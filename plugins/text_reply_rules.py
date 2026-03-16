@@ -1,0 +1,68 @@
+import re
+from datetime import datetime
+from typing import Optional
+from zoneinfo import ZoneInfo
+
+from plugins.tz_config import BEIJING_TIMEZONE, BEIJING_TIME_FORMAT, TEXT_REPLY_RULES
+
+
+def build_rule_context(user_id: int | str, sender_name: str, now: Optional[datetime] = None) -> dict:
+    current_dt = now or datetime.now(ZoneInfo(BEIJING_TIMEZONE))
+    return {
+        "current_time": current_dt.strftime(BEIJING_TIME_FORMAT),
+        "user_id": str(user_id),
+        "sender_name": sender_name,
+    }
+
+
+def replace_regex_groups(template: str, match: re.Match) -> str:
+    def repl(group_match: re.Match) -> str:
+        group_index = int(group_match.group(1))
+        try:
+            return match.group(group_index) or ""
+        except IndexError:
+            return ""
+
+    return re.sub(r"\$(\d+)", repl, template)
+
+
+def render_rule_reply(template: str, context: dict, match: re.Match) -> str:
+    rendered = replace_regex_groups(template, match)
+    return rendered.format(**context)
+
+
+def match_text_rule(
+    text: str,
+    user_id: int | str,
+    sender_name: str,
+    now: Optional[datetime] = None,
+) -> Optional[dict]:
+    base_context = build_rule_context(user_id, sender_name, now=now)
+    matched_rules = []
+
+    for rule_index, rule in enumerate(TEXT_REPLY_RULES):
+        for pattern in rule["patterns"]:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+
+            context = {**base_context, **match.groupdict()}
+            matched_rules.append(
+                {
+                    "rule_name": rule["name"],
+                    "rate_limit_key": rule.get("rate_limit_key", rule["name"]),
+                    "reply": render_rule_reply(rule["reply_template"], context, match),
+                    "context": context,
+                    "priority": int(rule.get("priority", 0)),
+                    "rule_index": rule_index,
+                }
+            )
+            break
+
+    if not matched_rules:
+        return None
+
+    matched_rules.sort(key=lambda item: (-item["priority"], item["rule_index"]))
+    best_match = matched_rules[0]
+    best_match.pop("rule_index", None)
+    return best_match
