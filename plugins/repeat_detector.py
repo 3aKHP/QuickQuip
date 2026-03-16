@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional
 
@@ -12,11 +13,20 @@ class RepeatState:
 
 
 class GroupRepeatDetector:
-    def __init__(self):
-        self.states: dict[str, RepeatState] = {}
+    def __init__(self, max_groups: int = 1024):
+        self.max_groups = max_groups
+        self.states: OrderedDict[str, RepeatState] = OrderedDict()
 
     def _trim_last_character(self, text: str) -> str:
         return text[:-1]
+
+    def _touch_state(self, group_key: str) -> None:
+        if group_key in self.states:
+            self.states.move_to_end(group_key)
+
+    def _prune_states(self) -> None:
+        while len(self.states) > self.max_groups:
+            self.states.popitem(last=False)
 
     def process(self, group_id: int | str, user_id: int | str, text: str) -> Optional[dict]:
         normalized_text = text.strip()
@@ -35,8 +45,11 @@ class GroupRepeatDetector:
                 last_sender_id=user_key,
                 all_same_sender=True,
             )
+            self._touch_state(group_key)
+            self._prune_states()
             return None
 
+        self._touch_state(group_key)
         previous_sender_id = state.last_sender_id
         state.count += 1
         state.last_sender_id = user_key

@@ -5,15 +5,17 @@ from plugins.good_girl_chain import GoodGirlChainManager
 from plugins.rate_limit import KeyedRateLimiter, SlidingWindowRateLimiter
 from plugins.repeat_detector import GroupRepeatDetector
 from plugins.text_reply_rules import match_text_rule
-from plugins.tz_tackcer import (
+from plugins.tz_tracker import (
     build_reply,
     build_timezone_reply,
-    circular_diff_minutes,
     detect_kind,
+    resolve_reply,
+)
+from plugins.tz_utils import (
+    circular_diff_minutes,
     find_best_timezones,
     format_city_zh,
     format_location_zh,
-    resolve_reply,
 )
 
 fixed_now = datetime(2026, 3, 16, 9, 19, tzinfo=ZoneInfo("Asia/Shanghai"))
@@ -117,11 +119,19 @@ assert rule_reply_2["rule_name"] == "sandwich_de"
 assert rule_reply_2["rate_limit_key"] == "sandwich_de"
 assert rule_reply_2["reply"] == "红茶怎么你了！"
 
-rule_reply_3 = match_text_rule("你喜欢苹果", user_id=123456, sender_name="测试用户", now=fixed_now)
+rule_reply_3 = match_text_rule("我喜欢苹果", user_id=123456, sender_name="测试用户", now=fixed_now)
 assert rule_reply_3 is not None
 assert rule_reply_3["rule_name"] == "like_reply"
 assert rule_reply_3["rate_limit_key"] == "like_reply"
 assert rule_reply_3["reply"].startswith("还在")
+assert match_text_rule("你喜欢苹果", user_id=123456, sender_name="测试用户", now=fixed_now) is None
+
+rule_reply_4 = match_text_rule("我闭嘴", user_id=123456, sender_name="测试用户", now=fixed_now)
+assert rule_reply_4 is not None
+assert rule_reply_4["rule_name"] == "i_do"
+assert rule_reply_4["reply"] == "不准闭嘴"
+assert match_text_rule("我知道", user_id=123456, sender_name="测试用户", now=fixed_now) is None
+assert match_text_rule("我觉得", user_id=123456, sender_name="测试用户", now=fixed_now) is None
 
 # 无关消息不回复
 assert build_reply("今天天气不错", user_id=123456, sender_name="测试用户", now=fixed_now) is None
@@ -214,6 +224,13 @@ repeat_detector_group = GroupRepeatDetector()
 assert repeat_detector_group.process(group_id=2001, user_id=1, text="群消息") is None
 assert repeat_detector_group.process(group_id=2002, user_id=2, text="群消息") is None
 assert repeat_detector_group.process(group_id=2001, user_id=3, text="群消息")["rule_name"] == "repeat_follow_read"
+
+# 测试复读状态有上限，最旧群状态会被淘汰
+repeat_detector_bounded = GroupRepeatDetector(max_groups=2)
+assert repeat_detector_bounded.process(group_id=1, user_id=1, text="A") is None
+assert repeat_detector_bounded.process(group_id=2, user_id=1, text="B") is None
+assert repeat_detector_bounded.process(group_id=3, user_id=1, text="C") is None
+assert list(repeat_detector_bounded.states.keys()) == ["2", "3"]
 
 # 测试好姐姐接龙：完整流程（监听任意单字并输出下一个单字）
 chain = GoodGirlChainManager(timeout_seconds=60)
@@ -316,6 +333,13 @@ assert chain_overlap_token.process(group_id=4003, text="别", now_ts=4)["reply"]
 assert chain_overlap_token.process(group_id=4003, text="姐", now_ts=5)["reply"] == "笑"
 assert chain_overlap_token.process(group_id=4003, text="笑", now_ts=6)["reply"] == "了"
 assert chain_overlap_token.process(group_id=4003, text="了", now_ts=7)["reply"] == "🤣"
+
+# 测试接龙会话有上限，最旧群会话会被淘汰
+chain_bounded = GoodGirlChainManager(timeout_seconds=60, max_sessions=2)
+assert chain_bounded.process(group_id=5001, text="赵云是好人吗", now_ts=0)["reply"] == "别"
+assert chain_bounded.process(group_id=5002, text="孙尚香是好人吗", now_ts=0)["reply"] == "别"
+assert chain_bounded.process(group_id=5003, text="阿桃是好女人吗", now_ts=0)["reply"] == "别"
+assert list(chain_bounded.sessions.keys()) == ["5002", "5003"]
 
 # 测试环形差值
 assert circular_diff_minutes(0, 0) == 0

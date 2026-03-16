@@ -2,9 +2,10 @@ from datetime import time
 
 BEIJING_TIMEZONE = "Asia/Shanghai"
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
+PRIORITY_ABSOLUTE = 65_536
 
 WAKE_WORDS = {"起床", "早安", "醒了", "睡醒了", "起了", "苏醒"}
-SLEEP_WORDS = {"晚安", "睡觉", "睡了", "睡啦", "困了","眠了"}
+SLEEP_WORDS = {"晚安", "睡觉", "睡了", "睡啦", "困了", "眠了"}
 
 WAKE_TARGET = time(7, 30)
 SLEEP_TARGET = time(23, 30)
@@ -22,6 +23,35 @@ RATE_LIMIT_RULES = {
     "repeat_trim_last": {"global_limit": 8, "user_limit": 3},
     "repeat_same_user_warning": {"global_limit": 4, "user_limit": 2},
     "good_girl_chain_entry": {"global_limit": 20, "user_limit": 10},
+}
+
+I_DO_BLOCKED_VERBS = {
+    "不会",
+    "不能",
+    "不要",
+    "以为",
+    "支持",
+    "反对",
+    "同意",
+    "喜欢",
+    "回去",
+    "回家",
+    "害怕",
+    "希望",
+    "忘了",
+    "忘记",
+    "担心",
+    "明白",
+    "来了",
+    "知道",
+    "觉得",
+    "认为",
+    "记得",
+    "认识",
+    "说过",
+    "谢谢",
+    "输了",
+    "赢了",
 }
 
 TEXT_REPLY_RULES = [
@@ -55,11 +85,12 @@ TEXT_REPLY_RULES = [
     },
     {
         "name": "like_reply",
-        "patterns": [r"^.*?喜欢(.+)$"],
+        "patterns": [r"^我喜欢(.+)$", r"^喜欢(.+)$"],
         "reply_template": "还在$1",
         "rate_limit_key": "like_reply",
         "priority": 60,
     },
+    # These variants intentionally share one bucket so adjacent meme triggers do not spam.
     {
         "name": "maggot_arrival",
         "patterns": [r"区临", r"区来了"],
@@ -76,14 +107,14 @@ TEXT_REPLY_RULES = [
     },
     {
         "name": "master_protection",
-        "patterns": [r"四区",r"4区",r"四出",r"4出"],
+        "patterns": [r"四区", r"4区", r"四出", r"4出"],
         "reply_template": "你不许说他他是我跌",
         "rate_limit_key": "divine_arrival",
-        "priority": 65536,
+        "priority": PRIORITY_ABSOLUTE,
     },
     {
         "name": "huaizhen_oversize",
-        "patterns": [r"怀真",r"赵怀真"],
+        "patterns": [r"怀真", r"赵怀真"],
         "reply_template": "赵怀真还不超标啊",
         "rate_limit_key": "timezone_wake",
         "priority": 50,
@@ -97,7 +128,8 @@ TEXT_REPLY_RULES = [
     },
     {
         "name": "i_do",
-        "patterns": [r"^我([\u4e00-\u9fa5]{2})[！!。，,？?]*$"],
+        "patterns": [r"^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$"],
+        "blocked_named_groups": {"verb": sorted(I_DO_BLOCKED_VERBS)},
         "reply_template": "不准$1",
         "rate_limit_key": "divine_arrival",
         "priority": 20,

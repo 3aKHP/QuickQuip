@@ -31,6 +31,22 @@ def render_rule_reply(template: str, context: dict, match: re.Match) -> str:
     return rendered.format(**context)
 
 
+def is_rule_match_allowed(rule: dict, match: re.Match) -> bool:
+    blocked_groups = rule.get("blocked_groups", {})
+    for group_index, blocked_values in blocked_groups.items():
+        group_value = match.group(int(group_index))
+        if group_value in blocked_values:
+            return False
+
+    blocked_named_groups = rule.get("blocked_named_groups", {})
+    for group_name, blocked_values in blocked_named_groups.items():
+        group_value = match.groupdict().get(group_name)
+        if group_value in blocked_values:
+            return False
+
+    return True
+
+
 def match_text_rule(
     text: str,
     user_id: int | str,
@@ -44,6 +60,8 @@ def match_text_rule(
         for pattern in rule["patterns"]:
             match = re.search(pattern, text)
             if not match:
+                continue
+            if not is_rule_match_allowed(rule, match):
                 continue
 
             context = {**base_context, **match.groupdict()}

@@ -1,4 +1,5 @@
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
 from time import time
 from typing import Optional
@@ -16,12 +17,25 @@ class GoodGirlSession:
 
 
 class GoodGirlChainManager:
-    def __init__(self, timeout_seconds: int = GOOD_GIRL_TIMEOUT_SECONDS):
+    def __init__(
+        self,
+        timeout_seconds: int = GOOD_GIRL_TIMEOUT_SECONDS,
+        max_sessions: int = 1024,
+    ):
         self.timeout_seconds = timeout_seconds
-        self.sessions: dict[str, GoodGirlSession] = {}
+        self.max_sessions = max_sessions
+        self.sessions: OrderedDict[str, GoodGirlSession] = OrderedDict()
 
     def _now(self, now_ts: float | None = None) -> float:
         return time() if now_ts is None else now_ts
+
+    def _touch_session(self, group_key: str) -> None:
+        if group_key in self.sessions:
+            self.sessions.move_to_end(group_key)
+
+    def _prune_sessions(self) -> None:
+        while len(self.sessions) > self.max_sessions:
+            self.sessions.popitem(last=False)
 
     def _clear_if_expired(self, group_key: str, now_ts: float) -> None:
         session = self.sessions.get(group_key)
@@ -59,6 +73,7 @@ class GoodGirlChainManager:
 
         session = self.sessions.get(group_key)
         if session is not None:
+            self._touch_session(group_key)
             if normalized_text == "🤣":
                 self.sessions.pop(group_key, None)
                 return None
@@ -88,6 +103,8 @@ class GoodGirlChainManager:
             lead_char=lead_char,
             expires_at=current_ts + self.timeout_seconds,
         )
+        self._touch_session(group_key)
+        self._prune_sessions()
         return {
             "reply": "别",
             "rate_limit_key": "good_girl_chain_entry",

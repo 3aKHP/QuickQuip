@@ -35,7 +35,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、纯规则�
 
 | 规则名称 | 触发示例 | 回复示例 | 优先级 |
 |---------|---------|---------|--------|
-| `master_protection` | 四区 / 4区 | 你不许说他他是我跌 | 65536 |
+| `master_protection` | 四区 / 4区 | 你不许说他他是我跌 | `PRIORITY_ABSOLUTE` |
 | `kpl_final` | A尽力，B犯罪，C的XX不团队 | 我说A才是最大的一条区有没有懂的 | 200 |
 | `divine_arrival` | 神临 / 降临 | {时间}，@{昵称} 区从天降 | 100 |
 | `maggot_arrival` | 区临 / 区来了 | {时间}，有自知之明的@{昵称} 区从天降 | 95 |
@@ -43,9 +43,9 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、纯规则�
 | `play_target` | 玩XX玩的 | XX怎么你了 | 85 |
 | `double_char_ni_de` | 牛牛你的 | 牛牛魔 | 80 |
 | `sandwich_de` | 冰红茶冰的 | 红茶怎么你了！ | 75 |
-| `like_reply` | 喜欢XX | 还在XX | 60 |
+| `like_reply` | 我喜欢XX / 喜欢XX | 还在XX | 60 |
 | `huaizhen_oversize` | 怀真 / 赵怀真 | 赵怀真还不超标啊 | 50 |
-| `i_do` | 我XX | 不准XX | 20 |
+| `i_do` | 我XX（过滤常见口语） | 不准XX | 20 |
 
 ### 🔗 "好女孩"接龙
 
@@ -86,7 +86,9 @@ QuickQuip/
 ├── test_tz.py                      # 全功能断言测试脚本
 └── plugins/                        # 插件目录
     ├── tz_config.py                # 全局配置：关键词、时区映射、规则定义、限流参数
-    ├── tz_tackcer.py               # 核心调度器：消息处理、回复分发、NoneBot 事件绑定
+    ├── __init__.py                 # 包标记文件，便于测试和直接导入
+    ├── tz_tracker.py               # 核心调度器：消息处理、回复分发、NoneBot 事件绑定
+    ├── tz_utils.py                 # 时区工具函数：时差计算、地点格式化、候选时区查找
     ├── text_reply_rules.py         # 文字彩蛋规则引擎：正则匹配 + 模板渲染
     ├── repeat_detector.py          # 复读检测器：群维度状态跟踪
     ├── rate_limit.py               # 滑动窗口限流器：全局 + 用户双层限流
@@ -165,11 +167,11 @@ python test_tz.py
 | [`SLEEP_WORDS`](plugins/tz_config.py:7) | 睡觉触发词集合 | 晚安、睡觉、睡了… |
 | [`RATE_LIMIT_WINDOW_SECONDS`](plugins/tz_config.py:12) | 限流滑动窗口大小 | `60` 秒 |
 | [`RATE_LIMIT_RULES`](plugins/tz_config.py:13) | 各规则限流参数 | 见源码 |
-| [`TEXT_REPLY_RULES`](plugins/tz_config.py:27) | 文字彩蛋规则列表 | 见源码 |
+| [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) | 文字彩蛋规则列表 | 见源码 |
 
 ### 添加自定义回复规则
 
-在 [`TEXT_REPLY_RULES`](plugins/tz_config.py:27) 列表中追加字典即可：
+在 [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) 列表中追加字典即可：
 
 ```python
 {
@@ -199,7 +201,7 @@ python test_tz.py
 群消息
   │
   ▼
-tz_tackcer.resolve_reply()        ← 统一入口
+tz_tracker.resolve_reply()        ← 统一入口
   │
   ├─① repeat_detector             ← 复读检测（最高优先）
   │
@@ -216,7 +218,7 @@ rate_limiter.allow()              ← 限流检查
 发送回复 / 静默跳过
 ```
 
-回复优先级从高到低：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每条回复在发送前都经过限流器检查。
+回复优先级从高到低：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。其中部分近义彩蛋规则会故意共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
 
 ---
 
