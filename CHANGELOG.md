@@ -6,7 +6,7 @@
 
 ### feat: add random replies, scheduled messages, message stats, and group rule switch
 
-Git: `(Pending)`
+Git: `678b5fe`
 
 - 新增随机回复引擎：规则支持 `reply_templates` 加权随机列表（当前未配置，处于休眠状态）
 - 新增定时消息模块 `plugins/scheduler.py`，基于 `nonebot-plugin-apscheduler`（当前未配置，处于休眠状态）
