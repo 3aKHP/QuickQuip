@@ -1,3 +1,4 @@
+import random
 import re
 from datetime import datetime
 from typing import Optional
@@ -24,6 +25,15 @@ def replace_regex_groups(template: str, match: re.Match) -> str:
             return ""
 
     return re.sub(r"\$(\d+)", repl, template)
+
+
+def select_reply_template(rule: dict) -> str:
+    templates = rule.get("reply_templates")
+    if not templates:
+        return rule["reply_template"]
+    weights = [t.get("weight", 1) for t in templates]
+    chosen = random.choices(templates, weights=weights, k=1)[0]
+    return chosen["template"]
 
 
 def render_rule_reply(template: str, context: dict, match: re.Match) -> str:
@@ -65,11 +75,12 @@ def match_text_rule(
                 continue
 
             context = {**base_context, **match.groupdict()}
+            template = select_reply_template(rule)
             matched_rules.append(
                 {
                     "rule_name": rule["name"],
                     "rate_limit_key": rule.get("rate_limit_key", rule["name"]),
-                    "reply": render_rule_reply(rule["reply_template"], context, match),
+                    "reply": render_rule_reply(template, context, match),
                     "context": context,
                     "priority": int(rule.get("priority", 0)),
                     "rule_index": rule_index,

@@ -54,8 +54,9 @@ class GoodGirlChainManager:
         if heard_text != expected_token:
             return None
 
-        session.next_index += 1
-        return chain[session.next_index]
+        reply_token = chain[session.next_index + 1]
+        session.next_index += 2
+        return reply_token
 
     def process(
         self,
@@ -102,6 +103,7 @@ class GoodGirlChainManager:
         self.sessions[group_key] = GoodGirlSession(
             lead_char=lead_char,
             expires_at=current_ts + self.timeout_seconds,
+            next_index=1,
         )
         self._touch_session(group_key)
         self._prune_sessions()

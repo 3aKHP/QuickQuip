@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -40,11 +41,15 @@ def find_best_timezones(now_cst: datetime, target, limit: int = 3):
         local_min = local_dt.hour * 60 + local_dt.minute
         diff = circular_diff_minutes(local_min, target_min)
 
+        city_zh = format_city_zh(tz_name)
+        if re.search(r"[a-zA-Z]", city_zh):
+            continue
+
         candidates.append(
             {
                 "tz_name": tz_name,
                 "location_zh": format_location_zh(tz_name),
-                "city_zh": format_city_zh(tz_name),
+                "city_zh": city_zh,
                 "local_dt": local_dt,
                 "diff": diff,
             }

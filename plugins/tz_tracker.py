@@ -2,17 +2,20 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 try:
-    from nonebot import on_message
+    from nonebot import on_message, on_command
     from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
 except ModuleNotFoundError:
     on_message = None
+    on_command = None
     GroupMessageEvent = object
     Message = None
     MessageSegment = None
 
 from plugins.good_girl_chain import GoodGirlChainManager
+from plugins.message_stats import GroupStatsTracker
 from plugins.rate_limit import KeyedRateLimiter
 from plugins.repeat_detector import GroupRepeatDetector
+from plugins.rule_switch import GroupRuleSwitch
 from plugins.text_reply_rules import match_text_rule
 from plugins.tz_config import (
     BEIJING_TIMEZONE,
@@ -31,6 +34,8 @@ rate_limiter = KeyedRateLimiter(
 )
 repeat_detector = GroupRepeatDetector()
 good_girl_chain = GoodGirlChainManager()
+stats_tracker = GroupStatsTracker()
+rule_switch = GroupRuleSwitch()
 
 
 def detect_kind(text: str):
@@ -49,6 +54,15 @@ def get_sender_name(event: GroupMessageEvent) -> str:
         if getattr(sender, "nickname", None):
             return sender.nickname
     return str(event.user_id)
+
+
+def _is_admin(event: GroupMessageEvent) -> bool:
+    sender = getattr(event, "sender", None)
+    if sender:
+        role = getattr(sender, "role", None)
+        if role in ("admin", "owner"):
+            return True
+    return False
 
 
 def build_timezone_reply(
@@ -87,6 +101,7 @@ def build_timezone_reply(
         ),
         "rate_limit_key": rate_limit_key,
         "kind": kind,
+        "rule_name": rate_limit_key,
     }
 
 
@@ -118,11 +133,15 @@ def resolve_reply(
 ):
     repeat_reply = resolve_repeat_reply(text=text, user_id=user_id, group_id=group_id)
     if repeat_reply:
-        return repeat_reply
+        rule_name = repeat_reply.get("rule_name", "")
+        if group_id is None or rule_switch.is_enabled(group_id, rule_name):
+            return repeat_reply
 
     good_girl_reply = resolve_good_girl_chain_reply(text=text, group_id=group_id)
     if good_girl_reply:
-        return good_girl_reply
+        rule_name = good_girl_reply.get("rule_name", "")
+        if group_id is None or rule_switch.is_enabled(group_id, rule_name):
+            return good_girl_reply
 
     now_cst = now or datetime.now(ZoneInfo(BEIJING_TIMEZONE))
 
@@ -133,9 +152,17 @@ def resolve_reply(
         now=now_cst,
     )
     if special_reply:
-        return special_reply
+        rule_name = special_reply.get("rule_name", "")
+        if group_id is None or rule_switch.is_enabled(group_id, rule_name):
+            return special_reply
 
-    return build_timezone_reply(text, sender_name=sender_name, now=now_cst)
+    tz_reply = build_timezone_reply(text, sender_name=sender_name, now=now_cst)
+    if tz_reply:
+        rule_name = tz_reply.get("rule_name", "")
+        if group_id is None or rule_switch.is_enabled(group_id, rule_name):
+            return tz_reply
+
+    return None
 
 
 def build_reply(
@@ -168,6 +195,9 @@ if on_message is not None:
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
+
+        stats_tracker.record_message(group_id, user_id)
+
         result = resolve_reply(
             text,
             user_id=user_id,
@@ -179,6 +209,8 @@ if on_message is not None:
         if not rate_limiter.allow(result["rate_limit_key"], user_id):
             return
 
+        stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
+
         if "at_user_id" in result:
             message = Message([
                 MessageSegment.at(result["at_user_id"]),
@@ -187,3 +219,59 @@ if on_message is not None:
             await matcher.finish(message)
 
         await matcher.finish(result["reply"])
+
+
+if on_command is not None:
+    stats_cmd = on_command("stats", priority=10, block=True)
+
+    @stats_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        group_id = event.group_id
+        reply = stats_tracker.format_stats(group_id)
+        await stats_cmd.finish(reply)
+
+    reset_stats_cmd = on_command("reset_stats", priority=10, block=True)
+
+    @reset_stats_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        if not _is_admin(event):
+            await reset_stats_cmd.finish("仅管理员可执行此操作")
+        stats_tracker.reset(event.group_id)
+        await reset_stats_cmd.finish("统计数据已重置")
+
+    disable_cmd = on_command("disable", priority=10, block=True)
+
+    @disable_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        if not _is_admin(event):
+            await disable_cmd.finish("仅管理员可执行此操作")
+        text = str(event.get_message()).strip()
+        rule_name = text.replace("/disable", "").strip()
+        if not rule_name:
+            await disable_cmd.finish("用法：/disable <rule_name>")
+        if rule_switch.disable(event.group_id, rule_name):
+            await disable_cmd.finish(f"已禁用规则：{rule_name}")
+        else:
+            await disable_cmd.finish(f"未知规则：{rule_name}")
+
+    enable_cmd = on_command("enable", priority=10, block=True)
+
+    @enable_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        if not _is_admin(event):
+            await enable_cmd.finish("仅管理员可执行此操作")
+        text = str(event.get_message()).strip()
+        rule_name = text.replace("/enable", "").strip()
+        if not rule_name:
+            await enable_cmd.finish("用法：/enable <rule_name>")
+        if rule_switch.enable(event.group_id, rule_name):
+            await enable_cmd.finish(f"已启用规则：{rule_name}")
+        else:
+            await enable_cmd.finish(f"未知规则：{rule_name}")
+
+    rules_cmd = on_command("rules", priority=10, block=True)
+
+    @rules_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        reply = rule_switch.format_rules(event.group_id)
+        await rules_cmd.finish(reply)

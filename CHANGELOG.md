@@ -4,7 +4,18 @@
 
 ## Unreleased
 
-- 当前无未发布的主仓库变更。
+### feat: add random replies, scheduled messages, message stats, and group rule switch
+
+Git: `(Pending)`
+
+- 新增随机回复引擎：规则支持 `reply_templates` 加权随机列表（当前未配置，处于休眠状态）
+- 新增定时消息模块 `plugins/scheduler.py`，基于 `nonebot-plugin-apscheduler`（当前未配置，处于休眠状态）
+- 新增消息统计模块 `plugins/message_stats.py`，支持 `/stats` 查看群聊统计、`/reset_stats` 重置
+- 新增群级规则开关 `plugins/rule_switch.py`，支持 `/disable`、`/enable`、`/rules` 命令（管理员权限）
+- `plugins/tz_tracker.py` 集成统计与规则开关，`resolve_reply()` 支持按群跳过被禁用的规则
+- `plugins/tz_config.py` 新增 `SCHEDULED_MESSAGES` 空配置
+- `requirements.txt` 新增 `nonebot-plugin-apscheduler` 依赖
+- 同步更新测试覆盖
 
 ## 2026-03-16
 

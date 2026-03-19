@@ -1,15 +1,19 @@
+import random
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from plugins.good_girl_chain import GoodGirlChainManager
+from plugins.message_stats import GroupStatsTracker
 from plugins.rate_limit import KeyedRateLimiter, SlidingWindowRateLimiter
 from plugins.repeat_detector import GroupRepeatDetector
-from plugins.text_reply_rules import match_text_rule
+from plugins.rule_switch import GroupRuleSwitch, SWITCHABLE_RULES
+from plugins.text_reply_rules import match_text_rule, select_reply_template
 from plugins.tz_tracker import (
     build_reply,
     build_timezone_reply,
     detect_kind,
     resolve_reply,
+    rule_switch as global_rule_switch,
 )
 from plugins.tz_utils import (
     circular_diff_minutes,
@@ -232,7 +236,7 @@ assert repeat_detector_bounded.process(group_id=2, user_id=1, text="B") is None
 assert repeat_detector_bounded.process(group_id=3, user_id=1, text="C") is None
 assert list(repeat_detector_bounded.states.keys()) == ["2", "3"]
 
-# 测试好姐姐接龙：完整流程（监听任意单字并输出下一个单字）
+# 测试好姐姐接龙：完整流程（交替接龙：用户说奇数位，bot 回偶数位）
 chain = GoodGirlChainManager(timeout_seconds=60)
 chain_start = chain.process(group_id=3001, text="阿桃是好女人吗", now_ts=0)
 assert chain_start is not None
@@ -240,99 +244,75 @@ assert chain_start["rule_name"] == "good_girl_chain_start"
 assert chain_start["reply"] == "别"
 assert chain_start["context"]["lead_char"] == "阿"
 
-chain_step_1 = chain.process(group_id=3001, text="别", now_ts=1)
+chain_step_1 = chain.process(group_id=3001, text="逗", now_ts=1)
 assert chain_step_1 is not None
-assert chain_step_1["reply"] == "逗"
+assert chain_step_1["reply"] == "你"
 assert chain_step_1["context"]["lead_char"] == "阿"
 
-chain_step_2 = chain.process(group_id=3001, text="逗", now_ts=2)
+chain_step_2 = chain.process(group_id=3001, text="阿", now_ts=2)
 assert chain_step_2 is not None
-assert chain_step_2["reply"] == "你"
+assert chain_step_2["reply"] == "姐"
 
-chain_step_3 = chain.process(group_id=3001, text="你", now_ts=3)
+chain_step_3 = chain.process(group_id=3001, text="笑", now_ts=3)
 assert chain_step_3 is not None
-assert chain_step_3["reply"] == "阿"
+assert chain_step_3["reply"] == "了"
 
-chain_step_4 = chain.process(group_id=3001, text="阿", now_ts=4)
-assert chain_step_4 is not None
-assert chain_step_4["reply"] == "姐"
-
-chain_step_5 = chain.process(group_id=3001, text="姐", now_ts=5)
-assert chain_step_5 is not None
-assert chain_step_5["reply"] == "笑"
-
-chain_step_6 = chain.process(group_id=3001, text="笑", now_ts=6)
-assert chain_step_6 is not None
-assert chain_step_6["reply"] == "了"
-
-chain_step_7 = chain.process(group_id=3001, text="了", now_ts=7)
-assert chain_step_7 is not None
-assert chain_step_7["reply"] == "🤣"
+# 用户说🤣结束链条，bot 不再回复
+chain_step_4 = chain.process(group_id=3001, text="🤣", now_ts=4)
+assert chain_step_4 is None
 
 # 测试好姐姐接龙：中途乱入不会打断，只会被忽略
 chain_interrupt = GoodGirlChainManager(timeout_seconds=60)
 assert chain_interrupt.process(group_id=3001, text="阿桃是好女人吗", now_ts=10)["reply"] == "别"
 assert chain_interrupt.process(group_id=3001, text="这是一条无关消息", now_ts=11) is None
-assert chain_interrupt.process(group_id=3001, text="别", now_ts=12)["reply"] == "逗"
+assert chain_interrupt.process(group_id=3001, text="逗", now_ts=12)["reply"] == "你"
 assert chain_interrupt.process(group_id=3001, text="又一条无关消息", now_ts=13) is None
-assert chain_interrupt.process(group_id=3001, text="逗", now_ts=14)["reply"] == "你"
-assert chain_interrupt.process(group_id=3001, text="你", now_ts=15)["reply"] == "阿"
-assert chain_interrupt.process(group_id=3001, text="阿", now_ts=16)["reply"] == "姐"
-assert chain_interrupt.process(group_id=3001, text="姐", now_ts=17)["reply"] == "笑"
-assert chain_interrupt.process(group_id=3001, text="笑", now_ts=18)["reply"] == "了"
-assert chain_interrupt.process(group_id=3001, text="了", now_ts=19)["reply"] == "🤣"
+assert chain_interrupt.process(group_id=3001, text="阿", now_ts=14)["reply"] == "姐"
+assert chain_interrupt.process(group_id=3001, text="笑", now_ts=15)["reply"] == "了"
 
 # 测试好姐姐接龙：完成后会话结束；收到🤣后不会再继续
-assert chain_interrupt.process(group_id=3001, text="🤣", now_ts=20) is None
-assert chain_interrupt.process(group_id=3001, text="别", now_ts=21) is None
+assert chain_interrupt.process(group_id=3001, text="🤣", now_ts=16) is None
+assert chain_interrupt.process(group_id=3001, text="逗", now_ts=17) is None
 
-# 测试好姐姐接龙：机器人发出🤣后，会话应立即结束，后续不会错误续接
+# 测试好姐姐接龙：用户发出🤣后，会话应立即结束，后续不会错误续接
 chain_finish = GoodGirlChainManager(timeout_seconds=60)
 assert chain_finish.process(group_id=3006, text="阿桃是好女人吗", now_ts=0)["reply"] == "别"
-assert chain_finish.process(group_id=3006, text="别", now_ts=1)["reply"] == "逗"
-assert chain_finish.process(group_id=3006, text="逗", now_ts=2)["reply"] == "你"
-assert chain_finish.process(group_id=3006, text="你", now_ts=3)["reply"] == "阿"
-assert chain_finish.process(group_id=3006, text="阿", now_ts=4)["reply"] == "姐"
-assert chain_finish.process(group_id=3006, text="姐", now_ts=5)["reply"] == "笑"
-assert chain_finish.process(group_id=3006, text="笑", now_ts=6)["reply"] == "了"
-assert chain_finish.process(group_id=3006, text="了", now_ts=7)["reply"] == "🤣"
-assert chain_finish.process(group_id=3006, text="别", now_ts=8) is None
+assert chain_finish.process(group_id=3006, text="逗", now_ts=1)["reply"] == "你"
+assert chain_finish.process(group_id=3006, text="阿", now_ts=2)["reply"] == "姐"
+assert chain_finish.process(group_id=3006, text="笑", now_ts=3)["reply"] == "了"
+assert chain_finish.process(group_id=3006, text="🤣", now_ts=4) is None
+assert chain_finish.process(group_id=3006, text="逗", now_ts=5) is None
 
 # 测试好姐姐接龙：收到🤣会主动终止链条
 chain_break = GoodGirlChainManager(timeout_seconds=60)
 assert chain_break.process(group_id=3005, text="林是好姐姐吗", now_ts=0)["reply"] == "别"
-assert chain_break.process(group_id=3005, text="别", now_ts=1)["reply"] == "逗"
+assert chain_break.process(group_id=3005, text="逗", now_ts=1)["reply"] == "你"
 assert chain_break.process(group_id=3005, text="🤣", now_ts=2) is None
-assert chain_break.process(group_id=3005, text="逗", now_ts=3) is None
+assert chain_break.process(group_id=3005, text="林", now_ts=3) is None
 
 # 测试好姐姐接龙：超时失效
 chain_timeout = GoodGirlChainManager(timeout_seconds=5)
 assert chain_timeout.process(group_id=3002, text="林是好姐姐吗", now_ts=0)["reply"] == "别"
 assert chain_timeout.process(group_id=3002, text="这条乱入不应打断", now_ts=2) is None
-assert chain_timeout.process(group_id=3002, text="别", now_ts=3)["reply"] == "逗"
-assert chain_timeout.process(group_id=3002, text="逗", now_ts=9) is None
+assert chain_timeout.process(group_id=3002, text="逗", now_ts=3)["reply"] == "你"
+assert chain_timeout.process(group_id=3002, text="林", now_ts=9) is None
 
 # 测试好姐姐接龙：按群隔离
 chain_group = GoodGirlChainManager(timeout_seconds=60)
 assert chain_group.process(group_id=4001, text="赵云是好人吗", now_ts=0)["reply"] == "别"
 assert chain_group.process(group_id=4002, text="孙尚香是好人吗", now_ts=0)["reply"] == "别"
-assert chain_group.process(group_id=4001, text="别", now_ts=1)["reply"] == "逗"
-assert chain_group.process(group_id=4002, text="别", now_ts=1)["reply"] == "逗"
-assert chain_group.process(group_id=4001, text="逗", now_ts=2)["reply"] == "你"
-assert chain_group.process(group_id=4002, text="逗", now_ts=2)["reply"] == "你"
-assert chain_group.process(group_id=4001, text="你", now_ts=3)["reply"] == "赵"
-assert chain_group.process(group_id=4002, text="你", now_ts=3)["reply"] == "孙"
+assert chain_group.process(group_id=4001, text="逗", now_ts=1)["reply"] == "你"
+assert chain_group.process(group_id=4002, text="逗", now_ts=1)["reply"] == "你"
+assert chain_group.process(group_id=4001, text="赵", now_ts=2)["reply"] == "姐"
+assert chain_group.process(group_id=4002, text="孙", now_ts=2)["reply"] == "姐"
 
 # 测试好姐姐接龙：前导字与链中已有 token 重合时，仍应按顺序推进
 chain_overlap_token = GoodGirlChainManager(timeout_seconds=60)
 assert chain_overlap_token.process(group_id=4003, text="别人是好人吗", now_ts=0)["reply"] == "别"
-assert chain_overlap_token.process(group_id=4003, text="别", now_ts=1)["reply"] == "逗"
-assert chain_overlap_token.process(group_id=4003, text="逗", now_ts=2)["reply"] == "你"
-assert chain_overlap_token.process(group_id=4003, text="你", now_ts=3)["reply"] == "别"
-assert chain_overlap_token.process(group_id=4003, text="别", now_ts=4)["reply"] == "姐"
-assert chain_overlap_token.process(group_id=4003, text="姐", now_ts=5)["reply"] == "笑"
-assert chain_overlap_token.process(group_id=4003, text="笑", now_ts=6)["reply"] == "了"
-assert chain_overlap_token.process(group_id=4003, text="了", now_ts=7)["reply"] == "🤣"
+assert chain_overlap_token.process(group_id=4003, text="逗", now_ts=1)["reply"] == "你"
+assert chain_overlap_token.process(group_id=4003, text="别", now_ts=2)["reply"] == "姐"
+assert chain_overlap_token.process(group_id=4003, text="笑", now_ts=3)["reply"] == "了"
+assert chain_overlap_token.process(group_id=4003, text="🤣", now_ts=4) is None
 
 # 测试接龙会话有上限，最旧群会话会被淘汰
 chain_bounded = GoodGirlChainManager(timeout_seconds=60, max_sessions=2)
@@ -345,5 +325,169 @@ assert list(chain_bounded.sessions.keys()) == ["5002", "5003"]
 assert circular_diff_minutes(0, 0) == 0
 assert circular_diff_minutes(100, 200) == 100
 assert circular_diff_minutes(10, 1430) == 20  # 跨午夜
+
+# ────────────────────────────────────────────────
+# 测试随机回复选择
+# ────────────────────────────────────────────────
+
+# 单模板规则：select_reply_template 返回 reply_template
+single_rule = {"reply_template": "固定回复"}
+assert select_reply_template(single_rule) == "固定回复"
+
+# 多模板规则：select_reply_template 返回列表中的某一个
+multi_rule = {
+    "reply_templates": [
+        {"template": "回复A", "weight": 1},
+        {"template": "回复B", "weight": 1},
+        {"template": "回复C", "weight": 1},
+    ]
+}
+random.seed(42)
+results = {select_reply_template(multi_rule) for _ in range(50)}
+assert results == {"回复A", "回复B", "回复C"}
+
+# 权重倾斜测试：weight=100 的模板应占绝大多数
+weighted_rule = {
+    "reply_templates": [
+        {"template": "常见", "weight": 100},
+        {"template": "罕见", "weight": 1},
+    ]
+}
+random.seed(0)
+weighted_results = [select_reply_template(weighted_rule) for _ in range(200)]
+assert weighted_results.count("常见") > 180
+
+# reply_templates 优先于 reply_template
+both_rule = {
+    "reply_template": "不该被选",
+    "reply_templates": [{"template": "应该被选", "weight": 1}],
+}
+assert select_reply_template(both_rule) == "应该被选"
+
+# ────────────────────────────────────────────────
+# 测试消息统计
+# ────────────────────────────────────────────────
+
+tracker = GroupStatsTracker()
+
+# 记录消息
+tracker.record_message(9001, "u1")
+tracker.record_message(9001, "u2")
+tracker.record_message(9001, "u1")
+gs = tracker.get_stats(9001)
+assert gs is not None
+assert gs.total_messages == 3
+assert gs.user_messages["u1"] == 2
+assert gs.user_messages["u2"] == 1
+
+# 记录规则触发
+tracker.record_trigger(9001, "divine_arrival")
+tracker.record_trigger(9001, "divine_arrival")
+tracker.record_trigger(9001, "play_target")
+assert gs.rule_triggers["divine_arrival"] == 2
+assert gs.rule_triggers["play_target"] == 1
+
+# 格式化输出
+formatted = tracker.format_stats(9001)
+assert "消息总数：3" in formatted
+assert "u1 — 2 条" in formatted
+assert "divine_arrival — 2 次" in formatted
+
+# 带名称解析的格式化
+formatted_named = tracker.format_stats(9001, name_resolver={"u1": "张三", "u2": "李四"})
+assert "张三 — 2 条" in formatted_named
+
+# 空统计
+assert tracker.format_stats(9999) == "暂无统计数据"
+
+# 重置
+tracker.reset(9001)
+assert tracker.get_stats(9001) is None
+assert tracker.format_stats(9001) == "暂无统计数据"
+
+# 群隔离
+tracker.record_message(8001, "u1")
+tracker.record_message(8002, "u1")
+assert tracker.get_stats(8001).total_messages == 1
+assert tracker.get_stats(8002).total_messages == 1
+
+# LRU 淘汰
+tracker_bounded = GroupStatsTracker(max_groups=2)
+tracker_bounded.record_message(1, "u1")
+tracker_bounded.record_message(2, "u1")
+tracker_bounded.record_message(3, "u1")
+assert list(tracker_bounded.stats.keys()) == ["2", "3"]
+
+# ────────────────────────────────────────────────
+# 测试群级规则开关
+# ────────────────────────────────────────────────
+
+switch = GroupRuleSwitch()
+
+# 默认全部启用
+assert switch.is_enabled(7001, "divine_arrival") is True
+
+# 禁用规则
+assert switch.disable(7001, "divine_arrival") is True
+assert switch.is_enabled(7001, "divine_arrival") is False
+
+# 启用规则
+assert switch.enable(7001, "divine_arrival") is True
+assert switch.is_enabled(7001, "divine_arrival") is True
+
+# 未知规则名 disable 返回 False
+assert switch.disable(7001, "not_a_rule") is False
+
+# 群隔离
+switch.disable(7001, "play_target")
+assert switch.is_enabled(7001, "play_target") is False
+assert switch.is_enabled(7002, "play_target") is True
+
+# list_disabled
+switch.disable(7001, "like_reply")
+disabled = switch.list_disabled(7001)
+assert "play_target" in disabled
+assert "like_reply" in disabled
+
+# format_rules 包含 ON/OFF 状态
+formatted_rules = switch.format_rules(7001)
+assert "[OFF] play_target" in formatted_rules
+assert "[ON] divine_arrival" in formatted_rules
+
+# LRU 淘汰
+switch_bounded = GroupRuleSwitch(max_groups=2)
+switch_bounded.disable(1, "divine_arrival")
+switch_bounded.disable(2, "divine_arrival")
+switch_bounded.disable(3, "divine_arrival")
+assert list(switch_bounded.disabled.keys()) == ["2", "3"]
+
+# ────────────────────────────────────────────────
+# 测试规则开关与 resolve_reply 集成
+# ────────────────────────────────────────────────
+
+# 保存并重置全局 rule_switch 状态
+_saved_disabled = dict(global_rule_switch.disabled)
+global_rule_switch.disabled.clear()
+
+# 禁用 divine_arrival 后，"神临" 不再触发该规则
+global_rule_switch.disable(6001, "divine_arrival")
+blocked_result = resolve_reply("神临", user_id=123, sender_name="测试", group_id=6001, now=fixed_now)
+assert blocked_result is None or blocked_result.get("rule_name") != "divine_arrival"
+
+# 启用后恢复（用不同 group_id 避免复读检测干扰）
+global_rule_switch.enable(6002, "divine_arrival")
+restored_result = resolve_reply("神临", user_id=123, sender_name="测试", group_id=6002, now=fixed_now)
+assert restored_result is not None
+assert restored_result["rule_name"] == "divine_arrival"
+
+# 不传 group_id 时规则开关不生效（向后兼容）
+global_rule_switch.disable(6003, "divine_arrival")
+no_group_result = resolve_reply("神临", user_id=123, sender_name="测试", now=fixed_now)
+assert no_group_result is not None
+assert no_group_result["rule_name"] == "divine_arrival"
+
+# 恢复全局 rule_switch
+global_rule_switch.disabled.clear()
+global_rule_switch.disabled.update(_saved_disabled)
 
 print("所有测试通过")

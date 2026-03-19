@@ -63,6 +63,45 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、纯规则�
 机器人： 🤣
 ```
 
+### 📊 消息统计
+
+机器人会自动统计每个群的消息数量和规则触发次数，可通过命令查看。
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/stats` | 查看当前群的消息统计 | 所有人 |
+| `/reset_stats` | 重置当前群的统计数据 | 管理员/群主 |
+
+**回复示例：**
+```
+群聊统计
+消息总数：1234
+活跃用户 Top 5：
+  1. 张三 — 200 条
+  2. 李四 — 150 条
+规则触发 Top 5：
+  1. repeat_follow_read — 50 次
+  2. divine_arrival — 30 次
+```
+
+### 🔧 群级规则开关
+
+管理员可以按群禁用或启用任意规则，实现精细化管控。
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/disable <rule_name>` | 在本群禁用指定规则 | 管理员/群主 |
+| `/enable <rule_name>` | 在本群启用指定规则 | 管理员/群主 |
+| `/rules` | 查看所有规则及其开关状态 | 所有人 |
+
+### 🎲 随机回复（引擎已就绪）
+
+规则支持配置 `reply_templates` 加权随机列表，同一条规则命中后可随机选择不同回复，避免机械感。当前所有规则仅使用单模板，待后续配置启用。
+
+### ⏰ 定时消息（引擎已就绪）
+
+支持通过 `SCHEDULED_MESSAGES` 配置 cron 定时向指定群发送消息（如每日问候、节日祝福）。当前配置为空，待后续启用。
+
 ### 🚦 频率限制
 
 所有回复均受**滑动窗口限流**保护（默认 60 秒窗口），每条规则独立配置全局上限和单用户上限，防止刷屏：
@@ -89,10 +128,13 @@ QuickQuip/
     ├── __init__.py                 # 包标记文件，便于测试和直接导入
     ├── tz_tracker.py               # 核心调度器：消息处理、回复分发、NoneBot 事件绑定
     ├── tz_utils.py                 # 时区工具函数：时差计算、地点格式化、候选时区查找
-    ├── text_reply_rules.py         # 文字彩蛋规则引擎：正则匹配 + 模板渲染
+    ├── text_reply_rules.py         # 文字彩蛋规则引擎：正则匹配 + 模板渲染 + 随机回复
     ├── repeat_detector.py          # 复读检测器：群维度状态跟踪
     ├── rate_limit.py               # 滑动窗口限流器：全局 + 用户双层限流
-    └── good_girl_chain.py          # "好女孩"接龙状态机
+    ├── good_girl_chain.py          # "好女孩"接龙状态机
+    ├── message_stats.py            # 消息统计：按群跟踪消息量与规则触发
+    ├── rule_switch.py              # 群级规则开关：按群禁用/启用规则
+    └── scheduler.py                # 定时消息：基于 APScheduler 的 cron 任务
 ```
 
 ---
@@ -123,7 +165,7 @@ QuickQuip/
    # Linux / macOS
    source .venv/bin/activate
 
-   pip install nonebot2 nonebot-adapter-onebot
+   pip install nonebot2 nonebot-adapter-onebot nonebot-plugin-apscheduler
    ```
 
 3. **配置环境变量**
@@ -168,6 +210,7 @@ python test_tz.py
 | [`RATE_LIMIT_WINDOW_SECONDS`](plugins/tz_config.py:12) | 限流滑动窗口大小 | `60` 秒 |
 | [`RATE_LIMIT_RULES`](plugins/tz_config.py:13) | 各规则限流参数 | 见源码 |
 | [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) | 文字彩蛋规则列表 | 见源码 |
+| [`SCHEDULED_MESSAGES`](plugins/tz_config.py) | 定时消息列表 | `[]`（空，休眠） |
 
 ### 添加自定义回复规则
 
@@ -193,6 +236,21 @@ python test_tz.py
 | `$1`, `$2`, … | 正则捕获组 |
 | `{命名捕获组}` | 正则命名捕获组（如 `(?P<target>...)` → `{target}`） |
 
+**随机回复（可选）：** 将 `reply_template` 替换为 `reply_templates` 列表即可启用加权随机回复：
+
+```python
+{
+    "name": "my_rule",
+    "patterns": [r"正则表达式"],
+    "reply_templates": [
+        {"template": "回复A", "weight": 2},   # 出现概率较高
+        {"template": "回复B", "weight": 1},
+    ],
+    "rate_limit_key": "my_rule",
+    "priority": 50,
+}
+```
+
 ---
 
 ## 🏗️ 架构设计
@@ -200,25 +258,31 @@ python test_tz.py
 ```
 群消息
   │
-  ▼
-tz_tracker.resolve_reply()        ← 统一入口
-  │
-  ├─① repeat_detector             ← 复读检测（最高优先）
-  │
-  ├─② good_girl_chain             ← 接龙会话
-  │
-  ├─③ text_reply_rules            ← 彩蛋规则匹配
-  │
-  └─④ build_timezone_reply()      ← 时区作息猜测（兜底）
+  ├─ stats_tracker.record_message()  ← 计入统计
   │
   ▼
-rate_limiter.allow()              ← 限流检查
+tz_tracker.resolve_reply()           ← 统一入口
+  │
+  ├─① repeat_detector                ← 复读检测（最高优先）
+  │
+  ├─② good_girl_chain                ← 接龙会话
+  │
+  ├─③ text_reply_rules               ← 彩蛋规则匹配
+  │
+  └─④ build_timezone_reply()         ← 时区作息猜测（兜底）
+  │
+  ├─ rule_switch.is_enabled()        ← 群级开关过滤
+  │
+  ▼
+rate_limiter.allow()                 ← 限流检查
+  │
+  ├─ stats_tracker.record_trigger()  ← 计入规则触发统计
   │
   ▼
 发送回复 / 静默跳过
 ```
 
-回复优先级从高到低：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。其中部分近义彩蛋规则会故意共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
+回复优先级从高到低：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每个环节均受群级规则开关控制，被禁用的规则会被跳过并尝试下一级。部分近义彩蛋规则会故意共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
 
 ---
 
