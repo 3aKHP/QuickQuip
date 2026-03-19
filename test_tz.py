@@ -492,4 +492,72 @@ assert no_group_result["rule_name"] == "divine_arrival"
 global_rule_switch.disabled.clear()
 global_rule_switch.disabled.update(_saved_disabled)
 
+# ────────────────────────────────────────────────
+# 测试持久化序列化往返
+# ────────────────────────────────────────────────
+import tempfile, os
+
+# GroupStatsTracker 序列化往返
+persist_tracker = GroupStatsTracker()
+persist_tracker.record_message(7001, "u1", "张三")
+persist_tracker.record_message(7001, "u2", "李四")
+persist_tracker.record_message(7001, "u1", "张三")
+persist_tracker.record_trigger(7001, "divine_arrival")
+persist_tracker.record_trigger(7001, "divine_arrival")
+persist_tracker.record_trigger(7001, "play_target")
+
+snapshot = persist_tracker.to_dict()
+restored_tracker = GroupStatsTracker()
+restored_tracker.from_dict(snapshot)
+rgs = restored_tracker.get_stats(7001)
+assert rgs is not None
+assert rgs.total_messages == 3
+assert rgs.user_messages["u1"] == 2
+assert rgs.user_names["u1"] == "张三"
+assert rgs.rule_triggers["divine_arrival"] == 2
+
+# 文件 save/load 往返
+with tempfile.TemporaryDirectory() as tmpdir:
+    stats_file = os.path.join(tmpdir, "stats.json")
+    persist_tracker.save(stats_file)
+    loaded_tracker = GroupStatsTracker()
+    loaded_tracker.load(stats_file)
+    lgs = loaded_tracker.get_stats(7001)
+    assert lgs is not None
+    assert lgs.total_messages == 3
+    assert lgs.user_names["u1"] == "张三"
+
+# load 不存在的文件不报错
+empty_tracker = GroupStatsTracker()
+empty_tracker.load("/nonexistent/path/stats.json")
+assert len(empty_tracker.stats) == 0
+
+# GroupRuleSwitch 序列化往返
+persist_switch = GroupRuleSwitch()
+persist_switch.disable(7001, "divine_arrival")
+persist_switch.disable(7001, "play_target")
+persist_switch.disable(7002, "like_reply")
+
+snapshot_sw = persist_switch.to_dict()
+restored_switch = GroupRuleSwitch()
+restored_switch.from_dict(snapshot_sw)
+assert restored_switch.is_enabled(7001, "divine_arrival") is False
+assert restored_switch.is_enabled(7001, "play_target") is False
+assert restored_switch.is_enabled(7002, "like_reply") is False
+assert restored_switch.is_enabled(7001, "like_reply") is True
+
+# 文件 save/load 往返
+with tempfile.TemporaryDirectory() as tmpdir:
+    switch_file = os.path.join(tmpdir, "rule_switch.json")
+    persist_switch.save(switch_file)
+    loaded_switch = GroupRuleSwitch()
+    loaded_switch.load(switch_file)
+    assert loaded_switch.is_enabled(7001, "divine_arrival") is False
+    assert loaded_switch.is_enabled(7002, "like_reply") is False
+
+# load 不存在的文件不报错
+empty_switch = GroupRuleSwitch()
+empty_switch.load("/nonexistent/path/switch.json")
+assert len(empty_switch.disabled) == 0
+
 print("所有测试通过")

@@ -1,6 +1,9 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+from plugins.persistence import load_json, save_json
 
 
 @dataclass
@@ -80,3 +83,32 @@ class GroupStatsTracker:
                 lines.append(f"  {rank}. {rule} — {count} 次")
 
         return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {
+            gid: {
+                "total_messages": gs.total_messages,
+                "user_messages": gs.user_messages,
+                "user_names": gs.user_names,
+                "rule_triggers": gs.rule_triggers,
+            }
+            for gid, gs in self.stats.items()
+        }
+
+    def from_dict(self, data: dict) -> None:
+        self.stats.clear()
+        for gid, entry in data.items():
+            self.stats[str(gid)] = GroupStats(
+                total_messages=entry.get("total_messages", 0),
+                user_messages=entry.get("user_messages", {}),
+                user_names=entry.get("user_names", {}),
+                rule_triggers=entry.get("rule_triggers", {}),
+            )
+
+    def save(self, path: str | Path) -> None:
+        save_json(path, self.to_dict())
+
+    def load(self, path: str | Path) -> None:
+        data = load_json(path)
+        if data is not None:
+            self.from_dict(data)

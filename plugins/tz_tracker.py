@@ -1,10 +1,13 @@
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 try:
+    import nonebot
     from nonebot import on_message, on_command
     from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
 except ModuleNotFoundError:
+    nonebot = None
     on_message = None
     on_command = None
     GroupMessageEvent = object
@@ -28,6 +31,10 @@ from plugins.tz_config import (
 )
 from plugins.tz_utils import find_best_timezones
 
+DATA_DIR = Path("data")
+STATS_PATH = DATA_DIR / "stats.json"
+RULE_SWITCH_PATH = DATA_DIR / "rule_switch.json"
+
 rate_limiter = KeyedRateLimiter(
     rule_limits=RATE_LIMIT_RULES,
     window_seconds=RATE_LIMIT_WINDOW_SECONDS,
@@ -36,6 +43,15 @@ repeat_detector = GroupRepeatDetector()
 good_girl_chain = GoodGirlChainManager()
 stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
+
+DATA_DIR.mkdir(exist_ok=True)
+stats_tracker.load(STATS_PATH)
+rule_switch.load(RULE_SWITCH_PATH)
+
+
+def save_all() -> None:
+    stats_tracker.save(STATS_PATH)
+    rule_switch.save(RULE_SWITCH_PATH)
 
 
 def detect_kind(text: str):
@@ -186,6 +202,26 @@ def build_reply(
 
 matcher = None
 
+if nonebot is not None:
+    driver = nonebot.get_driver()
+
+    @driver.on_shutdown
+    async def _save_on_shutdown():
+        save_all()
+
+    try:
+        from nonebot_plugin_apscheduler import scheduler
+
+        scheduler.add_job(
+            save_all,
+            "interval",
+            minutes=5,
+            id="persistence_auto_save",
+            replace_existing=True,
+        )
+    except ModuleNotFoundError:
+        pass
+
 if on_message is not None:
     matcher = on_message(priority=60, block=False)
 
@@ -237,6 +273,7 @@ if on_command is not None:
         if not _is_admin(event):
             await reset_stats_cmd.finish("仅管理员可执行此操作")
         stats_tracker.reset(event.group_id)
+        stats_tracker.save(STATS_PATH)
         await reset_stats_cmd.finish("统计数据已重置")
 
     disable_cmd = on_command("disable", priority=10, block=True)
@@ -250,6 +287,7 @@ if on_command is not None:
         if not rule_name:
             await disable_cmd.finish("用法：/disable <rule_name>")
         if rule_switch.disable(event.group_id, rule_name):
+            rule_switch.save(RULE_SWITCH_PATH)
             await disable_cmd.finish(f"已禁用规则：{rule_name}")
         else:
             await disable_cmd.finish(f"未知规则：{rule_name}")
@@ -265,6 +303,7 @@ if on_command is not None:
         if not rule_name:
             await enable_cmd.finish("用法：/enable <rule_name>")
         if rule_switch.enable(event.group_id, rule_name):
+            rule_switch.save(RULE_SWITCH_PATH)
             await enable_cmd.finish(f"已启用规则：{rule_name}")
         else:
             await enable_cmd.finish(f"未知规则：{rule_name}")

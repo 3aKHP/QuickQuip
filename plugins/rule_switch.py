@@ -1,5 +1,8 @@
 from collections import OrderedDict
+from pathlib import Path
 from typing import Optional
+
+from plugins.persistence import load_json, save_json
 
 
 # All switchable rule names (text rules + built-in modules).
@@ -77,3 +80,21 @@ class GroupRuleSwitch:
             status = "OFF" if rule in disabled_set else "ON"
             lines.append(f"  [{status}] {rule}")
         return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        return {gid: sorted(rules) for gid, rules in self.disabled.items()}
+
+    def from_dict(self, data: dict) -> None:
+        self.disabled.clear()
+        for gid, rules in data.items():
+            valid = set(rules) & SWITCHABLE_RULES
+            if valid:
+                self.disabled[str(gid)] = valid
+
+    def save(self, path: str | Path) -> None:
+        save_json(path, self.to_dict())
+
+    def load(self, path: str | Path) -> None:
+        data = load_json(path)
+        if data is not None:
+            self.from_dict(data)

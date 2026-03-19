@@ -34,5 +34,8 @@ dist/
 # Claude Code
 .claude/
 
+# Persistent data
+data/
+
 #Dev Filefolder
 dev/
