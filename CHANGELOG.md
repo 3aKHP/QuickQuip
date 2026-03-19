@@ -6,7 +6,7 @@
 
 ### feat: persist stats and rule switch across restarts
 
-Git: `(Pending)`
+Git: `e494665`
 
 - 新增 `plugins/persistence.py`，提供 JSON 原子写入与安全读取
 - `GroupStatsTracker` 与 `GroupRuleSwitch` 支持 `save()`/`load()` 序列化
