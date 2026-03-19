@@ -31,5 +31,8 @@ dist/
 .vscode/
 .idea/
 
+# Claude Code
+.claude/
+
 #Dev Filefolder
 dev/
