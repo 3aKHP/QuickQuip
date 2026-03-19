@@ -7,6 +7,7 @@ from typing import Optional
 class GroupStats:
     total_messages: int = 0
     user_messages: dict[str, int] = field(default_factory=dict)
+    user_names: dict[str, str] = field(default_factory=dict)
     rule_triggers: dict[str, int] = field(default_factory=dict)
 
 
@@ -30,11 +31,18 @@ class GroupStatsTracker:
         self._prune()
         return self.stats[group_key]
 
-    def record_message(self, group_id: int | str, user_id: int | str) -> None:
+    def record_message(
+        self,
+        group_id: int | str,
+        user_id: int | str,
+        sender_name: str | None = None,
+    ) -> None:
         gs = self._ensure(str(group_id))
         gs.total_messages += 1
         user_key = str(user_id)
         gs.user_messages[user_key] = gs.user_messages.get(user_key, 0) + 1
+        if sender_name:
+            gs.user_names[user_key] = sender_name
 
     def record_trigger(self, group_id: int | str, rule_name: str) -> None:
         gs = self._ensure(str(group_id))
@@ -61,7 +69,8 @@ class GroupStatsTracker:
             top_users = sorted(gs.user_messages.items(), key=lambda x: -x[1])[:5]
             lines.append("活跃用户 Top 5：")
             for rank, (uid, count) in enumerate(top_users, 1):
-                display = (name_resolver or {}).get(uid, uid)
+                resolver = name_resolver if name_resolver is not None else gs.user_names
+                display = resolver.get(uid, uid)
                 lines.append(f"  {rank}. {display} — {count} 条")
 
         if gs.rule_triggers:

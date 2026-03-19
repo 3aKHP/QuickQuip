@@ -370,15 +370,17 @@ assert select_reply_template(both_rule) == "应该被选"
 
 tracker = GroupStatsTracker()
 
-# 记录消息
-tracker.record_message(9001, "u1")
-tracker.record_message(9001, "u2")
-tracker.record_message(9001, "u1")
+# 记录消息（带昵称）
+tracker.record_message(9001, "u1", "张三")
+tracker.record_message(9001, "u2", "李四")
+tracker.record_message(9001, "u1", "张三")
 gs = tracker.get_stats(9001)
 assert gs is not None
 assert gs.total_messages == 3
 assert gs.user_messages["u1"] == 2
 assert gs.user_messages["u2"] == 1
+assert gs.user_names["u1"] == "张三"
+assert gs.user_names["u2"] == "李四"
 
 # 记录规则触发
 tracker.record_trigger(9001, "divine_arrival")
@@ -387,15 +389,15 @@ tracker.record_trigger(9001, "play_target")
 assert gs.rule_triggers["divine_arrival"] == 2
 assert gs.rule_triggers["play_target"] == 1
 
-# 格式化输出
+# 格式化输出：默认使用存储的昵称
 formatted = tracker.format_stats(9001)
 assert "消息总数：3" in formatted
-assert "u1 — 2 条" in formatted
+assert "张三 — 2 条" in formatted
 assert "divine_arrival — 2 次" in formatted
 
-# 带名称解析的格式化
-formatted_named = tracker.format_stats(9001, name_resolver={"u1": "张三", "u2": "李四"})
-assert "张三 — 2 条" in formatted_named
+# 外部 name_resolver 覆盖存储的昵称
+formatted_override = tracker.format_stats(9001, name_resolver={"u1": "覆盖名", "u2": "李四"})
+assert "覆盖名 — 2 条" in formatted_override
 
 # 空统计
 assert tracker.format_stats(9999) == "暂无统计数据"

@@ -196,7 +196,7 @@ if on_message is not None:
         user_id = event.user_id
         group_id = event.group_id
 
-        stats_tracker.record_message(group_id, user_id)
+        stats_tracker.record_message(group_id, user_id, sender_name)
 
         result = resolve_reply(
             text,
