@@ -15,10 +15,15 @@ except ModuleNotFoundError:
     MessageSegment = None
 
 from plugins.good_girl_chain import GoodGirlChainManager
+from plugins.llm_inputs import extract_llm_input
+from plugins.llm_runtime import llm_service
+from plugins.message_deduper import RecentMessageDeduper
 from plugins.message_stats import GroupStatsTracker
 from plugins.rate_limit import KeyedRateLimiter
+from plugins.recent_message_buffer import RecentMessageBuffer
 from plugins.repeat_detector import GroupRepeatDetector
 from plugins.rule_switch import GroupRuleSwitch
+from plugins.tavily_search import TavilySearchClient, TavilySearchError, format_search_response
 from plugins.text_reply_rules import match_text_rule
 from plugins.tz_config import (
     BEIJING_TIMEZONE,
@@ -43,6 +48,9 @@ repeat_detector = GroupRepeatDetector()
 good_girl_chain = GoodGirlChainManager()
 stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
+recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
+message_deduper = RecentMessageDeduper()
+tavily_client = TavilySearchClient()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
@@ -79,6 +87,19 @@ def _is_admin(event: GroupMessageEvent) -> bool:
         if role in ("admin", "owner"):
             return True
     return False
+
+
+def _is_self_message(event: GroupMessageEvent) -> bool:
+    return str(getattr(event, "user_id", "")) == str(getattr(event, "self_id", ""))
+
+
+def _strip_command_name(text: str, command_name: str) -> str:
+    normalized = text.strip()
+    prefixes = (f"/{command_name}", f"!{command_name}", command_name)
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            return normalized[len(prefix):].strip()
+    return normalized
 
 
 def build_timezone_reply(
@@ -227,12 +248,38 @@ if on_message is not None:
 
     @matcher.handle()
     async def _(event: GroupMessageEvent):
-        text = str(event.get_message()).strip()
+        if _is_self_message(event):
+            return
+
+        message = event.get_message()
+        text = str(message).strip()
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
+        message_id = getattr(event, "message_id", None)
+
+        if message_deduper.is_duplicate(group_id, message_id):
+            return
 
         stats_tracker.record_message(group_id, user_id, sender_name)
+        trigger_context = recent_messages.list_recent(group_id, limit=20)
+
+        llm_settings = llm_service.get_group_settings(group_id)
+        llm_input = extract_llm_input(message, event.self_id, llm_settings)
+        if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
+            recent_messages.add_message(group_id, user_id, sender_name, text)
+            if not rate_limiter.allow("llm_chat", user_id):
+                return
+            result = await llm_service.generate_reply(
+                group_id=group_id,
+                user_id=user_id,
+                sender_name=sender_name,
+                prompt=llm_input.prompt,
+                image_urls=llm_input.image_urls,
+                recent_messages=trigger_context,
+            )
+            stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
+            await matcher.finish(result["reply"])
 
         result = resolve_reply(
             text,
@@ -241,19 +288,23 @@ if on_message is not None:
             group_id=group_id,
         )
         if not result:
+            recent_messages.add_message(group_id, user_id, sender_name, text)
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id):
+            recent_messages.add_message(group_id, user_id, sender_name, text)
             return
 
         stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
 
         if "at_user_id" in result:
+            recent_messages.add_message(group_id, user_id, sender_name, text)
             message = Message([
                 MessageSegment.at(result["at_user_id"]),
                 MessageSegment.text(f" {result['reply']}"),
             ])
             await matcher.finish(message)
 
+        recent_messages.add_message(group_id, user_id, sender_name, text)
         await matcher.finish(result["reply"])
 
 
@@ -265,6 +316,133 @@ if on_command is not None:
         group_id = event.group_id
         reply = stats_tracker.format_stats(group_id)
         await stats_cmd.finish(reply)
+
+    llm_cmd = on_command("llm", priority=10, block=True)
+
+    @llm_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "llm")
+        group_id = event.group_id
+        tokens = args.split()
+
+        if not args or args == "status":
+            await llm_cmd.finish(llm_service.format_status(group_id))
+
+        if args == "current":
+            await llm_cmd.finish(llm_service.format_current(group_id))
+
+        if args == "providers":
+            await llm_cmd.finish(llm_service.format_providers())
+
+        if args == "personas":
+            await llm_cmd.finish(llm_service.format_personas())
+
+        if tokens[:1] == ["models"]:
+            provider_id = tokens[1] if len(tokens) > 1 else None
+            await llm_cmd.finish(llm_service.format_models(provider_id))
+
+        if tokens[:2] == ["memory", "status"]:
+            await llm_cmd.finish(llm_service.format_memory_status(group_id))
+
+        if not _is_admin(event):
+            await llm_cmd.finish("仅管理员可执行此操作")
+
+        if args == "on":
+            llm_service.set_group_enabled(group_id, True)
+            await llm_cmd.finish("本群 LLM 已开启")
+
+        if args == "off":
+            llm_service.set_group_enabled(group_id, False)
+            await llm_cmd.finish("本群 LLM 已关闭")
+
+        if args == "reload":
+            config = llm_service.reload_config()
+            if config.load_error:
+                await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
+            await llm_cmd.finish("LLM 配置已重载")
+
+        if args == "clear_context":
+            deleted = llm_service.clear_group_context(group_id)
+            await llm_cmd.finish(f"已清空当前群的短期上下文，共删除 {deleted} 条记录")
+
+        if tokens[:1] == ["use"] and len(tokens) >= 3:
+            provider_id = tokens[1]
+            model = tokens[2]
+            try:
+                llm_service.set_group_model(group_id, provider_id, model)
+            except ValueError as exc:
+                await llm_cmd.finish(str(exc))
+            await llm_cmd.finish(f"本群 LLM 已切换到 {provider_id} / {model}")
+
+        if tokens[:2] == ["persona", "use"] and len(tokens) >= 3:
+            persona_id = tokens[2]
+            try:
+                llm_service.set_group_persona(group_id, persona_id)
+            except ValueError as exc:
+                await llm_cmd.finish(str(exc))
+            await llm_cmd.finish(f"本群人格已切换到 {persona_id}")
+
+        if tokens[:2] == ["trigger", "prefix"] and len(tokens) >= 3:
+            try:
+                llm_service.set_group_trigger_prefix(group_id, tokens[2])
+            except ValueError as exc:
+                await llm_cmd.finish(str(exc))
+            await llm_cmd.finish(f"本群触发前缀已改为 {tokens[2]}")
+
+        if tokens[:2] == ["trigger", "prefix_mode"] and len(tokens) >= 3:
+            value = tokens[2].lower()
+            if value not in {"on", "off"}:
+                await llm_cmd.finish("用法：/llm trigger prefix_mode on|off")
+            llm_service.set_group_allow_prefix(group_id, value == "on")
+            await llm_cmd.finish(f"本群前缀触发已设为 {value}")
+
+        if tokens[:2] == ["trigger", "at"] and len(tokens) >= 3:
+            value = tokens[2].lower()
+            if value not in {"on", "off"}:
+                await llm_cmd.finish("用法：/llm trigger at on|off")
+            llm_service.set_group_allow_at(group_id, value == "on")
+            await llm_cmd.finish(f"本群艾特触发已设为 {value}")
+
+        if tokens[:2] == ["memory", "on"]:
+            llm_service.set_group_memory_enabled(group_id, True)
+            await llm_cmd.finish("本群记忆注入已开启")
+
+        if tokens[:2] == ["memory", "off"]:
+            llm_service.set_group_memory_enabled(group_id, False)
+            await llm_cmd.finish("本群记忆注入已关闭")
+
+        await llm_cmd.finish(
+            "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> <model>|"
+            "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
+            "memory status|memory on|memory off|clear_context|reload"
+        )
+
+    search_cmd = on_command("search", priority=10, block=True)
+
+    @search_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "search")
+        if not args:
+            await search_cmd.finish("用法：/search <query> 或 /search news <query>")
+        if not rate_limiter.allow("tavily_search", event.user_id):
+            await search_cmd.finish("搜索过于频繁，请稍后再试")
+
+        tokens = args.split()
+        topic = "general"
+        query = args
+        if tokens and tokens[0].lower() in {"general", "news", "finance"}:
+            topic = tokens[0].lower()
+            query = args[len(tokens[0]):].strip()
+        if not query:
+            await search_cmd.finish("搜索词不能为空")
+
+        try:
+            response = await tavily_client.search(query, topic=topic, max_results=5)
+        except TavilySearchError as exc:
+            await search_cmd.finish(f"联网搜索失败：{exc}")
+        await search_cmd.finish(format_search_response(response))
 
     reset_stats_cmd = on_command("reset_stats", priority=10, block=True)
 
@@ -314,3 +492,35 @@ if on_command is not None:
     async def _(event: GroupMessageEvent):
         reply = rule_switch.format_rules(event.group_id)
         await rules_cmd.finish(reply)
+
+    remember_cmd = on_command("remember", priority=10, block=True)
+
+    @remember_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        if not _is_admin(event):
+            await remember_cmd.finish("仅管理员可执行此操作")
+        content = _strip_command_name(str(event.get_message()).strip(), "remember")
+        if not content:
+            await remember_cmd.finish("用法：/remember <要保存的群记忆>")
+        memory_id = llm_service.remember_group_memory(event.group_id, content)
+        await remember_cmd.finish(f"已写入群记忆 #{memory_id}")
+
+    memories_cmd = on_command("memories", priority=10, block=True)
+
+    @memories_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        keyword = _strip_command_name(str(event.get_message()).strip(), "memories")
+        reply = llm_service.format_memories(event.group_id, keyword=keyword or None)
+        await memories_cmd.finish(reply)
+
+    forget_cmd = on_command("forget", priority=10, block=True)
+
+    @forget_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        if not _is_admin(event):
+            await forget_cmd.finish("仅管理员可执行此操作")
+        keyword = _strip_command_name(str(event.get_message()).strip(), "forget")
+        if not keyword:
+            await forget_cmd.finish("用法：/forget <关键词>")
+        deleted = llm_service.forget_group_memories(event.group_id, keyword)
+        await forget_cmd.finish(f"已删除 {deleted} 条群记忆")

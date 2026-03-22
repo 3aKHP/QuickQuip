@@ -1,6 +1,8 @@
 import random
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
+from pathlib import Path
+import shutil
 
 from plugins.good_girl_chain import GoodGirlChainManager
 from plugins.message_stats import GroupStatsTracker
@@ -495,7 +497,6 @@ global_rule_switch.disabled.update(_saved_disabled)
 # ────────────────────────────────────────────────
 # 测试持久化序列化往返
 # ────────────────────────────────────────────────
-import tempfile, os
 
 # GroupStatsTracker 序列化往返
 persist_tracker = GroupStatsTracker()
@@ -516,16 +517,20 @@ assert rgs.user_messages["u1"] == 2
 assert rgs.user_names["u1"] == "张三"
 assert rgs.rule_triggers["divine_arrival"] == 2
 
+artifact_dir = Path("dev/sandbox/test_artifacts/test_tz")
+if artifact_dir.exists():
+    shutil.rmtree(artifact_dir)
+artifact_dir.mkdir(parents=True, exist_ok=True)
+
 # 文件 save/load 往返
-with tempfile.TemporaryDirectory() as tmpdir:
-    stats_file = os.path.join(tmpdir, "stats.json")
-    persist_tracker.save(stats_file)
-    loaded_tracker = GroupStatsTracker()
-    loaded_tracker.load(stats_file)
-    lgs = loaded_tracker.get_stats(7001)
-    assert lgs is not None
-    assert lgs.total_messages == 3
-    assert lgs.user_names["u1"] == "张三"
+stats_file = artifact_dir / "stats.json"
+persist_tracker.save(stats_file)
+loaded_tracker = GroupStatsTracker()
+loaded_tracker.load(stats_file)
+lgs = loaded_tracker.get_stats(7001)
+assert lgs is not None
+assert lgs.total_messages == 3
+assert lgs.user_names["u1"] == "张三"
 
 # load 不存在的文件不报错
 empty_tracker = GroupStatsTracker()
@@ -547,13 +552,12 @@ assert restored_switch.is_enabled(7002, "like_reply") is False
 assert restored_switch.is_enabled(7001, "like_reply") is True
 
 # 文件 save/load 往返
-with tempfile.TemporaryDirectory() as tmpdir:
-    switch_file = os.path.join(tmpdir, "rule_switch.json")
-    persist_switch.save(switch_file)
-    loaded_switch = GroupRuleSwitch()
-    loaded_switch.load(switch_file)
-    assert loaded_switch.is_enabled(7001, "divine_arrival") is False
-    assert loaded_switch.is_enabled(7002, "like_reply") is False
+switch_file = artifact_dir / "rule_switch.json"
+persist_switch.save(switch_file)
+loaded_switch = GroupRuleSwitch()
+loaded_switch.load(switch_file)
+assert loaded_switch.is_enabled(7001, "divine_arrival") is False
+assert loaded_switch.is_enabled(7002, "like_reply") is False
 
 # load 不存在的文件不报错
 empty_switch = GroupRuleSwitch()

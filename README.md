@@ -2,7 +2,7 @@
 
 > 基于 [NoneBot2](https://nonebot.dev/) + [OneBot V11](https://github.com/nonebot/adapter-onebot) 的 QQ 群聊互动机器人，用妙语让群聊更有趣。
 
-QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、纯规则驱动**的 QQ 群聊机器人。它不依赖大模型，通过精心设计的正则匹配和状态机，在群聊中自动给出有趣的回复——猜测你的真实时区、跟读复读、玩文字梗、甚至和你接龙。
+QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱动优先**的 QQ 群聊机器人。它原本不依赖大模型，通过精心设计的正则匹配和状态机，在群聊中自动给出有趣的回复。现在项目也支持按群启用 LLM 扩展，显式通过指令或艾特触发对话，并可切换不同 provider 和 model。
 
 ---
 
@@ -94,6 +94,49 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、纯规则�
 | `/enable <rule_name>` | 在本群启用指定规则 | 管理员/群主 |
 | `/rules` | 查看所有规则及其开关状态 | 所有人 |
 
+### 🧠 LLM 扩展
+
+支持通过配置文件接入兼容 OpenAI、Claude、Gemini 三种协议的接口，并按群动态切换模型。
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/llm status` | 查看当前群 LLM 状态 | 所有人 |
+| `/llm current` | 查看当前群 LLM 运行配置与上下文/记忆计数 | 所有人 |
+| `/llm on` / `/llm off` | 开关当前群 LLM | 管理员/群主 |
+| `/llm providers` | 查看可用 provider | 所有人 |
+| `/llm models [provider]` | 查看模型列表 | 所有人 |
+| `/llm use <provider> <model>` | 切换当前群使用的 provider 和模型 | 管理员/群主 |
+| `/llm personas` | 查看可用人格 | 所有人 |
+| `/llm persona use <id>` | 切换当前群人格 | 管理员/群主 |
+| `/llm trigger prefix <value>` | 设置显式触发前缀 | 管理员/群主 |
+| `/llm trigger prefix_mode on|off` | 开关前缀触发 | 管理员/群主 |
+| `/llm trigger at on|off` | 开关艾特触发 | 管理员/群主 |
+| `/llm memory status` | 查看当前群记忆注入状态 | 所有人 |
+| `/llm memory on|off` | 开关当前群记忆注入 | 管理员/群主 |
+| `/llm clear_context` | 清空当前群的短期会话上下文 | 管理员/群主 |
+| `/search <query>` | 使用 Tavily 进行联网搜索 | 所有人 |
+| `/search news <query>` | 使用 Tavily 搜索新闻 | 所有人 |
+| `/remember <内容>` | 手工写入群记忆 | 管理员/群主 |
+| `/memories [关键词]` | 查看当前群记忆 | 所有人 |
+| `/forget <关键词>` | 删除匹配的群记忆 | 管理员/群主 |
+
+默认只在以下场景触发 LLM：
+
+- 消息以 `/ai` 之类的配置前缀开头
+- 消息中 `@机器人`
+
+当前版本还支持在显式触发时附带图片：
+
+- `/ai` + 图片
+- `@机器人` + 图片
+
+未附带文字提示时，会自动按“请描述这张图片”处理。
+
+当前实现还额外遵循两条硬约束：
+
+- 每次 LLM 响应只会看到触发当下往前最多 20 条群消息，这部分仅保存在内存中，不做长期持久化
+- LLM 的短期会话记录和长期记忆都有硬上限，不会无限增长
+
 ### 🎲 随机回复（引擎已就绪）
 
 规则支持配置 `reply_templates` 加权随机列表，同一条规则命中后可随机选择不同回复，避免机械感。当前所有规则仅使用单模板，待后续配置启用。
@@ -121,9 +164,18 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、纯规则�
 QuickQuip/
 ├── bot.py                          # NoneBot2 入口，注册适配器并加载插件
 ├── .env                            # 环境变量配置（不纳入版本控制）
+├── config/
+│   └── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
 ├── .gitignore                      # Git 忽略规则
 ├── test_tz.py                      # 全功能断言测试脚本
+├── test_llm.py                     # LLM 基础功能断言测试脚本
 └── plugins/                        # 插件目录
+    ├── llm_config.py               # LLM TOML 配置加载
+    ├── llm_inputs.py               # 从消息段提取文本触发、艾特触发和图片 URL
+    ├── llm_provider.py             # OpenAI / Claude / Gemini 协议适配
+    ├── llm_runtime.py              # LLM 运行时入口、人格注入、上下文拼装
+    ├── llm_store.py                # SQLite 持久化：群设置、短期会话、长期记忆
+    ├── tavily_search.py            # Tavily 联网搜索客户端与结果格式化
     ├── tz_config.py                # 全局配置：关键词、时区映射、规则定义、限流参数
     ├── __init__.py                 # 包标记文件，便于测试和直接导入
     ├── tz_tracker.py               # 核心调度器：消息处理、回复分发、NoneBot 事件绑定
@@ -165,7 +217,7 @@ QuickQuip/
    # Linux / macOS
    source .venv/bin/activate
 
-   pip install nonebot2 nonebot-adapter-onebot nonebot-plugin-apscheduler
+   pip install -r requirements.txt
    ```
 
 3. **配置环境变量**
@@ -178,7 +230,17 @@ QuickQuip/
    PORT=8080
    ```
 
-4. **启动机器人**
+4. **可选：启用 LLM**
+
+   复制 `config/llm.toml.example` 为 `config/llm.toml`，填入你的中转 URL、模型列表和默认人格。API Key 放进 [`.env`](.env)：
+
+   ```env
+   OPENAI_API_KEY=your_openai_key_here
+   ANTHROPIC_API_KEY=your_claude_key_here
+   GEMINI_API_KEY=your_gemini_key_here
+   ```
+
+5. **启动机器人**
 
    ```bash
    python bot.py
@@ -190,6 +252,7 @@ QuickQuip/
 
 ```bash
 python test_tz.py
+python test_llm.py
 ```
 
 无输出即表示所有测试通过。脚本会打印部分回复示例供人工验证。
@@ -198,7 +261,7 @@ python test_tz.py
 
 ## ⚙️ 配置说明
 
-所有配置集中在 [`plugins/tz_config.py`](plugins/tz_config.py) 中，可直接修改：
+规则相关配置集中在 [`plugins/tz_config.py`](plugins/tz_config.py) 中，可直接修改：
 
 | 配置项 | 说明 | 默认值 |
 |-------|------|--------|
@@ -211,6 +274,17 @@ python test_tz.py
 | [`RATE_LIMIT_RULES`](plugins/tz_config.py:13) | 各规则限流参数 | 见源码 |
 | [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) | 文字彩蛋规则列表 | 见源码 |
 | [`SCHEDULED_MESSAGES`](plugins/tz_config.py) | 定时消息列表 | `[]`（空，休眠） |
+
+LLM 相关配置放在 `config/llm.toml`：
+
+| 配置区块 | 说明 |
+|------|------|
+| `[runtime]` | 默认 provider、人设、上下文长度、记忆条数 |
+| `[triggers]` | 前缀触发、艾特触发、空提示回复 |
+| `[[providers]]` | provider ID、协议类型、base URL、模型列表、默认参数 |
+| `[[personas]]` | 人格卡、system prompt、风格注入 |
+
+联网搜索通过 `.env` 中的 `TAVILY_API_KEY` 启用。
 
 ### 添加自定义回复规则
 
@@ -289,6 +363,26 @@ rate_limiter.allow()                 ← 限流检查
 ## 📄 许可证
 
 本项目基于 [WTFPL](LICENSE) 发布 — **Do What The F\*ck You Want To**。想干嘛就干嘛。Copyright © 2026 [3aKHP](https://github.com/3aKHP)。
+
+---
+
+## 🛣️ 后续规划
+
+当前阶段已经完成：
+
+- 显式触发的 LLM 对话
+- 群级 provider / model / persona 切换
+- 人格注入与词表注入
+- 手动长期记忆
+- 严格限制的短期上下文
+- 图片识别
+- Tavily 联网搜索
+
+下一阶段优先考虑的方向：
+
+1. 保守版自动记忆抽取：仅从已经触发的 LLM 对话里提取高置信事实，不扫全天候群消息。
+2. 更稳定的元数据与调试能力：让排查 prompt、联网判定和上下文污染更容易。
+3. 自动联网能力：在独立开关下，让 AI 只在确实需要最新信息时才触发联网，并继续与长期记忆严格隔离。
 
 ---
 

@@ -4,6 +4,17 @@
 
 ## Unreleased
 
+### feat: add llm, vision, and web search foundation
+
+Git: `Git: (Pending)`
+
+- 新增 LLM 配置、运行时、持久化与 provider 适配层，支持 OpenAI、Claude、Gemini 三类协议
+- 新增群级 LLM 控制命令、手动长期记忆命令与调试命令
+- 新增人格注入、词表按需注入、时间元数据注入与严格受限的短期上下文
+- 新增图片识别能力与 Tavily 联网搜索命令
+- 新增 Docker / 远程部署收尾配置，支持挂载 `config/`、`data/` 与 `dev/llm_about/`
+- 新增 LLM 与群内指令相关文档，并补充测试覆盖
+
 ### feat: persist stats and rule switch across restarts
 
 Git: `e494665`

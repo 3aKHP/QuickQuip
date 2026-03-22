@@ -25,6 +25,7 @@ SWITCHABLE_RULES = {
     "good_girl_chain_progress",
     "timezone_wake",
     "timezone_sleep",
+    "llm_chat",
 }
 
 

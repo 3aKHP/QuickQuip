@@ -1,0 +1,67 @@
+[runtime]
+enabled = true
+default_provider = "openai-main"
+default_persona = "quickquip-default"
+history_limit = 10
+history_max_messages_per_group = 40
+memory_limit = 6
+memory_max_items_per_group = 200
+max_prompt_chars = 4000
+
+[triggers]
+default_prefix = "/ai"
+allow_prefix = true
+allow_at = true
+empty_prompt_reply = "请在触发指令或艾特后面补上想说的话。"
+
+[[personas]]
+id = "quickquip-default"
+display_name = "QuickQuip 默认人格"
+system_prompt = """
+你是 QuickQuip 的群聊 LLM 扩展人格。
+你正在 QQ 群聊里说话，默认使用简体中文。
+回复应尽量自然、简洁、像群友，不要写成长篇说明文。
+如果群友的问题不明确，先追问关键缺失信息。
+如果记忆区的信息和当前对话冲突，以当前对话为准，不要强行套用旧记忆。
+不要假装自己具备现实行动能力，不要编造你并不确定的外部事实。
+"""
+style_prompt = """
+口吻要求：
+- 轻松直接
+- 少废话
+- 优先给结论，再补一句必要说明
+- 除非用户明确要求，否则不要使用长列表
+"""
+
+[[providers]]
+id = "openai-main"
+protocol = "openai"
+base_url = "https://your-openai-relay.example/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-4.1-mini"
+models = ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"]
+timeout_seconds = 45
+temperature = 0.8
+max_output_tokens = 800
+
+[[providers]]
+id = "claude-main"
+protocol = "claude"
+base_url = "https://your-claude-relay.example/v1"
+api_key_env = "ANTHROPIC_API_KEY"
+default_model = "claude-sonnet-4-5"
+models = ["claude-sonnet-4-5", "claude-opus-4-1"]
+timeout_seconds = 45
+temperature = 0.8
+max_output_tokens = 800
+
+[[providers]]
+id = "gemini-main"
+protocol = "gemini"
+base_url = "https://your-gemini-relay.example/v1beta"
+api_key_env = "GEMINI_API_KEY"
+default_model = "gemini-2.5-flash"
+models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+timeout_seconds = 45
+temperature = 0.8
+max_output_tokens = 800
