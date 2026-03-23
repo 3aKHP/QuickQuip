@@ -1,32 +1,37 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import logging
 from pathlib import Path
 import re
 import asyncio
-from zoneinfo import ZoneInfo
 
-from plugins.llm_config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config
-from plugins.llm_identity import IdentityEntry, IdentityIndex
-from plugins.llm_mcp import MCPClientManager, MCPServerStatus
-from plugins.llm_provider import LLMProviderError, LLMRequest, build_provider_client
-from plugins.llm_store import LLMStore
-from plugins.llm_tool_registry import ToolRegistry
-from plugins.llm_tools import (
+from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.chat.message_stats import GroupStatsTracker
+from quickquip.chat.rule_switch import GroupRuleSwitch, SWITCHABLE_RULES
+from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config
+from quickquip.llm.identity import IdentityIndex
+from quickquip.llm.mcp import MCPClientManager, MCPServerStatus
+from quickquip.llm.prompting import (
+    build_messages,
+    build_system_prompt,
+    build_user_message_content,
+    format_quoted_speaker,
+    merge_image_urls,
+    normalize_history,
+)
+from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
+from quickquip.common.recent_message_buffer import RecentMessageBuffer
+from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
+from quickquip.llm.store import LLMStore
+from quickquip.llm.tool_registry import ToolRegistry
+from quickquip.llm.tool_loop import run_tool_call_loop
+from quickquip.llm.tools import (
     LLMConversationMessage,
-    LLMToolCall,
-    LLMToolResult,
     LLMToolSpec,
     ToolExecutionContext,
 )
-from plugins.message_stats import GroupStatsTracker
-from plugins.recent_message_buffer import RecentMessageBuffer
-from plugins.rule_switch import GroupRuleSwitch, SWITCHABLE_RULES
-from plugins.llm_vocab import VocabIndex
-from plugins.web_search import build_search_client, format_search_response, get_search_backend_name
-from plugins.tz_config import BEIJING_TIMEZONE
+from quickquip.llm.vocab import VocabIndex
+from quickquip.search.web_search import build_search_client, format_search_response, get_search_backend_name
 
 
 CONFIG_PATH = Path("config/llm.toml")
@@ -55,18 +60,6 @@ DEFAULT_ENABLED_TOOLS = [
 ]
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class ResolvedGroupSettings:
-    enabled: bool
-    memory_enabled: bool
-    provider_id: str
-    model: str
-    persona_id: str
-    trigger_prefix: str
-    allow_prefix: bool
-    allow_at: bool
 
 
 class LLMService:
@@ -464,29 +457,7 @@ class LLMService:
         return self.config
 
     def get_group_settings(self, group_id: int | str) -> ResolvedGroupSettings:
-        overrides = self.store.get_group_settings(group_id)
-        provider_id = overrides.provider_id or self.config.runtime.default_provider or ""
-        provider = self.config.providers.get(provider_id)
-        model = overrides.model or (provider.default_model if provider else "")
-
-        return ResolvedGroupSettings(
-            enabled=overrides.enabled if overrides.enabled is not None else self.config.runtime.enabled,
-            memory_enabled=(
-                overrides.memory_enabled
-                if overrides.memory_enabled is not None
-                else self.config.runtime.memory_enabled
-            ),
-            provider_id=provider_id,
-            model=model,
-            persona_id=overrides.persona_id or self.config.runtime.default_persona or "",
-            trigger_prefix=overrides.trigger_prefix or self.config.triggers.default_prefix,
-            allow_prefix=(
-                overrides.allow_prefix
-                if overrides.allow_prefix is not None
-                else self.config.triggers.allow_prefix
-            ),
-            allow_at=overrides.allow_at if overrides.allow_at is not None else self.config.triggers.allow_at,
-        )
+        return resolve_group_settings(self.store, self.config, group_id)
 
     def _get_enabled_tool_names(self) -> list[str]:
         names = self.config.tools.enabled or [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
@@ -691,15 +662,6 @@ class LLMService:
     def clear_group_context(self, group_id: int | str) -> int:
         return self.store.clear_conversation_messages(group_id)
 
-    def _format_identity_entry(self, entry: IdentityEntry) -> str:
-        lines = [f"- 标准身份：{entry.canonical_name}"]
-        lines.append(f"  QQ：{'、'.join(entry.qq_ids)}")
-        if entry.aliases:
-            lines.append(f"  别名：{'、'.join(entry.aliases)}")
-        if entry.note:
-            lines.append(f"  备注：{entry.note}")
-        return "\n".join(lines)
-
     def _build_system_prompt(
         self,
         persona: PersonaConfig,
@@ -710,129 +672,37 @@ class LLMService:
         memories: list[dict[str, object]],
         tool_specs: list[LLMToolSpec],
     ) -> str:
-        now_cst = datetime.now(ZoneInfo(BEIJING_TIMEZONE))
-        weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-        identity = self.identities.resolve_user(user_id, sender_name)
-
-        lines = [persona.system_prompt.strip()]
-        if persona.style_prompt.strip():
-            lines.append(persona.style_prompt.strip())
-
-        lines.append("当前元数据：")
-        lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")
-        lines.append(f"- 当前星期：{weekday_names[now_cst.weekday()]}")
-        lines.append(f"当前群号：{group_id}")
-        lines.append(f"当前提问者昵称：{sender_name}")
-        lines.append("当前提问者身份：")
-        lines.append(f"- QQ：{identity.user_id}")
-        lines.append(f"- 当前显示名：{sender_name}")
-        if identity.is_registered:
-            lines.append(f"- 标准身份：{identity.canonical_name}")
-            if identity.aliases:
-                lines.append(f"- 常见别名：{'、'.join(identity.aliases)}")
-            if identity.note:
-                lines.append(f"- 备注：{identity.note}")
-        else:
-            lines.append("- 标准身份：未登记")
-        if memories:
-            lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
-            for index, memory in enumerate(memories, 1):
-                lines.append(f"{index}. {memory['content']}")
-
-        vocab_lines: list[str] = []
-        vocab_matches = self.vocab.find_matches(prompt)
-        if vocab_matches:
-            vocab_lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
-            for item in vocab_matches:
-                line = f"- {item.alias} 通常指 {item.name}"
-                if item.note:
-                    line += f"；注意：{item.note}"
-                vocab_lines.append(line)
-
-        glossary_matches = self.vocab.find_glossary(prompt)
-        if glossary_matches:
-            vocab_lines.append("以下黑话解释仅在当前话题相关时参考：")
-            for term, meaning in glossary_matches:
-                vocab_lines.append(f"- {term}：{meaning}")
-
-        if vocab_lines:
-            lines.append("\n".join(vocab_lines))
-
-        if tool_specs:
-            search_backend = get_search_backend_name()
-            backend_label = "SearXNG" if search_backend == "searxng" else "Tavily"
-            tool_lines = [
-                "工具使用规则：",
-                "- 只有在确实需要外部信息、身份查询或记忆查询时才调用工具。",
-                "- 优先直接回答，不要为了显得聪明而滥用工具。",
-                f"- 当前联网后端：{backend_label}。",
-                f"- 遇到需要最新事实、网页、新闻、价格、版本、公告或来源链接的问题时，优先调用 {SEARCH_TOOL_NAME}。",
-                "- 工具结果不足时，明确告诉用户不足，不要编造。",
-            ]
-            if search_backend == "searxng":
-                tool_lines.extend([
-                    f"- 当前 {SEARCH_TOOL_NAME} 走项目内 SearXNG；搜索结果不够时，可以继续多次调用 {SEARCH_TOOL_NAME} 细化检索。",
-                    "- 优先先搜再答，再根据搜索结果组织结论。",
-                ])
-            tool_lines.extend([
-                "当前可用工具：",
-            ])
-            for spec in tool_specs:
-                tool_lines.append(f"- {spec.name}：{spec.description}")
-            lines.append("\n".join(tool_lines))
-
-        return "\n\n".join(line for line in lines if line)
+        return build_system_prompt(
+            persona=persona,
+            group_id=group_id,
+            user_id=user_id,
+            sender_name=sender_name,
+            prompt=prompt,
+            memories=memories,
+            tool_specs=tool_specs,
+            identities=self.identities,
+            vocab=self.vocab,
+            beijing_timezone=BEIJING_TIMEZONE,
+            search_tool_name=SEARCH_TOOL_NAME,
+            get_search_backend_name=get_search_backend_name,
+        )
 
     def _normalize_history(
         self,
         history: list[dict[str, str]],
         recent_messages: list[dict[str, str]] | None = None,
     ) -> list[LLMConversationMessage]:
-        normalized: list[LLMConversationMessage] = []
-        if recent_messages:
-            lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
-            for index, item in enumerate(recent_messages[-MAX_TRIGGER_CONTEXT_MESSAGES:], 1):
-                sender_name = item["sender_name"].strip() or item["user_id"]
-                canonical_name = item.get("canonical_name", "").strip()
-                user_id = item["user_id"]
-                if canonical_name and canonical_name != sender_name:
-                    speaker = f"{canonical_name}（QQ {user_id}，当前显示名：{sender_name}）"
-                elif canonical_name:
-                    speaker = f"{canonical_name}（QQ {user_id}）"
-                else:
-                    speaker = f"{sender_name}（QQ {user_id}，未登记）"
-                lines.append(f"{index}. {speaker}：{item['text']}")
-            normalized.append(LLMConversationMessage(role="user", content="\n".join(lines)))
-
-        normalized.extend(
-            LLMConversationMessage(role=item["role"], content=item["content"])
-            for item in history
-            if item["role"] in {"user", "assistant"} and item["content"].strip()
+        return normalize_history(
+            history,
+            recent_messages=recent_messages,
+            max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
         )
-        return normalized
 
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
-        merged: list[str] = []
-        seen: set[str] = set()
-        for items in collections:
-            for item in items:
-                url = item.strip()
-                if not url or url in seen:
-                    continue
-                seen.add(url)
-                merged.append(url)
-        return merged
+        return merge_image_urls(*collections)
 
     def _format_quoted_speaker(self, sender_name: str, user_id: str) -> str:
-        normalized_sender_name = sender_name.strip()
-        normalized_user_id = user_id.strip()
-        if normalized_sender_name and normalized_user_id and normalized_sender_name != normalized_user_id:
-            return f"{normalized_sender_name}（QQ {normalized_user_id}）"
-        if normalized_sender_name:
-            return normalized_sender_name
-        if normalized_user_id:
-            return f"QQ {normalized_user_id}"
-        return "未知用户"
+        return format_quoted_speaker(sender_name, user_id)
 
     def _build_user_message_content(
         self,
@@ -843,24 +713,14 @@ class LLMService:
         quoted_user_id: str = "",
         quoted_image_urls: list[str] | None = None,
     ) -> str:
-        normalized_prompt = prompt.strip()
-        normalized_quoted_text = quoted_text.strip()[:MAX_QUOTED_MESSAGE_CHARS]
-        normalized_quoted_images = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
-        if not normalized_quoted_text and not normalized_quoted_images:
-            return normalized_prompt
-
-        lines = ["以下是当前用户显式引用的消息，请结合它理解本轮提问："]
-        lines.append(f"- 引用发送者：{self._format_quoted_speaker(quoted_sender_name, quoted_user_id)}")
-        if normalized_quoted_text:
-            lines.append(f"- 引用内容：{normalized_quoted_text}")
-        if normalized_quoted_images:
-            lines.append(f"- 引用附图：{len(normalized_quoted_images)} 张")
-        if normalized_prompt:
-            lines.append("当前用户消息：")
-            lines.append(normalized_prompt)
-        else:
-            lines.append("当前用户没有额外文字，请优先围绕引用消息作答。")
-        return "\n".join(lines)
+        return build_user_message_content(
+            prompt=prompt,
+            quoted_text=quoted_text,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            quoted_image_urls=quoted_image_urls,
+            max_quoted_message_chars=MAX_QUOTED_MESSAGE_CHARS,
+        )
 
     def _build_messages(
         self,
@@ -870,15 +730,13 @@ class LLMService:
         history: list[dict[str, str]],
         recent_messages: list[dict[str, str]] | None,
     ) -> list[LLMConversationMessage]:
-        messages = self._normalize_history(history, recent_messages=recent_messages)
-        messages.append(
-            LLMConversationMessage(
-                role="user",
-                content=prompt,
-                image_urls=list(image_urls),
-            )
+        return build_messages(
+            prompt=prompt,
+            image_urls=image_urls,
+            history=history,
+            recent_messages=recent_messages,
+            max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
         )
-        return messages
 
     async def _run_tool_call_loop(
         self,
@@ -887,90 +745,19 @@ class LLMService:
         request: LLMRequest,
         context: ToolExecutionContext,
     ):
-        client = build_provider_client(provider)
-        max_rounds = max(0, min(self.config.runtime.tool_max_rounds, 16))
-        max_calls = max(1, min(self.config.runtime.tool_max_calls_per_round, 32))
-        search_backend = get_search_backend_name()
-        search_unlimited = search_backend == "searxng"
-        current_request = request
-        counted_rounds = 0
-
-        for round_index in range(SEARCH_TOOL_FAILSAFE_MAX_ROUNDS + 1):
-            response = await client.complete(current_request)
-            logger.info(
-                "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
-                provider.id,
-                response.model,
-                response.finish_reason,
-                len(response.tool_calls),
-                round_index,
-            )
-            if not response.tool_calls or not current_request.allow_tool_calls:
-                return response
-
-            search_calls = [call for call in response.tool_calls if call.name == SEARCH_TOOL_NAME]
-            other_calls = [call for call in response.tool_calls if call.name != SEARCH_TOOL_NAME]
-            has_non_search_calls = bool(other_calls)
-
-            if has_non_search_calls and counted_rounds >= max_rounds:
-                response.text = response.text or "工具调用轮次已达上限，未能完成最终回答。"
-                return response
-
-            if search_unlimited:
-                selected_calls = [
-                    *search_calls[:SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND],
-                    *other_calls[:max_calls],
-                ]
-            else:
-                selected_calls = response.tool_calls[:max_calls]
-
-            if not selected_calls:
-                response.text = response.text or "工具调用请求为空，未能完成最终回答。"
-                return response
-
-            if has_non_search_calls or not search_unlimited:
-                counted_rounds += 1
-
-            if round_index >= SEARCH_TOOL_FAILSAFE_MAX_ROUNDS:
-                response.text = response.text or "联网检索轮次过多，已触发安全上限，未能完成最终回答。"
-                return response
-
-            assistant_message = LLMConversationMessage(
-                role="assistant",
-                content=response.text,
-                tool_calls=selected_calls,
-            )
-
-            logger.info(
-                "LLM tool calls requested: provider=%s model=%s names=%s",
-                provider.id,
-                response.model,
-                [call.name for call in selected_calls],
-            )
-            tool_results = [await self.tool_registry.execute(call, context) for call in selected_calls]
-            tool_messages = [
-                LLMConversationMessage(
-                    role="tool",
-                    content=item.content,
-                    tool_call_id=item.call_id,
-                    tool_name=item.name,
-                    is_tool_error=item.is_error,
-                )
-                for item in tool_results
-            ]
-
-            current_request = LLMRequest(
-                model=current_request.model,
-                system_prompt=current_request.system_prompt,
-                messages=[*current_request.messages, assistant_message, *tool_messages],
-                temperature=current_request.temperature,
-                max_output_tokens=current_request.max_output_tokens,
-                tools=current_request.tools,
-                allow_tool_calls=current_request.allow_tool_calls,
-                tool_choice=current_request.tool_choice,
-            )
-
-        raise RuntimeError("工具调用循环未按预期结束")
+        return await run_tool_call_loop(
+            provider=provider,
+            request=request,
+            context=context,
+            build_provider_client=build_provider_client,
+            tool_registry=self.tool_registry,
+            runtime_config=self.config.runtime,
+            logger=logger,
+            get_search_backend_name=get_search_backend_name,
+            search_tool_name=SEARCH_TOOL_NAME,
+            search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
+            search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
+        )
 
     async def generate_reply(
         self,

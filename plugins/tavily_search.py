@@ -1,10 +1,8 @@
-from __future__ import annotations
-
-from plugins.web_search import (
-    SearchResponse as TavilySearchResponse,
-    SearchResult as TavilySearchResult,
+from quickquip.search.tavily_search import (
     TavilySearchClient,
     TavilySearchError,
+    TavilySearchResponse,
+    TavilySearchResult,
     format_search_response,
 )
 
