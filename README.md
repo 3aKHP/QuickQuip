@@ -114,8 +114,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | `/llm memory status` | 查看当前群记忆注入状态 | 所有人 |
 | `/llm memory on|off` | 开关当前群记忆注入 | 管理员/群主 |
 | `/llm clear_context` | 清空当前群的短期会话上下文 | 管理员/群主 |
-| `/search <query>` | 使用 Tavily 进行联网搜索 | 所有人 |
-| `/search news <query>` | 使用 Tavily 搜索新闻 | 所有人 |
+| `/search <query>` | 使用当前搜索后端进行联网搜索 | 所有人 |
+| `/search news <query>` | 使用当前搜索后端搜索新闻 | 所有人 |
 | `/remember <内容>` | 手工写入群记忆 | 管理员/群主 |
 | `/memories [关键词]` | 查看当前群记忆 | 所有人 |
 | `/forget <关键词>` | 删除匹配的群记忆 | 管理员/群主 |
@@ -136,6 +136,14 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 - 每次 LLM 响应只会看到触发当下往前最多 20 条群消息，这部分仅保存在内存中，不做长期持久化
 - LLM 的短期会话记录和长期记忆都有硬上限，不会无限增长
+
+当前版本还支持标准化工具调用，并可桥接到 MCP server：
+
+- `get_identity`：查询标准身份词表
+- `list_memories`：查询当前群长期记忆
+- `search_web`：通过当前搜索后端进行联网搜索
+
+工具调用仍然只发生在显式触发的 LLM 对话内部，不会扩展到普通规则消息流。
 
 ### 🎲 随机回复（引擎已就绪）
 
@@ -166,16 +174,24 @@ QuickQuip/
 ├── .env                            # 环境变量配置（不纳入版本控制）
 ├── config/
 │   └── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
+├── docker/
+│   └── searxng/
+│       └── settings.yml            # 项目内置 SearXNG 配置
+├── docker-compose.searxng.yml      # 项目内置 SearXNG 服务编排
 ├── .gitignore                      # Git 忽略规则
 ├── test_tz.py                      # 全功能断言测试脚本
 ├── test_llm.py                     # LLM 基础功能断言测试脚本
 └── plugins/                        # 插件目录
     ├── llm_config.py               # LLM TOML 配置加载
     ├── llm_inputs.py               # 从消息段提取文本触发、艾特触发和图片 URL
+    ├── llm_tools.py                # 统一工具调用数据结构
+    ├── llm_tool_registry.py        # 工具注册表与参数校验
+    ├── llm_mcp.py                  # MCP stdio/docker 客户端与工具桥接
     ├── llm_provider.py             # OpenAI / Claude / Gemini 协议适配
     ├── llm_runtime.py              # LLM 运行时入口、人格注入、上下文拼装
     ├── llm_store.py                # SQLite 持久化：群设置、短期会话、长期记忆
-    ├── tavily_search.py            # Tavily 联网搜索客户端与结果格式化
+    ├── web_search.py               # 联网搜索后端抽象：SearXNG / Tavily
+    ├── tavily_search.py            # 旧 Tavily 模块兼容导出层
     ├── tz_config.py                # 全局配置：关键词、时区映射、规则定义、限流参数
     ├── __init__.py                 # 包标记文件，便于测试和直接导入
     ├── tz_tracker.py               # 核心调度器：消息处理、回复分发、NoneBot 事件绑定
@@ -228,9 +244,21 @@ QuickQuip/
    DRIVER=~fastapi
    HOST=0.0.0.0
    PORT=8080
+   SEARCH_BACKEND=auto
+   SEARXNG_BASE_URL=http://127.0.0.1:8888
    ```
 
-4. **可选：启用 LLM**
+4. **可选：启动项目内置 SearXNG**
+
+   项目已经附带一份 SearXNG 配置，可直接在仓库根目录启动：
+
+   ```bash
+   docker compose -f docker-compose.searxng.yml up -d
+   ```
+
+   默认会把 SearXNG 暴露到 `http://127.0.0.1:8888`，并允许 JSON 搜索接口，供 `/search` 命令和 LLM 内部 `search_web` 工具直接复用。
+
+5. **可选：启用 LLM**
 
    复制 `config/llm.toml.example` 为 `config/llm.toml`，填入你的中转 URL、模型列表和默认人格。API Key 放进 [`.env`](.env)：
 
@@ -238,9 +266,23 @@ QuickQuip/
    OPENAI_API_KEY=your_openai_key_here
    ANTHROPIC_API_KEY=your_claude_key_here
    GEMINI_API_KEY=your_gemini_key_here
+   DEEPSEEK_API_KEY=your_deepseek_key_here
+   GITHUB_PERSONAL_ACCESS_TOKEN=your_github_pat_here
+   GITHUB_TOOLSETS=context,repos,issues,pull_requests,users,actions
+   GITHUB_READ_ONLY=
+   MCP_ARXIV_PAPERS_MOUNT=arxiv-papers:/root/.arxiv-mcp-server/papers
+   MCP_PRTS_WIKI_ENABLED=false
+   MCP_PRTS_GAMEDATA_MOUNT=/absolute/path/to/ArknightsGameData:/data/gamedata:ro
+   MCP_PRTS_STORYJSON_MOUNT=/absolute/path/to/ArknightsStoryJson:/data/storyjson:ro
    ```
 
-5. **启动机器人**
+   如需保留 Tavily 作为备用搜索后端，可额外配置：
+
+   ```env
+   TAVILY_API_KEY=your_tavily_key_here
+   ```
+
+6. **启动机器人**
 
    ```bash
    python bot.py
@@ -281,10 +323,29 @@ LLM 相关配置放在 `config/llm.toml`：
 |------|------|
 | `[runtime]` | 默认 provider、人设、上下文长度、记忆条数 |
 | `[triggers]` | 前缀触发、艾特触发、空提示回复 |
+| `[tools]` | 标准化工具调用白名单 |
+| `[mcp]` / `[[mcp.servers]]` | MCP 总开关、server 启动方式、白名单与 DOOD 相关参数 |
 | `[[providers]]` | provider ID、协议类型、base URL、模型列表、默认参数 |
 | `[[personas]]` | 人格卡、system prompt、风格注入 |
 
-联网搜索通过 `.env` 中的 `TAVILY_API_KEY` 启用。
+联网搜索后端通过 `.env` 中的 `SEARCH_BACKEND` 控制：
+
+- `auto`：若设置了 `SEARXNG_BASE_URL`，优先使用 SearXNG；否则使用 Tavily
+- `searxng`：固定使用 SearXNG
+- `tavily`：固定使用 Tavily
+
+项目附带的 `docker-compose.searxng.yml` 会把 SearXNG 作为本地服务启动，并通过 `docker/searxng/settings.yml` 开启 `json` 输出格式，供机器人直接调用。
+
+### MCP 配置要点
+
+- `LLMService` 会在启动时初始化已启用的 MCP server，并在 `/llm reload` 时重新装载。
+- `transport = "stdio"` 适合本机命令或脚本。
+- `transport = "docker"` 适合云端部署时按需拉起 sibling container，`command` 层走 Docker CLI，便于配合 DOOD。
+- `mount_docker_socket = true` 时，会自动附加 `/var/run/docker.sock:/var/run/docker.sock` 挂载，适合需要访问宿主 Docker daemon 的 MCP server。
+- `mounts`、`docker_args`、`env` 可以继续补充工作目录、卷挂载、网络和环境变量。
+- 配置值支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`，适合把本机和云端的密钥、卷挂载和开关留在 `.env` / `dev/.env`。
+- 当前项目默认把 GitHub、Tavily、arXiv、PRTS Wiki 作为可选 MCP server 放在 `config/llm.toml` 中，PRTS Wiki 建议在云端通过 `MCP_PRTS_WIKI_ENABLED=false` 单独关闭或改成云端可用挂载。
+- 当 `[tools].enabled = []` 时，运行时会自动暴露内建工具和已发现的 MCP 工具；若填写白名单，则按工具名精确过滤。
 
 ### 添加自定义回复规则
 
@@ -376,13 +437,14 @@ rate_limiter.allow()                 ← 限流检查
 - 手动长期记忆
 - 严格限制的短期上下文
 - 图片识别
-- Tavily 联网搜索
+- 可切换联网搜索后端（内置 SearXNG / Tavily）
 
 下一阶段优先考虑的方向：
 
 1. 保守版自动记忆抽取：仅从已经触发的 LLM 对话里提取高置信事实，不扫全天候群消息。
 2. 更稳定的元数据与调试能力：让排查 prompt、联网判定和上下文污染更容易。
 3. 自动联网能力：在独立开关下，让 AI 只在确实需要最新信息时才触发联网，并继续与长期记忆严格隔离。
+4. 可插拔外部工具后端：在保留直连 API 的前提下，为部分能力预留 MCP 集成空间。
 
 ---
 

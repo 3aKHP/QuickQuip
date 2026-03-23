@@ -4,9 +4,19 @@
 
 ## Unreleased
 
-### feat: add llm, vision, and web search foundation
+### feat: add llm tool calling and searxng search backend
 
 Git: `Git: (Pending)`
+
+- 新增标准化工具调用链路，补齐工具消息结构、参数校验与 provider 协议映射
+- 新增 MCP client 与工具桥接，支持按配置发现和执行外部工具
+- 新增身份词表、消息渲染与短期消息检索能力，提升群聊上下文和称呼消歧质量
+- 新增可切换联网搜索后端，支持项目内置 SearXNG 与 Tavily 兼容回退
+- 新增 SearXNG 容器编排与配置文件，补充联网优先提示词、部署配置与测试覆盖
+
+### feat: add llm, vision, and web search foundation
+
+Git: `c128875`
 
 - 新增 LLM 配置、运行时、持久化与 provider 适配层，支持 OpenAI、Claude、Gemini 三类协议
 - 新增群级 LLM 控制命令、手动长期记忆命令与调试命令

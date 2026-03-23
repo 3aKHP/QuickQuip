@@ -17,13 +17,14 @@ except ModuleNotFoundError:
 from plugins.good_girl_chain import GoodGirlChainManager
 from plugins.llm_inputs import extract_llm_input
 from plugins.llm_runtime import llm_service
+from plugins.message_rendering import render_message_for_llm
 from plugins.message_deduper import RecentMessageDeduper
 from plugins.message_stats import GroupStatsTracker
 from plugins.rate_limit import KeyedRateLimiter
 from plugins.recent_message_buffer import RecentMessageBuffer
 from plugins.repeat_detector import GroupRepeatDetector
 from plugins.rule_switch import GroupRuleSwitch
-from plugins.tavily_search import TavilySearchClient, TavilySearchError, format_search_response
+from plugins.web_search import WebSearchError, build_search_client, format_search_response
 from plugins.text_reply_rules import match_text_rule
 from plugins.tz_config import (
     BEIJING_TIMEZONE,
@@ -50,11 +51,13 @@ stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
 recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
 message_deduper = RecentMessageDeduper()
-tavily_client = TavilySearchClient()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
 rule_switch.load(RULE_SWITCH_PATH)
+llm_service.bind_group_stats_tracker(stats_tracker)
+llm_service.bind_rule_switch(rule_switch)
+llm_service.bind_recent_message_buffer(recent_messages)
 
 
 def save_all() -> None:
@@ -226,8 +229,13 @@ matcher = None
 if nonebot is not None:
     driver = nonebot.get_driver()
 
+    @driver.on_startup
+    async def _startup_llm_runtime():
+        await llm_service.startup(background=True)
+
     @driver.on_shutdown
     async def _save_on_shutdown():
+        await llm_service.shutdown()
         save_all()
 
     try:
@@ -253,10 +261,19 @@ if on_message is not None:
 
         message = event.get_message()
         text = str(message).strip()
+        rendered_message = render_message_for_llm(
+            message,
+            bot_self_id=event.self_id,
+            identity_index=llm_service.identities,
+            include_image_placeholder=True,
+        )
+        rendered_text = rendered_message.text
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
         message_id = getattr(event, "message_id", None)
+        identity = llm_service.identities.resolve_user(user_id, sender_name)
+        canonical_name = identity.canonical_name
 
         if message_deduper.is_duplicate(group_id, message_id):
             return
@@ -265,9 +282,14 @@ if on_message is not None:
         trigger_context = recent_messages.list_recent(group_id, limit=20)
 
         llm_settings = llm_service.get_group_settings(group_id)
-        llm_input = extract_llm_input(message, event.self_id, llm_settings)
+        llm_input = extract_llm_input(
+            message,
+            event.self_id,
+            llm_settings,
+            identity_index=llm_service.identities,
+        )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
-            recent_messages.add_message(group_id, user_id, sender_name, text)
+            recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
             if not rate_limiter.allow("llm_chat", user_id):
                 return
             result = await llm_service.generate_reply(
@@ -288,23 +310,23 @@ if on_message is not None:
             group_id=group_id,
         )
         if not result:
-            recent_messages.add_message(group_id, user_id, sender_name, text)
+            recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id):
-            recent_messages.add_message(group_id, user_id, sender_name, text)
+            recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
             return
 
         stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
 
         if "at_user_id" in result:
-            recent_messages.add_message(group_id, user_id, sender_name, text)
+            recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
             message = Message([
                 MessageSegment.at(result["at_user_id"]),
                 MessageSegment.text(f" {result['reply']}"),
             ])
             await matcher.finish(message)
 
-        recent_messages.add_message(group_id, user_id, sender_name, text)
+        recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
         await matcher.finish(result["reply"])
 
 
@@ -332,6 +354,9 @@ if on_command is not None:
         if args == "current":
             await llm_cmd.finish(llm_service.format_current(group_id))
 
+        if args in {"mcp", "mcp status"}:
+            await llm_cmd.finish(llm_service.format_mcp_status())
+
         if args == "providers":
             await llm_cmd.finish(llm_service.format_providers())
 
@@ -357,7 +382,7 @@ if on_command is not None:
             await llm_cmd.finish("本群 LLM 已关闭")
 
         if args == "reload":
-            config = llm_service.reload_config()
+            config = await llm_service.reload_runtime(background=True)
             if config.load_error:
                 await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
             await llm_cmd.finish("LLM 配置已重载")
@@ -415,7 +440,7 @@ if on_command is not None:
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> <model>|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|clear_context|reload"
+            "memory status|memory on|memory off|clear_context|reload|mcp status"
         )
 
     search_cmd = on_command("search", priority=10, block=True)
@@ -426,7 +451,7 @@ if on_command is not None:
         args = _strip_command_name(text, "search")
         if not args:
             await search_cmd.finish("用法：/search <query> 或 /search news <query>")
-        if not rate_limiter.allow("tavily_search", event.user_id):
+        if not rate_limiter.allow("web_search", event.user_id):
             await search_cmd.finish("搜索过于频繁，请稍后再试")
 
         tokens = args.split()
@@ -439,8 +464,8 @@ if on_command is not None:
             await search_cmd.finish("搜索词不能为空")
 
         try:
-            response = await tavily_client.search(query, topic=topic, max_results=5)
-        except TavilySearchError as exc:
+            response = await build_search_client().search(query, topic=topic, max_results=5)
+        except WebSearchError as exc:
             await search_cmd.finish(f"联网搜索失败：{exc}")
         await search_cmd.finish(format_search_response(response))
 

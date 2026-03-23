@@ -9,6 +9,7 @@ from time import time
 class RecentMessage:
     user_id: str
     sender_name: str
+    canonical_name: str
     text: str
     created_at: float
 
@@ -52,6 +53,7 @@ class RecentMessageBuffer:
         group_id: int | str,
         user_id: int | str,
         sender_name: str,
+        canonical_name: str,
         text: str,
         *,
         now_ts: float | None = None,
@@ -73,6 +75,7 @@ class RecentMessageBuffer:
             RecentMessage(
                 user_id=str(user_id),
                 sender_name=sender_name.strip() or str(user_id),
+                canonical_name=canonical_name.strip(),
                 text=normalized,
                 created_at=current_ts,
             )
@@ -102,6 +105,7 @@ class RecentMessageBuffer:
             {
                 "user_id": item.user_id,
                 "sender_name": item.sender_name,
+                "canonical_name": item.canonical_name,
                 "text": item.text,
             }
             for item in items

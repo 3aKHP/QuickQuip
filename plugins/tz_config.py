@@ -15,6 +15,7 @@ RATE_LIMIT_RULES = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3},
+    "web_search": {"global_limit": 6, "user_limit": 3},
     "tavily_search": {"global_limit": 6, "user_limit": 3},
     "divine_arrival": {"global_limit": 6, "user_limit": 3},
     "play_target": {"global_limit": 6, "user_limit": 3},

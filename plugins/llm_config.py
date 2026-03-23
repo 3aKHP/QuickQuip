@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+import re
 from typing import Any
 import tomllib
 
@@ -25,6 +27,42 @@ class RuntimeConfig:
     memory_limit: int = 6
     memory_max_items_per_group: int = 200
     max_prompt_chars: int = 4000
+    tool_calling_enabled: bool = False
+    tool_max_rounds: int = 8
+    tool_max_calls_per_round: int = 16
+
+
+@dataclass(slots=True)
+class ToolsConfig:
+    enabled: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class MCPServerConfig:
+    id: str
+    transport: str = "stdio"
+    enabled: bool = True
+    timeout_seconds: float = 30.0
+    protocol_version: str = "2025-03-26"
+    tool_prefix: str | None = None
+    allowed_tools: list[str] = field(default_factory=list)
+    command: str = ""
+    args: list[str] = field(default_factory=list)
+    cwd: str | None = None
+    env: dict[str, str] = field(default_factory=dict)
+    image: str = ""
+    docker_command: str = "docker"
+    docker_args: list[str] = field(default_factory=list)
+    mounts: list[str] = field(default_factory=list)
+    mount_docker_socket: bool = False
+    network: str | None = None
+    container_workdir: str | None = None
+
+
+@dataclass(slots=True)
+class MCPConfig:
+    enabled: bool = False
+    servers: list[MCPServerConfig] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -53,6 +91,8 @@ class ProviderConfig:
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
+    mcp: MCPConfig = field(default_factory=MCPConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
     load_error: str | None = None
@@ -69,9 +109,47 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
+_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_env_string(value: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        default = match.group(2)
+        resolved = os.getenv(key)
+        if resolved is None:
+            return default or ""
+        return resolved
+
+    return _ENV_PATTERN.sub(_replace, value)
+
+
+def _expand_env_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _expand_env_string(value)
+    if isinstance(value, list):
+        return [_expand_env_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _expand_env_value(item) for key, item in value.items()}
+    return value
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return default
+
+
 def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfig]:
     personas: dict[str, PersonaConfig] = {}
     for entry in raw_personas:
+        entry = _expand_env_value(entry)
         persona_id = str(entry.get("id", "")).strip()
         if not persona_id:
             continue
@@ -87,6 +165,7 @@ def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfi
 def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderConfig]:
     providers: dict[str, ProviderConfig] = {}
     for entry in raw_providers:
+        entry = _expand_env_value(entry)
         provider_id = str(entry.get("id", "")).strip()
         if not provider_id:
             continue
@@ -106,6 +185,45 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
     return providers
 
 
+def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
+    servers: list[MCPServerConfig] = []
+    for entry in raw_servers:
+        entry = _expand_env_value(entry)
+        server_id = str(entry.get("id", "")).strip()
+        if not server_id:
+            continue
+
+        raw_env = _as_dict(entry.get("env"))
+        servers.append(
+            MCPServerConfig(
+                id=server_id,
+                transport=str(entry.get("transport", "stdio")).strip().lower() or "stdio",
+                enabled=_as_bool(entry.get("enabled", True), default=True),
+                timeout_seconds=float(entry.get("timeout_seconds", 30)),
+                protocol_version=str(entry.get("protocol_version", "2025-03-26")).strip()
+                or "2025-03-26",
+                tool_prefix=str(entry.get("tool_prefix", "")).strip() or None,
+                allowed_tools=[
+                    str(item).strip()
+                    for item in entry.get("allowed_tools", [])
+                    if str(item).strip()
+                ],
+                command=str(entry.get("command", "")).strip(),
+                args=[str(item) for item in entry.get("args", []) if str(item).strip()],
+                cwd=str(entry.get("cwd", "")).strip() or None,
+                env={str(k): str(v) for k, v in raw_env.items()},
+                image=str(entry.get("image", "")).strip(),
+                docker_command=str(entry.get("docker_command", "docker")).strip() or "docker",
+                docker_args=[str(item) for item in entry.get("docker_args", []) if str(item).strip()],
+                mounts=[str(item).strip() for item in entry.get("mounts", []) if str(item).strip()],
+                mount_docker_socket=_as_bool(entry.get("mount_docker_socket", False), default=False),
+                network=str(entry.get("network", "")).strip() or None,
+                container_workdir=str(entry.get("container_workdir", "")).strip() or None,
+            )
+        )
+    return servers
+
+
 def load_llm_config(path: str | Path) -> LLMConfig:
     config_path = Path(path)
     if not config_path.exists():
@@ -114,15 +232,18 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     with config_path.open("rb") as file:
         data = tomllib.load(file)
 
-    runtime_raw = _as_dict(data.get("runtime"))
-    triggers_raw = _as_dict(data.get("triggers"))
+    runtime_raw = _expand_env_value(_as_dict(data.get("runtime")))
+    triggers_raw = _expand_env_value(_as_dict(data.get("triggers")))
+    tools_raw = _expand_env_value(_as_dict(data.get("tools")))
+    mcp_raw = _expand_env_value(_as_dict(data.get("mcp")))
     raw_providers = data.get("providers", [])
     raw_personas = data.get("personas", [])
+    raw_mcp_servers = mcp_raw.get("servers", [])
 
     config = LLMConfig(
         runtime=RuntimeConfig(
-            enabled=bool(runtime_raw.get("enabled", False)),
-            memory_enabled=bool(runtime_raw.get("memory_enabled", True)),
+            enabled=_as_bool(runtime_raw.get("enabled", False), default=False),
+            memory_enabled=_as_bool(runtime_raw.get("memory_enabled", True), default=True),
             default_provider=str(runtime_raw.get("default_provider", "")).strip() or None,
             default_persona=str(runtime_raw.get("default_persona", "")).strip() or None,
             history_limit=int(runtime_raw.get("history_limit", 10)),
@@ -130,15 +251,29 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             memory_limit=int(runtime_raw.get("memory_limit", 6)),
             memory_max_items_per_group=int(runtime_raw.get("memory_max_items_per_group", 200)),
             max_prompt_chars=int(runtime_raw.get("max_prompt_chars", 4000)),
+            tool_calling_enabled=_as_bool(runtime_raw.get("tool_calling_enabled", False), default=False),
+            tool_max_rounds=int(runtime_raw.get("tool_max_rounds", 8)),
+            tool_max_calls_per_round=int(runtime_raw.get("tool_max_calls_per_round", 16)),
         ),
         triggers=TriggerConfig(
             default_prefix=str(triggers_raw.get("default_prefix", "/ai")).strip() or "/ai",
-            allow_prefix=bool(triggers_raw.get("allow_prefix", True)),
-            allow_at=bool(triggers_raw.get("allow_at", True)),
+            allow_prefix=_as_bool(triggers_raw.get("allow_prefix", True), default=True),
+            allow_at=_as_bool(triggers_raw.get("allow_at", True), default=True),
             empty_prompt_reply=str(
                 triggers_raw.get("empty_prompt_reply", "请在触发指令或艾特后面补上想说的话。")
             ).strip()
             or "请在触发指令或艾特后面补上想说的话。",
+        ),
+        tools=ToolsConfig(
+            enabled=[
+                str(item).strip()
+                for item in tools_raw.get("enabled", [])
+                if str(item).strip()
+            ]
+        ),
+        mcp=MCPConfig(
+            enabled=_as_bool(mcp_raw.get("enabled", False), default=False),
+            servers=_read_mcp_servers(raw_mcp_servers if isinstance(raw_mcp_servers, list) else []),
         ),
         providers=_read_providers(raw_providers if isinstance(raw_providers, list) else []),
         personas=_read_personas(raw_personas if isinstance(raw_personas, list) else []),

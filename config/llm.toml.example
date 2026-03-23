@@ -7,12 +7,50 @@ history_max_messages_per_group = 40
 memory_limit = 6
 memory_max_items_per_group = 200
 max_prompt_chars = 4000
+tool_calling_enabled = true
+tool_max_rounds = 8
+tool_max_calls_per_round = 16
 
 [triggers]
 default_prefix = "/ai"
 allow_prefix = true
 allow_at = true
 empty_prompt_reply = "请在触发指令或艾特后面补上想说的话。"
+
+[tools]
+enabled = []
+
+[mcp]
+enabled = true
+
+[[mcp.servers]]
+id = "github"
+transport = "docker"
+timeout_seconds = 30
+image = "ghcr.io/github/github-mcp-server"
+env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
+
+[[mcp.servers]]
+id = "tavily"
+transport = "docker"
+timeout_seconds = 30
+image = "mcp/tavily"
+env = { TAVILY_API_KEY = "${TAVILY_API_KEY}" }
+
+[[mcp.servers]]
+id = "arxiv"
+transport = "docker"
+timeout_seconds = 30
+image = "arxiv-mcp-server:latest"
+mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"]
+
+[[mcp.servers]]
+id = "prts_wiki"
+transport = "docker"
+enabled = "${MCP_PRTS_WIKI_ENABLED:-false}"
+timeout_seconds = 30
+image = "prts-mcp"
+mounts = ["${MCP_PRTS_GAMEDATA_MOUNT:-}", "${MCP_PRTS_STORYJSON_MOUNT:-}"]
 
 [[personas]]
 id = "quickquip-default"
@@ -24,6 +62,8 @@ system_prompt = """
 如果群友的问题不明确，先追问关键缺失信息。
 如果记忆区的信息和当前对话冲突，以当前对话为准，不要强行套用旧记忆。
 不要假装自己具备现实行动能力，不要编造你并不确定的外部事实。
+只要问题依赖最新网页、新闻、公告、版本、价格或外部来源，就优先先联网再回答。
+当联网工具可用且当前后端是项目内 SearXNG 时，把它视为默认首选，不要无依据地跳过检索。
 """
 style_prompt = """
 口吻要求：
@@ -31,6 +71,7 @@ style_prompt = """
 - 少废话
 - 优先给结论，再补一句必要说明
 - 除非用户明确要求，否则不要使用长列表
+- 需要联网时先搜关键信息，再压缩成群聊口吻回复
 """
 
 [[providers]]
@@ -38,30 +79,41 @@ id = "openai-main"
 protocol = "openai"
 base_url = "https://your-openai-relay.example/v1"
 api_key_env = "OPENAI_API_KEY"
-default_model = "gpt-4.1-mini"
-models = ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"]
+default_model = "gpt-5.4"
+models = ["gpt-5.4", "gpt-5.2", "gpt-5.1"]
 timeout_seconds = 45
 temperature = 0.8
-max_output_tokens = 800
+max_output_tokens = 2048
 
 [[providers]]
 id = "claude-main"
 protocol = "claude"
 base_url = "https://your-claude-relay.example/v1"
 api_key_env = "ANTHROPIC_API_KEY"
-default_model = "claude-sonnet-4-5"
-models = ["claude-sonnet-4-5", "claude-opus-4-1"]
+default_model = "claude-sonnet-4-6"
+models = ["claude-sonnet-4-6", "claude-opus-4-5", "claude-sonnet-4-5"]
 timeout_seconds = 45
 temperature = 0.8
-max_output_tokens = 800
+max_output_tokens = 2048
 
 [[providers]]
 id = "gemini-main"
 protocol = "gemini"
 base_url = "https://your-gemini-relay.example/v1beta"
 api_key_env = "GEMINI_API_KEY"
-default_model = "gemini-2.5-flash"
-models = ["gemini-2.5-flash", "gemini-2.5-pro"]
+default_model = "gemini-3.1-pro-high"
+models = ["gemini-3.1-pro-high", "gemini-3-flash-preview"]
 timeout_seconds = 45
-temperature = 0.8
-max_output_tokens = 800
+temperature = 0.5
+max_output_tokens = 2048
+
+[[providers]]
+id = "deepseek"
+protocol = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key_env = "DEEPSEEK_API_KEY"
+default_model = "deepseek-chat"
+models = ["deepseek-chat", "deepseek-reasoner"]
+timeout_seconds = 45
+temperature = 0.5
+max_output_tokens = 2048

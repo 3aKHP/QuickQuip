@@ -1,0 +1,22 @@
+use_default_settings: true
+
+general:
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: ""
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "change-this-secret"
+  limiter: false
+  image_proxy: false
+  public_instance: false
+  method: "GET"
+  port: 8080
+  bind_address: "0.0.0.0"
+  base_url: false
