@@ -6,7 +6,7 @@
 
 ### feat: add llm tool calling and searxng search backend
 
-Git: `Git: (Pending)`
+Git: `f6cfb6c`
 
 - 新增标准化工具调用链路，补齐工具消息结构、参数校验与 provider 协议映射
 - 新增 MCP client 与工具桥接，支持按配置发现和执行外部工具

@@ -287,6 +287,8 @@ if on_message is not None:
             event.self_id,
             llm_settings,
             identity_index=llm_service.identities,
+            reply=getattr(event, "reply", None),
+            is_to_me=bool(getattr(event, "to_me", False)),
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
             recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
@@ -299,6 +301,10 @@ if on_message is not None:
                 prompt=llm_input.prompt,
                 image_urls=llm_input.image_urls,
                 recent_messages=trigger_context,
+                quoted_text=llm_input.quoted_text,
+                quoted_image_urls=llm_input.quoted_image_urls,
+                quoted_sender_name=llm_input.quoted_sender_name,
+                quoted_user_id=llm_input.quoted_user_id,
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
             await matcher.finish(result["reply"])

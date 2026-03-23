@@ -62,6 +62,20 @@ class DummyEvent:
         self.self_id = self_id
 
 
+class DummySender:
+    def __init__(self, *, card="", nickname=""):
+        self.card = card
+        self.nickname = nickname
+
+
+class DummyReply:
+    def __init__(self, *, message, user_id, sender=None, message_id=None):
+        self.message = message
+        self.user_id = user_id
+        self.sender = sender
+        self.message_id = message_id
+
+
 class StubProviderClient:
     last_request = None
 
@@ -357,6 +371,15 @@ mention_message = DummyMessage(
     ]
 )
 assert extract_llm_prompt(mention_message, "12345", prefix_settings) == "讲个笑话"
+assert (
+    extract_llm_prompt(
+        DummyMessage([DummySegment("text", {"text": "来一句"} )]),
+        "12345",
+        prefix_settings,
+        is_to_me=True,
+    )
+    == "来一句"
+)
 
 mention_user_message = DummyMessage(
     [
@@ -392,6 +415,37 @@ image_input = extract_llm_input(image_message, "12345", prefix_settings)
 assert image_input is not None
 assert image_input.prompt == ""
 assert image_input.image_urls == ["https://example.test/cat.png"]
+
+quoted_reply = DummyReply(
+    message=DummyMessage(
+        [
+            DummySegment("at", {"qq": "2002"}),
+            DummySegment("text", {"text": " 这张图什么意思"}),
+            DummySegment("image", {"url": "https://example.test/reply-cat.png"}),
+        ]
+    ),
+    user_id="2002",
+    sender=DummySender(nickname="镜子"),
+    message_id=7788,
+)
+quoted_input = extract_llm_input(
+    DummyMessage(
+        [
+            DummySegment("at", {"qq": "12345"}),
+            DummySegment("text", {"text": " 帮我看看"}),
+        ]
+    ),
+    "12345",
+    prefix_settings,
+    identity_index=identity_index,
+    reply=quoted_reply,
+)
+assert quoted_input is not None
+assert quoted_input.prompt == "帮我看看"
+assert quoted_input.quoted_text == "@镜子 这张图什么意思[图片]"
+assert quoted_input.quoted_image_urls == ["https://example.test/reply-cat.png"]
+assert quoted_input.quoted_sender_name == "镜子"
+assert quoted_input.quoted_user_id == "2002"
 
 non_trigger_message = DummyMessage([DummySegment("text", {"text": "普通消息"})])
 assert extract_llm_prompt(non_trigger_message, "12345", prefix_settings) is None
@@ -604,6 +658,31 @@ assert {tool.name for tool in StubProviderClient.last_request.tools} == {
     "get_llm_status",
     "get_current_model",
 }
+
+llm_runtime_module.build_provider_client = lambda provider: StubProviderClient()
+try:
+    quoted_result = asyncio.run(
+        service.generate_reply(
+            group_id=1002,
+            user_id=3003,
+            sender_name="测试用户",
+            prompt="帮我看看",
+            image_urls=[],
+            quoted_text="@镜子 这张图什么意思[图片]",
+            quoted_image_urls=["https://example.test/reply-cat.png"],
+            quoted_sender_name="镜子",
+            quoted_user_id="2002",
+        )
+    )
+finally:
+    llm_runtime_module.build_provider_client = original_builder
+
+assert quoted_result["reply"].startswith("stub::gpt-test::以下是当前用户显式引用的消息")
+assert "引用发送者：镜子（QQ 2002）" in StubProviderClient.last_request.messages[-1].content
+assert "引用内容：@镜子 这张图什么意思[图片]" in StubProviderClient.last_request.messages[-1].content
+assert "当前用户消息：" in StubProviderClient.last_request.messages[-1].content
+assert "帮我看看" in StubProviderClient.last_request.messages[-1].content
+assert StubProviderClient.last_request.messages[-1].image_urls == ["https://example.test/reply-cat.png"]
 
 history = service.store.list_recent_conversation_messages(1001, 10)
 assert history[-2]["role"] == "user"

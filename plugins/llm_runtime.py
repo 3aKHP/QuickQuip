@@ -39,6 +39,7 @@ MAX_CONVERSATION_HISTORY_MESSAGES = 20
 MAX_STORED_CONVERSATION_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
 MAX_STORED_MEMORY_ITEMS = 200
+MAX_QUOTED_MESSAGE_CHARS = 1200
 SEARCH_TOOL_NAME = "search_web"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
@@ -810,6 +811,57 @@ class LLMService:
         )
         return normalized
 
+    def _merge_image_urls(self, *collections: list[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for items in collections:
+            for item in items:
+                url = item.strip()
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                merged.append(url)
+        return merged
+
+    def _format_quoted_speaker(self, sender_name: str, user_id: str) -> str:
+        normalized_sender_name = sender_name.strip()
+        normalized_user_id = user_id.strip()
+        if normalized_sender_name and normalized_user_id and normalized_sender_name != normalized_user_id:
+            return f"{normalized_sender_name}（QQ {normalized_user_id}）"
+        if normalized_sender_name:
+            return normalized_sender_name
+        if normalized_user_id:
+            return f"QQ {normalized_user_id}"
+        return "未知用户"
+
+    def _build_user_message_content(
+        self,
+        *,
+        prompt: str,
+        quoted_text: str = "",
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+        quoted_image_urls: list[str] | None = None,
+    ) -> str:
+        normalized_prompt = prompt.strip()
+        normalized_quoted_text = quoted_text.strip()[:MAX_QUOTED_MESSAGE_CHARS]
+        normalized_quoted_images = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
+        if not normalized_quoted_text and not normalized_quoted_images:
+            return normalized_prompt
+
+        lines = ["以下是当前用户显式引用的消息，请结合它理解本轮提问："]
+        lines.append(f"- 引用发送者：{self._format_quoted_speaker(quoted_sender_name, quoted_user_id)}")
+        if normalized_quoted_text:
+            lines.append(f"- 引用内容：{normalized_quoted_text}")
+        if normalized_quoted_images:
+            lines.append(f"- 引用附图：{len(normalized_quoted_images)} 张")
+        if normalized_prompt:
+            lines.append("当前用户消息：")
+            lines.append(normalized_prompt)
+        else:
+            lines.append("当前用户没有额外文字，请优先围绕引用消息作答。")
+        return "\n".join(lines)
+
     def _build_messages(
         self,
         *,
@@ -929,13 +981,19 @@ class LLMService:
         prompt: str,
         image_urls: list[str] | None = None,
         recent_messages: list[dict[str, str]] | None = None,
+        quoted_text: str = "",
+        quoted_image_urls: list[str] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
     ) -> dict[str, str]:
         prompt = prompt.strip()
         normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
-        if not prompt and normalized_image_urls:
+        normalized_quoted_text = quoted_text.strip()
+        normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
+        if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls:
             prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
 
-        if not prompt:
+        if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls:
             return {
                 "reply": self.config.triggers.empty_prompt_reply,
                 "rate_limit_key": LLM_RULE_NAME,
@@ -974,6 +1032,18 @@ class LLMService:
             }
 
         trimmed_prompt = prompt[: self.config.runtime.max_prompt_chars]
+        quoted_prompt = normalized_quoted_text[:MAX_QUOTED_MESSAGE_CHARS]
+        analysis_prompt = "\n".join(
+            item for item in [trimmed_prompt, quoted_prompt] if item
+        )[: self.config.runtime.max_prompt_chars]
+        effective_prompt = self._build_user_message_content(
+            prompt=trimmed_prompt,
+            quoted_text=quoted_prompt,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            quoted_image_urls=normalized_quoted_image_urls,
+        )[: self.config.runtime.max_prompt_chars]
+        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
         history = self.store.list_recent_conversation_messages(
             group_id,
             min(self.config.runtime.history_limit, MAX_CONVERSATION_HISTORY_MESSAGES),
@@ -985,7 +1055,7 @@ class LLMService:
             memories = self.store.search_memories(
                 group_id,
                 user_id=user_id,
-                query=trimmed_prompt,
+                query=analysis_prompt or trimmed_prompt,
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
@@ -995,13 +1065,13 @@ class LLMService:
             group_id,
             user_id,
             sender_name,
-            trimmed_prompt,
+            analysis_prompt or trimmed_prompt,
             memories,
             tool_specs,
         )
         messages = self._build_messages(
-            prompt=trimmed_prompt,
-            image_urls=normalized_image_urls,
+            prompt=effective_prompt,
+            image_urls=effective_image_urls,
             history=history,
             recent_messages=recent_messages,
         )
@@ -1046,7 +1116,7 @@ class LLMService:
         if not text:
             text = "模型没有返回可显示的文本。"
 
-        self.store.append_conversation_message(group_id, user_id, "user", trimmed_prompt)
+        self.store.append_conversation_message(group_id, user_id, "user", effective_prompt)
         self.store.append_conversation_message(group_id, None, "assistant", text)
         self.store.prune_conversation_messages(
             group_id,
