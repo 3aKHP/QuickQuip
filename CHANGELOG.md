@@ -4,9 +4,18 @@
 
 ## Unreleased
 
-### feat: add fixed tieba random transport command
+### refactor: reorganize runtime into quickquip package
 
 Git: `(Pending)`
+
+- 新增 `quickquip/` 主包，按 `adapters`、`app`、`llm`、`chat`、`tieba`、`search`、`common` 分层承接运行时实现
+- 将群消息管线、NoneBot 适配层、LLM 基础设施、贴吧抓取与共享状态模块迁入新目录
+- 将 `plugins/` 收敛为兼容入口层，保留原导入路径与 NoneBot 插件加载面
+- 更新 README 项目结构、配置说明与架构设计文档
+
+### feat: add fixed tieba random transport command
+
+Git: `f2b323b`
 
 - 新增固定贴吧随机搬运能力，支持 `/tieba`、`/tieba text`、`/tieba status`、`/tieba refresh` 指令
 - 新增贴吧采集与缓存模块，使用 Playwright 合法登录态维护固定贴吧帖子池，并支持缓存避重与质量过滤

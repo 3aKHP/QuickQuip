@@ -191,32 +191,25 @@ QuickQuip/
 │   └── searxng/
 │       └── settings.yml            # 项目内置 SearXNG 配置
 ├── docker-compose.searxng.yml      # 项目内置 SearXNG 服务编排
+├── quickquip/                      # 主代码目录
+│   ├── adapters/nonebot/           # NoneBot 生命周期、消息入口与命令注册
+│   ├── app/                        # 应用级消息管线与状态装配
+│   ├── chat/                       # 规则驱动聊天能力：时区、复读、接龙、统计、规则开关
+│   ├── common/                     # 通用基础设施：JSON 持久化、限流、去重、最近消息缓冲
+│   ├── llm/                        # LLM 配置、运行时组件、provider、MCP、工具调用
+│   ├── search/                     # 联网搜索后端与兼容导出
+│   └── tieba/                      # 固定贴吧配置、抓取、缓存与服务层
 ├── .gitignore                      # Git 忽略规则
 ├── test_tz.py                      # 全功能断言测试脚本
 ├── test_llm.py                     # LLM 基础功能断言测试脚本
-└── plugins/                        # 插件目录
-    ├── llm_config.py               # LLM TOML 配置加载
-    ├── llm_inputs.py               # 从消息段提取文本触发、艾特触发和图片 URL
-    ├── llm_tools.py                # 统一工具调用数据结构
-    ├── llm_tool_registry.py        # 工具注册表与参数校验
-    ├── llm_mcp.py                  # MCP stdio/docker 客户端与工具桥接
-    ├── llm_provider.py             # OpenAI / Claude / Gemini 协议适配
-    ├── llm_runtime.py              # LLM 运行时入口、人格注入、上下文拼装
-    ├── llm_store.py                # SQLite 持久化：群设置、短期会话、长期记忆
-    ├── web_search.py               # 联网搜索后端抽象：SearXNG / Tavily
-    ├── tavily_search.py            # 旧 Tavily 模块兼容导出层
-    ├── tz_config.py                # 全局配置：关键词、时区映射、规则定义、限流参数
-    ├── __init__.py                 # 包标记文件，便于测试和直接导入
-    ├── tz_tracker.py               # 核心调度器：消息处理、回复分发、NoneBot 事件绑定
-    ├── tz_utils.py                 # 时区工具函数：时差计算、地点格式化、候选时区查找
-    ├── text_reply_rules.py         # 文字彩蛋规则引擎：正则匹配 + 模板渲染 + 随机回复
-    ├── repeat_detector.py          # 复读检测器：群维度状态跟踪
-    ├── rate_limit.py               # 滑动窗口限流器：全局 + 用户双层限流
-    ├── good_girl_chain.py          # "好女孩"接龙状态机
-    ├── message_stats.py            # 消息统计：按群跟踪消息量与规则触发
-    ├── rule_switch.py              # 群级规则开关：按群禁用/启用规则
-    └── scheduler.py                # 定时消息：基于 APScheduler 的 cron 任务
+└── plugins/                        # 兼容入口层，保留 NoneBot 插件加载与旧导入路径
+    ├── tz_tracker.py               # 群消息插件入口
+    ├── llm_runtime.py              # LLM 运行时入口
+    ├── tieba_service.py            # 贴吧服务兼容导出
+    └── ...                         # 其余文件为兼容导出层
 ```
+
+当前目录约定中，`quickquip/` 承载主要实现，`plugins/` 保留兼容入口与旧导入路径，现有测试与本地工具仍可继续直接引用 `plugins.*`。
 
 ---
 
@@ -342,7 +335,7 @@ python test_tieba.py
 
 ## ⚙️ 配置说明
 
-规则相关配置集中在 [`plugins/tz_config.py`](plugins/tz_config.py) 中，可直接修改：
+规则相关配置集中在 `quickquip/chat/config.py`，并通过 [`plugins/tz_config.py`](plugins/tz_config.py) 保留兼容导出，可直接修改其中任一入口：
 
 | 配置项 | 说明 | 默认值 |
 |-------|------|--------|
@@ -388,7 +381,7 @@ LLM 相关配置放在 `config/llm.toml`：
 
 ### 添加自定义回复规则
 
-在 [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) 列表中追加字典即可：
+在 `TEXT_REPLY_RULES` 列表中追加字典即可：
 
 ```python
 {
@@ -430,33 +423,36 @@ LLM 相关配置放在 `config/llm.toml`：
 ## 🏗️ 架构设计
 
 ```
-群消息
-  │
-  ├─ stats_tracker.record_message()  ← 计入统计
+bot.py
   │
   ▼
-tz_tracker.resolve_reply()           ← 统一入口
-  │
-  ├─① repeat_detector                ← 复读检测（最高优先）
-  │
-  ├─② good_girl_chain                ← 接龙会话
-  │
-  ├─③ text_reply_rules               ← 彩蛋规则匹配
-  │
-  └─④ build_timezone_reply()         ← 时区作息猜测（兜底）
-  │
-  ├─ rule_switch.is_enabled()        ← 群级开关过滤
+plugins/tz_tracker.py                    ← NoneBot 插件入口兼容层
   │
   ▼
-rate_limiter.allow()                 ← 限流检查
-  │
-  ├─ stats_tracker.record_trigger()  ← 计入规则触发统计
+quickquip/adapters/nonebot/
+  ├─ lifecycle.py                        ← 启动、关停、定时保存
+  ├─ group_messages.py                   ← 群消息入口
+  └─ commands.py                         ← /llm /stats /tieba 等命令注册
   │
   ▼
-发送回复 / 静默跳过
+quickquip/app/message_pipeline.py        ← 应用级消息管线与共享状态装配
+  │
+  ├─ quickquip/chat/repeat_detector.py   ← 复读检测
+  ├─ quickquip/chat/good_girl_chain.py   ← 接龙会话
+  ├─ quickquip/chat/text_rules.py        ← 彩蛋规则
+  ├─ quickquip/chat/timezones.py         ← 时区候选与地点格式化
+  ├─ quickquip/chat/rule_switch.py       ← 群级规则开关
+  ├─ quickquip/chat/message_stats.py     ← 群消息统计
+  └─ quickquip/common/                   ← 限流、去重、最近消息缓冲、JSON 持久化
+  │
+  ├─ quickquip/llm/                      ← LLM 配置、provider、MCP、tool loop、prompt 构建
+  ├─ quickquip/search/                   ← SearXNG / Tavily 搜索后端
+  └─ quickquip/tieba/                    ← 固定贴吧配置、抓取、缓存与服务层
 ```
 
-回复优先级从高到低：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每个环节均受群级规则开关控制，被禁用的规则会被跳过并尝试下一级。部分近义彩蛋规则会故意共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
+普通规则消息的回复优先级从高到低仍然是：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每个环节均受群级规则开关控制，被禁用的规则会被跳过并尝试下一级。部分近义彩蛋规则会共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
+
+LLM、贴吧与联网搜索能力在目录上已经独立成子系统，便于后续继续细分 provider、存储、抓取器和工具桥接实现。
 
 ---
 
@@ -489,4 +485,4 @@ rate_limiter.allow()                 ← 限流检查
 
 ## 🤝 贡献
 
-欢迎提交 Issue 和 Pull Request！添加新的回复规则只需编辑 [`plugins/tz_config.py`](plugins/tz_config.py)，无需修改核心逻辑。
+欢迎提交 Issue 和 Pull Request！添加新的回复规则只需编辑 `quickquip/chat/config.py`（或兼容入口 [`plugins/tz_config.py`](plugins/tz_config.py)），无需改动消息管线本身。

@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+try:
+    import nonebot
+    from nonebot import on_command, on_message
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+except ModuleNotFoundError:
+    nonebot = None
+    on_command = None
+    on_message = None
+    Message = None
+    MessageSegment = None
+
+from quickquip.adapters.nonebot.commands import register_commands
+from quickquip.adapters.nonebot.group_messages import register_message_matcher
+from quickquip.adapters.nonebot.lifecycle import register_lifecycle
+
+
+matcher = None
+
+if nonebot is not None:
+    try:
+        driver = nonebot.get_driver()
+    except ValueError:
+        driver = None
+        on_message = None
+        on_command = None
+
+    if driver is not None:
+        register_lifecycle(driver)
+
+if on_message is not None:
+    matcher = register_message_matcher(on_message, Message, MessageSegment)
+
+if on_command is not None:
+    register_commands(on_command, Message, MessageSegment)
