@@ -26,6 +26,7 @@ SWITCHABLE_RULES = {
     "timezone_wake",
     "timezone_sleep",
     "llm_chat",
+    "tieba_random_post",
 }
 
 

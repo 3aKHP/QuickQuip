@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+### feat: add fixed tieba random transport command
+
+Git: `(Pending)`
+
+- 新增固定贴吧随机搬运能力，支持 `/tieba`、`/tieba text`、`/tieba status`、`/tieba refresh` 指令
+- 新增贴吧采集与缓存模块，使用 Playwright 合法登录态维护固定贴吧帖子池，并支持缓存避重与质量过滤
+- 新增贴吧相关配置项、限流项、规则开关项与独立测试脚本
+- 补充 README 中的贴吧功能说明、环境变量示例与测试说明
+
 ### feat: add llm tool calling and searxng search backend
 
 Git: `f6cfb6c`

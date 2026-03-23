@@ -15,6 +15,7 @@ RATE_LIMIT_RULES = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3},
+    "tieba_random_post": {"global_limit": 2, "user_limit": 1},
     "web_search": {"global_limit": 6, "user_limit": 3},
     "tavily_search": {"global_limit": 6, "user_limit": 3},
     "divine_arrival": {"global_limit": 6, "user_limit": 3},

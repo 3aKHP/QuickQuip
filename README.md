@@ -145,6 +145,19 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 工具调用仍然只发生在显式触发的 LLM 对话内部，不会扩展到普通规则消息流。
 
+### 🖼️ 固定贴吧随机搬运
+
+支持为一个固定贴吧维护本地帖子池，并在群里随机抽取一条帖子发送。
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/tieba` | 随机发送一条缓存帖子，默认带镇楼图 | 所有人 |
+| `/tieba text` | 随机发送一条缓存帖子，仅文字 | 所有人 |
+| `/tieba status` | 查看贴吧缓存、同步和登录态状态 | 所有人 |
+| `/tieba refresh` | 立即同步固定贴吧 | 管理员/群主 |
+
+当前实现默认只抓取 `.env` 中配置的一个固定贴吧，并把登录后的跨平台 `storage_state.json` 保存在 `data/tieba/` 下。遇到百度安全验证时，需要人工运行登录辅助脚本续签，不会自动绕过验证。
+
 ### 🎲 随机回复（引擎已就绪）
 
 规则支持配置 `reply_templates` 加权随机列表，同一条规则命中后可随机选择不同回复，避免机械感。当前所有规则仅使用单模板，待后续配置启用。
@@ -282,7 +295,32 @@ QuickQuip/
    TAVILY_API_KEY=your_tavily_key_here
    ```
 
-6. **启动机器人**
+6. **可选：启用固定贴吧随机搬运**
+
+   安装 Playwright 依赖后，还需要安装浏览器：
+
+   ```bash
+   python -m playwright install chromium
+   ```
+
+   然后在 [`.env`](.env) 中配置固定贴吧：
+
+   ```env
+   TIEBA_ENABLED=true
+   TIEBA_FORUM_KEYWORD=示例贴吧名
+   TIEBA_SYNC_INTERVAL_SECONDS=900
+   TIEBA_BROWSER_HEADLESS=true
+   ```
+
+   `TIEBA_FORUM_KEYWORD` 建议填写贴吧名本体，例如 `搬石`。当前实现也会自动兼容末尾多写一个 `吧` 的情况。
+
+   首次使用前，运行登录辅助脚本，在弹出的浏览器里手动完成贴吧登录和任何安全验证：
+
+   ```bash
+   python dev/tools/tieba_login.py
+   ```
+
+7. **启动机器人**
 
    ```bash
    python bot.py
@@ -295,6 +333,7 @@ QuickQuip/
 ```bash
 python test_tz.py
 python test_llm.py
+python test_tieba.py
 ```
 
 无输出即表示所有测试通过。脚本会打印部分回复示例供人工验证。

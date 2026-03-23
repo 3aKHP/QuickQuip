@@ -24,6 +24,7 @@ from plugins.rate_limit import KeyedRateLimiter
 from plugins.recent_message_buffer import RecentMessageBuffer
 from plugins.repeat_detector import GroupRepeatDetector
 from plugins.rule_switch import GroupRuleSwitch
+from plugins.tieba_service import TIEBA_RULE_NAME, TiebaLoginRequiredError, TiebaServiceError, tieba_service
 from plugins.web_search import WebSearchError, build_search_client, format_search_response
 from plugins.text_reply_rules import match_text_rule
 from plugins.tz_config import (
@@ -227,29 +228,37 @@ def build_reply(
 matcher = None
 
 if nonebot is not None:
-    driver = nonebot.get_driver()
-
-    @driver.on_startup
-    async def _startup_llm_runtime():
-        await llm_service.startup(background=True)
-
-    @driver.on_shutdown
-    async def _save_on_shutdown():
-        await llm_service.shutdown()
-        save_all()
-
     try:
-        from nonebot_plugin_apscheduler import scheduler
+        driver = nonebot.get_driver()
+    except ValueError:
+        driver = None
+        on_message = None
+        on_command = None
 
-        scheduler.add_job(
-            save_all,
-            "interval",
-            minutes=5,
-            id="persistence_auto_save",
-            replace_existing=True,
-        )
-    except ModuleNotFoundError:
-        pass
+    if driver is not None:
+        @driver.on_startup
+        async def _startup_llm_runtime():
+            await llm_service.startup(background=True)
+            await tieba_service.startup()
+
+        @driver.on_shutdown
+        async def _save_on_shutdown():
+            await tieba_service.shutdown()
+            await llm_service.shutdown()
+            save_all()
+
+        try:
+            from nonebot_plugin_apscheduler import scheduler
+
+            scheduler.add_job(
+                save_all,
+                "interval",
+                minutes=5,
+                id="persistence_auto_save",
+                replace_existing=True,
+            )
+        except ModuleNotFoundError:
+            pass
 
 if on_message is not None:
     matcher = on_message(priority=60, block=False)
@@ -474,6 +483,61 @@ if on_command is not None:
         except WebSearchError as exc:
             await search_cmd.finish(f"联网搜索失败：{exc}")
         await search_cmd.finish(format_search_response(response))
+
+    tieba_cmd = on_command("tieba", priority=10, block=True)
+
+    @tieba_cmd.handle()
+    async def _(event: GroupMessageEvent):
+        if not rule_switch.is_enabled(event.group_id, TIEBA_RULE_NAME):
+            await tieba_cmd.finish("本群已关闭贴吧随机搬运功能")
+
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "tieba")
+        normalized_args = args.lower()
+
+        if not args or normalized_args == "random":
+            if not rate_limiter.allow(TIEBA_RULE_NAME, event.user_id):
+                await tieba_cmd.finish("贴吧搬运过于频繁，请稍后再试")
+            thread = await tieba_service.get_random_thread()
+            if thread is None:
+                if tieba_service.store.login_required:
+                    await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python dev/tools/tieba_login.py")
+                await tieba_cmd.finish("当前贴吧池为空，请稍后再试或让管理员执行 /tieba refresh")
+            tieba_service.mark_sent(thread.tid)
+            stats_tracker.record_trigger(event.group_id, TIEBA_RULE_NAME)
+            message = Message([MessageSegment.text(tieba_service.build_thread_preview(thread))])
+            image_url = thread.cover_image_url or (thread.image_urls[0] if thread.image_urls else "")
+            if image_url:
+                message.append(MessageSegment.image(image_url))
+            await tieba_cmd.finish(message)
+
+        if normalized_args == "text":
+            if not rate_limiter.allow(TIEBA_RULE_NAME, event.user_id):
+                await tieba_cmd.finish("贴吧搬运过于频繁，请稍后再试")
+            thread = await tieba_service.get_random_thread()
+            if thread is None:
+                if tieba_service.store.login_required:
+                    await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python dev/tools/tieba_login.py")
+                await tieba_cmd.finish("当前贴吧池为空，请稍后再试或让管理员执行 /tieba refresh")
+            tieba_service.mark_sent(thread.tid)
+            stats_tracker.record_trigger(event.group_id, TIEBA_RULE_NAME)
+            await tieba_cmd.finish(tieba_service.build_thread_preview(thread))
+
+        if normalized_args == "status":
+            await tieba_cmd.finish(tieba_service.format_status())
+
+        if normalized_args == "refresh":
+            if not _is_admin(event):
+                await tieba_cmd.finish("仅管理员可执行此操作")
+            try:
+                result = await tieba_service.sync_now(force=True)
+            except TiebaLoginRequiredError as exc:
+                await tieba_cmd.finish(f"{exc}\n请运行 python dev/tools/tieba_login.py 续签登录态")
+            except TiebaServiceError as exc:
+                await tieba_cmd.finish(f"贴吧同步失败：{exc}")
+            await tieba_cmd.finish(str(result["message"]))
+
+        await tieba_cmd.finish("贴吧命令用法：/tieba | /tieba text | /tieba status | /tieba refresh")
 
     reset_stats_cmd = on_command("reset_stats", priority=10, block=True)
 
