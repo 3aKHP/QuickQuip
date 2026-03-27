@@ -9,11 +9,66 @@ from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 from quickquip.tieba.service import tieba_service
 
 
+def _is_private_chat(event) -> bool:
+    return getattr(event, "message_type", "") == "private" or getattr(event, "group_id", None) is None
+
+
+def _chat_type(event) -> str:
+    return "private" if _is_private_chat(event) else "group"
+
+
+def _chat_id(event):
+    if _is_private_chat(event):
+        return event.user_id
+    return event.group_id
+
+
+def _chat_label(event) -> str:
+    return "当前私聊" if _is_private_chat(event) else "本群"
+
+
+def _allow_scope_management(event) -> bool:
+    return _is_private_chat(event) or _is_admin(event)
+
+
 def register_commands(on_command, Message, MessageSegment) -> None:
+    start_session_cmd = on_command("start_sesssion", priority=10, block=True)
+    start_session_alias_cmd = on_command("start_session", priority=10, block=True)
+    end_session_cmd = on_command("end_session", priority=10, block=True)
+
+    async def _start_private_session(event, matcher) -> None:
+        if not _is_private_chat(event):
+            await matcher.finish("该命令仅支持私聊")
+        llm_service.start_private_session(event.user_id)
+        await matcher.finish(
+            f"当前私聊会话已开启，之后的普通消息、图片和引用回复都会进入 LLM。"
+            f" 当前上下文上限为 {llm_service.get_default_history_limit('private')} 条。"
+        )
+
+    async def _end_private_session(event, matcher) -> None:
+        if not _is_private_chat(event):
+            await matcher.finish("该命令仅支持私聊")
+        deleted = llm_service.end_private_session(event.user_id)
+        await matcher.finish(f"当前私聊会话已结束，并清空了 {deleted} 条短期上下文。")
+
+    @start_session_cmd.handle()
+    async def _(event):
+        await _start_private_session(event, start_session_cmd)
+
+    @start_session_alias_cmd.handle()
+    async def _(event):
+        await _start_private_session(event, start_session_alias_cmd)
+
+    @end_session_cmd.handle()
+    async def _(event):
+        await _end_private_session(event, end_session_cmd)
+
     stats_cmd = on_command("stats", priority=10, block=True)
 
     @stats_cmd.handle()
     async def _(event):
+        if _is_private_chat(event):
+            await stats_cmd.finish("私聊不支持 /stats")
         await stats_cmd.finish(stats_tracker.format_stats(event.group_id))
 
     llm_cmd = on_command("llm", priority=10, block=True)
@@ -22,14 +77,16 @@ def register_commands(on_command, Message, MessageSegment) -> None:
     async def _(event):
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "llm")
-        group_id = event.group_id
+        chat_type = _chat_type(event)
+        chat_id = _chat_id(event)
+        scope_label = _chat_label(event)
         tokens = args.split()
 
         if not args or args == "status":
-            await llm_cmd.finish(llm_service.format_status(group_id))
+            await llm_cmd.finish(llm_service.format_status(chat_id, chat_type=chat_type))
 
         if args == "current":
-            await llm_cmd.finish(llm_service.format_current(group_id))
+            await llm_cmd.finish(llm_service.format_current(chat_id, chat_type=chat_type))
 
         if args in {"mcp", "mcp status"}:
             await llm_cmd.finish(llm_service.format_mcp_status())
@@ -45,89 +102,103 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await llm_cmd.finish(llm_service.format_models(provider_id))
 
         if tokens[:2] == ["memory", "status"]:
-            await llm_cmd.finish(llm_service.format_memory_status(group_id))
+            await llm_cmd.finish(llm_service.format_memory_status(chat_id, chat_type=chat_type))
 
-        if not _is_admin(event):
+        if not _allow_scope_management(event):
             await llm_cmd.finish("仅管理员可执行此操作")
 
         if args == "on":
-            llm_service.set_group_enabled(group_id, True)
-            await llm_cmd.finish("本群 LLM 已开启")
+            if chat_type == "private":
+                llm_service.start_private_session(chat_id)
+                await llm_cmd.finish(
+                    f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，当前上下文上限为 {llm_service.get_default_history_limit('private')} 条。"
+                )
+            else:
+                llm_service.set_chat_enabled(chat_id, True, chat_type=chat_type)
+                await llm_cmd.finish(f"{scope_label} LLM 已开启")
 
         if args == "off":
-            llm_service.set_group_enabled(group_id, False)
-            await llm_cmd.finish("本群 LLM 已关闭")
+            if chat_type == "private":
+                deleted = llm_service.end_private_session(chat_id)
+                await llm_cmd.finish(f"{scope_label}会话已结束，并清空了 {deleted} 条短期上下文。")
+            else:
+                llm_service.set_chat_enabled(chat_id, False, chat_type=chat_type)
+                await llm_cmd.finish(f"{scope_label} LLM 已关闭")
 
         if args == "reload":
-            llm_service.reset_group_history_limit(group_id)
+            llm_service.reset_chat_history_limit(chat_id, chat_type=chat_type)
             config = await llm_service.reload_runtime(background=True)
             if config.load_error:
                 await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
             await llm_cmd.finish("LLM 配置已重载")
 
         if args == "clear_context":
-            deleted = llm_service.clear_group_context(group_id)
-            await llm_cmd.finish(f"已清空当前群的短期上下文，共删除 {deleted} 条记录")
+            deleted = llm_service.clear_context(chat_id, chat_type=chat_type)
+            await llm_cmd.finish(f"已清空{scope_label}的短期上下文，共删除 {deleted} 条记录")
 
         if tokens[:1] == ["use"] and len(tokens) >= 3:
             provider_id = tokens[1]
             model = tokens[2]
             try:
-                llm_service.set_group_model(group_id, provider_id, model)
+                llm_service.set_chat_model(chat_id, provider_id, model, chat_type=chat_type)
             except ValueError as exc:
                 await llm_cmd.finish(str(exc))
-            await llm_cmd.finish(f"本群 LLM 已切换到 {provider_id} / {model}")
+            await llm_cmd.finish(f"{scope_label} LLM 已切换到 {provider_id} / {model}")
 
         if tokens[:2] == ["persona", "use"] and len(tokens) >= 3:
             persona_id = tokens[2]
             try:
-                llm_service.set_group_persona(group_id, persona_id)
+                llm_service.set_chat_persona(chat_id, persona_id, chat_type=chat_type)
             except ValueError as exc:
                 await llm_cmd.finish(str(exc))
-            await llm_cmd.finish(f"本群人格已切换到 {persona_id}")
+            await llm_cmd.finish(f"{scope_label}人格已切换到 {persona_id}")
 
         if tokens[:2] == ["trigger", "prefix"] and len(tokens) >= 3:
             try:
-                llm_service.set_group_trigger_prefix(group_id, tokens[2])
+                llm_service.set_chat_trigger_prefix(chat_id, tokens[2], chat_type=chat_type)
             except ValueError as exc:
                 await llm_cmd.finish(str(exc))
-            await llm_cmd.finish(f"本群触发前缀已改为 {tokens[2]}")
+            await llm_cmd.finish(f"{scope_label}触发前缀已改为 {tokens[2]}")
 
         if tokens[:2] == ["trigger", "prefix_mode"] and len(tokens) >= 3:
             value = tokens[2].lower()
             if value not in {"on", "off"}:
                 await llm_cmd.finish("用法：/llm trigger prefix_mode on|off")
-            llm_service.set_group_allow_prefix(group_id, value == "on")
-            await llm_cmd.finish(f"本群前缀触发已设为 {value}")
+            llm_service.set_chat_allow_prefix(chat_id, value == "on", chat_type=chat_type)
+            await llm_cmd.finish(f"{scope_label}前缀触发已设为 {value}")
 
         if tokens[:2] == ["trigger", "at"] and len(tokens) >= 3:
+            if chat_type == "private":
+                await llm_cmd.finish("私聊仅支持前缀触发，不支持艾特触发")
             value = tokens[2].lower()
             if value not in {"on", "off"}:
                 await llm_cmd.finish("用法：/llm trigger at on|off")
-            llm_service.set_group_allow_at(group_id, value == "on")
-            await llm_cmd.finish(f"本群艾特触发已设为 {value}")
+            llm_service.set_group_allow_at(chat_id, value == "on")
+            await llm_cmd.finish(f"{scope_label}艾特触发已设为 {value}")
 
         if tokens[:2] == ["memory", "on"]:
-            llm_service.set_group_memory_enabled(group_id, True)
-            await llm_cmd.finish("本群记忆注入已开启")
+            llm_service.set_chat_memory_enabled(chat_id, True, chat_type=chat_type)
+            await llm_cmd.finish(f"{scope_label}记忆注入已开启")
 
         if tokens[:2] == ["memory", "off"]:
-            llm_service.set_group_memory_enabled(group_id, False)
-            await llm_cmd.finish("本群记忆注入已关闭")
+            llm_service.set_chat_memory_enabled(chat_id, False, chat_type=chat_type)
+            await llm_cmd.finish(f"{scope_label}记忆注入已关闭")
 
         if tokens[:1] == ["context_limit"] and len(tokens) >= 2:
             value = tokens[1].lower()
             if value in {"reset", "off"}:
-                llm_service.reset_group_history_limit(group_id)
-                await llm_cmd.finish(f"本群上下文上限已重置为全局默认（{llm_service.config.runtime.history_limit} 条）")
+                llm_service.reset_chat_history_limit(chat_id, chat_type=chat_type)
+                await llm_cmd.finish(
+                    f"{scope_label}上下文上限已重置为默认（{llm_service.get_default_history_limit(chat_type)} 条）"
+                )
             try:
                 n = int(value)
             except ValueError:
                 await llm_cmd.finish("用法：/llm context_limit <条数> | reset")
             if n < 1:
                 await llm_cmd.finish("上下文上限须为正整数")
-            llm_service.set_group_history_limit(group_id, n)
-            await llm_cmd.finish(f"本群上下文上限已设为 {n} 条（/llm reload 可重置）")
+            llm_service.set_chat_history_limit(chat_id, n, chat_type=chat_type)
+            await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（/llm reload 可重置）")
 
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> <model>|"
@@ -165,6 +236,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
     @tieba_cmd.handle()
     async def _(event):
+        if _is_private_chat(event):
+            await tieba_cmd.finish("私聊不支持 /tieba")
         if not rule_switch.is_enabled(event.group_id, TIEBA_RULE_NAME):
             await tieba_cmd.finish("本群已关闭贴吧随机搬运功能")
 
@@ -220,6 +293,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
     @reset_stats_cmd.handle()
     async def _(event):
+        if _is_private_chat(event):
+            await reset_stats_cmd.finish("私聊不支持 /reset_stats")
         if not _is_admin(event):
             await reset_stats_cmd.finish("仅管理员可执行此操作")
         stats_tracker.reset(event.group_id)
@@ -230,6 +305,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
     @disable_cmd.handle()
     async def _(event):
+        if _is_private_chat(event):
+            await disable_cmd.finish("私聊不支持 /disable")
         if not _is_admin(event):
             await disable_cmd.finish("仅管理员可执行此操作")
         rule_name = str(event.get_message()).strip().replace("/disable", "").strip()
@@ -244,6 +321,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
     @enable_cmd.handle()
     async def _(event):
+        if _is_private_chat(event):
+            await enable_cmd.finish("私聊不支持 /enable")
         if not _is_admin(event):
             await enable_cmd.finish("仅管理员可执行此操作")
         rule_name = str(event.get_message()).strip().replace("/enable", "").strip()
@@ -258,45 +337,49 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
     @rules_cmd.handle()
     async def _(event):
+        if _is_private_chat(event):
+            await rules_cmd.finish("私聊不支持 /rules")
         await rules_cmd.finish(rule_switch.format_rules(event.group_id))
 
     remember_cmd = on_command("remember", priority=10, block=True)
 
     @remember_cmd.handle()
     async def _(event):
-        if not _is_admin(event):
+        if not _allow_scope_management(event):
             await remember_cmd.finish("仅管理员可执行此操作")
         content = _strip_command_name(str(event.get_message()).strip(), "remember")
         if not content:
-            await remember_cmd.finish("用法：/remember <要保存的群记忆>")
-        memory_id = llm_service.remember_group_memory(event.group_id, content)
-        await remember_cmd.finish(f"已写入群记忆 #{memory_id}")
+            await remember_cmd.finish("用法：/remember <要保存的记忆>")
+        chat_type = _chat_type(event)
+        chat_id = _chat_id(event)
+        memory_id = llm_service.remember_memory(chat_id, content, chat_type=chat_type)
+        await remember_cmd.finish(f"已写入{_chat_label(event)}记忆 #{memory_id}")
 
     memories_cmd = on_command("memories", priority=10, block=True)
 
     @memories_cmd.handle()
     async def _(event):
         keyword = _strip_command_name(str(event.get_message()).strip(), "memories")
-        reply = llm_service.format_memories(event.group_id, keyword=keyword or None)
+        reply = llm_service.format_memories(_chat_id(event), keyword=keyword or None, chat_type=_chat_type(event))
         await memories_cmd.finish(reply)
 
     forget_cmd = on_command("forget", priority=10, block=True)
 
     @forget_cmd.handle()
     async def _(event):
-        if not _is_admin(event):
+        if not _allow_scope_management(event):
             await forget_cmd.finish("仅管理员可执行此操作")
         keyword = _strip_command_name(str(event.get_message()).strip(), "forget")
         if not keyword:
             await forget_cmd.finish("用法：/forget <关键词>")
-        deleted = llm_service.forget_group_memories(event.group_id, keyword)
-        await forget_cmd.finish(f"已删除 {deleted} 条群记忆")
+        deleted = llm_service.forget_memories(_chat_id(event), keyword, chat_type=_chat_type(event))
+        await forget_cmd.finish(f"已删除{_chat_label(event)}中的 {deleted} 条记忆")
 
     forget_all_cmd = on_command("forget_all", priority=10, block=True)
 
     @forget_all_cmd.handle()
     async def _(event):
-        if not _is_admin(event):
+        if not _allow_scope_management(event):
             await forget_all_cmd.finish("仅管理员可执行此操作")
-        deleted = llm_service.clear_group_memories(event.group_id)
-        await forget_all_cmd.finish(f"已清空本群全部长期记忆（共 {deleted} 条）")
+        deleted = llm_service.clear_memories(_chat_id(event), chat_type=_chat_type(event))
+        await forget_all_cmd.finish(f"已清空{_chat_label(event)}全部长期记忆（共 {deleted} 条）")

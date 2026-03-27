@@ -4,9 +4,19 @@
 
 ## Unreleased
 
-### feat: add provider style overrides, forget_all, and per-group context limit
+### feat: add private session control and stronger identity tracking
 
 Git: `(Pending)`
+
+- 新增私聊会话管理机制，默认不在私聊中自动启用 LLM；通过 `/start_sesssion` 或 `/start_session` 开启当前私聊会话，通过 `/end_session` 结束并清空短期上下文
+- 私聊消息入口支持在会话开启后直接处理普通文本、图片与显式回复，并保留部分斜杠命令
+- 将私聊短期上下文默认读取上限和保留上限提升到 256 条，适合连续对话
+- 修正群聊 LLM 的“认人”链路：短期会话历史改为持久化保存 QQ、当前显示名与标准身份，并在 prompt 中注入认人规则与当前已知参与者摘要，降低多人对话中的张冠李戴
+- 补充 README 与测试覆盖，验证多用户轮流发言时的身份区分、私聊会话切换与图片/回复输入解析
+
+### feat: add provider style overrides, forget_all, and per-group context limit
+
+Git: `86311b9`
 
 - 新增 `[[providers]]` 的 `style_overrides` 字段，支持在 `llm.toml` 中为每个 provider 配置针对性的 system prompt 追加段，用于修正特定模型口癖（如 GPT 的句尾反问、DeepSeek 的分点列举等）
 - 新增 `/forget_all` 命令（管理员），一次性清空本群全部长期记忆

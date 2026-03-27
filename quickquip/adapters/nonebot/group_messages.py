@@ -24,6 +24,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
     @matcher.handle()
     async def _(event):
+        if getattr(event, "group_id", None) is None or getattr(event, "message_type", "") == "private":
+            return
         if _is_self_message(event):
             return
 

@@ -9,7 +9,7 @@ import plugins.llm_runtime as llm_runtime_module
 import plugins.web_search as web_search_module
 from plugins.llm_config import MCPServerConfig, ProviderConfig
 from plugins.llm_identity import IdentityIndex
-from plugins.llm_inputs import extract_llm_input, extract_llm_prompt
+from plugins.llm_inputs import extract_llm_input, extract_llm_prompt, extract_private_llm_input
 from plugins.llm_mcp import MCPServerStatus, MCPToolBinding, StdioMCPClient
 from plugins.llm_provider import (
     ClaudeProviderClient,
@@ -450,6 +450,34 @@ assert quoted_input.quoted_user_id == "2002"
 non_trigger_message = DummyMessage([DummySegment("text", {"text": "普通消息"})])
 assert extract_llm_prompt(non_trigger_message, "12345", prefix_settings) is None
 
+private_free_text_input = extract_private_llm_input(
+    DummyMessage([DummySegment("text", {"text": "普通私聊消息"})]),
+    "12345",
+    prefix_settings,
+)
+assert private_free_text_input is not None
+assert private_free_text_input.prompt == "普通私聊消息"
+
+private_image_input = extract_private_llm_input(
+    DummyMessage([DummySegment("image", {"url": "https://example.test/private-cat.png"})]),
+    "12345",
+    prefix_settings,
+)
+assert private_image_input is not None
+assert private_image_input.prompt == ""
+assert private_image_input.image_urls == ["https://example.test/private-cat.png"]
+
+private_reply_input = extract_private_llm_input(
+    DummyMessage([DummySegment("text", {"text": "帮我接着说"})]),
+    "12345",
+    prefix_settings,
+    identity_index=identity_index,
+    reply=quoted_reply,
+)
+assert private_reply_input is not None
+assert private_reply_input.prompt == "帮我接着说"
+assert private_reply_input.quoted_text == "@镜子 这张图什么意思[图片]"
+
 recent_buffer = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
 for index in range(25):
     recent_buffer.add_message(1, index, f"用户{index}", f"标准名{index}", f"消息{index}", now_ts=index)
@@ -560,6 +588,9 @@ service.set_group_persona(1001, "default")
 service.set_group_trigger_prefix(1001, "/bot")
 service.set_group_allow_at(1001, False)
 service.set_group_allow_prefix(1001, True)
+service.set_chat_persona(3003, "default", chat_type="private")
+service.set_chat_trigger_prefix(3003, "/dm", chat_type="private")
+service.set_chat_allow_prefix(3003, True, chat_type="private")
 
 status = service.format_status(1001)
 assert "Model：gpt-alt" in status
@@ -568,6 +599,18 @@ assert "艾特触发：OFF" in status
 assert "临时上下文：触发前最多 20 条群消息" in status
 assert "记忆注入：ON" in status
 assert "工具调用：ON" in status
+
+private_settings = service.get_chat_settings(3003, chat_type="private")
+assert private_settings.enabled is False
+assert private_settings.allow_at is False
+private_status = service.format_status(3003, chat_type="private")
+assert "当前会话：私聊" in private_status
+assert "总开关：OFF" in private_status
+assert "前缀触发：ON (/dm)" in private_status
+assert "会话状态：未开启" in private_status
+assert "直聊触发：仅在会话开启后生效" in private_status
+assert "艾特触发：OFF（私聊不适用）" in private_status
+assert "临时上下文：私聊不额外注入群消息" in private_status
 
 current = service.format_current(1001)
 assert current.startswith("LLM 当前配置")
@@ -586,6 +629,14 @@ for tool_name in (
 ):
     assert tool_name in current
 
+private_current = service.format_current(3003, chat_type="private")
+assert "当前会话：私聊" in private_current
+assert "会话状态：未开启" in private_current
+assert "直聊触发：仅在会话开启后生效" in private_current
+assert "短期会话：已存 0 条 / 读取上限 256 条（默认 256）" in private_current
+assert "get_group_stats" not in private_current
+assert "get_rule_status" not in private_current
+
 memory_id = service.remember_group_memory(1001, "阿桃喜欢薄荷糖。")
 assert memory_id >= 1
 memories = service.list_group_memories(1001)
@@ -597,6 +648,27 @@ assert matched_memories[0]["content"] == "阿桃喜欢薄荷糖。"
 memory_status = service.format_memory_status(1001)
 assert "记忆注入：ON" in memory_status
 assert "已存条数：1" in memory_status
+
+private_memory_id = service.remember_memory(3003, "阿桃在私聊里更愿意长篇回复。", chat_type="private")
+assert private_memory_id >= 1
+private_memories = service.list_memories(3003, chat_type="private")
+assert private_memories[0]["content"] == "阿桃在私聊里更愿意长篇回复。"
+assert "当前私聊记忆" in service.format_memories(3003, chat_type="private")
+private_memory_status = service.format_memory_status(3003, chat_type="private")
+assert "当前会话：私聊" in private_memory_status
+assert "已存条数：1" in private_memory_status
+
+private_memory_matches = service.store.search_memories(
+    service.build_chat_scope_key(3003, chat_type="private"),
+    user_id=3003,
+    query="私聊时你会怎么回复？",
+    limit=3,
+)
+assert private_memory_matches
+assert private_memory_matches[0]["content"] == "阿桃在私聊里更愿意长篇回复。"
+service.start_private_session(3003)
+assert service.get_chat_settings(3003, chat_type="private").enabled is True
+assert "会话状态：进行中" in service.format_status(3003, chat_type="private")
 
 service.set_group_memory_enabled(1001, False)
 memory_status_off = service.format_memory_status(1001)
@@ -635,6 +707,9 @@ assert "当前星期：" in StubProviderClient.last_request.system_prompt
 assert "当前提问者身份：" in StubProviderClient.last_request.system_prompt
 assert "- QQ：2002" in StubProviderClient.last_request.system_prompt
 assert "- 标准身份：镜子" in StubProviderClient.last_request.system_prompt
+assert "当前已知参与者：" in StubProviderClient.last_request.system_prompt
+assert "- 镜子（QQ 2002，当前显示名：测试用户）" in StubProviderClient.last_request.system_prompt
+assert "- 甲（QQ u1，未登记）" in StubProviderClient.last_request.system_prompt
 assert "常见别名：镜千翎、哈基镜" in StubProviderClient.last_request.system_prompt
 assert "哈基镜 通常指 镜子" in StubProviderClient.last_request.system_prompt
 assert "不要和王者荣耀的镜混淆" in StubProviderClient.last_request.system_prompt
@@ -673,7 +748,7 @@ try:
             quoted_sender_name="镜子",
             quoted_user_id="2002",
         )
-    )
+)
 finally:
     llm_runtime_module.build_provider_client = original_builder
 
@@ -684,9 +759,94 @@ assert "当前用户消息：" in StubProviderClient.last_request.messages[-1].c
 assert "帮我看看" in StubProviderClient.last_request.messages[-1].content
 assert StubProviderClient.last_request.messages[-1].image_urls == ["https://example.test/reply-cat.png"]
 
+service.store.append_conversation_message(
+    1003,
+    "2002",
+    "user",
+    "我觉得 4s 今天说得对。",
+    sender_name="镜千翎",
+    canonical_name="镜子",
+)
+service.store.append_conversation_message(1003, None, "assistant", "你说的是哪句？")
+service.store.append_conversation_message(
+    1003,
+    "4004",
+    "user",
+    "不是我刚才说的，是镜子先提的。",
+    sender_name="Туманность",
+    canonical_name="4s",
+)
+llm_runtime_module.build_provider_client = lambda provider: StubProviderClient()
+try:
+    multi_user_result = asyncio.run(
+        service.generate_reply(
+            group_id=1003,
+            user_id=2002,
+            sender_name="镜千翎",
+            prompt="你现在要分清刚才是谁说的。",
+            recent_messages=[],
+        )
+    )
+finally:
+    llm_runtime_module.build_provider_client = original_builder
+
+assert multi_user_result["reply"] == "stub::gpt-test::你现在要分清刚才是谁说的。"
+assert "当前已知参与者：" in StubProviderClient.last_request.system_prompt
+assert "- 镜子（QQ 2002，当前显示名：镜千翎）" in StubProviderClient.last_request.system_prompt
+assert "- 4s（QQ 4004，当前显示名：Туманность）" in StubProviderClient.last_request.system_prompt
+assert StubProviderClient.last_request.messages[0].content.startswith("历史会话消息")
+assert "发言者：镜子（QQ 2002，当前显示名：镜千翎）" in StubProviderClient.last_request.messages[0].content
+assert "内容：我觉得 4s 今天说得对。" in StubProviderClient.last_request.messages[0].content
+assert StubProviderClient.last_request.messages[2].content.startswith("历史会话消息")
+assert "发言者：4s（QQ 4004，当前显示名：Туманность）" in StubProviderClient.last_request.messages[2].content
+assert "内容：不是我刚才说的，是镜子先提的。" in StubProviderClient.last_request.messages[2].content
+
+private_scope_key = service.build_chat_scope_key(3003, chat_type="private")
+for index in range(50):
+    service.store.append_conversation_message(
+        private_scope_key,
+        "3003" if index % 2 == 0 else None,
+        "user" if index % 2 == 0 else "assistant",
+        f"私聊历史{index}",
+        sender_name="阿桃" if index % 2 == 0 else "",
+    )
+
+llm_runtime_module.build_provider_client = lambda provider: StubProviderClient()
+try:
+    private_result = asyncio.run(
+        service.generate_private_reply(
+            user_id=3003,
+            sender_name="阿桃",
+            prompt="私聊里继续我们刚才的话题",
+        )
+    )
+finally:
+    llm_runtime_module.build_provider_client = original_builder
+
+assert private_result["reply"] == "stub::gpt-test::私聊里继续我们刚才的话题"
+assert "当前会话类型：私聊" in StubProviderClient.last_request.system_prompt
+assert "当前私聊对象 QQ：3003" in StubProviderClient.last_request.system_prompt
+assert "当前处于一对一私聊场景" in StubProviderClient.last_request.system_prompt
+assert "阿桃在私聊里更愿意长篇回复。" in StubProviderClient.last_request.system_prompt
+assert len(StubProviderClient.last_request.messages) == 51
+assert StubProviderClient.last_request.messages[0].content.startswith("历史会话消息")
+assert "发言者：阿桃（QQ 3003，未登记）" in StubProviderClient.last_request.messages[0].content
+assert "内容：私聊历史0" in StubProviderClient.last_request.messages[0].content
+assert StubProviderClient.last_request.messages[-1].content == "私聊里继续我们刚才的话题"
+assert StubProviderClient.last_request.messages[-1].image_urls == []
+assert service.store.count_conversation_messages(private_scope_key) == 52
+private_deleted_context = service.end_private_session(3003)
+assert private_deleted_context == 52
+assert service.get_chat_settings(3003, chat_type="private").enabled is False
+assert service.store.list_recent_conversation_messages(private_scope_key, 100) == []
+assert "会话状态：未开启" in service.format_status(3003, chat_type="private")
+
 history = service.store.list_recent_conversation_messages(1001, 10)
 assert history[-2]["role"] == "user"
 assert history[-2]["content"] == "哈基镜是区吗？"
+assert history[-2]["user_id"] == "2002"
+assert history[-2]["sender_name"] == "测试用户"
+assert history[-2]["canonical_name"] == "镜子"
 assert history[-1]["role"] == "assistant"
 assert history[-1]["content"] == "stub::gpt-alt::哈基镜是区吗？"
 assert "短期会话：已存 2 条" in service.format_current(1001)
@@ -747,6 +907,32 @@ assert "当前群模型配置：" in tool_current_model
 assert "- Provider：openai-main" in tool_current_model
 assert "- Model：gpt-alt" in tool_current_model
 assert "- Persona：default" in tool_current_model
+
+private_context = llm_runtime_module.ToolExecutionContext(
+    group_id=3003,
+    user_id=3003,
+    sender_name="阿桃",
+    provider_id="openai-main",
+    model="gpt-test",
+    chat_scope=private_scope_key,
+    chat_type="private",
+)
+service_recent_messages.add_message(private_scope_key, "3003", "阿桃", "阿桃", "/dm 继续我们刚才的话题")
+
+tool_private_memories = asyncio.run(service._tool_list_memories({}, private_context))
+assert "当前私聊记忆：" in tool_private_memories
+assert "阿桃在私聊里更愿意长篇回复。" in tool_private_memories
+tool_private_recent = asyncio.run(
+    service._tool_search_recent_messages({"query": "刚才", "limit": 3}, private_context)
+)
+assert "最近私聊消息检索：刚才" in tool_private_recent
+tool_private_status = asyncio.run(service._tool_get_llm_status({}, private_context))
+assert "当前会话：私聊" in tool_private_status
+tool_private_model = asyncio.run(service._tool_get_current_model({}, private_context))
+assert "当前私聊模型配置：" in tool_private_model
+assert "艾特触发：OFF（私聊不适用）" in tool_private_model
+assert asyncio.run(service._tool_get_group_stats({}, private_context)) == "当前私聊没有群消息统计。"
+assert asyncio.run(service._tool_get_rule_status({}, private_context)) == "当前私聊没有群规则开关。"
 
 StubToolCallingProviderClient.requests = []
 llm_runtime_module.build_provider_client = lambda provider: StubToolCallingProviderClient()

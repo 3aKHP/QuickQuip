@@ -94,3 +94,53 @@ def extract_llm_prompt(
     if extracted is None:
         return None
     return extracted.prompt
+
+
+def extract_private_llm_input(
+    message,
+    bot_self_id: int | str,
+    settings,
+    identity_index: IdentityIndex | None = None,
+    *,
+    reply=None,
+) -> ExtractedLLMInput | None:
+    extracted = extract_llm_input(
+        message,
+        bot_self_id,
+        settings,
+        identity_index=identity_index,
+        reply=reply,
+        is_to_me=False,
+    )
+    if extracted is not None:
+        return extracted
+
+    rendered = render_message_for_llm(
+        message,
+        bot_self_id=bot_self_id,
+        identity_index=identity_index,
+    )
+    rendered_reply = render_reply_for_llm(
+        reply,
+        bot_self_id=bot_self_id,
+        identity_index=identity_index,
+        include_image_placeholder=True,
+    )
+
+    prompt = rendered.text.strip()
+    quoted_text = "" if rendered_reply is None else rendered_reply.text
+    quoted_image_urls = [] if rendered_reply is None else rendered_reply.image_urls
+    quoted_sender_name = "" if rendered_reply is None else rendered_reply.sender_name
+    quoted_user_id = "" if rendered_reply is None else rendered_reply.user_id
+
+    if not prompt and not rendered.image_urls and not quoted_text.strip() and not quoted_image_urls:
+        return None
+
+    return ExtractedLLMInput(
+        prompt=prompt,
+        image_urls=rendered.image_urls,
+        quoted_text=quoted_text,
+        quoted_image_urls=quoted_image_urls,
+        quoted_sender_name=quoted_sender_name,
+        quoted_user_id=quoted_user_id,
+    )

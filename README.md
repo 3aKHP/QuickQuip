@@ -145,6 +145,14 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 工具调用仍然只发生在显式触发的 LLM 对话内部，不会扩展到普通规则消息流。
 
+当前版本还支持私聊 LLM：
+
+- 私聊默认不会自动进入 LLM，需要先发送 `/start_sesssion` 开启会话；`/end_session` 用于结束当前会话
+- 会话开启后，普通文本、图片和引用回复都会进入 LLM；已注册的斜杠命令仍然优先走命令处理
+- 私聊沿用当前可用的人格列表，但会在提示词里自动收敛成更适合一对一聊天的表达方式
+- 私聊单会话的默认上下文上限为 256 条，适合连续对话
+- 私聊可继续使用 `/llm status`、`/llm current`、`/llm persona use <id>`、`/llm trigger prefix <value>`、`/llm context_limit <n>`、`/llm clear_context`、`/search`、`/remember`、`/memories`、`/forget`、`/forget_all`
+
 ### 🖼️ 固定贴吧随机搬运
 
 支持为一个固定贴吧维护本地帖子池，并在群里随机抽取一条帖子发送。
@@ -432,6 +440,7 @@ plugins/tz_tracker.py                    ← NoneBot 插件入口兼容层
 quickquip/adapters/nonebot/
   ├─ lifecycle.py                        ← 启动、关停、定时保存
   ├─ group_messages.py                   ← 群消息入口
+  ├─ private_messages.py                 ← 私聊消息入口
   └─ commands.py                         ← /llm /stats /tieba 等命令注册
   │
   ▼

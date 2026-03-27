@@ -6,6 +6,33 @@ from zoneinfo import ZoneInfo
 from quickquip.llm.tools import LLMConversationMessage, LLMToolSpec
 
 
+def format_participant_label(
+    *,
+    user_id: str,
+    sender_name: str = "",
+    canonical_name: str = "",
+    include_unregistered_note: bool = True,
+) -> str:
+    normalized_user_id = user_id.strip()
+    normalized_sender_name = sender_name.strip()
+    normalized_canonical_name = canonical_name.strip()
+    if normalized_canonical_name and normalized_sender_name and normalized_canonical_name != normalized_sender_name:
+        return f"{normalized_canonical_name}（QQ {normalized_user_id}，当前显示名：{normalized_sender_name}）"
+    if normalized_canonical_name:
+        return f"{normalized_canonical_name}（QQ {normalized_user_id}）"
+    if normalized_sender_name and normalized_user_id and normalized_sender_name != normalized_user_id:
+        if include_unregistered_note:
+            return f"{normalized_sender_name}（QQ {normalized_user_id}，未登记）"
+        return f"{normalized_sender_name}（QQ {normalized_user_id}）"
+    if normalized_sender_name:
+        return normalized_sender_name
+    if normalized_user_id:
+        if include_unregistered_note:
+            return f"QQ {normalized_user_id}（未登记）"
+        return f"QQ {normalized_user_id}"
+    return "未知用户"
+
+
 def build_system_prompt(
     *,
     persona,
@@ -20,6 +47,8 @@ def build_system_prompt(
     beijing_timezone: str,
     search_tool_name: str,
     get_search_backend_name,
+    chat_type: str = "group",
+    participants: list[dict[str, str]] | None = None,
     provider_style_overrides: str = "",
 ) -> str:
     now_cst = datetime.now(ZoneInfo(beijing_timezone))
@@ -32,10 +61,20 @@ def build_system_prompt(
     if provider_style_overrides.strip():
         lines.append(provider_style_overrides.strip())
 
+    lines.append("认人规则：")
+    lines.append("- 不同 QQ 号默认视为不同的人，不要把两个人合并成同一发言者。")
+    lines.append("- 优先按 QQ 号识别身份，其次再参考当前显示名、标准身份和别名。")
+    lines.append("- 当上下文里已经标出“标准身份（QQ …）”时，后续继续沿用，不要自行改口或张冠李戴。")
+
     lines.append("当前元数据：")
     lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")
     lines.append(f"- 当前星期：{weekday_names[now_cst.weekday()]}")
-    lines.append(f"当前群号：{group_id}")
+    if chat_type == "private":
+        lines.append("- 当前会话类型：私聊")
+        lines.append(f"- 当前私聊对象 QQ：{group_id}")
+    else:
+        lines.append("- 当前会话类型：群聊")
+        lines.append(f"- 当前群号：{group_id}")
     lines.append(f"当前提问者昵称：{sender_name}")
     lines.append("当前提问者身份：")
     lines.append(f"- QQ：{identity.user_id}")
@@ -48,8 +87,25 @@ def build_system_prompt(
             lines.append(f"- 备注：{identity.note}")
     else:
         lines.append("- 标准身份：未登记")
+    if chat_type == "private":
+        lines.append("当前处于一对一私聊场景，可以比群聊更自然、细致，但不要失去当前人格的底色。")
+    if participants:
+        participant_lines = ["当前已知参与者："]
+        for item in participants[:8]:
+            label = format_participant_label(
+                user_id=str(item.get("user_id", "")),
+                sender_name=str(item.get("sender_name", "")),
+                canonical_name=str(item.get("canonical_name", "")),
+                include_unregistered_note=True,
+            )
+            participant_lines.append(f"- {label}")
+        lines.append("\n".join(participant_lines))
+
     if memories:
-        lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
+        if chat_type == "private":
+            lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
+        else:
+            lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
         for index, memory in enumerate(memories, 1):
             lines.append(f"{index}. {memory['content']}")
 
@@ -101,28 +157,45 @@ def normalize_history(
     *,
     recent_messages: list[dict[str, str]] | None = None,
     max_trigger_context_messages: int,
+    chat_type: str = "group",
 ) -> list[LLMConversationMessage]:
     normalized: list[LLMConversationMessage] = []
     if recent_messages:
-        lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
+        if chat_type == "private":
+            lines = ["以下是本次触发前，当前私聊里最近的消息，仅供理解上下文："]
+        else:
+            lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
         for index, item in enumerate(recent_messages[-max_trigger_context_messages:], 1):
-            sender_name = item["sender_name"].strip() or item["user_id"]
-            canonical_name = item.get("canonical_name", "").strip()
-            user_id = item["user_id"]
-            if canonical_name and canonical_name != sender_name:
-                speaker = f"{canonical_name}（QQ {user_id}，当前显示名：{sender_name}）"
-            elif canonical_name:
-                speaker = f"{canonical_name}（QQ {user_id}）"
-            else:
-                speaker = f"{sender_name}（QQ {user_id}，未登记）"
+            speaker = format_participant_label(
+                user_id=item["user_id"],
+                sender_name=item.get("sender_name", ""),
+                canonical_name=item.get("canonical_name", ""),
+                include_unregistered_note=True,
+            )
             lines.append(f"{index}. {speaker}：{item['text']}")
         normalized.append(LLMConversationMessage(role="user", content="\n".join(lines)))
 
-    normalized.extend(
-        LLMConversationMessage(role=item["role"], content=item["content"])
-        for item in history
-        if item["role"] in {"user", "assistant"} and item["content"].strip()
-    )
+    for item in history:
+        if item["role"] not in {"user", "assistant"} or not item["content"].strip():
+            continue
+        if item["role"] == "assistant":
+            normalized.append(LLMConversationMessage(role="assistant", content=item["content"]))
+            continue
+        if item.get("user_id"):
+            speaker = format_participant_label(
+                user_id=item.get("user_id", ""),
+                sender_name=item.get("sender_name", ""),
+                canonical_name=item.get("canonical_name", ""),
+                include_unregistered_note=True,
+            )
+            normalized.append(
+                LLMConversationMessage(
+                    role="user",
+                    content=f"历史会话消息\n- 发言者：{speaker}\n- 内容：{item['content']}",
+                )
+            )
+            continue
+        normalized.append(LLMConversationMessage(role="user", content=item["content"]))
     return normalized
 
 
@@ -140,15 +213,12 @@ def merge_image_urls(*collections: list[str]) -> list[str]:
 
 
 def format_quoted_speaker(sender_name: str, user_id: str) -> str:
-    normalized_sender_name = sender_name.strip()
-    normalized_user_id = user_id.strip()
-    if normalized_sender_name and normalized_user_id and normalized_sender_name != normalized_user_id:
-        return f"{normalized_sender_name}（QQ {normalized_user_id}）"
-    if normalized_sender_name:
-        return normalized_sender_name
-    if normalized_user_id:
-        return f"QQ {normalized_user_id}"
-    return "未知用户"
+    return format_participant_label(
+        user_id=user_id,
+        sender_name=sender_name,
+        canonical_name="",
+        include_unregistered_note=False,
+    )
 
 
 def build_user_message_content(
@@ -187,11 +257,13 @@ def build_messages(
     history: list[dict[str, str]],
     recent_messages: list[dict[str, str]] | None,
     max_trigger_context_messages: int,
+    chat_type: str = "group",
 ) -> list[LLMConversationMessage]:
     messages = normalize_history(
         history,
         recent_messages=recent_messages,
         max_trigger_context_messages=max_trigger_context_messages,
+        chat_type=chat_type,
     )
     messages.append(
         LLMConversationMessage(

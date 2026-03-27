@@ -87,6 +87,8 @@ class LLMStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id TEXT NOT NULL,
                     user_id TEXT,
+                    sender_name TEXT,
+                    canonical_name TEXT,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
                     created_at TEXT NOT NULL
@@ -120,6 +122,14 @@ class LLMStore:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN memory_enabled INTEGER")
             if "history_limit" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN history_limit INTEGER")
+            conversation_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(conversation_messages)").fetchall()
+            }
+            if "sender_name" not in conversation_columns:
+                conn.execute("ALTER TABLE conversation_messages ADD COLUMN sender_name TEXT")
+            if "canonical_name" not in conversation_columns:
+                conn.execute("ALTER TABLE conversation_messages ADD COLUMN canonical_name TEXT")
 
     def get_group_settings(self, group_id: int | str) -> GroupSettingsOverride:
         with self._connect() as conn:
@@ -191,14 +201,25 @@ class LLMStore:
         user_id: int | str | None,
         role: str,
         content: str,
+        *,
+        sender_name: str = "",
+        canonical_name: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO conversation_messages (group_id, user_id, role, content, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO conversation_messages (group_id, user_id, sender_name, canonical_name, role, content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (str(group_id), None if user_id is None else str(user_id), role, content, _utc_now()),
+                (
+                    str(group_id),
+                    None if user_id is None else str(user_id),
+                    sender_name.strip() or None,
+                    canonical_name.strip() or None,
+                    role,
+                    content,
+                    _utc_now(),
+                ),
             )
 
     def list_recent_conversation_messages(
@@ -209,7 +230,7 @@ class LLMStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT role, content
+                SELECT user_id, sender_name, canonical_name, role, content
                 FROM conversation_messages
                 WHERE group_id = ?
                 ORDER BY id DESC
@@ -218,7 +239,13 @@ class LLMStore:
                 (str(group_id), int(limit)),
             ).fetchall()
         return [
-            {"role": row["role"], "content": row["content"]}
+            {
+                "user_id": "" if row["user_id"] is None else str(row["user_id"]),
+                "sender_name": "" if row["sender_name"] is None else str(row["sender_name"]),
+                "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
+                "role": row["role"],
+                "content": row["content"],
+            }
             for row in reversed(rows)
         ]
 

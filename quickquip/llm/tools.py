@@ -44,3 +44,5 @@ class ToolExecutionContext:
     sender_name: str
     provider_id: str
     model: str
+    chat_scope: str | None = None
+    chat_type: str = "group"

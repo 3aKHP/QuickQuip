@@ -13,10 +13,12 @@ except ModuleNotFoundError:
 
 from quickquip.adapters.nonebot.commands import register_commands
 from quickquip.adapters.nonebot.group_messages import register_message_matcher
+from quickquip.adapters.nonebot.private_messages import register_private_message_matcher
 from quickquip.adapters.nonebot.lifecycle import register_lifecycle
 
 
 matcher = None
+private_matcher = None
 
 if nonebot is not None:
     try:
@@ -31,6 +33,7 @@ if nonebot is not None:
 
 if on_message is not None:
     matcher = register_message_matcher(on_message, Message, MessageSegment)
+    private_matcher = register_private_message_matcher(on_message)
 
 if on_command is not None:
     register_commands(on_command, Message, MessageSegment)

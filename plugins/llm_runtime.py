@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 import re
 import asyncio
@@ -40,13 +41,16 @@ VOCAB_PATH = Path("dev/llm_about/vocab.yaml")
 IDENTITY_PATH = Path("dev/llm_about/identities.yaml")
 LLM_RULE_NAME = "llm_chat"
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
-MAX_STORED_CONVERSATION_MESSAGES = 20
+MAX_GROUP_STORED_CONVERSATION_MESSAGES = 20
+MAX_PRIVATE_STORED_CONVERSATION_MESSAGES = 256
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
 MAX_STORED_MEMORY_ITEMS = 200
 MAX_QUOTED_MESSAGE_CHARS = 1200
 SEARCH_TOOL_NAME = "search_web"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
+DEFAULT_PRIVATE_HISTORY_LIMIT = 256
+PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
 DEFAULT_ENABLED_TOOLS = [
     "get_identity",
     "list_memories",
@@ -297,13 +301,13 @@ class LLMService:
 
     async def _tool_list_memories(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         keyword = str(arguments.get("keyword", "")).strip() or None
-        items = self.list_group_memories(context.group_id, keyword=keyword)
+        items = self.list_memories(context.group_id, keyword=keyword, chat_type=context.chat_type)
         if not items:
             if keyword:
-                return f"当前群没有包含“{keyword}”的已存记忆。"
-            return "当前群没有已存记忆。"
+                return f"{self._scope_subject(context.chat_type)}没有包含“{keyword}”的已存记忆。"
+            return f"{self._scope_subject(context.chat_type)}没有已存记忆。"
 
-        lines = ["当前群记忆："]
+        lines = [f"{self._memory_label(context.chat_type)}："]
         for item in items[:10]:
             lines.append(f"- #{item['id']} {item['content']}")
         return "\n".join(lines)
@@ -320,6 +324,8 @@ class LLMService:
         arguments: dict[str, object],
         context: ToolExecutionContext,
     ) -> str:
+        if context.chat_type == "private":
+            return "当前私聊没有群消息统计。"
         if self.stats_tracker is None:
             return "当前运行时没有接入群消息统计。"
 
@@ -348,6 +354,8 @@ class LLMService:
         arguments: dict[str, object],
         context: ToolExecutionContext,
     ) -> str:
+        if context.chat_type == "private":
+            return "当前私聊没有群规则开关。"
         if self.rule_switch is None:
             return "当前运行时没有接入群规则开关状态。"
 
@@ -386,8 +394,13 @@ class LLMService:
         query = str(arguments.get("query", "")).strip()
         limit = int(arguments.get("limit", 5) or 5)
         limit = max(1, min(limit, MAX_TRIGGER_CONTEXT_MESSAGES))
-        recent_items = self.recent_message_buffer.list_recent(context.group_id, limit=MAX_TRIGGER_CONTEXT_MESSAGES)
+        recent_items = self.recent_message_buffer.list_recent(
+            self._context_scope_key(context),
+            limit=MAX_TRIGGER_CONTEXT_MESSAGES,
+        )
         if not recent_items:
+            if context.chat_type == "private":
+                return "当前私聊最近消息缓冲区为空。"
             return "当前群最近消息缓冲区为空。"
 
         filtered_items = recent_items
@@ -408,7 +421,10 @@ class LLMService:
             return f"最近消息里没有匹配“{query}”的内容。"
 
         selected_items = list(reversed(filtered_items[-limit:]))
-        header = f"最近消息检索：{query}" if query else "最近消息："
+        if context.chat_type == "private":
+            header = f"最近私聊消息检索：{query}" if query else "最近私聊消息："
+        else:
+            header = f"最近消息检索：{query}" if query else "最近消息："
         lines = [header]
         for index, item in enumerate(selected_items, 1):
             sender_name = item["sender_name"].strip() or item["user_id"]
@@ -430,8 +446,8 @@ class LLMService:
     ) -> str:
         detail = str(arguments.get("detail", "status")).strip() or "status"
         if detail == "current":
-            return self.format_current(context.group_id)
-        return self.format_status(context.group_id)
+            return self.format_current(context.group_id, chat_type=context.chat_type)
+        return self.format_status(context.group_id, chat_type=context.chat_type)
 
     async def _tool_get_current_model(
         self,
@@ -439,13 +455,16 @@ class LLMService:
         context: ToolExecutionContext,
     ) -> str:
         _ = arguments
-        settings = self.get_group_settings(context.group_id)
-        lines = ["当前群模型配置："]
+        settings = self.get_chat_settings(context.group_id, chat_type=context.chat_type)
+        lines = [f"{self._model_label(context.chat_type)}："]
         lines.append(f"- Provider：{settings.provider_id}")
         lines.append(f"- Model：{settings.model}")
         lines.append(f"- Persona：{settings.persona_id}")
         lines.append(f"- 前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
-        lines.append(f"- 艾特触发：{'ON' if settings.allow_at else 'OFF'}")
+        if context.chat_type == "private":
+            lines.append("- 艾特触发：OFF（私聊不适用）")
+        else:
+            lines.append(f"- 艾特触发：{'ON' if settings.allow_at else 'OFF'}")
         return "\n".join(lines)
 
     def reload_config(self) -> LLMConfig:
@@ -455,15 +474,72 @@ class LLMService:
         self._mcp_dirty = True
         return self.config
 
-    def get_group_settings(self, group_id: int | str) -> ResolvedGroupSettings:
-        return resolve_group_settings(self.store, self.config, group_id)
+    def build_chat_scope_key(self, chat_id: int | str, chat_type: str = "group") -> str:
+        if chat_type == "private":
+            return f"private:{chat_id}"
+        return str(chat_id)
 
-    def _get_enabled_tool_names(self) -> list[str]:
+    def _scope_label(self, chat_type: str) -> str:
+        return "私聊" if chat_type == "private" else "群聊"
+
+    def _scope_subject(self, chat_type: str) -> str:
+        return "当前私聊" if chat_type == "private" else "本群"
+
+    def _memory_label(self, chat_type: str) -> str:
+        return "当前私聊记忆" if chat_type == "private" else "当前群记忆"
+
+    def _model_label(self, chat_type: str) -> str:
+        return "当前私聊模型配置" if chat_type == "private" else "当前群模型配置"
+
+    def _default_history_limit(self, chat_type: str) -> int:
+        if chat_type == "private":
+            return max(self.config.runtime.history_limit, DEFAULT_PRIVATE_HISTORY_LIMIT)
+        return self.config.runtime.history_limit
+
+    def get_default_history_limit(self, chat_type: str = "group") -> int:
+        return self._default_history_limit(chat_type)
+
+    def _max_stored_conversation_messages(self, chat_type: str) -> int:
+        if chat_type == "private":
+            return MAX_PRIVATE_STORED_CONVERSATION_MESSAGES
+        return MAX_GROUP_STORED_CONVERSATION_MESSAGES
+
+    def _history_retention_limit(self, chat_type: str) -> int:
+        if chat_type == "private":
+            return max(self.config.runtime.history_max_messages_per_group, MAX_PRIVATE_STORED_CONVERSATION_MESSAGES)
+        return min(self.config.runtime.history_max_messages_per_group, MAX_GROUP_STORED_CONVERSATION_MESSAGES)
+
+    def _context_scope_key(self, context: ToolExecutionContext) -> str:
+        if context.chat_scope:
+            return context.chat_scope
+        return self.build_chat_scope_key(context.group_id, context.chat_type)
+
+    def get_chat_settings(self, chat_id: int | str, chat_type: str = "group") -> ResolvedGroupSettings:
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        overrides = self.store.get_group_settings(scope_key)
+        settings = resolve_group_settings(self.store, self.config, scope_key)
+        if chat_type == "private":
+            settings = replace(
+                settings,
+                enabled=False if overrides.enabled is None else settings.enabled,
+                allow_at=False,
+            )
+        return settings
+
+    def get_group_settings(self, group_id: int | str) -> ResolvedGroupSettings:
+        return self.get_chat_settings(group_id, chat_type="group")
+
+    def _update_chat_settings(self, chat_id: int | str, chat_type: str = "group", **fields: object) -> None:
+        self.store.update_group_settings(self.build_chat_scope_key(chat_id, chat_type), **fields)
+
+    def _get_enabled_tool_names(self, chat_type: str = "group") -> list[str]:
         names = self.config.tools.enabled or [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
+        if chat_type == "private":
+            names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
         return [name for name in names if self.tool_registry.has_tool(name)]
 
-    def _get_enabled_tool_specs(self) -> list[LLMToolSpec]:
-        return self.tool_registry.list_specs(self._get_enabled_tool_names())
+    def _get_enabled_tool_specs(self, chat_type: str = "group") -> list[LLMToolSpec]:
+        return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type))
 
     def _get_mcp_statuses(self) -> list[MCPServerStatus]:
         return self.mcp_manager.get_statuses()
@@ -517,13 +593,14 @@ class LLMService:
     def list_personas(self) -> list[PersonaConfig]:
         return list(self.config.personas.values())
 
-    def format_status(self, group_id: int | str) -> str:
-        settings = self.get_group_settings(group_id)
+    def format_status(self, group_id: int | str, chat_type: str = "group") -> str:
+        settings = self.get_chat_settings(group_id, chat_type=chat_type)
         lines = ["LLM 状态"]
         if self.config.load_error:
             lines.append(f"配置：{self.config.load_error}")
             return "\n".join(lines)
 
+        lines.append(f"当前会话：{self._scope_label(chat_type)}")
         lines.append(f"总开关：{'ON' if settings.enabled else 'OFF'}")
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
         lines.append(f"工具调用：{'ON' if self.config.runtime.tool_calling_enabled else 'OFF'}")
@@ -532,92 +609,159 @@ class LLMService:
         lines.append(f"Model：{settings.model}")
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
-        lines.append(f"艾特触发：{'ON' if settings.allow_at else 'OFF'}")
-        lines.append(f"临时上下文：触发前最多 {MAX_TRIGGER_CONTEXT_MESSAGES} 条群消息")
+        if chat_type == "private":
+            lines.append(f"会话状态：{'进行中' if settings.enabled else '未开启'}")
+            lines.append("直聊触发：仅在会话开启后生效")
+            lines.append("艾特触发：OFF（私聊不适用）")
+            lines.append("临时上下文：私聊不额外注入群消息")
+        else:
+            lines.append(f"艾特触发：{'ON' if settings.allow_at else 'OFF'}")
+            lines.append(f"临时上下文：触发前最多 {MAX_TRIGGER_CONTEXT_MESSAGES} 条群消息")
         return "\n".join(lines)
 
-    def format_current(self, group_id: int | str) -> str:
-        settings = self.get_group_settings(group_id)
+    def format_current(self, group_id: int | str, chat_type: str = "group") -> str:
+        settings = self.get_chat_settings(group_id, chat_type=chat_type)
         lines = ["LLM 当前配置"]
         if self.config.load_error:
             lines.append(f"配置：{self.config.load_error}")
             return "\n".join(lines)
 
+        scope_key = self.build_chat_scope_key(group_id, chat_type)
+        default_history_limit = self._default_history_limit(chat_type)
+        effective_history_limit = settings.history_limit if settings.history_limit is not None else default_history_limit
+        history_limit_note = (
+            f"（会话覆盖，默认 {default_history_limit}）"
+            if settings.history_limit is not None
+            else f"（默认 {default_history_limit}）"
+        )
         lines.append(f"总开关：{'ON' if settings.enabled else 'OFF'}")
+        lines.append(f"当前会话：{self._scope_label(chat_type)}")
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
         lines.append(f"工具调用：{'ON' if self.config.runtime.tool_calling_enabled else 'OFF'}")
         lines.append(f"MCP：{self._summarize_mcp_status()}")
-        lines.append(f"工具列表：{', '.join(self._get_enabled_tool_names()) or '无'}")
+        lines.append(f"工具列表：{', '.join(self._get_enabled_tool_names(chat_type=chat_type)) or '无'}")
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
-        lines.append(f"艾特触发：{'ON' if settings.allow_at else 'OFF'}")
-        effective_history_limit = settings.history_limit if settings.history_limit is not None else self.config.runtime.history_limit
-        history_limit_note = f"（群覆盖，全局默认 {self.config.runtime.history_limit}）" if settings.history_limit is not None else "（全局默认）"
+        if chat_type == "private":
+            lines.append(f"会话状态：{'进行中' if settings.enabled else '未开启'}")
+            lines.append("直聊触发：仅在会话开启后生效")
+            lines.append("艾特触发：OFF（私聊不适用）")
+        else:
+            lines.append(f"艾特触发：{'ON' if settings.allow_at else 'OFF'}")
         lines.append(
-            f"短期会话：已存 {self.store.count_conversation_messages(group_id)} 条 / 读取上限 {effective_history_limit} 条{history_limit_note}"
+            f"短期会话：已存 {self.store.count_conversation_messages(scope_key)} 条 / 读取上限 {effective_history_limit} 条{history_limit_note}"
         )
         lines.append(
-            f"长期记忆：已存 {self.store.count_memories(group_id)} 条 / 上限 {MAX_STORED_MEMORY_ITEMS} 条"
+            f"长期记忆：已存 {self.store.count_memories(scope_key)} 条 / 上限 {MAX_STORED_MEMORY_ITEMS} 条"
         )
-        lines.append(f"临时上下文：仅触发当下向前最多 {MAX_TRIGGER_CONTEXT_MESSAGES} 条群消息")
+        if chat_type == "private":
+            lines.append("临时上下文：私聊不额外注入群消息")
+        else:
+            lines.append(f"临时上下文：仅触发当下向前最多 {MAX_TRIGGER_CONTEXT_MESSAGES} 条群消息")
         return "\n".join(lines)
 
+    def set_chat_enabled(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
+        self._update_chat_settings(chat_id, chat_type, enabled=int(enabled))
+
+    def start_private_session(self, user_id: int | str) -> None:
+        self.clear_context(user_id, chat_type="private")
+        self.set_chat_enabled(user_id, True, chat_type="private")
+
+    def end_private_session(self, user_id: int | str) -> int:
+        deleted = self.clear_context(user_id, chat_type="private")
+        self.set_chat_enabled(user_id, False, chat_type="private")
+        return deleted
+
     def set_group_enabled(self, group_id: int | str, enabled: bool) -> None:
-        self.store.update_group_settings(group_id, enabled=int(enabled))
+        self.set_chat_enabled(group_id, enabled, chat_type="group")
+
+    def set_chat_memory_enabled(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
+        self._update_chat_settings(chat_id, chat_type, memory_enabled=int(enabled))
 
     def set_group_memory_enabled(self, group_id: int | str, enabled: bool) -> None:
-        self.store.update_group_settings(group_id, memory_enabled=int(enabled))
+        self.set_chat_memory_enabled(group_id, enabled, chat_type="group")
+
+    def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
+        self._update_chat_settings(chat_id, chat_type, history_limit=limit)
 
     def set_group_history_limit(self, group_id: int | str, limit: int) -> None:
-        self.store.update_group_settings(group_id, history_limit=limit)
+        self.set_chat_history_limit(group_id, limit, chat_type="group")
+
+    def reset_chat_history_limit(self, chat_id: int | str, chat_type: str = "group") -> None:
+        self._update_chat_settings(chat_id, chat_type, history_limit=None)
 
     def reset_group_history_limit(self, group_id: int | str) -> None:
-        self.store.update_group_settings(group_id, history_limit=None)
+        self.reset_chat_history_limit(group_id, chat_type="group")
 
-    def set_group_model(self, group_id: int | str, provider_id: str, model: str) -> str:
+    def set_chat_model(self, chat_id: int | str, provider_id: str, model: str, chat_type: str = "group") -> str:
         provider = self.config.providers.get(provider_id)
         if provider is None:
             raise ValueError(f"未知 provider：{provider_id}")
         if model not in provider.models:
             raise ValueError(f"provider {provider_id} 未声明模型：{model}")
-        self.store.update_group_settings(group_id, provider_id=provider_id, model=model)
+        self._update_chat_settings(chat_id, chat_type, provider_id=provider_id, model=model)
         return model
 
-    def set_group_persona(self, group_id: int | str, persona_id: str) -> None:
+    def set_group_model(self, group_id: int | str, provider_id: str, model: str) -> str:
+        return self.set_chat_model(group_id, provider_id, model, chat_type="group")
+
+    def set_chat_persona(self, chat_id: int | str, persona_id: str, chat_type: str = "group") -> None:
         if persona_id not in self.config.personas:
             raise ValueError(f"未知 persona：{persona_id}")
-        self.store.update_group_settings(group_id, persona_id=persona_id)
+        self._update_chat_settings(chat_id, chat_type, persona_id=persona_id)
 
-    def set_group_trigger_prefix(self, group_id: int | str, prefix: str) -> None:
+    def set_group_persona(self, group_id: int | str, persona_id: str) -> None:
+        self.set_chat_persona(group_id, persona_id, chat_type="group")
+
+    def set_chat_trigger_prefix(self, chat_id: int | str, prefix: str, chat_type: str = "group") -> None:
         prefix = prefix.strip()
         if not prefix:
             raise ValueError("触发前缀不能为空")
-        self.store.update_group_settings(group_id, trigger_prefix=prefix)
+        self._update_chat_settings(chat_id, chat_type, trigger_prefix=prefix)
+
+    def set_group_trigger_prefix(self, group_id: int | str, prefix: str) -> None:
+        self.set_chat_trigger_prefix(group_id, prefix, chat_type="group")
+
+    def set_chat_allow_prefix(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
+        self._update_chat_settings(chat_id, chat_type, allow_prefix=int(enabled))
 
     def set_group_allow_prefix(self, group_id: int | str, enabled: bool) -> None:
-        self.store.update_group_settings(group_id, allow_prefix=int(enabled))
+        self.set_chat_allow_prefix(group_id, enabled, chat_type="group")
 
     def set_group_allow_at(self, group_id: int | str, enabled: bool) -> None:
-        self.store.update_group_settings(group_id, allow_at=int(enabled))
+        self._update_chat_settings(group_id, "group", allow_at=int(enabled))
 
-    def remember_group_memory(self, group_id: int | str, content: str) -> int:
-        memory_id = self.store.add_memory(group_id, content.strip(), scope="group", source="manual")
+    def remember_memory(self, chat_id: int | str, content: str, chat_type: str = "group") -> int:
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        memory_id = self.store.add_memory(scope_key, content.strip(), scope="group", source="manual")
         self.store.prune_memories(
-            group_id,
+            scope_key,
             min(self.config.runtime.memory_max_items_per_group, MAX_STORED_MEMORY_ITEMS),
         )
         return memory_id
 
+    def remember_group_memory(self, group_id: int | str, content: str) -> int:
+        return self.remember_memory(group_id, content, chat_type="group")
+
+    def list_memories(self, chat_id: int | str, keyword: str | None = None, chat_type: str = "group") -> list[dict[str, object]]:
+        return self.store.list_memories(self.build_chat_scope_key(chat_id, chat_type), limit=10, keyword=keyword)
+
     def list_group_memories(self, group_id: int | str, keyword: str | None = None) -> list[dict[str, object]]:
-        return self.store.list_memories(group_id, limit=10, keyword=keyword)
+        return self.list_memories(group_id, keyword=keyword, chat_type="group")
+
+    def forget_memories(self, chat_id: int | str, keyword: str, chat_type: str = "group") -> int:
+        return self.store.delete_memories(self.build_chat_scope_key(chat_id, chat_type), keyword.strip())
 
     def forget_group_memories(self, group_id: int | str, keyword: str) -> int:
-        return self.store.delete_memories(group_id, keyword.strip())
+        return self.forget_memories(group_id, keyword, chat_type="group")
+
+    def clear_memories(self, chat_id: int | str, chat_type: str = "group") -> int:
+        return self.store.clear_memories(self.build_chat_scope_key(chat_id, chat_type))
 
     def clear_group_memories(self, group_id: int | str) -> int:
-        return self.store.clear_memories(group_id)
+        return self.clear_memories(group_id, chat_type="group")
 
     def format_providers(self) -> str:
         if self.config.load_error:
@@ -650,37 +794,43 @@ class LLMService:
             lines.append(f"- {persona.id}：{persona.display_name}")
         return "\n".join(lines)
 
-    def format_memories(self, group_id: int | str, keyword: str | None = None) -> str:
-        memories = self.list_group_memories(group_id, keyword=keyword)
+    def format_memories(self, group_id: int | str, keyword: str | None = None, chat_type: str = "group") -> str:
+        memories = self.list_memories(group_id, keyword=keyword, chat_type=chat_type)
         if not memories:
-            return "当前群没有已保存记忆"
-        lines = ["当前群记忆："]
+            return f"{self._scope_subject(chat_type)}没有已保存记忆"
+        lines = [f"{self._memory_label(chat_type)}："]
         for item in memories:
             lines.append(f"- #{item['id']} {item['content']}")
         return "\n".join(lines)
 
-    def format_memory_status(self, group_id: int | str) -> str:
-        settings = self.get_group_settings(group_id)
-        total = self.store.count_memories(group_id)
+    def format_memory_status(self, group_id: int | str, chat_type: str = "group") -> str:
+        settings = self.get_chat_settings(group_id, chat_type=chat_type)
+        total = self.store.count_memories(self.build_chat_scope_key(group_id, chat_type))
         lines = ["记忆状态"]
+        lines.append(f"当前会话：{self._scope_label(chat_type)}")
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
         lines.append(f"已存条数：{total}")
         lines.append(f"检索上限：{MAX_MEMORY_RETRIEVAL_ITEMS}")
         lines.append(f"存储上限：{MAX_STORED_MEMORY_ITEMS}")
         return "\n".join(lines)
 
+    def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
+        return self.store.clear_conversation_messages(self.build_chat_scope_key(group_id, chat_type))
+
     def clear_group_context(self, group_id: int | str) -> int:
-        return self.store.clear_conversation_messages(group_id)
+        return self.clear_context(group_id, chat_type="group")
 
     def _build_system_prompt(
         self,
         persona: PersonaConfig,
         group_id: int | str,
+        chat_type: str,
         user_id: int | str,
         sender_name: str,
         prompt: str,
         memories: list[dict[str, object]],
         tool_specs: list[LLMToolSpec],
+        participants: list[dict[str, str]] | None = None,
         provider_style_overrides: str = "",
     ) -> str:
         return build_system_prompt(
@@ -696,6 +846,8 @@ class LLMService:
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
             get_search_backend_name=get_search_backend_name,
+            chat_type=chat_type,
+            participants=participants,
             provider_style_overrides=provider_style_overrides,
         )
 
@@ -703,11 +855,13 @@ class LLMService:
         self,
         history: list[dict[str, str]],
         recent_messages: list[dict[str, str]] | None = None,
+        chat_type: str = "group",
     ) -> list[LLMConversationMessage]:
         return normalize_history(
             history,
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
+            chat_type=chat_type,
         )
 
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
@@ -741,6 +895,7 @@ class LLMService:
         image_urls: list[str],
         history: list[dict[str, str]],
         recent_messages: list[dict[str, str]] | None,
+        chat_type: str = "group",
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -748,7 +903,55 @@ class LLMService:
             history=history,
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
+            chat_type=chat_type,
         )
+
+    def _collect_known_participants(
+        self,
+        *,
+        user_id: int | str,
+        sender_name: str,
+        history: list[dict[str, str]],
+        recent_messages: list[dict[str, str]] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+    ) -> list[dict[str, str]]:
+        participants: list[dict[str, str]] = []
+        seen_user_ids: set[str] = set()
+
+        def _push(raw_user_id: int | str | None, raw_sender_name: str = "", raw_canonical_name: str = "") -> None:
+            user_key = str(raw_user_id or "").strip()
+            sender_value = raw_sender_name.strip()
+            canonical_value = raw_canonical_name.strip()
+            if not user_key and not sender_value:
+                return
+            dedupe_key = user_key or f"name:{sender_value}"
+            if dedupe_key in seen_user_ids:
+                return
+            seen_user_ids.add(dedupe_key)
+            if user_key:
+                identity = self.identities.resolve_user(user_key, sender_value)
+                if identity.is_registered:
+                    canonical_value = identity.canonical_name or canonical_value
+                    sender_value = sender_value or identity.sender_name or user_key
+            participants.append(
+                {
+                    "user_id": user_key,
+                    "sender_name": sender_value or user_key,
+                    "canonical_name": canonical_value,
+                }
+            )
+
+        _push(user_id, sender_name)
+        if quoted_sender_name or quoted_user_id:
+            _push(quoted_user_id, quoted_sender_name)
+        for item in recent_messages or []:
+            _push(item.get("user_id", ""), item.get("sender_name", ""), item.get("canonical_name", ""))
+        for item in history:
+            if item.get("role") != "user":
+                continue
+            _push(item.get("user_id", ""), item.get("sender_name", ""), item.get("canonical_name", ""))
+        return participants
 
     async def _run_tool_call_loop(
         self,
@@ -771,10 +974,11 @@ class LLMService:
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
         )
 
-    async def generate_reply(
+    async def _generate_reply_for_scope(
         self,
         *,
-        group_id: int | str,
+        chat_id: int | str,
+        chat_type: str,
         user_id: int | str,
         sender_name: str,
         prompt: str,
@@ -806,10 +1010,11 @@ class LLMService:
                 "rule_name": LLM_RULE_NAME,
             }
 
-        settings = self.get_group_settings(group_id)
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
         if not settings.enabled:
             return {
-                "reply": "本群 LLM 已关闭。",
+                "reply": f"{self._scope_subject(chat_type)} LLM 已关闭。",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
             }
@@ -843,33 +1048,44 @@ class LLMService:
             quoted_image_urls=normalized_quoted_image_urls,
         )[: self.config.runtime.max_prompt_chars]
         effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
+        default_history_limit = self._default_history_limit(chat_type)
         history = self.store.list_recent_conversation_messages(
-            group_id,
+            scope_key,
             min(
-                settings.history_limit if settings.history_limit is not None else self.config.runtime.history_limit,
-                MAX_STORED_CONVERSATION_MESSAGES,
+                settings.history_limit if settings.history_limit is not None else default_history_limit,
+                self._max_stored_conversation_messages(chat_type),
             ),
+        )
+        participants = self._collect_known_participants(
+            user_id=user_id,
+            sender_name=sender_name,
+            history=history,
+            recent_messages=recent_messages,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
         )
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
         memories: list[dict[str, object]] = []
         if settings.memory_enabled:
             memories = self.store.search_memories(
-                group_id,
+                scope_key,
                 user_id=user_id,
                 query=analysis_prompt or trimmed_prompt,
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
-        tool_specs = self._get_enabled_tool_specs() if self.config.runtime.tool_calling_enabled else []
+        tool_specs = self._get_enabled_tool_specs(chat_type=chat_type) if self.config.runtime.tool_calling_enabled else []
         system_prompt = self._build_system_prompt(
             persona,
-            group_id,
+            chat_id,
+            chat_type,
             user_id,
             sender_name,
             analysis_prompt or trimmed_prompt,
             memories,
             tool_specs,
+            participants=participants,
             provider_style_overrides=provider.style_overrides,
         )
         messages = self._build_messages(
@@ -877,6 +1093,7 @@ class LLMService:
             image_urls=effective_image_urls,
             history=history,
             recent_messages=recent_messages,
+            chat_type=chat_type,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -889,11 +1106,13 @@ class LLMService:
             tool_choice="auto",
         )
         tool_context = ToolExecutionContext(
-            group_id=group_id,
+            group_id=chat_id,
             user_id=user_id,
             sender_name=sender_name,
             provider_id=provider.id,
             model=request.model,
+            chat_scope=scope_key,
+            chat_type=chat_type,
         )
 
         try:
@@ -919,11 +1138,19 @@ class LLMService:
         if not text:
             text = "模型没有返回可显示的文本。"
 
-        self.store.append_conversation_message(group_id, user_id, "user", effective_prompt)
-        self.store.append_conversation_message(group_id, None, "assistant", text)
+        current_identity = self.identities.resolve_user(user_id, sender_name)
+        self.store.append_conversation_message(
+            scope_key,
+            user_id,
+            "user",
+            effective_prompt,
+            sender_name=sender_name,
+            canonical_name=current_identity.canonical_name,
+        )
+        self.store.append_conversation_message(scope_key, None, "assistant", text)
         self.store.prune_conversation_messages(
-            group_id,
-            min(self.config.runtime.history_max_messages_per_group, MAX_STORED_CONVERSATION_MESSAGES),
+            scope_key,
+            self._history_retention_limit(chat_type),
         )
 
         return {
@@ -931,6 +1158,61 @@ class LLMService:
             "rate_limit_key": LLM_RULE_NAME,
             "rule_name": LLM_RULE_NAME,
         }
+
+    async def generate_reply(
+        self,
+        *,
+        group_id: int | str,
+        user_id: int | str,
+        sender_name: str,
+        prompt: str,
+        image_urls: list[str] | None = None,
+        recent_messages: list[dict[str, str]] | None = None,
+        quoted_text: str = "",
+        quoted_image_urls: list[str] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+    ) -> dict[str, str]:
+        return await self._generate_reply_for_scope(
+            chat_id=group_id,
+            chat_type="group",
+            user_id=user_id,
+            sender_name=sender_name,
+            prompt=prompt,
+            image_urls=image_urls,
+            recent_messages=recent_messages,
+            quoted_text=quoted_text,
+            quoted_image_urls=quoted_image_urls,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+        )
+
+    async def generate_private_reply(
+        self,
+        *,
+        user_id: int | str,
+        sender_name: str,
+        prompt: str,
+        image_urls: list[str] | None = None,
+        recent_messages: list[dict[str, str]] | None = None,
+        quoted_text: str = "",
+        quoted_image_urls: list[str] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+    ) -> dict[str, str]:
+        return await self._generate_reply_for_scope(
+            chat_id=user_id,
+            chat_type="private",
+            user_id=user_id,
+            sender_name=sender_name,
+            prompt=prompt,
+            image_urls=image_urls,
+            recent_messages=recent_messages,
+            quoted_text=quoted_text,
+            quoted_image_urls=quoted_image_urls,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+        )
 
 
 llm_service = LLMService()

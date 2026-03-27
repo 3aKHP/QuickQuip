@@ -1,4 +1,4 @@
-from quickquip.adapters.nonebot.tz_tracker_plugin import matcher
+from quickquip.adapters.nonebot.tz_tracker_plugin import matcher, private_matcher
 from quickquip.app.message_pipeline import (
     DATA_DIR,
     RULE_SWITCH_PATH,
@@ -40,6 +40,7 @@ __all__ = [
     "llm_service",
     "matcher",
     "message_deduper",
+    "private_matcher",
     "rate_limiter",
     "recent_messages",
     "repeat_detector",
