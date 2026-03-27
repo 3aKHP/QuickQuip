@@ -836,7 +836,7 @@ assert StubProviderClient.last_request.messages[-1].content == "私聊里继续�
 assert StubProviderClient.last_request.messages[-1].image_urls == []
 assert service.store.count_conversation_messages(private_scope_key) == 52
 private_deleted_context = service.end_private_session(3003)
-assert private_deleted_context == 52
+assert private_deleted_context["deleted"] == 52
 assert service.get_chat_settings(3003, chat_type="private").enabled is False
 assert service.store.list_recent_conversation_messages(private_scope_key, 100) == []
 assert "会话状态：未开启" in service.format_status(3003, chat_type="private")
