@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, llm_service, rate_limiter, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
@@ -31,37 +33,131 @@ def _allow_scope_management(event) -> bool:
     return _is_private_chat(event) or _is_admin(event)
 
 
+_PRESET_RE = re.compile(r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'|(\S.*))', re.DOTALL)
+_RESUME_RE = re.compile(r'--resume(?:\s+(\d+))?')
+
+
+def _parse_preset(args: str) -> str:
+    m = _PRESET_RE.search(args)
+    if not m:
+        return ""
+    return (m.group(1) or m.group(2) or m.group(3) or "").strip()
+
+
+def _parse_resume(args: str) -> tuple[bool, int | None]:
+    m = _RESUME_RE.search(args)
+    if not m:
+        return False, None
+    num_str = m.group(1)
+    return True, int(num_str) if num_str else None
+
+
 def register_commands(on_command, Message, MessageSegment) -> None:
     start_session_cmd = on_command("start_sesssion", priority=10, block=True)
     start_session_alias_cmd = on_command("start_session", priority=10, block=True)
     end_session_cmd = on_command("end_session", priority=10, block=True)
 
-    async def _start_private_session(event, matcher) -> None:
+    async def _start_private_session(event, matcher, cmd_name: str) -> None:
         if not _is_private_chat(event):
             await matcher.finish("该命令仅支持私聊")
-        llm_service.start_private_session(event.user_id)
-        await matcher.finish(
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, cmd_name)
+        has_resume, resume_num = _parse_resume(args)
+        if has_resume:
+            result = llm_service.resume_private_session(event.user_id, resume_num)
+            if "error" in result:
+                await matcher.finish(result["error"])
+            preset_override = _parse_preset(args)
+            if preset_override:
+                scope_key = llm_service.build_chat_scope_key(event.user_id, "private")
+                llm_service._session_presets[scope_key] = preset_override
+            preset = preset_override or result.get("preset", "")
+            msg = f"已恢复存档 #{result['archive_number']}（{result['message_count']} 条消息）"
+            if preset:
+                preview = preset[:80] + ("..." if len(preset) > 80 else "")
+                msg += f"\n附加设定：{preview}"
+            await matcher.finish(msg)
+        preset = _parse_preset(args)
+        llm_service.start_private_session(event.user_id, preset=preset)
+        msg = (
             f"当前私聊会话已开启，之后的普通消息、图片和引用回复都会进入 LLM。"
             f" 当前上下文上限为 {llm_service.get_default_history_limit('private')} 条。"
         )
+        if preset:
+            preview = preset[:80] + ("..." if len(preset) > 80 else "")
+            msg += f"\n附加设定：{preview}"
+        await matcher.finish(msg)
 
-    async def _end_private_session(event, matcher) -> None:
+    async def _end_private_session(event, matcher, cmd_name: str) -> None:
         if not _is_private_chat(event):
             await matcher.finish("该命令仅支持私聊")
-        deleted = llm_service.end_private_session(event.user_id)
-        await matcher.finish(f"当前私聊会话已结束，并清空了 {deleted} 条短期上下文。")
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, cmd_name)
+        no_save = "--no-save" in args
+        result = llm_service.end_private_session(event.user_id, save=not no_save)
+        deleted = result["deleted"]
+        archive_number = result.get("archive_number")
+        if archive_number is not None:
+            await matcher.finish(f"当前私聊会话已结束，已存档为 #{archive_number}（{deleted} 条消息）。")
+        else:
+            suffix = "（未存档）" if no_save else ""
+            await matcher.finish(f"当前私聊会话已结束，并清空了 {deleted} 条短期上下文。{suffix}")
 
     @start_session_cmd.handle()
     async def _(event):
-        await _start_private_session(event, start_session_cmd)
+        await _start_private_session(event, start_session_cmd, "start_sesssion")
 
     @start_session_alias_cmd.handle()
     async def _(event):
-        await _start_private_session(event, start_session_alias_cmd)
+        await _start_private_session(event, start_session_alias_cmd, "start_session")
 
     @end_session_cmd.handle()
     async def _(event):
-        await _end_private_session(event, end_session_cmd)
+        await _end_private_session(event, end_session_cmd, "end_session")
+
+    resume_session_cmd = on_command("resume_session", priority=10, block=True)
+
+    @resume_session_cmd.handle()
+    async def _(event):
+        if not _is_private_chat(event):
+            await resume_session_cmd.finish("该命令仅支持私聊")
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "resume_session").strip()
+        archive_number = int(args) if args.isdigit() else None
+        result = llm_service.resume_private_session(event.user_id, archive_number)
+        if "error" in result:
+            await resume_session_cmd.finish(result["error"])
+        preset = result.get("preset", "")
+        msg = f"已恢复存档 #{result['archive_number']}（{result['message_count']} 条消息）"
+        if preset:
+            preview = preset[:80] + ("..." if len(preset) > 80 else "")
+            msg += f"\n附加设定：{preview}"
+        await resume_session_cmd.finish(msg)
+
+    sessions_cmd = on_command("sessions", priority=10, block=True)
+
+    @sessions_cmd.handle()
+    async def _(event):
+        if not _is_private_chat(event):
+            await sessions_cmd.finish("该命令仅支持私聊")
+        await sessions_cmd.finish(llm_service.format_session_archives(event.user_id))
+
+    delete_session_cmd = on_command("delete_session", priority=10, block=True)
+
+    @delete_session_cmd.handle()
+    async def _(event):
+        if not _is_private_chat(event):
+            await delete_session_cmd.finish("该命令仅支持私聊")
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "delete_session").strip()
+        if not args.isdigit():
+            await delete_session_cmd.finish("用法：/delete_session <存档编号>")
+        archive_number = int(args)
+        deleted = llm_service.delete_session_archive_for_user(event.user_id, archive_number)
+        if deleted:
+            await delete_session_cmd.finish(f"已删除存档 #{archive_number}。")
+        else:
+            await delete_session_cmd.finish(f"存档 #{archive_number} 不存在。")
 
     stats_cmd = on_command("stats", priority=10, block=True)
 
@@ -107,20 +203,45 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if not _allow_scope_management(event):
             await llm_cmd.finish("仅管理员可执行此操作")
 
-        if args == "on":
+        if tokens[:1] == ["on"]:
             if chat_type == "private":
-                llm_service.start_private_session(chat_id)
-                await llm_cmd.finish(
-                    f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，当前上下文上限为 {llm_service.get_default_history_limit('private')} 条。"
-                )
+                has_resume, resume_num = _parse_resume(args)
+                if has_resume:
+                    result = llm_service.resume_private_session(chat_id, resume_num)
+                    if "error" in result:
+                        await llm_cmd.finish(result["error"])
+                    preset_override = _parse_preset(args)
+                    if preset_override:
+                        scope_key = llm_service.build_chat_scope_key(chat_id, "private")
+                        llm_service._session_presets[scope_key] = preset_override
+                    preset = preset_override or result.get("preset", "")
+                    msg = f"已恢复存档 #{result['archive_number']}（{result['message_count']} 条消息）"
+                    if preset:
+                        preview = preset[:80] + ("..." if len(preset) > 80 else "")
+                        msg += f"\n附加设定：{preview}"
+                    await llm_cmd.finish(msg)
+                preset = _parse_preset(args)
+                llm_service.start_private_session(chat_id, preset=preset)
+                msg = f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，当前上下文上限为 {llm_service.get_default_history_limit('private')} 条。"
+                if preset:
+                    preview = preset[:80] + ("..." if len(preset) > 80 else "")
+                    msg += f"\n附加设定：{preview}"
+                await llm_cmd.finish(msg)
             else:
                 llm_service.set_chat_enabled(chat_id, True, chat_type=chat_type)
                 await llm_cmd.finish(f"{scope_label} LLM 已开启")
 
-        if args == "off":
+        if tokens[:1] == ["off"]:
             if chat_type == "private":
-                deleted = llm_service.end_private_session(chat_id)
-                await llm_cmd.finish(f"{scope_label}会话已结束，并清空了 {deleted} 条短期上下文。")
+                no_save = "--no-save" in args
+                result = llm_service.end_private_session(chat_id, save=not no_save)
+                deleted = result["deleted"]
+                archive_number = result.get("archive_number")
+                if archive_number is not None:
+                    await llm_cmd.finish(f"{scope_label}会话已结束，已存档为 #{archive_number}（{deleted} 条消息）。")
+                else:
+                    suffix = "（未存档）" if no_save else ""
+                    await llm_cmd.finish(f"{scope_label}会话已结束，并清空了 {deleted} 条短期上下文。{suffix}")
             else:
                 llm_service.set_chat_enabled(chat_id, False, chat_type=chat_type)
                 await llm_cmd.finish(f"{scope_label} LLM 已关闭")
@@ -135,6 +256,22 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if args == "clear_context":
             deleted = llm_service.clear_context(chat_id, chat_type=chat_type)
             await llm_cmd.finish(f"已清空{scope_label}的短期上下文，共删除 {deleted} 条记录")
+
+        if tokens[:1] == ["delete_msg"]:
+            reply = getattr(event, "reply", None)
+            target_msg_id = ""
+            if reply:
+                target_msg_id = str(getattr(reply, "message_id", "") or "").strip()
+            if not target_msg_id and len(tokens) >= 2:
+                target_msg_id = tokens[1].strip()
+            if not target_msg_id:
+                await llm_cmd.finish("用法：引用一条消息并发送 /llm delete_msg，或 /llm delete_msg <消息ID>")
+            scope_key = llm_service.build_chat_scope_key(chat_id, chat_type)
+            deleted = llm_service.delete_message_from_context(scope_key, target_msg_id)
+            if deleted:
+                await llm_cmd.finish(f"已从上下文中删除消息 {target_msg_id}")
+            else:
+                await llm_cmd.finish(f"未找到消息 {target_msg_id}，可能已过期或未被记录")
 
         if tokens[:1] == ["use"] and len(tokens) >= 3:
             provider_id = tokens[1]

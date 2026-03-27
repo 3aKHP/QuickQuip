@@ -15,8 +15,8 @@ from quickquip.app.message_pipeline import (
 from quickquip.app.message_pipeline import is_self_message as _is_self_message
 
 
-def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str) -> None:
-    recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text)
+def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "") -> None:
+    recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id=message_id)
 
 
 def register_message_matcher(on_message, Message, MessageSegment):
@@ -41,11 +41,11 @@ def register_message_matcher(on_message, Message, MessageSegment):
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
-        message_id = getattr(event, "message_id", None)
+        message_id = str(getattr(event, "message_id", "") or "")
         identity = llm_service.identities.resolve_user(user_id, sender_name)
         canonical_name = identity.canonical_name
 
-        if message_deduper.is_duplicate(group_id, message_id):
+        if message_deduper.is_duplicate(group_id, message_id or None):
             return
 
         stats_tracker.record_message(group_id, user_id, sender_name)
@@ -61,7 +61,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             is_to_me=bool(getattr(event, "to_me", False)),
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             if not rate_limiter.allow("llm_chat", user_id):
                 return
             result = await llm_service.generate_reply(
@@ -75,9 +75,15 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 quoted_image_urls=llm_input.quoted_image_urls,
                 quoted_sender_name=llm_input.quoted_sender_name,
                 quoted_user_id=llm_input.quoted_user_id,
+                message_id=message_id or None,
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
-            await matcher.finish(result["reply"])
+            resp = await matcher.send(result["reply"])
+            sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+            if sent_msg_id:
+                scope_key = str(group_id)
+                llm_service.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+            return
 
         result = resolve_reply(
             text,
@@ -86,23 +92,23 @@ def register_message_matcher(on_message, Message, MessageSegment):
             group_id=group_id,
         )
         if not result:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             return
 
         stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
 
         if "at_user_id" in result:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             message = Message([
                 MessageSegment.at(result["at_user_id"]),
                 MessageSegment.text(f" {result['reply']}"),
             ])
             await matcher.finish(message)
 
-        _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text)
+        _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
         await matcher.finish(result["reply"])
 
     return matcher

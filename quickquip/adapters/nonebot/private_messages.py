@@ -12,8 +12,8 @@ from quickquip.app.message_pipeline import (
 from quickquip.app.message_pipeline import is_self_message as _is_self_message
 
 
-def _remember_recent_message(scope_key, user_id, sender_name: str, canonical_name: str, rendered_text: str) -> None:
-    recent_messages.add_message(scope_key, user_id, sender_name, canonical_name, rendered_text)
+def _remember_recent_message(scope_key, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "") -> None:
+    recent_messages.add_message(scope_key, user_id, sender_name, canonical_name, rendered_text, message_id=message_id)
 
 
 def register_private_message_matcher(on_message):
@@ -37,11 +37,11 @@ def register_private_message_matcher(on_message):
         sender_name = get_sender_name(event)
         user_id = event.user_id
         scope_key = llm_service.build_chat_scope_key(user_id, chat_type="private")
-        message_id = getattr(event, "message_id", None)
+        message_id = str(getattr(event, "message_id", "") or "")
         identity = llm_service.identities.resolve_user(user_id, sender_name)
         canonical_name = identity.canonical_name
 
-        if message_deduper.is_duplicate(scope_key, message_id):
+        if message_deduper.is_duplicate(scope_key, message_id or None):
             return
 
         llm_settings = llm_service.get_chat_settings(user_id, chat_type="private")
@@ -57,7 +57,7 @@ def register_private_message_matcher(on_message):
 
         if llm_input is None:
             return
-        _remember_recent_message(scope_key, user_id, sender_name, canonical_name, rendered_text)
+        _remember_recent_message(scope_key, user_id, sender_name, canonical_name, rendered_text, message_id)
         if not rate_limiter.allow("llm_chat", user_id):
             return
 
@@ -71,7 +71,12 @@ def register_private_message_matcher(on_message):
             quoted_image_urls=llm_input.quoted_image_urls,
             quoted_sender_name=llm_input.quoted_sender_name,
             quoted_user_id=llm_input.quoted_user_id,
+            message_id=message_id or None,
         )
-        await matcher.finish(result["reply"])
+        resp = await matcher.send(result["reply"])
+        sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+        if sent_msg_id:
+            llm_service.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+        return
 
     return matcher

@@ -37,9 +37,11 @@ dist/
 # Persistent data
 data/
 config/llm.toml
+config/personas/
 config/llm.local.toml
 config/llm.*.local.toml
 !config/*.example
+!config/personas.example/
 
 #Dev Filefolder
 dev/

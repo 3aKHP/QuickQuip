@@ -194,7 +194,8 @@ QuickQuip/
 ├── bot.py                          # NoneBot2 入口，注册适配器并加载插件
 ├── .env                            # 环境变量配置（不纳入版本控制）
 ├── config/
-│   └── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
+│   ├── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
+│   └── personas.example/           # 人格定义样例目录，复制为 personas/ 后使用
 ├── docker/
 │   └── searxng/
 │       └── settings.yml            # 项目内置 SearXNG 配置
@@ -274,7 +275,7 @@ QuickQuip/
 
 5. **可选：启用 LLM**
 
-   复制 `config/llm.toml.example` 为 `config/llm.toml`，填入你的中转 URL、模型列表和默认人格。API Key 放进 [`.env`](.env)：
+   复制 `config/llm.toml.example` 为 `config/llm.toml`，复制 `config/personas.example/` 目录为 `config/personas/`，填入你的中转 URL、模型列表和人格定义。API Key 放进 [`.env`](.env)：
 
    ```env
    OPENAI_API_KEY=your_openai_key_here
@@ -357,16 +358,17 @@ python test_tieba.py
 | [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) | 文字彩蛋规则列表 | 见源码 |
 | [`SCHEDULED_MESSAGES`](plugins/tz_config.py) | 定时消息列表 | `[]`（空，休眠） |
 
-LLM 相关配置放在 `config/llm.toml`：
+LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 
-| 配置区块 | 说明 |
-|------|------|
-| `[runtime]` | 默认 provider、人设、上下文长度、记忆条数 |
-| `[triggers]` | 前缀触发、艾特触发、空提示回复 |
-| `[tools]` | 标准化工具调用白名单 |
-| `[mcp]` / `[[mcp.servers]]` | MCP 总开关、server 启动方式、白名单与 DOOD 相关参数 |
-| `[[providers]]` | provider ID、协议类型、base URL、模型列表、默认参数 |
-| `[[personas]]` | 人格卡、system prompt、风格注入 |
+| 配置区块 | 文件 | 说明 |
+|------|------|------|
+| `[runtime]` | `llm.toml` | 默认 provider、人设、上下文长度、记忆条数 |
+| `[triggers]` | `llm.toml` | 前缀触发、艾特触发、空提示回复 |
+| `[tools]` | `llm.toml` | 标准化工具调用白名单 |
+| `[mcp]` / `[[mcp.servers]]` | `llm.toml` | MCP 总开关、server 启动方式、白名单与 DOOD 相关参数 |
+| `[[providers]]` | `llm.toml` | provider ID、协议类型、base URL、模型列表、默认参数 |
+| `_shared.toml` | `personas/` | 自动注入所有人格的共享行为准则与风格规则 |
+| `<id>.toml` | `personas/` | 单个人格卡：id、display_name、system_prompt、style_prompt + 自由扩展字段 |
 
 联网搜索后端通过 `.env` 中的 `SEARCH_BACKEND` 控制：
 

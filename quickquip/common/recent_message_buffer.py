@@ -12,6 +12,7 @@ class RecentMessage:
     canonical_name: str
     text: str
     created_at: float
+    message_id: str = ""
 
 
 class RecentMessageBuffer:
@@ -56,6 +57,7 @@ class RecentMessageBuffer:
         canonical_name: str,
         text: str,
         *,
+        message_id: str = "",
         now_ts: float | None = None,
     ) -> None:
         normalized = text.strip()
@@ -78,6 +80,7 @@ class RecentMessageBuffer:
                 canonical_name=canonical_name.strip(),
                 text=normalized,
                 created_at=current_ts,
+                message_id=str(message_id) if message_id else "",
             )
         )
         self._touch_group(group_key)
@@ -107,6 +110,23 @@ class RecentMessageBuffer:
                 "sender_name": item.sender_name,
                 "canonical_name": item.canonical_name,
                 "text": item.text,
+                "message_id": item.message_id,
             }
             for item in items
         ]
+
+    def remove_by_message_id(self, group_id: int | str, message_id: str) -> bool:
+        group_key = str(group_id)
+        queue = self.messages.get(group_key)
+        if queue is None:
+            return False
+        msg_key = str(message_id)
+        remaining = [m for m in queue if m.message_id != msg_key]
+        if len(remaining) == len(queue):
+            return False
+        new_queue: deque[RecentMessage] = deque(remaining, maxlen=self.max_messages_per_group)
+        if new_queue:
+            self.messages[group_key] = new_queue
+        else:
+            self.messages.pop(group_key, None)
+        return True

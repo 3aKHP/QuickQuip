@@ -33,6 +33,130 @@ def format_participant_label(
     return "未知用户"
 
 
+def _compile_structured_persona(extras: dict[str, object]) -> str:
+    """Compile structured persona fields into prompt text.
+
+    Structured fields (TOML tables like [identity], [cognition], etc.) are
+    stored in ``PersonaConfig.extras`` as dicts.  This function renders them
+    into natural-language sections that precede the free-text system_prompt.
+    """
+    sections: list[str] = []
+
+    identity = extras.get("identity")
+    if isinstance(identity, dict):
+        parts: list[str] = []
+        if identity.get("archetype"):
+            parts.append(f"角色原型：{identity['archetype']}")
+        if identity.get("scenario"):
+            parts.append(f"当前情境：{identity['scenario']}")
+        if identity.get("self_reference"):
+            parts.append(f"自称方式：{identity['self_reference']}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    biography = extras.get("biography")
+    if isinstance(biography, dict):
+        parts = []
+        if biography.get("origin"):
+            parts.append(f"身世背景：{biography['origin']}")
+        if biography.get("defining_marks"):
+            marks = biography["defining_marks"]
+            if isinstance(marks, list):
+                parts.append("关键印记：")
+                for mark in marks:
+                    parts.append(f"- {mark}")
+            else:
+                parts.append(f"关键印记：{marks}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    cognition = extras.get("cognition")
+    if isinstance(cognition, dict):
+        parts = []
+        if cognition.get("decision_logic"):
+            parts.append(f"决策逻辑：{cognition['decision_logic']}")
+        if cognition.get("emotional_processing"):
+            parts.append(f"情绪处理：{cognition['emotional_processing']}")
+        if cognition.get("perception_filter"):
+            parts.append(f"感知滤镜：{cognition['perception_filter']}")
+        if cognition.get("attention_bias"):
+            parts.append(f"注意力偏向：{cognition['attention_bias']}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    instinct = extras.get("instinct")
+    if isinstance(instinct, dict):
+        parts = []
+        if instinct.get("core_desire"):
+            parts.append(f"核心渴望：{instinct['core_desire']}")
+        if instinct.get("stress_response"):
+            parts.append(f"压力反应：{instinct['stress_response']}")
+        if instinct.get("comfort_zone"):
+            parts.append(f"舒适区：{instinct['comfort_zone']}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    voice = extras.get("voice")
+    if isinstance(voice, dict):
+        parts = []
+        if voice.get("syntax_rhythm"):
+            parts.append(f"句法节奏：{voice['syntax_rhythm']}")
+        if voice.get("tone_shift"):
+            parts.append(f"语气变化：{voice['tone_shift']}")
+        if voice.get("verbal_habits"):
+            habits = voice["verbal_habits"]
+            if isinstance(habits, list):
+                parts.append(f"口头习惯：{'、'.join(str(h) for h in habits)}")
+            else:
+                parts.append(f"口头习惯：{habits}")
+        if voice.get("verbal_constraints"):
+            constraints = voice["verbal_constraints"]
+            if isinstance(constraints, list):
+                parts.append("语言约束：")
+                for c in constraints:
+                    parts.append(f"- {c}")
+            else:
+                parts.append(f"语言约束：{constraints}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    boundaries = extras.get("boundaries")
+    if isinstance(boundaries, dict):
+        parts = []
+        if boundaries.get("do"):
+            do_list = boundaries["do"]
+            if isinstance(do_list, list):
+                parts.append("允许：")
+                for item in do_list:
+                    parts.append(f"- {item}")
+        if boundaries.get("do_not"):
+            dont_list = boundaries["do_not"]
+            if isinstance(dont_list, list):
+                parts.append("禁止：")
+                for item in dont_list:
+                    parts.append(f"- {item}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    world = extras.get("world")
+    if isinstance(world, dict):
+        parts = []
+        if world.get("relationships"):
+            rels = world["relationships"]
+            if isinstance(rels, list):
+                parts.append("关键关系：")
+                for r in rels:
+                    parts.append(f"- {r}")
+            elif isinstance(rels, str):
+                parts.append(f"关键关系：{rels}")
+        if world.get("context"):
+            parts.append(f"世界观背景：{world['context']}")
+        if parts:
+            sections.append("\n".join(parts))
+
+    return "\n\n".join(sections)
+
+
 def build_system_prompt(
     *,
     persona,
@@ -50,12 +174,22 @@ def build_system_prompt(
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
     provider_style_overrides: str = "",
+    session_preset: str = "",
 ) -> str:
     now_cst = datetime.now(ZoneInfo(beijing_timezone))
     weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     identity = identities.resolve_user(user_id, sender_name)
 
-    lines = [persona.system_prompt.strip()]
+    lines: list[str] = []
+
+    # Structured persona fields (compiled from TOML tables in extras)
+    structured = _compile_structured_persona(getattr(persona, "extras", {}))
+    if structured:
+        lines.append(structured)
+
+    # Free-text persona prompts (can coexist with structured fields)
+    if persona.system_prompt.strip():
+        lines.append(persona.system_prompt.strip())
     if persona.style_prompt.strip():
         lines.append(persona.style_prompt.strip())
     if provider_style_overrides.strip():
@@ -89,6 +223,9 @@ def build_system_prompt(
         lines.append("- 标准身份：未登记")
     if chat_type == "private":
         lines.append("当前处于一对一私聊场景，可以比群聊更自然、细致，但不要失去当前人格的底色。")
+    if session_preset.strip():
+        lines.append("本次会话的附加设定：")
+        lines.append(session_preset.strip())
     if participants:
         participant_lines = ["当前已知参与者："]
         for item in participants[:8]:

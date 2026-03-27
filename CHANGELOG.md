@@ -4,9 +4,46 @@
 
 ## Unreleased
 
-### feat: add private session control and stronger identity tracking
+### feat: add session archive/resume and preset injection for private chat
 
 Git: `(Pending)`
+
+- 新增私聊会话存档与恢复机制：`/end_session` 默认自动存档（`--no-save` 跳过），`/start_session --resume [N]` 或 `/resume_session [N]` 恢复指定或最新存档
+- 新增 `session_archives` SQLite 表，存储每用户自增编号的存档元数据（人格、附加设定、消息数、时间戳）
+- 归档通过改写 `conversation_messages.group_id`（`private:X` → `archive:X:N`）实现零拷贝搬迁
+- 新增 `/sessions` 列出存档、`/delete_session <N>` 删除存档
+- 新增 `/start_session --preset "..."` 附加设定注入，文本拼接入系统提示词，生命周期为单个会话
+- `/llm on --preset/--resume` 与 `/llm off --no-save` 同步支持
+
+### feat: handle recalled and manually deleted messages in LLM context
+
+Git: `(Pending)`
+
+- 新增 `GroupRecallNoticeEvent` / `FriendRecallNoticeEvent` 监听，撤回消息自动从 LLM 对话历史和内存缓冲中清除
+- `conversation_messages` 表新增 `message_id` 列，入站消息和 bot 回复的平台消息 ID 均被持久化
+- LLM 回复路径从 `matcher.finish()` 改为 `matcher.send()` + 回填，捕获 bot 发出消息的 `message_id`
+- 新增 `/llm delete_msg` 子命令（admin），支持引用回复或显式消息 ID 手动删除超时无法撤回的消息
+- `RecentMessageBuffer` 新增 `message_id` 字段与 `remove_by_message_id()` 方法
+
+### refactor: split personas into per-file directory structure
+
+Git: `(Pending)`
+
+- 将 `config/personas.toml` 拆分为 `config/personas/` 目录，每个 `.toml` 文件对应一个人格，支持未来大规模结构化扩充
+- 新增 `config/personas/_shared.toml`，提取所有人格共享的通用行为准则和风格规则，加载时自动注入各人格，避免重复维护
+- `PersonaConfig` 新增 `extras` 字段，支持在人格文件中自由添加 `source`、`tags` 等自定义键值
+- 人格文件采用扁平顶层键格式（`id = "..."`），同时保留 `[[personas]]` 数组格式兼容
+- 移除旧的单文件 `personas.toml` sidecar 加载路径
+- 新增结构化人格字段：`[identity]`、`[biography]`、`[cognition]`、`[instinct]`、`[voice]`、`[boundaries]`、`[world]` 七个可选 TOML 表，参考 Neural Narratology 的认知分层和 Process Over Label 思路
+- `build_system_prompt()` 新增 `_compile_structured_persona()` 编译器，自动将结构化表渲染为自然语言段落并注入 system prompt，与自由文本 `system_prompt` 可共存
+- 对 `audrey` 和 `kangel_v` 两个人格进行了结构化试验，其余人格保持传统格式不变
+- 新增 `config/personas.example/structured.toml` 结构化格式完整文档和示例
+- 新增 `config/personas.example/` 示例目录，替代原 `personas.toml.example`
+- 更新 `.gitignore`、README、`llm.toml.example`、CLAUDE.md
+
+### feat: add private session control and stronger identity tracking
+
+Git: `16d66a1`
 
 - 新增私聊会话管理机制，默认不在私聊中自动启用 LLM；通过 `/start_sesssion` 或 `/start_session` 开启当前私聊会话，通过 `/end_session` 结束并清空短期上下文
 - 私聊消息入口支持在会话开启后直接处理普通文本、图片与显式回复，并保留部分斜杠命令

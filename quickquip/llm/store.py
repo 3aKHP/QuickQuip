@@ -112,6 +112,20 @@ class LLMStore:
 
                 CREATE INDEX IF NOT EXISTS idx_memories_group_id
                 ON memories(group_id, id);
+
+                CREATE TABLE IF NOT EXISTS session_archives (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id         TEXT NOT NULL,
+                    archive_number  INTEGER NOT NULL,
+                    persona_id      TEXT,
+                    preset          TEXT,
+                    message_count   INTEGER NOT NULL DEFAULT 0,
+                    created_at      TEXT NOT NULL,
+                    ended_at        TEXT NOT NULL
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_session_archives_user_number
+                ON session_archives(user_id, archive_number);
                 """
             )
             existing_columns = {
@@ -130,6 +144,8 @@ class LLMStore:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN sender_name TEXT")
             if "canonical_name" not in conversation_columns:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN canonical_name TEXT")
+            if "message_id" not in conversation_columns:
+                conn.execute("ALTER TABLE conversation_messages ADD COLUMN message_id TEXT")
 
     def get_group_settings(self, group_id: int | str) -> GroupSettingsOverride:
         with self._connect() as conn:
@@ -204,12 +220,13 @@ class LLMStore:
         *,
         sender_name: str = "",
         canonical_name: str = "",
+        message_id: str | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO conversation_messages (group_id, user_id, sender_name, canonical_name, role, content, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conversation_messages (group_id, user_id, sender_name, canonical_name, role, content, message_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(group_id),
@@ -218,6 +235,7 @@ class LLMStore:
                     canonical_name.strip() or None,
                     role,
                     content,
+                    message_id,
                     _utc_now(),
                 ),
             )
@@ -287,6 +305,34 @@ class LLMStore:
                 (str(group_id),),
             )
             return int(cursor.rowcount)
+
+    def delete_conversation_message_by_message_id(self, group_id: int | str, message_id: str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM conversation_messages
+                WHERE group_id = ? AND message_id = ?
+                """,
+                (str(group_id), str(message_id)),
+            )
+            return int(cursor.rowcount)
+
+    def update_last_assistant_message_id(self, group_id: int | str, message_id: str) -> None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM conversation_messages
+                WHERE group_id = ? AND role = 'assistant' AND message_id IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (str(group_id),),
+            ).fetchone()
+            if row is not None:
+                conn.execute(
+                    "UPDATE conversation_messages SET message_id = ? WHERE id = ?",
+                    (str(message_id), row["id"]),
+                )
 
     def add_memory(
         self,
@@ -446,3 +492,123 @@ class LLMStore:
                 (str(group_id),),
             ).fetchone()
         return int(row["total"]) if row is not None else 0
+
+    # ── session archives ──
+
+    def get_next_archive_number(self, user_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(archive_number) AS mx FROM session_archives WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        current = row["mx"] if row is not None and row["mx"] is not None else 0
+        return int(current) + 1
+
+    def create_session_archive(
+        self,
+        user_id: str,
+        archive_number: int,
+        *,
+        persona_id: str | None = None,
+        preset: str | None = None,
+        message_count: int = 0,
+        created_at: str = "",
+    ) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO session_archives (user_id, archive_number, persona_id, preset, message_count, created_at, ended_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    archive_number,
+                    persona_id,
+                    preset or None,
+                    message_count,
+                    created_at or _utc_now(),
+                    _utc_now(),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def archive_conversation_messages(self, user_id: str, archive_number: int) -> int:
+        private_key = f"private:{user_id}"
+        archive_key = f"archive:{user_id}:{archive_number}"
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE conversation_messages SET group_id = ? WHERE group_id = ?",
+                (archive_key, private_key),
+            )
+            return int(cursor.rowcount)
+
+    def restore_conversation_messages(self, user_id: str, archive_number: int) -> int:
+        private_key = f"private:{user_id}"
+        archive_key = f"archive:{user_id}:{archive_number}"
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE conversation_messages SET group_id = ? WHERE group_id = ?",
+                (private_key, archive_key),
+            )
+            return int(cursor.rowcount)
+
+    def get_session_archive(self, user_id: str, archive_number: int) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, user_id, archive_number, persona_id, preset, message_count, created_at, ended_at
+                FROM session_archives
+                WHERE user_id = ? AND archive_number = ?
+                """,
+                (user_id, archive_number),
+            ).fetchone()
+        if row is None:
+            return None
+        return {k: row[k] for k in row.keys()}
+
+    def list_session_archives(self, user_id: str, *, limit: int = 20) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, archive_number, persona_id, preset, message_count, created_at, ended_at
+                FROM session_archives
+                WHERE user_id = ?
+                ORDER BY archive_number DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            ).fetchall()
+        return [{k: row[k] for k in row.keys()} for row in rows]
+
+    def get_latest_archive_number(self, user_id: str) -> int | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(archive_number) AS mx FROM session_archives WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None or row["mx"] is None:
+            return None
+        return int(row["mx"])
+
+    def delete_session_archive(self, user_id: str, archive_number: int) -> bool:
+        archive_key = f"archive:{user_id}:{archive_number}"
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM conversation_messages WHERE group_id = ?",
+                (archive_key,),
+            )
+            cursor = conn.execute(
+                "DELETE FROM session_archives WHERE user_id = ? AND archive_number = ?",
+                (user_id, archive_number),
+            )
+            return int(cursor.rowcount) > 0
+
+    def get_earliest_message_time(self, group_id: str) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MIN(created_at) AS earliest FROM conversation_messages WHERE group_id = ?",
+                (group_id,),
+            ).fetchone()
+        if row is None or row["earliest"] is None:
+            return ""
+        return str(row["earliest"])

@@ -71,6 +71,7 @@ class PersonaConfig:
     display_name: str
     system_prompt: str
     style_prompt: str = ""
+    extras: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -147,6 +148,9 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+_KNOWN_PERSONA_KEYS = {"id", "display_name", "system_prompt", "style_prompt"}
+
+
 def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfig]:
     personas: dict[str, PersonaConfig] = {}
     for entry in raw_personas:
@@ -154,12 +158,73 @@ def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfi
         persona_id = str(entry.get("id", "")).strip()
         if not persona_id:
             continue
+        extras = {k: v for k, v in entry.items() if k not in _KNOWN_PERSONA_KEYS}
         personas[persona_id] = PersonaConfig(
             id=persona_id,
             display_name=str(entry.get("display_name", persona_id)).strip() or persona_id,
             system_prompt=str(entry.get("system_prompt", "")).strip(),
             style_prompt=str(entry.get("style_prompt", "")).strip(),
+            extras=extras,
         )
+    return personas
+
+
+def _load_personas_from_dir(personas_dir: Path) -> list[dict[str, Any]]:
+    """Load personas from a directory of TOML files.
+
+    Each file may define a persona using flat top-level keys (id, display_name,
+    system_prompt, style_prompt, plus any extras), or via a [[personas]] array
+    for compatibility.
+
+    A special file ``_shared.toml`` may define:
+    - ``shared_system_prompt``: appended to every persona's system_prompt
+    - ``shared_style_prompt``: appended to every persona's style_prompt
+
+    Files are loaded in lexicographic order. ``_shared.toml`` is processed
+    first and never treated as a persona definition itself.
+    """
+    if not personas_dir.is_dir():
+        return []
+
+    # Load shared rules first
+    shared_system = ""
+    shared_style = ""
+    shared_path = personas_dir / "_shared.toml"
+    if shared_path.exists():
+        with shared_path.open("rb") as fh:
+            shared_data = tomllib.load(fh)
+        shared_system = str(shared_data.get("shared_system_prompt", "")).strip()
+        shared_style = str(shared_data.get("shared_style_prompt", "")).strip()
+
+    personas: list[dict[str, Any]] = []
+    for toml_file in sorted(personas_dir.glob("*.toml")):
+        if toml_file.name.startswith("_"):
+            continue  # skip _shared.toml and other reserved files
+        with toml_file.open("rb") as fh:
+            data = tomllib.load(fh)
+
+        # Support flat top-level keys (preferred) or [[personas]] array
+        if "id" in data:
+            entry = dict(data)
+            # Inject shared content
+            if shared_system:
+                existing = str(entry.get("system_prompt", "")).rstrip()
+                entry["system_prompt"] = (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
+            if shared_style:
+                existing = str(entry.get("style_prompt", "")).rstrip()
+                entry["style_prompt"] = (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
+            personas.append(entry)
+        elif "personas" in data:
+            for entry in data["personas"]:
+                entry = dict(entry)
+                if shared_system:
+                    existing = str(entry.get("system_prompt", "")).rstrip()
+                    entry["system_prompt"] = (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
+                if shared_style:
+                    existing = str(entry.get("style_prompt", "")).rstrip()
+                    entry["style_prompt"] = (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
+                personas.append(entry)
+
     return personas
 
 
@@ -233,6 +298,14 @@ def load_llm_config(path: str | Path) -> LLMConfig:
 
     with config_path.open("rb") as file:
         data = tomllib.load(file)
+
+    personas_path = config_path.parent / "personas"
+    if personas_path.is_dir():
+        dir_personas = _load_personas_from_dir(personas_path)
+        existing = data.get("personas", [])
+        if not isinstance(existing, list):
+            existing = []
+        data["personas"] = existing + dir_personas
 
     runtime_raw = _expand_env_value(_as_dict(data.get("runtime")))
     triggers_raw = _expand_env_value(_as_dict(data.get("triggers")))
