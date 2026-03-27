@@ -109,10 +109,10 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | `/llm personas` | 查看可用人格 | 所有人 |
 | `/llm persona use <id>` | 切换当前群人格 | 管理员/群主 |
 | `/llm trigger prefix <value>` | 设置显式触发前缀 | 管理员/群主 |
-| `/llm trigger prefix_mode on|off` | 开关前缀触发 | 管理员/群主 |
-| `/llm trigger at on|off` | 开关艾特触发 | 管理员/群主 |
+| `/llm trigger prefix_mode on\|off` | 开关前缀触发 | 管理员/群主 |
+| `/llm trigger at on\|off` | 开关艾特触发 | 管理员/群主 |
 | `/llm memory status` | 查看当前群记忆注入状态 | 所有人 |
-| `/llm memory on|off` | 开关当前群记忆注入 | 管理员/群主 |
+| `/llm memory on\|off` | 开关当前群记忆注入 | 管理员/群主 |
 | `/llm clear_context` | 清空当前群的短期会话上下文 | 管理员/群主 |
 | `/search <query>` | 使用当前搜索后端进行联网搜索 | 所有人 |
 | `/search news <query>` | 使用当前搜索后端搜索新闻 | 所有人 |

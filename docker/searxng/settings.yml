@@ -1,4 +1,16 @@
-use_default_settings: true
+use_default_settings:
+  engines:
+    keep_only:
+      - bing
+      - bing images
+      - bing news
+      - bing videos
+      - baidu
+      - sogou
+      - sogou images
+      - sogou videos
+      - sogou wechat
+      - yandex
 
 general:
   debug: false
@@ -20,3 +32,20 @@ server:
   port: 8080
   bind_address: "0.0.0.0"
   base_url: false
+
+# Enable engines that are accessible from mainland China
+engines:
+  - name: bing
+    disabled: false
+  - name: baidu
+    disabled: false
+  - name: sogou
+    disabled: false
+  - name: sogou images
+    disabled: false
+  - name: sogou videos
+    disabled: false
+  - name: sogou wechat
+    disabled: false
+  - name: yandex
+    disabled: false

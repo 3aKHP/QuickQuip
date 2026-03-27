@@ -4,9 +4,18 @@
 
 ## Unreleased
 
-### refactor: reorganize runtime into quickquip package
+### feat: add provider style overrides, forget_all, and per-group context limit
 
 Git: `(Pending)`
+
+- 新增 `[[providers]]` 的 `style_overrides` 字段，支持在 `llm.toml` 中为每个 provider 配置针对性的 system prompt 追加段，用于修正特定模型口癖（如 GPT 的句尾反问、DeepSeek 的分点列举等）
+- 新增 `/forget_all` 命令（管理员），一次性清空本群全部长期记忆
+- 新增 `/llm context_limit <n>` 命令（管理员），支持按群持久化设置 LLM 对话上下文读取上限；`/llm context_limit reset` 重置为全局默认；`/llm reload` 同时清除本群覆盖
+- 调整项目内置 `docker/searxng/settings.yml` 的默认引擎集，优先保留在中国大陆网络环境下更易访问的搜索源
+
+### refactor: reorganize runtime into quickquip package
+
+Git: `770858a`
 
 - 新增 `quickquip/` 主包，按 `adapters`、`app`、`llm`、`chat`、`tieba`、`search`、`common` 分层承接运行时实现
 - 将群消息管线、NoneBot 适配层、LLM 基础设施、贴吧抓取与共享状态模块迁入新目录

@@ -20,6 +20,7 @@ def build_system_prompt(
     beijing_timezone: str,
     search_tool_name: str,
     get_search_backend_name,
+    provider_style_overrides: str = "",
 ) -> str:
     now_cst = datetime.now(ZoneInfo(beijing_timezone))
     weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
@@ -28,6 +29,8 @@ def build_system_prompt(
     lines = [persona.system_prompt.strip()]
     if persona.style_prompt.strip():
         lines.append(persona.style_prompt.strip())
+    if provider_style_overrides.strip():
+        lines.append(provider_style_overrides.strip())
 
     lines.append("当前元数据：")
     lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")

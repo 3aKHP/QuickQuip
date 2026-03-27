@@ -13,6 +13,7 @@ class ResolvedGroupSettings:
     trigger_prefix: str
     allow_prefix: bool
     allow_at: bool
+    history_limit: int | None = None
 
 
 def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupSettings:
@@ -38,4 +39,5 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
             else config.triggers.allow_prefix
         ),
         allow_at=overrides.allow_at if overrides.allow_at is not None else config.triggers.allow_at,
+        history_limit=overrides.history_limit,
     )

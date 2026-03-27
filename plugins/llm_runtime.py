@@ -40,7 +40,6 @@ VOCAB_PATH = Path("dev/llm_about/vocab.yaml")
 IDENTITY_PATH = Path("dev/llm_about/identities.yaml")
 LLM_RULE_NAME = "llm_chat"
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
-MAX_CONVERSATION_HISTORY_MESSAGES = 20
 MAX_STORED_CONVERSATION_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
 MAX_STORED_MEMORY_ITEMS = 200
@@ -554,8 +553,10 @@ class LLMService:
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
         lines.append(f"艾特触发：{'ON' if settings.allow_at else 'OFF'}")
+        effective_history_limit = settings.history_limit if settings.history_limit is not None else self.config.runtime.history_limit
+        history_limit_note = f"（群覆盖，全局默认 {self.config.runtime.history_limit}）" if settings.history_limit is not None else "（全局默认）"
         lines.append(
-            f"短期会话：已存 {self.store.count_conversation_messages(group_id)} 条 / 上限 {MAX_STORED_CONVERSATION_MESSAGES} 条"
+            f"短期会话：已存 {self.store.count_conversation_messages(group_id)} 条 / 读取上限 {effective_history_limit} 条{history_limit_note}"
         )
         lines.append(
             f"长期记忆：已存 {self.store.count_memories(group_id)} 条 / 上限 {MAX_STORED_MEMORY_ITEMS} 条"
@@ -568,6 +569,12 @@ class LLMService:
 
     def set_group_memory_enabled(self, group_id: int | str, enabled: bool) -> None:
         self.store.update_group_settings(group_id, memory_enabled=int(enabled))
+
+    def set_group_history_limit(self, group_id: int | str, limit: int) -> None:
+        self.store.update_group_settings(group_id, history_limit=limit)
+
+    def reset_group_history_limit(self, group_id: int | str) -> None:
+        self.store.update_group_settings(group_id, history_limit=None)
 
     def set_group_model(self, group_id: int | str, provider_id: str, model: str) -> str:
         provider = self.config.providers.get(provider_id)
@@ -608,6 +615,9 @@ class LLMService:
 
     def forget_group_memories(self, group_id: int | str, keyword: str) -> int:
         return self.store.delete_memories(group_id, keyword.strip())
+
+    def clear_group_memories(self, group_id: int | str) -> int:
+        return self.store.clear_memories(group_id)
 
     def format_providers(self) -> str:
         if self.config.load_error:
@@ -671,6 +681,7 @@ class LLMService:
         prompt: str,
         memories: list[dict[str, object]],
         tool_specs: list[LLMToolSpec],
+        provider_style_overrides: str = "",
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -685,6 +696,7 @@ class LLMService:
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
             get_search_backend_name=get_search_backend_name,
+            provider_style_overrides=provider_style_overrides,
         )
 
     def _normalize_history(
@@ -833,7 +845,10 @@ class LLMService:
         effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
         history = self.store.list_recent_conversation_messages(
             group_id,
-            min(self.config.runtime.history_limit, MAX_CONVERSATION_HISTORY_MESSAGES),
+            min(
+                settings.history_limit if settings.history_limit is not None else self.config.runtime.history_limit,
+                MAX_STORED_CONVERSATION_MESSAGES,
+            ),
         )
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
@@ -855,6 +870,7 @@ class LLMService:
             analysis_prompt or trimmed_prompt,
             memories,
             tool_specs,
+            provider_style_overrides=provider.style_overrides,
         )
         messages = self._build_messages(
             prompt=effective_prompt,

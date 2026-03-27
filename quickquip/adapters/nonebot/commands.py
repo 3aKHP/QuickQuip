@@ -59,6 +59,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await llm_cmd.finish("本群 LLM 已关闭")
 
         if args == "reload":
+            llm_service.reset_group_history_limit(group_id)
             config = await llm_service.reload_runtime(background=True)
             if config.load_error:
                 await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
@@ -114,10 +115,24 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             llm_service.set_group_memory_enabled(group_id, False)
             await llm_cmd.finish("本群记忆注入已关闭")
 
+        if tokens[:1] == ["context_limit"] and len(tokens) >= 2:
+            value = tokens[1].lower()
+            if value in {"reset", "off"}:
+                llm_service.reset_group_history_limit(group_id)
+                await llm_cmd.finish(f"本群上下文上限已重置为全局默认（{llm_service.config.runtime.history_limit} 条）")
+            try:
+                n = int(value)
+            except ValueError:
+                await llm_cmd.finish("用法：/llm context_limit <条数> | reset")
+            if n < 1:
+                await llm_cmd.finish("上下文上限须为正整数")
+            llm_service.set_group_history_limit(group_id, n)
+            await llm_cmd.finish(f"本群上下文上限已设为 {n} 条（/llm reload 可重置）")
+
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> <model>|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|clear_context|reload|mcp status"
+            "memory status|memory on|memory off|context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
 
     search_cmd = on_command("search", priority=10, block=True)
@@ -276,3 +291,12 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await forget_cmd.finish("用法：/forget <关键词>")
         deleted = llm_service.forget_group_memories(event.group_id, keyword)
         await forget_cmd.finish(f"已删除 {deleted} 条群记忆")
+
+    forget_all_cmd = on_command("forget_all", priority=10, block=True)
+
+    @forget_all_cmd.handle()
+    async def _(event):
+        if not _is_admin(event):
+            await forget_all_cmd.finish("仅管理员可执行此操作")
+        deleted = llm_service.clear_group_memories(event.group_id)
+        await forget_all_cmd.finish(f"已清空本群全部长期记忆（共 {deleted} 条）")

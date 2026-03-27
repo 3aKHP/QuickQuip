@@ -52,6 +52,7 @@ class GroupSettingsOverride:
     trigger_prefix: str | None = None
     allow_prefix: bool | None = None
     allow_at: bool | None = None
+    history_limit: int | None = None
 
 
 class LLMStore:
@@ -117,12 +118,14 @@ class LLMStore:
             }
             if "memory_enabled" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN memory_enabled INTEGER")
+            if "history_limit" not in existing_columns:
+                conn.execute("ALTER TABLE group_settings ADD COLUMN history_limit INTEGER")
 
     def get_group_settings(self, group_id: int | str) -> GroupSettingsOverride:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT enabled, memory_enabled, provider_id, model, persona_id, trigger_prefix, allow_prefix, allow_at
+                SELECT enabled, memory_enabled, provider_id, model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit
                 FROM group_settings
                 WHERE group_id = ?
                 """,
@@ -139,6 +142,7 @@ class LLMStore:
             trigger_prefix=row["trigger_prefix"],
             allow_prefix=None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
             allow_at=None if row["allow_at"] is None else bool(row["allow_at"]),
+            history_limit=None if row["history_limit"] is None else int(row["history_limit"]),
         )
 
     def update_group_settings(self, group_id: int | str, **fields: object) -> None:
@@ -152,6 +156,7 @@ class LLMStore:
             "trigger_prefix",
             "allow_prefix",
             "allow_at",
+            "history_limit",
         }
         payload = {key: value for key, value in fields.items() if key in allowed_fields}
         if not payload:
@@ -391,6 +396,17 @@ class LLMStore:
                 """,
                 (str(group_id), str(group_id), int(keep_last)),
             )
+
+    def clear_memories(self, group_id: int | str) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM memories
+                WHERE group_id = ?
+                """,
+                (str(group_id),),
+            )
+            return int(cursor.rowcount)
 
     def count_memories(self, group_id: int | str) -> int:
         with self._connect() as conn:
