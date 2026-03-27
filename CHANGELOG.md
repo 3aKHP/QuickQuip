@@ -6,7 +6,7 @@
 
 ### feat: add session archive/resume and preset injection for private chat
 
-Git: `(Pending)`
+Git: `48796e9`
 
 - 新增私聊会话存档与恢复机制：`/end_session` 默认自动存档（`--no-save` 跳过），`/start_session --resume [N]` 或 `/resume_session [N]` 恢复指定或最新存档
 - 新增 `session_archives` SQLite 表，存储每用户自增编号的存档元数据（人格、附加设定、消息数、时间戳）
@@ -17,7 +17,7 @@ Git: `(Pending)`
 
 ### feat: handle recalled and manually deleted messages in LLM context
 
-Git: `(Pending)`
+Git: `48796e9`
 
 - 新增 `GroupRecallNoticeEvent` / `FriendRecallNoticeEvent` 监听，撤回消息自动从 LLM 对话历史和内存缓冲中清除
 - `conversation_messages` 表新增 `message_id` 列，入站消息和 bot 回复的平台消息 ID 均被持久化
@@ -27,7 +27,7 @@ Git: `(Pending)`
 
 ### refactor: split personas into per-file directory structure
 
-Git: `(Pending)`
+Git: `48796e9`
 
 - 将 `config/personas.toml` 拆分为 `config/personas/` 目录，每个 `.toml` 文件对应一个人格，支持未来大规模结构化扩充
 - 新增 `config/personas/_shared.toml`，提取所有人格共享的通用行为准则和风格规则，加载时自动注入各人格，避免重复维护
