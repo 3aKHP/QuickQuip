@@ -1,3 +1,4 @@
+import logging
 import random
 import re
 from datetime import datetime
@@ -5,6 +6,14 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE, BEIJING_TIME_FORMAT, TEXT_REPLY_RULES
+
+logger = logging.getLogger(__name__)
+
+# Pre-compile regex patterns at module load for performance
+_COMPILED_PATTERNS: list[list[re.Pattern[str]]] = [
+    [re.compile(p) for p in rule["patterns"]]
+    for rule in TEXT_REPLY_RULES
+]
 
 
 def build_rule_context(user_id: int | str, sender_name: str, now: Optional[datetime] = None) -> dict:
@@ -38,7 +47,11 @@ def select_reply_template(rule: dict) -> str:
 
 def render_rule_reply(template: str, context: dict, match: re.Match) -> str:
     rendered = replace_regex_groups(template, match)
-    return rendered.format(**context)
+    try:
+        return rendered.format(**context)
+    except KeyError as exc:
+        logger.warning("text rule template has missing variable %s: %r", exc, template)
+        return rendered
 
 
 def is_rule_match_allowed(rule: dict, match: re.Match) -> bool:
@@ -67,8 +80,8 @@ def match_text_rule(
     matched_rules = []
 
     for rule_index, rule in enumerate(TEXT_REPLY_RULES):
-        for pattern in rule["patterns"]:
-            match = re.search(pattern, text)
+        for compiled in _COMPILED_PATTERNS[rule_index]:
+            match = compiled.search(text)
             if not match:
                 continue
             if not is_rule_match_allowed(rule, match):
