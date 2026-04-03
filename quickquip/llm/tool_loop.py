@@ -1,7 +1,34 @@
 from __future__ import annotations
 
-from quickquip.llm.provider import LLMRequest
+import asyncio
+
+from quickquip.llm.provider import LLMProviderError, LLMRequest
 from quickquip.llm.tools import LLMConversationMessage
+
+_RETRYABLE_HTTP_PREFIXES = ("HTTP 429", "HTTP 5", "网络错误")
+
+
+def _is_retryable(exc: LLMProviderError) -> bool:
+    msg = str(exc)
+    return any(msg.startswith(prefix) for prefix in _RETRYABLE_HTTP_PREFIXES)
+
+
+async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int, base_delay: float, logger):
+    last_exc: LLMProviderError | None = None
+    for attempt in range(max_attempts):
+        try:
+            return await client.complete(request)
+        except LLMProviderError as exc:
+            last_exc = exc
+            if attempt + 1 >= max_attempts or not _is_retryable(exc):
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                attempt + 1, max_attempts, delay, exc,
+            )
+            await asyncio.sleep(delay)
+    raise last_exc  # unreachable, but satisfies type checker
 
 
 async def run_tool_call_loop(
@@ -21,13 +48,18 @@ async def run_tool_call_loop(
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))
     max_calls = max(1, min(runtime_config.tool_max_calls_per_round, 32))
+    retry_max = max(1, getattr(runtime_config, "retry_max_attempts", 3))
+    retry_delay = max(0.0, getattr(runtime_config, "retry_base_delay", 1.0))
     search_backend = get_search_backend_name()
     search_unlimited = search_backend == "searxng"
     current_request = request
     counted_rounds = 0
 
     for round_index in range(search_failsafe_max_rounds + 1):
-        response = await client.complete(current_request)
+        response = await _complete_with_retry(
+            client, current_request,
+            max_attempts=retry_max, base_delay=retry_delay, logger=logger,
+        )
         logger.info(
             "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
             provider.id,

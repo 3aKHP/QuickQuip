@@ -30,6 +30,8 @@ class RuntimeConfig:
     tool_calling_enabled: bool = False
     tool_max_rounds: int = 8
     tool_max_calls_per_round: int = 16
+    retry_max_attempts: int = 3
+    retry_base_delay: float = 1.0
 
 
 @dataclass(slots=True)
@@ -331,6 +333,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             tool_calling_enabled=_as_bool(runtime_raw.get("tool_calling_enabled", False), default=False),
             tool_max_rounds=int(runtime_raw.get("tool_max_rounds", 8)),
             tool_max_calls_per_round=int(runtime_raw.get("tool_max_calls_per_round", 16)),
+            retry_max_attempts=int(runtime_raw.get("retry_max_attempts", 3)),
+            retry_base_delay=float(runtime_raw.get("retry_base_delay", 1.0)),
         ),
         triggers=TriggerConfig(
             default_prefix=str(triggers_raw.get("default_prefix", "/ai")).strip() or "/ai",
