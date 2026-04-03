@@ -1,3 +1,5 @@
+import logging
+
 try:
     import nonebot
     from nonebot_plugin_apscheduler import scheduler
@@ -6,6 +8,8 @@ except ModuleNotFoundError:
     scheduler = None
 
 from quickquip.chat.config import SCHEDULED_MESSAGES
+
+logger = logging.getLogger(__name__)
 
 
 def _register_jobs():
@@ -32,12 +36,13 @@ def _register_jobs():
             try:
                 bot = bot_getter()
             except Exception:
+                logger.warning("scheduled_msg: bot not available, skipping")
                 return
             for gid in gids:
                 try:
                     await bot.send_group_msg(group_id=gid, message=msg)
                 except Exception:
-                    pass
+                    logger.warning("scheduled_msg: failed to send to group %s", gid, exc_info=True)
 
         scheduler.add_job(
             _send,
