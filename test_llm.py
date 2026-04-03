@@ -167,6 +167,7 @@ class StubSearchOnlyProviderClient:
 
 class FakeOpenAIClient(OpenAIProviderClient):
     def __init__(self, config: ProviderConfig, response_data: dict):
+        config = ProviderConfig(**{**{f.name: getattr(config, f.name) for f in config.__dataclass_fields__.values()}, "stream_enabled": False})
         super().__init__(config)
         self.response_data = response_data
         self.last_payload = None
@@ -184,6 +185,7 @@ class FakeOpenAIClient(OpenAIProviderClient):
 
 class FakeClaudeClient(ClaudeProviderClient):
     def __init__(self, config: ProviderConfig, response_data: dict):
+        config = ProviderConfig(**{**{f.name: getattr(config, f.name) for f in config.__dataclass_fields__.values()}, "stream_enabled": False})
         super().__init__(config)
         self.response_data = response_data
         self.last_payload = None
@@ -201,6 +203,7 @@ class FakeClaudeClient(ClaudeProviderClient):
 
 class FakeGeminiClient(GeminiProviderClient):
     def __init__(self, config: ProviderConfig, response_data: dict):
+        config = ProviderConfig(**{**{f.name: getattr(config, f.name) for f in config.__dataclass_fields__.values()}, "stream_enabled": False})
         super().__init__(config)
         self.response_data = response_data
         self.last_payload = None
@@ -1447,5 +1450,121 @@ gemini_response = asyncio.run(gemini_client.complete(provider_request))
 assert gemini_client.last_payload["tools"][0]["functionDeclarations"][0]["name"] == "get_identity"
 assert gemini_response.tool_calls[0].name == "get_identity"
 assert gemini_response.tool_calls[0].arguments_json == '{"query": "哈基镜"}'
+
+# ── Streaming assembly tests ──
+
+# OpenAI streaming: text only
+openai_text_chunks = [
+    {"model": "gpt-5.4", "choices": [{"delta": {"content": "你好"}, "finish_reason": None}]},
+    {"model": "gpt-5.4", "choices": [{"delta": {"content": "世界"}, "finish_reason": None}]},
+    {"model": "gpt-5.4", "choices": [{"delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 2}},
+]
+openai_stream_resp = OpenAIProviderClient._assemble_stream_response(openai_text_chunks, "gpt-5.4")
+assert openai_stream_resp.text == "你好世界"
+assert openai_stream_resp.finish_reason == "stop"
+assert openai_stream_resp.input_tokens == 10
+assert openai_stream_resp.output_tokens == 2
+assert openai_stream_resp.tool_calls == []
+
+# OpenAI streaming: tool calls with incremental arguments
+openai_tool_chunks = [
+    {"model": "gpt-5.4", "choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "search_web", "arguments": '{"qu'}}]}, "finish_reason": None}]},
+    {"model": "gpt-5.4", "choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": 'ery": "test"}'}}]}, "finish_reason": None}]},
+    {"model": "gpt-5.4", "choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+]
+openai_tool_resp = OpenAIProviderClient._assemble_stream_response(openai_tool_chunks, "gpt-5.4")
+assert openai_tool_resp.text == ""
+assert len(openai_tool_resp.tool_calls) == 1
+assert openai_tool_resp.tool_calls[0].id == "call_1"
+assert openai_tool_resp.tool_calls[0].name == "search_web"
+assert json.loads(openai_tool_resp.tool_calls[0].arguments_json) == {"query": "test"}
+assert openai_tool_resp.finish_reason == "tool_calls"
+
+# Claude streaming: text only
+claude_text_chunks = [
+    {"_sse_event": "message_start", "message": {"model": "claude-sonnet-4-6", "usage": {"input_tokens": 15}}},
+    {"_sse_event": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"_sse_event": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "你好"}},
+    {"_sse_event": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "世界"}},
+    {"_sse_event": "content_block_stop", "index": 0},
+    {"_sse_event": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 8}},
+]
+claude_stream_resp = ClaudeProviderClient._assemble_stream_response(claude_text_chunks, "claude-sonnet-4-6")
+assert claude_stream_resp.text == "你好世界"
+assert claude_stream_resp.finish_reason == "end_turn"
+assert claude_stream_resp.input_tokens == 15
+assert claude_stream_resp.output_tokens == 8
+assert claude_stream_resp.tool_calls == []
+
+# Claude streaming: tool use
+claude_tool_chunks = [
+    {"_sse_event": "message_start", "message": {"model": "claude-sonnet-4-6", "usage": {"input_tokens": 20}}},
+    {"_sse_event": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "search_web"}},
+    {"_sse_event": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": '{"quer'}},
+    {"_sse_event": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": 'y": "test"}'}},
+    {"_sse_event": "content_block_stop", "index": 0},
+    {"_sse_event": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 12}},
+]
+claude_tool_resp = ClaudeProviderClient._assemble_stream_response(claude_tool_chunks, "claude-sonnet-4-6")
+assert claude_tool_resp.text == ""
+assert len(claude_tool_resp.tool_calls) == 1
+assert claude_tool_resp.tool_calls[0].id == "toolu_1"
+assert claude_tool_resp.tool_calls[0].name == "search_web"
+assert json.loads(claude_tool_resp.tool_calls[0].arguments_json) == {"query": "test"}
+
+# Gemini streaming: text only
+gemini_text_chunks = [
+    {"candidates": [{"content": {"parts": [{"text": "你好"}]}}]},
+    {"candidates": [{"content": {"parts": [{"text": "世界"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 4}},
+]
+gemini_stream_resp = GeminiProviderClient._assemble_stream_response(gemini_text_chunks, "gemini-pro")
+assert gemini_stream_resp.text == "你好世界"
+assert gemini_stream_resp.finish_reason == "STOP"
+assert gemini_stream_resp.input_tokens == 10
+assert gemini_stream_resp.output_tokens == 4
+assert gemini_stream_resp.tool_calls == []
+
+# Gemini streaming: function call
+gemini_tool_chunks = [
+    {"candidates": [{"content": {"parts": [{"functionCall": {"name": "search_web", "args": {"query": "test"}}}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}},
+]
+gemini_tool_resp = GeminiProviderClient._assemble_stream_response(gemini_tool_chunks, "gemini-pro")
+assert gemini_tool_resp.text == ""
+assert len(gemini_tool_resp.tool_calls) == 1
+assert gemini_tool_resp.tool_calls[0].name == "search_web"
+assert json.loads(gemini_tool_resp.tool_calls[0].arguments_json) == {"query": "test"}
+
+# Streaming fallback: when stream_enabled=True but _post_stream_sse fails with non-LLMProviderError
+class FakeStreamFallbackClient(OpenAIProviderClient):
+    def __init__(self, config, response_data):
+        super().__init__(config)
+        self.response_data = response_data
+        self.stream_attempted = False
+
+    async def _prepare_image_inputs(self, image_urls):
+        return []
+
+    def _get_api_key(self) -> str:
+        return "test-key"
+
+    async def _post_stream_sse(self, url, headers, payload):
+        self.stream_attempted = True
+        raise ValueError("simulated stream parse failure")
+
+    async def _post_json(self, url, headers, payload):
+        return self.response_data
+
+stream_fallback_config = ProviderConfig(
+    id="test", protocol="openai", base_url="http://test",
+    api_key_env="TEST_KEY", default_model="gpt-test", models=["gpt-test"],
+    stream_enabled=True,
+)
+stream_fallback_client = FakeStreamFallbackClient(
+    stream_fallback_config,
+    {"choices": [{"message": {"content": "fallback reply"}, "finish_reason": "stop"}], "model": "gpt-test"},
+)
+stream_fallback_resp = asyncio.run(stream_fallback_client.complete(provider_request))
+assert stream_fallback_client.stream_attempted
+assert stream_fallback_resp.text == "fallback reply"
 
 print("LLM 测试通过")

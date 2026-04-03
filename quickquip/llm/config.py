@@ -86,6 +86,7 @@ class ProviderConfig:
     temperature: float = 0.8
     max_output_tokens: int = 800
     style_overrides: str = ""
+    stream_enabled: bool = True
     headers: dict[str, str] = field(default_factory=dict)
 
 
@@ -247,6 +248,7 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
             temperature=float(entry.get("temperature", 0.8)),
             max_output_tokens=int(entry.get("max_output_tokens", 800)),
             style_overrides=str(entry.get("style_overrides", "")).strip(),
+            stream_enabled=_as_bool(entry.get("stream_enabled", True), default=True),
             headers={str(k): str(v) for k, v in raw_headers.items()},
         )
     return providers

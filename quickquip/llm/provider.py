@@ -137,6 +137,54 @@ class BaseProviderClient:
 
         return await asyncio.to_thread(_send)
 
+    async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        body = json.dumps(payload).encode("utf-8")
+        headers = {**headers, "Accept": "text/event-stream"}
+        http_request = request.Request(url=url, data=body, headers=headers, method="POST")
+
+        def _stream() -> list[dict[str, Any]]:
+            try:
+                response = request.urlopen(http_request, timeout=self.config.timeout_seconds)
+            except error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                raise LLMProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
+            except error.URLError as exc:
+                raise LLMProviderError(f"网络错误：{exc.reason}") from exc
+
+            events: list[dict[str, Any]] = []
+            current_event = ""
+            current_data_lines: list[str] = []
+            try:
+                while True:
+                    raw_line = response.readline()
+                    if not raw_line:
+                        break
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                    if line.startswith("event:"):
+                        current_event = line[6:].strip()
+                    elif line.startswith("data:"):
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        current_data_lines.append(data_str)
+                    elif line == "":
+                        if current_data_lines:
+                            joined = " ".join(current_data_lines)
+                            try:
+                                data = json.loads(joined)
+                                if current_event:
+                                    data["_sse_event"] = current_event
+                                events.append(data)
+                            except json.JSONDecodeError:
+                                pass
+                        current_event = ""
+                        current_data_lines = []
+            finally:
+                response.close()
+            return events
+
+        return await asyncio.to_thread(_stream)
+
 
 class OpenAIProviderClient(BaseProviderClient):
     async def _serialize_message(self, message: LLMConversationMessage) -> dict[str, Any]:
@@ -184,7 +232,7 @@ class OpenAIProviderClient(BaseProviderClient):
 
         return {"role": "user", "content": message.content}
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
+    async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/chat/completions"
         headers = {
             "Authorization": f"Bearer {self._get_api_key()}",
@@ -214,8 +262,10 @@ class OpenAIProviderClient(BaseProviderClient):
                 for spec in request.tools
             ]
             payload["tool_choice"] = request.tool_choice
+        return url, headers, payload
 
-        data = await self._post_json(url, headers, payload)
+    @staticmethod
+    def _parse_response(data: dict[str, Any], fallback_model: str) -> LLMResponse:
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message", {})
         tool_calls = [
@@ -230,12 +280,88 @@ class OpenAIProviderClient(BaseProviderClient):
         usage = data.get("usage", {})
         return LLMResponse(
             text=_text_from_block_list(message.get("content")),
-            model=str(data.get("model", request.model)),
+            model=str(data.get("model", fallback_model)),
             tool_calls=tool_calls,
             finish_reason=str(choice.get("finish_reason", "")).strip() or None,
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
         )
+
+    @staticmethod
+    def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
+        text_parts: list[str] = []
+        tool_calls_acc: dict[int, dict[str, str]] = {}  # index -> {id, name, arguments}
+        finish_reason: str | None = None
+        model = fallback_model
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+
+        for chunk in chunks:
+            model = str(chunk.get("model", model))
+            choices = chunk.get("choices") or []
+            if choices:
+                choice = choices[0] if isinstance(choices[0], dict) else {}
+                delta = choice.get("delta", {})
+                if delta.get("content"):
+                    text_parts.append(str(delta["content"]))
+                for tc in delta.get("tool_calls", []) or []:
+                    idx = tc.get("index", 0)
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc.get("id"):
+                        tool_calls_acc[idx]["id"] = str(tc["id"])
+                    func = tc.get("function", {})
+                    if func.get("name"):
+                        tool_calls_acc[idx]["name"] = str(func["name"])
+                    if func.get("arguments"):
+                        tool_calls_acc[idx]["arguments"] += str(func["arguments"])
+                if choice.get("finish_reason"):
+                    finish_reason = str(choice["finish_reason"])
+            usage = chunk.get("usage")
+            if isinstance(usage, dict):
+                if usage.get("prompt_tokens") is not None:
+                    input_tokens = usage["prompt_tokens"]
+                if usage.get("completion_tokens") is not None:
+                    output_tokens = usage["completion_tokens"]
+
+        tool_calls = [
+            LLMToolCall(
+                id=acc["id"] or f"tool_{idx + 1}",
+                name=acc["name"],
+                arguments_json=_json_string(acc["arguments"] or "{}"),
+            )
+            for idx, acc in sorted(tool_calls_acc.items())
+        ]
+        return LLMResponse(
+            text="".join(text_parts).strip(),
+            model=model,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
+        url, headers, payload = await self._build_request_parts(request)
+        data = await self._post_json(url, headers, payload)
+        return self._parse_response(data, request.model)
+
+    async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
+        url, headers, payload = await self._build_request_parts(request)
+        payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
+        chunks = await self._post_stream_sse(url, headers, payload)
+        return self._assemble_stream_response(chunks, request.model)
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        if self.config.stream_enabled:
+            try:
+                return await self._complete_stream(request)
+            except LLMProviderError:
+                raise
+            except Exception:
+                return await self._complete_non_stream(request)
+        return await self._complete_non_stream(request)
 
 
 class ClaudeProviderClient(BaseProviderClient):
@@ -315,7 +441,7 @@ class ClaudeProviderClient(BaseProviderClient):
         await _flush_tool_results()
         return serialized
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
+    async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/messages"
         headers = {
             "x-api-key": self._get_api_key(),
@@ -339,8 +465,10 @@ class ClaudeProviderClient(BaseProviderClient):
                 }
                 for spec in request.tools
             ]
+        return url, headers, payload
 
-        data = await self._post_json(url, headers, payload)
+    @staticmethod
+    def _parse_response(data: dict[str, Any], fallback_model: str) -> LLMResponse:
         content = data.get("content", [])
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
@@ -361,12 +489,97 @@ class ClaudeProviderClient(BaseProviderClient):
         usage = data.get("usage", {})
         return LLMResponse(
             text="".join(text_parts).strip(),
-            model=str(data.get("model", request.model)),
+            model=str(data.get("model", fallback_model)),
             tool_calls=tool_calls,
             finish_reason=str(data.get("stop_reason", "")).strip() or None,
             input_tokens=usage.get("input_tokens"),
             output_tokens=usage.get("output_tokens"),
         )
+
+    @staticmethod
+    def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
+        text_parts: list[str] = []
+        tool_calls_acc: dict[int, dict[str, str]] = {}  # block_index -> {id, name, input_json}
+        finish_reason: str | None = None
+        model = fallback_model
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+        current_block_index = -1
+
+        for chunk in chunks:
+            event = chunk.get("_sse_event", "")
+
+            if event == "message_start":
+                msg = chunk.get("message", {})
+                model = str(msg.get("model", model))
+                usage = msg.get("usage", {})
+                if usage.get("input_tokens") is not None:
+                    input_tokens = usage["input_tokens"]
+
+            elif event == "content_block_start":
+                current_block_index = chunk.get("index", current_block_index + 1)
+                block = chunk.get("content_block", {})
+                if block.get("type") == "tool_use":
+                    tool_calls_acc[current_block_index] = {
+                        "id": str(block.get("id", "")),
+                        "name": str(block.get("name", "")),
+                        "input_json": "",
+                    }
+
+            elif event == "content_block_delta":
+                delta = chunk.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    text_parts.append(str(delta.get("text", "")))
+                elif delta.get("type") == "input_json_delta":
+                    idx = chunk.get("index", current_block_index)
+                    if idx in tool_calls_acc:
+                        tool_calls_acc[idx]["input_json"] += str(delta.get("partial_json", ""))
+
+            elif event == "message_delta":
+                delta = chunk.get("delta", {})
+                if delta.get("stop_reason"):
+                    finish_reason = str(delta["stop_reason"])
+                usage = chunk.get("usage", {})
+                if usage.get("output_tokens") is not None:
+                    output_tokens = usage["output_tokens"]
+
+        tool_calls = [
+            LLMToolCall(
+                id=acc["id"] or f"tool_{idx + 1}",
+                name=acc["name"],
+                arguments_json=_json_string(acc["input_json"] or "{}"),
+            )
+            for idx, acc in sorted(tool_calls_acc.items())
+        ]
+        return LLMResponse(
+            text="".join(text_parts).strip(),
+            model=model,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
+        url, headers, payload = await self._build_request_parts(request)
+        data = await self._post_json(url, headers, payload)
+        return self._parse_response(data, request.model)
+
+    async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
+        url, headers, payload = await self._build_request_parts(request)
+        payload["stream"] = True
+        chunks = await self._post_stream_sse(url, headers, payload)
+        return self._assemble_stream_response(chunks, request.model)
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        if self.config.stream_enabled:
+            try:
+                return await self._complete_stream(request)
+            except LLMProviderError:
+                raise
+            except Exception:
+                return await self._complete_non_stream(request)
+        return await self._complete_non_stream(request)
 
 
 class GeminiProviderClient(BaseProviderClient):
@@ -438,9 +651,12 @@ class GeminiProviderClient(BaseProviderClient):
         _flush_tool_results()
         return serialized
 
-    async def complete(self, request: LLMRequest) -> LLMResponse:
+    async def _build_request_parts(self, request: LLMRequest, *, stream: bool = False) -> tuple[str, dict[str, str], dict[str, Any]]:
         api_key = self._get_api_key()
-        url = self.config.base_url.rstrip("/") + f"/models/{request.model}:generateContent?key={parse.quote(api_key)}"
+        action = "streamGenerateContent" if stream else "generateContent"
+        url = self.config.base_url.rstrip("/") + f"/models/{request.model}:{action}?key={parse.quote(api_key)}"
+        if stream:
+            url += "&alt=sse"
         payload: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": request.system_prompt}]},
             "contents": await self._serialize_messages(request.messages),
@@ -462,14 +678,14 @@ class GeminiProviderClient(BaseProviderClient):
                     ]
                 }
             ]
-
         headers = {
             "Content-Type": "application/json",
             **self.config.headers,
         }
-        data = await self._post_json(url, headers, payload)
-        candidates = data.get("candidates", [])
-        candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
+        return url, headers, payload
+
+    @staticmethod
+    def _parse_candidate(candidate: dict[str, Any], fallback_model: str) -> LLMResponse:
         content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
         parts = content.get("parts", []) if isinstance(content, dict) else []
         text_parts: list[str] = []
@@ -488,16 +704,86 @@ class GeminiProviderClient(BaseProviderClient):
                         arguments_json=_json_string(function_call.get("args", {})),
                     )
                 )
-
-        usage = data.get("usageMetadata", {})
         return LLMResponse(
             text="".join(text_parts).strip(),
-            model=request.model,
+            model=fallback_model,
             tool_calls=tool_calls,
             finish_reason=str(candidate.get("finishReason", "")).strip() or None,
-            input_tokens=usage.get("promptTokenCount"),
-            output_tokens=usage.get("candidatesTokenCount"),
         )
+
+    @staticmethod
+    def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
+        text_parts: list[str] = []
+        tool_calls: list[LLMToolCall] = []
+        finish_reason: str | None = None
+        input_tokens: int | None = None
+        output_tokens: int | None = None
+        tool_counter = 0
+
+        for chunk in chunks:
+            candidates = chunk.get("candidates", [])
+            if isinstance(candidates, list) and candidates:
+                candidate = candidates[0] if isinstance(candidates[0], dict) else {}
+                content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
+                parts = content.get("parts", []) if isinstance(content, dict) else []
+                for item in parts if isinstance(parts, list) else []:
+                    if not isinstance(item, dict):
+                        continue
+                    if "text" in item:
+                        text_parts.append(str(item.get("text", "")))
+                    if "functionCall" in item:
+                        tool_counter += 1
+                        function_call = item.get("functionCall", {})
+                        tool_calls.append(
+                            LLMToolCall(
+                                id=f"tool_{tool_counter}",
+                                name=str(function_call.get("name", "")).strip(),
+                                arguments_json=_json_string(function_call.get("args", {})),
+                            )
+                        )
+                if candidate.get("finishReason"):
+                    finish_reason = str(candidate["finishReason"])
+            usage = chunk.get("usageMetadata", {})
+            if isinstance(usage, dict):
+                if usage.get("promptTokenCount") is not None:
+                    input_tokens = usage["promptTokenCount"]
+                if usage.get("candidatesTokenCount") is not None:
+                    output_tokens = usage["candidatesTokenCount"]
+
+        return LLMResponse(
+            text="".join(text_parts).strip(),
+            model=fallback_model,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
+        url, headers, payload = await self._build_request_parts(request)
+        data = await self._post_json(url, headers, payload)
+        candidates = data.get("candidates", [])
+        candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
+        response = self._parse_candidate(candidate, request.model)
+        usage = data.get("usageMetadata", {})
+        response.input_tokens = usage.get("promptTokenCount")
+        response.output_tokens = usage.get("candidatesTokenCount")
+        return response
+
+    async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
+        url, headers, payload = await self._build_request_parts(request, stream=True)
+        chunks = await self._post_stream_sse(url, headers, payload)
+        return self._assemble_stream_response(chunks, request.model)
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        if self.config.stream_enabled:
+            try:
+                return await self._complete_stream(request)
+            except LLMProviderError:
+                raise
+            except Exception:
+                return await self._complete_non_stream(request)
+        return await self._complete_non_stream(request)
 
 
 def build_provider_client(config: ProviderConfig) -> BaseProviderClient:
