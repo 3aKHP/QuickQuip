@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import re
+from typing import Iterable
 from urllib import parse
 from zoneinfo import ZoneInfo
 
@@ -40,6 +41,23 @@ def normalize_forum_keyword(value: str) -> str:
     return normalized
 
 
+def normalize_forum_keywords(values: str | Iterable[str]) -> tuple[str, ...]:
+    if isinstance(values, str):
+        raw_items = re.split(r"[\r\n,;|]+", values)
+    else:
+        raw_items = [str(item or "") for item in values]
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        forum_keyword = normalize_forum_keyword(item)
+        if not forum_keyword or forum_keyword in seen:
+            continue
+        seen.add(forum_keyword)
+        normalized.append(forum_keyword)
+    return tuple(normalized)
+
+
 def load_project_env_files() -> None:
     load_dotenv(PROJECT_ROOT / ".env", override=False)
     load_dotenv(PROJECT_ROOT / "dev/.env", override=True)
@@ -69,7 +87,6 @@ def format_timestamp(timestamp: float) -> str:
 @dataclass(slots=True)
 class TiebaConfig:
     enabled: bool
-    forum_keyword: str
     sync_interval_seconds: int
     max_pool_size: int
     recent_sent_limit: int
@@ -81,24 +98,47 @@ class TiebaConfig:
     profile_dir: Path
     state_path: Path
     store_path: Path
+    forum_keyword: str = ""
+    forum_keywords: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        merged = list(normalize_forum_keywords(self.forum_keywords))
+        primary = normalize_forum_keyword(self.forum_keyword)
+        if primary and primary not in merged:
+            merged.insert(0, primary)
+        self.forum_keywords = tuple(merged)
+        self.forum_keyword = self.forum_keywords[0] if self.forum_keywords else primary
 
     @property
     def forum_url(self) -> str:
-        encoded_kw = parse.quote(self.forum_keyword)
+        if not self.forum_keyword:
+            return ""
+        return self.get_forum_url(self.forum_keyword)
+
+    def get_forum_url(self, forum_keyword: str) -> str:
+        encoded_kw = parse.quote(normalize_forum_keyword(forum_keyword))
         return f"https://tieba.baidu.com/f?kw={encoded_kw}"
 
     @property
     def is_configured(self) -> bool:
-        return self.enabled and bool(self.forum_keyword)
+        return self.enabled and bool(self.forum_keywords)
+
+    def has_forum(self, forum_keyword: str) -> bool:
+        return normalize_forum_keyword(forum_keyword) in set(self.forum_keywords)
 
 
 def load_tieba_config() -> TiebaConfig:
     load_project_env_files()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    forum_keywords = normalize_forum_keywords(
+        os.getenv("TIEBA_FORUM_KEYWORDS", "")
+        or os.getenv("TIEBA_FORUM_KEYWORD", "")
+    )
     return TiebaConfig(
         enabled=env_bool("TIEBA_ENABLED", False),
-        forum_keyword=normalize_forum_keyword(os.getenv("TIEBA_FORUM_KEYWORD", "")),
+        forum_keyword=forum_keywords[0] if forum_keywords else "",
+        forum_keywords=forum_keywords,
         sync_interval_seconds=max(
             60,
             int(os.getenv("TIEBA_SYNC_INTERVAL_SECONDS", DEFAULT_SYNC_INTERVAL_SECONDS) or DEFAULT_SYNC_INTERVAL_SECONDS),

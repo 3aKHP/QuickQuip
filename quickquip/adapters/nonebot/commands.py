@@ -52,6 +52,24 @@ def _parse_resume(args: str) -> tuple[bool, int | None]:
     return True, int(num_str) if num_str else None
 
 
+def _parse_tieba_command_args(args: str) -> tuple[str, str | None, bool]:
+    normalized_args = args.strip()
+    if not normalized_args:
+        return "random", None, False
+
+    tokens = normalized_args.split()
+    head = tokens[0].lower()
+    remainder = normalized_args[len(tokens[0]):].strip()
+
+    if head in {"random", "status", "refresh", "source"}:
+        return head, remainder or None, False
+    if head == "text":
+        return "random", remainder or None, True
+    if head == "list":
+        return "status", None, False
+    return "random", normalized_args, False
+
+
 def register_commands(on_command, Message, MessageSegment) -> None:
     start_session_cmd = on_command("start_sesssion", priority=10, block=True)
     start_session_alias_cmd = on_command("start_session", priority=10, block=True)
@@ -380,51 +398,59 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "tieba")
-        normalized_args = args.lower()
+        action, forum_keyword, text_only = _parse_tieba_command_args(args)
 
-        if not args or normalized_args == "random":
+        if action == "random":
             if not rate_limiter.allow(TIEBA_RULE_NAME, event.user_id):
                 await tieba_cmd.finish("贴吧搬运过于频繁，请稍后再试")
-            thread = await tieba_service.get_random_thread()
+            try:
+                thread = await tieba_service.get_random_thread(forum_keyword=forum_keyword)
+            except TiebaServiceError as exc:
+                await tieba_cmd.finish(f"贴吧搬运失败：{exc}")
             if thread is None:
-                if tieba_service.store.login_required:
+                if tieba_service.is_login_required(forum_keyword):
                     await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python dev/tools/tieba_login.py")
+                if forum_keyword:
+                    await tieba_cmd.finish(f"{forum_keyword}吧消息池为空，请稍后再试或让管理员执行 /tieba refresh {forum_keyword}")
                 await tieba_cmd.finish("当前贴吧池为空，请稍后再试或让管理员执行 /tieba refresh")
-            tieba_service.mark_sent(thread.tid)
+            tieba_service.mark_sent(thread)
             stats_tracker.record_trigger(event.group_id, TIEBA_RULE_NAME)
+            if text_only:
+                await tieba_cmd.finish(tieba_service.build_thread_preview(thread))
             message = Message([MessageSegment.text(tieba_service.build_thread_preview(thread))])
             image_url = thread.cover_image_url or (thread.image_urls[0] if thread.image_urls else "")
             if image_url:
                 message.append(MessageSegment.image(image_url))
             await tieba_cmd.finish(message)
 
-        if normalized_args == "text":
-            if not rate_limiter.allow(TIEBA_RULE_NAME, event.user_id):
-                await tieba_cmd.finish("贴吧搬运过于频繁，请稍后再试")
-            thread = await tieba_service.get_random_thread()
-            if thread is None:
-                if tieba_service.store.login_required:
-                    await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python dev/tools/tieba_login.py")
-                await tieba_cmd.finish("当前贴吧池为空，请稍后再试或让管理员执行 /tieba refresh")
-            tieba_service.mark_sent(thread.tid)
-            stats_tracker.record_trigger(event.group_id, TIEBA_RULE_NAME)
-            await tieba_cmd.finish(tieba_service.build_thread_preview(thread))
+        if action == "status":
+            try:
+                await tieba_cmd.finish(tieba_service.format_status(forum_keyword=forum_keyword))
+            except TiebaServiceError as exc:
+                await tieba_cmd.finish(f"贴吧状态读取失败：{exc}")
 
-        if normalized_args == "status":
-            await tieba_cmd.finish(tieba_service.format_status())
+        if action == "source":
+            try:
+                await tieba_cmd.finish(tieba_service.format_sources(forum_keyword=forum_keyword))
+            except TiebaServiceError as exc:
+                await tieba_cmd.finish(f"贴吧来源读取失败：{exc}")
 
-        if normalized_args == "refresh":
+        if action == "refresh":
             if not _is_admin(event):
                 await tieba_cmd.finish("仅管理员可执行此操作")
             try:
-                result = await tieba_service.sync_now(force=True)
+                target_forum = None if forum_keyword in {None, "", "all"} else forum_keyword
+                result = await tieba_service.sync_now(force=True, forum_keyword=target_forum)
             except TiebaLoginRequiredError as exc:
                 await tieba_cmd.finish(f"{exc}\n请运行 python dev/tools/tieba_login.py 续签登录态")
             except TiebaServiceError as exc:
                 await tieba_cmd.finish(f"贴吧同步失败：{exc}")
             await tieba_cmd.finish(str(result["message"]))
 
-        await tieba_cmd.finish("贴吧命令用法：/tieba | /tieba text | /tieba status | /tieba refresh")
+        await tieba_cmd.finish(
+            "贴吧命令用法：/tieba [贴吧名] | /tieba text [贴吧名] | "
+            "/tieba status [贴吧名] | /tieba source [贴吧名] | /tieba refresh [贴吧名|all]"
+        )
 
     reset_stats_cmd = on_command("reset_stats", priority=10, block=True)
 

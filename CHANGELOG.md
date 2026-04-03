@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+### feat: support multi-source tieba pools and source listing
+
+Git: `(Pending)`
+
+- 将贴吧搬运从单一固定贴吧升级为多贴吧来源池，支持通过 `TIEBA_FORUM_KEYWORDS` 配置多个来源，并继续兼容旧字段 `TIEBA_FORUM_KEYWORD`
+- `/tieba`、`/tieba text`、`/tieba status`、`/tieba refresh` 新增可选贴吧名参数，支持按指定来源抽取、查看状态和定向同步
+- 新增 `/tieba source [贴吧名]` 命令，用于查看全部或指定来源的缓存、状态与登录态摘要
+- 重构贴吧存储结构，按来源分别维护缓存、同步状态与最近发送记录，同时保留旧版单池缓存文件的加载兼容
+- 同步更新 README、群聊命令文档、环境变量示例与贴吧测试覆盖
+
 ### feat: add session archive/resume and preset injection for private chat
 
 Git: `48796e9`

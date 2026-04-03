@@ -203,13 +203,19 @@ AI 默认只在下面两种情况回复：
 /memories 阿桃
 ```
 
-### 4.10 随机搬运固定贴吧帖子
+### 4.10 随机搬运贴吧帖子
 
 ```text
 /tieba
 ```
 
-默认会随机发一条缓存帖子，带标题、摘要、原帖链接和镇楼图。
+默认会从全部已配置贴吧来源里随机发一条缓存帖子，带标题、摘要、原帖链接和镇楼图。
+
+如果想指定来源贴吧：
+
+```text
+/tieba 搬石
+```
 
 如果只想看文字版：
 
@@ -217,10 +223,34 @@ AI 默认只在下面两种情况回复：
 /tieba text
 ```
 
+也可以指定来源：
+
+```text
+/tieba text 搬石
+```
+
 查看当前贴吧缓存和同步状态：
 
 ```text
 /tieba status
+```
+
+也可以只看某一个来源：
+
+```text
+/tieba status 搬石
+```
+
+查看已配置的来源池摘要：
+
+```text
+/tieba source
+```
+
+也可以只看某一个来源：
+
+```text
+/tieba source 搬石
 ```
 
 ---
@@ -381,10 +411,22 @@ AI 默认只在下面两种情况回复：
 /reset_stats
 ```
 
-### 5.15 立即同步固定贴吧
+### 5.15 立即同步贴吧缓存
 
 ```text
 /tieba refresh
+```
+
+如果只同步某一个来源贴吧：
+
+```text
+/tieba refresh 搬石
+```
+
+如果想一次性同步全部来源，也可以显式写：
+
+```text
+/tieba refresh all
 ```
 
 如果提示需要人工续签登录态，请在机器人所在机器上运行：
@@ -489,8 +531,10 @@ QuickQuip 里的“记忆”分两种：
 - `/llm mcp`
 - `/memories`
 - `/tieba`
-- `/tieba text`
-- `/tieba status`
+- `/tieba [贴吧名]`
+- `/tieba text [贴吧名]`
+- `/tieba status [贴吧名]`
+- `/tieba source [贴吧名]`
 
 管理员最常用：
 
@@ -510,7 +554,7 @@ QuickQuip 里的“记忆”分两种：
 - `/forget_all`
 - `/disable <rule>`
 - `/enable <rule>`
-- `/tieba refresh`
+- `/tieba refresh [贴吧名|all]`
 
 如果只记一句话：
 

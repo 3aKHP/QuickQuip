@@ -153,18 +153,19 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - 私聊单会话的默认上下文上限为 256 条，适合连续对话
 - 私聊可继续使用 `/llm status`、`/llm current`、`/llm persona use <id>`、`/llm trigger prefix <value>`、`/llm context_limit <n>`、`/llm clear_context`、`/search`、`/remember`、`/memories`、`/forget`、`/forget_all`
 
-### 🖼️ 固定贴吧随机搬运
+### 🖼️ 多贴吧随机搬运
 
-支持为一个固定贴吧维护本地帖子池，并在群里随机抽取一条帖子发送。
+支持为多个贴吧分别维护本地帖子池，并在群里随机抽取一条帖子发送，也支持按指定来源搬运。
 
 | 命令 | 说明 | 权限 |
 |------|------|------|
-| `/tieba` | 随机发送一条缓存帖子，默认带镇楼图 | 所有人 |
-| `/tieba text` | 随机发送一条缓存帖子，仅文字 | 所有人 |
-| `/tieba status` | 查看贴吧缓存、同步和登录态状态 | 所有人 |
-| `/tieba refresh` | 立即同步固定贴吧 | 管理员/群主 |
+| `/tieba [贴吧名]` | 随机发送一条缓存帖子，默认带镇楼图；可指定来源贴吧 | 所有人 |
+| `/tieba text [贴吧名]` | 随机发送一条缓存帖子，仅文字；可指定来源贴吧 | 所有人 |
+| `/tieba status [贴吧名]` | 查看全部或指定贴吧的缓存、同步和登录态状态 | 所有人 |
+| `/tieba source [贴吧名]` | 查看全部或指定贴吧的来源池摘要 | 所有人 |
+| `/tieba refresh [贴吧名\|all]` | 立即同步全部或指定贴吧 | 管理员/群主 |
 
-当前实现默认只抓取 `.env` 中配置的一个固定贴吧，并把登录后的跨平台 `storage_state.json` 保存在 `data/tieba/` 下。遇到百度安全验证时，需要人工运行登录辅助脚本续签，不会自动绕过验证。
+当前实现会优先读取 `.env` 中的 `TIEBA_FORUM_KEYWORDS` 作为多贴吧来源列表；如果未配置，则回退到旧版单贴吧配置 `TIEBA_FORUM_KEYWORD`。登录后的跨平台 `storage_state.json` 保存在 `data/tieba/` 下，各贴吧来源共用同一份登录态。遇到百度安全验证时，需要人工运行登录辅助脚本续签，不会自动绕过验证。
 
 ### 🎲 随机回复（引擎已就绪）
 
@@ -207,7 +208,7 @@ QuickQuip/
 │   ├── common/                     # 通用基础设施：JSON 持久化、限流、去重、最近消息缓冲
 │   ├── llm/                        # LLM 配置、运行时组件、provider、MCP、工具调用
 │   ├── search/                     # 联网搜索后端与兼容导出
-│   └── tieba/                      # 固定贴吧配置、抓取、缓存与服务层
+│   └── tieba/                      # 多贴吧配置、抓取、缓存与服务层
 ├── .gitignore                      # Git 忽略规则
 ├── test_tz.py                      # 全功能断言测试脚本
 ├── test_llm.py                     # LLM 基础功能断言测试脚本
@@ -297,7 +298,7 @@ QuickQuip/
    TAVILY_API_KEY=your_tavily_key_here
    ```
 
-6. **可选：启用固定贴吧随机搬运**
+6. **可选：启用多贴吧随机搬运**
 
    安装 Playwright 依赖后，还需要安装浏览器：
 
@@ -305,16 +306,16 @@ QuickQuip/
    python -m playwright install chromium
    ```
 
-   然后在 [`.env`](.env) 中配置固定贴吧：
+   然后在 [`.env`](.env) 中配置贴吧来源：
 
    ```env
    TIEBA_ENABLED=true
-   TIEBA_FORUM_KEYWORD=示例贴吧名
+   TIEBA_FORUM_KEYWORDS=示例贴吧名1,示例贴吧名2
    TIEBA_SYNC_INTERVAL_SECONDS=900
    TIEBA_BROWSER_HEADLESS=true
    ```
 
-   `TIEBA_FORUM_KEYWORD` 建议填写贴吧名本体，例如 `搬石`。当前实现也会自动兼容末尾多写一个 `吧` 的情况。
+   `TIEBA_FORUM_KEYWORDS` 支持用逗号、分号、竖线或换行分隔多个贴吧名，例如 `搬石,明日方舟手游`。如果仍然只想配置一个来源，也可以继续使用旧字段 `TIEBA_FORUM_KEYWORD`。当前实现会自动兼容末尾多写一个 `吧` 的情况。
 
    首次使用前，运行登录辅助脚本，在弹出的浏览器里手动完成贴吧登录和任何安全验证：
 
@@ -458,7 +459,7 @@ quickquip/app/message_pipeline.py        ← 应用级消息管线与共享状�
   │
   ├─ quickquip/llm/                      ← LLM 配置、provider、MCP、tool loop、prompt 构建
   ├─ quickquip/search/                   ← SearXNG / Tavily 搜索后端
-  └─ quickquip/tieba/                    ← 固定贴吧配置、抓取、缓存与服务层
+  └─ quickquip/tieba/                    ← 多贴吧配置、抓取、缓存与服务层
 ```
 
 普通规则消息的回复优先级从高到低仍然是：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每个环节均受群级规则开关控制，被禁用的规则会被跳过并尝试下一级。部分近义彩蛋规则会共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。

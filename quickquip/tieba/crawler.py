@@ -61,13 +61,13 @@ class TiebaCrawler:
         if self.is_challenge_page(title, content, current_url):
             raise TiebaLoginRequiredError(f"{label} 命中百度安全验证，需要人工续签登录态")
 
-    async def load_forum_feed_data(self, page: Page) -> dict[str, object]:
+    async def load_forum_feed_data(self, page: Page, forum_keyword: str) -> dict[str, object]:
         try:
             async with page.expect_response(
                 lambda response: "tieba.baidu.com/c/f/frs/page_pc" in response.url,
                 timeout=20_000,
             ) as response_info:
-                await self.goto(page, self.config.forum_url)
+                await self.goto(page, self.config.get_forum_url(forum_keyword))
             response = await response_info.value
             raw = await response.text()
             data = json.loads(raw)
@@ -78,7 +78,7 @@ class TiebaCrawler:
         content = clean_text(await page.content(), limit=10_000)
         current_url = clean_text(page.url)
         if self.is_challenge_page(title, content, current_url):
-            raise TiebaLoginRequiredError(f"{self.config.forum_keyword} 吧主页命中百度安全验证，需要人工续签登录态")
+            raise TiebaLoginRequiredError(f"{forum_keyword} 吧主页命中百度安全验证，需要人工续签登录态")
 
         if int(data.get("error_code", 0) or 0) != 0:
             raise TiebaServiceError(
@@ -178,7 +178,12 @@ class TiebaCrawler:
 
         return clean_text(" ".join(text_parts), limit=1200), image_urls
 
-    def extract_thread_detail_from_data(self, data: dict[str, object], fallback_title: str) -> TiebaThread | None:
+    def extract_thread_detail_from_data(
+        self,
+        data: dict[str, object],
+        fallback_title: str,
+        forum_keyword: str,
+    ) -> TiebaThread | None:
         thread = data.get("thread", {})
         first_floor = data.get("first_floor", {})
         if not isinstance(thread, dict) or not isinstance(first_floor, dict):
@@ -239,13 +244,14 @@ class TiebaCrawler:
             tid=tid,
             title=title,
             thread_url=thread_url,
+            forum_keyword=forum_keyword,
             author_name=author_name,
             main_post_text=main_post_text,
             cover_image_url=cover_image_url,
             image_urls=deduped_images[:10],
         )
 
-    async def collect_threads(self) -> list[TiebaThread]:
+    async def collect_threads(self, forum_keyword: str) -> list[TiebaThread]:
         if not self.playwright_ready():
             raise TiebaServiceError("未安装 Playwright，无法启动贴吧采集")
 
@@ -259,7 +265,7 @@ class TiebaCrawler:
             try:
                 context = await browser.new_context(storage_state=self.get_storage_state_arg())
                 page = await context.new_page()
-                forum_feed_data = await self.load_forum_feed_data(page)
+                forum_feed_data = await self.load_forum_feed_data(page, forum_keyword)
                 links = self.extract_forum_links(forum_feed_data)
                 if not links:
                     raise TiebaServiceError("未在贴吧首页提取到帖子链接，请先完成登录并确认页面可正常打开")
@@ -275,7 +281,11 @@ class TiebaCrawler:
                             label=f"帖子 {item['tid']}",
                         )
                         detail_data = await self.load_thread_data(detail_page, item["url"])
-                        detail = self.extract_thread_detail_from_data(detail_data, fallback_title=item["title"])
+                        detail = self.extract_thread_detail_from_data(
+                            detail_data,
+                            fallback_title=item["title"],
+                            forum_keyword=forum_keyword,
+                        )
                         if detail is None:
                             continue
                         if not detail.cover_image_url:
@@ -290,11 +300,13 @@ class TiebaCrawler:
             finally:
                 await browser.close()
 
-    async def interactive_login(self) -> None:
-        if not self.config.forum_keyword:
-            raise TiebaServiceError("请先在 .env 中设置 TIEBA_FORUM_KEYWORD")
+    async def interactive_login(self, forum_keyword: str) -> None:
+        if not forum_keyword:
+            raise TiebaServiceError("请先在 .env 中设置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS")
         if not self.playwright_ready():
             raise TiebaServiceError("未安装 Playwright，请先执行 pip install -r requirements.txt")
+
+        forum_url = self.config.get_forum_url(forum_keyword)
 
         async with async_playwright() as playwright:
             launch_kwargs: dict[str, object] = {
@@ -306,13 +318,13 @@ class TiebaCrawler:
             context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
             try:
                 page = context.pages[0] if context.pages else await context.new_page()
-                await self.goto(page, self.config.forum_url)
+                await self.goto(page, forum_url)
                 print("浏览器已打开。请手动完成贴吧登录和任何安全验证，然后回到终端按回车继续。")
                 await asyncio.to_thread(input, "完成后按回车继续...")
                 await self.ensure_accessible_page(
                     page,
-                    url=self.config.forum_url,
-                    label=f"{self.config.forum_keyword} 吧主页",
+                    url=forum_url,
+                    label=f"{forum_keyword} 吧主页",
                 )
                 await context.storage_state(path=str(self.config.state_path))
             finally:
