@@ -289,12 +289,22 @@ def build_system_prompt(
     return "\n\n".join(line for line in lines if line)
 
 
+def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_canonical: str) -> str:
+    if identities is None or not user_id.strip():
+        return stored_canonical
+    match = identities.resolve_user(user_id, sender_name)
+    if match.is_registered:
+        return match.canonical_name or stored_canonical
+    return stored_canonical
+
+
 def normalize_history(
     history: list[dict[str, str]],
     *,
     recent_messages: list[dict[str, str]] | None = None,
     max_trigger_context_messages: int,
     chat_type: str = "group",
+    identities=None,
 ) -> list[LLMConversationMessage]:
     normalized: list[LLMConversationMessage] = []
     if recent_messages:
@@ -303,10 +313,15 @@ def normalize_history(
         else:
             lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
         for index, item in enumerate(recent_messages[-max_trigger_context_messages:], 1):
+            user_id = item["user_id"]
+            sender_name = item.get("sender_name", "")
+            canonical_name = _resolve_canonical_name(
+                identities, user_id, sender_name, item.get("canonical_name", ""),
+            )
             speaker = format_participant_label(
-                user_id=item["user_id"],
-                sender_name=item.get("sender_name", ""),
-                canonical_name=item.get("canonical_name", ""),
+                user_id=user_id,
+                sender_name=sender_name,
+                canonical_name=canonical_name,
                 include_unregistered_note=True,
             )
             lines.append(f"{index}. {speaker}：{item['text']}")
@@ -319,10 +334,15 @@ def normalize_history(
             normalized.append(LLMConversationMessage(role="assistant", content=item["content"]))
             continue
         if item.get("user_id"):
+            user_id = item.get("user_id", "")
+            sender_name = item.get("sender_name", "")
+            canonical_name = _resolve_canonical_name(
+                identities, user_id, sender_name, item.get("canonical_name", ""),
+            )
             speaker = format_participant_label(
-                user_id=item.get("user_id", ""),
-                sender_name=item.get("sender_name", ""),
-                canonical_name=item.get("canonical_name", ""),
+                user_id=user_id,
+                sender_name=sender_name,
+                canonical_name=canonical_name,
                 include_unregistered_note=True,
             )
             normalized.append(
@@ -349,11 +369,12 @@ def merge_image_urls(*collections: list[str]) -> list[str]:
     return merged
 
 
-def format_quoted_speaker(sender_name: str, user_id: str) -> str:
+def format_quoted_speaker(sender_name: str, user_id: str, identities=None) -> str:
+    canonical_name = _resolve_canonical_name(identities, user_id, sender_name, "")
     return format_participant_label(
         user_id=user_id,
         sender_name=sender_name,
-        canonical_name="",
+        canonical_name=canonical_name,
         include_unregistered_note=False,
     )
 
@@ -366,6 +387,7 @@ def build_user_message_content(
     quoted_user_id: str = "",
     quoted_image_urls: list[str] | None = None,
     max_quoted_message_chars: int,
+    identities=None,
 ) -> str:
     normalized_prompt = prompt.strip()
     normalized_quoted_text = quoted_text.strip()[:max_quoted_message_chars]
@@ -374,7 +396,7 @@ def build_user_message_content(
         return normalized_prompt
 
     lines = ["以下是当前用户显式引用的消息，请结合它理解本轮提问："]
-    lines.append(f"- 引用发送者：{format_quoted_speaker(quoted_sender_name, quoted_user_id)}")
+    lines.append(f"- 引用发送者：{format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)}")
     if normalized_quoted_text:
         lines.append(f"- 引用内容：{normalized_quoted_text}")
     if normalized_quoted_images:
@@ -395,12 +417,14 @@ def build_messages(
     recent_messages: list[dict[str, str]] | None,
     max_trigger_context_messages: int,
     chat_type: str = "group",
+    identities=None,
 ) -> list[LLMConversationMessage]:
     messages = normalize_history(
         history,
         recent_messages=recent_messages,
         max_trigger_context_messages=max_trigger_context_messages,
         chat_type=chat_type,
+        identities=identities,
     )
     messages.append(
         LLMConversationMessage(

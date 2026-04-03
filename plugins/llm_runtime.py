@@ -951,13 +951,14 @@ class LLMService:
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
             chat_type=chat_type,
+            identities=self.identities,
         )
 
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
         return merge_image_urls(*collections)
 
     def _format_quoted_speaker(self, sender_name: str, user_id: str) -> str:
-        return format_quoted_speaker(sender_name, user_id)
+        return format_quoted_speaker(sender_name, user_id, identities=self.identities)
 
     def _build_user_message_content(
         self,
@@ -975,6 +976,7 @@ class LLMService:
             quoted_user_id=quoted_user_id,
             quoted_image_urls=quoted_image_urls,
             max_quoted_message_chars=MAX_QUOTED_MESSAGE_CHARS,
+            identities=self.identities,
         )
 
     def _build_messages(
@@ -993,6 +995,7 @@ class LLMService:
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
             chat_type=chat_type,
+            identities=self.identities,
         )
 
     def _collect_known_participants(
