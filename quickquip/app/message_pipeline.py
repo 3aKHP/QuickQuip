@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from plugins.llm_runtime import llm_service
+from quickquip.llm.service import llm_service
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
 from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector
