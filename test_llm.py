@@ -5,7 +5,7 @@ import textwrap
 from pathlib import Path
 import shutil
 
-import plugins.llm_runtime as llm_runtime_module
+import quickquip.llm.service as llm_runtime_module
 import plugins.web_search as web_search_module
 from plugins.llm_config import MCPServerConfig, ProviderConfig
 from plugins.llm_identity import IdentityIndex
