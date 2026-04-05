@@ -4,6 +4,7 @@ import asyncio
 import base64
 from dataclasses import dataclass, field
 import json
+import re
 from typing import Any
 import os
 from urllib import error, parse, request
@@ -66,6 +67,31 @@ def _json_string(value: Any) -> str:
         return json.dumps(value if value is not None else {}, ensure_ascii=False)
     except TypeError:
         return "{}"
+
+
+_LEADING_REASONING_BLOCK_PATTERN = re.compile(
+    r"^\s*<(?P<tag>think|thinking|reasoning)>\s*.*?</(?P=tag)>\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+_LEADING_REASONING_FENCE_PATTERN = re.compile(
+    r"^\s*```(?:think|thinking|reasoning)[^\n]*\n.*?\n```\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_leading_reasoning_content(text: str) -> str:
+    cleaned = text.strip()
+    while cleaned:
+        next_cleaned = _LEADING_REASONING_BLOCK_PATTERN.sub("", cleaned, count=1)
+        if next_cleaned != cleaned:
+            cleaned = next_cleaned.strip()
+            continue
+        next_cleaned = _LEADING_REASONING_FENCE_PATTERN.sub("", cleaned, count=1)
+        if next_cleaned != cleaned:
+            cleaned = next_cleaned.strip()
+            continue
+        break
+    return cleaned
 
 
 class BaseProviderClient:
@@ -279,7 +305,7 @@ class OpenAIProviderClient(BaseProviderClient):
         ]
         usage = data.get("usage", {})
         return LLMResponse(
-            text=_text_from_block_list(message.get("content")),
+            text=strip_leading_reasoning_content(_text_from_block_list(message.get("content"))),
             model=str(data.get("model", fallback_model)),
             tool_calls=tool_calls,
             finish_reason=str(choice.get("finish_reason", "")).strip() or None,
@@ -333,7 +359,7 @@ class OpenAIProviderClient(BaseProviderClient):
             for idx, acc in sorted(tool_calls_acc.items())
         ]
         return LLMResponse(
-            text="".join(text_parts).strip(),
+            text=strip_leading_reasoning_content("".join(text_parts)),
             model=model,
             tool_calls=tool_calls,
             finish_reason=finish_reason,

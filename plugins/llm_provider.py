@@ -8,6 +8,7 @@ from quickquip.llm.provider import (
     LLMResponse,
     OpenAIProviderClient,
     build_provider_client,
+    strip_leading_reasoning_content,
 )
 
 
@@ -21,4 +22,5 @@ __all__ = [
     "LLMResponse",
     "OpenAIProviderClient",
     "build_provider_client",
+    "strip_leading_reasoning_content",
 ]

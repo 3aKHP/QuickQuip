@@ -17,6 +17,7 @@ from plugins.llm_provider import (
     LLMRequest,
     LLMResponse,
     OpenAIProviderClient,
+    strip_leading_reasoning_content,
 )
 from plugins.llm_runtime import LLMService, ResolvedGroupSettings
 from plugins.llm_tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
@@ -1480,6 +1481,17 @@ assert openai_tool_resp.tool_calls[0].name == "search_web"
 assert json.loads(openai_tool_resp.tool_calls[0].arguments_json) == {"query": "test"}
 assert openai_tool_resp.finish_reason == "tool_calls"
 
+# OpenAI content sanitizing: leading reasoning tags/fences should not leak
+assert strip_leading_reasoning_content("<think>\n先想一想\n</think>\n最终答复") == "最终答复"
+assert strip_leading_reasoning_content("```thinking\n分析\n```\n最终答复") == "最终答复"
+
+openai_reasoning_chunks = [
+    {"model": "gpt-5.4", "choices": [{"delta": {"content": "<think>\n先想一想\n</think>\n"}, "finish_reason": None}]},
+    {"model": "gpt-5.4", "choices": [{"delta": {"content": "最终答复"}, "finish_reason": "stop"}]},
+]
+openai_reasoning_resp = OpenAIProviderClient._assemble_stream_response(openai_reasoning_chunks, "gpt-5.4")
+assert openai_reasoning_resp.text == "最终答复"
+
 # Claude streaming: text only
 claude_text_chunks = [
     {"_sse_event": "message_start", "message": {"model": "claude-sonnet-4-6", "usage": {"input_tokens": 15}}},
@@ -1566,5 +1578,31 @@ stream_fallback_client = FakeStreamFallbackClient(
 stream_fallback_resp = asyncio.run(stream_fallback_client.complete(provider_request))
 assert stream_fallback_client.stream_attempted
 assert stream_fallback_resp.text == "fallback reply"
+
+
+class StubReasoningLeakProviderClient:
+    async def complete(self, request):
+        return LLMResponse(
+            text="<think>\n内部分析\n</think>\n\n给群友看的答案",
+            model=request.model,
+            finish_reason="stop",
+        )
+
+
+llm_runtime_module.build_provider_client = lambda provider: StubReasoningLeakProviderClient()
+try:
+    reasoning_sanitized_result = asyncio.run(
+        service.generate_reply(
+            group_id=1003,
+            user_id=3004,
+            sender_name="测试用户",
+            prompt="解释一下",
+            recent_messages=[],
+        )
+    )
+finally:
+    llm_runtime_module.build_provider_client = original_builder
+
+assert reasoning_sanitized_result["reply"] == "给群友看的答案"
 
 print("LLM 测试通过")

@@ -199,6 +199,7 @@ def build_system_prompt(
     lines.append("- 不同 QQ 号默认视为不同的人，不要把两个人合并成同一发言者。")
     lines.append("- 优先按 QQ 号识别身份，其次再参考当前显示名、标准身份和别名。")
     lines.append("- 当上下文里已经标出“标准身份（QQ …）”时，后续继续沿用，不要自行改口或张冠李戴。")
+    lines.append("- 只输出给用户看的最终回答，禁止输出任何内部推理、思维链、草稿、隐藏分析或 <think>/<thinking>/<reasoning> 之类标签。")
 
     lines.append("当前元数据：")
     lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")

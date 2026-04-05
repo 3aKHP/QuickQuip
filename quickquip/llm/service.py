@@ -25,7 +25,12 @@ from quickquip.llm.prompting import (
     merge_image_urls,
     normalize_history,
 )
-from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
+from quickquip.llm.provider import (
+    LLMProviderError,
+    LLMRequest,
+    build_provider_client,
+    strip_leading_reasoning_content,
+)
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
@@ -1238,7 +1243,8 @@ class LLMService:
                 "rule_name": LLM_RULE_NAME,
             }
 
-        text = re.sub(r"\n{3,}", "\n\n", response.text).strip()
+        text = strip_leading_reasoning_content(response.text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
         if not text:
             text = "模型没有返回可显示的文本。"
 
