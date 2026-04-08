@@ -77,7 +77,7 @@ DEFAULT_ENABLED_TOOLS = [
     "get_current_model",
 ]
 DEFECTIFY_RULE_NAME = "llm_defectify"
-DEFECTIFY_MAX_OUTPUT_TOKENS = 32768
+DEFECTIFY_MAX_OUTPUT_TOKENS = 512
 
 logger = logging.getLogger(__name__)
 
@@ -1076,8 +1076,8 @@ class LLMService:
                     image_urls=effective_image_urls,
                 )
             ],
-            temperature=min(provider.temperature, 0.4),
-            max_output_tokens=max(provider.max_output_tokens, DEFECTIFY_MAX_OUTPUT_TOKENS),
+            temperature=0.9,
+            max_output_tokens=min(provider.max_output_tokens, DEFECTIFY_MAX_OUTPUT_TOKENS),
             thinking_budget=None,
             tools=[],
             allow_tool_calls=False,
