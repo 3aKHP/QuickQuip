@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  test:
+    name: Test (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Validate example configs
+        run: |
+          python - <<'EOF'
+          import tomllib, pathlib, sys
+          files = (
+              list(pathlib.Path('config').glob('*.toml.example')) +
+              list(pathlib.Path('config/personas.example').glob('*.toml'))
+          )
+          for f in files:
+              try:
+                  tomllib.loads(f.read_text(encoding='utf-8'))
+              except Exception as e:
+                  print(f"FAIL {f}: {e}", file=sys.stderr)
+                  sys.exit(1)
+          print(f"OK ({len(files)} files)")
+          EOF
+
+      - name: Run timezone tests
+        run: python test_tz.py
+
+      - name: Run LLM tests
+        run: python test_llm.py
+
+      - name: Run Tieba tests
+        run: python test_tieba.py
+
+      - name: Run defectify tests
+        run: python test_defectify.py
+
+  release:
+    name: Create Release
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract release notes from CHANGELOG
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'EOF'
+          import os, re, sys, pathlib
+          tag = os.environ['TAG']
+          text = pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8')
+          m = re.search(rf'^## {re.escape(tag)}\n(.*?)(?=\n^## |\Z)', text, re.MULTILINE | re.DOTALL)
+          if not m:
+              print(f"ERROR: No '## {tag}' section found in CHANGELOG.md", file=sys.stderr)
+              sys.exit(1)
+          notes = m.group(1).strip()
+          if not notes:
+              print(f"ERROR: '## {tag}' section is empty", file=sys.stderr)
+              sys.exit(1)
+          pathlib.Path('release_notes.md').write_text(notes, encoding='utf-8')
+          print(f"Extracted {len(notes)} chars of release notes")
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
