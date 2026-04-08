@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, llm_service, rate_limiter, rule_switch, stats_tracker
+from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, rate_limiter, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
 from quickquip.search.web_search import WebSearchError, build_search_client, format_search_response
 from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
@@ -68,6 +69,16 @@ def _parse_tieba_command_args(args: str) -> tuple[str, str | None, bool]:
     if head == "list":
         return "status", None, False
     return "random", normalized_args, False
+
+
+def _strip_leading_command_token(text: str) -> str:
+    normalized = text.strip()
+    if not normalized:
+        return ""
+    parts = normalized.split(maxsplit=1)
+    if len(parts) == 1:
+        return ""
+    return parts[1].strip()
 
 
 def register_commands(on_command, Message, MessageSegment) -> None:
@@ -386,6 +397,47 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         except WebSearchError as exc:
             await search_cmd.finish(f"联网搜索失败：{exc}")
         await search_cmd.finish(format_search_response(response))
+
+    defectify_cmd = on_command("defectify", aliases={"故障化"}, priority=10, block=True)
+
+    @defectify_cmd.handle()
+    async def _(event):
+        if not rate_limiter.allow("llm_chat", event.user_id):
+            await defectify_cmd.finish("转写过于频繁，请稍后再试")
+
+        rendered = render_message_for_llm(
+            event.get_message(),
+            bot_self_id=event.self_id,
+            identity_index=llm_service.identities,
+        )
+        rendered_reply = render_reply_for_llm(
+            getattr(event, "reply", None),
+            bot_self_id=event.self_id,
+            identity_index=llm_service.identities,
+            include_image_placeholder=True,
+        )
+        prompt = _strip_leading_command_token(rendered.text)
+        quoted_text = "" if rendered_reply is None else rendered_reply.text
+        quoted_image_urls = [] if rendered_reply is None else rendered_reply.image_urls
+        quoted_sender_name = "" if rendered_reply is None else rendered_reply.sender_name
+        quoted_user_id = "" if rendered_reply is None else rendered_reply.user_id
+        chat_type = _chat_type(event)
+        chat_id = _chat_id(event)
+        result = await llm_service.generate_defectify_reply(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            user_id=event.user_id,
+            sender_name=get_sender_name(event),
+            prompt=prompt,
+            image_urls=rendered.image_urls,
+            quoted_text=quoted_text,
+            quoted_image_urls=quoted_image_urls,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+        )
+        if chat_type == "group":
+            stats_tracker.record_trigger(event.group_id, result.get("rule_name", "unknown"))
+        await defectify_cmd.finish(result["reply"])
 
     tieba_cmd = on_command("tieba", priority=10, block=True)
 

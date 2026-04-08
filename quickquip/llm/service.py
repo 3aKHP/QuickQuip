@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config
+from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.mcp import MCPClientManager, MCPServerStatus
 from quickquip.llm.prompting import (
@@ -75,6 +76,8 @@ DEFAULT_ENABLED_TOOLS = [
     "get_llm_status",
     "get_current_model",
 ]
+DEFECTIFY_RULE_NAME = "llm_defectify"
+DEFECTIFY_MAX_OUTPUT_TOKENS = 32768
 
 logger = logging.getLogger(__name__)
 
@@ -1011,6 +1014,103 @@ class LLMService:
             chat_type=chat_type,
             identities=self.identities,
         )
+
+    async def generate_defectify_reply(
+        self,
+        *,
+        chat_id: int | str,
+        chat_type: str,
+        user_id: int | str,
+        sender_name: str,
+        prompt: str,
+        image_urls: list[str] | None = None,
+        quoted_text: str = "",
+        quoted_image_urls: list[str] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+    ) -> dict[str, str]:
+        normalized_prompt = prompt.strip()
+        normalized_image_urls = [url.strip() for url in (image_urls or []) if url.strip()]
+        normalized_quoted_text = quoted_text.strip()
+        normalized_quoted_image_urls = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
+        if not normalized_prompt and not normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls:
+            return {
+                "reply": "用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+            }
+
+        if self.config.load_error:
+            return {
+                "reply": f"LLM 配置不可用：{self.config.load_error}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+            }
+
+        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
+        provider = self.config.providers.get(settings.provider_id)
+        if provider is None:
+            return {
+                "reply": f"当前 provider 不存在：{settings.provider_id}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+            }
+
+        prompt_pack = build_defectify_prompt(
+            prompt=normalized_prompt,
+            image_urls=normalized_image_urls,
+            quoted_text=normalized_quoted_text,
+            quoted_image_urls=normalized_quoted_image_urls,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+        )
+        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
+        defectify_provider = replace(provider, stream_enabled=False)
+        request = LLMRequest(
+            model=settings.model or provider.default_model,
+            system_prompt=prompt_pack.system_prompt,
+            messages=[
+                LLMConversationMessage(
+                    role="user",
+                    content=prompt_pack.user_prompt,
+                    image_urls=effective_image_urls,
+                )
+            ],
+            temperature=min(provider.temperature, 0.4),
+            max_output_tokens=max(provider.max_output_tokens, DEFECTIFY_MAX_OUTPUT_TOKENS),
+            thinking_budget=None,
+            tools=[],
+            allow_tool_calls=False,
+            tool_choice="none",
+        )
+
+        try:
+            response = await build_provider_client(defectify_provider).complete(request)
+        except LLMProviderError as exc:
+            return {
+                "reply": f"LLM 调用失败：{exc}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+            }
+        except Exception as exc:
+            return {
+                "reply": f"LLM 调用异常：{exc}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+            }
+
+        text = strip_leading_reasoning_content(response.text).strip()
+        if not text:
+            return {
+                "reply": "模型没有返回可显示的文本。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+            }
+        return {
+            "reply": text,
+            "rate_limit_key": LLM_RULE_NAME,
+            "rule_name": DEFECTIFY_RULE_NAME,
+        }
 
     def _collect_known_participants(
         self,

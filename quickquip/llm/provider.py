@@ -31,6 +31,7 @@ class LLMRequest:
     messages: list[LLMConversationMessage]
     temperature: float
     max_output_tokens: int
+    thinking_budget: int | None = None
     tools: list[LLMToolSpec] = field(default_factory=list)
     allow_tool_calls: bool = False
     tool_choice: str = "auto"
@@ -691,6 +692,10 @@ class GeminiProviderClient(BaseProviderClient):
                 "maxOutputTokens": request.max_output_tokens,
             },
         }
+        if request.thinking_budget is not None:
+            payload["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": request.thinking_budget,
+            }
         if request.allow_tool_calls and request.tools:
             payload["tools"] = [
                 {
