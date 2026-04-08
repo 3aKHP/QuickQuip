@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+### feat: generalize good_girl_chain into configurable ChainGameManager
+
+Git: `af0787a`
+
+- 新增 `quickquip/chat/chain_game.py`：通用接龙引擎，包含 `ChainGameDef` / `ChainGameSession` / `ChainGameManager`
+- 链条模板支持 `$N` / `$N[idx]` 捕获组占位符（`$1` 完整文本、`$1[0]` 首字、`$1[-1]` 尾字、`$1[N]` 任意位置）
+- 用户侧 token 支持 `|` 分隔的 OR 候选匹配（如 `"句号|。"`）
+- 奇数长度链条在 bot 末次回复后自动终止；偶数长度链条保留静默终止 token 语义（向下兼容）
+- 重构 `GoodGirlChainManager` 委托 `ChainGameManager`，保留全部公开 API 和 `context["lead_char"]` 格式
+- 好姐姐链条末段升级为 `"句号|。"` → bot 回 `"🤣"` 结尾，由 bot 终止接龙，同时覆盖多字元素与 OR 匹配两项新能力
+- `config/chat_rules.toml` 新增 `[[chain_games]]` 区块支持，自定义接龙在运行时加载并接入 `resolve_reply()` 管道
+- `config/chat_rules.toml.example` 新增 `[[chain_games]]` 完整格式文档、内置好姐姐示例（注释）及自定义三步接龙示例
+- 新增 `plugins/chain_game.py` 薄重导出
+
 ### feat: add /defectify phonetic alias command
 
 Git: `33c9cc4`
