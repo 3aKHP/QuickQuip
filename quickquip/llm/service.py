@@ -353,7 +353,7 @@ class LLMService:
         if stats is None or stats.total_messages == 0:
             return "当前群暂无统计数据。"
 
-        lines = [f"当前群统计：", f"- 消息总数：{stats.total_messages}"]
+        lines = ["当前群统计：", f"- 消息总数：{stats.total_messages}"]
         if stats.user_messages:
             top_users = sorted(stats.user_messages.items(), key=lambda item: (-item[1], item[0]))[:top_n]
             lines.append(f"- 活跃用户 Top {len(top_users)}：")

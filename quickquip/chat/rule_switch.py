@@ -1,6 +1,5 @@
 from collections import OrderedDict
 from pathlib import Path
-from typing import Optional
 
 from quickquip.common.persistence import load_json, save_json
 

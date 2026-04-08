@@ -975,7 +975,7 @@ mcp_vocab_path.write_text(VOCAB_TEXT, encoding="utf-8")
 mcp_identity_path.write_text(IDENTITIES_TEXT, encoding="utf-8")
 
 mcp_config_text = textwrap.dedent(
-    f"""
+    """
     [runtime]
     enabled = true
     default_provider = "openai-main"

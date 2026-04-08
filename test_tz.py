@@ -9,7 +9,7 @@ from plugins.good_girl_chain import GoodGirlChainManager
 from plugins.message_stats import GroupStatsTracker
 from plugins.rate_limit import KeyedRateLimiter, SlidingWindowRateLimiter
 from plugins.repeat_detector import GroupRepeatDetector
-from plugins.rule_switch import GroupRuleSwitch, SWITCHABLE_RULES
+from plugins.rule_switch import GroupRuleSwitch
 from plugins.text_reply_rules import match_text_rule, select_reply_template
 from plugins.tz_tracker import (
     build_reply,
@@ -574,7 +574,7 @@ assert len(empty_switch.disabled) == 0
 # ChainGameManager 专项测试
 # ══════════════════════════════════════════════════════════
 
-import re as _re
+import re as _re  # noqa: E402
 
 # ── 辅助：快速构造 ChainGameDef ──────────────────────────────
 def _def(name, pattern, chain, timeout=60, rate_limit_key="test_chain"):
