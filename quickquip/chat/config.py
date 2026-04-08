@@ -1,8 +1,9 @@
 from datetime import time
+import tomllib
+from pathlib import Path
 
 BEIJING_TIMEZONE = "Asia/Shanghai"
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
-PRIORITY_ABSOLUTE = 65_536
 
 WAKE_WORDS = {"起床", "早安", "醒了", "睡醒了", "起了", "苏醒"}
 SLEEP_WORDS = {"晚安", "睡觉", "睡了", "睡啦", "困了", "眠了"}
@@ -11,134 +12,34 @@ WAKE_TARGET = time(7, 30)
 SLEEP_TARGET = time(23, 30)
 
 RATE_LIMIT_WINDOW_SECONDS = 60
-RATE_LIMIT_RULES = {
+RATE_LIMIT_RULES: dict[str, dict] = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3},
     "tieba_random_post": {"global_limit": 6, "user_limit": 3},
     "web_search": {"global_limit": 6, "user_limit": 3},
     "tavily_search": {"global_limit": 6, "user_limit": 3},
-    "divine_arrival": {"global_limit": 6, "user_limit": 3},
-    "play_target": {"global_limit": 6, "user_limit": 3},
-    "double_char_ni_de": {"global_limit": 6, "user_limit": 3},
-    "sandwich_de": {"global_limit": 6, "user_limit": 3},
-    "like_reply": {"global_limit": 6, "user_limit": 3},
     "repeat_follow_read": {"global_limit": 8, "user_limit": 3},
     "repeat_trim_last": {"global_limit": 8, "user_limit": 3},
     "repeat_same_user_warning": {"global_limit": 4, "user_limit": 2},
     "good_girl_chain_entry": {"global_limit": 20, "user_limit": 10},
 }
 
-I_DO_BLOCKED_VERBS = {
-    "不会",
-    "不能",
-    "不要",
-    "以为",
-    "支持",
-    "反对",
-    "同意",
-    "喜欢",
-    "回去",
-    "回家",
-    "害怕",
-    "希望",
-    "忘了",
-    "忘记",
-    "担心",
-    "明白",
-    "来了",
-    "知道",
-    "觉得",
-    "认为",
-    "记得",
-    "认识",
-    "说过",
-    "谢谢",
-    "输了",
-    "赢了",
-}
+TEXT_REPLY_RULES: list[dict] = []
 
-TEXT_REPLY_RULES = [
-    {
-        "name": "divine_arrival",
-        "patterns": [r"神临", r"降临"],
-        "reply_template": "{current_time}，@{sender_name} 区从天降",
-        "rate_limit_key": "divine_arrival",
-        "priority": 100,
-    },
-    {
-        "name": "play_target",
-        "patterns": [r"玩(?P<target>.+?)玩的"],
-        "reply_template": "{target}怎么你了",
-        "rate_limit_key": "play_target",
-        "priority": 85,
-    },
-    {
-        "name": "double_char_ni_de",
-        "patterns": [r"^([\u4e00-\u9fa5])(\1)你的$"],
-        "reply_template": "$1牛魔",
-        "rate_limit_key": "double_char_ni_de",
-        "priority": 80,
-    },
-    {
-        "name": "sandwich_de",
-        "patterns": [r"^([\u4e00-\u9fa5])(.{2,})\1的$"],
-        "reply_template": "$2怎么你了！",
-        "rate_limit_key": "sandwich_de",
-        "priority": 75,
-    },
-    {
-        "name": "like_reply",
-        "patterns": [r"^我喜欢(.+)$", r"^喜欢(.+)$"],
-        "reply_template": "还在$1",
-        "rate_limit_key": "like_reply",
-        "priority": 60,
-    },
-    # These variants intentionally share one bucket so adjacent meme triggers do not spam.
-    {
-        "name": "maggot_arrival",
-        "patterns": [r"区临", r"区来了"],
-        "reply_template": "{current_time}，有自知之明的@{sender_name} 区从天降",
-        "rate_limit_key": "divine_arrival",
-        "priority": 95,
-    },
-    {
-        "name": "genshin_start",
-        "patterns": [r"^(.+?)[，,]\s*启动[！!]*$"],
-        "reply_template": "该启动$1了，少爷",
-        "rate_limit_key": "divine_arrival",
-        "priority": 90,
-    },
-    {
-        "name": "master_protection",
-        "patterns": [r"四区", r"4区", r"四出", r"4出"],
-        "reply_template": "你不许说他他是我跌",
-        "rate_limit_key": "divine_arrival",
-        "priority": PRIORITY_ABSOLUTE,
-    },
-    {
-        "name": "huaizhen_oversize",
-        "patterns": [r"怀真", r"赵怀真"],
-        "reply_template": "赵怀真还不超标啊",
-        "rate_limit_key": "timezone_wake",
-        "priority": 50,
-    },
-    {
-        "name": "kpl_final",
-        "patterns": [r"^(.+?)尽力[，,]\s*(.+?)犯罪[，,]\s*(.+?)(?:的)?(.{2})不团队$"],
-        "reply_template": "我说$1才是最大的一条区有没有懂的",
-        "rate_limit_key": "divine_arrival",
-        "priority": 200,
-    },
-    {
-        "name": "i_do",
-        "patterns": [r"^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$"],
-        "blocked_named_groups": {"verb": sorted(I_DO_BLOCKED_VERBS)},
-        "reply_template": "不准$1",
-        "rate_limit_key": "divine_arrival",
-        "priority": 20,
-    }
-]
+
+def _load_chat_rules() -> None:
+    """Extend TEXT_REPLY_RULES and RATE_LIMIT_RULES from config/chat_rules.toml if present."""
+    path = Path("config/chat_rules.toml")
+    if not path.exists():
+        return
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    RATE_LIMIT_RULES.update(data.get("rate_limit_rules", {}))
+    TEXT_REPLY_RULES.extend(data.get("rules", []))
+
+
+_load_chat_rules()
 
 SCHEDULED_MESSAGES: list[dict] = []
 # Example entry (uncomment and fill in to enable):

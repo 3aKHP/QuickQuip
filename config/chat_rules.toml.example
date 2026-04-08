@@ -1,0 +1,117 @@
+# QuickQuip 自定义回复规则配置示例
+#
+# 将本文件复制为 config/chat_rules.toml 后使用（该文件已被 .gitignore 排除在版本控制之外）。
+# chat_rules.toml 是部署级私有配置，适合存放群特有的彩蛋规则和内部梗。
+#
+# ══════════════════════════════════════════════════════════
+# [rate_limit_rules] — 限流桶定义
+# ══════════════════════════════════════════════════════════
+#
+# 格式：桶名 = {global_limit = N, user_limit = M}
+#   global_limit  - 60 秒窗口内全群最多触发次数
+#   user_limit    - 60 秒窗口内同一用户最多触发次数
+#
+# 时区回复、LLM、贴吧、复读、接龙等系统规则的限流桶
+# 已在 quickquip/chat/config.py 中预定义，此处只需定义文字规则专用桶。
+# 注意：多条规则可以共用同一个桶，命中任意一条都消耗同一个配额。
+
+[rate_limit_rules]
+group_meme   = {global_limit = 6, user_limit = 3}
+play_target  = {global_limit = 6, user_limit = 3}
+char_pattern = {global_limit = 6, user_limit = 3}
+like_reply   = {global_limit = 6, user_limit = 3}
+
+# ══════════════════════════════════════════════════════════
+# [[rules]] — 回复规则列表
+# ══════════════════════════════════════════════════════════
+#
+# 每条规则用 [[rules]] 定义，必填字段：
+#   name           - 规则唯一名称，用于统计（/stats）和开关控制（/disable /enable）
+#   patterns       - 触发正则列表（TOML 字面量字符串，用单引号避免反斜杠被转义）
+#                    支持多条，任意一条命中即触发
+#   reply_template - 回复模板（与 reply_templates 二选一）
+#   rate_limit_key - 使用的限流桶名称（需在 [rate_limit_rules] 中定义，或引用系统预定义桶）
+#   priority       - 优先级（整数越大越优先；同一消息命中多条规则时只触发最高优先级那条）
+#
+# 可选字段：
+#   reply_templates      - 加权随机回复列表（与 reply_template 二选一）
+#   blocked_named_groups - 命名捕获组黑名单；命中黑名单值时不触发，继续尝试下一条规则
+#   blocked_groups       - 位置捕获组黑名单（按组号索引），用法同上
+#
+# 模板变量：
+#   {sender_name}   - 发送者昵称
+#   {current_time}  - 当前北京时间（YYYY-MM-DD HH:MM）
+#   {user_id}       - 发送者 QQ 号
+#   {命名捕获组名}  - 正则命名捕获组，如 (?P<target>...) → {target}
+#   $1, $2, …       - 正则位置捕获组
+
+# ——— 示例：检测"XX，启动！"之类的格式 ———
+[[rules]]
+name           = 'genshin_start'
+patterns       = ['^(.+?)[，,]\s*启动[！!]*$']
+reply_template = '该启动$1了，少爷'
+rate_limit_key = 'group_meme'
+priority       = 90
+
+# ——— 示例：检测"玩XX玩的" ———
+[[rules]]
+name           = 'play_target'
+patterns       = ['玩(?P<target>.+?)玩的']
+reply_template = '{target}怎么你了'
+rate_limit_key = 'play_target'
+priority       = 85
+
+# ——— 示例：检测"AA你的"（叠字 + 你的）→ "AA牛魔" ———
+[[rules]]
+name           = 'double_char_ni_de'
+patterns       = ['^([\u4e00-\u9fa5])(\1)你的$']
+reply_template = '$1牛魔'
+rate_limit_key = 'char_pattern'
+priority       = 80
+
+# ——— 示例：检测"A…A的"（首尾相同汉字夹内容）→ "…怎么你了！" ———
+[[rules]]
+name           = 'sandwich_de'
+patterns       = ['^([\u4e00-\u9fa5])(.{2,})\1的$']
+reply_template = '$2怎么你了！'
+rate_limit_key = 'char_pattern'
+priority       = 75
+
+# ——— 示例：检测"我喜欢XX"或"喜欢XX" ———
+[[rules]]
+name           = 'like_reply'
+patterns       = ['^我喜欢(.+)$', '^喜欢(.+)$']
+reply_template = '还在$1'
+rate_limit_key = 'like_reply'
+priority       = 60
+
+# ——— 示例：检测"我XX"（二字动词），过滤常见口语 ———
+# blocked_named_groups 指定捕获组 verb 的黑名单，命中黑名单时不触发
+[[rules]]
+name           = 'i_do'
+patterns       = ['^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$']
+reply_template = '不准$1'
+rate_limit_key = 'group_meme'
+priority       = 20
+
+[rules.blocked_named_groups]
+verb = [
+    '不会', '不能', '不要', '以为', '支持', '反对', '同意', '喜欢', '回去', '回家',
+    '害怕', '希望', '忘了', '忘记', '担心', '明白', '来了', '知道', '觉得', '认为',
+    '记得', '认识', '说过', '谢谢', '输了', '赢了',
+]
+
+# ——— 示例：加权随机回复（reply_templates 代替 reply_template）———
+# [[rules]]
+# name           = 'example_random'
+# patterns       = ['示例触发词']
+# rate_limit_key = 'group_meme'
+# priority       = 10
+#
+# [[rules.reply_templates]]
+# template = '回复A'
+# weight   = 2
+#
+# [[rules.reply_templates]]
+# template = '回复B'
+# weight   = 1
