@@ -116,6 +116,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | `/llm clear_context` | 清空当前群的短期会话上下文 | 管理员/群主 |
 | `/search <query>` | 使用当前搜索后端进行联网搜索 | 所有人 |
 | `/search news <query>` | 使用当前搜索后端搜索新闻 | 所有人 |
+| `/defectify [内容]` | 把文字/图片/引用消息转写成近音“故障机器人”的五字别名 | 所有人 |
 | `/remember <内容>` | 手工写入群记忆 | 管理员/群主 |
 | `/memories [关键词]` | 查看当前群记忆 | 所有人 |
 | `/forget <关键词>` | 删除匹配的群记忆 | 管理员/群主 |
@@ -152,6 +153,16 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - 私聊沿用当前可用的人格列表，但会在提示词里自动收敛成更适合一对一聊天的表达方式
 - 私聊单会话的默认上下文上限为 256 条，适合连续对话
 - 私聊可继续使用 `/llm status`、`/llm current`、`/llm persona use <id>`、`/llm trigger prefix <value>`、`/llm context_limit <n>`、`/llm clear_context`、`/search`、`/remember`、`/memories`、`/forget`、`/forget_all`
+- 私聊中 `/defectify` 与 `/故障化` 仍可单独使用，不依赖当前会话是否开启
+
+### 🤖 故障机器人转写
+
+支持把任意有意义的文字、图片，或显式引用的一条消息，转写成一个读音贴近“故障机器人”的五字别名。该功能走专门的 LLM 约束 prompt，会尽量保证每个字都能回扣到输入语义，并固定输出：
+
+```text
+某某某某某
+笑点解析：......。令人忍俊不禁。
+```
 
 ### 🖼️ 多贴吧随机搬运
 
@@ -196,6 +207,7 @@ QuickQuip/
 ├── .env                            # 环境变量配置（不纳入版本控制）
 ├── config/
 │   ├── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
+│   ├── chat_rules.toml.example     # 文字回复规则样例，复制为 chat_rules.toml 后使用
 │   └── personas.example/           # 人格定义样例目录，复制为 personas/ 后使用
 ├── docker/
 │   └── searxng/
@@ -212,14 +224,13 @@ QuickQuip/
 ├── .gitignore                      # Git 忽略规则
 ├── test_tz.py                      # 全功能断言测试脚本
 ├── test_llm.py                     # LLM 基础功能断言测试脚本
-└── plugins/                        # 兼容入口层，保留 NoneBot 插件加载与旧导入路径
-    ├── tz_tracker.py               # 群消息插件入口
-    ├── llm_runtime.py              # LLM 运行时入口
-    ├── tieba_service.py            # 贴吧服务兼容导出
-    └── ...                         # 其余文件为兼容导出层
+└── plugins/                        # NoneBot2 插件入口层（薄层 re-export，不含业务逻辑）
+    ├── tz_tracker.py               # → quickquip.adapters.nonebot.tz_tracker_plugin
+    ├── llm_runtime.py              # → quickquip.llm.service
+    └── ...                         # 其余文件均为对应 quickquip.* 子包的 re-export
 ```
 
-当前目录约定中，`quickquip/` 承载主要实现，`plugins/` 保留兼容入口与旧导入路径，现有测试与本地工具仍可继续直接引用 `plugins.*`。
+目录约定：`quickquip/` 承载全部实现（业务逻辑在 `chat|common|llm|tieba|search`，NoneBot2 适配在 `adapters/nonebot/`）；`plugins/` 是 NoneBot2 插件发现的入口目录，只做 re-export 不写逻辑；`config/` 下以 `.example` 结尾的文件入版本控制，无后缀的为部署私有配置（gitignored）。
 
 ---
 
@@ -345,19 +356,26 @@ python test_tieba.py
 
 ## ⚙️ 配置说明
 
-规则相关配置集中在 `quickquip/chat/config.py`，并通过 [`plugins/tz_config.py`](plugins/tz_config.py) 保留兼容导出，可直接修改其中任一入口：
+规则相关配置分为两部分：
+
+**基础参数**（修改 `quickquip/chat/config.py`）：
 
 | 配置项 | 说明 | 默认值 |
 |-------|------|--------|
-| [`BEIJING_TIMEZONE`](plugins/tz_config.py:3) | 基准时区 | `Asia/Shanghai` |
-| [`WAKE_TARGET`](plugins/tz_config.py:9) | 起床目标时间 | `07:30` |
-| [`SLEEP_TARGET`](plugins/tz_config.py:10) | 睡觉目标时间 | `23:30` |
-| [`WAKE_WORDS`](plugins/tz_config.py:6) | 起床触发词集合 | 起床、早安、醒了… |
-| [`SLEEP_WORDS`](plugins/tz_config.py:7) | 睡觉触发词集合 | 晚安、睡觉、睡了… |
-| [`RATE_LIMIT_WINDOW_SECONDS`](plugins/tz_config.py:12) | 限流滑动窗口大小 | `60` 秒 |
-| [`RATE_LIMIT_RULES`](plugins/tz_config.py:13) | 各规则限流参数 | 见源码 |
-| [`TEXT_REPLY_RULES`](plugins/tz_config.py:56) | 文字彩蛋规则列表 | 见源码 |
-| [`SCHEDULED_MESSAGES`](plugins/tz_config.py) | 定时消息列表 | `[]`（空，休眠） |
+| `BEIJING_TIMEZONE` | 基准时区 | `Asia/Shanghai` |
+| `WAKE_TARGET` | 起床目标时间 | `07:30` |
+| `SLEEP_TARGET` | 睡觉目标时间 | `23:30` |
+| `WAKE_WORDS` | 起床触发词集合 | 起床、早安、醒了… |
+| `SLEEP_WORDS` | 睡觉触发词集合 | 晚安、睡觉、睡了… |
+| `RATE_LIMIT_WINDOW_SECONDS` | 限流滑动窗口大小 | `60` 秒 |
+| `SCHEDULED_MESSAGES` | 定时消息列表 | `[]`（空，休眠） |
+
+**文字回复规则**（编辑 `config/chat_rules.toml`，参见 `config/chat_rules.toml.example`）：
+
+| 配置项 | 说明 |
+|-------|------|
+| `[rate_limit_rules]` | 文字规则专用限流桶（桶名 + 全局/用户上限） |
+| `[[rules]]` | 回复规则列表（触发正则、优先级、回复模板、限流桶） |
 
 LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 
@@ -392,16 +410,18 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 
 ### 添加自定义回复规则
 
-在 `TEXT_REPLY_RULES` 列表中追加字典即可：
+在 `config/chat_rules.toml` 中追加 `[[rules]]` 条目即可（参见 `config/chat_rules.toml.example`）：
 
-```python
-{
-    "name": "my_rule",                    # 规则唯一名称
-    "patterns": [r"正则表达式"],            # 触发正则（支持多个）
-    "reply_template": "回复模板",           # 支持 {sender_name}、{current_time}、$1 等
-    "rate_limit_key": "my_rule",          # 限流 key（需在 RATE_LIMIT_RULES 中注册）
-    "priority": 50,                       # 优先级（数字越大越优先）
-}
+```toml
+[rate_limit_rules]
+my_rule = {global_limit = 6, user_limit = 3}   # 注册限流桶
+
+[[rules]]
+name           = 'my_rule'          # 规则唯一名称
+patterns       = ['正则表达式']      # 触发正则（支持多条，用单引号避免反斜杠被转义）
+reply_template = '回复模板'          # 支持 {sender_name}、{current_time}、$1 等
+rate_limit_key = 'my_rule'          # 使用的限流桶
+priority       = 50                  # 优先级（数字越大越优先）
 ```
 
 **模板变量：**
@@ -414,19 +434,22 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 | `$1`, `$2`, … | 正则捕获组 |
 | `{命名捕获组}` | 正则命名捕获组（如 `(?P<target>...)` → `{target}`） |
 
-**随机回复（可选）：** 将 `reply_template` 替换为 `reply_templates` 列表即可启用加权随机回复：
+**随机回复（可选）：** 将 `reply_template` 替换为 `[[rules.reply_templates]]` 列表：
 
-```python
-{
-    "name": "my_rule",
-    "patterns": [r"正则表达式"],
-    "reply_templates": [
-        {"template": "回复A", "weight": 2},   # 出现概率较高
-        {"template": "回复B", "weight": 1},
-    ],
-    "rate_limit_key": "my_rule",
-    "priority": 50,
-}
+```toml
+[[rules]]
+name           = 'my_rule'
+patterns       = ['正则表达式']
+rate_limit_key = 'my_rule'
+priority       = 50
+
+[[rules.reply_templates]]
+template = '回复A'
+weight   = 2
+
+[[rules.reply_templates]]
+template = '回复B'
+weight   = 1
 ```
 
 ---
@@ -437,7 +460,7 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 bot.py
   │
   ▼
-plugins/tz_tracker.py                    ← NoneBot 插件入口兼容层
+plugins/tz_tracker.py                    ← NoneBot2 插件入口（re-export 薄层）
   │
   ▼
 quickquip/adapters/nonebot/
@@ -497,4 +520,4 @@ LLM、贴吧与联网搜索能力在目录上已经独立成子系统，便于�
 
 ## 🤝 贡献
 
-欢迎提交 Issue 和 Pull Request！添加新的回复规则只需编辑 `quickquip/chat/config.py`（或兼容入口 [`plugins/tz_config.py`](plugins/tz_config.py)），无需改动消息管线本身。
+欢迎提交 Issue 和 Pull Request！添加新的回复规则只需编辑 `config/chat_rules.toml`（参见 [`config/chat_rules.toml.example`](config/chat_rules.toml.example) 了解格式），无需改动消息管线本身。

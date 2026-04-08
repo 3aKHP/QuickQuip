@@ -4,6 +4,24 @@
 
 ## Unreleased
 
+### feat: add /defectify phonetic alias command
+
+Git: `33c9cc4`
+
+- 新增 `/defectify`（别名 `/故障化`）命令，把任意文字、图片或引用消息转写成读音贴近"故障机器人"的五字别名，输出固定格式（五字别名 + 笑点解析）
+- `quickquip/llm/defectify.py` 封装约束 prompt 构建逻辑；`LLMService.generate_defectify_reply()` 负责调用，走 `llm_chat` 限流桶
+- `LLMRequest` 新增 `thinking_budget` 字段，Gemini provider 对应接入 `thinkingConfig`，供需要控制思考预算的场景使用
+- 同步更新群聊与私聊指令文档
+
+### refactor: externalize text reply rules to config/chat_rules.toml
+
+Git: `82d8762`
+
+- 将 `TEXT_REPLY_RULES` 及其专用限流桶从 `quickquip/chat/config.py`（受版本控制）迁移到 `config/chat_rules.toml`（gitignored 部署私有配置）
+- `config.py` 保留基础参数（时区、触发词、系统级限流桶），在模块加载时通过 `_load_chat_rules()` 从 TOML 文件追加规则和限流桶
+- 新增 `config/chat_rules.toml.example`（入版本控制），包含六条通用示例规则和完整格式注释；`.gitignore` 新增 `config/chat_rules.toml` 排除规则
+- 修正 CLAUDE.md / README 对层次结构的描述：明确 `quickquip/adapters/nonebot/` 是 NoneBot2 适配层实现所在，`plugins/` 是 NoneBot2 发现插件的薄层 re-export 入口
+
 ### feat: support multi-source tieba pools and source listing
 
  Git: `e9f54b2`
