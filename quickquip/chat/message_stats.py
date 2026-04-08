@@ -69,16 +69,16 @@ class GroupStatsTracker:
         lines = [f"群聊统计\n消息总数：{gs.total_messages}"]
 
         if gs.user_messages:
-            top_users = sorted(gs.user_messages.items(), key=lambda x: -x[1])[:5]
-            lines.append("活跃用户 Top 5：")
+            top_users = sorted(gs.user_messages.items(), key=lambda x: -x[1])[:15]
+            lines.append("活跃用户 Top 15：")
             for rank, (uid, count) in enumerate(top_users, 1):
                 resolver = name_resolver if name_resolver is not None else gs.user_names
                 display = resolver.get(uid, uid)
                 lines.append(f"  {rank}. {display} — {count} 条")
 
         if gs.rule_triggers:
-            top_rules = sorted(gs.rule_triggers.items(), key=lambda x: -x[1])[:5]
-            lines.append("规则触发 Top 5：")
+            top_rules = sorted(gs.rule_triggers.items(), key=lambda x: -x[1])[:10]
+            lines.append("规则触发 Top 10：")
             for rank, (rule, count) in enumerate(top_rules, 1):
                 lines.append(f"  {rank}. {rule} — {count} 次")
 

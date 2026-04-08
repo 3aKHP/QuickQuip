@@ -29,6 +29,7 @@ transport = "docker"
 timeout_seconds = 30
 image = "ghcr.io/github/github-mcp-server"
 env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
+allowed_tools = ["search_repositories", "get_file_contents", "search_code"]
 
 [[mcp.servers]]
 id = "tavily"
@@ -40,17 +41,32 @@ env = { TAVILY_API_KEY = "${TAVILY_API_KEY}" }
 [[mcp.servers]]
 id = "arxiv"
 transport = "docker"
+enabled = false
 timeout_seconds = 30
-image = "arxiv-mcp-server:latest"
+image = "mcp/arxiv-mcp-server"
 mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"]
+
+[[mcp.servers]]
+id = "fetch"
+transport = "docker"
+timeout_seconds = 30
+image = "mcp/fetch"
+
+[[mcp.servers]]
+id = "openweather"
+transport = "docker"
+timeout_seconds = 30
+image = "mcp/openweather"
+env = { OWM_API_KEY = "${OWM_API_KEY}" }
 
 [[mcp.servers]]
 id = "prts_wiki"
 transport = "docker"
 enabled = "${MCP_PRTS_WIKI_ENABLED:-false}"
 timeout_seconds = 30
-image = "prts-mcp"
-mounts = ["${MCP_PRTS_GAMEDATA_MOUNT:-}", "${MCP_PRTS_STORYJSON_MOUNT:-}"]
+image = "ghcr.io/3akhp/prts-mcp:latest"
+mounts = ["prts-mcp-data:/data/gamedata"]
+env = { GITHUB_TOKEN = "${GITHUB_TOKEN:-}" }
 
 # 人格定义已拆分至 config/personas/ 目录，每个 .toml 文件对应一个人格。
 # 参见 config/personas.example/ 中的示例文件。
