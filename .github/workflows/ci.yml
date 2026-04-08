@@ -56,6 +56,9 @@ jobs:
           print(f"OK ({len(files)} files)")
           EOF
 
+      - name: Set up test config
+        run: cp config/chat_rules.toml.example config/chat_rules.toml
+
       - name: Run timezone tests
         run: python test_tz.py
 

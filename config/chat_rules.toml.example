@@ -16,10 +16,12 @@
 # 注意：多条规则可以共用同一个桶，命中任意一条都消耗同一个配额。
 
 [rate_limit_rules]
-group_meme   = {global_limit = 6, user_limit = 3}
-play_target  = {global_limit = 6, user_limit = 3}
-char_pattern = {global_limit = 6, user_limit = 3}
-like_reply   = {global_limit = 6, user_limit = 3}
+group_meme       = {global_limit = 6, user_limit = 3}
+play_target      = {global_limit = 6, user_limit = 3}
+double_char_ni_de = {global_limit = 6, user_limit = 3}
+sandwich_de      = {global_limit = 6, user_limit = 3}
+like_reply       = {global_limit = 6, user_limit = 3}
+divine_arrival   = {global_limit = 4, user_limit = 2}
 
 # ══════════════════════════════════════════════════════════
 # [[rules]] — 回复规则列表
@@ -45,13 +47,21 @@ like_reply   = {global_limit = 6, user_limit = 3}
 #   {命名捕获组名}  - 正则命名捕获组，如 (?P<target>...) → {target}
 #   $1, $2, …       - 正则位置捕获组
 
+# ——— 示例：彩蛋回复（固定触发词 → 含时间和昵称的回复）———
+[[rules]]
+name           = 'divine_arrival'
+patterns       = ['神临', '降临']
+reply_template = '{current_time}，@{sender_name} 区从天降'
+rate_limit_key = 'divine_arrival'
+priority       = 100
+
 # ——— 示例：检测"XX，启动！"之类的格式 ———
 [[rules]]
 name           = 'genshin_start'
 patterns       = ['^(.+?)[，,]\s*启动[！!]*$']
 reply_template = '该启动$1了，少爷'
 rate_limit_key = 'group_meme'
-priority       = 90
+priority       = 95
 
 # ——— 示例：检测"玩XX玩的" ———
 [[rules]]
@@ -66,7 +76,7 @@ priority       = 85
 name           = 'double_char_ni_de'
 patterns       = ['^([\u4e00-\u9fa5])(\1)你的$']
 reply_template = '$1牛魔'
-rate_limit_key = 'char_pattern'
+rate_limit_key = 'double_char_ni_de'
 priority       = 80
 
 # ——— 示例：检测"A…A的"（首尾相同汉字夹内容）→ "…怎么你了！" ———
@@ -74,7 +84,7 @@ priority       = 80
 name           = 'sandwich_de'
 patterns       = ['^([\u4e00-\u9fa5])(.{2,})\1的$']
 reply_template = '$2怎么你了！'
-rate_limit_key = 'char_pattern'
+rate_limit_key = 'sandwich_de'
 priority       = 75
 
 # ——— 示例：检测"我喜欢XX"或"喜欢XX" ———
