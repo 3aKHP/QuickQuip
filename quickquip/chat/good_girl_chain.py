@@ -1,62 +1,60 @@
 import re
-from collections import OrderedDict
-from dataclasses import dataclass
-from time import time
 from typing import Optional
+
+from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
 
 
 GOOD_GIRL_START_PATTERN = re.compile(r"^(.+?)是好(.+?)吗[？?]*$")
 GOOD_GIRL_TIMEOUT_SECONDS = 60
 
-
-@dataclass
-class GoodGirlSession:
-    lead_char: str
-    expires_at: float
-    next_index: int = 0
+# The canonical good-girl chain definition, kept here as the named reference
+# and as the built-in example for the chain_games TOML format.
+#
+# Chain layout (odd-length → session ends automatically after bot's last reply):
+#   "别"      — bot opens
+#   "逗"      — user
+#   "你"      — bot
+#   "$1[0]"   — user sends the first character of the subject ("X是好Y吗" → group 1 = "X...")
+#   "姐"      — bot
+#   "笑"      — user
+#   "了"      — bot
+#   "句号|。"  — user sends "句号" or "。" (full-width period); pipe = OR
+#   "🤣"      — bot ends the chain
+GOOD_GIRL_CHAIN_DEF = ChainGameDef(
+    name="good_girl_chain",
+    trigger_pattern=GOOD_GIRL_START_PATTERN,
+    chain_template=["别", "逗", "你", "$1[0]", "姐", "笑", "了", "句号|。", "🤣"],
+    timeout_seconds=GOOD_GIRL_TIMEOUT_SECONDS,
+    rate_limit_key="good_girl_chain_entry",
+)
 
 
 class GoodGirlChainManager:
+    """Named wrapper around ChainGameManager for the built-in 好姐姐 chain.
+
+    Preserves the original public API and legacy context format
+    ``{"lead_char": <first char of subject>}`` so that existing callers
+    (pipeline, tests) require no changes.
+    """
+
     def __init__(
         self,
         timeout_seconds: int = GOOD_GIRL_TIMEOUT_SECONDS,
         max_sessions: int = 1024,
     ):
-        self.timeout_seconds = timeout_seconds
-        self.max_sessions = max_sessions
-        self.sessions: OrderedDict[str, GoodGirlSession] = OrderedDict()
+        def_obj = ChainGameDef(
+            name=GOOD_GIRL_CHAIN_DEF.name,
+            trigger_pattern=GOOD_GIRL_CHAIN_DEF.trigger_pattern,
+            chain_template=GOOD_GIRL_CHAIN_DEF.chain_template,
+            timeout_seconds=timeout_seconds,
+            rate_limit_key=GOOD_GIRL_CHAIN_DEF.rate_limit_key,
+        )
+        self._mgr = ChainGameManager([def_obj], max_sessions=max_sessions)
 
-    def _now(self, now_ts: float | None = None) -> float:
-        return time() if now_ts is None else now_ts
-
-    def _touch_session(self, group_key: str) -> None:
-        if group_key in self.sessions:
-            self.sessions.move_to_end(group_key)
-
-    def _prune_sessions(self) -> None:
-        while len(self.sessions) > self.max_sessions:
-            self.sessions.popitem(last=False)
-
-    def _clear_if_expired(self, group_key: str, now_ts: float) -> None:
-        session = self.sessions.get(group_key)
-        if session and now_ts > session.expires_at:
-            self.sessions.pop(group_key, None)
-
-    def _build_chain(self, lead_char: str) -> list[str]:
-        return ["别", "逗", "你", lead_char, "姐", "笑", "了", "🤣"]
-
-    def _advance_session(self, session: GoodGirlSession, heard_text: str) -> Optional[str]:
-        chain = self._build_chain(session.lead_char)
-        if session.next_index >= len(chain) - 1:
-            return None
-
-        expected_token = chain[session.next_index]
-        if heard_text != expected_token:
-            return None
-
-        reply_token = chain[session.next_index + 1]
-        session.next_index += 2
-        return reply_token
+    @property
+    def sessions(self):
+        """Proxy to the inner manager's session dict (backward compat for tests)."""
+        return self._mgr.sessions
 
     def process(
         self,
@@ -64,52 +62,13 @@ class GoodGirlChainManager:
         text: str,
         now_ts: float | None = None,
     ) -> Optional[dict]:
-        normalized_text = text.strip()
-        if not normalized_text:
+        result = self._mgr.process(group_id=group_id, text=text, now_ts=now_ts)
+        if result is None:
             return None
-
-        current_ts = self._now(now_ts)
-        group_key = str(group_id)
-        self._clear_if_expired(group_key, current_ts)
-
-        session = self.sessions.get(group_key)
-        if session is not None:
-            self._touch_session(group_key)
-            if normalized_text == "🤣":
-                self.sessions.pop(group_key, None)
-                return None
-
-            next_token = self._advance_session(session, normalized_text)
-            if next_token is None:
-                return None
-
-            if next_token == "🤣":
-                self.sessions.pop(group_key, None)
-            else:
-                session.expires_at = current_ts + self.timeout_seconds
-
-            return {
-                "reply": next_token,
-                "rate_limit_key": "good_girl_chain_entry",
-                "rule_name": "good_girl_chain_progress",
-                "context": {"lead_char": session.lead_char},
-            }
-
-        start_match = GOOD_GIRL_START_PATTERN.fullmatch(normalized_text)
-        if not start_match:
-            return None
-
-        lead_char = start_match.group(1)[0]
-        self.sessions[group_key] = GoodGirlSession(
-            lead_char=lead_char,
-            expires_at=current_ts + self.timeout_seconds,
-            next_index=1,
-        )
-        self._touch_session(group_key)
-        self._prune_sessions()
-        return {
-            "reply": "别",
-            "rate_limit_key": "good_girl_chain_entry",
-            "rule_name": "good_girl_chain_start",
-            "context": {"lead_char": lead_char},
-        }
+        # Translate generic context to legacy format.
+        # group 1 of the trigger is the subject ("X是好Y吗" → "X..."),
+        # lead_char is its first character — same as the original $1[0] slot.
+        groups = result.get("context", {}).get("groups", ())
+        lead_char = groups[0][0] if groups and groups[0] else ""
+        result["context"] = {"lead_char": lead_char}
+        return result

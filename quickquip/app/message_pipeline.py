@@ -5,6 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.service import llm_service
+from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
 from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector
@@ -13,6 +14,7 @@ from quickquip.chat.text_rules import match_text_rule
 from quickquip.chat.timezones import find_best_timezones
 from quickquip.chat.config import (
     BEIJING_TIMEZONE,
+    CHAIN_GAME_CONFIGS,
     RATE_LIMIT_RULES,
     RATE_LIMIT_WINDOW_SECONDS,
     SLEEP_TARGET,
@@ -35,6 +37,7 @@ rate_limiter = KeyedRateLimiter(
 )
 repeat_detector = GroupRepeatDetector()
 good_girl_chain = GoodGirlChainManager()
+custom_chain_games = ChainGameManager([ChainGameDef.from_dict(d) for d in CHAIN_GAME_CONFIGS])
 stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
 recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
@@ -170,6 +173,13 @@ def resolve_reply(
         rule_name = good_girl_reply.get("rule_name", "")
         if group_id is None or rule_switch.is_enabled(group_id, rule_name):
             return good_girl_reply
+
+    if group_id is not None:
+        chain_game_reply = custom_chain_games.process(group_id=group_id, text=text)
+        if chain_game_reply:
+            rule_name = chain_game_reply.get("rule_name", "")
+            if rule_switch.is_enabled(group_id, rule_name):
+                return chain_game_reply
 
     now_cst = now or datetime.now(ZoneInfo(BEIJING_TIMEZONE))
 

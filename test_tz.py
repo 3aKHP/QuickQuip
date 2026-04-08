@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 import shutil
 
+from plugins.chain_game import ChainGameDef, ChainGameManager
 from plugins.good_girl_chain import GoodGirlChainManager
 from plugins.message_stats import GroupStatsTracker
 from plugins.rate_limit import KeyedRateLimiter, SlidingWindowRateLimiter
@@ -259,9 +260,12 @@ chain_step_3 = chain.process(group_id=3001, text="笑", now_ts=3)
 assert chain_step_3 is not None
 assert chain_step_3["reply"] == "了"
 
-# 用户说🤣结束链条，bot 不再回复
-chain_step_4 = chain.process(group_id=3001, text="🤣", now_ts=4)
-assert chain_step_4 is None
+# 用户说"句号"（多字元素 OR 测试），bot 以 🤣 结束链条
+chain_step_4 = chain.process(group_id=3001, text="句号", now_ts=4)
+assert chain_step_4 is not None
+assert chain_step_4["reply"] == "🤣"
+# 奇数长度：bot 说完 🤣 后会话自动终止
+assert chain.process(group_id=3001, text="逗", now_ts=5) is None
 
 # 测试好姐姐接龙：中途乱入不会打断，只会被忽略
 chain_interrupt = GoodGirlChainManager(timeout_seconds=60)
@@ -271,26 +275,28 @@ assert chain_interrupt.process(group_id=3001, text="逗", now_ts=12)["reply"] ==
 assert chain_interrupt.process(group_id=3001, text="又一条无关消息", now_ts=13) is None
 assert chain_interrupt.process(group_id=3001, text="阿", now_ts=14)["reply"] == "姐"
 assert chain_interrupt.process(group_id=3001, text="笑", now_ts=15)["reply"] == "了"
+# 全角句号也触发（OR 的另一侧）
+assert chain_interrupt.process(group_id=3001, text="。", now_ts=16)["reply"] == "🤣"
 
-# 测试好姐姐接龙：完成后会话结束；收到🤣后不会再继续
-assert chain_interrupt.process(group_id=3001, text="🤣", now_ts=16) is None
-assert chain_interrupt.process(group_id=3001, text="逗", now_ts=17) is None
+# 测试好姐姐接龙：完成后会话结束；后续消息不会再续接
+assert chain_interrupt.process(group_id=3001, text="🤣", now_ts=17) is None
+assert chain_interrupt.process(group_id=3001, text="逗", now_ts=18) is None
 
-# 测试好姐姐接龙：用户发出🤣后，会话应立即结束，后续不会错误续接
+# 测试好姐姐接龙：走完全程后会话结束，后续不会错误续接
 chain_finish = GoodGirlChainManager(timeout_seconds=60)
 assert chain_finish.process(group_id=3006, text="阿桃是好女人吗", now_ts=0)["reply"] == "别"
 assert chain_finish.process(group_id=3006, text="逗", now_ts=1)["reply"] == "你"
 assert chain_finish.process(group_id=3006, text="阿", now_ts=2)["reply"] == "姐"
 assert chain_finish.process(group_id=3006, text="笑", now_ts=3)["reply"] == "了"
-assert chain_finish.process(group_id=3006, text="🤣", now_ts=4) is None
+assert chain_finish.process(group_id=3006, text="。", now_ts=4)["reply"] == "🤣"
 assert chain_finish.process(group_id=3006, text="逗", now_ts=5) is None
 
-# 测试好姐姐接龙：收到🤣会主动终止链条
+# 测试好姐姐接龙：中途发出 🤣 不再是终止信号，会被忽略，会话继续
 chain_break = GoodGirlChainManager(timeout_seconds=60)
 assert chain_break.process(group_id=3005, text="林是好姐姐吗", now_ts=0)["reply"] == "别"
 assert chain_break.process(group_id=3005, text="逗", now_ts=1)["reply"] == "你"
-assert chain_break.process(group_id=3005, text="🤣", now_ts=2) is None
-assert chain_break.process(group_id=3005, text="林", now_ts=3) is None
+assert chain_break.process(group_id=3005, text="🤣", now_ts=2) is None  # 不匹配，忽略
+assert chain_break.process(group_id=3005, text="林", now_ts=3)["reply"] == "姐"  # 会话仍存活
 
 # 测试好姐姐接龙：超时失效
 chain_timeout = GoodGirlChainManager(timeout_seconds=5)
@@ -314,7 +320,7 @@ assert chain_overlap_token.process(group_id=4003, text="别人是好人吗", now
 assert chain_overlap_token.process(group_id=4003, text="逗", now_ts=1)["reply"] == "你"
 assert chain_overlap_token.process(group_id=4003, text="别", now_ts=2)["reply"] == "姐"
 assert chain_overlap_token.process(group_id=4003, text="笑", now_ts=3)["reply"] == "了"
-assert chain_overlap_token.process(group_id=4003, text="🤣", now_ts=4) is None
+assert chain_overlap_token.process(group_id=4003, text="句号", now_ts=4)["reply"] == "🤣"
 
 # 测试接龙会话有上限，最旧群会话会被淘汰
 chain_bounded = GoodGirlChainManager(timeout_seconds=60, max_sessions=2)
@@ -563,5 +569,142 @@ assert loaded_switch.is_enabled(7002, "like_reply") is False
 empty_switch = GroupRuleSwitch()
 empty_switch.load("/nonexistent/path/switch.json")
 assert len(empty_switch.disabled) == 0
+
+# ══════════════════════════════════════════════════════════
+# ChainGameManager 专项测试
+# ══════════════════════════════════════════════════════════
+
+import re as _re
+
+# ── 辅助：快速构造 ChainGameDef ──────────────────────────────
+def _def(name, pattern, chain, timeout=60, rate_limit_key="test_chain"):
+    return ChainGameDef(
+        name=name,
+        trigger_pattern=_re.compile(pattern),
+        chain_template=chain,
+        timeout_seconds=timeout,
+        rate_limit_key=rate_limit_key,
+    )
+
+
+# ── 测试：$1 完整捕获组 ──────────────────────────────────────
+cg_full = ChainGameManager([_def("full_group", r"^来一个(.+)$", ["好的", "$1", "666"])])
+r = cg_full.process(group_id=1, text="来一个哈哈哈", now_ts=0)
+assert r is not None and r["reply"] == "好的"
+assert r["rule_name"] == "full_group_start"
+# 用户发完整捕获组文本 "哈哈哈"
+r = cg_full.process(group_id=1, text="哈哈哈", now_ts=1)
+assert r is not None and r["reply"] == "666"
+assert r["rule_name"] == "full_group_progress"
+# 奇数长度：bot 最后一个回复发出后会话结束
+assert cg_full.process(group_id=1, text="哈哈哈", now_ts=2) is None
+
+# ── 测试：$1[0] 首字 ─────────────────────────────────────────
+cg_first = ChainGameManager([_def("first_char", r"^(.+?)说$", ["嗯", "$1[0]", "好"])])
+r = cg_first.process(group_id=2, text="阿弥陀佛说", now_ts=0)
+assert r is not None and r["reply"] == "嗯"
+r = cg_first.process(group_id=2, text="阿", now_ts=1)  # 只接受首字
+assert r is not None and r["reply"] == "好"
+# 会话结束，再次发送无效
+assert cg_first.process(group_id=2, text="阿", now_ts=2) is None
+
+# ── 测试：$1[-1] 尾字 ────────────────────────────────────────
+cg_last = ChainGameManager([_def("last_char", r"^(.+?)好$", ["来", "$1[-1]", "哦"])])
+r = cg_last.process(group_id=3, text="挺好", now_ts=0)
+assert r is not None and r["reply"] == "来"
+r = cg_last.process(group_id=3, text="挺", now_ts=1)  # 尾字是"挺"
+assert r is not None and r["reply"] == "哦"
+
+# ── 测试：$1[1] 第二字 ───────────────────────────────────────
+cg_second = ChainGameManager([_def("second_char", r"^(.+)开始$", ["走", "$1[1]", "完"])])
+r = cg_second.process(group_id=4, text="AB开始", now_ts=0)
+assert r is not None and r["reply"] == "走"
+r = cg_second.process(group_id=4, text="B", now_ts=1)  # 第二字 index=1
+assert r is not None and r["reply"] == "完"
+
+# ── 测试：多字元素 ──────────────────────────────────────────
+cg_multi = ChainGameManager([_def("multi_tok", r"^(.+)发车$", ["上车了", "准备好了", "出发！"])])
+r = cg_multi.process(group_id=5, text="快速发车", now_ts=0)
+assert r is not None and r["reply"] == "上车了"
+r = cg_multi.process(group_id=5, text="准备好了", now_ts=1)
+assert r is not None and r["reply"] == "出发！"
+# 奇数长度，会话结束
+assert cg_multi.process(group_id=5, text="准备好了", now_ts=2) is None
+
+# ── 测试：偶数长度 + 静默终止 token ─────────────────────────
+cg_even = ChainGameManager([_def("even_chain", r"^(.+)启动$", ["准备", "就绪", "冲", "STOP"])])
+r = cg_even.process(group_id=6, text="快速启动", now_ts=0)
+assert r is not None and r["reply"] == "准备"
+r = cg_even.process(group_id=6, text="就绪", now_ts=1)
+assert r is not None and r["reply"] == "冲"
+# 终止 token 结束会话（无回复）
+r = cg_even.process(group_id=6, text="STOP", now_ts=2)
+assert r is None
+# 会话已结束，无法续接
+assert cg_even.process(group_id=6, text="就绪", now_ts=3) is None
+
+# ── 测试：偶数长度，终止 token 可提前触发 ───────────────────
+cg_early_stop = ChainGameManager([_def("early_stop", r"^(.+)启动$", ["准备", "就绪", "冲", "STOP"])])
+cg_early_stop.process(group_id=7, text="快速启动", now_ts=0)
+# 未完成接龙直接发 STOP
+assert cg_early_stop.process(group_id=7, text="STOP", now_ts=1) is None
+# 会话已结束
+assert cg_early_stop.process(group_id=7, text="就绪", now_ts=2) is None
+
+# ── 测试：错误输入被忽略，接龙不中断 ────────────────────────
+cg_noise = ChainGameManager([_def("noise_test", r"^(.+)准备$", ["好", "开始", "完成"])])
+cg_noise.process(group_id=8, text="ABC准备", now_ts=0)
+assert cg_noise.process(group_id=8, text="无关消息", now_ts=1) is None
+r = cg_noise.process(group_id=8, text="开始", now_ts=2)
+assert r is not None and r["reply"] == "完成"
+
+# ── 测试：超时后会话失效 ─────────────────────────────────────
+cg_timeout2 = ChainGameManager([_def("timeout_test", r"^(.+)准备$", ["好", "开始", "完成"], timeout=5)])
+cg_timeout2.process(group_id=9, text="ABC准备", now_ts=0)
+assert cg_timeout2.process(group_id=9, text="开始", now_ts=6) is None  # 超时
+
+# ── 测试：多群隔离 ───────────────────────────────────────────
+cg_groups2 = ChainGameManager([_def("groups_test", r"^(.+)来$", ["哦", "$1[0]", "好"])])
+cg_groups2.process(group_id=10, text="阿来", now_ts=0)
+cg_groups2.process(group_id=11, text="哟来", now_ts=0)
+assert cg_groups2.process(group_id=10, text="阿", now_ts=1)["reply"] == "好"
+assert cg_groups2.process(group_id=11, text="哟", now_ts=1)["reply"] == "好"
+
+# ── 测试：ChainGameDef.from_dict ────────────────────────────
+d = ChainGameDef.from_dict({
+    "name": "dict_chain",
+    "trigger_pattern": r"^test(.+)$",
+    "chain": ["A", "$1", "B"],
+    "timeout_seconds": 30,
+    "rate_limit_key": "test_bucket",
+})
+cg_dict = ChainGameManager([d])
+r = cg_dict.process(group_id=20, text="testXY", now_ts=0)
+assert r is not None and r["reply"] == "A"
+assert cg_dict.process(group_id=20, text="XY", now_ts=1)["reply"] == "B"
+
+# ── 测试：OR 匹配（pipe 分隔的多个候选 token）──────────────
+cg_or = ChainGameManager([_def("or_test", r"^(.+)出发$", ["准备", "就绪|ready|OK", "出发！"])])
+# 每个 group 独立测一种候选
+assert cg_or.process(group_id=40, text="快速出发", now_ts=0)["reply"] == "准备"
+assert cg_or.process(group_id=40, text="就绪", now_ts=1)["reply"] == "出发！"   # 候选1
+
+assert cg_or.process(group_id=41, text="快速出发", now_ts=0)["reply"] == "准备"
+assert cg_or.process(group_id=41, text="ready", now_ts=1)["reply"] == "出发！"  # 候选2
+
+assert cg_or.process(group_id=42, text="快速出发", now_ts=0)["reply"] == "准备"
+assert cg_or.process(group_id=42, text="OK", now_ts=1)["reply"] == "出发！"     # 候选3
+
+# 不在候选列表中的输入被忽略，会话仍存活
+assert cg_or.process(group_id=43, text="快速出发", now_ts=0)["reply"] == "准备"
+assert cg_or.process(group_id=43, text="差不多得了", now_ts=1) is None          # 不匹配
+assert cg_or.process(group_id=43, text="OK", now_ts=2)["reply"] == "出发！"     # 会话仍存活
+
+# ── 测试：context["groups"] 正确暴露 ────────────────────────
+cg_ctx = ChainGameManager([_def("ctx_test", r"^(.+?)和(.+?)$", ["好的", "$1", "完"])])
+r = cg_ctx.process(group_id=30, text="猫和狗", now_ts=0)
+assert r["context"]["groups"] == ("猫", "狗")
+r2 = cg_ctx.process(group_id=30, text="猫", now_ts=1)
+assert r2["context"]["groups"] == ("猫", "狗")
 
 print("所有测试通过")
