@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
-from quickquip.adapters.nonebot.daily_summary_plugin import record_group_message
 from quickquip.app.message_pipeline import (
     get_sender_name,
     llm_service,
     message_deduper,
     rate_limiter,
     recent_messages,
+    record_group_message,
     resolve_reply,
     rule_switch,
     stats_tracker,

@@ -71,12 +71,14 @@ env = { GITHUB_TOKEN = "${GITHUB_TOKEN:-}" }
 # 每日群聊总结配置。默认全局关闭；需要在群内执行 /summary on 开启。
 [daily_summary]
 enabled = false               # 全局开关（false 时不注册定时任务）
+# cron 表达式使用服务器本地时区（Asia/Shanghai，即北京时间）
 generate_cron = "0 6 * * *"  # 每日 06:00 生成前一个06:00~06:00窗口的总结
 publish_cron  = "0 12 * * *" # 每日 12:00 发布当日已生成的总结
-min_messages  = 30            # 低于此条数时跳过生成
-summary_length_hint = 2000    # 字数目标，注入 prompt
+min_messages  = 30            # 低于此条数时跳过生成（最小值 1）
+summary_length_hint = 2000    # 字数目标，注入 prompt（最小值 100）
 
-# 模型级联：逐个尝试直到成功；"@default" 表示使用当前群绑定的默认模型
+# 模型级联：逐个尝试直到成功；"@default" 表示使用当前群绑定的默认模型。
+# 下方模型名称仅为示例，请替换为你自己的 provider_id/model_id。
 model_cascade = [
     "gemini-main/gemini-3.1-pro-high",
     "claude-main/claude-sonnet-4-6",

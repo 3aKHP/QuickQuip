@@ -374,8 +374,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             enabled=_as_bool(daily_summary_raw.get("enabled", False), default=False),
             generate_cron=str(daily_summary_raw.get("generate_cron", "0 6 * * *")).strip() or "0 6 * * *",
             publish_cron=str(daily_summary_raw.get("publish_cron", "0 12 * * *")).strip() or "0 12 * * *",
-            min_messages=int(daily_summary_raw.get("min_messages", 30)),
-            summary_length_hint=int(daily_summary_raw.get("summary_length_hint", 2000)),
+            min_messages=max(1, int(daily_summary_raw.get("min_messages", 30))),
+            summary_length_hint=max(100, int(daily_summary_raw.get("summary_length_hint", 2000))),
             model_cascade=[
                 str(item).strip()
                 for item in daily_summary_raw.get("model_cascade", [])
