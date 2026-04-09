@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 每日群聊总结模块 `daily_summary`：凌晨 06:00 自动收集前一日聊天记录（06:00–06:00 窗口）并调用 LLM 生成约 2000 字小作文，中午 12:00 定时发布；以 persona 口吻撰写，注入群成员昵称对照表
+- 模型级联策略：生成失败时自动降级到下一个 provider/model，顺序可在 `[daily_summary] model_cascade` 中配置，支持 `"@default"` 占位符指向当前群绑定的默认模型
+- `/summary on|off|status|now` 命令：群管理员可开关本群每日总结；`now` 子命令立即生成前一天 06:00 至当前时刻的总结（每分钟限一次）
+- `DailyMessageCollector`：逐行写入 `data/daily_msgs/{group_id}/{date}.jsonl`，生成后自动删除原始文件
+- `DailySummaryStore`：独立 SQLite 文件 `data/daily_summaries.db` 持久化已生成的摘要
+- `DailySummaryEnabledGroups`：群级功能开关（默认关闭，需主动开启），持久化至 `data/daily_summary_groups.json`
+- `rule_switch` 新增 `"daily_summary"` 可切换规则，与 `/enable` / `/disable` 命令体系保持一致
+
 ## [0.5.0] - 2026-04-09
 
 ### 新增

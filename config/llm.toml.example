@@ -29,6 +29,7 @@ transport = "docker"
 timeout_seconds = 30
 image = "ghcr.io/github/github-mcp-server"
 env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
+allowed_tools = ["search_repositories", "get_file_contents", "search_code"]
 
 [[mcp.servers]]
 id = "tavily"
@@ -40,17 +41,51 @@ env = { TAVILY_API_KEY = "${TAVILY_API_KEY}" }
 [[mcp.servers]]
 id = "arxiv"
 transport = "docker"
+enabled = false
 timeout_seconds = 30
-image = "arxiv-mcp-server:latest"
+image = "mcp/arxiv-mcp-server"
 mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"]
+
+[[mcp.servers]]
+id = "fetch"
+transport = "docker"
+timeout_seconds = 30
+image = "mcp/fetch"
+
+[[mcp.servers]]
+id = "openweather"
+transport = "docker"
+timeout_seconds = 30
+image = "mcp/openweather"
+env = { OWM_API_KEY = "${OWM_API_KEY}" }
 
 [[mcp.servers]]
 id = "prts_wiki"
 transport = "docker"
 enabled = "${MCP_PRTS_WIKI_ENABLED:-false}"
 timeout_seconds = 30
-image = "prts-mcp"
-mounts = ["${MCP_PRTS_GAMEDATA_MOUNT:-}", "${MCP_PRTS_STORYJSON_MOUNT:-}"]
+image = "ghcr.io/3akhp/prts-mcp:latest"
+mounts = ["prts-mcp-data:/data/gamedata"]
+env = { GITHUB_TOKEN = "${GITHUB_TOKEN:-}" }
+
+# 每日群聊总结配置。默认全局关闭；需要在群内执行 /summary on 开启。
+[daily_summary]
+enabled = false               # 全局开关（false 时不注册定时任务）
+# cron 表达式使用服务器本地时区（Asia/Shanghai，即北京时间）
+generate_cron = "0 6 * * *"  # 每日 06:00 生成前一个06:00~06:00窗口的总结
+publish_cron  = "0 12 * * *" # 每日 12:00 发布当日已生成的总结
+min_messages  = 30            # 低于此条数时跳过生成（最小值 1）
+summary_length_hint = 2000    # 字数目标，注入 prompt（最小值 100）
+
+# 模型级联：逐个尝试直到成功；"@default" 表示使用当前群绑定的默认模型。
+# 下方模型名称仅为示例，请替换为你自己的 provider_id/model_id。
+model_cascade = [
+    "gemini-main/gemini-3.1-pro-high",
+    "claude-main/claude-sonnet-4-6",
+    "openai-main/gpt-5.4",
+    "@default",
+    "deepseek/deepseek-chat",
+]
 
 # 人格定义已拆分至 config/personas/ 目录，每个 .toml 文件对应一个人格。
 # 参见 config/personas.example/ 中的示例文件。

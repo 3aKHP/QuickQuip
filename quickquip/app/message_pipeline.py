@@ -22,6 +22,11 @@ from quickquip.chat.config import (
     WAKE_TARGET,
     WAKE_WORDS,
 )
+from quickquip.chat.daily_summary import (
+    DailyMessageCollector,
+    DailySummaryEnabledGroups,
+    DailySummaryStore,
+)
 from quickquip.common.message_deduper import RecentMessageDeduper
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
@@ -43,12 +48,23 @@ rule_switch = GroupRuleSwitch()
 recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
 message_deduper = RecentMessageDeduper()
 
+daily_collector = DailyMessageCollector()
+daily_store = DailySummaryStore()
+daily_enabled_groups = DailySummaryEnabledGroups()
+
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
 rule_switch.load(RULE_SWITCH_PATH)
 llm_service.bind_group_stats_tracker(stats_tracker)
 llm_service.bind_rule_switch(rule_switch)
 llm_service.bind_recent_message_buffer(recent_messages)
+
+
+def record_group_message(group_id: int | str, sender_name: str, rendered_text: str) -> None:
+    """Record a message for daily summary collection. No-op if group has not opted in."""
+    if not daily_enabled_groups.contains(group_id):
+        return
+    daily_collector.record(group_id, sender_name, rendered_text)
 
 
 def save_all() -> None:

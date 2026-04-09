@@ -93,6 +93,16 @@ class ProviderConfig:
 
 
 @dataclass(slots=True)
+class DailySummaryConfig:
+    enabled: bool = False
+    generate_cron: str = "0 6 * * *"
+    publish_cron: str = "0 12 * * *"
+    min_messages: int = 30
+    summary_length_hint: int = 2000
+    model_cascade: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
@@ -100,6 +110,7 @@ class LLMConfig:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
+    daily_summary: DailySummaryConfig = field(default_factory=DailySummaryConfig)
     load_error: str | None = None
     source_path: Path | None = None
 
@@ -315,6 +326,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     triggers_raw = _expand_env_value(_as_dict(data.get("triggers")))
     tools_raw = _expand_env_value(_as_dict(data.get("tools")))
     mcp_raw = _expand_env_value(_as_dict(data.get("mcp")))
+    daily_summary_raw = _expand_env_value(_as_dict(data.get("daily_summary")))
     raw_providers = data.get("providers", [])
     raw_personas = data.get("personas", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
@@ -358,6 +370,18 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         ),
         providers=_read_providers(raw_providers if isinstance(raw_providers, list) else []),
         personas=_read_personas(raw_personas if isinstance(raw_personas, list) else []),
+        daily_summary=DailySummaryConfig(
+            enabled=_as_bool(daily_summary_raw.get("enabled", False), default=False),
+            generate_cron=str(daily_summary_raw.get("generate_cron", "0 6 * * *")).strip() or "0 6 * * *",
+            publish_cron=str(daily_summary_raw.get("publish_cron", "0 12 * * *")).strip() or "0 12 * * *",
+            min_messages=max(1, int(daily_summary_raw.get("min_messages", 30))),
+            summary_length_hint=max(100, int(daily_summary_raw.get("summary_length_hint", 2000))),
+            model_cascade=[
+                str(item).strip()
+                for item in daily_summary_raw.get("model_cascade", [])
+                if str(item).strip()
+            ],
+        ),
         source_path=config_path,
     )
 
