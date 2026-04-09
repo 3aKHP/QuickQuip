@@ -164,6 +164,19 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 笑点解析：......。令人忍俊不禁。
 ```
 
+### 📰 每日群聊总结
+
+每天凌晨 06:00 自动收集前一个 06:00–06:00 窗口的群聊记录，调用 LLM 以 persona 口吻生成约 2000 字小作文，并在中午 12:00 定时发布到群里。支持模型级联策略（失败自动降级），注入群成员昵称对照表，消息量不足时自动跳过。
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/summary on` | 开启本群每日总结 | 管理员/群主 |
+| `/summary off` | 关闭本群每日总结 | 管理员/群主 |
+| `/summary status` | 查看本群每日总结开关状态 | 所有人 |
+| `/summary now` | 立即生成前一天 06:00 至当前时刻的总结（每分钟限一次） | 管理员/群主 |
+
+每日总结默认全局关闭，需在群内执行 `/summary on` 后才会为该群启用消息收集与定时生成。生成与发布时间可在 `config/llm.toml` 的 `[daily_summary]` 区块中自定义。
+
 ### 🖼️ 多贴吧随机搬运
 
 支持为多个贴吧分别维护本地帖子池，并在群里随机抽取一条帖子发送，也支持按指定来源搬运。
@@ -385,6 +398,7 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 | `[triggers]` | `llm.toml` | 前缀触发、艾特触发、空提示回复 |
 | `[tools]` | `llm.toml` | 标准化工具调用白名单 |
 | `[mcp]` / `[[mcp.servers]]` | `llm.toml` | MCP 总开关、server 启动方式、白名单与 DOOD 相关参数 |
+| `[daily_summary]` | `llm.toml` | 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表 |
 | `[[providers]]` | `llm.toml` | provider ID、协议类型、base URL、模型列表、默认参数 |
 | `_shared.toml` | `personas/` | 自动注入所有人格的共享行为准则与风格规则 |
 | `<id>.toml` | `personas/` | 单个人格卡：id、display_name、system_prompt、style_prompt + 自由扩展字段 |
@@ -467,6 +481,7 @@ quickquip/adapters/nonebot/
   ├─ lifecycle.py                        ← 启动、关停、定时保存
   ├─ group_messages.py                   ← 群消息入口
   ├─ private_messages.py                 ← 私聊消息入口
+  ├─ daily_summary_plugin.py             ← 每日总结定时任务与 /summary 命令
   └─ commands.py                         ← /llm /stats /tieba 等命令注册
   │
   ▼
@@ -478,16 +493,18 @@ quickquip/app/message_pipeline.py        ← 应用级消息管线与共享状�
   ├─ quickquip/chat/timezones.py         ← 时区候选与地点格式化
   ├─ quickquip/chat/rule_switch.py       ← 群级规则开关
   ├─ quickquip/chat/message_stats.py     ← 群消息统计
+  ├─ quickquip/chat/daily_summary.py     ← 消息收集器、总结 SQLite 存储、群开关
   └─ quickquip/common/                   ← 限流、去重、最近消息缓冲、JSON 持久化
   │
   ├─ quickquip/llm/                      ← LLM 配置、provider、MCP、tool loop、prompt 构建
+  ├─ quickquip/llm/summarize.py          ← 每日总结生成（模型级联、截断、prompt 构建）
   ├─ quickquip/search/                   ← SearXNG / Tavily 搜索后端
   └─ quickquip/tieba/                    ← 多贴吧配置、抓取、缓存与服务层
 ```
 
 普通规则消息的回复优先级从高到低仍然是：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每个环节均受群级规则开关控制，被禁用的规则会被跳过并尝试下一级。部分近义彩蛋规则会共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
 
-LLM、贴吧与联网搜索能力在目录上已经独立成子系统，便于后续继续细分 provider、存储、抓取器和工具桥接实现。
+LLM、贴吧与联网搜索能力在目录上已经独立成子系统，便于后续继续细分 provider、存储、抓取器和工具桥接实现。每日总结单独维护消息收集层与 SQLite 摘要存储，与主会话上下文完全隔离。
 
 ---
 
@@ -508,6 +525,7 @@ LLM、贴吧与联网搜索能力在目录上已经独立成子系统，便于�
 - 严格限制的短期上下文
 - 图片识别
 - 可切换联网搜索后端（内置 SearXNG / Tavily）
+- 每日群聊总结（定时生成 + 发布，模型级联，群级开关）
 
 下一阶段优先考虑的方向：
 
