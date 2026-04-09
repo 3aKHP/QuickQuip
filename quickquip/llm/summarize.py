@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import replace
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from quickquip.llm.config import DailySummaryConfig, LLMConfig, PersonaConfig
+from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
+from quickquip.llm.tools import LLMConversationMessage
+
+logger = logging.getLogger(__name__)
+
+_SUMMARY_MAX_OUTPUT_TOKENS = 4096
+_SUMMARY_TEMPERATURE = 0.7
+
+
+def _build_system_prompt(
+    persona: PersonaConfig,
+    date_label: str,
+    name_table: dict[str, str],
+    length_hint: int,
+) -> str:
+    parts: list[str] = []
+
+    if persona.system_prompt:
+        parts.append(persona.system_prompt)
+    if persona.style_prompt:
+        parts.append(persona.style_prompt)
+
+    parts.append(
+        f"你现在的任务是撰写一篇群聊日报，字数目标约 {length_hint} 字。"
+        "以小作文形式呈现，生动有趣，有血有肉，保持你的人格特色，不要干燥地堆砌列表。"
+        f"本篇日报的时间范围：{date_label}。"
+        "内容应覆盖当日主要话题与讨论走向、有趣或具有代表性的对话片段、活跃成员等。"
+    )
+
+    if name_table:
+        lines = ["以下是本群部分成员 QQ 号与昵称的对照（供参考，正文请使用昵称）："]
+        for uid, name in sorted(name_table.items()):
+            lines.append(f"  {uid} → {name}")
+        parts.append("\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
+def _format_messages(messages: list[dict], local_tz: ZoneInfo) -> str:
+    lines: list[str] = []
+    for entry in messages:
+        ts = float(entry.get("ts", 0))
+        sender = entry.get("sender", "未知")
+        text = str(entry.get("text", "")).strip()
+        if not text:
+            continue
+        time_str = datetime.fromtimestamp(ts, tz=local_tz).strftime("%H:%M")
+        lines.append(f"[{time_str}] {sender}：{text}")
+    return "\n".join(lines)
+
+
+async def generate_daily_summary(
+    messages: list[dict],
+    persona: PersonaConfig,
+    group_id: int | str,
+    date_label: str,
+    name_table: dict[str, str],
+    summary_config: DailySummaryConfig,
+    llm_config: LLMConfig,
+    default_provider_id: str,
+    default_model: str,
+    local_tz: ZoneInfo,
+) -> tuple[str, str]:
+    """Generate a daily summary using the model cascade.
+
+    Returns (summary_text, model_used_label).
+    Raises RuntimeError if all models in the cascade fail.
+    """
+    system_prompt = _build_system_prompt(
+        persona, date_label, name_table, summary_config.summary_length_hint
+    )
+    chat_log = _format_messages(messages, local_tz)
+    user_content = (
+        f"以下是{date_label}的群聊记录（共 {len(messages)} 条消息）：\n\n"
+        f"{chat_log}\n\n"
+        f"请生成约 {summary_config.summary_length_hint} 字的群聊日报。"
+    )
+    user_message = LLMConversationMessage(role="user", content=user_content)
+
+    cascade = summary_config.model_cascade or [f"{default_provider_id}/{default_model}"]
+    last_error: Exception | None = None
+
+    for entry in cascade:
+        if entry == "@default":
+            provider_id = default_provider_id
+            model = default_model
+        else:
+            parts = entry.split("/", 1)
+            if len(parts) != 2:
+                logger.warning("daily_summary: invalid cascade entry %r, skipping", entry)
+                continue
+            provider_id, model = parts
+
+        provider_config = llm_config.providers.get(provider_id)
+        if provider_config is None:
+            logger.warning("daily_summary: provider %r not found in config, skipping", provider_id)
+            continue
+
+        effective_config = replace(provider_config, stream_enabled=False)
+        req = LLMRequest(
+            model=model,
+            system_prompt=system_prompt,
+            messages=[user_message],
+            temperature=_SUMMARY_TEMPERATURE,
+            max_output_tokens=_SUMMARY_MAX_OUTPUT_TOKENS,
+        )
+
+        try:
+            client = build_provider_client(effective_config)
+            response = await client.complete(req)
+            text = response.text.strip()
+            if text:
+                logger.info(
+                    "daily_summary: generated for group %s via %s/%s (%d chars)",
+                    group_id, provider_id, model, len(text),
+                )
+                return text, f"{provider_id}/{model}"
+            logger.warning(
+                "daily_summary: %s/%s returned empty text, trying next", provider_id, model
+            )
+        except LLMProviderError as exc:
+            logger.warning(
+                "daily_summary: %s/%s provider error: %s, trying next", provider_id, model, exc
+            )
+            last_error = exc
+        except Exception as exc:
+            logger.warning(
+                "daily_summary: %s/%s unexpected error: %s, trying next", provider_id, model, exc
+            )
+            last_error = exc
+
+    raise RuntimeError(f"所有模型均调用失败，最后错误：{last_error}")
