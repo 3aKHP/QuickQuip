@@ -9,7 +9,9 @@ from zoneinfo import ZoneInfo
 try:
     import nonebot
     from nonebot_plugin_apscheduler import scheduler
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ValueError):
+    # ValueError is raised by nonebot_plugin_apscheduler when NoneBot is not
+    # yet initialized (e.g. during tests that import outside a bot context).
     nonebot = None
     scheduler = None
 
