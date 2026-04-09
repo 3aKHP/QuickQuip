@@ -220,7 +220,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await llm_cmd.finish(llm_service.format_providers())
 
         if args == "personas":
-            await llm_cmd.finish(llm_service.format_personas())
+            await llm_cmd.finish(llm_service.format_personas(chat_type=chat_type))
 
         if tokens[:1] == ["models"]:
             provider_id = tokens[1] if len(tokens) > 1 else None

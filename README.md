@@ -150,7 +150,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 - 私聊默认不会自动进入 LLM，需要先发送 `/start_sesssion` 开启会话；`/end_session` 用于结束当前会话
 - 会话开启后，普通文本、图片和引用回复都会进入 LLM；已注册的斜杠命令仍然优先走命令处理
-- 私聊沿用当前可用的人格列表，但会在提示词里自动收敛成更适合一对一聊天的表达方式
+- `/llm personas` 在私聊中只显示标注了 `scope = ["private"]` 或未设 scope 的人格；群聊中只显示标注了 `scope = ["group"]` 或未设 scope 的人格（向后兼容，未设 scope 两端均显示）
 - 私聊单会话的默认上下文上限为 256 条，适合连续对话
 - 私聊可继续使用 `/llm status`、`/llm current`、`/llm persona use <id>`、`/llm trigger prefix <value>`、`/llm context_limit <n>`、`/llm clear_context`、`/search`、`/remember`、`/memories`、`/forget`、`/forget_all`
 - 私聊中 `/defectify` 与 `/故障化` 仍可单独使用，不依赖当前会话是否开启
@@ -401,7 +401,7 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 | `[daily_summary]` | `llm.toml` | 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表 |
 | `[[providers]]` | `llm.toml` | provider ID、协议类型、base URL、模型列表、默认参数 |
 | `_shared.toml` | `personas/` | 自动注入所有人格的共享行为准则与风格规则 |
-| `<id>.toml` | `personas/` | 单个人格卡：id、display_name、system_prompt、style_prompt + 自由扩展字段 |
+| `<id>.toml` | `personas/` | 单个人格卡：id、display_name、system_prompt、style_prompt、scope（可选，见下）+ 自由扩展字段 |
 
 联网搜索后端通过 `.env` 中的 `SEARCH_BACKEND` 控制：
 

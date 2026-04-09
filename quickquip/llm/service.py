@@ -610,8 +610,8 @@ class LLMService:
     def list_providers(self) -> list[ProviderConfig]:
         return list(self.config.providers.values())
 
-    def list_personas(self) -> list[PersonaConfig]:
-        return list(self.config.personas.values())
+    def list_personas(self, chat_type: str = "group") -> list[PersonaConfig]:
+        return [p for p in self.config.personas.values() if not p.scope or chat_type in p.scope]
 
     def format_status(self, group_id: int | str, chat_type: str = "group") -> str:
         settings = self.get_chat_settings(group_id, chat_type=chat_type)
@@ -887,11 +887,11 @@ class LLMService:
             lines.extend(f"- {model}" for model in provider.models)
         return "\n".join(lines)
 
-    def format_personas(self) -> str:
+    def format_personas(self, chat_type: str = "group") -> str:
         if self.config.load_error:
             return f"LLM 配置不可用：{self.config.load_error}"
         lines = ["可用人格："]
-        for persona in self.list_personas():
+        for persona in self.list_personas(chat_type=chat_type):
             lines.append(f"- {persona.id}：{persona.display_name}")
         return "\n".join(lines)
 

@@ -73,6 +73,7 @@ class PersonaConfig:
     display_name: str
     system_prompt: str
     style_prompt: str = ""
+    scope: list[str] = field(default_factory=list)  # empty = both group and private
     extras: dict[str, Any] = field(default_factory=dict)
 
 
@@ -162,7 +163,7 @@ def _as_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
-_KNOWN_PERSONA_KEYS = {"id", "display_name", "system_prompt", "style_prompt"}
+_KNOWN_PERSONA_KEYS = {"id", "display_name", "system_prompt", "style_prompt", "scope"}
 
 
 def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfig]:
@@ -172,12 +173,17 @@ def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfi
         persona_id = str(entry.get("id", "")).strip()
         if not persona_id:
             continue
+        raw_scope = entry.get("scope", [])
+        if isinstance(raw_scope, str):
+            raw_scope = [raw_scope]
+        parsed_scope = [s for s in (str(s).strip().lower() for s in raw_scope) if s in {"group", "private"}]
         extras = {k: v for k, v in entry.items() if k not in _KNOWN_PERSONA_KEYS}
         personas[persona_id] = PersonaConfig(
             id=persona_id,
             display_name=str(entry.get("display_name", persona_id)).strip() or persona_id,
             system_prompt=str(entry.get("system_prompt", "")).strip(),
             style_prompt=str(entry.get("style_prompt", "")).strip(),
+            scope=parsed_scope,
             extras=extras,
         )
     return personas
