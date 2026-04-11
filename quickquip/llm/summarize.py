@@ -18,6 +18,11 @@ _SUMMARY_TEMPERATURE = 0.7
 # 300 000 chars is well within even 128k-token context windows for Chinese text.
 _MAX_CHAT_LOG_CHARS = 300_000
 
+# Finish reasons that indicate a clean, complete response.
+# Providers: Gemini → "STOP", OpenAI → "stop", Claude → "end_turn" / "stop_sequence".
+# An empty/None finish_reason is also accepted (provider didn't populate the field).
+_NORMAL_FINISH_REASONS: frozenset[str] = frozenset({"stop", "end_turn", "stop_sequence", "STOP"})
+
 
 def _build_system_prompt(
     persona: PersonaConfig,
@@ -149,15 +154,24 @@ async def generate_daily_summary(
             client = build_provider_client(effective_config)
             response = await client.complete(req)
             text = response.text.strip()
-            if text:
+            finish = (response.finish_reason or "").strip()
+            if text and (not finish or finish in _NORMAL_FINISH_REASONS):
                 logger.info(
-                    "daily_summary: generated for group %s via %s/%s (%d chars)",
-                    group_id, provider_id, model, len(text),
+                    "daily_summary: generated for group %s via %s/%s (%d chars, finish=%s)",
+                    group_id, provider_id, model, len(text), finish or "n/a",
                 )
                 return text, f"{provider_id}/{model}"
-            logger.warning(
-                "daily_summary: %s/%s returned empty text, trying next", provider_id, model
-            )
+            if text:
+                # Got content but non-normal finish (e.g. SAFETY, RECITATION, MAX_TOKENS)
+                logger.warning(
+                    "daily_summary: %s/%s non-normal finish_reason=%r (%d chars), trying next",
+                    provider_id, model, response.finish_reason, len(text),
+                )
+                last_error = RuntimeError(f"non-normal finish_reason: {response.finish_reason!r}")
+            else:
+                logger.warning(
+                    "daily_summary: %s/%s returned empty text, trying next", provider_id, model
+                )
         except LLMProviderError as exc:
             logger.warning(
                 "daily_summary: %s/%s provider error: %s, trying next", provider_id, model, exc

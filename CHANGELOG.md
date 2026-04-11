@@ -8,6 +8,11 @@
 
 - 人格配置支持可选 `scope` 字段，`/llm personas` 会按群聊或私聊上下文只展示当前场景可用的人格
 
+### 修复
+
+- 每日总结发送：`_send_long_message` 始终通过 `send_group_forward_msg` 发合并转发卡片，不再对单段内容走 `send_group_msg` 直发（规避 NapCat ~667 汉字截断限制）
+- 每日总结生成：模型级联现检查 `finish_reason`；Gemini 因 `SAFETY`/`RECITATION`/`MAX_TOKENS` 等非正常原因返回残缺内容时，自动降级至下一个模型，不再将截断文本写入数据库
+
 ## [0.6.0] - 2026-04-09
 
 ### 新增
