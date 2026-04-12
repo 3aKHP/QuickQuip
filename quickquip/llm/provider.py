@@ -4,10 +4,27 @@ import asyncio
 import base64
 from dataclasses import dataclass, field
 import json
+import os
 import re
 from typing import Any
-import os
 from urllib import error, parse, request
+
+try:
+    from loguru import logger as _loguru_logger
+    def _trace_log(msg: str) -> None:
+        _loguru_logger.opt(depth=1).info(msg)
+except ImportError:
+    def _trace_log(msg: str) -> None:  # type: ignore[misc]
+        print(msg, flush=True)
+
+# Optional path to a flag file that enables LLM request/response tracing.
+# Set via LLM_TRACE_FLAG_FILE env var. When the file exists, full payloads
+# and raw responses are logged at DEBUG level.
+_TRACE_FLAG_FILE: str = os.getenv("LLM_TRACE_FLAG_FILE", "")
+
+
+def _trace_active() -> bool:
+    return bool(_TRACE_FLAG_FILE and os.path.exists(_TRACE_FLAG_FILE))
 
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
@@ -150,6 +167,12 @@ class BaseProviderClient:
     async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(url=url, data=body, headers=headers, method="POST")
+        trace = _trace_active()
+        if trace:
+            _trace_log(
+                f">>> REQUEST [{self.config.id}]\n"
+                + json.dumps(payload, ensure_ascii=False, indent=2)
+            )
 
         def _send() -> dict[str, Any]:
             try:
@@ -162,12 +185,24 @@ class BaseProviderClient:
             except error.URLError as exc:
                 raise LLMProviderError(f"网络错误：{exc.reason}") from exc
 
-        return await asyncio.to_thread(_send)
+        result = await asyncio.to_thread(_send)
+        if trace:
+            _trace_log(
+                f"<<< RESPONSE [{self.config.id}]\n"
+                + json.dumps(result, ensure_ascii=False, indent=2)
+            )
+        return result
 
     async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
         body = json.dumps(payload).encode("utf-8")
         headers = {**headers, "Accept": "text/event-stream"}
         http_request = request.Request(url=url, data=body, headers=headers, method="POST")
+        trace = _trace_active()
+        if trace:
+            _trace_log(
+                f">>> REQUEST (stream) [{self.config.id}]\n"
+                + json.dumps(payload, ensure_ascii=False, indent=2)
+            )
 
         def _stream() -> list[dict[str, Any]]:
             try:
@@ -210,7 +245,13 @@ class BaseProviderClient:
                 response.close()
             return events
 
-        return await asyncio.to_thread(_stream)
+        result = await asyncio.to_thread(_stream)
+        if trace:
+            _trace_log(
+                f"<<< RESPONSE (stream) [{self.config.id}]\n"
+                + json.dumps(result, ensure_ascii=False, indent=2)
+            )
+        return result
 
 
 class OpenAIProviderClient(BaseProviderClient):
