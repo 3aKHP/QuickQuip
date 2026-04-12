@@ -14,6 +14,8 @@
 
 ### 修复
 
+- LLM 引用消息认人：`build_user_message_content` 在有引用消息时，在 user message 里同时标注"当前提问者"和"引用发送者"，避免 LLM 跨 system/user 两层拼凑身份时张冠李戴
+- LLM 上下文结构：`normalize_history` 统一历史消息格式，无 `user_id` 的旧消息不再裸露内容，改为标注"发言者：未知"；`build_messages` 将 recent_messages 块从序列头部移至紧贴当前提问之前，修正时间顺序（历史对话 → 触发前快照 → 当前提问）
 - 每日总结发送：`_send_long_message` 始终通过 `send_group_forward_msg` 发合并转发卡片，不再对单段内容走 `send_group_msg` 直发（规避 NapCat ~667 汉字截断限制）
 - 每日总结生成：模型级联现检查 `finish_reason`；Gemini 因 `SAFETY`/`RECITATION`/`MAX_TOKENS` 等非正常原因返回残缺内容时，自动降级至下一个模型，不再将截断文本写入数据库
 - Tieba 爬虫 `load_thread_data`：改用 `page.request.get` 直接调 `pb/page_pc` API（共享浏览器上下文 cookie），不再依赖拦截页面 XHR，避免 Playwright 驱动加载时接口不触发的问题；细化登录态错误识别（`error_code` 2/4 或错误信息含"登录"）

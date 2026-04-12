@@ -299,44 +299,48 @@ def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_c
     return stored_canonical
 
 
-def normalize_history(
-    history: list[dict[str, str]],
+def _build_recent_messages_block(
+    recent_messages: list[dict[str, str]],
     *,
-    recent_messages: list[dict[str, str]] | None = None,
     max_trigger_context_messages: int,
     chat_type: str = "group",
     identities=None,
+) -> str:
+    if chat_type == "private":
+        lines = ["以下是本次触发前，当前私聊里最近的消息，仅供理解上下文："]
+    else:
+        lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
+    for index, item in enumerate(recent_messages[-max_trigger_context_messages:], 1):
+        user_id = item["user_id"]
+        sender_name = item.get("sender_name", "")
+        canonical_name = _resolve_canonical_name(
+            identities, user_id, sender_name, item.get("canonical_name", ""),
+        )
+        speaker = format_participant_label(
+            user_id=user_id,
+            sender_name=sender_name,
+            canonical_name=canonical_name,
+            include_unregistered_note=True,
+        )
+        lines.append(f"{index}. {speaker}：{item['text']}")
+    return "\n".join(lines)
+
+
+def normalize_history(
+    history: list[dict[str, str]],
+    *,
+    identities=None,
 ) -> list[LLMConversationMessage]:
     normalized: list[LLMConversationMessage] = []
-    if recent_messages:
-        if chat_type == "private":
-            lines = ["以下是本次触发前，当前私聊里最近的消息，仅供理解上下文："]
-        else:
-            lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
-        for index, item in enumerate(recent_messages[-max_trigger_context_messages:], 1):
-            user_id = item["user_id"]
-            sender_name = item.get("sender_name", "")
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
-            speaker = format_participant_label(
-                user_id=user_id,
-                sender_name=sender_name,
-                canonical_name=canonical_name,
-                include_unregistered_note=True,
-            )
-            lines.append(f"{index}. {speaker}：{item['text']}")
-        normalized.append(LLMConversationMessage(role="user", content="\n".join(lines)))
-
     for item in history:
         if item["role"] not in {"user", "assistant"} or not item["content"].strip():
             continue
         if item["role"] == "assistant":
             normalized.append(LLMConversationMessage(role="assistant", content=item["content"]))
             continue
-        if item.get("user_id"):
-            user_id = item.get("user_id", "")
-            sender_name = item.get("sender_name", "")
+        user_id = item.get("user_id", "")
+        sender_name = item.get("sender_name", "")
+        if user_id:
             canonical_name = _resolve_canonical_name(
                 identities, user_id, sender_name, item.get("canonical_name", ""),
             )
@@ -346,14 +350,14 @@ def normalize_history(
                 canonical_name=canonical_name,
                 include_unregistered_note=True,
             )
-            normalized.append(
-                LLMConversationMessage(
-                    role="user",
-                    content=f"历史会话消息\n- 发言者：{speaker}\n- 内容：{item['content']}",
-                )
+        else:
+            speaker = sender_name.strip() or "未知"
+        normalized.append(
+            LLMConversationMessage(
+                role="user",
+                content=f"历史会话消息\n- 发言者：{speaker}\n- 内容：{item['content']}",
             )
-            continue
-        normalized.append(LLMConversationMessage(role="user", content=item["content"]))
+        )
     return normalized
 
 
@@ -389,6 +393,8 @@ def build_user_message_content(
     quoted_image_urls: list[str] | None = None,
     max_quoted_message_chars: int,
     identities=None,
+    sender_name: str = "",
+    user_id: str = "",
 ) -> str:
     normalized_prompt = prompt.strip()
     normalized_quoted_text = quoted_text.strip()[:max_quoted_message_chars]
@@ -397,6 +403,9 @@ def build_user_message_content(
         return normalized_prompt
 
     lines = ["以下是当前用户显式引用的消息，请结合它理解本轮提问："]
+    requester_label = format_quoted_speaker(sender_name, user_id, identities=identities) if (sender_name or user_id) else ""
+    if requester_label:
+        lines.append(f"- 当前提问者：{requester_label}")
     lines.append(f"- 引用发送者：{format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)}")
     if normalized_quoted_text:
         lines.append(f"- 引用内容：{normalized_quoted_text}")
@@ -420,18 +429,31 @@ def build_messages(
     chat_type: str = "group",
     identities=None,
 ) -> list[LLMConversationMessage]:
-    messages = normalize_history(
-        history,
-        recent_messages=recent_messages,
-        max_trigger_context_messages=max_trigger_context_messages,
-        chat_type=chat_type,
-        identities=identities,
-    )
-    messages.append(
-        LLMConversationMessage(
-            role="user",
-            content=prompt,
-            image_urls=list(image_urls),
+    messages = normalize_history(history, identities=identities)
+
+    if recent_messages:
+        recent_block = _build_recent_messages_block(
+            recent_messages,
+            max_trigger_context_messages=max_trigger_context_messages,
+            chat_type=chat_type,
+            identities=identities,
         )
-    )
+        # Prepend recent_block to the current prompt so the time order is:
+        # history → recent snapshot → current question
+        combined_prompt = recent_block + "\n\n" + prompt if prompt.strip() else recent_block
+        messages.append(
+            LLMConversationMessage(
+                role="user",
+                content=combined_prompt,
+                image_urls=list(image_urls),
+            )
+        )
+    else:
+        messages.append(
+            LLMConversationMessage(
+                role="user",
+                content=prompt,
+                image_urls=list(image_urls),
+            )
+        )
     return messages

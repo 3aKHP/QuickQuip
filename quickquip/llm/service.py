@@ -24,7 +24,6 @@ from quickquip.llm.prompting import (
     build_system_prompt,
     build_user_message_content,
     merge_image_urls,
-    normalize_history,
 )
 from quickquip.llm.provider import (
     LLMProviderError,
@@ -959,20 +958,6 @@ class LLMService:
             session_preset=session_preset,
         )
 
-    def _normalize_history(
-        self,
-        history: list[dict[str, str]],
-        recent_messages: list[dict[str, str]] | None = None,
-        chat_type: str = "group",
-    ) -> list[LLMConversationMessage]:
-        return normalize_history(
-            history,
-            recent_messages=recent_messages,
-            max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
-            chat_type=chat_type,
-            identities=self.identities,
-        )
-
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
         return merge_image_urls(*collections)
 
@@ -985,6 +970,8 @@ class LLMService:
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
         quoted_image_urls: list[str] | None = None,
+        sender_name: str = "",
+        user_id: str = "",
     ) -> str:
         return build_user_message_content(
             prompt=prompt,
@@ -994,6 +981,8 @@ class LLMService:
             quoted_image_urls=quoted_image_urls,
             max_quoted_message_chars=MAX_QUOTED_MESSAGE_CHARS,
             identities=self.identities,
+            sender_name=sender_name,
+            user_id=str(user_id),
         )
 
     def _build_messages(
@@ -1253,6 +1242,8 @@ class LLMService:
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
             quoted_image_urls=normalized_quoted_image_urls,
+            sender_name=sender_name,
+            user_id=str(user_id),
         )[: self.config.runtime.max_prompt_chars]
         effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
         default_history_limit = self._default_history_limit(chat_type)
