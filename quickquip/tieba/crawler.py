@@ -123,26 +123,37 @@ class TiebaCrawler:
         return normalized
 
     async def load_thread_data(self, page: Page, url: str) -> dict[str, object]:
+        """Fetch thread detail via direct authenticated API call.
+
+        Uses page.request (shares the browser-context cookies) instead of
+        navigating the page and intercepting an XHR.  This is more reliable
+        because Baidu's frontend may not always fire the pb/page_pc request
+        during a Playwright-driven page load.
+        """
+        tid = url.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
+        if not tid.isdigit():
+            raise TiebaServiceError(f"无法从 URL 中提取帖子 ID：{url!r}")
+
         try:
-            async with page.expect_response(
-                lambda response: "tieba.baidu.com/c/f/pb/page_pc" in response.url,
+            response = await page.request.get(
+                "https://tieba.baidu.com/c/f/pb/page_pc",
+                params={"tid": tid},
                 timeout=20_000,
-            ) as response_info:
-                await self.goto(page, url)
-            response = await response_info.value
+            )
             raw = await response.text()
             data = json.loads(raw)
         except Exception as exc:
-            raise TiebaServiceError(f"帖子详情接口解析失败：{exc}") from exc
+            raise TiebaServiceError(f"帖子详情接口请求失败：{exc}") from exc
 
-        title = clean_text(await page.title())
-        content = clean_text(await page.content(), limit=10_000)
-        current_url = clean_text(page.url)
-        if self.is_challenge_page(title, content, current_url):
-            raise TiebaLoginRequiredError("帖子详情页命中百度安全验证，需要人工续签登录态")
-        if int(data.get("error_code", 0) or 0) != 0:
+        error_code = int(data.get("error_code", 0) or 0)
+        error_msg = str(data.get("error_msg", "") or "")
+        if error_code != 0:
+            if error_code in {2, 4} or "登录" in error_msg or "登陆" in error_msg:
+                raise TiebaLoginRequiredError(
+                    f"帖子详情接口需要登录态（error_code={error_code}）：{error_msg}"
+                )
             raise TiebaServiceError(
-                f"帖子详情接口返回异常：error_code={data.get('error_code')} {data.get('error_msg', '')}"
+                f"帖子详情接口返回异常：error_code={error_code} {error_msg}"
             )
         return data
 
@@ -273,14 +284,11 @@ class TiebaCrawler:
                 selected_links = links[: self.config.detail_fetch_limit]
                 threads: list[TiebaThread] = []
                 for item in selected_links:
-                    detail_page = await context.new_page()
                     try:
-                        await self.ensure_accessible_page(
-                            detail_page,
-                            url=item["url"],
-                            label=f"帖子 {item['tid']}",
-                        )
-                        detail_data = await self.load_thread_data(detail_page, item["url"])
+                        # load_thread_data now uses page.request (direct API
+                        # call with session cookies) — no page navigation needed,
+                        # so we reuse the forum page object here.
+                        detail_data = await self.load_thread_data(page, item["url"])
                         detail = self.extract_thread_detail_from_data(
                             detail_data,
                             fallback_title=item["title"],
@@ -294,8 +302,10 @@ class TiebaCrawler:
                             detail.image_urls.insert(0, detail.cover_image_url)
                         detail.fetched_at = datetime.now(tz=ZoneInfo(BEIJING_TIMEZONE)).timestamp()
                         threads.append(detail)
-                    finally:
-                        await detail_page.close()
+                    except TiebaLoginRequiredError:
+                        raise  # login expiry aborts the entire forum
+                    except TiebaServiceError:
+                        continue  # single-thread failure: skip and try next
                 return threads
             finally:
                 await browser.close()
