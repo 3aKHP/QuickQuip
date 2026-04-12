@@ -7,11 +7,16 @@
 ### 新增
 
 - 人格配置支持可选 `scope` 字段，`/llm personas` 会按群聊或私聊上下文只展示当前场景可用的人格
+- `bot.py` 新增 loguru 文件日志输出，每日轮转写入 `data/logs/quickquip_YYYY-MM-DD.log`，保留 14 天；通过 nginx `/bot-logs/archive/` 路径（`auth_basic` 鉴权）可直接浏览下载
+- 新增 `dev/tools/log_server.py`：SSE 实时日志服务，监听 `127.0.0.1:5103`，通过 nginx `/bot-logs` 路径（`auth_basic` 鉴权）在浏览器实时查看容器日志，支持关键词过滤和自动滚动
+- `docker-compose.yml` 新增 `name: quickquip` 固定 compose project name，避免重复部署时因 project name 不一致导致 napcat 容器名冲突
+- `LLM_TRACE_FLAG_FILE` 环境变量：指定一个 flag 文件路径，文件存在时 `provider.py` 以 INFO 级别输出完整的 LLM 请求/响应 JSON；配合 `log_server.py` 的 `/bot-logs/llm-trace` SSE 端点实现浏览器实时查看
 
 ### 修复
 
 - 每日总结发送：`_send_long_message` 始终通过 `send_group_forward_msg` 发合并转发卡片，不再对单段内容走 `send_group_msg` 直发（规避 NapCat ~667 汉字截断限制）
 - 每日总结生成：模型级联现检查 `finish_reason`；Gemini 因 `SAFETY`/`RECITATION`/`MAX_TOKENS` 等非正常原因返回残缺内容时，自动降级至下一个模型，不再将截断文本写入数据库
+- Tieba 爬虫 `load_thread_data`：改用 `page.request.get` 直接调 `pb/page_pc` API（共享浏览器上下文 cookie），不再依赖拦截页面 XHR，避免 Playwright 驱动加载时接口不触发的问题；细化登录态错误识别（`error_code` 2/4 或错误信息含"登录"）
 
 ## [0.6.0] - 2026-04-09
 
