@@ -27,6 +27,7 @@ from quickquip.chat.daily_summary import (
     DailySummaryEnabledGroups,
     DailySummaryStore,
 )
+from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.common.message_deduper import RecentMessageDeduper
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
@@ -51,6 +52,7 @@ message_deduper = RecentMessageDeduper()
 daily_collector = DailyMessageCollector()
 daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
+wordcloud_collector = WordCloudCollector()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
@@ -65,6 +67,11 @@ def record_group_message(group_id: int | str, sender_name: str, rendered_text: s
     if not daily_enabled_groups.contains(group_id):
         return
     daily_collector.record(group_id, sender_name, rendered_text)
+
+
+def record_wordcloud_message(group_id: int | str, sender_name: str, rendered_text: str) -> None:
+    """Always-on word cloud collection for all groups."""
+    wordcloud_collector.record(group_id, sender_name, rendered_text)
 
 
 def save_all() -> None:

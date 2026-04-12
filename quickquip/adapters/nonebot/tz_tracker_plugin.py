@@ -14,6 +14,7 @@ except ModuleNotFoundError:
 
 from quickquip.adapters.nonebot.commands import register_commands
 from quickquip.adapters.nonebot.daily_summary_plugin import setup as setup_daily_summary
+from quickquip.adapters.nonebot.wordcloud_plugin import setup as setup_wordcloud
 from quickquip.adapters.nonebot.group_messages import register_message_matcher
 from quickquip.adapters.nonebot.private_messages import register_private_message_matcher
 from quickquip.adapters.nonebot.recall_handler import register_recall_handlers
@@ -41,6 +42,7 @@ if on_message is not None:
 if on_command is not None:
     register_commands(on_command, Message, MessageSegment)
     setup_daily_summary(on_command)
+    setup_wordcloud(on_command)
 
 if on_notice is not None:
     recall_matcher = register_recall_handlers(on_notice)
