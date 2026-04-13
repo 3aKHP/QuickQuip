@@ -6,6 +6,11 @@
 
 ### 新增
 
+- MCP docker transport 支持 `pull_policy` 配置项（`always`/`missing`/`never`，默认 `missing`），设为 `always` 可在每次重载时自动拉取最新镜像，解决镜像更新后工具列表不刷新的问题
+- 新增 `/llm mcp reload` 命令（仅管理员）：强制 pull 所有 docker transport MCP 服务器的最新镜像并重连，完成后输出最新状态；非 docker transport 服务器仅重连不 pull
+
+### 新增
+
 - 词云功能 `/wordcloud`（别名 `/词云`）：管理员可生成本群消息词频可视化图片，支持 `today`/`week`/`month`/`year` 四个时间窗口；独立消息收集层（`data/wordcloud_msgs/`），对所有群始终开启；图片以 base64 内联方式发送；依赖 jieba 分词 + wordcloud + Pillow，需在 `data/fonts/` 放置 NotoSansSC-Regular.ttf 字体文件
 
 ### 新增

@@ -127,7 +127,7 @@ class StdioMCPClient:
             if not self.config.image:
                 raise MCPError(f"MCP server {self.config.id} 缺少 image")
 
-            command = [self.config.docker_command, "run", "-i", "--rm"]
+            command = [self.config.docker_command, "run", "-i", "--rm", "--pull", self.config.pull_policy]
             if self.config.network:
                 command.extend(["--network", self.config.network])
             if self.config.container_workdir:
@@ -429,7 +429,20 @@ class MCPClientManager:
     def get_statuses(self) -> list[MCPServerStatus]:
         return [self._statuses[key] for key in sorted(self._statuses)]
 
-    async def sync(self, config: MCPConfig) -> list[MCPToolBinding]:
+    async def _pull_image(self, server: MCPServerConfig) -> None:
+        logger.info("Pulling Docker image for MCP server %s: %s", server.id, server.image)
+        proc = await asyncio.create_subprocess_exec(
+            server.docker_command, "pull", server.image,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            output = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
+            raise MCPError(f"docker pull {server.image} 失败（exit {proc.returncode}）：{output}")
+        logger.info("Pulled image %s for MCP server %s", server.image, server.id)
+
+    async def sync(self, config: MCPConfig, *, force_pull: bool = False) -> list[MCPToolBinding]:
         await self.aclose()
         self._statuses = {}
         self._bindings = {}
@@ -455,6 +468,8 @@ class MCPClientManager:
             )
             client: StdioMCPClient | None = None
             try:
+                if force_pull and server.transport == "docker":
+                    await self._pull_image(server)
                 client = StdioMCPClient(server)
                 await client.start()
                 tools = await client.list_tools()

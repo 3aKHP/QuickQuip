@@ -250,20 +250,20 @@ class LLMService:
             )
             self._mcp_tool_names.add(binding.alias)
 
-    async def ensure_mcp_ready(self, force: bool = False) -> None:
+    async def ensure_mcp_ready(self, force: bool = False, force_pull: bool = False) -> None:
         async with self._mcp_lock:
             if not force and not self._mcp_dirty:
                 return
-            await self.mcp_manager.sync(self.config.mcp)
+            await self.mcp_manager.sync(self.config.mcp, force_pull=force_pull)
             self._register_mcp_tools()
             self._mcp_dirty = False
 
     def _is_mcp_initializing(self) -> bool:
         return self._mcp_startup_task is not None and not self._mcp_startup_task.done()
 
-    async def _run_mcp_startup(self, force: bool) -> None:
+    async def _run_mcp_startup(self, force: bool, force_pull: bool = False) -> None:
         try:
-            await self.ensure_mcp_ready(force=force)
+            await self.ensure_mcp_ready(force=force, force_pull=force_pull)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -271,11 +271,11 @@ class LLMService:
         finally:
             self._mcp_startup_task = None
 
-    def start_mcp_background(self, force: bool = False) -> None:
+    def start_mcp_background(self, force: bool = False, force_pull: bool = False) -> None:
         if self._is_mcp_initializing():
             return
         self._mcp_startup_task = asyncio.create_task(
-            self._run_mcp_startup(force=force),
+            self._run_mcp_startup(force=force, force_pull=force_pull),
             name="quickquip-mcp-startup",
         )
 
@@ -299,6 +299,14 @@ class LLMService:
             return self.config
         await self.ensure_mcp_ready(force=True)
         return self.config
+
+    async def reload_mcp(self, *, background: bool = False) -> None:
+        """重连所有 MCP 服务器，对 docker transport 强制 pull 最新镜像。"""
+        self._mcp_dirty = True
+        if background:
+            self.start_mcp_background(force=True, force_pull=True)
+            return
+        await self.ensure_mcp_ready(force=True, force_pull=True)
 
     async def _tool_get_identity(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         query = str(arguments.get("query", "")).strip()

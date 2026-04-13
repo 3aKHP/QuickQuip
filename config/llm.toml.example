@@ -65,6 +65,7 @@ transport = "docker"
 enabled = "${MCP_PRTS_WIKI_ENABLED:-false}"
 timeout_seconds = 30
 image = "ghcr.io/3akhp/prts-mcp:latest"
+pull_policy = "always"  # 自动拉取最新镜像
 mounts = ["prts-mcp-data:/data/gamedata"]
 env = { GITHUB_TOKEN = "${GITHUB_TOKEN:-}" }
 

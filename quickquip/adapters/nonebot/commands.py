@@ -216,6 +216,13 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if args in {"mcp", "mcp status"}:
             await llm_cmd.finish(llm_service.format_mcp_status())
 
+        if args == "mcp reload":
+            if not _allow_scope_management(event):
+                await llm_cmd.finish("仅管理员可执行此操作")
+            await llm_cmd.send("正在拉取 MCP 镜像并重连，请稍候…")
+            await llm_service.reload_mcp(background=False)
+            await llm_cmd.finish(llm_service.format_mcp_status())
+
         if args == "providers":
             await llm_cmd.finish(llm_service.format_providers())
 

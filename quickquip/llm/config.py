@@ -55,6 +55,7 @@ class MCPServerConfig:
     image: str = ""
     docker_command: str = "docker"
     docker_args: list[str] = field(default_factory=list)
+    pull_policy: str = "missing"  # always | missing | never
     mounts: list[str] = field(default_factory=list)
     mount_docker_socket: bool = False
     network: str | None = None
