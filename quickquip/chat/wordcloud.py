@@ -120,6 +120,7 @@ class WordCloudCollector:
 
 def build_word_frequencies(messages: list[dict], stopwords: frozenset[str]) -> dict[str, int]:
     """Tokenize message texts with jieba and return word frequency counts."""
+    import re
     import jieba  # lazy import — only needed when generating
 
     counter: Counter[str] = Counter()
@@ -127,6 +128,7 @@ def build_word_frequencies(messages: list[dict], stopwords: frozenset[str]) -> d
         text = msg.get("text", "")
         if not text:
             continue
+        text = re.sub(r'\[.*?\]', '', text)
         for word in jieba.cut(text):
             word = word.strip()
             if len(word) < 2:

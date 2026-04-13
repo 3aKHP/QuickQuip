@@ -66,8 +66,8 @@ def setup(on_command) -> None:
         subcommand = parts[1].lower() if len(parts) > 1 else "today"
         if subcommand not in _SUBCOMMANDS:
             await cmd.finish(
-                f"用法：/wordcloud [today|week|month|year]\n"
-                f"例：/wordcloud week"
+                "用法：/wordcloud [today|week|month|year]\n"
+                "例：/wordcloud week"
             )
             return
 

@@ -9,6 +9,9 @@ import re
 from typing import Any
 from urllib import error, parse, request
 
+from quickquip.llm.config import ProviderConfig
+from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
+
 try:
     from loguru import logger as _loguru_logger
     def _trace_log(msg: str) -> None:
@@ -25,9 +28,6 @@ _TRACE_FLAG_FILE: str = os.getenv("LLM_TRACE_FLAG_FILE", "")
 
 def _trace_active() -> bool:
     return bool(_TRACE_FLAG_FILE and os.path.exists(_TRACE_FLAG_FILE))
-
-from quickquip.llm.config import ProviderConfig
-from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
 
 
 class LLMProviderError(RuntimeError):
