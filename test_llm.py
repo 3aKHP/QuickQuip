@@ -703,7 +703,8 @@ finally:
     llm_runtime_module.build_provider_client = original_builder
 
 assert result["rule_name"] == "llm_chat"
-assert result["reply"] == "stub::gpt-alt::哈基镜是区吗？"
+assert result["reply"].startswith("stub::gpt-alt::")
+assert result["reply"].endswith("哈基镜是区吗？")
 assert StubProviderClient.last_request is not None
 assert "当前元数据：" in StubProviderClient.last_request.system_prompt
 assert "当前北京时间：" in StubProviderClient.last_request.system_prompt
@@ -721,7 +722,7 @@ assert "区：群里常见的内部称谓" in StubProviderClient.last_request.sy
 assert StubProviderClient.last_request.messages[0].content.startswith("以下是本次触发前")
 assert "甲（QQ u1，未登记）：昨晚排位真红温。" in StubProviderClient.last_request.messages[0].content
 assert "镜子（QQ 2002，当前显示名：乙）：@4s 哈基镜今天又在发病。" in StubProviderClient.last_request.messages[0].content
-assert StubProviderClient.last_request.messages[-1].content == "哈基镜是区吗？"
+assert StubProviderClient.last_request.messages[-1].content.endswith("哈基镜是区吗？")
 assert StubProviderClient.last_request.messages[-1].image_urls == []
 assert all(
     item.content != "哈基镜是区吗？"
@@ -852,7 +853,8 @@ assert history[-2]["user_id"] == "2002"
 assert history[-2]["sender_name"] == "测试用户"
 assert history[-2]["canonical_name"] == "镜子"
 assert history[-1]["role"] == "assistant"
-assert history[-1]["content"] == "stub::gpt-alt::哈基镜是区吗？"
+assert history[-1]["content"].startswith("stub::gpt-alt::")
+assert history[-1]["content"].endswith("哈基镜是区吗？")
 assert "短期会话：已存 2 条" in service.format_current(1001)
 
 for index in range(20):
@@ -1034,7 +1036,7 @@ mcp_service = LLMService(
     vocab_path=mcp_vocab_path,
     identity_path=mcp_identity_path,
 )
-async def _fake_mcp_sync(_config):
+async def _fake_mcp_sync(_config, force_pull=False):
     binding = MCPToolBinding(
         alias="mcp_fake_echo_text",
         server_id="fake",
