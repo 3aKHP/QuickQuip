@@ -14,7 +14,11 @@
           <li v-if="!groups.summary.length" class="muted">无</li>
         </ul>
         <div class="add-row">
-          <input v-model="newSummaryId" placeholder="群号" @keyup.enter="addGroup('summary')" />
+          <select v-model="newSummaryId">
+            <option value="">— 从已知群选择 —</option>
+            <option v-for="gid in availableGroups('summary')" :key="gid" :value="gid">{{ gid }}</option>
+          </select>
+          <input v-model="newSummaryIdManual" placeholder="或手动输入群号" @keyup.enter="addGroup('summary')" />
           <button @click="addGroup('summary')">添加</button>
         </div>
       </section>
@@ -29,7 +33,11 @@
           <li v-if="!groups.briefing.length" class="muted">无</li>
         </ul>
         <div class="add-row">
-          <input v-model="newBriefingId" placeholder="群号" @keyup.enter="addGroup('briefing')" />
+          <select v-model="newBriefingId">
+            <option value="">— 从已知群选择 —</option>
+            <option v-for="gid in availableGroups('briefing')" :key="gid" :value="gid">{{ gid }}</option>
+          </select>
+          <input v-model="newBriefingIdManual" placeholder="或手动输入群号" @keyup.enter="addGroup('briefing')" />
           <button @click="addGroup('briefing')">添加</button>
         </div>
       </section>
@@ -39,50 +47,66 @@
 
 <script>
 import { apiFetch } from '../api.js'
+import { toast } from '../toast.js'
 export default {
   data: () => ({
     loaded: false,
     error: null,
     groups: { summary: [], briefing: [] },
+    knownGroups: [],
     newSummaryId: '',
+    newSummaryIdManual: '',
     newBriefingId: '',
+    newBriefingIdManual: '',
   }),
   async mounted() {
     try {
-      this.groups = await apiFetch('/api/groups')
+      const [groupsData, knownData] = await Promise.all([
+        apiFetch('/ops/api/groups'),
+        apiFetch('/ops/api/groups/known').catch(() => ({ groups: [] })),
+      ])
+      this.groups = groupsData
+      this.knownGroups = knownData.groups || []
       this.loaded = true
     } catch (e) {
       this.error = e.message
     }
   },
   methods: {
+    availableGroups(type) {
+      return this.knownGroups.filter(g => !this.groups[type].includes(g))
+    },
     async addGroup(type) {
-      const raw = type === 'summary' ? this.newSummaryId : this.newBriefingId
-      const gid = raw.trim()
-      if (!gid || !/^\d+$/.test(gid)) return alert('群号必须为纯数字')
+      const fromSelect = type === 'summary' ? this.newSummaryId : this.newBriefingId
+      const fromManual = type === 'summary' ? this.newSummaryIdManual : this.newBriefingIdManual
+      const gid = (fromSelect || fromManual).trim()
+      if (!gid || !/^\d+$/.test(gid)) { toast('群号必须为纯数字', 'error'); return }
       try {
-        await apiFetch(`/api/groups/${type}/${gid}`, {
+        await apiFetch(`/ops/api/groups/${type}/${gid}`, {
           method: 'POST',
           body: JSON.stringify({ enabled: true }),
         })
         if (!this.groups[type].includes(gid)) this.groups[type].push(gid)
-        if (type === 'summary') this.newSummaryId = ''
-        else this.newBriefingId = ''
+        if (type === 'summary') { this.newSummaryId = ''; this.newSummaryIdManual = '' }
+        else { this.newBriefingId = ''; this.newBriefingIdManual = '' }
+        toast(`群 ${gid} 已添加`)
       } catch (e) {
-        alert(`操作失败：${e.message}`)
+        toast(`操作失败：${e.message}`, 'error')
       }
     },
     async removeGroup(type, gid) {
       try {
-        await apiFetch(`/api/groups/${type}/${gid}`, {
+        await apiFetch(`/ops/api/groups/${type}/${gid}`, {
           method: 'POST',
           body: JSON.stringify({ enabled: false }),
         })
         this.groups[type] = this.groups[type].filter(g => g !== gid)
+        toast(`群 ${gid} 已移除`)
       } catch (e) {
-        alert(`操作失败：${e.message}`)
+        toast(`操作失败：${e.message}`, 'error')
       }
     },
   },
 }
 </script>
+

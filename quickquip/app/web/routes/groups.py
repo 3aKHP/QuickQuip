@@ -1,12 +1,17 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from quickquip.app.message_pipeline import daily_enabled_groups, daily_briefing_enabled_groups
+from quickquip.app.message_pipeline import daily_enabled_groups, daily_briefing_enabled_groups, stats_tracker
 
 router = APIRouter()
 
 
 class GroupToggle(BaseModel):
     enabled: bool
+
+
+@router.get("/groups/known")
+def get_known_groups():
+    return {"groups": sorted(stats_tracker.to_dict().keys())}
 
 
 @router.get("/groups")

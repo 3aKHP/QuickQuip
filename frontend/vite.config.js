@@ -6,7 +6,7 @@ export default defineConfig({
   base: '/ops/',
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:5104',
+      '/ops/api': 'http://127.0.0.1:5104',
     },
   },
 })
