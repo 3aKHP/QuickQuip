@@ -51,7 +51,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             return
 
         stats_tracker.record_message(group_id, user_id, sender_name)
-        record_group_message(group_id, sender_name, rendered_text)
+        record_group_message(group_id, user_id, sender_name, rendered_text)
         record_wordcloud_message(group_id, sender_name, rendered_text)
         trigger_context = recent_messages.list_recent(group_id, limit=20)
 

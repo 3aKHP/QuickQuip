@@ -164,6 +164,19 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 笑点解析：......。令人忍俊不禁。
 ```
 
+### 📣 每日早中晚播报
+
+支持按群开启每日早报、午报、晚报。播报会复用当前群绑定的 LLM provider、model 和 persona，结合消息数、活跃用户、热词和代表性消息样本，生成一条适合直接发群的短播报；当消息过少或 LLM 失败时，会自动退回到模板播报。新闻位接口也已预留，后续可继续接入外部来源。
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/briefing on` | 开启本群每日播报 | 管理员/群主 |
+| `/briefing off` | 关闭本群每日播报 | 管理员/群主 |
+| `/briefing status` | 查看本群每日播报状态 | 所有人 |
+| `/briefing now [morning\|noon\|evening]` | 立即测试一条播报，默认按当前时段 | 管理员/群主 |
+
+每日播报默认全局关闭，需先在 `config/llm.toml` 的 `[daily_briefing]` 区块中将 `enabled = true`，再在群内执行 `/briefing on` 启用。
+
 ### 📰 每日群聊总结
 
 每天凌晨 06:00 自动收集前一个 06:00–06:00 窗口的群聊记录，调用 LLM 以 persona 口吻生成约 2000 字小作文，并在中午 12:00 定时发布到群里。支持模型级联策略（失败自动降级），注入群成员昵称对照表，消息量不足时自动跳过。
@@ -217,11 +230,15 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 ```
 QuickQuip/
 ├── bot.py                          # NoneBot2 入口，注册适配器并加载插件
+├── web_api.py                      # Web 管理后台入口（独立于 bot.py 运行）
 ├── .env                            # 环境变量配置（不纳入版本控制）
 ├── config/
 │   ├── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
 │   ├── chat_rules.toml.example     # 文字回复规则样例，复制为 chat_rules.toml 后使用
 │   └── personas.example/           # 人格定义样例目录，复制为 personas/ 后使用
+├── frontend/                       # Web 管理后台前端（Vue 3 SPA）
+│   ├── src/                        # 源码
+│   └── dist/                       # 构建产物（gitignored，需先 npm run build）
 ├── docker/
 │   └── searxng/
 │       └── settings.yml            # 项目内置 SearXNG 配置
@@ -229,6 +246,7 @@ QuickQuip/
 ├── quickquip/                      # 主代码目录
 │   ├── adapters/nonebot/           # NoneBot 生命周期、消息入口与命令注册
 │   ├── app/                        # 应用级消息管线与状态装配
+│   │   └── web/                    # Web 管理后台 FastAPI 应用与路由
 │   ├── chat/                       # 规则驱动聊天能力：时区、复读、接龙、统计、规则开关
 │   ├── common/                     # 通用基础设施：JSON 持久化、限流、去重、最近消息缓冲
 │   ├── llm/                        # LLM 配置、运行时组件、provider、MCP、工具调用
@@ -347,7 +365,26 @@ QuickQuip/
    python dev/tools/tieba_login.py
    ```
 
-7. **启动机器人**
+7. **可选：启动 Web 管理后台**
+
+   先构建前端（需要 Node.js）：
+
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+
+   然后启动管理 API 服务：
+
+   ```bash
+   python web_api.py
+   ```
+
+   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面，提供消息统计、群级规则开关和群组管理功能。监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。
+
+8. **启动机器人**
 
    ```bash
    python bot.py
@@ -398,6 +435,7 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 | `[triggers]` | `llm.toml` | 前缀触发、艾特触发、空提示回复 |
 | `[tools]` | `llm.toml` | 标准化工具调用白名单 |
 | `[mcp]` / `[[mcp.servers]]` | `llm.toml` | MCP 总开关、server 启动方式、白名单与 DOOD 相关参数 |
+| `[daily_briefing]` | `llm.toml` | 每日早/午/晚播报全局开关、三段 cron、上下文规模、输出长度、模型级联列表 |
 | `[daily_summary]` | `llm.toml` | 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表 |
 | `[[providers]]` | `llm.toml` | provider ID、协议类型、base URL、模型列表、默认参数 |
 | `_shared.toml` | `personas/` | 自动注入所有人格的共享行为准则与风格规则 |
@@ -494,9 +532,11 @@ quickquip/app/message_pipeline.py        ← 应用级消息管线与共享状�
   ├─ quickquip/chat/rule_switch.py       ← 群级规则开关
   ├─ quickquip/chat/message_stats.py     ← 群消息统计
   ├─ quickquip/chat/daily_summary.py     ← 消息收集器、总结 SQLite 存储、群开关
+  ├─ quickquip/chat/daily_briefing.py    ← 每日播报上下文构建、热词/活跃用户统计、群开关
   └─ quickquip/common/                   ← 限流、去重、最近消息缓冲、JSON 持久化
   │
   ├─ quickquip/llm/                      ← LLM 配置、provider、MCP、tool loop、prompt 构建
+  ├─ quickquip/llm/briefing.py           ← 每日播报生成（群人格、模型级联、失败回退）
   ├─ quickquip/llm/summarize.py          ← 每日总结生成（模型级联、截断、prompt 构建）
   ├─ quickquip/search/                   ← SearXNG / Tavily 搜索后端
   └─ quickquip/tieba/                    ← 多贴吧配置、抓取、缓存与服务层

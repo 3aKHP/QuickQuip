@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime
+from time import time
+from zoneinfo import ZoneInfo
+
+try:
+    import nonebot
+    from nonebot_plugin_apscheduler import scheduler
+except (ModuleNotFoundError, ValueError):
+    nonebot = None
+    scheduler = None
+
+from quickquip.app.message_pipeline import (
+    RULE_SWITCH_PATH,
+    daily_briefing_enabled_groups,
+    daily_collector,
+    llm_service,
+    rule_switch,
+    wordcloud_collector,
+)
+from quickquip.app.message_pipeline import is_admin as _is_admin
+from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.chat.daily_briefing import (
+    BriefingPeriod,
+    NullBriefingNewsProvider,
+    build_briefing_context,
+    build_fallback_briefing,
+    normalize_period,
+)
+from quickquip.llm.briefing import generate_daily_briefing
+
+logger = logging.getLogger(__name__)
+
+_LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
+_RULE_NAME = "daily_briefing"
+_MANUAL_COOLDOWN_SECONDS = 60
+_NEWS_PROVIDER = NullBriefingNewsProvider()
+_PERIOD_LABELS = {"morning": "早报", "noon": "午报", "evening": "晚报"}
+_last_manual_trigger: dict[str, float] = {}
+
+
+def _cron_to_hhmm(cron_expr: str) -> str:
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        return cron_expr
+    minute_field, hour_field = parts[0], parts[1]
+    try:
+        return f"{int(hour_field):02d}:{int(minute_field):02d}"
+    except ValueError:
+        return f"{hour_field}:{minute_field}"
+
+
+def _parse_cron(cron_expr: str) -> dict[str, str]:
+    parts = cron_expr.split()
+    if len(parts) != 5:
+        return {"minute": "0", "hour": "8", "day": "*", "month": "*", "day_of_week": "*"}
+    return {
+        "minute": parts[0],
+        "hour": parts[1],
+        "day": parts[2],
+        "month": parts[3],
+        "day_of_week": parts[4],
+    }
+
+
+def _default_period_for_now(now: datetime) -> str:
+    if now.hour < 11:
+        return "morning"
+    if now.hour < 18:
+        return "noon"
+    return "evening"
+
+
+def _on_cooldown(group_id: int | str) -> bool:
+    last = _last_manual_trigger.get(str(group_id))
+    return last is not None and time() - last < _MANUAL_COOLDOWN_SECONDS
+
+
+def _mark_triggered(group_id: int | str) -> None:
+    _last_manual_trigger[str(group_id)] = time()
+
+
+def _is_group_enabled(group_id: int | str) -> bool:
+    return (
+        daily_briefing_enabled_groups.contains(group_id)
+        and rule_switch.is_enabled(group_id, _RULE_NAME)
+    )
+
+
+async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, str]:
+    now = datetime.now(tz=_LOCAL_TZ)
+    briefing_cfg = llm_service.config.daily_briefing
+    context = await build_briefing_context(
+        group_id=group_id,
+        period=period,
+        now=now,
+        daily_collector=daily_collector,
+        wordcloud_collector=wordcloud_collector,
+        briefing_config=briefing_cfg,
+        news_provider=_NEWS_PROVIDER,
+    )
+    fallback_text = build_fallback_briefing(context)
+
+    if llm_service.config.load_error:
+        return fallback_text, "fallback"
+
+    settings = llm_service.get_group_settings(group_id)
+    persona = llm_service.config.personas.get(settings.persona_id) or next(
+        iter(llm_service.config.personas.values()),
+        None,
+    )
+    if persona is None:
+        return fallback_text, "fallback"
+
+    if context.message_count < briefing_cfg.min_messages_for_llm:
+        return fallback_text, "fallback"
+
+    try:
+        content, model_used = await generate_daily_briefing(
+            context=context,
+            persona=persona,
+            group_id=group_id,
+            briefing_config=briefing_cfg,
+            llm_config=llm_service.config,
+            default_provider_id=settings.provider_id,
+            default_model=settings.model,
+        )
+        return content, model_used
+    except Exception:
+        logger.exception("daily_briefing: generation failed for group %s (%s)", group_id, period)
+        return fallback_text, "fallback"
+
+
+async def _send_one(bot, group_id: str, period: str) -> None:
+    if not rule_switch.is_enabled(group_id, _RULE_NAME):
+        return
+    content, model_used = await _render_briefing(group_id, period)
+    try:
+        await bot.send_group_msg(group_id=int(group_id), message=content)
+        logger.info(
+            "daily_briefing: sent to group %s (%s via %s)",
+            group_id,
+            period,
+            model_used,
+        )
+    except Exception:
+        logger.warning(
+            "daily_briefing: send failed for group %s (%s)",
+            group_id,
+            period,
+            exc_info=True,
+        )
+
+
+async def _job_send_period(period: str) -> None:
+    if nonebot is None:
+        return
+    try:
+        bot = nonebot.get_bot()
+    except Exception:
+        logger.warning("daily_briefing: bot not available at %s time", period)
+        return
+
+    enabled_groups = [
+        gid
+        for gid in daily_briefing_enabled_groups.all_groups()
+        if rule_switch.is_enabled(gid, _RULE_NAME)
+    ]
+    if not enabled_groups:
+        return
+
+    tasks = [_send_one(bot, gid, period) for gid in enabled_groups]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _register_scheduler_jobs() -> None:
+    if not scheduler:
+        return
+    cfg = llm_service.config.daily_briefing
+    if not cfg.enabled:
+        return
+
+    scheduler.add_job(
+        _job_send_period,
+        "cron",
+        id="daily_briefing_morning",
+        replace_existing=True,
+        args=["morning"],
+        **_parse_cron(cfg.morning_cron),
+    )
+    scheduler.add_job(
+        _job_send_period,
+        "cron",
+        id="daily_briefing_noon",
+        replace_existing=True,
+        args=["noon"],
+        **_parse_cron(cfg.noon_cron),
+    )
+    scheduler.add_job(
+        _job_send_period,
+        "cron",
+        id="daily_briefing_evening",
+        replace_existing=True,
+        args=["evening"],
+        **_parse_cron(cfg.evening_cron),
+    )
+    logger.info(
+        "daily_briefing: jobs registered (morning=%s, noon=%s, evening=%s)",
+        cfg.morning_cron,
+        cfg.noon_cron,
+        cfg.evening_cron,
+    )
+
+
+def register_daily_briefing_commands(on_command) -> None:
+    briefing_cmd = on_command("briefing", priority=10, block=True)
+
+    @briefing_cmd.handle()
+    async def _(event):
+        if getattr(event, "group_id", None) is None:
+            await briefing_cmd.finish("该命令仅支持群聊")
+
+        group_id = event.group_id
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "briefing").strip()
+        tokens = [item for item in args.split() if item]
+        action = tokens[0].lower() if tokens else "status"
+        cfg = llm_service.config.daily_briefing
+
+        if action in {"on", "开启", "启用"}:
+            if not _is_admin(event):
+                await briefing_cmd.finish("仅管理员可执行此操作")
+            if not cfg.enabled:
+                await briefing_cmd.finish(
+                    "每日播报全局未开启，请先在 config/llm.toml 的 [daily_briefing] 中设置 enabled = true。"
+                )
+            daily_briefing_enabled_groups.add(group_id)
+            rule_switch.enable(group_id, _RULE_NAME)
+            rule_switch.save(RULE_SWITCH_PATH)
+            await briefing_cmd.finish(
+                "本群每日播报已开启。"
+                f" 早报 { _cron_to_hhmm(cfg.morning_cron) }，"
+                f" 午报 { _cron_to_hhmm(cfg.noon_cron) }，"
+                f" 晚报 { _cron_to_hhmm(cfg.evening_cron) }。"
+            )
+
+        if action in {"off", "关闭", "禁用"}:
+            if not _is_admin(event):
+                await briefing_cmd.finish("仅管理员可执行此操作")
+            daily_briefing_enabled_groups.remove(group_id)
+            rule_switch.disable(group_id, _RULE_NAME)
+            rule_switch.save(RULE_SWITCH_PATH)
+            await briefing_cmd.finish("本群每日播报已关闭。")
+
+        if action in {"status", "状态", ""}:
+            enabled = _is_group_enabled(group_id)
+            await briefing_cmd.finish(
+                "每日播报状态\n"
+                f"全局开关：{'ON' if cfg.enabled else 'OFF'}\n"
+                f"本群开关：{'已开启 ✓' if enabled else '已关闭'}\n"
+                f"早报：{_cron_to_hhmm(cfg.morning_cron)}\n"
+                f"午报：{_cron_to_hhmm(cfg.noon_cron)}\n"
+                f"晚报：{_cron_to_hhmm(cfg.evening_cron)}"
+            )
+
+        if action in {"now", "立即", "测试"}:
+            if not _is_admin(event):
+                await briefing_cmd.finish("仅管理员可执行此操作")
+            if not _is_group_enabled(group_id):
+                await briefing_cmd.finish("本群未开启每日播报，请先使用 /briefing on 开启。")
+            if _on_cooldown(group_id):
+                await briefing_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
+            _mark_triggered(group_id)
+            period = normalize_period(tokens[1]) if len(tokens) >= 2 else None
+            if period is None:
+                period = _default_period_for_now(datetime.now(tz=_LOCAL_TZ))
+            await briefing_cmd.send(f"正在生成{_PERIOD_LABELS[period]}，请稍候……")
+            content, _model_used = await _render_briefing(str(group_id), period)
+            bot = nonebot.get_bot()
+            await bot.send_group_msg(group_id=int(group_id), message=content)
+            await briefing_cmd.finish()
+
+        await briefing_cmd.finish(
+            "用法：/briefing on|off|status|now [morning|noon|evening]\n"
+            "  on     — 开启本群每日播报（管理员）\n"
+            "  off    — 关闭本群每日播报（管理员）\n"
+            "  now    — 立即测试一条播报，默认按当前时段（管理员，每分钟限一次）\n"
+            "  status — 查看当前状态"
+        )
+
+
+def setup(on_command) -> None:
+    _register_scheduler_jobs()
+    register_daily_briefing_commands(on_command)

@@ -36,14 +36,24 @@ class DailyMessageCollector:
     def _file_path(self, group_id: int | str, calendar_date: date) -> Path:
         return self.base_dir / _safe_group_id(group_id) / f"{calendar_date.isoformat()}.jsonl"
 
-    def record(self, group_id: int | str, sender_name: str, text: str, ts: float | None = None) -> None:
+    def record(
+        self,
+        group_id: int | str,
+        sender_name: str,
+        text: str,
+        ts: float | None = None,
+        user_id: int | str | None = None,
+    ) -> None:
         if not text.strip():
             return
         ts_val = ts if ts is not None else time()
         local_date = datetime.fromtimestamp(ts_val, tz=_LOCAL_TZ).date()
         path = self._file_path(group_id, local_date)
         path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps({"sender": sender_name, "text": text, "ts": ts_val}, ensure_ascii=False)
+        payload = {"sender": sender_name, "text": text, "ts": ts_val}
+        if user_id is not None:
+            payload["user_id"] = str(user_id)
+        line = json.dumps(payload, ensure_ascii=False)
         try:
             with path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")

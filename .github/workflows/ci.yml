@@ -70,3 +70,6 @@ jobs:
 
       - name: Run defectify tests
         run: python test_defectify.py
+
+      - name: Run briefing tests
+        run: python test_briefing.py

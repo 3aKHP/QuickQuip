@@ -46,3 +46,7 @@ config/llm.*.local.toml
 
 #Dev Filefolder
 dev/
+
+# Frontend build output
+frontend/dist/
+frontend/node_modules/

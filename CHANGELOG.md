@@ -6,15 +6,11 @@
 
 ### 新增
 
+- 每日早中晚播报功能 `daily_briefing`：支持按群开启早报（08:00）、午报（12:00）、晚报（22:00），复用当前群绑定的 LLM provider/model/persona，结合消息数、活跃用户、热词和代表性消息样本生成短播报；消息量不足时自动退回模板播报；`/briefing on|off|status|now [morning|noon|evening]` 命令；`[daily_briefing]` 配置区块支持三段 cron、上下文规模、输出长度和模型级联
+- Web 管理后台 `web_api.py` + `quickquip/app/web/`：基于 FastAPI 的独立管理 API 服务，提供消息统计、群级规则开关、每日总结/播报群组管理三个端点；前端为 Vue 3 SPA（`frontend/`），构建产物 serve 在 `/ops/` 路径；通过 `WEB_ADMIN_HOST`/`WEB_ADMIN_PORT` 环境变量控制监听地址（默认 `127.0.0.1:5104`）
 - MCP docker transport 支持 `pull_policy` 配置项（`always`/`missing`/`never`，默认 `missing`），设为 `always` 可在每次重载时自动拉取最新镜像，解决镜像更新后工具列表不刷新的问题
 - 新增 `/llm mcp reload` 命令（仅管理员）：强制 pull 所有 docker transport MCP 服务器的最新镜像并重连，完成后输出最新状态；非 docker transport 服务器仅重连不 pull
-
-### 新增
-
 - 词云功能 `/wordcloud`（别名 `/词云`）：管理员可生成本群消息词频可视化图片，支持 `today`/`week`/`month`/`year` 四个时间窗口；独立消息收集层（`data/wordcloud_msgs/`），对所有群始终开启；图片以 base64 内联方式发送；依赖 jieba 分词 + wordcloud + Pillow，需在 `data/fonts/` 放置 NotoSansSC-Regular.ttf 字体文件
-
-### 新增
-
 - 人格配置支持可选 `scope` 字段，`/llm personas` 会按群聊或私聊上下文只展示当前场景可用的人格
 - `bot.py` 新增 loguru 文件日志输出，每日轮转写入 `data/logs/quickquip_YYYY-MM-DD.log`，保留 14 天；通过 nginx `/bot-logs/archive/` 路径（`auth_basic` 鉴权）可直接浏览下载
 - 新增 `dev/tools/log_server.py`：SSE 实时日志服务，监听 `127.0.0.1:5103`，通过 nginx `/bot-logs` 路径（`auth_basic` 鉴权）在浏览器实时查看容器日志，支持关键词过滤和自动滚动

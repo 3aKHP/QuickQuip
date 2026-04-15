@@ -6,3 +6,4 @@ playwright==1.58.0
 jieba>=0.42.1
 wordcloud>=1.9.3
 Pillow>=10.0.0
+uvicorn[standard]>=0.29.0

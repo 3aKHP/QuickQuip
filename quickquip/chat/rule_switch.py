@@ -6,6 +6,7 @@ from quickquip.common.persistence import load_json, save_json
 
 # All switchable rule names (text rules + built-in modules).
 SWITCHABLE_RULES = {
+    "daily_briefing",
     "daily_summary",
     "divine_arrival",
     "play_target",

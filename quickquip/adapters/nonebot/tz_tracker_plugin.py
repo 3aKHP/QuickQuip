@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     MessageSegment = None
 
 from quickquip.adapters.nonebot.commands import register_commands
+from quickquip.adapters.nonebot.daily_briefing_plugin import setup as setup_daily_briefing
 from quickquip.adapters.nonebot.daily_summary_plugin import setup as setup_daily_summary
 from quickquip.adapters.nonebot.wordcloud_plugin import setup as setup_wordcloud
 from quickquip.adapters.nonebot.group_messages import register_message_matcher
@@ -41,6 +42,7 @@ if on_message is not None:
 
 if on_command is not None:
     register_commands(on_command, Message, MessageSegment)
+    setup_daily_briefing(on_command)
     setup_daily_summary(on_command)
     setup_wordcloud(on_command)
 

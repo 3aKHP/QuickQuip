@@ -69,6 +69,26 @@ pull_policy = "always"  # 自动拉取最新镜像
 mounts = ["prts-mcp-data:/data/gamedata"]
 env = { GITHUB_TOKEN = "${GITHUB_TOKEN:-}" }
 
+# 每日早中晚播报配置。默认全局关闭；需要在群内执行 /briefing on 开启。
+[daily_briefing]
+enabled = false                    # 全局开关（false 时不注册定时任务）
+morning_cron = "0 8 * * *"        # 每日 08:00 发送早报（回顾昨天）
+noon_cron = "0 12 * * *"          # 每日 12:00 发送午报（回顾今天截至当前）
+evening_cron = "0 22 * * *"       # 每日 22:00 发送晚报（回顾今天截至当前）
+min_messages_for_llm = 5          # 低于此条数时跳过 LLM，改用模板回退
+active_users_limit = 5            # 注入给 LLM 的活跃用户数量
+hot_words_limit = 5               # 注入给 LLM 的热词数量
+sample_messages_limit = 60        # 注入给 LLM 的代表性消息样本条数
+max_context_chars = 40000         # 注入消息样本的总字符上限
+max_output_chars = 320            # 播报正文最大字符数（超出会自动裁切）
+
+# 模型级联：逐个尝试直到成功；"@default" 表示使用当前群绑定的默认模型。
+model_cascade = [
+    "@default",
+    "openai-main/gpt-5.4",
+    "claude-main/claude-sonnet-4-6",
+]
+
 # 每日群聊总结配置。默认全局关闭；需要在群内执行 /summary on 开启。
 [daily_summary]
 enabled = false               # 全局开关（false 时不注册定时任务）

@@ -105,6 +105,21 @@ class DailySummaryConfig:
 
 
 @dataclass(slots=True)
+class DailyBriefingConfig:
+    enabled: bool = False
+    morning_cron: str = "0 8 * * *"
+    noon_cron: str = "0 12 * * *"
+    evening_cron: str = "0 22 * * *"
+    min_messages_for_llm: int = 5
+    active_users_limit: int = 5
+    hot_words_limit: int = 5
+    sample_messages_limit: int = 60
+    max_context_chars: int = 40000
+    max_output_chars: int = 320
+    model_cascade: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
@@ -113,6 +128,7 @@ class LLMConfig:
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
     daily_summary: DailySummaryConfig = field(default_factory=DailySummaryConfig)
+    daily_briefing: DailyBriefingConfig = field(default_factory=DailyBriefingConfig)
     load_error: str | None = None
     source_path: Path | None = None
 
@@ -334,6 +350,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     tools_raw = _expand_env_value(_as_dict(data.get("tools")))
     mcp_raw = _expand_env_value(_as_dict(data.get("mcp")))
     daily_summary_raw = _expand_env_value(_as_dict(data.get("daily_summary")))
+    daily_briefing_raw = _expand_env_value(_as_dict(data.get("daily_briefing")))
     raw_providers = data.get("providers", [])
     raw_personas = data.get("personas", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
@@ -386,6 +403,23 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             model_cascade=[
                 str(item).strip()
                 for item in daily_summary_raw.get("model_cascade", [])
+                if str(item).strip()
+            ],
+        ),
+        daily_briefing=DailyBriefingConfig(
+            enabled=_as_bool(daily_briefing_raw.get("enabled", False), default=False),
+            morning_cron=str(daily_briefing_raw.get("morning_cron", "0 8 * * *")).strip() or "0 8 * * *",
+            noon_cron=str(daily_briefing_raw.get("noon_cron", "0 12 * * *")).strip() or "0 12 * * *",
+            evening_cron=str(daily_briefing_raw.get("evening_cron", "0 22 * * *")).strip() or "0 22 * * *",
+            min_messages_for_llm=max(1, int(daily_briefing_raw.get("min_messages_for_llm", 5))),
+            active_users_limit=max(1, int(daily_briefing_raw.get("active_users_limit", 5))),
+            hot_words_limit=max(1, int(daily_briefing_raw.get("hot_words_limit", 5))),
+            sample_messages_limit=max(1, int(daily_briefing_raw.get("sample_messages_limit", 60))),
+            max_context_chars=max(1000, int(daily_briefing_raw.get("max_context_chars", 40000))),
+            max_output_chars=max(80, int(daily_briefing_raw.get("max_output_chars", 320))),
+            model_cascade=[
+                str(item).strip()
+                for item in daily_briefing_raw.get("model_cascade", [])
                 if str(item).strip()
             ],
         ),

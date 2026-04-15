@@ -27,6 +27,7 @@ from quickquip.chat.daily_summary import (
     DailySummaryEnabledGroups,
     DailySummaryStore,
 )
+from quickquip.chat.daily_briefing import DailyBriefingEnabledGroups
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.common.message_deduper import RecentMessageDeduper
 from quickquip.common.rate_limit import KeyedRateLimiter
@@ -52,6 +53,7 @@ message_deduper = RecentMessageDeduper()
 daily_collector = DailyMessageCollector()
 daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
+daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
 wordcloud_collector = WordCloudCollector()
 
 DATA_DIR.mkdir(exist_ok=True)
@@ -62,11 +64,19 @@ llm_service.bind_rule_switch(rule_switch)
 llm_service.bind_recent_message_buffer(recent_messages)
 
 
-def record_group_message(group_id: int | str, sender_name: str, rendered_text: str) -> None:
-    """Record a message for daily summary collection. No-op if group has not opted in."""
-    if not daily_enabled_groups.contains(group_id):
+def record_group_message(
+    group_id: int | str,
+    user_id: int | str,
+    sender_name: str,
+    rendered_text: str,
+) -> None:
+    """Record a message for daily summary / briefing collection when either feature is enabled."""
+    if not (
+        daily_enabled_groups.contains(group_id)
+        or daily_briefing_enabled_groups.contains(group_id)
+    ):
         return
-    daily_collector.record(group_id, sender_name, rendered_text)
+    daily_collector.record(group_id, sender_name, rendered_text, user_id=user_id)
 
 
 def record_wordcloud_message(group_id: int | str, sender_name: str, rendered_text: str) -> None:
