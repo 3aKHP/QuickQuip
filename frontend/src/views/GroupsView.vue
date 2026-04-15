@@ -62,8 +62,8 @@ export default {
   async mounted() {
     try {
       const [groupsData, knownData] = await Promise.all([
-        apiFetch('/ops/api/groups'),
-        apiFetch('/ops/api/groups/known').catch(() => ({ groups: [] })),
+        apiFetch('/api/groups'),
+        apiFetch('/api/groups/known').catch(() => ({ groups: [] })),
       ])
       this.groups = groupsData
       this.knownGroups = knownData.groups || []
@@ -82,7 +82,7 @@ export default {
       const gid = (fromSelect || fromManual).trim()
       if (!gid || !/^\d+$/.test(gid)) { toast('群号必须为纯数字', 'error'); return }
       try {
-        await apiFetch(`/ops/api/groups/${type}/${gid}`, {
+        await apiFetch(`/api/groups/${type}/${gid}`, {
           method: 'POST',
           body: JSON.stringify({ enabled: true }),
         })
@@ -96,7 +96,7 @@ export default {
     },
     async removeGroup(type, gid) {
       try {
-        await apiFetch(`/ops/api/groups/${type}/${gid}`, {
+        await apiFetch(`/api/groups/${type}/${gid}`, {
           method: 'POST',
           body: JSON.stringify({ enabled: false }),
         })

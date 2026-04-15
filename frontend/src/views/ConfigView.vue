@@ -39,7 +39,7 @@ export default {
       this.loadError = null
       this.saveError = null
       try {
-        const d = await apiFetch('/ops/api/config/llm')
+        const d = await apiFetch('/api/config/llm')
         this.content = d.content
         this.missing = d.missing || false
         this.loaded = true
@@ -51,7 +51,7 @@ export default {
       this.saving = true
       this.saveError = null
       try {
-        await apiFetch('/ops/api/config/llm', {
+        await apiFetch('/api/config/llm', {
           method: 'PUT',
           body: JSON.stringify({ content: this.content }),
         })

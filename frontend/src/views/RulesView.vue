@@ -47,8 +47,8 @@ export default {
   async mounted() {
     try {
       const [rulesData, knownData] = await Promise.all([
-        apiFetch('/ops/api/rules'),
-        apiFetch('/ops/api/groups/known').catch(() => ({ groups: [] })),
+        apiFetch('/api/rules'),
+        apiFetch('/api/groups/known').catch(() => ({ groups: [] })),
       ])
       this.disabled = rulesData.disabled
       this.allRules = rulesData.all_rules
@@ -75,7 +75,7 @@ export default {
     async toggle(rule) {
       const nowEnabled = this.isEnabled(rule)
       try {
-        await apiFetch(`/ops/api/rules/${this.selectedGroup}/${rule}`, {
+        await apiFetch(`/api/rules/${this.selectedGroup}/${rule}`, {
           method: 'POST',
           body: JSON.stringify({ enabled: !nowEnabled }),
         })

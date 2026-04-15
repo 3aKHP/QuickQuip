@@ -45,7 +45,7 @@ export default {
       this.loading = true
       this.error = null
       try {
-        this.data = await apiFetch('/ops/api/stats')
+        this.data = await apiFetch('/api/stats')
         this.updatedAt = new Date().toLocaleTimeString('zh-CN')
       } catch (e) {
         this.error = e.message
