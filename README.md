@@ -382,7 +382,7 @@ QuickQuip/
    python web_api.py
    ```
 
-   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面，提供消息统计、群级规则开关和群组管理功能。监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。
+   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面，提供消息统计、群级规则开关、群组管理和 `config/llm.toml` 在线编辑功能。监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。
 
 8. **启动机器人**
 
