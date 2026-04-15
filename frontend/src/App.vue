@@ -5,12 +5,16 @@
       <button :class="{ active: view === 'stats' }" @click="view = 'stats'">统计</button>
       <button :class="{ active: view === 'rules' }" @click="view = 'rules'">规则</button>
       <button :class="{ active: view === 'groups' }" @click="view = 'groups'">群组</button>
+      <button :class="{ active: view === 'memory' }" @click="view = 'memory'">记忆</button>
+      <button :class="{ active: view === 'summary' }" @click="view = 'summary'">总结</button>
       <button :class="{ active: view === 'config' }" @click="view = 'config'">配置</button>
     </nav>
     <main>
       <StatsView v-if="view === 'stats'" />
       <RulesView v-else-if="view === 'rules'" />
       <GroupsView v-else-if="view === 'groups'" />
+      <MemoryView v-else-if="view === 'memory'" />
+      <SummaryView v-else-if="view === 'summary'" />
       <ConfigView v-else-if="view === 'config'" />
     </main>
     <transition name="toast">
@@ -23,11 +27,13 @@
 import StatsView from './views/StatsView.vue'
 import RulesView from './views/RulesView.vue'
 import GroupsView from './views/GroupsView.vue'
+import MemoryView from './views/MemoryView.vue'
+import SummaryView from './views/SummaryView.vue'
 import ConfigView from './views/ConfigView.vue'
 import { toastMsg, toastType } from './toast.js'
 
 export default {
-  components: { StatsView, RulesView, GroupsView, ConfigView },
+  components: { StatsView, RulesView, GroupsView, MemoryView, SummaryView, ConfigView },
   data: () => ({ view: 'stats', toastMsg, toastType }),
 }
 </script>
