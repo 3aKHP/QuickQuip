@@ -1,17 +1,22 @@
 <template>
   <div>
-<h2>功能群组管理</h2>
+    <UiPageHeader title="功能群组管理" />
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-else-if="!loaded">加载中…</p>
+    <UiLoading v-else-if="!loaded" />
     <div v-else class="groups-layout">
-      <section>
-        <h3>每日总结</h3>
-        <ul>
+      <UiCard padding="md" shadow="sm">
+        <div class="section-header">
+          <UiIcon name="CalendarCheck" :size="18" />
+          <h3>每日总结</h3>
+        </div>
+        <ul class="group-list">
           <li v-for="gid in groups.summary" :key="gid">
-            {{ gid }}
-            <button class="btn-off small" @click="removeGroup('summary', gid)">移除</button>
+            <span class="gid">{{ gid }}</span>
+            <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('summary', gid)">移除</UiButton>
           </li>
-          <li v-if="!groups.summary.length" class="muted">无</li>
+          <li v-if="!groups.summary.length" class="empty-item">
+            <UiEmpty icon="Inbox" title="无" description="暂无开启每日总结的群组" />
+          </li>
         </ul>
         <div class="add-row">
           <select v-model="newSummaryId">
@@ -19,18 +24,23 @@
             <option v-for="gid in availableGroups('summary')" :key="gid" :value="gid">{{ gid }}</option>
           </select>
           <input v-model="newSummaryIdManual" placeholder="或手动输入群号" @keyup.enter="addGroup('summary')" />
-          <button @click="addGroup('summary')">添加</button>
+          <UiButton icon="Plus" @click="addGroup('summary')">添加</UiButton>
         </div>
-      </section>
+      </UiCard>
 
-      <section>
-        <h3>每日简报</h3>
-        <ul>
+      <UiCard padding="md" shadow="sm">
+        <div class="section-header">
+          <UiIcon name="Newspaper" :size="18" />
+          <h3>每日简报</h3>
+        </div>
+        <ul class="group-list">
           <li v-for="gid in groups.briefing" :key="gid">
-            {{ gid }}
-            <button class="btn-off small" @click="removeGroup('briefing', gid)">移除</button>
+            <span class="gid">{{ gid }}</span>
+            <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('briefing', gid)">移除</UiButton>
           </li>
-          <li v-if="!groups.briefing.length" class="muted">无</li>
+          <li v-if="!groups.briefing.length" class="empty-item">
+            <UiEmpty icon="Inbox" title="无" description="暂无开启每日简报的群组" />
+          </li>
         </ul>
         <div class="add-row">
           <select v-model="newBriefingId">
@@ -38,17 +48,25 @@
             <option v-for="gid in availableGroups('briefing')" :key="gid" :value="gid">{{ gid }}</option>
           </select>
           <input v-model="newBriefingIdManual" placeholder="或手动输入群号" @keyup.enter="addGroup('briefing')" />
-          <button @click="addGroup('briefing')">添加</button>
+          <UiButton icon="Plus" @click="addGroup('briefing')">添加</UiButton>
         </div>
-      </section>
+      </UiCard>
     </div>
   </div>
 </template>
 
 <script>
-import { apiFetch } from '../api.js'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiCard from '../components/ui/UiCard.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiIcon from '../components/ui/UiIcon.vue'
+import UiLoading from '../components/ui/UiLoading.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
+import { fetchGroups, fetchKnownGroups, updateGroup } from '../api/groups.js'
 import { toast } from '../toast.js'
+
 export default {
+  components: { UiPageHeader, UiCard, UiButton, UiIcon, UiLoading, UiEmpty },
   data: () => ({
     loaded: false,
     error: null,
@@ -62,8 +80,8 @@ export default {
   async mounted() {
     try {
       const [groupsData, knownData] = await Promise.all([
-        apiFetch('/api/groups'),
-        apiFetch('/api/groups/known').catch(() => ({ groups: [] })),
+        fetchGroups(),
+        fetchKnownGroups(),
       ])
       this.groups = groupsData
       this.knownGroups = knownData.groups || []
@@ -82,10 +100,7 @@ export default {
       const gid = (fromSelect || fromManual).trim()
       if (!gid || !/^\d+$/.test(gid)) { toast('群号必须为纯数字', 'error'); return }
       try {
-        await apiFetch(`/api/groups/${type}/${gid}`, {
-          method: 'POST',
-          body: JSON.stringify({ enabled: true }),
-        })
+        await updateGroup(type, gid, true)
         if (!this.groups[type].includes(gid)) this.groups[type].push(gid)
         if (type === 'summary') { this.newSummaryId = ''; this.newSummaryIdManual = '' }
         else { this.newBriefingId = ''; this.newBriefingIdManual = '' }
@@ -96,10 +111,7 @@ export default {
     },
     async removeGroup(type, gid) {
       try {
-        await apiFetch(`/api/groups/${type}/${gid}`, {
-          method: 'POST',
-          body: JSON.stringify({ enabled: false }),
-        })
+        await updateGroup(type, gid, false)
         this.groups[type] = this.groups[type].filter(g => g !== gid)
         toast(`群 ${gid} 已移除`)
       } catch (e) {
@@ -110,3 +122,86 @@ export default {
 }
 </script>
 
+<style scoped>
+.error {
+  color: var(--qq-danger);
+}
+
+.groups-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--qq-gap-md);
+}
+
+@media (max-width: 720px) {
+  .groups-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-xs);
+  margin-bottom: var(--qq-gap-sm);
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--qq-text);
+}
+
+.group-list {
+  list-style: none;
+  margin-bottom: var(--qq-gap-sm);
+}
+
+.group-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--qq-border);
+  font-size: 13px;
+}
+
+.group-list li:last-child {
+  border-bottom: none;
+}
+
+.group-list li.empty-item {
+  padding: 0;
+}
+
+.gid {
+  font-family: var(--qq-font-mono);
+  color: var(--qq-text);
+}
+
+.add-row {
+  display: flex;
+  gap: var(--qq-gap-sm);
+  margin-top: var(--qq-gap-sm);
+  flex-wrap: wrap;
+}
+
+.add-row select,
+.add-row input {
+  flex: 1;
+  min-width: 120px;
+  background: var(--qq-surface-strong);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  color: var(--qq-text);
+  padding: 5px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.add-row select:focus,
+.add-row input:focus {
+  border-color: var(--qq-accent);
+  box-shadow: 0 0 0 3px var(--qq-accent-soft);
+}
+</style>

@@ -1,30 +1,42 @@
 <template>
   <div class="config-view">
-    <div class="view-header">
-      <h2>LLM 配置</h2>
-      <div class="header-actions">
-        <span v-if="missing" class="warn">⚠ config/llm.toml 不存在，保存后将创建</span>
-        <button @click="load" :disabled="saving">重置</button>
-        <button class="btn-primary" @click="save" :disabled="saving">{{ saving ? '保存中…' : '保存' }}</button>
-      </div>
-    </div>
+    <UiPageHeader title="LLM 配置">
+      <template #actions>
+        <span v-if="missing" class="warn">
+          <UiIcon name="AlertTriangle" :size="14" />
+          config/llm.toml 不存在，保存后将创建
+        </span>
+        <UiButton icon="RotateCcw" :disabled="saving" @click="load">重置</UiButton>
+        <UiButton variant="primary" :loading="saving" icon="Save" @click="save">保存</UiButton>
+      </template>
+    </UiPageHeader>
+
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <p v-if="saveError" class="error save-error">{{ saveError }}</p>
-    <p v-else-if="!loaded">加载中…</p>
-    <textarea
-      v-if="loaded"
-      v-model="content"
-      class="toml-editor"
-      spellcheck="false"
-      autocomplete="off"
-    ></textarea>
+    <UiLoading v-else-if="!loaded" />
+
+    <UiCard v-if="loaded" padding="none" shadow="md" class="editor-card">
+      <textarea
+        v-model="content"
+        class="toml-editor"
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </UiCard>
   </div>
 </template>
 
 <script>
-import { apiFetch } from '../api.js'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiIcon from '../components/ui/UiIcon.vue'
+import UiLoading from '../components/ui/UiLoading.vue'
+import UiCard from '../components/ui/UiCard.vue'
+import { fetchLlmConfig, saveLlmConfig } from '../api/config.js'
 import { toast } from '../toast.js'
+
 export default {
+  components: { UiPageHeader, UiButton, UiIcon, UiLoading, UiCard },
   data: () => ({
     loaded: false,
     loadError: null,
@@ -39,7 +51,7 @@ export default {
       this.loadError = null
       this.saveError = null
       try {
-        const d = await apiFetch('/api/config/llm')
+        const d = await fetchLlmConfig()
         this.content = d.content
         this.missing = d.missing || false
         this.loaded = true
@@ -51,10 +63,7 @@ export default {
       this.saving = true
       this.saveError = null
       try {
-        await apiFetch('/api/config/llm', {
-          method: 'PUT',
-          body: JSON.stringify({ content: this.content }),
-        })
+        await saveLlmConfig(this.content)
         this.missing = false
         toast('配置已保存')
       } catch (e) {
@@ -69,27 +78,53 @@ export default {
 </script>
 
 <style scoped>
-.config-view { display: flex; flex-direction: column; height: calc(100vh - 92px); }
-.view-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-shrink: 0; }
-.view-header h2 { margin-bottom: 0; }
-.header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.warn { color: #d29922; font-size: 13px; }
-.save-error { margin-bottom: 8px; font-size: 13px; }
-.btn-primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
-.btn-primary:hover { background: #388bfd; }
+.config-view {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 92px);
+}
+
+.error {
+  color: var(--qq-danger);
+}
+
+.save-error {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--qq-warn);
+  font-size: 13px;
+}
+
+.editor-card {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .toml-editor {
   flex: 1;
   width: 100%;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  color: #c9d1d9;
-  font-family: 'Consolas', 'Monaco', monospace;
+  background: var(--qq-surface-strong);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-md);
+  color: var(--qq-text);
+  font-family: var(--qq-font-mono);
   font-size: 13px;
-  line-height: 1.6;
-  padding: 12px;
+  line-height: 1.7;
+  padding: var(--qq-gap-md);
   resize: none;
   outline: none;
+  border: none;
 }
-.toml-editor:focus { border-color: #58a6ff; }
+
+.toml-editor:focus {
+  box-shadow: inset 0 0 0 1px var(--qq-accent);
+}
 </style>

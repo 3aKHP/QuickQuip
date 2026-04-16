@@ -1,40 +1,60 @@
 <template>
   <div>
-    <h2>规则开关</h2>
+    <UiPageHeader title="规则开关" />
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-else-if="!loaded">加载中…</p>
+    <UiLoading v-else-if="!loaded" />
     <div v-else>
-      <div class="toolbar">
-        <label>群组：
-          <select v-model="selectedGroup">
-            <option value="">— 选择群组 —</option>
-            <option v-for="gid in allGroups" :key="gid" :value="gid">{{ gid }}</option>
-          </select>
-        </label>
-        <label>手动添加：
-          <input v-model="newGroupId" placeholder="输入群号" @keyup.enter="addGroup" />
-        </label>
-        <button @click="addGroup">添加</button>
-      </div>
+      <UiCard padding="md" shadow="sm" class="toolbar-card">
+        <div class="toolbar-inner">
+          <label>群组
+            <select v-model="selectedGroup">
+              <option value="">— 选择群组 —</option>
+              <option v-for="gid in allGroups" :key="gid" :value="gid">{{ gid }}</option>
+            </select>
+          </label>
+          <label>手动添加
+            <input v-model="newGroupId" placeholder="输入群号" @keyup.enter="addGroup" />
+          </label>
+          <UiButton icon="Plus" @click="addGroup">添加</UiButton>
+        </div>
+      </UiCard>
 
       <div v-if="selectedGroup" class="rule-grid">
-        <div v-for="rule in allRules" :key="rule" class="rule-row">
-          <span class="rule-name">{{ rule }}</span>
-          <label class="toggle">
-            <input type="checkbox" :checked="isEnabled(rule)" @click.prevent="toggle(rule)" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
+        <UiCard
+          v-for="rule in allRules"
+          :key="rule"
+          padding="sm"
+          shadow="sm"
+          class="rule-row"
+        >
+          <div class="rule-left">
+            <span class="rule-dot" />
+            <span class="rule-name">{{ rule }}</span>
+          </div>
+          <UiToggle
+            :model-value="isEnabled(rule)"
+            @update:model-value="toggle(rule)"
+          />
+        </UiCard>
       </div>
-      <p v-else class="muted">请先选择或添加一个群组</p>
+      <UiEmpty v-else icon="MousePointerClick" title="请先选择或添加一个群组" />
     </div>
   </div>
 </template>
 
 <script>
-import { apiFetch } from '../api.js'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiCard from '../components/ui/UiCard.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiToggle from '../components/ui/UiToggle.vue'
+import UiLoading from '../components/ui/UiLoading.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
+import { fetchRules, updateRule } from '../api/rules.js'
+import { fetchKnownGroups } from '../api/groups.js'
 import { toast } from '../toast.js'
+
 export default {
+  components: { UiPageHeader, UiCard, UiButton, UiToggle, UiLoading, UiEmpty },
   data: () => ({
     loaded: false,
     error: null,
@@ -47,8 +67,8 @@ export default {
   async mounted() {
     try {
       const [rulesData, knownData] = await Promise.all([
-        apiFetch('/api/rules'),
-        apiFetch('/api/groups/known').catch(() => ({ groups: [] })),
+        fetchRules(),
+        fetchKnownGroups(),
       ])
       this.disabled = rulesData.disabled
       this.allRules = rulesData.all_rules
@@ -75,10 +95,7 @@ export default {
     async toggle(rule) {
       const nowEnabled = this.isEnabled(rule)
       try {
-        await apiFetch(`/api/rules/${this.selectedGroup}/${rule}`, {
-          method: 'POST',
-          body: JSON.stringify({ enabled: !nowEnabled }),
-        })
+        await updateRule(this.selectedGroup, rule, !nowEnabled)
         if (!this.disabled[this.selectedGroup]) this.disabled[this.selectedGroup] = []
         if (nowEnabled) {
           this.disabled[this.selectedGroup].push(rule)
@@ -93,3 +110,76 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+.error {
+  color: var(--qq-danger);
+}
+
+.toolbar-card {
+  margin-bottom: var(--qq-gap-md);
+}
+
+.toolbar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-md);
+  flex-wrap: wrap;
+}
+
+.toolbar-inner label {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-xs);
+  color: var(--qq-text-muted);
+  font-size: 13px;
+}
+
+.toolbar-inner select,
+.toolbar-inner input {
+  background: var(--qq-surface-strong);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  color: var(--qq-text);
+  padding: 5px 10px;
+  font-size: 14px;
+  outline: none;
+}
+
+.toolbar-inner select:focus,
+.toolbar-inner input:focus {
+  border-color: var(--qq-accent);
+  box-shadow: 0 0 0 3px var(--qq-accent-soft);
+}
+
+.rule-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-sm);
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rule-left {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-sm);
+}
+
+.rule-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--qq-accent);
+}
+
+.rule-name {
+  font-size: 13px;
+  font-family: var(--qq-font-mono);
+  color: var(--qq-text);
+}
+</style>
