@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Web 管理前台设计升级：引入基于 CSS 变量的统一设计系统（`variables.css`/`transitions.css`），新增 `UiButton`、`UiCard`、`UiTag`、`UiPageHeader`、`UiIcon`、`UiLoading`、`UiEmpty`、`UiToggle` 等通用组件；导航改为配置驱动并预留学生成路由表的扩展接口；按业务域拆分 `api.js` 为模块化 API 层；统计页 Top 列表改为进度条可视化，登录页、规则页、记忆页等全部视图统一升级圆角卡片、阴影层次与响应式布局，并补齐移动端适配
 - 每日早中晚播报功能 `daily_briefing`：支持按群开启早报（08:00）、午报（12:00）、晚报（22:00），复用当前群绑定的 LLM provider/model/persona，结合消息数、活跃用户、热词和代表性消息样本生成短播报；消息量不足时自动退回模板播报；`/briefing on|off|status|now [morning|noon|evening]` 命令；`[daily_briefing]` 配置区块支持三段 cron、上下文规模、输出长度和模型级联
 - Web 管理后台 `web_api.py` + `quickquip/app/web/`：基于 FastAPI 的独立管理 API 服务，提供消息统计、群级规则开关、每日总结/播报群组管理三个端点；前端为 Vue 3 SPA（`frontend/`），构建产物 serve 在 `/ops/` 路径；通过 `WEB_ADMIN_HOST`/`WEB_ADMIN_PORT` 环境变量控制监听地址（默认 `127.0.0.1:5104`）；新增 `GET /ops/api/groups/known` 返回已知群列表，`GET/PUT /ops/api/config/llm` 支持在线读写 `config/llm.toml`；前端新增配置编辑器标签页（原始文本编辑，保存前校验 TOML 语法），规则开关改为 pill toggle，操作反馈改为 toast，群组页支持从已知群下拉选择
 - Web 管理后台鉴权升级：FastAPI 层新增应用内 session 登录（`/ops/api/auth/login|me|logout`），所有管理接口统一要求 `HttpOnly` session cookie；`web_api.py` 启动时会自动读取根 `.env` 与 `dev/.env`，`WEB_ADMIN_PASSWORD` / `WEB_ADMIN_SESSION_TTL_HOURS` / `WEB_ADMIN_COOKIE_SECURE` 可直接纳入项目配置与部署流程
