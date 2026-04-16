@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-16
+
 ### 新增
 
 - Web 管理前台设计升级：引入基于 CSS 变量的统一设计系统（`variables.css`/`transitions.css`），新增 `UiButton`、`UiCard`、`UiTag`、`UiPageHeader`、`UiIcon`、`UiLoading`、`UiEmpty`、`UiToggle` 等通用组件；导航改为配置驱动并预留学生成路由表的扩展接口；按业务域拆分 `api.js` 为模块化 API 层；统计页 Top 列表改为进度条可视化，登录页、规则页、记忆页等全部视图统一升级圆角卡片、阴影层次与响应式布局，并补齐移动端适配
@@ -105,7 +107,9 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/3aKHP/QuickQuip/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/3aKHP/QuickQuip/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/3aKHP/QuickQuip/compare/bfdfcd0...v0.5.0
 [0.2.0]: https://github.com/3aKHP/QuickQuip/compare/3dc2ab0...bfdfcd0
 [0.1.0]: https://github.com/3aKHP/QuickQuip/commit/3dc2ab0
