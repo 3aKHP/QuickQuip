@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from asyncio.subprocess import Process
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import os
 import re
+import tempfile
 from typing import Any
 
 from quickquip.llm.config import MCPConfig, MCPServerConfig
@@ -16,6 +18,28 @@ from quickquip.llm.tools import ToolExecutionContext
 
 logger = logging.getLogger(__name__)
 _DOCKER_SOCKET_MOUNT = "/var/run/docker.sock:/var/run/docker.sock"
+
+
+@contextmanager
+def _temp_env_file(env: dict[str, str]):
+    """Write env vars to a 600-permission temp file, yield its path, delete on exit.
+    Yields None if env is empty (no file created).
+    """
+    if not env:
+        yield None
+        return
+    fd, path = tempfile.mkstemp(prefix="mcp-env-", suffix=".env")
+    try:
+        with os.fdopen(fd, "w") as f:
+            for key, value in env.items():
+                f.write(f"{key}={value}\n")
+        os.chmod(path, 0o600)
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 class MCPError(RuntimeError):
@@ -114,14 +138,19 @@ class StdioMCPClient:
         self._stdout_buffer = bytearray()
         self.server_info: dict[str, Any] = {}
 
-    def _build_command(self) -> tuple[list[str], dict[str, str], str | None]:
+    def _build_command(self) -> tuple[list[str], dict[str, str], str | None, dict[str, str]]:
+        """Return (command, process_env, cwd, docker_env).
+
+        docker_env is non-empty only for docker transport — these vars must be
+        passed via --env-file rather than -e to keep secrets out of ps output.
+        """
         if self.config.transport == "stdio":
             if not self.config.command:
                 raise MCPError(f"MCP server {self.config.id} 缺少 command")
             command = [self.config.command, *self.config.args]
             env = {**os.environ, **self.config.env}
             cwd = self.config.cwd
-            return command, env, cwd
+            return command, env, cwd, {}
 
         if self.config.transport == "docker":
             if not self.config.image:
@@ -136,28 +165,35 @@ class StdioMCPClient:
                 command.extend(["-v", mount])
             if self.config.mount_docker_socket:
                 command.extend(["-v", _DOCKER_SOCKET_MOUNT])
-            for key, value in self.config.env.items():
-                command.extend(["-e", f"{key}={value}"])
+            # env vars are injected via --env-file in start() to avoid leaking
+            # secrets into process arguments (visible in ps/proc/cmdline)
             command.extend(self.config.docker_args)
             command.append(self.config.image)
             command.extend(self.config.args)
             env = dict(os.environ)
-            return command, env, self.config.cwd
+            return command, env, self.config.cwd, dict(self.config.env)
 
         raise MCPError(f"MCP server {self.config.id} 使用了未知 transport：{self.config.transport}")
 
     async def start(self) -> None:
-        command, env, cwd = self._build_command()
+        command, env, cwd, docker_env = self._build_command()
         self._stdout_buffer.clear()
         logger.info("Starting MCP server %s with transport=%s", self.config.id, self.config.transport)
-        self.process = await asyncio.create_subprocess_exec(
-            *command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-        )
+        with _temp_env_file(docker_env) as env_file:
+            if env_file is not None:
+                # Insert --env-file just before the image name (last non-args token).
+                # command ends with: [..., image, *args] — find image position.
+                image_idx = command.index(self.config.image)
+                command = command[:image_idx] + ["--env-file", env_file] + command[image_idx:]
+            self.process = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env=env,
+            )
+        # temp file is deleted here; the container process already has its env
         self._reader_task = asyncio.create_task(self._reader_loop(), name=f"mcp-reader-{self.config.id}")
         self._stderr_task = asyncio.create_task(self._stderr_loop(), name=f"mcp-stderr-{self.config.id}")
         await self._initialize()
