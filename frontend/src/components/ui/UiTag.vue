@@ -1,0 +1,62 @@
+<template>
+  <span class="ui-tag" :class="[variantClass, sizeClass]">
+    <slot />
+  </span>
+</template>
+
+<script>
+export default {
+  name: 'UiTag',
+  props: {
+    variant: { type: String, default: 'info' }, // info | success | warn | danger
+    size: { type: String, default: 'md' }, // sm | md
+  },
+  computed: {
+    variantClass() {
+      return `ui-tag--${this.variant}`
+    },
+    sizeClass() {
+      return `ui-tag--${this.size}`
+    },
+  },
+}
+</script>
+
+<style scoped>
+.ui-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--qq-radius-pill);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.ui-tag--md {
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.ui-tag--sm {
+  min-height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.ui-tag--info {
+  background: var(--qq-accent-soft);
+  color: var(--qq-accent);
+}
+.ui-tag--success {
+  background: var(--qq-success-soft);
+  color: var(--qq-success);
+}
+.ui-tag--warn {
+  background: var(--qq-warn-soft);
+  color: var(--qq-warn);
+}
+.ui-tag--danger {
+  background: var(--qq-danger-soft);
+  color: var(--qq-danger);
+}
+</style>
