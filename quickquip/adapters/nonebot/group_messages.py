@@ -89,11 +89,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 llm_service.store.update_last_assistant_message_id(scope_key, sent_msg_id)
             return
 
-        result = resolve_reply(
+        result = await resolve_reply(
             text,
             user_id=user_id,
             sender_name=sender_name,
             group_id=group_id,
+            recent_context=trigger_context,
         )
         if not result:
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)

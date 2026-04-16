@@ -1,3 +1,4 @@
+import asyncio
 import random
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
@@ -99,17 +100,17 @@ assert priority_match_2 is not None
 assert priority_match_2["priority"] > 90
 
 # 测试总回复分发：规则优先于作息时区回复
-mixed_result = resolve_reply("神临早安", user_id=123456, sender_name="测试用户", now=fixed_now)
+mixed_result = asyncio.run(resolve_reply("神临早安", user_id=123456, sender_name="测试用户", now=fixed_now))
 assert mixed_result["reply"] == "2026-03-16 09:19，@测试用户 区从天降"
 assert mixed_result["rate_limit_key"] == "divine_arrival"
 
-normal_result = resolve_reply("早安", user_id=123456, sender_name="测试用户", now=fixed_now)
+normal_result = asyncio.run(resolve_reply("早安", user_id=123456, sender_name="测试用户", now=fixed_now))
 assert normal_result is not None
 assert normal_result["rate_limit_key"] == "timezone_wake"
 assert "@测试用户 " in normal_result["reply"]
 assert "要起床了" in normal_result["reply"]
 
-normal_reply = build_reply("早安", user_id=123456, sender_name="测试用户", now=fixed_now)
+normal_reply = asyncio.run(build_reply("早安", user_id=123456, sender_name="测试用户", now=fixed_now))
 assert normal_reply is not None
 assert "@测试用户 " in normal_reply
 
@@ -141,8 +142,8 @@ assert match_text_rule("我知道", user_id=123456, sender_name="测试用户", 
 assert match_text_rule("我觉得", user_id=123456, sender_name="测试用户", now=fixed_now) is None
 
 # 无关消息不回复
-assert build_reply("今天天气不错", user_id=123456, sender_name="测试用户", now=fixed_now) is None
-assert resolve_reply("今天天气不错", user_id=123456, sender_name="测试用户", now=fixed_now) is None
+assert asyncio.run(build_reply("今天天气不错", user_id=123456, sender_name="测试用户", now=fixed_now)) is None
+assert asyncio.run(resolve_reply("今天天气不错", user_id=123456, sender_name="测试用户", now=fixed_now)) is None
 
 # 测试旧限流器仍可单独工作
 limiter = SlidingWindowRateLimiter(global_limit=4, user_limit=2, window_seconds=60)
@@ -481,18 +482,18 @@ global_rule_switch.disabled.clear()
 
 # 禁用 divine_arrival 后，"神临" 不再触发该规则
 global_rule_switch.disable(6001, "divine_arrival")
-blocked_result = resolve_reply("神临", user_id=123, sender_name="测试", group_id=6001, now=fixed_now)
+blocked_result = asyncio.run(resolve_reply("神临", user_id=123, sender_name="测试", group_id=6001, now=fixed_now))
 assert blocked_result is None or blocked_result.get("rule_name") != "divine_arrival"
 
 # 启用后恢复（用不同 group_id 避免复读检测干扰）
 global_rule_switch.enable(6002, "divine_arrival")
-restored_result = resolve_reply("神临", user_id=123, sender_name="测试", group_id=6002, now=fixed_now)
+restored_result = asyncio.run(resolve_reply("神临", user_id=123, sender_name="测试", group_id=6002, now=fixed_now))
 assert restored_result is not None
 assert restored_result["rule_name"] == "divine_arrival"
 
 # 不传 group_id 时规则开关不生效（向后兼容）
 global_rule_switch.disable(6003, "divine_arrival")
-no_group_result = resolve_reply("神临", user_id=123, sender_name="测试", now=fixed_now)
+no_group_result = asyncio.run(resolve_reply("神临", user_id=123, sender_name="测试", now=fixed_now))
 assert no_group_result is not None
 assert no_group_result["rule_name"] == "divine_arrival"
 
@@ -706,5 +707,109 @@ r = cg_ctx.process(group_id=30, text="猫和狗", now_ts=0)
 assert r["context"]["groups"] == ("猫", "狗")
 r2 = cg_ctx.process(group_id=30, text="猫", now_ts=1)
 assert r2["context"]["groups"] == ("猫", "狗")
+
+# ══════════════════════════════════════════════════════════
+# context_rules 专项测试
+# ══════════════════════════════════════════════════════════
+
+from quickquip.chat.context_rules import (  # noqa: E402
+    _LLM_JUDGE_CACHE,
+    _check_regex_context,
+    match_context_rule,
+)
+from quickquip.chat.config import CONTEXT_REPLY_RULES  # noqa: E402
+
+# 清空缓存，确保测试之间不串扰
+_LLM_JUDGE_CACHE.clear()
+
+# ── 直接测 _check_regex_context：空条件视为不放行 ───────────
+assert _check_regex_context([], [{"text": "任意"}], context_window=5) is False
+
+# ── 直接测 _check_regex_context：条件命中 / 未命中 ──────────
+import re as _re_ctx  # noqa: E402
+_cond = [_re_ctx.compile("请假|调休")]
+assert _check_regex_context(
+    _cond,
+    [{"text": "我想请假一天"}, {"text": "其他无关"}],
+    context_window=5,
+) is True
+assert _check_regex_context(
+    _cond,
+    [{"text": "今天天气不错"}, {"text": "吃饭了吗"}],
+    context_window=5,
+) is False
+
+# 窗口截断：条件只在更早的消息里出现但超出窗口 → 不放行
+assert _check_regex_context(
+    _cond,
+    [{"text": "我想请假"}, {"text": "x"}, {"text": "y"}, {"text": "z"}],
+    context_window=2,
+) is False
+
+# ── 端到端：ntk_jingranbuxu（regex_context 规则）──────────
+# 仅在配置里存在该规则时运行（避免脱离配置时测试失败）
+if any(rule.get("name") == "ntk_jingranbuxu" for rule in CONTEXT_REPLY_RULES):
+    history_hit = [{"text": "我想请假一天", "sender_name": "张三"}]
+    ctx_hit = asyncio.run(
+        match_context_rule(
+            text="竟然不许",
+            user_id=1,
+            sender_name="李四",
+            recent_messages=history_hit,
+            now=fixed_now,
+            llm_service=None,
+            group_id=12345,
+        )
+    )
+    assert ctx_hit is not None
+    assert ctx_hit["rule_name"] == "ntk_jingranbuxu"
+    assert ctx_hit["reply"] == "竟然不许！？"
+
+    # 历史不含条件 → 不触发
+    history_miss = [{"text": "今天吃啥", "sender_name": "张三"}]
+    ctx_miss = asyncio.run(
+        match_context_rule(
+            text="竟然不许",
+            user_id=1,
+            sender_name="李四",
+            recent_messages=history_miss,
+            now=fixed_now,
+            llm_service=None,
+            group_id=12345,
+        )
+    )
+    assert ctx_miss is None
+
+# ── llm_context + llm_service=None 时不应触发 ───────────────
+if any(
+    rule.get("name") == "ntk_haoa" and rule.get("type") == "llm_context"
+    for rule in CONTEXT_REPLY_RULES
+):
+    ctx_no_llm = asyncio.run(
+        match_context_rule(
+            text="好啊",
+            user_id=1,
+            sender_name="李四",
+            recent_messages=[{"text": "他过江了", "sender_name": "张三"}],
+            now=fixed_now,
+            llm_service=None,
+            group_id=12345,
+        )
+    )
+    assert ctx_no_llm is None
+
+# ── 当前消息不匹配任何 pattern 时应返回 None ────────────────
+ctx_none = asyncio.run(
+    match_context_rule(
+        text="今天天气不错",
+        user_id=1,
+        sender_name="李四",
+        recent_messages=[{"text": "我想请假"}],
+        now=fixed_now,
+        llm_service=None,
+        group_id=12345,
+    )
+)
+assert ctx_none is None
 
 print("所有测试通过")

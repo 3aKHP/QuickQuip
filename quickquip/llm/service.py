@@ -966,6 +966,37 @@ class LLMService:
             session_preset=session_preset,
         )
 
+    async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
+        """
+        用于 context_rules 的极速判定调用。
+        不走群配置、不注入记忆、不启用工具，只发单条 system+user。
+        """
+        provider_id = self.config.default_provider
+        if not provider_id or provider_id not in self.config.providers:
+            provider_id = next(iter(self.config.providers), None)
+        if not provider_id:
+            return '{"trigger": false}'
+
+        provider = self.config.providers[provider_id]
+        judge_provider = replace(provider, stream_enabled=False)
+
+        request = LLMRequest(
+            model=judge_provider.default_model,
+            system_prompt="你是一个仅输出 JSON 的判定器。",
+            messages=[
+                LLMConversationMessage(role="user", content=prompt),
+            ],
+            temperature=0.0,
+            max_output_tokens=max_tokens,
+            thinking_budget=None,
+            tools=[],
+            allow_tool_calls=False,
+            tool_choice="none",
+        )
+        client = build_provider_client(judge_provider)
+        response = await client.complete(request)
+        return strip_leading_reasoning_content(response.text or "")
+
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
         return merge_image_urls(*collections)
 

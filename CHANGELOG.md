@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 语境感知回复子系统 `context_rules`：在普通 `[[rules]]` 与时区回复之间新增一层判定，`patterns` 首筛命中后再做上下文校验，只有语境合适时才触发；支持两种 `type`：`regex_context`（在最近 N 条消息中搜索 `context_conditions` 正则）和 `llm_context`（用超短 prompt 调用 LLM 返回 `{"trigger": true/false}` JSON）；LLM 判定带 `asyncio.wait_for` 超时（默认 2s）和按 `(rule_name, group_id, text)` 的 TTL 结果缓存（默认 60s，可通过 `llm_cache_ttl` 覆盖），降低常见触发词的调用成本
+- `LLMService.quick_judge`：用于 `context_rules` 的极速判定入口，不走群配置 / 不注入记忆 / 不启用工具，单条 system+user prompt，`temperature=0.0`、`stream_enabled=False`
+- 《新三国》梗默认入库（`chat_rules.toml.example`）：18 条直接 rules + 7 条 context_rules，共用 `new_three_kingdoms` 限流桶；`chat_rules.toml.example` 新增 `[[context_rules]]` 完整文档段与两条注释化示例
+
+### 变更
+
+- `resolve_reply` / `build_reply` 改为 `async`，新增 `recent_context` 参数透传最近消息列表给 `context_rules`；调用方（NoneBot2 群消息适配层）同步更新
+
+### 修复
+
+- `chat_rules.toml.example` 中 `ntk_longerduo` 的 priority 从 83 抬到 95，避免 `扎聋我自己的耳朵` / `议论孔明先生` 被 `ntk_long` 单字正则（priority 92）提前截胡
+
 ## [0.7.0] - 2026-04-16
 
 ### 新增

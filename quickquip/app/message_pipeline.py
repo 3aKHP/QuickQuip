@@ -29,6 +29,7 @@ from quickquip.chat.daily_summary import (
 )
 from quickquip.chat.daily_briefing import DailyBriefingEnabledGroups
 from quickquip.chat.wordcloud import WordCloudCollector
+from quickquip.chat.context_rules import match_context_rule
 from quickquip.common.message_deduper import RecentMessageDeduper
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
@@ -188,12 +189,13 @@ def resolve_good_girl_chain_reply(
     return good_girl_chain.process(group_id=group_id, text=text)
 
 
-def resolve_reply(
+async def resolve_reply(
     text: str,
     user_id: int | str,
     sender_name: str = "这位朋友",
     group_id: int | str | None = None,
     now: datetime | None = None,
+    recent_context: list[dict[str, str]] | None = None,
 ):
     repeat_reply = resolve_repeat_reply(text=text, user_id=user_id, group_id=group_id)
     if repeat_reply:
@@ -227,6 +229,21 @@ def resolve_reply(
         if group_id is None or rule_switch.is_enabled(group_id, rule_name):
             return special_reply
 
+    if recent_context and group_id is not None:
+        ctx_reply = await match_context_rule(
+            text=text,
+            user_id=user_id,
+            sender_name=sender_name,
+            recent_messages=recent_context,
+            now=now_cst,
+            llm_service=llm_service,
+            group_id=group_id,
+        )
+        if ctx_reply:
+            rule_name = ctx_reply.get("rule_name", "")
+            if rule_switch.is_enabled(group_id, rule_name):
+                return ctx_reply
+
     tz_reply = build_timezone_reply(text, sender_name=sender_name, now=now_cst)
     if tz_reply:
         rule_name = tz_reply.get("rule_name", "")
@@ -236,19 +253,21 @@ def resolve_reply(
     return None
 
 
-def build_reply(
+async def build_reply(
     text: str,
     user_id: int | str,
     sender_name: str = "这位朋友",
     group_id: int | str | None = None,
     now: datetime | None = None,
+    recent_context: list[dict[str, str]] | None = None,
 ):
-    result = resolve_reply(
+    result = await resolve_reply(
         text,
         user_id=user_id,
         sender_name=sender_name,
         group_id=group_id,
         now=now,
+        recent_context=recent_context,
     )
     if not result:
         return None

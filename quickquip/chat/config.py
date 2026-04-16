@@ -26,6 +26,7 @@ RATE_LIMIT_RULES: dict[str, dict] = {
 }
 
 TEXT_REPLY_RULES: list[dict] = []
+CONTEXT_REPLY_RULES: list[dict] = []
 CHAIN_GAME_CONFIGS: list[dict] = []
 
 
@@ -38,6 +39,7 @@ def _load_chat_rules() -> None:
         data = tomllib.load(f)
     RATE_LIMIT_RULES.update(data.get("rate_limit_rules", {}))
     TEXT_REPLY_RULES.extend(data.get("rules", []))
+    CONTEXT_REPLY_RULES.extend(data.get("context_rules", []))
     CHAIN_GAME_CONFIGS.extend(data.get("chain_games", []))
 
 

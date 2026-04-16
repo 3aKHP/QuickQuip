@@ -16,12 +16,13 @@
 # 注意：多条规则可以共用同一个桶，命中任意一条都消耗同一个配额。
 
 [rate_limit_rules]
-group_meme       = {global_limit = 6, user_limit = 3}
-play_target      = {global_limit = 6, user_limit = 3}
-double_char_ni_de = {global_limit = 6, user_limit = 3}
-sandwich_de      = {global_limit = 6, user_limit = 3}
-like_reply       = {global_limit = 6, user_limit = 3}
-divine_arrival   = {global_limit = 4, user_limit = 2}
+group_meme         = {global_limit = 6, user_limit = 3}
+play_target        = {global_limit = 6, user_limit = 3}
+double_char_ni_de  = {global_limit = 6, user_limit = 3}
+sandwich_de        = {global_limit = 6, user_limit = 3}
+like_reply         = {global_limit = 6, user_limit = 3}
+divine_arrival     = {global_limit = 4, user_limit = 2}
+new_three_kingdoms = {global_limit = 12, user_limit = 6}
 
 # ══════════════════════════════════════════════════════════
 # [[rules]] — 回复规则列表
@@ -127,6 +128,65 @@ verb = [
 # weight   = 1
 
 # ══════════════════════════════════════════════════════════
+# [[context_rules]] — 需要历史上下文的回复规则
+# ══════════════════════════════════════════════════════════
+#
+# 与 [[rules]] 的区别：普通 rules 只看当前消息命中正则即回复；
+# context_rules 在 pattern 命中后还会再做一步「语境判定」，只有
+# 语境合适时才触发，避免常见字/词在无关场合乱触发。
+#
+# 执行时机：在普通 rules 全部未命中之后、时区回复之前尝试。
+# 仅在群聊中生效（私聊不调用），且 resolve_reply 会把最近消息列表
+# 透传进来做判定。
+#
+# ── 必填字段 ──
+#   name           - 规则唯一名称
+#   type           - 'regex_context' 或 'llm_context'
+#   patterns       - 快速首筛正则列表（和 [[rules]] 的 patterns 一样）
+#   reply_template - 回复模板（或 reply_templates）
+#   rate_limit_key - 限流桶
+#   priority       - 优先级；同一消息命中多条 context_rules 时取最高者
+#
+# ── regex_context 专属 ──
+#   context_conditions - 上下文条件正则列表；需要在最近 N 条消息中
+#                        搜到任意一条匹配才放行。**留空会被视为不放行**
+#                        （该规则永远不会触发，模块加载时会打 warning）
+#   context_window     - 查看最近多少条消息（默认 5）
+#
+# ── llm_context 专属 ──
+#   llm_judge_prompt - 判定 prompt；会自动附带最近群聊记录与当前消息，
+#                      要求模型只输出 {"trigger": true/false} JSON
+#   llm_timeout      - LLM 调用超时秒数（默认 2.0；超时视为不触发）
+#   llm_cache_ttl    - 按 (rule_name, group_id, text) 缓存判定结果的
+#                      秒数（默认 60）。可降低常见触发词的 LLM 调用频次
+#
+# 模板变量和捕获组引用与 [[rules]] 完全一致。
+
+# ——— 示例：regex_context（历史里出现「请假」类词时，本句的"竟然不许"才触发）———
+# [[context_rules]]
+# name               = 'leave_denied'
+# type               = 'regex_context'
+# patterns           = ['竟然|不许|不行|拒了|没批|不准|不给过']
+# context_conditions = ['请假|休息|调休|申请|审批|报备|请假条|病假|年假']
+# context_window     = 5
+# reply_template     = '竟然不许！？'
+# rate_limit_key     = 'group_meme'
+# priority           = 99
+
+# ——— 示例：llm_context（仅当语境真的是"他过江我也过江"时才触发）———
+# [[context_rules]]
+# name             = 'me_too_follow'
+# type             = 'llm_context'
+# patterns         = ['好啊']
+# context_window   = 6
+# llm_judge_prompt = '''群友发了"好啊"或类似赞同词。请根据最近记录判断：当前语境是否在说"他/某人做某事，我也要做同样的事"（类似"他过江我也过江"）？只输出 JSON：{"trigger": true/false}'''
+# llm_timeout      = 2.0
+# llm_cache_ttl    = 60
+# reply_template   = '好啊，他过江我也过江'
+# rate_limit_key   = 'group_meme'
+# priority         = 100
+
+# ══════════════════════════════════════════════════════════
 # [[chain_games]] — 正则触发接龙游戏
 # ══════════════════════════════════════════════════════════
 #
@@ -178,3 +238,211 @@ verb = [
 # chain           = ['准备', '就绪', '$1[0]', '冲！']
 # timeout_seconds = 60
 # rate_limit_key  = 'group_meme'
+
+# ══════════════════════════════════════════════════════════
+# 新三国梗 — 默认入库的通用梗
+# ══════════════════════════════════════════════════════════
+#
+# 下列 rules / context_rules 是《新三国》电视剧的知名台词与经典梗，
+# 知名度高、老少皆宜，作为默认回复入库。共用 new_three_kingdoms 限流桶。
+# 如不需要可整段删除或按需关闭（/disable 规则名）。
+
+# ─── 1. rules（直接正则触发） ───────────────────────────────
+
+[[rules]]
+name           = 'ntk_nizoule'
+patterns       = ['你走了']
+reply_template = '我们吃什么'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 100
+
+[[rules]]
+name           = 'ntk_chishenme'
+patterns       = ['吃什么']
+reply_template = '是啊，吃什么'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 99
+
+[[rules]]
+name           = 'ntk_yongheng'
+patterns       = ['永恒的问题']
+reply_template = '是啊'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 98
+
+[[rules]]
+name           = 'ntk_sanjun'
+patterns       = ['三军听令']
+reply_template = '战至最后一刻'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 97
+
+[[rules]]
+name           = 'ntk_zuihouyike'
+patterns       = ['(.{1,12}?)最后一刻']
+reply_template = '战至最后一刻，自刎归天！'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 96
+
+[[rules]]
+name           = 'ntk_longerduo'
+patterns       = ['扎聋我自己的耳朵', '议论孔明先生']
+reply_template = '我再听到你们议论孔明先生，我就扎聋我自己的耳朵'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 95
+
+[[rules]]
+name           = 'ntk_sibukong'
+patterns       = ['死不可怕']
+reply_template = '死是凉爽的夏夜'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 94
+
+[[rules]]
+name           = 'ntk_xiaye'
+patterns       = ['凉爽的夏夜']
+reply_template = '可供人无忧的安眠'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 93
+
+[[rules]]
+name           = 'ntk_bushi'
+patterns       = ['不是(?P<name>.+?)害了你']
+reply_template = '不是{name}害了你，是这乱世害了你啊'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 92
+
+[[rules]]
+name           = 'ntk_long'
+patterns       = ['([龙聋])']
+reply_template = '$1，可是帝王之征啊'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 91
+
+[[rules]]
+name           = 'ntk_huozhe'
+patterns       = ['还活着吗']
+reply_template = '生死不明'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 90
+
+[[rules]]
+name           = 'ntk_shengsibuiming'
+patterns       = ['生死不明']
+reply_template = '那就是亖了'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 89
+
+[[rules]]
+name           = 'ntk_ququer'
+patterns       = ['蛐蛐儿', '有情有义', '我在想']
+reply_template = '我在想我的那些个蛐蛐儿，它们个个有情有义'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 88
+
+[[rules]]
+name           = 'ntk_gongxi'
+patterns       = ['恭喜(?P<person>.+?)可以(称帝|撑地)了']
+reply_template = '恭喜{person}可以$2了'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 87
+
+[[rules]]
+name           = 'ntk_dafu'
+patterns       = ['当浮一大白']
+reply_template = '当浮一大白'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 86
+
+[[rules]]
+name           = 'ntk_dehaoa'
+patterns       = ['得好啊']
+reply_template = '当浮一大白'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 85
+
+[[rules]]
+name           = 'ntk_bukeqi'
+patterns       = ['我是不会客气的']
+reply_template = '来人'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 84
+
+[[rules]]
+name           = 'ntk_lairen'
+patterns       = ['来人']
+reply_template = '换大盏'
+rate_limit_key = 'new_three_kingdoms'
+priority       = 83
+
+# ─── 2. context_rules（需要历史上下文或 LLM 判定） ─────────
+
+[[context_rules]]
+name             = 'ntk_haoa'
+type             = 'llm_context'
+patterns         = ['好啊']
+context_window   = 6
+llm_judge_prompt = '''群友发了"好啊"或类似赞同词。请根据最近记录判断：当前语境是否在说"他/某人做某事，我也要做同样的事"（类似"他过江我也过江"）？只输出 JSON：{"trigger": true/false}'''
+reply_template   = '好啊，他过江我也过江'
+rate_limit_key   = 'new_three_kingdoms'
+priority         = 100
+
+[[context_rules]]
+name               = 'ntk_jingranbuxu'
+type               = 'regex_context'
+patterns           = ['竟然|不许|不行|拒了|没批|不准|不给过']
+context_conditions = ['请假|休息|调休|申请|审批|报备|出去|离开|请假条|病假|年假']
+context_window     = 5
+reply_template     = '竟然不许！？'
+rate_limit_key     = 'new_three_kingdoms'
+priority           = 99
+
+[[context_rules]]
+name               = 'ntk_shengbi'
+type               = 'regex_context'
+patterns           = ['胜兵必骄|骄兵必败|败兵必哀|哀兵必胜']
+context_conditions = ['胜|败|骄|哀|兵|心态|膨胀|谦虚']
+context_window     = 5
+reply_template     = '胜兵必骄，骄兵必败，败兵必哀，哀兵必胜，胜兵必骄……'
+rate_limit_key     = 'new_three_kingdoms'
+priority           = 98
+
+[[context_rules]]
+name               = 'ntk_tianyi'
+type               = 'regex_context'
+patterns           = ['天意|命中注定|没办法|上天的安排']
+context_conditions = ['天意|命运|注定|老天|没辙|没办法']
+context_window     = 8
+reply_template     = '天意，天意啊'
+rate_limit_key     = 'new_three_kingdoms'
+priority           = 97
+
+[[context_rules]]
+name             = 'ntk_diyixiongguan'
+type             = 'llm_context'
+patterns         = ['(.{1,10}?)真乃第一(.{1,10}?)', '(.{1,10}?)实乃第一(.{1,10}?)']
+context_window   = 5
+llm_judge_prompt = '''群友可能在用夸张语气夸赞某事物是"第一xx"。请判断：当前消息是否在玩"徐州城不愧为中原第一雄关"的梗，或是否适合用该台词接话？只输出 JSON：{"trigger": true/false}'''
+reply_template   = '徐州城不愧为中原第一雄关'
+rate_limit_key   = 'new_three_kingdoms'
+priority         = 96
+
+[[context_rules]]
+name             = 'ntk_liangjian'
+type             = 'llm_context'
+patterns         = ['我有两(.{1,8}?)']
+context_window   = 5
+llm_judge_prompt = '''群友在说"我有两个xx"或持有两件某物的语境。请判断：当前消息是否适合接"一把叫仁之剑，一把叫义之剑"这个梗？只输出 JSON：{"trigger": true/false}'''
+reply_template   = '一把叫仁之剑，一把叫义之剑'
+rate_limit_key   = 'new_three_kingdoms'
+priority         = 95
+
+[[context_rules]]
+name               = 'ntk_caocaomengde'
+type               = 'regex_context'
+patterns           = ['一息尚存|还没死|活着|战无不胜']
+context_conditions = ['曹操|曹孟德|逆天|顽强|硬|死不了']
+context_window     = 6
+reply_template     = '只要曹孟德一息尚存，他就战无不胜！'
+rate_limit_key     = 'new_three_kingdoms'
+priority           = 94
