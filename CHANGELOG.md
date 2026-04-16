@@ -6,6 +6,7 @@
 
 ### 新增
 
+- `rate_limit_rules` 支持 `scope = "group" | "global"` 字段：`scope="group"`（默认）按群独立分桶，群 A 的触发不消耗群 B 的预算；`scope="global"` 所有群 + 私聊合并到同一个桶，用于保护跨会话共享资源（LLM、搜索、爬虫）。built-in 规则中 `llm_chat`/`web_search`/`tieba_random_post`/`tavily_search` 标为 `global`，其余 6 条保持 `group`；`chat_rules.toml.example` 的 `[rate_limit_rules]` 文档段补充 `scope` 字段说明
 - Web 管理后台新增"词云"标签页：后端 `GET /api/wordcloud/groups` 扫描 `data/wordcloud_msgs/` 列出有消息积累的群（显示天数和磁盘占用），`GET /api/wordcloud/render?group=...&window=today|week|month|year` 复用 `build_word_frequencies` + `render_wordcloud_bytes`，两个 CPU 密集步骤各自走 `asyncio.to_thread` 不阻塞事件循环，成功时返回 base64 PNG + Top50 词频 + 消息/词数统计；低于 50 词阈值返回 422，字体文件缺失返回 500 携带明确提示；前端提供群选择 + 时间窗 4 键切换 + "生成"按钮，左侧显示词云图（自带下载链接），右侧同步展示 Top 词频排行
 - Web 管理后台新增"贴吧"标签页：只读视图 `tieba_service.store`，左侧列出所有已缓存贴吧与其同步状态（正常/同步中/错误/需登录），右侧分页展示帖子列表（标题 + 作者 + 封面 + 正文预览 + 图数 + 已发送过标记），支持按标题/正文/作者关键词过滤；点击任意帖子弹出 detail overlay 显示完整正文、所有配图、贴吧原链接；后端 `tieba.py` 路由对 `forum` 和 `tid` 做正则白名单校验（`[^\s/\\:]{1,32}` / `\d{1,20}`）防止路径穿越
 - Web 管理后台新增"限流"标签页：`SlidingWindowRateLimiter` / `KeyedRateLimiter` 新增 `snapshot()` 方法在快照前就地 prune 掉过期时间戳并释放空 deque，`GET /api/rate-limit` 把每条限流规则的全局 used/limit、单用户 used/limit、窗口秒数、Top20 活跃用户按 user_id 一次返回；前端每条规则一张卡片，显示全局进度条 + 用户排行 mini bar，支持 5s 自动刷新（手动勾选），进程重启时所有窗口归零（符合内存实现的真实语义）
@@ -20,6 +21,8 @@
 
 ### 变更
 
+- `KeyedRateLimiter` 内部存储从 `{rule_name: Limiter}` 升级为 `{(rule_name, bucket_key): Limiter}`，`allow()` 增加 `group_id` 关键字参数；`scope="group"` 的规则按群创建独立桶，`scope="global"` 的规则和无 `group_id` 的私聊调用都归到空桶；`snapshot()` 响应结构改为按规则列举多个桶，命中时为空的桶会在 snapshot 时 GC 掉；`/api/rate-limit` 响应与"限流"前端页随之更新，显示规则 scope 标签 + 每桶独立进度条
+- `group_messages.py` 文本/语境规则的 `rate_limiter.allow()` 调用补传 `group_id=group_id`，其余 5 处调用（`llm_chat`/`web_search`/`tieba_random_post` 都是 global scope，或调用点无 group 上下文）保持原样
 - `resolve_reply` / `build_reply` 改为 `async`，新增 `recent_context` 参数透传最近消息列表给 `context_rules`；调用方（NoneBot2 群消息适配层）同步更新
 
 ### 修复

@@ -12,13 +12,16 @@ WAKE_TARGET = time(7, 30)
 SLEEP_TARGET = time(23, 30)
 
 RATE_LIMIT_WINDOW_SECONDS = 60
+# scope="global" 的规则把所有群 + 私聊合并到同一个桶里按用户限流，用来保护
+# 外部 API（LLM、搜索、爬虫）和其他跨会话共享资源；不写 scope 时默认为 "group"，
+# 表示按群独立分桶，群 A 的触发不占用群 B 的预算。
 RATE_LIMIT_RULES: dict[str, dict] = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
-    "llm_chat": {"global_limit": 6, "user_limit": 3},
-    "tieba_random_post": {"global_limit": 6, "user_limit": 3},
-    "web_search": {"global_limit": 6, "user_limit": 3},
-    "tavily_search": {"global_limit": 6, "user_limit": 3},
+    "llm_chat": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "tieba_random_post": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "web_search": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "tavily_search": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     "repeat_follow_read": {"global_limit": 8, "user_limit": 3},
     "repeat_trim_last": {"global_limit": 8, "user_limit": 3},
     "repeat_same_user_warning": {"global_limit": 4, "user_limit": 2},

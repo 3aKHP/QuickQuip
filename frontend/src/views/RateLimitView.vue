@@ -1,6 +1,6 @@
 <template>
   <div class="rl-view">
-    <UiPageHeader title="限流实时状态" subtitle="各规则在当前滑动窗口内的命中情况（内存状态，仅反映当前进程）">
+    <UiPageHeader title="限流实时状态" subtitle="内存状态，重启归零。scope=全局 的规则保护外部 API/共享资源；scope=按群 的规则每个群独立分桶">
       <template #actions>
         <label class="auto-toggle">
           <input type="checkbox" v-model="autoRefresh" />
@@ -24,44 +24,55 @@
       >
         <div class="rule-head">
           <span class="rule-name">{{ r.name }}</span>
-          <span class="rule-window">窗口 {{ r.window_seconds }}s</span>
-        </div>
-
-        <div class="rule-stat">
-          <div class="stat-label">
-            <span>全局已用</span>
-            <span class="stat-num">
-              <span :class="{ saturated: r.global_used >= r.global_limit }">{{ r.global_used }}</span>
-              / {{ r.global_limit }}
-            </span>
-          </div>
-          <div class="bar">
-            <div
-              class="bar-fill"
-              :class="{ saturated: r.global_used >= r.global_limit }"
-              :style="{ width: progressPercent(r.global_used, r.global_limit) + '%' }"
-            />
+          <div class="rule-tags">
+            <UiTag size="sm" :variant="r.scope === 'global' ? 'warn' : 'info'">
+              {{ r.scope === 'global' ? '全局' : '按群' }}
+            </UiTag>
+            <span class="rule-window">窗口 {{ r.window_seconds }}s · 上限 {{ r.global_limit }}/{{ r.user_limit }}</span>
           </div>
         </div>
 
-        <div class="rule-meta">
-          <span>单用户上限 {{ r.user_limit }}</span>
-          <span>·</span>
-          <span>活跃用户 {{ r.active_users }}</span>
+        <div v-if="!r.buckets.length" class="empty-bucket">
+          <span class="muted">当前窗口无命中</span>
         </div>
 
-        <div v-if="r.top_users.length" class="top-users">
-          <div class="top-title">当前窗口消耗排行</div>
-          <div v-for="u in r.top_users" :key="u.user_id" class="top-row">
-            <span class="mono">uid {{ u.user_id }}</span>
-            <div class="mini-bar">
+        <div v-else class="buckets">
+          <div
+            v-for="b in r.buckets"
+            :key="b.group_id || '__global__'"
+            class="bucket"
+          >
+            <div class="bucket-head">
+              <span class="bucket-label">{{ bucketLabel(r, b) }}</span>
+              <span class="stat-num">
+                <span :class="{ saturated: b.global_used >= r.global_limit }">{{ b.global_used }}</span>
+                / {{ r.global_limit }}
+              </span>
+            </div>
+            <div class="bar">
               <div
-                class="mini-fill"
-                :class="{ saturated: u.used >= r.user_limit }"
-                :style="{ width: progressPercent(u.used, r.user_limit) + '%' }"
+                class="bar-fill"
+                :class="{ saturated: b.global_used >= r.global_limit }"
+                :style="{ width: progressPercent(b.global_used, r.global_limit) + '%' }"
               />
             </div>
-            <span class="mono used">{{ u.used }}/{{ r.user_limit }}</span>
+
+            <div v-if="b.top_users.length" class="top-users">
+              <div class="top-row-header">
+                <span>活跃 {{ b.active_users }} 人</span>
+              </div>
+              <div v-for="u in b.top_users" :key="u.user_id" class="top-row">
+                <span class="mono">uid {{ u.user_id }}</span>
+                <div class="mini-bar">
+                  <div
+                    class="mini-fill"
+                    :class="{ saturated: u.used >= r.user_limit }"
+                    :style="{ width: progressPercent(u.used, r.user_limit) + '%' }"
+                  />
+                </div>
+                <span class="mono used">{{ u.used }}/{{ r.user_limit }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </UiCard>
@@ -74,6 +85,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
+import UiTag from '../components/ui/UiTag.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { fetchRateLimit } from '../api/rateLimit.js'
@@ -87,6 +99,12 @@ let timer = null
 function progressPercent(used, limit) {
   if (!limit) return 0
   return Math.min(100, Math.round((used / limit) * 100))
+}
+
+function bucketLabel(rule, bucket) {
+  if (rule.scope === 'global') return '全局桶'
+  if (!bucket.group_id) return '私聊/无群上下文'
+  return `群 ${bucket.group_id}`
 }
 
 async function load() {
@@ -133,13 +151,9 @@ load()
   min-height: 0;
 }
 
-.error {
-  color: var(--qq-danger);
-}
-
-.mono {
-  font-family: var(--qq-font-mono);
-}
+.error { color: var(--qq-danger); }
+.muted { color: var(--qq-text-muted); font-size: 12px; }
+.mono { font-family: var(--qq-font-mono); }
 
 .auto-toggle {
   display: inline-flex;
@@ -150,13 +164,11 @@ load()
   cursor: pointer;
 }
 
-.auto-toggle input {
-  cursor: pointer;
-}
+.auto-toggle input { cursor: pointer; }
 
 .rule-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: var(--qq-gap-md);
 }
 
@@ -166,6 +178,7 @@ load()
   justify-content: space-between;
   gap: var(--qq-gap-sm);
   margin-bottom: var(--qq-gap-sm);
+  flex-wrap: wrap;
 }
 
 .rule-name {
@@ -175,21 +188,45 @@ load()
   font-family: var(--qq-font-mono);
 }
 
+.rule-tags {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-xs);
+}
+
 .rule-window {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--qq-text-muted);
 }
 
-.rule-stat {
-  margin-bottom: var(--qq-gap-xs);
+.empty-bucket {
+  padding: var(--qq-gap-sm) 0;
 }
 
-.stat-label {
+.buckets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-sm);
+}
+
+.bucket {
+  padding: var(--qq-gap-sm);
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-surface-strong);
+}
+
+.bucket-head {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 12px;
   color: var(--qq-text-muted);
   margin-bottom: 4px;
+}
+
+.bucket-label {
+  color: var(--qq-text);
+  font-weight: 500;
 }
 
 .stat-num {
@@ -204,7 +241,7 @@ load()
 
 .bar {
   height: 6px;
-  background: var(--qq-surface-strong);
+  background: var(--qq-surface);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -215,28 +252,18 @@ load()
   transition: width 0.3s ease;
 }
 
-.bar-fill.saturated {
-  background: var(--qq-danger);
-}
-
-.rule-meta {
-  font-size: 12px;
-  color: var(--qq-text-muted);
-  display: flex;
-  gap: 6px;
-  margin: var(--qq-gap-xs) 0;
-}
+.bar-fill.saturated { background: var(--qq-danger); }
 
 .top-users {
-  margin-top: var(--qq-gap-sm);
-  padding-top: var(--qq-gap-sm);
+  margin-top: var(--qq-gap-xs);
+  padding-top: var(--qq-gap-xs);
   border-top: 1px solid var(--qq-border);
 }
 
-.top-title {
+.top-row-header {
   font-size: 11px;
   color: var(--qq-text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 
 .top-row {
@@ -246,12 +273,12 @@ load()
   gap: var(--qq-gap-sm);
   font-size: 12px;
   color: var(--qq-text-muted);
-  margin-bottom: 3px;
+  margin-bottom: 2px;
 }
 
 .mini-bar {
   height: 4px;
-  background: var(--qq-surface-strong);
+  background: var(--qq-surface);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -262,11 +289,7 @@ load()
   transition: width 0.3s ease;
 }
 
-.mini-fill.saturated {
-  background: var(--qq-danger);
-}
+.mini-fill.saturated { background: var(--qq-danger); }
 
-.used {
-  font-size: 11px;
-}
+.used { font-size: 11px; }
 </style>

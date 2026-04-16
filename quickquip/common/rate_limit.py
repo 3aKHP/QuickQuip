@@ -53,22 +53,96 @@ class SlidingWindowRateLimiter:
 
 
 class KeyedRateLimiter:
+    """
+    Per-rule rate limiter with optional per-group sub-buckets.
+
+    Each rule config can set scope = "global" or "group" (default "group").
+    - scope = "global": one bucket per rule, shared across every group and
+      private chat. Use for rules that protect external APIs or shared pools
+      (LLM calls, web search, crawler) where the cost is per-caller regardless
+      of which chat surface triggered it.
+    - scope = "group": one bucket per (rule, group_id), so group A's usage
+      doesn't eat into group B's budget. Falls back to the empty bucket key
+      when no group_id is supplied (private chat / command handlers with no
+      chat context).
+    """
+
+    _PRIVATE_BUCKET = ""  # bucket key used when group_id is not applicable
+
     def __init__(self, rule_limits: dict[str, dict], window_seconds: int = 60):
         self.window_seconds = window_seconds
-        self.limiters = {
-            key: SlidingWindowRateLimiter(
-                global_limit=value["global_limit"],
-                user_limit=value["user_limit"],
-                window_seconds=window_seconds,
-            )
-            for key, value in rule_limits.items()
-        }
+        self.rule_configs: dict[str, dict] = {}
+        for name, cfg in rule_limits.items():
+            scope = str(cfg.get("scope", "group")).lower()
+            if scope not in ("group", "global"):
+                scope = "group"
+            self.rule_configs[name] = {
+                "global_limit": int(cfg["global_limit"]),
+                "user_limit": int(cfg["user_limit"]),
+                "scope": scope,
+            }
+        # Key: (rule_name, bucket_key). bucket_key is "" for global or
+        # private-chat fallback, otherwise str(group_id).
+        self._limiters: dict[tuple[str, str], SlidingWindowRateLimiter] = {}
 
-    def allow(self, key: str, user_id: int | str, now_ts: float | None = None) -> bool:
-        limiter = self.limiters.get(key)
+    def _bucket_key(self, rule_name: str, group_id: int | str | None) -> str:
+        cfg = self.rule_configs.get(rule_name)
+        if cfg is None or cfg["scope"] == "global" or group_id is None:
+            return self._PRIVATE_BUCKET
+        return str(group_id)
+
+    def _get_or_create(self, rule_name: str, bucket_key: str) -> SlidingWindowRateLimiter:
+        key = (rule_name, bucket_key)
+        limiter = self._limiters.get(key)
         if limiter is None:
+            cfg = self.rule_configs[rule_name]
+            limiter = SlidingWindowRateLimiter(
+                global_limit=cfg["global_limit"],
+                user_limit=cfg["user_limit"],
+                window_seconds=self.window_seconds,
+            )
+            self._limiters[key] = limiter
+        return limiter
+
+    def allow(
+        self,
+        key: str,
+        user_id: int | str,
+        now_ts: float | None = None,
+        group_id: int | str | None = None,
+    ) -> bool:
+        if key not in self.rule_configs:
             return True
+        bucket_key = self._bucket_key(key, group_id)
+        limiter = self._get_or_create(key, bucket_key)
         return limiter.allow(user_id=user_id, now_ts=now_ts)
 
     def snapshot(self, now_ts: float | None = None) -> dict[str, dict]:
-        return {key: limiter.snapshot(now_ts) for key, limiter in self.limiters.items()}
+        result: dict[str, dict] = {}
+        for name, cfg in self.rule_configs.items():
+            result[name] = {
+                "scope": cfg["scope"],
+                "global_limit": cfg["global_limit"],
+                "user_limit": cfg["user_limit"],
+                "window_seconds": self.window_seconds,
+                "buckets": [],
+            }
+
+        to_drop: list[tuple[str, str]] = []
+        for (rule_name, bucket_key), limiter in self._limiters.items():
+            snap = limiter.snapshot(now_ts)
+            if snap["global_used"] == 0 and not snap["users"]:
+                to_drop.append((rule_name, bucket_key))
+                continue
+            if rule_name in result:
+                result[rule_name]["buckets"].append({
+                    "group_id": bucket_key,
+                    "global_used": snap["global_used"],
+                    "users": snap["users"],
+                })
+        for key in to_drop:
+            del self._limiters[key]
+
+        for entry in result.values():
+            entry["buckets"].sort(key=lambda b: b["group_id"])
+        return result

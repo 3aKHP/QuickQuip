@@ -7,13 +7,20 @@
 # [rate_limit_rules] — 限流桶定义
 # ══════════════════════════════════════════════════════════
 #
-# 格式：桶名 = {global_limit = N, user_limit = M}
-#   global_limit  - 60 秒窗口内全群最多触发次数
-#   user_limit    - 60 秒窗口内同一用户最多触发次数
+# 格式：桶名 = {global_limit = N, user_limit = M, scope = "group" | "global"}
+#   global_limit  - 60 秒窗口内桶内最多触发次数
+#   user_limit    - 60 秒窗口内桶内同一用户最多触发次数
+#   scope         - （可选）分桶作用域，不写默认 "group"：
+#                   "group"  = 按群独立分桶，群 A 的触发不消耗群 B 的预算，
+#                              私聊场景退化到合并桶
+#                   "global" = 所有群 + 私聊合并到同一个桶，用于保护跨会话
+#                              共享资源（LLM、搜索、爬虫）
 #
 # 时区回复、LLM、贴吧、复读、接龙等系统规则的限流桶
 # 已在 quickquip/chat/config.py 中预定义，此处只需定义文字规则专用桶。
 # 注意：多条规则可以共用同一个桶，命中任意一条都消耗同一个配额。
+# 梗文类桶保持默认 scope（group）即可；仅当桶里的规则会打外部 API 或共享池时，
+# 才考虑显式写 scope = "global"。
 
 [rate_limit_rules]
 group_meme         = {global_limit = 6, user_limit = 3}

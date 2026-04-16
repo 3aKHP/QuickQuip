@@ -99,7 +99,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         if not result:
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             return
-        if not rate_limiter.allow(result["rate_limit_key"], user_id):
+        if not rate_limiter.allow(result["rate_limit_key"], user_id, group_id=group_id):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             return
 
