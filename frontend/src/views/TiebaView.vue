@@ -1,0 +1,574 @@
+<template>
+  <div class="tieba-view">
+    <UiPageHeader title="贴吧帖子池" subtitle="只读视图，依赖 tieba 爬虫后台同步的数据">
+      <template #actions>
+        <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
+      </template>
+    </UiPageHeader>
+
+    <p v-if="loadError" class="error">{{ loadError }}</p>
+
+    <div class="split">
+      <UiCard padding="none" shadow="sm" class="forum-card">
+        <UiLoading v-if="loading && !forums.length" />
+        <UiEmpty
+          v-else-if="!forums.length"
+          icon="Inbox"
+          title="尚无任何贴吧缓存"
+        />
+        <ul v-else class="forum-list">
+          <li
+            v-for="f in forums"
+            :key="f.forum_keyword"
+            class="forum-item"
+            :class="{ active: f.forum_keyword === selectedForum }"
+            @click="selectForum(f.forum_keyword)"
+          >
+            <div class="forum-head">
+              <span class="forum-name">{{ f.forum_keyword }}吧</span>
+              <UiTag size="sm" :variant="syncVariant(f)">{{ syncLabel(f) }}</UiTag>
+            </div>
+            <div class="forum-meta">
+              <span>{{ f.count }} 条</span>
+              <span v-if="f.last_sync_completed_at">
+                · {{ formatTime(f.last_sync_completed_at) }}
+              </span>
+            </div>
+            <div v-if="f.last_error" class="forum-error" :title="f.last_error">
+              {{ f.last_error }}
+            </div>
+          </li>
+        </ul>
+      </UiCard>
+
+      <div class="main-col">
+        <UiCard v-if="!selectedForum" padding="lg" shadow="sm" class="hint-card">
+          <UiEmpty icon="BookOpen" title="从左侧选择一个贴吧查看帖子" />
+        </UiCard>
+
+        <template v-else>
+          <UiCard padding="md" shadow="sm" class="filter-card">
+            <div class="filter-row">
+              <span class="selected-forum">{{ selectedForum }}吧 · {{ total }} 条</span>
+              <input
+                v-model="keyword"
+                placeholder="标题/正文/作者关键词"
+                @keyup.enter="reload"
+              />
+              <UiButton icon="Search" :loading="loadingThreads" @click="reload">查询</UiButton>
+              <UiButton v-if="keyword" variant="ghost" icon="X" @click="clearKeyword">清空</UiButton>
+            </div>
+          </UiCard>
+
+          <UiCard padding="none" shadow="sm" class="threads-card">
+            <UiLoading v-if="loadingThreads && !threads.length" />
+            <UiEmpty
+              v-else-if="!threads.length"
+              icon="Inbox"
+              title="没有匹配的帖子"
+            />
+            <div v-else class="threads">
+              <div
+                v-for="t in threads"
+                :key="t.tid"
+                class="thread"
+                :class="{ selected: t.tid === detail?.tid }"
+                @click="openDetail(t.tid)"
+              >
+                <div class="thread-row">
+                  <img
+                    v-if="t.cover_image_url"
+                    :src="t.cover_image_url"
+                    class="thread-cover"
+                    loading="lazy"
+                    referrerpolicy="no-referrer"
+                  />
+                  <div class="thread-body">
+                    <div class="thread-title">
+                      <span class="title-text">{{ t.title }}</span>
+                      <UiTag v-if="t.was_sent" size="sm" variant="success">已发送过</UiTag>
+                      <UiTag v-if="t.is_deleted" size="sm" variant="danger">已删除</UiTag>
+                      <UiTag v-if="t.image_count" size="sm">{{ t.image_count }} 图</UiTag>
+                    </div>
+                    <div class="thread-meta">
+                      <span class="mono">#{{ t.tid }}</span>
+                      <span v-if="t.author_name">· {{ t.author_name }}</span>
+                      <span>· {{ formatTime(t.last_seen_at) }}</span>
+                    </div>
+                    <div v-if="t.preview" class="thread-preview">{{ t.preview }}</div>
+                  </div>
+                </div>
+              </div>
+              <div class="load-more-wrap">
+                <UiButton
+                  v-if="hasMore"
+                  :loading="loadingMore"
+                  icon="ArrowDown"
+                  @click="loadMore"
+                >加载更多</UiButton>
+                <span v-else-if="threads.length" class="muted">已到末尾</span>
+              </div>
+            </div>
+          </UiCard>
+        </template>
+      </div>
+    </div>
+
+    <div v-if="detail" class="detail-overlay" @click.self="detail = null">
+      <UiCard padding="lg" shadow="lg" class="detail-card">
+        <div class="detail-head">
+          <span class="mono">#{{ detail.tid }} · {{ detail.forum_keyword }}吧</span>
+          <button class="detail-close" @click="detail = null">
+            <UiIcon name="X" :size="18" />
+          </button>
+        </div>
+        <h3 class="detail-title">{{ detail.title }}</h3>
+        <div class="detail-meta">
+          <span v-if="detail.author_name">{{ detail.author_name }}</span>
+          <span>· {{ formatTime(detail.last_seen_at) }}</span>
+          <a :href="detail.thread_url" target="_blank" rel="noreferrer" class="detail-link">
+            在贴吧打开
+          </a>
+        </div>
+        <div class="detail-content">{{ detail.main_post_text || '（正文为空）' }}</div>
+        <div v-if="detail.image_urls && detail.image_urls.length" class="detail-images">
+          <img
+            v-for="(src, i) in detail.image_urls"
+            :key="i"
+            :src="src"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+          />
+        </div>
+      </UiCard>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiCard from '../components/ui/UiCard.vue'
+import UiTag from '../components/ui/UiTag.vue'
+import UiIcon from '../components/ui/UiIcon.vue'
+import UiLoading from '../components/ui/UiLoading.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
+import {
+  listTiebaForums,
+  fetchTiebaThreads,
+  fetchTiebaThread,
+} from '../api/tieba.js'
+import { toast } from '../toast.js'
+
+const PAGE_SIZE = 30
+
+const forums = ref([])
+const loading = ref(false)
+const loadError = ref(null)
+
+const selectedForum = ref('')
+const keyword = ref('')
+const threads = ref([])
+const total = ref(0)
+const hasMore = ref(false)
+const loadingThreads = ref(false)
+const loadingMore = ref(false)
+
+const detail = ref(null)
+
+function syncLabel(f) {
+  if (f.login_required) return '需登录'
+  return { ok: '正常', running: '同步中', error: '错误', idle: '未同步' }[f.last_sync_status] || f.last_sync_status
+}
+
+function syncVariant(f) {
+  if (f.login_required) return 'warn'
+  return { ok: 'success', running: 'info', error: 'danger', idle: 'info' }[f.last_sync_status] || 'info'
+}
+
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts * 1000)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+async function loadAll() {
+  loading.value = true
+  loadError.value = null
+  try {
+    const data = await listTiebaForums()
+    forums.value = data.forums || []
+    if (selectedForum.value) await reload()
+  } catch (e) {
+    loadError.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+async function selectForum(forum) {
+  if (forum === selectedForum.value) return
+  selectedForum.value = forum
+  keyword.value = ''
+  await reload()
+}
+
+async function reload() {
+  if (!selectedForum.value) return
+  loadingThreads.value = true
+  threads.value = []
+  total.value = 0
+  hasMore.value = false
+  try {
+    const data = await fetchTiebaThreads(selectedForum.value, {
+      keyword: keyword.value || undefined,
+      limit: PAGE_SIZE,
+      offset: 0,
+    })
+    threads.value = data.threads || []
+    total.value = data.total || 0
+    hasMore.value = !!data.has_more
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    loadingThreads.value = false
+  }
+}
+
+async function loadMore() {
+  if (!hasMore.value) return
+  loadingMore.value = true
+  try {
+    const data = await fetchTiebaThreads(selectedForum.value, {
+      keyword: keyword.value || undefined,
+      limit: PAGE_SIZE,
+      offset: threads.value.length,
+    })
+    threads.value.push(...(data.threads || []))
+    hasMore.value = !!data.has_more
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+function clearKeyword() {
+  keyword.value = ''
+  reload()
+}
+
+async function openDetail(tid) {
+  try {
+    detail.value = await fetchTiebaThread(selectedForum.value, tid)
+  } catch (e) {
+    toast(e.message, 'error')
+  }
+}
+
+loadAll()
+</script>
+
+<style scoped>
+.tieba-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.error { color: var(--qq-danger); }
+.muted { color: var(--qq-text-muted); font-size: 13px; }
+.mono { font-family: var(--qq-font-mono); }
+
+.split {
+  display: flex;
+  gap: var(--qq-gap-md);
+  flex: 1;
+  min-height: 0;
+}
+
+.forum-card {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  max-height: calc(100vh - 180px);
+}
+
+.forum-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.forum-item {
+  padding: var(--qq-gap-sm) var(--qq-gap-md);
+  border-bottom: 1px solid var(--qq-border);
+  cursor: pointer;
+  transition: background var(--qq-transition-fast);
+}
+
+.forum-item:last-child { border-bottom: none; }
+.forum-item:hover { background: var(--qq-surface-elevated); }
+.forum-item.active {
+  background: var(--qq-surface-elevated);
+  box-shadow: inset 3px 0 0 var(--qq-accent);
+}
+
+.forum-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-xs);
+  margin-bottom: 3px;
+}
+
+.forum-name {
+  font-weight: 500;
+  color: var(--qq-text);
+  font-size: 14px;
+}
+
+.forum-meta {
+  font-size: 12px;
+  color: var(--qq-text-muted);
+  display: flex;
+  gap: 4px;
+}
+
+.forum-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--qq-danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: var(--qq-gap-sm);
+}
+
+.hint-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.filter-card { flex-shrink: 0; }
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-sm);
+  flex-wrap: wrap;
+}
+
+.selected-forum {
+  font-size: 13px;
+  color: var(--qq-text-muted);
+}
+
+.filter-row input {
+  background: var(--qq-surface-strong);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  color: var(--qq-text);
+  padding: 5px 10px;
+  font-size: 14px;
+  outline: none;
+  flex: 1;
+  min-width: 200px;
+}
+
+.filter-row input:focus {
+  border-color: var(--qq-accent);
+  box-shadow: 0 0 0 3px var(--qq-accent-soft);
+}
+
+.threads-card {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+}
+
+.threads {
+  overflow-y: auto;
+  padding: var(--qq-gap-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread {
+  padding: 8px 10px;
+  border-radius: var(--qq-radius-sm);
+  cursor: pointer;
+  transition: background var(--qq-transition-fast);
+  border: 1px solid transparent;
+}
+
+.thread:hover {
+  background: var(--qq-surface-elevated);
+}
+
+.thread.selected {
+  background: var(--qq-surface-elevated);
+  border-color: var(--qq-accent);
+}
+
+.thread-row {
+  display: flex;
+  gap: var(--qq-gap-sm);
+}
+
+.thread-cover {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: var(--qq-radius-sm);
+  flex-shrink: 0;
+  background: var(--qq-surface-strong);
+}
+
+.thread-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-title {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-xs);
+  flex-wrap: wrap;
+  margin-bottom: 3px;
+}
+
+.title-text {
+  font-size: 14px;
+  color: var(--qq-text);
+  font-weight: 500;
+}
+
+.thread-meta {
+  font-size: 12px;
+  color: var(--qq-text-muted);
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.thread-preview {
+  font-size: 12px;
+  color: var(--qq-text-muted);
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: var(--qq-gap-sm);
+}
+
+.detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 9998;
+  padding: var(--qq-gap-lg);
+  overflow-y: auto;
+}
+
+.detail-card {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--qq-text-muted);
+  margin-bottom: var(--qq-gap-sm);
+}
+
+.detail-close {
+  background: transparent;
+  border: none;
+  color: var(--qq-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.detail-close:hover { color: var(--qq-text); background: var(--qq-surface-elevated); }
+
+.detail-title {
+  font-size: 18px;
+  color: var(--qq-text);
+  margin: 0 0 var(--qq-gap-sm) 0;
+}
+
+.detail-meta {
+  font-size: 12px;
+  color: var(--qq-text-muted);
+  display: flex;
+  gap: 6px;
+  margin-bottom: var(--qq-gap-md);
+}
+
+.detail-link {
+  color: var(--qq-accent);
+  text-decoration: none;
+}
+
+.detail-link:hover { text-decoration: underline; }
+
+.detail-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--qq-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: var(--qq-gap-sm);
+  background: var(--qq-surface-strong);
+  border-radius: var(--qq-radius-sm);
+  margin-bottom: var(--qq-gap-md);
+}
+
+.detail-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--qq-gap-xs);
+}
+
+.detail-images img {
+  width: 100%;
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-surface-strong);
+}
+
+@media (max-width: 900px) {
+  .split { flex-direction: column; }
+  .forum-card { width: 100%; max-height: 200px; }
+}
+</style>
