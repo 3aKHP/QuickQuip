@@ -1,5 +1,11 @@
 <template>
-  <div class="layout">
+  <LoginView
+    v-if="authReady && !authenticated"
+    :submitting="authBusy"
+    :error="authError"
+    @submit="handleLogin"
+  />
+  <div v-else-if="authReady" class="layout">
     <nav>
       <span class="brand">QuickQuip</span>
       <button :class="{ active: view === 'stats' }" @click="view = 'stats'">统计</button>
@@ -8,6 +14,8 @@
       <button :class="{ active: view === 'memory' }" @click="view = 'memory'">记忆</button>
       <button :class="{ active: view === 'summary' }" @click="view = 'summary'">总结</button>
       <button :class="{ active: view === 'config' }" @click="view = 'config'">配置</button>
+      <span class="nav-spacer"></span>
+      <button class="small" :disabled="authBusy" @click="handleLogout">退出</button>
     </nav>
     <main>
       <StatsView v-if="view === 'stats'" />
@@ -21,6 +29,12 @@
       <div v-if="toastMsg" class="toast" :class="toastType">{{ toastMsg }}</div>
     </transition>
   </div>
+  <div v-else class="auth-shell">
+    <section class="card login-card">
+      <h2>正在检查登录状态</h2>
+      <p class="muted login-copy">稍等，正在确认当前浏览器会话是否仍然有效。</p>
+    </section>
+  </div>
 </template>
 
 <script>
@@ -30,11 +44,79 @@ import GroupsView from './views/GroupsView.vue'
 import MemoryView from './views/MemoryView.vue'
 import SummaryView from './views/SummaryView.vue'
 import ConfigView from './views/ConfigView.vue'
+import LoginView from './views/LoginView.vue'
 import { toastMsg, toastType } from './toast.js'
+import { getAuthState, login, logout, setUnauthorizedHandler } from './api.js'
 
 export default {
-  components: { StatsView, RulesView, GroupsView, MemoryView, SummaryView, ConfigView },
-  data: () => ({ view: 'stats', toastMsg, toastType }),
+  components: { StatsView, RulesView, GroupsView, MemoryView, SummaryView, ConfigView, LoginView },
+  data: () => ({
+    view: 'stats',
+    authReady: false,
+    authenticated: false,
+    authBusy: false,
+    authError: '',
+    toastMsg,
+    toastType,
+  }),
+  created() {
+    setUnauthorizedHandler(() => {
+      this.authenticated = false
+      this.authReady = true
+      this.authBusy = false
+      this.authError = '登录状态已失效，请重新登录。'
+    })
+    this.initializeAuth()
+  },
+  beforeUnmount() {
+    // L9: 清理全局 handler，避免 HMR 场景下旧组件的闭包继续触发
+    setUnauthorizedHandler(null)
+  },
+  methods: {
+    async initializeAuth() {
+      this.authReady = false
+      this.authError = ''
+      try {
+        await getAuthState()
+        this.authenticated = true
+      } catch (error) {
+        if (error.status !== 401) {
+          this.authError = error.data?.detail || error.message || '鉴权检查失败'
+        }
+        this.authenticated = false
+      } finally {
+        this.authReady = true
+      }
+    },
+    async handleLogin(password) {
+      this.authBusy = true
+      this.authError = ''
+      try {
+        await login(password)
+        this.authenticated = true
+        toastMsg.value = null
+      } catch (error) {
+        this.authenticated = false
+        this.authError = error.status === 401
+          ? '口令错误，请重试。'
+          : (error.data?.detail || error.message || '登录失败')
+      } finally {
+        this.authBusy = false
+      }
+    },
+    async handleLogout() {
+      this.authBusy = true
+      this.authError = ''
+      try {
+        await logout()
+      } catch (error) {
+        this.authError = error.data?.detail || error.message || '退出失败'
+      } finally {
+        this.authenticated = false
+        this.authBusy = false
+      }
+    },
+  },
 }
 </script>
 
@@ -61,6 +143,7 @@ nav {
   height: 44px;
 }
 .brand { font-weight: 600; margin-right: 12px; color: #58a6ff; }
+.nav-spacer { flex: 1; }
 nav button {
   background: none;
   border: none;
@@ -74,6 +157,39 @@ nav button:hover { color: #c9d1d9; background: #21262d; }
 nav button.active { color: #c9d1d9; background: #21262d; }
 
 main { padding: 24px; flex: 1; }
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(100%, 420px);
+  margin: 0;
+}
+
+.login-copy {
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.login-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.login-form input {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  padding: 8px 10px;
+  font-size: 14px;
+}
 
 .card {
   background: #161b22;

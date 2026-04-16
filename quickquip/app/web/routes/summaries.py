@@ -6,10 +6,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
+from quickquip.app.web.settings import PROJECT_ROOT
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB = Path("data/daily_summaries.db")
+_DB = PROJECT_ROOT / "data" / "daily_summaries.db"
 
 _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

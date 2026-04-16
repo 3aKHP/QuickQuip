@@ -8,11 +8,12 @@ from pydantic import BaseModel, Field
 from typing import Annotated, Literal
 
 from quickquip.llm.store import LLMStore
+from quickquip.app.web.settings import PROJECT_ROOT
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB = "data/llm.db"
+_DB = PROJECT_ROOT / "data" / "llm.db"
 
 _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 

@@ -21,7 +21,7 @@
         <div v-for="rule in allRules" :key="rule" class="rule-row">
           <span class="rule-name">{{ rule }}</span>
           <label class="toggle">
-            <input type="checkbox" :checked="isEnabled(rule)" @change="toggle(rule)" />
+            <input type="checkbox" :checked="isEnabled(rule)" @click.prevent="toggle(rule)" />
             <span class="toggle-slider"></span>
           </label>
         </div>

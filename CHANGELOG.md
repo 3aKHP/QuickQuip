@@ -8,6 +8,7 @@
 
 - 每日早中晚播报功能 `daily_briefing`：支持按群开启早报（08:00）、午报（12:00）、晚报（22:00），复用当前群绑定的 LLM provider/model/persona，结合消息数、活跃用户、热词和代表性消息样本生成短播报；消息量不足时自动退回模板播报；`/briefing on|off|status|now [morning|noon|evening]` 命令；`[daily_briefing]` 配置区块支持三段 cron、上下文规模、输出长度和模型级联
 - Web 管理后台 `web_api.py` + `quickquip/app/web/`：基于 FastAPI 的独立管理 API 服务，提供消息统计、群级规则开关、每日总结/播报群组管理三个端点；前端为 Vue 3 SPA（`frontend/`），构建产物 serve 在 `/ops/` 路径；通过 `WEB_ADMIN_HOST`/`WEB_ADMIN_PORT` 环境变量控制监听地址（默认 `127.0.0.1:5104`）；新增 `GET /ops/api/groups/known` 返回已知群列表，`GET/PUT /ops/api/config/llm` 支持在线读写 `config/llm.toml`；前端新增配置编辑器标签页（原始文本编辑，保存前校验 TOML 语法），规则开关改为 pill toggle，操作反馈改为 toast，群组页支持从已知群下拉选择
+- Web 管理后台鉴权升级：FastAPI 层新增应用内 session 登录（`/ops/api/auth/login|me|logout`），所有管理接口统一要求 `HttpOnly` session cookie；`web_api.py` 启动时会自动读取根 `.env` 与 `dev/.env`，`WEB_ADMIN_PASSWORD` / `WEB_ADMIN_SESSION_TTL_HOURS` / `WEB_ADMIN_COOKIE_SECURE` 可直接纳入项目配置与部署流程
 - MCP docker transport 支持 `pull_policy` 配置项（`always`/`missing`/`never`，默认 `missing`），设为 `always` 可在每次重载时自动拉取最新镜像，解决镜像更新后工具列表不刷新的问题
 - 新增 `/llm mcp reload` 命令（仅管理员）：强制 pull 所有 docker transport MCP 服务器的最新镜像并重连，完成后输出最新状态；非 docker transport 服务器仅重连不 pull
 - 词云功能 `/wordcloud`（别名 `/词云`）：管理员可生成本群消息词频可视化图片，支持 `today`/`week`/`month`/`year` 四个时间窗口；独立消息收集层（`data/wordcloud_msgs/`），对所有群始终开启；图片以 base64 内联方式发送；依赖 jieba 分词 + wordcloud + Pillow，需在 `data/fonts/` 放置 NotoSansSC-Regular.ttf 字体文件
@@ -19,6 +20,20 @@
 
 ### 修复
 
+- Web 管理后台安全加固（审计报告 H2-H6、M2-M4、M7-M10、L1-L2、L5、L9）：
+  - 登录接口新增内存速率限制（每 IP 5 次失败/60s，超限封禁 300s）
+  - `X-Forwarded-For` 仅在直连 IP 为 loopback/私有地址时才信任，防止 IP 伪造
+  - CSRF 检查：Origin 和 Referer 均缺失时拒绝请求（返回 403），而非放行
+  - `llm.toml` 写入改用 `filelock` 防止并发覆盖，并用 `try/finally` 确保临时文件不残留
+  - `groups.py`、`rules.py` 统一 `group_id` 验证规则（5-12 位数字正则）
+  - `memory.py`、`summaries.py` 数据库路径改为基于 `PROJECT_ROOT` 的绝对路径
+  - Vite 开发代理路径从 `/api` 修正为 `/ops/api`，与生产环境一致
+  - `api.js` 先处理 401 再解析 JSON，避免解析失败吞掉 HTTP 错误信息；401 触发后不再重复 toast
+  - `MemoryView.vue`：confidence 空字符串传 `null` 而非 `""`，修复 422 校验错误；错误状态与"暂无条目"不再同时显示
+  - `MemoryView.vue`、`SummaryView.vue`：群组列表加载失败时显示错误信息而非静默
+  - `RulesView.vue`：checkbox 改用 `@click.prevent` 阻止浏览器默认切换，视觉状态完全由 Vue 控制
+  - `App.vue`：`beforeUnmount` 时清理全局 `unauthorizedHandler`，避免 HMR 场景下旧闭包残留
+  - 新增 `filelock>=3.12.0` 依赖
 - LLM 引用消息认人：`build_user_message_content` 在有引用消息时，在 user message 里同时标注"当前提问者"和"引用发送者"，避免 LLM 跨 system/user 两层拼凑身份时张冠李戴
 - LLM 上下文结构：`normalize_history` 统一历史消息格式，无 `user_id` 的旧消息不再裸露内容，改为标注"发言者：未知"；`build_messages` 将 recent_messages 块从序列头部移至紧贴当前提问之前，修正时间顺序（历史对话 → 触发前快照 → 当前提问）
 - 每日总结发送：`_send_long_message` 始终通过 `send_group_forward_msg` 发合并转发卡片，不再对单段内容走 `send_group_msg` 直发（规避 NapCat ~667 汉字截断限制）

@@ -13,7 +13,7 @@
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="groupId && !loading && memories.length === 0" class="muted">暂无记忆条目</p>
+    <p v-else-if="groupId && !loading && memories.length === 0" class="muted">暂无记忆条目</p>
 
     <div v-for="m in memories" :key="m.id" class="card memory-row">
       <div class="mem-meta muted">
@@ -74,7 +74,9 @@ export default {
     try {
       const d = await apiFetch('/api/groups/known')
       this.groups = d.groups || []
-    } catch {}
+    } catch (e) {
+      this.error = `加载群组列表失败: ${e.message}`
+    }
   },
   methods: {
     async load() {
@@ -94,12 +96,14 @@ export default {
     },
     async saveEdit(m) {
       try {
+        // M9: confidence 为空字符串或 NaN 时传 null，避免 422
+        const conf = this.editConf === '' || isNaN(this.editConf) ? null : Number(this.editConf)
         await apiFetch(`/api/memory/${this.groupId}/${m.id}`, {
           method: 'PUT',
           body: JSON.stringify({
             content: this.editContent,
             tags: this.editTags.split(',').map(t => t.trim()).filter(Boolean),
-            confidence: this.editConf,
+            confidence: conf,
           }),
         })
         this.editing = null

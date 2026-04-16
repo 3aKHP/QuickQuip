@@ -52,7 +52,9 @@ export default {
   async mounted() {
     try {
       this.groups = await apiFetch('/api/summaries-groups')
-    } catch {}
+    } catch (e) {
+      this.error = `加载群组列表失败: ${e.message}`
+    }
   },
   methods: {
     async loadList() {

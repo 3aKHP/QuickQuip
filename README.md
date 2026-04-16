@@ -367,6 +367,16 @@ QuickQuip/
 
 7. **可选：启动 Web 管理后台**
 
+   先在 `.env`（或云端的 `dev/.env`）里配置管理后台口令：
+
+   ```env
+   WEB_ADMIN_PASSWORD=change-this-admin-password
+   WEB_ADMIN_SESSION_TTL_HOURS=168
+   WEB_ADMIN_COOKIE_SECURE=auto
+   ```
+
+   `WEB_ADMIN_COOKIE_SECURE=auto` 会在检测到 HTTPS / `X-Forwarded-Proto: https` 时自动下发 `Secure` cookie；若你的反向代理没有传该 header，可在 HTTPS 部署时显式改成 `true`。
+
    先构建前端（需要 Node.js）：
 
    ```bash
@@ -382,7 +392,7 @@ QuickQuip/
    python web_api.py
    ```
 
-   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面，提供消息统计、群级规则开关、群组管理和 `config/llm.toml` 在线编辑功能。监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。
+   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面，提供消息统计、群级规则开关、群组管理和 `config/llm.toml` 在线编辑功能。后台会先检查浏览器中的应用层 session；首次进入时需要输入 `WEB_ADMIN_PASSWORD` 建立会话。监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。
 
 8. **启动机器人**
 
