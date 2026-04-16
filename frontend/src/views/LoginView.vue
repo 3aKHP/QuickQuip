@@ -128,7 +128,7 @@ export default {
 
 code {
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--qq-radius-sm);
   background: var(--qq-surface-elevated);
   font-family: var(--qq-font-mono);
   font-size: 12px;

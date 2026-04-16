@@ -76,7 +76,7 @@ export default {
   .app-nav {
     padding: 0 var(--qq-gap-sm);
   }
-  .nav-items .ui-nav-item .label {
+  .nav-items :deep(.ui-nav-item .label) {
     display: none;
   }
 }

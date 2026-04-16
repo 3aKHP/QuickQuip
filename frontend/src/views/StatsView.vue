@@ -19,32 +19,32 @@
             <UiTag>总消息 {{ gs.total_messages || 0 }}</UiTag>
           </div>
 
-          <div v-if="topUsers(gs).length" class="stat-section">
+          <div v-if="computedStats[gid]?.users?.length" class="stat-section">
             <div class="section-title">
               <UiIcon name="Users" :size="14" />
-              <span>活跃用户 Top {{ topUsers(gs).length }}</span>
+              <span>活跃用户 Top {{ computedStats[gid].users.length }}</span>
             </div>
             <div class="bar-list">
-              <div v-for="[uid, cnt] in topUsers(gs)" :key="uid" class="bar-row">
+              <div v-for="[uid, cnt] in computedStats[gid].users" :key="uid" class="bar-row">
                 <span class="bar-label">{{ gs.user_names?.[uid] || uid }}</span>
                 <div class="bar-track">
-                  <div class="bar-fill" :style="{ width: pct(cnt, maxUser(gs)) + '%' }" />
+                  <div class="bar-fill" :style="{ width: pct(cnt, computedStats[gid].maxUser) + '%' }" />
                 </div>
                 <span class="bar-value">{{ cnt }}</span>
               </div>
             </div>
           </div>
 
-          <div v-if="topRules(gs).length" class="stat-section">
+          <div v-if="computedStats[gid]?.rules?.length" class="stat-section">
             <div class="section-title">
               <UiIcon name="Zap" :size="14" />
-              <span>规则触发 Top {{ topRules(gs).length }}</span>
+              <span>规则触发 Top {{ computedStats[gid].rules.length }}</span>
             </div>
             <div class="bar-list">
-              <div v-for="[rule, cnt] in topRules(gs)" :key="rule" class="bar-row">
+              <div v-for="[rule, cnt] in computedStats[gid].rules" :key="rule" class="bar-row">
                 <span class="bar-label mono">{{ rule }}</span>
                 <div class="bar-track">
-                  <div class="bar-fill alt" :style="{ width: pct(cnt, maxRule(gs)) + '%' }" />
+                  <div class="bar-fill alt" :style="{ width: pct(cnt, computedStats[gid].maxRule) + '%' }" />
                 </div>
                 <span class="bar-value">{{ cnt }}</span>
               </div>
@@ -70,7 +70,7 @@ import { fetchStats } from '../api/stats.js'
 
 export default {
   components: { UiCard, UiButton, UiPageHeader, UiTag, UiIcon, UiLoading, UiEmpty },
-  data: () => ({ data: null, error: null, loading: false, updatedAt: null }),
+  data: () => ({ data: null, error: null, loading: false, updatedAt: null, computedStats: {} }),
   async mounted() { await this.load() },
   methods: {
     async load() {
@@ -79,27 +79,42 @@ export default {
       try {
         this.data = await fetchStats()
         this.updatedAt = new Date().toLocaleTimeString('zh-CN')
+        this.precomputeStats()
       } catch (e) {
         this.error = e.message
       } finally {
         this.loading = false
       }
     },
+    precomputeStats() {
+      const out = {}
+      for (const [gid, gs] of Object.entries(this.data || {})) {
+        const users = Object.entries(gs.user_messages || {})
+          .sort((a, b) => b[1] - a[1]).slice(0, 15)
+        const rules = Object.entries(gs.rule_triggers || {})
+          .sort((a, b) => b[1] - a[1]).slice(0, 10)
+        const userValues = users.map(([, v]) => v)
+        const ruleValues = rules.map(([, v]) => v)
+        out[gid] = {
+          users,
+          rules,
+          maxUser: userValues.length ? Math.max(...userValues) : 1,
+          maxRule: ruleValues.length ? Math.max(...ruleValues) : 1,
+        }
+      }
+      this.computedStats = out
+    },
     topUsers(gs) {
-      return Object.entries(gs.user_messages || {})
-        .sort((a, b) => b[1] - a[1]).slice(0, 15)
+      return this.computedStats[gs.gid]?.users || []
     },
     topRules(gs) {
-      return Object.entries(gs.rule_triggers || {})
-        .sort((a, b) => b[1] - a[1]).slice(0, 10)
+      return this.computedStats[gs.gid]?.rules || []
     },
     maxUser(gs) {
-      const arr = Object.values(gs.user_messages || {})
-      return arr.length ? Math.max(...arr) : 1
+      return this.computedStats[gs.gid]?.maxUser || 1
     },
     maxRule(gs) {
-      const arr = Object.values(gs.rule_triggers || {})
-      return arr.length ? Math.max(...arr) : 1
+      return this.computedStats[gs.gid]?.maxRule || 1
     },
     pct(value, max) {
       if (!max) return 0

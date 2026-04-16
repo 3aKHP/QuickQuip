@@ -2,6 +2,8 @@
   <label class="ui-toggle" :class="sizeClass">
     <input
       type="checkbox"
+      role="switch"
+      :aria-checked="modelValue"
       :checked="modelValue"
       :disabled="disabled"
       @change="$emit('update:modelValue', $event.target.checked)"

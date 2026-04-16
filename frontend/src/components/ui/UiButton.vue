@@ -64,6 +64,11 @@ export default {
   transform: translateY(1px);
 }
 
+.ui-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--qq-accent-glow);
+}
+
 .ui-button--md {
   min-height: 36px;
   padding: 0 14px;

@@ -81,7 +81,8 @@ export default {
 .config-view {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 92px);
+  flex: 1;
+  min-height: 0;
 }
 
 .error {

@@ -4,7 +4,69 @@
 
 <script>
 import { computed } from 'vue'
-import * as icons from 'lucide-vue-next'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  BarChart2,
+  BarChart3,
+  BookOpen,
+  Bot,
+  Brain,
+  CalendarCheck,
+  Check,
+  CircleX,
+  FileText,
+  Inbox,
+  Info,
+  Loader2,
+  Lock,
+  LogOut,
+  MousePointerClick,
+  Newspaper,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Settings,
+  ToggleLeft,
+  Trash2,
+  Users,
+  X,
+  Zap,
+} from 'lucide-vue-next'
+
+const ICON_MAP = {
+  AlertTriangle,
+  ArrowLeft,
+  BarChart2,
+  BarChart3,
+  BookOpen,
+  Bot,
+  Brain,
+  CalendarCheck,
+  Check,
+  CircleX,
+  FileText,
+  Inbox,
+  Info,
+  Loader2,
+  Lock,
+  LogOut,
+  MousePointerClick,
+  Newspaper,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Settings,
+  ToggleLeft,
+  Trash2,
+  Users,
+  X,
+  Zap,
+}
 
 export default {
   name: 'UiIcon',
@@ -14,7 +76,7 @@ export default {
     strokeWidth: { type: [String, Number], default: 2 },
   },
   setup(props) {
-    const iconComp = computed(() => icons[props.name] || null)
+    const iconComp = computed(() => ICON_MAP[props.name] || null)
     return { iconComp }
   },
 }

@@ -31,6 +31,10 @@
   --qq-shadow-md: 0 10px 28px rgba(0, 0, 0, 0.28);
   --qq-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.35);
 
+  /* Component-specific tokens */
+  --qq-toast-border-info: rgba(88, 166, 255, 0.45);
+  --qq-toast-border-error: rgba(248, 81, 73, 0.45);
+
   /* Radius */
   --qq-radius-sm: 8px;
   --qq-radius-md: 12px;

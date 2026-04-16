@@ -134,17 +134,9 @@ export default {
 main {
   padding: var(--qq-gap-lg);
   flex: 1;
-}
-
-main > .fade-enter-active,
-main > .fade-leave-active {
-  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
-}
-
-main > .fade-enter-from,
-main > .fade-leave-to {
-  opacity: 0;
-  transform: translateY(4px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .auth-shell {
@@ -196,113 +188,16 @@ main > .fade-leave-to {
 }
 
 .toast.error {
-  border-color: rgba(248, 81, 73, 0.45);
+  border-color: var(--qq-toast-border-error);
   color: var(--qq-danger);
 }
 
 .toast.info {
-  border-color: rgba(88, 166, 255, 0.45);
+  border-color: var(--qq-toast-border-info);
   color: var(--qq-accent);
 }
 
-/* Legacy helpers kept for backward compat during migration */
+/* Minimal global helpers still shared by auth-shell and LoginView */
 h2 { font-size: 18px; margin-bottom: var(--qq-gap-md); color: var(--qq-text); }
 h3 { font-size: 15px; margin-bottom: var(--qq-gap-sm); color: var(--qq-text); }
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: var(--qq-gap-md);
-  margin-bottom: var(--qq-gap-md);
-  flex-wrap: wrap;
-}
-
-.toolbar label {
-  display: flex;
-  align-items: center;
-  gap: var(--qq-gap-xs);
-  color: var(--qq-text-muted);
-  font-size: 13px;
-}
-
-.toolbar select,
-.toolbar input {
-  background: var(--qq-surface-strong);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-sm);
-  color: var(--qq-text);
-  padding: 5px 10px;
-  font-size: 14px;
-  outline: none;
-}
-
-.toolbar select:focus,
-.toolbar input:focus {
-  border-color: var(--qq-accent);
-  box-shadow: 0 0 0 3px var(--qq-accent-soft);
-}
-
-.add-row {
-  display: flex;
-  gap: var(--qq-gap-sm);
-  margin-top: var(--qq-gap-sm);
-  flex-wrap: wrap;
-}
-
-.add-row input,
-.add-row select {
-  flex: 1;
-  min-width: 120px;
-  background: var(--qq-surface-strong);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-sm);
-  color: var(--qq-text);
-  padding: 5px 10px;
-  font-size: 13px;
-  outline: none;
-}
-
-.add-row input:focus,
-.add-row select:focus {
-  border-color: var(--qq-accent);
-  box-shadow: 0 0 0 3px var(--qq-accent-soft);
-}
-
-.groups-layout {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--qq-gap-md);
-}
-
-@media (max-width: 720px) {
-  .groups-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-.groups-layout section {
-  background: var(--qq-surface);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-md);
-  padding: var(--qq-gap-md);
-  box-shadow: var(--qq-shadow-sm);
-}
-
-.groups-layout ul {
-  list-style: none;
-  margin-bottom: var(--qq-gap-sm);
-}
-
-.groups-layout li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--qq-border);
-  font-size: 13px;
-}
-
-.groups-layout li:last-child {
-  border-bottom: none;
-}
 </style>
