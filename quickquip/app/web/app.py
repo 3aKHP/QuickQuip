@@ -2,7 +2,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
-from quickquip.app.web.routes import stats, rules, groups, config, memory, summaries, personas, conversations, group_settings
+from quickquip.app.web.routes import stats, rules, groups, config, memory, summaries, personas, conversations, group_settings, rate_limit
 from quickquip.app.web.settings import load_web_env
 
 _DIST = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
@@ -22,6 +22,7 @@ def create_app() -> FastAPI:
     app.include_router(personas.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(conversations.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(group_settings.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+    app.include_router(rate_limit.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
 
     if _DIST.exists():
         app.mount("/ops", StaticFiles(directory=_DIST, html=True), name="static")

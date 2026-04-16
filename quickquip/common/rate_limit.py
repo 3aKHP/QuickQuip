@@ -30,6 +30,27 @@ class SlidingWindowRateLimiter:
         user_queue.append(current_ts)
         return True
 
+    def snapshot(self, now_ts: float | None = None) -> dict:
+        current_ts = time() if now_ts is None else now_ts
+        self._prune(self.global_timestamps, current_ts)
+        users: dict[str, int] = {}
+        empty_keys: list[str] = []
+        for user_id, queue in self.user_timestamps.items():
+            self._prune(queue, current_ts)
+            if queue:
+                users[user_id] = len(queue)
+            else:
+                empty_keys.append(user_id)
+        for key in empty_keys:
+            del self.user_timestamps[key]
+        return {
+            "global_limit": self.global_limit,
+            "user_limit": self.user_limit,
+            "window_seconds": self.window_seconds,
+            "global_used": len(self.global_timestamps),
+            "users": users,
+        }
+
 
 class KeyedRateLimiter:
     def __init__(self, rule_limits: dict[str, dict], window_seconds: int = 60):
@@ -48,3 +69,6 @@ class KeyedRateLimiter:
         if limiter is None:
             return True
         return limiter.allow(user_id=user_id, now_ts=now_ts)
+
+    def snapshot(self, now_ts: float | None = None) -> dict[str, dict]:
+        return {key: limiter.snapshot(now_ts) for key, limiter in self.limiters.items()}

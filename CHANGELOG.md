@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Web 管理后台新增"限流"标签页：`SlidingWindowRateLimiter` / `KeyedRateLimiter` 新增 `snapshot()` 方法在快照前就地 prune 掉过期时间戳并释放空 deque，`GET /api/rate-limit` 把每条限流规则的全局 used/limit、单用户 used/limit、窗口秒数、Top20 活跃用户按 user_id 一次返回；前端每条规则一张卡片，显示全局进度条 + 用户排行 mini bar，支持 5s 自动刷新（手动勾选），进程重启时所有窗口归零（符合内存实现的真实语义）
 - Web 管理后台新增"群 LLM"标签页：按群覆盖 `llm.db` → `group_settings` 表中的 9 个字段（enabled / memory_enabled / provider_id / model / persona_id / trigger_prefix / allow_prefix / allow_at / history_limit）；三态语义支持"跟随默认/开/关"，每个文本/数值字段可点"跟随"按钮回落到 llm.toml 里的默认值；右侧表单仅在字段相对加载快照有变化时才 `PUT`（服务端使用 `model_dump(exclude_unset=True)` 仅落表被改的列），避免无谓 row 膨胀；后端路由 `group_settings.py` 额外暴露 `GET /api/group-settings/options`，把 `llm.toml` 里的 provider/persona 清单与当前 runtime/trigger 默认值一次返回给前端做下拉与 placeholder
 - Web 管理后台新增"对话"标签页：浏览 `data/llm.db` 的 `conversation_messages` 表，左侧按 `group_id` 列出所有会话（群聊/私聊/归档自动分类），右侧以聊天流式展示消息（role 彩色标记、发送者名、时间、内容全文）；支持关键词过滤与游标翻页（`before_id`），可按单条删除用于回溯和脏数据清理；后端 `conversations.py` 用严格正则校验三种合法的 `group_id` 形态（`\d{5,12}` / `private:\d{5,15}` / `archive:\d{5,15}:\d{1,6}`）防止路径穿越
 - "配置"标签页改造为多文件编辑器：新增 `chat_rules.toml` 的在线编辑入口，保留原 `llm.toml`；后端 `GET/PUT /api/config/llm` 泛化为 `GET/PUT /api/config/{key}`，新增 `GET /api/config` 列表端点；白名单机制防止路径穿越；页头补充"保存后需重启 bot 才会生效"提示；切换文件时若有未保存修改会弹确认

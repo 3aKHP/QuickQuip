@@ -9,6 +9,7 @@ import SummaryView from '../views/SummaryView.vue'
 import ConversationsView from '../views/ConversationsView.vue'
 import PersonasView from '../views/PersonasView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
+import RateLimitView from '../views/RateLimitView.vue'
 import ConfigView from '../views/ConfigView.vue'
 
 export const NAV_ITEMS = [
@@ -20,5 +21,6 @@ export const NAV_ITEMS = [
   { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle', component: ConversationsView },
   { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',         component: PersonasView },
   { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', component: GroupSettingsView },
+  { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Zap',           component: RateLimitView },
   { key: 'config',         path: '/config',         label: '配置',     icon: 'Settings',      component: ConfigView },
 ]
