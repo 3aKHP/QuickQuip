@@ -6,42 +6,86 @@ from fastapi import APIRouter, HTTPException
 from filelock import FileLock
 from pydantic import BaseModel, Field
 
+from quickquip.app.web.settings import PROJECT_ROOT
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# 基于文件位置的绝对路径，不依赖进程工作目录
-# __file__ = quickquip/app/web/routes/config.py
-# parents[4] = 项目根目录
-_CONFIG_PATH = Path(__file__).parents[4] / "config" / "llm.toml"
-_CONFIG_LOCK = FileLock(str(_CONFIG_PATH) + ".lock")
+_CONFIG_DIR = PROJECT_ROOT / "config"
+_MAX_CONTENT_BYTES = 65536
+
+# Whitelist of editable root-level config files. Persona files live under
+# config/personas/ and are served by the dedicated personas router.
+_CONFIG_FILES: dict[str, dict] = {
+    "llm": {
+        "filename": "llm.toml",
+        "label": "LLM 配置",
+        "description": "模型、触发词、工具、MCP、人格装载",
+    },
+    "chat_rules": {
+        "filename": "chat_rules.toml",
+        "label": "聊天规则",
+        "description": "文本规则、语境规则、限流与连锁游戏配置",
+    },
+}
 
 
 class ConfigBody(BaseModel):
-    content: str = Field(max_length=65536)
+    content: str = Field(max_length=_MAX_CONTENT_BYTES)
 
 
-@router.get("/config/llm")
-def get_llm_config():
-    if not _CONFIG_PATH.exists():
-        return {"content": "", "missing": True}
-    return {"content": _CONFIG_PATH.read_text(encoding="utf-8"), "missing": False}
+def _resolve(key: str) -> Path:
+    entry = _CONFIG_FILES.get(key)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="unknown config key")
+    return _CONFIG_DIR / entry["filename"]
 
 
-@router.put("/config/llm")
-def put_llm_config(body: ConfigBody):
+def _lock_for(path: Path) -> FileLock:
+    return FileLock(str(path) + ".lock")
+
+
+@router.get("/config")
+def list_configs():
+    items = []
+    for key, entry in _CONFIG_FILES.items():
+        path = _CONFIG_DIR / entry["filename"]
+        exists = path.exists()
+        items.append({
+            "key": key,
+            "filename": entry["filename"],
+            "label": entry["label"],
+            "description": entry["description"],
+            "exists": exists,
+            "size": path.stat().st_size if exists else 0,
+            "mtime": int(path.stat().st_mtime) if exists else 0,
+        })
+    return {"configs": items}
+
+
+@router.get("/config/{key}")
+def get_config(key: str):
+    path = _resolve(key)
+    if not path.exists():
+        return {"key": key, "content": "", "missing": True}
+    return {"key": key, "content": path.read_text(encoding="utf-8"), "missing": False}
+
+
+@router.put("/config/{key}")
+def put_config(key: str, body: ConfigBody):
+    path = _resolve(key)
     try:
         tomllib.loads(body.content)
     except tomllib.TOMLDecodeError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    _CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _CONFIG_PATH.with_suffix(".toml.tmp")
-    # H3: 文件锁防止并发写入覆盖；M8: finally 确保临时文件不残留
-    with _CONFIG_LOCK:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with _lock_for(path):
         try:
             tmp.write_text(body.content, encoding="utf-8")
-            tmp.replace(_CONFIG_PATH)
+            tmp.replace(path)
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
-    logger.warning("llm.toml updated via web admin (%d bytes)", len(body.content))
+    logger.warning("config updated via web admin: %s (%d bytes)", key, len(body.content))
     return {"ok": True}
