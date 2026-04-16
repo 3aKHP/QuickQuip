@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Web 管理后台新增"对话"标签页：浏览 `data/llm.db` 的 `conversation_messages` 表，左侧按 `group_id` 列出所有会话（群聊/私聊/归档自动分类），右侧以聊天流式展示消息（role 彩色标记、发送者名、时间、内容全文）；支持关键词过滤与游标翻页（`before_id`），可按单条删除用于回溯和脏数据清理；后端 `conversations.py` 用严格正则校验三种合法的 `group_id` 形态（`\d{5,12}` / `private:\d{5,15}` / `archive:\d{5,15}:\d{1,6}`）防止路径穿越
 - "配置"标签页改造为多文件编辑器：新增 `chat_rules.toml` 的在线编辑入口，保留原 `llm.toml`；后端 `GET/PUT /api/config/llm` 泛化为 `GET/PUT /api/config/{key}`，新增 `GET /api/config` 列表端点；白名单机制防止路径穿越；页头补充"保存后需重启 bot 才会生效"提示；切换文件时若有未保存修改会弹确认
 - Web 管理后台新增"人格"标签页：列出 `config/personas/*.toml`、读取/编辑单个 TOML、新建与删除；`_shared.toml` 标记为共享且不可删除；后端 `personas.py` 路由按照 `[A-Za-z0-9_][A-Za-z0-9_-]{0,63}` 强校验文件名防止路径穿越，写入前做 `tomllib.loads` 校验，并以 `filelock` 串行化并发写入
 - Web 管理后台引入 `vue-router` 4（hash 模式）：`config/nav.js` 扩展 `path` 字段作为路由表唯一来源，`AppNav` 改用 `<router-link>`，支持 URL 深链接（`/ops/#/stats` 等）与浏览器前进后退；抽出 `composables/useAuth.js` 承载全局登录态、`composables/useAsyncData.js` 供后续新视图复用 loading/error/refresh 模板。hash 模式选择原因：nginx 端 `auth_basic` 外门和 FastAPI session cookie 内门的既有分层无需改动，任何深链刷新都只命中 `/ops/` 静态根，不需要额外的 SPA fallback 配置
