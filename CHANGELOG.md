@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Web 管理后台新增"词云"标签页：后端 `GET /api/wordcloud/groups` 扫描 `data/wordcloud_msgs/` 列出有消息积累的群（显示天数和磁盘占用），`GET /api/wordcloud/render?group=...&window=today|week|month|year` 复用 `build_word_frequencies` + `render_wordcloud_bytes`，两个 CPU 密集步骤各自走 `asyncio.to_thread` 不阻塞事件循环，成功时返回 base64 PNG + Top50 词频 + 消息/词数统计；低于 50 词阈值返回 422，字体文件缺失返回 500 携带明确提示；前端提供群选择 + 时间窗 4 键切换 + "生成"按钮，左侧显示词云图（自带下载链接），右侧同步展示 Top 词频排行
 - Web 管理后台新增"贴吧"标签页：只读视图 `tieba_service.store`，左侧列出所有已缓存贴吧与其同步状态（正常/同步中/错误/需登录），右侧分页展示帖子列表（标题 + 作者 + 封面 + 正文预览 + 图数 + 已发送过标记），支持按标题/正文/作者关键词过滤；点击任意帖子弹出 detail overlay 显示完整正文、所有配图、贴吧原链接；后端 `tieba.py` 路由对 `forum` 和 `tid` 做正则白名单校验（`[^\s/\\:]{1,32}` / `\d{1,20}`）防止路径穿越
 - Web 管理后台新增"限流"标签页：`SlidingWindowRateLimiter` / `KeyedRateLimiter` 新增 `snapshot()` 方法在快照前就地 prune 掉过期时间戳并释放空 deque，`GET /api/rate-limit` 把每条限流规则的全局 used/limit、单用户 used/limit、窗口秒数、Top20 活跃用户按 user_id 一次返回；前端每条规则一张卡片，显示全局进度条 + 用户排行 mini bar，支持 5s 自动刷新（手动勾选），进程重启时所有窗口归零（符合内存实现的真实语义）
 - Web 管理后台新增"群 LLM"标签页：按群覆盖 `llm.db` → `group_settings` 表中的 9 个字段（enabled / memory_enabled / provider_id / model / persona_id / trigger_prefix / allow_prefix / allow_at / history_limit）；三态语义支持"跟随默认/开/关"，每个文本/数值字段可点"跟随"按钮回落到 llm.toml 里的默认值；右侧表单仅在字段相对加载快照有变化时才 `PUT`（服务端使用 `model_dump(exclude_unset=True)` 仅落表被改的列），避免无谓 row 膨胀；后端路由 `group_settings.py` 额外暴露 `GET /api/group-settings/options`，把 `llm.toml` 里的 provider/persona 清单与当前 runtime/trigger 默认值一次返回给前端做下拉与 placeholder

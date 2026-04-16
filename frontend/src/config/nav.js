@@ -11,6 +11,7 @@ import PersonasView from '../views/PersonasView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
 import RateLimitView from '../views/RateLimitView.vue'
 import TiebaView from '../views/TiebaView.vue'
+import WordcloudView from '../views/WordcloudView.vue'
 import ConfigView from '../views/ConfigView.vue'
 
 export const NAV_ITEMS = [
@@ -24,5 +25,6 @@ export const NAV_ITEMS = [
   { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', component: GroupSettingsView },
   { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Zap',           component: RateLimitView },
   { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',      component: TiebaView },
+  { key: 'wordcloud',      path: '/wordcloud',      label: '词云',     icon: 'Newspaper',     component: WordcloudView },
   { key: 'config',         path: '/config',         label: '配置',     icon: 'Settings',      component: ConfigView },
 ]
