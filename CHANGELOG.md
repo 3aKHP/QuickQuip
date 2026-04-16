@@ -17,6 +17,7 @@
 ### 修复
 
 - `chat_rules.toml.example` 中 `ntk_longerduo` 的 priority 从 83 抬到 95，避免 `扎聋我自己的耳朵` / `议论孔明先生` 被 `ntk_long` 单字正则（priority 92）提前截胡
+- `rule_switch.SWITCHABLE_RULES` 改为在模块加载时动态并入 `TEXT_REPLY_RULES` / `CONTEXT_REPLY_RULES` / `CHAIN_GAME_CONFIGS` 里的规则名，修复 Web 管理后台规则开关页缺失 `kpl_*` 和新三国 `ntk_*` 系列规则开关的问题；系统/模块规则与历史规则名继续保留以兼容已有 `rule_switch.json`
 
 ## [0.7.0] - 2026-04-16
 

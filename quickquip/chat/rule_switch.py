@@ -1,24 +1,16 @@
 from collections import OrderedDict
 from pathlib import Path
 
+from quickquip.chat.config import CHAIN_GAME_CONFIGS, CONTEXT_REPLY_RULES, TEXT_REPLY_RULES
 from quickquip.common.persistence import load_json, save_json
 
 
-# All switchable rule names (text rules + built-in modules).
-SWITCHABLE_RULES = {
+# 系统/模块规则与历史保留的规则名（保留是为了兼容已有 rule_switch.json）。
+# TOML 加载出来的规则名会在模块加载时自动并入 SWITCHABLE_RULES。
+_BUILTIN_SWITCHABLE_RULES: set[str] = {
+    # 模块级
     "daily_briefing",
     "daily_summary",
-    "divine_arrival",
-    "play_target",
-    "double_char_ni_de",
-    "sandwich_de",
-    "like_reply",
-    "maggot_arrival",
-    "genshin_start",
-    "master_protection",
-    "huaizhen_oversize",
-    "kpl_final",
-    "i_do",
     "repeat_follow_read",
     "repeat_trim_last",
     "repeat_same_user_warning",
@@ -28,7 +20,33 @@ SWITCHABLE_RULES = {
     "timezone_sleep",
     "llm_chat",
     "tieba_random_post",
+    # 历史保留（曾在硬编码名单中，可能在旧部署里出现）
+    "maggot_arrival",
+    "master_protection",
+    "huaizhen_oversize",
+    "kpl_final",
 }
+
+
+def _collect_config_rule_names() -> set[str]:
+    names: set[str] = set()
+    for rule in TEXT_REPLY_RULES:
+        name = rule.get("name")
+        if name:
+            names.add(name)
+    for rule in CONTEXT_REPLY_RULES:
+        name = rule.get("name")
+        if name:
+            names.add(name)
+    for game in CHAIN_GAME_CONFIGS:
+        name = game.get("name")
+        if name:
+            names.add(f"{name}_start")
+            names.add(f"{name}_progress")
+    return names
+
+
+SWITCHABLE_RULES: set[str] = _BUILTIN_SWITCHABLE_RULES | _collect_config_rule_names()
 
 
 class GroupRuleSwitch:
