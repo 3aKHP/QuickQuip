@@ -30,7 +30,10 @@
             @click="selectGroup(g.group_id)"
           >
             <div class="group-head">
-              <span class="mono group-id">{{ g.group_id }}</span>
+              <UiTag size="sm" :variant="g.type === 'private' ? 'success' : 'info'">
+                {{ g.type === 'private' ? '私聊' : '群聊' }}
+              </UiTag>
+              <span class="mono group-id">{{ displayId(g.group_id) }}</span>
               <UiTag v-if="g.enabled === true" size="sm" variant="success">LLM 开</UiTag>
               <UiTag v-else-if="g.enabled === false" size="sm" variant="danger">LLM 关</UiTag>
             </div>
@@ -51,7 +54,12 @@
         <template v-else>
           <UiCard padding="md" shadow="sm" class="form-card">
             <div class="form-title">
-              <span class="mono">群 {{ selectedGroupId }}</span>
+              <span class="form-title-text">
+                <UiTag size="sm" :variant="selectedIsPrivate ? 'success' : 'info'">
+                  {{ selectedIsPrivate ? '私聊' : '群聊' }}
+                </UiTag>
+                <span class="mono">{{ displayId(selectedGroupId) }}</span>
+              </span>
               <div class="form-actions">
                 <UiButton
                   variant="danger"
@@ -235,6 +243,13 @@ function emptyDraft() {
   return Object.fromEntries(FIELDS.map(f => [f, null]))
 }
 
+function displayId(key) {
+  if (!key) return ''
+  return key.startsWith('private:') ? key.slice('private:'.length) : key
+}
+
+const selectedIsPrivate = computed(() => selectedGroupId.value.startsWith('private:'))
+
 const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
@@ -334,15 +349,15 @@ async function selectGroup(groupId) {
 }
 
 function startAdd() {
-  const raw = prompt('新群号（5-12 位数字）')
+  const raw = prompt('新增覆盖对象：\n- 群聊请填 5-12 位群号\n- 私聊请填 private:USER_ID（例 private:123456789）')
   if (!raw) return
-  const gid = raw.trim()
-  if (!/^\d{5,12}$/.test(gid)) {
-    toast('群号不合法', 'error')
+  const key = raw.trim()
+  if (!/^(?:\d{5,12}|private:\d{5,15})$/.test(key)) {
+    toast('格式不合法', 'error')
     return
   }
-  if (hasChanges.value && !confirm('当前群的修改未保存，切换会丢失。是否继续？')) return
-  selectedGroupId.value = gid
+  if (hasChanges.value && !confirm('当前修改未保存，切换会丢失。是否继续？')) return
+  selectedGroupId.value = key
   original.value = emptyDraft()
   draftTriState.value = emptyDraft()
 }
@@ -370,7 +385,8 @@ async function onSave() {
 }
 
 async function onClear() {
-  if (!confirm(`清空群 ${selectedGroupId.value} 的全部 override？该群将恢复到默认配置。`)) return
+  const label = (selectedIsPrivate.value ? '私聊 ' : '群 ') + displayId(selectedGroupId.value)
+  if (!confirm(`清空 ${label} 的全部 override？该会话将恢复到默认配置。`)) return
   try {
     await clearGroupSettings(selectedGroupId.value)
     toast('已清空')

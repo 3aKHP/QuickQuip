@@ -14,12 +14,17 @@ logger = logging.getLogger(__name__)
 
 _DB = PROJECT_ROOT / "data" / "llm.db"
 _LLM_TOML = PROJECT_ROOT / "config" / "llm.toml"
-_GROUP_ID_RE = re.compile(r"^\d{5,12}$")
+
+# group_settings is keyed by LLMService.build_chat_scope_key output, which is
+# the raw numeric group_id for groups and "private:USER_ID" for private chats.
+# Both forms must be accepted; everything else is rejected to stop path-ish
+# inputs from reaching SQL.
+_SCOPE_KEY_RE = re.compile(r"^(?:\d{5,12}|private:\d{5,15})$")
 
 
 def _validate_group_id(group_id: str) -> None:
-    if not _GROUP_ID_RE.match(group_id):
-        raise HTTPException(status_code=422, detail="group_id must be 5-12 digits")
+    if not _SCOPE_KEY_RE.match(group_id):
+        raise HTTPException(status_code=422, detail="scope key must be 5-12 digits or 'private:USER_ID'")
 
 
 def _store() -> LLMStore:
@@ -101,6 +106,7 @@ def list_group_settings():
         "groups": [
             {
                 "group_id": row["group_id"],
+                "type": "private" if row["group_id"].startswith("private:") else "group",
                 "enabled": None if row["enabled"] is None else bool(row["enabled"]),
                 "memory_enabled": None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
                 "provider_id": row["provider_id"],
