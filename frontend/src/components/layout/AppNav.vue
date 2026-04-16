@@ -6,14 +6,20 @@
     </span>
 
     <div class="nav-items">
-      <UiNavItem
+      <router-link
         v-for="item in items"
         :key="item.key"
-        :label="item.label"
-        :icon="item.icon"
-        :active="activeKey === item.key"
-        @click="$emit('update:activeKey', item.key)"
-      />
+        :to="item.path"
+        custom
+        v-slot="{ navigate, isActive }"
+      >
+        <UiNavItem
+          :label="item.label"
+          :icon="item.icon"
+          :active="isActive"
+          @click="navigate"
+        />
+      </router-link>
     </div>
 
     <span class="nav-spacer" />
@@ -34,10 +40,9 @@ export default {
   components: { UiNavItem, UiButton, UiIcon },
   props: {
     items: { type: Array, required: true },
-    activeKey: { type: String, required: true },
     logoutDisabled: { type: Boolean, default: false },
   },
-  emits: ['update:activeKey', 'logout'],
+  emits: ['logout'],
 }
 </script>
 

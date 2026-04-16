@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Web 管理后台引入 `vue-router` 4（hash 模式）：`config/nav.js` 扩展 `path` 字段作为路由表唯一来源，`AppNav` 改用 `<router-link>`，支持 URL 深链接（`/ops/#/stats` 等）与浏览器前进后退；抽出 `composables/useAuth.js` 承载全局登录态、`composables/useAsyncData.js` 供后续新视图复用 loading/error/refresh 模板。hash 模式选择原因：nginx 端 `auth_basic` 外门和 FastAPI session cookie 内门的既有分层无需改动，任何深链刷新都只命中 `/ops/` 静态根，不需要额外的 SPA fallback 配置
 - 语境感知回复子系统 `context_rules`：在普通 `[[rules]]` 与时区回复之间新增一层判定，`patterns` 首筛命中后再做上下文校验，只有语境合适时才触发；支持两种 `type`：`regex_context`（在最近 N 条消息中搜索 `context_conditions` 正则）和 `llm_context`（用超短 prompt 调用 LLM 返回 `{"trigger": true/false}` JSON）；LLM 判定带 `asyncio.wait_for` 超时（默认 2s）和按 `(rule_name, group_id, text)` 的 TTL 结果缓存（默认 60s，可通过 `llm_cache_ttl` 覆盖），降低常见触发词的调用成本
 - `LLMService.quick_judge`：用于 `context_rules` 的极速判定入口，不走群配置 / 不注入记忆 / 不启用工具，单条 system+user prompt，`temperature=0.0`、`stream_enabled=False`
 - 《新三国》梗默认入库（`chat_rules.toml.example`）：18 条直接 rules + 7 条 context_rules，共用 `new_three_kingdoms` 限流桶；`chat_rules.toml.example` 新增 `[[context_rules]]` 完整文档段与两条注释化示例

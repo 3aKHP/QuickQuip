@@ -8,15 +8,15 @@
   <div v-else-if="authReady" class="layout">
     <AppNav
       :items="NAV_ITEMS"
-      :active-key="view"
       :logout-disabled="authBusy"
-      @update:active-key="view = $event"
       @logout="handleLogout"
     />
     <main>
-      <Transition name="fade" mode="out-in">
-        <component :is="activeComponent" :key="view" />
-      </Transition>
+      <router-view v-slot="{ Component }">
+        <Transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </router-view>
     </main>
     <Transition name="toast">
       <div v-if="toastMsg" class="toast" :class="toastType">
@@ -33,95 +33,36 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { onMounted, onBeforeUnmount } from 'vue'
 import LoginView from './views/LoginView.vue'
 import AppNav from './components/layout/AppNav.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
 import { toastMsg, toastType } from './toast.js'
-import { getAuthState, login, logout } from './api/auth.js'
-import { setUnauthorizedHandler } from './api/index.js'
 import { NAV_ITEMS } from './config/nav.js'
+import { useAuth } from './composables/useAuth.js'
 
-export default {
-  components: {
-    LoginView,
-    AppNav, UiCard, UiIcon,
-  },
-  data: () => ({
-    view: 'stats',
-    authReady: false,
-    authenticated: false,
-    authBusy: false,
-    authError: '',
-    toastMsg,
-    toastType,
-    NAV_ITEMS,
-  }),
-  computed: {
-    activeComponent() {
-      const item = NAV_ITEMS.find(i => i.key === this.view)
-      return item ? item.component : null
-    },
-  },
-  created() {
-    setUnauthorizedHandler(() => {
-      this.authenticated = false
-      this.authReady = true
-      this.authBusy = false
-      this.authError = '登录状态已失效，请重新登录。'
-    })
-    this.initializeAuth()
-  },
-  beforeUnmount() {
-    setUnauthorizedHandler(null)
-  },
-  methods: {
-    async initializeAuth() {
-      this.authReady = false
-      this.authError = ''
-      try {
-        await getAuthState()
-        this.authenticated = true
-      } catch (error) {
-        if (error.status !== 401) {
-          this.authError = error.data?.detail || error.message || '鉴权检查失败'
-        }
-        this.authenticated = false
-      } finally {
-        this.authReady = true
-      }
-    },
-    async handleLogin(password) {
-      this.authBusy = true
-      this.authError = ''
-      try {
-        await login(password)
-        this.authenticated = true
-        toastMsg.value = null
-      } catch (error) {
-        this.authenticated = false
-        this.authError = error.status === 401
-          ? '口令错误，请重试。'
-          : (error.data?.detail || error.message || '登录失败')
-      } finally {
-        this.authBusy = false
-      }
-    },
-    async handleLogout() {
-      this.authBusy = true
-      this.authError = ''
-      try {
-        await logout()
-      } catch (error) {
-        this.authError = error.data?.detail || error.message || '退出失败'
-      } finally {
-        this.authenticated = false
-        this.authBusy = false
-      }
-    },
-  },
-}
+const {
+  authReady,
+  authenticated,
+  authBusy,
+  authError,
+  initializeAuth,
+  handleLogin,
+  handleLogout,
+  attachUnauthorizedHandler,
+  detachUnauthorizedHandler,
+} = useAuth()
+
+onMounted(() => {
+  attachUnauthorizedHandler()
+  initializeAuth()
+})
+
+onBeforeUnmount(() => {
+  detachUnauthorizedHandler()
+})
 </script>
 
 <style>
