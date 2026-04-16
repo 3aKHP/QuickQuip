@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Web 管理后台新增"群 LLM"标签页：按群覆盖 `llm.db` → `group_settings` 表中的 9 个字段（enabled / memory_enabled / provider_id / model / persona_id / trigger_prefix / allow_prefix / allow_at / history_limit）；三态语义支持"跟随默认/开/关"，每个文本/数值字段可点"跟随"按钮回落到 llm.toml 里的默认值；右侧表单仅在字段相对加载快照有变化时才 `PUT`（服务端使用 `model_dump(exclude_unset=True)` 仅落表被改的列），避免无谓 row 膨胀；后端路由 `group_settings.py` 额外暴露 `GET /api/group-settings/options`，把 `llm.toml` 里的 provider/persona 清单与当前 runtime/trigger 默认值一次返回给前端做下拉与 placeholder
 - Web 管理后台新增"对话"标签页：浏览 `data/llm.db` 的 `conversation_messages` 表，左侧按 `group_id` 列出所有会话（群聊/私聊/归档自动分类），右侧以聊天流式展示消息（role 彩色标记、发送者名、时间、内容全文）；支持关键词过滤与游标翻页（`before_id`），可按单条删除用于回溯和脏数据清理；后端 `conversations.py` 用严格正则校验三种合法的 `group_id` 形态（`\d{5,12}` / `private:\d{5,15}` / `archive:\d{5,15}:\d{1,6}`）防止路径穿越
 - "配置"标签页改造为多文件编辑器：新增 `chat_rules.toml` 的在线编辑入口，保留原 `llm.toml`；后端 `GET/PUT /api/config/llm` 泛化为 `GET/PUT /api/config/{key}`，新增 `GET /api/config` 列表端点；白名单机制防止路径穿越；页头补充"保存后需重启 bot 才会生效"提示；切换文件时若有未保存修改会弹确认
 - Web 管理后台新增"人格"标签页：列出 `config/personas/*.toml`、读取/编辑单个 TOML、新建与删除；`_shared.toml` 标记为共享且不可删除；后端 `personas.py` 路由按照 `[A-Za-z0-9_][A-Za-z0-9_-]{0,63}` 强校验文件名防止路径穿越，写入前做 `tomllib.loads` 校验，并以 `filelock` 串行化并发写入
