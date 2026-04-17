@@ -1607,4 +1607,82 @@ finally:
 
 assert reasoning_sanitized_result["reply"] == "给群友看的答案"
 
+# --- Forward message parsing tests ---
+
+# 1. render_message_for_llm handles dict-like segments (plain dicts from API)
+dict_message = [
+    {"type": "text", "data": {"text": "hello "}},
+    {"type": "at", "data": {"qq": "2002"}},
+    {"type": "text", "data": {"text": " world"}},
+    {"type": "image", "data": {"url": "https://example.test/dict-img.png"}},
+]
+dict_rendered = render_message_for_llm(dict_message, bot_self_id="12345", identity_index=identity_index)
+assert dict_rendered.text == "hello @镜子 world", f"got: {dict_rendered.text}"
+assert dict_rendered.image_urls == ["https://example.test/dict-img.png"]
+
+# 2. extract_llm_input carries forward content
+forward_input = extract_llm_input(
+    DummyMessage([DummySegment("text", {"text": "/ai 看看这个"})]),
+    "12345",
+    prefix_settings,
+    forward_text="1. Alice（QQ 10001）：你好\n2. Bob（QQ 10002）：[图片]",
+    forward_image_urls=["https://example.test/fwd.png"],
+)
+assert forward_input is not None
+assert forward_input.prompt == "看看这个"
+assert forward_input.forward_text == "1. Alice（QQ 10001）：你好\n2. Bob（QQ 10002）：[图片]"
+assert forward_input.forward_image_urls == ["https://example.test/fwd.png"]
+
+# 3. build_user_message_content with forward only
+from quickquip.llm.prompting import build_user_message_content
+
+forward_only_content = build_user_message_content(
+    prompt="你怎么看？",
+    forward_text="1. Alice（QQ 10001）：你好",
+    forward_image_urls=["https://example.test/fwd.png"],
+    max_quoted_message_chars=1200,
+)
+assert "以下是用户转发的合并消息" in forward_only_content
+assert "1. Alice（QQ 10001）：你好" in forward_only_content
+assert "转发附图：1 张" in forward_only_content
+assert "当前用户消息：" in forward_only_content
+assert "你怎么看？" in forward_only_content
+
+# 4. build_user_message_content with both quoted and forward
+both_content = build_user_message_content(
+    prompt="你怎么看？",
+    quoted_text="原来的消息",
+    quoted_sender_name="镜子",
+    quoted_user_id="2002",
+    quoted_image_urls=["https://example.test/q.png"],
+    forward_text="1. Alice（QQ 10001）：转发内容",
+    forward_image_urls=["https://example.test/f.png"],
+    max_quoted_message_chars=1200,
+)
+assert "以下是当前用户显式引用的消息" in both_content
+assert "以下是用户转发的合并消息" in both_content
+assert "引用附图：1 张" in both_content
+assert "转发附图：1 张" in both_content
+
+# 5. generate_reply with forward parameter
+llm_runtime_module.build_provider_client = lambda provider: StubProviderClient()
+try:
+    forward_result = asyncio.run(
+        service.generate_reply(
+            group_id=1004,
+            user_id=2002,
+            sender_name="测试用户",
+            prompt="分析一下",
+            forward_text="1. Alice（QQ 10001）：这是合并转发",
+            forward_image_urls=["https://example.test/forward.png"],
+        )
+    )
+finally:
+    llm_runtime_module.build_provider_client = original_builder
+
+assert forward_result["reply"].startswith("stub::gpt-test::")
+assert "以下是用户转发的合并消息" in StubProviderClient.last_request.messages[-1].content
+assert "1. Alice（QQ 10001）：这是合并转发" in StubProviderClient.last_request.messages[-1].content
+assert StubProviderClient.last_request.messages[-1].image_urls == ["https://example.test/forward.png"]
+
 print("LLM 测试通过")

@@ -391,6 +391,8 @@ def build_user_message_content(
     quoted_sender_name: str = "",
     quoted_user_id: str = "",
     quoted_image_urls: list[str] | None = None,
+    forward_text: str = "",
+    forward_image_urls: list[str] | None = None,
     max_quoted_message_chars: int,
     identities=None,
     sender_name: str = "",
@@ -399,23 +401,42 @@ def build_user_message_content(
     normalized_prompt = prompt.strip()
     normalized_quoted_text = quoted_text.strip()[:max_quoted_message_chars]
     normalized_quoted_images = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
-    if not normalized_quoted_text and not normalized_quoted_images:
+    normalized_forward_text = forward_text.strip()[:max_quoted_message_chars]
+    normalized_forward_images = [url.strip() for url in (forward_image_urls or []) if url.strip()]
+
+    has_quoted = bool(normalized_quoted_text or normalized_quoted_images)
+    has_forward = bool(normalized_forward_text or normalized_forward_images)
+
+    if not has_quoted and not has_forward:
         return normalized_prompt
 
-    lines = ["以下是当前用户显式引用的消息，请结合它理解本轮提问："]
-    requester_label = format_quoted_speaker(sender_name, user_id, identities=identities) if (sender_name or user_id) else ""
-    if requester_label:
-        lines.append(f"- 当前提问者：{requester_label}")
-    lines.append(f"- 引用发送者：{format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)}")
-    if normalized_quoted_text:
-        lines.append(f"- 引用内容：{normalized_quoted_text}")
-    if normalized_quoted_images:
-        lines.append(f"- 引用附图：{len(normalized_quoted_images)} 张")
+    lines: list[str] = []
+
+    if has_quoted:
+        lines.append("以下是当前用户显式引用的消息，请结合它理解本轮提问：")
+        requester_label = format_quoted_speaker(sender_name, user_id, identities=identities) if (sender_name or user_id) else ""
+        if requester_label:
+            lines.append(f"- 当前提问者：{requester_label}")
+        lines.append(f"- 引用发送者：{format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)}")
+        if normalized_quoted_text:
+            lines.append(f"- 引用内容：{normalized_quoted_text}")
+        if normalized_quoted_images:
+            lines.append(f"- 引用附图：{len(normalized_quoted_images)} 张")
+
+    if has_forward:
+        if has_quoted:
+            lines.append("")
+        lines.append("以下是用户转发的合并消息，请结合它理解本轮提问：")
+        if normalized_forward_text:
+            lines.append(normalized_forward_text)
+        if normalized_forward_images:
+            lines.append(f"转发附图：{len(normalized_forward_images)} 张")
+
     if normalized_prompt:
         lines.append("当前用户消息：")
         lines.append(normalized_prompt)
     else:
-        lines.append("当前用户没有额外文字，请优先围绕引用消息作答。")
+        lines.append("当前用户没有额外文字，请优先围绕上述消息作答。")
     return "\n".join(lines)
 
 

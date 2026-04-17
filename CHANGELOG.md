@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- LLM 对话支持合并转发消息：用户在群聊/私聊中转发合并消息时，bot 自动通过 `get_forward_msg` API 拉取内容，将每条子消息格式化为编号列表（含发言者名/QQ 号）后注入 LLM 上下文；图片 URL 同步合并到多模态输入；`ExtractedLLMInput` 新增 `forward_text` / `forward_image_urls` 字段，`build_user_message_content` / `generate_reply` / `generate_private_reply` 全链路透传
+
 ## [0.8.0] - 2026-04-17
 
 ### 新增
