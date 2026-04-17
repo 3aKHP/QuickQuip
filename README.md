@@ -31,7 +31,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 ### 🎭 文字彩蛋规则
 
-内置多条基于正则匹配的趣味回复规则，支持优先级排序：
+内置多条基于正则匹配的趣味回复规则，支持优先级排序（`chat_rules.toml.example` 自 0.8.0 起默认收录《新三国》全套 25 条梗文作为开箱即用的彩蛋库）：
 
 | 规则名称 | 触发示例 | 回复示例 | 优先级 |
 |---------|---------|---------|--------|
@@ -46,6 +46,15 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | `like_reply` | 我喜欢XX / 喜欢XX | 还在XX | 60 |
 | `huaizhen_oversize` | 怀真 / 赵怀真 | 赵怀真还不超标啊 | 50 |
 | `i_do` | 我XX（过滤常见口语） | 不准XX | 20 |
+
+### 🧩 语境感知回复
+
+除了普通正则规则，还支持"语境感知规则"（`[[context_rules]]`）：`patterns` 首筛命中后不会立刻回复，而是再做一层上下文判定，语境合适才触发。两种判定模式：
+
+- `regex_context`：在最近 N 条消息中搜索 `context_conditions` 正则，命中即通过
+- `llm_context`：用一个极短 prompt 调用当前群绑定的 LLM 做 yes/no 裁决，带超时保护和 TTL 结果缓存
+
+适合"曹操求药"这种只有在上下文出现关键线索时才该接的梗。配置示例见 `config/chat_rules.toml.example` 的 `[[context_rules]]` 段。
 
 ### 🔗 "好女孩"接龙
 
@@ -223,6 +232,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | 复读跟读 | 8 次/分钟 | 3 次/分钟 |
 | 接龙回复 | 20 次/分钟 | 10 次/分钟 |
 
+自 0.8.0 起，每条规则可在 `[rate_limit_rules]` 里声明 `scope = "group" | "global"`（默认 `group`）。`scope="group"` 的规则按群独立分桶，群 A 的触发不消耗群 B 的预算；`scope="global"` 的规则（`llm_chat` / `web_search` / `tieba_random_post` / `tavily_search`）把所有群 + 私聊合并到同一个桶，用于保护跨会话共享的外部 API 和爬虫池。
+
 ---
 
 ## 📁 项目结构
@@ -392,7 +403,14 @@ QuickQuip/
    python web_api.py
    ```
 
-   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面，提供消息统计、群级规则开关、群组管理和 `config/llm.toml` 在线编辑功能。后台会先检查浏览器中的应用层 session；首次进入时需要输入 `WEB_ADMIN_PASSWORD` 建立会话。监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。
+   访问 `http://127.0.0.1:5104/ops/` 即可打开管理界面。后台会先检查浏览器中的应用层 session，首次进入需要输入 `WEB_ADMIN_PASSWORD` 建立会话；监听地址可通过 `WEB_ADMIN_HOST` / `WEB_ADMIN_PORT` 环境变量覆盖。自 0.8.0 起，管理后台提供以下标签页：
+
+   - **统计 / 规则 / 群组** — 消息数、用户排行、规则触发 Top；按群启用/禁用任意规则；每日总结/播报群管理
+   - **记忆 / 总结 / 对话** — 按群浏览与编辑 LLM 长期记忆；查阅/删除每日总结；按群浏览 LLM 对话历史（含私聊/归档，支持关键词过滤、游标翻页、按单条删除）
+   - **人格 / 群 LLM / 配置** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）；按群覆盖 provider/model/persona/前缀/历史条数等 9 个 runtime 字段；`config/llm.toml` 与 `config/chat_rules.toml` 多文件编辑器
+   - **限流 / 贴吧 / 词云** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）；贴吧帖子池浏览（同步状态/关键词搜索/图文详情）；词云生成（4 档时间窗、Top 词频排行、图片下载）
+
+   前端使用 `vue-router` 4 的 hash 模式，深链接形如 `/ops/#/stats`，无需 nginx 端增加 SPA fallback 即可支持刷新和前进后退。
 
 8. **启动机器人**
 

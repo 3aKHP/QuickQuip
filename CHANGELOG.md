@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-17
+
 ### 新增
 
 - `rate_limit_rules` 支持 `scope = "group" | "global"` 字段：`scope="group"`（默认）按群独立分桶，群 A 的触发不消耗群 B 的预算；`scope="global"` 所有群 + 私聊合并到同一个桶，用于保护跨会话共享资源（LLM、搜索、爬虫）。built-in 规则中 `llm_chat`/`web_search`/`tieba_random_post`/`tavily_search` 标为 `global`，其余 6 条保持 `group`；`chat_rules.toml.example` 的 `[rate_limit_rules]` 文档段补充 `scope` 字段说明
@@ -133,7 +135,8 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/3aKHP/QuickQuip/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/3aKHP/QuickQuip/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/3aKHP/QuickQuip/compare/bfdfcd0...v0.5.0
