@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
+### 修复
+
+- Web 管理后台贴吧标签页图片无法显示：`tiebapic.baidu.com` 对带 `Origin` 头的跨域请求返回 403，新增后端图片代理端点 `GET /ops/api/tieba/imgproxy?url=...`（仅允许 `*.baidu.com` 域名），前端封面图和详情图均改走代理
+
 ### 新增
+
+- Web 管理后台贴吧标签页支持手动触发爬取：`GET /ops/api/tieba/sync?forum=...` 以 SSE 流式返回每条帖子的抓取进度；`crawler.collect_threads` 新增 `on_progress` 回调参数，`service.sync_now` 透传；前端页面头部新增"立即同步全部"按钮，每个贴吧条目右侧新增单吧同步按钮，同步过程实时展示日志面板，完成后自动刷新贴吧列表
 
 - LLM 对话支持合并转发消息：用户在群聊/私聊中转发合并消息时，bot 自动通过 `get_forward_msg` API 拉取内容，将每条子消息格式化为编号列表（含发言者名/QQ 号）后注入 LLM 上下文；图片 URL 同步合并到多模态输入；`ExtractedLLMInput` 新增 `forward_text` / `forward_image_urls` 字段，`build_user_message_content` / `generate_reply` / `generate_private_reply` 全链路透传
 
