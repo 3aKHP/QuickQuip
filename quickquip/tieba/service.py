@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from quickquip.tieba.store import TiebaStore, TiebaThread
 from quickquip.tieba.config import (
@@ -90,7 +91,13 @@ class TiebaService:
                 lines.append(f"- {forum_keyword}吧：{item['message']}")
         return "\n".join(lines)
 
-    async def sync_now(self, *, force: bool = False, forum_keyword: str | None = None) -> dict[str, object]:
+    async def sync_now(
+        self,
+        *,
+        force: bool = False,
+        forum_keyword: str | None = None,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> dict[str, object]:
         async with self._sync_lock:
             selected_forums = self._resolve_forum_keywords(forum_keyword)
             results: list[dict[str, object]] = []
@@ -110,10 +117,14 @@ class TiebaService:
                     continue
 
                 self.store.record_sync_started(selected_forum)
+                if on_progress:
+                    on_progress(f"▶ 开始同步 {selected_forum}吧")
                 try:
-                    threads = await self.crawler.collect_threads(selected_forum)
+                    threads = await self.crawler.collect_threads(selected_forum, on_progress=on_progress)
                 except TiebaLoginRequiredError as exc:
                     self.store.record_sync_failure(selected_forum, str(exc), login_required=True)
+                    if on_progress:
+                        on_progress(f"✗ {selected_forum}吧 需要重新登录：{exc}")
                     if len(selected_forums) == 1:
                         raise
                     results.append(
@@ -129,6 +140,8 @@ class TiebaService:
                 except PLAYWRIGHT_ERROR_TYPES as exc:
                     message = f"Playwright 访问失败：{exc}"
                     self.store.record_sync_failure(selected_forum, message)
+                    if on_progress:
+                        on_progress(f"✗ {selected_forum}吧 {message}")
                     if len(selected_forums) == 1:
                         raise TiebaServiceError(message) from exc
                     results.append(
@@ -143,6 +156,8 @@ class TiebaService:
                     continue
                 except TiebaServiceError as exc:
                     self.store.record_sync_failure(selected_forum, str(exc))
+                    if on_progress:
+                        on_progress(f"✗ {selected_forum}吧 {exc}")
                     if len(selected_forums) == 1:
                         raise
                     results.append(
@@ -158,6 +173,8 @@ class TiebaService:
                 except Exception as exc:
                     message = f"贴吧同步异常：{exc}"
                     self.store.record_sync_failure(selected_forum, message)
+                    if on_progress:
+                        on_progress(f"✗ {selected_forum}吧 {message}")
                     if len(selected_forums) == 1:
                         raise TiebaServiceError(message) from exc
                     results.append(
@@ -172,6 +189,8 @@ class TiebaService:
                     continue
 
                 updated = self.store.record_sync_success(selected_forum, threads)
+                if on_progress:
+                    on_progress(f"✓ {selected_forum}吧 同步完成，新增/更新 {updated} 条，共 {self.store.count((selected_forum,))} 条")
                 results.append(
                     {
                         "forum_keyword": selected_forum,
@@ -227,6 +246,13 @@ class TiebaService:
             prefer_images=self.config.prefer_image_threads,
             avoid_recent=self.config.random_avoid_recent,
         )
+
+    async def peek_random_thread(self, forum_keyword: str) -> TiebaThread | None:
+        """现爬指定吧首页，随机返回一个帖子，不写入 pool。"""
+        import random
+        threads = await self.crawler.collect_threads(forum_keyword, limit=5)
+        valid = [t for t in threads if t.cover_image_url or t.image_urls]
+        return random.choice(valid) if valid else (random.choice(threads) if threads else None)
 
     def is_login_required(self, forum_keyword: str | None = None) -> bool:
         selected_forums = self._resolve_forum_keywords(forum_keyword, require_enabled=False)
