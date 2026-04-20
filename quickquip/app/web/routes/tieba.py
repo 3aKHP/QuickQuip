@@ -1,8 +1,17 @@
+import asyncio
 import re
+import urllib.request
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
 
 from quickquip.tieba.service import tieba_service
+
+_ALLOWED_IMAGE_HOST_RE = re.compile(r"^https?://[^/]*\.baidu\.com/")
+_IMAGE_PROXY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://tieba.baidu.com/",
+}
 
 router = APIRouter()
 
@@ -110,3 +119,52 @@ def get_thread(forum: str, tid: str):
         **thread.to_dict(),
         "was_sent": tid in state.recent_sent_ids,
     }
+
+
+@router.get("/tieba/imgproxy")
+def proxy_image(url: str = Query(..., max_length=512)):
+    if not _ALLOWED_IMAGE_HOST_RE.match(url):
+        raise HTTPException(status_code=422, detail="url not allowed")
+    try:
+        req = urllib.request.Request(url, headers=_IMAGE_PROXY_HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content_type = resp.headers.get("Content-Type", "image/jpeg")
+            data = resp.read(5 * 1024 * 1024)  # 5 MB cap
+    except Exception:
+        raise HTTPException(status_code=502, detail="image fetch failed")
+    return Response(content=data, media_type=content_type)
+
+
+@router.get("/tieba/sync")
+async def sync_tieba(forum: str | None = Query(default=None, max_length=32)):
+    if forum is not None:
+        _validate_forum(forum)
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def push(msg: str) -> None:
+        queue.put_nowait(msg)
+
+    async def run() -> None:
+        try:
+            await tieba_service.sync_now(force=True, forum_keyword=forum, on_progress=push)
+        except Exception as exc:
+            push(f"✗ 同步失败：{exc}")
+        finally:
+            queue.put_nowait(None)
+
+    asyncio.create_task(run())
+
+    async def event_stream():
+        while True:
+            msg = await queue.get()
+            if msg is None:
+                yield "data: [done]\n\n"
+                break
+            yield f"data: {msg}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
