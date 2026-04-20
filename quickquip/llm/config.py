@@ -52,6 +52,8 @@ class MCPServerConfig:
     args: list[str] = field(default_factory=list)
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     image: str = ""
     docker_command: str = "docker"
     docker_args: list[str] = field(default_factory=list)
@@ -299,6 +301,7 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
             continue
 
         raw_env = _as_dict(entry.get("env"))
+        raw_headers = _as_dict(entry.get("headers"))
         servers.append(
             MCPServerConfig(
                 id=server_id,
@@ -317,6 +320,8 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
                 args=[str(item) for item in entry.get("args", []) if str(item).strip()],
                 cwd=str(entry.get("cwd", "")).strip() or None,
                 env={str(k): str(v) for k, v in raw_env.items()},
+                url=str(entry.get("url", "")).strip(),
+                headers={str(k): str(v) for k, v in raw_headers.items()},
                 image=str(entry.get("image", "")).strip(),
                 docker_command=str(entry.get("docker_command", "docker")).strip() or "docker",
                 docker_args=[str(item) for item in entry.get("docker_args", []) if str(item).strip()],

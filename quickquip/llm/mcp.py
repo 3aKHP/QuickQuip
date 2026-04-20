@@ -12,6 +12,13 @@ import re
 import tempfile
 from typing import Any
 
+try:
+    import httpx
+    _HTTPX_AVAILABLE = True
+except ModuleNotFoundError:
+    httpx = None  # type: ignore[assignment]
+    _HTTPX_AVAILABLE = False
+
 from quickquip.llm.config import MCPConfig, MCPServerConfig
 from quickquip.llm.tools import ToolExecutionContext
 
@@ -452,9 +459,138 @@ class StdioMCPClient:
         self._stdout_buffer.clear()
 
 
+class HttpMCPClient:
+    """MCP Streamable HTTP transport client (single POST endpoint, SSE responses)."""
+
+    def __init__(self, config: MCPServerConfig):
+        self.config = config
+        self._session_id: str | None = None
+        self._client: httpx.AsyncClient | None = None
+        self.server_info: dict[str, Any] = {}
+
+    async def start(self) -> None:
+        if not _HTTPX_AVAILABLE:
+            raise MCPError("HTTP MCP transport 需要 httpx，请执行 pip install httpx")
+        if not self.config.url:
+            raise MCPError(f"MCP server {self.config.id} 缺少 url")
+        self._client = httpx.AsyncClient(
+            headers=self.config.headers,
+            timeout=self.config.timeout_seconds,
+        )
+        await self._initialize()
+
+    async def _initialize(self) -> None:
+        result, session_id = await self._post(
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": self.config.protocol_version,
+                "capabilities": {},
+                "clientInfo": {"name": "QuickQuip", "version": "1.0"},
+            }},
+            session_id=None,
+        )
+        self._session_id = session_id
+        self.server_info = result.get("serverInfo", {}) if isinstance(result, dict) else {}
+        # send initialized notification (no response expected)
+        await self._post(
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            session_id=self._session_id,
+            expect_response=False,
+        )
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        tools: list[dict[str, Any]] = []
+        cursor: str | None = None
+        req_id = 2
+        while True:
+            params: dict[str, Any] = {}
+            if cursor:
+                params["cursor"] = cursor
+            result, _ = await self._post(
+                {"jsonrpc": "2.0", "id": req_id, "method": "tools/list", "params": params},
+                session_id=self._session_id,
+            )
+            req_id += 1
+            current = result.get("tools", []) if isinstance(result, dict) else []
+            tools.extend(item for item in current if isinstance(item, dict))
+            cursor = str(result.get("nextCursor", "")).strip() if isinstance(result, dict) else ""
+            if not cursor:
+                break
+        return tools
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolCallResult:
+        result, _ = await self._post(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": {"name": tool_name, "arguments": arguments}},
+            session_id=self._session_id,
+        )
+        if not isinstance(result, dict):
+            raise MCPError(f"MCP 工具 {tool_name} 返回了不可识别的响应")
+        return _format_tool_result(result)
+
+    async def _post(
+        self,
+        payload: dict[str, Any],
+        *,
+        session_id: str | None,
+        expect_response: bool = True,
+    ) -> tuple[dict[str, Any], str | None]:
+        assert self._client is not None
+        headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+        if session_id:
+            headers["mcp-session-id"] = session_id
+
+        try:
+            response = await self._client.post(
+                self.config.url,
+                content=json.dumps(payload, ensure_ascii=False).encode(),
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+        except httpx.RequestError as exc:
+            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+
+        returned_session = response.headers.get("mcp-session-id") or session_id
+
+        if not expect_response or response.status_code == 204:
+            return {}, returned_session
+
+        body = response.text
+        content_type = response.headers.get("content-type", "")
+
+        if "text/event-stream" in content_type:
+            result = self._parse_sse_result(body)
+        else:
+            result = response.json()
+
+        if isinstance(result, dict) and "error" in result:
+            error = result["error"]
+            detail = error.get("message", "未知错误") if isinstance(error, dict) else str(error)
+            raise MCPError(str(detail))
+
+        inner = result.get("result", result) if isinstance(result, dict) else result
+        return (inner if isinstance(inner, dict) else {}), returned_session
+
+    def _parse_sse_result(self, body: str) -> dict[str, Any]:
+        for line in body.splitlines():
+            if line.startswith("data:"):
+                data = line[5:].strip()
+                try:
+                    return json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+        raise MCPError(f"MCP server {self.config.id} SSE 响应中未找到有效 data 行")
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+
 class MCPClientManager:
     def __init__(self):
-        self._clients: dict[str, StdioMCPClient] = {}
+        self._clients: dict[str, StdioMCPClient | HttpMCPClient] = {}
         self._bindings: dict[str, MCPToolBinding] = {}
         self._statuses: dict[str, MCPServerStatus] = {}
 
@@ -502,11 +638,14 @@ class MCPClientManager:
                 transport=server.transport,
                 enabled=True,
             )
-            client: StdioMCPClient | None = None
+            client: StdioMCPClient | HttpMCPClient | None = None
             try:
-                if force_pull and server.transport == "docker":
-                    await self._pull_image(server)
-                client = StdioMCPClient(server)
+                if server.transport == "http":
+                    client = HttpMCPClient(server)
+                else:
+                    if force_pull and server.transport == "docker":
+                        await self._pull_image(server)
+                    client = StdioMCPClient(server)
                 await client.start()
                 tools = await client.list_tools()
                 server_bindings = self._build_bindings(server, tools)
@@ -578,13 +717,15 @@ class MCPClientManager:
             )
         return bindings
 
-    def _describe_server(self, server: MCPServerConfig, client: StdioMCPClient) -> str:
+    def _describe_server(self, server: MCPServerConfig, client: StdioMCPClient | HttpMCPClient) -> str:
         server_name = str(client.server_info.get("name", "")).strip()
         server_version = str(client.server_info.get("version", "")).strip()
         if server_name and server_version:
             return f"{server_name} {server_version}"
         if server_name:
             return server_name
+        if server.transport == "http":
+            return server.url
         if server.transport == "docker":
             return server.image
         return server.command

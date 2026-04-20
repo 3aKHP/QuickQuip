@@ -23,6 +23,9 @@ enabled = []
 [mcp]
 enabled = true
 
+# NOTE: docker transport 依赖 DooD（Docker-out-of-Docker），仅在宿主机直接运行时可用。
+# 容器内部署请改用 transport = "http" 或 transport = "stdio"。
+
 [[mcp.servers]]
 id = "github"
 transport = "docker"
@@ -61,13 +64,10 @@ env = { OWM_API_KEY = "${OWM_API_KEY}" }
 
 [[mcp.servers]]
 id = "prts_wiki"
-transport = "docker"
-enabled = "${MCP_PRTS_WIKI_ENABLED:-false}"
+transport = "http"
 timeout_seconds = 30
-image = "ghcr.io/3akhp/prts-mcp:latest"
-pull_policy = "always"  # 自动拉取最新镜像
-mounts = ["prts-mcp-data:/data/gamedata"]
-env = { GITHUB_TOKEN = "${GITHUB_TOKEN:-}" }
+url = "https://mcp.example.com/mcp"
+headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 
 # 每日早中晚播报配置。默认全局关闭；需要在群内执行 /briefing on 开启。
 [daily_briefing]

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- MCP 新增 `http` transport（MCP Streamable HTTP 协议）：`MCPServerConfig` 新增 `url` / `headers` 字段，`HttpMCPClient` 通过单端点 `POST` + `mcp-session-id` 会话管理与远端 MCP 服务器通信，支持 SSE 和 JSON 两种响应格式；`MCPClientManager.sync()` 按 transport 自动选择客户端类型；新增 `httpx>=0.27.0` 依赖；`llm.toml.example` 中 `prts_wiki` 改为 `http` transport 示例，并标注 `docker` transport 的 DooD 限制
+
 ### 修复
 
 - Web 管理后台贴吧标签页图片无法显示：`tiebapic.baidu.com` 对带 `Origin` 头的跨域请求返回 403，新增后端图片代理端点 `GET /ops/api/tieba/imgproxy?url=...`（仅允许 `*.baidu.com` 域名），前端封面图和详情图均改走代理
