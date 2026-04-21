@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quickquip.llm.inputs import extract_private_llm_input
 from quickquip.llm.rendering import render_message_for_llm
+from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.app.message_pipeline import (
     get_sender_name,
     llm_service,
@@ -20,7 +21,7 @@ def register_private_message_matcher(on_message):
     matcher = on_message(priority=60, block=False)
 
     @matcher.handle()
-    async def _(event):
+    async def _(bot, event):
         if getattr(event, "group_id", None) is not None or getattr(event, "message_type", "") == "group":
             return
         if _is_self_message(event):
@@ -47,12 +48,20 @@ def register_private_message_matcher(on_message):
         llm_settings = llm_service.get_chat_settings(user_id, chat_type="private")
         if not llm_settings.enabled:
             return
+        forward_text, forward_image_urls = await extract_forward_content(
+            bot=bot,
+            message=message,
+            bot_self_id=event.self_id,
+            identity_index=llm_service.identities,
+        )
         llm_input = extract_private_llm_input(
             message,
             event.self_id,
             llm_settings,
             identity_index=llm_service.identities,
             reply=getattr(event, "reply", None),
+            forward_text=forward_text,
+            forward_image_urls=forward_image_urls,
         )
 
         if llm_input is None:
@@ -71,6 +80,8 @@ def register_private_message_matcher(on_message):
             quoted_image_urls=llm_input.quoted_image_urls,
             quoted_sender_name=llm_input.quoted_sender_name,
             quoted_user_id=llm_input.quoted_user_id,
+            forward_text=llm_input.forward_text,
+            forward_image_urls=llm_input.forward_image_urls,
             message_id=message_id or None,
         )
         resp = await matcher.send(result["reply"])

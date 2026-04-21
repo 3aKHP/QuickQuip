@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
+from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.app.message_pipeline import (
     get_sender_name,
     llm_service,
@@ -25,7 +26,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
     matcher = on_message(priority=60, block=False)
 
     @matcher.handle()
-    async def _(event):
+    async def _(bot, event):
         if getattr(event, "group_id", None) is None or getattr(event, "message_type", "") == "private":
             return
         if _is_self_message(event):
@@ -56,6 +57,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
         trigger_context = recent_messages.list_recent(group_id, limit=20)
 
         llm_settings = llm_service.get_group_settings(group_id)
+        forward_text, forward_image_urls = await extract_forward_content(
+            bot=bot,
+            message=message,
+            bot_self_id=event.self_id,
+            identity_index=llm_service.identities,
+        )
         llm_input = extract_llm_input(
             message,
             event.self_id,
@@ -63,6 +70,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
             identity_index=llm_service.identities,
             reply=getattr(event, "reply", None),
             is_to_me=bool(getattr(event, "to_me", False)),
+            forward_text=forward_text,
+            forward_image_urls=forward_image_urls,
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
@@ -79,6 +88,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 quoted_image_urls=llm_input.quoted_image_urls,
                 quoted_sender_name=llm_input.quoted_sender_name,
                 quoted_user_id=llm_input.quoted_user_id,
+                forward_text=llm_input.forward_text,
+                forward_image_urls=llm_input.forward_image_urls,
                 message_id=message_id or None,
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))

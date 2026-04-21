@@ -47,6 +47,9 @@ config/llm.*.local.toml
 #Dev Filefolder
 dev/
 
+# Team-private MCP sidecar Dockerfiles (deployed via tar, not tracked)
+docker/*.Dockerfile
+
 # Frontend build output
 frontend/dist/
 frontend/node_modules/

@@ -45,7 +45,10 @@ def render_message_for_llm(
         return RenderedMessage(text=message.strip())
 
     segments = list(message)
-    if not segments or not any(hasattr(segment, "type") for segment in segments):
+    if not segments or not any(
+        hasattr(segment, "type") or isinstance(segment, dict)
+        for segment in segments
+    ):
         return RenderedMessage(text=str(message).strip())
 
     plain_parts: list[str] = []
@@ -55,8 +58,14 @@ def render_message_for_llm(
     identities = identity_index or IdentityIndex()
 
     for segment in segments:
-        segment_type = getattr(segment, "type", "")
-        data = getattr(segment, "data", {})
+        segment_type = getattr(segment, "type", None)
+        data = getattr(segment, "data", None)
+        if segment_type is None and isinstance(segment, dict):
+            segment_type = segment.get("type", "")
+        if data is None and isinstance(segment, dict):
+            data = segment.get("data", {})
+        segment_type = str(segment_type or "")
+        data = data or {}
         if segment_type == "at":
             qq = str(data.get("qq", "")).strip()
             if qq and qq == bot_key:

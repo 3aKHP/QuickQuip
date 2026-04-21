@@ -1009,6 +1009,8 @@ class LLMService:
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
         quoted_image_urls: list[str] | None = None,
+        forward_text: str = "",
+        forward_image_urls: list[str] | None = None,
         sender_name: str = "",
         user_id: str = "",
     ) -> str:
@@ -1018,6 +1020,8 @@ class LLMService:
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
             quoted_image_urls=quoted_image_urls,
+            forward_text=forward_text,
+            forward_image_urls=forward_image_urls,
             max_quoted_message_chars=MAX_QUOTED_MESSAGE_CHARS,
             identities=self.identities,
             sender_name=sender_name,
@@ -1222,16 +1226,20 @@ class LLMService:
         quoted_image_urls: list[str] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
+        forward_text: str = "",
+        forward_image_urls: list[str] | None = None,
         message_id: str | None = None,
     ) -> dict[str, str]:
         prompt = prompt.strip()
         normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
         normalized_quoted_text = quoted_text.strip()
         normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
-        if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls:
+        normalized_forward_text = forward_text.strip()
+        normalized_forward_image_urls = [url for url in (forward_image_urls or []) if url.strip()]
+        if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
 
-        if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls:
+        if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             return {
                 "reply": self.config.triggers.empty_prompt_reply,
                 "rate_limit_key": LLM_RULE_NAME,
@@ -1281,10 +1289,12 @@ class LLMService:
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
             quoted_image_urls=normalized_quoted_image_urls,
+            forward_text=normalized_forward_text,
+            forward_image_urls=normalized_forward_image_urls,
             sender_name=sender_name,
             user_id=str(user_id),
         )[: self.config.runtime.max_prompt_chars]
-        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
+        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls, normalized_forward_image_urls)
         default_history_limit = self._default_history_limit(chat_type)
         history = self.store.list_recent_conversation_messages(
             scope_key,
@@ -1413,6 +1423,8 @@ class LLMService:
         quoted_image_urls: list[str] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
+        forward_text: str = "",
+        forward_image_urls: list[str] | None = None,
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1427,6 +1439,8 @@ class LLMService:
             quoted_image_urls=quoted_image_urls,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
+            forward_text=forward_text,
+            forward_image_urls=forward_image_urls,
             message_id=message_id,
         )
 
@@ -1442,6 +1456,8 @@ class LLMService:
         quoted_image_urls: list[str] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
+        forward_text: str = "",
+        forward_image_urls: list[str] | None = None,
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1456,6 +1472,8 @@ class LLMService:
             quoted_image_urls=quoted_image_urls,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
+            forward_text=forward_text,
+            forward_image_urls=forward_image_urls,
             message_id=message_id,
         )
 

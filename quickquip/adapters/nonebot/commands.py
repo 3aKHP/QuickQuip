@@ -513,6 +513,35 @@ def register_commands(on_command, Message, MessageSegment) -> None:
 
     reset_stats_cmd = on_command("reset_stats", priority=10, block=True)
 
+    tieba_peek_cmd = on_command("tieba_peek", priority=10, block=True)
+
+    @tieba_peek_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await tieba_peek_cmd.finish("私聊不支持 /tieba_peek")
+        if not _is_admin(event):
+            await tieba_peek_cmd.finish("仅管理员可执行此操作")
+        text = str(event.get_message()).strip()
+        forum_keyword = _strip_command_name(text, "tieba_peek").strip()
+        if not forum_keyword:
+            await tieba_peek_cmd.finish("用法：/tieba_peek <贴吧名>")
+        await tieba_peek_cmd.send(f"正在从 {forum_keyword}吧 现爬，请稍候…")
+        try:
+            thread = await tieba_service.peek_random_thread(forum_keyword)
+        except TiebaLoginRequiredError:
+            await tieba_peek_cmd.finish("贴吧登录态需要人工续签，请运行 python dev/tools/tieba_login.py")
+        except TiebaServiceError as exc:
+            await tieba_peek_cmd.finish(f"现爬失败：{exc}")
+        if thread is None:
+            await tieba_peek_cmd.finish(f"{forum_keyword}吧未找到有效帖子")
+        message = Message([MessageSegment.text(tieba_service.build_thread_preview(thread))])
+        image_url = thread.cover_image_url or (thread.image_urls[0] if thread.image_urls else "")
+        if image_url:
+            message.append(MessageSegment.image(image_url))
+        await tieba_peek_cmd.finish(message)
+
+
+
     @reset_stats_cmd.handle()
     async def _(event):
         if _is_private_chat(event):

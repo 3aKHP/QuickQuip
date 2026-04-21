@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+### 测试与 CI
+
+- 测试套件整体重构：旧的 5 个顶层 `test_*.py`（共 2840 行断言式脚本，import 即执行、无 fixture、任一失败屏蔽后续）全部删除，改为 `tests/` 目录下的 pytest 套件（`unit/` + `integration/` + `fixtures/`），共计 193 个可独立运行的用例。新增 `requirements-dev.txt` 固定 `pytest` / `pytest-asyncio` / `pytest-cov` / `pytest-xdist` / `ruff` 版本；`pyproject.toml` 追加 `[tool.pytest.ini_options]`（markers: `playwright`/`slow`/`network`，默认跳过 playwright 与 network）与 `[tool.coverage.*]` 段
+- 共享 fixtures 模块化：`tests/fixtures/` 下按职责拆分为 `onebot.py`（OneBot V11 dummy 消息族）、`provider_stubs.py`（4 个 LLM stub client，改为每实例独立状态）、`provider_fakes.py`（3 个 provider fake 子类保留真实序列化）、`mcp_io.py`（stdio 异步 I/O dummy）、`stream_chunks.py`（三家 provider SSE chunk 样本）、`configs.py`（`MIN_LLM_CONFIG_TOML` + `llm_service` pytest fixture）、`chain_game.py`（`make_chain_def` 工厂）
+- CI 工作流替换为可复用模板：新 `.github/workflows/_tests.yml` 作为 `workflow_call` 模板，`ci.yml` 与 `release.yml` 双双改为瘦调用；新增 `concurrency` + `timeout-minutes` + `frontend` job（`npm ci && npm run build`）+ coverage.xml artifact 上传；原内嵌 TOML 校验 heredoc 和 CHANGELOG 提取脚本抽离到 `scripts/ci/validate_toml_examples.py` 与 `scripts/ci/extract_release_notes.py`，可本地复跑
+
+### 修复
+
+- `quickquip/chat/context_rules.py` 的 4 个 E402 lint 错误：`_extract_json` 函数定义将 `datetime` / `typing` / `quickquip.chat.config` / `quickquip.chat.text_rules` 的导入推后到了函数体之后，现将其归位到文件顶端
+
+### 变更
+
+- MCP 客户端重构：协议层与传输层解耦。新增 `Transport` 抽象基类 + `JsonRpcSession`（JSON-RPC id/pending-future/消息分发）+ 薄 `MCPClient`（initialize/tools 协议）三层；`StdioTransport` 合并原 stdio + docker 分支，`StreamableHttpTransport` 接管原 `HttpMCPClient`，新增 `SseTransport` 实现经典 MCP HTTP+SSE（GET 事件流 + `endpoint` 事件告知的 POST 地址）。`MCPClientManager` 对外 API 保持不变
+- 彻底移除 DooD 支持：`MCPServerConfig.mount_docker_socket` 字段删除，不再自动挂载 `/var/run/docker.sock`；`dev/docker-compose.yml` 的 quickquip 服务同步摘掉 `/var/run/docker.sock:/var/run/docker.sock` 挂载；`transport = "docker"` 保留但只用于裸机环境执行 `docker run -i --rm ...`。容器化部署请改用 `http` 或 `sse` transport
+- `config/llm.toml` / `config/llm.toml.example` 默认 MCP 清单清理：5 个只有 `docker` transport 的社区 server（github/tavily/arxiv/fetch/openweather）全部注释保留（裸机部署可手工启用），默认启用集只剩 `prts_wiki`（`transport = "http"`）
+- `config/llm.toml.example` 更新 transport 文档段，列出 4 种传输方式；`README.md` 同步更新 MCP 配置说明
+
+### 新增
+
+- MCP 新增 `sse` transport（经典 MCP HTTP+SSE）：客户端 GET `url` 打开 SSE 长连接，服务端发送 `event: endpoint` 告知 POST 地址；后续请求 POST 到该地址，响应通过 SSE 流以 `event: message` 返回。支持 `headers` 字段传递鉴权头
+- MCP sidecar POC：参考 `docker/mcp-example.Dockerfile.example` 用 `mcp-proxy` 包一层把 stdio-only 的上游社区镜像暴露为 SSE 服务，`dev/docker-compose.yml` 新增对应 sidecar service 跑在 compose 默认网络上，bot 通过 `transport = "sse"` 直连。此模式替代原先依赖 DooD 的 `transport = "docker"` 方案；新增 MCP 的模板化流程：写 Dockerfile、加 compose service、追加 `[[mcp.servers]]` 三步即可
+- `docker/mcp-example.Dockerfile.example` ENTRYPOINT 模板要求追加 `--pass-environment` 标志。mcp-proxy 默认 `--no-pass-environment`，spawned 子进程拿不到容器 env，表现为 MCP server 侧报"<KEY> environment variable is required"，即便容器里已正确注入。模板注释补充了踩坑说明，下游复用时别漏
+- `dev/deploy-v4.ps1` 部署时在远端对 `.env` / `dev/.env` 跑 `sed -i 's/\r$//'` 规范化行尾。Windows 编辑器常留下 CRLF，导致 Docker Compose 注入容器的 env 值尾部带 `\r`，表现为 API key 校验失败等奇怪错误（本次 POC 中 Tavily 首发报错即由此触发；后续清仓排进 ROADMAP）
+- `MCPClientManager.sync()` 新增启动重试：每个 server 初始化失败时最多重试 3 次、间隔 2s。用于兜底 compose 冷启动时 sidecar 慢 1~3s 导致的"首次握手时 uvicorn 尚未 listening"竞态（典型现象：Python + uv venv 型 MCP 比 Alpine + Node 型慢几百 ms~几秒）
+
+### 修复
+
+- Web 管理后台贴吧标签页图片无法显示：`tiebapic.baidu.com` 对带 `Origin` 头的跨域请求返回 403，新增后端图片代理端点 `GET /ops/api/tieba/imgproxy?url=...`（仅允许 `*.baidu.com` 域名），前端封面图和详情图均改走代理
+
+### 新增
+
+- Web 管理后台贴吧标签页支持手动触发爬取：`GET /ops/api/tieba/sync?forum=...` 以 SSE 流式返回每条帖子的抓取进度；`crawler.collect_threads` 新增 `on_progress` 回调参数，`service.sync_now` 透传；前端页面头部新增"立即同步全部"按钮，每个贴吧条目右侧新增单吧同步按钮，同步过程实时展示日志面板，完成后自动刷新贴吧列表
+
+- LLM 对话支持合并转发消息：用户在群聊/私聊中转发合并消息时，bot 自动通过 `get_forward_msg` API 拉取内容，将每条子消息格式化为编号列表（含发言者名/QQ 号）后注入 LLM 上下文；图片 URL 同步合并到多模态输入；`ExtractedLLMInput` 新增 `forward_text` / `forward_image_urls` 字段，`build_user_message_content` / `generate_reply` / `generate_private_reply` 全链路透传
+
 ## [0.8.0] - 2026-04-17
 
 ### 新增

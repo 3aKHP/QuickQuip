@@ -10,14 +10,21 @@ import logging
 import os
 import re
 import tempfile
-from typing import Any
+from abc import ABC, abstractmethod
+from typing import Any, AsyncIterator
+
+try:
+    import httpx
+    _HTTPX_AVAILABLE = True
+except ModuleNotFoundError:
+    httpx = None  # type: ignore[assignment]
+    _HTTPX_AVAILABLE = False
 
 from quickquip.llm.config import MCPConfig, MCPServerConfig
 from quickquip.llm.tools import ToolExecutionContext
 
 
 logger = logging.getLogger(__name__)
-_DOCKER_SOCKET_MOUNT = "/var/run/docker.sock:/var/run/docker.sock"
 
 
 @contextmanager
@@ -127,30 +134,75 @@ def _format_tool_result(payload: dict[str, Any]) -> MCPToolCallResult:
     )
 
 
-class StdioMCPClient:
+# --------------------------------------------------------------------------- #
+# Transport layer                                                             #
+# --------------------------------------------------------------------------- #
+
+
+class Transport(ABC):
+    """Abstract bidirectional JSON-RPC message pipe.
+
+    Subclasses push incoming envelopes to `self._inbox`. Pushing `None` signals
+    end-of-stream (connection closed). The session layer iterates via
+    `receive()` and stays agnostic to how bytes move on the wire.
+    """
+
+    def __init__(self) -> None:
+        self._inbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self._closed = False
+
+    @abstractmethod
+    async def start(self) -> None: ...
+
+    @abstractmethod
+    async def send(self, payload: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    async def aclose(self) -> None: ...
+
+    async def receive(self) -> AsyncIterator[dict[str, Any]]:
+        while True:
+            message = await self._inbox.get()
+            if message is None:
+                return
+            yield message
+
+    def _push(self, message: dict[str, Any]) -> None:
+        self._inbox.put_nowait(message)
+
+    def _close_inbox(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._inbox.put_nowait(None)
+
+
+class StdioTransport(Transport):
+    """stdio / `docker run -i` transport.
+
+    Spawns a subprocess, exchanges newline- or LSP-framed JSON-RPC over
+    stdin/stdout, and mirrors stderr into the logger.
+    """
+
     def __init__(self, config: MCPServerConfig):
+        super().__init__()
         self.config = config
         self.process: Process | None = None
-        self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
-        self._next_request_id = 1
+        self._stdout_buffer = bytearray()
         self._reader_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
-        self._stdout_buffer = bytearray()
-        self.server_info: dict[str, Any] = {}
 
     def _build_command(self) -> tuple[list[str], dict[str, str], str | None, dict[str, str]]:
         """Return (command, process_env, cwd, docker_env).
 
-        docker_env is non-empty only for docker transport — these vars must be
-        passed via --env-file rather than -e to keep secrets out of ps output.
+        docker_env is non-empty only for docker transport — these vars are
+        passed via --env-file to keep secrets out of ps output.
         """
         if self.config.transport == "stdio":
             if not self.config.command:
                 raise MCPError(f"MCP server {self.config.id} 缺少 command")
             command = [self.config.command, *self.config.args]
             env = {**os.environ, **self.config.env}
-            cwd = self.config.cwd
-            return command, env, cwd, {}
+            return command, env, self.config.cwd, {}
 
         if self.config.transport == "docker":
             if not self.config.image:
@@ -163,8 +215,6 @@ class StdioMCPClient:
                 command.extend(["-w", self.config.container_workdir])
             for mount in self.config.mounts:
                 command.extend(["-v", mount])
-            if self.config.mount_docker_socket:
-                command.extend(["-v", _DOCKER_SOCKET_MOUNT])
             # env vars are injected via --env-file in start() to avoid leaking
             # secrets into process arguments (visible in ps/proc/cmdline)
             command.extend(self.config.docker_args)
@@ -173,7 +223,7 @@ class StdioMCPClient:
             env = dict(os.environ)
             return command, env, self.config.cwd, dict(self.config.env)
 
-        raise MCPError(f"MCP server {self.config.id} 使用了未知 transport：{self.config.transport}")
+        raise MCPError(f"MCP server {self.config.id} 使用了未知 stdio transport：{self.config.transport}")
 
     async def start(self) -> None:
         command, env, cwd, docker_env = self._build_command()
@@ -181,8 +231,6 @@ class StdioMCPClient:
         logger.info("Starting MCP server %s with transport=%s", self.config.id, self.config.transport)
         with _temp_env_file(docker_env) as env_file:
             if env_file is not None:
-                # Insert --env-file just before the image name (last non-args token).
-                # command ends with: [..., image, *args] — find image position.
                 image_idx = command.index(self.config.image)
                 command = command[:image_idx] + ["--env-file", env_file] + command[image_idx:]
             self.process = await asyncio.create_subprocess_exec(
@@ -193,111 +241,30 @@ class StdioMCPClient:
                 cwd=cwd,
                 env=env,
             )
-        # temp file is deleted here; the container process already has its env
+        # temp file is deleted here; the child process already captured its env
         self._reader_task = asyncio.create_task(self._reader_loop(), name=f"mcp-reader-{self.config.id}")
         self._stderr_task = asyncio.create_task(self._stderr_loop(), name=f"mcp-stderr-{self.config.id}")
-        await self._initialize()
 
-    async def _initialize(self) -> None:
-        result = await self.request(
-            "initialize",
-            {
-                "protocolVersion": self.config.protocol_version,
-                "capabilities": {},
-                "clientInfo": {
-                    "name": "QuickQuip",
-                    "version": "1.0",
-                },
-            },
-        )
-        self.server_info = result.get("serverInfo", {}) if isinstance(result, dict) else {}
-        await self.notify("notifications/initialized", {})
-
-    async def list_tools(self) -> list[dict[str, Any]]:
-        tools: list[dict[str, Any]] = []
-        cursor: str | None = None
-
-        while True:
-            params: dict[str, Any] = {}
-            if cursor:
-                params["cursor"] = cursor
-            result = await self.request("tools/list", params)
-            current_tools = result.get("tools", []) if isinstance(result, dict) else []
-            tools.extend(item for item in current_tools if isinstance(item, dict))
-            cursor = str(result.get("nextCursor", "")).strip() if isinstance(result, dict) else ""
-            if not cursor:
-                break
-
-        return tools
-
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolCallResult:
-        result = await self.request(
-            "tools/call",
-            {
-                "name": tool_name,
-                "arguments": arguments,
-            },
-        )
-        if not isinstance(result, dict):
-            raise MCPError(f"MCP 工具 {tool_name} 返回了不可识别的响应")
-        return _format_tool_result(result)
-
-    async def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def send(self, payload: dict[str, Any]) -> None:
         if self.process is None or self.process.stdin is None:
             raise MCPError(f"MCP server {self.config.id} 尚未启动")
-
-        request_id = self._next_request_id
-        self._next_request_id += 1
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._pending[request_id] = future
-        await self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": method,
-                "params": params,
-            }
-        )
-
-        try:
-            return await asyncio.wait_for(future, timeout=self.config.timeout_seconds)
-        except asyncio.TimeoutError as exc:
-            self._pending.pop(request_id, None)
-            raise MCPError(f"MCP server {self.config.id} 调用 {method} 超时") from exc
-
-    async def notify(self, method: str, params: dict[str, Any]) -> None:
-        await self._send_message(
-            {
-                "jsonrpc": "2.0",
-                "method": method,
-                "params": params,
-            }
-        )
-
-    async def _send_message(self, payload: dict[str, Any]) -> None:
-        if self.process is None or self.process.stdin is None:
-            raise MCPError(f"MCP server {self.config.id} 尚未启动")
-
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.process.stdin.write(body + b"\n")
         await self.process.stdin.drain()
 
     async def _reader_loop(self) -> None:
-        assert self.process is not None and self.process.stdout is not None
         try:
             while True:
                 message = await self._read_message()
                 if message is None:
                     break
-                await self._handle_message(message)
+                self._push(message)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning("MCP reader for %s stopped: %s", self.config.id, exc)
-            self._fail_pending(f"MCP server {self.config.id} 连接中断：{exc}")
         finally:
-            self._fail_pending(f"MCP server {self.config.id} 已断开")
+            self._close_inbox()
 
     async def _read_message(self) -> dict[str, Any] | None:
         while True:
@@ -376,37 +343,6 @@ class StdioMCPClient:
         del self._stdout_buffer[:count]
         return data
 
-    async def _handle_message(self, message: dict[str, Any]) -> None:
-        if "id" in message and ("result" in message or "error" in message):
-            request_id = int(message["id"])
-            future = self._pending.pop(request_id, None)
-            if future is None or future.done():
-                return
-            if "error" in message:
-                error = message.get("error", {})
-                detail = error.get("message", "未知错误") if isinstance(error, dict) else str(error)
-                future.set_exception(MCPError(str(detail)))
-                return
-            result = message.get("result", {})
-            future.set_result(result if isinstance(result, dict) else {})
-            return
-
-        if "id" in message and "method" in message:
-            await self._send_message(
-                {
-                    "jsonrpc": "2.0",
-                    "id": message["id"],
-                    "error": {
-                        "code": -32601,
-                        "message": "Method not found",
-                    },
-                }
-            )
-            return
-
-        if message.get("method") == "notifications/tools/list_changed":
-            logger.info("MCP server %s reported tools/list change", self.config.id)
-
     async def _stderr_loop(self) -> None:
         assert self.process is not None and self.process.stderr is not None
         try:
@@ -420,18 +356,13 @@ class StdioMCPClient:
         except asyncio.CancelledError:
             raise
 
-    def _fail_pending(self, message: str) -> None:
-        for future in self._pending.values():
-            if not future.done():
-                future.set_exception(MCPError(message))
-        self._pending.clear()
-
     async def aclose(self) -> None:
         tasks = [task for task in (self._reader_task, self._stderr_task) if task is not None]
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        self._close_inbox()
 
         if self.process is None:
             self._stdout_buffer.clear()
@@ -452,9 +383,434 @@ class StdioMCPClient:
         self._stdout_buffer.clear()
 
 
+class StreamableHttpTransport(Transport):
+    """MCP Streamable HTTP: single POST endpoint; responses are JSON or inline SSE."""
+
+    def __init__(self, config: MCPServerConfig):
+        super().__init__()
+        self.config = config
+        self._client: "httpx.AsyncClient | None" = None
+        self._session_id: str | None = None
+
+    async def start(self) -> None:
+        if not _HTTPX_AVAILABLE:
+            raise MCPError("HTTP MCP transport 需要 httpx，请执行 pip install httpx")
+        if not self.config.url:
+            raise MCPError(f"MCP server {self.config.id} 缺少 url")
+        self._client = httpx.AsyncClient(
+            headers=self.config.headers,
+            timeout=self.config.timeout_seconds,
+        )
+
+    async def send(self, payload: dict[str, Any]) -> None:
+        if self._client is None:
+            raise MCPError(f"MCP server {self.config.id} 尚未启动")
+
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        if self._session_id:
+            headers["mcp-session-id"] = self._session_id
+
+        try:
+            response = await self._client.post(
+                self.config.url,
+                content=json.dumps(payload, ensure_ascii=False).encode(),
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+        except httpx.RequestError as exc:
+            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+
+        returned_session = response.headers.get("mcp-session-id")
+        if returned_session:
+            self._session_id = returned_session
+
+        is_notification = "id" not in payload
+        if is_notification or response.status_code == 204 or not response.content:
+            return
+
+        content_type = response.headers.get("content-type", "")
+        if "text/event-stream" in content_type:
+            for envelope in _parse_sse_block(response.text):
+                self._push(envelope)
+        else:
+            try:
+                envelope = response.json()
+            except ValueError as exc:
+                raise MCPError(f"MCP server {self.config.id} 返回了非 JSON 响应") from exc
+            if isinstance(envelope, dict):
+                self._push(envelope)
+
+    async def aclose(self) -> None:
+        self._close_inbox()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+
+class SseTransport(Transport):
+    """Classic MCP HTTP+SSE: GET `url` opens the inbound SSE stream; the server
+    emits an `endpoint` event whose data is the POST URL used for outbound
+    requests. Response envelopes arrive as `message` events on the SSE stream.
+    """
+
+    def __init__(self, config: MCPServerConfig):
+        super().__init__()
+        self.config = config
+        self._client: "httpx.AsyncClient | None" = None
+        self._sse_task: asyncio.Task[None] | None = None
+        self._post_url: str | None = None
+        self._endpoint_ready = asyncio.Event()
+        self._endpoint_error: Exception | None = None
+
+    async def start(self) -> None:
+        if not _HTTPX_AVAILABLE:
+            raise MCPError("SSE MCP transport 需要 httpx，请执行 pip install httpx")
+        if not self.config.url:
+            raise MCPError(f"MCP server {self.config.id} 缺少 url")
+
+        self._client = httpx.AsyncClient(
+            headers=self.config.headers,
+            timeout=httpx.Timeout(self.config.timeout_seconds, read=None),
+        )
+        self._sse_task = asyncio.create_task(self._sse_loop(), name=f"mcp-sse-{self.config.id}")
+
+        try:
+            await asyncio.wait_for(self._endpoint_ready.wait(), timeout=self.config.timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            await self._cancel_sse_task()
+            raise MCPError(f"MCP server {self.config.id} 等待 endpoint 事件超时") from exc
+
+        if self._endpoint_error is not None:
+            await self._cancel_sse_task()
+            raise MCPError(f"MCP server {self.config.id} SSE 连接失败：{self._endpoint_error}") from self._endpoint_error
+
+    async def send(self, payload: dict[str, Any]) -> None:
+        if self._client is None or self._post_url is None:
+            raise MCPError(f"MCP server {self.config.id} 尚未启动")
+
+        headers = {"Content-Type": "application/json"}
+        try:
+            response = await self._client.post(
+                self._post_url,
+                content=json.dumps(payload, ensure_ascii=False).encode(),
+                headers=headers,
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+        except httpx.RequestError as exc:
+            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+        # Classic SSE transport: POST typically returns 202 Accepted with no body;
+        # the JSON-RPC response arrives on the SSE stream. Nothing to push here.
+
+    async def _sse_loop(self) -> None:
+        assert self._client is not None
+        headers = {"Accept": "text/event-stream"}
+        try:
+            async with self._client.stream("GET", self.config.url, headers=headers) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    self._endpoint_error = exc
+                    self._endpoint_ready.set()
+                    return
+
+                async for event_name, data in _iter_sse_events(response.aiter_lines()):
+                    if event_name == "endpoint":
+                        self._set_endpoint(data)
+                    elif event_name in ("message", ""):
+                        # "" = data-only events (event field absent defaults to "message")
+                        self._dispatch_message(data)
+                    # ignore other events (ping, keepalive, ...)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("MCP SSE stream for %s stopped: %s", self.config.id, exc)
+            if not self._endpoint_ready.is_set():
+                self._endpoint_error = exc
+                self._endpoint_ready.set()
+        finally:
+            self._close_inbox()
+
+    def _set_endpoint(self, data: str) -> None:
+        endpoint = data.strip()
+        if not endpoint:
+            return
+        # Spec allows relative paths; resolve against the SSE URL.
+        if endpoint.startswith(("http://", "https://")):
+            self._post_url = endpoint
+        else:
+            from urllib.parse import urljoin
+            self._post_url = urljoin(self.config.url, endpoint)
+        self._endpoint_ready.set()
+
+    def _dispatch_message(self, data: str) -> None:
+        text = data.strip()
+        if not text:
+            return
+        try:
+            envelope = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("MCP SSE [%s] 丢弃无法解析的 data 行", self.config.id)
+            return
+        if isinstance(envelope, dict):
+            self._push(envelope)
+
+    async def _cancel_sse_task(self) -> None:
+        if self._sse_task is not None:
+            self._sse_task.cancel()
+            try:
+                await self._sse_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._sse_task = None
+
+    async def aclose(self) -> None:
+        await self._cancel_sse_task()
+        self._close_inbox()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+
+def _parse_sse_block(body: str) -> list[dict[str, Any]]:
+    """Parse a single SSE response body (as delivered inline via POST) and
+    return every JSON-decodable `data:` payload."""
+    envelopes: list[dict[str, Any]] = []
+    for raw_event in body.replace("\r\n", "\n").split("\n\n"):
+        data_lines = [
+            line[len("data:"):].lstrip()
+            for line in raw_event.splitlines()
+            if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        data = "\n".join(data_lines)
+        try:
+            envelope = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(envelope, dict):
+            envelopes.append(envelope)
+    return envelopes
+
+
+async def _iter_sse_events(lines: AsyncIterator[str]) -> AsyncIterator[tuple[str, str]]:
+    """Parse a server-sent events stream into (event_name, data) tuples."""
+    event_name = ""
+    data_lines: list[str] = []
+    async for raw in lines:
+        line = raw.rstrip("\r")
+        if line == "":
+            if data_lines:
+                yield event_name, "\n".join(data_lines)
+            event_name = ""
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue  # comment / keepalive
+        if ":" in line:
+            field, _, value = line.partition(":")
+            if value.startswith(" "):
+                value = value[1:]
+        else:
+            field, value = line, ""
+        if field == "event":
+            event_name = value
+        elif field == "data":
+            data_lines.append(value)
+
+
+# --------------------------------------------------------------------------- #
+# Protocol layer (JSON-RPC 2.0 session)                                       #
+# --------------------------------------------------------------------------- #
+
+
+class JsonRpcSession:
+    """JSON-RPC 2.0 session driving any `Transport`.
+
+    Owns request-id generation, pending-future bookkeeping, background message
+    dispatch, and timeout enforcement. Fully transport-agnostic.
+    """
+
+    def __init__(self, transport: Transport, *, server_id: str, timeout_seconds: float):
+        self._transport = transport
+        self._server_id = server_id
+        self._timeout = timeout_seconds
+        self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        self._next_id = 1
+        self._reader_task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        await self._transport.start()
+        self._reader_task = asyncio.create_task(self._reader_loop(), name=f"mcp-session-{self._server_id}")
+
+    async def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        request_id = self._next_id
+        self._next_id += 1
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._pending[request_id] = future
+
+        try:
+            await self._transport.send(
+                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+            )
+        except Exception:
+            self._pending.pop(request_id, None)
+            raise
+
+        try:
+            return await asyncio.wait_for(future, timeout=self._timeout)
+        except asyncio.TimeoutError as exc:
+            self._pending.pop(request_id, None)
+            raise MCPError(f"MCP server {self._server_id} 调用 {method} 超时") from exc
+
+    async def notify(self, method: str, params: dict[str, Any]) -> None:
+        await self._transport.send({"jsonrpc": "2.0", "method": method, "params": params})
+
+    async def _reader_loop(self) -> None:
+        try:
+            async for message in self._transport.receive():
+                await self._handle_message(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("MCP session %s reader stopped: %s", self._server_id, exc)
+            self._fail_pending(f"MCP server {self._server_id} 连接中断：{exc}")
+        finally:
+            self._fail_pending(f"MCP server {self._server_id} 已断开")
+
+    async def _handle_message(self, message: dict[str, Any]) -> None:
+        if "id" in message and ("result" in message or "error" in message):
+            try:
+                request_id = int(message["id"])
+            except (TypeError, ValueError):
+                return
+            future = self._pending.pop(request_id, None)
+            if future is None or future.done():
+                return
+            if "error" in message:
+                error = message.get("error", {})
+                detail = error.get("message", "未知错误") if isinstance(error, dict) else str(error)
+                future.set_exception(MCPError(str(detail)))
+                return
+            result = message.get("result", {})
+            future.set_result(result if isinstance(result, dict) else {})
+            return
+
+        if "id" in message and "method" in message:
+            await self._transport.send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "error": {"code": -32601, "message": "Method not found"},
+                }
+            )
+            return
+
+        if message.get("method") == "notifications/tools/list_changed":
+            logger.info("MCP server %s reported tools/list change", self._server_id)
+
+    def _fail_pending(self, message: str) -> None:
+        for future in self._pending.values():
+            if not future.done():
+                future.set_exception(MCPError(message))
+        self._pending.clear()
+
+    async def aclose(self) -> None:
+        if self._reader_task is not None:
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._reader_task = None
+        await self._transport.aclose()
+        self._fail_pending(f"MCP server {self._server_id} 已关闭")
+
+
+# --------------------------------------------------------------------------- #
+# Client (thin business layer) + manager                                      #
+# --------------------------------------------------------------------------- #
+
+
+def _build_transport(config: MCPServerConfig) -> Transport:
+    transport = config.transport
+    if transport in ("stdio", "docker"):
+        return StdioTransport(config)
+    if transport == "http":
+        return StreamableHttpTransport(config)
+    if transport == "sse":
+        return SseTransport(config)
+    raise MCPError(f"MCP server {config.id} 使用了未知 transport：{transport}")
+
+
+class MCPClient:
+    """MCP protocol surface (initialize / tools). Transport-agnostic."""
+
+    def __init__(self, config: MCPServerConfig):
+        self.config = config
+        self._transport = _build_transport(config)
+        self._session = JsonRpcSession(
+            self._transport,
+            server_id=config.id,
+            timeout_seconds=config.timeout_seconds,
+        )
+        self.server_info: dict[str, Any] = {}
+
+    async def start(self) -> None:
+        await self._session.start()
+        await self._initialize()
+
+    async def _initialize(self) -> None:
+        result = await self._session.request(
+            "initialize",
+            {
+                "protocolVersion": self.config.protocol_version,
+                "capabilities": {},
+                "clientInfo": {"name": "QuickQuip", "version": "1.0"},
+            },
+        )
+        self.server_info = result.get("serverInfo", {}) if isinstance(result, dict) else {}
+        await self._session.notify("notifications/initialized", {})
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        tools: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {}
+            if cursor:
+                params["cursor"] = cursor
+            result = await self._session.request("tools/list", params)
+            current_tools = result.get("tools", []) if isinstance(result, dict) else []
+            tools.extend(item for item in current_tools if isinstance(item, dict))
+            cursor = str(result.get("nextCursor", "")).strip() if isinstance(result, dict) else ""
+            if not cursor:
+                break
+        return tools
+
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolCallResult:
+        result = await self._session.request(
+            "tools/call",
+            {"name": tool_name, "arguments": arguments},
+        )
+        if not isinstance(result, dict):
+            raise MCPError(f"MCP 工具 {tool_name} 返回了不可识别的响应")
+        return _format_tool_result(result)
+
+    async def aclose(self) -> None:
+        await self._session.aclose()
+
+
 class MCPClientManager:
     def __init__(self):
-        self._clients: dict[str, StdioMCPClient] = {}
+        self._clients: dict[str, MCPClient] = {}
         self._bindings: dict[str, MCPToolBinding] = {}
         self._statuses: dict[str, MCPServerStatus] = {}
 
@@ -477,6 +833,37 @@ class MCPClientManager:
             output = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
             raise MCPError(f"docker pull {server.image} 失败（exit {proc.returncode}）：{output}")
         logger.info("Pulled image %s for MCP server %s", server.image, server.id)
+
+    async def _connect_with_retry(
+        self,
+        server: MCPServerConfig,
+        *,
+        attempts: int = 3,
+        backoff_seconds: float = 2.0,
+    ) -> tuple[MCPClient, list[dict[str, Any]]]:
+        """Start MCPClient + list tools, retrying on transient startup failures.
+
+        Covers the common compose cold-boot race where sidecar MCP servers
+        take a few seconds longer than bot init to become ready.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            client = MCPClient(server)
+            try:
+                await client.start()
+                tools = await client.list_tools()
+                return client, tools
+            except Exception as exc:
+                last_exc = exc
+                await client.aclose()
+                if attempt < attempts:
+                    logger.info(
+                        "MCP server %s attempt %d/%d failed (%s); retrying in %.1fs",
+                        server.id, attempt, attempts, exc, backoff_seconds,
+                    )
+                    await asyncio.sleep(backoff_seconds)
+        assert last_exc is not None
+        raise last_exc
 
     async def sync(self, config: MCPConfig, *, force_pull: bool = False) -> list[MCPToolBinding]:
         await self.aclose()
@@ -502,13 +889,11 @@ class MCPClientManager:
                 transport=server.transport,
                 enabled=True,
             )
-            client: StdioMCPClient | None = None
+            client: MCPClient | None = None
             try:
                 if force_pull and server.transport == "docker":
                     await self._pull_image(server)
-                client = StdioMCPClient(server)
-                await client.start()
-                tools = await client.list_tools()
+                client, tools = await self._connect_with_retry(server)
                 server_bindings = self._build_bindings(server, tools)
                 bindings.extend(server_bindings)
                 self._clients[server.id] = client
@@ -516,8 +901,6 @@ class MCPClientManager:
                 status.tool_count = len(server_bindings)
                 status.detail = self._describe_server(server, client)
             except Exception as exc:
-                if client is not None:
-                    await client.aclose()
                 status.error = str(exc)
                 logger.warning("Failed to initialize MCP server %s: %s", server.id, exc)
             self._statuses[server.id] = status
@@ -578,13 +961,15 @@ class MCPClientManager:
             )
         return bindings
 
-    def _describe_server(self, server: MCPServerConfig, client: StdioMCPClient) -> str:
+    def _describe_server(self, server: MCPServerConfig, client: MCPClient) -> str:
         server_name = str(client.server_info.get("name", "")).strip()
         server_version = str(client.server_info.get("version", "")).strip()
         if server_name and server_version:
             return f"{server_name} {server_version}"
         if server_name:
             return server_name
+        if server.transport in ("http", "sse"):
+            return server.url
         if server.transport == "docker":
             return server.image
         return server.command

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import json
+from collections.abc import Callable
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -123,27 +124,19 @@ class TiebaCrawler:
         return normalized
 
     async def load_thread_data(self, page: Page, url: str) -> dict[str, object]:
-        """Fetch thread detail via direct authenticated API call.
-
-        Uses page.request (shares the browser-context cookies) instead of
-        navigating the page and intercepting an XHR.  This is more reliable
-        because Baidu's frontend may not always fire the pb/page_pc request
-        during a Playwright-driven page load.
-        """
-        tid = url.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
-        if not tid.isdigit():
-            raise TiebaServiceError(f"无法从 URL 中提取帖子 ID：{url!r}")
-
         try:
-            response = await page.request.get(
-                "https://tieba.baidu.com/c/f/pb/page_pc",
-                params={"tid": tid},
+            async with page.expect_response(
+                lambda r: "tieba.baidu.com/c/f/pb/page_pc" in r.url,
                 timeout=20_000,
-            )
-            raw = await response.text()
-            data = json.loads(raw)
+            ) as response_info:
+                await self.goto(page, url)
+            response = await response_info.value
+            data = await response.json()
         except Exception as exc:
-            raise TiebaServiceError(f"帖子详情接口请求失败：{exc}") from exc
+            raise TiebaServiceError(f"帖子页面加载失败或未触发详情接口：{exc}") from exc
+
+        if not isinstance(data, dict):
+            raise TiebaServiceError(f"帖子详情接口响应格式异常：{url}")
 
         error_code = int(data.get("error_code", 0) or 0)
         error_msg = str(data.get("error_msg", "") or "")
@@ -262,7 +255,12 @@ class TiebaCrawler:
             image_urls=deduped_images[:10],
         )
 
-    async def collect_threads(self, forum_keyword: str) -> list[TiebaThread]:
+    async def collect_threads(
+        self,
+        forum_keyword: str,
+        on_progress: Callable[[str], None] | None = None,
+        limit: int | None = None,
+    ) -> list[TiebaThread]:
         if not self.playwright_ready():
             raise TiebaServiceError("未安装 Playwright，无法启动贴吧采集")
 
@@ -281,13 +279,10 @@ class TiebaCrawler:
                 if not links:
                     raise TiebaServiceError("未在贴吧首页提取到帖子链接，请先完成登录并确认页面可正常打开")
 
-                selected_links = links[: self.config.detail_fetch_limit]
+                selected_links = links[: limit if limit is not None else self.config.detail_fetch_limit]
                 threads: list[TiebaThread] = []
                 for item in selected_links:
                     try:
-                        # load_thread_data now uses page.request (direct API
-                        # call with session cookies) — no page navigation needed,
-                        # so we reuse the forum page object here.
                         detail_data = await self.load_thread_data(page, item["url"])
                         detail = self.extract_thread_detail_from_data(
                             detail_data,
@@ -302,9 +297,14 @@ class TiebaCrawler:
                             detail.image_urls.insert(0, detail.cover_image_url)
                         detail.fetched_at = datetime.now(tz=ZoneInfo(BEIJING_TIMEZONE)).timestamp()
                         threads.append(detail)
+                        if on_progress:
+                            img_hint = f" [{len(detail.image_urls)}图]" if detail.image_urls else ""
+                            on_progress(f"✓ {detail.title[:30]}{img_hint}")
                     except TiebaLoginRequiredError:
                         raise  # login expiry aborts the entire forum
-                    except TiebaServiceError:
+                    except TiebaServiceError as exc:
+                        if on_progress:
+                            on_progress(f"✗ 跳过 {item.get('title', item['url'])[:30]}: {exc}")
                         continue  # single-thread failure: skip and try next
                 return threads
             finally:

@@ -11,6 +11,28 @@ from typing import Any, Optional
 from quickquip.chat.config import CONTEXT_REPLY_RULES
 from quickquip.chat.text_rules import build_rule_context, render_rule_reply, select_reply_template
 
+_JSON_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
+
+
+def _extract_json(text: str) -> dict:
+    """Parse JSON from raw LLM output, tolerating markdown code fences and leading prose."""
+    stripped = text.strip()
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        pass
+    # Strip ```json ... ``` or ``` ... ``` fences
+    fenced = re.sub(r"^```[^\n]*\n(.*?)\n```\s*$", r"\1", stripped, flags=re.DOTALL)
+    try:
+        return json.loads(fenced.strip())
+    except json.JSONDecodeError:
+        pass
+    # Last resort: find first {...} in the text
+    m = _JSON_OBJECT_PATTERN.search(stripped)
+    if m:
+        return json.loads(m.group())
+    raise ValueError(f"no JSON object found in: {stripped!r}")
+
 logger = logging.getLogger(__name__)
 
 # (rule_name, group_id, text) → (trigger_bool, expires_at_ts)
@@ -132,7 +154,7 @@ async def _check_llm_context(
             llm_service.quick_judge(full_prompt, max_tokens=64),
             timeout=timeout,
         )
-        data = json.loads(raw.strip())
+        data = _extract_json(raw)
         result = bool(data.get("trigger", False))
     except asyncio.TimeoutError:
         logger.warning("LLM context judge timeout for rule %s", rule.get("name"))

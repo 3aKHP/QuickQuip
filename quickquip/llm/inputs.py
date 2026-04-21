@@ -14,6 +14,8 @@ class ExtractedLLMInput:
     quoted_image_urls: list[str] = field(default_factory=list)
     quoted_sender_name: str = ""
     quoted_user_id: str = ""
+    forward_text: str = ""
+    forward_image_urls: list[str] = field(default_factory=list)
 
 
 def extract_llm_input(
@@ -24,6 +26,8 @@ def extract_llm_input(
     *,
     reply=None,
     is_to_me: bool = False,
+    forward_text: str = "",
+    forward_image_urls: list[str] | None = None,
 ) -> ExtractedLLMInput | None:
     rendered = render_message_for_llm(
         message,
@@ -45,15 +49,21 @@ def extract_llm_input(
         "quoted_user_id": "" if rendered_reply is None else rendered_reply.user_id,
     }
 
+    forward_kwargs = {
+        "forward_text": forward_text,
+        "forward_image_urls": list(forward_image_urls or []),
+    }
+
     if not segments:
         text = rendered.text
         if settings.allow_prefix and text.startswith(settings.trigger_prefix):
             return ExtractedLLMInput(
                 prompt=text[len(settings.trigger_prefix):].strip(),
                 **extracted_reply,
+                **forward_kwargs,
             )
         if settings.allow_at and is_to_me:
-            return ExtractedLLMInput(prompt=text.strip(), **extracted_reply)
+            return ExtractedLLMInput(prompt=text.strip(), **extracted_reply, **forward_kwargs)
         return None
 
     normalized = rendered.text
@@ -62,6 +72,7 @@ def extract_llm_input(
             prompt=normalized[len(settings.trigger_prefix):].strip(),
             image_urls=rendered.image_urls,
             **extracted_reply,
+            **forward_kwargs,
         )
     if settings.allow_at and (rendered.mentioned_bot or is_to_me):
         if settings.allow_prefix and normalized.startswith(settings.trigger_prefix):
@@ -70,6 +81,7 @@ def extract_llm_input(
             prompt=normalized.strip(),
             image_urls=rendered.image_urls,
             **extracted_reply,
+            **forward_kwargs,
         )
     return None
 
@@ -103,6 +115,8 @@ def extract_private_llm_input(
     identity_index: IdentityIndex | None = None,
     *,
     reply=None,
+    forward_text: str = "",
+    forward_image_urls: list[str] | None = None,
 ) -> ExtractedLLMInput | None:
     extracted = extract_llm_input(
         message,
@@ -111,6 +125,8 @@ def extract_private_llm_input(
         identity_index=identity_index,
         reply=reply,
         is_to_me=False,
+        forward_text=forward_text,
+        forward_image_urls=forward_image_urls,
     )
     if extracted is not None:
         return extracted
@@ -133,7 +149,12 @@ def extract_private_llm_input(
     quoted_sender_name = "" if rendered_reply is None else rendered_reply.sender_name
     quoted_user_id = "" if rendered_reply is None else rendered_reply.user_id
 
-    if not prompt and not rendered.image_urls and not quoted_text.strip() and not quoted_image_urls:
+    has_any_content = (
+        prompt or rendered.image_urls
+        or quoted_text.strip() or quoted_image_urls
+        or forward_text.strip() or forward_image_urls
+    )
+    if not has_any_content:
         return None
 
     return ExtractedLLMInput(
@@ -143,4 +164,6 @@ def extract_private_llm_input(
         quoted_image_urls=quoted_image_urls,
         quoted_sender_name=quoted_sender_name,
         quoted_user_id=quoted_user_id,
+        forward_text=forward_text,
+        forward_image_urls=list(forward_image_urls or []),
     )

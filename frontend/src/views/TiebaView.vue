@@ -3,8 +3,19 @@
     <UiPageHeader title="贴吧帖子池" subtitle="只读视图，依赖 tieba 爬虫后台同步的数据">
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
+        <UiButton icon="Download" :loading="syncing" @click="startSync(null)">立即同步全部</UiButton>
       </template>
     </UiPageHeader>
+
+    <div v-if="syncLog.length" class="sync-log-wrap">
+      <div class="sync-log-head">
+        <span>同步日志{{ syncing ? '（进行中…）' : '（已完成）' }}</span>
+        <button class="sync-log-close" @click="syncLog = []">
+          <UiIcon name="X" :size="14" />
+        </button>
+      </div>
+      <pre ref="logEl" class="sync-log">{{ syncLog.join('\n') }}</pre>
+    </div>
 
     <p v-if="loadError" class="error">{{ loadError }}</p>
 
@@ -27,6 +38,9 @@
             <div class="forum-head">
               <span class="forum-name">{{ f.forum_keyword }}吧</span>
               <UiTag size="sm" :variant="syncVariant(f)">{{ syncLabel(f) }}</UiTag>
+              <button class="forum-sync-btn" :disabled="syncing" @click.stop="startSync(f.forum_keyword)" title="立即同步此吧">
+                <UiIcon name="Download" :size="12" />
+              </button>
             </div>
             <div class="forum-meta">
               <span>{{ f.count }} 条</span>
@@ -78,10 +92,9 @@
                 <div class="thread-row">
                   <img
                     v-if="t.cover_image_url"
-                    :src="t.cover_image_url"
+                    :src="tiebaImgProxyUrl(t.cover_image_url)"
                     class="thread-cover"
                     loading="lazy"
-                    referrerpolicy="no-referrer"
                   />
                   <div class="thread-body">
                     <div class="thread-title">
@@ -135,9 +148,8 @@
           <img
             v-for="(src, i) in detail.image_urls"
             :key="i"
-            :src="src"
+            :src="tiebaImgProxyUrl(src)"
             loading="lazy"
-            referrerpolicy="no-referrer"
           />
         </div>
       </UiCard>
@@ -146,7 +158,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, nextTick } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -158,6 +170,8 @@ import {
   listTiebaForums,
   fetchTiebaThreads,
   fetchTiebaThread,
+  tiebaImgProxyUrl,
+  openTiebaSyncStream,
 } from '../api/tieba.js'
 import { toast } from '../toast.js'
 
@@ -166,6 +180,28 @@ const PAGE_SIZE = 30
 const forums = ref([])
 const loading = ref(false)
 const loadError = ref(null)
+
+const syncing = ref(false)
+const syncLog = ref([])
+const logEl = ref(null)
+
+function startSync(forum) {
+  syncing.value = true
+  syncLog.value = [`▶ 开始同步${forum ? ' ' + forum + '吧' : '全部贴吧'}…`]
+  openTiebaSyncStream(
+    forum,
+    (msg) => {
+      syncLog.value.push(msg)
+      nextTick(() => {
+        if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
+      })
+    },
+    () => {
+      syncing.value = false
+      loadAll()
+    },
+  )
+}
 
 const selectedForum = ref('')
 const keyword = ref('')
@@ -321,7 +357,6 @@ loadAll()
 .forum-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--qq-gap-xs);
   margin-bottom: 3px;
 }
@@ -355,6 +390,59 @@ loadAll()
   min-width: 0;
   gap: var(--qq-gap-sm);
 }
+
+.sync-log-wrap {
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  margin-bottom: var(--qq-gap-sm);
+  overflow: hidden;
+}
+
+.sync-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--qq-surface-strong);
+  font-size: 12px;
+  color: var(--qq-text-muted);
+}
+
+.sync-log-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--qq-text-muted);
+  padding: 0;
+  display: flex;
+}
+
+.sync-log {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: monospace;
+  line-height: 1.6;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--qq-surface);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.forum-sync-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--qq-text-muted);
+  padding: 2px;
+  display: flex;
+  border-radius: var(--qq-radius-xs);
+  margin-left: auto;
+}
+
+.forum-sync-btn:hover { color: var(--qq-accent); }
+.forum-sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .hint-card {
   flex: 1;
