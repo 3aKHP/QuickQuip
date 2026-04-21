@@ -13,6 +13,7 @@ from tests.fixtures.onebot import DummyMessage, DummyReply, DummySender, at_seg,
 PREFIX_SETTINGS = ResolvedGroupSettings(
     enabled=True,
     memory_enabled=True,
+    auto_memory_enabled=False,
     provider_id="openai-main",
     model="gpt-test",
     persona_id="default",

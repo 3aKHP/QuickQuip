@@ -100,6 +100,16 @@
                 </select>
               </div>
 
+              <!-- auto_memory_enabled -->
+              <div class="field">
+                <label>自动记忆抽取</label>
+                <select v-model="draftTriState.auto_memory_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('auto_memory_enabled') }}）</option>
+                  <option :value="true">开</option>
+                  <option :value="false">关</option>
+                </select>
+              </div>
+
               <!-- provider_id -->
               <div class="field">
                 <label>Provider</label>
@@ -224,7 +234,7 @@ import {
 import { toast } from '../toast.js'
 
 const FIELDS = [
-  'enabled', 'memory_enabled', 'provider_id', 'model', 'persona_id',
+  'enabled', 'memory_enabled', 'auto_memory_enabled', 'provider_id', 'model', 'persona_id',
   'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit',
 ]
 

@@ -6,17 +6,16 @@
 
 ### 新增
 
+- 保守版自动记忆抽取：LLM 对话结束后后台异步跑一次独立的短 prompt 判定，提取"关于发言者的稳定长期事实"写入记忆库（source="auto"）。与主对话完全隔离：走 `quick_judge` 单路径（非流式、无工具、`temperature=0.0`），不注入历史记忆、不进入对话历史；异常静默吞掉，只记 `logger.exception`，不影响用户回复。全局开关 `[runtime] auto_memory_enabled`（默认 false）+ `auto_memory_prompt` / `auto_memory_max_tokens`；按群三态覆盖通过 `/llm auto_memory on|off|reset|status` 或 web admin 的"群 LLM"标签页。需要群级 `memory_enabled=true` 且 `auto_memory_enabled=true` 才会触发，关了记忆注入自然也不做抽取
 - personas 热重载：新增 `/reload_personas` 管理员命令，调用 `LLMService.reload_personas()` 仅重新读取 `[[personas]]` 段 + `config/personas/*.toml` 目录并就地替换 `self.config.personas`，不触发 provider / MCP / runtime 的任何重载。读取失败或 personas 为空时保留旧状态；若当前 `default_persona` 在新集合中不存在，自动回落到第一个可用人格。`quickquip/llm/config.py` 抽出 `load_personas_only(config_path)` 公开函数，`load_llm_config()` 复用同一实现避免两条代码路径漂移
 - chat_rules 热重载：新增 `/reload_rules` 管理员命令，就地重载 `config/chat_rules.toml` 并重建所有派生缓存（`TEXT_REPLY_RULES` / `CONTEXT_REPLY_RULES` / `CHAIN_GAME_CONFIGS` / `RATE_LIMIT_RULES` 四个模块级容器、`_COMPILED_PATTERNS` / `_COMPILED_CONTEXT_PATTERNS` / `_COMPILED_CONTEXT_CONDITIONS` 预编译正则、`SWITCHABLE_RULES` 规则名集合、`ChainGameManager.defs` 与 `KeyedRateLimiter.rule_configs`）；TOML 解析失败时原状态不受影响；接龙中 session 在 defs 替换时自动清空，避免旧 def 的接龙状态被按新 def 错判。`quickquip/app/message_pipeline.py` 导出 `reload_chat_rules_pipeline()` 作为统一入口
 - 限流窗口按规则自定义：`[rate_limit_rules]` 每条桶新增可选 `window = N` 字段，不写沿用全局默认 60s；`KeyedRateLimiter` 内部按 `(rule_name, bucket_key)` 存 `SlidingWindowRateLimiter`，每个按规则自身的 `window_seconds` 计窗；`KeyedRateLimiter.reload_rules()` 对 window 或 limits 变化的规则清空其 bucket，完全一致的规则保留状态。`/api/rate-limit` 的 snapshot 返回结构不变（`window_seconds` 字段改为按规则）
 
 ### 变更
 
-- `quickquip/chat/config.py` 拆分内置限流桶：新增 `_BUILTIN_RATE_LIMIT_RULES` 常量，reload 每次先重置为内置再叠 TOML 覆盖，避免重复 reload 时残留被删除的 TOML 桶配置
-- `quickquip/chat/text_rules.py` / `context_rules.py` 把预编译正则生成逻辑抽为 `recompile_patterns()` 函数，在模块加载和热重载后分别调用；`context_rules.py` 的 regex_context 缺失 `context_conditions` 警告同步移入 `recompile_patterns()`
-- `quickquip/chat/rule_switch.py` 的 `SWITCHABLE_RULES` 从模块加载时的 `_BUILTIN | _collect()` 静态并集改为可重建集合，新增 `rebuild_switchable_rules()`；`GroupRuleSwitch.disabled` 状态在重建时不受影响
-- `quickquip/chat/chain_game.py` `ChainGameManager` 新增 `replace_defs(defs)` 方法，替换定义并清空 `self.sessions`
-- `config/chat_rules.toml.example` 文档补充 `window` 字段说明与注释化示例
+- `quickquip/llm/store.py` `group_settings` 表新增 `auto_memory_enabled INTEGER` 列（`_ensure_schema` 里的 ALTER 迁移保持旧 db 兼容），`GroupSettingsOverride` / `ResolvedGroupSettings` / `/api/group-settings` PUT body 同步新增字段
+- `quickquip/llm/service.py` `quick_judge()` 修正 `self.config.default_provider` 错用（该字段实际在 `runtime` 下），现改为 `self.config.runtime.default_provider`。此前路径因 AttributeError 立即走到 `next(iter(providers))` 兜底，行为没有用户可见差异但代码意图错误
+- `quickquip/common/json_utils.py` 新增 `extract_json_object()`，把原 `context_rules._extract_json` 抽为通用工具；`service._extract_auto_memory()` 与 `context_rules` 共享
 
 ## [0.8.1] - 2026-04-21
 

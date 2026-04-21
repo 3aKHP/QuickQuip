@@ -357,6 +357,26 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             llm_service.set_chat_memory_enabled(chat_id, False, chat_type=chat_type)
             await llm_cmd.finish(f"{scope_label}记忆注入已关闭")
 
+        if tokens[:1] == ["auto_memory"] and len(tokens) >= 2:
+            sub = tokens[1].lower()
+            if sub == "on":
+                llm_service.set_chat_auto_memory_enabled(chat_id, True, chat_type=chat_type)
+                await llm_cmd.finish(f"{scope_label}自动记忆抽取已开启")
+            if sub == "off":
+                llm_service.set_chat_auto_memory_enabled(chat_id, False, chat_type=chat_type)
+                await llm_cmd.finish(f"{scope_label}自动记忆抽取已关闭")
+            if sub == "reset":
+                llm_service.set_chat_auto_memory_enabled(chat_id, None, chat_type=chat_type)
+                default = "开" if llm_service.config.runtime.auto_memory_enabled else "关"
+                await llm_cmd.finish(f"{scope_label}自动记忆抽取已跟随全局默认（当前：{default}）")
+            if sub == "status":
+                settings = llm_service.get_chat_settings(chat_id, chat_type=chat_type)
+                default = "开" if llm_service.config.runtime.auto_memory_enabled else "关"
+                current = "开" if settings.auto_memory_enabled else "关"
+                await llm_cmd.finish(
+                    f"{scope_label}自动记忆抽取：{current}（全局默认 {default}）"
+                )
+
         if tokens[:1] == ["context_limit"] and len(tokens) >= 2:
             value = tokens[1].lower()
             if value in {"reset", "off"}:
@@ -376,7 +396,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> <model>|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|context_limit <n>|context_limit reset|clear_context|reload|mcp status"
+            "memory status|memory on|memory off|auto_memory on|off|reset|status|context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
 
     search_cmd = on_command("search", priority=10, block=True)

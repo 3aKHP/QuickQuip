@@ -7,6 +7,7 @@ from dataclasses import dataclass
 class ResolvedGroupSettings:
     enabled: bool
     memory_enabled: bool
+    auto_memory_enabled: bool
     provider_id: str
     model: str
     persona_id: str
@@ -28,6 +29,11 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
             overrides.memory_enabled
             if overrides.memory_enabled is not None
             else config.runtime.memory_enabled
+        ),
+        auto_memory_enabled=(
+            overrides.auto_memory_enabled
+            if overrides.auto_memory_enabled is not None
+            else config.runtime.auto_memory_enabled
         ),
         provider_id=provider_id,
         model=model,

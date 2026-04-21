@@ -46,6 +46,7 @@ def _build_query_tokens(query: str) -> list[str]:
 class GroupSettingsOverride:
     enabled: bool | None = None
     memory_enabled: bool | None = None
+    auto_memory_enabled: bool | None = None
     provider_id: str | None = None
     model: str | None = None
     persona_id: str | None = None
@@ -136,6 +137,8 @@ class LLMStore:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN memory_enabled INTEGER")
             if "history_limit" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN history_limit INTEGER")
+            if "auto_memory_enabled" not in existing_columns:
+                conn.execute("ALTER TABLE group_settings ADD COLUMN auto_memory_enabled INTEGER")
             conversation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(conversation_messages)").fetchall()
@@ -151,7 +154,7 @@ class LLMStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT enabled, memory_enabled, provider_id, model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit
+                SELECT enabled, memory_enabled, auto_memory_enabled, provider_id, model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit
                 FROM group_settings
                 WHERE group_id = ?
                 """,
@@ -162,6 +165,7 @@ class LLMStore:
         return GroupSettingsOverride(
             enabled=None if row["enabled"] is None else bool(row["enabled"]),
             memory_enabled=None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
+            auto_memory_enabled=None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"]),
             provider_id=row["provider_id"],
             model=row["model"],
             persona_id=row["persona_id"],
@@ -176,6 +180,7 @@ class LLMStore:
         allowed_fields = {
             "enabled",
             "memory_enabled",
+            "auto_memory_enabled",
             "provider_id",
             "model",
             "persona_id",

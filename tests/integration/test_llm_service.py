@@ -328,3 +328,152 @@ def test_reload_personas_empty_keeps_previous(llm_service):
     assert count == 0
     assert error == "配置中没有可用的人格"
     assert llm_service.config.personas is original
+
+
+class _AutoMemoryStubClient:
+    """Stub provider client that returns pre-canned replies in order."""
+
+    def __init__(self, replies: list[str]):
+        self._replies = list(replies)
+        self.call_count = 0
+
+    async def complete(self, request):
+        from plugins.llm_provider import LLMResponse
+        self.call_count += 1
+        text = self._replies.pop(0) if self._replies else ""
+        return LLMResponse(text=text, model=request.model, finish_reason="stop")
+
+
+async def test_auto_memory_extraction_writes_memories_when_enabled(
+    llm_service, patch_provider_builder
+):
+    import asyncio
+    llm_service.config.runtime.auto_memory_enabled = True
+    # Reply pipeline: first call = reply, second call = auto-memory judge
+    stub = _AutoMemoryStubClient([
+        "收到，小明！奶茶是个好东西。",
+        '{"memories": ["小明是程序员", "小明喜欢喝奶茶"]}',
+    ])
+    patch_provider_builder(lambda provider: stub)
+
+    await llm_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="小明",
+        prompt="我叫小明，是个程序员，喜欢喝奶茶",
+        recent_messages=[],
+    )
+    # Drain any background auto-memory task before asserting.
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    assert stub.call_count == 2
+    memories = llm_service.list_group_memories(1001)
+    contents = {m["content"] for m in memories}
+    assert contents == {"小明是程序员", "小明喜欢喝奶茶"}
+    assert all(m["source"] == "auto" for m in memories)
+
+
+async def test_auto_memory_extraction_disabled_does_not_call_judge(
+    llm_service, patch_provider_builder
+):
+    import asyncio
+    # Default auto_memory_enabled == False.
+    stub = _AutoMemoryStubClient(["收到。", "should-not-be-called"])
+    patch_provider_builder(lambda provider: stub)
+
+    await llm_service.generate_reply(
+        group_id=1002,
+        user_id=2002,
+        sender_name="n",
+        prompt="哈基镜是区吗？",
+        recent_messages=[],
+    )
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    assert stub.call_count == 1
+    assert llm_service.list_group_memories(1002) == []
+
+
+async def test_auto_memory_extraction_swallows_judge_errors(
+    llm_service, patch_provider_builder
+):
+    import asyncio
+    llm_service.config.runtime.auto_memory_enabled = True
+    stub = _AutoMemoryStubClient([
+        "收到。",
+        "not valid json at all",
+    ])
+    patch_provider_builder(lambda provider: stub)
+
+    # Must not raise despite the judge returning junk.
+    result = await llm_service.generate_reply(
+        group_id=1003,
+        user_id=2002,
+        sender_name="n",
+        prompt="你好",
+        recent_messages=[],
+    )
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    assert result["reply"] == "收到。"
+    assert llm_service.list_group_memories(1003) == []
+
+
+async def test_auto_memory_respects_memory_disabled(
+    llm_service, patch_provider_builder
+):
+    import asyncio
+    llm_service.config.runtime.auto_memory_enabled = True
+    llm_service.set_group_memory_enabled(1004, False)
+
+    stub = _AutoMemoryStubClient(["收到。"])
+    patch_provider_builder(lambda provider: stub)
+
+    await llm_service.generate_reply(
+        group_id=1004,
+        user_id=2002,
+        sender_name="n",
+        prompt="我喜欢奶茶",
+        recent_messages=[],
+    )
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    # Only reply call; judge never runs because memory is off for this group.
+    assert stub.call_count == 1
+    assert llm_service.list_group_memories(1004) == []
+
+
+async def test_auto_memory_per_chat_override_beats_global_default(
+    llm_service, patch_provider_builder
+):
+    import asyncio
+    llm_service.config.runtime.auto_memory_enabled = False
+    llm_service.set_chat_auto_memory_enabled(1005, True, chat_type="group")
+
+    stub = _AutoMemoryStubClient([
+        "收到。",
+        '{"memories": ["override works"]}',
+    ])
+    patch_provider_builder(lambda provider: stub)
+
+    await llm_service.generate_reply(
+        group_id=1005,
+        user_id=2002,
+        sender_name="n",
+        prompt="hi",
+        recent_messages=[],
+    )
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    assert stub.call_count == 2
+    assert [m["content"] for m in llm_service.list_group_memories(1005)] == ["override works"]

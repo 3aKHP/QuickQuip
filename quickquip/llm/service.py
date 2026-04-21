@@ -15,6 +15,7 @@ import re
 from typing import TYPE_CHECKING
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
@@ -810,6 +811,12 @@ class LLMService:
     def set_group_memory_enabled(self, group_id: int | str, enabled: bool) -> None:
         self.set_chat_memory_enabled(group_id, enabled, chat_type="group")
 
+    def set_chat_auto_memory_enabled(
+        self, chat_id: int | str, enabled: bool | None, chat_type: str = "group"
+    ) -> None:
+        value = None if enabled is None else int(enabled)
+        self._update_chat_settings(chat_id, chat_type, auto_memory_enabled=value)
+
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)
 
@@ -990,7 +997,7 @@ class LLMService:
         用于 context_rules 的极速判定调用。
         不走群配置、不注入记忆、不启用工具，只发单条 system+user。
         """
-        provider_id = self.config.default_provider
+        provider_id = self.config.runtime.default_provider
         if not provider_id or provider_id not in self.config.providers:
             provider_id = next(iter(self.config.providers), None)
         if not provider_id:
@@ -1015,6 +1022,69 @@ class LLMService:
         client = build_provider_client(judge_provider)
         response = await client.complete(request)
         return strip_leading_reasoning_content(response.text or "")
+
+    async def _extract_auto_memory(
+        self,
+        *,
+        scope_key: str,
+        user_id: int | str,
+        sender_name: str,
+        user_text: str,
+        assistant_text: str,
+    ) -> None:
+        """Conservative auto-memory extraction (runs as a background task).
+
+        Swallows every exception; failures must not impact the user-visible reply.
+        Only writes when the judge returns a non-empty ``memories`` array.
+        """
+        try:
+            if not (user_text.strip() or assistant_text.strip()):
+                return
+            default_prompt = (
+                "以下是一段对话。请只提取关于发言者的稳定长期事实"
+                "（偏好 / 身份 / 正在进行的事），忽略闲聊、寒暄、一次性事件。"
+                "只回复 JSON，格式为 {\"memories\": [\"事实1\", \"事实2\"]}；"
+                "没有值得记住的内容时回 {\"memories\": []}。每条事实不超过 40 字。"
+            )
+            judge_prompt = (
+                self.config.runtime.auto_memory_prompt.strip()
+                or default_prompt
+            )
+            full_prompt = (
+                f"{judge_prompt}\n\n"
+                f"发言者：{sender_name} (user_id={user_id})\n"
+                f"用户消息：{user_text}\n"
+                f"助手回复：{assistant_text}"
+            )
+            raw = await self.quick_judge(
+                full_prompt,
+                max_tokens=self.config.runtime.auto_memory_max_tokens,
+            )
+            data = extract_json_object(raw)
+            memories = data.get("memories", [])
+            if not isinstance(memories, list):
+                return
+            for item in memories:
+                content = str(item).strip()
+                if not content:
+                    continue
+                self.store.add_memory(
+                    scope_key,
+                    content,
+                    scope="group",
+                    user_id=user_id,
+                    source="auto",
+                )
+            if memories:
+                self.store.prune_memories(
+                    scope_key,
+                    min(
+                        self.config.runtime.memory_max_items_per_group,
+                        MAX_STORED_MEMORY_ITEMS,
+                    ),
+                )
+        except Exception:
+            logger.exception("auto_memory extraction failed for scope=%s", scope_key)
 
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
         return merge_image_urls(*collections)
@@ -1422,6 +1492,17 @@ class LLMService:
             scope_key,
             self._history_retention_limit(chat_type),
         )
+
+        if settings.auto_memory_enabled and settings.memory_enabled:
+            asyncio.create_task(
+                self._extract_auto_memory(
+                    scope_key=scope_key,
+                    user_id=user_id,
+                    sender_name=sender_name,
+                    user_text=effective_prompt,
+                    assistant_text=text,
+                )
+            )
 
         return {
             "reply": text,

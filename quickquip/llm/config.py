@@ -32,6 +32,9 @@ class RuntimeConfig:
     tool_max_calls_per_round: int = 16
     retry_max_attempts: int = 3
     retry_base_delay: float = 1.0
+    auto_memory_enabled: bool = False
+    auto_memory_prompt: str = ""
+    auto_memory_max_tokens: int = 256
 
 
 @dataclass(slots=True)
@@ -389,6 +392,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             tool_max_calls_per_round=int(runtime_raw.get("tool_max_calls_per_round", 16)),
             retry_max_attempts=int(runtime_raw.get("retry_max_attempts", 3)),
             retry_base_delay=float(runtime_raw.get("retry_base_delay", 1.0)),
+            auto_memory_enabled=_as_bool(runtime_raw.get("auto_memory_enabled", False), default=False),
+            auto_memory_prompt=str(runtime_raw.get("auto_memory_prompt", "")).strip(),
+            auto_memory_max_tokens=max(32, int(runtime_raw.get("auto_memory_max_tokens", 256))),
         ),
         triggers=TriggerConfig(
             default_prefix=str(triggers_raw.get("default_prefix", "/ai")).strip() or "/ai",

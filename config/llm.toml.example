@@ -11,6 +11,15 @@ tool_calling_enabled = true
 tool_max_rounds = 8
 tool_max_calls_per_round = 16
 
+# 保守版自动记忆抽取：每轮 LLM 回复结束后以独立的短 prompt 判断
+# "这轮对话里有没有值得长期记住的关于发言者的稳定事实"，命中则
+# 以 source="auto" 写入记忆库。默认关闭，开启后可按群用 /llm auto_memory
+# on|off|reset 三态覆盖（或在 web admin 的"群 LLM"标签页切换）。
+# auto_memory_prompt 为空时使用代码内置的默认判断 prompt。
+auto_memory_enabled = false
+auto_memory_prompt = ""
+auto_memory_max_tokens = 256
+
 [triggers]
 default_prefix = "/ai"
 allow_prefix = true
