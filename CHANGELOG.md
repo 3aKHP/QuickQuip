@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-21
+
 ### 测试与 CI
 
 - 测试套件整体重构：旧的 5 个顶层 `test_*.py`（共 2840 行断言式脚本，import 即执行、无 fixture、任一失败屏蔽后续）全部删除，改为 `tests/` 目录下的 pytest 套件（`unit/` + `integration/` + `fixtures/`），共计 193 个可独立运行的用例。新增 `requirements-dev.txt` 固定 `pytest` / `pytest-asyncio` / `pytest-cov` / `pytest-xdist` / `ruff` 版本；`pyproject.toml` 追加 `[tool.pytest.ini_options]`（markers: `playwright`/`slow`/`network`，默认跳过 playwright 与 network）与 `[tool.coverage.*]` 段

@@ -75,7 +75,7 @@ Web admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工�
 
 ### 测试覆盖补充
 
-逐步补充并发安全测试、模板渲染负例测试、前端组件测试（TS 迁移完成后引入 Vitest）和性能基准测试。
+测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上逐步补充并发安全测试、模板渲染负例测试、前端组件测试（TS 迁移完成后引入 Vitest）和性能基准测试。
 
 ---
 
