@@ -5,6 +5,11 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
+from typing import Any, Optional
+
+from quickquip.chat.config import CONTEXT_REPLY_RULES
+from quickquip.chat.text_rules import build_rule_context, render_rule_reply, select_reply_template
 
 _JSON_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
@@ -27,11 +32,6 @@ def _extract_json(text: str) -> dict:
     if m:
         return json.loads(m.group())
     raise ValueError(f"no JSON object found in: {stripped!r}")
-from datetime import datetime
-from typing import Any, Optional
-
-from quickquip.chat.config import CONTEXT_REPLY_RULES
-from quickquip.chat.text_rules import build_rule_context, render_rule_reply, select_reply_template
 
 logger = logging.getLogger(__name__)
 

@@ -9,9 +9,18 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
-    name: Test (Python 3.12)
+  tests:
+    uses: ./.github/workflows/_tests.yml
+    with:
+      python-versions: '["3.12"]'
+
+  release:
+    name: Create Release
+    needs: tests
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -21,83 +30,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt ruff
-
-      - name: Lint
-        run: ruff check .
-
-      - name: Validate example configs
-        run: |
-          python - <<'EOF'
-          import tomllib, pathlib, sys
-          files = (
-              list(pathlib.Path('config').glob('*.toml.example')) +
-              list(pathlib.Path('config/personas.example').glob('*.toml'))
-          )
-          for f in files:
-              try:
-                  tomllib.loads(f.read_text(encoding='utf-8'))
-              except Exception as e:
-                  print(f"FAIL {f}: {e}", file=sys.stderr)
-                  sys.exit(1)
-          print(f"OK ({len(files)} files)")
-          EOF
-
-      - name: Set up test config
-        run: cp config/chat_rules.toml.example config/chat_rules.toml
-
-      - name: Run timezone tests
-        run: python test_tz.py
-
-      - name: Run LLM tests
-        run: python test_llm.py
-
-      - name: Run Tieba tests
-        run: python test_tieba.py
-
-      - name: Run defectify tests
-        run: python test_defectify.py
-
-      - name: Run briefing tests
-        run: python test_briefing.py
-
-  release:
-    name: Create Release
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       - name: Extract release notes from CHANGELOG
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          python - <<'EOF'
-          import os, re, sys, pathlib
-          tag = os.environ['TAG']
-          version = tag.lstrip('v')  # v0.5.0 -> 0.5.0
-          text = pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8')
-          # Match "## [0.5.0]" or "## [0.5.0] - 2026-04-09"
-          m = re.search(rf'^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n^## |\Z)', text, re.MULTILINE | re.DOTALL)
-          if not m:
-              print(f"ERROR: No '## [{version}]' section found in CHANGELOG.md", file=sys.stderr)
-              sys.exit(1)
-          notes = m.group(1).strip()
-          if not notes:
-              print(f"ERROR: '## [{version}]' section is empty", file=sys.stderr)
-              sys.exit(1)
-          pathlib.Path('release_notes.md').write_text(notes, encoding='utf-8')
-          print(f"Extracted {len(notes)} chars of release notes")
-          EOF
+        run: python scripts/ci/extract_release_notes.py "${{ github.ref_name }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
