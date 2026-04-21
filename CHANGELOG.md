@@ -4,9 +4,20 @@
 
 ## [Unreleased]
 
+### 变更
+
+- MCP 客户端重构：协议层与传输层解耦。新增 `Transport` 抽象基类 + `JsonRpcSession`（JSON-RPC id/pending-future/消息分发）+ 薄 `MCPClient`（initialize/tools 协议）三层；`StdioTransport` 合并原 stdio + docker 分支，`StreamableHttpTransport` 接管原 `HttpMCPClient`，新增 `SseTransport` 实现经典 MCP HTTP+SSE（GET 事件流 + `endpoint` 事件告知的 POST 地址）。`MCPClientManager` 对外 API 保持不变
+- 彻底移除 DooD 支持：`MCPServerConfig.mount_docker_socket` 字段删除，不再自动挂载 `/var/run/docker.sock`；`dev/docker-compose.yml` 的 quickquip 服务同步摘掉 `/var/run/docker.sock:/var/run/docker.sock` 挂载；`transport = "docker"` 保留但只用于裸机环境执行 `docker run -i --rm ...`。容器化部署请改用 `http` 或 `sse` transport
+- `config/llm.toml` / `config/llm.toml.example` 默认 MCP 清单清理：5 个只有 `docker` transport 的社区 server（github/tavily/arxiv/fetch/openweather）全部注释保留（裸机部署可手工启用），默认启用集只剩 `prts_wiki`（`transport = "http"`）
+- `config/llm.toml.example` 更新 transport 文档段，列出 4 种传输方式；`README.md` 同步更新 MCP 配置说明
+
 ### 新增
 
-- MCP 新增 `http` transport（MCP Streamable HTTP 协议）：`MCPServerConfig` 新增 `url` / `headers` 字段，`HttpMCPClient` 通过单端点 `POST` + `mcp-session-id` 会话管理与远端 MCP 服务器通信，支持 SSE 和 JSON 两种响应格式；`MCPClientManager.sync()` 按 transport 自动选择客户端类型；新增 `httpx>=0.27.0` 依赖；`llm.toml.example` 中 `prts_wiki` 改为 `http` transport 示例，并标注 `docker` transport 的 DooD 限制
+- MCP 新增 `sse` transport（经典 MCP HTTP+SSE）：客户端 GET `url` 打开 SSE 长连接，服务端发送 `event: endpoint` 告知 POST 地址；后续请求 POST 到该地址，响应通过 SSE 流以 `event: message` 返回。支持 `headers` 字段传递鉴权头
+- MCP sidecar POC：参考 `docker/mcp-example.Dockerfile.example` 用 `mcp-proxy` 包一层把 stdio-only 的上游社区镜像暴露为 SSE 服务，`dev/docker-compose.yml` 新增对应 sidecar service 跑在 compose 默认网络上，bot 通过 `transport = "sse"` 直连。此模式替代原先依赖 DooD 的 `transport = "docker"` 方案；新增 MCP 的模板化流程：写 Dockerfile、加 compose service、追加 `[[mcp.servers]]` 三步即可
+- `docker/mcp-example.Dockerfile.example` ENTRYPOINT 模板要求追加 `--pass-environment` 标志。mcp-proxy 默认 `--no-pass-environment`，spawned 子进程拿不到容器 env，表现为 MCP server 侧报"<KEY> environment variable is required"，即便容器里已正确注入。模板注释补充了踩坑说明，下游复用时别漏
+- `dev/deploy-v4.ps1` 部署时在远端对 `.env` / `dev/.env` 跑 `sed -i 's/\r$//'` 规范化行尾。Windows 编辑器常留下 CRLF，导致 Docker Compose 注入容器的 env 值尾部带 `\r`，表现为 API key 校验失败等奇怪错误（本次 POC 中 Tavily 首发报错即由此触发；后续清仓排进 ROADMAP）
+- `MCPClientManager.sync()` 新增启动重试：每个 server 初始化失败时最多重试 3 次、间隔 2s。用于兜底 compose 冷启动时 sidecar 慢 1~3s 导致的"首次握手时 uvicorn 尚未 listening"竞态（典型现象：Python + uv venv 型 MCP 比 Alpine + Node 型慢几百 ms~几秒）
 
 ### 修复
 

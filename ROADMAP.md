@@ -20,6 +20,13 @@
 
 `rate_limit_rules` 增加 `window = N` 字段，向后兼容（未指定时沿用全局默认 60s）。`SlidingWindowRateLimiter` 本身已经接受 `window_seconds`，只需把配置层打通。
 
+### CRLF 全仓清扫
+
+Windows 编辑器偶发写出 CRLF 行结尾，跨环境时会被 Docker Compose / Linux 工具链按字面值对待，造成诡异 bug（v0.8.x 阶段排查 Tavily "缺 API key" 时就因为 `dev/.env` 的 CRLF 被注入成 key 的一部分，浪费了一轮部署）。本版做三件事收敛：
+1. `.gitattributes` 对所有文本文件强制 `text eol=lf`，仓库内文本一律 LF；同时对 `*.ps1` 显式保留 `eol=crlf`（PowerShell 从 5.x 起虽然兼容 LF，但不必触雷）。
+2. 一次性全仓 `dos2unix` 扫描（`git add --renormalize .`）并提交，去掉历史 CRLF 残余。
+3. `dev/deploy-v4.ps1` 里的远端 `sed -i 's/\r$//'` 作为兜底保留，但主修在源头。
+
 ---
 
 ## v0.10.0 —— 类型安全与 LLM 自主性
@@ -35,6 +42,8 @@
 ### 自动联网判定
 
 在独立 `[triggers.auto_search]` 开关下，让模型在需要最新信息时自行触发 `search_web`，不再依赖用户显式 `/search`。联网结果继续与长期记忆严格隔离。
+
+顺手做一次搜索工具语义化重排：现在原生 `search_web` 通过 `SEARCH_BACKEND` 环境变量在 SearXNG / Tavily 间二选一，对 LLM 是不透明的 either/or；同时 Tavily MCP sidecar 又把 `tavily_search` / `tavily_crawl` / `tavily_research` 以细粒度工具暴露出来。本版把原生 `search_web` 硬编码走 SearXNG（免费快速元搜索），删掉 `build_search_client()` 的 backend 分发，让 Tavily 能力完全走 MCP 侧的细分工具。工具名就是语义，LLM 直接按场景选，不再依赖 env 切换。
 
 ---
 

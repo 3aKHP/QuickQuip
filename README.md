@@ -481,8 +481,9 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 
 - `LLMService` 会在启动时初始化已启用的 MCP server，并在 `/llm reload` 时重新装载。
 - `transport = "stdio"` 适合本机命令或脚本。
-- `transport = "docker"` 适合云端部署时按需拉起 sibling container，`command` 层走 Docker CLI，便于配合 DOOD。
-- `mount_docker_socket = true` 时，会自动附加 `/var/run/docker.sock:/var/run/docker.sock` 挂载，适合需要访问宿主 Docker daemon 的 MCP server。
+- `transport = "docker"` 适合裸机部署时用 `docker run -i --rm ...` 起一次性容器；容器化部署下请改用网络型 transport。
+- `transport = "http"`：MCP Streamable HTTP，单端点 `POST` 收发，服务端可用 `mcp-session-id` 维持会话。
+- `transport = "sse"`：经典 MCP HTTP+SSE，GET 拉取长连接事件流，服务端通过 `endpoint` 事件告知 POST 地址。
 - `mounts`、`docker_args`、`env` 可以继续补充工作目录、卷挂载、网络和环境变量。
 - 配置值支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`，适合把本机和云端的密钥、卷挂载和开关留在 `.env` / `dev/.env`。
 - 当前项目默认把 GitHub、Tavily、arXiv、PRTS Wiki 作为可选 MCP server 放在 `config/llm.toml` 中，PRTS Wiki 建议在云端通过 `MCP_PRTS_WIKI_ENABLED=false` 单独关闭或改成云端可用挂载。
