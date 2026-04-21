@@ -23,51 +23,78 @@ enabled = []
 [mcp]
 enabled = true
 
-# NOTE: docker transport 依赖 DooD（Docker-out-of-Docker），仅在宿主机直接运行时可用。
-# 容器内部署请改用 transport = "http" 或 transport = "stdio"。
+# 支持的 transport：
+#   "stdio" — 运行本地可执行文件（command + args），进程随 bot 启停；
+#   "docker" — 宿主机上执行 `docker run -i --rm ...`。仅在裸机 + 原生 Docker daemon 环境可用；
+#              容器化部署已不再挂载 docker.sock，本项目默认不推荐；
+#   "http"  — MCP Streamable HTTP：单端点 POST，响应为 JSON 或内联 SSE，用 mcp-session-id 做会话；
+#   "sse"   — 经典 MCP HTTP+SSE：GET 长连接事件流 + 服务端通过 endpoint 事件告知 POST 地址。
 
-[[mcp.servers]]
-id = "github"
-transport = "docker"
-timeout_seconds = 30
-image = "ghcr.io/github/github-mcp-server"
-env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
-allowed_tools = ["search_repositories", "get_file_contents", "search_code"]
-
-[[mcp.servers]]
-id = "tavily"
-transport = "docker"
-timeout_seconds = 30
-image = "mcp/tavily"
-env = { TAVILY_API_KEY = "${TAVILY_API_KEY}" }
-
-[[mcp.servers]]
-id = "arxiv"
-transport = "docker"
-enabled = false
-timeout_seconds = 30
-image = "mcp/arxiv-mcp-server"
-mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"]
-
-[[mcp.servers]]
-id = "fetch"
-transport = "docker"
-timeout_seconds = 30
-image = "mcp/fetch"
-
-[[mcp.servers]]
-id = "openweather"
-transport = "docker"
-timeout_seconds = 30
-image = "mcp/openweather"
-env = { OWM_API_KEY = "${OWM_API_KEY}" }
-
+# 默认示例：HTTP transport（连到你自建或第三方的 MCP 反代）
 [[mcp.servers]]
 id = "prts_wiki"
 transport = "http"
 timeout_seconds = 30
 url = "https://mcp.example.com/mcp"
 headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
+
+# ── MCP sidecar 模式（推荐用于容器化部署） ──────────────────────────────────
+# 上游 stdio-only 的 MCP 镜像被 mcp-proxy 包一层，作为 compose sidecar 跑在
+# 内部网络上，本 bot 以 transport = "sse" 直连。完整模板参考
+# docker/mcp-example.Dockerfile.example 与 dev/docker-compose.yml 的 MCP sidecar 区块。
+
+[[mcp.servers]]
+id = "tavily"
+transport = "sse"
+timeout_seconds = 30
+url = "http://mcp-tavily:8080/sse"
+
+[[mcp.servers]]
+id = "fetch"
+transport = "sse"
+timeout_seconds = 30
+url = "http://mcp-fetch:8080/sse"
+
+# ── 以下 docker transport 示例仅供裸机部署参考（全部注释）──────────────────
+# 这些 MCP 官方未提供 http/sse 入口，社区镜像直接 `docker run -i --rm` 启动。
+# 想用的话：1) 确保 Docker CLI 可直接调用本机 daemon；2) 取消对应段落的注释。
+#
+# [[mcp.servers]]
+# id = "github"
+# transport = "docker"
+# timeout_seconds = 30
+# image = "ghcr.io/github/github-mcp-server"
+# env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
+# allowed_tools = ["search_repositories", "get_file_contents", "search_code"]
+#
+# [[mcp.servers]]
+# id = "tavily"
+# transport = "docker"
+# timeout_seconds = 30
+# image = "mcp/tavily"
+# env = { TAVILY_API_KEY = "${TAVILY_API_KEY}" }
+#
+# [[mcp.servers]]
+# id = "arxiv"
+# transport = "docker"
+# enabled = false
+# timeout_seconds = 30
+# image = "mcp/arxiv-mcp-server"
+# mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"]
+#
+# [[mcp.servers]]
+# id = "fetch"
+# transport = "docker"
+# timeout_seconds = 30
+# image = "mcp/fetch"
+#
+# [[mcp.servers]]
+# id = "openweather"
+# transport = "docker"
+# timeout_seconds = 30
+# image = "mcp/openweather"
+# env = { OWM_API_KEY = "${OWM_API_KEY}" }
+# ─────────────────────────────────────────────────────────────────────────────
 
 # 每日早中晚播报配置。默认全局关闭；需要在群内执行 /briefing on 开启。
 [daily_briefing]
