@@ -10,6 +10,8 @@ env:
 
 jobs:
   tests:
+    # Intentionally keeps run-frontend=true (default) so tag pushes re-verify
+    # the frontend build before a release is cut.
     uses: ./.github/workflows/_tests.yml
     with:
       python-versions: '["3.12"]'
