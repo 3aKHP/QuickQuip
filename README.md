@@ -122,6 +122,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | `/llm trigger at on\|off` | 开关艾特触发 | 管理员/群主 |
 | `/llm memory status` | 查看当前群记忆注入状态 | 所有人 |
 | `/llm memory on\|off` | 开关当前群记忆注入 | 管理员/群主 |
+| `/llm auto_memory on\|off\|reset\|status` | 当前群自动记忆抽取三态开关（reset 回落到全局默认） | 管理员/群主 |
 | `/llm clear_context` | 清空当前群的短期会话上下文 | 管理员/群主 |
 | `/search <query>` | 使用当前搜索后端进行联网搜索 | 所有人 |
 | `/search news <query>` | 使用当前搜索后端搜索新闻 | 所有人 |
@@ -129,6 +130,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | `/remember <内容>` | 手工写入群记忆 | 管理员/群主 |
 | `/memories [关键词]` | 查看当前群记忆 | 所有人 |
 | `/forget <关键词>` | 删除匹配的群记忆 | 管理员/群主 |
+| `/reload_rules` | 重新读取 `config/chat_rules.toml` 并就地重建全部派生缓存（无需重启 bot） | 管理员/群主 |
+| `/reload_personas` | 重新读取 `config/personas/*.toml` 并就地替换人格集合，不动 provider/MCP/runtime | 管理员/群主 |
 
 默认只在以下场景触发 LLM：
 
