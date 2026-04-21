@@ -59,7 +59,6 @@ class MCPServerConfig:
     docker_args: list[str] = field(default_factory=list)
     pull_policy: str = "missing"  # always | missing | never
     mounts: list[str] = field(default_factory=list)
-    mount_docker_socket: bool = False
     network: str | None = None
     container_workdir: str | None = None
 
@@ -326,7 +325,6 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
                 docker_command=str(entry.get("docker_command", "docker")).strip() or "docker",
                 docker_args=[str(item) for item in entry.get("docker_args", []) if str(item).strip()],
                 mounts=[str(item).strip() for item in entry.get("mounts", []) if str(item).strip()],
-                mount_docker_socket=_as_bool(entry.get("mount_docker_socket", False), default=False),
                 network=str(entry.get("network", "")).strip() or None,
                 container_workdir=str(entry.get("container_workdir", "")).strip() or None,
             )

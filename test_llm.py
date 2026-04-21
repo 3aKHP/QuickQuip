@@ -10,7 +10,8 @@ import plugins.web_search as web_search_module
 from plugins.llm_config import MCPServerConfig, ProviderConfig
 from plugins.llm_identity import IdentityIndex
 from plugins.llm_inputs import extract_llm_input, extract_llm_prompt, extract_private_llm_input
-from plugins.llm_mcp import MCPServerStatus, MCPToolBinding, StdioMCPClient
+from plugins.llm_mcp import MCPServerStatus, MCPToolBinding
+from quickquip.llm.mcp import StdioTransport
 from plugins.llm_provider import (
     ClaudeProviderClient,
     GeminiProviderClient,
@@ -499,15 +500,15 @@ assert deduper.is_duplicate(1, 10002) is False
 assert deduper.is_duplicate(1, 10003) is False
 assert deduper.is_duplicate(1, 10001) is False
 
-stdio_client = StdioMCPClient(MCPServerConfig(id="stdio-test"))
+stdio_transport = StdioTransport(MCPServerConfig(id="stdio-test"))
 stdio_writer = DummyAsyncWriter()
-stdio_client.process = DummyProcess(
+stdio_transport.process = DummyProcess(
     stdin=stdio_writer,
     stdout=DummyAsyncReader(),
     stderr=DummyAsyncReader(),
 )
 asyncio.run(
-    stdio_client._send_message(
+    stdio_transport.send(
         {
             "jsonrpc": "2.0",
             "id": 1,
@@ -522,12 +523,12 @@ assert sent_text.endswith("\n")
 assert json.loads(sent_text.strip())["method"] == "initialize"
 
 line_message = b'{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'
-stdio_client.process = DummyProcess(
+stdio_transport.process = DummyProcess(
     stdin=DummyAsyncWriter(),
     stdout=DummyAsyncReader(line_message),
     stderr=DummyAsyncReader(),
 )
-assert asyncio.run(stdio_client._read_message()) == {
+assert asyncio.run(stdio_transport._read_message()) == {
     "jsonrpc": "2.0",
     "id": 1,
     "result": {"ok": True},
@@ -537,12 +538,12 @@ header_payload = b'{"jsonrpc":"2.0","id":2,"result":{"ok":true}}'
 header_message = (
     f"Content-Length: {len(header_payload)}\r\nX-Test: 1\r\n\r\n".encode("ascii") + header_payload
 )
-stdio_client.process = DummyProcess(
+stdio_transport.process = DummyProcess(
     stdin=DummyAsyncWriter(),
     stdout=DummyAsyncReader(header_message),
     stderr=DummyAsyncReader(),
 )
-assert asyncio.run(stdio_client._read_message()) == {
+assert asyncio.run(stdio_transport._read_message()) == {
     "jsonrpc": "2.0",
     "id": 2,
     "result": {"ok": True},
@@ -1123,7 +1124,6 @@ env_expand_config.write_text(
         enabled = "${QQ_MCP_SERVER_ENABLED:-true}"
         image = "ghcr.io/example/server:latest"
         mounts = ["${QQ_MCP_MOUNT_ONE:-/data/one:/mnt/one:ro}", "${QQ_MCP_MOUNT_TWO:-}"]
-        mount_docker_socket = "${QQ_MCP_SOCKET:-true}"
 
         [[personas]]
         id = "default"
@@ -1145,13 +1145,11 @@ os.environ["QQ_TEST_ENABLED"] = "true"
 os.environ["QQ_TOOL_CALLING_ENABLED"] = "true"
 os.environ["QQ_MCP_ENABLED"] = "true"
 os.environ["QQ_MCP_SERVER_ENABLED"] = "true"
-os.environ["QQ_MCP_SOCKET"] = "true"
 env_expand_loaded = llm_runtime_module.load_llm_config(env_expand_config)
 assert env_expand_loaded.runtime.enabled is True
 assert env_expand_loaded.runtime.tool_calling_enabled is True
 assert env_expand_loaded.mcp.enabled is True
 assert env_expand_loaded.mcp.servers[0].enabled is True
-assert env_expand_loaded.mcp.servers[0].mount_docker_socket is True
 assert env_expand_loaded.mcp.servers[0].mounts == ["/data/one:/mnt/one:ro"]
 
 search_reply = format_search_response(
