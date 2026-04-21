@@ -16,6 +16,7 @@
 - `quickquip/llm/store.py` `group_settings` 表新增 `auto_memory_enabled INTEGER` 列（`_ensure_schema` 里的 ALTER 迁移保持旧 db 兼容），`GroupSettingsOverride` / `ResolvedGroupSettings` / `/api/group-settings` PUT body 同步新增字段
 - `quickquip/llm/service.py` `quick_judge()` 修正 `self.config.default_provider` 错用（该字段实际在 `runtime` 下），现改为 `self.config.runtime.default_provider`。此前路径因 AttributeError 立即走到 `next(iter(providers))` 兜底，行为没有用户可见差异但代码意图错误
 - `quickquip/common/json_utils.py` 新增 `extract_json_object()`，把原 `context_rules._extract_json` 抽为通用工具；`service._extract_auto_memory()` 与 `context_rules` 共享
+- 新增仓根 `.gitattributes`：所有跟踪的文本文件强制 `text=auto eol=lf`，`*.ps1` / `*.bat` / `*.cmd` 显式保留 `eol=crlf`，常见图片 / 字体 / sqlite 资源标 `binary`。本次提交时仓内现有文本本就是 LF，没有触发实际 renormalize；规则就位后未来跨平台 commit 不会再写出 CRLF（v0.8.x 阶段 Tavily "缺 API key" bug 即由 `dev/.env` 的 CRLF 触发，从此源头杜绝）
 
 ## [0.8.1] - 2026-04-21
 

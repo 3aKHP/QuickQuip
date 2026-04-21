@@ -1,0 +1,28 @@
+# Default: all tracked text files → LF on checkout and in the index.
+# Binary files are auto-detected and never touched.
+* text=auto eol=lf
+
+# Windows-native scripts must keep CRLF. PowerShell 7+ accepts LF, but we
+# keep CRLF explicitly so Windows-only tooling never trips over line endings.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Image assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+
+# Fonts
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+# SQLite / packed databases
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
