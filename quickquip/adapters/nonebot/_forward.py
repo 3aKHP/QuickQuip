@@ -15,9 +15,11 @@ def _get_field(obj, key: str, default: str = "") -> str:
     return str(getattr(obj, key, default) or default)
 
 
-async def extract_forward_content(bot, message, bot_self_id, identity_index=None):
-    segments = list(message)
-    forward_id = ""
+def _find_forward_id(message) -> str:
+    try:
+        segments = list(message)
+    except TypeError:
+        return ""
     for segment in segments:
         segment_type = getattr(segment, "type", None)
         if segment_type is None and isinstance(segment, dict):
@@ -29,7 +31,18 @@ async def extract_forward_content(bot, message, bot_self_id, identity_index=None
             data = segment.get("data", {})
         forward_id = str(_get_field(data, "id")).strip()
         if forward_id:
-            break
+            return forward_id
+    return ""
+
+
+async def extract_forward_content(bot, message, bot_self_id, identity_index=None, *, reply=None):
+    forward_id = _find_forward_id(message)
+    if not forward_id and reply is not None:
+        reply_message = getattr(reply, "message", None)
+        if reply_message is None:
+            reply_message = getattr(reply, "raw_message", None)
+        if reply_message is not None:
+            forward_id = _find_forward_id(reply_message)
 
     if not forward_id:
         return "", []

@@ -6,7 +6,7 @@ from plugins.llm_identity import IdentityIndex
 from plugins.message_rendering import render_message_for_llm
 
 from tests.fixtures.configs import IDENTITIES_YAML
-from tests.fixtures.onebot import DummyMessage, at_seg, image_seg, text_seg
+from tests.fixtures.onebot import DummyMessage, at_seg, forward_seg, image_seg, text_seg
 
 
 def _identity_index(tmp_path: Path) -> IdentityIndex:
@@ -60,3 +60,26 @@ def test_render_image_placeholder_can_be_disabled(tmp_path: Path):
     # When the placeholder is off, only image_urls is populated; the text omits "[图片]"
     assert rendered.text == "看这个"
     assert rendered.image_urls == ["https://example.test/x.png"]
+
+
+def test_render_forward_segment_emits_placeholder_when_enabled():
+    msg = DummyMessage([forward_seg("fid_123"), text_seg("看一下")])
+    rendered = render_message_for_llm(
+        msg,
+        bot_self_id="12345",
+        include_image_placeholder=True,
+    )
+    assert "[合并转发消息]" in rendered.text
+    assert "看一下" in rendered.text
+
+
+def test_render_forward_segment_ignored_when_placeholder_off():
+    msg = DummyMessage([forward_seg("fid_123"), text_seg("看一下")])
+    rendered = render_message_for_llm(
+        msg,
+        bot_self_id="12345",
+        include_image_placeholder=False,
+    )
+    # Without the placeholder opt-in, rule-matching path stays untouched: forward
+    # segment collapses silently, plain text is returned as before.
+    assert rendered.text == "看一下"

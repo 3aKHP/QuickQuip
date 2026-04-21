@@ -53,6 +53,7 @@ def register_private_message_matcher(on_message):
             message=message,
             bot_self_id=event.self_id,
             identity_index=llm_service.identities,
+            reply=getattr(event, "reply", None),
         )
         llm_input = extract_private_llm_input(
             message,

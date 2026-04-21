@@ -57,3 +57,7 @@ def at_seg(qq: str) -> DummySegment:
 
 def image_seg(url: str) -> DummySegment:
     return DummySegment("image", {"url": url})
+
+
+def forward_seg(forward_id: str) -> DummySegment:
+    return DummySegment("forward", {"id": forward_id})

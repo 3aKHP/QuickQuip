@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- 引用合并转发消息 + @bot 时 bot 看不见被引用内容：`extract_forward_content` 之前只扫当前消息的 segments 找 `forward`，reply 里的 forward segment 被忽略；同时 `render_message_for_llm` 把 `forward` 当未知类型静默丢弃，`quoted_text` 也为空。两处叠加导致"引用一条合并转发消息并 @bot 问问题"时 LLM 既收不到转发内容也收不到引用内容。现 `extract_forward_content` 新增 `reply` 参数，当前消息无 forward 时回退扫 `reply.message`；`render_message_for_llm` 在 `include_image_placeholder=True`（reply 渲染路径）下为 `forward` segment 补 `[合并转发消息]` 占位，避免拉取失败时 LLM 仍然完全不知情
+
 ## [0.9.0] - 2026-04-21
 
 ### 修复

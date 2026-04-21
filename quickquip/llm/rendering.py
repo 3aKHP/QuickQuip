@@ -88,6 +88,11 @@ def render_message_for_llm(
                 image_urls.append(file_value)
             if include_image_placeholder:
                 plain_parts.append("[图片]")
+            continue
+
+        if segment_type == "forward" and include_image_placeholder:
+            plain_parts.append("[合并转发消息]")
+            continue
 
     return RenderedMessage(
         text="".join(plain_parts).strip(),
