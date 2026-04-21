@@ -174,3 +174,50 @@ GEMINI_TOOL_CHUNKS: list[dict] = [
         "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
     },
 ]
+
+
+# Shape captured from a real Gemini stream where `thought: true` parts
+# (Gemini native thought summaries) appeared interleaved with real reply
+# parts. Used to exercise the filter in _assemble_stream_response.
+GEMINI_THOUGHT_LEAK_CHUNKS: list[dict] = [
+    {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": "**Analyzing the Input**\n\nI'm currently dissecting",
+                            "thought": True,
+                        }
+                    ],
+                    "role": "model",
+                }
+            }
+        ],
+    },
+    {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {
+                            "text": "**Interpreting the Nuance**\n\nI'm now focusing on",
+                            "thought": True,
+                        }
+                    ],
+                    "role": "model",
+                }
+            }
+        ],
+    },
+    {"candidates": [{"content": {"parts": [{"text": "月曦，"}], "role": "model"}}]},
+    {
+        "candidates": [
+            {
+                "content": {"parts": [{"text": "小四这是不小心啃到蘑菇了吗？"}], "role": "model"},
+                "finishReason": "STOP",
+            }
+        ],
+        "usageMetadata": {"promptTokenCount": 79, "candidatesTokenCount": 12},
+    },
+]

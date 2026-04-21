@@ -13,6 +13,7 @@ from tests.fixtures.stream_chunks import (
     CLAUDE_TEXT_CHUNKS,
     CLAUDE_TOOL_CHUNKS,
     GEMINI_TEXT_CHUNKS,
+    GEMINI_THOUGHT_LEAK_CHUNKS,
     GEMINI_TOOL_CHUNKS,
     OPENAI_REASONING_CHUNKS,
     OPENAI_TEXT_CHUNKS,
@@ -84,3 +85,24 @@ class TestGeminiStreaming:
         assert len(resp.tool_calls) == 1
         assert resp.tool_calls[0].name == "search_web"
         assert json.loads(resp.tool_calls[0].arguments_json) == {"query": "test"}
+
+    def test_thought_parts_are_filtered(self):
+        resp = GeminiProviderClient._assemble_stream_response(
+            GEMINI_THOUGHT_LEAK_CHUNKS, "gemini-3.1-pro-preview"
+        )
+        assert resp.text == "月曦，小四这是不小心啃到蘑菇了吗？"
+        assert "Analyzing" not in resp.text
+        assert "thought" not in resp.text.lower()
+
+    def test_thought_parts_are_filtered_non_stream(self):
+        candidate = {
+            "content": {
+                "parts": [
+                    {"text": "**Analyzing**\n\nI'm thinking hard.", "thought": True},
+                    {"text": "真正的回复"},
+                ]
+            },
+            "finishReason": "STOP",
+        }
+        resp = GeminiProviderClient._parse_candidate(candidate, "gemini-3.1-pro-preview")
+        assert resp.text == "真正的回复"

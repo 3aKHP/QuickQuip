@@ -765,6 +765,8 @@ class GeminiProviderClient(BaseProviderClient):
         for index, item in enumerate(parts if isinstance(parts, list) else [], 1):
             if not isinstance(item, dict):
                 continue
+            if item.get("thought") is True:
+                continue
             if "text" in item:
                 text_parts.append(str(item.get("text", "")))
             if "functionCall" in item:
@@ -800,6 +802,8 @@ class GeminiProviderClient(BaseProviderClient):
                 parts = content.get("parts", []) if isinstance(content, dict) else []
                 for item in parts if isinstance(parts, list) else []:
                     if not isinstance(item, dict):
+                        continue
+                    if item.get("thought") is True:
                         continue
                     if "text" in item:
                         text_parts.append(str(item.get("text", "")))

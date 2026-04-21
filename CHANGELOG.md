@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 修复
+
+- Gemini 思维链泄漏到正文：Gemini 流式/非流式响应可能包含 `thought: true` 的原生 thought summary part，与真实回复 part 交替出现；`_parse_candidate` / `_assemble_stream_response` 未过滤，导致内心独白被拼到 `response.text` 开头和真实回复一起发出。现两处入口均跳过 `thought=True` 的 part
+
 ### 新增
 
 - 保守版自动记忆抽取：LLM 对话结束后后台异步跑一次独立的短 prompt 判定，提取"关于发言者的稳定长期事实"写入记忆库（source="auto"）。与主对话完全隔离：走 `quick_judge` 单路径（非流式、无工具、`temperature=0.0`），不注入历史记忆、不进入对话历史；异常静默吞掉，只记 `logger.exception`，不影响用户回复。全局开关 `[runtime] auto_memory_enabled`（默认 false）+ `auto_memory_prompt` / `auto_memory_max_tokens`；按群三态覆盖通过 `/llm auto_memory on|off|reset|status` 或 web admin 的"群 LLM"标签页。需要群级 `memory_enabled=true` 且 `auto_memory_enabled=true` 才会触发，关了记忆注入自然也不做抽取
