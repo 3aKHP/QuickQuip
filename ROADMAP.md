@@ -4,32 +4,7 @@
 
 ---
 
-## 下一版本（v0.9.0）—— 让修改立即生效
-
-**主题**：消除"保存后需重启 bot"债务，让 web admin 真正闭环。
-
-### 配置热重载（chat_rules + personas 两档）
-
-目前编辑 `config/chat_rules.toml` 和 `config/personas/*.toml` 都需要重启 bot 才能生效。本档先覆盖这两个改动最频繁的文件：观察 mtime 或显式 `/reload` 命令触发重新 parse，替换模块级缓存。`config/llm.toml` 因为涉及 provider/MCP 初始化副作用，继续要求重启，放到后续版本单独规划。
-
-### 保守版自动记忆抽取
-
-仅从已经触发的 LLM 对话结束后跑一次"抽取 pass"：用短 prompt 问"这轮对话里有没有值得记住的事实"，命中后写入长期记忆。独立开关、独立 prompt、与主对话隔离。不扫全天候群消息，不做无差别持久化。
-
-### 限流窗口按规则自定义
-
-`rate_limit_rules` 增加 `window = N` 字段，向后兼容（未指定时沿用全局默认 60s）。`SlidingWindowRateLimiter` 本身已经接受 `window_seconds`，只需把配置层打通。
-
-### CRLF 全仓清扫
-
-Windows 编辑器偶发写出 CRLF 行结尾，跨环境时会被 Docker Compose / Linux 工具链按字面值对待，造成诡异 bug（v0.8.x 阶段排查 Tavily "缺 API key" 时就因为 `dev/.env` 的 CRLF 被注入成 key 的一部分，浪费了一轮部署）。本版做三件事收敛：
-1. `.gitattributes` 对所有文本文件强制 `text eol=lf`，仓库内文本一律 LF；同时对 `*.ps1` 显式保留 `eol=crlf`（PowerShell 从 5.x 起虽然兼容 LF，但不必触雷）。
-2. 一次性全仓 `dos2unix` 扫描（`git add --renormalize .`）并提交，去掉历史 CRLF 残余。
-3. `dev/deploy-v4.ps1` 里的远端 `sed -i 's/\r$//'` 作为兜底保留，但主修在源头。
-
----
-
-## v0.10.0 —— 类型安全与 LLM 自主性
+## 下一版本（v1.0）—— 类型安全与 LLM 自主性
 
 ### 前端完全迁移到 TypeScript（本版本主轴）
 

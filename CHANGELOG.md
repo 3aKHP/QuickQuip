@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-21
+
 ### 修复
 
 - Gemini 思维链泄漏到正文：Gemini 流式/非流式响应可能包含 `thought: true` 的原生 thought summary part，与真实回复 part 交替出现；`_parse_candidate` / `_assemble_stream_response` 未过滤，导致内心独白被拼到 `response.text` 开头和真实回复一起发出。现两处入口均跳过 `thought=True` 的 part
@@ -191,7 +193,9 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/3aKHP/QuickQuip/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/3aKHP/QuickQuip/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/3aKHP/QuickQuip/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/3aKHP/QuickQuip/compare/v0.5.0...v0.6.0
