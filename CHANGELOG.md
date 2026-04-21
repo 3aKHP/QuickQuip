@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 测试与 CI
+
+- 测试套件整体重构：旧的 5 个顶层 `test_*.py`（共 2840 行断言式脚本，import 即执行、无 fixture、任一失败屏蔽后续）全部删除，改为 `tests/` 目录下的 pytest 套件（`unit/` + `integration/` + `fixtures/`），共计 193 个可独立运行的用例。新增 `requirements-dev.txt` 固定 `pytest` / `pytest-asyncio` / `pytest-cov` / `pytest-xdist` / `ruff` 版本；`pyproject.toml` 追加 `[tool.pytest.ini_options]`（markers: `playwright`/`slow`/`network`，默认跳过 playwright 与 network）与 `[tool.coverage.*]` 段
+- 共享 fixtures 模块化：`tests/fixtures/` 下按职责拆分为 `onebot.py`（OneBot V11 dummy 消息族）、`provider_stubs.py`（4 个 LLM stub client，改为每实例独立状态）、`provider_fakes.py`（3 个 provider fake 子类保留真实序列化）、`mcp_io.py`（stdio 异步 I/O dummy）、`stream_chunks.py`（三家 provider SSE chunk 样本）、`configs.py`（`MIN_LLM_CONFIG_TOML` + `llm_service` pytest fixture）、`chain_game.py`（`make_chain_def` 工厂）
+- CI 工作流替换为可复用模板：新 `.github/workflows/_tests.yml` 作为 `workflow_call` 模板，`ci.yml` 与 `release.yml` 双双改为瘦调用；新增 `concurrency` + `timeout-minutes` + `frontend` job（`npm ci && npm run build`）+ coverage.xml artifact 上传；原内嵌 TOML 校验 heredoc 和 CHANGELOG 提取脚本抽离到 `scripts/ci/validate_toml_examples.py` 与 `scripts/ci/extract_release_notes.py`，可本地复跑
+
+### 修复
+
+- `quickquip/chat/context_rules.py` 的 4 个 E402 lint 错误：`_extract_json` 函数定义将 `datetime` / `typing` / `quickquip.chat.config` / `quickquip.chat.text_rules` 的导入推后到了函数体之后，现将其归位到文件顶端
+
 ### 变更
 
 - MCP 客户端重构：协议层与传输层解耦。新增 `Transport` 抽象基类 + `JsonRpcSession`（JSON-RPC id/pending-future/消息分发）+ 薄 `MCPClient`（initialize/tools 协议）三层；`StdioTransport` 合并原 stdio + docker 分支，`StreamableHttpTransport` 接管原 `HttpMCPClient`，新增 `SseTransport` 实现经典 MCP HTTP+SSE（GET 事件流 + `endpoint` 事件告知的 POST 地址）。`MCPClientManager` 对外 API 保持不变
