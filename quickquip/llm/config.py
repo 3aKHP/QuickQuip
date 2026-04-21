@@ -332,6 +332,28 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
     return servers
 
 
+def load_personas_only(config_path: str | Path) -> dict[str, PersonaConfig]:
+    """Parse only the persona section of llm.toml plus ``config/personas/`` directory.
+
+    Used by hot-reload paths that must not touch providers/MCP/runtime; returns
+    an empty dict if the config file is missing or defines no personas.
+    """
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+
+    with path.open("rb") as file:
+        data = tomllib.load(file)
+
+    personas_path = path.parent / "personas"
+    raw_personas = data.get("personas", [])
+    if not isinstance(raw_personas, list):
+        raw_personas = []
+    if personas_path.is_dir():
+        raw_personas = raw_personas + _load_personas_from_dir(personas_path)
+    return _read_personas(raw_personas)
+
+
 def load_llm_config(path: str | Path) -> LLMConfig:
     config_path = Path(path)
     if not config_path.exists():
@@ -340,13 +362,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     with config_path.open("rb") as file:
         data = tomllib.load(file)
 
-    personas_path = config_path.parent / "personas"
-    if personas_path.is_dir():
-        dir_personas = _load_personas_from_dir(personas_path)
-        existing = data.get("personas", [])
-        if not isinstance(existing, list):
-            existing = []
-        data["personas"] = existing + dir_personas
+    personas = load_personas_only(config_path)
 
     runtime_raw = _expand_env_value(_as_dict(data.get("runtime")))
     triggers_raw = _expand_env_value(_as_dict(data.get("triggers")))
@@ -355,7 +371,6 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     daily_summary_raw = _expand_env_value(_as_dict(data.get("daily_summary")))
     daily_briefing_raw = _expand_env_value(_as_dict(data.get("daily_briefing")))
     raw_providers = data.get("providers", [])
-    raw_personas = data.get("personas", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
 
     config = LLMConfig(
@@ -396,7 +411,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             servers=_read_mcp_servers(raw_mcp_servers if isinstance(raw_mcp_servers, list) else []),
         ),
         providers=_read_providers(raw_providers if isinstance(raw_providers, list) else []),
-        personas=_read_personas(raw_personas if isinstance(raw_personas, list) else []),
+        personas=personas,
         daily_summary=DailySummaryConfig(
             enabled=_as_bool(daily_summary_raw.get("enabled", False), default=False),
             generate_cron=str(daily_summary_raw.get("generate_cron", "0 6 * * *")).strip() or "0 6 * * *",

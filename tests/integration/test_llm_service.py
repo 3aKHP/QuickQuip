@@ -230,3 +230,101 @@ async def test_memory_crud_basic(wired_service):
     deleted = wired_service.forget_group_memories(1001, "薄荷糖")
     assert deleted == 1
     assert wired_service.list_group_memories(1001) == []
+
+
+def test_reload_personas_swaps_config_personas_only(llm_service):
+    original_providers = llm_service.config.providers
+    original_runtime = llm_service.config.runtime
+
+    # Overwrite llm.toml with a different persona set (and different providers
+    # to prove reload_personas does NOT touch providers).
+    new_toml = """
+[runtime]
+enabled = true
+default_provider = "openai-main"
+default_persona = "chatter"
+history_limit = 6
+history_max_messages_per_group = 8
+memory_limit = 3
+memory_max_items_per_group = 20
+max_prompt_chars = 1000
+tool_calling_enabled = true
+
+[triggers]
+default_prefix = "/ai"
+allow_prefix = true
+allow_at = true
+
+[[personas]]
+id = "chatter"
+display_name = "健谈人格"
+system_prompt = "你特别健谈。"
+
+[[personas]]
+id = "silent"
+display_name = "寡言人格"
+system_prompt = "你话少。"
+
+[[providers]]
+id = "ghost-provider"
+protocol = "openai"
+base_url = "https://ghost.example/v1"
+api_key_env = "GHOST_API_KEY"
+default_model = "ghost-model"
+"""
+    llm_service.config_path.write_text(new_toml.lstrip(), encoding="utf-8")
+
+    count, error = llm_service.reload_personas()
+    assert error is None
+    assert count == 2
+    assert set(llm_service.config.personas.keys()) == {"chatter", "silent"}
+    assert llm_service.config.personas["chatter"].display_name == "健谈人格"
+
+    # Providers and runtime untouched — this is the whole point.
+    assert llm_service.config.providers is original_providers
+    assert llm_service.config.runtime is original_runtime
+    assert "openai-main" in llm_service.config.providers
+
+
+def test_reload_personas_falls_back_when_default_removed(llm_service):
+    assert llm_service.config.runtime.default_persona == "default"
+
+    new_toml = """
+[runtime]
+enabled = true
+default_provider = "openai-main"
+default_persona = "default"
+
+[triggers]
+default_prefix = "/ai"
+
+[[personas]]
+id = "freshling"
+display_name = "新来人格"
+system_prompt = "hi"
+
+[[providers]]
+id = "openai-main"
+protocol = "openai"
+base_url = "https://example.test/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-test"
+"""
+    llm_service.config_path.write_text(new_toml.lstrip(), encoding="utf-8")
+
+    count, error = llm_service.reload_personas()
+    assert error is None
+    assert count == 1
+    # default_persona no longer exists → falls back to first available
+    assert llm_service.config.runtime.default_persona == "freshling"
+
+
+def test_reload_personas_empty_keeps_previous(llm_service):
+    original = llm_service.config.personas
+    llm_service.config_path.write_text(
+        '[runtime]\ndefault_provider = "x"\n', encoding="utf-8"
+    )
+    count, error = llm_service.reload_personas()
+    assert count == 0
+    assert error == "配置中没有可用的人格"
+    assert llm_service.config.personas is original

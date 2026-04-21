@@ -15,7 +15,7 @@ import re
 from typing import TYPE_CHECKING
 
 from quickquip.chat.config import BEIJING_TIMEZONE
-from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config
+from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.mcp import MCPClientManager, MCPServerStatus
@@ -500,6 +500,25 @@ class LLMService:
         self.identities = IdentityIndex.from_file(self.identity_path)
         self._mcp_dirty = True
         return self.config
+
+    def reload_personas(self) -> tuple[int, str | None]:
+        """Reload only the personas section (``[[personas]]`` + ``config/personas/``).
+
+        Does **not** touch providers / MCP / runtime — those stay as loaded at
+        startup, since reloading them requires restarting provider clients and
+        reinitialising MCP sessions. Returns ``(count, error_message)``; on
+        error or an empty result, the previous ``self.config.personas`` is kept.
+        """
+        try:
+            new_personas = load_personas_only(self.config_path)
+        except Exception as exc:
+            return 0, str(exc)
+        if not new_personas:
+            return 0, "配置中没有可用的人格"
+        self.config.personas = new_personas
+        if self.config.runtime.default_persona not in new_personas:
+            self.config.runtime.default_persona = next(iter(new_personas))
+        return len(new_personas), None
 
     def build_chat_scope_key(self, chat_id: int | str, chat_type: str = "group") -> str:
         if chat_type == "private":

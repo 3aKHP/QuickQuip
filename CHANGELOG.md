@@ -6,6 +6,7 @@
 
 ### 新增
 
+- personas 热重载：新增 `/reload_personas` 管理员命令，调用 `LLMService.reload_personas()` 仅重新读取 `[[personas]]` 段 + `config/personas/*.toml` 目录并就地替换 `self.config.personas`，不触发 provider / MCP / runtime 的任何重载。读取失败或 personas 为空时保留旧状态；若当前 `default_persona` 在新集合中不存在，自动回落到第一个可用人格。`quickquip/llm/config.py` 抽出 `load_personas_only(config_path)` 公开函数，`load_llm_config()` 复用同一实现避免两条代码路径漂移
 - chat_rules 热重载：新增 `/reload_rules` 管理员命令，就地重载 `config/chat_rules.toml` 并重建所有派生缓存（`TEXT_REPLY_RULES` / `CONTEXT_REPLY_RULES` / `CHAIN_GAME_CONFIGS` / `RATE_LIMIT_RULES` 四个模块级容器、`_COMPILED_PATTERNS` / `_COMPILED_CONTEXT_PATTERNS` / `_COMPILED_CONTEXT_CONDITIONS` 预编译正则、`SWITCHABLE_RULES` 规则名集合、`ChainGameManager.defs` 与 `KeyedRateLimiter.rule_configs`）；TOML 解析失败时原状态不受影响；接龙中 session 在 defs 替换时自动清空，避免旧 def 的接龙状态被按新 def 错判。`quickquip/app/message_pipeline.py` 导出 `reload_chat_rules_pipeline()` 作为统一入口
 - 限流窗口按规则自定义：`[rate_limit_rules]` 每条桶新增可选 `window = N` 字段，不写沿用全局默认 60s；`KeyedRateLimiter` 内部按 `(rule_name, bucket_key)` 存 `SlidingWindowRateLimiter`，每个按规则自身的 `window_seconds` 计窗；`KeyedRateLimiter.reload_rules()` 对 window 或 limits 变化的规则清空其 bucket，完全一致的规则保留状态。`/api/rate-limit` 的 snapshot 返回结构不变（`window_seconds` 字段改为按规则）
 

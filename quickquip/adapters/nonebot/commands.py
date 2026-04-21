@@ -652,3 +652,17 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             f"chain {summary['chain_games']} / "
             f"rate_limit {summary['rate_limit_rules']}）"
         )
+
+    reload_personas_cmd = on_command("reload_personas", priority=10, block=True)
+
+    @reload_personas_cmd.handle()
+    async def _(event):
+        if not _allow_scope_management(event):
+            await reload_personas_cmd.finish("仅管理员可执行此操作")
+        count, error = llm_service.reload_personas()
+        if error:
+            await reload_personas_cmd.finish(f"人格重载失败：{error}")
+        default_persona = llm_service.config.runtime.default_persona or "(未配置)"
+        await reload_personas_cmd.finish(
+            f"人格已重载（{count} 个，默认：{default_persona}）"
+        )
