@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from tests.fixtures.configs import llm_config_paths, llm_service  # noqa: F401 (re-exported)
+
 
 FROZEN_NOW = datetime(2026, 3, 16, 9, 19, tzinfo=ZoneInfo("Asia/Shanghai"))
 
