@@ -110,6 +110,11 @@ class ChainGameManager:
         self.max_sessions = max_sessions
         self.sessions: OrderedDict[str, ChainGameSession] = OrderedDict()
 
+    def replace_defs(self, defs: list[ChainGameDef]) -> None:
+        """Swap in a new set of chain-game definitions and drop any in-flight sessions."""
+        self.defs = list(defs)
+        self.sessions.clear()
+
     # ── internal helpers ──────────────────────────────────────────────────
 
     def _now(self, now_ts: float | None) -> float:

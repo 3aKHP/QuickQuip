@@ -70,20 +70,39 @@ class KeyedRateLimiter:
     _PRIVATE_BUCKET = ""  # bucket key used when group_id is not applicable
 
     def __init__(self, rule_limits: dict[str, dict], window_seconds: int = 60):
-        self.window_seconds = window_seconds
-        self.rule_configs: dict[str, dict] = {}
+        self.default_window_seconds = window_seconds
+        self.rule_configs: dict[str, dict] = self._build_rule_configs(rule_limits)
+        # Key: (rule_name, bucket_key). bucket_key is "" for global or
+        # private-chat fallback, otherwise str(group_id).
+        self._limiters: dict[tuple[str, str], SlidingWindowRateLimiter] = {}
+
+    def _build_rule_configs(self, rule_limits: dict[str, dict]) -> dict[str, dict]:
+        configs: dict[str, dict] = {}
         for name, cfg in rule_limits.items():
             scope = str(cfg.get("scope", "group")).lower()
             if scope not in ("group", "global"):
                 scope = "group"
-            self.rule_configs[name] = {
+            configs[name] = {
                 "global_limit": int(cfg["global_limit"]),
                 "user_limit": int(cfg["user_limit"]),
                 "scope": scope,
+                "window_seconds": int(cfg.get("window", self.default_window_seconds)),
             }
-        # Key: (rule_name, bucket_key). bucket_key is "" for global or
-        # private-chat fallback, otherwise str(group_id).
-        self._limiters: dict[tuple[str, str], SlidingWindowRateLimiter] = {}
+        return configs
+
+    def reload_rules(self, rule_limits: dict[str, dict]) -> None:
+        """Replace rule configs; drop limiter buckets for removed or changed rules."""
+        new_configs = self._build_rule_configs(rule_limits)
+        to_drop: list[tuple[str, str]] = []
+        for key in self._limiters:
+            rule_name, _ = key
+            old_cfg = self.rule_configs.get(rule_name)
+            new_cfg = new_configs.get(rule_name)
+            if new_cfg is None or old_cfg != new_cfg:
+                to_drop.append(key)
+        for key in to_drop:
+            del self._limiters[key]
+        self.rule_configs = new_configs
 
     def _bucket_key(self, rule_name: str, group_id: int | str | None) -> str:
         cfg = self.rule_configs.get(rule_name)
@@ -99,7 +118,7 @@ class KeyedRateLimiter:
             limiter = SlidingWindowRateLimiter(
                 global_limit=cfg["global_limit"],
                 user_limit=cfg["user_limit"],
-                window_seconds=self.window_seconds,
+                window_seconds=cfg["window_seconds"],
             )
             self._limiters[key] = limiter
         return limiter
@@ -124,7 +143,7 @@ class KeyedRateLimiter:
                 "scope": cfg["scope"],
                 "global_limit": cfg["global_limit"],
                 "user_limit": cfg["user_limit"],
-                "window_seconds": self.window_seconds,
+                "window_seconds": cfg["window_seconds"],
                 "buckets": [],
             }
 

@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 新增
+
+- chat_rules 热重载：新增 `/reload_rules` 管理员命令，就地重载 `config/chat_rules.toml` 并重建所有派生缓存（`TEXT_REPLY_RULES` / `CONTEXT_REPLY_RULES` / `CHAIN_GAME_CONFIGS` / `RATE_LIMIT_RULES` 四个模块级容器、`_COMPILED_PATTERNS` / `_COMPILED_CONTEXT_PATTERNS` / `_COMPILED_CONTEXT_CONDITIONS` 预编译正则、`SWITCHABLE_RULES` 规则名集合、`ChainGameManager.defs` 与 `KeyedRateLimiter.rule_configs`）；TOML 解析失败时原状态不受影响；接龙中 session 在 defs 替换时自动清空，避免旧 def 的接龙状态被按新 def 错判。`quickquip/app/message_pipeline.py` 导出 `reload_chat_rules_pipeline()` 作为统一入口
+- 限流窗口按规则自定义：`[rate_limit_rules]` 每条桶新增可选 `window = N` 字段，不写沿用全局默认 60s；`KeyedRateLimiter` 内部按 `(rule_name, bucket_key)` 存 `SlidingWindowRateLimiter`，每个按规则自身的 `window_seconds` 计窗；`KeyedRateLimiter.reload_rules()` 对 window 或 limits 变化的规则清空其 bucket，完全一致的规则保留状态。`/api/rate-limit` 的 snapshot 返回结构不变（`window_seconds` 字段改为按规则）
+
+### 变更
+
+- `quickquip/chat/config.py` 拆分内置限流桶：新增 `_BUILTIN_RATE_LIMIT_RULES` 常量，reload 每次先重置为内置再叠 TOML 覆盖，避免重复 reload 时残留被删除的 TOML 桶配置
+- `quickquip/chat/text_rules.py` / `context_rules.py` 把预编译正则生成逻辑抽为 `recompile_patterns()` 函数，在模块加载和热重载后分别调用；`context_rules.py` 的 regex_context 缺失 `context_conditions` 警告同步移入 `recompile_patterns()`
+- `quickquip/chat/rule_switch.py` 的 `SWITCHABLE_RULES` 从模块加载时的 `_BUILTIN | _collect()` 静态并集改为可重建集合，新增 `rebuild_switchable_rules()`；`GroupRuleSwitch.disabled` 状态在重建时不受影响
+- `quickquip/chat/chain_game.py` `ChainGameManager` 新增 `replace_defs(defs)` 方法，替换定义并清空 `self.sessions`
+- `config/chat_rules.toml.example` 文档补充 `window` 字段说明与注释化示例
+
 ## [0.8.1] - 2026-04-21
 
 ### 测试与 CI

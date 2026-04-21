@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, rate_limiter, rule_switch, stats_tracker
+from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
@@ -634,3 +634,21 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await forget_all_cmd.finish("仅管理员可执行此操作")
         deleted = llm_service.clear_memories(_chat_id(event), chat_type=_chat_type(event))
         await forget_all_cmd.finish(f"已清空{_chat_label(event)}全部长期记忆（共 {deleted} 条）")
+
+    reload_rules_cmd = on_command("reload_rules", priority=10, block=True)
+
+    @reload_rules_cmd.handle()
+    async def _(event):
+        if not _allow_scope_management(event):
+            await reload_rules_cmd.finish("仅管理员可执行此操作")
+        try:
+            summary = reload_chat_rules_pipeline()
+        except Exception as exc:
+            await reload_rules_cmd.finish(f"chat_rules 重载失败：{exc}")
+        await reload_rules_cmd.finish(
+            "chat_rules 已重载（"
+            f"text {summary['text_rules']} / "
+            f"context {summary['context_rules']} / "
+            f"chain {summary['chain_games']} / "
+            f"rate_limit {summary['rate_limit_rules']}）"
+        )

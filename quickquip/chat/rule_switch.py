@@ -46,7 +46,17 @@ def _collect_config_rule_names() -> set[str]:
     return names
 
 
-SWITCHABLE_RULES: set[str] = _BUILTIN_SWITCHABLE_RULES | _collect_config_rule_names()
+SWITCHABLE_RULES: set[str] = set()
+
+
+def rebuild_switchable_rules() -> None:
+    """Repopulate SWITCHABLE_RULES in place from builtin + current TOML-derived rule names."""
+    SWITCHABLE_RULES.clear()
+    SWITCHABLE_RULES.update(_BUILTIN_SWITCHABLE_RULES)
+    SWITCHABLE_RULES.update(_collect_config_rule_names())
+
+
+rebuild_switchable_rules()
 
 
 class GroupRuleSwitch:

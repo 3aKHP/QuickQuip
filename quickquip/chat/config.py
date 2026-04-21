@@ -15,7 +15,7 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 # scope="global" 的规则把所有群 + 私聊合并到同一个桶里按用户限流，用来保护
 # 外部 API（LLM、搜索、爬虫）和其他跨会话共享资源；不写 scope 时默认为 "group"，
 # 表示按群独立分桶，群 A 的触发不占用群 B 的预算。
-RATE_LIMIT_RULES: dict[str, dict] = {
+_BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3, "scope": "global"},
@@ -28,25 +28,46 @@ RATE_LIMIT_RULES: dict[str, dict] = {
     "good_girl_chain_entry": {"global_limit": 20, "user_limit": 10},
 }
 
+RATE_LIMIT_RULES: dict[str, dict] = dict(_BUILTIN_RATE_LIMIT_RULES)
+
 TEXT_REPLY_RULES: list[dict] = []
 CONTEXT_REPLY_RULES: list[dict] = []
 CHAIN_GAME_CONFIGS: list[dict] = []
 
 
-def _load_chat_rules() -> None:
-    """Extend TEXT_REPLY_RULES, RATE_LIMIT_RULES and CHAIN_GAME_CONFIGS from config/chat_rules.toml if present."""
+def reload_chat_rules() -> None:
+    """Reload chat_rules.toml in place, preserving existing module-level list/dict identities.
+
+    Downstream modules hold references to these containers (e.g. pre-compiled regex lists,
+    rule_switch name sets, rate limiter configs), so we mutate in place rather than rebind.
+    Built-in rate limit rules are re-seeded before the TOML overlay so repeated reloads
+    stay idempotent even if the TOML no longer mentions a previously defined rule.
+
+    If the TOML file is missing the previous state is fully cleared (back to built-ins
+    only); if it exists but fails to parse, ``tomllib.TOMLDecodeError`` propagates and
+    existing rule state is left untouched.
+    """
     path = Path("config/chat_rules.toml")
-    if not path.exists():
-        return
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
+    data: dict = {}
+    if path.exists():
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+
+    RATE_LIMIT_RULES.clear()
+    RATE_LIMIT_RULES.update(_BUILTIN_RATE_LIMIT_RULES)
     RATE_LIMIT_RULES.update(data.get("rate_limit_rules", {}))
+
+    TEXT_REPLY_RULES.clear()
     TEXT_REPLY_RULES.extend(data.get("rules", []))
+
+    CONTEXT_REPLY_RULES.clear()
     CONTEXT_REPLY_RULES.extend(data.get("context_rules", []))
+
+    CHAIN_GAME_CONFIGS.clear()
     CHAIN_GAME_CONFIGS.extend(data.get("chain_games", []))
 
 
-_load_chat_rules()
+reload_chat_rules()
 
 SCHEDULED_MESSAGES: list[dict] = []
 # Example entry (uncomment and fill in to enable):

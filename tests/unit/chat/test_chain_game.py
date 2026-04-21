@@ -120,3 +120,18 @@ def test_context_exposes_groups_tuple():
     assert r["context"]["groups"] == ("猫", "狗")
     r2 = cg.process(group_id=30, text="猫", now_ts=1)
     assert r2["context"]["groups"] == ("猫", "狗")
+
+
+def test_replace_defs_swaps_defs_and_clears_sessions():
+    cg = ChainGameManager([make_chain_def("old_game", r"^来一个(.+)$", ["好的", "$1", "666"])])
+    # Start a session under the old def.
+    assert cg.process(group_id=50, text="来一个abc", now_ts=0)["reply"] == "好的"
+
+    cg.replace_defs([make_chain_def("new_game", r"^启动$", ["准备", "出发"])])
+
+    # Old session was cleared.
+    assert cg.sessions == {}
+    # Old def's trigger no longer matches.
+    assert cg.process(group_id=50, text="abc", now_ts=1) is None
+    # New def takes effect.
+    assert cg.process(group_id=50, text="启动", now_ts=2)["reply"] == "准备"

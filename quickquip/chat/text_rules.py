@@ -9,11 +9,20 @@ from quickquip.chat.config import BEIJING_TIMEZONE, BEIJING_TIME_FORMAT, TEXT_RE
 
 logger = logging.getLogger(__name__)
 
-# Pre-compile regex patterns at module load for performance
-_COMPILED_PATTERNS: list[list[re.Pattern[str]]] = [
-    [re.compile(p) for p in rule["patterns"]]
-    for rule in TEXT_REPLY_RULES
-]
+# Pre-compiled regex patterns; rebuilt in-place by recompile_patterns() so that
+# holders of this module-level list (e.g. match_text_rule below) see updates
+# after config/chat_rules.toml is reloaded.
+_COMPILED_PATTERNS: list[list[re.Pattern[str]]] = []
+
+
+def recompile_patterns() -> None:
+    _COMPILED_PATTERNS[:] = [
+        [re.compile(p) for p in rule["patterns"]]
+        for rule in TEXT_REPLY_RULES
+    ]
+
+
+recompile_patterns()
 
 
 def build_rule_context(user_id: int | str, sender_name: str, now: Optional[datetime] = None) -> dict:

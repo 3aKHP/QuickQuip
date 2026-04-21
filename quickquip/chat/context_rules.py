@@ -11,6 +11,8 @@ from typing import Any, Optional
 from quickquip.chat.config import CONTEXT_REPLY_RULES
 from quickquip.chat.text_rules import build_rule_context, render_rule_reply, select_reply_template
 
+logger = logging.getLogger(__name__)
+
 _JSON_OBJECT_PATTERN = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
 
@@ -32,8 +34,6 @@ def _extract_json(text: str) -> dict:
     if m:
         return json.loads(m.group())
     raise ValueError(f"no JSON object found in: {stripped!r}")
-
-logger = logging.getLogger(__name__)
 
 # (rule_name, group_id, text) → (trigger_bool, expires_at_ts)
 _LLM_JUDGE_CACHE: dict[tuple[str, str, str], tuple[bool, float]] = {}
@@ -63,24 +63,30 @@ def _llm_cache_set(key: tuple[str, str, str], value: bool, ttl: float) -> None:
     _LLM_JUDGE_CACHE[key] = (value, time.time() + ttl)
 
 # ═══════════════════════════════════════════════════════════════════
-# 预编译正则（模块加载时一次完成）
+# 预编译正则（recompile_patterns() 支持热重载后就地重建）
 # ═══════════════════════════════════════════════════════════════════
-_COMPILED_CONTEXT_PATTERNS: list[list[re.Pattern[str]]] = [
-    [re.compile(p) for p in rule.get("patterns", [])]
-    for rule in CONTEXT_REPLY_RULES
-]
+_COMPILED_CONTEXT_PATTERNS: list[list[re.Pattern[str]]] = []
+_COMPILED_CONTEXT_CONDITIONS: list[list[re.Pattern[str]]] = []
 
-_COMPILED_CONTEXT_CONDITIONS: list[list[re.Pattern[str]]] = [
-    [re.compile(c) for c in rule.get("context_conditions", [])]
-    for rule in CONTEXT_REPLY_RULES
-]
 
-for _idx, _rule in enumerate(CONTEXT_REPLY_RULES):
-    if _rule.get("type", "regex_context") == "regex_context" and not _COMPILED_CONTEXT_CONDITIONS[_idx]:
-        logger.warning(
-            "context rule %s 是 regex_context 但未配置 context_conditions，该规则将不会触发",
-            _rule.get("name", f"#{_idx}"),
-        )
+def recompile_patterns() -> None:
+    _COMPILED_CONTEXT_PATTERNS[:] = [
+        [re.compile(p) for p in rule.get("patterns", [])]
+        for rule in CONTEXT_REPLY_RULES
+    ]
+    _COMPILED_CONTEXT_CONDITIONS[:] = [
+        [re.compile(c) for c in rule.get("context_conditions", [])]
+        for rule in CONTEXT_REPLY_RULES
+    ]
+    for idx, rule in enumerate(CONTEXT_REPLY_RULES):
+        if rule.get("type", "regex_context") == "regex_context" and not _COMPILED_CONTEXT_CONDITIONS[idx]:
+            logger.warning(
+                "context rule %s 是 regex_context 但未配置 context_conditions，该规则将不会触发",
+                rule.get("name", f"#{idx}"),
+            )
+
+
+recompile_patterns()
 
 
 def _match_any(patterns: list[re.Pattern[str]], text: str) -> re.Match | None:

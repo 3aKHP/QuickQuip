@@ -5,6 +5,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.service import llm_service
+from quickquip.chat import config as chat_config
+from quickquip.chat import context_rules as context_rules_module
+from quickquip.chat import rule_switch as rule_switch_module
+from quickquip.chat import text_rules as text_rules_module
 from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
 from quickquip.chat.message_stats import GroupStatsTracker
@@ -88,6 +92,28 @@ def record_wordcloud_message(group_id: int | str, sender_name: str, rendered_tex
 def save_all() -> None:
     stats_tracker.save(STATS_PATH)
     rule_switch.save(RULE_SWITCH_PATH)
+
+
+def reload_chat_rules_pipeline() -> dict[str, int]:
+    """Reload chat_rules.toml and rebuild every derived cache in-place.
+
+    Returns a summary count dict so callers (e.g. the ``/reload_rules`` command)
+    can report how many rules landed after the refresh.
+    """
+    chat_config.reload_chat_rules()
+    text_rules_module.recompile_patterns()
+    context_rules_module.recompile_patterns()
+    rule_switch_module.rebuild_switchable_rules()
+    rate_limiter.reload_rules(chat_config.RATE_LIMIT_RULES)
+    custom_chain_games.replace_defs(
+        [ChainGameDef.from_dict(d) for d in chat_config.CHAIN_GAME_CONFIGS]
+    )
+    return {
+        "text_rules": len(chat_config.TEXT_REPLY_RULES),
+        "context_rules": len(chat_config.CONTEXT_REPLY_RULES),
+        "chain_games": len(chat_config.CHAIN_GAME_CONFIGS),
+        "rate_limit_rules": len(chat_config.RATE_LIMIT_RULES),
+    }
 
 
 def detect_kind(text: str):
