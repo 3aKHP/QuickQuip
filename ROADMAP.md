@@ -4,6 +4,33 @@
 
 ---
 
+## v0.9.x 增量更新 —— 轻量功能扩展
+
+在 v1.0 主轴（前端 TS 迁移）之前插入一轮按"复用现有 infra、低成本高趣味"筛出的增量功能。每条独立可 ship，不互相阻塞。
+
+### @某人捎话（离线留言）
+
+`/tell @某人 <内容>` 把留言存起来，目标用户下次在群内发言时 bot 自动 @ 他并贴出。复用 message pipeline 的现有触发路径 + SQLite 存储，无 LLM 依赖。`/tells` 查看自己待接收的留言、`/untell` 撤回自己刚发的一条。
+
+### 群语料搜索 + 精选回放
+
+- `/find <关键词>` 全文搜本群历史消息，按相关度/时间排序返回
+- `/quote` 引用一条消息收藏到群语录库；`/quote random` 随机翻出一条；可选与 LLM 结合做"以 persona 口吻点评"
+- `data/wordcloud_msgs/` 和 `data/daily_msgs/` 已经在收全量消息，直接加索引层即可
+
+### 群友人物卡
+
+`/profile @某人` 让 LLM 合成一段"人物志"：消息统计 + 长期记忆 + 最近发言样本 → 当前群绑定的 persona 口吻的短文。复用 `daily_summary` 的采样与 model_cascade；和 v0.9.0 的 `auto_memory` 形成闭环——自动抽取的记忆在此派上用场。
+
+### 轻娱乐命令族
+
+- `/roll [NdM]` 投骰子（默认 1d6）
+- `/vote "议题" 选项A 选项B ...` 发起投票，群友用回复参与
+- `/fortune` 今日运势（复用时区基础 + 短 LLM prompt）
+- `/choose A B C` 从候选里随机选一个
+
+---
+
 ## 下一版本（v1.0）—— 类型安全与 LLM 自主性
 
 ### 前端完全迁移到 TypeScript（本版本主轴）
@@ -19,6 +46,16 @@
 在独立 `[triggers.auto_search]` 开关下，让模型在需要最新信息时自行触发 `search_web`，不再依赖用户显式 `/search`。联网结果继续与长期记忆严格隔离。
 
 顺手做一次搜索工具语义化重排：现在原生 `search_web` 通过 `SEARCH_BACKEND` 环境变量在 SearXNG / Tavily 间二选一，对 LLM 是不透明的 either/or；同时 Tavily MCP sidecar 又把 `tavily_search` / `tavily_crawl` / `tavily_research` 以细粒度工具暴露出来。本版把原生 `search_web` 硬编码走 SearXNG（免费快速元搜索），删掉 `build_search_client()` 的 backend 分发，让 Tavily 能力完全走 MCP 侧的细分工具。工具名就是语义，LLM 直接按场景选，不再依赖 env 切换。
+
+### LLM 诊断工具化
+
+v0.9.0 阶段排 Gemini thought 泄漏和 schema 兼容性 bug 全靠临时写探针脚本 + 手工捕获请求/响应 JSON。把这类工具沉淀成 web admin 的"诊断"标签页：
+
+- 按 provider/model 触发一次样本请求（系统 prompt + 测试 user prompt 可配置），保存原始 JSON 供对着 `_parse_candidate` / `_assemble_stream_response` 逻辑目视
+- `LLM_TRACE_FLAG_FILE` 的 on/off 开关 + 最近 N 条 trace 浏览（复用现有 `_trace_log` 机制）
+- 按规则/persona 挑几个"典型触发样本"跑回归，直接在浏览器看命中与否
+
+下次类似 bug 出现时不用再现场拼脚本。
 
 ---
 
@@ -39,6 +76,16 @@ Web admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工�
 ### 群内名言录
 
 引用一条消息后发送 `/quote` 收藏，存入本群名言库；`/quote random` 随机翻出一条。纯规则驱动，可选与 LLM 结合做"以 persona 口吻点评"。
+
+> 已在 v0.9.x 增量更新里排期（与 `/find` 一起），该条保留作为交叉引用。
+
+### Provider 兼容性回归测试库
+
+把当前散落在 `tests/fixtures/stream_chunks.py` 的 SSE 样本扩成一套按 provider + model 分目录的真实 payload 库，每次 `quickquip/llm/provider.py` 改动必须跑通。目标是把 Gemini thought 泄漏、tool schema 字段兼容性这类"上生产才发现"的问题收回到 CI。驱动力不足前留这里，等下次类似 bug 触发再排期。
+
+### config/llm.toml 热重载
+
+v0.9.0 覆盖了 chat_rules + personas，`llm.toml` 仍然要求重启 bot。难点在 provider 重建时如何平滑处理 in-flight 请求 + MCP reconnect 顺序 + SQLite store 句柄迁移，需要先设计平滑切换协议再动手。当前重启成本可接受，不排优先级。
 
 ### 互动游戏扩展
 
