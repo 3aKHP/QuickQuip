@@ -7,6 +7,7 @@
 ### 修复
 
 - Gemini 思维链泄漏到正文：Gemini 流式/非流式响应可能包含 `thought: true` 的原生 thought summary part，与真实回复 part 交替出现；`_parse_candidate` / `_assemble_stream_response` 未过滤，导致内心独白被拼到 `response.text` 开头和真实回复一起发出。现两处入口均跳过 `thought=True` 的 part
+- Gemini 工具调用被 400 "Unknown name" 拒绝：Gemini `function_declarations.parameters` 仅接受其 Schema proto 定义的字段集合，部分 MCP server 的 `input_schema` 会吐出超出这个子集的 JSON Schema 关键字（如 `$schema` / `$defs` / `exclusiveMaximum` / `exclusiveMinimum` 等）。新增 `sanitize_gemini_schema()` 按白名单递归裁剪参数 schema，只保留 `type` / `format` / `title` / `description` / `nullable` / `enum` / `default` / `items` / `properties` / `required` / `minItems` / `maxItems` / `minLength` / `maxLength` / `minProperties` / `maxProperties` / `pattern` / `example` / `anyOf` / `propertyOrdering` / `minimum` / `maximum`；`properties` 下的属性名作为用户定义键保持原样透传
 
 ### 新增
 

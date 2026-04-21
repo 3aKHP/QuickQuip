@@ -112,6 +112,65 @@ def strip_leading_reasoning_content(text: str) -> str:
     return cleaned
 
 
+_GEMINI_ALLOWED_SCHEMA_KEYS = frozenset(
+    {
+        "type",
+        "format",
+        "title",
+        "description",
+        "nullable",
+        "enum",
+        "default",
+        "items",
+        "properties",
+        "required",
+        "minItems",
+        "maxItems",
+        "minLength",
+        "maxLength",
+        "minProperties",
+        "maxProperties",
+        "pattern",
+        "example",
+        "anyOf",
+        "propertyOrdering",
+        "minimum",
+        "maximum",
+    }
+)
+
+
+def sanitize_gemini_schema(schema: Any) -> Any:
+    """Restrict a JSON Schema subtree to keys Gemini's Schema proto accepts.
+
+    Gemini's ``function_declarations.parameters`` follows the OpenAPI 3.0
+    Schema proto and 400s on any unknown field name. Rather than chase the
+    long tail of JSON Schema keywords we don't know about, keep only the
+    exact set the proto declares; property names under ``properties`` are
+    user-defined and pass through untouched.
+    """
+    if not isinstance(schema, dict):
+        if isinstance(schema, list):
+            return [sanitize_gemini_schema(item) for item in schema]
+        return schema
+
+    cleaned: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key not in _GEMINI_ALLOWED_SCHEMA_KEYS:
+            continue
+        if key == "properties" and isinstance(value, dict):
+            cleaned[key] = {
+                name: sanitize_gemini_schema(sub) for name, sub in value.items()
+            }
+        elif key == "items":
+            cleaned[key] = sanitize_gemini_schema(value)
+        elif key == "anyOf" and isinstance(value, list):
+            cleaned[key] = [sanitize_gemini_schema(item) for item in value]
+        else:
+            cleaned[key] = value
+    return cleaned
+
+
 class BaseProviderClient:
     def __init__(self, config: ProviderConfig):
         self.config = config
@@ -744,7 +803,7 @@ class GeminiProviderClient(BaseProviderClient):
                         {
                             "name": spec.name,
                             "description": spec.description,
-                            "parameters": spec.input_schema,
+                            "parameters": sanitize_gemini_schema(spec.input_schema),
                         }
                         for spec in request.tools
                     ]

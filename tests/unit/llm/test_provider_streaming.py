@@ -6,6 +6,7 @@ from plugins.llm_provider import (
     ClaudeProviderClient,
     GeminiProviderClient,
     OpenAIProviderClient,
+    sanitize_gemini_schema,
     strip_leading_reasoning_content,
 )
 
@@ -106,3 +107,82 @@ class TestGeminiStreaming:
         }
         resp = GeminiProviderClient._parse_candidate(candidate, "gemini-3.1-pro-preview")
         assert resp.text == "真正的回复"
+
+
+class TestSanitizeGeminiSchema:
+    def test_strips_dollar_schema_at_top(self):
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        }
+        cleaned = sanitize_gemini_schema(schema)
+        assert cleaned == {
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        }
+
+    def test_strips_nested_meta_keys(self):
+        schema = {
+            "type": "object",
+            "$defs": {"Inner": {"type": "string"}},
+            "properties": {
+                "item": {"$ref": "#/$defs/Inner", "type": "string"},
+                "arr": {
+                    "type": "array",
+                    "items": {"$id": "x", "type": "integer"},
+                },
+            },
+        }
+        cleaned = sanitize_gemini_schema(schema)
+        assert "$defs" not in cleaned
+        assert "$ref" not in cleaned["properties"]["item"]
+        assert "$id" not in cleaned["properties"]["arr"]["items"]
+        assert cleaned["properties"]["item"] == {"type": "string"}
+        assert cleaned["properties"]["arr"]["items"] == {"type": "integer"}
+
+    def test_leaves_valid_schema_untouched(self):
+        schema = {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]}
+        assert sanitize_gemini_schema(schema) == schema
+
+    def test_handles_non_dict_input(self):
+        assert sanitize_gemini_schema("str") == "str"
+        assert sanitize_gemini_schema(42) == 42
+        assert sanitize_gemini_schema(None) is None
+        assert sanitize_gemini_schema([{"$schema": "x", "type": "string"}]) == [{"type": "string"}]
+
+    def test_strips_unsupported_numeric_keywords(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "n": {"type": "integer", "minimum": 0, "exclusiveMaximum": 100},
+                "m": {"type": "integer", "exclusiveMinimum": 0, "maximum": 100},
+            },
+        }
+        cleaned = sanitize_gemini_schema(schema)
+        assert cleaned["properties"]["n"] == {"type": "integer", "minimum": 0}
+        assert cleaned["properties"]["m"] == {"type": "integer", "maximum": 100}
+
+    def test_preserves_user_property_names(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "allow_external": {"type": "boolean"},
+                "$schema": {"type": "string"},  # user literally named a prop "$schema"
+                "exclusiveMaximum": {"type": "integer"},
+            },
+        }
+        cleaned = sanitize_gemini_schema(schema)
+        assert set(cleaned["properties"]) == {"allow_external", "$schema", "exclusiveMaximum"}
+
+    def test_recurses_through_any_of(self):
+        schema = {
+            "anyOf": [
+                {"type": "string", "$schema": "x"},
+                {"type": "integer", "exclusiveMinimum": 0},
+            ]
+        }
+        cleaned = sanitize_gemini_schema(schema)
+        assert cleaned == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
