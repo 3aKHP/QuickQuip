@@ -5,3 +5,28 @@ exclude = [".venv"]
 [tool.ruff.lint]
 select = ["E", "F"]
 ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "playwright: requires Playwright browser install (skipped by default)",
+    "slow: marks slow tests",
+    "network: tests that hit external network (skipped by default)",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "-m", "not playwright and not network",
+]
+
+[tool.coverage.run]
+source = ["quickquip"]
+omit = [
+    "*/__pycache__/*",
+    "quickquip/adapters/nonebot/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
