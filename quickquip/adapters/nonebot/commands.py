@@ -4,9 +4,10 @@ import hashlib
 import random
 import re
 import shlex
-from datetime import date
+from datetime import date, datetime
+from time import time
 
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
+from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, daily_collector, get_sender_name, group_quote_store, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.llm.image_gen import generate_image
@@ -837,6 +838,70 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         for i, opt in enumerate(options):
             lines.append(f"{_NUMBER_EMOJIS[i]} {opt}")
         await vote_cmd.finish("\n".join(lines))
+
+    find_cmd = on_command("find", priority=10, block=True)
+
+    @find_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await find_cmd.finish("该命令仅支持群聊")
+        keyword = _strip_command_name(str(event.get_message()).strip(), "find").strip()
+        if not keyword:
+            await find_cmd.finish("用法：/find <关键词>")
+        group_id = event.group_id
+        now = time()
+        messages = daily_collector.read_window(group_id, now - 30 * 86400, now)
+        kw_lower = keyword.lower()
+        hits = [m for m in messages if kw_lower in m.get("text", "").lower()]
+        if not hits:
+            await find_cmd.finish(f"没有找到包含「{keyword}」的消息（最近 30 天）")
+        shown = hits[-5:]
+        lines = [f"找到 {len(hits)} 条，显示最新 {len(shown)} 条："]
+        for m in shown:
+            ts = datetime.fromtimestamp(m["ts"]).strftime("%m-%d %H:%M")
+            text = m.get("text", "")
+            if len(text) > 50:
+                text = text[:50] + "…"
+            lines.append(f"[{ts}] {m['sender']}: {text}")
+        await find_cmd.finish("\n".join(lines))
+
+    quote_cmd = on_command("quote", priority=10, block=True)
+
+    @quote_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await quote_cmd.finish("该命令仅支持群聊")
+        group_id = event.group_id
+        args = _strip_command_name(str(event.get_message()).strip(), "quote").strip()
+        reply = getattr(event, "reply", None)
+        if args.lower() == "random" or (not args and not reply):
+            q = group_quote_store.random(group_id)
+            if q is None:
+                await quote_cmd.finish("语录库还是空的，引用一条消息发 /quote 来收藏吧")
+            ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
+            await quote_cmd.finish(f"「{q['content']}」\n—— {q['quoted_sender_name']} ({ts})")
+        if not reply:
+            await quote_cmd.finish("用法：引用一条消息后发 /quote 收藏；/quote random 随机一条")
+        rendered = render_reply_for_llm(
+            reply,
+            bot_self_id=event.self_id,
+            identity_index=llm_service.identities,
+        )
+        if not rendered or not rendered.text.strip():
+            await quote_cmd.finish("引用的消息没有文字内容，无法收藏")
+        content = rendered.text.strip()
+        if len(content) > 500:
+            await quote_cmd.finish("内容过长（限 500 字），无法收藏")
+        group_quote_store.add(
+            group_id=group_id,
+            quoted_user_id=rendered.user_id or "",
+            quoted_sender_name=rendered.sender_name or "未知",
+            content=content,
+            saved_by_user_id=event.user_id,
+        )
+        total = group_quote_store.count(group_id)
+        preview = content[:30] + ("…" if len(content) > 30 else "")
+        await quote_cmd.finish(f"已收藏「{preview}」（本群共 {total} 条语录）")
 
     reload_rules_cmd = on_command("reload_rules", priority=10, block=True)
 

@@ -6,6 +6,8 @@
 
 ### 新增
 
+- 群语料搜索：`/find <关键词>` 全文搜索本群最近 30 天历史消息（复用 `DailyMessageCollector` JSONL 数据），返回最新 5 条匹配结果
+- 群语录库：`/quote`（引用消息）收藏到本群语录库（SQLite）；`/quote random` 随机翻出一条；`/quote`（无引用时）等同于 `/quote random`
 - 轻娱乐命令族：`/roll [NdM]`（投骰子，默认 1d6，支持最多 10 颗/1000 面）、`/choose A B C`（随机选一个，支持引号含空格选项）、`/fortune`（今日运势，按 user_id + 日期哈希确定，同一天同一用户结果固定）、`/vote "议题" 选项A 选项B`（发起投票面板，最多 9 个选项，带数字 emoji 格式化）
 - 离线留言（@某人捎话）：`/tell @某人 <内容>` 将消息存储，目标用户下次在群内发言时 bot 自动 @ 并送达；`/tells` 查看待接收留言；`/untell` 撤回自己最新的未投递留言；无 LLM 依赖，SQLite 持久化（`data/offline_messages.db`）
 - 图片生成：新增 `/draw <描述>` 指令，调用图片生成 API 并将结果以 base64 图片发回群聊；通过 `[image_generation]` 配置块启用，复用已有 provider 的鉴权与 base_url

@@ -35,6 +35,7 @@ from quickquip.chat.daily_briefing import DailyBriefingEnabledGroups
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
 from quickquip.chat.offline_messages import OfflineMessageStore
+from quickquip.chat.group_quotes import GroupQuoteStore
 from quickquip.common.message_deduper import RecentMessageDeduper
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
@@ -44,6 +45,7 @@ DATA_DIR = Path("data")
 STATS_PATH = DATA_DIR / "stats.json"
 RULE_SWITCH_PATH = DATA_DIR / "rule_switch.json"
 OFFLINE_MESSAGES_PATH = DATA_DIR / "offline_messages.db"
+QUOTES_PATH = DATA_DIR / "quotes.db"
 
 rate_limiter = KeyedRateLimiter(
     rule_limits=RATE_LIMIT_RULES,
@@ -63,6 +65,7 @@ daily_enabled_groups = DailySummaryEnabledGroups()
 daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
 wordcloud_collector = WordCloudCollector()
 offline_message_store = OfflineMessageStore(OFFLINE_MESSAGES_PATH)
+group_quote_store = GroupQuoteStore(QUOTES_PATH)
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
