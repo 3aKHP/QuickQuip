@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import random
 import re
@@ -850,13 +851,16 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await find_cmd.finish("用法：/find <关键词>")
         group_id = event.group_id
         now = time()
-        messages = daily_collector.read_window(group_id, now - 30 * 86400, now)
+        messages = await asyncio.to_thread(
+            daily_collector.read_window, group_id, now - 30 * 86400, now
+        )
         kw_lower = keyword.lower()
         hits = [m for m in messages if kw_lower in m.get("text", "").lower()]
         if not hits:
             await find_cmd.finish(f"没有找到包含「{keyword}」的消息（最近 30 天）")
         shown = hits[-5:]
-        lines = [f"找到 {len(hits)} 条，显示最新 {len(shown)} 条："]
+        header = f"找到 {len(hits)} 条，显示最新 5 条：" if len(hits) > 5 else f"找到 {len(hits)} 条："
+        lines = [header]
         for m in shown:
             ts = datetime.fromtimestamp(m["ts"]).strftime("%m-%d %H:%M")
             text = m.get("text", "")
