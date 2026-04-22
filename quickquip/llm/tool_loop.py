@@ -2,15 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from quickquip.llm.provider import LLMProviderError, LLMRequest
+from quickquip.llm.provider import LLMProviderError, LLMRequest, _is_retryable
 from quickquip.llm.tools import LLMConversationMessage
-
-_RETRYABLE_HTTP_PREFIXES = ("HTTP 429", "HTTP 5", "网络错误")
-
-
-def _is_retryable(exc: LLMProviderError) -> bool:
-    msg = str(exc)
-    return any(msg.startswith(prefix) for prefix in _RETRYABLE_HTTP_PREFIXES)
 
 
 async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int, base_delay: float, logger):

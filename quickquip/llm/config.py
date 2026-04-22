@@ -297,9 +297,9 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
             user_agent=str(entry.get("user_agent", "")).strip(),
             extra_body=_expand_env_value(_as_dict(entry.get("extra_body"))),
             aliases={
-                str(k).strip(): str(v).strip()
-                for k, v in _expand_env_value(_as_dict(entry.get("aliases"))).items()
-                if str(k).strip() and str(v).strip()
+                k: v
+                for raw_k, raw_v in _expand_env_value(_as_dict(entry.get("aliases"))).items()
+                if (k := str(raw_k).strip()) and (v := str(raw_v).strip())
             },
             fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
         )

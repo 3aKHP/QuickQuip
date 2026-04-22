@@ -4,6 +4,7 @@ import asyncio
 import base64
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 import re
 from typing import Any
@@ -11,6 +12,8 @@ from urllib import error, parse, request
 
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
+
+logger = logging.getLogger(__name__)
 
 try:
     from loguru import logger as _loguru_logger
@@ -32,6 +35,14 @@ def _trace_active() -> bool:
 
 class LLMProviderError(RuntimeError):
     pass
+
+
+_RETRYABLE_HTTP_PREFIXES = ("HTTP 429", "HTTP 5", "网络错误")
+
+
+def _is_retryable(exc: LLMProviderError) -> bool:
+    msg = str(exc)
+    return any(msg.startswith(prefix) for prefix in _RETRYABLE_HTTP_PREFIXES)
 
 
 @dataclass(slots=True)
@@ -223,44 +234,36 @@ class BaseProviderClient:
             prepared.append(await self._download_image(image_url))
         return prepared
 
-    @staticmethod
-    def _is_retryable_error(exc: LLMProviderError) -> bool:
-        msg = str(exc)
-        return msg.startswith("HTTP 5") or msg.startswith("网络错误")
-
     def _swap_base_url(self, url: str, new_base: str) -> str:
         prefix = self.config.base_url.rstrip("/")
         if url.startswith(prefix):
             return new_base.rstrip("/") + url[len(prefix):]
+        logger.warning("LLM fallback: URL %s does not start with base_url %s", url, prefix)
         return url
 
-    async def _post_json_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    def _candidate_urls(self, url: str):
+        yield url
+        for fb in self.config.fallback_urls:
+            yield self._swap_base_url(url, fb)
+
+    async def _execute_with_fallback(self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]) -> Any:
         if not self.config.fallback_urls:
-            return await self._post_json(url, headers, payload)
-        candidates = [url] + [self._swap_base_url(url, fb) for fb in self.config.fallback_urls]
+            return await fn(url, headers, payload)
         last_exc: LLMProviderError | None = None
-        for candidate in candidates:
+        for candidate in self._candidate_urls(url):
             try:
-                return await self._post_json(candidate, headers, payload)
+                return await fn(candidate, headers, payload)
             except LLMProviderError as exc:
-                if not self._is_retryable_error(exc):
+                if not _is_retryable(exc):
                     raise
                 last_exc = exc
         raise last_exc  # type: ignore[misc]
 
+    async def _post_json_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._execute_with_fallback(self._post_json, url, headers, payload)
+
     async def _post_stream_sse_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
-        if not self.config.fallback_urls:
-            return await self._post_stream_sse(url, headers, payload)
-        candidates = [url] + [self._swap_base_url(url, fb) for fb in self.config.fallback_urls]
-        last_exc: LLMProviderError | None = None
-        for candidate in candidates:
-            try:
-                return await self._post_stream_sse(candidate, headers, payload)
-            except LLMProviderError as exc:
-                if not self._is_retryable_error(exc):
-                    raise
-                last_exc = exc
-        raise last_exc  # type: ignore[misc]
+        return await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
 
     async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
@@ -401,9 +404,9 @@ class OpenAIProviderClient(BaseProviderClient):
     async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/chat/completions"
         headers = {
+            **self.config.headers,
             "Authorization": f"Bearer {self._get_api_key()}",
             "Content-Type": "application/json",
-            **self.config.headers,
         }
         messages = [{"role": "system", "content": request.system_prompt}]
         for message in request.messages:

@@ -317,8 +317,10 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             except ValueError as exc:
                 await llm_cmd.finish(str(exc))
             if model and model != resolved:
-                await llm_cmd.finish(f"{scope_label} LLM 已切换到 {provider_id} / {resolved}（← {model}）")
-            await llm_cmd.finish(f"{scope_label} LLM 已切换到 {provider_id} / {resolved}")
+                msg = f"{scope_label} LLM 已切换到 {provider_id} / {resolved}（← {model}）"
+            else:
+                msg = f"{scope_label} LLM 已切换到 {provider_id} / {resolved}"
+            await llm_cmd.finish(msg)
 
         if tokens[:2] == ["persona", "use"] and len(tokens) >= 3:
             persona_id = tokens[2]
