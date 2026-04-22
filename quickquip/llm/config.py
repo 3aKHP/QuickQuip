@@ -134,6 +134,7 @@ class ImageGenerationConfig:
     model: str = ""
     size: str = "1024x1024"
     quality: str = "standard"
+    protocol: str = "openai_images"
 
 
 @dataclass(slots=True)
@@ -476,6 +477,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             model=str(ig_raw.get("model", "")).strip(),
             size=str(ig_raw.get("size", "1024x1024")).strip() or "1024x1024",
             quality=str(ig_raw.get("quality", "standard")).strip(),
+            protocol=str(ig_raw.get("protocol", "openai_images")).strip() or "openai_images",
         ),
         source_path=config_path,
     )

@@ -144,14 +144,32 @@ model_cascade = [
     "deepseek/deepseek-chat",
 ]
 
-# 图片生成配置。需要指向支持 POST /images/generations 的 OpenAI 兼容 provider。
-# 启用后可使用 /draw <描述> 指令触发。
+# 图片生成配置。/draw <描述> 指令触发；protocol 决定请求格式。
+#
+# 支持的 protocol：
+#   openai_images  — POST /images/generations，兼容 OpenAI DALL-E、GPT Image 系列
+#                    以及火山方舟 Seedream 系列（ARK API 完全兼容此格式）。
+#   gemini_imagen  — POST /models/{model}:generateContent，Gemini 原生图片生成格式
+#                    （Gemini 2.0/Flash 图片生成系列）。
 [image_generation]
 enabled = false
 provider_id = "openai-main"   # 复用已有 provider 的 base_url 和 api_key
-model = "dall-e-3"            # 图片生成模型，如 dall-e-3 / gpt-image-1
-size = "1024x1024"            # 尺寸：1024x1024 | 1792x1024 | 1024x1792
-quality = "standard"          # standard | hd（dall-e-3 支持）
+model = "dall-e-3"            # 图片生成模型
+size = "1024x1024"            # 尺寸；Seedream 还支持 "2K"、"3K" 等写法
+quality = "standard"          # openai_images 协议下有效：standard | hd（dall-e-3 支持）
+protocol = "openai_images"    # 见上方说明
+
+# 火山方舟 Seedream 示例（protocol = openai_images，ARK API 兼容）：
+# provider_id = "volcengine"
+# model = "doubao-seedream-3-0-t2i-250415"   # 或 doubao-seedream-5-0-lite-260128
+# size = "1024x1024"
+# protocol = "openai_images"
+
+# Gemini 图片生成示例（gemini_imagen 协议，认证走 ?key= query param）：
+# provider_id = "gemini-main"
+# model = "gemini-2.0-flash-preview-image-generation"
+# protocol = "gemini_imagen"
+# # extra_body 可传 generationConfig 扩展参数
 
 # 人格定义已拆分至 config/personas/ 目录，每个 .toml 文件对应一个人格。
 # 参见 config/personas.example/ 中的示例文件。
