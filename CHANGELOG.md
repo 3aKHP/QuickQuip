@@ -6,6 +6,7 @@
 
 ### 新增
 
+- 图片生成：新增 `/draw <描述>` 指令，调用 OpenAI 兼容的 `/images/generations` 端点生成图片并发送到群聊；通过 `[image_generation]` 配置块启用，复用已有 provider 的鉴权与 base_url；结果以 base64 编码后直接发出，无需额外存储
 - `ProviderConfig` 新增四个字段，提升 provider 调用层的可配置性：
   - `aliases`：模型别名映射（`{ 短名 = "完整模型ID" }`），`/llm use` 时自动解析，`/llm models` 展示时在方括号内列出；配置加载时校验所有 alias target 必须在 `models` 列表中
   - `user_agent`：注入自定义 `User-Agent` 请求头，适用于校验客户端标识的上游服务；三种协议（OpenAI / Claude / Gemini）均支持

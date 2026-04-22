@@ -5,6 +5,8 @@ import re
 from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.llm.image_gen import generate_image
+from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
 from quickquip.search.web_search import WebSearchError, build_search_client, format_search_response
 from quickquip.tieba.config import TIEBA_RULE_NAME
@@ -469,6 +471,29 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if chat_type == "group":
             stats_tracker.record_trigger(event.group_id, result.get("rule_name", "unknown"))
         await defectify_cmd.finish(result["reply"])
+
+    draw_cmd = on_command("draw", priority=10, block=True)
+
+    @draw_cmd.handle()
+    async def _(event):
+        if not rate_limiter.allow("image_gen", event.user_id):
+            await draw_cmd.finish("图片生成过于频繁，请稍后再试")
+        ig = llm_service.config.image_generation
+        if not ig.enabled:
+            await draw_cmd.finish("图片生成功能未启用")
+        provider = llm_service.config.providers.get(ig.provider_id)
+        if provider is None:
+            await draw_cmd.finish("图片生成 provider 未配置")
+        text = str(event.get_message()).strip()
+        prompt = _strip_command_name(text, "draw").strip()
+        if not prompt:
+            await draw_cmd.finish("用法：/draw <描述>")
+        await draw_cmd.send("正在生成图片，请稍候…")
+        try:
+            image_b64 = await generate_image(ig, provider, prompt)
+        except LLMProviderError as exc:
+            await draw_cmd.finish(f"图片生成失败：{exc}")
+        await draw_cmd.finish(Message([MessageSegment.image(f"base64://{image_b64}")]))
 
     tieba_cmd = on_command("tieba", priority=10, block=True)
 

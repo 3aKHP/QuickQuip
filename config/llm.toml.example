@@ -144,6 +144,15 @@ model_cascade = [
     "deepseek/deepseek-chat",
 ]
 
+# 图片生成配置。需要指向支持 POST /images/generations 的 OpenAI 兼容 provider。
+# 启用后可使用 /draw <描述> 指令触发。
+[image_generation]
+enabled = false
+provider_id = "openai-main"   # 复用已有 provider 的 base_url 和 api_key
+model = "dall-e-3"            # 图片生成模型，如 dall-e-3 / gpt-image-1
+size = "1024x1024"            # 尺寸：1024x1024 | 1792x1024 | 1024x1792
+quality = "standard"          # standard | hd（dall-e-3 支持）
+
 # 人格定义已拆分至 config/personas/ 目录，每个 .toml 文件对应一个人格。
 # 参见 config/personas.example/ 中的示例文件。
 

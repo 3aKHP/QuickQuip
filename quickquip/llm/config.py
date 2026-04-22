@@ -128,6 +128,15 @@ class DailyBriefingConfig:
 
 
 @dataclass(slots=True)
+class ImageGenerationConfig:
+    enabled: bool = False
+    provider_id: str = ""
+    model: str = ""
+    size: str = "1024x1024"
+    quality: str = "standard"
+
+
+@dataclass(slots=True)
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
@@ -137,6 +146,7 @@ class LLMConfig:
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
     daily_summary: DailySummaryConfig = field(default_factory=DailySummaryConfig)
     daily_briefing: DailyBriefingConfig = field(default_factory=DailyBriefingConfig)
+    image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     load_error: str | None = None
     source_path: Path | None = None
 
@@ -385,6 +395,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     mcp_raw = _expand_env_value(_as_dict(data.get("mcp")))
     daily_summary_raw = _expand_env_value(_as_dict(data.get("daily_summary")))
     daily_briefing_raw = _expand_env_value(_as_dict(data.get("daily_briefing")))
+    ig_raw = _expand_env_value(_as_dict(data.get("image_generation")))
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
 
@@ -458,6 +469,13 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 for item in daily_briefing_raw.get("model_cascade", [])
                 if str(item).strip()
             ],
+        ),
+        image_generation=ImageGenerationConfig(
+            enabled=_as_bool(ig_raw.get("enabled", False), default=False),
+            provider_id=str(ig_raw.get("provider_id", "")).strip(),
+            model=str(ig_raw.get("model", "")).strip(),
+            size=str(ig_raw.get("size", "1024x1024")).strip() or "1024x1024",
+            quality=str(ig_raw.get("quality", "standard")).strip(),
         ),
         source_path=config_path,
     )
