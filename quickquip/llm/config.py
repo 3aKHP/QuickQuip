@@ -96,6 +96,10 @@ class ProviderConfig:
     style_overrides: str = ""
     stream_enabled: bool = True
     headers: dict[str, str] = field(default_factory=dict)
+    user_agent: str = ""
+    extra_body: dict[str, Any] = field(default_factory=dict)
+    aliases: dict[str, str] = field(default_factory=dict)
+    fallback_urls: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -290,6 +294,14 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
             style_overrides=str(entry.get("style_overrides", "")).strip(),
             stream_enabled=_as_bool(entry.get("stream_enabled", True), default=True),
             headers={str(k): str(v) for k, v in raw_headers.items()},
+            user_agent=str(entry.get("user_agent", "")).strip(),
+            extra_body=_expand_env_value(_as_dict(entry.get("extra_body"))),
+            aliases={
+                str(k).strip(): str(v).strip()
+                for k, v in _expand_env_value(_as_dict(entry.get("aliases"))).items()
+                if str(k).strip() and str(v).strip()
+            },
+            fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
         )
     return providers
 
@@ -487,5 +499,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             return config
         if provider.default_model not in provider.models:
             provider.models.insert(0, provider.default_model)
+        for alias, target in provider.aliases.items():
+            if target not in provider.models:
+                config.load_error = f"provider {provider.id} 的 alias {alias!r} 指向未声明模型 {target!r}"
+                return config
 
     return config

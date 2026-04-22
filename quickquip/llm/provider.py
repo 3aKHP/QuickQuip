@@ -223,6 +223,45 @@ class BaseProviderClient:
             prepared.append(await self._download_image(image_url))
         return prepared
 
+    @staticmethod
+    def _is_retryable_error(exc: LLMProviderError) -> bool:
+        msg = str(exc)
+        return msg.startswith("HTTP 5") or msg.startswith("网络错误")
+
+    def _swap_base_url(self, url: str, new_base: str) -> str:
+        prefix = self.config.base_url.rstrip("/")
+        if url.startswith(prefix):
+            return new_base.rstrip("/") + url[len(prefix):]
+        return url
+
+    async def _post_json_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.config.fallback_urls:
+            return await self._post_json(url, headers, payload)
+        candidates = [url] + [self._swap_base_url(url, fb) for fb in self.config.fallback_urls]
+        last_exc: LLMProviderError | None = None
+        for candidate in candidates:
+            try:
+                return await self._post_json(candidate, headers, payload)
+            except LLMProviderError as exc:
+                if not self._is_retryable_error(exc):
+                    raise
+                last_exc = exc
+        raise last_exc  # type: ignore[misc]
+
+    async def _post_stream_sse_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        if not self.config.fallback_urls:
+            return await self._post_stream_sse(url, headers, payload)
+        candidates = [url] + [self._swap_base_url(url, fb) for fb in self.config.fallback_urls]
+        last_exc: LLMProviderError | None = None
+        for candidate in candidates:
+            try:
+                return await self._post_stream_sse(candidate, headers, payload)
+            except LLMProviderError as exc:
+                if not self._is_retryable_error(exc):
+                    raise
+                last_exc = exc
+        raise last_exc  # type: ignore[misc]
+
     async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
         http_request = request.Request(url=url, data=body, headers=headers, method="POST")
@@ -376,6 +415,10 @@ class OpenAIProviderClient(BaseProviderClient):
             "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        if self.config.user_agent:
+            headers["User-Agent"] = self.config.user_agent
+        if self.config.extra_body:
+            payload.update(self.config.extra_body)
         if request.allow_tool_calls and request.tools:
             payload["tools"] = [
                 {
@@ -470,14 +513,14 @@ class OpenAIProviderClient(BaseProviderClient):
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
-        data = await self._post_json(url, headers, payload)
+        data = await self._post_json_with_fallback(url, headers, payload)
         return self._parse_response(data, request.model)
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
-        chunks = await self._post_stream_sse(url, headers, payload)
+        chunks = await self._post_stream_sse_with_fallback(url, headers, payload)
         return self._assemble_stream_response(chunks, request.model)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -583,6 +626,10 @@ class ClaudeProviderClient(BaseProviderClient):
             "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        if self.config.user_agent:
+            headers["User-Agent"] = self.config.user_agent
+        if self.config.extra_body:
+            payload.update(self.config.extra_body)
         if request.allow_tool_calls and request.tools:
             payload["tools"] = [
                 {
@@ -689,13 +736,13 @@ class ClaudeProviderClient(BaseProviderClient):
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
-        data = await self._post_json(url, headers, payload)
+        data = await self._post_json_with_fallback(url, headers, payload)
         return self._parse_response(data, request.model)
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         payload["stream"] = True
-        chunks = await self._post_stream_sse(url, headers, payload)
+        chunks = await self._post_stream_sse_with_fallback(url, headers, payload)
         return self._assemble_stream_response(chunks, request.model)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -813,6 +860,10 @@ class GeminiProviderClient(BaseProviderClient):
             "Content-Type": "application/json",
             **self.config.headers,
         }
+        if self.config.user_agent:
+            headers["User-Agent"] = self.config.user_agent
+        if self.config.extra_body:
+            payload.update(self.config.extra_body)
         return url, headers, payload
 
     @staticmethod
@@ -896,7 +947,7 @@ class GeminiProviderClient(BaseProviderClient):
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
-        data = await self._post_json(url, headers, payload)
+        data = await self._post_json_with_fallback(url, headers, payload)
         candidates = data.get("candidates", [])
         candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
         response = self._parse_candidate(candidate, request.model)
@@ -907,7 +958,7 @@ class GeminiProviderClient(BaseProviderClient):
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request, stream=True)
-        chunks = await self._post_stream_sse(url, headers, payload)
+        chunks = await self._post_stream_sse_with_fallback(url, headers, payload)
         return self._assemble_stream_response(chunks, request.model)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:

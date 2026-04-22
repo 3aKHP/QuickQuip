@@ -829,14 +829,19 @@ class LLMService:
     def reset_group_history_limit(self, group_id: int | str) -> None:
         self.reset_chat_history_limit(group_id, chat_type="group")
 
-    def set_chat_model(self, chat_id: int | str, provider_id: str, model: str, chat_type: str = "group") -> str:
+    def set_chat_model(self, chat_id: int | str, provider_id: str, model: str = "", chat_type: str = "group") -> str:
         provider = self.config.providers.get(provider_id)
         if provider is None:
             raise ValueError(f"未知 provider：{provider_id}")
-        if model not in provider.models:
-            raise ValueError(f"provider {provider_id} 未声明模型：{model}")
-        self._update_chat_settings(chat_id, chat_type, provider_id=provider_id, model=model)
-        return model
+        resolved = model.strip()
+        if not resolved:
+            resolved = provider.default_model
+        elif resolved in provider.aliases:
+            resolved = provider.aliases[resolved]
+        if resolved not in provider.models:
+            raise ValueError(f"provider {provider_id} 未声明模型：{resolved}")
+        self._update_chat_settings(chat_id, chat_type, provider_id=provider_id, model=resolved)
+        return resolved
 
     def set_group_model(self, group_id: int | str, provider_id: str, model: str) -> str:
         return self.set_chat_model(group_id, provider_id, model, chat_type="group")
@@ -902,22 +907,40 @@ class LLMService:
             return f"LLM 配置不可用：{self.config.load_error}"
         lines = ["可用 Providers："]
         for provider in self.list_providers():
-            lines.append(f"- {provider.id} [{provider.protocol}] 默认模型：{provider.default_model}")
+            note_parts = []
+            if provider.aliases:
+                note_parts.append(f"{len(provider.aliases)} 个别名")
+            if provider.fallback_urls:
+                note_parts.append(f"{len(provider.fallback_urls)} 个备用")
+            suffix = f"（{', '.join(note_parts)}）" if note_parts else ""
+            lines.append(f"- {provider.id} [{provider.protocol}] 默认：{provider.default_model}{suffix}")
         return "\n".join(lines)
 
     def format_models(self, provider_id: str | None = None) -> str:
         if self.config.load_error:
             return f"LLM 配置不可用：{self.config.load_error}"
+
+        def _model_lines(provider: ProviderConfig) -> list[str]:
+            reverse: dict[str, list[str]] = {}
+            for alias, target in provider.aliases.items():
+                reverse.setdefault(target, []).append(alias)
+            result = []
+            for model in provider.models:
+                aliases = reverse.get(model)
+                suffix = f"  [{', '.join(sorted(aliases))}]" if aliases else ""
+                result.append(f"- {model}{suffix}")
+            return result
+
         if provider_id:
             provider = self.config.providers.get(provider_id)
             if provider is None:
                 return f"未知 provider：{provider_id}"
-            return "\n".join([f"{provider.id} 可用模型：", *[f"- {model}" for model in provider.models]])
+            return "\n".join([f"{provider.id} 可用模型：", *_model_lines(provider)])
 
         lines = ["可用模型："]
         for provider in self.list_providers():
             lines.append(f"[{provider.id}]")
-            lines.extend(f"- {model}" for model in provider.models)
+            lines.extend(_model_lines(provider))
         return "\n".join(lines)
 
     def format_personas(self, chat_type: str = "group") -> str:

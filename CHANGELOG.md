@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 新增
+
+- `ProviderConfig` 新增四个字段，提升 provider 调用层的可配置性：
+  - `aliases`：模型别名映射（`{ 短名 = "完整模型ID" }`），`/llm use` 时自动解析，`/llm models` 展示时在方括号内列出；配置加载时校验所有 alias target 必须在 `models` 列表中
+  - `user_agent`：注入自定义 `User-Agent` 请求头，适用于校验客户端标识的上游服务；三种协议（OpenAI / Claude / Gemini）均支持
+  - `extra_body`：注入到每次请求体的额外字段（TOML inline table），可传递上游厂商私有参数；在工具调用字段之前合并，允许覆盖非核心字段
+  - `fallback_urls`：备用 base URL 列表；主地址返回 5xx 或网络错误时自动切换到下一个（路径和 query string 保持不变），所有协议均支持
+- `/llm use <provider>` 现可省略模型名，省略时自动使用该 provider 的 `default_model`；切换成功后若输入的是别名，回复中注明解析结果（`← 别名`）
+- `/llm providers` 在每个 provider 旁附注别名数和备用地址数
+
+### 变更
+
+- `/llm use` 参数由必须 `<provider> <model>` 改为 `<provider> [model]`（model 可选）
+
 ### 修复
 
 - 引用合并转发消息 + @bot 时 bot 看不见被引用内容：`extract_forward_content` 之前只扫当前消息的 segments 找 `forward`，reply 里的 forward segment 被忽略；同时 `render_message_for_llm` 把 `forward` 当未知类型静默丢弃，`quoted_text` 也为空。两处叠加导致"引用一条合并转发消息并 @bot 问问题"时 LLM 既收不到转发内容也收不到引用内容。现 `extract_forward_content` 新增 `reply` 参数，当前消息无 forward 时回退扫 `reply.message`；`render_message_for_llm` 在 `include_image_placeholder=True`（reply 渲染路径）下为 `forward` segment 补 `[合并转发消息]` 占位，避免拉取失败时 LLM 仍然完全不知情

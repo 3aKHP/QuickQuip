@@ -157,6 +157,10 @@ models = ["gpt-5.4", "gpt-5.2", "gpt-5.1"]
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
+# aliases = { gpt4 = "gpt-5.4", mini = "gpt-5.2" }  # 短别名 → 完整模型 ID，用于 /llm use
+# fallback_urls = ["https://backup-relay.example/v1"]  # 主地址失败（5xx/网络）时自动切换
+# user_agent = ""  # 注入 User-Agent 头；留空则不注入
+# extra_body = {}  # 注入到每次请求体的额外字段，例如 { custom_header_field = "value" }
 
 [[providers]]
 id = "claude-main"

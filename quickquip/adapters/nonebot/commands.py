@@ -309,14 +309,16 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             else:
                 await llm_cmd.finish(f"未找到消息 {target_msg_id}，可能已过期或未被记录")
 
-        if tokens[:1] == ["use"] and len(tokens) >= 3:
+        if tokens[:1] == ["use"] and len(tokens) >= 2:
             provider_id = tokens[1]
-            model = tokens[2]
+            model = tokens[2] if len(tokens) >= 3 else ""
             try:
-                llm_service.set_chat_model(chat_id, provider_id, model, chat_type=chat_type)
+                resolved = llm_service.set_chat_model(chat_id, provider_id, model, chat_type=chat_type)
             except ValueError as exc:
                 await llm_cmd.finish(str(exc))
-            await llm_cmd.finish(f"{scope_label} LLM 已切换到 {provider_id} / {model}")
+            if model and model != resolved:
+                await llm_cmd.finish(f"{scope_label} LLM 已切换到 {provider_id} / {resolved}（← {model}）")
+            await llm_cmd.finish(f"{scope_label} LLM 已切换到 {provider_id} / {resolved}")
 
         if tokens[:2] == ["persona", "use"] and len(tokens) >= 3:
             persona_id = tokens[2]
@@ -394,7 +396,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（/llm reload 可重置）")
 
         await llm_cmd.finish(
-            "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> <model>|"
+            "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> [model]|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
             "memory status|memory on|memory off|auto_memory on|off|reset|status|context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
