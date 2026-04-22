@@ -886,11 +886,12 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             system_parts.append(provider.style_overrides)
         system_prompt = "\n\n".join(system_parts)
 
-        memories_raw = llm_service.store.search_memories(str(group_id), str(target_user_id), target_name, 8)
-        memories = [m["content"] for m in memories_raw if m.get("content")]
-
         now = time()
-        all_msgs = await asyncio.to_thread(daily_collector.read_window, group_id, now - 30 * 86400, now)
+        memories_raw, all_msgs = await asyncio.gather(
+            asyncio.to_thread(llm_service.store.search_memories, str(group_id), str(target_user_id), target_name, 8),
+            asyncio.to_thread(daily_collector.read_window, group_id, now - 30 * 86400, now),
+        )
+        memories = [m["content"] for m in memories_raw if m.get("content")]
         samples = [
             m["text"][:80]
             for m in all_msgs

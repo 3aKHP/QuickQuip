@@ -62,4 +62,6 @@ async def generate_profile(
         except LLMProviderError as exc:
             last_error = exc
 
-    raise LLMProviderError(f"所有模型均失败：{last_error}")
+    if last_error is not None:
+        raise LLMProviderError(f"所有模型均失败：{last_error}")
+    raise LLMProviderError("cascade 为空或所有 provider 均未配置")
