@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
@@ -62,8 +60,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         if pending:
             lines = [f"有 {len(pending)} 条留言捎给你："]
             for m in pending:
-                ts = datetime.fromtimestamp(m.created_at).strftime("%m-%d %H:%M")
-                lines.append(f"[{m.from_sender_name} {ts}] {m.content}")
+                lines.append(m.format_display())
             await bot.send(event, Message([
                 MessageSegment.at(user_id),
                 MessageSegment.text(" " + "\n".join(lines)),

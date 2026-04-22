@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 import re
 
 from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
@@ -733,8 +732,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await tells_cmd.finish("没有待接收的留言")
         lines = [f"有 {len(pending)} 条留言等着你："]
         for m in pending:
-            ts = datetime.fromtimestamp(m.created_at).strftime("%m-%d %H:%M")
-            lines.append(f"[{m.from_sender_name} {ts}] {m.content}")
+            lines.append(m.format_display())
         await tells_cmd.finish("\n".join(lines))
 
     untell_cmd = on_command("untell", priority=10, block=True)
