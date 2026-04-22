@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
@@ -7,6 +9,7 @@ from quickquip.app.message_pipeline import (
     get_sender_name,
     llm_service,
     message_deduper,
+    offline_message_store,
     rate_limiter,
     recent_messages,
     record_group_message,
@@ -54,6 +57,18 @@ def register_message_matcher(on_message, Message, MessageSegment):
         stats_tracker.record_message(group_id, user_id, sender_name)
         record_group_message(group_id, user_id, sender_name, rendered_text)
         record_wordcloud_message(group_id, sender_name, rendered_text)
+
+        pending = offline_message_store.pop_pending(group_id, user_id)
+        if pending:
+            lines = [f"有 {len(pending)} 条留言捎给你："]
+            for m in pending:
+                ts = datetime.fromtimestamp(m.created_at).strftime("%m-%d %H:%M")
+                lines.append(f"[{m.from_sender_name} {ts}] {m.content}")
+            await bot.send(event, Message([
+                MessageSegment.at(user_id),
+                MessageSegment.text(" " + "\n".join(lines)),
+            ]))
+
         trigger_context = recent_messages.list_recent(group_id, limit=20)
 
         llm_settings = llm_service.get_group_settings(group_id)

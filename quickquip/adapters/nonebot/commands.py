@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 import re
 
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
+from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.llm.image_gen import generate_image
@@ -683,6 +684,69 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await forget_all_cmd.finish("仅管理员可执行此操作")
         deleted = llm_service.clear_memories(_chat_id(event), chat_type=_chat_type(event))
         await forget_all_cmd.finish(f"已清空{_chat_label(event)}全部长期记忆（共 {deleted} 条）")
+
+    tell_cmd = on_command("tell", priority=10, block=True)
+
+    @tell_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await tell_cmd.finish("该命令仅支持群聊")
+        to_user_id = None
+        content_parts = []
+        at_found = False
+        for seg in event.get_message():
+            seg_type = getattr(seg, "type", None)
+            data = getattr(seg, "data", {})
+            if seg_type == "at" and not at_found:
+                qq = str(data.get("qq", "") or "").strip()
+                if qq and qq != "all":
+                    to_user_id = qq
+                    at_found = True
+            elif seg_type == "text" and at_found:
+                part = str(data.get("text", "") or "").strip()
+                if part:
+                    content_parts.append(part)
+        if not to_user_id:
+            await tell_cmd.finish("用法：/tell @某人 <内容>")
+        if str(to_user_id) == str(event.user_id):
+            await tell_cmd.finish("不能给自己留言")
+        content = " ".join(content_parts).strip()
+        if not content:
+            await tell_cmd.finish("留言内容不能为空")
+        offline_message_store.add(
+            group_id=event.group_id,
+            from_user_id=event.user_id,
+            from_sender_name=get_sender_name(event),
+            to_user_id=to_user_id,
+            content=content,
+        )
+        await tell_cmd.finish("留言已存，TA 下次发言时会收到")
+
+    tells_cmd = on_command("tells", priority=10, block=True)
+
+    @tells_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await tells_cmd.finish("该命令仅支持群聊")
+        pending = offline_message_store.list_pending_for(event.group_id, event.user_id)
+        if not pending:
+            await tells_cmd.finish("没有待接收的留言")
+        lines = [f"有 {len(pending)} 条留言等着你："]
+        for m in pending:
+            ts = datetime.fromtimestamp(m.created_at).strftime("%m-%d %H:%M")
+            lines.append(f"[{m.from_sender_name} {ts}] {m.content}")
+        await tells_cmd.finish("\n".join(lines))
+
+    untell_cmd = on_command("untell", priority=10, block=True)
+
+    @untell_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await untell_cmd.finish("该命令仅支持群聊")
+        to_user_id = offline_message_store.retract_latest(event.group_id, event.user_id)
+        if to_user_id is None:
+            await untell_cmd.finish("没有可撤回的留言")
+        await untell_cmd.finish(f"已撤回最新留言（收件人：{to_user_id}）")
 
     reload_rules_cmd = on_command("reload_rules", priority=10, block=True)
 

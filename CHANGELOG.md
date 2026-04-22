@@ -6,6 +6,7 @@
 
 ### 新增
 
+- 离线留言（@某人捎话）：`/tell @某人 <内容>` 将消息存储，目标用户下次在群内发言时 bot 自动 @ 并送达；`/tells` 查看待接收留言；`/untell` 撤回自己最新的未投递留言；无 LLM 依赖，SQLite 持久化（`data/offline_messages.db`）
 - 图片生成：新增 `/draw <描述>` 指令，调用图片生成 API 并将结果以 base64 图片发回群聊；通过 `[image_generation]` 配置块启用，复用已有 provider 的鉴权与 base_url
   - `protocol = "openai_images"`：兼容 OpenAI DALL-E / GPT Image 系列及火山方舟 Seedream 系列（ARK API 完全兼容此格式）
   - `protocol = "gemini_imagen"`：Gemini 原生图片生成格式（`generateContent` 端点，`inlineData` 响应解析）
