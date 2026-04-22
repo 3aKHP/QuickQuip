@@ -54,12 +54,19 @@ _FORTUNES = [
     ("小凶", "遇事三思而后行，不宜冒进"),
     ("凶", "今日多有阻碍，静待时机，勿急于求成"),
 ]
-_NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+_NUMBER_EMOJIS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣")
 
 
 def _daily_fortune(user_id: int | str) -> tuple[str, str]:
     h = int(hashlib.md5(f"{user_id}:{date.today().isoformat()}".encode()).hexdigest(), 16)
     return _FORTUNES[h % len(_FORTUNES)]
+
+
+def _safe_shlex_split(text: str) -> list[str]:
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
 
 
 def _parse_preset(args: str) -> str:
@@ -796,9 +803,9 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if not args:
             await choose_cmd.finish("用法：/choose A B C")
         try:
-            options = [o for o in shlex.split(args) if o.strip()]
+            options = _safe_shlex_split(args)
         except ValueError:
-            options = [o for o in args.split() if o.strip()]
+            options = args.split()
         if len(options) < 2:
             await choose_cmd.finish("至少需要两个选项")
         await choose_cmd.finish(f"选择了：{random.choice(options)}")
@@ -818,9 +825,9 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if not args:
             await vote_cmd.finish('用法：/vote "议题" 选项A 选项B ...')
         try:
-            parts = [p for p in shlex.split(args) if p.strip()]
+            parts = _safe_shlex_split(args)
         except ValueError:
-            parts = [p for p in args.split() if p.strip()]
+            parts = args.split()
         if len(parts) < 3:
             await vote_cmd.finish('用法：/vote "议题" 选项A 选项B（至少两个选项）')
         topic, options = parts[0], parts[1:]
