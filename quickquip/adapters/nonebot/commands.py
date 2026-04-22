@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import random
 import re
+import shlex
+from datetime import date
 
 from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, get_sender_name, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
@@ -38,6 +42,24 @@ def _allow_scope_management(event) -> bool:
 
 _PRESET_RE = re.compile(r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'|(\S.*))', re.DOTALL)
 _RESUME_RE = re.compile(r'--resume(?:\s+(\d+))?')
+_DICE_RE = re.compile(r"^(\d*)[dD](\d+)$")
+
+_FORTUNES = [
+    ("大吉", "财运亨通，诸事大顺，今日宜出行、宜交友"),
+    ("吉", "今日顺遂，保持当下状态即可"),
+    ("中吉", "稳中求进，努力终有回报"),
+    ("小吉", "小有收获，量力而行，不必强求"),
+    ("末吉", "平稳即福，顺势而为，随心所欲"),
+    ("平", "波澜不惊，平常心是最贵的"),
+    ("小凶", "遇事三思而后行，不宜冒进"),
+    ("凶", "今日多有阻碍，静待时机，勿急于求成"),
+]
+_NUMBER_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+
+
+def _daily_fortune(user_id: int | str) -> tuple[str, str]:
+    h = int(hashlib.md5(f"{user_id}:{date.today().isoformat()}".encode()).hexdigest(), 16)
+    return _FORTUNES[h % len(_FORTUNES)]
 
 
 def _parse_preset(args: str) -> str:
@@ -745,6 +767,69 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if to_user_id is None:
             await untell_cmd.finish("没有可撤回的留言")
         await untell_cmd.finish(f"已撤回最新留言（收件人：{to_user_id}）")
+
+    roll_cmd = on_command("roll", priority=10, block=True)
+
+    @roll_cmd.handle()
+    async def _(event):
+        args = _strip_command_name(str(event.get_message()).strip(), "roll").strip() or "1d6"
+        m = _DICE_RE.match(args)
+        if not m:
+            await roll_cmd.finish("用法：/roll [NdM]，例如 /roll 2d6 /roll d20")
+        n = int(m.group(1) or 1)
+        sides = int(m.group(2))
+        if not 1 <= n <= 10:
+            await roll_cmd.finish("骰子数量须在 1~10 之间")
+        if not 2 <= sides <= 1000:
+            await roll_cmd.finish("面数须在 2~1000 之间")
+        results = [random.randint(1, sides) for _ in range(n)]
+        if n == 1:
+            await roll_cmd.finish(f"🎲 {results[0]}")
+        detail = " + ".join(str(r) for r in results)
+        await roll_cmd.finish(f"🎲 {detail} = {sum(results)}")
+
+    choose_cmd = on_command("choose", priority=10, block=True)
+
+    @choose_cmd.handle()
+    async def _(event):
+        args = _strip_command_name(str(event.get_message()).strip(), "choose").strip()
+        if not args:
+            await choose_cmd.finish("用法：/choose A B C")
+        try:
+            options = [o for o in shlex.split(args) if o.strip()]
+        except ValueError:
+            options = [o for o in args.split() if o.strip()]
+        if len(options) < 2:
+            await choose_cmd.finish("至少需要两个选项")
+        await choose_cmd.finish(f"选择了：{random.choice(options)}")
+
+    fortune_cmd = on_command("fortune", priority=10, block=True)
+
+    @fortune_cmd.handle()
+    async def _(event):
+        grade, desc = _daily_fortune(event.user_id)
+        await fortune_cmd.finish(f"今日运势：{grade}\n{desc}")
+
+    vote_cmd = on_command("vote", priority=10, block=True)
+
+    @vote_cmd.handle()
+    async def _(event):
+        args = _strip_command_name(str(event.get_message()).strip(), "vote").strip()
+        if not args:
+            await vote_cmd.finish('用法：/vote "议题" 选项A 选项B ...')
+        try:
+            parts = [p for p in shlex.split(args) if p.strip()]
+        except ValueError:
+            parts = [p for p in args.split() if p.strip()]
+        if len(parts) < 3:
+            await vote_cmd.finish('用法：/vote "议题" 选项A 选项B（至少两个选项）')
+        topic, options = parts[0], parts[1:]
+        if len(options) > 9:
+            await vote_cmd.finish("选项最多 9 个")
+        lines = [f"📊 {topic}"]
+        for i, opt in enumerate(options):
+            lines.append(f"{_NUMBER_EMOJIS[i]} {opt}")
+        await vote_cmd.finish("\n".join(lines))
 
     reload_rules_cmd = on_command("reload_rules", priority=10, block=True)
 
