@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-04-22
+
 ### 新增
 
 - 群友人物卡：`/profile @某人` 收集消息统计、长期记忆、近期发言样本，通过 `daily_summary` 的 model_cascade 调用 LLM，以当前群绑定的 persona 口吻合成一段人物志
