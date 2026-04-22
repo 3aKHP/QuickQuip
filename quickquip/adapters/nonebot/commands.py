@@ -12,6 +12,7 @@ from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, daily_c
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.llm.image_gen import generate_image
+from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
 from quickquip.search.web_search import WebSearchError, build_search_client, format_search_response
@@ -839,6 +840,78 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         for i, opt in enumerate(options):
             lines.append(f"{_NUMBER_EMOJIS[i]} {opt}")
         await vote_cmd.finish("\n".join(lines))
+
+    profile_cmd = on_command("profile", priority=10, block=True)
+
+    @profile_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await profile_cmd.finish("该命令仅支持群聊")
+        if not llm_service.config.is_available:
+            await profile_cmd.finish("LLM 功能未启用，无法生成人物志")
+
+        target_user_id = None
+        for seg in event.get_message():
+            seg_type = getattr(seg, "type", None)
+            data = getattr(seg, "data", {})
+            if seg_type == "at":
+                qq = str(data.get("qq", "") or "").strip()
+                if qq and qq != "all":
+                    target_user_id = qq
+                    break
+        if not target_user_id:
+            await profile_cmd.finish("用法：/profile @某人")
+
+        group_id = event.group_id
+        group_stats = stats_tracker.get_stats(group_id)
+        target_name = group_stats.user_names.get(str(target_user_id), f"QQ:{target_user_id}")
+        msg_count = group_stats.user_messages.get(str(target_user_id), 0)
+
+        settings = llm_service.get_chat_settings(group_id, chat_type="group")
+        provider_id = settings.provider_id or llm_service.config.runtime.default_provider or ""
+        provider = llm_service.config.providers.get(provider_id)
+        if not provider:
+            await profile_cmd.finish("LLM provider 未配置")
+        effective_model = settings.model or provider.default_model
+
+        persona_id = settings.persona_id or llm_service.config.runtime.default_persona or ""
+        persona = llm_service.config.personas.get(persona_id) if persona_id else None
+        system_parts = []
+        if persona:
+            if persona.system_prompt:
+                system_parts.append(persona.system_prompt)
+            if persona.style_prompt:
+                system_parts.append(persona.style_prompt)
+        if provider.style_overrides:
+            system_parts.append(provider.style_overrides)
+        system_prompt = "\n\n".join(system_parts)
+
+        memories_raw = llm_service.store.search_memories(str(group_id), str(target_user_id), target_name, 8)
+        memories = [m["content"] for m in memories_raw if m.get("content")]
+
+        now = time()
+        all_msgs = await asyncio.to_thread(daily_collector.read_window, group_id, now - 30 * 86400, now)
+        samples = [
+            m["text"][:80]
+            for m in all_msgs
+            if m.get("user_id") == str(target_user_id) and m.get("text")
+        ][-5:]
+
+        await profile_cmd.send(f"正在生成 {target_name} 的人物志，请稍候…")
+        try:
+            text, _ = await generate_profile(
+                target_name=target_name,
+                message_count=msg_count,
+                memories=memories,
+                recent_samples=samples,
+                llm_config=llm_service.config,
+                system_prompt=system_prompt,
+                default_provider_id=provider.id,
+                default_model=effective_model,
+            )
+        except LLMProviderError as exc:
+            await profile_cmd.finish(f"人物志生成失败：{exc}")
+        await profile_cmd.finish(f"👤 {target_name}\n\n{text}")
 
     find_cmd = on_command("find", priority=10, block=True)
 

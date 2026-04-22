@@ -6,6 +6,7 @@
 
 ### 新增
 
+- 群友人物卡：`/profile @某人` 收集消息统计、长期记忆、近期发言样本，通过 `daily_summary` 的 model_cascade 调用 LLM，以当前群绑定的 persona 口吻合成一段人物志
 - 群语料搜索：`/find <关键词>` 全文搜索本群最近 30 天历史消息（复用 `DailyMessageCollector` JSONL 数据），返回最新 5 条匹配结果
 - 群语录库：`/quote`（引用消息）收藏到本群语录库（SQLite）；`/quote random` 随机翻出一条；`/quote`（无引用时）等同于 `/quote random`
 - 轻娱乐命令族：`/roll [NdM]`（投骰子，默认 1d6，支持最多 10 颗/1000 面）、`/choose A B C`（随机选一个，支持引号含空格选项）、`/fortune`（今日运势，按 user_id + 日期哈希确定，同一天同一用户结果固定）、`/vote "议题" 选项A 选项B`（发起投票面板，最多 9 个选项，带数字 emoji 格式化）
