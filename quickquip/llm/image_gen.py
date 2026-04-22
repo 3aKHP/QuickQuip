@@ -5,38 +5,33 @@ from urllib import parse
 from quickquip.llm.config import ImageGenerationConfig, ProviderConfig
 from quickquip.llm.provider import BaseProviderClient, LLMProviderError
 
-_SUPPORTED_PROTOCOLS = frozenset({"openai_images", "gemini_imagen"})
-
 
 async def generate_image(
     ig_config: ImageGenerationConfig,
     provider: ProviderConfig,
     prompt: str,
 ) -> str:
-    if ig_config.protocol == "openai_images":
-        return await _openai_images(ig_config, provider, prompt)
-    if ig_config.protocol == "gemini_imagen":
-        return await _gemini_imagen(ig_config, provider, prompt)
-    raise LLMProviderError(
-        f"未知图片生成协议：{ig_config.protocol!r}，支持：{', '.join(sorted(_SUPPORTED_PROTOCOLS))}"
-    )
+    handler = _DISPATCH.get(ig_config.protocol)
+    if handler is None:
+        raise LLMProviderError(
+            f"未知图片生成协议：{ig_config.protocol!r}，支持：{', '.join(sorted(_DISPATCH))}"
+        )
+    return await handler(BaseProviderClient(provider), ig_config, prompt)
 
 
 async def _openai_images(
+    client: BaseProviderClient,
     ig_config: ImageGenerationConfig,
-    provider: ProviderConfig,
     prompt: str,
 ) -> str:
-    """OpenAI Images API 格式（兼容 OpenAI DALL-E、GPT Image 系列及火山 Seedream 等）。"""
-    client = BaseProviderClient(provider)
-    url = provider.base_url.rstrip("/") + "/images/generations"
+    url = client.config.base_url.rstrip("/") + "/images/generations"
     headers = {
-        **provider.headers,
+        **client.config.headers,
         "Authorization": f"Bearer {client._get_api_key()}",
         "Content-Type": "application/json",
     }
-    if provider.user_agent:
-        headers["User-Agent"] = provider.user_agent
+    if client.config.user_agent:
+        headers["User-Agent"] = client.config.user_agent
 
     payload: dict = {
         "model": ig_config.model,
@@ -46,8 +41,8 @@ async def _openai_images(
         "quality": ig_config.quality,
         "response_format": "b64_json",
     }
-    if provider.extra_body:
-        payload.update(provider.extra_body)
+    if client.config.extra_body:
+        payload.update(client.config.extra_body)
 
     data = await client._post_json_with_fallback(url, headers, payload)
 
@@ -62,30 +57,28 @@ async def _openai_images(
 
 
 async def _gemini_imagen(
+    client: BaseProviderClient,
     ig_config: ImageGenerationConfig,
-    provider: ProviderConfig,
     prompt: str,
 ) -> str:
-    """Gemini generateContent 格式（Gemini 2.0/Flash 图片生成系列）。"""
-    client = BaseProviderClient(provider)
     url = (
-        provider.base_url.rstrip("/")
+        client.config.base_url.rstrip("/")
         + f"/models/{ig_config.model}:generateContent"
         + f"?key={parse.quote(client._get_api_key())}"
     )
     headers = {
-        **provider.headers,
+        **client.config.headers,
         "Content-Type": "application/json",
     }
-    if provider.user_agent:
-        headers["User-Agent"] = provider.user_agent
+    if client.config.user_agent:
+        headers["User-Agent"] = client.config.user_agent
 
     payload: dict = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseModalities": ["IMAGE"]},
     }
-    if provider.extra_body:
-        payload.update(provider.extra_body)
+    if client.config.extra_body:
+        payload.update(client.config.extra_body)
 
     data = await client._post_json_with_fallback(url, headers, payload)
 
@@ -97,8 +90,14 @@ async def _gemini_imagen(
         raise LLMProviderError("图片生成返回空结果")
 
     for part in candidates[0].get("content", {}).get("parts", []):
-        inline = part.get("inlineData") or part.get("inline_data")
+        inline = part.get("inlineData")
         if inline and inline.get("data"):
             return inline["data"]
 
     raise LLMProviderError("图片生成响应中未找到图片数据")
+
+
+_DISPATCH: dict = {
+    "openai_images": _openai_images,
+    "gemini_imagen": _gemini_imagen,
+}
