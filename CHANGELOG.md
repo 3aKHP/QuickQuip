@@ -4,16 +4,22 @@
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-23
+
 ### 新增
 
-- `/draw` 多模型支持：`[image_generation]` 重构为 `default_model` + `[[image_generation.models]]` 数组，每条模型独立配置 `id / provider_id / model / protocol / size / quality / base_url`；`/draw <id> <描述>` 可按名选模型，省略则用 `default_model`；无参调用时列出全部可用模型
-- `/draw` 新增 `protocol = "minimax_images"`：支持 MiniMax Image-01 图片生成（`POST /image_generation`），`size` 填宽高比（如 `"1:1"`、`"16:9"`）；有输入图片时以 `subject_reference`（角色参考模式）传入
-- `/draw` 限流桶：在 `[rate_limit_rules]` 中加入 `image_gen` 桶（`scope = "global"`，每分钟全局 10 次、单用户 2 次），防止付费 API 被滥用；限流检查同时传 `group_id` 以与 `KeyedRateLimiter` 接口保持一致
-- `/draw` 提示词预审查：`ImageGenerationConfig` 新增 `prompt_blocklist`（字符串列表），大小写不敏感子串匹配，命中则在调图片 API 前拒绝并提示修改
+- `/draw` 配置重构：`[image_generation]` 改为 `[[image_generation.providers]]` + 嵌套 `[[image_generation.providers.models]]`，与 LLM provider 结构对齐；每个 provider 独立配置 `protocol / base_url / api_key_env / timeout_seconds`，同一 provider 下可挂多个模型；`/draw <模型id> <描述>` 按名选模型，省略则用 `default_model`；无参调用时列出全部可用模型
+- `/draw` 图生图 / 图文生图：引用消息中的文字前缀合并入 prompt，引用图片 + 自带图片均采集为输入图片；支持纯文字 / 纯图片 / 图文混合 / 合并转发消息的全组合引用场景；`openai_images` 有输入图片时自动切换 `POST /images/edits`（multipart/form-data），`gemini_imagen` 以 `inlineData` 注入
+- `/draw` 新增 `--size 宽x高` 和 `--quality 值` 参数，覆盖模型默认值（通过 `dataclasses.replace` 不修改原配置）
+- `/draw` 限流桶：在 `[rate_limit_rules]` 中加入 `image_gen` 桶（`scope = "global"`，每分钟全局最多 10 次、单用户最多 2 次）
+- `/draw` 提示词预审查：`prompt_blocklist` 大小写不敏感子串匹配，命中则在调 API 前拒绝
+- `protocol = "minimax_images"`：支持 MiniMax Image-01（`POST /image_generation`），`size` 字段填宽高比（如 `"1:1"` / `"16:9"`）；有输入图片时以 `subject_reference` 角色参考模式传入；响应取 `data.image_base64[0]`；错误通过 `base_resp.status_code` 检测
+- Claude extended thinking：解析 `thinking` / `redacted_thinking` 内容块并存入 `LLMResponse.thinking_blocks`；工具调用轮次回填 assistant 消息时将 thinking blocks 前置，满足 Claude API 对扩展思考场景的 messages 结构要求；支持流式响应中 `thinking_delta` / `signature_delta` 累积
 
 ### 修复
 
-- `ImageGenerationConfig` 新增可选 `base_url` 字段，覆盖 provider 的 `base_url`；修复火山方舟 Seedream `/draw` 命令 404 问题（`volcengine` provider 的 chat 路径含 `/coding/`，图片端点路径不同）
+- 火山方舟 Seedream `/draw` 404：`volcengine` 的图片端点路径与 chat 端点不同，改为独立 `[[image_generation.providers]]` 配置后路径正确
+- `BaseProviderClient._post_json_with_fallback` 遗漏 `OSError` 和 `JSONDecodeError` 处理，与 `image_gen._http_post` 对齐补全
 
 ## [0.9.1] - 2026-04-22
 
