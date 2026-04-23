@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import os
-import tempfile
-
 import pytest
 
-from quickquip.chat.offline_messages import OfflineMessageStore, PendingMessage
+from quickquip.chat.offline_messages import OfflineMessageStore
 
 
 @pytest.fixture
