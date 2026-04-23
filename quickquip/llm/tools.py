@@ -27,6 +27,7 @@ class LLMConversationMessage:
     tool_call_id: str | None = None
     tool_name: str | None = None
     is_tool_error: bool = False
+    thinking_blocks: list[Any] = field(default_factory=list)
 
 
 @dataclass(slots=True)

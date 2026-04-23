@@ -73,6 +73,7 @@ class LLMResponse:
     finish_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _text_from_block_list(content: Any) -> str:
@@ -279,12 +280,17 @@ class BaseProviderClient:
             try:
                 with request.urlopen(http_request, timeout=self.config.timeout_seconds) as response:
                     raw = response.read().decode("utf-8")
-                    return json.loads(raw)
+                    try:
+                        return json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        raise LLMProviderError(f"响应非 JSON：{raw[:120]}") from exc
             except error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 raise LLMProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
             except error.URLError as exc:
                 raise LLMProviderError(f"网络错误：{exc.reason}") from exc
+            except OSError as exc:
+                raise LLMProviderError(f"网络错误：{exc}") from exc
 
         result = await asyncio.to_thread(_send)
         if trace:
@@ -590,7 +596,7 @@ class ClaudeProviderClient(BaseProviderClient):
 
             await _flush_tool_results()
             if message.role == "assistant":
-                content: list[dict[str, Any]] = []
+                content: list[dict[str, Any]] = [*message.thinking_blocks]
                 if message.content:
                     content.append({"type": "text", "text": message.content})
                 for call in message.tool_calls:
@@ -649,12 +655,18 @@ class ClaudeProviderClient(BaseProviderClient):
         content = data.get("content", [])
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
+        thinking_blocks: list[dict[str, Any]] = []
         for index, item in enumerate(content if isinstance(content, list) else [], 1):
             if not isinstance(item, dict):
                 continue
-            if item.get("type") == "text":
+            t = item.get("type")
+            if t == "thinking":
+                thinking_blocks.append({"type": "thinking", "thinking": item.get("thinking", ""), "signature": item.get("signature", "")})
+            elif t == "redacted_thinking":
+                thinking_blocks.append({"type": "redacted_thinking", "data": item.get("data", "")})
+            elif t == "text":
                 text_parts.append(str(item.get("text", "")))
-            if item.get("type") == "tool_use":
+            elif t == "tool_use":
                 tool_calls.append(
                     LLMToolCall(
                         id=str(item.get("id", "")).strip() or f"tool_{index}",
@@ -671,12 +683,14 @@ class ClaudeProviderClient(BaseProviderClient):
             finish_reason=str(data.get("stop_reason", "")).strip() or None,
             input_tokens=usage.get("input_tokens"),
             output_tokens=usage.get("output_tokens"),
+            thinking_blocks=thinking_blocks,
         )
 
     @staticmethod
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
         text_parts: list[str] = []
         tool_calls_acc: dict[int, dict[str, str]] = {}  # block_index -> {id, name, input_json}
+        thinking_acc: dict[int, dict[str, str]] = {}    # block_index -> {thinking, signature}
         finish_reason: str | None = None
         model = fallback_model
         input_tokens: int | None = None
@@ -702,15 +716,23 @@ class ClaudeProviderClient(BaseProviderClient):
                         "name": str(block.get("name", "")),
                         "input_json": "",
                     }
+                elif block.get("type") == "thinking":
+                    thinking_acc[current_block_index] = {"thinking": "", "signature": ""}
 
             elif event == "content_block_delta":
                 delta = chunk.get("delta", {})
+                idx = chunk.get("index", current_block_index)
                 if delta.get("type") == "text_delta":
                     text_parts.append(str(delta.get("text", "")))
                 elif delta.get("type") == "input_json_delta":
-                    idx = chunk.get("index", current_block_index)
                     if idx in tool_calls_acc:
                         tool_calls_acc[idx]["input_json"] += str(delta.get("partial_json", ""))
+                elif delta.get("type") == "thinking_delta":
+                    if idx in thinking_acc:
+                        thinking_acc[idx]["thinking"] += str(delta.get("thinking", ""))
+                elif delta.get("type") == "signature_delta":
+                    if idx in thinking_acc:
+                        thinking_acc[idx]["signature"] = str(delta.get("signature", ""))
 
             elif event == "message_delta":
                 delta = chunk.get("delta", {})
@@ -728,10 +750,15 @@ class ClaudeProviderClient(BaseProviderClient):
             )
             for idx, acc in sorted(tool_calls_acc.items())
         ]
+        thinking_blocks = [
+            {"type": "thinking", "thinking": acc["thinking"], "signature": acc["signature"]}
+            for _, acc in sorted(thinking_acc.items())
+        ]
         return LLMResponse(
             text="".join(text_parts).strip(),
             model=model,
             tool_calls=tool_calls,
+            thinking_blocks=thinking_blocks,
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

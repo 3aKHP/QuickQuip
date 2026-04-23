@@ -95,6 +95,7 @@ async def run_tool_call_loop(
             role="assistant",
             content=response.text,
             tool_calls=selected_calls,
+            thinking_blocks=response.thinking_blocks,
         )
 
         logger.info(
@@ -121,6 +122,7 @@ async def run_tool_call_loop(
             messages=[*current_request.messages, assistant_message, *tool_messages],
             temperature=current_request.temperature,
             max_output_tokens=current_request.max_output_tokens,
+            thinking_budget=current_request.thinking_budget,
             tools=current_request.tools,
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
