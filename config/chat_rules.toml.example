@@ -32,6 +32,8 @@ sandwich_de        = {global_limit = 6, user_limit = 3}
 like_reply         = {global_limit = 6, user_limit = 3}
 divine_arrival     = {global_limit = 4, user_limit = 2}
 new_three_kingdoms = {global_limit = 12, user_limit = 6}
+# 文生图：全局共享配额（scope = "global"），每分钟全局最多 10 次，单用户最多 2 次
+image_gen          = {global_limit = 10, user_limit = 2, scope = "global", window = 60}
 # 示例：10 分钟冷却的长窗口桶（window 字段按规则自定义）
 # long_cooldown    = {global_limit = 3, user_limit = 1, window = 600}
 

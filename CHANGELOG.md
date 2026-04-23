@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 新增
+
+- `/draw` 多模型支持：`[image_generation]` 重构为 `default_model` + `[[image_generation.models]]` 数组，每条模型独立配置 `id / provider_id / model / protocol / size / quality / base_url`；`/draw <id> <描述>` 可按名选模型，省略则用 `default_model`；无参调用时列出全部可用模型
+- `/draw` 新增 `protocol = "minimax_images"`：支持 MiniMax Image-01 图片生成（`POST /image_generation`），`size` 填宽高比（如 `"1:1"`、`"16:9"`）；有输入图片时以 `subject_reference`（角色参考模式）传入
+- `/draw` 限流桶：在 `[rate_limit_rules]` 中加入 `image_gen` 桶（`scope = "global"`，每分钟全局 10 次、单用户 2 次），防止付费 API 被滥用；限流检查同时传 `group_id` 以与 `KeyedRateLimiter` 接口保持一致
+- `/draw` 提示词预审查：`ImageGenerationConfig` 新增 `prompt_blocklist`（字符串列表），大小写不敏感子串匹配，命中则在调图片 API 前拒绝并提示修改
+
+### 修复
+
+- `ImageGenerationConfig` 新增可选 `base_url` 字段，覆盖 provider 的 `base_url`；修复火山方舟 Seedream `/draw` 命令 404 问题（`volcengine` provider 的 chat 路径含 `/coding/`，图片端点路径不同）
+
 ## [0.9.1] - 2026-04-22
 
 ### 新增

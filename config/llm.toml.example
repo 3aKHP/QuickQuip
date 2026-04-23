@@ -144,32 +144,106 @@ model_cascade = [
     "deepseek/deepseek-chat",
 ]
 
-# 图片生成配置。/draw <描述> 指令触发；protocol 决定请求格式。
+# 图片生成配置。/draw [模型] <描述> 指令触发。
 #
-# 支持的 protocol：
-#   openai_images  — POST /images/generations，兼容 OpenAI DALL-E、GPT Image 系列
-#                    以及火山方舟 Seedream 系列（ARK API 完全兼容此格式）。
-#   gemini_imagen  — POST /models/{model}:generateContent，Gemini 原生图片生成格式
-#                    （Gemini 2.0/Flash 图片生成系列）。
+# 支持的 protocol（每个 [[image_generation.providers]] 条目配置）：
+#   openai_images   — POST /images/generations，兼容 OpenAI DALL-E/GPT Image 系列
+#                     以及火山方舟 Seedream 系列（ARK API 完全兼容此格式）。
+#                     有输入图片时自动切换至 POST /images/edits（multipart/form-data）。
+#   gemini_imagen   — POST /models/{model}:generateContent，Gemini 原生图片生成格式；
+#                     输入图片以 inlineData 注入。
+#   minimax_images  — POST /image_generation，MiniMax Image-01 格式；size 填宽高比（如
+#                     "1:1"/"16:9"）；输入图片以 subject_reference 注入（角色参考模式）。
+#
+# default_model：不指定模型时使用的模型 id；省略时自动取第一条。
+# prompt_blocklist：全局关键词黑名单（大小写不敏感子串匹配），命中则在调 API 前拒绝。
+#
+# [[image_generation.providers]] 字段：
+#   id           — provider 唯一标识
+#   protocol     — 见上方说明
+#   base_url     — API 根端点（handlers 自动追加协议路径）
+#   api_key_env  — 读取 API key 的环境变量名
+#   timeout_seconds — 请求超时（图片生成通常较慢，建议 120+）
+#
+# [[image_generation.providers.models]] 字段（属于上方最近一个 provider）：
+#   id           — 模型唯一标识，用于 /draw <id> <描述> 选模型
+#   label        — 可选显示名称
+#   model        — 调用 API 时传入的模型 ID
+#   size         — openai_images/gemini：图片尺寸（如 "1024x1024"）；
+#                  minimax_images：宽高比（如 "1:1"、"16:9"、"9:16"）；
+#                  Seedream 还支持 "2K"、"3K" 等写法
+#   quality      — openai_images 协议下有效：standard | hd | low | medium | high | auto；设为 "" 则不发送此参数
+#   response_format — openai_images 协议下有效：b64_json（默认）| url | ""（不发送，gpt-image-1 等不支持此参数时用）
+
 [image_generation]
 enabled = false
-provider_id = "openai-main"   # 复用已有 provider 的 base_url 和 api_key
-model = "dall-e-3"            # 图片生成模型
-size = "1024x1024"            # 尺寸；Seedream 还支持 "2K"、"3K" 等写法
-quality = "standard"          # openai_images 协议下有效：standard | hd（dall-e-3 支持）
-protocol = "openai_images"    # 见上方说明
+default_model = "dalle3"
+# prompt_blocklist = ["naked", "gore", "blood"]
 
-# 火山方舟 Seedream 示例（protocol = openai_images，ARK API 兼容）：
-# provider_id = "volcengine"
-# model = "doubao-seedream-3-0-t2i-250415"   # 或 doubao-seedream-5-0-lite-260128
-# size = "1024x1024"
+[[image_generation.providers]]
+id = "openai-main"
+protocol = "openai_images"
+base_url = "https://your-openai-relay.example/v1"
+api_key_env = "OPENAI_API_KEY"
+timeout_seconds = 120
+
+[[image_generation.providers.models]]
+id = "dalle3"
+label = "DALL-E 3"
+model = "dall-e-3"
+size = "1024x1024"
+quality = "standard"
+
+# 火山方舟 Seedream 示例（ARK 图片端点路径与 chat 不同，需独立配置 provider）：
+# [[image_generation.providers]]
+# id = "volcengine"
 # protocol = "openai_images"
+# base_url = "https://ark.cn-beijing.volces.com/api/v3"
+# api_key_env = "VOLCENGINE_API_KEY"
+# timeout_seconds = 120
+#
+# [[image_generation.providers.models]]
+# id = "seedream4"
+# label = "Seedream 4.0"
+# model = "doubao-seedream-4-0-250828"
+# size = "1024x1024"
+#
+# [[image_generation.providers.models]]
+# id = "seedream5"
+# label = "Seedream 5.0"
+# model = "doubao-seedream-5-0-260128"
+# size = "1024x1024"
 
 # Gemini 图片生成示例（gemini_imagen 协议，认证走 ?key= query param）：
-# provider_id = "gemini-main"
-# model = "gemini-2.0-flash-preview-image-generation"
+# [[image_generation.providers]]
+# id = "gemini-image"
 # protocol = "gemini_imagen"
-# # extra_body 可传 generationConfig 扩展参数
+# base_url = "https://generativelanguage.googleapis.com/v1beta"
+# api_key_env = "GEMINI_API_KEY"
+# timeout_seconds = 120
+#
+# [[image_generation.providers.models]]
+# id = "gemini-imagen"
+# label = "Gemini Imagen"
+# model = "gemini-2.0-flash-preview-image-generation"
+# size = "1024x1024"
+# # extra_body 可在 provider 层传 generationConfig 扩展参数
+
+# MiniMax Image-01 示例（minimax_images 协议；size 填宽高比而非像素尺寸）：
+# 国内平台（MiniMaxi）使用 api.minimaxi.com，key 以 sk-cp- 开头；
+# 国际平台（MiniMax）使用 api.minimax.io，key 格式不同，按实际填写。
+# [[image_generation.providers]]
+# id = "minimax"
+# protocol = "minimax_images"
+# base_url = "https://api.minimaxi.com/v1"   # 国内；国际版改为 api.minimax.io/v1
+# api_key_env = "MINIMAX_API_KEY"
+# timeout_seconds = 120
+#
+# [[image_generation.providers.models]]
+# id = "minimax-image"
+# label = "MiniMax Image-01"
+# model = "image-01"
+# size = "1:1"     # 支持：1:1 | 16:9 | 4:3 | 3:2 | 2:3 | 3:4 | 9:16 | 21:9
 
 # 人格定义已拆分至 config/personas/ 目录，每个 .toml 文件对应一个人格。
 # 参见 config/personas.example/ 中的示例文件。

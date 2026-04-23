@@ -11,7 +11,7 @@ from time import time
 from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, daily_collector, get_sender_name, group_quote_store, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
-from quickquip.llm.image_gen import generate_image
+from quickquip.llm.image_gen import ImageInput, download_image, generate_image
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
@@ -46,6 +46,66 @@ def _allow_scope_management(event) -> bool:
 _PRESET_RE = re.compile(r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'|(\S.*))', re.DOTALL)
 _RESUME_RE = re.compile(r'--resume(?:\s+(\d+))?')
 _DICE_RE = re.compile(r"^(\d*)[dD](\d+)$")
+_DRAW_SIZE_RE = re.compile(r'--size\s+(\d+x\d+)', re.IGNORECASE)
+_DRAW_QUALITY_RE = re.compile(r'--quality\s+(\S+)', re.IGNORECASE)
+
+
+def _extract_image_urls(message) -> list[str]:
+    return [
+        seg.data.get("url", "")
+        for seg in message
+        if seg.type == "image" and seg.data.get("url", "").startswith("http")
+    ]
+
+
+async def _resolve_forward_content(bot, seg) -> tuple[str, list[str]]:
+    """Fetch text and image URLs from a merged-forward segment."""
+    raw_nodes = seg.data.get("content") or []
+    if not raw_nodes:
+        fwd_id = seg.data.get("id", "")
+        if fwd_id:
+            try:
+                raw_nodes = await bot.get_forward_msg(message_id=fwd_id) or []
+            except Exception:
+                return "", []
+    texts: list[str] = []
+    urls: list[str] = []
+    for node in raw_nodes:
+        if not isinstance(node, dict):
+            continue
+        for sd in node.get("message", []):
+            if not isinstance(sd, dict):
+                continue
+            if sd.get("type") == "text":
+                t = sd.get("data", {}).get("text", "").strip()
+                if t:
+                    texts.append(t)
+            elif sd.get("type") == "image":
+                url = sd.get("data", {}).get("url", "")
+                if url.startswith("http"):
+                    urls.append(url)
+    return "\n".join(filter(None, texts)), urls
+
+
+async def _resolve_message_content(bot, message) -> tuple[str, list[str]]:
+    """Extract (text, image_urls) from a message, resolving forward segments."""
+    texts: list[str] = []
+    urls: list[str] = []
+    for seg in message:
+        if seg.type == "text":
+            t = seg.data.get("text", "").strip()
+            if t:
+                texts.append(t)
+        elif seg.type == "image":
+            url = seg.data.get("url", "")
+            if url.startswith("http"):
+                urls.append(url)
+        elif seg.type == "forward":
+            ft, fu = await _resolve_forward_content(bot, seg)
+            if ft:
+                texts.append(ft)
+            urls.extend(fu)
+    return "\n".join(filter(None, texts)), urls
 
 _FORTUNES = [
     ("大吉", "财运亨通，诸事大顺，今日宜出行、宜交友"),
@@ -507,24 +567,69 @@ def register_commands(on_command, Message, MessageSegment) -> None:
     draw_cmd = on_command("draw", priority=10, block=True)
 
     @draw_cmd.handle()
-    async def _(event):
-        if not rate_limiter.allow("image_gen", event.user_id):
+    async def _(bot, event):
+        group_id = getattr(event, "group_id", None)
+        if not rate_limiter.allow("image_gen", event.user_id, group_id=group_id):
             await draw_cmd.finish("图片生成过于频繁，请稍后再试")
         ig = llm_service.config.image_generation
         if not ig.enabled:
             await draw_cmd.finish("图片生成功能未启用")
-        provider = llm_service.config.providers.get(ig.provider_id)
-        if provider is None:
-            await draw_cmd.finish("图片生成 provider 未配置")
+        if not ig.models:
+            await draw_cmd.finish("图片生成模型未配置")
         text = str(event.get_message()).strip()
         prompt = _strip_command_name(text, "draw").strip()
-        if not prompt:
-            await draw_cmd.finish("用法：/draw <描述>")
+        entry = None
+        first_word = prompt.split()[0] if prompt else ""
+        if first_word in ig.models:
+            entry = ig.models[first_word]
+            prompt = prompt[len(first_word):].strip()
+        else:
+            entry = ig.models.get(ig.default_model)
+        if entry is None:
+            await draw_cmd.finish("图片生成默认模型未配置")
+        model_config, provider = entry
+        size_m = _DRAW_SIZE_RE.search(prompt)
+        quality_m = _DRAW_QUALITY_RE.search(prompt)
+        size_override = size_m.group(1) if size_m else None
+        quality_override = quality_m.group(1) if quality_m else None
+        if size_m:
+            prompt = _DRAW_SIZE_RE.sub("", prompt).strip()
+        if quality_m:
+            prompt = _DRAW_QUALITY_RE.sub("", prompt).strip()
+        # Collect text and images from replied-to message (if any)
+        reply = getattr(event, "reply", None)
+        reply_text, reply_urls = "", []
+        if reply and reply.message:
+            reply_text, reply_urls = await _resolve_message_content(bot, reply.message)
+        # Own message: text already in prompt, collect images only
+        own_urls = _extract_image_urls(event.get_message())
+        # Merge: reply text prefixed before user's own prompt
+        full_prompt = "\n".join(filter(None, [reply_text, prompt])).strip()
+        if not full_prompt and not reply_urls and not own_urls:
+            model_ids = list(ig.models)
+            hint = "用法：/draw [模型] [--size 宽x高] [--quality 值] <描述>"
+            if len(model_ids) > 1:
+                await draw_cmd.finish(f"{hint}\n可用模型：{'、'.join(model_ids)}（默认：{ig.default_model}）")
+            await draw_cmd.finish(hint)
+        if full_prompt and any(w in full_prompt.lower() for w in ig.prompt_blocklist):
+            await draw_cmd.finish("提示词包含不允许的内容，请修改后重试")
         await draw_cmd.send("正在生成图片，请稍候…")
+        input_images: list[ImageInput] = []
+        for url in reply_urls + own_urls:
+            try:
+                input_images.append(await download_image(url))
+            except Exception:
+                pass
         try:
-            image_b64 = await generate_image(ig, provider, prompt)
+            image_b64 = await generate_image(
+                model_config, provider, full_prompt,
+                input_images=input_images or None,
+                size=size_override, quality=quality_override,
+            )
         except LLMProviderError as exc:
             await draw_cmd.finish(f"图片生成失败：{exc}")
+        except Exception as exc:
+            await draw_cmd.finish(f"图片生成异常：{type(exc).__name__}: {exc}")
         await draw_cmd.finish(Message([MessageSegment.image(f"base64://{image_b64}")]))
 
     tieba_cmd = on_command("tieba", priority=10, block=True)
