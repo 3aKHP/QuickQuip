@@ -43,7 +43,7 @@ RUN set -eux; \
 COPY requirements.txt .
 RUN set -eux; \
     _pip_install="pip install --no-cache-dir"; \
-    if [ -n "${PIP_INDEX_URL}" ]; then \
+    if [ -n "${PIP_INDEX_URL:-}" ]; then \
         printf "[global]\nindex-url = %s\ntrusted-host = %s\n" \
             "${PIP_INDEX_URL}" "${PIP_TRUSTED_HOST}" > /etc/pip.conf; \
     fi; \
