@@ -3,20 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-
-_ENV_LOADED = False
-
+from quickquip.common.env import PROJECT_ROOT, load_project_env_files
 
 def load_web_env() -> None:
-    global _ENV_LOADED
-    if _ENV_LOADED:
-        return
-    load_dotenv(PROJECT_ROOT / ".env", override=False)
-    load_dotenv(PROJECT_ROOT / "dev/.env", override=True)
-    _ENV_LOADED = True
+    load_project_env_files()
 
 
 def get_web_admin_password() -> str:

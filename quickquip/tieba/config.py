@@ -9,14 +9,12 @@ from typing import Iterable
 from urllib import parse
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
-
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.env import PROJECT_ROOT, load_project_env_files as load_shared_project_env_files
 
 
 TIEBA_RULE_NAME = "tieba_random_post"
 DATA_DIR = Path("data/tieba")
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STORE_PATH = DATA_DIR / "pool.json"
 PROFILE_DIR = DATA_DIR / "profile"
 STATE_PATH = DATA_DIR / "storage_state.json"
@@ -59,8 +57,7 @@ def normalize_forum_keywords(values: str | Iterable[str]) -> tuple[str, ...]:
 
 
 def load_project_env_files() -> None:
-    load_dotenv(PROJECT_ROOT / ".env", override=False)
-    load_dotenv(PROJECT_ROOT / "dev/.env", override=True)
+    load_shared_project_env_files()
 
 
 def clean_text(value: str, *, limit: int = 0) -> str:
