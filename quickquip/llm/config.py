@@ -128,39 +128,6 @@ class DailyBriefingConfig:
 
 
 @dataclass(slots=True)
-class ImageModelConfig:
-    id: str
-    model: str
-    label: str = ""
-    size: str = "1024x1024"
-    quality: str = "standard"
-    response_format: str = "b64_json"  # 设为空串则不发送此参数（gpt-image-1 等不支持该字段）
-
-
-@dataclass(slots=True)
-class ImageProviderConfig:
-    id: str
-    protocol: str
-    base_url: str
-    api_key_env: str
-    timeout_seconds: float = 120.0
-    default_model: str = ""
-    models: list[ImageModelConfig] = field(default_factory=list)
-    headers: dict[str, str] = field(default_factory=dict)
-    user_agent: str = ""
-    extra_body: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class ImageGenerationConfig:
-    enabled: bool = False
-    default_model: str = ""
-    prompt_blocklist: list[str] = field(default_factory=list)
-    providers: dict[str, ImageProviderConfig] = field(default_factory=dict)
-    models: dict[str, tuple[ImageModelConfig, ImageProviderConfig]] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
@@ -170,7 +137,6 @@ class LLMConfig:
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
     daily_summary: DailySummaryConfig = field(default_factory=DailySummaryConfig)
     daily_briefing: DailyBriefingConfig = field(default_factory=DailyBriefingConfig)
-    image_generation: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     load_error: str | None = None
     source_path: Path | None = None
 
@@ -340,61 +306,6 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
     return providers
 
 
-def _read_image_generation(ig_raw: dict[str, Any]) -> ImageGenerationConfig:
-    raw_providers = ig_raw.get("providers", [])
-    providers: dict[str, ImageProviderConfig] = {}
-    models: dict[str, tuple[ImageModelConfig, ImageProviderConfig]] = {}
-    for pentry in raw_providers if isinstance(raw_providers, list) else []:
-        pentry = _expand_env_value(pentry)
-        pid = str(pentry.get("id", "")).strip()
-        if not pid:
-            continue
-        raw_headers = _as_dict(pentry.get("headers"))
-        model_list: list[ImageModelConfig] = []
-        for mentry in pentry.get("models", []) or []:
-            mentry = _expand_env_value(mentry)
-            mid = str(mentry.get("id", "")).strip()
-            if not mid:
-                continue
-            model_list.append(ImageModelConfig(
-                id=mid,
-                model=str(mentry.get("model", "")).strip(),
-                label=str(mentry.get("label", "")).strip(),
-                size=str(mentry.get("size", "1024x1024")).strip() or "1024x1024",
-                quality=str(mentry.get("quality", "standard")).strip() or "standard",
-                response_format=str(mentry.get("response_format", "b64_json")).strip(),
-            ))
-        provider_config = ImageProviderConfig(
-            id=pid,
-            protocol=str(pentry.get("protocol", "openai_images")).strip() or "openai_images",
-            base_url=str(pentry.get("base_url", "")).strip(),
-            api_key_env=str(pentry.get("api_key_env", "")).strip(),
-            timeout_seconds=float(pentry.get("timeout_seconds", 120)),
-            default_model=str(pentry.get("default_model", "")).strip(),
-            models=model_list,
-            headers={str(k): str(v) for k, v in raw_headers.items()},
-            user_agent=str(pentry.get("user_agent", "")).strip(),
-            extra_body=_expand_env_value(_as_dict(pentry.get("extra_body"))),
-        )
-        providers[pid] = provider_config
-        for m in model_list:
-            models[m.id] = (m, provider_config)
-    default_model = str(ig_raw.get("default_model", "")).strip()
-    if not default_model and models:
-        default_model = next(iter(models))
-    return ImageGenerationConfig(
-        enabled=_as_bool(ig_raw.get("enabled", False), default=False),
-        default_model=default_model,
-        prompt_blocklist=[
-            str(w).strip().lower()
-            for w in ig_raw.get("prompt_blocklist", [])
-            if str(w).strip()
-        ],
-        providers=providers,
-        models=models,
-    )
-
-
 def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
     servers: list[MCPServerConfig] = []
     for entry in raw_servers:
@@ -474,7 +385,6 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     mcp_raw = _expand_env_value(_as_dict(data.get("mcp")))
     daily_summary_raw = _expand_env_value(_as_dict(data.get("daily_summary")))
     daily_briefing_raw = _expand_env_value(_as_dict(data.get("daily_briefing")))
-    ig_raw = _expand_env_value(_as_dict(data.get("image_generation")))
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
 
@@ -549,7 +459,6 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 if str(item).strip()
             ],
         ),
-        image_generation=_read_image_generation(ig_raw),
         source_path=config_path,
     )
 
