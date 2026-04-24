@@ -156,7 +156,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -171,22 +171,30 @@ import {
   clearTraces,
   runSampleRequest,
   runRegression,
-} from '../api/diagnostics.js'
+} from '../api/diagnostics'
 
-const providers = ref([])
+const providers = ref<any[]>([])
 const traceActive = ref(false)
 const traceFlagFile = ref('')
 const traceCount = ref(0)
-const traceEntries = ref([])
+const traceEntries = ref<any[]>([])
 const sampleLoading = ref(false)
-const sampleError = ref(null)
-const sampleResult = ref(null)
+const sampleError = ref<string | null>(null)
+const sampleResult = ref<any>(null)
 const regressionLoading = ref(false)
-const regressionError = ref(null)
-const regressionResults = ref([])
+const regressionError = ref<string | null>(null)
+const regressionResults = ref<any[]>([])
 const regressionInput = ref('')
 
-const sample = ref({
+interface SampleRequest {
+  provider_id: string
+  model: string
+  system_prompt: string
+  user_prompt: string
+  max_output_tokens: number
+}
+
+const sample = ref<SampleRequest>({
   provider_id: '',
   model: '',
   system_prompt: '你是一个测试助手。',
@@ -203,7 +211,7 @@ function onProviderChange() {
   sample.value.model = ''
 }
 
-function prettyJson(obj) {
+function prettyJson(obj: any): string {
   try {
     return JSON.stringify(obj, null, 2)
   } catch {
@@ -240,7 +248,7 @@ async function loadTraces() {
   } catch { /* ignore */ }
 }
 
-async function toggleTrace(on) {
+async function toggleTrace(on: boolean) {
   if (!traceFlagFile.value) return
   try {
     await setTraceStatus(on)
@@ -261,15 +269,15 @@ async function sendSample() {
   sampleError.value = null
   sampleResult.value = null
   try {
-    sampleResult.value = await runSampleRequest({
+    sampleResult.value = await runSampleRequest(JSON.stringify({
       provider_id: sample.value.provider_id,
       model: sample.value.model || null,
       system_prompt: sample.value.system_prompt,
       user_prompt: sample.value.user_prompt,
       max_output_tokens: sample.value.max_output_tokens,
-    })
-  } catch (e) {
-    sampleError.value = e.message
+    }))
+  } catch (e: unknown) {
+    sampleError.value = (e as Error).message
   } finally {
     sampleLoading.value = false
   }
@@ -286,10 +294,10 @@ async function runRegress() {
       if (pipe >= 0) return { label: line.slice(0, pipe).trim(), text: line.slice(pipe + 1).trim() }
       return { label: '', text: line.trim() }
     })
-    const data = await runRegression({ samples })
+    const data = await runRegression(JSON.stringify({ samples }))
     regressionResults.value = data.samples || []
-  } catch (e) {
-    regressionError.value = e.message
+  } catch (e: unknown) {
+    regressionError.value = (e as Error).message
   } finally {
     regressionLoading.value = false
   }

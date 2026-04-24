@@ -215,7 +215,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -230,30 +230,32 @@ import {
   fetchGroupSettings,
   saveGroupSettings,
   clearGroupSettings,
-} from '../api/groupSettings.js'
-import { toast } from '../toast.js'
+} from '../api/groupSettings'
+import { toast } from '../toast'
 
 const FIELDS = [
   'enabled', 'memory_enabled', 'auto_memory_enabled', 'provider_id', 'model', 'persona_id',
   'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit',
 ]
 
-const options = ref(null)
-const groupList = ref([])
+type DraftSettings = Record<string, any>
+
+const options = ref<any>(null)
+const groupList = ref<any[]>([])
 const loading = ref(false)
-const loadError = ref(null)
+const loadError = ref<string | null>(null)
 
 const selectedGroupId = ref('')
-const original = ref(emptyDraft())
-const draftTriState = ref(emptyDraft())
+const original = ref<DraftSettings>(emptyDraft())
+const draftTriState = ref<DraftSettings>(emptyDraft())
 const saving = ref(false)
-const saveError = ref(null)
+const saveError = ref<string | null>(null)
 
-function emptyDraft() {
+function emptyDraft(): DraftSettings {
   return Object.fromEntries(FIELDS.map(f => [f, null]))
 }
 
-function displayId(key) {
+function displayId(key: string): string {
   if (!key) return ''
   return key.startsWith('private:') ? key.slice('private:'.length) : key
 }
@@ -264,7 +266,7 @@ const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
 
-function defaultHint(field) {
+function defaultHint(field: string): string {
   const v = defaults.value[field]
   if (v === true) return '开'
   if (v === false) return '关'
@@ -295,13 +297,13 @@ const historyInput = computed({
 
 const modelPlaceholder = computed(() => {
   const pid = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find(p => p.id === pid)
+  const provider = providers.value.find((p: any) => p.id === pid)
   return provider?.default_model || '默认 model'
 })
 
 const modelSuggestions = computed(() => {
   const pid = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find(p => p.id === pid)
+  const provider = providers.value.find((p: any) => p.id === pid)
   return provider?.models || []
 })
 
@@ -329,14 +331,14 @@ async function reloadAll() {
     if (selectedGroupId.value) {
       await loadOne(selectedGroupId.value)
     }
-  } catch (e) {
-    loadError.value = e.message
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
   } finally {
     loading.value = false
   }
 }
 
-async function loadOne(groupId) {
+async function loadOne(groupId: string) {
   saveError.value = null
   try {
     const data = await fetchGroupSettings(groupId)
@@ -346,12 +348,12 @@ async function loadOne(groupId) {
     }
     original.value = snapshot
     draftTriState.value = { ...snapshot }
-  } catch (e) {
-    saveError.value = e.message
+  } catch (e: unknown) {
+    saveError.value = (e as Error).message
   }
 }
 
-async function selectGroup(groupId) {
+async function selectGroup(groupId: string) {
   if (groupId === selectedGroupId.value) return
   if (hasChanges.value && !confirm('当前群的修改未保存，切换会丢失。是否继续？')) return
   selectedGroupId.value = groupId
@@ -373,7 +375,7 @@ function startAdd() {
 }
 
 async function onSave() {
-  const diff = {}
+  const diff: Record<string, any> = {}
   for (const f of FIELDS) {
     if (draftTriState.value[f] !== original.value[f]) {
       diff[f] = draftTriState.value[f]
@@ -386,8 +388,8 @@ async function onSave() {
     await saveGroupSettings(selectedGroupId.value, diff)
     toast('已保存')
     await reloadAll()
-  } catch (e) {
-    saveError.value = e.message
+  } catch (e: unknown) {
+    saveError.value = (e as Error).message
     toast('保存失败', 'error')
   } finally {
     saving.value = false
@@ -404,8 +406,8 @@ async function onClear() {
     original.value = emptyDraft()
     draftTriState.value = emptyDraft()
     await reloadAll()
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   }
 }
 

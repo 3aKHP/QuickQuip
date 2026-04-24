@@ -30,17 +30,20 @@
   </nav>
 </template>
 
-<script setup>
+<script setup lang="ts">
+import type { NavItem } from '../../config/nav'
 import UiNavItem from '../ui/UiNavItem.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiIcon from '../ui/UiIcon.vue'
 
-defineProps({
-  items: { type: Array, required: true },
-  logoutDisabled: { type: Boolean, default: false },
-})
+defineProps<{
+  items: NavItem[]
+  logoutDisabled?: boolean
+}>()
 
-defineEmits(['logout'])
+defineEmits<{
+  logout: []
+}>()
 </script>
 
 <style scoped>

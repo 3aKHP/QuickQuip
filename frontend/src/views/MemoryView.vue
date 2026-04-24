@@ -78,7 +78,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -87,17 +87,17 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchKnownGroups } from '../api/groups.js'
-import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory.js'
-import { toast } from '../toast.js'
+import { fetchKnownGroups } from '../api/groups'
+import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory'
+import { toast } from '../toast'
 
-const groups = ref([])
+const groups = ref<string[]>([])
 const groupId = ref('')
 const keyword = ref('')
-const memories = ref([])
+const memories = ref<any[]>([])
 const loading = ref(false)
-const error = ref(null)
-const editing = ref(null)
+const error = ref<string | null>(null)
+const editing = ref<number | null>(null)
 const editContent = ref('')
 const editTags = ref('')
 const editConf = ref(1.0)
@@ -110,8 +110,8 @@ onMounted(async () => {
   try {
     const d = await fetchKnownGroups()
     groups.value = d.groups || []
-  } catch (e) {
-    error.value = `加载群组列表失败: ${e.message}`
+  } catch (e: unknown) {
+    error.value = `加载群组列表失败: ${(e as Error).message}`
   }
 })
 
@@ -120,20 +120,20 @@ async function load() {
   loading.value = true; error.value = null
   try {
     memories.value = await fetchMemories(groupId.value, keyword.value)
-  } catch (e) { error.value = e.message }
+  } catch (e: unknown) { error.value = (e as Error).message }
   finally { loading.value = false }
 }
 
-function startEdit(m) {
+function startEdit(m: any) {
   editing.value = m.id
   editContent.value = m.content
   editTags.value = m.tags.join(', ')
   editConf.value = m.confidence
 }
 
-async function saveEdit(m) {
+async function saveEdit(m: any) {
   try {
-    const conf = editConf.value === '' || isNaN(editConf.value) ? null : Number(editConf.value)
+    const conf = String(editConf.value) === '' || isNaN(editConf.value) ? null : Number(editConf.value)
     await updateMemory(groupId.value, m.id, {
       content: editContent.value,
       tags: editTags.value.split(',').map(t => t.trim()).filter(Boolean),
@@ -142,16 +142,16 @@ async function saveEdit(m) {
     editing.value = null
     toast('已保存')
     await load()
-  } catch (e) { toast(e.message, 'error') }
+  } catch (e: unknown) { toast((e as Error).message, 'error') }
 }
 
-async function del(id) {
+async function del(id: number) {
   if (!confirm(`删除记忆 #${id}？`)) return
   try {
     await deleteMemory(groupId.value, id)
     memories.value = memories.value.filter(m => m.id !== id)
     toast('已删除')
-  } catch (e) { toast(e.message, 'error') }
+  } catch (e: unknown) { toast((e as Error).message, 'error') }
 }
 
 async function clearAll() {
@@ -160,7 +160,7 @@ async function clearAll() {
     const r = await clearAllMemories(groupId.value)
     memories.value = []
     toast(`已删除 ${r.deleted} 条`)
-  } catch (e) { toast(e.message, 'error') }
+  } catch (e: unknown) { toast((e as Error).message, 'error') }
 }
 
 async function addMemory() {
@@ -175,7 +175,7 @@ async function addMemory() {
     newContent.value = ''; newUserId.value = ''; newTags.value = ''
     toast('已添加')
     await load()
-  } catch (e) { toast(e.message, 'error') }
+  } catch (e: unknown) { toast((e as Error).message, 'error') }
 }
 </script>
 

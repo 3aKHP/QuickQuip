@@ -1,6 +1,7 @@
 // Single source of truth for admin nav. Router in src/router/index.js reads
 // path/component from here; AppNav reads key/label/icon.
 
+import type { Component } from 'vue'
 import StatsView from '../views/StatsView.vue'
 import RulesView from '../views/RulesView.vue'
 import GroupsView from '../views/GroupsView.vue'
@@ -15,7 +16,15 @@ import WordcloudView from '../views/WordcloudView.vue'
 import ConfigView from '../views/ConfigView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
 
-export const NAV_ITEMS = [
+export interface NavItem {
+  key: string
+  path: string
+  label: string
+  icon: string
+  component: Component
+}
+
+export const NAV_ITEMS: NavItem[] = [
   { key: 'stats',          path: '/stats',          label: '统计',     icon: 'BarChart3',     component: StatsView },
   { key: 'rules',          path: '/rules',          label: '规则',     icon: 'ToggleLeft',    component: RulesView },
   { key: 'groups',         path: '/groups',         label: '群组',     icon: 'Users',         component: GroupsView },

@@ -45,22 +45,22 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiCard from '../components/ui/UiCard.vue'
-import { listConfigs, fetchConfig, saveConfig } from '../api/config.js'
-import { toast } from '../toast.js'
+import { listConfigs, fetchConfig, saveConfig } from '../api/config'
+import { toast } from '../toast'
 
-const configs = ref([])
-const listError = ref(null)
+const configs = ref<any[]>([])
+const listError = ref<string | null>(null)
 const currentKey = ref('')
 const loaded = ref(false)
-const loadError = ref(null)
-const saveError = ref(null)
+const loadError = ref<string | null>(null)
+const saveError = ref<string | null>(null)
 const saving = ref(false)
 const content = ref('')
 const originalContent = ref('')
@@ -79,18 +79,18 @@ async function loadList() {
     if (configs.value.length && !currentKey.value) {
       await load(configs.value[0].key)
     }
-  } catch (e) {
-    listError.value = e.message
+  } catch (e: unknown) {
+    listError.value = (e as Error).message
   }
 }
 
-async function switchTo(key) {
+async function switchTo(key: string) {
   if (key === currentKey.value) return
   if (dirty.value && !confirm('当前文件有未保存的修改，切换后将丢失。是否继续？')) return
   await load(key)
 }
 
-async function load(key) {
+async function load(key: string) {
   currentKey.value = key
   loaded.value = false
   loadError.value = null
@@ -102,8 +102,8 @@ async function load(key) {
     const entry = configs.value.find(c => c.key === key)
     if (entry) entry.missing = d.missing || false
     loaded.value = true
-  } catch (e) {
-    loadError.value = e.message
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
   }
 }
 
@@ -117,8 +117,8 @@ async function save() {
     const entry = configs.value.find(c => c.key === currentKey.value)
     if (entry) entry.missing = false
     toast('配置已保存')
-  } catch (e) {
-    saveError.value = e.message
+  } catch (e: unknown) {
+    saveError.value = (e as Error).message
     toast('保存失败', 'error')
   } finally {
     saving.value = false

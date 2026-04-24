@@ -1,6 +1,6 @@
-import { request } from './index.js'
+import { request } from './index'
 
-export async function login(password) {
+export async function login(password: string) {
   return request('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ password }),

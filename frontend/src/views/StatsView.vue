@@ -58,7 +58,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -67,13 +67,13 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchStats } from '../api/stats.js'
+import { fetchStats } from '../api/stats'
 
-const data = ref(null)
-const error = ref(null)
+const data = ref<any>(null)
+const error = ref<string | null>(null)
 const loading = ref(false)
-const updatedAt = ref(null)
-const computedStats = ref({})
+const updatedAt = ref<string | null>(null)
+const computedStats = ref<Record<string, any>>({})
 
 onMounted(() => load())
 
@@ -84,22 +84,22 @@ async function load() {
     data.value = await fetchStats()
     updatedAt.value = new Date().toLocaleTimeString('zh-CN')
     precomputeStats()
-  } catch (e) {
-    error.value = e.message
+  } catch (e: unknown) {
+    error.value = (e as Error).message
   } finally {
     loading.value = false
   }
 }
 
 function precomputeStats() {
-  const out = {}
-  for (const [gid, gs] of Object.entries(data.value || {})) {
-    const users = Object.entries(gs.user_messages || {})
+  const out: Record<string, any> = {}
+  for (const [gid, gs] of Object.entries(data.value || {}) as [string, any][]) {
+    const users = (Object.entries(gs.user_messages || {}) as [string, number][])
       .sort((a, b) => b[1] - a[1]).slice(0, 15)
-    const rules = Object.entries(gs.rule_triggers || {})
+    const rules = (Object.entries(gs.rule_triggers || {}) as [string, number][])
       .sort((a, b) => b[1] - a[1]).slice(0, 10)
-    const userValues = users.map(([, v]) => v)
-    const ruleValues = rules.map(([, v]) => v)
+    const userValues = users.map(([, v]) => v as number)
+    const ruleValues = rules.map(([, v]) => v as number)
     out[gid] = {
       users,
       rules,
@@ -110,7 +110,7 @@ function precomputeStats() {
   computedStats.value = out
 }
 
-function pct(value, max) {
+function pct(value: number, max: number): number {
   if (!max) return 0
   return Math.max(4, Math.round((value / max) * 100))
 }

@@ -80,7 +80,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -88,20 +88,20 @@ import UiCard from '../components/ui/UiCard.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchRateLimit } from '../api/rateLimit.js'
+import { fetchRateLimit } from '../api/rateLimit'
 
-const rules = ref([])
+const rules = ref<any[]>([])
 const loading = ref(false)
-const loadError = ref(null)
+const loadError = ref<string | null>(null)
 const autoRefresh = ref(false)
-let timer = null
+let timer: ReturnType<typeof setInterval> | null = null
 
-function progressPercent(used, limit) {
+function progressPercent(used: number, limit: number): number {
   if (!limit) return 0
   return Math.min(100, Math.round((used / limit) * 100))
 }
 
-function bucketLabel(rule, bucket) {
+function bucketLabel(rule: any, bucket: any): string {
   if (rule.scope === 'global') return '全局桶'
   if (!bucket.group_id) return '私聊/无群上下文'
   return `群 ${bucket.group_id}`
@@ -113,9 +113,9 @@ async function load() {
   try {
     const data = await fetchRateLimit()
     rules.value = data.rules || []
-  } catch (e) {
-    loadError.value = e.message
-    if (e._isUnauthorized) stopTimer()
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
+    if ((e as any)._isUnauthorized) stopTimer()
   } finally {
     loading.value = false
   }

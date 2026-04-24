@@ -109,7 +109,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -122,46 +122,46 @@ import {
   listConversations,
   fetchMessages,
   deleteMessage,
-} from '../api/conversations.js'
-import { toast } from '../toast.js'
+} from '../api/conversations'
+import { toast } from '../toast'
 
 const PAGE_SIZE = 50
 
-const conversations = ref([])
+const conversations = ref<any[]>([])
 const listing = ref(false)
-const listError = ref(null)
+const listError = ref<string | null>(null)
 
 const selectedKey = ref('')
 const keyword = ref('')
-const messages = ref([])
+const messages = ref<any[]>([])
 const loadingMessages = ref(false)
 const loadingMore = ref(false)
-const loadError = ref(null)
+const loadError = ref<string | null>(null)
 const hasMore = ref(false)
 
-function typeLabel(type) {
+function typeLabel(type: string): string {
   return { group: '群聊', private: '私聊', archive: '归档' }[type] || type
 }
 
-function typeVariant(type) {
+function typeVariant(type: string): string {
   return { group: 'info', private: 'success', archive: 'warn' }[type] || 'info'
 }
 
-function roleVariant(role) {
+function roleVariant(role: string): string {
   return { user: 'info', assistant: 'success', system: 'warn', tool: 'warn' }[role] || 'info'
 }
 
-function displayGroupId(conv) {
+function displayGroupId(conv: any): string {
   if (conv.type === 'private') return conv.group_id.slice('private:'.length)
   if (conv.type === 'archive') return conv.group_id.slice('archive:'.length)
   return conv.group_id
 }
 
-function formatTime(iso) {
+function formatTime(iso: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  const pad = (n) => String(n).padStart(2, '0')
+  const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
@@ -171,14 +171,14 @@ async function loadConversations() {
   try {
     const data = await listConversations()
     conversations.value = data.conversations || []
-  } catch (e) {
-    listError.value = e.message
+  } catch (e: unknown) {
+    listError.value = (e as Error).message
   } finally {
     listing.value = false
   }
 }
 
-async function selectConversation(groupKey) {
+async function selectConversation(groupKey: string) {
   if (groupKey === selectedKey.value) return
   selectedKey.value = groupKey
   keyword.value = ''
@@ -198,8 +198,8 @@ async function reload() {
     })
     messages.value = data.messages || []
     hasMore.value = !!data.has_more
-  } catch (e) {
-    loadError.value = e.message
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
   } finally {
     loadingMessages.value = false
   }
@@ -217,8 +217,8 @@ async function loadMore() {
     })
     messages.value.push(...(data.messages || []))
     hasMore.value = !!data.has_more
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   } finally {
     loadingMore.value = false
   }
@@ -229,14 +229,14 @@ function clearKeyword() {
   reload()
 }
 
-async function onDelete(m) {
+async function onDelete(m: any) {
   if (!confirm(`删除消息 #${m.id}？此操作不可撤销。`)) return
   try {
     await deleteMessage(selectedKey.value, m.id)
     messages.value = messages.value.filter(x => x.id !== m.id)
     toast('已删除')
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   }
 }
 

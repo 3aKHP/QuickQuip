@@ -55,7 +55,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -63,13 +63,13 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchGroups, fetchKnownGroups, updateGroup } from '../api/groups.js'
-import { toast } from '../toast.js'
+import { fetchGroups, fetchKnownGroups, updateGroup } from '../api/groups'
+import { toast } from '../toast'
 
 const loaded = ref(false)
-const error = ref(null)
-const groups = ref({ summary: [], briefing: [] })
-const knownGroups = ref([])
+const error = ref<string | null>(null)
+const groups = ref<{ summary: string[]; briefing: string[] }>({ summary: [], briefing: [] })
+const knownGroups = ref<string[]>([])
 const newSummaryId = ref('')
 const newSummaryIdManual = ref('')
 const newBriefingId = ref('')
@@ -84,16 +84,16 @@ onMounted(async () => {
     groups.value = groupsData
     knownGroups.value = knownData.groups || []
     loaded.value = true
-  } catch (e) {
-    error.value = e.message
+  } catch (e: unknown) {
+    error.value = (e as Error).message
   }
 })
 
-function availableGroups(type) {
+function availableGroups(type: 'summary' | 'briefing'): string[] {
   return knownGroups.value.filter(g => !groups.value[type].includes(g))
 }
 
-async function addGroup(type) {
+async function addGroup(type: 'summary' | 'briefing') {
   const fromSelect = type === 'summary' ? newSummaryId.value : newBriefingId.value
   const fromManual = type === 'summary' ? newSummaryIdManual.value : newBriefingIdManual.value
   const gid = (fromSelect || fromManual).trim()
@@ -104,18 +104,18 @@ async function addGroup(type) {
     if (type === 'summary') { newSummaryId.value = ''; newSummaryIdManual.value = '' }
     else { newBriefingId.value = ''; newBriefingIdManual.value = '' }
     toast(`群 ${gid} 已添加`)
-  } catch (e) {
-    toast(`操作失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    toast(`操作失败：${(e as Error).message}`, 'error')
   }
 }
 
-async function removeGroup(type, gid) {
+async function removeGroup(type: 'summary' | 'briefing', gid: string) {
   try {
     await updateGroup(type, gid, false)
     groups.value[type] = groups.value[type].filter(g => g !== gid)
     toast(`群 ${gid} 已移除`)
-  } catch (e) {
-    toast(`操作失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    toast(`操作失败：${(e as Error).message}`, 'error')
   }
 }
 </script>

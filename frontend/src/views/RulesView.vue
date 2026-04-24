@@ -42,7 +42,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -50,15 +50,15 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiToggle from '../components/ui/UiToggle.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchRules, updateRule } from '../api/rules.js'
-import { fetchKnownGroups } from '../api/groups.js'
-import { toast } from '../toast.js'
+import { fetchRules, updateRule } from '../api/rules'
+import { fetchKnownGroups } from '../api/groups'
+import { toast } from '../toast'
 
 const loaded = ref(false)
-const error = ref(null)
-const disabled = ref({})
-const allRules = ref([])
-const allGroups = ref([])
+const error = ref<string | null>(null)
+const disabled = ref<Record<string, string[]>>({})
+const allRules = ref<string[]>([])
+const allGroups = ref<string[]>([])
 const selectedGroup = ref('')
 const newGroupId = ref('')
 
@@ -74,12 +74,12 @@ onMounted(async () => {
     const fromKnown = knownData.groups || []
     allGroups.value = [...new Set([...fromKnown, ...fromRules])].sort()
     loaded.value = true
-  } catch (e) {
-    error.value = e.message
+  } catch (e: unknown) {
+    error.value = (e as Error).message
   }
 })
 
-function isEnabled(rule) {
+function isEnabled(rule: string): boolean {
   return !(disabled.value[selectedGroup.value] || []).includes(rule)
 }
 
@@ -92,7 +92,7 @@ function addGroup() {
   newGroupId.value = ''
 }
 
-async function toggle(rule) {
+async function toggle(rule: string) {
   const nowEnabled = isEnabled(rule)
   try {
     await updateRule(selectedGroup.value, rule, !nowEnabled)
@@ -103,8 +103,8 @@ async function toggle(rule) {
       disabled.value[selectedGroup.value] = disabled.value[selectedGroup.value].filter(r => r !== rule)
     }
     toast(`${rule} 已${!nowEnabled ? '启用' : '禁用'}`)
-  } catch (e) {
-    toast(`操作失败：${e.message}`, 'error')
+  } catch (e: unknown) {
+    toast(`操作失败：${(e as Error).message}`, 'error')
   }
 }
 </script>

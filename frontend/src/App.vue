@@ -33,15 +33,15 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, onBeforeUnmount } from 'vue'
 import LoginView from './views/LoginView.vue'
 import AppNav from './components/layout/AppNav.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
-import { toastMsg, toastType } from './toast.js'
-import { NAV_ITEMS } from './config/nav.js'
-import { useAuth } from './composables/useAuth.js'
+import { toastMsg, toastType } from './toast'
+import { NAV_ITEMS } from './config/nav'
+import { useAuth } from './composables/useAuth'
 
 const {
   authReady,

@@ -12,20 +12,22 @@
   </button>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
 
-const props = defineProps({
-  variant: { type: String, default: 'default' },
-  size: { type: String, default: 'md' },
-  type: { type: String, default: 'button' },
-  disabled: { type: Boolean, default: false },
-  loading: { type: Boolean, default: false },
-  icon: { type: String, default: '' },
-})
+const props = defineProps<{
+  variant?: string
+  size?: string
+  type?: 'button' | 'submit' | 'reset'
+  disabled?: boolean
+  loading?: boolean
+  icon?: string
+}>()
 
-defineEmits(['click'])
+defineEmits<{
+  click: [e: MouseEvent]
+}>()
 
 const variantClass = computed(() => `ui-button--${props.variant}`)
 const sizeClass = computed(() => `ui-button--${props.size}`)

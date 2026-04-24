@@ -157,7 +157,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -172,24 +172,24 @@ import {
   fetchTiebaThread,
   tiebaImgProxyUrl,
   openTiebaSyncStream,
-} from '../api/tieba.js'
-import { toast } from '../toast.js'
+} from '../api/tieba'
+import { toast } from '../toast'
 
 const PAGE_SIZE = 30
 
-const forums = ref([])
+const forums = ref<any[]>([])
 const loading = ref(false)
-const loadError = ref(null)
+const loadError = ref<string | null>(null)
 
 const syncing = ref(false)
-const syncLog = ref([])
-const logEl = ref(null)
+const syncLog = ref<string[]>([])
+const logEl = ref<HTMLPreElement | null>(null)
 
-function startSync(forum) {
+function startSync(forum: string | null) {
   syncing.value = true
   syncLog.value = [`▶ 开始同步${forum ? ' ' + forum + '吧' : '全部贴吧'}…`]
   openTiebaSyncStream(
-    forum,
+    forum || '',
     (msg) => {
       syncLog.value.push(msg)
       nextTick(() => {
@@ -205,29 +205,32 @@ function startSync(forum) {
 
 const selectedForum = ref('')
 const keyword = ref('')
-const threads = ref([])
+const threads = ref<any[]>([])
 const total = ref(0)
 const hasMore = ref(false)
 const loadingThreads = ref(false)
 const loadingMore = ref(false)
 
-const detail = ref(null)
+const detail = ref<any>(null)
 
-function syncLabel(f) {
+const STATUS_MAP: Record<string, string> = { ok: '正常', running: '同步中', error: '错误', idle: '未同步' }
+const VARIANT_MAP: Record<string, string> = { ok: 'success', running: 'info', error: 'danger', idle: 'info' }
+
+function syncLabel(f: any): string {
   if (f.login_required) return '需登录'
-  return { ok: '正常', running: '同步中', error: '错误', idle: '未同步' }[f.last_sync_status] || f.last_sync_status
+  return STATUS_MAP[f.last_sync_status] || f.last_sync_status
 }
 
-function syncVariant(f) {
+function syncVariant(f: any): string {
   if (f.login_required) return 'warn'
-  return { ok: 'success', running: 'info', error: 'danger', idle: 'info' }[f.last_sync_status] || 'info'
+  return VARIANT_MAP[f.last_sync_status] || 'info'
 }
 
-function formatTime(ts) {
+function formatTime(ts: number): string {
   if (!ts) return ''
   const d = new Date(ts * 1000)
   if (Number.isNaN(d.getTime())) return ''
-  const pad = (n) => String(n).padStart(2, '0')
+  const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
@@ -238,14 +241,14 @@ async function loadAll() {
     const data = await listTiebaForums()
     forums.value = data.forums || []
     if (selectedForum.value) await reload()
-  } catch (e) {
-    loadError.value = e.message
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
   } finally {
     loading.value = false
   }
 }
 
-async function selectForum(forum) {
+async function selectForum(forum: string) {
   if (forum === selectedForum.value) return
   selectedForum.value = forum
   keyword.value = ''
@@ -267,8 +270,8 @@ async function reload() {
     threads.value = data.threads || []
     total.value = data.total || 0
     hasMore.value = !!data.has_more
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   } finally {
     loadingThreads.value = false
   }
@@ -285,8 +288,8 @@ async function loadMore() {
     })
     threads.value.push(...(data.threads || []))
     hasMore.value = !!data.has_more
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   } finally {
     loadingMore.value = false
   }
@@ -297,11 +300,11 @@ function clearKeyword() {
   reload()
 }
 
-async function openDetail(tid) {
+async function openDetail(tid: number) {
   try {
     detail.value = await fetchTiebaThread(selectedForum.value, tid)
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   }
 }
 

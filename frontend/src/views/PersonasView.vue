@@ -82,7 +82,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -96,19 +96,19 @@ import {
   updatePersona,
   createPersona,
   deletePersona,
-} from '../api/personas.js'
-import { toast } from '../toast.js'
+} from '../api/personas'
+import { toast } from '../toast'
 
-const personas = ref([])
+const personas = ref<any[]>([])
 const listing = ref(false)
-const listError = ref(null)
+const listError = ref<string | null>(null)
 
 const selectedName = ref('')
 const isCreating = ref(false)
 const content = ref('')
 const loadingContent = ref(false)
-const loadError = ref(null)
-const saveError = ref(null)
+const loadError = ref<string | null>(null)
+const saveError = ref<string | null>(null)
 const saving = ref(false)
 
 const isProtected = computed(() => {
@@ -122,14 +122,14 @@ async function loadList() {
   try {
     const data = await listPersonas()
     personas.value = data.personas || []
-  } catch (e) {
-    listError.value = e.message
+  } catch (e: unknown) {
+    listError.value = (e as Error).message
   } finally {
     listing.value = false
   }
 }
 
-async function selectPersona(name) {
+async function selectPersona(name: string) {
   if (name === '__new__') return
   if (isCreating.value && content.value) {
     if (!confirm('当前正在创建新人格，未保存的内容将丢失。是否继续？')) return
@@ -143,8 +143,8 @@ async function selectPersona(name) {
   try {
     const data = await fetchPersona(name)
     content.value = data.content
-  } catch (e) {
-    loadError.value = e.message
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
   } finally {
     loadingContent.value = false
   }
@@ -183,8 +183,8 @@ async function onSave() {
       toast('人格已保存')
       await loadList()
     }
-  } catch (e) {
-    saveError.value = e.message
+  } catch (e: unknown) {
+    saveError.value = (e as Error).message
     toast('保存失败', 'error')
   } finally {
     saving.value = false
@@ -199,8 +199,8 @@ async function onDelete() {
     selectedName.value = ''
     content.value = ''
     await loadList()
-  } catch (e) {
-    toast(e.message, 'error')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
   }
 }
 

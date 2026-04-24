@@ -57,8 +57,14 @@ if errorlevel 1 (
     goto wait_admin
 )
 
-:: ── Open browser ─────────────────────────────────────────────────────────
-start http://127.0.0.1:5104/ops
+:: ── Open admin panel ─────────────────────────────────────────────────────
+:: Prefer native WebView window; fall back to browser if unavailable
+echo 正在打开管理面板...
+"%_PYTHON%" webview_launcher.py
+if errorlevel 2 (
+    echo pywebview 未安装，使用浏览器打开
+    start http://127.0.0.1:5104/ops
+)
 
 :: ── Start bot ────────────────────────────────────────────────────────────
 echo 正在启动 QQ Bot...

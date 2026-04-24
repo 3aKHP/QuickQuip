@@ -52,7 +52,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -61,22 +61,22 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchSummaryGroups, fetchSummaries, fetchSummaryDetail, deleteSummary } from '../api/summaries.js'
-import { toast } from '../toast.js'
+import { fetchSummaryGroups, fetchSummaries, fetchSummaryDetail, deleteSummary } from '../api/summaries'
+import { toast } from '../toast'
 
-const groups = ref([])
+const groups = ref<string[]>([])
 const groupId = ref('')
-const list = ref([])
+const list = ref<any[]>([])
 const loading = ref(false)
-const error = ref(null)
-const selected = ref(null)
-const detail = ref(null)
+const error = ref<string | null>(null)
+const selected = ref<string | null>(null)
+const detail = ref<any>(null)
 
 onMounted(async () => {
   try {
     groups.value = await fetchSummaryGroups()
-  } catch (e) {
-    error.value = `加载群组列表失败: ${e.message}`
+  } catch (e: unknown) {
+    error.value = `加载群组列表失败: ${(e as Error).message}`
   }
 })
 
@@ -85,25 +85,25 @@ async function loadList() {
   loading.value = true; error.value = null; selected.value = null; detail.value = null
   try {
     list.value = await fetchSummaries(groupId.value)
-  } catch (e) { error.value = e.message }
+  } catch (e: unknown) { error.value = (e as Error).message }
   finally { loading.value = false }
 }
 
-async function open(date) {
+async function open(date: string) {
   selected.value = date; detail.value = null
   try {
     detail.value = await fetchSummaryDetail(groupId.value, date)
-  } catch (e) { toast(e.message, 'error'); selected.value = null }
+  } catch (e: unknown) { toast((e as Error).message, 'error'); selected.value = null }
 }
 
-async function del(date) {
+async function del(date: string) {
   if (!confirm(`删除 ${groupId.value} / ${date} 的总结？`)) return
   try {
     await deleteSummary(groupId.value, date)
     list.value = list.value.filter(s => s.summary_date !== date)
     if (selected.value === date) closeDetail()
     toast('已删除')
-  } catch (e) { toast(e.message, 'error') }
+  } catch (e: unknown) { toast((e as Error).message, 'error') }
 }
 
 function closeDetail() {

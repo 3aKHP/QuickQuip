@@ -2,7 +2,7 @@
   <component :is="iconComp" v-if="iconComp" :size="size" :stroke-width="strokeWidth" />
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 import {
   AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, Bot, Brain,
@@ -10,7 +10,7 @@ import {
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
   SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode,
+  Send, Stethoscope, FileCode, Download,
 } from 'lucide-vue-next'
 
 const ICON_MAP = {
@@ -19,14 +19,16 @@ const ICON_MAP = {
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
   SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode,
+  Send, Stethoscope, FileCode, Download,
 }
 
-const props = defineProps({
-  name: { type: String, required: true },
-  size: { type: [String, Number], default: 16 },
-  strokeWidth: { type: [String, Number], default: 2 },
-})
+export type IconName = keyof typeof ICON_MAP
 
-const iconComp = computed(() => ICON_MAP[props.name] || null)
+const props = defineProps<{
+  name: IconName | string
+  size?: number
+  strokeWidth?: number
+}>()
+
+const iconComp = computed(() => (ICON_MAP as Record<string, any>)[props.name] || null)
 </script>

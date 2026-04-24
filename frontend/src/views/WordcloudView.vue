@@ -70,7 +70,7 @@
           <h3 class="top-title">Top {{ result.top_words.length }} 词频</h3>
           <ol class="top-list">
             <li v-for="(w, i) in result.top_words" :key="w.word">
-              <span class="rank">{{ i + 1 }}</span>
+              <span class="rank">{{ String(Number(i) + 1) }}</span>
               <span class="word">{{ w.word }}</span>
               <span class="count">{{ w.count }}</span>
             </li>
@@ -87,7 +87,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -95,8 +95,8 @@ import UiCard from '../components/ui/UiCard.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { listWordcloudGroups, renderWordcloud } from '../api/wordcloud.js'
-import { toast } from '../toast.js'
+import { listWordcloudGroups, renderWordcloud } from '../api/wordcloud'
+import { toast } from '../toast'
 
 const WINDOWS = [
   { key: 'today', label: '今日' },
@@ -105,21 +105,21 @@ const WINDOWS = [
   { key: 'year', label: '近一年' },
 ]
 
-const groups = ref([])
+const groups = ref<any[]>([])
 const loading = ref(false)
-const loadError = ref(null)
+const loadError = ref<string | null>(null)
 
 const groupId = ref('')
 const windowKey = ref('today')
 const rendering = ref(false)
-const renderError = ref(null)
-const result = ref(null)
+const renderError = ref<string | null>(null)
+const result = ref<any>(null)
 
 const imageDataUrl = computed(() =>
   result.value ? `data:image/png;base64,${result.value.image_base64}` : ''
 )
 
-function formatBytes(n) {
+function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / 1024 / 1024).toFixed(1)} MB`
@@ -131,8 +131,8 @@ async function loadGroups() {
   try {
     const data = await listWordcloudGroups()
     groups.value = data.groups || []
-  } catch (e) {
-    loadError.value = e.message
+  } catch (e: unknown) {
+    loadError.value = (e as Error).message
   } finally {
     loading.value = false
   }
@@ -144,9 +144,9 @@ async function onRender() {
   renderError.value = null
   try {
     result.value = await renderWordcloud(groupId.value, windowKey.value)
-  } catch (e) {
+  } catch (e: unknown) {
     result.value = null
-    renderError.value = e.data?.detail || e.message
+    renderError.value = ((e as any).data?.detail as string) || (e as Error).message
     toast('生成失败', 'error')
   } finally {
     rendering.value = false

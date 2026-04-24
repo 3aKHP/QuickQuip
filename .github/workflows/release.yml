@@ -53,6 +53,11 @@ jobs:
         env:
           PIP_NO_CACHE_DIR: "1"
 
+      - name: Install pywebview (Windows-only webview)
+        run: staging\python\python.exe -m pip install --no-warn-script-location pywebview
+        env:
+          PIP_NO_CACHE_DIR: "1"
+
       - name: Copy project files
         run: |
           Copy-Item -Recurse quickquip staging\
@@ -61,7 +66,7 @@ jobs:
           mkdir -p staging\frontend\dist
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
           Copy-Item -Recurse config staging\
-          Copy-Item bot.py, web_api.py, 启动.bat staging\
+          Copy-Item bot.py, web_api.py, 启动.bat, webview_launcher.py staging\
           mkdir staging\data
 
       - name: Create release zip

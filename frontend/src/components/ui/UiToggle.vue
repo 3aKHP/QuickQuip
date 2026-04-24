@@ -6,22 +6,28 @@
       :aria-checked="modelValue"
       :checked="modelValue"
       :disabled="disabled"
-      @change="$emit('update:modelValue', $event.target.checked)"
+      @change="onChange"
     />
     <span class="slider" />
   </label>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
 
-const props = defineProps({
-  modelValue: { type: Boolean, default: false },
-  disabled: { type: Boolean, default: false },
-  size: { type: String, default: 'md' },
-})
+const props = defineProps<{
+  modelValue?: boolean
+  disabled?: boolean
+  size?: string
+}>()
 
-defineEmits(['update:modelValue'])
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean]
+}>()
+
+function onChange(e: Event) {
+  emit('update:modelValue', (e.target as HTMLInputElement).checked)
+}
 
 const sizeClass = computed(() => `ui-toggle--${props.size}`)
 </script>
