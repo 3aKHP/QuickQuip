@@ -4,6 +4,7 @@ import asyncio
 import base64
 from collections import deque
 from dataclasses import dataclass, field
+import datetime
 import json
 import logging
 import os
@@ -38,7 +39,6 @@ _TRACE_LOG_LINES: deque[dict[str, object]] = deque(maxlen=200)
 
 
 def _record_trace(direction: str, provider_id: str, stream: bool, payload: str) -> None:
-    import datetime
     _TRACE_LOG_LINES.append({
         "timestamp": datetime.datetime.now().isoformat(),
         "direction": direction,

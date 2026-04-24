@@ -10,7 +10,7 @@ import {
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
   SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode, Trash2 as Trash,
+  Send, Stethoscope, FileCode,
 } from 'lucide-vue-next'
 
 const ICON_MAP = {
@@ -19,7 +19,7 @@ const ICON_MAP = {
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
   SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode, Trash,
+  Send, Stethoscope, FileCode,
 }
 
 const props = defineProps({
