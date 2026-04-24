@@ -45,7 +45,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
@@ -54,85 +55,74 @@ import UiCard from '../components/ui/UiCard.vue'
 import { listConfigs, fetchConfig, saveConfig } from '../api/config.js'
 import { toast } from '../toast.js'
 
-export default {
-  components: { UiPageHeader, UiButton, UiIcon, UiLoading, UiCard },
-  data: () => ({
-    configs: [],
-    listError: null,
-    currentKey: '',
-    loaded: false,
-    loadError: null,
-    saveError: null,
-    saving: false,
-    content: '',
-    originalContent: '',
-  }),
-  computed: {
-    current() {
-      return this.configs.find(c => c.key === this.currentKey) || null
-    },
-    currentFilename() {
-      return this.current?.filename || ''
-    },
-    dirty() {
-      return this.loaded && this.content !== this.originalContent
-    },
-  },
-  async mounted() {
-    await this.loadList()
-  },
-  methods: {
-    async loadList() {
-      this.listError = null
-      try {
-        const d = await listConfigs()
-        this.configs = d.configs || []
-        if (this.configs.length && !this.currentKey) {
-          await this.load(this.configs[0].key)
-        }
-      } catch (e) {
-        this.listError = e.message
-      }
-    },
-    async switchTo(key) {
-      if (key === this.currentKey) return
-      if (this.dirty && !confirm('当前文件有未保存的修改，切换后将丢失。是否继续？')) return
-      await this.load(key)
-    },
-    async load(key) {
-      this.currentKey = key
-      this.loaded = false
-      this.loadError = null
-      this.saveError = null
-      try {
-        const d = await fetchConfig(key)
-        this.content = d.content
-        this.originalContent = d.content
-        const entry = this.configs.find(c => c.key === key)
-        if (entry) entry.missing = d.missing || false
-        this.loaded = true
-      } catch (e) {
-        this.loadError = e.message
-      }
-    },
-    async save() {
-      if (!this.currentKey) return
-      this.saving = true
-      this.saveError = null
-      try {
-        await saveConfig(this.currentKey, this.content)
-        this.originalContent = this.content
-        const entry = this.configs.find(c => c.key === this.currentKey)
-        if (entry) entry.missing = false
-        toast('配置已保存')
-      } catch (e) {
-        this.saveError = e.message
-        toast('保存失败', 'error')
-      } finally {
-        this.saving = false
-      }
-    },
-  },
+const configs = ref([])
+const listError = ref(null)
+const currentKey = ref('')
+const loaded = ref(false)
+const loadError = ref(null)
+const saveError = ref(null)
+const saving = ref(false)
+const content = ref('')
+const originalContent = ref('')
+
+const current = computed(() => configs.value.find(c => c.key === currentKey.value) || null)
+const currentFilename = computed(() => current.value?.filename || '')
+const dirty = computed(() => loaded.value && content.value !== originalContent.value)
+
+onMounted(() => loadList())
+
+async function loadList() {
+  listError.value = null
+  try {
+    const d = await listConfigs()
+    configs.value = d.configs || []
+    if (configs.value.length && !currentKey.value) {
+      await load(configs.value[0].key)
+    }
+  } catch (e) {
+    listError.value = e.message
+  }
+}
+
+async function switchTo(key) {
+  if (key === currentKey.value) return
+  if (dirty.value && !confirm('当前文件有未保存的修改，切换后将丢失。是否继续？')) return
+  await load(key)
+}
+
+async function load(key) {
+  currentKey.value = key
+  loaded.value = false
+  loadError.value = null
+  saveError.value = null
+  try {
+    const d = await fetchConfig(key)
+    content.value = d.content
+    originalContent.value = d.content
+    const entry = configs.value.find(c => c.key === key)
+    if (entry) entry.missing = d.missing || false
+    loaded.value = true
+  } catch (e) {
+    loadError.value = e.message
+  }
+}
+
+async function save() {
+  if (!currentKey.value) return
+  saving.value = true
+  saveError.value = null
+  try {
+    await saveConfig(currentKey.value, content.value)
+    originalContent.value = content.value
+    const entry = configs.value.find(c => c.key === currentKey.value)
+    if (entry) entry.missing = false
+    toast('配置已保存')
+  } catch (e) {
+    saveError.value = e.message
+    toast('保存失败', 'error')
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 

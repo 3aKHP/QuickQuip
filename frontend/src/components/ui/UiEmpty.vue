@@ -9,18 +9,14 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import UiIcon from './UiIcon.vue'
 
-export default {
-  name: 'UiEmpty',
-  components: { UiIcon },
-  props: {
-    icon: { type: String, default: '' },
-    title: { type: String, default: '暂无数据' },
-    description: { type: String, default: '' },
-  },
-}
+defineProps({
+  icon: { type: String, default: '' },
+  title: { type: String, default: '暂无数据' },
+  description: { type: String, default: '' },
+})
 </script>
 
 <style scoped>

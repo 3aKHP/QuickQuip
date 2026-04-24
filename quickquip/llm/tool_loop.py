@@ -33,18 +33,17 @@ async def run_tool_call_loop(
     tool_registry,
     runtime_config,
     logger,
-    get_search_backend_name,
     search_tool_name: str,
     search_failsafe_max_rounds: int,
     search_failsafe_max_calls_per_round: int,
+    search_max_calls_per_round: int = 3,
 ):
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))
     max_calls = max(1, min(runtime_config.tool_max_calls_per_round, 32))
     retry_max = max(1, getattr(runtime_config, "retry_max_attempts", 3))
     retry_delay = max(0.0, getattr(runtime_config, "retry_base_delay", 1.0))
-    search_backend = get_search_backend_name()
-    search_unlimited = search_backend == "searxng"
+    effective_search_max_calls = max(1, min(search_max_calls_per_round, search_failsafe_max_calls_per_round))
     current_request = request
     counted_rounds = 0
 
@@ -72,19 +71,16 @@ async def run_tool_call_loop(
             response.text = response.text or "工具调用轮次已达上限，未能完成最终回答。"
             return response
 
-        if search_unlimited:
-            selected_calls = [
-                *search_calls[:search_failsafe_max_calls_per_round],
-                *other_calls[:max_calls],
-            ]
-        else:
-            selected_calls = response.tool_calls[:max_calls]
+        selected_calls = [
+            *search_calls[:effective_search_max_calls],
+            *other_calls[:max_calls],
+        ]
 
         if not selected_calls:
             response.text = response.text or "工具调用请求为空，未能完成最终回答。"
             return response
 
-        if has_non_search_calls or not search_unlimited:
+        if has_non_search_calls:
             counted_rounds += 1
 
         if round_index >= search_failsafe_max_rounds:

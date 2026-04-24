@@ -27,11 +27,14 @@ class FakeToolSearchClient:
         )
 
 
+def _fake_searxng_client(*args, **kwargs):
+    return FakeToolSearchClient()
+
+
 async def test_search_web_tool_loop(llm_service, monkeypatch, patch_provider_builder):
     stub = StubSearchOnlyProviderClient()
     patch_provider_builder(lambda provider: stub)
-    monkeypatch.setattr(llm_runtime_module, "build_search_client", lambda: FakeToolSearchClient())
-    monkeypatch.setenv("SEARCH_BACKEND", "searxng")
+    monkeypatch.setattr(llm_runtime_module, "SearXNGSearchClient", _fake_searxng_client)
     monkeypatch.setenv("SEARXNG_BASE_URL", "http://127.0.0.1:8888")
 
     result = await llm_service.generate_reply(

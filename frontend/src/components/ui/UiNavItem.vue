@@ -9,19 +9,16 @@
   </button>
 </template>
 
-<script>
+<script setup>
 import UiIcon from './UiIcon.vue'
 
-export default {
-  name: 'UiNavItem',
-  components: { UiIcon },
-  props: {
-    label: { type: String, required: true },
-    icon: { type: String, default: '' },
-    active: { type: Boolean, default: false },
-  },
-  emits: ['click'],
-}
+defineProps({
+  label: { type: String, required: true },
+  icon: { type: String, default: '' },
+  active: { type: Boolean, default: false },
+})
+
+defineEmits(['click'])
 </script>
 
 <style scoped>

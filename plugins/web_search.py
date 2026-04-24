@@ -4,12 +4,8 @@ from quickquip.search.web_search import (
     SearchResult,
     SearXNGSearchClient,
     SearXNGSearchError,
-    TavilySearchClient,
-    TavilySearchError,
     WebSearchError,
-    build_search_client,
     format_search_response,
-    get_search_backend_name,
 )
 
 request = _impl.request
@@ -22,13 +18,9 @@ __all__ = [
     "SearchResult",
     "SearXNGSearchClient",
     "SearXNGSearchError",
-    "TavilySearchClient",
-    "TavilySearchError",
     "WebSearchError",
-    "build_search_client",
     "error",
     "format_search_response",
-    "get_search_backend_name",
     "parse",
     "request",
 ]

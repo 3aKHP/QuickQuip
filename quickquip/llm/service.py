@@ -42,7 +42,7 @@ from quickquip.llm.tools import (
     ToolExecutionContext,
 )
 from quickquip.llm.vocab import VocabIndex
-from quickquip.search.web_search import build_search_client, format_search_response, get_search_backend_name
+from quickquip.search.web_search import SearXNGSearchClient, format_search_response
 
 if TYPE_CHECKING:
     from quickquip.chat.message_stats import GroupStatsTracker
@@ -342,7 +342,7 @@ class LLMService:
         _ = context
         query = str(arguments.get("query", "")).strip()
         topic = str(arguments.get("topic", "general")).strip() or "general"
-        response = await build_search_client().search(query, topic=topic, max_results=5)
+        response = await SearXNGSearchClient().search(query, topic=topic, max_results=5)
         return format_search_response(response, include_answer=True, max_results=3)
 
     async def _tool_get_group_stats(
@@ -1008,7 +1008,7 @@ class LLMService:
             vocab=self.vocab,
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
-            get_search_backend_name=get_search_backend_name,
+            auto_search_enabled=self.config.auto_search.enabled,
             chat_type=chat_type,
             participants=participants,
             provider_style_overrides=provider_style_overrides,
@@ -1318,10 +1318,10 @@ class LLMService:
             tool_registry=self.tool_registry,
             runtime_config=self.config.runtime,
             logger=logger,
-            get_search_backend_name=get_search_backend_name,
             search_tool_name=SEARCH_TOOL_NAME,
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
+            search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
         )
 
     async def _generate_reply_for_scope(

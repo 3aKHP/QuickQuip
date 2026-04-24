@@ -4,22 +4,16 @@
   </span>
 </template>
 
-<script>
-export default {
-  name: 'UiTag',
-  props: {
-    variant: { type: String, default: 'info' }, // info | success | warn | danger
-    size: { type: String, default: 'md' }, // sm | md
-  },
-  computed: {
-    variantClass() {
-      return `ui-tag--${this.variant}`
-    },
-    sizeClass() {
-      return `ui-tag--${this.size}`
-    },
-  },
-}
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  variant: { type: String, default: 'info' },
+  size: { type: String, default: 'md' },
+})
+
+const variantClass = computed(() => `ui-tag--${props.variant}`)
+const sizeClass = computed(() => `ui-tag--${props.size}`)
 </script>
 
 <style scoped>

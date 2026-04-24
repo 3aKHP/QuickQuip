@@ -10,14 +10,11 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'UiPageHeader',
-  props: {
-    title: { type: String, required: true },
-    subtitle: { type: String, default: '' },
-  },
-}
+<script setup>
+defineProps({
+  title: { type: String, required: true },
+  subtitle: { type: String, default: '' },
+})
 </script>
 
 <style scoped>

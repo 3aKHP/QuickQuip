@@ -58,7 +58,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { onMounted, ref } from 'vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
@@ -68,59 +69,50 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { fetchStats } from '../api/stats.js'
 
-export default {
-  components: { UiCard, UiButton, UiPageHeader, UiTag, UiIcon, UiLoading, UiEmpty },
-  data: () => ({ data: null, error: null, loading: false, updatedAt: null, computedStats: {} }),
-  async mounted() { await this.load() },
-  methods: {
-    async load() {
-      this.loading = true
-      this.error = null
-      try {
-        this.data = await fetchStats()
-        this.updatedAt = new Date().toLocaleTimeString('zh-CN')
-        this.precomputeStats()
-      } catch (e) {
-        this.error = e.message
-      } finally {
-        this.loading = false
-      }
-    },
-    precomputeStats() {
-      const out = {}
-      for (const [gid, gs] of Object.entries(this.data || {})) {
-        const users = Object.entries(gs.user_messages || {})
-          .sort((a, b) => b[1] - a[1]).slice(0, 15)
-        const rules = Object.entries(gs.rule_triggers || {})
-          .sort((a, b) => b[1] - a[1]).slice(0, 10)
-        const userValues = users.map(([, v]) => v)
-        const ruleValues = rules.map(([, v]) => v)
-        out[gid] = {
-          users,
-          rules,
-          maxUser: userValues.length ? Math.max(...userValues) : 1,
-          maxRule: ruleValues.length ? Math.max(...ruleValues) : 1,
-        }
-      }
-      this.computedStats = out
-    },
-    topUsers(gs) {
-      return this.computedStats[gs.gid]?.users || []
-    },
-    topRules(gs) {
-      return this.computedStats[gs.gid]?.rules || []
-    },
-    maxUser(gs) {
-      return this.computedStats[gs.gid]?.maxUser || 1
-    },
-    maxRule(gs) {
-      return this.computedStats[gs.gid]?.maxRule || 1
-    },
-    pct(value, max) {
-      if (!max) return 0
-      return Math.max(4, Math.round((value / max) * 100))
-    },
-  },
+const data = ref(null)
+const error = ref(null)
+const loading = ref(false)
+const updatedAt = ref(null)
+const computedStats = ref({})
+
+onMounted(() => load())
+
+async function load() {
+  loading.value = true
+  error.value = null
+  try {
+    data.value = await fetchStats()
+    updatedAt.value = new Date().toLocaleTimeString('zh-CN')
+    precomputeStats()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+function precomputeStats() {
+  const out = {}
+  for (const [gid, gs] of Object.entries(data.value || {})) {
+    const users = Object.entries(gs.user_messages || {})
+      .sort((a, b) => b[1] - a[1]).slice(0, 15)
+    const rules = Object.entries(gs.rule_triggers || {})
+      .sort((a, b) => b[1] - a[1]).slice(0, 10)
+    const userValues = users.map(([, v]) => v)
+    const ruleValues = rules.map(([, v]) => v)
+    out[gid] = {
+      users,
+      rules,
+      maxUser: userValues.length ? Math.max(...userValues) : 1,
+      maxRule: ruleValues.length ? Math.max(...ruleValues) : 1,
+    }
+  }
+  computedStats.value = out
+}
+
+function pct(value, max) {
+  if (!max) return 0
+  return Math.max(4, Math.round((value / max) * 100))
 }
 </script>
 

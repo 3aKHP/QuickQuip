@@ -55,7 +55,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -65,60 +66,57 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import { fetchGroups, fetchKnownGroups, updateGroup } from '../api/groups.js'
 import { toast } from '../toast.js'
 
-export default {
-  components: { UiPageHeader, UiCard, UiButton, UiIcon, UiLoading, UiEmpty },
-  data: () => ({
-    loaded: false,
-    error: null,
-    groups: { summary: [], briefing: [] },
-    knownGroups: [],
-    newSummaryId: '',
-    newSummaryIdManual: '',
-    newBriefingId: '',
-    newBriefingIdManual: '',
-  }),
-  async mounted() {
-    try {
-      const [groupsData, knownData] = await Promise.all([
-        fetchGroups(),
-        fetchKnownGroups(),
-      ])
-      this.groups = groupsData
-      this.knownGroups = knownData.groups || []
-      this.loaded = true
-    } catch (e) {
-      this.error = e.message
-    }
-  },
-  methods: {
-    availableGroups(type) {
-      return this.knownGroups.filter(g => !this.groups[type].includes(g))
-    },
-    async addGroup(type) {
-      const fromSelect = type === 'summary' ? this.newSummaryId : this.newBriefingId
-      const fromManual = type === 'summary' ? this.newSummaryIdManual : this.newBriefingIdManual
-      const gid = (fromSelect || fromManual).trim()
-      if (!gid || !/^\d+$/.test(gid)) { toast('群号必须为纯数字', 'error'); return }
-      try {
-        await updateGroup(type, gid, true)
-        if (!this.groups[type].includes(gid)) this.groups[type].push(gid)
-        if (type === 'summary') { this.newSummaryId = ''; this.newSummaryIdManual = '' }
-        else { this.newBriefingId = ''; this.newBriefingIdManual = '' }
-        toast(`群 ${gid} 已添加`)
-      } catch (e) {
-        toast(`操作失败：${e.message}`, 'error')
-      }
-    },
-    async removeGroup(type, gid) {
-      try {
-        await updateGroup(type, gid, false)
-        this.groups[type] = this.groups[type].filter(g => g !== gid)
-        toast(`群 ${gid} 已移除`)
-      } catch (e) {
-        toast(`操作失败：${e.message}`, 'error')
-      }
-    },
-  },
+const loaded = ref(false)
+const error = ref(null)
+const groups = ref({ summary: [], briefing: [] })
+const knownGroups = ref([])
+const newSummaryId = ref('')
+const newSummaryIdManual = ref('')
+const newBriefingId = ref('')
+const newBriefingIdManual = ref('')
+
+onMounted(async () => {
+  try {
+    const [groupsData, knownData] = await Promise.all([
+      fetchGroups(),
+      fetchKnownGroups(),
+    ])
+    groups.value = groupsData
+    knownGroups.value = knownData.groups || []
+    loaded.value = true
+  } catch (e) {
+    error.value = e.message
+  }
+})
+
+function availableGroups(type) {
+  return knownGroups.value.filter(g => !groups.value[type].includes(g))
+}
+
+async function addGroup(type) {
+  const fromSelect = type === 'summary' ? newSummaryId.value : newBriefingId.value
+  const fromManual = type === 'summary' ? newSummaryIdManual.value : newBriefingIdManual.value
+  const gid = (fromSelect || fromManual).trim()
+  if (!gid || !/^\d+$/.test(gid)) { toast('群号必须为纯数字', 'error'); return }
+  try {
+    await updateGroup(type, gid, true)
+    if (!groups.value[type].includes(gid)) groups.value[type].push(gid)
+    if (type === 'summary') { newSummaryId.value = ''; newSummaryIdManual.value = '' }
+    else { newBriefingId.value = ''; newBriefingIdManual.value = '' }
+    toast(`群 ${gid} 已添加`)
+  } catch (e) {
+    toast(`操作失败：${e.message}`, 'error')
+  }
+}
+
+async function removeGroup(type, gid) {
+  try {
+    await updateGroup(type, gid, false)
+    groups.value[type] = groups.value[type].filter(g => g !== gid)
+    toast(`群 ${gid} 已移除`)
+  } catch (e) {
+    toast(`操作失败：${e.message}`, 'error')
+  }
 }
 </script>
 
