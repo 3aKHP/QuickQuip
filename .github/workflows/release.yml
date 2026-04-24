@@ -61,7 +61,7 @@ jobs:
           mkdir -p staging\frontend\dist
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
           Copy-Item -Recurse config staging\
-          Copy-Item bot.py web_api.py 启动.bat staging\
+          Copy-Item bot.py, web_api.py, 启动.bat staging\
           mkdir staging\data
 
       - name: Create release zip

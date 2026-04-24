@@ -11,6 +11,15 @@
 # Run web admin only:
 #   docker run --rm -p 5104:5104 -v ./config:/app/config quickquip python -u web_api.py
 
+# ── Stage 1: Build frontend ────────────────────────────────────────────────
+FROM node:20-slim AS frontend-builder
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: Python runtime ────────────────────────────────────────────────
 FROM python:3.11-slim
 
 # ── Mirror selection ──────────────────────────────────────────────────────
@@ -46,7 +55,7 @@ COPY bot.py web_api.py ./
 COPY plugins/ plugins/
 COPY quickquip/ quickquip/
 COPY config/ config/
-COPY frontend/dist/ frontend/dist/
+COPY --from=frontend-builder /build/dist/ frontend/dist/
 RUN mkdir -p data
 
 EXPOSE 8080 5104
