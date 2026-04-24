@@ -4,7 +4,7 @@
 
 ---
 
-## 下一版本（v1.0.1）—— TypeScript 全面迁移
+## v1.0.1（已完成）—— TypeScript 全面迁移
 
 ### 前端 TypeScript 化（本版本主轴）
 
@@ -12,6 +12,12 @@
 - **构建解耦**：`npm run build` 保持 `vite build`（不带 vue-tsc），`npm run type-check` 独立；CI 和 pre-push hook 跑 type-check，`dev/deploy-v4.ps1` 热路径零增量
 - **严格模式**：启用 `strict: true`，一次性清掉所有隐性 any
 - 暂不引入 zod 等运行时校验层，待真正遇到后端 shape 不匹配的 bug 再考虑
+
+### 懒人包 WebView 窗口化
+
+- 新增 `webview_launcher.py`：基于 pywebview 的原生 WebView2 窗口
+- `启动.bat` 优先使用 WebView，pywebview 未安装时回落浏览器
+- pywebview 在 release workflow 中单独安装（不进入 requirements.txt 以免污染 Linux Docker 构建）
 
 ---
 
