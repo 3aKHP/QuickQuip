@@ -17,6 +17,12 @@ class TriggerConfig:
 
 
 @dataclass(slots=True)
+class AutoSearchConfig:
+    enabled: bool = False
+    search_max_calls_per_round: int = 3
+
+
+@dataclass(slots=True)
 class RuntimeConfig:
     enabled: bool = False
     memory_enabled: bool = True
@@ -131,6 +137,7 @@ class DailyBriefingConfig:
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
+    auto_search: AutoSearchConfig = field(default_factory=AutoSearchConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
@@ -387,6 +394,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     daily_briefing_raw = _expand_env_value(_as_dict(data.get("daily_briefing")))
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
+    auto_search_raw = _expand_env_value(_as_dict(triggers_raw.get("auto_search")))
 
     config = LLMConfig(
         runtime=RuntimeConfig(
@@ -416,6 +424,10 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 triggers_raw.get("empty_prompt_reply", "请在触发指令或艾特后面补上想说的话。")
             ).strip()
             or "请在触发指令或艾特后面补上想说的话。",
+        ),
+        auto_search=AutoSearchConfig(
+            enabled=_as_bool(auto_search_raw.get("enabled", False), default=False),
+            search_max_calls_per_round=max(1, min(int(auto_search_raw.get("search_max_calls_per_round", 3)), 32)),
         ),
         tools=ToolsConfig(
             enabled=[

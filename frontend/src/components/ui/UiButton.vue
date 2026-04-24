@@ -12,33 +12,24 @@
   </button>
 </template>
 
-<script>
+<script setup>
+import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
 
-export default {
-  name: 'UiButton',
-  components: { UiIcon },
-  props: {
-    variant: { type: String, default: 'default' }, // primary | default | danger | ghost
-    size: { type: String, default: 'md' }, // sm | md
-    type: { type: String, default: 'button' },
-    disabled: { type: Boolean, default: false },
-    loading: { type: Boolean, default: false },
-    icon: { type: String, default: '' },
-  },
-  emits: ['click'],
-  computed: {
-    variantClass() {
-      return `ui-button--${this.variant}`
-    },
-    sizeClass() {
-      return `ui-button--${this.size}`
-    },
-    iconSize() {
-      return this.size === 'sm' ? 14 : 16
-    },
-  },
-}
+const props = defineProps({
+  variant: { type: String, default: 'default' },
+  size: { type: String, default: 'md' },
+  type: { type: String, default: 'button' },
+  disabled: { type: Boolean, default: false },
+  loading: { type: Boolean, default: false },
+  icon: { type: String, default: '' },
+})
+
+defineEmits(['click'])
+
+const variantClass = computed(() => `ui-button--${props.variant}`)
+const sizeClass = computed(() => `ui-button--${props.size}`)
+const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
 </script>
 
 <style scoped>

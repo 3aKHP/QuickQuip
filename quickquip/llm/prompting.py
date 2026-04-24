@@ -170,7 +170,7 @@ def build_system_prompt(
     vocab,
     beijing_timezone: str,
     search_tool_name: str,
-    get_search_backend_name,
+    auto_search_enabled: bool = False,
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
     provider_style_overrides: str = "",
@@ -267,21 +267,19 @@ def build_system_prompt(
         lines.append("\n".join(vocab_lines))
 
     if tool_specs:
-        search_backend = get_search_backend_name()
-        backend_label = "SearXNG" if search_backend == "searxng" else "Tavily"
         tool_lines = [
             "工具使用规则：",
             "- 只有在确实需要外部信息、身份查询或记忆查询时才调用工具。",
             "- 优先直接回答，不要为了显得聪明而滥用工具。",
-            f"- 当前联网后端：{backend_label}。",
-            f"- 遇到需要最新事实、网页、新闻、价格、版本、公告或来源链接的问题时，优先调用 {search_tool_name}。",
-            "- 工具结果不足时，明确告诉用户不足，不要编造。",
         ]
-        if search_backend == "searxng":
+        if auto_search_enabled:
             tool_lines.extend([
+                "- 当前联网后端：SearXNG。",
+                f"- 遇到需要最新事实、网页、新闻、价格、版本、公告或来源链接的问题时，请主动调用 {search_tool_name}。",
                 f"- 当前 {search_tool_name} 走项目内 SearXNG；搜索结果不够时，可以继续多次调用 {search_tool_name} 细化检索。",
                 "- 优先先搜再答，再根据搜索结果组织结论。",
             ])
+        tool_lines.append("- 工具结果不足时，明确告诉用户不足，不要编造。")
         tool_lines.append("当前可用工具：")
         for spec in tool_specs:
             tool_lines.append(f"- {spec.name}：{spec.description}")

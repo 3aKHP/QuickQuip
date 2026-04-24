@@ -34,6 +34,10 @@ MIN_LLM_CONFIG_TOML = textwrap.dedent(
     allow_at = true
     empty_prompt_reply = "empty"
 
+    [triggers.auto_search]
+    enabled = true
+    search_max_calls_per_round = 3
+
     [tools]
     enabled = []
 

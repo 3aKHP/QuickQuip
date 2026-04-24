@@ -4,23 +4,17 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'UiCard',
-  props: {
-    padding: { type: String, default: 'md' }, // sm | md | lg
-    shadow: { type: String, default: 'sm' }, // sm | md | lg | none
-    clickable: { type: Boolean, default: false },
-  },
-  computed: {
-    paddingClass() {
-      return `ui-card--padding-${this.padding}`
-    },
-    shadowClass() {
-      return this.shadow === 'none' ? '' : `ui-card--shadow-${this.shadow}`
-    },
-  },
-}
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  padding: { type: String, default: 'md' },
+  shadow: { type: String, default: 'sm' },
+  clickable: { type: Boolean, default: false },
+})
+
+const paddingClass = computed(() => `ui-card--padding-${props.padding}`)
+const shadowClass = computed(() => props.shadow === 'none' ? '' : `ui-card--shadow-${props.shadow}`)
 </script>
 
 <style scoped>

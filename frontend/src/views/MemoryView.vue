@@ -78,7 +78,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -90,81 +91,91 @@ import { fetchKnownGroups } from '../api/groups.js'
 import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory.js'
 import { toast } from '../toast.js'
 
-export default {
-  components: { UiPageHeader, UiCard, UiButton, UiTag, UiIcon, UiLoading, UiEmpty },
-  data: () => ({
-    groups: [], groupId: '', keyword: '',
-    memories: [], loading: false, error: null,
-    editing: null, editContent: '', editTags: '', editConf: 1.0,
-    newContent: '', newScope: 'group', newUserId: '', newTags: '',
-  }),
-  async mounted() {
-    try {
-      const d = await fetchKnownGroups()
-      this.groups = d.groups || []
-    } catch (e) {
-      this.error = `加载群组列表失败: ${e.message}`
-    }
-  },
-  methods: {
-    async load() {
-      if (!this.groupId) return
-      this.loading = true; this.error = null
-      try {
-        this.memories = await fetchMemories(this.groupId, this.keyword)
-      } catch (e) { this.error = e.message }
-      finally { this.loading = false }
-    },
-    startEdit(m) {
-      this.editing = m.id
-      this.editContent = m.content
-      this.editTags = m.tags.join(', ')
-      this.editConf = m.confidence
-    },
-    async saveEdit(m) {
-      try {
-        const conf = this.editConf === '' || isNaN(this.editConf) ? null : Number(this.editConf)
-        await updateMemory(this.groupId, m.id, {
-          content: this.editContent,
-          tags: this.editTags.split(',').map(t => t.trim()).filter(Boolean),
-          confidence: conf,
-        })
-        this.editing = null
-        toast('已保存')
-        await this.load()
-      } catch (e) { toast(e.message, 'error') }
-    },
-    async del(id) {
-      if (!confirm(`删除记忆 #${id}？`)) return
-      try {
-        await deleteMemory(this.groupId, id)
-        this.memories = this.memories.filter(m => m.id !== id)
-        toast('已删除')
-      } catch (e) { toast(e.message, 'error') }
-    },
-    async clearAll() {
-      if (!confirm(`清空群 ${this.groupId} 的全部记忆？`)) return
-      try {
-        const r = await clearAllMemories(this.groupId)
-        this.memories = []
-        toast(`已删除 ${r.deleted} 条`)
-      } catch (e) { toast(e.message, 'error') }
-    },
-    async addMemory() {
-      if (!this.newContent.trim()) { toast('内容不能为空', 'error'); return }
-      try {
-        await createMemory(this.groupId, {
-          content: this.newContent.trim(),
-          scope: this.newScope,
-          user_id: this.newUserId.trim() || null,
-          tags: this.newTags.split(',').map(t => t.trim()).filter(Boolean),
-        })
-        this.newContent = ''; this.newUserId = ''; this.newTags = ''
-        toast('已添加')
-        await this.load()
-      } catch (e) { toast(e.message, 'error') }
-    },
-  },
+const groups = ref([])
+const groupId = ref('')
+const keyword = ref('')
+const memories = ref([])
+const loading = ref(false)
+const error = ref(null)
+const editing = ref(null)
+const editContent = ref('')
+const editTags = ref('')
+const editConf = ref(1.0)
+const newContent = ref('')
+const newScope = ref('group')
+const newUserId = ref('')
+const newTags = ref('')
+
+onMounted(async () => {
+  try {
+    const d = await fetchKnownGroups()
+    groups.value = d.groups || []
+  } catch (e) {
+    error.value = `加载群组列表失败: ${e.message}`
+  }
+})
+
+async function load() {
+  if (!groupId.value) return
+  loading.value = true; error.value = null
+  try {
+    memories.value = await fetchMemories(groupId.value, keyword.value)
+  } catch (e) { error.value = e.message }
+  finally { loading.value = false }
+}
+
+function startEdit(m) {
+  editing.value = m.id
+  editContent.value = m.content
+  editTags.value = m.tags.join(', ')
+  editConf.value = m.confidence
+}
+
+async function saveEdit(m) {
+  try {
+    const conf = editConf.value === '' || isNaN(editConf.value) ? null : Number(editConf.value)
+    await updateMemory(groupId.value, m.id, {
+      content: editContent.value,
+      tags: editTags.value.split(',').map(t => t.trim()).filter(Boolean),
+      confidence: conf,
+    })
+    editing.value = null
+    toast('已保存')
+    await load()
+  } catch (e) { toast(e.message, 'error') }
+}
+
+async function del(id) {
+  if (!confirm(`删除记忆 #${id}？`)) return
+  try {
+    await deleteMemory(groupId.value, id)
+    memories.value = memories.value.filter(m => m.id !== id)
+    toast('已删除')
+  } catch (e) { toast(e.message, 'error') }
+}
+
+async function clearAll() {
+  if (!confirm(`清空群 ${groupId.value} 的全部记忆？`)) return
+  try {
+    const r = await clearAllMemories(groupId.value)
+    memories.value = []
+    toast(`已删除 ${r.deleted} 条`)
+  } catch (e) { toast(e.message, 'error') }
+}
+
+async function addMemory() {
+  if (!newContent.value.trim()) { toast('内容不能为空', 'error'); return }
+  try {
+    await createMemory(groupId.value, {
+      content: newContent.value.trim(),
+      scope: newScope.value,
+      user_id: newUserId.value.trim() || null,
+      tags: newTags.value.split(',').map(t => t.trim()).filter(Boolean),
+    })
+    newContent.value = ''; newUserId.value = ''; newTags.value = ''
+    toast('已添加')
+    await load()
+  } catch (e) { toast(e.message, 'error') }
 }
 </script>
 

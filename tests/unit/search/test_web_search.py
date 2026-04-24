@@ -3,13 +3,10 @@ from __future__ import annotations
 import json
 
 import plugins.web_search as web_search_module
-from plugins.tavily_search import TavilySearchResponse, TavilySearchResult
 from plugins.web_search import (
     SearchResponse,
     SearchResult,
     SearXNGSearchClient,
-    TavilySearchClient,
-    build_search_client,
     format_search_response,
 )
 
@@ -28,13 +25,13 @@ class FakeSearchHTTPResponse:
         return False
 
 
-def test_format_tavily_search_response():
+def test_format_search_response():
     reply = format_search_response(
-        TavilySearchResponse(
+        SearchResponse(
             query="QuickQuip",
             answer="这是一个 QQ 群聊机器人项目。",
             results=[
-                TavilySearchResult(
+                SearchResult(
                     title="QuickQuip README",
                     url="https://example.test/quickquip",
                     content="QuickQuip 是一个基于 NoneBot2 的 QQ 群聊机器人。",
@@ -45,23 +42,6 @@ def test_format_tavily_search_response():
     assert "联网搜索：QuickQuip" in reply
     assert "摘要：这是一个 QQ 群聊机器人项目。" in reply
     assert "https://example.test/quickquip" in reply
-
-
-class TestBuildSearchClient:
-    def test_defaults_to_tavily_without_envs(self, monkeypatch):
-        monkeypatch.delenv("SEARCH_BACKEND", raising=False)
-        monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
-        assert isinstance(build_search_client(), TavilySearchClient)
-
-    def test_searxng_base_url_implies_searxng(self, monkeypatch):
-        monkeypatch.delenv("SEARCH_BACKEND", raising=False)
-        monkeypatch.setenv("SEARXNG_BASE_URL", "http://127.0.0.1:8888")
-        assert isinstance(build_search_client(), SearXNGSearchClient)
-
-    def test_explicit_tavily_wins_over_searxng_base_url(self, monkeypatch):
-        monkeypatch.setenv("SEARCH_BACKEND", "tavily")
-        monkeypatch.setenv("SEARXNG_BASE_URL", "http://127.0.0.1:8888")
-        assert isinstance(build_search_client(), TavilySearchClient)
 
 
 async def test_searxng_request_and_parse(monkeypatch):

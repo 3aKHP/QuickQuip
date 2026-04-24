@@ -26,6 +26,13 @@ allow_prefix = true
 allow_at = true
 empty_prompt_reply = "请在触发指令或艾特后面补上想说的话。"
 
+# 自动联网判定：开启后模型会在需要最新信息时自行触发 search_web，
+# 搜索走项目内 SearXNG。search_max_calls_per_round 控制每次工具调用
+# 轮次中最多执行多少次搜索调用（1-32，默认 3）。
+[triggers.auto_search]
+enabled = false
+search_max_calls_per_round = 3
+
 [tools]
 enabled = []
 

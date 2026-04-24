@@ -5,13 +5,10 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'UiLoading',
-  props: {
-    text: { type: String, default: '加载中…' },
-  },
-}
+<script setup>
+defineProps({
+  text: { type: String, default: '加载中…' },
+})
 </script>
 
 <style scoped>

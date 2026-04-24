@@ -1,6 +1,4 @@
 from quickquip.search.tavily_search import (
-    TavilySearchClient,
-    TavilySearchError,
     TavilySearchResponse,
     TavilySearchResult,
     format_search_response,
@@ -8,8 +6,6 @@ from quickquip.search.tavily_search import (
 
 
 __all__ = [
-    "TavilySearchClient",
-    "TavilySearchError",
     "TavilySearchResponse",
     "TavilySearchResult",
     "format_search_response",

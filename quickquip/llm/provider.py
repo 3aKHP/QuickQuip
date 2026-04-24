@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import deque
 from dataclasses import dataclass, field
+import datetime
 import json
 import logging
 import os
@@ -31,6 +33,30 @@ _TRACE_FLAG_FILE: str = os.getenv("LLM_TRACE_FLAG_FILE", "")
 
 def _trace_active() -> bool:
     return bool(_TRACE_FLAG_FILE and os.path.exists(_TRACE_FLAG_FILE))
+
+
+_TRACE_LOG_LINES: deque[dict[str, object]] = deque(maxlen=200)
+
+
+def _record_trace(direction: str, provider_id: str, stream: bool, payload: str) -> None:
+    _TRACE_LOG_LINES.append({
+        "timestamp": datetime.datetime.now().isoformat(),
+        "direction": direction,
+        "provider_id": provider_id,
+        "stream": stream,
+        "payload": payload,
+    })
+
+
+def get_trace_entries(n: int = 50) -> list[dict[str, object]]:
+    items = list(_TRACE_LOG_LINES)
+    return items[-n:]
+
+
+def clear_trace_entries() -> int:
+    count = len(_TRACE_LOG_LINES)
+    _TRACE_LOG_LINES.clear()
+    return count
 
 
 class LLMProviderError(RuntimeError):
@@ -275,6 +301,7 @@ class BaseProviderClient:
                 f">>> REQUEST [{self.config.id}]\n"
                 + json.dumps(payload, ensure_ascii=False, indent=2)
             )
+            _record_trace("request", self.config.id, False, json.dumps(payload, ensure_ascii=False, indent=2))
 
         def _send() -> dict[str, Any]:
             try:
@@ -298,6 +325,7 @@ class BaseProviderClient:
                 f"<<< RESPONSE [{self.config.id}]\n"
                 + json.dumps(result, ensure_ascii=False, indent=2)
             )
+            _record_trace("response", self.config.id, False, json.dumps(result, ensure_ascii=False, indent=2))
         return result
 
     async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -310,6 +338,7 @@ class BaseProviderClient:
                 f">>> REQUEST (stream) [{self.config.id}]\n"
                 + json.dumps(payload, ensure_ascii=False, indent=2)
             )
+            _record_trace("request", self.config.id, True, json.dumps(payload, ensure_ascii=False, indent=2))
 
         def _stream() -> list[dict[str, Any]]:
             try:
@@ -358,6 +387,7 @@ class BaseProviderClient:
                 f"<<< RESPONSE (stream) [{self.config.id}]\n"
                 + json.dumps(result, ensure_ascii=False, indent=2)
             )
+            _record_trace("response", self.config.id, True, json.dumps(result, ensure_ascii=False, indent=2))
         return result
 
 

@@ -42,7 +42,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -53,61 +54,58 @@ import { fetchRules, updateRule } from '../api/rules.js'
 import { fetchKnownGroups } from '../api/groups.js'
 import { toast } from '../toast.js'
 
-export default {
-  components: { UiPageHeader, UiCard, UiButton, UiToggle, UiLoading, UiEmpty },
-  data: () => ({
-    loaded: false,
-    error: null,
-    disabled: {},
-    allRules: [],
-    allGroups: [],
-    selectedGroup: '',
-    newGroupId: '',
-  }),
-  async mounted() {
-    try {
-      const [rulesData, knownData] = await Promise.all([
-        fetchRules(),
-        fetchKnownGroups(),
-      ])
-      this.disabled = rulesData.disabled
-      this.allRules = rulesData.all_rules
-      const fromRules = Object.keys(rulesData.disabled)
-      const fromKnown = knownData.groups || []
-      this.allGroups = [...new Set([...fromKnown, ...fromRules])].sort()
-      this.loaded = true
-    } catch (e) {
-      this.error = e.message
+const loaded = ref(false)
+const error = ref(null)
+const disabled = ref({})
+const allRules = ref([])
+const allGroups = ref([])
+const selectedGroup = ref('')
+const newGroupId = ref('')
+
+onMounted(async () => {
+  try {
+    const [rulesData, knownData] = await Promise.all([
+      fetchRules(),
+      fetchKnownGroups(),
+    ])
+    disabled.value = rulesData.disabled
+    allRules.value = rulesData.all_rules
+    const fromRules = Object.keys(rulesData.disabled)
+    const fromKnown = knownData.groups || []
+    allGroups.value = [...new Set([...fromKnown, ...fromRules])].sort()
+    loaded.value = true
+  } catch (e) {
+    error.value = e.message
+  }
+})
+
+function isEnabled(rule) {
+  return !(disabled.value[selectedGroup.value] || []).includes(rule)
+}
+
+function addGroup() {
+  const gid = newGroupId.value.trim()
+  if (!gid || !/^\d+$/.test(gid)) return
+  if (!allGroups.value.includes(gid)) allGroups.value.push(gid)
+  if (!disabled.value[gid]) disabled.value[gid] = []
+  selectedGroup.value = gid
+  newGroupId.value = ''
+}
+
+async function toggle(rule) {
+  const nowEnabled = isEnabled(rule)
+  try {
+    await updateRule(selectedGroup.value, rule, !nowEnabled)
+    if (!disabled.value[selectedGroup.value]) disabled.value[selectedGroup.value] = []
+    if (nowEnabled) {
+      disabled.value[selectedGroup.value].push(rule)
+    } else {
+      disabled.value[selectedGroup.value] = disabled.value[selectedGroup.value].filter(r => r !== rule)
     }
-  },
-  methods: {
-    isEnabled(rule) {
-      return !(this.disabled[this.selectedGroup] || []).includes(rule)
-    },
-    addGroup() {
-      const gid = this.newGroupId.trim()
-      if (!gid || !/^\d+$/.test(gid)) return
-      if (!this.allGroups.includes(gid)) this.allGroups.push(gid)
-      if (!this.disabled[gid]) this.disabled[gid] = []
-      this.selectedGroup = gid
-      this.newGroupId = ''
-    },
-    async toggle(rule) {
-      const nowEnabled = this.isEnabled(rule)
-      try {
-        await updateRule(this.selectedGroup, rule, !nowEnabled)
-        if (!this.disabled[this.selectedGroup]) this.disabled[this.selectedGroup] = []
-        if (nowEnabled) {
-          this.disabled[this.selectedGroup].push(rule)
-        } else {
-          this.disabled[this.selectedGroup] = this.disabled[this.selectedGroup].filter(r => r !== rule)
-        }
-        toast(`${rule} 已${!nowEnabled ? '启用' : '禁用'}`)
-      } catch (e) {
-        toast(`操作失败：${e.message}`, 'error')
-      }
-    },
-  },
+    toast(`${rule} 已${!nowEnabled ? '启用' : '禁用'}`)
+  } catch (e) {
+    toast(`操作失败：${e.message}`, 'error')
+  }
 }
 </script>
 

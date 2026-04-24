@@ -30,20 +30,17 @@
   </nav>
 </template>
 
-<script>
+<script setup>
 import UiNavItem from '../ui/UiNavItem.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiIcon from '../ui/UiIcon.vue'
 
-export default {
-  name: 'AppNav',
-  components: { UiNavItem, UiButton, UiIcon },
-  props: {
-    items: { type: Array, required: true },
-    logoutDisabled: { type: Boolean, default: false },
-  },
-  emits: ['logout'],
-}
+defineProps({
+  items: { type: Array, required: true },
+  logoutDisabled: { type: Boolean, default: false },
+})
+
+defineEmits(['logout'])
 </script>
 
 <style scoped>

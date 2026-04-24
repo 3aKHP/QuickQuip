@@ -44,7 +44,7 @@
           <UiIcon name="FileText" :size="20" />
           <strong>{{ groupId }} / {{ selected }}</strong>
         </div>
-        <UiButton size="sm" icon="ArrowLeft" @click="selected = null; detail = null">返回</UiButton>
+        <UiButton size="sm" icon="ArrowLeft" @click="closeDetail">返回</UiButton>
       </div>
       <div v-if="detail" class="sum-body">{{ detail.content }}</div>
       <UiLoading v-else />
@@ -52,7 +52,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -63,45 +64,50 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import { fetchSummaryGroups, fetchSummaries, fetchSummaryDetail, deleteSummary } from '../api/summaries.js'
 import { toast } from '../toast.js'
 
-export default {
-  components: { UiPageHeader, UiCard, UiButton, UiTag, UiIcon, UiLoading, UiEmpty },
-  data: () => ({
-    groups: [], groupId: '',
-    list: [], loading: false, error: null,
-    selected: null, detail: null,
-  }),
-  async mounted() {
-    try {
-      this.groups = await fetchSummaryGroups()
-    } catch (e) {
-      this.error = `加载群组列表失败: ${e.message}`
-    }
-  },
-  methods: {
-    async loadList() {
-      if (!this.groupId) return
-      this.loading = true; this.error = null; this.selected = null; this.detail = null
-      try {
-        this.list = await fetchSummaries(this.groupId)
-      } catch (e) { this.error = e.message }
-      finally { this.loading = false }
-    },
-    async open(date) {
-      this.selected = date; this.detail = null
-      try {
-        this.detail = await fetchSummaryDetail(this.groupId, date)
-      } catch (e) { toast(e.message, 'error'); this.selected = null }
-    },
-    async del(date) {
-      if (!confirm(`删除 ${this.groupId} / ${date} 的总结？`)) return
-      try {
-        await deleteSummary(this.groupId, date)
-        this.list = this.list.filter(s => s.summary_date !== date)
-        if (this.selected === date) { this.selected = null; this.detail = null }
-        toast('已删除')
-      } catch (e) { toast(e.message, 'error') }
-    },
-  },
+const groups = ref([])
+const groupId = ref('')
+const list = ref([])
+const loading = ref(false)
+const error = ref(null)
+const selected = ref(null)
+const detail = ref(null)
+
+onMounted(async () => {
+  try {
+    groups.value = await fetchSummaryGroups()
+  } catch (e) {
+    error.value = `加载群组列表失败: ${e.message}`
+  }
+})
+
+async function loadList() {
+  if (!groupId.value) return
+  loading.value = true; error.value = null; selected.value = null; detail.value = null
+  try {
+    list.value = await fetchSummaries(groupId.value)
+  } catch (e) { error.value = e.message }
+  finally { loading.value = false }
+}
+
+async function open(date) {
+  selected.value = date; detail.value = null
+  try {
+    detail.value = await fetchSummaryDetail(groupId.value, date)
+  } catch (e) { toast(e.message, 'error'); selected.value = null }
+}
+
+async function del(date) {
+  if (!confirm(`删除 ${groupId.value} / ${date} 的总结？`)) return
+  try {
+    await deleteSummary(groupId.value, date)
+    list.value = list.value.filter(s => s.summary_date !== date)
+    if (selected.value === date) closeDetail()
+    toast('已删除')
+  } catch (e) { toast(e.message, 'error') }
+}
+
+function closeDetail() {
+  selected.value = null; detail.value = null
 }
 </script>
 

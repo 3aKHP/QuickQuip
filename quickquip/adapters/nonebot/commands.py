@@ -21,7 +21,7 @@ from quickquip.generation.service import generation_service
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
-from quickquip.search.web_search import WebSearchError, build_search_client, format_search_response
+from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
 from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 from quickquip.tieba.service import tieba_service
@@ -679,7 +679,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await search_cmd.finish("搜索词不能为空")
 
         try:
-            response = await build_search_client().search(query, topic=topic, max_results=5)
+            response = await SearXNGSearchClient().search(query, topic=topic, max_results=5)
         except WebSearchError as exc:
             await search_cmd.finish(f"联网搜索失败：{exc}")
         await search_cmd.finish(format_search_response(response))

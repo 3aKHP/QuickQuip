@@ -12,21 +12,18 @@
   </label>
 </template>
 
-<script>
-export default {
-  name: 'UiToggle',
-  props: {
-    modelValue: { type: Boolean, default: false },
-    disabled: { type: Boolean, default: false },
-    size: { type: String, default: 'md' }, // sm | md
-  },
-  emits: ['update:modelValue'],
-  computed: {
-    sizeClass() {
-      return `ui-toggle--${this.size}`
-    },
-  },
-}
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  modelValue: { type: Boolean, default: false },
+  disabled: { type: Boolean, default: false },
+  size: { type: String, default: 'md' },
+})
+
+defineEmits(['update:modelValue'])
+
+const sizeClass = computed(() => `ui-toggle--${props.size}`)
 </script>
 
 <style scoped>

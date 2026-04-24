@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-24
+
+### 新增
+
+- 搜索工具语义化重排：`search_web` 硬编码走 SearXNG，删除 `build_search_client()` 后端分发和 `SEARCH_BACKEND` 环境变量切换；Tavily 能力完全走 MCP 侧 `tavily_search` / `tavily_crawl` / `tavily_research` 细粒度工具
+- 自动联网判定：新增 `[triggers.auto_search]` 配置开关（`enabled` + `search_max_calls_per_round`），开启后 LLM 在需要最新信息时主动调用 `search_web`，不再依赖用户显式 `/search`
+- LLM 诊断工具：Web admin 新增"诊断"标签页，支持按 provider/model 发送样本请求并查看原始 JSON trace、`LLM_TRACE_FLAG_FILE` 开关与 trace 浏览、文本规则回归测试
+
+### 变更
+
+- 前端全部迁移到 `<script setup>` 语法（10 组件 + 7 视图），不再使用 Options API，为后续 TypeScript 迁移铺平
+
 ## [0.9.2] - 2026-04-23
 
 ### 新增

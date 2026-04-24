@@ -33,26 +33,25 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref } from 'vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 
-export default {
-  components: { UiCard, UiButton, UiIcon },
-  props: {
-    submitting: { type: Boolean, default: false },
-    error: { type: String, default: '' },
-  },
-  emits: ['submit'],
-  data: () => ({ password: '' }),
-  methods: {
-    submit() {
-      if (!this.password || this.submitting) return
-      this.$emit('submit', this.password)
-      this.password = ''
-    },
-  },
+const props = defineProps({
+  submitting: { type: Boolean, default: false },
+  error: { type: String, default: '' },
+})
+
+const emit = defineEmits(['submit'])
+
+const password = ref('')
+
+function submit() {
+  if (!password.value || props.submitting) return
+  emit('submit', password.value)
+  password.value = ''
 }
 </script>
 
