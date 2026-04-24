@@ -52,8 +52,8 @@ if TYPE_CHECKING:
 
 CONFIG_PATH = Path("config/llm.toml")
 DB_PATH = Path("data/llm.db")
-VOCAB_PATH = Path("dev/llm_about/vocab.yaml")
-IDENTITY_PATH = Path("dev/llm_about/identities.yaml")
+VOCAB_PATH = Path("llm_about/vocab.yaml")
+IDENTITY_PATH = Path("llm_about/identities.yaml")
 LLM_RULE_NAME = "llm_chat"
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_GROUP_STORED_CONVERSATION_MESSAGES = 20

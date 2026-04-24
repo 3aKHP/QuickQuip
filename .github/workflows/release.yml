@@ -57,6 +57,7 @@ jobs:
         run: |
           Copy-Item -Recurse quickquip staging\
           Copy-Item -Recurse plugins staging\
+          Copy-Item -Recurse llm_about staging\
           mkdir -p staging\frontend\dist
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
           Copy-Item -Recurse config staging\

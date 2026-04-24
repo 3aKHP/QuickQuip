@@ -66,9 +66,9 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
-      # LLM 身份与词汇索引（可选）。将你的 identities.yaml 和 vocab.yaml
-      # 放到 ./llm_about/ 目录下，然后取消下面一行注释：
-      # - ./llm_about:/app/dev/llm_about:ro
+      # 群友身份与黑话词表（可选）。将 llm_about/vocab.yaml.example 和
+      # llm_about/identities.yaml.example 复制为 .yaml 并编辑后，取消注释：
+      # - ./llm_about:/app/llm_about:ro
     restart: unless-stopped
 
   # ── Web 管理后台 ────────────────────────────────────────────────────────
@@ -87,9 +87,10 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config
-      - ./frontend/dist:/app/frontend/dist:ro
-      # LLM 身份索引（同上，可选）：
-      # - ./llm_about:/app/dev/llm_about:ro
+      # 群友身份（同上，可选）：
+      # - ./llm_about:/app/llm_about:ro
+      # 仅当需要覆盖镜像内置前端时取消注释：
+      # - ./frontend/dist:/app/frontend/dist:ro
     restart: unless-stopped
 
   # ── MCP Sidecar：Tavily 搜索（可选）─────────────────────────────────────

@@ -18,6 +18,19 @@ if not exist "config\generation.toml" (
     echo [首次运行] 复制 config\generation.toml.example -^> config\generation.toml
     copy "config\generation.toml.example" "config\generation.toml" >nul
 )
+:: Optional: copy llm_about templates for group identity & vocab features
+if not exist "llm_about\vocab.yaml" (
+    if exist "llm_about\vocab.yaml.example" (
+        echo [首次运行] 复制 llm_about\vocab.yaml.example -^> llm_about\vocab.yaml
+        copy "llm_about\vocab.yaml.example" "llm_about\vocab.yaml" >nul
+    )
+)
+if not exist "llm_about\identities.yaml" (
+    if exist "llm_about\identities.yaml.example" (
+        echo [首次运行] 复制 llm_about\identities.yaml.example -^> llm_about\identities.yaml
+        copy "llm_about\identities.yaml.example" "llm_about\identities.yaml" >nul
+    )
+)
 
 :: ── Resolve Python ───────────────────────────────────────────────────────
 set "_PYTHON="

@@ -22,6 +22,8 @@ frontend/node_modules/
 config/*.toml
 !config/*.toml.example
 dev/
+llm_about/*.yaml
+!llm_about/*.yaml.example
 tests/
 scripts/
 README.md
