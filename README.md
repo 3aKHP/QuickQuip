@@ -176,6 +176,23 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 笑点解析：......。令人忍俊不禁。
 ```
 
+### 🎨 多模态产出
+
+当前版本已把图片、语音、音乐生成统一收口到 `config/generation.toml`，并通过独立命令暴露：
+
+| 命令 | 说明 | 权限 |
+|------|------|------|
+| `/draw [模型] [--size 宽x高] [--quality 值] <描述>` | 图片生成，支持直接描述，也支持结合回复图片做参考生成 | 所有人 |
+| `/tts models` | 查看可用语音模型 | 所有人 |
+| `/tts voices [模型] [关键词]` | 查看当前 provider 返回的可用音色 | 所有人 |
+| `/tts [模型] [--voice 音色ID] <文本>` | 语音生成 | 所有人 |
+| `/music models` | 查看可用音乐模型 | 所有人 |
+| `/music lyrics [--title 标题] <主题或要求>` | 歌词生成 | 所有人 |
+| `/music lyrics edit [--title 标题] [--lyrics 现有歌词] <修改要求>` | 基于现有歌词编辑/续写；也可回复一条歌词文本后使用 | 所有人 |
+| `/music [模型] [--instrumental] [--title 标题] [--lyrics 歌词] <风格描述>` | 音乐生成；未提供歌词时会先自动写词再谱曲 | 所有人 |
+
+当前音乐链路只覆盖“纯文本入参”的 MiniMax 能力：歌词生成、纯音乐生成、基于歌词的歌曲生成。翻唱前处理、参考音频、`cover_feature_id` 等依赖音频输入的接口暂未接入。
+
 ### 📣 每日早中晚播报
 
 支持按群开启每日早报、午报、晚报。播报会复用当前群绑定的 LLM provider、model 和 persona，结合消息数、活跃用户、热词和代表性消息样本，生成一条适合直接发群的短播报；当消息过少或 LLM 失败时，会自动退回到模板播报。新闻位接口也已预留，后续可继续接入外部来源。
@@ -235,7 +252,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 | 复读跟读 | 8 次/分钟 | 3 次/分钟 |
 | 接龙回复 | 20 次/分钟 | 10 次/分钟 |
 
-自 0.8.0 起，每条规则可在 `[rate_limit_rules]` 里声明 `scope = "group" | "global"`（默认 `group`）。`scope="group"` 的规则按群独立分桶，群 A 的触发不消耗群 B 的预算；`scope="global"` 的规则（`llm_chat` / `web_search` / `tieba_random_post` / `tavily_search`）把所有群 + 私聊合并到同一个桶，用于保护跨会话共享的外部 API 和爬虫池。
+自 0.8.0 起，每条规则可在 `[rate_limit_rules]` 里声明 `scope = "group" | "global"`（默认 `group`）。`scope="group"` 的规则按群独立分桶，群 A 的触发不消耗群 B 的预算；`scope="global"` 的规则（`llm_chat` / `audio_gen` / `music_gen` / `web_search` / `tieba_random_post` / `tavily_search`）把所有群 + 私聊合并到同一个桶，用于保护跨会话共享的外部 API 和爬虫池。
 
 ---
 
@@ -248,6 +265,7 @@ QuickQuip/
 ├── .env                            # 环境变量配置（不纳入版本控制）
 ├── config/
 │   ├── llm.toml.example            # LLM 配置样例，复制为 llm.toml 后使用
+│   ├── generation.toml.example     # 多模态产出配置样例，复制为 generation.toml 后使用
 │   ├── chat_rules.toml.example     # 文字回复规则样例，复制为 chat_rules.toml 后使用
 │   └── personas.example/           # 人格定义样例目录，复制为 personas/ 后使用
 ├── frontend/                       # Web 管理后台前端（Vue 3 SPA）
@@ -263,6 +281,7 @@ QuickQuip/
 │   │   └── web/                    # Web 管理后台 FastAPI 应用与路由
 │   ├── chat/                       # 规则驱动聊天能力：时区、复读、接龙、统计、规则开关
 │   ├── common/                     # 通用基础设施：JSON 持久化、限流、去重、最近消息缓冲
+│   ├── generation/                 # 多模态产出配置、模型解析与 provider 调用
 │   ├── llm/                        # LLM 配置、运行时组件、provider、MCP、工具调用
 │   ├── search/                     # 联网搜索后端与兼容导出
 │   └── tieba/                      # 多贴吧配置、抓取、缓存与服务层
@@ -354,7 +373,18 @@ QuickQuip/
    TAVILY_API_KEY=your_tavily_key_here
    ```
 
-6. **可选：启用多贴吧随机搬运**
+6. **可选：启用图片生成**
+
+   复制 `config/generation.toml.example` 为 `config/generation.toml`，按其中注释填写图片/语音/音乐生成 provider、模型列表和默认模型。当前版本会优先读取 `generation.toml`；若文件不存在，图片部分仍兼容旧版 `llm.toml` 中的 `[image_generation]` 配置，便于平滑迁移。
+
+   当前版本已支持：
+
+   - `/draw [模型] [--size 宽x高] [--quality 值] <描述>`：图片生成
+   - `/tts [模型] [--voice 音色ID] <文本>`：语音生成（当前实现基于 MiniMax 同步 TTS）
+   - `/music [模型] [--instrumental] [--lyrics 歌词] <风格描述>`：音乐生成
+   - `/music lyrics <主题或要求>`：歌词生成；`/music lyrics edit <修改要求>` 支持基于现有歌词编辑/续写
+
+7. **可选：启用多贴吧随机搬运**
 
    安装 Playwright 依赖后，还需要安装浏览器：
 
@@ -379,7 +409,7 @@ QuickQuip/
    python dev/tools/tieba_login.py
    ```
 
-7. **可选：启动 Web 管理后台**
+8. **可选：启动 Web 管理后台**
 
    先在 `.env`（或云端的 `dev/.env`）里配置管理后台口令：
 
@@ -410,12 +440,12 @@ QuickQuip/
 
    - **统计 / 规则 / 群组** — 消息数、用户排行、规则触发 Top；按群启用/禁用任意规则；每日总结/播报群管理
    - **记忆 / 总结 / 对话** — 按群浏览与编辑 LLM 长期记忆；查阅/删除每日总结；按群浏览 LLM 对话历史（含私聊/归档，支持关键词过滤、游标翻页、按单条删除）
-   - **人格 / 群 LLM / 配置** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）；按群覆盖 provider/model/persona/前缀/历史条数等 9 个 runtime 字段；`config/llm.toml` 与 `config/chat_rules.toml` 多文件编辑器
+   - **人格 / 群 LLM / 配置** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）；按群覆盖 provider/model/persona/前缀/历史条数等 9 个 runtime 字段；`config/llm.toml`、`config/generation.toml` 与 `config/chat_rules.toml` 多文件编辑器
    - **限流 / 贴吧 / 词云** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）；贴吧帖子池浏览（同步状态/关键词搜索/图文详情）；词云生成（4 档时间窗、Top 词频排行、图片下载）
 
    前端使用 `vue-router` 4 的 hash 模式，深链接形如 `/ops/#/stats`，无需 nginx 端增加 SPA fallback 即可支持刷新和前进后退。
 
-8. **启动机器人**
+9. **启动机器人**
 
    ```bash
    python bot.py
@@ -471,6 +501,22 @@ LLM 相关配置放在 `config/llm.toml` 和 `config/personas/` 目录：
 | `[[providers]]` | `llm.toml` | provider ID、协议类型、base URL、模型列表、默认参数 |
 | `_shared.toml` | `personas/` | 自动注入所有人格的共享行为准则与风格规则 |
 | `<id>.toml` | `personas/` | 单个人格卡：id、display_name、system_prompt、style_prompt、scope（可选，见下）+ 自由扩展字段 |
+
+多模态产出配置放在 `config/generation.toml`：
+
+| 配置区块 | 文件 | 说明 |
+|------|------|------|
+| `[image]` | `generation.toml` | 图片生成总开关、默认模型、提示词黑名单 |
+| `[[image.providers]]` | `generation.toml` | 图片 provider：协议、base URL、API key 环境变量、超时 |
+| `[[image.providers.models]]` | `generation.toml` | 图片模型：展示名、模型 ID、尺寸/比例、质量、返回格式 |
+| `[audio]` | `generation.toml` | 语音生成总开关、默认模型、文本黑名单 |
+| `[[audio.providers]]` | `generation.toml` | 语音 provider：协议、base URL、API key 环境变量、超时 |
+| `[[audio.providers.models]]` | `generation.toml` | 语音模型：默认音色、采样率、码率、格式与语音风格参数 |
+| `[music]` | `generation.toml` | 音乐生成总开关、默认模型、文本黑名单 |
+| `[[music.providers]]` | `generation.toml` | 音乐 provider：协议、base URL、API key 环境变量、超时 |
+| `[[music.providers.models]]` | `generation.toml` | 音乐模型：采样率、码率、格式、输出格式与歌词优化参数 |
+
+`generation.toml` 不存在时，运行时仍会回退读取 `config/llm.toml` 中旧版 `[image_generation]` 段，方便迁移现有部署。
 
 联网搜索后端通过 `.env` 中的 `SEARCH_BACKEND` 控制：
 
@@ -567,6 +613,7 @@ quickquip/app/message_pipeline.py        ← 应用级消息管线与共享状�
   ├─ quickquip/chat/daily_briefing.py    ← 每日播报上下文构建、热词/活跃用户统计、群开关
   └─ quickquip/common/                   ← 限流、去重、最近消息缓冲、JSON 持久化
   │
+  ├─ quickquip/generation/               ← 多模态产出配置、模型解析、图片/语音/音乐 provider 调用
   ├─ quickquip/llm/                      ← LLM 配置、provider、MCP、tool loop、prompt 构建
   ├─ quickquip/llm/briefing.py           ← 每日播报生成（群人格、模型级联、失败回退）
   ├─ quickquip/llm/summarize.py          ← 每日总结生成（模型级联、截断、prompt 构建）
@@ -576,7 +623,7 @@ quickquip/app/message_pipeline.py        ← 应用级消息管线与共享状�
 
 普通规则消息的回复优先级从高到低仍然是：**复读 > 接龙 > 彩蛋规则 > 时区猜测**。每个环节均受群级规则开关控制，被禁用的规则会被跳过并尝试下一级。部分近义彩蛋规则会共享同一个限流桶，避免短时间内连续刷屏。每条回复在发送前都经过限流器检查。
 
-LLM、贴吧与联网搜索能力在目录上已经独立成子系统，便于后续继续细分 provider、存储、抓取器和工具桥接实现。每日总结单独维护消息收集层与 SQLite 摘要存储，与主会话上下文完全隔离。
+LLM、多模态产出、贴吧与联网搜索能力在目录上已经独立成子系统，便于后续继续细分 provider、存储、抓取器和工具桥接实现。每日总结单独维护消息收集层与 SQLite 摘要存储，与主会话上下文完全隔离。
 
 ---
 

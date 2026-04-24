@@ -56,6 +56,10 @@ Web admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工�
 
 把当前散落在 `tests/fixtures/stream_chunks.py` 的 SSE 样本扩成一套按 provider + model 分目录的真实 payload 库，每次 `quickquip/llm/provider.py` 改动必须跑通。目标是把 Gemini thought 泄漏、tool schema 字段兼容性这类"上生产才发现"的问题收回到 CI。驱动力不足前留这里，等下次类似 bug 触发再排期。
 
+### 本地 TTS 服务接入
+
+在 `generation.audio` 下补充对本地 HTTP TTS provider 的支持，让 `/tts` 除远端语音 API 外，也能调用本地语音服务作为 fallback 或独立模型来源。首期只覆盖轻量、短文本、固定音色场景。
+
 ### config/llm.toml 热重载
 
 v0.9.0 覆盖了 chat_rules + personas，`llm.toml` 仍然要求重启 bot。难点在 provider 重建时如何平滑处理 in-flight 请求 + MCP reconnect 顺序 + SQLite store 句柄迁移，需要先设计平滑切换协议再动手。当前重启成本可接受，不排优先级。
