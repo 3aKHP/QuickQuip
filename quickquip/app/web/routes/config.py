@@ -20,7 +20,12 @@ _CONFIG_FILES: dict[str, dict] = {
     "llm": {
         "filename": "llm.toml",
         "label": "LLM 配置",
-        "description": "模型、触发词、工具、MCP、人格装载",
+        "description": "文本对话模型、触发词、工具、MCP、人格装载",
+    },
+    "generation": {
+        "filename": "generation.toml",
+        "label": "多模态产出配置",
+        "description": "图片与语音生成配置；后续视频产出也将归入这里",
     },
     "chat_rules": {
         "filename": "chat_rules.toml",

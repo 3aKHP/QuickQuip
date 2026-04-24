@@ -19,6 +19,8 @@ _BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "audio_gen": {"global_limit": 10, "user_limit": 2, "scope": "global"},
+    "music_gen": {"global_limit": 4, "user_limit": 1, "scope": "global"},
     "tieba_random_post": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     "web_search": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     "tavily_search": {"global_limit": 6, "user_limit": 3, "scope": "global"},
