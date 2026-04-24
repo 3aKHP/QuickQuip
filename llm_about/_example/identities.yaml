@@ -1,0 +1,25 @@
+# ── QuickQuip 分群身份词表 ──────────────────────────────────────────────
+# 复制此文件夹为你的群号（如 123456/），按群编辑 identities.yaml。
+#
+# 此文件只需填写本群与全局身份表 不同 的条目。
+# - 全局回退：../identities.yaml
+# - 合并规则：同名 canonical_name 以本群为准
+# - 常见用途：同一人在不同群的别名不同，在此覆盖 aliases 和 note
+#
+# 格式与全局一致。
+
+people:
+  # - canonical_name: 张三
+  #   qq_ids:
+  #     - "1234567890"
+  #   aliases:
+  #     - 三哥
+  #     - 哈基三
+  #   note: 大部分以三字开头的称呼通常指张三。
+
+# special_accounts:
+#   - qq_id: "9998887776"
+#     canonical_name: Bot
+#     aliases:
+#       - 机器人
+#     note: 这是机器人自己的号。

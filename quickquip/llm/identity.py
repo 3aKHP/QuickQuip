@@ -186,6 +186,15 @@ class IdentityIndex:
         index._build_indexes()
         return index
 
+    def merge(self, other: "IdentityIndex") -> "IdentityIndex":
+        """Return a new IdentityIndex with *other* overriding/adding to *self*."""
+        merged: dict[str, IdentityEntry] = {e.canonical_name: e for e in self.entries}
+        for entry in other.entries:
+            merged[entry.canonical_name] = entry
+        result = IdentityIndex(entries=list(merged.values()))
+        result._build_indexes()
+        return result
+
     def _build_indexes(self) -> None:
         self.by_qq.clear()
         self.by_alias.clear()

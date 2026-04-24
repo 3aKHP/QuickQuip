@@ -108,6 +108,40 @@ class LLMService:
         self.config = load_llm_config(self.config_path)
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self.identities = IdentityIndex.from_file(self.identity_path)
+        self._group_vocabs: dict[str, VocabIndex] = {}
+        self._group_identities: dict[str, IdentityIndex] = {}
+
+    def _resolve_vocab(self, group_id: str) -> VocabIndex:
+        if not group_id:
+            return self.vocab
+        cache_key = str(group_id)
+        cached = self._group_vocabs.get(cache_key)
+        if cached is not None:
+            return cached
+        group_path = self.vocab_path.parent / cache_key / "vocab.yaml"
+        if group_path.exists():
+            group_vocab = VocabIndex.from_file(group_path)
+            merged = self.vocab.merge(group_vocab)
+        else:
+            merged = self.vocab
+        self._group_vocabs[cache_key] = merged
+        return merged
+
+    def _resolve_identities(self, group_id: str) -> IdentityIndex:
+        if not group_id:
+            return self.identities
+        cache_key = str(group_id)
+        cached = self._group_identities.get(cache_key)
+        if cached is not None:
+            return cached
+        group_path = self.identity_path.parent / cache_key / "identities.yaml"
+        if group_path.exists():
+            group_identities = IdentityIndex.from_file(group_path)
+            merged = self.identities.merge(group_identities)
+        else:
+            merged = self.identities
+        self._group_identities[cache_key] = merged
+        return merged
 
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
@@ -311,7 +345,7 @@ class LLMService:
 
     async def _tool_get_identity(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         query = str(arguments.get("query", "")).strip()
-        matches = self.identities.search(query, limit=5)
+        matches = self._resolve_identities(str(context.group_id)).search(query, limit=5)
         if not matches:
             return f"未找到与“{query}”匹配的身份信息。"
 
@@ -499,6 +533,8 @@ class LLMService:
         self.config = load_llm_config(self.config_path)
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self.identities = IdentityIndex.from_file(self.identity_path)
+        self._group_vocabs.clear()
+        self._group_identities.clear()
         self._mcp_dirty = True
         return self.config
 
@@ -1004,8 +1040,8 @@ class LLMService:
             prompt=prompt,
             memories=memories,
             tool_specs=tool_specs,
-            identities=self.identities,
-            vocab=self.vocab,
+            identities=self._resolve_identities(str(group_id)),
+            vocab=self._resolve_vocab(str(group_id)),
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
             auto_search_enabled=self.config.auto_search.enabled,
@@ -1125,6 +1161,7 @@ class LLMService:
         forward_image_urls: list[str] | None = None,
         sender_name: str = "",
         user_id: str = "",
+        group_id: str = "",
     ) -> str:
         return build_user_message_content(
             prompt=prompt,
@@ -1135,7 +1172,7 @@ class LLMService:
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
             max_quoted_message_chars=MAX_QUOTED_MESSAGE_CHARS,
-            identities=self.identities,
+            identities=self._resolve_identities(group_id),
             sender_name=sender_name,
             user_id=str(user_id),
         )
@@ -1148,6 +1185,7 @@ class LLMService:
         history: list[dict[str, str]],
         recent_messages: list[dict[str, str]] | None,
         chat_type: str = "group",
+        group_id: str = "",
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -1156,7 +1194,7 @@ class LLMService:
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
             chat_type=chat_type,
-            identities=self.identities,
+            identities=self._resolve_identities(group_id),
         )
 
     async def generate_defectify_reply(
@@ -1265,9 +1303,11 @@ class LLMService:
         recent_messages: list[dict[str, str]] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
+        group_id: str = "",
     ) -> list[dict[str, str]]:
         participants: list[dict[str, str]] = []
         seen_user_ids: set[str] = set()
+        identities = self._resolve_identities(group_id)
 
         def _push(raw_user_id: int | str | None, raw_sender_name: str = "", raw_canonical_name: str = "") -> None:
             user_key = str(raw_user_id or "").strip()
@@ -1280,7 +1320,7 @@ class LLMService:
                 return
             seen_user_ids.add(dedupe_key)
             if user_key:
-                identity = self.identities.resolve_user(user_key, sender_value)
+                identity = identities.resolve_user(user_key, sender_value)
                 if identity.is_registered:
                     canonical_value = identity.canonical_name or canonical_value
                     sender_value = sender_value or identity.sender_name or user_key
@@ -1405,6 +1445,7 @@ class LLMService:
             forward_image_urls=normalized_forward_image_urls,
             sender_name=sender_name,
             user_id=str(user_id),
+            group_id=str(chat_id),
         )[: self.config.runtime.max_prompt_chars]
         effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls, normalized_forward_image_urls)
         default_history_limit = self._default_history_limit(chat_type)
@@ -1422,6 +1463,7 @@ class LLMService:
             recent_messages=recent_messages,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
+            group_id=str(chat_id),
         )
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
@@ -1455,6 +1497,7 @@ class LLMService:
             history=history,
             recent_messages=recent_messages,
             chat_type=chat_type,
+            group_id=str(chat_id),
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -1500,7 +1543,7 @@ class LLMService:
         if not text:
             text = "模型没有返回可显示的文本。"
 
-        current_identity = self.identities.resolve_user(user_id, sender_name)
+        current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
         self.store.append_conversation_message(
             scope_key,
             user_id,

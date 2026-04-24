@@ -91,6 +91,14 @@ class VocabIndex:
 
         return matches
 
+    def merge(self, other: "VocabIndex") -> "VocabIndex":
+        """Return a new VocabIndex with *other* overriding/adding to *self*."""
+        merged_entries: dict[str, VocabEntry] = {e.name: e for e in self.entries}
+        for entry in other.entries:
+            merged_entries[entry.name] = entry
+        merged_glossary = {**self.glossary, **other.glossary}
+        return VocabIndex(entries=list(merged_entries.values()), glossary=merged_glossary)
+
     def find_glossary(self, text: str, limit: int = 3) -> list[tuple[str, str]]:
         normalized = text.strip()
         if not normalized:

@@ -36,8 +36,9 @@ dist/
 
 # Persistent data
 data/
-llm_about/*.yaml
+llm_about/**/*.yaml
 !llm_about/*.yaml.example
+!llm_about/_example/*.yaml
 config/llm.toml
 config/generation.toml
 config/chat_rules.toml

@@ -11,10 +11,14 @@
 - 搜索工具语义化重排：`search_web` 硬编码走 SearXNG，删除 `build_search_client()` 后端分发和 `SEARCH_BACKEND` 环境变量切换；Tavily 能力完全走 MCP 侧 `tavily_search` / `tavily_crawl` / `tavily_research` 细粒度工具
 - 自动联网判定：新增 `[triggers.auto_search]` 配置开关（`enabled` + `search_max_calls_per_round`），开启后 LLM 在需要最新信息时主动调用 `search_web`，不再依赖用户显式 `/search`
 - LLM 诊断工具：Web admin 新增"诊断"标签页，支持按 provider/model 发送样本请求并查看原始 JSON trace、`LLM_TRACE_FLAG_FILE` 开关与 trace 浏览、文本规则回归测试
+- Windows 懒人包：GitHub Actions 自动构建嵌入式 Python 3.11 + 前端 bundle + 项目源码的 zip 包，附 `启动.bat` 一键启动脚本，首次运行自动拷贝 `.example` 模板
+- GHCR Docker 镜像：多阶段生产镜像 `ghcr.io/3aKHP/quickquip`，附 `docker-compose.example.yml` 完整部署模板（NapCat + SearXNG + Bot + Web Admin + 可选 MCP sidecar）
+- 分群词表与身份覆盖：支持 `llm_about/{群号}/vocab.yaml` 和 `identities.yaml`，与全局文件自动合并，分群条目覆盖全局同名项
 
 ### 变更
 
 - 前端全部迁移到 `<script setup>` 语法（10 组件 + 7 视图），不再使用 Options API，为后续 TypeScript 迁移铺平
+- `llm_about` 从 `dev/` 迁移到仓库根目录，`vocab.yaml.example` 和 `identities.yaml.example` 作为公开模板；`_example/` 子目录提供分群模板
 
 ## [0.9.2] - 2026-04-23
 
