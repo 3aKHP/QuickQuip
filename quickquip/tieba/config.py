@@ -10,7 +10,7 @@ from urllib import parse
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
-from quickquip.common.env import PROJECT_ROOT, load_project_env_files as load_shared_project_env_files
+from quickquip.common.env import load_project_env_files as load_shared_project_env_files
 
 
 TIEBA_RULE_NAME = "tieba_random_post"
