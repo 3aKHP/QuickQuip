@@ -4,31 +4,37 @@
 
 ---
 
-## 下一版本（v1.0）—— 类型安全与 LLM 自主性
+## 下一版本（v1.0.1）—— TypeScript 全面迁移
 
-### 前端完全迁移到 TypeScript（本版本主轴）
+### 前端 TypeScript 化（本版本主轴）
 
 - **API 类型**：用 `openapi-typescript` 从 FastAPI 的 `/openapi.json` 自动生成，消除前后端 shape 漂移
-- **视图统一**：把剩余的 Options API 视图（Stats / Rules / Groups / Memory / Summary / Config / Login）顺手迁到 `<script setup>`，避免 TS 下 Options API 的 `this` 类型麻烦
 - **构建解耦**：`npm run build` 保持 `vite build`（不带 vue-tsc），`npm run type-check` 独立；CI 和 pre-push hook 跑 type-check，`dev/deploy-v4.ps1` 热路径零增量
 - **严格模式**：启用 `strict: true`，一次性清掉所有隐性 any
 - 暂不引入 zod 等运行时校验层，待真正遇到后端 shape 不匹配的 bug 再考虑
 
+---
+
+## v1.0.0（已完成）—— 类型安全与 LLM 自主性（第一阶段）
+
+### 前端 Options API 迁移
+
+- 10 组件 + 7 视图全部迁移到 `<script setup>`，为 TS 化铺平
+- 零 Options API 残留
+
 ### 自动联网判定
 
-在独立 `[triggers.auto_search]` 开关下，让模型在需要最新信息时自行触发 `search_web`，不再依赖用户显式 `/search`。联网结果继续与长期记忆严格隔离。
+- 新增 `[triggers.auto_search]` 配置开关（`enabled` + `search_max_calls_per_round`）
+- 开启后 LLM 自行判断联网时机，不再依赖用户显式 `/search`
 
-顺手做一次搜索工具语义化重排：现在原生 `search_web` 通过 `SEARCH_BACKEND` 环境变量在 SearXNG / Tavily 间二选一，对 LLM 是不透明的 either/or；同时 Tavily MCP sidecar 又把 `tavily_search` / `tavily_crawl` / `tavily_research` 以细粒度工具暴露出来。本版把原生 `search_web` 硬编码走 SearXNG（免费快速元搜索），删掉 `build_search_client()` 的 backend 分发，让 Tavily 能力完全走 MCP 侧的细分工具。工具名就是语义，LLM 直接按场景选，不再依赖 env 切换。
+### 搜索工具语义化重排
+
+- `search_web` 硬编码走 SearXNG，删除 `build_search_client()` 后端分发和 `SEARCH_BACKEND` 环境变量切换
+- Tavily 能力完全走 MCP 侧 `tavily_search` / `tavily_crawl` / `tavily_research`
 
 ### LLM 诊断工具化
 
-v0.9.0 阶段排 Gemini thought 泄漏和 schema 兼容性 bug 全靠临时写探针脚本 + 手工捕获请求/响应 JSON。把这类工具沉淀成 web admin 的"诊断"标签页：
-
-- 按 provider/model 触发一次样本请求（系统 prompt + 测试 user prompt 可配置），保存原始 JSON 供对着 `_parse_candidate` / `_assemble_stream_response` 逻辑目视
-- `LLM_TRACE_FLAG_FILE` 的 on/off 开关 + 最近 N 条 trace 浏览（复用现有 `_trace_log` 机制）
-- 按规则/persona 挑几个"典型触发样本"跑回归，直接在浏览器看命中与否
-
-下次类似 bug 出现时不用再现场拼脚本。
+- Web admin 新增"诊断"标签页：样本请求 + 原始 JSON trace、`LLM_TRACE_FLAG_FILE` 开关与 trace 浏览、文本规则回归测试
 
 ---
 

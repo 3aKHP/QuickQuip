@@ -10,15 +10,71 @@ env:
 
 jobs:
   tests:
-    # Intentionally keeps run-frontend=true (default) so tag pushes re-verify
-    # the frontend build before a release is cut.
     uses: ./.github/workflows/_tests.yml
     with:
       python-versions: '["3.12"]'
 
+  lazy-package:
+    name: Build Windows Lazy Package
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Download embedded Python 3.11
+        run: |
+          curl -L -o python-embed.zip https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
+          7z x python-embed.zip -ostaging\python
+
+      - name: Enable pip in embedded Python
+        run: |
+          (Get-Content staging\python\python311._pth) -replace '#import site', 'import site' | Set-Content staging\python\python311._pth
+          curl -L -o staging\get-pip.py https://bootstrap.pypa.io/get-pip.py
+          staging\python\python.exe staging\get-pip.py --no-warn-script-location
+
+      - name: Install Python dependencies
+        run: staging\python\python.exe -m pip install --no-warn-script-location -r requirements.txt
+        env:
+          PIP_NO_CACHE_DIR: "1"
+
+      - name: Copy project files
+        run: |
+          Copy-Item -Recurse quickquip staging\
+          Copy-Item -Recurse plugins staging\
+          mkdir -p staging\frontend\dist
+          Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
+          Copy-Item -Recurse config staging\
+          Copy-Item bot.py web_api.py 启动.bat staging\
+          mkdir staging\data
+
+      - name: Create release zip
+        run: 7z a QuickQuip-${{ github.ref_name }}-windows-x64.zip .\staging\*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazy-package
+          path: QuickQuip-${{ github.ref_name }}-windows-x64.zip
+
   release:
     name: Create Release
-    needs: tests
+    needs: [tests, lazy-package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -33,6 +89,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Download lazy package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lazy-package
+
       - name: Extract release notes from CHANGELOG
         run: python scripts/ci/extract_release_notes.py "${{ github.ref_name }}"
 
@@ -41,3 +102,4 @@ jobs:
         with:
           body_path: release_notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
+          files: QuickQuip-*.zip
