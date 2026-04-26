@@ -414,7 +414,7 @@ async def test_auto_memory_extraction_swallows_judge_errors(
         group_id=1003,
         user_id=2002,
         sender_name="n",
-        prompt="你好",
+        prompt="你好，请介绍一下我自己的特点",
         recent_messages=[],
     )
     pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -468,7 +468,7 @@ async def test_auto_memory_per_chat_override_beats_global_default(
         group_id=1005,
         user_id=2002,
         sender_name="n",
-        prompt="hi",
+        prompt="我最近在学编程开发",
         recent_messages=[],
     )
     pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]

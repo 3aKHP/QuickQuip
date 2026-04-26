@@ -81,6 +81,54 @@ DEFAULT_ENABLED_TOOLS = [
 DEFECTIFY_RULE_NAME = "llm_defectify"
 DEFECTIFY_MAX_OUTPUT_TOKENS = 512
 
+# ── auto-memory extraction ──────────────────────────────────────────
+
+_AUTO_MEMORY_MIN_USER_CHARS = 8
+_AUTO_MEMORY_MIN_CONFIDENCE = 0.65
+
+_AUTO_MEMORY_DEFAULT_PROMPT = (
+    "你是一个群聊记忆助手。你的任务是从群聊对话中提取关于发言者的**稳定长期事实**。\n"
+    "\n"
+    "值得记住的内容：\n"
+    "- 身份信息：职业、专业、所在城市、年龄段\n"
+    "- 偏好与兴趣：喜欢或讨厌的事物、爱好、习惯用语\n"
+    "- 能力与经历：掌握的技能、做过的事、个人经历\n"
+    "- 群内角色：潜水党、话痨、管理者、某种群内梗的当事人\n"
+    "\n"
+    "不要记住的内容：\n"
+    "- 一次性闲聊、寒暄、吐槽、搞笑段子\n"
+    "- 临时对话话题（如「今天吃什么」）\n"
+    "- 对话中的假设、玩笑、反话、玩梗\n"
+    "- 无法确定归属于发言者本人的内容\n"
+    "\n"
+    "对每条事实给出置信度（0.0-1.0）：\n"
+    "- 0.9+：发言者明确说出的个人事实（如「我是一名程序员」）\n"
+    "- 0.7-0.9：从对话中高度合理推断（如多次提到写代码→可能是程序员）\n"
+    "- 0.5-0.7：可能的推断，但不完全确定\n"
+    "- 低于 0.5：不应提取\n"
+    "\n"
+    "只回复 JSON，格式为：\n"
+    '{"memories": [{"content": "事实内容", "confidence": 0.9}]}\n'
+    "没有值得记住的内容时回 {\"memories\": []}\n"
+    "每条事实不超过 40 字。"
+)
+
+
+def _is_duplicate_memory(new_content: str, existing_contents: list[str]) -> bool:
+    """Check character-level overlap with existing memories; skip if >60% shared."""
+    new_chars = set(new_content)
+    if len(new_chars) < 3:
+        return True  # too short to be meaningful
+    for old in existing_contents:
+        old_chars = set(old)
+        if not old_chars:
+            continue
+        overlap = len(new_chars & old_chars) / len(new_chars)
+        if overlap > 0.6:
+            return True
+    return False
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1149,29 +1197,27 @@ class LLMService:
         user_text: str,
         assistant_text: str,
     ) -> None:
-        """Conservative auto-memory extraction (runs as a background task).
+        """Extract long-term facts about the speaker from an LLM conversation turn.
 
-        Swallows every exception; failures must not impact the user-visible reply.
-        Only writes when the judge returns a non-empty ``memories`` array.
+        Runs as a background task; swallows every exception so failures never
+        impact the user-visible reply.  Only writes when the judge returns
+        non-empty results above the confidence threshold.
         """
         try:
-            if not (user_text.strip() or assistant_text.strip()):
+            if not (user_text.strip() and assistant_text.strip()):
                 return
-            default_prompt = (
-                "以下是一段对话。请只提取关于发言者的稳定长期事实"
-                "（偏好 / 身份 / 正在进行的事），忽略闲聊、寒暄、一次性事件。"
-                "只回复 JSON，格式为 {\"memories\": [\"事实1\", \"事实2\"]}；"
-                "没有值得记住的内容时回 {\"memories\": []}。每条事实不超过 40 字。"
-            )
+            if len(user_text.strip()) < _AUTO_MEMORY_MIN_USER_CHARS:
+                return
+
             judge_prompt = (
                 self.config.runtime.auto_memory_prompt.strip()
-                or default_prompt
+                or _AUTO_MEMORY_DEFAULT_PROMPT
             )
             full_prompt = (
                 f"{judge_prompt}\n\n"
-                f"发言者：{sender_name} (user_id={user_id})\n"
-                f"用户消息：{user_text}\n"
-                f"助手回复：{assistant_text}"
+                f"群友名：{sender_name}\n"
+                f"TA 的发言：{user_text}\n"
+                f"你的回复：{assistant_text}"
             )
             raw = await self.quick_judge(
                 full_prompt,
@@ -1181,9 +1227,31 @@ class LLMService:
             memories = data.get("memories", [])
             if not isinstance(memories, list):
                 return
+
+            existing_contents = [
+                str(m.get("content", ""))
+                for m in self.store.search_memories(
+                    scope_key, user_id=str(user_id), query="", limit=30,
+                )
+            ]
+            stored_count = 0
             for item in memories:
-                content = str(item).strip()
-                if not content:
+                if isinstance(item, str):
+                    content = item.strip()
+                    confidence = 1.0
+                elif isinstance(item, dict):
+                    content = str(item.get("content", "")).strip()
+                    try:
+                        confidence = float(item.get("confidence", 0.5))
+                    except (TypeError, ValueError):
+                        confidence = 0.5
+                else:
+                    continue
+                if not content or len(content) < 4:
+                    continue
+                if confidence < _AUTO_MEMORY_MIN_CONFIDENCE:
+                    continue
+                if _is_duplicate_memory(content, existing_contents):
                     continue
                 self.store.add_memory(
                     scope_key,
@@ -1191,8 +1259,12 @@ class LLMService:
                     scope="group",
                     user_id=user_id,
                     source="auto",
+                    confidence=confidence,
                 )
-            if memories:
+                existing_contents.append(content)
+                stored_count += 1
+
+            if stored_count:
                 self.store.prune_memories(
                     scope_key,
                     min(
