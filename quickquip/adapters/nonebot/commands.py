@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import hashlib
+import logging
 import random
 import re
 import shlex
@@ -25,6 +26,8 @@ from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, for
 from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 from quickquip.tieba.service import tieba_service
+
+logger = logging.getLogger(__name__)
 
 
 def _is_private_chat(event) -> bool:
@@ -1435,10 +1438,15 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         system_prompt = "\n\n".join(system_parts)
 
         now = time()
-        memories_raw, all_msgs = await asyncio.gather(
-            asyncio.to_thread(llm_service.store.search_memories, str(group_id), str(target_user_id), target_name, 8),
-            asyncio.to_thread(daily_collector.read_window, group_id, now - 30 * 86400, now),
-        )
+        try:
+            memories_raw, all_msgs = await asyncio.gather(
+                asyncio.to_thread(llm_service.store.search_memories, str(group_id), str(target_user_id), target_name, 8),
+                asyncio.to_thread(daily_collector.read_window, group_id, now - 7 * 86400, now),
+            )
+        except Exception:
+            logger.exception("profile data collection failed for group=%s user=%s", group_id, target_user_id)
+            await profile_cmd.finish("收集用户数据时出错，请稍后重试")
+
         memories = [m["content"] for m in memories_raw if m.get("content")]
         samples = [
             m["text"][:80]
@@ -1455,8 +1463,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
                 recent_samples=samples,
                 llm_config=llm_service.config,
                 system_prompt=system_prompt,
-                default_provider_id=provider.id,
-                default_model=effective_model,
+                provider_id=provider.id,
+                model=effective_model,
             )
         except LLMProviderError as exc:
             await profile_cmd.finish(f"人物志生成失败：{exc}")
