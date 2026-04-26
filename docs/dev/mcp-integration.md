@@ -66,13 +66,11 @@ docker run -i --rm ...
 
 这会显著放大权限范围。
 
-当前项目为了适配云端 DOOD，已经在 `dev/docker-compose.yml` 中默认挂载 Docker Socket，并在 `dev/Dockerfile` 中安装 Docker CLI。
+`docker` transport 需要在容器内安装 Docker CLI 并挂载 `/var/run/docker.sock`，这会放大权限范围，仅适合开发环境或可信宿主机。
 
-这意味着：
+生产部署推荐走纯 sidecar 模式：在 `docker-compose.yml` 中将 MCP server 作为独立 service 跑在同一 compose 网络，bot 通过 `transport = "sse"` 或 `transport = "http"` 直连。代码中的四种 transport 均已完整实现，生产无需依赖 Docker socket。
 
-- `quickquip` 容器可以向宿主 Docker daemon 发起 `docker run -i --rm ...`
-- GitHub / Tavily / arXiv 这类 Docker 型 MCP server 可以直接按需拉起
-- 权限边界比纯 HTTP API 更大，部署时应只在可信宿主机上使用
+当前生产环境已采用此模式——MCP server（tavily、fetch 等）以 sidecar 容器形式运行，经 compose 默认网络暴露 SSE 端点。
 
 ---
 

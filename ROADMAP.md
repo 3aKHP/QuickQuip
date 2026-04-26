@@ -2,71 +2,70 @@
 
 本文件记录 QuickQuip 的演进方向，按版本锁定近期 scope，中远期按优先级分层。
 
----
-
-## v1.0.1（已完成）—— TypeScript 全面迁移
-
-### 前端 TypeScript 化（本版本主轴）
-
-- **API 类型**：用 `openapi-typescript` 从 FastAPI 的 `/openapi.json` 自动生成，消除前后端 shape 漂移
-- **构建解耦**：`npm run build` 保持 `vite build`（不带 vue-tsc），`npm run type-check` 独立；CI 和 pre-push hook 跑 type-check，`dev/deploy-v4.ps1` 热路径零增量
-- **严格模式**：启用 `strict: true`，一次性清掉所有隐性 any
-- 暂不引入 zod 等运行时校验层，待真正遇到后端 shape 不匹配的 bug 再考虑
-
-### 懒人包 WebView 窗口化
-
-- 新增 `webview_launcher.py`：基于 pywebview 的原生 WebView2 窗口
-- `启动.bat` 优先使用 WebView，pywebview 未安装时回落浏览器
-- pywebview 在 release workflow 中单独安装（不进入 requirements.txt 以免污染 Linux Docker 构建）
+> 已完成的版本内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
-## v1.0.0（已完成）—— 类型安全与 LLM 自主性（第一阶段）
+## v1.2 — LLM 记忆重做 + 多模态理解
 
-### 前端 Options API 迁移
+### 自动记忆抽取重做
 
-- 10 组件 + 7 视图全部迁移到 `<script setup>`，为 TS 化铺平
-- 零 Options API 残留
+当前 `quickquip/llm/store.py` 中已有基本的自动记忆抽取实现，但抽取质量过低，实际处于不可用状态。需要对抽取 prompt、触发时机、候选消息筛选（只从 LLM 已触发的对话中抽取）、置信度阈值、冲突合并策略进行全面重做，目标是让抽取结果在群聊中达到"不需要人工 `/remember` 也能自然积累有用记忆"的水平。
 
-### 自动联网判定
+### 多模态理解升级
 
-- 新增 `[triggers.auto_search]` 配置开关（`enabled` + `search_max_calls_per_round`）
-- 开启后 LLM 自行判断联网时机，不再依赖用户显式 `/search`
+当前 LLM 多模态能力仅限于图片理解（单次最多 3 张、5MB 限制）。v1.2 扩展至：
+- 语音消息转文字（通过 `/tts` 对应的语音 provider 或独立 ASR API），转录结果注入 LLM 上下文
+- 贴吧帖子内容自动摘要（图片 + 文字综合理解，而非当前纯文字截断）
+- 考虑接入视频关键帧提取（实验性）
 
-### 搜索工具语义化重排
+### `/profile` 修复
 
-- `search_web` 硬编码走 SearXNG，删除 `build_search_client()` 后端分发和 `SEARCH_BACKEND` 环境变量切换
-- Tavily 能力完全走 MCP 侧 `tavily_search` / `tavily_crawl` / `tavily_research`
+`/profile @某人` 当前被阻塞而实际不可用（疑似消息量或 prompt 构建阶段的 bug）。需要定位根因并修复，确保能稳定产出可用的群友人物志。
 
-### LLM 诊断工具化
+### `/music` 合并转发
 
-- Web admin 新增"诊断"标签页：样本请求 + 原始 JSON trace、`LLM_TRACE_FLAG_FILE` 开关与 trace 浏览、文本规则回归测试
+`/music` 当前先自动生成歌词再谱曲，歌词文本经常刷屏。需要复用每日播报已有的合并转发消息功能，将歌词以合并转发的形式发送（而非直接逐条发送），体验对齐 `/briefing now`。
 
----
+### 配置文件去冗余重构
 
-## v0.11+ / 未定版本
-
-### MCP 工具接口专项升级
-
-摆脱当前 `transport = "docker"` + `mount_docker_socket = true` 的 DooD 方案。候选方向：优先使用原生 stdio（对只发 docker 镜像的上游 server 用轻量封装代替），评估 HTTP/SSE transport 的可用性，必要时自建常驻 RPC 代理。目标是权限收敛 + 配置简化 + 启停更清晰。
-
-### 定时任务看板
-
-把 `SCHEDULED_MESSAGES` / `daily_summary` / `daily_briefing` / 贴吧同步等定时任务统一到 web admin 的一个 tab，列出 cron 下一次执行时间、最近运行结果、失败堆栈。
-
-### MCP server 状态看板
-
-Web admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工具清单、最近调用失败。与 MCP 接口升级互补。
-
-### 群内名言录
-
-引用一条消息后发送 `/quote` 收藏，存入本群名言库；`/quote random` 随机翻出一条。纯规则驱动，可选与 LLM 结合做"以 persona 口吻点评"。
-
-> 已在 v0.9.x 增量更新里排期（与 `/find` 一起），该条保留作为交叉引用。
+当前生产环境配置文件（`llm.toml`、`chat_rules.toml`、`generation.toml`）存在大量冗余与重复声明——例如同一 base_url 和 api_key_env 在多个 provider 间反复出现。目标是在保持 TOML 配置兼容性的前提下，引入配置继承、默认值覆盖和模板引用机制，减少复制粘贴维护成本。
 
 ### Provider 兼容性回归测试库
 
-把当前散落在 `tests/fixtures/stream_chunks.py` 的 SSE 样本扩成一套按 provider + model 分目录的真实 payload 库，每次 `quickquip/llm/provider.py` 改动必须跑通。目标是把 Gemini thought 泄漏、tool schema 字段兼容性这类"上生产才发现"的问题收回到 CI。驱动力不足前留这里，等下次类似 bug 触发再排期。
+`tests/fixtures/stream_chunks.py` 已覆盖 OpenAI/Claude/Gemini 共 3 个 provider 的 8 个场景（text/tool/reasoning/thought_leak）。目标是扩成按 provider + model 分目录的真实 payload 库，每次 `provider.py` 改动跑通全量，把 DeepSeek reasoning_content 这类"上生产才发现"的协议兼容性问题收回到 CI。
+
+---
+
+## v1.3 — 群互动游戏化 + Web Admin 升级
+
+### 互动游戏扩展
+
+`ChainGameManager` 已经是通用引擎，支持捕获组和 OR 候选匹配，`config/chat_rules.toml` 的 `[[chain_games]]` 配置槽位已预留。v1.3 在引擎上配置接歌词、数字炸弹、猜谜等游戏类型，加入 `/game start <类型>` 入口和跨会话持久化的积分/排行榜。当前仅内置 good_girl_chain，示例仍为注释状态。
+
+### 节日自动化
+
+结合 `config/chat_rules.toml` 的定时消息能力与 persona 系统，在指定节日（春节、中秋、元旦等）自动切换 bot 应景言行：节日当天注入对应 system prompt 附录、定时发送 persona 口吻的节日问候。管理员可自定义节日日期和行为。
+
+### 前端美术设计升级
+
+当前 Web Admin 前端处于功能可用但缺少设计感的阶段——纯色面板、无动画过渡、排版密度不均。v1.3 对整体 UI 进行设计升级：统一配色/字体/间距体系、卡片化统计视图、过渡动画、暗色模式支持、移动端响应式适配。
+
+### Web Admin 操作审计
+
+当前所有配置修改（TOML 编辑器、群组管理、记忆编辑、规则开关）均无操作记录。v1.3 新增审计日志模块：记录操作人、时间、操作类型、变更前后内容摘要，Web Admin 新 tab 可浏览和过滤。为后续回滚和排障提供依据。
+
+### 定时任务看板
+
+把 `daily_summary` / `daily_briefing` / 贴吧同步 / `SCHEDULED_MESSAGES` 等定时任务统一到 Web Admin 的一个 tab，列出 cron 下一次执行时间、最近运行结果、失败堆栈。
+
+### MCP server 状态看板
+
+Web Admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工具清单、最近调用失败。当前 `/llm mcp` 命令和 `/llm health` 已提供文本查询能力，缺少可视化集中看板。
+
+---
+
+## v1.4+ / 未定版本
 
 ### 本地 TTS 服务接入
 
@@ -74,19 +73,19 @@ Web admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工�
 
 ### config/llm.toml 热重载
 
-v0.9.0 覆盖了 chat_rules + personas，`llm.toml` 仍然要求重启 bot。难点在 provider 重建时如何平滑处理 in-flight 请求 + MCP reconnect 顺序 + SQLite store 句柄迁移，需要先设计平滑切换协议再动手。当前重启成本可接受，不排优先级。
-
-### 互动游戏扩展
-
-`ChainGameManager` 已经是通用引擎，支持捕获组和 OR 候选匹配。可以通过 `chat_rules.toml` 的 `[[chain_games]]` 配置更多游戏类型（接歌词、接成语、数字接龙），并考虑加入跨会话持久化的积分/排行榜。
+v0.9.0 覆盖了 chat_rules + personas，`/llm reload` 可重读 llm.toml 并重建 MCP 连接，但 provider 客户端不主动重建（惰性创建）。难点在 provider 重建时如何平滑处理 in-flight 请求 + MCP reconnect 顺序 + SQLite store 句柄迁移，需要先设计平滑切换协议再动手。当前重启成本可接受，不排优先级。
 
 ### 并发安全加固
 
-为 `repeat_detector`、`stats_tracker`、`good_girl_chain` 等单例的关键路径添加 `asyncio.Lock`，消除高并发场景下的竞态风险。详见 `dev/docs/OPTIMIZATION_BACKLOG.md`。
+已为 3 个模块的关键路径添加锁（`quickquip/llm/service.py:106` MCP 初始化、`quickquip/tieba/service.py:28` 贴吧同步、`quickquip/app/web/auth.py:32` 登录防并发）。ROADMAP 原定目标的 `repeat_detector`、`stats_tracker`、`good_girl_chain` / `chain_game` 四个模块的 `OrderedDict` 状态字典仍无同步原语保护，在 NoneBot 异步并发处理多群消息时存在竞态风险（CPython GIL 在单线程事件循环下提供一定保护，实际触发概率较低）。
 
 ### 测试覆盖补充
 
-测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上逐步补充并发安全测试、模板渲染负例测试、前端组件测试（TS 迁移完成后引入 Vitest）和性能基准测试。
+测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上逐步补充并发安全测试、模板渲染负例测试、前端组件测试（TS 严格模式迁移已 @ v1.0.1 完成，引入 Vitest 的前提条件已成熟）和性能基准测试。
+
+### Provider 健康检查与自动故障转移
+
+`quickquip/llm/health.py` 已实现 10 项单次检查 + provider 探活延迟测量。下一步可考虑定时自检 + 多 provider 健康排行 + 故障自动切换，使 `/llm use` 的手动切换升级为半自动降级。
 
 ---
 
@@ -95,6 +94,12 @@ v0.9.0 覆盖了 chat_rules + personas，`llm.toml` 仍然要求重启 bot。难
 ### LLM 主动发言
 
 冷场检测：群内超过 N 小时无消息且处于活跃时段时，bot 主动发一条话题引子（从词云高频词、每日总结或名言录取材）。触发条件和冷却时间需严格配置，避免骚扰。
+
+> 风险较高：误判冷场或话题不合适容易产生骚扰感，短期内不排入版本。
+
+### 群周报 / 月报
+
+从每日总结升级为更丰富的长周期聚合：热词趋势、活跃榜/新人榜、本群大事记。技术可行但群聊消息量大、生成成本高（需处理数万条消息的 LLM 上下文窗口），先留远期评估。
 
 ### 平台适配扩展
 
