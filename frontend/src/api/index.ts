@@ -16,6 +16,24 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler
 }
 
+function formatErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map(item => {
+      if (typeof item === 'string') return item
+      if (typeof item === 'object' && item !== null) {
+        const record = item as Record<string, unknown>
+        const loc = Array.isArray(record.loc) ? record.loc.join('.') : ''
+        const msg = typeof record.msg === 'string' ? record.msg : JSON.stringify(record)
+        return loc ? `${loc}: ${msg}` : msg
+      }
+      return String(item)
+    }).join('; ')
+  }
+  if (typeof detail === 'object' && detail !== null) return JSON.stringify(detail)
+  return String(detail)
+}
+
 async function parseResponse(res: Response) {
   if (res.status === 401) {
     if (unauthorizedHandler) unauthorizedHandler()
@@ -39,7 +57,7 @@ async function parseResponse(res: Response) {
     const detail = typeof data === 'object' && data !== null && 'detail' in data
       ? (data as Record<string, unknown>).detail
       : res.statusText
-    const err = new ApiError(`${res.status} ${detail}`, res.status)
+    const err = new ApiError(`${res.status} ${formatErrorDetail(detail)}`, res.status)
     err.data = data
     throw err
   }

@@ -18,6 +18,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "-m", "not playwright and not network",
+    "--basetemp=/tmp/pytest-quickquip",
 ]
 
 [tool.coverage.run]

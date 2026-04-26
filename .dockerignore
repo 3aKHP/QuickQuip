@@ -21,7 +21,9 @@ frontend/node_modules/
 !.env.example
 config/*.toml
 !config/*.toml.example
-dev/
+dev/*
+!dev/llm_about/
+!dev/llm_about/**
 llm_about/**/*.yaml
 !llm_about/*.yaml.example
 !llm_about/_example/*.yaml

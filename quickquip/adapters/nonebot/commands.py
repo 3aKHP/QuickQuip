@@ -468,6 +468,15 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if args == "current":
             await llm_cmd.finish(llm_service.format_current(chat_id, chat_type=chat_type))
 
+        if tokens[:1] == ["health"]:
+            await llm_cmd.finish(
+                await llm_service.format_health(
+                    chat_id,
+                    chat_type=chat_type,
+                    verbose=len(tokens) > 1 and tokens[1] in {"verbose", "detail", "full"},
+                )
+            )
+
         if args in {"mcp", "mcp status"}:
             await llm_cmd.finish(llm_service.format_mcp_status())
 

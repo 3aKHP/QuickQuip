@@ -274,6 +274,7 @@ async function sendSample() {
       model: sample.value.model || null,
       system_prompt: sample.value.system_prompt,
       user_prompt: sample.value.user_prompt,
+      stream: false,
       max_output_tokens: sample.value.max_output_tokens,
     }))
   } catch (e: unknown) {
@@ -289,6 +290,10 @@ async function runRegress() {
   regressionResults.value = []
   try {
     const lines = regressionInput.value.split('\n').filter(l => l.trim())
+    if (!lines.length) {
+      regressionError.value = '请至少输入一条测试样本'
+      return
+    }
     const samples = lines.map(line => {
       const pipe = line.indexOf('|')
       if (pipe >= 0) return { label: line.slice(0, pipe).trim(), text: line.slice(pipe + 1).trim() }

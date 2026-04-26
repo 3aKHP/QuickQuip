@@ -18,6 +18,7 @@ from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
+from quickquip.llm.health import HealthReport, build_health_report, format_health_report
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.mcp import MCPClientManager, MCPServerStatus
 from quickquip.llm.prompting import (
@@ -75,6 +76,7 @@ DEFAULT_ENABLED_TOOLS = [
     "search_recent_messages",
     "get_llm_status",
     "get_current_model",
+    "get_health_status",
 ]
 DEFECTIFY_RULE_NAME = "llm_defectify"
 DEFECTIFY_MAX_OUTPUT_TOKENS = 512
@@ -250,6 +252,19 @@ class LLMService:
                 },
             ),
             self._tool_get_current_model,
+        )
+        self.tool_registry.register(
+            LLMToolSpec(
+                name="get_health_status",
+                description="执行一次轻量内部健康检查，覆盖 LLM 配置、当前 provider/model、资料库、数据库、工具、MCP、搜索和生成配置。仅在用户明确要求诊断或自检时调用。",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "verbose": {"type": "boolean"},
+                    },
+                },
+            ),
+            self._tool_get_health_status,
         )
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
@@ -529,6 +544,14 @@ class LLMService:
             lines.append(f"- 艾特触发：{'ON' if settings.allow_at else 'OFF'}")
         return "\n".join(lines)
 
+    async def _tool_get_health_status(
+        self,
+        arguments: dict[str, object],
+        context: ToolExecutionContext,
+    ) -> str:
+        verbose = bool(arguments.get("verbose", False))
+        return await self.format_health(context.group_id, chat_type=context.chat_type, verbose=verbose)
+
     def reload_config(self) -> LLMConfig:
         self.config = load_llm_config(self.config_path)
         self.vocab = VocabIndex.from_file(self.vocab_path)
@@ -744,6 +767,41 @@ class LLMService:
         else:
             lines.append(f"临时上下文：仅触发当下向前最多 {MAX_TRIGGER_CONTEXT_MESSAGES} 条群消息")
         return "\n".join(lines)
+
+    async def build_health_report(
+        self, group_id: int | str, chat_type: str = "group", *, probe_provider: bool = False
+    ) -> HealthReport:
+        settings = self.get_chat_settings(group_id, chat_type=chat_type)
+        scope_key = self.build_chat_scope_key(group_id, chat_type)
+        return await build_health_report(
+            config=self.config,
+            settings=settings,
+            scope_key=scope_key,
+            chat_type=chat_type,
+            db_path=self.store.path,
+            vocab_path=self.vocab_path,
+            identity_path=self.identity_path,
+            tool_names=self._get_enabled_tool_names(chat_type=chat_type),
+            mcp_status_summary=self._summarize_mcp_status(),
+            mcp_enabled=self.config.mcp.enabled,
+            mcp_tool_count=len(self._mcp_tool_names),
+            recent_buffer_bound=self.recent_message_buffer is not None,
+            stats_bound=self.stats_tracker is not None,
+            rule_switch_bound=self.rule_switch is not None,
+            probe_provider=probe_provider,
+        )
+
+    async def format_health(
+        self,
+        group_id: int | str,
+        chat_type: str = "group",
+        *,
+        verbose: bool = False,
+    ) -> str:
+        return format_health_report(
+            await self.build_health_report(group_id, chat_type=chat_type, probe_provider=verbose),
+            verbose=verbose,
+        )
 
     def set_chat_enabled(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, enabled=int(enabled))
