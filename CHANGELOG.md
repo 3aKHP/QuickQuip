@@ -4,14 +4,21 @@
 
 ## [Unreleased]
 
+### 新增
+
+- LLM 健康检查模块（`quickquip/llm/health.py`）：覆盖 LLM 配置、provider/model、persona、数据库、资料库文件、工具、MCP、搜索、生成配置及运行时绑定共 10 个检查项；`verbose` 模式可对当前 provider 发送极短探测请求测量延迟；通过 `/llm health [verbose|detail|full]` 命令或 `get_health_status` LLM 工具调用
+
 ### 修复
 
 - DeepSeek thinking mode `reasoning_content` 未传回导致 HTTP 400：`OpenAIProviderClient` 的响应解析（`_parse_response` 非流式 + `_assemble_stream_response` 流式）现提取 `reasoning_content`，存入 `LLMResponse.thinking_blocks`；`_serialize_message` 序列化 assistant 消息时将其输出回请求体，满足 DeepSeek API 对 reasoning 内容 round-trip 的要求
 - `dev/docker-compose.yml` 的 `llm_about` volume 挂载目标未随 v1.0.0 的 `llm_about` 迁移（`dev/` → 仓库根目录）更新，仍挂在 `/app/dev/llm_about`，导致健康检查报告 vocab.yaml / identities.yaml 缺失。现 quickquip 和 web-admin 两服务的挂载目标统一修正为 `/app/llm_about`
+- 前端诊断页：样本探测补 `stream: false` 避免流式响应阻塞结果展示；回归测试补空输入保护；API 层增强错误详情格式化（FastAPI 422 数组错误逐条展开）
 
 ### 变更
 
 - `frontend/package.json` 移除 `openapi-typescript` devDependency：该工具仅在 API schema 变更时用于重新生成 `types.d.ts`，不参与日常构建链。此项移除消除了 TS6 与 openapi-typescript（要求 TS5）的 peer dependency 冲突，所有 `--legacy-peer-deps` 回退一并摘除（`dev/deploy-v4.ps1`、`.github/workflows/_tests.yml`、`.github/workflows/release.yml`）
+- `.dockerignore`：`dev/` 改为 `dev/*` + `!dev/llm_about/`，保留 `dev/llm_about/` 在 Docker 构建上下文中作为 volume 挂载的 fallback
+- 全仓文档重构：README 从 644 行精简至 191 行（功能详解与命令表迁入 docs/）；docs/ 建立按读者角色分区的文档体系（`user/` 群友、`admin/` 部署管理、`dev/` 开发者），新增 `index.md` 总导航与 8 份专题文档（部署指南、配置参考、Web Admin、架构、LLM 模块、MCP 集成、正则教程）
 
 ## [1.0.0] - 2026-04-24
 

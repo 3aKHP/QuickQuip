@@ -1,0 +1,462 @@
+# QuickQuip LLM 模块说明
+
+## 1. 模块定位
+
+QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发扩展层**。
+
+它的设计目标不是把整个群改造成全时监听的聊天机器人，而是在保留原有规则回复体系的前提下，提供一套：
+
+- 可按群开关
+- 可按群切换 provider / model / persona
+- 仅在指令或艾特时触发
+- 带有限定人格注入
+- 带有严格边界的短期上下文与长期记忆
+
+的 LLM 能力。
+
+当前模块还额外覆盖两类能力：
+
+- 显式触发下的图片理解
+- 基于项目内搜索后端的联网搜索
+- 标准化工具调用（身份查询、记忆查询、联网搜索）
+
+如果后续需要把外部工具后端扩展为 MCP，单独查看 [mcp-integration.md](mcp-integration.md)。当前文档只描述已经落在项目内的 LLM 与工具调用实现。
+
+---
+
+## 2. 当前代码结构
+
+LLM 相关核心文件如下：
+
+- `quickquip/adapters/nonebot/commands.py`
+  - 负责 `/llm`、`/search` 等命令注册
+- `quickquip/adapters/nonebot/group_messages.py`
+  - 负责 NoneBot 群消息入口，并把消息交给应用层管线
+- `quickquip/adapters/nonebot/daily_summary_plugin.py`
+  - 负责每日总结的定时任务注册与 `/summary` 命令
+- `quickquip/llm/service.py`
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export
+- `quickquip/llm/summarize.py`
+  - 每日总结生成逻辑（模型级联、prompt 构建）
+- `quickquip/llm/briefing.py`
+  - 每日播报生成（群人格、模型级联、失败回退）
+- `quickquip/llm/defectify.py`
+  - `/defectify` 故障机器人转写逻辑
+- `quickquip/app/message_pipeline.py`
+  - 负责群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装
+- `quickquip/llm/config.py`
+  - 负责读取 `config/llm.toml`
+- `quickquip/llm/provider.py`
+  - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射
+- `quickquip/llm/tool_loop.py`
+  - 负责统一工具声明、工具调用循环、工具结果和会话消息结构
+- `quickquip/llm/tool_registry.py`
+  - 负责工具白名单注册、参数校验和执行调度
+- `quickquip/llm/store.py`
+  - 负责 SQLite 持久化
+- `quickquip/llm/vocab.py`
+  - 负责从 `llm_about/vocab.yaml` 读取群别名与黑话词表，并按需注入
+- `quickquip/llm/identity.py`
+  - 负责从 `llm_about/identities.yaml` 读取 QQ 号到标准身份的映射
+- `quickquip/llm/rendering.py`
+  - 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特
+- `quickquip/llm/health.py`
+  - LLM 健康检查模块（配置、provider 探活、知识文件、工具、MCP 等 10 项检查）
+- `quickquip/common/recent_message_buffer.py`
+  - 负责"触发前最近群消息"内存缓冲
+- `quickquip/llm/inputs.py`
+  - 负责从消息段中提取文本触发、艾特触发和图片 URL
+- `quickquip/search/web_search.py`
+  - 负责搜索后端抽象，当前支持 SearXNG / Tavily
+
+兼容层说明：
+
+- `plugins/` 目录仍然保留，但当前主要作为兼容导出层与 NoneBot 插件加载入口
+- 新增逻辑优先放在 `quickquip/` 下，`plugins/` 只负责转发旧导入路径
+
+持久化文件：
+
+- `data/llm.db`
+  - 群级 LLM 设置
+  - 短期 LLM 会话记录
+  - 长期记忆
+
+配置文件：
+
+- `config/llm.toml`
+  - 真实运行配置，本地私有
+- `config/llm.toml.example`
+  - 原始通用示例，保留为参考模板
+
+群资料文件：
+
+- `llm_about/identities.yaml`
+  - 群成员标准身份词表，负责 QQ 号到标准身份的映射
+- `llm_about/vocab.yaml`
+  - 群成员别名与部分黑话词表
+- `llm_about/群聊简介和概况.md`
+  - 仅供人工设计人格时参考，不直接整份注入模型
+
+> 注：生产部署中，`llm_about/` 下的文件通过 docker-compose volume 从宿主机的 `dev/llm_about/` 挂载到容器内的 `/app/llm_about/`。详见 [admin/deployment.md](../admin/deployment.md)。
+
+---
+
+## 3. 触发规则
+
+LLM 默认只在以下场景触发：
+
+- 以配置前缀开头，例如 `/ai`
+- `@机器人`
+- `/search <query>`
+
+普通群消息不会自动进入 LLM。
+
+当前消息流顺序：
+
+1. 记录普通统计
+2. 读取当前群最近消息缓冲
+3. 判断是否命中 LLM 显式触发
+4. 如果命中 LLM，则优先走 LLM
+5. 如果未命中，则继续原有规则流：
+   - 复读
+   - 接龙
+   - 彩蛋规则
+   - 时区猜测
+
+这意味着：
+
+- LLM 不会吞掉普通消息
+- 规则系统依然是默认主流程
+- LLM 是显式调用，不是默认响应层
+
+---
+
+## 4. 上下文边界
+
+### 4.1 临时上下文
+
+为避免长期运行后将 24 小时持续监听数据混入模型，当前实现明确限定：
+
+- 仅在一次 LLM 触发发生时，读取**该群向前最多 20 条消息**
+- 这 20 条消息来自 `RecentMessageBuffer`
+- 这部分数据**仅保存在内存中**
+- 不写入 `data/llm.db`
+- 不作为长期记忆保存
+
+这是当前最重要的设计边界之一。
+
+### 4.2 LLM 短期会话
+
+LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制：
+
+- 单群最多保留 20 条（存储上限，不受配置影响）
+- 每次触发时实际读取的条数由以下优先级决定：
+  1. 本群通过 `/llm context_limit <n>` 设置的覆盖值（若有）
+  2. `llm.toml` 的 `[runtime] history_limit`（全局默认，当前为 10）
+  3. 代码存储上限（`MAX_STORED_CONVERSATION_MESSAGES`，当前为 20，为最终截断）
+- 群级覆盖写入 `data/llm.db`，重启或 `clear_context` 不会清除
+- 执行 `/llm reload` 或 `/llm context_limit reset` 可重置为全局默认
+- `clear_context` 只清空已存的会话消息，不改变上限设置
+
+### 4.3 图片输入边界
+
+图片理解当前也遵循显式触发原则：
+
+- 必须和 `/ai` 或 `@机器人` 同时出现
+- 当前单次最多处理 3 张图片
+- 当前单张图片大小限制为 5MB
+- 如果只有图片没有文字提示，会自动补一个默认识图提示
+
+### 4.4 长期记忆
+
+长期记忆当前来源非常保守：
+
+- 人工 `/remember`
+- 后续如扩展自动抽取，也只允许从 LLM 已触发会话内提取
+
+明确不允许：
+
+- 直接把 24 小时全群监听内容塞进记忆
+- 把所有群聊消息无差别持久化给 LLM 模块
+
+---
+
+## 5. 人格注入设计
+
+当前人格注入分成多层：
+
+### 5.1 基础人格
+
+由 `config/personas/` 目录下的 TOML 文件定义，每个 `.toml` 一个人格，`_shared.toml` 提取所有人格共享的行为准则。
+
+当前默认人格强调：
+
+- 熟人群语气
+- 高语境理解
+- 轻松但克制
+- 能接梗
+- 严肃时收住玩笑
+- 不冒充和任何成员有既定私交
+
+### 5.2 群风格约束
+
+这部分不靠整份群资料硬灌，而是抽取稳定特征：
+
+- 熟人化
+- 深夜活跃
+- 游戏 / 创作 / 二次元并重
+- 黑话和夸张称呼常见
+- 但认真场景要正常说话
+
+### 5.3 词表按需注入
+
+`vocab.yaml` 不会整份注入模型。
+
+当前做法是：
+
+- 只有当 prompt 命中某个别名或黑话
+- 才在本轮 system prompt 里追加一小段消歧说明
+
+例如：
+
+- `哈基镜` 通常指镜子
+- 注意不要和王者荣耀的镜混淆
+
+这样做的好处：
+
+- 模型更会"听懂"
+- 不会变成背词表机器
+- 不容易把群资料污染成固定口癖
+
+### 5.4 Provider 风格覆盖
+
+每个 `[[providers]]` 条目支持可选字段 `style_overrides`（多行字符串）。
+
+此字段的内容会在每次调用该 provider 时，追加到 persona 的 `style_prompt` 之后，用于修正特定模型的口癖。
+
+典型用途：
+
+- GPT 系：禁止句尾反问句、禁止 emoji
+- DeepSeek：禁止分点列举
+- Claude / Gemini：禁止旁白括号、禁止过于简略的回复
+
+修改后需 `/llm reload` 生效。
+
+### 5.5 身份映射注入
+
+`identities.yaml` 负责"这个 QQ 号是谁"，用途和 `vocab.yaml` 不同。
+
+当前做法是：
+
+- 提问者进入 LLM 时，优先按 QQ 号解析标准身份
+- 最近群聊上下文中的发言者也会按 QQ 号显示标准身份
+- 消息中的艾特会优先渲染为 `@标准身份`
+- 未登记成员会降级显示为"当前显示名 + QQ 号 + 未登记"
+
+这样可以减少群友频繁改名带来的身份漂移。
+
+---
+
+## 6. 配置说明
+
+### 6.1 `config/llm.toml`
+
+主要区块：
+
+- `[runtime]`
+  - `enabled`
+  - `memory_enabled`
+  - `default_provider`
+  - `default_persona`
+  - `history_limit`
+  - `history_max_messages_per_group`
+  - `memory_limit`
+  - `memory_max_items_per_group`
+  - `max_prompt_chars`
+- `[triggers]`
+  - `default_prefix`
+  - `allow_prefix`
+  - `allow_at`
+  - `empty_prompt_reply`
+- `[tools]`
+  - `enabled`
+- `[[providers]]`
+  - `id`
+  - `protocol`
+  - `base_url`
+  - `api_key_env`
+  - `default_model`
+  - `models`
+  - `timeout_seconds`
+  - `temperature`
+  - `max_output_tokens`
+  - `style_overrides`（可选，追加到每次调用的 system prompt 末尾）
+- `[daily_briefing]`
+  - 每日早/午/晚播报全局开关、三段 cron、上下文规模、输出长度、模型级联列表
+- `[daily_summary]`
+  - 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表
+
+Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每个 `.toml` 一个人格文件，`_shared.toml` 存储共享行为准则与风格规则。
+
+注意：
+
+- 这里的配置是"逻辑配置"
+- 真正的硬上限仍然在代码里存在
+- 即使把 `history_max_messages_per_group` 写大，实际仍会被代码上限截断
+
+### 6.2 `.env`
+
+本地开发与容器运行都需要：
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+
+此外容器部署还会用到：
+
+- `QQ_ACCOUNT`
+- `ONEBOT_WS_URLS`
+- `ONEBOT_ACCESS_TOKEN`
+- `DRIVER`
+- `HOST`
+- `PORT`
+
+---
+
+## 7. 群内命令
+
+### 7.1 基础状态命令
+
+- `/llm status`
+  - 查看当前群 LLM 状态
+- `/llm current`
+  - 查看当前群实际生效的 provider、model、persona、记忆开关、短期会话条数和长期记忆条数
+- `/llm health [verbose|detail|full]`
+  - 运行 LLM 健康检查（配置、provider 探活、知识文件、工具、MCP 等 10 项）
+
+### 7.2 provider / model / persona
+
+- `/llm providers`
+- `/llm models [provider]`
+- `/llm use <provider> <model>`
+- `/llm personas`
+- `/llm persona use <id>`
+
+### 7.3 触发方式
+
+- `/llm trigger prefix <value>`
+- `/llm trigger prefix_mode on|off`
+- `/llm trigger at on|off`
+
+### 7.4 记忆与上下文
+
+- `/llm memory status`
+- `/llm memory on`
+- `/llm memory off`
+- `/llm context_limit <n>` — 设置本群上下文读取上限（1-20），持久化，不受 clear_context 影响
+- `/llm context_limit reset` — 重置为全局默认
+- `/llm clear_context`
+- `/remember <内容>`
+- `/memories [关键词]`
+- `/forget <关键词>`
+- `/forget_all` — 清空本群全部长期记忆
+
+### 7.5 联网搜索
+
+- `/search <query>`
+- `/search news <query>`
+- `/search finance <query>`
+
+当前搜索结果由当前搜索后端返回摘要与来源链接，不自动写入长期记忆。
+
+权限规则：
+
+- 查询型命令多数所有人可用
+- 变更型命令默认仅管理员 / 群主可用
+
+---
+
+## 8. Docker / 部署注意事项
+
+当前私有部署链位于 `dev/`：
+
+- `dev/Dockerfile`
+- `dev/docker-compose.yml`
+- `dev/deploy.ps1`
+- `dev/deploy-v4.ps1`
+- `dev/deploy.sh`
+- `dev/.env.deploy`
+
+部署完整指南见 [../admin/deployment.md](../admin/deployment.md)。
+
+部署要点：
+
+- `config/llm.toml` 通过 bind mount 只读挂载到容器
+- `dev/llm_about` 通过 bind mount 只读挂载到容器内 `/app/llm_about`
+  - 包括 `vocab.yaml` 与 `identities.yaml`
+- `data/` 通过 bind mount 持久化
+- 镜像构建时需要同时打包 `plugins/` 与 `quickquip/`
+- API key 通过 `dev/.env` 注入给 `quickquip`
+- 云端部署默认会额外启动 `searxng` 服务，并把 `quickquip` 容器内的 `SEARXNG_BASE_URL` 指向 `http://searxng:8080`
+
+根目录 `.dockerignore` 已经做了收紧，避免把以下内容送进 Docker build 上下文：
+
+- 本地 `.env`
+- `config/*.toml`
+- `data/`
+- `dev/sandbox/`
+- 其他开发工件
+
+---
+
+## 9. 现阶段已知边界
+
+当前模块还不是一个"全自动记忆智能体"，而是一个刻意收边的群聊 LLM：
+
+- 不自动扫全群消息做长期记忆
+- 不自动做复杂摘要归档
+- 不做跨群共享人格状态
+- 不把 `群聊简介和概况.md` 全文直接注入模型
+- 不默认把所有外部工具都改成 MCP
+
+注：每日总结（`daily_summary`）模块已实现模型级联策略，生成失败时自动降级到下一个 provider/model，顺序在 `[daily_summary] model_cascade` 中配置。这是总结生成专用的级联，不影响普通 LLM 对话的 provider 选择。
+
+---
+
+## 10. 上线前建议检查项
+
+如果准备正式上线，建议确认：
+
+- `config/llm.toml` 中默认 provider、model、persona 正确
+- `.env` 中 Gemini / OpenAI / Claude key 正确
+- `/llm current` 输出正常
+- `/llm memory status` 输出正常
+- `/llm clear_context` 可用
+- `@机器人` 和 `/ai` 触发都可用
+- 关闭记忆注入后，模型仍能正常回复
+- Docker 容器内日志没有出现：
+  - 配置文件缺失
+  - API key 缺失
+  - `vocab.yaml` 缺失
+  - `identities.yaml` 缺失
+
+---
+
+## 11. 推荐维护方式
+
+后续如果继续演进，建议遵守下面的顺序：
+
+1. 先改 `config/llm.toml` 和 persona 文案
+2. 再改 `identities.yaml`
+3. 再改 `vocab.yaml`
+4. 最后才考虑扩大自动记忆能力
+
+原因很简单：
+
+- 人格问题，优先改 prompt
+- 认人问题，优先改身份词表
+- 称呼理解问题，再改话题词表
+- 工具边界问题，优先改 `[tools]` 配置和注册表
+- 记忆问题，最后改自动抽取逻辑
+
+不要反过来。

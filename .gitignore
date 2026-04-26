@@ -50,7 +50,7 @@ config/llm.*.local.toml
 !config/personas.example/
 
 #Dev Filefolder
-dev/
+/dev/
 
 # Team-private MCP sidecar Dockerfiles (deployed via tar, not tracked)
 docker/*.Dockerfile
