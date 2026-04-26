@@ -2,6 +2,20 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- 自动记忆抽取保守重做：攒批触发（每 10 轮 LLM 对话才触发一次抽取）、多轮对话上下文（最近 10 条消息作为判定背景）、固定置信度 0.5（不再让 LLM 自评）；新增质量门槛——用户消息 ≥ 8 字且助手回复 ≥ 20 字才触发；去重算法改为双向 min 分母 + 0.7 阈值；prompt 强调「宁可不记，不可记错」
+- 自动记忆认人：抽取 prompt 现接收 `canonical_name`（来自 identities.yaml 解析），记忆内容强制以群友名开头而非模糊指代
+
+### 修复
+
+- `/profile @某人` 无响应：`on_command` 处理后 at 段可能丢失类型信息，现增加 CQ 码文本正则回退解析（`[CQ:at,qq=XXXX]`）
+- `/profile` 解除对 `daily_summary.model_cascade` 的依赖：现直接使用当前群的 provider/model，不再因级联配置空缺或引用不存在的 provider 而阻塞
+- `/profile` 消息窗口从 30 天缩至 7 天，数据收集增加 try/except 保护
+- `/music` 歌词改走合并转发消息（与每日播报相同模式），长歌词按段落边界分块，群聊不再刷屏；私聊回退直发
+
 ## [1.0.1] - 2026-04-27
 
 ### 新增
@@ -272,6 +286,7 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.0.1...HEAD
 [1.0.1]: https://github.com/3aKHP/QuickQuip/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/3aKHP/QuickQuip/compare/v0.9.2...v1.0.0
 [0.9.2]: https://github.com/3aKHP/QuickQuip/compare/v0.9.0...v0.9.2
