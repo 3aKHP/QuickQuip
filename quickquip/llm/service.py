@@ -101,6 +101,10 @@ _AUTO_MEMORY_DEFAULT_PROMPT = (
     "- 对话中的假设、玩笑、反话、玩梗\n"
     "- 无法确定归属于发言者本人的内容\n"
     "\n"
+    "格式要求：\n"
+    "- 每条事实必须以群友名开头，如「小明是程序员，常用 Python」\n"
+    "- 不要用「该用户」「某人」「TA」等模糊指代代替名字\n"
+    "\n"
     "对每条事实给出置信度（0.0-1.0）：\n"
     "- 0.9+：发言者明确说出的个人事实（如「我是一名程序员」）\n"
     "- 0.7-0.9：从对话中高度合理推断（如多次提到写代码→可能是程序员）\n"
@@ -1194,6 +1198,7 @@ class LLMService:
         scope_key: str,
         user_id: int | str,
         sender_name: str,
+        canonical_name: str = "",
         user_text: str,
         assistant_text: str,
     ) -> None:
@@ -1213,9 +1218,13 @@ class LLMService:
                 self.config.runtime.auto_memory_prompt.strip()
                 or _AUTO_MEMORY_DEFAULT_PROMPT
             )
+            display_name = canonical_name or sender_name
+            name_line = f"群友名：{display_name}"
+            if canonical_name and sender_name and canonical_name != sender_name:
+                name_line += f"（QQ昵称：{sender_name}）"
             full_prompt = (
                 f"{judge_prompt}\n\n"
-                f"群友名：{sender_name}\n"
+                f"{name_line}\n"
                 f"TA 的发言：{user_text}\n"
                 f"你的回复：{assistant_text}"
             )
@@ -1695,6 +1704,7 @@ class LLMService:
                     scope_key=scope_key,
                     user_id=user_id,
                     sender_name=sender_name,
+                    canonical_name=current_identity.canonical_name,
                     user_text=effective_prompt,
                     assistant_text=text,
                 )

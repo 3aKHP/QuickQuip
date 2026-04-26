@@ -1411,6 +1411,10 @@ def register_commands(on_command, Message, MessageSegment) -> None:
                     target_user_id = qq
                     break
         if not target_user_id:
+            m = re.search(r"\[CQ:at,qq=(\d+)\]", str(event.get_message()))
+            if m:
+                target_user_id = m.group(1)
+        if not target_user_id:
             await profile_cmd.finish("用法：/profile @某人")
 
         group_id = event.group_id
