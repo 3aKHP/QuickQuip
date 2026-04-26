@@ -392,12 +392,22 @@ class BaseProviderClient:
 
 
 class OpenAIProviderClient(BaseProviderClient):
+    @staticmethod
+    def _extract_reasoning_content(thinking_blocks: list[dict[str, Any]]) -> str:
+        for block in thinking_blocks:
+            if isinstance(block, dict) and block.get("type") == "reasoning":
+                return str(block.get("reasoning_content", ""))
+        return ""
+
     async def _serialize_message(self, message: LLMConversationMessage) -> dict[str, Any]:
         if message.role == "assistant":
             payload: dict[str, Any] = {
                 "role": "assistant",
                 "content": message.content,
             }
+            reasoning = self._extract_reasoning_content(message.thinking_blocks)
+            if reasoning:
+                payload["reasoning_content"] = reasoning
             if message.tool_calls:
                 payload["tool_calls"] = [
                     {
@@ -486,6 +496,10 @@ class OpenAIProviderClient(BaseProviderClient):
             for index, item in enumerate(message.get("tool_calls", []) or [], 1)
             if isinstance(item, dict)
         ]
+        thinking_blocks: list[dict[str, Any]] = []
+        reasoning_content = message.get("reasoning_content", "")
+        if reasoning_content:
+            thinking_blocks.append({"type": "reasoning", "reasoning_content": reasoning_content})
         usage = data.get("usage", {})
         return LLMResponse(
             text=strip_leading_reasoning_content(_text_from_block_list(message.get("content"))),
@@ -494,11 +508,13 @@ class OpenAIProviderClient(BaseProviderClient):
             finish_reason=str(choice.get("finish_reason", "")).strip() or None,
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
+            thinking_blocks=thinking_blocks,
         )
 
     @staticmethod
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls_acc: dict[int, dict[str, str]] = {}  # index -> {id, name, arguments}
         finish_reason: str | None = None
         model = fallback_model
@@ -513,6 +529,8 @@ class OpenAIProviderClient(BaseProviderClient):
                 delta = choice.get("delta", {})
                 if delta.get("content"):
                     text_parts.append(str(delta["content"]))
+                if delta.get("reasoning_content"):
+                    reasoning_parts.append(str(delta["reasoning_content"]))
                 for tc in delta.get("tool_calls", []) or []:
                     idx = tc.get("index", 0)
                     if idx not in tool_calls_acc:
@@ -541,10 +559,14 @@ class OpenAIProviderClient(BaseProviderClient):
             )
             for idx, acc in sorted(tool_calls_acc.items())
         ]
+        thinking_blocks: list[dict[str, Any]] = []
+        if reasoning_parts:
+            thinking_blocks.append({"type": "reasoning", "reasoning_content": "".join(reasoning_parts)})
         return LLMResponse(
             text=strip_leading_reasoning_content("".join(text_parts)),
             model=model,
             tool_calls=tool_calls,
+            thinking_blocks=thinking_blocks,
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

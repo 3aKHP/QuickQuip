@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 修复
+
+- DeepSeek thinking mode `reasoning_content` 未传回导致 HTTP 400：`OpenAIProviderClient` 的响应解析（`_parse_response` 非流式 + `_assemble_stream_response` 流式）现提取 `reasoning_content`，存入 `LLMResponse.thinking_blocks`；`_serialize_message` 序列化 assistant 消息时将其输出回请求体，满足 DeepSeek API 对 reasoning 内容 round-trip 的要求
+- `dev/docker-compose.yml` 的 `llm_about` volume 挂载目标未随 v1.0.0 的 `llm_about` 迁移（`dev/` → 仓库根目录）更新，仍挂在 `/app/dev/llm_about`，导致健康检查报告 vocab.yaml / identities.yaml 缺失。现 quickquip 和 web-admin 两服务的挂载目标统一修正为 `/app/llm_about`
+
+### 变更
+
+- `frontend/package.json` 移除 `openapi-typescript` devDependency：该工具仅在 API schema 变更时用于重新生成 `types.d.ts`，不参与日常构建链。此项移除消除了 TS6 与 openapi-typescript（要求 TS5）的 peer dependency 冲突，所有 `--legacy-peer-deps` 回退一并摘除（`dev/deploy-v4.ps1`、`.github/workflows/_tests.yml`、`.github/workflows/release.yml`）
+
 ## [1.0.0] - 2026-04-24
 
 ### 新增
