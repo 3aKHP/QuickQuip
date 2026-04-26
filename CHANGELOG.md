@@ -2,10 +2,12 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.0.1] - 2026-04-27
 
 ### 新增
 
+- TypeScript 严格模式迁移：前端 33 个文件（API 层、composables、router、views、config）全量转为 `.ts` + `<script setup lang="ts">`，启用 `strict: true`，`vue-tsc --noEmit` 零错误通过；API 类型通过 `openapi-typescript` 从 FastAPI `/openapi.json` 自动生成 `types.d.ts`（2308 行）；构建解耦——`npm run build` 不再捆绑类型检查，`npm run type-check` 独立运行，CI 与 pre-push hook 跑 type-check
+- Windows 懒人包 WebView 窗口化：新增 `webview_launcher.py`（基于 pywebview 的原生 WebView2 窗口），`启动.bat` 优先使用 WebView，pywebview 未安装时回落浏览器；pywebview 在 release workflow 中单独安装，不进入 `requirements.txt`
 - LLM 健康检查模块（`quickquip/llm/health.py`）：覆盖 LLM 配置、provider/model、persona、数据库、资料库文件、工具、MCP、搜索、生成配置及运行时绑定共 10 个检查项；`verbose` 模式可对当前 provider 发送极短探测请求测量延迟；通过 `/llm health [verbose|detail|full]` 命令或 `get_health_status` LLM 工具调用
 
 ### 修复
@@ -18,7 +20,7 @@
 
 - `frontend/package.json` 移除 `openapi-typescript` devDependency：该工具仅在 API schema 变更时用于重新生成 `types.d.ts`，不参与日常构建链。此项移除消除了 TS6 与 openapi-typescript（要求 TS5）的 peer dependency 冲突，所有 `--legacy-peer-deps` 回退一并摘除（`dev/deploy-v4.ps1`、`.github/workflows/_tests.yml`、`.github/workflows/release.yml`）
 - `.dockerignore`：`dev/` 改为 `dev/*` + `!dev/llm_about/`，保留 `dev/llm_about/` 在 Docker 构建上下文中作为 volume 挂载的 fallback
-- 全仓文档重构：README 从 644 行精简至 191 行（功能详解与命令表迁入 docs/）；docs/ 建立按读者角色分区的文档体系（`user/` 群友、`admin/` 部署管理、`dev/` 开发者），新增 `index.md` 总导航与 8 份专题文档（部署指南、配置参考、Web Admin、架构、LLM 模块、MCP 集成、正则教程）
+- 全仓文档重构：README 从 644 行精简至 191 行（功能详解与命令表迁入 docs/）；docs/ 建立按读者角色分区的文档体系（`user/` 群友、`admin/` 部署管理、`dev/` 开发者），新增 `index.md` 总导航与 8 份专题文档；ROADMAP 移除已完成版本条目并重组未来版本优先级；MCP 集成文档更新为当前生产 sidecar 部署模式
 
 ## [1.0.0] - 2026-04-24
 
@@ -270,7 +272,9 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v0.9.0...HEAD
+[1.0.1]: https://github.com/3aKHP/QuickQuip/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/3aKHP/QuickQuip/compare/v0.9.2...v1.0.0
+[0.9.2]: https://github.com/3aKHP/QuickQuip/compare/v0.9.0...v0.9.2
 [0.9.0]: https://github.com/3aKHP/QuickQuip/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/3aKHP/QuickQuip/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...v0.8.0
