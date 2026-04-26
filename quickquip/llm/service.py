@@ -84,51 +84,56 @@ DEFECTIFY_MAX_OUTPUT_TOKENS = 512
 # ── auto-memory extraction ──────────────────────────────────────────
 
 _AUTO_MEMORY_MIN_USER_CHARS = 8
-_AUTO_MEMORY_MIN_CONFIDENCE = 0.65
+_AUTO_MEMORY_MIN_ASSISTANT_CHARS = 20
+_AUTO_MEMORY_EXTRACT_EVERY_N = 10
+_AUTO_MEMORY_CONTEXT_TURNS = 10
+_AUTO_MEMORY_DEFAULT_CONFIDENCE = 0.5
+_AUTO_MEMORY_DEDUP_THRESHOLD = 0.7
+_AUTO_MEMORY_TURN_CACHE_MAX = 2048
 
 _AUTO_MEMORY_DEFAULT_PROMPT = (
-    "你是一个群聊记忆助手。你的任务是从群聊对话中提取关于发言者的**稳定长期事实**。\n"
+    "你是一个保守的群聊记忆助手。你的任务是：只有当对话中**明确出现了**关于发言者的稳定长期事实时，才记录下来。\n"
     "\n"
-    "值得记住的内容：\n"
-    "- 身份信息：职业、专业、所在城市、年龄段\n"
-    "- 偏好与兴趣：喜欢或讨厌的事物、爱好、习惯用语\n"
-    "- 能力与经历：掌握的技能、做过的事、个人经历\n"
-    "- 群内角色：潜水党、话痨、管理者、某种群内梗的当事人\n"
+    "以下是唯一应该记录的内容类型：\n"
+    "- 身份信息：职业、专业、所在城市、年龄段（发言者明确说出才算）\n"
+    "- 偏好与兴趣：喜欢或讨厌的具体事物、爱好\n"
+    "- 能力与经历：掌握的技能、做过的事\n"
     "\n"
-    "不要记住的内容：\n"
-    "- 一次性闲聊、寒暄、吐槽、搞笑段子\n"
-    "- 临时对话话题（如「今天吃什么」）\n"
-    "- 对话中的假设、玩笑、反话、玩梗\n"
-    "- 无法确定归属于发言者本人的内容\n"
+    "以下内容**绝对不要**记录：\n"
+    "- 闲聊、寒暄、吐槽、搞笑段子\n"
+    "- 临时话题（今天吃了什么、天气如何）\n"
+    "- 假设、玩笑、反话、玩梗\n"
+    "- 不确定是否属于发言者本人的内容\n"
+    "- 仅仅因为 bot 的回复提到某个话题就推断用户有相关特征\n"
+    "\n"
+    "核心原则：**宁可不记，不可记错。** 如果你不确定某条事实是否值得记住，就不要记。\n"
     "\n"
     "格式要求：\n"
     "- 每条事实必须以群友名开头，如「小明是程序员，常用 Python」\n"
-    "- 不要用「该用户」「某人」「TA」等模糊指代代替名字\n"
+    "- 不要用「该用户」「某人」「TA」等模糊指代\n"
+    "- 每条事实不超过 40 字\n"
     "\n"
-    "对每条事实给出置信度（0.0-1.0）：\n"
-    "- 0.9+：发言者明确说出的个人事实（如「我是一名程序员」）\n"
-    "- 0.7-0.9：从对话中高度合理推断（如多次提到写代码→可能是程序员）\n"
-    "- 0.5-0.7：可能的推断，但不完全确定\n"
-    "- 低于 0.5：不应提取\n"
-    "\n"
-    "只回复 JSON，格式为：\n"
-    '{"memories": [{"content": "事实内容", "confidence": 0.9}]}\n'
+    "只回复 JSON：\n"
+    '{"memories": ["事实1", "事实2"]}\n'
     "没有值得记住的内容时回 {\"memories\": []}\n"
-    "每条事实不超过 40 字。"
+    "大部分情况下你应该返回空数组。"
 )
 
 
 def _is_duplicate_memory(new_content: str, existing_contents: list[str]) -> bool:
-    """Check character-level overlap with existing memories; skip if >60% shared."""
+    """Check character overlap against existing memories (bi-directional min denominator)."""
     new_chars = set(new_content)
     if len(new_chars) < 3:
-        return True  # too short to be meaningful
+        return True
     for old in existing_contents:
         old_chars = set(old)
         if not old_chars:
             continue
-        overlap = len(new_chars & old_chars) / len(new_chars)
-        if overlap > 0.6:
+        min_len = min(len(new_chars), len(old_chars))
+        if min_len == 0:
+            continue
+        overlap = len(new_chars & old_chars) / min_len
+        if overlap > _AUTO_MEMORY_DEDUP_THRESHOLD:
             return True
     return False
 
@@ -158,6 +163,9 @@ class LLMService:
         self._mcp_lock = asyncio.Lock()
         self._mcp_startup_task: asyncio.Task[None] | None = None
         self._session_presets: dict[str, str] = {}
+        self._auto_memory_turns: dict[str, int] = {}
+        self._auto_memory_successes = 0
+        self._auto_memory_failures = 0
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
         self.vocab = VocabIndex.from_file(self.vocab_path)
@@ -841,6 +849,11 @@ class LLMService:
             stats_bound=self.stats_tracker is not None,
             rule_switch_bound=self.rule_switch is not None,
             probe_provider=probe_provider,
+            auto_memory_stats={
+                "successes": self._auto_memory_successes,
+                "failures": self._auto_memory_failures,
+                "active_scopes": len(self._auto_memory_turns),
+            },
         )
 
     async def format_health(
@@ -1202,32 +1215,77 @@ class LLMService:
         user_text: str,
         assistant_text: str,
     ) -> None:
-        """Extract long-term facts about the speaker from an LLM conversation turn.
+        """Conservative auto-memory extraction (runs as a background task).
 
-        Runs as a background task; swallows every exception so failures never
-        impact the user-visible reply.  Only writes when the judge returns
-        non-empty results above the confidence threshold.
+        Design (v1.0.2 conservative rewrite):
+
+        1. Quality gates: both user and assistant messages must be substantive.
+        2. Batch trigger: only runs every N-th turn per scope, not every turn.
+        3. Multi-turn context: passes the last several conversation messages so
+           the judge can distinguish one-off remarks from stable facts.
+        4. Fixed confidence: all auto memories are stored at 0.5; the LLM does
+           not self-score.
+        5. Bi-directional dedup: character overlap uses min(len) denominator.
         """
         try:
+            # ── quality gates ──────────────────────────────────────
             if not (user_text.strip() and assistant_text.strip()):
                 return
             if len(user_text.strip()) < _AUTO_MEMORY_MIN_USER_CHARS:
                 return
+            if len(assistant_text.strip()) < _AUTO_MEMORY_MIN_ASSISTANT_CHARS:
+                return
 
+            # ── batch trigger ───────────────────────────────────────
+            turn_count = self._auto_memory_turns.get(scope_key, 0) + 1
+            if len(self._auto_memory_turns) >= _AUTO_MEMORY_TURN_CACHE_MAX:
+                self._auto_memory_turns.clear()
+            self._auto_memory_turns[scope_key] = turn_count
+            if turn_count % _AUTO_MEMORY_EXTRACT_EVERY_N != 0:
+                return
+
+            # ── build context ───────────────────────────────────────
             judge_prompt = (
                 self.config.runtime.auto_memory_prompt.strip()
                 or _AUTO_MEMORY_DEFAULT_PROMPT
             )
+
+            history = self.store.list_recent_conversation_messages(
+                scope_key,
+                limit=_AUTO_MEMORY_CONTEXT_TURNS * 2,
+            )
+            context_parts: list[str] = []
+            seen = 0
+            for msg in reversed(history):
+                role = msg.get("role", "")
+                name = msg.get("canonical_name") or msg.get("sender_name", "?")
+                content = str(msg.get("content", "")).strip()
+                if not content:
+                    continue
+                tag = {"user": "群友", "assistant": "bot"}.get(role, role)
+                context_parts.append(f"[{tag}] {name}: {content[:200]}")
+                seen += 1
+                if seen >= _AUTO_MEMORY_CONTEXT_TURNS:
+                    break
+            context_parts.reverse()
+
             display_name = canonical_name or sender_name
-            name_line = f"群友名：{display_name}"
+            name_line = f"当前要评估的发言者：{display_name}"
             if canonical_name and sender_name and canonical_name != sender_name:
                 name_line += f"（QQ昵称：{sender_name}）"
+
+            context_block = "\n".join(context_parts) if context_parts else "（无上下文）"
             full_prompt = (
                 f"{judge_prompt}\n\n"
+                f"## 最近对话上下文（用于判断事实是否稳定、非偶然）\n"
+                f"{context_block}\n\n"
+                f"## 当前发言\n"
                 f"{name_line}\n"
                 f"TA 的发言：{user_text}\n"
                 f"你的回复：{assistant_text}"
             )
+
+            # ── judge ───────────────────────────────────────────────
             raw = await self.quick_judge(
                 full_prompt,
                 max_tokens=self.config.runtime.auto_memory_max_tokens,
@@ -1237,28 +1295,16 @@ class LLMService:
             if not isinstance(memories, list):
                 return
 
-            existing_contents = [
-                str(m.get("content", ""))
-                for m in self.store.search_memories(
-                    scope_key, user_id=str(user_id), query="", limit=30,
-                )
-            ]
+            # ── dedup & store ───────────────────────────────────────
+            existing_results = self.store.search_memories(
+                scope_key, user_id=str(user_id), query="", limit=50,
+            )
+            existing_contents = [str(m.get("content", "")) for m in existing_results]
+
             stored_count = 0
             for item in memories:
-                if isinstance(item, str):
-                    content = item.strip()
-                    confidence = 1.0
-                elif isinstance(item, dict):
-                    content = str(item.get("content", "")).strip()
-                    try:
-                        confidence = float(item.get("confidence", 0.5))
-                    except (TypeError, ValueError):
-                        confidence = 0.5
-                else:
-                    continue
+                content = str(item).strip() if isinstance(item, str) else ""
                 if not content or len(content) < 4:
-                    continue
-                if confidence < _AUTO_MEMORY_MIN_CONFIDENCE:
                     continue
                 if _is_duplicate_memory(content, existing_contents):
                     continue
@@ -1268,7 +1314,7 @@ class LLMService:
                     scope="group",
                     user_id=user_id,
                     source="auto",
-                    confidence=confidence,
+                    confidence=_AUTO_MEMORY_DEFAULT_CONFIDENCE,
                 )
                 existing_contents.append(content)
                 stored_count += 1
@@ -1281,7 +1327,10 @@ class LLMService:
                         MAX_STORED_MEMORY_ITEMS,
                     ),
                 )
+
+            self._auto_memory_successes += 1
         except Exception:
+            self._auto_memory_failures += 1
             logger.exception("auto_memory extraction failed for scope=%s", scope_key)
 
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:

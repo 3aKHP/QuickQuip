@@ -349,13 +349,14 @@ async def test_auto_memory_extraction_writes_memories_when_enabled(
 ):
     import asyncio
     llm_service.config.runtime.auto_memory_enabled = True
-    # Reply pipeline: first call = reply, second call = auto-memory judge
     stub = _AutoMemoryStubClient([
-        "收到，小明！奶茶是个好东西。",
+        "收到！小明果然是程序员，奶茶也是好文明。",
         '{"memories": ["小明是程序员", "小明喜欢喝奶茶"]}',
     ])
     patch_provider_builder(lambda provider: stub)
 
+    # Batch trigger: extract every 10 turns; pre-set counter so the next call hits the batch
+    llm_service._auto_memory_turns["1001"] = 9
     await llm_service.generate_reply(
         group_id=1001,
         user_id=2002,
@@ -363,7 +364,6 @@ async def test_auto_memory_extraction_writes_memories_when_enabled(
         prompt="我叫小明，是个程序员，喜欢喝奶茶",
         recent_messages=[],
     )
-    # Drain any background auto-memory task before asserting.
     pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
@@ -404,11 +404,13 @@ async def test_auto_memory_extraction_swallows_judge_errors(
     import asyncio
     llm_service.config.runtime.auto_memory_enabled = True
     stub = _AutoMemoryStubClient([
-        "收到。",
+        "收到！让我仔细想想你的特点和性格。",
         "not valid json at all",
     ])
     patch_provider_builder(lambda provider: stub)
 
+    # Batch trigger: extract every 10 turns
+    llm_service._auto_memory_turns["1003"] = 9
     # Must not raise despite the judge returning junk.
     result = await llm_service.generate_reply(
         group_id=1003,
@@ -421,7 +423,7 @@ async def test_auto_memory_extraction_swallows_judge_errors(
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
-    assert result["reply"] == "收到。"
+    assert result["reply"] == "收到！让我仔细想想你的特点和性格。"
     assert llm_service.list_group_memories(1003) == []
 
 
@@ -459,11 +461,12 @@ async def test_auto_memory_per_chat_override_beats_global_default(
     llm_service.set_chat_auto_memory_enabled(1005, True, chat_type="group")
 
     stub = _AutoMemoryStubClient([
-        "收到。",
+        "收到！编程开发是个不错的方向，继续加油坚持。",
         '{"memories": ["override works"]}',
     ])
     patch_provider_builder(lambda provider: stub)
 
+    llm_service._auto_memory_turns["1005"] = 9
     await llm_service.generate_reply(
         group_id=1005,
         user_id=2002,
