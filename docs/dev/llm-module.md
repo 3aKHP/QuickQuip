@@ -36,6 +36,8 @@ LLM 相关核心文件如下：
   - 负责每日总结的定时任务注册与 `/summary` 命令
 - `quickquip/llm/service.py`
   - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export
+- `quickquip/llm/prompting.py`
+  - 负责 system prompt 组装、场景块构建、统一发言者格式渲染与 messages 数组拼装
 - `quickquip/llm/summarize.py`
   - 每日总结生成逻辑（模型级联、prompt 构建）
 - `quickquip/llm/briefing.py`
@@ -62,6 +64,8 @@ LLM 相关核心文件如下：
   - 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特
 - `quickquip/llm/health.py`
   - LLM 健康检查模块（配置、provider 探活、知识文件、工具、MCP 等 10 项检查）
+- `quickquip/llm/image_preprocessor.py`
+  - 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点
 - `quickquip/common/recent_message_buffer.py`
   - 负责"触发前最近群消息"内存缓冲
 - `quickquip/llm/inputs.py`
@@ -158,6 +162,18 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 - 执行 `/llm reload` 或 `/llm context_limit reset` 可重置为全局默认
 - `clear_context` 只清空已存的会话消息，不改变上限设置
 
+**场景块消息结构**：当前 messages 数组采用"以 bot 回复为边界的场景块"模式：
+
+- 连续的多人发言归入同一 `role="user"` 场景块（bot 回复打断场景）
+- 所有发言者使用统一格式：`身份（QQ 号）：内容`
+- 场景以 `【上文】`（历史/缓冲）或 `【当前提问】`（最后一轮提问）标记
+- 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
+
+这样做的好处：
+- 模型只看到一种"某人说了某话"的语法，消除历史/缓冲/当前三种格式的解析负担
+- `【当前提问】` 明确标记最后一轮——模型无需自己推断该回答谁
+- 不存在 DB 存取嵌套包装（旧实现将已格式化的文本再次包入历史消息外层）
+
 ### 4.3 图片输入边界
 
 图片理解当前也遵循显式触发原则：
@@ -248,12 +264,14 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 
 当前做法是：
 
+- **统一发言者格式**：所有进入 LLM 的消息（历史、缓冲、当前提问）均使用同一格式 `身份（QQ 号）：内容`，不再区分三种不同的包装语法
 - 提问者进入 LLM 时，优先按 QQ 号解析标准身份
 - 最近群聊上下文中的发言者也会按 QQ 号显示标准身份
 - 消息中的艾特会优先渲染为 `@标准身份`
 - 未登记成员会降级显示为"当前显示名 + QQ 号 + 未登记"
+- **身份信息只在 messages 中呈现**：system prompt 不再重复声明"当前提问者是谁"——消除双信息源冲突
 
-这样可以减少群友频繁改名带来的身份漂移。
+这样可以减少群友频繁改名带来的身份漂移，并且让模型在单一信息源中自然识别发言者归属。
 
 ---
 

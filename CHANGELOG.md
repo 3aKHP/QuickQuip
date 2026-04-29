@@ -8,9 +8,20 @@
 
 - 自动记忆抽取保守重做：攒批触发（每 10 轮 LLM 对话才触发一次抽取）、多轮对话上下文（最近 10 条消息作为判定背景）、固定置信度 0.5（不再让 LLM 自评）；新增质量门槛——用户消息 ≥ 8 字且助手回复 ≥ 20 字才触发；去重算法改为双向 min 分母 + 0.7 阈值；prompt 强调「宁可不记，不可记错」
 - 自动记忆认人：抽取 prompt 现接收 `canonical_name`（来自 identities.yaml 解析），记忆内容强制以群友名开头而非模糊指代
+- 自动记忆去重：改为仅查 `scope="user"` 库（不再与全群 group-scope 记忆混排），避免目标用户记忆被其他人高置信度记忆挤出 `LIMIT 50` 候选集
+- 图像预处理抽象接口：`ImagePreprocessor` ABC + `NoOpImagePreprocessor` 默认实现，预留 OCR / 多模态模型转述文本的钩子点
+- `LLMSceneMessage` 场景块中间表示：支持将 bot 回复间的连续人类发言归入统一场景
+
+### 变更
+
+- LLM 提示词组装重构：从三种不同格式（历史 / 近期缓冲 / 当前消息各用一套语法）统一为单一发言者格式 `身份（QQ 号）：内容`；历史消息按 bot 回复边界分组为 `【上文】` 场景块，当前提问标记为 `【当前提问】`；格式化仅在 `build_messages()` 组装时做一次，不再存入 DB
+- LLM 会话落库：新增 `raw_content` 列存储原始轮次文本（含引用/转发上下文），解决多轮追问时历史丢失引用语境的问题；auto-memory 上下文读取优先 `raw_content`
+- System prompt 瘦身：移除与 messages 重复的 `当前提问者昵称/身份` 段，替换为消息格式说明；参与者列表简化为纯名称
+- `search_memories` 新增 `scope` 参数：支持按 `scope="user"` 限定查询范围
 
 ### 修复
 
+- LLM 上下文交替：修正 `build_messages()` 中 pending context flush 与当前场景分别生成连续 `role="user"` 的问题——现合并到同一 user message 用 `【上文】`/`【当前提问】` 在文本内区分，确保三家 provider 的 user/assistant 交替约束
 - `/profile @某人` 无响应：`on_command` 处理后 at 段可能丢失类型信息，现增加 CQ 码文本正则回退解析（`[CQ:at,qq=XXXX]`）
 - `/profile` 解除对 `daily_summary.model_cascade` 的依赖：现直接使用当前群的 provider/model，不再因级联配置空缺或引用不存在的 provider 而阻塞
 - `/profile` 消息窗口从 30 天缩至 7 天，数据收集增加 try/except 保护
