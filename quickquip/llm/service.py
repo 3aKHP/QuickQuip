@@ -341,6 +341,9 @@ class LLMService:
     def bind_recent_message_buffer(self, buffer: "RecentMessageBuffer | None") -> None:
         self.recent_message_buffer = buffer
 
+    def bind_image_preprocessor(self, preprocessor: ImagePreprocessor | None) -> None:
+        self.image_preprocessor = preprocessor
+
     def _clear_mcp_tools(self) -> None:
         for name in self._mcp_tool_names:
             self.tool_registry.unregister(name)
@@ -1623,6 +1626,10 @@ class LLMService:
         image_descriptions = []
         if self.image_preprocessor is not None and effective_image_urls:
             image_descriptions = await self.image_preprocessor.describe_images(effective_image_urls)
+            current_model = settings.model or provider.default_model
+            if current_model in provider.non_vision_models:
+                successful = {d.source_url for d in image_descriptions if d.success}
+                effective_image_urls = [u for u in effective_image_urls if u not in successful]
         default_history_limit = self._default_history_limit(chat_type)
         history = self.store.list_recent_conversation_messages(
             scope_key,

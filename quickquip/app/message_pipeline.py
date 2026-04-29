@@ -74,6 +74,29 @@ llm_service.bind_group_stats_tracker(stats_tracker)
 llm_service.bind_rule_switch(rule_switch)
 llm_service.bind_recent_message_buffer(recent_messages)
 
+# Wire up VisionImagePreprocessor when image_preprocessing is enabled.
+img_cfg = llm_service.config.image_preprocessing
+if img_cfg.enabled and img_cfg.provider_id:
+    vis_provider_cfg = llm_service.config.providers.get(img_cfg.provider_id)
+    if vis_provider_cfg is None:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning("image_preprocessing.provider_id %r not found in providers", img_cfg.provider_id)
+    else:
+        from dataclasses import replace
+        from quickquip.llm.provider import build_provider_client
+        from quickquip.llm.image_preprocessor import VisionImagePreprocessor
+        vis_client = build_provider_client(
+            replace(vis_provider_cfg, stream_enabled=False)
+        )
+        llm_service.bind_image_preprocessor(VisionImagePreprocessor(
+            provider_client=vis_client,
+            model=img_cfg.model or vis_provider_cfg.default_model,
+            max_tokens=img_cfg.max_tokens,
+            temperature=img_cfg.temperature,
+            prompt=img_cfg.prompt,
+        ))
+
 
 def record_group_message(
     group_id: int | str,

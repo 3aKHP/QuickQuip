@@ -158,6 +158,30 @@ model_cascade = [
 # 人格定义已拆分至 config/personas/ 目录，每个 .toml 文件对应一个人格。
 # 参见 config/personas.example/ 中的示例文件。
 
+# 风格模板 — 提取各 provider 重复的 style_overrides，通过 style_profile 引用。
+# provider 级仍可叠加 style_overrides 做微调（追加在模板之后）。
+[style_profiles]
+openai_family = """
+- 一定不要用AI助手的语言风格。你是聊天水群的群友。
+- 不要分点列举，用自然的连贯句子回复。
+- 不要在回复末尾追加反问句或引导性提问。
+- 角色扮演时不要加入过多的旁白性质的括号。
+"""
+claude_family = """
+- 一定不要用AI助手的语言风格。你是聊天水群的群友。
+- 角色扮演时不要加入过多的旁白性质的括号。
+"""
+
+# 图片预处理前置层：将图片通过视觉模型转为文本描述，使非视觉模型（如 deepseek-chat）
+# 也能"理解"图片内容。provider_id 指向一个支持 vision 的 provider。
+[image_preprocessing]
+enabled = false
+provider_id = ""        # 用于视觉理解的 provider ID（如 "openai-main"）
+model = ""              # 留空则用该 provider 的 default_model
+max_tokens = 300        # 单张图片描述最大 token 数
+temperature = 0.3       # 低温度确保描述准确
+prompt = ""             # 自定义 system prompt，留空使用内置默认
+
 [[providers]]
 id = "openai-main"
 protocol = "openai"
@@ -165,6 +189,7 @@ base_url = "https://your-openai-relay.example/v1"
 api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5.4"
 models = ["gpt-5.4", "gpt-5.2", "gpt-5.1"]
+style_profile = "openai_family"
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
@@ -180,6 +205,7 @@ base_url = "https://your-claude-relay.example/v1"
 api_key_env = "ANTHROPIC_API_KEY"
 default_model = "claude-sonnet-4-6"
 models = ["claude-sonnet-4-6", "claude-opus-4-5", "claude-sonnet-4-5"]
+style_profile = "claude_family"
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
@@ -191,6 +217,7 @@ base_url = "https://your-gemini-relay.example/v1beta"
 api_key_env = "GEMINI_API_KEY"
 default_model = "gemini-3.1-pro-high"
 models = ["gemini-3.1-pro-high", "gemini-3-flash-preview"]
+style_profile = "claude_family"
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048
@@ -202,6 +229,9 @@ base_url = "https://api.deepseek.com/v1"
 api_key_env = "DEEPSEEK_API_KEY"
 default_model = "deepseek-chat"
 models = ["deepseek-chat", "deepseek-reasoner"]
+style_profile = "openai_family"
+# non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 非视觉模型：触发图片预处理+剥离
+# non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 标记为非视觉模型，触发图片预处理+剥离
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

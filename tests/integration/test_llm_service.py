@@ -479,3 +479,139 @@ async def test_auto_memory_per_chat_override_beats_global_default(
 
     assert stub.call_count == 2
     assert [m["content"] for m in llm_service.list_group_memories(1005)] == ["override works"]
+
+
+# ── image preprocessor integration tests ──────────────────────────────
+
+
+async def test_image_preprocessor_called_with_images(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+
+    patch_provider_builder(lambda provider: StubProviderClient())
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    assert stub_preprocessor.call_count == 1
+    assert stub_preprocessor.last_urls == ["https://example.test/cat.png"]
+
+
+async def test_image_preprocessor_skipped_when_no_images(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+
+    patch_provider_builder(lambda provider: StubProviderClient())
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="纯文字提问",
+        image_urls=[],
+        recent_messages=[],
+    )
+    assert stub_preprocessor.call_count == 0
+
+
+async def test_non_vision_model_strips_images_from_request(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+
+    # Mark gpt-alt as non-vision in the provider config
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+
+    request = stub_client.last_request
+    # All user messages should have empty image_urls since the image was stripped
+    for msg in request.messages:
+        if msg.role == "user":
+            assert msg.image_urls == [], (
+                f"Expected empty image_urls for non-VLM model, got {msg.image_urls}"
+            )
+
+
+async def test_vision_model_keeps_images_in_request(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+
+    # non_vision_models is empty by default → all models treated as VLM
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+
+    request = stub_client.last_request
+    # At least one user message should still contain the image URL
+    image_urls_found = False
+    for msg in request.messages:
+        if msg.role == "user" and msg.image_urls:
+            image_urls_found = True
+            break
+    assert image_urls_found, "Expected image_urls preserved for VLM model"
+
+
+async def test_preprocessor_failure_preserves_image_urls(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubProviderClient
+    from quickquip.llm.image_preprocessor import ImageDescription
+
+    # Preprocessor that always fails
+    class _FailingPreprocessor:
+        async def describe_images(self, image_urls):
+            return [
+                ImageDescription(source_url=url, text_description="", success=False, error="fail")
+                for url in image_urls
+            ]
+
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+
+    wired_service.image_preprocessor = _FailingPreprocessor()
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+
+    request = stub_client.last_request
+    image_urls_found = False
+    for msg in request.messages:
+        if msg.role == "user" and msg.image_urls:
+            image_urls_found = True
+            break
+    assert image_urls_found, "Failed preprocessor should preserve image URLs"

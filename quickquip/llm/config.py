@@ -89,6 +89,16 @@ class PersonaConfig:
 
 
 @dataclass(slots=True)
+class ImagePreprocessingConfig:
+    enabled: bool = False
+    provider_id: str = ""
+    model: str = ""
+    max_tokens: int = 300
+    temperature: float = 0.3
+    prompt: str = ""
+
+
+@dataclass(slots=True)
 class ProviderConfig:
     id: str
     protocol: str
@@ -96,6 +106,7 @@ class ProviderConfig:
     api_key_env: str
     default_model: str
     models: list[str]
+    non_vision_models: list[str] = field(default_factory=list)
     timeout_seconds: float = 45.0
     temperature: float = 0.8
     max_output_tokens: int = 800
@@ -144,6 +155,8 @@ class LLMConfig:
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
     daily_summary: DailySummaryConfig = field(default_factory=DailySummaryConfig)
     daily_briefing: DailyBriefingConfig = field(default_factory=DailyBriefingConfig)
+    image_preprocessing: ImagePreprocessingConfig = field(default_factory=ImagePreprocessingConfig)
+    style_profiles: dict[str, str] = field(default_factory=dict)
     load_error: str | None = None
     source_path: Path | None = None
 
@@ -280,7 +293,8 @@ def _load_personas_from_dir(personas_dir: Path) -> list[dict[str, Any]]:
     return personas
 
 
-def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderConfig]:
+def _read_providers(raw_providers: list[dict[str, Any]], *, style_profiles: dict[str, str] | None = None) -> dict[str, ProviderConfig]:
+    style_profiles = style_profiles or {}
     providers: dict[str, ProviderConfig] = {}
     for entry in raw_providers:
         entry = _expand_env_value(entry)
@@ -288,6 +302,21 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
         if not provider_id:
             continue
         raw_headers = _as_dict(entry.get("headers"))
+
+        # Resolve style_profile reference: prepend the named profile to
+        # any per-provider style_overrides so the final string is the
+        # concatenation of shared + specific.
+        style_text = str(entry.get("style_overrides", "")).strip()
+        profile_name = str(entry.get("style_profile", "")).strip()
+        if profile_name:
+            if profile_name not in style_profiles:
+                raise ValueError(
+                    f"provider {provider_id} 引用了未知的 style_profile {profile_name!r}，"
+                    f"可用：{', '.join(sorted(style_profiles))}"
+                )
+            shared = style_profiles[profile_name].strip()
+            style_text = shared + ("\n" + style_text if style_text else "")
+
         providers[provider_id] = ProviderConfig(
             id=provider_id,
             protocol=str(entry.get("protocol", "")).strip().lower(),
@@ -295,10 +324,11 @@ def _read_providers(raw_providers: list[dict[str, Any]]) -> dict[str, ProviderCo
             api_key_env=str(entry.get("api_key_env", "")).strip(),
             default_model=str(entry.get("default_model", "")).strip(),
             models=[str(item).strip() for item in entry.get("models", []) if str(item).strip()],
+            non_vision_models=[str(item).strip() for item in entry.get("non_vision_models", []) if str(item).strip()],
             timeout_seconds=float(entry.get("timeout_seconds", 45)),
             temperature=float(entry.get("temperature", 0.8)),
             max_output_tokens=int(entry.get("max_output_tokens", 800)),
-            style_overrides=str(entry.get("style_overrides", "")).strip(),
+            style_overrides=style_text,
             stream_enabled=_as_bool(entry.get("stream_enabled", True), default=True),
             headers={str(k): str(v) for k, v in raw_headers.items()},
             user_agent=str(entry.get("user_agent", "")).strip(),
@@ -392,6 +422,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     mcp_raw = _expand_env_value(_as_dict(data.get("mcp")))
     daily_summary_raw = _expand_env_value(_as_dict(data.get("daily_summary")))
     daily_briefing_raw = _expand_env_value(_as_dict(data.get("daily_briefing")))
+    image_preprocessing_raw = _expand_env_value(_as_dict(data.get("image_preprocessing")))
+    raw_style_profiles = _expand_env_value(_as_dict(data.get("style_profiles")))
+    style_profiles = {str(k).strip(): str(v).strip() for k, v in raw_style_profiles.items() if str(k).strip() and str(v).strip()}
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
     auto_search_raw = _expand_env_value(_as_dict(triggers_raw.get("auto_search")))
@@ -440,7 +473,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             enabled=_as_bool(mcp_raw.get("enabled", False), default=False),
             servers=_read_mcp_servers(raw_mcp_servers if isinstance(raw_mcp_servers, list) else []),
         ),
-        providers=_read_providers(raw_providers if isinstance(raw_providers, list) else []),
+        providers=_read_providers(raw_providers if isinstance(raw_providers, list) else [], style_profiles=style_profiles),
         personas=personas,
         daily_summary=DailySummaryConfig(
             enabled=_as_bool(daily_summary_raw.get("enabled", False), default=False),
@@ -471,6 +504,15 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 if str(item).strip()
             ],
         ),
+        image_preprocessing=ImagePreprocessingConfig(
+            enabled=_as_bool(image_preprocessing_raw.get("enabled", False), default=False),
+            provider_id=str(image_preprocessing_raw.get("provider_id", "")).strip(),
+            model=str(image_preprocessing_raw.get("model", "")).strip(),
+            max_tokens=max(80, int(image_preprocessing_raw.get("max_tokens", 300))),
+            temperature=float(image_preprocessing_raw.get("temperature", 0.3)),
+            prompt=str(image_preprocessing_raw.get("prompt", "")).strip(),
+        ),
+        style_profiles=style_profiles,
         source_path=config_path,
     )
 

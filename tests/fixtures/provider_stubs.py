@@ -120,3 +120,30 @@ class StubReasoningLeakProviderClient:
             model=request.model,
             finish_reason="stop",
         )
+
+
+class StubImagePreprocessor:
+    """Records calls to describe_images and returns controlled results.
+
+    Duck-typed: no ImagePreprocessor base class needed for tests.
+    """
+
+    def __init__(self, descriptions: list[object] | None = None):
+        self.last_urls: list[str] = []
+        self.call_count = 0
+        self._descriptions = list(descriptions or [])
+
+    async def describe_images(self, image_urls: list[str]) -> list[object]:
+        self.last_urls = list(image_urls)
+        self.call_count += 1
+        from quickquip.llm.image_preprocessor import ImageDescription
+        if self._descriptions:
+            return self._descriptions
+        return [
+            ImageDescription(
+                source_url=url,
+                text_description=f"stub description of {url}",
+                success=True,
+            )
+            for url in image_urls
+        ]
