@@ -149,6 +149,8 @@ class LLMStore:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN canonical_name TEXT")
             if "message_id" not in conversation_columns:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN message_id TEXT")
+            if "raw_content" not in conversation_columns:
+                conn.execute("ALTER TABLE conversation_messages ADD COLUMN raw_content TEXT")
 
     def get_group_settings(self, group_id: int | str) -> GroupSettingsOverride:
         with self._connect() as conn:
@@ -226,12 +228,13 @@ class LLMStore:
         sender_name: str = "",
         canonical_name: str = "",
         message_id: str | None = None,
+        raw_content: str = "",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO conversation_messages (group_id, user_id, sender_name, canonical_name, role, content, message_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO conversation_messages (group_id, user_id, sender_name, canonical_name, role, content, message_id, raw_content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(group_id),
@@ -241,6 +244,7 @@ class LLMStore:
                     role,
                     content,
                     message_id,
+                    raw_content or None,
                     _utc_now(),
                 ),
             )
@@ -253,7 +257,7 @@ class LLMStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT user_id, sender_name, canonical_name, role, content
+                SELECT user_id, sender_name, canonical_name, role, content, raw_content
                 FROM conversation_messages
                 WHERE group_id = ?
                 ORDER BY id DESC
@@ -268,6 +272,7 @@ class LLMStore:
                 "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
                 "role": row["role"],
                 "content": row["content"],
+                "raw_content": "" if row["raw_content"] is None else str(row["raw_content"]),
             }
             for row in reversed(rows)
         ]
@@ -413,18 +418,23 @@ class LLMStore:
         user_id: int | str | None,
         query: str,
         limit: int,
+        scope: str | None = None,
     ) -> list[dict[str, object]]:
         tokens = _build_query_tokens(query)
-        sql = """
+        scope_clause: str
+        params: list[object]
+        if scope == "user":
+            scope_clause = "scope = 'user' AND user_id = ?"
+            params = [str(group_id), None if user_id is None else str(user_id)]
+        else:
+            scope_clause = "scope = 'group' OR (scope = 'user' AND user_id = ?)"
+            params = [str(group_id), None if user_id is None else str(user_id)]
+        sql = f"""
             SELECT id, scope, user_id, content, tags_json, source, confidence, created_at, updated_at
             FROM memories
             WHERE group_id = ?
-              AND (
-                    scope = 'group'
-                    OR (scope = 'user' AND user_id = ?)
-                  )
+              AND ({scope_clause})
         """
-        params: list[object] = [str(group_id), None if user_id is None else str(user_id)]
         if tokens:
             sql += " AND (" + " OR ".join("content LIKE ?" for _ in tokens) + ")"
             params.extend(f"%{token}%" for token in tokens)

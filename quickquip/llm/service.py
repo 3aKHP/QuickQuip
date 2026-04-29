@@ -20,11 +20,11 @@ from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.health import HealthReport, build_health_report, format_health_report
 from quickquip.llm.identity import IdentityIndex
+from quickquip.llm.image_preprocessor import ImagePreprocessor
 from quickquip.llm.mcp import MCPClientManager, MCPServerStatus
 from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
-    build_user_message_content,
     merge_image_urls,
 )
 from quickquip.llm.provider import (
@@ -148,6 +148,7 @@ class LLMService:
         db_path: str | Path = DB_PATH,
         vocab_path: str | Path = VOCAB_PATH,
         identity_path: str | Path = IDENTITY_PATH,
+        image_preprocessor: ImagePreprocessor | None = None,
     ):
         self.config_path = Path(config_path)
         self.store = LLMStore(db_path)
@@ -155,6 +156,7 @@ class LLMService:
         self.identity_path = Path(identity_path)
         self.tool_registry = ToolRegistry()
         self.mcp_manager = MCPClientManager()
+        self.image_preprocessor = image_preprocessor
         self.stats_tracker: "GroupStatsTracker | None" = None
         self.rule_switch: "GroupRuleSwitch | None" = None
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
@@ -1259,7 +1261,7 @@ class LLMService:
             for msg in reversed(history):
                 role = msg.get("role", "")
                 name = msg.get("canonical_name") or msg.get("sender_name", "?")
-                content = str(msg.get("content", "")).strip()
+                content = str(msg.get("raw_content") or msg.get("content", "")).strip()
                 if not content:
                     continue
                 tag = {"user": "群友", "assistant": "bot"}.get(role, role)
@@ -1296,8 +1298,12 @@ class LLMService:
                 return
 
             # ── dedup & store ───────────────────────────────────────
+            # Only query scope="user" for dedup so the target user's
+            # own auto memories are never crowded out of the LIMIT 50
+            # by other users' group-scoped entries.
             existing_results = self.store.search_memories(
                 scope_key, user_id=str(user_id), query="", limit=50,
+                scope="user",
             )
             existing_contents = [str(m.get("content", "")) for m in existing_results]
 
@@ -1311,7 +1317,7 @@ class LLMService:
                 self.store.add_memory(
                     scope_key,
                     content,
-                    scope="group",
+                    scope="user",
                     user_id=user_id,
                     source="auto",
                     confidence=_AUTO_MEMORY_DEFAULT_CONFIDENCE,
@@ -1337,34 +1343,6 @@ class LLMService:
         return merge_image_urls(*collections)
 
 
-    def _build_user_message_content(
-        self,
-        *,
-        prompt: str,
-        quoted_text: str = "",
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-        quoted_image_urls: list[str] | None = None,
-        forward_text: str = "",
-        forward_image_urls: list[str] | None = None,
-        sender_name: str = "",
-        user_id: str = "",
-        group_id: str = "",
-    ) -> str:
-        return build_user_message_content(
-            prompt=prompt,
-            quoted_text=quoted_text,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-            quoted_image_urls=quoted_image_urls,
-            forward_text=forward_text,
-            forward_image_urls=forward_image_urls,
-            max_quoted_message_chars=MAX_QUOTED_MESSAGE_CHARS,
-            identities=self._resolve_identities(group_id),
-            sender_name=sender_name,
-            user_id=str(user_id),
-        )
-
     def _build_messages(
         self,
         *,
@@ -1374,6 +1352,15 @@ class LLMService:
         recent_messages: list[dict[str, str]] | None,
         chat_type: str = "group",
         group_id: str = "",
+        current_sender_name: str = "",
+        current_user_id: str = "",
+        quoted_text: str = "",
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+        quoted_image_urls: list[str] | None = None,
+        forward_text: str = "",
+        forward_image_urls: list[str] | None = None,
+        image_descriptions: list[object] | None = None,
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -1383,6 +1370,15 @@ class LLMService:
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
             chat_type=chat_type,
             identities=self._resolve_identities(group_id),
+            current_sender_name=current_sender_name,
+            current_user_id=current_user_id,
+            quoted_text=quoted_text,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            quoted_image_urls=quoted_image_urls,
+            forward_text=forward_text,
+            forward_image_urls=forward_image_urls,
+            image_descriptions=image_descriptions,
         )
 
     async def generate_defectify_reply(
@@ -1623,19 +1619,10 @@ class LLMService:
         analysis_prompt = "\n".join(
             item for item in [trimmed_prompt, quoted_prompt] if item
         )[: self.config.runtime.max_prompt_chars]
-        effective_prompt = self._build_user_message_content(
-            prompt=trimmed_prompt,
-            quoted_text=quoted_prompt,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-            quoted_image_urls=normalized_quoted_image_urls,
-            forward_text=normalized_forward_text,
-            forward_image_urls=normalized_forward_image_urls,
-            sender_name=sender_name,
-            user_id=str(user_id),
-            group_id=str(chat_id),
-        )[: self.config.runtime.max_prompt_chars]
-        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls, normalized_forward_image_urls)
+        effective_image_urls = merge_image_urls(normalized_image_urls, normalized_quoted_image_urls, normalized_forward_image_urls)
+        image_descriptions = []
+        if self.image_preprocessor is not None and effective_image_urls:
+            image_descriptions = await self.image_preprocessor.describe_images(effective_image_urls)
         default_history_limit = self._default_history_limit(chat_type)
         history = self.store.list_recent_conversation_messages(
             scope_key,
@@ -1680,12 +1667,21 @@ class LLMService:
             session_preset=session_preset,
         )
         messages = self._build_messages(
-            prompt=effective_prompt,
+            prompt=trimmed_prompt,
             image_urls=effective_image_urls,
             history=history,
             recent_messages=recent_messages,
             chat_type=chat_type,
             group_id=str(chat_id),
+            current_sender_name=sender_name,
+            current_user_id=str(user_id),
+            quoted_text=quoted_prompt,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            quoted_image_urls=normalized_quoted_image_urls,
+            forward_text=normalized_forward_text,
+            forward_image_urls=normalized_forward_image_urls,
+            image_descriptions=image_descriptions or None,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -1732,14 +1728,26 @@ class LLMService:
             text = "模型没有返回可显示的文本。"
 
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
+        raw_turn_parts: list[str] = []
+        if normalized_quoted_text or normalized_quoted_image_urls:
+            q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
+            q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
+            raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
+        if normalized_forward_text or normalized_forward_image_urls:
+            fw_text = normalized_forward_text or "[合并转发消息]"
+            fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
+            raw_turn_parts.append(fw_text + fw_suffix)
+        raw_turn_parts.append(trimmed_prompt)
+        raw_turn = "\n".join(raw_turn_parts)
         self.store.append_conversation_message(
             scope_key,
             user_id,
             "user",
-            effective_prompt,
+            trimmed_prompt,
             sender_name=sender_name,
             canonical_name=current_identity.canonical_name,
             message_id=str(message_id) if message_id else None,
+            raw_content=raw_turn,
         )
         self.store.append_conversation_message(scope_key, None, "assistant", text)
         self.store.prune_conversation_messages(
@@ -1754,7 +1762,7 @@ class LLMService:
                     user_id=user_id,
                     sender_name=sender_name,
                     canonical_name=current_identity.canonical_name,
-                    user_text=effective_prompt,
+                    user_text=trimmed_prompt,
                     assistant_text=text,
                 )
             )

@@ -73,14 +73,15 @@ async def test_generate_private_reply_uses_private_system_prompt(
         prompt="私聊里继续我们刚才的话题",
     )
 
-    assert result["reply"] == "stub::gpt-test::私聊里继续我们刚才的话题"
+    assert "私聊里继续我们刚才的话题" in result["reply"]
     sys_prompt = stub.last_request.system_prompt
     assert "当前会话类型：私聊" in sys_prompt
     assert "当前私聊对象 QQ：3003" in sys_prompt
     assert "阿桃在私聊里更愿意长篇回复。" in sys_prompt
-    # 50 history + 1 current prompt
+    last_content = stub.last_request.messages[-1].content
+    assert "私聊里继续我们刚才的话题" in last_content
+    # Alternating user/assistant seed produces 25 user scenes + 25 assistant + 1 current = 51
     assert len(stub.last_request.messages) == 51
-    assert stub.last_request.messages[-1].content == "私聊里继续我们刚才的话题"
 
 
 def test_end_private_session_clears_history(configured_service):

@@ -82,9 +82,6 @@ async def test_generate_reply_populates_system_prompt_and_tools(
     req = stub.last_request
     assert req is not None
     sys_prompt = req.system_prompt
-    # structural, not verbatim
-    assert "2002" in sys_prompt  # current asker QQ
-    assert "镜子" in sys_prompt  # canonical name
     # Vocab/identity content flows in
     assert "镜千翎" in sys_prompt or "哈基镜" in sys_prompt
 
@@ -102,14 +99,16 @@ async def test_generate_reply_populates_system_prompt_and_tools(
     }
     assert expected <= tool_names
 
-    # Recent messages get injected as a leading assistant/history message
+    # Recent messages get injected as context in the first user message
     history_msg = req.messages[0].content
     assert "昨晚排位真红温。" in history_msg
     assert "@4s 哈基镜今天又在发病。" in history_msg
 
-    # Last message is the user's prompt, no leaked echo in earlier messages
-    assert req.messages[-1].content.endswith("哈基镜是区吗？")
-    assert all(m.content != "哈基镜是区吗？" for m in req.messages[:-1])
+    # Current speaker identity is in the last (current scene) message
+    last_content = req.messages[-1].content
+    assert "哈基镜是区吗？" in last_content
+    assert "2002" in last_content
+    assert "镜子" in last_content
 
 
 async def test_quoted_reply_content_in_user_message(wired_service, patch_provider_builder):
