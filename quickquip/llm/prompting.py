@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from quickquip.llm.tools import LLMConversationMessage, LLMToolSpec
+from quickquip.llm.tools import (
+    LLMConversationMessage,
+    LLMSceneMessage,
+    LLMToolSpec,
+    SCENE_MARKER_CONTEXT,
+    SCENE_MARKER_CURRENT,
+)
 
 
 def format_participant_label(
@@ -178,7 +184,6 @@ def build_system_prompt(
 ) -> str:
     now_cst = datetime.now(ZoneInfo(beijing_timezone))
     weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-    identity = identities.resolve_user(user_id, sender_name)
 
     lines: list[str] = []
 
@@ -198,8 +203,13 @@ def build_system_prompt(
     lines.append("认人规则：")
     lines.append("- 不同 QQ 号默认视为不同的人，不要把两个人合并成同一发言者。")
     lines.append("- 优先按 QQ 号识别身份，其次再参考当前显示名、标准身份和别名。")
-    lines.append("- 当上下文里已经标出“标准身份（QQ …）”时，后续继续沿用，不要自行改口或张冠李戴。")
+    lines.append('- 当上下文里已经标出“标准身份（QQ …）”时，后续继续沿用，不要自行改口或张冠李戴。')
     lines.append("- 只输出给用户看的最终回答，禁止输出任何内部推理、思维链、草稿、隐藏分析或 <think>/<thinking>/<reasoning> 之类标签。")
+
+    lines.append("消息格式说明：")
+    lines.append("- 所有消息均标注了发言者身份，格式为：身份（QQ 号）或 身份（QQ 号，当前显示名）")
+    lines.append(f"- 以「{SCENE_MARKER_CURRENT}」标记的是当前需要回复的消息")
+    lines.append(f"- 以「{SCENE_MARKER_CONTEXT}」标记的是上文对话历史")
 
     lines.append("当前元数据：")
     lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")
@@ -210,33 +220,16 @@ def build_system_prompt(
     else:
         lines.append("- 当前会话类型：群聊")
         lines.append(f"- 当前群号：{group_id}")
-    lines.append(f"当前提问者昵称：{sender_name}")
-    lines.append("当前提问者身份：")
-    lines.append(f"- QQ：{identity.user_id}")
-    lines.append(f"- 当前显示名：{sender_name}")
-    if identity.is_registered:
-        lines.append(f"- 标准身份：{identity.canonical_name}")
-        if identity.aliases:
-            lines.append(f"- 常见别名：{'、'.join(identity.aliases)}")
-        if identity.note:
-            lines.append(f"- 备注：{identity.note}")
-    else:
-        lines.append("- 标准身份：未登记")
     if chat_type == "private":
         lines.append("当前处于一对一私聊场景，可以比群聊更自然、细致，但不要失去当前人格的底色。")
     if session_preset.strip():
         lines.append("本次会话的附加设定：")
         lines.append(session_preset.strip())
     if participants:
-        participant_lines = ["当前已知参与者："]
+        participant_lines = ["当前对话参与成员："]
         for item in participants[:8]:
-            label = format_participant_label(
-                user_id=str(item.get("user_id", "")),
-                sender_name=str(item.get("sender_name", "")),
-                canonical_name=str(item.get("canonical_name", "")),
-                include_unregistered_note=True,
-            )
-            participant_lines.append(f"- {label}")
+            name = item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
+            participant_lines.append(f"- {name}")
         lines.append("\n".join(participant_lines))
 
     if memories:
@@ -296,6 +289,350 @@ def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_c
         return match.canonical_name or stored_canonical
     return stored_canonical
 
+
+# ---------------------------------------------------------------------------
+# Scene-based message assembly (new pipeline)
+# ---------------------------------------------------------------------------
+
+def _build_scenes_from_history(
+    history: list[dict[str, str]],
+    *,
+    identities=None,
+) -> list[LLMSceneMessage]:
+    """Group consecutive human messages between bot replies into scenes.
+
+    Each stretch of consecutive user messages becomes one scene.
+    An assistant message flushes the pending scene and acts as a boundary.
+    """
+    scenes: list[LLMSceneMessage] = []
+    pending_speakers: list[dict[str, str]] = []
+    pending_images: list[str] = []
+
+    for item in history:
+        if item["role"] not in {"user", "assistant"} or not item.get("content", "").strip():
+            continue
+
+        if item["role"] == "assistant":
+            if pending_speakers:
+                scenes.append(LLMSceneMessage(
+                    speakers=pending_speakers,
+                    images=pending_images,
+                    scene_type="history",
+                ))
+                pending_speakers = []
+                pending_images = []
+        else:
+            user_id = item.get("user_id", "")
+            sender_name = item.get("sender_name", "")
+            raw_text = item.get("raw_content") or item.get("content", "")
+            canonical_name = _resolve_canonical_name(
+                identities, user_id, sender_name, item.get("canonical_name", ""),
+            )
+            pending_speakers.append({
+                "user_id": user_id,
+                "sender_name": sender_name,
+                "canonical_name": canonical_name,
+                "text": raw_text,
+            })
+
+    if pending_speakers:
+        scenes.append(LLMSceneMessage(
+            speakers=pending_speakers,
+            images=pending_images,
+            scene_type="history",
+        ))
+
+    return scenes
+
+
+def _build_scene_from_recent_buffer(
+    recent_messages: list[dict[str, str]],
+    *,
+    max_trigger_context_messages: int,
+    identities=None,
+) -> LLMSceneMessage | None:
+    """Convert the recent-message buffer into a single scene."""
+    if not recent_messages:
+        return None
+
+    speakers: list[dict[str, str]] = []
+    for item in recent_messages[-max_trigger_context_messages:]:
+        user_id = item["user_id"]
+        sender_name = item.get("sender_name", "")
+        canonical_name = _resolve_canonical_name(
+            identities, user_id, sender_name, item.get("canonical_name", ""),
+        )
+        speakers.append({
+            "user_id": user_id,
+            "sender_name": sender_name,
+            "canonical_name": canonical_name,
+            "text": item["text"],
+        })
+
+    return LLMSceneMessage(
+        speakers=speakers,
+        images=[],
+        scene_type="recent",
+    )
+
+
+def _build_scene_from_current_message(
+    *,
+    prompt: str,
+    image_urls: list[str],
+    sender_name: str,
+    user_id: str,
+    quoted_text: str = "",
+    quoted_sender_name: str = "",
+    quoted_user_id: str = "",
+    quoted_image_urls: list[str] | None = None,
+    forward_text: str = "",
+    forward_image_urls: list[str] | None = None,
+    identities=None,
+    image_descriptions: list[object] | None = None,
+) -> LLMSceneMessage:
+    """Build the current scene from the user's message and its context.
+
+    Quoted and forwarded messages appear as inline speakers within the
+    same scene, preserving conversational context without nesting.
+    """
+    speakers: list[dict[str, str]] = []
+    all_images: list[str] = list(image_urls or [])
+
+    # Quoted message appears as an inline contextual speaker
+    if quoted_text.strip() or (quoted_image_urls or []):
+        q_user_id = quoted_user_id.strip()
+        q_sender = quoted_sender_name.strip()
+        q_canonical = _resolve_canonical_name(identities, q_user_id, q_sender, "")
+        q_text = quoted_text.strip()
+        if q_text:
+            suffix = f" [附图 {len(quoted_image_urls)} 张]" if quoted_image_urls else ""
+            q_text += suffix
+        else:
+            q_text = f"[图片 {len(quoted_image_urls or [])} 张]"
+        speakers.append({
+            "user_id": q_user_id,
+            "sender_name": q_sender,
+            "canonical_name": q_canonical,
+            "text": f"[引用] {q_text}",
+        })
+        if quoted_image_urls:
+            all_images.extend(quoted_image_urls)
+
+    # Forwarded content as inline contextual speaker
+    if forward_text.strip() or (forward_image_urls or []):
+        fw_text = forward_text.strip() or "[合并转发消息]"
+        if forward_image_urls:
+            fw_text += f" [附图 {len(forward_image_urls)} 张]"
+        speakers.append({
+            "user_id": "",
+            "sender_name": "转发",
+            "canonical_name": "转发消息",
+            "text": f"[转发] {fw_text}",
+        })
+        if forward_image_urls:
+            all_images.extend(forward_image_urls)
+
+    # Image pre-processing results as context lines
+    if image_descriptions:
+        for desc in image_descriptions:
+            if hasattr(desc, 'success') and desc.success and hasattr(desc, 'text_description'):
+                speakers.append({
+                    "user_id": "",
+                    "sender_name": "图片解析",
+                    "canonical_name": "图片解析",
+                    "text": f"{desc.text_description}",
+                })
+
+    # Current speaker (always last in the scene so the model knows who to answer)
+    current_canonical = _resolve_canonical_name(identities, user_id, sender_name, "")
+    speakers.append({
+        "user_id": user_id,
+        "sender_name": sender_name,
+        "canonical_name": current_canonical,
+        "text": prompt or "[图片消息]",
+    })
+
+    seen: set[str] = set()
+    deduped_images: list[str] = []
+    for url in all_images:
+        if url.strip() and url not in seen:
+            seen.add(url)
+            deduped_images.append(url)
+
+    return LLMSceneMessage(
+        speakers=speakers,
+        images=deduped_images,
+        scene_type="current",
+    )
+
+
+def _render_scene_to_text(
+    scene: LLMSceneMessage,
+    *,
+    identities=None,
+) -> str:
+    """Render a scene to the unified speaker format.
+
+    Called once at assembly time, never stored.
+    """
+    marker = SCENE_MARKER_CURRENT if scene.scene_type == "current" else SCENE_MARKER_CONTEXT
+    lines = [marker]
+    for speaker in scene.speakers:
+        label = format_participant_label(
+            user_id=speaker.get("user_id", ""),
+            sender_name=speaker.get("sender_name", ""),
+            canonical_name=speaker.get("canonical_name", ""),
+            include_unregistered_note=True,
+        )
+        lines.append(f"{label}：{speaker['text']}")
+    return "\n".join(lines)
+
+
+def build_messages(
+    *,
+    prompt: str,
+    image_urls: list[str],
+    history: list[dict[str, str]],
+    recent_messages: list[dict[str, str]] | None,
+    max_trigger_context_messages: int,
+    chat_type: str = "group",
+    identities=None,
+    current_sender_name: str = "",
+    current_user_id: str = "",
+    quoted_text: str = "",
+    quoted_sender_name: str = "",
+    quoted_user_id: str = "",
+    quoted_image_urls: list[str] | None = None,
+    forward_text: str = "",
+    forward_image_urls: list[str] | None = None,
+    image_descriptions: list[object] | None = None,
+) -> list[LLMConversationMessage]:
+    """Build the final messages array using scene-based grouping.
+
+    History + recent buffer + current message are assembled into scenes,
+    each becoming a single role="user" message.  Assistant messages
+    from history are interleaved as role="assistant".
+
+    The resulting array maintains user/assistant alternation, which
+    satisfies the ordering requirements of all three providers.
+    """
+    messages: list[LLMConversationMessage] = []
+
+    # Group pending human messages into a scene, flush when we hit an
+    # assistant message.
+    pending_speakers: list[dict[str, str]] = []
+    pending_images: list[str] = []
+
+    def _flush_pending():
+        if not pending_speakers:
+            return
+        scene = LLMSceneMessage(
+            speakers=list(pending_speakers),
+            images=list(pending_images),
+            scene_type="history",
+        )
+        messages.append(LLMConversationMessage(
+            role="user",
+            content=_render_scene_to_text(scene, identities=identities),
+            image_urls=scene.images,
+        ))
+        pending_speakers.clear()
+        pending_images.clear()
+
+    for item in history:
+        if item["role"] not in {"user", "assistant"} or not item.get("content", "").strip():
+            continue
+
+        if item["role"] == "assistant":
+            _flush_pending()
+            messages.append(LLMConversationMessage(
+                role="assistant",
+                content=item["content"],
+            ))
+        else:
+            user_id = item.get("user_id", "")
+            sender_name = item.get("sender_name", "")
+            raw_text = item.get("raw_content") or item.get("content", "")
+            canonical_name = _resolve_canonical_name(
+                identities, user_id, sender_name, item.get("canonical_name", ""),
+            )
+            pending_speakers.append({
+                "user_id": user_id,
+                "sender_name": sender_name,
+                "canonical_name": canonical_name,
+                "text": raw_text,
+            })
+
+    # Recent buffer: merge into pending rather than creating a separate scene,
+    # so the boundary between recent buffer and history is invisible to the LLM.
+    if recent_messages:
+        for item in recent_messages[-max_trigger_context_messages:]:
+            user_id = item["user_id"]
+            sender_name = item.get("sender_name", "")
+            canonical_name = _resolve_canonical_name(
+                identities, user_id, sender_name, item.get("canonical_name", ""),
+            )
+            pending_speakers.append({
+                "user_id": user_id,
+                "sender_name": sender_name,
+                "canonical_name": canonical_name,
+                "text": item["text"],
+            })
+
+    # Build current scene first, then merge any pending context into it.
+    # This avoids consecutive role="user" messages and keeps the
+    # user/assistant alternation that all three providers require.
+    current_scene = _build_scene_from_current_message(
+        prompt=prompt,
+        image_urls=image_urls,
+        sender_name=current_sender_name,
+        user_id=current_user_id,
+        quoted_text=quoted_text,
+        quoted_sender_name=quoted_sender_name,
+        quoted_user_id=quoted_user_id,
+        quoted_image_urls=quoted_image_urls,
+        forward_text=forward_text,
+        forward_image_urls=forward_image_urls,
+        identities=identities,
+        image_descriptions=image_descriptions,
+    )
+
+    if pending_speakers:
+        # Merge context into the current scene so we emit a single
+        # role="user" message with 【上文】/【当前提问】 separating
+        # the two parts in text.
+        context_text = _render_scene_to_text(
+            LLMSceneMessage(
+                speakers=list(pending_speakers),
+                images=list(pending_images),
+                scene_type="history",
+            ),
+            identities=identities,
+        )
+        current_text = _render_scene_to_text(current_scene, identities=identities)
+        combined_images = merge_image_urls(
+            pending_images, current_scene.images,
+        )
+        messages.append(LLMConversationMessage(
+            role="user",
+            content=context_text + "\n" + current_text,
+            image_urls=combined_images,
+        ))
+    else:
+        messages.append(LLMConversationMessage(
+            role="user",
+            content=_render_scene_to_text(current_scene, identities=identities),
+            image_urls=current_scene.images,
+        ))
+
+    return messages
+
+
+# ---------------------------------------------------------------------------
+# Deprecated functions — retained for backward-compat tests, removed in
+# the cleanup phase.
+# ---------------------------------------------------------------------------
 
 def _build_recent_messages_block(
     recent_messages: list[dict[str, str]],
@@ -436,43 +773,3 @@ def build_user_message_content(
     else:
         lines.append("当前用户没有额外文字，请优先围绕上述消息作答。")
     return "\n".join(lines)
-
-
-def build_messages(
-    *,
-    prompt: str,
-    image_urls: list[str],
-    history: list[dict[str, str]],
-    recent_messages: list[dict[str, str]] | None,
-    max_trigger_context_messages: int,
-    chat_type: str = "group",
-    identities=None,
-) -> list[LLMConversationMessage]:
-    messages = normalize_history(history, identities=identities)
-
-    if recent_messages:
-        recent_block = _build_recent_messages_block(
-            recent_messages,
-            max_trigger_context_messages=max_trigger_context_messages,
-            chat_type=chat_type,
-            identities=identities,
-        )
-        # Prepend recent_block to the current prompt so the time order is:
-        # history → recent snapshot → current question
-        combined_prompt = recent_block + "\n\n" + prompt if prompt.strip() else recent_block
-        messages.append(
-            LLMConversationMessage(
-                role="user",
-                content=combined_prompt,
-                image_urls=list(image_urls),
-            )
-        )
-    else:
-        messages.append(
-            LLMConversationMessage(
-                role="user",
-                content=prompt,
-                image_urls=list(image_urls),
-            )
-        )
-    return messages

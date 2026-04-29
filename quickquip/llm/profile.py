@@ -10,13 +10,6 @@ _TEMPERATURE = 0.9
 _MAX_OUTPUT_TOKENS = 300
 
 
-def _parse_cascade_entry(entry: str, fallback_provider: str, fallback_model: str) -> tuple[str, str]:
-    if entry == "@default":
-        return fallback_provider, fallback_model
-    parts = entry.split("/", 1)
-    return (parts[0], parts[1]) if len(parts) == 2 else (entry, fallback_model)
-
-
 async def generate_profile(
     target_name: str,
     message_count: int,
@@ -24,8 +17,8 @@ async def generate_profile(
     recent_samples: list[str],
     llm_config: LLMConfig,
     system_prompt: str,
-    default_provider_id: str,
-    default_model: str,
+    provider_id: str,
+    model: str,
 ) -> tuple[str, str]:
     sections = [
         f"请以你的语气，写一段关于群友「{target_name}」的简短人物志（约 100 字）。",
@@ -38,30 +31,19 @@ async def generate_profile(
         sections.append("\n近期发言样本：\n" + "\n".join(f"- {s}" for s in recent_samples))
 
     user_message = LLMConversationMessage(role="user", content="\n".join(sections))
-    cascade = llm_config.daily_summary.model_cascade or [f"{default_provider_id}/{default_model}"]
-    last_error: LLMProviderError | None = None
-
-    for entry in cascade:
-        provider_id, model = _parse_cascade_entry(entry, default_provider_id, default_model)
-        provider_config = llm_config.providers.get(provider_id)
-        if provider_config is None:
-            continue
-        try:
-            client = build_provider_client(replace(provider_config, stream_enabled=False))
-            response = await client.complete(LLMRequest(
-                model=model,
-                system_prompt=system_prompt,
-                messages=[user_message],
-                temperature=_TEMPERATURE,
-                max_output_tokens=_MAX_OUTPUT_TOKENS,
-                tools=[],
-                allow_tool_calls=False,
-            ))
-            if response.text.strip():
-                return response.text.strip(), f"{provider_id}/{model}"
-        except LLMProviderError as exc:
-            last_error = exc
-
-    if last_error is not None:
-        raise LLMProviderError(f"所有模型均失败：{last_error}")
-    raise LLMProviderError("cascade 为空或所有 provider 均未配置")
+    provider_config = llm_config.providers.get(provider_id)
+    if provider_config is None:
+        raise LLMProviderError(f"Provider 未配置：{provider_id}")
+    client = build_provider_client(replace(provider_config, stream_enabled=False))
+    response = await client.complete(LLMRequest(
+        model=model,
+        system_prompt=system_prompt,
+        messages=[user_message],
+        temperature=_TEMPERATURE,
+        max_output_tokens=_MAX_OUTPUT_TOKENS,
+        tools=[],
+        allow_tool_calls=False,
+    ))
+    if not response.text.strip():
+        raise LLMProviderError("LLM 返回空文本")
+    return response.text.strip(), f"{provider_id}/{model}"

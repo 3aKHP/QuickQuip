@@ -47,3 +47,21 @@ class ToolExecutionContext:
     model: str
     chat_scope: str | None = None
     chat_type: str = "group"
+
+
+@dataclass(slots=True)
+class LLMSceneMessage:
+    """A group of consecutive human messages between bot replies.
+
+    Internal intermediate representation used during prompt assembly.
+    Each scene becomes a single role="user" message at provider time,
+    maintaining user/assistant alternation across all three providers.
+    """
+
+    speakers: list[dict[str, str]]
+    images: list[str]
+    scene_type: str  # "history", "recent", or "current"
+
+
+SCENE_MARKER_CONTEXT = "【上文】"
+SCENE_MARKER_CURRENT = "【当前提问】"

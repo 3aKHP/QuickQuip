@@ -119,6 +119,7 @@ async def build_health_report(
     include_generation: bool = True,
     generation_config_path: Path = Path("config/generation.toml"),
     probe_provider: bool = False,
+    auto_memory_stats: dict[str, int] | None = None,
 ) -> HealthReport:
     started = time.monotonic()
     items: list[HealthCheckItem] = []
@@ -264,6 +265,28 @@ async def build_health_report(
                     },
                 )
             )
+
+    if auto_memory_stats is not None:
+        successes = auto_memory_stats.get("successes", 0)
+        failures = auto_memory_stats.get("failures", 0)
+        active_scopes = auto_memory_stats.get("active_scopes", 0)
+        total = successes + failures
+        fail_rate = f"{failures / total:.1%}" if total else "N/A"
+        status = "ok" if failures == 0 or (total and failures / total < 0.3) else "warn"
+        items.append(
+            HealthCheckItem(
+                "auto_memory",
+                status,
+                f"已抽取 {successes} 次 / 失败 {failures} 次 / {active_scopes} 个活跃 scope",
+                {
+                    "successes": successes,
+                    "failures": failures,
+                    "fail_rate": fail_rate,
+                    "active_scopes": active_scopes,
+                    "batch_interval_turns": 10,
+                },
+            )
+        )
 
     bindings_ok = recent_buffer_bound and (chat_type == "private" or (stats_bound and rule_switch_bound))
     items.append(

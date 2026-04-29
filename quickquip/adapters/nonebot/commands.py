@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import hashlib
+import logging
 import random
 import re
 import shlex
@@ -25,6 +26,8 @@ from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, for
 from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 from quickquip.tieba.service import tieba_service
+
+logger = logging.getLogger(__name__)
 
 
 def _is_private_chat(event) -> bool:
@@ -334,6 +337,62 @@ def _format_generated_lyrics(result, *, heading: str) -> str:
         lines.append("歌词：")
         lines.append(result.lyrics)
     return "\n".join(lines)
+
+
+def _chunk_text(content: str, max_chars: int = 600) -> list[str]:
+    """Split long text at paragraph/line boundaries for merge-forward nodes."""
+    if len(content) <= max_chars:
+        return [content]
+    chunks: list[str] = []
+    remaining = content
+    while len(remaining) > max_chars:
+        pos = remaining.rfind("\n\n", 0, max_chars)
+        if pos != -1:
+            chunks.append(remaining[:pos].rstrip())
+            remaining = remaining[pos + 2:].lstrip()
+            continue
+        pos = remaining.rfind("\n", 0, max_chars)
+        if pos != -1:
+            chunks.append(remaining[:pos])
+            remaining = remaining[pos + 1:]
+            continue
+        chunks.append(remaining[:max_chars])
+        remaining = remaining[max_chars:]
+    if remaining.strip():
+        chunks.append(remaining.strip())
+    return chunks
+
+
+async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
+    """Send lyrics as merge-forward in groups to avoid flooding chat."""
+    formatted = _format_generated_lyrics(lyric_result, heading=heading)
+    group_id = getattr(event, "group_id", None)
+    if group_id is not None:
+        chunks = _chunk_text(formatted)
+        try:
+            await bot.call_api(
+                "send_group_forward_msg",
+                group_id=group_id,
+                messages=[
+                    {
+                        "type": "node",
+                        "data": {
+                            "name": "歌词",
+                            "uin": str(bot.self_id),
+                            "content": [{"type": "text", "data": {"text": chunk}}],
+                        },
+                    }
+                    for chunk in chunks
+                ],
+            )
+            return
+        except Exception:
+            pass
+    # Fallback: direct message
+    if group_id is not None:
+        await bot.send_group_msg(group_id=group_id, message=formatted)
+    else:
+        await bot.send_private_msg(user_id=event.user_id, message=formatted)
 
 
 def register_commands(on_command, Message, MessageSegment) -> None:
@@ -953,7 +1012,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
                 await music_cmd.finish(f"歌词生成异常：{type(exc).__name__}: {exc}")
 
             heading = "歌词已生成" if parsed.action == "lyrics" else "歌词已编辑"
-            await music_cmd.finish(_format_generated_lyrics(lyric_result, heading=heading))
+            await _send_lyrics_forward(bot, event, lyric_result, heading)
+            await music_cmd.finish()
 
         if not rate_limiter.allow("music_gen", event.user_id, group_id=group_id):
             await music_cmd.finish("音乐生成过于频繁，请稍后再试")
@@ -1007,7 +1067,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await music_cmd.finish(f"音乐生成异常：{type(exc).__name__}: {exc}")
 
         if lyric_result is not None:
-            await music_cmd.send(_format_generated_lyrics(lyric_result, heading="已自动生成歌词并开始谱曲"))
+            await _send_lyrics_forward(bot, event, lyric_result, "已自动生成歌词并开始谱曲")
         else:
             lines = [f"音乐已生成（模型：{default_music_model.id}）"]
             if parsed.instrumental:
@@ -1351,6 +1411,10 @@ def register_commands(on_command, Message, MessageSegment) -> None:
                     target_user_id = qq
                     break
         if not target_user_id:
+            m = re.search(r"\[CQ:at,qq=(\d+)\]", str(event.get_message()))
+            if m:
+                target_user_id = m.group(1)
+        if not target_user_id:
             await profile_cmd.finish("用法：/profile @某人")
 
         group_id = event.group_id
@@ -1378,10 +1442,15 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         system_prompt = "\n\n".join(system_parts)
 
         now = time()
-        memories_raw, all_msgs = await asyncio.gather(
-            asyncio.to_thread(llm_service.store.search_memories, str(group_id), str(target_user_id), target_name, 8),
-            asyncio.to_thread(daily_collector.read_window, group_id, now - 30 * 86400, now),
-        )
+        try:
+            memories_raw, all_msgs = await asyncio.gather(
+                asyncio.to_thread(llm_service.store.search_memories, str(group_id), str(target_user_id), target_name, 8),
+                asyncio.to_thread(daily_collector.read_window, group_id, now - 7 * 86400, now),
+            )
+        except Exception:
+            logger.exception("profile data collection failed for group=%s user=%s", group_id, target_user_id)
+            await profile_cmd.finish("收集用户数据时出错，请稍后重试")
+
         memories = [m["content"] for m in memories_raw if m.get("content")]
         samples = [
             m["text"][:80]
@@ -1398,8 +1467,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
                 recent_samples=samples,
                 llm_config=llm_service.config,
                 system_prompt=system_prompt,
-                default_provider_id=provider.id,
-                default_model=effective_model,
+                provider_id=provider.id,
+                model=effective_model,
             )
         except LLMProviderError as exc:
             await profile_cmd.finish(f"人物志生成失败：{exc}")
