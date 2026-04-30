@@ -100,12 +100,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 - `WEB_ADMIN_COOKIE_SECURE`
   `auto | true | false`
 
-`web_api.py` 会在启动时自动读取：
-
-- 根目录 `.env`
-- `dev/.env`（若存在，则覆盖同名变量）
-
-因此本地运行和云端 Docker 部署都可以继续沿用项目既有的环境变量管理方式。
+`web_api.py` 会在启动时读取项目环境变量文件，并允许运行环境通过同名变量覆盖默认值。
 
 ---
 

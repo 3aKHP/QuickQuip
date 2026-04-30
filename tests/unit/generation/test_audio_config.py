@@ -51,3 +51,41 @@ def test_load_audio_generation_from_generation_file(tmp_path: Path):
     assert resolved.model_config.voice_id == "male-qn-qingse"
     assert resolved.model_config.subtitle_enable is True
 
+
+def test_load_asr_config_from_generation_file(tmp_path: Path):
+    config_path = tmp_path / "generation.toml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            [asr]
+            enabled = true
+            default_model = "whisper"
+            max_audio_bytes = 12345
+
+            [[asr.providers]]
+            id = "openai-asr"
+            protocol = "openai_transcriptions"
+            base_url = "https://example.test/v1"
+            api_key_env = "OPENAI_API_KEY"
+
+            [[asr.providers.models]]
+            id = "whisper"
+            model = "whisper-1"
+            language = "zh"
+            prompt = "群聊语音"
+            response_format = "json"
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    loaded = load_generation_config(config_path)
+
+    assert loaded.load_error is None
+    assert loaded.asr.enabled is True
+    assert loaded.asr.max_audio_bytes == 12345
+    resolved = loaded.asr.resolve_model()
+    assert resolved is not None
+    assert resolved.provider.id == "openai-asr"
+    assert resolved.model_config.language == "zh"
+    assert resolved.model_config.prompt == "群聊语音"

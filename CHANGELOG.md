@@ -12,6 +12,7 @@
 - 图像预处理抽象接口：`ImagePreprocessor` ABC + `NoOpImagePreprocessor` 默认实现，预留 OCR / 多模态模型转述文本的钩子点
 - `LLMSceneMessage` 场景块中间表示：支持将 bot 回复间的连续人类发言归入统一场景
 - Web 管理后台新增"资料"页：支持在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件，并可从示例模板创建群级资料目录
+- ASR 语音理解：支持将 OneBot V11 `record` 语音消息转写为文字并注入 LLM 上下文；优先使用协议端自带转写文本，缺失时通过 `get_record` 获取音频并调用 `[asr]` provider；首期支持 OpenAI-compatible `/audio/transcriptions`
 
 ### 变更
 
@@ -20,6 +21,7 @@
 - System prompt 瘦身：移除与 messages 重复的 `当前提问者昵称/身份` 段，替换为消息格式说明；参与者列表简化为纯名称
 - `search_memories` 新增 `scope` 参数：支持按 `scope="user"` 限定查询范围
 - `/profile @某人` 支持 `short` / `middle` / `long` / `full` 四档人物志长度；默认 `middle` 为约 1600 字长文，`long` 扩大上下文和输出规模，`full` 在约 400k 输入 token 上限内尽量纳入该群已落盘的完整发言记录，并通过合并转发发送完整正文
+- `config/generation.toml` 新增 `[asr]` 配置区块，和图片生成、语音生成、音乐生成统一收口；HTTPS 调用优先使用 certifi CA，降低 Windows 环境下证书链缺失导致的请求失败概率
 
 ### 修复
 

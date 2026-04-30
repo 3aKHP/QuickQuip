@@ -223,6 +223,43 @@
 
 `[[audio.providers]]` 和 `[[audio.providers.models]]` 结构类似图片，额外包含 `supported_formats`、`default_sample_rate`、`default_bitrate`、`default_voice`、`voice_style_options` 等语音特有字段。
 
+### `[asr]` — 语音识别
+
+ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM 上下文。协议端若已在消息段中提供 `text` / `transcript` / `transcription` 字段，QuickQuip 会优先使用该文本；否则通过 OneBot `get_record` 获取音频文件，再调用 ASR provider。
+
+| 键 | 说明 |
+|----|------|
+| `enabled` | 全局开关 |
+| `default_model` | 默认 ASR 模型 ID |
+| `max_audio_bytes` | 单条语音最大字节数，超过后跳过转写 |
+
+当前支持的 provider protocol：
+
+| protocol | 说明 |
+|----------|------|
+| `openai_transcriptions` | OpenAI-compatible `POST /audio/transcriptions`，使用 multipart/form-data 上传音频 |
+
+`[[asr.providers]]` 字段：
+
+| 键 | 说明 |
+|----|------|
+| `id` | Provider ID |
+| `protocol` | 协议类型，当前为 `openai_transcriptions` |
+| `base_url` | API 地址，如 `https://api.openai.com/v1` |
+| `api_key_env` | API key 环境变量名 |
+| `timeout_seconds` | 超时（秒） |
+
+每个 provider 下用 `[[asr.providers.models]]` 定义模型：
+
+| 键 | 说明 |
+|----|------|
+| `id` | 模型唯一 ID，用于 `default_model` 引用 |
+| `label` | 展示名 |
+| `model` | 上游模型 ID |
+| `language` | 可选语言提示，如 `zh` |
+| `prompt` | 可选上下文提示 |
+| `response_format` | 返回格式，支持 `json` / `text` |
+
 ### `[music]` — 音乐生成
 
 | 键 | 说明 |
@@ -379,4 +416,4 @@ server:
 
 ## 贴吧配置
 
-除 `.env` 变量外，贴吧登录态保存在 `data/tieba/storage_state.json`，登录辅助脚本为 `dev/tools/tieba_login.py`。
+除 `.env` 变量外，贴吧登录态保存在 `data/tieba/storage_state.json`。首次启用前需按部署指南完成登录态导出。

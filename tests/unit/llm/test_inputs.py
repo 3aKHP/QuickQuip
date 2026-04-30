@@ -7,7 +7,7 @@ from plugins.llm_inputs import extract_llm_input, extract_llm_prompt, extract_pr
 from plugins.llm_runtime import ResolvedGroupSettings
 
 from tests.fixtures.configs import IDENTITIES_YAML
-from tests.fixtures.onebot import DummyMessage, DummyReply, DummySender, at_seg, image_seg, text_seg
+from tests.fixtures.onebot import DummyMessage, DummyReply, DummySender, at_seg, image_seg, record_seg, text_seg
 
 
 PREFIX_SETTINGS = ResolvedGroupSettings(
@@ -65,6 +65,19 @@ def test_image_only_with_prefix():
     assert inp.image_urls == ["https://example.test/cat.png"]
 
 
+def test_voice_text_with_prefix():
+    msg = DummyMessage([text_seg("/ai"), record_seg("voice.silk")])
+    inp = extract_llm_input(
+        msg,
+        "12345",
+        PREFIX_SETTINGS,
+        voice_text="[语音转文字：你好]",
+    )
+    assert inp is not None
+    assert inp.prompt == ""
+    assert inp.voice_text == "[语音转文字：你好]"
+
+
 def test_quoted_reply_extracts_image_and_sender(tmp_path: Path):
     idx = _identity_index(tmp_path)
     reply = DummyReply(
@@ -105,6 +118,19 @@ def test_private_image_only_accepted():
     assert inp is not None
     assert inp.prompt == ""
     assert inp.image_urls == ["https://example.test/private-cat.png"]
+
+
+def test_private_voice_only_accepted():
+    msg = DummyMessage([record_seg("voice.silk")])
+    inp = extract_private_llm_input(
+        msg,
+        "12345",
+        PREFIX_SETTINGS,
+        voice_text="[语音转文字：私聊语音]",
+    )
+    assert inp is not None
+    assert inp.prompt == ""
+    assert inp.voice_text == "[语音转文字：私聊语音]"
 
 
 def test_private_with_quoted_reply(tmp_path: Path):

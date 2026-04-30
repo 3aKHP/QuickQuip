@@ -95,6 +95,46 @@ vol = 1.0
 pitch = 0.0
 output_format = "hex"
 
+[asr]
+enabled = false
+default_model = "whisper"
+max_audio_bytes = 26214400
+
+# ASR 用于把收到的 QQ 语音消息转写为文字并注入 LLM 上下文。
+# OneBot 协议端如果在 record 段中直接提供 text/transcript/transcription，
+# QuickQuip 会优先使用该文本；否则调用 OneBot get_record 转码，再交给这里的 ASR provider。
+#
+# 当前支持的 protocol：
+#   openai_transcriptions — POST /audio/transcriptions，兼容 OpenAI Whisper 风格接口
+#
+# [[asr.providers]] 字段：
+#   id              — provider 唯一标识
+#   protocol        — openai_transcriptions
+#   base_url        — API 根端点，例如 https://api.openai.com/v1
+#   api_key_env     — API key 环境变量名
+#   timeout_seconds — 请求超时
+#
+# [[asr.providers.models]] 字段：
+#   id              — 模型唯一标识
+#   model           — 调用 API 时传入的模型 ID
+#   language        — 可选语言提示，例如 zh
+#   prompt          — 可选上下文提示
+#   response_format — json | text
+
+[[asr.providers]]
+id = "openai-asr"
+protocol = "openai_transcriptions"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+timeout_seconds = 60
+
+[[asr.providers.models]]
+id = "whisper"
+label = "Whisper"
+model = "whisper-1"
+language = "zh"
+response_format = "json"
+
 [music]
 enabled = false
 default_model = "minimax-music"

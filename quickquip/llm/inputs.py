@@ -16,6 +16,7 @@ class ExtractedLLMInput:
     quoted_user_id: str = ""
     forward_text: str = ""
     forward_image_urls: list[str] = field(default_factory=list)
+    voice_text: str = ""
 
 
 def extract_llm_input(
@@ -28,6 +29,7 @@ def extract_llm_input(
     is_to_me: bool = False,
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
+    voice_text: str = "",
 ) -> ExtractedLLMInput | None:
     rendered = render_message_for_llm(
         message,
@@ -52,6 +54,7 @@ def extract_llm_input(
     forward_kwargs = {
         "forward_text": forward_text,
         "forward_image_urls": list(forward_image_urls or []),
+        "voice_text": voice_text.strip(),
     }
 
     if not segments:
@@ -117,6 +120,7 @@ def extract_private_llm_input(
     reply=None,
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
+    voice_text: str = "",
 ) -> ExtractedLLMInput | None:
     extracted = extract_llm_input(
         message,
@@ -127,6 +131,7 @@ def extract_private_llm_input(
         is_to_me=False,
         forward_text=forward_text,
         forward_image_urls=forward_image_urls,
+        voice_text=voice_text,
     )
     if extracted is not None:
         return extracted
@@ -153,6 +158,7 @@ def extract_private_llm_input(
         prompt or rendered.image_urls
         or quoted_text.strip() or quoted_image_urls
         or forward_text.strip() or forward_image_urls
+        or voice_text.strip()
     )
     if not has_any_content:
         return None
@@ -166,4 +172,5 @@ def extract_private_llm_input(
         quoted_user_id=quoted_user_id,
         forward_text=forward_text,
         forward_image_urls=list(forward_image_urls or []),
+        voice_text=voice_text.strip(),
     )

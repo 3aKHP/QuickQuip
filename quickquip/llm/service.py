@@ -1592,6 +1592,7 @@ class LLMService:
         quoted_user_id: str = "",
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
+        voice_text: str = "",
         message_id: str | None = None,
     ) -> dict[str, str]:
         prompt = prompt.strip()
@@ -1600,6 +1601,9 @@ class LLMService:
         normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
         normalized_forward_text = forward_text.strip()
         normalized_forward_image_urls = [url for url in (forward_image_urls or []) if url.strip()]
+        normalized_voice_text = voice_text.strip()
+        if normalized_voice_text:
+            prompt = "\n".join(item for item in [prompt, normalized_voice_text] if item).strip()
         request_image_urls = list(normalized_image_urls)
         request_quoted_image_urls = list(normalized_quoted_image_urls)
         request_forward_image_urls = list(normalized_forward_image_urls)
@@ -1864,6 +1868,7 @@ class LLMService:
         quoted_user_id: str = "",
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
+        voice_text: str = "",
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1880,6 +1885,7 @@ class LLMService:
             quoted_user_id=quoted_user_id,
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
+            voice_text=voice_text,
             message_id=message_id,
         )
 
@@ -1897,6 +1903,7 @@ class LLMService:
         quoted_user_id: str = "",
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
+        voice_text: str = "",
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1913,6 +1920,7 @@ class LLMService:
             quoted_user_id=quoted_user_id,
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
+            voice_text=voice_text,
             message_id=message_id,
         )
 

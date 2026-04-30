@@ -13,6 +13,7 @@ DEFAULT_LEGACY_LLM_CONFIG_PATH = Path("config/llm.toml")
 _SUPPORTED_IMAGE_PROTOCOLS = {"openai_images", "gemini_imagen", "minimax_images"}
 _SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async"}
 _SUPPORTED_MUSIC_PROTOCOLS = {"minimax_music"}
+_SUPPORTED_ASR_PROTOCOLS = {"openai_transcriptions"}
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
@@ -171,10 +172,58 @@ class MusicGenerationConfig:
 
 
 @dataclass(slots=True)
+class AsrModelConfig:
+    id: str
+    model: str
+    label: str = ""
+    language: str = ""
+    prompt: str = ""
+    response_format: str = "json"
+    extra_body: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AsrProviderConfig:
+    id: str
+    protocol: str
+    base_url: str
+    api_key_env: str
+    timeout_seconds: float = 60.0
+    default_model: str = ""
+    models: list[AsrModelConfig] = field(default_factory=list)
+    headers: dict[str, str] = field(default_factory=dict)
+    user_agent: str = ""
+    extra_body: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ResolvedAsrModel:
+    id: str
+    model_config: AsrModelConfig
+    provider: AsrProviderConfig
+
+
+@dataclass(slots=True)
+class AsrConfig:
+    enabled: bool = False
+    default_model: str = ""
+    max_audio_bytes: int = 25 * 1024 * 1024
+    providers: dict[str, AsrProviderConfig] = field(default_factory=dict)
+    models: dict[str, ResolvedAsrModel] = field(default_factory=dict)
+
+    def resolve_model(self, model_id: str | None = None) -> ResolvedAsrModel | None:
+        candidate = (model_id or self.default_model).strip()
+        if not candidate:
+            return None
+        return self.models.get(candidate)
+
+
+@dataclass(slots=True)
 class GenerationConfig:
     image: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     audio: AudioGenerationConfig = field(default_factory=AudioGenerationConfig)
     music: MusicGenerationConfig = field(default_factory=MusicGenerationConfig)
+    asr: AsrConfig = field(default_factory=AsrConfig)
     load_error: str | None = None
     source_path: Path | None = None
     source_kind: str = "generation"
@@ -439,6 +488,71 @@ def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
     )
 
 
+def _read_asr(raw: dict[str, Any]) -> AsrConfig:
+    providers: dict[str, AsrProviderConfig] = {}
+    models: dict[str, ResolvedAsrModel] = {}
+    raw_providers = raw.get("providers", [])
+    for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
+        provider_entry = _expand_env_value(provider_entry)
+        provider_id = str(provider_entry.get("id", "")).strip()
+        if not provider_id:
+            continue
+
+        raw_headers = _as_dict(provider_entry.get("headers"))
+        model_list: list[AsrModelConfig] = []
+        for model_entry in provider_entry.get("models", []) or []:
+            model_entry = _expand_env_value(model_entry)
+            model_id = str(model_entry.get("id", "")).strip()
+            model_name = str(model_entry.get("model", "")).strip()
+            if not model_id or not model_name:
+                continue
+
+            model = AsrModelConfig(
+                id=model_id,
+                model=model_name,
+                label=str(model_entry.get("label", "")).strip(),
+                language=str(model_entry.get("language", "")).strip(),
+                prompt=str(model_entry.get("prompt", "")).strip(),
+                response_format=str(model_entry.get("response_format", "json")).strip() or "json",
+                extra_body=_expand_env_value(_as_dict(model_entry.get("extra_body"))),
+            )
+            model_list.append(model)
+
+        provider = AsrProviderConfig(
+            id=provider_id,
+            protocol=str(provider_entry.get("protocol", "openai_transcriptions")).strip()
+            or "openai_transcriptions",
+            base_url=str(provider_entry.get("base_url", "")).strip(),
+            api_key_env=str(provider_entry.get("api_key_env", "")).strip(),
+            timeout_seconds=float(provider_entry.get("timeout_seconds", 60)),
+            default_model=str(provider_entry.get("default_model", "")).strip(),
+            models=model_list,
+            headers={str(k): str(v) for k, v in raw_headers.items()},
+            user_agent=str(provider_entry.get("user_agent", "")).strip(),
+            extra_body=_expand_env_value(_as_dict(provider_entry.get("extra_body"))),
+        )
+        providers[provider_id] = provider
+
+        for model in model_list:
+            models[model.id] = ResolvedAsrModel(
+                id=model.id,
+                model_config=model,
+                provider=provider,
+            )
+
+    default_model = str(raw.get("default_model", "")).strip()
+    if not default_model and models:
+        default_model = next(iter(models))
+
+    return AsrConfig(
+        enabled=_as_bool(raw.get("enabled", False), default=False),
+        default_model=default_model,
+        max_audio_bytes=max(1, int(raw.get("max_audio_bytes", 25 * 1024 * 1024))),
+        providers=providers,
+        models=models,
+    )
+
+
 def _read_generation_section(
     data: dict[str, Any],
     section_name: str,
@@ -472,6 +586,10 @@ def _read_audio_generation_section(data: dict[str, Any]) -> AudioGenerationConfi
 
 def _read_music_generation_section(data: dict[str, Any]) -> MusicGenerationConfig:
     return _read_generation_section(data, "music", "music_generation", _read_music_generation)
+
+
+def _read_asr_section(data: dict[str, Any]) -> AsrConfig:
+    return _read_generation_section(data, "asr", "asr", _read_asr)
 
 
 def _validate_generation_config(config: GenerationConfig) -> GenerationConfig:
@@ -526,6 +644,21 @@ def _validate_generation_config(config: GenerationConfig) -> GenerationConfig:
         config.load_error = f"音乐默认模型不存在：{music.default_model}"
         return config
 
+    asr = config.asr
+    for provider in asr.providers.values():
+        if provider.protocol not in _SUPPORTED_ASR_PROTOCOLS:
+            config.load_error = f"ASR provider {provider.id} 使用了未知协议：{provider.protocol}"
+            return config
+        if not provider.base_url:
+            config.load_error = f"ASR provider {provider.id} 缺少 base_url"
+            return config
+        if not provider.api_key_env:
+            config.load_error = f"ASR provider {provider.id} 缺少 api_key_env"
+            return config
+    if asr.default_model and asr.default_model not in asr.models:
+        config.load_error = f"ASR 默认模型不存在：{asr.default_model}"
+        return config
+
     return config
 
 
@@ -546,6 +679,7 @@ def load_generation_config(
             image=_read_image_generation_section(data),
             audio=_read_audio_generation_section(data),
             music=_read_music_generation_section(data),
+            asr=_read_asr_section(data),
             source_path=config_path,
             source_kind="generation",
         )
@@ -558,6 +692,7 @@ def load_generation_config(
             image=_read_image_generation_section(data),
             audio=_read_audio_generation_section(data),
             music=_read_music_generation_section(data),
+            asr=_read_asr_section(data),
             source_path=legacy_path,
             source_kind="llm_legacy",
         )

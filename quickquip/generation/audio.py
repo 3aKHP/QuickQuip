@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import os
+import ssl
 from urllib import error, parse, request
 
 from quickquip.generation.config import AudioModelConfig, AudioProviderConfig
@@ -54,6 +55,14 @@ def _get_api_key(provider: AudioProviderConfig) -> str:
     return api_key
 
 
+def _ssl_context():
+    try:
+        import certifi
+    except ModuleNotFoundError:
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _mime_for_audio_format(fmt: str) -> str:
     normalized = fmt.strip().lower()
     if normalized == "mp3":
@@ -71,7 +80,7 @@ async def _download_bytes(url: str, timeout: float) -> tuple[bytes, str]:
     def _fetch() -> tuple[bytes, str]:
         try:
             req = request.Request(url, headers={"User-Agent": "QuickQuip/1.0"})
-            with request.urlopen(req, timeout=timeout) as resp:
+            with request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
                 mime_type = resp.headers.get_content_type() or "application/octet-stream"
                 return resp.read(), mime_type
         except error.HTTPError as exc:
@@ -105,7 +114,11 @@ async def _http_json(
 
     def _send() -> dict:
         try:
-            with request.urlopen(http_request, timeout=timeout) as response:
+            with request.urlopen(
+                http_request,
+                timeout=timeout,
+                context=_ssl_context(),
+            ) as response:
                 raw = response.read().decode("utf-8")
                 try:
                     return json.loads(raw)

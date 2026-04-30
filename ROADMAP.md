@@ -6,18 +6,19 @@
 
 ---
 
-## v1.1 — 多模态理解 + 配置工程化
+## v1.1 — ASR 语音理解 + Provider 回归测试
 
-### 多模态理解升级
+### ASR 语音理解
 
-当前 LLM 多模态能力仅限于图片理解（单次最多 3 张、5MB 限制）。v1.1 扩展至：
-- 语音消息转文字（通过 `/tts` 对应的语音 provider 或独立 ASR API），转录结果注入 LLM 上下文
-- 贴吧帖子内容自动摘要（图片 + 文字综合理解，而非当前纯文字截断）
-- 考虑接入视频关键帧提取（实验性）
+当前 LLM 多模态理解能力以图片为主。v1.1 聚焦语音消息转文字：
+- 识别 OneBot V11 `record` 消息段，优先读取协议端已提供的转写文本
+- 无内置转写文本时，通过 OneBot `get_record` 获取本地音频文件并调用 ASR provider
+- 首期支持 OpenAI-compatible `/audio/transcriptions` 协议，配置归入 `config/generation.toml` 的 `[asr]`
+- 将转写结果注入 LLM prompt、最近消息、日报/播报采集和词云输入
 
 ### 配置文件去冗余重构
 
-当前生产环境配置文件（`llm.toml`、`chat_rules.toml`、`generation.toml`）存在大量冗余与重复声明——例如同一 base_url 和 api_key_env 在多个 provider 间反复出现。目标是在保持 TOML 配置兼容性的前提下，引入配置继承、默认值覆盖和模板引用机制，减少复制粘贴维护成本。
+当前配置形态已在准确度和详细度之间取得平衡，v1.1 不再扩大配置继承/模板 scope。后续仅在新增 provider 协议时补齐示例注释和兼容性测试。
 
 ### Provider 兼容性回归测试库
 

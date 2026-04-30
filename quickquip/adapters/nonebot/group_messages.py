@@ -3,6 +3,7 @@ from __future__ import annotations
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
+from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.app.message_pipeline import (
     get_sender_name,
     llm_service,
@@ -41,7 +42,6 @@ def register_message_matcher(on_message, Message, MessageSegment):
             identity_index=llm_service.identities,
             include_image_placeholder=True,
         )
-        rendered_text = rendered_message.text
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
@@ -51,6 +51,10 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
         if message_deduper.is_duplicate(group_id, message_id or None):
             return
+
+        voice_transcripts = await transcribe_message_records(bot, message)
+        voice_text = append_voice_transcripts("", voice_transcripts)
+        rendered_text = append_voice_transcripts(rendered_message.text, voice_transcripts)
 
         stats_tracker.record_message(group_id, user_id, sender_name)
         record_group_message(group_id, user_id, sender_name, rendered_text)
@@ -85,6 +89,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             is_to_me=bool(getattr(event, "to_me", False)),
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
+            voice_text=voice_text,
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
@@ -103,6 +108,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 quoted_user_id=llm_input.quoted_user_id,
                 forward_text=llm_input.forward_text,
                 forward_image_urls=llm_input.forward_image_urls,
+                voice_text=llm_input.voice_text,
                 message_id=message_id or None,
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))

@@ -17,6 +17,7 @@ QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发
 当前模块还额外覆盖两类能力：
 
 - 显式触发下的图片理解
+- 显式触发下的语音消息转写
 - 基于项目内搜索后端的联网搜索
 - 标准化工具调用（身份查询、记忆查询、联网搜索）
 
@@ -66,6 +67,10 @@ LLM 相关核心文件如下：
   - LLM 健康检查模块（配置、provider 探活、知识文件、工具、MCP 等 10 项检查）
 - `quickquip/llm/image_preprocessor.py`
   - 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点
+- `quickquip/adapters/nonebot/voice.py`
+  - 负责 OneBot V11 `record` 语音段提取、转码与 ASR 转写注入
+- `quickquip/generation/asr.py`
+  - 负责 ASR provider 调用，当前支持 OpenAI-compatible `/audio/transcriptions`
 - `quickquip/common/recent_message_buffer.py`
   - 负责"触发前最近群消息"内存缓冲
 - `quickquip/llm/inputs.py`
@@ -183,7 +188,18 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 - 当前单张图片大小限制为 5MB
 - 如果只有图片没有文字提示，会自动补一个默认识图提示
 
-### 4.4 长期记忆
+### 4.4 语音输入边界
+
+语音理解也遵循显式触发原则：
+
+- 群聊中必须和 `/ai` 或 `@机器人` 同时出现
+- 私聊会话开启后，普通语音消息可作为 LLM 输入
+- 若 OneBot 协议端的 `record` 段已经包含 `text` / `transcript` / `transcription`，直接使用该文本
+- 否则通过 OneBot `get_record` 获取音频文件，并调用 `config/generation.toml` 中 `[asr]` 配置的 provider
+- 转写结果会作为 `[语音转文字：...]` 拼入当前用户消息，并进入最近消息、日报/播报采集和词云输入
+- ASR 失败时不阻塞原消息处理；没有可用转写时按原有文字/图片输入逻辑继续
+
+### 4.5 长期记忆
 
 长期记忆当前来源非常保守：
 
@@ -339,6 +355,17 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
 - `HOST`
 - `PORT`
 
+### 6.3 `config/generation.toml`
+
+LLM 相关的多模态输入/产出配置在 `generation.toml` 中维护：
+
+- `[image]`：图片生成
+- `[audio]`：语音生成（TTS）
+- `[asr]`：语音识别，收到 OneBot `record` 语音消息时转写为文字注入 LLM
+- `[music]`：歌词与音乐生成
+
+ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /audio/transcriptions`。配置示例见 `config/generation.toml.example`。
+
 ---
 
 ## 7. 群内命令
@@ -394,35 +421,27 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
 
 ---
 
-## 8. Docker / 部署注意事项
-
-当前私有部署链位于 `dev/`：
-
-- `dev/Dockerfile`
-- `dev/docker-compose.yml`
-- `dev/deploy.ps1`
-- `dev/deploy-v4.ps1`
-- `dev/deploy.sh`
-- `dev/.env.deploy`
+## 8. 部署注意事项
 
 部署完整指南见 [../admin/deployment.md](../admin/deployment.md)。
 
 部署要点：
 
-- `config/llm.toml` 通过 bind mount 只读挂载到容器
-- `llm_about` 通过 bind mount 挂载到容器内 `/app/llm_about`
+- `config/llm.toml` 应在运行环境中提供
+- `config/generation.toml` 启用 ASR 时需要配置可用的 `[asr]` provider
+- `llm_about` 应在运行环境中提供
   - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
-- `data/` 通过 bind mount 持久化
+- `data/` 需要持久化
 - 镜像构建时需要同时打包 `plugins/` 与 `quickquip/`
-- API key 通过 `dev/.env` 注入给 `quickquip`
-- 云端部署默认会额外启动 `searxng` 服务，并把 `quickquip` 容器内的 `SEARXNG_BASE_URL` 指向 `http://searxng:8080`
+- API key 通过环境变量注入
+- 使用搜索功能时需提供可访问的 SearXNG 或 Tavily 后端
 
 根目录 `.dockerignore` 已经做了收紧，避免把以下内容送进 Docker build 上下文：
 
 - 本地 `.env`
 - `config/*.toml`
 - `data/`
-- `dev/sandbox/`
+- 临时测试与调试产物
 - 其他开发工件
 
 ---

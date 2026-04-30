@@ -13,10 +13,10 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **文字彩蛋规则** — 内置 25+ 条基于正则的趣味回复规则，支持优先级和加权随机，开箱即用《新三国》全套梗文。详见 [docs/user/three-kingdoms-memes.md](docs/user/three-kingdoms-memes.md)
 - **语境感知回复** — 支持 `regex_context`（正则二次判定）和 `llm_context`（LLM yes/no 裁决）两种模式
 - **"好女孩"接龙** — 8 步状态机驱动，60 秒超时保护。`ChainGameManager` 通用引擎支持自定义接龙游戏
-- **LLM 扩展** — 兼容 OpenAI / Claude / Gemini 协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、图片理解、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
+- **LLM 扩展** — 兼容 OpenAI / Claude / Gemini 协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
-- **多模态产出** — 图片生成、语音合成、歌词创作与音乐生成，统一收口 `config/generation.toml`
+- **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成，统一收口 `config/generation.toml`
 - **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、记忆编辑、对话浏览、配置在线编辑、词云生成、诊断工具。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
@@ -83,7 +83,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    完整配置参考见 [docs/admin/configuration.md](docs/admin/configuration.md)。
 
-6. **可选：启用图片/语音/音乐生成**
+6. **可选：启用图片/语音/音乐生成和语音识别**
 
    复制 `config/generation.toml.example` 为 `config/generation.toml`，按注释填入 provider 和模型。不存在时图片部分回退读取 `llm.toml` 旧版配置。
 
@@ -104,7 +104,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    TIEBA_BROWSER_HEADLESS=true
    ```
 
-   首次使用前运行 `python dev/tools/tieba_login.py` 完成登录。
+   首次使用前按 [部署指南](docs/admin/deployment.md) 完成贴吧登录态导出。
 
 8. **可选：启动 Web 管理后台**
 

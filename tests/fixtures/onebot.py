@@ -24,6 +24,8 @@ class DummyMessage(list):
                 parts.append(f"[CQ:at,qq={segment.data.get('qq', '')}]")
             elif segment.type == "image":
                 parts.append("[CQ:image]")
+            elif segment.type == "record":
+                parts.append("[CQ:record]")
         return "".join(parts)
 
 
@@ -57,6 +59,10 @@ def at_seg(qq: str) -> DummySegment:
 
 def image_seg(url: str) -> DummySegment:
     return DummySegment("image", {"url": url})
+
+
+def record_seg(file: str, **data: Any) -> DummySegment:
+    return DummySegment("record", {"file": file, **data})
 
 
 def forward_seg(forward_id: str) -> DummySegment:

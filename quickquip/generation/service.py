@@ -6,6 +6,7 @@ from quickquip.generation.config import (
     DEFAULT_GENERATION_CONFIG_PATH,
     DEFAULT_LEGACY_LLM_CONFIG_PATH,
     GenerationConfig,
+    ResolvedAsrModel,
     ResolvedAudioModel,
     ResolvedImageModel,
     ResolvedMusicModel,
@@ -61,6 +62,9 @@ class GenerationService:
 
     def resolve_music_model(self, model_id: str | None = None) -> ResolvedMusicModel | None:
         return self.get_config().music.resolve_model(model_id)
+
+    def resolve_asr_model(self, model_id: str | None = None) -> ResolvedAsrModel | None:
+        return self.get_config().asr.resolve_model(model_id)
 
 
 generation_service = GenerationService()
