@@ -197,11 +197,13 @@ dev/
 - **`dev/.env`**：云端 Docker 专用，HOST=0.0.0.0，含 Docker 网络配置与镜像地址
 - docker-compose 只读取 `dev/.env`，不再读取根 `.env`（二者互相独立）
 
-### `dev/llm_about` 部署路径
+### `llm_about` 部署路径
 
-`dev/llm_about/` 是 vocab.yaml 和 identities.yaml 的生产部署路径。v1.0.0 已将 `llm_about` 从 `dev/` 迁移到仓库根目录（代码默认值 `Path("llm_about/...")`），但实际生产文件仍在 `dev/llm_about/`，通过 docker-compose volume 挂载进容器：
+`llm_about/` 是 vocab.yaml 和 identities.yaml 的唯一生产部署路径。Docker 部署时应把仓库根目录的 `llm_about/` 挂载进容器：
 
-- 宿主机 `dev/llm_about/` → 容器内 `/app/llm_about/`
+- 宿主机 `llm_about/` → 容器内 `/app/llm_about/`
+
+历史路径 `dev/llm_about/` 已弃用，不应再被 compose 挂载或由部署脚本读写。
 
 ---
 

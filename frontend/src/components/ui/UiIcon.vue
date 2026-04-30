@@ -5,7 +5,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import {
-  AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, Bot, Brain,
+  AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, BookUser, Bot, Brain,
   CalendarCheck, Check, CircleX, Drama, FileText, Inbox, Info, Loader2,
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
@@ -14,7 +14,7 @@ import {
 } from 'lucide-vue-next'
 
 const ICON_MAP = {
-  AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, Bot, Brain,
+  AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, BookUser, Bot, Brain,
   CalendarCheck, Check, CircleX, Drama, FileText, Inbox, Info, Loader2,
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,

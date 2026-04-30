@@ -152,6 +152,7 @@ Web Admin 提供以下标签页（前端使用 vue-router 4 hash 模式，深链
 - **总结** — 查阅/删除每日总结存档
 - **对话** — 按群浏览 LLM 对话历史（含私聊/归档，支持关键词过滤、游标翻页、按单条删除）
 - **人格** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）
+- **资料** — 在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件（保存后执行 `/llm reload` 或重启 bot 生效）
 - **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 9 个 runtime 字段
 - **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml` 多文件 TOML 编辑器
 - **限流** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）

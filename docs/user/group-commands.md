@@ -297,6 +297,32 @@ AI 默认只在下面两种情况回复：
 /tieba source 搬石
 ```
 
+### 5.11 生成人物志
+
+```text
+/profile @某人
+```
+
+默认生成中版人物志。也可以指定长度：
+
+```text
+/profile short @某人
+```
+
+```text
+/profile middle @某人
+```
+
+```text
+/profile long @某人
+```
+
+```text
+/profile full @某人
+```
+
+`short` 接近旧版短评，`middle` 是默认长文，`long` 会使用更多发言样本，`full` 会尽量读取该群已记录的完整发言。
+
 ---
 
 ## 6. 管理员可用命令

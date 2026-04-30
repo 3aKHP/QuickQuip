@@ -147,3 +147,18 @@ def test_enabled_groups_persist(tmp_path: Path):
     assert reloaded.contains("10001") is True
     reloaded.remove("10001")
     assert reloaded.contains("10001") is False
+
+
+def test_daily_message_collector_read_all(tmp_path: Path):
+    collector = DailyMessageCollector(base_dir=tmp_path / "daily_msgs")
+    group_id = "10001"
+    older = datetime(2026, 4, 14, 9, 0, tzinfo=LOCAL_TZ)
+    newer = datetime(2026, 4, 15, 9, 0, tzinfo=LOCAL_TZ)
+
+    collector.record(group_id, "Alice", "旧消息", ts=older.timestamp(), user_id="1")
+    collector.record(group_id, "Alice", "新消息", ts=newer.timestamp(), user_id="1")
+
+    messages = collector.read_all(group_id)
+
+    assert [item["text"] for item in messages] == ["旧消息", "新消息"]
+    assert collector.read_all("99999") == []

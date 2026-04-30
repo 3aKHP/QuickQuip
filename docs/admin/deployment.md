@@ -56,8 +56,10 @@ nano .env  # 填入 QQ 号和 OneBot 配置
 - 根 `.env`
 - `dev/.env`
 - `config/llm.toml`
-- `dev/llm_about/vocab.yaml`
-- `dev/llm_about/identities.yaml`
+- `llm_about/vocab.yaml`
+- `llm_about/identities.yaml`
+- `llm_about/{群号}/vocab.yaml`
+- `llm_about/{群号}/identities.yaml`
 
 一并用于容器运行。其中 `quickquip` 容器会同时读取根 `.env` 和 `dev/.env`。
 若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
@@ -80,12 +82,12 @@ docker compose up -d
 当前 compose 会：
 
 - 让 `quickquip` 同时读取 `../.env` 与 `./.env`
-- 启动项目内置的 `searxng` 服务
+- 通过外部 `shared-search` Docker 网络连接服务器级 SearXNG
 - 把 `quickquip` 容器内的 `SEARXNG_BASE_URL` 覆盖为 `http://searxng:8080`
 - 挂载宿主机 `/var/run/docker.sock`，让 `quickquip` 容器可以通过 Docker CLI 以 DOOD 方式启动 `docker` 型 MCP server
 - 把 `../config` 只读挂载到容器内 `/app/config`
-- 把 `./llm_about` 只读挂载到容器内 `/app/llm_about`
-  - 其中包含 `vocab.yaml` 和 `identities.yaml`
+- 把 `../llm_about` 挂载到容器内 `/app/llm_about`
+  - 其中包含全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
 - 把 `../data` 挂载到容器内 `/app/data`，用于持久化统计、规则开关、LLM 数据库
 - 让贴吧运行时从 `/app/data/tieba/storage_state.json` 读取跨平台登录态
 - 直接基于 Playwright Python 镜像运行贴吧采集，镜像内已预装浏览器与系统依赖
@@ -94,7 +96,7 @@ docker compose up -d
 
 补充说明：
 
-- `config/llm.toml`、`dev/llm_about/vocab.yaml`、`dev/llm_about/identities.yaml` 虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
+- `config/llm.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`
 
@@ -183,10 +185,10 @@ WEB_ADMIN_COOKIE_SECURE=auto
 |---|---|---|
 | `../data` | `/app/data` | 读写 |
 | `../config` | `/app/config` | **读写**（llm.toml 在线编辑需要） |
-| `./llm_about` | `/app/llm_about` | 只读 |
+| `../llm_about` | `/app/llm_about` | **读写**（资料页在线编辑需要） |
 | `../frontend/dist` | `/app/frontend/dist` | 只读 |
 
-> 注意：`quickquip` 容器的 `config` 挂载仍为只读（`:ro`），只有 `web-admin` 需要写权限。
+> 注意：`quickquip` 容器的 `config` 和 `llm_about` 挂载仍可保持只读（`:ro`），只有 `web-admin` 需要写权限。
 
 ### web-admin 代码更新
 
@@ -256,7 +258,7 @@ docker compose logs -f napcat  # 找新的二维码
 - `/opt/QuickQuip/.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
 - `/opt/QuickQuip/dev/.env` 中是否把 `SEARCH_BACKEND` 设为 `searxng`
 - `/opt/QuickQuip/dev/.env` 中是否填了 `QQ_ACCOUNT`、`GITHUB_PERSONAL_ACCESS_TOKEN` 与云端 MCP 覆盖值
-- `docker compose logs -f searxng` 中是否出现 `json` 接口或配置报错
-- `/opt/QuickQuip/dev/llm_about/identities.yaml` 是否存在且格式正确
+- `/opt/searxng/` 中的共享 SearXNG 是否运行，QuickQuip 容器内是否能访问 `http://searxng:8080`
+- `/opt/QuickQuip/llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `/opt/QuickQuip/llm_about/{群号}/identities.yaml` 存在
 - `docker compose logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
 - 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建

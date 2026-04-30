@@ -9,6 +9,7 @@ import MemoryView from '../views/MemoryView.vue'
 import SummaryView from '../views/SummaryView.vue'
 import ConversationsView from '../views/ConversationsView.vue'
 import PersonasView from '../views/PersonasView.vue'
+import LlmAboutView from '../views/LlmAboutView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
 import RateLimitView from '../views/RateLimitView.vue'
 import TiebaView from '../views/TiebaView.vue'
@@ -32,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'summary',        path: '/summary',        label: '总结',     icon: 'FileText',      component: SummaryView },
   { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle', component: ConversationsView },
   { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',         component: PersonasView },
+  { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',      component: LlmAboutView },
   { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', component: GroupSettingsView },
   { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Zap',           component: RateLimitView },
   { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',      component: TiebaView },

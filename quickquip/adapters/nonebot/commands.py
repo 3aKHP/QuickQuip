@@ -19,7 +19,8 @@ from quickquip.generation.errors import GenerationProviderError
 from quickquip.generation.image import ImageInput, download_image, generate_image
 from quickquip.generation.music import generate_lyrics, generate_music
 from quickquip.generation.service import generation_service
-from quickquip.llm.profile import generate_profile
+from quickquip.adapters.nonebot.long_messages import send_long_group_message
+from quickquip.llm.profile import DEFAULT_PROFILE_MODE, PROFILE_MODES, ProfileModeConfig, generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
 from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
@@ -127,8 +128,6 @@ _FORTUNES = [
     ("凶", "今日多有阻碍，静待时机，勿急于求成"),
 ]
 _NUMBER_EMOJIS = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣")
-
-
 def _daily_fortune(user_id: int | str) -> tuple[str, str]:
     h = int(hashlib.md5(f"{user_id}:{date.today().isoformat()}".encode()).hexdigest(), 16)
     return _FORTUNES[h % len(_FORTUNES)]
@@ -139,6 +138,33 @@ def _safe_shlex_split(text: str) -> list[str]:
         return shlex.split(text)
     except ValueError:
         return text.split()
+
+
+def _select_profile_samples(
+    messages: list[dict],
+    target_user_id: str,
+    *,
+    limit: int | None,
+    max_chars: int | None,
+) -> list[str]:
+    target_messages = [
+        m["text"].strip()
+        for m in messages
+        if m.get("user_id") == target_user_id and m.get("text", "").strip()
+    ]
+    if limit is not None:
+        target_messages = target_messages[-limit:]
+    if max_chars is None:
+        return target_messages
+    return [text[:max_chars] for text in target_messages]
+
+
+def _parse_profile_mode(message_text: str) -> ProfileModeConfig:
+    args = _strip_command_name(message_text.strip(), "profile").strip()
+    for mode_id, mode_config in PROFILE_MODES.items():
+        if re.search(rf"(?<![A-Za-z]){re.escape(mode_id)}(?![A-Za-z])", args, re.IGNORECASE):
+            return mode_config
+    return DEFAULT_PROFILE_MODE
 
 
 def _parse_preset(args: str) -> str:
@@ -1395,7 +1421,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
     profile_cmd = on_command("profile", priority=10, block=True)
 
     @profile_cmd.handle()
-    async def _(event):
+    async def _(bot, event):
         if _is_private_chat(event):
             await profile_cmd.finish("该命令仅支持群聊")
         if not llm_service.config.is_available:
@@ -1415,9 +1441,10 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             if m:
                 target_user_id = m.group(1)
         if not target_user_id:
-            await profile_cmd.finish("用法：/profile @某人")
+            await profile_cmd.finish("用法：/profile [short|middle|long|full] @某人")
 
         group_id = event.group_id
+        profile_mode = _parse_profile_mode(str(event.get_message()))
         group_stats = stats_tracker.get_stats(group_id)
         target_name = group_stats.user_names.get(str(target_user_id), f"QQ:{target_user_id}")
         msg_count = group_stats.user_messages.get(str(target_user_id), 0)
@@ -1444,21 +1471,36 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         now = time()
         try:
             memories_raw, all_msgs = await asyncio.gather(
-                asyncio.to_thread(llm_service.store.search_memories, str(group_id), str(target_user_id), target_name, 8),
-                asyncio.to_thread(daily_collector.read_window, group_id, now - 7 * 86400, now),
+                asyncio.to_thread(
+                    llm_service.store.search_memories,
+                    str(group_id),
+                    user_id=str(target_user_id),
+                    query=target_name,
+                    limit=profile_mode.memory_limit,
+                    scope="user",
+                ),
+                asyncio.to_thread(daily_collector.read_all, group_id)
+                if profile_mode.full_records
+                else asyncio.to_thread(
+                    daily_collector.read_window,
+                    group_id,
+                    now - (profile_mode.read_days or 7) * 86400,
+                    now,
+                ),
             )
         except Exception:
             logger.exception("profile data collection failed for group=%s user=%s", group_id, target_user_id)
             await profile_cmd.finish("收集用户数据时出错，请稍后重试")
 
         memories = [m["content"] for m in memories_raw if m.get("content")]
-        samples = [
-            m["text"][:80]
-            for m in all_msgs
-            if m.get("user_id") == str(target_user_id) and m.get("text")
-        ][-5:]
+        samples = _select_profile_samples(
+            all_msgs,
+            str(target_user_id),
+            limit=profile_mode.sample_limit,
+            max_chars=profile_mode.sample_max_chars,
+        )
 
-        await profile_cmd.send(f"正在生成 {target_name} 的人物志，请稍候…")
+        await profile_cmd.send(f"正在生成 {target_name} 的{profile_mode.label}人物志，请稍候…")
         try:
             text, _ = await generate_profile(
                 target_name=target_name,
@@ -1469,10 +1511,18 @@ def register_commands(on_command, Message, MessageSegment) -> None:
                 system_prompt=system_prompt,
                 provider_id=provider.id,
                 model=effective_model,
+                profile_mode=profile_mode,
             )
         except LLMProviderError as exc:
             await profile_cmd.finish(f"人物志生成失败：{exc}")
-        await profile_cmd.finish(f"👤 {target_name}\n\n{text}")
+        await send_long_group_message(
+            bot,
+            int(group_id),
+            f"👤 {target_name}\n\n{text}",
+            node_name="人物志",
+            log_name="profile",
+        )
+        return
 
     find_cmd = on_command("find", priority=10, block=True)
 

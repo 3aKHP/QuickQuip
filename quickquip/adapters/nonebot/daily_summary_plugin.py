@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from time import time
@@ -27,6 +26,7 @@ from quickquip.app.message_pipeline import (
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.adapters.nonebot.long_messages import send_long_group_message
 from quickquip.llm.summarize import generate_daily_summary
 
 logger = logging.getLogger(__name__)
@@ -40,63 +40,14 @@ _MANUAL_COOLDOWN_SECONDS = 60
 # in between, so it is atomically safe within the event loop.
 _last_manual_trigger: dict[str, float] = {}
 
-# NapCat silently truncates single text messages beyond ~2 KB (~667 Chinese chars).
-# Split at paragraph / line boundaries to stay well under that limit.
-_MAX_SEND_CHARS = 800
-
-
-def _split_message(content: str, max_chars: int = _MAX_SEND_CHARS) -> list[str]:
-    """Split content into chunks of at most max_chars, breaking at paragraph or line boundaries."""
-    if len(content) <= max_chars:
-        return [content]
-
-    chunks: list[str] = []
-    remaining = content
-    while len(remaining) > max_chars:
-        pos = remaining.rfind("\n\n", 0, max_chars)
-        if pos != -1:
-            chunks.append(remaining[:pos].rstrip())
-            remaining = remaining[pos + 2:].lstrip()
-            continue
-        pos = remaining.rfind("\n", 0, max_chars)
-        if pos != -1:
-            chunks.append(remaining[:pos])
-            remaining = remaining[pos + 1:]
-            continue
-        chunks.append(remaining[:max_chars])
-        remaining = remaining[max_chars:]
-    if remaining.strip():
-        chunks.append(remaining.strip())
-    return chunks
-
-
 async def _send_long_message(bot, group_id: int, content: str) -> None:
-    """Send via forward-message card regardless of length; fall back to chunked sends with delay.
-
-    Always uses forward to avoid NapCat's ~667-char single-message truncation.
-    """
-    chunks = _split_message(content)
-    try:
-        await bot.call_api(
-            "send_group_forward_msg",
-            group_id=group_id,
-            messages=[
-                {
-                    "type": "node",
-                    "data": {
-                        "name": "群聊日报",
-                        "uin": str(bot.self_id),
-                        "content": [{"type": "text", "data": {"text": chunk}}],
-                    },
-                }
-                for chunk in chunks
-            ],
-        )
-    except Exception:
-        logger.warning("daily_summary: forward msg failed, falling back to chunked send")
-        for chunk in chunks:
-            await bot.send_group_msg(group_id=group_id, message=chunk)
-            await asyncio.sleep(0.5)
+    await send_long_group_message(
+        bot,
+        group_id,
+        content,
+        node_name="群聊日报",
+        log_name="daily_summary",
+    )
 
 
 def _on_cooldown(group_id: int | str) -> bool:

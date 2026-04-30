@@ -88,7 +88,7 @@ services:
       - ./data:/app/data
       - ./config:/app/config
       # 群友身份（同上，可选）：
-      # - ./llm_about:/app/llm_about:ro
+      # - ./llm_about:/app/llm_about
       # 仅当需要覆盖镜像内置前端时取消注释：
       # - ./frontend/dist:/app/frontend/dist:ro
     restart: unless-stopped

@@ -11,6 +11,7 @@
 - 自动记忆去重：改为仅查 `scope="user"` 库（不再与全群 group-scope 记忆混排），避免目标用户记忆被其他人高置信度记忆挤出 `LIMIT 50` 候选集
 - 图像预处理抽象接口：`ImagePreprocessor` ABC + `NoOpImagePreprocessor` 默认实现，预留 OCR / 多模态模型转述文本的钩子点
 - `LLMSceneMessage` 场景块中间表示：支持将 bot 回复间的连续人类发言归入统一场景
+- Web 管理后台新增"资料"页：支持在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件，并可从示例模板创建群级资料目录
 
 ### 变更
 
@@ -18,11 +19,14 @@
 - LLM 会话落库：新增 `raw_content` 列存储原始轮次文本（含引用/转发上下文），解决多轮追问时历史丢失引用语境的问题；auto-memory 上下文读取优先 `raw_content`
 - System prompt 瘦身：移除与 messages 重复的 `当前提问者昵称/身份` 段，替换为消息格式说明；参与者列表简化为纯名称
 - `search_memories` 新增 `scope` 参数：支持按 `scope="user"` 限定查询范围
+- `/profile @某人` 支持 `short` / `middle` / `long` / `full` 四档人物志长度；默认 `middle` 为约 1600 字长文，`long` 扩大上下文和输出规模，`full` 在约 400k 输入 token 上限内尽量纳入该群已落盘的完整发言记录，并通过合并转发发送完整正文
 
 ### 修复
 
 - LLM 上下文交替：修正 `build_messages()` 中 pending context flush 与当前场景分别生成连续 `role="user"` 的问题——现合并到同一 user message 用 `【上文】`/`【当前提问】` 在文本内区分，确保三家 provider 的 user/assistant 交替约束
 - LLM 图片输入：非视觉模型请求图片时先经图片预处理转述，再移除传给 provider 的图片 URL；配置热重载会同步重建图片预处理器，健康检查展示运行时绑定状态
+- `/quote random` 短时间连续触发时优先返回最近未输出过的语录，减少连续重复抽中同一条的情况
+- `/profile @某人` 数据收集失败：修正记忆查询调用仍使用旧版位置参数的问题，避免固定落入“收集用户数据时出错”
 - `/profile @某人` 无响应：`on_command` 处理后 at 段可能丢失类型信息，现增加 CQ 码文本正则回退解析（`[CQ:at,qq=XXXX]`）
 - `/profile` 解除对 `daily_summary.model_cascade` 的依赖：现直接使用当前群的 provider/model，不再因级联配置空缺或引用不存在的 provider 而阻塞
 - `/profile` 消息窗口从 30 天缩至 7 天，数据收集增加 try/except 保护

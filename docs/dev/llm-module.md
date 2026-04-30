@@ -101,7 +101,7 @@ LLM 相关核心文件如下：
 - `llm_about/群聊简介和概况.md`
   - 仅供人工设计人格时参考，不直接整份注入模型
 
-> 注：生产部署中，`llm_about/` 下的文件通过 docker-compose volume 从宿主机的 `dev/llm_about/` 挂载到容器内的 `/app/llm_about/`。详见 [admin/deployment.md](../admin/deployment.md)。
+> 注：生产部署中，仓库根目录的 `llm_about/` 通过 docker-compose volume 挂载到容器内的 `/app/llm_about/`。详见 [admin/deployment.md](../admin/deployment.md)。
 
 ---
 
@@ -410,8 +410,8 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
 部署要点：
 
 - `config/llm.toml` 通过 bind mount 只读挂载到容器
-- `dev/llm_about` 通过 bind mount 只读挂载到容器内 `/app/llm_about`
-  - 包括 `vocab.yaml` 与 `identities.yaml`
+- `llm_about` 通过 bind mount 挂载到容器内 `/app/llm_about`
+  - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
 - `data/` 通过 bind mount 持久化
 - 镜像构建时需要同时打包 `plugins/` 与 `quickquip/`
 - API key 通过 `dev/.env` 注入给 `quickquip`
