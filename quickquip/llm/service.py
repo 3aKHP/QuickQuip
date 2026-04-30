@@ -20,7 +20,7 @@ from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.health import HealthReport, build_health_report, format_health_report
 from quickquip.llm.identity import IdentityIndex
-from quickquip.llm.image_preprocessor import ImagePreprocessor
+from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
 from quickquip.llm.mcp import MCPClientManager, MCPServerStatus
 from quickquip.llm.prompting import (
     build_messages,
@@ -170,6 +170,8 @@ class LLMService:
         self._auto_memory_failures = 0
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
+        if self.image_preprocessor is None:
+            self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self.identities = IdentityIndex.from_file(self.identity_path)
         self._group_vocabs: dict[str, VocabIndex] = {}
@@ -343,6 +345,27 @@ class LLMService:
 
     def bind_image_preprocessor(self, preprocessor: ImagePreprocessor | None) -> None:
         self.image_preprocessor = preprocessor
+
+    def rebuild_image_preprocessor(self) -> None:
+        img_cfg = self.config.image_preprocessing
+        if not img_cfg.enabled or not img_cfg.provider_id:
+            self.image_preprocessor = None
+            return
+
+        vis_provider_cfg = self.config.providers.get(img_cfg.provider_id)
+        if vis_provider_cfg is None:
+            logger.warning("image_preprocessing.provider_id %r not found in providers", img_cfg.provider_id)
+            self.image_preprocessor = None
+            return
+
+        vis_client = build_provider_client(replace(vis_provider_cfg, stream_enabled=False))
+        self.image_preprocessor = VisionImagePreprocessor(
+            provider_client=vis_client,
+            model=img_cfg.model or vis_provider_cfg.default_model,
+            max_tokens=img_cfg.max_tokens,
+            temperature=img_cfg.temperature,
+            prompt=img_cfg.prompt,
+        )
 
     def _clear_mcp_tools(self) -> None:
         for name in self._mcp_tool_names:
@@ -619,6 +642,7 @@ class LLMService:
 
     def reload_config(self) -> LLMConfig:
         self.config = load_llm_config(self.config_path)
+        self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self.identities = IdentityIndex.from_file(self.identity_path)
         self._group_vocabs.clear()
@@ -859,6 +883,7 @@ class LLMService:
                 "failures": self._auto_memory_failures,
                 "active_scopes": len(self._auto_memory_turns),
             },
+            image_preprocessor_bound=self.image_preprocessor is not None,
         )
 
     async def format_health(
@@ -1575,6 +1600,9 @@ class LLMService:
         normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
         normalized_forward_text = forward_text.strip()
         normalized_forward_image_urls = [url for url in (forward_image_urls or []) if url.strip()]
+        request_image_urls = list(normalized_image_urls)
+        request_quoted_image_urls = list(normalized_quoted_image_urls)
+        request_forward_image_urls = list(normalized_forward_image_urls)
         if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
 
@@ -1622,14 +1650,55 @@ class LLMService:
         analysis_prompt = "\n".join(
             item for item in [trimmed_prompt, quoted_prompt] if item
         )[: self.config.runtime.max_prompt_chars]
-        effective_image_urls = merge_image_urls(normalized_image_urls, normalized_quoted_image_urls, normalized_forward_image_urls)
+
+        # ── image preprocessing & non-VLM stripping ──────────────────
+        current_model = settings.model or provider.default_model
+        is_non_vision = current_model in provider.non_vision_models
+
+        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls, request_forward_image_urls)
+
+        if effective_image_urls:
+            sources: list[str] = []
+            if normalized_image_urls:
+                sources.append(f"直接={len(normalized_image_urls)}")
+            if normalized_quoted_image_urls:
+                sources.append(f"引用={len(normalized_quoted_image_urls)}")
+            if normalized_forward_image_urls:
+                sources.append(f"转发={len(normalized_forward_image_urls)}")
+            logger.info(
+                "group=%s model=%s non_vision=%s images=%d (%s)",
+                chat_id, current_model, is_non_vision,
+                len(effective_image_urls), ", ".join(sources),
+            )
+
         image_descriptions = []
+        ok_count = 0
         if self.image_preprocessor is not None and effective_image_urls:
             image_descriptions = await self.image_preprocessor.describe_images(effective_image_urls)
-            current_model = settings.model or provider.default_model
-            if current_model in provider.non_vision_models:
-                successful = {d.source_url for d in image_descriptions if d.success}
-                effective_image_urls = [u for u in effective_image_urls if u not in successful]
+            ok_count = sum(1 for d in image_descriptions if d.success)
+            fail = len(image_descriptions) - ok_count
+            if fail:
+                logger.warning(
+                    "group=%s preprocessor: %d ok, %d failed (%s)",
+                    chat_id, ok_count, fail,
+                    ", ".join(d.source_url for d in image_descriptions if not d.success),
+                )
+            else:
+                logger.info("group=%s preprocessor: all %d images described", chat_id, ok_count)
+
+        if is_non_vision and effective_image_urls:
+            stripped_count = len(effective_image_urls)
+            extra = f" ({ok_count} described as text)" if ok_count else " (no preprocessing)"
+            logger.info(
+                "group=%s non-VLM strip: removed %d images from provider request%s",
+                chat_id, stripped_count, extra,
+            )
+            effective_image_urls = []
+            request_image_urls = []
+            request_quoted_image_urls = []
+            request_forward_image_urls = []
+
+        # ── end image preprocessing ─────────────────────────────────
         default_history_limit = self._default_history_limit(chat_type)
         history = self.store.list_recent_conversation_messages(
             scope_key,
@@ -1685,9 +1754,9 @@ class LLMService:
             quoted_text=quoted_prompt,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
-            quoted_image_urls=normalized_quoted_image_urls,
+            quoted_image_urls=request_quoted_image_urls,
             forward_text=normalized_forward_text,
-            forward_image_urls=normalized_forward_image_urls,
+            forward_image_urls=request_forward_image_urls,
             image_descriptions=image_descriptions or None,
         )
         request = LLMRequest(

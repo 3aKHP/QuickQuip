@@ -22,6 +22,7 @@
 ### 修复
 
 - LLM 上下文交替：修正 `build_messages()` 中 pending context flush 与当前场景分别生成连续 `role="user"` 的问题——现合并到同一 user message 用 `【上文】`/`【当前提问】` 在文本内区分，确保三家 provider 的 user/assistant 交替约束
+- LLM 图片输入：非视觉模型请求图片时先经图片预处理转述，再移除传给 provider 的图片 URL；配置热重载会同步重建图片预处理器，健康检查展示运行时绑定状态
 - `/profile @某人` 无响应：`on_command` 处理后 at 段可能丢失类型信息，现增加 CQ 码文本正则回退解析（`[CQ:at,qq=XXXX]`）
 - `/profile` 解除对 `daily_summary.model_cascade` 的依赖：现直接使用当前群的 provider/model，不再因级联配置空缺或引用不存在的 provider 而阻塞
 - `/profile` 消息窗口从 30 天缩至 7 天，数据收集增加 try/except 保护

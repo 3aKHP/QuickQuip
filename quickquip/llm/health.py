@@ -120,6 +120,7 @@ async def build_health_report(
     generation_config_path: Path = Path("config/generation.toml"),
     probe_provider: bool = False,
     auto_memory_stats: dict[str, int] | None = None,
+    image_preprocessor_bound: bool = False,
 ) -> HealthReport:
     started = time.monotonic()
     items: list[HealthCheckItem] = []
@@ -245,6 +246,35 @@ async def build_health_report(
             search_status,
             "搜索后端已配置" if search_env else "搜索后端未配置",
             {"needed": search_needed, "base_url_configured": bool(search_env)},
+        )
+    )
+
+    img_cfg = config.image_preprocessing
+    img_provider = config.providers.get(img_cfg.provider_id) if img_cfg.provider_id else None
+    if not img_cfg.enabled:
+        image_status = "ok"
+        image_summary = "图片预处理未启用"
+    elif img_provider is None:
+        image_status = "warn"
+        image_summary = f"图片预处理 provider 不存在：{img_cfg.provider_id}"
+    elif not image_preprocessor_bound:
+        image_status = "warn"
+        image_summary = "图片预处理已配置但运行时未绑定"
+    else:
+        image_status = "ok"
+        image_summary = f"图片预处理已绑定：{img_cfg.provider_id} / {img_cfg.model or img_provider.default_model}"
+    items.append(
+        HealthCheckItem(
+            "image_preprocessing",
+            image_status,
+            image_summary,
+            {
+                "enabled": img_cfg.enabled,
+                "provider_id": img_cfg.provider_id,
+                "provider_declared": img_provider is not None,
+                "model": img_cfg.model or (img_provider.default_model if img_provider else ""),
+                "runtime_bound": image_preprocessor_bound,
+            },
         )
     )
 

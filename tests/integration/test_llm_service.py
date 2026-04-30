@@ -329,6 +329,43 @@ def test_reload_personas_empty_keeps_previous(llm_service):
     assert llm_service.config.personas is original
 
 
+def test_reload_config_rebuilds_image_preprocessor(llm_service, monkeypatch):
+    from tests.fixtures.configs import MIN_LLM_CONFIG_TOML
+
+    built = []
+
+    class _StubClient:
+        pass
+
+    def _build(provider):
+        built.append(provider)
+        return _StubClient()
+
+    monkeypatch.setattr("quickquip.llm.service.build_provider_client", _build)
+    llm_service.config_path.write_text(
+        MIN_LLM_CONFIG_TOML
+        + """
+
+[image_preprocessing]
+enabled = true
+provider_id = "openai-main"
+model = "gpt-test"
+""",
+        encoding="utf-8",
+    )
+
+    llm_service.reload_config()
+
+    assert llm_service.image_preprocessor is not None
+    assert llm_service.image_preprocessor._model == "gpt-test"
+    assert built and built[-1].id == "openai-main"
+
+    llm_service.config_path.write_text(MIN_LLM_CONFIG_TOML, encoding="utf-8")
+    llm_service.reload_config()
+
+    assert llm_service.image_preprocessor is None
+
+
 class _AutoMemoryStubClient:
     """Stub provider client that returns pre-canned replies in order."""
 
@@ -579,7 +616,7 @@ async def test_vision_model_keeps_images_in_request(wired_service, patch_provide
     assert image_urls_found, "Expected image_urls preserved for VLM model"
 
 
-async def test_preprocessor_failure_preserves_image_urls(wired_service, patch_provider_builder):
+async def test_non_vision_strips_even_when_preprocessor_fails(wired_service, patch_provider_builder):
     from tests.fixtures.provider_stubs import StubProviderClient
     from quickquip.llm.image_preprocessor import ImageDescription
 
@@ -609,9 +646,91 @@ async def test_preprocessor_failure_preserves_image_urls(wired_service, patch_pr
     )
 
     request = stub_client.last_request
-    image_urls_found = False
+    # Non-VLM should strip images even when preprocessor fails
     for msg in request.messages:
-        if msg.role == "user" and msg.image_urls:
-            image_urls_found = True
-            break
-    assert image_urls_found, "Failed preprocessor should preserve image URLs"
+        if msg.role == "user":
+            assert msg.image_urls == [], (
+                f"Non-VLM must strip images regardless of preprocessor success, got {msg.image_urls}"
+            )
+
+
+async def test_non_vision_strips_without_preprocessor(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubProviderClient
+
+    # No preprocessor bound, model is non-VLM
+    wired_service.image_preprocessor = None
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+
+    request = stub_client.last_request
+    for msg in request.messages:
+        if msg.role == "user":
+            assert msg.image_urls == [], "Non-VLM without preprocessor must still strip images"
+
+
+async def test_non_vision_strips_quoted_images(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看引用图",
+        image_urls=[],
+        quoted_text="上一条",
+        quoted_image_urls=["https://example.test/reply.png"],
+        recent_messages=[],
+    )
+
+    request = stub_client.last_request
+    for msg in request.messages:
+        if msg.role == "user":
+            assert msg.image_urls == [], "Non-VLM must strip quoted images"
+    assert "stub description of https://example.test/reply.png" in request.messages[-1].content
+
+
+async def test_non_vision_strips_forward_images(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看看转发图",
+        image_urls=[],
+        forward_text="转发内容",
+        forward_image_urls=["https://example.test/forward.png"],
+        recent_messages=[],
+    )
+
+    request = stub_client.last_request
+    for msg in request.messages:
+        if msg.role == "user":
+            assert msg.image_urls == [], "Non-VLM must strip forwarded images"
+    assert "stub description of https://example.test/forward.png" in request.messages[-1].content
