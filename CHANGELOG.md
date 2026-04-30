@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-01
+
 ### 新增
 
 - 自动记忆抽取保守重做：攒批触发（每 10 轮 LLM 对话才触发一次抽取）、多轮对话上下文（最近 10 条消息作为判定背景）、固定置信度 0.5（不再让 LLM 自评）；新增质量门槛——用户消息 ≥ 8 字且助手回复 ≥ 20 字才触发；去重算法改为双向 min 分母 + 0.7 阈值；prompt 强调「宁可不记，不可记错」
@@ -304,7 +306,8 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/3aKHP/QuickQuip/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/3aKHP/QuickQuip/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/3aKHP/QuickQuip/compare/v0.9.2...v1.0.0
 [0.9.2]: https://github.com/3aKHP/QuickQuip/compare/v0.9.0...v0.9.2

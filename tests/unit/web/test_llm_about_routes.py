@@ -5,7 +5,7 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 HTTPException = fastapi.HTTPException
 
-from quickquip.app.web.routes import llm_about
+from quickquip.app.web.routes import llm_about  # noqa: E402
 
 
 def _patch_base(monkeypatch, tmp_path: Path) -> Path:
