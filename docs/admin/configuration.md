@@ -117,6 +117,15 @@
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `enabled` | 工具白名单。为空 `[]` 时暴露所有内建及 MCP 工具；填写后按工具名精确过滤 | `[]` |
+| `discovery_mode` | 工具发现模式：`off` 全量暴露；`on` 仅暴露常驻工具并通过 `tool_search` 按需加载；`auto` 在可延迟工具数超过阈值后启用 | `auto` |
+| `discovery_min_tools` | `auto` 模式下触发工具发现的可延迟工具数量阈值 | `10` |
+| `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 | `5` |
+| `discovery_max_loaded_tools` | 一次 LLM 工具调用循环中最多动态加载的工具总数 | `12` |
+| `always_loaded` | 工具发现开启时仍然常驻暴露的工具名列表 | `["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]` |
+
+`tool_search` 和 `tool_list` 是本地元工具，不依赖 Claude 原生 tool search。接入大量 MCP 工具时，模型会先用 `tool_search` 搜索相关能力；搜索不到时可用 `tool_list` 列出工具组、工具名或按精确工具名加载工具，下一轮再调用被加载的真实工具。
+
+专题配置和排障建议见 [tool-discovery.md](tool-discovery.md)。
 
 ### `[[providers]]` — Provider 定义（可多个）
 

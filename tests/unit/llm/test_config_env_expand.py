@@ -18,6 +18,14 @@ CONFIG_WITH_ENV_VARS = textwrap.dedent(
     [mcp]
     enabled = "${QQ_MCP_ENABLED:-true}"
 
+    [tools]
+    enabled = []
+    discovery_mode = "on"
+    discovery_min_tools = 3
+    discovery_search_limit = 4
+    discovery_max_loaded_tools = 9
+    always_loaded = ["tool_search", "tool_list", "search_web"]
+
     [[mcp.servers]]
     id = "expand"
     transport = "docker"
@@ -53,6 +61,11 @@ def test_env_expand_with_explicit_values(tmp_path: Path, monkeypatch):
     loaded = llm_runtime_module.load_llm_config(config_path)
     assert loaded.runtime.enabled is True
     assert loaded.runtime.tool_calling_enabled is True
+    assert loaded.tools.discovery_mode == "on"
+    assert loaded.tools.discovery_min_tools == 3
+    assert loaded.tools.discovery_search_limit == 4
+    assert loaded.tools.discovery_max_loaded_tools == 9
+    assert loaded.tools.always_loaded == ["tool_search", "tool_list", "search_web"]
     assert loaded.mcp.enabled is True
     assert loaded.mcp.servers[0].enabled is True
     # Empty default ${VAR:-} expands to empty string and is filtered from mounts

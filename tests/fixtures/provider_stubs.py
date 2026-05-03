@@ -83,6 +83,114 @@ class StubMCPToolCallingProviderClient:
         )
 
 
+class StubMCPDiscoveryProviderClient:
+    """Round 1 -> tool_search; round 2 -> MCP tool; round 3 -> final text."""
+
+    def __init__(self) -> None:
+        self.requests: list[LLMRequest] = []
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_tool_search_1",
+                        name="tool_search",
+                        arguments_json='{"query":"fake echo text MCP"}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if len(self.requests) == 2:
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_mcp_1",
+                        name="mcp_fake_echo_text",
+                        arguments_json='{"text":"云端 DOOD"}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(
+            text="echo::云端 DOOD",
+            model=request.model,
+            finish_reason="stop",
+        )
+
+
+class StubMCPListLoadProviderClient:
+    """Use tool_list as fallback before calling a deferred MCP tool."""
+
+    def __init__(self) -> None:
+        self.requests: list[LLMRequest] = []
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_list_groups",
+                        name="tool_list",
+                        arguments_json='{"mode":"groups"}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if len(self.requests) == 2:
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_list_group",
+                        name="tool_list",
+                        arguments_json='{"mode":"group","group":"mcp:fake","limit":5}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if len(self.requests) == 3:
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_load_tool",
+                        name="tool_list",
+                        arguments_json='{"mode":"load","names":["mcp_fake_echo_text"]}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if len(self.requests) == 4:
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_mcp_1",
+                        name="mcp_fake_echo_text",
+                        arguments_json='{"text":"云端 DOOD"}',
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        return LLMResponse(
+            text="echo::云端 DOOD",
+            model=request.model,
+            finish_reason="stop",
+        )
+
+
 class StubSearchOnlyProviderClient:
     """Rounds 1..4 → search_web; round 5 → final answer."""
 

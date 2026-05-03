@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-03
+
+### 新增
+
+- LLM 工具发现：新增本地 `tool_search` / `tool_list` 元工具与 `[tools] discovery_mode` 配置。工具数量较多时初始请求只暴露常驻工具，其余内置/MCP 工具按能力描述搜索或按精确名称加载，并在下一轮动态可用，降低大批 MCP 工具对提示词和工具 schema 的占用
+
 ## [1.1.0] - 2026-05-01
 
 ### 新增
@@ -306,7 +312,8 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/3aKHP/QuickQuip/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/3aKHP/QuickQuip/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/3aKHP/QuickQuip/compare/v0.9.2...v1.0.0

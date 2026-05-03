@@ -13,7 +13,11 @@ from plugins.llm_mcp import MCPServerStatus, MCPToolBinding
 from plugins.llm_runtime import LLMService
 
 from tests.fixtures.configs import write_llm_config_bundle
-from tests.fixtures.provider_stubs import StubMCPToolCallingProviderClient
+from tests.fixtures.provider_stubs import (
+    StubMCPDiscoveryProviderClient,
+    StubMCPListLoadProviderClient,
+    StubMCPToolCallingProviderClient,
+)
 
 
 MCP_CONFIG_TOML = textwrap.dedent(
@@ -141,3 +145,65 @@ async def test_mcp_tool_call_executed_in_loop(mcp_service, patch_provider_builde
     assert round2.messages[-1].role == "tool"
     assert round2.messages[-1].tool_name == "mcp_fake_echo_text"
     assert round2.messages[-1].content == "echo::云端 DOOD"
+
+
+async def test_mcp_tool_discovery_loads_deferred_tool(mcp_service, patch_provider_builder):
+    mcp_service.config.tools.discovery_mode = "on"
+    mcp_service.config.tools.always_loaded = [
+        "tool_search",
+        "tool_list",
+        "get_identity",
+        "list_memories",
+        "search_web",
+    ]
+    stub = StubMCPDiscoveryProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    result = await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我找能回显文本的 MCP 工具，然后调用它",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "echo::云端 DOOD"
+    assert len(stub.requests) == 3
+    assert "mcp_fake_echo_text" not in {tool.name for tool in stub.requests[0].tools}
+    assert "tool_search" in {tool.name for tool in stub.requests[0].tools}
+    assert "tool_list" in {tool.name for tool in stub.requests[0].tools}
+    assert "mcp_fake_echo_text" in {tool.name for tool in stub.requests[1].tools}
+    assert stub.requests[1].messages[-1].tool_name == "tool_search"
+    assert "mcp_fake_echo_text" in stub.requests[1].messages[-1].content
+    assert stub.requests[2].messages[-1].tool_name == "mcp_fake_echo_text"
+
+
+async def test_mcp_tool_list_can_load_deferred_tool(mcp_service, patch_provider_builder):
+    mcp_service.config.tools.discovery_mode = "on"
+    mcp_service.config.tools.always_loaded = [
+        "tool_search",
+        "tool_list",
+        "get_identity",
+        "list_memories",
+        "search_web",
+    ]
+    stub = StubMCPListLoadProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    result = await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="如果搜索不到，就列出工具并加载回显文本工具",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "echo::云端 DOOD"
+    assert len(stub.requests) == 5
+    assert "mcp_fake_echo_text" not in {tool.name for tool in stub.requests[0].tools}
+    assert stub.requests[1].messages[-1].tool_name == "tool_list"
+    assert "mcp:fake" in stub.requests[1].messages[-1].content
+    assert "mcp_fake_echo_text" in stub.requests[2].messages[-1].content
+    assert "mcp_fake_echo_text" in stub.requests[3].messages[-1].content
+    assert "mcp_fake_echo_text" in {tool.name for tool in stub.requests[3].tools}
+    assert stub.requests[4].messages[-1].tool_name == "mcp_fake_echo_text"

@@ -39,6 +39,17 @@ class LLMToolResult:
 
 
 @dataclass(slots=True)
+class ToolManifestEntry:
+    name: str
+    description: str
+    source: str = "builtin"
+    category: str = ""
+    keywords: list[str] = field(default_factory=list)
+    argument_names: list[str] = field(default_factory=list)
+    always_loaded: bool = False
+
+
+@dataclass(slots=True)
 class ToolExecutionContext:
     group_id: int | str
     user_id: int | str

@@ -314,6 +314,11 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
   - `empty_prompt_reply`
 - `[tools]`
   - `enabled`
+  - `discovery_mode`
+  - `discovery_min_tools`
+  - `discovery_search_limit`
+  - `discovery_max_loaded_tools`
+  - `always_loaded`
 - `[[providers]]`
   - `id`
   - `protocol`
@@ -331,6 +336,14 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
   - 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表
 
 Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每个 `.toml` 一个人格文件，`_shared.toml` 存储共享行为准则与风格规则。
+
+### 6.1 工具发现
+
+工具调用开启后，QuickQuip 支持本地 `tool_search` 和 `tool_list` 元工具。该机制用于工具数量较多的场景：初始请求只暴露 `always_loaded` 中的常驻工具，模型需要其它能力时先调用 `tool_search`；搜索不到但工具可能存在时，可用 `tool_list` 查看工具组、工具名或按精确名称加载工具。工具循环会把匹配到或精确加载的真实工具加入下一轮 provider 请求。
+
+默认 `discovery_mode = "auto"`，当可延迟工具数超过 `discovery_min_tools` 后启用；工具较少时继续按原方式全量暴露。该设计不依赖 Claude 原生 tool search，OpenAI / Claude / Gemini 协议适配器共用同一套本地发现逻辑。
+
+实现细节见 [tool-discovery.md](tool-discovery.md)，MCP 大工具集场景见 [mcp-integration.md](mcp-integration.md)。
 
 注意：
 

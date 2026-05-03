@@ -177,6 +177,10 @@ def build_system_prompt(
     beijing_timezone: str,
     search_tool_name: str,
     auto_search_enabled: bool = False,
+    tool_discovery_enabled: bool = False,
+    tool_search_name: str = "tool_search",
+    tool_list_name: str = "tool_list",
+    deferred_tool_categories: list[str] | None = None,
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
     provider_style_overrides: str = "",
@@ -265,6 +269,15 @@ def build_system_prompt(
             "- 只有在确实需要外部信息、身份查询或记忆查询时才调用工具。",
             "- 优先直接回答，不要为了显得聪明而滥用工具。",
         ]
+        if tool_discovery_enabled:
+            tool_lines.extend([
+                f"- 当前只展示常驻工具；需要未展示的外部能力、MCP 能力或专门查询能力时，先调用 {tool_search_name}。",
+                f"- {tool_search_name} 会按能力描述返回并加载少量相关工具，之后再调用对应工具名。",
+                f"- 如果 {tool_search_name} 没找到但你认为工具存在，用 {tool_list_name} 查看工具组、名称或摘要；确认工具名后用 {tool_list_name} 的 load 模式加载。",
+            ])
+            categories = [item for item in deferred_tool_categories or [] if item.strip()]
+            if categories:
+                tool_lines.append(f"- 可搜索工具类别：{'、'.join(categories[:12])}")
         if auto_search_enabled:
             tool_lines.extend([
                 "- 当前联网后端：SearXNG。",

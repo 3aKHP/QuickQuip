@@ -189,12 +189,19 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 - GitHub / arXiv / PRTS Wiki
   - 已支持作为 MCP 接入
   - 是否启用由 `config/llm.toml` 与环境变量控制
+- 大批量 MCP 工具
+  - 通过 `[tools] discovery_mode = "auto"` 走本地 `tool_search` 按需发现
+  - `tool_search` 搜不到但工具存在时，可用 `tool_list` 列工具组并按精确名称加载
+  - 初始请求只暴露 `always_loaded` 中的常驻工具，匹配到的 MCP 工具会在下一轮工具调用中加载
 
 也就是说：
 
 - 现有工具调用框架先服务项目内部工具
 - MCP 后续作为可插拔扩展层加入
+- MCP 工具数量较多时，优先使用工具发现控制提示词体积
 - 不要为了 MCP 而重写已经稳定工作的直连能力
+
+工具发现的实现边界与测试覆盖见 [tool-discovery.md](tool-discovery.md)。
 
 ---
 

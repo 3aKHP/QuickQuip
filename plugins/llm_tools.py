@@ -3,6 +3,7 @@ from quickquip.llm.tools import (
     LLMToolCall,
     LLMToolResult,
     LLMToolSpec,
+    ToolManifestEntry,
     ToolExecutionContext,
 )
 
@@ -12,5 +13,6 @@ __all__ = [
     "LLMToolCall",
     "LLMToolResult",
     "LLMToolSpec",
+    "ToolManifestEntry",
     "ToolExecutionContext",
 ]

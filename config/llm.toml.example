@@ -35,6 +35,14 @@ search_max_calls_per_round = 3
 
 [tools]
 enabled = []
+# 工具发现：工具较多时只常驻少量核心工具，其余工具由 tool_search
+# 按能力描述搜索并在下一轮加载。auto 模式会在可延迟工具数超过
+# discovery_min_tools 后启用，适合接入大批 MCP 工具时控制提示词体积。
+discovery_mode = "auto"       # off | on | auto
+discovery_min_tools = 10
+discovery_search_limit = 5
+discovery_max_loaded_tools = 12
+always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
 
 [mcp]
 enabled = true

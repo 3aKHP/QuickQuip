@@ -46,6 +46,11 @@ class RuntimeConfig:
 @dataclass(slots=True)
 class ToolsConfig:
     enabled: list[str] = field(default_factory=list)
+    discovery_mode: str = "auto"  # off | on | auto
+    discovery_min_tools: int = 10
+    discovery_search_limit: int = 5
+    discovery_max_loaded_tools: int = 12
+    always_loaded: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -467,7 +472,16 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 str(item).strip()
                 for item in tools_raw.get("enabled", [])
                 if str(item).strip()
-            ]
+            ],
+            discovery_mode=str(tools_raw.get("discovery_mode", "auto")).strip().lower() or "auto",
+            discovery_min_tools=max(1, int(tools_raw.get("discovery_min_tools", 10))),
+            discovery_search_limit=max(1, min(int(tools_raw.get("discovery_search_limit", 5)), 20)),
+            discovery_max_loaded_tools=max(1, min(int(tools_raw.get("discovery_max_loaded_tools", 12)), 64)),
+            always_loaded=[
+                str(item).strip()
+                for item in tools_raw.get("always_loaded", [])
+                if str(item).strip()
+            ],
         ),
         mcp=MCPConfig(
             enabled=_as_bool(mcp_raw.get("enabled", False), default=False),
@@ -537,6 +551,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     if config.runtime.default_persona not in config.personas:
         config.load_error = f"默认 persona 不存在：{config.runtime.default_persona}"
         return config
+
+    if config.tools.discovery_mode not in {"off", "on", "auto"}:
+        config.tools.discovery_mode = "auto"
 
     for provider in config.providers.values():
         if provider.protocol not in {"openai", "claude", "gemini"}:

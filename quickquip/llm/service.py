@@ -63,11 +63,22 @@ MAX_MEMORY_RETRIEVAL_ITEMS = 8
 MAX_STORED_MEMORY_ITEMS = 200
 MAX_QUOTED_MESSAGE_CHARS = 1200
 SEARCH_TOOL_NAME = "search_web"
+TOOL_SEARCH_NAME = "tool_search"
+TOOL_LIST_NAME = "tool_list"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
 DEFAULT_PRIVATE_HISTORY_LIMIT = 256
 PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
+DEFAULT_ALWAYS_LOADED_TOOLS = [
+    TOOL_SEARCH_NAME,
+    TOOL_LIST_NAME,
+    "get_identity",
+    "list_memories",
+    SEARCH_TOOL_NAME,
+]
 DEFAULT_ENABLED_TOOLS = [
+    TOOL_SEARCH_NAME,
+    TOOL_LIST_NAME,
     "get_identity",
     "list_memories",
     SEARCH_TOOL_NAME,
@@ -212,6 +223,49 @@ class LLMService:
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
+                name=TOOL_SEARCH_NAME,
+                description="按能力描述搜索当前可用工具，并在下一轮工具调用中加载少量相关工具。",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "category": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            self._tool_search_tools,
+            category="tools",
+            keywords=["tool", "tools", "工具", "能力", "mcp", "github", "search"],
+            always_loaded=True,
+        )
+        self.tool_registry.register(
+            LLMToolSpec(
+                name=TOOL_LIST_NAME,
+                description="列出工具组、工具名称或工具摘要，也可按精确工具名加载少量工具作为 tool_search 的兜底。",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": ["groups", "names", "summaries", "group", "load"],
+                        },
+                        "group": {"type": "string"},
+                        "page": {"type": "integer"},
+                        "limit": {"type": "integer"},
+                        "names": {"type": "array"},
+                    },
+                    "required": ["mode"],
+                },
+            ),
+            self._tool_list_tools,
+            category="tools",
+            keywords=["tool", "tools", "工具", "目录", "列表", "分组", "catalog", "list", "load"],
+            always_loaded=True,
+        )
+        self.tool_registry.register(
+            LLMToolSpec(
                 name="get_identity",
                 description="按标准名、别名或 QQ 号查询当前群资料库中的人物身份信息。",
                 input_schema={
@@ -223,6 +277,9 @@ class LLMService:
                 },
             ),
             self._tool_get_identity,
+            category="identity",
+            keywords=["身份", "人物", "群友", "别名", "qq"],
+            always_loaded=True,
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -236,6 +293,9 @@ class LLMService:
                 },
             ),
             self._tool_list_memories,
+            category="memory",
+            keywords=["记忆", "长期记忆", "memory"],
+            always_loaded=True,
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -251,6 +311,9 @@ class LLMService:
                 },
             ),
             self._tool_search_web,
+            category="search",
+            keywords=["联网", "网页", "新闻", "最新", "搜索", "web", "searxng"],
+            always_loaded=True,
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -264,6 +327,8 @@ class LLMService:
                 },
             ),
             self._tool_get_group_stats,
+            category="group",
+            keywords=["统计", "活跃", "消息数", "群状态"],
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -278,6 +343,8 @@ class LLMService:
                 },
             ),
             self._tool_get_rule_status,
+            category="group",
+            keywords=["规则", "开关", "状态"],
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -292,6 +359,8 @@ class LLMService:
                 },
             ),
             self._tool_search_recent_messages,
+            category="context",
+            keywords=["最近消息", "上下文", "短期缓冲", "群聊记录"],
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -305,6 +374,8 @@ class LLMService:
                 },
             ),
             self._tool_get_llm_status,
+            category="diagnostics",
+            keywords=["llm", "状态", "配置", "当前"],
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -316,6 +387,8 @@ class LLMService:
                 },
             ),
             self._tool_get_current_model,
+            category="diagnostics",
+            keywords=["模型", "provider", "persona", "触发"],
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -329,6 +402,8 @@ class LLMService:
                 },
             ),
             self._tool_get_health_status,
+            category="diagnostics",
+            keywords=["健康检查", "诊断", "自检", "health"],
         )
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
@@ -385,6 +460,9 @@ class LLMService:
                     input_schema=binding.input_schema,
                 ),
                 _handler,
+                source=f"mcp:{binding.server_id}",
+                category=f"mcp:{binding.server_id}",
+                keywords=[binding.server_id, binding.tool_name, "mcp"],
             )
             self._mcp_tool_names.add(binding.alias)
 
@@ -461,6 +539,114 @@ class LLMService:
             if entry.note:
                 lines.append(f"  备注：{entry.note}")
         return "\n".join(lines)
+
+    async def _tool_search_tools(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+        query = str(arguments.get("query", "")).strip()
+        category = str(arguments.get("category", "")).strip()
+        raw_limit = arguments.get("limit", self.config.tools.discovery_search_limit)
+        try:
+            limit = int(raw_limit or self.config.tools.discovery_search_limit)
+        except (TypeError, ValueError):
+            limit = self.config.tools.discovery_search_limit
+        limit = max(1, min(limit, self.config.tools.discovery_search_limit))
+        current_enabled = self._get_enabled_tool_names(chat_type=context.chat_type)
+        loaded_names = set(self._get_always_loaded_tool_names(chat_type=context.chat_type))
+        matches = self.tool_registry.search_manifest(
+            query,
+            enabled_names=current_enabled,
+            exclude_names=[TOOL_SEARCH_NAME],
+            category=category,
+            limit=limit,
+        )
+        if not matches:
+            suffix = f"（类别：{category}）" if category else ""
+            return f"没有找到与“{query}”匹配的可用工具{suffix}。"
+
+        lines = ["工具搜索结果："]
+        for item in matches:
+            state = "已常驻" if item.name in loaded_names else "将于下一轮可用"
+            args = f"；参数：{', '.join(item.argument_names)}" if item.argument_names else ""
+            category_part = f"；类别：{item.category}" if item.category else ""
+            lines.append(f"- {item.name}（{state}{category_part}{args}）：{item.description}")
+        lines.append("如需使用其中某个工具，请在下一轮直接调用对应工具名。")
+        return "\n".join(lines)
+
+    async def _tool_list_tools(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+        mode = str(arguments.get("mode", "")).strip().lower()
+        group = str(arguments.get("group", "")).strip()
+        try:
+            page = int(arguments.get("page", 1) or 1)
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            limit = int(arguments.get("limit", 20) or 20)
+        except (TypeError, ValueError):
+            limit = 20
+        page = max(1, page)
+        limit = max(1, min(limit, 50))
+        enabled_names = self._get_enabled_tool_names(chat_type=context.chat_type)
+
+        if mode == "groups":
+            groups = self.tool_registry.list_groups(enabled_names)
+            if not groups:
+                return "当前没有可用工具组。"
+            lines = ["工具组列表："]
+            for item in groups:
+                samples = "、".join(item["sample_tools"])
+                suffix = f"；示例：{samples}" if samples else ""
+                lines.append(f"- {item['name']}：{item['tool_count']} 个工具{suffix}")
+            lines.append("可用 tool_list mode=\"group\" 并传入 group 查看某组工具。")
+            return "\n".join(lines)
+
+        if mode in {"names", "summaries", "group"}:
+            entries, total = self.tool_registry.list_manifest_page(
+                enabled_names=enabled_names,
+                group=group,
+                page=page,
+                limit=limit,
+            )
+            group_part = f"（组：{group}）" if group else ""
+            if not entries:
+                return f"没有找到可列出的工具{group_part}。"
+            header_mode = "工具摘要" if mode in {"summaries", "group"} else "工具名称"
+            start = (page - 1) * limit + 1
+            end = start + len(entries) - 1
+            lines = [f"{header_mode}{group_part}：第 {page} 页，{start}-{end}/{total}"]
+            for item in entries:
+                if mode in {"summaries", "group"}:
+                    args = f"；参数：{', '.join(item.argument_names)}" if item.argument_names else ""
+                    category = f"；组：{item.category}" if item.category else ""
+                    lines.append(f"- {item.name}{category}{args}：{item.description}")
+                else:
+                    lines.append(f"- {item.name}")
+            if end < total:
+                lines.append(f"还有更多工具，可用 page={page + 1} 继续查看。")
+            if mode != "names":
+                lines.append("如需加载某些工具，可用 tool_list mode=\"load\" 并传入 names。")
+            return "\n".join(lines)
+
+        if mode == "load":
+            raw_names = arguments.get("names", [])
+            if not isinstance(raw_names, list):
+                return "names 必须是工具名数组。"
+            requested = [str(name).strip() for name in raw_names if str(name).strip()]
+            if not requested:
+                return "请在 names 中提供要加载的工具名。"
+            enabled_set = set(enabled_names)
+            valid = [
+                name for name in requested[: self.config.tools.discovery_search_limit]
+                if name in enabled_set and self.tool_registry.has_tool(name)
+            ]
+            invalid = [name for name in requested if name not in valid]
+            lines = ["工具加载请求："]
+            if valid:
+                lines.append(f"- 将于下一轮可用：{', '.join(valid)}")
+            if invalid:
+                lines.append(f"- 未加载（不存在或未启用）：{', '.join(invalid)}")
+            lines.append("下一轮请直接调用已加载的工具名。")
+            return "\n".join(lines)
+
+        return "未知 mode。可用 mode：groups、names、summaries、group、load。"
 
     async def _tool_list_memories(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         keyword = str(arguments.get("keyword", "")).strip() or None
@@ -733,8 +919,58 @@ class LLMService:
             names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
         return [name for name in names if self.tool_registry.has_tool(name)]
 
+    def _get_always_loaded_tool_names(self, chat_type: str = "group") -> list[str]:
+        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        enabled = set(self._get_enabled_tool_names(chat_type=chat_type))
+        names = [name for name in configured if name in enabled and self.tool_registry.has_tool(name)]
+        if self._is_tool_discovery_enabled(chat_type) and TOOL_SEARCH_NAME in enabled and TOOL_SEARCH_NAME not in names:
+            names.insert(0, TOOL_SEARCH_NAME)
+        return names
+
+    def _is_tool_discovery_enabled(self, chat_type: str = "group") -> bool:
+        mode = self.config.tools.discovery_mode
+        if mode == "off":
+            return False
+        if TOOL_SEARCH_NAME not in self._get_enabled_tool_names(chat_type=chat_type):
+            return False
+        enabled_count = len(self._get_enabled_tool_names(chat_type=chat_type))
+        if mode == "on":
+            configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+            always_count = len([
+                name for name in configured
+                if name in self._get_enabled_tool_names(chat_type=chat_type)
+                and self.tool_registry.has_tool(name)
+            ])
+            return enabled_count > always_count
+        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        always_names = {
+            name for name in configured
+            if name in self._get_enabled_tool_names(chat_type=chat_type)
+            and self.tool_registry.has_tool(name)
+        }
+        deferred_count = len([
+            name for name in self._get_enabled_tool_names(chat_type=chat_type)
+            if name not in always_names
+        ])
+        return deferred_count > self.config.tools.discovery_min_tools
+
     def _get_enabled_tool_specs(self, chat_type: str = "group") -> list[LLMToolSpec]:
+        if self._is_tool_discovery_enabled(chat_type):
+            return self.tool_registry.get_specs(self._get_always_loaded_tool_names(chat_type=chat_type))
         return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type))
+
+    def _get_deferred_tool_categories(self, chat_type: str = "group") -> list[str]:
+        if not self._is_tool_discovery_enabled(chat_type):
+            return []
+        loaded = set(self._get_always_loaded_tool_names(chat_type=chat_type))
+        categories: list[str] = []
+        for entry in self.tool_registry.list_manifest(self._get_enabled_tool_names(chat_type=chat_type)):
+            if entry.name in loaded:
+                continue
+            category = entry.category or entry.source
+            if category and category not in categories:
+                categories.append(category)
+        return categories
 
     def _get_mcp_statuses(self) -> list[MCPServerStatus]:
         return self.mcp_manager.get_statuses()
@@ -1198,6 +1434,10 @@ class LLMService:
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
             auto_search_enabled=self.config.auto_search.enabled,
+            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type),
+            tool_search_name=TOOL_SEARCH_NAME,
+            tool_list_name=TOOL_LIST_NAME,
+            deferred_tool_categories=self._get_deferred_tool_categories(chat_type),
             chat_type=chat_type,
             participants=participants,
             provider_style_overrides=provider_style_overrides,
@@ -1574,6 +1814,13 @@ class LLMService:
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
+            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type),
+            tool_search_name=TOOL_SEARCH_NAME,
+            tool_list_name=TOOL_LIST_NAME,
+            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type),
+            initial_tool_names=[spec.name for spec in request.tools],
+            tool_discovery_search_limit=self.config.tools.discovery_search_limit,
+            tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
         )
 
     async def _generate_reply_for_scope(
