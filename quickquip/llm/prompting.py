@@ -218,6 +218,11 @@ def build_system_prompt(
     lines.append("当前元数据：")
     lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")
     lines.append(f"- 当前星期：{weekday_names[now_cst.weekday()]}")
+    from quickquip.chat.festival import get_festival_persona_appendix
+    festival_appendix = get_festival_persona_appendix()
+    if festival_appendix:
+        lines.append("节日提示：")
+        lines.append(f"- {festival_appendix}")
     if chat_type == "private":
         lines.append("- 当前会话类型：私聊")
         lines.append(f"- 当前私聊对象 QQ：{group_id}")
