@@ -2,9 +2,10 @@ import logging
 import re
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.app.web.settings import PROJECT_ROOT
 from quickquip.llm.config import load_llm_config
 from quickquip.llm.store import LLMStore
@@ -135,7 +136,7 @@ def get_group_settings(group_id: str):
 
 
 @router.put("/group-settings/{group_id}")
-def put_group_settings(group_id: str, body: GroupSettingsBody):
+def put_group_settings(group_id: str, body: GroupSettingsBody, request: Request):
     _validate_group_id(group_id)
     payload = body.model_dump(exclude_unset=True)
     if not payload:
@@ -143,11 +144,18 @@ def put_group_settings(group_id: str, body: GroupSettingsBody):
     store = _store()
     store.update_group_settings(group_id, **payload)
     logger.info("group_settings updated: group=%s fields=%s", group_id, list(payload.keys()))
+    audit_logger.log(
+        request,
+        action="update",
+        target_type="group_setting",
+        target_id=group_id,
+        summary_after={"fields": list(payload.keys())},
+    )
     return {"ok": True}
 
 
 @router.delete("/group-settings/{group_id}")
-def delete_group_settings(group_id: str):
+def delete_group_settings(group_id: str, request: Request):
     _validate_group_id(group_id)
     store = _store()
     with store._connect() as conn:
@@ -156,4 +164,10 @@ def delete_group_settings(group_id: str):
             (group_id,),
         )
     logger.warning("group_settings cleared: group=%s deleted=%d", group_id, cursor.rowcount)
+    audit_logger.log(
+        request,
+        action="delete",
+        target_type="group_setting",
+        target_id=group_id,
+    )
     return {"deleted": cursor.rowcount}

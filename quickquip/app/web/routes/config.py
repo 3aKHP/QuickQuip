@@ -2,10 +2,11 @@ import logging
 import tomllib
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from filelock import FileLock
 from pydantic import BaseModel, Field
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.app.web.settings import PROJECT_ROOT
 
 router = APIRouter()
@@ -77,7 +78,7 @@ def get_config(key: str):
 
 
 @router.put("/config/{key}")
-def put_config(key: str, body: ConfigBody):
+def put_config(key: str, body: ConfigBody, request: Request):
     path = _resolve(key)
     try:
         tomllib.loads(body.content)
@@ -93,4 +94,10 @@ def put_config(key: str, body: ConfigBody):
             tmp.unlink(missing_ok=True)
             raise
     logger.warning("config updated via web admin: %s (%d bytes)", key, len(body.content))
+    audit_logger.log(
+        request,
+        action="update",
+        target_type="config",
+        target_id=key,
+    )
     return {"ok": True}

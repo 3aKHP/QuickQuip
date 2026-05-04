@@ -18,6 +18,7 @@ import ConfigView from '../views/ConfigView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
 import McpDashboardView from '../views/McpDashboardView.vue'
 import CronDashboardView from '../views/CronDashboardView.vue'
+import AuditView from '../views/AuditView.vue'
 
 export interface NavItem {
   key: string
@@ -44,4 +45,5 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'diagnostics',     path: '/diagnostics',     label: '诊断',     icon: 'Stethoscope',   component: DiagnosticsView },
   { key: 'mcp-dashboard',  path: '/mcp-dashboard',   label: 'MCP',      icon: 'Server',        component: McpDashboardView },
   { key: 'cron-dashboard', path: '/cron-dashboard',  label: '定时任务', icon: 'Clock',          component: CronDashboardView },
+  { key: 'audit',          path: '/audit',           label: '审计',     icon: 'ShieldCheck',   component: AuditView },
 ]

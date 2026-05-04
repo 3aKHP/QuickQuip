@@ -3,10 +3,11 @@ import re
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from filelock import FileLock
 from pydantic import BaseModel, Field
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.app.web.settings import PROJECT_ROOT
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.vocab import VocabIndex
@@ -207,7 +208,7 @@ def get_llm_about_file(scope: str, kind: str):
 
 
 @router.put("/llm-about/{scope}/{kind}")
-def put_llm_about_file(scope: str, kind: str, body: LLMAboutContent):
+def put_llm_about_file(scope: str, kind: str, body: LLMAboutContent, request: Request):
     path = _resolve(scope, kind)
     _validate_content(kind, body.content)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,11 +221,17 @@ def put_llm_about_file(scope: str, kind: str, body: LLMAboutContent):
             tmp.unlink(missing_ok=True)
             raise
     logger.warning("llm_about updated via web admin: %s/%s (%d bytes)", scope, kind, len(body.content))
+    audit_logger.log(
+        request,
+        action="update",
+        target_type="llm_about",
+        target_id=f"{scope}/{kind}",
+    )
     return {"ok": True}
 
 
 @router.post("/llm-about/groups", status_code=201)
-def create_llm_about_group(body: LLMAboutGroupCreate):
+def create_llm_about_group(body: LLMAboutGroupCreate, request: Request):
     group_id = body.group_id.strip()
     if not _GROUP_RE.match(group_id):
         raise HTTPException(status_code=422, detail="group_id must be 5-12 digits")
@@ -236,4 +243,10 @@ def create_llm_about_group(body: LLMAboutGroupCreate):
             _copy_example_file(target_dir, kind)
 
     logger.warning("llm_about group scope created via web admin: %s", group_id)
+    audit_logger.log(
+        request,
+        action="create",
+        target_type="llm_about",
+        target_id=group_id,
+    )
     return {"scope": group_id, "files": [_file_meta(group_id, kind) for kind in _KINDS]}
