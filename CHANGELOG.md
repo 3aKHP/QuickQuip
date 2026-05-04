@@ -2,11 +2,31 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.2.1] - 2026-05-05
 
 ### 新增
 
-- 节日自动化：内置元旦、春节、元宵、端午、中秋、除夕 6 个节日检测（公历+农历，使用 `lunardate` 库），每日凌晨 1 点 cron 触发；命中节日时自动向 LLM 系统提示注入节日人设附录，并向已启用日报的群组发送节日问候；支持 `config/chat_rules.toml` 的 `[[festivals.custom]]` 自定义节日扩展
+- 前端工程重构：Design Token 体系（暗色/亮色双主题）、响应式布局（768px 断点，侧栏/汉堡菜单自适应）、15 个视图统一卡片化、UI 组件标准化（UiCard/UiButton/UiToggle 等 variant/size 属性）、视图过渡动画
+- Web Admin 操作审计：SQLite 审计日志（`data/audit.db`），覆盖规则开关、群组管理、记忆编辑、人格修改、TOML 配置、群 LLM 设置、资料文件共 7 类变更操作；前端审计页支持按操作类型/目标类型/时间范围过滤和分页浏览
+- 定时任务看板：聚合 daily_summary、daily_briefing、scheduled_messages 及节日检查的 cron job 状态，展示触发器、下次执行时间、最近执行结果和错误信息，30s 自动刷新
+- MCP server 状态看板：展示所有 MCP server 的连接状态（已连接/连接失败/已禁用）、传输方式、工具数量和工具清单；bot 进程通过共享卷 `data/mcp_status.json` 向 web-admin 透传真实连接状态
+- MCP server 级工具过滤：`MCPServerConfig` 新增 `include_tools` / `exclude_tools` 字段，支持按白名单/黑名单在注册前过滤工具；兼容旧 `allowed_tools` 字段
+- 节日自动化：内置元旦、春节、元宵、端午、中秋、除夕 6 个节日检测（公历+农历，使用 `lunardate` 库），每日凌晨 1 点 cron 触发；命中节日时自动向 LLM 系统提示注入节日人设附录，并向已启用日报的群组发送节日问候
+- 数字炸弹游戏：`/game start 数字炸弹` 开始，群友猜 1-1000 间秘密数字，bot 回复"大了/小了"缩小范围，猜中 @ 获胜者；60s 超时自动揭晓，`/game score` 查看排行榜；`BaseGame` + `GameRegistry` 扩展接口预留给后续游戏类型
+- 每日总结 Markdown 渲染：详情页使用 `marked` + `DOMPurify` 安全渲染 Markdown 内容（标题、列表、加粗、代码块、引用、链接）
+
+### 变更
+
+- 前端视觉语言完善（Design Token 化、组件标准化），为后续 QQ 原生风格重设计铺平工程基础
+- 文档全面脱敏：CHANGELOG、部署指南、架构文档、MCP 集成文档中的私有路径/域名替换为通用描述；ROADMAP 移除已完成 v1.1 条目并标注 v1.2.0 版本号失误
+
+### 修复
+
+- 数字炸弹积分记录从 `user_id`（消息发送者）修正为 `at_user_id`（游戏判定获胜者），确保后续游戏类型的积分正确性
+- 定时任务看板中 scheduled_message 任务在 bot 不可用时不误报为"成功"
+- 节日 cron 任务补充 `record_job_result` 执行追踪，与其他定时任务在状态看板中一致
+- MCP 看板及新标签页缺失图标（Server/Clock/ShieldCheck/ChevronLeft/ChevronRight）已注册
+- 未使用 import 清理（`game_registry.py` 的 `field`、`game_scores.py` 的 `Optional`），CI ruff 报错消除
 
 ## [1.2.0] - 2026-05-03
 
