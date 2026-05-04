@@ -46,14 +46,14 @@
         </div>
         <UiButton size="sm" icon="ArrowLeft" @click="closeDetail">返回</UiButton>
       </div>
-      <div v-if="detail" class="sum-body">{{ detail.content }}</div>
+      <div v-if="detail" class="sum-body markdown-body" v-html="renderedContent" />
       <UiLoading v-else />
     </UiCard>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -62,6 +62,7 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { fetchSummaryGroups, fetchSummaries, fetchSummaryDetail, deleteSummary } from '../api/summaries'
+import { renderMarkdown } from '../composables/useMarkdown'
 import { toast } from '../toast'
 
 const groups = ref<string[]>([])
@@ -71,6 +72,10 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const selected = ref<string | null>(null)
 const detail = ref<any>(null)
+
+const renderedContent = computed(() => {
+  return detail.value ? renderMarkdown(detail.value.content) : ''
+})
 
 onMounted(async () => {
   try {
@@ -205,10 +210,82 @@ function closeDetail() {
 }
 
 .sum-body {
-  white-space: pre-wrap;
   font-size: var(--qq-text-base);
   line-height: 1.8;
-  word-break: break-all;
   color: var(--qq-text);
+}
+
+/* Markdown rendered content */
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin-top: 1.4em;
+  margin-bottom: 0.6em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--qq-text);
+}
+
+.markdown-body :deep(h1) { font-size: 1.4em; }
+.markdown-body :deep(h2) { font-size: 1.25em; }
+.markdown-body :deep(h3) { font-size: 1.1em; }
+
+.markdown-body :deep(p) {
+  margin-bottom: 0.8em;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  padding-left: 1.5em;
+  margin-bottom: 0.8em;
+}
+
+.markdown-body :deep(li) {
+  margin-bottom: 0.3em;
+}
+
+.markdown-body :deep(strong) {
+  font-weight: 600;
+}
+
+.markdown-body :deep(code) {
+  padding: 0.15em 0.4em;
+  font-size: 0.9em;
+  font-family: var(--qq-font-mono);
+  background: var(--qq-surface-strong);
+  border-radius: var(--qq-radius-sm);
+}
+
+.markdown-body :deep(pre) {
+  padding: var(--qq-gap-md);
+  margin-bottom: 0.8em;
+  background: var(--qq-surface-strong);
+  border-radius: var(--qq-radius-md);
+  overflow-x: auto;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  background: none;
+  font-size: var(--qq-text-sm);
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  border-left: 3px solid var(--qq-accent);
+  color: var(--qq-text-muted);
+}
+
+.markdown-body :deep(hr) {
+  margin: 1.5em 0;
+  border: none;
+  border-top: 1px solid var(--qq-border);
+}
+
+.markdown-body :deep(a) {
+  color: var(--qq-accent);
+  text-decoration: underline;
 }
 </style>

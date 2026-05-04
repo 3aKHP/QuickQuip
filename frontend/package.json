@@ -8,7 +8,9 @@
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "dompurify": "^3.4.2",
     "lucide-vue-next": "^1.0.0",
+    "marked": "^18.0.3",
     "vue": "^3.4.0",
     "vue-router": "^4.6.4"
   },
