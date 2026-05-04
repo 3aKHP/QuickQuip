@@ -10,7 +10,10 @@ from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
 from quickquip.chat import text_rules as text_rules_module
 from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
+from quickquip.chat.game_registry import GameRegistry
+from quickquip.chat.game_scores import GameScores
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
+from quickquip.chat.number_bomb import NumberBombGame
 from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector
 from quickquip.chat.rule_switch import GroupRuleSwitch
@@ -66,6 +69,10 @@ daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
 wordcloud_collector = WordCloudCollector()
 offline_message_store = OfflineMessageStore(OFFLINE_MESSAGES_PATH)
 group_quote_store = GroupQuoteStore(QUOTES_PATH)
+
+game_registry = GameRegistry(max_sessions=1024)
+game_registry.register(NumberBombGame())
+game_scores = GameScores()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
@@ -247,6 +254,24 @@ async def resolve_reply(
             rule_name = chain_game_reply.get("rule_name", "")
             if rule_switch.is_enabled(group_id, rule_name):
                 return chain_game_reply
+
+    if group_id is not None:
+        game_reply = game_registry.process(
+            group_id=str(group_id),
+            user_id=str(user_id),
+            text=text,
+        )
+        if game_reply:
+            # Record win if the game result has both an @mention target and a game name
+            if game_reply.get("at_user_id") and game_reply.get("game_name"):
+                game_scores.record_win(
+                    str(group_id),
+                    str(user_id),
+                    game_reply["game_name"],
+                )
+            rule_name = game_reply.get("rule_name", "")
+            if rule_switch.is_enabled(group_id, rule_name):
+                return game_reply
 
     now_cst = now or datetime.now(ZoneInfo(BEIJING_TIMEZONE))
 

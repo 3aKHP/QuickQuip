@@ -28,6 +28,7 @@ _BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "repeat_trim_last": {"global_limit": 8, "user_limit": 3},
     "repeat_same_user_warning": {"global_limit": 4, "user_limit": 2},
     "good_girl_chain_entry": {"global_limit": 20, "user_limit": 10},
+    "game_interaction": {"global_limit": 30, "user_limit": 15},
 }
 
 RATE_LIMIT_RULES: dict[str, dict] = dict(_BUILTIN_RATE_LIMIT_RULES)
