@@ -459,3 +459,16 @@ context_window     = 6
 reply_template     = '只要曹孟德一息尚存，他就战无不胜！'
 rate_limit_key     = 'new_three_kingdoms'
 priority           = 94
+
+# ══════════════════════════════════════════════════════════
+# [festivals] — 节日自动化（可选）
+# ══════════════════════════════════════════════════════════
+#
+# 内置节日已覆盖：元旦、春节、元宵、端午、中秋、除夕。
+# 如需自定义节日：
+# [[festivals.custom]]
+# name = "群庆日"
+# month = 6
+# day = 15
+# calendar = "solar"  # "solar" 公历 / "lunar" 农历
+# greeting = "今天是群庆日！感谢大家一路相伴～"

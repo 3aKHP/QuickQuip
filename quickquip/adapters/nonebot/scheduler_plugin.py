@@ -93,3 +93,56 @@ def _register_jobs():
 
 
 _register_jobs()
+
+
+# ── Festival check ────────────────────────────────────────────────────────────
+
+
+def _register_festival_job() -> None:
+    if not scheduler:
+        return
+    if nonebot is None:
+        return
+
+    from quickquip.chat.festival import check_today_festival, get_festival_greeting
+    from quickquip.app.message_pipeline import daily_enabled_groups
+
+    bot_getter = nonebot.get_bot
+
+    async def _check_and_greet() -> None:
+        festival = check_today_festival()
+        if festival is None:
+            return
+
+        greeting = get_festival_greeting()
+        if not greeting:
+            return
+
+        try:
+            bot = bot_getter()
+        except Exception:
+            logger.warning("festival_check: bot not available, skipping greeting")
+            return
+
+        full_greeting = f"【{festival.name}】{greeting}"
+        for gid in daily_enabled_groups.all_groups():
+            try:
+                await bot.send_group_msg(group_id=int(gid), message=full_greeting)
+            except Exception:
+                logger.warning(
+                    "festival_check: failed to send greeting to group %s",
+                    gid, exc_info=True,
+                )
+
+    scheduler.add_job(
+        _check_and_greet,
+        "cron",
+        id="festival_check",
+        replace_existing=True,
+        hour="1",
+        minute="0",
+    )
+    logger.info("festival_check: job registered (daily at 01:00)")
+
+
+_register_festival_job()
