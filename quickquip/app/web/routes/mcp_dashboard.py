@@ -9,12 +9,17 @@ router = APIRouter()
 
 @router.get("/mcp-dashboard")
 def get_mcp_dashboard():
+    # Try the runtime MCP manager first
     try:
         from quickquip.llm.service import llm_service
 
         statuses = llm_service.mcp_manager.get_statuses()
         bindings = llm_service.mcp_manager.bindings
+    except Exception:
+        statuses = []
+        bindings = {}
 
+    if statuses:
         server_tools: dict[str, list[dict]] = {}
         for binding in bindings.values():
             if binding.server_id not in server_tools:
@@ -36,23 +41,23 @@ def get_mcp_dashboard():
                 "detail": status.detail,
                 "tools": server_tools.get(status.id, []),
             })
-
         return {"servers": servers}
-    except Exception:
-        config = load_llm_config("config/llm.toml")
-        if config.load_error or not config.mcp.servers:
-            return {"servers": []}
 
-        servers = []
-        for s in config.mcp.servers:
-            servers.append({
-                "id": s.id,
-                "transport": s.transport,
-                "enabled": s.enabled,
-                "connected": False,
-                "tool_count": 0,
-                "error": None,
-                "detail": "config-only (runtime not available)",
-                "tools": [],
-            })
-        return {"servers": servers}
+    # Fallback: read server list from config when runtime is unavailable
+    config = load_llm_config("config/llm.toml")
+    if config.load_error or not config.mcp.servers:
+        return {"servers": []}
+
+    servers = []
+    for s in config.mcp.servers:
+        servers.append({
+            "id": s.id,
+            "transport": s.transport,
+            "enabled": s.enabled,
+            "connected": False,
+            "tool_count": 0,
+            "error": None,
+            "detail": "config-only (runtime not available)",
+            "tools": [],
+        })
+    return {"servers": servers}
