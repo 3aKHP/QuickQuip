@@ -11,7 +11,7 @@ from datetime import date, datetime
 from io import BytesIO
 from time import time
 
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, daily_collector, get_sender_name, group_quote_store, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
+from quickquip.app.message_pipeline import RULE_SWITCH_PATH, STATS_PATH, daily_collector, game_registry, game_scores, get_sender_name, group_quote_store, llm_service, offline_message_store, rate_limiter, reload_chat_rules_pipeline, rule_switch, stats_tracker
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.generation.audio import generate_audio, list_available_voices
@@ -1621,4 +1621,74 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         default_persona = llm_service.config.runtime.default_persona or "(未配置)"
         await reload_personas_cmd.finish(
             f"人格已重载（{count} 个，默认：{default_persona}）"
+        )
+
+    game_cmd = on_command("game", priority=10, block=True)
+
+    @game_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await game_cmd.finish("该命令仅支持群聊")
+        group_id = str(event.group_id)
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "game").strip()
+        tokens = args.split()
+        sub = tokens[0].lower() if tokens else ""
+
+        if sub == "list":
+            games = game_registry.list_games()
+            if not games:
+                await game_cmd.finish("暂无可用游戏")
+            lines = ["可用游戏："]
+            for g in games:
+                aliases_str = f"（别名：{'、'.join(g['aliases'])}）" if g["aliases"] else ""
+                lines.append(f"- {g['name']} {aliases_str}")
+            await game_cmd.finish("\n".join(lines))
+
+        if sub == "start":
+            game_name = args[len(tokens[0]):].strip() if len(tokens) > 1 else ""
+            if not game_name:
+                await game_cmd.finish("用法：/game start <游戏名>，使用 /game list 查看可用游戏")
+            game = game_registry.find(game_name)
+            if game is None:
+                await game_cmd.finish(f"未找到游戏：{game_name}，使用 /game list 查看可用游戏")
+            active_name = game_registry.get_active_game_name(group_id)
+            if active_name:
+                await game_cmd.finish(f"本群已有进行中的游戏：{active_name}，请先 /game stop 结束")
+            opening = game_registry.start_game(group_id, str(event.user_id), game)
+            if opening is None:
+                await game_cmd.finish(f"本群已有进行中的游戏：{game_registry.get_active_game_name(group_id)}，请先 /game stop 结束")
+            await game_cmd.finish(opening)
+
+        if sub == "stop":
+            active_name = game_registry.get_active_game_name(group_id)
+            if not active_name:
+                await game_cmd.finish("本群没有进行中的游戏")
+            closing = game_registry.stop_game(group_id)
+            if closing is None:
+                await game_cmd.finish(f"无法结束游戏：{active_name}")
+            await game_cmd.finish(closing)
+
+        if sub == "score":
+            game_name = args[len(tokens[0]):].strip() if len(tokens) > 1 else ""
+            if not game_name:
+                await game_cmd.finish("用法：/game score <游戏名>，使用 /game list 查看可用游戏")
+            game = game_registry.find(game_name)
+            if game is None:
+                await game_cmd.finish(f"未找到游戏：{game_name}，使用 /game list 查看可用游戏")
+            leaderboard = game_scores.get_leaderboard(group_id, game.name, top_n=10)
+            if not leaderboard:
+                await game_cmd.finish(f"{game.name} 暂无排行数据")
+            lines = [f"{game.name} 排行榜（前 {len(leaderboard)} 名）："]
+            for i, (uid, score) in enumerate(leaderboard, 1):
+                lines.append(f"{i}. QQ:{uid} — {score} 胜")
+            await game_cmd.finish("\n".join(lines))
+
+        # No valid subcommand
+        await game_cmd.finish(
+            "游戏命令用法：\n"
+            "/game list — 查看可用游戏\n"
+            "/game start <游戏名> — 开始游戏\n"
+            "/game stop — 结束当前游戏\n"
+            "/game score <游戏名> — 查看排行榜"
         )
