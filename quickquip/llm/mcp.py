@@ -914,7 +914,44 @@ class MCPClientManager:
             self._statuses[server.id] = status
 
         self._bindings = {binding.alias: binding for binding in bindings}
+        self._write_status_file()
         return bindings
+
+    def _write_status_file(self) -> None:
+        """Write current MCP status to a JSON file shared with web-admin."""
+        try:
+            from pathlib import Path
+            import json
+            path = Path("data/mcp_status.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            statuses = []
+            for s in self.get_statuses():
+                statuses.append({
+                    "id": s.id,
+                    "transport": s.transport,
+                    "enabled": s.enabled,
+                    "connected": s.connected,
+                    "tool_count": s.tool_count,
+                    "error": s.error,
+                    "detail": s.detail,
+                })
+            bindings_list = []
+            for alias, b in self._bindings.items():
+                bindings_list.append({
+                    "alias": alias,
+                    "server_id": b.server_id,
+                    "tool_name": b.tool_name,
+                    "description": b.description,
+                })
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps({"statuses": statuses, "bindings": bindings_list},
+                           ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp.replace(path)
+        except Exception:
+            logger.warning("Failed to write MCP status file", exc_info=True)
 
     async def execute(
         self,
