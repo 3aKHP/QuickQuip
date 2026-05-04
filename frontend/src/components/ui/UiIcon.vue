@@ -6,20 +6,20 @@
 import { computed } from 'vue'
 import {
   AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, BookUser, Bot, Brain,
-  CalendarCheck, Check, CircleX, Drama, FileText, Inbox, Info, Loader2,
-  Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
-  Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
-  SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
+  CalendarCheck, Check, ChevronLeft, ChevronRight, CircleX, Clock, Drama, FileText,
+  Inbox, Info, Loader2, Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown,
+  MousePointerClick, Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save,
+  Server, Settings, ShieldCheck, SlidersHorizontal, ToggleLeft, Trash2, Users,
+  X, Zap, Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
 } from 'lucide-vue-next'
 
 const ICON_MAP = {
   AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, BookUser, Bot, Brain,
-  CalendarCheck, Check, CircleX, Drama, FileText, Inbox, Info, Loader2,
-  Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
-  Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
-  SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
+  CalendarCheck, Check, ChevronLeft, ChevronRight, CircleX, Clock, Drama, FileText,
+  Inbox, Info, Loader2, Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown,
+  MousePointerClick, Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save,
+  Server, Settings, ShieldCheck, SlidersHorizontal, ToggleLeft, Trash2, Users,
+  X, Zap, Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
 }
 
 export type IconName = keyof typeof ICON_MAP
