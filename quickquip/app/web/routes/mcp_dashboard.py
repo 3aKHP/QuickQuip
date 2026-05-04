@@ -40,10 +40,13 @@ def get_mcp_dashboard():
                 "error": status.error,
                 "detail": status.detail,
                 "tools": server_tools.get(status.id, []),
+                "runtime_available": True,
             })
         return {"servers": servers}
 
-    # Fallback: read server list from config when runtime is unavailable
+    # Fallback: read server list from config when runtime is unavailable.
+    # Set runtime_available=False so the frontend can show a neutral
+    # "status unknown" indicator instead of the alarming "connection failed".
     config = load_llm_config("config/llm.toml")
     if config.load_error or not config.mcp.servers:
         return {"servers": []}
@@ -57,7 +60,8 @@ def get_mcp_dashboard():
             "connected": False,
             "tool_count": 0,
             "error": None,
-            "detail": "config-only (runtime not available)",
+            "detail": "runtime 未连接（web-admin 进程未同步 MCP）",
             "tools": [],
+            "runtime_available": False,
         })
     return {"servers": servers}
