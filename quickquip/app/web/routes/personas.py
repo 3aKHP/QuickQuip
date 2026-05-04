@@ -3,10 +3,11 @@ import re
 import tomllib
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from filelock import FileLock
 from pydantic import BaseModel, Field
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.app.web.settings import PROJECT_ROOT
 
 router = APIRouter()
@@ -93,7 +94,7 @@ def get_persona(name: str):
 
 
 @router.put("/personas/{name}")
-def update_persona(name: str, body: PersonaContent):
+def update_persona(name: str, body: PersonaContent, request: Request):
     path = _persona_path(name)
     if not path.exists():
         raise HTTPException(status_code=404, detail="persona not found")
@@ -110,11 +111,17 @@ def update_persona(name: str, body: PersonaContent):
             tmp.unlink(missing_ok=True)
             raise
     logger.warning("persona updated via web admin: %s (%d bytes)", name, len(body.content))
+    audit_logger.log(
+        request,
+        action="update",
+        target_type="persona",
+        target_id=name,
+    )
     return {"ok": True}
 
 
 @router.post("/personas", status_code=201)
-def create_persona(body: PersonaCreate):
+def create_persona(body: PersonaCreate, request: Request):
     _validate_name(body.name)
     if body.name in _PROTECTED_NAMES:
         raise HTTPException(status_code=409, detail="reserved persona name")
@@ -135,11 +142,17 @@ def create_persona(body: PersonaCreate):
             tmp.unlink(missing_ok=True)
             raise
     logger.warning("persona created via web admin: %s (%d bytes)", body.name, len(body.content))
+    audit_logger.log(
+        request,
+        action="create",
+        target_type="persona",
+        target_id=body.name,
+    )
     return {"name": body.name}
 
 
 @router.delete("/personas/{name}")
-def delete_persona(name: str):
+def delete_persona(name: str, request: Request):
     _validate_name(name)
     if name in _PROTECTED_NAMES:
         raise HTTPException(status_code=409, detail="protected persona cannot be deleted")
@@ -149,4 +162,10 @@ def delete_persona(name: str):
     with _lock_for(path):
         path.unlink()
     logger.warning("persona deleted via web admin: %s", name)
+    audit_logger.log(
+        request,
+        action="delete",
+        target_type="persona",
+        target_id=name,
+    )
     return {"ok": True}

@@ -3,11 +3,12 @@ import json
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from typing import Annotated, Literal
 
 from quickquip.llm.store import LLMStore
+from quickquip.app.web.audit import audit_logger
 from quickquip.app.web.settings import PROJECT_ROOT
 
 router = APIRouter()
@@ -53,7 +54,7 @@ def list_memories(
 
 
 @router.post("/memory/{group_id}", status_code=201)
-def create_memory(group_id: str, body: MemoryCreate):
+def create_memory(group_id: str, body: MemoryCreate, request: Request):
     _validate_group_id(group_id)
     store = _store()
     mem_id = store.add_memory(
@@ -66,11 +67,18 @@ def create_memory(group_id: str, body: MemoryCreate):
         confidence=body.confidence,
     )
     logger.info("memory created: group=%s id=%d scope=%s", group_id, mem_id, body.scope)
+    audit_logger.log(
+        request,
+        action="create",
+        target_type="memory",
+        target_id=f"{group_id}:{mem_id}",
+        summary_after={"scope": body.scope, "content": body.content[:100]},
+    )
     return {"id": mem_id}
 
 
 @router.put("/memory/{group_id}/{mem_id}")
-def update_memory(group_id: str, mem_id: int, body: MemoryUpdate):
+def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Request):
     _validate_group_id(group_id)
     store = _store()
     with store._connect() as conn:
@@ -80,23 +88,41 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate):
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="memory not found")
-        new_content = body.content if body.content is not None else row["content"]
-        new_tags = json.dumps(body.tags, ensure_ascii=False) if body.tags is not None else row["tags_json"]
-        new_conf = body.confidence if body.confidence is not None else row["confidence"]
+        old_content = row["content"]
+        old_tags = row["tags_json"]
+        old_conf = row["confidence"]
+        new_content = body.content if body.content is not None else old_content
+        new_tags = json.dumps(body.tags, ensure_ascii=False) if body.tags is not None else old_tags
+        new_conf = body.confidence if body.confidence is not None else old_conf
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             "UPDATE memories SET content=?, tags_json=?, confidence=?, updated_at=? WHERE id=?",
             (new_content, new_tags, new_conf, now, mem_id),
         )
     logger.info("memory updated: group=%s id=%d", group_id, mem_id)
+    audit_logger.log(
+        request,
+        action="update",
+        target_type="memory",
+        target_id=f"{group_id}:{mem_id}",
+        summary_before={"content": old_content[:100], "tags": old_tags, "confidence": old_conf},
+        summary_after={"content": new_content[:100], "tags": new_tags, "confidence": new_conf},
+    )
     return {"ok": True}
 
 
 @router.delete("/memory/{group_id}/{mem_id}")
-def delete_memory(group_id: str, mem_id: int):
+def delete_memory(group_id: str, mem_id: int, request: Request):
     _validate_group_id(group_id)
     store = _store()
     with store._connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM memories WHERE id = ? AND group_id = ?",
+            (mem_id, group_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="memory not found")
+        summary_before = {"content": row["content"][:100], "tags": row["tags_json"], "confidence": row["confidence"]}
         cur = conn.execute(
             "DELETE FROM memories WHERE id = ? AND group_id = ?",
             (mem_id, group_id),
@@ -104,15 +130,29 @@ def delete_memory(group_id: str, mem_id: int):
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="memory not found")
     logger.warning("memory deleted: group=%s id=%d", group_id, mem_id)
+    audit_logger.log(
+        request,
+        action="delete",
+        target_type="memory",
+        target_id=f"{group_id}:{mem_id}",
+        summary_before=summary_before,
+    )
     return {"ok": True}
 
 
 @router.delete("/memory/{group_id}")
-def clear_memories(group_id: str):
+def clear_memories(group_id: str, request: Request):
     _validate_group_id(group_id)
     store = _store()
     with store._connect() as conn:
         cur = conn.execute("DELETE FROM memories WHERE group_id = ?", (group_id,))
         count = cur.rowcount
     logger.warning("memory cleared: group=%s deleted=%d", group_id, count)
+    audit_logger.log(
+        request,
+        action="delete",
+        target_type="memory",
+        target_id=f"{group_id}:*",
+        summary_before={"deleted": count},
+    )
     return {"deleted": count}
