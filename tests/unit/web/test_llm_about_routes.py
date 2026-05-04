@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -6,6 +7,12 @@ fastapi = pytest.importorskip("fastapi")
 HTTPException = fastapi.HTTPException
 
 from quickquip.app.web.routes import llm_about  # noqa: E402
+
+
+def _mock_request():
+    req = MagicMock()
+    req.client.host = "127.0.0.1"
+    return req
 
 
 def _patch_base(monkeypatch, tmp_path: Path) -> Path:
@@ -32,7 +39,7 @@ def test_put_llm_about_rejects_invalid_scope(monkeypatch, tmp_path):
     _patch_base(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        llm_about.put_llm_about_file("../config", "vocab", llm_about.LLMAboutContent(content=""))
+        llm_about.put_llm_about_file("../config", "vocab", llm_about.LLMAboutContent(content=""), _mock_request())
 
     assert exc.value.status_code == 422
 
@@ -41,7 +48,7 @@ def test_put_llm_about_rejects_unknown_kind(monkeypatch, tmp_path):
     _patch_base(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        llm_about.put_llm_about_file("global", "secret", llm_about.LLMAboutContent(content=""))
+        llm_about.put_llm_about_file("global", "secret", llm_about.LLMAboutContent(content=""), _mock_request())
 
     assert exc.value.status_code == 404
 
@@ -50,7 +57,7 @@ def test_put_llm_about_validates_vocab_shape(monkeypatch, tmp_path):
     _patch_base(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        llm_about.put_llm_about_file("global", "vocab", llm_about.LLMAboutContent(content="foo: bar\n"))
+        llm_about.put_llm_about_file("global", "vocab", llm_about.LLMAboutContent(content="foo: bar\n"), _mock_request())
 
     assert exc.value.status_code == 400
 
@@ -69,6 +76,7 @@ def test_put_llm_about_writes_valid_identity(monkeypatch, tmp_path):
                 "    aliases: [阿丽]\n"
             )
         ),
+        _mock_request(),
     )
 
     saved = base / "1000000001" / "identities.yaml"
@@ -83,7 +91,8 @@ def test_create_llm_about_group_copies_examples(monkeypatch, tmp_path):
     (base / "_example" / "identities.yaml").write_text("people:\n", encoding="utf-8")
 
     result = llm_about.create_llm_about_group(
-        llm_about.LLMAboutGroupCreate(group_id="1000000001", copy_example=True)
+        llm_about.LLMAboutGroupCreate(group_id="1000000001", copy_example=True),
+        _mock_request(),
     )
 
     assert result["scope"] == "1000000001"
