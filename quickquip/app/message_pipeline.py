@@ -266,7 +266,7 @@ async def resolve_reply(
             if game_reply.get("at_user_id") and game_reply.get("game_name"):
                 game_scores.record_win(
                     str(group_id),
-                    str(user_id),
+                    str(game_reply["at_user_id"]),
                     game_reply["game_name"],
                 )
             rule_name = game_reply.get("rule_name", "")
