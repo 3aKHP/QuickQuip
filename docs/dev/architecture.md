@@ -20,7 +20,7 @@
 | 模式 | 入口 | 环境变量来源 |
 |---|---|---|
 | 本地直接运行 | `python bot.py` | 根目录 `.env` |
-| **云端 Docker（主用）** | `cd dev && docker compose up -d` | `dev/.env`（唯一来源） |
+| 容器化部署 | 私有部署编排 | 私有环境变量文件 |
 
 ---
 
@@ -153,7 +153,7 @@ docs/
 │   ├── deployment.md
 │   ├── configuration.md
 │   └── web-admin.md
-└── dev/                    # 面向开发者
+└── dev/                    # 开发者文档
     ├── architecture.md     # 本文件
     ├── llm-module.md
     ├── mcp-integration.md
@@ -162,40 +162,15 @@ docs/
 
 ---
 
-## `dev/` — 私有部署工具目录（自用层，整体 gitignore）
+## 私有部署材料
 
-```
-dev/
-├── .env.deploy             # 云端部署环境变量模板
-├── .env                    # 云端部署真实值
-├── Dockerfile              # 容器镜像构建文件
-├── docker-compose.yml      # 服务编排（quickquip + napcat + searxng + web-admin）
-├── deploy.sh               # Linux 一键部署脚本
-├── deploy.ps1              # Windows 一键部署脚本（旧）
-├── deploy-v4.ps1           # Windows 一键部署脚本（新）
-├── llm_about/
-│   ├── identities.yaml     # 群友 QQ 号 → 标准身份映射（私有）
-│   ├── vocab.yaml          # 群内词表（私有）
-│   └── 群聊简介和概况.md   # 群背景说明（私有）
-├── plans/                  # 历史设计规划文档
-├── sandbox/                # 本地测试产物与调试截图
-├── tools/
-│   ├── tieba_login.py      # 贴吧登录态导出工具
-│   └── log_server.py       # SSE 实时日志服务
-└── docs/                   # 部署与开发参考文档（私有）
-    ├── DEPLOY.md
-    ├── LLM.md
-    ├── MCP.md
-    ├── REGEX_TUTORIAL.md
-    ├── STRUCTURE.md
-    └── ...
-```
+真实部署脚本、私有环境变量、部署编排和临时分析材料均属自用层，不属于公共仓库分发内容。公共文档只记录通用配置格式和运行方式，不记录个人生产目录结构。
 
-### `dev/.env` 与根 `.env` 的关系
+### 私有环境变量与根 `.env` 的关系
 
-- **根 `.env`**：本地 `python bot.py` 专用，HOST=127.0.0.1，含本机路径
-- **`dev/.env`**：云端 Docker 专用，HOST=0.0.0.0，含 Docker 网络配置与镜像地址
-- docker-compose 只读取 `dev/.env`，不再读取根 `.env`（二者互相独立）
+- **根 `.env`**：本地直接运行可用的默认环境变量文件，必须保持 gitignore
+- **私有部署环境变量**：容器化部署可用的覆盖值，必须留在私有部署材料中
+- 如果部署编排同时读取多个 env 文件，应在私有部署文档中记录优先级
 
 ### `llm_about` 部署路径
 
@@ -203,7 +178,7 @@ dev/
 
 - 宿主机 `llm_about/` → 容器内 `/app/llm_about/`
 
-历史路径 `dev/llm_about/` 已弃用，不应再被 compose 挂载或由部署脚本读写。
+历史私有资料路径已弃用，不应再被 compose 挂载或由部署脚本读写。
 
 ---
 
@@ -218,4 +193,4 @@ dev/
 | `config/chat_rules.toml` | 含私有群梗规则 |
 | `config/personas/` | 含真实 persona 定义 |
 | `data/` | 运行时数据 |
-| `dev/` | 整个私有部署目录 |
+| 私有部署目录 | 部署脚本、真实环境变量、临时材料和个人生产结构 |

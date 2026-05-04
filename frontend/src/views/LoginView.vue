@@ -69,19 +69,19 @@ function submit() {
 
 .login-brand h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: var(--qq-text-xl);
   color: var(--qq-text);
 }
 
 .login-copy {
-  margin-bottom: 18px;
+  margin-bottom: var(--qq-gap-lg);
   line-height: 1.6;
 }
 
 .login-form {
   display: flex;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: var(--qq-gap-sm);
 }
 
 .input-wrap {
@@ -105,7 +105,7 @@ function submit() {
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 9px 12px 9px 36px;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   outline: none;
   transition: border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast);
 }
@@ -117,12 +117,12 @@ function submit() {
 
 .error {
   color: var(--qq-danger);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .muted {
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 code {
@@ -130,6 +130,6 @@ code {
   border-radius: var(--qq-radius-sm);
   background: var(--qq-surface-elevated);
   font-family: var(--qq-font-mono);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 </style>

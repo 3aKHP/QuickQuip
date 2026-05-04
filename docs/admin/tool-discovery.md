@@ -50,7 +50,7 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "s
 
 ### `discovery_mode = "on"`
 
-适合生产环境中已经确认工具数量较多，且希望稳定控制每轮请求体积的场景。
+适合部署环境中已经确认工具数量较多，且希望稳定控制每轮请求体积的场景。
 
 ### `discovery_mode = "off"`
 
@@ -97,6 +97,30 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "s
 ```
 
 如果希望模型总是先搜索 GitHub 能力，再调用具体 GitHub 工具，保持 GitHub MCP 工具不在 `always_loaded` 中即可。
+
+生产环境建议在 MCP server 层先收窄工具集合，再启用工具发现。例如只接入常用读类工具：
+
+```toml
+[[mcp.servers]]
+id = "github"
+transport = "http"
+tool_prefix = "github"
+url = "https://mcp.example.com/github/mcp"
+headers = { Authorization = "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" }
+include_tools = [
+  "search_repositories",
+  "search_code",
+  "get_file_contents",
+  "list_issues",
+  "issue_read",
+  "list_pull_requests",
+  "pull_request_read",
+  "actions_list",
+  "actions_get",
+]
+```
+
+被 `include_tools` / `exclude_tools` 过滤掉的工具不会进入 QuickQuip 工具注册表，因此也不会出现在 `tool_search`、`tool_list` 或真实工具调用路径中。
 
 ---
 

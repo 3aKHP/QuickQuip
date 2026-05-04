@@ -260,8 +260,8 @@ loadList()
 }
 
 .save-error {
-  margin-bottom: 8px;
-  font-size: 13px;
+  margin-bottom: var(--qq-gap-sm);
+  font-size: var(--qq-text-sm);
 }
 
 .hint {
@@ -269,7 +269,7 @@ loadList()
   align-items: center;
   gap: 6px;
   color: var(--qq-text-muted);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
 .split {
@@ -318,13 +318,13 @@ loadList()
   gap: var(--qq-gap-xs);
   margin-bottom: 3px;
   color: var(--qq-text);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   font-weight: 500;
 }
 
 .scope-meta {
   color: var(--qq-text-muted);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
 .editor-col {
@@ -347,7 +347,7 @@ loadList()
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 8px 14px;
+  padding: var(--qq-gap-sm) var(--qq-gap-md);
   background: transparent;
   border: 1px solid transparent;
   border-bottom: none;
@@ -355,7 +355,7 @@ loadList()
   border-top-right-radius: var(--qq-radius-sm);
   color: var(--qq-text-muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   margin-bottom: -1px;
   transition: background var(--qq-transition-fast), color var(--qq-transition-fast), border-color var(--qq-transition-fast);
 }
@@ -381,7 +381,7 @@ loadList()
 }
 
 .kind-file {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 
@@ -405,7 +405,7 @@ loadList()
   align-items: center;
   gap: var(--qq-gap-sm);
   color: var(--qq-text);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
 }
 
 .editor-actions {
@@ -427,7 +427,7 @@ loadList()
   background: var(--qq-surface-strong);
   color: var(--qq-text);
   font-family: var(--qq-font-mono);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   line-height: 1.7;
   padding: var(--qq-gap-md);
   resize: none;

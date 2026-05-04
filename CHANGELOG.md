@@ -10,6 +10,8 @@
 
 - LLM 工具发现：新增本地 `tool_search` / `tool_list` 元工具与 `[tools] discovery_mode` 配置。工具数量较多时初始请求只暴露常驻工具，其余内置/MCP 工具按能力描述搜索或按精确名称加载，并在下一轮动态可用，降低大批 MCP 工具对提示词和工具 schema 的占用
 
+> 此版本本应为 v1.1.1（v1.1 的增量补丁），因工程失误标记为 v1.2.0。ROADMAP 原定 v1.2 范围的 6 项功能不受影响，将在后续版本中交付。
+
 ## [1.1.0] - 2026-05-01
 
 ### 新增
@@ -53,14 +55,14 @@
 ### 修复
 
 - DeepSeek thinking mode `reasoning_content` 未传回导致 HTTP 400：`OpenAIProviderClient` 的响应解析（`_parse_response` 非流式 + `_assemble_stream_response` 流式）现提取 `reasoning_content`，存入 `LLMResponse.thinking_blocks`；`_serialize_message` 序列化 assistant 消息时将其输出回请求体，满足 DeepSeek API 对 reasoning 内容 round-trip 的要求
-- `dev/docker-compose.yml` 的 `llm_about` volume 挂载目标未随 v1.0.0 的 `llm_about` 迁移（`dev/` → 仓库根目录）更新，仍挂在 `/app/dev/llm_about`，导致健康检查报告 vocab.yaml / identities.yaml 缺失。现 quickquip 和 web-admin 两服务的挂载目标统一修正为 `/app/llm_about`
+- 私有部署编排中的 `llm_about` volume 挂载目标未随 v1.0.0 的资料目录迁移更新，导致健康检查报告 vocab.yaml / identities.yaml 缺失。现 quickquip 和 web-admin 两服务的挂载目标统一修正为 `/app/llm_about`
 - 前端诊断页：样本探测补 `stream: false` 避免流式响应阻塞结果展示；回归测试补空输入保护；API 层增强错误详情格式化（FastAPI 422 数组错误逐条展开）
 
 ### 变更
 
-- `frontend/package.json` 移除 `openapi-typescript` devDependency：该工具仅在 API schema 变更时用于重新生成 `types.d.ts`，不参与日常构建链。此项移除消除了 TS6 与 openapi-typescript（要求 TS5）的 peer dependency 冲突，所有 `--legacy-peer-deps` 回退一并摘除（`dev/deploy-v4.ps1`、`.github/workflows/_tests.yml`、`.github/workflows/release.yml`）
-- `.dockerignore`：`dev/` 改为 `dev/*` + `!dev/llm_about/`，保留 `dev/llm_about/` 在 Docker 构建上下文中作为 volume 挂载的 fallback
-- 全仓文档重构：README 从 644 行精简至 191 行（功能详解与命令表迁入 docs/）；docs/ 建立按读者角色分区的文档体系（`user/` 群友、`admin/` 部署管理、`dev/` 开发者），新增 `index.md` 总导航与 8 份专题文档；ROADMAP 移除已完成版本条目并重组未来版本优先级；MCP 集成文档更新为当前生产 sidecar 部署模式
+- `frontend/package.json` 移除 `openapi-typescript` devDependency：该工具仅在 API schema 变更时用于重新生成 `types.d.ts`，不参与日常构建链。此项移除消除了 TS6 与 openapi-typescript（要求 TS5）的 peer dependency 冲突，相关 CI / 发布脚本中的 `--legacy-peer-deps` 回退一并摘除
+- `.dockerignore`：收紧私有部署材料的构建上下文排除规则
+- 全仓文档重构：README 从 644 行精简至 191 行（功能详解与命令表迁入 docs/）；docs/ 建立按读者角色分区的文档体系（`user/` 群友、`admin/` 部署管理、`dev` 开发者），新增 `index.md` 总导航与 8 份专题文档；ROADMAP 移除已完成版本条目并重组未来版本优先级；MCP 集成文档更新为通用 sidecar 部署模式
 
 ## [1.0.0] - 2026-04-24
 
@@ -76,7 +78,7 @@
 ### 变更
 
 - 前端全部迁移到 `<script setup>` 语法（10 组件 + 7 视图），不再使用 Options API，为后续 TypeScript 迁移铺平
-- `llm_about` 从 `dev/` 迁移到仓库根目录，`vocab.yaml.example` 和 `identities.yaml.example` 作为公开模板；`_example/` 子目录提供分群模板
+- `llm_about` 资料目录迁移到仓库根目录，`vocab.yaml.example` 和 `identities.yaml.example` 作为公开模板；`_example/` 子目录提供分群模板
 
 ## [0.9.2] - 2026-04-23
 
@@ -142,7 +144,7 @@
 - `quickquip/llm/store.py` `group_settings` 表新增 `auto_memory_enabled INTEGER` 列（`_ensure_schema` 里的 ALTER 迁移保持旧 db 兼容），`GroupSettingsOverride` / `ResolvedGroupSettings` / `/api/group-settings` PUT body 同步新增字段
 - `quickquip/llm/service.py` `quick_judge()` 修正 `self.config.default_provider` 错用（该字段实际在 `runtime` 下），现改为 `self.config.runtime.default_provider`。此前路径因 AttributeError 立即走到 `next(iter(providers))` 兜底，行为没有用户可见差异但代码意图错误
 - `quickquip/common/json_utils.py` 新增 `extract_json_object()`，把原 `context_rules._extract_json` 抽为通用工具；`service._extract_auto_memory()` 与 `context_rules` 共享
-- 新增仓根 `.gitattributes`：所有跟踪的文本文件强制 `text=auto eol=lf`，`*.ps1` / `*.bat` / `*.cmd` 显式保留 `eol=crlf`，常见图片 / 字体 / sqlite 资源标 `binary`。本次提交时仓内现有文本本就是 LF，没有触发实际 renormalize；规则就位后未来跨平台 commit 不会再写出 CRLF（v0.8.x 阶段 Tavily "缺 API key" bug 即由 `dev/.env` 的 CRLF 触发，从此源头杜绝）
+- 新增仓根 `.gitattributes`：所有跟踪的文本文件强制 `text=auto eol=lf`，`*.ps1` / `*.bat` / `*.cmd` 显式保留 `eol=crlf`，常见图片 / 字体 / sqlite 资源标 `binary`。本次提交时仓内现有文本本就是 LF，没有触发实际 renormalize；规则就位后未来跨平台 commit 不会再写出 CRLF
 
 ## [0.8.1] - 2026-04-21
 
@@ -159,16 +161,16 @@
 ### 变更
 
 - MCP 客户端重构：协议层与传输层解耦。新增 `Transport` 抽象基类 + `JsonRpcSession`（JSON-RPC id/pending-future/消息分发）+ 薄 `MCPClient`（initialize/tools 协议）三层；`StdioTransport` 合并原 stdio + docker 分支，`StreamableHttpTransport` 接管原 `HttpMCPClient`，新增 `SseTransport` 实现经典 MCP HTTP+SSE（GET 事件流 + `endpoint` 事件告知的 POST 地址）。`MCPClientManager` 对外 API 保持不变
-- 彻底移除 DooD 支持：`MCPServerConfig.mount_docker_socket` 字段删除，不再自动挂载 `/var/run/docker.sock`；`dev/docker-compose.yml` 的 quickquip 服务同步摘掉 `/var/run/docker.sock:/var/run/docker.sock` 挂载；`transport = "docker"` 保留但只用于裸机环境执行 `docker run -i --rm ...`。容器化部署请改用 `http` 或 `sse` transport
+- 彻底移除 DooD 支持：`MCPServerConfig.mount_docker_socket` 字段删除，不再自动挂载 `/var/run/docker.sock`；私有部署编排同步摘掉 Docker socket 挂载；`transport = "docker"` 保留但只用于裸机环境执行 `docker run -i --rm ...`。容器化部署请改用 `http` 或 `sse` transport
 - `config/llm.toml` / `config/llm.toml.example` 默认 MCP 清单清理：5 个只有 `docker` transport 的社区 server（github/tavily/arxiv/fetch/openweather）全部注释保留（裸机部署可手工启用），默认启用集只剩 `prts_wiki`（`transport = "http"`）
 - `config/llm.toml.example` 更新 transport 文档段，列出 4 种传输方式；`README.md` 同步更新 MCP 配置说明
 
 ### 新增
 
 - MCP 新增 `sse` transport（经典 MCP HTTP+SSE）：客户端 GET `url` 打开 SSE 长连接，服务端发送 `event: endpoint` 告知 POST 地址；后续请求 POST 到该地址，响应通过 SSE 流以 `event: message` 返回。支持 `headers` 字段传递鉴权头
-- MCP sidecar POC：参考 `docker/mcp-example.Dockerfile.example` 用 `mcp-proxy` 包一层把 stdio-only 的上游社区镜像暴露为 SSE 服务，`dev/docker-compose.yml` 新增对应 sidecar service 跑在 compose 默认网络上，bot 通过 `transport = "sse"` 直连。此模式替代原先依赖 DooD 的 `transport = "docker"` 方案；新增 MCP 的模板化流程：写 Dockerfile、加 compose service、追加 `[[mcp.servers]]` 三步即可
+- MCP sidecar POC：参考 `docker/mcp-example.Dockerfile.example` 用 `mcp-proxy` 包一层把 stdio-only 的上游社区镜像暴露为 SSE 服务，私有部署编排新增对应 sidecar service 跑在同一网络上，bot 通过 `transport = "sse"` 直连。此模式替代原先依赖 DooD 的 `transport = "docker"` 方案；新增 MCP 的模板化流程：写 Dockerfile、加 compose service、追加 `[[mcp.servers]]` 三步即可
 - `docker/mcp-example.Dockerfile.example` ENTRYPOINT 模板要求追加 `--pass-environment` 标志。mcp-proxy 默认 `--no-pass-environment`，spawned 子进程拿不到容器 env，表现为 MCP server 侧报"<KEY> environment variable is required"，即便容器里已正确注入。模板注释补充了踩坑说明，下游复用时别漏
-- `dev/deploy-v4.ps1` 部署时在远端对 `.env` / `dev/.env` 跑 `sed -i 's/\r$//'` 规范化行尾。Windows 编辑器常留下 CRLF，导致 Docker Compose 注入容器的 env 值尾部带 `\r`，表现为 API key 校验失败等奇怪错误（本次 POC 中 Tavily 首发报错即由此触发；后续清仓排进 ROADMAP）
+- 私有部署脚本在远端对环境变量文件跑 `sed -i 's/\r$//'` 规范化行尾。Windows 编辑器常留下 CRLF，导致 Docker Compose 注入容器的 env 值尾部带 `\r`，表现为 API key 校验失败等奇怪错误；后续清仓排进 ROADMAP
 - `MCPClientManager.sync()` 新增启动重试：每个 server 初始化失败时最多重试 3 次、间隔 2s。用于兜底 compose 冷启动时 sidecar 慢 1~3s 导致的"首次握手时 uvicorn 尚未 listening"竞态（典型现象：Python + uv venv 型 MCP 比 Alpine + Node 型慢几百 ms~几秒）
 
 ### 修复
@@ -235,7 +237,7 @@
   - `llm.toml` 写入改用 `filelock` 防止并发覆盖，并用 `try/finally` 确保临时文件不残留
   - `groups.py`、`rules.py` 统一 `group_id` 验证规则（5-12 位数字正则）
   - `memory.py`、`summaries.py` 数据库路径改为基于 `PROJECT_ROOT` 的绝对路径
-  - Vite 开发代理路径从 `/api` 修正为 `/ops/api`，与生产环境一致
+  - Vite 开发代理路径从 `/api` 修正为 `/ops/api`，与部署路径一致
   - `api.js` 先处理 401 再解析 JSON，避免解析失败吞掉 HTTP 错误信息；401 触发后不再重复 toast
   - `MemoryView.vue`：confidence 空字符串传 `null` 而非 `""`，修复 422 校验错误；错误状态与"暂无条目"不再同时显示
   - `MemoryView.vue`、`SummaryView.vue`：群组列表加载失败时显示错误信息而非静默

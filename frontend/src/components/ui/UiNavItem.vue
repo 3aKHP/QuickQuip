@@ -23,27 +23,32 @@ defineEmits(['click'])
 
 <style scoped>
 .ui-nav-item {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: var(--qq-gap-xs);
-  padding: 6px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--qq-radius-sm);
+  gap: var(--qq-gap-sm);
+  padding: 8px var(--qq-gap-md);
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--qq-radius-sm) var(--qq-radius-sm) 0;
   background: transparent;
   color: var(--qq-text-muted);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   cursor: pointer;
-  transition: color var(--qq-transition-fast), background var(--qq-transition-fast), border-color var(--qq-transition-fast);
+  width: 100%;
+  text-align: left;
+  transition: color var(--qq-transition-fast),
+              background var(--qq-transition-fast),
+              border-color var(--qq-transition-fast);
 }
 
 .ui-nav-item:hover {
   color: var(--qq-text);
-  background: var(--qq-surface);
+  background: var(--qq-surface-elevated);
 }
 
 .ui-nav-item.active {
   color: var(--qq-text);
   background: var(--qq-surface-elevated);
-  border-color: var(--qq-border-strong);
+  border-left-color: var(--qq-accent);
 }
 </style>

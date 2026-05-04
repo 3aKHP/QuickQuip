@@ -200,7 +200,7 @@ async function addMemory() {
   align-items: center;
   gap: var(--qq-gap-xs);
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .toolbar-inner select,
@@ -210,7 +210,7 @@ async function addMemory() {
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 5px 10px;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   outline: none;
 }
 
@@ -236,8 +236,8 @@ async function addMemory() {
   align-items: center;
   flex-wrap: wrap;
   gap: var(--qq-gap-xs);
-  font-size: 12px;
-  margin-bottom: 8px;
+  font-size: var(--qq-text-xs);
+  margin-bottom: var(--qq-gap-sm);
 }
 
 .meta-id {
@@ -250,7 +250,7 @@ async function addMemory() {
 }
 
 .mem-content {
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--qq-text);
@@ -258,7 +258,7 @@ async function addMemory() {
 }
 
 .mem-tags {
-  margin-top: 8px;
+  margin-top: var(--qq-gap-sm);
   display: flex;
   gap: var(--qq-gap-xs);
   flex-wrap: wrap;
@@ -283,8 +283,8 @@ async function addMemory() {
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--qq-gap-sm) 10px;
+  font-size: var(--qq-text-sm);
   width: 100%;
   resize: vertical;
   outline: none;
@@ -309,7 +309,7 @@ async function addMemory() {
 
 .add-card h3 {
   margin: 0 0 var(--qq-gap-sm) 0;
-  font-size: 15px;
+  font-size: var(--qq-text-base);
   color: var(--qq-text);
 }
 
@@ -324,14 +324,38 @@ async function addMemory() {
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--qq-gap-sm) 10px;
+  font-size: var(--qq-text-sm);
   width: 100%;
   resize: vertical;
   outline: none;
 }
 
 .add-form textarea:focus {
+  border-color: var(--qq-accent);
+  box-shadow: 0 0 0 3px var(--qq-accent-soft);
+}
+
+.add-row {
+  display: flex;
+  gap: var(--qq-gap-sm);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.add-row select,
+.add-row input {
+  background: var(--qq-surface-strong);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  color: var(--qq-text);
+  padding: 5px 10px;
+  font-size: var(--qq-text-sm);
+  outline: none;
+}
+
+.add-row select:focus,
+.add-row input:focus {
   border-color: var(--qq-accent);
   box-shadow: 0 0 0 3px var(--qq-accent-soft);
 }

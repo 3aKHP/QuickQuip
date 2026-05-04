@@ -320,7 +320,7 @@ loadAll()
 }
 
 .error { color: var(--qq-danger); }
-.muted { color: var(--qq-text-muted); font-size: 13px; }
+.muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }
 
 .split {
@@ -367,11 +367,11 @@ loadAll()
 .forum-name {
   font-weight: 500;
   color: var(--qq-text);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
 }
 
 .forum-meta {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   display: flex;
   gap: 4px;
@@ -379,7 +379,7 @@ loadAll()
 
 .forum-error {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-danger);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -407,7 +407,7 @@ loadAll()
   justify-content: space-between;
   padding: 4px 10px;
   background: var(--qq-surface-strong);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 
@@ -422,8 +422,8 @@ loadAll()
 
 .sync-log {
   margin: 0;
-  padding: 8px 10px;
-  font-size: 12px;
+  padding: var(--qq-gap-sm) 10px;
+  font-size: var(--qq-text-xs);
   font-family: monospace;
   line-height: 1.6;
   max-height: 220px;
@@ -464,7 +464,7 @@ loadAll()
 }
 
 .selected-forum {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text-muted);
 }
 
@@ -474,7 +474,7 @@ loadAll()
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 5px 10px;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   outline: none;
   flex: 1;
   min-width: 200px;
@@ -546,13 +546,13 @@ loadAll()
 }
 
 .title-text {
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   color: var(--qq-text);
   font-weight: 500;
 }
 
 .thread-meta {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   display: flex;
   gap: 4px;
@@ -560,7 +560,7 @@ loadAll()
 }
 
 .thread-preview {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   line-height: 1.5;
   overflow: hidden;
@@ -597,7 +597,7 @@ loadAll()
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   margin-bottom: var(--qq-gap-sm);
 }
@@ -614,13 +614,13 @@ loadAll()
 .detail-close:hover { color: var(--qq-text); background: var(--qq-surface-elevated); }
 
 .detail-title {
-  font-size: 18px;
+  font-size: var(--qq-text-lg);
   color: var(--qq-text);
   margin: 0 0 var(--qq-gap-sm) 0;
 }
 
 .detail-meta {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   display: flex;
   gap: 6px;
@@ -635,7 +635,7 @@ loadAll()
 .detail-link:hover { text-decoration: underline; }
 
 .detail-content {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   line-height: 1.7;
   color: var(--qq-text);
   white-space: pre-wrap;

@@ -132,7 +132,7 @@ function closeDetail() {
   align-items: center;
   gap: var(--qq-gap-xs);
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .toolbar-inner select {
@@ -141,7 +141,7 @@ function closeDetail() {
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 5px 10px;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   outline: none;
 }
 
@@ -174,11 +174,11 @@ function closeDetail() {
 .sum-date {
   font-weight: 600;
   color: var(--qq-text);
-  font-size: 15px;
+  font-size: var(--qq-text-base);
 }
 
 .meta {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text-muted);
 }
 
@@ -200,13 +200,13 @@ function closeDetail() {
   display: inline-flex;
   align-items: center;
   gap: var(--qq-gap-xs);
-  font-size: 16px;
+  font-size: var(--qq-text-md);
   color: var(--qq-text);
 }
 
 .sum-body {
   white-space: pre-wrap;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   line-height: 1.8;
   word-break: break-all;
   color: var(--qq-text);

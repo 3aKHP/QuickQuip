@@ -68,9 +68,7 @@ docker run -i --rm ...
 
 `docker` transport 需要在容器内安装 Docker CLI 并挂载 `/var/run/docker.sock`，这会放大权限范围，仅适合开发环境或可信宿主机。
 
-生产部署推荐走纯 sidecar 模式：在 `docker-compose.yml` 中将 MCP server 作为独立 service 跑在同一 compose 网络，bot 通过 `transport = "sse"` 或 `transport = "http"` 直连。代码中的四种 transport 均已完整实现，生产无需依赖 Docker socket。
-
-当前生产环境已采用此模式——MCP server（tavily、fetch 等）以 sidecar 容器形式运行，经 compose 默认网络暴露 SSE 端点。
+容器化部署推荐走纯 sidecar 模式：在部署编排中将 MCP server 作为独立 service 跑在同一网络里，bot 通过 `transport = "sse"` 或 `transport = "http"` 直连。代码中的四种 transport 均已完整实现，部署时无需依赖 Docker socket。
 
 ---
 
@@ -103,6 +101,7 @@ id = "github"
 transport = "docker"
 image = "ghcr.io/github/github-mcp-server"
 env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}" }
+include_tools = ["search_repositories", "search_code", "get_file_contents"]
 
 [[mcp.servers]]
 id = "arxiv"
@@ -190,6 +189,7 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
   - 已支持作为 MCP 接入
   - 是否启用由 `config/llm.toml` 与环境变量控制
 - 大批量 MCP 工具
+  - 在 `[[mcp.servers]]` 上用 `include_tools` / `exclude_tools` 先治理工具集合
   - 通过 `[tools] discovery_mode = "auto"` 走本地 `tool_search` 按需发现
   - `tool_search` 搜不到但工具存在时，可用 `tool_list` 列工具组并按精确名称加载
   - 初始请求只暴露 `always_loaded` 中的常驻工具，匹配到的 MCP 工具会在下一轮工具调用中加载
@@ -198,7 +198,7 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 
 - 现有工具调用框架先服务项目内部工具
 - MCP 后续作为可插拔扩展层加入
-- MCP 工具数量较多时，优先使用工具发现控制提示词体积
+- MCP 工具数量较多时，先用 MCP server 级过滤控制能力面，再用工具发现控制提示词体积
 - 不要为了 MCP 而重写已经稳定工作的直连能力
 
 工具发现的实现边界与测试覆盖见 [tool-discovery.md](tool-discovery.md)。
@@ -220,4 +220,4 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 
 ## 8. 当前文档结论
 
-QuickQuip 当前已经可以接 MCP，但实际部署时仍应把它视为项目自己的外部工具后端，并通过项目自己的 `.env` / `dev/.env` 管理密钥、卷挂载和云端开关。
+QuickQuip 当前已经可以接 MCP，但实际部署时仍应把它视为项目自己的外部工具后端，并通过项目自己的私有部署环境变量、卷挂载和云端开关来管理。

@@ -131,7 +131,7 @@ async function removeGroup(type: 'summary' | 'briefing', gid: string) {
   gap: var(--qq-gap-md);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .groups-layout {
     grid-template-columns: 1fr;
   }
@@ -146,7 +146,7 @@ async function removeGroup(type: 'summary' | 'briefing', gid: string) {
 
 .section-header h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--qq-text-base);
   color: var(--qq-text);
 }
 
@@ -159,9 +159,9 @@ async function removeGroup(type: 'summary' | 'briefing', gid: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
+  padding: var(--qq-gap-sm) 0;
   border-bottom: 1px solid var(--qq-border);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .group-list li:last-child {
@@ -193,7 +193,7 @@ async function removeGroup(type: 'summary' | 'briefing', gid: string) {
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 5px 10px;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   outline: none;
 }
 

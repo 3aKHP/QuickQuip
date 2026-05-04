@@ -139,8 +139,8 @@ async function save() {
 }
 
 .save-error {
-  margin-bottom: 8px;
-  font-size: 13px;
+  margin-bottom: var(--qq-gap-sm);
+  font-size: var(--qq-text-sm);
 }
 
 .warn {
@@ -148,7 +148,7 @@ async function save() {
   align-items: center;
   gap: 6px;
   color: var(--qq-warn);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .hint {
@@ -156,7 +156,7 @@ async function save() {
   align-items: center;
   gap: 6px;
   color: var(--qq-text-muted);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
 .tabs {
@@ -172,7 +172,7 @@ async function save() {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 8px 14px;
+  padding: var(--qq-gap-sm) var(--qq-gap-md);
   background: transparent;
   border: 1px solid transparent;
   border-bottom: none;
@@ -180,7 +180,7 @@ async function save() {
   border-top-right-radius: var(--qq-radius-sm);
   color: var(--qq-text-muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   margin-bottom: -1px;
   transition: background var(--qq-transition-fast), color var(--qq-transition-fast), border-color var(--qq-transition-fast);
 }
@@ -203,7 +203,7 @@ async function save() {
 
 .tab-file {
   font-family: var(--qq-font-mono);
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 
@@ -220,7 +220,7 @@ async function save() {
   background: var(--qq-surface-strong);
   color: var(--qq-text);
   font-family: var(--qq-font-mono);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   line-height: 1.7;
   padding: var(--qq-gap-md);
   resize: none;

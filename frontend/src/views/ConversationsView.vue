@@ -257,7 +257,7 @@ loadConversations()
 
 .muted {
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .mono {
@@ -313,11 +313,11 @@ loadConversations()
 
 .conv-id {
   color: var(--qq-text);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .conv-meta {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   display: flex;
   gap: 4px;
@@ -351,7 +351,7 @@ loadConversations()
 }
 
 .selected-id {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text-muted);
 }
 
@@ -361,7 +361,7 @@ loadConversations()
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 5px 10px;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   outline: none;
   flex: 1;
   min-width: 200px;
@@ -411,7 +411,7 @@ loadConversations()
   display: flex;
   align-items: center;
   gap: var(--qq-gap-xs);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   margin-bottom: 4px;
   flex-wrap: wrap;
 }
@@ -427,12 +427,12 @@ loadConversations()
 
 .msg-id {
   color: var(--qq-text-muted);
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
 }
 
 .msg-time {
   color: var(--qq-text-muted);
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   margin-left: auto;
 }
 
@@ -452,7 +452,7 @@ loadConversations()
 }
 
 .msg-body {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text);
   line-height: 1.6;
   white-space: pre-wrap;

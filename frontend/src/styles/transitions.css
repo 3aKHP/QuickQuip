@@ -1,3 +1,7 @@
+/* ==========================================================================
+   Transition System
+   ========================================================================== */
+
 /* Page / view fade transition */
 .fade-enter-active,
 .fade-leave-active {
@@ -8,6 +12,18 @@
 .fade-leave-to {
   opacity: 0;
   transform: translateY(4px);
+}
+
+/* Slide-up (modal / overlay entrance) */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
 }
 
 /* Toast slide-up */
@@ -32,4 +48,10 @@
 .list-leave-to {
   opacity: 0;
   transform: translateY(6px);
+}
+
+/* ---- Card hover enhancement ---- */
+.ui-card:hover {
+  transform: scale(1.01);
+  box-shadow: var(--qq-shadow-md);
 }

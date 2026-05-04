@@ -433,7 +433,7 @@ reloadAll()
   align-items: center;
   gap: 6px;
   color: var(--qq-warn);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   margin-bottom: var(--qq-gap-sm);
 }
 
@@ -489,13 +489,13 @@ reloadAll()
 }
 
 .group-id {
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   font-weight: 500;
   color: var(--qq-text);
 }
 
 .group-meta {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   display: flex;
   gap: 4px;
@@ -550,7 +550,7 @@ reloadAll()
 }
 
 .field label {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   font-weight: 500;
 }
@@ -562,7 +562,7 @@ reloadAll()
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   outline: none;
   width: 100%;
 }

@@ -65,7 +65,7 @@ headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 # ── MCP sidecar 模式（推荐用于容器化部署） ──────────────────────────────────
 # 上游 stdio-only 的 MCP 镜像被 mcp-proxy 包一层，作为 compose sidecar 跑在
 # 内部网络上，本 bot 以 transport = "sse" 直连。完整模板参考
-# docker/mcp-example.Dockerfile.example 与 dev/docker-compose.yml 的 MCP sidecar 区块。
+# docker/mcp-example.Dockerfile.example 与你的私有部署编排。
 
 [[mcp.servers]]
 id = "tavily"
@@ -89,7 +89,8 @@ url = "http://mcp-fetch:8080/sse"
 # timeout_seconds = 30
 # image = "ghcr.io/github/github-mcp-server"
 # env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
-# allowed_tools = ["search_repositories", "get_file_contents", "search_code"]
+# include_tools = ["search_repositories", "get_file_contents", "search_code"]
+# exclude_tools = ["delete_file", "merge_pull_request"]
 #
 # [[mcp.servers]]
 # id = "tavily"

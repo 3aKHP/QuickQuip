@@ -1,0 +1,30 @@
+/* ==========================================================================
+   Responsive Breakpoints
+   Mobile-first approach: base = mobile, then scale up
+   ========================================================================== */
+
+/* ≤768px (mobile / narrow tablet) — default, no media query needed */
+/* Sidebar collapses, cards stack single column, tables scroll horizontally
+   (handled per-component via scoped @media queries) */
+
+/* 768-1024px (tablet / narrow desktop) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .card-grid--responsive {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ≥1024px (full desktop layout) */
+@media (min-width: 1024px) {
+  .card-grid--responsive {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Horizontal scroll utility for tables on small screens */
+@media (max-width: 767px) {
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

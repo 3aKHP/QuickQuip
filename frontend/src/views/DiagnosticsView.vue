@@ -2,7 +2,7 @@
   <div class="diag-view">
     <UiPageHeader title="诊断" subtitle="LLM 原始请求/响应查看、Trace 控制、文本规则回归测试" />
 
-    <section class="diag-section">
+    <UiCard padding="md" shadow="sm" class="diag-section">
       <h3 class="section-title">样本请求</h3>
       <p class="section-desc">按 provider/model 发送一次 LLM 请求，查看原始 JSON 和解析结果。</p>
 
@@ -74,9 +74,9 @@
           </div>
         </details>
       </div>
-    </section>
+    </UiCard>
 
-    <section class="diag-section">
+    <UiCard padding="md" shadow="sm" class="diag-section">
       <h3 class="section-title">Trace 控制</h3>
       <p class="section-desc">控制 LLM_TRACE_FLAG_FILE 开关，浏览最近 trace 条目。</p>
 
@@ -112,9 +112,9 @@
         </div>
       </div>
       <UiEmpty v-else icon="FileCode" title="无 trace 条目" />
-    </section>
+    </UiCard>
 
-    <section class="diag-section">
+    <UiCard padding="md" shadow="sm" class="diag-section">
       <h3 class="section-title">文本规则回归</h3>
       <p class="section-desc">输入测试文本，查看哪些规则命中。</p>
 
@@ -152,7 +152,7 @@
           </div>
         </div>
       </div>
-    </section>
+    </UiCard>
   </div>
 </template>
 
@@ -160,6 +160,7 @@
 import { onMounted, ref, computed } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import UiCard from '../components/ui/UiCard.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiToggle from '../components/ui/UiToggle.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
@@ -332,14 +333,14 @@ onMounted(() => {
 }
 
 .section-title {
-  font-size: 15px;
+  font-size: var(--qq-text-base);
   font-weight: 600;
   color: var(--qq-text);
   margin: 0;
 }
 
 .section-desc {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   margin: 0;
 }
@@ -348,7 +349,7 @@ onMounted(() => {
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field.grow { flex: 1; min-width: 200px; }
 .field label {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   font-weight: 500;
 }
@@ -357,9 +358,9 @@ select, input, textarea {
   padding: 6px 8px;
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-sm);
-  background: var(--qq-surface);
+  background: var(--qq-surface-strong);
   color: var(--qq-text);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   font-family: var(--qq-font-mono);
 }
 textarea { resize: vertical; }
@@ -372,16 +373,16 @@ textarea { resize: vertical; }
 }
 
 .duration {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
 }
 
 .error-block {
   color: var(--qq-danger);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   padding: var(--qq-gap-sm);
-  background: var(--qq-surface);
+  background: var(--qq-surface-strong);
   border-radius: var(--qq-radius-sm);
   border: 1px solid var(--qq-danger);
 }
@@ -400,17 +401,17 @@ textarea { resize: vertical; }
 }
 
 .token-info {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
 }
 
 .result-text {
   padding: var(--qq-gap-sm);
-  background: var(--qq-surface);
+  background: var(--qq-surface-strong);
   border-radius: var(--qq-radius-sm);
   border: 1px solid var(--qq-border);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   line-height: 1.6;
   white-space: pre-wrap;
   color: var(--qq-text);
@@ -421,7 +422,7 @@ textarea { resize: vertical; }
   background: var(--qq-surface-strong);
   border-radius: var(--qq-radius-sm);
   border: 1px solid var(--qq-border);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   font-family: var(--qq-font-mono);
   line-height: 1.4;
   overflow-x: auto;
@@ -430,7 +431,7 @@ textarea { resize: vertical; }
 }
 
 .thinking-detail, .trace-detail {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 
@@ -446,7 +447,7 @@ textarea { resize: vertical; }
 }
 
 .trace-meta {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   font-family: var(--qq-font-mono);
   color: var(--qq-text-muted);
 }
@@ -465,19 +466,19 @@ textarea { resize: vertical; }
 }
 
 .status-label {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text);
 }
 
 .flag-path {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   font-family: var(--qq-font-mono);
   color: var(--qq-text-muted);
 }
 
 .flag-unset {
-  font-size: 11px;
-  color: var(--qq-warning);
+  font-size: var(--qq-text-xs);
+  color: var(--qq-warn);
 }
 
 .trace-actions {
@@ -504,9 +505,9 @@ textarea { resize: vertical; }
   align-items: center;
   gap: var(--qq-gap-xs);
   padding: 4px var(--qq-gap-sm);
-  background: var(--qq-surface);
+  background: var(--qq-surface-strong);
   border-bottom: 1px solid var(--qq-border);
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
 }
 
 .trace-index {
@@ -530,12 +531,12 @@ textarea { resize: vertical; }
   padding: var(--qq-gap-sm);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-sm);
-  background: var(--qq-surface);
+  background: var(--qq-surface-strong);
 }
 
 .regression-item.matched {
   border-color: var(--qq-accent);
-  background: var(--qq-surface-strong);
+  background: var(--qq-surface-elevated);
 }
 
 .regression-head {
@@ -545,13 +546,13 @@ textarea { resize: vertical; }
 }
 
 .regression-label {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   font-family: var(--qq-font-mono);
   color: var(--qq-text-muted);
 }
 
 .regression-text {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text);
   flex: 1;
 }
@@ -569,7 +570,7 @@ textarea { resize: vertical; }
   display: flex;
   align-items: center;
   gap: var(--qq-gap-sm);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
 .rule-pattern {
@@ -588,7 +589,7 @@ textarea { resize: vertical; }
 
 .rule-prio {
   font-family: var(--qq-font-mono);
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 </style>

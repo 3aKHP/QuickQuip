@@ -61,6 +61,8 @@ class MCPServerConfig:
     timeout_seconds: float = 30.0
     protocol_version: str = "2025-03-26"
     tool_prefix: str | None = None
+    include_tools: list[str] = field(default_factory=list)
+    exclude_tools: list[str] = field(default_factory=list)
     allowed_tools: list[str] = field(default_factory=list)
     command: str = ""
     args: list[str] = field(default_factory=list)
@@ -367,6 +369,16 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
                 protocol_version=str(entry.get("protocol_version", "2025-03-26")).strip()
                 or "2025-03-26",
                 tool_prefix=str(entry.get("tool_prefix", "")).strip() or None,
+                include_tools=[
+                    str(item).strip()
+                    for item in entry.get("include_tools", [])
+                    if str(item).strip()
+                ],
+                exclude_tools=[
+                    str(item).strip()
+                    for item in entry.get("exclude_tools", [])
+                    if str(item).strip()
+                ],
                 allowed_tools=[
                     str(item).strip()
                     for item in entry.get("allowed_tools", [])

@@ -98,6 +98,14 @@ def _build_tool_alias(server_id: str, tool_name: str, prefix: str | None = None)
     return f"{head}{suffix}"
 
 
+def _normalize_tool_filter(items: list[str]) -> set[str]:
+    return {item.strip() for item in items if item.strip()}
+
+
+def _tool_filter_matches(filters: set[str], *, tool_name: str, alias: str) -> bool:
+    return tool_name in filters or alias in filters
+
+
 def _schema_from_tool(raw_tool: dict[str, Any]) -> dict[str, Any]:
     for key in ("inputSchema", "input_schema"):
         schema = raw_tool.get(key)
@@ -939,16 +947,18 @@ class MCPClientManager:
         server: MCPServerConfig,
         tools: list[dict[str, Any]],
     ) -> list[MCPToolBinding]:
-        allowed = {item.strip() for item in server.allowed_tools if item.strip()}
+        include = _normalize_tool_filter(server.include_tools or server.allowed_tools)
+        exclude = _normalize_tool_filter(server.exclude_tools)
         bindings: list[MCPToolBinding] = []
         for raw_tool in tools:
             tool_name = str(raw_tool.get("name", "")).strip()
             if not tool_name:
                 continue
-            if allowed and tool_name not in allowed:
-                continue
-
             alias = _build_tool_alias(server.id, tool_name, prefix=server.tool_prefix)
+            if include and not _tool_filter_matches(include, tool_name=tool_name, alias=alias):
+                continue
+            if exclude and _tool_filter_matches(exclude, tool_name=tool_name, alias=alias):
+                continue
             bindings.append(
                 MCPToolBinding(
                     alias=alias,

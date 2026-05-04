@@ -130,7 +130,7 @@ async function toggle(rule: string) {
   align-items: center;
   gap: var(--qq-gap-xs);
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .toolbar-inner select,
@@ -140,7 +140,7 @@ async function toggle(rule: string) {
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 5px 10px;
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   outline: none;
 }
 
@@ -176,7 +176,7 @@ async function toggle(rule: string) {
 }
 
 .rule-name {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   font-family: var(--qq-font-mono);
   color: var(--qq-text);
 }

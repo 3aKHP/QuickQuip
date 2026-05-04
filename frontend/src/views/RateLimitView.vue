@@ -152,7 +152,7 @@ load()
 }
 
 .error { color: var(--qq-danger); }
-.muted { color: var(--qq-text-muted); font-size: 12px; }
+.muted { color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
 .mono { font-family: var(--qq-font-mono); }
 
 .auto-toggle {
@@ -160,7 +160,7 @@ load()
   align-items: center;
   gap: 6px;
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   cursor: pointer;
 }
 
@@ -184,7 +184,7 @@ load()
 .rule-name {
   font-weight: 500;
   color: var(--qq-text);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   font-family: var(--qq-font-mono);
 }
 
@@ -195,7 +195,7 @@ load()
 }
 
 .rule-window {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 
@@ -219,7 +219,7 @@ load()
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   margin-bottom: 4px;
 }
@@ -261,7 +261,7 @@ load()
 }
 
 .top-row-header {
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   margin-bottom: 3px;
 }
@@ -271,7 +271,7 @@ load()
   grid-template-columns: minmax(100px, auto) 1fr auto;
   align-items: center;
   gap: var(--qq-gap-sm);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   margin-bottom: 2px;
 }
@@ -291,5 +291,5 @@ load()
 
 .mini-fill.saturated { background: var(--qq-danger); }
 
-.used { font-size: 11px; }
+.used { font-size: var(--qq-text-xs); }
 </style>

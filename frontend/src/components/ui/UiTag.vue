@@ -28,13 +28,13 @@ const sizeClass = computed(() => `ui-tag--${props.size}`)
 .ui-tag--md {
   min-height: 24px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
 .ui-tag--sm {
   min-height: 20px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
 }
 
 .ui-tag--info {

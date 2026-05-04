@@ -29,8 +29,8 @@ defineEmits<{
   click: [e: MouseEvent]
 }>()
 
-const variantClass = computed(() => `ui-button--${props.variant}`)
-const sizeClass = computed(() => `ui-button--${props.size}`)
+const variantClass = computed(() => `ui-button--${props.variant || 'default'}`)
+const sizeClass = computed(() => `ui-button--${props.size || 'md'}`)
 const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
 </script>
 
@@ -43,9 +43,13 @@ const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
   border: 1px solid var(--qq-border-strong);
   background: var(--qq-surface-elevated);
   color: var(--qq-text);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
+  font-weight: 500;
   cursor: pointer;
-  transition: background var(--qq-transition-fast), border-color var(--qq-transition-fast), transform var(--qq-transition-fast);
+  transition: background var(--qq-transition-fast),
+              border-color var(--qq-transition-fast),
+              transform var(--qq-transition-fast),
+              color var(--qq-transition-fast);
 }
 
 .ui-button:disabled {
@@ -62,6 +66,7 @@ const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
   box-shadow: 0 0 0 2px var(--qq-accent-glow);
 }
 
+/* Sizes */
 .ui-button--md {
   min-height: 36px;
   padding: 0 14px;
@@ -72,37 +77,56 @@ const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
   min-height: 28px;
   padding: 0 10px;
   border-radius: var(--qq-radius-sm);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
+/* Default (neutral) */
 .ui-button--default:hover:not(:disabled) {
   background: var(--qq-surface);
   border-color: var(--qq-border-strong);
 }
 
+/* Primary */
 .ui-button--primary {
   background: linear-gradient(180deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.10));
   border-color: rgba(88, 166, 255, 0.35);
   color: #fff;
 }
+
 .ui-button--primary:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(88, 166, 255, 0.30), rgba(88, 166, 255, 0.14));
 }
 
+/* Secondary */
+.ui-button--secondary {
+  background: var(--qq-surface);
+  border-color: var(--qq-border);
+  color: var(--qq-text);
+}
+
+.ui-button--secondary:hover:not(:disabled) {
+  background: var(--qq-surface-elevated);
+  border-color: var(--qq-border-strong);
+}
+
+/* Danger */
 .ui-button--danger {
   background: var(--qq-danger-soft);
   border-color: rgba(248, 81, 73, 0.35);
   color: var(--qq-danger);
 }
+
 .ui-button--danger:hover:not(:disabled) {
   background: rgba(248, 81, 73, 0.18);
 }
 
+/* Ghost */
 .ui-button--ghost {
   background: transparent;
   border-color: transparent;
   color: var(--qq-text-muted);
 }
+
 .ui-button--ghost:hover:not(:disabled) {
   color: var(--qq-text);
   background: var(--qq-surface);

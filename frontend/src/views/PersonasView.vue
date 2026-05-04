@@ -220,8 +220,8 @@ loadList()
 }
 
 .save-error {
-  margin-bottom: 8px;
-  font-size: 13px;
+  margin-bottom: var(--qq-gap-sm);
+  font-size: var(--qq-text-sm);
 }
 
 .split {
@@ -272,13 +272,13 @@ loadList()
 }
 
 .persona-display {
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   font-weight: 500;
   color: var(--qq-text);
 }
 
 .persona-meta {
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
   display: flex;
   gap: 4px;
@@ -321,7 +321,7 @@ loadList()
   align-items: center;
   gap: var(--qq-gap-sm);
   color: var(--qq-text);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
 }
 
 .editor-actions {
@@ -343,7 +343,7 @@ loadList()
   background: var(--qq-surface-strong);
   color: var(--qq-text);
   font-family: var(--qq-font-mono);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   line-height: 1.7;
   padding: var(--qq-gap-md);
   resize: none;

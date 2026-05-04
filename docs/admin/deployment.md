@@ -33,58 +33,47 @@ sudo usermod -aG docker $USER
 
 ```bash
 # 推荐：从本地私有工作目录上传完整项目
-scp -r /path/to/QuickQuip user@server:/opt/QuickQuip
+scp -r /path/to/QuickQuip user@server:/path/to/QuickQuip
 ```
 
 ### 3. 配置环境变量
 
 ```bash
-cd /opt/QuickQuip/dev
-cp .env.deploy .env
-nano .env  # 填入 QQ 号和 OneBot 配置
+cd /path/to/QuickQuip
+cp .env.example .env
+nano .env  # 填入 QQ 号、OneBot 配置和 API key
 ```
 
 同时确认：
 
 - 根目录下的 `.env` 已存在，并填入 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
 - 如果仍需保留 Tavily 作为备用搜索后端，再额外填入 `TAVILY_API_KEY`
-- `dev/.env` 已存在，并填入云端专用的 `GITHUB_PERSONAL_ACCESS_TOKEN` 与 MCP 挂载覆盖值
 - 根目录下的 `config/llm.toml` 已存在并填入真实 provider / model / base_url 配置
+- 如使用私有部署编排，相关环境变量文件不应进入公共仓库
 
 当前部署会把：
 
 - 根 `.env`
-- `dev/.env`
 - `config/llm.toml`
 - `llm_about/vocab.yaml`
 - `llm_about/identities.yaml`
 - `llm_about/{群号}/vocab.yaml`
 - `llm_about/{群号}/identities.yaml`
 
-一并用于容器运行。其中 `quickquip` 容器会同时读取根 `.env` 和 `dev/.env`。
+一并用于容器运行。
 若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
-
-变量优先级按容器实际加载顺序处理：
-
-- 根 `.env` 提供基础默认值
-- `dev/.env` 用于云端覆盖同名变量
-
-因此云端启用贴吧时，应当优先确认 `dev/.env` 中的 `TIEBA_ENABLED=true` 与 `TIEBA_FORUM_KEYWORD=搬石`。
-同理，容器构建用到的 `PIP_INDEX_URL`、`PIP_TRUSTED_HOST` 与 `PLAYWRIGHT_BASE_IMAGE` 也建议在 `dev/.env` 中维护云端值。
 
 ### 4. 启动服务
 
 ```bash
-cd /opt/QuickQuip/dev
+cd /path/to/QuickQuip
 docker compose up -d
 ```
 
 当前 compose 会：
 
-- 让 `quickquip` 同时读取 `../.env` 与 `./.env`
-- 通过外部 `shared-search` Docker 网络连接服务器级 SearXNG
-- 把 `quickquip` 容器内的 `SEARXNG_BASE_URL` 覆盖为 `http://searxng:8080`
-- 挂载宿主机 `/var/run/docker.sock`，让 `quickquip` 容器可以通过 Docker CLI 以 DOOD 方式启动 `docker` 型 MCP server
+- 按你的私有编排连接搜索服务
+- 把 `quickquip` 容器内的 `SEARXNG_BASE_URL` 覆盖为可访问的搜索服务地址
 - 把 `../config` 只读挂载到容器内 `/app/config`
 - 把 `../llm_about` 挂载到容器内 `/app/llm_about`
   - 其中包含全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
@@ -92,7 +81,7 @@ docker compose up -d
 - 让贴吧运行时从 `/app/data/tieba/storage_state.json` 读取跨平台登录态
 - 直接基于 Playwright Python 镜像运行贴吧采集，镜像内已预装浏览器与系统依赖
 - 通过构建参数把 Python 包安装源切到国内镜像，减少云端拉取超时
-- 默认通过 `PLAYWRIGHT_BASE_IMAGE` 使用国内代理前缀 `m.daocloud.io/mcr.microsoft.com/...` 拉取 Playwright 基础镜像
+- 可通过 `PLAYWRIGHT_BASE_IMAGE` 指定适合当前网络环境的 Playwright 基础镜像
 
 补充说明：
 
@@ -105,7 +94,7 @@ docker compose up -d
 贴吧登录态建议先在本地机器生成，再通过部署脚本同步到云端：
 
 ```bash
-python dev/tools/tieba_login.py
+python tools/tieba_login.py
 ```
 
 成功后会生成：
@@ -114,7 +103,7 @@ python dev/tools/tieba_login.py
 data/tieba/storage_state.json
 ```
 
-后续执行 `dev/deploy.sh` 或 `dev/deploy.ps1` 时，该文件会自动单独上传到云端。
+后续执行你的私有部署脚本时，该文件会自动单独上传到云端。
 
 ### 4.2 词云字体文件
 
@@ -123,7 +112,7 @@ data/tieba/storage_state.json
 1. 从 [Google Fonts](https://fonts.google.com/noto/specimen/Noto+Sans+SC) 下载 `NotoSansSC-Regular.ttf`
 2. 放置到 `data/fonts/NotoSansSC-Regular.ttf`
 
-云端部署时，`data/fonts/` 目录已通过 `data/` bind mount 挂载到容器内，字体文件上传一次后即可持久使用。若字体文件缺失，执行 `/wordcloud` 时 bot 会回复明确的错误提示。
+容器化部署时，`data/fonts/` 目录应通过 `data/` bind mount 挂载到容器内，字体文件上传一次后即可持久使用。若字体文件缺失，执行 `/wordcloud` 时 bot 会回复明确的错误提示。
 
 ### 5. 首次登录 NapCat
 
@@ -157,7 +146,7 @@ docker compose logs -f quickquip
 
 ### 7. Web 管理后台
 
-compose 会同时启动 `web-admin` 容器（`python web_api.py`，监听 `127.0.0.1:5104`）。通过 nginx 反代后，访问 `https://4sljq.top/ops/` 即可打开管理界面，提供：
+compose 会同时启动 `web-admin` 容器（`python web_api.py`，默认监听 `127.0.0.1:5104`）。通过 nginx 反代后即可打开管理界面，提供：
 
 - 消息统计（各群消息数、活跃用户、规则触发次数）
 - 群级规则开关（toggle 开关，实时生效）
@@ -166,10 +155,10 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，监听 `127.0
 
 管理界面同时有两层门：
 
-- nginx `auth_basic`：外层站点访问控制，密码文件为 `/etc/nginx/.htpasswd`
+- nginx `auth_basic`：外层站点访问控制，密码文件位置由你的反代配置决定
 - QuickQuip Web Admin session：应用层登录，会读取 `WEB_ADMIN_PASSWORD` 并在浏览器里建立 `HttpOnly` session cookie
 
-建议在 `dev/.env` 中补充：
+建议在私有环境变量文件中补充：
 
 ```env
 WEB_ADMIN_PASSWORD=change-this-admin-password
@@ -197,7 +186,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 - 改了 `quickquip/app/web/` 或其他 Python 代码后，**必须重建镜像**，`docker restart` 不够：
 
   ```bash
-  cd /opt/QuickQuip/dev
+  cd /path/to/QuickQuip
   docker compose build web-admin
   docker compose up -d web-admin
   ```
@@ -208,7 +197,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 ```bash
 # 更新代码后重新构建
-cd /opt/QuickQuip/dev
+cd /path/to/QuickQuip
 docker compose up -d --build
 
 # 查看日志
@@ -227,7 +216,7 @@ docker compose down
 
 不需要。
 
-如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 镜像到 `config/llm.toml`，但部署时仍要按 QuickQuip 自己的 `.env` / `dev/.env` 来管理密钥和宿主路径。
+如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 镜像到 `config/llm.toml`，但部署时仍要按 QuickQuip 自己的私有环境变量来管理密钥和宿主路径。
 
 当前项目已经同时保留 Tavily 直连能力和 MCP 扩展能力。MCP 集成的正式约定见 [../dev/mcp-integration.md](../dev/mcp-integration.md)。
 
@@ -254,11 +243,11 @@ docker compose logs -f napcat  # 找新的二维码
 
 优先检查以下几项：
 
-- `/opt/QuickQuip/config/llm.toml` 是否存在且内容正确
-- `/opt/QuickQuip/.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
-- `/opt/QuickQuip/dev/.env` 中是否把 `SEARCH_BACKEND` 设为 `searxng`
-- `/opt/QuickQuip/dev/.env` 中是否填了 `QQ_ACCOUNT`、`GITHUB_PERSONAL_ACCESS_TOKEN` 与云端 MCP 覆盖值
-- `/opt/searxng/` 中的共享 SearXNG 是否运行，QuickQuip 容器内是否能访问 `http://searxng:8080`
-- `/opt/QuickQuip/llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `/opt/QuickQuip/llm_about/{群号}/identities.yaml` 存在
+- `config/llm.toml` 是否存在且内容正确
+- `.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
+- 私有环境变量文件中是否把 `SEARCH_BACKEND` 设为 `searxng`
+- 私有环境变量文件中是否填了 `QQ_ACCOUNT`、`GITHUB_PERSONAL_ACCESS_TOKEN` 与云端 MCP 覆盖值
+- 搜索服务是否运行，QuickQuip 容器内是否能访问配置里的 `SEARXNG_BASE_URL`
+- `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在
 - `docker compose logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
 - 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建

@@ -182,7 +182,7 @@ loadGroups()
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-xs);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
 }
 
@@ -192,7 +192,7 @@ loadGroups()
   border-radius: var(--qq-radius-sm);
   color: var(--qq-text);
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   outline: none;
   min-width: 280px;
 }
@@ -212,7 +212,7 @@ loadGroups()
   background: var(--qq-surface-strong);
   border: 1px solid var(--qq-border);
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   cursor: pointer;
   transition: color var(--qq-transition-fast), background var(--qq-transition-fast);
 }
@@ -243,7 +243,7 @@ loadGroups()
   align-items: center;
   gap: 6px;
   color: var(--qq-text-muted);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   margin: var(--qq-gap-sm) 0 0;
 }
 
@@ -252,7 +252,7 @@ loadGroups()
   align-items: center;
   gap: var(--qq-gap-sm);
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   margin-bottom: var(--qq-gap-sm);
   flex-wrap: wrap;
 }
@@ -261,7 +261,7 @@ loadGroups()
   margin-left: auto;
   color: var(--qq-accent);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .download-link:hover { text-decoration: underline; }
@@ -290,7 +290,7 @@ loadGroups()
 
 .top-title {
   margin: 0 0 var(--qq-gap-sm);
-  font-size: 14px;
+  font-size: var(--qq-text-base);
   color: var(--qq-text);
 }
 
@@ -310,7 +310,7 @@ loadGroups()
   gap: var(--qq-gap-sm);
   padding: 4px 6px;
   border-radius: var(--qq-radius-sm);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .top-list li:hover { background: var(--qq-surface-elevated); }
@@ -318,7 +318,7 @@ loadGroups()
 .rank {
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
   text-align: right;
 }
 
@@ -332,7 +332,7 @@ loadGroups()
 .count {
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
-  font-size: 12px;
+  font-size: var(--qq-text-xs);
 }
 
 @media (max-width: 900px) {

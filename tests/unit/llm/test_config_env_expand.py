@@ -32,6 +32,8 @@ CONFIG_WITH_ENV_VARS = textwrap.dedent(
     enabled = "${QQ_MCP_SERVER_ENABLED:-true}"
     image = "ghcr.io/example/server:latest"
     mounts = ["${QQ_MCP_MOUNT_ONE:-/data/one:/mnt/one:ro}", "${QQ_MCP_MOUNT_TWO:-}"]
+    include_tools = ["search_code", "get_file_contents"]
+    exclude_tools = ["delete_file"]
 
     [[personas]]
     id = "default"
@@ -68,6 +70,8 @@ def test_env_expand_with_explicit_values(tmp_path: Path, monkeypatch):
     assert loaded.tools.always_loaded == ["tool_search", "tool_list", "search_web"]
     assert loaded.mcp.enabled is True
     assert loaded.mcp.servers[0].enabled is True
+    assert loaded.mcp.servers[0].include_tools == ["search_code", "get_file_contents"]
+    assert loaded.mcp.servers[0].exclude_tools == ["delete_file"]
     # Empty default ${VAR:-} expands to empty string and is filtered from mounts
     assert loaded.mcp.servers[0].mounts == ["/data/one:/mnt/one:ro"]
 

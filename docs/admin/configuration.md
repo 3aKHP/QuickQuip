@@ -57,7 +57,6 @@
 | `MCP_PRTS_WIKI_ENABLED` | 是否启用 PRTS Wiki MCP server。默认 `false` |
 | `MCP_PRTS_GAMEDATA_MOUNT` | PRTS Wiki 游戏数据卷挂载，格式 `/absolute/path:/data/gamedata:ro` |
 | `MCP_PRTS_STORYJSON_MOUNT` | PRTS Wiki 剧情 JSON 卷挂载，格式 `/absolute/path:/data/storyjson:ro` |
-
 其他 `${ENV_VAR}` 与 `${ENV_VAR:-default}` 语法在 `config/llm.toml` 的 MCP server 配置中均可用。
 
 ### Web Admin
@@ -162,7 +161,11 @@
 | `env` | 环境变量键值对，值支持 `${ENV_VAR}` / `${ENV_VAR:-default}` |
 | `mounts` | 卷挂载列表，格式 `host:container` 或 `host:container:ro` |
 | `docker_args` | 额外 Docker 运行参数 |
-| `tool_allowlist` | 该 server 暴露的工具白名单 |
+| `include_tools` | 该 server 暴露的工具白名单，支持 MCP 原始工具名或 QuickQuip 生成后的工具名 |
+| `exclude_tools` | 该 server 排除的工具列表，支持 MCP 原始工具名或 QuickQuip 生成后的工具名 |
+| `allowed_tools` | 兼容旧配置的白名单字段，新配置建议使用 `include_tools` |
+
+`include_tools` 为空时默认接入该 MCP server 暴露的全部工具；`exclude_tools` 会在白名单之后生效。接入 GitHub MCP 这类大工具集时，生产环境建议优先使用 `include_tools` 收窄到读类工具，再交给 `tool_search` / `tool_list` 做按需加载。
 
 ### `[daily_briefing]` — 每日播报
 

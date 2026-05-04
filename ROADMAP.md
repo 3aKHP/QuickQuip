@@ -6,26 +6,6 @@
 
 ---
 
-## v1.1 — ASR 语音理解 + Provider 回归测试
-
-### ASR 语音理解
-
-当前 LLM 多模态理解能力以图片为主。v1.1 聚焦语音消息转文字：
-- 识别 OneBot V11 `record` 消息段，优先读取协议端已提供的转写文本
-- 无内置转写文本时，通过 OneBot `get_record` 获取本地音频文件并调用 ASR provider
-- 首期支持 OpenAI-compatible `/audio/transcriptions` 协议，配置归入 `config/generation.toml` 的 `[asr]`
-- 将转写结果注入 LLM prompt、最近消息、日报/播报采集和词云输入
-
-### 配置文件去冗余重构
-
-当前配置形态已在准确度和详细度之间取得平衡，v1.1 不再扩大配置继承/模板 scope。后续仅在新增 provider 协议时补齐示例注释和兼容性测试。
-
-### Provider 兼容性回归测试库
-
-`tests/fixtures/stream_chunks.py` 已覆盖 OpenAI/Claude/Gemini 共 3 个 provider 的 8 个场景（text/tool/reasoning/thought_leak）。目标是扩成按 provider + model 分目录的真实 payload 库，每次 `provider.py` 改动跑通全量，把 DeepSeek reasoning_content 这类"上生产才发现"的协议兼容性问题收回到 CI。
-
----
-
 ## v1.2 — 群互动游戏化 + Web Admin 升级
 
 ### 互动游戏扩展
@@ -58,7 +38,7 @@ Web Admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工�
 
 ### 本地 TTS 服务接入
 
-在 `generation.audio` 下补充对本地 HTTP TTS provider 的支持，让 `/tts` 除远端语音 API 外，也能调用本地语音服务作为 fallback 或独立模型来源。首期只覆盖轻量、短文本、固定音色场景。
+远程 TTS 已通过 `config/generation.toml` 的 `[audio]` provider 实现。本条目目标为补充本地 HTTP TTS provider 作为 fallback 或独立模型来源，首期只覆盖轻量、短文本、固定音色场景。
 
 ### config/llm.toml 热重载
 
@@ -70,7 +50,7 @@ v0.9.0 覆盖了 chat_rules + personas，`/llm reload` 可重读 llm.toml 并重
 
 ### 测试覆盖补充
 
-测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上逐步补充并发安全测试、模板渲染负例测试、前端组件测试（TS 严格模式迁移已 @ v1.0.1 完成，引入 Vitest 的前提条件已成熟）和性能基准测试。
+测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上逐步补充：Provider 流式解析回归测试库（`stream_chunks.py` 已覆盖 3 provider × 8 场景，待扩为按 provider/model 分目录的真实 payload 库）、并发安全测试、模板渲染负例测试、前端组件测试（TS 严格模式迁移已 @ v1.0.1 完成，引入 Vitest 的前提条件已成熟）和性能基准测试。
 
 ### Provider 健康检查与自动故障转移
 

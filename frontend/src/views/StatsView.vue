@@ -119,7 +119,7 @@ function pct(value: number, max: number): number {
 <style scoped>
 .muted {
   color: var(--qq-text-muted);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .error {
@@ -140,7 +140,7 @@ function pct(value: number, max: number): number {
 
 .stat-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--qq-text-md);
   color: var(--qq-text);
 }
 
@@ -154,7 +154,7 @@ function pct(value: number, max: number): number {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   font-weight: 500;
   color: var(--qq-text-muted);
   margin-bottom: var(--qq-gap-sm);
@@ -163,7 +163,7 @@ function pct(value: number, max: number): number {
 .bar-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--qq-gap-sm);
 }
 
 .bar-row {
@@ -171,7 +171,7 @@ function pct(value: number, max: number): number {
   grid-template-columns: 140px 1fr 48px;
   align-items: center;
   gap: var(--qq-gap-sm);
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
 }
 
 .bar-label {

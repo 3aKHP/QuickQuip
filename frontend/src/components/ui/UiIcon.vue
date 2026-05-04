@@ -1,5 +1,5 @@
 <template>
-  <component :is="iconComp" v-if="iconComp" :size="size" :stroke-width="strokeWidth" />
+  <component :is="iconComp" v-if="iconComp" :size="size" :stroke-width="strokeWidth" class="ui-icon" />
 </template>
 
 <script setup lang="ts">
@@ -10,7 +10,7 @@ import {
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
   SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode, Download,
+  Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
 } from 'lucide-vue-next'
 
 const ICON_MAP = {
@@ -19,7 +19,7 @@ const ICON_MAP = {
   Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown, MousePointerClick,
   Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save, Settings,
   SlidersHorizontal, ToggleLeft, Trash2, Users, X, Zap,
-  Send, Stethoscope, FileCode, Download,
+  Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
 }
 
 export type IconName = keyof typeof ICON_MAP
@@ -32,3 +32,9 @@ const props = defineProps<{
 
 const iconComp = computed(() => (ICON_MAP as Record<string, any>)[props.name] || null)
 </script>
+
+<style scoped>
+.ui-icon {
+  flex-shrink: 0;
+}
+</style>

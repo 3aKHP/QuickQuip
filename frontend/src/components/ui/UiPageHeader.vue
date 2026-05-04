@@ -24,6 +24,8 @@ defineProps({
   justify-content: space-between;
   gap: var(--qq-gap-md);
   margin-bottom: var(--qq-gap-lg);
+  padding-bottom: var(--qq-gap-md);
+  border-bottom: 1px solid var(--qq-border);
   flex-wrap: wrap;
 }
 
@@ -34,14 +36,14 @@ defineProps({
 }
 
 .title {
-  font-size: 18px;
+  font-size: var(--qq-text-lg);
   font-weight: 600;
   color: var(--qq-text);
   margin: 0;
 }
 
 .subtitle {
-  font-size: 13px;
+  font-size: var(--qq-text-sm);
   color: var(--qq-text-muted);
   margin: 0;
 }

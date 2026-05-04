@@ -29,25 +29,36 @@ function onChange(e: Event) {
   emit('update:modelValue', (e.target as HTMLInputElement).checked)
 }
 
-const sizeClass = computed(() => `ui-toggle--${props.size}`)
+const sizeClass = computed(() => `ui-toggle--${props.size || 'md'}`)
 </script>
 
 <style scoped>
 .ui-toggle {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
+  min-height: 32px;
+  min-width: 36px;
+}
+
+.ui-toggle:focus-within {
+  outline: none;
 }
 
 .ui-toggle input {
   opacity: 0;
   width: 0;
   height: 0;
+  position: absolute;
+}
+
+.ui-toggle input:focus-visible + .slider {
+  box-shadow: 0 0 0 2px var(--qq-accent-glow);
 }
 
 .slider {
-  position: absolute;
-  inset: 0;
+  position: relative;
   background: var(--qq-surface-strong);
   border: 1px solid var(--qq-border-strong);
   border-radius: var(--qq-radius-pill);
@@ -77,31 +88,35 @@ const sizeClass = computed(() => `ui-toggle--${props.size}`)
 }
 
 /* md: 36x20 */
-.ui-toggle--md {
+.ui-toggle--md .slider {
   width: 36px;
   height: 20px;
 }
+
 .ui-toggle--md .slider::before {
   width: 14px;
   height: 14px;
   left: 2px;
   top: 2px;
 }
+
 .ui-toggle--md input:checked + .slider::before {
   transform: translateX(16px);
 }
 
 /* sm: 28x16 */
-.ui-toggle--sm {
+.ui-toggle--sm .slider {
   width: 28px;
   height: 16px;
 }
+
 .ui-toggle--sm .slider::before {
   width: 10px;
   height: 10px;
   left: 2px;
   top: 2px;
 }
+
 .ui-toggle--sm input:checked + .slider::before {
   transform: translateX(12px);
 }
