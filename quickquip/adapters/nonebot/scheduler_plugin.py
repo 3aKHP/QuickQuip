@@ -62,10 +62,6 @@ def _register_jobs():
                     bot = bot_getter()
                 except Exception:
                     logger.warning("scheduled_msg: bot not available, skipping")
-                    try:
-                        record_job_result(job_id, True)
-                    except Exception:
-                        pass
                     return
                 for gid in gids:
                     try:
@@ -110,29 +106,40 @@ def _register_festival_job() -> None:
     bot_getter = nonebot.get_bot
 
     async def _check_and_greet() -> None:
-        festival = check_today_festival()
-        if festival is None:
-            return
-
-        greeting = get_festival_greeting()
-        if not greeting:
-            return
-
         try:
-            bot = bot_getter()
-        except Exception:
-            logger.warning("festival_check: bot not available, skipping greeting")
-            return
+            festival = check_today_festival()
+            if festival is None:
+                record_job_result("festival_check", True)
+                return
 
-        full_greeting = f"【{festival.name}】{greeting}"
-        for gid in daily_enabled_groups.all_groups():
+            greeting = get_festival_greeting()
+            if not greeting:
+                record_job_result("festival_check", True)
+                return
+
             try:
-                await bot.send_group_msg(group_id=int(gid), message=full_greeting)
+                bot = bot_getter()
             except Exception:
-                logger.warning(
-                    "festival_check: failed to send greeting to group %s",
-                    gid, exc_info=True,
-                )
+                logger.warning("festival_check: bot not available, skipping greeting")
+                record_job_result("festival_check", False, "bot not available")
+                return
+
+            full_greeting = f"【{festival.name}】{greeting}"
+            for gid in daily_enabled_groups.all_groups():
+                try:
+                    await bot.send_group_msg(group_id=int(gid), message=full_greeting)
+                except Exception:
+                    logger.warning(
+                        "festival_check: failed to send greeting to group %s",
+                        gid, exc_info=True,
+                    )
+            record_job_result("festival_check", True)
+        except Exception as exc:
+            try:
+                record_job_result("festival_check", False, str(exc)[:500])
+            except Exception:
+                pass
+            raise
 
     scheduler.add_job(
         _check_and_greet,
