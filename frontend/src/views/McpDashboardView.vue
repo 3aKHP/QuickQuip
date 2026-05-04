@@ -28,12 +28,13 @@
               class="status-dot"
               :class="{
                 'status-connected': server.connected,
-                'status-error': !server.connected && server.enabled,
+                'status-error': !server.connected && server.enabled && server.runtime_available !== false,
                 'status-disabled': !server.enabled,
+                'status-unknown': !server.connected && server.enabled && server.runtime_available === false,
               }"
             />
             <span class="status-text">
-              {{ server.connected ? '已连接' : (server.enabled ? '连接失败' : '已禁用') }}
+              {{ server.connected ? '已连接' : (server.runtime_available === false ? '状态未知' : (server.enabled ? '连接失败' : '已禁用')) }}
             </span>
           </div>
         </div>
@@ -194,6 +195,10 @@ onMounted(() => {
 
 .status-disabled {
   background: var(--qq-text-muted);
+}
+
+.status-unknown {
+  background: var(--qq-warn);
 }
 
 .status-text {

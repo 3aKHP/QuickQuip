@@ -14,6 +14,7 @@ export interface McpServer {
   error: string | null
   detail: string
   tools: McpTool[]
+  runtime_available?: boolean
 }
 
 export interface McpDashboardResponse {
