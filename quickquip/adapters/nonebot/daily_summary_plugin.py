@@ -228,15 +228,45 @@ def _register_scheduler_jobs() -> None:
     if not daily_cfg.enabled:
         return
 
+    from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
+
+    async def _wrapped_generate():
+        try:
+            await _job_generate_summaries()
+            try:
+                record_job_result("daily_summary_generate", True)
+            except Exception:
+                pass
+        except Exception as exc:
+            try:
+                record_job_result("daily_summary_generate", False, str(exc)[:500])
+            except Exception:
+                pass
+            raise
+
+    async def _wrapped_publish():
+        try:
+            await _job_publish_summaries()
+            try:
+                record_job_result("daily_summary_publish", True)
+            except Exception:
+                pass
+        except Exception as exc:
+            try:
+                record_job_result("daily_summary_publish", False, str(exc)[:500])
+            except Exception:
+                pass
+            raise
+
     scheduler.add_job(
-        _job_generate_summaries,
+        _wrapped_generate,
         "cron",
         id="daily_summary_generate",
         replace_existing=True,
         **_parse_cron(daily_cfg.generate_cron),
     )
     scheduler.add_job(
-        _job_publish_summaries,
+        _wrapped_publish,
         "cron",
         id="daily_summary_publish",
         replace_existing=True,

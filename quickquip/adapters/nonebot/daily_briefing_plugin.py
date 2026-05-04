@@ -184,30 +184,33 @@ def _register_scheduler_jobs() -> None:
     if not cfg.enabled:
         return
 
-    scheduler.add_job(
-        _job_send_period,
-        "cron",
-        id="daily_briefing_morning",
-        replace_existing=True,
-        args=["morning"],
-        **_parse_cron(cfg.morning_cron),
-    )
-    scheduler.add_job(
-        _job_send_period,
-        "cron",
-        id="daily_briefing_noon",
-        replace_existing=True,
-        args=["noon"],
-        **_parse_cron(cfg.noon_cron),
-    )
-    scheduler.add_job(
-        _job_send_period,
-        "cron",
-        id="daily_briefing_evening",
-        replace_existing=True,
-        args=["evening"],
-        **_parse_cron(cfg.evening_cron),
-    )
+    from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
+
+    periods = ["morning", "noon", "evening"]
+    for period in periods:
+        job_id = f"daily_briefing_{period}"
+
+        async def _wrapped_send(p=period, jid=job_id):
+            try:
+                await _job_send_period(p)
+                try:
+                    record_job_result(jid, True)
+                except Exception:
+                    pass
+            except Exception as exc:
+                try:
+                    record_job_result(jid, False, str(exc)[:500])
+                except Exception:
+                    pass
+                raise
+
+        scheduler.add_job(
+            _wrapped_send,
+            "cron",
+            id=job_id,
+            replace_existing=True,
+            **_parse_cron(getattr(cfg, f"{period}_cron")),
+        )
     logger.info(
         "daily_briefing: jobs registered (morning=%s, noon=%s, evening=%s)",
         cfg.morning_cron,

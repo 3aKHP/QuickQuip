@@ -17,6 +17,7 @@ import WordcloudView from '../views/WordcloudView.vue'
 import ConfigView from '../views/ConfigView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
 import McpDashboardView from '../views/McpDashboardView.vue'
+import CronDashboardView from '../views/CronDashboardView.vue'
 
 export interface NavItem {
   key: string
@@ -40,6 +41,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',      component: TiebaView },
   { key: 'wordcloud',      path: '/wordcloud',      label: '词云',     icon: 'Newspaper',     component: WordcloudView },
   { key: 'config',         path: '/config',         label: '配置',     icon: 'Settings',      component: ConfigView },
-  { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',   component: DiagnosticsView },
-  { key: 'mcp-dashboard', path: '/mcp-dashboard', label: 'MCP',      icon: 'Server',        component: McpDashboardView },
+  { key: 'diagnostics',     path: '/diagnostics',     label: '诊断',     icon: 'Stethoscope',   component: DiagnosticsView },
+  { key: 'mcp-dashboard',  path: '/mcp-dashboard',   label: 'MCP',      icon: 'Server',        component: McpDashboardView },
+  { key: 'cron-dashboard', path: '/cron-dashboard',  label: '定时任务', icon: 'Clock',          component: CronDashboardView },
 ]
