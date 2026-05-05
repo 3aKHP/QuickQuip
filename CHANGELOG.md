@@ -357,7 +357,9 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/3aKHP/QuickQuip/compare/v1.2.1...v1.3.0
+[1.2.1]: https://github.com/3aKHP/QuickQuip/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/3aKHP/QuickQuip/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/3aKHP/QuickQuip/compare/v1.0.0...v1.0.1

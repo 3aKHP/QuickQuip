@@ -166,7 +166,6 @@ quickquip/app/              ← 应用级消息管线与共享状态装配
 
 目录约定：`quickquip/` 承载全部实现；`plugins/` 是 NoneBot2 插件发现入口，只做 re-export；`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。游戏参数集中在 `config/games.toml`。
 
-目录约定：`quickquip/` 承载全部实现；`plugins/` 是 NoneBot2 插件发现入口，只做 re-export；`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。  
 详细结构见 [docs/dev/architecture.md](docs/dev/architecture.md)。
 
 ---
