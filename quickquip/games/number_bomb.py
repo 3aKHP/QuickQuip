@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from time import time
 from typing import Optional
 
-from quickquip.chat.game_registry import BaseGame, GameResult
+from quickquip.games.config import NumberBombConfig
+from quickquip.games.registry import BaseGame, GameResult
 
 
 @dataclass(slots=True)
@@ -37,20 +38,19 @@ class NumberBombGame(BaseGame):
 
     def __init__(
         self,
+        config: NumberBombConfig | None = None,
         max_sessions: int = 1024,
-        min_number: int = 1,
-        max_number: int = 1000,
-        timeout_seconds: int = 60,
     ):
+        cfg = config or NumberBombConfig()
         self._max_sessions = max_sessions
-        self._min_number = min_number
-        self._max_number = max_number
-        self._timeout = timeout_seconds
+        self._min_number = cfg.min_number
+        self._max_number = cfg.max_number
+        self._timeout = cfg.timeout_seconds
         self._sessions: OrderedDict[str, NumberBombSession] = OrderedDict()
 
     # ── public API ───────────────────────────────────────────────────────
 
-    def start(self, group_id: str, user_id: str) -> str:
+    def start(self, group_id: str, user_id: str, start_arg: str = "") -> str:
         secret = random.randint(self._min_number, self._max_number)
         session = NumberBombSession(
             secret=secret,

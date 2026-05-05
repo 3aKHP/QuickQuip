@@ -50,13 +50,13 @@ class BaseGame(ABC):
         """
         return []
 
-    @abstractmethod
-    def start(self, group_id: str, user_id: str) -> str:
+    def start(self, group_id: str, user_id: str, start_arg: str = "") -> str:
         """Begin a new game session in *group_id*.
 
         Args:
             group_id: The group where the game is being started.
             user_id: The user who issued the start command.
+            start_arg: Optional argument from the start command (e.g. bet amount).
 
         Returns:
             The opening message to send to the group.
@@ -143,7 +143,7 @@ class GameRegistry:
     # ── session management ───────────────────────────────────────────────
 
     def start_game(
-        self, group_id: str, user_id: str, game: BaseGame
+        self, group_id: str, user_id: str, game: BaseGame, start_arg: str = ""
     ) -> Optional[str]:
         """Begin *game* in *group_id* and record the session.
 
@@ -153,7 +153,7 @@ class GameRegistry:
         key = str(group_id)
         if key in self._sessions:
             return None
-        reply = game.start(key, user_id)
+        reply = game.start(key, user_id, start_arg)
         self._sessions[key] = (game.name, time())
         self._touch(key)
         self._prune()

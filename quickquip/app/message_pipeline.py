@@ -10,10 +10,9 @@ from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
 from quickquip.chat import text_rules as text_rules_module
 from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
-from quickquip.chat.game_registry import GameRegistry
-from quickquip.chat.game_scores import GameScores
+from quickquip.games import GameRegistry, GameScores, NumberBombGame
+
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
-from quickquip.chat.number_bomb import NumberBombGame
 from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector
 from quickquip.chat.rule_switch import GroupRuleSwitch
