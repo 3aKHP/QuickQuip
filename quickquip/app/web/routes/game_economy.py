@@ -24,7 +24,7 @@ class AdjustBody(BaseModel):
 async def list_groups(request: Request):
     """Return all group IDs that have gold accounts."""
     store: GameEconomyStore = game_economy
-    with store._connect() as conn:
+    with store.connect() as conn:
         rows = conn.execute(
             """
             SELECT group_id, COUNT(*) AS user_count, SUM(gold) AS total_gold
@@ -69,7 +69,7 @@ async def list_accounts(
     limit = min(limit, 200)
 
     store: GameEconomyStore = game_economy
-    with store._connect() as conn:
+    with store.connect() as conn:
         if keyword and _UID_RE.match(keyword):
             rows = conn.execute(
                 """
@@ -119,7 +119,7 @@ async def get_account(group_id: str, user_id: str, request: Request):
         raise HTTPException(422, "invalid user_id")
 
     store: GameEconomyStore = game_economy
-    with store._connect() as conn:
+    with store.connect() as conn:
         row = conn.execute(
             "SELECT user_id, gold, affection, sign_streak, last_sign_date FROM gold_accounts WHERE user_id = ? AND group_id = ?",
             (user_id, group_id),
@@ -138,6 +138,7 @@ async def adjust_gold(group_id: str, user_id: str, body: AdjustBody, request: Re
         raise HTTPException(422, "invalid user_id")
 
     store: GameEconomyStore = game_economy
+    old_balance = store.get_balance(user_id, group_id)["gold"]
     if body.amount >= 0:
         new_balance = store.add_gold(user_id, group_id, body.amount)
     else:
@@ -151,6 +152,7 @@ async def adjust_gold(group_id: str, user_id: str, body: AdjustBody, request: Re
         action="adjust_gold",
         target_type="gold_account",
         target_id=f"{group_id}/{user_id}",
+        summary_before={"gold": old_balance},
         summary_after={"amount": body.amount, "reason": body.reason, "new_balance": new_balance},
     )
     logger.warning(

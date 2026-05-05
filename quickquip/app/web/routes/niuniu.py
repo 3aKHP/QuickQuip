@@ -40,7 +40,7 @@ async def list_users(request: Request, offset: int = 0, limit: int = 50, keyword
     limit = min(limit, 200)
 
     store: NiuNiuStore = niuniu_store
-    with store._connect() as conn:
+    with store.connect() as conn:
         if keyword and _UID_RE.match(keyword):
             rows = conn.execute(
                 """

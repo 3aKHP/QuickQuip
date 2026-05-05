@@ -152,13 +152,12 @@ class BlackjackGame(BaseGame):
         session = self._sessions.pop(str(group_id), None)
         if session is None:
             return None
-        # Refund all players
-        if self._economy:
+        if not session.playing and self._economy:
+            # Refund only during waiting phase (before dealing)
             for p in session.players:
                 self._economy.add_gold(p.user_id, str(group_id), p.bet)
-        if session.playing:
-            return "游戏已终止，所有下注已退还"
-        return "游戏已取消，下注已退还"
+            return "游戏已取消，下注已退还"
+        return "游戏已终止（出牌后不可退款）"
 
     def is_active(self, group_id: str) -> bool:
         return str(group_id) in self._sessions

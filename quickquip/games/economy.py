@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 
@@ -27,10 +27,17 @@ class GameEconomyStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    def connect(self) -> sqlite3.Connection:
+        """Return a new SQLite connection with row_factory set.
+
+        Public for use by web-admin routes and other external consumers
+        that need direct query access beyond the standard API.
+        """
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    _connect = connect  # internal alias for backward compatibility
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -258,7 +265,7 @@ class GameEconomyStore:
 def _yesterday(today: str) -> str:
     try:
         dt = datetime.strptime(today, "%Y-%m-%d").date()
-        return (dt - __import__("datetime").timedelta(days=1)).isoformat()
+        return (dt - timedelta(days=1)).isoformat()
     except ValueError:
         return ""
 

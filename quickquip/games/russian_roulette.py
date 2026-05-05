@@ -119,16 +119,14 @@ class RussianRouletteGame(BaseGame):
         session = self._sessions.pop(str(group_id), None)
         if session is None:
             return None
-        # Refund player 1 (player 2 hasn't paid yet if in early phases)
-        if session.phase != "playing" and self._economy:
-            self._economy.add_gold(session.player1_id, str(group_id), session.player1_bet)
-            return f"对决已取消，退还 {session.player1_bet} 金币"
-        # If playing, both paid — refund both
-        if self._economy:
+        # Gold is only deducted when player 2 accepts (phase → "playing").
+        # Earlier phases: no gold was taken, so no refund is needed.
+        if session.phase == "playing" and self._economy:
             self._economy.add_gold(session.player1_id, str(group_id), session.player1_bet)
             if session.player2_id:
                 self._economy.add_gold(session.player2_id, str(group_id), session.player1_bet)
-        return "对决已终止，赌注已退还"
+            return "对决已终止，赌注已退还"
+        return "对决已取消"
 
     def is_active(self, group_id: str) -> bool:
         return str(group_id) in self._sessions

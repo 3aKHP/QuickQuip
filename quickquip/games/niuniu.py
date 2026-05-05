@@ -181,10 +181,13 @@ class NiuNiuStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
-    def _connect(self) -> sqlite3.Connection:
+    def connect(self) -> sqlite3.Connection:
+        """Return a new SQLite connection with row_factory set."""
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    _connect = connect  # internal alias
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
@@ -482,6 +485,15 @@ def fencing(
     if i_win:
         my_len = round(my_len + reduce_val, 2)
         oppo_len = round(oppo_len - 0.8 * reduce_val, 2)
+    else:
+        my_len = round(my_len - reduce_val, 2)
+        oppo_len = round(oppo_len + 0.8 * reduce_val, 2)
+
+    # Apply decay
+    my_len = _apply_decay(my_len, store.config)
+    oppo_len = _apply_decay(oppo_len, store.config)
+
+    if i_win:
         if my_len < 0:
             msg = f"哦吼！？你的牛牛在长大欸！长大了 {abs(reduce_val)} cm！"
         else:
@@ -491,8 +503,6 @@ def fencing(
                 f"你当前长度为 {my_len} cm！"
             )
     else:
-        my_len = round(my_len - reduce_val, 2)
-        oppo_len = round(oppo_len + 0.8 * reduce_val, 2)
         if my_len < 0:
             msg = (
                 f"哦吼！？看来你的牛牛因为击剑而凹进去了！凹进去了 {reduce_val} cm！"
@@ -502,10 +512,6 @@ def fencing(
                 f"对方以绝对的长度让你屈服了！你的长度减少 {reduce_val} cm，"
                 f"当前长度 {my_len} cm！"
             )
-
-    # Apply decay
-    my_len = _apply_decay(my_len, store.config)
-    oppo_len = _apply_decay(oppo_len, store.config)
 
     store.update_length(my_uid, my_len)
     store.update_length(oppo_uid, oppo_len)
