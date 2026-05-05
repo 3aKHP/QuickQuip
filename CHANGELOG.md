@@ -2,6 +2,25 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.3.0] - 2026-05-06
+
+### 新增
+
+- **金币经济系统**：SQLite 持久化金币账户（`data/game_economy.db`），每日签到连击累加、好感度成长、金币排行；`deduct_gold` / `transfer_gold` 原子事务保护，贯穿全部对战游戏
+- **21 点（Blackjack）**：`/game start 21点 <赌注>` 发起，bot 坐庄硬 17 停牌，支持 Blackjack 判定和平局退款，最多 8 人同局
+- **俄罗斯轮盘**：`/game start 俄罗斯轮盘 <赌注>` 发起，装弹/接受对决/轮流开枪，7 槽弹仓随机排列，存活概率实时更新
+- **牛牛大作战**：持久化 RPG 系统（`data/niuniu.db`），注册牛牛随机初始长度、打胶加权事件引擎（5 种事件/6 档评论）、击剑胜率公式、长度/深度排行、CD 系统、操作记录追溯
+- **游戏配置文件化**：`config/games.toml` 统一管理全部游戏参数（签到倍率、赌注上下限、CD 时长、衰减率等），`GameConfig` dataclass 层次注入，缺失文件回退默认值
+- **`quickquip/games/` 独立子目录**：`registry.py` / `scores.py` / `economy.py` / `config.py` + 4 个游戏实现，与 `llm/`、`generation/`、`tieba/` 同级
+- **Web Admin 游戏管理**：金币面板（群金币汇总/排行/账户查询/手动调金审计记录）、牛牛面板（排行/用户详情/长度手动修正）、配置编辑器支持 `games.toml`
+- **游戏文档三层体系**：`docs/user/group-games.md`（群友向玩法指南）+ `docs/admin/game-config.md`（部署向配置手册）+ `docs/dev/game-framework.md`（开发向扩展指南）
+
+### 变更
+
+- `BaseGame.start()` 签名新增可选 `start_arg` 参数，`GameRegistry.start_game()` 透传，`/game start` 命令解析附加参数
+- `GameScores` / `GameRegistry` / `NumberBombGame` 从 `quickquip/chat/` 迁移至 `quickquip/games/`
+- Web Admin 配置白名单新增 `games.toml`，`UiIcon` 组件注册 `Coins` / `Swords` 图标，标签页增至 19 个
+
 ## [1.2.1] - 2026-05-05
 
 ### 新增

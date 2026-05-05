@@ -81,16 +81,18 @@ QuickQuip/
 
 ```
 quickquip/
-├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集）
+├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集、节日检测）
 ├── common/                  # 通用工具（限流、持久化、消息去重、最近消息缓冲）
+├── games/                   # 游戏模块（registry、scores、economy、config、各游戏实现）
 ├── llm/                     # LLM 运行时（多 provider、工具调用循环、MCP 客户端、记忆存储、persona、身份映射、词表、健康检查）
 ├── generation/              # 多模态产出配置、模型解析、图片/语音/音乐 provider 调用
 ├── tieba/                   # 贴吧爬虫与帖子池
 ├── search/                  # 联网搜索后端（SearXNG / Tavily）
 ├── adapters/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件）
-└── app/                     # 应用级流水线装配（单例初始化、状态加载）
-    └── web/                 # Web 管理后台 FastAPI 应用与路由
+└── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）
+    ├── web/                 # Web 管理后台 FastAPI 应用与路由
+    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、限流、贴吧、词云、诊断、MCP面板、定时任务、审计、金币经济、牛牛大作战）
 ```
 
 **规则**：业务逻辑只进 `quickquip/`，不进 `plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
@@ -113,6 +115,8 @@ quickquip/
 | `generation.toml` | 自用层（gitignore） | 真实图片/语音/音乐 provider 配置 |
 | `chat_rules.toml.example` | 分发层（追踪） | 文字回复规则格式示例 |
 | `chat_rules.toml` | 自用层（gitignore） | 部署专用的彩蛋规则（群内私有梗） |
+| `games.toml.example` | 分发层（追踪） | 游戏参数配置模板 |
+| `games.toml` | 自用层（gitignore） | 游戏参数（金币倍率、CD、赌注上限等） |
 | `personas.example/` | 分发层（追踪） | persona 配置格式示例 |
 | `personas/` | 自用层（gitignore） | 真实 persona 定义（含人格描述、系统提示等） |
 
@@ -191,6 +195,7 @@ docs/
 | `config/llm.*.local.toml` | 同上 |
 | `config/generation.toml` | 含真实多模态 provider 配置 |
 | `config/chat_rules.toml` | 含私有群梗规则 |
+| `config/games.toml` | 含游戏参数配置 |
 | `config/personas/` | 含真实 persona 定义 |
 | `data/` | 运行时数据 |
 | 私有部署目录 | 部署脚本、真实环境变量、临时材料和个人生产结构 |

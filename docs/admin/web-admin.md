@@ -138,7 +138,7 @@ WEB_ADMIN_COOKIE_SECURE=true
 
 ## 功能标签页
 
-Web Admin 提供以下标签页（前端使用 vue-router 4 hash 模式，深链接形如 `/ops/#/stats`）：
+Web Admin 提供以下标签页（前端使用 vue-router 4 hash 模式，深链接形如 `/ops/#/stats`）。前端已升级为响应式设计，支持亮色/暗色主题切换，使用统一的设计 token 体系。当前共 19 个标签页。
 
 - **统计** — 各群消息数、活跃用户排行、规则触发 Top
 - **规则** — 按群启用/禁用任意规则，toggle 实时生效
@@ -154,6 +154,12 @@ Web Admin 提供以下标签页（前端使用 vue-router 4 hash 模式，深链
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情）
 - **词云** — 词云生成（4 档时间窗、Top 词频排行、图片下载）
 - **诊断** — 样本请求与原始 JSON trace、`LLM_TRACE_FLAG_FILE` 开关与 trace 浏览、文本规则回归测试
+- **MCP** — MCP 服务器状态面板（各 server 的 transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
+- **定时任务** — APScheduler 定时任务面板（job ID、trigger、next_run、last_run 时间与状态、错误详情）
+- **审计** — Web Admin 变更审计日志（按操作类型、目标类型、操作人、日期范围等条件过滤，分页浏览）
+- **金币** — 金币经济面板（各群金币汇总、排行 TOP 20、账户查询、手动余额调整并记录审计日志）
+- **牛牛** — 牛牛大作战面板（长度/深度全局排行、用户查询、操作记录追溯）
+- **配置** — 配置文件编辑器中新增加 `config/games.toml`（游戏配置），可在线编辑所有游戏参数
 
 ---
 
