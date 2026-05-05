@@ -19,6 +19,8 @@ import DiagnosticsView from '../views/DiagnosticsView.vue'
 import McpDashboardView from '../views/McpDashboardView.vue'
 import CronDashboardView from '../views/CronDashboardView.vue'
 import AuditView from '../views/AuditView.vue'
+import GameEconomyView from '../views/GameEconomyView.vue'
+import NiuNiuView from '../views/NiuNiuView.vue'
 
 export interface NavItem {
   key: string
@@ -46,4 +48,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'mcp-dashboard',  path: '/mcp-dashboard',   label: 'MCP',      icon: 'Server',        component: McpDashboardView },
   { key: 'cron-dashboard', path: '/cron-dashboard',  label: '定时任务', icon: 'Clock',          component: CronDashboardView },
   { key: 'audit',          path: '/audit',           label: '审计',     icon: 'ShieldCheck',   component: AuditView },
+  { key: 'game-economy',   path: '/game-economy',    label: '金币',     icon: 'Coins',          component: GameEconomyView },
+  { key: 'niuniu',         path: '/niuniu',          label: '牛牛',     icon: 'Swords',          component: NiuNiuView },
 ]

@@ -33,6 +33,11 @@ _CONFIG_FILES: dict[str, dict] = {
         "label": "聊天规则",
         "description": "文本规则、语境规则、限流与连锁游戏配置",
     },
+    "games": {
+        "filename": "games.toml",
+        "label": "游戏配置",
+        "description": "金币签到倍率、各游戏赌注/CD/超时等参数",
+    },
 }
 
 
