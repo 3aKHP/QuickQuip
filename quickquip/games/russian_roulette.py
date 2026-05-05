@@ -208,9 +208,14 @@ class RussianRouletteGame(BaseGame):
                     reply=f"金币不足！你需要 {s.player1_bet} 金币来接受对决（当前 {bal['gold']}）",
                     at_user_id=uid,
                 )
+            # Deduct both players atomically: if p1's deduction fails, refund p2
             self._economy.deduct_gold(uid, gid, s.player1_bet)
-            # Also deduct player 1 now (wasn't deducted on start to allow refund if no one accepts)
-            self._economy.deduct_gold(s.player1_id, gid, s.player1_bet)
+            if not self._economy.deduct_gold(s.player1_id, gid, s.player1_bet):
+                self._economy.add_gold(uid, gid, s.player1_bet)
+                return GameResult(
+                    reply="发起者金币不足，对决取消",
+                    at_user_id=uid,
+                )
 
         s.player2_id = uid
         s.phase = "playing"

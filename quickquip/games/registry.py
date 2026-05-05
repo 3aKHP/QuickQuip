@@ -154,6 +154,11 @@ class GameRegistry:
         if key in self._sessions:
             return None
         reply = game.start(key, user_id, start_arg)
+        # Only register the session if the game actually created one.
+        # start() may return an error/usage message without initialising
+        # internal state — in that case is_active() returns False.
+        if not game.is_active(key):
+            return reply
         self._sessions[key] = (game.name, time())
         self._touch(key)
         self._prune()
