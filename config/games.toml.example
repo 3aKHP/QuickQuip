@@ -1,0 +1,66 @@
+# QuickQuip 游戏配置文件模板
+# 复制为 config/games.toml 后修改，所有字段均可选，未设置时使用默认值。
+
+# ── 金币经济系统 ────────────────────────────────────────────────────────
+
+[economy]
+# 每日签到基础金币奖励
+sign_base_gold = 10
+# 连续签到每天额外加成（实际加成 = streak_bonus × (连续天数 - 1)）
+sign_streak_bonus = 2
+# 连续签到加成上限
+sign_max_streak_bonus = 30
+# 每次签到获得的好感度
+affection_per_sign = 1
+
+# ── 数字炸弹 ────────────────────────────────────────────────────────────
+
+[number_bomb]
+# 数字范围下限
+min_number = 1
+# 数字范围上限
+max_number = 1000
+# 超时秒数（无操作自动结束）
+timeout_seconds = 60
+
+# ── 21 点（Blackjack）────────────────────────────────────────────────────
+
+[blackjack]
+# 最低赌注（金币）
+min_bet = 20
+# 最大玩家数（含庄家为 N + 1）
+max_players = 8
+# 超时秒数
+timeout_seconds = 90
+# 庄家停牌阈值（达到此点数不再要牌）
+dealer_stand_threshold = 17
+
+# ── 俄罗斯轮盘 ──────────────────────────────────────────────────────────
+
+[russian_roulette]
+# 弹仓槽数
+cylinder_slots = 7
+# 最低赌注（金币）
+min_bet = 20
+# 超时秒数
+timeout_seconds = 30
+
+# ── 牛牛大作战 ──────────────────────────────────────────────────────────
+
+[niuniu]
+# 击剑 CD（秒）
+fence_cooldown = 180
+# 被击剑保护期（秒）
+fenced_protection = 300
+# 打胶 CD（秒）
+glue_cooldown = 180
+# 连续打胶检测窗口（秒），在此窗口内再次打胶视为连续打胶
+quick_glue_window = 240
+# 注销牛牛所需金币
+unsubscribe_gold = 500
+# 长度超过 50 时的衰减率
+decay_rate_high = 0.03
+# 正常长度衰减率
+decay_rate_normal = 0.02
+# 衰减下限（长度不会低于此值）
+decay_floor = -100

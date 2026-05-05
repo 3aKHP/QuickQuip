@@ -6,64 +6,41 @@
 
 ---
 
-## v1.2 — 群互动游戏化 + Web Admin 升级
+## v1.2 — 群互动游戏化 + Web Admin 升级 ✅ 已完成
 
-### 互动游戏扩展
+v1.2 全部功能已交付（v1.2.0 / v1.2.1），详细记录见 [CHANGELOG.md](CHANGELOG.md)：
 
-`ChainGameManager` 已经是通用引擎，支持捕获组和 OR 候选匹配，`config/chat_rules.toml` 的 `[[chain_games]]` 配置槽位已预留。v1.2 在引擎上配置接歌词、数字炸弹、猜谜等游戏类型，加入 `/game start <类型>` 入口和跨会话持久化的积分/排行榜。当前仅内置 good_girl_chain，示例仍为注释状态。
-
-### 节日自动化
-
-结合 `config/chat_rules.toml` 的定时消息能力与 persona 系统，在指定节日（春节、中秋、元旦等）自动切换 bot 应景言行：节日当天注入对应 system prompt 附录、定时发送 persona 口吻的节日问候。管理员可自定义节日日期和行为。
-
-### 前端美术设计升级
-
-v1.2 已完成工程基础：Design Token 体系、响应式布局、暗亮切换、UI 组件标准化。视觉风格未发生本质变化，仍偏开发者工具风格。
-
-### Web Admin 操作审计
-
-当前所有配置修改（TOML 编辑器、群组管理、记忆编辑、规则开关）均无操作记录。v1.2 新增审计日志模块：记录操作人、时间、操作类型、变更前后内容摘要，Web Admin 新 tab 可浏览和过滤。为后续回滚和排障提供依据。
-
-### 定时任务看板
-
-把 `daily_summary` / `daily_briefing` / 贴吧同步 / `SCHEDULED_MESSAGES` 等定时任务统一到 Web Admin 的一个 tab，列出 cron 下一次执行时间、最近运行结果、失败堆栈。
-
-### MCP server 状态看板
-
-Web Admin 新 tab，列出每个 MCP server 的 ready/disconnected 状态、工具清单、最近调用失败。当前 `/llm mcp` 命令和 `/llm health` 已提供文本查询能力，缺少可视化集中看板。
+- 数字炸弹游戏（`/game start 数字炸弹`）+ `BaseGame` / `GameRegistry` 扩展接口
+- 节日自动化：6 个农历/公历节日检测 + persona 注入 + 定时问候
+- 前端工程基础升级：Design Token 体系、响应式布局、暗亮主题切换、UI 组件标准化
+- Web Admin 操作审计：SQLite 审计日志 + 前端过滤浏览
+- 定时任务看板：APScheduler cron job 状态聚合
+- MCP server 状态看板：bot 与 web-admin 共享状态文件
+- 每日总结 Markdown 渲染
+- LLM 工具发现（`tool_search` / `tool_list` 本地元工具）
 
 ---
 
-## v1.2.x — UI 视觉重设计 + 体验优化
+## v1.3 — 游戏生态 + 金币经济 ✅ 已完成
 
-当前版本可用，以下改进在日常使用中逐步推进。
+v1.3.0 已交付，详细记录见 [CHANGELOG.md](CHANGELOG.md)：
+
+- 金币经济底座：签到/好感度/金币排行，SQLite 原子事务，贯穿全部对战游戏
+- 21 点（Blackjack）：bot 坐庄硬 17 停牌，Blackjack 判定，最多 8 人同局
+- 俄罗斯轮盘：装弹/接受对决/轮流开枪，7 槽弹仓随机排列，存活概率实时更新
+- 牛牛大作战：持久 RPG（注册/打胶/击剑/排行/CD 系统/5 事件打胶引擎/11 档评论）
+- 游戏配置文件化：`config/games.toml` 统一管理全部游戏参数，`GameConfig` dataclass 层次注入
+- `quickquip/games/` 独立子目录（与 `llm/`、`generation/`、`tieba/` 同级），6 个模块
+- Web Admin 游戏管理：金币面板 + 牛牛面板 + 配置编辑器支持 `games.toml`，标签页增至 19 个
+- 游戏文档三层体系：`docs/user/group-games.md` + `docs/admin/game-config.md` + `docs/dev/game-framework.md`
+
+---
+
+## v1.3.x / v1.4+ 待定
 
 ### QQ 原生风格 UI 重设计
 
-**现状问题**：v1.2 完成了 Design Token 化、响应式、暗亮切换等工程基础，但视觉语言仍偏 GitHub 式开发者工具风格（深蓝黑底、单一蓝色强调、纯色平面卡片），与 QQ 群聊 bot 管理后台的产品定位不匹配。
-
-**设计方向**：方案 A（QQ 原生风）+ 完整暗色适配。核心变化：
-
-| 维度 | 现状 | 目标 |
-|------|------|------|
-| 底色 | 纯黑 `#0a0f14` | 亮色 `#F5F6FA`（QQ 灰白）/ 暗色 `#0D1117` |
-| 主色 | GitHub 蓝 `#58a6ff` | QQ 蓝 `#12B7F5` |
-| 导航 | 左侧固定栏 220px | 顶部水平标签栏（移动端折叠） |
-| 卡片 | 纯色平面 | 白底圆角 16px + 微阴影浮起感 |
-| 字体 | system-ui | PingFang SC / Microsoft YaHei 优先 |
-| 圆角 | 8-16px | 12-20px（更大更圆润） |
-| 开关 | CSS 模拟 | iOS 风格 34×20px 椭圆轨道 |
-| 空状态 | 灰色文字 | 大图标 + 友好语气文案 |
-
-完整设计方案见 `dev/plans/v1.2-qq-redesign.md`。
-
-### 每日总结 Markdown 渲染
-
-当前每日总结页纯文本展示。许多 LLM 生成的总结内容本身是 Markdown 格式（标题、列表、加粗），应在前端渲染为富文本，提升可读性。引入一个轻量 Markdown 渲染库（如 `marked` + `DOMPurify`），仅做渲染不做编辑。
-
----
-
-## v1.3+ / 未定版本
+v1.2 已铺平工程基础（Design Token、响应式、暗亮切换、组件标准化），但视觉语言仍偏 GitHub 式开发者工具风格。完整 QQ 原生风重设计（亮色 `#F5F6FA`、顶部水平导航、iOS 风格开关、圆角卡片）从 v1.2 顺延至后续版本。设计方案见 `dev/plans/v1.2-qq-redesign.md`。
 
 ### 本地 TTS 服务接入
 

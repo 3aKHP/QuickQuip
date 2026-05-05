@@ -12,7 +12,11 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **复读检测与互动** — 检测群内复读行为，自动跟读、变体复读或刷屏警告
 - **文字彩蛋规则** — 内置 25+ 条基于正则的趣味回复规则，支持优先级和加权随机，开箱即用《新三国》全套梗文。详见 [docs/user/three-kingdoms-memes.md](docs/user/three-kingdoms-memes.md)
 - **语境感知回复** — 支持 `regex_context`（正则二次判定）和 `llm_context`（LLM yes/no 裁决）两种模式
-- **"好女孩"接龙** — 8 步状态机驱动，60 秒超时保护。`ChainGameManager` 通用引擎支持自定义接龙游戏
+- **群内小游戏** — Session 型对战：数字炸弹 / 21 点（Blackjack）/ 俄罗斯轮盘；持久 RPG：牛牛大作战（注册/打胶/击剑/排行）。全部接入金币经济系统，详见 [docs/user/group-games.md](docs/user/group-games.md)
+- **金币经济系统** — 每日签到累加连击、好感度成长、金币排行，所有对战游戏共用下注和结算。参数集中在 `config/games.toml` 配置
+- **节日自动化** — 内置 6 个中国传统节日（公历+农历），自动切换 bot 语气并发送 persona 口吻问候
+- **轻娱乐与互动** — `/roll` 掷骰子、`/choose` 随机选择、`/fortune` 每日运势、`/vote` 投票、`/quote` 语录收藏、`/find` 群聊搜索、`/tell` 离线留言
+- **词云生成** — `/wordcloud` 按 today/week/month 四档生成群聊词云图片
 - **LLM 扩展** — 兼容 OpenAI / Claude / Gemini 协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
@@ -149,7 +153,8 @@ quickquip/adapters/nonebot/ ← 生命周期、消息入口、命令注册
   ▼
 quickquip/app/              ← 应用级消息管线与共享状态装配
   │
-  ├─ quickquip/chat/        ← 规则回复（复读、接龙、彩蛋、时区、统计）
+  ├─ quickquip/chat/        ← 规则回复（复读、接龙、彩蛋、节日、时区、统计）
+  ├─ quickquip/games/       ← 游戏模块（registry、scores、economy、各游戏实现）
   ├─ quickquip/llm/         ← LLM 运行时（provider、MCP、工具调用、记忆）
   ├─ quickquip/generation/  ← 多模态产出（图片、语音、音乐）
   ├─ quickquip/tieba/       ← 贴吧爬虫与帖子池
@@ -157,7 +162,9 @@ quickquip/app/              ← 应用级消息管线与共享状态装配
   └─ quickquip/common/      ← 限流、去重、持久化、消息缓冲
 ```
 
-回复优先级从高到低：**复读 > 接龙 > 彩蛋规则 > 语境规则 > 时区猜测**。每个环节受群级规则开关和滑动窗口限流保护。
+回复优先级从高到低：**复读 > 接龙/游戏 > 彩蛋规则 > 语境规则 > 时区猜测**。每个环节受群级规则开关和滑动窗口限流保护。
+
+目录约定：`quickquip/` 承载全部实现；`plugins/` 是 NoneBot2 插件发现入口，只做 re-export；`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。游戏参数集中在 `config/games.toml`。
 
 目录约定：`quickquip/` 承载全部实现；`plugins/` 是 NoneBot2 插件发现入口，只做 re-export；`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。  
 详细结构见 [docs/dev/architecture.md](docs/dev/architecture.md)。

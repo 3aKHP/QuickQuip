@@ -10,10 +10,10 @@ from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
 from quickquip.chat import text_rules as text_rules_module
 from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
-from quickquip.chat.game_registry import GameRegistry
-from quickquip.chat.game_scores import GameScores
+from quickquip.games import BlackjackGame, GameEconomyStore, GameRegistry, GameScores, NiuNiuStore, NumberBombGame, RussianRouletteGame
+
+from quickquip.games.config import load_games_config
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
-from quickquip.chat.number_bomb import NumberBombGame
 from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector
 from quickquip.chat.rule_switch import GroupRuleSwitch
@@ -70,9 +70,15 @@ wordcloud_collector = WordCloudCollector()
 offline_message_store = OfflineMessageStore(OFFLINE_MESSAGES_PATH)
 group_quote_store = GroupQuoteStore(QUOTES_PATH)
 
+games_config = load_games_config("config/games.toml")
+
 game_registry = GameRegistry(max_sessions=1024)
-game_registry.register(NumberBombGame())
+game_registry.register(NumberBombGame(config=games_config.number_bomb))
+game_economy = GameEconomyStore(config=games_config.economy)
+game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))
+game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))
 game_scores = GameScores()
+niuniu_store = NiuNiuStore(config=games_config.niuniu)
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
