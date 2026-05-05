@@ -212,9 +212,12 @@ class RussianRouletteGame(BaseGame):
             self._economy.deduct_gold(uid, gid, s.player1_bet)
             if not self._economy.deduct_gold(s.player1_id, gid, s.player1_bet):
                 self._economy.add_gold(uid, gid, s.player1_bet)
+                self._sessions.pop(key, None)
                 return GameResult(
                     reply="发起者金币不足，对决取消",
                     at_user_id=uid,
+                    finished=True,
+                    rule_name="russian_roulette_cancelled",
                 )
 
         s.player2_id = uid
