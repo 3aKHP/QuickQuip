@@ -58,4 +58,5 @@ docker/*.Dockerfile
 
 # Frontend build output
 dist/
+!frontend-v1/dist/
 node_modules/
