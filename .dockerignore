@@ -20,8 +20,11 @@ frontend/node_modules/
 .env.*
 !.env.example
 config/*.toml
+config/personas/
 !config/*.toml.example
 dev/*
+frontend-v1/
+frontend-v2/
 llm_about/**/*.yaml
 !llm_about/*.yaml.example
 !llm_about/_example/*.yaml
