@@ -23,7 +23,8 @@ config/*.toml
 config/personas/
 !config/*.toml.example
 dev/*
-frontend-v1/
+frontend-v1/*
+!frontend-v1/dist/
 frontend-v2/
 llm_about/**/*.yaml
 !llm_about/*.yaml.example

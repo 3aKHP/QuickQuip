@@ -65,6 +65,8 @@ jobs:
           Copy-Item -Recurse llm_about staging\
           mkdir -p staging\frontend\dist
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
+          mkdir -p staging\frontend-v1\dist
+          Copy-Item -Recurse frontend-v1\dist\* staging\frontend-v1\dist\
           Copy-Item -Recurse config staging\
           Copy-Item bot.py, web_api.py, 启动.bat, webview_launcher.py staging\
           mkdir staging\data
