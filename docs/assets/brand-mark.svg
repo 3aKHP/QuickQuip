@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <!-- 缩小投影扩展范围，防止裁切 -->
+    <filter id="shadow-v6" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.2" />
+    </filter>
+
+    <!-- 配色优化：采用更为克制、统一的冷色调科技蓝/靛蓝/青色，降低饱和度冲击 -->
+    <linearGradient id="grad-c1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" /> <!-- 柔和的天蓝 -->
+      <stop offset="100%" stop-color="#2563EB" /> <!-- 沉稳的宝蓝 -->
+    </linearGradient>
+
+    <linearGradient id="grad-c2" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818CF8" /> <!-- 柔和的靛蓝 -->
+      <stop offset="100%" stop-color="#3730A3" /> <!-- 深邃的暗紫蓝 -->
+    </linearGradient>
+
+    <linearGradient id="grad-tail" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2DD4BF" /> <!-- 清新的青水色 -->
+      <stop offset="100%" stop-color="#0F766E" /> <!-- 深沉的松石绿 -->
+    </linearGradient>
+  </defs>
+
+  <!-- 使用 transform 略微缩小整体尺寸并重新居中，彻底解决边缘被裁切(超界)的问题 -->
+  <g filter="url(#shadow-v6)" transform="translate(24, 24) scale(0.82) translate(-24, -24)">
+    <!-- Crescent 2 (Bottom to Top-Left) -->
+    <path d="M 24 42 A 18 18 0 1 0 11.27 11.27 A 22 22 0 1 1 24 42 Z" fill="url(#grad-c2)" opacity="0.95" />
+    
+    <!-- Crescent 1 (Top to Bottom-Right) -->
+    <path d="M 24 6 A 18 18 0 1 0 36.73 36.73 A 22 22 0 1 1 24 6 Z" fill="url(#grad-c1)" opacity="0.95" />
+
+    <!-- Dynamic Swoosh Tail -->
+    <path d="M 22 26 C 28 26 38 34 44 44 C 38 40 30 32 24 30 C 22 29 20 27 22 26 Z" fill="url(#grad-tail)" opacity="0.95" />
+  </g>
+</svg>

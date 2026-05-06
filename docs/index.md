@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand-mark.svg" width="64" alt="QuickQuip" />
+</p>
+
 # QuickQuip 文档导航
 
 QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊机器人，在精心设计的正则匹配和状态机之上，支持按群启用 LLM 扩展。

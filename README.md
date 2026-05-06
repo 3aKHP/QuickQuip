@@ -1,3 +1,5 @@
+<img align="right" src="docs/assets/brand-mark.svg" width="72" alt="QuickQuip" />
+
 # QuickQuip — QQ 群聊妙语机器人
 
 > 基于 [NoneBot2](https://nonebot.dev/) + [OneBot V11](https://github.com/nonebot/adapter-onebot) 的 QQ 群聊互动机器人，用妙语让群聊更有趣。
