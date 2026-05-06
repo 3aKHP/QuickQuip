@@ -94,7 +94,7 @@ docker compose up -d
 贴吧登录态建议先在本地机器生成，再通过部署脚本同步到云端：
 
 ```bash
-python tools/tieba_login.py
+# 运行项目自带的贴吧登录脚本（位于开发工作区中），按提示完成扫码登录
 ```
 
 成功后会生成：

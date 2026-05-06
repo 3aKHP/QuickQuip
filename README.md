@@ -116,6 +116,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    ```bash
    # 先构建前端（需 Node.js）
+   # 注：frontend-v1/ 为旧版 SPA 备份，仅作过渡保留；构建只需进入 frontend/
    cd frontend && npm install && npm run build && cd ..
 
    # 在 .env 中设置管理口令

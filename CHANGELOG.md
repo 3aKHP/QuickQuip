@@ -2,6 +2,14 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **前端品牌设计**：v6-fluid 双月牙流体标志，替代纯文字 Q 标记；logo 应用于侧边栏、登录页、favicon、README 和文档
+- **前端精致度提升**：eyebrow 排版优化（12px + letter-spacing + uppercase）、多层阴影叠加（shadow-md / shadow-lg）、导航项 :active scale(0.97) 按反馈、过渡曲线 cubic-bezier(0.2, 0.8, 0.2, 1)
+- **前端工程重构**：Vue 3 Composition API 全面迁移、全局 base.css 抽离、UI 组件库重构、新增 Dashboard 概览页；frontend-v1/ 保留旧版 SPA 实现双版本共存
+
 ## [1.3.0] - 2026-05-06
 
 ### 新增
