@@ -6,41 +6,7 @@
 
 ---
 
-## v1.2 — 群互动游戏化 + Web Admin 升级 ✅ 已完成
-
-v1.2 全部功能已交付（v1.2.0 / v1.2.1），详细记录见 [CHANGELOG.md](CHANGELOG.md)：
-
-- 数字炸弹游戏（`/game start 数字炸弹`）+ `BaseGame` / `GameRegistry` 扩展接口
-- 节日自动化：6 个农历/公历节日检测 + persona 注入 + 定时问候
-- 前端工程基础升级：Design Token 体系、响应式布局、暗亮主题切换、UI 组件标准化
-- Web Admin 操作审计：SQLite 审计日志 + 前端过滤浏览
-- 定时任务看板：APScheduler cron job 状态聚合
-- MCP server 状态看板：bot 与 web-admin 共享状态文件
-- 每日总结 Markdown 渲染
-- LLM 工具发现（`tool_search` / `tool_list` 本地元工具）
-
----
-
-## v1.3 — 游戏生态 + 金币经济 ✅ 已完成
-
-v1.3.0 已交付，详细记录见 [CHANGELOG.md](CHANGELOG.md)：
-
-- 金币经济底座：签到/好感度/金币排行，SQLite 原子事务，贯穿全部对战游戏
-- 21 点（Blackjack）：bot 坐庄硬 17 停牌，Blackjack 判定，最多 8 人同局
-- 俄罗斯轮盘：装弹/接受对决/轮流开枪，7 槽弹仓随机排列，存活概率实时更新
-- 牛牛大作战：持久 RPG（注册/打胶/击剑/排行/CD 系统/5 事件打胶引擎/11 档评论）
-- 游戏配置文件化：`config/games.toml` 统一管理全部游戏参数，`GameConfig` dataclass 层次注入
-- `quickquip/games/` 独立子目录（与 `llm/`、`generation/`、`tieba/` 同级），6 个模块
-- Web Admin 游戏管理：金币面板 + 牛牛面板 + 配置编辑器支持 `games.toml`，标签页增至 19 个
-- 游戏文档三层体系：`docs/user/group-games.md` + `docs/admin/game-config.md` + `docs/dev/game-framework.md`
-
----
-
-## v1.3.x / v1.4+ 待定
-
-### QQ 原生风格 UI 重设计
-
-v1.2 已铺平工程基础（Design Token、响应式、暗亮切换、组件标准化），但视觉语言仍偏 GitHub 式开发者工具风格。完整 QQ 原生风重设计（亮色 `#F5F6FA`、顶部水平导航、iOS 风格开关、圆角卡片）从 v1.2 顺延至后续版本。
+## v1.4+ 待定
 
 ### 本地 TTS 服务接入
 

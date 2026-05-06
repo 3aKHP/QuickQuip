@@ -2,7 +2,7 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.3.1] - 2026-05-07
 
 ### 新增
 
@@ -365,7 +365,8 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.3.0...HEAD
+[1.3.1]: https://github.com/3aKHP/QuickQuip/compare/v1.3.0...v1.3.1
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.3.1...HEAD
 [1.3.0]: https://github.com/3aKHP/QuickQuip/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/3aKHP/QuickQuip/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...v1.2.0
