@@ -10,9 +10,7 @@
     <div v-if="syncLog.length" class="sync-log-wrap">
       <div class="sync-log-head">
         <span>同步日志{{ syncing ? '（进行中…）' : '（已完成）' }}</span>
-        <button class="sync-log-close" @click="syncLog = []">
-          <UiIcon name="X" :size="14" />
-        </button>
+        <button class="sync-log-close" @click="syncLog = []"><UiIcon name="X" :size="14" /></button>
       </div>
       <pre ref="logEl" class="sync-log">{{ syncLog.join('\n') }}</pre>
     </div>
@@ -22,19 +20,9 @@
     <div class="split">
       <UiCard padding="none" shadow="sm" class="forum-card">
         <UiLoading v-if="loading && !forums.length" />
-        <UiEmpty
-          v-else-if="!forums.length"
-          icon="Inbox"
-          title="尚无任何贴吧缓存"
-        />
+        <UiEmpty v-else-if="!forums.length" icon="BookOpen" title="尚无任何贴吧缓存" />
         <ul v-else class="forum-list">
-          <li
-            v-for="f in forums"
-            :key="f.forum_keyword"
-            class="forum-item"
-            :class="{ active: f.forum_keyword === selectedForum }"
-            @click="selectForum(f.forum_keyword)"
-          >
+          <li v-for="f in forums" :key="f.forum_keyword" class="forum-item" :class="{ active: f.forum_keyword === selectedForum }" @click="selectForum(f.forum_keyword)">
             <div class="forum-head">
               <span class="forum-name">{{ f.forum_keyword }}吧</span>
               <UiTag size="sm" :variant="syncVariant(f)">{{ syncLabel(f) }}</UiTag>
@@ -44,13 +32,9 @@
             </div>
             <div class="forum-meta">
               <span>{{ f.count }} 条</span>
-              <span v-if="f.last_sync_completed_at">
-                · {{ formatTime(f.last_sync_completed_at) }}
-              </span>
+              <span v-if="f.last_sync_completed_at"> · {{ formatTime(f.last_sync_completed_at) }}</span>
             </div>
-            <div v-if="f.last_error" class="forum-error" :title="f.last_error">
-              {{ f.last_error }}
-            </div>
+            <div v-if="f.last_error" class="forum-error" :title="f.last_error">{{ f.last_error }}</div>
           </li>
         </ul>
       </UiCard>
@@ -64,11 +48,7 @@
           <UiCard padding="md" shadow="sm" class="filter-card">
             <div class="filter-row">
               <span class="selected-forum">{{ selectedForum }}吧 · {{ total }} 条</span>
-              <input
-                v-model="keyword"
-                placeholder="标题/正文/作者关键词"
-                @keyup.enter="reload"
-              />
+              <input v-model="keyword" placeholder="标题/正文/作者关键词" @keyup.enter="reload" />
               <UiButton icon="Search" :loading="loadingThreads" @click="reload">查询</UiButton>
               <UiButton v-if="keyword" variant="ghost" icon="X" @click="clearKeyword">清空</UiButton>
             </div>
@@ -76,26 +56,11 @@
 
           <UiCard padding="none" shadow="sm" class="threads-card">
             <UiLoading v-if="loadingThreads && !threads.length" />
-            <UiEmpty
-              v-else-if="!threads.length"
-              icon="Inbox"
-              title="没有匹配的帖子"
-            />
+            <UiEmpty v-else-if="!threads.length" icon="BookOpen" title="没有匹配的帖子" />
             <div v-else class="threads">
-              <div
-                v-for="t in threads"
-                :key="t.tid"
-                class="thread"
-                :class="{ selected: t.tid === detail?.tid }"
-                @click="openDetail(t.tid)"
-              >
+              <div v-for="t in threads" :key="t.tid" class="thread" :class="{ selected: t.tid === detail?.tid }" @click="openDetail(t.tid)">
                 <div class="thread-row">
-                  <img
-                    v-if="t.cover_image_url"
-                    :src="tiebaImgProxyUrl(t.cover_image_url)"
-                    class="thread-cover"
-                    loading="lazy"
-                  />
+                  <img v-if="t.cover_image_url" :src="tiebaImgProxyUrl(t.cover_image_url)" class="thread-cover" loading="lazy" />
                   <div class="thread-body">
                     <div class="thread-title">
                       <span class="title-text">{{ t.title }}</span>
@@ -113,12 +78,7 @@
                 </div>
               </div>
               <div class="load-more-wrap">
-                <UiButton
-                  v-if="hasMore"
-                  :loading="loadingMore"
-                  icon="ArrowDown"
-                  @click="loadMore"
-                >加载更多</UiButton>
+                <UiButton v-if="hasMore" :loading="loadingMore" icon="ChevronDown" @click="loadMore">加载更多</UiButton>
                 <span v-else-if="threads.length" class="muted">已到末尾</span>
               </div>
             </div>
@@ -131,26 +91,17 @@
       <UiCard padding="lg" shadow="lg" class="detail-card">
         <div class="detail-head">
           <span class="mono">#{{ detail.tid }} · {{ detail.forum_keyword }}吧</span>
-          <button class="detail-close" @click="detail = null">
-            <UiIcon name="X" :size="18" />
-          </button>
+          <button class="detail-close" @click="detail = null"><UiIcon name="X" :size="18" /></button>
         </div>
         <h3 class="detail-title">{{ detail.title }}</h3>
         <div class="detail-meta">
           <span v-if="detail.author_name">{{ detail.author_name }}</span>
           <span>· {{ formatTime(detail.last_seen_at) }}</span>
-          <a :href="detail.thread_url" target="_blank" rel="noreferrer" class="detail-link">
-            在贴吧打开
-          </a>
+          <a :href="detail.thread_url" target="_blank" rel="noreferrer" class="detail-link">在贴吧打开</a>
         </div>
         <div class="detail-content">{{ detail.main_post_text || '（正文为空）' }}</div>
         <div v-if="detail.image_urls && detail.image_urls.length" class="detail-images">
-          <img
-            v-for="(src, i) in detail.image_urls"
-            :key="i"
-            :src="tiebaImgProxyUrl(src)"
-            loading="lazy"
-          />
+          <img v-for="(src, i) in detail.image_urls" :key="i" :src="tiebaImgProxyUrl(src)" loading="lazy" />
         </div>
       </UiCard>
     </div>
@@ -166,13 +117,7 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import {
-  listTiebaForums,
-  fetchTiebaThreads,
-  fetchTiebaThread,
-  tiebaImgProxyUrl,
-  openTiebaSyncStream,
-} from '../api/tieba'
+import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, openTiebaSyncStream } from '../api/tieba'
 import { toast } from '../toast'
 
 const PAGE_SIZE = 30
@@ -192,9 +137,7 @@ function startSync(forum: string | null) {
     forum || '',
     (msg) => {
       syncLog.value.push(msg)
-      nextTick(() => {
-        if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
-      })
+      nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
     },
     () => {
       syncing.value = false
@@ -337,11 +280,7 @@ loadAll()
   max-height: calc(100vh - 180px);
 }
 
-.forum-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
+.forum-list { list-style: none; margin: 0; padding: 0; }
 
 .forum-item {
   padding: var(--qq-gap-sm) var(--qq-gap-md);
@@ -354,7 +293,7 @@ loadAll()
 .forum-item:hover { background: var(--qq-surface-elevated); }
 .forum-item.active {
   background: var(--qq-surface-elevated);
-  box-shadow: inset 3px 0 0 var(--qq-accent);
+  box-shadow: inset 3px 0 0 var(--qq-primary);
 }
 
 .forum-head {
@@ -376,6 +315,20 @@ loadAll()
   display: flex;
   gap: 4px;
 }
+
+.forum-sync-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--qq-text-muted);
+  padding: 2px;
+  display: flex;
+  border-radius: var(--qq-radius-sm);
+  margin-left: auto;
+}
+
+.forum-sync-btn:hover { color: var(--qq-primary); }
+.forum-sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .forum-error {
   margin-top: 4px;
@@ -424,7 +377,7 @@ loadAll()
   margin: 0;
   padding: var(--qq-gap-sm) 10px;
   font-size: var(--qq-text-xs);
-  font-family: monospace;
+  font-family: var(--qq-font-mono);
   line-height: 1.6;
   max-height: 220px;
   overflow-y: auto;
@@ -432,20 +385,6 @@ loadAll()
   white-space: pre-wrap;
   word-break: break-all;
 }
-
-.forum-sync-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--qq-text-muted);
-  padding: 2px;
-  display: flex;
-  border-radius: var(--qq-radius-xs);
-  margin-left: auto;
-}
-
-.forum-sync-btn:hover { color: var(--qq-accent); }
-.forum-sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .hint-card {
   flex: 1;
@@ -463,10 +402,7 @@ loadAll()
   flex-wrap: wrap;
 }
 
-.selected-forum {
-  font-size: var(--qq-text-sm);
-  color: var(--qq-text-muted);
-}
+.selected-forum { font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
 
 .filter-row input {
   background: var(--qq-surface-strong);
@@ -475,14 +411,15 @@ loadAll()
   color: var(--qq-text);
   padding: 5px 10px;
   font-size: var(--qq-text-base);
+  font-family: var(--qq-font-base);
   outline: none;
   flex: 1;
   min-width: 200px;
 }
 
 .filter-row input:focus {
-  border-color: var(--qq-accent);
-  box-shadow: 0 0 0 3px var(--qq-accent-soft);
+  border-color: var(--qq-primary);
+  box-shadow: 0 0 0 3px var(--qq-primary-soft);
 }
 
 .threads-card {
@@ -509,19 +446,13 @@ loadAll()
   border: 1px solid transparent;
 }
 
-.thread:hover {
-  background: var(--qq-surface-elevated);
-}
-
+.thread:hover { background: var(--qq-surface-elevated); }
 .thread.selected {
   background: var(--qq-surface-elevated);
-  border-color: var(--qq-accent);
+  border-color: var(--qq-primary);
 }
 
-.thread-row {
-  display: flex;
-  gap: var(--qq-gap-sm);
-}
+.thread-row { display: flex; gap: var(--qq-gap-sm); }
 
 .thread-cover {
   width: 72px;
@@ -532,10 +463,7 @@ loadAll()
   background: var(--qq-surface-strong);
 }
 
-.thread-body {
-  flex: 1;
-  min-width: 0;
-}
+.thread-body { flex: 1; min-width: 0; }
 
 .thread-title {
   display: flex;
@@ -608,10 +536,13 @@ loadAll()
   color: var(--qq-text-muted);
   cursor: pointer;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--qq-radius-sm);
 }
 
-.detail-close:hover { color: var(--qq-text); background: var(--qq-surface-elevated); }
+.detail-close:hover {
+  color: var(--qq-text);
+  background: var(--qq-surface-elevated);
+}
 
 .detail-title {
   font-size: var(--qq-text-lg);
@@ -628,7 +559,7 @@ loadAll()
 }
 
 .detail-link {
-  color: var(--qq-accent);
+  color: var(--qq-primary);
   text-decoration: none;
 }
 

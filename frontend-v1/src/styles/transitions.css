@@ -1,0 +1,57 @@
+/* ==========================================================================
+   Transition System
+   ========================================================================== */
+
+/* Page / view fade transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+/* Slide-up (modal / overlay entrance) */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+/* Toast slide-up */
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+/* List stagger (used with Vue <TransitionGroup>) */
+.list-enter-active,
+.list-leave-active {
+  transition: opacity var(--qq-transition-fast), transform var(--qq-transition-fast);
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* ---- Card hover enhancement ---- */
+.ui-card:hover {
+  transform: scale(1.01);
+  box-shadow: var(--qq-shadow-md);
+}

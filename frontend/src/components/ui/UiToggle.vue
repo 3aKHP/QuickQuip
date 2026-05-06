@@ -1,35 +1,29 @@
 <template>
-  <label class="ui-toggle" :class="sizeClass">
-    <input
-      type="checkbox"
-      role="switch"
-      :aria-checked="modelValue"
-      :checked="modelValue"
-      :disabled="disabled"
-      @change="onChange"
-    />
-    <span class="slider" />
+  <label :class="['ui-toggle', `ui-toggle--${size}`, { 'ui-toggle--disabled': disabled }]" role="switch" :aria-checked="modelValue">
+    <input type="checkbox" :checked="modelValue" :disabled="disabled" @change="toggle" />
+    <span class="ui-toggle__track">
+      <span class="ui-toggle__knob" />
+    </span>
   </label>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue?: boolean
   disabled?: boolean
-  size?: string
-}>()
+  size?: 'md' | 'sm'
+}>(), {
+  modelValue: false,
+  size: 'md',
+})
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
 }>()
 
-function onChange(e: Event) {
+function toggle(e: Event) {
   emit('update:modelValue', (e.target as HTMLInputElement).checked)
 }
-
-const sizeClass = computed(() => `ui-toggle--${props.size || 'md'}`)
 </script>
 
 <style scoped>
@@ -38,86 +32,74 @@ const sizeClass = computed(() => `ui-toggle--${props.size || 'md'}`)
   display: inline-flex;
   align-items: center;
   cursor: pointer;
-  min-height: 32px;
-  min-width: 36px;
 }
 
-.ui-toggle:focus-within {
-  outline: none;
-}
-
-.ui-toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.ui-toggle input:focus-visible + .slider {
-  box-shadow: 0 0 0 2px var(--qq-accent-glow);
-}
-
-.slider {
-  position: relative;
-  background: var(--qq-surface-strong);
-  border: 1px solid var(--qq-border-strong);
-  border-radius: var(--qq-radius-pill);
-  transition: background var(--qq-transition-fast), border-color var(--qq-transition-fast);
-}
-
-.slider::before {
-  content: '';
-  position: absolute;
-  background: var(--qq-text-muted);
-  border-radius: 50%;
-  transition: transform var(--qq-transition-fast), background var(--qq-transition-fast);
-}
-
-.ui-toggle input:checked + .slider {
-  background: var(--qq-accent-soft);
-  border-color: var(--qq-accent);
-}
-
-.ui-toggle input:checked + .slider::before {
-  background: var(--qq-accent);
-}
-
-.ui-toggle input:disabled + .slider {
+.ui-toggle--disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* md: 36x20 */
-.ui-toggle--md .slider {
-  width: 36px;
+.ui-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ui-toggle__track {
+  position: relative;
+  border-radius: var(--qq-radius-full);
+  background: #D1D5DB;
+  transition: background var(--qq-transition-fast);
+}
+
+.ui-toggle__knob {
+  position: absolute;
+  background: #FFFFFF;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform var(--qq-transition-fast);
+}
+
+/* md size: 34x20 track, 18x18 knob */
+.ui-toggle--md .ui-toggle__track {
+  width: 34px;
   height: 20px;
 }
 
-.ui-toggle--md .slider::before {
-  width: 14px;
-  height: 14px;
-  left: 2px;
-  top: 2px;
+.ui-toggle--md .ui-toggle__knob {
+  width: 18px;
+  height: 18px;
+  top: 1px;
+  left: 1px;
 }
 
-.ui-toggle--md input:checked + .slider::before {
-  transform: translateX(16px);
+.ui-toggle--md input:checked + .ui-toggle__track {
+  background: var(--qq-primary);
 }
 
-/* sm: 28x16 */
-.ui-toggle--sm .slider {
+.ui-toggle--md input:checked + .ui-toggle__track .ui-toggle__knob {
+  transform: translateX(14px);
+}
+
+/* sm size: 28x16 track, 14x14 knob */
+.ui-toggle--sm .ui-toggle__track {
   width: 28px;
   height: 16px;
 }
 
-.ui-toggle--sm .slider::before {
-  width: 10px;
-  height: 10px;
-  left: 2px;
-  top: 2px;
+.ui-toggle--sm .ui-toggle__knob {
+  width: 14px;
+  height: 14px;
+  top: 1px;
+  left: 1px;
 }
 
-.ui-toggle--sm input:checked + .slider::before {
+.ui-toggle--sm input:checked + .ui-toggle__track {
+  background: var(--qq-primary);
+}
+
+.ui-toggle--sm input:checked + .ui-toggle__track .ui-toggle__knob {
   transform: translateX(12px);
 }
 </style>

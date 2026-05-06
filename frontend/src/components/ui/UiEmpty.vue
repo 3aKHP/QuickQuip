@@ -1,17 +1,13 @@
 <template>
   <div class="ui-empty">
-    <div v-if="$slots.icon || icon" class="icon-wrap">
-      <slot name="icon">
-        <UiIcon v-if="icon" :name="icon" :size="36" />
-      </slot>
-    </div>
-    <div v-if="title" class="title">{{ title }}</div>
-    <div v-if="description" class="desc">{{ description }}</div>
-    <div v-if="$slots.action" class="action">
+    <slot name="icon">
+      <UiIcon v-if="icon" :name="icon" :size="48" class="ui-empty__icon" />
+    </slot>
+    <p class="ui-empty__title">{{ title }}</p>
+    <p v-if="description" class="ui-empty__desc">{{ description }}</p>
+    <slot />
+    <div v-if="$slots.action" class="ui-empty__action">
       <slot name="action" />
-    </div>
-    <div v-if="$slots.default" class="extra">
-      <slot />
     </div>
   </div>
 </template>
@@ -19,10 +15,12 @@
 <script setup lang="ts">
 import UiIcon from './UiIcon.vue'
 
-defineProps({
-  icon: { type: String, default: '' },
-  title: { type: String, default: '暂无数据' },
-  description: { type: String, default: '' },
+withDefaults(defineProps<{
+  icon?: string
+  title?: string
+  description?: string
+}>(), {
+  title: '暂无数据',
 })
 </script>
 
@@ -32,36 +30,31 @@ defineProps({
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--qq-gap-sm);
-  padding: var(--qq-gap-xl) var(--qq-gap-md);
-  color: var(--qq-text-muted);
+  padding: var(--qq-gap-2xl) var(--qq-gap-md);
   text-align: center;
 }
 
-.icon-wrap {
-  opacity: 0.45;
-  margin-bottom: var(--qq-gap-xs);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.title {
-  font-size: var(--qq-text-base);
-  color: var(--qq-text);
-}
-
-.desc {
-  font-size: var(--qq-text-sm);
-  max-width: 360px;
+.ui-empty__icon {
   color: var(--qq-text-muted);
+  opacity: 0.3;
+  margin-bottom: var(--qq-gap-md);
 }
 
-.action {
-  margin-top: var(--qq-gap-sm);
+.ui-empty__title {
+  font-size: var(--qq-text-md);
+  font-weight: 600;
+  color: var(--qq-text);
+  margin-bottom: var(--qq-gap-xs);
 }
 
-.extra {
-  margin-top: var(--qq-gap-xs);
+.ui-empty__desc {
+  font-size: var(--qq-text-sm);
+  color: var(--qq-text-muted);
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+.ui-empty__action {
+  margin-top: var(--qq-gap-lg);
 }
 </style>

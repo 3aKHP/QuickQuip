@@ -1,24 +1,22 @@
 <template>
-  <button
-    class="ui-nav-item"
-    :class="{ active }"
-    @click="$emit('click')"
-  >
-    <UiIcon v-if="icon" :name="icon" :size="16" />
-    <span class="label">{{ label }}</span>
-  </button>
+  <a :class="['ui-nav-item', { active }]" href="#" @click.prevent="$emit('click')">
+    <UiIcon :name="icon" :size="18" class="ui-nav-item__icon" />
+    <span class="ui-nav-item__label">{{ label }}</span>
+  </a>
 </template>
 
 <script setup lang="ts">
 import UiIcon from './UiIcon.vue'
 
-defineProps({
-  label: { type: String, required: true },
-  icon: { type: String, default: '' },
-  active: { type: Boolean, default: false },
-})
+defineProps<{
+  label: string
+  icon: string
+  active?: boolean
+}>()
 
-defineEmits(['click'])
+defineEmits<{
+  click: []
+}>()
 </script>
 
 <style scoped>
@@ -26,29 +24,40 @@ defineEmits(['click'])
   display: flex;
   align-items: center;
   gap: var(--qq-gap-sm);
-  padding: 8px var(--qq-gap-md);
-  border: none;
-  border-left: 3px solid transparent;
-  border-radius: 0 var(--qq-radius-sm) var(--qq-radius-sm) 0;
-  background: transparent;
+  padding: 0 14px;
+  height: 38px;
+  border-radius: var(--qq-radius-nav);
   color: var(--qq-text-muted);
   font-size: var(--qq-text-base);
+  font-weight: 500;
+  text-decoration: none;
+  transition: all var(--qq-transition-fast);
   cursor: pointer;
-  width: 100%;
-  text-align: left;
-  transition: color var(--qq-transition-fast),
-              background var(--qq-transition-fast),
-              border-color var(--qq-transition-fast);
+  user-select: none;
 }
 
 .ui-nav-item:hover {
   color: var(--qq-text);
-  background: var(--qq-surface-elevated);
+  background: var(--qq-surface-hover);
 }
 
 .ui-nav-item.active {
-  color: var(--qq-text);
-  background: var(--qq-surface-elevated);
-  border-left-color: var(--qq-accent);
+  color: var(--qq-primary);
+  background: var(--qq-primary-soft);
+}
+
+.ui-nav-item__icon {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.ui-nav-item.active .ui-nav-item__icon {
+  opacity: 1;
+}
+
+.ui-nav-item__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

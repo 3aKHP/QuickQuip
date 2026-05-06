@@ -1,17 +1,17 @@
 <template>
   <div class="ui-loading">
-    <div class="skeleton">
-      <div class="skeleton-bar skeleton-bar--1" />
-      <div class="skeleton-bar skeleton-bar--2" />
-      <div class="skeleton-bar skeleton-bar--3" />
-    </div>
-    <span v-if="text" class="text">{{ text }}</span>
+    <div class="ui-loading__bar ui-loading__bar--1" />
+    <div class="ui-loading__bar ui-loading__bar--2" />
+    <div class="ui-loading__bar ui-loading__bar--3" />
+    <p v-if="text" class="ui-loading__text">{{ text }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps({
-  text: { type: String, default: '加载中…' },
+withDefaults(defineProps<{
+  text?: string
+}>(), {
+  text: '加载中...',
 })
 </script>
 
@@ -20,52 +20,31 @@ defineProps({
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: var(--qq-gap-sm);
-  padding: var(--qq-gap-lg) var(--qq-gap-md);
-}
-
-.skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
   max-width: 320px;
+  margin: 0 auto;
+  padding: var(--qq-gap-2xl) 0;
 }
 
-.skeleton-bar {
-  height: 12px;
+.ui-loading__bar {
+  height: 10px;
+  border-radius: var(--qq-radius-full);
   background: var(--qq-surface-strong);
-  border-radius: var(--qq-radius-sm);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
-.skeleton-bar--1 {
-  width: 100%;
-  animation-delay: 0s;
-}
+.ui-loading__bar--1 { width: 100%; animation-delay: 0s; }
+.ui-loading__bar--2 { width: 75%; animation-delay: 0.15s; }
+.ui-loading__bar--3 { width: 50%; animation-delay: 0.3s; }
 
-.skeleton-bar--2 {
-  width: 75%;
-  animation-delay: 0.2s;
-}
-
-.skeleton-bar--3 {
-  width: 50%;
-  animation-delay: 0.4s;
-}
-
-.text {
-  color: var(--qq-text-muted);
+.ui-loading__text {
+  margin-top: var(--qq-gap-sm);
   font-size: var(--qq-text-sm);
+  color: var(--qq-text-muted);
 }
 
 @keyframes pulse {
-  0%, 100% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 0.7;
-  }
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
 }
 </style>

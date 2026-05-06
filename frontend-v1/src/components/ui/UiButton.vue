@@ -1,0 +1,143 @@
+<template>
+  <button
+    class="ui-button"
+    :class="[variantClass, sizeClass]"
+    :type="type"
+    :disabled="disabled || loading"
+    @click="$emit('click', $event)"
+  >
+    <UiIcon v-if="loading" name="Loader2" class="spin" :size="iconSize" />
+    <UiIcon v-else-if="icon" :name="icon" :size="iconSize" />
+    <span v-if="$slots.default" class="ui-button-text"><slot /></span>
+  </button>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import UiIcon from './UiIcon.vue'
+
+const props = defineProps<{
+  variant?: string
+  size?: string
+  type?: 'button' | 'submit' | 'reset'
+  disabled?: boolean
+  loading?: boolean
+  icon?: string
+}>()
+
+defineEmits<{
+  click: [e: MouseEvent]
+}>()
+
+const variantClass = computed(() => `ui-button--${props.variant || 'default'}`)
+const sizeClass = computed(() => `ui-button--${props.size || 'md'}`)
+const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
+</script>
+
+<style scoped>
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--qq-gap-sm);
+  border: 1px solid var(--qq-border-strong);
+  background: var(--qq-surface-elevated);
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--qq-transition-fast),
+              border-color var(--qq-transition-fast),
+              transform var(--qq-transition-fast),
+              color var(--qq-transition-fast);
+}
+
+.ui-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.ui-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--qq-accent-glow);
+}
+
+/* Sizes */
+.ui-button--md {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--qq-radius-sm);
+}
+
+.ui-button--sm {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--qq-radius-sm);
+  font-size: var(--qq-text-xs);
+}
+
+/* Default (neutral) */
+.ui-button--default:hover:not(:disabled) {
+  background: var(--qq-surface);
+  border-color: var(--qq-border-strong);
+}
+
+/* Primary */
+.ui-button--primary {
+  background: linear-gradient(180deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.10));
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #fff;
+}
+
+.ui-button--primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(88, 166, 255, 0.30), rgba(88, 166, 255, 0.14));
+}
+
+/* Secondary */
+.ui-button--secondary {
+  background: var(--qq-surface);
+  border-color: var(--qq-border);
+  color: var(--qq-text);
+}
+
+.ui-button--secondary:hover:not(:disabled) {
+  background: var(--qq-surface-elevated);
+  border-color: var(--qq-border-strong);
+}
+
+/* Danger */
+.ui-button--danger {
+  background: var(--qq-danger-soft);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: var(--qq-danger);
+}
+
+.ui-button--danger:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.18);
+}
+
+/* Ghost */
+.ui-button--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--qq-text-muted);
+}
+
+.ui-button--ghost:hover:not(:disabled) {
+  color: var(--qq-text);
+  background: var(--qq-surface);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+</style>

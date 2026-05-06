@@ -1,7 +1,5 @@
-// Single source of truth for admin nav. Router in src/router/index.js reads
-// path/component from here; AppNav reads key/label/icon.
-
 import type { Component } from 'vue'
+import DashboardView from '../views/DashboardView.vue'
 import StatsView from '../views/StatsView.vue'
 import RulesView from '../views/RulesView.vue'
 import GroupsView from '../views/GroupsView.vue'
@@ -27,27 +25,45 @@ export interface NavItem {
   path: string
   label: string
   icon: string
+  section: string
   component: Component
 }
 
+export interface NavSection {
+  key: string
+  label: string
+  icon: string
+  description: string
+}
+
+export const NAV_SECTIONS: NavSection[] = [
+  { key: 'overview', label: '总览', icon: 'LayoutDashboard', description: '运行态与全局入口' },
+  { key: 'ops', label: '群聊运营', icon: 'MessagesSquare', description: '群状态、规则、限流与 LLM 覆盖' },
+  { key: 'llm', label: 'LLM 工坊', icon: 'BrainCircuit', description: '记忆、人格、资料与诊断工具' },
+  { key: 'content', label: '内容流', icon: 'Newspaper', description: '总结、贴吧与词云产物' },
+  { key: 'system', label: '系统', icon: 'ServerCog', description: '配置、定时任务与审计记录' },
+  { key: 'games', label: '游戏', icon: 'Gamepad2', description: '金币经济与牛牛大作战' },
+]
+
 export const NAV_ITEMS: NavItem[] = [
-  { key: 'stats',          path: '/stats',          label: '统计',     icon: 'BarChart3',     component: StatsView },
-  { key: 'rules',          path: '/rules',          label: '规则',     icon: 'ToggleLeft',    component: RulesView },
-  { key: 'groups',         path: '/groups',         label: '群组',     icon: 'Users',         component: GroupsView },
-  { key: 'memory',         path: '/memory',         label: '记忆',     icon: 'Brain',         component: MemoryView },
-  { key: 'summary',        path: '/summary',        label: '总结',     icon: 'FileText',      component: SummaryView },
-  { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle', component: ConversationsView },
-  { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',         component: PersonasView },
-  { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',      component: LlmAboutView },
-  { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', component: GroupSettingsView },
-  { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Zap',           component: RateLimitView },
-  { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',      component: TiebaView },
-  { key: 'wordcloud',      path: '/wordcloud',      label: '词云',     icon: 'Newspaper',     component: WordcloudView },
-  { key: 'config',         path: '/config',         label: '配置',     icon: 'Settings',      component: ConfigView },
-  { key: 'diagnostics',     path: '/diagnostics',     label: '诊断',     icon: 'Stethoscope',   component: DiagnosticsView },
-  { key: 'mcp-dashboard',  path: '/mcp-dashboard',   label: 'MCP',      icon: 'Server',        component: McpDashboardView },
-  { key: 'cron-dashboard', path: '/cron-dashboard',  label: '定时任务', icon: 'Clock',          component: CronDashboardView },
-  { key: 'audit',          path: '/audit',           label: '审计',     icon: 'ShieldCheck',   component: AuditView },
-  { key: 'game-economy',   path: '/game-economy',    label: '金币',     icon: 'Coins',          component: GameEconomyView },
-  { key: 'niuniu',         path: '/niuniu',          label: '牛牛',     icon: 'Swords',          component: NiuNiuView },
+  { key: 'home',           path: '/',               label: '概览',     icon: 'LayoutDashboard', section: 'overview', component: DashboardView },
+  { key: 'stats',          path: '/stats',          label: '统计',     icon: 'BarChart3',       section: 'ops',      component: StatsView },
+  { key: 'rules',          path: '/rules',          label: '规则',     icon: 'ToggleLeft',      section: 'ops',      component: RulesView },
+  { key: 'groups',         path: '/groups',         label: '群组',     icon: 'Users',           section: 'ops',      component: GroupsView },
+  { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', section: 'ops',    component: GroupSettingsView },
+  { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Gauge',           section: 'ops',      component: RateLimitView },
+  { key: 'memory',         path: '/memory',         label: '记忆',     icon: 'Brain',           section: 'llm',      component: MemoryView },
+  { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle',   section: 'llm',      component: ConversationsView },
+  { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',           section: 'llm',      component: PersonasView },
+  { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',        section: 'llm',      component: LlmAboutView },
+  { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
+  { key: 'mcp-dashboard',  path: '/mcp-dashboard',  label: 'MCP',      icon: 'Network',         section: 'llm',      component: McpDashboardView },
+  { key: 'summary',        path: '/summary',        label: '总结',     icon: 'FileText',        section: 'content',  component: SummaryView },
+  { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',        section: 'content',  component: TiebaView },
+  { key: 'wordcloud',      path: '/wordcloud',      label: '词云',     icon: 'Cloud',           section: 'content',  component: WordcloudView },
+  { key: 'config',         path: '/config',         label: '配置',     icon: 'Settings',        section: 'system',   component: ConfigView },
+  { key: 'cron-dashboard', path: '/cron-dashboard', label: '定时任务', icon: 'Clock',           section: 'system',   component: CronDashboardView },
+  { key: 'audit',          path: '/audit',          label: '审计',     icon: 'ShieldCheck',     section: 'system',   component: AuditView },
+  { key: 'game-economy',   path: '/game-economy',   label: '金币',     icon: 'Coins',           section: 'games',    component: GameEconomyView },
+  { key: 'niuniu',         path: '/niuniu',         label: '牛牛',     icon: 'Swords',          section: 'games',    component: NiuNiuView },
 ]

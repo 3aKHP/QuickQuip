@@ -1,14 +1,15 @@
 <template>
   <button
-    class="ui-button"
-    :class="[variantClass, sizeClass]"
+    :class="classes"
     :type="type"
     :disabled="disabled || loading"
     @click="$emit('click', $event)"
   >
-    <UiIcon v-if="loading" name="Loader2" class="spin" :size="iconSize" />
+    <UiIcon v-if="loading" name="Loader2" :size="iconSize" class="ui-btn__loading spin" />
     <UiIcon v-else-if="icon" :name="icon" :size="iconSize" />
-    <span v-if="$slots.default" class="ui-button-text"><slot /></span>
+    <span v-if="$slots.default" class="ui-btn__text">
+      <slot />
+    </span>
   </button>
 </template>
 
@@ -16,128 +17,129 @@
 import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
 
-const props = defineProps<{
-  variant?: string
-  size?: string
+const props = withDefaults(defineProps<{
+  variant?: 'default' | 'primary' | 'secondary' | 'danger' | 'ghost'
+  size?: 'md' | 'sm'
   type?: 'button' | 'submit' | 'reset'
   disabled?: boolean
   loading?: boolean
   icon?: string
-}>()
+}>(), {
+  variant: 'default',
+  size: 'md',
+  type: 'button',
+})
 
 defineEmits<{
   click: [e: MouseEvent]
 }>()
 
-const variantClass = computed(() => `ui-button--${props.variant || 'default'}`)
-const sizeClass = computed(() => `ui-button--${props.size || 'md'}`)
 const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
+
+const classes = computed(() => [
+  'ui-btn',
+  `ui-btn--${props.variant}`,
+  `ui-btn--${props.size}`,
+])
 </script>
 
 <style scoped>
-.ui-button {
+.ui-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--qq-gap-sm);
-  border: 1px solid var(--qq-border-strong);
-  background: var(--qq-surface-elevated);
-  color: var(--qq-text);
-  font-size: var(--qq-text-sm);
+  gap: 6px;
+  border: none;
+  border-radius: var(--qq-radius-md);
+  font-family: var(--qq-font-base);
+  font-size: var(--qq-text-base);
   font-weight: 500;
   cursor: pointer;
-  transition: background var(--qq-transition-fast),
-              border-color var(--qq-transition-fast),
-              transform var(--qq-transition-fast),
-              color var(--qq-transition-fast);
+  white-space: nowrap;
+  transition: all var(--qq-transition-fast);
+  user-select: none;
 }
 
-.ui-button:disabled {
+.ui-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ui-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.ui-button:not(:disabled):active {
-  transform: translateY(1px);
-}
-
-.ui-button:focus-visible {
+.ui-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--qq-accent-glow);
+  box-shadow: 0 0 0 2px var(--qq-primary-glow);
 }
 
-/* Sizes */
-.ui-button--md {
+.ui-btn--md {
   min-height: 36px;
-  padding: 0 14px;
-  border-radius: var(--qq-radius-sm);
+  padding: 0 16px;
 }
 
-.ui-button--sm {
+.ui-btn--sm {
   min-height: 28px;
-  padding: 0 10px;
-  border-radius: var(--qq-radius-sm);
-  font-size: var(--qq-text-xs);
+  padding: 0 12px;
+  font-size: var(--qq-text-sm);
 }
 
-/* Default (neutral) */
-.ui-button--default:hover:not(:disabled) {
+.ui-btn--default {
   background: var(--qq-surface);
-  border-color: var(--qq-border-strong);
-}
-
-/* Primary */
-.ui-button--primary {
-  background: linear-gradient(180deg, rgba(88, 166, 255, 0.22), rgba(88, 166, 255, 0.10));
-  border-color: rgba(88, 166, 255, 0.35);
-  color: #fff;
-}
-
-.ui-button--primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(88, 166, 255, 0.30), rgba(88, 166, 255, 0.14));
-}
-
-/* Secondary */
-.ui-button--secondary {
-  background: var(--qq-surface);
-  border-color: var(--qq-border);
   color: var(--qq-text);
+  border: 1px solid var(--qq-border);
 }
 
-.ui-button--secondary:hover:not(:disabled) {
+.ui-btn--default:hover:not(:disabled) {
   background: var(--qq-surface-elevated);
   border-color: var(--qq-border-strong);
 }
 
-/* Danger */
-.ui-button--danger {
-  background: var(--qq-danger-soft);
-  border-color: rgba(248, 81, 73, 0.35);
-  color: var(--qq-danger);
+.ui-btn--primary {
+  background: var(--qq-primary);
+  color: #FFFFFF;
 }
 
-.ui-button--danger:hover:not(:disabled) {
-  background: rgba(248, 81, 73, 0.18);
+.ui-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
-/* Ghost */
-.ui-button--ghost {
+.ui-btn--secondary {
   background: transparent;
-  border-color: transparent;
+  color: var(--qq-primary);
+  border: 1px solid var(--qq-primary);
+}
+
+.ui-btn--secondary:hover:not(:disabled) {
+  background: var(--qq-primary-soft);
+}
+
+.ui-btn--danger {
+  background: var(--qq-danger);
+  color: #FFFFFF;
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ui-btn--ghost {
+  background: transparent;
   color: var(--qq-text-muted);
+  border: 1px solid transparent;
 }
 
-.ui-button--ghost:hover:not(:disabled) {
+.ui-btn--ghost:hover:not(:disabled) {
   color: var(--qq-text);
-  background: var(--qq-surface);
+  background: var(--qq-surface-strong);
 }
 
-.spin {
-  animation: spin 1s linear infinite;
+.ui-btn__loading {
+  animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 </style>

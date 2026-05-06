@@ -1,24 +1,33 @@
 <template>
-  <div :data-theme="theme" class="app-root">
+  <div class="app-root">
+    <!-- Unauthenticated -->
     <LoginView
       v-if="authReady && !authenticated"
       :submitting="authBusy"
       :error="authError"
       @submit="handleLogin"
     />
+
+    <!-- Main layout -->
     <div v-else-if="authReady" class="layout">
       <AppNav
         :items="NAV_ITEMS"
+        :sections="NAV_SECTIONS"
         :logout-disabled="authBusy"
+        :theme-icon="theme === 'dark' ? 'Sun' : 'Moon'"
+        :theme-label="theme === 'dark' ? '亮色' : '暗色'"
         @logout="handleLogout"
+        @toggle-theme="toggleTheme"
       />
-      <main>
+      <main class="content">
         <router-view v-slot="{ Component }">
           <Transition name="fade" mode="out-in">
             <component :is="Component" />
           </Transition>
         </router-view>
       </main>
+
+      <!-- Toast -->
       <Transition name="toast">
         <div v-if="toastMsg" class="toast" :class="toastType">
           <UiIcon :name="toastType === 'error' ? 'CircleX' : 'Info'" :size="16" />
@@ -26,6 +35,8 @@
         </div>
       </Transition>
     </div>
+
+    <!-- Checking auth -->
     <div v-else class="auth-shell">
       <UiCard padding="lg" shadow="md" class="login-card">
         <h2>正在检查登录状态</h2>
@@ -36,13 +47,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import LoginView from './views/LoginView.vue'
 import AppNav from './components/layout/AppNav.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
 import { toastMsg, toastType } from './toast'
-import { NAV_ITEMS } from './config/nav'
+import { NAV_ITEMS, NAV_SECTIONS } from './config/nav'
 import { useAuth } from './composables/useAuth'
 
 const {
@@ -57,7 +68,11 @@ const {
   detachUnauthorizedHandler,
 } = useAuth()
 
-const theme = ref<'dark' | 'light'>('dark')
+const theme = ref<'light' | 'dark'>('light')
+
+function applyTheme(t: 'light' | 'dark') {
+  document.documentElement.setAttribute('data-theme', t)
+}
 
 function loadTheme() {
   try {
@@ -65,17 +80,18 @@ function loadTheme() {
     if (stored === 'light' || stored === 'dark') {
       theme.value = stored
     }
-  } catch { /* localStorage may be unavailable */ }
+  } catch { /* ignore */ }
+  applyTheme(theme.value)
 }
 
 function toggleTheme() {
-  theme.value = theme.value === 'dark' ? 'light' : 'dark'
-  try {
-    localStorage.setItem('qq-admin-theme', theme.value)
-  } catch { /* ignore */ }
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  try { localStorage.setItem('qq-admin-theme', theme.value) } catch { /* ignore */ }
+  applyTheme(theme.value)
 }
 
-// Expose toggleTheme for AppNav usage
+watch(theme, applyTheme)
+
 ;(window as any).__qqToggleTheme = toggleTheme
 
 onMounted(() => {
@@ -90,31 +106,34 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-@import './styles/responsive.css';
-
 .app-root {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .layout {
   display: flex;
   flex-direction: row;
-  min-height: 100vh;
+  flex: 1;
+  min-height: 0;
 }
 
-main {
+.content {
   padding: var(--qq-gap-lg);
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
   max-width: var(--qq-content-max-width);
   margin: 0 auto;
   width: 100%;
 }
 
 .auth-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   place-items: center;
   padding: var(--qq-gap-lg);
@@ -136,10 +155,6 @@ main {
   line-height: 1.6;
 }
 
-.error {
-  color: var(--qq-danger);
-}
-
 /* Toast */
 .toast {
   position: fixed;
@@ -151,7 +166,7 @@ main {
   gap: var(--qq-gap-sm);
   background: var(--qq-surface-elevated);
   border: 1px solid var(--qq-border-strong);
-  border-radius: var(--qq-radius-md);
+  border-radius: var(--qq-radius-card);
   padding: 10px 18px;
   font-size: var(--qq-text-sm);
   color: var(--qq-text);
@@ -168,20 +183,16 @@ main {
 
 .toast.info {
   border-color: var(--qq-toast-border-info);
-  color: var(--qq-accent);
+  color: var(--qq-primary);
 }
 
-/* Minimal global helpers shared by auth-shell and LoginView */
-h2 { font-size: var(--qq-text-md); margin-bottom: var(--qq-gap-md); color: var(--qq-text); }
-h3 { font-size: var(--qq-text-base); margin-bottom: var(--qq-gap-sm); color: var(--qq-text); }
-
-/* Responsive: stack on narrow screens */
+/* Responsive */
 @media (max-width: 767px) {
   .layout {
     flex-direction: column;
   }
 
-  main {
+  .content {
     padding: var(--qq-gap-md);
   }
 }

@@ -1,344 +1,65 @@
 <template>
-  <div class="wc-view">
-    <UiPageHeader title="词云" subtitle="对选定群在指定时间窗内的消息做分词并渲染词云图">
-      <template #actions>
-        <UiButton icon="RefreshCw" :disabled="loading" @click="loadGroups">刷新</UiButton>
-      </template>
-    </UiPageHeader>
-
+  <div>
+    <UiPageHeader title="词云" subtitle="对选定群在指定时间窗内的消息做分词并渲染词云图"><template #actions><UiButton icon="RefreshCw" :disabled="loading" @click="loadGroups">刷新</UiButton></template></UiPageHeader>
     <p v-if="loadError" class="error">{{ loadError }}</p>
-
-    <UiCard padding="md" shadow="sm" class="controls-card">
-      <div class="controls-row">
-        <label class="control">
-          群组
-          <select v-model="groupId" :disabled="!groups.length">
-            <option value="">-- 选择群 --</option>
-            <option v-for="g in groups" :key="g.group_id" :value="g.group_id">
-              {{ g.group_id }}（{{ g.days }} 天 / {{ formatBytes(g.total_bytes) }}）
-            </option>
-          </select>
-        </label>
-
-        <label class="control">
-          时间窗
-          <div class="window-row">
-            <button
-              v-for="w in WINDOWS"
-              :key="w.key"
-              class="window-btn"
-              :class="{ active: windowKey === w.key }"
-              type="button"
-              @click="windowKey = w.key"
-            >{{ w.label }}</button>
-          </div>
-        </label>
-
-        <UiButton
-          variant="primary"
-          icon="Play"
-          :loading="rendering"
-          :disabled="!groupId"
-          @click="onRender"
-        >生成</UiButton>
-      </div>
-      <p class="hint">
-        <UiIcon name="Info" :size="14" />
-        分词与渲染都在后端进行，单群全年数据可能需要数秒到十几秒
-      </p>
-    </UiCard>
-
-    <p v-if="renderError" class="error render-error">{{ renderError }}</p>
-
-    <div v-if="result" class="result">
-      <div class="summary">
-        <UiTag size="sm">{{ result.window === 'today' ? '今日' : result.window === 'week' ? '近 7 天' : result.window === 'month' ? '近 30 天' : '近一年' }}</UiTag>
-        <span>{{ result.message_count }} 条消息</span>
-        <span>·</span>
-        <span>{{ result.word_count }} 个有效词</span>
-        <span>·</span>
-        <span>{{ result.unique_words }} 个 unique</span>
-        <a :href="imageDataUrl" download="wordcloud.png" class="download-link">下载图片</a>
-      </div>
-
-      <div class="result-body">
-        <UiCard padding="none" shadow="md" class="image-card">
-          <img :src="imageDataUrl" class="wc-image" />
-        </UiCard>
-
-        <UiCard padding="md" shadow="sm" class="top-card">
-          <h3 class="top-title">Top {{ result.top_words.length }} 词频</h3>
-          <ol class="top-list">
-            <li v-for="(w, i) in result.top_words" :key="w.word">
-              <span class="rank">{{ String(Number(i) + 1) }}</span>
-              <span class="word">{{ w.word }}</span>
-              <span class="count">{{ w.count }}</span>
-            </li>
-          </ol>
-        </UiCard>
+    <div class="controls">
+      <label class="ctrl">群组<select v-model="groupId" :disabled="!groups.length"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g.group_id" :value="g.group_id">{{ g.group_id }}（{{ g.days }} 天 / {{ fmtBytes(g.total_bytes) }}）</option></select></label>
+      <label class="ctrl">时间窗<div class="win-row"><button v-for="w in WINS" :key="w.k" class="win-btn" :class="{ active: windowKey === w.k }" @click="windowKey = w.k">{{ w.l }}</button></div></label>
+      <UiButton variant="primary" icon="RefreshCw" :loading="rendering" :disabled="!groupId" @click="onRender">生成</UiButton>
+    </div>
+    <p class="hint"><UiIcon name="Info" :size="14" />分词与渲染都在后端进行，单群全年数据可能需要数秒到十几秒</p>
+    <p v-if="renderError" class="error">{{ renderError }}</p>
+    <div v-if="result">
+      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique</span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
+      <div class="res-grid"><div class="img-wrap"><img :src="imgUrl" class="wc-img" /></div>
+        <UiCard padding="md" shadow="sm" class="top-wrap"><h3 class="top-t">Top {{ result.top_words.length }} 词频</h3><ol class="top-list"><li v-for="(w, i) in result.top_words" :key="w.word"><span class="rk">{{ i + 1 }}</span><span class="wd">{{ w.word }}</span><span class="ct">{{ w.count }}</span></li></ol></UiCard>
       </div>
     </div>
-
-    <UiEmpty
-      v-else-if="!groups.length && !loading"
-      icon="BarChart2"
-      title="尚无任何群的词云消息记录"
-    />
+    <UiEmpty v-else-if="!groups.length && !loading" icon="BarChart3" title="暂无词云消息记录" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'
-import UiButton from '../components/ui/UiButton.vue'
-import UiCard from '../components/ui/UiCard.vue'
-import UiTag from '../components/ui/UiTag.vue'
-import UiIcon from '../components/ui/UiIcon.vue'
-import UiEmpty from '../components/ui/UiEmpty.vue'
-import { listWordcloudGroups, renderWordcloud } from '../api/wordcloud'
-import { toast } from '../toast'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiIcon from '../components/ui/UiIcon.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import { listWordcloudGroups, renderWordcloud } from '../api/wordcloud'; import { toast } from '../toast'
 
-const WINDOWS = [
-  { key: 'today', label: '今日' },
-  { key: 'week', label: '近 7 天' },
-  { key: 'month', label: '近 30 天' },
-  { key: 'year', label: '近一年' },
-]
+const WINS = [{ k: 'today', l: '今日' }, { k: 'week', l: '近7天' }, { k: 'month', l: '近30天' }, { k: 'year', l: '近一年' }]
+const WL: Record<string, string> = { today: '今日', week: '近7天', month: '近30天', year: '近一年' }
 
-const groups = ref<any[]>([])
-const loading = ref(false)
-const loadError = ref<string | null>(null)
+const groups = ref<any[]>([]); const loading = ref(false); const loadError = ref<string | null>(null); const groupId = ref(''); const windowKey = ref('today'); const rendering = ref(false); const renderError = ref<string | null>(null); const result = ref<any>(null)
+const imgUrl = computed(() => result.value ? `data:image/png;base64,${result.value.image_base64}` : '')
+const winLabel = computed(() => WL[windowKey.value] || windowKey.value)
 
-const groupId = ref('')
-const windowKey = ref('today')
-const rendering = ref(false)
-const renderError = ref<string | null>(null)
-const result = ref<any>(null)
-
-const imageDataUrl = computed(() =>
-  result.value ? `data:image/png;base64,${result.value.image_base64}` : ''
-)
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
-async function loadGroups() {
-  loading.value = true
-  loadError.value = null
-  try {
-    const data = await listWordcloudGroups()
-    groups.value = data.groups || []
-  } catch (e: unknown) {
-    loadError.value = (e as Error).message
-  } finally {
-    loading.value = false
-  }
-}
-
-async function onRender() {
-  if (!groupId.value) return
-  rendering.value = true
-  renderError.value = null
-  try {
-    result.value = await renderWordcloud(groupId.value, windowKey.value)
-  } catch (e: unknown) {
-    result.value = null
-    renderError.value = ((e as any).data?.detail as string) || (e as Error).message
-    toast('生成失败', 'error')
-  } finally {
-    rendering.value = false
-  }
-}
-
+function fmtBytes(n: number): string { if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(1) + ' MB' }
+async function loadGroups() { loading.value = true; loadError.value = null; try { groups.value = (await listWordcloudGroups()).groups || [] } catch (e: unknown) { loadError.value = (e as Error).message } finally { loading.value = false } }
+async function onRender() { if (!groupId.value) return; rendering.value = true; renderError.value = null; try { result.value = await renderWordcloud(groupId.value, windowKey.value) } catch (e: unknown) { result.value = null; renderError.value = ((e as any).data?.detail as string) || (e as Error).message; toast('生成失败', 'error') } finally { rendering.value = false } }
 loadGroups()
 </script>
 
 <style scoped>
-.wc-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
 .error { color: var(--qq-danger); }
-.render-error { margin-top: var(--qq-gap-sm); }
-
-.controls-card {
-  margin-bottom: var(--qq-gap-md);
-}
-
-.controls-row {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--qq-gap-md);
-  flex-wrap: wrap;
-}
-
-.control {
-  display: flex;
-  flex-direction: column;
-  gap: var(--qq-gap-xs);
-  font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
-}
-
-.control select {
-  background: var(--qq-surface-strong);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-sm);
-  color: var(--qq-text);
-  padding: 6px 10px;
-  font-size: var(--qq-text-sm);
-  outline: none;
-  min-width: 280px;
-}
-
-.control select:focus {
-  border-color: var(--qq-accent);
-  box-shadow: 0 0 0 3px var(--qq-accent-soft);
-}
-
-.window-row {
-  display: inline-flex;
-  gap: 2px;
-}
-
-.window-btn {
-  padding: 6px 12px;
-  background: var(--qq-surface-strong);
-  border: 1px solid var(--qq-border);
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-sm);
-  cursor: pointer;
-  transition: color var(--qq-transition-fast), background var(--qq-transition-fast);
-}
-
-.window-btn:first-child {
-  border-top-left-radius: var(--qq-radius-sm);
-  border-bottom-left-radius: var(--qq-radius-sm);
-}
-
-.window-btn:last-child {
-  border-top-right-radius: var(--qq-radius-sm);
-  border-bottom-right-radius: var(--qq-radius-sm);
-}
-
-.window-btn:hover:not(.active) {
-  color: var(--qq-text);
-  background: var(--qq-surface-elevated);
-}
-
-.window-btn.active {
-  background: var(--qq-accent-soft);
-  color: var(--qq-accent);
-  border-color: var(--qq-accent);
-}
-
-.hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
-  margin: var(--qq-gap-sm) 0 0;
-}
-
-.summary {
-  display: flex;
-  align-items: center;
-  gap: var(--qq-gap-sm);
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-sm);
-  margin-bottom: var(--qq-gap-sm);
-  flex-wrap: wrap;
-}
-
-.download-link {
-  margin-left: auto;
-  color: var(--qq-accent);
-  text-decoration: none;
-  font-size: var(--qq-text-sm);
-}
-
-.download-link:hover { text-decoration: underline; }
-
-.result-body {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
-  gap: var(--qq-gap-md);
-  align-items: start;
-}
-
-.image-card {
-  overflow: hidden;
-}
-
-.wc-image {
-  width: 100%;
-  display: block;
-  background: #fff;
-}
-
-.top-card {
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-.top-title {
-  margin: 0 0 var(--qq-gap-sm);
-  font-size: var(--qq-text-base);
-  color: var(--qq-text);
-}
-
-.top-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.top-list li {
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  align-items: center;
-  gap: var(--qq-gap-sm);
-  padding: 4px 6px;
-  border-radius: var(--qq-radius-sm);
-  font-size: var(--qq-text-sm);
-}
-
-.top-list li:hover { background: var(--qq-surface-elevated); }
-
-.rank {
-  color: var(--qq-text-muted);
-  font-family: var(--qq-font-mono);
-  font-size: var(--qq-text-xs);
-  text-align: right;
-}
-
-.word {
-  color: var(--qq-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.count {
-  color: var(--qq-text-muted);
-  font-family: var(--qq-font-mono);
-  font-size: var(--qq-text-xs);
-}
-
-@media (max-width: 900px) {
-  .result-body {
-    grid-template-columns: 1fr;
-  }
-  .top-card { max-height: 400px; }
-}
+.controls { display: flex; align-items: flex-end; gap: var(--qq-gap-md); flex-wrap: wrap; margin-bottom: var(--qq-gap-sm); padding: var(--qq-gap-md); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
+.ctrl { display: flex; flex-direction: column; gap: var(--qq-gap-xs); font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
+.win-row { display: inline-flex; gap: 1px; }
+.win-btn { padding: 6px 12px; border: none; background: var(--qq-surface-strong); color: var(--qq-text-muted); font-size: var(--qq-text-sm); font-family: var(--qq-font-base); cursor: pointer; transition: all var(--qq-transition-fast); }
+.win-btn:first-child { border-radius: var(--qq-radius-sm) 0 0 var(--qq-radius-sm); }
+.win-btn:last-child { border-radius: 0 var(--qq-radius-sm) var(--qq-radius-sm) 0; }
+.win-btn.active { background: var(--qq-primary); color: #fff; }
+.hint { display: inline-flex; align-items: center; gap: 6px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); margin: var(--qq-gap-sm) 0 var(--qq-gap-md); }
+.muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
+.sum-row { display: flex; align-items: center; gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); flex-wrap: wrap; }
+.link { margin-left: auto; color: var(--qq-primary); text-decoration: none; font-size: var(--qq-text-sm); }
+.res-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: var(--qq-gap-md); align-items: start; }
+.img-wrap { border-radius: var(--qq-radius-card); overflow: hidden; box-shadow: var(--qq-shadow-card); }
+.wc-img { width: 100%; display: block; background: #fff; }
+.top-wrap { max-height: 500px; overflow-y: auto; }
+.top-t { margin: 0 0 var(--qq-gap-sm); font-size: var(--qq-text-base); color: var(--qq-text); }
+.top-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.top-list li { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: var(--qq-gap-sm); padding: 4px 6px; border-radius: var(--qq-radius-sm); font-size: var(--qq-text-sm); }
+.top-list li:hover { background: var(--qq-surface-hover); }
+.rk { color: var(--qq-text-muted); font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); text-align: right; }
+.wd { color: var(--qq-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct { color: var(--qq-text-muted); font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); }
+@media (max-width: 900px) { .res-grid { grid-template-columns: 1fr; } }
 </style>

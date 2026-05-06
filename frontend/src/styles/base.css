@@ -1,0 +1,122 @@
+html {
+  box-sizing: border-box;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--qq-font-base);
+  font-size: var(--qq-text-base);
+  line-height: 1.6;
+  background: var(--qq-bg);
+  color: var(--qq-text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--qq-border-strong);
+  border-radius: var(--qq-radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--qq-text-muted);
+}
+
+/* Global input base */
+input:not([type]),
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="date"],
+input[type="search"],
+select,
+textarea {
+  font-family: var(--qq-font-base);
+  font-size: var(--qq-text-sm);
+  background: var(--qq-surface);
+  border: 1px solid var(--qq-border-strong);
+  border-radius: var(--qq-radius-btn);
+  color: var(--qq-text);
+  min-height: 36px;
+  height: 36px;
+  padding: 7px 11px;
+  outline: none;
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.02);
+  transition: border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast), background var(--qq-transition-fast);
+}
+
+textarea {
+  height: auto;
+  min-height: 72px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--qq-primary);
+  background: var(--qq-surface-elevated);
+  box-shadow: 0 0 0 3px var(--qq-primary-soft);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Global table base */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--qq-text-sm);
+}
+
+thead th {
+  padding: 10px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--qq-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--qq-surface-strong);
+  border-bottom: 2px solid var(--qq-border-strong);
+}
+
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--qq-border);
+  color: var(--qq-text);
+  vertical-align: middle;
+}
+
+tbody tr:hover td {
+  background: var(--qq-surface-hover);
+}
+
+tbody tr:nth-child(even) td {
+  background: var(--qq-table-stripe);
+}
+
+tbody tr:nth-child(even):hover td {
+  background: var(--qq-surface-hover);
+}

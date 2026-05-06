@@ -1,57 +1,51 @@
 <template>
   <div class="ui-page-header">
-    <div class="titles">
-      <h2 class="title">{{ title }}</h2>
-      <p v-if="subtitle" class="subtitle">{{ subtitle }}</p>
+    <div class="ui-page-header__info">
+      <h1 class="ui-page-header__title">{{ title }}</h1>
+      <p v-if="subtitle" class="ui-page-header__subtitle">{{ subtitle }}</p>
     </div>
-    <div v-if="$slots.actions" class="actions">
+    <div v-if="$slots.actions" class="ui-page-header__actions">
       <slot name="actions" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps({
-  title: { type: String, required: true },
-  subtitle: { type: String, default: '' },
-})
+defineProps<{
+  title: string
+  subtitle?: string
+}>()
 </script>
 
 <style scoped>
 .ui-page-header {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--qq-gap-md);
   margin-bottom: var(--qq-gap-lg);
   padding-bottom: var(--qq-gap-md);
   border-bottom: 1px solid var(--qq-border);
-  flex-wrap: wrap;
 }
 
-.titles {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.title {
+.ui-page-header__title {
   font-size: var(--qq-text-lg);
   font-weight: 600;
   color: var(--qq-text);
-  margin: 0;
+  line-height: 1.3;
 }
 
-.subtitle {
+.ui-page-header__subtitle {
   font-size: var(--qq-text-sm);
   color: var(--qq-text-muted);
-  margin: 0;
+  margin-top: var(--qq-gap-xs);
 }
 
-.actions {
+.ui-page-header__actions {
   display: flex;
   align-items: center;
   gap: var(--qq-gap-sm);
-  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 </style>

@@ -1,28 +1,49 @@
 <template>
-  <component :is="iconComp" v-if="iconComp" :size="size" :stroke-width="strokeWidth" class="ui-icon" />
+  <component :is="resolved" :size="size" :stroke-width="strokeWidth" />
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import {
-  AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, BookUser, Bot, Brain,
-  CalendarCheck, Check, ChevronLeft, ChevronRight, CircleX, Clock, Coins, Drama, FileText,
-  Inbox, Info, Loader2, Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown,
-  MousePointerClick, Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save,
-  Server, Settings, ShieldCheck, SlidersHorizontal, Swords, ToggleLeft, Trash2, Users,
-  X, Zap, Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
+  BarChart3, ToggleLeft, Users, Brain, FileText, MessageCircle,
+  Drama, BookUser, SlidersHorizontal, Zap, BookOpen, Newspaper,
+  Settings, Stethoscope, Server, Clock, ShieldCheck, Coins, Swords,
+  Loader2, CircleX, Info, LogOut, Menu, Bot, Sun, Moon, ChevronRight,
+  Search, Plus, Trash2, Pencil, RotateCw, Upload, ExternalLink,
+  Check, X, ChevronDown, FolderOpen, Lock, RefreshCw, LayoutDashboard,
+  MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
+  Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
+  AlertTriangle, Play, Save, ChevronLeft, Download
 } from 'lucide-vue-next'
+import { computed } from 'vue'
+import type { Component } from 'vue'
 
-const ICON_MAP = {
-  AlertTriangle, ArrowLeft, BarChart2, BarChart3, BookOpen, BookUser, Bot, Brain,
-  CalendarCheck, Check, ChevronLeft, ChevronRight, CircleX, Clock, Coins, Drama, FileText,
-  Inbox, Info, Loader2, Lock, LogOut, MessageCircle, Search, ArrowUp, ArrowDown,
-  MousePointerClick, Newspaper, Pencil, Play, Plus, RefreshCw, RotateCcw, Save,
-  Server, Settings, ShieldCheck, SlidersHorizontal, Swords, ToggleLeft, Trash2, Users,
-  X, Zap, Send, Stethoscope, FileCode, Download, Menu, Sun, Moon,
+type IconName =
+  | 'BarChart3' | 'ToggleLeft' | 'Users' | 'Brain' | 'FileText'
+  | 'MessageCircle' | 'Drama' | 'BookUser' | 'SlidersHorizontal'
+  | 'Zap' | 'BookOpen' | 'Newspaper' | 'Settings' | 'Stethoscope'
+  | 'Server' | 'Clock' | 'ShieldCheck' | 'Coins' | 'Swords'
+  | 'Loader2' | 'CircleX' | 'Info' | 'LogOut' | 'Menu' | 'Bot'
+  | 'Sun' | 'Moon' | 'ChevronRight' | 'Search' | 'Plus' | 'Trash2'
+  | 'Pencil' | 'RotateCw' | 'Upload' | 'ExternalLink' | 'Check'
+  | 'X' | 'ChevronDown' | 'FolderOpen' | 'Lock' | 'RefreshCw'
+  | 'LayoutDashboard' | 'MessagesSquare' | 'BrainCircuit' | 'ServerCog'
+  | 'Gamepad2' | 'Gauge' | 'Network' | 'Cloud' | 'ArrowRight'
+  | 'ChevronUp' | 'Send' | 'FileCode' | 'ListChecks' | 'AlertTriangle'
+  | 'Play' | 'Save' | 'ChevronLeft' | 'Download'
+
+const ICON_MAP: Record<IconName, Component> = {
+  BarChart3, ToggleLeft, Users, Brain, FileText,
+  MessageCircle, Drama, BookUser, SlidersHorizontal,
+  Zap, BookOpen, Newspaper, Settings, Stethoscope,
+  Server, Clock, ShieldCheck, Coins, Swords,
+  Loader2, CircleX, Info, LogOut, Menu, Bot,
+  Sun, Moon, ChevronRight, Search, Plus, Trash2,
+  Pencil, RotateCw, Upload, ExternalLink, Check,
+  X, ChevronDown, FolderOpen, Lock, RefreshCw, LayoutDashboard,
+  MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
+  Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
+  AlertTriangle, Play, Save, ChevronLeft, Download
 }
-
-export type IconName = keyof typeof ICON_MAP
 
 const props = defineProps<{
   name: IconName | string
@@ -30,11 +51,8 @@ const props = defineProps<{
   strokeWidth?: number
 }>()
 
-const iconComp = computed(() => (ICON_MAP as Record<string, any>)[props.name] || null)
+const resolved = computed(() => {
+  const c = ICON_MAP[props.name as IconName]
+  return c || Info
+})
 </script>
-
-<style scoped>
-.ui-icon {
-  flex-shrink: 0;
-}
-</style>

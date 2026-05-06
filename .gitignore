@@ -57,5 +57,5 @@ config/llm.*.local.toml
 docker/*.Dockerfile
 
 # Frontend build output
-frontend/dist/
-frontend/node_modules/
+dist/
+node_modules/

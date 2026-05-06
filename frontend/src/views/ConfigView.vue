@@ -1,47 +1,83 @@
 <template>
   <div class="config-view">
-    <UiPageHeader title="配置">
+    <UiPageHeader title="配置" subtitle="在线编辑 TOML 配置文件，保存后需要重启 bot 才会生效">
       <template #actions>
         <span v-if="current && current.missing" class="warn">
-          <UiIcon name="AlertTriangle" :size="14" />
+          <UiIcon name="Info" :size="14" />
           {{ currentFilename }} 不存在，保存后将创建
         </span>
         <span class="hint">
           <UiIcon name="Info" :size="14" />
           保存后需重启 bot 才会生效
         </span>
-        <UiButton icon="RotateCcw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
+        <UiButton icon="RefreshCw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
         <UiButton variant="primary" :loading="saving" icon="Save" @click="save">保存</UiButton>
       </template>
     </UiPageHeader>
 
     <p v-if="listError" class="error">{{ listError }}</p>
 
-    <div v-if="configs.length" class="tabs">
-      <button
-        v-for="c in configs"
-        :key="c.key"
-        class="tab"
-        :class="{ active: c.key === currentKey }"
-        @click="switchTo(c.key)"
-      >
-        <span class="tab-label">{{ c.label }}</span>
-        <span class="tab-file">{{ c.filename }}</span>
-      </button>
+    <div class="config-shell">
+      <aside class="config-list">
+        <div class="panel-head">
+          <span class="panel-title">配置文件</span>
+          <span class="panel-count">{{ configs.length }}</span>
+        </div>
+        <UiLoading v-if="!configs.length && !listError" />
+        <button
+          v-for="c in configs"
+          :key="c.key"
+          class="config-item"
+          :class="{ active: c.key === currentKey }"
+          @click="switchTo(c.key)"
+        >
+          <span class="config-item__label">{{ c.label }}</span>
+          <span class="config-item__file">{{ c.filename }}</span>
+          <span v-if="c.missing" class="config-item__flag">缺失</span>
+        </button>
+      </aside>
+
+      <main class="config-editor">
+        <p v-if="loadError" class="error">{{ loadError }}</p>
+        <p v-if="saveError" class="error">{{ saveError }}</p>
+        <UiLoading v-else-if="!loaded && currentKey" />
+
+        <template v-if="loaded">
+          <div class="editor-head">
+            <div class="editor-meta">
+              <span class="editor-kicker">当前文件</span>
+              <h3>{{ currentFilename }}</h3>
+            </div>
+            <div class="editor-state">
+              <span v-if="current && current.missing" class="state-pill state-pill--warn">将创建新文件</span>
+              <span v-else-if="dirty" class="state-pill state-pill--info">未保存</span>
+              <span v-else class="state-pill state-pill--ok">已同步</span>
+            </div>
+          </div>
+          <textarea v-model="content" class="toml-editor" spellcheck="false" autocomplete="off" />
+        </template>
+
+        <div v-else class="empty-editor">
+          <UiEmpty icon="Settings" title="从左侧选择一个配置文件开始编辑" />
+        </div>
+      </main>
+
+      <aside class="config-side">
+        <div class="side-card">
+          <h4>保存说明</h4>
+          <p>配置文件会直接写回仓库内的 TOML 文件。这里更适合做紧凑的在线编辑，不承担结构化校验。</p>
+        </div>
+        <div class="side-card">
+          <h4>常见文件</h4>
+          <ul>
+            <li>llm.toml</li>
+            <li>generation.toml</li>
+            <li>chat_rules.toml</li>
+            <li>games.toml</li>
+          </ul>
+        </div>
+      </aside>
     </div>
-
-    <p v-if="loadError" class="error">{{ loadError }}</p>
-    <p v-if="saveError" class="error save-error">{{ saveError }}</p>
-    <UiLoading v-else-if="!loaded && currentKey" />
-
-    <UiCard v-if="loaded" padding="none" shadow="md" class="editor-card">
-      <textarea
-        v-model="content"
-        class="toml-editor"
-        spellcheck="false"
-        autocomplete="off"
-      />
-    </UiCard>
   </div>
 </template>
 
@@ -49,9 +85,9 @@
 import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
-import UiCard from '../components/ui/UiCard.vue'
 import { listConfigs, fetchConfig, saveConfig } from '../api/config'
 import { toast } from '../toast'
 
@@ -74,8 +110,8 @@ onMounted(() => loadList())
 async function loadList() {
   listError.value = null
   try {
-    const d = await listConfigs()
-    configs.value = d.configs || []
+    const data = await listConfigs()
+    configs.value = data.configs || []
     if (configs.value.length && !currentKey.value) {
       await load(configs.value[0].key)
     }
@@ -96,11 +132,11 @@ async function load(key: string) {
   loadError.value = null
   saveError.value = null
   try {
-    const d = await fetchConfig(key)
-    content.value = d.content
-    originalContent.value = d.content
+    const data = await fetchConfig(key)
+    content.value = data.content
+    originalContent.value = data.content
     const entry = configs.value.find(c => c.key === key)
-    if (entry) entry.missing = d.missing || false
+    if (entry) entry.missing = data.missing || false
     loaded.value = true
   } catch (e: unknown) {
     loadError.value = (e as Error).message
@@ -129,106 +165,265 @@ async function save() {
 <style scoped>
 .config-view {
   display: flex;
-  flex-direction: column;
   flex: 1;
   min-height: 0;
+  flex-direction: column;
 }
 
 .error {
   color: var(--qq-danger);
-}
-
-.save-error {
-  margin-bottom: var(--qq-gap-sm);
   font-size: var(--qq-text-sm);
 }
 
-.warn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--qq-warn);
-  font-size: var(--qq-text-sm);
-}
-
+.warn,
 .hint {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-size: var(--qq-text-sm);
+}
+
+.warn {
+  color: var(--qq-warn);
+}
+
+.hint {
   color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
 }
 
-.tabs {
-  display: flex;
-  gap: var(--qq-gap-xs);
-  margin-bottom: var(--qq-gap-md);
-  border-bottom: 1px solid var(--qq-border);
-  flex-wrap: wrap;
+.config-shell {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 260px minmax(0, 1fr) 220px;
+  gap: var(--qq-gap-md);
 }
 
-.tab {
+.config-list,
+.config-editor,
+.config-side {
+  min-width: 0;
+  min-height: 0;
+  background: var(--qq-surface);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  box-shadow: var(--qq-shadow-card);
+}
+
+.config-list {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
-  background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-top-left-radius: var(--qq-radius-sm);
-  border-top-right-radius: var(--qq-radius-sm);
-  color: var(--qq-text-muted);
-  cursor: pointer;
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 var(--qq-gap-md);
+  border-bottom: 1px solid var(--qq-border);
+}
+
+.panel-title {
+  color: var(--qq-text);
   font-size: var(--qq-text-sm);
-  margin-bottom: -1px;
-  transition: background var(--qq-transition-fast), color var(--qq-transition-fast), border-color var(--qq-transition-fast);
+  font-weight: 700;
 }
 
-.tab:hover {
-  color: var(--qq-text);
-  background: var(--qq-surface);
-}
-
-.tab.active {
-  color: var(--qq-text);
-  background: var(--qq-surface-elevated);
-  border-color: var(--qq-border);
-  border-bottom-color: var(--qq-surface-elevated);
-}
-
-.tab-label {
-  font-weight: 500;
-}
-
-.tab-file {
+.panel-count {
+  color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
 }
 
-.editor-card {
-  flex: 1;
-  overflow: hidden;
+.config-item {
   display: flex;
   flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: var(--qq-gap-sm) var(--qq-gap-md);
+  border: 0;
+  border-bottom: 1px solid var(--qq-border);
+  background: transparent;
+  color: var(--qq-text);
+  cursor: pointer;
+  font-family: var(--qq-font-base);
+  text-align: left;
+  transition: background var(--qq-transition-fast);
+}
+
+.config-item:hover {
+  background: var(--qq-surface-hover);
+}
+
+.config-item.active {
+  background: var(--qq-primary-soft);
+  box-shadow: inset 3px 0 0 var(--qq-primary);
+}
+
+.config-item__label {
+  font-size: var(--qq-text-sm);
+  font-weight: 700;
+}
+
+.config-item__file,
+.config-item__flag {
+  color: var(--qq-text-muted);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-xs);
+}
+
+.config-item__flag {
+  color: var(--qq-warn);
+}
+
+.config-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-sm);
+  overflow: hidden;
+  padding: var(--qq-gap-md);
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-md);
+}
+
+.editor-meta {
+  min-width: 0;
+}
+
+.editor-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--qq-primary);
+  font-size: var(--qq-text-xs);
+  font-weight: 700;
+}
+
+.editor-meta h3 {
+  margin: 0;
+  color: var(--qq-text);
+  font-size: var(--qq-text-lg);
+  line-height: 1.2;
+  word-break: break-all;
+}
+
+.editor-state {
+  display: flex;
+  gap: var(--qq-gap-xs);
+}
+
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--qq-radius-full);
+  font-size: var(--qq-text-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.state-pill--warn {
+  background: var(--qq-warn-soft);
+  color: var(--qq-warn);
+}
+
+.state-pill--info {
+  background: var(--qq-primary-soft);
+  color: var(--qq-primary);
+}
+
+.state-pill--ok {
+  background: var(--qq-success-soft);
+  color: var(--qq-success);
 }
 
 .toml-editor {
   flex: 1;
   width: 100%;
+  min-height: 0;
+  padding: var(--qq-gap-md);
+  border: 0;
+  border-top: 1px solid var(--qq-border);
   background: var(--qq-surface-strong);
   color: var(--qq-text);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-sm);
   line-height: 1.7;
-  padding: var(--qq-gap-md);
   resize: none;
   outline: none;
-  border: none;
+  tab-size: 2;
 }
 
 .toml-editor:focus {
-  box-shadow: inset 0 0 0 1px var(--qq-accent);
+  box-shadow: inset 0 0 0 1px var(--qq-primary);
+}
+
+.empty-editor {
+  flex: 1;
+  display: grid;
+  place-items: center;
+}
+
+.config-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-sm);
+  padding: var(--qq-gap-md);
+}
+
+.side-card {
+  padding: var(--qq-gap-sm);
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-surface-strong);
+}
+
+.side-card h4 {
+  margin: 0 0 6px;
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+}
+
+.side-card p,
+.side-card li {
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
+  line-height: 1.6;
+}
+
+.side-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 1100px) {
+  .config-shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .config-side {
+    display: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .config-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .config-list {
+    max-height: 240px;
+  }
+
+  .editor-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

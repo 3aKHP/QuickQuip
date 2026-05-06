@@ -13,74 +13,87 @@
       llm.toml 加载失败：{{ options.load_error }}；provider/persona 下拉可能为空
     </p>
 
-    <div class="split">
-      <UiCard padding="none" shadow="sm" class="list-card">
+    <div class="settings-shell">
+      <aside class="group-panel">
+        <div class="panel-head">
+          <span class="panel-title">覆盖对象</span>
+          <span class="panel-count">{{ groupList.length }}</span>
+        </div>
+
         <UiLoading v-if="loading && !groupList.length" />
-        <UiEmpty
-          v-else-if="!groupList.length"
-          icon="Users"
-          title="尚无群级 override"
-        />
-        <ul v-else class="group-list">
-          <li
+        <UiEmpty v-else-if="!groupList.length" icon="Users" title="尚无群级 override" />
+        <div v-else class="group-list">
+          <button
             v-for="g in groupList"
             :key="g.group_id"
             class="group-item"
             :class="{ active: g.group_id === selectedGroupId }"
             @click="selectGroup(g.group_id)"
           >
-            <div class="group-head">
+            <span class="group-item__top">
               <UiTag size="sm" :variant="g.type === 'private' ? 'success' : 'info'">
                 {{ g.type === 'private' ? '私聊' : '群聊' }}
               </UiTag>
               <span class="mono group-id">{{ displayId(g.group_id) }}</span>
               <UiTag v-if="g.enabled === true" size="sm" variant="success">LLM 开</UiTag>
               <UiTag v-else-if="g.enabled === false" size="sm" variant="danger">LLM 关</UiTag>
-            </div>
-            <div class="group-meta">
+            </span>
+            <span class="group-item__meta">
               <span v-if="g.persona_id">{{ g.persona_id }}</span>
-              <span v-if="g.provider_id">· {{ g.provider_id }}</span>
-              <span v-if="g.model" class="mono">· {{ g.model }}</span>
-            </div>
-          </li>
-        </ul>
-      </UiCard>
+              <span v-if="g.provider_id">{{ g.provider_id }}</span>
+              <span v-if="g.model" class="mono">{{ g.model }}</span>
+              <span v-if="!g.persona_id && !g.provider_id && !g.model">仅覆盖开关或触发方式</span>
+            </span>
+          </button>
+        </div>
+      </aside>
 
-      <div class="main-col">
-        <UiCard v-if="!selectedGroupId" padding="lg" shadow="sm" class="hint-card">
+      <main class="editor-panel">
+        <div v-if="!selectedGroupId" class="empty-editor">
           <UiEmpty icon="Settings" title="选择或添加一个群来编辑覆盖设置" />
-        </UiCard>
+        </div>
 
         <template v-else>
-          <UiCard padding="md" shadow="sm" class="form-card">
-            <div class="form-title">
-              <span class="form-title-text">
+          <div class="editor-head">
+            <div>
+              <span class="editor-kicker">当前对象</span>
+              <h3>
                 <UiTag size="sm" :variant="selectedIsPrivate ? 'success' : 'info'">
                   {{ selectedIsPrivate ? '私聊' : '群聊' }}
                 </UiTag>
                 <span class="mono">{{ displayId(selectedGroupId) }}</span>
-              </span>
-              <div class="form-actions">
-                <UiButton
-                  variant="danger"
-                  icon="Trash2"
-                  :disabled="saving"
-                  @click="onClear"
-                >清空全部 override</UiButton>
-                <UiButton
-                  variant="primary"
-                  icon="Save"
-                  :loading="saving"
-                  :disabled="!hasChanges"
-                  @click="onSave"
-                >保存</UiButton>
-              </div>
+              </h3>
             </div>
+            <div class="editor-actions">
+              <UiButton variant="danger" icon="Trash2" :disabled="saving" @click="onClear">清空全部 override</UiButton>
+              <UiButton variant="primary" icon="Save" :loading="saving" :disabled="!hasChanges" @click="onSave">保存</UiButton>
+            </div>
+          </div>
 
-            <p v-if="saveError" class="error">{{ saveError }}</p>
+          <p v-if="saveError" class="error">{{ saveError }}</p>
 
-            <div class="form-grid">
-              <!-- enabled -->
+          <section class="default-strip">
+            <div class="default-item">
+              <span>默认 Provider</span>
+              <strong>{{ defaults.provider_id || '未设置' }}</strong>
+            </div>
+            <div class="default-item">
+              <span>默认 Persona</span>
+              <strong>{{ defaults.persona_id || '未设置' }}</strong>
+            </div>
+            <div class="default-item">
+              <span>默认触发前缀</span>
+              <strong>{{ defaults.trigger_prefix || '/ai' }}</strong>
+            </div>
+            <div class="default-item">
+              <span>默认历史</span>
+              <strong>{{ defaults.history_limit ?? 10 }}</strong>
+            </div>
+          </section>
+
+          <section class="form-section">
+            <h4>运行状态</h4>
+            <div class="form-grid form-grid--three">
               <div class="field">
                 <label>LLM 启用</label>
                 <select v-model="draftTriState.enabled">
@@ -89,8 +102,6 @@
                   <option :value="false">关</option>
                 </select>
               </div>
-
-              <!-- memory_enabled -->
               <div class="field">
                 <label>记忆启用</label>
                 <select v-model="draftTriState.memory_enabled">
@@ -99,8 +110,6 @@
                   <option :value="false">关</option>
                 </select>
               </div>
-
-              <!-- auto_memory_enabled -->
               <div class="field">
                 <label>自动记忆抽取</label>
                 <select v-model="draftTriState.auto_memory_enabled">
@@ -109,8 +118,12 @@
                   <option :value="false">关</option>
                 </select>
               </div>
+            </div>
+          </section>
 
-              <!-- provider_id -->
+          <section class="form-section">
+            <h4>模型与人格</h4>
+            <div class="form-grid">
               <div class="field">
                 <label>Provider</label>
                 <select v-model="draftTriState.provider_id">
@@ -118,30 +131,16 @@
                   <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.id }}</option>
                 </select>
               </div>
-
-              <!-- model -->
               <div class="field">
                 <label>Model</label>
-                <div class="model-row">
-                  <input
-                    v-model="modelInput"
-                    :placeholder="modelPlaceholder"
-                    list="model-suggestions"
-                  />
+                <div class="field-row">
+                  <input v-model="modelInput" :placeholder="modelPlaceholder" list="model-suggestions" />
                   <datalist id="model-suggestions">
                     <option v-for="m in modelSuggestions" :key="m" :value="m" />
                   </datalist>
-                  <UiButton
-                    v-if="draftTriState.model !== null"
-                    size="sm"
-                    variant="ghost"
-                    icon="X"
-                    @click="clearModel"
-                  >跟随</UiButton>
+                  <UiButton v-if="draftTriState.model !== null" size="sm" variant="ghost" icon="X" @click="clearModel">跟随</UiButton>
                 </div>
               </div>
-
-              <!-- persona_id -->
               <div class="field">
                 <label>Persona</label>
                 <select v-model="draftTriState.persona_id">
@@ -151,23 +150,19 @@
                   </option>
                 </select>
               </div>
+            </div>
+          </section>
 
-              <!-- trigger_prefix -->
+          <section class="form-section">
+            <h4>触发方式</h4>
+            <div class="form-grid">
               <div class="field">
                 <label>触发前缀</label>
-                <div class="model-row">
+                <div class="field-row">
                   <input v-model="prefixInput" :placeholder="defaults.trigger_prefix || '/ai'" />
-                  <UiButton
-                    v-if="draftTriState.trigger_prefix !== null"
-                    size="sm"
-                    variant="ghost"
-                    icon="X"
-                    @click="clearPrefix"
-                  >跟随</UiButton>
+                  <UiButton v-if="draftTriState.trigger_prefix !== null" size="sm" variant="ghost" icon="X" @click="clearPrefix">跟随</UiButton>
                 </div>
               </div>
-
-              <!-- allow_prefix -->
               <div class="field">
                 <label>允许前缀触发</label>
                 <select v-model="draftTriState.allow_prefix">
@@ -176,8 +171,6 @@
                   <option :value="false">关</option>
                 </select>
               </div>
-
-              <!-- allow_at -->
               <div class="field">
                 <label>允许 @ 触发</label>
                 <select v-model="draftTriState.allow_at">
@@ -186,50 +179,35 @@
                   <option :value="false">关</option>
                 </select>
               </div>
-
-              <!-- history_limit -->
               <div class="field">
                 <label>历史条数</label>
-                <div class="model-row">
-                  <input
-                    v-model.number="historyInput"
-                    type="number"
-                    min="0"
-                    max="200"
-                    :placeholder="String(defaults.history_limit ?? 10)"
-                  />
-                  <UiButton
-                    v-if="draftTriState.history_limit !== null"
-                    size="sm"
-                    variant="ghost"
-                    icon="X"
-                    @click="clearHistory"
-                  >跟随</UiButton>
+                <div class="field-row">
+                  <input v-model.number="historyInput" type="number" min="0" max="200" :placeholder="String(defaults.history_limit ?? 10)" />
+                  <UiButton v-if="draftTriState.history_limit !== null" size="sm" variant="ghost" icon="X" @click="clearHistory">跟随</UiButton>
                 </div>
               </div>
             </div>
-          </UiCard>
+          </section>
         </template>
-      </div>
+      </main>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import UiCard from '../components/ui/UiCard.vue'
-import UiTag from '../components/ui/UiTag.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
-import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiTag from '../components/ui/UiTag.vue'
 import {
+  clearGroupSettings,
+  fetchGroupSettings,
   fetchOptions,
   listGroupSettings,
-  fetchGroupSettings,
   saveGroupSettings,
-  clearGroupSettings,
 } from '../api/groupSettings'
 import { toast } from '../toast'
 
@@ -244,7 +222,6 @@ const options = ref<any>(null)
 const groupList = ref<any[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
-
 const selectedGroupId = ref('')
 const original = ref<DraftSettings>(emptyDraft())
 const draftTriState = ref<DraftSettings>(emptyDraft())
@@ -252,7 +229,7 @@ const saving = ref(false)
 const saveError = ref<string | null>(null)
 
 function emptyDraft(): DraftSettings {
-  return Object.fromEntries(FIELDS.map(f => [f, null]))
+  return Object.fromEntries(FIELDS.map(field => [field, null]))
 }
 
 function displayId(key: string): string {
@@ -261,55 +238,54 @@ function displayId(key: string): string {
 }
 
 const selectedIsPrivate = computed(() => selectedGroupId.value.startsWith('private:'))
-
 const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
 
 function defaultHint(field: string): string {
-  const v = defaults.value[field]
-  if (v === true) return '开'
-  if (v === false) return '关'
-  if (v == null) return '未设置'
-  return String(v)
+  const value = defaults.value[field]
+  if (value === true) return '开'
+  if (value === false) return '关'
+  if (value == null) return '未设置'
+  return String(value)
 }
 
 const modelInput = computed({
   get: () => draftTriState.value.model ?? '',
-  set: (v) => { draftTriState.value.model = v === '' ? null : v },
+  set: (value) => { draftTriState.value.model = value === '' ? null : value },
 })
 
 const prefixInput = computed({
   get: () => draftTriState.value.trigger_prefix ?? '',
-  set: (v) => { draftTriState.value.trigger_prefix = v === '' ? null : v },
+  set: (value) => { draftTriState.value.trigger_prefix = value === '' ? null : value },
 })
 
 const historyInput = computed({
   get: () => draftTriState.value.history_limit ?? '',
-  set: (v) => {
-    if (v === '' || v == null || Number.isNaN(Number(v))) {
+  set: (value) => {
+    if (value === '' || value == null || Number.isNaN(Number(value))) {
       draftTriState.value.history_limit = null
     } else {
-      draftTriState.value.history_limit = Number(v)
+      draftTriState.value.history_limit = Number(value)
     }
   },
 })
 
 const modelPlaceholder = computed(() => {
-  const pid = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find((p: any) => p.id === pid)
+  const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
+  const provider = providers.value.find((p: any) => p.id === providerId)
   return provider?.default_model || '默认 model'
 })
 
 const modelSuggestions = computed(() => {
-  const pid = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find((p: any) => p.id === pid)
+  const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
+  const provider = providers.value.find((p: any) => p.id === providerId)
   return provider?.models || []
 })
 
 const hasChanges = computed(() => {
-  for (const f of FIELDS) {
-    if (draftTriState.value[f] !== original.value[f]) return true
+  for (const field of FIELDS) {
+    if (draftTriState.value[field] !== original.value[field]) return true
   }
   return false
 })
@@ -343,8 +319,8 @@ async function loadOne(groupId: string) {
   try {
     const data = await fetchGroupSettings(groupId)
     const snapshot = emptyDraft()
-    for (const f of FIELDS) {
-      if (data[f] !== undefined) snapshot[f] = data[f]
+    for (const field of FIELDS) {
+      if (data[field] !== undefined) snapshot[field] = data[field]
     }
     original.value = snapshot
     draftTriState.value = { ...snapshot }
@@ -376,9 +352,9 @@ function startAdd() {
 
 async function onSave() {
   const diff: Record<string, any> = {}
-  for (const f of FIELDS) {
-    if (draftTriState.value[f] !== original.value[f]) {
-      diff[f] = draftTriState.value[f]
+  for (const field of FIELDS) {
+    if (draftTriState.value[field] !== original.value[field]) {
+      diff[field] = draftTriState.value[field]
     }
   }
   if (!Object.keys(diff).length) return
@@ -419,13 +395,14 @@ reloadAll()
 <style scoped>
 .gs-view {
   display: flex;
-  flex-direction: column;
-  flex: 1;
   min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
 .error {
   color: var(--qq-danger);
+  font-size: var(--qq-text-sm);
 }
 
 .warn-text {
@@ -441,100 +418,196 @@ reloadAll()
   font-family: var(--qq-font-mono);
 }
 
-.split {
-  display: flex;
-  gap: var(--qq-gap-md);
-  flex: 1;
+.settings-shell {
+  display: grid;
   min-height: 0;
+  flex: 1;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: var(--qq-gap-md);
 }
 
-.list-card {
-  width: 280px;
-  flex-shrink: 0;
-  overflow-y: auto;
-  max-height: calc(100vh - 180px);
+.group-panel,
+.editor-panel {
+  min-width: 0;
+  min-height: 0;
+  background: var(--qq-surface);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  box-shadow: var(--qq-shadow-card);
+}
+
+.group-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 var(--qq-gap-md);
+  border-bottom: 1px solid var(--qq-border);
+}
+
+.panel-title {
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+  font-weight: 700;
+}
+
+.panel-count {
+  color: var(--qq-text-muted);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-xs);
 }
 
 .group-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
 }
 
 .group-item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   padding: var(--qq-gap-sm) var(--qq-gap-md);
+  border: 0;
   border-bottom: 1px solid var(--qq-border);
+  background: transparent;
+  color: var(--qq-text);
   cursor: pointer;
+  font-family: var(--qq-font-base);
+  text-align: left;
   transition: background var(--qq-transition-fast);
 }
 
-.group-item:last-child {
-  border-bottom: none;
-}
-
 .group-item:hover {
-  background: var(--qq-surface-elevated);
+  background: var(--qq-surface-hover);
 }
 
 .group-item.active {
-  background: var(--qq-surface-elevated);
-  box-shadow: inset 3px 0 0 var(--qq-accent);
+  background: var(--qq-primary-soft);
+  box-shadow: inset 3px 0 0 var(--qq-primary);
 }
 
-.group-head {
+.group-item__top {
   display: flex;
   align-items: center;
   gap: var(--qq-gap-xs);
-  margin-bottom: 3px;
+  min-width: 0;
 }
 
 .group-id {
-  font-size: var(--qq-text-base);
-  font-weight: 500;
+  min-width: 0;
   color: var(--qq-text);
+  font-size: var(--qq-text-base);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.group-meta {
-  font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
+.group-item__meta {
   display: flex;
-  gap: 4px;
   flex-wrap: wrap;
+  gap: var(--qq-gap-xs);
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
 }
 
-.main-col {
+.editor-panel {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  gap: var(--qq-gap-sm);
+  gap: var(--qq-gap-md);
+  overflow-y: auto;
+  padding: var(--qq-gap-md);
 }
 
-.hint-card {
-  flex: 1;
+.empty-editor {
   display: flex;
+  min-height: 320px;
+  flex: 1;
   align-items: center;
   justify-content: center;
 }
 
-.form-card {
-  flex: 1;
-}
-
-.form-title {
+.editor-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--qq-gap-md);
-  flex-wrap: wrap;
-  margin-bottom: var(--qq-gap-md);
-  padding-bottom: var(--qq-gap-sm);
+  padding-bottom: var(--qq-gap-md);
   border-bottom: 1px solid var(--qq-border);
 }
 
-.form-actions {
+.editor-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--qq-primary);
+  font-size: var(--qq-text-xs);
+  font-weight: 700;
+}
+
+.editor-head h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-sm);
+  margin: 0;
+  color: var(--qq-text);
+  font-size: var(--qq-text-lg);
+}
+
+.editor-actions {
   display: flex;
   gap: var(--qq-gap-sm);
+  flex-wrap: wrap;
+}
+
+.default-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--qq-gap-sm);
+}
+
+.default-item {
+  min-width: 0;
+  padding: var(--qq-gap-sm);
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-surface-strong);
+}
+
+.default-item span {
+  display: block;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
+}
+
+.default-item strong {
+  display: block;
+  color: var(--qq-text);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-sm);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-sm);
+}
+
+.form-section h4 {
+  margin: 0;
+  color: var(--qq-text);
+  font-size: var(--qq-text-base);
 }
 
 .form-grid {
@@ -543,53 +616,54 @@ reloadAll()
   gap: var(--qq-gap-md);
 }
 
+.form-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .field {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: var(--qq-gap-xs);
 }
 
 .field label {
-  font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
-  font-weight: 500;
+  font-size: var(--qq-text-xs);
+  font-weight: 600;
 }
 
-.field select,
-.field input {
-  background: var(--qq-surface-strong);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-sm);
-  color: var(--qq-text);
-  padding: 6px 10px;
-  font-size: var(--qq-text-sm);
-  outline: none;
-  width: 100%;
-}
-
-.field select:focus,
-.field input:focus {
-  border-color: var(--qq-accent);
-  box-shadow: 0 0 0 3px var(--qq-accent-soft);
-}
-
-.model-row {
+.field-row {
   display: flex;
-  gap: var(--qq-gap-xs);
   align-items: center;
+  gap: var(--qq-gap-xs);
 }
 
-.model-row input {
+.field-row input {
   flex: 1;
+  min-width: 0;
 }
 
-@media (max-width: 900px) {
-  .split {
+@media (max-width: 1100px) {
+  .settings-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .group-panel {
+    max-height: 260px;
+  }
+}
+
+@media (max-width: 760px) {
+  .editor-head {
+    align-items: flex-start;
     flex-direction: column;
   }
-  .list-card {
-    width: 100%;
-    max-height: 200px;
+
+  .default-strip,
+  .form-grid,
+  .form-grid--three {
+    grid-template-columns: 1fr;
   }
 }
 </style>

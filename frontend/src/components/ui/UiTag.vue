@@ -1,54 +1,55 @@
 <template>
-  <span class="ui-tag" :class="[variantClass, sizeClass]">
+  <span :class="['ui-tag', `ui-tag--${variant}`, `ui-tag--${size}`]">
     <slot />
   </span>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-
-const props = defineProps({
-  variant: { type: String, default: 'info' },
-  size: { type: String, default: 'md' },
+withDefaults(defineProps<{
+  variant?: 'info' | 'success' | 'warn' | 'danger'
+  size?: 'md' | 'sm'
+}>(), {
+  variant: 'info',
+  size: 'md',
 })
-
-const variantClass = computed(() => `ui-tag--${props.variant}`)
-const sizeClass = computed(() => `ui-tag--${props.size}`)
 </script>
 
 <style scoped>
 .ui-tag {
   display: inline-flex;
   align-items: center;
-  border-radius: var(--qq-radius-pill);
+  border-radius: var(--qq-radius-full);
   font-weight: 500;
+  font-size: var(--qq-text-xs);
   line-height: 1;
+  white-space: nowrap;
 }
 
 .ui-tag--md {
-  min-height: 24px;
+  height: 24px;
   padding: 0 10px;
-  font-size: var(--qq-text-xs);
 }
 
 .ui-tag--sm {
-  min-height: 20px;
+  height: 20px;
   padding: 0 8px;
-  font-size: var(--qq-text-xs);
 }
 
 .ui-tag--info {
-  background: var(--qq-accent-soft);
-  color: var(--qq-accent);
+  background: var(--qq-primary-soft);
+  color: var(--qq-primary);
 }
+
 .ui-tag--success {
   background: var(--qq-success-soft);
   color: var(--qq-success);
 }
+
 .ui-tag--warn {
   background: var(--qq-warn-soft);
   color: var(--qq-warn);
 }
+
 .ui-tag--danger {
   background: var(--qq-danger-soft);
   color: var(--qq-danger);
