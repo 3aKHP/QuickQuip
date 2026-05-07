@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-05-08
+
+> [!WARNING]
+> 此版本彻底移除了对旧版前端 frontend-v1 的支持。如果你在部署脚本或 Docker 编排中引用了 `/ops/v1/` 路径或 `frontend-v1/dist` 卷挂载，请在本版升级前移除相关配置。
+
 ### 新增
 
 - **牛牛打胶事件重做**：事件从 5 个扩展至 11 个，新增 lucky_day、mirror、blessing、gambler、zen、frenzy、nightmare 共 7 种事件，权重重新分配；移除急速惩罚陷阱（连续打胶窗口）
@@ -27,6 +32,10 @@
 - Web 端牛牛操作记录缺失 `fencing_draw` 和 `fencing_self_hurt` 中文标签
 - **牛牛三种排行体系**：新增自然数值排行（有符号排序）和绝对值排行，加上原有长度/深度群体排行共四种视角；负数用户不再显示排名 -1；Web 端和群命令均已支持
 - **语录系统升级**：新增 per-group 顺序编号、按编号定点查看（`/quote N`）、关键词搜索（`/quote search <关键词>`）、Web 端管理界面（按群浏览/搜索/删除）；旧数据库自动迁移
+
+### 移除
+
+- **frontend-v1 废弃**：移除旧版 SPA 前端全部挂载点（FastAPI `/ops/v1` 静态挂载、Dockerfile COPY、CI 发布打包、gitignore 排除规则、v2 前端"旧版"导航按钮）
 
 ## [1.3.1] - 2026-05-07
 
@@ -391,8 +400,9 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
+[1.3.2]: https://github.com/3aKHP/QuickQuip/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/3aKHP/QuickQuip/compare/v1.3.0...v1.3.1
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.3.2...HEAD
 [1.3.0]: https://github.com/3aKHP/QuickQuip/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/3aKHP/QuickQuip/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...v1.2.0
