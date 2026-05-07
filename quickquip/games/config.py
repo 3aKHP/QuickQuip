@@ -79,11 +79,45 @@ class NiuNiuConfig:
     fence_cooldown: int = 180
     fenced_protection: int = 300
     glue_cooldown: int = 180
-    quick_glue_window: int = 240
     unsubscribe_gold: int = 500
-    decay_rate_high: float = 0.03
-    decay_rate_normal: float = 0.02
-    decay_floor: int = -100
+    decay_rate_high: float = 0.01
+    decay_rate_normal: float = 0.005
+    decay_floor: float = -1000000.0
+
+    # Growth formula tuning
+    glue_growth_scale: float = 500.0
+
+    # Gluing event tuning
+    glue_lucky_coefficient: float = 1.8
+    glue_special_coefficient: float = 1.3
+    glue_shrinkage_effect: float = 0.5
+    glue_nightmare_effect: float = 0.7
+    glue_arrested_duration: int = 180
+    glue_blessing_min: float = 3.0
+    glue_blessing_max: float = 10.0
+    glue_gambler_min: float = 2.0
+    glue_gambler_max: float = 7.0
+    glue_zen_min: float = 0.3
+    glue_zen_max: float = 1.5
+    glue_frenzy_min: float = 1.5
+    glue_frenzy_max: float = 5.0
+
+    # Fencing event tuning
+    fence_critical_multiplier: float = 1.8
+    fence_glancing_multiplier: float = 0.4
+    fence_dominate_multiplier: float = 3.0
+    fence_devour_steal_ratio: float = 0.15
+    fence_devour_threshold: float = 50.0
+    fence_draw_min: float = 0.5
+    fence_draw_max: float = 2.0
+
+    # No-niuniu target tuning
+    fence_self_hurt_min: float = 0.5
+    fence_self_hurt_max: float = 2.5
+
+    # Bot fencing tuning
+    fence_bot_phantom_min: float = 5.0
+    fence_bot_phantom_max: float = 80.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> NiuNiuConfig:
