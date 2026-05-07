@@ -109,12 +109,12 @@ const adjustError = ref(false)
 
 const ACTION_LABELS: Record<string, string> = {
   register: '注册', unsubscribe: '注销', gluing: '打胶',
-  fencing: '击剑', fenced: '被击', admin_adjust: '修正',
+  fencing: '击剑', fenced: '被击', fencing_draw: '平局', fencing_self_hurt: '自伤', admin_adjust: '修正',
 }
 function actionLabel(a: string) { return ACTION_LABELS[a] || a }
 
 function tagVariant(a: string): string {
-  const m: Record<string, string> = { fencing: 'success', fenced: 'danger', gluing: 'info', admin_adjust: 'warn' }
+  const m: Record<string, string> = { fencing: 'success', fenced: 'danger', gluing: 'info', fencing_draw: 'warn', fencing_self_hurt: 'danger', admin_adjust: 'warn' }
   return m[a] || ''
 }
 
