@@ -73,9 +73,14 @@ game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯
 | `[niuniu]` | `fenced_protection` | 300 | 被击保护期（秒） |
 | `[niuniu]` | `glue_cooldown` | 180 | 打胶 CD（秒） |
 | `[niuniu]` | `unsubscribe_gold` | 500 | 注销费用 |
-| `[niuniu]` | `decay_rate_high` | 0.03 | 高长度衰减率 |
-| `[niuniu]` | `decay_rate_normal` | 0.02 | 正常衰减率 |
-| `[niuniu]` | `decay_floor` | -100 | 衰减下限 |
+| `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率 |
+| `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率 |
+| `[niuniu]` | `decay_floor` | -1000000.0 | 衰减下限 |
+| `[niuniu]` | `glue_growth_scale` | 500.0 | 打胶增长基数 |
+| `[niuniu]` | `fence_critical_multiplier` | 1.8 | 击剑暴击倍率 |
+| `[niuniu]` | `fence_dominate_multiplier` | 3.0 | 击剑牛头人压制倍率 |
+| `[niuniu]` | `fence_devour_steal_ratio` | 0.15 | 击剑魅魔吞噬比例 |
+| `[niuniu]` | `fence_devour_threshold` | 50.0 | 吞噬触发阈值 |
 
 ### 配置文件加载逻辑
 

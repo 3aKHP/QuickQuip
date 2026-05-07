@@ -22,8 +22,11 @@
 
 ### 修复
 
+- **审计日志 IP 恒为 `172.20.0.1`**：将 `request.client.host` 替换为 `X-Forwarded-For` 感知的共享工具函数 `get_client_ip()`（提取自 auth 模块，新建 `quickquip/app/web/client_ip.py`）
 - 击剑 @ 机器人时 @ 提取失败（OneBot 对 self-@ 不产生 MessageSegment），改为优先从 `event.raw_message` 提取
 - Web 端牛牛操作记录缺失 `fencing_draw` 和 `fencing_self_hurt` 中文标签
+- **牛牛三种排行体系**：新增自然数值排行（有符号排序）和绝对值排行，加上原有长度/深度群体排行共四种视角；负数用户不再显示排名 -1；Web 端和群命令均已支持
+- **语录系统升级**：新增 per-group 顺序编号、按编号定点查看（`/quote N`）、关键词搜索（`/quote search <关键词>`）、Web 端管理界面（按群浏览/搜索/删除）；旧数据库自动迁移
 
 ## [1.3.1] - 2026-05-07
 
