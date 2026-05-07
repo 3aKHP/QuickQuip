@@ -11,6 +11,7 @@ import LlmAboutView from '../views/LlmAboutView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
 import RateLimitView from '../views/RateLimitView.vue'
 import TiebaView from '../views/TiebaView.vue'
+import QuotesView from '../views/QuotesView.vue'
 import WordcloudView from '../views/WordcloudView.vue'
 import ConfigView from '../views/ConfigView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
@@ -59,6 +60,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
   { key: 'mcp-dashboard',  path: '/mcp-dashboard',  label: 'MCP',      icon: 'Network',         section: 'llm',      component: McpDashboardView },
   { key: 'summary',        path: '/summary',        label: '总结',     icon: 'FileText',        section: 'content',  component: SummaryView },
+  { key: 'quotes',         path: '/quotes',         label: '语录',     icon: 'Quote',           section: 'content',  component: QuotesView },
   { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',        section: 'content',  component: TiebaView },
   { key: 'wordcloud',      path: '/wordcloud',      label: '词云',     icon: 'Cloud',           section: 'content',  component: WordcloudView },
   { key: 'config',         path: '/config',         label: '配置',     icon: 'Settings',        section: 'system',   component: ConfigView },

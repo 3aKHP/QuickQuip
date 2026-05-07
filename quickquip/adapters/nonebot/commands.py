@@ -1571,14 +1571,47 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         group_id = event.group_id
         args = _strip_command_name(str(event.get_message()).strip(), "quote").strip()
         reply = getattr(event, "reply", None)
+
+        # /quote random  or  /quote (no args, no reply) → random
         if args.lower() == "random" or (not args and not reply):
             q = group_quote_store.random(group_id)
             if q is None:
                 await quote_cmd.finish("语录库还是空的，引用一条消息发 /quote 来收藏吧")
             ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
-            await quote_cmd.finish(f"「{q['content']}」\n—— {q['quoted_sender_name']} ({ts})")
+            seq_str = f"#{q.get('group_seq', '?')} " if q.get('group_seq') else ""
+            await quote_cmd.finish(f"{seq_str}「{q['content']}」\n—— {q['quoted_sender_name']} ({ts})")
+
+        # /quote N  or  /quote #N → get by group_seq
+        seq_match = re.match(r"^#?(\d+)$", args)
+        if seq_match:
+            seq = int(seq_match.group(1))
+            q = group_quote_store.get_by_seq(group_id, seq)
+            if q is None:
+                await quote_cmd.finish(f"本群没有编号为 #{seq} 的语录")
+            ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
+            await quote_cmd.finish(f"#{seq} 「{q['content']}」\n—— {q['quoted_sender_name']} ({ts})")
+
+        # /quote search <keyword>  or  /quote s <keyword>
+        search_match = re.match(r"^(?:search|s)\s+(.+)$", args, re.IGNORECASE)
+        if search_match:
+            keyword = search_match.group(1).strip()
+            rows, total = group_quote_store.search(group_id, keyword, limit=10)
+            if not rows:
+                await quote_cmd.finish(f"未找到包含「{keyword}」的语录")
+            lines = [f"🔍 「{keyword}」（共 {total} 条）："]
+            for r in rows:
+                preview = r["content"][:40] + ("…" if len(r["content"]) > 40 else "")
+                lines.append(f"#{r['group_seq']} 「{preview}」—— {r['quoted_sender_name']}")
+            await quote_cmd.finish("\n".join(lines))
+
         if not reply:
-            await quote_cmd.finish("用法：引用一条消息后发 /quote 收藏；/quote random 随机一条")
+            await quote_cmd.finish(
+                "用法：\n"
+                "/quote — 随机一条\n"
+                "/quote N — 查看编号为 N 的语录\n"
+                "/quote search <关键词> — 搜索语录\n"
+                "引用消息 + /quote — 收藏语录"
+            )
         rendered = render_reply_for_llm(
             reply,
             bot_self_id=event.self_id,
@@ -1800,8 +1833,13 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         length = niuniu_store.get_length(uid)
         if length is None:
             await nn_my.finish("你还没有牛牛呢！请发送 注册牛牛 领取你的牛牛！")
-        rank = niuniu_store.get_rank_position(uid)
-        rank_str = f"第 {rank} 名" if rank > 0 else "未上榜（深度状态）"
+        natural_rank = niuniu_store.get_rank_position(uid, "natural")
+        if length > 0:
+            rank_str = f"第 {natural_rank} 名"
+        else:
+            depth_rank = niuniu_store.get_rank_position(uid, "depth")
+            abs_rank = niuniu_store.get_rank_position(uid, "absolute")
+            rank_str = f"总榜第 {natural_rank} 名 | 深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
         last_glue = niuniu_store.latest_record_time(uid, "gluing")
         lines = [
             "🐂 我的牛牛",
@@ -1937,6 +1975,43 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         n = min(n, 50)
         entries = niuniu_store.rank_by_depth(limit=n)
         await nn_depth_rank_all.finish(_build_rank_text(entries, "牛牛深度总排行（全局）"))
+
+    nn_natural_rank = on_command("牛牛总排行", priority=10, block=True)
+
+    @nn_natural_rank.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await nn_natural_rank.finish("私聊不支持此命令")
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "牛牛总排行").strip()
+        n = int(args) if args.isdigit() else 10
+        n = min(n, 50)
+        entries = niuniu_store.rank_by_natural(limit=n)
+        await nn_natural_rank.finish(_build_rank_text(entries, "牛牛总排行（自然数值）"))
+
+    nn_abs_rank = on_command("牛牛绝对值排行", priority=10, block=True)
+
+    @nn_abs_rank.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await nn_abs_rank.finish("私聊不支持此命令，请使用 牛牛绝对值总排行")
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "牛牛绝对值排行").strip()
+        n = int(args) if args.isdigit() else 10
+        n = min(n, 50)
+        entries = niuniu_store.rank_by_absolute(limit=n)
+        await nn_abs_rank.finish(_build_rank_text(entries, "牛牛绝对值排行"))
+
+    nn_abs_rank_all = on_command("牛牛绝对值总排行", priority=10, block=True)
+
+    @nn_abs_rank_all.handle()
+    async def _(event):
+        text = str(event.get_message()).strip()
+        args = _strip_command_name(text, "牛牛绝对值总排行").strip()
+        n = int(args) if args.isdigit() else 10
+        n = min(n, 50)
+        entries = niuniu_store.rank_by_absolute(limit=n)
+        await nn_abs_rank_all.finish(_build_rank_text(entries, "牛牛绝对值总排行（全局）"))
 
     nn_records = on_command("我的牛牛战绩", priority=10, block=True)
 
