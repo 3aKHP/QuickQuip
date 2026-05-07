@@ -1847,17 +1847,22 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             ]
             await nn_fence.finish(random.choice(tips))
 
-        # Extract @target
+        # Extract @target — prefer raw_message (preserves self-@ that
+        # get_message segments may strip), fall back to segment parsing.
         target_uid = None
-        at_found = False
-        for seg in event.get_message():
-            seg_type = getattr(seg, "type", None)
-            data = getattr(seg, "data", {})
-            if seg_type == "at" and not at_found:
-                qq = str(data.get("qq", "") or "").strip()
-                if qq and qq != "all":
-                    target_uid = qq
-                    at_found = True
+        raw = getattr(event, "raw_message", None) or str(event.get_message())
+        m = re.search(r"\[CQ:at,qq=(\d+)\]", raw)
+        if m:
+            target_uid = m.group(1)
+        if not target_uid:
+            for seg in event.get_message():
+                seg_type = getattr(seg, "type", None)
+                data = getattr(seg, "data", {})
+                if seg_type == "at":
+                    qq = str(data.get("qq", "") or "").strip()
+                    if qq and qq != "all":
+                        target_uid = qq
+                        break
         if not target_uid:
             await nn_fence.finish("你要和谁击剑？请 @一位用户")
 
@@ -1873,7 +1878,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             ]
             await nn_fence.finish(random.choice(tips))
 
-        result = fencing(niuniu_store, uid, target_uid)
+        is_vs_bot = (target_uid == str(event.self_id))
+        result = fencing(niuniu_store, uid, target_uid, oppo_is_bot=is_vs_bot)
         await nn_fence.finish(result)
 
     def _build_rank_text(entries: list[dict], title: str, unit: str = "cm") -> str:
@@ -1952,6 +1958,8 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             "gluing": "💦 打胶",
             "fencing": "⚔️ 击剑（主动）",
             "fenced": "🎯 被击剑",
+            "fencing_draw": "🤝 击剑平局",
+            "fencing_self_hurt": "💨 击剑自伤",
         }
         lines = ["📋 我的牛牛战绩："]
         for r in records:
