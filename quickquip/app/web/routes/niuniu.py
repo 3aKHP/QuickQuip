@@ -21,16 +21,22 @@ class AdjustLengthBody(BaseModel):
 
 @router.get("/niuniu/rankings")
 async def get_rankings(request: Request, type: str = "length", top_n: int = 20):
-    """Return global length or depth rankings."""
-    if type not in ("length", "depth"):
-        raise HTTPException(422, "type must be 'length' or 'depth'")
+    """Return global rankings.
+
+    *type*: "natural" | "absolute" | "length" | "depth"
+    """
+    if type not in ("natural", "absolute", "length", "depth"):
+        raise HTTPException(422, "type must be 'natural', 'absolute', 'length' or 'depth'")
     top_n = min(top_n, 100)
 
     store: NiuNiuStore = niuniu_store
-    if type == "length":
-        entries = store.rank_by_length(limit=top_n)
-    else:
-        entries = store.rank_by_depth(limit=top_n)
+    method = {
+        "natural": store.rank_by_natural,
+        "absolute": store.rank_by_absolute,
+        "length": store.rank_by_length,
+        "depth": store.rank_by_depth,
+    }[type]
+    entries = method(limit=top_n)
     return {"type": type, "rankings": entries, "total_users": store.count()}
 
 
@@ -89,13 +95,16 @@ async def get_user(uid: str, request: Request):
     if length is None:
         raise HTTPException(404, "user not found")
 
-    rank = store.get_rank_position(uid)
     records = store.get_records(uid, limit=30)
 
     return {
         "uid": uid,
         "length": length,
-        "rank": rank,
+        "rank": store.get_rank_position(uid, "natural"),
+        "rank_natural": store.get_rank_position(uid, "natural"),
+        "rank_absolute": store.get_rank_position(uid, "absolute"),
+        "rank_length": store.get_rank_position(uid, "length"),
+        "rank_depth": store.get_rank_position(uid, "depth"),
         "records": records,
     }
 

@@ -395,16 +395,78 @@ class NiuNiuStore:
                 ).fetchall()
         return [{"uid": r["uid"], "length": abs(r["length"])} for r in rows]
 
-    def get_rank_position(self, uid: str) -> int:
-        """Return the 1-based rank of *uid* among all users with positive length."""
-        length = self.get_length(uid)
-        if length is None or length <= 0:
-            return -1
+    def rank_by_natural(self, limit: int = 10, user_ids: list[str] | None = None) -> list[dict]:
+        """Rank all users by signed length descending."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS c FROM niuniu_users WHERE length > ?",
-                (length,),
-            ).fetchone()
+            if user_ids:
+                placeholders = ",".join("?" for _ in user_ids)
+                rows = conn.execute(
+                    f"SELECT uid, length FROM niuniu_users WHERE uid IN ({placeholders}) ORDER BY length DESC LIMIT ?",
+                    [*user_ids, limit],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT uid, length FROM niuniu_users ORDER BY length DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [{"uid": r["uid"], "length": r["length"]} for r in rows]
+
+    def rank_by_absolute(self, limit: int = 10, user_ids: list[str] | None = None) -> list[dict]:
+        """Rank all users by ABS(length) descending."""
+        with self._connect() as conn:
+            if user_ids:
+                placeholders = ",".join("?" for _ in user_ids)
+                rows = conn.execute(
+                    f"SELECT uid, length FROM niuniu_users WHERE uid IN ({placeholders}) ORDER BY ABS(length) DESC LIMIT ?",
+                    [*user_ids, limit],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT uid, length FROM niuniu_users ORDER BY ABS(length) DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [{"uid": r["uid"], "length": r["length"]} for r in rows]
+
+    def get_rank_position(self, uid: str, type: str = "natural") -> int:
+        """Return the 1-based rank of *uid*.
+
+        *type* selects the ranking:
+        - "natural":  signed length DESC across all users
+        - "absolute": ABS(length) DESC across all users
+        - "length":   among positive-length users only (-1 if length <= 0)
+        - "depth":    among negative-length users only (-1 if length >= 0)
+        """
+        length = self.get_length(uid)
+        if length is None:
+            return -1
+
+        with self._connect() as conn:
+            if type == "natural":
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM niuniu_users WHERE length > ?",
+                    (length,),
+                ).fetchone()
+            elif type == "absolute":
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM niuniu_users WHERE ABS(length) > ?",
+                    (abs(length),),
+                ).fetchone()
+            elif type == "length":
+                if length <= 0:
+                    return -1
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM niuniu_users WHERE length > ?",
+                    (length,),
+                ).fetchone()
+            elif type == "depth":
+                if length >= 0:
+                    return -1
+                row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM niuniu_users WHERE length < ?",
+                    (length,),
+                ).fetchone()
+            else:
+                return -1
             return (row["c"] if row else 0) + 1
 
 

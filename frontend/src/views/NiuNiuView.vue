@@ -3,17 +3,17 @@
     <UiPageHeader title="牛牛大作战" subtitle="查看全局排行、用户详情，手动修正异常数据" />
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiCard padding="md" shadow="sm" class="section">
-      <div class="toolbar"><h3 class="st">排行</h3><div class="tab-row"><button :class="{ active: rankType === 'length' }" @click="switchRank('length')">长度</button><button :class="{ active: rankType === 'depth' }" @click="switchRank('depth')">深度</button></div><span class="muted" style="margin-left:auto">共 {{ totalUsers.toLocaleString() }} 用户</span><UiButton size="sm" icon="RefreshCw" :loading="rankLoading" @click="loadRankings" /></div>
+      <div class="toolbar"><h3 class="st">排行</h3><div class="tab-row"><button :class="{ active: rankType === 'natural' }" @click="switchRank('natural')">自然</button><button :class="{ active: rankType === 'absolute' }" @click="switchRank('absolute')">绝对值</button><button :class="{ active: rankType === 'length' }" @click="switchRank('length')">长度</button><button :class="{ active: rankType === 'depth' }" @click="switchRank('depth')">深度</button></div><span class="muted" style="margin-left:auto">共 {{ totalUsers.toLocaleString() }} 用户</span><UiButton size="sm" icon="RefreshCw" :loading="rankLoading" @click="loadRankings" /></div>
       <UiLoading v-if="rankLoading && !rankings.length" />
-      <UiEmpty v-else-if="!rankings.length" icon="BarChart3" :title="rankType === 'length' ? '暂无长度数据' : '暂无深度数据'" />
-      <table v-else><thead><tr><th class="num">#</th><th>QQ</th><th class="num">{{ rankType === 'length' ? '长度 (cm)' : '深度 (cm)' }}</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.uid"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="selectUser(r.uid)" class="link">{{ r.uid }}</a></td><td class="num">{{ r.length }}</td></tr></tbody></table>
+      <UiEmpty v-else-if="!rankings.length" icon="BarChart3" :title="'暂无' + rankLabel + '数据'" />
+      <table v-else><thead><tr><th class="num">#</th><th>QQ</th><th class="num">{{ rankColLabel }}</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.uid"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="selectUser(r.uid)" class="link">{{ r.uid }}</a></td><td class="num">{{ r.length }}</td></tr></tbody></table>
     </UiCard>
 
     <UiCard padding="md" shadow="sm" class="section">
       <h3 class="st">用户查询</h3>
       <div class="lookup"><input v-model="searchUid" placeholder="QQ 号" style="width:160px" @keyup.enter="searchUser" /><UiButton icon="Search" :loading="userLoading" @click="searchUser">查询</UiButton></div>
       <div v-if="userDetail" class="user-detail">
-        <div class="acct-info"><span class="al">QQ</span><span class="mono">{{ userDetail.uid }}</span><span class="al">长度</span><strong>{{ userDetail.length }} cm</strong><span v-if="userDetail.rank > 0" class="al">排名</span><span>第 {{ userDetail.rank }} 名</span></div>
+        <div class="acct-info"><span class="al">QQ</span><span class="mono">{{ userDetail.uid }}</span><span class="al">长度</span><strong>{{ userDetail.length }} cm</strong><span class="al">总排行</span><span>第 {{ userDetail.rank_natural }} 名</span><span v-if="userDetail.rank_length > 0" class="al">长度排行</span><span v-if="userDetail.rank_length > 0">第 {{ userDetail.rank_length }} 名</span><span v-if="userDetail.rank_depth > 0" class="al">深度排行</span><span v-if="userDetail.rank_depth > 0">第 {{ userDetail.rank_depth }} 名</span><span class="al">绝对值</span><span>第 {{ userDetail.rank_absolute }} 名</span></div>
         <div class="adj-row"><input v-model.number="adjustLengthVal" type="number" step="0.01" placeholder="新长度" class="adj-amt" /><input v-model="adjustReason" placeholder="原因（可选）" class="adj-reason" maxlength="200" /><UiButton variant="primary" icon="Send" :loading="adjLoading" @click="doAdjust">修正</UiButton></div>
         <p v-if="adjustResult" class="adj-res" :class="{ 'adj-err': adjustError }">{{ adjustResult }}</p>
         <h4 class="st" style="margin-top:var(--qq-gap-md)">操作记录（最近 30 条）</h4>
@@ -26,13 +26,18 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
 import { getRankings, getUser, adjustLength } from '../api/niuniu'; import { toast } from '../toast'
 
-const loadError = ref<string | null>(null); const rankType = ref('length'); const rankLoading = ref(false); const rankings = ref<any[]>([]); const totalUsers = ref(0)
+const loadError = ref<string | null>(null); const rankType = ref('natural'); const rankLoading = ref(false); const rankings = ref<any[]>([]); const totalUsers = ref(0)
 const searchUid = ref(''); const userLoading = ref(false); const userSearched = ref(false); const userDetail = ref<any>(null)
 const adjustLengthVal = ref<number | null>(null); const adjustReason = ref(''); const adjLoading = ref(false); const adjustResult = ref(''); const adjustError = ref(false)
+
+const RANK_LABELS: Record<string, string> = { natural: '自然数值', absolute: '绝对值', length: '长度', depth: '深度' }
+const RANK_COL_LABELS: Record<string, string> = { natural: '长度 (cm)', absolute: '长度 (cm)', length: '长度 (cm)', depth: '深度 (cm)' }
+const rankLabel = computed(() => RANK_LABELS[rankType.value] || rankType.value)
+const rankColLabel = computed(() => RANK_COL_LABELS[rankType.value] || '长度 (cm)')
 
 const AL: Record<string, string> = { register: '注册', unsubscribe: '注销', gluing: '打胶', fencing: '击剑', fenced: '被击', fencing_draw: '平局', fencing_self_hurt: '自伤', admin_adjust: '修正' }
 function al(a: string) { return AL[a] || a }
