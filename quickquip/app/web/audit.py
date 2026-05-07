@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import Request
 
+from quickquip.app.web.client_ip import get_client_ip
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,7 +71,7 @@ class AuditLogger:
     ) -> None:
         """Record an audit entry. Failures are caught and logged — never raised."""
         try:
-            operator = request.client.host if request.client else "unknown"
+            operator = get_client_ip(request) or "unknown"
             timestamp = datetime.now(timezone.utc).isoformat()
             before_json = json.dumps(summary_before, ensure_ascii=False) if summary_before else None
             after_json = json.dumps(summary_after, ensure_ascii=False) if summary_after else None

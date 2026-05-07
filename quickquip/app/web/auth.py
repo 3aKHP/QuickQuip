@@ -89,17 +89,8 @@ def _format_dt(value: datetime) -> str:
 
 
 def _get_client_ip(request: Request) -> str:
-    # H4: 只有直连 IP 是 loopback 或私有地址时才信任 X-Forwarded-For
-    direct_ip = request.client.host if request.client else ""
-    _TRUSTED_PREFIXES = ("127.", "::1", "10.", "172.", "192.168.")
-    if direct_ip and any(direct_ip.startswith(p) for p in _TRUSTED_PREFIXES):
-        forwarded_for = request.headers.get("x-forwarded-for", "")
-        if forwarded_for:
-            candidate = forwarded_for.split(",")[0].strip()
-            # 基本格式校验，拒绝含换行符等非法字符的值
-            if candidate and "\n" not in candidate and "\r" not in candidate:
-                return candidate
-    return direct_ip
+    from quickquip.app.web.client_ip import get_client_ip
+    return get_client_ip(request)
 
 
 def _request_scheme(request: Request) -> str:
