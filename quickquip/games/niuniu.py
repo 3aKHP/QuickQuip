@@ -14,7 +14,6 @@ from quickquip.games.config import NiuNiuConfig
 FENCE_COOLDOWN = 180
 FENCED_PROTECTION = 300
 GLUE_COOLDOWN = 180
-QUICK_GLUE_WINDOW = 240
 UNSUBSCRIBE_GOLD = 500
 
 
@@ -27,7 +26,6 @@ def _utc_now() -> str:
 _fence_cd: dict[str, float] = {}       # uid → next allowed fence time
 _fenced_cd: dict[str, float] = {}      # uid → next allowed to-be-fenced time
 _glue_cd: dict[str, float] = {}        # uid → next allowed glue time
-_glue_last: dict[str, float] = {}      # uid → last glue time (for rapid detection)
 _arrested_until: dict[str, float] = {} # uid → arrested until
 
 
@@ -47,9 +45,8 @@ def _set_cd(cd_map: dict[str, float], uid: str, seconds: float) -> None:
 _GLUE_EVENTS = [
     {
         "name": "normal",
-        "weight": 60,
+        "weight": 30,
         "category": "growth",
-        "coefficient": 1.0,
         "pos": [
             "你嘿咻嘿咻一下，促进了牛牛发育，牛牛增加了 {diff} cm！",
             "你打了个舒服痛快的🦶，牛牛增加了 {diff} cm！",
@@ -68,14 +65,83 @@ _GLUE_EVENTS = [
             "你的牛牛刚开始变长了，可过了一会又回来了，什么变化也没有",
             "你在打胶时，感觉这个世界似乎发生了什么变化",
         ],
-        "rapid_pos": ["这么着急？牛牛只微微增长了 {diff} cm..."],
-        "rapid_neg": ["bro你搞这么快只会适得其反！牛牛减少了 {diff} cm！"],
+    },
+    {
+        "name": "lucky_day",
+        "weight": 5,
+        "category": "growth",
+        "pos": [
+            "🍀 今天运势极佳！牛牛疯狂生长了 {diff} cm！",
+            "幸运女神掀起了你的裙子！牛牛暴增 {diff} cm！",
+            "黄历说今日宜打胶，果然！牛牛增长了 {diff} cm！",
+        ],
+    },
+    {
+        "name": "mirror",
+        "weight": 5,
+        "category": "mirror",
+        "pos": [
+            "🪞 你的牛牛穿过了镜子！长度反转了！现在 {new_length} cm！",
+            "牛牛误入了异次元裂缝，正负颠倒！当前 {new_length} cm！",
+            "镜之国度的魔法！你的牛牛变成了 {new_length} cm！",
+        ],
+    },
+    {
+        "name": "blessing",
+        "weight": 3,
+        "category": "jackpot",
+        "pos": [
+            "🌈 牛牛之神降下了祝福！牛牛暴涨 {diff} cm！！",
+            "上古牛神显灵！你的牛牛获得了神力加持，暴增 {diff} cm！",
+            "天降祥瑞！七彩祥云笼罩了你的牛牛，增长 {diff} cm！",
+        ],
+    },
+    {
+        "name": "gambler",
+        "weight": 4,
+        "category": "gambler",
+        "pos": [
+            "🎰 你押上了全部身家……赢了！牛牛暴涨 {diff} cm！！",
+            "赌徒的胜利！牛牛狂增 {diff} cm！",
+        ],
+        "neg": [
+            "🎰 你押上了全部身家……输光了！牛牛暴跌 {diff} cm...",
+            "赌狗不得好死！牛牛缩水了 {diff} cm...",
+        ],
+    },
+    {
+        "name": "zen",
+        "weight": 4,
+        "category": "zen",
+        "pos": [
+            "🧘 你进入了贤者模式，牛牛宁静地生长了 {diff} cm",
+            "心如止水，牛牛缓缓增长了 {diff} cm",
+            "打坐冥想之后，牛牛平和地增加了 {diff} cm",
+        ],
+    },
+    {
+        "name": "frenzy",
+        "weight": 4,
+        "category": "frenzy",
+        "pos": [
+            "💥 你进入了狂暴状态！牛牛暴涨 {diff} cm！",
+            "肾上腺素飙升！牛牛怒长了 {diff} cm！",
+            "你磕了药一样疯狂打胶，牛牛暴增 {diff} cm！",
+        ],
+    },
+    {
+        "name": "nightmare",
+        "weight": 3,
+        "category": "shrinkage",
+        "neg": [
+            "👻 你做了一个关于牛牛的噩梦！吓缩了 {diff} cm...",
+            "深夜惊醒，发现牛牛被鬼压床！缩短了 {diff} cm...",
+        ],
     },
     {
         "name": "shrinkage",
-        "weight": 10,
+        "weight": 8,
         "category": "shrinkage",
-        "effect": 0.5,
         "neg": [
             "由于你在换蛋期打胶，你的牛牛断掉了呢！当前长度 {new_length} cm！",
             "bro换蛋期就不要打胶了！你的牛牛萎缩了 {diff} cm！",
@@ -83,31 +149,19 @@ _GLUE_EVENTS = [
     },
     {
         "name": "arrested",
-        "weight": 10,
+        "weight": 6,
         "category": "arrested",
-        "ban_time": 180,
         "pos": [
             "打胶时被窗外的路人发现了，对方报警了！你被抓走关进小黑屋 {ban_time}s！",
         ],
     },
     {
         "name": "special_boost",
-        "weight": 5,
+        "weight": 4,
         "category": "growth",
-        "coefficient": 1.1,
         "pos": [
             "你收到了群主私发的女装，冲！！！牛牛长大了 {diff} cm！",
             "一股神秘力量涌来！牛牛暴增 {diff} cm！",
-        ],
-    },
-    {
-        "name": "rapid_penalty",
-        "weight": 15,
-        "category": "shrinkage",
-        "effect": 0.9,
-        "neg": [
-            "这么着急？牛牛减少了 {diff} cm...",
-            "bro你搞这么快只会适得其反！牛牛减少了 {diff} cm！",
         ],
     },
 ]
@@ -115,6 +169,10 @@ _GLUE_EVENTS = [
 # ── length comments ─────────────────────────────────────────────────────
 
 _LENGTH_COMMENTS = {
+    (-1000000000, -1000): [
+        "你已经超越了维度的界限……深渊魅魔之神！",
+        "凡人无法理解的凹度，你已经成为了传说！",
+    ],
     (-1000, -100): [
         "哇哦！你已经进化成魅魔了！魅魔在击剑时有几率吞噬对方牛牛呢！",
     ],
@@ -154,11 +212,15 @@ _LENGTH_COMMENTS = {
     (50, 100): [
         "你这个长度会死人的……！",
         "你是什么怪物，不要过来啊！！",
-        "惊世骇俗！你已经进化成牛头人了！牛头人在击剑时有几率吞噬对方牛牛呢！",
+        "惊世骇俗！你已经进化成牛头人了！牛头人在击剑时有几率支配对手！",
     ],
-    (100, 100000): [
+    (100, 1000): [
         "你已经超越人类极限了……",
         "牛牛之王！",
+    ],
+    (1000, 1000000000): [
+        "你已经是神话级别的存在了！牛牛突破了现实维度！",
+        "凡人只能仰望你的长度……牛牛之神降临！",
     ],
 }
 
@@ -369,8 +431,6 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     if origin is None:
         return "你还没有牛牛呢！请先发送 注册牛牛", 0
 
-    is_rapid = time.time() - _glue_last.get(uid, 0) < store.config.quick_glue_window
-
     # Arrested check
     if _check_cd(_arrested_until, uid) > 0:
         remaining = int(_check_cd(_arrested_until, uid))
@@ -383,13 +443,14 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     chosen_name = random.choices(names, weights=weights, k=1)[0]
     event = next(e for e in events if e["name"] == chosen_name)
 
-    if is_rapid and "rapid_neg" in event:
-        # Use rapid variant for normal event
-        diff = round(random.uniform(0.5, 1.5) * -1, 2)
-        new_length = round(origin + diff, 2)
-        msg = random.choice(event["rapid_neg"]).format(diff=abs(diff))
-    elif event["category"] == "growth":
-        diff = _glue_growth(origin, event.get("coefficient", 1.0))
+    cfg = store.config
+
+    if event["category"] == "growth":
+        coeff = {
+            "lucky_day": cfg.glue_lucky_coefficient,
+            "special_boost": cfg.glue_special_coefficient,
+        }.get(event["name"], 1.0)
+        diff = _glue_growth(origin, coeff, cfg.glue_growth_scale)
         new_length = round(origin + diff, 2)
         if diff > 0 and "pos" in event:
             msg = random.choice(event["pos"]).format(diff=abs(diff))
@@ -398,7 +459,7 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
         else:
             msg = random.choice(event.get("zero", ["什么也没有发生…"])).format(diff=0)
     elif event["category"] == "shrinkage":
-        effect = event.get("effect", 0.5)
+        effect = cfg.glue_nightmare_effect if event["name"] == "nightmare" else cfg.glue_shrinkage_effect
         if origin >= 0:
             new_length = round(origin * effect, 2)
         else:
@@ -409,13 +470,41 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
         else:
             msg = f"你的牛牛萎缩了 {abs(diff)} cm！当前 {new_length} cm"
     elif event["category"] == "arrested":
-        ban_time = event.get("ban_time", 180)
+        ban_time = cfg.glue_arrested_duration
         _set_cd(_arrested_until, uid, ban_time)
         new_length = origin
         diff = 0
         msg = random.choice(event.get("pos", ["你被抓走了！"])).format(ban_time=ban_time)
+    elif event["category"] == "mirror":
+        if abs(origin) < 0.01:
+            new_length = origin
+            msg = "你的牛牛太短了，镜子也找不到它……什么也没发生"
+        else:
+            new_length = round(-origin, 2)
+            msg = random.choice(event["pos"]).format(new_length=new_length)
+    elif event["category"] == "jackpot":
+        diff = round(random.uniform(cfg.glue_blessing_min, cfg.glue_blessing_max), 2)
+        new_length = round(origin + diff, 2)
+        msg = random.choice(event["pos"]).format(diff=diff)
+    elif event["category"] == "gambler":
+        diff = round(random.uniform(cfg.glue_gambler_min, cfg.glue_gambler_max), 2)
+        if random.random() < 0.5:
+            new_length = round(origin + diff, 2)
+            msg = random.choice(event["pos"]).format(diff=diff)
+        else:
+            diff = round(-diff, 2)
+            new_length = round(origin + diff, 2)
+            msg = random.choice(event["neg"]).format(diff=abs(diff))
+    elif event["category"] == "zen":
+        diff = round(random.uniform(cfg.glue_zen_min, cfg.glue_zen_max), 2)
+        new_length = round(origin + diff, 2)
+        msg = random.choice(event["pos"]).format(diff=diff)
+    elif event["category"] == "frenzy":
+        diff = round(random.uniform(cfg.glue_frenzy_min, cfg.glue_frenzy_max), 2)
+        new_length = round(origin + diff, 2)
+        msg = random.choice(event["pos"]).format(diff=diff)
     else:
-        diff = _glue_growth(origin, 1.0)
+        diff = _glue_growth(origin, 1.0, cfg.glue_growth_scale)
         new_length = round(origin + diff, 2)
         msg = f"你的牛牛变化了 {abs(diff)} cm"
 
@@ -423,17 +512,16 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     new_length = _apply_decay(new_length, store.config)
     store.update_length(uid, new_length)
 
-    # Update CDs
+    # Update CD
     _set_cd(_glue_cd, uid, store.config.glue_cooldown)
-    _glue_last[uid] = time.time()
 
     store._add_record(uid, "gluing", origin, new_length)
     return msg, new_length
 
 
-def _glue_growth(origin: float, coefficient: float = 1.0) -> float:
+def _glue_growth(origin: float, coefficient: float = 1.0, scale: float = 200.0) -> float:
     """Calculate growth/shrinkage for gluing."""
-    growth_factor = max(0.5, 1 - abs(origin) / 200)
+    growth_factor = max(0.5, 1 - abs(origin) / scale)
     prob = random.choice([-0.6, -0.5, -0.4, -0.2, 0, 0.2, 0.4, 0.5, 0.6])
     if origin <= 0:
         diff = prob * 0.1 * abs(origin)
@@ -455,18 +543,250 @@ def _apply_decay(length: float, cfg: NiuNiuConfig) -> float:
     return max(cfg.decay_floor, length * (1 + rate * 0.8))
 
 
+# ── fencing messages ────────────────────────────────────────────────────
+
+_FENCE_WIN_POS = [
+    "你以绝对的长度让对方屈服了！长度 +{gain} cm，对方 -{loss} cm！当前 {my_len} cm！",
+    "一剑封喉！你将对手挑落马下！牛牛增长 {gain} cm，当前 {my_len} cm！",
+    "击剑大胜利！你从对方身上夺取了 {gain} cm！当前 {my_len} cm！",
+    "对方在你面前不堪一击！牛牛怒增 {gain} cm！",
+    "你的牛牛坚不可摧！+{gain} cm，对手 -{loss} cm！",
+]
+
+_FENCE_WIN_NEG = [
+    "哦吼！？你的牛牛在长大欸！凹进去的深度减少了 {gain} cm，当前 {my_len} cm！",
+    "以凹制胜！凹牛牛反而膨胀了 {gain} cm！当前 {my_len} cm！",
+    "负负得正！你的凹牛牛逆势增长 {gain} cm！",
+]
+
+_FENCE_LOSE_POS = [
+    "对方以绝对的长度让你屈服了！长度 -{loss} cm，当前 {my_len} cm！",
+    "技不如人！牛牛被对方折服，缩短了 {loss} cm...",
+    "败北！你的牛牛缩水了 {loss} cm，当前 {my_len} cm...",
+    "你被对手压倒了！牛牛减少了 {loss} cm！",
+    "对手的牛牛比你想象的更硬！你损失了 {loss} cm...",
+]
+
+_FENCE_LOSE_NEG = [
+    "哦吼！？你的牛牛因为击剑凹进去了！又凹了 {loss} cm！当前 {my_len} cm！",
+    "雪上加霜！已经凹了还要继续凹...又陷进去 {loss} cm！",
+    "反向击剑失败！牛牛凹得更深了 {loss} cm...",
+]
+
+# ── fencing events ──────────────────────────────────────────────────────
+
+_FENCE_EVENTS = [
+    {
+        "name": "normal",
+        "weight": 50,
+    },
+    {
+        "name": "critical",
+        "weight": 12,
+        "win_pos": [
+            "💥 暴击！你给予了对方致命一击！+{gain} cm，对方 -{loss} cm！",
+            "这一剑贯穿天地！暴击！牛牛增长 {gain} cm！",
+            "精准命中要害！暴击伤害！+{gain} cm！",
+        ],
+        "win_neg": [
+            "💥 暴击！你的凹牛牛爆发了惊人力量！+{gain} cm！",
+        ],
+        "lose_pos": [
+            "💥 对方使出了暴击！你遭受重创，-{loss} cm...",
+            "天哪！对方打出了暴击！牛牛损失 {loss} cm...",
+        ],
+        "lose_neg": [
+            "💥 暴击！你的牛牛被对方打得更凹了...",
+        ],
+    },
+    {
+        "name": "glancing",
+        "weight": 12,
+        "win_pos": [
+            "双方擦肩而过，你略占上风！+{gain} cm",
+            "这次击剑如同蜻蜓点水……你微微增长了 {gain} cm",
+        ],
+        "win_neg": [
+            "轻轻一碰，你的凹牛牛稍微恢复了一点 +{gain} cm",
+        ],
+        "lose_pos": [
+            "只是擦伤！你仅损失了 {loss} cm，不痛不痒",
+            "有惊无险，仅仅缩水了 {loss} cm",
+        ],
+        "lose_neg": [
+            "轻微碰撞，你的牛牛又凹了一点点...",
+        ],
+    },
+    {
+        "name": "reversal",
+        "weight": 8,
+        "win_pos": [
+            "🔄 绝地翻盘！你以弱胜强，击溃了对手！+{gain} cm！",
+            "惊天逆转！所有人都以为你会输……你赢了！+{gain} cm！",
+            "逆天改命！你反杀了比你长的对手！+{gain} cm！",
+        ],
+        "win_neg": [
+            "🔄 绝地翻盘！凹牛牛逆袭成功！+{gain} cm！",
+        ],
+        "lose_pos": [
+            "🔄 你太大意了！被对手绝地翻盘！-{loss} cm...",
+            "轻敌的代价！你被对手反杀，损失 {loss} cm...",
+        ],
+        "lose_neg": [
+            "🔄 大意失荆州！被翻盘了...",
+        ],
+    },
+    {
+        "name": "dominate",
+        "weight": 3,
+        "win_pos": [
+            "👹 牛头人威压降临！你支配了对手！+{gain} cm，对方 -{loss} cm！",
+            "牛头人之力爆发！你将对手踩在脚下！+{gain} cm！！",
+        ],
+        "win_neg": [
+            "👹 牛头人威压降临！你的凹牛牛顺势膨胀了 {gain} cm！",
+        ],
+        "lose_pos": [
+            "👹 对方使出了牛头人威压！你被支配了，-{loss} cm...",
+            "牛头人支配了你！损失 {loss} cm...",
+        ],
+        "lose_neg": [
+            "👹 对方牛头人威压！你的牛牛被压得更凹了...",
+        ],
+    },
+    {
+        "name": "succubus_devour",
+        "weight": 3,
+        "win_pos": [
+            "👁 魅魔吞噬！你从对方身上夺取了 {gain} cm，对方损失 {loss} cm！",
+            "魅魔之吻吸走了对方的力量！你增长了 {gain} cm！",
+        ],
+        "win_neg": [
+            "👁 魅魔吞噬！你的凹度吸收了对方 {gain} cm！",
+        ],
+        "lose_pos": [
+            "👁 魅魔吞噬反噬！对方夺取了你 {loss} cm...",
+            "你被魅魔吸走了 {loss} cm！",
+        ],
+        "lose_neg": [
+            "👁 魅魔吞噬反噬！你被对方吸得更凹了...",
+        ],
+    },
+    {
+        "name": "slip",
+        "weight": 8,
+        "lose_pos": [
+            "💨 你脚下一滑！没刺到对方反而伤了自己！-{loss} cm...",
+            "手滑了！你的牛牛撞到了墙上，损失 {loss} cm...",
+            "一个趔趄！你的击剑动作失误，自损 {loss} cm！",
+        ],
+        "lose_neg": [
+            "💨 你滑倒了！凹牛牛陷得更深了...",
+        ],
+    },
+    {
+        "name": "draw",
+        "weight": 5,
+        "msg": [
+            "🤝 双方牛牛旗鼓相当！两败俱伤，各损失 {loss} cm！当前 {my_len} cm",
+            "互不相让，双双重伤！你的牛牛损失了 {loss} cm...",
+            "势均力敌！双方牛牛都受到了 {loss} cm 的损伤！",
+        ],
+    },
+]
+
+# ── no-niuniu target events ─────────────────────────────────────────────
+
+_NO_NIUNIU_EVENTS = [
+    {
+        "name": "reject",
+        "weight": 55,
+        "msg": [
+            "对方还没有牛牛呢！不能击剑！",
+            "你对着空气一阵乱刺……对方根本没有牛牛！",
+            "击剑？对方连牛牛都没注册，你跟空气击呢？",
+            "对方处于无敌状态（没有牛牛），你的击剑无效！",
+        ],
+    },
+    {
+        "name": "force_register",
+        "weight": 25,
+        "msg": [
+            "对方被你突如其来的击剑吓到了，慌乱中牛牛长了出来！足足 {oppo_len} cm！",
+            "你的剑气唤醒了对方体内的牛牛之力！对方长出了 {oppo_len} cm 的牛牛！",
+            "你一剑劈开了对方的牛牛封印！一只 {oppo_len} cm 的牛牛诞生了！",
+        ],
+    },
+    {
+        "name": "self_hurt",
+        "weight": 20,
+        "msg": [
+            "你对着空气猛刺一剑，失去平衡摔倒了！牛牛损失 {loss} cm...",
+            "目标没有牛牛，你的剑刺空闪到了腰！牛牛缩短了 {loss} cm...",
+            "你对着虚空疯狂输出，结果用力过猛，牛牛磨损了 {loss} cm！",
+        ],
+    },
+]
+
+# ── bot fencing messages ────────────────────────────────────────────────
+
+_FENCE_BOT_WIN = [
+    "🤖 你竟然战胜了机器人！牛牛增长了 {gain} cm！但机器人毫无波澜，它只是一段代码...",
+    "🤖 你击败了机器人守卫！+{gain} cm！机器人默默重启中...",
+    "🤖 血肉之躯战胜了钢铁！你的牛牛增长了 {gain} cm！",
+]
+
+_FENCE_BOT_LOSE = [
+    "🤖 你被机器人无情碾压！牛牛损失了 {loss} cm...机器人的牛牛是机械制成的！",
+    "🤖 挑战机器人失败！你损失了 {loss} cm！机械牛牛果然更硬？",
+    "🤖 机器人使出了精准的机械击剑！你败了，-{loss} cm...",
+    "🤖 你被机器人的钢铁牛牛击溃了！损失 {loss} cm...",
+]
+
+_FENCE_BOT_DRAW = [
+    "🤖 你和机器人势均力敌！双方各损失 {loss} cm！当前 {my_len} cm",
+    "🤖 机器人和你打成了平手！两败俱伤，你损失了 {loss} cm...",
+]
+
 # ── fencing (击剑) ─────────────────────────────────────────────────────
 
+def _fence_no_target(store: NiuNiuStore, my_uid: str, my_len: float, oppo_uid: str) -> str:
+    """Handle fencing when the target has no niuniu registered."""
+    chosen = random.choices(_NO_NIUNIU_EVENTS, weights=[e["weight"] for e in _NO_NIUNIU_EVENTS], k=1)[0]
+
+    if chosen["name"] == "reject":
+        return random.choice(chosen["msg"])
+    elif chosen["name"] == "force_register":
+        oppo_len = store.register(oppo_uid)
+        prefix = random.choice(chosen["msg"]).format(oppo_len=oppo_len)
+        result = fencing(store, my_uid, oppo_uid)
+        return prefix + "\n" + result
+    elif chosen["name"] == "self_hurt":
+        loss = round(random.uniform(store.config.fence_self_hurt_min, store.config.fence_self_hurt_max), 2)
+        new_len = round(my_len - loss, 2)
+        new_len = _apply_decay(new_len, store.config)
+        store.update_length(my_uid, round(new_len, 2))
+        store._add_record(my_uid, "fencing_self_hurt", my_len, new_len)
+        _set_cd(_fence_cd, my_uid, store.config.fence_cooldown)
+        return random.choice(chosen["msg"]).format(loss=loss)
+    return "出了一点问题……"
+
 def fencing(
-    store: NiuNiuStore, my_uid: str, oppo_uid: str
+    store: NiuNiuStore, my_uid: str, oppo_uid: str, *, oppo_is_bot: bool = False
 ) -> str:
     """Execute a fencing battle. Returns result message."""
     my_len = store.get_length(my_uid)
-    oppo_len = store.get_length(oppo_uid)
     if my_len is None:
         return "你还没有牛牛呢！请先发送 注册牛牛"
+
+    oppo_len = store.get_length(oppo_uid)
+
+    # Target has no niuniu — bot gets a phantom, others trigger events
     if oppo_len is None:
-        return "对方还没有牛牛呢！不能击剑！"
+        if oppo_is_bot:
+            oppo_len = round(random.uniform(store.config.fence_bot_phantom_min, store.config.fence_bot_phantom_max), 2)
+        else:
+            return _fence_no_target(store, my_uid, my_len, oppo_uid)
 
     origin_my = my_len
     origin_oppo = oppo_len
@@ -475,51 +795,131 @@ def fencing(
     win_prob = _fence_win_prob(my_len, oppo_len)
     i_win = random.random() < win_prob
 
+    # Select event
+    chosen = random.choices(_FENCE_EVENTS, weights=[e["weight"] for e in _FENCE_EVENTS], k=1)[0]
+
+    # Dominate eligibility: requires at least one 牛头人 (positive >= threshold)
+    if chosen["name"] == "dominate":
+        threshold = store.config.fence_devour_threshold
+        if my_len < threshold and oppo_len < threshold:
+            chosen = next(e for e in _FENCE_EVENTS if e["name"] == "normal")
+
+    # Succubus devour eligibility: requires at least one 魅魔 (negative, abs >= threshold)
+    if chosen["name"] == "succubus_devour":
+        threshold = store.config.fence_devour_threshold
+        qualifies = (
+            (my_len < 0 and abs(my_len) >= threshold)
+            or (oppo_len < 0 and abs(oppo_len) >= threshold)
+        )
+        if not qualifies:
+            chosen = next(e for e in _FENCE_EVENTS if e["name"] == "normal")
+
+    # Apply event effects on outcome
+    if chosen["name"] == "reversal":
+        i_win = not i_win
+    elif chosen["name"] == "slip":
+        i_win = False
+
+    # Succubus devour — real steal mechanic, replaces normal damage
+    if chosen["name"] == "succubus_devour":
+        steal = round(min(abs(my_len), abs(oppo_len)) * store.config.fence_devour_steal_ratio, 2)
+        loss_val = round(steal * 1.5, 2)
+        if i_win:
+            my_len = round(my_len + steal, 2)
+            if not oppo_is_bot:
+                oppo_len = round(oppo_len - loss_val, 2)
+        else:
+            my_len = round(my_len - loss_val, 2)
+            if not oppo_is_bot:
+                oppo_len = round(oppo_len + steal, 2)
+        my_len = round(_apply_decay(my_len, store.config), 2)
+        if not oppo_is_bot:
+            oppo_len = round(_apply_decay(oppo_len, store.config), 2)
+        store.update_length(my_uid, my_len)
+        store._add_record(my_uid, "fencing", origin_my, my_len)
+        if not oppo_is_bot:
+            store.update_length(oppo_uid, oppo_len)
+            store._add_record(oppo_uid, "fenced", origin_oppo, oppo_len)
+            _set_cd(_fenced_cd, oppo_uid, store.config.fenced_protection)
+        _set_cd(_fence_cd, my_uid, store.config.fence_cooldown)
+        if oppo_is_bot:
+            msgs = _FENCE_BOT_WIN if i_win else _FENCE_BOT_LOSE
+        elif i_win:
+            msgs = (chosen.get("win_neg") or _FENCE_WIN_NEG) if my_len < 0 else (chosen.get("win_pos") or _FENCE_WIN_POS)
+        else:
+            msgs = (chosen.get("lose_neg") or _FENCE_LOSE_NEG) if my_len < 0 else (chosen.get("lose_pos") or _FENCE_LOSE_POS)
+        return random.choice(msgs).format(gain=steal, loss=loss_val, my_len=my_len)
+
     # Calculate change
     base_change = min(abs(my_len), abs(oppo_len)) * 0.1
     rd = abs(time.time() % 10 - 5) + random.uniform(0.13, 0.24) * base_change
-    reduce_val = round(rd * 0.3, 2)
     balance = max(0.3, 1 - abs(my_len - oppo_len) / 100)
-    reduce_val *= balance
+    reduce_val = round(rd * 0.3 * balance, 2)
+
+    # Draw — both lose a fixed small amount
+    if chosen["name"] == "draw":
+        reduce_val = round(random.uniform(store.config.fence_draw_min, store.config.fence_draw_max), 2)
+        my_len = round(my_len - reduce_val, 2)
+        my_len = round(_apply_decay(my_len, store.config), 2)
+        store.update_length(my_uid, my_len)
+        store._add_record(my_uid, "fencing_draw", origin_my, my_len)
+        if not oppo_is_bot:
+            oppo_len = round(oppo_len - reduce_val, 2)
+            oppo_len = round(_apply_decay(oppo_len, store.config), 2)
+            store.update_length(oppo_uid, oppo_len)
+            store._add_record(oppo_uid, "fencing_draw", origin_oppo, oppo_len)
+            _set_cd(_fenced_cd, oppo_uid, store.config.fenced_protection)
+        _set_cd(_fence_cd, my_uid, store.config.fence_cooldown)
+        msgs = _FENCE_BOT_DRAW if oppo_is_bot else chosen["msg"]
+        return random.choice(msgs).format(loss=reduce_val, my_len=my_len)
+
+    # Apply multiplier from config
+    multiplier = {
+        "critical": store.config.fence_critical_multiplier,
+        "glancing": store.config.fence_glancing_multiplier,
+        "dominate": store.config.fence_dominate_multiplier,
+    }.get(chosen["name"], 1.0)
+    reduce_val = round(reduce_val * multiplier, 2)
 
     if i_win:
         my_len = round(my_len + reduce_val, 2)
-        oppo_len = round(oppo_len - 0.8 * reduce_val, 2)
+        if not oppo_is_bot:
+            oppo_len = round(oppo_len - 0.8 * reduce_val, 2)
     else:
         my_len = round(my_len - reduce_val, 2)
-        oppo_len = round(oppo_len + 0.8 * reduce_val, 2)
+        if not oppo_is_bot:
+            oppo_len = round(oppo_len + 0.8 * reduce_val, 2)
 
     # Apply decay
-    my_len = _apply_decay(my_len, store.config)
-    oppo_len = _apply_decay(oppo_len, store.config)
+    my_len = round(_apply_decay(my_len, store.config), 2)
+    if not oppo_is_bot:
+        oppo_len = round(_apply_decay(oppo_len, store.config), 2)
 
-    if i_win:
+    loss_val = round(0.8 * reduce_val, 2)
+
+    # Message: bot > event-specific > defaults
+    if oppo_is_bot:
+        msgs = _FENCE_BOT_WIN if i_win else _FENCE_BOT_LOSE
+    elif i_win:
         if my_len < 0:
-            msg = f"哦吼！？你的牛牛在长大欸！长大了 {abs(reduce_val)} cm！"
+            msgs = chosen.get("win_neg") or _FENCE_WIN_NEG
         else:
-            msg = (
-                f"你以绝对的长度让对方屈服了！你的长度增加 {reduce_val} cm，"
-                f"对方减少了 {round(0.8 * reduce_val, 2)} cm！"
-                f"你当前长度为 {my_len} cm！"
-            )
+            msgs = chosen.get("win_pos") or _FENCE_WIN_POS
     else:
         if my_len < 0:
-            msg = (
-                f"哦吼！？看来你的牛牛因为击剑而凹进去了！凹进去了 {reduce_val} cm！"
-            )
+            msgs = chosen.get("lose_neg") or _FENCE_LOSE_NEG
         else:
-            msg = (
-                f"对方以绝对的长度让你屈服了！你的长度减少 {reduce_val} cm，"
-                f"当前长度 {my_len} cm！"
-            )
+            msgs = chosen.get("lose_pos") or _FENCE_LOSE_POS
+    msg = random.choice(msgs).format(gain=reduce_val, loss=loss_val, my_len=my_len)
 
     store.update_length(my_uid, my_len)
-    store.update_length(oppo_uid, oppo_len)
     store._add_record(my_uid, "fencing", origin_my, my_len)
-    store._add_record(oppo_uid, "fenced", origin_oppo, oppo_len)
+    if not oppo_is_bot:
+        store.update_length(oppo_uid, oppo_len)
+        store._add_record(oppo_uid, "fenced", origin_oppo, oppo_len)
+        _set_cd(_fenced_cd, oppo_uid, store.config.fenced_protection)
 
     _set_cd(_fence_cd, my_uid, store.config.fence_cooldown)
-    _set_cd(_fenced_cd, oppo_uid, store.config.fenced_protection)
 
     return msg
 
