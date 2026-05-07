@@ -54,9 +54,6 @@
         <button class="rail-tool" :title="themeLabel" @click="$emit('toggleTheme')">
           <UiIcon :name="themeIcon" :size="18" />
         </button>
-        <a class="rail-tool" href="/ops/v1/" title="旧版">
-          <UiIcon name="RotateCw" :size="18" />
-        </a>
         <button class="rail-tool" title="退出" :disabled="logoutDisabled" @click="$emit('logout')">
           <UiIcon name="LogOut" :size="18" />
         </button>
@@ -136,10 +133,6 @@
         </div>
 
         <div class="drawer__footer">
-          <a href="/ops/v1/" class="drawer-action" @click="drawerOpen = false">
-            <UiIcon name="RotateCw" :size="14" />
-            <span>旧版</span>
-          </a>
           <button class="drawer-action" :disabled="logoutDisabled" @click="$emit('logout'); drawerOpen = false">
             <UiIcon name="LogOut" :size="14" />
             <span>退出</span>

@@ -56,7 +56,7 @@ COPY plugins/ plugins/
 COPY quickquip/ quickquip/
 COPY config/ config/
 COPY --from=frontend-builder /build/dist/ frontend/dist/
-COPY frontend-v1/dist/ frontend-v1/dist/
+
 RUN mkdir -p data
 
 EXPOSE 8080 5104
