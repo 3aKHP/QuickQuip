@@ -14,6 +14,8 @@ class GroupQuoteStore:
         recent_random_window_seconds: int = 600,
         time_func: Callable[[], float] = time.time,
     ):
+        self._db: sqlite3.Connection | None = None
+        self._closed = False
         self._path = Path(db_path)
         self._recent_random_window_seconds = max(1, int(recent_random_window_seconds))
         self._time = time_func
@@ -154,7 +156,11 @@ class GroupQuoteStore:
         return len(self._recent_ids(str(group_id)))
 
     def close(self) -> None:
+        if self._closed or self._db is None:
+            return
         self._db.close()
+        self._db = None
+        self._closed = True
 
     def __del__(self):
         try:

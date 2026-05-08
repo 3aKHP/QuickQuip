@@ -22,6 +22,8 @@ class PendingMessage:
 
 class OfflineMessageStore:
     def __init__(self, db_path: str | Path):
+        self._db: sqlite3.Connection | None = None
+        self._closed = False
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self._path), check_same_thread=False)
@@ -108,3 +110,16 @@ class OfflineMessageStore:
             key,
         ).fetchall()
         return [PendingMessage(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+
+    def close(self) -> None:
+        if self._closed or self._db is None:
+            return
+        self._db.close()
+        self._db = None
+        self._closed = True
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass

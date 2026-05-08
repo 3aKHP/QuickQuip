@@ -10,7 +10,7 @@ from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
 from quickquip.chat import text_rules as text_rules_module
 from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
-from quickquip.games import BlackjackGame, GameEconomyStore, GameRegistry, GameScores, NiuNiuStore, NumberBombGame, RussianRouletteGame
+from quickquip.games import BlackjackGame, GameEconomyStore, GameRegistry, NiuNiuStore, NumberBombGame, RussianRouletteGame, game_scores
 
 from quickquip.games.config import load_games_config
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
@@ -44,6 +44,26 @@ from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
 
+class _LazyStoreProxy:
+    """Delay SQLite-backed store creation until the first real use."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._store = None
+
+    def _get_store(self):
+        if self._store is None:
+            self._store = self._factory()
+        return self._store
+
+    def __getattr__(self, name):
+        return getattr(self._get_store(), name)
+
+    def close(self) -> None:
+        if self._store is not None:
+            self._store.close()
+
+
 DATA_DIR = Path("data")
 STATS_PATH = DATA_DIR / "stats.json"
 RULE_SWITCH_PATH = DATA_DIR / "rule_switch.json"
@@ -67,8 +87,12 @@ daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
 daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
 wordcloud_collector = WordCloudCollector()
-offline_message_store = OfflineMessageStore(OFFLINE_MESSAGES_PATH)
-group_quote_store = GroupQuoteStore(QUOTES_PATH)
+offline_message_store = _LazyStoreProxy(
+    lambda: OfflineMessageStore(OFFLINE_MESSAGES_PATH),
+)
+group_quote_store = _LazyStoreProxy(
+    lambda: GroupQuoteStore(QUOTES_PATH),
+)
 
 games_config = load_games_config("config/games.toml")
 
@@ -77,7 +101,6 @@ game_registry.register(NumberBombGame(config=games_config.number_bomb))
 game_economy = GameEconomyStore(config=games_config.economy)
 game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))
 game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))
-game_scores = GameScores()
 niuniu_store = NiuNiuStore(config=games_config.niuniu)
 
 DATA_DIR.mkdir(exist_ok=True)
@@ -111,6 +134,11 @@ def record_wordcloud_message(group_id: int | str, sender_name: str, rendered_tex
 def save_all() -> None:
     stats_tracker.save(STATS_PATH)
     rule_switch.save(RULE_SWITCH_PATH)
+
+
+def close_persistent_stores() -> None:
+    offline_message_store.close()
+    group_quote_store.close()
 
 
 def reload_chat_rules_pipeline() -> dict[str, int]:
