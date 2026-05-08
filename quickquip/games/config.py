@@ -87,6 +87,12 @@ class NiuNiuConfig:
     # Growth formula tuning
     glue_growth_scale: float = 500.0
 
+    # Regression pressure — asymmetric damping on extreme |length|
+    # pressure = min((|length| - threshold) / scale, max_pressure)
+    regression_threshold: float = 50.0
+    regression_scale: float = 900.0
+    regression_max_pressure: float = 0.5
+
     # Gluing event tuning
     glue_lucky_coefficient: float = 1.8
     glue_special_coefficient: float = 1.3

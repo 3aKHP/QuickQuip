@@ -32,6 +32,18 @@ def _apply_decay(length: float, cfg: NiuNiuConfig) -> float:
     return max(cfg.decay_floor, length * (1 + rate * 0.8))
 
 
+def _regression_pressure(length: float, cfg: NiuNiuConfig) -> float:
+    """Asymmetric pressure ∈ [0, max]: how strongly to push |length| back.
+
+    Outward moves (away from zero) are dampened by (1 - pressure).
+    Inward moves (toward zero) are amplified by (1 + pressure).
+    """
+    if abs(length) <= cfg.regression_threshold:
+        return 0.0
+    raw = (abs(length) - cfg.regression_threshold) / cfg.regression_scale
+    return min(raw, cfg.regression_max_pressure)
+
+
 def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     """Perform a gluing operation. Returns (result_message, new_length)."""
     origin = store.get_length(uid)
@@ -126,13 +138,25 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
         new_length = round(origin + diff, 2)
         msg = f"你的牛牛变化了 {abs(diff)} cm"
 
-    # Apply daily luck multiplier (except for arrested and mirror)
+    # Apply daily luck + regression pressure (except for arrested and mirror)
     if event["category"] not in ("arrested", "mirror"):
         luck = store.get_glue_luck(uid)
         luck_diff = round((new_length - origin) * luck, 2)
+
+        # Regression: extreme |length| → dampen outward, amplify inward
+        pressure = _regression_pressure(origin, cfg)
+        if pressure > 0:
+            origin_abs = abs(origin)
+            target_abs = abs(origin + luck_diff)
+            if target_abs > origin_abs:
+                luck_diff = round(luck_diff * (1.0 - pressure), 2)
+            elif target_abs < origin_abs:
+                luck_diff = round(luck_diff * (1.0 + pressure), 2)
+
         new_length = round(origin + luck_diff, 2)
-        # Rebuild message with luck-adjusted diff where applicable
         diff_abs = abs(luck_diff)
+
+        # Rebuild message with combined luck+regression adjusted diff
         if event["category"] == "growth":
             if luck_diff > 0 and "pos" in event:
                 msg = random.choice(event["pos"]).format(diff=diff_abs)

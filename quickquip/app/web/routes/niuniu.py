@@ -15,7 +15,7 @@ _UID_RE = re.compile(r"^\d{5,15}$")
 
 
 class AdjustLengthBody(BaseModel):
-    length: float = Field(ge=-1000, le=100000)
+    length: float
     reason: str = Field(default="", max_length=200)
 
 

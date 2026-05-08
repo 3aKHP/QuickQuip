@@ -62,6 +62,14 @@ decay_rate_high = 0.01
 decay_rate_normal = 0.005
 # 衰减下限（长度不会低于此值）
 decay_floor = -1000000.0
+# ── 回归压力（防止数值膨胀）──────────────────────────────────────────
+# 极端 |length| 时，向外变化（远离 0）被抑制，向内变化（靠近 0）被放大
+# pressure = min((|length| - threshold) / scale, max_pressure)
+# 默认值：|length|=50 时为 0，|length|=500 时达到 0.5（上限）
+regression_threshold = 50.0
+regression_scale = 900.0
+regression_max_pressure = 0.5
+
 # ── 打胶事件参数 ────────────────────────────────────────────────────────
 # 幸运日 growth 倍率
 glue_lucky_coefficient = 1.8
