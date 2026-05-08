@@ -64,10 +64,12 @@ def register_lifecycle(driver) -> None:
 
     @driver.on_shutdown
     async def _save_on_shutdown():
-        await tieba_service.shutdown()
-        await llm_service.shutdown()
-        save_all()
-        close_persistent_stores()
+        try:
+            await tieba_service.shutdown()
+            await llm_service.shutdown()
+            save_all()
+        finally:
+            close_persistent_stores()
 
     try:
         from nonebot_plugin_apscheduler import scheduler
