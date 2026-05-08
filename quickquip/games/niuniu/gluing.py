@@ -29,7 +29,7 @@ def _apply_decay(length: float, cfg: NiuNiuConfig) -> float:
         rate = cfg.decay_rate_normal
     if length > 0:
         return max(0.0, length * (1 - rate))
-    return max(cfg.decay_floor, length * (1 + rate * 0.8))
+    return length * (1 + rate * 0.8)
 
 
 def _regression_pressure(length: float, cfg: NiuNiuConfig) -> float:

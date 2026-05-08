@@ -75,7 +75,6 @@ game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯
 | `[niuniu]` | `unsubscribe_gold` | 500 | 注销费用 |
 | `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率（\|length\| > 50） |
 | `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率（\|length\| ≤ 50） |
-| `[niuniu]` | `decay_floor` | -1000000.0 | 负长度衰减下限 |
 | `[niuniu]` | `regression_threshold` | 50.0 | 回归压力起始阈值（\|length\| > N 开始施压） |
 | `[niuniu]` | `regression_scale` | 900.0 | 压力增速（\|length\|=500 时达到上限 0.5） |
 | `[niuniu]` | `regression_max_pressure` | 0.5 | 最大压力系数（0=无效果, 1=100%抑制/放大） |

@@ -251,12 +251,6 @@ class TestApplyDecay:
         result = _apply_decay(-60.0, cfg)
         assert -60.0 < result < 0
 
-    def test_negative_respects_decay_floor(self, cfg):
-        extreme = cfg.decay_floor - 1
-        result = _apply_decay(extreme, cfg)
-        assert result >= cfg.decay_floor
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # NiuNiuStore — CRUD
 # ═══════════════════════════════════════════════════════════════════════════

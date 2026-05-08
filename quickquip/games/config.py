@@ -82,7 +82,6 @@ class NiuNiuConfig:
     unsubscribe_gold: int = 500
     decay_rate_high: float = 0.01
     decay_rate_normal: float = 0.005
-    decay_floor: float = -1000000.0
 
     # Growth formula tuning
     glue_growth_scale: float = 500.0
