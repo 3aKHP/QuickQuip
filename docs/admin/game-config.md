@@ -73,14 +73,17 @@ game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯
 | `[niuniu]` | `fenced_protection` | 300 | 被击保护期（秒） |
 | `[niuniu]` | `glue_cooldown` | 180 | 打胶 CD（秒） |
 | `[niuniu]` | `unsubscribe_gold` | 500 | 注销费用 |
-| `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率 |
-| `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率 |
-| `[niuniu]` | `decay_floor` | -1000000.0 | 衰减下限 |
-| `[niuniu]` | `glue_growth_scale` | 500.0 | 打胶增长基数 |
+| `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率（\|length\| > 50） |
+| `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率（\|length\| ≤ 50） |
+| `[niuniu]` | `decay_floor` | -1000000.0 | 负长度衰减下限 |
+| `[niuniu]` | `luck_sigma` | 1.0 | 打胶运势对数标准差（lg(x) ~ N(0, σ)） |
+| `[niuniu]` | `fence_luck_sigma` | 1.0 | 击剑运势对数标准差（同上分布） |
 | `[niuniu]` | `fence_critical_multiplier` | 1.8 | 击剑暴击倍率 |
-| `[niuniu]` | `fence_dominate_multiplier` | 3.0 | 击剑牛头人压制倍率 |
-| `[niuniu]` | `fence_devour_steal_ratio` | 0.15 | 击剑魅魔吞噬比例 |
-| `[niuniu]` | `fence_devour_threshold` | 50.0 | 吞噬触发阈值 |
+| `[niuniu]` | `fence_dominate_multiplier` | 3.0 | 击剑牛头人支配倍率 |
+| `[niuniu]` | `fence_dominate_sever_chance` | 0.4 | 牛头人腰斩触发概率 |
+| `[niuniu]` | `fence_dominate_threshold` | 50.0 | 牛头人角色阈值（length ≥ N） |
+| `[niuniu]` | `fence_devour_steal_ratio` | 0.3 | 魅魔吞噬窃取比例 |
+| `[niuniu]` | `fence_devour_threshold` | 50.0 | 魅魔角色阈值（length ≤ -N） |
 
 ### 配置文件加载逻辑
 

@@ -15,7 +15,13 @@ quickquip/games/
 ├── number_bomb.py        ← 数字炸弹（BaseGame 示例）
 ├── blackjack.py          ← 21 点（BaseGame + 金币）
 ├── russian_roulette.py   ← 俄罗斯轮盘（BaseGame + 金币）
-└── niuniu.py             ← 牛牛大作战（独立 RPG 系统）
+└── niuniu/               ← 牛牛大作战（独立 RPG 系统，包）
+    ├── __init__.py       ← 公共 API 重导出
+    ├── cooldown.py       ← CooldownTracker（线程安全 CD）
+    ├── store.py          ← NiuNiuStore（SQLite CRUD / 排行 / 运势）
+    ├── events.py         ← 事件定义 + 消息模板 + get_comment()
+    ├── gluing.py         ← gluing() / _apply_decay()
+    └── fencing.py        ← fencing() / _fence_win_prob() / 角色判定
 ```
 
 ---

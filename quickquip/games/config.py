@@ -106,7 +106,9 @@ class NiuNiuConfig:
     fence_critical_multiplier: float = 1.8
     fence_glancing_multiplier: float = 0.4
     fence_dominate_multiplier: float = 3.0
-    fence_devour_steal_ratio: float = 0.15
+    fence_dominate_sever_chance: float = 0.4
+    fence_dominate_threshold: float = 50.0
+    fence_devour_steal_ratio: float = 0.3
     fence_devour_threshold: float = 50.0
     fence_draw_min: float = 0.5
     fence_draw_max: float = 2.0
@@ -118,6 +120,13 @@ class NiuNiuConfig:
     # Bot fencing tuning
     fence_bot_phantom_min: float = 5.0
     fence_bot_phantom_max: float = 80.0
+
+    # Daily luck tuning — log10-symmetric: lg(x) ~ N(0, σ)
+    # σ=1 → ±1σ = [0.1, 10] (one order of magnitude), ±2σ = [0.01, 100] (clamp bounds)
+    luck_sigma: float = 1.0
+
+    # Daily fence luck tuning — same distribution, separate daily roll
+    fence_luck_sigma: float = 1.0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> NiuNiuConfig:

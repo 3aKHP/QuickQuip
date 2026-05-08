@@ -20,3 +20,17 @@ export async function adjustLength(uid: string, length: number, reason: string =
     body: JSON.stringify({ length, reason }),
   })
 }
+
+export async function setLuck(uid: string, luck: number) {
+  return request(`/api/niuniu/users/${encodeURIComponent(uid)}/luck`, {
+    method: 'POST',
+    body: JSON.stringify({ luck }),
+  })
+}
+
+export async function setFenceLuck(uid: string, fence_luck: number) {
+  return request(`/api/niuniu/users/${encodeURIComponent(uid)}/fence-luck`, {
+    method: 'POST',
+    body: JSON.stringify({ fence_luck }),
+  })
+}

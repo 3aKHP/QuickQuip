@@ -28,14 +28,61 @@ from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 from quickquip.tieba.service import tieba_service
 from quickquip.games.niuniu import (
-    _check_cd,
-    _comment,
-    _fence_cd,
-    _fenced_cd,
-    _glue_cd,
+    fence_cd,
+    fenced_cd,
     fencing,
+    get_comment,
+    glue_cd,
     gluing,
 )
+
+
+def _evaluate_luck(value: float) -> str:
+    """Convert a luck value to a short label."""
+    if value < 0.2:
+        return "大凶"
+    elif value < 0.5:
+        return "凶"
+    elif value < 0.8:
+        return "平"
+    elif value < 1.2:
+        return "吉"
+    elif value < 3.0:
+        return "大吉"
+    else:
+        return "神运"
+
+
+def _glue_luck_tips(value: float) -> str:
+    """Gluing-specific flavour based on luck value."""
+    if value < 0.2:
+        return "今日不宜打胶，牛牛极易萎缩…"
+    elif value < 0.5:
+        return "运势低迷，打胶效果减半，小心凹进去！"
+    elif value < 0.8:
+        return "运势平平，平常心对待即可~"
+    elif value < 1.2:
+        return "运势尚可，正常发挥！"
+    elif value < 3.0:
+        return "运势旺盛，打胶事半功倍！"
+    else:
+        return "运势如虹！今日打胶效果极佳，冲！！"
+
+
+def _fence_luck_tips(value: float) -> str:
+    """Fencing-specific flavour based on luck value."""
+    if value < 0.2:
+        return "今日击剑大凶，极易翻车…建议避战！"
+    elif value < 0.5:
+        return "击剑运势不佳，谨慎出手！"
+    elif value < 0.8:
+        return "运势中规中矩，可战可不战~"
+    elif value < 1.2:
+        return "运势良好，可放手一战！"
+    elif value < 3.0:
+        return "运势高涨！今日击剑胜率大幅提升！"
+    else:
+        return "运势如神！今日击剑无往不利，战无不胜！！"
 
 logger = logging.getLogger(__name__)
 
@@ -1841,12 +1888,16 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             abs_rank = niuniu_store.get_rank_position(uid, "absolute")
             rank_str = f"总榜第 {natural_rank} 名 | 深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
         last_glue = niuniu_store.latest_record_time(uid, "gluing")
+        glue_luck = niuniu_store.get_glue_luck(uid)
+        fence_luck = niuniu_store.get_fence_luck(uid)
         lines = [
             "🐂 我的牛牛",
             f"当前长度：{length} cm",
             f"排名：{rank_str}",
+            f"打胶运势：{glue_luck}（{_evaluate_luck(glue_luck)}）",
+            f"击剑运势：{fence_luck}（{_evaluate_luck(fence_luck)}）",
             f"最后打胶：{last_glue}",
-            f"评价：{_comment(length)}",
+            f"评价：{get_comment(length)}",
         ]
         await nn_my.finish("\n".join(lines))
 
@@ -1857,7 +1908,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         if _is_private_chat(event):
             await nn_glue.finish("私聊不支持此命令")
         uid = str(event.user_id)
-        remaining = _check_cd(_glue_cd, uid)
+        remaining = glue_cd.check(uid)
         if remaining > 0:
             tips = [
                 f"不行不行，你的身体会受不了的，歇 {int(remaining)}s 再来吧",
@@ -1876,7 +1927,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
         uid = str(event.user_id)
 
         # CD check
-        remaining = _check_cd(_fence_cd, uid)
+        remaining = fence_cd.check(uid)
         if remaining > 0:
             tips = [
                 f"不行不行，你的身体会受不了的，歇 {int(remaining)}s 再来吧",
@@ -1908,7 +1959,7 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             await nn_fence.finish("不能和自己击剑哦！")
 
         # Check defender CD
-        remaining = _check_cd(_fenced_cd, target_uid)
+        remaining = fenced_cd.check(target_uid)
         if remaining > 0:
             tips = [
                 f"对方刚被击剑过，需要休息 {int(remaining)}s 才能再次被击剑",
@@ -2043,3 +2094,35 @@ def register_commands(on_command, Message, MessageSegment) -> None:
             sign = "+" if diff > 0 else ""
             lines.append(f"{act} | {r['origin_length']} → {r['new_length']} ({sign}{diff}) | {r['created_at']}")
         await nn_records.finish("\n".join(lines))
+
+    nn_glue_luck = on_command("打胶运势", priority=10, block=True)
+
+    @nn_glue_luck.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await nn_glue_luck.finish("私聊不支持此命令")
+        uid = str(event.user_id)
+        if not niuniu_store.exists(uid):
+            await nn_glue_luck.finish("你还没有牛牛呢！请先发送 注册牛牛")
+        luck = niuniu_store.get_glue_luck(uid)
+        label = _evaluate_luck(luck)
+        tips = _glue_luck_tips(luck)
+        await nn_glue_luck.finish(
+            f"🔮 今日打胶运势\n运势值：{luck}\n评价：{label}\n{tips}"
+        )
+
+    nn_fence_luck = on_command("击剑运势", priority=10, block=True)
+
+    @nn_fence_luck.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await nn_fence_luck.finish("私聊不支持此命令")
+        uid = str(event.user_id)
+        if not niuniu_store.exists(uid):
+            await nn_fence_luck.finish("你还没有牛牛呢！请先发送 注册牛牛")
+        luck = niuniu_store.get_fence_luck(uid)
+        label = _evaluate_luck(luck)
+        tips = _fence_luck_tips(luck)
+        await nn_fence_luck.finish(
+            f"⚔️ 今日击剑运势\n运势值：{luck}\n评价：{label}\n{tips}"
+        )

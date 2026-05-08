@@ -19,6 +19,14 @@ class AdjustLengthBody(BaseModel):
     reason: str = Field(default="", max_length=200)
 
 
+class SetLuckBody(BaseModel):
+    luck: float = Field(gt=0)
+
+
+class SetFenceLuckBody(BaseModel):
+    fence_luck: float = Field(gt=0)
+
+
 @router.get("/niuniu/rankings")
 async def get_rankings(request: Request, type: str = "length", top_n: int = 20):
     """Return global rankings.
@@ -50,7 +58,7 @@ async def list_users(request: Request, offset: int = 0, limit: int = 50, keyword
         if keyword and _UID_RE.match(keyword):
             rows = conn.execute(
                 """
-                SELECT uid, length, created_at, updated_at
+                SELECT uid, length, luck, fence_luck, created_at, updated_at
                 FROM niuniu_users
                 WHERE uid = ?
                 ORDER BY length DESC
@@ -65,7 +73,7 @@ async def list_users(request: Request, offset: int = 0, limit: int = 50, keyword
         else:
             rows = conn.execute(
                 """
-                SELECT uid, length, created_at, updated_at
+                SELECT uid, length, luck, fence_luck, created_at, updated_at
                 FROM niuniu_users
                 ORDER BY length DESC
                 LIMIT ? OFFSET ?
@@ -96,10 +104,14 @@ async def get_user(uid: str, request: Request):
         raise HTTPException(404, "user not found")
 
     records = store.get_records(uid, limit=30)
+    luck = store.get_glue_luck(uid)
+    fence_luck = store.get_fence_luck(uid)
 
     return {
         "uid": uid,
         "length": length,
+        "luck": luck,
+        "fence_luck": fence_luck,
         "rank": store.get_rank_position(uid, "natural"),
         "rank_natural": store.get_rank_position(uid, "natural"),
         "rank_absolute": store.get_rank_position(uid, "absolute"),
@@ -136,3 +148,59 @@ async def adjust_length(uid: str, body: AdjustLengthBody, request: Request):
         uid, old_length, body.length, body.reason,
     )
     return {"ok": True, "old_length": old_length, "new_length": body.length}
+
+
+@router.post("/niuniu/users/{uid}/luck")
+async def set_luck(uid: str, body: SetLuckBody, request: Request):
+    """Manually override a user's daily luck."""
+    if not _UID_RE.match(uid):
+        raise HTTPException(422, "invalid uid")
+
+    store: NiuNiuStore = niuniu_store
+    if store.get_length(uid) is None:
+        raise HTTPException(404, "user not found")
+
+    old_luck = store.get_glue_luck(uid)
+    store.set_glue_luck(uid, body.luck)
+
+    audit_logger.log(
+        request,
+        action="set_luck",
+        target_type="niuniu_user",
+        target_id=uid,
+        summary_before={"luck": old_luck},
+        summary_after={"luck": body.luck},
+    )
+    logger.warning(
+        "niuniu luck adjusted uid=%s old=%.2f new=%.2f",
+        uid, old_luck, body.luck,
+    )
+    return {"ok": True, "old_luck": old_luck, "new_luck": body.luck}
+
+
+@router.post("/niuniu/users/{uid}/fence-luck")
+async def set_fence_luck(uid: str, body: SetFenceLuckBody, request: Request):
+    """Manually override a user's daily fence luck."""
+    if not _UID_RE.match(uid):
+        raise HTTPException(422, "invalid uid")
+
+    store: NiuNiuStore = niuniu_store
+    if store.get_length(uid) is None:
+        raise HTTPException(404, "user not found")
+
+    old_fence_luck = store.get_fence_luck(uid)
+    store.set_fence_luck(uid, body.fence_luck)
+
+    audit_logger.log(
+        request,
+        action="set_fence_luck",
+        target_type="niuniu_user",
+        target_id=uid,
+        summary_before={"fence_luck": old_fence_luck},
+        summary_after={"fence_luck": body.fence_luck},
+    )
+    logger.warning(
+        "niuniu fence_luck adjusted uid=%s old=%.2f new=%.2f",
+        uid, old_fence_luck, body.fence_luck,
+    )
+    return {"ok": True, "old_fence_luck": old_fence_luck, "new_fence_luck": body.fence_luck}
