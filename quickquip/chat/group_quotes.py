@@ -38,6 +38,7 @@ class GroupQuoteStore:
         """)
         self._migrate()
         self._db.commit()
+        self._closed = False
 
     def _migrate(self) -> None:
         try:
@@ -154,7 +155,10 @@ class GroupQuoteStore:
         return len(self._recent_ids(str(group_id)))
 
     def close(self) -> None:
+        if self._closed:
+            return
         self._db.close()
+        self._closed = True
 
     def __del__(self):
         try:

@@ -3,10 +3,68 @@
 本文件记录 QuickQuip 的演进方向，按版本锁定近期 scope，中远期按优先级分层。
 
 > 已完成的版本内容见 [CHANGELOG.md](CHANGELOG.md)。
+>
+> 说明：这里先定版本阶梯和每个版本的主线目标；更细的分阶段执行文档后续会单独拆出。
 
 ---
 
-## v1.4+ 待定
+## v1.4.0 架构止血版
+
+### 大阶段 A：先收住高风险正确性问题
+
+1. 统一 `GameScores` 的实例来源，消除双重实例化与同文件多缓存写入风险。
+2. 补齐 `OfflineMessageStore` 与 `GroupQuoteStore` 的资源生命周期，避免 SQLite 连接长期悬挂。
+3. 先把 `message_pipeline.py` 里会造成共享状态混乱的最小问题点收口，再谈更大的容器重构。
+
+### 大阶段 B：把仓库现状和文档对齐
+
+1. 更新 `CLAUDE.md` / 相关说明，补录现存插件与当前目录结构。
+2. 清理已失效的历史描述，避免旧入口继续影响后续分阶段规划。
+3. 为这轮修复补最小回归测试，确保数据和生命周期问题不会悄悄回潮。
+
+## v1.4.1 巨型入口拆分版
+
+### 大阶段 A：拆 `commands.py`
+
+1. 按命令域拆成可维护的子模块，先从 LLM、小游戏、贴吧、TTS 这几类切入。
+2. 把 57 个嵌套处理函数收束到更清晰的注册入口，降低单文件分支密度。
+3. 保持外部命令行为不变，只改组织方式和内部边界。
+
+### 大阶段 B：拆 `LLMService`
+
+1. 先按职责拆出工具管理、会话管理、记忆管理、回复生成、健康检查这几组稳定边界。
+2. 保留 `LLMService` 作为对外门面，但把内部实现迁到更小的 manager/service。
+3. 同步补上围绕 `/llm` 核心路径的回归测试，避免拆分时把状态流弄散。
+
+## v1.4.2 依赖边界收口版
+
+### 大阶段 A：清理跨层耦合
+
+1. 处理 `chat` 与 `llm` 的双向依赖，把共享内容抽到更合适的公共层。
+2. 重新审视 `message_pipeline.py` 的“组装层”职责，减少它作为服务定位器的隐式作用。
+3. 收敛 web route 中直接嵌 SQL 的数据访问模式，优先抽出可复用的数据层 helper。
+
+### 大阶段 B：统一配置与路径约定
+
+1. 统一 config loader 的返回形态和错误处理方式。
+2. 把硬编码路径、环境变量扩展工具、重复的小型配置 helper 收到公共位置。
+3. 顺手处理 `generation/__init__.py`、`Optional[X]` 等风格与可维护性问题。
+
+## v1.4.3 质量补强版
+
+### 大阶段 A：补测试与边界验证
+
+1. 补 `app/web/routes/` 的回归测试，优先覆盖现有高耦合路由。
+2. 补并发安全、模板渲染负例、provider payload 等容易出隐性回归的测试。
+3. 给关键状态管理点加足够的断言，避免“重构完成了，行为却漂了”。
+
+### 大阶段 B：整理低风险技术债
+
+1. 清理死代码和无意义的历史残留。
+2. 将宽泛异常捕获逐步收窄为可诊断的具体异常。
+3. 继续做细碎但有价值的命名、导入和类型风格统一。
+
+## v1.4.4+ 待评估
 
 ### 本地 TTS 服务接入
 
@@ -14,19 +72,19 @@
 
 ### config/llm.toml 热重载
 
-v0.9.0 覆盖了 chat_rules + personas，`/llm reload` 可重读 llm.toml 并重建 MCP 连接，但 provider 客户端不主动重建（惰性创建）。难点在 provider 重建时如何平滑处理 in-flight 请求 + MCP reconnect 顺序 + SQLite store 句柄迁移，需要先设计平滑切换协议再动手。当前重启成本可接受，不排优先级。
+`/llm reload` 可重读 `llm.toml` 并重建 MCP 连接，但 provider 客户端不主动重建（惰性创建）。难点在 provider 重建时如何平滑处理 in-flight 请求 + MCP reconnect 顺序 + SQLite store 句柄迁移，需要先设计平滑切换协议再动手。当前重启成本可接受，不排优先级。
 
 ### 并发安全加固
 
-已为 3 个模块的关键路径添加锁（`quickquip/llm/service.py:106` MCP 初始化、`quickquip/tieba/service.py:28` 贴吧同步、`quickquip/app/web/auth.py:32` 登录防并发）。ROADMAP 原定目标的 `repeat_detector`、`stats_tracker`、`good_girl_chain` / `chain_game` 四个模块的 `OrderedDict` 状态字典仍无同步原语保护，在 NoneBot 异步并发处理多群消息时存在竞态风险（CPython GIL 在单线程事件循环下提供一定保护，实际触发概率较低）。
+已为 3 个模块的关键路径添加锁（`quickquip/llm/service.py` MCP 初始化、`quickquip/tieba/service.py` 贴吧同步、`quickquip/app/web/auth.py` 登录防并发）。`repeat_detector`、`stats_tracker`、`good_girl_chain` / `chain_game` 的共享状态仍值得继续加固，但更适合放到后续分阶段文档里细排。
 
 ### 测试覆盖补充
 
-测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上逐步补充：Provider 流式解析回归测试库（`stream_chunks.py` 已覆盖 3 provider × 8 场景，待扩为按 provider/model 分目录的真实 payload 库）、并发安全测试、模板渲染负例测试、前端组件测试（TS 严格模式迁移已 @ v1.0.1 完成，引入 Vitest 的前提条件已成熟）和性能基准测试。
+测试框架现代化已完成 @ v0.8.1（旧的 5 个顶层断言式脚本迁移到 pytest + fixtures + CI reusable workflow）。在此基础上继续补：Provider 流式解析回归测试库（`stream_chunks.py` 已覆盖 3 provider × 8 场景，待扩为按 provider/model 分目录的真实 payload 库）、前端组件测试、并发安全测试、模板渲染负例测试和性能基准测试。
 
 ### Provider 健康检查与自动故障转移
 
-`quickquip/llm/health.py` 已实现 10 项单次检查 + provider 探活延迟测量。下一步可考虑定时自检 + 多 provider 健康排行 + 故障自动切换，使 `/llm use` 的手动切换升级为半自动降级。
+`quickquip/llm/health.py` 已实现单次检查 + provider 探活延迟测量。下一步可考虑定时自检 + 多 provider 健康排行 + 故障自动切换，使 `/llm use` 的手动切换升级为半自动降级。
 
 ---
 

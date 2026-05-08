@@ -109,3 +109,8 @@ def test_recent_random_history_is_group_scoped(tmp_path, clock):
     assert store.random("g1") is not None
     assert store.recent_random_count("g1") == 1
     assert store.recent_random_count("g2") == 0
+
+
+def test_close_is_idempotent(store):
+    store.close()
+    store.close()

@@ -4,6 +4,7 @@ import logging
 import os
 
 from quickquip.app.message_pipeline import (
+    close_persistent_stores,
     llm_service,
     save_all,
     RULE_SWITCH_PATH,
@@ -66,6 +67,7 @@ def register_lifecycle(driver) -> None:
         await tieba_service.shutdown()
         await llm_service.shutdown()
         save_all()
+        close_persistent_stores()
 
     try:
         from nonebot_plugin_apscheduler import scheduler

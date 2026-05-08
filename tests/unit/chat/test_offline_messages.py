@@ -78,3 +78,8 @@ def test_retract_only_own_messages(store):
     msgs = store.pop_pending("g1", "u3")
     assert len(msgs) == 1
     assert msgs[0].from_user_id == "u1"
+
+
+def test_close_is_idempotent(store):
+    store.close()
+    store.close()

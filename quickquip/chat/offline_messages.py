@@ -50,6 +50,7 @@ class OfflineMessageStore:
                 "SELECT DISTINCT group_id, to_user_id FROM offline_messages"
             ).fetchall()
         }
+        self._closed = False
 
     def add(
         self,
@@ -108,3 +109,9 @@ class OfflineMessageStore:
             key,
         ).fetchall()
         return [PendingMessage(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._db.close()
+        self._closed = True

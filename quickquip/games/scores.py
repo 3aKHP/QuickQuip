@@ -4,6 +4,8 @@ from pathlib import Path
 
 from quickquip.common.persistence import load_json, save_json
 
+DEFAULT_GAME_SCORES_PATH = Path("data/game_scores.json")
+
 
 class GameScores:
     """Simple JSON-file persistence for game win counts.
@@ -21,7 +23,7 @@ class GameScores:
     Thread-safe for single-writer workloads (the bot's asyncio event loop).
     """
 
-    def __init__(self, path: str = "data/game_scores.json"):
+    def __init__(self, path: str | Path = DEFAULT_GAME_SCORES_PATH):
         self._path = Path(path)
         self._data: dict[str, dict[str, dict[str, int]]] = {}
         self._load()
@@ -53,3 +55,6 @@ class GameScores:
         scores = self.get_scores(group_id, game_name)
         sorted_scores = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
         return sorted_scores[:top_n]
+
+
+game_scores = GameScores()

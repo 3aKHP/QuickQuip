@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+import quickquip.app.message_pipeline as message_pipeline
+from quickquip.games import game_scores as domain_game_scores
 from quickquip.app.message_pipeline import (
     build_reply,
     build_timezone_reply,
@@ -32,6 +34,28 @@ def test_detect_kind_wake_sleep_none():
     assert detect_kind("早安") == "wake"
     assert detect_kind("晚安") == "sleep"
     assert detect_kind("你好") is None
+
+
+def test_game_scores_uses_domain_singleton():
+    assert message_pipeline.game_scores is domain_game_scores
+
+
+def test_close_persistent_stores_closes_sqlite_stores(monkeypatch):
+    calls: list[str] = []
+
+    class FakeStore:
+        def __init__(self, name: str):
+            self.name = name
+
+        def close(self) -> None:
+            calls.append(self.name)
+
+    monkeypatch.setattr(message_pipeline, "offline_message_store", FakeStore("offline"))
+    monkeypatch.setattr(message_pipeline, "group_quote_store", FakeStore("quotes"))
+
+    message_pipeline.close_persistent_stores()
+
+    assert calls == ["offline", "quotes"]
 
 
 def test_build_timezone_reply_wake(frozen_now):
