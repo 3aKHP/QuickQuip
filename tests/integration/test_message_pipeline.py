@@ -36,6 +36,11 @@ def test_detect_kind_wake_sleep_none():
     assert detect_kind("你好") is None
 
 
+def test_sqlite_stores_are_lazy_proxies():
+    assert isinstance(message_pipeline.offline_message_store, message_pipeline._LazyStoreProxy)
+    assert isinstance(message_pipeline.group_quote_store, message_pipeline._LazyStoreProxy)
+
+
 def test_game_scores_uses_domain_singleton():
     assert message_pipeline.game_scores is domain_game_scores
 

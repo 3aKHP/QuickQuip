@@ -44,6 +44,26 @@ from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
 
+class _LazyStoreProxy:
+    """Delay SQLite-backed store creation until the first real use."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._store = None
+
+    def _get_store(self):
+        if self._store is None:
+            self._store = self._factory()
+        return self._store
+
+    def __getattr__(self, name):
+        return getattr(self._get_store(), name)
+
+    def close(self) -> None:
+        if self._store is not None:
+            self._store.close()
+
+
 DATA_DIR = Path("data")
 STATS_PATH = DATA_DIR / "stats.json"
 RULE_SWITCH_PATH = DATA_DIR / "rule_switch.json"
@@ -67,8 +87,12 @@ daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
 daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
 wordcloud_collector = WordCloudCollector()
-offline_message_store = OfflineMessageStore(OFFLINE_MESSAGES_PATH)
-group_quote_store = GroupQuoteStore(QUOTES_PATH)
+offline_message_store = _LazyStoreProxy(
+    lambda: OfflineMessageStore(OFFLINE_MESSAGES_PATH),
+)
+group_quote_store = _LazyStoreProxy(
+    lambda: GroupQuoteStore(QUOTES_PATH),
+)
 
 games_config = load_games_config("config/games.toml")
 
