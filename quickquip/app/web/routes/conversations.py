@@ -5,12 +5,12 @@ import sqlite3
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import LLM_DB_PATH
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB = PROJECT_ROOT / "data" / "llm.db"
+_DB = LLM_DB_PATH
 
 # Accepts normal group ids (5-12 digits), private: and archive: synthetic keys,
 # all restricted to URL-safe chars to avoid injection via path segment.

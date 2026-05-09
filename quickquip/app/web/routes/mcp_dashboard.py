@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from fastapi import APIRouter
 
+from quickquip.common.paths import CONFIG_LLM_TOML, MCP_STATUS_JSON_PATH
 from quickquip.llm.config import load_llm_config
 
 router = APIRouter()
 
-_STATUS_PATH = Path("data/mcp_status.json")
+_STATUS_PATH = MCP_STATUS_JSON_PATH
 
 
 def _read_status_file() -> dict | None:
@@ -85,7 +85,7 @@ def get_mcp_dashboard():
         return {"servers": servers}
 
     # 3) Config-only: no runtime data available at all
-    config = load_llm_config("config/llm.toml")
+    config = load_llm_config(CONFIG_LLM_TOML)
     if config.load_error or not config.mcp.servers:
         return {"servers": []}
 

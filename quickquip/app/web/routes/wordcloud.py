@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query
 
 from quickquip.app.message_pipeline import wordcloud_collector
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import WORDCLOUD_MESSAGES_DIR
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.wordcloud import (
     WORDCLOUD_MIN_WORDS,
@@ -45,7 +45,7 @@ def _time_window(window: str, now: datetime) -> tuple[float, float]:
 
 @router.get("/wordcloud/groups")
 def list_wordcloud_groups():
-    base = PROJECT_ROOT / "data" / "wordcloud_msgs"
+    base = WORDCLOUD_MESSAGES_DIR
     if not base.exists():
         return {"groups": []}
     groups = []

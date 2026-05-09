@@ -9,6 +9,7 @@ from pathlib import Path
 from time import time
 from zoneinfo import ZoneInfo
 
+from quickquip.common.paths import WORDCLOUD_MESSAGES_DIR
 from quickquip.chat.config import BEIJING_TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ def _safe_group_id(group_id: int | str) -> str:
 class WordCloudCollector:
     """Appends chat messages to per-group per-date JSONL files for word cloud generation."""
 
-    def __init__(self, base_dir: str | Path = "data/wordcloud_msgs"):
+    def __init__(self, base_dir: str | Path = WORDCLOUD_MESSAGES_DIR):
         self.base_dir = Path(base_dir)
 
     def _file_path(self, group_id: int | str, calendar_date: date) -> Path:

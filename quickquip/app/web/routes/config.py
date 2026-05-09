@@ -7,12 +7,12 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 
 from quickquip.app.web.audit import audit_logger
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import CONFIG_DIR
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_CONFIG_DIR = PROJECT_ROOT / "config"
+_CONFIG_DIR = CONFIG_DIR
 _MAX_CONTENT_BYTES = 65536
 
 # Whitelist of editable root-level config files. Persona files live under

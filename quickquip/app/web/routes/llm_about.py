@@ -8,14 +8,14 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 
 from quickquip.app.web.audit import audit_logger
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import LLM_ABOUT_DIR
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.vocab import VocabIndex
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_LLM_ABOUT_DIR = PROJECT_ROOT / "llm_about"
+_LLM_ABOUT_DIR = LLM_ABOUT_DIR
 _GROUP_RE = re.compile(r"^\d{5,12}$")
 _KINDS = {
     "vocab": {
