@@ -75,6 +75,16 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
 
     reset_stats_cmd = on_command("reset_stats", priority=10, block=True)
 
+    @reset_stats_cmd.handle()
+    async def _(event):
+        if _is_private_chat(event):
+            await reset_stats_cmd.finish("私聊不支持 /reset_stats")
+        if not _is_admin(event):
+            await reset_stats_cmd.finish("仅管理员可执行此操作")
+        stats_tracker.reset(event.group_id)
+        stats_tracker.save(STATS_PATH)
+        await reset_stats_cmd.finish("统计数据已重置")
+
     tieba_peek_cmd = on_command("tieba_peek", priority=10, block=True)
 
     @tieba_peek_cmd.handle()
@@ -101,15 +111,3 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
         if image_url:
             message.append(MessageSegment.image(image_url))
         await tieba_peek_cmd.finish(message)
-
-
-
-    @reset_stats_cmd.handle()
-    async def _(event):
-        if _is_private_chat(event):
-            await reset_stats_cmd.finish("私聊不支持 /reset_stats")
-        if not _is_admin(event):
-            await reset_stats_cmd.finish("仅管理员可执行此操作")
-        stats_tracker.reset(event.group_id)
-        stats_tracker.save(STATS_PATH)
-        await reset_stats_cmd.finish("统计数据已重置")

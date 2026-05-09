@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
+from quickquip.llm.service_parts.constants import MAX_TRIGGER_CONTEXT_MESSAGES
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 
 if TYPE_CHECKING:
@@ -19,8 +20,6 @@ TOOL_SEARCH_NAME = "tool_search"
 TOOL_LIST_NAME = "tool_list"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
-MAX_MEMORY_RETRIEVAL_ITEMS = 8
-MAX_TRIGGER_CONTEXT_MESSAGES = 20
 PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
 DEFAULT_ALWAYS_LOADED_TOOLS = [
     TOOL_SEARCH_NAME,

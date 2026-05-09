@@ -32,6 +32,12 @@ from quickquip.llm.provider import (
     build_provider_client,
     strip_leading_reasoning_content,
 )
+from quickquip.llm.service_parts.constants import (
+    DEFAULT_PRIVATE_HISTORY_LIMIT,
+    MAX_MEMORY_RETRIEVAL_ITEMS,
+    MAX_STORED_MEMORY_ITEMS,
+    MAX_TRIGGER_CONTEXT_MESSAGES,
+)
 from quickquip.llm.service_parts import HealthMixin, StateMixin, ToolMixin
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
@@ -56,18 +62,14 @@ DB_PATH = Path("data/llm.db")
 VOCAB_PATH = Path("llm_about/vocab.yaml")
 IDENTITY_PATH = Path("llm_about/identities.yaml")
 LLM_RULE_NAME = "llm_chat"
-MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_GROUP_STORED_CONVERSATION_MESSAGES = 20
 MAX_PRIVATE_STORED_CONVERSATION_MESSAGES = 256
-MAX_MEMORY_RETRIEVAL_ITEMS = 8
-MAX_STORED_MEMORY_ITEMS = 200
 MAX_QUOTED_MESSAGE_CHARS = 1200
 SEARCH_TOOL_NAME = "search_web"
 TOOL_SEARCH_NAME = "tool_search"
 TOOL_LIST_NAME = "tool_list"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
-DEFAULT_PRIVATE_HISTORY_LIMIT = 256
 PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
 DEFAULT_ALWAYS_LOADED_TOOLS = [
     TOOL_SEARCH_NAME,

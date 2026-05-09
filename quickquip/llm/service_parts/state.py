@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from quickquip.llm.config import ProviderConfig
-
-MAX_MEMORY_RETRIEVAL_ITEMS = 8
-MAX_STORED_MEMORY_ITEMS = 200
+from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
 
 
 class StateMixin:

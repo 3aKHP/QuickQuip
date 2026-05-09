@@ -4,11 +4,10 @@ from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
 from quickquip.llm.mcp import MCPServerStatus
-
-MAX_TRIGGER_CONTEXT_MESSAGES = 20
-MAX_MEMORY_RETRIEVAL_ITEMS = 8
-MAX_STORED_MEMORY_ITEMS = 200
-DEFAULT_PRIVATE_HISTORY_LIMIT = 256
+from quickquip.llm.service_parts.constants import (
+    MAX_STORED_MEMORY_ITEMS,
+    MAX_TRIGGER_CONTEXT_MESSAGES,
+)
 
 
 class HealthMixin:
