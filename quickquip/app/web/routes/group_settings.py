@@ -5,6 +5,7 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from quickquip.app.message_pipeline import stats_tracker
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import CONFIG_LLM_TOML, LLM_DB_PATH
 from quickquip.llm.config import load_llm_config
@@ -91,40 +92,75 @@ def get_options():
     }
 
 
+def _format_group_entry(group_id: str, row) -> dict:
+    """Format a single group entry, with DB row data merged in if available."""
+    entry = {
+        "group_id": group_id,
+        "type": "private" if group_id.startswith("private:") else "group",
+        "enabled": None,
+        "memory_enabled": None,
+        "auto_memory_enabled": None,
+        "provider_id": None,
+        "model": None,
+        "persona_id": None,
+        "trigger_prefix": None,
+        "allow_prefix": None,
+        "allow_at": None,
+        "history_limit": None,
+        "updated_at": None,
+    }
+    if row is not None:
+        entry.update({
+            "enabled": None if row["enabled"] is None else bool(row["enabled"]),
+            "memory_enabled": None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
+            "auto_memory_enabled": None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"]),
+            "provider_id": row["provider_id"],
+            "model": row["model"],
+            "persona_id": row["persona_id"],
+            "trigger_prefix": row["trigger_prefix"],
+            "allow_prefix": None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
+            "allow_at": None if row["allow_at"] is None else bool(row["allow_at"]),
+            "history_limit": row["history_limit"],
+            "updated_at": row["updated_at"],
+        })
+    return entry
+
+
 @router.get("/group-settings")
 def list_group_settings():
-    if not _DB.exists():
-        return {"groups": []}
-    store = _store()
-    with store._connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT group_id, enabled, memory_enabled, auto_memory_enabled, provider_id, model, persona_id,
-                   trigger_prefix, allow_prefix, allow_at, history_limit, updated_at
-            FROM group_settings
-            ORDER BY updated_at DESC
-            """
-        ).fetchall()
-    return {
-        "groups": [
-            {
-                "group_id": row["group_id"],
-                "type": "private" if row["group_id"].startswith("private:") else "group",
-                "enabled": None if row["enabled"] is None else bool(row["enabled"]),
-                "memory_enabled": None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
-                "auto_memory_enabled": None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"]),
-                "provider_id": row["provider_id"],
-                "model": row["model"],
-                "persona_id": row["persona_id"],
-                "trigger_prefix": row["trigger_prefix"],
-                "allow_prefix": None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
-                "allow_at": None if row["allow_at"] is None else bool(row["allow_at"]),
-                "history_limit": row["history_limit"],
-                "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
-    }
+    # Collect all known active group IDs from stats_tracker.
+    active_groups = set(stats_tracker.to_dict().keys())
+
+    # Load group_settings overrides from the DB (if it exists).
+    db_entries: dict[str, object] = {}
+    if _DB.exists():
+        store = _store()
+        with store._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT group_id, enabled, memory_enabled, auto_memory_enabled, provider_id, model, persona_id,
+                       trigger_prefix, allow_prefix, allow_at, history_limit, updated_at
+                FROM group_settings
+                ORDER BY updated_at DESC
+                """
+            ).fetchall()
+        for row in rows:
+            db_entries[row["group_id"]] = row
+
+    result: list[dict] = []
+
+    # Phase 1: known active groups first (with merged DB overrides if present).
+    for group_id in sorted(active_groups):
+        row = db_entries.pop(group_id, None)
+        result.append(_format_group_entry(group_id, row))
+
+    # Phase 2: remaining DB entries that are not in active groups.
+    # Only include private chats and orphaned numeric groups (so admins can still
+    # see pre-configured groups that haven't sent a message yet).
+    for group_id, row in db_entries.items():
+        result.append(_format_group_entry(group_id, row))
+
+    return {"groups": result}
 
 
 @router.get("/group-settings/{group_id}")

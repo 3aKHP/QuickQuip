@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
@@ -14,6 +15,7 @@ class ExtractedLLMInput:
     quoted_image_urls: list[str] = field(default_factory=list)
     quoted_sender_name: str = ""
     quoted_user_id: str = ""
+    quoted_is_bot_self: bool = False
     forward_text: str = ""
     forward_image_urls: list[str] = field(default_factory=list)
     voice_text: str = ""
@@ -25,6 +27,7 @@ def extract_llm_input(
     settings,
     identity_index: IdentityIndex | None = None,
     *,
+    bot_self_ids: Iterable[int | str] | None = None,
     reply=None,
     is_to_me: bool = False,
     forward_text: str = "",
@@ -34,11 +37,13 @@ def extract_llm_input(
     rendered = render_message_for_llm(
         message,
         bot_self_id=bot_self_id,
+        bot_self_ids=bot_self_ids,
         identity_index=identity_index,
     )
     rendered_reply = render_reply_for_llm(
         reply,
         bot_self_id=bot_self_id,
+        bot_self_ids=bot_self_ids,
         identity_index=identity_index,
         include_image_placeholder=True,
     )
@@ -49,6 +54,7 @@ def extract_llm_input(
         "quoted_image_urls": [] if rendered_reply is None else rendered_reply.image_urls,
         "quoted_sender_name": "" if rendered_reply is None else rendered_reply.sender_name,
         "quoted_user_id": "" if rendered_reply is None else rendered_reply.user_id,
+        "quoted_is_bot_self": False if rendered_reply is None else rendered_reply.is_bot_self,
     }
 
     forward_kwargs = {
@@ -95,6 +101,7 @@ def extract_llm_prompt(
     settings,
     identity_index: IdentityIndex | None = None,
     *,
+    bot_self_ids: Iterable[int | str] | None = None,
     reply=None,
     is_to_me: bool = False,
 ) -> str | None:
@@ -103,6 +110,7 @@ def extract_llm_prompt(
         bot_self_id,
         settings,
         identity_index=identity_index,
+        bot_self_ids=bot_self_ids,
         reply=reply,
         is_to_me=is_to_me,
     )
@@ -117,6 +125,7 @@ def extract_private_llm_input(
     settings,
     identity_index: IdentityIndex | None = None,
     *,
+    bot_self_ids: Iterable[int | str] | None = None,
     reply=None,
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
@@ -127,6 +136,7 @@ def extract_private_llm_input(
         bot_self_id,
         settings,
         identity_index=identity_index,
+        bot_self_ids=bot_self_ids,
         reply=reply,
         is_to_me=False,
         forward_text=forward_text,
@@ -139,11 +149,13 @@ def extract_private_llm_input(
     rendered = render_message_for_llm(
         message,
         bot_self_id=bot_self_id,
+        bot_self_ids=bot_self_ids,
         identity_index=identity_index,
     )
     rendered_reply = render_reply_for_llm(
         reply,
         bot_self_id=bot_self_id,
+        bot_self_ids=bot_self_ids,
         identity_index=identity_index,
         include_image_placeholder=True,
     )
@@ -153,6 +165,7 @@ def extract_private_llm_input(
     quoted_image_urls = [] if rendered_reply is None else rendered_reply.image_urls
     quoted_sender_name = "" if rendered_reply is None else rendered_reply.sender_name
     quoted_user_id = "" if rendered_reply is None else rendered_reply.user_id
+    quoted_is_bot_self = False if rendered_reply is None else rendered_reply.is_bot_self
 
     has_any_content = (
         prompt or rendered.image_urls
@@ -170,6 +183,7 @@ def extract_private_llm_input(
         quoted_image_urls=quoted_image_urls,
         quoted_sender_name=quoted_sender_name,
         quoted_user_id=quoted_user_id,
+        quoted_is_bot_self=quoted_is_bot_self,
         forward_text=forward_text,
         forward_image_urls=list(forward_image_urls or []),
         voice_text=voice_text.strip(),

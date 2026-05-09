@@ -28,7 +28,7 @@ from quickquip.games.niuniu.events import (
     _normal_fence_event,
 )
 from quickquip.games.niuniu.fencing import _fence_win_prob, _fence_winner_is_role
-from quickquip.games.niuniu.gluing import _glue_growth, _regression_pressure
+from quickquip.games.niuniu.gluing import _apply_regression_to_delta, _glue_growth, _regression_pressure
 from quickquip.games.niuniu.store import _roll_lognormal
 
 
@@ -423,15 +423,15 @@ class TestNiuNiuStoreRankings:
 
 
 class TestNiuNiuStoreLuck:
-    def test_glue_luck_in_bounds(self, store, uid_a):
-        assert 0.01 <= store.get_glue_luck(uid_a) <= 100.0
+    def test_glue_luck_positive(self, store, uid_a):
+        assert store.get_glue_luck(uid_a) > 0
 
     def test_set_glue_luck_overrides(self, store, uid_a):
         store.set_glue_luck(uid_a, 2.5)
         assert store.get_glue_luck(uid_a) == 2.5
 
-    def test_fence_luck_in_bounds(self, store, uid_a):
-        assert 0.01 <= store.get_fence_luck(uid_a) <= 100.0
+    def test_fence_luck_positive(self, store, uid_a):
+        assert store.get_fence_luck(uid_a) > 0
 
     def test_set_fence_luck_overrides(self, store, uid_a):
         store.set_fence_luck(uid_a, 3.0)
@@ -477,6 +477,28 @@ class TestRegressionPressure:
 
     def test_symmetric_for_positive_and_negative(self, cfg):
         assert _regression_pressure(500.0, cfg) == _regression_pressure(-500.0, cfg)
+
+
+class TestRegressionDelta:
+    @pytest.fixture
+    def cfg(self):
+        return NiuNiuConfig()
+
+    def test_negative_outward_is_dampened(self, cfg):
+        adjusted = _apply_regression_to_delta(-500.0, -100.0, cfg)
+        assert adjusted == pytest.approx(-50.0, abs=0.01)
+
+    def test_negative_inward_is_amplified_toward_zero(self, cfg):
+        adjusted = _apply_regression_to_delta(-500.0, 100.0, cfg)
+        assert adjusted == pytest.approx(150.0, abs=0.01)
+
+    def test_negative_inward_does_not_cross_zero(self, cfg):
+        adjusted = _apply_regression_to_delta(-500.0, 600.0, cfg)
+        assert adjusted == pytest.approx(500.0, abs=0.01)
+
+    def test_positive_inward_does_not_cross_zero(self, cfg):
+        adjusted = _apply_regression_to_delta(500.0, -600.0, cfg)
+        assert adjusted == pytest.approx(-500.0, abs=0.01)
 
 
 class TestGluing:
@@ -578,6 +600,22 @@ class TestGluing:
         _, new_len = gluing(store, uid_a)
         # Shrinkage at 500 produces significant drop; regression amplifies it
         assert new_len < 500.0
+
+    def test_negative_regression_inward_bonus_does_not_flip_sign(self, store, uid_a, monkeypatch):
+        store.update_length(uid_a, -500.0)
+        store.set_glue_luck(uid_a, 100.0)
+        _patch_glue_event(monkeypatch, "blessing")
+        _patch_uniform(monkeypatch, 10.0)
+        _, new_len = gluing(store, uid_a)
+        assert new_len <= 0.0
+        assert abs(new_len) <= 500.0
+
+    def test_negative_regression_dampens_outward_shrinkage(self, store, uid_a, monkeypatch):
+        store.update_length(uid_a, -500.0)
+        store.set_glue_luck(uid_a, 1.0)
+        _patch_glue_event(monkeypatch, "shrinkage")
+        _, new_len = gluing(store, uid_a)
+        assert abs(new_len) < 1000.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════

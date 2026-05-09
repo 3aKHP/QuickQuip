@@ -259,11 +259,13 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
         rendered = render_message_for_llm(
             event.get_message(),
             bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
             identity_index=llm_service.identities,
         )
         rendered_reply = render_reply_for_llm(
             getattr(event, "reply", None),
             bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
             identity_index=llm_service.identities,
             include_image_placeholder=True,
         )
