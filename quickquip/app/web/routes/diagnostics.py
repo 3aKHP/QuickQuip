@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from quickquip.common.paths import CONFIG_LLM_TOML
 from quickquip.llm.config import load_llm_config
 from quickquip.llm.provider import (
     LLMRequest,
@@ -47,7 +48,7 @@ class RegressionRequest(BaseModel):
 
 @router.get("/diagnostics/providers")
 def get_diagnostics_providers():
-    config = load_llm_config("config/llm.toml")
+    config = load_llm_config(CONFIG_LLM_TOML)
     if config.load_error:
         return {"providers": []}
     return {
@@ -104,7 +105,7 @@ def clear_traces():
 async def run_sample_request(body: SampleRequest):
     import time
 
-    config = load_llm_config("config/llm.toml")
+    config = load_llm_config(CONFIG_LLM_TOML)
     if config.load_error:
         raise HTTPException(status_code=400, detail=f"config load error: {config.load_error}")
 

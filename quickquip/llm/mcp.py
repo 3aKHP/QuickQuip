@@ -920,9 +920,10 @@ class MCPClientManager:
     def _write_status_file(self) -> None:
         """Write current MCP status to a JSON file shared with web-admin."""
         try:
-            from pathlib import Path
             import json
-            path = Path("data/mcp_status.json")
+            from quickquip.common.paths import MCP_STATUS_JSON_PATH
+
+            path = MCP_STATUS_JSON_PATH
             path.parent.mkdir(parents=True, exist_ok=True)
             statuses = []
             for s in self.get_statuses():

@@ -50,7 +50,7 @@ async def test_extracts_from_current_message():
 
     text, images = await extract_forward_content(bot=bot, message=msg, bot_self_id="12345")
 
-    assert bot.calls == [("get_forward_msg", {"id": "fid_direct"})]
+    assert bot.calls == [("get_forward_msg", {"message_id": "fid_direct"})]
     assert "合并里第 1 条" in text
     assert "合并里第 2 条" in text
     assert images == ["https://example.test/fwd1.png"]
@@ -73,7 +73,7 @@ async def test_extracts_from_reply_when_current_has_none():
         bot=bot, message=current, bot_self_id="12345", reply=reply
     )
 
-    assert bot.calls == [("get_forward_msg", {"id": "fid_via_reply"})]
+    assert bot.calls == [("get_forward_msg", {"message_id": "fid_via_reply"})]
     assert "合并里第 1 条" in text
     assert images == ["https://example.test/fwd1.png"]
 
@@ -89,7 +89,7 @@ async def test_current_message_forward_wins_over_reply():
         bot=bot, message=current, bot_self_id="12345", reply=reply
     )
 
-    assert bot.calls == [("get_forward_msg", {"id": "fid_direct"})]
+    assert bot.calls == [("get_forward_msg", {"message_id": "fid_direct"})]
     assert text
 
 

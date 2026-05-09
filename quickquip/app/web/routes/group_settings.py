@@ -6,15 +6,15 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from quickquip.app.web.audit import audit_logger
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import CONFIG_LLM_TOML, LLM_DB_PATH
 from quickquip.llm.config import load_llm_config
 from quickquip.llm.store import LLMStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB = PROJECT_ROOT / "data" / "llm.db"
-_LLM_TOML = PROJECT_ROOT / "config" / "llm.toml"
+_DB = LLM_DB_PATH
+_LLM_TOML = CONFIG_LLM_TOML
 
 # group_settings is keyed by LLMService.build_chat_scope_key output, which is
 # the raw numeric group_id for groups and "private:USER_ID" for private chats.

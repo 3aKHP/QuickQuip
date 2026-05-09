@@ -8,6 +8,7 @@ import sqlite3
 import time
 from typing import Any
 
+from quickquip.common.paths import CONFIG_GENERATION_TOML
 from quickquip.generation.config import load_generation_config
 from quickquip.llm.config import LLMConfig, ProviderConfig
 from quickquip.llm.settings import ResolvedGroupSettings
@@ -117,7 +118,7 @@ async def build_health_report(
     stats_bound: bool,
     rule_switch_bound: bool,
     include_generation: bool = True,
-    generation_config_path: Path = Path("config/generation.toml"),
+    generation_config_path: Path = CONFIG_GENERATION_TOML,
     probe_provider: bool = False,
     auto_memory_stats: dict[str, int] | None = None,
     image_preprocessor_bound: bool = False,

@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from quickquip.common.env import PROJECT_ROOT, load_project_env_files
+from quickquip.common.env import load_project_env_files
+from quickquip.common.paths import WEB_ADMIN_SESSIONS_DB_PATH
 
 def load_web_env() -> None:
     load_project_env_files()
@@ -33,4 +34,4 @@ def get_web_admin_cookie_secure_mode() -> str:
 
 
 def get_web_admin_session_db_path() -> Path:
-    return PROJECT_ROOT / "data" / "web_admin_sessions.db"
+    return WEB_ADMIN_SESSIONS_DB_PATH

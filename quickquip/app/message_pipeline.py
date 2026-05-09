@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.service import llm_service
@@ -40,6 +39,14 @@ from quickquip.chat.context_rules import match_context_rule
 from quickquip.chat.offline_messages import OfflineMessageStore
 from quickquip.chat.group_quotes import GroupQuoteStore
 from quickquip.common.message_deduper import RecentMessageDeduper
+from quickquip.common.paths import (
+    CONFIG_GAMES_TOML,
+    DATA_DIR,
+    OFFLINE_MESSAGES_DB_PATH,
+    QUOTES_DB_PATH,
+    RULE_SWITCH_JSON_PATH,
+    STATS_JSON_PATH,
+)
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
@@ -64,11 +71,10 @@ class _LazyStoreProxy:
             self._store.close()
 
 
-DATA_DIR = Path("data")
-STATS_PATH = DATA_DIR / "stats.json"
-RULE_SWITCH_PATH = DATA_DIR / "rule_switch.json"
-OFFLINE_MESSAGES_PATH = DATA_DIR / "offline_messages.db"
-QUOTES_PATH = DATA_DIR / "quotes.db"
+STATS_PATH = STATS_JSON_PATH
+RULE_SWITCH_PATH = RULE_SWITCH_JSON_PATH
+OFFLINE_MESSAGES_PATH = OFFLINE_MESSAGES_DB_PATH
+QUOTES_PATH = QUOTES_DB_PATH
 
 rate_limiter = KeyedRateLimiter(
     rule_limits=RATE_LIMIT_RULES,
@@ -94,7 +100,7 @@ group_quote_store = _LazyStoreProxy(
     lambda: GroupQuoteStore(QUOTES_PATH),
 )
 
-games_config = load_games_config("config/games.toml")
+games_config = load_games_config(CONFIG_GAMES_TOML)
 
 game_registry = GameRegistry(max_sessions=1024)
 game_registry.register(NumberBombGame(config=games_config.number_bomb))

@@ -5,12 +5,12 @@ import sqlite3
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB = PROJECT_ROOT / "data" / "daily_summaries.db"
+_DB = DAILY_SUMMARIES_DB_PATH
 
 _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")

@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **配置解析 helper 统一**：LLM 与 generation 配置加载共享环境变量展开、字典读取和布尔解析工具，减少跨模块重复实现
 - **适配层与 LLM 运行时结构拆分**：`commands.py` 收束为聚合注册入口，命令域迁入 `command_parts/`；`LLMService` 拆出 `service_parts/` 的工具、健康检查和状态管理职责块
 - **LLM 常量集中管理**：`service_parts/` 共享常量收束到单一来源，避免运行时和 mixin 之间重复定义
 - **贴吧命令注册整理**：`reset_stats` 与 `tieba_peek` 的注册和处理逻辑重新靠拢，便于后续维护

@@ -49,6 +49,12 @@ from quickquip.llm.tools import (
     ToolExecutionContext,
 )
 from quickquip.llm.vocab import VocabIndex
+from quickquip.common.paths import (
+    CONFIG_LLM_TOML,
+    LLM_DB_PATH,
+    LLM_IDENTITIES_YAML_PATH,
+    LLM_VOCAB_YAML_PATH,
+)
 from quickquip.search.web_search import SearXNGSearchClient, format_search_response  # noqa: F401
 
 if TYPE_CHECKING:
@@ -57,10 +63,10 @@ if TYPE_CHECKING:
     from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
 
-CONFIG_PATH = Path("config/llm.toml")
-DB_PATH = Path("data/llm.db")
-VOCAB_PATH = Path("llm_about/vocab.yaml")
-IDENTITY_PATH = Path("llm_about/identities.yaml")
+CONFIG_PATH = CONFIG_LLM_TOML
+DB_PATH = LLM_DB_PATH
+VOCAB_PATH = LLM_VOCAB_YAML_PATH
+IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_GROUP_STORED_CONVERSATION_MESSAGES = 20
 MAX_PRIVATE_STORED_CONVERSATION_MESSAGES = 256

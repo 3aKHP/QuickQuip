@@ -48,7 +48,7 @@ async def extract_forward_content(bot, message, bot_self_id, identity_index=None
         return "", []
 
     try:
-        result = await bot.call_api("get_forward_msg", id=forward_id)
+        result = await bot.call_api("get_forward_msg", message_id=forward_id)
     except Exception:
         logger.warning("Failed to fetch forward message id=%s", forward_id, exc_info=True)
         return "", []

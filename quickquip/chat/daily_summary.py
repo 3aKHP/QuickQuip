@@ -9,6 +9,7 @@ from time import time
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.paths import DAILY_MESSAGES_DIR, DAILY_SUMMARIES_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ def _safe_group_id(group_id: int | str) -> str:
 class DailyMessageCollector:
     """Appends chat messages to per-group per-date JSONL files for daily summarization."""
 
-    def __init__(self, base_dir: str | Path = "data/daily_msgs"):
+    def __init__(self, base_dir: str | Path = DAILY_MESSAGES_DIR):
         self.base_dir = Path(base_dir)
 
     def _file_path(self, group_id: int | str, calendar_date: date) -> Path:
@@ -131,7 +132,7 @@ class DailyMessageCollector:
 class DailySummaryStore:
     """SQLite store for persisting generated daily summaries."""
 
-    def __init__(self, db_path: str | Path = "data/daily_summaries.db"):
+    def __init__(self, db_path: str | Path = DAILY_SUMMARIES_DB_PATH):
         self.db_path = Path(db_path)
         self._init_db()
 

@@ -8,12 +8,12 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 
 from quickquip.app.web.audit import audit_logger
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import CONFIG_PERSONAS_DIR
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_PERSONAS_DIR = PROJECT_ROOT / "config" / "personas"
+_PERSONAS_DIR = CONFIG_PERSONAS_DIR
 _NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_\-]{0,63}$")
 _PROTECTED_NAMES = {"_shared"}
 _MAX_CONTENT_BYTES = 65536

@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import os
 from pathlib import Path
-import re
 from typing import Any
 import tomllib
 
+from quickquip.common.config_utils import as_bool, as_dict, expand_env_value
+from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_LLM_TOML
 
-DEFAULT_GENERATION_CONFIG_PATH = Path("config/generation.toml")
-DEFAULT_LEGACY_LLM_CONFIG_PATH = Path("config/llm.toml")
+
+DEFAULT_GENERATION_CONFIG_PATH = CONFIG_GENERATION_TOML
+DEFAULT_LEGACY_LLM_CONFIG_PATH = CONFIG_LLM_TOML
 _SUPPORTED_IMAGE_PROTOCOLS = {"openai_images", "gemini_imagen", "minimax_images"}
 _SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async"}
 _SUPPORTED_MUSIC_PROTOCOLS = {"minimax_music"}
 _SUPPORTED_ASR_PROTOCOLS = {"openai_transcriptions"}
-_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
 @dataclass(slots=True)
@@ -228,61 +228,20 @@ class GenerationConfig:
     source_path: Path | None = None
     source_kind: str = "generation"
 
-
-def _as_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    return {}
-
-
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off", ""}:
-            return False
-    return default
-
-
-def _expand_env_string(value: str) -> str:
-    def _replace(match: re.Match[str]) -> str:
-        key = match.group(1)
-        default = match.group(2)
-        resolved = os.getenv(key)
-        if resolved is None:
-            return default or ""
-        return resolved
-
-    return _ENV_PATTERN.sub(_replace, value)
-
-
-def _expand_env_value(value: Any) -> Any:
-    if isinstance(value, str):
-        return _expand_env_string(value)
-    if isinstance(value, list):
-        return [_expand_env_value(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): _expand_env_value(item) for key, item in value.items()}
-    return value
-
-
 def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
     providers: dict[str, ImageProviderConfig] = {}
     models: dict[str, ResolvedImageModel] = {}
     raw_providers = raw.get("providers", [])
     for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = _expand_env_value(provider_entry)
+        provider_entry = expand_env_value(provider_entry)
         provider_id = str(provider_entry.get("id", "")).strip()
         if not provider_id:
             continue
 
-        raw_headers = _as_dict(provider_entry.get("headers"))
+        raw_headers = as_dict(provider_entry.get("headers"))
         model_list: list[ImageModelConfig] = []
         for model_entry in provider_entry.get("models", []) or []:
-            model_entry = _expand_env_value(model_entry)
+            model_entry = expand_env_value(model_entry)
             model_id = str(model_entry.get("id", "")).strip()
             model_name = str(model_entry.get("model", "")).strip()
             if not model_id or not model_name:
@@ -308,7 +267,7 @@ def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
             models=model_list,
             headers={str(k): str(v) for k, v in raw_headers.items()},
             user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=_expand_env_value(_as_dict(provider_entry.get("extra_body"))),
+            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
         )
         providers[provider_id] = provider
 
@@ -324,7 +283,7 @@ def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
         default_model = next(iter(models))
 
     return ImageGenerationConfig(
-        enabled=_as_bool(raw.get("enabled", False), default=False),
+        enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
         prompt_blocklist=[
             str(word).strip().lower()
@@ -341,15 +300,15 @@ def _read_audio_generation(raw: dict[str, Any]) -> AudioGenerationConfig:
     models: dict[str, ResolvedAudioModel] = {}
     raw_providers = raw.get("providers", [])
     for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = _expand_env_value(provider_entry)
+        provider_entry = expand_env_value(provider_entry)
         provider_id = str(provider_entry.get("id", "")).strip()
         if not provider_id:
             continue
 
-        raw_headers = _as_dict(provider_entry.get("headers"))
+        raw_headers = as_dict(provider_entry.get("headers"))
         model_list: list[AudioModelConfig] = []
         for model_entry in provider_entry.get("models", []) or []:
-            model_entry = _expand_env_value(model_entry)
+            model_entry = expand_env_value(model_entry)
             model_id = str(model_entry.get("id", "")).strip()
             model_name = str(model_entry.get("model", "")).strip()
             if not model_id or not model_name:
@@ -369,11 +328,11 @@ def _read_audio_generation(raw: dict[str, Any]) -> AudioGenerationConfig:
                 format=str(model_entry.get("format", "mp3")).strip() or "mp3",
                 channel=int(model_entry.get("channel", 1)),
                 language_boost=str(model_entry.get("language_boost", "")).strip(),
-                subtitle_enable=_as_bool(model_entry.get("subtitle_enable", False), default=False),
+                subtitle_enable=as_bool(model_entry.get("subtitle_enable", False), default=False),
                 output_format=str(model_entry.get("output_format", "hex")).strip() or "hex",
-                pronunciation_dict=_expand_env_value(_as_dict(model_entry.get("pronunciation_dict"))),
-                voice_modify=_expand_env_value(_as_dict(model_entry.get("voice_modify"))),
-                extra_body=_expand_env_value(_as_dict(model_entry.get("extra_body"))),
+                pronunciation_dict=expand_env_value(as_dict(model_entry.get("pronunciation_dict"))),
+                voice_modify=expand_env_value(as_dict(model_entry.get("voice_modify"))),
+                extra_body=expand_env_value(as_dict(model_entry.get("extra_body"))),
             )
             model_list.append(model)
 
@@ -388,7 +347,7 @@ def _read_audio_generation(raw: dict[str, Any]) -> AudioGenerationConfig:
             models=model_list,
             headers={str(k): str(v) for k, v in raw_headers.items()},
             user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=_expand_env_value(_as_dict(provider_entry.get("extra_body"))),
+            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
         )
         providers[provider_id] = provider
 
@@ -404,7 +363,7 @@ def _read_audio_generation(raw: dict[str, Any]) -> AudioGenerationConfig:
         default_model = next(iter(models))
 
     return AudioGenerationConfig(
-        enabled=_as_bool(raw.get("enabled", False), default=False),
+        enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
         prompt_blocklist=[
             str(word).strip().lower()
@@ -421,15 +380,15 @@ def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
     models: dict[str, ResolvedMusicModel] = {}
     raw_providers = raw.get("providers", [])
     for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = _expand_env_value(provider_entry)
+        provider_entry = expand_env_value(provider_entry)
         provider_id = str(provider_entry.get("id", "")).strip()
         if not provider_id:
             continue
 
-        raw_headers = _as_dict(provider_entry.get("headers"))
+        raw_headers = as_dict(provider_entry.get("headers"))
         model_list: list[MusicModelConfig] = []
         for model_entry in provider_entry.get("models", []) or []:
-            model_entry = _expand_env_value(model_entry)
+            model_entry = expand_env_value(model_entry)
             model_id = str(model_entry.get("id", "")).strip()
             model_name = str(model_entry.get("model", "")).strip()
             if not model_id or not model_name:
@@ -443,9 +402,9 @@ def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
                 bitrate=int(model_entry.get("bitrate", 256000)),
                 format=str(model_entry.get("format", "mp3")).strip() or "mp3",
                 output_format=str(model_entry.get("output_format", "hex")).strip() or "hex",
-                add_watermark=_as_bool(model_entry.get("add_watermark", False), default=False),
-                lyrics_optimizer=_as_bool(model_entry.get("lyrics_optimizer", False), default=False),
-                extra_body=_expand_env_value(_as_dict(model_entry.get("extra_body"))),
+                add_watermark=as_bool(model_entry.get("add_watermark", False), default=False),
+                lyrics_optimizer=as_bool(model_entry.get("lyrics_optimizer", False), default=False),
+                extra_body=expand_env_value(as_dict(model_entry.get("extra_body"))),
             )
             model_list.append(model)
 
@@ -460,7 +419,7 @@ def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
             models=model_list,
             headers={str(k): str(v) for k, v in raw_headers.items()},
             user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=_expand_env_value(_as_dict(provider_entry.get("extra_body"))),
+            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
         )
         providers[provider_id] = provider
 
@@ -476,7 +435,7 @@ def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
         default_model = next(iter(models))
 
     return MusicGenerationConfig(
-        enabled=_as_bool(raw.get("enabled", False), default=False),
+        enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
         prompt_blocklist=[
             str(word).strip().lower()
@@ -493,15 +452,15 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
     models: dict[str, ResolvedAsrModel] = {}
     raw_providers = raw.get("providers", [])
     for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = _expand_env_value(provider_entry)
+        provider_entry = expand_env_value(provider_entry)
         provider_id = str(provider_entry.get("id", "")).strip()
         if not provider_id:
             continue
 
-        raw_headers = _as_dict(provider_entry.get("headers"))
+        raw_headers = as_dict(provider_entry.get("headers"))
         model_list: list[AsrModelConfig] = []
         for model_entry in provider_entry.get("models", []) or []:
-            model_entry = _expand_env_value(model_entry)
+            model_entry = expand_env_value(model_entry)
             model_id = str(model_entry.get("id", "")).strip()
             model_name = str(model_entry.get("model", "")).strip()
             if not model_id or not model_name:
@@ -514,7 +473,7 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
                 language=str(model_entry.get("language", "")).strip(),
                 prompt=str(model_entry.get("prompt", "")).strip(),
                 response_format=str(model_entry.get("response_format", "json")).strip() or "json",
-                extra_body=_expand_env_value(_as_dict(model_entry.get("extra_body"))),
+                extra_body=expand_env_value(as_dict(model_entry.get("extra_body"))),
             )
             model_list.append(model)
 
@@ -529,7 +488,7 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
             models=model_list,
             headers={str(k): str(v) for k, v in raw_headers.items()},
             user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=_expand_env_value(_as_dict(provider_entry.get("extra_body"))),
+            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
         )
         providers[provider_id] = provider
 
@@ -545,7 +504,7 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
         default_model = next(iter(models))
 
     return AsrConfig(
-        enabled=_as_bool(raw.get("enabled", False), default=False),
+        enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
         max_audio_bytes=max(1, int(raw.get("max_audio_bytes", 25 * 1024 * 1024))),
         providers=providers,
@@ -559,17 +518,17 @@ def _read_generation_section(
     legacy_section_name: str,
     reader,
 ):
-    generation = _expand_env_value(_as_dict(data.get("generation")))
+    generation = expand_env_value(as_dict(data.get("generation")))
     if generation:
-        section = _expand_env_value(_as_dict(generation.get(section_name)))
+        section = expand_env_value(as_dict(generation.get(section_name)))
         if section:
             return reader(section)
 
-    section = _expand_env_value(_as_dict(data.get(section_name)))
+    section = expand_env_value(as_dict(data.get(section_name)))
     if section:
         return reader(section)
 
-    legacy_section = _expand_env_value(_as_dict(data.get(legacy_section_name)))
+    legacy_section = expand_env_value(as_dict(data.get(legacy_section_name)))
     if legacy_section:
         return reader(legacy_section)
 

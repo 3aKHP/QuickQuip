@@ -7,14 +7,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from typing import Annotated, Literal
 
-from quickquip.llm.store import LLMStore
 from quickquip.app.web.audit import audit_logger
-from quickquip.app.web.settings import PROJECT_ROOT
+from quickquip.common.paths import LLM_DB_PATH
+from quickquip.llm.store import LLMStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB = PROJECT_ROOT / "data" / "llm.db"
+_DB = LLM_DB_PATH
 
 _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 
