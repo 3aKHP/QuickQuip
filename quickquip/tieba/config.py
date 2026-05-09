@@ -11,10 +11,11 @@ from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.env import load_project_env_files as load_shared_project_env_files
+from quickquip.common.paths import TIEBA_DATA_DIR
 
 
 TIEBA_RULE_NAME = "tieba_random_post"
-DATA_DIR = Path("data/tieba")
+DATA_DIR = TIEBA_DATA_DIR
 STORE_PATH = DATA_DIR / "pool.json"
 PROFILE_DIR = DATA_DIR / "profile"
 STATE_PATH = DATA_DIR / "storage_state.json"

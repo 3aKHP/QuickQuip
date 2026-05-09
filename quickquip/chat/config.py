@@ -1,6 +1,7 @@
 from datetime import time
 import tomllib
-from pathlib import Path
+
+from quickquip.common.paths import CHAT_RULES_TOML_PATH
 
 BEIJING_TIMEZONE = "Asia/Shanghai"
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
@@ -50,7 +51,7 @@ def reload_chat_rules() -> None:
     only); if it exists but fails to parse, ``tomllib.TOMLDecodeError`` propagates and
     existing rule state is left untouched.
     """
-    path = Path("config/chat_rules.toml")
+    path = CHAT_RULES_TOML_PATH
     data: dict = {}
     if path.exists():
         with open(path, "rb") as f:

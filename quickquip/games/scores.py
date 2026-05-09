@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from quickquip.common.persistence import load_json, save_json
+from quickquip.common.paths import GAME_SCORES_JSON_PATH
 
-DEFAULT_GAME_SCORES_PATH = Path("data/game_scores.json")
+DEFAULT_GAME_SCORES_PATH = GAME_SCORES_JSON_PATH
 
 
 class GameScores:
