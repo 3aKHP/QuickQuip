@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-05-09
+
 ### 变更
 
 - **群设置页扩充可见范围**：Web 管理端的群设置列表会同时展示近期活跃群和数据库中已有覆盖配置的群，便于直接管理真实在用群组
@@ -448,9 +450,13 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/3aKHP/QuickQuip/compare/v1.4.2...v1.4.3
+[1.4.2]: https://github.com/3aKHP/QuickQuip/compare/v1.4.1...v1.4.2
+[1.4.1]: https://github.com/3aKHP/QuickQuip/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/3aKHP/QuickQuip/compare/v1.3.2...v1.4.0
 [1.3.2]: https://github.com/3aKHP/QuickQuip/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/3aKHP/QuickQuip/compare/v1.3.0...v1.3.1
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.3.2...HEAD
 [1.3.0]: https://github.com/3aKHP/QuickQuip/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/3aKHP/QuickQuip/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/3aKHP/QuickQuip/compare/v1.1.0...v1.2.0
