@@ -44,6 +44,29 @@ def _regression_pressure(length: float, cfg: NiuNiuConfig) -> float:
     return min(raw, cfg.regression_max_pressure)
 
 
+def _apply_regression_to_delta(origin: float, delta: float, cfg: NiuNiuConfig) -> float:
+    """Adjust a signed delta using regression pressure around zero.
+
+    The pressure acts on *distance to zero*, not directly on the signed value:
+    - outward moves (|target| > |origin|) are dampened
+    - inward moves (|target| < |origin|) are amplified
+
+    For inward moves, the adjusted delta is capped at zero so the bonus cannot
+    overshoot through zero and turn into a new outward move on the other side.
+    """
+    pressure = _regression_pressure(origin, cfg)
+    if pressure <= 0 or abs(delta) < 0.01:
+        return round(delta, 2)
+
+    if origin * delta > 0:
+        return round(delta * (1.0 - pressure), 2)
+    if origin * delta < 0:
+        adjusted_abs = min(abs(delta) * (1.0 + pressure), abs(origin))
+        direction = -1.0 if origin > 0 else 1.0
+        return round(direction * adjusted_abs, 2)
+    return round(delta, 2)
+
+
 def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     """Perform a gluing operation. Returns (result_message, new_length)."""
     origin = store.get_length(uid)
@@ -142,16 +165,7 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     if event["category"] not in ("arrested", "mirror"):
         luck = store.get_glue_luck(uid)
         luck_diff = round((new_length - origin) * luck, 2)
-
-        # Regression: extreme |length| → dampen outward, amplify inward
-        pressure = _regression_pressure(origin, cfg)
-        if pressure > 0:
-            origin_abs = abs(origin)
-            target_abs = abs(origin + luck_diff)
-            if target_abs > origin_abs:
-                luck_diff = round(luck_diff * (1.0 - pressure), 2)
-            elif target_abs < origin_abs:
-                luck_diff = round(luck_diff * (1.0 + pressure), 2)
+        luck_diff = _apply_regression_to_delta(origin, luck_diff, cfg)
 
         new_length = round(origin + luck_diff, 2)
         diff_abs = abs(luck_diff)
