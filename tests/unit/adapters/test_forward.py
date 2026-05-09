@@ -16,13 +16,13 @@ from tests.fixtures.onebot import (
 
 
 class _StubBot:
-    def __init__(self, forward_payload: dict | None = None):
-        self._payload = forward_payload or {}
+    def __init__(self, forward_payloads: dict[str, dict] | None = None):
+        self._payloads = forward_payloads or {}
         self.calls: list[tuple[str, dict]] = []
 
     async def call_api(self, name: str, **kwargs):
         self.calls.append((name, kwargs))
-        return self._payload
+        return self._payloads.get(kwargs.get("message_id", ""), {})
 
 
 def _forward_payload() -> dict:
@@ -45,7 +45,7 @@ def _forward_payload() -> dict:
 
 @pytest.mark.asyncio
 async def test_extracts_from_current_message():
-    bot = _StubBot(_forward_payload())
+    bot = _StubBot({"fid_direct": _forward_payload()})
     msg = DummyMessage([forward_seg("fid_direct"), text_seg("分析一下")])
 
     text, images = await extract_forward_content(bot=bot, message=msg, bot_self_id="12345")
@@ -58,16 +58,11 @@ async def test_extracts_from_current_message():
 
 @pytest.mark.asyncio
 async def test_extracts_from_reply_when_current_has_none():
-    bot = _StubBot(_forward_payload())
+    bot = _StubBot({"fid_via_reply": _forward_payload()})
     # Current message is the quote + @bot + user's question: no forward segment
     current = DummyMessage([at_seg("12345"), text_seg("你怎么看这个")])
-    reply_msg = DummyMessage([forward_seg("fid_via_reply")])
-    reply = DummyReply(
-        message=reply_msg,
-        user_id="10001",
-        sender=DummySender(nickname="Alice"),
-        message_id="42",
-    )
+    reply = DummyReply(message="[合并转发消息]", user_id="10001", sender=DummySender(nickname="Alice"), message_id="42")
+    reply.raw_message = DummyMessage([forward_seg("fid_via_reply")])
 
     text, images = await extract_forward_content(
         bot=bot, message=current, bot_self_id="12345", reply=reply
@@ -80,7 +75,7 @@ async def test_extracts_from_reply_when_current_has_none():
 
 @pytest.mark.asyncio
 async def test_current_message_forward_wins_over_reply():
-    bot = _StubBot(_forward_payload())
+    bot = _StubBot({"fid_direct": _forward_payload(), "fid_in_reply": _forward_payload()})
     current = DummyMessage([forward_seg("fid_direct"), text_seg("说说")])
     reply_msg = DummyMessage([forward_seg("fid_in_reply")])
     reply = DummyReply(message=reply_msg, user_id="10001")
@@ -95,7 +90,7 @@ async def test_current_message_forward_wins_over_reply():
 
 @pytest.mark.asyncio
 async def test_no_forward_anywhere_returns_empty():
-    bot = _StubBot(_forward_payload())
+    bot = _StubBot({"fid": _forward_payload()})
     current = DummyMessage([at_seg("12345"), text_seg("嗨")])
     reply_msg = DummyMessage([text_seg("之前那句话"), image_seg("https://example.test/prev.png")])
     reply = DummyReply(message=reply_msg, user_id="10001")
@@ -111,7 +106,7 @@ async def test_no_forward_anywhere_returns_empty():
 
 @pytest.mark.asyncio
 async def test_reply_none_is_safe():
-    bot = _StubBot(_forward_payload())
+    bot = _StubBot({"fid": _forward_payload()})
     current = DummyMessage([at_seg("12345"), text_seg("嗨")])
 
     text, images = await extract_forward_content(
@@ -121,3 +116,59 @@ async def test_reply_none_is_safe():
     assert bot.calls == []
     assert text == ""
     assert images == []
+
+
+@pytest.mark.asyncio
+async def test_nested_forward_expands_recursively_with_images_and_bot_marker():
+    payloads = {
+        "fid_outer": {
+            "messages": [
+                {
+                    "sender": {"nickname": "Alice", "user_id": 10001},
+                    "content": [
+                        {"type": "text", "data": {"text": "外层开头"}},
+                        {"type": "forward", "data": {"id": "fid_mid"}},
+                        {"type": "image", "data": {"url": "https://example.test/outer.png"}},
+                    ],
+                }
+            ]
+        },
+        "fid_mid": {
+            "messages": [
+                {
+                    "sender": {"nickname": "", "user_id": 12345},
+                    "content": [
+                        {"type": "text", "data": {"text": "中层"}},
+                        {"type": "forward", "data": {"id": "fid_inner"}},
+                    ],
+                }
+            ]
+        },
+        "fid_inner": {
+            "messages": [
+                {
+                    "sender": {"nickname": "Bob", "user_id": 10002},
+                    "content": [
+                        {"type": "text", "data": {"text": "里层"}},
+                        {"type": "image", "data": {"url": "https://example.test/inner.png"}},
+                    ],
+                }
+            ]
+        },
+    }
+    bot = _StubBot(payloads)
+    current = DummyMessage([forward_seg("fid_outer"), text_seg("看看这个")])
+
+    text, images = await extract_forward_content(
+        bot=bot,
+        message=current,
+        bot_self_id="12345",
+        bot_self_ids={"12345", "67890"},
+    )
+
+    assert "机器人（QQ 12345）" in text
+    assert "外层开头" in text
+    assert "中层" in text
+    assert "里层" in text
+    assert images == ["https://example.test/inner.png", "https://example.test/outer.png"]
+    assert [call[1]["message_id"] for call in bot.calls] == ["fid_outer", "fid_mid", "fid_inner"]

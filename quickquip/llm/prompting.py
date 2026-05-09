@@ -209,6 +209,10 @@ def build_system_prompt(
     lines.append("- 优先按 QQ 号识别身份，其次再参考当前显示名、标准身份和别名。")
     lines.append('- 当上下文里已经标出“标准身份（QQ …）”时，后续继续沿用，不要自行改口或张冠李戴。')
     lines.append("- 只输出给用户看的最终回答，禁止输出任何内部推理、思维链、草稿、隐藏分析或 <think>/<thinking>/<reasoning> 之类标签。")
+    lines.append("引用判定：")
+    lines.append("- 当前提问者永远是本条消息的发送者；引用发送者只是被引用对象，不是当前说话者。")
+    lines.append("- 当 A 引用 B 的消息向你提问时，始终把 A 视为当前提问者，把 B 视为引用来源，不要把 B 当成当前发言者。")
+    lines.append("- 即使引用来源是机器人自己，也要把当前提问者和引用来源分开理解。")
 
     lines.append("消息格式说明：")
     lines.append("- 所有消息均标注了发言者身份，格式为：身份（QQ 号）或 身份（QQ 号，当前显示名）")
@@ -404,6 +408,7 @@ def _build_scene_from_current_message(
     quoted_sender_name: str = "",
     quoted_user_id: str = "",
     quoted_image_urls: list[str] | None = None,
+    quoted_is_bot_self: bool = False,
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
     identities=None,
@@ -420,8 +425,8 @@ def _build_scene_from_current_message(
     # Quoted message appears as an inline contextual speaker
     if quoted_text.strip() or (quoted_image_urls or []):
         q_user_id = quoted_user_id.strip()
-        q_sender = quoted_sender_name.strip()
-        q_canonical = _resolve_canonical_name(identities, q_user_id, q_sender, "")
+        q_sender = "机器人自己" if quoted_is_bot_self else quoted_sender_name.strip()
+        q_canonical = "机器人自己" if quoted_is_bot_self else _resolve_canonical_name(identities, q_user_id, q_sender, "")
         q_text = quoted_text.strip()
         if q_text:
             suffix = f" [附图 {len(quoted_image_urls)} 张]" if quoted_image_urls else ""
@@ -522,6 +527,7 @@ def build_messages(
     quoted_sender_name: str = "",
     quoted_user_id: str = "",
     quoted_image_urls: list[str] | None = None,
+    quoted_is_bot_self: bool = False,
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
     image_descriptions: list[object] | None = None,
@@ -610,6 +616,7 @@ def build_messages(
         quoted_sender_name=quoted_sender_name,
         quoted_user_id=quoted_user_id,
         quoted_image_urls=quoted_image_urls,
+        quoted_is_bot_self=quoted_is_bot_self,
         forward_text=forward_text,
         forward_image_urls=forward_image_urls,
         identities=identities,
@@ -744,6 +751,7 @@ def build_user_message_content(
     quoted_sender_name: str = "",
     quoted_user_id: str = "",
     quoted_image_urls: list[str] | None = None,
+    quoted_is_bot_self: bool = False,
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
     max_quoted_message_chars: int,
@@ -770,7 +778,9 @@ def build_user_message_content(
         requester_label = format_quoted_speaker(sender_name, user_id, identities=identities) if (sender_name or user_id) else ""
         if requester_label:
             lines.append(f"- 当前提问者：{requester_label}")
-        lines.append(f"- 引用发送者：{format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)}")
+        quote_sender_label = "机器人自己" if quoted_is_bot_self else format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)
+        lines.append(f"- 引用发送者：{quote_sender_label}")
+        lines.append("- 角色关系：当前提问者就是现在发消息的人，引用发送者只是被引用对象。")
         if normalized_quoted_text:
             lines.append(f"- 引用内容：{normalized_quoted_text}")
         if normalized_quoted_images:

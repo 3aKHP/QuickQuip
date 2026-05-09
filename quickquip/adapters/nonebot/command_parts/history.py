@@ -206,6 +206,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         rendered = render_reply_for_llm(
             reply,
             bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
             identity_index=llm_service.identities,
         )
         if not rendered or not rendered.text.strip():

@@ -32,6 +32,7 @@ def register_private_message_matcher(on_message):
         rendered_message = render_message_for_llm(
             message,
             bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
             identity_index=llm_service.identities,
             include_image_placeholder=True,
         )
@@ -57,6 +58,7 @@ def register_private_message_matcher(on_message):
             bot=bot,
             message=message,
             bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
             identity_index=llm_service.identities,
             reply=getattr(event, "reply", None),
         )
@@ -65,6 +67,7 @@ def register_private_message_matcher(on_message):
             event.self_id,
             llm_settings,
             identity_index=llm_service.identities,
+            bot_self_ids={event.self_id},
             reply=getattr(event, "reply", None),
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
@@ -87,6 +90,7 @@ def register_private_message_matcher(on_message):
             quoted_image_urls=llm_input.quoted_image_urls,
             quoted_sender_name=llm_input.quoted_sender_name,
             quoted_user_id=llm_input.quoted_user_id,
+            quoted_is_bot_self=llm_input.quoted_is_bot_self,
             forward_text=llm_input.forward_text,
             forward_image_urls=llm_input.forward_image_urls,
             voice_text=llm_input.voice_text,

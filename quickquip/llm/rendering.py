@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 
 from quickquip.llm.identity import IdentityIndex
+from quickquip.llm.message_segments import message_has_segments, normalize_bot_self_ids, render_segment_leaf
 
 
 @dataclass(slots=True)
@@ -17,6 +19,7 @@ class RenderedReply:
     text: str
     image_urls: list[str] = field(default_factory=list)
     mentioned_bot: bool = False
+    is_bot_self: bool = False
     sender_name: str = ""
     user_id: str = ""
     message_id: str = ""
@@ -38,6 +41,7 @@ def render_message_for_llm(
     message,
     *,
     bot_self_id: int | str | None = None,
+    bot_self_ids: Iterable[int | str] | None = None,
     identity_index: IdentityIndex | None = None,
     include_image_placeholder: bool = False,
 ) -> RenderedMessage:
@@ -54,45 +58,21 @@ def render_message_for_llm(
     plain_parts: list[str] = []
     image_urls: list[str] = []
     mentioned_bot = False
-    bot_key = "" if bot_self_id is None else str(bot_self_id)
+    bot_keys = normalize_bot_self_ids(bot_self_id=bot_self_id, bot_self_ids=bot_self_ids)
     identities = identity_index or IdentityIndex()
 
     for segment in segments:
-        segment_type = getattr(segment, "type", None)
-        data = getattr(segment, "data", None)
-        if segment_type is None and isinstance(segment, dict):
-            segment_type = segment.get("type", "")
-        if data is None and isinstance(segment, dict):
-            data = segment.get("data", {})
-        segment_type = str(segment_type or "")
-        data = data or {}
-        if segment_type == "at":
-            qq = str(data.get("qq", "")).strip()
-            if qq and qq == bot_key:
-                mentioned_bot = True
-                continue
-            if qq:
-                plain_parts.append(identities.render_mention(qq))
-            continue
-
-        if segment_type == "text":
-            plain_parts.append(str(data.get("text", "")))
-            continue
-
-        if segment_type == "image":
-            url = str(data.get("url", "")).strip()
-            file_value = str(data.get("file", "")).strip()
-            if url:
-                image_urls.append(url)
-            elif file_value.startswith("http://") or file_value.startswith("https://"):
-                image_urls.append(file_value)
-            if include_image_placeholder:
-                plain_parts.append("[图片]")
-            continue
-
-        if segment_type == "forward" and include_image_placeholder:
-            plain_parts.append("[合并转发消息]")
-            continue
+        text, segment_images, was_bot = render_segment_leaf(
+            segment,
+            bot_self_ids=bot_keys,
+            identity_index=identities,
+            include_image_placeholder=include_image_placeholder,
+        )
+        if text:
+            plain_parts.append(text)
+        if segment_images:
+            image_urls.extend(segment_images)
+        mentioned_bot = mentioned_bot or was_bot
 
     return RenderedMessage(
         text="".join(plain_parts).strip(),
@@ -105,6 +85,7 @@ def render_reply_for_llm(
     reply,
     *,
     bot_self_id: int | str | None = None,
+    bot_self_ids: Iterable[int | str] | None = None,
     identity_index: IdentityIndex | None = None,
     include_image_placeholder: bool = False,
 ) -> RenderedReply | None:
@@ -112,11 +93,15 @@ def render_reply_for_llm(
         return None
 
     reply_message = getattr(reply, "message", None)
-    if reply_message is None:
-        reply_message = getattr(reply, "raw_message", None)
+    raw_reply_message = getattr(reply, "raw_message", None)
+    if not message_has_segments(reply_message) and message_has_segments(raw_reply_message):
+        reply_message = raw_reply_message
+    elif reply_message is None:
+        reply_message = raw_reply_message
     rendered = render_message_for_llm(
         reply_message,
         bot_self_id=bot_self_id,
+        bot_self_ids=bot_self_ids,
         identity_index=identity_index,
         include_image_placeholder=include_image_placeholder,
     )
@@ -126,11 +111,13 @@ def render_reply_for_llm(
         sender_name = str(getattr(reply, "nickname", "") or "").strip()
     if not sender_name:
         sender_name = user_id
+    is_bot_self = user_id in normalize_bot_self_ids(bot_self_id=bot_self_id, bot_self_ids=bot_self_ids)
 
     return RenderedReply(
         text=rendered.text,
         image_urls=rendered.image_urls,
         mentioned_bot=rendered.mentioned_bot,
+        is_bot_self=is_bot_self,
         sender_name=sender_name,
         user_id=user_id,
         message_id=str(getattr(reply, "message_id", "") or "").strip(),

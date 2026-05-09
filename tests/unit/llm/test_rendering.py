@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from plugins.llm_identity import IdentityIndex
-from plugins.message_rendering import render_message_for_llm
+from plugins.message_rendering import render_message_for_llm, render_reply_for_llm
 
 from tests.fixtures.configs import IDENTITIES_YAML
-from tests.fixtures.onebot import DummyMessage, at_seg, forward_seg, image_seg, text_seg
+from tests.fixtures.onebot import DummyMessage, DummyReply, DummySender, at_seg, forward_seg, image_seg, text_seg
 
 
 def _identity_index(tmp_path: Path) -> IdentityIndex:
@@ -29,6 +29,19 @@ def test_render_replaces_at_with_canonical_name(tmp_path: Path):
         include_image_placeholder=True,
     )
     assert rendered.text == "/ai 你看看@镜子 今天又在说什么"
+
+
+def test_render_replaces_at_for_any_bot_id(tmp_path: Path):
+    idx = _identity_index(tmp_path)
+    msg = DummyMessage([at_seg("67890"), text_seg(" 继续")])
+    rendered = render_message_for_llm(
+        msg,
+        bot_self_ids={"12345", "67890"},
+        identity_index=idx,
+        include_image_placeholder=True,
+    )
+    assert rendered.text == "继续"
+    assert rendered.mentioned_bot is True
 
 
 def test_render_handles_dict_segments(tmp_path: Path):
@@ -83,3 +96,18 @@ def test_render_forward_segment_ignored_when_placeholder_off():
     # Without the placeholder opt-in, rule-matching path stays untouched: forward
     # segment collapses silently, plain text is returned as before.
     assert rendered.text == "看一下"
+
+
+def test_render_reply_marks_bot_self_with_multi_ids():
+    reply = DummyReply(
+        message=DummyMessage([text_seg("我是自己")]),
+        user_id="67890",
+        sender=DummySender(nickname="Bot"),
+    )
+    rendered = render_reply_for_llm(
+        reply,
+        bot_self_ids={"12345", "67890"},
+        include_image_placeholder=True,
+    )
+    assert rendered is not None
+    assert rendered.is_bot_self is True

@@ -11,8 +11,9 @@ from quickquip.llm.tools import LLMConversationMessage
 
 logger = logging.getLogger(__name__)
 
-_BRIEFING_MAX_OUTPUT_TOKENS = 768
+_BRIEFING_MAX_OUTPUT_TOKENS = 8192
 _BRIEFING_TEMPERATURE = 0.8
+_NORMAL_FINISH_REASONS: frozenset[str] = frozenset({"stop", "end_turn", "stop_sequence", "STOP"})
 _PERIOD_INSTRUCTIONS = {
     "morning": "你现在要写一条群聊早报。重点是开场、回顾昨天的群聊氛围，并自然带出今天的开始。",
     "noon": "你现在要写一条群聊午报。重点是中场播报，概括今天到中午为止的节奏，语气轻快一些。",
@@ -154,15 +155,27 @@ async def generate_daily_briefing(
             client = build_provider_client(effective_config)
             response = await client.complete(req)
             text = _trim_output(response.text, briefing_config.max_output_chars)
-            if text:
+            finish = (response.finish_reason or "").strip()
+            if text and (not finish or finish in _NORMAL_FINISH_REASONS):
                 logger.info(
-                    "daily_briefing: generated for group %s via %s/%s (%d chars)",
+                    "daily_briefing: generated for group %s via %s/%s (%d chars, finish=%s)",
                     group_id,
                     provider_id,
                     model,
                     len(text),
+                    finish or "n/a",
                 )
                 return text, f"{provider_id}/{model}"
+            if text:
+                logger.warning(
+                    "daily_briefing: %s/%s non-normal finish_reason=%r (%d chars), trying next",
+                    provider_id,
+                    model,
+                    response.finish_reason,
+                    len(text),
+                )
+                last_error = RuntimeError(f"non-normal finish_reason: {response.finish_reason!r}")
+                continue
             logger.warning("daily_briefing: %s/%s returned empty text, trying next", provider_id, model)
         except LLMProviderError as exc:
             logger.warning(

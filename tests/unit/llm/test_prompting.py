@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from quickquip.llm.prompting import (
     _build_scene_from_current_message,
     _build_scene_from_recent_buffer,
     _build_scenes_from_history,
     _render_scene_to_text,
     build_messages,
+    build_system_prompt,
     build_user_message_content,
     format_participant_label,
     merge_image_urls,
@@ -181,6 +184,17 @@ def test_current_scene_with_forward():
     assert len(scene.speakers) == 2
     assert "[转发]" in scene.speakers[0]["text"]
     assert "合并消息内容" in scene.speakers[0]["text"]
+
+
+def test_current_scene_with_bot_self_quote():
+    scene = _build_scene_from_current_message(
+        prompt="你怎么看？", image_urls=[],
+        sender_name="4s", user_id="4004",
+        quoted_text="旧消息", quoted_sender_name="4s", quoted_user_id="4004",
+        quoted_is_bot_self=True,
+    )
+    assert scene.speakers[0]["sender_name"] == "机器人自己"
+    assert scene.speakers[0]["canonical_name"] == "机器人自己"
 
 
 def test_current_scene_empty_prompt_with_quoted():
@@ -376,7 +390,40 @@ def test_build_user_message_content_forward():
     assert "转发附图：1 张" in content
 
 
+def test_build_user_message_content_self_quote():
+    content = build_user_message_content(
+        prompt="你怎么看？",
+        quoted_text="旧消息",
+        quoted_sender_name="4s",
+        quoted_user_id="4004",
+        quoted_is_bot_self=True,
+        max_quoted_message_chars=1200,
+    )
+    assert "机器人自己" in content
+    assert "角色关系：当前提问者就是现在发消息的人" in content
+
+
 def test_build_user_message_content_plain():
     content = build_user_message_content(prompt="只有正文", max_quoted_message_chars=1200)
     assert "以下是当前用户显式引用的消息" not in content
     assert "只有正文" in content
+
+
+def test_system_prompt_disambiguates_quote_roles():
+    persona = SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
+    vocab = SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
+    prompt = build_system_prompt(
+        persona=persona,
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="B说了什么？",
+        memories=[],
+        tool_specs=[],
+        identities=None,
+        vocab=vocab,
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+    )
+    assert "当前提问者永远是本条消息的发送者" in prompt
+    assert "引用发送者只是被引用对象" in prompt
