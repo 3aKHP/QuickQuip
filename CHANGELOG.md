@@ -6,6 +6,7 @@
 
 ### 变更
 
+- **适配层与 LLM 运行时结构拆分**：`commands.py` 收束为聚合注册入口，命令域迁入 `command_parts/`；`LLMService` 拆出 `service_parts/` 的工具、健康检查和状态管理职责块
 - **回归压力机制**：极端 \|长度\| 时，向外变化（远离 0）被渐进抑制、向内变化（靠近 0）被渐进放大。\|长度\|=50 无影响，\|长度\|=500 时达到 50% 抑制/放大上限。三个可配参数：threshold / scale / max_pressure
 - **移除全部长度硬限制**：Web 管理端的 `ge=-1000, le=100000` 边界移除，长度变化仅受浮点数上下限约束
 - **牛牛模块拆分为包**：`niuniu.py`（1097 行）拆分为 `niuniu/` 包（cooldown / store / events / gluing / fencing），各子模块职责内聚
