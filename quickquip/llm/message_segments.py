@@ -22,7 +22,7 @@ def normalize_bot_self_ids(
     return ids
 
 
-def _segment_type_and_data(segment) -> tuple[str, dict[str, object]]:
+def segment_type_and_data(segment) -> tuple[str, dict[str, object]]:
     segment_type = getattr(segment, "type", None)
     data = getattr(segment, "data", None)
     if segment_type is None and isinstance(segment, dict):
@@ -49,7 +49,7 @@ def render_segment_leaf(
 ) -> tuple[str, list[str], bool]:
     bot_keys = normalize_bot_self_ids(bot_self_ids=bot_self_ids)
     identities = identity_index or IdentityIndex()
-    segment_type, data = _segment_type_and_data(segment)
+    segment_type, data = segment_type_and_data(segment)
 
     if segment_type == "at":
         qq = str(data.get("qq", "")).strip()

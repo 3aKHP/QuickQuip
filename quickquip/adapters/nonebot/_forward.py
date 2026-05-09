@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 import logging
 
-from quickquip.llm.message_segments import normalize_bot_self_ids, render_segment_leaf
+from quickquip.llm.message_segments import (
+    message_has_segments,
+    normalize_bot_self_ids,
+    render_segment_leaf,
+    segment_type_and_data,
+)
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.prompting import format_participant_label
 
@@ -18,31 +23,19 @@ def _get_field(obj, key: str, default: str = "") -> str:
     if isinstance(obj, dict):
         return str(obj.get(key, default) or default)
     return str(getattr(obj, key, default) or default)
-
-
-def _segment_type_and_data(segment) -> tuple[str, dict[str, object]]:
-    segment_type = getattr(segment, "type", None)
-    data = getattr(segment, "data", None)
-    if segment_type is None and isinstance(segment, dict):
-        segment_type = segment.get("type", "")
-    if data is None and isinstance(segment, dict):
-        data = segment.get("data", {})
-    return str(segment_type or ""), dict(data or {})
-
-
 def _message_segments(message) -> list[object]:
     try:
         segments = list(message)
     except TypeError:
         return []
-    if not segments or not any(hasattr(segment, "type") or isinstance(segment, dict) for segment in segments):
+    if not message_has_segments(message):
         return []
     return segments
 
 
 def _extract_forward_payload(message) -> tuple[str, list[object]]:
     for segment in _message_segments(message):
-        segment_type, data = _segment_type_and_data(segment)
+        segment_type, data = segment_type_and_data(segment)
         if segment_type != "forward":
             continue
         forward_id = str(_get_field(data, "id")).strip()
@@ -139,7 +132,7 @@ async def _render_forward_content(
     image_urls: list[str] = []
 
     for segment in segments:
-        segment_type, data = _segment_type_and_data(segment)
+        segment_type, data = segment_type_and_data(segment)
 
         if segment_type == "forward":
             nested_id = str(_get_field(data, "id")).strip()
