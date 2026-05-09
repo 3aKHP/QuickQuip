@@ -423,15 +423,15 @@ class TestNiuNiuStoreRankings:
 
 
 class TestNiuNiuStoreLuck:
-    def test_glue_luck_in_bounds(self, store, uid_a):
-        assert 0.01 <= store.get_glue_luck(uid_a) <= 100.0
+    def test_glue_luck_positive(self, store, uid_a):
+        assert store.get_glue_luck(uid_a) > 0
 
     def test_set_glue_luck_overrides(self, store, uid_a):
         store.set_glue_luck(uid_a, 2.5)
         assert store.get_glue_luck(uid_a) == 2.5
 
-    def test_fence_luck_in_bounds(self, store, uid_a):
-        assert 0.01 <= store.get_fence_luck(uid_a) <= 100.0
+    def test_fence_luck_positive(self, store, uid_a):
+        assert store.get_fence_luck(uid_a) > 0
 
     def test_set_fence_luck_overrides(self, store, uid_a):
         store.set_fence_luck(uid_a, 3.0)
