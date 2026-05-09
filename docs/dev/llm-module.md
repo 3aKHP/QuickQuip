@@ -42,7 +42,7 @@ LLM 相关核心文件如下：
 - `quickquip/llm/summarize.py`
   - 每日总结生成逻辑（模型级联、prompt 构建）
 - `quickquip/llm/briefing.py`
-  - 每日播报生成（群人格、模型级联、失败回退）
+  - 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联）
 - `quickquip/llm/defectify.py`
   - `/defectify` 故障机器人转写逻辑
 - `quickquip/app/message_pipeline.py`
@@ -63,6 +63,8 @@ LLM 相关核心文件如下：
   - 负责从 `llm_about/identities.yaml` 读取 QQ 号到标准身份的映射
 - `quickquip/llm/rendering.py`
   - 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特
+- `quickquip/llm/message_segments.py`
+  - 负责消息段叶子节点渲染、bot 身份集合归一化等共享小逻辑
 - `quickquip/llm/health.py`
   - LLM 健康检查模块（配置、provider 探活、知识文件、工具、MCP 等 10 项检查）
 - `quickquip/llm/image_preprocessor.py`
@@ -173,6 +175,8 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 - 所有发言者使用统一格式：`身份（QQ 号）：内容`
 - 场景以 `【上文】`（历史/缓冲）或 `【当前提问】`（最后一轮提问）标记
 - 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
+- 引用消息会同时保留“当前提问者”和“引用发送者”，并显式区分机器人自己，避免 A 引用 B 时被误读成 B 在发言
+- 合并转发会递归展开多层节点，并保留每层的文字和图片信息，不再只剩一个占位外壳
 
 这样做的好处：
 - 模型只看到一种"某人说了某话"的语法，消除历史/缓冲/当前三种格式的解析负担
@@ -331,7 +335,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
   - `max_output_tokens`
   - `style_overrides`（可选，追加到每次调用的 system prompt 末尾）
 - `[daily_briefing]`
-  - 每日早/午/晚播报全局开关、三段 cron、上下文规模、输出长度、模型级联列表
+  - 每日早/午/晚播报全局开关、三段 cron、最小消息数、活跃用户/热词/样本上限、上下文规模、输出长度、模型级联列表
 - `[daily_summary]`
   - 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表
 

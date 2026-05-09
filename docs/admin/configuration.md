@@ -175,9 +175,15 @@
 | `morning_cron` | 早报 cron 表达式 |
 | `noon_cron` | 午报 cron 表达式 |
 | `evening_cron` | 晚报 cron 表达式 |
-| `context_message_count` | 采样消息数 |
+| `min_messages_for_llm` | 触发 LLM 的最小消息数 |
+| `active_users_limit` | 活跃用户数量上限 |
+| `hot_words_limit` | 热词数量上限 |
+| `sample_messages_limit` | 消息样本数量上限 |
+| `max_context_chars` | 送给模型的上下文字符上限 |
 | `max_output_chars` | 最大输出字符数 |
 | `model_cascade` | 模型级联列表（provider + model，失败自动降级） |
+
+`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项。
 
 ### `[daily_summary]` — 每日总结
 
@@ -186,8 +192,8 @@
 | `enabled` | 全局开关（`true` / `false`） |
 | `generate_cron` | 生成 cron 表达式 |
 | `publish_cron` | 发布 cron 表达式 |
-| `min_message_count` | 最小消息数（不足时跳过） |
-| `target_words` | 目标字数 |
+| `min_messages` | 最小消息数（不足时跳过） |
+| `summary_length_hint` | 目标字数 |
 | `model_cascade` | 模型级联列表（失败自动降级） |
 
 ---

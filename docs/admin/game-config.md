@@ -126,3 +126,4 @@ config/games.toml 解析失败 → load_error 记录错误，全部回退默认�
 1. 用户数据在 `data/niuniu.db` 的 `niuniu_users` 表
 2. 操作记录在 `niuniu_records` 表，可用于排查异常长度变化
 3. CD 状态存储在内存中，重启机器人后 CD 全部重置
+4. 回归压力是围绕 0 的绝对值机制：负数区间的 inward bonus 会被限制在 0 边界，不会穿过 0 反向冲出
