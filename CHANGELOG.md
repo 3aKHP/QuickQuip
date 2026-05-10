@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-05-10
+
 ### 新增
 
 - **Web 管理后台日志页拆分**：新增 `实时日志`、`LLM Trace`、`日志归档` 三个独立标签页；实时日志直接尾随 `data/logs/quickquip_YYYY-MM-DD.log`，LLM trace 记录同步写入共享 JSONL 文件，供 `/ops` 与诊断页共用
@@ -462,7 +464,8 @@
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复基础功能
 - 说明文档、环境变量示例与基础测试脚本
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.4.4...HEAD
+[1.4.4]: https://github.com/3aKHP/QuickQuip/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/3aKHP/QuickQuip/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/3aKHP/QuickQuip/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/3aKHP/QuickQuip/compare/v1.4.0...v1.4.1
