@@ -111,7 +111,7 @@ GLUE_EVENTS = [
     },
     {
         "name": "arrested",
-        "weight": 6,
+        "weight": 2,
         "category": "arrested",
         "pos": [
             "打胶时被窗外的路人发现了，对方报警了！你被抓走关进小黑屋 {ban_time}s！",

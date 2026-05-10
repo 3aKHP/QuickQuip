@@ -86,26 +86,20 @@ class NiuNiuConfig:
     # Growth formula tuning
     glue_growth_scale: float = 500.0
 
-    # Regression pressure — asymmetric damping on extreme |length|
-    # pressure = min((|length| - threshold) / scale, max_pressure)
-    regression_threshold: float = 50.0
-    regression_scale: float = 900.0
-    regression_max_pressure: float = 0.5
-
     # Gluing event tuning
     glue_lucky_coefficient: float = 1.8
     glue_special_coefficient: float = 1.3
     glue_shrinkage_effect: float = 0.5
     glue_nightmare_effect: float = 0.7
-    glue_arrested_duration: int = 180
-    glue_blessing_min: float = 3.0
-    glue_blessing_max: float = 10.0
-    glue_gambler_min: float = 2.0
-    glue_gambler_max: float = 7.0
-    glue_zen_min: float = 0.3
-    glue_zen_max: float = 1.5
-    glue_frenzy_min: float = 1.5
-    glue_frenzy_max: float = 5.0
+    glue_arrested_duration: int = 60
+    glue_blessing_min: float = 5.0
+    glue_blessing_max: float = 18.0
+    glue_gambler_min: float = 4.0
+    glue_gambler_max: float = 14.0
+    glue_zen_min: float = 1.0
+    glue_zen_max: float = 4.0
+    glue_frenzy_min: float = 3.0
+    glue_frenzy_max: float = 10.0
 
     # Fencing event tuning
     fence_critical_multiplier: float = 1.8

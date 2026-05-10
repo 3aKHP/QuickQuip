@@ -1,5 +1,6 @@
 """Gluing (打胶) game mechanic for 牛牛大作战."""
 
+import math
 import random
 
 from quickquip.games.config import NiuNiuConfig
@@ -9,14 +10,15 @@ from quickquip.games.niuniu.store import NiuNiuStore
 
 
 def _glue_growth(origin: float, coefficient: float = 1.0, scale: float = 200.0) -> float:
-    """Calculate growth/shrinkage delta — proportional to abs(origin).
+    """Calculate growth/shrinkage delta — proportional to sqrt(|origin|).
 
-    Larger lengths get proportionally larger absolute changes.
-    Decay (applied separately) provides regression toward zero.
+    Sqrt scaling keeps the recurrence L_{n+1} = L_n + β·√L_n quadratic
+    (not exponential) and gives a finite equilibrium L* = (δβ/r)² when
+    combined with decay — the system self-regulates without hard caps.
     """
     prob = random.choice([-0.6, -0.5, -0.4, -0.2, 0, 0.2, 0.4, 0.5, 0.6])
-    base = abs(origin) if origin <= 0 else origin
-    return round(prob * 0.1 * base * coefficient, 2)
+    base = math.sqrt(abs(origin))
+    return round(prob * 0.4 * base * coefficient, 2)
 
 
 def _apply_decay(length: float, cfg: NiuNiuConfig) -> float:
@@ -30,41 +32,6 @@ def _apply_decay(length: float, cfg: NiuNiuConfig) -> float:
     if length > 0:
         return max(0.0, length * (1 - rate))
     return length * (1 + rate * 0.8)
-
-
-def _regression_pressure(length: float, cfg: NiuNiuConfig) -> float:
-    """Asymmetric pressure ∈ [0, max]: how strongly to push |length| back.
-
-    Outward moves (away from zero) are dampened by (1 - pressure).
-    Inward moves (toward zero) are amplified by (1 + pressure).
-    """
-    if abs(length) <= cfg.regression_threshold:
-        return 0.0
-    raw = (abs(length) - cfg.regression_threshold) / cfg.regression_scale
-    return min(raw, cfg.regression_max_pressure)
-
-
-def _apply_regression_to_delta(origin: float, delta: float, cfg: NiuNiuConfig) -> float:
-    """Adjust a signed delta using regression pressure around zero.
-
-    The pressure acts on *distance to zero*, not directly on the signed value:
-    - outward moves (|target| > |origin|) are dampened
-    - inward moves (|target| < |origin|) are amplified
-
-    For inward moves, the adjusted delta is capped at zero so the bonus cannot
-    overshoot through zero and turn into a new outward move on the other side.
-    """
-    pressure = _regression_pressure(origin, cfg)
-    if pressure <= 0 or abs(delta) < 0.01:
-        return round(delta, 2)
-
-    if origin * delta > 0:
-        return round(delta * (1.0 - pressure), 2)
-    if origin * delta < 0:
-        adjusted_abs = min(abs(delta) * (1.0 + pressure), abs(origin))
-        direction = -1.0 if origin > 0 else 1.0
-        return round(direction * adjusted_abs, 2)
-    return round(delta, 2)
 
 
 def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
@@ -161,16 +128,15 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
         new_length = round(origin + diff, 2)
         msg = f"你的牛牛变化了 {abs(diff)} cm"
 
-    # Apply daily luck + regression pressure (except for arrested and mirror)
+    # Apply daily luck (except for arrested and mirror)
     if event["category"] not in ("arrested", "mirror"):
         luck = store.get_glue_luck(uid)
         luck_diff = round((new_length - origin) * luck, 2)
-        luck_diff = _apply_regression_to_delta(origin, luck_diff, cfg)
 
         new_length = round(origin + luck_diff, 2)
         diff_abs = abs(luck_diff)
 
-        # Rebuild message with combined luck+regression adjusted diff
+        # Rebuild message with luck-adjusted diff
         if event["category"] == "growth":
             if luck_diff > 0 and "pos" in event:
                 msg = random.choice(event["pos"]).format(diff=diff_abs)

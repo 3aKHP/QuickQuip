@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **Web 管理后台日志页拆分**：新增 `实时日志`、`LLM Trace`、`日志归档` 三个独立标签页；实时日志直接尾随 `data/logs/quickquip_YYYY-MM-DD.log`，LLM trace 记录同步写入共享 JSONL 文件，供 `/ops` 与诊断页共用
+- **诊断页收缩**：`诊断` 标签页只保留样本请求与文本规则回归测试，原始 trace 浏览迁入独立的 `LLM Trace` 标签页
+
+### 变更
+
+- **牛牛打胶改为 sqrt 尺度**：单次长度变化量由 `∝ |L|` 改为 `∝ √|L|`，系统从无界指数过程变为带有限平衡点 `L* = (δβ/r)²` 的均值回归过程，移除原有的"惩罚性回归压力"机制（删除 `regression_threshold`/`regression_scale`/`regression_max_pressure` 三个配置项）
+- **打胶基础系数与事件放宽**：`_glue_growth` 基础系数 `0.1` → `0.4`；`blessing` 3-10 → 5-18、`gambler` 2-7 → 4-14、`zen` 0.3-1.5 → 1-4、`frenzy` 1.5-5 → 3-10，长度波动更有存在感
+- **arrested 事件改善**：权重 `6` → `2`（触发率 7.9% → 2.8%），`glue_arrested_duration` `180s` → `60s`
+- **击剑数值幅度大幅提升**：重写主伤害公式，移除伪随机时间项与过时的线性 balance 因子，改用比值制 balance；`fence_luck` 从只影响命中概率扩展为全面的幅度乘数（同时作用于普通伤害、`dominate` 腰斩比例、`succubus_devour` 吞噬量），让击剑的戏剧性终于与打胶对等
+
 ## [1.4.3] - 2026-05-09
 
 ### 变更

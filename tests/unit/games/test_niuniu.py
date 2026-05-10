@@ -28,7 +28,7 @@ from quickquip.games.niuniu.events import (
     _normal_fence_event,
 )
 from quickquip.games.niuniu.fencing import _fence_win_prob, _fence_winner_is_role
-from quickquip.games.niuniu.gluing import _apply_regression_to_delta, _glue_growth, _regression_pressure
+from quickquip.games.niuniu.gluing import _glue_growth
 from quickquip.games.niuniu.store import _roll_lognormal
 
 
@@ -452,55 +452,6 @@ class TestNiuNiuStoreLuck:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# _regression_pressure
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestRegressionPressure:
-    @pytest.fixture
-    def cfg(self):
-        return NiuNiuConfig()
-
-    def test_zero_under_threshold(self, cfg):
-        assert _regression_pressure(0.0, cfg) == 0.0
-        assert _regression_pressure(50.0, cfg) == 0.0
-        assert _regression_pressure(-50.0, cfg) == 0.0
-
-    def test_half_max_at_500(self, cfg):
-        p = _regression_pressure(500.0, cfg)
-        assert p == pytest.approx(cfg.regression_max_pressure, abs=0.01)
-
-    def test_capped_at_max(self, cfg):
-        p = _regression_pressure(10000.0, cfg)
-        assert p == pytest.approx(cfg.regression_max_pressure, abs=0.01)
-
-    def test_symmetric_for_positive_and_negative(self, cfg):
-        assert _regression_pressure(500.0, cfg) == _regression_pressure(-500.0, cfg)
-
-
-class TestRegressionDelta:
-    @pytest.fixture
-    def cfg(self):
-        return NiuNiuConfig()
-
-    def test_negative_outward_is_dampened(self, cfg):
-        adjusted = _apply_regression_to_delta(-500.0, -100.0, cfg)
-        assert adjusted == pytest.approx(-50.0, abs=0.01)
-
-    def test_negative_inward_is_amplified_toward_zero(self, cfg):
-        adjusted = _apply_regression_to_delta(-500.0, 100.0, cfg)
-        assert adjusted == pytest.approx(150.0, abs=0.01)
-
-    def test_negative_inward_does_not_cross_zero(self, cfg):
-        adjusted = _apply_regression_to_delta(-500.0, 600.0, cfg)
-        assert adjusted == pytest.approx(500.0, abs=0.01)
-
-    def test_positive_inward_does_not_cross_zero(self, cfg):
-        adjusted = _apply_regression_to_delta(500.0, -600.0, cfg)
-        assert adjusted == pytest.approx(-500.0, abs=0.01)
-
-
 class TestGluing:
     def test_no_niuniu_returns_error(self, store):
         msg, length = gluing(store, "noone")
@@ -580,42 +531,6 @@ class TestGluing:
         _patch_uniform(monkeypatch, 5.0)
         _, new_len = gluing(store, uid_a)
         assert new_len < 500.0
-
-    def test_regression_pressure_dampens_outward_growth(self, store, uid_a, monkeypatch):
-        """At |length|=500 (max pressure), outward blessing is dampened ~50%."""
-        store.update_length(uid_a, 500.0)
-        store.set_glue_luck(uid_a, 1.0)  # luck=1 for clean measurement
-        _patch_glue_event(monkeypatch, "blessing")
-        _patch_uniform(monkeypatch, 10.0)  # 10cm blessing
-        _, new_len = gluing(store, uid_a)
-        # Without pressure: 500 + 10 = 510, decay → ~505. With pressure:
-        # 500 + 10*0.5 = 505, decay → ~500. So new_len should be < 510
-        assert new_len - 500.0 < 10.0  # pressure dampened the growth
-
-    def test_regression_pressure_amplifies_inward_shrinkage(self, store, uid_a, monkeypatch):
-        """At |length|=500 (max pressure), inward shrinkage is amplified ~50%."""
-        store.update_length(uid_a, 500.0)
-        store.set_glue_luck(uid_a, 1.0)
-        _patch_glue_event(monkeypatch, "shrinkage")
-        _, new_len = gluing(store, uid_a)
-        # Shrinkage at 500 produces significant drop; regression amplifies it
-        assert new_len < 500.0
-
-    def test_negative_regression_inward_bonus_does_not_flip_sign(self, store, uid_a, monkeypatch):
-        store.update_length(uid_a, -500.0)
-        store.set_glue_luck(uid_a, 100.0)
-        _patch_glue_event(monkeypatch, "blessing")
-        _patch_uniform(monkeypatch, 10.0)
-        _, new_len = gluing(store, uid_a)
-        assert new_len <= 0.0
-        assert abs(new_len) <= 500.0
-
-    def test_negative_regression_dampens_outward_shrinkage(self, store, uid_a, monkeypatch):
-        store.update_length(uid_a, -500.0)
-        store.set_glue_luck(uid_a, 1.0)
-        _patch_glue_event(monkeypatch, "shrinkage")
-        _, new_len = gluing(store, uid_a)
-        assert abs(new_len) < 1000.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -60,13 +60,6 @@ unsubscribe_gold = 500
 decay_rate_high = 0.01
 # 正常长度衰减率
 decay_rate_normal = 0.005
-# ── 回归压力（防止数值膨胀）──────────────────────────────────────────
-# 极端 |length| 时，向外变化（远离 0）被抑制，向内变化（靠近 0）被放大
-# pressure = min((|length| - threshold) / scale, max_pressure)
-# 默认值：|length|=50 时为 0，|length|=500 时达到 0.5（上限）
-regression_threshold = 50.0
-regression_scale = 900.0
-regression_max_pressure = 0.5
 
 # ── 打胶事件参数 ────────────────────────────────────────────────────────
 # 幸运日 growth 倍率
@@ -78,19 +71,19 @@ glue_shrinkage_effect = 0.5
 # 噩梦缩水率
 glue_nightmare_effect = 0.7
 # 被捕小黑屋时长（秒）
-glue_arrested_duration = 180
+glue_arrested_duration = 60
 # 牛神祝福增长范围 (cm)
-glue_blessing_min = 3.0
-glue_blessing_max = 10.0
+glue_blessing_min = 5.0
+glue_blessing_max = 18.0
 # 赌徒输赢幅度范围 (cm)
-glue_gambler_min = 2.0
-glue_gambler_max = 7.0
+glue_gambler_min = 4.0
+glue_gambler_max = 14.0
 # 贤者模式增长范围 (cm)
-glue_zen_min = 0.3
-glue_zen_max = 1.5
+glue_zen_min = 1.0
+glue_zen_max = 4.0
 # 狂暴增长范围 (cm)
-glue_frenzy_min = 1.5
-glue_frenzy_max = 5.0
+glue_frenzy_min = 3.0
+glue_frenzy_max = 10.0
 
 # ── 击剑事件参数 ────────────────────────────────────────────────────────
 # 暴击倍率

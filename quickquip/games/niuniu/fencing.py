@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import random
-import time
 
 from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.cooldown import fence_cd, fenced_cd
@@ -174,7 +173,7 @@ def fencing(
     # ── succubus devour ──────────────────────────────────────────────
     if chosen["name"] == "succubus_devour":
         steal = round(
-            min(abs(my_len), abs(oppo_len)) * cfg.fence_devour_steal_ratio, 2
+            min(abs(my_len), abs(oppo_len)) * cfg.fence_devour_steal_ratio * fence_luck, 2
         )
         loss_val = round(steal * 1.5, 2)
         if i_win:
@@ -208,11 +207,13 @@ def fencing(
     ):
         old_oppo = oppo_len
         if oppo_len > 0:
-            sever_loss = round(oppo_len * 0.5, 2)
+            sever_ratio = min(0.95, 0.5 * fence_luck)
+            sever_loss = round(oppo_len * sever_ratio, 2)
             oppo_len = round(oppo_len - sever_loss, 2)
         else:
-            sever_loss = round(abs(oppo_len), 2)
-            oppo_len = round(oppo_len * 2, 2)
+            deepen_ratio = min(3.0, 1.0 * fence_luck)
+            sever_loss = round(abs(oppo_len) * deepen_ratio, 2)
+            oppo_len = round(oppo_len - sever_loss, 2)
         gain = round(sever_loss * 0.6, 2)
         my_len = round(my_len + gain, 2)
         my_len = round(_apply_decay(my_len, cfg), 2)
@@ -237,12 +238,15 @@ def fencing(
         and random.random() < cfg.fence_dominate_sever_chance
     ):
         old_my = my_len
+        defender_luck = store.get_fence_luck(oppo_uid)
         if my_len > 0:
-            sever_loss = round(my_len * 0.5, 2)
+            sever_ratio = min(0.95, 0.5 * defender_luck)
+            sever_loss = round(my_len * sever_ratio, 2)
             my_len = round(my_len - sever_loss, 2)
         else:
-            sever_loss = round(abs(my_len), 2)
-            my_len = round(my_len * 2, 2)
+            deepen_ratio = min(3.0, 1.0 * defender_luck)
+            sever_loss = round(abs(my_len) * deepen_ratio, 2)
+            my_len = round(my_len - sever_loss, 2)
         gain = round(sever_loss * 0.6, 2)
         oppo_len = round(oppo_len + gain, 2)
         my_len = round(_apply_decay(my_len, cfg), 2)
@@ -259,10 +263,10 @@ def fencing(
         )
 
     # ── damage calculation ───────────────────────────────────────────
-    base_change = min(abs(my_len), abs(oppo_len)) * 0.1
-    rd = abs(time.time() % 10 - 5) + random.uniform(0.13, 0.24) * base_change
-    balance = max(0.3, 1 - abs(my_len - oppo_len) / 100)
-    reduce_val = round(rd * 0.3 * balance, 2)
+    base = min(abs(my_len), abs(oppo_len))
+    ratio = base / max(abs(my_len), abs(oppo_len), 0.01)
+    balance = max(0.3, ratio)
+    reduce_val = round(base * random.uniform(0.04, 0.06) * balance, 2)
 
     # ── draw ─────────────────────────────────────────────────────────
     if chosen["name"] == "draw":
@@ -289,7 +293,7 @@ def fencing(
         "glancing": cfg.fence_glancing_multiplier,
         "dominate": cfg.fence_dominate_multiplier,
     }.get(chosen["name"], 1.0)
-    reduce_val = round(reduce_val * multiplier, 2)
+    reduce_val = round(reduce_val * multiplier * fence_luck, 2)
 
     if i_win:
         my_len = round(my_len + reduce_val, 2)
