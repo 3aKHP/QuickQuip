@@ -92,7 +92,7 @@ quickquip/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件；命令注册按域拆到 command_parts/）
 └── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）
     ├── web/                 # Web 管理后台 FastAPI 应用与路由
-    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、限流、贴吧、词云、诊断、MCP面板、定时任务、审计、金币经济、牛牛大作战）
+    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、MCP面板、定时任务、审计、金币经济、牛牛大作战）
 ```
 
 **规则**：业务逻辑只进 `quickquip/`，不进 `plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
@@ -134,7 +134,7 @@ data/
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
 ├── web_admin_sessions.db   # Web Admin 会话记录
 ├── daily_msgs/             # 每日消息原始收集（{group_id}/{date}.jsonl）
-├── logs/                   # loguru 文件日志（保留 14 天）
+├── logs/                   # loguru 文件日志（保留 14 天）+ 共享 LLM trace JSONL
 ├── fonts/                  # 词云字体文件（手动放置）
 ├── tieba/
 │   ├── pool.json           # 贴吧帖子池

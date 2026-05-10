@@ -23,7 +23,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成，统一收口 `config/generation.toml`
-- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、记忆编辑、对话浏览、配置在线编辑、词云生成、诊断工具。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
+- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、记忆编辑、对话浏览、配置在线编辑、词云生成、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。  

@@ -23,6 +23,8 @@ QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发
 
 如果后续需要把外部工具后端扩展为 MCP，单独查看 [mcp-integration.md](mcp-integration.md)。当前文档只描述已经落在项目内的 LLM 与工具调用实现。
 
+LLM 运行时的请求/响应 trace 会在 `LLM_TRACE_FLAG_FILE` 触发时同步写入共享 `data/logs/quickquip_trace.jsonl`，Web Admin 的 `LLM Trace` 页面和诊断页会读取这份共享 trace，而不只看当前进程内的临时缓存。
+
 ---
 
 ## 2. 当前代码结构

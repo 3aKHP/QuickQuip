@@ -152,6 +152,7 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，默认监听 
 - 群级规则开关（toggle 开关，实时生效）
 - 每日总结 / 每日播报群组管理
 - `config/llm.toml` 在线编辑（保存前校验 TOML 语法）
+- 实时日志 / LLM Trace / 日志归档面板（直接读取 `../data/logs` 共享日志与 trace 文件）
 
 管理界面同时有两层门：
 

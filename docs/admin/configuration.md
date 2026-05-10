@@ -39,6 +39,12 @@
 
 `SEARCH_BACKEND=auto` 时，若 `SEARXNG_BASE_URL` 已设置则优先使用 SearXNG。
 
+### LLM 调试
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `LLM_TRACE_FLAG_FILE` | 触发 LLM 请求/响应 trace 的 flag 文件路径；文件存在时会记录共享 trace，供 Web Admin 的 LLM Trace 页面读取 | — |
+
 ### 贴吧
 
 | 变量 | 说明 | 默认值 |
