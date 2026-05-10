@@ -102,7 +102,7 @@ def test_get_log_tail_returns_last_lines(monkeypatch, tmp_path):
 def test_get_log_tail_rejects_invalid_name(monkeypatch, tmp_path):
     _patch_logs_dir(monkeypatch, tmp_path)
 
-    with pytest.raises(_HTTPException) as exc:
+    with pytest.raises(Exception) as exc:
         logs.get_log_tail("../secret.log")
 
-    assert exc.value.status_code == 422
+    assert getattr(exc.value, "status_code", None) == 422
