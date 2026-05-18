@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-19
+
+### 新增
+
+- **LLM 流量敏感词过滤**：新增 `quickquip/common/sensitive_filter.py`，在 LLM 调用的输入/输出/历史三处接入两级（block/soft）敏感词匹配，基于纯 Python Aho-Corasick 自动机实现。词表配置文件 `config/sensitive_words.toml` 已 gitignored，模板见 `config/sensitive_words.toml.example`，部署指引见 `docs/admin/sensitive-filter.md`。命中日志只记录类别和 SHA-256 前缀哈希，不记录原文。规避 LLM 提供商网关层审核风险（如 DeepSeek `Content Exists Risk`）和群聊违规内容外发风险
+- **敏感词过滤器健康检查与 Web Admin 可观测性**：`/llm health` 报告新增 `sensitive_filter` 检查项（summary 三态：已启用/未配置/未绑定，刻意不暴露词数到群聊），Web Admin 新增只读端点 `GET /api/sensitive-filter/status` 返回完整 stats 供运维侧查看
+- **工具调用层敏感词扫描**：`tool_loop.py` 在每次工具调用前扫描 LLM 构造的 arguments，命中即拒绝执行；执行后扫描工具结果 content，少量命中则 scrub，大量命中则整体替换。修复了"群友消息合规但 LLM 自主搜索拉回违规内容"的高危路径——这是 DS V4 触发 `Content Exists Risk` 的真实成因
+
 ## [1.4.5] - 2026-05-18
 
 ### 新增
