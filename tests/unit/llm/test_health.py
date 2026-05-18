@@ -115,3 +115,49 @@ provider_id = "missing-provider"
 
     assert items["image_preprocessing"].status == "warn"
     assert items["image_preprocessing"].details["provider_declared"] is False
+
+
+def test_format_health_report_redacts_sensitive_filter_details():
+    """`/llm health verbose` posts back into chat. The sensitive_filter
+    item's details (counts, etc.) are deployment-time facts that must not
+    leak there even with verbose=True. The redaction list in
+    format_health_report enforces this."""
+    from quickquip.llm.health import (
+        HealthCheckItem,
+        HealthReport,
+        format_health_report,
+    )
+
+    report = HealthReport(
+        status="ok",
+        scope_key="test",
+        chat_type="group",
+        duration_ms=1.0,
+        items=[
+            HealthCheckItem(
+                name="sensitive_filter",
+                status="ok",
+                summary="敏感词过滤：已启用",
+                details={"loaded": True, "total": 87, "block": 73, "soft": 14},
+            ),
+            # Control case: a non-redacted item should still expose details.
+            HealthCheckItem(
+                name="provider",
+                status="ok",
+                summary="dummy",
+                details={"provider_id": "x", "model": "y"},
+            ),
+        ],
+    )
+
+    rendered = format_health_report(report, verbose=True)
+    # Counts must NOT appear in the chat-side render.
+    assert "87" not in rendered
+    assert "73" not in rendered
+    assert "14" not in rendered
+    assert "total" not in rendered
+    assert "block: " not in rendered
+    # Summary stays — that's the point.
+    assert "敏感词过滤：已启用" in rendered
+    # Sanity check: other items are unaffected by the redaction.
+    assert "provider_id" in rendered

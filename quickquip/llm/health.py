@@ -8,7 +8,8 @@ import sqlite3
 import time
 from typing import Any
 
-from quickquip.common.paths import CONFIG_GENERATION_TOML
+from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_SENSITIVE_WORDS_TOML
+from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.generation.config import load_generation_config
 from quickquip.llm.config import LLMConfig, ProviderConfig
 from quickquip.llm.settings import ResolvedGroupSettings
@@ -122,6 +123,8 @@ async def build_health_report(
     probe_provider: bool = False,
     auto_memory_stats: dict[str, int] | None = None,
     image_preprocessor_bound: bool = False,
+    sensitive_filter: SensitiveFilter | None = None,
+    sensitive_filter_path: Path = CONFIG_SENSITIVE_WORDS_TOML,
 ) -> HealthReport:
     started = time.monotonic()
     items: list[HealthCheckItem] = []
@@ -279,6 +282,43 @@ async def build_health_report(
         )
     )
 
+    # Sensitive-word filter visibility.
+    # Summary stays terse and `details` deliberately omits the config file
+    # path. `format_health_report(verbose=True)` happily prints whatever
+    # is in `details` — and `/llm health verbose` posts that back into the
+    # group chat, so leaking a filesystem path there would defeat the
+    # whole "deploy-time word list, never disclosed publicly" stance.
+    # Web Admin reads the path from its own /api/sensitive-filter/status
+    # endpoint where the audience is already authenticated.
+    if sensitive_filter is None:
+        sf_status = "warn"
+        sf_summary = "敏感词过滤：未绑定"
+        sf_details: dict[str, Any] = {"bound": False}
+    elif not sensitive_filter.is_loaded:
+        # File missing or empty: filter quietly passes everything. That's a
+        # compliance gap worth flagging, but not an error — deployer may
+        # simply not have populated the list yet.
+        sf_status = "warn"
+        sf_summary = "敏感词过滤：未配置"
+        sf_details = {
+            "bound": True,
+            "loaded": False,
+            "config_exists": sensitive_filter_path.exists(),
+        }
+    else:
+        sf_status = "ok"
+        sf_summary = "敏感词过滤：已启用"
+        stats = sensitive_filter.stats
+        sf_details = {
+            "bound": True,
+            "loaded": True,
+            "config_exists": True,
+            "total": stats["total"],
+            "block": stats["block"],
+            "soft": stats["soft"],
+        }
+    items.append(HealthCheckItem("sensitive_filter", sf_status, sf_summary, sf_details))
+
     if include_generation:
         generation = load_generation_config(generation_config_path)
         if generation.load_error:
@@ -343,13 +383,22 @@ async def build_health_report(
     )
 
 
+# Health items whose `details` are operator-only and must NOT be rendered
+# back into chat, even when `/llm health verbose` is invoked. The chat-side
+# response would otherwise expose deployment-time facts that the project
+# treats as compliance-sensitive (filter coverage stats, etc.). Web Admin
+# reads these items' details directly from `HealthReport.as_dict()` and
+# bypasses the formatter, so it's unaffected.
+_CHAT_DETAIL_REDACTED_ITEMS = frozenset({"sensitive_filter"})
+
+
 def format_health_report(report: HealthReport, *, verbose: bool = False) -> str:
     icon = {"ok": "✅", "warn": "⚠️", "error": "❌"}.get(report.status, "ℹ️")
     lines = [f"{icon} LLM 健康检查：{report.status.upper()}（{report.duration_ms}ms）"]
     for item in report.items:
         item_icon = {"ok": "✅", "warn": "⚠️", "error": "❌"}.get(item.status, "ℹ️")
         lines.append(f"{item_icon} {item.name}：{item.summary}")
-        if verbose and item.details:
+        if verbose and item.details and item.name not in _CHAT_DETAIL_REDACTED_ITEMS:
             for key, value in item.details.items():
                 lines.append(f"  - {key}: {value}")
     return "\n".join(lines)
