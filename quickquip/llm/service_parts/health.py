@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filter
 from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
@@ -159,6 +160,7 @@ class HealthMixin:
                 "active_scopes": len(self._auto_memory_turns),
             },
             image_preprocessor_bound=self.image_preprocessor is not None,
+            sensitive_filter=_get_sensitive_filter(),
         )
 
     async def format_health(
