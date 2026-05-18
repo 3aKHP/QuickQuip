@@ -18,6 +18,7 @@ LOGS_DIR = DATA_DIR / "logs"
 CONFIG_LLM_TOML = CONFIG_DIR / "llm.toml"
 CONFIG_GENERATION_TOML = CONFIG_DIR / "generation.toml"
 CONFIG_GAMES_TOML = CONFIG_DIR / "games.toml"
+CONFIG_SENSITIVE_WORDS_TOML = CONFIG_DIR / "sensitive_words.toml"
 
 LLM_DB_PATH = DATA_DIR / "llm.db"
 DAILY_SUMMARIES_DB_PATH = DATA_DIR / "daily_summaries.db"

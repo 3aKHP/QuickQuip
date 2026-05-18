@@ -16,6 +16,13 @@ from typing import TYPE_CHECKING
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.json_utils import extract_json_object
+from quickquip.common.sensitive_filter import (
+    DEFAULT_BLOCK_REPLY,
+    DEFAULT_OUTPUT_FALLBACK,
+    SCRUB_PLACEHOLDER,
+    get_filter as _get_sensitive_filter,
+    log_hits as _log_sensitive_hits,
+)
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
@@ -836,6 +843,26 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "rule_name": LLM_RULE_NAME,
             }
 
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        sensitive = _get_sensitive_filter()
+        if sensitive.is_loaded:
+            input_blob = "\n".join(
+                part for part in (
+                    prompt,
+                    normalized_quoted_text,
+                    normalized_forward_text,
+                ) if part
+            )
+            input_scan = sensitive.scan(input_blob)
+            if input_scan.hits:
+                _log_sensitive_hits("input", scope_key, input_scan)
+            if input_scan.blocked:
+                return {
+                    "reply": DEFAULT_BLOCK_REPLY,
+                    "rate_limit_key": LLM_RULE_NAME,
+                    "rule_name": LLM_RULE_NAME,
+                }
+
         if self.config.load_error:
             return {
                 "reply": f"LLM 配置不可用：{self.config.load_error}",
@@ -843,7 +870,6 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "rule_name": LLM_RULE_NAME,
             }
 
-        scope_key = self.build_chat_scope_key(chat_id, chat_type)
         settings = self.get_chat_settings(chat_id, chat_type=chat_type)
         if not settings.enabled:
             return {
@@ -930,6 +956,26 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 self._max_stored_conversation_messages(chat_type),
             ),
         )
+        if sensitive.is_loaded and history:
+            # Re-scan history with the *current* word list — entries written
+            # under an older list may now contain blocked content. Scrubbing
+            # here keeps the next request's context clean without rewriting
+            # the on-disk store.
+            history_blocked = 0
+            for item in history:
+                for field_name in ("content", "raw_content"):
+                    original = item.get(field_name)
+                    if not original:
+                        continue
+                    scrubbed = sensitive.scrub(str(original), SCRUB_PLACEHOLDER)
+                    if scrubbed != original:
+                        item[field_name] = scrubbed
+                        history_blocked += 1
+            if history_blocked:
+                logger.info(
+                    "sensitive_filter[history] scrubbed scope=%s fields=%d",
+                    scope_key, history_blocked,
+                )
         participants = self._collect_known_participants(
             user_id=user_id,
             sender_name=sender_name,
@@ -1026,6 +1072,16 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
         if not text:
             text = "模型没有返回可显示的文本。"
+
+        if sensitive.is_loaded:
+            output_scan = sensitive.scan(text)
+            if output_scan.hits:
+                _log_sensitive_hits("output", scope_key, output_scan)
+            if output_scan.blocked:
+                # Don't write the blocked output to history — that would
+                # poison the next turn's context. Substitute the fallback
+                # for both the user-visible reply and what we persist.
+                text = DEFAULT_OUTPUT_FALLBACK
 
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
         raw_turn_parts: list[str] = []

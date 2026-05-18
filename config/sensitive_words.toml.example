@@ -1,0 +1,126 @@
+# Sensitive word filter — deployment-specific configuration.
+#
+# This file is GITIGNORED. Copy this template to `config/sensitive_words.toml`
+# and fill in the categories you need for your deployment.
+#
+# Two severity tiers:
+#   [block.<category>]  — hit short-circuits the LLM call (input) or
+#                         substitutes a fallback (output). Use for content
+#                         where letting the message through is itself a risk.
+#   [soft.<category>]   — hits are logged for monitoring; the message still
+#                         reaches the LLM. Use for noisy / context-sensitive
+#                         terms where false positives hurt more than misses.
+#
+# See docs/admin/sensitive-filter.md for the recommended 17-category scaffold
+# (政治人物 / 历史敏感事件 / 领土主权 / 民族宗教 / etc.) and pointers on
+# where to source words from. This template intentionally ships only generic
+# anti-fraud / anti-spam terms so the public repository carries no
+# jurisdiction-specific content.
+#
+# Matching is performed on a normalized form of the input (casefold +
+# zero-width strip + whitespace strip). Add words in their canonical form;
+# trivial obfuscation like "杀 猪 盘" or zero-width insertions still hit.
+#
+# Tips:
+# - Start small. 50-80 high-confidence terms catch most real abuse.
+# - Use the [soft] tier liberally for monitoring before promoting to [block].
+# - Review hit logs (logger=quickquip.common.sensitive_filter) weekly to
+#   catch false positives early.
+
+# ─────────────────────────────────────────────────────────────────────
+# BLOCK tier — hits short-circuit the request.
+# ─────────────────────────────────────────────────────────────────────
+
+[block.fraud]
+# 反诈：典型电信网络诈骗术语。这些组合在正常群聊中几乎不会出现。
+words = [
+    "杀猪盘",
+    "出售身份证",
+    "出售银行卡",
+    "刷单兼职",
+    "兼职刷单",
+    "高薪招嫖",
+    "走投无路借钱",
+]
+
+[block.gambling]
+# 赌博平台引流：这些词出现在群聊里基本只有引流一种用途。
+words = [
+    "网赌平台",
+    "私彩平台",
+    "菠菜担保",
+    "信用盘出租",
+]
+
+[block.account_trade]
+# 账号买卖与跑分：黑灰产高频词。
+words = [
+    "跑分平台",
+    "跑分接单",
+    "支付宝跑分",
+    "微信跑分",
+    "出U换U",
+    "U商对接",
+]
+
+[block.illegal_service]
+# 违法服务：代办、伪造类。
+words = [
+    "代办毕业证",
+    "伪造身份证",
+    "伪造营业执照",
+    "私家侦探查询",
+    "查开房记录",
+]
+
+# ─────────────────────────────────────────────────────────────────────
+# SOFT tier — hits are logged but don't block.
+# ─────────────────────────────────────────────────────────────────────
+
+[soft.spam_pattern]
+# 推广话术：单独不一定恶意，但密集出现可能是水军/广告。
+words = [
+    "加微信领取",
+    "扫码进群",
+    "私聊详谈",
+    "了解更多请联系",
+]
+
+[soft.suspicious_ask]
+# 边缘提问：用于监控群成员是否在试探 bot 边界。
+words = [
+    "怎么绕过",
+    "如何破解",
+    "怎么规避监管",
+]
+
+# ─────────────────────────────────────────────────────────────────────
+# Add your jurisdiction-specific categories below.
+#
+# Recommended scaffold (see docs/admin/sensitive-filter.md):
+#   [block.political_leaders]
+#   [block.political_events]
+#   [block.territorial]
+#   [block.ethnic_religion]
+#   [block.banned_organizations]
+#   [block.separatism]
+#   [block.violence_terror]
+#   [block.obscenity_minor]
+#   [block.obscenity_explicit]
+#   [block.drugs]
+#   [block.weapons]
+#   [block.hate_speech]
+#   [block.suicide_promotion]
+#   [block.private_info_doxxing]
+#   [block.discrimination]
+#
+# We deliberately do NOT publish word lists for these categories in the
+# public repo. Sources to consider:
+#   1. Your provider's "Content Exists Risk" / safety-rejection logs
+#      (free labelled data — every rejection is a confirmed sensitive term).
+#   2. Open-source compilations on GitHub, lightly filtered for relevance.
+#   3. Commercial content-moderation APIs (Aliyun / Tencent) if you need
+#      breadth without curation cost.
+#   4. Your own observation of LLM-side refusals during testing — note the
+#      exact phrasing the model rejects.
+# ─────────────────────────────────────────────────────────────────────

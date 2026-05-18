@@ -3,8 +3,30 @@ from __future__ import annotations
 import asyncio
 import json
 
+from quickquip.common.sensitive_filter import (
+    SCRUB_PLACEHOLDER,
+    get_filter as _get_sensitive_filter,
+    log_hits as _log_sensitive_hits,
+)
 from quickquip.llm.provider import LLMProviderError, LLMRequest, _is_retryable
 from quickquip.llm.tools import LLMConversationMessage, LLMToolResult
+
+
+# Threshold above which a scrubbed tool result is judged too noisy to keep
+# even with placeholders, and gets replaced wholesale. Picked empirically:
+# >5 distinct block hits in one tool result almost always means a search
+# returned a hot-topic page rather than scattered incidental matches, and
+# scrubbing those gives a Swiss-cheese result the model can't reason over.
+_TOOL_RESULT_SCRUB_HIT_LIMIT = 5
+# Below this content length, even a single block hit makes the remaining
+# fragment too thin to be useful — replace wholesale instead.
+_TOOL_RESULT_MIN_USABLE_LEN = 200
+_TOOL_RESULT_BLOCK_REPLACEMENT = (
+    "工具返回内容包含违规内容，已整体丢弃。请尝试其他查询、来源或换个表述。"
+)
+_TOOL_ARGS_BLOCK_REPLACEMENT = (
+    "工具调用参数包含违规内容，已拒绝执行。请用其他表述重新尝试。"
+)
 
 
 async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int, base_delay: float, logger):
@@ -191,6 +213,8 @@ async def run_tool_call_loop(
             [call.name for call in selected_calls],
         )
         tool_results: list[LLMToolResult] = []
+        sensitive = _get_sensitive_filter()
+        scope_key = getattr(context, "chat_scope", None) or str(getattr(context, "group_id", "?"))
         for call in selected_calls:
             if tool_discovery_enabled and call.name not in loaded_names:
                 tool_results.append(
@@ -202,7 +226,64 @@ async def run_tool_call_loop(
                     )
                 )
                 continue
+
+            # Pre-execution: scan the LLM-constructed arguments. The model
+            # can fold a user's borderline phrasing into a search query and
+            # turn an innocuous question into a payload that would trip the
+            # next provider request — block before we even call the tool.
+            if sensitive.is_loaded:
+                args_scan = sensitive.scan(call.arguments_json or "")
+                if args_scan.hits:
+                    _log_sensitive_hits(
+                        f"tool_args:{call.name}", scope_key, args_scan,
+                    )
+                if args_scan.blocked:
+                    tool_results.append(
+                        LLMToolResult(
+                            call_id=call.id,
+                            name=call.name,
+                            content=_TOOL_ARGS_BLOCK_REPLACEMENT,
+                            is_error=True,
+                        )
+                    )
+                    continue
+
             result = await tool_registry.execute(call, context)
+
+            # Post-execution: scan the tool result. This is the highest-risk
+            # entry point — search/fetch tools pull external content that
+            # the user can steer (via query) but we cannot pre-vet. A single
+            # tool_result rich in flagged terms then rides into the next
+            # provider request as part of `messages` and trips the gateway.
+            if sensitive.is_loaded and result.content:
+                result_scan = sensitive.scan(result.content)
+                if result_scan.hits:
+                    _log_sensitive_hits(
+                        f"tool_result:{call.name}", scope_key, result_scan,
+                    )
+                if result_scan.blocked:
+                    block_count = sum(
+                        1 for h in result_scan.hits if h.severity == "block"
+                    )
+                    if (
+                        block_count > _TOOL_RESULT_SCRUB_HIT_LIMIT
+                        or len(result.content) < _TOOL_RESULT_MIN_USABLE_LEN
+                    ):
+                        result = LLMToolResult(
+                            call_id=result.call_id,
+                            name=result.name,
+                            content=_TOOL_RESULT_BLOCK_REPLACEMENT,
+                            is_error=True,
+                        )
+                    else:
+                        scrubbed = sensitive.scrub(result.content, SCRUB_PLACEHOLDER)
+                        result = LLMToolResult(
+                            call_id=result.call_id,
+                            name=result.name,
+                            content=scrubbed,
+                            is_error=True,
+                        )
+
             tool_results.append(result)
             if tool_discovery_enabled and call.name == tool_search_name and not result.is_error:
                 newly_loaded = _discover_tools_from_call(call)
