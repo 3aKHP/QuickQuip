@@ -38,6 +38,16 @@ _CONFIG_FILES: dict[str, dict] = {
         "label": "游戏配置",
         "description": "金币签到倍率、各游戏赌注/CD/超时等参数",
     },
+    "niuniu_text": {
+        "filename": "niuniu_text.toml",
+        "label": "牛牛文案",
+        "description": "牛牛大作战全部事件文案与长度评价",
+    },
+    "niuniu_text_safe": {
+        "filename": "niuniu_text_safe.toml",
+        "label": "牛牛文案（安全版）",
+        "description": "牛牛大作战和谐版文案，仅覆写需要无害化的事件",
+    },
 }
 
 

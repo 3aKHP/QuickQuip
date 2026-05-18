@@ -2,10 +2,56 @@ from __future__ import annotations
 
 import random
 import re
+from time import time
 
-from quickquip.adapters.nonebot.command_parts.common import _evaluate_luck, _fence_luck_tips, _glue_luck_tips, _is_private_chat, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import _evaluate_luck, _fence_luck_tips, _glue_luck_tips, _is_admin, _is_private_chat, _strip_command_name
 from quickquip.app.message_pipeline import game_economy, niuniu_store
+from quickquip.common.rate_limit import SlidingWindowRateLimiter
 from quickquip.games.niuniu import fence_cd, fenced_cd, fencing, get_comment, glue_cd, gluing
+
+# Per-group RPM rate limiters — created lazily, reaped periodically
+_glue_rpm: dict[str, SlidingWindowRateLimiter] = {}
+_fence_rpm: dict[str, SlidingWindowRateLimiter] = {}
+_RPM_REAP_EVERY = 120  # reap idle limiters every 120s
+_last_reap: float = time()
+
+
+def _reap_idle_rpm() -> None:
+    """Drop limiters for groups that have been idle for two window lengths."""
+    global _last_reap
+    now = time()
+    if now - _last_reap < _RPM_REAP_EVERY:
+        return
+    _last_reap = now
+    cfg = niuniu_store.config
+    threshold = cfg.rpm_window_seconds * 2
+    for bucket in (_glue_rpm, _fence_rpm):
+        stale = [
+            gid
+            for gid, limiter in bucket.items()
+            if limiter.snapshot(now)["global_used"] == 0
+        ]
+        for gid in stale:
+            del bucket[gid]
+
+
+def _check_rpm(group_id: str, action: str) -> bool:
+    """Return True if the action is allowed under the group RPM limit."""
+    _reap_idle_rpm()
+    cfg = niuniu_store.config
+    if action == "glue":
+        bucket = _glue_rpm
+        cap = cfg.glue_rpm_limit
+    else:
+        bucket = _fence_rpm
+        cap = cfg.fence_rpm_limit
+    limiter = bucket.get(group_id)
+    if limiter is None:
+        limiter = SlidingWindowRateLimiter(
+            global_limit=cap, user_limit=999_999, window_seconds=cfg.rpm_window_seconds
+        )
+        bucket[group_id] = limiter
+    return limiter.allow(user_id=0)
 
 
 def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
@@ -73,7 +119,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             f"打胶运势：{glue_luck}（{_evaluate_luck(glue_luck)}）",
             f"击剑运势：{fence_luck}（{_evaluate_luck(fence_luck)}）",
             f"最后打胶：{last_glue}",
-            f"评价：{get_comment(length)}",
+            f"评价：{get_comment(length, niuniu_store.get_text(str(event.group_id)))}",
         ]
         await nn_my.finish("\n".join(lines))
 
@@ -87,11 +133,18 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         remaining = glue_cd.check(uid)
         if remaining > 0:
             tips = [
-                f"不行不行，你的身体会受不了的，歇 {int(remaining)}s 再来吧",
-                f"休息一下吧，会炸膛的！{int(remaining)}s 后再来吧",
+                t.format(remaining=int(remaining))
+                for t in niuniu_store.texts["default"].cd.get("glue", [])
             ]
             await nn_glue.finish(random.choice(tips))
-        msg, _ = gluing(niuniu_store, uid)
+        gid = str(event.group_id)
+        if not _check_rpm(gid, "glue"):
+            await nn_glue.finish(
+                niuniu_store.texts["default"].commands.get(
+                    "glue.rpm_blocked", "本群打胶太频繁啦！休息一下再来吧~"
+                )
+            )
+        msg, _ = gluing(niuniu_store, uid, str(event.group_id))
         await nn_glue.finish(msg)
 
     nn_fence = on_command("击剑", aliases={"jj", "JJ", "Jj", "jJ"}, priority=10, block=True)
@@ -106,11 +159,18 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         remaining = fence_cd.check(uid)
         if remaining > 0:
             tips = [
-                f"不行不行，你的身体会受不了的，歇 {int(remaining)}s 再来吧",
-                f"你这种男同就应该被送去集中营！等待 {int(remaining)}s 再来吧",
-                f"打咩哟！你的牛牛会炸的，休息 {int(remaining)}s 再来吧",
+                t.format(remaining=int(remaining))
+                for t in niuniu_store.texts["default"].cd.get("fence", [])
             ]
             await nn_fence.finish(random.choice(tips))
+
+        gid = str(event.group_id)
+        if not _check_rpm(gid, "fence"):
+            await nn_fence.finish(
+                niuniu_store.texts["default"].commands.get(
+                    "fence.rpm_blocked", "本群击剑太频繁啦！休息一下再来吧~"
+                )
+            )
 
         # Extract @target — prefer raw_message (preserves self-@ that
         # get_message segments may strip), fall back to segment parsing.
@@ -138,13 +198,14 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         remaining = fenced_cd.check(target_uid)
         if remaining > 0:
             tips = [
-                f"对方刚被击剑过，需要休息 {int(remaining)}s 才能再次被击剑",
-                f"对方牛牛还在恢复中，{int(remaining)}s 后再来吧",
+                t.format(remaining=int(remaining))
+                for t in niuniu_store.texts["default"].cd.get("fenced", [])
             ]
             await nn_fence.finish(random.choice(tips))
 
         is_vs_bot = (target_uid == str(event.self_id))
-        result = fencing(niuniu_store, uid, target_uid, oppo_is_bot=is_vs_bot)
+        result = fencing(niuniu_store, uid, target_uid, oppo_is_bot=is_vs_bot,
+                         group_id=str(event.group_id))
         await nn_fence.finish(result)
 
     def _build_rank_text(entries: list[dict], title: str, unit: str = "cm") -> str:
@@ -301,4 +362,32 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         tips = _fence_luck_tips(luck)
         await nn_fence_luck.finish(
             f"⚔️ 今日击剑运势\n运势值：{luck}\n评价：{label}\n{tips}"
+        )
+
+    nn_text_mode = on_command("牛牛文案", priority=10, block=True)
+
+    @nn_text_mode.handle()
+    async def _(event):
+        gid = str(event.group_id) if getattr(event, "group_id", None) else None
+        if gid is None:
+            await nn_text_mode.finish("请在群聊中使用此命令")
+        cmd = niuniu_store.texts["default"].commands
+        args = str(event.get_message()).strip()
+        mode_name = _strip_command_name(args, "牛牛文案").strip().lower()
+        current = niuniu_store.get_group_text_mode(gid)
+        available = ", ".join(niuniu_store.texts.keys())
+        if not mode_name:
+            await nn_text_mode.finish(
+                cmd.get("text_mode.view", "当前模式：{mode}，可用：{available}")
+                .format(mode=current, available=available)
+            )
+        if not _is_admin(event):
+            await nn_text_mode.finish(cmd.get("text_mode.no_permission", "仅管理员可切换"))
+        ok = niuniu_store.set_group_text_mode(gid, mode_name)
+        if not ok:
+            await nn_text_mode.finish(
+                cmd.get("text_mode.unknown", "未知模式：{mode}").format(mode=mode_name)
+            )
+        await nn_text_mode.finish(
+            cmd.get("text_mode.switched", "已切换至：{mode}").format(mode=mode_name)
         )

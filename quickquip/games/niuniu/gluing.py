@@ -5,7 +5,6 @@ import random
 
 from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.cooldown import arrested_cd, glue_cd
-from quickquip.games.niuniu.events import GLUE_EVENTS
 from quickquip.games.niuniu.store import NiuNiuStore
 
 
@@ -34,7 +33,7 @@ def _apply_decay(length: float, cfg: NiuNiuConfig) -> float:
     return length * (1 + rate * 0.8)
 
 
-def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
+def gluing(store: NiuNiuStore, uid: str, group_id: str) -> tuple[str, float]:
     """Perform a gluing operation. Returns (result_message, new_length)."""
     origin = store.get_length(uid)
     if origin is None:
@@ -45,11 +44,13 @@ def gluing(store: NiuNiuStore, uid: str) -> tuple[str, float]:
     if remaining > 0:
         return f"你还在小黑屋里！{int(remaining)}s 后才能打胶", origin
 
+    text = store.get_text(group_id)
+    events = text.glue_events
     # Weighted event selection
-    names = [e["name"] for e in GLUE_EVENTS]
-    weights = [e["weight"] for e in GLUE_EVENTS]
+    names = [e["name"] for e in events]
+    weights = [e["weight"] for e in events]
     chosen_name = random.choices(names, weights=weights, k=1)[0]
-    event = next(e for e in GLUE_EVENTS if e["name"] == chosen_name)
+    event = next(e for e in events if e["name"] == chosen_name)
 
     cfg = store.config
 

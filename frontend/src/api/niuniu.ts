@@ -34,3 +34,14 @@ export async function setFenceLuck(uid: string, fence_luck: number) {
     body: JSON.stringify({ fence_luck }),
   })
 }
+
+export async function getTextModes() {
+  return request('/api/niuniu/text-mode')
+}
+
+export async function setGroupTextMode(groupId: string, mode: string) {
+  return request(`/api/niuniu/text-mode/${encodeURIComponent(groupId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  })
+}

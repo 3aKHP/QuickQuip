@@ -454,49 +454,49 @@ class TestNiuNiuStoreLuck:
 
 class TestGluing:
     def test_no_niuniu_returns_error(self, store):
-        msg, length = gluing(store, "noone")
+        msg, length = gluing(store, "noone", group_id="test")
         assert "没有牛牛" in msg
         assert length == 0.0
 
     def test_arrested_returns_error(self, store, uid_a):
         arrested_cd.set(uid_a, 999)
-        msg, _ = gluing(store, uid_a)
+        msg, _ = gluing(store, uid_a, group_id="test")
         assert "小黑屋" in msg
 
     def test_gluing_sets_cd(self, store, uid_a, monkeypatch):
         _patch_glue_event(monkeypatch, "normal")
-        gluing(store, uid_a)
+        gluing(store, uid_a, group_id="test")
         assert glue_cd.check(uid_a) > 0
 
     def test_gluing_adds_record(self, store, uid_a, monkeypatch):
         _patch_glue_event(monkeypatch, "normal")
-        gluing(store, uid_a)
+        gluing(store, uid_a, group_id="test")
         records = store.get_records(uid_a)
         assert records[0]["action"] == "gluing"
 
     def test_gluing_changes_length(self, store, uid_a, monkeypatch):
         old_len = store.get_length(uid_a)
         _patch_glue_event(monkeypatch, "normal")
-        _, new_len = gluing(store, uid_a)
+        _, new_len = gluing(store, uid_a, group_id="test")
         assert new_len != old_len
 
     def test_mirror_flips_positive_to_negative(self, store, uid_a, monkeypatch):
         store.update_length(uid_a, 20.0)
         _patch_glue_event(monkeypatch, "mirror")
-        _, new_len = gluing(store, uid_a)
+        _, new_len = gluing(store, uid_a, group_id="test")
         assert new_len == pytest.approx(-20.0, abs=1.0)
 
     def test_mirror_too_short_near_zero(self, store, uid_a, monkeypatch):
         store.update_length(uid_a, 0.0)
         _patch_glue_event(monkeypatch, "mirror")
-        msg, new_len = gluing(store, uid_a)
+        msg, new_len = gluing(store, uid_a, group_id="test")
         assert "太短" in msg
         assert new_len == 0.0
 
     def test_arrested_event_blocks(self, store, uid_a, monkeypatch):
         store.update_length(uid_a, 20.0)
         _patch_glue_event(monkeypatch, "arrested")
-        msg, new_len = gluing(store, uid_a)
+        msg, new_len = gluing(store, uid_a, group_id="test")
         assert "小黑屋" in msg
         assert arrested_cd.check(uid_a) > 0
         assert new_len == pytest.approx(20.0, abs=1.0)
@@ -504,7 +504,7 @@ class TestGluing:
     def test_shrinkage_reduces_length(self, store, uid_a, monkeypatch):
         store.update_length(uid_a, 30.0)
         _patch_glue_event(monkeypatch, "shrinkage")
-        msg, new_len = gluing(store, uid_a)
+        msg, new_len = gluing(store, uid_a, group_id="test")
         assert isinstance(msg, str)
         assert new_len <= 30.0
 
@@ -513,7 +513,7 @@ class TestGluing:
         store.set_glue_luck(uid_a, 2.0)  # double effect
         _patch_glue_event(monkeypatch, "blessing")
         _patch_uniform(monkeypatch, 10.0)
-        _, new_len = gluing(store, uid_a)
+        _, new_len = gluing(store, uid_a, group_id="test")
         assert new_len > 20.0
 
     def test_luck_multiplier_affects_result(self, store, uid_a, monkeypatch):
@@ -521,7 +521,7 @@ class TestGluing:
         store.set_glue_luck(uid_a, 100.0)
         _patch_glue_event(monkeypatch, "blessing")
         _patch_uniform(monkeypatch, 5.0)
-        _, new_len = gluing(store, uid_a)
+        _, new_len = gluing(store, uid_a, group_id="test")
         assert new_len > 50.0
 
     def test_decay_applied_after_gluing_high_length(self, store, uid_a, monkeypatch):
@@ -529,7 +529,7 @@ class TestGluing:
         store.set_glue_luck(uid_a, 0.01)  # lowest luck → massive shrinkage
         _patch_glue_event(monkeypatch, "blessing")
         _patch_uniform(monkeypatch, 5.0)
-        _, new_len = gluing(store, uid_a)
+        _, new_len = gluing(store, uid_a, group_id="test")
         assert new_len < 500.0
 
 
@@ -601,16 +601,16 @@ class TestFenceWinnerIsRole:
 
 class TestFencing:
     def test_no_niuniu_attacker(self, store):
-        assert "没有牛牛" in fencing(store, "noone", "someone")
+        assert "没有牛牛" in fencing(store, "noone", "someone", group_id="test")
 
     def test_target_no_niuniu_reject(self, store, uid_a, monkeypatch):
         _patch_no_niuniu_event(monkeypatch, "reject")
-        result = fencing(store, uid_a, "noone")
+        result = fencing(store, uid_a, "noone", group_id="test")
         assert "对方" in result or "空气" in result or "无敌" in result
 
     def test_target_no_niuniu_self_hurt(self, store, uid_a, monkeypatch):
         _patch_no_niuniu_event(monkeypatch, "self_hurt")
-        assert isinstance(fencing(store, uid_a, "noone"), str)
+        assert isinstance(fencing(store, uid_a, "noone", group_id="test"), str)
 
     def test_force_register_then_fence(self, store, uid_a, monkeypatch):
         """force_register creates opponent then proceeds to real fencing."""
@@ -623,27 +623,27 @@ class TestFencing:
         monkeypatch.setattr(
             random, "choices", lambda population, weights=None, k=1: [next(events)]
         )
-        result = fencing(store, uid_a, "noone")
+        result = fencing(store, uid_a, "noone", group_id="test")
         assert store.exists("noone")
         assert isinstance(result, str)
 
     def test_bot_gets_phantom_length(self, store, uid_a, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
-        assert isinstance(fencing(store, uid_a, "bot_uid", oppo_is_bot=True), str)
+        assert isinstance(fencing(store, uid_a, "bot_uid", oppo_is_bot=True, group_id="test"), str)
 
     def test_fencing_sets_attacker_cd(self, store, uid_a, uid_b, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
-        fencing(store, uid_a, uid_b)
+        fencing(store, uid_a, uid_b, group_id="test")
         assert fence_cd.check(uid_a) > 0
 
     def test_fencing_sets_defender_cd(self, store, uid_a, uid_b, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
-        fencing(store, uid_a, uid_b)
+        fencing(store, uid_a, uid_b, group_id="test")
         assert fenced_cd.check(uid_b) > 0
 
     def test_fencing_adds_records(self, store, uid_a, uid_b, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
-        fencing(store, uid_a, uid_b)
+        fencing(store, uid_a, uid_b, group_id="test")
         a_recs = store.get_records(uid_a)
         b_recs = store.get_records(uid_b)
         assert any(r["action"] == "fencing" for r in a_recs)
@@ -653,7 +653,7 @@ class TestFencing:
         store.update_length(uid_a, 20.0)
         store.update_length(uid_b, 20.0)
         _patch_fence_event(monkeypatch, "draw")
-        fencing(store, uid_a, uid_b)
+        fencing(store, uid_a, uid_b, group_id="test")
         assert store.get_length(uid_a) < 20.0
         assert store.get_length(uid_b) < 20.0
 
@@ -664,7 +664,7 @@ class TestFencing:
         store.update_length(uid_a, 10.0)
         store.update_length(uid_b, 15.0)
         _patch_fence_event(monkeypatch, "dominate")
-        result = fencing(store, uid_a, uid_b)
+        result = fencing(store, uid_a, uid_b, group_id="test")
         assert isinstance(result, str)
 
     def test_succubus_downgrades_when_winner_not_succubus(
@@ -674,7 +674,7 @@ class TestFencing:
         store.update_length(uid_a, 10.0)
         store.update_length(uid_b, 20.0)
         _patch_fence_event(monkeypatch, "succubus_devour")
-        result = fencing(store, uid_a, uid_b)
+        result = fencing(store, uid_a, uid_b, group_id="test")
         assert isinstance(result, str)
 
     def test_dominate_sever_for_niutouren(self, store, uid_a, uid_b, monkeypatch):
@@ -683,7 +683,7 @@ class TestFencing:
         store.update_length(uid_b, 10.0)
         _patch_fence_event(monkeypatch, "dominate")
         monkeypatch.setattr(random, "random", lambda: 0.0)
-        result = fencing(store, uid_a, uid_b)
+        result = fencing(store, uid_a, uid_b, group_id="test")
         assert any(
             kw in result for kw in ("腰斩", "处刑", "断头台", "支配")
         ), f"Expected sever message, got: {result}"
@@ -695,31 +695,31 @@ class TestFencing:
         store.set_fence_luck(uid_a, 100.0)  # guarantee win
         _patch_fence_event(monkeypatch, "succubus_devour")
         _patch_random(monkeypatch, 0.0)  # win_prob check passes
-        result = fencing(store, uid_a, uid_b)
+        result = fencing(store, uid_a, uid_b, group_id="test")
         assert "吞噬" in result or "魅魔" in result
 
     def test_reversal_flips_winner(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 10.0)
         store.update_length(uid_b, 100.0)
         _patch_fence_event(monkeypatch, "reversal")
-        assert isinstance(fencing(store, uid_a, uid_b), str)
+        assert isinstance(fencing(store, uid_a, uid_b, group_id="test"), str)
 
     def test_slip_attacker_always_loses(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 200.0)
         store.update_length(uid_b, 1.0)
         _patch_fence_event(monkeypatch, "slip")
-        fencing(store, uid_a, uid_b)
+        fencing(store, uid_a, uid_b, group_id="test")
         assert store.get_length(uid_a) < 200.0
 
     def test_critical_multiplies_damage(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 30.0)
         store.update_length(uid_b, 30.0)
         _patch_fence_event(monkeypatch, "critical")
-        assert isinstance(fencing(store, uid_a, uid_b), str)
+        assert isinstance(fencing(store, uid_a, uid_b, group_id="test"), str)
 
     def test_bot_fencing_no_defender_db_write(self, store, uid_a, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
-        fencing(store, uid_a, "bot", oppo_is_bot=True)
+        fencing(store, uid_a, "bot", oppo_is_bot=True, group_id="test")
         assert not store.exists("bot")
 
     def test_fence_luck_sways_outcome(self, store, uid_a, uid_b, monkeypatch):
@@ -727,7 +727,7 @@ class TestFencing:
         store.update_length(uid_b, 20.0)
         store.set_fence_luck(uid_a, 100.0)
         _patch_fence_event(monkeypatch, "normal")
-        assert isinstance(fencing(store, uid_a, uid_b), str)
+        assert isinstance(fencing(store, uid_a, uid_b, group_id="test"), str)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

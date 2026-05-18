@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from quickquip.games.config import NiuNiuConfig
+from quickquip.games.niuniu.text import NiuNiuText, default_text, load_niuniu_text
 
 
 def _roll_lognormal(sigma: float) -> float:
@@ -50,6 +51,7 @@ class NiuNiuStore:
         self.config = config or NiuNiuConfig()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
+        self.texts: dict[str, NiuNiuText] = self._load_texts()
 
     def connect(self) -> sqlite3.Connection:
         """Return a new SQLite connection with row_factory set."""
@@ -86,6 +88,11 @@ class NiuNiuStore:
 
                 CREATE INDEX IF NOT EXISTS idx_records_uid
                 ON niuniu_records(uid, id DESC);
+
+                CREATE TABLE IF NOT EXISTS niuniu_group_text (
+                    group_id  TEXT PRIMARY KEY,
+                    text_mode TEXT NOT NULL DEFAULT 'default'
+                );
                 """
             )
         self._migrate()
@@ -111,6 +118,70 @@ class NiuNiuStore:
                 conn.execute(
                     "ALTER TABLE niuniu_users ADD COLUMN fence_luck_date TEXT NOT NULL DEFAULT ''"
                 )
+
+    # ── text sets ─────────────────────────────────────────────────────
+
+    def _load_texts(self) -> dict[str, NiuNiuText]:
+        """Load all text sets; 'default' is always present (from built-ins)."""
+        texts: dict[str, NiuNiuText] = {"default": default_text()}
+        cfg = self.config
+        for mode_name, path_attr in [("safe", "niuniu_safe_text_path")]:
+            path = getattr(cfg, path_attr, "")
+            if path:
+                loaded = load_niuniu_text(path)
+                # Merge missing fields from defaults
+                if not loaded.glue_events:
+                    loaded.glue_events = texts["default"].glue_events
+                if not loaded.glue_length_comments:
+                    loaded.glue_length_comments = texts["default"].glue_length_comments
+                if not loaded.fence_shared:
+                    loaded.fence_shared = texts["default"].fence_shared
+                if not loaded.fence_events:
+                    loaded.fence_events = texts["default"].fence_events
+                if not loaded.fence_bot:
+                    loaded.fence_bot = texts["default"].fence_bot
+                if not loaded.fence_no_target:
+                    loaded.fence_no_target = texts["default"].fence_no_target
+                if not loaded.luck_glue:
+                    loaded.luck_glue = texts["default"].luck_glue
+                if not loaded.luck_fence:
+                    loaded.luck_fence = texts["default"].luck_fence
+                if not loaded.cd:
+                    loaded.cd = texts["default"].cd
+                if not loaded.commands:
+                    loaded.commands = texts["default"].commands
+                texts[mode_name] = loaded
+        # Also try loading a custom default from config
+        default_path = getattr(cfg, "niuniu_text_path", "")
+        if default_path:
+            loaded = load_niuniu_text(default_path)
+            if loaded.glue_events:
+                # Only replace if the file actually had content
+                texts["default"] = loaded
+        return texts
+
+    def get_text(self, group_id: str) -> NiuNiuText:
+        """Return the NiuNiuText for *group_id*, respecting its mode setting."""
+        mode = self.get_group_text_mode(group_id)
+        return self.texts.get(mode, self.texts["default"])
+
+    def get_group_text_mode(self, group_id: str) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT text_mode FROM niuniu_group_text WHERE group_id = ?", (group_id,)
+            ).fetchone()
+        return row["text_mode"] if row else "default"
+
+    def set_group_text_mode(self, group_id: str, mode: str) -> bool:
+        """Set text mode. Returns False if mode is unknown, True on success."""
+        if mode not in self.texts:
+            return False
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO niuniu_group_text (group_id, text_mode) VALUES (?, ?)",
+                (group_id, mode),
+            )
+        return True
 
     # ── daily glue luck (打胶运势) ──────────────────────────────────────
 

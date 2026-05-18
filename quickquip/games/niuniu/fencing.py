@@ -6,20 +6,9 @@ import random
 
 from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.cooldown import fence_cd, fenced_cd
-from quickquip.games.niuniu.events import (
-    FENCE_BOT_DRAW,
-    FENCE_BOT_LOSE,
-    FENCE_BOT_WIN,
-    FENCE_EVENTS,
-    FENCE_LOSE_NEG,
-    FENCE_LOSE_POS,
-    FENCE_WIN_NEG,
-    FENCE_WIN_POS,
-    NO_NIUNIU_EVENTS,
-    _normal_fence_event,
-)
 from quickquip.games.niuniu.gluing import _apply_decay
 from quickquip.games.niuniu.store import NiuNiuStore
+from quickquip.games.niuniu.text import NiuNiuText
 
 
 def _fence_win_prob(a: float, b: float) -> float:
@@ -76,11 +65,13 @@ def _commit_fence_result(
 
 
 def _fence_no_target(
-    store: NiuNiuStore, my_uid: str, my_len: float, oppo_uid: str
+    store: NiuNiuStore, my_uid: str, my_len: float, oppo_uid: str, group_id: str
 ) -> str:
     """Handle fencing when the target has no niuniu registered."""
+    text = store.get_text(group_id)
+    events = text.fence_no_target
     chosen = random.choices(
-        NO_NIUNIU_EVENTS, weights=[e["weight"] for e in NO_NIUNIU_EVENTS], k=1
+        events, weights=[e["weight"] for e in events], k=1
     )[0]
 
     if chosen["name"] == "reject":
@@ -88,7 +79,7 @@ def _fence_no_target(
     elif chosen["name"] == "force_register":
         oppo_len = store.register(oppo_uid)
         prefix = random.choice(chosen["msg"]).format(oppo_len=oppo_len)
-        result = fencing(store, my_uid, oppo_uid)
+        result = fencing(store, my_uid, oppo_uid, group_id=group_id)
         return prefix + "\n" + result
     elif chosen["name"] == "self_hurt":
         loss = round(
@@ -106,14 +97,24 @@ def _fence_no_target(
     return "出了一点问题……"
 
 
+def _normal_fence_event(text: NiuNiuText) -> dict:
+    """Return the 'normal' fencing event dict from *text*."""
+    for e in text.fence_events:
+        if e["name"] == "normal":
+            return e
+    return {"name": "normal", "weight": 50}
+
+
 def fencing(
-    store: NiuNiuStore, my_uid: str, oppo_uid: str, *, oppo_is_bot: bool = False
+    store: NiuNiuStore, my_uid: str, oppo_uid: str, *, oppo_is_bot: bool = False,
+    group_id: str = "",
 ) -> str:
     """Execute a fencing battle. Returns result message."""
     my_len = store.get_length(my_uid)
     if my_len is None:
         return "你还没有牛牛呢！请先发送 注册牛牛"
 
+    text = store.get_text(group_id)
     oppo_len = store.get_length(oppo_uid)
 
     # Target has no niuniu — bot gets a phantom, others trigger events
@@ -127,7 +128,7 @@ def fencing(
                 2,
             )
         else:
-            return _fence_no_target(store, my_uid, my_len, oppo_uid)
+            return _fence_no_target(store, my_uid, my_len, oppo_uid, group_id)
 
     origin_my = my_len
     origin_oppo = oppo_len
@@ -140,22 +141,23 @@ def fencing(
     i_win = random.random() < win_prob
 
     # Weighted event selection
+    fence_events = text.fence_events
     chosen = random.choices(
-        FENCE_EVENTS, weights=[e["weight"] for e in FENCE_EVENTS], k=1
+        fence_events, weights=[e["weight"] for e in fence_events], k=1
     )[0]
 
     # Eligibility guards (pre-reversal): ensure at least one player qualifies
     if chosen["name"] == "dominate":
         threshold = cfg.fence_dominate_threshold
         if my_len < threshold and oppo_len < threshold:
-            chosen = _normal_fence_event()
+            chosen = _normal_fence_event(text)
     elif chosen["name"] == "succubus_devour":
         threshold = cfg.fence_devour_threshold
         qualifies = (my_len < 0 and abs(my_len) >= threshold) or (
             oppo_len < 0 and abs(oppo_len) >= threshold
         )
         if not qualifies:
-            chosen = _normal_fence_event()
+            chosen = _normal_fence_event(text)
 
     # Apply reversal *before* role check so the actual winner is tested
     if chosen["name"] == "reversal":
@@ -165,7 +167,7 @@ def fencing(
     require_role = chosen.get("require_role")
     if require_role:
         if not _fence_winner_is_role(i_win, my_len, oppo_len, require_role, cfg):
-            chosen = _normal_fence_event()
+            chosen = _normal_fence_event(text)
 
     if chosen["name"] == "slip":
         i_win = False
@@ -191,11 +193,11 @@ def fencing(
             store, my_uid, origin_my, my_len, oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg
         )
         if oppo_is_bot:
-            msgs = FENCE_BOT_WIN if i_win else FENCE_BOT_LOSE
+            msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
         elif i_win:
-            msgs = (chosen.get("win_neg") or FENCE_WIN_NEG) if my_len < 0 else (chosen.get("win_pos") or FENCE_WIN_POS)
+            msgs = (chosen.get("win_neg") or text.fence_shared["win_neg"]) if my_len < 0 else (chosen.get("win_pos") or text.fence_shared["win_pos"])
         else:
-            msgs = (chosen.get("devoured_neg") or FENCE_LOSE_NEG) if my_len < 0 else (chosen.get("devoured_pos") or FENCE_LOSE_POS)
+            msgs = (chosen.get("devoured_neg") or text.fence_shared["lose_neg"]) if my_len < 0 else (chosen.get("devoured_pos") or text.fence_shared["lose_pos"])
         return random.choice(msgs).format(gain=steal, loss=loss_val, my_len=my_len)
 
     # ── dominate sever ───────────────────────────────────────────────
@@ -284,7 +286,7 @@ def fencing(
             oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg,
             action="fencing_draw", oppo_action="fencing_draw",
         )
-        msgs = FENCE_BOT_DRAW if oppo_is_bot else chosen["msg"]
+        msgs = text.fence_bot["draw"] if oppo_is_bot else chosen["msg"]
         return random.choice(msgs).format(loss=reduce_val, my_len=my_len)
 
     # ── apply event multiplier ───────────────────────────────────────
@@ -312,17 +314,17 @@ def fencing(
 
     # ── message selection ────────────────────────────────────────────
     if oppo_is_bot:
-        msgs = FENCE_BOT_WIN if i_win else FENCE_BOT_LOSE
+        msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
     elif i_win:
         if my_len < 0:
-            msgs = chosen.get("win_neg") or FENCE_WIN_NEG
+            msgs = chosen.get("win_neg") or text.fence_shared["win_neg"]
         else:
-            msgs = chosen.get("win_pos") or FENCE_WIN_POS
+            msgs = chosen.get("win_pos") or text.fence_shared["win_pos"]
     else:
         if my_len < 0:
-            msgs = chosen.get("lose_neg") or FENCE_LOSE_NEG
+            msgs = chosen.get("lose_neg") or text.fence_shared["lose_neg"]
         else:
-            msgs = chosen.get("lose_pos") or FENCE_LOSE_POS
+            msgs = chosen.get("lose_pos") or text.fence_shared["lose_pos"]
     msg = random.choice(msgs).format(
         gain=reduce_val, loss=loss_val, my_len=my_len
     )

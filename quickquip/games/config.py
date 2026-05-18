@@ -80,6 +80,15 @@ class NiuNiuConfig:
     fenced_protection: int = 300
     glue_cooldown: int = 180
     unsubscribe_gold: int = 500
+
+    # Per-group RPM limits (requests per minute window)
+    glue_rpm_limit: int = 30
+    fence_rpm_limit: int = 20
+    rpm_window_seconds: int = 60
+
+    # Text TOML paths — empty means use built-in defaults
+    niuniu_text_path: str = ""
+    niuniu_safe_text_path: str = ""
     decay_rate_high: float = 0.01
     decay_rate_normal: float = 0.005
 

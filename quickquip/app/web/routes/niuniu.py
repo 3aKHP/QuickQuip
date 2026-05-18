@@ -204,3 +204,37 @@ async def set_fence_luck(uid: str, body: SetFenceLuckBody, request: Request):
         uid, old_fence_luck, body.fence_luck,
     )
     return {"ok": True, "old_fence_luck": old_fence_luck, "new_fence_luck": body.fence_luck}
+
+
+class SetTextModeBody(BaseModel):
+    mode: str = Field(min_length=1, max_length=64)
+
+
+@router.get("/niuniu/text-mode")
+async def get_text_modes(request: Request):
+    """Return available text modes and groups with non-default modes."""
+    store: NiuNiuStore = niuniu_store
+    modes = list(store.texts.keys())
+    groups: list[dict] = []
+    with store.connect() as conn:
+        rows = conn.execute(
+            "SELECT group_id, text_mode FROM niuniu_group_text ORDER BY group_id"
+        ).fetchall()
+        for r in rows:
+            groups.append({"group_id": r["group_id"], "text_mode": r["text_mode"]})
+    return {"modes": modes, "default": "default", "groups": groups}
+
+
+@router.post("/niuniu/text-mode/{group_id}")
+async def set_text_mode(group_id: str, body: SetTextModeBody, request: Request):
+    """Set the text mode for a group."""
+    store: NiuNiuStore = niuniu_store
+    old_mode = store.get_group_text_mode(group_id)
+    ok = store.set_group_text_mode(group_id, body.mode)
+    if not ok:
+        raise HTTPException(400, f"unknown text mode: {body.mode}")
+    logger.warning(
+        "niuniu text mode changed group=%s old=%s new=%s",
+        group_id, old_mode, body.mode,
+    )
+    return {"ok": True, "group_id": group_id, "old_mode": old_mode, "new_mode": body.mode}

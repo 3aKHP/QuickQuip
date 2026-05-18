@@ -187,8 +187,18 @@ LENGTH_COMMENTS: dict[tuple[float, float], list[str]] = {
 }
 
 
-def get_comment(length: float) -> str:
-    """Return a random flavour comment for the given niuniu length."""
+def get_comment(length: float, text=None) -> str:
+    """Return a random flavour comment for the given niuniu length.
+
+    If *text* (NiuNiuText) is provided, uses text.glue_length_comments.
+    Otherwise falls back to the built-in LENGTH_COMMENTS.
+    """
+    if text is not None and text.glue_length_comments:
+        for entry in text.glue_length_comments:
+            if entry["min"] < length <= entry["max"]:
+                return random.choice(entry["messages"])
+        return "你的牛牛状态很特殊……"
+
     for (lo, hi), msgs in LENGTH_COMMENTS.items():
         if lo < length <= hi:
             return random.choice(msgs)
