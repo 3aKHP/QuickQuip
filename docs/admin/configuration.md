@@ -389,6 +389,25 @@ steps = ['第一', '第二', '第三']
 
 ---
 
+## config/games.toml
+
+游戏参数配置文件，详见 [game-config.md](game-config.md) 和 `config/games.toml.example`。
+
+### 牛牛文案预设文件
+
+在 `games.toml` 中设置 `niuniu_text_path` 和 `niuniu_safe_text_path` 可指向自定义 TOML 文案文件。
+
+| 文件 | 层 | 说明 |
+|------|-----|------|
+| `config/niuniu_text.toml.example` | 分发层（追踪） | 自定义牛牛文案模板，含所有事件消息、长度评价、运势提示、CD 消息 |
+| `config/niuniu_text.toml` | 自用层（gitignore） | 部署者自定义文案（复制 example 后修改） |
+| `config/niuniu_text_safe.toml.example` | 分发层（追踪） | 和谐版文案模板，字段与 default 一致但措辞中性化 |
+| `config/niuniu_text_safe.toml` | 自用层（gitignore） | 部署者自定义和谐版文案 |
+
+文案 TOML 结构中，`safe` 模式可仅填写需要覆写的字段，缺失字段自动从 `default` 继承。
+
+---
+
 ## config/personas/
 
 每个 `.toml` 文件定义一个人格，`_shared.toml` 为自动注入所有人格的共享行为准则。

@@ -122,3 +122,17 @@ fence_bot_phantom_max = 80.0
 luck_sigma = 1.0
 # 击剑运势对数标准差
 fence_luck_sigma = 1.0
+
+# ── 牛牛 RPM 限流 ────────────────────────────────────────────────────────
+# 打胶每分钟每群请求上限
+glue_rpm_limit = 30
+# 击剑每分钟每群请求上限
+fence_rpm_limit = 20
+# RPM 滑动窗口大小（秒）
+rpm_window_seconds = 60
+
+# ── 牛牛文案预设 ────────────────────────────────────────────────────────
+# 自定义文案 TOML 路径（为空则使用内置 default 文案）
+# niuniu_text_path = "config/niuniu_text.toml"
+# 和谐版文案 TOML 路径（为空则使用内置 safe 文案）
+# niuniu_safe_text_path = "config/niuniu_text_safe.toml"

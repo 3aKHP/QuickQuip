@@ -21,7 +21,8 @@ quickquip/games/
     ├── store.py          ← NiuNiuStore（SQLite CRUD / 排行 / 运势）
     ├── events.py         ← 事件定义 + 消息模板 + get_comment()
     ├── gluing.py         ← gluing() / _apply_decay()
-    └── fencing.py        ← fencing() / _fence_win_prob() / 角色判定
+    ├── fencing.py        ← fencing() / _fence_win_prob() / 角色判定
+    └── text.py           ← NiuNiuText 数据类、TOML 加载器、内置文案预设
 ```
 
 ---

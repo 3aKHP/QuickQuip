@@ -117,6 +117,10 @@ quickquip/
 | `chat_rules.toml` | 自用层（gitignore） | 部署专用的彩蛋规则（群内私有梗） |
 | `games.toml.example` | 分发层（追踪） | 游戏参数配置模板 |
 | `games.toml` | 自用层（gitignore） | 游戏参数（金币倍率、CD、赌注上限等） |
+| `niuniu_text.toml.example` | 分发层（追踪） | 牛牛自定义文案模板 |
+| `niuniu_text.toml` | 自用层（gitignore） | 部署者自定义牛牛文案 |
+| `niuniu_text_safe.toml.example` | 分发层（追踪） | 牛牛和谐版文案模板 |
+| `niuniu_text_safe.toml` | 自用层（gitignore） | 部署者自定义牛牛和谐版文案 |
 | `personas.example/` | 分发层（追踪） | persona 配置格式示例 |
 | `personas/` | 自用层（gitignore） | 真实 persona 定义（含人格描述、系统提示等） |
 

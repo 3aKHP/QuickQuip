@@ -83,6 +83,11 @@ game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯
 | `[niuniu]` | `fence_dominate_threshold` | 50.0 | 牛头人角色阈值（length ≥ N） |
 | `[niuniu]` | `fence_devour_steal_ratio` | 0.3 | 魅魔吞噬窃取比例 |
 | `[niuniu]` | `fence_devour_threshold` | 50.0 | 魅魔角色阈值（length ≤ -N） |
+| `[niuniu]` | `glue_rpm_limit` | 30 | 打胶每分钟每群请求上限 |
+| `[niuniu]` | `fence_rpm_limit` | 20 | 击剑每分钟每群请求上限 |
+| `[niuniu]` | `rpm_window_seconds` | 60 | RPM 滑动窗口大小（秒） |
+| `[niuniu]` | `niuniu_text_path` | `""` | 自定义牛牛文案 TOML 路径（为空使用内置 default） |
+| `[niuniu]` | `niuniu_safe_text_path` | `""` | 和谐版牛牛文案 TOML 路径（为空使用内置 safe） |
 
 ### 配置文件加载逻辑
 
@@ -94,12 +99,27 @@ config/games.toml 解析失败 → load_error 记录错误，全部回退默认�
 
 任何未在 TOML 中显式设置的字段保留默认值，无需全量填写。
 
+### 牛牛文案系统
+
+QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按群切换：
+
+| 模式 | 说明 |
+|------|------|
+| `default` | 原版文案，包含"打胶""击剑"等措辞 |
+| `safe` | 和谐版文案，事件描述和长度评价语调整为更中性的表达 |
+
+**加载逻辑**：`config/games.toml` 中的 `niuniu_text_path` / `niuniu_safe_text_path` 指向自定义 TOML 文件；为空时使用内置默认文案。`safe` 模式缺失的字段会自动从 `default` 继承补全。
+
+**群级切换**：管理员通过 `/牛牛文案 [模式名]` 命令切换本群文案模式（默认 `default`）。Web Admin 牛牛面板的"文案模式管理"卡片可视化操作群组文案设置。切换记录存储在 `niuniu_group_text` 表中。
+
+**扩展自定义文案**：参考 `config/niuniu_text.toml.example` 的格式，复制后修改对应键，在 `games.toml` 中设置 `niuniu_text_path` 指向该文件即可。
+
 ### 数据库文件
 
 | 文件 | 存储内容 | 引擎 |
 |------|---------|------|
 | `data/game_economy.db` | 金币账户、签到记录 | SQLite |
-| `data/niuniu.db` | 牛牛用户数据、操作记录 | SQLite |
+| `data/niuniu.db` | 牛牛用户数据、操作记录、群文案模式覆盖 | SQLite |
 | `data/game_scores.json` | 数字炸弹猜中次数排行 | JSON |
 
 ---
@@ -123,4 +143,4 @@ config/games.toml 解析失败 → load_error 记录错误，全部回退默认�
 1. 用户数据在 `data/niuniu.db` 的 `niuniu_users` 表
 2. 操作记录在 `niuniu_records` 表，可用于排查异常长度变化
 3. CD 状态存储在内存中，重启机器人后 CD 全部重置
-4. 回归压力是围绕 0 的绝对值机制：负数区间的 inward bonus 会被限制在 0 边界，不会穿过 0 反向冲出
+4. 文案模式切换通过 `/牛牛文案 <模式名>` 命令或 Web Admin 牛牛面板操作，数据存储在 `niuniu_group_text` 表
