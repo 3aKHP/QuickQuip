@@ -74,6 +74,8 @@
             <li>generation.toml</li>
             <li>chat_rules.toml</li>
             <li>games.toml</li>
+            <li>niuniu_text.toml</li>
+            <li>niuniu_text_safe.toml</li>
           </ul>
         </div>
       </aside>
@@ -195,7 +197,7 @@ async function save() {
   display: grid;
   flex: 1;
   min-height: 0;
-  grid-template-columns: 260px minmax(0, 1fr) 220px;
+  grid-template-columns: 220px minmax(0, 1fr) 180px;
   gap: var(--qq-gap-md);
 }
 
@@ -213,7 +215,7 @@ async function save() {
 .config-list {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .panel-head {
@@ -281,36 +283,40 @@ async function save() {
 .config-editor {
   display: flex;
   flex-direction: column;
-  gap: var(--qq-gap-sm);
+  gap: var(--qq-gap-xs);
   overflow: hidden;
-  padding: var(--qq-gap-md);
+  padding: var(--qq-gap-sm);
 }
 
 .editor-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--qq-gap-md);
+  gap: var(--qq-gap-sm);
+  padding: 0 var(--qq-gap-xs);
 }
 
 .editor-meta {
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--qq-gap-sm);
 }
 
 .editor-kicker {
-  display: block;
-  margin-bottom: 4px;
   color: var(--qq-primary);
   font-size: var(--qq-text-xs);
   font-weight: 700;
+  flex-shrink: 0;
 }
 
 .editor-meta h3 {
   margin: 0;
   color: var(--qq-text);
-  font-size: var(--qq-text-lg);
+  font-size: var(--qq-text-base);
   line-height: 1.2;
   word-break: break-all;
+  font-family: var(--qq-font-mono);
 }
 
 .editor-state {
@@ -347,8 +353,8 @@ async function save() {
 .toml-editor {
   flex: 1;
   width: 100%;
-  min-height: 0;
-  padding: var(--qq-gap-md);
+  min-height: 360px;
+  padding: var(--qq-gap-sm);
   border: 0;
   border-top: 1px solid var(--qq-border);
   background: var(--qq-surface-strong);
@@ -404,7 +410,7 @@ async function save() {
 
 @media (max-width: 1100px) {
   .config-shell {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
   }
 
   .config-side {
@@ -412,13 +418,14 @@ async function save() {
   }
 }
 
-@media (max-width: 780px) {
+@media (max-width: 767px) {
   .config-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(360px, 1fr);
   }
 
   .config-list {
-    max-height: 240px;
+    max-height: 160px;
   }
 
   .editor-head {

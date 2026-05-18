@@ -82,4 +82,5 @@ function formatNum(n: number): string { return n >= 10000 ? (n / 10000).toFixed(
 .bar-value { text-align: right; color: var(--qq-text-muted); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 640px) { .bar-row { grid-template-columns: 100px 1fr 40px; } }
+@media (max-width: 400px) { .bar-row { grid-template-columns: 70px 1fr 36px; } }
 </style>

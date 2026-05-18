@@ -50,7 +50,7 @@ input[type="search"],
 select,
 textarea {
   font-family: var(--qq-font-base);
-  font-size: var(--qq-text-sm);
+  font-size: var(--qq-text-md);
   background: var(--qq-surface);
   border: 1px solid var(--qq-border-strong);
   border-radius: var(--qq-radius-btn);

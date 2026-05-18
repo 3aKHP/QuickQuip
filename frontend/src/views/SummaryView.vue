@@ -298,10 +298,12 @@ function closeDetail() {
   flex: 0 0 auto;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .summary-row {
     grid-template-columns: 1fr;
     align-items: stretch;
+    min-height: auto;
+    padding: var(--qq-gap-md);
   }
 
   .summary-main {
@@ -310,6 +312,8 @@ function closeDetail() {
 
   .sum-actions {
     justify-content: flex-start;
+    padding-top: var(--qq-gap-sm);
+    border-top: 1px solid var(--qq-border);
   }
 }
 

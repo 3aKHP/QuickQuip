@@ -654,7 +654,7 @@ reloadAll()
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .editor-head {
     align-items: flex-start;
     flex-direction: column;

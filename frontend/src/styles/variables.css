@@ -92,6 +92,12 @@
   --qq-content-max-width: 1180px;
   --qq-rail-bg: #F0F6FA;
 
+  /* ---- Breakpoints (reference; not usable inside @media — keep values in sync) ---- */
+  --qq-bp-sm: 640px;
+  --qq-bp-nav: 767px;
+  --qq-bp-md: 900px;
+  --qq-bp-lg: 1100px;
+
   /* ---- Table ---- */
   --qq-table-stripe: rgba(0, 0, 0, 0.015);
 }

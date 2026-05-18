@@ -10,7 +10,7 @@
       <h3 class="st">金币排行 TOP 20</h3>
       <UiLoading v-if="rankLoading" />
       <UiEmpty v-else-if="!rankings.length" icon="BarChart3" title="暂无排行数据" />
-      <table v-else><thead><tr><th class="num">#</th><th>QQ</th><th class="num">金币</th><th class="num">好感度</th><th class="num">连击</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.user_id"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="lookupUser(r.user_id)" class="acct-link">{{ r.user_id }}</a></td><td class="num">{{ r.gold.toLocaleString() }}</td><td class="num">{{ r.affection }}</td><td class="num">{{ r.sign_streak }} 天</td></tr></tbody></table>
+      <div v-else class="table-scroll"><table><thead><tr><th class="num">#</th><th>QQ</th><th class="num">金币</th><th class="num">好感度</th><th class="num">连击</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.user_id"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="lookupUser(r.user_id)" class="acct-link">{{ r.user_id }}</a></td><td class="num">{{ r.gold.toLocaleString() }}</td><td class="num">{{ r.affection }}</td><td class="num">{{ r.sign_streak }} 天</td></tr></tbody></table></div>
     </UiCard>
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">

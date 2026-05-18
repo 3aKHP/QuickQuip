@@ -283,6 +283,28 @@ onMounted(async () => {
   .dash-row { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 640px) {
+  .dash-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stat-card__value {
+    font-size: var(--qq-text-2xl);
+  }
+
+  .mini-bar-row {
+    grid-template-columns: 18px 1fr auto;
+  }
+
+  .mini-bar-track {
+    display: none;
+  }
+
+  .mini-bar-val {
+    text-align: right;
+  }
+}
+
 .dash-card-title {
   font-size: var(--qq-text-base);
   font-weight: 600;

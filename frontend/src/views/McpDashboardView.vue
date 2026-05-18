@@ -33,7 +33,7 @@ onMounted(() => load())
 
 <style scoped>
 .err-block { display: flex; align-items: center; gap: var(--qq-gap-sm); color: var(--qq-danger); font-size: var(--qq-text-sm); }
-.server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--qq-gap-md); }
+.server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--qq-gap-md); }
 .s-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--qq-gap-sm); }
 .s-title { display: flex; flex-direction: column; gap: 2px; }
 .s-name { font-size: 15px; font-weight: 600; color: var(--qq-text); font-family: var(--qq-font-mono); }

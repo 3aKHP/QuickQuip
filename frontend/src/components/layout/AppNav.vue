@@ -92,9 +92,14 @@
       <UiIcon name="Bot" :size="20" />
       <span>{{ activeSection?.label || 'QuickQuip' }}</span>
     </span>
-    <button class="mobile-bar__theme-btn" :aria-label="themeLabel" @click="$emit('toggleTheme')">
-      <UiIcon :name="themeIcon" :size="18" />
-    </button>
+    <div class="mobile-bar__actions">
+      <button class="mobile-bar__theme-btn" :aria-label="themeLabel" @click="$emit('toggleTheme')">
+        <UiIcon :name="themeIcon" :size="18" />
+      </button>
+      <button class="mobile-bar__theme-btn" title="退出" :disabled="logoutDisabled" @click="$emit('logout')">
+        <UiIcon name="LogOut" :size="18" />
+      </button>
+    </div>
   </div>
 
   <Transition name="slide-up">
@@ -412,6 +417,7 @@ watch(activeSectionKey, (sectionKey) => {
     justify-content: space-between;
     height: 52px;
     padding: 0 var(--qq-gap-md);
+    padding-top: env(safe-area-inset-top, 0px);
     background: var(--qq-surface);
     border-bottom: 1px solid var(--qq-border);
     color: var(--qq-text);
@@ -431,6 +437,17 @@ watch(activeSectionKey, (sectionKey) => {
     background: var(--qq-surface-strong);
     color: var(--qq-text);
     cursor: pointer;
+  }
+
+  .mobile-bar__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--qq-gap-xs);
+  }
+
+  .mobile-bar__theme-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .mobile-bar__brand {
@@ -465,6 +482,7 @@ watch(activeSectionKey, (sectionKey) => {
     gap: var(--qq-gap-sm);
     height: 54px;
     padding: 0 var(--qq-gap-md);
+    padding-top: env(safe-area-inset-top, 0px);
     border-bottom: 1px solid var(--qq-border);
     color: var(--qq-text);
     font-weight: 700;
@@ -539,6 +557,7 @@ watch(activeSectionKey, (sectionKey) => {
 
   .drawer__footer {
     padding: var(--qq-gap-sm);
+    padding-bottom: calc(var(--qq-gap-sm) + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--qq-border);
   }
 

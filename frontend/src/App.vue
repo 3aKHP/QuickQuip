@@ -194,6 +194,13 @@ onBeforeUnmount(() => {
 
   .content {
     padding: var(--qq-gap-md);
+    padding-bottom: calc(var(--qq-gap-lg) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .toast {
+    bottom: auto;
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    transform: translateX(-50%);
   }
 }
 </style>

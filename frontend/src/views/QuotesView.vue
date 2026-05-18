@@ -33,7 +33,7 @@
         <UiLoading v-if="loading && !entries.length" />
         <UiEmpty v-else-if="!entries.length" icon="FileText" :title="keyword ? '无匹配语录' : '暂无语录'" />
 
-        <table v-else class="data-table">
+        <div v-else class="table-scroll"><table class="data-table">
           <thead>
             <tr>
               <th class="num">#</th>
@@ -56,7 +56,7 @@
               </td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
 
         <div v-if="hasMore && entries.length" class="load-more">
           <UiButton :loading="loading" @click="loadMore">加载更多</UiButton>
