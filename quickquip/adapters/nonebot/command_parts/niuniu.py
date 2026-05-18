@@ -23,8 +23,6 @@ def _reap_idle_rpm() -> None:
     if now - _last_reap < _RPM_REAP_EVERY:
         return
     _last_reap = now
-    cfg = niuniu_store.config
-    threshold = cfg.rpm_window_seconds * 2
     for bucket in (_glue_rpm, _fence_rpm):
         stale = [
             gid
