@@ -192,7 +192,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         self._mcp_lock = asyncio.Lock()
         self._mcp_startup_task: asyncio.Task[None] | None = None
         self._session_presets: dict[str, str] = {}
-        self._auto_memory_turns: dict[str, int] = {}
+        self._auto_memory_turns: OrderedDict[str, int] = OrderedDict()
         self._auto_memory_successes = 0
         self._auto_memory_failures = 0
         self._init_error: str | None = None
@@ -516,8 +516,10 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
 
             # ── batch trigger ───────────────────────────────────────
             turn_count = self._auto_memory_turns.get(scope_key, 0) + 1
-            if len(self._auto_memory_turns) >= _AUTO_MEMORY_TURN_CACHE_MAX:
-                self._auto_memory_turns.clear()
+            if scope_key in self._auto_memory_turns:
+                self._auto_memory_turns.move_to_end(scope_key)
+            elif len(self._auto_memory_turns) >= _AUTO_MEMORY_TURN_CACHE_MAX:
+                self._auto_memory_turns.popitem(last=False)
             self._auto_memory_turns[scope_key] = turn_count
             if turn_count % _AUTO_MEMORY_EXTRACT_EVERY_N != 0:
                 return

@@ -70,6 +70,19 @@ class LLMStore:
             logger.error("LLMStore 数据库初始化失败 (%s)：%s", self.path, exc)
             self._unavailable = True
 
+    @staticmethod
+    def _safe_load_tags(tags_json: str | None) -> list[str]:
+        if not tags_json:
+            return []
+        try:
+            tags = json.loads(tags_json)
+            if isinstance(tags, list):
+                return tags
+            return []
+        except json.JSONDecodeError:
+            logger.warning("记忆库中存在损坏的 tags_json，已回退为空列表")
+            return []
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
@@ -432,7 +445,7 @@ class LLMStore:
                 "scope": row["scope"],
                 "user_id": row["user_id"],
                 "content": row["content"],
-                "tags": json.loads(row["tags_json"]),
+                "tags": self._safe_load_tags(row["tags_json"]),
                 "source": row["source"],
                 "confidence": row["confidence"],
                 "created_at": row["created_at"],
@@ -481,7 +494,7 @@ class LLMStore:
                 "scope": row["scope"],
                 "user_id": row["user_id"],
                 "content": row["content"],
-                "tags": json.loads(row["tags_json"]),
+                "tags": self._safe_load_tags(row["tags_json"]),
                 "source": row["source"],
                 "confidence": row["confidence"],
                 "created_at": row["created_at"],

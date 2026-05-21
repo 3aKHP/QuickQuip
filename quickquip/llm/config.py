@@ -625,6 +625,24 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
     if bad_providers and not config.providers:
         errors.append(f"全部 {len(bad_providers)} 个 provider 均被跳过：{', '.join(bad_providers)}")
 
+    # -- cross-reference validation (non-fatal, augments errors) --
+    if config.image_preprocessing.enabled and config.image_preprocessing.provider_id:
+        if config.image_preprocessing.provider_id not in config.providers:
+            errors.append(
+                f"image_preprocessing.provider_id {config.image_preprocessing.provider_id!r} 不存在"
+            )
+
+    for cascade_name, cascade_list in [
+        ("daily_summary.model_cascade", config.daily_summary.model_cascade),
+        ("daily_briefing.model_cascade", config.daily_briefing.model_cascade),
+    ]:
+        for entry in cascade_list:
+            provider_id = entry.split("/", 1)[0].strip()
+            if provider_id == "@default":
+                continue
+            if provider_id not in config.providers:
+                errors.append(f"{cascade_name} 引用了不存在的 provider {provider_id!r}")
+
     if errors:
         config.load_error = "; ".join(errors)
         logger.warning("LLM 配置存在问题：%s", config.load_error)

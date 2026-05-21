@@ -115,4 +115,4 @@ def put_config(key: str, body: ConfigBody, request: Request):
         target_type="config",
         target_id=key,
     )
-    return {"ok": True}
+    return {"ok": True, "reload_required": True}
