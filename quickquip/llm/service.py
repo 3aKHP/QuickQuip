@@ -8,6 +8,7 @@ layer now re-exports from here via ``plugins/llm_runtime.py``.
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import replace
 import logging
 from pathlib import Path
@@ -116,6 +117,7 @@ _AUTO_MEMORY_CONTEXT_TURNS = 10
 _AUTO_MEMORY_DEFAULT_CONFIDENCE = 0.5
 _AUTO_MEMORY_DEDUP_THRESHOLD = 0.7
 _AUTO_MEMORY_TURN_CACHE_MAX = 2048
+_GROUP_CACHE_MAX = 512
 
 _AUTO_MEMORY_DEFAULT_PROMPT = (
     "你是一个保守的群聊记忆助手。你的任务是：只有当对话中**明确出现了**关于发言者的稳定长期事实时，才记录下来。\n"
@@ -227,8 +229,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             if not self._init_error:
                 self._init_error = f"身份资料加载失败：{exc}"
 
-        self._group_vocabs: dict[str, VocabIndex] = {}
-        self._group_identities: dict[str, IdentityIndex] = {}
+        self._group_vocabs: OrderedDict[str, VocabIndex] = OrderedDict()
+        self._group_identities: OrderedDict[str, IdentityIndex] = OrderedDict()
 
     def _resolve_vocab(self, group_id: str) -> VocabIndex:
         if not group_id:
@@ -243,6 +245,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             merged = self.vocab.merge(group_vocab)
         else:
             merged = self.vocab
+        if len(self._group_vocabs) >= _GROUP_CACHE_MAX:
+            self._group_vocabs.popitem(last=False)
         self._group_vocabs[cache_key] = merged
         return merged
 
@@ -259,6 +263,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             merged = self.identities.merge(group_identities)
         else:
             merged = self.identities
+        if len(self._group_identities) >= _GROUP_CACHE_MAX:
+            self._group_identities.popitem(last=False)
         self._group_identities[cache_key] = merged
         return merged
 

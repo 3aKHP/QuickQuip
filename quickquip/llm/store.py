@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import json
 import re
 import sqlite3
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
@@ -60,7 +63,12 @@ class LLMStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self._unavailable = False
+        try:
+            self._ensure_schema()
+        except sqlite3.Error as exc:
+            logger.error("LLMStore 数据库初始化失败 (%s)：%s", self.path, exc)
+            self._unavailable = True
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -153,6 +161,8 @@ class LLMStore:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN raw_content TEXT")
 
     def get_group_settings(self, group_id: int | str) -> GroupSettingsOverride:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -178,6 +188,8 @@ class LLMStore:
         )
 
     def update_group_settings(self, group_id: int | str, **fields: object) -> None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         group_key = str(group_id)
         allowed_fields = {
             "enabled",
@@ -230,6 +242,8 @@ class LLMStore:
         message_id: str | None = None,
         raw_content: str = "",
     ) -> None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             conn.execute(
                 """
@@ -254,6 +268,8 @@ class LLMStore:
         group_id: int | str,
         limit: int,
     ) -> list[dict[str, str]]:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -278,6 +294,8 @@ class LLMStore:
         ]
 
     def prune_conversation_messages(self, group_id: int | str, keep_last: int) -> None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             conn.execute(
                 """
@@ -294,6 +312,8 @@ class LLMStore:
             )
 
     def count_conversation_messages(self, group_id: int | str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -306,6 +326,8 @@ class LLMStore:
         return int(row["total"]) if row is not None else 0
 
     def clear_conversation_messages(self, group_id: int | str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -317,6 +339,8 @@ class LLMStore:
             return int(cursor.rowcount)
 
     def delete_conversation_message_by_message_id(self, group_id: int | str, message_id: str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -328,6 +352,8 @@ class LLMStore:
             return int(cursor.rowcount)
 
     def update_last_assistant_message_id(self, group_id: int | str, message_id: str) -> None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -355,6 +381,8 @@ class LLMStore:
         source: str = "manual",
         confidence: float = 1.0,
     ) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -382,6 +410,8 @@ class LLMStore:
         limit: int = 10,
         keyword: str | None = None,
     ) -> list[dict[str, object]]:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         params: list[object] = [str(group_id)]
         sql = """
             SELECT id, scope, user_id, content, tags_json, source, confidence, created_at, updated_at
@@ -420,6 +450,8 @@ class LLMStore:
         limit: int,
         scope: str | None = None,
     ) -> list[dict[str, object]]:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         tokens = _build_query_tokens(query)
         scope_clause: str
         params: list[object]
@@ -459,6 +491,8 @@ class LLMStore:
         ]
 
     def delete_memories(self, group_id: int | str, keyword: str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -470,6 +504,8 @@ class LLMStore:
             return int(cursor.rowcount)
 
     def prune_memories(self, group_id: int | str, keep_last: int) -> None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             conn.execute(
                 """
@@ -486,6 +522,8 @@ class LLMStore:
             )
 
     def clear_memories(self, group_id: int | str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -497,6 +535,8 @@ class LLMStore:
             return int(cursor.rowcount)
 
     def count_memories(self, group_id: int | str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -511,6 +551,8 @@ class LLMStore:
     # ── session archives ──
 
     def get_next_archive_number(self, user_id: str) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT MAX(archive_number) AS mx FROM session_archives WHERE user_id = ?",
@@ -529,6 +571,8 @@ class LLMStore:
         message_count: int = 0,
         created_at: str = "",
     ) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -548,6 +592,8 @@ class LLMStore:
             return int(cursor.lastrowid)
 
     def archive_conversation_messages(self, user_id: str, archive_number: int) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         private_key = f"private:{user_id}"
         archive_key = f"archive:{user_id}:{archive_number}"
         with self._connect() as conn:
@@ -558,6 +604,8 @@ class LLMStore:
             return int(cursor.rowcount)
 
     def restore_conversation_messages(self, user_id: str, archive_number: int) -> int:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         private_key = f"private:{user_id}"
         archive_key = f"archive:{user_id}:{archive_number}"
         with self._connect() as conn:
@@ -568,6 +616,8 @@ class LLMStore:
             return int(cursor.rowcount)
 
     def get_session_archive(self, user_id: str, archive_number: int) -> dict | None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -582,6 +632,8 @@ class LLMStore:
         return {k: row[k] for k in row.keys()}
 
     def list_session_archives(self, user_id: str, *, limit: int = 20) -> list[dict]:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -596,6 +648,8 @@ class LLMStore:
         return [{k: row[k] for k in row.keys()} for row in rows]
 
     def get_latest_archive_number(self, user_id: str) -> int | None:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT MAX(archive_number) AS mx FROM session_archives WHERE user_id = ?",
@@ -606,6 +660,8 @@ class LLMStore:
         return int(row["mx"])
 
     def delete_session_archive(self, user_id: str, archive_number: int) -> bool:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         archive_key = f"archive:{user_id}:{archive_number}"
         with self._connect() as conn:
             conn.execute(
@@ -619,6 +675,8 @@ class LLMStore:
             return int(cursor.rowcount) > 0
 
     def get_earliest_message_time(self, group_id: str) -> str:
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT MIN(created_at) AS earliest FROM conversation_messages WHERE group_id = ?",

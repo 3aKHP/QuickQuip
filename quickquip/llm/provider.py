@@ -9,11 +9,12 @@ import json
 import logging
 import os
 import re
+import time as _time
 from pathlib import Path
 from typing import Any
 from urllib import error, parse, request
 
-from quickquip.common.paths import LLM_TRACE_JSONL_PATH
+from quickquip.common.paths import LOGS_DIR
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
 
@@ -31,8 +32,10 @@ except ImportError:
 # Set via LLM_TRACE_FLAG_FILE env var. When the file exists, full payloads
 # and raw responses are logged at DEBUG level.
 _TRACE_FLAG_FILE: str = os.getenv("LLM_TRACE_FLAG_FILE", "")
-_TRACE_STORE_PATH: Path = LLM_TRACE_JSONL_PATH
+_TRACE_DIR: Path = LOGS_DIR
 _TRACE_MEMORY_LIMIT = 200
+_TRACE_RETENTION_DAYS = 14
+_LAST_TRACE_CLEANUP_DATE: str | None = None
 
 
 def _trace_active() -> bool:
@@ -40,6 +43,32 @@ def _trace_active() -> bool:
 
 
 _TRACE_LOG_LINES: deque[dict[str, object]] = deque(maxlen=200)
+
+
+def _daily_trace_path() -> Path:
+    return _TRACE_DIR / f"quickquip_trace_{datetime.date.today().isoformat()}.jsonl"
+
+
+def _cleanup_old_traces() -> None:
+    """Remove trace files older than _TRACE_RETENTION_DAYS, throttled to once per day."""
+    global _LAST_TRACE_CLEANUP_DATE
+    today = datetime.date.today().isoformat()
+    if _LAST_TRACE_CLEANUP_DATE == today:
+        return
+    _LAST_TRACE_CLEANUP_DATE = today
+
+    cutoff = _time.time() - _TRACE_RETENTION_DAYS * 86400
+    pattern = "quickquip_trace_????-??-??.jsonl"
+    try:
+        for p in sorted(_TRACE_DIR.glob(pattern)):
+            try:
+                if p.stat().st_mtime < cutoff:
+                    p.unlink()
+                    logger.debug("清理过期 trace 文件：%s", p.name)
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def _record_trace(direction: str, provider_id: str, stream: bool, payload: str) -> None:
@@ -51,52 +80,65 @@ def _record_trace(direction: str, provider_id: str, stream: bool, payload: str) 
         "payload": payload,
     }
     _TRACE_LOG_LINES.append(entry)
+    trace_path = _daily_trace_path()
     try:
-        _TRACE_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _TRACE_STORE_PATH.open("a", encoding="utf-8") as f:
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError:
-        logger.debug("failed to append trace entry to %s", _TRACE_STORE_PATH)
+        logger.debug("failed to append trace entry to %s", trace_path)
+    _cleanup_old_traces()
 
 
 def _load_trace_entries(limit: int | None = None) -> list[dict[str, object]]:
     if limit is None or limit <= 0:
         limit = _TRACE_MEMORY_LIMIT
-    path = _TRACE_STORE_PATH
-    if not path.exists():
-        items = list(_TRACE_LOG_LINES)
-        return items[-limit:]
 
+    pattern = "quickquip_trace_????-??-??.jsonl"
     items: deque[dict[str, object]] = deque(maxlen=limit)
+    files_read = 0
     try:
-        with path.open("r", encoding="utf-8") as f:
-            for raw_line in f:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(entry, dict):
-                    items.append(entry)
+        for p in sorted(_TRACE_DIR.glob(pattern)):
+            try:
+                with p.open("r", encoding="utf-8") as f:
+                    for raw_line in f:
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(entry, dict):
+                            items.append(entry)
+                files_read += 1
+            except OSError:
+                continue
     except OSError:
-        fallback = list(_TRACE_LOG_LINES)
-        return fallback[-limit:]
+        pass
+
+    if files_read == 0:
+        items = deque(_TRACE_LOG_LINES, maxlen=limit)
     return list(items)
 
 
 def _count_trace_entries() -> int:
-    path = _TRACE_STORE_PATH
-    if not path.exists():
-        return len(_TRACE_LOG_LINES)
+    pattern = "quickquip_trace_????-??-??.jsonl"
     count = 0
+    files_read = 0
     try:
-        with path.open("r", encoding="utf-8") as f:
-            for raw_line in f:
-                if raw_line.strip():
-                    count += 1
+        for p in sorted(_TRACE_DIR.glob(pattern)):
+            try:
+                with p.open("r", encoding="utf-8") as f:
+                    for raw_line in f:
+                        if raw_line.strip():
+                            count += 1
+                files_read += 1
+            except OSError:
+                continue
     except OSError:
+        return len(_TRACE_LOG_LINES)
+    if files_read == 0:
         return len(_TRACE_LOG_LINES)
     return count
 
@@ -108,11 +150,16 @@ def get_trace_entries(n: int = 50) -> list[dict[str, object]]:
 def clear_trace_entries() -> int:
     count = _count_trace_entries()
     _TRACE_LOG_LINES.clear()
+    pattern = "quickquip_trace_????-??-??.jsonl"
     try:
-        _TRACE_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _TRACE_STORE_PATH.write_text("", encoding="utf-8")
+        _TRACE_DIR.mkdir(parents=True, exist_ok=True)
+        for p in sorted(_TRACE_DIR.glob(pattern)):
+            try:
+                p.write_text("", encoding="utf-8")
+            except OSError:
+                pass
     except OSError:
-        logger.debug("failed to clear trace store at %s", _TRACE_STORE_PATH)
+        pass
     return count
 
 

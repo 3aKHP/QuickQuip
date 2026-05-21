@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 import ast
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -118,7 +121,13 @@ class IdentityIndex:
         current_list_key: str | None = None
         entries: list[IdentityEntry] = []
 
-        for raw_line in identity_path.read_text(encoding="utf-8").splitlines():
+        try:
+            raw_text = identity_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("无法读取身份资料文件 %s：%s", identity_path, exc)
+            return cls()
+
+        for raw_line in raw_text.splitlines():
             cleaned = _strip_inline_comment(raw_line)
             if not cleaned.strip():
                 continue
