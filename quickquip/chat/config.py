@@ -1,7 +1,10 @@
 from datetime import time
+import logging
 import tomllib
 
 from quickquip.common.paths import CHAT_RULES_TOML_PATH
+
+logger = logging.getLogger(__name__)
 
 BEIJING_TIMEZONE = "Asia/Shanghai"
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
@@ -39,39 +42,48 @@ CONTEXT_REPLY_RULES: list[dict] = []
 CHAIN_GAME_CONFIGS: list[dict] = []
 
 
-def reload_chat_rules() -> None:
-    """Reload chat_rules.toml in place, preserving existing module-level list/dict identities.
+def reload_chat_rules() -> bool:
+    """Reload chat_rules.toml, replacing module-level containers atomically.
 
-    Downstream modules hold references to these containers (e.g. pre-compiled regex lists,
-    rule_switch name sets, rate limiter configs), so we mutate in place rather than rebind.
-    Built-in rate limit rules are re-seeded before the TOML overlay so repeated reloads
-    stay idempotent even if the TOML no longer mentions a previously defined rule.
+    Returns True on success, False if the file is missing / unparseable (previous
+    state is preserved in that case).
 
-    If the TOML file is missing the previous state is fully cleared (back to built-ins
-    only); if it exists but fails to parse, ``tomllib.TOMLDecodeError`` propagates and
-    existing rule state is left untouched.
+    The parse-then-replace ordering ensures a broken config never leaves the
+    system with an empty rule set.
     """
     path = CHAT_RULES_TOML_PATH
-    data: dict = {}
+    raw_data: dict = {}
     if path.exists():
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        try:
+            with open(path, "rb") as f:
+                raw_data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            logger.warning("chat_rules.toml 语法错误，保留旧规则：%s", exc)
+            return False
 
+    # Parse new state into temporaries before touching module-level containers.
+    new_rate_limits = dict(_BUILTIN_RATE_LIMIT_RULES)
+    new_rate_limits.update(raw_data.get("rate_limit_rules", {}))
+    new_text_rules = list(raw_data.get("rules", []))
+    new_context_rules = list(raw_data.get("context_rules", []))
+    new_chain_games = list(raw_data.get("chain_games", []))
+
+    # Atomic replacement.
     RATE_LIMIT_RULES.clear()
-    RATE_LIMIT_RULES.update(_BUILTIN_RATE_LIMIT_RULES)
-    RATE_LIMIT_RULES.update(data.get("rate_limit_rules", {}))
-
+    RATE_LIMIT_RULES.update(new_rate_limits)
     TEXT_REPLY_RULES.clear()
-    TEXT_REPLY_RULES.extend(data.get("rules", []))
-
+    TEXT_REPLY_RULES.extend(new_text_rules)
     CONTEXT_REPLY_RULES.clear()
-    CONTEXT_REPLY_RULES.extend(data.get("context_rules", []))
-
+    CONTEXT_REPLY_RULES.extend(new_context_rules)
     CHAIN_GAME_CONFIGS.clear()
-    CHAIN_GAME_CONFIGS.extend(data.get("chain_games", []))
+    CHAIN_GAME_CONFIGS.extend(new_chain_games)
+    return True
 
 
-reload_chat_rules()
+try:
+    reload_chat_rules()
+except Exception:
+    logger.exception("chat_rules 初始加载失败，使用内置默认值")
 
 SCHEDULED_MESSAGES: list[dict] = []
 # Example entry (uncomment and fill in to enable):

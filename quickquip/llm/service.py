@@ -177,7 +177,6 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         image_preprocessor: ImagePreprocessor | None = None,
     ):
         self.config_path = Path(config_path)
-        self.store = LLMStore(db_path)
         self.vocab_path = Path(vocab_path)
         self.identity_path = Path(identity_path)
         self.tool_registry = ToolRegistry()
@@ -194,12 +193,40 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         self._auto_memory_turns: dict[str, int] = {}
         self._auto_memory_successes = 0
         self._auto_memory_failures = 0
+        self._init_error: str | None = None
+
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
+
+        try:
+            self.store = LLMStore(db_path)
+        except Exception as exc:
+            logger.exception("LLMStore 初始化失败")
+            self.store = None  # type: ignore[assignment]
+            self._init_error = f"数据库初始化失败：{exc}"
+
         if self.image_preprocessor is None:
-            self.rebuild_image_preprocessor()
-        self.vocab = VocabIndex.from_file(self.vocab_path)
-        self.identities = IdentityIndex.from_file(self.identity_path)
+            try:
+                self.rebuild_image_preprocessor()
+            except Exception:
+                logger.exception("image_preprocessor 初始化失败")
+
+        try:
+            self.vocab = VocabIndex.from_file(self.vocab_path)
+        except Exception as exc:
+            logger.exception("vocab 加载失败")
+            self.vocab = VocabIndex()
+            if not self._init_error:
+                self._init_error = f"词表加载失败：{exc}"
+
+        try:
+            self.identities = IdentityIndex.from_file(self.identity_path)
+        except Exception as exc:
+            logger.exception("identities 加载失败")
+            self.identities = IdentityIndex()
+            if not self._init_error:
+                self._init_error = f"身份资料加载失败：{exc}"
+
         self._group_vocabs: dict[str, VocabIndex] = {}
         self._group_identities: dict[str, IdentityIndex] = {}
 
@@ -1205,4 +1232,26 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         )
 
 
-llm_service = LLMService()
+_llm_service: LLMService | None = None
+_init_attempted: bool = False
+
+
+def get_llm_service() -> LLMService:
+    """Return the singleton LLMService, lazily initialising it on first call.
+
+    Unlike the old module-level ``llm_service = LLMService()`` pattern, this
+    function does not run any initialisation at import time.  If
+    ``LLMService.__init__`` fails, the exception is logged and a degraded
+    service object (with ``_init_error`` set) is returned rather than
+    crashing the process.
+    """
+    global _llm_service, _init_attempted
+    if not _init_attempted:
+        _init_attempted = True
+        try:
+            _llm_service = LLMService()
+        except Exception as exc:
+            logger.critical("LLMService 初始化失败，创建降级实例：%s", exc)
+            _llm_service = LLMService.__new__(LLMService)
+            _llm_service._init_error = str(exc)  # type: ignore[attr-defined]
+    return _llm_service  # type: ignore[return-value]

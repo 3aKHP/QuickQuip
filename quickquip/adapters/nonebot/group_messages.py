@@ -5,8 +5,9 @@ from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.app.message_pipeline import (
+    _ensure_llm_bindings,
+    get_llm_service,
     get_sender_name,
-    llm_service,
     message_deduper,
     offline_message_store,
     rate_limiter,
@@ -34,20 +35,23 @@ def register_message_matcher(on_message, Message, MessageSegment):
         if _is_self_message(event):
             return
 
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+
         message = event.get_message()
         text = str(message).strip()
         rendered_message = render_message_for_llm(
             message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
             include_image_placeholder=True,
         )
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
         message_id = str(getattr(event, "message_id", "") or "")
-        identity = llm_service.identities.resolve_user(user_id, sender_name)
+        identity = svc.identities.resolve_user(user_id, sender_name)
         canonical_name = identity.canonical_name
 
         if message_deduper.is_duplicate(group_id, message_id or None):
@@ -73,20 +77,20 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
         trigger_context = recent_messages.list_recent(group_id, limit=20)
 
-        llm_settings = llm_service.get_group_settings(group_id)
+        llm_settings = svc.get_group_settings(group_id)
         forward_text, forward_image_urls = await extract_forward_content(
             bot=bot,
             message=message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
             reply=getattr(event, "reply", None),
         )
         llm_input = extract_llm_input(
             message,
             event.self_id,
             llm_settings,
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
             bot_self_ids={event.self_id},
             reply=getattr(event, "reply", None),
             is_to_me=bool(getattr(event, "to_me", False)),
@@ -98,7 +102,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
             if not rate_limiter.allow("llm_chat", user_id):
                 return
-            result = await llm_service.generate_reply(
+            result = await svc.generate_reply(
                 group_id=group_id,
                 user_id=user_id,
                 sender_name=sender_name,
@@ -120,7 +124,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
             if sent_msg_id:
                 scope_key = str(group_id)
-                llm_service.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+                svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
             return
 
         result = await resolve_reply(

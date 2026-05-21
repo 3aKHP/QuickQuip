@@ -5,8 +5,9 @@ from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.app.message_pipeline import (
+    _ensure_llm_bindings,
+    get_llm_service,
     get_sender_name,
-    llm_service,
     message_deduper,
     rate_limiter,
     recent_messages,
@@ -28,25 +29,28 @@ def register_private_message_matcher(on_message):
         if _is_self_message(event):
             return
 
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+
         message = event.get_message()
         rendered_message = render_message_for_llm(
             message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
             include_image_placeholder=True,
         )
         sender_name = get_sender_name(event)
         user_id = event.user_id
-        scope_key = llm_service.build_chat_scope_key(user_id, chat_type="private")
+        scope_key = svc.build_chat_scope_key(user_id, chat_type="private")
         message_id = str(getattr(event, "message_id", "") or "")
-        identity = llm_service.identities.resolve_user(user_id, sender_name)
+        identity = svc.identities.resolve_user(user_id, sender_name)
         canonical_name = identity.canonical_name
 
         if message_deduper.is_duplicate(scope_key, message_id or None):
             return
 
-        llm_settings = llm_service.get_chat_settings(user_id, chat_type="private")
+        llm_settings = svc.get_chat_settings(user_id, chat_type="private")
         if not llm_settings.enabled:
             return
 
@@ -59,14 +63,14 @@ def register_private_message_matcher(on_message):
             message=message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
             reply=getattr(event, "reply", None),
         )
         llm_input = extract_private_llm_input(
             message,
             event.self_id,
             llm_settings,
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
             bot_self_ids={event.self_id},
             reply=getattr(event, "reply", None),
             forward_text=forward_text,
@@ -80,7 +84,7 @@ def register_private_message_matcher(on_message):
         if not rate_limiter.allow("llm_chat", user_id):
             return
 
-        result = await llm_service.generate_private_reply(
+        result = await svc.generate_private_reply(
             user_id=user_id,
             sender_name=sender_name,
             prompt=llm_input.prompt,
@@ -99,7 +103,7 @@ def register_private_message_matcher(on_message):
         resp = await matcher.send(result["reply"])
         sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
         if sent_msg_id:
-            llm_service.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+            svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
         return
 
     return matcher

@@ -5,7 +5,7 @@ import os
 
 from quickquip.app.message_pipeline import (
     close_persistent_stores,
-    llm_service,
+    get_llm_service,
     save_all,
     RULE_SWITCH_PATH,
     rule_switch,
@@ -58,15 +58,17 @@ def _reload_if_changed() -> None:
 def register_lifecycle(driver) -> None:
     @driver.on_startup
     async def _startup_llm_runtime():
-        await llm_service.startup(background=True)
+        svc = get_llm_service()
+        await svc.startup(background=True)
         await tieba_service.startup()
         _init_mtimes()
 
     @driver.on_shutdown
     async def _save_on_shutdown():
+        svc = get_llm_service()
         try:
             await tieba_service.shutdown()
-            await llm_service.shutdown()
+            await svc.shutdown()
             save_all()
         finally:
             close_persistent_stores()

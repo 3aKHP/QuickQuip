@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _is_private_chat, _strip_command_name
-from quickquip.app.message_pipeline import get_sender_name, llm_service, offline_message_store
+from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, get_sender_name, offline_message_store
 
 
 def register_memory_commands(on_command, Message, MessageSegment) -> None:
@@ -14,17 +14,21 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         content = _strip_command_name(str(event.get_message()).strip(), "remember")
         if not content:
             await remember_cmd.finish("用法：/remember <要保存的记忆>")
+        _ensure_llm_bindings()
+        svc = get_llm_service()
         chat_type = _chat_type(event)
         chat_id = _chat_id(event)
-        memory_id = llm_service.remember_memory(chat_id, content, chat_type=chat_type)
+        memory_id = svc.remember_memory(chat_id, content, chat_type=chat_type)
         await remember_cmd.finish(f"已写入{_chat_label(event)}记忆 #{memory_id}")
 
     memories_cmd = on_command("memories", priority=10, block=True)
 
     @memories_cmd.handle()
     async def _(event):
+        _ensure_llm_bindings()
+        svc = get_llm_service()
         keyword = _strip_command_name(str(event.get_message()).strip(), "memories")
-        reply = llm_service.format_memories(_chat_id(event), keyword=keyword or None, chat_type=_chat_type(event))
+        reply = svc.format_memories(_chat_id(event), keyword=keyword or None, chat_type=_chat_type(event))
         await memories_cmd.finish(reply)
 
     forget_cmd = on_command("forget", priority=10, block=True)
@@ -36,7 +40,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         keyword = _strip_command_name(str(event.get_message()).strip(), "forget")
         if not keyword:
             await forget_cmd.finish("用法：/forget <关键词>")
-        deleted = llm_service.forget_memories(_chat_id(event), keyword, chat_type=_chat_type(event))
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+        deleted = svc.forget_memories(_chat_id(event), keyword, chat_type=_chat_type(event))
         await forget_cmd.finish(f"已删除{_chat_label(event)}中的 {deleted} 条记忆")
 
     forget_all_cmd = on_command("forget_all", priority=10, block=True)
@@ -45,7 +51,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
     async def _(event):
         if not _allow_scope_management(event):
             await forget_all_cmd.finish("仅管理员可执行此操作")
-        deleted = llm_service.clear_memories(_chat_id(event), chat_type=_chat_type(event))
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+        deleted = svc.clear_memories(_chat_id(event), chat_type=_chat_type(event))
         await forget_all_cmd.finish(f"已清空{_chat_label(event)}全部长期记忆（共 {deleted} 条）")
 
     tell_cmd = on_command("tell", priority=10, block=True)
