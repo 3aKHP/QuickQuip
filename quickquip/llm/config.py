@@ -637,7 +637,7 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
         ("daily_briefing.model_cascade", config.daily_briefing.model_cascade),
     ]:
         for entry in cascade_list:
-            provider_id = entry.split(":", 1)[0].strip()
+            provider_id = entry.split("/", 1)[0].strip()
             if provider_id == "@default":
                 continue
             if provider_id not in config.providers:
