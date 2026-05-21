@@ -269,6 +269,17 @@ def sanitize_gemini_schema(schema: Any) -> Any:
 class BaseProviderClient:
     def __init__(self, config: ProviderConfig):
         self.config = config
+        proxy = config.proxy
+        if proxy:
+            proxy_handler = request.ProxyHandler({"http": proxy, "https": proxy})
+            self._opener: request.OpenerDirector | None = request.build_opener(proxy_handler)
+        else:
+            self._opener = None
+
+    def _urlopen(self, http_request: request.Request, timeout: float):
+        if self._opener is not None:
+            return self._opener.open(http_request, timeout=timeout)
+        return request.urlopen(http_request, timeout=timeout)
 
     def _get_api_key(self) -> str:
         api_key = os.getenv(self.config.api_key_env, "").strip()
@@ -286,7 +297,7 @@ class BaseProviderClient:
 
         def _fetch() -> LLMImageInput:
             try:
-                with request.urlopen(http_request, timeout=self.config.timeout_seconds) as response:
+                with self._urlopen(http_request, timeout=self.config.timeout_seconds) as response:
                     media_type = response.headers.get_content_type() or "image/jpeg"
                     if not media_type.startswith("image/"):
                         raise LLMProviderError(f"图片 URL 不是受支持的图片类型：{image_url}")
@@ -362,7 +373,7 @@ class BaseProviderClient:
 
         def _send() -> dict[str, Any]:
             try:
-                with request.urlopen(http_request, timeout=self.config.timeout_seconds) as response:
+                with self._urlopen(http_request, timeout=self.config.timeout_seconds) as response:
                     raw = response.read().decode("utf-8")
                     try:
                         return json.loads(raw)
@@ -399,7 +410,7 @@ class BaseProviderClient:
 
         def _stream() -> list[dict[str, Any]]:
             try:
-                response = request.urlopen(http_request, timeout=self.config.timeout_seconds)
+                response = self._urlopen(http_request, timeout=self.config.timeout_seconds)
             except error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 raise LLMProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
