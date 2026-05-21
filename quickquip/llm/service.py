@@ -1253,5 +1253,9 @@ def get_llm_service() -> LLMService:
         except Exception as exc:
             logger.critical("LLMService 初始化失败，创建降级实例：%s", exc)
             _llm_service = LLMService.__new__(LLMService)
-            _llm_service._init_error = str(exc)  # type: ignore[attr-defined]
+            _llm_service._init_error = str(exc)
+            _llm_service.config = LLMConfig(load_error=str(exc))  # type: ignore[attr-defined]
+            _llm_service.vocab = VocabIndex()  # type: ignore[attr-defined]
+            _llm_service.identities = IdentityIndex()  # type: ignore[attr-defined]
+            _llm_service.store = None  # type: ignore[attr-defined]
     return _llm_service  # type: ignore[return-value]

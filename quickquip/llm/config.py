@@ -281,15 +281,13 @@ def _read_providers(raw_providers: list[dict[str, Any]], *, style_profiles: dict
         except Exception:
             logger.exception("跳过配置无效的 provider %s", provider_id)
             continue
-        if provider is None:
-            continue
         providers[provider_id] = provider
     return providers
 
 
 def _parse_single_provider(
     entry: dict[str, Any], provider_id: str, style_profiles: dict[str, str]
-) -> ProviderConfig | None:
+) -> ProviderConfig:
     raw_headers = as_dict(entry.get("headers"))
 
     style_text = str(entry.get("style_overrides", "")).strip()
@@ -551,7 +549,11 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         source_path=config_path,
     )
 
-    _validate_and_fix_config(config)
+    try:
+        _validate_and_fix_config(config)
+    except Exception:
+        logger.exception("配置校验阶段异常")
+        config.load_error = "配置校验时发生内部错误"
     return config
 
 
@@ -612,6 +614,13 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
 
     for pid in bad_providers:
         del config.providers[pid]
+
+    # Re-validate default_provider in case it was among the deleted ones.
+    if config.runtime.default_provider not in config.providers:
+        if config.providers:
+            config.runtime.default_provider = next(iter(config.providers))
+        else:
+            config.runtime.default_provider = None
 
     if bad_providers and not config.providers:
         errors.append(f"全部 {len(bad_providers)} 个 provider 均被跳过：{', '.join(bad_providers)}")
