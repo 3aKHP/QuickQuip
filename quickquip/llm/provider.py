@@ -273,6 +273,7 @@ class BaseProviderClient:
         if proxy:
             proxy_handler = request.ProxyHandler({"http": proxy, "https": proxy})
             self._opener: request.OpenerDirector | None = request.build_opener(proxy_handler)
+            logger.info("provider %s 启用代理：%s", config.id, proxy)
         else:
             self._opener = None
 
