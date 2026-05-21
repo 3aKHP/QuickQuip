@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 from typing import Any
 import tomllib
 
 from quickquip.common.config_utils import as_bool, as_dict, expand_env_value
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -220,17 +223,24 @@ def _load_personas_from_dir(personas_dir: Path) -> list[dict[str, Any]]:
     shared_style = ""
     shared_path = personas_dir / "_shared.toml"
     if shared_path.exists():
-        with shared_path.open("rb") as fh:
-            shared_data = tomllib.load(fh)
-        shared_system = str(shared_data.get("shared_system_prompt", "")).strip()
-        shared_style = str(shared_data.get("shared_style_prompt", "")).strip()
+        try:
+            with shared_path.open("rb") as fh:
+                shared_data = tomllib.load(fh)
+            shared_system = str(shared_data.get("shared_system_prompt", "")).strip()
+            shared_style = str(shared_data.get("shared_style_prompt", "")).strip()
+        except tomllib.TOMLDecodeError as exc:
+            logger.warning("跳过损坏的 _shared.toml：%s", exc)
 
     personas: list[dict[str, Any]] = []
     for toml_file in sorted(personas_dir.glob("*.toml")):
         if toml_file.name.startswith("_"):
             continue  # skip _shared.toml and other reserved files
-        with toml_file.open("rb") as fh:
-            data = tomllib.load(fh)
+        try:
+            with toml_file.open("rb") as fh:
+                data = tomllib.load(fh)
+        except tomllib.TOMLDecodeError as exc:
+            logger.warning("跳过损坏的人格文件 %s：%s", toml_file.name, exc)
+            continue
 
         # Support flat top-level keys (preferred) or [[personas]] array
         if "id" in data:
@@ -265,47 +275,67 @@ def _read_providers(raw_providers: list[dict[str, Any]], *, style_profiles: dict
         provider_id = str(entry.get("id", "")).strip()
         if not provider_id:
             continue
-        raw_headers = as_dict(entry.get("headers"))
 
-        # Resolve style_profile reference: prepend the named profile to
-        # any per-provider style_overrides so the final string is the
-        # concatenation of shared + specific.
-        style_text = str(entry.get("style_overrides", "")).strip()
-        profile_name = str(entry.get("style_profile", "")).strip()
-        if profile_name:
-            if profile_name not in style_profiles:
-                raise ValueError(
-                    f"provider {provider_id} 引用了未知的 style_profile {profile_name!r}，"
-                    f"可用：{', '.join(sorted(style_profiles))}"
-                )
+        try:
+            provider = _parse_single_provider(entry, provider_id, style_profiles)
+        except Exception:
+            logger.exception("跳过配置无效的 provider %s", provider_id)
+            continue
+        providers[provider_id] = provider
+    return providers
+
+
+def _parse_single_provider(
+    entry: dict[str, Any], provider_id: str, style_profiles: dict[str, str]
+) -> ProviderConfig:
+    raw_headers = as_dict(entry.get("headers"))
+
+    style_text = str(entry.get("style_overrides", "")).strip()
+    profile_name = str(entry.get("style_profile", "")).strip()
+    if profile_name:
+        if profile_name not in style_profiles:
+            available = ", ".join(sorted(style_profiles)) if style_profiles else "(无)"
+            logger.error(
+                "provider %s 引用了未知的 style_profile %r，已忽略该 profile（可用：%s）",
+                provider_id, profile_name, available,
+            )
+        else:
             shared = style_profiles[profile_name].strip()
             style_text = shared + ("\n" + style_text if style_text else "")
 
-        providers[provider_id] = ProviderConfig(
-            id=provider_id,
-            protocol=str(entry.get("protocol", "")).strip().lower(),
-            base_url=str(entry.get("base_url", "")).strip(),
-            api_key_env=str(entry.get("api_key_env", "")).strip(),
-            default_model=str(entry.get("default_model", "")).strip(),
-            models=[str(item).strip() for item in entry.get("models", []) if str(item).strip()],
-            non_vision_models=[str(item).strip() for item in entry.get("non_vision_models", []) if str(item).strip()],
-            timeout_seconds=float(entry.get("timeout_seconds", 45)),
-            temperature=float(entry.get("temperature", 0.8)),
-            max_output_tokens=int(entry.get("max_output_tokens", 800)),
-            style_overrides=style_text,
-            stream_enabled=as_bool(entry.get("stream_enabled", True), default=True),
-            headers={str(k): str(v) for k, v in raw_headers.items()},
-            user_agent=str(entry.get("user_agent", "")).strip(),
-            extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
-            aliases={
-                k: v
-                for raw_k, raw_v in expand_env_value(as_dict(entry.get("aliases"))).items()
-                if (k := str(raw_k).strip()) and (v := str(raw_v).strip())
-            },
-            fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
-            proxy=str(entry.get("proxy", "")).strip(),
-        )
-    return providers
+    raw_aliases = expand_env_value(as_dict(entry.get("aliases")))
+    models = [str(item).strip() for item in entry.get("models", []) if str(item).strip()]
+    aliases: dict[str, str] = {}
+    for raw_k, raw_v in raw_aliases.items():
+        k = str(raw_k).strip()
+        v = str(raw_v).strip()
+        if not k or not v:
+            continue
+        if v not in models:
+            logger.warning("provider %s 的 alias %r 指向不存在的模型 %r，已跳过", provider_id, k, v)
+            continue
+        aliases[k] = v
+
+    return ProviderConfig(
+        id=provider_id,
+        protocol=str(entry.get("protocol", "")).strip().lower(),
+        base_url=str(entry.get("base_url", "")).strip(),
+        api_key_env=str(entry.get("api_key_env", "")).strip(),
+        default_model=str(entry.get("default_model", "")).strip(),
+        models=models,
+        non_vision_models=[str(item).strip() for item in entry.get("non_vision_models", []) if str(item).strip()],
+        timeout_seconds=float(entry.get("timeout_seconds", 45)),
+        temperature=float(entry.get("temperature", 0.8)),
+        max_output_tokens=int(entry.get("max_output_tokens", 800)),
+        style_overrides=style_text,
+        stream_enabled=as_bool(entry.get("stream_enabled", True), default=True),
+        headers={str(k): str(v) for k, v in raw_headers.items()},
+        user_agent=str(entry.get("user_agent", "")).strip(),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+        aliases=aliases,
+        fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
+        proxy=str(entry.get("proxy", "")).strip(),
+    )
 
 
 def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
@@ -369,8 +399,12 @@ def load_personas_only(config_path: str | Path) -> dict[str, PersonaConfig]:
     if not path.exists():
         return {}
 
-    with path.open("rb") as file:
-        data = tomllib.load(file)
+    try:
+        with path.open("rb") as file:
+            data = tomllib.load(file)
+    except tomllib.TOMLDecodeError as exc:
+        logger.warning("load_personas_only 跳过损坏的 TOML：%s", exc)
+        return {}
 
     personas_path = path.parent / "personas"
     raw_personas = data.get("personas", [])
@@ -381,13 +415,28 @@ def load_personas_only(config_path: str | Path) -> dict[str, PersonaConfig]:
     return _read_personas(raw_personas)
 
 
+def _read_providers_safe(raw_providers: Any, style_profiles: dict[str, str]) -> dict[str, ProviderConfig]:
+    try:
+        return _read_providers(
+            raw_providers if isinstance(raw_providers, list) else [],
+            style_profiles=style_profiles,
+        )
+    except Exception:
+        logger.exception("provider 解析阶段发生未预期异常")
+        return {}
+
+
 def load_llm_config(path: str | Path) -> LLMConfig:
     config_path = Path(path)
     if not config_path.exists():
         return LLMConfig(load_error=f"未找到配置文件：{config_path}", source_path=config_path)
 
-    with config_path.open("rb") as file:
-        data = tomllib.load(file)
+    try:
+        with config_path.open("rb") as file:
+            data = tomllib.load(file)
+    except tomllib.TOMLDecodeError as exc:
+        logger.exception("llm.toml 语法错误")
+        return LLMConfig(load_error=f"TOML 语法错误：{exc}", source_path=config_path)
 
     personas = load_personas_only(config_path)
 
@@ -457,7 +506,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             enabled=as_bool(mcp_raw.get("enabled", False), default=False),
             servers=_read_mcp_servers(raw_mcp_servers if isinstance(raw_mcp_servers, list) else []),
         ),
-        providers=_read_providers(raw_providers if isinstance(raw_providers, list) else [], style_profiles=style_profiles),
+        providers=_read_providers_safe(raw_providers, style_profiles),
         personas=personas,
         daily_summary=DailySummaryConfig(
             enabled=as_bool(daily_summary_raw.get("enabled", False), default=False),
@@ -500,49 +549,82 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         source_path=config_path,
     )
 
+    try:
+        _validate_and_fix_config(config)
+    except Exception:
+        logger.exception("配置校验阶段异常")
+        config.load_error = "配置校验时发生内部错误"
+    return config
+
+
+def _validate_and_fix_config(config: LLMConfig) -> None:
+    """Validate cross-references and fix salvageable issues.
+
+    Single-provider problems result in that provider being skipped (logged);
+    only truly fatal issues (no providers at all, no personas at all) set
+    ``load_error``.  This ensures one bad provider config never blocks others.
+    """
+    errors: list[str] = []
+
     if not config.providers:
         config.load_error = "LLM 配置中没有可用的 providers"
-        return config
+        return
 
+    # -- default_provider fallback --
     if config.runtime.default_provider is None:
         config.runtime.default_provider = next(iter(config.providers))
+    elif config.runtime.default_provider not in config.providers:
+        errors.append(f"默认 provider {config.runtime.default_provider!r} 不存在，已回退")
+        config.runtime.default_provider = next(iter(config.providers))
 
-    if config.runtime.default_provider not in config.providers:
-        config.load_error = f"默认 provider 不存在：{config.runtime.default_provider}"
-        return config
-
+    # -- personas --
     if not config.personas:
         config.load_error = "LLM 配置中没有可用的人格"
-        return config
-
+        return
     if config.runtime.default_persona is None:
         config.runtime.default_persona = next(iter(config.personas))
+    elif config.runtime.default_persona not in config.personas:
+        fallback = next(iter(config.personas))
+        errors.append(f"默认 persona {config.runtime.default_persona!r} 不存在，已回退为 {fallback!r}")
+        config.runtime.default_persona = fallback
 
-    if config.runtime.default_persona not in config.personas:
-        config.load_error = f"默认 persona 不存在：{config.runtime.default_persona}"
-        return config
-
+    # -- tools --
     if config.tools.discovery_mode not in {"off", "on", "auto"}:
         config.tools.discovery_mode = "auto"
 
-    for provider in config.providers.values():
+    # -- per-provider validation: collect and prune --
+    bad_providers: list[str] = []
+    for pid, provider in config.providers.items():
+        provider_errors: list[str] = []
         if provider.protocol not in {"openai", "claude", "gemini"}:
-            config.load_error = f"provider {provider.id} 使用了未知协议：{provider.protocol}"
-            return config
+            provider_errors.append(f"未知协议 {provider.protocol!r}")
         if not provider.base_url:
-            config.load_error = f"provider {provider.id} 缺少 base_url"
-            return config
+            provider_errors.append("缺少 base_url")
         if not provider.api_key_env:
-            config.load_error = f"provider {provider.id} 缺少 api_key_env"
-            return config
+            provider_errors.append("缺少 api_key_env")
         if not provider.default_model:
-            config.load_error = f"provider {provider.id} 缺少 default_model"
-            return config
-        if provider.default_model not in provider.models:
+            provider_errors.append("缺少 default_model")
+        if provider.default_model and provider.default_model not in provider.models:
             provider.models.insert(0, provider.default_model)
-        for alias, target in provider.aliases.items():
-            if target not in provider.models:
-                config.load_error = f"provider {provider.id} 的 alias {alias!r} 指向未声明模型 {target!r}"
-                return config
+            logger.warning("provider %s 的 default_model %r 不在 models 列表中，已自动添加", pid, provider.default_model)
 
-    return config
+        if provider_errors:
+            logger.error("provider %s 配置无效：%s，已跳过", pid, "; ".join(provider_errors))
+            bad_providers.append(pid)
+
+    for pid in bad_providers:
+        del config.providers[pid]
+
+    # Re-validate default_provider in case it was among the deleted ones.
+    if config.runtime.default_provider not in config.providers:
+        if config.providers:
+            config.runtime.default_provider = next(iter(config.providers))
+        else:
+            config.runtime.default_provider = None
+
+    if bad_providers and not config.providers:
+        errors.append(f"全部 {len(bad_providers)} 个 provider 均被跳过：{', '.join(bad_providers)}")
+
+    if errors:
+        config.load_error = "; ".join(errors)
+        logger.warning("LLM 配置存在问题：%s", config.load_error)

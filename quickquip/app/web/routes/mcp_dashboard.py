@@ -51,10 +51,12 @@ def get_mcp_dashboard():
 
     # 2) Runtime MCP manager (same process, e.g. local dev)
     try:
-        from quickquip.llm.service import llm_service
+        from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service
 
-        statuses = llm_service.mcp_manager.get_statuses()
-        bindings = llm_service.mcp_manager.bindings
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+        statuses = svc.mcp_manager.get_statuses()
+        bindings = svc.mcp_manager.bindings
     except Exception:
         statuses = []
         bindings = {}

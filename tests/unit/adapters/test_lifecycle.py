@@ -44,7 +44,11 @@ async def test_shutdown_closes_stores_even_if_save_all_fails(monkeypatch):
     fake_scheduler_module.scheduler = types.SimpleNamespace(add_job=lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "nonebot_plugin_apscheduler", fake_scheduler_module)
     monkeypatch.setattr(lifecycle, "tieba_service", types.SimpleNamespace(shutdown=fake_tieba_shutdown))
-    monkeypatch.setattr(lifecycle, "llm_service", types.SimpleNamespace(shutdown=fake_llm_shutdown, startup=lambda *args, **kwargs: None))
+    monkeypatch.setattr(
+        lifecycle,
+        "get_llm_service",
+        lambda: types.SimpleNamespace(shutdown=fake_llm_shutdown, startup=lambda *args, **kwargs: None),
+    )
     monkeypatch.setattr(lifecycle, "save_all", fake_save_all)
     monkeypatch.setattr(lifecycle, "close_persistent_stores", fake_close_persistent_stores)
 

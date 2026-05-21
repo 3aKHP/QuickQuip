@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _is_private_chat
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, llm_service, reload_chat_rules_pipeline, rule_switch
+from quickquip.app.message_pipeline import RULE_SWITCH_PATH, _ensure_llm_bindings, get_llm_service, reload_chat_rules_pipeline, rule_switch
 from quickquip.app.message_pipeline import is_admin as _is_admin
 
 
@@ -70,10 +70,12 @@ def register_rules_commands(on_command, Message, MessageSegment) -> None:
     async def _(event):
         if not _allow_scope_management(event):
             await reload_personas_cmd.finish("仅管理员可执行此操作")
-        count, error = llm_service.reload_personas()
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+        count, error = svc.reload_personas()
         if error:
             await reload_personas_cmd.finish(f"人格重载失败：{error}")
-        default_persona = llm_service.config.runtime.default_persona or "(未配置)"
+        default_persona = svc.config.runtime.default_persona or "(未配置)"
         await reload_personas_cmd.finish(
             f"人格已重载（{count} 个，默认：{default_persona}）"
         )

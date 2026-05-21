@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from quickquip.llm.service import (
     LLMService,
-    llm_service,
+    get_llm_service,
     LLM_RULE_NAME,
     MAX_TRIGGER_CONTEXT_MESSAGES,
     MAX_GROUP_STORED_CONVERSATION_MESSAGES,
@@ -28,7 +28,7 @@ from quickquip.llm.settings import ResolvedGroupSettings
 
 __all__ = [
     "LLMService",
-    "llm_service",
+    "get_llm_service",
     "LLM_RULE_NAME",
     "MAX_TRIGGER_CONTEXT_MESSAGES",
     "MAX_GROUP_STORED_CONVERSATION_MESSAGES",

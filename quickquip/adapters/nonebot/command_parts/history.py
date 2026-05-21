@@ -8,7 +8,7 @@ from time import time
 
 from quickquip.adapters.nonebot.command_parts.common import _is_private_chat, _parse_profile_mode, _select_profile_samples, _strip_command_name
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
-from quickquip.app.message_pipeline import daily_collector, group_quote_store, llm_service, stats_tracker
+from quickquip.app.message_pipeline import _ensure_llm_bindings, daily_collector, get_llm_service, group_quote_store, stats_tracker
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_reply_for_llm
@@ -24,7 +24,9 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
     async def _(bot, event):
         if _is_private_chat(event):
             await profile_cmd.finish("该命令仅支持群聊")
-        if not llm_service.config.is_available:
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+        if not svc.config.is_available:
             await profile_cmd.finish("LLM 功能未启用，无法生成人物志")
 
         target_user_id = None
@@ -49,15 +51,15 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         target_name = group_stats.user_names.get(str(target_user_id), f"QQ:{target_user_id}")
         msg_count = group_stats.user_messages.get(str(target_user_id), 0)
 
-        settings = llm_service.get_chat_settings(group_id, chat_type="group")
-        provider_id = settings.provider_id or llm_service.config.runtime.default_provider or ""
-        provider = llm_service.config.providers.get(provider_id)
+        settings = svc.get_chat_settings(group_id, chat_type="group")
+        provider_id = settings.provider_id or svc.config.runtime.default_provider or ""
+        provider = svc.config.providers.get(provider_id)
         if not provider:
             await profile_cmd.finish("LLM provider 未配置")
         effective_model = settings.model or provider.default_model
 
-        persona_id = settings.persona_id or llm_service.config.runtime.default_persona or ""
-        persona = llm_service.config.personas.get(persona_id) if persona_id else None
+        persona_id = settings.persona_id or svc.config.runtime.default_persona or ""
+        persona = svc.config.personas.get(persona_id) if persona_id else None
         system_parts = []
         if persona:
             if persona.system_prompt:
@@ -72,7 +74,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         try:
             memories_raw, all_msgs = await asyncio.gather(
                 asyncio.to_thread(
-                    llm_service.store.search_memories,
+                    svc.store.search_memories,
                     str(group_id),
                     user_id=str(target_user_id),
                     query=target_name,
@@ -107,7 +109,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                 message_count=msg_count,
                 memories=memories,
                 recent_samples=samples,
-                llm_config=llm_service.config,
+                llm_config=svc.config,
                 system_prompt=system_prompt,
                 provider_id=provider.id,
                 model=effective_model,
@@ -159,6 +161,8 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
     async def _(event):
         if _is_private_chat(event):
             await quote_cmd.finish("该命令仅支持群聊")
+        _ensure_llm_bindings()
+        svc = get_llm_service()
         group_id = event.group_id
         args = _strip_command_name(str(event.get_message()).strip(), "quote").strip()
         reply = getattr(event, "reply", None)
@@ -207,7 +211,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             reply,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=llm_service.identities,
+            identity_index=svc.identities,
         )
         if not rendered or not rendered.text.strip():
             await quote_cmd.finish("引用的消息没有文字内容，无法收藏")

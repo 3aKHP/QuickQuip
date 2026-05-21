@@ -104,8 +104,8 @@ priority = 10
 
     (config_dir / "chat_rules.toml").write_text("this is not valid toml [[", encoding="utf-8")
     with _chdir(tmp_path):
-        with pytest.raises(Exception):
-            chat_config.reload_chat_rules()
+        ok = chat_config.reload_chat_rules()
+    assert ok is False  # malformed TOML returns False, does not raise
     # state untouched after failure
     assert len(chat_config.TEXT_REPLY_RULES) == 1
     assert chat_config.TEXT_REPLY_RULES[0]["name"] == "ok"

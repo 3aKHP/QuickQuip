@@ -18,9 +18,10 @@ except (ModuleNotFoundError, ValueError):
 from quickquip.app.message_pipeline import (
     RULE_SWITCH_PATH,
     daily_collector,
+    _ensure_llm_bindings,
+    get_llm_service,
     daily_enabled_groups,
     daily_store,
-    llm_service,
     rule_switch,
     stats_tracker,
 )
@@ -87,8 +88,11 @@ async def _run_generation(
     Returns (content, model_used) on success, None if skipped or failed.
     Does NOT persist to the store — callers decide what to do with the result.
     """
+    _ensure_llm_bindings()
+    svc = get_llm_service()
+
     messages = daily_collector.read_window(group_id, start_ts, end_ts)
-    llm_config = llm_service.config
+    llm_config = svc.config
     daily_config = llm_config.daily_summary
 
     if len(messages) < daily_config.min_messages:
@@ -98,7 +102,7 @@ async def _run_generation(
         )
         return None
 
-    settings = llm_service.get_group_settings(group_id)
+    settings = svc.get_group_settings(group_id)
     persona = llm_config.personas.get(settings.persona_id) or next(
         iter(llm_config.personas.values()), None
     )
@@ -222,9 +226,11 @@ def _parse_cron(cron_expr: str) -> dict[str, str]:
 
 
 def _register_scheduler_jobs() -> None:
+    _ensure_llm_bindings()
+    svc = get_llm_service()
     if not scheduler:
         return
-    daily_cfg = llm_service.config.daily_summary
+    daily_cfg = svc.config.daily_summary
     if not daily_cfg.enabled:
         return
 
@@ -287,6 +293,9 @@ def register_daily_summary_commands(on_command) -> None:
         if getattr(event, "group_id", None) is None:
             await summary_cmd.finish("该命令仅支持群聊")
 
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+
         group_id = event.group_id
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "summary").lower()
@@ -298,7 +307,7 @@ def register_daily_summary_commands(on_command) -> None:
             daily_enabled_groups.add(group_id)
             rule_switch.enable(group_id, _RULE_NAME)
             rule_switch.save(RULE_SWITCH_PATH)
-            cfg = llm_service.config.daily_summary
+            cfg = svc.config.daily_summary
             gen_time = _cron_to_hhmm(cfg.generate_cron)
             pub_time = _cron_to_hhmm(cfg.publish_cron)
             await summary_cmd.finish(
@@ -347,7 +356,7 @@ def register_daily_summary_commands(on_command) -> None:
 
             await summary_cmd.send("正在生成总结，请稍候……")
 
-            daily_config = llm_service.config.daily_summary
+            daily_config = svc.config.daily_summary
             messages = daily_collector.read_window(str(group_id), start_ts, end_ts)
 
             if len(messages) < daily_config.min_messages:

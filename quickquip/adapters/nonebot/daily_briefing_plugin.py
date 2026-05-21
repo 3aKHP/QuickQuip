@@ -16,8 +16,9 @@ except (ModuleNotFoundError, ValueError):
 from quickquip.app.message_pipeline import (
     RULE_SWITCH_PATH,
     daily_briefing_enabled_groups,
+    _ensure_llm_bindings,
+    get_llm_service,
     daily_collector,
-    llm_service,
     rule_switch,
     wordcloud_collector,
 )
@@ -92,8 +93,10 @@ def _is_group_enabled(group_id: int | str) -> bool:
 
 
 async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, str]:
+    _ensure_llm_bindings()
+    svc = get_llm_service()
     now = datetime.now(tz=_LOCAL_TZ)
-    briefing_cfg = llm_service.config.daily_briefing
+    briefing_cfg = svc.config.daily_briefing
     context = await build_briefing_context(
         group_id=group_id,
         period=period,
@@ -105,12 +108,12 @@ async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, 
     )
     fallback_text = build_fallback_briefing(context)
 
-    if llm_service.config.load_error:
+    if svc.config.load_error:
         return fallback_text, "fallback"
 
-    settings = llm_service.get_group_settings(group_id)
-    persona = llm_service.config.personas.get(settings.persona_id) or next(
-        iter(llm_service.config.personas.values()),
+    settings = svc.get_group_settings(group_id)
+    persona = svc.config.personas.get(settings.persona_id) or next(
+        iter(svc.config.personas.values()),
         None,
     )
     if persona is None:
@@ -125,7 +128,7 @@ async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, 
             persona=persona,
             group_id=group_id,
             briefing_config=briefing_cfg,
-            llm_config=llm_service.config,
+            llm_config=svc.config,
             default_provider_id=settings.provider_id,
             default_model=settings.model,
         )
@@ -178,9 +181,11 @@ async def _job_send_period(period: str) -> None:
 
 
 def _register_scheduler_jobs() -> None:
+    _ensure_llm_bindings()
+    svc = get_llm_service()
     if not scheduler:
         return
-    cfg = llm_service.config.daily_briefing
+    cfg = svc.config.daily_briefing
     if not cfg.enabled:
         return
 
@@ -227,12 +232,15 @@ def register_daily_briefing_commands(on_command) -> None:
         if getattr(event, "group_id", None) is None:
             await briefing_cmd.finish("该命令仅支持群聊")
 
+        _ensure_llm_bindings()
+        svc = get_llm_service()
+
         group_id = event.group_id
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "briefing").strip()
         tokens = [item for item in args.split() if item]
         action = tokens[0].lower() if tokens else "status"
-        cfg = llm_service.config.daily_briefing
+        cfg = svc.config.daily_briefing
 
         if action in {"on", "开启", "启用"}:
             if not _is_admin(event):

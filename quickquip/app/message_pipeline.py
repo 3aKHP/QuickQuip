@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from quickquip.llm.service import llm_service
+from quickquip.llm.service import get_llm_service
 from quickquip.chat import config as chat_config
 from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
@@ -112,9 +112,24 @@ niuniu_store = NiuNiuStore(config=games_config.niuniu)
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
 rule_switch.load(RULE_SWITCH_PATH)
-llm_service.bind_group_stats_tracker(stats_tracker)
-llm_service.bind_rule_switch(rule_switch)
-llm_service.bind_recent_message_buffer(recent_messages)
+_llm_bindings_done = False
+
+
+def _ensure_llm_bindings() -> None:
+    """Wire the pipeline singletons into LLMService once, lazily.
+
+    Called at the top of every adapter entry point that needs llm_service,
+    so bindings are guaranteed to be in place before first use but never
+    executed at import time.
+    """
+    global _llm_bindings_done
+    if _llm_bindings_done:
+        return
+    svc = get_llm_service()
+    svc.bind_group_stats_tracker(stats_tracker)
+    svc.bind_rule_switch(rule_switch)
+    svc.bind_recent_message_buffer(recent_messages)
+    _llm_bindings_done = True
 
 
 def record_group_message(
@@ -333,7 +348,7 @@ async def resolve_reply(
             sender_name=sender_name,
             recent_messages=recent_context,
             now=now_cst,
-            llm_service=llm_service,
+            llm_service=get_llm_service(),
             group_id=group_id,
         )
         if ctx_reply:
