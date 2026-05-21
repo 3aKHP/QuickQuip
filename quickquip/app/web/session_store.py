@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 import secrets
 import sqlite3
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
@@ -14,7 +17,12 @@ class WebAdminSessionStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self._unavailable = False
+        try:
+            self._ensure_schema()
+        except sqlite3.Error as exc:
+            logger.error("WebAdminSessionStore 数据库初始化失败 (%s)：%s", self.path, exc)
+            self._unavailable = True
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
@@ -40,6 +48,8 @@ class WebAdminSessionStore:
             )
 
     def purge_expired_sessions(self, *, now: str | None = None) -> int:
+        if self._unavailable:
+            raise RuntimeError("Web管理会话 数据库不可用")
         threshold = now or _utc_now()
         with self._connect() as conn:
             cursor = conn.execute(
@@ -55,6 +65,8 @@ class WebAdminSessionStore:
         client_ip: str = "",
         user_agent: str = "",
     ) -> dict[str, str]:
+        if self._unavailable:
+            raise RuntimeError("Web管理会话 数据库不可用")
         self.purge_expired_sessions()
         session_id = secrets.token_urlsafe(32)
         now = _utc_now()
@@ -81,6 +93,8 @@ class WebAdminSessionStore:
         }
 
     def get_session(self, session_id: str) -> dict[str, str] | None:
+        if self._unavailable:
+            raise RuntimeError("Web管理会话 数据库不可用")
         self.purge_expired_sessions()
         with self._connect() as conn:
             row = conn.execute(
@@ -96,6 +110,8 @@ class WebAdminSessionStore:
         return {key: row[key] for key in row.keys()}
 
     def touch_session(self, session_id: str, *, expires_at: str) -> bool:
+        if self._unavailable:
+            raise RuntimeError("Web管理会话 数据库不可用")
         now = _utc_now()
         with self._connect() as conn:
             cursor = conn.execute(
@@ -109,6 +125,8 @@ class WebAdminSessionStore:
             return int(cursor.rowcount) > 0
 
     def delete_session(self, session_id: str) -> bool:
+        if self._unavailable:
+            raise RuntimeError("Web管理会话 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
                 "DELETE FROM admin_sessions WHERE session_id = ?",

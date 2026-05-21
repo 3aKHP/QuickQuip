@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 import re
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -34,7 +37,13 @@ class VocabIndex:
         entries: list[VocabEntry] = []
         glossary: dict[str, str] = {}
 
-        for raw_line in vocab_path.read_text(encoding="utf-8").splitlines():
+        try:
+            raw_text = vocab_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning("无法读取词表文件 %s：%s", vocab_path, exc)
+            return cls()
+
+        for raw_line in raw_text.splitlines():
             if not raw_line.strip():
                 continue
 

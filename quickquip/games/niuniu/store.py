@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 import sqlite3
 from datetime import date, datetime, timezone
@@ -10,6 +11,8 @@ from typing import Optional
 
 from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.text import NiuNiuText, default_text, load_niuniu_text
+
+logger = logging.getLogger(__name__)
 
 
 def _roll_lognormal(sigma: float) -> float:
@@ -50,7 +53,12 @@ class NiuNiuStore:
         self.path = Path(path)
         self.config = config or NiuNiuConfig()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self._unavailable = False
+        try:
+            self._ensure_schema()
+        except sqlite3.Error as exc:
+            logger.error("NiuNiuStore 数据库初始化失败 (%s)：%s", self.path, exc)
+            self._unavailable = True
         self.texts: dict[str, NiuNiuText] = self._load_texts()
 
     def connect(self) -> sqlite3.Connection:
@@ -162,10 +170,14 @@ class NiuNiuStore:
 
     def get_text(self, group_id: str) -> NiuNiuText:
         """Return the NiuNiuText for *group_id*, respecting its mode setting."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         mode = self.get_group_text_mode(group_id)
         return self.texts.get(mode, self.texts["default"])
 
     def get_group_text_mode(self, group_id: str) -> str:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT text_mode FROM niuniu_group_text WHERE group_id = ?", (group_id,)
@@ -174,6 +186,8 @@ class NiuNiuStore:
 
     def set_group_text_mode(self, group_id: str, mode: str) -> bool:
         """Set text mode. Returns False if mode is unknown, True on success."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         if mode not in self.texts:
             return False
         with self._connect() as conn:
@@ -200,6 +214,8 @@ class NiuNiuStore:
         return luck
 
     def get_glue_luck(self, uid: str) -> float:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT luck, luck_date FROM niuniu_users WHERE uid = ?", (uid,)
@@ -211,6 +227,8 @@ class NiuNiuStore:
         return row["luck"]
 
     def set_glue_luck(self, uid: str, value: float) -> None:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             conn.execute(
                 "UPDATE niuniu_users SET luck = ?, luck_date = ? WHERE uid = ?",
@@ -230,6 +248,8 @@ class NiuNiuStore:
         return luck
 
     def get_fence_luck(self, uid: str) -> float:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT fence_luck, fence_luck_date FROM niuniu_users WHERE uid = ?",
@@ -242,6 +262,8 @@ class NiuNiuStore:
         return row["fence_luck"]
 
     def set_fence_luck(self, uid: str, value: float) -> None:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             conn.execute(
                 "UPDATE niuniu_users SET fence_luck = ?, fence_luck_date = ? WHERE uid = ?",
@@ -251,6 +273,8 @@ class NiuNiuStore:
     # ── user CRUD ───────────────────────────────────────────────────────
 
     def exists(self, uid: str) -> bool:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM niuniu_users WHERE uid = ?", (uid,)
@@ -258,6 +282,8 @@ class NiuNiuStore:
             return row is not None
 
     def get_length(self, uid: str) -> Optional[float]:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT length FROM niuniu_users WHERE uid = ?", (uid,)
@@ -266,6 +292,8 @@ class NiuNiuStore:
 
     def register(self, uid: str) -> float:
         """Create a new niuniu with random initial length. Returns the length."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         length = _random_initial_length(self)
         now = _utc_now()
         cfg = self.config
@@ -282,6 +310,8 @@ class NiuNiuStore:
         return length
 
     def unsubscribe(self, uid: str) -> Optional[float]:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         old = self.get_length(uid)
         if old is None:
             return None
@@ -291,6 +321,8 @@ class NiuNiuStore:
         return old
 
     def update_length(self, uid: str, new_length: float) -> None:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         now = _utc_now()
         with self._connect() as conn:
             conn.execute(
@@ -299,6 +331,8 @@ class NiuNiuStore:
             )
 
     def count(self) -> int:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS c FROM niuniu_users").fetchone()
             return row["c"] if row else 0
@@ -313,6 +347,8 @@ class NiuNiuStore:
             )
 
     def get_records(self, uid: str, limit: int = 10) -> list[dict]:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT action, origin_length, new_length, created_at FROM niuniu_records WHERE uid = ? ORDER BY id DESC LIMIT ?",
@@ -330,6 +366,8 @@ class NiuNiuStore:
         ]
 
     def latest_record_time(self, uid: str, action: str) -> str:
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT created_at FROM niuniu_records WHERE uid = ? AND action = ? ORDER BY id DESC LIMIT 1",
@@ -341,6 +379,8 @@ class NiuNiuStore:
 
     def rank_by_length(self, limit: int = 10, user_ids: list[str] | None = None) -> list[dict]:
         """Rank by descending length (positive only)."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
@@ -357,6 +397,8 @@ class NiuNiuStore:
 
     def rank_by_depth(self, limit: int = 10, user_ids: list[str] | None = None) -> list[dict]:
         """Rank by ascending length (most negative = deepest)."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
@@ -373,6 +415,8 @@ class NiuNiuStore:
 
     def rank_by_natural(self, limit: int = 10, user_ids: list[str] | None = None) -> list[dict]:
         """Rank all users by signed length descending."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
@@ -389,6 +433,8 @@ class NiuNiuStore:
 
     def rank_by_absolute(self, limit: int = 10, user_ids: list[str] | None = None) -> list[dict]:
         """Rank all users by ABS(length) descending."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
@@ -412,6 +458,8 @@ class NiuNiuStore:
         - "length":   among positive-length users only (-1 if length <= 0)
         - "depth":    among negative-length users only (-1 if length >= 0)
         """
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
         length = self.get_length(uid)
         if length is None:
             return -1

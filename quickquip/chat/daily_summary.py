@@ -134,7 +134,12 @@ class DailySummaryStore:
 
     def __init__(self, db_path: str | Path = DAILY_SUMMARIES_DB_PATH):
         self.db_path = Path(db_path)
-        self._init_db()
+        self._unavailable = False
+        try:
+            self._init_db()
+        except sqlite3.Error as exc:
+            logger.error("DailySummaryStore 数据库初始化失败 (%s)：%s", self.db_path, exc)
+            self._unavailable = True
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path))
@@ -174,6 +179,8 @@ class DailySummaryStore:
         content: str,
         model_used: str | None = None,
     ) -> None:
+        if self._unavailable:
+            raise RuntimeError("每日总结 数据库不可用")
         generated_at = datetime.now(tz=timezone.utc).isoformat()
         conn = self._connect()
         try:
@@ -196,6 +203,8 @@ class DailySummaryStore:
             conn.close()
 
     def get(self, group_id: int | str, summary_date: str) -> dict | None:
+        if self._unavailable:
+            raise RuntimeError("每日总结 数据库不可用")
         conn = self._connect()
         try:
             row = conn.execute(
@@ -208,6 +217,8 @@ class DailySummaryStore:
 
     def get_unpublished(self) -> list[dict]:
         """Return all summaries that have not yet been published."""
+        if self._unavailable:
+            raise RuntimeError("每日总结 数据库不可用")
         conn = self._connect()
         try:
             rows = conn.execute(
@@ -218,6 +229,8 @@ class DailySummaryStore:
             conn.close()
 
     def mark_published(self, group_id: int | str, summary_date: str) -> None:
+        if self._unavailable:
+            raise RuntimeError("每日总结 数据库不可用")
         published_at = datetime.now(tz=timezone.utc).isoformat()
         conn = self._connect()
         try:

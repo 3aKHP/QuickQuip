@@ -3,12 +3,16 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+import logging
 
 from quickquip.games.config import EconomyConfig
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+logger = logging.getLogger(__name__)
 
 
 class GameEconomyStore:
@@ -25,7 +29,12 @@ class GameEconomyStore:
         self.path = Path(path)
         self.config = config or EconomyConfig()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self._unavailable = False
+        try:
+            self._ensure_schema()
+        except sqlite3.Error as exc:
+            logger.error("GameEconomyStore 数据库初始化失败 (%s)：%s", self.path, exc)
+            self._unavailable = True
 
     def connect(self) -> sqlite3.Connection:
         """Return a new SQLite connection with row_factory set.
@@ -71,6 +80,8 @@ class GameEconomyStore:
 
     def get_balance(self, user_id: str, group_id: str) -> dict:
         """Return {gold, affection, sign_streak, last_sign_date} for a user."""
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         with self._connect() as conn:
             self._ensure_account(conn, user_id, group_id)
             row = conn.execute(
@@ -90,6 +101,8 @@ class GameEconomyStore:
 
     def add_gold(self, user_id: str, group_id: str, amount: int) -> int:
         """Add *amount* gold to a user. Returns new balance."""
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         with self._connect() as conn:
             self._ensure_account(conn, user_id, group_id)
             conn.execute(
@@ -108,6 +121,8 @@ class GameEconomyStore:
 
     def deduct_gold(self, user_id: str, group_id: str, amount: int) -> bool:
         """Deduct *amount* gold. Returns False if insufficient balance."""
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         with self._connect() as conn:
             self._ensure_account(conn, user_id, group_id)
             cursor = conn.execute(
@@ -127,6 +142,8 @@ class GameEconomyStore:
 
         Returns False if *from_user* has insufficient balance.
         """
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         gid = str(group_id)
         fu = str(from_user)
         tu = str(to_user)
@@ -157,6 +174,8 @@ class GameEconomyStore:
         self, group_id: str, top_n: int = 10
     ) -> list[dict[str, object]]:
         """Return top *top_n* users by gold in *group_id*."""
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -177,6 +196,8 @@ class GameEconomyStore:
 
         *today* should be ISO date string (YYYY-MM-DD). Uses UTC if empty.
         """
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         if not today:
             today = date.today().isoformat()
 
@@ -239,6 +260,8 @@ class GameEconomyStore:
 
     def get_affection(self, user_id: str, group_id: str) -> int:
         """Return the user's affection level in this group."""
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         with self._connect() as conn:
             self._ensure_account(conn, user_id, group_id)
             row = conn.execute(
@@ -249,6 +272,8 @@ class GameEconomyStore:
 
     def add_affection(self, user_id: str, group_id: str, amount: int) -> int:
         """Add *amount* affection. Returns new total."""
+        if self._unavailable:
+            raise RuntimeError("经济系统 数据库不可用")
         with self._connect() as conn:
             self._ensure_account(conn, user_id, group_id)
             conn.execute(
