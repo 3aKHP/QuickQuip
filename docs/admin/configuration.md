@@ -136,18 +136,27 @@
 
 每个 provider 一个 `[[providers]]` 条目：
 
-| 键 | 说明 |
-|----|------|
-| `id` | Provider 唯一标识（如 `openai-main`、`gemini-main`） |
-| `protocol` | 协议类型：`openai` / `anthropic` / `gemini` |
-| `base_url` | API 中转地址 |
-| `api_key_env` | API key 所在环境变量名 |
-| `default_model` | 默认模型 ID |
-| `models` | 可用模型 ID 数组 |
-| `timeout_seconds` | 请求超时（秒） |
-| `temperature` | 温度参数 |
-| `max_output_tokens` | 最大输出 token 数 |
-| `style_overrides` | 可选，多行字符串，追加到每次调用的 system prompt 末尾 |
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `id` | Provider 唯一标识（如 `openai-main`、`gemini-main`） | — |
+| `protocol` | 协议类型：`openai` / `claude` / `gemini` | — |
+| `base_url` | API 中转地址 | — |
+| `api_key_env` | API key 所在环境变量名 | — |
+| `default_model` | 默认模型 ID | — |
+| `models` | 可用模型 ID 数组 | — |
+| `timeout_seconds` | 请求超时（秒） | `45` |
+| `temperature` | 温度参数 | `0.8` |
+| `max_output_tokens` | 最大输出 token 数 | `800` |
+| `style_overrides` | 可选，多行字符串，追加到每次调用的 system prompt 末尾 | — |
+| `style_profile` | 可选，引用 `[style_profiles]` 中预定义的共享 system prompt 段，与 `style_overrides` 拼接 | — |
+| `non_vision_models` | 该 provider 下不支持图片输入的模型 ID 列表 | `[]` |
+| `stream_enabled` | 是否启用 SSE 流式响应 | `true` |
+| `aliases` | 模型短别名映射，如 `{ gpt4 = "gpt-5.4" }`，`/llm use` 时自动解析 | — |
+| `headers` | 注入到每次请求的额外 HTTP 头 | — |
+| `user_agent` | 自定义 User-Agent 请求头 | — |
+| `extra_body` | 注入到每次请求体的额外 JSON 字段（TOML inline table） | — |
+| `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
+| `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
 
 ### `[mcp]` — MCP 总开关
 

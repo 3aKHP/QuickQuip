@@ -2,9 +2,19 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.6.0] - 2026-05-22
+
+### 新增
 
 - LLM Provider 代理支持：`ProviderConfig` 新增 `proxy` 字段，可选 HTTP(S) 代理地址
+
+### 变更
+
+- 启动链熔断：单文件配置错误不再导致全集群崩溃。Persona TOML 单文件隔离、chat_rules 原子替换、provider 验证 per-entry 容错、llm.toml 顶层解析兜底、LLMService 懒加载
+- 运行时降级：vocab/identity 文件读取容错、7 个 SQLite store 统一加入 `_unavailable` 守卫、分组词表/身份缓存 OrderedDict 驱逐、LLM Trace 按日期轮转
+- 语义验证：model_cascade 与 image_preprocessing.provider_id 跨引用校验，缺失时追加到 load_error 而非静默失败
+- Web Admin 配置保存后通知 reload（响应注入 reload_required，前端展示操作提示）
+- 记忆库脏 tags_json 记录保护、auto_memory turn 计数器 LRU 淘汰
 
 ## [1.5.0] - 2026-05-19
 
