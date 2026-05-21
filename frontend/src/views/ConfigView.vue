@@ -150,11 +150,15 @@ async function save() {
   saving.value = true
   saveError.value = null
   try {
-    await saveConfig(currentKey.value, content.value)
+    const res = await saveConfig(currentKey.value, content.value)
     originalContent.value = content.value
     const entry = configs.value.find(c => c.key === currentKey.value)
     if (entry) entry.missing = false
-    toast('配置已保存')
+    if (res?.reload_required) {
+      toast('已保存。请在群内执行 /llm reload 或重启 bot 使配置生效')
+    } else {
+      toast('配置已保存')
+    }
   } catch (e: unknown) {
     saveError.value = (e as Error).message
     toast('保存失败', 'error')
