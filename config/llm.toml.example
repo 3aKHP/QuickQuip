@@ -204,6 +204,7 @@ temperature = 0.8
 max_output_tokens = 2048
 # aliases = { gpt4 = "gpt-5.4", mini = "gpt-5.2" }  # 短别名 → 完整模型 ID，用于 /llm use
 # fallback_urls = ["https://backup-relay.example/v1"]  # 主地址失败（5xx/网络）时自动切换
+# proxy = "http://127.0.0.1:7890"  # HTTP(S) 代理地址，Docker 容器内可用宿主机网桥 IP；代理宕机时 fallback_urls 同样不可达
 # user_agent = ""  # 注入 User-Agent 头；留空则不注入
 # extra_body = {}  # 注入到每次请求体的额外字段，例如 { custom_header_field = "value" }
 

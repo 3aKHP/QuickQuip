@@ -124,6 +124,7 @@ class ProviderConfig:
     extra_body: dict[str, Any] = field(default_factory=dict)
     aliases: dict[str, str] = field(default_factory=dict)
     fallback_urls: list[str] = field(default_factory=list)
+    proxy: str = ""
 
 
 @dataclass(slots=True)
@@ -302,6 +303,7 @@ def _read_providers(raw_providers: list[dict[str, Any]], *, style_profiles: dict
                 if (k := str(raw_k).strip()) and (v := str(raw_v).strip())
             },
             fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
+            proxy=str(entry.get("proxy", "")).strip(),
         )
     return providers
 
