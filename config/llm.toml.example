@@ -216,6 +216,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 default_model = "claude-sonnet-4-6"
 models = ["claude-sonnet-4-6", "claude-opus-4-5", "claude-sonnet-4-5"]
 style_profile = "claude_family"
+# auth_method = "bearer"      # 认证方式："api_key"=x-api-key 头（默认），"bearer"=Authorization: Bearer
+# prompt_caching = true       # 启用 Anthropic Prompt Caching（需中转站支持 CLI 格式）
+# headers = { x-app = "cli" } # 自定义 HTTP 头；不设置 x-app 时自动补为 "cli"
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048

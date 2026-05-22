@@ -128,6 +128,8 @@ class ProviderConfig:
     aliases: dict[str, str] = field(default_factory=dict)
     fallback_urls: list[str] = field(default_factory=list)
     proxy: str = ""
+    prompt_caching: bool = False
+    auth_method: str = "api_key"  # "api_key" | "bearer"
 
 
 @dataclass(slots=True)
@@ -335,6 +337,8 @@ def _parse_single_provider(
         aliases=aliases,
         fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
         proxy=str(entry.get("proxy", "")).strip(),
+        prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
+        auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
     )
 
 
@@ -598,6 +602,8 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
         provider_errors: list[str] = []
         if provider.protocol not in {"openai", "claude", "gemini"}:
             provider_errors.append(f"未知协议 {provider.protocol!r}")
+        if provider.auth_method not in {"api_key", "bearer"}:
+            provider_errors.append(f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）")
         if not provider.base_url:
             provider_errors.append("缺少 base_url")
         if not provider.api_key_env:

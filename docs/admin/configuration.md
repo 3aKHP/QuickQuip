@@ -157,6 +157,10 @@
 | `extra_body` | 注入到每次请求体的额外 JSON 字段（TOML inline table） | — |
 | `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
 | `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
+| `auth_method` | 认证方式：`api_key`（x-api-key 头，默认）或 `bearer`（Authorization: Bearer 头） | `api_key` |
+| `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
+
+> **协议适配说明**：`claude` 协议的请求默认带上 `x-app: cli` 头以匹配 Claude Code 的线格式；可通过 `headers` 覆盖。
 
 ### `[mcp]` — MCP 总开关
 

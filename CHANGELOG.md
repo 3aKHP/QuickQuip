@@ -2,6 +2,12 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.6.1] - 2026-05-22
+
+### 变更
+
+- Claude 协议线格式对齐：新增 `x-app: cli` 默认头、`auth_method` 配置项（api_key / bearer）、`prompt_caching` 支持（system prompt / 末尾消息块 / 末尾 tool 定义注入 `cache_control` 标记）
+
 ## [1.6.0] - 2026-05-22
 
 ### 新增

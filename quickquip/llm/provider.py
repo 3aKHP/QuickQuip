@@ -790,25 +790,52 @@ class ClaudeProviderClient(BaseProviderClient):
 
     async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/messages"
+        api_key = self._get_api_key()
+        if self.config.auth_method == "bearer":
+            auth_headers = {"Authorization": f"Bearer {api_key}"}
+        else:
+            auth_headers = {"x-api-key": api_key}
         headers = {
-            "x-api-key": self._get_api_key(),
-            "anthropic-version": self.config.headers.get("anthropic-version", "2023-06-01"),
+            **auth_headers,
+            "anthropic-version": self.config.headers.get("anthropic-version", "2025-03-26"),
             "Content-Type": "application/json",
             **{k: v for k, v in self.config.headers.items() if k != "anthropic-version"},
         }
+        if "x-app" not in headers:
+            headers["x-app"] = "cli"
+        use_cache = self.config.prompt_caching
+
+        # System prompt: match Claude Code wire format — array of text blocks
+        # with cache_control on the final block.
+        system: list[dict[str, Any]] = [{"type": "text", "text": request.system_prompt}]
+        if use_cache:
+            system[-1]["cache_control"] = {"type": "ephemeral"}
+
+        # Messages: match Claude Code — cache_control on the last content block
+        # of the last message. Skips thinking/redacted_thinking blocks.
+        # String content is promoted to [{type: "text", ...}] when caching is on.
+        messages = await self._serialize_messages(request.messages)
+        if use_cache and messages:
+            last_msg = messages[-1]
+            content = last_msg.get("content")
+            if isinstance(content, list) and content:
+                last_block = content[-1]
+                if last_block.get("type") not in ("thinking", "redacted_thinking"):
+                    last_block["cache_control"] = {"type": "ephemeral"}
+            elif isinstance(content, str) and content:
+                last_msg["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+
         payload: dict[str, Any] = {
             "model": request.model,
-            "system": request.system_prompt,
-            "messages": await self._serialize_messages(request.messages),
+            "system": system,
+            "messages": messages,
             "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
-        if self.config.user_agent:
-            headers["User-Agent"] = self.config.user_agent
         if self.config.extra_body:
             payload.update(self.config.extra_body)
         if request.allow_tool_calls and request.tools:
-            payload["tools"] = [
+            tools: list[dict[str, Any]] = [
                 {
                     "name": spec.name,
                     "description": spec.description,
@@ -816,6 +843,14 @@ class ClaudeProviderClient(BaseProviderClient):
                 }
                 for spec in request.tools
             ]
+            # Match Claude Code: cache_control on the final tool definition.
+            if use_cache and tools:
+                tools[-1]["cache_control"] = {"type": "ephemeral"}
+            payload["tools"] = tools
+        if self.config.user_agent:
+            headers["User-Agent"] = self.config.user_agent
+        else:
+            headers["User-Agent"] = "claude-cli/2.1.88 (user, cli)"
         return url, headers, payload
 
     @staticmethod
