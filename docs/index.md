@@ -24,7 +24,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 | 文件 | 说明 |
 |------|------|
-| [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、NapCat 登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
+| [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、LLBot 登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、`llm.toml`、`generation.toml`、`chat_rules.toml`、`personas/` 所有可配项 |
 | [admin/tool-discovery.md](admin/tool-discovery.md) | LLM 工具发现配置——大量 MCP 工具接入时的 `tool_search`、`tool_list`、常驻工具和排障建议 |
 | [admin/game-config.md](admin/game-config.md) | 游戏系统管理——游戏开关、参数配置、数据库文件、故障排查 |

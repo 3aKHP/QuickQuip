@@ -37,7 +37,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 - **Python** ≥ 3.11
 - **NoneBot2** + **OneBot V11 适配器**
-- OneBot V11 协议实现端（如 [Lagrange.OneBot](https://github.com/LagrangeDev/Lagrange.Core)、[NapCat](https://github.com/NapNeko/NapCatQQ)）
+- OneBot V11 协议实现端（推荐 [LLBot](https://github.com/LLOneBot/LuckyLilliaBot)，备选 [NapCat](https://github.com/NapNeko/NapCatQQ)）
 
 ### 安装步骤
 

@@ -5,8 +5,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# NapCat silently truncates single text messages beyond ~2 KB (~667 Chinese chars).
-# Split at paragraph / line boundaries to stay well under that limit.
+# OneBot 协议实现端（NapCat / LLBot）在单条消息超过 ~2 KB 时可能截断。
+# 按段落 / 换行拆分，保持在限制以内。
 _MAX_SEND_CHARS = 800
 
 

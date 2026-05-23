@@ -2,6 +2,12 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 变更
+
+- 推荐 OneBot V11 基座从 NapCat 迁移至 LLBot：更新 compose 示例模板、部署文档、README；新增迁移指南 `docs/admin/migration-napcat-to-llbot.md`。NapCat 近期因 DLL 注入特征遭腾讯高强度风控（频繁 KickedOffLine / 静默掐断），LLBot 使用 PMHQ 外部内存 Hook 规避检测
+
 ## [1.6.1] - 2026-05-22
 
 ### 变更
