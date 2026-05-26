@@ -17,8 +17,10 @@ from quickquip.chat.awakening import (
     _RULE_INTEREST,
     _RULE_QA,
     _RULE_RELEVANCE,
+    _extract_json_trigger,
     _extract_words,
     _is_in_dnd_window,
+    _llm_cache_text,
     _word_overlap_ratio,
     check_awakening_triggers,
     check_boredom,
@@ -28,6 +30,7 @@ from quickquip.chat.awakening import (
     check_qa,
     check_relevance,
     load_awakening_config,
+    run_boredom_check,
 )
 
 
@@ -325,6 +328,18 @@ class TestQAFastPattern:
         assert not _QA_FAST_PATTERNS.search("哈哈哈笑死")
 
 
+class TestExtractJsonTrigger:
+    def test_score_uses_threshold(self):
+        assert _extract_json_trigger('{"score": 0.7}', threshold=0.5) is True
+        assert _extract_json_trigger('{"score": 0.4}', threshold=0.5) is False
+
+    def test_trigger_boolean_fallback(self):
+        assert _extract_json_trigger('```json\n{"trigger": true}\n```', threshold=0.9) is True
+
+    def test_trigger_string_false_is_false(self):
+        assert _extract_json_trigger('{"trigger": "false"}') is False
+
+
 # =========================================================================
 # Trigger checks (sync)
 # =========================================================================
@@ -439,6 +454,16 @@ class TestCheckRelevance:
         result = asyncio.run(check_relevance("g1", "u1", "hello", settings, None, s))
         assert result is None
 
+    def test_zero_threshold_disabled(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        settings = _make_settings(relevance_threshold=0.0)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        result = asyncio.run(check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s))
+        assert result is None
+        svc.quick_judge.assert_not_called()
+
     def test_no_bot_messages(self):
         s = AwakeningState()
         settings = _make_settings(relevance_threshold=0.5)
@@ -478,17 +503,41 @@ class TestCheckRelevance:
         )
         assert result is None
 
+    def test_llm_score_below_threshold(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        settings = _make_settings(relevance_threshold=0.8)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        result = asyncio.run(
+            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+        )
+        assert result is None
+
     def test_cache_hit(self):
         s = AwakeningState()
         s.bot_messages.add("g1", "今天天气非常不错")
-        s.llm_cache_set(_RULE_RELEVANCE, "g1", "今天天气怎么样", True)
         settings = _make_settings(relevance_threshold=0.3)
+        s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
         svc = MagicMock()
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
         assert result is not None
         svc.quick_judge.assert_not_called()
+
+    def test_cache_key_includes_threshold(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
+        settings = _make_settings(relevance_threshold=0.8)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        result = asyncio.run(
+            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge.assert_awaited_once()
 
 
 class TestCheckQA:
@@ -497,6 +546,15 @@ class TestCheckQA:
         settings = _make_settings(qa_threshold=1.0)
         result = asyncio.run(check_qa("g1", "u1", "请问这是什么？", settings, None, s))
         assert result is None
+
+    def test_zero_threshold_disabled(self):
+        s = AwakeningState()
+        settings = _make_settings(qa_threshold=0.0)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        result = asyncio.run(check_qa("g1", "u1", "请问这是什么？", settings, svc, s))
+        assert result is None
+        svc.quick_judge.assert_not_called()
 
     def test_no_question_marker(self):
         s = AwakeningState()
@@ -525,10 +583,20 @@ class TestCheckQA:
         )
         assert result is None
 
+    def test_llm_score_below_threshold(self):
+        s = AwakeningState()
+        settings = _make_settings(qa_threshold=0.8)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        result = asyncio.run(
+            check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
+        )
+        assert result is None
+
     def test_cache_hit(self):
         s = AwakeningState()
-        s.llm_cache_set(_RULE_QA, "g1", "cached q?", True)
         settings = _make_settings(qa_threshold=0.5)
+        s.llm_cache_set(_RULE_QA, "g1", _llm_cache_text("cached q?", 0.5), True)
         svc = MagicMock()
         result = asyncio.run(
             check_qa("g1", "u1", "cached q?", settings, svc, s)
@@ -543,6 +611,95 @@ class TestCheckQA:
 
 
 class TestCheckAwakeningTriggers:
+    def test_llm_disabled_returns_none(self):
+        s = AwakeningState()
+        llm_settings = MagicMock()
+        llm_settings.enabled = False
+        llm_settings.persona_id = ""
+        svc = MagicMock()
+        svc.config = MagicMock()
+        svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
+        svc.config.personas = {}
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(interest_topics=["test"]),
+        )
+        try:
+            result = asyncio.run(
+                check_awakening_triggers("g1", "u1", "test message", llm_settings, svc, state=s)
+            )
+            assert result is None
+        finally:
+            aw._config = old_cfg
+
+    def test_disabled_rule_skips_quick_judge(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        llm_settings = MagicMock()
+        llm_settings.persona_id = ""
+        svc = MagicMock()
+        svc.config = MagicMock()
+        svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
+        svc.config.personas = {}
+        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(relevance_threshold=0.3),
+        )
+        try:
+            result = asyncio.run(
+                check_awakening_triggers(
+                    "g1",
+                    "u1",
+                    "今天天气怎么样",
+                    llm_settings,
+                    svc,
+                    state=s,
+                    rule_enabled=lambda rule_name: rule_name != _RULE_RELEVANCE,
+                )
+            )
+            assert result is None
+            svc.quick_judge.assert_not_called()
+        finally:
+            aw._config = old_cfg
+
+    def test_rate_unavailable_skips_quick_judge(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        llm_settings = MagicMock()
+        llm_settings.persona_id = ""
+        svc = MagicMock()
+        svc.config = MagicMock()
+        svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
+        svc.config.personas = {}
+        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(relevance_threshold=0.3),
+        )
+        try:
+            result = asyncio.run(
+                check_awakening_triggers(
+                    "g1",
+                    "u1",
+                    "今天天气怎么样",
+                    llm_settings,
+                    svc,
+                    state=s,
+                    rate_available=lambda rule_name: rule_name != _RULE_RELEVANCE,
+                )
+            )
+            assert result is None
+            svc.quick_judge.assert_not_called()
+        finally:
+            aw._config = old_cfg
+
     def test_extend_takes_priority(self):
         s = AwakeningState()
         s.mark_awakened("g1", "u1")
@@ -591,3 +748,72 @@ class TestCheckAwakeningTriggers:
             assert result is None
         finally:
             aw._config = old_cfg
+
+
+class TestRunBoredomCheck:
+    def test_skips_when_group_llm_disabled(self):
+        bot = MagicMock()
+        bot.send_group_msg = AsyncMock()
+        groups = MagicMock()
+        groups.all_groups.return_value = ["123"]
+        rule_switch = MagicMock()
+        rule_switch.is_enabled.return_value = True
+        svc = MagicMock()
+        svc.config.load_error = None
+        svc.get_group_settings.return_value = MagicMock(enabled=False)
+        svc.generate_reply = AsyncMock(return_value={"reply": "本群 LLM 已关闭。"})
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        old_state = aw._state
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(
+                boredom_silence_seconds=1,
+                boredom_probability=1.0,
+                boredom_check_interval=1,
+            ),
+        )
+        aw._state = AwakeningState()
+        try:
+            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc))
+        finally:
+            aw._config = old_cfg
+            aw._state = old_state
+
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+
+    def test_sends_when_group_llm_enabled(self):
+        bot = MagicMock()
+        bot.send_group_msg = AsyncMock()
+        groups = MagicMock()
+        groups.all_groups.return_value = ["123"]
+        rule_switch = MagicMock()
+        rule_switch.is_enabled.return_value = True
+        svc = MagicMock()
+        svc.config.load_error = None
+        svc.get_group_settings.return_value = MagicMock(enabled=True)
+        svc.recent_message_buffer.list_recent.return_value = []
+        svc.generate_reply = AsyncMock(return_value={"reply": "冒个泡"})
+        stats_tracker = MagicMock()
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        old_state = aw._state
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(
+                boredom_silence_seconds=1,
+                boredom_probability=1.0,
+                boredom_check_interval=1,
+            ),
+        )
+        aw._state = AwakeningState()
+        try:
+            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
+        finally:
+            aw._config = old_cfg
+            aw._state = old_state
+
+        svc.generate_reply.assert_awaited_once()
+        bot.send_group_msg.assert_awaited_once_with(group_id=123, message="冒个泡")
+        stats_tracker.record_trigger.assert_called_once_with("123", "awakening_boredom")

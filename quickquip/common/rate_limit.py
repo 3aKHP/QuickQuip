@@ -30,6 +30,15 @@ class SlidingWindowRateLimiter:
         user_queue.append(current_ts)
         return True
 
+    def can_allow(self, user_id: int | str, now_ts: float | None = None) -> bool:
+        current_ts = time() if now_ts is None else now_ts
+
+        self._prune(self.global_timestamps, current_ts)
+        user_queue = self.user_timestamps[str(user_id)]
+        self._prune(user_queue, current_ts)
+
+        return len(self.global_timestamps) < self.global_limit and len(user_queue) < self.user_limit
+
     def snapshot(self, now_ts: float | None = None) -> dict:
         current_ts = time() if now_ts is None else now_ts
         self._prune(self.global_timestamps, current_ts)
@@ -135,6 +144,19 @@ class KeyedRateLimiter:
         bucket_key = self._bucket_key(key, group_id)
         limiter = self._get_or_create(key, bucket_key)
         return limiter.allow(user_id=user_id, now_ts=now_ts)
+
+    def can_allow(
+        self,
+        key: str,
+        user_id: int | str,
+        now_ts: float | None = None,
+        group_id: int | str | None = None,
+    ) -> bool:
+        if key not in self.rule_configs:
+            return True
+        bucket_key = self._bucket_key(key, group_id)
+        limiter = self._get_or_create(key, bucket_key)
+        return limiter.can_allow(user_id=user_id, now_ts=now_ts)
 
     def snapshot(self, now_ts: float | None = None) -> dict[str, dict]:
         result: dict[str, dict] = {}

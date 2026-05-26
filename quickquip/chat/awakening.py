@@ -6,6 +6,7 @@ import random
 import re
 import tomllib
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from time import monotonic
@@ -14,6 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.json_utils import extract_json_object
 from quickquip.common.paths import CONFIG_AWAKENING_TOML
 
 logger = logging.getLogger(__name__)
@@ -418,13 +420,13 @@ def _word_overlap_ratio(user_text: str, bot_texts: list[str]) -> float:
 _RELEVANCE_SYSTEM = (
     "你是一个仅输出 JSON 的判定器。"
     "判断用户消息是否在延续或回应 bot 之前的对话。"
-    '仅输出 {"trigger": true} 或 {"trigger": false}。'
+    '仅输出 {"score": 0.0} 到 {"score": 1.0}，score 越高越相关。'
 )
 
 _QA_SYSTEM = (
     "你是一个仅输出 JSON 的判定器。"
     "判断用户消息是否是一个需要专业性回答的问题（而非日常闲聊问候）。"
-    '仅输出 {"trigger": true} 或 {"trigger": false}。'
+    '仅输出 {"score": 0.0} 到 {"score": 1.0}，score 越高越需要回答。'
 )
 
 
@@ -432,10 +434,11 @@ async def _llm_judge(
     svc: Any,
     system_prompt: str,
     user_prompt: str,
+    threshold: float,
     timeout: float,
     max_tokens: int,
 ) -> bool:
-    """Call quick_judge with timeout. Returns True if trigger=true."""
+    """Call quick_judge with timeout. Returns True if score passes threshold."""
     try:
         # quick_judge uses its own system_prompt; we embed ours in the user prompt
         full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
@@ -443,7 +446,7 @@ async def _llm_judge(
             svc.quick_judge(full_prompt, max_tokens=max_tokens),
             timeout=timeout,
         )
-        return _extract_json_trigger(raw)
+        return _extract_json_trigger(raw, threshold)
     except asyncio.TimeoutError:
         logger.debug("awakening: quick_judge timed out (%.1fs)", timeout)
         return False
@@ -452,15 +455,26 @@ async def _llm_judge(
         return False
 
 
-def _extract_json_trigger(raw: str) -> bool:
-    """Extract trigger boolean from JSON response string."""
-    text = raw.strip()
-    # Strip markdown code fences if present
-    if text.startswith("```"):
-        lines = text.splitlines()
-        lines = [ln for ln in lines if not ln.strip().startswith("```")]
-        text = "\n".join(lines)
-    return bool(re.search(r'"trigger"\s*:\s*true', text, re.IGNORECASE))
+def _extract_json_trigger(raw: str, threshold: float = 0.5) -> bool:
+    """Extract trigger decision from JSON-ish model output."""
+    try:
+        data = extract_json_object(raw)
+        if "score" in data:
+            return float(data["score"]) >= threshold
+        if "trigger" in data:
+            trigger = data["trigger"]
+            if isinstance(trigger, bool):
+                return trigger
+            if isinstance(trigger, str):
+                return trigger.strip().lower() == "true"
+            return bool(trigger)
+    except (TypeError, ValueError):
+        pass
+    return bool(re.search(r'"trigger"\s*:\s*true', raw, re.IGNORECASE))
+
+
+def _llm_cache_text(message_text: str, threshold: float) -> str:
+    return f"{threshold:.6g}\0{message_text}"
 
 
 # ---------------------------------------------------------------------------
@@ -574,9 +588,9 @@ async def check_relevance(
     """Check if user message is continuing a conversation with the bot.
 
     Two-stage: fast word overlap filter -> LLM judge.
-    Zero LLM calls if threshold >= 1.0 (disabled).
+    Zero LLM calls if threshold <= 0 or >= 1.0 (disabled).
     """
-    if settings.relevance_threshold >= 1.0 or not message_text.strip():
+    if settings.relevance_threshold <= 0 or settings.relevance_threshold >= 1.0 or not message_text.strip():
         return None
 
     st = state or _state
@@ -590,7 +604,8 @@ async def check_relevance(
         return None
 
     # Check LLM cache
-    cached = st.llm_cache_get(_RULE_RELEVANCE, group_id, message_text)
+    cache_text = _llm_cache_text(message_text, settings.relevance_threshold)
+    cached = st.llm_cache_get(_RULE_RELEVANCE, group_id, cache_text)
     if cached is not None:
         if not cached:
             return None
@@ -603,8 +618,8 @@ async def check_relevance(
     # Stage 2: LLM judge
     context_lines = [f"[bot 回复 {i+1}] {msg}" for i, msg in enumerate(bot_msgs)]
     user_prompt = "\n".join(context_lines) + f"\n[用户消息] {message_text.strip()}"
-    triggered = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, timeout, max_tokens)
-    st.llm_cache_set(_RULE_RELEVANCE, group_id, message_text, triggered)
+    triggered = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens)
+    st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, triggered)
 
     if not triggered:
         return None
@@ -629,9 +644,9 @@ async def check_qa(
     """Check if user message is a question needing a professional answer.
 
     Two-stage: fast regex filter -> LLM judge.
-    Zero LLM calls if threshold >= 1.0 (disabled).
+    Zero LLM calls if threshold <= 0 or >= 1.0 (disabled).
     """
-    if settings.qa_threshold >= 1.0 or not message_text.strip():
+    if settings.qa_threshold <= 0 or settings.qa_threshold >= 1.0 or not message_text.strip():
         return None
 
     # Stage 1: fast regex filter - must contain question markers
@@ -641,7 +656,8 @@ async def check_qa(
     st = state or _state
 
     # Check LLM cache
-    cached = st.llm_cache_get(_RULE_QA, group_id, message_text)
+    cache_text = _llm_cache_text(message_text, settings.qa_threshold)
+    cached = st.llm_cache_get(_RULE_QA, group_id, cache_text)
     if cached is not None:
         if not cached:
             return None
@@ -652,8 +668,8 @@ async def check_qa(
         )
 
     # Stage 2: LLM judge
-    triggered = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), timeout, max_tokens)
-    st.llm_cache_set(_RULE_QA, group_id, message_text, triggered)
+    triggered = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens)
+    st.llm_cache_set(_RULE_QA, group_id, cache_text, triggered)
 
     if not triggered:
         return None
@@ -678,38 +694,54 @@ async def check_awakening_triggers(
     svc: Any,
     *,
     state: AwakeningState | None = None,
+    rule_enabled: Callable[[str], bool] | None = None,
+    rate_available: Callable[[str], bool] | None = None,
 ) -> AwakeningTriggerResult | None:
+    if not bool(getattr(llm_settings, "enabled", True)):
+        return None
+
     cfg = get_config()
     settings = cfg.resolve_group(group_id)
     st = state or _state
 
+    def _rule_enabled(rule_name: str) -> bool:
+        return True if rule_enabled is None else rule_enabled(rule_name)
+
+    def _rate_available(rule_name: str) -> bool:
+        return True if rate_available is None else rate_available(rule_name)
+
     # Stage 1: synchronous checks (no LLM)
-    result = check_extend(group_id, user_id, message_text, settings, st)
-    if result is not None:
-        return result
+    if _rule_enabled(_RULE_EXTEND) and _rate_available(_RULE_EXTEND):
+        result = check_extend(group_id, user_id, message_text, settings, st)
+        if result is not None:
+            return result
 
     persona_id = getattr(llm_settings, "persona_id", "")
-    result = check_interest(group_id, user_id, message_text, settings, persona_id, svc)
-    if result is not None:
-        return result
+    if _rule_enabled(_RULE_INTEREST) and _rate_available(_RULE_INTEREST):
+        result = check_interest(group_id, user_id, message_text, settings, persona_id, svc)
+        if result is not None:
+            return result
 
     # Stage 2: async checks (may call LLM, gated by threshold + fast filter)
     qj_cfg = svc.config.quick_judge if hasattr(svc, "config") else None
     timeout = qj_cfg.timeout if qj_cfg and qj_cfg.timeout > 0 else 2.0
     max_tokens = qj_cfg.max_tokens if qj_cfg and qj_cfg.max_tokens > 0 else 64
 
-    result = await check_relevance(group_id, user_id, message_text, settings, svc, st, timeout, max_tokens)
-    if result is not None:
-        return result
+    if _rule_enabled(_RULE_RELEVANCE) and _rate_available(_RULE_RELEVANCE):
+        result = await check_relevance(group_id, user_id, message_text, settings, svc, st, timeout, max_tokens)
+        if result is not None:
+            return result
 
-    result = await check_qa(group_id, user_id, message_text, settings, svc, st, timeout, max_tokens)
-    if result is not None:
-        return result
+    if _rule_enabled(_RULE_QA) and _rate_available(_RULE_QA):
+        result = await check_qa(group_id, user_id, message_text, settings, svc, st, timeout, max_tokens)
+        if result is not None:
+            return result
 
     # Stage 3: fallback
-    result = check_fallback(group_id, user_id, message_text, settings)
-    if result is not None:
-        return result
+    if _rule_enabled(_RULE_FALLBACK) and _rate_available(_RULE_FALLBACK):
+        result = check_fallback(group_id, user_id, message_text, settings)
+        if result is not None:
+            return result
 
     return None
 
@@ -717,6 +749,18 @@ async def check_awakening_triggers(
 # ---------------------------------------------------------------------------
 # Boredom check entry point (for scheduler)
 # ---------------------------------------------------------------------------
+
+
+def _is_group_llm_enabled(svc: Any, group_id: int | str) -> bool:
+    config = getattr(svc, "config", None)
+    if getattr(config, "load_error", None):
+        return False
+    try:
+        settings = svc.get_group_settings(group_id)
+    except Exception:
+        logger.debug("awakening_boredom: failed to resolve LLM settings for group %s", group_id, exc_info=True)
+        return False
+    return bool(getattr(settings, "enabled", False))
 
 
 async def run_boredom_check(
@@ -733,6 +777,8 @@ async def run_boredom_check(
 
     for gid in boredom_enabled_groups.all_groups():
         if not rule_switch.is_enabled(gid, _RULE_BOREDOM):
+            continue
+        if not _is_group_llm_enabled(svc, gid):
             continue
         settings = cfg.resolve_group(gid)
         result = check_boredom(gid, settings, st)

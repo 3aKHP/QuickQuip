@@ -133,11 +133,17 @@ def register_message_matcher(on_message, Message, MessageSegment):
         from quickquip.chat.awakening import check_awakening_triggers
 
         awakening_result = await check_awakening_triggers(
-            group_id, user_id, text, llm_settings, svc,
+            group_id,
+            user_id,
+            text,
+            llm_settings,
+            svc,
+            rule_enabled=lambda rule_name: rule_switch.is_enabled(group_id, rule_name),
+            rate_available=lambda rule_name: rate_limiter.can_allow(rule_name, user_id, group_id=group_id),
         )
         if awakening_result and rule_switch.is_enabled(group_id, awakening_result.rule_name):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
-            if not rate_limiter.allow(awakening_result.rule_name, user_id):
+            if not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
                 return
             trigger_context = recent_messages.list_recent(group_id, limit=20)
             result = await svc.generate_reply(

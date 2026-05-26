@@ -13,6 +13,14 @@ def test_sliding_window_basic():
     assert limiter.allow("u1", now_ts=61) is True
 
 
+def test_sliding_window_can_allow_does_not_consume():
+    limiter = SlidingWindowRateLimiter(global_limit=1, user_limit=1, window_seconds=60)
+    assert limiter.can_allow("u1", now_ts=0) is True
+    assert limiter.can_allow("u1", now_ts=1) is True
+    assert limiter.allow("u1", now_ts=2) is True
+    assert limiter.can_allow("u1", now_ts=3) is False
+
+
 def test_keyed_rate_limiter_keys_are_independent():
     limiter = KeyedRateLimiter(
         rule_limits={
@@ -30,6 +38,17 @@ def test_keyed_rate_limiter_keys_are_independent():
     assert limiter.allow("play_target", "u1", now_ts=5) is True
     assert limiter.allow("play_target", "u1", now_ts=6) is True
     assert limiter.allow("play_target", "u1", now_ts=7) is True
+
+
+def test_keyed_rate_limiter_can_allow_does_not_consume():
+    limiter = KeyedRateLimiter(
+        rule_limits={"awakening_qa": {"global_limit": 1, "user_limit": 1, "scope": "global"}},
+        window_seconds=60,
+    )
+    assert limiter.can_allow("awakening_qa", "u1", now_ts=0) is True
+    assert limiter.can_allow("awakening_qa", "u1", now_ts=1) is True
+    assert limiter.allow("awakening_qa", "u1", now_ts=2) is True
+    assert limiter.can_allow("awakening_qa", "u1", now_ts=3) is False
 
 
 def test_keyed_rate_limiter_global_per_rule():
