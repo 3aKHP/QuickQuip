@@ -36,6 +36,11 @@ from quickquip.chat.daily_summary import (
 from quickquip.chat.daily_briefing import DailyBriefingEnabledGroups
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
+from quickquip.chat.awakening import (
+    get_config as _get_awakening_config,
+    get_state as _get_awakening_state,
+    reload_config as _reload_awakening_config,
+)
 from quickquip.chat.offline_messages import OfflineMessageStore
 from quickquip.chat.group_quotes import GroupQuoteStore
 from quickquip.common.message_deduper import RecentMessageDeduper
@@ -87,6 +92,7 @@ stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
 recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
 message_deduper = RecentMessageDeduper()
+awakening_state = _get_awakening_state()
 
 daily_collector = DailyMessageCollector()
 daily_store = DailySummaryStore()
@@ -176,11 +182,13 @@ def reload_chat_rules_pipeline() -> dict[str, int]:
     custom_chain_games.replace_defs(
         [ChainGameDef.from_dict(d) for d in chat_config.CHAIN_GAME_CONFIGS]
     )
+    _reload_awakening_config()
     return {
         "text_rules": len(chat_config.TEXT_REPLY_RULES),
         "context_rules": len(chat_config.CONTEXT_REPLY_RULES),
         "chain_games": len(chat_config.CHAIN_GAME_CONFIGS),
         "rate_limit_rules": len(chat_config.RATE_LIMIT_RULES),
+        "awakening_config_error": 1 if _get_awakening_config().load_error else 0,
     }
 
 

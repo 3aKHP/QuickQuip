@@ -454,10 +454,12 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
 
     async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
         """
-        用于 context_rules 的极速判定调用。
+        用于 context_rules 和 awakening 的极速判定调用。
         不走群配置、不注入记忆、不启用工具，只发单条 system+user。
+        优先使用 [triggers.quick_judge] 配置的 provider/model。
         """
-        provider_id = self.config.runtime.default_provider
+        qj = self.config.quick_judge
+        provider_id = qj.provider_id if qj.provider_id else self.config.runtime.default_provider
         if not provider_id or provider_id not in self.config.providers:
             provider_id = next(iter(self.config.providers), None)
         if not provider_id:
@@ -466,8 +468,10 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         provider = self.config.providers[provider_id]
         judge_provider = replace(provider, stream_enabled=False)
 
+        model = qj.model if qj.model else judge_provider.default_model
+
         request = LLMRequest(
-            model=judge_provider.default_model,
+            model=model,
             system_prompt="你是一个仅输出 JSON 的判定器。",
             messages=[
                 LLMConversationMessage(role="user", content=prompt),

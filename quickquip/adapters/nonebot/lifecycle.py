@@ -12,6 +12,7 @@ from quickquip.app.message_pipeline import (
     daily_enabled_groups,
     daily_briefing_enabled_groups,
 )
+from quickquip.adapters.nonebot.awakening_plugin import boredom_enabled_groups
 from quickquip.tieba.service import tieba_service
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ def _init_mtimes() -> None:
         RULE_SWITCH_PATH,
         daily_enabled_groups.path,
         daily_briefing_enabled_groups.path,
+        boredom_enabled_groups.path,
     ):
         try:
             _watched[str(path)] = os.stat(path).st_mtime
@@ -39,6 +41,7 @@ def _reload_if_changed() -> None:
         (RULE_SWITCH_PATH, lambda: rule_switch.load(RULE_SWITCH_PATH)),
         (daily_enabled_groups.path, daily_enabled_groups.load),
         (daily_briefing_enabled_groups.path, daily_briefing_enabled_groups.load),
+        (boredom_enabled_groups.path, boredom_enabled_groups.load),
     ]
     for path, reload_fn in checks:
         key = str(path)

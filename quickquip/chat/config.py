@@ -33,6 +33,12 @@ _BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "repeat_same_user_warning": {"global_limit": 4, "user_limit": 2},
     "good_girl_chain_entry": {"global_limit": 20, "user_limit": 10},
     "game_interaction": {"global_limit": 30, "user_limit": 15},
+    "awakening_extend": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "awakening_interest": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "awakening_fallback": {"global_limit": 3, "user_limit": 1, "scope": "global"},
+    "awakening_boredom": {"global_limit": 3, "user_limit": 1, "scope": "global"},
+    "awakening_relevance": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "awakening_qa": {"global_limit": 6, "user_limit": 3, "scope": "global"},
 }
 
 RATE_LIMIT_RULES: dict[str, dict] = dict(_BUILTIN_RATE_LIMIT_RULES)
