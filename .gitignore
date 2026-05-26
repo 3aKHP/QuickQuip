@@ -45,6 +45,7 @@ config/generation.toml
 config/chat_rules.toml
 config/games.toml
 config/sensitive_words.toml
+config/awakening.toml
 config/personas/
 config/llm.local.toml
 config/llm.*.local.toml

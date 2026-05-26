@@ -6,6 +6,7 @@ from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
+    awakening_state,
     get_llm_service,
     get_sender_name,
     message_deduper,
@@ -64,6 +65,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         stats_tracker.record_message(group_id, user_id, sender_name)
         record_group_message(group_id, user_id, sender_name, rendered_text)
         record_wordcloud_message(group_id, sender_name, rendered_text)
+        awakening_state.record_message(group_id, user_id)
 
         pending = offline_message_store.pop_pending(group_id, user_id)
         if pending:
@@ -120,11 +122,47 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 message_id=message_id or None,
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
+            awakening_state.bot_messages.add(group_id, result["reply"])
             resp = await matcher.send(result["reply"])
             sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
             if sent_msg_id:
                 scope_key = str(group_id)
                 svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+            return
+
+        from quickquip.chat.awakening import check_awakening_triggers
+
+        awakening_result = await check_awakening_triggers(
+            group_id,
+            user_id,
+            text,
+            llm_settings,
+            svc,
+            rule_enabled=lambda rule_name: rule_switch.is_enabled(group_id, rule_name),
+            rate_available=lambda rule_name: rate_limiter.can_allow(rule_name, user_id, group_id=group_id),
+        )
+        if awakening_result and rule_switch.is_enabled(group_id, awakening_result.rule_name):
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+            if not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
+                return
+            trigger_context = recent_messages.list_recent(group_id, limit=20)
+            result = await svc.generate_reply(
+                group_id=group_id,
+                user_id=user_id,
+                sender_name=sender_name,
+                prompt=awakening_result.prompt,
+                image_urls=[],
+                recent_messages=trigger_context,
+                message_id=message_id or None,
+            )
+            stats_tracker.record_trigger(group_id, awakening_result.rule_name)
+            awakening_state.bot_messages.add(group_id, result["reply"])
+            resp = await matcher.send(result["reply"])
+            sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+            if sent_msg_id:
+                scope_key = str(group_id)
+                svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+            awakening_state.mark_awakened(group_id, user_id)
             return
 
         result = await resolve_reply(

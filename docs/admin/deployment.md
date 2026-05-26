@@ -6,7 +6,7 @@ LLM 模块的详细结构、边界和群内命令说明见 [../dev/llm-module.md
 
 - 一台 Linux 服务器（1 核 1G 即可）
 - 已安装 Docker 和 Docker Compose
-- QQ 账号（用于 NapCat 登录）
+- QQ 账号（用于 LLBot 登录）
 
 ## 推荐服务器
 
@@ -114,16 +114,16 @@ data/tieba/storage_state.json
 
 容器化部署时，`data/fonts/` 目录应通过 `data/` bind mount 挂载到容器内，字体文件上传一次后即可持久使用。若字体文件缺失，执行 `/wordcloud` 时 bot 会回复明确的错误提示。
 
-### 5. 首次登录 NapCat
+### 5. 首次登录 LLBot
 
-NapCat 首次启动需要扫码登录：
+LLBot 首次启动需要扫码登录：
 
 ```bash
-# 查看 NapCat 日志，找到登录二维码
-docker compose logs -f napcat
+# 查看 LLBot 日志，找到登录二维码
+docker compose logs -f llbot
 ```
 
-日志中会出现二维码或登录链接，用手机 QQ 扫码确认。登录成功后，登录态会持久化在 `napcat-data/` 目录中。
+日志中会出现二维码或登录链接，用手机 QQ 扫码确认。登录成功后，登录态会持久化在 `llbot-qq/` 目录中，配置文件在 `llbot-data/` 中。也可通过 WebUI（`http://<服务器IP>:3080`）扫码。
 
 ### 6. 验证运行
 
@@ -221,13 +221,13 @@ docker compose down
 
 当前项目已经同时保留 Tavily 直连能力和 MCP 扩展能力。MCP 集成的正式约定见 [../dev/mcp-integration.md](../dev/mcp-integration.md)。
 
-### NapCat 登录态过期
+### LLBot 登录态过期
 
 换 IP 或长时间未活动后可能需要重新扫码：
 
 ```bash
-docker compose restart napcat
-docker compose logs -f napcat  # 找新的二维码
+docker compose restart llbot
+docker compose logs -f llbot  # 找新的二维码
 ```
 
 ### QQ 风控/冻结

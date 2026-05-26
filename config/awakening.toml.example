@@ -1,0 +1,22 @@
+# 唤醒模块配置。默认所有功能关闭（阈值 = 0 或 >= 1）。
+# 复制为 config/awakening.toml 后按需修改。
+
+[awakening.defaults]
+extend_duration = 0          # 唤醒延长秒数，0=关闭
+fallback_probability = 0     # 兜底概率 0-1，0=关闭
+boredom_silence_seconds = 0  # 沉寂判定秒数，0=关闭
+boredom_probability = 0      # 沉寂触发概率 0-1
+boredom_check_interval = 300 # 无聊检查间隔秒数
+boredom_dnd_start = ""       # 免打扰开始 HH:MM，空=不启用
+boredom_dnd_end = ""         # 免打扰结束 HH:MM
+interest_topics = []         # 全局兴趣关键词
+relevance_threshold = 1.0    # 相关性唤醒阈值 0-1，>=1 关闭（不产生 LLM 调用）
+qa_threshold = 1.0           # 答疑唤醒阈值 0-1，>=1 关闭（不产生 LLM 调用）
+
+# 按群覆盖（可选，取消注释并填写群号）
+# [[awakening.group_overrides]]
+# group_id = "123456"
+# extend_duration = 10
+# interest_topics = ["编程", "Python"]
+# relevance_threshold = 0.5
+# qa_threshold = 0.88

@@ -26,6 +26,14 @@ class AutoSearchConfig:
 
 
 @dataclass(slots=True)
+class QuickJudgeConfig:
+    provider_id: str = ""
+    model: str = ""
+    timeout: float = 2.0
+    max_tokens: int = 64
+
+
+@dataclass(slots=True)
 class RuntimeConfig:
     enabled: bool = False
     memory_enabled: bool = True
@@ -162,6 +170,7 @@ class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     auto_search: AutoSearchConfig = field(default_factory=AutoSearchConfig)
+    quick_judge: QuickJudgeConfig = field(default_factory=QuickJudgeConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
@@ -456,6 +465,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
     auto_search_raw = expand_env_value(as_dict(triggers_raw.get("auto_search")))
+    quick_judge_raw = expand_env_value(as_dict(triggers_raw.get("quick_judge")))
 
     config = LLMConfig(
         runtime=RuntimeConfig(
@@ -489,6 +499,12 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         auto_search=AutoSearchConfig(
             enabled=as_bool(auto_search_raw.get("enabled", False), default=False),
             search_max_calls_per_round=max(1, min(int(auto_search_raw.get("search_max_calls_per_round", 3)), 32)),
+        ),
+        quick_judge=QuickJudgeConfig(
+            provider_id=str(quick_judge_raw.get("provider_id", "")).strip(),
+            model=str(quick_judge_raw.get("model", "")).strip(),
+            timeout=max(0.5, float(quick_judge_raw.get("timeout", 2.0))),
+            max_tokens=max(8, int(quick_judge_raw.get("max_tokens", 64))),
         ),
         tools=ToolsConfig(
             enabled=[

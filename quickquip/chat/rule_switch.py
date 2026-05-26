@@ -20,6 +20,12 @@ _BUILTIN_SWITCHABLE_RULES: set[str] = {
     "timezone_sleep",
     "llm_chat",
     "tieba_random_post",
+    "awakening_extend",
+    "awakening_interest",
+    "awakening_fallback",
+    "awakening_boredom",
+    "awakening_relevance",
+    "awakening_qa",
     # 历史保留（曾在硬编码名单中，可能在旧部署里出现）
     "maggot_arrival",
     "master_protection",

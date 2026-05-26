@@ -33,6 +33,14 @@ empty_prompt_reply = "请在触发指令或艾特后面补上想说的话。"
 enabled = false
 search_max_calls_per_round = 3
 
+# 快速判定专用模型（用于 context_rules llm_context、awakening 相关性/答疑判断等）。
+# 留空则回退到 default_provider / default_model。推荐使用廉价小模型以降低成本。
+[triggers.quick_judge]
+provider_id = ""   # 引用 [[providers]] 中的 id，留空用 default_provider
+model = ""         # 留空用该 provider 的 default_model
+timeout = 2.0      # 秒
+max_tokens = 64
+
 [tools]
 enabled = []
 # 工具发现：工具较多时只常驻少量核心工具，其余工具由 tool_search

@@ -144,9 +144,9 @@ class TestCooldownTracker:
 
 
 class TestRollLognormal:
-    def test_never_negative(self):
+    def test_never_zero_or_negative(self):
         for _ in range(500):
-            assert _roll_lognormal(1.0) >= 0
+            assert _roll_lognormal(1.0) > 0
 
     def test_median_near_one(self):
         samples = sorted(_roll_lognormal(1.0) for _ in range(2000))

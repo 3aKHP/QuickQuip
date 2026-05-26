@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 def _roll_lognormal(sigma: float) -> float:
     """Roll a log10-symmetric luck value: lg(x) ~ N(0, σ).
 
-    No hard bounds — extreme values (1e-9 or 1e9) are rare but possible.
+    No hard bounds or rounding — extreme values (1e-9 or 1e9) are rare but possible.
     σ=1 → ±1σ = [0.1, 10], median = 1.0.
     """
-    return round(10.0 ** random.gauss(0.0, sigma), 2)
+    return 10.0 ** random.gauss(0.0, sigma)
 
 
 def _utc_now() -> str:
