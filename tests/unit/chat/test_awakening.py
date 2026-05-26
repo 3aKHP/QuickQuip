@@ -2,23 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from time import monotonic
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningDefaults,
     AwakeningGroupOverride,
     AwakeningState,
-    AwakeningTriggerResult,
     BotMessageCache,
     ResolvedAwakeningSettings,
     _QA_FAST_PATTERNS,
-    _RULE_BOREDOM,
     _RULE_EXTEND,
-    _RULE_FALLBACK,
     _RULE_INTEREST,
     _RULE_QA,
     _RULE_RELEVANCE,
