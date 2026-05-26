@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from pathlib import Path
-from time import time
 
 try:
     import nonebot
@@ -15,10 +13,10 @@ except (ModuleNotFoundError, ValueError):
 
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
-    awakening_state,
     get_llm_service,
     rate_limiter,
     rule_switch,
+    stats_tracker,
 )
 from quickquip.chat.awakening import get_config, run_boredom_check
 
@@ -49,7 +47,14 @@ class BoredomEnabledGroups:
         try:
             with self.path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._groups = {str(g) for g in data.get("enabled", [])}
+            raw_groups = data.get("enabled", [])
+            validated: set[str] = set()
+            for g in raw_groups:
+                try:
+                    validated.add(_safe_group_id(g))
+                except ValueError:
+                    logger.warning("awakening: ignoring invalid group_id in %s: %r", self.path, g)
+            self._groups = validated
         except (OSError, json.JSONDecodeError):
             self._groups = set()
 
@@ -104,7 +109,7 @@ def _register_scheduler_jobs() -> None:
             except Exception:
                 return
             svc = get_llm_service()
-            await run_boredom_check(bot, boredom_enabled_groups, rule_switch, svc, rate_limiter)
+            await run_boredom_check(bot, boredom_enabled_groups, rule_switch, svc, rate_limiter, stats_tracker)
             try:
                 record_job_result(job_id, True)
             except Exception:
@@ -193,7 +198,7 @@ def register_awakening_commands(on_command) -> None:
             if not _is_admin(event):
                 await cmd.finish("仅管理员可执行此操作")
             if len(tokens) < 2:
-                await cmd.finish("用法: /awakening on <规则名>\n可选: awakening_extend, awakening_interest, awakening_fallback, awakening_boredom")
+                await cmd.finish("用法: /awakening on <规则名>\n可选: awakening_extend, awakening_interest, awakening_fallback, awakening_boredom, awakening_relevance, awakening_qa")
             rule_name = tokens[1]
             valid_rules = {"awakening_extend", "awakening_interest", "awakening_fallback", "awakening_boredom", "awakening_relevance", "awakening_qa"}
             if rule_name not in valid_rules:
@@ -234,7 +239,9 @@ def register_awakening_commands(on_command) -> None:
             "  status        — 查看状态\n"
             "  on <rule>     — 启用规则（管理员）\n"
             "  off <rule>    — 禁用规则（管理员）\n"
-            "  boredom on|off — 开关无聊唤醒群启用（管理员）"
+            "  boredom on|off — 开关无聊唤醒群启用（管理员）\n"
+            "可选规则: awakening_extend, awakening_interest, awakening_fallback,\n"
+            "  awakening_boredom, awakening_relevance, awakening_qa"
         )
 
 

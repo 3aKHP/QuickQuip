@@ -443,7 +443,7 @@ async def _llm_judge(
             svc.quick_judge(full_prompt, max_tokens=max_tokens),
             timeout=timeout,
         )
-        return '"trigger": true' in raw or '"trigger":true' in raw
+        return _extract_json_trigger(raw)
     except asyncio.TimeoutError:
         logger.debug("awakening: quick_judge timed out (%.1fs)", timeout)
         return False
@@ -454,7 +454,13 @@ async def _llm_judge(
 
 def _extract_json_trigger(raw: str) -> bool:
     """Extract trigger boolean from JSON response string."""
-    return '"trigger": true' in raw or '"trigger":true' in raw
+    text = raw.strip()
+    # Strip markdown code fences if present
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = [ln for ln in lines if not ln.strip().startswith("```")]
+        text = "\n".join(lines)
+    return bool(re.search(r'"trigger"\s*:\s*true', text, re.IGNORECASE))
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +554,6 @@ def check_boredom(
         return None
     if random.random() >= settings.boredom_probability:
         return None
-    st.mark_boredom_triggered(group_id)
     return AwakeningTriggerResult(
         rule_name=_RULE_BOREDOM,
         prompt=_BOREDOM_PROMPT,
@@ -678,8 +683,6 @@ async def check_awakening_triggers(
     settings = cfg.resolve_group(group_id)
     st = state or _state
 
-    st.record_message(group_id, user_id)
-
     # Stage 1: synchronous checks (no LLM)
     result = check_extend(group_id, user_id, message_text, settings, st)
     if result is not None:
@@ -722,6 +725,7 @@ async def run_boredom_check(
     rule_switch: Any,
     svc: Any,
     rate_limiter: Any | None = None,
+    stats_tracker: Any | None = None,
 ) -> None:
     cfg = get_config()
     st = get_state()
@@ -748,6 +752,10 @@ async def run_boredom_check(
                 message_id=None,
             )
             await bot.send_group_msg(group_id=int(gid), message=reply_result["reply"])
+            st.mark_boredom_triggered(gid)
+            st.bot_messages.add(gid, reply_result["reply"])
+            if stats_tracker is not None:
+                stats_tracker.record_trigger(gid, _RULE_BOREDOM)
             logger.info("awakening_boredom: sent to group %s (%s)", gid, result.trigger_reason)
         except Exception:
             logger.warning("awakening_boredom: failed for group %s", gid, exc_info=True)
