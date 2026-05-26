@@ -34,7 +34,7 @@ def _ssl_context():
     try:
         import certifi
     except ModuleNotFoundError:
-        return None
+        return ssl.create_default_context()
     return ssl.create_default_context(cafile=certifi.where())
 
 
