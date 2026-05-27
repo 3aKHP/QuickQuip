@@ -48,6 +48,10 @@ import { buildLogDownloadUrl, buildLogStreamUrl, fetchLogIndex } from '../api/lo
 
 interface LogLine { id: number; text: string }
 
+const MAX_LINES = 1800
+const MAX_PENDING_LINES = 320
+const FLUSH_FALLBACK_MS = 250
+
 const loading = ref(false)
 const currentFile = ref('')
 const connected = ref(false)
@@ -58,6 +62,7 @@ const logEl = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
 let nextId = 0
 let rafId: number | null = null
+let fallbackTimerId: number | null = null
 const pending: string[] = []
 
 const currentFileLabel = computed(() => currentFile.value ? `当前文件：${currentFile.value}` : '当前文件：暂无')
@@ -110,12 +115,30 @@ async function loadCurrent() {
 
 function enqueueLine(line: string) {
   pending.push(line)
-  if (rafId == null) {
-    rafId = requestAnimationFrame(() => {
-      flushPending()
-      rafId = null
-    })
+  if (pending.length > MAX_PENDING_LINES) pending.splice(0, pending.length - MAX_PENDING_LINES)
+  scheduleFlush()
+}
+
+function scheduleFlush() {
+  if (rafId != null || fallbackTimerId != null) return
+  rafId = requestAnimationFrame(runScheduledFlush)
+  fallbackTimerId = window.setTimeout(runScheduledFlush, FLUSH_FALLBACK_MS)
+}
+
+function cancelScheduledFlush() {
+  if (rafId != null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
   }
+  if (fallbackTimerId != null) {
+    clearTimeout(fallbackTimerId)
+    fallbackTimerId = null
+  }
+}
+
+function runScheduledFlush() {
+  cancelScheduledFlush()
+  flushPending()
 }
 
 function flushPending() {
@@ -123,7 +146,7 @@ function flushPending() {
   for (const text of pending) {
     lines.value.push({ id: nextId++, text })
   }
-  if (lines.value.length > 1800) lines.value.splice(0, lines.value.length - 1800)
+  if (lines.value.length > MAX_LINES) lines.value.splice(0, lines.value.length - MAX_LINES)
   pending.length = 0
   if (autoScroll.value) {
     nextTick(() => {
@@ -155,10 +178,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   source?.close()
-  if (rafId != null) {
-    cancelAnimationFrame(rafId)
-    rafId = null
-  }
+  cancelScheduledFlush()
+  pending.length = 0
 })
 </script>
 

@@ -65,6 +65,10 @@ interface TraceEntry {
   payload: string
 }
 
+const MAX_ENTRIES = 500
+const MAX_PENDING_ENTRIES = 120
+const FLUSH_FALLBACK_MS = 250
+
 const loading = ref(false)
 const connected = ref(false)
 const traceActive = ref(false)
@@ -76,6 +80,7 @@ const traceEl = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
 let nextId = 0
 let rafId: number | null = null
+let fallbackTimerId: number | null = null
 const pending: TraceEntry[] = []
 
 const traceFlagLabel = computed(() => {
@@ -126,6 +131,8 @@ async function toggleTrace(next: boolean) {
 async function clear() {
   try {
     await clearTraces()
+    cancelScheduledFlush()
+    pending.length = 0
     entries.value = []
   } catch {
     // ignore
@@ -134,12 +141,30 @@ async function clear() {
 
 function enqueueEntry(entry: TraceEntry) {
   pending.push(entry)
-  if (rafId == null) {
-    rafId = requestAnimationFrame(() => {
-      flushPending()
-      rafId = null
-    })
+  if (pending.length > MAX_PENDING_ENTRIES) pending.splice(0, pending.length - MAX_PENDING_ENTRIES)
+  scheduleFlush()
+}
+
+function scheduleFlush() {
+  if (rafId != null || fallbackTimerId != null) return
+  rafId = requestAnimationFrame(runScheduledFlush)
+  fallbackTimerId = window.setTimeout(runScheduledFlush, FLUSH_FALLBACK_MS)
+}
+
+function cancelScheduledFlush() {
+  if (rafId != null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
   }
+  if (fallbackTimerId != null) {
+    clearTimeout(fallbackTimerId)
+    fallbackTimerId = null
+  }
+}
+
+function runScheduledFlush() {
+  cancelScheduledFlush()
+  flushPending()
 }
 
 function flushPending() {
@@ -147,7 +172,7 @@ function flushPending() {
   for (const entry of pending) {
     entries.value.push({ ...entry, id: nextId++ })
   }
-  if (entries.value.length > 500) entries.value.splice(0, entries.value.length - 500)
+  if (entries.value.length > MAX_ENTRIES) entries.value.splice(0, entries.value.length - MAX_ENTRIES)
   pending.length = 0
   if (autoScroll.value) {
     nextTick(() => {
@@ -183,10 +208,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   source?.close()
-  if (rafId != null) {
-    cancelAnimationFrame(rafId)
-    rafId = null
-  }
+  cancelScheduledFlush()
+  pending.length = 0
 })
 </script>
 
