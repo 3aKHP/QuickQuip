@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -301,13 +302,12 @@ class TestDndWindow:
         assert _is_in_dnd_window("", "") is False
 
     def test_same_day_range(self):
-        # Current CST time varies; just verify it returns a bool without crashing
-        result = _is_in_dnd_window("08:00", "20:00")
-        assert isinstance(result, bool)
+        assert _is_in_dnd_window("08:00", "20:00", now=datetime(2026, 5, 27, 12, 0)) is True
+        assert _is_in_dnd_window("08:00", "20:00", now=datetime(2026, 5, 27, 21, 0)) is False
 
     def test_overnight_range(self):
-        # current CST ~04:09, which IS in 23:00-08:00 range
-        assert _is_in_dnd_window("23:00", "08:00") is True
+        assert _is_in_dnd_window("23:00", "08:00", now=datetime(2026, 5, 27, 4, 0)) is True
+        assert _is_in_dnd_window("23:00", "08:00", now=datetime(2026, 5, 27, 12, 0)) is False
 
     def test_invalid_format(self):
         assert _is_in_dnd_window("bad", "08:00") is False
