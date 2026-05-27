@@ -4,12 +4,22 @@
 
 ## [Unreleased]
 
-### 变更
+## [1.7.10] - 2026-05-28
 
-- GHCR 分发镜像补齐 Playwright 浏览器、Docker CLI、Web Admin 前端和资料示例目录；公开 compose 示例改用可直接拉取的小写镜像名，并修正容器内 SearXNG 地址注入。
-- Windows 懒人包入口改为 `start.bat`，打包内置 Playwright Chromium，并在首次运行时生成 `.env`、常用配置、persona 与资料文件后提示补齐配置。
-- 生产运维模板迁移到 `prod.example/`，真实生产目录使用私有 `prod/`；QuickQuip 应用环境变量统一从根 `.env` 读取。
-- 贴吧登录态续签入口改为 `python -m quickquip.tieba.login`。
+> *“为什么版本号从 1.7.1 直接跳到了 1.7.10？”*
+> *在那个著名的方块游戏里，1.7.10 象征着最坚实的基础设施与最繁荣的 Mod 生态。今天，QuickQuip 也迎来了属于它的 1.7.10。*
+> *我们终于彻底清偿了从 0.x 时代积累至今的“开发与生产环境高度耦合”的技术债。它终于成为了一款真正意义上“开箱即用”的机器人框架。*
+
+### 🚀 史诗级基建重构 (Infrastructure)
+
+- 🐳 **Docker 镜像真正可用**：GHCR 分发镜像全面补齐了 Playwright 浏览器内核、Docker CLI、Web Admin 前端构建产物及资料示例目录。公开的 compose 示例已修正为可直接拉取的小写镜像名，并修复了容器内 SearXNG 地址注入的问题。
+- 🪟 **Windows 懒人包开箱即用**：启动入口全面升级为 `start.bat`。现已直接打包内置 Playwright Chromium，首次运行会自动生成 `.env`、常用配置、persona 及资料文件，并贴心提示补齐必要配置。告别繁琐的手动初始化！
+
+### 🔧 变更与优化 (Changed)
+
+- **生产环境与配置解耦**：生产运维模板正式迁移至 `prod.example/`，真实生产目录隔离至私有 `prod/`；QuickQuip 应用环境变量现已统一从项目根目录的 `.env` 读取，逻辑更加清晰。
+- **贴吧组件入口调整**：贴吧登录态续签入口规范化，改为 `python -m quickquip.tieba.login`。
+
 
 ## [1.7.1] - 2026-05-27
 
@@ -455,7 +465,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...HEAD
+[1.7.10]: https://github.com/3aKHP/QuickQuip/compare/v1.7.1...v1.7.10
 [1.7.1]: https://github.com/3aKHP/QuickQuip/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/3aKHP/QuickQuip/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/3aKHP/QuickQuip/compare/v1.6.0...v1.6.1
