@@ -168,3 +168,19 @@ async def sync_tieba(forum: str | None = Query(default=None, max_length=32)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/tieba/peek")
+async def peek_tieba(forum: str = Query(..., max_length=32)):
+    from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
+
+    _validate_forum(forum)
+    try:
+        thread = await tieba_service.peek_random_thread(forum)
+    except TiebaLoginRequiredError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TiebaServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if thread is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    return thread.to_dict()

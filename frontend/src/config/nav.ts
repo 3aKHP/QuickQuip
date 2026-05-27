@@ -9,6 +9,7 @@ import ConversationsView from '../views/ConversationsView.vue'
 import PersonasView from '../views/PersonasView.vue'
 import LlmAboutView from '../views/LlmAboutView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
+import AwakeningView from '../views/AwakeningView.vue'
 import RateLimitView from '../views/RateLimitView.vue'
 import TiebaView from '../views/TiebaView.vue'
 import QuotesView from '../views/QuotesView.vue'
@@ -55,6 +56,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'rules',          path: '/rules',          label: '规则',     icon: 'ToggleLeft',      section: 'ops',      component: RulesView },
   { key: 'groups',         path: '/groups',         label: '群组',     icon: 'Users',           section: 'ops',      component: GroupsView },
   { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', section: 'ops',    component: GroupSettingsView },
+  { key: 'awakening',      path: '/awakening',      label: '唤醒',     icon: 'BellRing',        section: 'ops',      component: AwakeningView },
   { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Gauge',           section: 'ops',      component: RateLimitView },
   { key: 'memory',         path: '/memory',         label: '记忆',     icon: 'Brain',           section: 'llm',      component: MemoryView },
   { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle',   section: 'llm',      component: ConversationsView },

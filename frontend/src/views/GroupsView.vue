@@ -7,7 +7,13 @@
       <UiCard padding="md" shadow="sm">
         <h3 class="card-title"><UiIcon name="FileText" :size="18" /> 每日总结</h3>
         <ul class="glist">
-          <li v-for="gid in groups.summary" :key="gid"><span class="gid">{{ gid }}</span><UiButton size="sm" variant="danger" icon="X" @click="removeGroup('summary', gid)">移除</UiButton></li>
+          <li v-for="gid in groups.summary" :key="gid">
+            <span class="gid">{{ gid }}</span>
+            <span class="row-actions">
+              <UiButton size="sm" icon="Send" :loading="runningNow === `summary:${gid}`" @click="summaryNow(gid)">立即生成</UiButton>
+              <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('summary', gid)">移除</UiButton>
+            </span>
+          </li>
           <li v-if="!groups.summary.length" class="empty-li"><UiEmpty icon="BookOpen" title="无" description="暂无开启每日总结的群组" /></li>
         </ul>
         <div class="add-row"><select v-model="newSummaryId"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('summary')" :key="gid" :value="gid">{{ gid }}</option></select><input v-model="newSummaryIdManual" placeholder="或手动输入群号" @keyup.enter="addGroup('summary')" /><UiButton icon="Plus" @click="addGroup('summary')">添加</UiButton></div>
@@ -15,7 +21,19 @@
       <UiCard padding="md" shadow="sm">
         <h3 class="card-title"><UiIcon name="Newspaper" :size="18" /> 每日简报</h3>
         <ul class="glist">
-          <li v-for="gid in groups.briefing" :key="gid"><span class="gid">{{ gid }}</span><UiButton size="sm" variant="danger" icon="X" @click="removeGroup('briefing', gid)">移除</UiButton></li>
+          <li v-for="gid in groups.briefing" :key="gid">
+            <span class="gid">{{ gid }}</span>
+            <span class="row-actions">
+              <select v-model="briefingPeriods[gid]" class="period-select">
+                <option value="">当前时段</option>
+                <option value="morning">早报</option>
+                <option value="noon">午报</option>
+                <option value="evening">晚报</option>
+              </select>
+              <UiButton size="sm" icon="Send" :loading="runningNow === `briefing:${gid}`" @click="briefingNow(gid)">立即生成</UiButton>
+              <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('briefing', gid)">移除</UiButton>
+            </span>
+          </li>
           <li v-if="!groups.briefing.length" class="empty-li"><UiEmpty icon="BookOpen" title="无" description="暂无开启每日简报的群组" /></li>
         </ul>
         <div class="add-row"><select v-model="newBriefingId"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('briefing')" :key="gid" :value="gid">{{ gid }}</option></select><input v-model="newBriefingIdManual" placeholder="或手动输入群号" @keyup.enter="addGroup('briefing')" /><UiButton icon="Plus" @click="addGroup('briefing')">添加</UiButton></div>
@@ -29,15 +47,18 @@ import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'; import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchGroups, fetchKnownGroups, updateGroup } from '../api/groups'; import { toast } from '../toast'
+import { fetchGroups, fetchKnownGroups, runBriefingNow, runSummaryNow, updateGroup } from '../api/groups'; import { toast } from '../toast'
 
 const loaded = ref(false); const error = ref<string | null>(null); const groups = ref<{ summary: string[]; briefing: string[] }>({ summary: [], briefing: [] }); const knownGroups = ref<string[]>([])
 const newSummaryId = ref(''); const newSummaryIdManual = ref(''); const newBriefingId = ref(''); const newBriefingIdManual = ref('')
+const runningNow = ref(''); const briefingPeriods = ref<Record<string, string>>({})
 
 onMounted(async () => { try { const [g, k] = await Promise.all([fetchGroups(), fetchKnownGroups()]); groups.value = g; knownGroups.value = k.groups || []; loaded.value = true } catch (e: unknown) { error.value = (e as Error).message } })
 function availableGroups(type: 'summary' | 'briefing'): string[] { return knownGroups.value.filter(g => !groups.value[type].includes(g)) }
 async function addGroup(type: 'summary' | 'briefing') { const v = (type === 'summary' ? (newSummaryId.value || newSummaryIdManual.value) : (newBriefingId.value || newBriefingIdManual.value)).trim(); if (!v || !/^\d+$/.test(v)) { toast('群号必须为纯数字', 'error'); return }; try { await updateGroup(type, v, true); if (!groups.value[type].includes(v)) groups.value[type].push(v); if (type === 'summary') { newSummaryId.value = ''; newSummaryIdManual.value = '' } else { newBriefingId.value = ''; newBriefingIdManual.value = '' }; toast(`群 ${v} 已添加`) } catch (e: unknown) { toast(`操作失败：${(e as Error).message}`, 'error') } }
 async function removeGroup(type: 'summary' | 'briefing', gid: string) { try { await updateGroup(type, gid, false); groups.value[type] = groups.value[type].filter(g => g !== gid); toast(`群 ${gid} 已移除`) } catch (e: unknown) { toast(`操作失败：${(e as Error).message}`, 'error') } }
+async function summaryNow(gid: string) { runningNow.value = `summary:${gid}`; try { const r = await runSummaryNow(gid); toast(`总结任务已入队：${r.action?.id || ''}`) } catch (e: unknown) { toast(`入队失败：${(e as Error).message}`, 'error', 4000) } finally { runningNow.value = '' } }
+async function briefingNow(gid: string) { runningNow.value = `briefing:${gid}`; try { const r = await runBriefingNow(gid, briefingPeriods.value[gid] || undefined); toast(`播报任务已入队：${r.action?.id || ''}`) } catch (e: unknown) { toast(`入队失败：${(e as Error).message}`, 'error', 4000) } finally { runningNow.value = '' } }
 </script>
 
 <style scoped>
@@ -50,6 +71,8 @@ async function removeGroup(type: 'summary' | 'briefing', gid: string) { try { aw
 .glist li:last-child { border-bottom: none; }
 .glist li.empty-li { padding: 0; border: none; }
 .gid { font-family: var(--qq-font-mono); color: var(--qq-text); }
+.row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--qq-gap-xs); flex-wrap: wrap; }
+.period-select { width: 92px; padding: 4px 6px; font-size: var(--qq-text-xs); }
 .add-row { display: flex; gap: var(--qq-gap-sm); margin-top: var(--qq-gap-sm); flex-wrap: wrap; }
 .add-row select, .add-row input { flex: 1; min-width: 120px; }
 </style>

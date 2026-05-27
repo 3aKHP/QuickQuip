@@ -38,6 +38,11 @@ _CONFIG_FILES: dict[str, dict] = {
         "label": "游戏配置",
         "description": "金币签到倍率、各游戏赌注/CD/超时等参数",
     },
+    "awakening": {
+        "filename": "awakening.toml",
+        "label": "唤醒配置",
+        "description": "按群唤醒延长、兴趣话题、相关性判定和无聊冒泡参数",
+    },
     "niuniu_text": {
         "filename": "niuniu_text.toml",
         "label": "牛牛文案",

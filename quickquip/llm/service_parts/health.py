@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+from quickquip.common.paths import MCP_STATUS_JSON_PATH
 from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filter
 from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
@@ -15,6 +18,29 @@ class HealthMixin:
     def _get_mcp_statuses(self) -> list[MCPServerStatus]:
         return self.mcp_manager.get_statuses()
 
+    def _get_shared_mcp_health(self) -> tuple[str, int] | None:
+        if not self.config.mcp.enabled or self._get_mcp_statuses():
+            return None
+        try:
+            data = json.loads(MCP_STATUS_JSON_PATH.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return None
+
+        raw_statuses = data.get("statuses", [])
+        if not isinstance(raw_statuses, list) or not raw_statuses:
+            return None
+        statuses = [item for item in raw_statuses if isinstance(item, dict)]
+        if not statuses:
+            return None
+        connected = sum(1 for item in statuses if item.get("connected"))
+        tool_count = 0
+        for item in statuses:
+            try:
+                tool_count += int(item.get("tool_count") or 0)
+            except (TypeError, ValueError):
+                pass
+        return f"ON ({connected}/{len(statuses)}，{tool_count} tools，bot runtime)", tool_count
+
     def format_mcp_status(self) -> str:
         lines = ["MCP 状态"]
         if not self.config.mcp.enabled:
@@ -24,6 +50,11 @@ class HealthMixin:
         lines.append("总开关：ON")
         if self._is_mcp_initializing():
             lines.append("运行态：初始化中")
+        shared = self._get_shared_mcp_health()
+        if shared is not None and self._mcp_dirty:
+            summary, _tool_count = shared
+            lines.append(f"运行态：{summary}")
+            return "\n".join(lines)
         if self._mcp_dirty and not self._get_mcp_statuses():
             lines.append("运行态：待初始化")
             return "\n".join(lines)
@@ -51,6 +82,9 @@ class HealthMixin:
         if self._is_mcp_initializing():
             return "初始化中"
         statuses = self._get_mcp_statuses()
+        shared = self._get_shared_mcp_health()
+        if shared is not None and self._mcp_dirty:
+            return shared[0]
         if self._mcp_dirty and not statuses:
             return "待初始化"
         if not statuses:
@@ -149,7 +183,7 @@ class HealthMixin:
             tool_names=self._get_enabled_tool_names(chat_type=chat_type),
             mcp_status_summary=self._summarize_mcp_status(),
             mcp_enabled=self.config.mcp.enabled,
-            mcp_tool_count=len(self._mcp_tool_names),
+            mcp_tool_count=(self._get_shared_mcp_health() or ("", len(self._mcp_tool_names)))[1],
             recent_buffer_bound=self.recent_message_buffer is not None,
             stats_bound=self.stats_tracker is not None,
             rule_switch_bound=self.rule_switch is not None,

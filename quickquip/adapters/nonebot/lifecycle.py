@@ -13,6 +13,7 @@ from quickquip.app.message_pipeline import (
     daily_briefing_enabled_groups,
 )
 from quickquip.adapters.nonebot.awakening_plugin import boredom_enabled_groups
+from quickquip.adapters.nonebot.web_admin_actions import process_web_admin_actions
 from quickquip.tieba.service import tieba_service
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,13 @@ def register_lifecycle(driver) -> None:
             "interval",
             seconds=30,
             id="web_admin_state_sync",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            process_web_admin_actions,
+            "interval",
+            seconds=5,
+            id="web_admin_action_queue",
             replace_existing=True,
         )
     except ModuleNotFoundError:

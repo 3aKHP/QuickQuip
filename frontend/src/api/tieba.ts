@@ -38,3 +38,7 @@ export async function fetchTiebaThreads(forum: string, { keyword, limit, offset 
 export async function fetchTiebaThread(forum: string, tid: number) {
   return request(`/api/tieba/threads/${encodeURIComponent(forum)}/${encodeURIComponent(tid)}`)
 }
+
+export async function peekTiebaThread(forum: string) {
+  return request(`/api/tieba/peek?forum=${encodeURIComponent(forum)}`)
+}
