@@ -4,9 +4,18 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 群聊唤醒模块：新增唤醒延长、兴趣话题、相关性判定、答疑判定、无聊唤醒、兜底概率六类主动响应入口；配置集中在 `config/awakening.toml`，群内通过 `/awakening` 查看状态并管理规则开关。
+- Web 管理后台唤醒页支持按群编辑唤醒延长、兜底概率、无聊唤醒、相关性判定和答疑判定参数，保存后通知 bot 重载规则配置。
+
 ### 变更
 
 - 推荐 OneBot V11 基座从 NapCat 迁移至 LLBot：更新 compose 示例模板、部署文档、README；新增迁移指南 `docs/admin/migration-napcat-to-llbot.md`。NapCat 近期因 DLL 注入特征遭腾讯高强度风控（频繁 KickedOffLine / 静默掐断），LLBot 使用 PMHQ 外部内存 Hook 规避检测
+
+### 修复
+
+- `/llm reload` 现在会同步刷新敏感词过滤器；`config/sensitive_words.toml` 继续仅通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑。
 
 ## [1.6.1] - 2026-05-22
 
@@ -427,7 +436,11 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.4.4...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/3aKHP/QuickQuip/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/3aKHP/QuickQuip/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/3aKHP/QuickQuip/compare/v1.4.5...v1.5.0
+[1.4.5]: https://github.com/3aKHP/QuickQuip/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/3aKHP/QuickQuip/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/3aKHP/QuickQuip/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/3aKHP/QuickQuip/compare/v1.4.1...v1.4.2

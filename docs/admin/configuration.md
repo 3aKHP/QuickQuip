@@ -34,10 +34,15 @@
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SEARCH_BACKEND` | 搜索后端选择：`auto` / `searxng` / `tavily` | `auto` |
-| `SEARXNG_BASE_URL` | SearXNG 服务地址 | `http://127.0.0.1:8888` |
+| `SEARXNG_BASE_URL` | Bot 内置 `search_web` 和 `/search` 使用的 SearXNG 服务地址 | `http://127.0.0.1:8888` |
+| `SEARXNG_SAFE_SEARCH` | 传给 SearXNG 的安全搜索级别：`0` / `1` / `2` | `0` |
+| `SEARXNG_LANGUAGE` | 传给 SearXNG 的搜索语言；空值时使用 `all` | `all` |
+| `SEARXNG_PUBLIC_BASE_URL` | compose 中 SearXNG 对外展示的 base URL | `http://127.0.0.1:8888/` |
+| `SEARXNG_BIND_ADDRESS` | compose 暴露 SearXNG 时绑定的宿主地址 | `127.0.0.1` |
+| `SEARXNG_BIND_PORT` | compose 暴露 SearXNG 时绑定的宿主端口 | `8888` |
+| `SEARXNG_SECRET` | SearXNG 实例密钥，用于容器环境变量 | — |
 
-`SEARCH_BACKEND=auto` 时，若 `SEARXNG_BASE_URL` 已设置则优先使用 SearXNG。
+`search_web` 固定走项目内 SearXNG；Tavily 等外部搜索能力建议通过 MCP sidecar 暴露为工具。
 
 ### LLM 调试
 
@@ -53,7 +58,13 @@
 | `TIEBA_FORUM_KEYWORDS` | 多贴吧来源，逗号/分号/竖线/换行分隔 | — |
 | `TIEBA_FORUM_KEYWORD` | 单贴吧来源（旧字段，多来源时优先用 `FORUM_KEYWORDS`） | — |
 | `TIEBA_SYNC_INTERVAL_SECONDS` | 同步间隔（秒） | `900` |
+| `TIEBA_MAX_POOL_SIZE` | 每个来源最多保留的帖子数，最小 `20` | `240` |
+| `TIEBA_RECENT_SENT_LIMIT` | 最近发送记录保留数量，最小 `1` | `30` |
+| `TIEBA_DETAIL_FETCH_LIMIT` | 单次抓取详情的帖子数量上限，最小 `1` | `18` |
+| `TIEBA_RANDOM_AVOID_RECENT` | 随机抽帖时避开最近 N 条发送记录 | `30` |
+| `TIEBA_PREFER_IMAGE_THREADS` | 随机抽帖时优先选择带图帖子 | `true` |
 | `TIEBA_BROWSER_HEADLESS` | 浏览器是否无头模式 | `true` |
+| `TIEBA_BROWSER_CHANNEL` | Playwright 浏览器 channel；空值使用默认 Chromium | — |
 
 ### MCP 挂载与开关
 
@@ -100,6 +111,12 @@
 | `memory_limit` | 单次调用注入的记忆条数上限 | — |
 | `memory_max_items_per_group` | 单群存储的记忆条数硬上限 | — |
 | `max_prompt_chars` | system prompt 最大字符数 | — |
+| `tool_calling_enabled` | 是否允许工具调用 | `false` |
+| `tool_max_rounds` | 单次工具调用循环最大轮数 | `8` |
+| `tool_max_calls_per_round` | 单轮最多执行工具调用数 | `16` |
+| `auto_memory_enabled` | 自动记忆抽取全局默认开关 | `false` |
+| `auto_memory_prompt` | 自动记忆抽取自定义判定 prompt | `""` |
+| `auto_memory_max_tokens` | 自动记忆抽取判定最大输出 token | `256` |
 
 ### `[triggers]` — 触发方式
 
@@ -115,7 +132,18 @@
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `enabled` | 是否启用自动联网 | `false` |
-| `search_max_calls_per_round` | 单轮最大搜索调用数 | — |
+| `search_max_calls_per_round` | 单轮最大搜索调用数，范围 1-32 | `3` |
+
+`[triggers.quick_judge]` — 快速判定模型：
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `provider_id` | 快速判定专用 provider ID；留空使用默认 provider | `""` |
+| `model` | 快速判定专用模型；留空使用 provider 默认模型 | `""` |
+| `timeout` | 判定超时秒数 | `2.0` |
+| `max_tokens` | 判定最大输出 token | `64` |
+
+快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。
 
 ### `[tools]` — 工具调用
 
@@ -306,6 +334,66 @@ ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM �
 | `prompt_blocklist` | 文本黑名单 |
 
 `[[music.providers]]` 和 `[[music.providers.models]]` 结构类似，额外包含 `supported_output_formats`、`lyrics_optimization` 等音乐特有字段。
+
+`api_key_env` 由每个 provider 自行声明；示例配置中常见的键名包括 `MINIMAX_API_KEY`、`VOLCENGINE_API_KEY` 和 OpenAI-compatible ASR 使用的 `OPENAI_API_KEY`。
+
+---
+
+## config/awakening.toml
+
+唤醒模块默认关闭，复制 `config/awakening.toml.example` 为 `config/awakening.toml` 后按需启用。配置支持全局默认值和按群覆盖。
+
+### `[awakening.defaults]`
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `extend_duration` | 显式触发 AI 后继续回应同一用户的秒数；`0` 关闭 | `0` |
+| `fallback_probability` | 普通消息低概率触发回应的概率；`0` 关闭 | `0` |
+| `boredom_silence_seconds` | 群聊沉寂多少秒后允许无聊唤醒；`0` 关闭 | `0` |
+| `boredom_probability` | 无聊检查命中时发送冒泡消息的概率 | `0` |
+| `boredom_check_interval` | 无聊唤醒定时检查间隔秒数 | `300` |
+| `boredom_dnd_start` | 免打扰开始时间，格式 `HH:MM`，空值关闭 | `""` |
+| `boredom_dnd_end` | 免打扰结束时间，格式 `HH:MM`，空值关闭 | `""` |
+| `interest_topics` | 兴趣话题关键词列表，命中后触发 `awakening_interest` | `[]` |
+| `relevance_threshold` | 相关性唤醒判定阈值，`>= 1` 关闭 LLM 判定 | `1.0` |
+| `qa_threshold` | 答疑唤醒判定阈值，`>= 1` 关闭 LLM 判定 | `1.0` |
+
+### `[[awakening.group_overrides]]`
+
+按群覆盖任意默认值：
+
+```toml
+[[awakening.group_overrides]]
+group_id = "123456"
+extend_duration = 10
+interest_topics = ["编程", "Python"]
+relevance_threshold = 0.5
+qa_threshold = 0.88
+```
+
+`interest_topics` 还可写在 persona TOML 的扩展字段中：
+
+```toml
+[awakening]
+interest_topics = ["角色相关关键词"]
+```
+
+### 群内管理
+
+`/awakening status` 会展示本群六类唤醒规则的规则开关状态和已解析配置。`/awakening on <rule>` 与 `/awakening off <rule>` 复用规则开关系统；无聊唤醒还需要 `/awakening boredom on` 将本群加入 `data/awakening_boredom_groups.json`。
+
+---
+
+## config/sensitive_words.toml
+
+敏感词过滤器默认在词表缺失或为空时静默放行。复制 `config/sensitive_words.toml.example` 为 `config/sensitive_words.toml` 后，按部署环境填充 block/soft 两级词表。
+
+| 区段 | 行为 |
+|------|------|
+| `[block.<category>]` | 命中后阻断 LLM 输入、替换 LLM 输出，或在工具调用链路拒绝执行/替换结果 |
+| `[soft.<category>]` | 只记录日志，不阻断请求 |
+
+每个类别使用 `words = ["..."]` 定义词表。命中日志只记录类别与哈希，不记录原文。完整接入点和运维建议见 [sensitive-filter.md](sensitive-filter.md)。
 
 ---
 

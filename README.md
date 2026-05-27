@@ -18,12 +18,13 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **金币经济系统** — 每日签到累加连击、好感度成长、金币排行，所有对战游戏共用下注和结算。参数集中在 `config/games.toml` 配置
 - **节日自动化** — 内置 6 个中国传统节日（公历+农历），自动切换 bot 语气并发送 persona 口吻问候
 - **轻娱乐与互动** — `/roll` 掷骰子、`/choose` 随机选择、`/fortune` 每日运势、`/vote` 投票、`/quote` 语录收藏、`/find` 群聊搜索、`/tell` 离线留言
-- **词云生成** — `/wordcloud` 按 today/week/month 四档生成群聊词云图片
+- **词云生成** — `/wordcloud` 按 today/week/month/year 四档生成群聊词云图片
 - **LLM 扩展** — 兼容 OpenAI / Claude / Gemini 协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
+- **低频唤醒** — 按群配置唤醒延长、兴趣话题、相关性/答疑判定、无聊冒泡和兜底概率，所有入口受规则开关与限流保护
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成，统一收口 `config/generation.toml`
-- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、记忆编辑、对话浏览、配置在线编辑、词云生成、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
+- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、词云生成、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。  
@@ -64,7 +65,6 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    DRIVER=~fastapi
    HOST=0.0.0.0
    PORT=8080
-   SEARCH_BACKEND=auto
    SEARXNG_BASE_URL=http://127.0.0.1:8888
    ```
 
@@ -93,7 +93,11 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    复制 `config/generation.toml.example` 为 `config/generation.toml`，按注释填入 provider 和模型。不存在时图片部分回退读取 `llm.toml` 旧版配置。
 
-7. **可选：启用多贴吧搬运**
+7. **可选：启用群聊唤醒**
+
+   复制 `config/awakening.toml.example` 为 `config/awakening.toml`，按群设置唤醒延长、兴趣话题、相关性判定、答疑判定和无聊唤醒参数。群内可用 `/awakening status` 查看生效状态。
+
+8. **可选：启用多贴吧搬运**
 
    安装 Playwright 浏览器：
 
@@ -112,7 +116,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    首次使用前按 [部署指南](docs/admin/deployment.md) 完成贴吧登录态导出。
 
-8. **可选：启动 Web 管理后台**
+9. **可选：启动 Web 管理后台**
 
    ```bash
    # 先构建前端（需 Node.js）
@@ -127,7 +131,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    访问 `http://127.0.0.1:5104/ops/`。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)。
 
-9. **启动机器人**
+10. **启动机器人**
 
    ```bash
    python bot.py
@@ -181,6 +185,9 @@ quickquip/app/              ← 应用级消息管线与共享状态装配
 | [docs/user/private-commands.md](docs/user/private-commands.md) | 私聊指令速查 |
 | [docs/admin/deployment.md](docs/admin/deployment.md) | 云端部署指南 |
 | [docs/admin/configuration.md](docs/admin/configuration.md) | 完整配置参考 |
+| [docs/admin/web-admin.md](docs/admin/web-admin.md) | Web 管理后台 |
+| [docs/admin/sensitive-filter.md](docs/admin/sensitive-filter.md) | 敏感词过滤器 |
+| [docs/admin/migration-napcat-to-llbot.md](docs/admin/migration-napcat-to-llbot.md) | NapCat 迁移 LLBot |
 | [docs/dev/llm-module.md](docs/dev/llm-module.md) | LLM 模块详解 |
 | [docs/dev/regex-tutorial.md](docs/dev/regex-tutorial.md) | 正则表达式教程 |
 | [ROADMAP.md](ROADMAP.md) | 演进路线 |

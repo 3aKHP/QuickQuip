@@ -4,7 +4,7 @@
 
 QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发扩展层**。
 
-它的设计目标不是把整个群改造成全时监听的聊天机器人，而是在保留原有规则回复体系的前提下，提供一套：
+它在保留原有规则回复体系的前提下，提供一套受开关、触发条件和上下文边界约束的 LLM 能力：
 
 - 可按群开关
 - 可按群切换 provider / model / persona
@@ -80,7 +80,7 @@ LLM 相关核心文件如下：
 - `quickquip/llm/inputs.py`
   - 负责从消息段中提取文本触发、艾特触发和图片 URL
 - `quickquip/search/web_search.py`
-  - 负责搜索后端抽象，当前支持 SearXNG / Tavily
+  - 负责项目内 SearXNG 搜索客户端，供 `/search` 与 `search_web` 工具使用
 
 兼容层说明：
 
@@ -122,7 +122,7 @@ LLM 默认只在以下场景触发：
 - `@机器人`
 - `/search <query>`
 
-普通群消息不会自动进入 LLM。
+普通群消息可以通过唤醒模块进入 LLM，但所有唤醒入口默认关闭或受阈值控制，且会经过群规则开关与限流器。
 
 当前消息流顺序：
 
@@ -130,7 +130,13 @@ LLM 默认只在以下场景触发：
 2. 读取当前群最近消息缓冲
 3. 判断是否命中 LLM 显式触发
 4. 如果命中 LLM，则优先走 LLM
-5. 如果未命中，则继续原有规则流：
+5. 如果未命中显式触发，则检查唤醒模块：
+   - `awakening_extend`
+   - `awakening_interest`
+   - `awakening_relevance`
+   - `awakening_qa`
+   - `awakening_fallback`
+6. 如果仍未命中，则继续原有规则流：
    - 复读
    - 接龙
    - 彩蛋规则
@@ -138,9 +144,26 @@ LLM 默认只在以下场景触发：
 
 这意味着：
 
-- LLM 不会吞掉普通消息
+- 默认配置下 LLM 不会吞掉普通消息
 - 规则系统依然是默认主流程
-- LLM 是显式调用，不是默认响应层
+- 显式调用优先级高于唤醒模块，唤醒模块优先级高于普通规则回复
+
+### 3.1 唤醒模块
+
+唤醒模块位于 `quickquip/chat/awakening.py`，命令入口位于 `quickquip/adapters/nonebot/awakening_plugin.py`，配置文件为 `config/awakening.toml`。
+
+| 规则名 | 触发方式 |
+|------|----------|
+| `awakening_extend` | 显式触发后，在 `extend_duration` 秒内继续回应同一用户 |
+| `awakening_interest` | 消息命中全局或 persona 里的兴趣话题 |
+| `awakening_relevance` | 先做词重叠快筛，再用 `quick_judge` 判断是否延续 bot 近期回复 |
+| `awakening_qa` | 先做问句快筛，再用 `quick_judge` 判断是否需要回答 |
+| `awakening_boredom` | APScheduler 定时检查沉寂群，并向 opt-in 群发送低频冒泡消息 |
+| `awakening_fallback` | 普通消息按配置概率兜底触发 |
+
+相关性与答疑判定会使用 `[triggers.quick_judge]` 指定的小模型配置；阈值 `>= 1.0` 时跳过对应 LLM 判定。
+
+无聊唤醒有两层开关：先在 `config/awakening.toml` 中设置沉寂秒数、概率、检查间隔和免打扰时间，再由群管理员执行 `/awakening boredom on`，写入 `data/awakening_boredom_groups.json`。
 
 ---
 
@@ -210,7 +233,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 长期记忆当前来源非常保守：
 
 - 人工 `/remember`
-- 后续如扩展自动抽取，也只允许从 LLM 已触发会话内提取
+- 自动记忆抽取开启时，仅从 LLM 已触发会话内提取稳定事实
 
 明确不允许：
 
@@ -313,11 +336,18 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
   - `memory_limit`
   - `memory_max_items_per_group`
   - `max_prompt_chars`
+  - `tool_calling_enabled`
+  - `tool_max_rounds`
+  - `tool_max_calls_per_round`
+  - `auto_memory_enabled`
+  - `auto_memory_prompt`
+  - `auto_memory_max_tokens`
 - `[triggers]`
   - `default_prefix`
   - `allow_prefix`
   - `allow_at`
   - `empty_prompt_reply`
+  - `[triggers.quick_judge]`：唤醒模块和语境规则使用的快速判定模型
 - `[tools]`
   - `enabled`
   - `discovery_mode`
@@ -345,7 +375,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 
 Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每个 `.toml` 一个人格文件，`_shared.toml` 存储共享行为准则与风格规则。
 
-### 6.1 工具发现
+### 6.2 工具发现
 
 工具调用开启后，QuickQuip 支持本地 `tool_search` 和 `tool_list` 元工具。该机制用于工具数量较多的场景：初始请求只暴露 `always_loaded` 中的常驻工具，模型需要其它能力时先调用 `tool_search`；搜索不到但工具可能存在时，可用 `tool_list` 查看工具组、工具名或按精确名称加载工具。工具循环会把匹配到或精确加载的真实工具加入下一轮 provider 请求。
 
@@ -359,7 +389,33 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
 - 真正的硬上限仍然在代码里存在
 - 即使把 `history_max_messages_per_group` 写大，实际仍会被代码上限截断
 
-### 6.2 `.env`
+### 6.3 `config/awakening.toml`
+
+唤醒模块配置集中在 `config/awakening.toml`：
+
+- `[awakening.defaults]`
+  - `extend_duration`
+  - `fallback_probability`
+  - `boredom_silence_seconds`
+  - `boredom_probability`
+  - `boredom_check_interval`
+  - `boredom_dnd_start`
+  - `boredom_dnd_end`
+  - `interest_topics`
+  - `relevance_threshold`
+  - `qa_threshold`
+- `[[awakening.group_overrides]]`
+  - `group_id`
+  - 任意需要覆盖的默认字段
+
+persona TOML 可通过自由扩展字段追加兴趣话题：
+
+```toml
+[awakening]
+interest_topics = ["关键词"]
+```
+
+### 6.4 `.env`
 
 本地开发与容器运行都需要：
 
@@ -376,7 +432,7 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
 - `HOST`
 - `PORT`
 
-### 6.3 `config/generation.toml`
+### 6.5 `config/generation.toml`
 
 LLM 相关的多模态输入/产出配置在 `generation.toml` 中维护：
 
@@ -419,6 +475,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm memory status`
 - `/llm memory on`
 - `/llm memory off`
+- `/llm auto_memory status|on|off|reset`
 - `/llm context_limit <n>` — 设置本群上下文读取上限（1-20），持久化，不受 clear_context 影响
 - `/llm context_limit reset` — 重置为全局默认
 - `/llm clear_context`
@@ -426,6 +483,10 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/memories [关键词]`
 - `/forget <关键词>`
 - `/forget_all` — 清空本群全部长期记忆
+- `/awakening status`
+- `/awakening on <rule>`
+- `/awakening off <rule>`
+- `/awakening boredom on|off`
 
 ### 7.5 联网搜索
 
@@ -455,7 +516,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `data/` 需要持久化
 - 镜像构建时需要同时打包 `plugins/` 与 `quickquip/`
 - API key 通过环境变量注入
-- 使用搜索功能时需提供可访问的 SearXNG 或 Tavily 后端
+- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
 
 根目录 `.dockerignore` 已经做了收紧，避免把以下内容送进 Docker build 上下文：
 
@@ -469,7 +530,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 
 ## 9. 现阶段已知边界
 
-当前模块还不是一个"全自动记忆智能体"，而是一个刻意收边的群聊 LLM：
+当前模块定位为刻意收边的群聊 LLM，边界如下：
 
 - 不自动扫全群消息做长期记忆
 - 不自动做复杂摘要归档

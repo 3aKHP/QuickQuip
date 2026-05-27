@@ -87,12 +87,12 @@ quickquip/
 ├── llm/                     # LLM 运行时（多 provider、工具调用循环、MCP 客户端、记忆存储、persona、身份映射、词表、健康检查；核心门面拆到 service_parts/）
 ├── generation/              # 多模态产出配置、模型解析、图片/语音/音乐 provider 调用
 ├── tieba/                   # 贴吧爬虫与帖子池
-├── search/                  # 联网搜索后端（SearXNG / Tavily）
+├── search/                  # 项目内 SearXNG 搜索客户端
 ├── adapters/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件；命令注册按域拆到 command_parts/）
 └── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）
     ├── web/                 # Web 管理后台 FastAPI 应用与路由
-    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、MCP面板、定时任务、审计、金币经济、牛牛大作战）
+    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、定时任务、审计、金币经济、牛牛大作战）
 ```
 
 **规则**：业务逻辑只进 `quickquip/`，不进 `plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
@@ -113,6 +113,10 @@ quickquip/
 | `llm.toml` | 自用层（gitignore） | 真实 provider 配置，含 base_url / model 等 |
 | `generation.toml.example` | 分发层（追踪） | 多模态产出配置模板 |
 | `generation.toml` | 自用层（gitignore） | 真实图片/语音/音乐 provider 配置 |
+| `awakening.toml.example` | 分发层（追踪） | 群聊唤醒模块配置模板 |
+| `awakening.toml` | 自用层（gitignore） | 真实唤醒阈值、兴趣话题和按群覆盖 |
+| `sensitive_words.toml.example` | 分发层（追踪） | 敏感词过滤器配置模板 |
+| `sensitive_words.toml` | 自用层（gitignore） | 部署者填充的敏感词词表 |
 | `chat_rules.toml.example` | 分发层（追踪） | 文字回复规则格式示例 |
 | `chat_rules.toml` | 自用层（gitignore） | 部署专用的彩蛋规则（群内私有梗） |
 | `games.toml.example` | 分发层（追踪） | 游戏参数配置模板 |
@@ -137,6 +141,8 @@ data/
 ├── llm.db                  # LLM 对话历史与长期记忆（SQLite）
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
 ├── web_admin_sessions.db   # Web Admin 会话记录
+├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
+├── awakening_boredom_groups.json # 已启用无聊唤醒的群列表
 ├── daily_msgs/             # 每日消息原始收集（{group_id}/{date}.jsonl）
 ├── logs/                   # loguru 文件日志（保留 14 天）+ 共享 LLM trace JSONL
 ├── fonts/                  # 词云字体文件（手动放置）
@@ -155,17 +161,25 @@ docs/
 ├── index.md                # 文档总导航
 ├── user/                   # 面向群友
 │   ├── group-commands.md
+│   ├── group-games.md
+│   ├── llm-tool-discovery.md
 │   ├── private-commands.md
 │   └── three-kingdoms-memes.md
 ├── admin/                  # 面向部署者/管理员
 │   ├── deployment.md
 │   ├── configuration.md
+│   ├── game-config.md
+│   ├── migration-napcat-to-llbot.md
+│   ├── sensitive-filter.md
+│   ├── tool-discovery.md
 │   └── web-admin.md
 └── dev/                    # 开发者文档
     ├── architecture.md     # 本文件
+    ├── game-framework.md
     ├── llm-module.md
     ├── mcp-integration.md
-    └── regex-tutorial.md
+    ├── regex-tutorial.md
+    └── tool-discovery.md
 ```
 
 ---
@@ -198,8 +212,11 @@ docs/
 | `config/llm.toml` | 含真实 provider 配置 |
 | `config/llm.*.local.toml` | 同上 |
 | `config/generation.toml` | 含真实多模态 provider 配置 |
+| `config/awakening.toml` | 含真实唤醒阈值、兴趣话题和群覆盖 |
+| `config/sensitive_words.toml` | 含部署者填充的敏感词词表 |
 | `config/chat_rules.toml` | 含私有群梗规则 |
 | `config/games.toml` | 含游戏参数配置 |
+| `config/niuniu_text.toml`, `config/niuniu_text_safe.toml` | 含部署者自定义牛牛文案 |
 | `config/personas/` | 含真实 persona 定义 |
 | `data/` | 运行时数据 |
 | 私有部署目录 | 部署脚本、真实环境变量、临时材料和个人生产结构 |
