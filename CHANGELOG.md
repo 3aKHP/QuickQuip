@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-27
+
 ### 新增
 
 - 群聊唤醒模块：新增唤醒延长、兴趣话题、相关性判定、答疑判定、无聊唤醒、兜底概率六类主动响应入口；配置集中在 `config/awakening.toml`，群内通过 `/awakening` 查看状态并管理规则开关。
@@ -438,7 +440,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/3aKHP/QuickQuip/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/3aKHP/QuickQuip/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/3aKHP/QuickQuip/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/3aKHP/QuickQuip/compare/v1.4.5...v1.5.0

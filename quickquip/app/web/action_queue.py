@@ -30,16 +30,18 @@ class WebAdminAction:
 class WebAdminActionQueue:
     def __init__(self, path: str | Path = WEB_ADMIN_ACTIONS_DB_PATH):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self._schema_ready = False
 
     def _connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
         with self._connect() as conn:
             conn.execute(
                 """
@@ -61,6 +63,7 @@ class WebAdminActionQueue:
                 ON web_admin_actions(status, created_at)
                 """
             )
+        self._schema_ready = True
 
     def _reap_stale_running_locked(self, conn: sqlite3.Connection, timeout_seconds: int = 300) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, int(timeout_seconds)))).isoformat()
@@ -75,6 +78,7 @@ class WebAdminActionQueue:
         return cur.rowcount
 
     def reap_stale_running(self, timeout_seconds: int = 300) -> int:
+        self._ensure_schema()
         with self._connect() as conn:
             return self._reap_stale_running_locked(conn, timeout_seconds)
 
@@ -93,6 +97,7 @@ class WebAdminActionQueue:
         )
 
     def enqueue(self, action_type: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        self._ensure_schema()
         action_id = uuid.uuid4().hex
         now = _utc_now()
         with self._connect() as conn:
@@ -113,6 +118,7 @@ class WebAdminActionQueue:
         return {"id": action_id, "action_type": action_type, "status": "queued"}
 
     def claim(self, limit: int = 5) -> list[WebAdminAction]:
+        self._ensure_schema()
         limit = max(1, min(int(limit), 20))
         now = _utc_now()
         with self._connect() as conn:
@@ -146,6 +152,7 @@ class WebAdminActionQueue:
         return actions
 
     def complete(self, action_id: str, result: dict[str, Any] | None = None) -> None:
+        self._ensure_schema()
         with self._connect() as conn:
             conn.execute(
                 """
@@ -161,6 +168,7 @@ class WebAdminActionQueue:
             )
 
     def fail(self, action_id: str, error: str) -> None:
+        self._ensure_schema()
         with self._connect() as conn:
             conn.execute(
                 """
@@ -172,6 +180,7 @@ class WebAdminActionQueue:
             )
 
     def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        self._ensure_schema()
         limit = max(1, min(int(limit), 100))
         with self._connect() as conn:
             rows = conn.execute(
