@@ -117,6 +117,21 @@ provider_id = "missing-provider"
     assert items["image_preprocessing"].details["provider_declared"] is False
 
 
+def test_reload_config_refreshes_sensitive_filter(llm_service, monkeypatch):
+    calls = 0
+
+    def _fake_reload():
+        nonlocal calls
+        calls += 1
+        return None
+
+    monkeypatch.setattr("quickquip.llm.service._reload_sensitive_filter", _fake_reload)
+
+    llm_service.reload_config()
+
+    assert calls == 1
+
+
 def test_format_health_report_redacts_sensitive_filter_details():
     """`/llm health verbose` posts back into chat. The sensitive_filter
     item's details (counts, etc.) are deployment-time facts that must not

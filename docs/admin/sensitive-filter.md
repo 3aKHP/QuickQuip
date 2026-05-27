@@ -90,9 +90,11 @@ cp config/sensitive_words.toml.example config/sensitive_words.toml
 - **阿里云/腾讯云内容安全 API**：覆盖更全但增加延迟和成本，对群聊 bot 而言 overkill
 - **测试群跑半个月，记录所有模型主动拒答**——这是质量最高的源
 
-### 4. 重载
+### 4. 重载与状态查看
 
-修改 `config/sensitive_words.toml` 后，调用 `reload_filter()` 即可热更新（不需要重启 bot）。当前没有暴露给 web admin，需要时可以加个 `/reload-sensitive` 命令。
+修改 `config/sensitive_words.toml` 后，调用 `reload_filter()` 即可热更新（不需要重启 bot）。当前没有独立的群内重载命令；在服务器本地更新词表后，可执行 `/llm reload` 或重启 bot。
+
+Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返回配置文件是否存在、是否已加载以及 block/soft/total 计数。它不会返回词表内容、分类明细或文件路径。群内 `/llm health verbose` 也会展示 `sensitive_filter` 健康项，但不会回显词表路径。
 
 ## 接入点
 
@@ -109,7 +111,8 @@ cp config/sensitive_words.toml.example config/sensitive_words.toml
 **为什么工具结果扫描尤其重要**：搜索/抓取类工具（`search_web`、`fetch`、各类 MCP 工具）从外部源拉取内容，**用户的查询可以引导但我们无法预先审查**。一段富集敏感词的 tool_result 会作为 messages 的一部分进入下一轮 provider 请求，正是触发 DeepSeek `Content Exists Risk` / Aliyun `Content security warning` 的高危场景。
 
 **没有接入的位置**：
-- `daily_summary` / `daily_briefing` / `wordcloud` 路径——这些路径的输入是已经过滤过的群聊消息，且不直接通过 LLM 输出到群里。如需加固，可以在 `quickquip/chat/daily_summary.py` 的消息收集阶段调用同一个 `get_filter()` 做扫描
+- `daily_summary` / `daily_briefing` 会走独立的模型级联 provider 调用，不经过 `LLMService.generate_reply()` 主链路，因此当前不会复用输入/输出/历史侧过滤器；如需加固，应在 `quickquip/llm/summarize.py` 与 `quickquip/llm/briefing.py` 的请求和响应边界接入同一个 `get_filter()`
+- `wordcloud` 不调用 LLM，只读取群聊消息并渲染词频图片；如需避免敏感词出现在图片中，应在 `quickquip/chat/wordcloud.py` 的分词或渲染前增加扫描/剔除
 
 ## 性能
 
@@ -122,6 +125,7 @@ cp config/sensitive_words.toml.example config/sensitive_words.toml
 ## 不要做的事
 
 - ❌ 把 `config/sensitive_words.toml` 提交到公开仓库
+- ❌ 通过 Web Admin 或任何浏览器页面读取、回显、编辑 `config/sensitive_words.toml`
 - ❌ 把命中日志记得太详细（如完整原文 + 用户 ID + 时间）——日志本身会成为合规风险
 - ❌ 在群里**告知用户**触发了过滤——直接静默 + 后台日志即可，告知等于教用户绕过
 - ❌ 让 LLM 自己判断"这内容能不能发"——增加成本和延迟，且模型自己也不可靠
