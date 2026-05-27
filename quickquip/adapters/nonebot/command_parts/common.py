@@ -8,6 +8,7 @@ from datetime import date
 
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.common.bot_action_trace import bot_action_trace, current_bot_action_trace
 from quickquip.llm.profile import DEFAULT_PROFILE_MODE, PROFILE_MODES, ProfileModeConfig
 
 
@@ -427,28 +428,75 @@ def _chunk_text(content: str, max_chars: int = 600) -> list[str]:
 async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
     formatted = _format_generated_lyrics(lyric_result, heading=heading)
     group_id = getattr(event, "group_id", None)
+
+    def _trace_context():
+        if current_bot_action_trace() is not None:
+            return None
+        return bot_action_trace(
+            trigger_kind="command",
+            reason_code="command.music.lyrics",
+            reason_detail="命令触发：歌词生成结果发送",
+            rule_name="music_gen",
+            chat_type=_chat_type(event),
+            group_id=group_id,
+            user_id=getattr(event, "user_id", ""),
+            incoming_message_id=str(getattr(event, "message_id", "") or ""),
+            incoming_preview=str(event.get_message()).strip() if hasattr(event, "get_message") else "",
+            reply_preview=formatted,
+            source="command.music.lyrics_forward",
+        )
+
     if group_id is not None:
         chunks = _chunk_text(formatted)
         try:
-            await bot.call_api(
-                "send_group_forward_msg",
-                group_id=group_id,
-                messages=[
-                    {
-                        "type": "node",
-                        "data": {
-                            "name": "歌词",
-                            "uin": str(bot.self_id),
-                            "content": [{"type": "text", "data": {"text": chunk}}],
-                        },
-                    }
-                    for chunk in chunks
-                ],
-            )
+            trace_context = _trace_context()
+            if trace_context is None:
+                await bot.call_api(
+                    "send_group_forward_msg",
+                    group_id=group_id,
+                    messages=[
+                        {
+                            "type": "node",
+                            "data": {
+                                "name": "歌词",
+                                "uin": str(bot.self_id),
+                                "content": [{"type": "text", "data": {"text": chunk}}],
+                            },
+                        }
+                        for chunk in chunks
+                    ],
+                )
+            else:
+                with trace_context:
+                    await bot.call_api(
+                        "send_group_forward_msg",
+                        group_id=group_id,
+                        messages=[
+                            {
+                                "type": "node",
+                                "data": {
+                                    "name": "歌词",
+                                    "uin": str(bot.self_id),
+                                    "content": [{"type": "text", "data": {"text": chunk}}],
+                                },
+                            }
+                            for chunk in chunks
+                        ],
+                    )
             return
         except Exception:
             pass
     if group_id is not None:
-        await bot.send_group_msg(group_id=group_id, message=formatted)
+        trace_context = _trace_context()
+        if trace_context is None:
+            await bot.send_group_msg(group_id=group_id, message=formatted)
+        else:
+            with trace_context:
+                await bot.send_group_msg(group_id=group_id, message=formatted)
     else:
-        await bot.send_private_msg(user_id=event.user_id, message=formatted)
+        trace_context = _trace_context()
+        if trace_context is None:
+            await bot.send_private_msg(user_id=event.user_id, message=formatted)
+        else:
+            with trace_context:
+                await bot.send_private_msg(user_id=event.user_id, message=formatted)

@@ -15,6 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.common.json_utils import extract_json_object
 from quickquip.common.paths import CONFIG_AWAKENING_TOML
 
@@ -141,6 +142,18 @@ class AwakeningTriggerResult:
     rule_name: str
     prompt: str
     trigger_reason: str
+    trigger_instruction: str = ""
+    opens_extend_window: bool = False
+    matched_topic: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class AwakeningExtendSession:
+    timestamp: float
+    source: str = "explicit_llm"
+
+
+_PASSIVE_IMAGE_LIMIT = 2
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +244,7 @@ class AwakeningState:
     _LLM_CACHE_MAX = 256
 
     def __init__(self) -> None:
-        self._extend_sessions: dict[str, dict[str, float]] = {}
+        self._extend_sessions: dict[str, dict[str, AwakeningExtendSession]] = {}
         self._last_message_times: dict[str, float] = {}
         self._last_boredom_trigger: dict[str, float] = {}
         self.bot_messages = BotMessageCache()
@@ -240,12 +253,15 @@ class AwakeningState:
     def record_message(self, group_id: int | str, user_id: int | str) -> None:
         self._last_message_times[str(group_id)] = monotonic()
 
-    def mark_awakened(self, group_id: int | str, user_id: int | str) -> None:
+    def mark_awakened(self, group_id: int | str, user_id: int | str, source: str = "explicit_llm") -> None:
         gid = str(group_id)
         uid = str(user_id)
         if gid not in self._extend_sessions:
             self._extend_sessions[gid] = {}
-        self._extend_sessions[gid][uid] = monotonic()
+        self._extend_sessions[gid][uid] = AwakeningExtendSession(
+            timestamp=monotonic(),
+            source=source.strip() or "explicit_llm",
+        )
 
     def is_in_extend_window(self, group_id: int | str, user_id: int | str, duration: int) -> bool:
         if duration <= 0:
@@ -255,10 +271,10 @@ class AwakeningState:
         sessions = self._extend_sessions.get(gid)
         if sessions is None:
             return False
-        ts = sessions.get(uid)
-        if ts is None:
+        session = sessions.get(uid)
+        if session is None:
             return False
-        return (monotonic() - ts) < duration
+        return session.source == "explicit_llm" and (monotonic() - session.timestamp) < duration
 
     def get_group_silence_seconds(self, group_id: int | str) -> float:
         ts = self._last_message_times.get(str(group_id))
@@ -300,7 +316,7 @@ class AwakeningState:
     def prune_stale(self, max_age: float = 7200) -> None:
         now = monotonic()
         for sessions in self._extend_sessions.values():
-            stale = [uid for uid, ts in sessions.items() if (now - ts) > max_age]
+            stale = [uid for uid, session in sessions.items() if (now - session.timestamp) > max_age]
             for uid in stale:
                 del sessions[uid]
         stale_groups = [gid for gid, sessions in self._extend_sessions.items() if not sessions]
@@ -329,6 +345,37 @@ def get_state() -> AwakeningState:
 
 # Common Chinese question markers for fast QA filtering
 _QA_FAST_PATTERNS = re.compile(r"[？?]|(?:请问|求解|怎么[办样]?|如何|怎么回事|谁能帮|有没有人|有没[有谁]|求助|谁知道|为啥|为什么|什么原因|怎样|能不能|可不可以|可以吗|是什么|怎么办|该怎么)")
+_CQ_CODE_RE = re.compile(r"\[CQ:[^\]]+\]")
+_URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+_PLACEHOLDER_RE = re.compile(r"\[(?:图片|语音|合并转发消息|文件|表情|视频)(?:[^\]]*)\]")
+_MEANINGFUL_TEXT_RE = re.compile(r"[\w\u4e00-\u9fff]", re.UNICODE)
+_EXTEND_REJECT_TEXTS = {
+    "?",
+    "？",
+    "??",
+    "？？",
+    "!",
+    "！",
+    "...",
+    "…",
+    "草",
+    "艹",
+    "好",
+    "行",
+    "嗯",
+    "恩",
+    "哦",
+    "噢",
+    "啊",
+    "诶",
+    "额",
+    "呃",
+    "哈",
+    "哈哈",
+    "哈哈哈",
+    "乐",
+    "笑死",
+}
 
 # Stopwords for word overlap calculation
 _STOPWORDS = frozenset("的了是在我你他她它们吗呢啊吧呀哦嘛嗯么这那就也都还不")
@@ -377,6 +424,64 @@ def _get_effective_interest_topics(
             seen.add(key)
             deduped.append(t)
     return deduped
+
+
+def _strip_structural_message_parts(text: str) -> str:
+    cleaned = _CQ_CODE_RE.sub(" ", text)
+    cleaned = _URL_RE.sub(" ", cleaned)
+    cleaned = _PLACEHOLDER_RE.sub(" ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _is_extend_eligible_message(message_text: str) -> bool:
+    cleaned = _strip_structural_message_parts(message_text)
+    if not cleaned or not _MEANINGFUL_TEXT_RE.search(cleaned):
+        return False
+
+    compact = re.sub(r"\s+", "", cleaned).lower()
+    punctuationless = re.sub(r"[^\w\u4e00-\u9fff]+", "", compact, flags=re.UNICODE)
+    if compact in _EXTEND_REJECT_TEXTS or punctuationless in _EXTEND_REJECT_TEXTS:
+        return False
+    is_short_question = (
+        bool(_QA_FAST_PATTERNS.search(cleaned))
+        or any(mark in cleaned for mark in "?？")
+        or cleaned.rstrip().endswith(("吗", "嘛", "么"))
+    )
+    if len(punctuationless) < 3 and not is_short_question:
+        return False
+    return True
+
+
+def _passive_trigger_allows_images(rule_name: str) -> bool:
+    return rule_name in {_RULE_EXTEND, _RULE_INTEREST, _RULE_RELEVANCE, _RULE_QA}
+
+
+def select_passive_trigger_image_urls(
+    result: AwakeningTriggerResult,
+    image_urls: list[str],
+    *,
+    limit: int = _PASSIVE_IMAGE_LIMIT,
+) -> list[str]:
+    if limit <= 0 or not image_urls or not _passive_trigger_allows_images(result.rule_name):
+        return []
+    selected: list[str] = []
+    seen: set[str] = set()
+    for raw_url in image_urls:
+        url = raw_url.strip()
+        if not url or url in seen:
+            continue
+        selected.append(url)
+        seen.add(url)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def build_passive_trigger_raw_user_text(result: AwakeningTriggerResult, image_urls: list[str]) -> str:
+    text = result.prompt.strip()
+    if image_urls:
+        return text
+    return _strip_structural_message_parts(text)
 
 
 def _extract_words(text: str) -> set[str]:
@@ -488,9 +593,25 @@ _RULE_BOREDOM = "awakening_boredom"
 _RULE_RELEVANCE = "awakening_relevance"
 _RULE_QA = "awakening_qa"
 
-_BOREDOM_PROMPT = "（群聊沉寂已久，自然地冒个泡说点什么吧）"
-_RELEVANCE_PROMPT_TEMPLATE = "（用户在延续你之前的对话，请自然地回应）\n用户说：{text}"
-_QA_PROMPT_TEMPLATE = "（用户提出了一个问题，请回答）\n用户说：{text}"
+_BOREDOM_INSTRUCTION = "群聊沉寂已久，你可以自然地冒个泡说点什么。不要说明自己是因为无聊唤醒或定时机制才发言。"
+_EXTEND_INSTRUCTION = "这名群友刚刚显式召唤过你，现在仍在同一段短对话窗口内。只有能自然接上时才回应，保持简短，不要说明唤醒延长或触发机制。"
+_INTEREST_INSTRUCTION_TEMPLATE = "这条群聊消息命中了你感兴趣的话题「{topic}」。请围绕这条消息自然接话，不要说明兴趣话题、关键词或唤醒机制。"
+_FALLBACK_INSTRUCTION = "你低概率决定参与这条群聊。只有在能自然接上时才简短回应，不要强行扩展，不要说明兜底概率或唤醒机制。"
+_RELEVANCE_INSTRUCTION = "判定结果显示用户在延续你之前的对话。请自然回应当前消息，不要说明相关性判定或唤醒机制。"
+_QA_INSTRUCTION = "判定结果显示用户提出了可能需要你回答的问题。请直接回答当前问题，不要说明答疑判定或唤醒机制。"
+_PASSIVE_IMAGE_INSTRUCTION = "这条触发消息包含图片，请结合图片与文字自然回应；如果图片不可见或信息不足，不要编造具体图像细节。"
+
+
+def build_awakening_prompt(result: AwakeningTriggerResult, image_urls: list[str] | None = None) -> str:
+    text = result.prompt.strip()
+    instruction = result.trigger_instruction.strip()
+    if select_passive_trigger_image_urls(result, image_urls or []):
+        instruction = "\n".join(item for item in [instruction, _PASSIVE_IMAGE_INSTRUCTION] if item)
+    if not instruction:
+        return text
+    if text:
+        return f"【内部触发说明】{instruction}\n【群友消息】{text}"
+    return f"【内部触发说明】{instruction}"
 
 
 def check_extend(
@@ -500,15 +621,19 @@ def check_extend(
     settings: ResolvedAwakeningSettings,
     state: AwakeningState | None = None,
 ) -> AwakeningTriggerResult | None:
-    if settings.extend_duration <= 0 or not message_text.strip():
+    text = message_text.strip()
+    if settings.extend_duration <= 0 or not text:
+        return None
+    if not _is_extend_eligible_message(text):
         return None
     st = state or _state
     if not st.is_in_extend_window(group_id, user_id, settings.extend_duration):
         return None
     return AwakeningTriggerResult(
         rule_name=_RULE_EXTEND,
-        prompt=message_text.strip(),
+        prompt=text,
         trigger_reason="唤醒延长：用户在活跃窗口内继续发言",
+        trigger_instruction=_EXTEND_INSTRUCTION,
     )
 
 
@@ -521,15 +646,18 @@ def check_interest(
     svc: Any,
 ) -> AwakeningTriggerResult | None:
     topics = _get_effective_interest_topics(settings, persona_id, svc)
-    if not topics or not message_text.strip():
+    text = message_text.strip()
+    if not topics or not text:
         return None
-    text_lower = message_text.lower()
+    text_lower = text.lower()
     for topic in topics:
         if topic.lower() in text_lower:
             return AwakeningTriggerResult(
                 rule_name=_RULE_INTEREST,
-                prompt=message_text.strip(),
+                prompt=text,
                 trigger_reason=f"兴趣话题匹配：{topic}",
+                trigger_instruction=_INTEREST_INSTRUCTION_TEMPLATE.format(topic=topic),
+                matched_topic=topic,
             )
     return None
 
@@ -540,14 +668,16 @@ def check_fallback(
     message_text: str,
     settings: ResolvedAwakeningSettings,
 ) -> AwakeningTriggerResult | None:
-    if settings.fallback_probability <= 0 or not message_text.strip():
+    text = message_text.strip()
+    if settings.fallback_probability <= 0 or not text:
         return None
     if random.random() >= settings.fallback_probability:
         return None
     return AwakeningTriggerResult(
         rule_name=_RULE_FALLBACK,
-        prompt=message_text.strip(),
+        prompt=text,
         trigger_reason="兜底概率触发",
+        trigger_instruction=_FALLBACK_INSTRUCTION,
     )
 
 
@@ -570,8 +700,9 @@ def check_boredom(
         return None
     return AwakeningTriggerResult(
         rule_name=_RULE_BOREDOM,
-        prompt=_BOREDOM_PROMPT,
+        prompt="",
         trigger_reason=f"无聊唤醒：沉寂 {silence:.0f}s",
+        trigger_instruction=_BOREDOM_INSTRUCTION,
     )
 
 
@@ -611,8 +742,9 @@ async def check_relevance(
             return None
         return AwakeningTriggerResult(
             rule_name=_RULE_RELEVANCE,
-            prompt=_RELEVANCE_PROMPT_TEMPLATE.format(text=message_text.strip()),
+            prompt=message_text.strip(),
             trigger_reason=f"相关性唤醒：overlap={overlap:.2f}",
+            trigger_instruction=_RELEVANCE_INSTRUCTION,
         )
 
     # Stage 2: LLM judge
@@ -626,8 +758,9 @@ async def check_relevance(
 
     return AwakeningTriggerResult(
         rule_name=_RULE_RELEVANCE,
-        prompt=_RELEVANCE_PROMPT_TEMPLATE.format(text=message_text.strip()),
+        prompt=message_text.strip(),
         trigger_reason=f"相关性唤醒：overlap={overlap:.2f}, LLM确认",
+        trigger_instruction=_RELEVANCE_INSTRUCTION,
     )
 
 
@@ -663,8 +796,9 @@ async def check_qa(
             return None
         return AwakeningTriggerResult(
             rule_name=_RULE_QA,
-            prompt=_QA_PROMPT_TEMPLATE.format(text=message_text.strip()),
+            prompt=message_text.strip(),
             trigger_reason="答疑唤醒：LLM缓存命中",
+            trigger_instruction=_QA_INSTRUCTION,
         )
 
     # Stage 2: LLM judge
@@ -676,8 +810,9 @@ async def check_qa(
 
     return AwakeningTriggerResult(
         rule_name=_RULE_QA,
-        prompt=_QA_PROMPT_TEMPLATE.format(text=message_text.strip()),
+        prompt=message_text.strip(),
         trigger_reason="答疑唤醒：LLM确认",
+        trigger_instruction=_QA_INSTRUCTION,
     )
 
 
@@ -792,12 +927,26 @@ async def run_boredom_check(
                 group_id=gid,
                 user_id="boredom_timer",
                 sender_name="系统",
-                prompt=result.prompt,
+                prompt=build_awakening_prompt(result),
                 image_urls=[],
                 recent_messages=trigger_context,
                 message_id=None,
             )
-            await bot.send_group_msg(group_id=int(gid), message=reply_result["reply"])
+            with bot_action_trace(
+                trigger_kind="awakening",
+                reason_code=_RULE_BOREDOM,
+                reason_detail=result.trigger_reason,
+                rule_name=_RULE_BOREDOM,
+                chat_type="group",
+                group_id=gid,
+                user_id="boredom_timer",
+                reply_preview=reply_result["reply"],
+                llm_used=bool(reply_result.get("llm_used")),
+                provider_id=str(reply_result.get("provider_id", "")),
+                model=str(reply_result.get("model", "")),
+                source="awakening.boredom_timer",
+            ):
+                await bot.send_group_msg(group_id=int(gid), message=reply_result["reply"])
             st.mark_boredom_triggered(gid)
             st.bot_messages.add(gid, reply_result["reply"])
             if stats_tracker is not None:

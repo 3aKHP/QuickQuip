@@ -29,6 +29,7 @@ from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
+from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.llm.summarize import generate_daily_summary
 
 logger = logging.getLogger(__name__)
@@ -186,7 +187,19 @@ async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=
         if nonebot is None:
             raise RuntimeError("bot runtime is not available")
         bot = nonebot.get_bot()
-    await _send_long_message(bot, int(group_key), content)
+    with bot_action_trace(
+        trigger_kind="command",
+        reason_code="command.summary.now",
+        reason_detail="命令触发：立即生成并发送每日总结",
+        rule_name=_RULE_NAME,
+        chat_type="group",
+        group_id=group_key,
+        reply_preview=content,
+        llm_used=model_used != "fallback",
+        model=model_used,
+        source="daily_summary.manual",
+    ):
+        await _send_long_message(bot, int(group_key), content)
     return {"model_used": model_used, "char_count": len(content)}
 
 
@@ -218,7 +231,18 @@ async def _publish_one(bot, row: dict) -> None:
     group_id = row["group_id"]
     summary_date = row["summary_date"]
     try:
-        await _send_long_message(bot, int(group_id), row["content"])
+        with bot_action_trace(
+            trigger_kind="scheduled",
+            reason_code="daily_summary.publish",
+            reason_detail=f"定时发布每日总结：{summary_date}",
+            rule_name=_RULE_NAME,
+            chat_type="group",
+            group_id=group_id,
+            reply_preview=row["content"],
+            model=str(row.get("model_used", "")),
+            source="daily_summary.scheduled_publish",
+        ):
+            await _send_long_message(bot, int(group_id), row["content"])
         daily_store.mark_published(group_id, summary_date)
         # Delete JSONL files only after confirmed delivery; covers the two dates in the window
         import datetime as _dt

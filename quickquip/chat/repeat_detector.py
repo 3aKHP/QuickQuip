@@ -61,6 +61,8 @@ class GroupRepeatDetector:
                     "reply": normalized_text,
                     "rate_limit_key": "repeat_follow_read",
                     "rule_name": "repeat_follow_read",
+                    "trigger_kind": "rule",
+                    "trigger_reason": "复读检测：不同用户连续复读",
                 }
 
             trimmed = self._trim_last_character(normalized_text)
@@ -70,6 +72,8 @@ class GroupRepeatDetector:
                 "reply": trimmed,
                 "rate_limit_key": "repeat_trim_last",
                 "rule_name": "repeat_trim_last",
+                "trigger_kind": "rule",
+                "trigger_reason": "复读检测：同一用户连续复读",
             }
 
         if state.count == 4 and state.all_same_sender:
@@ -78,6 +82,8 @@ class GroupRepeatDetector:
                 "at_user_id": user_key,
                 "rate_limit_key": "repeat_same_user_warning",
                 "rule_name": "repeat_same_user_warning",
+                "trigger_kind": "rule",
+                "trigger_reason": "复读检测：同一用户刷屏警告",
             }
 
         return None

@@ -4,6 +4,7 @@ from quickquip.llm.inputs import extract_private_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
+from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     get_llm_service,
@@ -100,7 +101,23 @@ def register_private_message_matcher(on_message):
             voice_text=llm_input.voice_text,
             message_id=message_id or None,
         )
-        resp = await matcher.send(result["reply"])
+        trigger_source = llm_input.trigger_source or "private_message"
+        with bot_action_trace(
+            trigger_kind="explicit_llm",
+            reason_code=f"llm_chat.{trigger_source}",
+            reason_detail=f"私聊 LLM 触发：{trigger_source}",
+            rule_name=result.get("rule_name", "llm_chat"),
+            chat_type="private",
+            user_id=user_id,
+            incoming_message_id=message_id,
+            incoming_preview=rendered_text,
+            reply_preview=result["reply"],
+            llm_used=bool(result.get("llm_used")),
+            provider_id=str(result.get("provider_id", "")),
+            model=str(result.get("model", "")),
+            source="private_message.llm",
+        ):
+            resp = await matcher.send(result["reply"])
         sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
         if sent_msg_id:
             svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)

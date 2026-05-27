@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _parse_preset, _parse_resume, _strip_command_name, _strip_leading_command_token
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, get_sender_name, rate_limiter, stats_tracker
+from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
 from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
 
@@ -296,4 +297,20 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
         )
         if chat_type == "group":
             stats_tracker.record_trigger(event.group_id, result.get("rule_name", "unknown"))
-        await defectify_cmd.finish(result["reply"])
+        with bot_action_trace(
+            trigger_kind="command",
+            reason_code="command.defectify",
+            reason_detail="命令触发：故障化转写",
+            rule_name=result.get("rule_name", "defectify"),
+            chat_type=chat_type,
+            group_id=getattr(event, "group_id", ""),
+            user_id=event.user_id,
+            incoming_message_id=str(getattr(event, "message_id", "") or ""),
+            incoming_preview=rendered.text,
+            reply_preview=result["reply"],
+            llm_used=bool(result.get("llm_used")),
+            provider_id=str(result.get("provider_id", "")),
+            model=str(result.get("model", "")),
+            source="command.defectify",
+        ):
+            await defectify_cmd.finish(result["reply"])

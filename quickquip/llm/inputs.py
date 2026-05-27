@@ -10,6 +10,7 @@ from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
 @dataclass(slots=True)
 class ExtractedLLMInput:
     prompt: str
+    trigger_source: str = ""
     image_urls: list[str] = field(default_factory=list)
     quoted_text: str = ""
     quoted_image_urls: list[str] = field(default_factory=list)
@@ -68,17 +69,24 @@ def extract_llm_input(
         if settings.allow_prefix and text.startswith(settings.trigger_prefix):
             return ExtractedLLMInput(
                 prompt=text[len(settings.trigger_prefix):].strip(),
+                trigger_source="prefix",
                 **extracted_reply,
                 **forward_kwargs,
             )
         if settings.allow_at and is_to_me:
-            return ExtractedLLMInput(prompt=text.strip(), **extracted_reply, **forward_kwargs)
+            return ExtractedLLMInput(
+                prompt=text.strip(),
+                trigger_source="at",
+                **extracted_reply,
+                **forward_kwargs,
+            )
         return None
 
     normalized = rendered.text
     if settings.allow_prefix and normalized.startswith(settings.trigger_prefix):
         return ExtractedLLMInput(
             prompt=normalized[len(settings.trigger_prefix):].strip(),
+            trigger_source="prefix",
             image_urls=rendered.image_urls,
             **extracted_reply,
             **forward_kwargs,
@@ -88,6 +96,7 @@ def extract_llm_input(
             normalized = normalized[len(settings.trigger_prefix):].strip()
         return ExtractedLLMInput(
             prompt=normalized.strip(),
+            trigger_source="at",
             image_urls=rendered.image_urls,
             **extracted_reply,
             **forward_kwargs,
@@ -178,6 +187,7 @@ def extract_private_llm_input(
 
     return ExtractedLLMInput(
         prompt=prompt,
+        trigger_source="private_message",
         image_urls=rendered.image_urls,
         quoted_text=quoted_text,
         quoted_image_urls=quoted_image_urls,

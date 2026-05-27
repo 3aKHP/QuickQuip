@@ -25,6 +25,7 @@ from quickquip.app.message_pipeline import (
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.chat.daily_briefing import (
     BriefingPeriod,
     NullBriefingNewsProvider,
@@ -143,7 +144,19 @@ async def _send_one(bot, group_id: str, period: str) -> None:
         return
     content, model_used = await _render_briefing(group_id, period)
     try:
-        await bot.send_group_msg(group_id=int(group_id), message=content)
+        with bot_action_trace(
+            trigger_kind="scheduled",
+            reason_code=f"daily_briefing.{period}",
+            reason_detail=f"定时发送每日播报：{period}",
+            rule_name=_RULE_NAME,
+            chat_type="group",
+            group_id=group_id,
+            reply_preview=content,
+            llm_used=model_used != "fallback",
+            model=model_used,
+            source="daily_briefing.scheduled",
+        ):
+            await bot.send_group_msg(group_id=int(group_id), message=content)
         logger.info(
             "daily_briefing: sent to group %s (%s via %s)",
             group_id,
@@ -185,7 +198,19 @@ async def send_daily_briefing_now(
     if before_generate is not None:
         await before_generate(selected_period)
     content, model_used = await _render_briefing(group_key, selected_period)
-    await bot.send_group_msg(group_id=int(group_key), message=content)
+    with bot_action_trace(
+        trigger_kind="command",
+        reason_code=f"command.briefing.now.{selected_period}",
+        reason_detail=f"命令触发：立即发送每日播报 {selected_period}",
+        rule_name=_RULE_NAME,
+        chat_type="group",
+        group_id=group_key,
+        reply_preview=content,
+        llm_used=model_used != "fallback",
+        model=model_used,
+        source="daily_briefing.manual",
+    ):
+        await bot.send_group_msg(group_id=int(group_key), message=content)
     return {"period": selected_period, "model_used": model_used, "char_count": len(content)}
 
 
