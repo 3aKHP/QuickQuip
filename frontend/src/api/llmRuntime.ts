@@ -1,7 +1,10 @@
 import { request } from './index'
 
-export async function fetchLlmHealth(verbose = false) {
-  return request(`/api/llm-runtime/health?verbose=${verbose ? 'true' : 'false'}`)
+export async function fetchLlmHealth(verbose = false, scopeKey = '__web_admin__') {
+  return request('/api/llm-runtime/health', {
+    method: 'POST',
+    body: JSON.stringify({ verbose, scope_key: scopeKey }),
+  })
 }
 
 export async function reloadLlmRuntime() {

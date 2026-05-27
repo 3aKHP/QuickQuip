@@ -16,6 +16,8 @@
 ### 修复
 
 - `/llm reload` 现在会同步刷新敏感词过滤器；`config/sensitive_words.toml` 继续仅通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑。
+- Web Admin 唤醒参数保存后会通知 bot 重载 `config/awakening.toml`，并移除 API 响应中的服务端配置路径。
+- Web Admin 诊断页健康检查改由 bot 侧动作队列执行；动作队列启用 WAL，并会回收长时间停留在 `running` 的中断任务。
 
 ## [1.6.1] - 2026-05-22
 

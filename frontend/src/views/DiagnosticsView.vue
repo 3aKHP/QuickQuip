@@ -51,6 +51,7 @@
                 <span class="action-time">{{ formatActionTime(item.updated_at || item.created_at) }}</span>
               </div>
               <div v-if="item.error" class="action-error">{{ item.error }}</div>
+              <pre v-else-if="item.result?.text" class="action-result">{{ item.result.text }}</pre>
               <pre v-else-if="item.result" class="action-result">{{ prettyJson(item.result) }}</pre>
             </div>
           </div>
@@ -257,8 +258,10 @@ function actionLabel(actionType: string): string {
     mcp_reload: '重载 MCP',
     personas_reload: '重载人格',
     rules_reload: '重载规则',
+    awakening_reload: '重载唤醒',
     clear_context: '清空上下文',
     delete_context_message: '删除上下文消息',
+    health_check: '健康检查',
     summary_now: '立即总结',
     briefing_now: '立即播报',
   } as Record<string, string>)[actionType] || actionType
@@ -287,7 +290,7 @@ function formatActionTime(raw: string): string {
   const d = new Date(raw)
   if (Number.isNaN(d.getTime())) return raw
   const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
 async function loadActions() {
@@ -322,7 +325,13 @@ async function loadHealth(verbose: boolean) {
   runtimeError.value = null
   try {
     const data = await fetchLlmHealth(verbose)
-    healthText.value = data.text || ''
+    if (data?.queued) {
+      healthText.value = '健康检查已入队，请稍后查看最近动作。'
+      await loadActions()
+      toast('健康检查已入队')
+    } else {
+      healthText.value = data.text || ''
+    }
   } catch (e: unknown) {
     runtimeError.value = (e as Error).message
   } finally {

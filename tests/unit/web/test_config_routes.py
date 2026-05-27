@@ -82,9 +82,6 @@ if _real_filelock is not None:
 else:
     sys.modules.pop("filelock", None)
 
-HTTPException = _HTTPException
-
-
 def _mock_request():
     req = MagicMock()
     req.client.host = "127.0.0.1"
@@ -112,21 +109,38 @@ def test_list_configs_does_not_expose_sensitive_words(monkeypatch, tmp_path):
 def test_sensitive_words_config_key_is_not_readable(monkeypatch, tmp_path):
     _patch_config_dir(monkeypatch, tmp_path)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(Exception) as exc:
         config.get_config("sensitive_words")
 
-    assert exc.value.status_code == 404
+    assert getattr(exc.value, "status_code", None) == 404
 
 
 def test_sensitive_words_config_key_is_not_writable(monkeypatch, tmp_path):
     _patch_config_dir(monkeypatch, tmp_path)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(Exception) as exc:
         config.put_config(
             "sensitive_words",
             config.ConfigBody(content="[block]\nwords = [\"secret\"]\n"),
             _mock_request(),
         )
 
-    assert exc.value.status_code == 404
+    assert getattr(exc.value, "status_code", None) == 404
     assert not (tmp_path / "config" / "sensitive_words.toml").exists()
+
+
+def test_put_awakening_config_queues_reload(monkeypatch, tmp_path):
+    base = _patch_config_dir(monkeypatch, tmp_path)
+    captured: list[str] = []
+    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "a1"})
+    monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
+
+    result = config.put_config(
+        "awakening",
+        config.ConfigBody(content="[awakening.defaults]\nfallback_probability = 0.1\n"),
+        _mock_request(),
+    )
+
+    assert result["queued"] is True
+    assert captured == ["awakening_reload"]
+    assert (base / "awakening.toml").exists()

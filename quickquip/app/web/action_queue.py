@@ -4,7 +4,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ class WebAdminActionQueue:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
     def _ensure_schema(self) -> None:
@@ -60,6 +61,22 @@ class WebAdminActionQueue:
                 ON web_admin_actions(status, created_at)
                 """
             )
+
+    def _reap_stale_running_locked(self, conn: sqlite3.Connection, timeout_seconds: int = 300) -> int:
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, int(timeout_seconds)))).isoformat()
+        cur = conn.execute(
+            """
+            UPDATE web_admin_actions
+            SET status = 'failed', updated_at = ?, error = ?
+            WHERE status = 'running' AND updated_at < ?
+            """,
+            (_utc_now(), "action timed out after bot worker interruption", cutoff),
+        )
+        return cur.rowcount
+
+    def reap_stale_running(self, timeout_seconds: int = 300) -> int:
+        with self._connect() as conn:
+            return self._reap_stale_running_locked(conn, timeout_seconds)
 
     @staticmethod
     def _row_to_action(row: sqlite3.Row) -> WebAdminAction:
@@ -100,6 +117,7 @@ class WebAdminActionQueue:
         now = _utc_now()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            self._reap_stale_running_locked(conn)
             rows = conn.execute(
                 """
                 SELECT *
@@ -121,19 +139,11 @@ class WebAdminActionQueue:
                     [(now, action_id) for action_id in ids],
                 )
             conn.commit()
-        return [
-            WebAdminAction(
-                id=row["id"],
-                action_type=row["action_type"],
-                payload=json.loads(row["payload_json"] or "{}"),
-                status="running",
-                created_at=row["created_at"],
-                updated_at=now,
-                result=json.loads(row["result_json"]) if row["result_json"] else None,
-                error=row["error"] or "",
-            )
-            for row in rows
-        ]
+        actions = [self._row_to_action(row) for row in rows]
+        for action in actions:
+            action.status = "running"
+            action.updated_at = now
+        return actions
 
     def complete(self, action_id: str, result: dict[str, Any] | None = None) -> None:
         with self._connect() as conn:

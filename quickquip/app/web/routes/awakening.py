@@ -19,6 +19,7 @@ from quickquip.chat.awakening import (
     AwakeningGroupOverride,
     CONFIG_AWAKENING_TOML,
     get_config,
+    load_awakening_config,
     reload_config,
 )
 
@@ -111,8 +112,12 @@ def _toml_value(value: Any) -> str:
     raise TypeError(f"unsupported TOML value: {value!r}")
 
 
-def _write_awakening_config(cfg: AwakeningConfig, path: Path | None = None) -> None:
-    target_path = path or _CONFIG_PATH
+def _lock_for(path: Path) -> FileLock:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileLock(str(path) + ".lock")
+
+
+def _render_awakening_config(cfg: AwakeningConfig) -> str:
     defaults = asdict(cfg.defaults)
     lines = [
         "# Managed by QuickQuip Web Admin.",
@@ -144,39 +149,50 @@ def _write_awakening_config(cfg: AwakeningConfig, path: Path | None = None) -> N
 
     content = "\n".join(lines).rstrip() + "\n"
     tomllib.loads(content)
+    return content
+
+
+def _write_awakening_config_unlocked(cfg: AwakeningConfig, target_path: Path) -> None:
+    content = _render_awakening_config(cfg)
     target_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = target_path.with_suffix(target_path.suffix + ".tmp")
-    with FileLock(str(target_path) + ".lock"):
-        try:
-            tmp.write_text(content, encoding="utf-8")
-            tmp.replace(target_path)
-        except Exception:
-            tmp.unlink(missing_ok=True)
-            raise
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(target_path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _write_awakening_config(cfg: AwakeningConfig, path: Path | None = None) -> None:
+    target_path = path or _CONFIG_PATH
+    with _lock_for(target_path):
+        _write_awakening_config_unlocked(cfg, target_path)
 
 
 def _apply_group_settings(group_id: str, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    reload_config(_CONFIG_PATH)
-    cfg = get_config()
-    if cfg.load_error:
-        raise HTTPException(status_code=409, detail=f"awakening.toml load error: {cfg.load_error}")
-    before = asdict(cfg.group_overrides[group_id]) if group_id in cfg.group_overrides else None
-    existing = cfg.group_overrides.get(group_id)
-    override = AwakeningGroupOverride(**asdict(existing)) if existing is not None else AwakeningGroupOverride(group_id=group_id)
-    for key, value in payload.items():
-        setattr(override, key, value)
-    next_overrides = dict(cfg.group_overrides)
-    values = asdict(override)
-    has_any_override = any(values[field_name] is not None for field_name in _ALL_GROUP_OVERRIDE_FIELDS)
-    if has_any_override:
-        next_overrides[group_id] = override
-    else:
-        next_overrides.pop(group_id, None)
-    next_cfg = AwakeningConfig(defaults=cfg.defaults, group_overrides=next_overrides, source_path=cfg.source_path)
-    _write_awakening_config(next_cfg)
-    reload_config(_CONFIG_PATH)
-    after_override = get_config().group_overrides.get(group_id)
-    after = asdict(after_override) if after_override is not None else None
+    target_path = _CONFIG_PATH
+    with _lock_for(target_path):
+        cfg = load_awakening_config(target_path)
+        if cfg.load_error:
+            raise HTTPException(status_code=409, detail=f"awakening.toml load error: {cfg.load_error}")
+        before = asdict(cfg.group_overrides[group_id]) if group_id in cfg.group_overrides else None
+        existing = cfg.group_overrides.get(group_id)
+        override = AwakeningGroupOverride(**asdict(existing)) if existing is not None else AwakeningGroupOverride(group_id=group_id)
+        for key, value in payload.items():
+            setattr(override, key, value)
+        next_overrides = dict(cfg.group_overrides)
+        values = asdict(override)
+        has_any_override = any(values[field_name] is not None for field_name in _ALL_GROUP_OVERRIDE_FIELDS)
+        if has_any_override:
+            next_overrides[group_id] = override
+        else:
+            next_overrides.pop(group_id, None)
+        next_cfg = AwakeningConfig(defaults=cfg.defaults, group_overrides=next_overrides, source_path=cfg.source_path)
+        _write_awakening_config_unlocked(next_cfg, target_path)
+        reload_config(target_path)
+        after_override = get_config().group_overrides.get(group_id)
+        after = asdict(after_override) if after_override is not None else None
     return before or {}, after or {}
 
 
@@ -235,7 +251,6 @@ def list_awakening():
     cfg = get_config()
     return {
         "load_error": cfg.load_error,
-        "source_path": str(cfg.source_path or ""),
         "defaults": asdict(cfg.defaults),
         "rules": [{"name": name, "label": label} for name, label in _AWAKENING_RULES],
         "groups": [_format_group(group_id) for group_id in _known_group_ids()],
@@ -273,13 +288,14 @@ def set_awakening_rule(group_id: str, rule_name: str, body: ToggleBody, request:
 @router.post("/awakening/{group_id}/boredom")
 def set_boredom_opt_in(group_id: str, body: ToggleBody, request: Request):
     _validate_group_id(group_id)
-    groups = _load_boredom_groups()
-    old_enabled = group_id in groups
-    if body.enabled:
-        groups.add(group_id)
-    else:
-        groups.discard(group_id)
-    _save_boredom_groups(groups)
+    with _lock_for(_BOREDOM_GROUPS_PATH):
+        groups = _load_boredom_groups()
+        old_enabled = group_id in groups
+        if body.enabled:
+            groups.add(group_id)
+        else:
+            groups.discard(group_id)
+        _save_boredom_groups(groups)
     audit_logger.log(
         request,
         action="toggle",
@@ -299,7 +315,7 @@ def set_awakening_settings(group_id: str, body: AwakeningSettingsBody, request: 
         raise HTTPException(status_code=400, detail="no fields to update")
     _validate_settings_payload(payload)
     before, after = _apply_group_settings(group_id, payload)
-    action = action_queue.enqueue("rules_reload")
+    action = action_queue.enqueue("awakening_reload")
     audit_logger.log(
         request,
         action="update",

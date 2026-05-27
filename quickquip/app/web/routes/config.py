@@ -7,6 +7,7 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 
 from quickquip.app.web.audit import audit_logger
+from quickquip.app.web.action_queue import action_queue
 from quickquip.common.paths import CONFIG_DIR
 
 router = APIRouter()
@@ -120,4 +121,8 @@ def put_config(key: str, body: ConfigBody, request: Request):
         target_type="config",
         target_id=key,
     )
-    return {"ok": True, "reload_required": True}
+    response = {"ok": True, "reload_required": True}
+    if key == "awakening":
+        action = action_queue.enqueue("awakening_reload")
+        response.update({"queued": True, "action": action})
+    return response

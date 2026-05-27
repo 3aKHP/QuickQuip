@@ -5,13 +5,13 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service
 from quickquip.app.web.action_queue import action_queue
 from quickquip.app.web.audit import audit_logger
 
 router = APIRouter()
 
 _SCOPE_KEY_RE = re.compile(r"^(?:\d{5,12}|private:\d{5,15})$")
+_WEB_ADMIN_HEALTH_SCOPE = "__web_admin__"
 
 
 class ScopeBody(BaseModel):
@@ -23,6 +23,11 @@ class DeleteMessageBody(BaseModel):
     message_id: str
 
 
+class HealthBody(BaseModel):
+    verbose: bool = False
+    scope_key: str = _WEB_ADMIN_HEALTH_SCOPE
+
+
 def _validate_scope_key(scope_key: str) -> str:
     key = scope_key.strip()
     if not _SCOPE_KEY_RE.match(key):
@@ -30,11 +35,25 @@ def _validate_scope_key(scope_key: str) -> str:
     return key
 
 
-@router.get("/llm-runtime/health")
-async def get_health(verbose: bool = False):
-    _ensure_llm_bindings()
-    svc = get_llm_service()
-    return {"text": await svc.format_health("0", chat_type="group", verbose=verbose)}
+def _validate_health_scope_key(scope_key: str) -> str:
+    key = scope_key.strip()
+    if not key or key == _WEB_ADMIN_HEALTH_SCOPE:
+        return _WEB_ADMIN_HEALTH_SCOPE
+    return _validate_scope_key(key)
+
+
+@router.post("/llm-runtime/health")
+def queue_health_check(body: HealthBody, request: Request):
+    scope_key = _validate_health_scope_key(body.scope_key)
+    action = action_queue.enqueue("health_check", {"verbose": body.verbose, "scope_key": scope_key})
+    audit_logger.log(
+        request,
+        action="queue",
+        target_type="llm_runtime",
+        target_id="health",
+        summary_after={"action_id": action["id"], "verbose": body.verbose, "scope_key": scope_key},
+    )
+    return {"ok": True, "queued": True, "action": action}
 
 
 @router.post("/llm-runtime/reload")

@@ -159,6 +159,36 @@ async def _send_one(bot, group_id: str, period: str) -> None:
         )
 
 
+async def send_daily_briefing_now(
+    group_id: int | str,
+    period: BriefingPeriod | None = None,
+    bot=None,
+    before_generate=None,
+) -> dict[str, object]:
+    group_key = str(group_id)
+    if period is not None:
+        normalized_period = normalize_period(period)
+        if normalized_period is None:
+            raise ValueError("period must be morning, noon, or evening")
+        period = normalized_period
+    if not _is_group_enabled(group_key):
+        raise RuntimeError("daily briefing is not enabled for this group")
+    if _on_cooldown(group_key):
+        raise RuntimeError("briefing generation is on cooldown")
+
+    _mark_triggered(group_key)
+    selected_period = period or _default_period_for_now(datetime.now(tz=_LOCAL_TZ))
+    if bot is None:
+        if nonebot is None:
+            raise RuntimeError("bot runtime is not available")
+        bot = nonebot.get_bot()
+    if before_generate is not None:
+        await before_generate(selected_period)
+    content, model_used = await _render_briefing(group_key, selected_period)
+    await bot.send_group_msg(group_id=int(group_key), message=content)
+    return {"period": selected_period, "model_used": model_used, "char_count": len(content)}
+
+
 async def _job_send_period(period: str) -> None:
     if nonebot is None:
         return
@@ -281,18 +311,22 @@ def register_daily_briefing_commands(on_command) -> None:
         if action in {"now", "立即", "测试"}:
             if not _is_admin(event):
                 await briefing_cmd.finish("仅管理员可执行此操作")
-            if not _is_group_enabled(group_id):
-                await briefing_cmd.finish("本群未开启每日播报，请先使用 /briefing on 开启。")
-            if _on_cooldown(group_id):
-                await briefing_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
-            _mark_triggered(group_id)
             period = normalize_period(tokens[1]) if len(tokens) >= 2 else None
             if period is None:
                 period = _default_period_for_now(datetime.now(tz=_LOCAL_TZ))
-            await briefing_cmd.send(f"正在生成{_PERIOD_LABELS[period]}，请稍候……")
-            content, _model_used = await _render_briefing(str(group_id), period)
-            bot = nonebot.get_bot()
-            await bot.send_group_msg(group_id=int(group_id), message=content)
+            try:
+                await send_daily_briefing_now(
+                    group_id,
+                    period,
+                    before_generate=lambda selected_period: briefing_cmd.send(f"正在生成{_PERIOD_LABELS[selected_period]}，请稍候……"),
+                )
+            except RuntimeError as exc:
+                message = str(exc)
+                if message == "daily briefing is not enabled for this group":
+                    await briefing_cmd.finish("本群未开启每日播报，请先使用 /briefing on 开启。")
+                if message == "briefing generation is on cooldown":
+                    await briefing_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
+                raise
             await briefing_cmd.finish()
 
         await briefing_cmd.finish(

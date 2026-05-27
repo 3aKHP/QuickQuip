@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
 from typing import Any
 
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
-    daily_briefing_enabled_groups,
-    daily_enabled_groups,
     get_llm_service,
     reload_chat_rules_pipeline,
-    rule_switch,
 )
 from quickquip.app.web.action_queue import WebAdminAction, action_queue
+from quickquip.chat.awakening import reload_config as reload_awakening_config
 from quickquip.chat.daily_briefing import normalize_period
 
 _SCOPE_KEY_RE = re.compile(r"^(?:\d{5,12}|private:\d{5,15})$")
+_WEB_ADMIN_HEALTH_SCOPE = "__web_admin__"
 
 
 def _chat_type(scope_key: str) -> str:
@@ -23,6 +21,8 @@ def _chat_type(scope_key: str) -> str:
 
 
 def _chat_id(scope_key: str) -> str:
+    if scope_key == _WEB_ADMIN_HEALTH_SCOPE:
+        return scope_key
     return scope_key.removeprefix("private:")
 
 
@@ -31,6 +31,13 @@ def _validate_scope(scope_key: Any) -> str:
     if not _SCOPE_KEY_RE.match(key):
         raise ValueError("scope_key must be 5-12 digits or 'private:USER_ID'")
     return key
+
+
+def _normalize_health_scope(scope_key: Any) -> str:
+    key = str(scope_key or "").strip()
+    if not key or key == _WEB_ADMIN_HEALTH_SCOPE:
+        return _WEB_ADMIN_HEALTH_SCOPE
+    return _validate_scope(key)
 
 
 def _get_bot():
@@ -59,6 +66,17 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
         summary = reload_chat_rules_pipeline()
         return {"ok": True, "summary": summary}
 
+    if action.action_type == "awakening_reload":
+        reload_awakening_config()
+        summary = reload_chat_rules_pipeline()
+        return {"ok": True, "summary": summary}
+
+    if action.action_type == "health_check":
+        scope_key = _normalize_health_scope(action.payload.get("scope_key"))
+        verbose = bool(action.payload.get("verbose", False))
+        text = await svc.format_health(_chat_id(scope_key), chat_type=_chat_type(scope_key), verbose=verbose)
+        return {"ok": True, "text": text}
+
     if action.action_type == "clear_context":
         scope_key = _validate_scope(action.payload.get("scope_key"))
         deleted = svc.clear_context(_chat_id(scope_key), chat_type=_chat_type(scope_key))
@@ -79,81 +97,20 @@ async def _execute_summary_now(action: WebAdminAction) -> dict[str, Any]:
     group_id = str(action.payload.get("group_id") or "").strip()
     if not group_id.isdigit():
         raise ValueError("group_id is required")
-    if not daily_enabled_groups.contains(group_id):
-        raise RuntimeError("daily summary is not enabled for this group")
+    from quickquip.adapters.nonebot.daily_summary_plugin import send_daily_summary_now
 
-    from quickquip.adapters.nonebot.daily_summary_plugin import (
-        _LOCAL_TZ,
-        _mark_triggered,
-        _on_cooldown,
-        _run_generation,
-        _send_long_message,
-    )
-
-    if _on_cooldown(group_id):
-        raise RuntimeError("summary generation is on cooldown")
-
-    bot = _get_bot()
-    _mark_triggered(group_id)
-
-    now = datetime.now(tz=_LOCAL_TZ)
-    yesterday = now.date() - timedelta(days=1)
-    start_dt = now.replace(
-        year=yesterday.year,
-        month=yesterday.month,
-        day=yesterday.day,
-        hour=6,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    date_label = (
-        start_dt.strftime("%Y年%m月%d日 06:00")
-        + " 至 "
-        + now.strftime("%m月%d日 %H:%M")
-    )
-    result = await _run_generation(
-        group_id,
-        start_dt.timestamp(),
-        now.timestamp(),
-        date_label,
-    )
-    if result is None:
-        raise RuntimeError("summary generation skipped or failed")
-
-    content, model_used = result
-    await _send_long_message(bot, int(group_id), content)
-    return {"model_used": model_used, "char_count": len(content)}
+    return await send_daily_summary_now(group_id, _get_bot())
 
 
 async def _execute_briefing_now(action: WebAdminAction) -> dict[str, Any]:
     group_id = str(action.payload.get("group_id") or "").strip()
     if not group_id.isdigit():
         raise ValueError("group_id is required")
-    if not daily_briefing_enabled_groups.contains(group_id) or not rule_switch.is_enabled(group_id, "daily_briefing"):
-        raise RuntimeError("daily briefing is not enabled for this group")
-
-    from quickquip.adapters.nonebot.daily_briefing_plugin import (
-        _LOCAL_TZ,
-        _default_period_for_now,
-        _mark_triggered,
-        _on_cooldown,
-        _render_briefing,
-    )
-
-    if _on_cooldown(group_id):
-        raise RuntimeError("briefing generation is on cooldown")
-
     period_raw = str(action.payload.get("period") or "").strip()
     period = normalize_period(period_raw) if period_raw else None
-    if period is None:
-        period = _default_period_for_now(datetime.now(tz=_LOCAL_TZ))
+    from quickquip.adapters.nonebot.daily_briefing_plugin import send_daily_briefing_now
 
-    bot = _get_bot()
-    _mark_triggered(group_id)
-    content, model_used = await _render_briefing(group_id, period)
-    await bot.send_group_msg(group_id=int(group_id), message=content)
-    return {"period": period, "model_used": model_used, "char_count": len(content)}
+    return await send_daily_briefing_now(group_id, period, _get_bot())
 
 
 async def execute_web_admin_action(action: WebAdminAction) -> dict[str, Any]:

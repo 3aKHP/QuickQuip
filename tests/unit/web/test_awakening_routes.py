@@ -12,7 +12,10 @@ from quickquip.chat import awakening as awakening_config  # noqa: E402
 @pytest.fixture()
 def temp_awakening_config(monkeypatch, tmp_path):
     path = tmp_path / "awakening.toml"
+    boredom_path = tmp_path / "awakening_boredom_groups.json"
     monkeypatch.setattr(awakening_route, "_CONFIG_PATH", path)
+    monkeypatch.setattr(awakening_route, "_BOREDOM_GROUPS_PATH", boredom_path)
+    monkeypatch.setattr(awakening_route.stats_tracker, "to_dict", lambda: {})
     awakening_config.reload_config(path)
     try:
         yield path
@@ -78,6 +81,27 @@ def test_clearing_editable_fields_keeps_interest_only_override(temp_awakening_co
     assert "123456" in saved.group_overrides
     assert saved.group_overrides["123456"].interest_topics == ["Python"]
     assert saved.group_overrides["123456"].fallback_probability is None
+
+
+def test_list_awakening_does_not_expose_source_path(temp_awakening_config):
+    result = awakening_route.list_awakening()
+
+    assert "source_path" not in result
+
+
+def test_set_awakening_settings_queues_awakening_reload(monkeypatch, temp_awakening_config):
+    captured: list[str] = []
+    monkeypatch.setattr(awakening_route.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "a1"})
+    monkeypatch.setattr(awakening_route.audit_logger, "log", lambda *args, **kwargs: None)
+
+    result = awakening_route.set_awakening_settings(
+        "123456",
+        awakening_route.AwakeningSettingsBody(fallback_probability=0.25),
+        object(),
+    )
+
+    assert result["ok"] is True
+    assert captured == ["awakening_reload"]
 
 
 def test_validate_settings_payload_rejects_bool_numbers():
