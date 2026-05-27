@@ -283,7 +283,7 @@ class TiebaService:
             if state and state.last_error:
                 lines.append(f"  最近错误：{state.last_error}")
 
-        lines.append("登录工具：python dev/tools/tieba_login.py")
+        lines.append("登录工具：python -m quickquip.tieba.login")
         return "\n".join(lines)
 
     def format_sources(self, forum_keyword: str | None = None) -> str:

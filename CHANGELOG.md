@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 生产运维模板迁移到 `prod.example/`，真实生产目录使用私有 `prod/`；QuickQuip 应用环境变量统一从根 `.env` 读取。
+- 贴吧登录态续签入口改为 `python -m quickquip.tieba.login`。
+
 ## [1.7.1] - 2026-05-27
 
 ### 修复

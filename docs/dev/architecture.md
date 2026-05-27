@@ -20,7 +20,7 @@
 | 模式 | 入口 | 环境变量来源 |
 |---|---|---|
 | 本地直接运行 | `python bot.py` | 根目录 `.env` |
-| 容器化部署 | 私有部署编排 | 私有环境变量文件 |
+| 容器化部署 | `prod/` 私有部署编排 | 根目录 `.env` |
 
 ---
 
@@ -67,6 +67,8 @@ QuickQuip/
 │   ├── src/                # 源码
 │   └── dist/               # 构建产物（gitignore）
 ├── docker-compose.searxng.yml  # 项目内置 SearXNG 服务编排
+├── prod.example/          # 生产运维目录模板（追踪）
+├── prod/                  # 真实生产运维目录（gitignore，由 prod.example/ 复制）
 ├── docker/
 │   └── searxng/
 │       └── settings.yml    # SearXNG 配置
@@ -173,26 +175,26 @@ docs/
 │   ├── sensitive-filter.md
 │   ├── tool-discovery.md
 │   └── web-admin.md
-└── dev/                    # 开发者文档
-    ├── architecture.md     # 本文件
-    ├── game-framework.md
-    ├── llm-module.md
-    ├── mcp-integration.md
-    ├── regex-tutorial.md
-    └── tool-discovery.md
+└── docs/dev/...            # 开发者文档
 ```
 
 ---
 
 ## 私有部署材料
 
-真实部署脚本、私有环境变量、部署编排和临时分析材料均属自用层，不属于公共仓库分发内容。公共文档只记录通用配置格式和运行方式，不记录个人生产目录结构。
+真实部署脚本配置、运维通知密钥、compose 运行态目录和临时分析材料均属自用层，不属于公共仓库分发内容。公共文档只记录通用配置格式和运行方式，不记录个人生产目录结构。
+
+### `prod.example/` 与 `prod/`
+
+- `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
+- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、LLBot 登录态目录和运维通知密钥。
+- 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档，不承担生产服务器角色。
 
 ### 私有环境变量与根 `.env` 的关系
 
-- **根 `.env`**：本地直接运行可用的默认环境变量文件，必须保持 gitignore
-- **私有部署环境变量**：容器化部署可用的覆盖值，必须留在私有部署材料中
-- 如果部署编排同时读取多个 env 文件，应在私有部署文档中记录优先级
+- **根 `.env`**：QuickQuip 应用唯一的涉密环境变量来源，供本地运行与 `prod/` 容器部署共同读取，必须保持 gitignore。
+- **`prod/sendkey.env`**：可选运维通知密钥，仅由巡检脚本读取，不被 QuickQuip 应用加载。
+- 本地私有工作区不再作为应用配置来源，不承担生产环境变量覆盖职责。
 
 ### `llm_about` 部署路径
 
@@ -219,4 +221,5 @@ docs/
 | `config/niuniu_text.toml`, `config/niuniu_text_safe.toml` | 含部署者自定义牛牛文案 |
 | `config/personas/` | 含真实 persona 定义 |
 | `data/` | 运行时数据 |
-| 私有部署目录 | 部署脚本、真实环境变量、临时材料和个人生产结构 |
+| `prod/` | 真实生产运维目录、运行态目录和运维密钥 |
+| 本地私有工作区 | 本地开发草稿、沙箱、探针脚本和工作文档 |

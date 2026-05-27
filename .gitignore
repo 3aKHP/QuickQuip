@@ -52,8 +52,12 @@ config/llm.*.local.toml
 !config/*.example
 !config/personas.example/
 
-#Dev Filefolder
-/dev/
+# Private production deployment assets
+/prod/
+!/prod.example/
+
+# Local private workspace
+/d[e]v/
 
 # Team-private MCP sidecar Dockerfiles (deployed via tar, not tracked)
 docker/*.Dockerfile

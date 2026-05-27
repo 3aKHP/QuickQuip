@@ -1,6 +1,6 @@
 # QuickQuip 云端部署指南
 
-LLM 模块的详细结构、边界和群内命令说明见 [../dev/llm-module.md](../dev/llm-module.md)。如果后续需要把外部工具后端接成 MCP，另见 [../dev/mcp-integration.md](../dev/mcp-integration.md)。
+LLM 模块的详细结构、边界和群内命令说明见 [docs/dev/llm-module.md](../../docs/dev/llm-module.md)。如果后续需要把外部工具后端接成 MCP，另见 [docs/dev/mcp-integration.md](../../docs/dev/mcp-integration.md)。
 
 ## 前提条件
 
@@ -29,30 +29,32 @@ sudo usermod -aG docker $USER
 
 ### 2. 上传项目
 
-这套 Docker 与部署脚本是**私有部署工具**，默认不面向公共仓库使用。不要假设可以只靠公共 GitHub 仓库直接还原完整部署环境。
+这套 Docker 与部署脚本以 `prod.example/` 作为公共模板，以私有 `prod/` 目录作为实际生产运维目录。不要把 `prod/` 中的真实脚本配置、通知密钥或运行态目录提交到公共仓库。
 
 ```bash
 # 推荐：从本地私有工作目录上传完整项目
 scp -r /path/to/QuickQuip user@server:/path/to/QuickQuip
 ```
 
-### 3. 配置环境变量
+### 3. 准备生产运维目录和环境变量
 
 ```bash
 cd /path/to/QuickQuip
 cp .env.example .env
 nano .env  # 填入 QQ 号、OneBot 配置和 API key
+cp -r prod.example prod
 ```
 
 同时确认：
 
 - 根目录下的 `.env` 已存在，并填入 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
-- 如启用 MCP Tavily sidecar，再额外填入 `TAVILY_API_KEY`
+- 如启用 MCP sidecar，再按你的私有 `prod/` 编排补充对应 API key
 - 根目录下的 `config/llm.toml` 已存在并填入真实 provider / model / base_url 配置
 - 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
 - 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
 - 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
-- 如使用私有部署编排，相关环境变量文件不应进入公共仓库
+- `prod/` 已由 `prod.example/` 复制而来，并按服务器环境调整 compose、部署脚本或巡检脚本
+- 如需 ServerChan 等运维通知，在 `prod/sendkey.env` 中维护；该文件不被 QuickQuip 应用读取
 
 当前部署会把：
 
@@ -66,17 +68,20 @@ nano .env  # 填入 QQ 号、OneBot 配置和 API key
 一并用于容器运行。
 若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
 
+根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 只承载部署脚本、compose 编排、巡检脚本和运维通知密钥，不再提供应用层 `.env` 覆盖。
+
 ### 4. 启动服务
 
 ```bash
-cd /path/to/QuickQuip
-docker compose up -d
+cd /path/to/QuickQuip/prod
+docker compose --env-file ../.env up -d
 ```
 
 当前 compose 会：
 
-- 按你的私有编排连接搜索服务
-- 把 `quickquip` 容器内的 `SEARXNG_BASE_URL` 覆盖为可访问的搜索服务地址
+- 启动模板内置的 SearXNG，供 `quickquip` 和 Web Admin 容器通过内部地址访问
+- 如需复用外部搜索服务，可在 `.env` 中设置 `QUICKQUIP_SEARXNG_BASE_URL`，或在私有 `prod/docker-compose.yml` 中调整编排
+- 通过 `../.env` 向 bot 和 Web Admin 提供应用环境变量
 - 把 `../config` 只读挂载到容器内 `/app/config`
 - 把 `../llm_about` 挂载到容器内 `/app/llm_about`
   - 其中包含全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
@@ -97,7 +102,7 @@ docker compose up -d
 贴吧登录态建议先在本地机器生成，再通过部署脚本同步到云端：
 
 ```bash
-# 运行项目自带的贴吧登录脚本（位于开发工作区中），按提示完成扫码登录
+python -m quickquip.tieba.login
 ```
 
 成功后会生成：
@@ -106,7 +111,7 @@ docker compose up -d
 data/tieba/storage_state.json
 ```
 
-后续执行你的私有部署脚本时，该文件会自动单独上传到云端。
+后续执行 `prod/deploy-v4.ps1` 时，该文件会自动单独上传到云端。
 
 ### 4.2 词云字体文件
 
@@ -123,7 +128,7 @@ LLBot 首次启动需要扫码登录：
 
 ```bash
 # 查看 LLBot 日志，找到登录二维码
-docker compose logs -f llbot
+docker compose --env-file ../.env logs -f llbot
 ```
 
 日志中会出现二维码或登录链接，用手机 QQ 扫码确认。登录成功后，登录态会持久化在 `llbot-qq/` 目录中，配置文件在 `llbot-data/` 中。也可通过 WebUI（`http://<服务器IP>:3080`）扫码。
@@ -132,10 +137,10 @@ docker compose logs -f llbot
 
 ```bash
 # 查看两个容器是否正常运行
-docker compose ps
+docker compose --env-file ../.env ps
 
 # 查看 QuickQuip 日志
-docker compose logs -f quickquip
+docker compose --env-file ../.env logs -f quickquip
 ```
 
 在群里发一条"早安"，如果 bot 回复了时区猜测，说明部署成功。
@@ -164,7 +169,7 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，默认监听 
 - nginx `auth_basic`：外层站点访问控制，密码文件位置由你的反代配置决定
 - QuickQuip Web Admin session：应用层登录，会读取 `WEB_ADMIN_PASSWORD` 并在浏览器里建立 `HttpOnly` session cookie
 
-建议在私有环境变量文件中补充：
+建议在根目录 `.env` 中补充：
 
 ```env
 WEB_ADMIN_PASSWORD=change-this-admin-password
@@ -193,9 +198,9 @@ WEB_ADMIN_COOKIE_SECURE=auto
 - 改了 `quickquip/app/web/` 或其他 Python 代码后，**必须重建镜像**，`docker restart` 不够：
 
   ```bash
-  cd /path/to/QuickQuip
-  docker compose build web-admin
-  docker compose up -d web-admin
+  cd /path/to/QuickQuip/prod
+  docker compose --env-file ../.env build web-admin
+  docker compose --env-file ../.env up -d web-admin
   ```
 
 - 只改了 `frontend/dist`（前端静态文件）时，`docker restart quickquip-web-admin` 即可，无需重建。
@@ -204,17 +209,17 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 ```bash
 # 更新代码后重新构建
-cd /path/to/QuickQuip
-docker compose up -d --build
+cd /path/to/QuickQuip/prod
+docker compose --env-file ../.env up -d --build
 
 # 查看日志
-docker compose logs -f
+docker compose --env-file ../.env logs -f
 
 # 重启
-docker compose restart
+docker compose --env-file ../.env restart
 
 # 停止
-docker compose down
+docker compose --env-file ../.env down
 ```
 
 ## 常见问题
@@ -223,17 +228,17 @@ docker compose down
 
 不需要。
 
-如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 镜像到 `config/llm.toml`，但部署时仍要按 QuickQuip 自己的私有环境变量来管理密钥和宿主路径。
+如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 镜像到 `config/llm.toml`，应用密钥统一写入根 `.env`，宿主路径和 sidecar 编排留在私有 `prod/` 中维护。
 
-当前项目通过 SearXNG 提供内置 `search_web` 搜索，通过 MCP 扩展接入 Tavily 等外部工具。MCP 集成的正式约定见 [../dev/mcp-integration.md](../dev/mcp-integration.md)。
+当前项目通过 SearXNG 提供内置 `search_web` 搜索，通过 MCP 扩展接入 Tavily 等外部工具。MCP 集成的正式约定见 [docs/dev/mcp-integration.md](../../docs/dev/mcp-integration.md)。
 
 ### LLBot 登录态过期
 
 换 IP 或长时间未活动后可能需要重新扫码：
 
 ```bash
-docker compose restart llbot
-docker compose logs -f llbot  # 找新的二维码
+docker compose --env-file ../.env restart llbot
+docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 ```
 
 ### QQ 风控/冻结
@@ -252,8 +257,8 @@ docker compose logs -f llbot  # 找新的二维码
 
 - `config/llm.toml` 是否存在且内容正确
 - `.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
-- 私有环境变量文件中是否填了 `QQ_ACCOUNT`、`GITHUB_PERSONAL_ACCESS_TOKEN` 与云端 MCP 覆盖值
+- `.env` 中是否填了 `QQ_ACCOUNT` 以及启用 MCP 时需要的 API key
 - 搜索服务是否运行，QuickQuip 容器内是否能访问配置里的 `SEARXNG_BASE_URL`
 - `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在
-- `docker compose logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
+- `docker compose --env-file ../.env logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
 - 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建

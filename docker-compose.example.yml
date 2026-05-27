@@ -62,8 +62,8 @@ services:
       - .env
     environment:
       DRIVER: "${DRIVER:-~fastapi}"
-      HOST: "${HOST:-0.0.0.0}"
-      PORT: "${PORT:-8080}"
+      HOST: "0.0.0.0"
+      PORT: "8080"
       ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
       SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"

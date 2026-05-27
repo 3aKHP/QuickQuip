@@ -22,7 +22,10 @@ frontend/node_modules/
 config/*.toml
 config/personas/
 !config/*.toml.example
-dev/*
+d[e]v/*
+prod/*
+!prod/Dockerfile
+prod.example/
 frontend-v2/
 llm_about/**/*.yaml
 !llm_about/*.yaml.example

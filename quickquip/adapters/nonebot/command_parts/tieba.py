@@ -30,7 +30,7 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
                 await tieba_cmd.finish(f"贴吧搬运失败：{exc}")
             if thread is None:
                 if tieba_service.is_login_required(forum_keyword):
-                    await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python dev/tools/tieba_login.py")
+                    await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python -m quickquip.tieba.login")
                 if forum_keyword:
                     await tieba_cmd.finish(f"{forum_keyword}吧消息池为空，请稍后再试或让管理员执行 /tieba refresh {forum_keyword}")
                 await tieba_cmd.finish("当前贴吧池为空，请稍后再试或让管理员执行 /tieba refresh")
@@ -63,7 +63,7 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
                 target_forum = None if forum_keyword in {None, "", "all"} else forum_keyword
                 result = await tieba_service.sync_now(force=True, forum_keyword=target_forum)
             except TiebaLoginRequiredError as exc:
-                await tieba_cmd.finish(f"{exc}\n请运行 python dev/tools/tieba_login.py 续签登录态")
+                await tieba_cmd.finish(f"{exc}\n请运行 python -m quickquip.tieba.login 续签登录态")
             except TiebaServiceError as exc:
                 await tieba_cmd.finish(f"贴吧同步失败：{exc}")
             await tieba_cmd.finish(str(result["message"]))
@@ -101,7 +101,7 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
         try:
             thread = await tieba_service.peek_random_thread(forum_keyword)
         except TiebaLoginRequiredError:
-            await tieba_peek_cmd.finish("贴吧登录态需要人工续签，请运行 python dev/tools/tieba_login.py")
+            await tieba_peek_cmd.finish("贴吧登录态需要人工续签，请运行 python -m quickquip.tieba.login")
         except TiebaServiceError as exc:
             await tieba_peek_cmd.finish(f"现爬失败：{exc}")
         if thread is None:

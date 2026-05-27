@@ -919,7 +919,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 如果提示需要人工续签登录态，请在机器人所在机器上运行：
 
 ```text
-按部署指南完成贴吧登录态导出。
+python -m quickquip.tieba.login
 ```
 
 ### 6.19 贴吧实时抓取

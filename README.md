@@ -114,7 +114,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    TIEBA_BROWSER_HEADLESS=true
    ```
 
-   首次使用前按 [部署指南](docs/admin/deployment.md) 完成贴吧登录态导出。
+   首次使用前运行 `python -m quickquip.tieba.login`，或按 [部署指南](docs/admin/deployment.md) 完成贴吧登录态导出。
 
 9. **可选：启动 Web 管理后台**
 
@@ -136,6 +136,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    ```bash
    python bot.py
    ```
+
+生产部署模板位于 `prod.example/`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
 
 ### 运行测试
 

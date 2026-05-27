@@ -1,0 +1,102 @@
+name: quickquip
+
+services:
+  searxng:
+    image: ghcr.io/searxng/searxng:latest
+    container_name: quickquip-searxng
+    environment:
+      FORCE_OWNERSHIP: "true"
+      SEARXNG_BASE_URL: "${SEARXNG_PUBLIC_BASE_URL:-http://127.0.0.1:8888/}"
+      SEARXNG_BIND_ADDRESS: "0.0.0.0"
+      SEARXNG_PORT: "8080"
+      SEARXNG_SECRET: "${SEARXNG_SECRET:?Set SEARXNG_SECRET in ../.env}"
+      SEARXNG_LIMITER: "false"
+    ports:
+      - "${SEARXNG_BIND_ADDRESS:-127.0.0.1}:${SEARXNG_BIND_PORT:-8888}:8080"
+    volumes:
+      - ../docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-cache:/var/cache/searxng:rw
+    restart: unless-stopped
+
+  llbot:
+    image: initialencounter/llonebot:latest
+    container_name: llbot
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "(sleep 5 && echo 'nameserver 127.0.0.11' > /etc/resolv.conf && echo 'options ndots:0' >> /etc/resolv.conf) & exec /bin/llonebot-service"
+    volumes:
+      - ./llbot-qq:/root/.config/QQ
+      - ./llbot-data:/root/llonebot
+    environment:
+      - TZ=Asia/Shanghai
+      - QUICK_LOGIN_QQ=${QQ_ACCOUNT}
+    ports:
+      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3080:3080"
+    restart: unless-stopped
+
+  quickquip:
+    init: true
+    build:
+      context: ..
+      dockerfile: prod/Dockerfile
+      args:
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+        PIP_TRUSTED_HOST: "${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}"
+        PLAYWRIGHT_BASE_IMAGE: "${PLAYWRIGHT_BASE_IMAGE:-m.daocloud.io/mcr.microsoft.com/playwright/python:v1.58.0-noble}"
+    container_name: quickquip
+    depends_on:
+      - llbot
+      - searxng
+    env_file:
+      - ../.env
+    environment:
+      DRIVER: "${DRIVER:-~fastapi}"
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
+      ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
+      SEARCH_BACKEND: "${SEARCH_BACKEND:-searxng}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+    shm_size: "1gb"
+    volumes:
+      - ../data:/app/data
+      - ../config:/app/config:ro
+      - ../llm_about:/app/llm_about:ro
+      - ../bot.py:/app/bot.py:ro
+      - ../quickquip:/app/quickquip:ro
+      - ../plugins:/app/plugins:ro
+    restart: unless-stopped
+
+  web-admin:
+    init: true
+    build:
+      context: ..
+      dockerfile: prod/Dockerfile
+      args:
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+        PIP_TRUSTED_HOST: "${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}"
+        PLAYWRIGHT_BASE_IMAGE: "${PLAYWRIGHT_BASE_IMAGE:-m.daocloud.io/mcr.microsoft.com/playwright/python:v1.58.0-noble}"
+    container_name: quickquip-web-admin
+    command: ["python", "-u", "web_api.py"]
+    env_file:
+      - ../.env
+    environment:
+      WEB_ADMIN_HOST: "0.0.0.0"
+      WEB_ADMIN_PORT: "5104"
+      SEARCH_BACKEND: "${SEARCH_BACKEND:-searxng}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+    ports:
+      - "127.0.0.1:5104:5104"
+    volumes:
+      - ../data:/app/data
+      - ../config:/app/config
+      - ../llm_about:/app/llm_about
+      - ../frontend/dist:/app/frontend/dist:ro
+      - ../web_api.py:/app/web_api.py:ro
+      - ../quickquip:/app/quickquip:ro
+    restart: unless-stopped
+
+volumes:
+  searxng-cache:
