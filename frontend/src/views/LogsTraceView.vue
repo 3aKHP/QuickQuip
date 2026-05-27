@@ -27,9 +27,9 @@
 
       <div ref="traceEl" class="trace-box">
         <div v-if="filteredEntries.length" class="trace-stream">
-          <article v-for="(entry, idx) in filteredEntries" :key="idx" class="trace-entry" :class="entry.direction">
+          <article v-for="(entry, i) in filteredEntries" :key="entry.id" class="trace-entry" :class="entry.direction">
             <div class="trace-entry-head">
-              <span class="trace-index">#{{ filteredEntries.length - idx }}</span>
+              <span class="trace-index">#{{ filteredEntries.length - i }}</span>
               <UiTag size="sm" :variant="entry.direction === 'request' ? 'warn' : 'success'">{{ entry.direction.toUpperCase() }}</UiTag>
               <UiTag size="sm" variant="info">{{ entry.provider_id }}</UiTag>
               <UiTag v-if="entry.stream" size="sm">STREAM</UiTag>
@@ -57,6 +57,7 @@ import { clearTraces, fetchTraceStatus, setTraceStatus } from '../api/diagnostic
 import { buildTraceStreamUrl } from '../api/logs'
 
 interface TraceEntry {
+  id: number
   timestamp: string
   direction: string
   provider_id: string
@@ -73,6 +74,9 @@ const autoScroll = ref(true)
 const entries = ref<TraceEntry[]>([])
 const traceEl = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
+let nextId = 0
+let rafId: number | null = null
+const pending: TraceEntry[] = []
 
 const traceFlagLabel = computed(() => {
   if (!traceFlagFile.value) return 'LLM_TRACE_FLAG_FILE 未设置'
@@ -128,9 +132,29 @@ async function clear() {
   }
 }
 
-function push(entry: TraceEntry) {
-  entries.value.push(entry)
+function enqueueEntry(entry: TraceEntry) {
+  pending.push(entry)
+  if (rafId == null) {
+    rafId = requestAnimationFrame(() => {
+      flushPending()
+      rafId = null
+    })
+  }
+}
+
+function flushPending() {
+  if (!pending.length) return
+  for (const entry of pending) {
+    entries.value.push({ ...entry, id: nextId++ })
+  }
   if (entries.value.length > 500) entries.value.splice(0, entries.value.length - 500)
+  pending.length = 0
+  if (autoScroll.value) {
+    nextTick(() => {
+      const el = traceEl.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }
 }
 
 function connect() {
@@ -145,13 +169,7 @@ function connect() {
   source.onmessage = (event) => {
     if (!event.data) return
     try {
-      push(JSON.parse(event.data) as TraceEntry)
-      if (autoScroll.value) {
-        nextTick(() => {
-          const el = traceEl.value
-          if (el) el.scrollTop = el.scrollHeight
-        })
-      }
+      enqueueEntry(JSON.parse(event.data) as TraceEntry)
     } catch {
       // ignore malformed payloads
     }
@@ -165,6 +183,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   source?.close()
+  if (rafId != null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
 })
 </script>
 

@@ -26,8 +26,8 @@
 
       <div ref="logEl" class="stream-box">
         <div v-if="filteredLines.length" class="stream-lines">
-          <div v-for="(line, idx) in filteredLines" :key="idx" class="stream-line" :class="classifyLine(line)">
-            {{ line }}
+          <div v-for="item in filteredLines" :key="item.id" class="stream-line" :class="classifyLine(item.text)">
+            {{ item.text }}
           </div>
         </div>
         <UiEmpty v-else icon="FileText" title="暂无日志内容" />
@@ -46,14 +46,19 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { buildLogDownloadUrl, buildLogStreamUrl, fetchLogIndex } from '../api/logs'
 
+interface LogLine { id: number; text: string }
+
 const loading = ref(false)
 const currentFile = ref('')
 const connected = ref(false)
 const filter = ref('')
 const autoScroll = ref(true)
-const lines = ref<string[]>([])
+const lines = ref<LogLine[]>([])
 const logEl = ref<HTMLElement | null>(null)
 let source: EventSource | null = null
+let nextId = 0
+let rafId: number | null = null
+const pending: string[] = []
 
 const currentFileLabel = computed(() => currentFile.value ? `当前文件：${currentFile.value}` : '当前文件：暂无')
 
@@ -70,7 +75,7 @@ function compileFilter(value: string): RegExp | null {
 const filteredLines = computed(() => {
   const re = compileFilter(filter.value)
   if (!re) return lines.value
-  return lines.value.filter(line => re.test(line))
+  return lines.value.filter(item => re.test(item.text))
 })
 
 function classifyLine(line: string): string {
@@ -103,9 +108,29 @@ async function loadCurrent() {
   }
 }
 
-function pushLine(line: string) {
-  lines.value.push(line)
+function enqueueLine(line: string) {
+  pending.push(line)
+  if (rafId == null) {
+    rafId = requestAnimationFrame(() => {
+      flushPending()
+      rafId = null
+    })
+  }
+}
+
+function flushPending() {
+  if (!pending.length) return
+  for (const text of pending) {
+    lines.value.push({ id: nextId++, text })
+  }
   if (lines.value.length > 1800) lines.value.splice(0, lines.value.length - 1800)
+  pending.length = 0
+  if (autoScroll.value) {
+    nextTick(() => {
+      const el = logEl.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }
 }
 
 function connect() {
@@ -119,13 +144,7 @@ function connect() {
   }
   source.onmessage = (event) => {
     if (!event.data) return
-    pushLine(event.data)
-    if (autoScroll.value) {
-      nextTick(() => {
-        const el = logEl.value
-        if (el) el.scrollTop = el.scrollHeight
-      })
-    }
+    enqueueLine(event.data)
   }
 }
 
@@ -136,6 +155,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   source?.close()
+  if (rafId != null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
 })
 </script>
 
