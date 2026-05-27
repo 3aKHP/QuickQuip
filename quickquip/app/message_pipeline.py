@@ -269,6 +269,8 @@ def build_timezone_reply(
         "rate_limit_key": rate_limit_key,
         "kind": kind,
         "rule_name": rate_limit_key,
+        "trigger_kind": "rule",
+        "trigger_reason": f"时区作息关键词触发：{action}",
     }
 
 

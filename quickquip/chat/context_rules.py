@@ -199,6 +199,8 @@ async def match_context_rule(
                 "rule_name": rule["name"],
                 "rate_limit_key": rule.get("rate_limit_key", rule["name"]),
                 "reply": render_rule_reply(template, context, current_match),
+                "trigger_kind": "rule",
+                "trigger_reason": f"语境规则匹配：{rule['name']}",
                 "context": context,
                 "priority": int(rule.get("priority", 0)),
                 "rule_index": rule_index,

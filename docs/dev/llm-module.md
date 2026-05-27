@@ -163,6 +163,12 @@ LLM 默认只在以下场景触发：
 
 相关性与答疑判定会使用 `[triggers.quick_judge]` 指定的小模型配置；阈值 `>= 1.0` 时跳过对应 LLM 判定。
 
+`awakening_extend` 只由显式 LLM 入口打开，例如前缀或艾特触发。兴趣、兜底、无聊、相关性和答疑唤醒都是一次性触发，不会继续刷新延长窗口。延长窗口内仍会过滤图片-only、CQ-only、短语气词和过短无实义文本。
+
+唤醒触发会给本轮 LLM 请求附加内部触发说明，例如命中的兴趣话题或兜底触发背景，并要求模型不要暴露唤醒机制。内部说明不会作为群友原文写入 LLM 对话历史。
+
+被动唤醒只会注入当前触发消息里的图片，不回捞历史图片。`awakening_extend`、`awakening_interest`、`awakening_relevance` 和 `awakening_qa` 最多携带当前消息前 2 张图片；`awakening_fallback` 和 `awakening_boredom` 不注入图片。非视觉模型仍由 LLM 运行时的图片预处理与剥离逻辑统一处理。
+
 无聊唤醒有两层开关：先在 `config/awakening.toml` 中设置沉寂秒数、概率、检查间隔和免打扰时间，再由群管理员执行 `/awakening boredom on`，写入 `data/awakening_boredom_groups.json`。
 
 ---
@@ -210,10 +216,11 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 
 ### 4.3 图片输入边界
 
-图片理解当前也遵循显式触发原则：
+图片理解默认遵循显式触发原则，被动唤醒仅在当前触发消息本身带图时使用受限注入：
 
 - 必须和 `/ai` 或 `@机器人` 同时出现
-- 当前单次最多处理 3 张图片
+- 显式触发当前单次最多处理 3 张图片
+- 被动唤醒只在 `awakening_extend`、`awakening_interest`、`awakening_relevance` 和 `awakening_qa` 中携带当前消息前 2 张图片，不回捞历史图片
 - 当前单张图片大小限制为 5MB
 - 如果只有图片没有文字提示，会自动补一个默认识图提示
 

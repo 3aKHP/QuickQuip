@@ -187,6 +187,8 @@ class ChainGameManager:
                 "reply": reply,
                 "rate_limit_key": rate_limit_key,
                 "rule_name": f"{session.def_name}_progress",
+                "trigger_kind": "rule",
+                "trigger_reason": f"接龙规则推进：{session.def_name}",
                 "context": {"groups": session.groups},
             }
 
@@ -215,6 +217,8 @@ class ChainGameManager:
                 "reply": chain[0],
                 "rate_limit_key": def_obj.rate_limit_key,
                 "rule_name": f"{def_obj.name}_start",
+                "trigger_kind": "rule",
+                "trigger_reason": f"接龙规则开始：{def_obj.name}",
                 "context": {"groups": groups},
             }
 

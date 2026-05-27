@@ -8,6 +8,7 @@ except ModuleNotFoundError:
     scheduler = None
 
 from quickquip.chat.config import SCHEDULED_MESSAGES
+from quickquip.common.bot_action_trace import bot_action_trace
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,17 @@ def _register_jobs():
                     return
                 for gid in gids:
                     try:
-                        await bot.send_group_msg(group_id=gid, message=msg)
+                        with bot_action_trace(
+                            trigger_kind="scheduled",
+                            reason_code="scheduled_message",
+                            reason_detail=f"定时消息触发：scheduled_msg_{_idx}",
+                            rule_name="scheduled_message",
+                            chat_type="group",
+                            group_id=gid,
+                            reply_preview=msg,
+                            source="scheduler.scheduled_message",
+                        ):
+                            await bot.send_group_msg(group_id=gid, message=msg)
                     except Exception:
                         logger.warning("scheduled_msg: failed to send to group %s", gid, exc_info=True)
                 try:
@@ -127,7 +138,17 @@ def _register_festival_job() -> None:
             full_greeting = f"【{festival.name}】{greeting}"
             for gid in daily_enabled_groups.all_groups():
                 try:
-                    await bot.send_group_msg(group_id=int(gid), message=full_greeting)
+                    with bot_action_trace(
+                        trigger_kind="scheduled",
+                        reason_code="festival_greeting",
+                        reason_detail=f"节日问候触发：{festival.name}",
+                        rule_name="festival_greeting",
+                        chat_type="group",
+                        group_id=gid,
+                        reply_preview=full_greeting,
+                        source="scheduler.festival_greeting",
+                    ):
+                        await bot.send_group_msg(group_id=int(gid), message=full_greeting)
                 except Exception:
                     logger.warning(
                         "festival_check: failed to send greeting to group %s",

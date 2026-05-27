@@ -4,6 +4,7 @@ from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
+from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     awakening_state,
@@ -24,6 +25,14 @@ from quickquip.app.message_pipeline import is_self_message as _is_self_message
 
 def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "") -> None:
     recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id=message_id)
+
+
+def _result_reason(result: dict) -> str:
+    if result.get("trigger_reason"):
+        return str(result["trigger_reason"])
+    rule_name = str(result.get("rule_name", "unknown"))
+    kind = str(result.get("trigger_kind", "rule"))
+    return f"{kind} 触发：{rule_name}"
 
 
 def register_message_matcher(on_message, Message, MessageSegment):
@@ -60,6 +69,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
         voice_transcripts = await transcribe_message_records(bot, message)
         voice_text = append_voice_transcripts("", voice_transcripts)
+        passive_trigger_text = rendered_message.text
         rendered_text = append_voice_transcripts(rendered_message.text, voice_transcripts)
 
         stats_tracker.record_message(group_id, user_id, sender_name)
@@ -72,10 +82,24 @@ def register_message_matcher(on_message, Message, MessageSegment):
             lines = [f"有 {len(pending)} 条留言捎给你："]
             for m in pending:
                 lines.append(m.format_display())
-            await bot.send(event, Message([
+            reply_message = Message([
                 MessageSegment.at(user_id),
                 MessageSegment.text(" " + "\n".join(lines)),
-            ]))
+            ])
+            with bot_action_trace(
+                trigger_kind="offline_delivery",
+                reason_code="offline_message.delivery",
+                reason_detail=f"离线留言投递：{len(pending)} 条",
+                rule_name="offline_message_delivery",
+                chat_type="group",
+                group_id=group_id,
+                user_id=user_id,
+                incoming_message_id=message_id,
+                incoming_preview=rendered_text,
+                reply_preview=reply_message,
+                source="group_message.pending_offline_messages",
+            ):
+                await bot.send(event, reply_message)
 
         trigger_context = recent_messages.list_recent(group_id, limit=20)
 
@@ -123,19 +147,43 @@ def register_message_matcher(on_message, Message, MessageSegment):
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
             awakening_state.bot_messages.add(group_id, result["reply"])
-            resp = await matcher.send(result["reply"])
+            if bool(result.get("llm_used")):
+                awakening_state.mark_awakened(group_id, user_id, source="explicit_llm")
+            trigger_source = llm_input.trigger_source or "explicit"
+            with bot_action_trace(
+                trigger_kind="explicit_llm",
+                reason_code=f"llm_chat.{trigger_source}",
+                reason_detail=f"显式 LLM 触发：{trigger_source}",
+                rule_name=result.get("rule_name", "llm_chat"),
+                chat_type="group",
+                group_id=group_id,
+                user_id=user_id,
+                incoming_message_id=message_id,
+                incoming_preview=rendered_text,
+                reply_preview=result["reply"],
+                llm_used=bool(result.get("llm_used")),
+                provider_id=str(result.get("provider_id", "")),
+                model=str(result.get("model", "")),
+                source="group_message.explicit_llm",
+            ):
+                resp = await matcher.send(result["reply"])
             sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
             if sent_msg_id:
                 scope_key = str(group_id)
                 svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
             return
 
-        from quickquip.chat.awakening import check_awakening_triggers
+        from quickquip.chat.awakening import (
+            build_awakening_prompt,
+            build_passive_trigger_raw_user_text,
+            check_awakening_triggers,
+            select_passive_trigger_image_urls,
+        )
 
         awakening_result = await check_awakening_triggers(
             group_id,
             user_id,
-            text,
+            passive_trigger_text,
             llm_settings,
             svc,
             rule_enabled=lambda rule_name: rule_switch.is_enabled(group_id, rule_name),
@@ -146,23 +194,43 @@ def register_message_matcher(on_message, Message, MessageSegment):
             if not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
                 return
             trigger_context = recent_messages.list_recent(group_id, limit=20)
+            passive_image_urls = select_passive_trigger_image_urls(
+                awakening_result,
+                rendered_message.image_urls,
+            )
             result = await svc.generate_reply(
                 group_id=group_id,
                 user_id=user_id,
                 sender_name=sender_name,
-                prompt=awakening_result.prompt,
-                image_urls=[],
+                prompt=build_awakening_prompt(awakening_result, passive_image_urls),
+                image_urls=passive_image_urls,
                 recent_messages=trigger_context,
+                raw_user_text=build_passive_trigger_raw_user_text(awakening_result, passive_image_urls),
                 message_id=message_id or None,
             )
             stats_tracker.record_trigger(group_id, awakening_result.rule_name)
             awakening_state.bot_messages.add(group_id, result["reply"])
-            resp = await matcher.send(result["reply"])
+            with bot_action_trace(
+                trigger_kind="awakening",
+                reason_code=awakening_result.rule_name,
+                reason_detail=awakening_result.trigger_reason,
+                rule_name=awakening_result.rule_name,
+                chat_type="group",
+                group_id=group_id,
+                user_id=user_id,
+                incoming_message_id=message_id,
+                incoming_preview=rendered_text,
+                reply_preview=result["reply"],
+                llm_used=bool(result.get("llm_used")),
+                provider_id=str(result.get("provider_id", "")),
+                model=str(result.get("model", "")),
+                source="group_message.awakening",
+            ):
+                resp = await matcher.send(result["reply"])
             sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
             if sent_msg_id:
                 scope_key = str(group_id)
                 svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
-            awakening_state.mark_awakened(group_id, user_id)
             return
 
         result = await resolve_reply(
@@ -187,9 +255,35 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 MessageSegment.at(result["at_user_id"]),
                 MessageSegment.text(f" {result['reply']}"),
             ])
-            await matcher.finish(message)
+            with bot_action_trace(
+                trigger_kind=str(result.get("trigger_kind", "rule")),
+                reason_code=str(result.get("reason_code", result.get("rule_name", "unknown"))),
+                reason_detail=_result_reason(result),
+                rule_name=str(result.get("rule_name", "unknown")),
+                chat_type="group",
+                group_id=group_id,
+                user_id=user_id,
+                incoming_message_id=message_id,
+                incoming_preview=rendered_text,
+                reply_preview=message,
+                source="group_message.rule_reply",
+            ):
+                await matcher.finish(message)
 
         _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
-        await matcher.finish(result["reply"])
+        with bot_action_trace(
+            trigger_kind=str(result.get("trigger_kind", "rule")),
+            reason_code=str(result.get("reason_code", result.get("rule_name", "unknown"))),
+            reason_detail=_result_reason(result),
+            rule_name=str(result.get("rule_name", "unknown")),
+            chat_type="group",
+            group_id=group_id,
+            user_id=user_id,
+            incoming_message_id=message_id,
+            incoming_preview=rendered_text,
+            reply_preview=result["reply"],
+            source="group_message.rule_reply",
+        ):
+            await matcher.finish(result["reply"])
 
     return matcher

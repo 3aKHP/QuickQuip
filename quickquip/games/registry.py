@@ -220,6 +220,8 @@ class GameRegistry:
             "reply": result.reply,
             "rate_limit_key": result.rate_limit_key,
             "rule_name": result.rule_name,
+            "trigger_kind": "rule",
+            "trigger_reason": f"群游戏互动：{game_name}",
             "game_name": game_name,
         }
         if result.at_user_id:

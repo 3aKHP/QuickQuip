@@ -691,6 +691,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": "用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": False,
             }
 
         if self.config.load_error:
@@ -698,6 +699,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"LLM 配置不可用：{self.config.load_error}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": False,
             }
 
         settings = self.get_chat_settings(chat_id, chat_type=chat_type)
@@ -707,6 +709,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"当前 provider 不存在：{settings.provider_id}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": False,
             }
 
         prompt_pack = build_defectify_prompt(
@@ -744,12 +747,18 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"LLM 调用失败：{exc}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
             }
         except Exception as exc:
             return {
                 "reply": f"LLM 调用异常：{exc}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
             }
 
         text = strip_leading_reasoning_content(response.text).strip()
@@ -758,11 +767,17 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": "模型没有返回可显示的文本。",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
             }
         return {
             "reply": text,
             "rate_limit_key": LLM_RULE_NAME,
             "rule_name": DEFECTIFY_RULE_NAME,
+            "llm_used": True,
+            "provider_id": provider.id,
+            "model": request.model,
         }
 
     def _collect_known_participants(
@@ -860,9 +875,12 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         voice_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
         message_id: str | None = None,
     ) -> dict[str, str]:
         prompt = prompt.strip()
+        normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
         normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
         normalized_quoted_text = quoted_text.strip()
         normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
@@ -876,12 +894,16 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         request_forward_image_urls = list(normalized_forward_image_urls)
         if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
+        stored_prompt = (
+            normalized_raw_user_text if normalized_raw_user_text is not None else prompt
+        )[: self.config.runtime.max_prompt_chars]
 
         if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             return {
                 "reply": self.config.triggers.empty_prompt_reply,
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
             }
 
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
@@ -902,6 +924,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                     "reply": DEFAULT_BLOCK_REPLY,
                     "rate_limit_key": LLM_RULE_NAME,
                     "rule_name": LLM_RULE_NAME,
+                    "llm_used": False,
                 }
 
         if self.config.load_error:
@@ -909,6 +932,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"LLM 配置不可用：{self.config.load_error}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
             }
 
         settings = self.get_chat_settings(chat_id, chat_type=chat_type)
@@ -917,6 +941,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"{self._scope_subject(chat_type)} LLM 已关闭。",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
             }
 
         provider = self.config.providers.get(settings.provider_id)
@@ -925,6 +950,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"当前 provider 不存在：{settings.provider_id}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
             }
 
         persona = self.config.personas.get(settings.persona_id)
@@ -933,12 +959,13 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"当前 persona 不存在：{settings.persona_id}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
             }
 
         trimmed_prompt = prompt[: self.config.runtime.max_prompt_chars]
         quoted_prompt = normalized_quoted_text[:MAX_QUOTED_MESSAGE_CHARS]
         analysis_prompt = "\n".join(
-            item for item in [trimmed_prompt, quoted_prompt] if item
+            item for item in [stored_prompt, quoted_prompt] if item
         )[: self.config.runtime.max_prompt_chars]
 
         # ── image preprocessing & non-VLM stripping ──────────────────
@@ -1101,12 +1128,18 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 "reply": f"LLM 调用失败：{exc}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
             }
         except Exception as exc:
             return {
                 "reply": f"LLM 调用异常：{exc}",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
             }
 
         text = strip_leading_reasoning_content(response.text)
@@ -1125,41 +1158,42 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 text = DEFAULT_OUTPUT_FALLBACK
 
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
-        raw_turn_parts: list[str] = []
-        if normalized_quoted_text or normalized_quoted_image_urls:
-            q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
-            q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
-            raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
-        if normalized_forward_text or normalized_forward_image_urls:
-            fw_text = normalized_forward_text or "[合并转发消息]"
-            fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
-            raw_turn_parts.append(fw_text + fw_suffix)
-        raw_turn_parts.append(trimmed_prompt)
-        raw_turn = "\n".join(raw_turn_parts)
-        self.store.append_conversation_message(
-            scope_key,
-            user_id,
-            "user",
-            trimmed_prompt,
-            sender_name=sender_name,
-            canonical_name=current_identity.canonical_name,
-            message_id=str(message_id) if message_id else None,
-            raw_content=raw_turn,
-        )
+        if store_user_message:
+            raw_turn_parts: list[str] = []
+            if normalized_quoted_text or normalized_quoted_image_urls:
+                q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
+                q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
+                raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
+            if normalized_forward_text or normalized_forward_image_urls:
+                fw_text = normalized_forward_text or "[合并转发消息]"
+                fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
+                raw_turn_parts.append(fw_text + fw_suffix)
+            raw_turn_parts.append(stored_prompt)
+            raw_turn = "\n".join(raw_turn_parts)
+            self.store.append_conversation_message(
+                scope_key,
+                user_id,
+                "user",
+                stored_prompt,
+                sender_name=sender_name,
+                canonical_name=current_identity.canonical_name,
+                message_id=str(message_id) if message_id else None,
+                raw_content=raw_turn,
+            )
         self.store.append_conversation_message(scope_key, None, "assistant", text)
         self.store.prune_conversation_messages(
             scope_key,
             self._history_retention_limit(chat_type),
         )
 
-        if settings.auto_memory_enabled and settings.memory_enabled:
+        if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
             asyncio.create_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
                     user_id=user_id,
                     sender_name=sender_name,
                     canonical_name=current_identity.canonical_name,
-                    user_text=trimmed_prompt,
+                    user_text=stored_prompt,
                     assistant_text=text,
                 )
             )
@@ -1168,6 +1202,9 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             "reply": text,
             "rate_limit_key": LLM_RULE_NAME,
             "rule_name": LLM_RULE_NAME,
+            "llm_used": True,
+            "provider_id": provider.id,
+            "model": request.model,
         }
 
     async def generate_reply(
@@ -1187,6 +1224,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         voice_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1205,6 +1244,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
             voice_text=voice_text,
+            raw_user_text=raw_user_text,
+            store_user_message=store_user_message,
             message_id=message_id,
         )
 
@@ -1224,6 +1265,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         voice_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1242,6 +1285,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
             voice_text=voice_text,
+            raw_user_text=raw_user_text,
+            store_user_message=store_user_message,
             message_id=message_id,
         )
 

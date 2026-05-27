@@ -11,18 +11,23 @@ from quickquip.chat.awakening import (
     AwakeningDefaults,
     AwakeningGroupOverride,
     AwakeningState,
+    AwakeningTriggerResult,
     BotMessageCache,
     ResolvedAwakeningSettings,
     _QA_FAST_PATTERNS,
     _RULE_EXTEND,
+    _RULE_FALLBACK,
     _RULE_INTEREST,
     _RULE_QA,
     _RULE_RELEVANCE,
     _extract_json_trigger,
     _extract_words,
+    _is_extend_eligible_message,
     _is_in_dnd_window,
     _llm_cache_text,
     _word_overlap_ratio,
+    build_awakening_prompt,
+    build_passive_trigger_raw_user_text,
     check_awakening_triggers,
     check_boredom,
     check_extend,
@@ -32,6 +37,7 @@ from quickquip.chat.awakening import (
     check_relevance,
     load_awakening_config,
     run_boredom_check,
+    select_passive_trigger_image_urls,
 )
 
 
@@ -226,6 +232,13 @@ class TestAwakeningState:
         assert s.is_in_extend_window("g1", "u2", 30) is False
         assert s.is_in_extend_window("g2", "u1", 30) is False
 
+    def test_extend_window_requires_explicit_source(self):
+        s = AwakeningState()
+        s.mark_awakened("g1", "u1", source="awakening_interest")
+        assert s.is_in_extend_window("g1", "u1", 30) is False
+        s.mark_awakened("g1", "u1", source="explicit_llm")
+        assert s.is_in_extend_window("g1", "u1", 30) is True
+
     def test_silence_seconds(self):
         s = AwakeningState()
         assert s.get_group_silence_seconds("g1") == float("inf")
@@ -340,6 +353,74 @@ class TestExtractJsonTrigger:
         assert _extract_json_trigger('{"trigger": "false"}') is False
 
 
+class TestExtendEligibility:
+    def test_rejects_image_only_and_cq_only(self):
+        assert _is_extend_eligible_message("[图片]") is False
+        assert _is_extend_eligible_message("[CQ:image,file=abc]") is False
+
+    def test_rejects_short_interjections(self):
+        assert _is_extend_eligible_message("哈哈") is False
+        assert _is_extend_eligible_message("草") is False
+        assert _is_extend_eligible_message("嗯") is False
+
+    def test_accepts_substantive_short_question(self):
+        assert _is_extend_eligible_message("是吗") is True
+        assert _is_extend_eligible_message("为啥？") is True
+
+    def test_accepts_substantive_text(self):
+        assert _is_extend_eligible_message("下午没课可以继续聊") is True
+
+
+class TestPassiveTriggerImages:
+    def test_selects_images_for_interest_with_limit_and_dedupe(self):
+        result = AwakeningTriggerResult(
+            rule_name=_RULE_INTEREST,
+            prompt="这张图里的Python代码",
+            trigger_reason="兴趣话题匹配：Python",
+        )
+
+        selected = select_passive_trigger_image_urls(
+            result,
+            [
+                "https://example.test/a.png",
+                "https://example.test/a.png",
+                "https://example.test/b.png",
+                "https://example.test/c.png",
+            ],
+        )
+
+        assert selected == [
+            "https://example.test/a.png",
+            "https://example.test/b.png",
+        ]
+
+    def test_rejects_images_for_fallback(self):
+        result = AwakeningTriggerResult(
+            rule_name=_RULE_FALLBACK,
+            prompt="[图片] 马头蒸菜",
+            trigger_reason="兜底概率触发",
+        )
+
+        assert select_passive_trigger_image_urls(result, ["https://example.test/a.png"]) == []
+        assert build_passive_trigger_raw_user_text(result, []) == "马头蒸菜"
+
+    def test_prompt_mentions_images_only_when_selected(self):
+        result = AwakeningTriggerResult(
+            rule_name=_RULE_QA,
+            prompt="[图片] 这是什么？",
+            trigger_reason="答疑唤醒：LLM确认",
+            trigger_instruction="判定结果显示用户提出了可能需要你回答的问题。",
+        )
+
+        with_image = build_awakening_prompt(result, ["https://example.test/a.png"])
+        without_image = build_awakening_prompt(result, [])
+
+        assert "这条触发消息包含图片" in with_image
+        assert "不要编造具体图像细节" in with_image
+        assert "这条触发消息包含图片" not in without_image
+        assert build_passive_trigger_raw_user_text(result, ["https://example.test/a.png"]) == "[图片] 这是什么？"
+
+
 # =========================================================================
 # Trigger checks (sync)
 # =========================================================================
@@ -376,6 +457,8 @@ class TestCheckExtend:
         result = check_extend("g1", "u1", "hello", settings, s)
         assert result is not None
         assert result.rule_name == _RULE_EXTEND
+        assert result.opens_extend_window is False
+        assert "唤醒延长" in result.trigger_instruction
 
     def test_not_in_window(self):
         s = AwakeningState()
@@ -387,6 +470,19 @@ class TestCheckExtend:
         s.mark_awakened("g1", "u1")
         settings = _make_settings(extend_duration=30)
         assert check_extend("g1", "u1", "", settings, s) is None
+
+    def test_in_window_rejects_noise(self):
+        s = AwakeningState()
+        s.mark_awakened("g1", "u1")
+        settings = _make_settings(extend_duration=30)
+        assert check_extend("g1", "u1", "[图片]", settings, s) is None
+        assert check_extend("g1", "u1", "哈哈", settings, s) is None
+
+    def test_non_explicit_source_does_not_extend(self):
+        s = AwakeningState()
+        s.mark_awakened("g1", "u1", source="awakening_interest")
+        settings = _make_settings(extend_duration=30)
+        assert check_extend("g1", "u1", "这句话值得继续聊", settings, s) is None
 
 
 class TestCheckInterest:
@@ -402,6 +498,11 @@ class TestCheckInterest:
         result = check_interest("g1", "u1", "我在学Python", settings, "", svc)
         assert result is not None
         assert result.rule_name == _RULE_INTEREST
+        assert result.matched_topic == "Python"
+        assert result.opens_extend_window is False
+        assert "Python" in result.trigger_instruction
+        assert "唤醒机制" in result.trigger_instruction
+        assert "我在学Python" in build_awakening_prompt(result)
 
     def test_no_match(self):
         settings = _make_settings(interest_topics=["Python"])
@@ -427,6 +528,15 @@ class TestCheckFallback:
     def test_empty_text(self):
         settings = _make_settings(fallback_probability=1.0)
         assert check_fallback("g1", "u1", "", settings) is None
+
+    def test_trigger_uses_conservative_instruction(self, monkeypatch):
+        monkeypatch.setattr("quickquip.chat.awakening.random.random", lambda: 0.0)
+        settings = _make_settings(fallback_probability=1.0)
+        result = check_fallback("g1", "u1", "马头蒸菜", settings)
+        assert result is not None
+        assert result.opens_extend_window is False
+        assert "低概率" in result.trigger_instruction
+        assert "不要说明" in result.trigger_instruction
 
 
 class TestCheckBoredom:
@@ -491,6 +601,8 @@ class TestCheckRelevance:
         )
         assert result is not None
         assert result.rule_name == _RULE_RELEVANCE
+        assert result.opens_extend_window is False
+        assert "相关性判定" in result.trigger_instruction
 
     def test_llm_returns_false(self):
         s = AwakeningState()
@@ -572,6 +684,8 @@ class TestCheckQA:
         )
         assert result is not None
         assert result.rule_name == _RULE_QA
+        assert result.opens_extend_window is False
+        assert "答疑判定" in result.trigger_instruction
 
     def test_llm_returns_false(self):
         s = AwakeningState()
@@ -725,6 +839,38 @@ class TestCheckAwakeningTriggers:
             )
             assert result is not None
             assert result.rule_name == _RULE_EXTEND
+        finally:
+            aw._config = old_cfg
+
+    def test_interest_does_not_open_extend_window(self):
+        s = AwakeningState()
+        llm_settings = MagicMock()
+        llm_settings.persona_id = ""
+        svc = MagicMock()
+        svc.config = MagicMock()
+        svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
+        svc.config.personas = {}
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(
+                extend_duration=30,
+                interest_topics=["Python"],
+            ),
+        )
+        try:
+            first = asyncio.run(
+                check_awakening_triggers("g1", "u1", "我在学Python", llm_settings, svc, state=s)
+            )
+            assert first is not None
+            assert first.rule_name == _RULE_INTEREST
+            assert first.opens_extend_window is False
+
+            second = asyncio.run(
+                check_awakening_triggers("g1", "u1", "后续普通聊天内容", llm_settings, svc, state=s)
+            )
+            assert second is None
         finally:
             aw._config = old_cfg
 
