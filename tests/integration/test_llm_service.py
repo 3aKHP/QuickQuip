@@ -162,6 +162,52 @@ async def test_raw_user_text_stored_without_internal_trigger_instruction(
     assert user_rows[0]["raw_content"] == "马头蒸菜"
 
 
+async def test_empty_raw_user_text_does_not_persist_internal_trigger_instruction(
+    wired_service, patch_provider_builder
+):
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1007,
+        user_id=3003,
+        sender_name="测试用户",
+        prompt="【内部触发说明】只有图片占位被剥离。\n【群友消息】[图片]",
+        raw_user_text="",
+        recent_messages=[],
+    )
+
+    last_user = stub.last_request.messages[-1].content
+    assert "内部触发说明" in last_user
+
+    stored = wired_service.store.list_recent_conversation_messages(1007, 2)
+    user_rows = [row for row in stored if row["role"] == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0]["content"] == ""
+    assert "内部触发说明" not in user_rows[0]["raw_content"]
+
+
+async def test_can_skip_user_history_for_system_trigger(
+    wired_service, patch_provider_builder
+):
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1008,
+        user_id="boredom_timer",
+        sender_name="系统",
+        prompt="【内部触发说明】群聊沉寂触发。\n【群友消息】",
+        raw_user_text="",
+        store_user_message=False,
+        recent_messages=[],
+    )
+
+    stored = wired_service.store.list_recent_conversation_messages(1008, 2)
+    assert [row["role"] for row in stored] == ["assistant"]
+    assert "内部触发说明" in stub.last_request.messages[-1].content
+
+
 async def test_internal_trigger_prompt_can_include_current_image(
     wired_service, patch_provider_builder
 ):

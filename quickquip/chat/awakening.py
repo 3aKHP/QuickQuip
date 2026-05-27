@@ -930,6 +930,8 @@ async def run_boredom_check(
                 prompt=build_awakening_prompt(result),
                 image_urls=[],
                 recent_messages=trigger_context,
+                raw_user_text="",
+                store_user_message=False,
                 message_id=None,
             )
             with bot_action_trace(

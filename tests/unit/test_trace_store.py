@@ -13,6 +13,8 @@ def test_trace_store_persists_and_clears(monkeypatch, tmp_path):
     provider._record_trace("response", "demo", False, '{"ok": true}')
 
     assert today_path.exists()
+    assert "a" in today_path.read_text(encoding="utf-8")
+    assert provider.get_trace_entries(0)[0]["payload"] == '{"a": 1}'
     assert len(provider.get_trace_entries(0)) == 2
     assert provider.get_trace_entries(1)[0]["direction"] == "response"
 

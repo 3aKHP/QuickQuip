@@ -69,6 +69,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
         voice_transcripts = await transcribe_message_records(bot, message)
         voice_text = append_voice_transcripts("", voice_transcripts)
+        passive_trigger_text = rendered_message.text
         rendered_text = append_voice_transcripts(rendered_message.text, voice_transcripts)
 
         stats_tracker.record_message(group_id, user_id, sender_name)
@@ -182,7 +183,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         awakening_result = await check_awakening_triggers(
             group_id,
             user_id,
-            rendered_text,
+            passive_trigger_text,
             llm_settings,
             svc,
             rule_enabled=lambda rule_name: rule_switch.is_enabled(group_id, rule_name),

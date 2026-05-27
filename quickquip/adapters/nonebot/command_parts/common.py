@@ -8,7 +8,7 @@ from datetime import date
 
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
-from quickquip.common.bot_action_trace import bot_action_trace, current_bot_action_trace
+from quickquip.common.bot_action_trace import overlay_bot_action_trace
 from quickquip.llm.profile import DEFAULT_PROFILE_MODE, PROFILE_MODES, ProfileModeConfig
 
 
@@ -430,9 +430,7 @@ async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
     group_id = getattr(event, "group_id", None)
 
     def _trace_context():
-        if current_bot_action_trace() is not None:
-            return None
-        return bot_action_trace(
+        return overlay_bot_action_trace(
             trigger_kind="command",
             reason_code="command.music.lyrics",
             reason_detail="命令触发：歌词生成结果发送",
@@ -450,7 +448,7 @@ async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
         chunks = _chunk_text(formatted)
         try:
             trace_context = _trace_context()
-            if trace_context is None:
+            with trace_context:
                 await bot.call_api(
                     "send_group_forward_msg",
                     group_id=group_id,
@@ -466,37 +464,14 @@ async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
                         for chunk in chunks
                     ],
                 )
-            else:
-                with trace_context:
-                    await bot.call_api(
-                        "send_group_forward_msg",
-                        group_id=group_id,
-                        messages=[
-                            {
-                                "type": "node",
-                                "data": {
-                                    "name": "歌词",
-                                    "uin": str(bot.self_id),
-                                    "content": [{"type": "text", "data": {"text": chunk}}],
-                                },
-                            }
-                            for chunk in chunks
-                        ],
-                    )
             return
         except Exception:
             pass
     if group_id is not None:
         trace_context = _trace_context()
-        if trace_context is None:
+        with trace_context:
             await bot.send_group_msg(group_id=group_id, message=formatted)
-        else:
-            with trace_context:
-                await bot.send_group_msg(group_id=group_id, message=formatted)
     else:
         trace_context = _trace_context()
-        if trace_context is None:
+        with trace_context:
             await bot.send_private_msg(user_id=event.user_id, message=formatted)
-        else:
-            with trace_context:
-                await bot.send_private_msg(user_id=event.user_id, message=formatted)

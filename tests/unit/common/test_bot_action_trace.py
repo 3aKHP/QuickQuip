@@ -41,6 +41,9 @@ def test_bot_action_trace_payload_uses_context():
     assert payload["group_id"] == "1000000001"
     assert payload["user_id"] == "42"
     assert payload["sent_message_id"] == "99"
+    assert payload["incoming_preview"] == ""
+    assert payload["reply_preview"] == ""
+    assert payload["content_redacted"] is True
     assert payload["llm_used"] is True
     assert payload["provider_id"] == "openai"
     assert payload["model"] == "gpt-test"
@@ -56,7 +59,25 @@ def test_payload_marks_missing_context_as_coverage_gap():
     assert payload["reason_code"] == "unknown.unattributed"
     assert payload["chat_type"] == "private"
     assert payload["user_id"] == "7"
-    assert payload["reply_preview"] == "hi"
+    assert payload["reply_preview"] == ""
+    assert payload["content_redacted"] is True
+
+
+def test_payload_summarizes_forward_message_types_without_content():
+    payload = build_bot_action_trace_payload(
+        api="send_group_forward_msg",
+        data={
+            "group_id": 1,
+            "messages": [
+                {"type": "node", "data": {"content": "secret"}},
+                {"type": "node", "data": {"content": "more secret"}},
+            ],
+        },
+    )
+
+    assert payload["message_types"] == ["node", "node"]
+    assert payload["reply_preview"] == ""
+    assert payload["content_redacted"] is True
 
 
 @pytest.mark.asyncio

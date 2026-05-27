@@ -875,11 +875,12 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         voice_text: str = "",
-        raw_user_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
         message_id: str | None = None,
     ) -> dict[str, str]:
         prompt = prompt.strip()
-        raw_user_text = raw_user_text.strip()
+        normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
         normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
         normalized_quoted_text = quoted_text.strip()
         normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
@@ -893,7 +894,9 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         request_forward_image_urls = list(normalized_forward_image_urls)
         if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
-        stored_prompt = (raw_user_text or prompt)[: self.config.runtime.max_prompt_chars]
+        stored_prompt = (
+            normalized_raw_user_text if normalized_raw_user_text is not None else prompt
+        )[: self.config.runtime.max_prompt_chars]
 
         if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
             return {
@@ -1155,34 +1158,35 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
                 text = DEFAULT_OUTPUT_FALLBACK
 
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
-        raw_turn_parts: list[str] = []
-        if normalized_quoted_text or normalized_quoted_image_urls:
-            q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
-            q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
-            raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
-        if normalized_forward_text or normalized_forward_image_urls:
-            fw_text = normalized_forward_text or "[合并转发消息]"
-            fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
-            raw_turn_parts.append(fw_text + fw_suffix)
-        raw_turn_parts.append(stored_prompt)
-        raw_turn = "\n".join(raw_turn_parts)
-        self.store.append_conversation_message(
-            scope_key,
-            user_id,
-            "user",
-            stored_prompt,
-            sender_name=sender_name,
-            canonical_name=current_identity.canonical_name,
-            message_id=str(message_id) if message_id else None,
-            raw_content=raw_turn,
-        )
+        if store_user_message:
+            raw_turn_parts: list[str] = []
+            if normalized_quoted_text or normalized_quoted_image_urls:
+                q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
+                q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
+                raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
+            if normalized_forward_text or normalized_forward_image_urls:
+                fw_text = normalized_forward_text or "[合并转发消息]"
+                fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
+                raw_turn_parts.append(fw_text + fw_suffix)
+            raw_turn_parts.append(stored_prompt)
+            raw_turn = "\n".join(raw_turn_parts)
+            self.store.append_conversation_message(
+                scope_key,
+                user_id,
+                "user",
+                stored_prompt,
+                sender_name=sender_name,
+                canonical_name=current_identity.canonical_name,
+                message_id=str(message_id) if message_id else None,
+                raw_content=raw_turn,
+            )
         self.store.append_conversation_message(scope_key, None, "assistant", text)
         self.store.prune_conversation_messages(
             scope_key,
             self._history_retention_limit(chat_type),
         )
 
-        if settings.auto_memory_enabled and settings.memory_enabled:
+        if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
             asyncio.create_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
@@ -1220,7 +1224,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         voice_text: str = "",
-        raw_user_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1240,6 +1245,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             forward_image_urls=forward_image_urls,
             voice_text=voice_text,
             raw_user_text=raw_user_text,
+            store_user_message=store_user_message,
             message_id=message_id,
         )
 
@@ -1259,7 +1265,8 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         voice_text: str = "",
-        raw_user_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
         message_id: str | None = None,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
@@ -1279,6 +1286,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
             forward_image_urls=forward_image_urls,
             voice_text=voice_text,
             raw_user_text=raw_user_text,
+            store_user_message=store_user_message,
             message_id=message_id,
         )
 

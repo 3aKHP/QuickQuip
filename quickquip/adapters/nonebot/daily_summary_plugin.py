@@ -239,6 +239,7 @@ async def _publish_one(bot, row: dict) -> None:
             chat_type="group",
             group_id=group_id,
             reply_preview=row["content"],
+            llm_used=str(row.get("model_used", "")) != "fallback",
             model=str(row.get("model_used", "")),
             source="daily_summary.scheduled_publish",
         ):

@@ -65,7 +65,15 @@ def _message_types(message: Any) -> list[str]:
     if isinstance(message, str):
         return ["text"] if message else []
     try:
-        return [str(getattr(seg, "type", "")) for seg in message if getattr(seg, "type", "")]
+        types: list[str] = []
+        for seg in message:
+            if isinstance(seg, dict):
+                seg_type = seg.get("type")
+            else:
+                seg_type = getattr(seg, "type", "")
+            if seg_type:
+                types.append(str(seg_type))
+        return types
     except TypeError:
         return [type(message).__name__]
 
@@ -118,8 +126,8 @@ def build_bot_action_trace_payload(
         )
 
     message = data.get("message")
+    messages = data.get("messages")
     chat_type, group_id, user_id = _infer_chat_fields(api, data, active)
-    reply_preview = active.reply_preview or _preview(message)
 
     return {
         "trace_id": active.trace_id,
@@ -131,13 +139,14 @@ def build_bot_action_trace_payload(
         "group_id": group_id,
         "user_id": user_id,
         "incoming_message_id": active.incoming_message_id,
-        "incoming_preview": active.incoming_preview,
+        "incoming_preview": "",
         "api": api,
         "outcome": "failed" if exception else "sent",
         "error": "" if exception is None else f"{type(exception).__name__}: {_preview(exception, 240)}",
         "sent_message_id": "" if exception else _sent_message_id(result),
-        "message_types": _message_types(message),
-        "reply_preview": reply_preview,
+        "message_types": _message_types(message) or _message_types(messages),
+        "reply_preview": "",
+        "content_redacted": True,
         "llm_used": active.llm_used,
         "provider_id": active.provider_id,
         "model": active.model,
