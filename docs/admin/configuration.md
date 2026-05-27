@@ -10,7 +10,7 @@
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DRIVER` | NoneBot2 驱动器 | `~fastapi` |
+| `DRIVER` | NoneBot2 驱动器；使用 LLBot 正向 WebSocket 时需包含 `~websockets` | `~fastapi+~websockets` |
 | `HOST` | 监听地址 | `0.0.0.0` |
 | `PORT` | 监听端口 | `8080` |
 | `QQ_ACCOUNT` | QQ 号（云端部署必填） | — |
@@ -35,6 +35,7 @@
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `SEARXNG_BASE_URL` | Bot 内置 `search_web` 和 `/search` 使用的 SearXNG 服务地址 | `http://127.0.0.1:8888` |
+| `QUICKQUIP_SEARXNG_BASE_URL` | Docker Compose 内注入给 QuickQuip / Web Admin 的 SearXNG 容器内地址；避免把本地直跑的 `127.0.0.1` 地址带入容器 | `http://searxng:8080` |
 | `SEARXNG_SAFE_SEARCH` | 传给 SearXNG 的安全搜索级别：`0` / `1` / `2` | `0` |
 | `SEARXNG_LANGUAGE` | 传给 SearXNG 的搜索语言；空值时使用 `all` | `all` |
 | `SEARXNG_PUBLIC_BASE_URL` | compose 中 SearXNG 对外展示的 base URL | `http://127.0.0.1:8888/` |
@@ -42,7 +43,7 @@
 | `SEARXNG_BIND_PORT` | compose 暴露 SearXNG 时绑定的宿主端口 | `8888` |
 | `SEARXNG_SECRET` | SearXNG 实例密钥，用于容器环境变量 | — |
 
-`search_web` 固定走项目内 SearXNG；Tavily 等外部搜索能力建议通过 MCP sidecar 暴露为工具。
+`search_web` 固定走项目内 SearXNG。普通本地运行读取 `SEARXNG_BASE_URL`；`docker-compose.example.yml` 和 `prod.example/docker-compose.yml` 会优先把 `QUICKQUIP_SEARXNG_BASE_URL` 注入为容器内的 `SEARXNG_BASE_URL`。Tavily 等外部搜索能力建议通过 MCP sidecar 暴露为工具。
 
 ### LLM 调试
 
@@ -93,6 +94,8 @@
 | `PIP_INDEX_URL` | pip 安装源（国内镜像加速） |
 | `PIP_TRUSTED_HOST` | pip 信任主机 |
 | `PLAYWRIGHT_BASE_IMAGE` | Playwright 基础镜像（可含国内代理前缀） |
+
+GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜像构建，并内置 Docker CLI，便于贴吧采集和可选 MCP docker transport 使用。docker transport 仍需显式挂载宿主机 Docker socket，默认 compose 不会挂载。
 
 ---
 

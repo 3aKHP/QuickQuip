@@ -11,6 +11,8 @@
 # Run web admin only:
 #   docker run --rm -p 5104:5104 -v ./config:/app/config quickquip python -u web_api.py
 
+ARG PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright/python:v1.58.0-noble
+
 # ── Stage 1: Build frontend ────────────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
 WORKDIR /build
@@ -19,8 +21,11 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ── Stage 2: Python runtime ────────────────────────────────────────────────
-FROM python:3.11-slim
+# ── Stage 2: Docker CLI for optional MCP docker transport ─────────────────
+FROM docker:27-cli AS docker_cli
+
+# ── Stage 3: Python + Playwright runtime ──────────────────────────────────
+FROM ${PLAYWRIGHT_BASE_IMAGE}
 
 # ── Mirror selection ──────────────────────────────────────────────────────
 # Default: PyPI. Set PIP_INDEX_URL for mainland China mirrors, e.g.:
@@ -50,11 +55,14 @@ RUN set -eux; \
     $_pip_install -r requirements.txt; \
     rm -f /etc/pip.conf
 
+COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
+
 # ── App source ────────────────────────────────────────────────────────────
 COPY bot.py web_api.py ./
 COPY plugins/ plugins/
 COPY quickquip/ quickquip/
 COPY config/ config/
+COPY llm_about/ llm_about/
 COPY --from=frontend-builder /build/dist/ frontend/dist/
 
 RUN mkdir -p data

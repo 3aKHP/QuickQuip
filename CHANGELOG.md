@@ -6,6 +6,8 @@
 
 ### 变更
 
+- GHCR 分发镜像补齐 Playwright 浏览器、Docker CLI、Web Admin 前端和资料示例目录；公开 compose 示例改用可直接拉取的小写镜像名，并修正容器内 SearXNG 地址注入。
+- Windows 懒人包入口改为 `start.bat`，打包内置 Playwright Chromium，并在首次运行时生成 `.env`、常用配置、persona 与资料文件后提示补齐配置。
 - 生产运维模板迁移到 `prod.example/`，真实生产目录使用私有 `prod/`；QuickQuip 应用环境变量统一从根 `.env` 读取。
 - 贴吧登录态续签入口改为 `python -m quickquip.tieba.login`。
 

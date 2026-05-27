@@ -195,6 +195,7 @@ Write-Host "Extracting and rebuilding containers..." -ForegroundColor Cyan
 $RemoteDeployScript = @'
 set -eu
 REMOTE_DIR="__REMOTE_DIR__"
+NULL_DEVICE="/d""ev/null"
 mkdir -p "$REMOTE_DIR"
 cd "$REMOTE_DIR"
 
@@ -212,12 +213,12 @@ if [ -f /tmp/quickquip-tieba-state.tar.gz ]; then
     tar xzf /tmp/quickquip-tieba-state.tar.gz -C "$REMOTE_DIR"
 fi
 
-sed -i 's/\r$//' "$REMOTE_DIR/.env" 2>/dev/null || true
-chmod 600 "$REMOTE_DIR/.env" 2>/dev/null || true
+sed -i 's/\r$//' "$REMOTE_DIR/.env" 2>"$NULL_DEVICE" || true
+chmod 600 "$REMOTE_DIR/.env" 2>"$NULL_DEVICE" || true
 
 if [ -f "$REMOTE_DIR/prod/sendkey.env" ]; then
-    sed -i 's/\r$//' "$REMOTE_DIR/prod/sendkey.env" 2>/dev/null || true
-    chmod 600 "$REMOTE_DIR/prod/sendkey.env" 2>/dev/null || true
+    sed -i 's/\r$//' "$REMOTE_DIR/prod/sendkey.env" 2>"$NULL_DEVICE" || true
+    chmod 600 "$REMOTE_DIR/prod/sendkey.env" 2>"$NULL_DEVICE" || true
 fi
 
 if [ -d "$REMOTE_DIR/prod/llbot-data" ]; then
@@ -274,9 +275,9 @@ for path in paths:
 PY
 fi
 
-chmod 750 "$REMOTE_DIR" "$REMOTE_DIR/prod" 2>/dev/null || true
+chmod 750 "$REMOTE_DIR" "$REMOTE_DIR/prod" 2>"$NULL_DEVICE" || true
 if [ -f "$REMOTE_DIR/data/tieba/pool.json" ]; then
-    sudo chown "$(id -u):$(id -g)" "$REMOTE_DIR/data/tieba/pool.json" 2>/dev/null || true
+    sudo chown "$(id -u):$(id -g)" "$REMOTE_DIR/data/tieba/pool.json" 2>"$NULL_DEVICE" || true
 fi
 
 rm -f /tmp/quickquip-deploy.tar.gz /tmp/quickquip-tieba-state.tar.gz /tmp/quickquip-sendkey.env

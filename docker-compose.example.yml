@@ -2,11 +2,11 @@
 # 将所有 ${VAR} 替换为实际值或创建 .env 文件后运行：
 #   docker compose up -d
 #
-# 最小部署（仅 Bot + Web Admin）：
+# 仅启动 Bot + Web Admin：
 #   docker compose up -d quickquip web-admin
 #
-# 完整部署（含搜索 + MCP sidecar）：
-#   docker compose --profile full up -d
+# MCP sidecar 请参考 docker/mcp-example.Dockerfile.example 和 config/llm.toml.example
+# 在自己的部署编排中添加。
 
 name: quickquip
 
@@ -54,39 +54,47 @@ services:
 
   # ── QQ Bot ──────────────────────────────────────────────────────────────
   quickquip:
-    image: ghcr.io/3aKHP/quickquip:latest
+    image: ghcr.io/3akhp/quickquip:latest
     container_name: quickquip
+    init: true
     depends_on:
       - llbot
+      - searxng
     env_file:
       - .env
     environment:
-      DRIVER: "${DRIVER:-~fastapi}"
+      DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
       PORT: "8080"
       ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
-      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+    shm_size: "1gb"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
       # 群友身份与黑话词表（可选）。将 llm_about/vocab.yaml.example 和
       # llm_about/identities.yaml.example 复制为 .yaml 并编辑后，取消注释：
       # - ./llm_about:/app/llm_about:ro
+      # 仅当 config/llm.toml 启用 docker transport MCP 时才挂载：
+      # - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   # ── Web 管理后台 ────────────────────────────────────────────────────────
   # 与 quickquip 共用同一镜像，仅 command 不同。
   web-admin:
-    image: ghcr.io/3aKHP/quickquip:latest
+    image: ghcr.io/3akhp/quickquip:latest
     container_name: quickquip-web-admin
+    init: true
     command: ["python", "-u", "web_api.py"]
+    depends_on:
+      - searxng
     env_file:
       - .env
     environment:
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
-      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
     ports:
       - "127.0.0.1:5104:5104"
     volumes:
@@ -96,29 +104,6 @@ services:
       # - ./llm_about:/app/llm_about
       # 仅当需要覆盖镜像内置前端时取消注释：
       # - ./frontend/dist:/app/frontend/dist:ro
-    restart: unless-stopped
-
-  # ── MCP Sidecar：Tavily 搜索（可选）─────────────────────────────────────
-  # 启用：docker compose --profile full up -d
-  # 此服务将上游 stdio‑only 的 mcp/tavily 镜像通过 mcp‑proxy 封装为 HTTP，
-  # 供 quickquip 通过 transport = "sse" 调用。
-  mcp-tavily:
-    build:
-      context: .
-      dockerfile: docker/mcp-tavily.Dockerfile
-    container_name: quickquip-mcp-tavily
-    profiles: ["full"]
-    environment:
-      TAVILY_API_KEY: "${TAVILY_API_KEY:-}"
-    restart: unless-stopped
-
-  # ── MCP Sidecar：Fetch 网页抓取（可选）──────────────────────────────────
-  mcp-fetch:
-    build:
-      context: .
-      dockerfile: docker/mcp-fetch.Dockerfile
-    container_name: quickquip-mcp-fetch
-    profiles: ["full"]
     restart: unless-stopped
 
 volumes:

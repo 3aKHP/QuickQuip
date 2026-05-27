@@ -2,7 +2,7 @@
 
 # QuickQuip — QQ 群聊妙语机器人
 
-> 基于 [NoneBot2](https://nonebot.dev/) + [OneBot V11](https://github.com/nonebot/adapter-onebot) 的 QQ 群聊互动机器人，用妙语让群聊更有趣。
+> 基于 [NoneBot2](https://nonebot.dev) + [OneBot V11](https://github.com/nonebot/adapter-onebot) 的 QQ 群聊互动机器人，用妙语让群聊更有趣。
 
 QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱动优先**的 QQ 群聊机器人。它通过精心设计的正则匹配和状态机自动给出幽默回复，同时支持按群启用 LLM 扩展，可通过指令或艾特触发多模型对话。
 
@@ -62,7 +62,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    在项目根目录创建 `.env` 文件，参考 NoneBot2 文档配置连接参数：
 
    ```env
-   DRIVER=~fastapi
+   DRIVER=~fastapi+~websockets
    HOST=0.0.0.0
    PORT=8080
    SEARXNG_BASE_URL=http://127.0.0.1:8888
@@ -137,7 +137,11 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    python bot.py
    ```
 
-生产部署模板位于 `prod.example/`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
+### Windows 懒人包
+
+Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
+
+生产部署模板位于 `prod.example/`；公开分发镜像位于 `ghcr.io/3akhp/quickquip`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
 
 ### 运行测试
 

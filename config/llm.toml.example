@@ -53,7 +53,7 @@ discovery_max_loaded_tools = 12
 always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
 
 [mcp]
-enabled = true
+enabled = false
 
 # 支持的 transport：
 #   "stdio" — 运行本地可执行文件（command + args），进程随 bot 启停；
@@ -75,17 +75,17 @@ headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 # 内部网络上，本 bot 以 transport = "sse" 直连。完整模板参考
 # docker/mcp-example.Dockerfile.example 与你的私有部署编排。
 
-[[mcp.servers]]
-id = "tavily"
-transport = "sse"
-timeout_seconds = 30
-url = "http://mcp-tavily:8080/sse"
-
-[[mcp.servers]]
-id = "fetch"
-transport = "sse"
-timeout_seconds = 30
-url = "http://mcp-fetch:8080/sse"
+# [[mcp.servers]]
+# id = "tavily"
+# transport = "sse"
+# timeout_seconds = 30
+# url = "http://mcp-tavily:8080/sse"
+#
+# [[mcp.servers]]
+# id = "fetch"
+# transport = "sse"
+# timeout_seconds = 30
+# url = "http://mcp-fetch:8080/sse"
 
 # ── 以下 docker transport 示例仅供裸机部署参考（全部注释）──────────────────
 # 这些 MCP 官方未提供 http/sse 入口，社区镜像直接 `docker run -i --rm` 启动。

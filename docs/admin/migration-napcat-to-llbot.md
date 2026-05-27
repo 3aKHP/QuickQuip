@@ -88,6 +88,7 @@ quickquip:
   depends_on:
     - llbot
   environment:
+    DRIVER: "${DRIVER:-~fastapi+~websockets}"
     ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
 ```
 
@@ -125,7 +126,7 @@ NapCat 的登录态和数据卷（`napcat-data/`）建议在确认稳定前保�
 
 ## OneBot WS 模式说明
 
-LLBot 同时支持正向和反向 WebSocket。`docker-compose.example.yml` 默认使用**正向 WS**：QuickQuip 通过 `ONEBOT_WS_URLS='["ws://llbot:3001/"]'` 连接 LLBot 的 3001 端口。
+LLBot 同时支持正向和反向 WebSocket。`docker-compose.example.yml` 默认使用**正向 WS**：QuickQuip 通过 `ONEBOT_WS_URLS='["ws://llbot:3001/"]'` 连接 LLBot 的 3001 端口。此模式需要 `DRIVER` 包含 `~websockets`。
 
 如果你更希望保留 NapCat 时期常见的反向 WS 结构，也可以在 LLBot WebUI 中配置 `ws-reverse`，让 LLBot 连接 QuickQuip 的 `/onebot/v11/ws/` 端点。
 

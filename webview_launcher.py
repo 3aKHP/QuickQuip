@@ -3,16 +3,17 @@
 Requires ``pywebview`` (installed separately; not in requirements.txt
 since it pulls in pythonnet /.NET CLR which is Windows-only).
 
-If pywebview is unavailable this script exits with code 2 so the
-caller (启动.bat) can fall back to opening a browser tab.
+If pywebview is unavailable this script opens the admin URL in the
+default browser and exits with code 2.
 """
 
 import sys
 import time
 import urllib.request
+import webbrowser
 
 ADMIN_URL = "http://127.0.0.1:5104/ops"
-HEALTH_URL = "http://127.0.0.1:5104/ops/api/auth/me"
+HEALTH_URL = "http://127.0.0.1:5104/ops/"
 WAIT_TIMEOUT = 30
 
 
@@ -32,6 +33,8 @@ def main() -> int:
         import webview  # type: ignore[import-untyped]
     except ImportError:
         print("pywebview not installed, falling back to browser", file=sys.stderr)
+        _wait_for_admin()
+        webbrowser.open(ADMIN_URL)
         return 2
 
     _wait_for_admin()

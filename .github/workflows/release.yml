@@ -18,7 +18,7 @@ jobs:
     name: Build Windows Lazy Package
     needs: tests
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     permissions:
       contents: read
 
@@ -52,23 +52,68 @@ jobs:
         run: staging\python\python.exe -m pip install --no-warn-script-location -r requirements.txt
         env:
           PIP_NO_CACHE_DIR: "1"
+          PLAYWRIGHT_BROWSERS_PATH: "0"
 
       - name: Install pywebview (Windows-only webview)
         run: staging\python\python.exe -m pip install --no-warn-script-location pywebview
         env:
           PIP_NO_CACHE_DIR: "1"
 
+      - name: Install Playwright browsers
+        run: staging\python\python.exe -m playwright install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+
       - name: Copy project files
         run: |
           Copy-Item -Recurse quickquip staging\
           Copy-Item -Recurse plugins staging\
           Copy-Item -Recurse llm_about staging\
-          mkdir -p staging\frontend\dist
+          New-Item -ItemType Directory -Force staging\frontend\dist | Out-Null
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
 
           Copy-Item -Recurse config staging\
-          Copy-Item bot.py, web_api.py, 启动.bat, webview_launcher.py staging\
-          mkdir staging\data
+          Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
+          New-Item -ItemType Directory -Force staging\data | Out-Null
+
+      - name: Smoke test lazy package
+        shell: pwsh
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+        run: |
+          staging\python\python.exe -m compileall -q staging\bot.py staging\web_api.py staging\webview_launcher.py staging\quickquip staging\plugins
+          staging\python\python.exe -c "import webview; print('pywebview ok')"
+          Push-Location staging
+          try {
+            .\python\python.exe -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); browser.close(); p.stop(); print('playwright chromium ok')"
+            Copy-Item .env.example .env -Force
+            $env:WEB_ADMIN_PASSWORD = "smoke"
+            $env:WEB_ADMIN_HOST = "127.0.0.1"
+            $env:WEB_ADMIN_PORT = "55104"
+            $proc = Start-Process -FilePath .\python\python.exe -ArgumentList "-u","web_api.py" -WindowStyle Hidden -PassThru
+            try {
+              $ready = $false
+              for ($i = 0; $i -lt 30; $i++) {
+                Start-Sleep -Seconds 1
+                try {
+                  $resp = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:55104/ops/" -TimeoutSec 2
+                  if ($resp.StatusCode -eq 200 -and $resp.Content -match '<div id="app"></div>') {
+                    $ready = $true
+                    break
+                  }
+                } catch {}
+              }
+              if (-not $ready) {
+                throw "Web Admin smoke test failed"
+              }
+            } finally {
+              if ($proc -and -not $proc.HasExited) {
+                Stop-Process -Id $proc.Id -Force
+              }
+            }
+          } finally {
+            Pop-Location
+          }
 
       - name: Create release zip
         run: 7z a QuickQuip-${{ github.ref_name }}-windows-x64.zip .\staging\*
@@ -83,7 +128,7 @@ jobs:
     name: Build and Push Docker Image
     needs: tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -106,11 +151,27 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ghcr.io/3akhp/quickquip
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build smoke image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: quickquip:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test Docker image
+        run: |
+          docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py quickquip plugins'
+          docker run --rm --shm-size=1g quickquip:smoke python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--no-sandbox']); browser.close(); p.stop()"
 
       - name: Build and push
         uses: docker/build-push-action@v6

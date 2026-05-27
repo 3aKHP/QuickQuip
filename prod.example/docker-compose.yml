@@ -52,7 +52,7 @@ services:
     env_file:
       - ../.env
     environment:
-      DRIVER: "${DRIVER:-~fastapi}"
+      DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
       PORT: "8080"
       ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'

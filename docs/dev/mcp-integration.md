@@ -66,7 +66,7 @@ docker run -i --rm ...
 
 这会显著放大权限范围。
 
-`docker` transport 需要在容器内安装 Docker CLI 并挂载 `/var/run/docker.sock`，这会放大权限范围，仅适合开发环境或可信宿主机。
+GHCR 分发镜像和生产模板镜像已内置 Docker CLI，以便需要时启用 `docker` transport。真正启用还必须显式挂载 `/var/run/docker.sock`，这会放大权限范围，仅适合开发环境或可信宿主机。
 
 容器化部署推荐走纯 sidecar 模式：在部署编排中将 MCP server 作为独立 service 跑在同一网络里，bot 通过 `transport = "sse"` 或 `transport = "http"` 直连。代码中的四种 transport 均已完整实现，部署时无需依赖 Docker socket。
 
