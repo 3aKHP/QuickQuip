@@ -411,6 +411,10 @@ AI 默认只在下面两种情况回复：
 /wordcloud month
 ```
 
+```text
+/wordcloud year
+```
+
 也支持中文别名：
 
 ```text
@@ -725,7 +729,27 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 /llm memory off
 ```
 
-### 6.6 清空 AI 短期上下文
+### 6.6 开关自动记忆抽取
+
+```text
+/llm auto_memory status
+```
+
+```text
+/llm auto_memory on
+```
+
+```text
+/llm auto_memory off
+```
+
+```text
+/llm auto_memory reset
+```
+
+自动记忆抽取只从已触发的 AI 对话中提取稳定事实，`reset` 会让本群跟随全局默认值。
+
+### 6.7 清空 AI 短期上下文
 
 ```text
 /llm clear_context
@@ -734,7 +758,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 这会清掉 AI 最近几轮对话上下文。
 适合在 AI”串台”或”记错上下文”时用。
 
-### 6.7 从上下文中删除指定消息
+### 6.8 从上下文中删除指定消息
 
 回复一条消息并发送：
 
@@ -750,7 +774,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 
 适合在 AI 记住了不该记住的消息时用。
 
-### 6.8 重载 AI 配置
+### 6.9 重载 AI 配置
 
 ```text
 /llm reload
@@ -758,19 +782,19 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 
 重载会同时重置本群的上下文条数覆盖（如有）。
 
-### 6.9 手动添加记忆
+### 6.10 手动添加记忆
 
 ```text
 /remember 阿桃喜欢薄荷糖
 ```
 
-### 6.10 删除记忆
+### 6.11 删除记忆
 
 ```text
 /forget 薄荷糖
 ```
 
-### 6.11 清空本群全部长期记忆
+### 6.12 清空本群全部长期记忆
 
 ```text
 /forget_all
@@ -778,7 +802,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 
 一次性清除本群所有已存的长期记忆。
 
-### 6.12 设置上下文读取上限
+### 6.13 设置上下文读取上限
 
 ```text
 /llm context_limit 5
@@ -793,7 +817,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 /llm context_limit reset
 ```
 
-### 6.13 群规则开关
+### 6.14 群规则开关
 
 禁用某条旧规则：
 
@@ -807,13 +831,54 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 /enable divine_arrival
 ```
 
-### 6.14 重置群统计
+### 6.15 唤醒模块
+
+查看本群唤醒状态：
+
+```text
+/awakening status
+```
+
+可管理的唤醒规则：
+
+| 规则名 | 说明 |
+|------|------|
+| `awakening_extend` | 显式触发 AI 后的一小段时间内，继续回应同一用户 |
+| `awakening_interest` | 命中配置的兴趣话题时回应 |
+| `awakening_relevance` | 判断群友是否在延续 bot 刚才的话题 |
+| `awakening_qa` | 判断群友是否提出了需要回答的问题 |
+| `awakening_boredom` | 群聊沉寂达到配置时长后主动冒泡 |
+| `awakening_fallback` | 按低概率兜底触发 |
+
+启用或关闭某个规则：
+
+```text
+/awakening on awakening_interest
+```
+
+```text
+/awakening off awakening_interest
+```
+
+无聊唤醒还需要本群单独 opt-in：
+
+```text
+/awakening boredom on
+```
+
+```text
+/awakening boredom off
+```
+
+具体阈值和兴趣话题由部署者在 `config/awakening.toml` 中配置。
+
+### 6.16 重置群统计
 
 ```text
 /reset_stats
 ```
 
-### 6.15 热重载规则和人格
+### 6.17 热重载规则和人格
 
 重载聊天规则（`chat_rules.toml`）：
 
@@ -829,7 +894,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 
 适合在通过 Web Admin 在线编辑配置文件后立即生效。
 
-### 6.16 立即同步贴吧缓存
+### 6.18 立即同步贴吧缓存
 
 ```text
 /tieba refresh
@@ -853,7 +918,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 按部署指南完成贴吧登录态导出。
 ```
 
-### 6.17 贴吧实时抓取
+### 6.19 贴吧实时抓取
 
 ```text
 /tieba_peek 搬石
@@ -981,7 +1046,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 - `/tell @某人 内容` — 离线留言
 - `/tells` — 查看待收留言
 - `/untell` — 撤回留言
-- `/wordcloud [today|week|month]` — 生成词云（管理员）
+- `/wordcloud [today|week|month|year]` — 生成词云（管理员）
 - `/draw 描述` — AI 图片生成
 - `/tts 文本` — 文字转语音
 - `/music 风格 主题` — AI 写歌
@@ -1018,6 +1083,7 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 - `/llm persona use <id>`
 - `/llm memory on`
 - `/llm memory off`
+- `/llm auto_memory status|on|off|reset`
 - `/llm context_limit <n>`
 - `/llm context_limit reset`
 - `/llm clear_context`
@@ -1028,6 +1094,9 @@ QuickQuip 内置 4 款群内游戏，详见 [群内游戏指南](group-games.md)
 - `/forget_all`
 - `/disable <rule>`
 - `/enable <rule>`
+- `/awakening status`
+- `/awakening on|off <rule>`
+- `/awakening boredom on|off`
 - `/reload_rules` — 热重载聊天规则
 - `/reload_personas` — 热重载 LLM 人格
 - `/reset_stats`

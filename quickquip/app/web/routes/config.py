@@ -7,6 +7,7 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 
 from quickquip.app.web.audit import audit_logger
+from quickquip.app.web.action_queue import action_queue
 from quickquip.common.paths import CONFIG_DIR
 
 router = APIRouter()
@@ -37,6 +38,11 @@ _CONFIG_FILES: dict[str, dict] = {
         "filename": "games.toml",
         "label": "游戏配置",
         "description": "金币签到倍率、各游戏赌注/CD/超时等参数",
+    },
+    "awakening": {
+        "filename": "awakening.toml",
+        "label": "唤醒配置",
+        "description": "按群唤醒延长、兴趣话题、相关性判定和无聊冒泡参数",
     },
     "niuniu_text": {
         "filename": "niuniu_text.toml",
@@ -115,4 +121,8 @@ def put_config(key: str, body: ConfigBody, request: Request):
         target_type="config",
         target_id=key,
     )
-    return {"ok": True, "reload_required": True}
+    response = {"ok": True, "reload_required": True}
+    if key == "awakening":
+        action = action_queue.enqueue("awakening_reload")
+        response.update({"queued": True, "action": action})
+    return response

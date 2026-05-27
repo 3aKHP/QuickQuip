@@ -23,6 +23,7 @@ from quickquip.common.sensitive_filter import (
     SCRUB_PLACEHOLDER,
     get_filter as _get_sensitive_filter,
     log_hits as _log_sensitive_hits,
+    reload_filter as _reload_sensitive_filter,
 )
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
@@ -271,6 +272,7 @@ class LLMService(ToolMixin, HealthMixin, StateMixin):
 
     def reload_config(self) -> LLMConfig:
         self.config = load_llm_config(self.config_path)
+        _reload_sensitive_filter()
         self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self.identities = IdentityIndex.from_file(self.identity_path)

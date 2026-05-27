@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -58,3 +59,33 @@ async def test_shutdown_closes_stores_even_if_save_all_fails(monkeypatch):
         await driver.shutdown()
 
     assert calls == ["tieba", "llm", "save", "close"]
+
+
+def test_reload_if_changed_watches_awakening_config(monkeypatch, tmp_path):
+    rule_path = tmp_path / "rule_switch.json"
+    awakening_path = tmp_path / "awakening.toml"
+    daily_path = tmp_path / "daily.json"
+    briefing_path = tmp_path / "briefing.json"
+    boredom_path = tmp_path / "boredom.json"
+    for path in (rule_path, awakening_path, daily_path, briefing_path, boredom_path):
+        path.write_text("{}", encoding="utf-8")
+
+    calls: list[str] = []
+    monkeypatch.setattr(lifecycle, "RULE_SWITCH_PATH", rule_path)
+    monkeypatch.setattr(lifecycle, "CONFIG_AWAKENING_TOML", awakening_path)
+    monkeypatch.setattr(lifecycle.rule_switch, "load", lambda path: calls.append(f"rule:{Path(path).name}"))
+    monkeypatch.setattr(lifecycle, "reload_awakening_config", lambda: calls.append("awakening"))
+    monkeypatch.setattr(lifecycle.daily_enabled_groups, "path", daily_path)
+    monkeypatch.setattr(lifecycle.daily_enabled_groups, "load", lambda: calls.append("daily"))
+    monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "path", briefing_path)
+    monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "load", lambda: calls.append("briefing"))
+    monkeypatch.setattr(lifecycle.boredom_enabled_groups, "path", boredom_path)
+    monkeypatch.setattr(lifecycle.boredom_enabled_groups, "load", lambda: calls.append("boredom"))
+
+    lifecycle._watched.clear()
+    lifecycle._init_mtimes()
+    awakening_path.write_text("{\"changed\": true}", encoding="utf-8")
+
+    lifecycle._reload_if_changed()
+
+    assert calls == ["awakening"]

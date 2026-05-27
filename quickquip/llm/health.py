@@ -288,8 +288,8 @@ async def build_health_report(
     # is in `details` — and `/llm health verbose` posts that back into the
     # group chat, so leaking a filesystem path there would defeat the
     # whole "deploy-time word list, never disclosed publicly" stance.
-    # Web Admin reads the path from its own /api/sensitive-filter/status
-    # endpoint where the audience is already authenticated.
+    # Web Admin exposes only aggregate status through its own
+    # /api/sensitive-filter/status endpoint.
     if sensitive_filter is None:
         sf_status = "warn"
         sf_summary = "敏感词过滤：未绑定"

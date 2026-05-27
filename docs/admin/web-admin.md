@@ -132,38 +132,47 @@ WEB_ADMIN_COOKIE_SECURE=true
 - 写操作会额外检查 `Origin` / `Referer` 是否与当前请求宿主一致
 - FastAPI 层自身有登录态校验，不再完全依赖 nginx
 
-这比"只有 nginx `auth_basic`，应用层完全无认证"的旧结构更符合纵深防御原则。
+外层站点访问控制和应用层 session 共同组成后台的纵深防御边界。
 
 ---
 
 ## 功能标签页
 
-Web Admin 提供以下标签页（前端使用 vue-router 4 hash 模式，深链接形如 `/ops/#/stats`）。前端已升级为响应式设计，支持亮色/暗色主题切换，使用统一的设计 token 体系。当前共 24 个标签页。
+Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式，深链接形如 `/ops/#/stats`）。前端使用响应式设计、亮色/暗色主题切换和统一设计 token。
 
+- **概览** — 汇总运行状态、常用入口和关键指标
 - **统计** — 各群消息数、活跃用户排行、规则触发 Top
 - **规则** — 按群启用/禁用任意规则，toggle 实时生效
 - **群组** — 每日总结 / 每日播报群管理
+- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
+- **唤醒** — 按群查看并编辑唤醒参数，切换 `awakening_*` 规则和无聊唤醒 opt-in；兴趣话题由人格配置和规则开关控制
+- **限流** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）
 - **记忆** — 按群浏览与编辑 LLM 长期记忆
-- **总结** — 查阅/删除每日总结存档
 - **对话** — 按群浏览 LLM 对话历史（含私聊/归档，支持关键词过滤、游标翻页、按单条删除）
 - **人格** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）
 - **资料** — 在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件（保存后执行 `/llm reload` 或重启 bot 生效）
-- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 9 个 runtime 字段；列表会同时显示近期活跃群和数据库里已有覆盖配置的群，便于直接管理真实在用群组
-- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml` 多文件 TOML 编辑器
-- **限流** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）
-- **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情）
+- **诊断** — LLM runtime 重载、MCP 重连、上下文清理、样本请求、文本规则回归测试和 LLM 健康状态
+- **MCP** — MCP 服务器状态面板（transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
+- **总结** — 查阅/删除每日总结存档
 - **语录** — 语录管理（按群浏览、关键词搜索、删除）
-- **词云** — 词云生成（4 档时间窗、Top 词频排行、图片下载）
+- **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
+- **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
+- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器
 - **实时日志** — 当前运行日志流、连接状态与当前文件下载
 - **LLM Trace** — 共享 trace 流、开关控制与最近 trace 条目
 - **日志归档** — 历史轮转日志浏览、预览与下载
-- **诊断** — 样本请求与文本规则回归测试
-- **MCP** — MCP 服务器状态面板（各 server 的 transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
 - **定时任务** — APScheduler 定时任务面板（job ID、trigger、next_run、last_run 时间与状态、错误详情）
 - **审计** — Web Admin 变更审计日志（按操作类型、目标类型、操作人、日期范围等条件过滤，分页浏览）
 - **金币** — 金币经济面板（各群金币汇总、排行 TOP 20、账户查询、手动余额调整并记录审计日志）
-- **牛牛** — 牛牛大作战面板（自然/绝对值/长度/深度四种排行、用户查询含多维度排名、操作记录追溯、文案模式管理：查看可用模式并设置群组文案）
-- **配置** — 配置文件编辑器中新增加 `config/games.toml`（游戏配置），可在线编辑所有游戏参数
+- **牛牛** — 牛牛大作战面板（自然/绝对值/长度/深度四种排行、用户查询含多维度排名、操作记录追溯、文案模式管理）
+
+敏感词过滤器没有独立标签页。后台提供只读接口 `GET /ops/api/sensitive-filter/status`，LLM 健康检查也会汇总过滤器加载状态和词表数量。`config/sensitive_words.toml` 属于高敏部署文件，只在服务器本地维护，Web Admin 不提供内容读取或在线编辑入口。
+
+### Bot 执行动作队列
+
+`web_api.py` 是独立进程，不能直接复用 bot 进程里的 OneBot 连接。诊断页的运行时重载、LLM 健康检查、上下文清理、唤醒参数重载、群组页的“立即生成总结/播报”等需要 bot 进程执行的动作，会先写入 `data/web_admin_actions.db`。bot 端定时任务 `web_admin_action_queue` 每 5 秒领取并执行队列任务，结果回写到同一数据库；诊断页“最近动作”用于查看等待、执行中、成功或失败状态。动作队列数据库启用 WAL；若 bot 在领取任务后退出，后续轮询会将超时的 `running` 动作标记为失败，避免任务永久挂起。
+
+普通配置文件和群级开关仍走文件持久化路径。bot 端 `web_admin_state_sync` 每 30 秒检测 `rule_switch.json`、`config/awakening.toml`、每日总结/播报群组文件、无聊唤醒群组文件的修改并重载。唤醒标签页和配置页保存 `config/awakening.toml` 后也会主动入队一次 `awakening_reload`。
 
 ---
 

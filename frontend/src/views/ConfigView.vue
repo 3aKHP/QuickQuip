@@ -1,6 +1,6 @@
 <template>
   <div class="config-view">
-    <UiPageHeader title="配置" subtitle="在线编辑 TOML 配置文件，保存后需要重启 bot 才会生效">
+    <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后需要重启 bot 才会生效">
       <template #actions>
         <span v-if="current && current.missing" class="warn">
           <UiIcon name="Info" :size="14" />
@@ -65,7 +65,7 @@
       <aside class="config-side">
         <div class="side-card">
           <h4>保存说明</h4>
-          <p>配置文件会直接写回仓库内的 TOML 文件。这里更适合做紧凑的在线编辑，不承担结构化校验。</p>
+          <p>配置文件会直接写回仓库内的常规 TOML 文件。敏感词表等高敏文件只在服务器本地维护。</p>
         </div>
         <div class="side-card">
           <h4>常见文件</h4>

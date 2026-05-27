@@ -6,6 +6,7 @@ endpoint deliberately does NOT expose:
 - The matched words themselves (plaintext or hash form)
 - Per-category breakdown beyond aggregate block/soft totals
 - Hit logs or recent matches
+- The sensitive TOML file path
 
 Hit-level visibility lives in the regular log stream (logger
 ``quickquip.common.sensitive_filter``); this endpoint is purely a "is the
@@ -33,7 +34,6 @@ def get_sensitive_filter_status() -> dict:
     stats = sf.stats if sf.is_loaded else {"total": 0, "block": 0, "soft": 0}
     return {
         "loaded": sf.is_loaded,
-        "config_path": str(CONFIG_SENSITIVE_WORDS_TOML),
         "config_exists": config_exists,
         "stats": stats,
     }

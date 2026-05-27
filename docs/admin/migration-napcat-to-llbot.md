@@ -35,7 +35,9 @@ services:
     image: initialencounter/llonebot:latest
     container_name: llbot
     entrypoint:
-      - /entrypoint.sh
+      - /bin/sh
+      - -c
+      - "(sleep 5 && echo 'nameserver 127.0.0.11' > /etc/resolv.conf && echo 'options ndots:0' >> /etc/resolv.conf) & exec /bin/llonebot-service"
     environment:
       - QUICK_LOGIN_QQ=${QQ_ACCOUNT:?请设置 QQ 号}
       - TZ=Asia/Shanghai
@@ -45,28 +47,12 @@ services:
     volumes:
       - ./llbot-qq:/root/.config/QQ        # 登录态持久化（关键，切勿丢失）
       - ./llbot-data:/root/llonebot         # 配置文件 + 运行时数据
-      - ./llbot-entrypoint.sh:/entrypoint.sh:ro   # DNS 修复 wrapper
     restart: unless-stopped
 ```
 
-**重要**：LLBot 镜像的入口脚本会将容器 DNS 指向公网服务器，导致无法解析 Docker Compose 内部服务名。需挂载修复脚本（见下方）。
+> 注意：LLBot 镜像的入口脚本会将容器 DNS 指向公网服务器，导致无法解析 Docker Compose 内部服务名。上方 `entrypoint` 已通过内联 `/bin/sh -c` 在启动前修复 DNS，无需额外文件。
 
-### 2. 创建 DNS 修复脚本
-
-在 compose 同目录下创建 `llbot-entrypoint.sh`：
-
-```bash
-#!/bin/sh
-echo 'nameserver 127.0.0.11' > /etc/resolv.conf
-echo 'options ndots:0' >> /etc/resolv.conf
-exec /bin/llonebot-service
-```
-
-```bash
-chmod +x llbot-entrypoint.sh
-```
-
-### 3. 创建 OneBot 配置文件
+### 2. 配置 OneBot 反向 WS
 
 LLBot 的配置为 JSON 格式，位于 `llbot-data/default_config.json`。最小配置（启用反向 WS）：
 
@@ -91,11 +77,11 @@ LLBot 的配置为 JSON 格式，位于 `llbot-data/default_config.json`。最�
 }
 ```
 
-> **注意**：容器首次启动时入口脚本会用内置默认配置覆盖此文件。建议先启动容器完成首次登录，再通过 WebUI（`http://<服务器IP>:3080`）配置反向 WS，或使用 `docker exec` 修改 `data/config_<QQ号>.json`。
+> 注意：容器首次启动时入口脚本可能用内置默认配置覆盖此文件。建议先启动容器完成首次登录，再通过 WebUI（`http://<服务器IP>:3080`）配置反向 WS，或使用 `docker exec` 修改 `data/config_<QQ号>.json`。
 
-### 4. 更新 QuickQuip 服务
+### 3. 更新 QuickQuip 服务
 
-在 compose 中将 QuickQuip 的 `depends_on` 和 `ONEBOT_WS_URLS` 更新为指向 LLBot：
+在 compose 中将 QuickQuip 的 `depends_on` 和 `ONEBOT_WS_URLS` 更新为指向 LLBot 正向 WS：
 
 ```yaml
 quickquip:
@@ -105,7 +91,7 @@ quickquip:
     ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
 ```
 
-### 5. 启动并扫码登录
+### 4. 启动并扫码登录
 
 ```bash
 docker compose up -d llbot
@@ -127,7 +113,7 @@ docker compose logs quickquip | grep "Bot.*connected"
 # 应输出: OneBot V11 | Bot <你的QQ号> connected
 ```
 
-### 6. 移除旧 NapCat 服务（验证稳定后）
+### 5. 移除旧 NapCat 服务（验证稳定后）
 
 ```bash
 docker compose stop napcat
@@ -139,9 +125,9 @@ NapCat 的登录态和数据卷（`napcat-data/`）建议在确认稳定前保�
 
 ## OneBot WS 模式说明
 
-LLBot 同时支持正向和反向 WebSocket。QuickQuip 的默认 `~fastapi` driver 使用**反向 WS**——LLBot 作为客户端连接到 QuickQuip 的 `/onebot/v11/ws/` 端点。这与 NapCat 时期的行为完全一致，无需调整 NoneBot 配置。
+LLBot 同时支持正向和反向 WebSocket。`docker-compose.example.yml` 默认使用**正向 WS**：QuickQuip 通过 `ONEBOT_WS_URLS='["ws://llbot:3001/"]'` 连接 LLBot 的 3001 端口。
 
-正向 WS（端口 3001）作为备用保留，`ONEBOT_WS_URLS` 中的默认值即指向此端口。
+如果你更希望保留 NapCat 时期常见的反向 WS 结构，也可以在 LLBot WebUI 中配置 `ws-reverse`，让 LLBot 连接 QuickQuip 的 `/onebot/v11/ws/` 端点。
 
 ## 已知差异
 

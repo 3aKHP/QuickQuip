@@ -4,6 +4,7 @@
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
         <UiButton icon="Download" :loading="syncing" @click="startSync(null)">立即同步全部</UiButton>
+        <UiButton icon="Radar" :disabled="!selectedForum" :loading="peeking" @click="peekSelected">现爬一条</UiButton>
       </template>
     </UiPageHeader>
 
@@ -117,7 +118,7 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, openTiebaSyncStream } from '../api/tieba'
+import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, openTiebaSyncStream, peekTiebaThread } from '../api/tieba'
 import { toast } from '../toast'
 
 const PAGE_SIZE = 30
@@ -129,6 +130,7 @@ const loadError = ref<string | null>(null)
 const syncing = ref(false)
 const syncLog = ref<string[]>([])
 const logEl = ref<HTMLPreElement | null>(null)
+const peeking = ref(false)
 
 function startSync(forum: string | null) {
   syncing.value = true
@@ -248,6 +250,19 @@ async function openDetail(tid: number) {
     detail.value = await fetchTiebaThread(selectedForum.value, tid)
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
+  }
+}
+
+async function peekSelected() {
+  if (!selectedForum.value) return
+  peeking.value = true
+  try {
+    detail.value = await peekTiebaThread(selectedForum.value)
+    toast('现爬完成')
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error', 4000)
+  } finally {
+    peeking.value = false
   }
 }
 

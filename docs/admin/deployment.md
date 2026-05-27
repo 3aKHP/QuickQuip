@@ -47,14 +47,17 @@ nano .env  # 填入 QQ 号、OneBot 配置和 API key
 同时确认：
 
 - 根目录下的 `.env` 已存在，并填入 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
-- 如果仍需保留 Tavily 作为备用搜索后端，再额外填入 `TAVILY_API_KEY`
+- 如启用 MCP Tavily sidecar，再额外填入 `TAVILY_API_KEY`
 - 根目录下的 `config/llm.toml` 已存在并填入真实 provider / model / base_url 配置
+- 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
+- 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
+- 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
 - 如使用私有部署编排，相关环境变量文件不应进入公共仓库
 
 当前部署会把：
 
 - 根 `.env`
-- `config/llm.toml`
+- `config/` 目录下的运行配置（如 `llm.toml`、`generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
 - `llm_about/vocab.yaml`
 - `llm_about/identities.yaml`
 - `llm_about/{群号}/vocab.yaml`
@@ -85,7 +88,7 @@ docker compose up -d
 
 补充说明：
 
-- `config/llm.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
+- `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`
 
@@ -151,7 +154,9 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，默认监听 
 - 消息统计（各群消息数、活跃用户、规则触发次数）
 - 群级规则开关（toggle 开关，实时生效）
 - 每日总结 / 每日播报群组管理
-- `config/llm.toml` 在线编辑（保存前校验 TOML 语法）
+- `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 在线编辑（保存前校验 TOML 语法）
+- 敏感词过滤器只读状态查看；`config/sensitive_words.toml` 只通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑
+- 记忆、对话、人格、资料、唤醒、贴吧、词云、语录、定时任务、审计、金币经济和牛牛面板
 - 实时日志 / LLM Trace / 日志归档面板（直接读取 `../data/logs` 共享日志与 trace 文件）
 
 管理界面同时有两层门：
@@ -179,6 +184,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | `../frontend/dist` | `/app/frontend/dist` | 只读 |
 
 > 注意：`quickquip` 容器的 `config` 和 `llm_about` 挂载仍可保持只读（`:ro`），只有 `web-admin` 需要写权限。
+> `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
 
 ### web-admin 代码更新
 
@@ -219,7 +225,7 @@ docker compose down
 
 如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 镜像到 `config/llm.toml`，但部署时仍要按 QuickQuip 自己的私有环境变量来管理密钥和宿主路径。
 
-当前项目已经同时保留 Tavily 直连能力和 MCP 扩展能力。MCP 集成的正式约定见 [../dev/mcp-integration.md](../dev/mcp-integration.md)。
+当前项目通过 SearXNG 提供内置 `search_web` 搜索，通过 MCP 扩展接入 Tavily 等外部工具。MCP 集成的正式约定见 [../dev/mcp-integration.md](../dev/mcp-integration.md)。
 
 ### LLBot 登录态过期
 
@@ -238,7 +244,7 @@ docker compose logs -f llbot  # 找新的二维码
 
 ### 端口冲突
 
-如果服务器上 6099 或 8080 端口已被占用，在 `docker-compose.yml` 中修改端口映射即可。QuickQuip 的 8080 端口不需要对外暴露（容器内部通信）。
+如果服务器上 3001、3080、5104 或 8888 端口已被占用，在 `docker-compose.yml` 中修改宿主机端口映射即可。QuickQuip 的 8080 端口只用于容器内部通信，不需要对外暴露。
 
 ### LLM 配置不生效
 
@@ -246,7 +252,6 @@ docker compose logs -f llbot  # 找新的二维码
 
 - `config/llm.toml` 是否存在且内容正确
 - `.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
-- 私有环境变量文件中是否把 `SEARCH_BACKEND` 设为 `searxng`
 - 私有环境变量文件中是否填了 `QQ_ACCOUNT`、`GITHUB_PERSONAL_ACCESS_TOKEN` 与云端 MCP 覆盖值
 - 搜索服务是否运行，QuickQuip 容器内是否能访问配置里的 `SEARXNG_BASE_URL`
 - `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在

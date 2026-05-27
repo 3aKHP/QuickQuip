@@ -18,7 +18,9 @@ services:
     image: initialencounter/llonebot:latest
     container_name: llbot
     entrypoint:
-      - /entrypoint.sh
+      - /bin/sh
+      - -c
+      - "(sleep 5 && echo 'nameserver 127.0.0.11' > /etc/resolv.conf && echo 'options ndots:0' >> /etc/resolv.conf) & exec /bin/llonebot-service"
     environment:
       - QUICK_LOGIN_QQ=${QQ_ACCOUNT:?请设置 QQ 号}
       - TZ=Asia/Shanghai
@@ -28,7 +30,6 @@ services:
     volumes:
       - ./llbot-qq:/root/.config/QQ        # 登录态持久化（关键）
       - ./llbot-data:/root/llonebot         # 配置文件 + 运行时数据
-      - ./llbot-entrypoint.sh:/entrypoint.sh:ro   # DNS 修复 wrapper
     restart: unless-stopped
 
   # ── 联网搜索（SearXNG）──────────────────────────────────────────────────
@@ -85,6 +86,7 @@ services:
     environment:
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
+      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://searxng:8080}"
     ports:
       - "127.0.0.1:5104:5104"
     volumes:

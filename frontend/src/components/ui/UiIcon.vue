@@ -12,7 +12,8 @@ import {
   Check, X, ChevronDown, FolderOpen, Lock, RefreshCw, LayoutDashboard,
   MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
-  AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles
+  AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
+  BellRing, Radar, Wrench, ListTree, Eraser, Activity
 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Component } from 'vue'
@@ -30,6 +31,7 @@ type IconName =
   | 'Gamepad2' | 'Gauge' | 'Network' | 'Cloud' | 'ArrowRight'
   | 'ChevronUp' | 'Send' | 'FileCode' | 'ListChecks' | 'AlertTriangle'
   | 'Play' | 'Save' | 'ChevronLeft' | 'Download' | 'Sparkles'
+  | 'BellRing' | 'Radar' | 'Wrench' | 'ListTree' | 'Eraser' | 'Activity'
 
 const ICON_MAP: Record<IconName, Component> = {
   BarChart3, ToggleLeft, Users, Brain, FileText,
@@ -42,7 +44,8 @@ const ICON_MAP: Record<IconName, Component> = {
   X, ChevronDown, FolderOpen, Lock, RefreshCw, LayoutDashboard,
   MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
-  AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles
+  AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
+  BellRing, Radar, Wrench, ListTree, Eraser, Activity
 }
 
 const props = defineProps<{
