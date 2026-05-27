@@ -867,8 +867,6 @@ class TestCheckAwakeningTriggers:
             assert first.rule_name == _RULE_INTEREST
             assert first.opens_extend_window is False
 
-            if first.opens_extend_window:
-                s.mark_awakened("g1", "u1", source=first.rule_name)
             second = asyncio.run(
                 check_awakening_triggers("g1", "u1", "后续普通聊天内容", llm_settings, svc, state=s)
             )

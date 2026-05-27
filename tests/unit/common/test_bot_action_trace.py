@@ -8,6 +8,7 @@ from quickquip.common.bot_action_trace import (
     current_bot_action_trace,
     install_nonebot_api_trace_hook,
     log_bot_action_trace,
+    overlay_bot_action_trace,
 )
 
 
@@ -78,6 +79,13 @@ def test_payload_summarizes_forward_message_types_without_content():
     assert payload["message_types"] == ["node", "node"]
     assert payload["reply_preview"] == ""
     assert payload["content_redacted"] is True
+
+
+def test_overlay_ignores_unknown_fields():
+    with bot_action_trace(trigger_kind="command", reason_code="command.demo"):
+        with overlay_bot_action_trace(reason_code="command.specific", unknown_field="ignored") as trace:
+            assert trace.reason_code == "command.specific"
+            assert not hasattr(trace, "unknown_field")
 
 
 @pytest.mark.asyncio

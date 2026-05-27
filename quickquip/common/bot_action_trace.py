@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 import json
 import logging
 from time import time
@@ -40,6 +40,7 @@ class BotActionTrace:
 
 _current_trace: ContextVar[BotActionTrace | None] = ContextVar("quickquip_bot_action_trace", default=None)
 _installed_api_hooks: set[str] = set()
+_TRACE_FIELD_NAMES = {field.name for field in fields(BotActionTrace)}
 
 
 def current_bot_action_trace() -> BotActionTrace | None:
@@ -234,6 +235,7 @@ def overlay_bot_action_trace(**updates: Any) -> Iterator[BotActionTrace]:
     normalized = {
         key: _coerce(value) if key in {"group_id", "user_id", "incoming_message_id"} else value
         for key, value in updates.items()
+        if key in _TRACE_FIELD_NAMES
     }
     if "incoming_preview" in normalized:
         normalized["incoming_preview"] = _preview(normalized["incoming_preview"])

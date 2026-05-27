@@ -429,26 +429,22 @@ async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
     formatted = _format_generated_lyrics(lyric_result, heading=heading)
     group_id = getattr(event, "group_id", None)
 
-    def _trace_context():
-        return overlay_bot_action_trace(
-            trigger_kind="command",
-            reason_code="command.music.lyrics",
-            reason_detail="命令触发：歌词生成结果发送",
-            rule_name="music_gen",
-            chat_type=_chat_type(event),
-            group_id=group_id,
-            user_id=getattr(event, "user_id", ""),
-            incoming_message_id=str(getattr(event, "message_id", "") or ""),
-            incoming_preview=str(event.get_message()).strip() if hasattr(event, "get_message") else "",
-            reply_preview=formatted,
-            source="command.music.lyrics_forward",
-        )
-
-    if group_id is not None:
-        chunks = _chunk_text(formatted)
-        try:
-            trace_context = _trace_context()
-            with trace_context:
+    with overlay_bot_action_trace(
+        trigger_kind="command",
+        reason_code="command.music.lyrics",
+        reason_detail="命令触发：歌词生成结果发送",
+        rule_name="music_gen",
+        chat_type=_chat_type(event),
+        group_id=group_id,
+        user_id=getattr(event, "user_id", ""),
+        incoming_message_id=str(getattr(event, "message_id", "") or ""),
+        incoming_preview=str(event.get_message()).strip() if hasattr(event, "get_message") else "",
+        reply_preview=formatted,
+        source="command.music.lyrics_forward",
+    ):
+        if group_id is not None:
+            chunks = _chunk_text(formatted)
+            try:
                 await bot.call_api(
                     "send_group_forward_msg",
                     group_id=group_id,
@@ -464,14 +460,10 @@ async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
                         for chunk in chunks
                     ],
                 )
-            return
-        except Exception:
-            pass
-    if group_id is not None:
-        trace_context = _trace_context()
-        with trace_context:
+                return
+            except Exception:
+                pass
+        if group_id is not None:
             await bot.send_group_msg(group_id=group_id, message=formatted)
-    else:
-        trace_context = _trace_context()
-        with trace_context:
+        else:
             await bot.send_private_msg(user_id=event.user_id, message=formatted)
