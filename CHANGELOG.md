@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-05-27
+
 ### 修复
 
 - 群聊唤醒延长现在只由显式 LLM 触发打开，并过滤图片-only、CQ-only 与短语气词；兴趣、兜底、相关性、答疑和无聊唤醒不会造成后续普通消息连续响应。
@@ -446,7 +448,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/3aKHP/QuickQuip/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/3aKHP/QuickQuip/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/3aKHP/QuickQuip/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/3aKHP/QuickQuip/compare/v1.5.0...v1.6.0
