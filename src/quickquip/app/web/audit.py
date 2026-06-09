@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import Request
 
 from quickquip.app.web.client_ip import get_client_ip
+from quickquip.common.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -177,4 +178,4 @@ class AuditLogger:
 
 
 # Module-level singleton
-audit_logger = AuditLogger(Path(__file__).parent.parent.parent.parent.parent / "data" / "audit.db")
+audit_logger = AuditLogger(DATA_DIR / "audit.db")

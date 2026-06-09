@@ -10,7 +10,7 @@ dynamic = ["dependencies"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["quickquip*", "plugins*"]
+include = ["quickquip", "quickquip.*", "plugins", "plugins.*"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }

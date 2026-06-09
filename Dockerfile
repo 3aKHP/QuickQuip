@@ -61,6 +61,9 @@ COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 COPY bot.py web_api.py ./
 COPY pyproject.toml ./
 COPY src/ src/
+# --no-deps: runtime deps already installed above. requirements.txt (COPY'd
+# earlier, still present) is read by setuptools dynamic deps during metadata
+# generation, so it must remain in the image at this point.
 RUN pip install --no-deps --no-cache-dir .
 COPY config/ config/
 COPY llm_about/ llm_about/
