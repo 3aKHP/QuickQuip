@@ -59,14 +59,14 @@ services:
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
       SEARCH_BACKEND: "${SEARCH_BACKEND:-searxng}"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+      PYTHONPATH: "/app/src"
     shm_size: "1gb"
     volumes:
       - ../data:/app/data
       - ../config:/app/config:ro
       - ../llm_about:/app/llm_about:ro
       - ../bot.py:/app/bot.py:ro
-      - ../quickquip:/app/quickquip:ro
-      - ../plugins:/app/plugins:ro
+      - ../src:/app/src:ro
     restart: unless-stopped
 
   web-admin:
@@ -87,6 +87,7 @@ services:
       WEB_ADMIN_PORT: "5104"
       SEARCH_BACKEND: "${SEARCH_BACKEND:-searxng}"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+      PYTHONPATH: "/app/src"
     ports:
       - "127.0.0.1:5104:5104"
     volumes:
@@ -95,7 +96,7 @@ services:
       - ../llm_about:/app/llm_about
       - ../frontend/dist:/app/frontend/dist:ro
       - ../web_api.py:/app/web_api.py:ro
-      - ../quickquip:/app/quickquip:ro
+      - ../src:/app/src:ro
     restart: unless-stopped
 
 volumes:

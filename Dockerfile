@@ -59,8 +59,9 @@ COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 
 # ── App source ────────────────────────────────────────────────────────────
 COPY bot.py web_api.py ./
-COPY plugins/ plugins/
-COPY quickquip/ quickquip/
+COPY pyproject.toml ./
+COPY src/ src/
+RUN pip install --no-deps --no-cache-dir .
 COPY config/ config/
 COPY llm_about/ llm_about/
 COPY --from=frontend-builder /build/dist/ frontend/dist/

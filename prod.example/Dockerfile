@@ -19,8 +19,9 @@ COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 
 COPY bot.py .
 COPY web_api.py .
-COPY plugins/ plugins/
-COPY quickquip/ quickquip/
+COPY pyproject.toml .
+COPY src/ src/
+RUN pip install --no-deps --no-cache-dir .
 COPY llm_about/ llm_about/
 RUN mkdir -p data
 
