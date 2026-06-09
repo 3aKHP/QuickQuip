@@ -177,4 +177,4 @@ class AuditLogger:
 
 
 # Module-level singleton
-audit_logger = AuditLogger(Path(__file__).parent.parent.parent.parent / "data" / "audit.db")
+audit_logger = AuditLogger(Path(__file__).parent.parent.parent.parent.parent / "data" / "audit.db")

@@ -1,3 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quickquip"
+version = "1.7.10"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["quickquip*", "plugins*"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
 [tool.ruff]
 line-length = 100
 exclude = [".venv"]
@@ -8,6 +25,7 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 markers = [
     "playwright: requires Playwright browser install (skipped by default)",
@@ -25,7 +43,7 @@ addopts = [
 source = ["quickquip"]
 omit = [
     "*/__pycache__/*",
-    "quickquip/adapters/nonebot/*",
+    "*/quickquip/adapters/nonebot/*",
 ]
 
 [tool.coverage.report]

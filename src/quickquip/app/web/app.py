@@ -5,7 +5,7 @@ from quickquip.app.web import auth
 from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime
 from quickquip.app.web.settings import load_web_env
 
-_DIST = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
+_DIST = Path(__file__).parent.parent.parent.parent.parent / "frontend" / "dist"
 
 
 def create_app() -> FastAPI:
