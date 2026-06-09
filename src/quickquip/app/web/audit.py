@@ -22,7 +22,7 @@ class AuditLogger:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
-        self._init_db()
+        self._init_attempted = False
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path))
@@ -31,9 +31,19 @@ class AuditLogger:
         conn.execute("PRAGMA foreign_keys=OFF")
         return conn
 
-    def _init_db(self) -> None:
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+    def _ensure_init(self) -> None:
+        """Create the data directory and schema if not already done.
+
+        Idempotent and concurrency-safe: the guard flag prevents repeated
+        attempts after a failure, and CREATE TABLE IF NOT EXISTS / mkdir
+        with exist_ok=True are safe to run from multiple threads
+        simultaneously on the first call.
+        """
+        if self._init_attempted:
+            return
+        self._init_attempted = True
         try:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._connect() as conn:
                 conn.execute(
                     """
@@ -71,6 +81,7 @@ class AuditLogger:
         summary_after: dict[str, Any] | None = None,
     ) -> None:
         """Record an audit entry. Failures are caught and logged — never raised."""
+        self._ensure_init()
         try:
             operator = get_client_ip(request) or "unknown"
             timestamp = datetime.now(timezone.utc).isoformat()
@@ -109,6 +120,7 @@ class AuditLogger:
         Returns (items: list[dict], total: int). Items are ordered by
         timestamp DESC.
         """
+        self._ensure_init()
         try:
             where_clauses: list[str] = []
             params: list[Any] = []
