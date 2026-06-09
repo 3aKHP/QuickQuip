@@ -14,7 +14,7 @@
     └── NiuNiu RPG             ← 牛牛大作战（持久化，niuniu.db）
 ```
 
-所有数据存储在 `data/` 目录下，gitignore 排除。游戏模块代码在 `quickquip/games/` 下。
+所有数据存储在 `data/` 目录下，gitignore 排除。游戏模块代码在 `src/quickquip/games/` 下。
 
 ---
 
@@ -39,7 +39,7 @@
 
 ### 游戏总开关
 
-游戏注册在 `quickquip/app/message_pipeline.py` 中。要禁用某个游戏，注释掉对应的 `game_registry.register()` 行：
+游戏注册在 `src/quickquip/app/message_pipeline.py` 中。要禁用某个游戏，注释掉对应的 `game_registry.register()` 行：
 
 ```python
 # 当前注册的游戏

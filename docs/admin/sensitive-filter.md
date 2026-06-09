@@ -6,7 +6,7 @@ QuickQuip 在 LLM 流量入口和出口处都接了一层敏感词过滤，目�
 2. **防止群被炸**：模型生成的违规内容如果被 bot 发到群里，群本身和发言群员（即使是 bot）都可能被处罚
 3. **减少历史污染**：旧消息中的敏感内容如果继续作为 context 注入下次请求，会持续触发问题
 
-过滤器位于 `quickquip/common/sensitive_filter.py`，由词表配置文件 `config/sensitive_words.toml` 驱动。**该词表文件被 gitignored，必须由部署者自行填充。**
+过滤器位于 `src/quickquip/common/sensitive_filter.py`，由词表配置文件 `config/sensitive_words.toml` 驱动。**该词表文件被 gitignored，必须由部署者自行填充。**
 
 ## 工作原理
 
@@ -98,7 +98,7 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 
 ## 接入点
 
-文件：`quickquip/llm/service.py` `_generate_reply_for_scope()` 和 `quickquip/llm/tool_loop.py` `run_tool_call_loop()`
+文件：`src/quickquip/llm/service.py` `_generate_reply_for_scope()` 和 `src/quickquip/llm/tool_loop.py` `run_tool_call_loop()`
 
 | 接入点 | 位置 | 行为 |
 |---|---|---|
@@ -111,8 +111,8 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 **为什么工具结果扫描尤其重要**：搜索/抓取类工具（`search_web`、`fetch`、各类 MCP 工具）从外部源拉取内容，**用户的查询可以引导但我们无法预先审查**。一段富集敏感词的 tool_result 会作为 messages 的一部分进入下一轮 provider 请求，正是触发 DeepSeek `Content Exists Risk` / Aliyun `Content security warning` 的高危场景。
 
 **没有接入的位置**：
-- `daily_summary` / `daily_briefing` 会走独立的模型级联 provider 调用，不经过 `LLMService.generate_reply()` 主链路，因此当前不会复用输入/输出/历史侧过滤器；如需加固，应在 `quickquip/llm/summarize.py` 与 `quickquip/llm/briefing.py` 的请求和响应边界接入同一个 `get_filter()`
-- `wordcloud` 不调用 LLM，只读取群聊消息并渲染词频图片；如需避免敏感词出现在图片中，应在 `quickquip/chat/wordcloud.py` 的分词或渲染前增加扫描/剔除
+- `daily_summary` / `daily_briefing` 会走独立的模型级联 provider 调用，不经过 `LLMService.generate_reply()` 主链路，因此当前不会复用输入/输出/历史侧过滤器；如需加固，应在 `src/quickquip/llm/summarize.py` 与 `src/quickquip/llm/briefing.py` 的请求和响应边界接入同一个 `get_filter()`
+- `wordcloud` 不调用 LLM，只读取群聊消息并渲染词频图片；如需避免敏感词出现在图片中，应在 `src/quickquip/chat/wordcloud.py` 的分词或渲染前增加扫描/剔除
 
 ## 性能
 

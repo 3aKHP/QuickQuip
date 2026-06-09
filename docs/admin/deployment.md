@@ -68,7 +68,7 @@ cp -r prod.example prod
 一并用于容器运行。
 若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
 
-根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 只承载部署脚本、compose 编排、巡检脚本和运维通知密钥，不再提供应用层 `.env` 覆盖。
+根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 只承载部署脚本、compose 编排、巡检脚本和运维通知密钥。
 
 ### 4. 启动服务
 
@@ -191,16 +191,28 @@ WEB_ADMIN_COOKIE_SECURE=auto
 > 注意：`quickquip` 容器的 `config` 和 `llm_about` 挂载仍可保持只读（`:ro`），只有 `web-admin` 需要写权限。
 > `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
 
-### web-admin 代码更新
+### 代码更新
 
-`quickquip/` 下的 Python 代码是**打进镜像**的，不是 bind mount。因此：
+项目采用 **hybrid 混合模式**部署：
 
-- 改了 `quickquip/app/web/` 或其他 Python 代码后，**必须重建镜像**，`docker restart` 不够：
+- **镜像构建时** `pip install --no-deps .` 将 `src/` 下的 `quickquip` 和 `plugins` 安装至 site-packages，作为 baked fallback。
+- **运行时** docker-compose 将 `../src` 挂载到 `/app/src` 并通过 `PYTHONPATH=/app/src` 使其优先于 site-packages，实现**源码热更新**。
+
+因此：
+
+- 改了 `src/quickquip/` 或 `src/plugins/` 下的 Python 代码后，**重启容器即可生效**，无需重建镜像：
 
   ```bash
   cd /path/to/QuickQuip/prod
-  docker compose --env-file ../.env build web-admin
-  docker compose --env-file ../.env up -d web-admin
+  docker compose --env-file ../.env restart quickquip web-admin
+  ```
+
+- 改动了 `pyproject.toml`、`requirements.txt`、`Dockerfile` 或 `src/` 下新增/删除了文件时，**需重建镜像**：
+
+  ```bash
+  cd /path/to/QuickQuip/prod
+  docker compose --env-file ../.env build quickquip web-admin
+  docker compose --env-file ../.env up -d quickquip web-admin
   ```
 
 - 只改了 `frontend/dist`（前端静态文件）时，`docker restart quickquip-web-admin` 即可，无需重建。
@@ -208,15 +220,17 @@ WEB_ADMIN_COOKIE_SECURE=auto
 ## 日常维护
 
 ```bash
-# 更新代码后重新构建
+# 更新 Python 源码后重启（hybrid 模式下无需重建）
 cd /path/to/QuickQuip/prod
-docker compose --env-file ../.env up -d --build
+docker compose --env-file ../.env restart quickquip web-admin
+
+# 更新依赖/Dockerfile/pyproject 后重建
+cd /path/to/QuickQuip/prod
+docker compose --env-file ../.env build quickquip web-admin
+docker compose --env-file ../.env up -d quickquip web-admin
 
 # 查看日志
 docker compose --env-file ../.env logs -f
-
-# 重启
-docker compose --env-file ../.env restart
 
 # 停止
 docker compose --env-file ../.env down

@@ -7,7 +7,7 @@
 ## 目录结构
 
 ```
-quickquip/games/
+src/quickquip/games/
 ├── __init__.py           ← 统一 re-export
 ├── registry.py           ← GameRegistry / BaseGame / GameResult
 ├── scores.py             ← GameScores（JSON 持久化）
@@ -62,7 +62,7 @@ class MyGame(BaseGame):
         ...
 ```
 
-**注册**：在 `message_pipeline.py` 中注册并注入依赖：
+**注册**：在 `src/quickquip/app/message_pipeline.py` 中注册并注入依赖：
 
 ```python
 game_registry.register(MyGame(economy=game_economy))
@@ -84,7 +84,7 @@ class GameResult:
 
 ### 持久 RPG 系统：独立 Store
 
-适用于用户数据跨游戏 session 持久化的场景（如牛牛大作战）。不走 GameRegistry，直接在 `message_pipeline.py` 中初始化单例，在 `commands.py` 中注册独立命令。
+适用于用户数据跨游戏 session 持久化的场景（如牛牛大作战）。不走 GameRegistry，直接在 `src/quickquip/app/message_pipeline.py` 中初始化单例，在 `src/quickquip/adapters/nonebot/commands.py` 或对应 `command_parts/` 中注册独立命令。
 
 ```python
 class MyRPGStore:
@@ -102,7 +102,7 @@ class MyRPGStore:
 
 ## 配置系统
 
-所有游戏参数集中在 `config/games.toml` 中。`quickquip/games/config.py` 提供配置 dataclass 和加载器。
+所有游戏参数集中在 `config/games.toml` 中。`src/quickquip/games/config.py` 提供配置 dataclass 和加载器。
 
 ### 配置 dataclass 层次
 
@@ -149,7 +149,7 @@ def __init__(self, config: MyGameConfig | None = None, ...):
     self._config = config or MyGameConfig()
 ```
 
-5. 在 `message_pipeline.py` 注入：
+5. 在 `src/quickquip/app/message_pipeline.py` 注入：
 ```python
 game_registry.register(MyGame(config=games_config.my_game))
 ```
@@ -205,18 +205,18 @@ class GameEconomyStore:
 
 ### Session 型游戏
 
-1. 在 `quickquip/games/` 下创建 `my_game.py`
+1. 在 `src/quickquip/games/` 下创建 `my_game.py`
 2. 继承 `BaseGame`，实现全部方法
 3. 如需金币：构造函数接收 `economy: GameEconomyStore | None`
 4. 在 `__init__.py` 中导出
-5. 在 `message_pipeline.py` 中注册
+5. 在 `src/quickquip/app/message_pipeline.py` 中注册
 6. 在 `docs/user/group-games.md` 添加玩法说明
 
 ### RPG 系统
 
-1. 在 `quickquip/games/` 下创建 store + 逻辑文件
-2. 在 `message_pipeline.py` 初始化单例
-3. 在 `commands.py` 中注册独立命令
+1. 在 `src/quickquip/games/` 下创建 store + 逻辑文件
+2. 在 `src/quickquip/app/message_pipeline.py` 初始化单例
+3. 在 `src/quickquip/adapters/nonebot/commands.py` 或对应 `command_parts/` 中注册独立命令
 4. 在 `docs/user/group-games.md` 添加玩法说明
 
 ---
@@ -270,5 +270,5 @@ def _set_cd(cd_map, uid: str, seconds: float):
 
 - Session 型游戏通过 `/game start`、`/game stop`、`/game score` 统一入口
 - 游戏内消息（如"拿牌"、"开枪"）由 `GameRegistry.process()` 统一分发
-- RPG 系统在 `commands.py` 中用 `on_command()` 独立注册
+- RPG 系统在 `src/quickquip/adapters/nonebot/commands.py` 或对应 `command_parts/` 中用 `on_command()` 独立注册
 - 命令别名用 `aliases=` 参数（如 `aliases={"签到"}`），不用重复注册

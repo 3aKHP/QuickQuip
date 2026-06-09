@@ -20,12 +20,12 @@ QuickQuip 支持 OpenAI / Claude / Gemini 三类 provider，因此工具发现�
 
 | 文件 | 责任 |
 |------|------|
-| `quickquip/llm/tools.py` | 定义 `ToolManifestEntry` |
-| `quickquip/llm/tool_registry.py` | 保存真实工具 spec/handler，生成 manifest，执行搜索 |
-| `quickquip/llm/service.py` | 注册 `tool_search` / `tool_list`，决定启用工具列表和常驻工具列表 |
-| `quickquip/llm/tool_loop.py` | 在工具调用循环中动态加载搜索命中或精确加载的工具 |
-| `quickquip/llm/prompting.py` | discovery 模式下生成工具发现提示 |
-| `quickquip/llm/config.py` | 读取 `[tools]` 下的 discovery 配置 |
+| `src/quickquip/llm/tools.py` | 定义 `ToolManifestEntry` |
+| `src/quickquip/llm/tool_registry.py` | 保存真实工具 spec/handler，生成 manifest，执行搜索 |
+| `src/quickquip/llm/service.py` | 注册 `tool_search` / `tool_list`，决定启用工具列表和常驻工具列表 |
+| `src/quickquip/llm/tool_loop.py` | 在工具调用循环中动态加载搜索命中或精确加载的工具 |
+| `src/quickquip/llm/prompting.py` | discovery 模式下生成工具发现提示 |
+| `src/quickquip/llm/config.py` | 读取 `[tools]` 下的 discovery 配置 |
 
 ---
 

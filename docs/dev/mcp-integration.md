@@ -78,8 +78,8 @@ GHCR 分发镜像和生产模板镜像已内置 Docker CLI，以便需要时启�
 
 建议未来按三层来接 MCP：
 
-1. `quickquip/app/message_pipeline.py` / `quickquip/llm/tool_registry.py`
-2. `quickquip/llm/mcp.py`
+1. `src/quickquip/app/message_pipeline.py` / `src/quickquip/llm/tool_registry.py`
+2. `src/quickquip/llm/mcp.py`
 3. `config/llm.toml` 内的 `[[mcp.servers]]` 定义
 
 这样可以保持：

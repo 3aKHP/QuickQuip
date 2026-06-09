@@ -31,61 +31,61 @@ LLM 运行时的请求/响应 trace 会在 `LLM_TRACE_FLAG_FILE` 触发时同步
 
 LLM 相关核心文件如下：
 
-- `quickquip/adapters/nonebot/commands.py`
+- `src/quickquip/adapters/nonebot/commands.py`
   - 负责 `/llm`、`/search` 等命令注册
-- `quickquip/adapters/nonebot/group_messages.py`
+- `src/quickquip/adapters/nonebot/group_messages.py`
   - 负责 NoneBot 群消息入口，并把消息交给应用层管线
-- `quickquip/adapters/nonebot/daily_summary_plugin.py`
+- `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结的定时任务注册与 `/summary` 命令
-- `quickquip/llm/service.py`
+- `src/quickquip/llm/service.py`
   - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export
-- `quickquip/llm/prompting.py`
+- `src/quickquip/llm/prompting.py`
   - 负责 system prompt 组装、场景块构建、统一发言者格式渲染与 messages 数组拼装
-- `quickquip/llm/summarize.py`
+- `src/quickquip/llm/summarize.py`
   - 每日总结生成逻辑（模型级联、prompt 构建）
-- `quickquip/llm/briefing.py`
+- `src/quickquip/llm/briefing.py`
   - 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联）
-- `quickquip/llm/defectify.py`
+- `src/quickquip/llm/defectify.py`
   - `/defectify` 故障机器人转写逻辑
-- `quickquip/app/message_pipeline.py`
+- `src/quickquip/app/message_pipeline.py`
   - 负责群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装
-- `quickquip/llm/config.py`
+- `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
-- `quickquip/llm/provider.py`
+- `src/quickquip/llm/provider.py`
   - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射
-- `quickquip/llm/tool_loop.py`
+- `src/quickquip/llm/tool_loop.py`
   - 负责统一工具声明、工具调用循环、工具结果和会话消息结构
-- `quickquip/llm/tool_registry.py`
+- `src/quickquip/llm/tool_registry.py`
   - 负责工具白名单注册、参数校验和执行调度
-- `quickquip/llm/store.py`
+- `src/quickquip/llm/store.py`
   - 负责 SQLite 持久化
-- `quickquip/llm/vocab.py`
+- `src/quickquip/llm/vocab.py`
   - 负责从 `llm_about/vocab.yaml` 读取群别名与黑话词表，并按需注入
-- `quickquip/llm/identity.py`
+- `src/quickquip/llm/identity.py`
   - 负责从 `llm_about/identities.yaml` 读取 QQ 号到标准身份的映射
-- `quickquip/llm/rendering.py`
+- `src/quickquip/llm/rendering.py`
   - 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特
-- `quickquip/llm/message_segments.py`
+- `src/quickquip/llm/message_segments.py`
   - 负责消息段叶子节点渲染、bot 身份集合归一化等共享小逻辑
-- `quickquip/llm/health.py`
+- `src/quickquip/llm/health.py`
   - LLM 健康检查模块（配置、provider 探活、知识文件、工具、MCP 等 10 项检查）
-- `quickquip/llm/image_preprocessor.py`
+- `src/quickquip/llm/image_preprocessor.py`
   - 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点
-- `quickquip/adapters/nonebot/voice.py`
+- `src/quickquip/adapters/nonebot/voice.py`
   - 负责 OneBot V11 `record` 语音段提取、转码与 ASR 转写注入
-- `quickquip/generation/asr.py`
+- `src/quickquip/generation/asr.py`
   - 负责 ASR provider 调用，当前支持 OpenAI-compatible `/audio/transcriptions`
-- `quickquip/common/recent_message_buffer.py`
+- `src/quickquip/common/recent_message_buffer.py`
   - 负责"触发前最近群消息"内存缓冲
-- `quickquip/llm/inputs.py`
+- `src/quickquip/llm/inputs.py`
   - 负责从消息段中提取文本触发、艾特触发和图片 URL
-- `quickquip/search/web_search.py`
+- `src/quickquip/search/web_search.py`
   - 负责项目内 SearXNG 搜索客户端，供 `/search` 与 `search_web` 工具使用
 
 兼容层说明：
 
-- `plugins/` 目录仍然保留，但当前主要作为兼容导出层与 NoneBot 插件加载入口
-- 新增逻辑优先放在 `quickquip/` 下，`plugins/` 只负责转发旧导入路径
+- `src/plugins/` 目录是 NoneBot2 插件入口，由 `bot.py` 通过 `nonebot.load_plugins(*plugins.__path__)` 加载已安装包路径
+- 新增逻辑优先放在 `src/quickquip/` 下（包路径 `quickquip.*`），`src/plugins/` 只负责 re-export
 
 持久化文件：
 
@@ -150,7 +150,7 @@ LLM 默认只在以下场景触发：
 
 ### 3.1 唤醒模块
 
-唤醒模块位于 `quickquip/chat/awakening.py`，命令入口位于 `quickquip/adapters/nonebot/awakening_plugin.py`，配置文件为 `config/awakening.toml`。
+唤醒模块位于 `src/quickquip/chat/awakening.py`，命令入口位于 `src/quickquip/adapters/nonebot/awakening_plugin.py`，配置文件为 `config/awakening.toml`。
 
 | 规则名 | 触发方式 |
 |------|----------|
@@ -521,7 +521,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `llm_about` 应在运行环境中提供
   - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
 - `data/` 需要持久化
-- 镜像构建时需要同时打包 `plugins/` 与 `quickquip/`
+- 镜像构建时通过 `COPY src/` + `pip install --no-deps .` 安装项目包
 - API key 通过环境变量注入
 - 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
 

@@ -4,7 +4,7 @@
 >
 > **前置要求：** 了解基本的 Python 语法（字符串、函数调用）。
 >
-> **源码指引：** 本文引用的源码路径以 `quickquip/` 下的主实现为准。`plugins/` 目录是 NoneBot2 插件入口层，只做 re-export，不包含业务逻辑。例如 `quickquip/chat/config.py` 实际源码在 `quickquip/chat/config.py`，`quickquip/chat/text_rules.py` 实际源码在 `quickquip/chat/text_rules.py`。
+> **源码指引：** 本文引用的源码路径以 `src/quickquip/` 下的主实现为准。`src/plugins/` 目录是 NoneBot2 插件入口层，只做 re-export，不包含业务逻辑。例如文字规则配置位于 `src/quickquip/chat/config.py`，模板渲染实现位于 `src/quickquip/chat/text_rules.py`。
 
 ---
 
@@ -123,7 +123,7 @@ r"怀真"      # 匹配文本中出现的"怀真"二字
 QuickQuip 中大量"梗触发"使用的就是这种简单匹配：
 
 ```python
-# quickquip/chat/config.py 中的 divine_arrival 规则
+# src/quickquip/chat/config.py 中的 divine_arrival 规则
 {"patterns": [r"神临", r"降临"], ...}
 
 # master_protection 规则
@@ -208,7 +208,7 @@ r"[！!。，,？?]*"  # 匹配零个或多个中英文标点
 
 ### 4.1 纯文字匹配——`divine_arrival` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 59-64 行
+**源码位置：** `src/quickquip/chat/config.py` 第 59-64 行
 
 ```python
 {
@@ -237,7 +237,7 @@ r"[！!。，,？?]*"  # 匹配零个或多个中英文标点
 
 ### 4.2 锚点 + 捕获组——`like_reply` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 87-92 行
+**源码位置：** `src/quickquip/chat/config.py` 第 87-92 行
 
 ```python
 {
@@ -282,7 +282,7 @@ print(m.group(1))  # "打游戏"（第一个捕获组）
 
 ### 4.3 非贪婪匹配 + 命名捕获组——`play_target` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 66-71 行
+**源码位置：** `src/quickquip/chat/config.py` 第 66-71 行
 
 ```python
 {
@@ -324,7 +324,7 @@ print(m.groupdict())         # {"target": "原神"}
 
 ### 4.4 反向引用——`double_char_ni_de` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 73-78 行
+**源码位置：** `src/quickquip/chat/config.py` 第 73-78 行
 
 ```python
 {
@@ -368,7 +368,7 @@ re.search(r"^([\u4e00-\u9fa5])(\1)你的$", "牛马你的")
 
 ### 4.5 字符范围 + 量词——`sandwich_de` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 80-85 行
+**源码位置：** `src/quickquip/chat/config.py` 第 80-85 行
 
 ```python
 {
@@ -412,7 +412,7 @@ print(m.group(2))  # "红茶"
 
 ### 4.6 可选分组 + 多捕获——`kpl_final` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 123-128 行
+**源码位置：** `src/quickquip/chat/config.py` 第 123-128 行
 
 ```python
 {
@@ -469,7 +469,7 @@ print(m.group(2))  # "红茶"
 
 ### 4.7 命名捕获组 + 黑名单过滤——`i_do` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 130-136 行
+**源码位置：** `src/quickquip/chat/config.py` 第 130-136 行
 
 ```python
 {
@@ -514,7 +514,7 @@ I_DO_BLOCKED_VERBS = {"不会", "不能", "不要", "喜欢", "知道", "觉得"
 
 ### 4.8 `fullmatch` + 接龙状态机——`good_girl_chain`
 
-**源码位置：** `quickquip/chat/good_girl_chain.py` 第 8 行
+**源码位置：** `src/quickquip/chat/good_girl_chain.py` 第 8 行
 
 ```python
 GOOD_GIRL_START_PATTERN = re.compile(r"^(.+?)是好(.+?)吗[？?]*$")
@@ -549,7 +549,7 @@ lead_char = start_match.group(1)[0]  # "小"（取第一个字）
 
 ### 4.9 启动模式匹配——`genshin_start` 规则
 
-**源码位置：** `quickquip/chat/config.py` 第 102-107 行
+**源码位置：** `src/quickquip/chat/config.py` 第 102-107 行
 
 ```python
 {
@@ -590,7 +590,7 @@ lead_char = start_match.group(1)[0]  # "小"（取第一个字）
 
 QuickQuip 的回复模板中使用 `$1`、`$2` 作为占位符，而 Python 的 `str.format()` 使用 `{}`。项目通过 `re.sub()` 巧妙地桥接了两者。
 
-**源码位置：** `quickquip/chat/text_rules.py` 第 18-26 行
+**源码位置：** `src/quickquip/chat/text_rules.py` 第 18-26 行
 
 ```python
 def replace_regex_groups(template: str, match: re.Match) -> str:
@@ -628,7 +628,7 @@ template = "还在$1"
 
 ### 5.2 `match.groupdict()` 与动态上下文
 
-**源码位置：** `quickquip/chat/text_rules.py` 第 67 行
+**源码位置：** `src/quickquip/chat/text_rules.py` 第 67 行
 
 ```python
 context = {**base_context, **match.groupdict()}
@@ -660,13 +660,13 @@ context = {**base_context, **regex_context}
 | **内联** | `re.search(pattern, text)` | 配置驱动，模式来自配置字典 |
 | **预编译** | `PATTERN = re.compile(r"...")` | 固定模式，高频调用 |
 
-`quickquip/chat/good_girl_chain.py` 中的接龙触发模式使用预编译：
+`src/quickquip/chat/good_girl_chain.py` 中的接龙触发模式使用预编译：
 
 ```python
 GOOD_GIRL_START_PATTERN = re.compile(r"^(.+?)是好(.+?)吗[？?]*$")
 ```
 
-而 `quickquip/chat/text_rules.py` 中遍历配置列表时使用内联：
+而 `src/quickquip/chat/text_rules.py` 中遍历配置列表时使用内联：
 
 ```python
 for rule in TEXT_REPLY_RULES:
@@ -682,7 +682,7 @@ for rule in TEXT_REPLY_RULES:
 
 下表列出了 QuickQuip 项目中所有正则表达式的位置、模式和用途：
 
-### 6.1 文字彩蛋规则（`quickquip/chat/config.py` → `TEXT_REPLY_RULES`）
+### 6.1 文字彩蛋规则（`src/quickquip/chat/config.py` → `TEXT_REPLY_RULES`）
 
 | # | 规则名 | 正则表达式 | 用途 | 关键技术 |
 |---|--------|-----------|------|---------|
@@ -698,13 +698,13 @@ for rule in TEXT_REPLY_RULES:
 | 10 | `kpl_final` | `r"^(.+?)尽力[，,]\s*(.+?)犯罪[，,]\s*(.+?)(?:的)?(.{2})不团队$"` | 复杂多捕获组 | 非捕获组、多组 |
 | 11 | `i_do` | `r"^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$"` | "我XX"格式 | 命名捕获组、黑名单 |
 
-### 6.2 接龙触发（`quickquip/chat/good_girl_chain.py`）
+### 6.2 接龙触发（`src/quickquip/chat/good_girl_chain.py`）
 
 | 正则表达式 | 用途 | 关键技术 |
 |-----------|------|---------|
 | `r"^(.+?)是好(.+?)吗[？?]*$"` | 启动接龙会话 | 预编译、fullmatch |
 
-### 6.3 模板引擎（`quickquip/chat/text_rules.py`）
+### 6.3 模板引擎（`src/quickquip/chat/text_rules.py`）
 
 | 正则表达式 | 用途 | 关键技术 |
 |-----------|------|---------|
@@ -906,7 +906,7 @@ r"^([\u4e00-\u9fa5])\1\1$"
 
 ### 练习 5：理解执行流程（难度 ★★★★★）
 
-阅读下面的代码（来自 `quickquip/chat/text_rules.py`），回答问题：
+阅读下面的代码（来自 `src/quickquip/chat/text_rules.py`），回答问题：
 
 ```python
 def match_text_rule(text, user_id, sender_name, now=None):

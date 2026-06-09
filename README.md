@@ -55,6 +55,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    python -m venv .venv
    # Windows: .venv\Scripts\activate  |  Linux/macOS: source .venv/bin/activate
    pip install -r requirements.txt
+   pip install -e .     # 可编辑安装（src layout 必须）
    ```
 
 3. **配置环境变量**
@@ -154,29 +155,26 @@ pytest -n auto
 ## 架构
 
 ```
-bot.py
-  │
-  ▼
-plugins/                    ← NoneBot2 插件入口（re-export 薄层）
-  │
-  ▼
-quickquip/adapters/nonebot/ ← 生命周期、消息入口、命令注册
-  │
-  ▼
-quickquip/app/              ← 应用级消息管线与共享状态装配
-  │
-  ├─ quickquip/chat/        ← 规则回复（复读、接龙、彩蛋、节日、时区、统计）
-  ├─ quickquip/games/       ← 游戏模块（registry、scores、economy、各游戏实现）
-  ├─ quickquip/llm/         ← LLM 运行时（provider、MCP、工具调用、记忆）
-  ├─ quickquip/generation/  ← 多模态产出（图片、语音、音乐）
-  ├─ quickquip/tieba/       ← 贴吧爬虫与帖子池
-  ├─ quickquip/search/      ← 联网搜索后端
-  └─ quickquip/common/      ← 限流、去重、持久化、消息缓冲
+src/
+├── quickquip/
+│   ├── adapters/nonebot/ ← 生命周期、消息入口、命令注册
+│   ├── app/              ← 应用级消息管线与共享状态装配
+│   │   └── web/          ← Web 管理后台 FastAPI + Vue 3 SPA
+│   ├── chat/             ← 规则回复（复读、接龙、彩蛋、节日、时区、统计）
+│   ├── games/            ← 游戏模块（registry、scores、economy、各游戏实现）
+│   ├── llm/              ← LLM 运行时（provider、MCP、工具调用、记忆）
+│   ├── generation/       ← 多模态产出（图片、语音、音乐）
+│   ├── tieba/            ← 贴吧爬虫与帖子池
+│   ├── search/           ← 联网搜索后端
+│   └── common/           ← 限流、去重、持久化、消息缓冲
+└── plugins/              ← NoneBot2 插件入口（re-export 薄层）
 ```
+
+消息流：`bot.py` → `plugins`（NoneBot2 发现）→ `adapters/nonebot`（matcher 分发）→ `app`（管线装配）→ `chat` / `games` / `llm` 等子系统。
 
 回复优先级从高到低：**复读 > 接龙/游戏 > 彩蛋规则 > 语境规则 > 时区猜测**。每个环节受群级规则开关和滑动窗口限流保护。
 
-目录约定：`quickquip/` 承载全部实现；`plugins/` 是 NoneBot2 插件发现入口，只做 re-export；`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。游戏参数集中在 `config/games.toml`。
+目录约定：源码位于 `src/`（src layout），包路径 `quickquip.*` 不变；`src/plugins/` 是 NoneBot2 插件发现入口，只做 re-export；开发时需 `pip install -e .`（可编辑安装）。`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。游戏参数集中在 `config/games.toml`。
 
 详细结构见 [docs/dev/architecture.md](docs/dev/architecture.md)。
 

@@ -19,7 +19,7 @@
 
 | 模式 | 入口 | 环境变量来源 |
 |---|---|---|
-| 本地直接运行 | `python bot.py` | 根目录 `.env` |
+| 本地直接运行 | `pip install -e .` 后 `python bot.py` | 根目录 `.env` |
 | 容器化部署 | `prod/` 私有部署编排 | 根目录 `.env` |
 
 ---
@@ -28,9 +28,9 @@
 
 QuickQuip 代码组织为三层结构：
 
-1. **`quickquip/chat|common|llm|tieba|search|generation`** — 框架无关的业务逻辑
-2. **`quickquip/adapters/nonebot/`** — NoneBot2 适配层（所有 matcher / command 注册在此）
-3. **`plugins/`** — NoneBot2 插件发现入口，只做 re-export，不含业务逻辑
+1. **`src/quickquip/chat|common|llm|tieba|search|generation`** — 框架无关的业务逻辑
+2. **`src/quickquip/adapters/nonebot/`** — NoneBot2 适配层（所有 matcher / command 注册在此）
+3. **`src/plugins/`** — NoneBot2 插件发现入口，只做 re-export，不含业务逻辑
 
 消息流顺序：
 
@@ -63,6 +63,9 @@ QuickQuip/
 ├── requirements.txt        # pip 安装用依赖列表
 ├── .env.example            # 本地部署环境变量模板
 ├── .env                    # 本地部署真实值（gitignore）
+├── src/                    # Python 源码（src layout）
+│   ├── quickquip/          # 业务逻辑包
+│   └── plugins/            # NoneBot2 插件入口薄层
 ├── frontend/               # Web 管理后台前端（Vue 3 SPA）
 │   ├── src/                # 源码
 │   └── dist/               # 构建产物（gitignore）
@@ -79,10 +82,12 @@ QuickQuip/
 
 ---
 
-## `quickquip/` — 业务逻辑包（分发层）
+## `src/quickquip/` — 业务逻辑包
+
+项目采用 src layout，所有源码位于 `src/` 下。包导入路径 `quickquip.*` 保持不变。
 
 ```
-quickquip/
+src/quickquip/
 ├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集、节日检测）
 ├── common/                  # 通用工具（限流、持久化、消息去重、最近消息缓冲）
 ├── games/                   # 游戏模块（registry、scores、economy、config、各游戏实现）
@@ -97,13 +102,15 @@ quickquip/
     │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、定时任务、审计、金币经济、牛牛大作战）
 ```
 
-**规则**：业务逻辑只进 `quickquip/`，不进 `plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
+**规则**：业务逻辑只进 `src/quickquip/`（包路径 `quickquip.*`），不进 `src/plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
 
 ---
 
-## `plugins/` — NoneBot2 插件入口层（分发层）
+## `src/plugins/` — NoneBot2 插件入口层
 
-每个文件都是薄层 re-export，把 `quickquip.*` 里的对象暴露给 NoneBot2 插件发现机制。不含任何业务逻辑。
+源码位于 `src/plugins/`。每个文件都是薄层 re-export，把 `quickquip.*` 里的对象暴露给 NoneBot2 插件发现机制。不含任何业务逻辑。
+
+`bot.py` 通过 `nonebot.load_plugins(*plugins.__path__)` 加载已安装的 `plugins` 包路径。
 
 ---
 
@@ -175,7 +182,7 @@ docs/
 │   ├── sensitive-filter.md
 │   ├── tool-discovery.md
 │   └── web-admin.md
-└── docs/dev/...            # 开发者文档
+└── dev/                    # 面向开发者
 ```
 
 ---
@@ -188,13 +195,13 @@ docs/
 
 - `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
 - `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、LLBot 登录态目录和运维通知密钥。
-- 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档，不承担生产服务器角色。
+- 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档，不承担生产环境变量覆盖职责。
 
 ### 私有环境变量与根 `.env` 的关系
 
 - **根 `.env`**：QuickQuip 应用唯一的涉密环境变量来源，供本地运行与 `prod/` 容器部署共同读取，必须保持 gitignore。
 - **`prod/sendkey.env`**：可选运维通知密钥，仅由巡检脚本读取，不被 QuickQuip 应用加载。
-- 本地私有工作区不再作为应用配置来源，不承担生产环境变量覆盖职责。
+- 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档。
 
 ### `llm_about` 部署路径
 

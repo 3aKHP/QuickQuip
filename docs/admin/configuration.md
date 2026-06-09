@@ -557,7 +557,7 @@ server:
 
 ## 限流窗口
 
-基础参数在 `quickquip/chat/config.py` 中（为代码默认值，`chat_rules.toml` 可覆盖）：
+基础参数在 `src/quickquip/chat/config.py` 中（为代码默认值，`chat_rules.toml` 可覆盖）：
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|

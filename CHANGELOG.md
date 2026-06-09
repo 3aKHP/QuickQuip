@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-09
+
 ### 变更
 
 - 代码库迁移至 src layout 并成为可安装包（`pip install`），消除“工作目录恰好可导入”的隐式依赖；生产部署改为镜像内安装 + 源码挂载热更新的混合模式，开发与发布路径更清晰。
@@ -469,7 +471,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...v1.8.0
 [1.7.10]: https://github.com/3aKHP/QuickQuip/compare/v1.7.1...v1.7.10
 [1.7.1]: https://github.com/3aKHP/QuickQuip/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/3aKHP/QuickQuip/compare/v1.6.1...v1.7.0
