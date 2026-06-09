@@ -2,6 +2,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 from loguru import logger
 
+import plugins
 from quickquip.common.env import load_root_env_file
 
 logger.add(
@@ -17,7 +18,7 @@ nonebot.init()
 driver = nonebot.get_driver()
 driver.register_adapter(OneBotV11Adapter)
 
-nonebot.load_plugins("plugins")
+nonebot.load_plugins(*plugins.__path__)
 
 if __name__ == "__main__":
     nonebot.run()

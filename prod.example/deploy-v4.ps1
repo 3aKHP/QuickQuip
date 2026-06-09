@@ -102,7 +102,7 @@ Push-Location $ProjectRoot
 Initialize-NodeToolchainPath
 $NpmCommand = Get-NpmCommand
 
-foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
+foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
     if (-not (Test-Path $requiredPath)) {
         Write-Host "Missing required file: $requiredPath" -ForegroundColor Red
         Pop-Location
@@ -124,7 +124,7 @@ Invoke-Native "tar archive" {
         --exclude='__pycache__' `
         --exclude='.venv' `
         --exclude='.vscode' `
-        --exclude='data' `
+        --exclude='./data' `
         --exclude="$LocalPrivateWorkspace" `
         --exclude='prod/sendkey.env' `
         --exclude='prod/sendkey.env.example' `
@@ -132,9 +132,9 @@ Invoke-Native "tar archive" {
         --exclude='prod/llbot-qq' `
         --exclude='prod/llbot-data' `
         --exclude='frontend/node_modules' `
-        --exclude='tests' `
+        --exclude='./tests' `
         --exclude='test_*.py' `
-        --exclude='scripts' `
+        --exclude='./scripts' `
         --exclude='requirements-dev.txt' `
         --exclude='.pytest-tmp-*' `
         --exclude='*.tar' `

@@ -71,8 +71,8 @@ jobs:
 
       - name: Copy project files
         run: |
-          Copy-Item -Recurse quickquip staging\
-          Copy-Item -Recurse plugins staging\
+          Copy-Item -Recurse src\quickquip staging\
+          Copy-Item -Recurse src\plugins staging\
           Copy-Item -Recurse llm_about staging\
           New-Item -ItemType Directory -Force staging\frontend\dist | Out-Null
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
@@ -90,7 +90,7 @@ jobs:
           staging\python\python.exe -c "import webview; print('pywebview ok')"
           Push-Location staging
           try {
-            .\python\python.exe -c "import quickquip, web_api; print('app import ok')"
+            .\python\python.exe -c "import quickquip, plugins, web_api; print('app import ok')"
             .\python\python.exe -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True); browser.close(); p.stop(); print('playwright chromium ok')"
             Copy-Item .env.example .env -Force
             $env:WEB_ADMIN_PASSWORD = "smoke"
@@ -192,7 +192,7 @@ jobs:
 
       - name: Smoke test Docker image
         run: |
-          docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py quickquip plugins'
+          docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -c "import quickquip, plugins, web_api"'
           docker run --rm --shm-size=1g quickquip:smoke python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--no-sandbox']); browser.close(); p.stop()"
 
       - name: Build and push
