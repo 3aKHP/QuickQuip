@@ -1,7 +1,5 @@
-"""ProviderConfig proxy field: opener creation and _urlopen dispatch."""
+"""ProviderConfig proxy field: httpx client kwargs construction."""
 from __future__ import annotations
-
-from urllib import request
 
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import BaseProviderClient
@@ -20,37 +18,35 @@ def _make_config(**overrides) -> ProviderConfig:
     return ProviderConfig(**defaults)
 
 
-def test_no_proxy_opener_is_none():
+def test_no_proxy_keeps_proxy_none():
     client = BaseProviderClient(_make_config(proxy=""))
-    assert client._opener is None
+    assert client._proxy is None
 
 
-def test_proxy_creates_opener():
+def test_proxy_stored_for_httpx():
     client = BaseProviderClient(_make_config(proxy="http://127.0.0.1:7890"))
-    assert client._opener is not None
-    assert isinstance(client._opener, request.OpenerDirector)
+    assert client._proxy == "http://127.0.0.1:7890"
 
 
-def test_proxy_opener_has_proxy_handler():
+def test_client_kwargs_no_proxy():
+    client = BaseProviderClient(_make_config(proxy="", timeout_seconds=30.0))
+    kwargs = client._client_kwargs()
+    assert "proxy" not in kwargs
+    assert kwargs["timeout"] == 30.0
+
+
+def test_client_kwargs_with_proxy():
     client = BaseProviderClient(_make_config(proxy="http://proxy.local:8080"))
-    handlers = [h for h in client._opener.handlers if isinstance(h, request.ProxyHandler)]
-    assert len(handlers) == 1
-    assert handlers[0].proxies == {"http": "http://proxy.local:8080", "https": "http://proxy.local:8080"}
+    kwargs = client._client_kwargs()
+    assert kwargs["proxy"] == "http://proxy.local:8080"
 
 
-def test_urlopen_without_proxy_uses_stdlib(monkeypatch):
-    client = BaseProviderClient(_make_config(proxy=""))
-    calls = []
-    monkeypatch.setattr(request, "urlopen", lambda req, timeout=None: calls.append(("urlopen", timeout)))
-    req = request.Request("http://example.com")
-    client._urlopen(req, timeout=10)
-    assert calls == [("urlopen", 10)]
+def test_client_kwargs_stream_read_disables_read_timeout():
+    import httpx
 
-
-def test_urlopen_with_proxy_uses_opener(monkeypatch):
-    client = BaseProviderClient(_make_config(proxy="http://127.0.0.1:7890"))
-    calls = []
-    client._opener.open = lambda req, timeout=None: calls.append(("opener", timeout))  # type: ignore[assignment]
-    req = request.Request("http://example.com")
-    client._urlopen(req, timeout=15)
-    assert calls == [("opener", 15)]
+    client = BaseProviderClient(_make_config(timeout_seconds=45.0))
+    kwargs = client._client_kwargs(stream_read=True)
+    timeout = kwargs["timeout"]
+    assert isinstance(timeout, httpx.Timeout)
+    # read=None lets SSE long-lived streams survive between chunks
+    assert timeout.read is None

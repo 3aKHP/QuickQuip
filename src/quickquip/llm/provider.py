@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 from collections import deque
 from dataclasses import dataclass, field
@@ -8,11 +7,14 @@ import datetime
 import json
 import logging
 import os
+import platform
 import re
 import time as _time
 from pathlib import Path
 from typing import Any
-from urllib import error, parse, request
+from urllib import parse
+
+import httpx
 
 from quickquip.common.paths import LOGS_DIR
 from quickquip.llm.config import ProviderConfig
@@ -316,18 +318,25 @@ def sanitize_gemini_schema(schema: Any) -> Any:
 class BaseProviderClient:
     def __init__(self, config: ProviderConfig):
         self.config = config
-        proxy = config.proxy
-        if proxy:
-            proxy_handler = request.ProxyHandler({"http": proxy, "https": proxy})
-            self._opener: request.OpenerDirector | None = request.build_opener(proxy_handler)
-            logger.info("provider %s 启用代理：%s", config.id, proxy)
-        else:
-            self._opener = None
+        self._proxy: str | None = config.proxy or None
+        if self._proxy:
+            logger.info("provider %s 启用代理：%s", config.id, self._proxy)
 
-    def _urlopen(self, http_request: request.Request, timeout: float):
-        if self._opener is not None:
-            return self._opener.open(http_request, timeout=timeout)
-        return request.urlopen(http_request, timeout=timeout)
+    def _client_kwargs(self, *, stream_read: bool = False) -> dict[str, Any]:
+        """Build httpx.AsyncClient kwargs honoring proxy and timeout config.
+
+        ``stream_read=True`` disables the read timeout so SSE long-lived
+        streams are not killed mid-response (mirrors the mcp.py pattern).
+        """
+        timeout: httpx.Timeout | float
+        if stream_read:
+            timeout = httpx.Timeout(self.config.timeout_seconds, read=None)
+        else:
+            timeout = self.config.timeout_seconds
+        kwargs: dict[str, Any] = {"timeout": timeout}
+        if self._proxy:
+            kwargs["proxy"] = self._proxy
+        return kwargs
 
     def _get_api_key(self) -> str:
         api_key = os.getenv(self.config.api_key_env, "").strip()
@@ -341,33 +350,32 @@ class BaseProviderClient:
         raise NotImplementedError
 
     async def _download_image(self, image_url: str) -> LLMImageInput:
-        http_request = request.Request(image_url, headers={"User-Agent": "QuickQuip/1.0"})
+        try:
+            async with httpx.AsyncClient(**self._client_kwargs()) as client:
+                response = await client.get(
+                    image_url, headers={"User-Agent": "QuickQuip/1.0"}
+                )
+                response.raise_for_status()
+                media_type = response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                if not media_type.startswith("image/"):
+                    raise LLMProviderError(f"图片 URL 不是受支持的图片类型：{image_url}")
+                raw = response.content
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text
+            raise LLMProviderError(f"图片下载失败：HTTP {exc.response.status_code} {detail[:160]}") from exc
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise LLMProviderError(f"图片下载网络错误：{exc}") from exc
 
-        def _fetch() -> LLMImageInput:
-            try:
-                with self._urlopen(http_request, timeout=self.config.timeout_seconds) as response:
-                    media_type = response.headers.get_content_type() or "image/jpeg"
-                    if not media_type.startswith("image/"):
-                        raise LLMProviderError(f"图片 URL 不是受支持的图片类型：{image_url}")
-                    raw = response.read()
-            except error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                raise LLMProviderError(f"图片下载失败：HTTP {exc.code} {detail[:160]}") from exc
-            except error.URLError as exc:
-                raise LLMProviderError(f"图片下载网络错误：{exc.reason}") from exc
+        if not raw:
+            raise LLMProviderError(f"图片内容为空：{image_url}")
+        if len(raw) > 5 * 1024 * 1024:
+            raise LLMProviderError(f"图片过大，当前限制为 5MB：{image_url}")
 
-            if not raw:
-                raise LLMProviderError(f"图片内容为空：{image_url}")
-            if len(raw) > 5 * 1024 * 1024:
-                raise LLMProviderError(f"图片过大，当前限制为 5MB：{image_url}")
-
-            return LLMImageInput(
-                source_url=image_url,
-                media_type=media_type,
-                data_base64=base64.b64encode(raw).decode("ascii"),
-            )
-
-        return await asyncio.to_thread(_fetch)
+        return LLMImageInput(
+            source_url=image_url,
+            media_type=media_type,
+            data_base64=base64.b64encode(raw).decode("ascii"),
+        )
 
     async def _prepare_image_inputs(self, image_urls: list[str]) -> list[LLMImageInput]:
         if not image_urls:
@@ -410,7 +418,6 @@ class BaseProviderClient:
 
     async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
-        http_request = request.Request(url=url, data=body, headers=headers, method="POST")
         trace = _trace_active()
         if trace:
             _trace_log(
@@ -419,23 +426,21 @@ class BaseProviderClient:
             )
             _record_trace("request", self.config.id, False, json.dumps(payload, ensure_ascii=False, indent=2))
 
-        def _send() -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(**self._client_kwargs()) as client:
+                response = await client.post(url, content=body, headers=headers)
+                response.raise_for_status()
+                raw = response.text
             try:
-                with self._urlopen(http_request, timeout=self.config.timeout_seconds) as response:
-                    raw = response.read().decode("utf-8")
-                    try:
-                        return json.loads(raw)
-                    except json.JSONDecodeError as exc:
-                        raise LLMProviderError(f"响应非 JSON：{raw[:120]}") from exc
-            except error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                raise LLMProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
-            except error.URLError as exc:
-                raise LLMProviderError(f"网络错误：{exc.reason}") from exc
-            except OSError as exc:
-                raise LLMProviderError(f"网络错误：{exc}") from exc
+                result = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise LLMProviderError(f"响应非 JSON：{raw[:120]}") from exc
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text
+            raise LLMProviderError(f"HTTP {exc.response.status_code} {detail[:240]}") from exc
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise LLMProviderError(f"网络错误：{exc}") from exc
 
-        result = await asyncio.to_thread(_send)
         if trace:
             _trace_log(
                 f"<<< RESPONSE [{self.config.id}]\n"
@@ -446,8 +451,7 @@ class BaseProviderClient:
 
     async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
         body = json.dumps(payload).encode("utf-8")
-        headers = {**headers, "Accept": "text/event-stream"}
-        http_request = request.Request(url=url, data=body, headers=headers, method="POST")
+        headers = {**headers, "accept": "text/event-stream"}
         trace = _trace_active()
         if trace:
             _trace_log(
@@ -456,55 +460,52 @@ class BaseProviderClient:
             )
             _record_trace("request", self.config.id, True, json.dumps(payload, ensure_ascii=False, indent=2))
 
-        def _stream() -> list[dict[str, Any]]:
-            try:
-                response = self._urlopen(http_request, timeout=self.config.timeout_seconds)
-            except error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")
-                raise LLMProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
-            except error.URLError as exc:
-                raise LLMProviderError(f"网络错误：{exc.reason}") from exc
+        events: list[dict[str, Any]] = []
+        current_event = ""
+        current_data_lines: list[str] = []
+        try:
+            async with httpx.AsyncClient(**self._client_kwargs(stream_read=True)) as client:
+                async with client.stream("POST", url, content=body, headers=headers) as response:
+                    # Read the error body before raise_for_status so the HTTPStatusError
+                    # handler can access exc.response.text (streamed responses are not
+                    # pre-read; accessing .text on an unread stream raises ResponseNotRead).
+                    if response.status_code >= 400:
+                        await response.aread()
+                    response.raise_for_status()
+                    async for raw_line in response.aiter_lines():
+                        line = raw_line.rstrip("\r")
+                        if line.startswith("event:"):
+                            current_event = line[6:].strip()
+                        elif line.startswith("data:"):
+                            data_str = line[5:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            current_data_lines.append(data_str)
+                        elif line == "":
+                            if current_data_lines:
+                                joined = " ".join(current_data_lines)
+                                try:
+                                    data = json.loads(joined)
+                                    if current_event:
+                                        data["_sse_event"] = current_event
+                                    events.append(data)
+                                except json.JSONDecodeError:
+                                    pass
+                            current_event = ""
+                            current_data_lines = []
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text
+            raise LLMProviderError(f"HTTP {exc.response.status_code} {detail[:240]}") from exc
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise LLMProviderError(f"网络错误：{exc}") from exc
 
-            events: list[dict[str, Any]] = []
-            current_event = ""
-            current_data_lines: list[str] = []
-            try:
-                while True:
-                    raw_line = response.readline()
-                    if not raw_line:
-                        break
-                    line = raw_line.decode("utf-8").rstrip("\r\n")
-                    if line.startswith("event:"):
-                        current_event = line[6:].strip()
-                    elif line.startswith("data:"):
-                        data_str = line[5:].strip()
-                        if data_str == "[DONE]":
-                            break
-                        current_data_lines.append(data_str)
-                    elif line == "":
-                        if current_data_lines:
-                            joined = " ".join(current_data_lines)
-                            try:
-                                data = json.loads(joined)
-                                if current_event:
-                                    data["_sse_event"] = current_event
-                                events.append(data)
-                            except json.JSONDecodeError:
-                                pass
-                        current_event = ""
-                        current_data_lines = []
-            finally:
-                response.close()
-            return events
-
-        result = await asyncio.to_thread(_stream)
         if trace:
             _trace_log(
                 f"<<< RESPONSE (stream) [{self.config.id}]\n"
-                + json.dumps(result, ensure_ascii=False, indent=2)
+                + json.dumps(events, ensure_ascii=False, indent=2)
             )
-            _record_trace("response", self.config.id, True, json.dumps(result, ensure_ascii=False, indent=2))
-        return result
+            _record_trace("response", self.config.id, True, json.dumps(events, ensure_ascii=False, indent=2))
+        return events
 
 
 class OpenAIProviderClient(BaseProviderClient):
@@ -567,8 +568,8 @@ class OpenAIProviderClient(BaseProviderClient):
         url = self.config.base_url.rstrip("/") + "/chat/completions"
         headers = {
             **self.config.headers,
-            "Authorization": f"Bearer {self._get_api_key()}",
-            "Content-Type": "application/json",
+            "authorization": f"Bearer {self._get_api_key()}",
+            "content-type": "application/json",
         }
         messages = [{"role": "system", "content": request.system_prompt}]
         for message in request.messages:
@@ -581,7 +582,7 @@ class OpenAIProviderClient(BaseProviderClient):
             "max_tokens": request.max_output_tokens,
         }
         if self.config.user_agent:
-            headers["User-Agent"] = self.config.user_agent
+            headers["user-agent"] = self.config.user_agent
         if self.config.extra_body:
             payload.update(self.config.extra_body)
         if request.allow_tool_calls and request.tools:
@@ -711,6 +712,51 @@ class OpenAIProviderClient(BaseProviderClient):
         return await self._complete_non_stream(request)
 
 
+# Claude Code wire-format fingerprint defaults.
+# Captured from a real claude-cli 2.1.150 (external, cli) client running on
+# Linux, routed through a capturing proxy. Each value is overridable via
+# ProviderConfig.headers (case-insensitive lookup). Header keys are lowercase
+# to match the undici wire format that httpx preserves on the wire.
+#
+# Note: x-stainless-os is injected dynamically in _build_request_parts because
+# the real client reports the host OS rather than a fixed value.
+_CLAUDE_CODE_FINGERPRINT: dict[str, str] = {
+    "accept": "application/json",
+    # Real claude-cli advertises "gzip, deflate, br, zstd", but httpx can only
+    # auto-decompress gzip/deflate without optional brotli/zstandard deps.
+    # Advertising encodings we cannot decode would corrupt the response body,
+    # so we claim only what httpx can handle. Relays fall back to gzip.
+    "accept-encoding": "gzip, deflate",
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": (
+        "claude-code-20250219,context-1m-2025-08-07,"
+        "interleaved-thinking-2025-05-14,context-management-2025-06-27,"
+        "prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,"
+        "effort-2025-11-24"
+    ),
+    "anthropic-dangerous-direct-browser-access": "true",
+    "x-app": "cli",
+    "x-stainless-arch": "x64",
+    "x-stainless-lang": "js",
+    "x-stainless-package-version": "0.94.0",
+    "x-stainless-retry-count": "0",
+    "x-stainless-runtime": "node",
+    "x-stainless-runtime-version": "v24.3.0",
+    "x-stainless-timeout": "600",
+}
+_CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.150 (external, cli)"
+
+
+def _detect_stainless_os() -> str:
+    """Map the host OS to the value claude-cli's Stainless SDK reports."""
+    system = platform.system()
+    if system == "Windows":
+        return "Windows"
+    if system == "Darwin":
+        return "MacOS"
+    return system or "Linux"
+
+
 class ClaudeProviderClient(BaseProviderClient):
     async def _serialize_user_message(self, message: LLMConversationMessage) -> dict[str, Any]:
         image_inputs = await self._prepare_image_inputs(message.image_urls)
@@ -789,20 +835,40 @@ class ClaudeProviderClient(BaseProviderClient):
         return serialized
 
     async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
-        url = self.config.base_url.rstrip("/") + "/messages"
+        url = self.config.base_url.rstrip("/") + "/messages?beta=true"
         api_key = self._get_api_key()
-        if self.config.auth_method == "bearer":
-            auth_headers = {"Authorization": f"Bearer {api_key}"}
-        else:
-            auth_headers = {"x-api-key": api_key}
-        headers = {
-            **auth_headers,
-            "anthropic-version": self.config.headers.get("anthropic-version", "2025-03-26"),
-            "Content-Type": "application/json",
-            **{k: v for k, v in self.config.headers.items() if k != "anthropic-version"},
+        auth_key = "authorization" if self.config.auth_method == "bearer" else "x-api-key"
+        auth_value = f"Bearer {api_key}" if self.config.auth_method == "bearer" else api_key
+
+        # User overrides, indexed case-insensitively so that any fingerprint
+        # default can be overridden without worrying about header casing.
+        overrides = {k.lower(): v for k, v in self.config.headers.items()}
+
+        # Build headers in undici wire order: auth + content-type first, then
+        # inject Claude Code fingerprint defaults (x-stainless-os is dynamic),
+        # then apply user overrides on top (preserving original casing).
+        headers: dict[str, str] = {
+            auth_key: auth_value,
+            "content-type": "application/json",
         }
-        if "x-app" not in headers:
-            headers["x-app"] = "cli"
+        for key, value in _CLAUDE_CODE_FINGERPRINT.items():
+            if key not in overrides:
+                headers[key] = value
+        # x-stainless-os reflects the host OS; inject unless user overrode it.
+        if "x-stainless-os" not in overrides:
+            headers["x-stainless-os"] = _detect_stainless_os()
+        for key, value in self.config.headers.items():
+            headers[key] = value
+        # user_agent config field takes precedence over both the fingerprint
+        # default and any user-agent header set via config.headers. Strip any
+        # existing user-agent key (regardless of casing) first to avoid a
+        # duplicate header on the wire when both are set.
+        if self.config.user_agent:
+            for existing in [k for k in headers if k.lower() == "user-agent"]:
+                del headers[existing]
+            headers["user-agent"] = self.config.user_agent
+        elif "user-agent" not in overrides:
+            headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
         use_cache = self.config.prompt_caching
 
         # System prompt: match Claude Code wire format — array of text blocks
@@ -847,10 +913,6 @@ class ClaudeProviderClient(BaseProviderClient):
             if use_cache and tools:
                 tools[-1]["cache_control"] = {"type": "ephemeral"}
             payload["tools"] = tools
-        if self.config.user_agent:
-            headers["User-Agent"] = self.config.user_agent
-        else:
-            headers["User-Agent"] = "claude-cli/2.1.88 (user, cli)"
         return url, headers, payload
 
     @staticmethod
@@ -1090,11 +1152,11 @@ class GeminiProviderClient(BaseProviderClient):
                 }
             ]
         headers = {
-            "Content-Type": "application/json",
+            "content-type": "application/json",
             **self.config.headers,
         }
         if self.config.user_agent:
-            headers["User-Agent"] = self.config.user_agent
+            headers["user-agent"] = self.config.user_agent
         if self.config.extra_body:
             payload.update(self.config.extra_body)
         return url, headers, payload

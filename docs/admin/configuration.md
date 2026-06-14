@@ -191,7 +191,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `auth_method` | 认证方式：`api_key`（x-api-key 头，默认）或 `bearer`（Authorization: Bearer 头） | `api_key` |
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
 
-> **协议适配说明**：`claude` 协议的请求默认带上 `x-app: cli` 头以匹配 Claude Code 的线格式；可通过 `headers` 覆盖。
+> **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 
 ### `[mcp]` — MCP 总开关
 

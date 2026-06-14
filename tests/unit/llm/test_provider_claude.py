@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import platform
+
 from plugins.llm_config import ProviderConfig
-from plugins.llm_provider import LLMRequest
+from plugins.llm_provider import LLMRequest, _detect_stainless_os
 from plugins.llm_tools import LLMConversationMessage, LLMToolSpec
 
 from tests.fixtures.provider_fakes import FakeClaudeClient
@@ -63,3 +65,111 @@ async def test_claude_tool_use_payload_and_response():
     assert response.tool_calls[0].name == "get_identity"
     # Claude sends input as dict, client serializes to JSON
     assert response.tool_calls[0].arguments_json == '{"query": "哈基镜"}'
+
+
+async def test_claude_code_fingerprint_headers():
+    """Default Claude provider emits the full Claude Code wire-format fingerprint
+    captured from a real claude-cli 2.1.150 (external, cli) client on Linux."""
+    response_data = {
+        "model": "claude-test",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    client = FakeClaudeClient(_provider_config(), response_data)
+    await client.complete(_tool_call_request())
+    headers = client.last_headers
+
+    assert headers["user-agent"] == "claude-cli/2.1.150 (external, cli)"
+    assert headers["anthropic-version"] == "2023-06-01"
+    assert "claude-code-20250219" in headers["anthropic-beta"]
+    assert headers["accept"] == "application/json"
+    assert headers["accept-encoding"] == "gzip, deflate"
+    # Stainless runtime fingerprint marks this as a Node.js SDK client
+    assert headers["x-stainless-lang"] == "js"
+    assert headers["x-stainless-runtime"] == "node"
+    assert headers["x-app"] == "cli"
+    assert headers["anthropic-dangerous-direct-browser-access"] == "true"
+    # x-stainless-os reflects the host OS (real CC reports the actual OS)
+    assert headers["x-stainless-os"] == _detect_stainless_os()
+    assert client.last_url.endswith("/messages?beta=true")
+
+
+async def test_claude_fingerprint_user_override_lowercase():
+    """ProviderConfig.headers overrides fingerprint defaults case-insensitively."""
+    from dataclasses import replace
+
+    config = replace(
+        _provider_config(),
+        headers={"anthropic-version": "2025-03-26"},
+    )
+    response_data = {
+        "model": "claude-test",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    client = FakeClaudeClient(config, response_data)
+    await client.complete(_tool_call_request())
+
+    assert client.last_headers["anthropic-version"] == "2025-03-26"
+    # Non-overridden fingerprint headers still applied
+    assert client.last_headers["x-app"] == "cli"
+
+
+async def test_claude_fingerprint_user_override_mixed_case():
+    """Mixed-case header keys in config.headers still suppress the matching default."""
+    from dataclasses import replace
+
+    config = replace(
+        _provider_config(),
+        headers={"Anthropic-Version": "2025-03-26"},
+    )
+    response_data = {
+        "model": "claude-test",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    client = FakeClaudeClient(config, response_data)
+    await client.complete(_tool_call_request())
+
+    # The mixed-case user key should be present and the lowercase default absent
+    assert client.last_headers["Anthropic-Version"] == "2025-03-26"
+    assert "anthropic-version" not in client.last_headers
+
+
+async def test_claude_user_agent_no_duplicate():
+    """When config.user_agent AND a User-Agent header are both set, only one
+    user-agent key survives (regression test for the duplicate-header bug)."""
+    from dataclasses import replace
+
+    config = replace(
+        _provider_config(),
+        user_agent="config-ua-field",
+        headers={"User-Agent": "header-ua"},
+    )
+    response_data = {
+        "model": "claude-test",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
+    client = FakeClaudeClient(config, response_data)
+    await client.complete(_tool_call_request())
+
+    ua_keys = [k for k in client.last_headers if k.lower() == "user-agent"]
+    assert len(ua_keys) == 1
+    assert client.last_headers["user-agent"] == "config-ua-field"
+
+
+async def test_detect_stainless_os_matches_platform():
+    """_detect_stainless_os returns a sensible value for the current host."""
+    detected = _detect_stainless_os()
+    system = platform.system()
+    if system == "Windows":
+        assert detected == "Windows"
+    elif system == "Darwin":
+        assert detected == "MacOS"
+    else:
+        assert detected == system

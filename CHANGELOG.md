@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-06-14
+
+### 变更
+
+- LLM provider 网络层从 `urllib` 迁移到 `httpx.AsyncClient`，实现真正的全小写 wire-format header（httpx 保留用户传入的 header 键原样，而 urllib 会在发送时 Title-Case 化）。OpenAI / Claude / Gemini 三个协议统一受益，SSE 流式解析改用原生异步 `aiter_lines`，图片下载、超时与代理行为保持等价。
+- Claude 协议指纹基于真实 claude-cli 2.1.150 抓包完整校准：User-Agent 对齐 `claude-cli/2.1.150 (external, cli)`，`anthropic-beta` 集合逐字对齐抓包的 7 个特性标记，补齐 `?beta=true` query param、`accept` 头，`x-stainless-os` 改为按宿主 OS 动态探测（Windows/Linux/macOS）。
+- `accept-encoding` 声明为 `gzip, deflate`（真实 CC 声明 `br, zstd` 但 httpx 无 brotli/zstandard 依赖无法解码，声明不支持的编码会导致响应体乱码）。
+- 修复 `user_agent` 配置字段与 `headers` 中的 `User-Agent` 同时设置时产生重复 header 键的问题（KHPilot Bot CR 发现）。
+
 ## [1.8.0] - 2026-06-09
 
 ### 变更
@@ -471,7 +480,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/3aKHP/QuickQuip/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...v1.8.0
 [1.7.10]: https://github.com/3aKHP/QuickQuip/compare/v1.7.1...v1.7.10
 [1.7.1]: https://github.com/3aKHP/QuickQuip/compare/v1.7.0...v1.7.1

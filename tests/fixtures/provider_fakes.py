@@ -29,6 +29,8 @@ class FakeOpenAIClient(OpenAIProviderClient):
         super().__init__(_force_non_streaming(config))
         self.response_data = response_data
         self.last_payload: dict | None = None
+        self.last_headers: dict | None = None
+        self.last_url: str | None = None
 
     async def _prepare_image_inputs(self, image_urls):
         return []
@@ -38,6 +40,8 @@ class FakeOpenAIClient(OpenAIProviderClient):
 
     async def _post_json(self, url, headers, payload):
         self.last_payload = payload
+        self.last_headers = headers
+        self.last_url = url
         return self.response_data
 
 
@@ -46,6 +50,8 @@ class FakeClaudeClient(ClaudeProviderClient):
         super().__init__(_force_non_streaming(config))
         self.response_data = response_data
         self.last_payload: dict | None = None
+        self.last_headers: dict | None = None
+        self.last_url: str | None = None
 
     async def _prepare_image_inputs(self, image_urls):
         return []
@@ -55,6 +61,8 @@ class FakeClaudeClient(ClaudeProviderClient):
 
     async def _post_json(self, url, headers, payload):
         self.last_payload = payload
+        self.last_headers = headers
+        self.last_url = url
         return self.response_data
 
 
@@ -63,6 +71,8 @@ class FakeGeminiClient(GeminiProviderClient):
         super().__init__(_force_non_streaming(config))
         self.response_data = response_data
         self.last_payload: dict | None = None
+        self.last_headers: dict | None = None
+        self.last_url: str | None = None
 
     async def _prepare_image_inputs(self, image_urls):
         return []
@@ -72,4 +82,6 @@ class FakeGeminiClient(GeminiProviderClient):
 
     async def _post_json(self, url, headers, payload):
         self.last_payload = payload
+        self.last_headers = headers
+        self.last_url = url
         return self.response_data
