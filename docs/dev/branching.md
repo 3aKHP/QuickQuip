@@ -2,7 +2,7 @@
 
 本项目采用**精简 GitFlow**：一条常驻 `dev` 集成分支 + 一条 `main` 发布专线。所有日常改动先进 `dev`，积累到一定量或需要发版时再通过 release PR 合入 `main` 并打 tag。
 
-代码规范与架构硬原则见 [`style.md`](style.md)；Commit message 格式与 CHANGELOG 修改规则见 [`../../AGENTS.md`](../../AGENTS.md)。本文件只讲分支与发布节奏。
+代码规范与架构硬原则见 [`style.md`](style.md)。本文件只讲分支与发布节奏；Commit message 格式与 CHANGELOG 修改规则遵循项目既有约定（Conventional Commits + Keep a Changelog）。
 
 ---
 
@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | `main` | 发布专线，每个 release commit 对应一个 tag | 是 | 仅 hotfix | — |
 | `dev` | 集成分支，所有日常改动的汇聚点 | 是 | chore/docs 小修补 | — |
-| `feature/*` / `fix/*` / `refactor/*` / `docs/*` / `chore/*` | 短生命周期工作分支 | 否 | — | **dev** |
+| `feat/*` / `fix/*` / `refactor/*` / `docs/*` / `chore/*` / `test/*` / `perf/*` | 短生命周期工作分支 | 否 | — | **dev** |
 | `hotfix/*` | 紧急修复，仅生产事故时使用 | 否 | — | **main** |
 
 ---
@@ -43,7 +43,7 @@
 > 触发条件：`dev` 积累了足够多的改动，或外部要求发布新版本。
 
 1. **在 dev 上 bump 版本**：编辑 `pyproject.toml` 的 `version` 字段
-2. **整理 CHANGELOG**（按 [`../../AGENTS.md`](../../AGENTS.md) 的规则）：
+2. **整理 CHANGELOG**（遵循项目 Keep a Changelog 约定）：
    - 将 `## [Unreleased]` 改为 `## [X.Y.Z] - YYYY-MM-DD`（版本号不带 `v` 前缀）
    - 在其上方插入新的空 `## [Unreleased]` 段
    - 在文件底部的链接区更新 `[Unreleased]` 和新版本的比较链接
@@ -76,7 +76,8 @@
 
 格式：`<type>/<topic>` 或 `<type>/v<version>-<topic>`
 
-- `type` 用 Conventional Commits 类型：`feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `perf` / `style` / `hotfix`
+- `type` 用 Conventional Commits 类型：`feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `perf` / `style`
+- `hotfix` 是**专用类型**，base 必须为 main，见上方[例外：紧急 hotfix](#例外紧急-hotfix-直接上-main) 章节，不纳入常规 dev 工作流
 - 发版期对齐的多分支工作用 `<type>/v<version>-<topic>`（如 `feat/v1.9.0-proxy-support`）
 - 零星 PR 用 `<type>/<topic>` 即可（如 `docs/branching-model`）
 

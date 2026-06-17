@@ -1,5 +1,7 @@
 name: CI
 
+# push: dev 与 pull_request 合并到 dev 时会各触发一次（concurrency group 不同），
+# 这是已知权衡——dev 允许 chore/docs 直接 push，需要 push 触发器覆盖这类绕过 PR 的改动。
 on:
   push:
     branches: [main, dev]
