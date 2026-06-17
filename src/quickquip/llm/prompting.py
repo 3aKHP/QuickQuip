@@ -59,8 +59,9 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
     biography = extras.get("biography")
     if isinstance(biography, dict):
         parts: list[str] = []
-        if biography.get("origin"):
-            parts.append(f"身世背景：{biography['origin']}")
+        origin = biography.get("origin")
+        if origin:
+            parts.append(f"身世背景：{origin}")
         marks = biography.get("defining_marks")
         if marks:
             if isinstance(marks, list):
@@ -90,10 +91,12 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
     voice = extras.get("voice")
     if isinstance(voice, dict):
         parts = []
-        if voice.get("syntax_rhythm"):
-            parts.append(f"句法节奏：{voice['syntax_rhythm']}")
-        if voice.get("tone_shift"):
-            parts.append(f"语气变化：{voice['tone_shift']}")
+        syntax_rhythm = voice.get("syntax_rhythm")
+        if syntax_rhythm:
+            parts.append(f"句法节奏：{syntax_rhythm}")
+        tone_shift = voice.get("tone_shift")
+        if tone_shift:
+            parts.append(f"语气变化：{tone_shift}")
         if voice.get("verbal_habits"):
             habits = voice["verbal_habits"]
             if isinstance(habits, list):
@@ -132,8 +135,9 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
                 parts.append("关键关系：\n" + "\n".join(f"- {r}" for r in rels))
             elif isinstance(rels, str):
                 parts.append(f"关键关系：{rels}")
-        if world.get("context"):
-            parts.append(f"世界观背景：{world['context']}")
+        context = world.get("context")
+        if context:
+            parts.append(f"世界观背景：{context}")
         if parts:
             sections.append("\n".join(parts))
 
@@ -141,17 +145,18 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
 
 
 def _render_persona_section(table: dict[str, object], field_labels: dict[str, str]) -> str:
-    """Render a persona TOML table's simple string fields into a section.
+    """Render a persona TOML table's simple scalar fields into a section.
 
-    Each ``{toml_key: chinese_label}`` entry whose value is a non-empty string
-    becomes ``label：value``. Non-string values are skipped (matching the
-    original per-field ``if X.get(...)`` truthiness guard for TOML scalars).
-    Returns empty string if no fields were present.
+    Each ``{toml_key: chinese_label}`` entry whose value is truthy becomes
+    ``label：str(value)``, mirroring the original per-field ``if X.get(...)``
+    truthiness guard. Non-string truthy values (e.g. integers) are stringified
+    just as the original f-string did. Returns empty string if no fields
+    were present.
     """
     parts: list[str] = []
     for key, label in field_labels.items():
         value = table.get(key)
-        if isinstance(value, str) and value.strip():
+        if value:
             parts.append(f"{label}：{value}")
     return "\n".join(parts)
 

@@ -397,13 +397,23 @@ def test_persona_identity_renders_simple_fields():
     assert "自称方式：本侦探" in out
 
 
-def test_persona_identity_skips_missing_and_nonstring():
+def test_persona_identity_skips_missing_renders_truthy():
+    # Guard is bare truthiness (matching original per-field `if X.get(...)`);
+    # falsy values (None, '', 0, []) are skipped, truthy values rendered.
     out = _compile_structured_persona({
-        "identity": {"archetype": "侦探", "scenario": "", "self_reference": None},
+        "identity": {"archetype": None, "scenario": "", "self_reference": "侦探"},
     })
-    assert "角色原型：侦探" in out
+    assert "角色原型" not in out
     assert "当前情境" not in out
-    assert "自称方式" not in out
+    assert "自称方式：侦探" in out
+
+    # Truthy non-string scalars are stringified and rendered, same as original.
+    out_int = _compile_structured_persona({"identity": {"archetype": 1}})
+    assert "角色原型：1" in out_int
+
+    # Whitespace-only strings are truthy and rendered, same as original.
+    out_ws = _compile_structured_persona({"identity": {"scenario": "   "}})
+    assert "当前情境：   " in out_ws
 
 
 def test_persona_boundaries_list_only_str_skipped():
