@@ -104,6 +104,8 @@ src/quickquip/
 
 **规则**：业务逻辑只进 `src/quickquip/`（包路径 `quickquip.*`），不进 `src/plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
 
+分层依赖方向、文件长度预警线、抽取触发条件、反模式与重构节奏等硬原则见 [`style.md`](style.md)。
+
 ---
 
 ## `src/plugins/` — NoneBot2 插件入口层

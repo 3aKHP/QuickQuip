@@ -36,6 +36,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 | 文件 | 说明 |
 |------|------|
+| [docs/dev/style.md](../docs/dev/style.md) | 代码规范与架构硬原则——单一职责、文件长度预警、分层纪律、抽取触发条件、反模式与重构节奏 |
 | [docs/dev/architecture.md](../docs/dev/architecture.md) | 项目架构与结构——三层架构、消息流、目录用途、分发层/自用层划分、gitignore 规则 |
 | [docs/dev/game-framework.md](../docs/dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
 | [docs/dev/llm-module.md](../docs/dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |

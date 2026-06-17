@@ -7,7 +7,14 @@ from typing import TYPE_CHECKING
 
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
-from quickquip.llm.service_parts.constants import MAX_TRIGGER_CONTEXT_MESSAGES
+from quickquip.llm.service_parts.constants import (
+    DEFAULT_ALWAYS_LOADED_TOOLS,
+    DEFAULT_ENABLED_TOOLS,
+    MAX_TRIGGER_CONTEXT_MESSAGES,
+    PRIVATE_UNAVAILABLE_TOOLS,
+    TOOL_LIST_NAME,
+    TOOL_SEARCH_NAME,
+)
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 
 if TYPE_CHECKING:
@@ -15,37 +22,14 @@ if TYPE_CHECKING:
     from quickquip.chat.rule_switch import GroupRuleSwitch
     from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
-SEARCH_TOOL_NAME = "search_web"
-TOOL_SEARCH_NAME = "tool_search"
-TOOL_LIST_NAME = "tool_list"
-SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
-SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
-PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
-DEFAULT_ALWAYS_LOADED_TOOLS = [
-    TOOL_SEARCH_NAME,
-    TOOL_LIST_NAME,
-    "get_identity",
-    "list_memories",
-    SEARCH_TOOL_NAME,
-]
-DEFAULT_ENABLED_TOOLS = [
-    TOOL_SEARCH_NAME,
-    TOOL_LIST_NAME,
-    "get_identity",
-    "list_memories",
-    SEARCH_TOOL_NAME,
-    "get_group_stats",
-    "get_rule_status",
-    "search_recent_messages",
-    "get_llm_status",
-    "get_current_model",
-    "get_health_status",
-]
-
 logger = logging.getLogger(__name__)
 
 
 class ToolMixin:
+    # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
+    # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
+    # self._model_label (also ScopeMixin). ScopeMixin must precede ToolMixin
+    # in the LLMService base list.
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
@@ -234,6 +218,65 @@ class ToolMixin:
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
         self.tool_registry.register(spec, handler)
+
+    # ── tool discovery policy (off / on / auto) ──────────────────────
+    # Moved from service.py: these methods decide which tools are visible
+    # to the LLM based on the discovery_mode config and chat_type. Called
+    # by service.py's prompt builder and tool loop, and by ToolMixin's own
+    # _tool_search_tools / _tool_list_tools handlers.
+
+    def _get_enabled_tool_names(self, chat_type: str = "group") -> list[str]:
+        names = self.config.tools.enabled or [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
+        if chat_type == "private":
+            names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
+        return [name for name in names if self.tool_registry.has_tool(name)]
+
+    def _get_always_loaded_tool_names(self, chat_type: str = "group") -> list[str]:
+        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        enabled = set(self._get_enabled_tool_names(chat_type=chat_type))
+        names = [name for name in configured if name in enabled and self.tool_registry.has_tool(name)]
+        if self._is_tool_discovery_enabled(chat_type) and TOOL_SEARCH_NAME in enabled and TOOL_SEARCH_NAME not in names:
+            names.insert(0, TOOL_SEARCH_NAME)
+        return names
+
+    def _is_tool_discovery_enabled(self, chat_type: str = "group") -> bool:
+        mode = self.config.tools.discovery_mode
+        if mode == "off":
+            return False
+        # Cache the enabled-names list once — previously this was recomputed
+        # up to 5+ times per call (inside list/set comprehensions), each time
+        # rebuilding the filtered list through tool_registry.has_tool().
+        enabled = self._get_enabled_tool_names(chat_type=chat_type)
+        if TOOL_SEARCH_NAME not in enabled:
+            return False
+        enabled_set = set(enabled)
+        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        always_names = {
+            name for name in configured
+            if name in enabled_set and self.tool_registry.has_tool(name)
+        }
+        if mode == "on":
+            return len(enabled) > len(always_names)
+        deferred_count = len(enabled_set - always_names)
+        return deferred_count > self.config.tools.discovery_min_tools
+
+    def _get_enabled_tool_specs(self, chat_type: str = "group") -> list[LLMToolSpec]:
+        if self._is_tool_discovery_enabled(chat_type):
+            return self.tool_registry.get_specs(self._get_always_loaded_tool_names(chat_type=chat_type))
+        return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type))
+
+    def _get_deferred_tool_categories(self, chat_type: str = "group") -> list[str]:
+        if not self._is_tool_discovery_enabled(chat_type):
+            return []
+        loaded = set(self._get_always_loaded_tool_names(chat_type=chat_type))
+        categories: list[str] = []
+        for entry in self.tool_registry.list_manifest(self._get_enabled_tool_names(chat_type=chat_type)):
+            if entry.name in loaded:
+                continue
+            category = entry.category or entry.source
+            if category and category not in categories:
+                categories.append(category)
+        return categories
 
     def bind_group_stats_tracker(self, tracker: "GroupStatsTracker | None") -> None:
         self.stats_tracker = tracker
