@@ -50,27 +50,21 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
 
     identity = extras.get("identity")
     if isinstance(identity, dict):
-        parts: list[str] = []
-        if identity.get("archetype"):
-            parts.append(f"角色原型：{identity['archetype']}")
-        if identity.get("scenario"):
-            parts.append(f"当前情境：{identity['scenario']}")
-        if identity.get("self_reference"):
-            parts.append(f"自称方式：{identity['self_reference']}")
-        if parts:
-            sections.append("\n".join(parts))
+        sections.append(_render_persona_section(identity, {
+            "archetype": "角色原型",
+            "scenario": "当前情境",
+            "self_reference": "自称方式",
+        }))
 
     biography = extras.get("biography")
     if isinstance(biography, dict):
-        parts = []
+        parts: list[str] = []
         if biography.get("origin"):
             parts.append(f"身世背景：{biography['origin']}")
-        if biography.get("defining_marks"):
-            marks = biography["defining_marks"]
+        marks = biography.get("defining_marks")
+        if marks:
             if isinstance(marks, list):
-                parts.append("关键印记：")
-                for mark in marks:
-                    parts.append(f"- {mark}")
+                parts.append("关键印记：\n" + "\n".join(f"- {m}" for m in marks))
             else:
                 parts.append(f"关键印记：{marks}")
         if parts:
@@ -78,29 +72,20 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
 
     cognition = extras.get("cognition")
     if isinstance(cognition, dict):
-        parts = []
-        if cognition.get("decision_logic"):
-            parts.append(f"决策逻辑：{cognition['decision_logic']}")
-        if cognition.get("emotional_processing"):
-            parts.append(f"情绪处理：{cognition['emotional_processing']}")
-        if cognition.get("perception_filter"):
-            parts.append(f"感知滤镜：{cognition['perception_filter']}")
-        if cognition.get("attention_bias"):
-            parts.append(f"注意力偏向：{cognition['attention_bias']}")
-        if parts:
-            sections.append("\n".join(parts))
+        sections.append(_render_persona_section(cognition, {
+            "decision_logic": "决策逻辑",
+            "emotional_processing": "情绪处理",
+            "perception_filter": "感知滤镜",
+            "attention_bias": "注意力偏向",
+        }))
 
     instinct = extras.get("instinct")
     if isinstance(instinct, dict):
-        parts = []
-        if instinct.get("core_desire"):
-            parts.append(f"核心渴望：{instinct['core_desire']}")
-        if instinct.get("stress_response"):
-            parts.append(f"压力反应：{instinct['stress_response']}")
-        if instinct.get("comfort_zone"):
-            parts.append(f"舒适区：{instinct['comfort_zone']}")
-        if parts:
-            sections.append("\n".join(parts))
+        sections.append(_render_persona_section(instinct, {
+            "core_desire": "核心渴望",
+            "stress_response": "压力反应",
+            "comfort_zone": "舒适区",
+        }))
 
     voice = extras.get("voice")
     if isinstance(voice, dict):
@@ -118,9 +103,7 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
         if voice.get("verbal_constraints"):
             constraints = voice["verbal_constraints"]
             if isinstance(constraints, list):
-                parts.append("语言约束：")
-                for c in constraints:
-                    parts.append(f"- {c}")
+                parts.append("语言约束：\n" + "\n".join(f"- {c}" for c in constraints))
             else:
                 parts.append(f"语言约束：{constraints}")
         if parts:
@@ -132,15 +115,11 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
         if boundaries.get("do"):
             do_list = boundaries["do"]
             if isinstance(do_list, list):
-                parts.append("允许：")
-                for item in do_list:
-                    parts.append(f"- {item}")
+                parts.append("允许：\n" + "\n".join(f"- {item}" for item in do_list))
         if boundaries.get("do_not"):
             dont_list = boundaries["do_not"]
             if isinstance(dont_list, list):
-                parts.append("禁止：")
-                for item in dont_list:
-                    parts.append(f"- {item}")
+                parts.append("禁止：\n" + "\n".join(f"- {item}" for item in dont_list))
         if parts:
             sections.append("\n".join(parts))
 
@@ -150,9 +129,7 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
         if world.get("relationships"):
             rels = world["relationships"]
             if isinstance(rels, list):
-                parts.append("关键关系：")
-                for r in rels:
-                    parts.append(f"- {r}")
+                parts.append("关键关系：\n" + "\n".join(f"- {r}" for r in rels))
             elif isinstance(rels, str):
                 parts.append(f"关键关系：{rels}")
         if world.get("context"):
@@ -160,7 +137,23 @@ def _compile_structured_persona(extras: dict[str, object]) -> str:
         if parts:
             sections.append("\n".join(parts))
 
-    return "\n\n".join(sections)
+    return "\n\n".join(section for section in sections if section)
+
+
+def _render_persona_section(table: dict[str, object], field_labels: dict[str, str]) -> str:
+    """Render a persona TOML table's simple string fields into a section.
+
+    Each ``{toml_key: chinese_label}`` entry whose value is a non-empty string
+    becomes ``label：value``. Non-string values are skipped (matching the
+    original per-field ``if X.get(...)`` truthiness guard for TOML scalars).
+    Returns empty string if no fields were present.
+    """
+    parts: list[str] = []
+    for key, label in field_labels.items():
+        value = table.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(f"{label}：{value}")
+    return "\n".join(parts)
 
 
 def build_system_prompt(
@@ -654,73 +647,6 @@ def build_messages(
     return messages
 
 
-# ---------------------------------------------------------------------------
-# Deprecated functions — retained for backward-compat tests, removed in
-# the cleanup phase.
-# ---------------------------------------------------------------------------
-
-def _build_recent_messages_block(
-    recent_messages: list[dict[str, str]],
-    *,
-    max_trigger_context_messages: int,
-    chat_type: str = "group",
-    identities=None,
-) -> str:
-    if chat_type == "private":
-        lines = ["以下是本次触发前，当前私聊里最近的消息，仅供理解上下文："]
-    else:
-        lines = ["以下是本次触发前，当前群里最近的消息，仅供理解上下文："]
-    for index, item in enumerate(recent_messages[-max_trigger_context_messages:], 1):
-        user_id = item["user_id"]
-        sender_name = item.get("sender_name", "")
-        canonical_name = _resolve_canonical_name(
-            identities, user_id, sender_name, item.get("canonical_name", ""),
-        )
-        speaker = format_participant_label(
-            user_id=user_id,
-            sender_name=sender_name,
-            canonical_name=canonical_name,
-            include_unregistered_note=True,
-        )
-        lines.append(f"{index}. {speaker}：{item['text']}")
-    return "\n".join(lines)
-
-
-def normalize_history(
-    history: list[dict[str, str]],
-    *,
-    identities=None,
-) -> list[LLMConversationMessage]:
-    normalized: list[LLMConversationMessage] = []
-    for item in history:
-        if item["role"] not in {"user", "assistant"} or not item["content"].strip():
-            continue
-        if item["role"] == "assistant":
-            normalized.append(LLMConversationMessage(role="assistant", content=item["content"]))
-            continue
-        user_id = item.get("user_id", "")
-        sender_name = item.get("sender_name", "")
-        if user_id:
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
-            speaker = format_participant_label(
-                user_id=user_id,
-                sender_name=sender_name,
-                canonical_name=canonical_name,
-                include_unregistered_note=True,
-            )
-        else:
-            speaker = sender_name.strip() or "未知"
-        normalized.append(
-            LLMConversationMessage(
-                role="user",
-                content=f"历史会话消息\n- 发言者：{speaker}\n- 内容：{item['content']}",
-            )
-        )
-    return normalized
-
-
 def merge_image_urls(*collections: list[str]) -> list[str]:
     merged: list[str] = []
     seen: set[str] = set()
@@ -732,72 +658,3 @@ def merge_image_urls(*collections: list[str]) -> list[str]:
             seen.add(url)
             merged.append(url)
     return merged
-
-
-def format_quoted_speaker(sender_name: str, user_id: str, identities=None) -> str:
-    canonical_name = _resolve_canonical_name(identities, user_id, sender_name, "")
-    return format_participant_label(
-        user_id=user_id,
-        sender_name=sender_name,
-        canonical_name=canonical_name,
-        include_unregistered_note=False,
-    )
-
-
-def build_user_message_content(
-    *,
-    prompt: str,
-    quoted_text: str = "",
-    quoted_sender_name: str = "",
-    quoted_user_id: str = "",
-    quoted_image_urls: list[str] | None = None,
-    quoted_is_bot_self: bool = False,
-    forward_text: str = "",
-    forward_image_urls: list[str] | None = None,
-    max_quoted_message_chars: int,
-    identities=None,
-    sender_name: str = "",
-    user_id: str = "",
-) -> str:
-    normalized_prompt = prompt.strip()
-    normalized_quoted_text = quoted_text.strip()[:max_quoted_message_chars]
-    normalized_quoted_images = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
-    normalized_forward_text = forward_text.strip()[:max_quoted_message_chars]
-    normalized_forward_images = [url.strip() for url in (forward_image_urls or []) if url.strip()]
-
-    has_quoted = bool(normalized_quoted_text or normalized_quoted_images)
-    has_forward = bool(normalized_forward_text or normalized_forward_images)
-
-    if not has_quoted and not has_forward:
-        return normalized_prompt
-
-    lines: list[str] = []
-
-    if has_quoted:
-        lines.append("以下是当前用户显式引用的消息，请结合它理解本轮提问：")
-        requester_label = format_quoted_speaker(sender_name, user_id, identities=identities) if (sender_name or user_id) else ""
-        if requester_label:
-            lines.append(f"- 当前提问者：{requester_label}")
-        quote_sender_label = "机器人自己" if quoted_is_bot_self else format_quoted_speaker(quoted_sender_name, quoted_user_id, identities=identities)
-        lines.append(f"- 引用发送者：{quote_sender_label}")
-        lines.append("- 角色关系：当前提问者就是现在发消息的人，引用发送者只是被引用对象。")
-        if normalized_quoted_text:
-            lines.append(f"- 引用内容：{normalized_quoted_text}")
-        if normalized_quoted_images:
-            lines.append(f"- 引用附图：{len(normalized_quoted_images)} 张")
-
-    if has_forward:
-        if has_quoted:
-            lines.append("")
-        lines.append("以下是用户转发的合并消息，请结合它理解本轮提问：")
-        if normalized_forward_text:
-            lines.append(normalized_forward_text)
-        if normalized_forward_images:
-            lines.append(f"转发附图：{len(normalized_forward_images)} 张")
-
-    if normalized_prompt:
-        lines.append("当前用户消息：")
-        lines.append(normalized_prompt)
-    else:
-        lines.append("当前用户没有额外文字，请优先围绕上述消息作答。")
-    return "\n".join(lines)
