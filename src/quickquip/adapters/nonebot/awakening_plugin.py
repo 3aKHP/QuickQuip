@@ -14,9 +14,11 @@ except (ModuleNotFoundError, ValueError):
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     get_llm_service,
+    is_admin as _is_admin,
     rate_limiter,
     rule_switch,
     stats_tracker,
+    strip_command_name as _strip_command_name,
 )
 from quickquip.chat.awakening import get_config, run_boredom_check
 
@@ -129,24 +131,6 @@ def _register_scheduler_jobs() -> None:
         replace_existing=True,
     )
     logger.info("awakening: boredom check job registered (interval=%ds)", interval)
-
-
-def _is_admin(event) -> bool:
-    sender = getattr(event, "sender", None)
-    if sender:
-        role = getattr(sender, "role", None)
-        if role in ("admin", "owner"):
-            return True
-    return False
-
-
-def _strip_command_name(text: str, command_name: str) -> str:
-    normalized = text.strip()
-    prefixes = (f"/{command_name}", f"!{command_name}", command_name)
-    for prefix in prefixes:
-        if normalized.startswith(prefix):
-            return normalized[len(prefix):].strip()
-    return normalized
 
 
 def register_awakening_commands(on_command) -> None:

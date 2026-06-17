@@ -4,6 +4,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.service import get_llm_service
+from quickquip.common.event_utils import (  # noqa: F401 — re-exported for adapter layer
+    get_sender_name as get_sender_name,
+    is_admin as is_admin,
+    is_self_message as is_self_message,
+    strip_command_name as strip_command_name,
+)
 from quickquip.chat import config as chat_config
 from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
@@ -198,38 +204,6 @@ def detect_kind(text: str):
     if any(word in text for word in SLEEP_WORDS):
         return "sleep"
     return None
-
-
-def get_sender_name(event) -> str:
-    sender = getattr(event, "sender", None)
-    if sender:
-        if getattr(sender, "card", None):
-            return sender.card
-        if getattr(sender, "nickname", None):
-            return sender.nickname
-    return str(event.user_id)
-
-
-def is_admin(event) -> bool:
-    sender = getattr(event, "sender", None)
-    if sender:
-        role = getattr(sender, "role", None)
-        if role in ("admin", "owner"):
-            return True
-    return False
-
-
-def is_self_message(event) -> bool:
-    return str(getattr(event, "user_id", "")) == str(getattr(event, "self_id", ""))
-
-
-def strip_command_name(text: str, command_name: str) -> str:
-    normalized = text.strip()
-    prefixes = (f"/{command_name}", f"!{command_name}", command_name)
-    for prefix in prefixes:
-        if normalized.startswith(prefix):
-            return normalized[len(prefix):].strip()
-    return normalized
 
 
 def build_timezone_reply(
