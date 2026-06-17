@@ -5,6 +5,8 @@ MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
 MAX_STORED_MEMORY_ITEMS = 200
 DEFAULT_PRIVATE_HISTORY_LIMIT = 256
+MAX_GROUP_STORED_CONVERSATION_MESSAGES = 20
+MAX_PRIVATE_STORED_CONVERSATION_MESSAGES = 256
 
 # ── builtin tool names & discovery defaults ─────────────────────────
 # Single source of truth for tool-name constants shared between

@@ -15,6 +15,10 @@ from quickquip.llm.service_parts.constants import (
 
 
 class HealthMixin:
+    # MRO contract: HealthMixin calls self._get_enabled_tool_names (ToolMixin),
+    # self.build_chat_scope_key / self._default_history_limit / self._scope_label
+    # (ScopeMixin), and self._auto_memory_* (AutoMemoryMixin). All three must
+    # precede HealthMixin in the LLMService base list.
     def _get_mcp_statuses(self) -> list[MCPServerStatus]:
         return self.mcp_manager.get_statuses()
 
