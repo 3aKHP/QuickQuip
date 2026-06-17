@@ -53,8 +53,12 @@ class JsonRpcSession:
         try:
             return await asyncio.wait_for(future, timeout=self._timeout)
         except asyncio.TimeoutError as exc:
-            self._pending.pop(request_id, None)
             raise MCPError(f"MCP server {self._server_id} 调用 {method} 超时") from exc
+        finally:
+            # Ensure the pending entry is removed on every exit path:
+            # normal return (already popped by _handle_message), timeout,
+            # or cancellation (which previously leaked the future).
+            self._pending.pop(request_id, None)
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
         await self._transport.send({"jsonrpc": "2.0", "method": method, "params": params})
@@ -67,8 +71,10 @@ class JsonRpcSession:
             raise
         except Exception as exc:
             logger.warning("MCP session %s reader stopped: %s", self._server_id, exc)
-            self._fail_pending(f"MCP server {self._server_id} 连接中断：{exc}")
         finally:
+            # Single cleanup point: fail all pending futures on any exit.
+            # (Previously _fail_pending was also called in the except block,
+            # double-failing futures with an overwritten message.)
             self._fail_pending(f"MCP server {self._server_id} 已断开")
 
     async def _handle_message(self, message: dict[str, Any]) -> None:
