@@ -243,27 +243,21 @@ class ToolMixin:
         mode = self.config.tools.discovery_mode
         if mode == "off":
             return False
-        if TOOL_SEARCH_NAME not in self._get_enabled_tool_names(chat_type=chat_type):
+        # Cache the enabled-names list once — previously this was recomputed
+        # up to 5+ times per call (inside list/set comprehensions), each time
+        # rebuilding the filtered list through tool_registry.has_tool().
+        enabled = self._get_enabled_tool_names(chat_type=chat_type)
+        if TOOL_SEARCH_NAME not in enabled:
             return False
-        enabled_count = len(self._get_enabled_tool_names(chat_type=chat_type))
-        if mode == "on":
-            configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
-            always_count = len([
-                name for name in configured
-                if name in self._get_enabled_tool_names(chat_type=chat_type)
-                and self.tool_registry.has_tool(name)
-            ])
-            return enabled_count > always_count
+        enabled_set = set(enabled)
         configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
         always_names = {
             name for name in configured
-            if name in self._get_enabled_tool_names(chat_type=chat_type)
-            and self.tool_registry.has_tool(name)
+            if name in enabled_set and self.tool_registry.has_tool(name)
         }
-        deferred_count = len([
-            name for name in self._get_enabled_tool_names(chat_type=chat_type)
-            if name not in always_names
-        ])
+        if mode == "on":
+            return len(enabled) > len(always_names)
+        deferred_count = len(enabled_set - always_names)
         return deferred_count > self.config.tools.discovery_min_tools
 
     def _get_enabled_tool_specs(self, chat_type: str = "group") -> list[LLMToolSpec]:
