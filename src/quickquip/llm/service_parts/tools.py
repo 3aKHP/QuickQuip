@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
 from quickquip.llm.service_parts.constants import (
+    DEFAULT_ALWAYS_LOADED_TOOLS,
+    DEFAULT_ENABLED_TOOLS,
     MAX_TRIGGER_CONTEXT_MESSAGES,
+    PRIVATE_UNAVAILABLE_TOOLS,
     TOOL_LIST_NAME,
     TOOL_SEARCH_NAME,
 )
@@ -211,6 +214,71 @@ class ToolMixin:
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
         self.tool_registry.register(spec, handler)
+
+    # ── tool discovery policy (off / on / auto) ──────────────────────
+    # Moved from service.py: these methods decide which tools are visible
+    # to the LLM based on the discovery_mode config and chat_type. Called
+    # by service.py's prompt builder and tool loop, and by ToolMixin's own
+    # _tool_search_tools / _tool_list_tools handlers.
+
+    def _get_enabled_tool_names(self, chat_type: str = "group") -> list[str]:
+        names = self.config.tools.enabled or [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
+        if chat_type == "private":
+            names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
+        return [name for name in names if self.tool_registry.has_tool(name)]
+
+    def _get_always_loaded_tool_names(self, chat_type: str = "group") -> list[str]:
+        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        enabled = set(self._get_enabled_tool_names(chat_type=chat_type))
+        names = [name for name in configured if name in enabled and self.tool_registry.has_tool(name)]
+        if self._is_tool_discovery_enabled(chat_type) and TOOL_SEARCH_NAME in enabled and TOOL_SEARCH_NAME not in names:
+            names.insert(0, TOOL_SEARCH_NAME)
+        return names
+
+    def _is_tool_discovery_enabled(self, chat_type: str = "group") -> bool:
+        mode = self.config.tools.discovery_mode
+        if mode == "off":
+            return False
+        if TOOL_SEARCH_NAME not in self._get_enabled_tool_names(chat_type=chat_type):
+            return False
+        enabled_count = len(self._get_enabled_tool_names(chat_type=chat_type))
+        if mode == "on":
+            configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+            always_count = len([
+                name for name in configured
+                if name in self._get_enabled_tool_names(chat_type=chat_type)
+                and self.tool_registry.has_tool(name)
+            ])
+            return enabled_count > always_count
+        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        always_names = {
+            name for name in configured
+            if name in self._get_enabled_tool_names(chat_type=chat_type)
+            and self.tool_registry.has_tool(name)
+        }
+        deferred_count = len([
+            name for name in self._get_enabled_tool_names(chat_type=chat_type)
+            if name not in always_names
+        ])
+        return deferred_count > self.config.tools.discovery_min_tools
+
+    def _get_enabled_tool_specs(self, chat_type: str = "group") -> list[LLMToolSpec]:
+        if self._is_tool_discovery_enabled(chat_type):
+            return self.tool_registry.get_specs(self._get_always_loaded_tool_names(chat_type=chat_type))
+        return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type))
+
+    def _get_deferred_tool_categories(self, chat_type: str = "group") -> list[str]:
+        if not self._is_tool_discovery_enabled(chat_type):
+            return []
+        loaded = set(self._get_always_loaded_tool_names(chat_type=chat_type))
+        categories: list[str] = []
+        for entry in self.tool_registry.list_manifest(self._get_enabled_tool_names(chat_type=chat_type)):
+            if entry.name in loaded:
+                continue
+            category = entry.category or entry.source
+            if category and category not in categories:
+                categories.append(category)
+        return categories
 
     def bind_group_stats_tracker(self, tracker: "GroupStatsTracker | None") -> None:
         self.stats_tracker = tracker
