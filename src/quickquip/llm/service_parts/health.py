@@ -189,6 +189,8 @@ class HealthMixin:
             rule_switch_bound=self.rule_switch is not None,
             probe_provider=probe_provider,
             auto_memory_stats={
+                # _auto_memory_* attributes are initialised by AutoMemoryMixin._init_auto_memory();
+                # AutoMemoryMixin must be in the MRO and _init_auto_memory() called in __init__.
                 "successes": self._auto_memory_successes,
                 "failures": self._auto_memory_failures,
                 "active_scopes": len(self._auto_memory_turns),

@@ -1,13 +1,18 @@
 """Auto-memory extraction mixin for :class:`quickquip.llm.service.LLMService`.
 
-Extracted from ``service.py`` as an independent sub-domain (~280 lines):
-quality gates + batch trigger + multi-turn context + fixed-confidence store,
-plus the per-scope turn counter and success/failure tallies.
+Extracted from ``service.py`` as an independent sub-domain: quality gates +
+batch trigger + multi-turn context + fixed-confidence store, plus the
+per-scope turn counter and success/failure tallies.
 
 The mixin depends on the host class providing ``self.config``,
 ``self.store`` and ``self.quick_judge`` (all supplied by ``LLMService``).
 State is initialised via :meth:`AutoMemoryMixin._init_auto_memory`, which
 the host class must call from its own ``__init__``.
+
+Note: ``HealthMixin.build_health_report`` reads ``self._auto_memory_*``
+attributes populated here, so ``AutoMemoryMixin`` must stay in the MRO
+and ``_init_auto_memory()`` must be called before any health report is
+built.
 """
 from __future__ import annotations
 

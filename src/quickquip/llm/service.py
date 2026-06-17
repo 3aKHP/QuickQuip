@@ -45,7 +45,7 @@ from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS,
     DEFAULT_PRIVATE_HISTORY_LIMIT,
     MAX_MEMORY_RETRIEVAL_ITEMS,
-    MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # re-exported via plugins/llm_runtime
+    MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime; `as` form marks explicit re-export for ruff
     MAX_TRIGGER_CONTEXT_MESSAGES,
     PRIVATE_UNAVAILABLE_TOOLS,
     SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
