@@ -4,9 +4,10 @@ Covers the three exit paths of ``request()`` that determine whether the
 pending-future entry leaks:
 - normal response (already popped by _handle_message)
 - timeout (TimeoutError → MCPError)
-- cancellation (CancelledError — previously leaked the future, fixed in backlog #8)
+- cancellation during wait_for (CancelledError — previously leaked)
 
-Also covers _reader_loop's _fail_pending being a single cleanup point (backlog #9).
+Also covers _reader_loop using _fail_pending as a single cleanup point
+(previously called twice: once in except, once in finally).
 """
 from __future__ import annotations
 
@@ -17,16 +18,23 @@ from unittest.mock import AsyncMock
 import pytest
 
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
+from quickquip.llm.mcp.transport import Transport
 from quickquip.llm.mcp.types import MCPError
 
 
-class _FakeTransport:
-    """Minimal Transport stub: send() is an AsyncMock, receive() blocks on inbox."""
+class _FakeTransport(Transport):
+    """Minimal Transport for testing: send() is an AsyncMock, receive() blocks on inbox.
+
+    Inherits from Transport so it stays in sync with the abstract interface
+    as it evolves, rather than relying on duck typing.
+    """
 
     def __init__(self):
-        self.send = AsyncMock()
-        self._inbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-        self._closed = False
+        super().__init__()
+        self._send_mock = AsyncMock()
+
+    async def send(self, payload: dict[str, Any]) -> None:
+        await self._send_mock(payload)
 
     async def start(self) -> None:
         pass
@@ -112,8 +120,11 @@ async def test_request_cancelled_pops_pending(session):
 
 
 @pytest.mark.asyncio
-async def test_reader_loop_fail_pending_single_cleanup(session):
-    """Backlog #9: _fail_pending called once (in finally), not twice."""
+async def test_reader_loop_fail_pending_cleans_up(session):
+    """_reader_loop's finally block fails all pending futures on disconnect.
+    Verifies the outcome (futures are failed with MCPError), not the internal
+    call count of _fail_pending.
+    """
     sess, transport = session
     await sess.start()
 

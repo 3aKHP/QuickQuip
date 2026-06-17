@@ -43,27 +43,29 @@ class JsonRpcSession:
         self._pending[request_id] = future
 
         try:
-            await self._transport.send(
-                {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
-            )
-        except Exception:
-            self._pending.pop(request_id, None)
-            raise
+            try:
+                await self._transport.send(
+                    {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+                )
+            except Exception:
+                raise
 
-        try:
-            return await asyncio.wait_for(future, timeout=self._timeout)
-        except asyncio.TimeoutError as exc:
-            raise MCPError(f"MCP server {self._server_id} 调用 {method} 超时") from exc
+            try:
+                return await asyncio.wait_for(future, timeout=self._timeout)
+            except asyncio.TimeoutError as exc:
+                raise MCPError(f"MCP server {self._server_id} 调用 {method} 超时") from exc
         finally:
-            # Ensure the pending entry is removed on every exit path:
-            # normal return (already popped by _handle_message), timeout,
-            # or cancellation (which previously leaked the future).
+            # Single cleanup point spanning both send() and wait_for().
+            # Covers normal return, timeout, send() failure, and cancellation
+            # during either phase (CancelledError extends BaseException,
+            # skipping except clauses but still running finally).
             self._pending.pop(request_id, None)
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
         await self._transport.send({"jsonrpc": "2.0", "method": method, "params": params})
 
     async def _reader_loop(self) -> None:
+        disconnect_reason = "已断开"
         try:
             async for message in self._transport.receive():
                 await self._handle_message(message)
@@ -71,11 +73,13 @@ class JsonRpcSession:
             raise
         except Exception as exc:
             logger.warning("MCP session %s reader stopped: %s", self._server_id, exc)
+            disconnect_reason = f"连接中断：{exc}"
         finally:
             # Single cleanup point: fail all pending futures on any exit.
-            # (Previously _fail_pending was also called in the except block,
-            # double-failing futures with an overwritten message.)
-            self._fail_pending(f"MCP server {self._server_id} 已断开")
+            # Includes the specific exception cause when available (previously
+            # the except-block call used '连接中断：{exc}' but was overwritten
+            # by the finally-block call's generic '已断开').
+            self._fail_pending(f"MCP server {self._server_id} {disconnect_reason}")
 
     async def _handle_message(self, message: dict[str, Any]) -> None:
         if "id" in message and ("result" in message or "error" in message):
