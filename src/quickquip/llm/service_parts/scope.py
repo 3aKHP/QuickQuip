@@ -6,7 +6,8 @@ human-readable scope labels, and history/memory limit resolution.
 
 This mixin is deliberately placed first in the ``LLMService`` MRO so its
 methods are available to all other mixins via ``self.`` It depends only on
-``self.config.runtime`` (history limits) — no other mixin's state.
+``self.config.runtime`` (history limits) and the scope-limit constants from
+``service_parts.constants`` — no other mixin's state.
 """
 from __future__ import annotations
 
