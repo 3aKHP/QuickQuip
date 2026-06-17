@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+## [1.8.9] - 2026-06-18
+
+> *"为什么版本号是 1.8.9 而不是 1.8.2？"*
+> *和当年的 1.7.10 一样，我们在向那个方块游戏致敬。1.8.9 不是一个带来新内容的版本，而是 1.8 系列最坚实、最稳定的收尾——无数服务器和 mod 长期驻留于此。QuickQuip 的 1.8.9 也是如此：不发新功能，而是清偿技术债，引入工程规范，让代码库从"能跑"走向"能维护"。*
+
+### 🔧 变更 (Changed)
+
+- **引入工程规范基准**：新增 `docs/dev/style.md`，作为代码架构硬原则的事实参考（单一职责、400 行预警线、分层纪律、抽取触发条件、反模式清单、重构节奏）。该文档从 GPS-Plane 项目的开发规范本地化而来。
+- **LLM 模块大文件拆解（纯内部重构，对外 import 路径不变）**：
+  - `llm/provider.py`（1277 行）拆分为 `provider/` 包：`trace.py`（trace 基础设施）、`base.py`（基类 + 数据类 + 共享工具）、`openai.py` / `claude.py` / `gemini.py`（三个协议实现）、`factory.py`。三个 ProviderClient 的 `complete()` 方法逐字节相同，上提至基类。
+  - `llm/mcp.py`（1023 行）拆分为 `mcp/` 包：`types.py`（数据类 + 纯函数）、`transport.py`（Transport ABC + Stdio/HTTP/Sse 传输）、`jsonrpc.py`（JSON-RPC 2.0 会话）、`client.py`（客户端 + 多服务器管理器）。依赖方向严格单向。
+  - `llm/service.py`（1320 行）降至 1009 行：auto-memory 子域独立为 `AutoMemoryMixin`，群/私聊差异化策略独立为 `ScopeMixin`，工具发现策略下沉至 `ToolMixin`，8 个重复常量统一到 `service_parts/constants.py`。
+  - `llm/prompting.py`（803 行）降至 660 行：删除 4 个 deprecated 函数（零生产引用），7 段 persona 渲染收敛为共享辅助函数。
+- **跨层违规修复**：`app/message_pipeline.py` 的 4 个纯工具函数（`is_admin` / `is_self_message` / `strip_command_name` / `get_sender_name`）迁至 `common/event_utils.py`，消除适配器层跨层 import app 装配模块的反模式。原路径通过 re-export 保持兼容。
+
+### 🔧 优化 (Performance)
+
+- `_is_tool_discovery_enabled` 在工具发现判定中重复调用 `_get_enabled_tool_names` 达 5 次以上（每次重建列表），该方法位于每条 LLM 回复的热路径。现已缓存为单次调用。
+
+### 🐛 修复 (Fixed)
+
+- `JsonRpcSession.request` 在 task 被取消时泄漏 future（`CancelledError` 跳过超时异常处理，pending future 未清理）。`_reader_loop` 的 `_fail_pending` 此前在 except 和 finally 中双重调用且丢失具体异常信息。
+
 ## [1.8.1] - 2026-06-14
 
 ### 变更
@@ -480,7 +503,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...HEAD
+[1.8.9]: https://github.com/3aKHP/QuickQuip/compare/v1.8.1...v1.8.9
 [1.8.1]: https://github.com/3aKHP/QuickQuip/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...v1.8.0
 [1.7.10]: https://github.com/3aKHP/QuickQuip/compare/v1.7.1...v1.7.10
