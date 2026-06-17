@@ -6,10 +6,10 @@ from quickquip.llm.prompting import (
     _build_scene_from_current_message,
     _build_scene_from_recent_buffer,
     _build_scenes_from_history,
+    _compile_structured_persona,
     _render_scene_to_text,
     build_messages,
     build_system_prompt,
-    build_user_message_content,
     format_participant_label,
     merge_image_urls,
 )
@@ -362,53 +362,6 @@ def test_build_messages_images_attached():
     assert "img.png" in msgs[-1].image_urls
 
 
-# ---------------------------------------------------------------------------
-# Deprecated functions (backward-compat, remove in cleanup phase)
-# ---------------------------------------------------------------------------
-
-def test_build_user_message_content_quoted():
-    content = build_user_message_content(
-        prompt="这是什么？",
-        quoted_text="原来的消息",
-        quoted_sender_name="镜子",
-        quoted_user_id="2002",
-        quoted_image_urls=["https://example.test/q.png"],
-        max_quoted_message_chars=1200,
-    )
-    assert "以下是当前用户显式引用的消息" in content
-    assert "引用附图：1 张" in content
-
-
-def test_build_user_message_content_forward():
-    content = build_user_message_content(
-        prompt="你怎么看？",
-        forward_text="1. Alice（QQ 10001）：你好",
-        forward_image_urls=["https://example.test/fwd.png"],
-        max_quoted_message_chars=1200,
-    )
-    assert "以下是用户转发的合并消息" in content
-    assert "转发附图：1 张" in content
-
-
-def test_build_user_message_content_self_quote():
-    content = build_user_message_content(
-        prompt="你怎么看？",
-        quoted_text="旧消息",
-        quoted_sender_name="4s",
-        quoted_user_id="4004",
-        quoted_is_bot_self=True,
-        max_quoted_message_chars=1200,
-    )
-    assert "机器人自己" in content
-    assert "角色关系：当前提问者就是现在发消息的人" in content
-
-
-def test_build_user_message_content_plain():
-    content = build_user_message_content(prompt="只有正文", max_quoted_message_chars=1200)
-    assert "以下是当前用户显式引用的消息" not in content
-    assert "只有正文" in content
-
-
 def test_system_prompt_disambiguates_quote_roles():
     persona = SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
     vocab = SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
@@ -427,3 +380,81 @@ def test_system_prompt_disambiguates_quote_roles():
     )
     assert "当前提问者永远是本条消息的发送者" in prompt
     assert "引用发送者只是被引用对象" in prompt
+
+
+# ---------------------------------------------------------------------------
+# _compile_structured_persona — behaviour lock for the 7-section renderer.
+# Added alongside the refactor that collapsed repeated per-field scaffolding
+# into _render_persona_section; guards the edge cases the refactor touched.
+# ---------------------------------------------------------------------------
+
+def test_persona_identity_renders_simple_fields():
+    out = _compile_structured_persona({
+        "identity": {"archetype": "侦探", "scenario": "雨夜", "self_reference": "本侦探"},
+    })
+    assert "角色原型：侦探" in out
+    assert "当前情境：雨夜" in out
+    assert "自称方式：本侦探" in out
+
+
+def test_persona_identity_skips_missing_renders_truthy():
+    # Guard is bare truthiness (matching original per-field `if X.get(...)`);
+    # falsy values (None, '', 0, []) are skipped, truthy values rendered.
+    out = _compile_structured_persona({
+        "identity": {"archetype": None, "scenario": "", "self_reference": "侦探"},
+    })
+    assert "角色原型" not in out
+    assert "当前情境" not in out
+    assert "自称方式：侦探" in out
+
+    # Truthy non-string scalars are stringified and rendered, same as original.
+    out_int = _compile_structured_persona({"identity": {"archetype": 1}})
+    assert "角色原型：1" in out_int
+
+    # Whitespace-only strings are truthy and rendered, same as original.
+    out_ws = _compile_structured_persona({"identity": {"scenario": "   "}})
+    assert "当前情境：   " in out_ws
+
+
+def test_persona_boundaries_list_only_str_skipped():
+    # boundaries.do/do_not only render as bullet lists; a bare string is
+    # intentionally skipped (original list-only behaviour preserved).
+    out = _compile_structured_persona({
+        "boundaries": {"do": ["保持礼貌"], "do_not": ["剧透结局"]},
+    })
+    assert "允许：\n- 保持礼貌" in out
+    assert "禁止：\n- 剧透结局" in out
+
+    out_str = _compile_structured_persona({"boundaries": {"do": "单条"}})
+    assert "允许" not in out_str
+
+
+def test_persona_world_relationships_str_or_list():
+    out_list = _compile_structured_persona({
+        "world": {"relationships": ["与A是旧识", "与B对立"]},
+    })
+    assert "关键关系：\n- 与A是旧识" in out_list
+
+    out_str = _compile_structured_persona({"world": {"relationships": "与A是旧识"}})
+    assert "关键关系：与A是旧识" in out_str
+
+
+def test_persona_voice_habits_join_with_delimiter():
+    out = _compile_structured_persona({
+        "voice": {"verbal_habits": ["常说嗯", "爱用反问"], "verbal_constraints": ["不爆粗", "不撒谎"]},
+    })
+    assert "口头习惯：常说嗯、爱用反问" in out
+    assert "语言约束：\n- 不爆粗\n- 不撒谎" in out
+
+
+def test_persona_sections_joined_by_double_newline():
+    out = _compile_structured_persona({
+        "identity": {"archetype": "侦探"},
+        "cognition": {"decision_logic": "证据优先"},
+    })
+    assert "角色原型：侦探\n\n决策逻辑：证据优先" in out
+
+
+def test_persona_empty_extras_returns_empty():
+    assert _compile_structured_persona({}) == ""
+    assert _compile_structured_persona({"identity": {}}) == ""
