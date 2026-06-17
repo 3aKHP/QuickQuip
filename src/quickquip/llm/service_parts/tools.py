@@ -7,40 +7,17 @@ from typing import TYPE_CHECKING
 
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
-from quickquip.llm.service_parts.constants import MAX_TRIGGER_CONTEXT_MESSAGES
+from quickquip.llm.service_parts.constants import (
+    MAX_TRIGGER_CONTEXT_MESSAGES,
+    TOOL_LIST_NAME,
+    TOOL_SEARCH_NAME,
+)
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 
 if TYPE_CHECKING:
     from quickquip.chat.message_stats import GroupStatsTracker
     from quickquip.chat.rule_switch import GroupRuleSwitch
     from quickquip.common.recent_message_buffer import RecentMessageBuffer
-
-SEARCH_TOOL_NAME = "search_web"
-TOOL_SEARCH_NAME = "tool_search"
-TOOL_LIST_NAME = "tool_list"
-SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
-SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
-PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
-DEFAULT_ALWAYS_LOADED_TOOLS = [
-    TOOL_SEARCH_NAME,
-    TOOL_LIST_NAME,
-    "get_identity",
-    "list_memories",
-    SEARCH_TOOL_NAME,
-]
-DEFAULT_ENABLED_TOOLS = [
-    TOOL_SEARCH_NAME,
-    TOOL_LIST_NAME,
-    "get_identity",
-    "list_memories",
-    SEARCH_TOOL_NAME,
-    "get_group_stats",
-    "get_rule_status",
-    "search_recent_messages",
-    "get_llm_status",
-    "get_current_model",
-    "get_health_status",
-]
 
 logger = logging.getLogger(__name__)
 
