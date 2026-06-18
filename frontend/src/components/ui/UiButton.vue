@@ -98,11 +98,13 @@ const classes = computed(() => [
 
 .ui-btn--primary {
   background: var(--qq-primary);
-  color: #FFFFFF;
+  color: var(--qq-on-primary);
+  border: 1px solid var(--qq-primary);
 }
 
 .ui-btn--primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: var(--qq-primary-deep);
+  border-color: var(--qq-primary-deep);
 }
 
 .ui-btn--secondary {
@@ -117,11 +119,13 @@ const classes = computed(() => [
 
 .ui-btn--danger {
   background: var(--qq-danger);
-  color: #FFFFFF;
+  color: var(--qq-on-primary);
+  border: 1px solid var(--qq-danger);
 }
 
 .ui-btn--danger:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: var(--qq-danger-deep);
+  border-color: var(--qq-danger-deep);
 }
 
 .ui-btn--ghost {

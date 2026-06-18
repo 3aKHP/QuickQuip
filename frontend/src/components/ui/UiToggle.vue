@@ -49,13 +49,13 @@ function toggle(e: Event) {
 .ui-toggle__track {
   position: relative;
   border-radius: var(--qq-radius-full);
-  background: #D1D5DB;
+  background: var(--qq-toggle-off);
   transition: background var(--qq-transition-fast);
 }
 
 .ui-toggle__knob {
   position: absolute;
-  background: #FFFFFF;
+  background: var(--qq-white);
   border-radius: 50%;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
   transition: transform var(--qq-transition-fast);

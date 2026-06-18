@@ -664,7 +664,7 @@ textarea {
 .error-block {
   padding: var(--qq-gap-sm);
   background: var(--qq-danger-soft);
-  border: 1px solid rgba(250, 81, 81, 0.25);
+  border: 1px solid var(--qq-danger-border);
   border-radius: var(--qq-radius-sm);
   color: var(--qq-danger);
   font-size: var(--qq-text-sm);
@@ -735,7 +735,7 @@ textarea {
 }
 
 .regression-item.matched {
-  border-color: rgba(18, 183, 245, 0.42);
+  border-color: var(--qq-primary-border);
   background: var(--qq-primary-soft);
 }
 

@@ -521,7 +521,7 @@ loadAll()
 .detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--qq-overlay-strong);
   display: flex;
   align-items: flex-start;
   justify-content: center;

@@ -2,30 +2,7 @@
   <div class="login-shell">
     <UiCard padding="lg" shadow="md" class="login-card">
       <div class="login-card__head">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" class="login-card__logo">
-            <defs>
-              <filter id="login-shadow" x="-30%" y="-30%" width="160%" height="160%">
-                <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.2" />
-              </filter>
-              <linearGradient id="login-grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#60A5FA" />
-                <stop offset="100%" stop-color="#2563EB" />
-              </linearGradient>
-              <linearGradient id="login-grad2" x1="0%" y1="100%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#818CF8" />
-                <stop offset="100%" stop-color="#3730A3" />
-              </linearGradient>
-              <linearGradient id="login-grad-tail" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#2DD4BF" />
-                <stop offset="100%" stop-color="#0F766E" />
-              </linearGradient>
-            </defs>
-            <g filter="url(#login-shadow)" transform="translate(24, 24) scale(0.82) translate(-24, -24)">
-              <path d="M 24 42 A 18 18 0 1 0 11.27 11.27 A 22 22 0 1 1 24 42 Z" fill="url(#login-grad2)" opacity="0.95" />
-              <path d="M 24 6 A 18 18 0 1 0 36.73 36.73 A 22 22 0 1 1 24 6 Z" fill="url(#login-grad1)" opacity="0.95" />
-              <path d="M 22 26 C 28 26 38 34 44 44 C 38 40 30 32 24 30 C 22 29 20 27 22 26 Z" fill="url(#login-grad-tail)" opacity="0.95" />
-            </g>
-          </svg>
+        <img src="/brand.svg" alt="" class="login-card__logo" width="48" height="48" aria-hidden="true">
         <h2>QuickQuip Admin</h2>
         <p class="muted">请输入管理员口令</p>
       </div>
