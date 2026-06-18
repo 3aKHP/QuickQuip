@@ -15,6 +15,8 @@ function loadTheme() {
       theme.value = stored
     }
   } catch { /* ignore */ }
+  // watch(theme) 会响应 theme.value 的赋值自动 applyTheme；
+  // 仅在 watch 尚未首次触发的初始化场景兜底一次
   applyTheme(theme.value)
 }
 

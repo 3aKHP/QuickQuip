@@ -168,11 +168,12 @@ function draw(now: number) {
       ctx.stroke()
 
       if (p.tone > 0.82) {
+        ctx.save()
+        ctx.globalAlpha = 0.55
         ctx.beginPath()
         ctx.arc(sx, sy, tick * 0.62, 0, Math.PI * 2)
-        ctx.globalAlpha = 0.55
         ctx.stroke()
-        ctx.globalAlpha = 1
+        ctx.restore()
       }
     }
   }

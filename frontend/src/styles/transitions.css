@@ -131,4 +131,11 @@
   .list-leave-active {
     transition: none;
   }
+
+  /* route trace sweep 是 animation 不是 transition，需单独抑制 */
+  .content.route-motion-forward::before,
+  .content.route-motion-back::before,
+  .content.route-motion-switch::before {
+    animation: none;
+  }
 }

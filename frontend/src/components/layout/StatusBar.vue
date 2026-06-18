@@ -74,7 +74,7 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
-  font-size: 11px;
+  font-size: var(--qq-text-xs);
   line-height: 1;
   user-select: none;
   overflow: hidden;
@@ -105,7 +105,7 @@ onUnmounted(() => {
   background: var(--qq-primary);
   box-shadow: 0 0 0 2px var(--qq-primary-soft);
   vertical-align: middle;
-  animation: dot-pulse 2.4s ease-in-out infinite;
+  animation: dot-pulse 2.4s steps(2, end) infinite;
 }
 
 @keyframes dot-pulse {
@@ -114,7 +114,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 640px) {
-  .status-bar { font-size: 10px; padding: 0 var(--qq-gap-sm); }
+  .status-bar { font-size: calc(var(--qq-text-xs) - 1px); padding: 0 var(--qq-gap-sm); }
   .status-bar__seg { padding: 0 6px; }
   .status-bar__seg--hint { display: none; }
   .seg-clock { display: none; }
