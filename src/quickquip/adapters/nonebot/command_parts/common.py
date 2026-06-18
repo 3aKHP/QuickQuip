@@ -14,8 +14,12 @@ from quickquip.adapters.nonebot.command_parts._chat_utils import _allow_scope_ma
 from quickquip.adapters.nonebot.command_parts._chat_utils import _chat_id as _chat_id  # noqa: F401
 from quickquip.adapters.nonebot.command_parts._chat_utils import _chat_label as _chat_label  # noqa: F401
 from quickquip.adapters.nonebot.command_parts._chat_utils import _chat_type as _chat_type  # noqa: F401
-from quickquip.adapters.nonebot.command_parts._chat_utils import _is_admin as _is_admin  # noqa: F401
 from quickquip.adapters.nonebot.command_parts._chat_utils import _is_private_chat as _is_private_chat  # noqa: F401
+
+# ── event utils (is_admin / strip_command_name 直接从 common.event_utils re-export，
+#    修 v1.8.9 PR-6 跨层遗留：不再经 app.message_pipeline 间接获取) ──────────────
+from quickquip.common.event_utils import is_admin as _is_admin  # noqa: F401
+from quickquip.common.event_utils import strip_command_name as _strip_command_name  # noqa: F401
 
 # ── fortune ──────────────────────────────────────────────────────────────────
 from quickquip.adapters.nonebot.command_parts._fortune import _daily_fortune as _daily_fortune  # noqa: F401
@@ -47,8 +51,6 @@ from quickquip.adapters.nonebot.command_parts._parsing import _safe_shlex_split 
 from quickquip.adapters.nonebot.command_parts._parsing import _select_profile_samples as _select_profile_samples  # noqa: F401
 from quickquip.adapters.nonebot.command_parts._parsing import _strip_leading_command_token as _strip_leading_command_token  # noqa: F401
 from quickquip.adapters.nonebot.command_parts._parsing import MusicCommandArgs as MusicCommandArgs  # noqa: F401
-# _strip_command_name 改为从 common.event_utils 直接 re-export（修 v1.8.9 PR-6 跨层遗留）
-from quickquip.common.event_utils import strip_command_name as _strip_command_name  # noqa: F401
 
 # ── formatting ───────────────────────────────────────────────────────────────
 from quickquip.adapters.nonebot.command_parts._formatting import _chunk_text as _chunk_text  # noqa: F401
