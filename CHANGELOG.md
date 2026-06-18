@@ -8,6 +8,7 @@
 
 - `generation/config.py` 四模式（image/audio/music/asr）配置解析去重：`resolve_model` 统一到 `_ResolveModelMixin`，providers/models 解析骨架统一到 `_read_generation_section_data`。对外 import 路径与解析行为不变。
 - `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
+- `llm/store.py`（645 行单类）按业务域拆分到 `store_parts/` 子包：基础设施（连接/schema/守卫）→ `_StoreBase`，会话消息/记忆/归档/群设置各自独立为 mixin。对外 import 路径与 SQL 行为不变。
 
 ## [1.8.9] - 2026-06-18
 
