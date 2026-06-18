@@ -4,8 +4,21 @@
 
 ## [Unreleased]
 
+### ✨ 新增 (Added)
+
+- **Web Admin 视觉语言升级**：引入"QQ 蓝主导 + 青/琥珀辅助色 + 玻璃光场"的设计体系，借鉴 4sljq 主站设计语言并克制适配后台场景：
+  - 设计 token 全面扩展：新增青/琥珀辅助色、Inter 字体栈（含 display 标题字）、玻璃层（shell-glass）、光场层（粒子/鼠标辉光）、机械缓动（linear/steps 替代 cubic-bezier）、日志/trace 专用色板等约 40 个 token。
+  - 新增氛围层组件：`ParticleBackground`（克制强度的蓝青粒子光场，约为展示站 1/3 强度）、`MouseGlow`（跟随鼠标的蓝青锥形光晕）、`StatusBar`（顶部状态条，显示工作域路径 + CST 时钟 + 在线心跳）。
+  - 新增路由切换动效：`page-shell` 三态过渡（前进/后退/切换）+ route trace sweep（换页时顶部一道蓝青光带横扫）。
+  - 新增 `useTheme` composable，抽离主题逻辑。
+  - 新增 `public/brand.svg`，统一品牌标识引用。
+
 ### 🔧 变更 (Changed)
 
+- **Web Admin 外壳玻璃化**：侧栏（domain rail + section panel）、移动端顶栏、抽屉、Toast 化为半透玻璃（`backdrop-filter`）浮于光场之上；内容区（卡片/表格/表单）保持实色以保证长时间阅读可读性。
+- **设计基调收敛**：圆角从 6/8/20px 收敛到 4/6/12px；卡片 hover 从浮起投影改为描边式（`0 0 0 1px`）；缓动全局改为 linear/steps 营造机械精确感。
+- **品牌标识去重**：`LoginView` / `AppNav` 内联的品牌 SVG（两份共 16 处硬编码渐变 stop-color）抽取为 `public/brand.svg` 单文件 `<img>` 引用。
+- **硬编码颜色 token 化**：清理 11 个视图 + 2 个组件中绕过设计系统的约 40 处硬编码颜色，统一到 `--qq-*` token（含日志色板、trace 边框、品牌蓝边框、遮罩、强调态文字色等）。
 - `generation/config.py` 四模式（image/audio/music/asr）配置解析去重：`resolve_model` 统一到 `_ResolveModelMixin`，providers/models 解析骨架统一到 `_read_generation_section_data`。对外 import 路径与解析行为不变。
 - `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
 - `llm/store.py`（645 行单类）按业务域拆分到 `store_parts/` 子包：基础设施（连接/schema/守卫）→ `_StoreBase`，会话消息/记忆/归档/群设置各自独立为 mixin。对外 import 路径与 SQL 行为不变。
