@@ -1,62 +1,87 @@
 /* ==========================================================================
-   QuickQuip Design Token System
-   Light (default) + Dark ([data-theme="dark"])
+   QuickQuip Design Token System  v2 — QQ 蓝 + 青 + 琥珀 / 玻璃光场 / linear·steps
+   Primary: QQ 蓝  |  Accent: 青 (Cyan)  |  Highlight: 琥珀 (Amber)
+   Light: 浅灰白底 / Dark: 深炭蓝底
+   Easing: linear / steps 优先（无 Material cubic-bezier）
+   玻璃仅用于氛围层（侧栏/状态条/抽屉/Toast）；内容区（卡片/表格/表单）保持实色。
    ========================================================================== */
 
 :root {
-  /* ---- Background & Surface ---- */
-  --qq-bg: #F5F6FA;
-  --qq-surface: #FFFFFF;
-  --qq-surface-elevated: #F8F9FB;
-  --qq-surface-strong: #F0F1F3;
-  --qq-surface-hover: #EBECEF;
+  /* ── Background & Surface ── */
+  --qq-bg: #f4f6f9;
+  --qq-surface: #ffffff;
+  --qq-surface-elevated: #f8f9fb;
+  --qq-surface-strong: #eef0f3;
+  --qq-surface-hover: #e6e8ec;
+  --qq-grid-line: rgba(18, 60, 95, 0.040);
+  --qq-token-bg: rgba(18, 60, 95, 0.035);
 
-  /* ---- Borders ---- */
-  --qq-border: rgba(0, 0, 0, 0.06);
-  --qq-border-strong: rgba(0, 0, 0, 0.10);
+  /* ── Borders（实线优先，hover 才走 soft）── */
+  --qq-border: rgba(0, 0, 0, 0.08);
+  --qq-border-strong: rgba(0, 0, 0, 0.14);
+  --qq-border-soft: rgba(0, 0, 0, 0.04);
 
-  /* ---- Text ---- */
-  --qq-text: #1E1E1E;
-  --qq-text-muted: #8A8A8A;
+  /* ── Text ── */
+  --qq-text: #1c2330;
+  --qq-text-muted: #5b6678;
+  --qq-text-quiet: #9099a6;
 
-  /* ---- Primary / Accent ---- */
-  --qq-primary: #12B7F5;
-  --qq-primary-dark: #0D9BE0;
-  --qq-primary-soft: rgba(18, 183, 245, 0.10);
-  --qq-primary-glow: rgba(18, 183, 245, 0.35);
+  /* ── Primary: QQ 蓝 ── */
+  --qq-primary: #12b7f5;
+  --qq-primary-dark: #0d9be0;
+  --qq-primary-deep: #0a82c2;
+  --qq-primary-soft: rgba(18, 183, 245, 0.12);
+  --qq-primary-glow: rgba(18, 183, 245, 0.40);
+  --qq-primary-ink: rgba(13, 155, 224, 0.94);
+  --qq-primary-border: rgba(18, 183, 245, 0.36);
+  --qq-primary-shadow: rgba(18, 183, 245, 0.25);
 
-  /* ---- Brand Gradient ---- */
-  --qq-gradient-brand: linear-gradient(135deg, #12B7F5, #0D9BE0);
+  /* ── Accent: 青 (Cyan) ── */
+  --qq-cyan: #06b6d4;
+  --qq-cyan-deep: #0891b2;
+  --qq-cyan-soft: rgba(6, 182, 212, 0.12);
+  --qq-cyan-glow: rgba(6, 182, 212, 0.38);
 
-  /* ---- Semantics ---- */
-  --qq-success: #07C160;
-  --qq-success-soft: rgba(7, 193, 96, 0.10);
-  --qq-warn: #FA9D3B;
-  --qq-warn-soft: rgba(250, 157, 59, 0.10);
-  --qq-danger: #FA5151;
-  --qq-danger-soft: rgba(250, 81, 81, 0.10);
+  /* ── Highlight: 琥珀 (Amber) ── */
+  --qq-accent: #f59e0b;
+  --qq-accent-soft: rgba(245, 158, 11, 0.14);
 
-  /* ---- Shadows ---- */
-  --qq-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --qq-shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.10);
-  --qq-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --qq-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --qq-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  /* ── Brand Gradient（QQ 蓝 → 青）── */
+  --qq-gradient-brand: linear-gradient(135deg, #12b7f5, #06b6d4);
 
-  /* ---- Toast ---- */
-  --qq-toast-border-info: rgba(18, 183, 245, 0.45);
-  --qq-toast-border-error: rgba(250, 81, 81, 0.45);
+  /* ── Semantics ── */
+  --qq-success: #07c160;
+  --qq-success-soft: rgba(7, 193, 96, 0.12);
+  --qq-warn: #fa9d3b;
+  --qq-warn-soft: rgba(250, 157, 59, 0.12);
+  --qq-danger: #fa5151;
+  --qq-danger-deep: #e03e3e;
+  --qq-danger-soft: rgba(250, 81, 81, 0.12);
+  --qq-danger-border: rgba(250, 81, 81, 0.25);
+  --qq-info: #12b7f5;
+  --qq-info-soft: rgba(18, 183, 245, 0.12);
 
-  /* ---- Radius ---- */
-  --qq-radius-sm: 6px;
-  --qq-radius-md: 8px;
-  --qq-radius-nav: 8px;
-  --qq-radius-btn: 8px;
-  --qq-radius-card: 8px;
-  --qq-radius-xl: 20px;
+  /* ── Shadows（极简；hover 走描边而非浮起）── */
+  --qq-shadow-card: 0 1px 0 rgba(0, 0, 0, 0.04);
+  --qq-shadow-card-hover: 0 0 0 1px var(--qq-primary-soft);
+  --qq-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.05);
+  --qq-shadow-md: 0 2px 0 rgba(0, 0, 0, 0.04);
+  --qq-shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.10);
+
+  /* ── Toast ── */
+  --qq-toast-border-info: rgba(18, 183, 245, 0.50);
+  --qq-toast-border-error: rgba(250, 81, 81, 0.50);
+
+  /* ── Radius（收敛：4 / 6 / 12 / 全圆）── */
+  --qq-radius-sm: 4px;
+  --qq-radius-md: 6px;
+  --qq-radius-nav: 6px;
+  --qq-radius-btn: 6px;
+  --qq-radius-card: 6px;
+  --qq-radius-xl: 12px;
   --qq-radius-full: 9999px;
 
-  /* ---- Spacing ---- */
+  /* ── Spacing ── */
   --qq-gap-xs: 4px;
   --qq-gap-sm: 8px;
   --qq-gap-md: 16px;
@@ -65,70 +90,175 @@
   --qq-gap-2xl: 48px;
   --qq-gap-3xl: 64px;
 
-  /* ---- Font Size Scale ---- */
-  --qq-text-xs: 12px;
-  --qq-text-sm: 13px;
-  --qq-text-base: 14px;
-  --qq-text-md: 16px;
-  --qq-text-lg: 18px;
-  --qq-text-xl: 24px;
+  /* ── Font Size Scale ── */
+  --qq-text-xs: 11px;
+  --qq-text-sm: 12px;
+  --qq-text-base: 13px;
+  --qq-text-md: 15px;
+  --qq-text-lg: 17px;
+  --qq-text-xl: 22px;
   --qq-text-2xl: 28px;
   --qq-text-3xl: 36px;
 
-  /* ---- Typography ---- */
-  --qq-font-base: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
+  /* ── Typography ── */
+  --qq-font-base: "Inter", "Segoe UI", "Noto Sans SC", "Source Han Sans SC",
+                  "Microsoft YaHei UI", "PingFang SC", "Hiragino Sans GB",
                   system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --qq-font-mono: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas,
-                  "Fira Code", monospace;
+  --qq-font-display: "Inter", "Segoe UI Semibold", "Segoe UI", "Noto Sans SC",
+                     "Source Han Sans SC", "Microsoft YaHei UI", "PingFang SC",
+                     system-ui, sans-serif;
+  --qq-font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas,
+                  "Fira Code", "Noto Sans Mono CJK SC", "Microsoft YaHei UI",
+                  monospace;
 
-  /* ---- Transitions ---- */
-  --qq-transition-fast: 0.15s ease;
-  --qq-transition-base: 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* ── Line Heights ── */
+  --qq-line-tight: 1.25;
+  --qq-line-base: 1.6;
+  --qq-line-mono: 1.55;
 
-  /* ---- Layout ---- */
+  /* ── Transitions（无 cubic-bezier，全 linear / steps）── */
+  --qq-ease-quiet: 120ms linear;
+  --qq-ease-step: steps(4, end);
+  --qq-ease-snap: steps(1, end);
+  --qq-transition-fast: 120ms linear;
+  --qq-transition-base: 150ms linear;
+  --qq-transition-slow: 240ms linear;
+
+  /* ── Layout ── */
   --qq-domain-rail-width: 72px;
   --qq-nav-width: 260px;
   --qq-sidebar-width: var(--qq-nav-width);
   --qq-content-max-width: 1180px;
-  --qq-rail-bg: #F0F6FA;
+  --qq-status-bar-height: 26px;
+  --qq-rail-bg: #eef2f6;
 
-  /* ---- Breakpoints (reference; not usable inside @media — keep values in sync) ---- */
+  /* ── Breakpoints（参考值；@media 内不可用，需手动同步）── */
   --qq-bp-sm: 640px;
   --qq-bp-nav: 767px;
   --qq-bp-md: 900px;
   --qq-bp-lg: 1100px;
 
-  /* ---- Table ---- */
-  --qq-table-stripe: rgba(0, 0, 0, 0.015);
+  /* ── Table ── */
+  --qq-table-stripe: rgba(0, 0, 0, 0.018);
+
+  /* ── Shell Glass（氛围层玻璃：侧栏/状态条/抽屉/Toast）── */
+  --qq-shell-glass-bg: rgba(255, 255, 255, 0.46);
+  --qq-shell-rail-bg: rgba(238, 242, 246, 0.40);
+  --qq-shell-status-bg: rgba(238, 242, 246, 0.52);
+  --qq-shell-drawer-bg: rgba(255, 255, 255, 0.66);
+  --qq-shell-glass-border: rgba(18, 183, 245, 0.22);
+  --qq-shell-glass-highlight: rgba(255, 255, 255, 0.72);
+  --qq-shell-glass-sheen: rgba(18, 183, 245, 0.10);
+  --qq-shell-control-hover: rgba(18, 183, 245, 0.10);
+  --qq-shell-control-active: rgba(255, 255, 255, 0.54);
+  --qq-shell-shadow: rgba(18, 60, 95, 0.05);
+
+  /* ── Background Field（粒子光场，克制强度）── */
+  --qq-background-field-opacity: 0.55;
+  --qq-background-field-blend: normal;
+  --qq-mouse-glow-opacity: 0.32;
+  --qq-mouse-glow-blend: normal;
+
+  /* ── Route Trace Sweep（换页光带）── */
+  --qq-route-trace-color: var(--qq-primary);
+
+  /* ── Neutral 语义补充（吸收历史硬编码）── */
+  --qq-white: #ffffff;
+  --qq-on-primary: #ffffff;
+  --qq-overlay: rgba(0, 0, 0, 0.42);
+  --qq-overlay-strong: rgba(0, 0, 0, 0.55);
+  --qq-toggle-off: #d1d5db;
+  --qq-selection-bg: rgba(18, 183, 245, 0.24);
+  --qq-selection-fg: #0d2538;
+
+  /* ── 日志级别色板（LogsLiveView）── */
+  --qq-log-error: #f85149;
+  --qq-log-warn: #d29922;
+  --qq-log-success: #3fb950;
+  --qq-log-info: #79c0ff;
+  --qq-log-debug: #8b949e;
+
+  /* ── Trace 色板（LogsTraceView）── */
+  --qq-trace-request: rgba(245, 158, 11, 0.40);
+  --qq-trace-response: rgba(6, 182, 212, 0.40);
 }
 
-/* ---- Dark Theme ---- */
+/* ── Dark Theme（深炭蓝底）── */
 [data-theme="dark"] {
-  --qq-bg: #0D1117;
-  --qq-surface: #1A1F28;
-  --qq-surface-elevated: #222833;
-  --qq-surface-strong: #2A3038;
-  --qq-surface-hover: #2E333D;
+  --qq-bg: #0d1117;
+  --qq-surface: #161c26;
+  --qq-surface-elevated: #1d2530;
+  --qq-surface-strong: #252e3a;
+  --qq-surface-hover: #2c3642;
+  --qq-grid-line: rgba(160, 200, 230, 0.045);
+  --qq-token-bg: rgba(160, 200, 230, 0.040);
 
-  --qq-border: rgba(255, 255, 255, 0.06);
-  --qq-border-strong: rgba(255, 255, 255, 0.10);
+  --qq-border: rgba(255, 255, 255, 0.09);
+  --qq-border-strong: rgba(255, 255, 255, 0.16);
+  --qq-border-soft: rgba(255, 255, 255, 0.05);
 
-  --qq-text: #E8ECF1;
-  --qq-text-muted: #8B949E;
+  --qq-text: #e6ebf2;
+  --qq-text-muted: #8290a3;
+  --qq-text-quiet: #555f6e;
 
-  --qq-primary: #12B7F5;
-  --qq-primary-dark: #0D9BE0;
-  --qq-primary-soft: rgba(18, 183, 245, 0.14);
+  --qq-primary: #12b7f5;
+  --qq-primary-dark: #0d9be0;
+  --qq-primary-deep: #34d0f7;
+  --qq-primary-soft: rgba(18, 183, 245, 0.16);
+  --qq-primary-glow: rgba(18, 183, 245, 0.36);
+  --qq-primary-ink: rgba(52, 208, 247, 0.96);
+  --qq-primary-border: rgba(18, 183, 245, 0.34);
+  --qq-primary-shadow: rgba(18, 183, 245, 0.22);
 
-  --qq-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.24);
-  --qq-shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.36);
-  --qq-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20);
-  --qq-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.30), 0 2px 4px -2px rgba(0, 0, 0, 0.22);
-  --qq-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.36), 0 4px 6px -4px rgba(0, 0, 0, 0.28);
+  --qq-cyan: #22d3ee;
+  --qq-cyan-deep: #06b6d4;
+  --qq-cyan-soft: rgba(6, 182, 212, 0.16);
+  --qq-cyan-glow: rgba(34, 211, 238, 0.34);
 
-  --qq-toast-border-info: rgba(18, 183, 245, 0.45);
-  --qq-toast-border-error: rgba(250, 81, 81, 0.45);
+  --qq-accent-soft: rgba(245, 158, 11, 0.16);
 
-  --qq-table-stripe: rgba(255, 255, 255, 0.012);
+  --qq-success-soft: rgba(7, 193, 96, 0.16);
+  --qq-warn-soft: rgba(250, 157, 59, 0.16);
+  --qq-danger-soft: rgba(250, 81, 81, 0.16);
+  --qq-danger-deep: #e85a5a;
+  --qq-danger-border: rgba(250, 81, 81, 0.30);
+  --qq-info-soft: rgba(18, 183, 245, 0.16);
+
+  --qq-shadow-card: 0 1px 0 rgba(0, 0, 0, 0.22);
+  --qq-shadow-card-hover: 0 0 0 1px var(--qq-primary-soft);
+  --qq-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.26);
+  --qq-shadow-md: 0 2px 0 rgba(0, 0, 0, 0.22);
+  --qq-shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.42);
+
+  --qq-table-stripe: rgba(255, 255, 255, 0.015);
   --qq-rail-bg: #111820;
+
+  --qq-shell-glass-bg: rgba(13, 17, 23, 0.62);
+  --qq-shell-rail-bg: rgba(17, 24, 32, 0.58);
+  --qq-shell-status-bg: rgba(29, 37, 48, 0.62);
+  --qq-shell-drawer-bg: rgba(13, 17, 23, 0.78);
+  --qq-shell-glass-border: rgba(18, 183, 245, 0.18);
+  --qq-shell-glass-highlight: rgba(255, 255, 255, 0.07);
+  --qq-shell-glass-sheen: rgba(52, 208, 247, 0.10);
+  --qq-shell-control-hover: rgba(52, 208, 247, 0.10);
+  --qq-shell-control-active: rgba(17, 24, 32, 0.58);
+  --qq-shell-shadow: rgba(0, 0, 0, 0.24);
+
+  --qq-background-field-opacity: 0.50;
+  --qq-background-field-blend: screen;
+  --qq-mouse-glow-opacity: 0.42;
+  --qq-mouse-glow-blend: screen;
+
+  --qq-toggle-off: #3a4452;
+  --qq-selection-bg: rgba(18, 183, 245, 0.30);
+  --qq-selection-fg: #e6ebf2;
+
+  --qq-log-error: #ff7b72;
+  --qq-log-warn: #e3b341;
+  --qq-log-success: #56d364;
+  --qq-log-info: #79c0ff;
+  --qq-log-debug: #8b949e;
+
+  --qq-trace-request: rgba(245, 158, 11, 0.34);
+  --qq-trace-response: rgba(34, 211, 238, 0.34);
 }

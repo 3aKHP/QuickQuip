@@ -1,18 +1,85 @@
-/* Route transitions */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity var(--qq-transition-base);
+/* ==========================================================================
+   QuickQuip Transitions  v2 — 机械动效（linear / steps，无 cubic-bezier）
+   ========================================================================== */
+
+/* ── 路由切换（page-shell 三态：前进 / 后退 / 切换）── */
+.page-view {
+  display: block;
+  width: 100%;
 }
 
-.fade-enter-from,
-.fade-leave-to {
+.page-shell-enter-active,
+.page-shell-leave-active {
+  transition:
+    opacity 180ms linear,
+    transform 180ms linear,
+    filter 180ms linear;
+  transform-origin: 50% 18%;
+  will-change: opacity, transform, filter;
+}
+
+.page-shell-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.page-shell-enter-active {
+  position: relative;
+  z-index: 1;
+}
+
+.page-shell-enter-from {
   opacity: 0;
+  filter: saturate(0.92);
+  transform: translateY(10px);
 }
 
-/* Toast transition */
+.page-shell-leave-to {
+  opacity: 0;
+  filter: saturate(0.92);
+  transform: translateY(-6px);
+}
+
+.route-motion-back .page-shell-enter-from {
+  transform: translateY(-8px);
+}
+
+.route-motion-back .page-shell-leave-to {
+  transform: translateY(8px);
+}
+
+.route-motion-switch .page-shell-enter-from {
+  transform: translateY(4px);
+}
+
+.route-motion-switch .page-shell-leave-to {
+  transform: translateY(-3px);
+}
+
+/* ── Route Trace Sweep（换页顶部光带横扫）── */
+@keyframes route-trace-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-42%);
+  }
+  16% {
+    opacity: 0.74;
+  }
+  82% {
+    opacity: 0.24;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(42%);
+  }
+}
+
+/* ── Toast ── */
 .toast-enter-active,
 .toast-leave-active {
-  transition: all var(--qq-transition-base);
+  transition: opacity 150ms linear, transform 150ms linear;
 }
 
 .toast-enter-from,
@@ -21,10 +88,10 @@
   transform: translateY(8px);
 }
 
-/* Slide-up (drawer, modals) */
+/* ── Slide-up（抽屉 / 模态）── */
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: transform 0.25s ease;
+  transition: transform 200ms linear;
 }
 
 .slide-up-enter-from,
@@ -32,10 +99,10 @@
   transform: translateX(-100%);
 }
 
-/* List transitions */
+/* ── List transitions ── */
 .list-enter-active,
 .list-leave-active {
-  transition: all var(--qq-transition-base);
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
 }
 
 .list-enter-from {
@@ -50,4 +117,18 @@
 
 .list-leave-active {
   position: absolute;
+}
+
+/* ── Reduced motion 降级 ── */
+@media (prefers-reduced-motion: reduce) {
+  .page-shell-enter-active,
+  .page-shell-leave-active,
+  .toast-enter-active,
+  .toast-leave-active,
+  .slide-up-enter-active,
+  .slide-up-leave-active,
+  .list-enter-active,
+  .list-leave-active {
+    transition: none;
+  }
 }
