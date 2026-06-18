@@ -23,12 +23,16 @@ class _ResolveModelMixin:
 
     混入类需具备 ``default_model`` (str) 和 ``models`` (dict[str, Any]) 属性。
     四个模式（image/audio/music/asr）的 resolve_model 逐字节相同，集中于此避免漂移。
+
+    返回类型标注为 ``Any``：由于 ``models`` 在 mixin 层是 ``dict[str, Any]``，
+    具体的 ``ResolvedXxxModel`` 类型信息在子类才确定。各子类的调用方（如 service.py）
+    已有显式返回类型注解，类型安全在消费侧保证。
     """
 
     default_model: str
     models: dict[str, Any]
 
-    def resolve_model(self, model_id: str | None = None):
+    def resolve_model(self, model_id: str | None = None) -> Any:
         candidate = (model_id or self.default_model).strip()
         if not candidate:
             return None
@@ -236,18 +240,24 @@ def _read_generation_section_data(
     *,
     model_factory: Callable[[dict[str, Any]], Any],
     provider_factory: Callable[[str, dict[str, Any], list[Any]], Any],
-    resolved_factory: Callable[[Any, Any], Any],
+    resolved_cls: type,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     """解析 providers/models 的通用骨架，供四个 _read_xxx 复用。
 
     遍历 ``raw["providers"]``，对每个 provider：
     - 通过 *model_factory* 从 model_entry 构造各模式的 ModelConfig（含特有字段）
     - 通过 *provider_factory* 把 provider 通用字段 + model_list 绑定为具体 ProviderConfig
+    - 通过 *resolved_cls* 构造 ResolvedXxxModel（四个 Resolved 类构造签名同为
+      ``(id, model_config, provider)``，故直接传 class 替代逐模式 lambda）
 
     provider 的通用字段（id/protocol/base_url/api_key_env/timeout/default_model/
     headers/user_agent/extra_body）在四个模式间完全同构，差异仅是 protocol 和
     timeout 的默认值——这两个差异由 provider_factory 内部的 ``.get(key, default)``
     各自处理，本骨架不感知。
+
+    契约：skeleton 对 model_id/model_name 做非空预校验（决定是否跳过该 entry），
+    之后将完整 model_entry 交给 *model_factory*。factory 必须从同一 entry 提取
+    id/model 字段构造 ModelConfig，不得改用其他 key——否则预校验与实际构造不一致。
 
     返回 (providers, models, default_model)。
     """
@@ -274,7 +284,7 @@ def _read_generation_section_data(
         providers[provider_id] = provider
 
         for model in model_list:
-            models[model.id] = resolved_factory(model, provider)
+            models[model.id] = resolved_cls(id=model.id, model_config=model, provider=provider)
 
     default_model = str(raw.get("default_model", "")).strip()
     if not default_model and models:
@@ -409,7 +419,7 @@ def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
         raw,
         model_factory=_build_image_model,
         provider_factory=_image_provider_factory,
-        resolved_factory=lambda m, p: ResolvedImageModel(id=m.id, model_config=m, provider=p),
+        resolved_cls=ResolvedImageModel,
     )
     return ImageGenerationConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
@@ -425,7 +435,7 @@ def _read_audio_generation(raw: dict[str, Any]) -> AudioGenerationConfig:
         raw,
         model_factory=_build_audio_model,
         provider_factory=_audio_provider_factory,
-        resolved_factory=lambda m, p: ResolvedAudioModel(id=m.id, model_config=m, provider=p),
+        resolved_cls=ResolvedAudioModel,
     )
     return AudioGenerationConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
@@ -441,7 +451,7 @@ def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
         raw,
         model_factory=_build_music_model,
         provider_factory=_music_provider_factory,
-        resolved_factory=lambda m, p: ResolvedMusicModel(id=m.id, model_config=m, provider=p),
+        resolved_cls=ResolvedMusicModel,
     )
     return MusicGenerationConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
@@ -457,7 +467,7 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
         raw,
         model_factory=_build_asr_model,
         provider_factory=_asr_provider_factory,
-        resolved_factory=lambda m, p: ResolvedAsrModel(id=m.id, model_config=m, provider=p),
+        resolved_cls=ResolvedAsrModel,
     )
     return AsrConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
