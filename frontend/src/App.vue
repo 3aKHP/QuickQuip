@@ -176,8 +176,8 @@ onBeforeUnmount(() => {
   pointer-events: none;
   opacity: 0;
   background:
-    linear-gradient(90deg, transparent, var(--qq-primary), transparent 42%),
-    linear-gradient(90deg, transparent 56%, var(--qq-cyan-glow), transparent);
+    linear-gradient(90deg, transparent, var(--qq-route-trace-color), transparent 42%),
+    linear-gradient(90deg, transparent 56%, var(--qq-route-trace-secondary), transparent);
   transform: translateX(-42%);
 }
 

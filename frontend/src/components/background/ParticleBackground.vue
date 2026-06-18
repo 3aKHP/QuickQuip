@@ -176,7 +176,9 @@ function draw(now: number) {
       }
     }
   }
-  raf = requestAnimationFrame(draw)
+  if (!prefersReducedMotion()) {
+    raf = requestAnimationFrame(draw)
+  }
 }
 
 function resize() {
@@ -188,19 +190,38 @@ function resize() {
   initParticles(canvas.width, canvas.height)
 }
 
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    if (raf) { cancelAnimationFrame(raf); raf = 0 }
+  } else if (!raf && !prefersReducedMotion()) {
+    raf = requestAnimationFrame(draw)
+  }
+}
+
 onMounted(() => {
   resize()
   window.addEventListener('resize', resize)
   window.addEventListener('mousemove', onMouseMove, { passive: true })
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  // 尊重 prefers-reduced-motion：只画一帧静态，不启动 RAF 循环
+  if (prefersReducedMotion()) {
+    draw(performance.now())
+    return
+  }
   raf = requestAnimationFrame(draw)
 })
 
 watch(theme, () => resize())
 
 onUnmounted(() => {
-  cancelAnimationFrame(raf)
+  if (raf) cancelAnimationFrame(raf)
   window.removeEventListener('resize', resize)
   window.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>
 

@@ -1,5 +1,6 @@
 <template>
   <div
+    v-if="!reducedMotion"
     class="mouse-glow"
     :style="glowStyle"
     aria-hidden="true"
@@ -7,23 +8,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 
 const { theme } = useTheme()
 const isDark = computed(() => theme.value === 'dark')
 
+// prefers-reduced-motion：整组件不渲染（前庭敏感用户不需要跟随光晕）
+const reducedMotion = ref(false)
+
 const mx = ref(0)
 const my = ref(0)
-let raf = 0
-let rawX = 0
-let rawY = 0
 
-function onMouseMove(e: MouseEvent) { rawX = e.clientX; rawY = e.clientY }
-
-function tick() {
-  if (rawX || rawY) { mx.value = rawX; my.value = rawY }
-  raf = requestAnimationFrame(tick)
+function onMouseMove(e: MouseEvent) {
+  mx.value = e.clientX
+  my.value = e.clientY
 }
 
 const glowStyle = computed(() => {
@@ -46,14 +45,15 @@ const glowStyle = computed(() => {
 })
 
 onMounted(() => {
-  rawX = window.innerWidth / 2; rawY = window.innerHeight / 2
-  mx.value = rawX; my.value = rawY
+  reducedMotion.value = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (reducedMotion.value) return
+  mx.value = window.innerWidth / 2
+  my.value = window.innerHeight / 2
+  // 事件驱动：鼠标移动才更新坐标，静态时不空转 RAF
   window.addEventListener('mousemove', onMouseMove, { passive: true })
-  raf = requestAnimationFrame(tick)
 })
 
 onUnmounted(() => {
-  cancelAnimationFrame(raf)
   window.removeEventListener('mousemove', onMouseMove)
 })
 </script>

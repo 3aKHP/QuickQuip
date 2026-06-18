@@ -161,6 +161,7 @@
 
   /* ── Route Trace Sweep（换页光带）── */
   --qq-route-trace-color: var(--qq-primary);
+  --qq-route-trace-secondary: var(--qq-cyan-glow);
 
   /* ── Neutral 语义补充（吸收历史硬编码）── */
   --qq-white: #ffffff;
