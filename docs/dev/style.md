@@ -2,7 +2,7 @@
 
 面向所有协作者（人类与 AI）。本文件记录 QuickQuip 的代码架构硬原则、反模式与重构节奏，作为工程规范的事实参考。
 
-日常工作流见 [`../../CLAUDE.md`](../../CLAUDE.md)；项目目录与分层结构见 [`architecture.md`](architecture.md)；Commit 与 CHANGELOG 规范见 [`../../AGENTS.md`](../../AGENTS.md)。
+项目目录与分层结构见 [`architecture.md`](architecture.md)；分支模型与发布流程见 [`branching.md`](branching.md)。本文件聚焦代码架构硬原则。
 
 ---
 
@@ -13,7 +13,7 @@
 ### 文件大小与职责
 
 - **单一职责**：一个文件只干一件事。`common/sensitive_filter` 只负责敏感词过滤，不混限流；单位/格式换算类逻辑独立成纯函数模块，不放业务路径里
-- **文件长度预警线**：Python 源文件超过 ~400 行就要问"这能不能拆"。`llm/service.py`（1300+ 行）、`llm/provider.py`（1200+ 行）、`llm/mcp.py`（1000+ 行）、`chat/awakening.py`（950+ 行）已显著超标，属于待重构积压——新功能不该继续往里堆
+- **文件长度预警线**：Python 源文件超过 ~400 行就要问"这能不能拆"。`llm/service.py`（1009 行）、`chat/awakening.py`（958 行）、`llm/store.py`（组合壳，但 `store_parts/_base.py` 含集中 schema 约 160 行）等仍超预警线，属于待重构积压——新功能不该继续往里堆。`llm/provider/` 和 `llm/mcp/` 已在 v1.8.9 拆为子包，各文件均已在预警线内
 - **业务层只做业务**：纯解析、数学、统计、过滤**必须**抽到独立模块或类。`adapters/nonebot/` 只保留 matcher 注册和命令分发骨架，对业务函数的调用回到 `quickquip.*` 业务层
 
 ### 分层纪律

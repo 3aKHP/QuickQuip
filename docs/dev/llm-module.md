@@ -51,14 +51,14 @@ LLM 相关核心文件如下：
   - 负责群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
-- `src/quickquip/llm/provider.py`
-  - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射
+- `src/quickquip/llm/provider/`（包）
+  - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责统一工具声明、工具调用循环、工具结果和会话消息结构
 - `src/quickquip/llm/tool_registry.py`
   - 负责工具白名单注册、参数校验和执行调度
 - `src/quickquip/llm/store.py`
-  - 负责 SQLite 持久化
+  - 负责 SQLite 持久化（会话/记忆/归档/群设置）；v1.8.9 后按域拆为 `store_parts/` 子包的 mixin 组合
 - `src/quickquip/llm/vocab.py`
   - 负责从 `llm_about/vocab.yaml` 读取群别名与黑话词表，并按需注入
 - `src/quickquip/llm/identity.py`
