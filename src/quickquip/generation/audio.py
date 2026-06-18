@@ -353,6 +353,28 @@ async def list_available_voices(
     *,
     voice_type: str = "all",
 ) -> dict[str, list[VoiceInfo]]:
+    # 本地/自建 TTS 协议无音色查询 API：返回空，不报错。
+    # 若 model config 在 extra_body 配置了静态 voices 列表，直接返回。
+    if provider.protocol in {"openai_tts", "http_tts"}:
+        static_voices: list[VoiceInfo] = []
+        for model in provider.models:
+            voices = model.extra_body.get("voices") if isinstance(model.extra_body, dict) else None
+            if not isinstance(voices, list):
+                continue
+            for item in voices:
+                if isinstance(item, str):
+                    static_voices.append(VoiceInfo(voice_id=item, source=provider.id))
+                elif isinstance(item, dict):
+                    vid = str(item.get("voice_id", "")).strip()
+                    if vid:
+                        static_voices.append(
+                            VoiceInfo(
+                                voice_id=vid,
+                                voice_name=str(item.get("voice_name", "")),
+                                source=provider.id,
+                            )
+                        )
+        return {"static": static_voices} if static_voices else {}
     if provider.protocol not in {"minimax_t2a_http", "minimax_t2a_async"}:
         raise GenerationProviderError(f"当前 provider 不支持音色查询：{provider.protocol}")
     url = provider.base_url.rstrip("/") + "/get_voice"
@@ -421,7 +443,149 @@ async def _minimax_t2a_async(
     raise GenerationProviderError("异步音频任务轮询超时")
 
 
+def _build_local_headers(provider: AudioProviderConfig) -> dict[str, str]:
+    """本地/自建 TTS 服务的请求头：仅在配置了 api_key_env 时才附加鉴权。"""
+    headers = {**provider.headers}
+    if provider.user_agent:
+        headers["User-Agent"] = provider.user_agent
+    if provider.api_key_env:
+        api_key = os.getenv(provider.api_key_env, "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+async def _http_raw_bytes(
+    url: str,
+    *,
+    headers: dict,
+    payload: dict | None,
+    timeout: float,
+) -> tuple[bytes, str]:
+    """POST JSON 并读取 raw bytes 响应体（用于响应为音频流的 TTS）。返回 (bytes, mime_type)。"""
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    request_headers = dict(headers)
+    if body is not None:
+        request_headers["Content-Type"] = "application/json"
+    http_request = request.Request(url=url, data=body, headers=request_headers, method="POST")
+
+    def _send() -> tuple[bytes, str]:
+        try:
+            with request.urlopen(http_request, timeout=timeout, context=_ssl_context()) as response:
+                mime_type = response.headers.get_content_type() or "application/octet-stream"
+                return response.read(), mime_type
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise GenerationProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
+        except error.URLError as exc:
+            raise GenerationProviderError(f"网络错误：{exc.reason}") from exc
+        except OSError as exc:
+            raise GenerationProviderError(f"网络错误：{exc}") from exc
+
+    return await asyncio.to_thread(_send)
+
+
+async def _openai_tts(
+    provider: AudioProviderConfig,
+    model_config: AudioModelConfig,
+    text: str,
+    *,
+    voice_id: str | None = None,
+) -> GeneratedAudioResult:
+    """OpenAI TTS 兼容协议：POST /audio/speech，响应体为音频 bytes。
+
+    覆盖 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。
+    """
+    url = provider.base_url.rstrip("/") + "/audio/speech"
+    payload: dict = {
+        "model": model_config.model,
+        "input": text,
+        "voice": (voice_id or model_config.voice_id or "default").strip(),
+    }
+    if model_config.format:
+        payload["response_format"] = model_config.format
+    if model_config.speed:
+        payload["speed"] = model_config.speed
+    if model_config.extra_body:
+        payload.update(model_config.extra_body)
+    if provider.extra_body:
+        payload.update(provider.extra_body)
+    audio_bytes, detected_mime = await _http_raw_bytes(
+        url,
+        headers=_build_local_headers(provider),
+        payload=payload,
+        timeout=provider.timeout_seconds,
+    )
+    if not audio_bytes:
+        raise GenerationProviderError("OpenAI TTS 返回空响应")
+    mime_type = _mime_for_audio_format(model_config.format) if model_config.format else detected_mime
+    return GeneratedAudioResult(
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+        format=model_config.format or "mp3",
+    )
+
+
+async def _http_tts(
+    provider: AudioProviderConfig,
+    model_config: AudioModelConfig,
+    text: str,
+    *,
+    voice_id: str | None = None,
+) -> GeneratedAudioResult:
+    """原始 HTTP POST 协议：自定义请求体字段映射，适配非 OpenAI 格式的本地 TTS。
+
+    请求体从 model_config.extra_body 模板派生，支持 {text} / {voice} 占位符替换。
+    响应体作为音频 bytes 读取。
+    """
+    path = str(model_config.extra_body.get("__path", "/tts"))
+    method = str(model_config.extra_body.get("__method", "POST"))
+    url = provider.base_url.rstrip("/") + path
+
+    # 模板字段：复制 extra_body 后剔除内部控制键，做占位符替换
+    template = {k: v for k, v in model_config.extra_body.items() if not k.startswith("__")}
+    resolved_voice = (voice_id or model_config.voice_id or "").strip()
+    payload: dict = {}
+    for key, value in template.items():
+        if isinstance(value, str):
+            value = value.replace("{text}", text).replace("{voice}", resolved_voice)
+        payload[key] = value
+    # provider.extra_body 兜底补充
+    for key, value in provider.extra_body.items():
+        payload.setdefault(key, value)
+
+    body = json.dumps(payload).encode("utf-8")
+    headers = _build_local_headers(provider)
+    headers["Content-Type"] = "application/json"
+    http_request = request.Request(url=url, data=body, headers=headers, method=method)
+
+    def _send() -> GeneratedAudioResult:
+        try:
+            with request.urlopen(http_request, timeout=provider.timeout_seconds, context=_ssl_context()) as response:
+                mime_type = response.headers.get_content_type() or "application/octet-stream"
+                audio_bytes = response.read()
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise GenerationProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
+        except error.URLError as exc:
+            raise GenerationProviderError(f"网络错误：{exc.reason}") from exc
+        except OSError as exc:
+            raise GenerationProviderError(f"网络错误：{exc}") from exc
+
+        if not audio_bytes:
+            raise GenerationProviderError("HTTP TTS 返回空响应")
+        return GeneratedAudioResult(
+            audio_bytes=audio_bytes,
+            mime_type=mime_type if mime_type != "application/json" else _mime_for_audio_format(model_config.format),
+            format=model_config.format or "wav",
+        )
+
+    return await asyncio.to_thread(_send)
+
+
 _AUDIO_DISPATCH: dict[str, object] = {
     "minimax_t2a_http": _minimax_t2a_http,
     "minimax_t2a_async": _minimax_t2a_async,
+    "openai_tts": _openai_tts,
+    "http_tts": _http_tts,
 }

@@ -13,9 +13,12 @@ from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_LLM_TOML
 DEFAULT_GENERATION_CONFIG_PATH = CONFIG_GENERATION_TOML
 DEFAULT_LEGACY_LLM_CONFIG_PATH = CONFIG_LLM_TOML
 _SUPPORTED_IMAGE_PROTOCOLS = {"openai_images", "gemini_imagen", "minimax_images"}
-_SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async"}
+_SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async", "openai_tts", "http_tts"}
 _SUPPORTED_MUSIC_PROTOCOLS = {"minimax_music"}
 _SUPPORTED_ASR_PROTOCOLS = {"openai_transcriptions"}
+
+# 协议无需鉴权（本地/自建服务常无 API key）
+_NO_AUTH_AUDIO_PROTOCOLS = {"openai_tts", "http_tts"}
 
 
 class _ResolveModelMixin:
@@ -547,7 +550,7 @@ def _validate_generation_config(config: GenerationConfig) -> GenerationConfig:
         if not provider.base_url:
             config.load_error = f"音频 provider {provider.id} 缺少 base_url"
             return config
-        if not provider.api_key_env:
+        if provider.protocol not in _NO_AUTH_AUDIO_PROTOCOLS and not provider.api_key_env:
             config.load_error = f"音频 provider {provider.id} 缺少 api_key_env"
             return config
     if audio.default_model and audio.default_model not in audio.models:

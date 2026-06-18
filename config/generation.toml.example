@@ -58,14 +58,14 @@ default_model = "minimax-speech"
 #
 # [[audio.providers]] 字段：
 #   id              — provider 唯一标识
-#   protocol        — minimax_t2a_http | minimax_t2a_async
-#   base_url        — MiniMax API 根地址，默认 https://api.minimaxi.com/v1
-#   api_key_env     — API key 环境变量名
+#   protocol        — minimax_t2a_http | minimax_t2a_async | openai_tts | http_tts
+#   base_url        — API 根地址（MiniMax 默认 https://api.minimaxi.com/v1）
+#   api_key_env     — API key 环境变量名（openai_tts / http_tts 可省略，本地无鉴权）
 #   timeout_seconds — 请求超时
 #
 # [[audio.providers.models]] 字段：
 #   id              — 模型唯一标识，用于 /tts <id> <文本>
-#   model           — MiniMax TTS 模型名，例如 speech-2.8-hd
+#   model           — TTS 模型名（MiniMax: speech-2.8-hd；OpenAI: tts-1 等）
 #   voice_id        — 默认音色 ID，可被 /tts --voice 覆盖
 #   format          — mp3 | wav | flac | pcm
 #   sample_rate     — 采样率
@@ -73,6 +73,14 @@ default_model = "minimax-speech"
 #   channel         — 声道数
 #   speed / vol / pitch / emotion — 默认语音风格参数
 #   output_format   — 建议使用 hex，便于直接转成 QQ 语音段
+#   extra_body      — 自定义字段（见下方 openai_tts / http_tts 示例）
+#
+# 本地/自建 TTS（openai_tts / http_tts）：
+#   openai_tts  — OpenAI TTS 兼容协议（POST /audio/speech），覆盖 edge-tts / GPT-SoVITS /
+#                 piper 等本地服务的 OpenAI 兼容包装。无 api_key_env 时不附加鉴权头。
+#   http_tts    — 原始 HTTP POST，请求体字段从 model 的 extra_body 模板派生，
+#                 支持 {text} / {voice} 占位符替换，适配非 OpenAI 格式的本地服务。
+#                 以下划线开头的键（如 __path、__method）是内部控制字段，不会进入请求体。
 
 [[audio.providers]]
 id = "minimax-audio"
@@ -94,6 +102,47 @@ speed = 1.0
 vol = 1.0
 pitch = 0.0
 output_format = "hex"
+
+# ── 本地/自建 TTS 示例（按需取消注释）──────────────────────────────────
+#
+# # OpenAI TTS 兼容协议：适配 edge-tts / GPT-SoVITS / 各类 OpenAI 兼容 tts gateway
+# [[audio.providers]]
+# id = "local-openai-tts"
+# protocol = "openai_tts"
+# base_url = "http://127.0.0.1:8000/v1"
+# # api_key_env = "LOCAL_TTS_KEY"   # 本地无鉴权时可省略
+# timeout_seconds = 60
+#
+# [[audio.providers.models]]
+# id = "local-tts"
+# label = "本地 TTS"
+# model = "tts-1"
+# voice_id = "alloy"
+# format = "mp3"
+# # extra_body 可声明静态音色列表，供 /tts voices 查询：
+# # [audio.providers.models.extra_body]
+# # voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+#
+# # 原始 HTTP POST 协议：自定义请求体字段，适配非 OpenAI 格式的本地服务
+# # 以下划线开头的键为内部控制字段（__path 请求路径、__method HTTP 方法），不进入请求体
+# [[audio.providers]]
+# id = "local-http-tts"
+# protocol = "http_tts"
+# base_url = "http://127.0.0.1:5000"
+# timeout_seconds = 60
+#
+# [[audio.providers.models]]
+# id = "piper-tts"
+# label = "Piper TTS"
+# model = "zh_CN-huayan-medium"
+# voice_id = "huayan"
+# format = "wav"
+# [audio.providers.models.extra_body]
+# __path = "/synthesize"
+# __method = "POST"
+# text = "{text}"
+# voice = "{voice}"
+# model_id = "zh_CN-huayan-medium"
 
 [asr]
 enabled = false
