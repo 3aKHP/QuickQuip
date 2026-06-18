@@ -249,3 +249,42 @@ def test_group_settings_bool_conversion(store: LLMStore) -> None:
     assert override.enabled is False
     assert override.memory_enabled is True
     assert override.allow_at is False
+
+
+# ── _unavailable 守卫路径 ─────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def unavailable_store(tmp_path: Path) -> LLMStore:
+    """模拟数据库不可用的 store（_unavailable=True）。"""
+    s = LLMStore(tmp_path / "ok.db")
+    s._unavailable = True
+    return s
+
+
+def test_unavailable_conversation_raises(unavailable_store: LLMStore) -> None:
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.append_conversation_message(1, "u", "user", "x")
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.list_recent_conversation_messages(1, 10)
+
+
+def test_unavailable_memory_raises(unavailable_store: LLMStore) -> None:
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.add_memory(1, "x")
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.search_memories(1, user_id=None, query="x", limit=5)
+
+
+def test_unavailable_session_archive_raises(unavailable_store: LLMStore) -> None:
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.create_session_archive("u", 1)
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.archive_conversation_messages("u", 1)
+
+
+def test_unavailable_group_settings_raises(unavailable_store: LLMStore) -> None:
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.get_group_settings(1)
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        unavailable_store.update_group_settings(1, enabled=True)
