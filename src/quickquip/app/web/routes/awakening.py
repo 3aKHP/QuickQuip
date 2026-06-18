@@ -11,7 +11,7 @@ from filelock import FileLock
 from pydantic import BaseModel
 import tomllib
 
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, rule_switch, stats_tracker
+from quickquip.common.paths import RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH
 from quickquip.app.web.action_queue import action_queue
 from quickquip.app.web.audit import audit_logger
 from quickquip.chat.awakening import (
@@ -218,6 +218,8 @@ def _save_boredom_groups(groups: set[str]) -> None:
 
 
 def _known_group_ids() -> list[str]:
+    from quickquip.app.message_pipeline import stats_tracker
+
     groups = set(stats_tracker.to_dict().keys())
     groups.update(get_config().group_overrides.keys())
     groups.update(_load_boredom_groups())
@@ -225,6 +227,8 @@ def _known_group_ids() -> list[str]:
 
 
 def _format_group(group_id: str) -> dict:
+    from quickquip.app.message_pipeline import rule_switch
+
     cfg = get_config()
     settings = cfg.resolve_group(group_id)
     boredom_groups = _load_boredom_groups()
@@ -268,6 +272,8 @@ def set_awakening_rule(group_id: str, rule_name: str, body: ToggleBody, request:
     _validate_group_id(group_id)
     if rule_name not in _VALID_RULES:
         raise HTTPException(status_code=404, detail="unknown awakening rule")
+    from quickquip.app.message_pipeline import rule_switch
+
     old_enabled = rule_switch.is_enabled(group_id, rule_name)
     if body.enabled:
         rule_switch.enable(group_id, rule_name)

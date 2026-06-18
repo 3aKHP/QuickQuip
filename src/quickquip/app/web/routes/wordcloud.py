@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 
-from quickquip.app.message_pipeline import wordcloud_collector
 from quickquip.common.paths import WORDCLOUD_MESSAGES_DIR
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.wordcloud import (
@@ -79,6 +78,8 @@ async def render_wordcloud(
 
     now = datetime.now(tz=_LOCAL_TZ)
     start_ts, end_ts = _time_window(window, now)
+
+    from quickquip.app.message_pipeline import wordcloud_collector
 
     messages = wordcloud_collector.read_window(group, start_ts, end_ts)
     if not messages:

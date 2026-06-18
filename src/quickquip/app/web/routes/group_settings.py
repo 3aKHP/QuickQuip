@@ -5,7 +5,6 @@ from dataclasses import asdict
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from quickquip.app.message_pipeline import stats_tracker
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import CONFIG_LLM_TOML, LLM_DB_PATH
 from quickquip.llm.config import load_llm_config
@@ -129,6 +128,8 @@ def _format_group_entry(group_id: str, row) -> dict:
 @router.get("/group-settings")
 def list_group_settings():
     # Collect all known active group IDs from stats_tracker.
+    from quickquip.app.message_pipeline import stats_tracker
+
     active_groups = set(stats_tracker.to_dict().keys())
 
     # Load group_settings overrides from the DB (if it exists).
