@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 🔧 变更 (Changed)
+
+- `generation/config.py` 四模式（image/audio/music/asr）配置解析去重：`resolve_model` 统一到 `_ResolveModelMixin`，providers/models 解析骨架统一到 `_read_generation_section_data`。对外 import 路径与解析行为不变。
+
 ## [1.8.9] - 2026-06-18
 
 > *"为什么版本号是 1.8.9 而不是 1.8.2？"*
