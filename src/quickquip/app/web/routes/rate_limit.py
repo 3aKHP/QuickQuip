@@ -1,7 +1,5 @@
 from fastapi import APIRouter
 
-from quickquip.app.message_pipeline import rate_limiter
-
 router = APIRouter()
 
 _TOP_USERS_PER_BUCKET = 10
@@ -9,6 +7,8 @@ _TOP_USERS_PER_BUCKET = 10
 
 @router.get("/rate-limit")
 def get_rate_limit():
+    from quickquip.app.message_pipeline import rate_limiter
+
     snapshot = rate_limiter.snapshot()
     rules = []
     for name, data in snapshot.items():

@@ -15,7 +15,10 @@ def temp_awakening_config(monkeypatch, tmp_path):
     boredom_path = tmp_path / "awakening_boredom_groups.json"
     monkeypatch.setattr(awakening_route, "_CONFIG_PATH", path)
     monkeypatch.setattr(awakening_route, "_BOREDOM_GROUPS_PATH", boredom_path)
-    monkeypatch.setattr(awakening_route.stats_tracker, "to_dict", lambda: {})
+    # stats_tracker 现在在 handler 内懒导入，mock 其真实来源 message_pipeline
+    from quickquip.app.message_pipeline import stats_tracker
+
+    monkeypatch.setattr(stats_tracker, "to_dict", lambda: {})
     awakening_config.reload_config(path)
     try:
         yield path

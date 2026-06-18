@@ -2,7 +2,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, daily_enabled_groups, daily_briefing_enabled_groups, rule_switch, stats_tracker
+from quickquip.common.paths import RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH
 from quickquip.app.web.action_queue import action_queue
 from quickquip.app.web.audit import audit_logger
 
@@ -26,11 +26,15 @@ class BriefingNowBody(BaseModel):
 
 @router.get("/groups/known")
 def get_known_groups():
+    from quickquip.app.message_pipeline import stats_tracker
+
     return {"groups": sorted(stats_tracker.to_dict().keys())}
 
 
 @router.get("/groups")
 def get_groups():
+    from quickquip.app.message_pipeline import daily_briefing_enabled_groups, daily_enabled_groups
+
     return {
         "summary": sorted(daily_enabled_groups.all_groups()),
         "briefing": sorted(daily_briefing_enabled_groups.all_groups()),
@@ -40,6 +44,8 @@ def get_groups():
 @router.post("/groups/summary/{group_id}")
 def set_summary_group(group_id: str, body: GroupToggle, request: Request):
     _validate_group_id(group_id)
+    from quickquip.app.message_pipeline import daily_enabled_groups, rule_switch
+
     if body.enabled:
         daily_enabled_groups.add(group_id)
         rule_switch.enable(group_id, "daily_summary")
@@ -59,6 +65,8 @@ def set_summary_group(group_id: str, body: GroupToggle, request: Request):
 @router.post("/groups/briefing/{group_id}")
 def set_briefing_group(group_id: str, body: GroupToggle, request: Request):
     _validate_group_id(group_id)
+    from quickquip.app.message_pipeline import daily_briefing_enabled_groups, rule_switch
+
     if body.enabled:
         daily_briefing_enabled_groups.add(group_id)
         rule_switch.enable(group_id, "daily_briefing")
@@ -78,6 +86,8 @@ def set_briefing_group(group_id: str, body: GroupToggle, request: Request):
 @router.post("/groups/summary/{group_id}/now")
 def run_summary_now(group_id: str, request: Request):
     _validate_group_id(group_id)
+    from quickquip.app.message_pipeline import daily_enabled_groups
+
     if not daily_enabled_groups.contains(group_id):
         raise HTTPException(status_code=409, detail="daily summary is not enabled for this group")
     action = action_queue.enqueue("summary_now", {"group_id": group_id})
@@ -94,6 +104,8 @@ def run_summary_now(group_id: str, request: Request):
 @router.post("/groups/briefing/{group_id}/now")
 def run_briefing_now(group_id: str, body: BriefingNowBody, request: Request):
     _validate_group_id(group_id)
+    from quickquip.app.message_pipeline import daily_briefing_enabled_groups, rule_switch
+
     if not daily_briefing_enabled_groups.contains(group_id) or not rule_switch.is_enabled(group_id, "daily_briefing"):
         raise HTTPException(status_code=409, detail="daily briefing is not enabled for this group")
     from quickquip.chat.daily_briefing import normalize_period

@@ -2,7 +2,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
-from quickquip.app.message_pipeline import rule_switch, RULE_SWITCH_PATH
+from quickquip.common.paths import RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH
 from quickquip.app.web.audit import audit_logger
 from quickquip.chat.rule_switch import SWITCHABLE_RULES
 
@@ -17,6 +17,8 @@ class RuleToggle(BaseModel):
 
 @router.get("/rules")
 def get_rules():
+    from quickquip.app.message_pipeline import rule_switch
+
     return {
         "disabled": rule_switch.to_dict(),
         "all_rules": sorted(SWITCHABLE_RULES),
@@ -25,6 +27,8 @@ def get_rules():
 
 @router.post("/rules/{group_id}/{rule_name}")
 def set_rule(group_id: str, rule_name: str, body: RuleToggle, request: Request):
+    from quickquip.app.message_pipeline import rule_switch
+
     if not _GROUP_ID_RE.match(group_id):
         raise HTTPException(status_code=400, detail="group_id must be 5-12 digits")
     if rule_name not in SWITCHABLE_RULES:

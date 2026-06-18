@@ -4,7 +4,6 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from quickquip.app.message_pipeline import niuniu_store
 from quickquip.app.web.audit import audit_logger
 from quickquip.games.niuniu import NiuNiuStore
 
@@ -37,6 +36,8 @@ async def get_rankings(request: Request, type: str = "length", top_n: int = 20):
         raise HTTPException(422, "type must be 'natural', 'absolute', 'length' or 'depth'")
     top_n = min(top_n, 100)
 
+    from quickquip.app.message_pipeline import niuniu_store
+
     store: NiuNiuStore = niuniu_store
     method = {
         "natural": store.rank_by_natural,
@@ -52,6 +53,8 @@ async def get_rankings(request: Request, type: str = "length", top_n: int = 20):
 async def list_users(request: Request, offset: int = 0, limit: int = 50, keyword: str = ""):
     """Paginated niuniu user list."""
     limit = min(limit, 200)
+
+    from quickquip.app.message_pipeline import niuniu_store
 
     store: NiuNiuStore = niuniu_store
     with store.connect() as conn:
@@ -98,6 +101,8 @@ async def get_user(uid: str, request: Request):
     if not _UID_RE.match(uid):
         raise HTTPException(422, "invalid uid")
 
+    from quickquip.app.message_pipeline import niuniu_store
+
     store: NiuNiuStore = niuniu_store
     length = store.get_length(uid)
     if length is None:
@@ -126,6 +131,8 @@ async def adjust_length(uid: str, body: AdjustLengthBody, request: Request):
     """Manually set a user's niuniu length."""
     if not _UID_RE.match(uid):
         raise HTTPException(422, "invalid uid")
+
+    from quickquip.app.message_pipeline import niuniu_store
 
     store: NiuNiuStore = niuniu_store
     old_length = store.get_length(uid)
@@ -156,6 +163,8 @@ async def set_luck(uid: str, body: SetLuckBody, request: Request):
     if not _UID_RE.match(uid):
         raise HTTPException(422, "invalid uid")
 
+    from quickquip.app.message_pipeline import niuniu_store
+
     store: NiuNiuStore = niuniu_store
     if store.get_length(uid) is None:
         raise HTTPException(404, "user not found")
@@ -183,6 +192,8 @@ async def set_fence_luck(uid: str, body: SetFenceLuckBody, request: Request):
     """Manually override a user's daily fence luck."""
     if not _UID_RE.match(uid):
         raise HTTPException(422, "invalid uid")
+
+    from quickquip.app.message_pipeline import niuniu_store
 
     store: NiuNiuStore = niuniu_store
     if store.get_length(uid) is None:
@@ -213,6 +224,8 @@ class SetTextModeBody(BaseModel):
 @router.get("/niuniu/text-mode")
 async def get_text_modes(request: Request):
     """Return available text modes and groups with non-default modes."""
+    from quickquip.app.message_pipeline import niuniu_store
+
     store: NiuNiuStore = niuniu_store
     modes = list(store.texts.keys())
     groups: list[dict] = []
@@ -228,6 +241,8 @@ async def get_text_modes(request: Request):
 @router.post("/niuniu/text-mode/{group_id}")
 async def set_text_mode(group_id: str, body: SetTextModeBody, request: Request):
     """Set the text mode for a group."""
+    from quickquip.app.message_pipeline import niuniu_store
+
     store: NiuNiuStore = niuniu_store
     old_mode = store.get_group_text_mode(group_id)
     ok = store.set_group_text_mode(group_id, body.mode)
