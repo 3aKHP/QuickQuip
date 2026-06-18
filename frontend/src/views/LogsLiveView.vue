@@ -267,11 +267,11 @@ onBeforeUnmount(() => {
   color: var(--qq-text-muted);
 }
 
-.lvl-error, .lvl-critical { color: #f85149; }
-.lvl-warning { color: #d29922; }
-.lvl-success { color: #3fb950; }
-.lvl-info { color: #79c0ff; }
-.lvl-debug { color: #8b949e; }
+.lvl-error, .lvl-critical { color: var(--qq-log-error); }
+.lvl-warning { color: var(--qq-log-warn); }
+.lvl-success { color: var(--qq-log-success); }
+.lvl-info { color: var(--qq-log-info); }
+.lvl-debug { color: var(--qq-log-debug); }
 
 @media (max-width: 640px) {
   .stream-box {

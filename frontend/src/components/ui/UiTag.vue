@@ -6,7 +6,7 @@
 
 <script setup lang="ts">
 withDefaults(defineProps<{
-  variant?: 'info' | 'success' | 'warn' | 'danger'
+  variant?: 'info' | 'success' | 'warn' | 'danger' | 'cyan' | 'accent'
   size?: 'md' | 'sm'
 }>(), {
   variant: 'info',
@@ -38,6 +38,16 @@ withDefaults(defineProps<{
 .ui-tag--info {
   background: var(--qq-primary-soft);
   color: var(--qq-primary);
+}
+
+.ui-tag--cyan {
+  background: var(--qq-cyan-soft);
+  color: var(--qq-cyan-deep);
+}
+
+.ui-tag--accent {
+  background: var(--qq-accent-soft);
+  color: var(--qq-accent);
 }
 
 .ui-tag--success {

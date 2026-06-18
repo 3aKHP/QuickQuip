@@ -243,13 +243,13 @@ onMounted(async () => {
 
 .stat-card--primary {
   background: var(--qq-gradient-brand);
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(18, 183, 245, 0.25);
+  color: var(--qq-white);
+  box-shadow: 0 4px 16px var(--qq-primary-shadow);
 }
 
 .stat-card--primary .stat-card__label,
 .stat-card--primary .stat-card__value,
-.stat-card--primary .stat-card__sub { color: #fff; }
+.stat-card--primary .stat-card__sub { color: var(--qq-white); }
 
 .stat-card__label {
   font-size: var(--qq-text-xs);

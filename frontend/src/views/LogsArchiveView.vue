@@ -180,7 +180,7 @@ onMounted(() => {
 }
 
 .archive-item.active {
-  border-color: rgba(18, 183, 245, 0.45);
+  border-color: var(--qq-primary-border);
   background: var(--qq-primary-soft);
 }
 

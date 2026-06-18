@@ -412,7 +412,7 @@ load()
 .rule-row { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-md); min-height: 62px; padding: var(--qq-gap-sm); border: 1px solid var(--qq-border); border-radius: var(--qq-radius-sm); background: var(--qq-surface-strong); }
 .rule-row > div { min-width: 0; }
 .rule-row :deep(.ui-toggle) { flex: 0 0 auto; }
-.boredom-row { border-color: rgba(18, 183, 245, 0.35); }
+.boredom-row { border-color: var(--qq-primary-border); }
 .rule-label { display: block; color: var(--qq-text); font-size: var(--qq-text-sm); font-weight: 600; }
 .rule-name { display: block; margin-top: 3px; overflow: hidden; color: var(--qq-text-muted); font-size: var(--qq-text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--qq-gap-sm); }
