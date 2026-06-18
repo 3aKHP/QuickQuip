@@ -9,30 +9,14 @@
           aria-label="QuickQuip Admin"
           @click="navigate"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" class="brand-mark__icon">
-            <defs>
-              <filter id="bm-shadow" x="-30%" y="-30%" width="160%" height="160%">
-                <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.2" />
-              </filter>
-              <linearGradient id="bm-grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#60A5FA" />
-                <stop offset="100%" stop-color="#2563EB" />
-              </linearGradient>
-              <linearGradient id="bm-grad2" x1="0%" y1="100%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#818CF8" />
-                <stop offset="100%" stop-color="#3730A3" />
-              </linearGradient>
-              <linearGradient id="bm-grad-tail" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#2DD4BF" />
-                <stop offset="100%" stop-color="#0F766E" />
-              </linearGradient>
-            </defs>
-            <g filter="url(#bm-shadow)" transform="translate(24, 24) scale(0.82) translate(-24, -24)">
-              <path d="M 24 42 A 18 18 0 1 0 11.27 11.27 A 22 22 0 1 1 24 42 Z" fill="url(#bm-grad2)" opacity="0.95" />
-              <path d="M 24 6 A 18 18 0 1 0 36.73 36.73 A 22 22 0 1 1 24 6 Z" fill="url(#bm-grad1)" opacity="0.95" />
-              <path d="M 22 26 C 28 26 38 34 44 44 C 38 40 30 32 24 30 C 22 29 20 27 22 26 Z" fill="url(#bm-grad-tail)" opacity="0.95" />
-            </g>
-          </svg>
+          <img
+            class="brand-mark__icon"
+            src="/brand.svg"
+            alt=""
+            width="34"
+            height="34"
+            aria-hidden="true"
+          >
         </button>
       </router-link>
 
@@ -213,8 +197,15 @@ watch(activeSectionKey, (sectionKey) => {
   width: var(--qq-nav-width);
   display: grid;
   grid-template-columns: var(--qq-domain-rail-width) 1fr;
-  background: var(--qq-surface);
-  border-right: 1px solid var(--qq-border);
+  background:
+    linear-gradient(90deg, var(--qq-shell-glass-highlight), transparent 44%),
+    var(--qq-shell-glass-bg);
+  border-right: 1px solid var(--qq-shell-glass-border);
+  box-shadow:
+    10px 0 34px var(--qq-shell-shadow),
+    inset -1px 0 0 var(--qq-shell-glass-highlight);
+  backdrop-filter: blur(18px) saturate(1.22);
+  -webkit-backdrop-filter: blur(18px) saturate(1.22);
   flex-shrink: 0;
   z-index: 100;
 }
@@ -225,8 +216,10 @@ watch(activeSectionKey, (sectionKey) => {
   align-items: center;
   gap: var(--qq-gap-sm);
   padding: var(--qq-gap-sm) 0;
-  background: var(--qq-rail-bg);
-  border-right: 1px solid var(--qq-border);
+  background:
+    linear-gradient(180deg, var(--qq-shell-glass-highlight), transparent 38%),
+    var(--qq-shell-rail-bg);
+  border-right: 1px solid var(--qq-shell-glass-border);
 }
 
 .brand-mark,
@@ -244,18 +237,19 @@ watch(activeSectionKey, (sectionKey) => {
   display: grid;
   place-items: center;
   border-radius: var(--qq-radius-sm);
-  background: #fff;
-  border: 1px solid rgba(18, 183, 245, 0.22);
-  box-shadow: var(--qq-shadow-sm);
+  background: transparent;
+  padding: 0;
+}
+
+.brand-mark.active {
+  box-shadow: 0 0 0 3px var(--qq-primary-soft);
 }
 
 .brand-mark__icon {
   width: 34px;
   height: 34px;
-}
-
-.brand-mark.active {
-  box-shadow: 0 0 0 3px var(--qq-primary-soft);
+  display: block;
+  border-radius: var(--qq-radius-sm);
 }
 
 .domain-rail__items {
@@ -284,7 +278,7 @@ watch(activeSectionKey, (sectionKey) => {
 .domain-btn:hover,
 .rail-tool:hover {
   color: var(--qq-text);
-  background: var(--qq-surface-hover);
+  background: var(--qq-shell-control-hover);
 }
 
 .domain-btn:active {
@@ -293,7 +287,10 @@ watch(activeSectionKey, (sectionKey) => {
 
 .domain-btn.active {
   color: var(--qq-primary);
-  background: var(--qq-primary-soft);
+  background: var(--qq-shell-control-active);
+  box-shadow: inset 2px 0 0 var(--qq-primary);
+  backdrop-filter: blur(10px) saturate(1.14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.14);
 }
 
 .domain-rail__tools {
@@ -318,11 +315,45 @@ watch(activeSectionKey, (sectionKey) => {
   cursor: not-allowed;
 }
 
+.rail-tool:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--qq-primary-glow);
+}
+
+.brand-mark:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--qq-primary-glow);
+}
+
+.domain-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--qq-primary-glow);
+}
+
 .section-panel {
+  position: relative;
   min-width: 0;
   display: flex;
   flex-direction: column;
   padding: var(--qq-gap-md) var(--qq-gap-sm);
+  overflow: hidden;
+}
+
+.section-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(145deg, var(--qq-shell-glass-sheen), transparent 34%),
+    radial-gradient(ellipse at 80% 18%, var(--qq-shell-glass-sheen), transparent 38%);
+  opacity: 0.55;
+}
+
+.section-panel__head,
+.section-panel__nav {
+  position: relative;
+  z-index: 1;
 }
 
 .section-panel__head {
@@ -333,14 +364,14 @@ watch(activeSectionKey, (sectionKey) => {
   display: block;
   margin-bottom: 4px;
   color: var(--qq-primary);
+  font-family: var(--qq-font-mono);
   font-size: var(--qq-text-xs);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
 .section-panel__head h2 {
   color: var(--qq-text);
+  font-family: var(--qq-font-display);
   font-size: var(--qq-text-lg);
   line-height: 1.2;
   margin-bottom: 6px;
@@ -361,36 +392,58 @@ watch(activeSectionKey, (sectionKey) => {
 }
 
 .page-link {
+  position: relative;
+  box-sizing: border-box;
   width: 100%;
   height: 38px;
   display: flex;
   align-items: center;
   gap: var(--qq-gap-sm);
   padding: 0 12px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--qq-radius-sm);
   background: transparent;
   color: var(--qq-text-muted);
-  font-family: var(--qq-font-base);
+  font-family: var(--qq-font-display);
   font-size: var(--qq-text-sm);
   font-weight: 500;
   cursor: pointer;
   text-align: left;
-  transition: color var(--qq-transition-fast), background var(--qq-transition-fast), transform var(--qq-transition-fast);
+  transition: color var(--qq-transition-fast), background var(--qq-transition-fast);
+}
+
+/* Hover left bar indicator */
+.page-link::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 2px;
+  height: 14px;
+  border-radius: var(--qq-radius-full);
+  background: var(--qq-primary);
+  opacity: 0;
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
 
 .page-link:hover {
   color: var(--qq-text);
-  background: var(--qq-surface-hover);
+  background: var(--qq-shell-control-hover);
 }
 
-.page-link:active {
-  transform: scale(0.97);
+.page-link:hover::after {
+  transform: translateY(-50%) scaleY(1);
+  opacity: 0.5;
 }
 
 .page-link.active {
   color: var(--qq-text);
-  background: var(--qq-surface-strong);
+  background: var(--qq-shell-control-active);
+  border: 1px solid var(--qq-shell-glass-border);
+  box-shadow: inset 0 1px 0 var(--qq-shell-glass-highlight);
+  backdrop-filter: blur(10px) saturate(1.14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.14);
 }
 
 .page-link.active::before {
@@ -418,8 +471,13 @@ watch(activeSectionKey, (sectionKey) => {
     height: 52px;
     padding: 0 var(--qq-gap-md);
     padding-top: env(safe-area-inset-top, 0px);
-    background: var(--qq-surface);
-    border-bottom: 1px solid var(--qq-border);
+    background:
+      linear-gradient(180deg, var(--qq-shell-glass-highlight), transparent 58%),
+      var(--qq-shell-status-bg);
+    border-bottom: 1px solid var(--qq-shell-glass-border);
+    box-shadow: 0 10px 28px var(--qq-shell-shadow);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
     color: var(--qq-text);
     position: sticky;
     top: 0;
@@ -434,7 +492,7 @@ watch(activeSectionKey, (sectionKey) => {
     place-items: center;
     border: 0;
     border-radius: var(--qq-radius-sm);
-    background: var(--qq-surface-strong);
+    background: var(--qq-shell-control-active);
     color: var(--qq-text);
     cursor: pointer;
   }
@@ -463,7 +521,7 @@ watch(activeSectionKey, (sectionKey) => {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.42);
+    background: var(--qq-overlay);
     z-index: 200;
   }
 
@@ -472,8 +530,13 @@ watch(activeSectionKey, (sectionKey) => {
     height: 100vh;
     display: flex;
     flex-direction: column;
-    background: var(--qq-surface);
+    background:
+      linear-gradient(145deg, var(--qq-shell-glass-highlight), transparent 42%),
+      var(--qq-shell-drawer-bg);
     box-shadow: var(--qq-shadow-lg);
+    border-right: 1px solid var(--qq-shell-glass-border);
+    backdrop-filter: blur(18px) saturate(1.22);
+    -webkit-backdrop-filter: blur(18px) saturate(1.22);
   }
 
   .drawer__head {
@@ -483,7 +546,7 @@ watch(activeSectionKey, (sectionKey) => {
     height: 54px;
     padding: 0 var(--qq-gap-md);
     padding-top: env(safe-area-inset-top, 0px);
-    border-bottom: 1px solid var(--qq-border);
+    border-bottom: 1px solid var(--qq-shell-glass-border);
     color: var(--qq-text);
     font-weight: 700;
   }
@@ -496,7 +559,7 @@ watch(activeSectionKey, (sectionKey) => {
     place-items: center;
     border: 0;
     border-radius: var(--qq-radius-sm);
-    background: var(--qq-surface-strong);
+    background: var(--qq-shell-control-active);
     color: var(--qq-text);
     cursor: pointer;
   }
