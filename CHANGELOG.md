@@ -10,6 +10,10 @@
 - `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
 - `llm/store.py`（645 行单类）按业务域拆分到 `store_parts/` 子包：基础设施（连接/schema/守卫）→ `_StoreBase`，会话消息/记忆/归档/群设置各自独立为 mixin。对外 import 路径与 SQL 行为不变。
 
+### ⚡ 优化 (Performance)
+
+- Web Admin 启动内存占用优化：10 个 route 文件的 `message_pipeline` 顶层 import 改为 handler 内懒导入，避免启动时实例化 9 个 bot 专属单例（复读检测/接龙/jieba/wordcloud/游戏等），预计 VmHWM 从 ~111MB 降至 ~40MB。
+
 ## [1.8.9] - 2026-06-18
 
 > *"为什么版本号是 1.8.9 而不是 1.8.2？"*
