@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 🔧 变更 (Changed)
+
+- `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
+
 ## [1.8.9] - 2026-06-18
 
 > *"为什么版本号是 1.8.9 而不是 1.8.2？"*
