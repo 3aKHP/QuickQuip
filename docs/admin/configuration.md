@@ -246,6 +246,22 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `summary_length_hint` | 目标字数 |
 | `model_cascade` | 模型级联列表（失败自动降级） |
 
+### `[weekly_report]` / `[monthly_report]` — 群周报 / 群月报
+
+每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源复用词云采集（`wordcloud_msgs`，always-on 不删除），按天采样后套用每日日报同款 LLM 管线。与 `[daily_summary]` 相互独立，可单独开启。
+
+| 键 | 说明 |
+|----|------|
+| `enabled` | 全局开关（`true` / `false`，默认 `false`） |
+| `generate_cron` | 生成 cron（周报默认 `0 9 * * 1` 每周一；月报默认 `0 9 1 * *` 每月 1 日） |
+| `publish_cron` | 发布 cron（周报默认 `0 10 * * 1`；月报默认 `0 10 1 * *`） |
+| `min_messages` | 周期内最小消息数（不足时跳过；周报默认 100，月报默认 300） |
+| `length_hint` | 目标字数（周报默认 2000，月报默认 2500） |
+| `sample_per_day` | 每天采样消息数上限（控制喂给 LLM 的总量；周报默认 50，月报默认 20） |
+| `model_cascade` | 模型级联列表，支持 `@default` 占位符 |
+
+> 周报/月报通过 `/summary weekly|monthly on|off|status|now` 在群内按群开启。period 标识：周报为 ISO 周号（如 `2026-W24`），月报为年月（如 `2026-06`）。
+
 ---
 
 ## config/generation.toml

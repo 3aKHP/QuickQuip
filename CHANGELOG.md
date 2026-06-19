@@ -6,6 +6,11 @@
 
 ### ✨ 新增 (Added)
 
+- **群周报与群月报**：每周一/每月 1 日自动生成上一周期的群聊回顾，发到群里。与每日日报相互独立，可单独开启。
+  - 数据源复用词云采集（`wordcloud_msgs`，always-on 不删除），按天均匀采样后套用每日日报同款 LLM 管线，保证覆盖全周期同时控制成本。
+  - 周报覆盖上周（ISO 周号标识，如 `2026-W24`），月报覆盖上月（年月标识，如 `2026-06`），prompt 引导覆盖热词趋势、活跃成员、群内大事记等结构化回顾。
+  - 命令 `/summary weekly on|off|status|now` 与 `/summary monthly on|off|status|now`，与现有 `/summary` 日报子命令向后兼容（支持中文别名 `周报`/`月报`）。
+  - 配置项 `[weekly_report]` / `[monthly_report]`，含 cron、min_messages、length_hint、sample_per_day、model_cascade。
 - **语音合成新增本地 TTS 协议**：`[audio]` 段新增两种 protocol，覆盖各类本地/自建 TTS 服务，`/tts` 命令链路自动接入：
   - `openai_tts`：OpenAI TTS 兼容协议（`POST /audio/speech`），一个 handler 同时适配 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。`api_key_env` 可省略，本地无鉴权时不附加 Authorization 头。
   - `http_tts`：原始 HTTP POST 协议，请求体字段从 model 的 `extra_body` 模板派生，支持 `{text}` / `{voice}` 占位符替换，适配非 OpenAI 格式的本地服务（`__path` / `__method` 为内部控制字段）。
