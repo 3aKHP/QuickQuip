@@ -6,6 +6,10 @@
 
 ### ✨ 新增 (Added)
 
+- **语音合成新增本地 TTS 协议**：`[audio]` 段新增两种 protocol，覆盖各类本地/自建 TTS 服务，`/tts` 命令链路自动接入：
+  - `openai_tts`：OpenAI TTS 兼容协议（`POST /audio/speech`），一个 handler 同时适配 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。`api_key_env` 可省略，本地无鉴权时不附加 Authorization 头。
+  - `http_tts`：原始 HTTP POST 协议，请求体字段从 model 的 `extra_body` 模板派生，支持 `{text}` / `{voice}` 占位符替换，适配非 OpenAI 格式的本地服务（`__path` / `__method` 为内部控制字段）。
+  - 本地协议的音色查询：若 model 在 `extra_body.voices` 配置了静态列表，`/tts voices` 可返回；否则返回空而不报错。
 - **Web Admin 视觉语言升级**：引入"QQ 蓝主导 + 青/琥珀辅助色 + 玻璃光场"的设计体系，借鉴 4sljq 主站设计语言并克制适配后台场景：
   - 设计 token 全面扩展：新增青/琥珀辅助色、Inter 字体栈（含 display 标题字）、玻璃层（shell-glass）、光场层（粒子/鼠标辉光）、机械缓动（linear/steps 替代 cubic-bezier）、日志/trace 专用色板等约 40 个 token。
   - 新增氛围层组件：`ParticleBackground`（克制强度的蓝青粒子光场，约为展示站 1/3 强度）、`MouseGlow`（跟随鼠标的蓝青锥形光晕）、`StatusBar`（顶部状态条，显示工作域路径 + CST 时钟 + 在线心跳）。

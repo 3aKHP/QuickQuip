@@ -291,6 +291,17 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 `[[audio.providers]]` 和 `[[audio.providers.models]]` 结构类似图片，额外包含 `supported_formats`、`default_sample_rate`、`default_bitrate`、`default_voice`、`voice_style_options` 等语音特有字段。
 
+当前支持的 provider protocol：
+
+| protocol | 说明 |
+|----------|------|
+| `minimax_t2a_http` | MiniMax 同步 TTS，响应体含 hex 编码音频 |
+| `minimax_t2a_async` | MiniMax 异步 TTS，创建任务→轮询→取文件 |
+| `openai_tts` | OpenAI TTS 兼容协议（`POST /audio/speech`），响应体为音频 bytes。覆盖 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。`api_key_env` 可省略（本地无鉴权时不附加 Authorization 头） |
+| `http_tts` | 原始 HTTP POST，请求体字段从 model 的 `extra_body` 模板派生，支持 `{text}` / `{voice}` 占位符替换，适配非 OpenAI 格式的本地服务。以下划线开头的键（`__path` 请求路径、`__method` HTTP 方法）是内部控制字段，不进入请求体 |
+
+`openai_tts` / `http_tts` 的完整配置示例见 `config/generation.toml.example`。
+
 ### `[asr]` — 语音识别
 
 ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM 上下文。协议端若已在消息段中提供 `text` / `transcript` / `transcription` 字段，QuickQuip 会优先使用该文本；否则通过 OneBot `get_record` 获取音频文件，再调用 ASR provider。
