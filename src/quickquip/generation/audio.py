@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import os
+import re
 import ssl
 from urllib import error, parse, request
 
@@ -461,13 +462,14 @@ async def _http_raw_bytes(
     headers: dict,
     payload: dict | None,
     timeout: float,
+    method: str = "POST",
 ) -> tuple[bytes, str]:
-    """POST JSON 并读取 raw bytes 响应体（用于响应为音频流的 TTS）。返回 (bytes, mime_type)。"""
+    """发送 JSON 请求并读取 raw bytes 响应体（用于响应为音频流的 TTS）。返回 (bytes, mime_type)。"""
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     request_headers = dict(headers)
     if body is not None:
         request_headers["Content-Type"] = "application/json"
-    http_request = request.Request(url=url, data=body, headers=request_headers, method="POST")
+    http_request = request.Request(url=url, data=body, headers=request_headers, method=method)
 
     def _send() -> tuple[bytes, str]:
         try:
@@ -483,6 +485,17 @@ async def _http_raw_bytes(
             raise GenerationProviderError(f"网络错误：{exc}") from exc
 
     return await asyncio.to_thread(_send)
+
+
+# {text} / {voice} 占位符单次替换（防顺序替换注入：用户文本含 {voice} 不会被替换）
+_PLACEHOLDER_RE = re.compile(r"\{text\}|\{voice\}")
+
+
+def _substitute_placeholders(value: object, *, text: str, voice: str) -> object:
+    """对模板字段值做 {text} / {voice} 单次正则替换；非字符串原样返回。"""
+    if not isinstance(value, str):
+        return value
+    return _PLACEHOLDER_RE.sub(lambda m: text if m.group() == "{text}" else voice, value)
 
 
 async def _openai_tts(
@@ -533,54 +546,46 @@ async def _http_tts(
     *,
     voice_id: str | None = None,
 ) -> GeneratedAudioResult:
-    """原始 HTTP POST 协议：自定义请求体字段映射，适配非 OpenAI 格式的本地 TTS。
+    """原始 HTTP 协议：自定义请求体字段映射，适配非 OpenAI 格式的本地 TTS。
 
     请求体从 model_config.extra_body 模板派生，支持 {text} / {voice} 占位符替换。
+    provider.extra_body 的字符串字段同样支持占位符替换（兜底补充）。
     响应体作为音频 bytes 读取。
     """
     path = str(model_config.extra_body.get("__path", "/tts"))
-    method = str(model_config.extra_body.get("__method", "POST"))
+    if not path.startswith("/"):
+        path = "/" + path
+    method = str(model_config.extra_body.get("__method", "POST")).upper() or "POST"
     url = provider.base_url.rstrip("/") + path
 
-    # 模板字段：复制 extra_body 后剔除内部控制键，做占位符替换
-    template = {k: v for k, v in model_config.extra_body.items() if not k.startswith("__")}
     resolved_voice = (voice_id or model_config.voice_id or "").strip()
-    payload: dict = {}
-    for key, value in template.items():
-        if isinstance(value, str):
-            value = value.replace("{text}", text).replace("{voice}", resolved_voice)
-        payload[key] = value
-    # provider.extra_body 兜底补充
+
+    # 模板字段：复制 extra_body 后剔除下划线开头的内部控制键，做单次正则占位符替换
+    template = {k: v for k, v in model_config.extra_body.items() if not k.startswith("__")}
+    payload: dict = {
+        k: _substitute_placeholders(v, text=text, voice=resolved_voice) for k, v in template.items()
+    }
+    # provider.extra_body 兜底补充（同样做占位符替换）
     for key, value in provider.extra_body.items():
-        payload.setdefault(key, value)
+        payload.setdefault(key, _substitute_placeholders(value, text=text, voice=resolved_voice))
 
-    body = json.dumps(payload).encode("utf-8")
-    headers = _build_local_headers(provider)
-    headers["Content-Type"] = "application/json"
-    http_request = request.Request(url=url, data=body, headers=headers, method=method)
-
-    def _send() -> GeneratedAudioResult:
-        try:
-            with request.urlopen(http_request, timeout=provider.timeout_seconds, context=_ssl_context()) as response:
-                mime_type = response.headers.get_content_type() or "application/octet-stream"
-                audio_bytes = response.read()
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise GenerationProviderError(f"HTTP {exc.code} {detail[:240]}") from exc
-        except error.URLError as exc:
-            raise GenerationProviderError(f"网络错误：{exc.reason}") from exc
-        except OSError as exc:
-            raise GenerationProviderError(f"网络错误：{exc}") from exc
-
-        if not audio_bytes:
-            raise GenerationProviderError("HTTP TTS 返回空响应")
-        return GeneratedAudioResult(
-            audio_bytes=audio_bytes,
-            mime_type=mime_type if mime_type != "application/json" else _mime_for_audio_format(model_config.format),
-            format=model_config.format or "wav",
-        )
-
-    return await asyncio.to_thread(_send)
+    audio_bytes, detected_mime = await _http_raw_bytes(
+        url,
+        headers=_build_local_headers(provider),
+        payload=payload,
+        timeout=provider.timeout_seconds,
+        method=method,
+    )
+    if not audio_bytes:
+        raise GenerationProviderError("HTTP TTS 返回空响应")
+    mime_type = detected_mime
+    if mime_type == "application/json" and model_config.format:
+        mime_type = _mime_for_audio_format(model_config.format)
+    return GeneratedAudioResult(
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+        format=model_config.format or "wav",
+    )
 
 
 _AUDIO_DISPATCH: dict[str, object] = {
