@@ -166,6 +166,36 @@ class DailyBriefingConfig:
 
 
 @dataclass(slots=True)
+class WeeklyReportConfig:
+    """群周报：每周自动生成上周群聊回顾。
+
+    数据源复用 wordcloud collector（always-on，不删除），按天采样后套用日报同款 LLM 管线。
+    period 标识为 ISO 周号（如 2026-W24）。
+    """
+
+    enabled: bool = False
+    generate_cron: str = "0 9 * * 1"  # 每周一 09:00 生成上周周报
+    publish_cron: str = "0 10 * * 1"  # 每周一 10:00 发布
+    min_messages: int = 100
+    length_hint: int = 2000
+    sample_per_day: int = 50  # 每天采样消息数上限，控制总量
+    model_cascade: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class MonthlyReportConfig:
+    """群月报：每月自动生成上月群聊回顾。period 标识为 YYYY-MM（如 2026-06）。"""
+
+    enabled: bool = False
+    generate_cron: str = "0 9 1 * *"  # 每月 1 日 09:00 生成上月月报
+    publish_cron: str = "0 10 1 * *"  # 每月 1 日 10:00 发布
+    min_messages: int = 300
+    length_hint: int = 2500
+    sample_per_day: int = 20  # 月报跨度长，每天采样更少
+    model_cascade: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LLMConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
@@ -177,6 +207,8 @@ class LLMConfig:
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
     daily_summary: DailySummaryConfig = field(default_factory=DailySummaryConfig)
     daily_briefing: DailyBriefingConfig = field(default_factory=DailyBriefingConfig)
+    weekly_report: WeeklyReportConfig = field(default_factory=WeeklyReportConfig)
+    monthly_report: MonthlyReportConfig = field(default_factory=MonthlyReportConfig)
     image_preprocessing: ImagePreprocessingConfig = field(default_factory=ImagePreprocessingConfig)
     style_profiles: dict[str, str] = field(default_factory=dict)
     load_error: str | None = None
@@ -459,6 +491,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     mcp_raw = expand_env_value(as_dict(data.get("mcp")))
     daily_summary_raw = expand_env_value(as_dict(data.get("daily_summary")))
     daily_briefing_raw = expand_env_value(as_dict(data.get("daily_briefing")))
+    weekly_report_raw = expand_env_value(as_dict(data.get("weekly_report")))
+    monthly_report_raw = expand_env_value(as_dict(data.get("monthly_report")))
     image_preprocessing_raw = expand_env_value(as_dict(data.get("image_preprocessing")))
     raw_style_profiles = expand_env_value(as_dict(data.get("style_profiles")))
     style_profiles = {str(k).strip(): str(v).strip() for k, v in raw_style_profiles.items() if str(k).strip() and str(v).strip()}
@@ -554,6 +588,32 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             model_cascade=[
                 str(item).strip()
                 for item in daily_briefing_raw.get("model_cascade", [])
+                if str(item).strip()
+            ],
+        ),
+        weekly_report=WeeklyReportConfig(
+            enabled=as_bool(weekly_report_raw.get("enabled", False), default=False),
+            generate_cron=str(weekly_report_raw.get("generate_cron", "0 9 * * 1")).strip() or "0 9 * * 1",
+            publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * 1")).strip() or "0 10 * * 1",
+            min_messages=max(1, int(weekly_report_raw.get("min_messages", 100))),
+            length_hint=max(200, int(weekly_report_raw.get("length_hint", 2000))),
+            sample_per_day=max(1, int(weekly_report_raw.get("sample_per_day", 50))),
+            model_cascade=[
+                str(item).strip()
+                for item in weekly_report_raw.get("model_cascade", [])
+                if str(item).strip()
+            ],
+        ),
+        monthly_report=MonthlyReportConfig(
+            enabled=as_bool(monthly_report_raw.get("enabled", False), default=False),
+            generate_cron=str(monthly_report_raw.get("generate_cron", "0 9 1 * *")).strip() or "0 9 1 * *",
+            publish_cron=str(monthly_report_raw.get("publish_cron", "0 10 1 * *")).strip() or "0 10 1 * *",
+            min_messages=max(1, int(monthly_report_raw.get("min_messages", 300))),
+            length_hint=max(200, int(monthly_report_raw.get("length_hint", 2500))),
+            sample_per_day=max(1, int(monthly_report_raw.get("sample_per_day", 20))),
+            model_cascade=[
+                str(item).strip()
+                for item in monthly_report_raw.get("model_cascade", [])
                 if str(item).strip()
             ],
         ),
@@ -657,6 +717,8 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
     for cascade_name, cascade_list in [
         ("daily_summary.model_cascade", config.daily_summary.model_cascade),
         ("daily_briefing.model_cascade", config.daily_briefing.model_cascade),
+        ("weekly_report.model_cascade", config.weekly_report.model_cascade),
+        ("monthly_report.model_cascade", config.monthly_report.model_cascade),
     ]:
         for entry in cascade_list:
             provider_id = entry.split("/", 1)[0].strip()

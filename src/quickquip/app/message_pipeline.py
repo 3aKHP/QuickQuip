@@ -40,6 +40,12 @@ from quickquip.chat.daily_summary import (
     DailySummaryStore,
 )
 from quickquip.chat.daily_briefing import DailyBriefingEnabledGroups
+from quickquip.chat.period_report import (
+    PERIOD_MONTHLY,
+    PERIOD_WEEKLY,
+    PeriodReportEnabledGroups,
+    PeriodReportStore,
+)
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
 from quickquip.chat.awakening import (
@@ -54,9 +60,12 @@ from quickquip.common.paths import (
     CONFIG_GAMES_TOML,
     DATA_DIR,
     OFFLINE_MESSAGES_DB_PATH,
+    PERIOD_REPORTS_DB_PATH,
     QUOTES_DB_PATH,
     RULE_SWITCH_JSON_PATH,
     STATS_JSON_PATH,
+    WEEKLY_REPORT_GROUPS_PATH,
+    MONTHLY_REPORT_GROUPS_PATH,
 )
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
@@ -105,6 +114,10 @@ daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
 daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
 wordcloud_collector = WordCloudCollector()
+# 群周报 / 群月报（数据源复用 wordcloud_collector，独立 store 与 enabled 集合）
+period_store = PeriodReportStore(PERIOD_REPORTS_DB_PATH)
+weekly_enabled_groups = PeriodReportEnabledGroups(PERIOD_WEEKLY, WEEKLY_REPORT_GROUPS_PATH)
+monthly_enabled_groups = PeriodReportEnabledGroups(PERIOD_MONTHLY, MONTHLY_REPORT_GROUPS_PATH)
 offline_message_store = _LazyStoreProxy(
     lambda: OfflineMessageStore(OFFLINE_MESSAGES_PATH),
 )
