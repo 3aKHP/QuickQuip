@@ -175,7 +175,7 @@ class WeeklyReportConfig:
 
     enabled: bool = False
     generate_cron: str = "0 9 * * 1"  # 每周一 09:00 生成上周周报
-    publish_cron: str = "0 10 * * 1"  # 每周一 10:00 发布
+    publish_cron: str = "0 10 * * *"  # 每天 10:00 发布（周一发新报告，其余日子补发未发布的）
     min_messages: int = 100
     length_hint: int = 2000
     sample_per_day: int = 50  # 每天采样消息数上限，控制总量
@@ -188,7 +188,7 @@ class MonthlyReportConfig:
 
     enabled: bool = False
     generate_cron: str = "0 9 1 * *"  # 每月 1 日 09:00 生成上月月报
-    publish_cron: str = "0 10 1 * *"  # 每月 1 日 10:00 发布
+    publish_cron: str = "0 10 * * *"  # 每天 10:00 发布（1 日发新报告，其余日子补发未发布的）
     min_messages: int = 300
     length_hint: int = 2500
     sample_per_day: int = 20  # 月报跨度长，每天采样更少
@@ -594,7 +594,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         weekly_report=WeeklyReportConfig(
             enabled=as_bool(weekly_report_raw.get("enabled", False), default=False),
             generate_cron=str(weekly_report_raw.get("generate_cron", "0 9 * * 1")).strip() or "0 9 * * 1",
-            publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * 1")).strip() or "0 10 * * 1",
+            publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
             min_messages=max(1, int(weekly_report_raw.get("min_messages", 100))),
             length_hint=max(200, int(weekly_report_raw.get("length_hint", 2000))),
             sample_per_day=max(1, int(weekly_report_raw.get("sample_per_day", 50))),
@@ -607,7 +607,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         monthly_report=MonthlyReportConfig(
             enabled=as_bool(monthly_report_raw.get("enabled", False), default=False),
             generate_cron=str(monthly_report_raw.get("generate_cron", "0 9 1 * *")).strip() or "0 9 1 * *",
-            publish_cron=str(monthly_report_raw.get("publish_cron", "0 10 1 * *")).strip() or "0 10 1 * *",
+            publish_cron=str(monthly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
             min_messages=max(1, int(monthly_report_raw.get("min_messages", 300))),
             length_hint=max(200, int(monthly_report_raw.get("length_hint", 2500))),
             sample_per_day=max(1, int(monthly_report_raw.get("sample_per_day", 20))),
