@@ -159,3 +159,22 @@ async def test_send_period_report_now_raises_cooldown(monkeypatch):
     monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: True)
     with pytest.raises(plugin.PeriodReportCooldownError):
         await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+
+
+@pytest.mark.asyncio
+async def test_send_period_report_now_raises_generation_failed(monkeypatch):
+    """回归 Bot LOW #5：生成失败（_run_period_generation 返回 None）抛 GenerationFailedError。"""
+    _patch_period_deps(monkeypatch)
+    monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
+        contains=lambda gid: True, all_groups=lambda: [],
+        add=lambda gid: None, remove=lambda gid: None,
+    ))
+    monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: False)
+    monkeypatch.setattr(plugin, "_mark_triggered", lambda gid: None)
+
+    async def fake_run_gen(*a, **kw):
+        return None
+
+    monkeypatch.setattr(plugin, "_run_period_generation", fake_run_gen)
+    with pytest.raises(plugin.PeriodReportGenerationFailedError):
+        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
