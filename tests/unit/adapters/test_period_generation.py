@@ -55,6 +55,7 @@ def _patch_period_deps(monkeypatch, *, msg_count: int = 50):
 
     monkeypatch.setattr(plugin, "_ensure_llm_bindings", lambda: None)
     monkeypatch.setattr(plugin, "get_llm_service", lambda: fake_svc)
+    monkeypatch.setattr(plugin, "stats_tracker", types.SimpleNamespace(get_stats=lambda gid: None))
     monkeypatch.setattr(plugin, "wordcloud_collector", types.SimpleNamespace(read_window=fake_read_window))
     monkeypatch.setattr(plugin, "sample_messages_by_day", lambda msgs, per_day: msgs)
     monkeypatch.setattr(plugin, "generate_period_report", fake_generate)
@@ -110,3 +111,26 @@ async def test_send_period_report_now_does_not_persist(monkeypatch):
 
     assert counts.upsert == 0    # 不入库
     assert counts.send == 1      # 但确实发送了
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_populates_name_table_from_stats(monkeypatch):
+    """回归 Bot LOW #9：name_table 应从 stats_tracker.user_names 填充，
+    否则周报/月报里成员会显示 QQ 号而非昵称。
+    """
+    _patch_period_deps(monkeypatch, msg_count=50)
+    monkeypatch.setattr(plugin, "stats_tracker", types.SimpleNamespace(
+        get_stats=lambda gid: types.SimpleNamespace(user_names={"123": "小明", "456": "小红"}),
+    ))
+
+    captured: dict = {}
+
+    async def capture_generate(sampled, persona, group_id, **kw):
+        captured["name_table"] = kw["name_table"]
+        return ("正文", "model-1")
+
+    monkeypatch.setattr(plugin, "generate_period_report", capture_generate)
+
+    await plugin._run_period_generation("10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26")
+
+    assert captured["name_table"] == {"123": "小明", "456": "小红"}

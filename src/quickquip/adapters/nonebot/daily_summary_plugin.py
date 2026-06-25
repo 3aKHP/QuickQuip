@@ -515,7 +515,8 @@ async def _run_period_generation(
         logger.warning("period_report[%s]: no persona available for group %s", period_type, group_id)
         return None
 
-    name_table: dict[str, str] = {}
+    gs = stats_tracker.get_stats(group_id)
+    name_table: dict[str, str] = dict(gs.user_names) if gs and gs.user_names else {}
 
     try:
         return await generate_period_report(
