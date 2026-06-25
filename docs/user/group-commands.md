@@ -1107,6 +1107,8 @@ python -m quickquip.tieba.login
 - `/tieba refresh [贴吧名|all]`
 - `/tieba_peek <贴吧名>` — 实时抓取帖子
 - `/summary on|off|status|now`
+- `/summary weekly on|off|status|now`
+- `/summary monthly on|off|status|now`
 - `/briefing on|off|status|now [morning|noon|evening]`
 
 如果只记一句话：
@@ -1118,6 +1120,8 @@ python -m quickquip.tieba.login
 ## 11. 每日群聊总结
 
 机器人可以收集当天的群聊，每天早上六点自动生成一篇约 2000 字的小作文风格日报，并在中午十二点发到群里。该功能默认关闭，需要管理员手动开启。
+
+除每日日报外，还支持**群周报**与**群月报**——每周一/每月 1 日自动生成上一周期的群聊回顾（覆盖更长的时间跨度，提炼热词趋势、活跃成员、群内大事记等）。周报/月报与日报相互独立，可单独开启。
 
 ### 11.1 开启 / 关闭
 
@@ -1142,3 +1146,43 @@ python -m quickquip.tieba.login
 ```
 
 会生成前一天 06:00 至当前时刻的总结，直接发到群里，不存档。每分钟限一次。
+
+### 11.4 群周报 / 群月报
+
+周报与月报是每日日报的"长周期版"：每周一（或每月 1 日）自动生成上一个完整周期（上周/上月）的群聊回顾，发到群里。
+
+与日报的差异：
+- **时间跨度更长**：覆盖一整周/一整月，而非单日。
+- **分天采样**：由于消息量大，会按天均匀采样（周报每天约 50 条、月报每天约 20 条）后喂给 LLM，保证覆盖全周期同时控制成本。
+- **独立开关**：周报、月报、日报三者互不影响，可单独开启任意组合。
+
+#### 开启 / 关闭
+
+```text
+/summary weekly on
+```
+
+```text
+/summary weekly off
+```
+
+月报同理，把 `weekly` 换成 `monthly`。也支持中文别名 `/summary 周报 on`、`/summary 月报 off`。
+
+#### 查看状态
+
+```text
+/summary weekly status
+/summary monthly status
+```
+
+不带子命令时（`/summary weekly`）等价于查状态。
+
+#### 立即生成
+
+```text
+/summary weekly now
+```
+
+会立即生成**上一个完整周期**（上周一至今周一的窗口）的周报并发到群里，不等定时任务。每分钟限一次。月报同理用 `/summary monthly now`。
+
+> 周报/月报默认关闭，需管理员开启后才生效。生成时机由 `[weekly_report]` / `[monthly_report]` 的 cron 配置控制，详见管理员配置文档。
