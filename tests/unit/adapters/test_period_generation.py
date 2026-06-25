@@ -134,3 +134,47 @@ async def test_run_period_generation_populates_name_table_from_stats(monkeypatch
     await plugin._run_period_generation("10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26")
 
     assert captured["name_table"] == {"123": "小明", "456": "小红"}
+
+
+@pytest.mark.asyncio
+async def test_send_period_report_now_raises_not_enabled(monkeypatch):
+    """回归 Bot LOW #5：未开启抛 PeriodReportNotEnabledError（非通用 RuntimeError）。"""
+    _patch_period_deps(monkeypatch)
+    monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
+        contains=lambda gid: False, all_groups=lambda: [],
+        add=lambda gid: None, remove=lambda gid: None,
+    ))
+    with pytest.raises(plugin.PeriodReportNotEnabledError):
+        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+
+
+@pytest.mark.asyncio
+async def test_send_period_report_now_raises_cooldown(monkeypatch):
+    """回归 Bot LOW #5：冷却中抛 PeriodReportCooldownError。"""
+    _patch_period_deps(monkeypatch)
+    monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
+        contains=lambda gid: True, all_groups=lambda: [],
+        add=lambda gid: None, remove=lambda gid: None,
+    ))
+    monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: True)
+    with pytest.raises(plugin.PeriodReportCooldownError):
+        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+
+
+@pytest.mark.asyncio
+async def test_send_period_report_now_raises_generation_failed(monkeypatch):
+    """回归 Bot LOW #5：生成失败（_run_period_generation 返回 None）抛 GenerationFailedError。"""
+    _patch_period_deps(monkeypatch)
+    monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
+        contains=lambda gid: True, all_groups=lambda: [],
+        add=lambda gid: None, remove=lambda gid: None,
+    ))
+    monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: False)
+    monkeypatch.setattr(plugin, "_mark_triggered", lambda gid: None)
+
+    async def fake_run_gen(*a, **kw):
+        return None
+
+    monkeypatch.setattr(plugin, "_run_period_generation", fake_run_gen)
+    with pytest.raises(plugin.PeriodReportGenerationFailedError):
+        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())

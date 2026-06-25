@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 _SUMMARY_MAX_OUTPUT_TOKENS = 4096
 _SUMMARY_TEMPERATURE = 0.7
 
-# 周报/月报篇幅更长，输出 token 上限上调。
+# 周报/月报篇幅更长，输出 token 上限上调。8192 token 约覆盖默认 length_hint
+# （周报 2000 / 月报 2500 字，中文约 1.5-2 字/token）；调高 length_hint 时
+# 注意可能在此截断——如需更长输出请同步上调此常量。
 _PERIOD_REPORT_MAX_OUTPUT_TOKENS = 8192
 _PERIOD_REPORT_TEMPERATURE = 0.7
 

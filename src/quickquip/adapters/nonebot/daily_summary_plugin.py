@@ -657,6 +657,18 @@ def _register_period_jobs() -> None:
         )
 
 
+class PeriodReportNotEnabledError(RuntimeError):
+    """群未开启该周期报告。"""
+
+
+class PeriodReportCooldownError(RuntimeError):
+    """命令触发过于频繁（冷却中）。"""
+
+
+class PeriodReportGenerationFailedError(RuntimeError):
+    """周期报告生成失败或被跳过（消息不足、LLM 失败等）。"""
+
+
 async def _send_period_report_now(
     group_id: int | str, period_type: str, bot=None, before_generate=None
 ) -> dict[str, object]:
@@ -664,9 +676,9 @@ async def _send_period_report_now(
     group_key = str(group_id)
     enabled = _period_enabled_groups(period_type)
     if not enabled.contains(group_key):
-        raise RuntimeError(f"{period_type} report is not enabled for this group")
+        raise PeriodReportNotEnabledError(f"{period_type} report is not enabled for this group")
     if _on_cooldown(group_key):
-        raise RuntimeError("generation is on cooldown")
+        raise PeriodReportCooldownError("generation is on cooldown")
     _mark_triggered(group_key)
 
     if before_generate is not None:
@@ -676,7 +688,7 @@ async def _send_period_report_now(
     start_ts, end_ts, _, period_label = compute_period_window(period_type, now)
     result = await _run_period_generation(group_key, period_type, start_ts, end_ts, period_label)
     if result is None:
-        raise RuntimeError("period report generation skipped or failed")
+        raise PeriodReportGenerationFailedError("period report generation skipped or failed")
 
     content, model_used = result
     if bot is None:
@@ -752,15 +764,12 @@ async def _handle_period_subcommand(
                 group_id, period_type,
                 before_generate=lambda: summary_cmd.send(f"正在生成{kind_word}，请稍候……"),
             )
-        except RuntimeError as exc:
-            message = str(exc)
-            if "not enabled" in message:
-                await summary_cmd.finish(f"本群未开启{kind_word}，请先使用 /summary {head} on 开启。")
-            if "on cooldown" in message:
-                await summary_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
-            if "skipped or failed" in message:
-                await summary_cmd.finish(f"{kind_word}生成失败，请查看日志。")
-            raise
+        except PeriodReportNotEnabledError:
+            await summary_cmd.finish(f"本群未开启{kind_word}，请先使用 /summary {head} on 开启。")
+        except PeriodReportCooldownError:
+            await summary_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
+        except PeriodReportGenerationFailedError:
+            await summary_cmd.finish(f"{kind_word}生成失败，请查看日志。")
         await summary_cmd.finish()
         return True
 

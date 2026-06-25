@@ -45,7 +45,7 @@ def period_key_for(period_type: str, ref_date: date) -> str:
     raise ValueError(f"未知 period_type: {period_type!r}")
 
 
-def period_label_for(period_type: str, period_key: str, local_tz: ZoneInfo) -> str:
+def period_label_for(period_type: str, period_key: str) -> str:
     """人类可读的周期标签（用于 LLM prompt）。"""
     if period_type == PERIOD_WEEKLY:
         # period_key 形如 2026-W24，解析出 ISO 年和周号
@@ -71,7 +71,7 @@ def sample_messages_by_day(
     by_day: dict[date, list[dict]] = defaultdict(list)
     for entry in messages:
         ts = float(entry.get("ts", 0))
-        day = datetime.fromtimestamp(ts, tz=local_tz_fallback()).date()
+        day = datetime.fromtimestamp(ts, tz=_LOCAL_TZ).date()
         by_day[day].append(entry)
 
     sampled: list[dict] = []
@@ -88,10 +88,6 @@ def sample_messages_by_day(
 
     sampled.sort(key=lambda x: float(x.get("ts", 0)))
     return sampled
-
-
-def local_tz_fallback() -> ZoneInfo:
-    return _LOCAL_TZ
 
 
 class PeriodReportStore:
@@ -273,7 +269,7 @@ def compute_period_window(period_type: str, now: datetime) -> tuple[float, float
         end = this_week_monday
         ref_date = start.date()  # 上周内任意一天都映射到同一 ISO 周
         key = period_key_for(period_type, ref_date)
-        label = period_label_for(period_type, key, _LOCAL_TZ)
+        label = period_label_for(period_type, key)
         return start.timestamp(), end.timestamp(), key, label
 
     if period_type == PERIOD_MONTHLY:
@@ -283,7 +279,7 @@ def compute_period_window(period_type: str, now: datetime) -> tuple[float, float
         end = this_month_first
         ref_date = start.date()
         key = period_key_for(period_type, ref_date)
-        label = period_label_for(period_type, key, _LOCAL_TZ)
+        label = period_label_for(period_type, key)
         return start.timestamp(), end.timestamp(), key, label
 
     raise ValueError(f"未知 period_type: {period_type!r}")
