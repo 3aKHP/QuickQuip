@@ -32,6 +32,7 @@
 - `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
 - `llm/store.py`（645 行单类）按业务域拆分到 `store_parts/` 子包：基础设施（连接/schema/守卫）→ `_StoreBase`，会话消息/记忆/归档/群设置各自独立为 mixin。对外 import 路径与 SQL 行为不变。
 - **群周报/月报发布改为每日轮询**：`publish_cron` 从"每周一/每月 1 日"改为"每天 10:00"，使 generate 成功但 publish 失败的报告能在次日自动补发，不再等到下个周期（原周报延迟一周、月报延迟一个月才补发）。
+- **周报/月报命令层错误处理改用自定义异常类**：`/summary weekly|monthly now` 的失败原因（未开启 / 冷却中 / 生成失败）改用专用异常类型向命令层传递，替代原先对 RuntimeError 消息做子串匹配的脆方案，避免无关错误被误判为这三种情况导致提示错乱。
 
 ### ⚡ 优化 (Performance)
 

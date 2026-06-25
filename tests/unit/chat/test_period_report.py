@@ -41,11 +41,11 @@ def test_period_key_invalid_type():
 # ── period_label_for ──────────────────────────────────────────────────────
 
 def test_period_label_weekly():
-    assert period_label_for(PERIOD_WEEKLY, "2026-W24", LOCAL_TZ) == "2026 年第 24 周"
+    assert period_label_for(PERIOD_WEEKLY, "2026-W24") == "2026 年第 24 周"
 
 
 def test_period_label_monthly():
-    assert period_label_for(PERIOD_MONTHLY, "2026-06", LOCAL_TZ) == "2026 年 6 月"
+    assert period_label_for(PERIOD_MONTHLY, "2026-06") == "2026 年 6 月"
 
 
 # ── compute_period_window ─────────────────────────────────────────────────
@@ -72,6 +72,30 @@ def test_compute_monthly_window_returns_previous_month():
     assert end.strftime("%Y-%m-%d %H:%M") == "2026-07-01 00:00"
     assert key == "2026-06"
     assert label == "2026 年 6 月"
+
+
+def test_compute_weekly_window_crosses_year():
+    # 2026-01-05 是周一 09:00，上周跨年：2025-12-29 ~ 2026-01-04（ISO 2026-W01）
+    now = datetime(2026, 1, 5, 9, 0, tzinfo=LOCAL_TZ)
+    start_ts, end_ts, key, label = compute_period_window(PERIOD_WEEKLY, now)
+    start = datetime.fromtimestamp(start_ts, tz=LOCAL_TZ)
+    end = datetime.fromtimestamp(end_ts, tz=LOCAL_TZ)
+    assert start.strftime("%Y-%m-%d %H:%M") == "2025-12-29 00:00"
+    assert end.strftime("%Y-%m-%d %H:%M") == "2026-01-05 00:00"
+    assert key == "2026-W01"
+    assert label == "2026 年第 1 周"
+
+
+def test_compute_monthly_window_crosses_year():
+    # 2026-01-01 09:00，上月跨年：2025-12-01 ~ 2026-01-01
+    now = datetime(2026, 1, 1, 9, 0, tzinfo=LOCAL_TZ)
+    start_ts, end_ts, key, label = compute_period_window(PERIOD_MONTHLY, now)
+    start = datetime.fromtimestamp(start_ts, tz=LOCAL_TZ)
+    end = datetime.fromtimestamp(end_ts, tz=LOCAL_TZ)
+    assert start.strftime("%Y-%m-%d %H:%M") == "2025-12-01 00:00"
+    assert end.strftime("%Y-%m-%d %H:%M") == "2026-01-01 00:00"
+    assert key == "2025-12"
+    assert label == "2025 年 12 月"
 
 
 def test_compute_window_invalid_type():
