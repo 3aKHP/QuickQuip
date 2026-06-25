@@ -729,7 +729,7 @@ async def _handle_period_subcommand(
         cfg = svc.config.weekly_report if period_type == PERIOD_WEEKLY else svc.config.monthly_report
         gen_time = _cron_to_hhmm(cfg.generate_cron)
         pub_time = _cron_to_hhmm(cfg.publish_cron)
-        await summary_cmd.finish(f"本群{kind_word}已开启。将于每周期 {gen_time} 生成、{pub_time} 发布。")
+        await summary_cmd.finish(f"本群{kind_word}已开启。将于每周期 {gen_time} 生成，每天 {pub_time} 发布（未发布的报告会自动补发）。")
         return True
 
     if sub in {"off", "关闭", "禁用"}:
