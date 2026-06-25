@@ -175,7 +175,7 @@ model_cascade = [
 [weekly_report]
 enabled = false                  # 全局开关（false 时不注册定时任务）
 generate_cron = "0 9 * * 1"      # 每周一 09:00 生成上周周报
-publish_cron  = "0 10 * * 1"     # 每周一 10:00 发布
+publish_cron  = "0 10 * * *"     # 每天 10:00 发布（周一发新报告，其余日子补发未发布的）
 min_messages  = 100              # 低于此条数时跳过生成（最小值 1）
 length_hint   = 2000             # 字数目标，注入 prompt（最小值 200）
 sample_per_day = 50              # 每天采样消息数上限，控制喂给 LLM 的总量（最小值 1）
@@ -191,7 +191,7 @@ model_cascade = [
 [monthly_report]
 enabled = false                  # 全局开关
 generate_cron = "0 9 1 * *"      # 每月 1 日 09:00 生成上月月报
-publish_cron  = "0 10 1 * *"     # 每月 1 日 10:00 发布
+publish_cron  = "0 10 * * *"     # 每天 10:00 发布（1 日发新报告，其余日子补发未发布的）
 min_messages  = 300              # 低于此条数时跳过生成
 length_hint   = 2500             # 字数目标（最小值 200）
 sample_per_day = 20              # 月报跨度长，每天采样更少（最小值 1）
