@@ -477,30 +477,42 @@ def _period_enabled_groups(period_type: str):
 async def _run_period_generation(
     group_id: str,
     period_type: str,
+    start_ts: float,
+    end_ts: float,
     period_label: str,
-    period_key: str,
-    length_hint: int,
-    sample_per_day: int,
-    model_cascade: list[str],
 ) -> tuple[str, str] | None:
-    """读取周期窗口原始消息 → 分天采样 → 调 LLM 生成。返回 (text, model_used) 或 None。"""
-    now = datetime.now(tz=_LOCAL_TZ)
-    start_ts, end_ts, _, _ = compute_period_window(period_type, now)
+    """Core generation logic shared by the scheduled job and the manual command.
+
+    Returns (content, model_used) on success, None if skipped or failed.
+    Does NOT persist to the store — callers decide what to do with the result.
+    """
+    _ensure_llm_bindings()
+    svc = get_llm_service()
+    llm_config = svc.config
+
+    if period_type == PERIOD_WEEKLY:
+        cfg = llm_config.weekly_report
+    else:
+        cfg = llm_config.monthly_report
+
     messages = wordcloud_collector.read_window(group_id, start_ts, end_ts)
-    if not messages:
-        logger.info("period_report[%s]: no messages for group %s (%s)", period_type, group_id, period_key)
+    if len(messages) < cfg.min_messages:
+        logger.info(
+            "period_report[%s]: group %s has %d messages (< %d), skipping",
+            period_type, group_id, len(messages), cfg.min_messages,
+        )
         return None
 
-    sampled = sample_messages_by_day(messages, sample_per_day)
+    sampled = sample_messages_by_day(messages, cfg.sample_per_day)
     if not sampled:
         return None
 
-    svc = get_llm_service()
-    llm_config = svc.config
-    settings = llm_config.resolve_group_settings(group_id=group_id, chat_type="group")
-    persona = llm_config.personas.get(settings.persona_id) or next(iter(llm_config.personas.values()))
+    settings = svc.get_group_settings(group_id)
+    persona = llm_config.personas.get(settings.persona_id) or next(
+        iter(llm_config.personas.values()), None
+    )
     if persona is None:
-        logger.warning("period_report[%s]: no persona available", period_type)
+        logger.warning("period_report[%s]: no persona available for group %s", period_type, group_id)
         return None
 
     name_table: dict[str, str] = {}
@@ -513,8 +525,8 @@ async def _run_period_generation(
             period_label=period_label,
             period_kind=period_type,
             name_table=name_table,
-            length_hint=length_hint,
-            model_cascade=model_cascade,
+            length_hint=cfg.length_hint,
+            model_cascade=cfg.model_cascade,
             llm_config=llm_config,
             default_provider_id=settings.provider_id,
             default_model=settings.model,
@@ -526,31 +538,12 @@ async def _run_period_generation(
 
 
 async def _generate_period_one(group_id: str, period_type: str, *, now: datetime | None = None) -> tuple[str, str] | None:
-    """为单个群生成周期报告并入库。返回 (text, model_used) 或 None。"""
-    svc = get_llm_service()
-    if period_type == PERIOD_WEEKLY:
-        cfg = svc.config.weekly_report
-    else:
-        cfg = svc.config.monthly_report
-
+    """Generate and persist a period report for one group. Used by the scheduled job."""
     if now is None:
         now = datetime.now(tz=_LOCAL_TZ)
     start_ts, end_ts, period_key, period_label = compute_period_window(period_type, now)
 
-    messages = wordcloud_collector.read_window(group_id, start_ts, end_ts)
-    if len(messages) < cfg.min_messages:
-        logger.info(
-            "period_report[%s]: group %s has only %d/%d messages, skipping",
-            period_type, group_id, len(messages), cfg.min_messages,
-        )
-        return None
-
-    result = await _run_period_generation(
-        group_id, period_type, period_label, period_key,
-        length_hint=cfg.length_hint,
-        sample_per_day=cfg.sample_per_day,
-        model_cascade=cfg.model_cascade,
-    )
+    result = await _run_period_generation(group_id, period_type, start_ts, end_ts, period_label)
     if result is not None:
         content, model_used = result
         period_store.upsert(group_id, period_type, period_key, content, model_used)
@@ -678,7 +671,9 @@ async def _send_period_report_now(
     if before_generate is not None:
         await before_generate()
 
-    result = await _generate_period_one(group_key, period_type)
+    now = datetime.now(tz=_LOCAL_TZ)
+    start_ts, end_ts, _, period_label = compute_period_window(period_type, now)
+    result = await _run_period_generation(group_key, period_type, start_ts, end_ts, period_label)
     if result is None:
         raise RuntimeError("period report generation skipped or failed")
 
