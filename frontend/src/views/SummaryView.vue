@@ -359,7 +359,7 @@ function closeDetail() {
   gap: var(--qq-gap-sm);
   margin-bottom: var(--qq-gap-md);
   padding: var(--qq-gap-sm) var(--qq-gap-md);
-  border: 1px solid rgba(250, 81, 81, 0.25);
+  border: 1px solid var(--qq-danger-border);
   border-radius: var(--qq-radius-card);
   background: var(--qq-danger-soft);
   color: var(--qq-danger);

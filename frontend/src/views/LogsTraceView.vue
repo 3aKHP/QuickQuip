@@ -296,11 +296,11 @@ onBeforeUnmount(() => {
 }
 
 .trace-entry.request {
-  border-color: rgba(217, 119, 6, 0.35);
+  border-color: var(--qq-trace-request);
 }
 
 .trace-entry.response {
-  border-color: rgba(16, 185, 129, 0.35);
+  border-color: var(--qq-trace-response);
 }
 
 .trace-entry-head {

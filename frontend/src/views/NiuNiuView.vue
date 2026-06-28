@@ -96,7 +96,7 @@ async function doSetFenceLuck() { if (adjustFenceLuckVal.value == null || !userD
 .tab-row button { padding: 4px 16px; border: none; background: var(--qq-surface-strong); color: var(--qq-text-muted); font-size: var(--qq-text-sm); font-family: var(--qq-font-base); cursor: pointer; }
 .tab-row button:first-child { border-radius: var(--qq-radius-sm) 0 0 var(--qq-radius-sm); }
 .tab-row button:last-child { border-radius: 0 var(--qq-radius-sm) var(--qq-radius-sm) 0; }
-.tab-row button.active { background: var(--qq-primary); color: #fff; }
+.tab-row button.active { background: var(--qq-primary); color: var(--qq-on-primary); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .link { color: var(--qq-primary); text-decoration: none; font-family: var(--qq-font-mono); }
 .link:hover { text-decoration: underline; }

@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{
   padding?: 'sm' | 'md' | 'lg' | 'none'
   shadow?: 'none' | 'sm' | 'md' | 'lg'
   clickable?: boolean
-  accent?: 'primary' | 'success' | 'warn' | 'danger'
+  accent?: 'primary' | 'cyan' | 'accent' | 'success' | 'warn' | 'danger'
 }>(), {
   padding: 'md',
   shadow: 'sm',
@@ -30,9 +30,10 @@ const classes = computed(() => [
 .ui-card {
   position: relative;
   background: var(--qq-surface);
+  border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   overflow: hidden;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast);
 }
 
 .ui-card--shadow-sm { box-shadow: var(--qq-shadow-card); }
@@ -47,21 +48,25 @@ const classes = computed(() => [
   cursor: pointer;
 }
 
+/* 描边式 hover，替代浮起投影 */
 .ui-card--clickable:hover {
-  transform: translateY(-2px);
+  border-color: var(--qq-primary-border);
   box-shadow: var(--qq-shadow-card-hover);
 }
 
-/* Semantic accent bar */
+/* 语义色条 — 左侧 2px */
 .ui-card__accent {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  height: 3px;
+  bottom: 0;
+  width: 2px;
+  z-index: 2;
 }
 
 .ui-card__accent--primary { background: var(--qq-primary); }
+.ui-card__accent--cyan    { background: var(--qq-cyan); }
+.ui-card__accent--accent  { background: var(--qq-accent); }
 .ui-card__accent--success { background: var(--qq-success); }
 .ui-card__accent--warn    { background: var(--qq-warn); }
 .ui-card__accent--danger  { background: var(--qq-danger); }

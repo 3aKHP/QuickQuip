@@ -1,5 +1,9 @@
 <template>
   <div class="app-root">
+    <!-- Ambient light field -->
+    <ParticleBackground />
+    <MouseGlow />
+
     <!-- Unauthenticated -->
     <LoginView
       v-if="authReady && !authenticated"
@@ -10,22 +14,27 @@
 
     <!-- Main layout -->
     <div v-else-if="authReady" class="layout">
-      <AppNav
-        :items="NAV_ITEMS"
-        :sections="NAV_SECTIONS"
-        :logout-disabled="authBusy"
-        :theme-icon="theme === 'dark' ? 'Sun' : 'Moon'"
-        :theme-label="theme === 'dark' ? '亮色' : '暗色'"
-        @logout="handleLogout"
-        @toggle-theme="toggleTheme"
-      />
-      <main class="content">
-        <router-view v-slot="{ Component }">
-          <Transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </Transition>
-        </router-view>
-      </main>
+      <StatusBar />
+      <div class="layout__body">
+        <AppNav
+          :items="NAV_ITEMS"
+          :sections="NAV_SECTIONS"
+          :logout-disabled="authBusy"
+          :theme-icon="theme === 'dark' ? 'Sun' : 'Moon'"
+          :theme-label="theme === 'dark' ? '亮色' : '暗色'"
+          @logout="handleLogout"
+          @toggle-theme="toggleTheme"
+        />
+        <main ref="contentEl" class="content" :class="routeMotionClass">
+          <div class="page-stage">
+            <router-view v-slot="{ Component, route: viewRoute }">
+              <Transition name="page-shell">
+                <component :is="Component" :key="viewRoute.fullPath" class="page-view" />
+              </Transition>
+            </router-view>
+          </div>
+        </main>
+      </div>
 
       <!-- Toast -->
       <Transition name="toast">
@@ -47,14 +56,19 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import LoginView from './views/LoginView.vue'
 import AppNav from './components/layout/AppNav.vue'
+import StatusBar from './components/layout/StatusBar.vue'
+import ParticleBackground from './components/background/ParticleBackground.vue'
+import MouseGlow from './components/background/MouseGlow.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
 import { toastMsg, toastType } from './toast'
 import { NAV_ITEMS, NAV_SECTIONS } from './config/nav'
 import { useAuth } from './composables/useAuth'
+import { useTheme } from './composables/useTheme'
 
 const {
   authReady,
@@ -68,29 +82,36 @@ const {
   detachUnauthorizedHandler,
 } = useAuth()
 
-const theme = ref<'light' | 'dark'>('light')
+const { theme, loadTheme, toggleTheme } = useTheme()
+const route = useRoute()
+const contentEl = ref<HTMLElement | null>(null)
+const routeMotionClass = ref('route-motion-forward')
 
-function applyTheme(t: 'light' | 'dark') {
-  document.documentElement.setAttribute('data-theme', t)
+function routeDepth(path: string): number {
+  if (path === '/') return 0
+  return path.split('/').filter(Boolean).length
 }
 
-function loadTheme() {
-  try {
-    const stored = localStorage.getItem('qq-admin-theme')
-    if (stored === 'light' || stored === 'dark') {
-      theme.value = stored
+watch(
+  () => route.fullPath,
+  (nextPath, prevPath) => {
+    const nextDepth = routeDepth(nextPath)
+    const prevDepth = prevPath ? routeDepth(prevPath) : nextDepth
+
+    if (nextDepth > prevDepth) {
+      routeMotionClass.value = 'route-motion-forward'
+    } else if (nextDepth < prevDepth) {
+      routeMotionClass.value = 'route-motion-back'
+    } else {
+      routeMotionClass.value = 'route-motion-switch'
     }
-  } catch { /* ignore */ }
-  applyTheme(theme.value)
-}
 
-function toggleTheme() {
-  theme.value = theme.value === 'light' ? 'dark' : 'light'
-  try { localStorage.setItem('qq-admin-theme', theme.value) } catch { /* ignore */ }
-  applyTheme(theme.value)
-}
-
-watch(theme, applyTheme)
+    void nextTick(() => {
+      contentEl.value?.scrollTo({ top: 0 })
+    })
+  },
+  { immediate: true },
+)
 
 ;(window as any).__qqToggleTheme = toggleTheme
 
@@ -111,9 +132,19 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
+  position: relative;
 }
 
 .layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.layout__body {
   display: flex;
   flex-direction: row;
   flex: 1;
@@ -121,6 +152,7 @@ onBeforeUnmount(() => {
 }
 
 .content {
+  position: relative;
   padding: var(--qq-gap-lg);
   flex: 1;
   display: flex;
@@ -132,7 +164,37 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+/* Route trace sweep — 换页时顶部一道蓝青光带横扫 */
+.content::before {
+  content: "";
+  position: absolute;
+  top: var(--qq-gap-md);
+  left: var(--qq-gap-lg);
+  right: var(--qq-gap-lg);
+  z-index: 6;
+  height: 1px;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(90deg, transparent, var(--qq-route-trace-color), transparent 42%),
+    linear-gradient(90deg, transparent 56%, var(--qq-route-trace-secondary), transparent);
+  transform: translateX(-42%);
+}
+
+.content.route-motion-forward::before,
+.content.route-motion-back::before,
+.content.route-motion-switch::before {
+  animation: route-trace-sweep 360ms linear 1;
+}
+
+.page-stage {
+  position: relative;
+  width: 100%;
+}
+
 .auth-shell {
+  position: relative;
+  z-index: 1;
   height: 100vh;
   display: grid;
   place-items: center;
@@ -164,8 +226,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--qq-gap-sm);
-  background: var(--qq-surface-elevated);
-  border: 1px solid var(--qq-border-strong);
+  background:
+    linear-gradient(180deg, var(--qq-shell-glass-highlight), transparent 58%),
+    var(--qq-shell-drawer-bg);
+  border: 1px solid var(--qq-shell-glass-border);
   border-radius: var(--qq-radius-card);
   padding: 10px 18px;
   font-size: var(--qq-text-sm);
@@ -173,6 +237,8 @@ onBeforeUnmount(() => {
   z-index: 9999;
   pointer-events: none;
   white-space: nowrap;
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: var(--qq-shadow-md);
 }
 
@@ -188,7 +254,7 @@ onBeforeUnmount(() => {
 
 /* Responsive */
 @media (max-width: 767px) {
-  .layout {
+  .layout__body {
     flex-direction: column;
   }
 
@@ -197,9 +263,14 @@ onBeforeUnmount(() => {
     padding-bottom: calc(var(--qq-gap-lg) + env(safe-area-inset-bottom, 0px));
   }
 
+  .content::before {
+    left: var(--qq-gap-md);
+    right: var(--qq-gap-md);
+  }
+
   .toast {
     bottom: auto;
-    top: calc(56px + env(safe-area-inset-top, 0px));
+    top: calc(var(--qq-status-bar-height) + 56px + env(safe-area-inset-top, 0px));
     transform: translateX(-50%);
   }
 }

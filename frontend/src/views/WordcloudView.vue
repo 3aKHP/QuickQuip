@@ -45,14 +45,14 @@ loadGroups()
 .win-btn { padding: 6px 12px; border: none; background: var(--qq-surface-strong); color: var(--qq-text-muted); font-size: var(--qq-text-sm); font-family: var(--qq-font-base); cursor: pointer; transition: all var(--qq-transition-fast); }
 .win-btn:first-child { border-radius: var(--qq-radius-sm) 0 0 var(--qq-radius-sm); }
 .win-btn:last-child { border-radius: 0 var(--qq-radius-sm) var(--qq-radius-sm) 0; }
-.win-btn.active { background: var(--qq-primary); color: #fff; }
+.win-btn.active { background: var(--qq-primary); color: var(--qq-on-primary); }
 .hint { display: inline-flex; align-items: center; gap: 6px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); margin: var(--qq-gap-sm) 0 var(--qq-gap-md); }
 .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .sum-row { display: flex; align-items: center; gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); flex-wrap: wrap; }
 .link { margin-left: auto; color: var(--qq-primary); text-decoration: none; font-size: var(--qq-text-sm); }
 .res-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: var(--qq-gap-md); align-items: start; }
 .img-wrap { border-radius: var(--qq-radius-card); overflow: hidden; box-shadow: var(--qq-shadow-card); }
-.wc-img { width: 100%; display: block; background: #fff; }
+.wc-img { width: 100%; display: block; background: var(--qq-white); }
 .top-wrap { max-height: 500px; overflow-y: auto; }
 .top-t { margin: 0 0 var(--qq-gap-sm); font-size: var(--qq-text-base); color: var(--qq-text); }
 .top-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }

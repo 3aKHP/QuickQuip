@@ -168,6 +168,40 @@ model_cascade = [
     "deepseek/deepseek-chat",
 ]
 
+# 群周报 — 每周自动生成上周群聊回顾。
+# 数据源复用词云采集（wordcloud_msgs，always-on 不删除），按天采样后套用日报同款 LLM 管线。
+# 命令：/summary weekly on|off|status|now（在群里开启/关闭/查状态/立即生成上周）
+# period 标识为 ISO 周号（如 2026-W24）。
+[weekly_report]
+enabled = false                  # 全局开关（false 时不注册定时任务）
+generate_cron = "0 9 * * 1"      # 每周一 09:00 生成上周周报
+publish_cron  = "0 10 * * *"     # 每天 10:00 发布（周一发新报告，其余日子补发未发布的）
+min_messages  = 100              # 低于此条数时跳过生成（最小值 1）
+length_hint   = 2000             # 字数目标，注入 prompt（最小值 200）
+sample_per_day = 50              # 每天采样消息数上限，控制喂给 LLM 的总量（最小值 1）
+model_cascade = [
+    "gemini-main/gemini-3.1-pro-high",
+    "claude-main/claude-sonnet-4-6",
+    "openai-main/gpt-5.4",
+    "@default",
+]
+
+# 群月报 — 每月自动生成上月群聊回顾。period 标识为年月（如 2026-06）。
+# 命令：/summary monthly on|off|status|now
+[monthly_report]
+enabled = false                  # 全局开关
+generate_cron = "0 9 1 * *"      # 每月 1 日 09:00 生成上月月报
+publish_cron  = "0 10 * * *"     # 每天 10:00 发布（1 日发新报告，其余日子补发未发布的）
+min_messages  = 300              # 低于此条数时跳过生成
+length_hint   = 2500             # 字数目标（最小值 200）
+sample_per_day = 20              # 月报跨度长，每天采样更少（最小值 1）
+model_cascade = [
+    "gemini-main/gemini-3.1-pro-high",
+    "claude-main/claude-sonnet-4-6",
+    "openai-main/gpt-5.4",
+    "@default",
+]
+
 # 图片 / 音视频等多模态产出配置已拆分到 config/generation.toml。
 # 请复制 config/generation.toml.example 为 config/generation.toml 后单独维护。
 # 当前运行时仍兼容旧版 [image_generation] 配置读取，但该写法只用于平滑迁移。

@@ -4,7 +4,6 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from quickquip.app.message_pipeline import game_economy
 from quickquip.app.web.audit import audit_logger
 from quickquip.games.economy import GameEconomyStore
 
@@ -23,6 +22,8 @@ class AdjustBody(BaseModel):
 @router.get("/game-economy/groups")
 async def list_groups(request: Request):
     """Return all group IDs that have gold accounts."""
+    from quickquip.app.message_pipeline import game_economy
+
     store: GameEconomyStore = game_economy
     with store.connect() as conn:
         rows = conn.execute(
@@ -50,6 +51,8 @@ async def get_rankings(group_id: str, request: Request, top_n: int = 20):
     """Return top N gold holders in a group."""
     if not _GROUP_ID_RE.match(group_id):
         raise HTTPException(422, "invalid group_id")
+    from quickquip.app.message_pipeline import game_economy
+
     store: GameEconomyStore = game_economy
     rank = store.get_rank(group_id, top_n=min(top_n, 100))
     return {"group_id": group_id, "rankings": rank}
@@ -67,6 +70,8 @@ async def list_accounts(
     if not _GROUP_ID_RE.match(group_id):
         raise HTTPException(422, "invalid group_id")
     limit = min(limit, 200)
+
+    from quickquip.app.message_pipeline import game_economy
 
     store: GameEconomyStore = game_economy
     with store.connect() as conn:
@@ -118,6 +123,8 @@ async def get_account(group_id: str, user_id: str, request: Request):
     if not _UID_RE.match(user_id):
         raise HTTPException(422, "invalid user_id")
 
+    from quickquip.app.message_pipeline import game_economy
+
     store: GameEconomyStore = game_economy
     with store.connect() as conn:
         row = conn.execute(
@@ -136,6 +143,8 @@ async def adjust_gold(group_id: str, user_id: str, body: AdjustBody, request: Re
         raise HTTPException(422, "invalid group_id")
     if not _UID_RE.match(user_id):
         raise HTTPException(422, "invalid user_id")
+
+    from quickquip.app.message_pipeline import game_economy
 
     store: GameEconomyStore = game_economy
     old_balance = store.get_balance(user_id, group_id)["gold"]

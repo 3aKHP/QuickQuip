@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+
+## [1.9.0] - 2026-06-26
+
+### ✨ 新增 (Added)
+
+- **群周报与群月报**：每周一/每月 1 日自动生成上一周期的群聊回顾，发到群里。与每日日报相互独立，可单独开启。
+  - 数据源复用词云采集（`wordcloud_msgs`，always-on 不删除），按天均匀采样后套用每日日报同款 LLM 管线，保证覆盖全周期同时控制成本。
+  - 周报覆盖上周（ISO 周号标识，如 `2026-W24`），月报覆盖上月（年月标识，如 `2026-06`），prompt 引导覆盖热词趋势、活跃成员、群内大事记等结构化回顾。
+  - 命令 `/summary weekly on|off|status|now` 与 `/summary monthly on|off|status|now`，与现有 `/summary` 日报子命令向后兼容（支持中文别名 `周报`/`月报`）。
+  - 配置项 `[weekly_report]` / `[monthly_report]`，含 cron、min_messages、length_hint、sample_per_day、model_cascade。
+- **语音合成新增本地 TTS 协议**：`[audio]` 段新增两种 protocol，覆盖各类本地/自建 TTS 服务，`/tts` 命令链路自动接入：
+  - `openai_tts`：OpenAI TTS 兼容协议（`POST /audio/speech`），一个 handler 同时适配 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。`api_key_env` 可省略，本地无鉴权时不附加 Authorization 头。
+  - `http_tts`：原始 HTTP POST 协议，请求体字段从 model 的 `extra_body` 模板派生，支持 `{text}` / `{voice}` 占位符替换，适配非 OpenAI 格式的本地服务（`__path` / `__method` 为内部控制字段）。
+  - 本地协议的音色查询：若 model 在 `extra_body.voices` 配置了静态列表，`/tts voices` 可返回；否则返回空而不报错。
+- **Web Admin 视觉语言升级**：引入"QQ 蓝主导 + 青/琥珀辅助色 + 玻璃光场"的设计体系，借鉴 4sljq 主站设计语言并克制适配后台场景：
+  - 设计 token 全面扩展：新增青/琥珀辅助色、Inter 字体栈（含 display 标题字）、玻璃层（shell-glass）、光场层（粒子/鼠标辉光）、机械缓动（linear/steps 替代 cubic-bezier）、日志/trace 专用色板等约 40 个 token。
+  - 新增氛围层组件：`ParticleBackground`（克制强度的蓝青粒子光场，约为展示站 1/3 强度）、`MouseGlow`（跟随鼠标的蓝青锥形光晕）、`StatusBar`（顶部状态条，显示工作域路径 + CST 时钟 + 在线心跳）。
+  - 新增路由切换动效：`page-shell` 三态过渡（前进/后退/切换）+ route trace sweep（换页时顶部一道蓝青光带横扫）。
+  - 新增 `useTheme` composable，抽离主题逻辑。
+  - 新增 `public/brand.svg`，统一品牌标识引用。
+
+### 🔧 变更 (Changed)
+
+- **Web Admin 外壳玻璃化**：侧栏（domain rail + section panel）、移动端顶栏、抽屉、Toast 化为半透玻璃（`backdrop-filter`）浮于光场之上；内容区（卡片/表格/表单）保持实色以保证长时间阅读可读性。
+- **设计基调收敛**：圆角从 6/8/20px 收敛到 4/6/12px；卡片 hover 从浮起投影改为描边式（`0 0 0 1px`）；缓动全局改为 linear/steps 营造机械精确感。
+- **品牌标识去重**：`LoginView` / `AppNav` 内联的品牌 SVG（两份共 16 处硬编码渐变 stop-color）抽取为 `public/brand.svg` 单文件 `<img>` 引用。
+- **硬编码颜色 token 化**：清理 11 个视图 + 2 个组件中绕过设计系统的约 40 处硬编码颜色，统一到 `--qq-*` token（含日志色板、trace 边框、品牌蓝边框、遮罩、强调态文字色等）。
+- `generation/config.py` 四模式（image/audio/music/asr）配置解析去重：`resolve_model` 统一到 `_ResolveModelMixin`，providers/models 解析骨架统一到 `_read_generation_section_data`。对外 import 路径与解析行为不变。
+- `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
+- `llm/store.py`（645 行单类）按业务域拆分到 `store_parts/` 子包：基础设施（连接/schema/守卫）→ `_StoreBase`，会话消息/记忆/归档/群设置各自独立为 mixin。对外 import 路径与 SQL 行为不变。
+- **群周报/月报发布改为每日轮询**：`publish_cron` 从"每周一/每月 1 日"改为"每天 10:00"，使 generate 成功但 publish 失败的报告能在次日自动补发，不再等到下个周期（原周报延迟一周、月报延迟一个月才补发）。
+- **周报/月报命令层错误处理改用自定义异常类**：`/summary weekly|monthly now` 的失败原因（未开启 / 冷却中 / 生成失败）改用专用异常类型向命令层传递，替代原先对 RuntimeError 消息做子串匹配的脆方案，避免无关错误被误判为这三种情况导致提示错乱。
+
+### ⚡ 优化 (Performance)
+
+- Web Admin 启动内存占用优化：10 个 route 文件的 `message_pipeline` 顶层 import 改为 handler 内懒导入，避免启动时实例化 9 个 bot 专属单例（复读检测/接龙/jieba/wordcloud/游戏等），预计 VmHWM 从 ~111MB 降至 ~40MB。
+
 ## [1.8.9] - 2026-06-18
 
 > *"为什么版本号是 1.8.9 而不是 1.8.2？"*
@@ -503,7 +540,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...v1.9.0
 [1.8.9]: https://github.com/3aKHP/QuickQuip/compare/v1.8.1...v1.8.9
 [1.8.1]: https://github.com/3aKHP/QuickQuip/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...v1.8.0

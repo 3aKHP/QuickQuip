@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,33 @@ from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_LLM_TOML
 DEFAULT_GENERATION_CONFIG_PATH = CONFIG_GENERATION_TOML
 DEFAULT_LEGACY_LLM_CONFIG_PATH = CONFIG_LLM_TOML
 _SUPPORTED_IMAGE_PROTOCOLS = {"openai_images", "gemini_imagen", "minimax_images"}
-_SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async"}
+_SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async", "openai_tts", "http_tts"}
 _SUPPORTED_MUSIC_PROTOCOLS = {"minimax_music"}
 _SUPPORTED_ASR_PROTOCOLS = {"openai_transcriptions"}
+
+# 协议无需鉴权（本地/自建服务常无 API key）
+_NO_AUTH_AUDIO_PROTOCOLS = {"openai_tts", "http_tts"}
+
+
+class _ResolveModelMixin:
+    """为各模式 generation config 容器提供统一的 resolve_model 查找逻辑。
+
+    混入类需具备 ``default_model`` (str) 和 ``models`` (dict[str, Any]) 属性。
+    四个模式（image/audio/music/asr）的 resolve_model 逐字节相同，集中于此避免漂移。
+
+    返回类型标注为 ``Any``：由于 ``models`` 在 mixin 层是 ``dict[str, Any]``，
+    具体的 ``ResolvedXxxModel`` 类型信息在子类才确定。各子类的调用方（如 service.py）
+    已有显式返回类型注解，类型安全在消费侧保证。
+    """
+
+    default_model: str
+    models: dict[str, Any]
+
+    def resolve_model(self, model_id: str | None = None) -> Any:
+        candidate = (model_id or self.default_model).strip()
+        if not candidate:
+            return None
+        return self.models.get(candidate)
 
 
 @dataclass(slots=True)
@@ -49,18 +74,12 @@ class ResolvedImageModel:
 
 
 @dataclass(slots=True)
-class ImageGenerationConfig:
+class ImageGenerationConfig(_ResolveModelMixin):
     enabled: bool = False
     default_model: str = ""
     prompt_blocklist: list[str] = field(default_factory=list)
     providers: dict[str, ImageProviderConfig] = field(default_factory=dict)
     models: dict[str, ResolvedImageModel] = field(default_factory=dict)
-
-    def resolve_model(self, model_id: str | None = None) -> ResolvedImageModel | None:
-        candidate = (model_id or self.default_model).strip()
-        if not candidate:
-            return None
-        return self.models.get(candidate)
 
 
 @dataclass(slots=True)
@@ -107,18 +126,12 @@ class ResolvedAudioModel:
 
 
 @dataclass(slots=True)
-class AudioGenerationConfig:
+class AudioGenerationConfig(_ResolveModelMixin):
     enabled: bool = False
     default_model: str = ""
     prompt_blocklist: list[str] = field(default_factory=list)
     providers: dict[str, AudioProviderConfig] = field(default_factory=dict)
     models: dict[str, ResolvedAudioModel] = field(default_factory=dict)
-
-    def resolve_model(self, model_id: str | None = None) -> ResolvedAudioModel | None:
-        candidate = (model_id or self.default_model).strip()
-        if not candidate:
-            return None
-        return self.models.get(candidate)
 
 
 @dataclass(slots=True)
@@ -157,18 +170,12 @@ class ResolvedMusicModel:
 
 
 @dataclass(slots=True)
-class MusicGenerationConfig:
+class MusicGenerationConfig(_ResolveModelMixin):
     enabled: bool = False
     default_model: str = ""
     prompt_blocklist: list[str] = field(default_factory=list)
     providers: dict[str, MusicProviderConfig] = field(default_factory=dict)
     models: dict[str, ResolvedMusicModel] = field(default_factory=dict)
-
-    def resolve_model(self, model_id: str | None = None) -> ResolvedMusicModel | None:
-        candidate = (model_id or self.default_model).strip()
-        if not candidate:
-            return None
-        return self.models.get(candidate)
 
 
 @dataclass(slots=True)
@@ -204,18 +211,12 @@ class ResolvedAsrModel:
 
 
 @dataclass(slots=True)
-class AsrConfig:
+class AsrConfig(_ResolveModelMixin):
     enabled: bool = False
     default_model: str = ""
     max_audio_bytes: int = 25 * 1024 * 1024
     providers: dict[str, AsrProviderConfig] = field(default_factory=dict)
     models: dict[str, ResolvedAsrModel] = field(default_factory=dict)
-
-    def resolve_model(self, model_id: str | None = None) -> ResolvedAsrModel | None:
-        candidate = (model_id or self.default_model).strip()
-        if not candidate:
-            return None
-        return self.models.get(candidate)
 
 
 @dataclass(slots=True)
@@ -228,9 +229,43 @@ class GenerationConfig:
     source_path: Path | None = None
     source_kind: str = "generation"
 
-def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
-    providers: dict[str, ImageProviderConfig] = {}
-    models: dict[str, ResolvedImageModel] = {}
+def _read_prompt_blocklist(raw: dict[str, Any]) -> list[str]:
+    """从 raw 配置读取 prompt_blocklist，统一做 strip + lower + 去空。"""
+    return [
+        str(word).strip().lower()
+        for word in raw.get("prompt_blocklist", [])
+        if str(word).strip()
+    ]
+
+
+def _read_generation_section_data(
+    raw: dict[str, Any],
+    *,
+    model_factory: Callable[[dict[str, Any]], Any],
+    provider_factory: Callable[[str, dict[str, Any], list[Any]], Any],
+    resolved_cls: type,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """解析 providers/models 的通用骨架，供四个 _read_xxx 复用。
+
+    遍历 ``raw["providers"]``，对每个 provider：
+    - 通过 *model_factory* 从 model_entry 构造各模式的 ModelConfig（含特有字段）
+    - 通过 *provider_factory* 把 provider 通用字段 + model_list 绑定为具体 ProviderConfig
+    - 通过 *resolved_cls* 构造 ResolvedXxxModel（四个 Resolved 类构造签名同为
+      ``(id, model_config, provider)``，故直接传 class 替代逐模式 lambda）
+
+    provider 的通用字段（id/protocol/base_url/api_key_env/timeout/default_model/
+    headers/user_agent/extra_body）在四个模式间完全同构，差异仅是 protocol 和
+    timeout 的默认值——这两个差异由 provider_factory 内部的 ``.get(key, default)``
+    各自处理，本骨架不感知。
+
+    契约：skeleton 对 model_id/model_name 做非空预校验（决定是否跳过该 entry），
+    之后将完整 model_entry 交给 *model_factory*。factory 必须从同一 entry 提取
+    id/model 字段构造 ModelConfig，不得改用其他 key——否则预校验与实际构造不一致。
+
+    返回 (providers, models, default_model)。
+    """
+    providers: dict[str, Any] = {}
+    models: dict[str, Any] = {}
     raw_providers = raw.get("providers", [])
     for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
         provider_entry = expand_env_value(provider_entry)
@@ -238,271 +273,205 @@ def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
         if not provider_id:
             continue
 
-        raw_headers = as_dict(provider_entry.get("headers"))
-        model_list: list[ImageModelConfig] = []
+        model_list: list[Any] = []
         for model_entry in provider_entry.get("models", []) or []:
             model_entry = expand_env_value(model_entry)
             model_id = str(model_entry.get("id", "")).strip()
             model_name = str(model_entry.get("model", "")).strip()
             if not model_id or not model_name:
                 continue
-
-            model = ImageModelConfig(
-                id=model_id,
-                model=model_name,
-                label=str(model_entry.get("label", "")).strip(),
-                size=str(model_entry.get("size", "1024x1024")).strip() or "1024x1024",
-                quality=str(model_entry.get("quality", "standard")).strip() or "standard",
-                response_format=str(model_entry.get("response_format", "b64_json")).strip(),
-            )
+            model = model_factory(model_entry)
             model_list.append(model)
 
-        provider = ImageProviderConfig(
-            id=provider_id,
-            protocol=str(provider_entry.get("protocol", "openai_images")).strip() or "openai_images",
-            base_url=str(provider_entry.get("base_url", "")).strip(),
-            api_key_env=str(provider_entry.get("api_key_env", "")).strip(),
-            timeout_seconds=float(provider_entry.get("timeout_seconds", 120)),
-            default_model=str(provider_entry.get("default_model", "")).strip(),
-            models=model_list,
-            headers={str(k): str(v) for k, v in raw_headers.items()},
-            user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
-        )
+        provider = provider_factory(provider_id, provider_entry, model_list)
         providers[provider_id] = provider
 
         for model in model_list:
-            models[model.id] = ResolvedImageModel(
-                id=model.id,
-                model_config=model,
-                provider=provider,
-            )
+            models[model.id] = resolved_cls(id=model.id, model_config=model, provider=provider)
 
     default_model = str(raw.get("default_model", "")).strip()
     if not default_model and models:
         default_model = next(iter(models))
 
+    return providers, models, default_model
+
+
+def _build_image_model(entry: dict[str, Any]) -> ImageModelConfig:
+    return ImageModelConfig(
+        id=str(entry.get("id", "")).strip(),
+        model=str(entry.get("model", "")).strip(),
+        label=str(entry.get("label", "")).strip(),
+        size=str(entry.get("size", "1024x1024")).strip() or "1024x1024",
+        quality=str(entry.get("quality", "standard")).strip() or "standard",
+        response_format=str(entry.get("response_format", "b64_json")).strip(),
+    )
+
+
+def _build_audio_model(entry: dict[str, Any]) -> AudioModelConfig:
+    return AudioModelConfig(
+        id=str(entry.get("id", "")).strip(),
+        model=str(entry.get("model", "")).strip(),
+        label=str(entry.get("label", "")).strip(),
+        voice_id=str(entry.get("voice_id", "")).strip(),
+        speed=float(entry.get("speed", 1.0)),
+        vol=float(entry.get("vol", 1.0)),
+        pitch=int(float(entry.get("pitch", 0))),
+        emotion=str(entry.get("emotion", "")).strip(),
+        sample_rate=int(entry.get("sample_rate", 32000)),
+        bitrate=int(entry.get("bitrate", 128000)),
+        format=str(entry.get("format", "mp3")).strip() or "mp3",
+        channel=int(entry.get("channel", 1)),
+        language_boost=str(entry.get("language_boost", "")).strip(),
+        subtitle_enable=as_bool(entry.get("subtitle_enable", False), default=False),
+        output_format=str(entry.get("output_format", "hex")).strip() or "hex",
+        pronunciation_dict=expand_env_value(as_dict(entry.get("pronunciation_dict"))),
+        voice_modify=expand_env_value(as_dict(entry.get("voice_modify"))),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _build_music_model(entry: dict[str, Any]) -> MusicModelConfig:
+    return MusicModelConfig(
+        id=str(entry.get("id", "")).strip(),
+        model=str(entry.get("model", "")).strip(),
+        label=str(entry.get("label", "")).strip(),
+        sample_rate=int(entry.get("sample_rate", 44100)),
+        bitrate=int(entry.get("bitrate", 256000)),
+        format=str(entry.get("format", "mp3")).strip() or "mp3",
+        output_format=str(entry.get("output_format", "hex")).strip() or "hex",
+        add_watermark=as_bool(entry.get("add_watermark", False), default=False),
+        lyrics_optimizer=as_bool(entry.get("lyrics_optimizer", False), default=False),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _build_asr_model(entry: dict[str, Any]) -> AsrModelConfig:
+    return AsrModelConfig(
+        id=str(entry.get("id", "")).strip(),
+        model=str(entry.get("model", "")).strip(),
+        label=str(entry.get("label", "")).strip(),
+        language=str(entry.get("language", "")).strip(),
+        prompt=str(entry.get("prompt", "")).strip(),
+        response_format=str(entry.get("response_format", "json")).strip() or "json",
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _image_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> ImageProviderConfig:
+    return ImageProviderConfig(
+        id=pid,
+        protocol=str(entry.get("protocol", "openai_images")).strip() or "openai_images",
+        base_url=str(entry.get("base_url", "")).strip(),
+        api_key_env=str(entry.get("api_key_env", "")).strip(),
+        timeout_seconds=float(entry.get("timeout_seconds", 120)),
+        default_model=str(entry.get("default_model", "")).strip(),
+        models=models,
+        headers={str(k): str(v) for k, v in as_dict(entry.get("headers")).items()},
+        user_agent=str(entry.get("user_agent", "")).strip(),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _audio_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> AudioProviderConfig:
+    return AudioProviderConfig(
+        id=pid,
+        protocol=str(entry.get("protocol", "minimax_t2a_http")).strip() or "minimax_t2a_http",
+        base_url=str(entry.get("base_url", "")).strip(),
+        api_key_env=str(entry.get("api_key_env", "")).strip(),
+        timeout_seconds=float(entry.get("timeout_seconds", 120)),
+        default_model=str(entry.get("default_model", "")).strip(),
+        models=models,
+        headers={str(k): str(v) for k, v in as_dict(entry.get("headers")).items()},
+        user_agent=str(entry.get("user_agent", "")).strip(),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _music_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> MusicProviderConfig:
+    return MusicProviderConfig(
+        id=pid,
+        protocol=str(entry.get("protocol", "minimax_music")).strip() or "minimax_music",
+        base_url=str(entry.get("base_url", "")).strip(),
+        api_key_env=str(entry.get("api_key_env", "")).strip(),
+        timeout_seconds=float(entry.get("timeout_seconds", 180)),
+        default_model=str(entry.get("default_model", "")).strip(),
+        models=models,
+        headers={str(k): str(v) for k, v in as_dict(entry.get("headers")).items()},
+        user_agent=str(entry.get("user_agent", "")).strip(),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _asr_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> AsrProviderConfig:
+    return AsrProviderConfig(
+        id=pid,
+        protocol=str(entry.get("protocol", "openai_transcriptions")).strip() or "openai_transcriptions",
+        base_url=str(entry.get("base_url", "")).strip(),
+        api_key_env=str(entry.get("api_key_env", "")).strip(),
+        timeout_seconds=float(entry.get("timeout_seconds", 60)),
+        default_model=str(entry.get("default_model", "")).strip(),
+        models=models,
+        headers={str(k): str(v) for k, v in as_dict(entry.get("headers")).items()},
+        user_agent=str(entry.get("user_agent", "")).strip(),
+        extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
+    )
+
+
+def _read_image_generation(raw: dict[str, Any]) -> ImageGenerationConfig:
+    providers, models, default_model = _read_generation_section_data(
+        raw,
+        model_factory=_build_image_model,
+        provider_factory=_image_provider_factory,
+        resolved_cls=ResolvedImageModel,
+    )
     return ImageGenerationConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
-        prompt_blocklist=[
-            str(word).strip().lower()
-            for word in raw.get("prompt_blocklist", [])
-            if str(word).strip()
-        ],
+        prompt_blocklist=_read_prompt_blocklist(raw),
         providers=providers,
         models=models,
     )
 
 
 def _read_audio_generation(raw: dict[str, Any]) -> AudioGenerationConfig:
-    providers: dict[str, AudioProviderConfig] = {}
-    models: dict[str, ResolvedAudioModel] = {}
-    raw_providers = raw.get("providers", [])
-    for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = expand_env_value(provider_entry)
-        provider_id = str(provider_entry.get("id", "")).strip()
-        if not provider_id:
-            continue
-
-        raw_headers = as_dict(provider_entry.get("headers"))
-        model_list: list[AudioModelConfig] = []
-        for model_entry in provider_entry.get("models", []) or []:
-            model_entry = expand_env_value(model_entry)
-            model_id = str(model_entry.get("id", "")).strip()
-            model_name = str(model_entry.get("model", "")).strip()
-            if not model_id or not model_name:
-                continue
-
-            model = AudioModelConfig(
-                id=model_id,
-                model=model_name,
-                label=str(model_entry.get("label", "")).strip(),
-                voice_id=str(model_entry.get("voice_id", "")).strip(),
-                speed=float(model_entry.get("speed", 1.0)),
-                vol=float(model_entry.get("vol", 1.0)),
-                pitch=int(float(model_entry.get("pitch", 0))),
-                emotion=str(model_entry.get("emotion", "")).strip(),
-                sample_rate=int(model_entry.get("sample_rate", 32000)),
-                bitrate=int(model_entry.get("bitrate", 128000)),
-                format=str(model_entry.get("format", "mp3")).strip() or "mp3",
-                channel=int(model_entry.get("channel", 1)),
-                language_boost=str(model_entry.get("language_boost", "")).strip(),
-                subtitle_enable=as_bool(model_entry.get("subtitle_enable", False), default=False),
-                output_format=str(model_entry.get("output_format", "hex")).strip() or "hex",
-                pronunciation_dict=expand_env_value(as_dict(model_entry.get("pronunciation_dict"))),
-                voice_modify=expand_env_value(as_dict(model_entry.get("voice_modify"))),
-                extra_body=expand_env_value(as_dict(model_entry.get("extra_body"))),
-            )
-            model_list.append(model)
-
-        provider = AudioProviderConfig(
-            id=provider_id,
-            protocol=str(provider_entry.get("protocol", "minimax_t2a_http")).strip()
-            or "minimax_t2a_http",
-            base_url=str(provider_entry.get("base_url", "")).strip(),
-            api_key_env=str(provider_entry.get("api_key_env", "")).strip(),
-            timeout_seconds=float(provider_entry.get("timeout_seconds", 120)),
-            default_model=str(provider_entry.get("default_model", "")).strip(),
-            models=model_list,
-            headers={str(k): str(v) for k, v in raw_headers.items()},
-            user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
-        )
-        providers[provider_id] = provider
-
-        for model in model_list:
-            models[model.id] = ResolvedAudioModel(
-                id=model.id,
-                model_config=model,
-                provider=provider,
-            )
-
-    default_model = str(raw.get("default_model", "")).strip()
-    if not default_model and models:
-        default_model = next(iter(models))
-
+    providers, models, default_model = _read_generation_section_data(
+        raw,
+        model_factory=_build_audio_model,
+        provider_factory=_audio_provider_factory,
+        resolved_cls=ResolvedAudioModel,
+    )
     return AudioGenerationConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
-        prompt_blocklist=[
-            str(word).strip().lower()
-            for word in raw.get("prompt_blocklist", [])
-            if str(word).strip()
-        ],
+        prompt_blocklist=_read_prompt_blocklist(raw),
         providers=providers,
         models=models,
     )
 
 
 def _read_music_generation(raw: dict[str, Any]) -> MusicGenerationConfig:
-    providers: dict[str, MusicProviderConfig] = {}
-    models: dict[str, ResolvedMusicModel] = {}
-    raw_providers = raw.get("providers", [])
-    for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = expand_env_value(provider_entry)
-        provider_id = str(provider_entry.get("id", "")).strip()
-        if not provider_id:
-            continue
-
-        raw_headers = as_dict(provider_entry.get("headers"))
-        model_list: list[MusicModelConfig] = []
-        for model_entry in provider_entry.get("models", []) or []:
-            model_entry = expand_env_value(model_entry)
-            model_id = str(model_entry.get("id", "")).strip()
-            model_name = str(model_entry.get("model", "")).strip()
-            if not model_id or not model_name:
-                continue
-
-            model = MusicModelConfig(
-                id=model_id,
-                model=model_name,
-                label=str(model_entry.get("label", "")).strip(),
-                sample_rate=int(model_entry.get("sample_rate", 44100)),
-                bitrate=int(model_entry.get("bitrate", 256000)),
-                format=str(model_entry.get("format", "mp3")).strip() or "mp3",
-                output_format=str(model_entry.get("output_format", "hex")).strip() or "hex",
-                add_watermark=as_bool(model_entry.get("add_watermark", False), default=False),
-                lyrics_optimizer=as_bool(model_entry.get("lyrics_optimizer", False), default=False),
-                extra_body=expand_env_value(as_dict(model_entry.get("extra_body"))),
-            )
-            model_list.append(model)
-
-        provider = MusicProviderConfig(
-            id=provider_id,
-            protocol=str(provider_entry.get("protocol", "minimax_music")).strip()
-            or "minimax_music",
-            base_url=str(provider_entry.get("base_url", "")).strip(),
-            api_key_env=str(provider_entry.get("api_key_env", "")).strip(),
-            timeout_seconds=float(provider_entry.get("timeout_seconds", 180)),
-            default_model=str(provider_entry.get("default_model", "")).strip(),
-            models=model_list,
-            headers={str(k): str(v) for k, v in raw_headers.items()},
-            user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
-        )
-        providers[provider_id] = provider
-
-        for model in model_list:
-            models[model.id] = ResolvedMusicModel(
-                id=model.id,
-                model_config=model,
-                provider=provider,
-            )
-
-    default_model = str(raw.get("default_model", "")).strip()
-    if not default_model and models:
-        default_model = next(iter(models))
-
+    providers, models, default_model = _read_generation_section_data(
+        raw,
+        model_factory=_build_music_model,
+        provider_factory=_music_provider_factory,
+        resolved_cls=ResolvedMusicModel,
+    )
     return MusicGenerationConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
-        prompt_blocklist=[
-            str(word).strip().lower()
-            for word in raw.get("prompt_blocklist", [])
-            if str(word).strip()
-        ],
+        prompt_blocklist=_read_prompt_blocklist(raw),
         providers=providers,
         models=models,
     )
 
 
 def _read_asr(raw: dict[str, Any]) -> AsrConfig:
-    providers: dict[str, AsrProviderConfig] = {}
-    models: dict[str, ResolvedAsrModel] = {}
-    raw_providers = raw.get("providers", [])
-    for provider_entry in raw_providers if isinstance(raw_providers, list) else []:
-        provider_entry = expand_env_value(provider_entry)
-        provider_id = str(provider_entry.get("id", "")).strip()
-        if not provider_id:
-            continue
-
-        raw_headers = as_dict(provider_entry.get("headers"))
-        model_list: list[AsrModelConfig] = []
-        for model_entry in provider_entry.get("models", []) or []:
-            model_entry = expand_env_value(model_entry)
-            model_id = str(model_entry.get("id", "")).strip()
-            model_name = str(model_entry.get("model", "")).strip()
-            if not model_id or not model_name:
-                continue
-
-            model = AsrModelConfig(
-                id=model_id,
-                model=model_name,
-                label=str(model_entry.get("label", "")).strip(),
-                language=str(model_entry.get("language", "")).strip(),
-                prompt=str(model_entry.get("prompt", "")).strip(),
-                response_format=str(model_entry.get("response_format", "json")).strip() or "json",
-                extra_body=expand_env_value(as_dict(model_entry.get("extra_body"))),
-            )
-            model_list.append(model)
-
-        provider = AsrProviderConfig(
-            id=provider_id,
-            protocol=str(provider_entry.get("protocol", "openai_transcriptions")).strip()
-            or "openai_transcriptions",
-            base_url=str(provider_entry.get("base_url", "")).strip(),
-            api_key_env=str(provider_entry.get("api_key_env", "")).strip(),
-            timeout_seconds=float(provider_entry.get("timeout_seconds", 60)),
-            default_model=str(provider_entry.get("default_model", "")).strip(),
-            models=model_list,
-            headers={str(k): str(v) for k, v in raw_headers.items()},
-            user_agent=str(provider_entry.get("user_agent", "")).strip(),
-            extra_body=expand_env_value(as_dict(provider_entry.get("extra_body"))),
-        )
-        providers[provider_id] = provider
-
-        for model in model_list:
-            models[model.id] = ResolvedAsrModel(
-                id=model.id,
-                model_config=model,
-                provider=provider,
-            )
-
-    default_model = str(raw.get("default_model", "")).strip()
-    if not default_model and models:
-        default_model = next(iter(models))
-
+    providers, models, default_model = _read_generation_section_data(
+        raw,
+        model_factory=_build_asr_model,
+        provider_factory=_asr_provider_factory,
+        resolved_cls=ResolvedAsrModel,
+    )
     return AsrConfig(
         enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
@@ -510,6 +479,8 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
         providers=providers,
         models=models,
     )
+
+
 
 
 def _read_generation_section(
@@ -579,7 +550,7 @@ def _validate_generation_config(config: GenerationConfig) -> GenerationConfig:
         if not provider.base_url:
             config.load_error = f"音频 provider {provider.id} 缺少 base_url"
             return config
-        if not provider.api_key_env:
+        if provider.protocol not in _NO_AUTH_AUDIO_PROTOCOLS and not provider.api_key_env:
             config.load_error = f"音频 provider {provider.id} 缺少 api_key_env"
             return config
     if audio.default_model and audio.default_model not in audio.models:

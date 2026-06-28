@@ -246,6 +246,22 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `summary_length_hint` | 目标字数 |
 | `model_cascade` | 模型级联列表（失败自动降级） |
 
+### `[weekly_report]` / `[monthly_report]` — 群周报 / 群月报
+
+每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源复用词云采集（`wordcloud_msgs`，always-on 不删除），按天采样后套用每日日报同款 LLM 管线。与 `[daily_summary]` 相互独立，可单独开启。
+
+| 键 | 说明 |
+|----|------|
+| `enabled` | 全局开关（`true` / `false`，默认 `false`） |
+| `generate_cron` | 生成 cron（周报默认 `0 9 * * 1` 每周一；月报默认 `0 9 1 * *` 每月 1 日） |
+| `publish_cron` | 发布 cron（默认 `0 10 * * *` 每天 10:00；周报/月报共用，每日发布新报告并补发未发布的） |
+| `min_messages` | 周期内最小消息数（不足时跳过；周报默认 100，月报默认 300） |
+| `length_hint` | 目标字数（周报默认 2000，月报默认 2500） |
+| `sample_per_day` | 每天采样消息数上限（控制喂给 LLM 的总量；周报默认 50，月报默认 20） |
+| `model_cascade` | 模型级联列表，支持 `@default` 占位符 |
+
+> 周报/月报通过 `/summary weekly|monthly on|off|status|now` 在群内按群开启。period 标识：周报为 ISO 周号（如 `2026-W24`），月报为年月（如 `2026-06`）。
+
 ---
 
 ## config/generation.toml
@@ -290,6 +306,17 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `prompt_blocklist` | 文本黑名单 |
 
 `[[audio.providers]]` 和 `[[audio.providers.models]]` 结构类似图片，额外包含 `supported_formats`、`default_sample_rate`、`default_bitrate`、`default_voice`、`voice_style_options` 等语音特有字段。
+
+当前支持的 provider protocol：
+
+| protocol | 说明 |
+|----------|------|
+| `minimax_t2a_http` | MiniMax 同步 TTS，响应体含 hex 编码音频 |
+| `minimax_t2a_async` | MiniMax 异步 TTS，创建任务→轮询→取文件 |
+| `openai_tts` | OpenAI TTS 兼容协议（`POST /audio/speech`），响应体为音频 bytes。覆盖 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。`api_key_env` 可省略（本地无鉴权时不附加 Authorization 头） |
+| `http_tts` | 原始 HTTP POST，请求体字段从 model 的 `extra_body` 模板派生，支持 `{text}` / `{voice}` 占位符替换，适配非 OpenAI 格式的本地服务。以下划线开头的键（`__path` 请求路径、`__method` HTTP 方法）是内部控制字段，不进入请求体 |
+
+`openai_tts` / `http_tts` 的完整配置示例见 `config/generation.toml.example`。
 
 ### `[asr]` — 语音识别
 
