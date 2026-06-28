@@ -254,7 +254,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 |----|------|
 | `enabled` | 全局开关（`true` / `false`，默认 `false`） |
 | `generate_cron` | 生成 cron（周报默认 `0 9 * * 1` 每周一；月报默认 `0 9 1 * *` 每月 1 日） |
-| `publish_cron` | 发布 cron（周报默认 `0 10 * * 1`；月报默认 `0 10 1 * *`） |
+| `publish_cron` | 发布 cron（默认 `0 10 * * *` 每天 10:00；周报/月报共用，每日发布新报告并补发未发布的） |
 | `min_messages` | 周期内最小消息数（不足时跳过；周报默认 100，月报默认 300） |
 | `length_hint` | 目标字数（周报默认 2000，月报默认 2500） |
 | `sample_per_day` | 每天采样消息数上限（控制喂给 LLM 的总量；周报默认 50，月报默认 20） |
