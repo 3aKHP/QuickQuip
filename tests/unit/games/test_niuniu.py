@@ -649,13 +649,14 @@ class TestFencing:
         assert any(r["action"] == "fencing" for r in a_recs)
         assert any(r["action"] == "fenced" for r in b_recs)
 
-    def test_draw_damages_both(self, store, uid_a, uid_b, monkeypatch):
+    def test_draw_is_zero_transfer(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 20.0)
         store.update_length(uid_b, 20.0)
         _patch_fence_event(monkeypatch, "draw")
         fencing(store, uid_a, uid_b, group_id="test")
-        assert store.get_length(uid_a) < 20.0
-        assert store.get_length(uid_b) < 20.0
+        # 零和击剑：draw 无转移，双方不变
+        assert store.get_length(uid_a) == 20.0
+        assert store.get_length(uid_b) == 20.0
 
     def test_dominate_downgrades_when_winner_not_niutouren(
         self, store, uid_a, uid_b, monkeypatch

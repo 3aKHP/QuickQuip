@@ -110,6 +110,10 @@ class NiuNiuConfig:
     glue_frenzy_min: float = 3.0
     glue_frenzy_max: float = 10.0
 
+    # Redesign: 凹侧 sublinear 加深深度 + luck 幂压缩(1**α==1, 中位数不变)
+    glue_neg_shrink_depth: float = 1.0
+    luck_power: float = 0.75
+
     # Fencing event tuning
     fence_critical_multiplier: float = 1.8
     fence_glancing_multiplier: float = 0.4

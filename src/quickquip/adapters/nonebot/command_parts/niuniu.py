@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import re
+from datetime import datetime, timedelta, timezone
 from time import time
 
 from quickquip.adapters.nonebot.command_parts.common import _evaluate_luck, _fence_luck_tips, _glue_luck_tips, _is_admin, _is_private_chat, _strip_command_name
@@ -14,6 +15,27 @@ _glue_rpm: dict[str, SlidingWindowRateLimiter] = {}
 _fence_rpm: dict[str, SlidingWindowRateLimiter] = {}
 _RPM_REAP_EVERY = 120  # reap idle limiters every 120s
 _last_reap: float = time()
+
+
+def _fmt_luck(value: float) -> str:
+    """Display-only: round luck to 2 dp for messages (storage keeps full precision)."""
+    return f"{value:.2f}"
+
+
+_CST = timezone(timedelta(hours=8))
+
+
+def _fmt_time(iso: str) -> str:
+    """Display-only: ISO-UTC → CST (UTC+8) 'YYYY-MM-DD HH:MM'.
+
+    Container runs UTC; players are CN, so force UTC+8 for display.
+    """
+    if not iso or iso == "暂无记录":
+        return iso
+    try:
+        return datetime.fromisoformat(iso).astimezone(_CST).strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return iso
 
 
 def _reap_idle_rpm() -> None:
@@ -114,9 +136,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             "🐂 我的牛牛",
             f"当前长度：{length} cm",
             f"排名：{rank_str}",
-            f"打胶运势：{glue_luck}（{_evaluate_luck(glue_luck)}）",
-            f"击剑运势：{fence_luck}（{_evaluate_luck(fence_luck)}）",
-            f"最后打胶：{last_glue}",
+            f"打胶运势：{_fmt_luck(glue_luck)}（{_evaluate_luck(glue_luck)}）",
+            f"击剑运势：{_fmt_luck(fence_luck)}（{_evaluate_luck(fence_luck)}）",
+            f"最后打胶：{_fmt_time(last_glue)}",
             f"评价：{get_comment(length, niuniu_store.get_text(str(event.group_id)))}",
         ]
         await nn_my.finish("\n".join(lines))
@@ -327,7 +349,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             act = action_labels.get(r["action"], r["action"])
             diff = r["diff"]
             sign = "+" if diff > 0 else ""
-            lines.append(f"{act} | {r['origin_length']} → {r['new_length']} ({sign}{diff}) | {r['created_at']}")
+            lines.append(f"{act} | {r['origin_length']} → {r['new_length']} ({sign}{diff}) | {_fmt_time(r['created_at'])}")
         await nn_records.finish("\n".join(lines))
 
     nn_glue_luck = on_command("打胶运势", priority=10, block=True)
@@ -343,7 +365,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         label = _evaluate_luck(luck)
         tips = _glue_luck_tips(luck)
         await nn_glue_luck.finish(
-            f"🔮 今日打胶运势\n运势值：{luck}\n评价：{label}\n{tips}"
+            f"🔮 今日打胶运势\n运势值：{_fmt_luck(luck)}\n评价：{label}\n{tips}"
         )
 
     nn_fence_luck = on_command("击剑运势", priority=10, block=True)
@@ -359,7 +381,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         label = _evaluate_luck(luck)
         tips = _fence_luck_tips(luck)
         await nn_fence_luck.finish(
-            f"⚔️ 今日击剑运势\n运势值：{luck}\n评价：{label}\n{tips}"
+            f"⚔️ 今日击剑运势\n运势值：{_fmt_luck(luck)}\n评价：{label}\n{tips}"
         )
 
     nn_text_mode = on_command("牛牛文案", priority=10, block=True)
