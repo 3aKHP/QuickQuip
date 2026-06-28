@@ -104,8 +104,8 @@ async def test_send_period_report_now_does_not_persist(monkeypatch):
         contains=lambda gid: True, all_groups=lambda: [],
         add=lambda gid: None, remove=lambda gid: None,
     ))
-    monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: False)
-    monkeypatch.setattr(plugin, "_mark_triggered", lambda gid: None)
+    monkeypatch.setattr(plugin, "_on_period_cooldown", lambda gid: False)
+    monkeypatch.setattr(plugin, "_mark_period_triggered", lambda gid: None)
 
     await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
 
@@ -156,7 +156,7 @@ async def test_send_period_report_now_raises_cooldown(monkeypatch):
         contains=lambda gid: True, all_groups=lambda: [],
         add=lambda gid: None, remove=lambda gid: None,
     ))
-    monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: True)
+    monkeypatch.setattr(plugin, "_on_period_cooldown", lambda gid: True)
     with pytest.raises(plugin.PeriodReportCooldownError):
         await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
 
@@ -169,8 +169,8 @@ async def test_send_period_report_now_raises_generation_failed(monkeypatch):
         contains=lambda gid: True, all_groups=lambda: [],
         add=lambda gid: None, remove=lambda gid: None,
     ))
-    monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: False)
-    monkeypatch.setattr(plugin, "_mark_triggered", lambda gid: None)
+    monkeypatch.setattr(plugin, "_on_period_cooldown", lambda gid: False)
+    monkeypatch.setattr(plugin, "_mark_period_triggered", lambda gid: None)
 
     async def fake_run_gen(*a, **kw):
         return None
@@ -178,3 +178,15 @@ async def test_send_period_report_now_raises_generation_failed(monkeypatch):
     monkeypatch.setattr(plugin, "_run_period_generation", fake_run_gen)
     with pytest.raises(plugin.PeriodReportGenerationFailedError):
         await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+
+
+def test_period_cooldown_independent_of_daily():
+    """回归 Bot MEDIUM：周报/月报冷却字典独立于每日总结，同群两类"立即生成"不互相阻挡。"""
+    plugin._last_manual_trigger.clear()
+    plugin._last_period_manual_trigger.clear()
+    plugin._mark_triggered("10001")
+    assert plugin._on_cooldown("10001")
+    assert not plugin._on_period_cooldown("10001")
+    plugin._mark_period_triggered("10002")
+    assert plugin._on_period_cooldown("10002")
+    assert not plugin._on_cooldown("10002")

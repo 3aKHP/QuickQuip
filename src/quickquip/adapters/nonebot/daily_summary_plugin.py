@@ -72,6 +72,19 @@ def _mark_triggered(group_id: int | str) -> None:
     _last_manual_trigger[str(group_id)] = time()
 
 
+# 周报/月报手动触发冷却：独立于每日总结，避免同群两类"立即生成"互相阻挡。
+_last_period_manual_trigger: dict[str, float] = {}
+
+
+def _on_period_cooldown(group_id: int | str) -> bool:
+    last = _last_period_manual_trigger.get(str(group_id))
+    return last is not None and time() - last < _MANUAL_COOLDOWN_SECONDS
+
+
+def _mark_period_triggered(group_id: int | str) -> None:
+    _last_period_manual_trigger[str(group_id)] = time()
+
+
 def _cron_to_hhmm(cron_expr: str) -> str:
     """Convert a 5-field cron expression to an HH:MM display string.
 
@@ -680,9 +693,9 @@ async def send_period_report_now(
     enabled = _period_enabled_groups(period_type)
     if not enabled.contains(group_key):
         raise PeriodReportNotEnabledError(f"{period_type} report is not enabled for this group")
-    if _on_cooldown(group_key):
+    if _on_period_cooldown(group_key):
         raise PeriodReportCooldownError("generation is on cooldown")
-    _mark_triggered(group_key)
+    _mark_period_triggered(group_key)
 
     if before_generate is not None:
         await before_generate()

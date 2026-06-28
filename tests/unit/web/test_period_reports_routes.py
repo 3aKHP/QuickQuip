@@ -71,15 +71,16 @@ def test_get_text(db):
     assert period_reports.get_period_report_text("10001", "monthly", "2026-06") == "月报正文"
 
 
-def test_delete(db):
+def test_delete(db, monkeypatch):
+    monkeypatch.setattr(period_reports.audit_logger, "log", lambda *a, **k: None)
     db.upsert("10001", PERIOD_WEEKLY, "2026-W24", "x", "m1")
-    assert period_reports.delete_period_report("10001", "weekly", "2026-W24") == {"ok": True}
+    assert period_reports.delete_period_report("10001", "weekly", "2026-W24", object()) == {"ok": True}
     assert db.get("10001", PERIOD_WEEKLY, "2026-W24") is None
 
 
 def test_delete_404_when_missing(db):
     with pytest.raises(HTTPException) as exc:
-        period_reports.delete_period_report("10001", "weekly", "2026-W24")
+        period_reports.delete_period_report("10001", "weekly", "2026-W24", object())
     assert exc.value.status_code == 404
 
 

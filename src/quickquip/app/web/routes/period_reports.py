@@ -2,9 +2,10 @@ import logging
 import re
 import sqlite3
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import PERIOD_REPORTS_DB_PATH
 
 router = APIRouter()
@@ -100,7 +101,7 @@ def get_period_report_text(group_id: str, period_type: str, period_key: str):
 
 
 @router.delete("/period-reports/{group_id}/{period_type}/{period_key}")
-def delete_period_report(group_id: str, period_type: str, period_key: str):
+def delete_period_report(group_id: str, period_type: str, period_key: str, request: Request):
     _validate_group_id(group_id)
     _validate_period_type(period_type)
     _validate_period_key(period_key)
@@ -117,6 +118,12 @@ def delete_period_report(group_id: str, period_type: str, period_key: str):
             raise HTTPException(status_code=404, detail="period report not found")
         logger.warning(
             "period report deleted: group=%s type=%s key=%s", group_id, period_type, period_key,
+        )
+        audit_logger.log(
+            request,
+            action="delete",
+            target_type="period_report",
+            target_id=f"{group_id}:{period_type}:{period_key}",
         )
         return {"ok": True}
     finally:

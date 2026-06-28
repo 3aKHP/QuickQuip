@@ -13,7 +13,7 @@ _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 
 def _validate_group_id(group_id: str) -> None:
     if not _GROUP_ID_RE.match(group_id):
-        raise HTTPException(status_code=400, detail="group_id must be 5-12 digits")
+        raise HTTPException(status_code=422, detail="group_id must be 5-12 digits")
 
 
 class GroupToggle(BaseModel):
