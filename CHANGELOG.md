@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+
+## [1.9.0] - 2026-06-26
+
 ### ✨ 新增 (Added)
 
 - **群周报与群月报**：每周一/每月 1 日自动生成上一周期的群聊回顾，发到群里。与每日日报相互独立，可单独开启。
@@ -537,7 +540,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...v1.9.0
 [1.8.9]: https://github.com/3aKHP/QuickQuip/compare/v1.8.1...v1.8.9
 [1.8.1]: https://github.com/3aKHP/QuickQuip/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/3aKHP/QuickQuip/compare/v1.7.10...v1.8.0
