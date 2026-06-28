@@ -44,6 +44,7 @@
 
 1. **在 dev 上 bump 版本**：编辑 `pyproject.toml` 的 `version` 字段
 2. **整理 CHANGELOG**（遵循项目 Keep a Changelog 约定）：
+   - 汇总本期改动：以协作者本地维护的 changelog 草稿（主）+ 已合并 commit 历史（兜底）为来源，按对应分类写入 `## [Unreleased]` 段；汇总后清掉已发布的本地草稿
    - 将 `## [Unreleased]` 改为 `## [X.Y.Z] - YYYY-MM-DD`（版本号不带 `v` 前缀）
    - 在其上方插入新的空 `## [Unreleased]` 段
    - 在文件底部的链接区更新 `[Unreleased]` 和新版本的比较链接
