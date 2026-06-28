@@ -29,7 +29,7 @@
 ## 日常工作流
 
 1. **拉分支**：`git checkout -b <type>/<topic> dev`（base 必须是 dev，不是 main）
-2. **实现**：遵循 [`style.md`](style.md) 的单一职责、400 行预警线、分层纪律
+2. **实现**：遵循 [`style.md`](style.md) 的单一职责、400 行预警线、分层纪律。feat/fix/refactor 级改动**不直接编辑 `CHANGELOG.md`**，改记一条本地 changelog 草稿（机制见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)），草稿正文附 PR 描述
 3. **本地验证**：pre-push hook 会自动跑 ruff + type-check + pytest；失败则修，不加 `--no-verify`
 4. **推送 + 开 PR**：PR base 选 dev。PR 描述写清动机、范围、验证方式
 5. **CI + Review**：CI 在所有 PR 上自动跑；@khpilot bot 会提供自动化 code review
@@ -44,6 +44,7 @@
 
 1. **在 dev 上 bump 版本**：编辑 `pyproject.toml` 的 `version` 字段
 2. **整理 CHANGELOG**（遵循项目 Keep a Changelog 约定）：
+   - 汇总本期改动：以协作者本地维护的 changelog 草稿（主，机制见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)）+ 已合并 commit 历史（兜底）为来源，按对应分类写入 `## [Unreleased]` 段（草稿暂不清，保留至 release 确认后；见第 6 步）
    - 将 `## [Unreleased]` 改为 `## [X.Y.Z] - YYYY-MM-DD`（版本号不带 `v` 前缀）
    - 在其上方插入新的空 `## [Unreleased]` 段
    - 在文件底部的链接区更新 `[Unreleased]` 和新版本的比较链接
@@ -52,6 +53,7 @@
 5. **合并 release PR**：`gh pr merge --merge`
 6. **打 tag**：在 main 上 `git tag vX.Y.Z && git push origin vX.Y.Z`
    - tag push 会触发 `release.yml`：完整 tests + Windows lazy package + Docker 镜像 + GitHub Release
+   - release 流水线通过后，清掉已发布的本地 changelog 草稿（草稿不进 git，删除前确认 CHANGELOG 已正确汇总）
 7. **back-merge main → dev**：
    - 若 dev 是 main 的直接祖先（常见）：`git checkout dev && git merge --ff-only main && git push`
    - 若 dev 已有新提交（release 后又开了 feature）：开一个 `chore/back-merge-vX.Y.Z` PR，base = dev
@@ -65,7 +67,7 @@
 > 仅当生产事故、安全漏洞等**等不及走 dev → main 双跳**的情况。日常改动禁止走这条路。
 
 1. **拉分支**：`git checkout -b hotfix/<topic> main`（base 是 main）
-2. **修复 + 补 CHANGELOG**：在对应版本段或新建一个 patch 版本段
+2. **修复 + 补 CHANGELOG**：hotfix 不走草稿流程，直接编辑 `CHANGELOG.md`（在对应版本段或新建一个 patch 版本段）
 3. **PR 回 main**：`gh pr merge --merge`
 4. **打 tag**：`vX.Y.Z+1`（patch 号）
 5. **back-merge main → dev**：同 release 流程的第 7 步，**不可省略**，否则 dev 永久落后
@@ -85,7 +87,7 @@
 
 ## chore / docs 落点
 
-- **默认进 dev**：版本号 bump、typo、文档微调、CHANGELOG 追加等小修补，直接 push 到 dev 即可（不走 PR 也可，走 PR 更利于触发 CI）
+- **默认进 dev**：版本号 bump、typo、文档微调等小修补，直接 push 到 dev 即可（不走 PR 也可，走 PR 更利于触发 CI）
 - **禁止直接上 main**：除 release 窗口期的 release commit 和上述 hotfix 例外
 
 ---
