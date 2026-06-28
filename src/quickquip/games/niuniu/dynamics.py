@@ -20,7 +20,7 @@ from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.text import NiuNiuText
 
 
-def _glue_growth(origin: float, coefficient: float = 1.0, scale: float = 200.0) -> float:
+def _glue_growth(origin: float, coefficient: float = 1.0) -> float:
     """Calculate growth/shrinkage delta — proportional to sqrt(|origin|).
 
     Sqrt scaling keeps the recurrence L_{n+1} = L_n + β·√L_n quadratic
@@ -114,7 +114,7 @@ def glue_resolve(
             "lucky_day": cfg.glue_lucky_coefficient,
             "special_boost": cfg.glue_special_coefficient,
         }.get(name, 1.0)
-        diff = _glue_growth(origin, coeff, cfg.glue_growth_scale)
+        diff = _glue_growth(origin, coeff)
         new_length = round(origin + diff, 2)
         if diff > 0 and "pos" in event:
             msg = random.choice(event["pos"]).format(diff=abs(diff))
@@ -132,7 +132,8 @@ def glue_resolve(
             new_length = round(origin * effect, 2)
         elif neg_shrink == "sublinear":
             # 凹侧 sublinear 加深(取代乘性翻倍)：α=0.5 不发散,与 growth 的
-            # √|origin| 扩散同构。depth 区分 shrinkage / nightmare 的强度。
+            # √|origin| 扩散同构。depth 是单 scalar——nightmare 与 shrinkage
+            # 在凹侧等价(intentional;正侧才用 effect 区分两者)。
             new_length = round(origin - neg_shrink_depth * math.sqrt(abs(origin)), 2)
         else:
             new_length = round(origin / effect, 2)
@@ -177,7 +178,7 @@ def glue_resolve(
         new_length = round(origin + diff, 2)
         msg = random.choice(event["pos"]).format(diff=diff)
     else:
-        diff = _glue_growth(origin, 1.0, cfg.glue_growth_scale)
+        diff = _glue_growth(origin, 1.0)
         new_length = round(origin + diff, 2)
         msg = f"你的牛牛变化了 {abs(diff)} cm"
 
@@ -510,13 +511,15 @@ def fence_resolve_zerohsum(
         )
         msg_branch = "succubus"
     elif chosen["name"] == "dominate":
-        if random.random() < cfg.fence_dominate_sever_chance:
-            # sever: a ratio of the LOSER's length, transferred in full
-            if i_win:
-                stake = round(abs(oppo_len) * min(0.95, 0.5 * mf), 2)
-            else:
-                df = oppo_luck_provider() ** luck_power
-                stake = round(abs(my_len) * min(0.95, 0.5 * df), 2)
+        sever = random.random() < cfg.fence_dominate_sever_chance
+        if sever and i_win:
+            # attacker severs opponent (allowed vs bot too — attacker gains from phantom)
+            stake = round(abs(oppo_len) * min(0.95, 0.5 * mf), 2)
+            msg_branch = "dominate_sever"
+        elif sever and not oppo_is_bot:
+            # defender severs attacker — guard vs bot (legacy: bot phantom can't sever)
+            df = oppo_luck_provider() ** luck_power
+            stake = round(abs(my_len) * min(0.95, 0.5 * df), 2)
             msg_branch = "dominate_sever"
         else:
             base = min(abs(my_len), abs(oppo_len))

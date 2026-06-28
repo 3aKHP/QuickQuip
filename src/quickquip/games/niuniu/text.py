@@ -470,9 +470,9 @@ def _default_fence_events() -> list[dict[str, Any]]:
         {
             "name": "draw", "weight": 5,
             "msg": [
-                "🤝 双方牛牛旗鼓相当！两败俱伤，各损失 {loss} cm！当前 {my_len} cm",
-                "互不相让，双双重伤！你的牛牛损失了 {loss} cm...",
-                "势均力敌！双方牛牛都受到了 {loss} cm 的损伤！",
+                "🤝 双方牛牛旗鼓相当！势均力敌，谁也没占到便宜，当前 {my_len} cm",
+                "互不相让！双方难分胜负，当前 {my_len} cm",
+                "势均力敌！这场击剑没有赢家，当前 {my_len} cm",
             ],
         },
     ]

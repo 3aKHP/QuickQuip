@@ -93,7 +93,7 @@ GLUE_EVENTS = [
     },
     {
         "name": "nightmare",
-        "weight": 3,
+        "weight": 2,
         "category": "shrinkage",
         "neg": [
             "👻 你做了一个关于牛牛的噩梦！吓缩了 {diff} cm...",
@@ -102,7 +102,7 @@ GLUE_EVENTS = [
     },
     {
         "name": "shrinkage",
-        "weight": 8,
+        "weight": 4,
         "category": "shrinkage",
         "neg": [
             "由于你在换蛋期打胶，你的牛牛断掉了呢！当前长度 {new_length} cm！",
