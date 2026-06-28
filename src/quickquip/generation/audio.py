@@ -520,9 +520,9 @@ async def _openai_tts(
     if model_config.speed:
         payload["speed"] = model_config.speed
     if model_config.extra_body:
-        payload.update(model_config.extra_body)
+        payload.update({k: v for k, v in model_config.extra_body.items() if not k.startswith("__")})
     if provider.extra_body:
-        payload.update(provider.extra_body)
+        payload.update({k: v for k, v in provider.extra_body.items() if not k.startswith("__")})
     audio_bytes, detected_mime = await _http_raw_bytes(
         url,
         headers=_build_local_headers(provider),

@@ -104,3 +104,31 @@ def test_generate_audio_openai_tts_empty_response(monkeypatch):
         assert False, "应抛出空响应错误"
     except Exception as exc:
         assert "空响应" in str(exc)
+
+
+def test_generate_audio_openai_tts_strips_double_underscore_keys(monkeypatch):
+    """回归 Bot MEDIUM：_openai_tts 应剔除 extra_body 中 __ 前缀的内部控制键
+    （http_tts 协议的 __path/__method），避免泄露到 openai_tts 请求体。"""
+    captured: dict = {}
+
+    async def fake_http_raw_bytes(url, *, headers, payload, timeout):
+        captured["payload"] = payload
+        return b"BYTES", "audio/mpeg"
+
+    monkeypatch.setattr("quickquip.generation.audio._http_raw_bytes", fake_http_raw_bytes)
+
+    provider = AudioProviderConfig(
+        id="local-openai-tts", protocol="openai_tts",
+        base_url="http://127.0.0.1:8000/v1", api_key_env="",
+    )
+    model = AudioModelConfig(
+        id="local-tts", model="tts-1", voice_id="alloy", format="mp3",
+        extra_body={"__path": "/tts", "__method": "POST", "speed": 1.5},
+    )
+
+    asyncio.run(generate_audio(model, provider, "测试"))
+
+    payload = captured["payload"]
+    assert "__path" not in payload
+    assert "__method" not in payload
+    assert payload["speed"] == 1.5  # 非 __ 前缀键保留

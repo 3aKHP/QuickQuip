@@ -471,7 +471,9 @@ def _period_enabled_groups(period_type: str):
     """按 period_type 返回对应的 enabled groups 实例（duck-typed，具备 add/remove/contains/all_groups）。"""
     if period_type == PERIOD_WEEKLY:
         return weekly_enabled_groups
-    return monthly_enabled_groups
+    if period_type == PERIOD_MONTHLY:
+        return monthly_enabled_groups
+    raise ValueError(f"未知 period_type: {period_type!r}")
 
 
 async def _run_period_generation(
@@ -616,6 +618,7 @@ def _register_period_jobs() -> None:
     """注册周报/月报的生成与发布 job。各自独立 enabled 开关。"""
     if not scheduler:
         return
+    _ensure_llm_bindings()
     svc = get_llm_service()
     from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
 
