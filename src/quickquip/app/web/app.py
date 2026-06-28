@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
-from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime
+from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, period_reports, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime
 from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
 
@@ -21,6 +21,7 @@ def create_app() -> FastAPI:
     app.include_router(diagnostics.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(memory.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(summaries.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+    app.include_router(period_reports.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(personas.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(conversations.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(group_settings.router, prefix="/ops/api", dependencies=auth.protected_dependencies)

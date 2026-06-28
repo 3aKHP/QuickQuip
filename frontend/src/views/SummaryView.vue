@@ -1,9 +1,20 @@
 <template>
   <div class="sum-view">
-    <UiPageHeader title="每日总结" />
+    <UiPageHeader title="总结" />
 
     <UiCard padding="md" shadow="sm" class="toolbar-card">
       <div class="toolbar-inner">
+        <div class="tab-group">
+          <button
+            v-for="t in tabs"
+            :key="t.key"
+            class="tab-btn"
+            :class="{ active: activeTab === t.key }"
+            @click="switchTab(t.key)"
+          >
+            {{ t.label }}
+          </button>
+        </div>
         <label>
           群组
           <select v-model="groupId" @change="loadList">
@@ -20,16 +31,16 @@
       <span>{{ listError }}</span>
     </div>
 
-    <UiLoading v-if="listLoading && !selected" text="正在加载总结记录" class="summary-loading" />
+    <UiLoading v-if="listLoading && !selected" text="正在加载记录" class="summary-loading" />
 
     <div v-else-if="!selected" class="summary-list">
       <article
         v-for="item in normalizedList"
-        :key="item.date"
+        :key="item.key"
         class="summary-row"
       >
         <div class="summary-main">
-          <span class="sum-date">{{ item.date }}</span>
+          <span class="sum-date">{{ item.key }}</span>
           <span class="meta" :title="`${item.model} · ${item.charCount} 字`">
             {{ item.model }} · {{ item.charCount }} 字
           </span>
@@ -38,12 +49,12 @@
           </UiTag>
         </div>
         <div class="sum-actions">
-          <UiButton size="sm" icon="BookOpen" @click="open(item.date)">阅读</UiButton>
-          <UiButton size="sm" variant="danger" icon="Trash2" @click="del(item.date)">删除</UiButton>
+          <UiButton size="sm" icon="BookOpen" @click="open(item.key)">阅读</UiButton>
+          <UiButton size="sm" variant="danger" icon="Trash2" @click="del(item.key)">删除</UiButton>
         </div>
       </article>
 
-      <UiEmpty v-if="groupId && !listLoading && normalizedList.length === 0" icon="FileText" title="暂无总结记录" />
+      <UiEmpty v-if="groupId && !listLoading && normalizedList.length === 0" icon="FileText" title="暂无记录" />
     </div>
 
     <UiCard v-else padding="lg" shadow="md" class="detail-card">
@@ -57,7 +68,7 @@
 
       <div class="detail-scroll">
         <div v-if="detailLoading" class="detail-loading">
-          <UiLoading text="正在读取总结正文" />
+          <UiLoading text="正在读取正文" />
         </div>
 
         <div v-else-if="detailError" class="error-block">
@@ -80,34 +91,71 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { fetchSummaryGroups, fetchSummaries, fetchSummaryDetail, deleteSummary } from '../api/summaries'
+import { deleteSummary, fetchSummaryDetail, fetchSummaryGroups, fetchSummaries } from '../api/summaries'
+import { deletePeriodReport, fetchPeriodReportDetail, fetchPeriodReportGroups, fetchPeriodReports } from '../api/period_reports'
 import { renderMarkdown } from '../composables/useMarkdown'
 import { toast } from '../toast'
 
+type Tab = 'daily' | 'weekly' | 'monthly'
+
 interface SummaryListRow {
   summary_date?: string
-  date?: string
-  generated_date?: string
-  day?: string
+  period_key?: string
+  generated_at?: string
   model_used?: string
-  model?: string
   char_count?: number | string
-  characters?: number | string
-  content_length?: number | string
   published_at?: string | null
-  published?: boolean
-}
-
-interface SummaryDetailRow extends SummaryListRow {
   content?: string
+  [key: string]: unknown
 }
 
 interface SummaryListItem {
-  date: string
+  key: string
   model: string
   charCount: number | string
   published: boolean
 }
+
+interface TabConfig {
+  keyField: string
+  fetchGroups: () => Promise<string[]>
+  fetchList: (gid: string) => Promise<SummaryListRow[]>
+  fetchDetail: (gid: string, key: string) => Promise<SummaryListRow>
+  remove: (gid: string, key: string) => Promise<unknown>
+}
+
+const tabs: { key: Tab; label: string }[] = [
+  { key: 'daily', label: '每日' },
+  { key: 'weekly', label: '周报' },
+  { key: 'monthly', label: '月报' },
+]
+
+const tabConfig: Record<Tab, TabConfig> = {
+  daily: {
+    keyField: 'summary_date',
+    fetchGroups: () => fetchSummaryGroups(),
+    fetchList: (gid) => fetchSummaries(gid),
+    fetchDetail: (gid, key) => fetchSummaryDetail(gid, key),
+    remove: (gid, key) => deleteSummary(gid, key),
+  },
+  weekly: {
+    keyField: 'period_key',
+    fetchGroups: () => fetchPeriodReportGroups('weekly'),
+    fetchList: (gid) => fetchPeriodReports(gid, 'weekly'),
+    fetchDetail: (gid, key) => fetchPeriodReportDetail(gid, 'weekly', key),
+    remove: (gid, key) => deletePeriodReport(gid, 'weekly', key),
+  },
+  monthly: {
+    keyField: 'period_key',
+    fetchGroups: () => fetchPeriodReportGroups('monthly'),
+    fetchList: (gid) => fetchPeriodReports(gid, 'monthly'),
+    fetchDetail: (gid, key) => fetchPeriodReportDetail(gid, 'monthly', key),
+    remove: (gid, key) => deletePeriodReport(gid, 'monthly', key),
+  },
+}
+
+const activeTab = ref<Tab>('daily')
+const current = computed(() => tabConfig[activeTab.value])
 
 const groups = ref<string[]>([])
 const groupId = ref('')
@@ -115,22 +163,23 @@ const list = ref<SummaryListRow[]>([])
 const listLoading = ref(false)
 const listError = ref<string | null>(null)
 const selected = ref<string | null>(null)
-const detail = ref<SummaryDetailRow | null>(null)
+const detail = ref<SummaryListRow | null>(null)
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
 
 const normalizedList = computed<SummaryListItem[]>(() => {
   return list.value
     .map((item) => {
-      const date = item.summary_date || item.date || item.generated_date || item.day || ''
+      const raw = item[current.value.keyField]
+      const key = raw != null ? String(raw) : ''
       return {
-        date: String(date || '未知日期'),
-        model: item.model_used || item.model || '—',
-        charCount: item.char_count ?? item.characters ?? item.content_length ?? '—',
-        published: Boolean(item.published_at || item.published),
+        key: key || '未知',
+        model: (item.model_used as string) || '—',
+        charCount: item.char_count ?? '—',
+        published: Boolean(item.published_at),
       }
     })
-    .filter(item => item.date && item.date !== '未知日期')
+    .filter(item => item.key && item.key !== '未知')
 })
 
 const renderedContent = computed(() => {
@@ -138,17 +187,33 @@ const renderedContent = computed(() => {
   return content ? renderMarkdown(content) : ''
 })
 
-onMounted(async () => {
+onMounted(() => loadGroups())
+
+function switchTab(t: Tab) {
+  if (activeTab.value === t) return
+  activeTab.value = t
+  selected.value = null
+  detail.value = null
+  detailError.value = null
+  list.value = []
+  groupId.value = ''
+  loadGroups()
+}
+
+async function loadGroups() {
+  listError.value = null
   try {
-    groups.value = await fetchSummaryGroups()
-    if (!groupId.value && groups.value.length > 0) {
-      groupId.value = groups.value[0]
-      await loadList()
-    }
+    groups.value = await current.value.fetchGroups()
   } catch (e: unknown) {
+    groups.value = []
     listError.value = `加载群组列表失败: ${(e as Error).message}`
+    return
   }
-})
+  if (!groupId.value && groups.value.length > 0) {
+    groupId.value = groups.value[0]
+    await loadList()
+  }
+}
 
 async function loadList() {
   if (!groupId.value) return
@@ -158,7 +223,7 @@ async function loadList() {
   detail.value = null
   detailError.value = null
   try {
-    const rows = await fetchSummaries(groupId.value)
+    const rows = await current.value.fetchList(groupId.value)
     list.value = Array.isArray(rows) ? rows : []
   } catch (e: unknown) {
     listError.value = (e as Error).message
@@ -167,13 +232,13 @@ async function loadList() {
   }
 }
 
-async function open(date: string) {
-  selected.value = date
+async function open(key: string) {
+  selected.value = key
   detail.value = null
   detailError.value = null
   detailLoading.value = true
   try {
-    detail.value = await fetchSummaryDetail(groupId.value, date)
+    detail.value = await current.value.fetchDetail(groupId.value, key)
   } catch (e: unknown) {
     detailError.value = (e as Error).message
     toast((e as Error).message, 'error')
@@ -182,12 +247,12 @@ async function open(date: string) {
   }
 }
 
-async function del(date: string) {
-  if (!confirm(`删除 ${groupId.value} / ${date} 的总结？`)) return
+async function del(key: string) {
+  if (!confirm(`删除 ${groupId.value} / ${key} ？`)) return
   try {
-    await deleteSummary(groupId.value, date)
-    list.value = list.value.filter(item => (item.summary_date || item.date || item.generated_date || item.day) !== date)
-    if (selected.value === date) closeDetail()
+    await current.value.remove(groupId.value, key)
+    list.value = list.value.filter(item => String(item[current.value.keyField] || '') !== key)
+    if (selected.value === key) closeDetail()
     toast('已删除')
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
@@ -223,6 +288,34 @@ function closeDetail() {
   align-items: center;
   gap: var(--qq-gap-md);
   flex-wrap: wrap;
+}
+
+.tab-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  background: var(--qq-surface-strong);
+}
+
+.tab-btn {
+  border: 0;
+  padding: 5px 14px;
+  border-radius: calc(var(--qq-radius-card) - 3px);
+  background: transparent;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-sm);
+  cursor: pointer;
+  transition: color var(--qq-transition-fast), background var(--qq-transition-fast);
+}
+
+.tab-btn:hover { color: var(--qq-text); }
+
+.tab-btn.active {
+  color: var(--qq-text);
+  background: var(--qq-surface);
+  box-shadow: var(--qq-shadow-card);
 }
 
 .toolbar-inner label {
