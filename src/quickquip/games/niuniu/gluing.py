@@ -32,8 +32,8 @@ def gluing(store: NiuNiuStore, uid: str, group_id: str) -> tuple[str, float]:
 
     cfg = store.config
     # Fetch daily luck only when the event actually consumes it, so that
-    # arrested/mirror events do not trigger a luck re-roll.
-    if event["category"] not in ("arrested", "mirror"):
+    # arrested/mirror/shrinkage events do not trigger a luck re-roll.
+    if event["category"] not in ("arrested", "mirror", "shrinkage"):
         luck = store.get_glue_luck(uid)
     else:
         luck = 1.0
