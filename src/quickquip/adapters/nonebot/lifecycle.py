@@ -11,6 +11,8 @@ from quickquip.app.message_pipeline import (
     rule_switch,
     daily_enabled_groups,
     daily_briefing_enabled_groups,
+    weekly_enabled_groups,
+    monthly_enabled_groups,
 )
 from quickquip.adapters.nonebot.awakening_plugin import boredom_enabled_groups
 from quickquip.adapters.nonebot.web_admin_actions import process_web_admin_actions
@@ -31,6 +33,8 @@ def _init_mtimes() -> None:
         CONFIG_AWAKENING_TOML,
         daily_enabled_groups.path,
         daily_briefing_enabled_groups.path,
+        weekly_enabled_groups.path,
+        monthly_enabled_groups.path,
         boredom_enabled_groups.path,
     ):
         try:
@@ -46,6 +50,8 @@ def _reload_if_changed() -> None:
         (CONFIG_AWAKENING_TOML, reload_awakening_config),
         (daily_enabled_groups.path, daily_enabled_groups.load),
         (daily_briefing_enabled_groups.path, daily_briefing_enabled_groups.load),
+        (weekly_enabled_groups.path, weekly_enabled_groups.load),
+        (monthly_enabled_groups.path, monthly_enabled_groups.load),
         (boredom_enabled_groups.path, boredom_enabled_groups.load),
     ]
     for path, reload_fn in checks:

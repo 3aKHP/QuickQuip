@@ -89,3 +89,42 @@ def test_reload_if_changed_watches_awakening_config(monkeypatch, tmp_path):
     lifecycle._reload_if_changed()
 
     assert calls == ["awakening"]
+
+
+def test_reload_if_changed_watches_period_report_groups(monkeypatch, tmp_path):
+    """回归 B1：weekly/monthly enabled 群文件必须被 web_admin_state_sync 监听，
+    否则 Web Admin 双进程部署下开关与立即生成对 bot 进程不可见。"""
+    rule_path = tmp_path / "rule_switch.json"
+    awakening_path = tmp_path / "awakening.toml"
+    daily_path = tmp_path / "daily.json"
+    briefing_path = tmp_path / "briefing.json"
+    boredom_path = tmp_path / "boredom.json"
+    weekly_path = tmp_path / "weekly.json"
+    monthly_path = tmp_path / "monthly.json"
+    for path in (rule_path, awakening_path, daily_path, briefing_path, boredom_path, weekly_path, monthly_path):
+        path.write_text("{}", encoding="utf-8")
+
+    calls: list[str] = []
+    monkeypatch.setattr(lifecycle, "RULE_SWITCH_PATH", rule_path)
+    monkeypatch.setattr(lifecycle, "CONFIG_AWAKENING_TOML", awakening_path)
+    monkeypatch.setattr(lifecycle.rule_switch, "load", lambda path: calls.append("rule"))
+    monkeypatch.setattr(lifecycle, "reload_awakening_config", lambda: calls.append("awakening"))
+    monkeypatch.setattr(lifecycle.daily_enabled_groups, "path", daily_path)
+    monkeypatch.setattr(lifecycle.daily_enabled_groups, "load", lambda: calls.append("daily"))
+    monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "path", briefing_path)
+    monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "load", lambda: calls.append("briefing"))
+    monkeypatch.setattr(lifecycle.boredom_enabled_groups, "path", boredom_path)
+    monkeypatch.setattr(lifecycle.boredom_enabled_groups, "load", lambda: calls.append("boredom"))
+    monkeypatch.setattr(lifecycle.weekly_enabled_groups, "path", weekly_path)
+    monkeypatch.setattr(lifecycle.weekly_enabled_groups, "load", lambda: calls.append("weekly"))
+    monkeypatch.setattr(lifecycle.monthly_enabled_groups, "path", monthly_path)
+    monkeypatch.setattr(lifecycle.monthly_enabled_groups, "load", lambda: calls.append("monthly"))
+
+    lifecycle._watched.clear()
+    lifecycle._init_mtimes()
+    weekly_path.write_text('{"changed": true}', encoding="utf-8")
+    monthly_path.write_text('{"changed": true}', encoding="utf-8")
+
+    lifecycle._reload_if_changed()
+
+    assert calls == ["weekly", "monthly"]

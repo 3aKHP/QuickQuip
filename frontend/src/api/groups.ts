@@ -9,7 +9,7 @@ export async function fetchKnownGroups() {
 }
 
 export async function updateGroup(type: string, gid: string | number, enabled: boolean) {
-  return request(`/api/groups/${type}/${gid}`, {
+  return request(`/api/groups/${type}/${encodeURIComponent(String(gid))}`, {
     method: 'POST',
     body: JSON.stringify({ enabled }),
   })

@@ -136,7 +136,11 @@ def run_briefing_now(group_id: str, body: BriefingNowBody, request: Request):
 
 def _period_report_enabled_groups(period_type: str):
     from quickquip.app.message_pipeline import weekly_enabled_groups, monthly_enabled_groups
-    return weekly_enabled_groups if period_type == "weekly" else monthly_enabled_groups
+    if period_type == "weekly":
+        return weekly_enabled_groups
+    if period_type == "monthly":
+        return monthly_enabled_groups
+    raise ValueError(f"unknown period_type: {period_type!r}")
 
 
 def _set_period_report_group(period_type: str, group_id: str, body: GroupToggle, request: Request) -> None:
