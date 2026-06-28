@@ -68,9 +68,9 @@
 
 > 以下为临时发现的零散点子，**尚未深入讨论**——目标、可行性、优先级与范围都待定，仅作记录以免遗忘。一个点子正式立项前应先补齐验收标准、风险边界与验证方式。
 
-### Web Admin 适配周报与月报
+### Web Admin 周报/月报配置项在线编辑
 
-1.9.0 的周报/月报目前只能通过群内 `/summary weekly|monthly` 命令和编辑 `config/llm.toml` 管理。Web Admin 既有的"每日总结群组管理"可扩展到周报/月报：按群开关、状态查看、最近一期内容回看与配置项在线编辑。
+周报/月报的按群开关、状态查看与历史报告回看已在 Web Admin 落地（群组页开关 + 总结页日/周/月切换）。剩余：`[weekly_report]` / `[monthly_report]` 的 cron、min_messages、sample_per_day、length_hint 等字段级在线编辑，需等 `config/llm.toml` 热重载（含 scheduler 重注册）打通后实现。
 
 ### 周报/月报内容翔实度大幅升级
 

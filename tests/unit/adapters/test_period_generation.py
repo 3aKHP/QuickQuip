@@ -95,8 +95,8 @@ async def test_generate_period_one_reads_window_once_and_persists(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_send_period_report_now_does_not_persist(monkeypatch):
-    """回归 Bot MEDIUM：命令触发的 _send_period_report_now 不应入库。
+async def testsend_period_report_now_does_not_persist(monkeypatch):
+    """回归 Bot MEDIUM：命令触发的 send_period_report_now 不应入库。
     旧实现经 _generate_period_one 触发 upsert（published_at=NULL），定时 publish job 会重复发布。
     """
     counts = _patch_period_deps(monkeypatch, msg_count=50)
@@ -107,7 +107,7 @@ async def test_send_period_report_now_does_not_persist(monkeypatch):
     monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: False)
     monkeypatch.setattr(plugin, "_mark_triggered", lambda gid: None)
 
-    await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+    await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
 
     assert counts.upsert == 0    # 不入库
     assert counts.send == 1      # 但确实发送了
@@ -137,7 +137,7 @@ async def test_run_period_generation_populates_name_table_from_stats(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_send_period_report_now_raises_not_enabled(monkeypatch):
+async def testsend_period_report_now_raises_not_enabled(monkeypatch):
     """回归 Bot LOW #5：未开启抛 PeriodReportNotEnabledError（非通用 RuntimeError）。"""
     _patch_period_deps(monkeypatch)
     monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
@@ -145,11 +145,11 @@ async def test_send_period_report_now_raises_not_enabled(monkeypatch):
         add=lambda gid: None, remove=lambda gid: None,
     ))
     with pytest.raises(plugin.PeriodReportNotEnabledError):
-        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+        await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
 
 
 @pytest.mark.asyncio
-async def test_send_period_report_now_raises_cooldown(monkeypatch):
+async def testsend_period_report_now_raises_cooldown(monkeypatch):
     """回归 Bot LOW #5：冷却中抛 PeriodReportCooldownError。"""
     _patch_period_deps(monkeypatch)
     monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
@@ -158,11 +158,11 @@ async def test_send_period_report_now_raises_cooldown(monkeypatch):
     ))
     monkeypatch.setattr(plugin, "_on_cooldown", lambda gid: True)
     with pytest.raises(plugin.PeriodReportCooldownError):
-        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+        await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
 
 
 @pytest.mark.asyncio
-async def test_send_period_report_now_raises_generation_failed(monkeypatch):
+async def testsend_period_report_now_raises_generation_failed(monkeypatch):
     """回归 Bot LOW #5：生成失败（_run_period_generation 返回 None）抛 GenerationFailedError。"""
     _patch_period_deps(monkeypatch)
     monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
@@ -177,4 +177,4 @@ async def test_send_period_report_now_raises_generation_failed(monkeypatch):
 
     monkeypatch.setattr(plugin, "_run_period_generation", fake_run_gen)
     with pytest.raises(plugin.PeriodReportGenerationFailedError):
-        await plugin._send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())
+        await plugin.send_period_report_now(10001, plugin.PERIOD_WEEKLY, bot=object())

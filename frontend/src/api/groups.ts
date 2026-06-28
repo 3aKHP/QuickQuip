@@ -25,3 +25,7 @@ export async function runBriefingNow(gid: string | number, period?: string) {
     body: JSON.stringify({ period: period || null }),
   })
 }
+
+export async function runPeriodReportNow(type: 'weekly' | 'monthly', gid: string | number) {
+  return request(`/api/groups/${type}/${encodeURIComponent(String(gid))}/now`, { method: 'POST' })
+}

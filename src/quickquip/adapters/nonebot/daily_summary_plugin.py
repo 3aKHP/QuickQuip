@@ -672,7 +672,7 @@ class PeriodReportGenerationFailedError(RuntimeError):
     """周期报告生成失败或被跳过（消息不足、LLM 失败等）。"""
 
 
-async def _send_period_report_now(
+async def send_period_report_now(
     group_id: int | str, period_type: str, bot=None, before_generate=None
 ) -> dict[str, object]:
     """命令触发的立即生成 + 发送（不入库）。"""
@@ -763,7 +763,7 @@ async def _handle_period_subcommand(
         if not _is_admin(event):
             await summary_cmd.finish("仅管理员可执行此操作")
         try:
-            await _send_period_report_now(
+            await send_period_report_now(
                 group_id, period_type,
                 before_generate=lambda: summary_cmd.send(f"正在生成{kind_word}，请稍候……"),
             )
