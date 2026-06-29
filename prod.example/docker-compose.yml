@@ -1,23 +1,9 @@
 name: quickquip
 
 services:
-  searxng:
-    image: ghcr.io/searxng/searxng:latest
-    container_name: quickquip-searxng
-    environment:
-      FORCE_OWNERSHIP: "true"
-      SEARXNG_BASE_URL: "${SEARXNG_PUBLIC_BASE_URL:-http://127.0.0.1:8888/}"
-      SEARXNG_BIND_ADDRESS: "0.0.0.0"
-      SEARXNG_PORT: "8080"
-      SEARXNG_SECRET: "${SEARXNG_SECRET:?Set SEARXNG_SECRET in ../.env}"
-      SEARXNG_LIMITER: "false"
-    ports:
-      - "${SEARXNG_BIND_ADDRESS:-127.0.0.1}:${SEARXNG_BIND_PORT:-8888}:8080"
-    volumes:
-      - ../docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - searxng-cache:/var/cache/searxng:rw
-    restart: unless-stopped
-
+  # SearXNG 不内置于运维模板：请用外部独立 searxng 实例提供搜索能力，
+  # 并通过 QUICKQUIP_SEARXNG_BASE_URL 指向它（见 quickquip / web-admin 的 environment）。
+  # 面向终端用户的开箱即用自带 searxng 见仓库根目录 docker-compose.example.yml。
   llbot:
     image: initialencounter/llonebot:latest
     container_name: llbot
@@ -48,7 +34,6 @@ services:
     container_name: quickquip
     depends_on:
       - llbot
-      - searxng
     env_file:
       - ../.env
     environment:
@@ -57,8 +42,7 @@ services:
       PORT: "8080"
       ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
-      SEARCH_BACKEND: "${SEARCH_BACKEND:-searxng}"
-      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"
       PYTHONPATH: "/app/src"
     shm_size: "1gb"
     volumes:
@@ -85,8 +69,7 @@ services:
     environment:
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
-      SEARCH_BACKEND: "${SEARCH_BACKEND:-searxng}"
-      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"
       PYTHONPATH: "/app/src"
     ports:
       - "127.0.0.1:5104:5104"
@@ -98,6 +81,3 @@ services:
       - ../web_api.py:/app/web_api.py:ro
       - ../src:/app/src:ro
     restart: unless-stopped
-
-volumes:
-  searxng-cache:

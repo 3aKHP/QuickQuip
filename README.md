@@ -72,8 +72,10 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 4. **可选：启动项目内置 SearXNG**
 
+   需先在 `.env` 中设置 `SEARXNG_SECRET`（compose 启动时必填）：
+
    ```bash
-   docker compose -f docker-compose.searxng.yml up -d
+   docker compose -f docker-compose.example.yml up -d searxng
    ```
 
    默认暴露到 `http://127.0.0.1:8888`，开启 JSON 搜索接口。

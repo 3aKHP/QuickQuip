@@ -28,7 +28,7 @@
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub PAT（MCP 用） |
 | `GITHUB_TOOLSETS` | GitHub MCP 启用的工具集，逗号分隔。可选：`context`, `repos`, `issues`, `pull_requests`, `users`, `actions` |
 | `GITHUB_READ_ONLY` | 设为非空时限制 GitHub MCP 为只读 |
-| `TAVILY_API_KEY` | Tavily 搜索 API key（备用搜索后端） |
+| `TAVILY_API_KEY` | Tavily API key（供 MCP sidecar 的 Tavily 工具使用，未启用 MCP Tavily 时无需填写） |
 
 ### 搜索
 
@@ -565,7 +565,7 @@ Persona 文件支持自由扩展字段，运行时只使用已识别的键。
 
 ## SearXNG 配置
 
-项目内置 `docker-compose.searxng.yml` 和服务配置 `docker/searxng/settings.yml`：
+项目内置 `docker-compose.example.yml`（含 searxng 服务）和服务配置 `docker/searxng/settings.yml`：
 
 ```yaml
 # docker/searxng/settings.yml
@@ -579,6 +579,8 @@ server:
 ```
 
 默认暴露在 `http://127.0.0.1:8888`，开启 JSON 接口供 bot 直接调用。
+
+> ⚠️ **搜索质量免责**：`search_web` 只负责把请求转发给 SearXNG 实例，结果相关性取决于该实例聚合的搜索引擎与出口 IP（机房 IP 下 bing/baidu/sogou 等常大面积失效或风控）。QuickQuip 不为搜索结果质量背书；生产环境建议使用调优过的或自建 SearXNG 实例。
 
 ---
 

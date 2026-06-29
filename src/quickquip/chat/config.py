@@ -27,7 +27,6 @@ _BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "music_gen": {"global_limit": 4, "user_limit": 1, "scope": "global"},
     "tieba_random_post": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     "web_search": {"global_limit": 6, "user_limit": 3, "scope": "global"},
-    "tavily_search": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     "repeat_follow_read": {"global_limit": 8, "user_limit": 3},
     "repeat_trim_last": {"global_limit": 8, "user_limit": 3},
     "repeat_same_user_warning": {"global_limit": 4, "user_limit": 2},
