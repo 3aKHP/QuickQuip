@@ -106,6 +106,9 @@ def fencing(
     my_luck = store.get_fence_luck(my_uid)
 
     if oppo_is_bot:
+        if my_len < 0:
+            fence_cd.set(my_uid, cfg.fence_cooldown)
+            return "深渊魅魔形态下无法与机器人击剑……"
         out = fence_resolve_bot(my_len, my_luck, text, luck_power=cfg.luck_power)
     else:
         out = fence_resolve_zerohsum(

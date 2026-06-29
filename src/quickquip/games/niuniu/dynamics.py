@@ -463,8 +463,9 @@ def fence_resolve_zerohsum(
     only the transfer is made symmetric and decay is dropped. dominate sever
     and succubus devour are full transfers (legacy 0.6× / 1.5× broke
     conservation). NB: *luck* still scales stake and win_prob here — tightening
-    that is deferred to the gluing/luck redesign. Message text is a sandbox
-    placeholder, not the production copy.
+    that is deferred to the gluing/luck redesign. NB: draw is an intentional
+    non-zero-sum exception (两败俱伤, anti-inflation — both sides lose,
+    offsetting gluing's positive Σ drift).
     """
     # ── win determination (legacy) ───────────────────────────────────
     win_prob = _fence_win_prob(my_len, oppo_len)
@@ -597,7 +598,7 @@ def fence_resolve_bot(
     """Bot 击剑: 纯娱乐, E[Δmy] = 0。
 
     win_prob 固定 0.5(luck 不进胜率 → 期望严格 0)。luck 只放大 stake(方差)。
-    stake ∝ √|my|(sublinear: 大玩家有像样波动, 又不会乘性缩水)。bot 是简化
+    stake ∝ √max(my,0)(sublinear, my≥0 有效; my<0 由编排层拒绝)。bot 是简化
     靶子, 只 win/lose, 不走 sever/devour/draw(fence_bot draw 文案待后续)。
     """
     mf = my_luck ** luck_power
