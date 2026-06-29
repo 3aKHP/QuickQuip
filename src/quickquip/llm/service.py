@@ -335,6 +335,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         forward_text: str = "",
         forward_image_urls: list[str] | None = None,
         image_descriptions: list[object] | None = None,
+        include_recent_images: bool = False,
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -354,6 +355,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
             image_descriptions=image_descriptions,
+            include_recent_images=include_recent_images,
         )
 
     async def generate_defectify_reply(
@@ -567,6 +569,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         raw_user_text: str | None = None,
         store_user_message: bool = True,
         message_id: str | None = None,
+        include_recent_images: bool = False,
     ) -> dict[str, str]:
         prompt = prompt.strip()
         normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
@@ -785,6 +788,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             forward_text=normalized_forward_text,
             forward_image_urls=request_forward_image_urls,
             image_descriptions=image_descriptions or None,
+            include_recent_images=include_recent_images and not is_non_vision,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -916,6 +920,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         raw_user_text: str | None = None,
         store_user_message: bool = True,
         message_id: str | None = None,
+        include_recent_images: bool = False,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
             chat_id=group_id,
@@ -936,6 +941,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             raw_user_text=raw_user_text,
             store_user_message=store_user_message,
             message_id=message_id,
+            include_recent_images=include_recent_images,
         )
 
     async def generate_private_reply(
@@ -957,6 +963,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         raw_user_text: str | None = None,
         store_user_message: bool = True,
         message_id: str | None = None,
+        include_recent_images: bool = False,
     ) -> dict[str, str]:
         return await self._generate_reply_for_scope(
             chat_id=user_id,
@@ -977,6 +984,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             raw_user_text=raw_user_text,
             store_user_message=store_user_message,
             message_id=message_id,
+            include_recent_images=include_recent_images,
         )
 
 

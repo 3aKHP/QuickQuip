@@ -27,6 +27,10 @@ from quickquip.llm.provider.trace import (
 
 logger = logging.getLogger(__name__)
 
+# Max images attached to a single provider request. Caps multimodal token
+# cost; also bounds how many recent-buffer images a passive trigger carries.
+MAX_IMAGES_PER_REQUEST = 5
+
 
 class LLMProviderError(RuntimeError):
     pass
@@ -260,8 +264,14 @@ class BaseProviderClient:
         if not image_urls:
             return []
         prepared: list[LLMImageInput] = []
-        for image_url in image_urls[:3]:
-            prepared.append(await self._download_image(image_url))
+        for image_url in image_urls[:MAX_IMAGES_PER_REQUEST]:
+            try:
+                prepared.append(await self._download_image(image_url))
+            except LLMProviderError:
+                # A single stale/forbidden URL (common for QQ CDN links pulled
+                # from the recent buffer) must not sink the whole request;
+                # skip it so the remaining images and text still go through.
+                logger.warning("provider: 跳过无法下载的图片 %s", image_url)
         return prepared
 
     def _swap_base_url(self, url: str, new_base: str) -> str:

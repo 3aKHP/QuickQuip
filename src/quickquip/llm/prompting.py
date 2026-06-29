@@ -11,6 +11,11 @@ from quickquip.llm.tools import (
     SCENE_MARKER_CURRENT,
 )
 
+# Upper bound on how many images from the recent-message buffer are attached
+# to a passive/boredom trigger. Keeps multimodal token cost bounded regardless
+# of how image-heavy the recent window is.
+MAX_RECENT_CONTEXT_IMAGES = 5
+
 
 def format_participant_label(
     *,
@@ -517,6 +522,8 @@ def build_messages(
     history: list[dict[str, str]],
     recent_messages: list[dict[str, str]] | None,
     max_trigger_context_messages: int,
+    include_recent_images: bool = False,
+    max_recent_images: int = MAX_RECENT_CONTEXT_IMAGES,
     chat_type: str = "group",
     identities=None,
     current_sender_name: str = "",
@@ -589,7 +596,8 @@ def build_messages(
     # Recent buffer: merge into pending rather than creating a separate scene,
     # so the boundary between recent buffer and history is invisible to the LLM.
     if recent_messages:
-        for item in recent_messages[-max_trigger_context_messages:]:
+        recent_slice = recent_messages[-max_trigger_context_messages:]
+        for item in recent_slice:
             user_id = item["user_id"]
             sender_name = item.get("sender_name", "")
             canonical_name = _resolve_canonical_name(
@@ -601,6 +609,22 @@ def build_messages(
                 "canonical_name": canonical_name,
                 "text": item["text"],
             })
+        # Attach recent-buffer images so passive/boredom triggers can "see" what
+        # was shared in the group recently.  Collect newest-last, then reverse so
+        # the newest come first; after merging behind the current images and the
+        # provider's per-request cap, this keeps the newest recent images and
+        # drops the oldest.  Duplicates across messages are skipped.
+        if include_recent_images:
+            seen = set(pending_images)
+            collected: list[str] = []
+            for item in recent_slice:
+                for url in item.get("image_urls", []):
+                    url = url.strip()
+                    if url and url not in seen:
+                        seen.add(url)
+                        collected.append(url)
+            if collected:
+                pending_images.extend(reversed(collected[-max_recent_images:]))
 
     # Build current scene first, then merge any pending context into it.
     # This avoids consecutive role="user" messages and keeps the
@@ -635,7 +659,7 @@ def build_messages(
         )
         current_text = _render_scene_to_text(current_scene, identities=identities)
         combined_images = merge_image_urls(
-            pending_images, current_scene.images,
+            current_scene.images, pending_images,
         )
         messages.append(LLMConversationMessage(
             role="user",

@@ -362,6 +362,89 @@ def test_build_messages_images_attached():
     assert "img.png" in msgs[-1].image_urls
 
 
+def test_build_messages_recent_images_off_by_default():
+    # Explicit triggers must NOT see recent-buffer images.
+    recent = [
+        {"user_id": "1", "sender_name": "A", "text": "看图", "image_urls": ["r1.png"]},
+    ]
+    msgs = build_messages(
+        prompt="继续", image_urls=[],
+        history=[], recent_messages=recent,
+        max_trigger_context_messages=5,
+        current_sender_name="B", current_user_id="2",
+    )
+    assert msgs[-1].image_urls == []
+
+
+def test_build_messages_recent_images_attached_when_enabled():
+    recent = [
+        {"user_id": "1", "sender_name": "A", "text": "看图", "image_urls": ["r1.png", "r2.png"]},
+    ]
+    msgs = build_messages(
+        prompt="继续", image_urls=[],
+        history=[], recent_messages=recent,
+        max_trigger_context_messages=5,
+        include_recent_images=True,
+        current_sender_name="B", current_user_id="2",
+    )
+    assert "r1.png" in msgs[-1].image_urls
+    assert "r2.png" in msgs[-1].image_urls
+
+
+def test_build_messages_recent_images_budget_keeps_newest():
+    # 8 recent images, budget 5 → only the 5 newest survive, in order.
+    recent = [
+        {"user_id": str(i), "sender_name": f"u{i}", "text": f"m{i}", "image_urls": [f"img{i}.png"]}
+        for i in range(8)
+    ]
+    msgs = build_messages(
+        prompt="继续", image_urls=[],
+        history=[], recent_messages=recent,
+        max_trigger_context_messages=10,
+        include_recent_images=True,
+        max_recent_images=5,
+        current_sender_name="B", current_user_id="2",
+    )
+    # Newest-first: img7 (newest) .. img3, so the provider cap keeps the
+    # newest recent images, not the oldest.
+    assert msgs[-1].image_urls == ["img7.png", "img6.png", "img5.png", "img4.png", "img3.png"]
+
+
+def test_build_messages_recent_images_dedup_across_messages():
+    recent = [
+        {"user_id": "1", "sender_name": "A", "text": "a", "image_urls": ["dup.png", "x.png"]},
+        {"user_id": "2", "sender_name": "B", "text": "b", "image_urls": ["dup.png", "y.png"]},
+    ]
+    msgs = build_messages(
+        prompt="继续", image_urls=[],
+        history=[], recent_messages=recent,
+        max_trigger_context_messages=5,
+        include_recent_images=True,
+        current_sender_name="C", current_user_id="3",
+    )
+    urls = msgs[-1].image_urls
+    # Newest message's images first (y, then x); dup kept from its first
+    # (oldest) sighting, so it lands last.
+    assert urls == ["y.png", "x.png", "dup.png"]
+
+
+def test_build_messages_current_image_precedes_recent():
+    # Combined order is current → newest recent → oldest recent, so the
+    # provider's per-request cap keeps the current image and the newest history.
+    recent = [
+        {"user_id": "1", "sender_name": "A", "text": "旧图1", "image_urls": ["r_old.png"]},
+        {"user_id": "2", "sender_name": "B", "text": "旧图2", "image_urls": ["r_new.png"]},
+    ]
+    msgs = build_messages(
+        prompt="新的", image_urls=["cur.png"],
+        history=[], recent_messages=recent,
+        max_trigger_context_messages=5,
+        include_recent_images=True,
+        current_sender_name="C", current_user_id="3",
+    )
+    assert msgs[-1].image_urls == ["cur.png", "r_new.png", "r_old.png"]
+
+
 def test_system_prompt_disambiguates_quote_roles():
     persona = SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
     vocab = SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
