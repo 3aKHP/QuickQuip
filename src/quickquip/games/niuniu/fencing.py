@@ -8,6 +8,7 @@ from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.cooldown import fence_cd, fenced_cd
 from quickquip.games.niuniu.dynamics import (
     _apply_decay,
+    fence_resolve_bot,
     fence_resolve_zerohsum,
 )
 from quickquip.games.niuniu.dynamics import (  # noqa: F401 (re-exported for tests)
@@ -104,16 +105,19 @@ def fencing(
     cfg = store.config
     my_luck = store.get_fence_luck(my_uid)
 
-    out = fence_resolve_zerohsum(
-        my_len,
-        oppo_len,
-        my_luck,
-        lambda: store.get_fence_luck(oppo_uid),
-        text,
-        cfg,
-        oppo_is_bot,
-        luck_power=cfg.luck_power,
-    )
+    if oppo_is_bot:
+        out = fence_resolve_bot(my_len, my_luck, text, luck_power=cfg.luck_power)
+    else:
+        out = fence_resolve_zerohsum(
+            my_len,
+            oppo_len,
+            my_luck,
+            lambda: store.get_fence_luck(oppo_uid),
+            text,
+            cfg,
+            oppo_is_bot=False,
+            luck_power=cfg.luck_power,
+        )
 
     _commit_fence_result(
         store, my_uid, origin_my, out.my_new, oppo_uid, origin_oppo, out.oppo_new,

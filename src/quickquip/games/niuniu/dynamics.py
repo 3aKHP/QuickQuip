@@ -588,3 +588,24 @@ def fence_resolve_zerohsum(
         msg = random.choice(msgs).format(gain=stake, loss=loss_val, my_len=my_len)
 
     return FenceOutcome(my_new=my_len, oppo_new=oppo_len, msg=msg)
+
+
+def fence_resolve_bot(
+    my_len: float, my_luck: float, text: NiuNiuText,
+    *, luck_power: float = 1.0,
+) -> FenceOutcome:
+    """Bot 击剑: 纯娱乐, E[Δmy] = 0。
+
+    win_prob 固定 0.5(luck 不进胜率 → 期望严格 0)。luck 只放大 stake(方差)。
+    stake ∝ √|my|(sublinear: 大玩家有像样波动, 又不会乘性缩水)。bot 是简化
+    靶子, 只 win/lose, 不走 sever/devour/draw(fence_bot draw 文案待后续)。
+    """
+    mf = my_luck ** luck_power
+    stake = round(math.sqrt(max(my_len, 0.0)) * random.uniform(0.4, 0.6) * mf, 2)
+    if random.random() < 0.5:
+        my_len = round(my_len + stake, 2)
+        msg = random.choice(text.fence_bot["win"]).format(gain=stake, my_len=my_len)
+    else:
+        my_len = round(my_len - stake, 2)
+        msg = random.choice(text.fence_bot["lose"]).format(loss=stake, my_len=my_len)
+    return FenceOutcome(my_new=my_len, oppo_new=0.0, msg=msg)
