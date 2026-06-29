@@ -529,8 +529,17 @@ def fence_resolve_zerohsum(
                 * cfg.fence_dominate_multiplier * mf, 2
             )
     elif chosen["name"] == "draw":
-        stake = 0.0
-        msg_branch = "draw"
+        # 两败俱伤(有意破例,非零和):双方各损,用于略微抵消打胶正期望的 Σ 通胀。
+        # fence_bot 的 draw 文案待后续单独处理。
+        reduce_val = round(random.uniform(cfg.fence_draw_min, cfg.fence_draw_max), 2)
+        my_len = round(my_len - reduce_val, 2)
+        oppo_len = round(oppo_len - reduce_val, 2)
+        msgs = text.fence_bot["draw"] if oppo_is_bot else chosen["msg"]
+        msg = random.choice(msgs).format(loss=reduce_val, my_len=my_len)
+        return FenceOutcome(
+            my_new=my_len, oppo_new=oppo_len, msg=msg,
+            action="fencing_draw", oppo_action="fencing_draw",
+        )
     else:
         base = min(abs(my_len), abs(oppo_len))
         balance = max(0.3, base / max(abs(my_len), abs(oppo_len), 0.01))
@@ -569,9 +578,6 @@ def fence_resolve_zerohsum(
             gain=stake, loss=loss_val, my_len=my_len,
             old_oppo=old_oppo, new_oppo=oppo_len, old_my=old_my, new_my=my_len,
         )
-    elif msg_branch == "draw":
-        msgs = text.fence_bot["draw"] if oppo_is_bot else chosen["msg"]
-        msg = random.choice(msgs).format(loss=loss_val, my_len=my_len)
     else:  # normal / critical / glancing / reversal / slip
         if oppo_is_bot:
             msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
