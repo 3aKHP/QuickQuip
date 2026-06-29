@@ -654,6 +654,7 @@ class TestFencing:
         store.update_length(uid_b, 20.0)
         _patch_fence_event(monkeypatch, "draw")
         fencing(store, uid_a, uid_b, group_id="test")
+        # draw 两败俱伤(有意破例,非零和):双方各损,anti-inflation
         assert store.get_length(uid_a) < 20.0
         assert store.get_length(uid_b) < 20.0
 
@@ -707,6 +708,9 @@ class TestFencing:
     def test_slip_attacker_always_loses(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 200.0)
         store.update_length(uid_b, 1.0)
+        # 固定 fence_luck:悬殊对战(200 vs 1)下 stake 基于 min=1 极小,
+        # 随机低 luck 会 round 到 0 使 attacker 不变;固定后 stake 确定非 0
+        store.set_fence_luck(uid_a, 1.0)
         _patch_fence_event(monkeypatch, "slip")
         fencing(store, uid_a, uid_b, group_id="test")
         assert store.get_length(uid_a) < 200.0

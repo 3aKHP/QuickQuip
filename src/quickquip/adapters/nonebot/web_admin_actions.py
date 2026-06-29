@@ -113,11 +113,25 @@ async def _execute_briefing_now(action: WebAdminAction) -> dict[str, Any]:
     return await send_daily_briefing_now(group_id, period, _get_bot())
 
 
+async def _execute_period_report_now(action: WebAdminAction) -> dict[str, Any]:
+    group_id = str(action.payload.get("group_id") or "").strip()
+    if not group_id.isdigit():
+        raise ValueError("group_id is required")
+    period_type = str(action.payload.get("period_type") or "").strip()
+    if period_type not in {"weekly", "monthly"}:
+        raise ValueError("period_type must be weekly or monthly")
+    from quickquip.adapters.nonebot.daily_summary_plugin import send_period_report_now
+
+    return await send_period_report_now(group_id, period_type, _get_bot())
+
+
 async def execute_web_admin_action(action: WebAdminAction) -> dict[str, Any]:
     if action.action_type == "summary_now":
         return await _execute_summary_now(action)
     if action.action_type == "briefing_now":
         return await _execute_briefing_now(action)
+    if action.action_type == "period_report_now":
+        return await _execute_period_report_now(action)
     return await _execute_runtime_action(action)
 
 

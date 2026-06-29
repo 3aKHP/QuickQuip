@@ -6,38 +6,16 @@ import random
 
 from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.cooldown import fence_cd, fenced_cd
-from quickquip.games.niuniu.gluing import _apply_decay
+from quickquip.games.niuniu.dynamics import (
+    _apply_decay,
+    fence_resolve_bot,
+    fence_resolve_zerohsum,
+)
+from quickquip.games.niuniu.dynamics import (  # noqa: F401 (re-exported for tests)
+    _fence_win_prob,
+    _fence_winner_is_role,
+)
 from quickquip.games.niuniu.store import NiuNiuStore
-from quickquip.games.niuniu.text import NiuNiuText
-
-
-def _fence_win_prob(a: float, b: float) -> float:
-    """Probability that player A wins (0.05–0.85). Based on length ratio."""
-    if abs(a) < 0.001 or abs(b) < 0.001:
-        return 0.5
-    p = 0.85
-    ratio = max(abs(a), abs(b)) / min(abs(a), abs(b))
-    reduction = p * 0.1 * (ratio - 1)
-    p = p - reduction
-    if a < 0:
-        p = 1.0 - p
-    return max(0.05, min(p, 0.85))
-
-
-def _fence_winner_is_role(
-    i_win: bool, my_len: float, oppo_len: float, role: str, cfg: NiuNiuConfig
-) -> bool:
-    """Check if the winning player has the required role.
-
-    *role*: "niutouren" (positive length >= dominate_threshold)
-            "succubus"  (negative length, abs >= devour_threshold)
-    """
-    winner_len = my_len if i_win else oppo_len
-    if role == "niutouren":
-        return winner_len >= cfg.fence_dominate_threshold
-    if role == "succubus":
-        return winner_len < 0 and abs(winner_len) >= cfg.fence_devour_threshold
-    return False
 
 
 def _commit_fence_result(
@@ -97,14 +75,6 @@ def _fence_no_target(
     return "出了一点问题……"
 
 
-def _normal_fence_event(text: NiuNiuText) -> dict:
-    """Return the 'normal' fencing event dict from *text*."""
-    for e in text.fence_events:
-        if e["name"] == "normal":
-            return e
-    return {"name": "normal", "weight": 50}
-
-
 def fencing(
     store: NiuNiuStore, my_uid: str, oppo_uid: str, *, oppo_is_bot: bool = False,
     group_id: str = "",
@@ -133,203 +103,27 @@ def fencing(
     origin_my = my_len
     origin_oppo = oppo_len
     cfg = store.config
+    my_luck = store.get_fence_luck(my_uid)
 
-    # Win probability
-    win_prob = _fence_win_prob(my_len, oppo_len)
-    fence_luck = store.get_fence_luck(my_uid)
-    win_prob = min(0.95, max(0.05, win_prob + (fence_luck - 1.0) * 0.1))
-    i_win = random.random() < win_prob
-
-    # Weighted event selection
-    fence_events = text.fence_events
-    chosen = random.choices(
-        fence_events, weights=[e["weight"] for e in fence_events], k=1
-    )[0]
-
-    # Eligibility guards (pre-reversal): ensure at least one player qualifies
-    if chosen["name"] == "dominate":
-        threshold = cfg.fence_dominate_threshold
-        if my_len < threshold and oppo_len < threshold:
-            chosen = _normal_fence_event(text)
-    elif chosen["name"] == "succubus_devour":
-        threshold = cfg.fence_devour_threshold
-        qualifies = (my_len < 0 and abs(my_len) >= threshold) or (
-            oppo_len < 0 and abs(oppo_len) >= threshold
-        )
-        if not qualifies:
-            chosen = _normal_fence_event(text)
-
-    # Apply reversal *before* role check so the actual winner is tested
-    if chosen["name"] == "reversal":
-        i_win = not i_win
-
-    # Post-reversal role check: winner must have the role for special effects
-    require_role = chosen.get("require_role")
-    if require_role:
-        if not _fence_winner_is_role(i_win, my_len, oppo_len, require_role, cfg):
-            chosen = _normal_fence_event(text)
-
-    if chosen["name"] == "slip":
-        i_win = False
-
-    # ── succubus devour ──────────────────────────────────────────────
-    if chosen["name"] == "succubus_devour":
-        steal = round(
-            min(abs(my_len), abs(oppo_len)) * cfg.fence_devour_steal_ratio * fence_luck, 2
-        )
-        loss_val = round(steal * 1.5, 2)
-        if i_win:
-            my_len = round(my_len + steal, 2)
-            if not oppo_is_bot:
-                oppo_len = round(oppo_len - loss_val, 2)
-        else:
-            my_len = round(my_len - loss_val, 2)
-            if not oppo_is_bot:
-                oppo_len = round(oppo_len + steal, 2)
-        my_len = round(_apply_decay(my_len, cfg), 2)
-        if not oppo_is_bot:
-            oppo_len = round(_apply_decay(oppo_len, cfg), 2)
-        _commit_fence_result(
-            store, my_uid, origin_my, my_len, oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg
-        )
-        if oppo_is_bot:
-            msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
-        elif i_win:
-            msgs = (chosen.get("win_neg") or text.fence_shared["win_neg"]) if my_len < 0 else (chosen.get("win_pos") or text.fence_shared["win_pos"])
-        else:
-            msgs = (chosen.get("devoured_neg") or text.fence_shared["lose_neg"]) if my_len < 0 else (chosen.get("devoured_pos") or text.fence_shared["lose_pos"])
-        return random.choice(msgs).format(gain=steal, loss=loss_val, my_len=my_len)
-
-    # ── dominate sever ───────────────────────────────────────────────
-    # Attacker is 牛头人, wins → sever opponent
-    if (
-        chosen["name"] == "dominate"
-        and i_win
-        and random.random() < cfg.fence_dominate_sever_chance
-    ):
-        old_oppo = oppo_len
-        if oppo_len > 0:
-            sever_ratio = min(0.95, 0.5 * fence_luck)
-            sever_loss = round(oppo_len * sever_ratio, 2)
-            oppo_len = round(oppo_len - sever_loss, 2)
-        else:
-            deepen_ratio = min(3.0, 1.0 * fence_luck)
-            sever_loss = round(abs(oppo_len) * deepen_ratio, 2)
-            oppo_len = round(oppo_len - sever_loss, 2)
-        gain = round(sever_loss * 0.6, 2)
-        my_len = round(my_len + gain, 2)
-        my_len = round(_apply_decay(my_len, cfg), 2)
-        if not oppo_is_bot:
-            oppo_len = round(_apply_decay(oppo_len, cfg), 2)
-        _commit_fence_result(
-            store, my_uid, origin_my, my_len, oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg
-        )
-        if old_oppo > 0:
-            msgs = chosen.get("sever_pos", chosen.get("win_pos"))
-        else:
-            msgs = chosen.get("sever_neg", chosen.get("win_neg"))
-        return random.choice(msgs).format(
-            gain=gain, loss=sever_loss, old_oppo=old_oppo, new_oppo=oppo_len
-        )
-
-    # Defender is 牛头人, wins → sever attacker
-    if (
-        chosen["name"] == "dominate"
-        and not i_win
-        and not oppo_is_bot
-        and random.random() < cfg.fence_dominate_sever_chance
-    ):
-        old_my = my_len
-        defender_luck = store.get_fence_luck(oppo_uid)
-        if my_len > 0:
-            sever_ratio = min(0.95, 0.5 * defender_luck)
-            sever_loss = round(my_len * sever_ratio, 2)
-            my_len = round(my_len - sever_loss, 2)
-        else:
-            deepen_ratio = min(3.0, 1.0 * defender_luck)
-            sever_loss = round(abs(my_len) * deepen_ratio, 2)
-            my_len = round(my_len - sever_loss, 2)
-        gain = round(sever_loss * 0.6, 2)
-        oppo_len = round(oppo_len + gain, 2)
-        my_len = round(_apply_decay(my_len, cfg), 2)
-        oppo_len = round(_apply_decay(oppo_len, cfg), 2)
-        _commit_fence_result(
-            store, my_uid, origin_my, my_len, oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg
-        )
-        if old_my > 0:
-            msgs = chosen.get("severed_pos", chosen.get("lose_pos"))
-        else:
-            msgs = chosen.get("severed_neg", chosen.get("lose_neg"))
-        return random.choice(msgs).format(
-            gain=gain, loss=sever_loss, old_my=old_my, new_my=my_len, my_len=my_len
-        )
-
-    # ── damage calculation ───────────────────────────────────────────
-    base = min(abs(my_len), abs(oppo_len))
-    ratio = base / max(abs(my_len), abs(oppo_len), 0.01)
-    balance = max(0.3, ratio)
-    reduce_val = round(base * random.uniform(0.04, 0.06) * balance, 2)
-
-    # ── draw ─────────────────────────────────────────────────────────
-    if chosen["name"] == "draw":
-        reduce_val = round(
-            random.uniform(cfg.fence_draw_min, cfg.fence_draw_max), 2
-        )
-        my_len = round(my_len - reduce_val, 2)
-        my_len = round(_apply_decay(my_len, cfg), 2)
-        if not oppo_is_bot:
-            oppo_len = round(oppo_len - reduce_val, 2)
-            oppo_len = round(_apply_decay(oppo_len, cfg), 2)
-        _commit_fence_result(
-            store,
-            my_uid, origin_my, my_len,
-            oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg,
-            action="fencing_draw", oppo_action="fencing_draw",
-        )
-        msgs = text.fence_bot["draw"] if oppo_is_bot else chosen["msg"]
-        return random.choice(msgs).format(loss=reduce_val, my_len=my_len)
-
-    # ── apply event multiplier ───────────────────────────────────────
-    multiplier = {
-        "critical": cfg.fence_critical_multiplier,
-        "glancing": cfg.fence_glancing_multiplier,
-        "dominate": cfg.fence_dominate_multiplier,
-    }.get(chosen["name"], 1.0)
-    reduce_val = round(reduce_val * multiplier * fence_luck, 2)
-
-    if i_win:
-        my_len = round(my_len + reduce_val, 2)
-        if not oppo_is_bot:
-            oppo_len = round(oppo_len - 0.8 * reduce_val, 2)
-    else:
-        my_len = round(my_len - reduce_val, 2)
-        if not oppo_is_bot:
-            oppo_len = round(oppo_len + 0.8 * reduce_val, 2)
-
-    my_len = round(_apply_decay(my_len, cfg), 2)
-    if not oppo_is_bot:
-        oppo_len = round(_apply_decay(oppo_len, cfg), 2)
-
-    loss_val = round(0.8 * reduce_val, 2)
-
-    # ── message selection ────────────────────────────────────────────
     if oppo_is_bot:
-        msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
-    elif i_win:
         if my_len < 0:
-            msgs = chosen.get("win_neg") or text.fence_shared["win_neg"]
-        else:
-            msgs = chosen.get("win_pos") or text.fence_shared["win_pos"]
+            fence_cd.set(my_uid, cfg.fence_cooldown)
+            return "深渊魅魔形态下无法与机器人击剑……"
+        out = fence_resolve_bot(my_len, my_luck, text, luck_power=cfg.luck_power)
     else:
-        if my_len < 0:
-            msgs = chosen.get("lose_neg") or text.fence_shared["lose_neg"]
-        else:
-            msgs = chosen.get("lose_pos") or text.fence_shared["lose_pos"]
-    msg = random.choice(msgs).format(
-        gain=reduce_val, loss=loss_val, my_len=my_len
-    )
+        out = fence_resolve_zerohsum(
+            my_len,
+            oppo_len,
+            my_luck,
+            lambda: store.get_fence_luck(oppo_uid),
+            text,
+            cfg,
+            oppo_is_bot=False,
+            luck_power=cfg.luck_power,
+        )
 
     _commit_fence_result(
-        store, my_uid, origin_my, my_len, oppo_uid, origin_oppo, oppo_len, oppo_is_bot, cfg
+        store, my_uid, origin_my, out.my_new, oppo_uid, origin_oppo, out.oppo_new,
+        oppo_is_bot, cfg, action=out.action, oppo_action=out.oppo_action,
     )
-    return msg
+    return out.msg

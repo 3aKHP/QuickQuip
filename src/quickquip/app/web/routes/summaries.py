@@ -2,9 +2,10 @@ import logging
 import re
 import sqlite3
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH
 
 router = APIRouter()
@@ -88,7 +89,7 @@ def get_summary_text(group_id: str, summary_date: str):
 
 
 @router.delete("/summaries/{group_id}/{summary_date}")
-def delete_summary(group_id: str, summary_date: str):
+def delete_summary(group_id: str, summary_date: str, request: Request):
     _validate_group_id(group_id)
     _validate_date(summary_date)
     if not _DB.exists():
@@ -103,6 +104,12 @@ def delete_summary(group_id: str, summary_date: str):
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="summary not found")
         logger.warning("summary deleted: group=%s date=%s", group_id, summary_date)
+        audit_logger.log(
+            request,
+            action="delete",
+            target_type="daily_summary",
+            target_id=f"{group_id}:{summary_date}",
+        )
         return {"ok": True}
     finally:
         conn.close()

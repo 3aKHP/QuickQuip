@@ -107,3 +107,31 @@ async def test_briefing_now_action_uses_public_executor(monkeypatch):
     )
 
     assert result == {"period": "morning", "model_used": "m", "char_count": 3}
+
+
+@pytest.mark.asyncio
+async def test_period_report_now_action_uses_public_executor(monkeypatch):
+    calls: list[tuple] = []
+
+    async def fake_send_period_report_now(group_id, period_type, bot=None, before_generate=None):
+        calls.append((group_id, period_type, bot))
+        return {"model_used": "m", "char_count": 5}
+
+    monkeypatch.setattr(web_admin_actions, "_get_bot", lambda: "bot")
+    import quickquip.adapters.nonebot.daily_summary_plugin as summary_plugin
+
+    monkeypatch.setattr(summary_plugin, "send_period_report_now", fake_send_period_report_now)
+
+    result = await web_admin_actions.execute_web_admin_action(
+        WebAdminAction(
+            id="p1",
+            action_type="period_report_now",
+            payload={"group_id": "123456", "period_type": "weekly"},
+            status="running",
+            created_at="",
+            updated_at="",
+        )
+    )
+
+    assert result == {"model_used": "m", "char_count": 5}
+    assert calls == [("123456", "weekly", "bot")]

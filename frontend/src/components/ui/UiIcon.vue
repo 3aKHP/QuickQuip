@@ -13,7 +13,8 @@ import {
   MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
   AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
-  BellRing, Radar, Wrench, ListTree, Eraser, Activity
+  BellRing, Radar, Wrench, ListTree, Eraser, Activity,
+  CalendarRange, CalendarDays
 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Component } from 'vue'
@@ -32,6 +33,7 @@ type IconName =
   | 'ChevronUp' | 'Send' | 'FileCode' | 'ListChecks' | 'AlertTriangle'
   | 'Play' | 'Save' | 'ChevronLeft' | 'Download' | 'Sparkles'
   | 'BellRing' | 'Radar' | 'Wrench' | 'ListTree' | 'Eraser' | 'Activity'
+  | 'CalendarRange' | 'CalendarDays'
 
 const ICON_MAP: Record<IconName, Component> = {
   BarChart3, ToggleLeft, Users, Brain, FileText,
@@ -45,7 +47,8 @@ const ICON_MAP: Record<IconName, Component> = {
   MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
   AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
-  BellRing, Radar, Wrench, ListTree, Eraser, Activity
+  BellRing, Radar, Wrench, ListTree, Eraser, Activity,
+  CalendarRange, CalendarDays
 }
 
 const props = defineProps<{

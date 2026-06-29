@@ -9,7 +9,7 @@ export async function fetchKnownGroups() {
 }
 
 export async function updateGroup(type: string, gid: string | number, enabled: boolean) {
-  return request(`/api/groups/${type}/${gid}`, {
+  return request(`/api/groups/${type}/${encodeURIComponent(String(gid))}`, {
     method: 'POST',
     body: JSON.stringify({ enabled }),
   })
@@ -24,4 +24,8 @@ export async function runBriefingNow(gid: string | number, period?: string) {
     method: 'POST',
     body: JSON.stringify({ period: period || null }),
   })
+}
+
+export async function runPeriodReportNow(type: 'weekly' | 'monthly', gid: string | number) {
+  return request(`/api/groups/${type}/${encodeURIComponent(String(gid))}/now`, { method: 'POST' })
 }
