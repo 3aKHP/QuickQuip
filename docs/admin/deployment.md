@@ -79,8 +79,7 @@ docker compose --env-file ../.env up -d
 
 当前 compose 会：
 
-- 启动模板内置的 SearXNG，供 `quickquip` 和 Web Admin 容器通过内部地址访问
-- 如需复用外部搜索服务，可在 `.env` 中设置 `QUICKQUIP_SEARXNG_BASE_URL`，或在私有 `prod/docker-compose.yml` 中调整编排
+- 不内置 SearXNG：搜索能力需由外部独立 searxng 实例提供，必须在 `.env` 中设置 `QUICKQUIP_SEARXNG_BASE_URL` 指向它（未设置时 compose 启动即报错）
 - 通过 `../.env` 向 bot 和 Web Admin 提供应用环境变量
 - 把 `../config` 只读挂载到容器内 `/app/config`
 - 把 `../llm_about` 挂载到容器内 `/app/llm_about`

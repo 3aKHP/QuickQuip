@@ -42,7 +42,7 @@ services:
       PORT: "8080"
       ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
-      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"
       PYTHONPATH: "/app/src"
     shm_size: "1gb"
     volumes:
@@ -69,7 +69,7 @@ services:
     environment:
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
-      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
+      SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"
       PYTHONPATH: "/app/src"
     ports:
       - "127.0.0.1:5104:5104"

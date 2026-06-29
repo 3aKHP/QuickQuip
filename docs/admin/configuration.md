@@ -28,7 +28,7 @@
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub PAT（MCP 用） |
 | `GITHUB_TOOLSETS` | GitHub MCP 启用的工具集，逗号分隔。可选：`context`, `repos`, `issues`, `pull_requests`, `users`, `actions` |
 | `GITHUB_READ_ONLY` | 设为非空时限制 GitHub MCP 为只读 |
-| `TAVILY_API_KEY` | Tavily 搜索 API key（备用搜索后端） |
+| `TAVILY_API_KEY` | Tavily API key（供 MCP sidecar 的 Tavily 工具使用，未启用 MCP Tavily 时无需填写） |
 
 ### 搜索
 
