@@ -6,6 +6,16 @@
 
 （暂无）
 
+## [1.9.2] - 2026-06-30
+
+### 🔧 变更 (Changed)
+
+- **搜索后端配置梳理**：生产运维模板不再内置 SearXNG（改为显式声明外部依赖，匹配真实部署），与终端用户的开箱即用自包含模板职责分离，消除"搜索到底走哪"的长期混乱。
+
+### 🗑️ 移除 (Removed)
+
+- **搜索后端死代码清理**：删除早期遗留的独立 SearXNG 编排文件、Tavily 内嵌空壳（从未接入 `search_web`）以及未被代码读取的后端选择配置——均为 v1.0.0 搜索工具重排后未清干净的残留。
+
 ## [1.9.1] - 2026-06-29
 
 ### ✨ 新增 (Added)
@@ -565,7 +575,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.2...HEAD
+[1.9.2]: https://github.com/3aKHP/QuickQuip/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/3aKHP/QuickQuip/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...v1.9.0
 [1.8.9]: https://github.com/3aKHP/QuickQuip/compare/v1.8.1...v1.8.9

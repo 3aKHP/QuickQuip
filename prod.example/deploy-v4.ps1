@@ -285,7 +285,7 @@ rm -f /tmp/quickquip-deploy.tar.gz /tmp/quickquip-tieba-state.tar.gz /tmp/quickq
 cd "$REMOTE_DIR/prod"
 docker compose --env-file ../.env config --quiet
 docker compose --env-file ../.env build quickquip web-admin
-docker compose --env-file ../.env up -d --remove-orphans searxng llbot quickquip web-admin
+docker compose --env-file ../.env up -d --remove-orphans llbot quickquip web-admin
 docker compose --env-file ../.env up -d --force-recreate quickquip web-admin
 docker compose --env-file ../.env ps
 docker builder prune --filter 'until=48h' --force
@@ -299,7 +299,6 @@ Invoke-Native "ssh remote deploy" {
 Write-Host "Deploy complete." -ForegroundColor Green
 Write-Host "QuickQuip logs: ssh $HostAlias 'cd $RemoteDir/prod && docker compose --env-file ../.env logs -f quickquip'" -ForegroundColor Yellow
 Write-Host "Web Admin logs: ssh $HostAlias 'cd $RemoteDir/prod && docker compose --env-file ../.env logs -f web-admin'" -ForegroundColor Yellow
-Write-Host "SearXNG logs: ssh $HostAlias 'cd $RemoteDir/prod && docker compose --env-file ../.env logs -f searxng'" -ForegroundColor Yellow
 
 Remove-Item -Force $TempArchive -ErrorAction SilentlyContinue
 Remove-Item -Force $TiebaStateArchive -ErrorAction SilentlyContinue
