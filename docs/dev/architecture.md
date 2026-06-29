@@ -69,7 +69,7 @@ QuickQuip/
 ├── frontend/               # Web 管理后台前端（Vue 3 SPA）
 │   ├── src/                # 源码
 │   └── dist/               # 构建产物（gitignore）
-├── docker-compose.searxng.yml  # 项目内置 SearXNG 服务编排
+├── docker-compose.example.yml  # Docker Compose 编排示例（含内置 SearXNG）
 ├── prod.example/          # 生产运维目录模板（追踪）
 ├── prod/                  # 真实生产运维目录（gitignore，由 prod.example/ 复制）
 ├── docker/
