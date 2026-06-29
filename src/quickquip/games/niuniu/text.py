@@ -254,14 +254,14 @@ def _default_glue_events() -> list[dict[str, Any]]:
             ],
         },
         {
-            "name": "nightmare", "weight": 3, "category": "shrinkage",
+            "name": "nightmare", "weight": 2, "category": "shrinkage",
             "neg": [
                 "👻 你做了一个关于牛牛的噩梦！吓缩了 {diff} cm...",
                 "深夜惊醒，发现牛牛被鬼压床！缩短了 {diff} cm...",
             ],
         },
         {
-            "name": "shrinkage", "weight": 8, "category": "shrinkage",
+            "name": "shrinkage", "weight": 4, "category": "shrinkage",
             "neg": [
                 "由于你在换蛋期打胶，你的牛牛断掉了呢！当前长度 {new_length} cm！",
                 "bro换蛋期就不要打胶了！你的牛牛萎缩了 {diff} cm！",
