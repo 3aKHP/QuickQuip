@@ -73,7 +73,7 @@ game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯
 | `[niuniu]` | `fenced_protection` | 300 | 被击保护期（秒） |
 | `[niuniu]` | `glue_cooldown` | 180 | 打胶 CD（秒） |
 | `[niuniu]` | `unsubscribe_gold` | 500 | 注销费用 |
-| `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率（\|length\| > 50） |
+| `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率（\|length\| > 50）；正侧按此率、负侧减半 |
 | `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率（\|length\| ≤ 50） |
 | `[niuniu]` | `luck_sigma` | 1.0 | 打胶运势对数标准差（lg(x) ~ N(0, σ)） |
 | `[niuniu]` | `fence_luck_sigma` | 1.0 | 击剑运势对数标准差（同上分布） |
