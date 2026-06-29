@@ -77,6 +77,8 @@ game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯
 | `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率（\|length\| ≤ 50） |
 | `[niuniu]` | `luck_sigma` | 1.0 | 打胶运势对数标准差（lg(x) ~ N(0, σ)） |
 | `[niuniu]` | `fence_luck_sigma` | 1.0 | 击剑运势对数标准差（同上分布） |
+| `[niuniu]` | `luck_power` | 0.75 | 运势幂压缩指数（luck^0.75：中位运势行为不变，仅温和化极端运势的实际影响） |
+| `[niuniu]` | `glue_neg_shrink_depth` | 1.0 | 打胶凹侧 sublinear 加深强度（越大凹侧萎缩越深，1.0 为线性基准） |
 | `[niuniu]` | `fence_critical_multiplier` | 1.8 | 击剑暴击倍率 |
 | `[niuniu]` | `fence_dominate_multiplier` | 3.0 | 击剑牛头人支配倍率 |
 | `[niuniu]` | `fence_dominate_sever_chance` | 0.4 | 牛头人腰斩触发概率 |
