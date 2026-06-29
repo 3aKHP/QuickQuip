@@ -610,18 +610,21 @@ def build_messages(
                 "text": item["text"],
             })
         # Attach recent-buffer images so passive/boredom triggers can "see" what
-        # was shared in the group recently.  Newer images win when the budget is
-        # exceeded; duplicates across messages are skipped.
+        # was shared in the group recently.  Collect newest-last, then reverse so
+        # the newest come first; after merging behind the current images and the
+        # provider's per-request cap, this keeps the newest recent images and
+        # drops the oldest.  Duplicates across messages are skipped.
         if include_recent_images:
             seen = set(pending_images)
+            collected: list[str] = []
             for item in recent_slice:
                 for url in item.get("image_urls", []):
                     url = url.strip()
                     if url and url not in seen:
                         seen.add(url)
-                        pending_images.append(url)
-            if len(pending_images) > max_recent_images:
-                pending_images[:] = pending_images[-max_recent_images:]
+                        collected.append(url)
+            if collected:
+                pending_images.extend(reversed(collected[-max_recent_images:]))
 
     # Build current scene first, then merge any pending context into it.
     # This avoids consecutive role="user" messages and keeps the

@@ -405,7 +405,9 @@ def test_build_messages_recent_images_budget_keeps_newest():
         max_recent_images=5,
         current_sender_name="B", current_user_id="2",
     )
-    assert msgs[-1].image_urls == ["img3.png", "img4.png", "img5.png", "img6.png", "img7.png"]
+    # Newest-first: img7 (newest) .. img3, so the provider cap keeps the
+    # newest recent images, not the oldest.
+    assert msgs[-1].image_urls == ["img7.png", "img6.png", "img5.png", "img4.png", "img3.png"]
 
 
 def test_build_messages_recent_images_dedup_across_messages():
@@ -421,24 +423,26 @@ def test_build_messages_recent_images_dedup_across_messages():
         current_sender_name="C", current_user_id="3",
     )
     urls = msgs[-1].image_urls
-    assert urls.count("dup.png") == 1
-    assert "x.png" in urls and "y.png" in urls
+    # Newest message's images first (y, then x); dup kept from its first
+    # (oldest) sighting, so it lands last.
+    assert urls == ["y.png", "x.png", "dup.png"]
 
 
 def test_build_messages_current_image_precedes_recent():
-    # When both current and recent images exist, current wins ordering so the
-    # provider's per-request cap keeps the user's current image, not history.
-    recent = [{"user_id": "1", "sender_name": "A", "text": "旧图", "image_urls": ["old.png"]}]
+    # Combined order is current → newest recent → oldest recent, so the
+    # provider's per-request cap keeps the current image and the newest history.
+    recent = [
+        {"user_id": "1", "sender_name": "A", "text": "旧图1", "image_urls": ["r_old.png"]},
+        {"user_id": "2", "sender_name": "B", "text": "旧图2", "image_urls": ["r_new.png"]},
+    ]
     msgs = build_messages(
-        prompt="新的", image_urls=["new.png"],
+        prompt="新的", image_urls=["cur.png"],
         history=[], recent_messages=recent,
         max_trigger_context_messages=5,
         include_recent_images=True,
-        current_sender_name="B", current_user_id="2",
+        current_sender_name="C", current_user_id="3",
     )
-    urls = msgs[-1].image_urls
-    assert urls[0] == "new.png"
-    assert "old.png" in urls
+    assert msgs[-1].image_urls == ["cur.png", "r_new.png", "r_old.png"]
 
 
 def test_system_prompt_disambiguates_quote_roles():
