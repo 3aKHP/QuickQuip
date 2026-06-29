@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections import OrderedDict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import time
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -13,6 +14,7 @@ class RecentMessage:
     text: str
     created_at: float
     message_id: str = ""
+    image_urls: list[str] = field(default_factory=list)
 
 
 class RecentMessageBuffer:
@@ -58,6 +60,7 @@ class RecentMessageBuffer:
         text: str,
         *,
         message_id: str = "",
+        image_urls: list[str] | None = None,
         now_ts: float | None = None,
     ) -> None:
         normalized = text.strip()
@@ -73,6 +76,7 @@ class RecentMessageBuffer:
             queue = deque(maxlen=self.max_messages_per_group)
             self.messages[group_key] = queue
 
+        normalized_image_urls = [u.strip() for u in (image_urls or []) if u.strip()]
         queue.append(
             RecentMessage(
                 user_id=str(user_id),
@@ -81,6 +85,7 @@ class RecentMessageBuffer:
                 text=normalized,
                 created_at=current_ts,
                 message_id=str(message_id) if message_id else "",
+                image_urls=normalized_image_urls,
             )
         )
         self._touch_group(group_key)
@@ -92,7 +97,7 @@ class RecentMessageBuffer:
         *,
         limit: int | None = None,
         now_ts: float | None = None,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         current_ts = self._now(now_ts)
         group_key = str(group_id)
         self._prune_expired(group_key, current_ts)
@@ -111,6 +116,7 @@ class RecentMessageBuffer:
                 "canonical_name": item.canonical_name,
                 "text": item.text,
                 "message_id": item.message_id,
+                "image_urls": list(item.image_urls),
             }
             for item in items
         ]

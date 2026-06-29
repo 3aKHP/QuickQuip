@@ -30,3 +30,35 @@ def test_group_isolation():
     r2 = buf.list_recent(2, now_ts=1)
     assert [m["text"] for m in r1] == ["msg-group-1"]
     assert [m["text"] for m in r2] == ["msg-group-2"]
+
+
+def test_image_urls_round_trip():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    buf.add_message(1, "u1", "a", "A", "看这张图", image_urls=["http://x/1.png", "http://x/2.png"], now_ts=0)
+    buf.add_message(1, "u2", "b", "B", "纯文字", now_ts=1)
+    recent = buf.list_recent(1, now_ts=2)
+    assert recent[0]["image_urls"] == ["http://x/1.png", "http://x/2.png"]
+    assert recent[1]["image_urls"] == []
+
+
+def test_image_urls_strips_empty_and_whitespace():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    buf.add_message(1, "u", "a", "A", "msg", image_urls=["  http://x/1.png  ", "", "  "], now_ts=0)
+    recent = buf.list_recent(1, now_ts=1)
+    assert recent[0]["image_urls"] == ["http://x/1.png"]
+
+
+def test_image_urls_default_empty():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    buf.add_message(1, "u", "a", "A", "msg", now_ts=0)
+    recent = buf.list_recent(1, now_ts=1)
+    assert recent[0]["image_urls"] == []
+
+
+def test_image_urls_returns_copy():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    buf.add_message(1, "u", "a", "A", "msg", image_urls=["http://x/1.png"], now_ts=0)
+    recent = buf.list_recent(1, now_ts=1)
+    recent[0]["image_urls"].append("http://x/evil.png")
+    # Mutating the returned dict must not leak into the buffer's internal state.
+    assert buf.list_recent(1, now_ts=1)[0]["image_urls"] == ["http://x/1.png"]

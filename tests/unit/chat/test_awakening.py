@@ -15,6 +15,7 @@ from quickquip.chat.awakening import (
     BotMessageCache,
     ResolvedAwakeningSettings,
     _QA_FAST_PATTERNS,
+    _RULE_BOREDOM,
     _RULE_EXTEND,
     _RULE_FALLBACK,
     _RULE_INTEREST,
@@ -26,6 +27,7 @@ from quickquip.chat.awakening import (
     _is_in_dnd_window,
     _llm_cache_text,
     _word_overlap_ratio,
+    allows_recent_images,
     build_awakening_prompt,
     build_passive_trigger_raw_user_text,
     check_awakening_triggers,
@@ -39,6 +41,22 @@ from quickquip.chat.awakening import (
     run_boredom_check,
     select_passive_trigger_image_urls,
 )
+
+
+# =========================================================================
+# Recent-image gating
+# =========================================================================
+
+
+def test_allows_recent_images_rules():
+    assert allows_recent_images(_RULE_BOREDOM) is True
+    assert allows_recent_images(_RULE_EXTEND) is True
+    assert allows_recent_images(_RULE_INTEREST) is True
+    assert allows_recent_images(_RULE_RELEVANCE) is True
+    assert allows_recent_images(_RULE_QA) is True
+    assert allows_recent_images(_RULE_FALLBACK) is False
+    assert allows_recent_images("explicit_llm") is False
+    assert allows_recent_images("llm_chat") is False
 
 
 # =========================================================================

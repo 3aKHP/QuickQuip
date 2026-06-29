@@ -456,6 +456,16 @@ def _passive_trigger_allows_images(rule_name: str) -> bool:
     return rule_name in {_RULE_EXTEND, _RULE_INTEREST, _RULE_RELEVANCE, _RULE_QA}
 
 
+def allows_recent_images(rule_name: str) -> bool:
+    """Whether an awakening trigger should carry recent-buffer images.
+
+    Boredom and the passive triggers that already accept the current
+    message's images also get recent-buffer images; explicit triggers and
+    the low-signal fallback do not.
+    """
+    return rule_name == _RULE_BOREDOM or _passive_trigger_allows_images(rule_name)
+
+
 def select_passive_trigger_image_urls(
     result: AwakeningTriggerResult,
     image_urls: list[str],
@@ -930,6 +940,7 @@ async def run_boredom_check(
                 prompt=build_awakening_prompt(result),
                 image_urls=[],
                 recent_messages=trigger_context,
+                include_recent_images=True,
                 raw_user_text="",
                 store_user_message=False,
                 message_id=None,

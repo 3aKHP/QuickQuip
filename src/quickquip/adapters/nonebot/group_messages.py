@@ -23,8 +23,8 @@ from quickquip.app.message_pipeline import (
 from quickquip.app.message_pipeline import is_self_message as _is_self_message
 
 
-def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "") -> None:
-    recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id=message_id)
+def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "", image_urls: list[str] | None = None) -> None:
+    recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id=message_id, image_urls=image_urls)
 
 
 def _result_reason(result: dict) -> str:
@@ -125,7 +125,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             voice_text=voice_text,
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             if not rate_limiter.allow("llm_chat", user_id):
                 return
             result = await svc.generate_reply(
@@ -174,6 +174,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             return
 
         from quickquip.chat.awakening import (
+            allows_recent_images,
             build_awakening_prompt,
             build_passive_trigger_raw_user_text,
             check_awakening_triggers,
@@ -190,7 +191,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             rate_available=lambda rule_name: rate_limiter.can_allow(rule_name, user_id, group_id=group_id),
         )
         if awakening_result and rule_switch.is_enabled(group_id, awakening_result.rule_name):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             if not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
                 return
             trigger_context = recent_messages.list_recent(group_id, limit=20)
@@ -205,6 +206,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 prompt=build_awakening_prompt(awakening_result, passive_image_urls),
                 image_urls=passive_image_urls,
                 recent_messages=trigger_context,
+                include_recent_images=allows_recent_images(awakening_result.rule_name),
                 raw_user_text=build_passive_trigger_raw_user_text(awakening_result, passive_image_urls),
                 message_id=message_id or None,
             )
@@ -241,16 +243,16 @@ def register_message_matcher(on_message, Message, MessageSegment):
             recent_context=trigger_context,
         )
         if not result:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id, group_id=group_id):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             return
 
         stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
 
         if "at_user_id" in result:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             message = Message([
                 MessageSegment.at(result["at_user_id"]),
                 MessageSegment.text(f" {result['reply']}"),
@@ -270,7 +272,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             ):
                 await matcher.finish(message)
 
-        _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id)
+        _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
         with bot_action_trace(
             trigger_kind=str(result.get("trigger_kind", "rule")),
             reason_code=str(result.get("reason_code", result.get("rule_name", "unknown"))),
