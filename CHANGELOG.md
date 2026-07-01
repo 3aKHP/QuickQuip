@@ -6,6 +6,18 @@
 
 （暂无）
 
+## [1.9.3] - 2026-07-02
+
+### ✨ 新增 (Added)
+
+- **`/llm probe` 命令与 Web Admin provider 探活**：并发探活所有 provider（每个发一条 max_tokens=1 的请求），报告可达性与延迟。按需触发即每次计费，api_key 未设置的 provider 自动跳过——不做静默的后台定时探活（静默扣费是大忌）。Web Admin 诊断页同步加入「探活 Provider」按钮，与命令对等。
+- **Web Admin 配置保存按文件返回生效方式**：`awakening`/`chat_rules` 保存即自动重载（`chat_rules` 新接入 `rules_reload`），`llm` 引导手动 reload，`generation`/`games`/`niuniu_text*` 如实提示需重启——不再一律「需重启 bot 才会生效」。
+
+### 🔧 变更 (Changed)
+
+- **`/llm reload` 收紧为仅管理员 + 重载后探活**：原先无权限守卫，现与 `/llm mcp reload` 对齐；并在重载后探活当前会话实际生效的 provider/model、回显结果，补上 reload 后的可达性验证闭环。
+- **`llm` 配置保存不再自动触发 reload**：`llm_reload` 会触发 MCP 全量重连且 llm 配置影响面大，改为前端引导用户到诊断页手动 reload（注：`reload_runtime` 本身不探活、不涉及计费）。
+
 ## [1.9.2] - 2026-06-30
 
 ### 🔧 变更 (Changed)
@@ -575,7 +587,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.2...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.3...HEAD
+[1.9.3]: https://github.com/3aKHP/QuickQuip/compare/v1.9.2...v1.9.3
 [1.9.2]: https://github.com/3aKHP/QuickQuip/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/3aKHP/QuickQuip/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/3aKHP/QuickQuip/compare/v1.8.9...v1.9.0

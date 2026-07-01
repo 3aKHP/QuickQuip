@@ -2,7 +2,7 @@
 
 本文件记录 QuickQuip 未来可能投入的方向。已发布版本与历史变更见 [CHANGELOG.md](CHANGELOG.md)。
 
-当前稳定版本为 v1.9.2（搜索后端技术债清理：searxng 重复定义收敛 + Tavily 内嵌空壳/死配置清除 + 运维模板外部 searxng 化）。条目以方向池形式维护，具体版本归属在后续里程碑中确定。一个方向进入版本计划前，应先补齐目标、验收标准、风险边界和验证方式。
+当前稳定版本为 v1.9.3（provider 健康探活：`/llm probe` 命令 + Web Admin 探活按钮 + reload 守卫与探活闭环；Web Admin 配置保存按文件返回生效方式，`awakening`/`chat_rules` 自动重载）。条目以方向池形式维护，具体版本归属在后续里程碑中确定。一个方向进入版本计划前，应先补齐目标、验收标准、风险边界和验证方式。
 
 ---
 
@@ -28,21 +28,19 @@
 
 ### `config/llm.toml` 热重载增强
 
-`/llm reload` 已能重读配置并重建部分运行时对象。更完整的热重载需要先明确：
+`/llm reload` 已能重读配置并重建部分运行时对象。provider client 不缓存（每次请求新建），故 provider 配置改动 reload 后即时生效、in-flight 请求自然用旧配置跑完——此项无须专门处理。剩余待明确：
 
-1. provider 客户端的生命周期和 in-flight 请求处理。
-2. MCP reconnect 的顺序、超时和失败回退。
-3. Web Admin 保存配置后的用户提示和状态刷新。
-4. reload 前后运行时状态的一致性验证。
+1. MCP reconnect 的顺序、超时和失败回退（将与「指定 MCP 加载顺序防止依赖倒序」合并设计）。
+2. Web Admin 保存配置后的用户提示和状态刷新（已部分落地：按 key 返回 `effect`，`awakening`/`chat_rules` 自动重载，`llm` 手动引导——自动 reload 会触发 MCP 全量重连且影响面大；剩余 `generation`/`games`/`niuniu_text*` 仍需重启）。
+3. reload 前后运行时状态的一致性验证（`/llm reload` 已探活当前 provider/model；全量 provider 巡检由 `/llm probe` 执行）。
 
 ### Provider 健康检查与故障转移
 
-`src/quickquip/llm/health.py` 已具备单次检查、探活和敏感词过滤器可观测性。后续可扩展：
+`src/quickquip/llm/health.py` 已具备单次检查、探活和敏感词过滤器可观测性；`/llm probe` 与 Web Admin 诊断页支持按需并发探活所有 provider（每次调用即每次计费，不静默扣费）。后续可扩展：
 
-1. 定时健康检查。
+1. 定时健康检查（须 opt-in 且配告警，避免静默扣费）。
 2. provider 健康排序。
 3. 基于错误类型的自动降级或故障转移。
-4. Web Admin 与 `/llm health` 的状态展示。
 
 ### 测试覆盖继续补强
 

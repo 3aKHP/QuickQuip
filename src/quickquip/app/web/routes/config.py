@@ -121,8 +121,19 @@ def put_config(key: str, body: ConfigBody, request: Request):
         target_type="config",
         target_id=key,
     )
-    response = {"ok": True, "reload_required": True}
     if key == "awakening":
-        action = action_queue.enqueue("awakening_reload")
-        response.update({"queued": True, "action": action})
-    return response
+        action_queue.enqueue("awakening_reload")
+        effect = "auto_reloading"
+    elif key == "chat_rules":
+        action_queue.enqueue("rules_reload")
+        effect = "auto_reloading"
+    elif key == "llm":
+        # llm_reload 走 reload_runtime(background=True)，会触发 MCP 全量重连
+        # （含容器/子进程重启），静默执行绕过用户感知；且 llm 配置影响面大
+        # （provider/model/触发词/MCP），用户主动确认更稳妥，故引导手动 reload。
+        # 注：reload_runtime 本身不探活（探活只在 /llm reload 命令路径），不涉及计费。
+        effect = "manual_reload"
+    else:
+        # generation / games / niuniu_text* 无 reload 机制，需重启生效。
+        effect = "restart_needed"
+    return {"ok": True, "effect": effect}

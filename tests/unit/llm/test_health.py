@@ -176,3 +176,91 @@ def test_format_health_report_redacts_sensitive_filter_details():
     assert "敏感词过滤：已启用" in rendered
     # Sanity check: other items are unaffected by the redaction.
     assert "provider_id" in rendered
+
+
+async def test_health_verbose_probes_provider_when_reachable(llm_service, monkeypatch):
+    """probe_provider=True 且 api_key 已设时，应真实探活并标记 provider_reachable=True。
+
+    覆盖 _probe_provider 薄包装 → provider_health.probe_provider 的接线（重构回归）：
+    原先 test_health 只覆盖 key-missing 跳过路径，成功路径未覆盖。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _OkClient:
+        async def complete(self, request):
+            return object()
+
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _OkClient())
+
+    report = await llm_service.build_health_report(10001, probe_provider=True)
+    items = {item.name: item for item in report.items}
+    assert items["provider"].details["provider_reachable"] is True
+    assert "probe_latency_ms" in items["provider"].details
+    assert items["provider"].status == "ok"
+
+
+async def test_format_provider_probe_returns_formatted_text(llm_service, monkeypatch):
+    """HealthMixin.format_provider_probe 应并发探活并返回格式化文本（/llm probe 接线）。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _OkClient:
+        async def complete(self, request):
+            return object()
+
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _OkClient())
+
+    text = await llm_service.format_provider_probe()
+    assert "Provider 探活" in text
+    assert "正常" in text  # mock client 成功 → 至少一个 provider ok
+
+
+async def test_format_current_provider_probe_only_probes_active_model(llm_service, monkeypatch):
+    """reload 后验证只探活当前会话的 resolved provider/model，不全量扫 provider。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    called: list[tuple[str, str]] = []
+
+    class _CaptureClient:
+        def __init__(self, provider_id: str) -> None:
+            self.provider_id = provider_id
+
+        async def complete(self, request):
+            called.append((self.provider_id, request.model))
+            return object()
+
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client",
+        lambda provider: _CaptureClient(provider.id),
+    )
+
+    # Add a second configured provider to prove current-probe does not fan out.
+    provider = llm_service.config.providers["openai-main"]
+    llm_service.config.providers["backup"] = type(provider)(
+        id="backup",
+        protocol=provider.protocol,
+        base_url=provider.base_url,
+        api_key_env=provider.api_key_env,
+        default_model="backup-model",
+        models=["backup-model"],
+    )
+
+    text = await llm_service.format_current_provider_probe(10001, chat_type="group")
+
+    assert "Provider 探活（1 个）" in text
+    assert called == [("openai-main", "gpt-test")]
+    assert "backup" not in text
+
+
+async def test_format_current_provider_probe_failure_prefaces_config_effective(llm_service, monkeypatch):
+    """探活未通过时应前置'配置已生效'，避免 reload 成功但探活 ❌ 被误读为 reload 失败。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _FailClient:
+        async def complete(self, request):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _FailClient())
+
+    text = await llm_service.format_current_provider_probe(10001, chat_type="group")
+    assert "配置已生效" in text
+    assert "探活未通过" in text
+    assert "Provider 探活（1 个）" in text  # body 仍在

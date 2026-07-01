@@ -141,6 +141,56 @@ def test_put_awakening_config_queues_reload(monkeypatch, tmp_path):
         _mock_request(),
     )
 
-    assert result["queued"] is True
+    assert result["effect"] == "auto_reloading"
     assert captured == ["awakening_reload"]
     assert (base / "awakening.toml").exists()
+
+
+def test_put_chat_rules_config_queues_rules_reload(monkeypatch, tmp_path):
+    _patch_config_dir(monkeypatch, tmp_path)
+    captured: list[str] = []
+    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "r1"})
+    monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
+
+    result = config.put_config(
+        "chat_rules",
+        config.ConfigBody(content="[text_rules]\nname = 'x'\n"),
+        _mock_request(),
+    )
+
+    assert result["effect"] == "auto_reloading"
+    assert captured == ["rules_reload"]
+
+
+def test_put_llm_config_does_not_queue_reload(monkeypatch, tmp_path):
+    """llm 改动不自动 reload——reload_runtime 含探活会静默扣费（opt-in）。"""
+    _patch_config_dir(monkeypatch, tmp_path)
+    captured: list[str] = []
+    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "x1"})
+    monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
+
+    result = config.put_config(
+        "llm",
+        config.ConfigBody(content="[runtime]\nenabled = true\n"),
+        _mock_request(),
+    )
+
+    assert result["effect"] == "manual_reload"
+    assert captured == []  # 不入队，避免静默探活扣费
+
+
+@pytest.mark.parametrize("key", ["games", "generation", "niuniu_text", "niuniu_text_safe"])
+def test_put_restart_needed_configs_do_not_queue_reload(monkeypatch, tmp_path, key):
+    _patch_config_dir(monkeypatch, tmp_path)
+    captured: list[str] = []
+    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "g1"})
+    monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
+
+    result = config.put_config(
+        key,
+        config.ConfigBody(content="[section]\nkey = 'value'\n"),
+        _mock_request(),
+    )
+
+    assert result["effect"] == "restart_needed"
+    assert captured == []

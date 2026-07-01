@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 import os
@@ -13,10 +12,6 @@ from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.generation.config import load_generation_config
 from quickquip.llm.config import LLMConfig, ProviderConfig
 from quickquip.llm.settings import ResolvedGroupSettings
-
-_PROBE_TIMEOUT_SECONDS = 5.0
-_PROBE_MODEL_FALLBACK = "gpt-4o-mini"
-
 
 @dataclass(slots=True)
 class HealthCheckItem:
@@ -78,28 +73,12 @@ def _check_sqlite(path: Path) -> tuple[str, str, dict[str, Any]]:
 
 
 async def _probe_provider(provider: ProviderConfig, model: str) -> tuple[bool, float, str]:
-    from quickquip.llm.provider import LLMRequest, build_provider_client
-    from quickquip.llm.tools import LLMConversationMessage
+    from quickquip.llm.provider_health import probe_provider as _probe
 
-    request = LLMRequest(
-        model=model,
-        system_prompt="",
-        messages=[LLMConversationMessage(role="user", content="hi")],
-        temperature=0.0,
-        max_output_tokens=1,
-    )
-    client = build_provider_client(provider)
-    t0 = time.monotonic()
-    try:
-        await asyncio.wait_for(client.complete(request), timeout=_PROBE_TIMEOUT_SECONDS)
-        latency_ms = round((time.monotonic() - t0) * 1000, 1)
-        return True, latency_ms, ""
-    except asyncio.TimeoutError:
-        latency_ms = round(_PROBE_TIMEOUT_SECONDS * 1000)
-        return False, latency_ms, "timeout"
-    except Exception as exc:
-        latency_ms = round((time.monotonic() - t0) * 1000, 1)
-        return False, latency_ms, type(exc).__name__
+    result = await _probe(provider, model=model)
+    if result.status == "ok":
+        return True, result.latency_ms or 0.0, ""
+    return False, result.latency_ms or 0.0, result.error or "unknown"
 
 
 async def build_health_report(
