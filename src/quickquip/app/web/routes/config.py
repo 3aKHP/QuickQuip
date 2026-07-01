@@ -128,8 +128,10 @@ def put_config(key: str, body: ConfigBody, request: Request):
         action_queue.enqueue("rules_reload")
         effect = "auto_reloading"
     elif key == "llm":
-        # llm_reload 走 reload_runtime（含 MCP 重启 + reload 后探活），
-        # 自动触发会静默扣费（违背 opt-in）；改为前端引导用户手动 reload。
+        # llm_reload 走 reload_runtime(background=True)，会触发 MCP 全量重连
+        # （含容器/子进程重启），静默执行绕过用户感知；且 llm 配置影响面大
+        # （provider/model/触发词/MCP），用户主动确认更稳妥，故引导手动 reload。
+        # 注：reload_runtime 本身不探活（探活只在 /llm reload 命令路径），不涉及计费。
         effect = "manual_reload"
     else:
         # generation / games / niuniu_text* 无 reload 机制，需重启生效。

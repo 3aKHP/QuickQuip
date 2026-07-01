@@ -31,7 +31,7 @@
 `/llm reload` 已能重读配置并重建部分运行时对象。provider client 不缓存（每次请求新建），故 provider 配置改动 reload 后即时生效、in-flight 请求自然用旧配置跑完——此项无须专门处理。剩余待明确：
 
 1. MCP reconnect 的顺序、超时和失败回退（将与「指定 MCP 加载顺序防止依赖倒序」合并设计）。
-2. Web Admin 保存配置后的用户提示和状态刷新（已部分落地：按 key 返回 `effect`，`awakening`/`chat_rules` 自动重载，`llm` 手动引导避免静默探活扣费；剩余 `generation`/`games`/`niuniu_text*` 仍需重启）。
+2. Web Admin 保存配置后的用户提示和状态刷新（已部分落地：按 key 返回 `effect`，`awakening`/`chat_rules` 自动重载，`llm` 手动引导——自动 reload 会触发 MCP 全量重连且影响面大；剩余 `generation`/`games`/`niuniu_text*` 仍需重启）。
 3. reload 前后运行时状态的一致性验证（`/llm reload` 已探活当前 provider/model；全量 provider 巡检由 `/llm probe` 执行）。
 
 ### Provider 健康检查与故障转移

@@ -162,7 +162,7 @@ async function save() {
     } else if (effect === 'restart_needed') {
       toast('已保存。此项需重启 bot 生效')
     } else {
-      toast('配置已保存')
+      toast('已保存。如未自动生效，请到诊断页重载或重启 bot')
     }
   } catch (e: unknown) {
     saveError.value = (e as Error).message

@@ -179,15 +179,16 @@ def test_put_llm_config_does_not_queue_reload(monkeypatch, tmp_path):
     assert captured == []  # 不入队，避免静默探活扣费
 
 
-def test_put_games_config_requires_restart(monkeypatch, tmp_path):
+@pytest.mark.parametrize("key", ["games", "generation", "niuniu_text", "niuniu_text_safe"])
+def test_put_restart_needed_configs_do_not_queue_reload(monkeypatch, tmp_path, key):
     _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
     monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "g1"})
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
 
     result = config.put_config(
-        "games",
-        config.ConfigBody(content="[niuniu]\nstake = 10\n"),
+        key,
+        config.ConfigBody(content="[section]\nkey = 'value'\n"),
         _mock_request(),
     )
 
