@@ -4,6 +4,10 @@ export async function fetchProviders() {
   return request('/api/diagnostics/providers')
 }
 
+export async function probeProviders() {
+  return request('/api/diagnostics/providers/probe', { method: 'POST' })
+}
+
 export async function fetchTraceStatus() {
   return request('/api/diagnostics/trace-status')
 }

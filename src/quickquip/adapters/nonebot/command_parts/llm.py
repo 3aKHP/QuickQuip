@@ -37,6 +37,12 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 )
             )
 
+        if args == "probe":
+            if not _allow_scope_management(event):
+                await llm_cmd.finish("仅管理员可执行此操作")
+            await llm_cmd.send("正在并发探活所有 provider，请稍候…")
+            await llm_cmd.finish(await svc.format_provider_probe())
+
         if args in {"mcp", "mcp status"}:
             await llm_cmd.finish(svc.format_mcp_status())
 
@@ -107,11 +113,14 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 await llm_cmd.finish(f"{scope_label} LLM 已关闭")
 
         if args == "reload":
+            if not _allow_scope_management(event):
+                await llm_cmd.finish("仅管理员可执行此操作")
             svc.reset_chat_history_limit(chat_id, chat_type=chat_type)
             config = await svc.reload_runtime(background=True)
             if config.load_error:
                 await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
-            await llm_cmd.finish("LLM 配置已重载")
+            await llm_cmd.send("LLM 配置已重载，正在探活当前 provider/model…")
+            await llm_cmd.finish(await svc.format_current_provider_probe(chat_id, chat_type=chat_type))
 
         if args == "clear_context":
             deleted = svc.clear_context(chat_id, chat_type=chat_type)
@@ -222,7 +231,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（/llm reload 可重置）")
 
         await llm_cmd.finish(
-            "LLM 命令用法：/llm status|current|on|off|providers|models [provider]|use <provider> [model]|"
+            "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
             "memory status|memory on|memory off|auto_memory on|off|reset|status|context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )

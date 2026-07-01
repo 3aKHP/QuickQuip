@@ -16,6 +16,7 @@ from quickquip.llm.provider import (
     get_trace_entries,
     _TRACE_FLAG_FILE,
 )
+from quickquip.llm.provider_health import format_probe_results, probe_all_providers
 from quickquip.llm.tools import LLMConversationMessage
 
 router = APIRouter()
@@ -56,6 +57,19 @@ def get_diagnostics_providers():
             {"id": p.id, "models": p.models}
             for p in config.providers.values()
         ]
+    }
+
+
+@router.post("/diagnostics/providers/probe")
+async def probe_providers():
+    """并发探活所有 provider，返回结构化结果 + 格式化文本（无状态，每次即每次计费）。"""
+    config = load_llm_config(CONFIG_LLM_TOML)
+    if config.load_error:
+        raise HTTPException(status_code=400, detail=f"config load error: {config.load_error}")
+    results = await probe_all_providers(config)
+    return {
+        "results": [r.as_dict() for r in results],
+        "text": format_probe_results(results),
     }
 
 

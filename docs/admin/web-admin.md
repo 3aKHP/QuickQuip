@@ -151,7 +151,7 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 - **对话** — 按群浏览 LLM 对话历史（含私聊/归档，支持关键词过滤、游标翻页、按单条删除）
 - **人格** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）
 - **资料** — 在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件（保存后执行 `/llm reload` 或重启 bot 生效）
-- **诊断** — LLM runtime 重载、MCP 重连、上下文清理、样本请求、文本规则回归测试和 LLM 健康状态
+- **诊断** — LLM runtime 重载、MCP 重连、上下文清理、样本请求、文本规则回归测试、provider 探活（并发，按需计费）和 LLM 健康状态
 - **MCP** — MCP 服务器状态面板（transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
 - **总结** — 查阅/删除每日总结、群周报、群月报存档（顶部切换日/周/月）
 - **语录** — 语录管理（按群浏览、关键词搜索、删除）
@@ -167,6 +167,8 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 - **牛牛** — 牛牛大作战面板（自然/绝对值/长度/深度四种排行、用户查询含多维度排名、操作记录追溯、文案模式管理）
 
 敏感词过滤器没有独立标签页。后台提供只读接口 `GET /ops/api/sensitive-filter/status`，LLM 健康检查也会汇总过滤器加载状态和词表数量。`config/sensitive_words.toml` 属于高敏部署文件，只在服务器本地维护，Web Admin 不提供内容读取或在线编辑入口。
+
+诊断页的"探活 Provider"按钮会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动全量巡检；群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
 
 ### Bot 执行动作队列
 

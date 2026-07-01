@@ -7,6 +7,7 @@ from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filte
 from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
+from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
 from quickquip.llm.mcp import MCPServerStatus
 from quickquip.llm.service_parts.constants import (
     MAX_STORED_MEMORY_ITEMS,
@@ -214,3 +215,20 @@ class HealthMixin:
             await self.build_health_report(group_id, chat_type=chat_type, probe_provider=verbose),
             verbose=verbose,
         )
+
+    async def format_provider_probe(self) -> str:
+        """并发探活所有 provider 并格式化结果（/llm probe 用，每次调用即每次计费）。"""
+        results = await probe_all_providers(self.config)
+        return format_probe_results(results)
+
+    async def format_current_provider_probe(self, group_id: int | str, chat_type: str = "group") -> str:
+        """探活当前会话实际生效的 provider/model（/llm reload 后验证用）。"""
+        settings = self.get_chat_settings(group_id, chat_type=chat_type)
+        provider = self.config.providers.get(settings.provider_id)
+        if provider is None:
+            return f"当前 provider 不存在：{settings.provider_id}"
+        result = await probe_provider(provider, model=settings.model or None)
+        body = format_probe_results([result])
+        if result.status == "ok":
+            return body
+        return f"配置已生效，但当前 provider 探活未通过：\n{body}"

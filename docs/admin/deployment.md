@@ -94,7 +94,7 @@ docker compose --env-file ../.env up -d
 
 - `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
-- 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`
+- 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
 
 ### 4.1 首次准备贴吧登录态
 
@@ -275,3 +275,4 @@ docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 - `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在
 - `docker compose --env-file ../.env logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
 - 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建
+- `/llm reload` 会在重载后探活当前群实际生效的 provider/model；如需全量巡检，在群内执行 `/llm probe` 或在 Web Admin 诊断页点击"探活 Provider"，会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费

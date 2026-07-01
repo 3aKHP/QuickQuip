@@ -15,6 +15,7 @@
         <div class="runtime-actions">
           <UiButton icon="Activity" :loading="healthLoading" @click="loadHealth(false)">健康检查</UiButton>
           <UiButton icon="ListTree" :loading="healthLoadingVerbose" @click="loadHealth(true)">详细健康</UiButton>
+          <UiButton icon="Zap" :loading="probeLoading" @click="runProbe">探活 Provider</UiButton>
           <UiButton icon="RefreshCw" :loading="runtimeLoading === 'llm'" @click="runRuntimeAction('llm')">重载 LLM</UiButton>
           <UiButton icon="Network" :loading="runtimeLoading === 'mcp'" @click="runRuntimeAction('mcp')">重载 MCP</UiButton>
           <UiButton icon="Drama" :loading="runtimeLoading === 'personas'" @click="runRuntimeAction('personas')">重载人格</UiButton>
@@ -36,6 +37,7 @@
 
         <div v-if="runtimeError" class="error-block">{{ runtimeError }}</div>
         <pre v-if="healthText" class="health-block">{{ healthText }}</pre>
+        <pre v-if="probeText" class="health-block">{{ probeText }}</pre>
 
         <div class="action-panel">
           <div class="action-panel__head">
@@ -197,7 +199,7 @@ import UiCard from '../components/ui/UiCard.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiTag from '../components/ui/UiTag.vue'
-import { fetchProviders, runRegression, runSampleRequest } from '../api/diagnostics'
+import { fetchProviders, probeProviders, runRegression, runSampleRequest } from '../api/diagnostics'
 import { clearLlmContext, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../api/llmRuntime'
 import { toast } from '../toast'
 
@@ -212,6 +214,8 @@ const regressionInput = ref('')
 const healthLoading = ref(false)
 const healthLoadingVerbose = ref(false)
 const healthText = ref('')
+const probeLoading = ref(false)
+const probeText = ref('')
 const runtimeError = ref<string | null>(null)
 const runtimeLoading = ref('')
 const contextScope = ref('')
@@ -337,6 +341,19 @@ async function loadHealth(verbose: boolean) {
   } finally {
     healthLoading.value = false
     healthLoadingVerbose.value = false
+  }
+}
+
+async function runProbe() {
+  probeLoading.value = true
+  runtimeError.value = null
+  try {
+    const data = await probeProviders()
+    probeText.value = data?.text || '没有已配置的 provider。'
+  } catch (e: unknown) {
+    runtimeError.value = (e as Error).message
+  } finally {
+    probeLoading.value = false
   }
 }
 
