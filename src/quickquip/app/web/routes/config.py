@@ -121,8 +121,17 @@ def put_config(key: str, body: ConfigBody, request: Request):
         target_type="config",
         target_id=key,
     )
-    response = {"ok": True, "reload_required": True}
     if key == "awakening":
-        action = action_queue.enqueue("awakening_reload")
-        response.update({"queued": True, "action": action})
-    return response
+        action_queue.enqueue("awakening_reload")
+        effect = "auto_reloading"
+    elif key == "chat_rules":
+        action_queue.enqueue("rules_reload")
+        effect = "auto_reloading"
+    elif key == "llm":
+        # llm_reload 走 reload_runtime（含 MCP 重启 + reload 后探活），
+        # 自动触发会静默扣费（违背 opt-in）；改为前端引导用户手动 reload。
+        effect = "manual_reload"
+    else:
+        # generation / games / niuniu_text* 无 reload 机制，需重启生效。
+        effect = "restart_needed"
+    return {"ok": True, "effect": effect}

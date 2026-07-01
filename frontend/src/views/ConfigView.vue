@@ -1,6 +1,6 @@
 <template>
   <div class="config-view">
-    <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后需要重启 bot 才会生效">
+    <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后部分自动重载，其余需手动 reload 或重启">
       <template #actions>
         <span v-if="current && current.missing" class="warn">
           <UiIcon name="Info" :size="14" />
@@ -8,7 +8,7 @@
         </span>
         <span class="hint">
           <UiIcon name="Info" :size="14" />
-          保存后需重启 bot 才会生效
+          保存后会提示具体生效方式
         </span>
         <UiButton icon="RefreshCw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
         <UiButton variant="primary" :loading="saving" icon="Save" @click="save">保存</UiButton>
@@ -154,8 +154,13 @@ async function save() {
     originalContent.value = content.value
     const entry = configs.value.find(c => c.key === currentKey.value)
     if (entry) entry.missing = false
-    if (res?.reload_required) {
-      toast('已保存。请在群内执行 /llm reload 或重启 bot 使配置生效')
+    const effect = res?.effect
+    if (effect === 'auto_reloading') {
+      toast('已保存，正在自动重载（诊断页「最近动作」查看结果）')
+    } else if (effect === 'manual_reload') {
+      toast('已保存。请到诊断页点「重载 LLM」或群内 /llm reload 生效')
+    } else if (effect === 'restart_needed') {
+      toast('已保存。此项需重启 bot 生效')
     } else {
       toast('配置已保存')
     }
