@@ -7,6 +7,7 @@ from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filte
 from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
+from quickquip.llm.provider_health import format_probe_results, probe_all_providers
 from quickquip.llm.mcp import MCPServerStatus
 from quickquip.llm.service_parts.constants import (
     MAX_STORED_MEMORY_ITEMS,
@@ -214,3 +215,8 @@ class HealthMixin:
             await self.build_health_report(group_id, chat_type=chat_type, probe_provider=verbose),
             verbose=verbose,
         )
+
+    async def format_provider_probe(self) -> str:
+        """并发探活所有 provider 并格式化结果（/llm probe 用，每次调用即每次计费）。"""
+        results = await probe_all_providers(self.config)
+        return format_probe_results(results)
