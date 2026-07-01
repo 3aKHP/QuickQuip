@@ -176,3 +176,39 @@ def test_format_health_report_redacts_sensitive_filter_details():
     assert "敏感词过滤：已启用" in rendered
     # Sanity check: other items are unaffected by the redaction.
     assert "provider_id" in rendered
+
+
+async def test_health_verbose_probes_provider_when_reachable(llm_service, monkeypatch):
+    """probe_provider=True 且 api_key 已设时，应真实探活并标记 provider_reachable=True。
+
+    覆盖 _probe_provider 薄包装 → provider_health.probe_provider 的接线（重构回归）：
+    原先 test_health 只覆盖 key-missing 跳过路径，成功路径未覆盖。
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _OkClient:
+        async def complete(self, request):
+            return object()
+
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _OkClient())
+
+    report = await llm_service.build_health_report(10001, probe_provider=True)
+    items = {item.name: item for item in report.items}
+    assert items["provider"].details["provider_reachable"] is True
+    assert "probe_latency_ms" in items["provider"].details
+    assert items["provider"].status == "ok"
+
+
+async def test_format_provider_probe_returns_formatted_text(llm_service, monkeypatch):
+    """HealthMixin.format_provider_probe 应并发探活并返回格式化文本（/llm probe 接线）。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _OkClient:
+        async def complete(self, request):
+            return object()
+
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _OkClient())
+
+    text = await llm_service.format_provider_probe()
+    assert "Provider 探活" in text
+    assert "正常" in text  # mock client 成功 → 至少一个 provider ok
