@@ -157,7 +157,7 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 - **语录** — 语录管理（按群浏览、关键词搜索、删除）
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
 - **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
-- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器
+- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）
 - **实时日志** — 当前运行日志流、连接状态与当前文件下载
 - **LLM Trace** — 共享 trace 流、开关控制与最近 trace 条目
 - **日志归档** — 历史轮转日志浏览、预览与下载
