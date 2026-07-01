@@ -119,8 +119,8 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             config = await svc.reload_runtime(background=True)
             if config.load_error:
                 await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
-            await llm_cmd.send("LLM 配置已重载，正在探活 provider…")
-            await llm_cmd.finish(await svc.format_provider_probe())
+            await llm_cmd.send("LLM 配置已重载，正在探活当前 provider/model…")
+            await llm_cmd.finish(await svc.format_current_provider_probe(chat_id, chat_type=chat_type))
 
         if args == "clear_context":
             deleted = svc.clear_context(chat_id, chat_type=chat_type)

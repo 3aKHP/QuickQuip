@@ -212,3 +212,39 @@ async def test_format_provider_probe_returns_formatted_text(llm_service, monkeyp
     text = await llm_service.format_provider_probe()
     assert "Provider 探活" in text
     assert "正常" in text  # mock client 成功 → 至少一个 provider ok
+
+
+async def test_format_current_provider_probe_only_probes_active_model(llm_service, monkeypatch):
+    """reload 后验证只探活当前会话的 resolved provider/model，不全量扫 provider。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    called: list[tuple[str, str]] = []
+
+    class _CaptureClient:
+        def __init__(self, provider_id: str) -> None:
+            self.provider_id = provider_id
+
+        async def complete(self, request):
+            called.append((self.provider_id, request.model))
+            return object()
+
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client",
+        lambda provider: _CaptureClient(provider.id),
+    )
+
+    # Add a second configured provider to prove current-probe does not fan out.
+    provider = llm_service.config.providers["openai-main"]
+    llm_service.config.providers["backup"] = type(provider)(
+        id="backup",
+        protocol=provider.protocol,
+        base_url=provider.base_url,
+        api_key_env=provider.api_key_env,
+        default_model="backup-model",
+        models=["backup-model"],
+    )
+
+    text = await llm_service.format_current_provider_probe(10001, chat_type="group")
+
+    assert "Provider 探活（1 个，并发）" in text
+    assert called == [("openai-main", "gpt-test")]
+    assert "backup" not in text
