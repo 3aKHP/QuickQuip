@@ -245,6 +245,22 @@ async def test_format_current_provider_probe_only_probes_active_model(llm_servic
 
     text = await llm_service.format_current_provider_probe(10001, chat_type="group")
 
-    assert "Provider 探活（1 个，并发）" in text
+    assert "Provider 探活（1 个）" in text
     assert called == [("openai-main", "gpt-test")]
     assert "backup" not in text
+
+
+async def test_format_current_provider_probe_failure_prefaces_config_effective(llm_service, monkeypatch):
+    """探活未通过时应前置'配置已生效'，避免 reload 成功但探活 ❌ 被误读为 reload 失败。"""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    class _FailClient:
+        async def complete(self, request):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _FailClient())
+
+    text = await llm_service.format_current_provider_probe(10001, chat_type="group")
+    assert "配置已生效" in text
+    assert "探活未通过" in text
+    assert "Provider 探活（1 个）" in text  # body 仍在

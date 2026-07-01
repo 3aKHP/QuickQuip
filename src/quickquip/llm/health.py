@@ -13,9 +13,6 @@ from quickquip.generation.config import load_generation_config
 from quickquip.llm.config import LLMConfig, ProviderConfig
 from quickquip.llm.settings import ResolvedGroupSettings
 
-_PROBE_MODEL_FALLBACK = "gpt-4o-mini"
-
-
 @dataclass(slots=True)
 class HealthCheckItem:
     name: str

@@ -228,4 +228,7 @@ class HealthMixin:
         if provider is None:
             return f"当前 provider 不存在：{settings.provider_id}"
         result = await probe_provider(provider, model=settings.model or None)
-        return format_probe_results([result])
+        body = format_probe_results([result])
+        if result.status == "ok":
+            return body
+        return f"配置已生效，但当前 provider 探活未通过：\n{body}"

@@ -14,7 +14,7 @@ from quickquip.llm.provider_health import ProviderHealth  # noqa: E402
 async def test_probe_providers_returns_results_and_text(monkeypatch):
     """端点应并发探活并返回结构化 results + 后端统一格式化的 text。"""
     monkeypatch.setattr(
-        diagnostics, "load_llm_config", lambda path: SimpleNamespace(load_error=None)
+        diagnostics, "load_llm_config", lambda path: SimpleNamespace(load_error=None, providers={})
     )
 
     fake_results = [

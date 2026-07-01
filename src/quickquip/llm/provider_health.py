@@ -108,7 +108,8 @@ def format_probe_results(results: list[ProviderHealth]) -> str:
     if not results:
         return "没有已配置的 provider。"
     icon = {"ok": "✅", "error": "❌", "skipped": "⚪"}
-    lines = [f"🔍 Provider 探活（{len(results)} 个，并发）"]
+    suffix = "，并发" if len(results) > 1 else ""
+    lines = [f"🔍 Provider 探活（{len(results)} 个{suffix}）"]
     for r in results:
         latency = f"{r.latency_ms}ms" if r.latency_ms is not None else "-"
         if r.status == "ok":
