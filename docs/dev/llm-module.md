@@ -462,9 +462,12 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
   - 查看当前群实际生效的 provider、model、persona、记忆开关、短期会话条数和长期记忆条数
 - `/llm health [verbose|detail|full]`
   - 运行 LLM 健康检查（配置、provider 探活、知识文件、工具、MCP 等 10 项）
+- `/llm reload`
+  - 仅管理员。重载 LLM 配置，并探活当前会话实际生效的 provider/model
+  - reload 后探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费；api_key 未设置时自动跳过
 - `/llm probe`
   - 仅管理员。并发探活所有 provider（每个发一条 max_tokens=1 的请求），报告可达性与延迟
-  - 每次调用即每次计费——按需触发，不静默扣费；api_key 未设置的 provider 自动跳过
+  - 每次调用都可能产生 provider 计费——按需触发，不静默扣费；api_key 未设置的 provider 自动跳过
 
 ### 7.2 provider / model / persona
 

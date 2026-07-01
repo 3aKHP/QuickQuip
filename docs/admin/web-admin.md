@@ -168,6 +168,8 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 
 敏感词过滤器没有独立标签页。后台提供只读接口 `GET /ops/api/sensitive-filter/status`，LLM 健康检查也会汇总过滤器加载状态和词表数量。`config/sensitive_words.toml` 属于高敏部署文件，只在服务器本地维护，Web Admin 不提供内容读取或在线编辑入口。
 
+诊断页的"探活 Provider"按钮会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动全量巡检；群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
+
 ### Bot 执行动作队列
 
 `web_api.py` 是独立进程，不能直接复用 bot 进程里的 OneBot 连接。诊断页的运行时重载、LLM 健康检查、上下文清理、唤醒参数重载、群组页的“立即生成总结/播报/周报/月报”等需要 bot 进程执行的动作，会先写入 `data/web_admin_actions.db`。bot 端定时任务 `web_admin_action_queue` 每 5 秒领取并执行队列任务，结果回写到同一数据库；诊断页“最近动作”用于查看等待、执行中、成功或失败状态。动作队列数据库启用 WAL；若 bot 在领取任务后退出，后续轮询会将超时的 `running` 动作标记为失败，避免任务永久挂起。

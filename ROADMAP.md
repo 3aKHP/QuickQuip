@@ -32,7 +32,7 @@
 
 1. MCP reconnect 的顺序、超时和失败回退。
 2. Web Admin 保存配置后的用户提示和状态刷新。
-3. reload 前后运行时状态的一致性验证（reload 后可用 `/llm probe` 探活验证 provider 可达性）。
+3. reload 前后运行时状态的一致性验证（`/llm reload` 已探活当前 provider/model；全量 provider 巡检由 `/llm probe` 执行）。
 
 ### Provider 健康检查与故障转移
 
