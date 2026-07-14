@@ -4,7 +4,7 @@
 
 ## 环境搭建
 
-项目用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境与依赖(uv 跨平台,Linux/Windows 命令一致)。Python ≥ 3.11,可编辑安装是 src layout 的硬性要求(让 Python 解析 `src/` 下的包)。
+项目用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境与依赖(uv 跨平台,环境搭建命令一致)。Python ≥ 3.11,可编辑安装是 src layout 的硬性要求(让 Python 解析 `src/` 下的包)。
 
 **Linux / WSL2(canonical 环境):**
 
@@ -12,7 +12,7 @@
 uv venv                                          # 创建 .venv(.venv/bin/ 布局)
 uv pip install -r requirements-dev.txt           # 运行时 + 开发依赖
 uv pip install -e .                              # 可编辑安装(src layout 必须)
-uv run python -m pytest -n auto                  # 验证
+.venv/bin/python -m pytest -n auto               # 验证
 ```
 
 **Windows(PowerShell):**
@@ -21,10 +21,10 @@ uv run python -m pytest -n auto                  # 验证
 uv venv                                          # 创建 .venv(.venv\Scripts\ 布局)
 uv pip install -r requirements-dev.txt
 uv pip install -e .
-uv run python -m pytest -n auto
+.venv/Scripts/python.exe -m pytest -n auto
 ```
 
-命令本身跨平台一致(uv 抽象了 venv 布局差异),区别仅在 shell(bash vs pwsh)与 venv 目录名(`bin/` vs `Scripts\`)。
+环境搭建命令(`uv venv`、`uv pip install`)跨平台一致;运行测试直接调 venv 内 python,路径按平台写(Linux `.venv/bin/python`、Windows `.venv/Scripts/python.exe`),或激活 venv 后直接 `python`。
 
 **AI 协作指令的跨平台处理:** 仓库里的 `CLAUDE.md` 是 Linux canonical 版本(AI 每次会话加载,保持精简、不掺双平台内容)。Windows 协作者请把平台覆盖写入本地(不被追踪)的 `CLAUDE.local.md`:
 

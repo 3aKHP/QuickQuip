@@ -20,7 +20,7 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 ## 环境
 
 - **Linux 环境（WSL2）**。Shell 用 bash，路径分隔符 `/`
-- **环境与依赖用 uv 管理**。`.venv` 由 `uv venv` 创建（Linux 布局 `.venv/bin/`）。运行命令优先用 `uv run`（免激活），或 `source .venv/bin/activate` 后直接用 `python`
+- **环境与依赖用 uv 管理**。`.venv` 由 `uv venv` 创建（Linux 布局 `.venv/bin/`），依赖用 `uv pip install` 安装。**日常运行直接用 `.venv/bin/python`**（或激活 `.venv/bin/activate` 后直接 `python`）；不把 `uv run` 用于日常命令，以免触发 uv 项目模式生成 `uv.lock`（已永久 gitignore）。跨平台 pre-push hook 例外，仍用 `uv run`
 - **项目采用 src layout**：源码位于 `src/quickquip/` 和 `src/plugins/`，开发时需 `uv pip install -e .`（可编辑安装）或设 `PYTHONPATH=src`
 - **不主动 push**。即使刚 commit 完，也等用户明确说"请推"
 - **不 squash merge**。合并 PR 用 `gh pr merge --merge`，保留完整分支历史
@@ -48,16 +48,16 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 
 ## 常用命令
 
-所有命令通过 `uv run` 在项目 `.venv` 中执行（免激活）。也可 `source .venv/bin/activate` 后直接用 `python`。
+环境用 `uv venv` / `uv pip install` 创建与装依赖；日常命令直接调 `.venv/bin/python`（或激活 `.venv/bin/activate` 后用 `python`）。
 
 ```bash
 uv venv                                            # 创建虚拟环境（首次）
 uv pip install -r requirements-dev.txt             # 安装依赖（含运行时）
 uv pip install -e .                                # 可编辑安装（src layout 必须）
-uv run python bot.py                               # 启动 bot
-uv run python -m pytest -n auto                    # 并行运行测试
-uv run python -m pytest -m playwright              # 包含浏览器测试
-uv run ruff check .                                # Lint
+.venv/bin/python bot.py                            # 启动 bot
+.venv/bin/python -m pytest -n auto                 # 并行运行测试
+.venv/bin/python -m pytest -m playwright           # 包含浏览器测试
+.venv/bin/ruff check .                             # Lint
 ```
 
 ## 架构速览
