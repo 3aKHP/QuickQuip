@@ -112,7 +112,7 @@ foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml"
 
 Write-Host "Building frontend..." -ForegroundColor Cyan
 Push-Location "frontend"
-Invoke-Native "pnpm install" { & $PnpmCommand install }
+Invoke-Native "pnpm install --frozen-lockfile" { & $PnpmCommand install --frozen-lockfile }
 Invoke-Native "pnpm build" { & $PnpmCommand build }
 Pop-Location
 
