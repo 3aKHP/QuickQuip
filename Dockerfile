@@ -14,12 +14,13 @@
 ARG PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright/python:v1.58.0-noble
 
 # ── Stage 1: Build frontend ────────────────────────────────────────────────
-FROM node:20-slim AS frontend-builder
+FROM node:24-slim AS frontend-builder
 WORKDIR /build
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN corepack enable
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
-RUN npm run build
+RUN pnpm build
 
 # ── Stage 2: Docker CLI for optional MCP docker transport ─────────────────
 FROM docker:27-cli AS docker_cli

@@ -6,7 +6,7 @@
 set -euo pipefail
 
 command -v uv >/dev/null 2>&1 || { echo "[pre-push] uv 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
-command -v npm >/dev/null 2>&1 || { echo "[pre-push] npm 未安装"; exit 1; }
+command -v pnpm >/dev/null 2>&1 || { echo "[pre-push] pnpm 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
 
 echo "[pre-push] Running CI checks..."
 
@@ -15,8 +15,8 @@ echo "[pre-push] ruff check ..."
 uv run ruff check .
 
 # 2. Frontend type check
-echo "[pre-push] npm run type-check ..."
-(cd frontend && npm run type-check)
+echo "[pre-push] pnpm type-check ..."
+(cd frontend && pnpm type-check)
 
 # 3. Validate example configs
 echo "[pre-push] Validating example configs..."
