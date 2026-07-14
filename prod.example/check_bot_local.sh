@@ -36,8 +36,6 @@ step() { printf '%s%s%s\n' "$C" "$*" "$N"; }
 ok()   { printf '%s%s%s\n' "$G" "$*" "$N"; }
 err()  { printf '%s%s%s\n' "$R" "$*" "$N" >&2; }
 
-NULL_DEVICE="/d""ev/null"
-
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ProjectRoot="$(cd "$ScriptDir/.." && pwd)"
 

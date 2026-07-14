@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+command -v uv >/dev/null 2>&1 || { echo "[pre-push] uv 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
+command -v npm >/dev/null 2>&1 || { echo "[pre-push] npm 未安装"; exit 1; }
+
 echo "[pre-push] Running CI checks..."
 
 # 1. Lint
