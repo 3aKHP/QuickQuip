@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -7,6 +8,14 @@ from pathlib import Path
 import pytest
 
 from quickquip.adapters.nonebot import lifecycle
+
+
+def _bump_mtime(path: Path) -> None:
+    """Force a distinct mtime after writing. Some filesystems (notably WSL2)
+    don't update mtime on rapid successive writes, which would hide the change
+    from lifecycle._reload_if_changed (an mtime-based watcher)."""
+    st = path.stat()
+    os.utime(path, (st.st_atime, st.st_mtime + 10))
 
 
 class _FakeDriver:
@@ -85,6 +94,7 @@ def test_reload_if_changed_watches_awakening_config(monkeypatch, tmp_path):
     lifecycle._watched.clear()
     lifecycle._init_mtimes()
     awakening_path.write_text("{\"changed\": true}", encoding="utf-8")
+    _bump_mtime(awakening_path)
 
     lifecycle._reload_if_changed()
 
@@ -124,6 +134,8 @@ def test_reload_if_changed_watches_period_report_groups(monkeypatch, tmp_path):
     lifecycle._init_mtimes()
     weekly_path.write_text('{"changed": true}', encoding="utf-8")
     monthly_path.write_text('{"changed": true}', encoding="utf-8")
+    _bump_mtime(weekly_path)
+    _bump_mtime(monthly_path)
 
     lifecycle._reload_if_changed()
 

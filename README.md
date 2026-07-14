@@ -123,8 +123,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 9. **可选：启动 Web 管理后台**
 
    ```bash
-   # 先构建前端（需 Node.js）
-   cd frontend && npm install && npm run build && cd ..
+   # 先构建前端（需 Node.js + pnpm）
+   cd frontend && pnpm install && pnpm build && cd ..
 
    # 在 .env 中设置管理口令
    # WEB_ADMIN_PASSWORD=your-password

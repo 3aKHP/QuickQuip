@@ -6,6 +6,21 @@
 
 （暂无）
 
+## [1.9.4] - 2026-07-14
+
+### ✨ 新增 (Added)
+
+- **跨平台运维工具链**：生产部署/巡检脚本补充 Linux 等价物（`prod.example/deploy-v4.sh`、`check_bot_local.sh`，与既有 Windows `.ps1` 并存）；新增基于 uv 的跨平台 pre-push hook 模板（push 前自动跑 ruff + 前端 type-check + 配置校验 + pytest，本地镜像 CI）。
+
+### 🔧 变更 (Changed)
+
+- **推荐开发环境从 Windows 迁至 Linux（WSL2）**：`CLAUDE.md` / `CONTRIBUTING.md` 的 canonical 版本本地化为 Linux + uv，Windows 降级为本地覆盖（`CLAUDE.local.windows.example`）。Python 环境统一用 uv 管理，日常命令改用 `.venv/bin/python` 直接调用（不再 `uv run`，避免触发 uv 项目模式生成 `uv.lock`，后者已永久 gitignore）。
+- **前端构建工具链由 npm 迁移至 pnpm，Node 运行时从已 EOL 的 20 升到 24 LTS**：CI、根 `Dockerfile`、pre-push hook 与部署脚本同步切换；贡献者构建前端改用 pnpm（Node 20 已于 2026-04 EOL）。生产服务器不涉及——前端在开发者本机构建为静态产物上传，服务器只跑纯 Python 镜像 + bind-mount `dist/`，从未跑 Node。
+
+> "变量解析被Powershell咬了一口。""刚刚这条命令被Powershell绊了一下。""Powershell的转义有点娇气，我写个ps1脚本。" ——From Codex
+>
+> 再也不会这样了。让Powershell带着Here-String一起见鬼去吧。
+
 ## [1.9.3] - 2026-07-02
 
 ### ✨ 新增 (Added)
@@ -587,7 +602,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.3...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.4...HEAD
+[1.9.4]: https://github.com/3aKHP/QuickQuip/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/3aKHP/QuickQuip/compare/v1.9.2...v1.9.3
 [1.9.2]: https://github.com/3aKHP/QuickQuip/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/3aKHP/QuickQuip/compare/v1.9.0...v1.9.1
