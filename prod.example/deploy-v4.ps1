@@ -63,29 +63,29 @@ function Initialize-NodeToolchainPath {
     $env:Path = ($items -join ';')
 }
 
-function Get-NpmCommand {
+function Get-PnpmCommand {
     foreach ($candidate in @(
-        "C:\Program Files\Volta\npm.cmd",
-        "C:\Program Files\Volta\npm.exe",
-        (Join-Path $env:LOCALAPPDATA "Volta\bin\npm.cmd"),
-        (Join-Path $env:LOCALAPPDATA "Volta\bin\npm.exe")
+        "C:\Program Files\Volta\pnpm.cmd",
+        "C:\Program Files\Volta\pnpm.exe",
+        (Join-Path $env:LOCALAPPDATA "Volta\bin\pnpm.cmd"),
+        (Join-Path $env:LOCALAPPDATA "Volta\bin\pnpm.exe")
     )) {
         if ($candidate -and (Test-Path $candidate)) {
             return $candidate
         }
     }
 
-    $command = Get-Command "npm.exe" -ErrorAction SilentlyContinue
+    $command = Get-Command "pnpm.exe" -ErrorAction SilentlyContinue
     if ($command) {
         return $command.Source
     }
 
-    $command = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
+    $command = Get-Command "pnpm.cmd" -ErrorAction SilentlyContinue
     if ($command) {
         return $command.Source
     }
 
-    throw "No usable npm found. Install Node.js/npm or fix Volta."
+    throw "No usable pnpm found. Install pnpm (e.g. volta install pnpm) or fix Volta."
 }
 
 function Invoke-Native {
@@ -100,7 +100,7 @@ function Invoke-Native {
 Push-Location $ProjectRoot
 
 Initialize-NodeToolchainPath
-$NpmCommand = Get-NpmCommand
+$PnpmCommand = Get-PnpmCommand
 
 foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
     if (-not (Test-Path $requiredPath)) {
@@ -112,8 +112,8 @@ foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml"
 
 Write-Host "Building frontend..." -ForegroundColor Cyan
 Push-Location "frontend"
-Invoke-Native "npm install" { & $NpmCommand install }
-Invoke-Native "npm build" { & $NpmCommand run build }
+Invoke-Native "pnpm install" { & $PnpmCommand install }
+Invoke-Native "pnpm build" { & $PnpmCommand build }
 Pop-Location
 
 Write-Host "Packing project..." -ForegroundColor Cyan

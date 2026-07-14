@@ -58,7 +58,7 @@ for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproje
 done
 
 echo "${C}Building frontend...${N}"
-run_step "frontend build" bash -c 'cd frontend && npm install && npm run build'
+run_step "frontend build" bash -c 'cd frontend && pnpm install && pnpm build'
 
 echo "${C}Packing project...${N}"
 run_step "tar archive" tar czf "$TempArchive" \
