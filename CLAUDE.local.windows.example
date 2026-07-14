@@ -1,0 +1,21 @@
+# CLAUDE.local.md — Windows 平台覆盖
+
+本文件是 `CLAUDE.md` 的本地覆盖，把 Linux canonical 部分替换为 Windows 实际情况。用法见 [`CONTRIBUTING.md`](CONTRIBUTING.md)「环境搭建」。**uv 跨平台通用，命令主体不变**，仅 shell 与 venv 布局不同。
+
+## 环境（覆盖 CLAUDE.md「环境」段）
+
+- **Windows 设备**。Shell 用 `pwsh.exe`（PowerShell 7+）。路径分隔符用 `/`（pwsh 兼容），`&&` 用 `;` 替代。
+- **环境与依赖用 uv 管理**（跨平台，与 Linux 一致）。`.venv` 由 `uv venv` 创建，Windows 布局是 `.venv/Scripts/`（非 Linux 的 `.venv/bin/`）。优先用 `uv run`（免激活，跨平台命令完全一致）；若要激活，用 `.venv/Scripts/Activate.ps1`。
+- **项目采用 src layout**：开发时需 `uv pip install -e .`（可编辑安装）。
+
+## Commit 多行 body（覆盖 CLAUDE.md「Commit 规范」示例）
+
+pwsh 用 here-string 写多行 body：
+
+```pwsh
+git commit -m @"
+feat(llm): add proxy support to ProviderConfig
+
+Optional HTTP(S) proxy field; all HTTP requests route through ProxyHandler opener.
+"@
+```
