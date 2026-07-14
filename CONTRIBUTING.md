@@ -2,6 +2,45 @@
 
 感谢参与!本文件是**全贡献者通用**的约定。分支模型与发布流程见 [`docs/dev/branching.md`](docs/dev/branching.md),代码规范见 [`docs/dev/style.md`](docs/dev/style.md)。
 
+## 环境搭建
+
+项目用 [uv](https://docs.astral.sh/uv/) 管理 Python 环境与依赖(uv 跨平台,Linux/Windows 命令一致)。Python ≥ 3.11,可编辑安装是 src layout 的硬性要求(让 Python 解析 `src/` 下的包)。
+
+**Linux / WSL2(canonical 环境):**
+
+```bash
+uv venv                                          # 创建 .venv(.venv/bin/ 布局)
+uv pip install -r requirements-dev.txt           # 运行时 + 开发依赖
+uv pip install -e .                              # 可编辑安装(src layout 必须)
+uv run python -m pytest -n auto                  # 验证
+```
+
+**Windows(PowerShell):**
+
+```pwsh
+uv venv                                          # 创建 .venv(.venv\Scripts\ 布局)
+uv pip install -r requirements-dev.txt
+uv pip install -e .
+uv run python -m pytest -n auto
+```
+
+命令本身跨平台一致(uv 抽象了 venv 布局差异),区别仅在 shell(bash vs pwsh)与 venv 目录名(`bin/` vs `Scripts\`)。
+
+**AI 协作指令的跨平台处理:** 仓库里的 `CLAUDE.md` 是 Linux canonical 版本(AI 每次会话加载,保持精简、不掺双平台内容)。Windows 协作者请把平台覆盖写入本地(不被追踪)的 `CLAUDE.local.md`:
+
+```pwsh
+cp CLAUDE.local.windows.example CLAUDE.local.md
+```
+
+`CLAUDE.local.md` 加载优先级高于 `CLAUDE.md`,AI 会话中 Windows 覆盖生效。
+
+**pre-push hook:** 仓库提供跨平台 hook 模板(`scripts/git-hooks/pre-push`,基于 uv),push 前自动跑 ruff + 前端 type-check + 配置校验 + pytest,镜像 CI。git hooks 不被追踪,各贡献者本地安装一次:
+
+```bash
+cp scripts/git-hooks/pre-push .git/hooks/pre-push
+chmod +x .git/hooks/pre-push
+```
+
 ## 本地开发目录
 
 每位开发者建议在本地建立一个**不被 git 追踪**的辅助目录,存放草稿、计划、沙箱、私有笔记等。排除方式用 `.git/info/exclude`(本地生效、本身不进仓库),而非 `.gitignore`(后者会被追踪并推送,把该目录的存在暴露到公开仓库):

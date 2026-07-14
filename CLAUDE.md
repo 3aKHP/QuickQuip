@@ -19,9 +19,9 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 
 ## 环境
 
-- **Windows 设备**。Shell 默认用 `pwsh.exe`（PowerShell 7+），不要用 bash。`&&` 用 `;` 替代，路径分隔符用 `/`
-- **优先使用项目 `.venv`**。运行 Python 命令前激活：`.venv/Scripts/activate`，或直接用 `.venv/Scripts/python -m pytest` 等
-- **项目采用 src layout**：源码位于 `src/quickquip/` 和 `src/plugins/`，开发时需 `pip install -e .`（可编辑安装）或设 `PYTHONPATH=src`
+- **Linux 环境（WSL2）**。Shell 用 bash，路径分隔符 `/`
+- **环境与依赖用 uv 管理**。`.venv` 由 `uv venv` 创建（Linux 布局 `.venv/bin/`）。运行命令优先用 `uv run`（免激活），或 `source .venv/bin/activate` 后直接用 `python`
+- **项目采用 src layout**：源码位于 `src/quickquip/` 和 `src/plugins/`，开发时需 `uv pip install -e .`（可编辑安装）或设 `PYTHONPATH=src`
 - **不主动 push**。即使刚 commit 完，也等用户明确说"请推"
 - **不 squash merge**。合并 PR 用 `gh pr merge --merge`，保留完整分支历史
 
@@ -30,13 +30,6 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 - `prod.example/` 是可公开分发的生产运维模板；`prod/` 是真实生产运维目录，不提交。
 - 根目录 `.env` 是 QuickQuip 应用层唯一涉密凭证来源；`prod/sendkey.env` 只供运维巡检/通知脚本使用。
 - 本地开发辅助目录（草稿/沙箱/私有材料）由开发者自行建立并排除，机制见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
-
-### Shell 降级策略
-
-1. **优先用原生 PowerShell 工具**（`PowerShell` 指令），直接写 pwsh 7 语法
-2. 遇到引号转义或复杂管道问题时，**降级为** `pwsh.exe -Command "..."` 通过 Bash 工具调用
-3. 反复出错时，**写入 `.ps1` 临时文件再执行**，避免多层转义
-4. **严禁**在 PowerShell 中使用 Unix 重定向语法（`2>/dev/null`、`>&2` 等），用 `2>$null`、`$ErrorActionPreference` 替代
 
 ## 启动准则
 
@@ -55,16 +48,16 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 
 ## 常用命令
 
-所有命令优先通过 `.venv` 执行。若未激活虚拟环境，用 `.venv/Scripts/python -m <module>` 调用。
+所有命令通过 `uv run` 在项目 `.venv` 中执行（免激活）。也可 `source .venv/bin/activate` 后直接用 `python`。
 
 ```bash
-.venv/Scripts/pip install -r requirements.txt       # 安装依赖
-.venv/Scripts/pip install -r requirements-dev.txt   # 安装开发依赖
-.venv/Scripts/pip install -e .                      # 可编辑安装（src layout 必须）
-.venv/Scripts/python bot.py                         # 启动 bot
-.venv/Scripts/python -m pytest -n auto              # 并行运行测试
-.venv/Scripts/python -m pytest -m playwright        # 包含浏览器测试
-.venv/Scripts/ruff check .                          # Lint
+uv venv                                            # 创建虚拟环境（首次）
+uv pip install -r requirements-dev.txt             # 安装依赖（含运行时）
+uv pip install -e .                                # 可编辑安装（src layout 必须）
+uv run python bot.py                               # 启动 bot
+uv run python -m pytest -n auto                    # 并行运行测试
+uv run python -m pytest -m playwright              # 包含浏览器测试
+uv run ruff check .                                # Lint
 ```
 
 ## 架构速览
@@ -91,20 +84,17 @@ src/
 - `quickquip/adapters/nonebot/` — NoneBot2 handler 注册（直接 import `nonebot`，与业务层隔离）
 - `plugins/` — NoneBot2 插件入口 shim，每个文件只是 re-export 指向 `quickquip.*`
 
-开发环境需先运行 `pip install -e .`（可编辑安装），让 Python 能解析 `src/` 下的包。
+开发环境需先运行 `uv pip install -e .`（可编辑安装），让 Python 能解析 `src/` 下的包。
 
 消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → chain → text_rules → context_rules → timezone），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
 
 ## Commit 规范
 
-格式：`<type>(<scope>): <subject>`，Conventional Commits。多行 body 用 pwsh here-string：
+格式：`<type>(<scope>): <subject>`，Conventional Commits。多行 body 用多个 `-m` 分隔（每个 `-m` 为一段）：
 
-```pwsh
-git commit -m @"
-feat(llm): add proxy support to ProviderConfig
-
-Optional HTTP(S) proxy field; all HTTP requests route through ProxyHandler opener.
-"@
+```bash
+git commit -m "feat(llm): add proxy support to ProviderConfig" \
+  -m "Optional HTTP(S) proxy field; all HTTP requests route through ProxyHandler opener."
 ```
 
 - **type**：`feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `style` / `perf`
