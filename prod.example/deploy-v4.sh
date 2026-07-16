@@ -47,8 +47,10 @@ ssh_args=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=15 -o S
 
 run_step() {
     local desc="$1"; shift
-    if ! "$@"; then
-        echo "${R}FAILED: $desc (exit $?)${N}" >&2
+    local rc=0
+    "$@" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "${R}FAILED: $desc (exit $rc)${N}" >&2
         exit 1
     fi
 }
