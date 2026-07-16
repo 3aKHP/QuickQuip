@@ -223,13 +223,14 @@ claude_family = """
 - 角色扮演时不要加入过多的旁白性质的括号。
 """
 
-# 图片预处理前置层：将图片通过视觉模型转为文本描述，使非视觉模型（如 deepseek-chat）
-# 也能"理解"图片内容。provider_id 指向一个支持 vision 的 provider。
+# 图片预处理前置层：仅当主模型列入 non_vision_models 时调用视觉模型生成转述。
+# provider_id 和 model 必须指向支持图片输入的模型。单轮最多处理 5 张图片；
+# 任一图片识别失败时终止本轮，避免非视觉主模型在缺少图像信息时猜测。
 [image_preprocessing]
 enabled = false
 provider_id = ""        # 用于视觉理解的 provider ID（如 "openai-main"）
 model = ""              # 留空则用该 provider 的 default_model
-max_tokens = 300        # 单张图片描述最大 token 数
+max_tokens = 300        # 单张图片描述最大 token 数，运行时限制为 80-2048
 temperature = 0.3       # 低温度确保描述准确
 prompt = ""             # 自定义 system prompt，留空使用内置默认
 

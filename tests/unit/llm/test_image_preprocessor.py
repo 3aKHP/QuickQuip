@@ -6,6 +6,7 @@ import pytest
 
 from quickquip.llm.image_preprocessor import (
     DEFAULT_VISION_PROMPT,
+    MAX_IMAGES_PER_PREPROCESSING_REQUEST,
     VisionImagePreprocessor,
 )
 from quickquip.llm.provider import LLMRequest, LLMResponse, LLMProviderError
@@ -84,6 +85,21 @@ async def test_describe_multiple_images_parallel():
     assert all(r.success for r in result)
     assert [r.text_description for r in result] == ["图1", "图2", "图3"]
     assert len(stub.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_describe_images_enforces_request_cap():
+    stub = _StubVisionProvider()
+    v = VisionImagePreprocessor(provider_client=stub, model="gpt-4o")
+    urls = [
+        f"https://example.test/{index}.png"
+        for index in range(MAX_IMAGES_PER_PREPROCESSING_REQUEST + 2)
+    ]
+
+    result = await v.describe_images(urls)
+
+    assert len(result) == MAX_IMAGES_PER_PREPROCESSING_REQUEST
+    assert len(stub.requests) == MAX_IMAGES_PER_PREPROCESSING_REQUEST
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,8 @@ from quickquip.llm.provider import LLMRequest, LLMProviderError
 
 logger = logging.getLogger(__name__)
 
+MAX_IMAGES_PER_PREPROCESSING_REQUEST = 5
+
 # ── public types ──────────────────────────────────────────────────────
 
 
@@ -20,6 +22,7 @@ class ImageDescription:
     text_description: str
     success: bool
     error: str = ""
+    context_label: str = ""
 
 
 class ImagePreprocessor:
@@ -28,10 +31,8 @@ class ImagePreprocessor:
     Implementations can use OCR, a multimodal model, or any technique
     to produce text representations of image content.  The preprocessor
     runs BEFORE provider serialization, so the main chat LLM receives
-    text descriptions instead of (or in addition to) raw image URLs.
-
-    This enables non-multimodal LLMs to "see" images, and also allows
-    multimodal LLMs to benefit from structured pre-analysis.
+    text descriptions instead of raw image URLs. This enables
+    non-multimodal LLMs to "see" images.
     """
 
     async def describe_images(
@@ -107,14 +108,15 @@ class VisionImagePreprocessor(ImagePreprocessor):
             async with self._semaphore:
                 return await self._describe_single(url)
 
-        tasks = [_describe_one(url) for url in image_urls]
+        bounded_urls = image_urls[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
+        tasks = [_describe_one(url) for url in bounded_urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         descriptions: list[ImageDescription] = []
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 descriptions.append(ImageDescription(
-                    source_url=image_urls[i],
+                    source_url=bounded_urls[i],
                     text_description="",
                     success=False,
                     error=str(result),

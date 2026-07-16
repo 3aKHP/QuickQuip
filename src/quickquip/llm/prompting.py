@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,28 @@ from quickquip.llm.tools import (
 # to a passive/boredom trigger. Keeps multimodal token cost bounded regardless
 # of how image-heavy the recent window is.
 MAX_RECENT_CONTEXT_IMAGES = 5
+MAX_IMAGE_DESCRIPTION_CHARS = 4000
+MAX_TOTAL_IMAGE_DESCRIPTION_CHARS = 12000
+
+
+def collect_recent_image_urls(
+    recent_messages: Sequence[Mapping[str, object]] | None,
+    *,
+    max_trigger_context_messages: int,
+    max_recent_images: int = MAX_RECENT_CONTEXT_IMAGES,
+) -> list[str]:
+    if not recent_messages or max_recent_images <= 0:
+        return []
+
+    seen: set[str] = set()
+    collected: list[str] = []
+    for item in recent_messages[-max_trigger_context_messages:]:
+        for raw_url in item.get("image_urls", []):
+            url = str(raw_url).strip()
+            if url and url not in seen:
+                seen.add(url)
+                collected.append(url)
+    return list(reversed(collected[-max_recent_images:]))
 
 
 def format_participant_label(
@@ -461,14 +484,26 @@ def _build_scene_from_current_message(
 
     # Image pre-processing results as context lines
     if image_descriptions:
-        for desc in image_descriptions:
-            if hasattr(desc, 'success') and desc.success and hasattr(desc, 'text_description'):
-                speakers.append({
-                    "user_id": "",
-                    "sender_name": "图片解析",
-                    "canonical_name": "图片解析",
-                    "text": f"{desc.text_description}",
-                })
+        successful = [
+            desc
+            for desc in image_descriptions
+            if getattr(desc, "success", False) and str(getattr(desc, "text_description", "")).strip()
+        ]
+        per_description_budget = min(
+            MAX_IMAGE_DESCRIPTION_CHARS,
+            MAX_TOTAL_IMAGE_DESCRIPTION_CHARS // max(1, len(successful)),
+        )
+        for index, desc in enumerate(successful, 1):
+            description = str(desc.text_description).strip()
+            if len(description) > per_description_budget:
+                description = description[:per_description_budget].rstrip() + "\n[转述内容已截断]"
+            label = str(getattr(desc, "context_label", "")).strip() or f"图片 {index}"
+            speakers.append({
+                "user_id": "",
+                "sender_name": "视觉转述",
+                "canonical_name": "视觉转述",
+                "text": f"[{label}]\n{description}",
+            })
 
     # Current speaker (always last in the scene so the model knows who to answer)
     current_canonical = _resolve_canonical_name(identities, user_id, sender_name, "")
@@ -615,16 +650,14 @@ def build_messages(
         # provider's per-request cap, this keeps the newest recent images and
         # drops the oldest.  Duplicates across messages are skipped.
         if include_recent_images:
-            seen = set(pending_images)
-            collected: list[str] = []
-            for item in recent_slice:
-                for url in item.get("image_urls", []):
-                    url = url.strip()
-                    if url and url not in seen:
-                        seen.add(url)
-                        collected.append(url)
-            if collected:
-                pending_images.extend(reversed(collected[-max_recent_images:]))
+            recent_image_urls = collect_recent_image_urls(
+                recent_messages,
+                max_trigger_context_messages=max_trigger_context_messages,
+                max_recent_images=max_recent_images,
+            )
+            pending_images.extend(
+                url for url in recent_image_urls if url not in pending_images
+            )
 
     # Build current scene first, then merge any pending context into it.
     # This avoids consecutive role="user" messages and keeps the

@@ -27,7 +27,13 @@ from quickquip.common.sensitive_filter import (
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
-from quickquip.llm.image_preprocessor import ImagePreprocessor
+from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
+from quickquip.llm.image_routing import (
+    IMAGE_PREPROCESSING_FAILED_REPLY,
+    IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
+    match_image_descriptions,
+    plan_non_vision_images,
+)
 from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.prompting import (
     build_messages,
@@ -663,8 +669,25 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
-
         effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls, request_forward_image_urls)
+
+        image_plan = None
+        if is_non_vision:
+            image_plan = plan_non_vision_images(
+                image_urls=request_image_urls,
+                quoted_image_urls=request_quoted_image_urls,
+                forward_image_urls=request_forward_image_urls,
+                recent_messages=recent_messages,
+                include_recent_images=include_recent_images,
+                max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
+            )
+            if image_plan.error_reply:
+                return {
+                    "reply": image_plan.error_reply,
+                    "rate_limit_key": LLM_RULE_NAME,
+                    "rule_name": LLM_RULE_NAME,
+                    "llm_used": False,
+                }
 
         if effective_image_urls:
             sources: list[str] = []
@@ -680,27 +703,57 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 len(effective_image_urls), ", ".join(sources),
             )
 
-        image_descriptions = []
+        image_descriptions: list[ImageDescription] = []
         ok_count = 0
-        if self.image_preprocessor is not None and effective_image_urls:
-            image_descriptions = await self.image_preprocessor.describe_images(effective_image_urls)
-            ok_count = sum(1 for d in image_descriptions if d.success)
-            fail = len(image_descriptions) - ok_count
-            if fail:
+        if image_plan is not None and image_plan.candidates:
+            if self.image_preprocessor is None:
+                logger.error(
+                    "group=%s model=%s requires image preprocessing but no preprocessor is bound",
+                    chat_id,
+                    current_model,
+                )
+                return {
+                    "reply": IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
+                    "rate_limit_key": LLM_RULE_NAME,
+                    "rule_name": LLM_RULE_NAME,
+                    "llm_used": False,
+                    "provider_id": provider.id,
+                    "model": current_model,
+                }
+
+            raw_descriptions = await self.image_preprocessor.describe_images(
+                [candidate.url for candidate in image_plan.candidates]
+            )
+            description_match = match_image_descriptions(
+                image_plan.candidates,
+                raw_descriptions,
+            )
+            image_descriptions = description_match.descriptions
+            ok_count = len(image_descriptions)
+            if description_match.failed_urls:
                 logger.warning(
                     "group=%s preprocessor: %d ok, %d failed (%s)",
-                    chat_id, ok_count, fail,
-                    ", ".join(d.source_url for d in image_descriptions if not d.success),
+                    chat_id,
+                    ok_count,
+                    len(description_match.failed_urls),
+                    ", ".join(description_match.failed_urls),
                 )
-            else:
-                logger.info("group=%s preprocessor: all %d images described", chat_id, ok_count)
+                return {
+                    "reply": IMAGE_PREPROCESSING_FAILED_REPLY,
+                    "rate_limit_key": LLM_RULE_NAME,
+                    "rule_name": LLM_RULE_NAME,
+                    "llm_used": True,
+                    "provider_id": self.config.image_preprocessing.provider_id,
+                    "model": self.config.image_preprocessing.model,
+                }
+            logger.info("group=%s preprocessor: all %d images described", chat_id, ok_count)
 
-        if is_non_vision and effective_image_urls:
-            stripped_count = len(effective_image_urls)
-            extra = f" ({ok_count} described as text)" if ok_count else " (no preprocessing)"
+        if image_plan is not None and image_plan.candidates:
+            stripped_count = len(image_plan.candidates)
             logger.info(
-                "group=%s non-VLM strip: removed %d images from provider request%s",
-                chat_id, stripped_count, extra,
+                "group=%s non-VLM strip: replaced %d images with text descriptions",
+                chat_id,
+                stripped_count,
             )
             effective_image_urls = []
             request_image_urls = []

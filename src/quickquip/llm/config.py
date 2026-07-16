@@ -10,6 +10,8 @@ from quickquip.common.config_utils import as_bool, as_dict, expand_env_value
 
 logger = logging.getLogger(__name__)
 
+MAX_IMAGE_PREPROCESSING_TOKENS = 2048
+
 
 @dataclass(slots=True)
 class TriggerConfig:
@@ -621,7 +623,13 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             enabled=as_bool(image_preprocessing_raw.get("enabled", False), default=False),
             provider_id=str(image_preprocessing_raw.get("provider_id", "")).strip(),
             model=str(image_preprocessing_raw.get("model", "")).strip(),
-            max_tokens=max(80, int(image_preprocessing_raw.get("max_tokens", 300))),
+            max_tokens=max(
+                80,
+                min(
+                    int(image_preprocessing_raw.get("max_tokens", 300)),
+                    MAX_IMAGE_PREPROCESSING_TOKENS,
+                ),
+            ),
             temperature=float(image_preprocessing_raw.get("temperature", 0.3)),
             prompt=str(image_preprocessing_raw.get("prompt", "")).strip(),
         ),
