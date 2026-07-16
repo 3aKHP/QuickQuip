@@ -6,6 +6,12 @@
 
 （暂无）
 
+## [1.9.5] - 2026-07-17
+
+### 🐛 修复 (Fixed)
+
+- **部署脚本失败时如实上报退出码**：`prod.example/deploy-v4.sh` 的步骤执行器此前在任何失败场景都显示 `(exit 0)`（`!` 取反吞掉了真实退出码），现如实显示真实退出码（如 ssh/scp 连接失败为 255），避免掩盖部署故障的真实原因。
+
 ## [1.9.4] - 2026-07-14
 
 ### ✨ 新增 (Added)
@@ -602,7 +608,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.4...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.5...HEAD
+[1.9.5]: https://github.com/3aKHP/QuickQuip/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/3aKHP/QuickQuip/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/3aKHP/QuickQuip/compare/v1.9.2...v1.9.3
 [1.9.2]: https://github.com/3aKHP/QuickQuip/compare/v1.9.1...v1.9.2
