@@ -6,6 +6,13 @@
 
 （暂无）
 
+## [1.9.6] - 2026-07-17
+
+### 🐛 修复 (Fixed)
+
+- **LLM 图片理解按主模型能力正确路由**：视觉主模型直接接收原图，不再重复调用前置视觉模型并混入转述文本，消除双重图像解释导致的严重幻觉；非视觉主模型现在会转述被动唤醒携带的近期图片，并为当前、引用、转发和近期图片保留来源编号。前置识别缺失、返回空内容或任一图片失败时会终止本轮，避免主模型在没有图像信息时猜测。
+- **前置图片识别增加资源边界**：单轮最多处理 5 张图片，单图转述最多输出 2048 token，注入主模型的转述文本同时受单图和总字符上限保护；健康检查会拒绝把已声明的非视觉模型配置成前置视觉模型。
+
 ## [1.9.5] - 2026-07-17
 
 ### 🐛 修复 (Fixed)
@@ -608,7 +615,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.5...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.6...HEAD
+[1.9.6]: https://github.com/3aKHP/QuickQuip/compare/v1.9.5...v1.9.6
 [1.9.5]: https://github.com/3aKHP/QuickQuip/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/3aKHP/QuickQuip/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/3aKHP/QuickQuip/compare/v1.9.2...v1.9.3

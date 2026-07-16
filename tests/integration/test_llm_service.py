@@ -622,8 +622,9 @@ async def test_auto_memory_per_chat_override_beats_global_default(
 # ── image preprocessor integration tests ──────────────────────────────
 
 
-async def test_image_preprocessor_called_with_images(wired_service, patch_provider_builder):
+async def test_image_preprocessor_called_for_non_vision_model(wired_service, patch_provider_builder):
     from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
     stub_preprocessor = StubImagePreprocessor()
     wired_service.image_preprocessor = stub_preprocessor
 
@@ -715,6 +716,7 @@ async def test_vision_model_keeps_images_in_request(wired_service, patch_provide
             image_urls_found = True
             break
     assert image_urls_found, "Expected image_urls preserved for VLM model"
+    assert stub_preprocessor.call_count == 0
 
 
 async def test_non_vision_strips_even_when_preprocessor_fails(wired_service, patch_provider_builder):
@@ -737,7 +739,7 @@ async def test_non_vision_strips_even_when_preprocessor_fails(wired_service, pat
     stub_client = StubProviderClient()
     patch_provider_builder(lambda provider: stub_client)
 
-    await wired_service.generate_reply(
+    result = await wired_service.generate_reply(
         group_id=1001,
         user_id=2002,
         sender_name="测试用户",
@@ -747,12 +749,8 @@ async def test_non_vision_strips_even_when_preprocessor_fails(wired_service, pat
     )
 
     request = stub_client.last_request
-    # Non-VLM should strip images even when preprocessor fails
-    for msg in request.messages:
-        if msg.role == "user":
-            assert msg.image_urls == [], (
-                f"Non-VLM must strip images regardless of preprocessor success, got {msg.image_urls}"
-            )
+    assert request is None
+    assert result["reply"].startswith("前置图片识别失败")
 
 
 async def test_non_vision_strips_without_preprocessor(wired_service, patch_provider_builder):
@@ -766,7 +764,7 @@ async def test_non_vision_strips_without_preprocessor(wired_service, patch_provi
     stub_client = StubProviderClient()
     patch_provider_builder(lambda provider: stub_client)
 
-    await wired_service.generate_reply(
+    result = await wired_service.generate_reply(
         group_id=1001,
         user_id=2002,
         sender_name="测试用户",
@@ -776,9 +774,68 @@ async def test_non_vision_strips_without_preprocessor(wired_service, patch_provi
     )
 
     request = stub_client.last_request
-    for msg in request.messages:
-        if msg.role == "user":
-            assert msg.image_urls == [], "Non-VLM without preprocessor must still strip images"
+    assert request is None
+    assert result["reply"].startswith("当前模型无法直接读取图片")
+
+
+async def test_non_vision_preprocesses_recent_context_images(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="刚才那张图是什么意思",
+        recent_messages=[
+            {
+                "user_id": "3003",
+                "sender_name": "发图者",
+                "text": "[图片]",
+                "image_urls": ["https://example.test/recent.png"],
+            }
+        ],
+        include_recent_images=True,
+    )
+
+    assert stub_preprocessor.last_urls == ["https://example.test/recent.png"]
+    request = stub_client.last_request
+    assert request is not None
+    assert all(not msg.image_urls for msg in request.messages if msg.role == "user")
+    assert "[近期上下文图片 1]" in request.messages[-1].content
+    assert "stub description of https://example.test/recent.png" in request.messages[-1].content
+
+
+async def test_non_vision_rejects_too_many_primary_images(wired_service, patch_provider_builder):
+    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+
+    provider = wired_service.config.providers["openai-main"]
+    provider.non_vision_models.append("gpt-alt")
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="看这些图",
+        image_urls=[f"https://example.test/{index}.png" for index in range(6)],
+        recent_messages=[],
+    )
+
+    assert result["reply"].startswith("一次最多识别 5 张图片")
+    assert stub_preprocessor.call_count == 0
+    assert stub_client.last_request is None
 
 
 async def test_non_vision_strips_quoted_images(wired_service, patch_provider_builder):

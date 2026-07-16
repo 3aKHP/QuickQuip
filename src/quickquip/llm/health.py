@@ -234,18 +234,25 @@ async def build_health_report(
 
     img_cfg = config.image_preprocessing
     img_provider = config.providers.get(img_cfg.provider_id) if img_cfg.provider_id else None
+    img_model = img_cfg.model or (img_provider.default_model if img_provider else "")
+    image_model_declared_non_vision = bool(
+        img_provider and img_model in img_provider.non_vision_models
+    )
     if not img_cfg.enabled:
         image_status = "ok"
         image_summary = "图片预处理未启用"
     elif img_provider is None:
         image_status = "warn"
         image_summary = f"图片预处理 provider 不存在：{img_cfg.provider_id}"
+    elif image_model_declared_non_vision:
+        image_status = "warn"
+        image_summary = f"图片预处理模型被标记为非视觉模型：{img_model}"
     elif not image_preprocessor_bound:
         image_status = "warn"
         image_summary = "图片预处理已配置但运行时未绑定"
     else:
         image_status = "ok"
-        image_summary = f"图片预处理已绑定：{img_cfg.provider_id} / {img_cfg.model or img_provider.default_model}"
+        image_summary = f"图片预处理已绑定：{img_cfg.provider_id} / {img_model}"
     items.append(
         HealthCheckItem(
             "image_preprocessing",
@@ -255,7 +262,8 @@ async def build_health_report(
                 "enabled": img_cfg.enabled,
                 "provider_id": img_cfg.provider_id,
                 "provider_declared": img_provider is not None,
-                "model": img_cfg.model or (img_provider.default_model if img_provider else ""),
+                "model": img_model,
+                "model_declared_non_vision": image_model_declared_non_vision,
                 "runtime_bound": image_preprocessor_bound,
             },
         )

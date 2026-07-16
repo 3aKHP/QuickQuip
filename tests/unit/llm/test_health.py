@@ -117,6 +117,34 @@ provider_id = "missing-provider"
     assert items["image_preprocessing"].details["provider_declared"] is False
 
 
+async def test_health_rejects_non_vision_preprocessor_model(llm_service):
+    from tests.fixtures.configs import MIN_LLM_CONFIG_TOML
+
+    config = MIN_LLM_CONFIG_TOML.replace(
+        'models = ["gpt-test", "gpt-alt"]',
+        'models = ["gpt-test", "gpt-alt"]\nnon_vision_models = ["gpt-test"]',
+    )
+    llm_service.config_path.write_text(
+        config
+        + """
+
+[image_preprocessing]
+enabled = true
+provider_id = "openai-main"
+model = "gpt-test"
+""",
+        encoding="utf-8",
+    )
+    llm_service.reload_config()
+
+    report = await llm_service.build_health_report(10001)
+    items = {item.name: item for item in report.items}
+
+    assert items["image_preprocessing"].status == "warn"
+    assert items["image_preprocessing"].details["model_declared_non_vision"] is True
+    assert items["image_preprocessing"].details["runtime_bound"] is False
+
+
 def test_reload_config_refreshes_sensitive_filter(llm_service, monkeypatch):
     calls = 0
 

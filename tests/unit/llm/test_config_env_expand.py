@@ -93,3 +93,23 @@ def test_env_expand_falls_back_to_defaults(tmp_path: Path, monkeypatch):
     loaded = llm_runtime_module.load_llm_config(config_path)
     assert loaded.runtime.enabled is True
     assert loaded.mcp.servers[0].mounts == ["/data/one:/mnt/one:ro"]
+
+
+def test_image_preprocessing_max_tokens_is_capped(tmp_path: Path):
+    config_path = tmp_path / "llm.toml"
+    config_path.write_text(
+        CONFIG_WITH_ENV_VARS
+        + """
+
+[image_preprocessing]
+enabled = true
+provider_id = "openai-main"
+model = "gpt-test"
+max_tokens = 16384
+""",
+        encoding="utf-8",
+    )
+
+    loaded = llm_runtime_module.load_llm_config(config_path)
+
+    assert loaded.image_preprocessing.max_tokens == 2048

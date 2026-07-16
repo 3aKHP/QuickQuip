@@ -304,10 +304,20 @@ class ToolMixin:
             self.image_preprocessor = None
             return
 
+        vision_model = img_cfg.model or vis_provider_cfg.default_model
+        if vision_model in vis_provider_cfg.non_vision_models:
+            logger.warning(
+                "image_preprocessing model %r is declared non-vision by provider %r",
+                vision_model,
+                img_cfg.provider_id,
+            )
+            self.image_preprocessor = None
+            return
+
         vis_client = service_module.build_provider_client(replace(vis_provider_cfg, stream_enabled=False))
         self.image_preprocessor = VisionImagePreprocessor(
             provider_client=vis_client,
-            model=img_cfg.model or vis_provider_cfg.default_model,
+            model=vision_model,
             max_tokens=img_cfg.max_tokens,
             temperature=img_cfg.temperature,
             prompt=img_cfg.prompt,

@@ -148,6 +148,21 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。
 
+### `[image_preprocessing]` — 非视觉模型图片转述
+
+当当前主模型出现在所属 provider 的 `non_vision_models` 中时，运行时先调用指定视觉模型，将图片转成带来源和序号的文本，再交给主模型。视觉主模型直接接收原图，不调用该前置层。
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `enabled` | 启用非视觉模型图片转述 | `false` |
+| `provider_id` | 提供视觉识别能力的 provider ID | `""` |
+| `model` | 视觉模型 ID；留空使用该 provider 的默认模型 | `""` |
+| `max_tokens` | 单张图片转述输出上限，运行时限制为 80-2048 | `300` |
+| `temperature` | 图片转述温度 | `0.3` |
+| `prompt` | 自定义转述 system prompt；留空使用内置提示 | `""` |
+
+单轮最多处理 5 张当前、引用或转发图片。被动唤醒需要近期图片时，会用剩余名额选择最新图片。任一图片转述失败时，本轮不会调用非视觉主模型，用户会收到可重试提示。
+
 ### `[tools]` — 工具调用
 
 | 键 | 说明 | 默认值 |

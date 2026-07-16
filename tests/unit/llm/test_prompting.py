@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from quickquip.llm.image_preprocessor import ImageDescription
 from quickquip.llm.prompting import (
+    MAX_IMAGE_DESCRIPTION_CHARS,
     _build_scene_from_current_message,
     _build_scene_from_recent_buffer,
     _build_scenes_from_history,
@@ -360,6 +362,52 @@ def test_build_messages_images_attached():
         current_sender_name="A", current_user_id="1",
     )
     assert "img.png" in msgs[-1].image_urls
+
+
+def test_build_messages_labels_image_descriptions_by_source():
+    msgs = build_messages(
+        prompt="第二张是什么", image_urls=[],
+        history=[], recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="A", current_user_id="1",
+        image_descriptions=[
+            ImageDescription(
+                source_url="quoted.png",
+                text_description="一张聊天截图",
+                success=True,
+                context_label="引用消息图片 1",
+            ),
+            ImageDescription(
+                source_url="forward.png",
+                text_description="一张风景照",
+                success=True,
+                context_label="转发消息图片 1",
+            ),
+        ],
+    )
+
+    assert "[引用消息图片 1]\n一张聊天截图" in msgs[-1].content
+    assert "[转发消息图片 1]\n一张风景照" in msgs[-1].content
+
+
+def test_build_messages_truncates_large_image_descriptions():
+    msgs = build_messages(
+        prompt="看图", image_urls=[],
+        history=[], recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="A", current_user_id="1",
+        image_descriptions=[
+            ImageDescription(
+                source_url="large.png",
+                text_description="x" * (MAX_IMAGE_DESCRIPTION_CHARS + 100),
+                success=True,
+                context_label="当前消息图片 1",
+            ),
+        ],
+    )
+
+    assert "x" * (MAX_IMAGE_DESCRIPTION_CHARS + 1) not in msgs[-1].content
+    assert "[转述内容已截断]" in msgs[-1].content
 
 
 def test_build_messages_recent_images_off_by_default():
