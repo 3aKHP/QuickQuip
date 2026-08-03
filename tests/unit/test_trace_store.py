@@ -185,6 +185,70 @@ def test_trace_store_migration_is_serialized_across_instances(tmp_path):
     assert {"agent_loop_id", "loop_sequence", "response_raw_text"} <= columns
 
 
+class _RetryingConnection:
+    def __init__(self, *, failures: int):
+        self.failures = failures
+        self.wal_attempts = 0
+        self.statements: list[str] = []
+        self.errors: list[sqlite3.OperationalError] = []
+        self.closed = False
+        self.row_factory = None
+
+    def execute(self, statement: str):
+        self.statements.append(statement)
+        if statement == "PRAGMA journal_mode=WAL":
+            self.wal_attempts += 1
+            if self.wal_attempts <= self.failures:
+                error = sqlite3.OperationalError("database is locked")
+                error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+                self.errors.append(error)
+                raise error
+        return self
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_trace_store_retries_wal_setup_with_a_bounded_fast_failure_window(
+    monkeypatch, tmp_path
+):
+    connection = _RetryingConnection(failures=2)
+    sleeps: list[float] = []
+    monkeypatch.setattr(trace.sqlite3, "connect", lambda *args, **kwargs: connection)
+    monkeypatch.setattr(trace.time, "sleep", sleeps.append)
+
+    result = trace.LLMTraceStore(tmp_path / "trace.db")._connect()
+
+    assert result is connection
+    assert connection.wal_attempts == 3
+    assert sleeps == [trace._SQLITE_BUSY_RETRY_DELAY_SECONDS] * 2
+    assert connection.statements[0] == "PRAGMA busy_timeout=0"
+    assert connection.statements[-2:] == [
+        f"PRAGMA busy_timeout={trace._SQLITE_BUSY_TIMEOUT_MS}",
+        "PRAGMA synchronous=NORMAL",
+    ]
+    assert not connection.closed
+
+
+def test_trace_store_closes_connection_when_wal_retries_are_exhausted(
+    monkeypatch, tmp_path
+):
+    connection = _RetryingConnection(failures=3)
+    monkeypatch.setattr(trace, "_SQLITE_BUSY_RETRY_ATTEMPTS", 3)
+    monkeypatch.setattr(trace.sqlite3, "connect", lambda *args, **kwargs: connection)
+    monkeypatch.setattr(trace.time, "sleep", lambda _delay: None)
+
+    try:
+        trace.LLMTraceStore(tmp_path / "trace.db")._connect()
+    except sqlite3.OperationalError as error:
+        assert error is connection.errors[-1]
+    else:
+        raise AssertionError("expected WAL setup to exhaust its retries")
+
+    assert connection.wal_attempts == 3
+    assert connection.closed
+
+
 def test_trace_store_expires_stale_pending_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(trace.time, "monotonic", lambda: 1.0)
     store = trace.LLMTraceStore(tmp_path / "trace.db")

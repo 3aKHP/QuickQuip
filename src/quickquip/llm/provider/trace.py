@@ -26,6 +26,10 @@ _TRACE_RETENTION_DAYS = 14
 _LEGACY_TRACE_GLOB = "quickquip_trace_????-??-??.jsonl"
 _TRACE_STALE_AFTER = timedelta(hours=1)
 _TRACE_STALE_CHECK_INTERVAL_SECONDS = 60
+_SQLITE_BUSY_TIMEOUT_MS = 10_000
+_SQLITE_BUSY_RETRY_DELAY_SECONDS = 0.1
+_SQLITE_BUSY_RETRY_ATTEMPTS = 100
+_SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 
 def _utc_now() -> str:
@@ -120,11 +124,31 @@ class LLMTraceStore:
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.path, timeout=10)
+        conn = sqlite3.connect(
+            self.path,
+            timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000,
+        )
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA busy_timeout=10000")
+        try:
+            conn.execute("PRAGMA busy_timeout=0")
+            for attempt in range(_SQLITE_BUSY_RETRY_ATTEMPTS):
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as error:
+                    error_code = getattr(error, "sqlite_errorcode", None)
+                    if (
+                        error_code is None
+                        or error_code & 0xFF not in _SQLITE_RETRYABLE_LOCK_CODES
+                        or attempt == _SQLITE_BUSY_RETRY_ATTEMPTS - 1
+                    ):
+                        raise
+                    time.sleep(_SQLITE_BUSY_RETRY_DELAY_SECONDS)
+            conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception:
+            conn.close()
+            raise
         try:
             self.path.chmod(0o600)
         except OSError:
