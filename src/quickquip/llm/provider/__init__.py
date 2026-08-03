@@ -29,8 +29,8 @@ from quickquip.llm.provider.base import (
 
 # Public trace entry points
 from quickquip.llm.provider.trace import (
-    clear_trace_entries,
-    get_trace_entries,
+    collect_trace_calls,
+    trace_store,
 )
 
 # Factory
@@ -62,6 +62,6 @@ __all__ = [
     "build_provider_client",
     "sanitize_gemini_schema",
     "strip_leading_reasoning_content",
-    "get_trace_entries",
-    "clear_trace_entries",
+    "collect_trace_calls",
+    "trace_store",
 ]

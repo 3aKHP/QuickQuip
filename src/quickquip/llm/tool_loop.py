@@ -9,6 +9,7 @@ from quickquip.common.sensitive_filter import (
     log_hits as _log_sensitive_hits,
 )
 from quickquip.llm.provider import LLMProviderError, LLMRequest, _is_retryable
+from quickquip.llm.provider.trace import trace_agent_loop
 from quickquip.llm.tools import LLMConversationMessage, LLMToolResult
 
 
@@ -47,6 +48,7 @@ async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int
     raise last_exc  # unreachable, but satisfies type checker
 
 
+@trace_agent_loop
 async def run_tool_call_loop(
     *,
     provider,

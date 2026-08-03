@@ -153,9 +153,10 @@ data/
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
 ├── web_admin_sessions.db   # Web Admin 会话记录
 ├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
+├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
 ├── awakening_boredom_groups.json # 已启用无聊唤醒的群列表
 ├── daily_msgs/             # 每日消息原始收集（{group_id}/{date}.jsonl）
-├── logs/                   # loguru 文件日志（保留 14 天）+ 共享 LLM trace JSONL
+├── logs/                   # loguru 文件日志（保留 14 天）
 ├── fonts/                  # 词云字体文件（手动放置）
 ├── tieba/
 │   ├── pool.json           # 贴吧帖子池

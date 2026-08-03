@@ -23,7 +23,7 @@ QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发
 
 如果后续需要把外部工具后端扩展为 MCP，单独查看 [mcp-integration.md](mcp-integration.md)。当前文档只描述已经落在项目内的 LLM 与工具调用实现。
 
-LLM 运行时的请求/响应 trace 会在 `LLM_TRACE_FLAG_FILE` 触发时同步写入共享 `data/logs/quickquip_trace.jsonl`，Web Admin 的 `LLM Trace` 页面和诊断页会读取这份共享 trace，而不只看当前进程内的临时缓存。
+LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message 或 Gemini GenerateContent 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
 
 ---
 

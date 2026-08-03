@@ -159,7 +159,7 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 - **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
 - **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）
 - **实时日志** — 当前运行日志流、连接状态与当前文件下载
-- **LLM Trace** — 共享 trace 流、开关控制与最近 trace 条目
+- **LLM Trace** — 按 HTTP 调用索引 QuickQuip 与 LLM Provider 之间的完整 JSON 请求/响应文本，支持持久开关、实时状态更新、分页和按需加载正文
 - **日志归档** — 历史轮转日志浏览、预览与下载
 - **定时任务** — APScheduler 定时任务面板（job ID、trigger、next_run、last_run 时间与状态、错误详情）
 - **审计** — Web Admin 变更审计日志（按操作类型、目标类型、操作人、日期范围等条件过滤，分页浏览）
@@ -169,6 +169,12 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 敏感词过滤器没有独立标签页。后台提供只读接口 `GET /ops/api/sensitive-filter/status`，LLM 健康检查也会汇总过滤器加载状态和词表数量。`config/sensitive_words.toml` 属于高敏部署文件，只在服务器本地维护，Web Admin 不提供内容读取或在线编辑入口。
 
 诊断页的"探活 Provider"按钮会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动全量巡检；群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
+
+LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Tool Loop 内的调用归入一个明显分组。请求正文是交给 HTTP 客户端的 UTF-8 JSON 序列化文本，详情页可在格式化 JSON 和传输原文之间切换；普通响应保留解析前的服务端 JSON 文本；流式响应完整消费 SSE 后，按 OpenAI、Claude 或 Gemini 协议重建为一份接近非流式结构的完整响应对象。详情页默认展示组合 JSON，也允许管理员切换到 SSE 传输原文。主列表和实时更新只传输调用元数据，选择记录后才读取请求正文、响应正文和 Header。故障切换、重试和 Tool Loop 后续轮次分别保留 HTTP 明细，并通过 Agent Loop ID 与组内序号关联。
+
+该页面面向最高权限管理员，正文和 Header 不做脱敏。页面会明确提示其中可能包含 API 凭证、系统提示和用户内容；建议只在排障期间开启采集。记录保存在 `data/llm_trace.db`，默认保留 14 天。
+
+从使用 JSONL Trace 的版本升级时，`data/logs/quickquip_trace_YYYY-MM-DD.jsonl` 历史记录不会导入新的调用索引；Web Admin 访问 Trace 存储或产生新调用记录时，运行时仍会按同一 14 天保留期清理这些旧文件。
 
 ### Bot 执行动作队列
 

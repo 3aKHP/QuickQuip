@@ -44,6 +44,19 @@ class TestOpenAIStreaming:
         resp = OpenAIProviderClient._assemble_stream_response(OPENAI_REASONING_CHUNKS, "gpt-5.4")
         assert resp.text == "最终答复"
 
+    def test_trace_reconstructs_complete_chat_completion(self):
+        combined = OpenAIProviderClient._combine_stream_trace(
+            OPENAI_TOOL_CHUNKS,
+            "gpt-5.4",
+        )
+        assert combined["object"] == "chat.completion"
+        assert "delta" not in json.dumps(combined)
+        choice = combined["choices"][0]
+        assert choice["finish_reason"] == "tool_calls"
+        tool = choice["message"]["tool_calls"][0]
+        assert tool["function"]["name"] == "search_web"
+        assert json.loads(tool["function"]["arguments"]) == {"query": "test"}
+
 
 class TestStripLeadingReasoningContent:
     def test_think_block(self):
@@ -70,6 +83,17 @@ class TestClaudeStreaming:
         assert resp.tool_calls[0].name == "search_web"
         assert json.loads(resp.tool_calls[0].arguments_json) == {"query": "test"}
 
+    def test_trace_reconstructs_complete_message(self):
+        combined = ClaudeProviderClient._combine_stream_trace(
+            CLAUDE_TEXT_CHUNKS,
+            "claude-sonnet-4-6",
+        )
+        assert combined["type"] == "message"
+        assert combined["content"] == [{"type": "text", "text": "你好世界"}]
+        assert combined["stop_reason"] == "end_turn"
+        assert combined["usage"] == {"input_tokens": 15, "output_tokens": 8}
+        assert "_sse_event" not in json.dumps(combined)
+
 
 class TestGeminiStreaming:
     def test_text_only(self):
@@ -86,6 +110,16 @@ class TestGeminiStreaming:
         assert len(resp.tool_calls) == 1
         assert resp.tool_calls[0].name == "search_web"
         assert json.loads(resp.tool_calls[0].arguments_json) == {"query": "test"}
+
+    def test_trace_reconstructs_complete_generate_content(self):
+        combined = GeminiProviderClient._combine_stream_trace(
+            GEMINI_TEXT_CHUNKS,
+            "gemini-pro",
+        )
+        candidate = combined["candidates"][0]
+        assert candidate["content"]["parts"] == [{"text": "你好世界"}]
+        assert candidate["finishReason"] == "STOP"
+        assert combined["usageMetadata"]["candidatesTokenCount"] == 4
 
     def test_thought_parts_are_filtered(self):
         resp = GeminiProviderClient._assemble_stream_response(

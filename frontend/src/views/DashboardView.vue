@@ -1,6 +1,10 @@
 <template>
   <div class="dash-view">
-    <UiPageHeader title="概览" subtitle="QuickQuip 当前运行状态一览" />
+    <UiPageHeader title="概览" subtitle="QuickQuip 当前运行状态一览">
+      <template #actions>
+        <UiTag variant="info">v{{ quickQuipVersion }}</UiTag>
+      </template>
+    </UiPageHeader>
 
     <p v-if="error" class="error">{{ error }}</p>
     <UiLoading v-if="loading" />
@@ -121,6 +125,7 @@ import { NAV_ITEMS, NAV_SECTIONS } from '../config/nav'
 const data = ref<DashboardData | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+const quickQuipVersion = __QUICKQUIP_VERSION__
 
 function fmt(n: number): string {
   if (n >= 10000) return (n / 10000).toFixed(1) + '万'
