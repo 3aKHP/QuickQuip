@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import sqlite3
+import threading
 
 from quickquip.llm.provider import trace
 
@@ -127,6 +129,74 @@ def test_trace_store_migrates_first_release_schema(tmp_path):
     assert detail["loop_sequence"] == 1
     assert detail["response_raw_text"] == ""
     assert detail["response_raw_bytes"] == 0
+
+
+def test_trace_store_migration_is_serialized_across_instances(tmp_path):
+    path = tmp_path / "trace.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE llm_http_traces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                call_id TEXT NOT NULL UNIQUE,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                provider_id TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                model TEXT NOT NULL,
+                stream INTEGER NOT NULL,
+                method TEXT NOT NULL,
+                url TEXT NOT NULL,
+                request_headers TEXT NOT NULL,
+                request_text TEXT NOT NULL,
+                request_bytes INTEGER NOT NULL,
+                response_status INTEGER,
+                response_headers TEXT,
+                response_text TEXT,
+                response_bytes INTEGER NOT NULL DEFAULT 0,
+                duration_ms REAL,
+                state TEXT NOT NULL,
+                error_type TEXT,
+                error_message TEXT
+            );
+            CREATE TABLE llm_http_trace_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
+    ready = threading.Barrier(2)
+
+    def migrate() -> int:
+        ready.wait()
+        return trace.LLMTraceStore(path).count_calls()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: migrate(), range(2)))
+
+    assert results == [0, 0]
+    with sqlite3.connect(path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_http_traces)")}
+    assert {"agent_loop_id", "loop_sequence", "response_raw_text"} <= columns
+
+
+def test_trace_store_expires_stale_pending_calls(tmp_path):
+    store = trace.LLMTraceStore(tmp_path / "trace.db")
+    call_id = _begin(store)
+    with sqlite3.connect(store.path) as conn:
+        conn.execute(
+            "UPDATE llm_http_traces SET started_at = ? WHERE call_id = ?",
+            ("2000-01-01T00:00:00+00:00", call_id),
+        )
+
+    calls = store.list_calls()
+
+    assert calls[0]["state"] == "error"
+    assert calls[0]["error_type"] == "StaleTrace"
+    assert [event["state"] for event in store.list_events()] == ["pending", "error"]
 
 
 async def test_forced_capture_records_without_global_flag(monkeypatch, tmp_path):

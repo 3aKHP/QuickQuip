@@ -8,6 +8,7 @@ migration.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator
 from unittest.mock import MagicMock
@@ -114,6 +115,33 @@ async def test_sse_done_marker_terminates(client, monkeypatch):
     events = await client._post_stream_sse("http://x", {}, {})
     # Only the first event was collected; the [DONE] line broke the loop.
     assert len(events) == 1
+    assert events[0]["choices"][0]["delta"]["content"] == "hi"
+
+
+async def test_sse_done_returns_without_waiting_for_connection_close(
+    client, monkeypatch
+):
+    never = asyncio.Event()
+
+    class KeepAliveResponse(_FakeStreamResponse):
+        async def aiter_text(self) -> AsyncIterator[str]:
+            yield (
+                'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+                "data: [DONE]\n\n"
+            )
+            await never.wait()
+
+    response = KeepAliveResponse([])
+
+    def fake_stream(self, method, url, **kwargs):
+        return _FakeStreamContext(response)
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    events = await asyncio.wait_for(
+        client._post_stream_sse("http://x", {}, {}),
+        timeout=0.2,
+    )
+
     assert events[0]["choices"][0]["delta"]["content"] == "hi"
 
 
@@ -247,6 +275,69 @@ async def test_stream_trace_is_one_complete_combined_json_document(
     assert combined["choices"][0]["message"]["content"] == "你好"
     assert not isinstance(combined, list)
     assert "data:" not in detail["response_text"]
-    assert "data:" in detail["response_raw_text"]
+    assert detail["response_raw_text"] == "".join(chunks)
     assert detail["response_raw_bytes"] == len(detail["response_raw_text"].encode("utf-8"))
     assert detail["state"] == "success"
+
+
+async def test_stream_trace_reconstruction_failure_does_not_fail_call(
+    client, monkeypatch, tmp_path
+):
+    store = trace.LLMTraceStore(tmp_path / "trace.db")
+    monkeypatch.setattr(trace, "trace_store", store)
+    chunks = [
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+        "data: [DONE]\n\n",
+    ]
+
+    def fake_stream(self, method, url, **kwargs):
+        return _FakeStreamContext(_FakeStreamResponse(chunks))
+
+    def fail_reconstruction(events, model):
+        raise ValueError("synthetic reconstruction failure")
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    monkeypatch.setattr(client, "_combine_stream_trace", fail_reconstruction)
+
+    with trace.collect_trace_calls(force=True) as call_ids:
+        events = await client._post_stream_sse("http://x", {}, {"model": "m"})
+
+    assert events[0]["choices"][0]["delta"]["content"] == "ok"
+    detail = store.get_call(call_ids[0])
+    assert detail is not None
+    assert detail["state"] == "success"
+    assert detail["error_type"] == "ValueError"
+    assert detail["response_text"] == ""
+    assert "data:" in detail["response_raw_text"]
+
+
+async def test_stream_cancellation_finishes_pending_trace(
+    client, monkeypatch, tmp_path
+):
+    store = trace.LLMTraceStore(tmp_path / "trace.db")
+    monkeypatch.setattr(trace, "trace_store", store)
+    started = asyncio.Event()
+    never = asyncio.Event()
+
+    class BlockingResponse(_FakeStreamResponse):
+        async def aiter_text(self) -> AsyncIterator[str]:
+            yield 'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            started.set()
+            await never.wait()
+
+    def fake_stream(self, method, url, **kwargs):
+        return _FakeStreamContext(BlockingResponse([]))
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    with trace.collect_trace_calls(force=True) as call_ids:
+        task = asyncio.create_task(client._post_stream_sse("http://x", {}, {}))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    detail = store.get_call(call_ids[0])
+    assert detail is not None
+    assert detail["state"] == "error"
+    assert detail["error_type"] == "CancelledError"
+    assert "partial" in detail["response_raw_text"]

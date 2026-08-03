@@ -7,6 +7,7 @@ helpers used across all three provider implementations.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 from dataclasses import dataclass, field
 import json
@@ -98,6 +99,53 @@ def _parse_sse_text(raw: str) -> list[dict[str, Any]]:
     else:
         flush()
     return events
+
+
+def _take_sse_line(buffer: str) -> tuple[str, str] | None:
+    """Take one complete SSE line while preserving its original line ending."""
+
+    for index, char in enumerate(buffer):
+        if char == "\n":
+            return buffer[: index + 1], buffer[index + 1 :]
+        if char != "\r":
+            continue
+        if index + 1 == len(buffer):
+            return None
+        end = index + 2 if buffer[index + 1] == "\n" else index + 1
+        return buffer[:end], buffer[end:]
+    return None
+
+
+def _is_sse_done_line(line: str) -> bool:
+    content = line.rstrip("\r\n")
+    return content.startswith("data:") and content[5:].strip() == "[DONE]"
+
+
+class _SSETextCapture:
+    """Accumulate exact SSE text while recognizing its terminal data line."""
+
+    def __init__(self) -> None:
+        self._raw_parts: list[str] = []
+        self._pending = ""
+        self._done = False
+
+    def feed(self, chunk: str) -> bool:
+        self._pending += chunk
+        while line_parts := _take_sse_line(self._pending):
+            line, self._pending = line_parts
+            self._raw_parts.append(line)
+            if _is_sse_done_line(line):
+                blank_parts = _take_sse_line(self._pending)
+                if blank_parts is not None and not blank_parts[0].rstrip("\r\n"):
+                    self._raw_parts.append(blank_parts[0])
+                self._pending = ""
+                self._done = True
+                return True
+        return False
+
+    def text(self) -> str:
+        pending = "" if self._done else self._pending
+        return "".join(self._raw_parts) + pending
 
 
 @dataclass(slots=True)
@@ -411,6 +459,21 @@ class BaseProviderClient:
                     error_message=f"响应非 JSON：{raw[:120]}",
                 )
                 raise LLMProviderError(f"响应非 JSON：{raw[:120]}") from exc
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                finish_http_trace(
+                    call_id,
+                    state="error",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text=raw,
+                    response_bytes=len(raw.encode("utf-8")),
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type="CancelledError",
+                    error_message="HTTP request was cancelled",
+                )
+            )
+            raise
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
             await finish_http_trace(
@@ -496,8 +559,30 @@ class BaseProviderClient:
                         await response.aread()
                         raw = response.text
                     response.raise_for_status()
-                    chunks = [chunk async for chunk in response.aiter_text()]
-                    raw = "".join(chunks)
+                    capture = _SSETextCapture()
+                    try:
+                        async for chunk in response.aiter_text():
+                            if capture.feed(chunk):
+                                break
+                    finally:
+                        raw = capture.text()
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                finish_http_trace(
+                    call_id,
+                    state="error",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=len(raw.encode("utf-8")),
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type="CancelledError",
+                    error_message="HTTP stream was cancelled",
+                )
+            )
+            raise
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
             await finish_http_trace(
@@ -539,14 +624,15 @@ class BaseProviderClient:
             )
             raise
 
+        events = _parse_sse_text(raw)
         try:
-            events = _parse_sse_text(raw)
             combined = self._combine_stream_trace(events, _trace_model(url, payload))
             combined_response = json.dumps(combined, ensure_ascii=False, indent=2)
         except Exception as exc:
+            logger.exception("LLM HTTP trace response reconstruction failed")
             await finish_http_trace(
                 call_id,
-                state="error",
+                state="success",
                 response_status=response_status,
                 response_headers=response_headers,
                 response_text="",
@@ -557,7 +643,7 @@ class BaseProviderClient:
                 error_type=type(exc).__name__,
                 error_message=str(exc),
             )
-            raise
+            return events
         await finish_http_trace(
             call_id,
             state="success",

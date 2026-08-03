@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import sqlite3
 import threading
+import time
 from typing import Iterator
 from uuid import uuid4
 import logging
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 _TRACE_FLAG_FILE = os.getenv("LLM_TRACE_FLAG_FILE", "")
 _TRACE_RETENTION_DAYS = 14
+_TRACE_STALE_AFTER = timedelta(hours=1)
+_TRACE_STALE_CHECK_INTERVAL_SECONDS = 60
 
 
 def _utc_now() -> str:
@@ -101,6 +104,8 @@ class LLMTraceStore:
         self._schema_lock = threading.Lock()
         self._cleanup_lock = threading.Lock()
         self._last_cleanup_date: str | None = None
+        self._stale_lock = threading.Lock()
+        self._last_stale_check = 0.0
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -170,6 +175,7 @@ class LLMTraceStore:
                     ON llm_http_trace_events(trace_id, event_id);
                     """
                 )
+                conn.execute("BEGIN IMMEDIATE")
                 event_columns = {
                     row["name"]
                     for row in conn.execute(
@@ -364,6 +370,7 @@ class LLMTraceStore:
         after_id: int | None = None,
     ) -> list[dict[str, object]]:
         self._ensure_schema()
+        self._expire_stale_pending_if_due()
         limit = max(1, min(int(limit), 200))
         where = ""
         params: list[object] = []
@@ -395,6 +402,7 @@ class LLMTraceStore:
 
     def get_call(self, call_id: str) -> dict[str, object] | None:
         self._ensure_schema()
+        self._expire_stale_pending_if_due()
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM llm_http_traces WHERE call_id = ?",
@@ -418,6 +426,7 @@ class LLMTraceStore:
         limit: int = 100,
     ) -> list[dict[str, object]]:
         self._ensure_schema()
+        self._expire_stale_pending_if_due()
         limit = max(1, min(int(limit), 500))
         where = ""
         params: list[object] = []
@@ -517,6 +526,46 @@ class LLMTraceStore:
                 )
                 conn.execute("DELETE FROM llm_http_traces WHERE started_at < ?", (cutoff,))
             self._last_cleanup_date = today
+
+    def _expire_stale_pending_if_due(self) -> None:
+        checked_at = time.monotonic()
+        if checked_at - self._last_stale_check < _TRACE_STALE_CHECK_INTERVAL_SECONDS:
+            return
+        with self._stale_lock:
+            checked_at = time.monotonic()
+            if checked_at - self._last_stale_check < _TRACE_STALE_CHECK_INTERVAL_SECONDS:
+                return
+            cutoff = (datetime.now(timezone.utc) - _TRACE_STALE_AFTER).isoformat()
+            completed_at = _utc_now()
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                rows = conn.execute(
+                    """
+                    SELECT id FROM llm_http_traces
+                    WHERE state = 'pending' AND started_at < ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                for row in rows:
+                    cursor = conn.execute(
+                        """
+                        UPDATE llm_http_traces
+                        SET completed_at = ?, state = 'error',
+                            error_type = 'StaleTrace',
+                            error_message = 'Trace remained pending for more than one hour'
+                        WHERE id = ? AND state = 'pending'
+                        """,
+                        (completed_at, int(row["id"])),
+                    )
+                    if cursor.rowcount:
+                        conn.execute(
+                            """
+                            INSERT INTO llm_http_trace_events (trace_id, state, created_at)
+                            VALUES (?, 'error', ?)
+                            """,
+                            (int(row["id"]), completed_at),
+                        )
+            self._last_stale_check = checked_at
 
 
 trace_store = LLMTraceStore()

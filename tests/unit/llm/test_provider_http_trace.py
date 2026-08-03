@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
+import pytest
 
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.provider import BaseProviderClient, trace
@@ -119,3 +121,45 @@ async def test_http_fallback_attempts_are_separate_correlated_calls(
     assert second["response_status"] == 200
     assert second["url"].startswith("https://fallback.example/")
     assert first["call_id"] != second["call_id"]
+
+
+async def test_non_stream_cancellation_finishes_pending_trace(monkeypatch, tmp_path):
+    store = trace.LLMTraceStore(tmp_path / "trace.db")
+    monkeypatch.setattr(trace, "trace_store", store)
+    started = asyncio.Event()
+    never = asyncio.Event()
+
+    class BlockingClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url: str, **kwargs):
+            started.set()
+            await never.wait()
+
+    monkeypatch.setattr(provider_base.httpx, "AsyncClient", BlockingClient)
+    client = BaseProviderClient(_config())
+
+    with trace.collect_trace_calls(force=True) as call_ids:
+        task = asyncio.create_task(
+            client._post_json(
+                "https://primary.example/v1/chat/completions",
+                {},
+                {"model": "m"},
+            )
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    detail = store.get_call(call_ids[0])
+    assert detail is not None
+    assert detail["state"] == "error"
+    assert detail["error_type"] == "CancelledError"
