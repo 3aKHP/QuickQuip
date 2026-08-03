@@ -116,7 +116,7 @@ class LLMTraceStore:
         self._cleanup_lock = threading.Lock()
         self._last_cleanup_date: str | None = None
         self._stale_lock = threading.Lock()
-        self._last_stale_check = 0.0
+        self._last_stale_check: float | None = None
 
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -562,11 +562,17 @@ class LLMTraceStore:
 
     def _expire_stale_pending_if_due(self) -> None:
         checked_at = time.monotonic()
-        if checked_at - self._last_stale_check < _TRACE_STALE_CHECK_INTERVAL_SECONDS:
+        if (
+            self._last_stale_check is not None
+            and checked_at - self._last_stale_check < _TRACE_STALE_CHECK_INTERVAL_SECONDS
+        ):
             return
         with self._stale_lock:
             checked_at = time.monotonic()
-            if checked_at - self._last_stale_check < _TRACE_STALE_CHECK_INTERVAL_SECONDS:
+            if (
+                self._last_stale_check is not None
+                and checked_at - self._last_stale_check < _TRACE_STALE_CHECK_INTERVAL_SECONDS
+            ):
                 return
             cutoff = (datetime.now(timezone.utc) - _TRACE_STALE_AFTER).isoformat()
             completed_at = _utc_now()
