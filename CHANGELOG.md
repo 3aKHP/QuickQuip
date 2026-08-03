@@ -6,6 +6,23 @@
 
 （暂无）
 
+## [1.9.7] - 2026-08-03
+
+### ✨ 新增 (Added)
+
+- **Web Admin 展示运行版本**：概览页新增 QuickQuip 版本信息，版本号由项目元数据统一提供，便于部署核验与问题排查。
+
+### 🔧 变更 (Changed)
+
+- **重写 Web Admin 的 LLM Trace**：按 Agent Tool Loop 分组并保留每次 HTTP 尝试，可按需查看格式化 JSON、实际传输内容和请求头；流式响应按 Provider 协议重建为完整响应对象，同时保留可选 SSE 原文，并移除旧版独立 Trace 页面。
+
+### 🐛 修复 (Fixed)
+
+- **恢复 Docker 发布镜像的前端构建**：前端构建阶段现在会复制项目版本源文件，既避免发布镜像构建失败，也确保 Web Admin 嵌入正确版本号。
+- **完善 LLM Trace 日志维护**：迁移到 SQLite 后，旧版 JSONL 文件继续遵守 14 天保留策略；临时 Trace 存储使用隔离的维护日志，读取路径也会触发每日清理，避免测试或自定义存储误删真实运行数据。
+- **增强 LLM Trace 数据库并发初始化**：多个进程或实例同时首次启用 SQLite WAL 时会有界重试瞬时锁冲突，避免迁移阶段偶发 `database is locked`。
+- **首次检查即可恢复中断任务**：Web Admin 动作队列在进程启动后的第一次检查中即可回收超时停留在 `running` 状态的任务，不再受进程运行时长影响。
+
 ## [1.9.6] - 2026-07-17
 
 ### 🐛 修复 (Fixed)
@@ -615,7 +632,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.6...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.7...HEAD
+[1.9.7]: https://github.com/3aKHP/QuickQuip/compare/v1.9.6...v1.9.7
 [1.9.6]: https://github.com/3aKHP/QuickQuip/compare/v1.9.5...v1.9.6
 [1.9.5]: https://github.com/3aKHP/QuickQuip/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/3aKHP/QuickQuip/compare/v1.9.3...v1.9.4
