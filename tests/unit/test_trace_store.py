@@ -185,7 +185,8 @@ def test_trace_store_migration_is_serialized_across_instances(tmp_path):
     assert {"agent_loop_id", "loop_sequence", "response_raw_text"} <= columns
 
 
-def test_trace_store_expires_stale_pending_calls(tmp_path):
+def test_trace_store_expires_stale_pending_calls(monkeypatch, tmp_path):
+    monkeypatch.setattr(trace.time, "monotonic", lambda: 1.0)
     store = trace.LLMTraceStore(tmp_path / "trace.db")
     call_id = _begin(store)
     with sqlite3.connect(store.path) as conn:
