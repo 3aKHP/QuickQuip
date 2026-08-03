@@ -215,11 +215,8 @@ def test_trace_store_cleanup_removes_only_expired_legacy_jsonl(tmp_path):
     os.utime(retained, (now - 13 * 86400, now - 13 * 86400))
     os.utime(unrelated, (now - 15 * 86400, now - 15 * 86400))
 
-    store = trace.LLMTraceStore(
-        tmp_path / "trace.db",
-        legacy_trace_dir=legacy_dir,
-    )
-    _begin(store)
+    store = trace.LLMTraceStore(tmp_path / "trace.db")
+    assert store.count_calls() == 0
 
     assert not expired.exists()
     assert retained.exists()

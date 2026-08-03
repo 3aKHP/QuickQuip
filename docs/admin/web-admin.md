@@ -174,7 +174,7 @@ LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Too
 
 该页面面向最高权限管理员，正文和 Header 不做脱敏。页面会明确提示其中可能包含 API 凭证、系统提示和用户内容；建议只在排障期间开启采集。记录保存在 `data/llm_trace.db`，默认保留 14 天。
 
-从使用 JSONL Trace 的版本升级时，`data/logs/quickquip_trace_YYYY-MM-DD.jsonl` 历史记录不会导入新的调用索引；运行时仍会按同一 14 天保留期清理这些旧文件。
+从使用 JSONL Trace 的版本升级时，`data/logs/quickquip_trace_YYYY-MM-DD.jsonl` 历史记录不会导入新的调用索引；Web Admin 访问 Trace 存储或产生新调用记录时，运行时仍会按同一 14 天保留期清理这些旧文件。
 
 ### Bot 执行动作队列
 

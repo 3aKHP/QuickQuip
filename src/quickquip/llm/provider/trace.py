@@ -103,10 +103,14 @@ class LLMTraceStore:
         self,
         path: str | Path = LLM_TRACE_DB_PATH,
         *,
-        legacy_trace_dir: str | Path = LOGS_DIR,
+        legacy_trace_dir: str | Path | None = None,
     ):
         self.path = Path(path)
-        self.legacy_trace_dir = Path(legacy_trace_dir)
+        self.legacy_trace_dir = (
+            Path(legacy_trace_dir)
+            if legacy_trace_dir is not None
+            else self.path.parent / "logs"
+        )
         self._schema_ready = False
         self._schema_lock = threading.Lock()
         self._cleanup_lock = threading.Lock()
@@ -377,6 +381,7 @@ class LLMTraceStore:
         after_id: int | None = None,
     ) -> list[dict[str, object]]:
         self._ensure_schema()
+        self._cleanup_if_due()
         self._expire_stale_pending_if_due()
         limit = max(1, min(int(limit), 200))
         where = ""
@@ -409,6 +414,7 @@ class LLMTraceStore:
 
     def get_call(self, call_id: str) -> dict[str, object] | None:
         self._ensure_schema()
+        self._cleanup_if_due()
         self._expire_stale_pending_if_due()
         with self._connect() as conn:
             row = conn.execute(
@@ -433,6 +439,7 @@ class LLMTraceStore:
         limit: int = 100,
     ) -> list[dict[str, object]]:
         self._ensure_schema()
+        self._cleanup_if_due()
         self._expire_stale_pending_if_due()
         limit = max(1, min(int(limit), 500))
         where = ""
@@ -484,6 +491,7 @@ class LLMTraceStore:
 
     def latest_event_id(self) -> int:
         self._ensure_schema()
+        self._cleanup_if_due()
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(event_id), 0) AS event_id FROM llm_http_trace_events"
@@ -492,6 +500,7 @@ class LLMTraceStore:
 
     def count_calls(self) -> int:
         self._ensure_schema()
+        self._cleanup_if_due()
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) AS count FROM llm_http_traces").fetchone()
         return int(row["count"] if row else 0)
@@ -521,7 +530,8 @@ class LLMTraceStore:
         with self._cleanup_lock:
             if self._last_cleanup_date == today:
                 return
-            cutoff = (now - timedelta(days=_TRACE_RETENTION_DAYS)).isoformat()
+            retention = timedelta(days=_TRACE_RETENTION_DAYS)
+            cutoff = (now - retention).isoformat()
             with self._connect() as conn:
                 conn.execute(
                     """
@@ -533,9 +543,7 @@ class LLMTraceStore:
                     (cutoff,),
                 )
                 conn.execute("DELETE FROM llm_http_traces WHERE started_at < ?", (cutoff,))
-            self._cleanup_legacy_trace_files(
-                now.timestamp() - _TRACE_RETENTION_DAYS * 86400
-            )
+            self._cleanup_legacy_trace_files((now - retention).timestamp())
             self._last_cleanup_date = today
 
     def _cleanup_legacy_trace_files(self, cutoff_timestamp: float) -> None:
@@ -593,7 +601,7 @@ class LLMTraceStore:
             self._last_stale_check = checked_at
 
 
-trace_store = LLMTraceStore()
+trace_store = LLMTraceStore(legacy_trace_dir=LOGS_DIR)
 
 
 async def begin_http_trace(**values: object) -> str | None:
