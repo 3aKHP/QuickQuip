@@ -195,6 +195,110 @@ class OpenAIProviderClient(BaseProviderClient):
             output_tokens=output_tokens,
         )
 
+    @staticmethod
+    def _combine_stream_trace(
+        chunks: list[dict[str, Any]],
+        fallback_model: str,
+    ) -> dict[str, Any]:
+        top: dict[str, Any] = {
+            "object": "chat.completion",
+            "model": fallback_model,
+        }
+        choices: dict[int, dict[str, Any]] = {}
+        usage: dict[str, Any] | None = None
+
+        for chunk in chunks:
+            for key in ("id", "created", "model", "system_fingerprint", "service_tier"):
+                if chunk.get(key) is not None:
+                    top[key] = chunk[key]
+            if isinstance(chunk.get("object"), str):
+                top["object"] = str(chunk["object"]).removesuffix(".chunk")
+            if isinstance(chunk.get("usage"), dict):
+                usage = chunk["usage"]
+
+            for raw_choice in chunk.get("choices") or []:
+                if not isinstance(raw_choice, dict):
+                    continue
+                index = int(raw_choice.get("index", 0) or 0)
+                acc = choices.setdefault(
+                    index,
+                    {
+                        "role": "assistant",
+                        "content": [],
+                        "reasoning_content": [],
+                        "refusal": [],
+                        "tool_calls": {},
+                        "finish_reason": None,
+                        "logprobs": None,
+                    },
+                )
+                delta = raw_choice.get("delta") or {}
+                if not isinstance(delta, dict):
+                    delta = {}
+                if delta.get("role"):
+                    acc["role"] = str(delta["role"])
+                for key in ("content", "reasoning_content", "refusal"):
+                    if delta.get(key) is not None:
+                        acc[key].append(str(delta[key]))
+                for raw_tool in delta.get("tool_calls") or []:
+                    if not isinstance(raw_tool, dict):
+                        continue
+                    tool_index = int(raw_tool.get("index", 0) or 0)
+                    tool = acc["tool_calls"].setdefault(
+                        tool_index,
+                        {"id": "", "type": "function", "name": "", "arguments": ""},
+                    )
+                    if raw_tool.get("id"):
+                        tool["id"] = str(raw_tool["id"])
+                    if raw_tool.get("type"):
+                        tool["type"] = str(raw_tool["type"])
+                    function = raw_tool.get("function") or {}
+                    if isinstance(function, dict):
+                        if function.get("name"):
+                            tool["name"] = str(function["name"])
+                        if function.get("arguments") is not None:
+                            tool["arguments"] += str(function["arguments"])
+                if raw_choice.get("finish_reason") is not None:
+                    acc["finish_reason"] = raw_choice["finish_reason"]
+                if raw_choice.get("logprobs") is not None:
+                    acc["logprobs"] = raw_choice["logprobs"]
+
+        combined_choices: list[dict[str, Any]] = []
+        for index, acc in sorted(choices.items()):
+            message: dict[str, Any] = {
+                "role": acc["role"],
+                "content": "".join(acc["content"]) if acc["content"] else None,
+            }
+            if acc["reasoning_content"]:
+                message["reasoning_content"] = "".join(acc["reasoning_content"])
+            if acc["refusal"]:
+                message["refusal"] = "".join(acc["refusal"])
+            if acc["tool_calls"]:
+                message["tool_calls"] = [
+                    {
+                        "id": tool["id"] or f"tool_{tool_index + 1}",
+                        "type": tool["type"],
+                        "function": {
+                            "name": tool["name"],
+                            "arguments": tool["arguments"],
+                        },
+                    }
+                    for tool_index, tool in sorted(acc["tool_calls"].items())
+                ]
+            combined_choices.append(
+                {
+                    "index": index,
+                    "message": message,
+                    "logprobs": acc["logprobs"],
+                    "finish_reason": acc["finish_reason"],
+                }
+            )
+
+        top["choices"] = combined_choices
+        if usage is not None:
+            top["usage"] = usage
+        return top
+
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         data = await self._post_json_with_fallback(url, headers, payload)

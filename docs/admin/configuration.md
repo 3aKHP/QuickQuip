@@ -49,7 +49,7 @@
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `LLM_TRACE_FLAG_FILE` | 触发 LLM 请求/响应 trace 的 flag 文件路径；文件存在时会记录共享 trace，供 Web Admin 的 LLM Trace 页面读取 | — |
+| `LLM_TRACE_FLAG_FILE` | LLM HTTP Trace 持久开关文件路径；文件存在时按调用记录完整请求/响应 JSON 文本到 `data/llm_trace.db`，供 Web Admin 的 LLM Trace 页面按需读取 | — |
 
 ### 贴吧
 

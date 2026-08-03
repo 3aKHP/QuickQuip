@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import httpx
@@ -20,9 +21,8 @@ import httpx
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
 from quickquip.llm.provider.trace import (
-    _record_trace,
-    _trace_active,
-    _trace_log,
+    begin_http_trace,
+    finish_http_trace,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,62 @@ _RETRYABLE_HTTP_PREFIXES = ("HTTP 429", "HTTP 5", "网络错误")
 def _is_retryable(exc: LLMProviderError) -> bool:
     msg = str(exc)
     return any(msg.startswith(prefix) for prefix in _RETRYABLE_HTTP_PREFIXES)
+
+
+def _headers_to_text(headers: Any) -> str:
+    raw = getattr(headers, "raw", None)
+    if isinstance(raw, (list, tuple)):
+        return "\r\n".join(
+            f"{bytes(name).decode('latin-1')}: {bytes(value).decode('latin-1')}"
+            for name, value in raw
+        )
+    items = headers.items() if hasattr(headers, "items") else []
+    return "\r\n".join(f"{name}: {value}" for name, value in items)
+
+
+def _trace_model(url: str, payload: dict[str, Any]) -> str:
+    model = payload.get("model")
+    if model:
+        return str(model)
+    match = re.search(r"/models/([^/:?]+):", url)
+    return match.group(1) if match else ""
+
+
+def _parse_sse_text(raw: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    current_event = ""
+    current_data_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_event, current_data_lines
+        if current_data_lines:
+            joined = " ".join(current_data_lines)
+            try:
+                data = json.loads(joined)
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                if current_event:
+                    data["_sse_event"] = current_event
+                events.append(data)
+        current_event = ""
+        current_data_lines = []
+
+    for raw_line in raw.splitlines():
+        line = raw_line.rstrip("\r")
+        if line.startswith("event:"):
+            current_event = line[6:].strip()
+        elif line.startswith("data:"):
+            data_str = line[5:].strip()
+            if data_str == "[DONE]":
+                flush()
+                break
+            current_data_lines.append(data_str)
+        elif line == "":
+            flush()
+    else:
+        flush()
+    return events
 
 
 @dataclass(slots=True)
@@ -305,93 +361,212 @@ class BaseProviderClient:
     async def _post_stream_sse_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
         return await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
 
+    def _combine_stream_trace(
+        self,
+        chunks: list[dict[str, Any]],
+        fallback_model: str,
+    ) -> dict[str, Any]:
+        raise NotImplementedError(
+            f"{type(self).__name__} must reconstruct its streamed response"
+        )
+
     async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
-        body = json.dumps(payload).encode("utf-8")
-        trace = _trace_active()
-        if trace:
-            _trace_log(
-                f">>> REQUEST [{self.config.id}]\n"
-                + json.dumps(payload, ensure_ascii=False, indent=2)
-            )
-            _record_trace("request", self.config.id, False, json.dumps(payload, ensure_ascii=False, indent=2))
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request_headers = _headers_to_text(headers)
+        started = time.monotonic()
+        call_id = await begin_http_trace(
+            provider_id=self.config.id,
+            protocol=self.config.protocol,
+            model=_trace_model(url, payload),
+            stream=False,
+            method="POST",
+            url=url,
+            request_headers=request_headers,
+            request_text=body.decode("utf-8"),
+            request_bytes=len(body),
+        )
+        response_status: int | None = None
+        response_headers = ""
+        raw = ""
 
         try:
             async with httpx.AsyncClient(**self._client_kwargs()) as client:
                 response = await client.post(url, content=body, headers=headers)
-                response.raise_for_status()
+                response_status = response.status_code
+                response_headers = _headers_to_text(response.headers)
                 raw = response.text
+                response.raise_for_status()
             try:
                 result = json.loads(raw)
             except json.JSONDecodeError as exc:
+                await finish_http_trace(
+                    call_id,
+                    state="error",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text=raw,
+                    response_bytes=len(raw.encode("utf-8")),
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type=type(exc).__name__,
+                    error_message=f"响应非 JSON：{raw[:120]}",
+                )
                 raise LLMProviderError(f"响应非 JSON：{raw[:120]}") from exc
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=exc.response.status_code,
+                response_headers=_headers_to_text(exc.response.headers),
+                response_text=detail,
+                response_bytes=len(detail.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=f"HTTP {exc.response.status_code} {detail[:240]}",
+            )
             raise LLMProviderError(f"HTTP {exc.response.status_code} {detail[:240]}") from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
-            raise LLMProviderError(f"网络错误：{exc}") from exc
-
-        if trace:
-            _trace_log(
-                f"<<< RESPONSE [{self.config.id}]\n"
-                + json.dumps(result, ensure_ascii=False, indent=2)
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=response_status,
+                response_headers=response_headers,
+                response_text=raw,
+                response_bytes=len(raw.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
             )
-            _record_trace("response", self.config.id, False, json.dumps(result, ensure_ascii=False, indent=2))
+            raise LLMProviderError(f"网络错误：{exc}") from exc
+        except LLMProviderError:
+            raise
+        except Exception as exc:
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=response_status,
+                response_headers=response_headers,
+                response_text=raw,
+                response_bytes=len(raw.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
+
+        await finish_http_trace(
+            call_id,
+            state="success",
+            response_status=response_status,
+            response_headers=response_headers,
+            response_text=raw,
+            response_bytes=len(raw.encode("utf-8")),
+            duration_ms=(time.monotonic() - started) * 1000,
+        )
         return result
 
     async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {**headers, "accept": "text/event-stream"}
-        trace = _trace_active()
-        if trace:
-            _trace_log(
-                f">>> REQUEST (stream) [{self.config.id}]\n"
-                + json.dumps(payload, ensure_ascii=False, indent=2)
-            )
-            _record_trace("request", self.config.id, True, json.dumps(payload, ensure_ascii=False, indent=2))
+        started = time.monotonic()
+        call_id = await begin_http_trace(
+            provider_id=self.config.id,
+            protocol=self.config.protocol,
+            model=_trace_model(url, payload),
+            stream=True,
+            method="POST",
+            url=url,
+            request_headers=_headers_to_text(headers),
+            request_text=body.decode("utf-8"),
+            request_bytes=len(body),
+        )
 
-        events: list[dict[str, Any]] = []
-        current_event = ""
-        current_data_lines: list[str] = []
+        raw = ""
+        response_status: int | None = None
+        response_headers = ""
         try:
             async with httpx.AsyncClient(**self._client_kwargs(stream_read=True)) as client:
                 async with client.stream("POST", url, content=body, headers=headers) as response:
+                    response_status = response.status_code
+                    response_headers = _headers_to_text(response.headers)
                     # Read the error body before raise_for_status so the HTTPStatusError
                     # handler can access exc.response.text (streamed responses are not
                     # pre-read; accessing .text on an unread stream raises ResponseNotRead).
                     if response.status_code >= 400:
                         await response.aread()
+                        raw = response.text
                     response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = raw_line.rstrip("\r")
-                        if line.startswith("event:"):
-                            current_event = line[6:].strip()
-                        elif line.startswith("data:"):
-                            data_str = line[5:].strip()
-                            if data_str == "[DONE]":
-                                break
-                            current_data_lines.append(data_str)
-                        elif line == "":
-                            if current_data_lines:
-                                joined = " ".join(current_data_lines)
-                                try:
-                                    data = json.loads(joined)
-                                    if current_event:
-                                        data["_sse_event"] = current_event
-                                    events.append(data)
-                                except json.JSONDecodeError:
-                                    pass
-                            current_event = ""
-                            current_data_lines = []
+                    chunks = [chunk async for chunk in response.aiter_text()]
+                    raw = "".join(chunks)
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=exc.response.status_code,
+                response_headers=_headers_to_text(exc.response.headers),
+                response_text=detail,
+                response_bytes=len(detail.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=f"HTTP {exc.response.status_code} {detail[:240]}",
+            )
             raise LLMProviderError(f"HTTP {exc.response.status_code} {detail[:240]}") from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
-            raise LLMProviderError(f"网络错误：{exc}") from exc
-
-        if trace:
-            _trace_log(
-                f"<<< RESPONSE (stream) [{self.config.id}]\n"
-                + json.dumps(events, ensure_ascii=False, indent=2)
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=response_status,
+                response_headers=response_headers,
+                response_text=raw,
+                response_bytes=len(raw.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
             )
-            _record_trace("response", self.config.id, True, json.dumps(events, ensure_ascii=False, indent=2))
+            raise LLMProviderError(f"网络错误：{exc}") from exc
+        except Exception as exc:
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=response_status,
+                response_headers=response_headers,
+                response_text=raw,
+                response_bytes=len(raw.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
+
+        try:
+            events = _parse_sse_text(raw)
+            combined = self._combine_stream_trace(events, _trace_model(url, payload))
+            combined_response = json.dumps(combined, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            await finish_http_trace(
+                call_id,
+                state="error",
+                response_status=response_status,
+                response_headers=response_headers,
+                response_text="",
+                response_bytes=0,
+                response_raw_text=raw,
+                response_raw_bytes=len(raw.encode("utf-8")),
+                duration_ms=(time.monotonic() - started) * 1000,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+            raise
+        await finish_http_trace(
+            call_id,
+            state="success",
+            response_status=response_status,
+            response_headers=response_headers,
+            response_text=combined_response,
+            response_bytes=len(combined_response.encode("utf-8")),
+            response_raw_text=raw,
+            response_raw_bytes=len(raw.encode("utf-8")),
+            duration_ms=(time.monotonic() - started) * 1000,
+        )
         return events

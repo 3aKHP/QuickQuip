@@ -1,172 +1,554 @@
-"""LLM request/response tracing infrastructure.
-
-Extracted from the former monolithic ``provider.py``. Provides on-disk
-jsonl trace logging (gated by an optional flag file) plus an in-memory
-ring buffer for fallback reads.
-
-Tracing is toggleable at runtime: set the ``LLM_TRACE_FLAG_FILE`` env
-var to a path; while that file exists, provider clients log full
-payloads. The public entry points are :func:`get_trace_entries` /
-:func:`clear_trace_entries` (consumed by the Web Admin diagnostics page).
-
-Module-level state (``_TRACE_FLAG_FILE``, ``_TRACE_DIR``,
-``_TRACE_LOG_LINES``, ``_LAST_TRACE_CLEANUP_DATE``) is intentionally
-kept here rather than in a config object so that
-``tests/unit/test_trace_store.py`` can ``monkeypatch.setattr(trace, ...)``
-the individual attributes.
-"""
+"""Indexed HTTP text tracing for LLM provider calls."""
 from __future__ import annotations
 
-from collections import deque
-import datetime
-import json
-import logging
+import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from functools import wraps
 import os
-import time as _time
 from pathlib import Path
+import sqlite3
+import threading
+from typing import Iterator
+from uuid import uuid4
+import logging
 
-from quickquip.common.paths import LOGS_DIR
+from quickquip.common.paths import LLM_TRACE_DB_PATH
+
 
 logger = logging.getLogger(__name__)
 
-try:
-    from loguru import logger as _loguru_logger
-    def _trace_log(msg: str) -> None:
-        _loguru_logger.opt(depth=1).info(msg)
-except ImportError:
-    def _trace_log(msg: str) -> None:  # type: ignore[misc]
-        print(msg, flush=True)
-
-# Optional path to a flag file that enables LLM request/response tracing.
-# Set via LLM_TRACE_FLAG_FILE env var. When the file exists, full payloads
-# and raw responses are logged at DEBUG level.
-_TRACE_FLAG_FILE: str = os.getenv("LLM_TRACE_FLAG_FILE", "")
-_TRACE_DIR: Path = LOGS_DIR
-_TRACE_MEMORY_LIMIT = 200
+_TRACE_FLAG_FILE = os.getenv("LLM_TRACE_FLAG_FILE", "")
 _TRACE_RETENTION_DAYS = 14
-_LAST_TRACE_CLEANUP_DATE: str | None = None
 
 
-def _trace_active() -> bool:
-    return bool(_TRACE_FLAG_FILE and os.path.exists(_TRACE_FLAG_FILE))
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-_TRACE_LOG_LINES: deque[dict[str, object]] = deque(maxlen=200)
+@dataclass(slots=True)
+class TraceCapture:
+    """Collect provider call IDs for one explicitly observed operation."""
+
+    force: bool = False
+    call_ids: list[str] = field(default_factory=list)
 
 
-def _daily_trace_path() -> Path:
-    return _TRACE_DIR / f"quickquip_trace_{datetime.date.today().isoformat()}.jsonl"
+@dataclass(slots=True)
+class AgentLoopTrace:
+    """Identify and order all HTTP attempts belonging to one agent loop."""
+
+    loop_id: str = field(default_factory=lambda: uuid4().hex)
+    sequence: int = 0
 
 
-def _cleanup_old_traces() -> None:
-    """Remove trace files older than _TRACE_RETENTION_DAYS, throttled to once per day."""
-    global _LAST_TRACE_CLEANUP_DATE
-    today = datetime.date.today().isoformat()
-    if _LAST_TRACE_CLEANUP_DATE == today:
+_TRACE_CAPTURE: ContextVar[TraceCapture | None] = ContextVar(
+    "quickquip_llm_trace_capture",
+    default=None,
+)
+_AGENT_LOOP_TRACE: ContextVar[AgentLoopTrace | None] = ContextVar(
+    "quickquip_llm_agent_loop_trace",
+    default=None,
+)
+
+
+@contextmanager
+def collect_trace_calls(*, force: bool = False) -> Iterator[list[str]]:
+    """Collect call IDs in the current task so diagnostics can load their traces."""
+
+    capture = TraceCapture(force=force)
+    token = _TRACE_CAPTURE.set(capture)
+    try:
+        yield capture.call_ids
+    finally:
+        _TRACE_CAPTURE.reset(token)
+
+
+def trace_agent_loop(func):
+    """Give all provider calls made by an async agent loop one shared boundary."""
+
+    @wraps(func)
+    async def wrapped(*args, **kwargs):
+        if _AGENT_LOOP_TRACE.get() is not None:
+            return await func(*args, **kwargs)
+        token = _AGENT_LOOP_TRACE.set(AgentLoopTrace())
+        try:
+            return await func(*args, **kwargs)
+        finally:
+            _AGENT_LOOP_TRACE.reset(token)
+
+    return wrapped
+
+
+def trace_active() -> bool:
+    """Return whether global or operation-scoped HTTP tracing is active."""
+
+    capture = _TRACE_CAPTURE.get()
+    return bool(
+        (capture is not None and capture.force)
+        or (_TRACE_FLAG_FILE and os.path.exists(_TRACE_FLAG_FILE))
+    )
+
+
+class LLMTraceStore:
+    """Persist indexed LLM HTTP text traces without loading payloads into listings."""
+
+    def __init__(self, path: str | Path = LLM_TRACE_DB_PATH):
+        self.path = Path(path)
+        self._schema_ready = False
+        self._schema_lock = threading.Lock()
+        self._cleanup_lock = threading.Lock()
+        self._last_cleanup_date: str | None = None
+
+    def _connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        try:
+            self.path.chmod(0o600)
+        except OSError:
+            pass
+        return conn
+
+    def _ensure_schema(self) -> None:
+        if self._schema_ready:
+            return
+        with self._schema_lock:
+            if self._schema_ready:
+                return
+            with self._connect() as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS llm_http_traces (
+                        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                        call_id          TEXT NOT NULL UNIQUE,
+                        agent_loop_id    TEXT NOT NULL,
+                        loop_sequence    INTEGER NOT NULL,
+                        started_at       TEXT NOT NULL,
+                        completed_at     TEXT,
+                        provider_id      TEXT NOT NULL,
+                        protocol         TEXT NOT NULL,
+                        model            TEXT NOT NULL,
+                        stream           INTEGER NOT NULL,
+                        method           TEXT NOT NULL,
+                        url              TEXT NOT NULL,
+                        request_headers  TEXT NOT NULL,
+                        request_text     TEXT NOT NULL,
+                        request_bytes    INTEGER NOT NULL,
+                        response_status  INTEGER,
+                        response_headers TEXT,
+                        response_text    TEXT,
+                        response_bytes   INTEGER NOT NULL DEFAULT 0,
+                        response_raw_text TEXT,
+                        response_raw_bytes INTEGER NOT NULL DEFAULT 0,
+                        duration_ms      REAL,
+                        state            TEXT NOT NULL,
+                        error_type       TEXT,
+                        error_message    TEXT
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_llm_http_traces_started
+                    ON llm_http_traces(started_at DESC, id DESC);
+
+                    CREATE INDEX IF NOT EXISTS idx_llm_http_traces_provider
+                    ON llm_http_traces(provider_id, id DESC);
+
+                    CREATE TABLE IF NOT EXISTS llm_http_trace_events (
+                        event_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                        trace_id   INTEGER NOT NULL,
+                        state      TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(trace_id) REFERENCES llm_http_traces(id) ON DELETE CASCADE
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_llm_http_trace_events_trace
+                    ON llm_http_trace_events(trace_id, event_id);
+                    """
+                )
+                event_columns = {
+                    row["name"]
+                    for row in conn.execute(
+                        "PRAGMA table_info(llm_http_trace_events)"
+                    ).fetchall()
+                }
+                if "state" not in event_columns:
+                    conn.execute(
+                        "ALTER TABLE llm_http_trace_events ADD COLUMN state TEXT"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE llm_http_trace_events AS events
+                        SET state = CASE
+                            WHEN event_id = (
+                                SELECT MIN(first_event.event_id)
+                                FROM llm_http_trace_events AS first_event
+                                WHERE first_event.trace_id = events.trace_id
+                            ) THEN 'pending'
+                            ELSE COALESCE((
+                                SELECT traces.state
+                                FROM llm_http_traces AS traces
+                                WHERE traces.id = events.trace_id
+                            ), 'error')
+                        END
+                        """
+                    )
+                trace_columns = {
+                    row["name"]
+                    for row in conn.execute(
+                        "PRAGMA table_info(llm_http_traces)"
+                    ).fetchall()
+                }
+                if "agent_loop_id" not in trace_columns:
+                    conn.execute(
+                        "ALTER TABLE llm_http_traces ADD COLUMN agent_loop_id TEXT"
+                    )
+                    conn.execute(
+                        "UPDATE llm_http_traces SET agent_loop_id = call_id"
+                    )
+                if "loop_sequence" not in trace_columns:
+                    conn.execute(
+                        "ALTER TABLE llm_http_traces ADD COLUMN loop_sequence INTEGER NOT NULL DEFAULT 1"
+                    )
+                if "response_raw_text" not in trace_columns:
+                    conn.execute(
+                        "ALTER TABLE llm_http_traces ADD COLUMN response_raw_text TEXT"
+                    )
+                if "response_raw_bytes" not in trace_columns:
+                    conn.execute(
+                        "ALTER TABLE llm_http_traces ADD COLUMN response_raw_bytes INTEGER NOT NULL DEFAULT 0"
+                    )
+            self._schema_ready = True
+
+    @staticmethod
+    def _metadata(row: sqlite3.Row) -> dict[str, object]:
+        return {
+            "id": int(row["id"]),
+            "call_id": row["call_id"],
+            "agent_loop_id": row["agent_loop_id"] or row["call_id"],
+            "loop_sequence": int(row["loop_sequence"] or 1),
+            "started_at": row["started_at"],
+            "completed_at": row["completed_at"],
+            "provider_id": row["provider_id"],
+            "protocol": row["protocol"],
+            "model": row["model"],
+            "stream": bool(row["stream"]),
+            "method": row["method"],
+            "url": row["url"],
+            "request_bytes": int(row["request_bytes"]),
+            "response_status": row["response_status"],
+            "response_bytes": int(row["response_bytes"]),
+            "response_raw_bytes": int(row["response_raw_bytes"] or 0),
+            "duration_ms": row["duration_ms"],
+            "state": row["state"],
+            "error_type": row["error_type"],
+            "error_message": row["error_message"],
+        }
+
+    def begin_call(
+        self,
+        *,
+        provider_id: str,
+        protocol: str,
+        model: str,
+        stream: bool,
+        method: str,
+        url: str,
+        request_headers: str,
+        request_text: str,
+        request_bytes: int,
+        agent_loop_id: str = "",
+        loop_sequence: int = 1,
+    ) -> str:
+        self._ensure_schema()
+        self._cleanup_if_due()
+        call_id = uuid4().hex
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO llm_http_traces (
+                    call_id, agent_loop_id, loop_sequence, started_at,
+                    provider_id, protocol, model, stream,
+                    method, url, request_headers, request_text, request_bytes, state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                """,
+                (
+                    call_id,
+                    agent_loop_id or call_id,
+                    max(1, int(loop_sequence)),
+                    _utc_now(),
+                    provider_id,
+                    protocol,
+                    model,
+                    int(stream),
+                    method,
+                    url,
+                    request_headers,
+                    request_text,
+                    request_bytes,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO llm_http_trace_events (trace_id, state, created_at)
+                VALUES (?, 'pending', ?)
+                """,
+                (int(cursor.lastrowid), _utc_now()),
+            )
+        return call_id
+
+    def finish_call(
+        self,
+        call_id: str,
+        *,
+        state: str,
+        response_status: int | None,
+        response_headers: str,
+        response_text: str,
+        response_bytes: int,
+        duration_ms: float,
+        error_type: str = "",
+        error_message: str = "",
+        response_raw_text: str = "",
+        response_raw_bytes: int = 0,
+    ) -> None:
+        self._ensure_schema()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE llm_http_traces
+                SET completed_at = ?, response_status = ?, response_headers = ?,
+                    response_text = ?, response_bytes = ?, duration_ms = ?,
+                    response_raw_text = ?, response_raw_bytes = ?,
+                    state = ?, error_type = ?, error_message = ?
+                WHERE call_id = ?
+                """,
+                (
+                    _utc_now(),
+                    response_status,
+                    response_headers,
+                    response_text,
+                    response_bytes,
+                    duration_ms,
+                    response_raw_text or None,
+                    response_raw_bytes,
+                    state,
+                    error_type or None,
+                    error_message or None,
+                    call_id,
+                ),
+            )
+            if cursor.rowcount:
+                row = conn.execute(
+                    "SELECT id FROM llm_http_traces WHERE call_id = ?",
+                    (call_id,),
+                ).fetchone()
+                if row is not None:
+                    conn.execute(
+                        """
+                        INSERT INTO llm_http_trace_events (trace_id, state, created_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (int(row["id"]), state, _utc_now()),
+                    )
+
+    def list_calls(
+        self,
+        *,
+        limit: int = 50,
+        before_id: int | None = None,
+        after_id: int | None = None,
+    ) -> list[dict[str, object]]:
+        self._ensure_schema()
+        limit = max(1, min(int(limit), 200))
+        where = ""
+        params: list[object] = []
+        order = "DESC"
+        if before_id is not None:
+            where = "WHERE id < ?"
+            params.append(int(before_id))
+        elif after_id is not None:
+            where = "WHERE id > ?"
+            params.append(int(after_id))
+            order = "ASC"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, call_id, agent_loop_id, loop_sequence,
+                       started_at, completed_at, provider_id, protocol,
+                       model, stream, method, url, request_bytes, response_status,
+                       response_bytes, response_raw_bytes, duration_ms,
+                       state, error_type, error_message
+                FROM llm_http_traces
+                {where}
+                ORDER BY id {order}
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [self._metadata(row) for row in rows]
+
+    def get_call(self, call_id: str) -> dict[str, object] | None:
+        self._ensure_schema()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM llm_http_traces WHERE call_id = ?",
+                (call_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            **self._metadata(row),
+            "request_headers": row["request_headers"],
+            "request_text": row["request_text"],
+            "response_headers": row["response_headers"] or "",
+            "response_text": row["response_text"] or "",
+            "response_raw_text": row["response_raw_text"] or "",
+        }
+
+    def list_events(
+        self,
+        *,
+        after_event_id: int | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        self._ensure_schema()
+        limit = max(1, min(int(limit), 500))
+        where = ""
+        params: list[object] = []
+        order = "DESC"
+        if after_event_id is not None:
+            where = "WHERE events.event_id > ?"
+            params.append(int(after_event_id))
+            order = "ASC"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT events.event_id, events.state AS event_state,
+                       traces.id, traces.call_id, traces.agent_loop_id,
+                       traces.loop_sequence, traces.started_at, traces.completed_at,
+                       traces.provider_id, traces.protocol, traces.model, traces.stream,
+                       traces.method, traces.url, traces.request_bytes,
+                       traces.response_status, traces.response_bytes,
+                       traces.response_raw_bytes, traces.duration_ms,
+                       traces.state, traces.error_type, traces.error_message
+                FROM llm_http_trace_events AS events
+                JOIN llm_http_traces AS traces ON traces.id = events.trace_id
+                {where}
+                ORDER BY events.event_id {order}
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        items = []
+        for row in rows:
+            item = {
+                **self._metadata(row),
+                "event_id": int(row["event_id"]),
+                "state": row["event_state"] or row["state"],
+            }
+            if item["state"] == "pending":
+                item.update(
+                    completed_at=None,
+                    response_status=None,
+                    response_bytes=0,
+                    response_raw_bytes=0,
+                    duration_ms=None,
+                    error_type=None,
+                    error_message=None,
+                )
+            items.append(item)
+        return items if order == "ASC" else list(reversed(items))
+
+    def latest_event_id(self) -> int:
+        self._ensure_schema()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(event_id), 0) AS event_id FROM llm_http_trace_events"
+            ).fetchone()
+        return int(row["event_id"] if row else 0)
+
+    def count_calls(self) -> int:
+        self._ensure_schema()
+        with self._connect() as conn:
+            row = conn.execute("SELECT COUNT(*) AS count FROM llm_http_traces").fetchone()
+        return int(row["count"] if row else 0)
+
+    def clear(self) -> int:
+        self._ensure_schema()
+        with self._connect() as conn:
+            count = int(conn.execute("SELECT COUNT(*) FROM llm_http_traces").fetchone()[0])
+            conn.execute("DELETE FROM llm_http_trace_events")
+            conn.execute("DELETE FROM llm_http_traces")
+        return count
+
+    def storage_bytes(self) -> int:
+        total = 0
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                total += Path(f"{self.path}{suffix}").stat().st_size
+            except OSError:
+                pass
+        return total
+
+    def _cleanup_if_due(self) -> None:
+        today = datetime.now(timezone.utc).date().isoformat()
+        if self._last_cleanup_date == today:
+            return
+        with self._cleanup_lock:
+            if self._last_cleanup_date == today:
+                return
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=_TRACE_RETENTION_DAYS)).isoformat()
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    DELETE FROM llm_http_trace_events
+                    WHERE trace_id IN (
+                        SELECT id FROM llm_http_traces WHERE started_at < ?
+                    )
+                    """,
+                    (cutoff,),
+                )
+                conn.execute("DELETE FROM llm_http_traces WHERE started_at < ?", (cutoff,))
+            self._last_cleanup_date = today
+
+
+trace_store = LLMTraceStore()
+
+
+async def begin_http_trace(**values: object) -> str | None:
+    """Start a trace when capture is active and return its call identifier."""
+
+    if not trace_active():
+        return None
+    loop = _AGENT_LOOP_TRACE.get()
+    if loop is not None:
+        loop.sequence += 1
+        values["agent_loop_id"] = loop.loop_id
+        values["loop_sequence"] = loop.sequence
+    try:
+        call_id = await asyncio.to_thread(trace_store.begin_call, **values)
+    except (OSError, sqlite3.Error):
+        logger.exception("LLM HTTP trace start failed")
+        return None
+    capture = _TRACE_CAPTURE.get()
+    if capture is not None:
+        capture.call_ids.append(call_id)
+    return call_id
+
+
+async def finish_http_trace(call_id: str | None, **values: object) -> None:
+    """Finish an active trace while keeping storage I/O off the event loop."""
+
+    if call_id is None:
         return
-    _LAST_TRACE_CLEANUP_DATE = today
-
-    cutoff = _time.time() - _TRACE_RETENTION_DAYS * 86400
-    pattern = "quickquip_trace_????-??-??.jsonl"
     try:
-        for p in sorted(_TRACE_DIR.glob(pattern)):
-            try:
-                if p.stat().st_mtime < cutoff:
-                    p.unlink()
-                    logger.debug("清理过期 trace 文件：%s", p.name)
-            except OSError:
-                pass
-    except OSError:
-        pass
-
-
-def _record_trace(direction: str, provider_id: str, stream: bool, payload: str) -> None:
-    entry = {
-        "timestamp": datetime.datetime.now().isoformat(),
-        "direction": direction,
-        "provider_id": provider_id,
-        "stream": stream,
-        "payload": payload,
-    }
-    _TRACE_LOG_LINES.append(entry)
-    trace_path = _daily_trace_path()
-    try:
-        trace_path.parent.mkdir(parents=True, exist_ok=True)
-        with trace_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError:
-        logger.debug("failed to append trace entry to %s", trace_path)
-    _cleanup_old_traces()
-
-
-def _load_trace_entries(limit: int | None = None) -> list[dict[str, object]]:
-    if limit is None or limit <= 0:
-        limit = _TRACE_MEMORY_LIMIT
-
-    pattern = "quickquip_trace_????-??-??.jsonl"
-    items: deque[dict[str, object]] = deque(maxlen=limit)
-    files_read = 0
-    try:
-        for p in sorted(_TRACE_DIR.glob(pattern)):
-            try:
-                with p.open("r", encoding="utf-8") as f:
-                    for raw_line in f:
-                        line = raw_line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if isinstance(entry, dict):
-                            items.append(entry)
-                files_read += 1
-            except OSError:
-                continue
-    except OSError:
-        pass
-
-    if files_read == 0:
-        items = deque(_TRACE_LOG_LINES, maxlen=limit)
-    return list(items)
-
-
-def _count_trace_entries() -> int:
-    pattern = "quickquip_trace_????-??-??.jsonl"
-    count = 0
-    files_read = 0
-    try:
-        for p in sorted(_TRACE_DIR.glob(pattern)):
-            try:
-                with p.open("r", encoding="utf-8") as f:
-                    for raw_line in f:
-                        if raw_line.strip():
-                            count += 1
-                files_read += 1
-            except OSError:
-                continue
-    except OSError:
-        return len(_TRACE_LOG_LINES)
-    if files_read == 0:
-        return len(_TRACE_LOG_LINES)
-    return count
-
-
-def get_trace_entries(n: int = 50) -> list[dict[str, object]]:
-    return _load_trace_entries(n)
-
-
-def clear_trace_entries() -> int:
-    count = _count_trace_entries()
-    _TRACE_LOG_LINES.clear()
-    pattern = "quickquip_trace_????-??-??.jsonl"
-    try:
-        _TRACE_DIR.mkdir(parents=True, exist_ok=True)
-        for p in sorted(_TRACE_DIR.glob(pattern)):
-            try:
-                p.write_text("", encoding="utf-8")
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return count
+        await asyncio.to_thread(trace_store.finish_call, call_id, **values)
+    except (OSError, sqlite3.Error):
+        logger.exception("LLM HTTP trace finish failed: call_id=%s", call_id)

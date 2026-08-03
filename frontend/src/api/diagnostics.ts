@@ -19,10 +19,6 @@ export async function setTraceStatus(enabled: boolean) {
   })
 }
 
-export async function fetchRecentTraces(n: number = 20) {
-  return request(`/api/diagnostics/trace/recent?n=${n}`)
-}
-
 export async function clearTraces() {
   return request('/api/diagnostics/trace/clear', { method: 'POST' })
 }

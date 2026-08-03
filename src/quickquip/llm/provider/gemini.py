@@ -204,6 +204,58 @@ class GeminiProviderClient(BaseProviderClient):
             output_tokens=output_tokens,
         )
 
+    @staticmethod
+    def _combine_stream_trace(
+        chunks: list[dict[str, Any]],
+        fallback_model: str,
+    ) -> dict[str, Any]:
+        combined: dict[str, Any] = {"candidates": []}
+        candidates: dict[int, dict[str, Any]] = {}
+
+        for chunk in chunks:
+            for key, value in chunk.items():
+                if key not in {"candidates", "usageMetadata", "_sse_event"}:
+                    combined[key] = value
+            if isinstance(chunk.get("usageMetadata"), dict):
+                combined["usageMetadata"] = chunk["usageMetadata"]
+            for raw_candidate in chunk.get("candidates") or []:
+                if not isinstance(raw_candidate, dict):
+                    continue
+                index = int(raw_candidate.get("index", 0) or 0)
+                candidate = candidates.setdefault(
+                    index,
+                    {"index": index, "content": {"role": "model", "parts": []}},
+                )
+                for key, value in raw_candidate.items():
+                    if key not in {"content", "index"}:
+                        candidate[key] = value
+                content = raw_candidate.get("content") or {}
+                if not isinstance(content, dict):
+                    continue
+                if content.get("role"):
+                    candidate["content"]["role"] = content["role"]
+                for raw_part in content.get("parts") or []:
+                    if not isinstance(raw_part, dict):
+                        continue
+                    parts = candidate["content"]["parts"]
+                    if "text" in raw_part:
+                        thought = bool(raw_part.get("thought"))
+                        if (
+                            parts
+                            and "text" in parts[-1]
+                            and bool(parts[-1].get("thought")) == thought
+                        ):
+                            parts[-1]["text"] = str(parts[-1]["text"]) + str(raw_part.get("text", ""))
+                        else:
+                            parts.append(dict(raw_part))
+                    else:
+                        parts.append(dict(raw_part))
+
+        combined["candidates"] = [candidate for _, candidate in sorted(candidates.items())]
+        if "modelVersion" not in combined:
+            combined["modelVersion"] = fallback_model
+        return combined
+
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         data = await self._post_json_with_fallback(url, headers, payload)

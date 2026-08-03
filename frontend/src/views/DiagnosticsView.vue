@@ -129,16 +129,23 @@
             <pre class="json-block">{{ prettyJson(sampleResult.thinking_blocks) }}</pre>
           </details>
 
-          <details v-if="sampleResult.raw_traces?.length" class="data-detail">
-            <summary>Raw Traces ({{ sampleResult.raw_traces.length }})</summary>
-            <div v-for="(t, i) in sampleResult.raw_traces" :key="i" class="trace-item">
+          <details v-if="sampleResult.trace_calls?.length" class="data-detail">
+            <summary>HTTP Traces ({{ sampleResult.trace_calls.length }})</summary>
+            <div v-for="call in sampleResult.trace_calls" :key="call.call_id" class="trace-item">
               <div class="trace-head">
-                <UiTag size="sm" :variant="t.direction === 'request' ? 'warn' : 'success'">
-                  {{ t.direction.toUpperCase() }}
+                <UiTag size="sm" :variant="call.state === 'success' ? 'success' : 'danger'">
+                  {{ call.state.toUpperCase() }}
                 </UiTag>
-                <span class="trace-meta">{{ t.timestamp }}</span>
+                <span class="trace-meta">{{ call.method }} {{ call.url }}</span>
               </div>
-              <pre class="json-block">{{ t.payload }}</pre>
+              <details open>
+                <summary>Request JSON · {{ call.request_bytes }} bytes</summary>
+                <pre class="json-block">{{ call.request_text }}</pre>
+              </details>
+              <details>
+                <summary>Response JSON · {{ call.response_bytes }} bytes</summary>
+                <pre class="json-block">{{ call.response_text }}</pre>
+              </details>
             </div>
           </details>
         </div>
