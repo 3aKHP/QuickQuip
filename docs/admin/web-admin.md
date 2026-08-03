@@ -174,6 +174,8 @@ LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Too
 
 该页面面向最高权限管理员，正文和 Header 不做脱敏。页面会明确提示其中可能包含 API 凭证、系统提示和用户内容；建议只在排障期间开启采集。记录保存在 `data/llm_trace.db`，默认保留 14 天。
 
+从使用 JSONL Trace 的版本升级时，`data/logs/quickquip_trace_YYYY-MM-DD.jsonl` 历史记录不会导入新的调用索引；Web Admin 访问 Trace 存储或产生新调用记录时，运行时仍会按同一 14 天保留期清理这些旧文件。
+
 ### Bot 执行动作队列
 
 `web_api.py` 是独立进程，不能直接复用 bot 进程里的 OneBot 连接。诊断页的运行时重载、LLM 健康检查、上下文清理、唤醒参数重载、群组页的“立即生成总结/播报/周报/月报”等需要 bot 进程执行的动作，会先写入 `data/web_admin_actions.db`。bot 端定时任务 `web_admin_action_queue` 每 5 秒领取并执行队列任务，结果回写到同一数据库；诊断页“最近动作”用于查看等待、执行中、成功或失败状态。动作队列数据库启用 WAL；若 bot 在领取任务后退出，后续轮询会将超时的 `running` 动作标记为失败，避免任务永久挂起。

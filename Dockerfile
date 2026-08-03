@@ -20,6 +20,8 @@ RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
+# vite.config.ts reads the canonical app version from the repository root.
+COPY pyproject.toml /pyproject.toml
 RUN pnpm build
 
 # ── Stage 2: Docker CLI for optional MCP docker transport ─────────────────
