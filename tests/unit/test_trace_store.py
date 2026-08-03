@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import os
 import sqlite3
 import threading
+import time
 
 from quickquip.llm.provider import trace
 
@@ -197,6 +199,31 @@ def test_trace_store_expires_stale_pending_calls(tmp_path):
     assert calls[0]["state"] == "error"
     assert calls[0]["error_type"] == "StaleTrace"
     assert [event["state"] for event in store.list_events()] == ["pending", "error"]
+
+
+def test_trace_store_cleanup_removes_only_expired_legacy_jsonl(tmp_path):
+    legacy_dir = tmp_path / "logs"
+    legacy_dir.mkdir()
+    expired = legacy_dir / "quickquip_trace_2000-01-01.jsonl"
+    retained = legacy_dir / "quickquip_trace_2099-01-01.jsonl"
+    unrelated = legacy_dir / "quickquip_2000-01-01.log"
+    for path in (expired, retained, unrelated):
+        path.write_text('{"payload":"sensitive"}\n', encoding="utf-8")
+
+    now = time.time()
+    os.utime(expired, (now - 15 * 86400, now - 15 * 86400))
+    os.utime(retained, (now - 13 * 86400, now - 13 * 86400))
+    os.utime(unrelated, (now - 15 * 86400, now - 15 * 86400))
+
+    store = trace.LLMTraceStore(
+        tmp_path / "trace.db",
+        legacy_trace_dir=legacy_dir,
+    )
+    _begin(store)
+
+    assert not expired.exists()
+    assert retained.exists()
+    assert unrelated.exists()
 
 
 async def test_forced_capture_records_without_global_flag(monkeypatch, tmp_path):

@@ -16,13 +16,14 @@ from typing import Iterator
 from uuid import uuid4
 import logging
 
-from quickquip.common.paths import LLM_TRACE_DB_PATH
+from quickquip.common.paths import LLM_TRACE_DB_PATH, LOGS_DIR
 
 
 logger = logging.getLogger(__name__)
 
 _TRACE_FLAG_FILE = os.getenv("LLM_TRACE_FLAG_FILE", "")
 _TRACE_RETENTION_DAYS = 14
+_LEGACY_TRACE_GLOB = "quickquip_trace_????-??-??.jsonl"
 _TRACE_STALE_AFTER = timedelta(hours=1)
 _TRACE_STALE_CHECK_INTERVAL_SECONDS = 60
 
@@ -98,8 +99,14 @@ def trace_active() -> bool:
 class LLMTraceStore:
     """Persist indexed LLM HTTP text traces without loading payloads into listings."""
 
-    def __init__(self, path: str | Path = LLM_TRACE_DB_PATH):
+    def __init__(
+        self,
+        path: str | Path = LLM_TRACE_DB_PATH,
+        *,
+        legacy_trace_dir: str | Path = LOGS_DIR,
+    ):
         self.path = Path(path)
+        self.legacy_trace_dir = Path(legacy_trace_dir)
         self._schema_ready = False
         self._schema_lock = threading.Lock()
         self._cleanup_lock = threading.Lock()
@@ -507,13 +514,14 @@ class LLMTraceStore:
         return total
 
     def _cleanup_if_due(self) -> None:
-        today = datetime.now(timezone.utc).date().isoformat()
+        now = datetime.now(timezone.utc)
+        today = now.date().isoformat()
         if self._last_cleanup_date == today:
             return
         with self._cleanup_lock:
             if self._last_cleanup_date == today:
                 return
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=_TRACE_RETENTION_DAYS)).isoformat()
+            cutoff = (now - timedelta(days=_TRACE_RETENTION_DAYS)).isoformat()
             with self._connect() as conn:
                 conn.execute(
                     """
@@ -525,7 +533,24 @@ class LLMTraceStore:
                     (cutoff,),
                 )
                 conn.execute("DELETE FROM llm_http_traces WHERE started_at < ?", (cutoff,))
+            self._cleanup_legacy_trace_files(
+                now.timestamp() - _TRACE_RETENTION_DAYS * 86400
+            )
             self._last_cleanup_date = today
+
+    def _cleanup_legacy_trace_files(self, cutoff_timestamp: float) -> None:
+        """Retain the previous JSONL trace format under the same 14-day policy."""
+
+        try:
+            paths = list(self.legacy_trace_dir.glob(_LEGACY_TRACE_GLOB))
+        except OSError:
+            return
+        for path in paths:
+            try:
+                if path.stat().st_mtime < cutoff_timestamp:
+                    path.unlink()
+            except OSError:
+                logger.debug("Failed to clean legacy LLM trace file: %s", path)
 
     def _expire_stale_pending_if_due(self) -> None:
         checked_at = time.monotonic()
