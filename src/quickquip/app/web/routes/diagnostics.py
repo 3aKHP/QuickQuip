@@ -12,8 +12,8 @@ from quickquip.llm.config import load_llm_config
 from quickquip.llm.provider import (
     LLMRequest,
     build_provider_client,
-    clear_trace_entries,
-    get_trace_entries,
+    collect_trace_calls,
+    trace_store,
     _TRACE_FLAG_FILE,
 )
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers
@@ -78,15 +78,21 @@ async def probe_providers():
 
 @router.get("/diagnostics/trace-status")
 def get_trace_status():
+    """Report the global Trace switch and current indexed storage state."""
+
     return {
         "active": os.path.exists(_TRACE_FLAG_FILE) if _TRACE_FLAG_FILE else False,
         "flag_file": _TRACE_FLAG_FILE or "",
-        "entry_count": len(get_trace_entries(0)),
+        "entry_count": trace_store.count_calls(),
+        "latest_event_id": trace_store.latest_event_id(),
+        "storage_bytes": trace_store.storage_bytes(),
     }
 
 
 @router.post("/diagnostics/trace-status")
 def set_trace_status(body: TraceToggle):
+    """Toggle persistent LLM HTTP tracing for administrator diagnostics."""
+
     if not _TRACE_FLAG_FILE:
         raise HTTPException(status_code=400, detail="LLM_TRACE_FLAG_FILE env not set")
     flag_path = Path(_TRACE_FLAG_FILE)
@@ -100,15 +106,11 @@ def set_trace_status(body: TraceToggle):
     return {"active": body.enabled}
 
 
-@router.get("/diagnostics/trace/recent")
-def get_recent_traces(n: int = 20):
-    n = max(1, min(n, 100))
-    return {"entries": get_trace_entries(n)}
-
-
 @router.post("/diagnostics/trace/clear")
 def clear_traces():
-    count = clear_trace_entries()
+    """Clear all stored LLM HTTP traces on an explicit administrator request."""
+
+    count = trace_store.clear()
     return {"cleared": count}
 
 
@@ -146,33 +148,18 @@ async def run_sample_request(body: SampleRequest):
     )
 
     t0 = time.monotonic()
-    trace_was_active = False
-    if _TRACE_FLAG_FILE:
-        trace_was_active = os.path.exists(_TRACE_FLAG_FILE)
-        try:
-            Path(_TRACE_FLAG_FILE).touch()
-        except OSError:
-            pass
-    pre_count = len(get_trace_entries(0))
-
     try:
-        response = await client.complete(req)
+        with collect_trace_calls(force=True) as trace_call_ids:
+            response = await client.complete(req)
     except Exception as exc:
-        if _TRACE_FLAG_FILE and not trace_was_active:
-            try:
-                os.remove(_TRACE_FLAG_FILE)
-            except (OSError, FileNotFoundError):
-                pass
         raise HTTPException(status_code=502, detail=f"API call failed: {exc}") from exc
-    finally:
-        if _TRACE_FLAG_FILE and not trace_was_active:
-            try:
-                os.remove(_TRACE_FLAG_FILE)
-            except (OSError, FileNotFoundError):
-                pass
 
     elapsed_ms = (time.monotonic() - t0) * 1000
-    trace_entries = get_trace_entries(200)[pre_count:]
+    trace_calls = [
+        detail
+        for call_id in trace_call_ids
+        if (detail := trace_store.get_call(call_id)) is not None
+    ]
 
     return {
         "text": response.text,
@@ -182,7 +169,7 @@ async def run_sample_request(body: SampleRequest):
         "output_tokens": response.output_tokens,
         "thinking_blocks": response.thinking_blocks,
         "duration_ms": round(elapsed_ms, 1),
-        "raw_traces": trace_entries,
+        "trace_calls": trace_calls,
     }
 
 

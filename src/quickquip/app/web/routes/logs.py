@@ -1,21 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 import json
 from pathlib import Path
 import re
 import time
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
-from quickquip.common.paths import LOGS_DIR, LLM_TRACE_JSONL_PATH
-from quickquip.llm.provider import get_trace_entries
+from quickquip.common.paths import LOGS_DIR
+from quickquip.llm.provider import trace_store
 
 router = APIRouter()
 
 _LOGS_DIR = LOGS_DIR
-_TRACE_STORE_PATH = LLM_TRACE_JSONL_PATH
 _LOG_FILE_RE = re.compile(r"^quickquip_\d{4}-\d{2}-\d{2}\.log$")
 _STREAM_POLL_SECONDS = 1.0
 _STREAM_HEARTBEAT_SECONDS = 20.0
@@ -121,57 +121,34 @@ def _stream_log_lines(tail: int) -> StreamingResponse:
     )
 
 
-def _stream_trace_entries(tail: int) -> StreamingResponse:
-    def event_stream():
-        offset = 0
-        sent_initial = False
+def _encode_trace_sse(entry: dict[str, object]) -> str:
+    event_id = int(entry["event_id"])
+    payload = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+    return f"id: {event_id}\n{_encode_sse_data(payload)}"
+
+
+def _stream_trace_calls(request: Request, after_event_id: int | None) -> StreamingResponse:
+    async def event_stream():
+        cursor = after_event_id
         last_heartbeat = time.monotonic()
 
-        while True:
-            path = _TRACE_STORE_PATH
-            if not path.exists():
-                if time.monotonic() - last_heartbeat >= _STREAM_HEARTBEAT_SECONDS:
-                    yield ": heartbeat\n\n"
-                    last_heartbeat = time.monotonic()
-                time.sleep(_STREAM_POLL_SECONDS)
-                continue
-
-            if not sent_initial:
-                for entry in get_trace_entries(tail):
-                    yield _encode_sse_data(json.dumps(entry, ensure_ascii=False))
-                try:
-                    offset = path.stat().st_size
-                except OSError:
-                    offset = 0
-                sent_initial = True
-                last_heartbeat = time.monotonic()
-                continue
-
-            chunk = ""
-            try:
-                size = path.stat().st_size
-                if offset > size:
-                    offset = 0
-                with path.open("r", encoding="utf-8", errors="replace") as f:
-                    f.seek(offset)
-                    chunk = f.read()
-                    offset = f.tell()
-            except OSError:
-                chunk = ""
-
-            if chunk:
-                for raw_line in chunk.splitlines():
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    yield _encode_sse_data(line)
+        while not await request.is_disconnected():
+            events = await asyncio.to_thread(
+                trace_store.list_events,
+                after_event_id=cursor,
+                limit=200,
+            )
+            if events:
+                for event in events:
+                    cursor = int(event["event_id"])
+                    yield _encode_trace_sse(event)
                 last_heartbeat = time.monotonic()
                 continue
 
             if time.monotonic() - last_heartbeat >= _STREAM_HEARTBEAT_SECONDS:
                 yield ": heartbeat\n\n"
                 last_heartbeat = time.monotonic()
-            time.sleep(_STREAM_POLL_SECONDS)
+            await asyncio.sleep(_STREAM_POLL_SECONDS)
 
     return StreamingResponse(
         event_stream(),
@@ -221,5 +198,37 @@ def stream_logs(tail: int = Query(default=200, ge=1, le=_MAX_TAIL_LINES)):
 
 
 @router.get("/logs/trace/stream")
-def stream_trace_logs(tail: int = Query(default=50, ge=1, le=_MAX_TAIL_LINES)):
-    return _stream_trace_entries(tail)
+def stream_trace_logs(
+    request: Request,
+    after_event_id: int | None = Query(default=None, ge=0),
+):
+    """Stream lightweight Trace index events to the Web Admin client."""
+
+    header_cursor = request.headers.get("last-event-id", "").strip()
+    if header_cursor.isdigit():
+        after_event_id = max(after_event_id or 0, int(header_cursor))
+    return _stream_trace_calls(request, after_event_id)
+
+
+@router.get("/logs/trace/calls")
+def list_trace_calls(
+    limit: int = Query(default=50, ge=1, le=200),
+    before_id: int | None = Query(default=None, ge=1),
+):
+    """List paginated Trace metadata without returning request or response bodies."""
+
+    calls = trace_store.list_calls(limit=limit, before_id=before_id)
+    return {
+        "calls": calls,
+        "next_before_id": int(calls[-1]["id"]) if len(calls) == limit else None,
+    }
+
+
+@router.get("/logs/trace/calls/{call_id}")
+def get_trace_call(call_id: str):
+    """Load the complete HTTP text payload for one selected Trace call."""
+
+    entry = trace_store.get_call(call_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="trace call not found")
+    return entry

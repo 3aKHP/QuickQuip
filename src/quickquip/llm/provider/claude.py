@@ -335,6 +335,72 @@ class ClaudeProviderClient(BaseProviderClient):
             output_tokens=output_tokens,
         )
 
+    @staticmethod
+    def _combine_stream_trace(
+        chunks: list[dict[str, Any]],
+        fallback_model: str,
+    ) -> dict[str, Any]:
+        message: dict[str, Any] = {
+            "type": "message",
+            "role": "assistant",
+            "model": fallback_model,
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {},
+        }
+        blocks: dict[int, dict[str, Any]] = {}
+        tool_json: dict[int, str] = {}
+
+        for chunk in chunks:
+            event = chunk.get("_sse_event", "")
+            if event == "message_start":
+                started = chunk.get("message") or {}
+                if isinstance(started, dict):
+                    for key, value in started.items():
+                        if key not in {"content", "usage"}:
+                            message[key] = value
+                    if isinstance(started.get("usage"), dict):
+                        message["usage"].update(started["usage"])
+            elif event == "content_block_start":
+                index = int(chunk.get("index", len(blocks)) or 0)
+                block = chunk.get("content_block") or {}
+                if isinstance(block, dict):
+                    blocks[index] = dict(block)
+                    if block.get("type") == "tool_use":
+                        tool_json[index] = ""
+            elif event == "content_block_delta":
+                index = int(chunk.get("index", 0) or 0)
+                delta = chunk.get("delta") or {}
+                block = blocks.setdefault(index, {})
+                if not isinstance(delta, dict):
+                    continue
+                delta_type = delta.get("type")
+                if delta_type == "text_delta":
+                    block["type"] = "text"
+                    block["text"] = str(block.get("text", "")) + str(delta.get("text", ""))
+                elif delta_type == "thinking_delta":
+                    block["type"] = "thinking"
+                    block["thinking"] = str(block.get("thinking", "")) + str(delta.get("thinking", ""))
+                elif delta_type == "signature_delta":
+                    block["signature"] = str(block.get("signature", "")) + str(delta.get("signature", ""))
+                elif delta_type == "input_json_delta":
+                    tool_json[index] = tool_json.get(index, "") + str(delta.get("partial_json", ""))
+            elif event == "message_delta":
+                delta = chunk.get("delta") or {}
+                if isinstance(delta, dict):
+                    message.update(delta)
+                if isinstance(chunk.get("usage"), dict):
+                    message["usage"].update(chunk["usage"])
+
+        for index, raw_json in tool_json.items():
+            try:
+                blocks[index]["input"] = json.loads(raw_json or "{}")
+            except json.JSONDecodeError:
+                blocks[index]["input"] = raw_json
+        message["content"] = [block for _, block in sorted(blocks.items())]
+        return message
+
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         data = await self._post_json_with_fallback(url, headers, payload)
