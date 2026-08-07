@@ -23,6 +23,7 @@ from quickquip.common.sensitive_filter import (
     get_filter as _get_sensitive_filter,
     log_hits as _log_sensitive_hits,
     reload_filter as _reload_sensitive_filter,
+    scan_and_log as _scan_sensitive_text,
 )
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
@@ -391,6 +392,25 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 "llm_used": False,
             }
 
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        sensitive = _get_sensitive_filter()
+        input_blob = "\n".join(
+            part for part in (normalized_prompt, normalized_quoted_text) if part
+        )
+        input_scan = _scan_sensitive_text(
+            input_blob,
+            channel="defectify_input",
+            scope=scope_key,
+            sensitive_filter=sensitive,
+        )
+        if input_scan.blocked:
+            return {
+                "reply": DEFAULT_BLOCK_REPLY,
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": DEFECTIFY_RULE_NAME,
+                "llm_used": False,
+            }
+
         if self.config.load_error:
             return {
                 "reply": f"LLM 配置不可用：{self.config.load_error}",
@@ -468,6 +488,14 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 "provider_id": provider.id,
                 "model": request.model,
             }
+        output_scan = _scan_sensitive_text(
+            text,
+            channel="defectify_output",
+            scope=scope_key,
+            sensitive_filter=sensitive,
+        )
+        if output_scan.blocked:
+            text = DEFAULT_OUTPUT_FALLBACK
         return {
             "reply": text,
             "rate_limit_key": LLM_RULE_NAME,
@@ -740,6 +768,25 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 )
                 return {
                     "reply": IMAGE_PREPROCESSING_FAILED_REPLY,
+                    "rate_limit_key": LLM_RULE_NAME,
+                    "rule_name": LLM_RULE_NAME,
+                    "llm_used": True,
+                    "provider_id": self.config.image_preprocessing.provider_id,
+                    "model": self.config.image_preprocessing.model,
+                }
+            description_blob = "\n".join(
+                item.text_description for item in image_descriptions
+                if item.text_description
+            )
+            description_scan = _scan_sensitive_text(
+                description_blob,
+                channel="image_description",
+                scope=scope_key,
+                sensitive_filter=sensitive,
+            )
+            if description_scan.blocked:
+                return {
+                    "reply": DEFAULT_BLOCK_REPLY,
                     "rate_limit_key": LLM_RULE_NAME,
                     "rule_name": LLM_RULE_NAME,
                     "llm_used": True,

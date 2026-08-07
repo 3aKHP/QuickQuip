@@ -1,6 +1,6 @@
 # 敏感词过滤器（sensitive_filter）
 
-QuickQuip 在 LLM 流量入口和出口处都接了一层敏感词过滤，目的是：
+QuickQuip 在 LLM 和多模态相关文本的流量边界接入敏感词过滤，目的是：
 
 1. **防止账号被封**：触发 LLM 提供商网关层审核（如 DeepSeek 的 `Content Exists Risk`、阿里云的 `Content security warning`）多次后，API Key 可能被封禁
 2. **防止群被炸**：模型生成的违规内容如果被 bot 发到群里，群本身和发言群员（即使是 bot）都可能被处罚
@@ -96,9 +96,20 @@ cp config/sensitive_words.toml.example config/sensitive_words.toml
 
 Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返回配置文件是否存在、是否已加载以及 block/soft/total 计数。它不会返回词表内容、分类明细或文件路径。群内 `/llm health verbose` 也会展示 `sensitive_filter` 健康项，但不会回显词表路径。
 
+## 审查边界
+
+过滤器只处理文本，包括用户输入、ASR 转写、图片转述和歌词。图片像素、音频波形、
+TTS 音频、生成图片和音乐成品不经过本过滤器。部署者仍需依赖相应 provider 的内容安全
+机制；项目当前不提供图片、音频或音乐 moderation provider。
+
+`config/generation.toml` 中的 `prompt_blocklist` 继续作为生成业务专属限制，与
+`config/sensitive_words.toml` 叠加生效。前者适合记录特定生成模型不接受的提示词，后者是
+QuickQuip 各文本链路共享的部署级词表。
+
 ## 接入点
 
-文件：`src/quickquip/llm/service.py` `_generate_reply_for_scope()` 和 `src/quickquip/llm/tool_loop.py` `run_tool_call_loop()`
+主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_loop.py` 和
+`src/quickquip/adapters/nonebot/command_parts/media.py`。
 
 | 接入点 | 位置 | 行为 |
 |---|---|---|
@@ -107,10 +118,17 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 | 输出侧 | LLM 响应取出后、写入 store 前 | block → 替换为 `DEFAULT_OUTPUT_FALLBACK`，写入历史的也是替换后的 |
 | **工具参数** | `tool_registry.execute()` 调用前 | block → 直接拒绝执行，返回错误 result，节省 token + 防止外部 API 收到违规查询 |
 | **工具结果** | `tool_registry.execute()` 返回后 | block 命中 ≤ 5 个且原文 ≥ 200 字 → scrub；否则整体替换为占位文本，并标记 `is_error=True`（让 LLM 知道结果不完整） |
+| **图片/语音生成输入** | `/draw`、`/tts` 调用生成 provider 前 | block → 终止命令，不向 provider 提交 prompt 或引用文本 |
+| **音乐生成输入** | 歌词生成或音乐生成 provider 调用前 | block → 终止命令，不提交 prompt、标题、歌词或引用文本 |
+| **歌词输出** | 外部歌词生成完成后、发送或继续谱曲前 | block → 使用输出兜底回复，不发送歌词，也不把歌词提交给音乐 provider |
+| **ASR 转写** | 转写文本并入普通 LLM prompt 后 | 复用输入侧扫描；原始音频会先发送给 ASR provider |
+| **图片转述** | 视觉模型返回描述后、描述注入主 LLM 前 | block → 终止主 LLM 请求；视觉模型已经读取原始图片 |
+| **故障化** | `/defectify` 直连 provider 的输入和输出边界 | 输入 block → 不调用 provider；输出 block → 使用输出兜底回复 |
 
 **为什么工具结果扫描尤其重要**：搜索/抓取类工具（`search_web`、`fetch`、各类 MCP 工具）从外部源拉取内容，**用户的查询可以引导但我们无法预先审查**。一段富集敏感词的 tool_result 会作为 messages 的一部分进入下一轮 provider 请求，正是触发 DeepSeek `Content Exists Risk` / Aliyun `Content security warning` 的高危场景。
 
 **没有接入的位置**：
+- 图片像素、音频波形、生成图片、TTS 音频和音乐成品不属于文本过滤器的处理对象
 - `daily_summary` / `daily_briefing` 会走独立的模型级联 provider 调用，不经过 `LLMService.generate_reply()` 主链路，因此当前不会复用输入/输出/历史侧过滤器；如需加固，应在 `src/quickquip/llm/summarize.py` 与 `src/quickquip/llm/briefing.py` 的请求和响应边界接入同一个 `get_filter()`
 - `wordcloud` 不调用 LLM，只读取群聊消息并渲染词频图片；如需避免敏感词出现在图片中，应在 `src/quickquip/chat/wordcloud.py` 的分词或渲染前增加扫描/剔除
 
@@ -134,5 +152,7 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 ## 测试
 
 ```bash
-pytest tests/unit/common/test_sensitive_filter.py
+pytest tests/unit/common/test_sensitive_filter.py \
+  tests/unit/adapters/test_media_sensitive_filter.py \
+  tests/integration/test_llm_service.py
 ```
