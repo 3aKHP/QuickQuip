@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 
@@ -53,10 +54,17 @@ async def test_prts_operator_artwork_image_content_reaches_stub_provider():
             {"operator_name": operator, "action": "list"},
         )
         assert listed.content
+        artwork_ids = re.findall(r"`([^`]+)`", "\n".join(listed.text))
+        assert artwork_ids, "PRTS operator_artwork list response did not include an artwork_id"
 
         raw_result = await client.call_tool(
             "operator_artwork",
-            {"operator_name": operator, "action": "get"},
+            {
+                "operator_name": operator,
+                "action": "get",
+                "artwork_id": artwork_ids[0],
+                "variant": "preview",
+            },
         )
     finally:
         await client.aclose()
