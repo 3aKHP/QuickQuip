@@ -154,5 +154,6 @@ QuickQuip 各文本链路共享的部署级词表。
 ```bash
 pytest tests/unit/common/test_sensitive_filter.py \
   tests/unit/adapters/test_media_sensitive_filter.py \
+  tests/integration/test_multimodal_sensitive_filter.py \
   tests/integration/test_llm_service.py
 ```

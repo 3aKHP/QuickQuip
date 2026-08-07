@@ -9,6 +9,7 @@ from quickquip.adapters.nonebot.command_parts import media
 from quickquip.common import sensitive_filter as sensitive_filter_module
 from quickquip.common.sensitive_filter import DEFAULT_OUTPUT_FALLBACK, SensitiveFilter
 from quickquip.generation.music import LyricsGenerationResult
+from tests.fixtures.sensitive_filter import make_sensitive_filter
 
 
 class _CommandFinished(Exception):
@@ -63,15 +64,6 @@ class _FakeEvent:
 
     def get_message(self):
         return self._message
-
-
-def _filter(tmp_path, section: str, word: str = "blocked") -> SensitiveFilter:
-    path = tmp_path / f"{section}.toml"
-    path.write_text(
-        f'[{section}.test]\nwords = ["{word}"]\n',
-        encoding="utf-8",
-    )
-    return SensitiveFilter.from_toml(path)
 
 
 def _generation_config():
@@ -134,7 +126,7 @@ async def test_generation_input_block_stops_provider_call(
     message,
     provider_function,
 ):
-    commands = _register(monkeypatch, _filter(tmp_path, "block"))
+    commands = _register(monkeypatch, make_sensitive_filter(tmp_path, "block"))
     provider_call = AsyncMock()
     monkeypatch.setattr(media, provider_function, provider_call)
 
@@ -150,7 +142,7 @@ def test_generation_soft_hit_and_unloaded_filter_do_not_block(monkeypatch, tmp_p
     monkeypatch.setattr(
         sensitive_filter_module,
         "get_filter",
-        lambda: _filter(tmp_path, "soft"),
+        lambda: make_sensitive_filter(tmp_path, "soft"),
     )
     assert not media._sensitive_text_blocked(
         event,
@@ -170,7 +162,7 @@ async def test_generated_lyrics_block_stops_music_provider_and_user_output(
     monkeypatch,
     tmp_path,
 ):
-    commands = _register(monkeypatch, _filter(tmp_path, "block"))
+    commands = _register(monkeypatch, make_sensitive_filter(tmp_path, "block"))
     monkeypatch.setattr(
         media,
         "generate_lyrics",
@@ -187,3 +179,56 @@ async def test_generated_lyrics_block_stops_music_provider_and_user_output(
     assert exc_info.value.args[0] == DEFAULT_OUTPUT_FALLBACK
     generate_music.assert_not_awaited()
     send_lyrics.assert_not_awaited()
+
+
+async def test_lyrics_command_block_stops_user_output(monkeypatch, tmp_path):
+    commands = _register(monkeypatch, make_sensitive_filter(tmp_path, "block"))
+    generate_lyrics = AsyncMock(
+        return_value=LyricsGenerationResult(lyrics="blocked lyrics")
+    )
+    send_lyrics = AsyncMock()
+    monkeypatch.setattr(media, "generate_lyrics", generate_lyrics)
+    monkeypatch.setattr(media, "_send_lyrics_forward", send_lyrics)
+
+    with pytest.raises(_CommandFinished) as exc_info:
+        await commands["music"].handler_fn(
+            object(),
+            _FakeEvent("/music lyrics safe theme"),
+        )
+
+    assert exc_info.value.args[0] == DEFAULT_OUTPUT_FALLBACK
+    generate_lyrics.assert_awaited_once()
+    send_lyrics.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("command_name", "message", "provider_function"),
+    [
+        ("draw", "/draw safe prompt", "generate_image"),
+        ("tts", "/tts safe prompt", "generate_audio"),
+        ("music", "/music safe prompt", "generate_music"),
+    ],
+)
+async def test_sensitive_reply_text_stops_provider_call(
+    monkeypatch,
+    tmp_path,
+    command_name,
+    message,
+    provider_function,
+):
+    commands = _register(monkeypatch, make_sensitive_filter(tmp_path, "block"))
+    provider_call = AsyncMock()
+    monkeypatch.setattr(media, provider_function, provider_call)
+    monkeypatch.setattr(
+        media,
+        "_resolve_message_content",
+        AsyncMock(return_value=("blocked reply", [])),
+    )
+    event = _FakeEvent(message)
+    event.reply = SimpleNamespace(message=object())
+
+    with pytest.raises(_CommandFinished) as exc_info:
+        await commands[command_name].handler_fn(object(), event)
+
+    assert "不允许" in str(exc_info.value.args[0])
+    provider_call.assert_not_awaited()

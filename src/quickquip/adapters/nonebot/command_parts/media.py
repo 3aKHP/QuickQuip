@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
+from quickquip.adapters.nonebot.command_parts._chat_utils import _scope_key
 from quickquip.adapters.nonebot.command_parts.common import _DRAW_QUALITY_RE, _DRAW_SIZE_RE, _extract_image_urls, _format_music_models, _format_tts_models, _format_voice_groups, _parse_music_args, _parse_tts_args, _resolve_message_content, _safe_shlex_split, _send_lyrics_forward, _strip_command_name
 from quickquip.app.message_pipeline import rate_limiter
 from quickquip.common.sensitive_filter import (
@@ -14,17 +15,11 @@ from quickquip.generation.image import ImageInput, download_image, generate_imag
 from quickquip.generation.music import generate_lyrics, generate_music
 from quickquip.generation.service import generation_service
 
-
-def _sensitive_scope(event) -> str:
-    group_id = getattr(event, "group_id", None)
-    return str(group_id) if group_id is not None else f"private:{event.user_id}"
-
-
 def _sensitive_text_blocked(event, text: str, channel: str) -> bool:
     return _scan_sensitive_text(
         text,
         channel=channel,
-        scope=_sensitive_scope(event),
+        scope=_scope_key(event),
     ).blocked
 
 

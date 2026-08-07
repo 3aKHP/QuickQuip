@@ -8,15 +8,7 @@ from quickquip.common.sensitive_filter import (
 from quickquip.llm.image_preprocessor import ImageDescription
 from quickquip.llm.provider import LLMResponse
 from tests.fixtures.provider_stubs import StubProviderClient
-
-
-def _sensitive_filter(tmp_path, section: str, word: str = "blocked") -> SensitiveFilter:
-    path = tmp_path / f"sensitive-{section}.toml"
-    path.write_text(
-        f'[{section}.test]\nwords = ["{word}"]\n',
-        encoding="utf-8",
-    )
-    return SensitiveFilter.from_toml(path)
+from tests.fixtures.sensitive_filter import make_sensitive_filter
 
 
 async def test_voice_transcript_block_stops_main_provider(
@@ -25,7 +17,7 @@ async def test_voice_transcript_block_stops_main_provider(
     monkeypatch,
     tmp_path,
 ):
-    sensitive = _sensitive_filter(tmp_path, "block")
+    sensitive = make_sensitive_filter(tmp_path, "block")
     monkeypatch.setattr("quickquip.llm.service._get_sensitive_filter", lambda: sensitive)
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
@@ -49,7 +41,7 @@ async def test_defectify_blocked_input_stops_provider(
     monkeypatch,
     tmp_path,
 ):
-    sensitive = _sensitive_filter(tmp_path, "block")
+    sensitive = make_sensitive_filter(tmp_path, "block")
     monkeypatch.setattr("quickquip.llm.service._get_sensitive_filter", lambda: sensitive)
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
@@ -74,7 +66,7 @@ async def test_defectify_blocked_output_uses_fallback(
     monkeypatch,
     tmp_path,
 ):
-    sensitive = _sensitive_filter(tmp_path, "block")
+    sensitive = make_sensitive_filter(tmp_path, "block")
     monkeypatch.setattr("quickquip.llm.service._get_sensitive_filter", lambda: sensitive)
 
     class _BlockedOutputClient:
@@ -131,7 +123,7 @@ async def test_blocked_image_description_stops_main_provider(
     monkeypatch,
     tmp_path,
 ):
-    sensitive = _sensitive_filter(tmp_path, "block")
+    sensitive = make_sensitive_filter(tmp_path, "block")
     monkeypatch.setattr("quickquip.llm.service._get_sensitive_filter", lambda: sensitive)
     provider = llm_service.config.providers["openai-main"]
     provider.non_vision_models.append("gpt-test")
@@ -171,7 +163,7 @@ async def test_soft_image_description_continues_to_main_provider(
     monkeypatch,
     tmp_path,
 ):
-    sensitive = _sensitive_filter(tmp_path, "soft")
+    sensitive = make_sensitive_filter(tmp_path, "soft")
     monkeypatch.setattr("quickquip.llm.service._get_sensitive_filter", lambda: sensitive)
     provider = llm_service.config.providers["openai-main"]
     provider.non_vision_models.append("gpt-test")
