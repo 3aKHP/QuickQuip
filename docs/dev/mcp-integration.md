@@ -218,6 +218,14 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 
 ---
 
-## 8. 当前文档结论
+## 8. 工具结果内容边界
+
+MCP 工具调用会先在 `src/quickquip/llm/mcp/` 归一化为受控的内部结果，再交给现有工具调用链。当前文本结果保持逐项去除首尾空白、忽略空项并以换行连接；仅在没有可见文本时，`structuredContent` 保持现有 JSON 文本回退行为。
+
+`ImageContent`、resource、audio、link 和未知内容不会被原样 JSON 序列化为工具文本。系统只向模型提供稳定的有限提示，例如图片尚未交付或某类内容尚未支持；不会自动下载 resource/link，也不会把资源正文、blob、完整 URL query、音频数据或图片编码注入模型请求。
+
+这项安全降级只处理非文本 MCP 内容的边界。MCP 图片的正式模型交付会在后续独立变更中实现；在此之前，它们不会作为图片发送给模型或 QQ 用户。
+
+## 9. 当前文档结论
 
 QuickQuip 当前已经可以接 MCP，但实际部署时仍应把它视为项目自己的外部工具后端，并通过项目自己的私有部署环境变量、卷挂载和云端开关来管理。
