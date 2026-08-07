@@ -1,7 +1,7 @@
 name: Tests
 
 # Reusable test workflow invoked by ci.yml (on push/PR) and release.yml (on tag).
-# Action references use version tags (v4, v5, ...); the repo should enable
+# Action references use floating major version tags; the repo should enable
 # Dependabot or a similar auto-pinner to replace them with commit SHAs.
 
 on:
