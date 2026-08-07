@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from quickquip.llm.config import MCPConfig, MCPServerConfig
-from quickquip.llm.tools import ToolExecutionContext
+from quickquip.llm.tools import LLMToolOutput, ToolExecutionContext
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
 from quickquip.llm.mcp.transport import (
     SseTransport,
@@ -27,6 +27,7 @@ from quickquip.llm.mcp.types import (
     MCPServerStatus,
     MCPToolCallResult,
     _build_tool_alias,
+    deliver_mcp_tool_result,
     _format_tool_result,
     _normalize_tool_filter,
     _schema_from_tool,
@@ -246,7 +247,7 @@ class MCPClientManager:
         alias: str,
         arguments: dict[str, Any],
         context: ToolExecutionContext,
-    ) -> str:
+    ) -> LLMToolOutput:
         _ = context
         binding = self._bindings.get(alias)
         if binding is None:
@@ -256,9 +257,11 @@ class MCPClientManager:
             raise MCPError(f"MCP server 未连接：{binding.server_id}")
 
         result = await client.call_tool(binding.tool_name, arguments)
-        if result.is_error:
-            raise MCPError(result.content)
-        return result.content
+        return deliver_mcp_tool_result(
+            result,
+            server_id=binding.server_id,
+            tool_name=binding.tool_name,
+        )
 
     async def aclose(self) -> None:
         clients = list(self._clients.values())

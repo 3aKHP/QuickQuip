@@ -222,9 +222,21 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 
 MCP 工具调用会先在 `src/quickquip/llm/mcp/` 归一化为受控的内部结果，再交给现有工具调用链。当前文本结果保持逐项去除首尾空白、忽略空项并以换行连接；仅在没有可见文本时，`structuredContent` 保持现有 JSON 文本回退行为。
 
-`ImageContent`、resource、audio、link 和未知内容不会被原样 JSON 序列化为工具文本。系统只向模型提供稳定的有限提示，例如图片尚未交付或某类内容尚未支持；不会自动下载 resource/link，也不会把资源正文、blob、完整 URL query、音频数据或图片编码注入模型请求。
+`ImageContent` 会先严格校验 base64、5 MiB 单图大小、真实图片格式和声明 MIME；首期仅支持 PNG、JPEG、GIF、WebP，每个 MCP 工具结果最多交付 5 张。校验通过的图片只在当前工具调用循环的内存中保存：视觉模型按各 provider 的受支持格式接收；非视觉模型使用已配置的图片转述器，转述失败或服务不可用时保留安全工具文本并明确省略图片。工具错误或被敏感词整体拦截的结果不会交付图片。图片像素本身不在本地敏感词审核范围，转述文本会在进入主模型前再次扫描。
 
-这项安全降级只处理非文本 MCP 内容的边界。MCP 图片的正式模型交付会在后续独立变更中实现；在此之前，它们不会作为图片发送给模型或 QQ 用户。
+resource、audio、link 和未知内容不会被原样 JSON 序列化为工具文本。系统只向模型提供稳定的有限提示；不会自动下载 resource/link，也不会把资源正文、blob、完整 URL query 或音频数据注入模型请求。MCP 图片只服务下一轮模型推理，不会直接作为 QQ 最终消息发送给用户。
+
+可选的固定版本 PRTS MCP 验收不会调用付费 LLM。提供连接信息后运行：
+
+```bash
+QUICKQUIP_MCP_ACCEPTANCE=1 \
+QUICKQUIP_MCP_PRTS_URL=https://example.test/mcp \
+QUICKQUIP_MCP_PRTS_TOKEN=... \
+QUICKQUIP_MCP_PRTS_OPERATOR=能天使 \
+.venv/bin/python -m pytest -m network tests/integration/test_mcp_prts_acceptance.py -q
+```
+
+测试会执行 MCP initialize、tools/list 和 `operator_artwork` 的 list/get，再用本地 stub serializer 检查结果请求结构。缺少任一环境变量时会明确 skip；不要把 token 写入测试 fixture、Issue 或 PR。
 
 ## 9. 当前文档结论
 

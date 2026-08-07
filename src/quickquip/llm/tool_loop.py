@@ -28,6 +28,30 @@ _TOOL_RESULT_BLOCK_REPLACEMENT = (
 _TOOL_ARGS_BLOCK_REPLACEMENT = (
     "工具调用参数包含违规内容，已拒绝执行。请用其他表述重新尝试。"
 )
+_TOOL_IMAGE_PREPROCESSING_UNAVAILABLE = (
+    "工具返回了图片，但当前模型无法直接读取图片，且前置图片识别服务不可用；已省略图片。"
+)
+_TOOL_IMAGE_PREPROCESSING_FAILED = "工具图片转述失败，已省略图片。"
+
+
+def _append_tool_notice(result: LLMToolResult, notice: str) -> LLMToolResult:
+    content = "\n".join(part for part in (result.content, notice) if part)
+    return LLMToolResult(
+        call_id=result.call_id,
+        name=result.name,
+        content=content,
+        images=list(result.images),
+        is_error=result.is_error,
+    )
+
+
+def _request_image_budget(request: LLMRequest) -> int:
+    existing_images = sum(
+        len(message.image_urls) + len(message.inline_images)
+        for message in request.messages
+        if message.role == "user"
+    )
+    return max(0, 5 - existing_images)
 
 
 async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int, base_delay: float, logger):
@@ -69,6 +93,7 @@ async def run_tool_call_loop(
     initial_tool_names: list[str] | None = None,
     tool_discovery_search_limit: int = 5,
     tool_discovery_max_loaded_tools: int = 12,
+    image_preprocessor=None,
 ):
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))
@@ -84,6 +109,7 @@ async def run_tool_call_loop(
         loaded_names = [spec.name for spec in request.tools]
     max_loaded_tools = max(1, min(tool_discovery_max_loaded_tools, 64))
     discovery_search_limit = max(1, min(tool_discovery_search_limit, 20))
+    remaining_tool_image_budget = _request_image_budget(request)
 
     def _loaded_request_tools():
         if not tool_discovery_enabled:
@@ -286,6 +312,87 @@ async def run_tool_call_loop(
                             is_error=True,
                         )
 
+            if result.is_error and result.images:
+                result = LLMToolResult(
+                    call_id=result.call_id,
+                    name=result.name,
+                    content=result.content,
+                    is_error=True,
+                )
+
+            if result.images:
+                accepted_images = result.images[:remaining_tool_image_budget]
+                omitted_images = len(result.images) - len(accepted_images)
+                result = LLMToolResult(
+                    call_id=result.call_id,
+                    name=result.name,
+                    content=result.content,
+                    images=accepted_images,
+                    is_error=result.is_error,
+                )
+                remaining_tool_image_budget -= len(accepted_images)
+                if omitted_images:
+                    result = _append_tool_notice(
+                        result,
+                        f"MCP 工具省略了 {omitted_images} 个超出当前请求图片预算的图片项。",
+                    )
+
+            if result.images and context.model in provider.non_vision_models:
+                if image_preprocessor is None:
+                    result = LLMToolResult(
+                        call_id=result.call_id,
+                        name=result.name,
+                        content="\n".join(
+                            part for part in (result.content, _TOOL_IMAGE_PREPROCESSING_UNAVAILABLE) if part
+                        ),
+                        is_error=result.is_error,
+                    )
+                else:
+                    descriptions = await image_preprocessor.describe_inline_images(result.images)
+                    descriptions_by_label = {
+                        description.source_url: description
+                        for description in descriptions
+                    }
+                    description_parts: list[str] = []
+                    failed_count = 0
+                    for image in result.images:
+                        description = descriptions_by_label.get(image.source_label)
+                        if (
+                            description is None
+                            or not description.success
+                            or not description.text_description.strip()
+                        ):
+                            failed_count += 1
+                            continue
+                        description_parts.append(
+                            f"[{image.source_label}]\n{description.text_description.strip()}"
+                        )
+                    description_blob = "\n".join(description_parts)
+                    if description_blob and sensitive.is_loaded:
+                        description_scan = sensitive.scan(description_blob)
+                        if description_scan.hits:
+                            _log_sensitive_hits(
+                                f"tool_image_description:{call.name}", scope_key, description_scan,
+                            )
+                        if description_scan.blocked:
+                            result = LLMToolResult(
+                                call_id=result.call_id,
+                                name=result.name,
+                                content=_TOOL_RESULT_BLOCK_REPLACEMENT,
+                                is_error=True,
+                            )
+                            description_parts = []
+                            failed_count = 0
+                    if description_parts or failed_count:
+                        notices = list(description_parts)
+                        if failed_count:
+                            notices.append(f"{_TOOL_IMAGE_PREPROCESSING_FAILED}（{failed_count} 张）")
+                        result = LLMToolResult(
+                            call_id=result.call_id,
+                            name=result.name,
+                            content="\n".join(part for part in [result.content, *notices] if part),
+                            is_error=result.is_error,
+                        )
             tool_results.append(result)
             if tool_discovery_enabled and call.name == tool_search_name and not result.is_error:
                 newly_loaded = _discover_tools_from_call(call)
@@ -312,6 +419,7 @@ async def run_tool_call_loop(
                 tool_call_id=item.call_id,
                 tool_name=item.name,
                 is_tool_error=item.is_error,
+                inline_images=list(item.images),
             )
             for item in tool_results
         ]

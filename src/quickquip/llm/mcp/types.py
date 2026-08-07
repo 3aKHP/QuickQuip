@@ -9,12 +9,20 @@ httpx machinery.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
+import warnings
 from dataclasses import dataclass, field
+from io import BytesIO
 from typing import Any, Literal
 from urllib.parse import urlsplit
+
+from PIL import Image, UnidentifiedImageError
+
+from quickquip.llm.tools import LLMInlineImage, LLMToolOutput
 
 
 class MCPError(RuntimeError):
@@ -88,12 +96,26 @@ class MCPToolCallResult:
     @property
     def content(self) -> str:
         """Render safe text and bounded notices without serializing raw content items."""
+        return self.format_content(undelivered_images=len(self.images))
+
+    def format_content(
+        self,
+        *,
+        undelivered_images: int = 0,
+        omitted_images: int = 0,
+        budget_omitted_images: int = 0,
+    ) -> str:
+        """Render safe text and bounded notices without raw MCP payloads."""
         parts = list(self.text)
         if not parts and self.structured_content is not None:
             parts.append(json.dumps(self.structured_content, ensure_ascii=False))
 
-        if self.images:
-            parts.append(f"MCP 工具返回了 {len(self.images)} 个尚未交付的图片项。")
+        if undelivered_images:
+            parts.append(f"MCP 工具返回了 {undelivered_images} 个尚未交付的图片项。")
+        if omitted_images:
+            parts.append(f"MCP 工具省略了 {omitted_images} 个无效或超出限制的图片项。")
+        if budget_omitted_images:
+            parts.append(f"MCP 工具省略了 {budget_omitted_images} 个超出当前请求图片预算的图片项。")
 
         for kind in ("resource", "audio", "link"):
             count = sum(1 for item in self.deferred if item.kind == kind)
@@ -265,3 +287,104 @@ def _format_tool_result(payload: dict[str, Any]) -> MCPToolCallResult:
         )
 
     return result
+
+
+_SUPPORTED_IMAGE_MIME_TYPES = frozenset({
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+})
+_IMAGE_FORMAT_MIME_TYPES = {
+    "PNG": "image/png",
+    "JPEG": "image/jpeg",
+    "GIF": "image/gif",
+    "WEBP": "image/webp",
+}
+_MAX_INLINE_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def _decode_image_candidate(candidate: MCPInlineImageCandidate) -> bytes | None:
+    """Strictly decode and inspect one candidate without exposing its data."""
+    encoded = candidate.data
+    if not encoded or len(encoded) % 4:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9+/]*={0,2}", encoded):
+        return None
+    padding = len(encoded) - len(encoded.rstrip("="))
+    if padding > 2 or (padding and "=" in encoded[:-padding]):
+        return None
+    estimated_size = (len(encoded) // 4) * 3 - padding
+    if estimated_size > _MAX_INLINE_IMAGE_BYTES:
+        return None
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if len(decoded) > _MAX_INLINE_IMAGE_BYTES:
+        return None
+    if base64.b64encode(decoded).decode("ascii") != encoded:
+        return None
+    return decoded
+
+
+def _validated_image(candidate: MCPInlineImageCandidate) -> bytes | None:
+    declared_mime = candidate.mime_type.lower()
+    if declared_mime not in _SUPPORTED_IMAGE_MIME_TYPES:
+        return None
+    decoded = _decode_image_candidate(candidate)
+    if decoded is None:
+        return None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(decoded)) as image:
+                detected_mime = _IMAGE_FORMAT_MIME_TYPES.get(image.format or "")
+                image.verify()
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        OSError,
+        ValueError,
+        UnidentifiedImageError,
+    ):
+        return None
+    if detected_mime != declared_mime:
+        return None
+    return decoded
+
+
+def deliver_mcp_tool_result(
+    result: MCPToolCallResult,
+    *,
+    server_id: str,
+    tool_name: str,
+) -> LLMToolOutput:
+    """Validate MCP image candidates and prepare a bounded rich tool result."""
+    if result.is_error:
+        return LLMToolOutput(
+            content=result.format_content(undelivered_images=len(result.images)),
+            is_error=True,
+        )
+
+    images: list[LLMInlineImage] = []
+    omitted_images = 0
+    for candidate in result.images:
+        if len(images) >= 5:
+            omitted_images += 1
+            continue
+        decoded = _validated_image(candidate)
+        if decoded is None:
+            omitted_images += 1
+            continue
+        images.append(
+            LLMInlineImage(
+                data=decoded,
+                media_type=candidate.mime_type.lower(),
+                source_label=f"MCP/{_safe_metadata(server_id)}/{_safe_metadata(tool_name)} image {len(images) + 1}",
+            )
+        )
+    return LLMToolOutput(
+        content=result.format_content(omitted_images=omitted_images),
+        images=images,
+    )

@@ -32,7 +32,7 @@ class FakeOpenAIClient(OpenAIProviderClient):
         self.last_headers: dict | None = None
         self.last_url: str | None = None
 
-    async def _prepare_image_inputs(self, image_urls):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None):
         return []
 
     def _get_api_key(self) -> str:
@@ -53,7 +53,7 @@ class FakeClaudeClient(ClaudeProviderClient):
         self.last_headers: dict | None = None
         self.last_url: str | None = None
 
-    async def _prepare_image_inputs(self, image_urls):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None):
         return []
 
     def _get_api_key(self) -> str:
@@ -74,7 +74,7 @@ class FakeGeminiClient(GeminiProviderClient):
         self.last_headers: dict | None = None
         self.last_url: str | None = None
 
-    async def _prepare_image_inputs(self, image_urls):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None):
         return []
 
     def _get_api_key(self) -> str:

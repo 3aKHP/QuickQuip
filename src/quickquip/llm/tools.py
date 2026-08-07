@@ -19,10 +19,29 @@ class LLMToolCall:
 
 
 @dataclass(slots=True)
+class LLMInlineImage:
+    """Validated in-memory image bytes for one provider request only."""
+
+    data: bytes = field(repr=False)
+    media_type: str = ""
+    source_label: str = ""
+
+
+@dataclass(slots=True)
+class LLMToolOutput:
+    """Provider-neutral tool handler output before registry call metadata is added."""
+
+    content: str
+    images: list[LLMInlineImage] = field(default_factory=list)
+    is_error: bool = False
+
+
+@dataclass(slots=True)
 class LLMConversationMessage:
     role: str
     content: str = ""
     image_urls: list[str] = field(default_factory=list)
+    inline_images: list[LLMInlineImage] = field(default_factory=list)
     tool_calls: list[LLMToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     tool_name: str | None = None
@@ -35,6 +54,7 @@ class LLMToolResult:
     call_id: str
     name: str
     content: str
+    images: list[LLMInlineImage] = field(default_factory=list)
     is_error: bool = False
 
 
