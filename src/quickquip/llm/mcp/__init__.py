@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from quickquip.llm.mcp.types import (
     MCPError,
+    MCPDeferredContentCandidate,
+    MCPInlineImageCandidate,
+    MCPResultDiagnostic,
     MCPToolBinding,
     MCPServerStatus,
     MCPToolCallResult,
@@ -30,6 +33,9 @@ __all__ = [
     "MCPClient",
     "MCPClientManager",
     "MCPError",
+    "MCPInlineImageCandidate",
+    "MCPDeferredContentCandidate",
+    "MCPResultDiagnostic",
     "MCPToolBinding",
     "MCPServerStatus",
     "MCPToolCallResult",

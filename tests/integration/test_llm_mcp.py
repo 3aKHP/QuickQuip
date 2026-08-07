@@ -11,6 +11,7 @@ import pytest
 
 from plugins.llm_mcp import MCPServerStatus, MCPToolBinding
 from plugins.llm_runtime import LLMService
+from quickquip.llm.mcp.types import _format_tool_result
 
 from tests.fixtures.configs import write_llm_config_bundle
 from tests.fixtures.provider_stubs import (
@@ -145,6 +146,45 @@ async def test_mcp_tool_call_executed_in_loop(mcp_service, patch_provider_builde
     assert round2.messages[-1].role == "tool"
     assert round2.messages[-1].tool_name == "mcp_fake_echo_text"
     assert round2.messages[-1].content == "echo::云端 DOOD"
+
+
+async def test_mcp_non_text_result_reaches_provider_only_as_safe_notice(
+    mcp_service,
+    patch_provider_builder,
+):
+    image_sentinel = "MCP_PROVIDER_IMAGE_SECRET_73b0"
+    resource_sentinel = "MCP_PROVIDER_RESOURCE_SECRET_1ac4"
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return _format_tool_result(
+            {"content": [
+                {"type": "text", "text": "safe MCP text"},
+                {"type": "image", "data": image_sentinel, "mimeType": "image/png"},
+                {"type": "resource", "resource": {
+                    "uri": f"https://example.test/data?token={resource_sentinel}",
+                    "text": resource_sentinel,
+                }},
+            ]}
+        ).content
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        recent_messages=[],
+    )
+
+    provider_text = "\n".join(message.content for message in stub.requests[-1].messages)
+    assert "safe MCP text" in provider_text
+    assert "尚未交付的图片项" in provider_text
+    assert "resource 项" in provider_text
+    assert image_sentinel not in provider_text
+    assert resource_sentinel not in provider_text
 
 
 async def test_mcp_tool_discovery_loads_deferred_tool(mcp_service, patch_provider_builder):
