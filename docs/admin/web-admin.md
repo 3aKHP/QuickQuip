@@ -172,7 +172,7 @@ Web Admin 当前提供 25 个标签页（前端使用 vue-router 4 hash 模式�
 
 LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Tool Loop 内的调用归入一个明显分组。请求正文是交给 HTTP 客户端的 UTF-8 JSON 序列化文本，详情页可在格式化 JSON 和传输原文之间切换；普通响应保留解析前的服务端 JSON 文本；流式响应完整消费 SSE 后，按 OpenAI、Claude 或 Gemini 协议重建为一份接近非流式结构的完整响应对象。详情页默认展示组合 JSON，也允许管理员切换到 SSE 传输原文。主列表和实时更新只传输调用元数据，选择记录后才读取请求正文、响应正文和 Header。故障切换、重试和 Tool Loop 后续轮次分别保留 HTTP 明细，并通过 Agent Loop ID 与组内序号关联。
 
-该页面面向最高权限管理员，正文和 Header 不做脱敏。页面会明确提示其中可能包含 API 凭证、系统提示和用户内容；建议只在排障期间开启采集。记录保存在 `data/llm_trace.db`，默认保留 14 天。
+该页面面向最高权限管理员，正文和 Header 不做脱敏。页面会明确提示其中可能包含 API 凭证、系统提示和用户内容；当 MCP 工具图片实际发送给 provider 时，原始请求正文还会包含重新编码后的图片 base64，且记录体积会增大。建议只在排障期间开启采集。记录保存在 `data/llm_trace.db`，默认保留 14 天。
 
 从使用 JSONL Trace 的版本升级时，`data/logs/quickquip_trace_YYYY-MM-DD.jsonl` 历史记录不会导入新的调用索引；Web Admin 访问 Trace 存储或产生新调用记录时，运行时仍会按同一 14 天保留期清理这些旧文件。
 

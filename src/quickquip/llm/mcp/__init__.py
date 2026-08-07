@@ -19,6 +19,7 @@ from quickquip.llm.mcp.types import (
     MCPToolBinding,
     MCPServerStatus,
     MCPToolCallResult,
+    deliver_mcp_tool_result,
 )
 from quickquip.llm.mcp.transport import (
     SseTransport,
@@ -39,6 +40,7 @@ __all__ = [
     "MCPToolBinding",
     "MCPServerStatus",
     "MCPToolCallResult",
+    "deliver_mcp_tool_result",
     "Transport",
     "StdioTransport",
     "StreamableHttpTransport",

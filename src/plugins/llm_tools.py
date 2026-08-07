@@ -1,7 +1,9 @@
 from quickquip.llm.tools import (
     LLMConversationMessage,
+    LLMInlineImage,
     LLMToolCall,
     LLMToolResult,
+    LLMToolOutput,
     LLMToolSpec,
     ToolManifestEntry,
     ToolExecutionContext,
@@ -10,8 +12,10 @@ from quickquip.llm.tools import (
 
 __all__ = [
     "LLMConversationMessage",
+    "LLMInlineImage",
     "LLMToolCall",
     "LLMToolResult",
+    "LLMToolOutput",
     "LLMToolSpec",
     "ToolManifestEntry",
     "ToolExecutionContext",

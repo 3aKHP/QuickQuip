@@ -580,6 +580,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             initial_tool_names=[spec.name for spec in request.tools],
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
+            image_preprocessor=self.image_preprocessor,
         )
 
     async def _generate_reply_for_scope(

@@ -53,7 +53,10 @@ class OpenAIProviderClient(BaseProviderClient):
                 "content": message.content,
             }
 
-        image_inputs = await self._prepare_image_inputs(message.image_urls)
+        if message.inline_images:
+            image_inputs = await self._prepare_image_inputs(message.image_urls, message.inline_images)
+        else:
+            image_inputs = await self._prepare_image_inputs(message.image_urls)
         if image_inputs:
             content: list[dict[str, Any]] = [
                 *[
@@ -78,8 +81,42 @@ class OpenAIProviderClient(BaseProviderClient):
             "content-type": "application/json",
         }
         messages = [{"role": "system", "content": request.system_prompt}]
+
+        pending_tool_images = []
+
+        async def _flush_tool_images() -> None:
+            nonlocal pending_tool_images
+            if not pending_tool_images:
+                return
+            image_inputs = await self._prepare_image_inputs([], pending_tool_images)
+            if image_inputs:
+                messages.append({
+                    "role": "user",
+                    "content": [
+                        *[
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{item.media_type};base64,{item.data_base64}",
+                                },
+                            }
+                            for item in image_inputs
+                        ],
+                        {
+                            "type": "text",
+                            "text": "以下图片来自刚才工具调用，仅用于继续推理。",
+                        },
+                    ],
+                })
+            pending_tool_images = []
+
         for message in request.messages:
+            if message.role != "tool":
+                await _flush_tool_images()
             messages.append(await self._serialize_message(message))
+            if message.role == "tool" and message.inline_images and not message.is_tool_error:
+                pending_tool_images.extend(message.inline_images)
+        await _flush_tool_images()
 
         payload: dict[str, Any] = {
             "model": request.model,

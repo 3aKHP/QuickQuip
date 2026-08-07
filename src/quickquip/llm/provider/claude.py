@@ -65,7 +65,10 @@ def _detect_stainless_os() -> str:
 
 class ClaudeProviderClient(BaseProviderClient):
     async def _serialize_user_message(self, message: LLMConversationMessage) -> dict[str, Any]:
-        image_inputs = await self._prepare_image_inputs(message.image_urls)
+        if message.inline_images:
+            image_inputs = await self._prepare_image_inputs(message.image_urls, message.inline_images)
+        else:
+            image_inputs = await self._prepare_image_inputs(message.image_urls)
         if image_inputs:
             content: list[dict[str, Any]] = [
                 *[
@@ -100,7 +103,7 @@ class ClaudeProviderClient(BaseProviderClient):
                         {
                             "type": "tool_result",
                             "tool_use_id": item.tool_call_id,
-                            "content": item.content,
+                            "content": await self._serialize_tool_result_content(item),
                             "is_error": item.is_tool_error,
                         }
                         for item in pending_tool_results
@@ -139,6 +142,31 @@ class ClaudeProviderClient(BaseProviderClient):
 
         await _flush_tool_results()
         return serialized
+
+    async def _serialize_tool_result_content(
+        self,
+        message: LLMConversationMessage,
+    ) -> str | list[dict[str, Any]]:
+        image_inputs = await self._prepare_image_inputs(
+            [],
+            [] if message.is_tool_error else message.inline_images,
+        )
+        if not image_inputs:
+            return message.content
+        return [
+            {"type": "text", "text": message.content},
+            *[
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": item.media_type,
+                        "data": item.data_base64,
+                    },
+                }
+                for item in image_inputs
+            ],
+        ]
 
     async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/messages?beta=true"

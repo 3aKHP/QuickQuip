@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 
-from quickquip.llm.tools import LLMConversationMessage
+from quickquip.llm.tools import LLMConversationMessage, LLMInlineImage
 from quickquip.llm.provider import LLMRequest, LLMProviderError
 
 logger = logging.getLogger(__name__)
@@ -40,11 +40,19 @@ class ImagePreprocessor:
     ) -> list[ImageDescription]:
         raise NotImplementedError
 
+    async def describe_inline_images(
+        self, images: list[LLMInlineImage]
+    ) -> list[ImageDescription]:
+        raise NotImplementedError
+
 
 class NoOpImagePreprocessor(ImagePreprocessor):
     """Default: returns empty list. Images pass through to the provider as-is."""
 
     async def describe_images(self, image_urls: list[str]) -> list[ImageDescription]:
+        return []
+
+    async def describe_inline_images(self, images: list[LLMInlineImage]) -> list[ImageDescription]:
         return []
 
 
@@ -125,6 +133,34 @@ class VisionImagePreprocessor(ImagePreprocessor):
                 descriptions.append(result)
         return descriptions
 
+    async def describe_inline_images(
+        self, images: list[LLMInlineImage]
+    ) -> list[ImageDescription]:
+        if not images:
+            return []
+
+        async def _describe_one(image: LLMInlineImage) -> ImageDescription:
+            async with self._semaphore:
+                return await self._describe_inline_single(image)
+
+        bounded_images = images[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
+        results = await asyncio.gather(
+            *[_describe_one(image) for image in bounded_images],
+            return_exceptions=True,
+        )
+        descriptions: list[ImageDescription] = []
+        for image, result in zip(bounded_images, results, strict=True):
+            if isinstance(result, BaseException):
+                descriptions.append(ImageDescription(
+                    source_url=image.source_label,
+                    text_description="",
+                    success=False,
+                    error=str(result),
+                ))
+            else:
+                descriptions.append(result)
+        return descriptions
+
     async def _describe_single(self, image_url: str) -> ImageDescription:
         try:
             request = LLMRequest(
@@ -165,6 +201,51 @@ class VisionImagePreprocessor(ImagePreprocessor):
             logger.exception("Unexpected error describing image %s", image_url)
             return ImageDescription(
                 source_url=image_url,
+                text_description="",
+                success=False,
+                error=str(exc),
+            )
+
+    async def _describe_inline_single(self, image: LLMInlineImage) -> ImageDescription:
+        try:
+            request = LLMRequest(
+                model=self._model,
+                system_prompt=self._prompt,
+                messages=[
+                    LLMConversationMessage(
+                        role="user",
+                        content="请描述这张图片。",
+                        inline_images=[image],
+                    )
+                ],
+                temperature=self._temperature,
+                max_output_tokens=self._max_tokens,
+            )
+            response = await self._client.complete(request)
+            text = response.text.strip()
+            if not text:
+                return ImageDescription(
+                    source_url=image.source_label,
+                    text_description="",
+                    success=False,
+                    error="视觉模型返回了空内容",
+                )
+            return ImageDescription(
+                source_url=image.source_label,
+                text_description=text,
+                success=True,
+            )
+        except LLMProviderError as exc:
+            return ImageDescription(
+                source_url=image.source_label,
+                text_description="",
+                success=False,
+                error=str(exc),
+            )
+        except Exception as exc:
+            logger.exception("Unexpected error describing inline image %s", image.source_label)
+            return ImageDescription(
+                source_url=image.source_label,
                 text_description="",
                 success=False,
                 error=str(exc),
