@@ -28,8 +28,6 @@ from quickquip.common.sensitive_filter import (
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.sts.config import (
-    CARD_LE_LLM_TIMEOUT,
-    TURMFLUCH_MAX_OUTPUT_TOKENS,
     TURMFLUCH_RATE_LIMIT_KEY,
     TURMFLUCH_RULE_NAME,
 )
@@ -102,7 +100,6 @@ IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
 DEFECTIFY_RULE_NAME = "llm_defectify"
-DEFECTIFY_MAX_OUTPUT_TOKENS = 512
 _GROUP_CACHE_MAX = 512
 
 
@@ -458,7 +455,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 )
             ],
             temperature=0.9,
-            max_output_tokens=min(provider.max_output_tokens, DEFECTIFY_MAX_OUTPUT_TOKENS),
+            max_output_tokens=provider.max_output_tokens,
             thinking_budget=None,
             tools=[],
             allow_tool_calls=False,
@@ -599,7 +596,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 )
             ],
             temperature=0.7,
-            max_output_tokens=min(provider.max_output_tokens, TURMFLUCH_MAX_OUTPUT_TOKENS),
+            max_output_tokens=provider.max_output_tokens,  # 不限小预算：推理模型的 reasoning_content 计入 max_tokens
             thinking_budget=None,
             tools=[],
             allow_tool_calls=False,
@@ -607,20 +604,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         )
 
         try:
-            response = await asyncio.wait_for(
-                build_provider_client(turmfluch_provider).complete(request),
-                timeout=CARD_LE_LLM_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("/turmfluch LLM call timed out")
-            return {
-                "reply": "LLM 响应超时，请稍后再试。",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
+            response = await build_provider_client(turmfluch_provider).complete(request)
         except LLMProviderError as exc:
             logger.warning("/turmfluch LLM call failed: %s", exc)
             return {
@@ -679,13 +663,19 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         chat_type: str,
     ) -> dict | None:
         """被动路径：群友说的「{captured}了」里的 captured 不是合法名时，找最近的
-        真名，返回 ``{"reply": "名了", ...}``；无合法结果返回 None。"""
+        真名，返回 ``{"reply": "名了", ...}``；无合法结果返回 None。
+
+        走 ``[triggers.quick_judge]`` 配置的专用便宜模型，不走群主模型。
+        """
         if self.config.load_error:
             return None
-        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
-        provider = self.config.providers.get(settings.provider_id)
-        if provider is None:
+        qj = self.config.quick_judge
+        provider_id = qj.provider_id if qj.provider_id else self.config.runtime.default_provider
+        if not provider_id or provider_id not in self.config.providers:
+            provider_id = next(iter(self.config.providers), None)
+        if not provider_id:
             return None
+        provider = self.config.providers[provider_id]
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
         sensitive = _get_sensitive_filter()
         if _scan_sensitive_text(
@@ -696,24 +686,18 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         prompt_pack = build_nearest_prompt(captured=captured)
         nearest_provider = replace(provider, stream_enabled=False)
         request = LLMRequest(
-            model=settings.model or provider.default_model,
+            model=qj.model if qj.model else provider.default_model,
             system_prompt=prompt_pack.system_prompt,
             messages=[LLMConversationMessage(role="user", content=prompt_pack.user_prompt)],
             temperature=0.5,  # 最近匹配偏低温求稳
-            max_output_tokens=min(provider.max_output_tokens, TURMFLUCH_MAX_OUTPUT_TOKENS),
+            max_output_tokens=provider.max_output_tokens,
             thinking_budget=None,
             tools=[],
             allow_tool_calls=False,
             tool_choice="none",
         )
         try:
-            response = await asyncio.wait_for(
-                build_provider_client(nearest_provider).complete(request),
-                timeout=CARD_LE_LLM_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("STS card_le nearest LLM timed out for %r", captured)
-            return None
+            response = await build_provider_client(nearest_provider).complete(request)
         except Exception:
             logger.exception("STS card_le nearest LLM call failed for %r", captured)
             return None
