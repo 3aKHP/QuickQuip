@@ -15,6 +15,9 @@ include = ["quickquip", "quickquip.*", "plugins", "plugins.*"]
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
+[tool.setuptools.package-data]
+"quickquip.sts" = ["*.json"]
+
 [tool.ruff]
 line-length = 100
 exclude = [".venv"]
