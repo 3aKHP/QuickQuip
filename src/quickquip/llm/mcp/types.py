@@ -42,6 +42,46 @@ class MCPStaleSessionError(MCPError):
     pass
 
 
+class MCPLegacyFallbackSignal(MCPError):
+    """Internal signal: auto probe detected a legacy server.
+
+    Not a real failure — the caller (MCPClient._start_auto) should close
+    the modern probe and fall back to legacy initialize.
+    """
+    pass
+
+
+# Recognized modern JSON-RPC error codes that prove a server is modern
+# (used by auto-negotiation to distinguish modern errors from legacy signals).
+_RECOGNIZED_MODERN_ERROR_CODES = frozenset({-32022, -32020})
+
+
+def _is_recognized_modern_error_body(body: bytes | str) -> bool:
+    """Check whether an HTTP error body contains a recognized modern JSON-RPC error.
+
+    Modern servers use 400 for UnsupportedProtocolVersionError (-32022) and
+    HeaderMismatch (-32020).  If the body contains one of these, the server
+    speaks modern MCP.  Otherwise (empty, HTML, or non-modern JSON-RPC), the
+    caller should treat it as a legacy fallback signal.
+    """
+    if isinstance(body, bytes):
+        try:
+            body = body.decode("utf-8")
+        except (UnicodeDecodeError, ValueError):
+            return False
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    error = data.get("error")
+    if not isinstance(error, dict):
+        return False
+    code = error.get("code")
+    return isinstance(code, (int, float)) and int(code) in _RECOGNIZED_MODERN_ERROR_CODES
+
+
 # ---------------------------------------------------------------------------
 # Failure classification (Wave 2)
 # ---------------------------------------------------------------------------

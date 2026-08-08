@@ -15,6 +15,7 @@ from typing import Any
 from quickquip.llm.config import MCPConfig, MCPServerConfig
 from quickquip.llm.tools import LLMToolOutput, ToolExecutionContext
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
+from quickquip.llm.mcp.modern_session import ModernHttpSession
 from quickquip.llm.mcp.transport import (
     SseTransport,
     StdioTransport,
@@ -23,6 +24,7 @@ from quickquip.llm.mcp.transport import (
 )
 from quickquip.llm.mcp.types import (
     MCPError,
+    MCPLegacyFallbackSignal,
     MCPStaleSessionError,
     MCPToolBinding,
     MCPServerStatus,
@@ -67,6 +69,7 @@ class MCPClient:
             server_id=config.id,
             timeout_seconds=config.timeout_seconds,
         )
+        self._modern_session: ModernHttpSession | None = None
         self.server_info: dict[str, Any] = {}
         self._connection_info = MCPConnectionInfo(
             server_id=config.id,
@@ -75,15 +78,68 @@ class MCPClient:
             configured_protocol_version=config.protocol_version,
         )
 
+    @property
+    def _is_modern(self) -> bool:
+        return self._modern_session is not None
+
+    def _pick_modern_version(self) -> str:
+        versions = self.config.supported_protocol_versions
+        return versions[0] if versions else "2026-07-28"
+
     async def start(self) -> None:
-        if self.config.negotiation in ("auto", "modern"):
+        negotiation = self.config.negotiation
+        if negotiation == "legacy":
+            await self._session.start()
+            await self._initialize()
+            self._connection_info.era = "legacy"
+        elif negotiation == "modern":
+            await self._start_modern()
+        elif negotiation == "auto":
+            await self._start_auto()
+        else:
             raise MCPError(
-                f"MCP server {self.config.id} 的 {self.config.negotiation!r} 协商模式尚未实现",
+                f"MCP server {self.config.id} 未知 negotiation 模式：{negotiation!r}",
                 failure_kind=MCP_FAILURE_CONFIG,
             )
+
+    async def _start_modern(self) -> None:
+        self._modern_session = ModernHttpSession(self.config)
+        await self._modern_session.start()
+        result = await self._modern_session.discover(
+            protocol_version=self._pick_modern_version(),
+            supported_versions=self.config.supported_protocol_versions,
+        )
+        self._on_modern_connected(result)
+
+    async def _start_auto(self) -> None:
+        """Auto negotiation: probe modern, fall back to legacy on legacy signal."""
+        modern = ModernHttpSession(self.config)
+        await modern.start()
+        try:
+            result = await modern.discover(
+                protocol_version=self._pick_modern_version(),
+                supported_versions=self.config.supported_protocol_versions,
+            )
+        except MCPLegacyFallbackSignal:
+            await modern.aclose()
+        else:
+            self._modern_session = modern
+            self._on_modern_connected(result)
+            return
+        # Legacy fallback
         await self._session.start()
         await self._initialize()
         self._connection_info.era = "legacy"
+
+    def _on_modern_connected(self, discover_result: dict[str, Any]) -> None:
+        self._connection_info.era = "modern"
+        self.server_info = discover_result.get("serverInfo", {}) if isinstance(discover_result, dict) else {}
+        self._connection_info.server_info = self.server_info or None
+        caps = discover_result.get("capabilities", {})
+        if isinstance(caps, dict):
+            self._connection_info.capabilities = caps
+        assert self._modern_session is not None
+        self._connection_info.negotiated_protocol_version = self._modern_session.protocol_version
 
     async def _initialize(self) -> None:
         result = await self._session.request(
@@ -110,6 +166,8 @@ class MCPClient:
         await self._initialize()
 
     async def list_tools(self) -> list[dict[str, Any]]:
+        if self._is_modern:
+            return await self._list_tools_modern()
         for attempt in range(self._MAX_STALE_RECONNECTS + 1):
             try:
                 return await self._list_tools_once()
@@ -120,6 +178,22 @@ class MCPClient:
                 await self._reconnect()
         # unreachable, but satisfies type checker
         return []
+
+    async def _list_tools_modern(self) -> list[dict[str, Any]]:
+        assert self._modern_session is not None
+        tools: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            params: dict[str, Any] = {}
+            if cursor:
+                params["cursor"] = cursor
+            result = await self._modern_session.request("tools/list", params)
+            current_tools = result.get("tools", []) if isinstance(result, dict) else []
+            tools.extend(item for item in current_tools if isinstance(item, dict))
+            cursor = str(result.get("nextCursor", "")).strip() if isinstance(result, dict) else ""
+            if not cursor:
+                break
+        return tools
 
     async def _list_tools_once(self) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
@@ -137,6 +211,8 @@ class MCPClient:
         return tools
 
     async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolCallResult:
+        if self._is_modern:
+            return await self._call_tool_modern(tool_name, arguments)
         try:
             result = await self._session.request(
                 "tools/call",
@@ -151,7 +227,20 @@ class MCPClient:
             raise MCPError(f"MCP 工具 {tool_name} 返回了不可识别的响应")
         return _format_tool_result(result)
 
+    async def _call_tool_modern(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolCallResult:
+        assert self._modern_session is not None
+        result = await self._modern_session.request(
+            "tools/call",
+            {"name": tool_name, "arguments": arguments},
+        )
+        if not isinstance(result, dict):
+            raise MCPError(f"MCP 工具 {tool_name} 返回了不可识别的响应")
+        return _format_tool_result(result)
+
     async def aclose(self) -> None:
+        if self._modern_session is not None:
+            await self._modern_session.aclose()
+            self._modern_session = None
         await self._session.aclose()
 
 

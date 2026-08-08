@@ -10,8 +10,6 @@ Covers:
 """
 from __future__ import annotations
 
-import pytest
-
 from quickquip.llm.config import _read_mcp_servers
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_KINDS,
@@ -335,39 +333,3 @@ def test_retryable_unknown_exception_retried():
 
     assert MCPClientManager._is_retryable(Exception("unknown"))
     assert MCPClientManager._is_retryable(MCPError("no kind"))
-
-
-# ---------------------------------------------------------------------------
-# Auto/modern mode not yet implemented (Wave 3 stub)
-# ---------------------------------------------------------------------------
-
-async def test_auto_mode_start_raises_not_implemented():
-    from quickquip.llm.config import MCPServerConfig
-    from quickquip.llm.mcp.client import MCPClient
-
-    config = MCPServerConfig(
-        id="test", transport="http", url="http://test/mcp",
-        negotiation="auto", supported_protocol_versions=["2026-07-28"],
-    )
-    client = MCPClient(config)
-    try:
-        with pytest.raises(MCPError, match="尚未实现"):
-            await client.start()
-    finally:
-        await client.aclose()
-
-
-async def test_modern_mode_start_raises_not_implemented():
-    from quickquip.llm.config import MCPServerConfig
-    from quickquip.llm.mcp.client import MCPClient
-
-    config = MCPServerConfig(
-        id="test", transport="http", url="http://test/mcp",
-        negotiation="modern", supported_protocol_versions=["2026-07-28"],
-    )
-    client = MCPClient(config)
-    try:
-        with pytest.raises(MCPError, match="尚未实现"):
-            await client.start()
-    finally:
-        await client.aclose()

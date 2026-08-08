@@ -24,6 +24,7 @@ import pytest
 from quickquip.llm.config import MCPServerConfig
 from quickquip.llm.mcp.client import MCPClient
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
+from quickquip.llm.mcp.modern_session import ModernHttpSession
 from quickquip.llm.mcp.transport import StreamableHttpTransport
 from quickquip.llm.mcp.types import MCPError, MCPStaleSessionError
 
@@ -599,4 +600,141 @@ async def test_transport_404_without_session_is_not_stale():
         assert not isinstance(exc_info.value, MCPStaleSessionError)
     finally:
         await session.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Wave 4: modern session and auto negotiation
+# ---------------------------------------------------------------------------
+
+def _patch_modern_asgi(monkeypatch, app: Any) -> None:
+    """Patch ModernHttpSession.start to use ASGI transport for in-process testing."""
+    async def _asgi_start(self: ModernHttpSession) -> None:
+        self._client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+            headers=self.config.headers,
+            timeout=self.config.timeout_seconds,
+        )
+    monkeypatch.setattr(ModernHttpSession, "start", _asgi_start)
+
+
+def _modern_config(**overrides: Any) -> MCPServerConfig:
+    defaults: dict[str, Any] = dict(
+        id="modern-test",
+        transport="http",
+        url="http://testserver/mcp",
+        timeout_seconds=5.0,
+        negotiation="modern",
+        supported_protocol_versions=["2026-07-28"],
+    )
+    defaults.update(overrides)
+    return MCPServerConfig(**defaults)
+
+
+async def test_modern_mode_discover_and_list(monkeypatch):
+    """Modern negotiation: discover → list_tools through modern session."""
+    app = ModernMCPServer()
+    _patch_modern_asgi(monkeypatch, app)
+    config = _modern_config()
+    client = MCPClient(config)
+    try:
+        await client.start()
+        assert client._is_modern
+        assert client._connection_info.era == "modern"
+        assert client._connection_info.negotiated_protocol_version == "2026-07-28"
+
+        tools = await client.list_tools()
+        assert len(tools) == 2  # default tools: echo, ping
+    finally:
+        await client.aclose()
+
+
+async def test_modern_mode_tools_call(monkeypatch):
+    """Modern tools/call returns result through modern session."""
+    app = ModernMCPServer()
+    _patch_modern_asgi(monkeypatch, app)
+    config = _modern_config()
+    client = MCPClient(config)
+    try:
+        await client.start()
+        result = await client.call_tool("echo", {"text": "modern hello"})
+        assert result.text == ["echo: modern hello"]
+    finally:
+        await client.aclose()
+
+
+async def test_modern_request_carries_meta_and_headers(monkeypatch):
+    """Modern requests include _meta, MCP-Protocol-Version, Mcp-Method, Mcp-Name."""
+    app = ModernMCPServer()
+    _patch_modern_asgi(monkeypatch, app)
+    config = _modern_config()
+    client = MCPClient(config)
+    try:
+        await client.start()
+        await client.call_tool("echo", {"text": "check headers"})
+
+        # Find the tools/call request
+        call_req = next(r for r in app.requests if r["method"] == "tools/call")
+        # _meta is inside params (per MCP 2026-07-28 spec)
+        meta = call_req["params"]["_meta"]
+        assert meta["io.modelcontextprotocol/protocolVersion"] == "2026-07-28"
+        assert meta["io.modelcontextprotocol/clientInfo"]["name"] == "QuickQuip"
+        # Routing headers
+        headers = call_req["headers"]
+        assert headers["mcp-protocol-version"] == "2026-07-28"
+        assert headers["mcp-method"] == "tools/call"
+        assert headers["mcp-name"] == "echo"
+    finally:
+        await client.aclose()
+
+
+async def test_auto_falls_back_to_legacy(monkeypatch):
+    """Auto negotiation falls back when probe detects legacy server."""
+    app = LegacyMCPServer()  # returns -32601 for server/discover
+    _patch_modern_asgi(monkeypatch, app)
+
+    # Also patch legacy transport to use ASGI
+    config = _modern_config(negotiation="auto")
+    transport = _AsgiHttpTransport(config, app=app)
+
+    client = MCPClient(config)
+    client._transport = transport
+    client._session = JsonRpcSession(transport, server_id=config.id, timeout_seconds=5)
+    try:
+        await client.start()
+        # Should have fallen back to legacy
+        assert not client._is_modern
+        assert client._connection_info.era == "legacy"
+
+        tools = await client.list_tools()
+        assert len(tools) == 2
+    finally:
+        await client.aclose()
+
+
+async def test_auto_stays_modern(monkeypatch):
+    """Auto negotiation stays modern when probe succeeds."""
+    app = ModernMCPServer()
+    _patch_modern_asgi(monkeypatch, app)
+    config = _modern_config(negotiation="auto")
+    client = MCPClient(config)
+    try:
+        await client.start()
+        assert client._is_modern
+        assert client._connection_info.era == "modern"
+    finally:
+        await client.aclose()
+
+
+async def test_modern_version_mismatch_fails(monkeypatch):
+    """Modern negotiation fails when no version intersection."""
+    app = ModernMCPServer(protocol_versions=["2099-01-01"])
+    _patch_modern_asgi(monkeypatch, app)
+    config = _modern_config(supported_protocol_versions=["2026-07-28"])
+    client = MCPClient(config)
+    try:
+        with pytest.raises(MCPError, match="无交集"):
+            await client.start()
+    finally:
+        await client.aclose()
 
