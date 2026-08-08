@@ -4,9 +4,10 @@ Provides the abstract ``Transport`` base plus three concrete transports.
 Each transport is a bidirectional JSON-RPC message pipe that pushes
 incoming envelopes into an ``asyncio.Queue`` inbox.
 
-Module-level state: ``_HTTPX_AVAILABLE`` is probed once at import time
-and read by ``StreamableHttpTransport.start`` / ``SseTransport.start`` to
-give a clear error when httpx is missing.
+httpx is imported lazily via :func:`_require_httpx` at ``start()`` time
+(not module import time) so that environments with deferred package
+installation (e.g. Windows embedded Python) can make httpx available
+between module import and first use.
 """
 from __future__ import annotations
 
@@ -22,15 +23,32 @@ from typing import Any, AsyncIterator
 
 try:
     import httpx
-    _HTTPX_AVAILABLE = True
 except ModuleNotFoundError:
     httpx = None  # type: ignore[assignment]
-    _HTTPX_AVAILABLE = False
 
 from quickquip.llm.config import MCPServerConfig
 from quickquip.llm.mcp.types import MCPError
 
 logger = logging.getLogger(__name__)
+
+
+def _require_httpx():
+    """Import httpx at call time (``start()``), not module import time.
+
+    Environments with deferred package installation (e.g. Windows embedded
+    Python) may make httpx available between module import and first use.
+    Once imported, the module-level ``httpx`` is set for subsequent calls.
+    """
+    global httpx
+    if httpx is None:
+        try:
+            import httpx as _httpx
+        except ModuleNotFoundError:
+            raise MCPError(
+                "HTTP/SSE MCP transport 需要 httpx，请执行 pip install httpx"
+            ) from None
+        httpx = _httpx
+    return httpx
 
 
 @contextmanager
@@ -309,8 +327,7 @@ class StreamableHttpTransport(Transport):
         self._session_id: str | None = None
 
     async def start(self) -> None:
-        if not _HTTPX_AVAILABLE:
-            raise MCPError("HTTP MCP transport 需要 httpx，请执行 pip install httpx")
+        _require_httpx()
         if not self.config.url:
             raise MCPError(f"MCP server {self.config.id} 缺少 url")
         self._client = httpx.AsyncClient(
@@ -384,8 +401,7 @@ class SseTransport(Transport):
         self._endpoint_error: Exception | None = None
 
     async def start(self) -> None:
-        if not _HTTPX_AVAILABLE:
-            raise MCPError("SSE MCP transport 需要 httpx，请执行 pip install httpx")
+        _require_httpx()
         if not self.config.url:
             raise MCPError(f"MCP server {self.config.id} 缺少 url")
 
