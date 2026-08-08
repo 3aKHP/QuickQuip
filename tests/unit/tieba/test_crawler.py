@@ -6,7 +6,9 @@ skipped unless invoked explicitly (pytest -m playwright).
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from filelock import FileLock
@@ -111,3 +113,80 @@ async def test_collect_threads_fails_when_profile_locked(
             await crawler.collect_threads("测试")
     finally:
         held.release()
+
+
+async def test_collect_threads_launch_kwargs_omit_storage_state_and_inject_cookies(
+    crawler: TiebaCrawler, monkeypatch
+) -> None:
+    """launch_persistent_context must NOT receive storage_state (it raises
+    TypeError — the v1.10.1 bug); cookies from storage_state.json must be
+    injected via add_cookies instead."""
+    cookies = [{"name": "BDUSS", "value": "x", "domain": "tieba.baidu.com", "path": "/"}]
+    crawler.config.state_path.parent.mkdir(parents=True, exist_ok=True)
+    crawler.config.state_path.write_text(
+        json.dumps({"cookies": cookies, "origins": []}), encoding="utf-8"
+    )
+
+    captured: dict = {}
+    mock_context = AsyncMock()
+    mock_context.pages = []
+    mock_context.new_page = AsyncMock(return_value=AsyncMock())
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return mock_context
+
+    mock_playwright = MagicMock()
+    mock_playwright.chromium.launch_persistent_context = AsyncMock(side_effect=_capture)
+
+    class _FakeAsyncPlaywright:
+        async def __aenter__(self):
+            return mock_playwright
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("quickquip.tieba.crawler.async_playwright", _FakeAsyncPlaywright)
+    # empty feed -> extract_forum_links returns [] -> raises before any crawling,
+    # but only after cookies are injected
+    monkeypatch.setattr(
+        crawler, "load_forum_feed_data", AsyncMock(return_value={"page_data": {"feed_list": []}})
+    )
+
+    with pytest.raises(TiebaServiceError, match="未在贴吧首页提取到帖子链接"):
+        await crawler.collect_threads("测试")
+
+    assert "storage_state" not in captured
+    assert captured["user_data_dir"] == str(crawler.config.crawler_profile_dir)
+    assert any("disk-cache-size" in a for a in captured["args"])
+    mock_context.add_cookies.assert_awaited_once_with(cookies)
+
+
+async def test_collect_threads_skips_add_cookies_when_no_state_file(
+    crawler: TiebaCrawler, monkeypatch
+) -> None:
+    """When storage_state.json is absent, add_cookies is not called."""
+    assert not crawler.config.state_path.exists()
+
+    mock_context = AsyncMock()
+    mock_context.pages = []
+    mock_context.new_page = AsyncMock(return_value=AsyncMock())
+    mock_playwright = MagicMock()
+    mock_playwright.chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
+
+    class _FakeAsyncPlaywright:
+        async def __aenter__(self):
+            return mock_playwright
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("quickquip.tieba.crawler.async_playwright", _FakeAsyncPlaywright)
+    monkeypatch.setattr(
+        crawler, "load_forum_feed_data", AsyncMock(return_value={"page_data": {"feed_list": []}})
+    )
+
+    with pytest.raises(TiebaServiceError, match="未在贴吧首页提取到帖子链接"):
+        await crawler.collect_threads("测试")
+
+    mock_context.add_cookies.assert_not_awaited()
