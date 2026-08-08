@@ -6,6 +6,12 @@
 
 （暂无）
 
+## [1.10.1] - 2026-08-09
+
+### 🐛 修复 (Fixed)
+
+- **贴吧爬虫临时 profile I/O 抖动**：`collect_threads` 改用持久 `user_data_dir`（替代每次 `launch` 建删临时 profile），并以跨进程文件锁串行化 bot 与 web-admin 容器对同一 profile 的并发访问，消除曾主导容器累计块写入与内存峰值的 I/O 抖动。
+
 ## [1.10.0] - 2026-08-08
 
 ### ✨ 新增 (Added)
@@ -655,7 +661,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.10.1...HEAD
+[1.10.1]: https://github.com/3aKHP/QuickQuip/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/3aKHP/QuickQuip/compare/v1.9.7...v1.10.0
 [1.9.7]: https://github.com/3aKHP/QuickQuip/compare/v1.9.6...v1.9.7
 [1.9.6]: https://github.com/3aKHP/QuickQuip/compare/v1.9.5...v1.9.6
