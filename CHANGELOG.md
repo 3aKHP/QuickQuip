@@ -6,6 +6,12 @@
 
 （暂无）
 
+## [1.10.2] - 2026-08-09
+
+### 🐛 修复 (Fixed)
+
+- **贴吧采集启动失败**：v1.10.1 的 `collect_threads` 误将 `storage_state` 传给 `launch_persistent_context`（该参数仅 `new_context` 支持），导致 `TypeError`、后台同步任务崩溃、贴吧同步完全失效；改为启动持久 context 后用 `add_cookies` 注入登录态。
+
 ## [1.10.1] - 2026-08-09
 
 ### 🐛 修复 (Fixed)
@@ -661,7 +667,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.10.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.10.2...HEAD
+[1.10.2]: https://github.com/3aKHP/QuickQuip/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/3aKHP/QuickQuip/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/3aKHP/QuickQuip/compare/v1.9.7...v1.10.0
 [1.9.7]: https://github.com/3aKHP/QuickQuip/compare/v1.9.6...v1.9.7

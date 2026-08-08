@@ -293,11 +293,16 @@ class TiebaCrawler:
                 }
                 if self.config.browser_channel:
                     launch_kwargs["channel"] = self.config.browser_channel
-                storage_state = self.get_storage_state_arg()
-                if storage_state:
-                    launch_kwargs["storage_state"] = storage_state
                 context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
                 try:
+                    # launch_persistent_context does not accept storage_state; inject
+                    # the login cookies from storage_state.json into the context instead.
+                    storage_state = self.get_storage_state_arg()
+                    if storage_state:
+                        with open(storage_state, encoding="utf-8") as f:
+                            state = json.load(f)
+                        if state.get("cookies"):
+                            await context.add_cookies(state["cookies"])
                     page = context.pages[0] if context.pages else await context.new_page()
                     forum_feed_data = await self.load_forum_feed_data(page, forum_keyword)
                     links = self.extract_forum_links(forum_feed_data)
