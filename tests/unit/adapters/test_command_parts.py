@@ -52,6 +52,7 @@ def test_register_commands_keeps_command_count_and_order():
         "sessions",
         "delete_session",
         "stats",
+        "turmfluch",
         "llm",
         "search",
         "defectify",
