@@ -4,9 +4,10 @@ Provides the abstract ``Transport`` base plus three concrete transports.
 Each transport is a bidirectional JSON-RPC message pipe that pushes
 incoming envelopes into an ``asyncio.Queue`` inbox.
 
-Module-level state: ``_HTTPX_AVAILABLE`` is probed once at import time
-and read by ``StreamableHttpTransport.start`` / ``SseTransport.start`` to
-give a clear error when httpx is missing.
+httpx is imported lazily via :func:`_require_httpx` at ``start()`` time
+(not module import time) so that environments with deferred package
+installation (e.g. Windows embedded Python) can make httpx available
+between module import and first use.
 """
 from __future__ import annotations
 
@@ -22,15 +23,39 @@ from typing import Any, AsyncIterator
 
 try:
     import httpx
-    _HTTPX_AVAILABLE = True
 except ModuleNotFoundError:
     httpx = None  # type: ignore[assignment]
-    _HTTPX_AVAILABLE = False
 
 from quickquip.llm.config import MCPServerConfig
-from quickquip.llm.mcp.types import MCPError
+from quickquip.llm.mcp.types import (
+    MCPError,
+    MCPStaleSessionError,
+    MCP_FAILURE_AUTH,
+    MCP_FAILURE_TIMEOUT,
+    MCP_FAILURE_TRANSPORT,
+    _sanitize_error_message,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _require_httpx():
+    """Import httpx at call time (``start()``), not module import time.
+
+    Environments with deferred package installation (e.g. Windows embedded
+    Python) may make httpx available between module import and first use.
+    Once imported, the module-level ``httpx`` is set for subsequent calls.
+    """
+    global httpx
+    if httpx is None:
+        try:
+            import httpx as _httpx
+        except ModuleNotFoundError:
+            raise MCPError(
+                "HTTP/SSE MCP transport 需要 httpx，请执行 pip install httpx"
+            ) from None
+        httpx = _httpx
+    return httpx
 
 
 @contextmanager
@@ -309,8 +334,7 @@ class StreamableHttpTransport(Transport):
         self._session_id: str | None = None
 
     async def start(self) -> None:
-        if not _HTTPX_AVAILABLE:
-            raise MCPError("HTTP MCP transport 需要 httpx，请执行 pip install httpx")
+        _require_httpx()
         if not self.config.url:
             raise MCPError(f"MCP server {self.config.id} 缺少 url")
         self._client = httpx.AsyncClient(
@@ -337,9 +361,23 @@ class StreamableHttpTransport(Transport):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+            status = exc.response.status_code
+            if status == 404 and self._session_id:
+                self._session_id = None
+                raise MCPStaleSessionError(
+                    f"MCP server {self.config.id} session expired"
+                ) from exc
+            raise MCPError(
+                f"MCP server {self.config.id} HTTP {status}",
+                failure_kind=MCP_FAILURE_AUTH if status in (401, 403) else MCP_FAILURE_TRANSPORT,
+                http_status=status,
+            ) from exc
         except httpx.RequestError as exc:
-            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+            kind = MCP_FAILURE_TIMEOUT if isinstance(exc, httpx.TimeoutException) else MCP_FAILURE_TRANSPORT
+            raise MCPError(
+                f"MCP server {self.config.id} 请求失败：{_sanitize_error_message(exc)}",
+                failure_kind=kind,
+            ) from exc
 
         returned_session = response.headers.get("mcp-session-id")
         if returned_session:
@@ -384,8 +422,7 @@ class SseTransport(Transport):
         self._endpoint_error: Exception | None = None
 
     async def start(self) -> None:
-        if not _HTTPX_AVAILABLE:
-            raise MCPError("SSE MCP transport 需要 httpx，请执行 pip install httpx")
+        _require_httpx()
         if not self.config.url:
             raise MCPError(f"MCP server {self.config.id} 缺少 url")
 
@@ -418,9 +455,18 @@ class SseTransport(Transport):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+            status = exc.response.status_code
+            raise MCPError(
+                f"MCP server {self.config.id} HTTP {status}",
+                failure_kind=MCP_FAILURE_AUTH if status in (401, 403) else MCP_FAILURE_TRANSPORT,
+                http_status=status,
+            ) from exc
         except httpx.RequestError as exc:
-            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+            kind = MCP_FAILURE_TIMEOUT if isinstance(exc, httpx.TimeoutException) else MCP_FAILURE_TRANSPORT
+            raise MCPError(
+                f"MCP server {self.config.id} 请求失败：{_sanitize_error_message(exc)}",
+                failure_kind=kind,
+            ) from exc
         # Classic SSE transport: POST typically returns 202 Accepted with no body;
         # the JSON-RPC response arrives on the SSE stream. Nothing to push here.
 

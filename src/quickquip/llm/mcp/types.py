@@ -26,7 +26,54 @@ from quickquip.llm.tools import LLMInlineImage, LLMToolOutput
 
 
 class MCPError(RuntimeError):
+    def __init__(self, *args: Any, failure_kind: str = "", http_status: int = 0) -> None:
+        super().__init__(*args)
+        self.failure_kind = failure_kind
+        self.http_status = http_status
+
+
+class MCPStaleSessionError(MCPError):
+    """Raised when a request carrying mcp-session-id receives HTTP 404.
+
+    Indicates the server has discarded the session and a new legacy
+    initialize is required.  Read-only requests may trigger a bounded
+    reconnect; tools/call must NOT be replayed.
+    """
     pass
+
+
+class MCPLegacyFallbackSignal(MCPError):
+    """Internal signal: auto probe detected a legacy server.
+
+    Not a real failure — the caller (MCPClient._start_auto) should close
+    the modern probe and fall back to legacy initialize.
+    """
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Failure classification (Wave 2)
+# ---------------------------------------------------------------------------
+
+MCP_FAILURE_CONFIG = "config"
+MCP_FAILURE_PROBE = "probe"
+MCP_FAILURE_LEGACY_HANDSHAKE = "legacy-handshake"
+MCP_FAILURE_MODERN_NEGOTIATION = "modern-negotiation"
+MCP_FAILURE_AUTH = "auth"
+MCP_FAILURE_TIMEOUT = "timeout"
+MCP_FAILURE_ROUTING = "routing"
+MCP_FAILURE_TRANSPORT = "transport"
+
+MCP_FAILURE_KINDS = frozenset({
+    MCP_FAILURE_CONFIG,
+    MCP_FAILURE_PROBE,
+    MCP_FAILURE_LEGACY_HANDSHAKE,
+    MCP_FAILURE_MODERN_NEGOTIATION,
+    MCP_FAILURE_AUTH,
+    MCP_FAILURE_TIMEOUT,
+    MCP_FAILURE_ROUTING,
+    MCP_FAILURE_TRANSPORT,
+})
 
 
 @dataclass(slots=True)
@@ -47,6 +94,33 @@ class MCPServerStatus:
     tool_count: int = 0
     error: str | None = None
     detail: str = ""
+    negotiation: str = "legacy"
+    era: str = "unknown"
+    failure_kind: str = ""
+    negotiated_protocol_version: str = ""
+
+
+@dataclass(slots=True)
+class MCPConnectionInfo:
+    """Per-server connection state for dual-era MCP.
+
+    ``configured_protocol_version`` is the legacy pin (from config) or the
+    modern offer list joined as a string; ``negotiated_protocol_version``
+    is the version actually agreed upon (empty until negotiation completes).
+
+    ``generation`` increments on each reconnect so stale pending futures
+    can be discarded.
+    """
+
+    server_id: str
+    negotiation: str  # legacy | auto | modern
+    era: str  # legacy | modern | unknown
+    configured_protocol_version: str
+    negotiated_protocol_version: str = ""
+    session_id: str | None = None
+    capabilities: dict[str, Any] = field(default_factory=dict)
+    server_info: dict[str, Any] | None = None
+    generation: int = 0
 
 
 @dataclass(slots=True)
@@ -153,6 +227,60 @@ def _normalize_tool_filter(items: list[str]) -> set[str]:
 
 def _tool_filter_matches(filters: set[str], *, tool_name: str, alias: str) -> bool:
     return tool_name in filters or alias in filters
+
+
+def _detect_alias_conflicts(bindings: list[MCPToolBinding]) -> set[str]:
+    """Return aliases that appear more than once across all bindings.
+
+    Collisions can arise from ``_sanitize_tool_name`` normalization
+    (e.g. ``a-b`` and ``a_b`` produce the same alias) or from identical
+    tool names across different servers.  Callers should treat conflicting
+    aliases as fail-closed: do not register any binding whose alias is in
+    the returned set.
+    """
+    counts: dict[str, int] = {}
+    for binding in bindings:
+        counts[binding.alias] = counts.get(binding.alias, 0) + 1
+    return {alias for alias, count in counts.items() if count > 1}
+
+
+_MAX_SAFE_ERROR_LENGTH = 200
+_URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def _sanitize_url(url: str) -> str:
+    """Strip query, fragment, and userinfo from a URL to prevent credential leakage.
+
+    Tokens in query parameters (``?key=...``) and embedded credentials
+    (``user:pass@host``) must never appear in status JSON, dashboards, or
+    logs.  Non-absolute URLs (paths, commands) are returned unchanged.
+    """
+    if not isinstance(url, str) or not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "[invalid-url]"
+    if not parts.scheme or not parts.netloc:
+        return url
+    # Reconstruct from hostname/port to strip userinfo; bracket IPv6 literals.
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return f"{parts.scheme}://{host}{parts.path}"
+
+
+def _sanitize_error_message(exc: BaseException, *, limit: int = _MAX_SAFE_ERROR_LENGTH) -> str:
+    """Remove URLs from exception messages for safe status/logging use.
+
+    httpx ``RequestError`` string representations include the full request
+    URL, which may carry credentials in the query string.
+    """
+    msg = str(exc)
+    msg = _URL_PATTERN.sub("[url]", msg)
+    return msg[:limit]
 
 
 def _schema_from_tool(raw_tool: dict[str, Any]) -> dict[str, Any]:
