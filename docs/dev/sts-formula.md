@@ -1,0 +1,111 @@
+# STS 公式化回复模块
+
+## 1. 模块定位
+
+`quickquip.sts` 是承载《杀戮尖塔》（Slay the Spire）相关"公式化"梗能力的**独立顶层域**。
+它与规则引擎（`chat/`）和 LLM 运行时（`llm/`）平行，按"每个公式一个子包"的方式组织，
+互不耦合，方便后续追加策略不同的新公式。
+
+当前唯一公式：
+
+- **「xxx了」**（`formulas/card_le/`）——把卡牌/遗物名当事件用，加"了"输出。
+
+第一阶段的范围仅此一个公式；"我说xxxx""假如xxxx"等以后以兄弟子包形式加入。
+
+---
+
+## 2. 词表（地基）
+
+公式的前提是一份有时效性的卡牌/遗物中文名表。
+
+- **数据源**：[`nkhoit/spire-archive`](https://github.com/nkhoit/spire-archive)。两代游戏的
+  cards/relics 数据 + 简中本地化，从游戏文件解析（非手抄），覆盖 STS1（361 卡 / 181 遗物）
+  与 STS2（577 卡 / 289 遗物，EA 快照 v0.107.1）。
+- **构建**：`scripts/refresh_sts_lexicon.py` 把两代数据按 ID join 简中、按中文名跨代去重，
+  输出 `src/quickquip/sts/sts_lexicon.json`（1117 条，带来源 SHA / 版本元信息）。
+  刷新时核对 spire-archive 最新 commit、改脚本里的 `SOURCE_SHA` 重跑即可。
+- **加载**：`lexicon.py` 经 `importlib.resources` 读取 vendored JSON，套用
+  `config.EXCLUDED_NAMES` 得到活跃集合 `NAMES`。vendored 文件保持完整（与上游一致），
+  排除项集中、可审计、刷新不回退。
+- **排除标准打防牌**：每个角色的初始 Strike/Defend 跨代去重后坍缩为「打击」「防御」两个
+  2 字裸词，歧义过大（群聊里几乎不会是玩梗），故排除；含该子串的「完美打击」「究极防御」
+  等不受影响。新增歧义词只需追加到 `EXCLUDED_NAMES`。
+
+> 词表文件平铺在包根（`sts/sts_lexicon.json`），不放在 `data/` 子目录——根 `.gitignore`
+> 的 `data/` 规则会忽略任意层级的 `data` 目录。
+
+---
+
+## 3. 「xxx了」的两条触发路径
+
+两条路径共用 `prompting.py`（system prompt 注入完整活跃词表作为闭集约束、利于 prompt 缓存）
+与 `parsing.py`（从模型输出提取并校验合法名，保证 bot 永不发出虚构名字）。
+
+### 3.1 被动路径（`passive.py`）
+
+群友发言里的**独立短句**「X了」：
+
+1. 正则 `^([一-鿿]{2,5})了$` 整句锚定命中（只接 2–5 汉字 + 了、句末，避免长句误触发）；
+2. X 是合法卡牌/遗物名（在活跃词表里）→ **静默**（别人已在玩梗，无需插话）；
+3. X 不是合法名 → LLM 从词表里挑语义/字面最近的真名 Y → 回复「Y了」。
+
+反直觉点是"命中真名反而闭嘴、没命中才接话"——喜剧来自把非卡词强行映射进卡牌语义空间。
+
+- LLM 调用经 `LLMService.generate_card_le_nearest`（provider 解析 + 输出敏感词扫描，输出经
+  `extract_card_le_name` 校验）。
+- **限频**：`sts_card_le` 桶，按群分桶、强限频，保持"偶发荒诞乱入"而非刷屏。
+- **缓存**：按捕获词的短期 TTL 缓存（300s），降低同一「X了」的重复 LLM 调用——因为 LLM
+  调用发生在 `resolve_reply` 内、早于框架层的限频判定，缓存能把被限频情形的成本压低
+  （同 `chat/context_rules.py` 的 judge 缓存思路）。
+
+接入点：`app/message_pipeline.py` 的 `resolve_reply()` 规则链，位于 `context_rule` 之后、
+`timezone` 之前，复用 `rule_switch`（按群开关）与框架的 `rate_limit`。
+
+### 3.2 主动路径（`/turmfluch` 命令）
+
+显式命令（`turmfluch` = 德语 Turm 尖塔 + Fluch 诅咒），与 `/defectify` 同构：
+
+- 吃跟随文字 / 命令内图片 / 引用消息（`command_parts/sts.py`）；
+- `LLMService.generate_turmfluch_reply` 把内容喂给 LLM，从词表闭集里选一个最贴切的名字，
+  输出「名了」，经 `extract_card_le_name` 校验 + 输入/输出敏感词扫描；
+- `sts_turmfluch` 限频桶（global scope，保护 LLM 用量）。
+
+---
+
+## 4. 架构与扩展
+
+```
+src/quickquip/sts/
+├── lexicon.py            # 加载词表 + 排除 + 查询（NAMES / is_card_name / get / meta）
+├── sts_lexicon.json      # vendored 词表（1117 条，包数据，importlib.resources 加载）
+├── config.py             # 排除项、正则、规则名/限频键等共用配置
+└── formulas/
+    └── card_le/          # 公式「xxx了」
+        ├── prompting.py  # LLM prompt（注入词表闭集）
+        ├── parsing.py    # 输出校验（提取合法名）
+        ├── passive.py    # 被动匹配器（返回规则 dict，插 resolve_reply 链）
+        └── command.py    # （命令业务逻辑当前在 LLMService.generate_turmfluch_reply）
+```
+
+框架无关的业务逻辑都在 `sts/`；NoneBot 接线在适配层：
+命令注册在 `adapters/nonebot/command_parts/sts.py`，被动匹配器在 `app/message_pipeline.py`。
+
+**加新公式**：在 `formulas/` 加一个兄弟子包，自带触发与生成策略，复用 `lexicon` 与 `config`
+即可。LLM 调用仍走 `LLMService` 的方法（参照 defectify / turmfluch 的编排位置），不直接伸手
+进 LLMService 私有成员。当前不为"公式"做抽象注册框架（只有一个公式），等第二个公式落地再视
+需要抽象。
+
+---
+
+## 5. 相关文件速查
+
+| 关注点 | 位置 |
+|---|---|
+| 词表数据 | `src/quickquip/sts/sts_lexicon.json` |
+| 词表加载/排除/查询 | `src/quickquip/sts/lexicon.py` |
+| 排除项与正则、规则名 | `src/quickquip/sts/config.py` |
+| 词表刷新脚本 | `scripts/refresh_sts_lexicon.py` |
+| 被动匹配器 | `src/quickquip/sts/formulas/card_le/passive.py` |
+| 命令注册 | `src/quickquip/adapters/nonebot/command_parts/sts.py` |
+| LLM 编排 | `src/quickquip/llm/service.py`（`generate_turmfluch_reply` / `generate_card_le_nearest`） |
+| 限频桶 | `src/quickquip/chat/config.py`（`_BUILTIN_RATE_LIMIT_RULES`） |
