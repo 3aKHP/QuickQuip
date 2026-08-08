@@ -18,6 +18,7 @@ _BUILTIN_SWITCHABLE_RULES: set[str] = {
     "good_girl_chain_progress",
     "timezone_wake",
     "timezone_sleep",
+    "sts_card_le",
     "llm_chat",
     "tieba_random_post",
     "awakening_extend",

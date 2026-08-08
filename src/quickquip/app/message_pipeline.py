@@ -48,6 +48,7 @@ from quickquip.chat.period_report import (
 )
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
+from quickquip.sts.config import CARD_LE_RATE_LIMIT_KEY
 from quickquip.sts.formulas.card_le.passive import match_card_le
 from quickquip.chat.awakening import (
     get_config as _get_awakening_config,
@@ -354,7 +355,9 @@ async def resolve_reply(
             if rule_switch.is_enabled(group_id, rule_name):
                 return ctx_reply
 
-    if group_id is not None:
+    if group_id is not None and rate_limiter.can_allow(
+        CARD_LE_RATE_LIMIT_KEY, user_id, group_id=group_id
+    ):
         sts_reply = await match_card_le(
             text=text,
             llm_service=get_llm_service(),

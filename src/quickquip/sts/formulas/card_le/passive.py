@@ -68,7 +68,7 @@ async def match_card_le(
     if cached is _MISSING:
         result = await llm_service.generate_card_le_nearest(
             captured=captured,
-            chat_id=group_id if group_id is not None else 0,
+            chat_id=group_id,
             chat_type=chat_type,
         )
         reply = result["reply"] if result else None

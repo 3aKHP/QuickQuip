@@ -27,7 +27,12 @@ from quickquip.common.sensitive_filter import (
 )
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
-from quickquip.sts.config import TURMFLUCH_MAX_OUTPUT_TOKENS, TURMFLUCH_RATE_LIMIT_KEY, TURMFLUCH_RULE_NAME
+from quickquip.sts.config import (
+    CARD_LE_LLM_TIMEOUT,
+    TURMFLUCH_MAX_OUTPUT_TOKENS,
+    TURMFLUCH_RATE_LIMIT_KEY,
+    TURMFLUCH_RULE_NAME,
+)
 from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
 from quickquip.sts.formulas.card_le.prompting import build_nearest_prompt, build_turmfluch_prompt
 from quickquip.llm.identity import IdentityIndex
@@ -670,6 +675,10 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             return None
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
         sensitive = _get_sensitive_filter()
+        if _scan_sensitive_text(
+            captured, channel="card_le_input", scope=scope_key, sensitive_filter=sensitive
+        ).blocked:
+            return None
 
         prompt_pack = build_nearest_prompt(captured=captured)
         nearest_provider = replace(provider, stream_enabled=False)
@@ -685,7 +694,13 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             tool_choice="none",
         )
         try:
-            response = await build_provider_client(nearest_provider).complete(request)
+            response = await asyncio.wait_for(
+                build_provider_client(nearest_provider).complete(request),
+                timeout=CARD_LE_LLM_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("STS card_le nearest LLM timed out for %r", captured)
+            return None
         except Exception:
             logger.exception("STS card_le nearest LLM call failed for %r", captured)
             return None

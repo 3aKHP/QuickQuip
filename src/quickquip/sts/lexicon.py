@@ -45,7 +45,7 @@ def is_card_name(name: str) -> bool:
 
 
 def get(name: str) -> dict | None:
-    """取 ``name`` 的元数据（games/kind/en/ids/meta）；不存在或被排除仍返回原始记录。"""
+    """取 ``name`` 的原始记录（含被排除项）；不存在返回 None。"""
     return _ALL_NAMES.get(name)
 
 

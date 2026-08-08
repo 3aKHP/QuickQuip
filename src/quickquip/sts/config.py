@@ -21,9 +21,10 @@ CARD_LE_PATTERN = r"^([一-鿿]{2,5})了$"
 # 被动路径（群友发言里的「X了」→ 未命中词表 → LLM 找最近真名）
 CARD_LE_RULE_NAME = "sts_card_le"
 CARD_LE_RATE_LIMIT_KEY = "sts_card_le"
+CARD_LE_LLM_TIMEOUT = 12.0  # 最近匹配 LLM 调用超时（system prompt 注入了全词表，给足余量）
 
 # 主动路径（显式命令，把跟随/引用内容提炼成一句「名了」）
 TURMFLUCH_RULE_NAME = "sts_turmfluch"
 TURMFLUCH_RATE_LIMIT_KEY = "sts_turmfluch"
-TURMFLUCH_ALIASES: set[str] = set()  # 中文别名可在此追加，如 {"尖塔化"}
+TURMFLUCH_ALIASES: frozenset[str] = frozenset()  # 中文别名可在此追加，如 frozenset({"尖塔化"})
 TURMFLUCH_MAX_OUTPUT_TOKENS = 64  # 只需输出「名了」，给足余量即可
