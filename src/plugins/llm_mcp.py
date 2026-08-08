@@ -4,6 +4,7 @@ from quickquip.llm.mcp import (
     MCPServerStatus,
     MCPToolBinding,
     MCPToolCallResult,
+    deliver_mcp_tool_result,
 )
 
 
@@ -13,4 +14,5 @@ __all__ = [
     "MCPServerStatus",
     "MCPToolBinding",
     "MCPToolCallResult",
+    "deliver_mcp_tool_result",
 ]

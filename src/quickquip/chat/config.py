@@ -23,6 +23,9 @@ _BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "timezone_wake": {"global_limit": 3, "user_limit": 1},
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "sts_turmfluch": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    # 被动「xxx了」：按群分桶、强限频，保持"偶发荒诞乱入"而非刷屏
+    "sts_card_le": {"global_limit": 3, "user_limit": 1},
     "audio_gen": {"global_limit": 10, "user_limit": 2, "scope": "global"},
     "music_gen": {"global_limit": 4, "user_limit": 1, "scope": "global"},
     "tieba_random_post": {"global_limit": 6, "user_limit": 3, "scope": "global"},

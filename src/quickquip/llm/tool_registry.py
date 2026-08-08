@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from quickquip.llm.tools import (
     LLMToolCall,
+    LLMToolOutput,
     LLMToolResult,
     LLMToolSpec,
     ToolExecutionContext,
@@ -18,7 +19,11 @@ class ToolValidationError(ValueError):
     pass
 
 
-ToolHandler = Callable[[dict[str, Any], ToolExecutionContext], Awaitable[str] | str]
+ToolHandlerOutput = str | LLMToolOutput
+ToolHandler = Callable[
+    [dict[str, Any], ToolExecutionContext],
+    Awaitable[ToolHandlerOutput] | ToolHandlerOutput,
+]
 
 
 @dataclass(slots=True)
@@ -310,6 +315,15 @@ class ToolRegistry:
                 name=call.name,
                 content=f"工具执行失败：{exc}",
                 is_error=True,
+            )
+
+        if isinstance(result, LLMToolOutput):
+            return LLMToolResult(
+                call_id=call.id,
+                name=call.name,
+                content=result.content.strip(),
+                images=list(result.images),
+                is_error=result.is_error,
             )
 
         return LLMToolResult(

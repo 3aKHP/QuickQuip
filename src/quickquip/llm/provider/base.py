@@ -20,7 +20,12 @@ from typing import Any
 import httpx
 
 from quickquip.llm.config import ProviderConfig
-from quickquip.llm.tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
+from quickquip.llm.tools import (
+    LLMConversationMessage,
+    LLMInlineImage,
+    LLMToolCall,
+    LLMToolSpec,
+)
 from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
@@ -364,8 +369,12 @@ class BaseProviderClient:
             data_base64=base64.b64encode(raw).decode("ascii"),
         )
 
-    async def _prepare_image_inputs(self, image_urls: list[str]) -> list[LLMImageInput]:
-        if not image_urls:
+    async def _prepare_image_inputs(
+        self,
+        image_urls: list[str],
+        inline_images: list[LLMInlineImage] | None = None,
+    ) -> list[LLMImageInput]:
+        if not image_urls and not inline_images:
             return []
         prepared: list[LLMImageInput] = []
         for image_url in image_urls[:MAX_IMAGES_PER_REQUEST]:
@@ -376,6 +385,22 @@ class BaseProviderClient:
                 # from the recent buffer) must not sink the whole request;
                 # skip it so the remaining images and text still go through.
                 logger.warning("provider: 跳过无法下载的图片 %s", image_url)
+        remaining = MAX_IMAGES_PER_REQUEST - len(prepared)
+        for image in (inline_images or [])[:remaining]:
+            if (
+                image.media_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}
+                or not image.data
+                or len(image.data) > 5 * 1024 * 1024
+            ):
+                logger.warning("provider: 跳过无效的内联图片 %s", image.source_label)
+                continue
+            prepared.append(
+                LLMImageInput(
+                    source_url=image.source_label,
+                    media_type=image.media_type,
+                    data_base64=base64.b64encode(image.data).decode("ascii"),
+                )
+            )
         return prepared
 
     def _swap_base_url(self, url: str, new_base: str) -> str:

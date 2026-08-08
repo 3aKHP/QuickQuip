@@ -389,9 +389,10 @@ def reload_filter() -> SensitiveFilter:
 def log_hits(channel: str, scope: str, result: ScanResult) -> None:
     """Emit a hit summary at WARNING/INFO level without leaking matched text.
 
-    ``channel`` is one of "input"/"output"/"history". ``scope`` is the
-    chat scope key (group id or "private:USER_ID"). We log category +
-    word hash so on-call can correlate spikes without the log file itself
+    ``channel`` identifies the pipeline boundary, such as ``input``,
+    ``tool_result:search_web`` or ``generation_input:draw``. ``scope`` is
+    the chat scope key (group id or ``private:USER_ID``). We log category
+    and word hash so on-call can correlate spikes without the log file itself
     becoming a sensitive artifact.
     """
     if not result.hits:
@@ -412,3 +413,18 @@ def log_hits(channel: str, scope: str, result: ScanResult) -> None:
             "sensitive_filter[%s] soft-flagged scope=%s hits=%s",
             channel, scope, ",".join(soft_summary),
         )
+
+
+def scan_and_log(
+    text: str,
+    *,
+    channel: str,
+    scope: str,
+    sensitive_filter: SensitiveFilter | None = None,
+) -> ScanResult:
+    """Scan one text boundary and emit the standard privacy-safe hit log."""
+    active_filter = sensitive_filter or get_filter()
+    result = active_filter.scan(text)
+    if result.hits:
+        log_hits(channel, scope, result)
+    return result

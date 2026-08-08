@@ -218,6 +218,74 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 
 ---
 
-## 8. 当前文档结论
+## 8. 工具结果内容边界
+
+MCP 工具调用会先在 `src/quickquip/llm/mcp/` 归一化为受控的内部结果，再交给现有工具调用链。当前文本结果保持逐项去除首尾空白、忽略空项并以换行连接；仅在没有可见文本时，`structuredContent` 保持现有 JSON 文本回退行为。
+
+`ImageContent` 会先严格校验 base64、5 MiB 单图大小、真实图片格式和声明 MIME；首期仅支持 PNG、JPEG、GIF、WebP，每个 MCP 工具结果最多交付 5 张。校验通过的图片只在当前工具调用循环的内存中保存：视觉模型按各 provider 的受支持格式接收；非视觉模型使用已配置的图片转述器，转述失败或服务不可用时保留安全工具文本并明确省略图片。工具错误或被敏感词整体拦截的结果不会交付图片。图片像素本身不在本地敏感词审核范围，转述文本会在进入主模型前再次扫描。
+
+resource、audio、link 和未知内容不会被原样 JSON 序列化为工具文本。系统只向模型提供稳定的有限提示；不会自动下载 resource/link，也不会把资源正文、blob、完整 URL query 或音频数据注入模型请求。MCP 图片只服务下一轮模型推理，不会直接作为 QQ 最终消息发送给用户。
+
+可选的固定版本 PRTS MCP 验收不会调用付费 LLM。提供连接信息后运行：
+
+```bash
+QUICKQUIP_MCP_ACCEPTANCE=1 \
+QUICKQUIP_MCP_PRTS_URL=https://example.test/mcp \
+QUICKQUIP_MCP_PRTS_TOKEN=... \
+QUICKQUIP_MCP_PRTS_OPERATOR=能天使 \
+.venv/bin/python -m pytest -m network tests/integration/test_mcp_prts_acceptance.py -q
+```
+
+测试会执行 MCP initialize、tools/list 和 `operator_artwork` 的 list/get，再用本地 stub serializer 检查结果请求结构。缺少任一环境变量时会明确 skip；不要把 token 写入测试 fixture、Issue 或 PR。
+
+## 9. 双协议纪元（Dual-Era）支持
+
+自 MCP `2026-07-28` 规范起，协议分为两个纪元：
+
+- **Legacy era**（`2025-11-25` 及之前）：通过 `initialize` 握手建立会话，使用 `mcp-session-id`。
+- **Modern era**（`2026-07-28` 起）：无握手、无 session，每个请求携带 `_meta`（协议版本、客户端身份、capabilities）和 routing headers（`MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name`）。
+
+QuickQuip 的 `negotiation` 字段控制每个 HTTP MCP Server 的协商模式：
+
+| 模式 | 行为 |
+|---|---|
+| `legacy`（默认） | 只走 `initialize` + session，兼容所有旧 Server。缺省时自动生效，行为与旧版完全一致。 |
+| `auto` | 先发 `server/discover` 探测；如果 Server 返回 DiscoverResult 就走 modern；如果返回 legacy 信号（JSON-RPC error、400/404/405 无 modern error body）就回退 legacy。401/403/5xx/超时直接失败，不回退。 |
+| `modern` | 只走 modern 协议，不回退。 |
+
+### 配置示例
+
+```toml
+[[mcp.servers]]
+id = "modern_api"
+transport = "http"
+negotiation = "auto"
+supported_protocol_versions = ["2026-07-28"]
+url = "https://modern-mcp.example.com/mcp"
+```
+
+### 协商规则
+
+- `stdio`、`docker`、`sse` transport 只支持 legacy。配置 `auto`/`modern` 会在配置校验阶段被跳过并记录 warning。
+- `supported_protocol_versions` 为空时 `auto`/`modern` 也会被跳过。
+- `auto` 探测的 verdict 在单次进程生命周期内保存。
+- modern version 无交集时明确报 negotiation failure。
+- `tools/call` 在 modern 模式下收到 `InputRequiredResult`（MRTR）时返回稳定的 unsupported 结果。
+
+### Stale session 处理（legacy HTTP）
+
+带 `mcp-session-id` 的请求收到 HTTP 404 时：
+
+- `tools/list` 等只读请求在有界次数内（≤2）触发重连：重新 `initialize` 获取新 session-id。
+- `tools/call` 不自动重放，直接失败并标记需重连，避免重复副作用。
+- 新连接不继承旧 session-id 或旧 request-id。
+
+### 安全
+
+- `_describe_server` 对 HTTP/SSE URL 脱敏（去除 query string 和 fragment）。
+- 异常消息中的 URL 和凭据经过清洗后才进入 status JSON 或日志。
+- alias 冲突采用 fail-closed：冲突的 binding 全部不注册，status 标记 `failure_kind = "config"`。
+
+## 10. 当前文档结论
 
 QuickQuip 当前已经可以接 MCP，但实际部署时仍应把它视为项目自己的外部工具后端，并通过项目自己的私有部署环境变量、卷挂载和云端开关来管理。

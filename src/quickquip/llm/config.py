@@ -90,6 +90,8 @@ class MCPServerConfig:
     mounts: list[str] = field(default_factory=list)
     network: str | None = None
     container_workdir: str | None = None
+    negotiation: str = "legacy"  # legacy | auto | modern
+    supported_protocol_versions: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -385,20 +387,58 @@ def _parse_single_provider(
     )
 
 
+_MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}
+
+
 def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
     servers: list[MCPServerConfig] = []
+    seen_ids: set[str] = set()
     for entry in raw_servers:
         entry = expand_env_value(entry)
         server_id = str(entry.get("id", "")).strip()
         if not server_id:
             continue
 
+        if server_id in seen_ids:
+            logger.warning("跳过重复的 MCP server id：%s", server_id)
+            continue
+        seen_ids.add(server_id)
+
+        negotiation = str(entry.get("negotiation", "legacy")).strip().lower() or "legacy"
+        if negotiation not in _MCP_NEGOTIATION_MODES:
+            logger.warning(
+                "跳过 MCP server %s：未知 negotiation 模式 %r（仅支持 legacy/auto/modern）",
+                server_id, negotiation,
+            )
+            continue
+
+        transport = str(entry.get("transport", "stdio")).strip().lower() or "stdio"
+        supported_versions = [
+            str(v).strip()
+            for v in entry.get("supported_protocol_versions", [])
+            if str(v).strip()
+        ]
+
+        if negotiation in {"auto", "modern"}:
+            if transport != "http":
+                logger.warning(
+                    "跳过 MCP server %s：%r 协商模式仅支持 HTTP transport（当前 %r）",
+                    server_id, negotiation, transport,
+                )
+                continue
+            if not supported_versions:
+                logger.warning(
+                    "跳过 MCP server %s：%r 协商模式需要 supported_protocol_versions",
+                    server_id, negotiation,
+                )
+                continue
+
         raw_env = as_dict(entry.get("env"))
         raw_headers = as_dict(entry.get("headers"))
         servers.append(
             MCPServerConfig(
                 id=server_id,
-                transport=str(entry.get("transport", "stdio")).strip().lower() or "stdio",
+                transport=transport,
                 enabled=as_bool(entry.get("enabled", True), default=True),
                 timeout_seconds=float(entry.get("timeout_seconds", 30)),
                 protocol_version=str(entry.get("protocol_version", "2025-03-26")).strip()
@@ -431,6 +471,8 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
                 mounts=[str(item).strip() for item in entry.get("mounts", []) if str(item).strip()],
                 network=str(entry.get("network", "")).strip() or None,
                 container_workdir=str(entry.get("container_workdir", "")).strip() or None,
+                negotiation=negotiation,
+                supported_protocol_versions=supported_versions,
             )
         )
     return servers

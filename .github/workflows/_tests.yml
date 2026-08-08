@@ -1,7 +1,7 @@
 name: Tests
 
 # Reusable test workflow invoked by ci.yml (on push/PR) and release.yml (on tag).
-# Action references use version tags (v4, v5, ...); the repo should enable
+# Action references use floating major version tags; the repo should enable
 # Dependabot or a similar auto-pinner to replace them with commit SHAs.
 
 on:
@@ -16,9 +16,6 @@ on:
         type: boolean
         default: true
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   python:
     name: Python ${{ matrix.python-version }}
@@ -31,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -61,7 +58,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-py${{ matrix.python-version }}
           path: coverage.xml
@@ -77,15 +74,15 @@ jobs:
         working-directory: frontend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10.31.0
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: pnpm

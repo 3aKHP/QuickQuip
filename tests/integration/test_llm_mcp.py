@@ -11,6 +11,8 @@ import pytest
 
 from plugins.llm_mcp import MCPServerStatus, MCPToolBinding
 from plugins.llm_runtime import LLMService
+from quickquip.llm.mcp.types import _format_tool_result
+from quickquip.llm.tools import LLMInlineImage, LLMToolOutput
 
 from tests.fixtures.configs import write_llm_config_bundle
 from tests.fixtures.provider_stubs import (
@@ -145,6 +147,182 @@ async def test_mcp_tool_call_executed_in_loop(mcp_service, patch_provider_builde
     assert round2.messages[-1].role == "tool"
     assert round2.messages[-1].tool_name == "mcp_fake_echo_text"
     assert round2.messages[-1].content == "echo::云端 DOOD"
+
+
+async def test_mcp_non_text_result_reaches_provider_only_as_safe_notice(
+    mcp_service,
+    patch_provider_builder,
+):
+    image_sentinel = "MCP_PROVIDER_IMAGE_SECRET_73b0"
+    resource_sentinel = "MCP_PROVIDER_RESOURCE_SECRET_1ac4"
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return _format_tool_result(
+            {"content": [
+                {"type": "text", "text": "safe MCP text"},
+                {"type": "image", "data": image_sentinel, "mimeType": "image/png"},
+                {"type": "resource", "resource": {
+                    "uri": f"https://example.test/data?token={resource_sentinel}",
+                    "text": resource_sentinel,
+                }},
+            ]}
+        ).content
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        recent_messages=[],
+    )
+
+    provider_text = "\n".join(message.content for message in stub.requests[-1].messages)
+    assert "safe MCP text" in provider_text
+    assert "尚未交付的图片项" in provider_text
+    assert "resource 项" in provider_text
+    assert image_sentinel not in provider_text
+    assert resource_sentinel not in provider_text
+
+
+async def test_mcp_image_result_reaches_vision_provider_as_inline_bytes(
+    mcp_service,
+    patch_provider_builder,
+):
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+    image = LLMInlineImage(data=b"valid image bytes", media_type="image/png", source_label="MCP/fake/echo_text image 1")
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return LLMToolOutput(content="safe image result", images=[image])
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        recent_messages=[],
+    )
+
+    tool_message = stub.requests[-1].messages[-1]
+    assert tool_message.content == "safe image result"
+    assert tool_message.inline_images == [image]
+
+
+async def test_mcp_image_result_for_non_vision_model_uses_safe_description(
+    mcp_service,
+    patch_provider_builder,
+):
+    from quickquip.llm.image_preprocessor import ImageDescription
+
+    class _Preprocessor:
+        async def describe_inline_images(self, images):
+            return [ImageDescription(
+                source_url=image.source_label,
+                text_description="受控的工具图片转述",
+                success=True,
+            ) for image in images]
+
+    mcp_service.config.providers["openai-main"].non_vision_models.append("gpt-test")
+    mcp_service.image_preprocessor = _Preprocessor()
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return LLMToolOutput(
+            content="safe image result",
+            images=[LLMInlineImage(
+                data=b"valid image bytes",
+                media_type="image/png",
+                source_label="MCP/fake/echo_text image 1",
+            )],
+        )
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        recent_messages=[],
+    )
+
+    tool_message = stub.requests[-1].messages[-1]
+    assert tool_message.inline_images == []
+    assert "受控的工具图片转述" in tool_message.content
+
+
+async def test_mcp_image_result_without_non_vision_preprocessor_is_omitted(
+    mcp_service,
+    patch_provider_builder,
+):
+    mcp_service.config.providers["openai-main"].non_vision_models.append("gpt-test")
+    mcp_service.image_preprocessor = None
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return LLMToolOutput(
+            content="safe image result",
+            images=[LLMInlineImage(
+                data=b"valid image bytes",
+                media_type="image/png",
+                source_label="MCP/fake/echo_text image 1",
+            )],
+        )
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        recent_messages=[],
+    )
+
+    tool_message = stub.requests[-1].messages[-1]
+    assert tool_message.inline_images == []
+    assert "前置图片识别服务不可用" in tool_message.content
+
+
+async def test_mcp_images_respect_existing_user_image_budget(
+    mcp_service,
+    patch_provider_builder,
+):
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return LLMToolOutput(
+            content="safe image result",
+            images=[LLMInlineImage(
+                data=b"valid image bytes",
+                media_type="image/png",
+                source_label="MCP/fake/echo_text image 1",
+            )],
+        )
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        image_urls=[f"https://example.test/{index}.png" for index in range(5)],
+        recent_messages=[],
+    )
+
+    tool_message = stub.requests[-1].messages[-1]
+    assert tool_message.inline_images == []
+    assert "超出当前请求图片预算" in tool_message.content
 
 
 async def test_mcp_tool_discovery_loads_deferred_tool(mcp_service, patch_provider_builder):

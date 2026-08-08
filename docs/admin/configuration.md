@@ -283,6 +283,10 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 此文件不存在时，图片部分回退读取 `config/llm.toml` 中旧版 `[image_generation]` 段。
 
+图片、语音和音乐的 `prompt_blocklist` 是生成业务专属限制。配置了
+`config/sensitive_words.toml` 时，生成 prompt、标题、歌词和引用文本还会经过部署级统一
+敏感词过滤。该检查只处理文本，不审核输入或输出的图片像素、音频波形和音乐成品。
+
 ### `[image]` — 图片生成
 
 | 键 | 说明 |
@@ -336,6 +340,9 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 ### `[asr]` — 语音识别
 
 ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM 上下文。协议端若已在消息段中提供 `text` / `transcript` / `transcription` 字段，QuickQuip 会优先使用该文本；否则通过 OneBot `get_record` 获取音频文件，再调用 ASR provider。
+
+转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider
+才能得到可扫描文本。
 
 | 键 | 说明 |
 |----|------|

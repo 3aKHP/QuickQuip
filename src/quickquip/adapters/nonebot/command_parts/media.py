@@ -2,13 +2,31 @@ from __future__ import annotations
 
 from io import BytesIO
 
+from quickquip.adapters.nonebot.command_parts._chat_utils import _scope_key
 from quickquip.adapters.nonebot.command_parts.common import _DRAW_QUALITY_RE, _DRAW_SIZE_RE, _extract_image_urls, _format_music_models, _format_tts_models, _format_voice_groups, _parse_music_args, _parse_tts_args, _resolve_message_content, _safe_shlex_split, _send_lyrics_forward, _strip_command_name
 from quickquip.app.message_pipeline import rate_limiter
+from quickquip.common.sensitive_filter import (
+    DEFAULT_OUTPUT_FALLBACK,
+    scan_and_log as _scan_sensitive_text,
+)
 from quickquip.generation.audio import generate_audio, list_available_voices
 from quickquip.generation.errors import GenerationProviderError
 from quickquip.generation.image import ImageInput, download_image, generate_image
 from quickquip.generation.music import generate_lyrics, generate_music
 from quickquip.generation.service import generation_service
+
+def _sensitive_text_blocked(event, text: str, channel: str) -> bool:
+    return _scan_sensitive_text(
+        text,
+        channel=channel,
+        scope=_scope_key(event),
+    ).blocked
+
+
+def _lyrics_result_text(result) -> str:
+    return "\n".join(
+        part for part in (result.title, result.style_tags, result.lyrics) if part
+    )
 
 
 def register_media_commands(on_command, Message, MessageSegment) -> None:
@@ -67,6 +85,8 @@ def register_media_commands(on_command, Message, MessageSegment) -> None:
                 )
             await draw_cmd.finish(hint)
         if full_prompt and any(w in full_prompt.lower() for w in image_generation.prompt_blocklist):
+            await draw_cmd.finish("提示词包含不允许的内容，请修改后重试")
+        if _sensitive_text_blocked(event, full_prompt, "generation_input:draw"):
             await draw_cmd.finish("提示词包含不允许的内容，请修改后重试")
         await draw_cmd.send("正在生成图片，请稍候…")
         input_images: list[ImageInput] = []
@@ -147,6 +167,8 @@ def register_media_commands(on_command, Message, MessageSegment) -> None:
             await tts_cmd.finish(hint)
         if any(word in full_prompt.lower() for word in audio_generation.prompt_blocklist):
             await tts_cmd.finish("文本包含不允许的内容，请修改后重试")
+        if _sensitive_text_blocked(event, full_prompt, "generation_input:tts"):
+            await tts_cmd.finish("文本包含不允许的内容，请修改后重试")
 
         await tts_cmd.send("正在生成语音，请稍候…")
         try:
@@ -192,10 +214,12 @@ def register_media_commands(on_command, Message, MessageSegment) -> None:
         if reply and reply.message:
             reply_text, _ = await _resolve_message_content(bot, reply.message)
 
-        blocklist_text = "\n".join(
+        generation_input_text = "\n".join(
             filter(None, [parsed.prompt, parsed.lyrics, parsed.title, reply_text])
-        ).lower()
-        if any(word in blocklist_text for word in music_generation.prompt_blocklist):
+        )
+        if any(word in generation_input_text.lower() for word in music_generation.prompt_blocklist):
+            await music_cmd.finish("文本包含不允许的内容，请修改后重试")
+        if _sensitive_text_blocked(event, generation_input_text, "generation_input:music"):
             await music_cmd.finish("文本包含不允许的内容，请修改后重试")
 
         default_music_model = music_generation.resolve_model(parsed.model_id)
@@ -230,6 +254,12 @@ def register_media_commands(on_command, Message, MessageSegment) -> None:
             except Exception as exc:
                 await music_cmd.finish(f"歌词生成异常：{type(exc).__name__}: {exc}")
 
+            if _sensitive_text_blocked(
+                event,
+                _lyrics_result_text(lyric_result),
+                "generation_output:lyrics",
+            ):
+                await music_cmd.finish(DEFAULT_OUTPUT_FALLBACK)
             heading = "歌词已生成" if parsed.action == "lyrics" else "歌词已编辑"
             await _send_lyrics_forward(bot, event, lyric_result, heading)
             await music_cmd.finish()
@@ -269,6 +299,12 @@ def register_media_commands(on_command, Message, MessageSegment) -> None:
                 await music_cmd.finish(f"歌词生成失败：{exc}")
             except Exception as exc:
                 await music_cmd.finish(f"歌词生成异常：{type(exc).__name__}: {exc}")
+            if _sensitive_text_blocked(
+                event,
+                _lyrics_result_text(lyric_result),
+                "generation_output:lyrics",
+            ):
+                await music_cmd.finish(DEFAULT_OUTPUT_FALLBACK)
             source_lyrics = lyric_result.lyrics
             prompt_for_music = lyric_result.style_tags or parsed.prompt
 
