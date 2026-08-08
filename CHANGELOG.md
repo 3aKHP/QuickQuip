@@ -6,6 +6,29 @@
 
 （暂无）
 
+## [1.10.0] - 2026-08-08
+
+### ✨ 新增 (Added)
+
+- **杀戮尖塔「xxx了」公式化回复模块**：基于两代卡牌/遗物名词表，被动捕获群友整句「X了」用 LLM 映射到最近的真名回复，并提供 `/turmfluch` 命令把任意内容提炼成「名了」；独立 `sts` 顶层域，可扩展更多公式。被动路径走 `[triggers.quick_judge]` 专用便宜模型。
+- **MCP 工具图片交付**：支持将 MCP 工具返回的图片安全交付给视觉模型，并为非视觉模型提供受控转述或降级提示。
+- **MCP 双协议纪元支持**：per-server `negotiation` 配置（legacy/auto/modern），同一进程可同时连接 legacy 和 modern (2026-07-28) MCP Server。
+
+### 🔧 变更 (Changed)
+
+- MCP stale-session 404 现在触发有界重连（只读请求重试 ≤2 次，tools/call 不重放），而非无差别失败。
+- MCP `_connect_with_retry` 改为按失败类型分类重试：auth/config/4xx 不重试，timeout/5xx 仍重试。
+- MCP `_describe_server` 对 HTTP/SSE URL 脱敏（去除 query string），异常消息经 URL 清洗后才进入 status 和日志。
+- MCP alias 冲突改为 fail-closed：冲突的 binding 全部不注册并标记 config 错误，不再静默覆盖。
+- MCP status JSON 和 `/llm mcp status` 增加 negotiation、era、failure_kind、negotiated_protocol_version 字段。
+
+### 🐛 修复 (Fixed)
+
+- **LLM 命令输出截断**：`/defectify`、`/turmfluch` 和被动「xxx了」的 `max_output_tokens` 硬上限（512/64）在推理模型上被 `reasoning_content` 耗尽，导致实际输出被截断；现统一使用 provider 自己的 `max_output_tokens`。
+- **被动「xxx了」频繁 HTTP Request was cancelled**：应用层 `asyncio.wait_for` 超时（12s）短于 provider HTTP 超时（45s），提前取消了携带 ~1644 token 词表 system prompt 的合法请求；已移除应用层超时，由 provider HTTP 超时做唯一守卫。
+- 多模态相关文本链路现已复用部署级敏感词过滤器，覆盖图片、语音和音乐生成提示词、自动歌词、图片转述以及故障化输入输出。
+- 加固 MCP 非文本工具结果处理，避免未支持的图片、资源和媒体 payload 进入模型文本。
+
 ## [1.9.7] - 2026-08-03
 
 ### ✨ 新增 (Added)
@@ -632,7 +655,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.9.7...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/3aKHP/QuickQuip/compare/v1.9.7...v1.10.0
 [1.9.7]: https://github.com/3aKHP/QuickQuip/compare/v1.9.6...v1.9.7
 [1.9.6]: https://github.com/3aKHP/QuickQuip/compare/v1.9.5...v1.9.6
 [1.9.5]: https://github.com/3aKHP/QuickQuip/compare/v1.9.4...v1.9.5
