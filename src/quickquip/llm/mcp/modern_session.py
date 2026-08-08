@@ -20,13 +20,13 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_MODERN_NEGOTIATION,
     MCP_FAILURE_TIMEOUT,
     MCP_FAILURE_TRANSPORT,
-    _is_recognized_modern_error_body,
     _sanitize_error_message,
 )
 from quickquip.llm.mcp.codec import (
     build_modern_body,
     build_routing_headers,
     detect_input_required,
+    is_recognized_modern_error_body,
     parse_response_envelope,
     parse_sse_response,
 )
@@ -77,15 +77,18 @@ class ModernHttpSession:
         if response.status_code == 200:
             try:
                 result = self._parse_response(response)
-            except MCPError:
+            except MCPError as exc:
                 # A legacy server may return HTTP 200 with a JSON-RPC error
                 # (e.g. -32601 for unknown method "server/discover").
-                if not _is_recognized_modern_error_body(response.content):
+                if not is_recognized_modern_error_body(response.content):
                     raise MCPLegacyFallbackSignal(
                         f"MCP server {self.config.id} 探测判定为 legacy"
                         f"（discover 返回 JSON-RPC error）"
                     )
-                raise  # recognized modern error — re-raise as negotiation failure
+                raise MCPError(
+                    f"MCP server {self.config.id} modern 协商失败：{exc}",
+                    failure_kind=MCP_FAILURE_MODERN_NEGOTIATION,
+                ) from exc
             server_versions = result.get("protocolVersions", [])
             if isinstance(server_versions, list) and server_versions:
                 intersection = [v for v in supported_versions if v in server_versions]
@@ -185,7 +188,7 @@ class ModernHttpSession:
         """Classify a failed server/discover probe response."""
         status = response.status_code
         if status in _LEGACY_FALLBACK_STATUSES:
-            if _is_recognized_modern_error_body(response.content):
+            if is_recognized_modern_error_body(response.content):
                 raise MCPError(
                     f"MCP server {self.config.id} modern 协商失败：HTTP {status}",
                     failure_kind=MCP_FAILURE_MODERN_NEGOTIATION,

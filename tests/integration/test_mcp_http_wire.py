@@ -468,10 +468,23 @@ async def test_streaming_cancellation_closes_response():
 
 
 async def test_streaming_timeout_does_not_leak_client():
-    """After a cancelled stream, the client is still usable for new requests."""
-    app = StreamingModernMCPServer(delay_seconds=30.0)
+    """After a cancelled stream, the SAME client is still usable for new requests."""
+    # First app: streams slowly (triggers timeout)
+    slow_app = StreamingModernMCPServer(delay_seconds=30.0)
+    # Second app: responds immediately (verifies client reuse)
+    fast_app = ModernMCPServer()
+    # Use a single client with a composite app that routes based on delay state
+    call_count = {"n": 0}
+
+    async def composite_app(scope, receive, send):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            await slow_app(scope, receive, send)
+        else:
+            await fast_app(scope, receive, send)
+
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+        transport=httpx.ASGITransport(app=composite_app),
         base_url="http://test",
     ) as client:
         # First request: times out during streaming
@@ -487,30 +500,23 @@ async def test_streaming_timeout_does_not_leak_client():
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(slow_read(), timeout=1.0)
 
-        # Second request: a fresh modern server should still work on the same client
-        fresh_app = ModernMCPServer()
-        # Swap the transport's app (simulates a different server)
-        client2 = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=fresh_app),
-            base_url="http://test",
+        # Second request on the SAME client: must succeed
+        response = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0", "id": 6, "method": "server/discover", "params": {},
+                "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                          "io.modelcontextprotocol/clientInfo": {"name": "QuickQuip", "version": "1.0"},
+                          "io.modelcontextprotocol/clientCapabilities": {}},
+            },
+            headers={
+                "Content-Type": "application/json",
+                "MCP-Protocol-Version": "2026-07-28",
+                "Mcp-Method": "server/discover",
+            },
         )
-        try:
-            response = await client2.post(
-                "/mcp",
-                json={
-                    "jsonrpc": "2.0", "id": 6, "method": "server/discover", "params": {},
-                    "_meta": {"protocolVersion": "2026-07-28", "clientInfo": {"name": "QuickQuip", "version": "1.0"}, "capabilities": {}},
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "MCP-Protocol-Version": "2026-07-28",
-                    "Mcp-Method": "server/discover",
-                },
-            )
-            assert response.status_code == 200
-            assert "2026-07-28" in response.json()["result"]["protocolVersions"]
-        finally:
-            await client2.aclose()
+        assert response.status_code == 200
+        assert "2026-07-28" in response.json()["result"]["protocolVersions"]
 
 
 # ---------------------------------------------------------------------------

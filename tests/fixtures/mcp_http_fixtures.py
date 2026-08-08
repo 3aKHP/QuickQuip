@@ -328,7 +328,7 @@ class ModernMCPServer:
         method = payload.get("method", "")
         request_id = payload.get("id")
         params = payload.get("params", {})
-        meta = payload.get("_meta", {})
+        meta = params.get("_meta", {})
 
         self.requests.append({
             "method": method,

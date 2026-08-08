@@ -51,37 +51,6 @@ class MCPLegacyFallbackSignal(MCPError):
     pass
 
 
-# Recognized modern JSON-RPC error codes that prove a server is modern
-# (used by auto-negotiation to distinguish modern errors from legacy signals).
-_RECOGNIZED_MODERN_ERROR_CODES = frozenset({-32022, -32020})
-
-
-def _is_recognized_modern_error_body(body: bytes | str) -> bool:
-    """Check whether an HTTP error body contains a recognized modern JSON-RPC error.
-
-    Modern servers use 400 for UnsupportedProtocolVersionError (-32022) and
-    HeaderMismatch (-32020).  If the body contains one of these, the server
-    speaks modern MCP.  Otherwise (empty, HTML, or non-modern JSON-RPC), the
-    caller should treat it as a legacy fallback signal.
-    """
-    if isinstance(body, bytes):
-        try:
-            body = body.decode("utf-8")
-        except (UnicodeDecodeError, ValueError):
-            return False
-    try:
-        data = json.loads(body)
-    except (ValueError, TypeError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    error = data.get("error")
-    if not isinstance(error, dict):
-        return False
-    code = error.get("code")
-    return isinstance(code, (int, float)) and int(code) in _RECOGNIZED_MODERN_ERROR_CODES
-
-
 # ---------------------------------------------------------------------------
 # Failure classification (Wave 2)
 # ---------------------------------------------------------------------------
@@ -280,11 +249,11 @@ _URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
 
 
 def _sanitize_url(url: str) -> str:
-    """Strip query string and fragment from a URL to prevent credential leakage.
+    """Strip query, fragment, and userinfo from a URL to prevent credential leakage.
 
-    Tokens passed as URL query parameters (e.g. ``?key=...``) must never
-    appear in status JSON, dashboards, or logs.  Non-absolute URLs (paths,
-    commands) are returned unchanged.
+    Tokens in query parameters (``?key=...``) and embedded credentials
+    (``user:pass@host``) must never appear in status JSON, dashboards, or
+    logs.  Non-absolute URLs (paths, commands) are returned unchanged.
     """
     if not isinstance(url, str) or not url:
         return ""
@@ -294,7 +263,13 @@ def _sanitize_url(url: str) -> str:
         return "[invalid-url]"
     if not parts.scheme or not parts.netloc:
         return url
-    return f"{parts.scheme}://{parts.netloc}{parts.path}"
+    # Reconstruct from hostname/port to strip userinfo; bracket IPv6 literals.
+    host = parts.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return f"{parts.scheme}://{host}{parts.path}"
 
 
 def _sanitize_error_message(exc: BaseException, *, limit: int = _MAX_SAFE_ERROR_LENGTH) -> str:

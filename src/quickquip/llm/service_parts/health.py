@@ -77,8 +77,6 @@ class HealthMixin:
             era_tag = ""
             if status.negotiation != "legacy" or status.era not in ("unknown", "legacy"):
                 era_tag = f"/{status.negotiation}/{status.era}"
-            elif status.negotiation != "legacy":
-                era_tag = f"/{status.negotiation}"
             lines.append(
                 f"- {status.id} [{status.transport}{era_tag}] {state} tools={status.tool_count}"
                 + (f" detail={status.detail}" if status.detail else "")

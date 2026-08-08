@@ -2,13 +2,15 @@
 
 Pure functions for building modern JSON-RPC requests with ``_meta``,
 routing headers (``MCP-Protocol-Version``, ``Mcp-Method``, ``Mcp-Name``),
-and response parsing.  No networking or asyncio — safe to import from
-anywhere without pulling in httpx.
+modern error classification, and response parsing.  No networking or
+asyncio — safe to import from anywhere.
 """
 from __future__ import annotations
 
 import json
 from typing import Any
+
+from quickquip.llm.mcp.types import MCPError
 
 _CLIENT_INFO: dict[str, str] = {"name": "QuickQuip", "version": "1.0"}
 
@@ -18,6 +20,36 @@ _META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
 
 # Methods that require Mcp-Name header (from params.name or params.uri)
 _METHODS_WITH_NAME_HEADER = frozenset({"tools/call", "resources/read", "prompts/get"})
+
+# Recognized modern JSON-RPC error codes that prove a server is modern
+# (used by auto-negotiation to distinguish modern errors from legacy signals).
+_RECOGNIZED_MODERN_ERROR_CODES = frozenset({-32022, -32020})
+
+
+def is_recognized_modern_error_body(body: bytes | str) -> bool:
+    """Check whether an HTTP error body contains a recognized modern JSON-RPC error.
+
+    Modern servers use 400 for UnsupportedProtocolVersionError (-32022) and
+    HeaderMismatch (-32020).  If the body contains one of these, the server
+    speaks modern MCP.  Otherwise (empty, HTML, or non-modern JSON-RPC), the
+    caller should treat it as a legacy fallback signal.
+    """
+    if isinstance(body, bytes):
+        try:
+            body = body.decode("utf-8")
+        except (UnicodeDecodeError, ValueError):
+            return False
+    try:
+        data = json.loads(body)
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    error = data.get("error")
+    if not isinstance(error, dict):
+        return False
+    code = error.get("code")
+    return isinstance(code, (int, float)) and int(code) in _RECOGNIZED_MODERN_ERROR_CODES
 
 
 def build_meta(protocol_version: str) -> dict[str, Any]:
@@ -82,8 +114,6 @@ def parse_response_envelope(data: dict[str, Any]) -> dict[str, Any]:
 
     Raises MCPError if the envelope contains an ``error``.
     """
-    from quickquip.llm.mcp.types import MCPError
-
     if "error" in data:
         error = data.get("error", {})
         detail = error.get("message", "未知错误") if isinstance(error, dict) else str(error)
@@ -95,30 +125,14 @@ def parse_response_envelope(data: dict[str, Any]) -> dict[str, Any]:
 def parse_sse_response(text: str) -> dict[str, Any]:
     """Parse an SSE response body and return the final JSON-RPC result.
 
-    Request-scoped SSE may carry notifications before the final response.
-    Only the last envelope containing ``result`` or ``error`` is returned.
+    Reuses ``_parse_sse_block`` from transport to avoid duplicating the
+    SSE body parser.  Returns the last envelope containing ``result`` or
+    ``error``; earlier notifications are skipped.
     """
-    from quickquip.llm.mcp.types import MCPError
+    from quickquip.llm.mcp.transport import _parse_sse_block
 
-    envelopes: list[dict[str, Any]] = []
-    for raw_event in text.replace("\r\n", "\n").split("\n\n"):
-        data_lines = [
-            line[len("data:"):].lstrip()
-            for line in raw_event.splitlines()
-            if line.startswith("data:")
-        ]
-        if not data_lines:
-            continue
-        data_str = "\n".join(data_lines)
-        try:
-            envelope = json.loads(data_str)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(envelope, dict):
-            envelopes.append(envelope)
-
+    envelopes = _parse_sse_block(text)
     for env in reversed(envelopes):
         if "result" in env or "error" in env:
             return parse_response_envelope(env)
-
     raise MCPError("SSE 流中未找到 JSON-RPC 响应")

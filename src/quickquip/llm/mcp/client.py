@@ -32,6 +32,7 @@ from quickquip.llm.mcp.types import (
     MCPConnectionInfo,
     MCP_FAILURE_AUTH,
     MCP_FAILURE_CONFIG,
+    MCP_FAILURE_MODERN_NEGOTIATION,
     _build_tool_alias,
     _detect_alias_conflicts,
     _sanitize_error_message,
@@ -83,6 +84,16 @@ class MCPClient:
     def _is_modern(self) -> bool:
         return self._modern_session is not None
 
+    @property
+    def era(self) -> str:
+        """Resolved protocol era: 'legacy', 'modern', or 'unknown'."""
+        return self._connection_info.era
+
+    @property
+    def negotiated_protocol_version(self) -> str:
+        """The protocol version actually agreed upon (empty before negotiation)."""
+        return self._connection_info.negotiated_protocol_version
+
     def _pick_modern_version(self) -> str:
         versions = self.config.supported_protocol_versions
         return versions[0] if versions else "2026-07-28"
@@ -106,25 +117,38 @@ class MCPClient:
     async def _start_modern(self) -> None:
         self._modern_session = ModernHttpSession(self.config)
         await self._modern_session.start()
-        result = await self._modern_session.discover(
-            protocol_version=self._pick_modern_version(),
-            supported_versions=self.config.supported_protocol_versions,
-        )
-        self._on_modern_connected(result)
-
-    async def _start_auto(self) -> None:
-        """Auto negotiation: probe modern, fall back to legacy on legacy signal."""
-        modern = ModernHttpSession(self.config)
-        await modern.start()
         try:
-            result = await modern.discover(
+            result = await self._modern_session.discover(
                 protocol_version=self._pick_modern_version(),
                 supported_versions=self.config.supported_protocol_versions,
             )
         except MCPLegacyFallbackSignal:
-            await modern.aclose()
+            await self._modern_session.aclose()
+            self._modern_session = None
+            raise MCPError(
+                f"MCP server {self.config.id} modern 协商失败：探测判定为 legacy"
+                f"（modern 模式不回退）",
+                failure_kind=MCP_FAILURE_CONFIG,
+            )
+        self._on_modern_connected(result)
+
+    async def _start_auto(self) -> None:
+        """Auto negotiation: probe modern, fall back to legacy on legacy signal."""
+        self._modern_session = ModernHttpSession(self.config)
+        await self._modern_session.start()
+        try:
+            result = await self._modern_session.discover(
+                protocol_version=self._pick_modern_version(),
+                supported_versions=self.config.supported_protocol_versions,
+            )
+        except MCPLegacyFallbackSignal:
+            await self._modern_session.aclose()
+            self._modern_session = None
+        except Exception:
+            await self._modern_session.aclose()
+            self._modern_session = None
+            raise
         else:
-            self._modern_session = modern
             self._on_modern_connected(result)
             return
         # Legacy fallback
@@ -168,10 +192,11 @@ class MCPClient:
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self._is_modern:
-            return await self._list_tools_modern()
+            assert self._modern_session is not None
+            return await self._list_tools_paginated(self._modern_session.request)
         for attempt in range(self._MAX_STALE_RECONNECTS + 1):
             try:
-                return await self._list_tools_once()
+                return await self._list_tools_paginated(self._session.request)
             except MCPStaleSessionError:
                 if attempt >= self._MAX_STALE_RECONNECTS:
                     raise
@@ -180,30 +205,18 @@ class MCPClient:
         # unreachable, but satisfies type checker
         return []
 
-    async def _list_tools_modern(self) -> list[dict[str, Any]]:
-        assert self._modern_session is not None
+    @staticmethod
+    async def _list_tools_paginated(
+        requester,
+    ) -> list[dict[str, Any]]:
+        """Paginated tools/list using a session-agnostic request callable."""
         tools: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
             params: dict[str, Any] = {}
             if cursor:
                 params["cursor"] = cursor
-            result = await self._modern_session.request("tools/list", params)
-            current_tools = result.get("tools", []) if isinstance(result, dict) else []
-            tools.extend(item for item in current_tools if isinstance(item, dict))
-            cursor = str(result.get("nextCursor", "")).strip() if isinstance(result, dict) else ""
-            if not cursor:
-                break
-        return tools
-
-    async def _list_tools_once(self) -> list[dict[str, Any]]:
-        tools: list[dict[str, Any]] = []
-        cursor: str | None = None
-        while True:
-            params: dict[str, Any] = {}
-            if cursor:
-                params["cursor"] = cursor
-            result = await self._session.request("tools/list", params)
+            result = await requester("tools/list", params)
             current_tools = result.get("tools", []) if isinstance(result, dict) else []
             tools.extend(item for item in current_tools if isinstance(item, dict))
             cursor = str(result.get("nextCursor", "")).strip() if isinstance(result, dict) else ""
@@ -275,13 +288,14 @@ class MCPClientManager:
     def _is_retryable(exc: Exception) -> bool:
         """Classify whether a startup failure is worth retrying.
 
-        Auth (401/403), config errors, and 4xx client errors are not retryable.
-        Timeout, transport, and 5xx are retryable (compose cold-boot race, etc.).
+        Auth (401/403), config errors, modern negotiation failures, legacy
+        fallback signals, and 4xx client errors are not retryable.
+        Timeout, transport, and 5xx are retryable (compose cold-boot race).
         """
+        if isinstance(exc, (MCPLegacyFallbackSignal,)):
+            return False
         if isinstance(exc, MCPError):
-            if exc.failure_kind == MCP_FAILURE_AUTH:
-                return False
-            if exc.failure_kind == MCP_FAILURE_CONFIG:
+            if exc.failure_kind in (MCP_FAILURE_AUTH, MCP_FAILURE_CONFIG, MCP_FAILURE_MODERN_NEGOTIATION):
                 return False
             if exc.http_status and 400 <= exc.http_status < 500:
                 return False
@@ -357,8 +371,8 @@ class MCPClientManager:
                 status.connected = True
                 status.tool_count = len(server_bindings)
                 status.detail = self._describe_server(server, client)
-                status.era = client._connection_info.era
-                status.negotiated_protocol_version = client._connection_info.negotiated_protocol_version
+                status.era = client.era
+                status.negotiated_protocol_version = client.negotiated_protocol_version
             except Exception as exc:
                 status.error = _sanitize_error_message(exc)
                 if isinstance(exc, MCPError):

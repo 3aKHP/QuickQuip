@@ -232,6 +232,17 @@ def test_sanitize_url_non_absolute_returned_as_is():
     assert _sanitize_url("docker run -i image") == "docker run -i image"
 
 
+def test_sanitize_url_strips_userinfo():
+    """Embedded credentials (user:pass@host) must be stripped."""
+    assert _sanitize_url("https://user:s3cr3t@host.com/mcp") == "https://host.com/mcp"
+    assert _sanitize_url("https://token:x@mcp.internal:8443/api") == "https://mcp.internal:8443/api"
+
+
+def test_sanitize_url_handles_ipv6():
+    """IPv6 literals must be bracketed in the reconstructed URL."""
+    assert _sanitize_url("https://[::1]:8443/mcp") == "https://[::1]:8443/mcp"
+
+
 # ---------------------------------------------------------------------------
 # Error message sanitization
 # ---------------------------------------------------------------------------
@@ -361,22 +372,22 @@ def test_alias_conflict_in_build_bindings():
 
 def test_is_recognized_modern_error_body_rejects_legacy_error():
     """A legacy -32601 JSON-RPC error is NOT a recognized modern error."""
-    from quickquip.llm.mcp.types import _is_recognized_modern_error_body
+    from quickquip.llm.mcp.codec import is_recognized_modern_error_body
 
     legacy_body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}'
-    assert not _is_recognized_modern_error_body(legacy_body)
+    assert not is_recognized_modern_error_body(legacy_body)
 
 
 def test_is_recognized_modern_error_body_accepts_version_error():
     """UnsupportedProtocolVersionError (-32022) IS a recognized modern error."""
-    from quickquip.llm.mcp.types import _is_recognized_modern_error_body
+    from quickquip.llm.mcp.codec import is_recognized_modern_error_body
 
     modern_body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported version","data":{"supported":["2026-07-28"]}}}'
-    assert _is_recognized_modern_error_body(modern_body)
+    assert is_recognized_modern_error_body(modern_body)
 
 
 def test_is_recognized_modern_error_body_rejects_html():
-    from quickquip.llm.mcp.types import _is_recognized_modern_error_body
+    from quickquip.llm.mcp.codec import is_recognized_modern_error_body
 
-    assert not _is_recognized_modern_error_body(b"<html>Not Found</html>")
-    assert not _is_recognized_modern_error_body(b"")
+    assert not is_recognized_modern_error_body(b"<html>Not Found</html>")
+    assert not is_recognized_modern_error_body(b"")
