@@ -18,6 +18,7 @@ TIEBA_RULE_NAME = "tieba_random_post"
 DATA_DIR = TIEBA_DATA_DIR
 STORE_PATH = DATA_DIR / "pool.json"
 PROFILE_DIR = DATA_DIR / "profile"
+CRAWLER_PROFILE_DIR = DATA_DIR / "crawler_profile"
 STATE_PATH = DATA_DIR / "storage_state.json"
 DEFAULT_SYNC_INTERVAL_SECONDS = 900
 DEFAULT_MAX_POOL_SIZE = 240
@@ -94,6 +95,7 @@ class TiebaConfig:
     browser_headless: bool
     browser_channel: str
     profile_dir: Path
+    crawler_profile_dir: Path
     state_path: Path
     store_path: Path
     forum_keyword: str = ""
@@ -129,6 +131,7 @@ def load_tieba_config() -> TiebaConfig:
     load_project_env_files()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    CRAWLER_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     forum_keywords = normalize_forum_keywords(
         os.getenv("TIEBA_FORUM_KEYWORDS", "")
         or os.getenv("TIEBA_FORUM_KEYWORD", "")
@@ -161,6 +164,7 @@ def load_tieba_config() -> TiebaConfig:
         browser_headless=env_bool("TIEBA_BROWSER_HEADLESS", True),
         browser_channel=os.getenv("TIEBA_BROWSER_CHANNEL", "").strip(),
         profile_dir=PROFILE_DIR,
+        crawler_profile_dir=CRAWLER_PROFILE_DIR,
         state_path=STATE_PATH,
         store_path=STORE_PATH,
     )

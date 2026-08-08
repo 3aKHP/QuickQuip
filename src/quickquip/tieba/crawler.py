@@ -28,6 +28,7 @@ PLAYWRIGHT_ERROR_TYPES = (PlaywrightError, PlaywrightTimeoutError)
 class TiebaCrawler:
     def __init__(self, config: TiebaConfig):
         self.config = config
+        self._launch_lock = asyncio.Lock()
 
     def playwright_ready(self) -> bool:
         return async_playwright is not None
@@ -264,51 +265,59 @@ class TiebaCrawler:
         if not self.playwright_ready():
             raise TiebaServiceError("未安装 Playwright，无法启动贴吧采集")
 
-        async with async_playwright() as playwright:
-            launch_kwargs: dict[str, object] = {
-                "headless": self.config.browser_headless,
-            }
-            if self.config.browser_channel:
-                launch_kwargs["channel"] = self.config.browser_channel
-            browser = await playwright.chromium.launch(**launch_kwargs)
-            try:
-                context = await browser.new_context(storage_state=self.get_storage_state_arg())
-                page = await context.new_page()
-                forum_feed_data = await self.load_forum_feed_data(page, forum_keyword)
-                links = self.extract_forum_links(forum_feed_data)
-                if not links:
-                    raise TiebaServiceError("未在贴吧首页提取到帖子链接，请先完成登录并确认页面可正常打开")
+        async with self._launch_lock:
+            async with async_playwright() as playwright:
+                # Reuse a persistent user_data_dir instead of letting Chromium mint a
+                # fresh temp profile on every launch (write-then-delete churn that
+                # dominated container I/O — see issue #80).
+                launch_kwargs: dict[str, object] = {
+                    "user_data_dir": str(self.config.crawler_profile_dir),
+                    "headless": self.config.browser_headless,
+                    "args": ["--disk-cache-size=10485760"],
+                }
+                if self.config.browser_channel:
+                    launch_kwargs["channel"] = self.config.browser_channel
+                storage_state = self.get_storage_state_arg()
+                if storage_state:
+                    launch_kwargs["storage_state"] = storage_state
+                context = await playwright.chromium.launch_persistent_context(**launch_kwargs)
+                try:
+                    page = context.pages[0] if context.pages else await context.new_page()
+                    forum_feed_data = await self.load_forum_feed_data(page, forum_keyword)
+                    links = self.extract_forum_links(forum_feed_data)
+                    if not links:
+                        raise TiebaServiceError("未在贴吧首页提取到帖子链接，请先完成登录并确认页面可正常打开")
 
-                selected_links = links[: limit if limit is not None else self.config.detail_fetch_limit]
-                threads: list[TiebaThread] = []
-                for item in selected_links:
-                    try:
-                        detail_data = await self.load_thread_data(page, item["url"])
-                        detail = self.extract_thread_detail_from_data(
-                            detail_data,
-                            fallback_title=item["title"],
-                            forum_keyword=forum_keyword,
-                        )
-                        if detail is None:
-                            continue
-                        if not detail.cover_image_url:
-                            detail.cover_image_url = item.get("cover_image_url", "")
-                        if detail.cover_image_url and detail.cover_image_url not in detail.image_urls:
-                            detail.image_urls.insert(0, detail.cover_image_url)
-                        detail.fetched_at = datetime.now(tz=ZoneInfo(BEIJING_TIMEZONE)).timestamp()
-                        threads.append(detail)
-                        if on_progress:
-                            img_hint = f" [{len(detail.image_urls)}图]" if detail.image_urls else ""
-                            on_progress(f"✓ {detail.title[:30]}{img_hint}")
-                    except TiebaLoginRequiredError:
-                        raise  # login expiry aborts the entire forum
-                    except TiebaServiceError as exc:
-                        if on_progress:
-                            on_progress(f"✗ 跳过 {item.get('title', item['url'])[:30]}: {exc}")
-                        continue  # single-thread failure: skip and try next
-                return threads
-            finally:
-                await browser.close()
+                    selected_links = links[: limit if limit is not None else self.config.detail_fetch_limit]
+                    threads: list[TiebaThread] = []
+                    for item in selected_links:
+                        try:
+                            detail_data = await self.load_thread_data(page, item["url"])
+                            detail = self.extract_thread_detail_from_data(
+                                detail_data,
+                                fallback_title=item["title"],
+                                forum_keyword=forum_keyword,
+                            )
+                            if detail is None:
+                                continue
+                            if not detail.cover_image_url:
+                                detail.cover_image_url = item.get("cover_image_url", "")
+                            if detail.cover_image_url and detail.cover_image_url not in detail.image_urls:
+                                detail.image_urls.insert(0, detail.cover_image_url)
+                            detail.fetched_at = datetime.now(tz=ZoneInfo(BEIJING_TIMEZONE)).timestamp()
+                            threads.append(detail)
+                            if on_progress:
+                                img_hint = f" [{len(detail.image_urls)}图]" if detail.image_urls else ""
+                                on_progress(f"✓ {detail.title[:30]}{img_hint}")
+                        except TiebaLoginRequiredError:
+                            raise  # login expiry aborts the entire forum
+                        except TiebaServiceError as exc:
+                            if on_progress:
+                                on_progress(f"✗ 跳过 {item.get('title', item['url'])[:30]}: {exc}")
+                            continue  # single-thread failure: skip and try next
+                    return threads
+                finally:
+                    await context.close()
 
     async def interactive_login(self, forum_keyword: str) -> None:
         if not forum_keyword:

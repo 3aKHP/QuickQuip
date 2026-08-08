@@ -27,6 +27,7 @@ def crawler(tmp_path: Path) -> TiebaCrawler:
         browser_headless=True,
         browser_channel="",
         profile_dir=tmp_path / "profile",
+        crawler_profile_dir=tmp_path / "crawler_profile",
         state_path=tmp_path / "storage_state.json",
         store_path=tmp_path / "pool.json",
         forum_keyword="测试",
