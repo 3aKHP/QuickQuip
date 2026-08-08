@@ -9,9 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from filelock import FileLock
 
 from plugins.tieba_service import TiebaConfig
 from quickquip.tieba.crawler import TiebaCrawler
+from quickquip.tieba.errors import TiebaServiceError
 
 
 @pytest.fixture
@@ -89,3 +91,23 @@ async def test_collect_threads_against_live_tieba(crawler: TiebaCrawler):
     Invoke explicitly with: pytest -m playwright tests/unit/tieba/test_crawler.py
     """
     pytest.skip("live browser smoke test — implement against a staged fixture when needed")
+
+
+async def test_collect_threads_fails_when_profile_locked(
+    crawler: TiebaCrawler, monkeypatch
+) -> None:
+    """While the browser lock is held by another instance, collect_threads fails
+    fast instead of opening a second Chromium against the same persistent profile.
+
+    Guards the shared-user_data_dir regression: bot and web-admin (or a concurrent
+    in-process caller) must not launch Chromium simultaneously against the same
+    profile dir (issue #80, PR #92 review).
+    """
+    monkeypatch.setattr(crawler, "playwright_ready", lambda: True)
+    held = FileLock(crawler._browser_lock_path)
+    held.acquire(timeout=0)
+    try:
+        with pytest.raises(TiebaServiceError, match="采集进行中"):
+            await crawler.collect_threads("测试")
+    finally:
+        held.release()

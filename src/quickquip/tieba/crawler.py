@@ -7,6 +7,8 @@ from collections.abc import Callable
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from filelock import FileLock, Timeout
+
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.tieba.store import TiebaThread
 from quickquip.tieba.config import TiebaConfig, clean_text, clean_thread_title
@@ -24,11 +26,20 @@ except ModuleNotFoundError:
 
 PLAYWRIGHT_ERROR_TYPES = (PlaywrightError, PlaywrightTimeoutError)
 
+# Cap the persistent profile's disk cache so it cannot grow unbounded across
+# sync runs (10 MiB; Chromium LRU-evicts within this budget).
+CRAWLER_DISK_CACHE_BYTES = 10 * 1024 * 1024
+
 
 class TiebaCrawler:
     def __init__(self, config: TiebaConfig):
         self.config = config
-        self._launch_lock = asyncio.Lock()
+        # Path of the cross-process file lock guarding the persistent user_data_dir.
+        # Bot and web-admin run as separate containers sharing the data volume; a
+        # fresh FileLock per collect_threads call (own fd) serializes both
+        # cross-process and concurrent in-process callers. A held instance is
+        # reentrant, so we must NOT reuse one across calls.
+        self._browser_lock_path = str(config.crawler_profile_dir) + ".lock"
 
     def playwright_ready(self) -> bool:
         return async_playwright is not None
@@ -265,7 +276,12 @@ class TiebaCrawler:
         if not self.playwright_ready():
             raise TiebaServiceError("未安装 Playwright，无法启动贴吧采集")
 
-        async with self._launch_lock:
+        browser_lock = FileLock(self._browser_lock_path)
+        try:
+            await asyncio.to_thread(browser_lock.acquire, timeout=0)
+        except Timeout:
+            raise TiebaServiceError("贴吧采集进行中，请稍后再试")
+        try:
             async with async_playwright() as playwright:
                 # Reuse a persistent user_data_dir instead of letting Chromium mint a
                 # fresh temp profile on every launch (write-then-delete churn that
@@ -273,7 +289,7 @@ class TiebaCrawler:
                 launch_kwargs: dict[str, object] = {
                     "user_data_dir": str(self.config.crawler_profile_dir),
                     "headless": self.config.browser_headless,
-                    "args": ["--disk-cache-size=10485760"],
+                    "args": [f"--disk-cache-size={CRAWLER_DISK_CACHE_BYTES}"],
                 }
                 if self.config.browser_channel:
                     launch_kwargs["channel"] = self.config.browser_channel
@@ -318,6 +334,8 @@ class TiebaCrawler:
                     return threads
                 finally:
                     await context.close()
+        finally:
+            browser_lock.release()
 
     async def interactive_login(self, forum_keyword: str) -> None:
         if not forum_keyword:
