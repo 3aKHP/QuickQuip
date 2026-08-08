@@ -278,7 +278,7 @@ class TiebaCrawler:
 
         browser_lock = FileLock(self._browser_lock_path)
         try:
-            await asyncio.to_thread(browser_lock.acquire, timeout=0)
+            browser_lock.acquire(timeout=0)
         except Timeout:
             raise TiebaServiceError("贴吧采集进行中，请稍后再试")
         try:
