@@ -27,6 +27,9 @@ from quickquip.common.sensitive_filter import (
 )
 from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
 from quickquip.llm.defectify import build_defectify_prompt
+from quickquip.sts.config import TURMFLUCH_MAX_OUTPUT_TOKENS, TURMFLUCH_RATE_LIMIT_KEY, TURMFLUCH_RULE_NAME
+from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
+from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
@@ -500,6 +503,151 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             "reply": text,
             "rate_limit_key": LLM_RULE_NAME,
             "rule_name": DEFECTIFY_RULE_NAME,
+            "llm_used": True,
+            "provider_id": provider.id,
+            "model": request.model,
+        }
+
+    async def generate_turmfluch_reply(
+        self,
+        *,
+        chat_id: int | str,
+        chat_type: str,
+        user_id: int | str,
+        sender_name: str,
+        prompt: str,
+        image_urls: list[str] | None = None,
+        quoted_text: str = "",
+        quoted_image_urls: list[str] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+    ) -> dict[str, str]:
+        """/turmfluch 命令：把输入提炼成一句「<卡牌或遗物名>了」。"""
+        normalized_prompt = prompt.strip()
+        normalized_image_urls = [url.strip() for url in (image_urls or []) if url.strip()]
+        normalized_quoted_text = quoted_text.strip()
+        normalized_quoted_image_urls = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
+        if (
+            not normalized_prompt
+            and not normalized_image_urls
+            and not normalized_quoted_text
+            and not normalized_quoted_image_urls
+        ):
+            return {
+                "reply": "用法：/turmfluch <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /turmfluch。",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": False,
+            }
+
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        sensitive = _get_sensitive_filter()
+        input_blob = "\n".join(part for part in (normalized_prompt, normalized_quoted_text) if part)
+        input_scan = _scan_sensitive_text(
+            input_blob,
+            channel="turmfluch_input",
+            scope=scope_key,
+            sensitive_filter=sensitive,
+        )
+        if input_scan.blocked:
+            return {
+                "reply": DEFAULT_BLOCK_REPLY,
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": False,
+            }
+
+        if self.config.load_error:
+            return {
+                "reply": f"LLM 配置不可用：{self.config.load_error}",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": False,
+            }
+
+        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
+        provider = self.config.providers.get(settings.provider_id)
+        if provider is None:
+            return {
+                "reply": f"当前 provider 不存在：{settings.provider_id}",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": False,
+            }
+
+        prompt_pack = build_turmfluch_prompt(
+            prompt=normalized_prompt,
+            image_urls=normalized_image_urls,
+            quoted_text=normalized_quoted_text,
+            quoted_image_urls=normalized_quoted_image_urls,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+        )
+        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
+        turmfluch_provider = replace(provider, stream_enabled=False)
+        request = LLMRequest(
+            model=settings.model or provider.default_model,
+            system_prompt=prompt_pack.system_prompt,
+            messages=[
+                LLMConversationMessage(
+                    role="user",
+                    content=prompt_pack.user_prompt,
+                    image_urls=effective_image_urls,
+                )
+            ],
+            temperature=0.7,
+            max_output_tokens=min(provider.max_output_tokens, TURMFLUCH_MAX_OUTPUT_TOKENS),
+            thinking_budget=None,
+            tools=[],
+            allow_tool_calls=False,
+            tool_choice="none",
+        )
+
+        try:
+            response = await build_provider_client(turmfluch_provider).complete(request)
+        except LLMProviderError as exc:
+            return {
+                "reply": f"LLM 调用失败：{exc}",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
+        except Exception as exc:
+            return {
+                "reply": f"LLM 调用异常：{exc}",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
+
+        raw_text = strip_leading_reasoning_content(response.text).strip()
+        name = extract_card_le_name(raw_text)
+        if name is None:
+            return {
+                "reply": "模型没有返回合法的卡牌/遗物名。",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
+        text = f"{name}了"
+        output_scan = _scan_sensitive_text(
+            text,
+            channel="turmfluch_output",
+            scope=scope_key,
+            sensitive_filter=sensitive,
+        )
+        if output_scan.blocked:
+            text = DEFAULT_OUTPUT_FALLBACK
+        return {
+            "reply": text,
+            "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+            "rule_name": TURMFLUCH_RULE_NAME,
             "llm_used": True,
             "provider_id": provider.id,
             "model": request.model,

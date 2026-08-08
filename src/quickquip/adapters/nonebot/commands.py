@@ -16,12 +16,14 @@ from quickquip.adapters.nonebot.command_parts.memory import register_memory_comm
 from quickquip.adapters.nonebot.command_parts.niuniu import register_niuniu_commands
 from quickquip.adapters.nonebot.command_parts.rules import register_rules_commands
 from quickquip.adapters.nonebot.command_parts.session import register_session_commands
+from quickquip.adapters.nonebot.command_parts.sts import register_sts_commands
 from quickquip.adapters.nonebot.command_parts.tieba import register_tieba_commands
 from quickquip.adapters.nonebot.command_parts.utility import register_utility_commands
 
 
 def register_commands(on_command, Message, MessageSegment) -> None:
     register_session_commands(on_command, Message, MessageSegment)
+    register_sts_commands(on_command, Message, MessageSegment)
     register_llm_commands(on_command, Message, MessageSegment)
     register_media_commands(on_command, Message, MessageSegment)
     register_tieba_commands(on_command, Message, MessageSegment)
