@@ -33,6 +33,7 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_AUTH,
     MCP_FAILURE_CONFIG,
     _build_tool_alias,
+    _detect_alias_conflicts,
     _sanitize_error_message,
     _sanitize_url,
     deliver_mcp_tool_result,
@@ -364,6 +365,24 @@ class MCPClientManager:
                     status.failure_kind = exc.failure_kind
                 logger.warning("Failed to initialize MCP server %s: %s", server.id, exc)
             self._statuses[server.id] = status
+
+        # Detect alias conflicts (fail-closed: conflicting bindings are excluded)
+        conflicts = _detect_alias_conflicts(bindings)
+        if conflicts:
+            logger.warning(
+                "MCP alias 冲突（fail-closed），跳过 %d 个：%s",
+                len(conflicts), ", ".join(sorted(conflicts)),
+            )
+            conflict_server_ids = {
+                b.server_id for b in bindings if b.alias in conflicts
+            }
+            bindings = [b for b in bindings if b.alias not in conflicts]
+            for sid in conflict_server_ids:
+                if sid in self._statuses:
+                    self._statuses[sid].failure_kind = MCP_FAILURE_CONFIG
+                    self._statuses[sid].error = (
+                        f"alias 冲突：{', '.join(sorted(conflicts))}"
+                    )
 
         self._bindings = {binding.alias: binding for binding in bindings}
         self._write_status_file()

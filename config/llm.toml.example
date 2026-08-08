@@ -70,6 +70,24 @@ timeout_seconds = 30
 url = "https://mcp.example.com/mcp"
 headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 
+# ── 双协议纪元（dual-era）协商 ─────────────────────────────────────────────
+# negotiation 控制 MCP 协议协商模式（仅 transport = "http" 生效）：
+#   "legacy" — 使用 initialize 握手 + mcp-session-id（默认，兼容所有旧 Server）
+#   "auto"   — 先发 server/discover 探测；探测到 modern 就走 modern，否则回退 legacy
+#   "modern" — 只用 modern 协议（2026-07-28），不回退
+#
+# 缺省（不填 negotiation）= "legacy"，行为与旧版完全一致。
+#
+# protocol_version 仅 legacy 使用（initialize 时的协议版本 pin）。
+# supported_protocol_versions 仅 modern/auto 使用（客户端声明的可接受版本列表）。
+#
+# [[mcp.servers]]
+# id = "modern_server"
+# transport = "http"
+# negotiation = "auto"
+# supported_protocol_versions = ["2026-07-28"]
+# url = "https://modern-mcp.example.com/mcp"
+
 # ── MCP sidecar 模式（推荐用于容器化部署） ──────────────────────────────────
 # 上游 stdio-only 的 MCP 镜像被 mcp-proxy 包一层，作为 compose sidecar 跑在
 # 内部网络上，本 bot 以 transport = "sse" 直连。完整模板参考

@@ -74,8 +74,13 @@ class HealthMixin:
         lines.append(f"工具数：{len(self._mcp_tool_names)}")
         for status in statuses:
             state = "ON" if status.connected else ("OFF" if not status.enabled else "ERROR")
+            era_tag = ""
+            if status.negotiation != "legacy" or status.era not in ("unknown", "legacy"):
+                era_tag = f"/{status.negotiation}/{status.era}"
+            elif status.negotiation != "legacy":
+                era_tag = f"/{status.negotiation}"
             lines.append(
-                f"- {status.id} [{status.transport}] {state} tools={status.tool_count}"
+                f"- {status.id} [{status.transport}{era_tag}] {state} tools={status.tool_count}"
                 + (f" detail={status.detail}" if status.detail else "")
                 + (f" error={status.error}" if status.error else "")
             )

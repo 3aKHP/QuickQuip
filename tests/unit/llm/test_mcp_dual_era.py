@@ -333,3 +333,50 @@ def test_retryable_unknown_exception_retried():
 
     assert MCPClientManager._is_retryable(Exception("unknown"))
     assert MCPClientManager._is_retryable(MCPError("no kind"))
+
+
+# ---------------------------------------------------------------------------
+# Alias conflict fail-closed in sync (Wave 6)
+# ---------------------------------------------------------------------------
+
+def test_alias_conflict_in_build_bindings():
+    """Two tools that sanitize to the same alias are detected by _detect_alias_conflicts."""
+    from quickquip.llm.mcp.types import _build_tool_alias
+
+    # 'foo.bar' and 'foo_bar' sanitize to the same alias
+    alias = _build_tool_alias("srv", "foo.bar")
+    bindings = [
+        MCPToolBinding(alias=alias, server_id="srv", tool_name="foo.bar",
+                       description="", input_schema={}),
+        MCPToolBinding(alias=alias, server_id="srv", tool_name="foo_bar",
+                       description="", input_schema={}),
+    ]
+    conflicts = _detect_alias_conflicts(bindings)
+    assert alias in conflicts
+
+
+# ---------------------------------------------------------------------------
+# MCPLegacyFallbackSignal and modern error detection (Wave 4)
+# ---------------------------------------------------------------------------
+
+def test_is_recognized_modern_error_body_rejects_legacy_error():
+    """A legacy -32601 JSON-RPC error is NOT a recognized modern error."""
+    from quickquip.llm.mcp.types import _is_recognized_modern_error_body
+
+    legacy_body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}'
+    assert not _is_recognized_modern_error_body(legacy_body)
+
+
+def test_is_recognized_modern_error_body_accepts_version_error():
+    """UnsupportedProtocolVersionError (-32022) IS a recognized modern error."""
+    from quickquip.llm.mcp.types import _is_recognized_modern_error_body
+
+    modern_body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported version","data":{"supported":["2026-07-28"]}}}'
+    assert _is_recognized_modern_error_body(modern_body)
+
+
+def test_is_recognized_modern_error_body_rejects_html():
+    from quickquip.llm.mcp.types import _is_recognized_modern_error_body
+
+    assert not _is_recognized_modern_error_body(b"<html>Not Found</html>")
+    assert not _is_recognized_modern_error_body(b"")
