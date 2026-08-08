@@ -6,6 +6,7 @@ from .memory import register_memory_commands
 from .niuniu import register_niuniu_commands
 from .rules import register_rules_commands
 from .session import register_session_commands
+from .sts import register_sts_commands
 from .tieba import register_tieba_commands
 from .utility import register_utility_commands
 
@@ -18,6 +19,7 @@ __all__ = [
     "register_niuniu_commands",
     "register_rules_commands",
     "register_session_commands",
+    "register_sts_commands",
     "register_tieba_commands",
     "register_utility_commands",
 ]
