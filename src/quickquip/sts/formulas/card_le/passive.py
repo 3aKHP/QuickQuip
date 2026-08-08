@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 _CARD_LE_RE = re.compile(CARD_LE_PATTERN)
 
-# 捕获词 → (回复 or None, 过期时间戳)。None 也缓存，避免对失败词反复重试。
+# 捕获词 → (回复 or None, 过期时间戳)。按捕获词跨群共享：同一词的"最近卡名"与群无关
+# （语义映射，不依赖群配置），故有意不区分 group_id。None 也缓存，避免对失败词反复重试。
 _NEAREST_CACHE: dict[str, tuple[str | None, float]] = {}
 _NEAREST_CACHE_TTL = 300.0
 _NEAREST_CACHE_MAX = 256

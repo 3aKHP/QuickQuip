@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from quickquip.adapters.nonebot.command_parts.common import (
-    _chat_id,
-    _chat_type,
-    _strip_leading_command_token,
-)
+from quickquip.adapters.nonebot.command_parts._chat_utils import _chat_id, _chat_type
+from quickquip.adapters.nonebot.command_parts._parsing import _strip_leading_command_token
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     get_llm_service,

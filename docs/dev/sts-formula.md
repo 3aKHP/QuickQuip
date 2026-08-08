@@ -83,9 +83,14 @@ src/quickquip/sts/
     └── card_le/          # 公式「xxx了」
         ├── prompting.py  # LLM prompt（注入词表闭集）
         ├── parsing.py    # 输出校验（提取合法名）
-        ├── passive.py    # 被动匹配器（返回规则 dict，插 resolve_reply 链）
-        └── command.py    # （命令业务逻辑当前在 LLMService.generate_turmfluch_reply）
+        └── passive.py    # 被动匹配器（返回规则 dict，插 resolve_reply 链尾）
 ```
+
+> 依赖方向说明：STS 公式逻辑（prompt/词表/正则）在 ``sts/``，但 LLM 调用编排
+> （provider 解析、敏感词扫描、complete）与 defectify 一样驻留在 ``LLMService``
+> （``llm/`` 域），因此存在 ``llm/service.py`` → ``quickquip.sts.*`` 的单向导入；
+> ``sts/`` 本身不反向依赖 ``llm/``。等第二个公式落地、编排出第三份变体时，再考虑
+> 把命令编排下沉到公式包内、收敛重复骨架。
 
 框架无关的业务逻辑都在 `sts/`；NoneBot 接线在适配层：
 命令注册在 `adapters/nonebot/command_parts/sts.py`，被动匹配器在 `app/message_pipeline.py`。

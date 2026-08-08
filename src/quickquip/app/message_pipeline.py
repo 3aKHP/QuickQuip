@@ -355,6 +355,13 @@ async def resolve_reply(
             if rule_switch.is_enabled(group_id, rule_name):
                 return ctx_reply
 
+    tz_reply = build_timezone_reply(text, sender_name=sender_name, now=now_cst)
+    if tz_reply:
+        rule_name = tz_reply.get("rule_name", "")
+        if group_id is None or rule_switch.is_enabled(group_id, rule_name):
+            return tz_reply
+
+    # STS「xxx了」置于链尾：广覆盖的梗规则，不得抢占时区（起床了/睡醒了）等具体规则
     if group_id is not None and rate_limiter.can_allow(
         CARD_LE_RATE_LIMIT_KEY, user_id, group_id=group_id
     ):
@@ -367,12 +374,6 @@ async def resolve_reply(
             rule_name = sts_reply.get("rule_name", "")
             if rule_switch.is_enabled(group_id, rule_name):
                 return sts_reply
-
-    tz_reply = build_timezone_reply(text, sender_name=sender_name, now=now_cst)
-    if tz_reply:
-        rule_name = tz_reply.get("rule_name", "")
-        if group_id is None or rule_switch.is_enabled(group_id, rule_name):
-            return tz_reply
 
     return None
 
