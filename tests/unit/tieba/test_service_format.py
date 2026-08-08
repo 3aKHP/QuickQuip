@@ -54,6 +54,7 @@ def seeded_service(tmp_path: Path) -> TiebaService:
         browser_headless=True,
         browser_channel="",
         profile_dir=tmp_path / "profile",
+        crawler_profile_dir=tmp_path / "crawler_profile",
         state_path=tmp_path / "storage_state.json",
         store_path=store_path,
         forum_keyword="测试",
