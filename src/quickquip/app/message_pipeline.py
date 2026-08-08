@@ -48,6 +48,7 @@ from quickquip.chat.period_report import (
 )
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
+from quickquip.sts.formulas.card_le.passive import match_card_le
 from quickquip.chat.awakening import (
     get_config as _get_awakening_config,
     get_state as _get_awakening_state,
@@ -352,6 +353,17 @@ async def resolve_reply(
             rule_name = ctx_reply.get("rule_name", "")
             if rule_switch.is_enabled(group_id, rule_name):
                 return ctx_reply
+
+    if group_id is not None:
+        sts_reply = await match_card_le(
+            text=text,
+            llm_service=get_llm_service(),
+            group_id=group_id,
+        )
+        if sts_reply:
+            rule_name = sts_reply.get("rule_name", "")
+            if rule_switch.is_enabled(group_id, rule_name):
+                return sts_reply
 
     tz_reply = build_timezone_reply(text, sender_name=sender_name, now=now_cst)
     if tz_reply:

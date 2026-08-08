@@ -29,7 +29,7 @@ from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.sts.config import TURMFLUCH_MAX_OUTPUT_TOKENS, TURMFLUCH_RATE_LIMIT_KEY, TURMFLUCH_RULE_NAME
 from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
-from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
+from quickquip.sts.formulas.card_le.prompting import build_nearest_prompt, build_turmfluch_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
@@ -652,6 +652,53 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             "provider_id": provider.id,
             "model": request.model,
         }
+
+    async def generate_card_le_nearest(
+        self,
+        *,
+        captured: str,
+        chat_id: int | str,
+        chat_type: str,
+    ) -> dict | None:
+        """被动路径：群友说的「{captured}了」里的 captured 不是合法名时，找最近的
+        真名，返回 ``{"reply": "名了", ...}``；无合法结果返回 None。"""
+        if self.config.load_error:
+            return None
+        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
+        provider = self.config.providers.get(settings.provider_id)
+        if provider is None:
+            return None
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        sensitive = _get_sensitive_filter()
+
+        prompt_pack = build_nearest_prompt(captured=captured)
+        nearest_provider = replace(provider, stream_enabled=False)
+        request = LLMRequest(
+            model=settings.model or provider.default_model,
+            system_prompt=prompt_pack.system_prompt,
+            messages=[LLMConversationMessage(role="user", content=prompt_pack.user_prompt)],
+            temperature=0.5,  # 最近匹配偏低温求稳
+            max_output_tokens=min(provider.max_output_tokens, TURMFLUCH_MAX_OUTPUT_TOKENS),
+            thinking_budget=None,
+            tools=[],
+            allow_tool_calls=False,
+            tool_choice="none",
+        )
+        try:
+            response = await build_provider_client(nearest_provider).complete(request)
+        except Exception:
+            logger.exception("STS card_le nearest LLM call failed for %r", captured)
+            return None
+
+        name = extract_card_le_name(strip_leading_reasoning_content(response.text).strip())
+        if name is None:
+            return None
+        text = f"{name}了"
+        if _scan_sensitive_text(
+            text, channel="card_le_output", scope=scope_key, sensitive_filter=sensitive
+        ).blocked:
+            return None
+        return {"reply": text, "llm_used": True, "provider_id": provider.id, "model": request.model}
 
     def _collect_known_participants(
         self,
