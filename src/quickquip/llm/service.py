@@ -13,7 +13,7 @@ from dataclasses import replace
 import logging
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.sensitive_filter import (
@@ -518,15 +518,13 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         *,
         chat_id: int | str,
         chat_type: str,
-        user_id: int | str,
-        sender_name: str,
         prompt: str,
         image_urls: list[str] | None = None,
         quoted_text: str = "",
         quoted_image_urls: list[str] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """/turmfluch 命令：把输入提炼成一句「<卡牌或遗物名>了」。"""
         normalized_prompt = prompt.strip()
         normalized_image_urls = [url.strip() for url in (image_urls or []) if url.strip()]
@@ -609,8 +607,22 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         )
 
         try:
-            response = await build_provider_client(turmfluch_provider).complete(request)
+            response = await asyncio.wait_for(
+                build_provider_client(turmfluch_provider).complete(request),
+                timeout=CARD_LE_LLM_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("/turmfluch LLM call timed out")
+            return {
+                "reply": "LLM 响应超时，请稍后再试。",
+                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
+                "rule_name": TURMFLUCH_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
         except LLMProviderError as exc:
+            logger.warning("/turmfluch LLM call failed: %s", exc)
             return {
                 "reply": f"LLM 调用失败：{exc}",
                 "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
@@ -620,6 +632,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 "model": request.model,
             }
         except Exception as exc:
+            logger.exception("/turmfluch LLM call raised unexpectedly")
             return {
                 "reply": f"LLM 调用异常：{exc}",
                 "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,

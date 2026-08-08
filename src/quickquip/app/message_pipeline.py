@@ -48,7 +48,7 @@ from quickquip.chat.period_report import (
 )
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
-from quickquip.sts.config import CARD_LE_RATE_LIMIT_KEY
+from quickquip.sts.config import CARD_LE_RATE_LIMIT_KEY, CARD_LE_RULE_NAME
 from quickquip.sts.formulas.card_le.passive import match_card_le
 from quickquip.chat.awakening import (
     get_config as _get_awakening_config,
@@ -362,8 +362,10 @@ async def resolve_reply(
             return tz_reply
 
     # STS「xxx了」置于链尾：广覆盖的梗规则，不得抢占时区（起床了/睡醒了）等具体规则
-    if group_id is not None and rate_limiter.can_allow(
-        CARD_LE_RATE_LIMIT_KEY, user_id, group_id=group_id
+    if (
+        group_id is not None
+        and rule_switch.is_enabled(group_id, CARD_LE_RULE_NAME)
+        and rate_limiter.can_allow(CARD_LE_RATE_LIMIT_KEY, user_id, group_id=group_id)
     ):
         sts_reply = await match_card_le(
             text=text,
@@ -371,9 +373,7 @@ async def resolve_reply(
             group_id=group_id,
         )
         if sts_reply:
-            rule_name = sts_reply.get("rule_name", "")
-            if rule_switch.is_enabled(group_id, rule_name):
-                return sts_reply
+            return sts_reply
 
     return None
 

@@ -5,7 +5,6 @@ from quickquip.adapters.nonebot.command_parts._parsing import _strip_leading_com
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     get_llm_service,
-    get_sender_name,
     rate_limiter,
     stats_tracker,
 )
@@ -50,8 +49,6 @@ def register_sts_commands(on_command, Message, MessageSegment) -> None:
         result = await svc.generate_turmfluch_reply(
             chat_id=chat_id,
             chat_type=chat_type,
-            user_id=event.user_id,
-            sender_name=get_sender_name(event),
             prompt=prompt,
             image_urls=rendered.image_urls,
             quoted_text=quoted_text,
