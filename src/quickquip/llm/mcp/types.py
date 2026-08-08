@@ -26,6 +26,19 @@ from quickquip.llm.tools import LLMInlineImage, LLMToolOutput
 
 
 class MCPError(RuntimeError):
+    def __init__(self, *args: Any, failure_kind: str = "", http_status: int = 0) -> None:
+        super().__init__(*args)
+        self.failure_kind = failure_kind
+        self.http_status = http_status
+
+
+class MCPStaleSessionError(MCPError):
+    """Raised when a request carrying mcp-session-id receives HTTP 404.
+
+    Indicates the server has discarded the session and a new legacy
+    initialize is required.  Read-only requests may trigger a bounded
+    reconnect; tools/call must NOT be replayed.
+    """
     pass
 
 

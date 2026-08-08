@@ -22,13 +22,15 @@ import httpx
 import pytest
 
 from quickquip.llm.config import MCPServerConfig
+from quickquip.llm.mcp.client import MCPClient
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
 from quickquip.llm.mcp.transport import StreamableHttpTransport
-from quickquip.llm.mcp.types import MCPError
+from quickquip.llm.mcp.types import MCPError, MCPStaleSessionError
 
 from tests.fixtures.mcp_http_fixtures import (
     LegacyMCPServer,
     ModernMCPServer,
+    StaleSessionLegacyServer,
     StreamingModernMCPServer,
 )
 
@@ -508,3 +510,93 @@ async def test_streaming_timeout_does_not_leak_client():
             assert "2026-07-28" in response.json()["result"]["protocolVersions"]
         finally:
             await client2.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Wave 3: stale-session handling
+# ---------------------------------------------------------------------------
+
+def _asgi_client(config: MCPServerConfig, server: Any) -> MCPClient:
+    """Build an MCPClient with an ASGI-backed transport for in-process testing."""
+    client = MCPClient(config)
+    transport = _AsgiHttpTransport(config, app=server)
+    client._transport = transport
+    client._session = JsonRpcSession(transport, server_id=config.id, timeout_seconds=config.timeout_seconds)
+    return client
+
+
+async def test_stale_session_list_tools_reconnects():
+    """Read-only tools/list triggers bounded reconnect on stale session 404."""
+    server = StaleSessionLegacyServer()
+    config = _http_config()
+    client = _asgi_client(config, server)
+    await client._session.start()
+
+    # Initialize establishes session stale-sess-1
+    await client._initialize()
+    assert client._transport._session_id == "stale-sess-1"
+
+    # Invalidate: subsequent requests with stale-sess-1 get 404
+    server.invalidate_session()
+
+    try:
+        # list_tools should detect stale session, reconnect, and retry
+        tools = await client.list_tools()
+        assert len(tools) == 2  # default tools: echo, ping
+
+        # After reconnect, session should be stale-sess-2
+        assert client._transport._session_id == "stale-sess-2"
+        assert client._connection_info.generation == 1
+    finally:
+        await client.aclose()
+
+
+async def test_stale_session_call_tool_does_not_replay():
+    """tools/call on stale session raises without replaying."""
+    server = StaleSessionLegacyServer()
+    config = _http_config()
+    client = _asgi_client(config, server)
+    await client._session.start()
+
+    await client._initialize()
+    # list_tools succeeds (session still valid)
+    tools = await client.list_tools()
+    assert len(tools) == 2
+
+    # Invalidate session
+    server.invalidate_session()
+
+    try:
+        # tools/call should fail WITHOUT replaying
+        with pytest.raises(MCPError, match="未自动重放"):
+            await client.call_tool("echo", {"text": "should-not-replay"})
+
+        # Verify the server only saw ONE tools/call attempt (no replay)
+        call_requests = [r for r in server.requests if r["method"] == "tools/call"]
+        assert len(call_requests) == 1
+    finally:
+        await client.aclose()
+
+
+async def test_transport_404_without_session_is_not_stale():
+    """404 without a session-id is a plain HTTP error, not stale session."""
+
+    async def always_404(scope, receive, send):
+        if scope["type"] != "http":
+            return
+        await send({"type": "http.response.start", "status": 404, "headers": [(b"content-length", b"0")]})
+        await send({"type": "http.response.body", "body": b""})
+
+    config = _http_config()
+    transport = _AsgiHttpTransport(config, app=always_404)
+    session = JsonRpcSession(transport, server_id=config.id, timeout_seconds=5)
+    await session.start()
+    try:
+        # Direct request without prior initialize (no session-id)
+        with pytest.raises(MCPError) as exc_info:
+            await session.request("tools/list", {})
+        # Should NOT be a stale-session error
+        assert not isinstance(exc_info.value, MCPStaleSessionError)
+    finally:
+        await session.aclose()
+

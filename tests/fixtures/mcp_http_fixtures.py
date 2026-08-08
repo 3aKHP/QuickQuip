@@ -227,6 +227,76 @@ class LegacyMCPServer:
 # Modern MCP server
 # ---------------------------------------------------------------------------
 
+class StaleSessionLegacyServer:
+    """Legacy server with controllable session invalidation.
+
+    Issues a fresh ``mcp-session-id`` on each ``initialize``.  When
+    ``invalidate_session()`` is called, all non-initialize requests with
+    the previous session-id receive HTTP 404, simulating server-side
+    session expiry.  This lets tests verify stale-session reconnect
+    (read-only retry) and no-replay (tools/call) behavior.
+    """
+
+    def __init__(self) -> None:
+        self._init_count = 0
+        self._invalidated = False
+        self.requests: list[dict[str, Any]] = []
+
+    def invalidate_session(self) -> None:
+        self._invalidated = True
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            return
+
+        body = await _read_body(receive)
+        headers = _header_dict(scope)
+        payload: dict[str, Any] = json.loads(body) if body else {}
+        method = payload.get("method", "")
+        request_id = payload.get("id")
+        session_id = headers.get("mcp-session-id", "")
+
+        self.requests.append({"method": method, "session_id": session_id})
+
+        if method == "initialize":
+            self._init_count += 1
+            self._invalidated = False
+            new_session = f"stale-sess-{self._init_count}"
+            await _send_json(send, status=200, body_dict={
+                "jsonrpc": "2.0", "id": request_id,
+                "result": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "stale-test", "version": "1.0"},
+                },
+            }, extra_headers=[(b"mcp-session-id", new_session.encode())])
+            return
+
+        if method == "notifications/initialized":
+            await _send_no_content(send)
+            return
+
+        if self._invalidated and session_id:
+            await _send_error(send, status=404, message="Session expired")
+            return
+
+        if method == "tools/list":
+            await _send_json(send, status=200, body_dict={
+                "jsonrpc": "2.0", "id": request_id,
+                "result": {"tools": _DEFAULT_TOOLS},
+            }, extra_headers=[(b"mcp-session-id", session_id.encode())])
+            return
+
+        if method == "tools/call":
+            arguments = payload.get("params", {}).get("arguments", {})
+            text = arguments.get("text", "")
+            await _send_json(send, status=200, body_dict={
+                "jsonrpc": "2.0", "id": request_id,
+                "result": {"content": [{"type": "text", "text": f"echo: {text}"}]},
+            }, extra_headers=[(b"mcp-session-id", session_id.encode())])
+            return
+
+
 class ModernMCPServer:
     """Minimal modern MCP (2026-07-28) server (ASGI callable).
 

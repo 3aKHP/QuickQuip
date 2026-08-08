@@ -27,7 +27,14 @@ except ModuleNotFoundError:
     httpx = None  # type: ignore[assignment]
 
 from quickquip.llm.config import MCPServerConfig
-from quickquip.llm.mcp.types import MCPError
+from quickquip.llm.mcp.types import (
+    MCPError,
+    MCPStaleSessionError,
+    MCP_FAILURE_AUTH,
+    MCP_FAILURE_TIMEOUT,
+    MCP_FAILURE_TRANSPORT,
+    _sanitize_error_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -354,9 +361,23 @@ class StreamableHttpTransport(Transport):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+            status = exc.response.status_code
+            if status == 404 and self._session_id:
+                self._session_id = None
+                raise MCPStaleSessionError(
+                    f"MCP server {self.config.id} session expired"
+                ) from exc
+            raise MCPError(
+                f"MCP server {self.config.id} HTTP {status}",
+                failure_kind=MCP_FAILURE_AUTH if status in (401, 403) else MCP_FAILURE_TRANSPORT,
+                http_status=status,
+            ) from exc
         except httpx.RequestError as exc:
-            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+            kind = MCP_FAILURE_TIMEOUT if isinstance(exc, httpx.TimeoutException) else MCP_FAILURE_TRANSPORT
+            raise MCPError(
+                f"MCP server {self.config.id} 请求失败：{_sanitize_error_message(exc)}",
+                failure_kind=kind,
+            ) from exc
 
         returned_session = response.headers.get("mcp-session-id")
         if returned_session:
@@ -434,9 +455,18 @@ class SseTransport(Transport):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            raise MCPError(f"MCP server {self.config.id} HTTP {exc.response.status_code}") from exc
+            status = exc.response.status_code
+            raise MCPError(
+                f"MCP server {self.config.id} HTTP {status}",
+                failure_kind=MCP_FAILURE_AUTH if status in (401, 403) else MCP_FAILURE_TRANSPORT,
+                http_status=status,
+            ) from exc
         except httpx.RequestError as exc:
-            raise MCPError(f"MCP server {self.config.id} 请求失败：{exc}") from exc
+            kind = MCP_FAILURE_TIMEOUT if isinstance(exc, httpx.TimeoutException) else MCP_FAILURE_TRANSPORT
+            raise MCPError(
+                f"MCP server {self.config.id} 请求失败：{_sanitize_error_message(exc)}",
+                failure_kind=kind,
+            ) from exc
         # Classic SSE transport: POST typically returns 202 Accepted with no body;
         # the JSON-RPC response arrives on the SSE stream. Nothing to push here.
 

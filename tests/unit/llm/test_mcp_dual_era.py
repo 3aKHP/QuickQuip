@@ -10,6 +10,8 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
 from quickquip.llm.config import _read_mcp_servers
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_KINDS,
@@ -292,3 +294,80 @@ def test_detect_alias_conflicts_finds_sanitization_collisions():
 
 def test_detect_alias_conflicts_empty():
     assert _detect_alias_conflicts([]) == set()
+
+
+# ---------------------------------------------------------------------------
+# Retry classification (Wave 3)
+# ---------------------------------------------------------------------------
+
+def test_retryable_auth_error_not_retried():
+    from quickquip.llm.mcp.client import MCPClientManager
+    from quickquip.llm.mcp.types import MCP_FAILURE_AUTH
+
+    exc = MCPError("HTTP 401", failure_kind=MCP_FAILURE_AUTH)
+    assert not MCPClientManager._is_retryable(exc)
+
+
+def test_retryable_config_error_not_retried():
+    from quickquip.llm.mcp.client import MCPClientManager
+    from quickquip.llm.mcp.types import MCP_FAILURE_CONFIG
+
+    exc = MCPError("not implemented", failure_kind=MCP_FAILURE_CONFIG)
+    assert not MCPClientManager._is_retryable(exc)
+
+
+def test_retryable_4xx_not_retried():
+    from quickquip.llm.mcp.client import MCPClientManager
+
+    exc = MCPError("HTTP 404", http_status=404)
+    assert not MCPClientManager._is_retryable(exc)
+
+
+def test_retryable_5xx_retried():
+    from quickquip.llm.mcp.client import MCPClientManager
+
+    exc = MCPError("HTTP 500", http_status=500)
+    assert MCPClientManager._is_retryable(exc)
+
+
+def test_retryable_unknown_exception_retried():
+    from quickquip.llm.mcp.client import MCPClientManager
+
+    assert MCPClientManager._is_retryable(Exception("unknown"))
+    assert MCPClientManager._is_retryable(MCPError("no kind"))
+
+
+# ---------------------------------------------------------------------------
+# Auto/modern mode not yet implemented (Wave 3 stub)
+# ---------------------------------------------------------------------------
+
+async def test_auto_mode_start_raises_not_implemented():
+    from quickquip.llm.config import MCPServerConfig
+    from quickquip.llm.mcp.client import MCPClient
+
+    config = MCPServerConfig(
+        id="test", transport="http", url="http://test/mcp",
+        negotiation="auto", supported_protocol_versions=["2026-07-28"],
+    )
+    client = MCPClient(config)
+    try:
+        with pytest.raises(MCPError, match="尚未实现"):
+            await client.start()
+    finally:
+        await client.aclose()
+
+
+async def test_modern_mode_start_raises_not_implemented():
+    from quickquip.llm.config import MCPServerConfig
+    from quickquip.llm.mcp.client import MCPClient
+
+    config = MCPServerConfig(
+        id="test", transport="http", url="http://test/mcp",
+        negotiation="modern", supported_protocol_versions=["2026-07-28"],
+    )
+    client = MCPClient(config)
+    try:
+        with pytest.raises(MCPError, match="尚未实现"):
+            await client.start()
+    finally:
+        await client.aclose()
