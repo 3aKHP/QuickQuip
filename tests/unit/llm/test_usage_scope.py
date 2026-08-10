@@ -48,3 +48,35 @@ async def test_usage_scope_propagates_along_await_chain():
         await asyncio.sleep(0)  # 让出一次事件循环
         await inner()
     assert seen == ["chat", "chat"]
+
+
+async def test_record_usage_reads_usage_scope(monkeypatch, tmp_path):
+    """接线有效性核心：usage_scope 设的 feature/group_id 经 _record_usage 正确落库。"""
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    from quickquip.llm.usage import _record_usage
+    from quickquip.llm.usage_store import LLMUsageStore
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.app.message_pipeline.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
+    with usage_scope("chat", group_id="g42", persona_id="p7"):
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        row = conn.execute(
+            "SELECT feature, group_id, persona_id FROM llm_usage_events"
+        ).fetchone()
+    assert row["feature"] == "chat"
+    assert row["group_id"] == "g42"
+    assert row["persona_id"] == "p7"

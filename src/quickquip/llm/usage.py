@@ -53,8 +53,9 @@ def set_usage_scope(
     group_id: str | None = None,
     persona_id: str | None = None,
 ) -> None:
-    """直接设置 scope（不 reset）；仅用于 ``asyncio.create_task`` 隔离的子任务——
-    子任务跑在父 context 的副本上，task 结束时 context 自动销毁，故无需 reset。"""
+    """直接设置 scope（不 reset）。用于：(1) ``asyncio.create_task`` 隔离的子任务
+    （跑在父 context 副本上，task 结束自动清理）；(2) 顶层 cron/handler 入口（调用方
+    不再调 provider，残留无害）。调用链中间环节应优先用 ``usage_scope``（自动 reset）。"""
     _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
 
 
