@@ -146,6 +146,20 @@ class ProviderConfig:
 
 
 @dataclass(slots=True)
+class PricingRates:
+    """单个模型的 per-MTok 定价（llm.toml [pricing.models.<name>]）。
+
+    cache_read/write_per_mtok 为 None 表示该桶无单独价（套餐制/无缓存溢价），
+    计算时回退 input 价。
+    """
+
+    input_per_mtok: float = 0.0
+    output_per_mtok: float = 0.0
+    cache_read_per_mtok: float | None = None
+    cache_write_per_mtok: float | None = None
+
+
+@dataclass(slots=True)
 class DailySummaryConfig:
     enabled: bool = False
     generate_cron: str = "0 6 * * *"
@@ -216,6 +230,7 @@ class LLMConfig:
     monthly_report: MonthlyReportConfig = field(default_factory=MonthlyReportConfig)
     image_preprocessing: ImagePreprocessingConfig = field(default_factory=ImagePreprocessingConfig)
     style_profiles: dict[str, str] = field(default_factory=dict)
+    pricing: dict[str, PricingRates] = field(default_factory=dict)
     load_error: str | None = None
     source_path: Path | None = None
 
@@ -247,6 +262,32 @@ def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfi
             extras=extras,
         )
     return personas
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_pricing(raw: dict[str, Any]) -> dict[str, PricingRates]:
+    """解析 [pricing.models.<name>] 子表为 {model: PricingRates}。"""
+    models_raw = as_dict(raw.get("models"))
+    pricing: dict[str, PricingRates] = {}
+    for model_name, entry in models_raw.items():
+        name = str(model_name).strip()
+        if not name or not isinstance(entry, dict):
+            continue
+        pricing[name] = PricingRates(
+            input_per_mtok=float(entry.get("input_per_mtok", 0.0) or 0.0),
+            output_per_mtok=float(entry.get("output_per_mtok", 0.0) or 0.0),
+            cache_read_per_mtok=_optional_float(entry.get("cache_read_per_mtok")),
+            cache_write_per_mtok=_optional_float(entry.get("cache_write_per_mtok")),
+        )
+    return pricing
 
 
 def _load_personas_from_dir(personas_dir: Path) -> list[dict[str, Any]]:
@@ -542,6 +583,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     image_preprocessing_raw = expand_env_value(as_dict(data.get("image_preprocessing")))
     raw_style_profiles = expand_env_value(as_dict(data.get("style_profiles")))
     style_profiles = {str(k).strip(): str(v).strip() for k, v in raw_style_profiles.items() if str(k).strip() and str(v).strip()}
+    raw_pricing = as_dict(data.get("pricing"))
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
     auto_search_raw = expand_env_value(as_dict(triggers_raw.get("auto_search")))
@@ -678,6 +720,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             prompt=str(image_preprocessing_raw.get("prompt", "")).strip(),
         ),
         style_profiles=style_profiles,
+        pricing=_read_pricing(raw_pricing),
         source_path=config_path,
     )
 
