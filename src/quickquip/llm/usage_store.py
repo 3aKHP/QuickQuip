@@ -120,6 +120,70 @@ class LLMUsageStore:
                 list(full.values()),
             )
 
+    def summary(self, cutoff: str) -> dict:
+        """聚合用量/成本（仅 state='ok' 行计入金额；error/cancelled 单独计数）。"""
+        self._ensure_schema()
+        with self.connect() as conn:
+            total = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0) AS cost, "
+                "COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS tokens, "
+                "COUNT(*) AS calls FROM llm_usage_events WHERE ts >= ? AND state = 'ok'",
+                (cutoff,),
+            ).fetchone()
+            unpriced = conn.execute(
+                "SELECT COUNT(*) AS c, "
+                "COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS t "
+                "FROM llm_usage_events WHERE ts >= ? AND priced = 0 AND state = 'ok'",
+                (cutoff,),
+            ).fetchone()
+            err = conn.execute(
+                "SELECT COUNT(*) AS c FROM llm_usage_events WHERE ts >= ? AND state = 'error'",
+                (cutoff,),
+            ).fetchone()
+            cancelled = conn.execute(
+                "SELECT COUNT(*) AS c FROM llm_usage_events WHERE ts >= ? AND state = 'cancelled'",
+                (cutoff,),
+            ).fetchone()
+            return {
+                "total_cost": round(total["cost"], 6),
+                "total_tokens": total["tokens"],
+                "total_calls": total["calls"],
+                "by_provider": self._group_by(conn, "provider_id", cutoff),
+                "by_feature": self._group_by(conn, "feature", cutoff),
+                "by_model": self._group_by(conn, "model", cutoff),
+                "by_group": self._group_by(conn, "group_id", cutoff),
+                "unpriced_calls_count": unpriced["c"],
+                "unpriced_tokens_total": unpriced["t"],
+                "error_count": err["c"],
+                "cancelled_count": cancelled["c"],
+                "bounds_note": "总成本为下界：不含失败/超时/未定价调用",
+            }
+
+    def timeline(self, cutoff: str) -> list[dict]:
+        self._ensure_schema()
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT strftime('%Y-%m-%d', ts) AS d, COALESCE(SUM(cost_usd), 0) AS cost, "
+                "COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS tokens "
+                "FROM llm_usage_events WHERE ts >= ? AND state = 'ok' GROUP BY d ORDER BY d",
+                (cutoff,),
+            ).fetchall()
+        return [{"date": r["d"], "cost": round(r["cost"], 6), "tokens": r["tokens"]} for r in rows]
+
+    @staticmethod
+    def _group_by(conn, col: str, cutoff: str) -> list[dict]:
+        """按某列聚合 cost/calls（仅 state='ok'）。col 受控（非用户输入）。"""
+        rows = conn.execute(
+            f"SELECT {col} AS k, COALESCE(SUM(cost_usd), 0) AS cost, COUNT(*) AS calls "
+            f"FROM llm_usage_events WHERE ts >= ? AND state = 'ok' GROUP BY {col} "
+            f"ORDER BY cost DESC",
+            (cutoff,),
+        ).fetchall()
+        return [
+            {"key": r["k"] if r["k"] is not None else "(未归因)", "cost": round(r["cost"], 6), "calls": r["calls"]}
+            for r in rows
+        ]
+
     def _cleanup_if_due(self) -> None:
         now = datetime.now(timezone.utc)
         today = now.date().isoformat()

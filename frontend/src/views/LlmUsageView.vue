@@ -13,7 +13,7 @@
     </UiPageHeader>
 
     <p v-if="error" class="error">{{ error }}</p>
-    <UiLoading v-else-if="loading && !data" />
+    <UiLoading v-if="loading && !data" />
     <template v-else-if="data">
       <p class="bounds-note">{{ data.bounds_note }}</p>
 
@@ -50,7 +50,7 @@
       </div>
 
       <UiCard v-if="timeline.length" padding="md" shadow="sm">
-        <h4 class="bucket-title">每日成本趋势（近 30 天）</h4>
+        <h4 class="bucket-title">每日成本趋势</h4>
         <div class="timeline">
           <div v-for="t in timeline" :key="t.date" class="tl-col" :title="`${t.date}: $${fmtCost(t.cost)} · ${fmtNum(t.tokens)} tokens`">
             <div class="tl-bar" :style="{ height: (tlMax ? Math.round(t.cost / tlMax * 100) : 0) + '%' }" />
@@ -102,7 +102,7 @@ function fmtNum(v: number) {
   return v.toLocaleString()
 }
 function pct(v: number, m: number) {
-  return m ? Math.max(4, Math.round((v / m) * 100)) : 0
+  return m && v > 0 ? Math.max(4, Math.round((v / m) * 100)) : 0
 }
 
 async function load() {
@@ -111,7 +111,7 @@ async function load() {
   try {
     const [s, t] = await Promise.all([
       fetchLlmUsageSummary(range.value),
-      fetchLlmUsageTimeline('30d'),
+      fetchLlmUsageTimeline(range.value),
     ])
     data.value = s
     timeline.value = t

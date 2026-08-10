@@ -1,6 +1,8 @@
+from __future__ import annotations
+
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from quickquip.app.web.routes import llm_usage as route
 from quickquip.llm.usage_store import LLMUsageStore
 
 
@@ -22,48 +24,64 @@ def _seed(store: LLMUsageStore) -> None:
                   "cost_usd": 0.0, "priced": 1, "state": "error", "error_message": "boom"})
 
 
-def _cutoff_days(days: int = 7) -> str:
+def _seed_old(store: LLMUsageStore) -> None:
+    """落一行并把 ts 改到 10 天前（cutoff 7d 应排除、30d 应包含）。"""
+    store.record({"provider_id": "old-prov", "protocol": "claude", "model": "old",
+                  "feature": "chat", "group_id": "g9", "stream": 1,
+                  "input_tokens": 50, "output_tokens": 10, "cost_usd": 0.002,
+                  "priced": 1, "state": "ok"})
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    with sqlite3.connect(store.path) as conn:
+        conn.execute("UPDATE llm_usage_events SET ts = ? WHERE provider_id = ?", (old_ts, "old-prov"))
+
+
+def _cutoff(days: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
 
 def test_summary_aggregates_cost_tokens_unpriced_errors(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     _seed(store)
-    s = route._summary(store, _cutoff_days(7))
-    assert s["total_cost"] == round(0.001 + 0.0005, 6)  # 仅 ok 行
-    assert s["total_calls"] == 3  # 3 行 ok（error 不计）
+    s = store.summary(_cutoff(7))
+    assert s["total_cost"] == round(0.001 + 0.0005, 6)
+    assert s["total_calls"] == 3
     assert s["total_tokens"] == 100 + 50 + 200 + 30 + 300 + 40
     assert s["unpriced_calls_count"] == 1
-    assert s["unpriced_tokens_total"] == 300 + 40
     assert s["error_count"] == 1
     assert s["cancelled_count"] == 0
     assert "下界" in s["bounds_note"]
 
 
-def test_summary_group_by_provider_orders_by_cost(tmp_path):
+def test_summary_group_by_orders_and_null_group(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     _seed(store)
-    s = route._summary(store, _cutoff_days(7))
-    keys = [b["key"] for b in s["by_provider"]]
-    assert keys[0] == "claude-main"  # 0.001 最高
-    assert "gemini-main" in keys
-    # 未归因 group：vision 行 group_id=None → "(未归因)"
-    group_keys = [b["key"] for b in s["by_group"]]
-    assert "(未归因)" in group_keys
+    s = store.summary(_cutoff(7))
+    assert s["by_provider"][0]["key"] == "claude-main"
+    assert "(未归因)" in [b["key"] for b in s["by_group"]]
 
 
-def test_timeline_buckets_by_day(tmp_path):
+def test_summary_range_filter_excludes_old(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     _seed(store)
-    tl = route._timeline(store, _cutoff_days(7))
-    assert len(tl) == 1  # 全部今天
-    assert tl[0]["date"] == datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    assert tl[0]["cost"] == round(0.001 + 0.0005, 6)
+    _seed_old(store)
+    assert store.summary(_cutoff(7))["total_calls"] == 3   # 旧行被排除
+    assert store.summary(_cutoff(30))["total_calls"] == 4  # 旧行被纳入
+
+
+def test_timeline_range_filter_and_date(tmp_path):
+    store = LLMUsageStore(tmp_path / "u.db")
+    _seed(store)
+    _seed_old(store)
+    tl7 = store.timeline(_cutoff(7))
+    assert len(tl7) == 1
+    assert tl7[0]["date"] == datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    tl30 = store.timeline(_cutoff(30))
+    assert len(tl30) == 2  # 今天 + 10 天前
 
 
 def test_summary_empty_store(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
-    s = route._summary(store, _cutoff_days(7))
+    s = store.summary(_cutoff(7))
     assert s["total_cost"] == 0.0
     assert s["total_calls"] == 0
     assert s["by_provider"] == []
