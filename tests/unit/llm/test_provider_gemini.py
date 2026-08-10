@@ -82,3 +82,15 @@ async def test_gemini_cache_thinking_tokens_parsed():
     assert resp.cache_read_tokens == 250
     assert resp.thinking_tokens == 15
     assert resp.cache_creation_tokens is None
+
+
+async def test_gemini_stream_cache_thinking_tokens_parsed():
+    """流式 usageMetadata 解析（stream_enabled 默认 True，生产主路径）。"""
+    chunks = [
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}, "finishReason": "STOP"}],
+         "usageMetadata": {"promptTokenCount": 300, "candidatesTokenCount": 40,
+                           "cachedContentTokenCount": 250, "thoughtsTokenCount": 15}},
+    ]
+    resp = FakeGeminiClient._assemble_stream_response(chunks, "gemini-test")
+    assert resp.cache_read_tokens == 250
+    assert resp.thinking_tokens == 15

@@ -70,10 +70,9 @@ def _cache_creation_tokens(usage: dict[str, Any]) -> int | None:
         return int(total)
     detail = usage.get("cache_creation")
     if isinstance(detail, dict):
-        summed = (detail.get("ephemeral_5m_input_tokens") or 0) + (
+        return int(detail.get("ephemeral_5m_input_tokens") or 0) + int(
             detail.get("ephemeral_1h_input_tokens") or 0
         )
-        return summed or None
     return None
 
 

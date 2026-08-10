@@ -87,3 +87,18 @@ async def test_openai_cache_thinking_tokens_parsed():
     assert resp.cache_read_tokens == 250
     assert resp.thinking_tokens == 15
     assert resp.cache_creation_tokens is None
+
+
+async def test_openai_stream_cache_thinking_tokens_parsed():
+    """流式末块 usage.details 解析（stream_enabled 默认 True，生产主路径）。"""
+    chunks = [
+        {"choices": [{"delta": {"content": "ok"}, "finish_reason": None}]},
+        {"choices": [{"delta": {}, "finish_reason": "stop"}],
+         "usage": {"prompt_tokens": 300, "completion_tokens": 40,
+                   "prompt_tokens_details": {"cached_tokens": 250},
+                   "completion_tokens_details": {"reasoning_tokens": 15}}},
+    ]
+    resp = FakeOpenAIClient._assemble_stream_response(chunks, "gpt-test")
+    assert resp.cache_read_tokens == 250
+    assert resp.thinking_tokens == 15
+    assert resp.output_tokens == 40

@@ -222,3 +222,18 @@ async def test_claude_cache_tokens_parsed():
     resp2 = await FakeClaudeClient(base, data2).complete(request)
     assert resp2.cache_creation_tokens == 80
     assert resp2.cache_read_tokens is None
+
+
+async def test_claude_stream_cache_tokens_parsed():
+    """流式 message_start.usage 的 cache token 解析（stream_enabled 默认 True，生产主路径）。"""
+    chunks = [
+        {"_sse_event": "message_start", "message": {"model": "claude-test",
+            "usage": {"input_tokens": 100, "cache_creation_input_tokens": 80,
+                      "cache_read_input_tokens": 200}}},
+        {"_sse_event": "message_delta", "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 50}},
+    ]
+    resp = FakeClaudeClient._assemble_stream_response(chunks, "claude-test")
+    assert resp.cache_creation_tokens == 80
+    assert resp.cache_read_tokens == 200
+    assert resp.output_tokens == 50
