@@ -69,3 +69,21 @@ async def test_openai_tool_call_payload_and_response():
     assert client.last_payload["tools"][0]["function"]["name"] == "get_identity"
     assert response.tool_calls[0].name == "get_identity"
     assert response.tool_calls[0].arguments_json == '{"query":"哈基镜"}'
+
+
+async def test_openai_cache_thinking_tokens_parsed():
+    """cached_tokens/reasoning_tokens 从 usage.details 解析（inclusive：cached ⊆ prompt）。"""
+    request = LLMRequest(
+        model="gpt-test", system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=0.2, max_output_tokens=128,
+    )
+    data = {"model": "gpt-test",
+            "choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 300, "completion_tokens": 40,
+                      "prompt_tokens_details": {"cached_tokens": 250},
+                      "completion_tokens_details": {"reasoning_tokens": 15}}}
+    resp = await FakeOpenAIClient(_provider_config(), data).complete(request)
+    assert resp.cache_read_tokens == 250
+    assert resp.thinking_tokens == 15
+    assert resp.cache_creation_tokens is None

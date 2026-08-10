@@ -63,6 +63,20 @@ def _detect_stainless_os() -> str:
     return system or "Linux"
 
 
+def _cache_creation_tokens(usage: dict[str, Any]) -> int | None:
+    """缓存写 token：顶层 cache_creation_input_tokens 优先，否则 5m/1h 细分求和。"""
+    total = usage.get("cache_creation_input_tokens")
+    if total is not None:
+        return int(total)
+    detail = usage.get("cache_creation")
+    if isinstance(detail, dict):
+        summed = (detail.get("ephemeral_5m_input_tokens") or 0) + (
+            detail.get("ephemeral_1h_input_tokens") or 0
+        )
+        return summed or None
+    return None
+
+
 class ClaudeProviderClient(BaseProviderClient):
     async def _serialize_user_message(self, message: LLMConversationMessage) -> dict[str, Any]:
         if message.inline_images:
@@ -204,12 +218,18 @@ class ClaudeProviderClient(BaseProviderClient):
         elif "user-agent" not in overrides:
             headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
         use_cache = self.config.prompt_caching
+        # cache_control 块：默认 ephemeral=5min；cache_ttl="1h" 启用 1h 扩展缓存。
+        # 1h write 2× input（vs 5min 1.25×），仅当请求间隔 >5min 才更划算（如群聊）。
+        # 注意第三方中转对 1h TTL 的支持因上游而异，套餐制 provider 无意义——默认空（5min）。
+        cache_control: dict[str, str] = {"type": "ephemeral"}
+        if self.config.cache_ttl:
+            cache_control["ttl"] = self.config.cache_ttl
 
         # System prompt: match Claude Code wire format — array of text blocks
         # with cache_control on the final block.
         system: list[dict[str, Any]] = [{"type": "text", "text": request.system_prompt}]
         if use_cache:
-            system[-1]["cache_control"] = {"type": "ephemeral"}
+            system[-1]["cache_control"] = dict(cache_control)
 
         # Messages: match Claude Code — cache_control on the last content block
         # of the last message. Skips thinking/redacted_thinking blocks.
@@ -221,9 +241,9 @@ class ClaudeProviderClient(BaseProviderClient):
             if isinstance(content, list) and content:
                 last_block = content[-1]
                 if last_block.get("type") not in ("thinking", "redacted_thinking"):
-                    last_block["cache_control"] = {"type": "ephemeral"}
+                    last_block["cache_control"] = dict(cache_control)
             elif isinstance(content, str) and content:
-                last_msg["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                last_msg["content"] = [{"type": "text", "text": content, "cache_control": dict(cache_control)}]
 
         payload: dict[str, Any] = {
             "model": request.model,
@@ -245,7 +265,7 @@ class ClaudeProviderClient(BaseProviderClient):
             ]
             # Match Claude Code: cache_control on the final tool definition.
             if use_cache and tools:
-                tools[-1]["cache_control"] = {"type": "ephemeral"}
+                tools[-1]["cache_control"] = dict(cache_control)
             payload["tools"] = tools
         return url, headers, payload
 
@@ -282,6 +302,8 @@ class ClaudeProviderClient(BaseProviderClient):
             finish_reason=str(data.get("stop_reason", "")).strip() or None,
             input_tokens=usage.get("input_tokens"),
             output_tokens=usage.get("output_tokens"),
+            cache_creation_tokens=_cache_creation_tokens(usage),
+            cache_read_tokens=usage.get("cache_read_input_tokens"),
             thinking_blocks=thinking_blocks,
         )
 
@@ -294,6 +316,8 @@ class ClaudeProviderClient(BaseProviderClient):
         model = fallback_model
         input_tokens: int | None = None
         output_tokens: int | None = None
+        cache_creation_tokens: int | None = None
+        cache_read_tokens: int | None = None
         current_block_index = -1
 
         for chunk in chunks:
@@ -305,6 +329,11 @@ class ClaudeProviderClient(BaseProviderClient):
                 usage = msg.get("usage", {})
                 if usage.get("input_tokens") is not None:
                     input_tokens = usage["input_tokens"]
+                cc = _cache_creation_tokens(usage)
+                if cc is not None:
+                    cache_creation_tokens = cc
+                if usage.get("cache_read_input_tokens") is not None:
+                    cache_read_tokens = usage["cache_read_input_tokens"]
 
             elif event == "content_block_start":
                 current_block_index = chunk.get("index", current_block_index + 1)
@@ -361,6 +390,8 @@ class ClaudeProviderClient(BaseProviderClient):
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
         )
 
     @staticmethod

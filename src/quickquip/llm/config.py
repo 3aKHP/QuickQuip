@@ -141,6 +141,7 @@ class ProviderConfig:
     fallback_urls: list[str] = field(default_factory=list)
     proxy: str = ""
     prompt_caching: bool = False
+    cache_ttl: str = ""  # Claude prompt-cache TTL；空=默认 5min，"1h"=扩展缓存
     auth_method: str = "api_key"  # "api_key" | "bearer"
 
 
@@ -383,6 +384,7 @@ def _parse_single_provider(
         fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
         proxy=str(entry.get("proxy", "")).strip(),
         prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
+        cache_ttl=str(entry.get("cache_ttl", "")).strip(),
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
     )
 

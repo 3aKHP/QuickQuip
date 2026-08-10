@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import platform
 
 from plugins.llm_config import ProviderConfig
@@ -173,3 +174,51 @@ async def test_detect_stainless_os_matches_platform():
         assert detected == "MacOS"
     else:
         assert detected == system
+
+
+async def test_claude_cache_control_ttl_when_configured():
+    """cache_ttl='1h' 给所有 cache_control 块加 ttl；空则维持默认 ephemeral（5min）。"""
+    request = LLMRequest(
+        model="claude-test",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=0.2,
+        max_output_tokens=128,
+    )
+    base = _provider_config()
+
+    on = FakeClaudeClient(replace(base, prompt_caching=True, cache_ttl="1h"), {"content": []})
+    await on.complete(request)
+    assert on.last_payload["system"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    default = FakeClaudeClient(replace(base, prompt_caching=True, cache_ttl=""), {"content": []})
+    await default.complete(request)
+    assert default.last_payload["system"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_claude_cache_tokens_parsed():
+    """cache_creation/cache_read 从 usage 解析；5m/1h 细分求和；thinking 计入 output 无独立字段。"""
+    request = LLMRequest(
+        model="claude-test",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=0.2,
+        max_output_tokens=128,
+    )
+    base = _provider_config()
+
+    data = {"model": "claude-test", "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 100, "output_tokens": 50,
+                      "cache_creation_input_tokens": 80, "cache_read_input_tokens": 200}}
+    resp = await FakeClaudeClient(base, data).complete(request)
+    assert resp.cache_creation_tokens == 80
+    assert resp.cache_read_tokens == 200
+    assert resp.thinking_tokens is None
+
+    # 5m/1h 细分求和回退（无顶层 cache_creation_input_tokens 时）
+    data2 = {"model": "claude-test", "content": [{"type": "text", "text": "ok"}],
+             "usage": {"input_tokens": 100, "output_tokens": 50,
+                       "cache_creation": {"ephemeral_5m_input_tokens": 30, "ephemeral_1h_input_tokens": 50}}}
+    resp2 = await FakeClaudeClient(base, data2).complete(request)
+    assert resp2.cache_creation_tokens == 80
+    assert resp2.cache_read_tokens is None
