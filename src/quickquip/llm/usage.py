@@ -98,7 +98,7 @@ async def _record_usage(
                 response.cache_creation_tokens,
                 response.cache_read_tokens,
             )
-            rates = match_pricing(model, _configured_pricing())
+            rates = match_pricing(client.config.id, model, _configured_pricing())
             cost_usd, priced_flag = estimate_cost(usage, rates)
             priced = 1 if priced_flag else 0
 

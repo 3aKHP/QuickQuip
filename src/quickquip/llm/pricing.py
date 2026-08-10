@@ -86,9 +86,17 @@ def estimate_cost(u: CanonicalUsage, rates: PricingRates | None) -> tuple[float,
     return cost, True
 
 
-def match_pricing(model: str, configured: dict[str, PricingRates]) -> PricingRates | None:
-    """先查 configured（llm.toml 精确模型名），未命中 → None（未定价）。"""
-    return configured.get(model)
+def match_pricing(
+    provider_id: str, model: str, configured: dict[str, PricingRates]
+) -> PricingRates | None:
+    """先查 ``provider_id/model``（per-provider 中转实际价），miss 回退纯 ``model``
+    （官方价默认），再 miss → None（未定价）。
+
+    key 为 ``f"{provider_id}/{model}"`` 精确拼接——即使 model 名本身含 ``/``（如
+    OpenRouter 的 ``google/gemma-4-31b-it``），拼接后 ``openrouter/google/gemma-4-31b-it``
+    仍与 configured 同名 key 精确匹配，无歧义；``is not None`` 判断避免依赖 truthiness。"""
+    specific = configured.get(f"{provider_id}/{model}")
+    return specific if specific is not None else configured.get(model)
 
 
 def _mtok(tokens: int | None, rate_per_mtok: float) -> float:
