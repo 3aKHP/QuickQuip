@@ -181,6 +181,9 @@ class LLMResponse:
     finish_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 

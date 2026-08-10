@@ -141,6 +141,7 @@ class ProviderConfig:
     fallback_urls: list[str] = field(default_factory=list)
     proxy: str = ""
     prompt_caching: bool = False
+    cache_ttl: str = ""  # Claude prompt-cache TTL；空=默认 5min，"1h"=扩展缓存
     auth_method: str = "api_key"  # "api_key" | "bearer"
 
 
@@ -383,6 +384,7 @@ def _parse_single_provider(
         fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
         proxy=str(entry.get("proxy", "")).strip(),
         prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
+        cache_ttl=str(entry.get("cache_ttl", "")).strip(),
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
     )
 
@@ -730,6 +732,8 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
             provider_errors.append(f"未知协议 {provider.protocol!r}")
         if provider.auth_method not in {"api_key", "bearer"}:
             provider_errors.append(f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）")
+        if provider.protocol == "claude" and provider.cache_ttl not in ("", "5m", "1h"):
+            provider_errors.append(f"非法 cache_ttl {provider.cache_ttl!r}（claude 仅支持 5m / 1h，留空=默认 5min）")
         if not provider.base_url:
             provider_errors.append("缺少 base_url")
         if not provider.api_key_env:

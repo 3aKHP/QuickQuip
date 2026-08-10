@@ -161,6 +161,8 @@ class OpenAIProviderClient(BaseProviderClient):
         if reasoning_content:
             thinking_blocks.append({"type": "reasoning", "reasoning_content": reasoning_content})
         usage = data.get("usage", {})
+        prompt_details = usage.get("prompt_tokens_details") or {}
+        completion_details = usage.get("completion_tokens_details") or {}
         return LLMResponse(
             text=strip_leading_reasoning_content(_text_from_block_list(message.get("content"))),
             model=str(data.get("model", fallback_model)),
@@ -168,6 +170,8 @@ class OpenAIProviderClient(BaseProviderClient):
             finish_reason=str(choice.get("finish_reason", "")).strip() or None,
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
+            cache_read_tokens=prompt_details.get("cached_tokens") if isinstance(prompt_details, dict) else None,
+            thinking_tokens=completion_details.get("reasoning_tokens") if isinstance(completion_details, dict) else None,
             thinking_blocks=thinking_blocks,
         )
 
@@ -180,6 +184,8 @@ class OpenAIProviderClient(BaseProviderClient):
         model = fallback_model
         input_tokens: int | None = None
         output_tokens: int | None = None
+        cache_read_tokens: int | None = None
+        thinking_tokens: int | None = None
 
         for chunk in chunks:
             model = str(chunk.get("model", model))
@@ -210,6 +216,12 @@ class OpenAIProviderClient(BaseProviderClient):
                     input_tokens = usage["prompt_tokens"]
                 if usage.get("completion_tokens") is not None:
                     output_tokens = usage["completion_tokens"]
+                prompt_details = usage.get("prompt_tokens_details") or {}
+                if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens") is not None:
+                    cache_read_tokens = prompt_details["cached_tokens"]
+                completion_details = usage.get("completion_tokens_details") or {}
+                if isinstance(completion_details, dict) and completion_details.get("reasoning_tokens") is not None:
+                    thinking_tokens = completion_details["reasoning_tokens"]
 
         tool_calls = [
             LLMToolCall(
@@ -230,6 +242,8 @@ class OpenAIProviderClient(BaseProviderClient):
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            thinking_tokens=thinking_tokens,
         )
 
     @staticmethod

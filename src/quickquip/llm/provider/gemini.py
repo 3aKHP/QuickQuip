@@ -185,6 +185,8 @@ class GeminiProviderClient(BaseProviderClient):
         finish_reason: str | None = None
         input_tokens: int | None = None
         output_tokens: int | None = None
+        cache_read_tokens: int | None = None
+        thinking_tokens: int | None = None
         tool_counter = 0
 
         for chunk in chunks:
@@ -218,6 +220,10 @@ class GeminiProviderClient(BaseProviderClient):
                     input_tokens = usage["promptTokenCount"]
                 if usage.get("candidatesTokenCount") is not None:
                     output_tokens = usage["candidatesTokenCount"]
+                if usage.get("cachedContentTokenCount") is not None:
+                    cache_read_tokens = usage["cachedContentTokenCount"]
+                if usage.get("thoughtsTokenCount") is not None:
+                    thinking_tokens = usage["thoughtsTokenCount"]
 
         return LLMResponse(
             text="".join(text_parts).strip(),
@@ -226,6 +232,8 @@ class GeminiProviderClient(BaseProviderClient):
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            thinking_tokens=thinking_tokens,
         )
 
     @staticmethod
@@ -289,6 +297,8 @@ class GeminiProviderClient(BaseProviderClient):
         usage = data.get("usageMetadata", {})
         response.input_tokens = usage.get("promptTokenCount")
         response.output_tokens = usage.get("candidatesTokenCount")
+        response.cache_read_tokens = usage.get("cachedContentTokenCount")
+        response.thinking_tokens = usage.get("thoughtsTokenCount")
         return response
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
