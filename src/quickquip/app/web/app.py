@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
-from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, period_reports, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime
+from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, period_reports, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime, llm_usage
 from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
 
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(sensitive_filter.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(awakening.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(llm_runtime.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+    app.include_router(llm_usage.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
 
     if _DIST.exists():
         app.mount("/ops", StaticFiles(directory=_DIST, html=True), name="static")
