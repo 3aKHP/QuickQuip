@@ -157,6 +157,8 @@ class PricingRates:
     output_per_mtok: float = 0.0
     cache_read_per_mtok: float | None = None
     cache_write_per_mtok: float | None = None
+    source: str = "config"
+    confidence: str = "configured"
 
 
 @dataclass(slots=True)
@@ -286,6 +288,8 @@ def _read_pricing(raw: dict[str, Any]) -> dict[str, PricingRates]:
             output_per_mtok=float(entry.get("output_per_mtok", 0.0) or 0.0),
             cache_read_per_mtok=_optional_float(entry.get("cache_read_per_mtok")),
             cache_write_per_mtok=_optional_float(entry.get("cache_write_per_mtok")),
+            source=str(entry.get("source", "config")).strip() or "config",
+            confidence=str(entry.get("confidence", "configured")).strip() or "configured",
         )
     return pricing
 

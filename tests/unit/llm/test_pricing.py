@@ -4,6 +4,7 @@ from quickquip.llm.pricing import (
     estimate_cost,
     match_pricing,
     normalize_usage,
+    estimate_cost_components,
 )
 
 
@@ -95,3 +96,15 @@ def test_cache_rate_falls_back_to_input():
     # actual_input=100-50-20=30；cache_read 50 + cache_write 20 均回退 input 3.0
     expected = 30 * 3 / 1e6 + 50 * 3 / 1e6 + 20 * 3 / 1e6 + 10 * 15 / 1e6
     assert abs(cost - expected) < 1e-12
+
+
+def test_cost_components_expose_canonical_buckets():
+    rates = PricingRates(input_per_mtok=2.0, output_per_mtok=8.0, cache_read_per_mtok=0.2)
+    usage = normalize_usage("claude", 100, 50, 80, 200)
+    components, priced = estimate_cost_components(usage, rates)
+    assert priced is True
+    assert usage.fresh_input == 100
+    assert usage.total_tokens == 430
+    assert usage.input_token_semantics == "inclusive"
+    assert components["input_cost_usd"] == 100 * 2 / 1e6
+    assert components["cache_read_cost_usd"] == 200 * 0.2 / 1e6

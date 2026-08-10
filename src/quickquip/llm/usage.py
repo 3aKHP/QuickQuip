@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Iterator
 
-from quickquip.llm.pricing import estimate_cost, match_pricing, normalize_usage
+from quickquip.llm.pricing import estimate_cost_components, match_pricing, normalize_usage
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,16 @@ async def _record_usage(
 
         cost_usd = 0.0
         priced = 0
+        input_cost_usd = 0.0
+        output_cost_usd = 0.0
+        cache_read_cost_usd = 0.0
+        cache_creation_cost_usd = 0.0
+        fresh_input_tokens = None
+        total_tokens = None
+        input_token_semantics = None
+        pricing_model = None
+        pricing_source = None
+        pricing_confidence = None
         if response is not None and state == "ok":
             usage = normalize_usage(
                 client.config.protocol,
@@ -98,9 +108,22 @@ async def _record_usage(
                 response.cache_creation_tokens,
                 response.cache_read_tokens,
             )
-            rates = match_pricing(client.config.id, model, _configured_pricing())
-            cost_usd, priced_flag = estimate_cost(usage, rates)
+            configured = _configured_pricing()
+            rates = match_pricing(client.config.id, model, configured)
+            components, priced_flag = estimate_cost_components(usage, rates)
+            input_cost_usd = components["input_cost_usd"]
+            output_cost_usd = components["output_cost_usd"]
+            cache_read_cost_usd = components["cache_read_cost_usd"]
+            cache_creation_cost_usd = components["cache_creation_cost_usd"]
+            cost_usd = sum(components.values())
             priced = 1 if priced_flag else 0
+            fresh_input_tokens = usage.fresh_input
+            total_tokens = usage.total_tokens
+            input_token_semantics = usage.input_token_semantics
+            if rates is not None:
+                pricing_model = f"{client.config.id}/{model}" if f"{client.config.id}/{model}" in configured else model
+                pricing_source = rates.source
+                pricing_confidence = rates.confidence
 
         row = {
             "provider_id": client.config.id,
@@ -113,11 +136,21 @@ async def _record_usage(
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,
+            "fresh_input_tokens": fresh_input_tokens,
+            "total_tokens": total_tokens,
+            "input_token_semantics": input_token_semantics,
             "output_tokens": response.output_tokens if response else None,
             "cache_creation_tokens": response.cache_creation_tokens if response else None,
             "cache_read_tokens": response.cache_read_tokens if response else None,
             "thinking_tokens": response.thinking_tokens if response else None,
             "cost_usd": cost_usd,
+            "input_cost_usd": input_cost_usd,
+            "output_cost_usd": output_cost_usd,
+            "cache_read_cost_usd": cache_read_cost_usd,
+            "cache_creation_cost_usd": cache_creation_cost_usd,
+            "pricing_model": pricing_model,
+            "pricing_source": pricing_source,
+            "pricing_confidence": pricing_confidence,
             "priced": priced,
             "state": state,
             "error_message": error_msg or None,
