@@ -85,3 +85,33 @@ def test_summary_empty_store(tmp_path):
     assert s["total_cost"] == 0.0
     assert s["total_calls"] == 0
     assert s["by_provider"] == []
+
+
+def test_summary_filters_and_canonical_buckets(tmp_path):
+    store = LLMUsageStore(tmp_path / "u.db")
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat", "group_id": "g", "stream": 1, "input_tokens": 100, "fresh_input_tokens": 30, "total_tokens": 150, "input_token_semantics": "inclusive", "cache_read_tokens": 70, "output_tokens": 50, "cost_usd": 0.01, "priced": 1, "state": "ok", "duration_ms": 100})
+    store.record({"provider_id": "q", "protocol": "openai", "model": "n", "feature": "other", "stream": 1, "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.02, "priced": 1, "state": "ok"})
+    summary = store.summary(_cutoff(7), provider_id="p", feature="chat")
+    assert summary["request_count"] == 1
+    assert summary["success_rate"] == 1.0
+    assert summary["total_fresh_input_tokens"] == 30
+    assert summary["cache_hit_rate"] == 0.7
+
+
+def test_timeline_zero_fills_and_selects_metric(tmp_path):
+    store = LLMUsageStore(tmp_path / "u.db")
+    store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1, "input_tokens": 2, "output_tokens": 3, "cost_usd": 0.01, "priced": 1, "state": "ok"})
+    timeline = store.timeline(_cutoff(7), range_days=7, metric="requests")
+    assert len(timeline) == 7
+    assert sum(point["value"] for point in timeline) == 1
+
+
+def test_events_cursor_pagination(tmp_path):
+    store = LLMUsageStore(tmp_path / "u.db")
+    for index in range(3):
+        store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1, "state": "ok", "error_message": None})
+    first = store.events(cutoff=_cutoff(7), limit=2)
+    assert len(first["items"]) == 2
+    assert first["next_cursor"]
+    second = store.events(cutoff=_cutoff(7), limit=2, cursor=int(first["next_cursor"]))
+    assert len(second["items"]) == 1

@@ -89,15 +89,52 @@ class LLMUsageStore:
                         stream                INTEGER NOT NULL,
                         duration_ms           REAL,
                         input_tokens          INTEGER,
+                        fresh_input_tokens    INTEGER,
+                        total_tokens          INTEGER,
+                        input_token_semantics TEXT,
                         output_tokens         INTEGER,
                         cache_creation_tokens INTEGER,
                         cache_read_tokens     INTEGER,
                         thinking_tokens       INTEGER,
                         cost_usd              REAL NOT NULL DEFAULT 0.0,
+                        input_cost_usd        REAL NOT NULL DEFAULT 0.0,
+                        output_cost_usd       REAL NOT NULL DEFAULT 0.0,
+                        cache_read_cost_usd   REAL NOT NULL DEFAULT 0.0,
+                        cache_creation_cost_usd REAL NOT NULL DEFAULT 0.0,
+                        pricing_model         TEXT,
+                        pricing_source        TEXT,
+                        pricing_confidence    TEXT,
                         priced                INTEGER NOT NULL DEFAULT 0,
                         state                 TEXT NOT NULL DEFAULT 'ok',
                         error_message         TEXT
                     );
+                    """
+                )
+                columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")
+                }
+                migrations = {
+                    "feature": "TEXT",
+                    "group_id": "TEXT",
+                    "persona_id": "TEXT",
+                    "agent_loop_id": "TEXT",
+                    "duration_ms": "REAL",
+                    "fresh_input_tokens": "INTEGER",
+                    "total_tokens": "INTEGER",
+                    "input_token_semantics": "TEXT",
+                    "input_cost_usd": "REAL NOT NULL DEFAULT 0.0",
+                    "output_cost_usd": "REAL NOT NULL DEFAULT 0.0",
+                    "cache_read_cost_usd": "REAL NOT NULL DEFAULT 0.0",
+                    "cache_creation_cost_usd": "REAL NOT NULL DEFAULT 0.0",
+                    "pricing_model": "TEXT",
+                    "pricing_source": "TEXT",
+                    "pricing_confidence": "TEXT",
+                }
+                for name, definition in migrations.items():
+                    if name not in columns:
+                        conn.execute(f"ALTER TABLE llm_usage_events ADD COLUMN {name} {definition}")
+                conn.executescript(
+                    """
                     CREATE INDEX IF NOT EXISTS idx_usage_ts       ON llm_usage_events(ts DESC, id DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_provider ON llm_usage_events(provider_id, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_feature  ON llm_usage_events(feature, ts DESC);
@@ -120,69 +157,193 @@ class LLMUsageStore:
                 list(full.values()),
             )
 
-    def summary(self, cutoff: str) -> dict:
+    def summary(self, cutoff: str, **filters: str | None) -> dict:
         """聚合用量/成本（仅 state='ok' 行计入金额；error/cancelled 单独计数）。"""
         self._ensure_schema()
+        where, params = self._where(cutoff, filters)
         with self.connect() as conn:
             total = conn.execute(
-                "SELECT COALESCE(SUM(cost_usd), 0) AS cost, "
-                "COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS tokens, "
-                "COUNT(*) AS calls FROM llm_usage_events WHERE ts >= ? AND state = 'ok'",
-                (cutoff,),
+                f"SELECT COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) AS cost, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._total_tokens_expr()} ELSE 0 END), 0) AS tokens, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._fresh_input_expr()} ELSE 0 END), 0) AS fresh_input, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN output_tokens ELSE 0 END), 0) AS output, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_read_tokens ELSE 0 END), 0) AS cache_read, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_creation_tokens ELSE 0 END), 0) AS cache_creation, "
+                f"COUNT(*) AS calls, COALESCE(SUM(CASE WHEN state = 'ok' THEN 1 ELSE 0 END), 0) AS successes, "
+                f"COALESCE(AVG(duration_ms), 0) AS avg_duration "
+                f"FROM llm_usage_events WHERE {where}",
+                params,
             ).fetchone()
             unpriced = conn.execute(
-                "SELECT COUNT(*) AS c, "
-                "COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS t "
-                "FROM llm_usage_events WHERE ts >= ? AND priced = 0 AND state = 'ok'",
-                (cutoff,),
+                f"SELECT COUNT(*) AS c, COALESCE(SUM({self._total_tokens_expr()}), 0) AS t "
+                f"FROM llm_usage_events WHERE {where} AND priced = 0 AND state = 'ok'",
+                params,
             ).fetchone()
-            err = conn.execute(
-                "SELECT COUNT(*) AS c FROM llm_usage_events WHERE ts >= ? AND state = 'error'",
-                (cutoff,),
-            ).fetchone()
-            cancelled = conn.execute(
-                "SELECT COUNT(*) AS c FROM llm_usage_events WHERE ts >= ? AND state = 'cancelled'",
-                (cutoff,),
-            ).fetchone()
+            states = conn.execute(
+                f"SELECT state, COUNT(*) AS c FROM llm_usage_events WHERE {where} GROUP BY state",
+                params,
+            ).fetchall()
+            state_counts = {r["state"]: r["c"] for r in states}
+            input_total = total["fresh_input"] + total["cache_read"] + total["cache_creation"]
             return {
                 "total_cost": round(total["cost"], 6),
                 "total_tokens": total["tokens"],
-                "total_calls": total["calls"],
-                "by_provider": self._group_by(conn, "provider_id", cutoff),
-                "by_feature": self._group_by(conn, "feature", cutoff),
-                "by_model": self._group_by(conn, "model", cutoff),
-                "by_group": self._group_by(conn, "group_id", cutoff),
+                "total_fresh_input_tokens": total["fresh_input"],
+                "total_output_tokens": total["output"],
+                "total_cache_read_tokens": total["cache_read"],
+                "total_cache_creation_tokens": total["cache_creation"],
+                "request_count": total["calls"],
+                "success_count": total["successes"],
+                "total_calls": total["successes"],
+                "success_rate": round((total["successes"] or 0) / total["calls"], 4) if total["calls"] else 0.0,
+                "average_duration_ms": round(total["avg_duration"], 2),
+                "cache_hit_rate": round(total["cache_read"] / input_total, 4) if input_total else 0.0,
+                "by_provider": self._group_by(conn, "provider_id", where, params),
+                "by_feature": self._group_by(conn, "feature", where, params),
+                "by_model": self._group_by(conn, "model", where, params),
+                "by_group": self._group_by(conn, "group_id", where, params),
                 "unpriced_calls_count": unpriced["c"],
                 "unpriced_tokens_total": unpriced["t"],
-                "error_count": err["c"],
-                "cancelled_count": cancelled["c"],
+                "error_count": state_counts.get("error", 0),
+                "cancelled_count": state_counts.get("cancelled", 0),
                 "bounds_note": "总成本为下界：不含失败/超时/未定价调用",
             }
 
-    def timeline(self, cutoff: str) -> list[dict]:
+    def timeline(
+        self,
+        cutoff: str,
+        *,
+        range_days: int | None = None,
+        metric: str = "cost",
+        **filters: str | None,
+    ) -> list[dict]:
+        if metric not in {"cost", "tokens", "requests", "errors", "duration"}:
+            raise ValueError("unsupported metric")
         self._ensure_schema()
+        where, params = self._where(cutoff, filters)
+        fill_buckets = range_days is not None
+        effective_days = range_days or 7
+        if effective_days <= 1:
+            bucket_expr = "strftime('%Y-%m-%dT%H:00:00Z', ts)"
+            step = timedelta(hours=1)
+            start = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+            fmt = "%Y-%m-%dT%H:00:00Z"
+        else:
+            bucket_expr = "strftime('%Y-%m-%d', ts)"
+            step = timedelta(days=1)
+            start = datetime.now(timezone.utc).date() - timedelta(days=effective_days - 1)
+            fmt = "%Y-%m-%d"
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT strftime('%Y-%m-%d', ts) AS d, COALESCE(SUM(cost_usd), 0) AS cost, "
-                "COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)), 0) AS tokens "
-                "FROM llm_usage_events WHERE ts >= ? AND state = 'ok' GROUP BY d ORDER BY d",
-                (cutoff,),
+                f"SELECT {bucket_expr} AS d, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) AS cost, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._total_tokens_expr()} ELSE 0 END), 0) AS tokens, "
+                f"COUNT(*) AS requests, SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END) AS errors, "
+                f"COALESCE(AVG(duration_ms), 0) AS duration "
+                f"FROM llm_usage_events WHERE {where} GROUP BY d ORDER BY d",
+                params,
             ).fetchall()
-        return [{"date": r["d"], "cost": round(r["cost"], 6), "tokens": r["tokens"]} for r in rows]
+        indexed = {r["d"]: r for r in rows}
+        result = []
+        cursor = start
+        end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) if effective_days <= 1 else datetime.now(timezone.utc).date()
+        if not fill_buckets:
+            return [
+                {"date": r["d"], "cost": round(r["cost"], 6), "tokens": r["tokens"],
+                 "requests": r["requests"], "errors": r["errors"], "duration": round(r["duration"], 2),
+                 "value": self._timeline_value(r, metric)}
+                for r in rows
+            ]
+        while cursor <= end:
+            key = cursor.strftime(fmt)
+            row = indexed.get(key)
+            result.append({
+                "date": key,
+                "cost": round(row["cost"], 6) if row else 0.0,
+                "tokens": row["tokens"] if row else 0,
+                "requests": row["requests"] if row else 0,
+                "errors": row["errors"] if row else 0,
+                "duration": round(row["duration"], 2) if row else 0.0,
+                "value": self._timeline_value(row, metric),
+            })
+            cursor += step
+        return result
 
     @staticmethod
-    def _group_by(conn, col: str, cutoff: str) -> list[dict]:
+    def _group_by(conn, col: str, where: str, params: list[object]) -> list[dict]:
         """按某列聚合 cost/calls（仅 state='ok'）。col 受控（非用户输入）。"""
         rows = conn.execute(
-            f"SELECT {col} AS k, COALESCE(SUM(cost_usd), 0) AS cost, COUNT(*) AS calls "
-            f"FROM llm_usage_events WHERE ts >= ? AND state = 'ok' GROUP BY {col} "
+            f"SELECT {col} AS k, COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) AS cost, "
+            f"COUNT(*) AS calls, COALESCE(SUM(CASE WHEN state = 'ok' THEN {LLMUsageStore._total_tokens_expr()} ELSE 0 END), 0) AS tokens, "
+            f"SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END) AS errors "
+            f"FROM llm_usage_events WHERE {where} GROUP BY {col} "
             f"ORDER BY cost DESC",
-            (cutoff,),
+            params,
         ).fetchall()
         return [
-            {"key": r["k"] if r["k"] is not None else "(未归因)", "cost": round(r["cost"], 6), "calls": r["calls"]}
+            {"key": r["k"] if r["k"] is not None else "(未归因)", "cost": round(r["cost"], 6), "calls": r["calls"], "tokens": r["tokens"], "errors": r["errors"]}
             for r in rows
         ]
+
+    @staticmethod
+    def _total_tokens_expr() -> str:
+        return "COALESCE(total_tokens, CASE WHEN input_token_semantics = 'exclusive' OR (input_token_semantics IS NULL AND protocol = 'claude') THEN COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) ELSE COALESCE(input_tokens, 0) END + COALESCE(output_tokens, 0))"
+
+    @staticmethod
+    def _fresh_input_expr() -> str:
+        return "COALESCE(fresh_input_tokens, CASE WHEN input_token_semantics = 'exclusive' OR (input_token_semantics IS NULL AND protocol = 'claude') THEN COALESCE(input_tokens, 0) ELSE MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_creation_tokens, 0)) END)"
+
+    @staticmethod
+    def _timeline_value(row: sqlite3.Row | None, metric: str) -> float | int:
+        if row is None:
+            return 0.0 if metric in {"cost", "duration"} else 0
+        return {
+            "cost": round(row["cost"], 6),
+            "tokens": row["tokens"],
+            "requests": row["requests"],
+            "errors": row["errors"],
+            "duration": round(row["duration"], 2),
+        }[metric]
+
+    @staticmethod
+    def _where(cutoff: str, filters: dict[str, str | None]) -> tuple[str, list[object]]:
+        clauses = ["ts >= ?"]
+        params: list[object] = [cutoff]
+        for key in ("provider_id", "model", "feature", "group_id", "state"):
+            value = filters.get(key)
+            if value:
+                clauses.append(f"{key} = ?")
+                params.append(value)
+        return " AND ".join(clauses), params
+
+    def events(
+        self,
+        *,
+        cutoff: str,
+        limit: int = 50,
+        cursor: int | None = None,
+        **filters: str | None,
+    ) -> dict:
+        self._ensure_schema()
+        where, params = self._where(cutoff, filters)
+        if cursor is not None:
+            where += " AND id < ?"
+            params.append(cursor)
+        limit = max(1, min(limit, 100))
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM llm_usage_events WHERE {where} ORDER BY id DESC LIMIT ?",
+                [*params, limit + 1],
+            ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        return {"items": [dict(row) for row in rows], "next_cursor": str(rows[-1]["id"]) if has_more and rows else None}
+
+    def event(self, event_id: int) -> dict | None:
+        self._ensure_schema()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM llm_usage_events WHERE id = ?", (event_id,)).fetchone()
+        return dict(row) if row else None
 
     def _cleanup_if_due(self) -> None:
         now = datetime.now(timezone.utc)

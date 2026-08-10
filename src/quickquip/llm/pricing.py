@@ -25,6 +25,22 @@ class CanonicalUsage:
     cache_read: int | None
     cache_write: int | None
 
+    @property
+    def fresh_input(self) -> int | None:
+        if self.prompt is None:
+            return None
+        return max(0, self.prompt - (self.cache_read or 0) - (self.cache_write or 0))
+
+    @property
+    def total_tokens(self) -> int | None:
+        if self.prompt is None and self.completion is None:
+            return None
+        return (self.prompt or 0) + (self.completion or 0)
+
+    @property
+    def input_token_semantics(self) -> str:
+        return "inclusive"
+
 
 def normalize_usage(
     protocol: str,
@@ -66,7 +82,7 @@ def estimate_cost(u: CanonicalUsage, rates: PricingRates | None) -> tuple[float,
     # actual_input = prompt - cache_read - cache_write（三者都已含在 inclusive prompt 中，
     # 都减掉才剩"未缓存的新鲜输入"，否则 Claude 的 cache_write 会在 actual_input 和
     # cache_write 两处重复计费）
-    actual_input = max(0, (u.prompt or 0) - (u.cache_read or 0) - (u.cache_write or 0))
+    actual_input = u.fresh_input or 0
     cache_read_rate = (
         rates.cache_read_per_mtok
         if rates.cache_read_per_mtok is not None
@@ -84,6 +100,37 @@ def estimate_cost(u: CanonicalUsage, rates: PricingRates | None) -> tuple[float,
         + _mtok(u.completion, rates.output_per_mtok)
     )
     return cost, True
+
+
+def estimate_cost_components(
+    u: CanonicalUsage,
+    rates: PricingRates | None,
+) -> tuple[dict[str, float], bool]:
+    """Return the four billable components plus total pricing state."""
+    if rates is None:
+        return {
+            "input_cost_usd": 0.0,
+            "output_cost_usd": 0.0,
+            "cache_read_cost_usd": 0.0,
+            "cache_creation_cost_usd": 0.0,
+        }, False
+    cache_read_rate = (
+        rates.cache_read_per_mtok
+        if rates.cache_read_per_mtok is not None
+        else rates.input_per_mtok
+    )
+    cache_write_rate = (
+        rates.cache_write_per_mtok
+        if rates.cache_write_per_mtok is not None
+        else rates.input_per_mtok
+    )
+    components = {
+        "input_cost_usd": _mtok(u.fresh_input, rates.input_per_mtok),
+        "output_cost_usd": _mtok(u.completion, rates.output_per_mtok),
+        "cache_read_cost_usd": _mtok(u.cache_read, cache_read_rate),
+        "cache_creation_cost_usd": _mtok(u.cache_write, cache_write_rate),
+    }
+    return components, True
 
 
 def match_pricing(
