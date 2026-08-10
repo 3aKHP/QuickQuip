@@ -109,3 +109,38 @@ async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
     assert row["input_tokens"] == 100
     assert row["cost_usd"] == 0.0  # 无 pricing 配置 → 未定价
     assert row["priced"] == 0
+
+
+async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
+    """e2e: _record_usage 传 client.config.id，provider 级价（覆盖 model 默认）落 cost_usd。"""
+    from quickquip.llm.config import PricingRates
+    from quickquip.llm.usage import _record_usage
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.app.message_pipeline.usage_store", fake_store)
+    configured = {
+        "gpt-test": PricingRates(input_per_mtok=1.0, output_per_mtok=5.0),
+        "p1/gpt-test": PricingRates(input_per_mtok=2.0, output_per_mtok=10.0),
+    }
+    monkeypatch.setattr("quickquip.llm.usage._configured_pricing", lambda: configured)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p1", protocol="openai", base_url="https://x/v1",
+            api_key_env="K", default_model="gpt-test", models=["gpt-test"],
+        )
+
+    class FakeReq:
+        model = "gpt-test"
+
+    response = LLMResponse(text="ok", model="gpt-test", input_tokens=100, output_tokens=50)
+    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        row = conn.execute("SELECT cost_usd, priced FROM llm_usage_events").fetchone()
+    # provider p1 覆盖价（非 model 默认）：actual_input 100*2 + completion 50*10（per MTok）
+    expected = 100 * 2 / 1e6 + 50 * 10 / 1e6
+    assert abs(row["cost_usd"] - expected) < 1e-9
+    assert row["priced"] == 1
