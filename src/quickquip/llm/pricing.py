@@ -86,9 +86,12 @@ def estimate_cost(u: CanonicalUsage, rates: PricingRates | None) -> tuple[float,
     return cost, True
 
 
-def match_pricing(model: str, configured: dict[str, PricingRates]) -> PricingRates | None:
-    """先查 configured（llm.toml 精确模型名），未命中 → None（未定价）。"""
-    return configured.get(model)
+def match_pricing(
+    provider_id: str, model: str, configured: dict[str, PricingRates]
+) -> PricingRates | None:
+    """先查 ``provider_id/model``（per-provider 中转实际价），miss 回退纯 ``model``
+    （官方价默认），再 miss → None（未定价）。支持"model 默认 + provider 覆盖"两层。"""
+    return configured.get(f"{provider_id}/{model}") or configured.get(model)
 
 
 def _mtok(tokens: int | None, rate_per_mtok: float) -> float:

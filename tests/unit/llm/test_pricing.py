@@ -78,10 +78,14 @@ def test_estimate_cost_none_tokens_not_counted():
     assert priced is True
 
 
-def test_match_pricing_configured_only():
-    configured = {"gpt-test": PricingRates(input_per_mtok=1.0)}
-    assert match_pricing("gpt-test", configured).input_per_mtok == 1.0
-    assert match_pricing("unknown", configured) is None
+def test_match_pricing_provider_overrides_model_fallback():
+    configured = {
+        "gpt-test": PricingRates(input_per_mtok=1.0),
+        "p1/gpt-test": PricingRates(input_per_mtok=2.0),
+    }
+    assert match_pricing("p1", "gpt-test", configured).input_per_mtok == 2.0
+    assert match_pricing("p2", "gpt-test", configured).input_per_mtok == 1.0
+    assert match_pricing("p1", "unknown", configured) is None
 
 
 def test_cache_rate_falls_back_to_input():
