@@ -6,6 +6,7 @@ import logging
 
 from quickquip.llm.tools import LLMConversationMessage, LLMInlineImage
 from quickquip.llm.provider import LLMRequest, LLMProviderError
+from quickquip.llm.usage import usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -112,26 +113,27 @@ class VisionImagePreprocessor(ImagePreprocessor):
         if not image_urls:
             return []
 
-        async def _describe_one(url: str) -> ImageDescription:
-            async with self._semaphore:
-                return await self._describe_single(url)
+        with usage_scope("vision"):
+            async def _describe_one(url: str) -> ImageDescription:
+                async with self._semaphore:
+                    return await self._describe_single(url)
 
-        bounded_urls = image_urls[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
-        tasks = [_describe_one(url) for url in bounded_urls]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            bounded_urls = image_urls[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
+            tasks = [_describe_one(url) for url in bounded_urls]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        descriptions: list[ImageDescription] = []
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                descriptions.append(ImageDescription(
-                    source_url=bounded_urls[i],
-                    text_description="",
-                    success=False,
-                    error=str(result),
-                ))
-            else:
-                descriptions.append(result)
-        return descriptions
+            descriptions: list[ImageDescription] = []
+            for i, result in enumerate(results):
+                if isinstance(result, BaseException):
+                    descriptions.append(ImageDescription(
+                        source_url=bounded_urls[i],
+                        text_description="",
+                        success=False,
+                        error=str(result),
+                    ))
+                else:
+                    descriptions.append(result)
+            return descriptions
 
     async def describe_inline_images(
         self, images: list[LLMInlineImage]
@@ -139,27 +141,28 @@ class VisionImagePreprocessor(ImagePreprocessor):
         if not images:
             return []
 
-        async def _describe_one(image: LLMInlineImage) -> ImageDescription:
-            async with self._semaphore:
-                return await self._describe_inline_single(image)
+        with usage_scope("vision"):
+            async def _describe_one(image: LLMInlineImage) -> ImageDescription:
+                async with self._semaphore:
+                    return await self._describe_inline_single(image)
 
-        bounded_images = images[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
-        results = await asyncio.gather(
-            *[_describe_one(image) for image in bounded_images],
-            return_exceptions=True,
-        )
-        descriptions: list[ImageDescription] = []
-        for image, result in zip(bounded_images, results, strict=True):
-            if isinstance(result, BaseException):
-                descriptions.append(ImageDescription(
-                    source_url=image.source_label,
-                    text_description="",
-                    success=False,
-                    error=str(result),
-                ))
-            else:
-                descriptions.append(result)
-        return descriptions
+            bounded_images = images[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
+            results = await asyncio.gather(
+                *[_describe_one(image) for image in bounded_images],
+                return_exceptions=True,
+            )
+            descriptions: list[ImageDescription] = []
+            for image, result in zip(bounded_images, results, strict=True):
+                if isinstance(result, BaseException):
+                    descriptions.append(ImageDescription(
+                        source_url=image.source_label,
+                        text_description="",
+                        success=False,
+                        error=str(result),
+                    ))
+                else:
+                    descriptions.append(result)
+            return descriptions
 
     async def _describe_single(self, image_url: str) -> ImageDescription:
         try:

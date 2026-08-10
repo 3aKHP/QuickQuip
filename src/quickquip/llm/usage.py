@@ -47,6 +47,18 @@ def usage_scope(
         _USAGE_SCOPE.reset(token)
 
 
+def set_usage_scope(
+    feature: str,
+    *,
+    group_id: str | None = None,
+    persona_id: str | None = None,
+) -> None:
+    """直接设置 scope（不 reset）。用于：(1) ``asyncio.create_task`` 隔离的子任务
+    （跑在父 context 副本上，task 结束自动清理）；(2) 顶层 cron/handler 入口（调用方
+    不再调 provider，残留无害）。调用链中间环节应优先用 ``usage_scope``（自动 reset）。"""
+    _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
+
+
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
     try:

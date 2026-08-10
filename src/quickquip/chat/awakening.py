@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.common.json_utils import extract_json_object
+from quickquip.llm.usage import usage_scope
 from quickquip.common.paths import CONFIG_AWAKENING_TOML
 
 logger = logging.getLogger(__name__)
@@ -557,10 +558,11 @@ async def _llm_judge(
     try:
         # quick_judge uses its own system_prompt; we embed ours in the user prompt
         full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
-        raw = await asyncio.wait_for(
-            svc.quick_judge(full_prompt, max_tokens=max_tokens),
-            timeout=timeout,
-        )
+        with usage_scope("awakening_judge"):
+            raw = await asyncio.wait_for(
+                svc.quick_judge(full_prompt, max_tokens=max_tokens),
+                timeout=timeout,
+            )
         return _extract_json_trigger(raw, threshold)
     except asyncio.TimeoutError:
         logger.debug("awakening: quick_judge timed out (%.1fs)", timeout)
