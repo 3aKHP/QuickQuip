@@ -88,10 +88,9 @@ headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 # supported_protocol_versions = ["2026-07-28"]
 # url = "https://modern-mcp.example.com/mcp"
 
-# ── MCP sidecar 模式（推荐用于容器化部署） ──────────────────────────────────
-# 上游 stdio-only 的 MCP 镜像被 mcp-proxy 包一层，作为 compose sidecar 跑在
-# 内部网络上，本 bot 以 transport = "sse" 直连。完整模板参考
-# docker/mcp-example.Dockerfile.example 与你的私有部署编排。
+# ── MCP sidecar 模式（legacy，仅在没有宿主机 HTTP 服务时使用） ──────────────
+# 生产容器优先通过已鉴权的 HTTPS Streamable HTTP 网关连接宿主机上的 MCP
+# 服务；以下 sidecar 示例保留用于独立环境，不应与宿主机 MCP 服务重复部署。
 
 # [[mcp.servers]]
 # id = "tavily"
