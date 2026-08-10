@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.tools import LLMConversationMessage
+from quickquip.llm.usage import set_usage_scope
 
 _TEMPERATURE = 0.9
 
@@ -112,6 +113,7 @@ async def generate_profile(
     model: str,
     profile_mode: ProfileModeConfig = DEFAULT_PROFILE_MODE,
 ) -> tuple[str, str]:
+    set_usage_scope("profile")
     sections = [
         f"请以你的语气，为群友「{target_name}」写一篇人物志，目标长度约 {profile_mode.target_chars} 字。",
         f"\n群内发言总数：{message_count} 条",

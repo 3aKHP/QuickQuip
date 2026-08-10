@@ -21,6 +21,7 @@ from collections import OrderedDict
 
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.service_parts.constants import MAX_STORED_MEMORY_ITEMS
+from quickquip.llm.usage import set_usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class AutoMemoryMixin:
         user_text: str,
         assistant_text: str,
     ) -> None:
+        set_usage_scope("auto_memory", group_id=scope_key)
         try:
             # ── quality gates ──────────────────────────────────────
             if not (user_text.strip() and assistant_text.strip()):

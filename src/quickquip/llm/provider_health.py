@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.usage import set_usage_scope
 
 PROBE_TIMEOUT_SECONDS = 5.0
 _PROBE_MAX_TOKENS = 1
@@ -61,6 +62,7 @@ async def probe_provider(
     api_key 未设置的 provider 直接返回 "skipped"，不产生计费。
     传入 model 为 None 时用 provider.default_model。
     """
+    set_usage_scope("health")
     from quickquip.llm.provider import LLMRequest, build_provider_client
     from quickquip.llm.tools import LLMConversationMessage
 
