@@ -732,6 +732,8 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
             provider_errors.append(f"未知协议 {provider.protocol!r}")
         if provider.auth_method not in {"api_key", "bearer"}:
             provider_errors.append(f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）")
+        if provider.protocol == "claude" and provider.cache_ttl not in ("", "5m", "1h"):
+            provider_errors.append(f"非法 cache_ttl {provider.cache_ttl!r}（claude 仅支持 5m / 1h，留空=默认 5min）")
         if not provider.base_url:
             provider_errors.append("缺少 base_url")
         if not provider.api_key_env:

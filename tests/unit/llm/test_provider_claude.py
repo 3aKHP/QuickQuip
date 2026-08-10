@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import platform
+from dataclasses import replace
 
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMRequest, _detect_stainless_os
