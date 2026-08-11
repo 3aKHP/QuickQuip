@@ -270,7 +270,7 @@ async def test_legacy_requests_carry_no_modern_headers():
 # ---------------------------------------------------------------------------
 
 async def test_modern_discover_returns_capabilities():
-    """server/discover returns protocolVersions and serverInfo."""
+    """server/discover returns the final 2026-07-28 identity contract."""
     app = ModernMCPServer()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -282,11 +282,15 @@ async def test_modern_discover_returns_capabilities():
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "server/discover",
-                "params": {},
-                "_meta": {
-                    "protocolVersion": "2026-07-28",
-                    "clientInfo": {"name": "QuickQuip", "version": "1.0"},
-                    "capabilities": {},
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {
+                            "name": "QuickQuip",
+                            "version": "1.0",
+                        },
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
                 },
             },
             headers={
@@ -297,8 +301,10 @@ async def test_modern_discover_returns_capabilities():
             },
         )
         result = response.json()["result"]
-        assert "2026-07-28" in result["protocolVersions"]
-        assert result["serverInfo"]["name"] == "modern-test-server"
+        assert "2026-07-28" in result["supportedVersions"]
+        server_info = result["_meta"]["io.modelcontextprotocol/serverInfo"]
+        assert server_info["name"] == "modern-test-server"
+        assert server_info["version"] == "2.0.0"
 
 
 async def test_modern_discover_missing_routing_headers_rejected():
@@ -314,12 +320,40 @@ async def test_modern_discover_missing_routing_headers_rejected():
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "server/discover",
-                "params": {},
-                "_meta": {"protocolVersion": "2026-07-28"},
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    },
+                },
             },
             headers={
                 "Content-Type": "application/json",
                 # Missing MCP-Protocol-Version and Mcp-Method
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == -32600
+
+
+async def test_modern_discover_missing_envelope_metadata_rejected():
+    """Modern fixture rejects routing-only requests without params metadata."""
+    app = ModernMCPServer()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "server/discover",
+                "params": {},
+            },
+            headers={
+                "Content-Type": "application/json",
+                "MCP-Protocol-Version": "2026-07-28",
+                "Mcp-Method": "server/discover",
             },
         )
         assert response.status_code == 400
@@ -339,11 +373,17 @@ async def test_modern_request_scoped_json():
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": "echo", "arguments": {"text": "modern hello"}},
-                "_meta": {
-                    "protocolVersion": "2026-07-28",
-                    "clientInfo": {"name": "QuickQuip", "version": "1.0"},
-                    "capabilities": {},
+                "params": {
+                    "name": "echo",
+                    "arguments": {"text": "modern hello"},
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {
+                            "name": "QuickQuip",
+                            "version": "1.0",
+                        },
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
                 },
             },
             headers={
@@ -504,10 +544,19 @@ async def test_streaming_timeout_does_not_leak_client():
         response = await client.post(
             "/mcp",
             json={
-                "jsonrpc": "2.0", "id": 6, "method": "server/discover", "params": {},
-                "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                          "io.modelcontextprotocol/clientInfo": {"name": "QuickQuip", "version": "1.0"},
-                          "io.modelcontextprotocol/clientCapabilities": {}},
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "server/discover",
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {
+                            "name": "QuickQuip",
+                            "version": "1.0",
+                        },
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
+                },
             },
             headers={
                 "Content-Type": "application/json",
@@ -516,7 +565,7 @@ async def test_streaming_timeout_does_not_leak_client():
             },
         )
         assert response.status_code == 200
-        assert "2026-07-28" in response.json()["result"]["protocolVersions"]
+        assert "2026-07-28" in response.json()["result"]["supportedVersions"]
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +696,8 @@ async def test_modern_mode_discover_and_list(monkeypatch):
         await client.start()
         assert client._is_modern
         assert client._connection_info.era == "modern"
+        assert client.server_info == {"name": "modern-test-server", "version": "2.0.0"}
+        assert client._connection_info.server_info == client.server_info
         assert client._connection_info.negotiated_protocol_version == "2026-07-28"
 
         tools = await client.list_tools()
@@ -665,6 +716,19 @@ async def test_modern_mode_tools_call(monkeypatch):
         await client.start()
         result = await client.call_tool("echo", {"text": "modern hello"})
         assert result.text == ["echo: modern hello"]
+    finally:
+        await client.aclose()
+
+
+async def test_modern_mode_accepts_pre_final_discovery_fields(monkeypatch):
+    """Early 2026-07-28 servers remain usable through the draft fallback."""
+    app = ModernMCPServer(draft_discovery=True)
+    _patch_modern_asgi(monkeypatch, app)
+    client = MCPClient(_modern_config())
+    try:
+        await client.start()
+        assert client.server_info == {"name": "modern-test-server", "version": "2.0.0"}
+        assert client.negotiated_protocol_version == "2026-07-28"
     finally:
         await client.aclose()
 
@@ -743,4 +807,3 @@ async def test_modern_version_mismatch_fails(monkeypatch):
             await client.start()
     finally:
         await client.aclose()
-

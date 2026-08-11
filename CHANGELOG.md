@@ -6,6 +6,12 @@
 
 （暂无）
 
+## [1.11.1] - 2026-08-12
+
+### 🐛 修复 (Fixed)
+
+- **Modern MCP 服务器信息恢复显示**：按 MCP 2026-07-28 正式字段读取协商版本和服务器身份，同时兼容早期草案服务器，使 `/llm mcp` 能再次显示 PRTS-MCP 等 modern 服务器的名称与版本号。
+
 ## [1.11.0] - 2026-08-11
 
 ### ✨ 新增 (Added)
@@ -687,7 +693,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/3aKHP/QuickQuip/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/3aKHP/QuickQuip/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/3aKHP/QuickQuip/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/3aKHP/QuickQuip/compare/v1.10.0...v1.10.1

@@ -89,7 +89,10 @@ class ModernHttpSession:
                     f"MCP server {self.config.id} modern 协商失败：{exc}",
                     failure_kind=MCP_FAILURE_MODERN_NEGOTIATION,
                 ) from exc
-            server_versions = result.get("protocolVersions", [])
+            server_versions = result.get("supportedVersions")
+            if not isinstance(server_versions, list) or not server_versions:
+                # Compatibility with servers built against the pre-final draft.
+                server_versions = result.get("protocolVersions", [])
             if isinstance(server_versions, list) and server_versions:
                 intersection = [v for v in supported_versions if v in server_versions]
                 if not intersection:

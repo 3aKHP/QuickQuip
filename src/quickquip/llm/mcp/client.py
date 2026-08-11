@@ -48,6 +48,19 @@ from quickquip.llm.mcp.types import (
 
 logger = logging.getLogger(__name__)
 
+_MODERN_SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
+
+
+def _extract_modern_server_info(result: dict[str, Any]) -> dict[str, Any]:
+    """Read the final 2026-07-28 identity stamp, with draft compatibility."""
+    meta = result.get("_meta")
+    if isinstance(meta, dict):
+        server_info = meta.get(_MODERN_SERVER_INFO_KEY)
+        if isinstance(server_info, dict):
+            return server_info
+    draft_server_info = result.get("serverInfo")
+    return draft_server_info if isinstance(draft_server_info, dict) else {}
+
 
 def _build_transport(config: MCPServerConfig) -> Transport:
     transport = config.transport
@@ -160,7 +173,7 @@ class MCPClient:
 
     def _on_modern_connected(self, discover_result: dict[str, Any]) -> None:
         self._connection_info.era = "modern"
-        self.server_info = discover_result.get("serverInfo", {}) if isinstance(discover_result, dict) else {}
+        self.server_info = _extract_modern_server_info(discover_result)
         self._connection_info.server_info = self.server_info or None
         caps = discover_result.get("capabilities", {})
         if isinstance(caps, dict):

@@ -313,9 +313,11 @@ class ModernMCPServer:
         *,
         tools: list[dict[str, Any]] | None = None,
         protocol_versions: list[str] | None = None,
+        draft_discovery: bool = False,
     ) -> None:
         self._tools = tools if tools is not None else list(_DEFAULT_TOOLS)
         self._protocol_versions = protocol_versions or [self.PROTOCOL_VERSION]
+        self._draft_discovery = draft_discovery
         self.requests: list[dict[str, Any]] = []
 
     async def __call__(self, scope, receive, send) -> None:
@@ -347,13 +349,32 @@ class ModernMCPServer:
                 "error": {"code": -32600, "message": "Missing routing headers"},
             })
             return
+        if meta.get("io.modelcontextprotocol/protocolVersion") != self.PROTOCOL_VERSION:
+            await _send_json(send, status=400, body_dict={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32600, "message": "Missing modern protocol metadata"},
+            })
+            return
 
         if method == "server/discover":
-            result = {
-                "capabilities": {"tools": {}},
-                "protocolVersions": self._protocol_versions,
-                "serverInfo": {"name": "modern-test-server", "version": "2.0.0"},
-            }
+            if self._draft_discovery:
+                result = {
+                    "capabilities": {"tools": {}},
+                    "protocolVersions": self._protocol_versions,
+                    "serverInfo": {"name": "modern-test-server", "version": "2.0.0"},
+                }
+            else:
+                result = {
+                    "capabilities": {"tools": {}},
+                    "supportedVersions": self._protocol_versions,
+                    "_meta": {
+                        "io.modelcontextprotocol/serverInfo": {
+                            "name": "modern-test-server",
+                            "version": "2.0.0",
+                        },
+                    },
+                }
             await _send_json(send, status=200, body_dict={
                 "jsonrpc": "2.0", "id": request_id, "result": result,
             }, extra_headers=[(b"mcp-protocol-version", self.PROTOCOL_VERSION.encode())])
