@@ -84,7 +84,7 @@ class HealthMixin:
                 era_tag = f"/{status.negotiation}/{status.era}"
             lines.append(
                 f"- {status.id} [{status.transport}{era_tag}] {state} tools={status.tool_count}"
-                + (f" detail={status.server_identity}" if status.server_identity else "")
+                + (f" server={status.server_identity}" if status.server_identity else "")
                 + (f" error={status.error}" if status.error else "")
             )
         return "\n".join(lines)

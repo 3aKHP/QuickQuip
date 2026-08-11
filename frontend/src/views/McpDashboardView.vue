@@ -27,7 +27,9 @@ const servers = ref<McpServer[]>([]); const loading = ref(true); const error = r
 function statusText(s: McpServer): string { if (s.connected) return '已连接'; if (s.runtime_available === false) return '状态未知'; if (!s.enabled) return '已禁用'; return '连接失败' }
 function dotClass(s: McpServer): string { if (s.connected) return 'dot-ok'; if (!s.enabled) return 'dot-off'; if (s.runtime_available === false) return 'dot-unk'; return 'dot-err' }
 function toggle(id: string) { const n = new Set(expanded.value); n.has(id) ? n.delete(id) : n.add(id); expanded.value = n }
-function eraTag(s: McpServer): string { const neg = s.negotiation || 'legacy'; const era = s.era || 'unknown'; if (neg === era) return neg === 'legacy' ? '' : neg; if (neg === 'legacy' && (era === 'unknown' || era === 'legacy')) return ''; return `${neg}/${era}` }
+// Era tag de-duplication; keep semantics in sync with format_mcp_status
+// (src/quickquip/llm/service_parts/health.py).
+function eraTag(s: McpServer): string { const neg = s.negotiation || 'legacy'; const era = s.era || 'unknown'; if (neg === era) return neg === 'legacy' ? '' : neg; if (neg === 'legacy' && era === 'unknown') return ''; return `${neg}/${era}` }
 async function load() { loading.value = true; error.value = null; try { servers.value = ((await fetchMcpDashboard()).servers || []) as any } catch (e: unknown) { error.value = (e as Error).message || '加载失败' } finally { loading.value = false } }
 onMounted(() => load())
 </script>

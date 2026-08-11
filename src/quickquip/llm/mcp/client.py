@@ -515,12 +515,11 @@ class MCPClientManager:
         return server_name
 
     def _describe_server(self, server: MCPServerConfig, client: MCPClient) -> str:
-        server_name = str(client.server_info.get("name", "")).strip()
-        server_version = str(client.server_info.get("version", "")).strip()
-        if server_name and server_version:
-            return f"{server_name} {server_version}"
-        if server_name:
-            return server_name
+        """Admin/log-facing detail: chat-safe identity when available, else
+        sanitized endpoint info (URL/image/command). Never chat-visible."""
+        identity = self._server_identity(client)
+        if identity:
+            return identity
         if server.transport in ("http", "sse"):
             return _sanitize_url(server.url)
         if server.transport == "docker":
