@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "dompurify": "^3.4.2",
+    "echarts": "^6.1.0",
     "lucide-vue-next": "^1.0.0",
     "marked": "^18.0.3",
     "vue": "^3.4.0",
@@ -23,7 +24,9 @@
   },
   "packageManager": "pnpm@10.31.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "volta": {
     "node": "24.18.0"
