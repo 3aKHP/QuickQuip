@@ -30,6 +30,7 @@ from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
 )
+from quickquip.llm.usage import _record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,9 @@ class LLMResponse:
     finish_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -323,7 +327,7 @@ class BaseProviderClient:
         return api_key
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        """Stream-then-fallback dispatch.
+        """Stream-then-fallback dispatch + usage metering.
 
         When ``config.stream_enabled`` is set, try the streaming endpoint
         first; on a non-LLMProviderError failure, fall back to the non-
@@ -331,15 +335,37 @@ class BaseProviderClient:
         callers (e.g. tool_loop retry) see the original status. This logic
         is identical across all three provider subclasses, so it lives here
         rather than being duplicated.
+
+        Every complete() (success/error/cancelled) is metered via
+        ``_record_usage``; metering failure never affects the main path.
         """
-        if self.config.stream_enabled:
-            try:
-                return await self._complete_stream(request)
-            except LLMProviderError:
-                raise
-            except Exception:
-                return await self._complete_non_stream(request)
-        return await self._complete_non_stream(request)
+        started = time.monotonic()
+        stream_used = self.config.stream_enabled
+        response: LLMResponse | None = None
+        try:
+            if self.config.stream_enabled:
+                try:
+                    response = await self._complete_stream(request)
+                except LLMProviderError:
+                    raise
+                except Exception:
+                    stream_used = False
+                    response = await self._complete_non_stream(request)
+            else:
+                response = await self._complete_non_stream(request)
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                _record_usage(self, request, None, started, stream_used, "cancelled")
+            )
+            raise
+        except Exception as exc:
+            await _record_usage(
+                self, request, None, started, stream_used, "error",
+                f"{type(exc).__name__}: {exc}"[:200],
+            )
+            raise
+        await _record_usage(self, request, response, started, stream_used, "ok")
+        return response
 
     async def _download_image(self, image_url: str) -> LLMImageInput:
         try:

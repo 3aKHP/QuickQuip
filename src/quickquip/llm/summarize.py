@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from quickquip.llm.config import DailySummaryConfig, LLMConfig, PersonaConfig
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.tools import LLMConversationMessage
+from quickquip.llm.usage import set_usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ async def generate_daily_summary(
     Returns (summary_text, model_used_label).
     Raises RuntimeError if all models in the cascade fail.
     """
+    set_usage_scope("summary", group_id=str(group_id))
     system_prompt = _build_system_prompt(
         persona, date_label, name_table, summary_config.summary_length_hint
     )
@@ -266,6 +268,7 @@ async def generate_period_report(
     Returns (report_text, model_used_label).
     Raises RuntimeError if all models in the cascade fail.
     """
+    set_usage_scope("period_report", group_id=str(group_id))
     system_prompt = _build_period_system_prompt(
         persona, period_label, period_kind, name_table, length_hint
     )

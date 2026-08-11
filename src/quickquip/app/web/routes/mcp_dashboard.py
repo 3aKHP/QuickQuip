@@ -44,6 +44,11 @@ def get_mcp_dashboard():
                 "tool_count": s.get("tool_count", 0),
                 "error": s.get("error"),
                 "detail": s.get("detail", ""),
+                "server_identity": s.get("server_identity", ""),
+                "negotiation": s.get("negotiation", "legacy"),
+                "era": s.get("era", "unknown"),
+                "failure_kind": s.get("failure_kind", ""),
+                "negotiated_protocol_version": s.get("negotiated_protocol_version", ""),
                 "tools": server_tools.get(s["id"], []),
                 "runtime_available": True,
             })
@@ -81,6 +86,11 @@ def get_mcp_dashboard():
                 "tool_count": status.tool_count,
                 "error": status.error,
                 "detail": status.detail,
+                "server_identity": status.server_identity,
+                "negotiation": status.negotiation,
+                "era": status.era,
+                "failure_kind": status.failure_kind,
+                "negotiated_protocol_version": status.negotiated_protocol_version,
                 "tools": server_tools.get(status.id, []),
                 "runtime_available": True,
             })

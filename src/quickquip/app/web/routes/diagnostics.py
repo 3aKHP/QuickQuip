@@ -18,6 +18,7 @@ from quickquip.llm.provider import (
 )
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers
 from quickquip.llm.tools import LLMConversationMessage
+from quickquip.llm.usage import set_usage_scope
 
 router = APIRouter()
 
@@ -119,6 +120,7 @@ def clear_traces():
 
 @router.post("/diagnostics/sample-request")
 async def run_sample_request(body: SampleRequest):
+    set_usage_scope("diagnostics")
     import time
 
     config = load_llm_config(CONFIG_LLM_TOML)

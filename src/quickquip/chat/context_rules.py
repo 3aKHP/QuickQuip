@@ -10,6 +10,7 @@ from typing import Any, Optional
 from quickquip.chat.config import CONTEXT_REPLY_RULES
 from quickquip.chat.text_rules import build_rule_context, render_rule_reply, select_reply_template
 from quickquip.common.json_utils import extract_json_object
+from quickquip.llm.usage import usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +135,11 @@ async def _check_llm_context(
     )
 
     try:
-        raw = await asyncio.wait_for(
-            llm_service.quick_judge(full_prompt, max_tokens=64),
-            timeout=timeout,
-        )
+        with usage_scope("context_rule_judge", group_id=str(group_id) if group_id is not None else None):
+            raw = await asyncio.wait_for(
+                llm_service.quick_judge(full_prompt, max_tokens=64),
+                timeout=timeout,
+            )
         data = extract_json_object(raw)
         result = bool(data.get("trigger", False))
     except asyncio.TimeoutError:

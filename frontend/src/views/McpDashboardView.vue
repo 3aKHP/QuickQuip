@@ -7,7 +7,7 @@
     <div v-else class="server-grid">
       <UiCard v-for="s in servers" :key="s.id" padding="md" shadow="sm">
         <div class="s-head"><div class="s-title"><span class="s-name">{{ s.id }}</span><span v-if="s.detail" class="s-detail">{{ s.detail }}</span></div><div class="s-status"><span class="dot" :class="dotClass(s)" /><span class="muted">{{ statusText(s) }}</span></div></div>
-        <div class="s-meta"><UiTag size="sm" variant="info">{{ s.transport }}</UiTag><span class="muted">{{ s.tool_count }} 个工具</span></div>
+        <div class="s-meta"><UiTag size="sm" variant="info">{{ s.transport }}</UiTag><UiTag v-if="eraTag(s)" size="sm" variant="info">{{ eraTag(s) }}</UiTag><span v-if="s.negotiated_protocol_version" class="muted">v{{ s.negotiated_protocol_version }}</span><span class="muted">{{ s.tool_count }} 个工具</span></div>
         <div v-if="s.error" class="s-error">{{ s.error }}</div>
         <div v-if="s.tools.length" class="s-tools">
           <button class="tools-toggle" @click="toggle(s.id)"><UiIcon :name="expanded.has(s.id) ? 'ChevronDown' : 'ChevronRight'" :size="14" /><span>工具列表 ({{ s.tools.length }})</span></button>
@@ -27,6 +27,9 @@ const servers = ref<McpServer[]>([]); const loading = ref(true); const error = r
 function statusText(s: McpServer): string { if (s.connected) return '已连接'; if (s.runtime_available === false) return '状态未知'; if (!s.enabled) return '已禁用'; return '连接失败' }
 function dotClass(s: McpServer): string { if (s.connected) return 'dot-ok'; if (!s.enabled) return 'dot-off'; if (s.runtime_available === false) return 'dot-unk'; return 'dot-err' }
 function toggle(id: string) { const n = new Set(expanded.value); n.has(id) ? n.delete(id) : n.add(id); expanded.value = n }
+// Era tag de-duplication; keep semantics in sync with format_mcp_status
+// (src/quickquip/llm/service_parts/health.py).
+function eraTag(s: McpServer): string { const neg = s.negotiation || 'legacy'; const era = s.era || 'unknown'; if (neg === era) return neg === 'legacy' ? '' : neg; if (neg === 'legacy' && era === 'unknown') return ''; return `${neg}/${era}` }
 async function load() { loading.value = true; error.value = null; try { servers.value = ((await fetchMcpDashboard()).servers || []) as any } catch (e: unknown) { error.value = (e as Error).message || '加载失败' } finally { loading.value = false } }
 onMounted(() => load())
 </script>

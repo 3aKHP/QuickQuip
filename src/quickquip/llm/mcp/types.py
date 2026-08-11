@@ -93,7 +93,12 @@ class MCPServerStatus:
     connected: bool = False
     tool_count: int = 0
     error: str | None = None
+    # Admin/log-facing detail: may contain sanitized endpoint info; never
+    # render this field into chat-visible output.
     detail: str = ""
+    # Chat-safe identity: only populated from serverInfo name/version, with
+    # no fallback to URL/image/command.
+    server_identity: str = ""
     negotiation: str = "legacy"
     era: str = "unknown"
     failure_kind: str = ""
@@ -296,6 +301,27 @@ def _safe_metadata(value: Any, *, limit: int = 64) -> str:
     if not isinstance(value, str):
         return ""
     cleaned = re.sub(r"[^A-Za-z0-9._/+:-]+", "_", value.strip())
+    return cleaned[:limit]
+
+
+_CQ_CODE_PATTERN = re.compile(r"\[CQ:[^\]]*\]")
+
+
+def _sanitize_server_text(value: Any, *, limit: int = 64) -> str:
+    """Make server-controlled text safe for chat-visible output.
+
+    Untrusted MCP values (serverInfo name/version, negotiated protocol
+    version) must not be able to forge chat formatting: newlines are folded
+    (prevents fake status lines), URLs are masked, CQ-code segments are
+    neutralized, control characters are stripped, and the result is
+    truncated.  Unlike _safe_metadata (ASCII-only), CJK text is preserved.
+    """
+    if not isinstance(value, str):
+        return ""
+    cleaned = _URL_PATTERN.sub("[url]", value)
+    cleaned = _CQ_CODE_PATTERN.sub("[cq]", cleaned)
+    cleaned = "".join(ch for ch in cleaned if ch.isprintable() or ch in " \t")
+    cleaned = " ".join(cleaned.split())
     return cleaned[:limit]
 
 

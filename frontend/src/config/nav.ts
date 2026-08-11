@@ -8,6 +8,7 @@ import SummaryView from '../views/SummaryView.vue'
 import ConversationsView from '../views/ConversationsView.vue'
 import PersonasView from '../views/PersonasView.vue'
 import LlmAboutView from '../views/LlmAboutView.vue'
+import LlmUsageView from '../views/LlmUsageView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
 import AwakeningView from '../views/AwakeningView.vue'
 import RateLimitView from '../views/RateLimitView.vue'
@@ -64,6 +65,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',        section: 'llm',      component: LlmAboutView },
   { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
   { key: 'mcp-dashboard',  path: '/mcp-dashboard',  label: 'MCP',      icon: 'Network',         section: 'llm',      component: McpDashboardView },
+  { key: 'llm-usage',      path: '/llm-usage',      label: '用量',     icon: 'Activity',        section: 'llm',      component: LlmUsageView },
   { key: 'summary',        path: '/summary',        label: '总结',     icon: 'FileText',        section: 'content',  component: SummaryView },
   { key: 'quotes',         path: '/quotes',         label: '语录',     icon: 'Quote',           section: 'content',  component: QuotesView },
   { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',        section: 'content',  component: TiebaView },

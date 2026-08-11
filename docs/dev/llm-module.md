@@ -380,6 +380,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
   - `style_overrides`（可选，追加到每次调用的 system prompt 末尾）
   - `auth_method`（可选，`api_key` / `bearer`，默认 `api_key`，控制认证头格式）
   - `prompt_caching`（可选，`claude` 协议专用，启用 Anthropic Prompt Caching）
+  - `cache_ttl`（可选，`claude` 协议专用，`"1h"` 启用 1h 扩展缓存、留空=默认 5min；仅 `prompt_caching` 开启时生效）
 - `[daily_briefing]`
   - 每日早/午/晚播报全局开关、三段 cron、最小消息数、活跃用户/热词/样本上限、上下文规模、输出长度、模型级联列表
 - `[daily_summary]`

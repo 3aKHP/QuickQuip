@@ -68,7 +68,7 @@ docker run -i --rm ...
 
 GHCR 分发镜像和生产模板镜像已内置 Docker CLI，以便需要时启用 `docker` transport。真正启用还必须显式挂载 `/var/run/docker.sock`，这会放大权限范围，仅适合开发环境或可信宿主机。
 
-容器化部署推荐走纯 sidecar 模式：在部署编排中将 MCP server 作为独立 service 跑在同一网络里，bot 通过 `transport = "sse"` 或 `transport = "http"` 直连。代码中的四种 transport 均已完整实现，部署时无需依赖 Docker socket。
+生产环境若已有宿主机上的 Streamable HTTP MCP 服务，优先通过现有 HTTPS MCP 网关复用它们，避免在 QuickQuip Compose 内重复运行 MCP sidecar。只有没有可复用的宿主机 HTTP 服务时，才采用纯 sidecar 模式：在部署编排中将 MCP server 作为独立 service 跑在同一网络里，bot 通过 `transport = "sse"` 或 `transport = "http"` 直连。代码中的四种 transport 均已完整实现，部署时无需依赖 Docker socket。
 
 ---
 

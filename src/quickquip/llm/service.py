@@ -69,6 +69,7 @@ from quickquip.llm.service_parts.constants import (
     TOOL_SEARCH_NAME,
 )
 from quickquip.llm.service_parts import AutoMemoryMixin, HealthMixin, ScopeMixin, StateMixin, ToolMixin
+from quickquip.llm.usage import usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
@@ -463,7 +464,8 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         )
 
         try:
-            response = await build_provider_client(defectify_provider).complete(request)
+            with usage_scope("defectify", group_id=str(chat_id)):
+                response = await build_provider_client(defectify_provider).complete(request)
         except LLMProviderError as exc:
             return {
                 "reply": f"LLM 调用失败：{exc}",
@@ -604,7 +606,8 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         )
 
         try:
-            response = await build_provider_client(turmfluch_provider).complete(request)
+            with usage_scope("turmfluch", group_id=str(chat_id)):
+                response = await build_provider_client(turmfluch_provider).complete(request)
         except LLMProviderError as exc:
             logger.warning("/turmfluch LLM call failed: %s", exc)
             return {
@@ -697,7 +700,8 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             tool_choice="none",
         )
         try:
-            response = await build_provider_client(nearest_provider).complete(request)
+            with usage_scope("card_le_nearest", group_id=str(chat_id)):
+                response = await build_provider_client(nearest_provider).complete(request)
         except Exception:
             logger.exception("STS card_le nearest LLM call failed for %r", captured)
             return None
@@ -1230,27 +1234,28 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, str]:
-        return await self._generate_reply_for_scope(
-            chat_id=group_id,
-            chat_type="group",
-            user_id=user_id,
-            sender_name=sender_name,
-            prompt=prompt,
-            image_urls=image_urls,
-            recent_messages=recent_messages,
-            quoted_text=quoted_text,
-            quoted_image_urls=quoted_image_urls,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-            quoted_is_bot_self=quoted_is_bot_self,
-            forward_text=forward_text,
-            forward_image_urls=forward_image_urls,
-            voice_text=voice_text,
-            raw_user_text=raw_user_text,
-            store_user_message=store_user_message,
-            message_id=message_id,
-            include_recent_images=include_recent_images,
-        )
+        with usage_scope("chat", group_id=str(group_id)):
+            return await self._generate_reply_for_scope(
+                chat_id=group_id,
+                chat_type="group",
+                user_id=user_id,
+                sender_name=sender_name,
+                prompt=prompt,
+                image_urls=image_urls,
+                recent_messages=recent_messages,
+                quoted_text=quoted_text,
+                quoted_image_urls=quoted_image_urls,
+                quoted_sender_name=quoted_sender_name,
+                quoted_user_id=quoted_user_id,
+                quoted_is_bot_self=quoted_is_bot_self,
+                forward_text=forward_text,
+                forward_image_urls=forward_image_urls,
+                voice_text=voice_text,
+                raw_user_text=raw_user_text,
+                store_user_message=store_user_message,
+                message_id=message_id,
+                include_recent_images=include_recent_images,
+            )
 
     async def generate_private_reply(
         self,
@@ -1273,27 +1278,28 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, str]:
-        return await self._generate_reply_for_scope(
-            chat_id=user_id,
-            chat_type="private",
-            user_id=user_id,
-            sender_name=sender_name,
-            prompt=prompt,
-            image_urls=image_urls,
-            recent_messages=recent_messages,
-            quoted_text=quoted_text,
-            quoted_image_urls=quoted_image_urls,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-            quoted_is_bot_self=quoted_is_bot_self,
-            forward_text=forward_text,
-            forward_image_urls=forward_image_urls,
-            voice_text=voice_text,
-            raw_user_text=raw_user_text,
-            store_user_message=store_user_message,
-            message_id=message_id,
-            include_recent_images=include_recent_images,
-        )
+        with usage_scope("chat"):
+            return await self._generate_reply_for_scope(
+                chat_id=user_id,
+                chat_type="private",
+                user_id=user_id,
+                sender_name=sender_name,
+                prompt=prompt,
+                image_urls=image_urls,
+                recent_messages=recent_messages,
+                quoted_text=quoted_text,
+                quoted_image_urls=quoted_image_urls,
+                quoted_sender_name=quoted_sender_name,
+                quoted_user_id=quoted_user_id,
+                quoted_is_bot_self=quoted_is_bot_self,
+                forward_text=forward_text,
+                forward_image_urls=forward_image_urls,
+                voice_text=voice_text,
+                raw_user_text=raw_user_text,
+                store_user_message=store_user_message,
+                message_id=message_id,
+                include_recent_images=include_recent_images,
+            )
 
 
 _llm_service: LLMService | None = None

@@ -88,10 +88,9 @@ headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 # supported_protocol_versions = ["2026-07-28"]
 # url = "https://modern-mcp.example.com/mcp"
 
-# ── MCP sidecar 模式（推荐用于容器化部署） ──────────────────────────────────
-# 上游 stdio-only 的 MCP 镜像被 mcp-proxy 包一层，作为 compose sidecar 跑在
-# 内部网络上，本 bot 以 transport = "sse" 直连。完整模板参考
-# docker/mcp-example.Dockerfile.example 与你的私有部署编排。
+# ── MCP sidecar 模式（legacy，仅在没有宿主机 HTTP 服务时使用） ──────────────
+# 生产容器优先通过已鉴权的 HTTPS Streamable HTTP 网关连接宿主机上的 MCP
+# 服务；以下 sidecar 示例保留用于独立环境，不应与宿主机 MCP 服务重复部署。
 
 # [[mcp.servers]]
 # id = "tavily"
@@ -309,3 +308,23 @@ style_profile = "openai_family"
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048
+
+# ════════════════════════════════════════════════════════════════════════════
+# 模型定价（per-MTok，USD）—— 供 LLM 用量/成本统计计算 cost_usd。
+#   · match_pricing 先查 "provider_id/model"（per-provider 覆盖，如某中转实际价），
+#     miss 回退纯 "model"（官方价默认），再 miss → 标记未定价（cost=0，仪表盘可见）。
+#   · 第三方中转：按模型 id 对应官方价填 model 默认，再按中转实际计费加 provider 覆盖。
+#   · cache_read/write_per_mtok：模型无该缓存机制（OpenAI '–'、Google 存储型缓存）时省略。
+#   · 国产 CNY 价按汇率换算成 USD。未填价格的模型在用量页显示"未定价"（priced=0）。
+# ════════════════════════════════════════════════════════════════════════════
+
+# 纯 model 名 = 官方价默认（所有 provider 的该 model 共享）
+[pricing.models."deepseek-chat"]
+input_per_mtok = 0.14
+output_per_mtok = 0.28
+cache_read_per_mtok = 0.003
+
+# "provider_id/model" = per-provider 覆盖（某中转实际价，优先于 model 默认）
+# [pricing.models."my-provider/deepseek-chat"]
+# input_per_mtok = 0.20   # 例：该中转加价
+# output_per_mtok = 0.40

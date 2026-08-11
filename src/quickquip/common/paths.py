@@ -36,6 +36,7 @@ MCP_STATUS_JSON_PATH = DATA_DIR / "mcp_status.json"
 WEB_ADMIN_SESSIONS_DB_PATH = DATA_DIR / "web_admin_sessions.db"
 WEB_ADMIN_ACTIONS_DB_PATH = DATA_DIR / "web_admin_actions.db"
 LLM_TRACE_DB_PATH = DATA_DIR / "llm_trace.db"
+LLM_USAGE_DB_PATH = DATA_DIR / "llm_usage.db"
 
 LLM_VOCAB_YAML_PATH = LLM_ABOUT_DIR / "vocab.yaml"
 LLM_IDENTITIES_YAML_PATH = LLM_ABOUT_DIR / "identities.yaml"

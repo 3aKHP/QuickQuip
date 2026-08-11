@@ -35,7 +35,9 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_MODERN_NEGOTIATION,
     _build_tool_alias,
     _detect_alias_conflicts,
+    _MAX_SAFE_ERROR_LENGTH,
     _sanitize_error_message,
+    _sanitize_server_text,
     _sanitize_url,
     deliver_mcp_tool_result,
     _format_tool_result,
@@ -371,8 +373,11 @@ class MCPClientManager:
                 status.connected = True
                 status.tool_count = len(server_bindings)
                 status.detail = self._describe_server(server, client)
+                status.server_identity = self._server_identity(client)
                 status.era = client.era
-                status.negotiated_protocol_version = client.negotiated_protocol_version
+                status.negotiated_protocol_version = _sanitize_server_text(
+                    client.negotiated_protocol_version, limit=32
+                )
             except Exception as exc:
                 status.error = _sanitize_error_message(exc)
                 if isinstance(exc, MCPError):
@@ -419,6 +424,7 @@ class MCPClientManager:
                     "tool_count": s.tool_count,
                     "error": s.error,
                     "detail": s.detail,
+                    "server_identity": s.server_identity,
                     "negotiation": s.negotiation,
                     "era": s.era,
                     "failure_kind": s.failure_kind,
@@ -456,7 +462,17 @@ class MCPClientManager:
         if client is None:
             raise MCPError(f"MCP server 未连接：{binding.server_id}")
 
-        result = await client.call_tool(binding.tool_name, arguments)
+        try:
+            result = await client.call_tool(binding.tool_name, arguments)
+        except Exception as exc:
+            # Boundary for the LLM-context path: tool errors are fed back to
+            # the model and may be quoted into chat, so server-controlled
+            # text (including MCPError text built from JSON-RPC error
+            # bodies) gets the same treatment as chat-visible output.
+            raise MCPError(
+                f"MCP 工具 {alias} 调用失败："
+                f"{_sanitize_server_text(str(exc), limit=_MAX_SAFE_ERROR_LENGTH)}"
+            ) from exc
         return deliver_mcp_tool_result(
             result,
             server_id=binding.server_id,
@@ -499,13 +515,25 @@ class MCPClientManager:
             )
         return bindings
 
-    def _describe_server(self, server: MCPServerConfig, client: MCPClient) -> str:
-        server_name = str(client.server_info.get("name", "")).strip()
-        server_version = str(client.server_info.get("version", "")).strip()
+    def _server_identity(self, client: MCPClient) -> str:
+        """Chat-safe server identity: serverInfo name/version only, no fallback.
+
+        Unlike _describe_server (admin/log-facing), this never falls back to
+        the configured URL, docker image, or stdio command, so it is safe to
+        render into chat-visible output.
+        """
+        server_name = _sanitize_server_text(client.server_info.get("name", ""))
+        server_version = _sanitize_server_text(client.server_info.get("version", ""), limit=32)
         if server_name and server_version:
             return f"{server_name} {server_version}"
-        if server_name:
-            return server_name
+        return server_name
+
+    def _describe_server(self, server: MCPServerConfig, client: MCPClient) -> str:
+        """Admin/log-facing detail: chat-safe identity when available, else
+        sanitized endpoint info (URL/image/command). Never chat-visible."""
+        identity = self._server_identity(client)
+        if identity:
+            return identity
         if server.transport in ("http", "sse"):
             return _sanitize_url(server.url)
         if server.transport == "docker":

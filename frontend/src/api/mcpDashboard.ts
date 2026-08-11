@@ -13,6 +13,11 @@ export interface McpServer {
   tool_count: number
   error: string | null
   detail: string
+  server_identity?: string
+  negotiation?: string
+  era?: string
+  failure_kind?: string
+  negotiated_protocol_version?: string
   tools: McpTool[]
   runtime_available?: boolean
 }
