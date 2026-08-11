@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 from quickquip.llm.config import _read_mcp_servers
+from quickquip.llm.mcp.client import _extract_modern_server_info
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_KINDS,
     MCP_FAILURE_TIMEOUT,
@@ -22,6 +23,34 @@ from quickquip.llm.mcp.types import (
     _sanitize_error_message,
     _sanitize_url,
 )
+
+
+# ---------------------------------------------------------------------------
+# Modern discovery identity compatibility
+# ---------------------------------------------------------------------------
+
+def test_modern_server_info_prefers_final_metadata():
+    result = {
+        "_meta": {
+            "io.modelcontextprotocol/serverInfo": {"name": "final", "version": "2.0"},
+        },
+        "serverInfo": {"name": "draft", "version": "1.0"},
+    }
+    assert _extract_modern_server_info(result) == {"name": "final", "version": "2.0"}
+
+
+def test_modern_server_info_falls_back_to_draft_metadata():
+    result = {
+        "_meta": {},
+        "serverInfo": {"name": "draft", "version": "1.0"},
+    }
+    assert _extract_modern_server_info(result) == {"name": "draft", "version": "1.0"}
+
+
+def test_modern_server_info_rejects_missing_or_malformed_metadata():
+    assert _extract_modern_server_info({}) == {}
+    assert _extract_modern_server_info({"_meta": {"io.modelcontextprotocol/serverInfo": "bad"}}) == {}
+    assert _extract_modern_server_info({"serverInfo": "bad"}) == {}
 
 
 # ---------------------------------------------------------------------------
