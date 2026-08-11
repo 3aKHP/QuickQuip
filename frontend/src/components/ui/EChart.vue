@@ -6,11 +6,11 @@
 /**
  * 通用 ECharts 容器组件。
  * - echarts 通过动态 import 加载，独立异步 chunk，不拖慢首屏；
- * - option 变化时增量 setOption；主题切换时由父级重建 option 传入；
+ * - option 变化时整体重建 setOption（notMerge）；主题切换时由父级重建 option 传入；
  * - ResizeObserver 自适应容器宽度，卸载时自动 dispose。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { ECOption } from '../../charts/echarts'
+import type { ECOption, ECElementEvent } from '../../charts/echarts'
 import type { echarts as echartsApi } from '../../charts/echarts'
 
 const props = withDefaults(defineProps<{
@@ -21,7 +21,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  click: [params: unknown]
+  click: [params: ECElementEvent]
 }>()
 
 const el = ref<HTMLDivElement | null>(null)

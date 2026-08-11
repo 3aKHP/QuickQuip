@@ -8,7 +8,6 @@ import { BarChart, LineChart } from 'echarts/charts'
 import {
   DataZoomComponent,
   GridComponent,
-  LegendComponent,
   TooltipComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -17,7 +16,6 @@ import type { BarSeriesOption, LineSeriesOption } from 'echarts/charts'
 import type {
   DataZoomComponentOption,
   GridComponentOption,
-  LegendComponentOption,
   TooltipComponentOption,
 } from 'echarts/components'
 
@@ -26,7 +24,6 @@ echarts.use([
   BarChart,
   GridComponent,
   TooltipComponent,
-  LegendComponent,
   DataZoomComponent,
   CanvasRenderer,
 ])
@@ -36,8 +33,9 @@ export type ECOption = ComposeOption<
   | BarSeriesOption
   | GridComponentOption
   | TooltipComponentOption
-  | LegendComponentOption
   | DataZoomComponentOption
 >
+
+export type { ECElementEvent } from 'echarts/core'
 
 export { echarts }

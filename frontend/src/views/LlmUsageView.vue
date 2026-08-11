@@ -48,7 +48,7 @@
       <section class="panel">
         <div class="panel-heading">
           <h3>趋势</h3>
-          <UiSegmented :model-value="metric" :options="metricOptions" aria-label="趋势指标" @update:model-value="value => { metric = value as UsageMetric; loadTimeline() }" />
+          <UiSegmented :model-value="metric" :options="metricOptions" aria-label="趋势指标" @update:model-value="value => { metric = value; loadTimeline() }" />
         </div>
         <EChart v-if="timeline.length" :option="trendOption" :height="280" />
         <UiEmpty v-else icon="BarChart3" title="暂无趋势数据" />
@@ -57,7 +57,7 @@
       <section class="panel">
         <div class="panel-heading">
           <h3>维度分布</h3>
-          <UiSegmented :model-value="breakdown" :options="breakdownOptions" aria-label="分布维度" @update:model-value="value => breakdown = value as BreakdownKey" />
+          <UiSegmented :model-value="breakdown" :options="breakdownOptions" aria-label="分布维度" @update:model-value="value => breakdown = value" />
         </div>
         <p class="hint"><UiIcon name="MousePointerClick" :size="13" /> 点击条形可将该维度值填入上方筛选器</p>
         <EChart v-if="breakdownItems.length" :option="barOption" :height="barHeight" @click="onBarClick" />
@@ -106,9 +106,9 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
-import UiSegmented from '../components/ui/UiSegmented.vue'
+import UiSegmented, { type UiSegmentedOption } from '../components/ui/UiSegmented.vue'
 import UiStatCard from '../components/ui/UiStatCard.vue'
-import type { ECOption } from '../charts/echarts'
+import type { ECOption, ECElementEvent } from '../charts/echarts'
 import { useChartTheme } from '../composables/useChartTheme'
 import {
   fetchLlmUsageEvents,
@@ -145,14 +145,14 @@ const rangeOptions = [
   { value: '30d', label: '30 天' },
   { value: '90d', label: '90 天' },
 ]
-const metricOptions = [
+const metricOptions: UiSegmentedOption<UsageMetric>[] = [
   { value: 'cost', label: '成本' },
   { value: 'tokens', label: 'Tokens' },
   { value: 'requests', label: '请求' },
   { value: 'errors', label: '错误' },
   { value: 'duration', label: '耗时' },
 ]
-const breakdownOptions = [
+const breakdownOptions: UiSegmentedOption<BreakdownKey>[] = [
   { value: 'provider', label: 'Provider' },
   { value: 'model', label: '模型' },
   { value: 'feature', label: '功能' },
@@ -176,7 +176,10 @@ function mergeDimensionOptions(summary: LlmUsageSummary) {
   }
   for (const [dim, buckets] of Object.entries(sources) as [keyof typeof dimensionOptions, UsageBucket[]][]) {
     const merged = new Set(dimensionOptions[dim])
-    for (const bucket of buckets) merged.add(bucket.key)
+    for (const bucket of buckets) {
+      if (bucket.key === UNATTRIBUTED_KEY) continue
+      merged.add(bucket.key)
+    }
     dimensionOptions[dim] = [...merged].sort()
   }
 }
@@ -227,6 +230,9 @@ const trendOption = computed<ECOption>(() => {
 
 const BAR_LIMIT = 12
 
+/** 后端 usage_store._group_by 把 NULL 维度值映射为该字面量；它不是可筛选的真实值 */
+const UNATTRIBUTED_KEY = '(未归因)'
+
 const barOption = computed<ECOption>(() => {
   const t = chartTheme.value
   const items = [...breakdownItems.value].slice(0, BAR_LIMIT).reverse()
@@ -238,11 +244,14 @@ const barOption = computed<ECOption>(() => {
       trigger: 'item',
       ...t.tooltip,
       formatter: (params: { name: string; value: number }) =>
-        `${params.name}<br/>成本 $${fmtCost(params.value)}（${share(params.value)}）<br/>点击填入筛选器`,
+        `${params.name}<br/>成本 $${fmtCost(params.value)}（${share(params.value)}）<br/>${
+          params.name === UNATTRIBUTED_KEY ? '未归因调用，不支持筛选' : '点击填入筛选器'
+        }`,
     },
     xAxis: {
       type: 'value',
-      axisLabel: { ...t.axisLabel, formatter: (value: number) => fmtAxis(value) },
+      // 分布图数据恒为成本，formatter 与趋势指标解耦，固定带 $ 前缀
+      axisLabel: { ...t.axisLabel, formatter: (value: number) => `$${fmtCompact(value)}` },
       splitLine: t.splitLine,
     },
     yAxis: {
@@ -299,9 +308,10 @@ function pricingLabel(event: UsageEvent) {
   return parts.join(' · ')
 }
 
-function onBarClick(params: unknown) {
-  const name = (params as { name?: string }).name
-  if (!name) return
+function onBarClick(params: ECElementEvent) {
+  const name = params.name
+  // (未归因) 桶对应后端 NULL 值，精确匹配永远为空结果，不做下钻
+  if (!name || name === UNATTRIBUTED_KEY) return
   filters[breakdown.value] = name
   reload()
 }

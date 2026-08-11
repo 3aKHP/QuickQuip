@@ -12,26 +12,27 @@
   </div>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends string = string">
 /**
  * 分段选择器。NiuNiuView 的 .tab-row、SummaryView 的 .tab-group 为同构模式，
  * 后续回填这些视图时可统一替换为本组件。
+ * 泛型 T 保留调用方的联合类型（如 UsageMetric），v-model 无需 as 断言。
  */
-export interface UiSegmentedOption<T = string> {
-  value: T
+export interface UiSegmentedOption<V extends string = string> {
+  value: V
   label: string
 }
 
 withDefaults(defineProps<{
-  modelValue: string
-  options: UiSegmentedOption[]
+  modelValue: T
+  options: UiSegmentedOption<T>[]
   ariaLabel?: string
 }>(), {
   ariaLabel: undefined,
 })
 
 defineEmits<{
-  'update:modelValue': [value: string]
+  'update:modelValue': [value: T]
 }>()
 </script>
 
