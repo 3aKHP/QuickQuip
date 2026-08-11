@@ -209,7 +209,7 @@ async def test_execute_masks_server_text_in_tool_errors():
 
     class _EvilClient:
         async def call_tool(self, tool_name, arguments):
-            raise RuntimeError("failed at https://evil.test/secret")
+            raise RuntimeError("failed\n- fake line\n[CQ:at,qq=1] https://evil.test/secret")
 
     manager = _manager()
     manager._bindings = {
@@ -229,3 +229,12 @@ async def test_execute_masks_server_text_in_tool_errors():
     message = str(exc_info.value)
     assert "evil.test" not in message
     assert "[url]" in message
+    assert "\n" not in message
+    assert "[CQ:" not in message
+
+
+def test_failure_labels_cover_all_failure_kinds():
+    from quickquip.llm.mcp.types import MCP_FAILURE_KINDS
+    from quickquip.llm.service_parts.health import _MCP_FAILURE_LABELS
+
+    assert set(_MCP_FAILURE_LABELS) == set(MCP_FAILURE_KINDS)

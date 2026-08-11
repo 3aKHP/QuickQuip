@@ -35,6 +35,7 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_MODERN_NEGOTIATION,
     _build_tool_alias,
     _detect_alias_conflicts,
+    _MAX_SAFE_ERROR_LENGTH,
     _sanitize_error_message,
     _sanitize_server_text,
     _sanitize_url,
@@ -465,10 +466,12 @@ class MCPClientManager:
             result = await client.call_tool(binding.tool_name, arguments)
         except Exception as exc:
             # Boundary for the LLM-context path: tool errors are fed back to
-            # the model, so server-controlled text (including MCPError text
-            # built from JSON-RPC error bodies) must stay URL-masked.
+            # the model and may be quoted into chat, so server-controlled
+            # text (including MCPError text built from JSON-RPC error
+            # bodies) gets the same treatment as chat-visible output.
             raise MCPError(
-                f"MCP 工具 {alias} 调用失败：{_sanitize_error_message(exc)}"
+                f"MCP 工具 {alias} 调用失败："
+                f"{_sanitize_server_text(str(exc), limit=_MAX_SAFE_ERROR_LENGTH)}"
             ) from exc
         return deliver_mcp_tool_result(
             result,

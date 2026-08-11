@@ -8,7 +8,6 @@ from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
-from quickquip.llm.mcp import MCPServerStatus
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_AUTH,
     MCP_FAILURE_CONFIG,
@@ -18,6 +17,7 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_ROUTING,
     MCP_FAILURE_TIMEOUT,
     MCP_FAILURE_TRANSPORT,
+    MCPServerStatus,
 )
 from quickquip.llm.service_parts.constants import (
     MAX_STORED_MEMORY_ITEMS,
