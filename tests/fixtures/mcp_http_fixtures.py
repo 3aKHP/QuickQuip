@@ -349,6 +349,13 @@ class ModernMCPServer:
                 "error": {"code": -32600, "message": "Missing routing headers"},
             })
             return
+        if meta.get("io.modelcontextprotocol/protocolVersion") != self.PROTOCOL_VERSION:
+            await _send_json(send, status=400, body_dict={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32600, "message": "Missing modern protocol metadata"},
+            })
+            return
 
         if method == "server/discover":
             if self._draft_discovery:

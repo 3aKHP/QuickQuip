@@ -335,6 +335,31 @@ async def test_modern_discover_missing_routing_headers_rejected():
         assert response.json()["error"]["code"] == -32600
 
 
+async def test_modern_discover_missing_envelope_metadata_rejected():
+    """Modern fixture rejects routing-only requests without params metadata."""
+    app = ModernMCPServer()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "server/discover",
+                "params": {},
+            },
+            headers={
+                "Content-Type": "application/json",
+                "MCP-Protocol-Version": "2026-07-28",
+                "Mcp-Method": "server/discover",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == -32600
+
+
 async def test_modern_request_scoped_json():
     """Modern tools/call returns JSON within a single request scope."""
     app = ModernMCPServer()
