@@ -282,11 +282,15 @@ async def test_modern_discover_returns_capabilities():
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "server/discover",
-                "params": {},
-                "_meta": {
-                    "protocolVersion": "2026-07-28",
-                    "clientInfo": {"name": "QuickQuip", "version": "1.0"},
-                    "capabilities": {},
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {
+                            "name": "QuickQuip",
+                            "version": "1.0",
+                        },
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
                 },
             },
             headers={
@@ -316,8 +320,11 @@ async def test_modern_discover_missing_routing_headers_rejected():
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "server/discover",
-                "params": {},
-                "_meta": {"protocolVersion": "2026-07-28"},
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    },
+                },
             },
             headers={
                 "Content-Type": "application/json",
@@ -341,11 +348,17 @@ async def test_modern_request_scoped_json():
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": "echo", "arguments": {"text": "modern hello"}},
-                "_meta": {
-                    "protocolVersion": "2026-07-28",
-                    "clientInfo": {"name": "QuickQuip", "version": "1.0"},
-                    "capabilities": {},
+                "params": {
+                    "name": "echo",
+                    "arguments": {"text": "modern hello"},
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {
+                            "name": "QuickQuip",
+                            "version": "1.0",
+                        },
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
                 },
             },
             headers={
@@ -506,10 +519,19 @@ async def test_streaming_timeout_does_not_leak_client():
         response = await client.post(
             "/mcp",
             json={
-                "jsonrpc": "2.0", "id": 6, "method": "server/discover", "params": {},
-                "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                          "io.modelcontextprotocol/clientInfo": {"name": "QuickQuip", "version": "1.0"},
-                          "io.modelcontextprotocol/clientCapabilities": {}},
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "server/discover",
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {
+                            "name": "QuickQuip",
+                            "version": "1.0",
+                        },
+                        "io.modelcontextprotocol/clientCapabilities": {},
+                    },
+                },
             },
             headers={
                 "Content-Type": "application/json",
