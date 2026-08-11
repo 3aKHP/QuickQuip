@@ -6,6 +6,26 @@
 
 （暂无）
 
+## [1.11.0] - 2026-08-11
+
+### ✨ 新增 (Added)
+
+- **LLM 用量与成本计量**：每次 LLM 调用常驻捕获 token/成本/耗时/状态，成本引擎按各家缓存约定归一化计算（Claude exclusive→inclusive 还原、inclusive 减法避免缓存按全价计、修复 Claude cache_write 双算），错误/取消/超时同样留痕；价格由 `llm.toml` 的 `[pricing.models]` 配置，未覆盖模型标记「未定价」。
+- **用量归因**：所有 LLM 调用入口携带功能与群维度标签（chat / defectify / turmfluch / vision / summary / profile 等 14 类），为成本按维度分解提供归因基础。
+- **Web Admin LLM 用量看板**：统一的 token/cost 总览与明细、成功率、缓存命中率、耗时趋势，支持按 provider/功能/模型/群四维分解与筛选，可下钻到请求级明细；旧用量数据库启动时自动迁移并保留历史记录。
+- **Provider 级 1h prompt-cache TTL**：provider 可配置 `cache_ttl` 启用 1 小时扩展缓存；群聊两次请求间隔常超 5 分钟默认窗口，1h 缓存可显著提升命中率、降低成本。
+
+### 🔧 变更 (Changed)
+
+- **LLM 定价改为 provider 级覆盖**：`[pricing.models."provider_id/model"]` 支持按 provider 填写实际计费价（如中转价），未命中时回退模型官方价默认值。
+- **用量看板 ECharts 视觉改版**：趋势图与维度分布图升级为 ECharts 图表（完整坐标轴、十字线悬浮提示、90 天数据滚轮缩放），点击分布图条形可直接下钻筛选；请求明细补充四桶 token、成本分项、定价置信度等完整计量字段；筛选维度选项在筛选后保持完整，不再塌缩。
+
+### 🐛 修复 (Fixed)
+
+- **cache/thinking token 解析补全**：Claude/OpenAI/Gemini 的 cache 与 thinking token 此前被丢弃，开启 `prompt_caching` 后成本无法正确核算；现已完整解析进 `LLMResponse`。
+- **`/llm mcp` 群聊状态信息披露**：strict modern 不再显示重复的 modern/modern 标签；状态输出不再回显 MCP 配置 URL（缺少服务器身份信息时改用中性的 serverInfo 名称）；Web Admin MCP 面板新增协议时代标签与协商版本展示。
+- **MCP 聊天输出边界加固**：错误信息只显示故障类别（如连接超时、认证失败），服务器返回的原始文本、名称与协议版本经单行化与 URL/CQ 码清洗后才允许进入群聊；MCP 工具调用的错误文本在进入 LLM 上下文前同样做 URL 遮罩。
+
 ## [1.10.2] - 2026-08-09
 
 ### 🐛 修复 (Fixed)
@@ -667,7 +687,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.10.2...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/3aKHP/QuickQuip/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/3aKHP/QuickQuip/compare/v1.10.1...v1.10.2
 [1.10.1]: https://github.com/3aKHP/QuickQuip/compare/v1.10.0...v1.10.1
 [1.10.0]: https://github.com/3aKHP/QuickQuip/compare/v1.9.7...v1.10.0
