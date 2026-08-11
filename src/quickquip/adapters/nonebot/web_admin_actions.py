@@ -56,7 +56,7 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
 
     if action.action_type == "mcp_reload":
         await svc.reload_mcp(background=False)
-        return {"ok": True, "status": svc.format_mcp_status()}
+        return {"ok": True, "status": svc.format_mcp_status(verbose=True)}
 
     if action.action_type == "personas_reload":
         count, error = svc.reload_personas()
