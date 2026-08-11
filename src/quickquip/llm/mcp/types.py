@@ -93,7 +93,12 @@ class MCPServerStatus:
     connected: bool = False
     tool_count: int = 0
     error: str | None = None
+    # Admin/log-facing detail: may contain sanitized endpoint info; never
+    # render this field into chat-visible output.
     detail: str = ""
+    # Chat-safe identity: only populated from serverInfo name/version, with
+    # no fallback to URL/image/command.
+    server_identity: str = ""
     negotiation: str = "legacy"
     era: str = "unknown"
     failure_kind: str = ""

@@ -371,6 +371,7 @@ class MCPClientManager:
                 status.connected = True
                 status.tool_count = len(server_bindings)
                 status.detail = self._describe_server(server, client)
+                status.server_identity = self._server_identity(client)
                 status.era = client.era
                 status.negotiated_protocol_version = client.negotiated_protocol_version
             except Exception as exc:
@@ -419,6 +420,7 @@ class MCPClientManager:
                     "tool_count": s.tool_count,
                     "error": s.error,
                     "detail": s.detail,
+                    "server_identity": s.server_identity,
                     "negotiation": s.negotiation,
                     "era": s.era,
                     "failure_kind": s.failure_kind,
@@ -498,6 +500,19 @@ class MCPClientManager:
                 )
             )
         return bindings
+
+    def _server_identity(self, client: MCPClient) -> str:
+        """Chat-safe server identity: serverInfo name/version only, no fallback.
+
+        Unlike _describe_server (admin/log-facing), this never falls back to
+        the configured URL, docker image, or stdio command, so it is safe to
+        render into chat-visible output.
+        """
+        server_name = str(client.server_info.get("name", "")).strip()
+        server_version = str(client.server_info.get("version", "")).strip()
+        if server_name and server_version:
+            return f"{server_name} {server_version}"
+        return server_name
 
     def _describe_server(self, server: MCPServerConfig, client: MCPClient) -> str:
         server_name = str(client.server_info.get("name", "")).strip()

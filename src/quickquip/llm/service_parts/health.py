@@ -75,11 +75,16 @@ class HealthMixin:
         for status in statuses:
             state = "ON" if status.connected else ("OFF" if not status.enabled else "ERROR")
             era_tag = ""
-            if status.negotiation != "legacy" or status.era not in ("unknown", "legacy"):
+            if status.negotiation == status.era:
+                # Strict mode: configured negotiation and resolved era agree,
+                # render once instead of a duplicated "modern/modern" tag.
+                if status.negotiation != "legacy":
+                    era_tag = f"/{status.negotiation}"
+            elif status.negotiation != "legacy" or status.era not in ("unknown", "legacy"):
                 era_tag = f"/{status.negotiation}/{status.era}"
             lines.append(
                 f"- {status.id} [{status.transport}{era_tag}] {state} tools={status.tool_count}"
-                + (f" detail={status.detail}" if status.detail else "")
+                + (f" detail={status.server_identity}" if status.server_identity else "")
                 + (f" error={status.error}" if status.error else "")
             )
         return "\n".join(lines)
