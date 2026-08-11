@@ -8,11 +8,35 @@ from quickquip.llm.config import PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
-from quickquip.llm.mcp import MCPServerStatus
+from quickquip.llm.mcp.types import (
+    MCP_FAILURE_AUTH,
+    MCP_FAILURE_CONFIG,
+    MCP_FAILURE_LEGACY_HANDSHAKE,
+    MCP_FAILURE_MODERN_NEGOTIATION,
+    MCP_FAILURE_PROBE,
+    MCP_FAILURE_ROUTING,
+    MCP_FAILURE_TIMEOUT,
+    MCP_FAILURE_TRANSPORT,
+    MCPServerStatus,
+)
 from quickquip.llm.service_parts.constants import (
     MAX_STORED_MEMORY_ITEMS,
     MAX_TRIGGER_CONTEXT_MESSAGES,
 )
+
+
+_MCP_FAILURE_LABELS = {
+    MCP_FAILURE_CONFIG: "配置错误",
+    MCP_FAILURE_PROBE: "探活失败",
+    MCP_FAILURE_LEGACY_HANDSHAKE: "协议握手失败",
+    MCP_FAILURE_MODERN_NEGOTIATION: "协议协商失败",
+    MCP_FAILURE_AUTH: "认证失败",
+    MCP_FAILURE_TIMEOUT: "连接超时",
+    MCP_FAILURE_ROUTING: "路由错误",
+    MCP_FAILURE_TRANSPORT: "传输错误",
+}
+
+_MCP_FAILURE_FALLBACK_LABEL = "连接失败"
 
 
 class HealthMixin:
@@ -46,7 +70,10 @@ class HealthMixin:
                 pass
         return f"ON ({connected}/{len(statuses)}，{tool_count} tools，bot runtime)", tool_count
 
-    def format_mcp_status(self) -> str:
+    def format_mcp_status(self, *, verbose: bool = False) -> str:
+        """Render MCP status. Non-verbose (chat) output only shows the
+        failure category derived from failure_kind; verbose (admin surface)
+        additionally renders the sanitized raw error text."""
         lines = ["MCP 状态"]
         if not self.config.mcp.enabled:
             lines.append("总开关：OFF")
@@ -82,10 +109,21 @@ class HealthMixin:
                     era_tag = f"/{status.negotiation}"
             elif status.negotiation != "legacy" or status.era not in ("unknown", "legacy"):
                 era_tag = f"/{status.negotiation}/{status.era}"
+            error_part = ""
+            if status.error:
+                if verbose:
+                    error_part = f" error={status.error}"
+                else:
+                    # Chat surface: server-controlled error text stays out;
+                    # only the failure category is shown.
+                    label = _MCP_FAILURE_LABELS.get(
+                        status.failure_kind, _MCP_FAILURE_FALLBACK_LABEL
+                    )
+                    error_part = f" error={label}"
             lines.append(
                 f"- {status.id} [{status.transport}{era_tag}] {state} tools={status.tool_count}"
                 + (f" server={status.server_identity}" if status.server_identity else "")
-                + (f" error={status.error}" if status.error else "")
+                + error_part
             )
         return "\n".join(lines)
 

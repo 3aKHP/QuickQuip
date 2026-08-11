@@ -35,7 +35,9 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_MODERN_NEGOTIATION,
     _build_tool_alias,
     _detect_alias_conflicts,
+    _MAX_SAFE_ERROR_LENGTH,
     _sanitize_error_message,
+    _sanitize_server_text,
     _sanitize_url,
     deliver_mcp_tool_result,
     _format_tool_result,
@@ -373,7 +375,9 @@ class MCPClientManager:
                 status.detail = self._describe_server(server, client)
                 status.server_identity = self._server_identity(client)
                 status.era = client.era
-                status.negotiated_protocol_version = client.negotiated_protocol_version
+                status.negotiated_protocol_version = _sanitize_server_text(
+                    client.negotiated_protocol_version, limit=32
+                )
             except Exception as exc:
                 status.error = _sanitize_error_message(exc)
                 if isinstance(exc, MCPError):
@@ -458,7 +462,17 @@ class MCPClientManager:
         if client is None:
             raise MCPError(f"MCP server 未连接：{binding.server_id}")
 
-        result = await client.call_tool(binding.tool_name, arguments)
+        try:
+            result = await client.call_tool(binding.tool_name, arguments)
+        except Exception as exc:
+            # Boundary for the LLM-context path: tool errors are fed back to
+            # the model and may be quoted into chat, so server-controlled
+            # text (including MCPError text built from JSON-RPC error
+            # bodies) gets the same treatment as chat-visible output.
+            raise MCPError(
+                f"MCP 工具 {alias} 调用失败："
+                f"{_sanitize_server_text(str(exc), limit=_MAX_SAFE_ERROR_LENGTH)}"
+            ) from exc
         return deliver_mcp_tool_result(
             result,
             server_id=binding.server_id,
@@ -508,8 +522,8 @@ class MCPClientManager:
         the configured URL, docker image, or stdio command, so it is safe to
         render into chat-visible output.
         """
-        server_name = str(client.server_info.get("name", "")).strip()
-        server_version = str(client.server_info.get("version", "")).strip()
+        server_name = _sanitize_server_text(client.server_info.get("name", ""))
+        server_version = _sanitize_server_text(client.server_info.get("version", ""), limit=32)
         if server_name and server_version:
             return f"{server_name} {server_version}"
         return server_name
