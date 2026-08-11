@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from quickquip.app.web.routes import mcp_dashboard
+import pytest
+
+fastapi = pytest.importorskip("fastapi")
+
+from quickquip.app.web.routes import mcp_dashboard  # noqa: E402
 
 
 def test_dashboard_status_file_branch_exposes_era_fields(tmp_path, monkeypatch):
