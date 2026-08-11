@@ -270,7 +270,7 @@ async def test_legacy_requests_carry_no_modern_headers():
 # ---------------------------------------------------------------------------
 
 async def test_modern_discover_returns_capabilities():
-    """server/discover returns protocolVersions and serverInfo."""
+    """server/discover returns the final 2026-07-28 identity contract."""
     app = ModernMCPServer()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
@@ -297,8 +297,10 @@ async def test_modern_discover_returns_capabilities():
             },
         )
         result = response.json()["result"]
-        assert "2026-07-28" in result["protocolVersions"]
-        assert result["serverInfo"]["name"] == "modern-test-server"
+        assert "2026-07-28" in result["supportedVersions"]
+        server_info = result["_meta"]["io.modelcontextprotocol/serverInfo"]
+        assert server_info["name"] == "modern-test-server"
+        assert server_info["version"] == "2.0.0"
 
 
 async def test_modern_discover_missing_routing_headers_rejected():
@@ -516,7 +518,7 @@ async def test_streaming_timeout_does_not_leak_client():
             },
         )
         assert response.status_code == 200
-        assert "2026-07-28" in response.json()["result"]["protocolVersions"]
+        assert "2026-07-28" in response.json()["result"]["supportedVersions"]
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +649,8 @@ async def test_modern_mode_discover_and_list(monkeypatch):
         await client.start()
         assert client._is_modern
         assert client._connection_info.era == "modern"
+        assert client.server_info == {"name": "modern-test-server", "version": "2.0.0"}
+        assert client._connection_info.server_info == client.server_info
         assert client._connection_info.negotiated_protocol_version == "2026-07-28"
 
         tools = await client.list_tools()
@@ -665,6 +669,19 @@ async def test_modern_mode_tools_call(monkeypatch):
         await client.start()
         result = await client.call_tool("echo", {"text": "modern hello"})
         assert result.text == ["echo: modern hello"]
+    finally:
+        await client.aclose()
+
+
+async def test_modern_mode_accepts_pre_final_discovery_fields(monkeypatch):
+    """Early 2026-07-28 servers remain usable through the draft fallback."""
+    app = ModernMCPServer(draft_discovery=True)
+    _patch_modern_asgi(monkeypatch, app)
+    client = MCPClient(_modern_config())
+    try:
+        await client.start()
+        assert client.server_info == {"name": "modern-test-server", "version": "2.0.0"}
+        assert client.negotiated_protocol_version == "2026-07-28"
     finally:
         await client.aclose()
 
@@ -743,4 +760,3 @@ async def test_modern_version_mismatch_fails(monkeypatch):
             await client.start()
     finally:
         await client.aclose()
-
