@@ -8,7 +8,6 @@ layer now re-exports from here via ``plugins/llm_runtime.py``.
 from __future__ import annotations
 
 import asyncio
-import base64
 from collections import OrderedDict
 from dataclasses import replace
 import logging
@@ -69,7 +68,14 @@ from quickquip.llm.service_parts.constants import (
     TOOL_LIST_NAME,
     TOOL_SEARCH_NAME,
 )
-from quickquip.llm.service_parts import AutoMemoryMixin, HealthMixin, ScopeMixin, StateMixin, ToolMixin
+from quickquip.llm.service_parts import (
+    AutoMemoryMixin,
+    DrawSvgToolMixin,
+    HealthMixin,
+    ScopeMixin,
+    StateMixin,
+    ToolMixin,
+)
 from quickquip.llm.usage import usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
@@ -78,8 +84,8 @@ from quickquip.llm.tool_loop import run_tool_call_loop
 from quickquip.llm.tools import (
     LLMConversationMessage,
     LLMToolSpec,
-    MAX_OUTBOUND_TOOL_IMAGES,
     ToolExecutionContext,
+    outbound_images_payload,
 )
 from quickquip.llm.vocab import VocabIndex
 from quickquip.common.paths import (
@@ -109,7 +115,7 @@ _GROUP_CACHE_MAX = 512
 logger = logging.getLogger(__name__)
 
 
-class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
@@ -1138,6 +1144,8 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 "llm_used": True,
                 "provider_id": provider.id,
                 "model": request.model,
+                # 工具已产出的图片不因后续 LLM 调用失败而丢弃
+                "images": outbound_images_payload(tool_context),
             }
         except Exception as exc:
             return {
@@ -1147,6 +1155,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
                 "llm_used": True,
                 "provider_id": provider.id,
                 "model": request.model,
+                "images": outbound_images_payload(tool_context),
             }
 
         text = strip_leading_reasoning_content(response.text)
@@ -1213,10 +1222,7 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             "provider_id": provider.id,
             "model": request.model,
             # 工具外发图片（base64 PNG），适配层拼在文本后发送；上限见 MAX_OUTBOUND_TOOL_IMAGES
-            "images": [
-                base64.b64encode(image.data).decode("ascii")
-                for image in tool_context.outbound_images[:MAX_OUTBOUND_TOOL_IMAGES]
-            ],
+            "images": outbound_images_payload(tool_context),
         }
 
     async def generate_reply(

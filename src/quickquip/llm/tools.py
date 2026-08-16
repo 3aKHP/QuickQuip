@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -85,6 +86,14 @@ class ToolExecutionContext:
 
 # 单次回复允许携带的工具外发图片上限，防 prompt injection 驱动的刷图
 MAX_OUTBOUND_TOOL_IMAGES = 3
+
+
+def outbound_images_payload(context: ToolExecutionContext) -> list[str]:
+    """把 context 累积的外发图片转成 base64 列表（超上限部分丢弃）。"""
+    return [
+        base64.b64encode(image.data).decode("ascii")
+        for image in context.outbound_images[:MAX_OUTBOUND_TOOL_IMAGES]
+    ]
 
 
 @dataclass(slots=True)

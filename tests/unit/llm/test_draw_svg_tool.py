@@ -7,7 +7,7 @@ import pytest
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.generation import svg as svg_module
 from quickquip.generation.service import generation_service
-from quickquip.llm.service_parts.tools import ToolMixin
+from quickquip.llm.service_parts.draw_svg import DrawSvgToolMixin
 from quickquip.llm.tools import ToolExecutionContext
 
 
@@ -25,7 +25,7 @@ class _FakeGenerationConfig:
     load_error: str | None = None
 
 
-class _FakeService(ToolMixin):
+class _FakeService(DrawSvgToolMixin):
     """只满足 draw_svg handler 依赖的最小宿主。"""
 
     def __init__(self, judge_reply: str = '{"safe": true}') -> None:
@@ -136,7 +136,26 @@ async def test_content_judge_fail_open_on_bad_json(svg_tool_env):
     assert len(ctx.outbound_images) == 1
 
 
+async def test_content_judge_fail_open_on_non_bool_safe(svg_tool_env):
+    svg_tool_env.config.svg.content_judge = True
+    svc = _FakeService(judge_reply='{"safe": null}')
+    ctx = _make_context()
+    out = await svc._tool_draw_svg({"svg": _GOOD_SVG}, ctx)
+    assert not out.is_error
+    assert len(ctx.outbound_images) == 1
+
+
 async def test_content_judge_not_called_when_disabled(svg_tool_env):
     svc = _FakeService()
     await svc._tool_draw_svg({"svg": _GOOD_SVG}, _make_context())
     assert svc.judge_prompts == []
+
+
+async def test_cdata_text_reaches_sensitive_scan(svg_tool_env):
+    """CDATA 包裹的可见文本必须进入提取结果，防扫描绕过（CR M1 回归）。"""
+    from quickquip.generation.svg_sanitize import extract_visible_text
+
+    svg = _GOOD_SVG.replace(
+        ">你好<", "><![CDATA[敏感词测试CDATA]]><"
+    )
+    assert "敏感词测试CDATA" in extract_visible_text(svg)
