@@ -389,6 +389,18 @@ ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM �
 
 `api_key_env` 由每个 provider 自行声明；示例配置中常见的键名包括 `MINIMAX_API_KEY`、`VOLCENGINE_API_KEY` 和 OpenAI-compatible ASR 使用的 `OPENAI_API_KEY`。
 
+### `[svg]` — SVG 画图（`draw_svg` 工具）
+
+LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写出 SVG 源码，本地 resvg 渲染成 PNG 随回复外发。不需要配置 provider/model（SVG 代码由当前群的对话模型生成），渲染字体沿用 `data/fonts/NotoSansSC-Regular.ttf`（与词云同源）。启用需两步：本段 `enabled = true`，且 `llm.toml [tools] enabled` 中加入 `"draw_svg"`。
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `enabled` | `false` | 功能总开关 |
+| `harden` | `true` | 第一层安全（默认启用）：输入硬约束（64KB / 嵌套 ≤2000 / viewBox ≤2048 / 滤镜参数上限）、静态清洗（剥 script、事件属性、外链）、输出尺寸服务端覆盖、渲染子进程 rlimit（地址空间 2GB / CPU 5s）。关闭即自担风险：恶意 SVG 可耗尽内存或 CPU |
+| `content_judge` | `false` | 第二层安全（默认关闭）：渲染前用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做内容安全裁决。判定失败（超时 / 非 JSON / 未配置）时放行渲染并记录 WARN（fail-open） |
+
+渲染始终在独立子进程内执行（结构性防段错误，不受 `harden` 开关影响）；渲染限流为全局 10 次/分钟、单用户 2 次/分钟，单次回复最多外发 3 张图片。
+
 ---
 
 ## config/awakening.toml
