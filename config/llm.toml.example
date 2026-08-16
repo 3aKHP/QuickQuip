@@ -42,6 +42,8 @@ timeout = 2.0      # 秒
 max_tokens = 64
 
 [tools]
+# 可选内置工具按需加入，如 "draw_svg"（SVG 画图，需同时在
+# generation.toml 的 [svg] 段开启 enabled）。
 enabled = []
 # 工具发现：工具较多时只常驻少量核心工具，其余工具由 tool_search
 # 按能力描述搜索并在下一轮加载。auto 模式会在可延迟工具数超过

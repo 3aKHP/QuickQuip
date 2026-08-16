@@ -48,6 +48,27 @@ model = "dall-e-3"
 size = "1024x1024"
 quality = "standard"
 
+[svg]
+enabled = false
+harden = true
+content_judge = false
+
+# SVG 画图（LLM 工具 draw_svg）：模型在对话中自主生成 SVG 并渲染成 PNG 发送。
+# 不需要 provider/model 配置——SVG 源码由当前群的对话模型在工具参数中直接写出，
+# 渲染由本地 resvg 完成（字体沿用 data/fonts/NotoSansSC-Regular.ttf，与词云同源）。
+# 启用步骤：本段 enabled = true，并在 llm.toml 的 [tools] enabled 中加入 "draw_svg"。
+#
+# 两层安全防护均为可选项（默认值守住底线，取舍自由归部署者）：
+#   harden        — 第一层（默认启用）：输入大小/嵌套/滤镜参数硬约束、静态清洗
+#                   （剥 script/事件属性/外链）、输出尺寸服务端覆盖、渲染子进程
+#                   rlimit（地址空间 2GB / CPU 5s）。关闭即自担风险：恶意 SVG 可
+#                   耗尽内存或 CPU（实测未设限时 160GB 位图分配可打挂整机）。
+#                   渲染始终在独立子进程内执行（结构性防段错误），不受此开关影响。
+#   content_judge — 第二层（默认关闭）：渲染前用 llm.toml [triggers.quick_judge]
+#                   配置的廉价模型对图片可见文本做一次内容安全裁决，拦截涉政、
+#                   辱骂、隐私信息等语义层面的风险。判定失败（超时/非 JSON/未配置）
+#                   时放行渲染并记录 WARN（fail-open）。
+
 [audio]
 enabled = false
 default_model = "minimax-speech"

@@ -117,7 +117,11 @@ def register_private_message_matcher(on_message):
             model=str(result.get("model", "")),
             source="private_message.llm",
         ):
-            resp = await matcher.send(result["reply"])
+            from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
+            from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
+
+            resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
         sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
         if sent_msg_id:
             svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)

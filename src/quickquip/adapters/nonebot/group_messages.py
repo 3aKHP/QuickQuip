@@ -3,6 +3,7 @@ from __future__ import annotations
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
+from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.app.message_pipeline import (
@@ -166,7 +167,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 model=str(result.get("model", "")),
                 source="group_message.explicit_llm",
             ):
-                resp = await matcher.send(result["reply"])
+                resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
             sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
             if sent_msg_id:
                 scope_key = str(group_id)
@@ -228,7 +229,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 model=str(result.get("model", "")),
                 source="group_message.awakening",
             ):
-                resp = await matcher.send(result["reply"])
+                resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
             sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
             if sent_msg_id:
                 scope_key = str(group_id)

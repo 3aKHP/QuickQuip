@@ -215,6 +215,8 @@ class ToolMixin:
             category="diagnostics",
             keywords=["健康检查", "诊断", "自检", "health"],
         )
+        # draw_svg 独立成 DrawSvgToolMixin（tools.py 已超长度预警线）
+        self.register_draw_svg_tool()
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
         self.tool_registry.register(spec, handler)
