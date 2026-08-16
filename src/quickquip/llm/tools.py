@@ -78,6 +78,13 @@ class ToolExecutionContext:
     model: str
     chat_scope: str | None = None
     chat_type: str = "group"
+    # 工具产出、需要直接发给用户的外发图片（与回喂模型的 images 语义相反）。
+    # 每次请求新建的 context 即累加器，service 在工具循环结束后统一收进回复结果。
+    outbound_images: list[LLMInlineImage] = field(default_factory=list)
+
+
+# 单次回复允许携带的工具外发图片上限，防 prompt injection 驱动的刷图
+MAX_OUTBOUND_TOOL_IMAGES = 3
 
 
 @dataclass(slots=True)

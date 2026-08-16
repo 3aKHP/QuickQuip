@@ -8,6 +8,7 @@ layer now re-exports from here via ``plugins/llm_runtime.py``.
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections import OrderedDict
 from dataclasses import replace
 import logging
@@ -77,6 +78,7 @@ from quickquip.llm.tool_loop import run_tool_call_loop
 from quickquip.llm.tools import (
     LLMConversationMessage,
     LLMToolSpec,
+    MAX_OUTBOUND_TOOL_IMAGES,
     ToolExecutionContext,
 )
 from quickquip.llm.vocab import VocabIndex
@@ -1210,6 +1212,11 @@ class LLMService(ScopeMixin, ToolMixin, HealthMixin, StateMixin, AutoMemoryMixin
             "llm_used": True,
             "provider_id": provider.id,
             "model": request.model,
+            # 工具外发图片（base64 PNG），适配层拼在文本后发送；上限见 MAX_OUTBOUND_TOOL_IMAGES
+            "images": [
+                base64.b64encode(image.data).decode("ascii")
+                for image in tool_context.outbound_images[:MAX_OUTBOUND_TOOL_IMAGES]
+            ],
         }
 
     async def generate_reply(
