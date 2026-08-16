@@ -82,6 +82,27 @@ class TestSanitizeSvg:
         with pytest.raises(SvgSanitizeError, match="filter"):
             sanitize_svg(_wrap('<filter id="f" x="-100%" y="0" width="500%" height="100%"><feGaussianBlur stdDeviation="1"/></filter>'))
 
+    def test_filter_param_limits_single_quote_and_scientific_notation(self):
+        """CR M2 回归：单引号与科学计数法形态不得绕过参数上限。"""
+        with pytest.raises(SvgSanitizeError, match="numOctaves"):
+            sanitize_svg(_wrap("<filter id='f'><feTurbulence numOctaves='9'/></filter>"))
+        with pytest.raises(SvgSanitizeError, match="stdDeviation"):
+            sanitize_svg(_wrap('<filter id="f"><feGaussianBlur stdDeviation="1e3"/></filter>'))
+        with pytest.raises(SvgSanitizeError, match="baseFrequency"):
+            sanitize_svg(_wrap("<filter id='f'><feTurbulence baseFrequency='1e-5'/></filter>"))
+        with pytest.raises(SvgSanitizeError, match="filter"):
+            sanitize_svg(_wrap("<filter id='f' width='5000%'><feGaussianBlur stdDeviation='1'/></filter>"))
+
+    def test_filter_param_words_in_text_content_not_rejected(self):
+        """文本内容里出现属性样式字样不触发误拒（过度拦截回归）。"""
+        svg = _wrap("<text>性能调优口诀：numOctaves=99、stdDeviation=500</text>")
+        sanitize_svg(svg)
+
+    def test_href_word_in_text_content_preserved(self):
+        svg = _wrap("<text>详见 href=http://example.com 的说明</text>")
+        cleaned = sanitize_svg(svg)
+        assert "http://example.com" in cleaned
+
 
 class TestParseViewbox:
     def test_parses_valid_viewbox(self):

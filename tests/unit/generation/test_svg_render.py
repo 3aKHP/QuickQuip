@@ -48,3 +48,14 @@ async def test_render_lenient_mode_clamps():
 async def test_render_propagates_worker_error():
     with pytest.raises(SvgRenderError):
         await render_svg_to_png("这不是一段 SVG 文档")
+
+
+async def test_concurrent_renders_complete():
+    """三并发渲染（并发闸门=2）必须全部完成——事件循环死锁回归（CR B1）。"""
+    import asyncio
+
+    svgs = [_GOOD_SVG.replace("#4e79a7", color) for color in ("#e15759", "#59a14f", "#edc948")]
+    results = await asyncio.wait_for(
+        asyncio.gather(*(render_svg_to_png(svg) for svg in svgs)), timeout=30.0
+    )
+    assert all(png[:8] == b"\x89PNG\r\n\x1a\n" for png in results)

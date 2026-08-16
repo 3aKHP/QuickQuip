@@ -4,6 +4,9 @@
 不引入任何 XML 解析器（标准库解析器自身存在实体膨胀风险）。真正的 XML 解析
 发生在受 rlimit 约束的渲染 worker 子进程内（见 ``svg_worker.py``），本模块
 的深度与滤镜检查只是启发式前置，用于尽早给出可回传给模型的明确错误。
+
+属性相关的清洗与检查只作用于标签内部（``<...>`` 区间），避免把文本内容里
+出现的 ``href=``、``numOctaves=`` 等字样误当作属性处理。
 """
 
 from __future__ import annotations
@@ -30,21 +33,17 @@ _SCRIPT_BLOCK_RE = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.IGNORECASE |
 _FOREIGN_BLOCK_RE = re.compile(
     r"<foreignObject\b[^>]*>.*?</foreignObject\s*>", re.IGNORECASE | re.DOTALL
 )
+# 属性值的三种引号形态；所有属性级检查统一经 _iter_tag_bodies 锚定到标签内
 _EVENT_ATTR_RE = re.compile(r"""\s+on[a-zA-Z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
-_HREF_ATTR_RE = re.compile(
-    r"""(\s+(?:xlink:)?href\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE
-)
+_HREF_ATTR_RE = re.compile(r"""(\s+(?:xlink:)?href\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
 _VIEWBOX_RE = re.compile(r"""viewBox\s*=\s*(["'])\s*([-\d.eE+,\s]+?)\1""", re.IGNORECASE)
 _SVG_ROOT_TAG_RE = re.compile(r"<svg\b[^>]*>", re.IGNORECASE)
 _ROOT_SIZE_ATTR_RE = re.compile(
     r"""\s(?:width|height)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"""
 )
-_TEXT_BLOCK_RE = re.compile(
-    r"<(text|tspan)\b[^>]*>(.*?)</\1\s*>", re.IGNORECASE | re.DOTALL
-)
-_NUM_OCTAVES_RE = re.compile(r"""numOctaves\s*=\s*"?(\d+)""")
-_STD_DEVIATION_RE = re.compile(r"""stdDeviation\s*=\s*"?([\d.]+(?:\s+[\d.]+)?)""")
-_BASE_FREQUENCY_RE = re.compile(r"""baseFrequency\s*=\s*"?([\d.eE+-]+)""")
+_TEXT_BLOCK_RE = re.compile(r"<(text|tspan)\b[^>]*>(.*?)</\1\s*>", re.IGNORECASE | re.DOTALL)
+_CDATA_RE = re.compile(r"<!\[CDATA\[(.*?)\]\]>", re.DOTALL)
 
 
 def sanitize_svg(svg: str) -> str:
@@ -60,27 +59,12 @@ def sanitize_svg(svg: str) -> str:
     _check_nesting_depth(svg)
     _check_filter_params(svg)
 
-    cleaned = _SCRIPT_BLOCK_RE.sub("", svg)
+    cleaned = _map_tag_bodies(svg, _strip_event_and_href_attrs)
+    cleaned = _SCRIPT_BLOCK_RE.sub("", cleaned)
     cleaned = _FOREIGN_BLOCK_RE.sub("", cleaned)
     if re.search(r"<script\b|<foreignObject\b", cleaned, re.IGNORECASE):
         raise SvgSanitizeError("存在未闭合的 script/foreignObject，请移除后重试")
-    cleaned = _EVENT_ATTR_RE.sub("", cleaned)
-    cleaned = _HREF_ATTR_RE.sub(_drop_external_href, cleaned)
     return cleaned
-
-
-def strip_root_size_attrs(svg: str) -> str:
-    """剥离根节点 <svg> 的 width/height 属性，只保留 viewBox。
-
-    resvg 以 SVG 自带 width/height 为内在尺寸参与等比缩放，服务端的输出
-    尺寸覆盖（渲染参数 width/height 只是适配画布）必须配合本归一化才能
-    精确生效——这也是输出尺寸炸弹防线的组成部分，任何模式下都执行。
-    """
-    match = _SVG_ROOT_TAG_RE.search(svg)
-    if match is None:
-        return svg
-    root_tag = _ROOT_SIZE_ATTR_RE.sub("", match.group(0))
-    return svg[: match.start()] + root_tag + svg[match.end() :]
 
 
 def parse_viewbox(svg: str) -> tuple[int, int]:
@@ -121,15 +105,50 @@ def lenient_viewbox(svg: str) -> tuple[int, int] | None:
     return width, height
 
 
+def strip_root_size_attrs(svg: str) -> str:
+    """剥离根节点 <svg> 的 width/height 属性，只保留 viewBox。
+
+    resvg 以 SVG 自带 width/height 为内在尺寸参与等比缩放，服务端的输出
+    尺寸覆盖（渲染参数 width/height 只是适配画布）必须配合本归一化才能
+    精确生效——这也是输出尺寸炸弹防线的组成部分，任何模式下都执行。
+    """
+    match = _SVG_ROOT_TAG_RE.search(svg)
+    if match is None:
+        return svg
+    root_tag = _ROOT_SIZE_ATTR_RE.sub("", match.group(0))
+    return svg[: match.start()] + root_tag + svg[match.end() :]
+
+
 def extract_visible_text(svg: str) -> str:
-    """提取 <text>/<tspan> 的可见文本，供敏感词扫描与内容裁决使用。"""
+    """提取 <text>/<tspan> 的可见文本，供敏感词扫描与内容裁决使用。
+
+    先展开 CDATA 定界（resvg 会渲染其中内容，不能让扫描层看不见），
+    再清掉嵌套标签并做实体反转义。
+    """
     chunks: list[str] = []
     for match in _TEXT_BLOCK_RE.finditer(svg):
-        inner = re.sub(r"<[^>]+>", " ", match.group(2))
-        text = html.unescape(inner).strip()
+        inner = _CDATA_RE.sub(r"\1", match.group(2))
+        text = html.unescape(re.sub(r"<[^>]+>", " ", inner)).strip()
         if text:
             chunks.append(text)
     return "\n".join(chunks)
+
+
+def _map_tag_bodies(svg: str, mapper) -> str:
+    """把 *mapper* 只应用到标签（``<...>``）内部，文本区间原样保留。"""
+    parts: list[str] = []
+    cursor = 0
+    for match in _TAG_RE.finditer(svg):
+        parts.append(svg[cursor:match.start()])
+        parts.append(mapper(match.group(0)))
+        cursor = match.end()
+    parts.append(svg[cursor:])
+    return "".join(parts)
+
+
+def _strip_event_and_href_attrs(tag: str) -> str:
+    tag = _EVENT_ATTR_RE.sub("", tag)
+    return _HREF_ATTR_RE.sub(_drop_external_href, tag)
 
 
 def _drop_external_href(match: re.Match) -> str:
@@ -179,34 +198,51 @@ def _check_nesting_depth(svg: str) -> None:
         raise SvgSanitizeError(f"元素嵌套深度超过 {MAX_NESTING_DEPTH}")
 
 
+def _attr_number(tag: str, name: str) -> float | None:
+    """从单个标签里取数值属性；统一处理三种引号形态与科学计数法。"""
+    match = re.search(
+        rf"""{name}\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""", tag, re.IGNORECASE
+    )
+    if match is None:
+        return None
+    value = match.group(1).strip("\"'")
+    try:
+        return float(value.rstrip("%"))
+    except ValueError:
+        return None
+
+
 def _check_filter_params(svg: str) -> None:
-    """滤镜参数启发式：拦截已知的高消耗组合，错误信息回传模型可自修。"""
-    for match in _NUM_OCTAVES_RE.finditer(svg):
-        if int(match.group(1)) > MAX_NUM_OCTAVES:
-            raise SvgSanitizeError(f"feTurbulence numOctaves 不能超过 {MAX_NUM_OCTAVES}")
-    for match in _STD_DEVIATION_RE.finditer(svg):
-        for value in match.group(1).split():
-            if float(value) > MAX_STD_DEVIATION:
-                raise SvgSanitizeError(f"feGaussianBlur stdDeviation 不能超过 {MAX_STD_DEVIATION:g}")
-    for match in _BASE_FREQUENCY_RE.finditer(svg):
-        try:
-            frequency = float(match.group(1))
-        except ValueError:
-            continue
-        if 0 < frequency < MIN_BASE_FREQUENCY:
+    """滤镜参数启发式：拦截已知的高消耗组合，错误信息回传模型可自修。
+
+    只扫描标签区间——文本内容里出现 ``numOctaves=99`` 字样属于正常文字，
+    不应触发误拒。
+    """
+    for match in _TAG_RE.finditer(svg):
+        tag = match.group(0)
+        octaves = _attr_number(tag, "numOctaves")
+        if octaves is not None and octaves > MAX_NUM_OCTAVES:
+            raise SvgSanitizeError(f"feTurbulence numOctaves 不能超过 {MAX_NUM_OCTAVES:g}")
+        deviation = _attr_number(tag, "stdDeviation")
+        if deviation is not None and deviation > MAX_STD_DEVIATION:
+            raise SvgSanitizeError(f"feGaussianBlur stdDeviation 不能超过 {MAX_STD_DEVIATION:g}")
+        frequency = _attr_number(tag, "baseFrequency")
+        if frequency is not None and 0 < frequency < MIN_BASE_FREQUENCY:
             raise SvgSanitizeError(f"feTurbulence baseFrequency 不能低于 {MIN_BASE_FREQUENCY}")
-    for match in re.finditer(r"<filter\b[^>]*>", svg, re.IGNORECASE):
-        _check_filter_region(match.group(0))
+        if re.match(r"<filter\b", tag, re.IGNORECASE):
+            _check_filter_region(tag)
 
 
 def _check_filter_region(filter_tag: str) -> None:
     for attr in ("x", "y", "width", "height"):
-        match = re.search(rf"""{attr}\s*=\s*"?([\d.%eE+-]+)",?""", filter_tag)
-        if match is None:
+        value = _attr_number(filter_tag, attr)
+        if value is None:
             continue
-        value = match.group(1)
-        if value.endswith("%"):
-            if float(value[:-1]) > MAX_FILTER_REGION_RATIO * 100:
-                raise SvgSanitizeError(f"filter {attr} 区域不能超过 {MAX_FILTER_REGION_RATIO * 100:.0f}%")
-        elif float(value) > MAX_FILTER_REGION_ABS:
+        if value > MAX_FILTER_REGION_ABS:
             raise SvgSanitizeError(f"filter {attr} 区域不能超过 {MAX_FILTER_REGION_ABS:g}")
+    for attr in ("x", "y", "width", "height"):
+        raw = re.search(
+            rf"""{attr}\s*=\s*["']([\d.]+)%["']""", filter_tag, re.IGNORECASE
+        )
+        if raw is not None and float(raw.group(1)) > MAX_FILTER_REGION_RATIO * 100:
+            raise SvgSanitizeError(f"filter {attr} 区域不能超过 {MAX_FILTER_REGION_RATIO * 100:.0f}%")

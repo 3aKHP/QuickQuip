@@ -1,16 +1,22 @@
-"""resvg 渲染 worker：在独立子进程内执行受限渲染。
+"""resvg 渲染 worker：以 ``python -m`` 独立子进程执行受限渲染。
 
-本模块被 ``svg.py`` 以 spawn 方式启动。子进程内发生的一切（段错误、
-Rust 分配失败 abort、CPU 打满）都由进程边界与 rlimit 兜住，不影响 bot
-主进程。结果经单向管道回传 ``("ok", png_bytes)`` 或 ``("error", message)``；
-子进程在写入前崩溃时管道保持为空，由父进程按墙钟超时归类。
+以 ``python -m quickquip.generation.svg_worker`` 方式调用（不经
+multiprocessing spawn，避免子进程重新导入应用入口 bot.py 的全部
+模块级副作用）。协议：
 
-本模块必须保持导入无副作用（spawn 会在子进程内重新 import）。
+- argv：font_path width_px height_px as_limit_bytes cpu_seconds
+- stdin：完整 SVG 文本（读到 EOF）
+- stdout：成功 = 8 字节大端长度 + PNG bytes；失败 = ``ERR `` 前缀 + 一行错误
+- rlimit 在导入 resvg 之前生效；任何崩溃（段错误 / 分配失败 abort）由
+  父进程按退出码归类，进程边界兜住。
 """
 
 from __future__ import annotations
 
 import os
+import sys
+
+_LENGTH_PREFIX_BYTES = 8
 
 
 def _apply_limits(as_limit_bytes: int, cpu_seconds: int) -> None:
@@ -25,18 +31,14 @@ def _apply_limits(as_limit_bytes: int, cpu_seconds: int) -> None:
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
 
 
-def run_render(
-    send_pipe,
-    svg: str,
-    font_path: str,
-    width_px: int,
-    height_px: int,
-    as_limit_bytes: int,
-    cpu_seconds: int,
-) -> None:
-    """worker 入口：受限渲染单张 SVG 并把 PNG bytes 写回管道。"""
+def main() -> int:
+    if len(sys.argv) != 6:
+        sys.stdout.write("ERR usage: svg_worker font_path width height as_limit cpu_limit\n")
+        return 0
+    font_path, width_arg, height_arg, as_limit_arg, cpu_limit_arg = sys.argv[1:]
     # rlimit 必须先于 resvg 导入生效——导入阶段就可能发生大额分配
-    _apply_limits(as_limit_bytes, cpu_seconds)
+    _apply_limits(int(as_limit_arg), int(cpu_limit_arg))
+    svg = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
         import resvg_py
 
@@ -44,11 +46,17 @@ def run_render(
         png = resvg_py.svg_to_bytes(
             svg_string=svg,
             font_files=font_files,
-            width=width_px,
-            height=height_px,
+            width=int(width_arg),
+            height=int(height_arg),
         )
-        send_pipe.send(("ok", png))
+        sys.stdout.buffer.write(len(png).to_bytes(_LENGTH_PREFIX_BYTES, "big"))
+        sys.stdout.buffer.write(png)
+        sys.stdout.buffer.flush()
     except BaseException as exc:  # noqa: BLE001 — worker 侧任何异常都只上报不外抛
-        send_pipe.send(("error", f"{type(exc).__name__}: {exc}"))
-    finally:
-        send_pipe.close()
+        sys.stdout.write(f"ERR {type(exc).__name__}: {exc}\n")
+        sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
