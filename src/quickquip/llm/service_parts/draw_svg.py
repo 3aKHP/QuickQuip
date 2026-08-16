@@ -6,15 +6,36 @@ MRO 契约：本 mixin 只依赖宿主（LLMService）的 ``quick_judge`` 方法
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 
-from quickquip.llm.tools import LLMInlineImage, LLMToolOutput, LLMToolSpec, ToolExecutionContext
+from quickquip.common.json_utils import extract_json_object
+from quickquip.llm.tools import (
+    LLMInlineImage,
+    LLMToolOutput,
+    LLMToolSpec,
+    MAX_OUTBOUND_TOOL_IMAGES,
+    ToolExecutionContext,
+)
 
 logger = logging.getLogger(__name__)
 
 DRAW_SVG_TOOL_NAME = "draw_svg"
+
+_VERDICT_TRUE = {"true", "1", "yes"}
+_VERDICT_FALSE = {"false", "0", "no"}
+
+
+def _coerce_verdict(value: object) -> bool | None:
+    """把判定器的 safe 字段规约为布尔；可辨认取值（含字符串形态）映射，不可辨认返回 None。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in _VERDICT_TRUE:
+            return True
+        if lowered in _VERDICT_FALSE:
+            return False
+    return None
 
 DRAW_SVG_TOOL_SPEC = LLMToolSpec(
     name=DRAW_SVG_TOOL_NAME,
@@ -64,6 +85,11 @@ class DrawSvgToolMixin:
         caption = str(arguments.get("caption", "")).strip()
         if not svg:
             return LLMToolOutput(content="缺少 svg 参数（需要完整 SVG 源码）", is_error=True)
+        if len(context.outbound_images) >= MAX_OUTBOUND_TOOL_IMAGES:
+            return LLMToolOutput(
+                content=f"本次回复图片已达上限（{MAX_OUTBOUND_TOOL_IMAGES} 张），不要再生成更多图片",
+                is_error=True,
+            )
         svg_config = generation_service.get_config().svg
         if not svg_config.enabled:
             return LLMToolOutput(content="SVG 画图功能未启用（generation.toml [svg] enabled）", is_error=True)
@@ -99,8 +125,9 @@ class DrawSvgToolMixin:
     async def _judge_svg_content(self, visible_text: str, caption: str) -> tuple[bool, str]:
         """第二层内容安全裁决（可选项 content_judge）。
 
-        判定失败（异常 / 非 JSON / safe 非布尔）一律 fail-open 放行并记录
-        WARN——增强层故障不应阻断画图功能。
+        判定失败（异常 / 非 JSON / safe 不可辨认）一律 fail-open 放行并记录
+        WARN——增强层故障不应阻断画图功能；但可辨认的 "false"（含字符串
+        形态，LLM 常见输出）按不安全处理，不能因形态差异静默放行。
         """
         prompt = (
             "判断以下将被渲染成图片发送到群聊的文本内容是否安全合规"
@@ -111,15 +138,12 @@ class DrawSvgToolMixin:
             f"图片文本：\n{visible_text[:2000] or '（无文字）'}"
         )
         try:
-            raw = await self.quick_judge(prompt, max_tokens=128)
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if match is None:
-                raise ValueError("判定器未返回 JSON")
-            data = json.loads(match.group(0))
-            safe = data.get("safe")
-            if not isinstance(safe, bool):
-                raise ValueError(f"safe 不是布尔值：{safe!r}")
+            data = extract_json_object(await self.quick_judge(prompt, max_tokens=128))
+            safe = _coerce_verdict(data.get("safe"))
         except Exception:
             logger.warning("SVG 内容安全裁决失败，按 fail-open 放行")
+            return True, ""
+        if safe is None:
+            logger.warning("SVG 内容安全裁决 safe 字段不可辨认，按 fail-open 放行")
             return True, ""
         return safe, str(data.get("reason", ""))[:100]

@@ -136,13 +136,49 @@ async def test_content_judge_fail_open_on_bad_json(svg_tool_env):
     assert len(ctx.outbound_images) == 1
 
 
-async def test_content_judge_fail_open_on_non_bool_safe(svg_tool_env):
+async def test_content_judge_fail_open_on_unrecognizable_safe(svg_tool_env):
     svg_tool_env.config.svg.content_judge = True
     svc = _FakeService(judge_reply='{"safe": null}')
     ctx = _make_context()
     out = await svc._tool_draw_svg({"svg": _GOOD_SVG}, ctx)
     assert not out.is_error
     assert len(ctx.outbound_images) == 1
+
+
+async def test_content_judge_blocks_string_false(svg_tool_env):
+    """字符串形态的 "false" 是可辨认的不安全判定，不得因 truthy 静默放行（bot review）。"""
+    svg_tool_env.config.svg.content_judge = True
+    svc = _FakeService(judge_reply='{"safe": "false", "reason": "字符串形态的不安全"}')
+    ctx = _make_context()
+    out = await svc._tool_draw_svg({"svg": _GOOD_SVG}, ctx)
+    assert out.is_error
+    assert "字符串形态的不安全" in out.content
+    assert ctx.outbound_images == []
+
+
+async def test_content_judge_accepts_string_true(svg_tool_env):
+    svg_tool_env.config.svg.content_judge = True
+    svc = _FakeService(judge_reply='{"safe": "true"}')
+    ctx = _make_context()
+    out = await svc._tool_draw_svg({"svg": _GOOD_SVG}, ctx)
+    assert not out.is_error
+    assert len(ctx.outbound_images) == 1
+
+
+async def test_outbound_image_cap_enforced_in_handler(svg_tool_env):
+    """超上限的 draw_svg 调用在渲染前拒绝，不浪费渲染与限流配额（bot review）。"""
+    from quickquip.llm.tools import LLMInlineImage
+
+    svc = _FakeService()
+    ctx = _make_context()
+    ctx.outbound_images.extend(
+        LLMInlineImage(data=b"png", media_type="image/png") for _ in range(3)
+    )
+    out = await svc._tool_draw_svg({"svg": _GOOD_SVG}, ctx)
+    assert out.is_error
+    assert "上限" in out.content
+    assert len(ctx.outbound_images) == 3
+    assert svg_tool_env.rendered == []
 
 
 async def test_content_judge_not_called_when_disabled(svg_tool_env):

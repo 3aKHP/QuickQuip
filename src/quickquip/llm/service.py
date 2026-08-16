@@ -824,7 +824,7 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         store_user_message: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         prompt = prompt.strip()
         normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
         normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
@@ -1246,7 +1246,7 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         store_user_message: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         with usage_scope("chat", group_id=str(group_id)):
             return await self._generate_reply_for_scope(
                 chat_id=group_id,
@@ -1290,7 +1290,7 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         store_user_message: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
-    ) -> dict[str, str]:
+    ) -> dict[str, object]:
         with usage_scope("chat"):
             return await self._generate_reply_for_scope(
                 chat_id=user_id,

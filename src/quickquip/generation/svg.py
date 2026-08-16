@@ -37,7 +37,9 @@ WORKER_AS_LIMIT_BYTES = 2 * 1024**3
 WORKER_CPU_SECONDS = 5
 WORKER_WALL_TIMEOUT_SECONDS = 8.0
 MAX_RENDER_CONCURRENCY = 2
-MAX_OUTPUT_PNG_BYTES = 10 * 1024 * 1024
+# 4096² 画布的高熵输出可达数 MB；base64 后单条消息过大可能超过
+# OneBot/QQ 平台的消息尺寸限制，超限直接判失败让模型简化重画
+MAX_OUTPUT_PNG_BYTES = 4 * 1024 * 1024
 
 _ERR_PREFIX = b"ERR "
 _LENGTH_PREFIX_BYTES = 8
@@ -82,7 +84,9 @@ def _render_sync(svg: str, harden: bool) -> bytes:
     with _RENDER_SLOTS:
         png = _run_worker(svg, width * SVG_ZOOM, height * SVG_ZOOM, harden)
     if len(png) > MAX_OUTPUT_PNG_BYTES:
-        raise SvgRenderError(f"渲染输出超过 {MAX_OUTPUT_PNG_BYTES // 1024 // 1024}MB 上限")
+        raise SvgRenderError(
+            f"渲染输出超过 {MAX_OUTPUT_PNG_BYTES // 1024 // 1024}MB 上限，请简化图形或减小画面尺寸"
+        )
     return png
 
 
