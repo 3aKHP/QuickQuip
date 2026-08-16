@@ -59,6 +59,9 @@ class RuntimeConfig:
 @dataclass(slots=True)
 class ToolsConfig:
     enabled: list[str] = field(default_factory=list)
+    # enabled 列表的作用模式：append = 在默认白名单 + MCP 工具之上追加
+    # （默认，opt-in 工具的启用路径）；replace = 精确过滤，只暴露所列工具
+    enabled_mode: str = "append"  # append | replace
     discovery_mode: str = "auto"  # off | on | auto
     discovery_min_tools: int = 10
     discovery_search_limit: int = 5
@@ -437,6 +440,16 @@ def _parse_single_provider(
 _MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}
 
 
+def _parse_enabled_mode(raw: Any) -> str:
+    """解析 [tools] enabled_mode；非法取值回退 append 并告警。"""
+    mode = str(raw if raw is not None else "append").strip().lower()
+    if mode not in ("append", "replace"):
+        if raw is not None:
+            logger.warning("[tools] enabled_mode 非法取值 %r，回退为 append", raw)
+        return "append"
+    return mode
+
+
 def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
     servers: list[MCPServerConfig] = []
     seen_ids: set[str] = set()
@@ -638,6 +651,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 for item in tools_raw.get("enabled", [])
                 if str(item).strip()
             ],
+            enabled_mode=_parse_enabled_mode(tools_raw.get("enabled_mode")),
             discovery_mode=str(tools_raw.get("discovery_mode", "auto")).strip().lower() or "auto",
             discovery_min_tools=max(1, int(tools_raw.get("discovery_min_tools", 10))),
             discovery_search_limit=max(1, min(int(tools_raw.get("discovery_search_limit", 5)), 20)),

@@ -228,7 +228,14 @@ class ToolMixin:
     # _tool_search_tools / _tool_list_tools handlers.
 
     def _get_enabled_tool_names(self, chat_type: str = "group") -> list[str]:
-        names = self.config.tools.enabled or [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
+        configured = self.config.tools.enabled
+        if not configured:
+            names = [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
+        elif self.config.tools.enabled_mode == "replace":
+            names = list(configured)
+        else:  # append：默认白名单 + MCP 工具之上追加，opt-in 工具的启用路径
+            names = [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names), *configured]
+        names = list(dict.fromkeys(names))
         if chat_type == "private":
             names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
         return [name for name in names if self.tool_registry.has_tool(name)]

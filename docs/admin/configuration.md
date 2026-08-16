@@ -167,7 +167,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
-| `enabled` | 工具白名单。为空 `[]` 时暴露所有内建及 MCP 工具；填写后按工具名精确过滤 | `[]` |
+| `enabled` | 工具名单。为空 `[]` 时暴露默认白名单及全部 MCP 工具；非空时与 `enabled_mode` 配合使用 | `[]` |
+| `enabled_mode` | `enabled` 非空时的作用方式：`append` 在默认白名单 + MCP 工具之上追加（启用 `draw_svg` 等可选内置工具用这个）；`replace` 精确过滤，只暴露所列工具 | `append` |
 | `discovery_mode` | 工具发现模式：`off` 全量暴露；`on` 仅暴露常驻工具并通过 `tool_search` 按需加载；`auto` 在可延迟工具数超过阈值后启用 | `auto` |
 | `discovery_min_tools` | `auto` 模式下触发工具发现的可延迟工具数量阈值 | `10` |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 | `5` |

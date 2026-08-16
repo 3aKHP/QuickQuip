@@ -362,6 +362,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
   - `[triggers.quick_judge]`：唤醒模块和语境规则使用的快速判定模型
 - `[tools]`
   - `enabled`
+  - `enabled_mode`：`enabled` 非空时的作用方式，`append`（默认，默认白名单 + MCP 之上追加）/ `replace`（精确过滤）
   - `discovery_mode`
   - `discovery_min_tools`
   - `discovery_search_limit`
