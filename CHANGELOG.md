@@ -19,7 +19,7 @@
 
 ### 🔧 变更 (Changed)
 
-- **`[tools] enabled` 支持 append/replace 两种作用模式**：`enabled` 非空时不再整体替换默认白名单（旧语义会把未列入的 MCP 工具一并过滤掉），默认按 `append` 在默认白名单与 MCP 工具之上追加；需要精确白名单的部署显式设置 `enabled_mode = "replace"`；`enabled = []` 的部署行为完全不变。升级说明见 `docs/admin/configuration.md`。
+- **`[tools] enabled` 支持 append/replace 两种作用模式**：`enabled` 非空时不再整体替换默认白名单（旧语义会把未列入的 MCP 工具一并过滤掉），默认按 `append` 在默认白名单与 MCP 工具之上追加；需要精确白名单的部署显式设置 `enabled_mode = "replace"`；`enabled = []` 的部署行为完全不变。升级后 `enabled` 非空且未设置 `enabled_mode` 的部署会在启动日志收到语义提醒。升级说明见 `docs/admin/configuration.md`。
 
 ### 🐛 修复 (Fixed)
 

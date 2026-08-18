@@ -93,8 +93,6 @@ class DrawSvgToolMixin:
         svg_config = generation_service.get_config().svg
         if not svg_config.enabled:
             return LLMToolOutput(content="SVG 画图功能未启用（generation.toml [svg] enabled）", is_error=True)
-        if not svg_render_allowed(context.user_id, context.group_id):
-            return LLMToolOutput(content="画图太频繁了，请稍后再试", is_error=True)
 
         visible_text = extract_visible_text(svg)
         sensitive = _get_sensitive_filter()
@@ -108,6 +106,10 @@ class DrawSvgToolMixin:
             if not safe:
                 detail = f"：{reason}" if reason else ""
                 return LLMToolOutput(content=f"图片文本内容安全校验未通过{detail}，请修改后重试", is_error=True)
+
+        # 限流放在内容检查之后：被拦截的尝试不占渲染配额，避免低成本耗尽全局配额
+        if not svg_render_allowed(context.user_id, context.group_id):
+            return LLMToolOutput(content="画图太频繁了，请稍后再试", is_error=True)
 
         try:
             png = await render_svg_to_png(svg, harden=svg_config.harden)

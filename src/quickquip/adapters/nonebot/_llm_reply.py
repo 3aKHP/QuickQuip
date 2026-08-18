@@ -5,10 +5,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from nonebot.adapters.onebot.v11 import Message as OneBotMessage
+    from nonebot.adapters.onebot.v11 import MessageSegment as OneBotMessageSegment
 
 
-def build_llm_reply_message(result: dict[str, Any], Message, MessageSegment):
+def build_llm_reply_message(
+    result: dict[str, Any],
+    Message: type[OneBotMessage],
+    MessageSegment: type[OneBotMessageSegment],
+) -> str | OneBotMessage:
     """把 ``generate_reply`` 的结果转为可发送内容：无图时返回纯文本，有图时返回 Message。"""
     images = result.get("images") or []
     if not images:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from quickquip.llm.config import ToolsConfig, load_llm_config
 from quickquip.llm.service_parts.constants import DEFAULT_ENABLED_TOOLS
 from quickquip.llm.service_parts.tools import ToolMixin
@@ -87,3 +89,29 @@ def test_config_invalid_enabled_mode_falls_back_to_append(tmp_path):
     config_path.write_text('[tools]\nenabled_mode = "merge"\n', encoding="utf-8")
     loaded = load_llm_config(config_path)
     assert loaded.tools.enabled_mode == "append"
+
+
+def test_config_warns_when_enabled_nonempty_without_mode(tmp_path, caplog):
+    """升级部署语义提示：enabled 非空且未显式设置 enabled_mode 时告警（append 默认）。"""
+    config_path = tmp_path / "llm.toml"
+    config_path.write_text('[tools]\nenabled = ["draw_svg"]\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = load_llm_config(config_path)
+    assert loaded.tools.enabled == ["draw_svg"]
+    assert any("enabled_mode" in record.message for record in caplog.records)
+
+
+def test_config_no_append_semantics_warning_with_explicit_mode(tmp_path, caplog):
+    config_path = tmp_path / "llm.toml"
+    config_path.write_text('[tools]\nenabled = ["draw_svg"]\nenabled_mode = "append"\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        load_llm_config(config_path)
+    assert not any("enabled_mode" in record.message for record in caplog.records)
+
+
+def test_config_no_append_semantics_warning_when_enabled_empty(tmp_path, caplog):
+    config_path = tmp_path / "llm.toml"
+    config_path.write_text('[tools]\nenabled = []\n', encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        load_llm_config(config_path)
+    assert not any("enabled_mode" in record.message for record in caplog.records)

@@ -917,7 +917,10 @@ async def run_boredom_check(
     svc: Any,
     rate_limiter: Any | None = None,
     stats_tracker: Any | None = None,
+    build_reply_message: Any | None = None,
 ) -> None:
+    """无聊唤醒巡检。``build_reply_message`` 由适配层注入（把 generate_reply
+    结果转为可发送内容，带图时拼 Message）；缺省只发纯文本。"""
     cfg = get_config()
     st = get_state()
     st.prune_stale()
@@ -961,7 +964,14 @@ async def run_boredom_check(
                 model=str(reply_result.get("model", "")),
                 source="awakening.boredom_timer",
             ):
-                await bot.send_group_msg(group_id=int(gid), message=reply_result["reply"])
+                await bot.send_group_msg(
+                    group_id=int(gid),
+                    message=(
+                        build_reply_message(reply_result)
+                        if build_reply_message is not None
+                        else reply_result["reply"]
+                    ),
+                )
             st.mark_boredom_triggered(gid)
             st.bot_messages.add(gid, reply_result["reply"])
             if stats_tracker is not None:

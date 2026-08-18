@@ -981,3 +981,45 @@ class TestRunBoredomCheck:
         svc.generate_reply.assert_awaited_once()
         bot.send_group_msg.assert_awaited_once_with(group_id=123, message="冒个泡")
         stats_tracker.record_trigger.assert_called_once_with("123", "awakening_boredom")
+
+    def test_sends_with_images_via_injected_reply_builder(self):
+        """适配层注入 build_reply_message 时，带图回复经拼装器发送（不丢图）。"""
+        bot = MagicMock()
+        bot.send_group_msg = AsyncMock()
+        groups = MagicMock()
+        groups.all_groups.return_value = ["123"]
+        rule_switch = MagicMock()
+        rule_switch.is_enabled.return_value = True
+        svc = MagicMock()
+        svc.config.load_error = None
+        svc.get_group_settings.return_value = MagicMock(enabled=True)
+        svc.recent_message_buffer.list_recent.return_value = []
+        svc.generate_reply = AsyncMock(
+            return_value={"reply": "冒个泡", "images": ["cXctaW1n"]}
+        )
+
+        def _build_reply(result):
+            return ("message", result["reply"], result.get("images"))
+
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        old_state = aw._state
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(
+                boredom_silence_seconds=1,
+                boredom_probability=1.0,
+                boredom_check_interval=1,
+            ),
+        )
+        aw._state = AwakeningState()
+        try:
+            asyncio.run(
+                run_boredom_check(bot, groups, rule_switch, svc, build_reply_message=_build_reply)
+            )
+        finally:
+            aw._config = old_cfg
+            aw._state = old_state
+
+        bot.send_group_msg.assert_awaited_once_with(
+            group_id=123, message=("message", "冒个泡", ["cXctaW1n"])
+        )

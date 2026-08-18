@@ -100,6 +100,35 @@ async def test_draw_svg_rate_limited(svg_tool_env):
     assert "频繁" in third.content
 
 
+async def test_blocked_content_does_not_consume_render_quota(svg_tool_env, monkeypatch):
+    """被内容检查拦截的画图尝试不占渲染配额（限流在内容检查之后）。"""
+    from quickquip.common import sensitive_filter as sf_module
+
+    class _BlockedScan:
+        blocked = True
+
+    class _LoadedFilter:
+        is_loaded = True
+
+        def scan(self, text):
+            return _BlockedScan()
+
+    monkeypatch.setattr(sf_module, "get_filter", lambda: _LoadedFilter())
+    svc = _FakeService()
+    for _ in range(3):
+        out = await svc._tool_draw_svg({"svg": _GOOD_SVG}, _make_context())
+        assert out.is_error
+        assert "不允许" in out.content
+
+    # 拦截未消耗配额：随后同用户两次干净请求仍可渲染，第三次才触发限流
+    monkeypatch.setattr(sf_module, "get_filter", lambda: type("F", (), {"is_loaded": False})())
+    assert not (await svc._tool_draw_svg({"svg": _GOOD_SVG}, _make_context())).is_error
+    assert not (await svc._tool_draw_svg({"svg": _GOOD_SVG}, _make_context())).is_error
+    third = await svc._tool_draw_svg({"svg": _GOOD_SVG}, _make_context())
+    assert third.is_error
+    assert "频繁" in third.content
+
+
 async def test_draw_svg_missing_argument(svg_tool_env):
     svc = _FakeService()
     out = await svc._tool_draw_svg({}, _make_context())

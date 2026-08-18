@@ -606,6 +606,19 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     auto_search_raw = expand_env_value(as_dict(triggers_raw.get("auto_search")))
     quick_judge_raw = expand_env_value(as_dict(triggers_raw.get("quick_judge")))
 
+    _enabled_tools = [
+        str(item).strip()
+        for item in tools_raw.get("enabled", [])
+        if str(item).strip()
+    ]
+    _enabled_mode = _parse_enabled_mode(tools_raw.get("enabled_mode"))
+    if _enabled_tools and "enabled_mode" not in tools_raw:
+        # v1.11 及更早 enabled 非空 = 精确白名单；未显式声明 mode 的升级部署提示语义变化
+        logger.warning(
+            "[tools] enabled 非空且未设置 enabled_mode，按 append 语义在默认白名单与 MCP 工具之上追加；"
+            '如需精确白名单请显式设置 enabled_mode = "replace"'
+        )
+
     config = LLMConfig(
         runtime=RuntimeConfig(
             enabled=as_bool(runtime_raw.get("enabled", False), default=False),
@@ -646,12 +659,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             max_tokens=max(8, int(quick_judge_raw.get("max_tokens", 64))),
         ),
         tools=ToolsConfig(
-            enabled=[
-                str(item).strip()
-                for item in tools_raw.get("enabled", [])
-                if str(item).strip()
-            ],
-            enabled_mode=_parse_enabled_mode(tools_raw.get("enabled_mode")),
+            enabled=_enabled_tools,
+            enabled_mode=_enabled_mode,
             discovery_mode=str(tools_raw.get("discovery_mode", "auto")).strip().lower() or "auto",
             discovery_min_tools=max(1, int(tools_raw.get("discovery_min_tools", 10))),
             discovery_search_limit=max(1, min(int(tools_raw.get("discovery_search_limit", 5)), 20)),

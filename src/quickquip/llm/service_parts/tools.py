@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
 class ToolMixin:
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
     # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
-    # self._model_label (also ScopeMixin). ScopeMixin must precede ToolMixin
-    # in the LLMService base list.
+    # self._model_label (also ScopeMixin); _register_builtin_tools additionally
+    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin). ScopeMixin
+    # and DrawSvgToolMixin must precede ToolMixin in the LLMService base list.
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
