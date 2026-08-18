@@ -179,6 +179,12 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 专题配置和排障建议见 [tool-discovery.md](tool-discovery.md)。
 
+**`enabled_mode` 升级说明（v1.11 → v1.12）**：v1.11 及更早版本中，`enabled` 非空表示精确白名单，未列入名单的默认工具与 MCP 工具都会被过滤。自 v1.12 起，`enabled` 非空时默认按 `append` 追加语义处理。各场景影响：
+
+- `enabled = []`（默认）：行为完全不变，仍暴露默认白名单加全部 MCP 工具。
+- 用 `enabled` 启用可选内置工具（如 `draw_svg`）：MCP 工具不再被名单误过滤，通常无需改动。
+- 需要严格工具白名单的部署：显式设置 `enabled_mode = "replace"`，恢复精确过滤语义。
+
 ### `[[providers]]` — Provider 定义（可多个）
 
 每个 provider 一个 `[[providers]]` 条目：
@@ -401,6 +407,8 @@ LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写�
 | `content_judge` | `false` | 第二层安全（默认关闭）：渲染前用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做内容安全裁决。判定失败（超时 / 非 JSON / 未配置）时放行渲染并记录 WARN（fail-open） |
 
 渲染始终在独立子进程内执行（结构性防段错误，不受 `harden` 开关影响）；渲染限流为全局 10 次/分钟、单用户 2 次/分钟，单次回复最多外发 3 张图片。
+
+平台能力差异：`harden` 的子进程资源硬限制（地址空间 2GB / CPU 5s）依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 无对应机制，保留 8 秒墙钟超时兜底（超时即终止子进程）。输入清洗、输出尺寸覆盖与渲染限流在所有平台一致。字体与部署注意事项见 [deployment.md](deployment.md#42-cjk-字体文件词云与-svg-画图)。
 
 ---
 

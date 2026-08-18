@@ -112,14 +112,20 @@ data/tieba/storage_state.json
 
 后续执行 `prod/deploy-v4.ps1` 时，该文件会自动单独上传到云端。
 
-### 4.2 词云字体文件
+### 4.2 CJK 字体文件（词云与 SVG 画图）
 
-词云功能需要一个 CJK 字体文件，不随代码仓库分发，需手动放置：
+词云与 SVG 画图（`draw_svg` 工具）共用同一个 CJK 字体文件，不随代码仓库分发，需手动放置：
 
 1. 从 [Google Fonts](https://fonts.google.com/noto/specimen/Noto+Sans+SC) 下载 `NotoSansSC-Regular.ttf`
 2. 放置到 `data/fonts/NotoSansSC-Regular.ttf`
 
-容器化部署时，`data/fonts/` 目录应通过 `data/` bind mount 挂载到容器内，字体文件上传一次后即可持久使用。若字体文件缺失，执行 `/wordcloud` 时 bot 会回复明确的错误提示。
+容器化部署时，`data/fonts/` 目录应通过 `data/` bind mount 挂载到容器内，字体文件上传一次后即可持久使用。若字体文件缺失，执行 `/wordcloud` 时 bot 会回复明确的错误提示；SVG 画图则回退系统字体，精简系统上中文可能渲染为方框，建议同样放置该文件。
+
+SVG 画图的部署边界：
+
+- 渲染引擎 resvg 以 pip 依赖随 `requirements.txt` 安装，Docker 镜像与 Windows 懒人包均随依赖安装自动获得，无需额外系统依赖或构建步骤。
+- 文本渲染优先使用上述 NotoSansSC 字体；emoji 等字符依赖系统字体回退。官方 Playwright 基础镜像自带常用字体（含彩色 emoji），Docker 部署一般无需处理；裸机源码部署在精简系统上可能缺少 emoji 字体，图中 emoji 会显示为方框；Windows 使用系统字体（微软雅黑、Segoe UI Emoji），一般无需处理。
+- 渲染子进程的资源硬限制（地址空间 / CPU 时间）依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 保留 8 秒墙钟超时兜底。
 
 ### 5. 首次登录 LLBot
 
