@@ -13,7 +13,8 @@ import logging
 from typing import Any
 
 from quickquip.llm.config import MCPConfig, MCPServerConfig
-from quickquip.llm.tools import LLMToolOutput, MAX_SAFE_ERROR_LENGTH, ToolExecutionContext
+from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH
+from quickquip.llm.tools import LLMToolOutput, ToolExecutionContext
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
 from quickquip.llm.mcp.modern_session import ModernHttpSession
 from quickquip.llm.mcp.transport import (

@@ -187,7 +187,14 @@ def _schedule_usage_record(
     task.add_done_callback(_USAGE_TASKS.discard)
 
 
-async def drain_usage_tasks() -> None:
-    """等待所有在途计量任务完成（进程关停排空；测试亦用于断言前排空）。"""
-    if _USAGE_TASKS:
+async def drain_usage_tasks(rounds: int = 3) -> None:
+    """等待在途计量任务完成（进程关停排空；测试亦用于断言前排空）。
+
+    有界多轮排空覆盖 drain 期间新入队的任务（关停瞬间仍在途的聊天请求
+    会在其后才调度计量）；关停钩子不等待在途事件处理器，超出轮数的任务
+    按 best-effort 放弃。
+    """
+    for _ in range(rounds):
+        if not _USAGE_TASKS:
+            break
         await asyncio.gather(*list(_USAGE_TASKS), return_exceptions=True)

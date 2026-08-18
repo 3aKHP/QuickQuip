@@ -22,13 +22,8 @@ from urllib.parse import urlsplit
 
 from PIL import Image, UnidentifiedImageError
 
-from quickquip.llm.tools import (
-    LLMInlineImage,
-    LLMToolOutput,
-    MAX_SAFE_ERROR_LENGTH,
-    mask_urls,
-    sanitize_error_message,
-)
+from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, mask_urls, sanitize_error_message
+from quickquip.llm.tools import LLMInlineImage, LLMToolOutput
 
 
 class MCPError(RuntimeError):

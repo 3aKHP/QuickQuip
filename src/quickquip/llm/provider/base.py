@@ -20,13 +20,12 @@ from typing import Any
 import httpx
 
 from quickquip.llm.config import ProviderConfig
+from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, sanitize_error_message
 from quickquip.llm.tools import (
     LLMConversationMessage,
     LLMInlineImage,
     LLMToolCall,
     LLMToolSpec,
-    MAX_SAFE_ERROR_LENGTH,
-    sanitize_error_message,
 )
 from quickquip.llm.provider.trace import (
     begin_http_trace,

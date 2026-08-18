@@ -47,7 +47,7 @@ async def test_shutdown_closes_stores_even_if_save_all_fails(monkeypatch):
         calls.append("save")
         raise RuntimeError("boom")
 
-    def fake_close_persistent_stores():
+    async def fake_close_persistent_stores():
         calls.append("close")
 
     fake_scheduler_module = types.ModuleType("nonebot_plugin_apscheduler")

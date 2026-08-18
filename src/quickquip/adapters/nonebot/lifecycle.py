@@ -18,7 +18,6 @@ from quickquip.adapters.nonebot.awakening_plugin import boredom_enabled_groups
 from quickquip.adapters.nonebot.web_admin_actions import process_web_admin_actions
 from quickquip.chat.awakening import reload_config as reload_awakening_config
 from quickquip.common.paths import CONFIG_AWAKENING_TOML
-from quickquip.llm.usage import drain_usage_tasks
 from quickquip.tieba.service import tieba_service
 
 logger = logging.getLogger(__name__)
@@ -86,9 +85,7 @@ def register_lifecycle(driver) -> None:
             await svc.shutdown()
             save_all()
         finally:
-            # 关停前排空在途 fire-and-forget 计量任务，避免尾部用量行随循环关闭丢失
-            await drain_usage_tasks()
-            close_persistent_stores()
+            await close_persistent_stores()
 
     try:
         from nonebot_plugin_apscheduler import scheduler
