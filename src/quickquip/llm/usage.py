@@ -1,8 +1,9 @@
 """LLM 用量捕获：``_USAGE_SCOPE`` ContextVar 归因 + ``_record_usage`` 落库。
 
 照搬 ``trace.py`` 的 ``collect_trace_calls`` contextmanager 范式（非装饰器，因
-归因字段需调用时动态传）。``_record_usage`` 在 provider ``complete()`` 内调用，
-计量失败**绝不影响主聊天路径**——全程 try/except 只 logger.exception。
+归因字段需调用时动态传）。``_record_usage`` 在 provider ``complete()`` 内经
+``_schedule_usage_record`` fire-and-forget 调度，计量失败**绝不影响主聊天
+路径**——全程 try/except 只 logger.exception。
 """
 from __future__ import annotations
 
@@ -155,9 +156,38 @@ async def _record_usage(
             "state": state,
             "error_message": error_msg or None,
         }
-        from quickquip.app.message_pipeline import usage_store
+        from quickquip.llm.usage_store import usage_store
         await asyncio.to_thread(usage_store.record, row)
     except (OSError, sqlite3.Error):
         logger.exception("LLM usage record failed")
     except Exception:
         logger.exception("LLM usage record unexpected error")
+
+
+_USAGE_TASKS: set[asyncio.Task] = set()
+
+
+def _schedule_usage_record(
+    client,
+    request,
+    response,
+    started: float,
+    stream_used: bool,
+    state: str,
+    error_msg: str = "",
+) -> None:
+    """Fire-and-forget 调度计量任务，绝不把写库等待挂到聊天请求上。
+
+    事件循环对 task 只持弱引用，必须自持强引用防止任务被 GC 中途回收。
+    """
+    task = asyncio.create_task(
+        _record_usage(client, request, response, started, stream_used, state, error_msg)
+    )
+    _USAGE_TASKS.add(task)
+    task.add_done_callback(_USAGE_TASKS.discard)
+
+
+async def drain_usage_tasks() -> None:
+    """等待所有在途计量任务完成（测试排空用；任务自身已吞异常）。"""
+    if _USAGE_TASKS:
+        await asyncio.gather(*list(_USAGE_TASKS), return_exceptions=True)

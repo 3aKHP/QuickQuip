@@ -13,6 +13,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from quickquip.common.paths import LLM_USAGE_DB_PATH
+
 logger = logging.getLogger(__name__)
 
 _USAGE_RETENTION_DAYS = 90
@@ -369,3 +371,6 @@ class LLMUsageStore:
 
     def close(self) -> None:
         """每次操作开/关连接，无持久连接需关。"""
+
+
+usage_store = LLMUsageStore(LLM_USAGE_DB_PATH)
