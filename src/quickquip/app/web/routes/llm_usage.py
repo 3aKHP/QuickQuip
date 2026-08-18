@@ -9,7 +9,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, Query
 
-from quickquip.llm.usage_store import window_start
+from quickquip.llm.usage_store import usage_store, window_start
 
 router = APIRouter()
 
@@ -41,7 +41,6 @@ async def get_summary(
     group: str | None = Query(None, alias="group"),
     state: str | None = None,
 ):
-    from quickquip.llm.usage_store import usage_store
 
     _days(range_)
     return await asyncio.to_thread(usage_store.summary, _cutoff(range_), **_filters(provider, model, feature, group, state))
@@ -57,7 +56,6 @@ async def get_timeline(
     group: str | None = Query(None, alias="group"),
     state: str | None = None,
 ):
-    from quickquip.llm.usage_store import usage_store
 
     days = _days(range_)
     if metric not in {"cost", "tokens", "requests", "errors", "duration"}:
@@ -82,7 +80,6 @@ async def get_events(
     group: str | None = Query(None, alias="group"),
     state: str | None = None,
 ):
-    from quickquip.llm.usage_store import usage_store
 
     _days(range_)
     return await asyncio.to_thread(
@@ -96,7 +93,6 @@ async def get_events(
 
 @router.get("/llm-usage/events/{event_id}")
 async def get_event(event_id: int):
-    from quickquip.llm.usage_store import usage_store
 
     event = await asyncio.to_thread(usage_store.event, event_id)
     if event is None:

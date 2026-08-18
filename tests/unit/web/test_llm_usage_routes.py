@@ -111,7 +111,9 @@ def test_timeline_1d_returns_24_hourly_buckets(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     timeline = store.timeline(_cutoff(1), range_days=1, metric="requests")
     assert len(timeline) == 24
-    assert all(point["date"].endswith("T00:00:00Z") or ":00:00Z" in point["date"] for point in timeline)
+    start = window_start(1)
+    assert timeline[0]["date"] == start.strftime("%Y-%m-%dT%H:00:00Z")
+    assert timeline[-1]["date"] == (start + timedelta(hours=23)).strftime("%Y-%m-%dT%H:00:00Z")
 
 
 def test_summary_and_timeline_share_aligned_window(tmp_path):
