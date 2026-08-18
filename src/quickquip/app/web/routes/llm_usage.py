@@ -6,9 +6,10 @@ auth（由 app.py 的 protected_dependencies 保证）+ asyncio.to_thread 卸载
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query
+
+from quickquip.llm.usage_store import window_start
 
 router = APIRouter()
 
@@ -16,8 +17,8 @@ _RANGES = {"1d": 1, "7d": 7, "30d": 30, "90d": 90}
 
 
 def _cutoff(range_key: str) -> str:
-    days = _RANGES[range_key]
-    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    """与 timeline 网格同起点的统一下界，保证汇总卡片与趋势合计口径一致。"""
+    return window_start(_RANGES[range_key]).isoformat()
 
 
 def _days(range_key: str) -> int:

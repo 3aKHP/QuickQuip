@@ -70,43 +70,29 @@ def normalize_usage(
 
 
 def estimate_cost(u: CanonicalUsage, rates: PricingRates | None) -> tuple[float, bool]:
-    """中立计算；无 rates → (0.0, False)（未定价）。
+    """中立计算总额；无 rates → (0.0, False)（未定价）。
 
-    actual_input = prompt - cache_read（inclusive 减法，避免缓存按全价计的 2-4× 高估，
-    即 litellm#19681 类 bug）。cache_read/write 无单独价时回退 input 价。
-    thinking_tokens v1 不额外计（Claude/OpenAI 已含在 output；Gemini thoughts 量小
-    且与 candidatesTokenCount 的包含关系不确定，保守不计避免双算）。
+    总额恒等于 ``estimate_cost_components`` 四桶之和；计费口径在该函数单处定义。
     """
-    if rates is None:
-        return 0.0, False
-    # actual_input = prompt - cache_read - cache_write（三者都已含在 inclusive prompt 中，
-    # 都减掉才剩"未缓存的新鲜输入"，否则 Claude 的 cache_write 会在 actual_input 和
-    # cache_write 两处重复计费）
-    actual_input = u.fresh_input or 0
-    cache_read_rate = (
-        rates.cache_read_per_mtok
-        if rates.cache_read_per_mtok is not None
-        else rates.input_per_mtok
-    )
-    cache_write_rate = (
-        rates.cache_write_per_mtok
-        if rates.cache_write_per_mtok is not None
-        else rates.input_per_mtok
-    )
-    cost = (
-        _mtok(actual_input, rates.input_per_mtok)
-        + _mtok(u.cache_read, cache_read_rate)
-        + _mtok(u.cache_write, cache_write_rate)
-        + _mtok(u.completion, rates.output_per_mtok)
-    )
-    return cost, True
+    components, priced = estimate_cost_components(u, rates)
+    return sum(components.values()), priced
 
 
 def estimate_cost_components(
     u: CanonicalUsage,
     rates: PricingRates | None,
 ) -> tuple[dict[str, float], bool]:
-    """Return the four billable components plus total pricing state."""
+    """Return the four billable components plus total pricing state.
+
+    计费口径（单一事实来源，``estimate_cost`` 总额即本四桶之和）：
+    actual_input = prompt - cache_read - cache_write（inclusive prompt 中三者
+    都已包含，都减掉才剩"未缓存的新鲜输入"，否则 cache_write 会在
+    actual_input 与 cache_write 两处重复计费；inclusive 减法也避免缓存按
+    全价计的 2-4× 高估，即 litellm#19681 类 bug）。cache_read/write 无单独
+    价时回退 input 价。thinking_tokens v1 不额外计（Claude/OpenAI 已含在
+    output；Gemini thoughts 量小且与 candidatesTokenCount 的包含关系不
+    确定，保守不计避免双算）。
+    """
     if rates is None:
         return {
             "input_cost_usd": 0.0,
