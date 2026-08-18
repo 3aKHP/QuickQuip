@@ -108,3 +108,25 @@ def test_cost_components_expose_canonical_buckets():
     assert usage.input_token_semantics == "inclusive"
     assert components["input_cost_usd"] == 100 * 2 / 1e6
     assert components["cache_read_cost_usd"] == 200 * 0.2 / 1e6
+
+
+def test_estimate_cost_equals_components_sum():
+    """计费口径单一事实来源（Issue #111 #3）：总额恒等于四桶之和、priced 一致。"""
+    usages = [
+        CanonicalUsage(prompt=None, completion=None, cache_read=None, cache_write=None),
+        CanonicalUsage(prompt=300, completion=40, cache_read=250, cache_write=None),
+        CanonicalUsage(prompt=380, completion=50, cache_read=200, cache_write=80),
+    ]
+    rates_set = [
+        None,
+        PricingRates(input_per_mtok=3.0, output_per_mtok=15.0),
+        PricingRates(input_per_mtok=3.0, output_per_mtok=15.0, cache_read_per_mtok=0.3),
+        PricingRates(input_per_mtok=3.0, output_per_mtok=15.0,
+                     cache_read_per_mtok=0.3, cache_write_per_mtok=3.75),
+    ]
+    for u in usages:
+        for rates in rates_set:
+            total, priced = estimate_cost(u, rates)
+            components, components_priced = estimate_cost_components(u, rates)
+            assert priced is components_priced
+            assert abs(total - sum(components.values())) < 1e-15
