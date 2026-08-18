@@ -6,6 +6,27 @@
 
 （暂无）
 
+## [1.12.0] - 2026-08-18
+
+### ✨ 新增 (Added)
+
+- **SVG 画图（LLM 工具 `draw_svg`）**：启用 LLM 的群里，AI 可以在对话中自主画 SVG 矢量图（梗图、图表、示意图），本地 resvg 渲染成 PNG 直接发到群里，无需任何指令。
+  - 启用方式（管理员）：`config/generation.toml` 新增 `[svg]` 段设 `enabled = true`，并在 `config/llm.toml` 的 `[tools] enabled` 中加入 `"draw_svg"`。
+  - 渲染在本地完成，不额外消耗图片生成 API；中文字体沿用词云的思源黑体，无需新增部署要求。
+  - 两层可选安全防护：默认启用的渲染硬防线（输入约束、清洗、输出尺寸覆盖、子进程资源限制），与默认关闭的 LLM 内容安全裁决（`content_judge`，复用 quick_judge 廉价模型）。
+  - 渲染限流：全局每分钟 10 次、单用户每分钟 2 次；单次回复最多发送 3 张图片。
+  - 渲染子进程资源硬限制依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 保留 8 秒墙钟超时兜底。平台与字体说明见 `docs/admin/deployment.md`。
+
+### 🔧 变更 (Changed)
+
+- **`[tools] enabled` 支持 append/replace 两种作用模式**：`enabled` 非空时不再整体替换默认白名单（旧语义会把未列入的 MCP 工具一并过滤掉），默认按 `append` 在默认白名单与 MCP 工具之上追加；需要精确白名单的部署显式设置 `enabled_mode = "replace"`；`enabled = []` 的部署行为完全不变。升级说明见 `docs/admin/configuration.md`。
+
+### 🐛 修复 (Fixed)
+
+- **用量计量不再阻塞聊天回复**：高并发多群场景下，聊天回复不再等待 LLM 用量计量写库完成，写锁竞争高峰期的回复延迟尖峰消除；进程关停前排空在途计量任务，重启/部署时尾部用量记录不再丢失。
+- **成本统计窗口口径对齐**：Web Admin 成本页趋势图与总成本卡片共用同一时间窗下界，趋势合计不再与汇总卡片不一致；计费公式收敛为单一实现。
+- **用量错误信息遮蔽请求 URL**：错误信息落库前遮蔽完整请求 URL（可能携带 query 凭据），不再进入数据库与 Web Admin 展示。
+
 ## [1.11.1] - 2026-08-12
 
 ### 🐛 修复 (Fixed)
@@ -693,7 +714,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.11.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/3aKHP/QuickQuip/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/3aKHP/QuickQuip/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/3aKHP/QuickQuip/compare/v1.10.2...v1.11.0
 [1.10.2]: https://github.com/3aKHP/QuickQuip/compare/v1.10.1...v1.10.2
