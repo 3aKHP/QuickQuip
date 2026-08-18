@@ -188,6 +188,6 @@ def _schedule_usage_record(
 
 
 async def drain_usage_tasks() -> None:
-    """等待所有在途计量任务完成（测试排空用；任务自身已吞异常）。"""
+    """等待所有在途计量任务完成（进程关停排空；测试亦用于断言前排空）。"""
     if _USAGE_TASKS:
         await asyncio.gather(*list(_USAGE_TASKS), return_exceptions=True)

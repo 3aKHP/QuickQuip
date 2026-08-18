@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from quickquip.llm.config import MCPConfig, MCPServerConfig
-from quickquip.llm.tools import LLMToolOutput, ToolExecutionContext
+from quickquip.llm.tools import LLMToolOutput, MAX_SAFE_ERROR_LENGTH, ToolExecutionContext
 from quickquip.llm.mcp.jsonrpc import JsonRpcSession
 from quickquip.llm.mcp.modern_session import ModernHttpSession
 from quickquip.llm.mcp.transport import (
@@ -35,7 +35,6 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_MODERN_NEGOTIATION,
     _build_tool_alias,
     _detect_alias_conflicts,
-    _MAX_SAFE_ERROR_LENGTH,
     _sanitize_error_message,
     _sanitize_server_text,
     _sanitize_url,
@@ -484,7 +483,7 @@ class MCPClientManager:
             # bodies) gets the same treatment as chat-visible output.
             raise MCPError(
                 f"MCP 工具 {alias} 调用失败："
-                f"{_sanitize_server_text(str(exc), limit=_MAX_SAFE_ERROR_LENGTH)}"
+                f"{_sanitize_server_text(str(exc), limit=MAX_SAFE_ERROR_LENGTH)}"
             ) from exc
         return deliver_mcp_tool_result(
             result,

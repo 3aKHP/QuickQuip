@@ -1,8 +1,26 @@
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+MAX_SAFE_ERROR_LENGTH = 200
+_URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
+
+
+def mask_urls(text: str) -> str:
+    """Replace http(s) URLs with ``[url]``.
+
+    httpx ``RequestError`` string representations include the full request
+    URL, which may carry credentials in the query string.
+    """
+    return _URL_PATTERN.sub("[url]", text)
+
+
+def sanitize_error_message(message: str, *, limit: int = MAX_SAFE_ERROR_LENGTH) -> str:
+    """Mask URLs in an error message and truncate it for safe persistence/display."""
+    return mask_urls(message)[:limit]
 
 
 @dataclass(slots=True)

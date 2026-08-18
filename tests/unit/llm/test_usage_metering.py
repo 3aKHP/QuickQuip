@@ -47,10 +47,12 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
     spy 阻塞在 gate 上永不自行结束；若 complete() 仍 await 计量，wait_for 会超时。
     """
     gate = asyncio.Event()
+    entered = asyncio.Event()
     calls = []
 
     async def spy(client, request, response, started, stream_used, state, error_msg=""):
         calls.append(state)
+        entered.set()
         await gate.wait()
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -58,9 +60,13 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
         _config(),
         {"content": [], "usage": {"input_tokens": 10, "output_tokens": 5}},
     )
-    response = await asyncio.wait_for(client.complete(_req()), timeout=1.0)
-    assert response is not None  # gate 未放行，回复已经返回
-    gate.set()
+    try:
+        response = await asyncio.wait_for(client.complete(_req()), timeout=1.0)
+        assert response is not None  # gate 未放行，回复已经返回
+        await asyncio.wait_for(entered.wait(), timeout=1.0)  # 计量任务确已启动并阻塞
+        assert calls == ["ok"]
+    finally:
+        gate.set()  # 失败路径也必须放行，避免阻塞任务泄漏给后续测试的 drain
     await drain_usage_tasks()
     assert calls == ["ok"]
 
