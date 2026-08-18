@@ -277,15 +277,18 @@ def _sanitize_url(url: str) -> str:
     return f"{parts.scheme}://{host}{parts.path}"
 
 
-def _sanitize_error_message(exc: BaseException, *, limit: int = _MAX_SAFE_ERROR_LENGTH) -> str:
-    """Remove URLs from exception messages for safe status/logging use.
+def sanitize_error_message(message: str, *, limit: int = _MAX_SAFE_ERROR_LENGTH) -> str:
+    """Remove URLs from an error message string for safe persistence/display.
 
     httpx ``RequestError`` string representations include the full request
     URL, which may carry credentials in the query string.
     """
-    msg = str(exc)
-    msg = _URL_PATTERN.sub("[url]", msg)
-    return msg[:limit]
+    return _URL_PATTERN.sub("[url]", message)[:limit]
+
+
+def _sanitize_error_message(exc: BaseException, *, limit: int = _MAX_SAFE_ERROR_LENGTH) -> str:
+    """``sanitize_error_message`` 的异常对象便捷入口。"""
+    return sanitize_error_message(str(exc), limit=limit)
 
 
 def _schema_from_tool(raw_tool: dict[str, Any]) -> dict[str, Any]:
