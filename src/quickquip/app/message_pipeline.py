@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.service import get_llm_service
+from quickquip.llm.usage import drain_usage_tasks
 from quickquip.llm.usage_store import usage_store
 from quickquip.common.event_utils import (  # noqa: F401 — re-exported for adapter layer
     get_sender_name as get_sender_name,
@@ -185,7 +186,9 @@ def save_all() -> None:
     rule_switch.save(RULE_SWITCH_PATH)
 
 
-def close_persistent_stores() -> None:
+async def close_persistent_stores() -> None:
+    """关停收尾：先排空在途 fire-and-forget 计量任务，再关闭各持久化 store。"""
+    await drain_usage_tasks()
     offline_message_store.close()
     group_quote_store.close()
     usage_store.close()

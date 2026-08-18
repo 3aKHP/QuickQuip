@@ -45,7 +45,7 @@ def test_game_scores_uses_domain_singleton():
     assert message_pipeline.game_scores is domain_game_scores
 
 
-def test_close_persistent_stores_closes_sqlite_stores(monkeypatch):
+async def test_close_persistent_stores_closes_sqlite_stores(monkeypatch):
     calls: list[str] = []
 
     class FakeStore:
@@ -58,7 +58,7 @@ def test_close_persistent_stores_closes_sqlite_stores(monkeypatch):
     monkeypatch.setattr(message_pipeline, "offline_message_store", FakeStore("offline"))
     monkeypatch.setattr(message_pipeline, "group_quote_store", FakeStore("quotes"))
 
-    message_pipeline.close_persistent_stores()
+    await message_pipeline.close_persistent_stores()
 
     assert calls == ["offline", "quotes"]
 

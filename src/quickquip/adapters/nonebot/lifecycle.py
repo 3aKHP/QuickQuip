@@ -85,7 +85,7 @@ def register_lifecycle(driver) -> None:
             await svc.shutdown()
             save_all()
         finally:
-            close_persistent_stores()
+            await close_persistent_stores()
 
     try:
         from nonebot_plugin_apscheduler import scheduler

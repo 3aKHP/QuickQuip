@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from quickquip.llm.config import ProviderConfig
+from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, sanitize_error_message
 from quickquip.llm.tools import (
     LLMConversationMessage,
     LLMInlineImage,
@@ -30,7 +31,6 @@ from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
 )
-from quickquip.llm.mcp.types import sanitize_error_message
 from quickquip.llm.usage import _schedule_usage_record
 
 logger = logging.getLogger(__name__)
@@ -360,7 +360,7 @@ class BaseProviderClient:
         except Exception as exc:
             _schedule_usage_record(
                 self, request, None, started, stream_used, "error",
-                f"{type(exc).__name__}: {sanitize_error_message(str(exc))}"[:200],
+                f"{type(exc).__name__}: {sanitize_error_message(str(exc))}"[:MAX_SAFE_ERROR_LENGTH],
             )
             raise
         _schedule_usage_record(self, request, response, started, stream_used, "ok")
