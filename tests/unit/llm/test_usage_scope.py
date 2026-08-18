@@ -59,7 +59,7 @@ async def test_record_usage_reads_usage_scope(monkeypatch, tmp_path):
     from quickquip.llm.usage_store import LLMUsageStore
 
     fake_store = LLMUsageStore(tmp_path / "u.db")
-    monkeypatch.setattr("quickquip.app.message_pipeline.usage_store", fake_store)
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
 
     class FakeClient:
         config = ProviderConfig(

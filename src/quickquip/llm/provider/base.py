@@ -30,7 +30,7 @@ from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
 )
-from quickquip.llm.usage import _record_usage
+from quickquip.llm.usage import _schedule_usage_record
 
 logger = logging.getLogger(__name__)
 
@@ -354,17 +354,15 @@ class BaseProviderClient:
             else:
                 response = await self._complete_non_stream(request)
         except asyncio.CancelledError:
-            await asyncio.shield(
-                _record_usage(self, request, None, started, stream_used, "cancelled")
-            )
+            _schedule_usage_record(self, request, None, started, stream_used, "cancelled")
             raise
         except Exception as exc:
-            await _record_usage(
+            _schedule_usage_record(
                 self, request, None, started, stream_used, "error",
                 f"{type(exc).__name__}: {exc}"[:200],
             )
             raise
-        await _record_usage(self, request, response, started, stream_used, "ok")
+        _schedule_usage_record(self, request, response, started, stream_used, "ok")
         return response
 
     async def _download_image(self, image_url: str) -> LLMImageInput:
