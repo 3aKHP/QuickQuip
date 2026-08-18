@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMRequest
@@ -105,6 +106,30 @@ async def test_complete_cancelled_propagates(monkeypatch):
         await task
     await drain_usage_tasks()
     assert calls == [("cancelled", None)]
+
+
+async def test_complete_error_message_masks_url(monkeypatch, tmp_path):
+    """Issue #111 #4：error_message 落库前遮蔽 URL（httpx 错误串含完整请求 URL
+    及潜在 query 凭据）；写入 conftest 指向的临时 usage 库。"""
+    client = FakeClaudeClient(_config(), {"content": []})
+
+    async def _raise(*a, **kw):
+        raise httpx.ConnectError(
+            "connection refused for https://api.example.com/v1/messages?key=SECRET"
+        )
+
+    monkeypatch.setattr(client, "_post_json", _raise)
+    with pytest.raises(httpx.ConnectError):
+        await client.complete(_req())
+    await drain_usage_tasks()
+
+    from quickquip.llm import usage_store as usage_store_module
+    with usage_store_module.usage_store.connect() as conn:
+        row = conn.execute("SELECT error_message FROM llm_usage_events").fetchone()
+    assert row["error_message"].startswith("ConnectError:")
+    assert "[url]" in row["error_message"]
+    assert "SECRET" not in row["error_message"]
+    assert "api.example.com" not in row["error_message"]
 
 
 async def test_record_usage_writes_db_row(monkeypatch, tmp_path):

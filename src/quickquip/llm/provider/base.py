@@ -30,6 +30,7 @@ from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
 )
+from quickquip.llm.mcp.types import sanitize_error_message
 from quickquip.llm.usage import _schedule_usage_record
 
 logger = logging.getLogger(__name__)
@@ -359,7 +360,7 @@ class BaseProviderClient:
         except Exception as exc:
             _schedule_usage_record(
                 self, request, None, started, stream_used, "error",
-                f"{type(exc).__name__}: {exc}"[:200],
+                f"{type(exc).__name__}: {sanitize_error_message(str(exc))}"[:200],
             )
             raise
         _schedule_usage_record(self, request, response, started, stream_used, "ok")
