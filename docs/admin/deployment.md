@@ -125,7 +125,7 @@ SVG 画图的部署边界：
 
 - 渲染引擎 resvg 以 pip 依赖随 `requirements.txt` 安装，Docker 镜像与 Windows 懒人包均随依赖安装自动获得，无需额外系统依赖或构建步骤。
 - 文本渲染优先使用上述 NotoSansSC 字体；emoji 等字符依赖系统字体回退。官方 Playwright 基础镜像自带常用字体（含彩色 emoji），Docker 部署一般无需处理；裸机源码部署在精简系统上可能缺少 emoji 字体，图中 emoji 会显示为方框；Windows 使用系统字体（微软雅黑、Segoe UI Emoji），一般无需处理。
-- 渲染子进程的资源硬限制（地址空间 / CPU 时间）依赖 POSIX `rlimit`，仅在 Linux 上生效；Windows 保留 8 秒墙钟超时兜底。
+- 渲染子进程的资源硬限制（地址空间 / CPU 时间）依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 保留 8 秒墙钟超时兜底。
 
 ### 5. 首次登录 LLBot
 
