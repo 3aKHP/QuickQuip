@@ -6,10 +6,14 @@ from pathlib import Path
 
 try:
     import nonebot
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
     from nonebot_plugin_apscheduler import scheduler
 except (ModuleNotFoundError, ValueError):
     nonebot = None
     scheduler = None
+    Message = MessageSegment = None
+
+from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
@@ -111,7 +115,14 @@ def _register_scheduler_jobs() -> None:
             except Exception:
                 return
             svc = get_llm_service()
-            await run_boredom_check(bot, boredom_enabled_groups, rule_switch, svc, rate_limiter, stats_tracker)
+
+            def _build_reply(result: dict):
+                return build_llm_reply_message(result, Message, MessageSegment)
+
+            await run_boredom_check(
+                bot, boredom_enabled_groups, rule_switch, svc, rate_limiter, stats_tracker,
+                build_reply_message=_build_reply,
+            )
             try:
                 record_job_result(job_id, True)
             except Exception:

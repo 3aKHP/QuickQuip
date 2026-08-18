@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import os
 import sqlite3
 import threading
@@ -79,10 +80,12 @@ def test_trace_store_cursor_pagination_and_concurrent_calls(tmp_path):
 
 
 def test_trace_store_migrates_first_release_schema(tmp_path):
+    # started_at 必须落在 14 天保留期内（相对 now 计算），否则行会在访问前被清理
+    started = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     path = tmp_path / "trace.db"
     with sqlite3.connect(path) as conn:
         conn.executescript(
-            """
+            f"""
             CREATE TABLE llm_http_traces (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 call_id TEXT NOT NULL UNIQUE,
@@ -117,8 +120,8 @@ def test_trace_store_migrates_first_release_schema(tmp_path):
                 method, url, request_headers, request_text, request_bytes,
                 response_bytes, state
             ) VALUES (
-                'legacy-call', '2026-08-03T00:00:00+00:00', 'p', 'openai',
-                'm', 1, 'POST', 'https://llm.example', '', '{}', 2, 0, 'pending'
+                'legacy-call', '{started}', 'p', 'openai',
+                'm', 1, 'POST', 'https://llm.example', '', '{{}}', 2, 0, 'pending'
             );
             """
         )

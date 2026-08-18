@@ -4,7 +4,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.service import get_llm_service
-from quickquip.llm.usage_store import LLMUsageStore
+from quickquip.llm.usage import drain_usage_tasks
+from quickquip.llm.usage_store import usage_store
 from quickquip.common.event_utils import (  # noqa: F401 — re-exported for adapter layer
     get_sender_name as get_sender_name,
     is_admin as is_admin,
@@ -62,7 +63,6 @@ from quickquip.common.message_deduper import RecentMessageDeduper
 from quickquip.common.paths import (
     CONFIG_GAMES_TOML,
     DATA_DIR,
-    LLM_USAGE_DB_PATH,
     OFFLINE_MESSAGES_DB_PATH,
     PERIOD_REPORTS_DB_PATH,
     QUOTES_DB_PATH,
@@ -137,7 +137,6 @@ game_economy = GameEconomyStore(config=games_config.economy)
 game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))
 game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))
 niuniu_store = NiuNiuStore(config=games_config.niuniu)
-usage_store = _LazyStoreProxy(lambda: LLMUsageStore(LLM_USAGE_DB_PATH))
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
@@ -187,7 +186,9 @@ def save_all() -> None:
     rule_switch.save(RULE_SWITCH_PATH)
 
 
-def close_persistent_stores() -> None:
+async def close_persistent_stores() -> None:
+    """关停收尾：先排空在途 fire-and-forget 计量任务，再关闭各持久化 store。"""
+    await drain_usage_tasks()
     offline_message_store.close()
     group_quote_store.close()
     usage_store.close()

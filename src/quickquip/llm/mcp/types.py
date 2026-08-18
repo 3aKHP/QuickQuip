@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image, UnidentifiedImageError
 
+from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, mask_urls, sanitize_error_message
 from quickquip.llm.tools import LLMInlineImage, LLMToolOutput
 
 
@@ -249,10 +250,6 @@ def _detect_alias_conflicts(bindings: list[MCPToolBinding]) -> set[str]:
     return {alias for alias, count in counts.items() if count > 1}
 
 
-_MAX_SAFE_ERROR_LENGTH = 200
-_URL_PATTERN = re.compile(r"https?://[^\s'\"<>]+")
-
-
 def _sanitize_url(url: str) -> str:
     """Strip query, fragment, and userinfo from a URL to prevent credential leakage.
 
@@ -277,15 +274,9 @@ def _sanitize_url(url: str) -> str:
     return f"{parts.scheme}://{host}{parts.path}"
 
 
-def _sanitize_error_message(exc: BaseException, *, limit: int = _MAX_SAFE_ERROR_LENGTH) -> str:
-    """Remove URLs from exception messages for safe status/logging use.
-
-    httpx ``RequestError`` string representations include the full request
-    URL, which may carry credentials in the query string.
-    """
-    msg = str(exc)
-    msg = _URL_PATTERN.sub("[url]", msg)
-    return msg[:limit]
+def _sanitize_error_message(exc: BaseException, *, limit: int = MAX_SAFE_ERROR_LENGTH) -> str:
+    """Convenience wrapper for sanitize_error_message accepting an exception object."""
+    return sanitize_error_message(str(exc), limit=limit)
 
 
 def _schema_from_tool(raw_tool: dict[str, Any]) -> dict[str, Any]:
@@ -318,7 +309,7 @@ def _sanitize_server_text(value: Any, *, limit: int = 64) -> str:
     """
     if not isinstance(value, str):
         return ""
-    cleaned = _URL_PATTERN.sub("[url]", value)
+    cleaned = mask_urls(value)
     cleaned = _CQ_CODE_PATTERN.sub("[cq]", cleaned)
     cleaned = "".join(ch for ch in cleaned if ch.isprintable() or ch in " \t")
     cleaned = " ".join(cleaned.split())

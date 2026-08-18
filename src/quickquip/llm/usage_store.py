@@ -13,6 +13,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from quickquip.common.paths import LLM_USAGE_DB_PATH
+
 logger = logging.getLogger(__name__)
 
 _USAGE_RETENTION_DAYS = 90
@@ -24,6 +26,20 @@ _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def window_start(range_days: int) -> datetime:
+    """趋势网格起点，同时作为同 range 汇总/明细查询的统一下界。
+
+    1d：当前整点 - 23h（24 个小时桶）；多天：UTC 今天 - (N-1) 的零点
+    （N 个日历日桶）。summary/timeline/events 共用该起点，保证趋势合计
+    与总成本卡片口径一致。
+    """
+    now = datetime.now(timezone.utc)
+    if range_days <= 1:
+        return now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+    start_date = now.date() - timedelta(days=range_days - 1)
+    return datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
 
 
 class LLMUsageStore:
@@ -223,15 +239,16 @@ class LLMUsageStore:
         where, params = self._where(cutoff, filters)
         fill_buckets = range_days is not None
         effective_days = range_days or 7
+        aligned_start = window_start(effective_days)
         if effective_days <= 1:
             bucket_expr = "strftime('%Y-%m-%dT%H:00:00Z', ts)"
             step = timedelta(hours=1)
-            start = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+            start = aligned_start
             fmt = "%Y-%m-%dT%H:00:00Z"
         else:
             bucket_expr = "strftime('%Y-%m-%d', ts)"
             step = timedelta(days=1)
-            start = datetime.now(timezone.utc).date() - timedelta(days=effective_days - 1)
+            start = aligned_start.date()
             fmt = "%Y-%m-%d"
         with self.connect() as conn:
             rows = conn.execute(
@@ -369,3 +386,6 @@ class LLMUsageStore:
 
     def close(self) -> None:
         """每次操作开/关连接，无持久连接需关。"""
+
+
+usage_store = LLMUsageStore(LLM_USAGE_DB_PATH)

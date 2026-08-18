@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.llm.inputs import extract_private_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
@@ -25,6 +26,8 @@ def register_private_message_matcher(on_message):
 
     @matcher.handle()
     async def _(bot, event):
+        from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
         if getattr(event, "group_id", None) is not None or getattr(event, "message_type", "") == "group":
             return
         if _is_self_message(event):
@@ -117,7 +120,7 @@ def register_private_message_matcher(on_message):
             model=str(result.get("model", "")),
             source="private_message.llm",
         ):
-            resp = await matcher.send(result["reply"])
+            resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
         sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
         if sent_msg_id:
             svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)

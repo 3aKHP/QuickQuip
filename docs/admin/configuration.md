@@ -167,7 +167,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
-| `enabled` | 工具白名单。为空 `[]` 时暴露所有内建及 MCP 工具；填写后按工具名精确过滤 | `[]` |
+| `enabled` | 工具名单。为空 `[]` 时暴露默认白名单及全部 MCP 工具；非空时与 `enabled_mode` 配合使用 | `[]` |
+| `enabled_mode` | `enabled` 非空时的作用方式：`append` 在默认白名单 + MCP 工具之上追加（启用 `draw_svg` 等可选内置工具用这个）；`replace` 精确过滤，只暴露所列工具 | `append` |
 | `discovery_mode` | 工具发现模式：`off` 全量暴露；`on` 仅暴露常驻工具并通过 `tool_search` 按需加载；`auto` 在可延迟工具数超过阈值后启用 | `auto` |
 | `discovery_min_tools` | `auto` 模式下触发工具发现的可延迟工具数量阈值 | `10` |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 | `5` |
@@ -177,6 +178,12 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 `tool_search` 和 `tool_list` 是本地元工具，不依赖 Claude 原生 tool search。接入大量 MCP 工具时，模型会先用 `tool_search` 搜索相关能力；搜索不到时可用 `tool_list` 列出工具组、工具名或按精确工具名加载工具，下一轮再调用被加载的真实工具。
 
 专题配置和排障建议见 [tool-discovery.md](tool-discovery.md)。
+
+**`enabled_mode` 升级说明（v1.11 → v1.12）**：v1.11 及更早版本中，`enabled` 非空表示精确白名单，未列入名单的默认工具与 MCP 工具都会被过滤。自 v1.12 起，`enabled` 非空时默认按 `append` 追加语义处理。各场景影响：
+
+- `enabled = []`（默认）：行为完全不变，仍暴露默认白名单加全部 MCP 工具。
+- 用 `enabled` 启用可选内置工具（如 `draw_svg`）：MCP 工具不再被名单误过滤，通常无需改动。
+- 需要严格工具白名单的部署：显式设置 `enabled_mode = "replace"`，恢复精确过滤语义。
 
 ### `[[providers]]` — Provider 定义（可多个）
 
@@ -388,6 +395,20 @@ ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM �
 `[[music.providers]]` 和 `[[music.providers.models]]` 结构类似，额外包含 `supported_output_formats`、`lyrics_optimization` 等音乐特有字段。
 
 `api_key_env` 由每个 provider 自行声明；示例配置中常见的键名包括 `MINIMAX_API_KEY`、`VOLCENGINE_API_KEY` 和 OpenAI-compatible ASR 使用的 `OPENAI_API_KEY`。
+
+### `[svg]` — SVG 画图（`draw_svg` 工具）
+
+LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写出 SVG 源码，本地 resvg 渲染成 PNG 随回复外发。不需要配置 provider/model（SVG 代码由当前群的对话模型生成），渲染字体沿用 `data/fonts/NotoSansSC-Regular.ttf`（与词云同源）。启用需两步：本段 `enabled = true`，且 `llm.toml [tools] enabled` 中加入 `"draw_svg"`。
+
+| 键 | 默认 | 说明 |
+|----|------|------|
+| `enabled` | `false` | 功能总开关 |
+| `harden` | `true` | 第一层安全（默认启用）：输入硬约束（64KB / 嵌套 ≤2000 / viewBox ≤2048 / 滤镜参数上限）、静态清洗（剥 script、事件属性、外链）、输出尺寸服务端覆盖、渲染子进程 rlimit（地址空间 2GB / CPU 5s）。关闭即自担风险：恶意 SVG 可耗尽内存或 CPU |
+| `content_judge` | `false` | 第二层安全（默认关闭）：渲染前用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做内容安全裁决。判定失败（超时 / 非 JSON / 未配置）时放行渲染并记录 WARN（fail-open） |
+
+渲染始终在独立子进程内执行（结构性防段错误，不受 `harden` 开关影响）；渲染限流为全局 10 次/分钟、单用户 2 次/分钟，单次回复最多外发 3 张图片。
+
+平台能力差异：`harden` 的子进程资源硬限制（地址空间 2GB / CPU 5s）依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 无对应机制，保留 8 秒墙钟超时兜底（超时即终止子进程）。输入清洗、输出尺寸覆盖与渲染限流在所有平台一致。字体与部署注意事项见 [deployment.md](deployment.md#42-cjk-字体文件词云与-svg-画图)。
 
 ---
 

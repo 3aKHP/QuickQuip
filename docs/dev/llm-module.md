@@ -362,6 +362,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
   - `[triggers.quick_judge]`：唤醒模块和语境规则使用的快速判定模型
 - `[tools]`
   - `enabled`
+  - `enabled_mode`：`enabled` 非空时的作用方式，`append`（默认，默认白名单 + MCP 之上追加）/ `replace`（精确过滤）
   - `discovery_mode`
   - `discovery_min_tools`
   - `discovery_search_limit`
@@ -453,8 +454,13 @@ LLM 相关的多模态输入/产出配置在 `generation.toml` 中维护：
 - `[audio]`：语音生成（TTS）
 - `[asr]`：语音识别，收到 OneBot `record` 语音消息时转写为文字注入 LLM
 - `[music]`：歌词与音乐生成
+- `[svg]`：SVG 画图（`draw_svg` 工具），模型在工具参数中直接写出 SVG 源码，本地 resvg 渲染成 PNG 后随回复外发
 
 ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /audio/transcriptions`。配置示例见 `config/generation.toml.example`。
+
+`draw_svg` 是内置工具但**不在默认启用名单**：需要在 `generation.toml [svg]` 设 `enabled = true`，并在 `llm.toml [tools] enabled` 中加入 `"draw_svg"`。渲染由 `quickquip.generation.svg` 编排——输入硬约束与静态清洗（`svg_sanitize.py`）、输出尺寸服务端覆盖（剥离根节点 width/height 后按 viewBox×2 显式传参）、spawn 子进程沙箱（Linux 带 RLIMIT_AS/RLIMIT_CPU，墙钟超时兜底）。工具结果图片经 `ToolExecutionContext.outbound_images` 外发通道直接发给用户（不回喂模型），单次回复上限 3 张，渲染限流为全局 10 次/分钟、单用户 2 次/分钟。
+
+两层可选安全防护：`harden`（默认启用）控制第一层渲染硬防线（输入约束+清洗+尺寸覆盖+沙箱 rlimit）；`content_judge`（默认关闭）控制第二层内容裁决，复用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做安全判定，判定失败 fail-open。详见 `config/generation.toml.example` 中 `[svg]` 段注释。
 
 ---
 

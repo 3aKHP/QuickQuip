@@ -59,6 +59,9 @@ class RuntimeConfig:
 @dataclass(slots=True)
 class ToolsConfig:
     enabled: list[str] = field(default_factory=list)
+    # enabled 列表的作用模式：append = 在默认白名单 + MCP 工具之上追加
+    # （默认，opt-in 工具的启用路径）；replace = 精确过滤，只暴露所列工具
+    enabled_mode: str = "append"  # append | replace
     discovery_mode: str = "auto"  # off | on | auto
     discovery_min_tools: int = 10
     discovery_search_limit: int = 5
@@ -437,6 +440,16 @@ def _parse_single_provider(
 _MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}
 
 
+def _parse_enabled_mode(raw: Any) -> str:
+    """解析 [tools] enabled_mode；非法取值回退 append 并告警。"""
+    mode = str(raw if raw is not None else "append").strip().lower()
+    if mode not in ("append", "replace"):
+        if raw is not None:
+            logger.warning("[tools] enabled_mode 非法取值 %r，回退为 append", raw)
+        return "append"
+    return mode
+
+
 def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
     servers: list[MCPServerConfig] = []
     seen_ids: set[str] = set()
@@ -593,6 +606,19 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     auto_search_raw = expand_env_value(as_dict(triggers_raw.get("auto_search")))
     quick_judge_raw = expand_env_value(as_dict(triggers_raw.get("quick_judge")))
 
+    _enabled_tools = [
+        str(item).strip()
+        for item in tools_raw.get("enabled", [])
+        if str(item).strip()
+    ]
+    _enabled_mode = _parse_enabled_mode(tools_raw.get("enabled_mode"))
+    if _enabled_tools and "enabled_mode" not in tools_raw:
+        # v1.11 及更早 enabled 非空 = 精确白名单；未显式声明 mode 的升级部署提示语义变化
+        logger.warning(
+            "[tools] enabled 非空且未设置 enabled_mode，按 append 语义在默认白名单与 MCP 工具之上追加；"
+            '如需精确白名单请显式设置 enabled_mode = "replace"'
+        )
+
     config = LLMConfig(
         runtime=RuntimeConfig(
             enabled=as_bool(runtime_raw.get("enabled", False), default=False),
@@ -633,11 +659,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             max_tokens=max(8, int(quick_judge_raw.get("max_tokens", 64))),
         ),
         tools=ToolsConfig(
-            enabled=[
-                str(item).strip()
-                for item in tools_raw.get("enabled", [])
-                if str(item).strip()
-            ],
+            enabled=_enabled_tools,
+            enabled_mode=_enabled_mode,
             discovery_mode=str(tools_raw.get("discovery_mode", "auto")).strip().lower() or "auto",
             discovery_min_tools=max(1, int(tools_raw.get("discovery_min_tools", 10))),
             discovery_search_limit=max(1, min(int(tools_raw.get("discovery_search_limit", 5)), 20)),

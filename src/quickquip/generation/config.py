@@ -220,11 +220,19 @@ class AsrConfig(_ResolveModelMixin):
 
 
 @dataclass(slots=True)
+class SvgConfig:
+    enabled: bool = False
+    harden: bool = True
+    content_judge: bool = False
+
+
+@dataclass(slots=True)
 class GenerationConfig:
     image: ImageGenerationConfig = field(default_factory=ImageGenerationConfig)
     audio: AudioGenerationConfig = field(default_factory=AudioGenerationConfig)
     music: MusicGenerationConfig = field(default_factory=MusicGenerationConfig)
     asr: AsrConfig = field(default_factory=AsrConfig)
+    svg: SvgConfig = field(default_factory=SvgConfig)
     load_error: str | None = None
     source_path: Path | None = None
     source_kind: str = "generation"
@@ -522,6 +530,18 @@ def _read_asr_section(data: dict[str, Any]) -> AsrConfig:
     return _read_generation_section(data, "asr", "asr", _read_asr)
 
 
+def _read_svg(raw: dict[str, Any]) -> SvgConfig:
+    return SvgConfig(
+        enabled=as_bool(raw.get("enabled", False), default=False),
+        harden=as_bool(raw.get("harden", True), default=True),
+        content_judge=as_bool(raw.get("content_judge", False), default=False),
+    )
+
+
+def _read_svg_section(data: dict[str, Any]) -> SvgConfig:
+    return _read_generation_section(data, "svg", "svg", _read_svg)
+
+
 def _validate_generation_config(config: GenerationConfig) -> GenerationConfig:
     image = config.image
     for provider in image.providers.values():
@@ -610,6 +630,7 @@ def load_generation_config(
             audio=_read_audio_generation_section(data),
             music=_read_music_generation_section(data),
             asr=_read_asr_section(data),
+            svg=_read_svg_section(data),
             source_path=config_path,
             source_kind="generation",
         )
@@ -623,6 +644,7 @@ def load_generation_config(
             audio=_read_audio_generation_section(data),
             music=_read_music_generation_section(data),
             asr=_read_asr_section(data),
+            svg=_read_svg_section(data),
             source_path=legacy_path,
             source_kind="llm_legacy",
         )

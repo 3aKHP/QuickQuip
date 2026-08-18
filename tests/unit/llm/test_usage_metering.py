@@ -1,10 +1,12 @@
 import asyncio
 
+import httpx
 import pytest
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMRequest
 from plugins.llm_tools import LLMConversationMessage
 
+from quickquip.llm.usage import drain_usage_tasks
 from tests.fixtures.provider_fakes import FakeClaudeClient
 
 
@@ -29,13 +31,44 @@ async def test_complete_ok_records_usage(monkeypatch):
     async def spy(client, request, response, started, stream_used, state, error_msg=""):
         calls.append((state, response is not None))
 
-    monkeypatch.setattr("quickquip.llm.provider.base._record_usage", spy)
+    monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
     client = FakeClaudeClient(
         _config(),
         {"content": [], "usage": {"input_tokens": 10, "output_tokens": 5}},
     )
     await client.complete(_req())
+    await drain_usage_tasks()
     assert calls == [("ok", True)]
+
+
+async def test_complete_does_not_await_usage_record(monkeypatch):
+    """complete() 的返回不等待计量任务：计量阻塞时聊天回复仍及时（Issue #111 #1）。
+
+    spy 阻塞在 gate 上永不自行结束；若 complete() 仍 await 计量，wait_for 会超时。
+    """
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+    calls = []
+
+    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+        calls.append(state)
+        entered.set()
+        await gate.wait()
+
+    monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
+    client = FakeClaudeClient(
+        _config(),
+        {"content": [], "usage": {"input_tokens": 10, "output_tokens": 5}},
+    )
+    try:
+        response = await asyncio.wait_for(client.complete(_req()), timeout=1.0)
+        assert response is not None  # gate 未放行，回复已经返回
+        await asyncio.wait_for(entered.wait(), timeout=1.0)  # 计量任务确已启动并阻塞
+        assert calls == ["ok"]
+    finally:
+        gate.set()  # 失败路径也必须放行，避免阻塞任务泄漏给后续测试的 drain
+    await drain_usage_tasks()
+    assert calls == ["ok"]
 
 
 async def test_complete_error_records_state(monkeypatch):
@@ -44,7 +77,7 @@ async def test_complete_error_records_state(monkeypatch):
     async def spy(client, request, response, started, stream_used, state, error_msg=""):
         calls.append((state, response))
 
-    monkeypatch.setattr("quickquip.llm.provider.base._record_usage", spy)
+    monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
     client = FakeClaudeClient(_config(), {"content": []})
 
     async def _raise(*a, **kw):
@@ -53,17 +86,19 @@ async def test_complete_error_records_state(monkeypatch):
     monkeypatch.setattr(client, "_post_json", _raise)
     with pytest.raises(RuntimeError):
         await client.complete(_req())
+    await drain_usage_tasks()
     assert calls == [("error", None)]
 
 
 async def test_complete_cancelled_propagates(monkeypatch):
-    """cancelled 记录是 best-effort（shield 在 task 退出时可能丢失，参照 trace）；
-    这里只断言 CancelledError 正确传播。"""
+    """cancelled 记录经独立任务调度（父协程取消后仍存活）；此处断言
+    CancelledError 正确传播且计量任务仍被调度执行。"""
+    calls = []
 
-    async def spy(*a, **kw):
-        pass
+    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+        calls.append((state, response))
 
-    monkeypatch.setattr("quickquip.llm.provider.base._record_usage", spy)
+    monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
     client = FakeClaudeClient(_config(), {"content": []})
 
     async def _hang(*a, **kw):
@@ -75,6 +110,32 @@ async def test_complete_cancelled_propagates(monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    await drain_usage_tasks()
+    assert calls == [("cancelled", None)]
+
+
+async def test_complete_error_message_masks_url(monkeypatch, tmp_path):
+    """Issue #111 #4：error_message 落库前遮蔽 URL（httpx 错误串含完整请求 URL
+    及潜在 query 凭据）；写入 conftest 指向的临时 usage 库。"""
+    client = FakeClaudeClient(_config(), {"content": []})
+
+    async def _raise(*a, **kw):
+        raise httpx.ConnectError(
+            "connection refused for https://api.example.com/v1/messages?key=SECRET"
+        )
+
+    monkeypatch.setattr(client, "_post_json", _raise)
+    with pytest.raises(httpx.ConnectError):
+        await client.complete(_req())
+    await drain_usage_tasks()
+
+    from quickquip.llm import usage_store as usage_store_module
+    with usage_store_module.usage_store.connect() as conn:
+        row = conn.execute("SELECT error_message FROM llm_usage_events").fetchone()
+    assert row["error_message"].startswith("ConnectError:")
+    assert "[url]" in row["error_message"]
+    assert "SECRET" not in row["error_message"]
+    assert "api.example.com" not in row["error_message"]
 
 
 async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
@@ -85,7 +146,7 @@ async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
     from plugins.llm_provider import LLMResponse
 
     fake_store = LLMUsageStore(tmp_path / "u.db")
-    monkeypatch.setattr("quickquip.app.message_pipeline.usage_store", fake_store)
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
 
     class FakeClient:
         config = ProviderConfig(
@@ -120,7 +181,7 @@ async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
     from plugins.llm_provider import LLMResponse
 
     fake_store = LLMUsageStore(tmp_path / "u.db")
-    monkeypatch.setattr("quickquip.app.message_pipeline.usage_store", fake_store)
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
     configured = {
         "gpt-test": PricingRates(input_per_mtok=1.0, output_per_mtok=5.0),
         "p1/gpt-test": PricingRates(input_per_mtok=2.0, output_per_mtok=10.0),
