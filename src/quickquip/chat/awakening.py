@@ -606,14 +606,14 @@ _QA_SYSTEM = (
 
 # quick-judge 结果类别：业务 true/false 可缓存；其余为技术失败，
 # fail-closed（不触发群聊回复）且不得写入判定缓存。
+# timeout/provider_error/invalid_json 为 awakening 层类别；service 层
+# 技术失败（empty/length/provider_error/no_provider）直接透传其 outcome，
+# 技术失败判定统一经 QuickJudgeResult.is_technical，不在此枚举字符串。
 _JUDGE_BUSINESS_TRUE = "business_true"
 _JUDGE_BUSINESS_FALSE = "business_false"
 _JUDGE_TIMEOUT = "timeout"
 _JUDGE_PROVIDER_ERROR = "provider_error"
-_JUDGE_EMPTY = "empty"
-_JUDGE_LENGTH = "length"
 _JUDGE_INVALID_JSON = "invalid_json"
-_JUDGE_NO_PROVIDER = "no_provider"
 
 
 @dataclass(slots=True)
@@ -631,25 +631,49 @@ class QuickJudgeOutcome:
 
 
 def _parse_judge_text(text: str, threshold: float) -> bool | None:
-    """严格解析业务判定；无法解析返回 None（区别于业务 false）。"""
+    """严格解析业务判定；无法解析返回 None（区别于业务 false）。
+
+    只接受完整 JSON 对象；残缺 JSON 或散文中出现的 "trigger" 字样
+    一律视为不可解析（fail-closed，不写缓存）。
+    """
     try:
         data = extract_json_object(text)
-        if "score" in data:
-            return float(data["score"]) >= threshold
-        if "trigger" in data:
-            trigger = data["trigger"]
-            if isinstance(trigger, bool):
-                return trigger
-            if isinstance(trigger, str):
-                return trigger.strip().lower() == "true"
-            return bool(trigger)
     except (TypeError, ValueError):
-        pass
-    if re.search(r'"trigger"\s*:\s*true', text, re.IGNORECASE):
-        return True
-    if re.search(r'"trigger"\s*:\s*false', text, re.IGNORECASE):
-        return False
+        return None
+    if "score" in data:
+        return float(data["score"]) >= threshold
+    if "trigger" in data:
+        trigger = data["trigger"]
+        if isinstance(trigger, bool):
+            return trigger
+        if isinstance(trigger, str):
+            return trigger.strip().lower() == "true"
+        return bool(trigger)
     return None
+
+
+def _judge_target(svc: Any) -> dict:
+    """解析判定目标的 provider/model（仅诊断字段，无敏感信息）。"""
+    config = getattr(svc, "config", None)
+    qj = getattr(config, "quick_judge", None)
+    provider_id = ""
+    if qj is not None and qj.provider_id:
+        provider_id = str(qj.provider_id)
+    else:
+        runtime = getattr(config, "runtime", None)
+        provider_id = str(getattr(runtime, "default_provider", "") or "")
+    model = str(getattr(qj, "model", "") or "")
+    return {"provider": provider_id, "model": model}
+
+
+def _cache_business_outcome(
+    st: AwakeningState, rule: str, group_id: int | str, cache_text: str, outcome: QuickJudgeOutcome
+) -> None:
+    """仅业务 true/false 写入判定缓存；技术失败不缓存。"""
+    if outcome.category == _JUDGE_BUSINESS_TRUE:
+        st.llm_cache_set(rule, group_id, cache_text, True)
+    elif outcome.category == _JUDGE_BUSINESS_FALSE:
+        st.llm_cache_set(rule, group_id, cache_text, False)
 
 
 async def _llm_judge(
@@ -671,20 +695,24 @@ async def _llm_judge(
                 timeout=timeout,
             )
     except asyncio.TimeoutError:
-        return QuickJudgeOutcome(
-            _JUDGE_TIMEOUT, None, {"outcome": _JUDGE_TIMEOUT, "duration_ms": round((monotonic() - started) * 1000, 2)}
-        )
+        diagnostic = {
+            "outcome": _JUDGE_TIMEOUT,
+            "duration_ms": round((monotonic() - started) * 1000, 2),
+            **_judge_target(svc),
+        }
+        logger.warning("awakening: quick_judge timed out after %.1fs: %s", timeout, diagnostic)
+        return QuickJudgeOutcome(_JUDGE_TIMEOUT, None, diagnostic)
     except Exception:
-        logger.warning(
-            "awakening: quick_judge call failed (%s)", _JUDGE_PROVIDER_ERROR, exc_info=True
-        )
-        return QuickJudgeOutcome(
-            _JUDGE_PROVIDER_ERROR, None,
-            {"outcome": _JUDGE_PROVIDER_ERROR, "duration_ms": round((monotonic() - started) * 1000, 2)},
-        )
+        diagnostic = {
+            "outcome": _JUDGE_PROVIDER_ERROR,
+            "duration_ms": round((monotonic() - started) * 1000, 2),
+            **_judge_target(svc),
+        }
+        logger.warning("awakening: quick_judge call failed: %s", diagnostic, exc_info=True)
+        return QuickJudgeOutcome(_JUDGE_PROVIDER_ERROR, None, diagnostic)
 
     diagnostic = result.to_diagnostic()
-    if result.outcome in {_JUDGE_NO_PROVIDER, _JUDGE_PROVIDER_ERROR, _JUDGE_EMPTY, _JUDGE_LENGTH}:
+    if result.is_technical:
         logger.warning("awakening: quick_judge technical failure: %s", diagnostic)
         return QuickJudgeOutcome(result.outcome, None, diagnostic)
 
@@ -699,24 +727,6 @@ async def _llm_judge(
     return QuickJudgeOutcome(
         _JUDGE_BUSINESS_TRUE if parsed else _JUDGE_BUSINESS_FALSE, parsed, merged
     )
-
-
-def _extract_json_trigger(raw: str, threshold: float = 0.5) -> bool:
-    """Extract trigger decision from JSON-ish model output."""
-    try:
-        data = extract_json_object(raw)
-        if "score" in data:
-            return float(data["score"]) >= threshold
-        if "trigger" in data:
-            trigger = data["trigger"]
-            if isinstance(trigger, bool):
-                return trigger
-            if isinstance(trigger, str):
-                return trigger.strip().lower() == "true"
-            return bool(trigger)
-    except (TypeError, ValueError):
-        pass
-    return bool(re.search(r'"trigger"\s*:\s*true', raw, re.IGNORECASE))
 
 
 def _llm_cache_text(message_text: str, threshold: float) -> str:
@@ -895,10 +905,7 @@ async def check_relevance(
     context_lines = [f"[bot 回复 {i+1}] {msg}" for i, msg in enumerate(bot_msgs)]
     user_prompt = "\n".join(context_lines) + f"\n[用户消息] {message_text.strip()}"
     outcome = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens)
-    if outcome.category == _JUDGE_BUSINESS_TRUE:
-        st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, True)
-    elif outcome.category == _JUDGE_BUSINESS_FALSE:
-        st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, False)
+    _cache_business_outcome(st, _RULE_RELEVANCE, group_id, cache_text, outcome)
 
     if outcome.triggered is not True:
         return None
@@ -950,10 +957,7 @@ async def check_qa(
 
     # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
     outcome = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens)
-    if outcome.category == _JUDGE_BUSINESS_TRUE:
-        st.llm_cache_set(_RULE_QA, group_id, cache_text, True)
-    elif outcome.category == _JUDGE_BUSINESS_FALSE:
-        st.llm_cache_set(_RULE_QA, group_id, cache_text, False)
+    _cache_business_outcome(st, _RULE_QA, group_id, cache_text, outcome)
 
     if outcome.triggered is not True:
         return None

@@ -120,9 +120,10 @@ logger = logging.getLogger(__name__)
 class QuickJudgeResult:
     """quick-judge 的结构化结果（内部诊断通道）。
 
-    ``outcome``: ok | empty | length | provider_error | no_provider。
-    ``to_diagnostic()`` 只输出允许记录的字段；``error`` 仅供调用方
-    重新抛出（quick_judge 公共契约），不得进入日志或诊断记录。
+    ``outcome``: ok | empty | length | provider_error | no_provider；
+    ``is_technical``（非 ok）是唯一的技术失败判定入口，调用方不得
+    自行枚举 outcome 字符串。``to_diagnostic()`` 只输出允许记录的字段；
+    ``error`` 仅供调用方重新抛出（quick_judge 公共契约），不得进入日志或诊断记录。
     """
 
     text: str
@@ -135,6 +136,10 @@ class QuickJudgeResult:
     thinking_tokens: int | None = None
     duration_ms: float = 0.0
     error: Exception | None = None
+
+    @property
+    def is_technical(self) -> bool:
+        return self.outcome != "ok"
 
     def to_diagnostic(self) -> dict:
         return {

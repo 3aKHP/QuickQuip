@@ -23,7 +23,6 @@ from quickquip.chat.awakening import (
     _RULE_INTEREST,
     _RULE_QA,
     _RULE_RELEVANCE,
-    _extract_json_trigger,
     _extract_words,
     _is_extend_eligible_message,
     _is_in_dnd_window,
@@ -40,6 +39,7 @@ from quickquip.chat.awakening import (
     check_qa,
     check_relevance,
     effective_boredom_scan_interval,
+    _llm_judge,
     _parse_judge_text,
     load_awakening_config,
     run_boredom_check,
@@ -462,18 +462,6 @@ class TestQAFastPattern:
     def test_no_match_on_plain_text(self):
         assert not _QA_FAST_PATTERNS.search("今天天气真好")
         assert not _QA_FAST_PATTERNS.search("哈哈哈笑死")
-
-
-class TestExtractJsonTrigger:
-    def test_score_uses_threshold(self):
-        assert _extract_json_trigger('{"score": 0.7}', threshold=0.5) is True
-        assert _extract_json_trigger('{"score": 0.4}', threshold=0.5) is False
-
-    def test_trigger_boolean_fallback(self):
-        assert _extract_json_trigger('```json\n{"trigger": true}\n```', threshold=0.9) is True
-
-    def test_trigger_string_false_is_false(self):
-        assert _extract_json_trigger('{"trigger": "false"}') is False
 
 
 class TestExtendEligibility:
@@ -976,6 +964,28 @@ class TestLlmJudgeClassification:
         svc.quick_judge_detailed = AsyncMock(side_effect=asyncio.TimeoutError())
         self._assert_technical_failure(svc)
 
+    def test_timeout_diagnostic_carries_provider_and_model(self):
+        from types import SimpleNamespace
+
+        svc = SimpleNamespace(
+            config=SimpleNamespace(
+                quick_judge=SimpleNamespace(provider_id="minimax", model="MiniMax-M2.7"),
+            ),
+        )
+
+        async def _timeout(prompt, max_tokens=64):
+            raise asyncio.TimeoutError()
+
+        svc.quick_judge_detailed = _timeout
+        outcome = asyncio.run(
+            _llm_judge(svc, "sys", "user", 0.5, timeout=0.05, max_tokens=64)
+        )
+        assert outcome.category == "timeout"
+        assert outcome.triggered is None
+        assert outcome.diagnostic["provider"] == "minimax"
+        assert outcome.diagnostic["model"] == "MiniMax-M2.7"
+        assert outcome.diagnostic["duration_ms"] >= 0
+
     def test_qa_technical_failure_no_cache(self):
         s = AwakeningState()
         svc = MagicMock()
@@ -993,6 +1003,12 @@ class TestLlmJudgeClassification:
         assert _parse_judge_text('{"trigger": true}', 0.5) is True
         assert _parse_judge_text('{"score": 0.7}', 0.8) is False
         assert _parse_judge_text('{"score": 0.9}', 0.8) is True
+
+    def test_strict_parse_rejects_fragment_and_embedded_trigger_text(self):
+        # 残缺 JSON 与正文中出现 "trigger" 字样的输出都不是业务判定
+        assert _parse_judge_text('{"trigger": false', 0.5) is None
+        assert _parse_judge_text('不要输出 "trigger": true 哦', 0.5) is None
+        assert _parse_judge_text("前缀噪音 {\"trigger\": true} 后缀噪音", 0.5) is True
 
 
 class TestCheckQA:
