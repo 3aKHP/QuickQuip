@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -37,6 +38,7 @@ from quickquip.chat.awakening import (
     check_interest,
     check_qa,
     check_relevance,
+    effective_boredom_scan_interval,
     load_awakening_config,
     run_boredom_check,
     select_passive_trigger_image_urls,
@@ -288,9 +290,30 @@ class TestAwakeningState:
 
     def test_silence_seconds(self):
         s = AwakeningState()
-        assert s.get_group_silence_seconds("g1") == float("inf")
+        assert s.get_group_silence_seconds("g1") is None
         s.record_message("g1", "u1")
         assert s.get_group_silence_seconds("g1") < 1.0
+
+    def test_clear_boredom_state(self):
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s.mark_boredom_triggered("g1")
+        s.clear_boredom_state("g1")
+        assert s.get_group_silence_seconds("g1") is None
+        assert s.can_trigger_boredom("g1", 60) is True
+
+    def test_prune_stale_keeps_silence_and_cooldown_state(self):
+        """沉寂/冷却状态不做固定时限淘汰：较大 boredom_silence_seconds
+        不会因旧状态被清理而提前满足。"""
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s._last_message_times["g1"] = monotonic() - 7200  # 两小时前的消息
+        s.mark_boredom_triggered("g1")
+        s._last_boredom_trigger["g1"] = monotonic() - 7200
+        s.prune_stale(max_age=7200)
+        assert s.get_group_silence_seconds("g1") is not None
+        assert s.get_group_silence_seconds("g1") >= 7200
+        assert s.can_trigger_boredom("g1", 300) is True
 
     def test_boredom_trigger_guard(self):
         s = AwakeningState()
@@ -527,6 +550,29 @@ class TestPassiveTriggerImages:
         assert build_passive_trigger_raw_user_text(mixed, []) == "看这个 第二段"
 
 
+class TestBoredomScanInterval:
+    def test_scan_interval_from_toml(self, tmp_path: Path):
+        path = tmp_path / "awakening.toml"
+        path.write_text(
+            "[awakening.defaults]\nboredom_scan_interval = 120\nboredom_check_interval = 600\n",
+            encoding="utf-8",
+        )
+        cfg = load_awakening_config(path)
+        assert cfg.defaults.boredom_scan_interval == 120
+        assert effective_boredom_scan_interval(cfg) == 120
+
+    def test_scan_interval_falls_back_to_check_interval(self, tmp_path: Path):
+        path = tmp_path / "awakening.toml"
+        path.write_text("[awakening.defaults]\nboredom_check_interval = 600\n", encoding="utf-8")
+        cfg = load_awakening_config(path)
+        assert cfg.defaults.boredom_scan_interval is None
+        assert effective_boredom_scan_interval(cfg) == 600
+
+    def test_scan_interval_invalid_falls_back_to_default_300(self, tmp_path: Path):
+        cfg = AwakeningConfig(defaults=AwakeningDefaults(boredom_check_interval=0))
+        assert effective_boredom_scan_interval(cfg) == 300
+
+
 # =========================================================================
 # Trigger checks (sync)
 # =========================================================================
@@ -654,6 +700,33 @@ class TestCheckBoredom:
         s = AwakeningState()
         s.record_message("g1", "u1")
         settings = _make_settings(boredom_silence_seconds=60, boredom_probability=1.0)
+        assert check_boredom("g1", settings, s) is None
+
+    def test_unknown_silence_never_triggers(self):
+        """重启后未观察到群消息：沉寂未知，不允许无聊唤醒。"""
+        s = AwakeningState()
+        settings = _make_settings(boredom_silence_seconds=60, boredom_probability=1.0)
+        assert check_boredom("g1", settings, s) is None
+
+    def test_long_silence_threshold_not_prematurely_met(self):
+        """沉寂 7200s 且门槛 10800s：prune 后状态保留且不提前触发。"""
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s._last_message_times["g1"] = monotonic() - 7200
+        s.prune_stale(max_age=7200)
+        settings = _make_settings(boredom_silence_seconds=10800, boredom_probability=1.0)
+        assert check_boredom("g1", settings, s) is None
+
+    def test_dnd_blocks_boredom(self):
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s._last_message_times["g1"] = monotonic() - 7200
+        settings = _make_settings(
+            boredom_silence_seconds=3600,
+            boredom_probability=1.0,
+            boredom_dnd_start="00:00",
+            boredom_dnd_end="23:59",
+        )
         assert check_boredom("g1", settings, s) is None
 
 
@@ -1095,6 +1168,9 @@ class TestRunBoredomCheck:
             ),
         )
         aw._state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        aw._state.record_message("123", "u1")
+        aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(run_boredom_check(bot, groups, rule_switch, svc))
         finally:
@@ -1129,6 +1205,9 @@ class TestRunBoredomCheck:
             ),
         )
         aw._state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        aw._state.record_message("123", "u1")
+        aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(run_boredom_check(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
         finally:
@@ -1169,6 +1248,9 @@ class TestRunBoredomCheck:
             ),
         )
         aw._state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        aw._state.record_message("123", "u1")
+        aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(
                 run_boredom_check(bot, groups, rule_switch, svc, build_reply_message=_build_reply)

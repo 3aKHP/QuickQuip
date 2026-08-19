@@ -34,6 +34,9 @@ class AwakeningDefaults:
     boredom_silence_seconds: int = 0
     boredom_probability: float = 0.0
     boredom_check_interval: int = 300
+    # 全局 scheduler 扫描周期（秒）。None = 未设置，回退到 boredom_check_interval；
+    # boredom_check_interval 固定为群级成功唤醒冷却时间。
+    boredom_scan_interval: int | None = None
     boredom_dnd_start: str = ""
     boredom_dnd_end: str = ""
     interest_topics: list[str] = field(default_factory=list)
@@ -207,6 +210,16 @@ def reload_config(path: str | Path | None = None) -> None:
     _config = load_awakening_config(path or CONFIG_AWAKENING_TOML)
 
 
+def effective_boredom_scan_interval(config: AwakeningConfig | None = None) -> int:
+    """APScheduler 扫描周期：新字段优先；未设置时回退旧配置的
+    ``defaults.boredom_check_interval``（兼容尚未写新键的私有部署）。"""
+    cfg = config if config is not None else _config
+    if cfg.defaults.boredom_scan_interval is not None and cfg.defaults.boredom_scan_interval > 0:
+        return cfg.defaults.boredom_scan_interval
+    interval = cfg.defaults.boredom_check_interval
+    return interval if interval > 0 else 300
+
+
 # ---------------------------------------------------------------------------
 # Runtime state (in-memory, not persisted)
 # ---------------------------------------------------------------------------
@@ -293,10 +306,12 @@ class AwakeningState:
             return False
         return session.source == "explicit_llm" and (monotonic() - session.timestamp) < duration
 
-    def get_group_silence_seconds(self, group_id: int | str) -> float:
+    def get_group_silence_seconds(self, group_id: int | str) -> float | None:
+        """群沉寂秒数；本进程未观察到该群消息时返回 None（未知），
+        未知状态不允许无聊唤醒。"""
         ts = self._last_message_times.get(str(group_id))
         if ts is None:
-            return float("inf")
+            return None
         return monotonic() - ts
 
     def can_trigger_boredom(self, group_id: int | str, check_interval: int) -> bool:
@@ -307,6 +322,12 @@ class AwakeningState:
 
     def mark_boredom_triggered(self, group_id: int | str) -> None:
         self._last_boredom_trigger[str(group_id)] = monotonic()
+
+    def clear_boredom_state(self, group_id: int | str) -> None:
+        """清除群的沉寂与冷却状态（群取消无聊唤醒 opt-in 时调用）。"""
+        gid = str(group_id)
+        self._last_message_times.pop(gid, None)
+        self._last_boredom_trigger.pop(gid, None)
 
     def llm_cache_get(self, rule: str, group_id: int | str, text: str) -> bool | None:
         key = (rule, str(group_id), text)
@@ -331,6 +352,10 @@ class AwakeningState:
         self._llm_cache[(rule, str(group_id), text)] = (result, monotonic())
 
     def prune_stale(self, max_age: float = 7200) -> None:
+        """只清理延长会话。沉寂时间戳与群级冷却**不做固定时限淘汰**：
+        较大的 boredom_silence_seconds 会被提前满足（旧实现两小时即丢状态，
+        使沉寂回到未知），取消 opt-in 的清除由 clear_boredom_state 显式负责。
+        每群仅各一个浮点条目，不淘汰无增长风险。"""
         now = monotonic()
         for sessions in self._extend_sessions.values():
             stale = [uid for uid, session in sessions.items() if (now - session.timestamp) > max_age]
@@ -339,14 +364,6 @@ class AwakeningState:
         stale_groups = [gid for gid, sessions in self._extend_sessions.items() if not sessions]
         for gid in stale_groups:
             del self._extend_sessions[gid]
-
-        stale_msgs = [gid for gid, ts in self._last_message_times.items() if (now - ts) > max_age]
-        for gid in stale_msgs:
-            del self._last_message_times[gid]
-
-        stale_boredom = [gid for gid, ts in self._last_boredom_trigger.items() if (now - ts) > max_age]
-        for gid in stale_boredom:
-            del self._last_boredom_trigger[gid]
 
 
 _state = AwakeningState()
@@ -746,6 +763,9 @@ def check_boredom(
         return None
     st = state or _state
     silence = st.get_group_silence_seconds(group_id)
+    if silence is None:
+        # 本进程未观察到该群消息：沉寂未知，不允许无聊唤醒
+        return None
     if silence < settings.boredom_silence_seconds:
         return None
     if not st.can_trigger_boredom(group_id, settings.boredom_check_interval):

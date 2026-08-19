@@ -92,6 +92,38 @@ def test_list_awakening_does_not_expose_source_path(temp_awakening_config):
     assert "source_path" not in result
 
 
+def test_list_awakening_exposes_effective_scan_interval(temp_awakening_config):
+    _write_config(
+        temp_awakening_config,
+        """
+        [awakening.defaults]
+        boredom_check_interval = 600
+        """,
+    )
+    result = awakening_route.list_awakening()
+    assert result["defaults"]["boredom_scan_interval"] is None
+    assert result["effective_boredom_scan_interval"] == 600
+
+
+def test_render_keeps_scan_interval_fallback_dynamic(temp_awakening_config):
+    """Web Admin 保存不把回退值物化进托管文件：未设置即不写键。"""
+    _write_config(
+        temp_awakening_config,
+        """
+        [awakening.defaults]
+        boredom_check_interval = 600
+        """,
+    )
+    cfg = awakening_route.get_config()
+    content = awakening_route._render_awakening_config(cfg)
+    assert "boredom_scan_interval" not in content
+
+    import tomllib
+
+    parsed = tomllib.loads(content)
+    assert parsed["awakening"]["defaults"]["boredom_check_interval"] == 600
+
+
 def test_set_awakening_settings_queues_awakening_reload(monkeypatch, temp_awakening_config):
     captured: list[str] = []
     monkeypatch.setattr(awakening_route.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "a1"})

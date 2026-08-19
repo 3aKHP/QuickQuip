@@ -24,12 +24,19 @@ from quickquip.app.message_pipeline import (
     stats_tracker,
     strip_command_name as _strip_command_name,
 )
-from quickquip.chat.awakening import get_config, run_boredom_check
+from quickquip.chat.awakening import (
+    effective_boredom_scan_interval,
+    get_config,
+    get_state,
+    reload_config,
+    run_boredom_check,
+)
 
 logger = logging.getLogger(__name__)
 
 _RULE_NAME = "awakening_boredom"
 _BOREDOM_GROUPS_PATH = Path("data/awakening_boredom_groups.json")
+BOREDOM_SCAN_JOB_ID = "awakening_boredom_check"
 
 
 def _safe_group_id(group_id: int | str) -> str:
@@ -93,18 +100,19 @@ class BoredomEnabledGroups:
 boredom_enabled_groups = BoredomEnabledGroups()
 
 
-def _register_scheduler_jobs() -> None:
-    if not scheduler:
-        return
-    _ensure_llm_bindings()
+def register_boredom_scan_job(sched=None) -> int | None:
+    """以固定 job ID（重）注册无聊唤醒扫描任务；reload 路径复用本函数，
+    修改 ``boredom_scan_interval`` 后无需重启即可生效。返回生效的周期秒数，
+    scheduler 不可用时返回 None。"""
+    sched = scheduler if sched is None else sched
+    if not sched:
+        return None
     cfg = get_config()
-    interval = cfg.defaults.boredom_check_interval
-    if interval <= 0:
-        interval = 300
+    interval = effective_boredom_scan_interval(cfg)
 
     from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
 
-    job_id = "awakening_boredom_check"
+    job_id = BOREDOM_SCAN_JOB_ID
 
     async def _wrapped_boredom_check():
         try:
@@ -114,6 +122,7 @@ def _register_scheduler_jobs() -> None:
                 bot = nonebot.get_bot()
             except Exception:
                 return
+            _ensure_llm_bindings()
             svc = get_llm_service()
 
             def _build_reply(result: dict):
@@ -134,14 +143,36 @@ def _register_scheduler_jobs() -> None:
                 pass
             raise
 
-    scheduler.add_job(
+    sched.add_job(
         _wrapped_boredom_check,
         "interval",
         seconds=interval,
         id=job_id,
         replace_existing=True,
     )
-    logger.info("awakening: boredom check job registered (interval=%ds)", interval)
+    logger.info("awakening: boredom scan job registered (interval=%ds)", interval)
+    return interval
+
+
+def reload_awakening_and_reschedule() -> int | None:
+    """「重载 awakening.toml → 同一 job ID 重注册扫描任务」的唯一入口，
+    mtime 轮询与 awakening_reload 动作共用；返回生效的扫描周期秒数。"""
+    reload_config()
+    return register_boredom_scan_job()
+
+
+def reload_boredom_groups() -> None:
+    """重载 opt-in 集合并清理由此取消 opt-in 群的唤醒状态。
+
+    供 web-admin 写入触发的 mtime 轮询使用；进程内命令路径
+    （/awakening boredom off）直接调用 clear_boredom_state 清除。
+    """
+    before = set(boredom_enabled_groups.all_groups())
+    boredom_enabled_groups.load()
+    removed = before - set(boredom_enabled_groups.all_groups())
+    state = get_state()
+    for gid in removed:
+        state.clear_boredom_state(gid)
 
 
 def register_awakening_commands(on_command) -> None:
@@ -226,6 +257,7 @@ def register_awakening_commands(on_command) -> None:
                 await cmd.finish("本群无聊唤醒已开启。")
             if sub in {"off", "关闭", "禁用"}:
                 boredom_enabled_groups.remove(group_id)
+                get_state().clear_boredom_state(group_id)
                 await cmd.finish("本群无聊唤醒已关闭。")
             await cmd.finish("用法: /awakening boredom on|off")
 
@@ -241,5 +273,6 @@ def register_awakening_commands(on_command) -> None:
 
 
 def setup(on_command) -> None:
-    _register_scheduler_jobs()
+    _ensure_llm_bindings()
+    register_boredom_scan_job()
     register_awakening_commands(on_command)

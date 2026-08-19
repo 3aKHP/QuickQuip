@@ -18,6 +18,7 @@ from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningGroupOverride,
     CONFIG_AWAKENING_TOML,
+    effective_boredom_scan_interval,
     get_config,
     load_awakening_config,
     reload_config,
@@ -129,6 +130,7 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "fallback_probability",
         "boredom_silence_seconds",
         "boredom_probability",
+        "boredom_scan_interval",
         "boredom_check_interval",
         "boredom_dnd_start",
         "boredom_dnd_end",
@@ -136,7 +138,12 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "relevance_threshold",
         "qa_threshold",
     ]:
-        lines.append(f"{field_name} = {_toml_value(defaults[field_name])}")
+        value = defaults[field_name]
+        if field_name == "boredom_scan_interval" and value is None:
+            # 未设置即不写键：保持「回退 boredom_check_interval」的动态语义，
+            # 不把回退值物化进托管文件
+            continue
+        lines.append(f"{field_name} = {_toml_value(value)}")
 
     for group_id in sorted(cfg.group_overrides):
         override = cfg.group_overrides[group_id]
@@ -256,6 +263,8 @@ def list_awakening():
     return {
         "load_error": cfg.load_error,
         "defaults": asdict(cfg.defaults),
+        # 回退规则的单一来源：前端只消费生效值，不重复实现回退链
+        "effective_boredom_scan_interval": effective_boredom_scan_interval(cfg),
         "rules": [{"name": name, "label": label} for name, label in _AWAKENING_RULES],
         "groups": [_format_group(group_id) for group_id in _known_group_ids()],
     }
