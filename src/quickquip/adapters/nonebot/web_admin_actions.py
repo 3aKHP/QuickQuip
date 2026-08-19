@@ -68,8 +68,12 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
 
     if action.action_type == "awakening_reload":
         reload_awakening_config()
+        # 同一 job ID 重注册，使新的 boredom_scan_interval 无需重启立即生效
+        from quickquip.adapters.nonebot.awakening_plugin import register_boredom_scan_job
+
+        scan_interval = register_boredom_scan_job()
         summary = reload_chat_rules_pipeline()
-        return {"ok": True, "summary": summary}
+        return {"ok": True, "summary": summary, "boredom_scan_interval": scan_interval}
 
     if action.action_type == "health_check":
         scope_key = _normalize_health_scope(action.payload.get("scope_key"))

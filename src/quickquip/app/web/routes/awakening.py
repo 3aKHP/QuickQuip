@@ -18,6 +18,7 @@ from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningGroupOverride,
     CONFIG_AWAKENING_TOML,
+    effective_boredom_scan_interval,
     get_config,
     load_awakening_config,
     reload_config,
@@ -129,6 +130,7 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "fallback_probability",
         "boredom_silence_seconds",
         "boredom_probability",
+        "boredom_scan_interval",
         "boredom_check_interval",
         "boredom_dnd_start",
         "boredom_dnd_end",
@@ -136,7 +138,11 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "relevance_threshold",
         "qa_threshold",
     ]:
-        lines.append(f"{field_name} = {_toml_value(defaults[field_name])}")
+        value = defaults[field_name]
+        if value is None:
+            # 旧配置未写新键：物化回退值（boredom_check_interval），语义不变
+            value = effective_boredom_scan_interval(cfg)
+        lines.append(f"{field_name} = {_toml_value(value)}")
 
     for group_id in sorted(cfg.group_overrides):
         override = cfg.group_overrides[group_id]

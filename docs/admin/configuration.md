@@ -424,7 +424,8 @@ LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写�
 | `fallback_probability` | 普通消息低概率触发回应的概率；`0` 关闭 | `0` |
 | `boredom_silence_seconds` | 群聊沉寂多少秒后允许无聊唤醒；`0` 关闭 | `0` |
 | `boredom_probability` | 无聊检查命中时发送冒泡消息的概率 | `0` |
-| `boredom_check_interval` | 无聊唤醒定时检查间隔秒数 | `300` |
+| `boredom_scan_interval` | 无聊唤醒定时扫描周期秒数；未设置时回退 `boredom_check_interval` | `300` |
+| `boredom_check_interval` | 群级无聊唤醒成功后的冷却秒数 | `300` |
 | `boredom_dnd_start` | 免打扰开始时间，格式 `HH:MM`，空值关闭 | `""` |
 | `boredom_dnd_end` | 免打扰结束时间，格式 `HH:MM`，空值关闭 | `""` |
 | `interest_topics` | 兴趣话题关键词列表，命中后触发 `awakening_interest` | `[]` |
@@ -432,6 +433,8 @@ LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写�
 | `qa_threshold` | 答疑唤醒判定阈值，`<= 0` 或 `>= 1` 关闭 LLM 判定 | `1.0` |
 
 `extend_duration` 只会在群友通过前缀或艾特等显式 LLM 入口触发后生效。兴趣、兜底、无聊、相关性和答疑唤醒不会打开延长窗口；延长窗口内的图片-only、CQ-only、短语气词和过短无实义文本也会被忽略。
+
+无聊唤醒的扫描与冷却分离：`boredom_scan_interval` 只控制定时扫描周期（修改后经 Web Admin 保存或 `awakening_reload` 自动生效，无需重启）；`boredom_check_interval` 是群级成功唤醒后的冷却。进程启动后未观察到某群消息时该群沉寂状态未知，不会触发无聊唤醒；群取消无聊唤醒 opt-in 后其沉寂与冷却状态立即清除。
 
 被动唤醒会携带群内近期历史图片（延长、兴趣、相关性、答疑和无聊唤醒注入，兜底唤醒不注入）。
 

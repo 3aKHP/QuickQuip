@@ -18,6 +18,7 @@
       <div class="default-item"><span>兜底概率</span><strong>{{ data.defaults.fallback_probability }}</strong></div>
       <div class="default-item"><span>无聊沉寂</span><strong>{{ data.defaults.boredom_silence_seconds }}s</strong></div>
       <div class="default-item"><span>无聊概率</span><strong>{{ data.defaults.boredom_probability }}</strong></div>
+      <div class="default-item"><span>无聊扫描</span><strong>{{ scanIntervalText }}</strong></div>
       <div class="default-item"><span>相关阈值</span><strong>{{ data.defaults.relevance_threshold }}</strong></div>
       <div class="default-item"><span>答疑阈值</span><strong>{{ data.defaults.qa_threshold }}</strong></div>
     </div>
@@ -192,6 +193,13 @@ const draft = ref<Record<FieldKey, string>>(emptyDraft())
 const originalDraft = ref<Record<FieldKey, string>>(emptyDraft())
 
 const groups = computed(() => data.value?.groups || [])
+// 扫描周期为全局字段：未设置时回退检查间隔（后端 effective_boredom_scan_interval 同源规则）
+const scanIntervalText = computed(() => {
+  const defaults = data.value?.defaults || {}
+  const scan = defaults.boredom_scan_interval ?? defaults.boredom_check_interval ?? 300
+  const suffix = defaults.boredom_scan_interval == null ? '（回退）' : ''
+  return `${scan}s${suffix}`
+})
 const selectedGroup = computed(() => groups.value.find((g: any) => g.group_id === selectedGroupId.value) || null)
 const topicsText = computed(() => {
   const topics = selectedGroup.value?.settings?.interest_topics || []

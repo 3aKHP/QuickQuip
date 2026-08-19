@@ -14,7 +14,11 @@ from quickquip.app.message_pipeline import (
     weekly_enabled_groups,
     monthly_enabled_groups,
 )
-from quickquip.adapters.nonebot.awakening_plugin import boredom_enabled_groups
+from quickquip.adapters.nonebot.awakening_plugin import (
+    boredom_enabled_groups,
+    register_boredom_scan_job,
+    reload_boredom_groups,
+)
 from quickquip.adapters.nonebot.web_admin_actions import process_web_admin_actions
 from quickquip.chat.awakening import reload_config as reload_awakening_config
 from quickquip.common.paths import CONFIG_AWAKENING_TOML
@@ -43,16 +47,23 @@ def _init_mtimes() -> None:
             _watched[str(path)] = 0.0
 
 
+def _reload_awakening_toml() -> None:
+    """重载 awakening.toml 并以同一 job ID 重注册扫描任务，
+    使新的 boredom_scan_interval 立即生效。"""
+    reload_awakening_config()
+    register_boredom_scan_job()
+
+
 def _reload_if_changed() -> None:
     """H1: 检测状态文件是否被 web-admin 进程修改，有变化则 reload。"""
     checks = [
         (RULE_SWITCH_PATH, lambda: rule_switch.load(RULE_SWITCH_PATH)),
-        (CONFIG_AWAKENING_TOML, reload_awakening_config),
+        (CONFIG_AWAKENING_TOML, _reload_awakening_toml),
         (daily_enabled_groups.path, daily_enabled_groups.load),
         (daily_briefing_enabled_groups.path, daily_briefing_enabled_groups.load),
         (weekly_enabled_groups.path, weekly_enabled_groups.load),
         (monthly_enabled_groups.path, monthly_enabled_groups.load),
-        (boredom_enabled_groups.path, boredom_enabled_groups.load),
+        (boredom_enabled_groups.path, reload_boredom_groups),
     ]
     for path, reload_fn in checks:
         key = str(path)

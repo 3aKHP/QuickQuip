@@ -412,7 +412,8 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
   - `fallback_probability`
   - `boredom_silence_seconds`
   - `boredom_probability`
-  - `boredom_check_interval`
+  - `boredom_scan_interval`（全局扫描周期；未设置回退 `boredom_check_interval`）
+  - `boredom_check_interval`（群级成功唤醒冷却）
   - `boredom_dnd_start`
   - `boredom_dnd_end`
   - `interest_topics`

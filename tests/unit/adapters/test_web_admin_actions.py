@@ -52,7 +52,7 @@ async def test_awakening_reload_action_reloads_config_and_rules(monkeypatch):
         )
     )
 
-    assert result == {"ok": True, "summary": {"rules": 1}}
+    assert result == {"ok": True, "summary": {"rules": 1}, "boredom_scan_interval": None}
     assert calls == ["awakening", "rules"]
 
 

@@ -3,7 +3,8 @@ import logging
 try:
     import nonebot
     from nonebot_plugin_apscheduler import scheduler
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ValueError):
+    # 未安装插件或 NoneBot driver 尚未初始化（如测试环境）时优雅降级
     nonebot = None
     scheduler = None
 
