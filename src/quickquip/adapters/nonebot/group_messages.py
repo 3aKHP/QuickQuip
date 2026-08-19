@@ -70,8 +70,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
         voice_transcripts = await transcribe_message_records(bot, message)
         voice_text = append_voice_transcripts("", voice_transcripts)
-        passive_trigger_text = rendered_message.text
         rendered_text = append_voice_transcripts(rendered_message.text, voice_transcripts)
+        passive_trigger_text = rendered_text
 
         stats_tracker.record_message(group_id, user_id, sender_name)
         record_group_message(group_id, user_id, sender_name, rendered_text)
@@ -195,7 +195,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             if not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
                 return
-            trigger_context = recent_messages.list_recent(group_id, limit=20)
+            # trigger_context was captured before the current message was stored,
+            # so the passive prompt's user text stays the only copy of it.
             passive_image_urls = select_passive_trigger_image_urls(
                 awakening_result,
                 rendered_message.image_urls,

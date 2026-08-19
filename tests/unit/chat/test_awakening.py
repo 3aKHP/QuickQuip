@@ -235,6 +235,35 @@ class TestBotMessageCache:
         c.clear_group("g1")
         assert c.get_recent("g1") == []
 
+    def test_ttl_visible_before_30_minutes(self):
+        c = BotMessageCache()
+        c.add("g1", "fresh", now=1000.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 - 1.0) == ["fresh"]
+
+    def test_ttl_boundary_keeps_entry(self):
+        c = BotMessageCache()
+        c.add("g1", "edge", now=1000.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0) == ["edge"]
+
+    def test_ttl_evicts_after_30_minutes(self):
+        c = BotMessageCache()
+        c.add("g1", "old", now=1000.0)
+        c.add("g1", "new", now=1000.0 + 60.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 + 1.0) == ["new"]
+
+    def test_ttl_eviction_keeps_order(self):
+        c = BotMessageCache()
+        c.add("g1", "a", now=100.0)
+        c.add("g1", "b", now=200.0)
+        c.add("g1", "c", now=300.0)
+        assert c.get_recent("g1", now=200.0 + 30 * 60.0 + 0.5) == ["c"]
+
+    def test_all_expired_entry_removes_group(self):
+        c = BotMessageCache()
+        c.add("g1", "old", now=1000.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 + 1.0) == []
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 + 2.0) == []
+
 
 # =========================================================================
 # AwakeningState
@@ -296,11 +325,55 @@ class TestExtractWords:
         assert len(words) > 0
         assert any("天气" in w for w in words)
 
+    def test_english_words_normalized(self):
+        words = _extract_words("Deploy the Kubernetes cluster")
+        assert "deploy" in words
+        assert "kubernetes" in words
+        assert "cluster" in words
+
+    def test_numbers_extracted(self):
+        words = _extract_words("upgrade to python 3.12")
+        assert "python" in words
+        assert "3" in words
+        assert "12" in words
+
+    def test_code_identifiers_kept_intact(self):
+        words = _extract_words("run pip_install_deps in GitHub Actions")
+        assert "pip_install_deps" in words
+        assert "github" in words
+        assert "actions" in words
+
+    def test_camel_case_identifier(self):
+        words = _extract_words("fix WebSocketError retry")
+        assert "websocketerror" in words
+        assert "retry" in words
+
+    def test_case_insensitive_overlap(self):
+        assert "pytest" in _extract_words("use PYTEST fixtures")
+        assert "pytest" in _extract_words("pytest.ini 配置")
+
+    def test_url_fragments_not_tokenized(self):
+        words = _extract_words("看这个 https://example.com/foo 很有意思")
+        assert "https" not in words
+        assert "example" not in words
+        assert "com" not in words
+
+    def test_voice_transcript_content_participates(self):
+        words = _extract_words("[语音转文字：Kubernetes 部署又失败了]")
+        assert "kubernetes" in words
+        assert any("部署" in w or "失败" in w for w in words)
+
+    def test_structural_placeholders_not_tokenized(self):
+        assert _extract_words("[图片][语音][CQ:at,qq=123]") == set()
+
     def test_empty_text(self):
         assert _extract_words("") == set()
 
-    def test_no_cjk(self):
-        assert _extract_words("hello world 123") == set()
+    def test_no_cjk_yields_latin_tokens(self):
+        assert _extract_words("hello world 123") == {"hello", "world", "123"}
+
+    def test_latin_stopwords_dropped(self):
+        assert _extract_words("what is this") == set()
 
 
 class TestWordOverlapRatio:
@@ -437,6 +510,21 @@ class TestPassiveTriggerImages:
         assert "不要编造具体图像细节" in with_image
         assert "这条触发消息包含图片" not in without_image
         assert build_passive_trigger_raw_user_text(result, ["https://example.test/a.png"]) == "[图片] 这是什么？"
+
+    def test_raw_user_text_preserves_voice_transcript(self):
+        voice_only = AwakeningTriggerResult(
+            rule_name=_RULE_RELEVANCE,
+            prompt="[语音转文字：Kubernetes 部署又失败了]",
+            trigger_reason="相关性唤醒",
+        )
+        assert build_passive_trigger_raw_user_text(voice_only, []) == "Kubernetes 部署又失败了"
+
+        mixed = AwakeningTriggerResult(
+            rule_name=_RULE_RELEVANCE,
+            prompt="看这个\n[语音2转文字：第二段]",
+            trigger_reason="相关性唤醒",
+        )
+        assert build_passive_trigger_raw_user_text(mixed, []) == "看这个 第二段"
 
 
 # =========================================================================
@@ -667,6 +755,75 @@ class TestCheckRelevance:
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
         assert result is None
+        svc.quick_judge.assert_awaited_once()
+
+    def test_english_overlap_enters_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "the Kubernetes deployment failed with ImagePullBackOff")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        result = asyncio.run(
+            check_relevance("g1", "u1", "Kubernetes ImagePullBackOff again?", settings, svc, s)
+        )
+        assert result is not None
+        svc.quick_judge.assert_awaited_once()
+
+    def test_code_identifier_overlap_enters_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "跑 pip_install_deps 的时候 warnings 一堆")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        result = asyncio.run(
+            check_relevance("g1", "u1", "pip_install_deps 又 warnings 了吗", settings, svc, s)
+        )
+        assert result is not None
+        svc.quick_judge.assert_awaited_once()
+
+    def test_non_overlapping_english_skips_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "the Kubernetes deployment failed with ImagePullBackOff")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "lakers won the game last night", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge.assert_not_called()
+
+    def test_shared_url_alone_does_not_pass_fast_filter(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "看这个 https://example.com/a 很有意思")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "我上传到 https://example.com/b 了", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge.assert_not_called()
+
+    def test_threshold_one_disables_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "Kubernetes ImagePullBackOff")
+        settings = _make_settings(relevance_threshold=1.0)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "Kubernetes ImagePullBackOff?", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge.assert_not_called()
+
+    def test_threshold_middle_value_uses_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "Kubernetes deployment failed")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        result = asyncio.run(
+            check_relevance("g1", "u1", "Kubernetes deployment again?", settings, svc, s)
+        )
+        assert result is not None
         svc.quick_judge.assert_awaited_once()
 
 

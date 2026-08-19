@@ -14,7 +14,7 @@ from typing import Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
@@ -213,23 +213,39 @@ def reload_config(path: str | Path | None = None) -> None:
 
 
 class BotMessageCache:
-    """Per-group cache of recent bot reply texts for relevance checking."""
+    """Per-group cache of recent bot reply texts for relevance checking.
 
-    __slots__ = ("_messages",)
+    Entries older than the recent-context TTL (monotonic clock) are evicted
+    lazily on read; the window is shared with ``RecentMessageBuffer``.
+    """
+
+    __slots__ = ("_messages", "_ttl_seconds")
     _MAX_PER_GROUP = 5
 
-    def __init__(self) -> None:
-        self._messages: dict[str, deque[str]] = {}
+    def __init__(self, *, ttl_seconds: float = RECENT_CONTEXT_TTL_SECONDS) -> None:
+        self._messages: dict[str, deque[tuple[str, float]]] = {}
+        self._ttl_seconds = ttl_seconds
 
-    def add(self, group_id: int | str, text: str) -> None:
+    def add(self, group_id: int | str, text: str, *, now: float | None = None) -> None:
         gid = str(group_id)
         if gid not in self._messages:
             self._messages[gid] = deque(maxlen=self._MAX_PER_GROUP)
-        if text.strip():
-            self._messages[gid].append(text.strip())
+        stripped = text.strip()
+        if stripped:
+            self._messages[gid].append((stripped, monotonic() if now is None else now))
 
-    def get_recent(self, group_id: int | str) -> list[str]:
-        return list(self._messages.get(str(group_id), []))
+    def get_recent(self, group_id: int | str, *, now: float | None = None) -> list[str]:
+        gid = str(group_id)
+        queue = self._messages.get(gid)
+        if queue is None:
+            return []
+        current = monotonic() if now is None else now
+        while queue and (current - queue[0][1]) > self._ttl_seconds:
+            queue.popleft()
+        if not queue:
+            del self._messages[gid]
+            return []
+        return [text for text, _ in queue]
 
     def clear_group(self, group_id: int | str) -> None:
         self._messages.pop(str(group_id), None)
@@ -381,6 +397,13 @@ _EXTEND_REJECT_TEXTS = {
 # Stopwords for word overlap calculation
 _STOPWORDS = frozenset("的了是在我你他她它们吗呢啊吧呀哦嘛嗯么这那就也都还不")
 
+# English stopwords filtered from latin token overlap (mirrors the Chinese set)
+_LATIN_STOPWORDS = frozenset(
+    "a an and are as at be been but by can com did do does for get go got had has have he her his how http "
+    "https i if in io is it its just me my net no not ok of on or org our she so that the their them these "
+    "they this those to use used was we were what when where which who why will with www you your".split()
+)
+
 
 def _is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None) -> bool:
     if not dnd_start or not dnd_end:
@@ -432,6 +455,14 @@ def _strip_structural_message_parts(text: str) -> str:
     cleaned = _URL_RE.sub(" ", cleaned)
     cleaned = _PLACEHOLDER_RE.sub(" ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+_VOICE_TRANSCRIPT_RE = re.compile(r"\[语音(?:\d+)?转文字：([^\]]+)\]")
+
+
+def _replace_voice_transcripts(text: str) -> str:
+    """把语音转写标记替换为其中的转写文本：转写是用户内容，不是结构占位符。"""
+    return _VOICE_TRANSCRIPT_RE.sub(lambda m: m.group(1).strip(), text)
 
 
 def _is_extend_eligible_message(message_text: str) -> bool:
@@ -489,19 +520,30 @@ def select_passive_trigger_image_urls(
 
 
 def build_passive_trigger_raw_user_text(result: AwakeningTriggerResult, image_urls: list[str]) -> str:
-    text = result.prompt.strip()
+    text = _replace_voice_transcripts(result.prompt.strip())
     if image_urls:
         return text
     return _strip_structural_message_parts(text)
 
 
+# Normalized latin/digit runs: english words, numbers and code identifiers
+# (snake_case, camelCase, __dunder__) all stay intact as single tokens.
+_LATIN_TOKEN_RE = re.compile(r"[a-z_][a-z0-9_]*|\d+", re.IGNORECASE)
+
+
 def _extract_words(text: str) -> set[str]:
-    """Extract meaningful Chinese characters/bigrams from text (no jieba needed)."""
+    """Extract meaningful tokens from text: Chinese unigram/bigram plus
+    normalized english words, numbers and code identifiers. URLs, CQ codes
+    and structural placeholders are stripped first; voice transcript markers
+    are replaced by their content so spoken words still participate."""
+    cleaned = _strip_structural_message_parts(_replace_voice_transcripts(text))
+    words: set[str] = {
+        token
+        for token in _LATIN_TOKEN_RE.findall(cleaned.lower())
+        if token not in _LATIN_STOPWORDS
+    }
     # Keep only CJK characters, then extract bigrams + unigrams
-    chars = [c for c in text if "一" <= c <= "鿿"]
-    if not chars:
-        return set()
-    words: set[str] = set()
+    chars = [c for c in cleaned if "一" <= c <= "鿿"]
     for c in chars:
         if c not in _STOPWORDS:
             words.add(c)

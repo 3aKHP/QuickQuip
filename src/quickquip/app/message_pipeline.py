@@ -31,6 +31,7 @@ from quickquip.chat.config import (
     CHAIN_GAME_CONFIGS,
     RATE_LIMIT_RULES,
     RATE_LIMIT_WINDOW_SECONDS,
+    RECENT_CONTEXT_TTL_SECONDS,
     SLEEP_TARGET,
     SLEEP_WORDS,
     WAKE_TARGET,
@@ -109,7 +110,7 @@ good_girl_chain = GoodGirlChainManager()
 custom_chain_games = ChainGameManager([ChainGameDef.from_dict(d) for d in CHAIN_GAME_CONFIGS])
 stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
-recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
+recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=RECENT_CONTEXT_TTL_SECONDS)
 message_deduper = RecentMessageDeduper()
 awakening_state = _get_awakening_state()
 

@@ -9,6 +9,10 @@ logger = logging.getLogger(__name__)
 BEIJING_TIMEZONE = "Asia/Shanghai"
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
 
+# 短期最近消息上下文窗口（秒）：RecentMessageBuffer 的 TTL 与唤醒相关性判定
+# 使用的 BotMessageCache TTL 共用同一来源，两侧不允许静默漂移。
+RECENT_CONTEXT_TTL_SECONDS = 30 * 60
+
 WAKE_WORDS = {"起床", "早安", "醒了", "睡醒了", "起了", "苏醒"}
 SLEEP_WORDS = {"晚安", "睡觉", "睡了", "睡啦", "困了", "眠了"}
 
