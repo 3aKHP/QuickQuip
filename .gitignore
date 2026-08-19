@@ -41,6 +41,9 @@ uv.lock
 .claude/
 CLAUDE.local.md
 
+#ZCode
+.zcode/
+
 # Persistent data
 data/
 llm_about/**/*.yaml
