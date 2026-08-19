@@ -110,8 +110,11 @@ class AutoMemoryMixin:
         canonical_name: str = "",
         user_text: str,
         assistant_text: str,
+        persona_id: str = "",
     ) -> None:
-        set_usage_scope("auto_memory", group_id=scope_key)
+        # persona 由调用方显式传入：create_task 复制的父 context 会被下面的
+        # set_usage_scope 覆盖，不能依赖任务外 ContextVar 残留。
+        set_usage_scope("auto_memory", group_id=scope_key, persona_id=persona_id or None)
         try:
             # ── quality gates ──────────────────────────────────────
             if not (user_text.strip() and assistant_text.strip()):

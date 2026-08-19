@@ -892,3 +892,34 @@ async def test_non_vision_strips_forward_images(wired_service, patch_provider_bu
         if msg.role == "user":
             assert msg.image_urls == [], "Non-VLM must strip forwarded images"
     assert "stub description of https://example.test/forward.png" in request.messages[-1].content
+
+
+async def test_generate_reply_usage_scope_carries_group_and_persona(
+    wired_service, patch_provider_builder, monkeypatch
+):
+    """#109-A：聊天主链路的 provider 调用运行在带 group/persona 归因的 scope 内。"""
+    import contextlib
+
+    import quickquip.llm.service as service_module
+    from tests.fixtures.provider_stubs import StubProviderClient
+
+    calls: list[tuple] = []
+
+    @contextlib.contextmanager
+    def _record(feature, **kwargs):
+        calls.append((feature, kwargs))
+        yield
+
+    monkeypatch.setattr(service_module, "usage_scope", _record)
+    stub_client = StubProviderClient()
+    patch_provider_builder(lambda provider: stub_client)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是区吗？",
+        recent_messages=[],
+    )
+
+    assert ("chat", {"group_id": "1001", "persona_id": "default"}) in calls

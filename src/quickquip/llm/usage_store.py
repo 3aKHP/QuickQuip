@@ -23,6 +23,10 @@ _SQLITE_BUSY_RETRY_DELAY_SECONDS = 0.1
 _SQLITE_BUSY_RETRY_ATTEMPTS = 100
 _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
+# NULL 维度桶（provider/model/feature/group/persona）统一显示标签，由后端下发；
+# 它不是任何列的真实值，不能作为筛选条件传给 API。
+UNATTRIBUTED_LABEL = "(未归因)"
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -156,6 +160,7 @@ class LLMUsageStore:
                     CREATE INDEX IF NOT EXISTS idx_usage_feature  ON llm_usage_events(feature, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_group    ON llm_usage_events(group_id, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_model    ON llm_usage_events(model, ts DESC);
+                    CREATE INDEX IF NOT EXISTS idx_usage_persona  ON llm_usage_events(persona_id, ts DESC);
                     """
                 )
             self._schema_ready = True
@@ -218,6 +223,8 @@ class LLMUsageStore:
                 "by_feature": self._group_by(conn, "feature", where, params),
                 "by_model": self._group_by(conn, "model", where, params),
                 "by_group": self._group_by(conn, "group_id", where, params),
+                "by_persona": self._group_by(conn, "persona_id", where, params),
+                "unattributed_label": UNATTRIBUTED_LABEL,
                 "unpriced_calls_count": unpriced["c"],
                 "unpriced_tokens_total": unpriced["t"],
                 "error_count": state_counts.get("error", 0),
@@ -298,7 +305,7 @@ class LLMUsageStore:
             params,
         ).fetchall()
         return [
-            {"key": r["k"] if r["k"] is not None else "(未归因)", "cost": round(r["cost"], 6), "calls": r["calls"], "tokens": r["tokens"], "errors": r["errors"]}
+            {"key": r["k"] if r["k"] is not None else UNATTRIBUTED_LABEL, "cost": round(r["cost"], 6), "calls": r["calls"], "tokens": r["tokens"], "errors": r["errors"]}
             for r in rows
         ]
 
@@ -326,12 +333,35 @@ class LLMUsageStore:
     def _where(cutoff: str, filters: dict[str, str | None]) -> tuple[str, list[object]]:
         clauses = ["ts >= ?"]
         params: list[object] = [cutoff]
-        for key in ("provider_id", "model", "feature", "group_id", "state"):
+        for key in ("provider_id", "model", "feature", "group_id", "persona_id", "state"):
             value = filters.get(key)
             if value:
                 clauses.append(f"{key} = ?")
                 params.append(value)
         return " AND ".join(clauses), params
+
+    def dimensions(self, cutoff: str) -> dict:
+        """range 内可选筛选维度。仅受 cutoff 约束，不受页面其它筛选影响；
+        NULL 不返回（不可筛选，由 unattributed_label 统一显示）。"""
+        self._ensure_schema()
+        with self.connect() as conn:
+
+            def distinct(col: str) -> list[str]:
+                rows = conn.execute(
+                    f"SELECT DISTINCT {col} AS v FROM llm_usage_events "
+                    f"WHERE ts >= ? AND {col} IS NOT NULL ORDER BY v",
+                    (cutoff,),
+                ).fetchall()
+                return [r["v"] for r in rows]
+
+            return {
+                "providers": distinct("provider_id"),
+                "models": distinct("model"),
+                "features": distinct("feature"),
+                "groups": distinct("group_id"),
+                "personas": distinct("persona_id"),
+                "unattributed_label": UNATTRIBUTED_LABEL,
+            }
 
     def events(
         self,

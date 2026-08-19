@@ -2,7 +2,7 @@
   <div class="usage-view">
     <UiPageHeader title="LLM 用量与成本" subtitle="按请求观察 token、成本、成功率与耗时">
       <template #actions>
-        <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="reload" />
+        <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="changeRange" />
         <UiButton :loading="loading" icon="RefreshCw" @click="reload">刷新</UiButton>
       </template>
     </UiPageHeader>
@@ -24,6 +24,10 @@
       <select v-model="filters.group" aria-label="群筛选" @change="reload">
         <option value="">全部群</option>
         <option v-for="item in dimensionOptions.group" :key="item" :value="item">{{ item }}</option>
+      </select>
+      <select v-model="filters.persona" aria-label="人格筛选" @change="reload">
+        <option value="">全部人格</option>
+        <option v-for="item in dimensionOptions.persona" :key="item" :value="item">{{ item }}</option>
       </select>
       <select v-model="filters.state" aria-label="状态筛选" @change="reload">
         <option value="">全部状态</option>
@@ -78,6 +82,7 @@
             <div v-if="expandedId === event.id" class="event-detail" @click.stop>
               <dl>
                 <div><dt>时间</dt><dd>{{ formatTs(event.ts) }}</dd></div>
+                <div><dt>人格</dt><dd>{{ event.persona_id || UNATTRIBUTED_KEY }}</dd></div>
                 <div><dt>耗时</dt><dd>{{ fmtDuration(event.duration_ms) }}</dd></div>
                 <div><dt>输入 / 输出</dt><dd>{{ fmtNum(event.input_tokens ?? 0) }} / {{ fmtNum(event.output_tokens ?? 0) }}</dd></div>
                 <div><dt>新鲜输入</dt><dd>{{ fmtNum(event.fresh_input_tokens ?? 0) }}</dd></div>
@@ -111,22 +116,25 @@ import UiStatCard from '../components/ui/UiStatCard.vue'
 import type { ECOption, ECElementEvent } from '../charts/echarts'
 import { useChartTheme } from '../composables/useChartTheme'
 import {
+  fetchLlmUsageDimensions,
   fetchLlmUsageEvents,
   fetchLlmUsageSummary,
   fetchLlmUsageTimeline,
   type LlmUsageSummary,
   type TimelinePoint,
   type UsageBucket,
+  type UsageDimensions,
   type UsageEvent,
   type UsageFilters,
   type UsageMetric,
 } from '../api/llmUsage'
 
-type BreakdownKey = 'provider' | 'model' | 'feature' | 'group'
+type BreakdownKey = 'provider' | 'model' | 'feature' | 'group' | 'persona'
 
 const range = ref('7d')
 const metric = ref<UsageMetric>('cost')
 const data = ref<LlmUsageSummary | null>(null)
+const dimensions = ref<UsageDimensions | null>(null)
 const timeline = ref<TimelinePoint[]>([])
 const events = ref<UsageEvent[]>([])
 const nextCursor = ref<string | null>(null)
@@ -135,7 +143,7 @@ const loading = ref(false)
 const eventsLoading = ref(false)
 const error = ref('')
 const breakdown = ref<BreakdownKey>('provider')
-const filters = reactive<UsageFilters>({ provider: '', model: '', feature: '', group: '', state: '' })
+const filters = reactive<UsageFilters>({ provider: '', model: '', feature: '', group: '', persona: '', state: '' })
 
 const { chartTheme } = useChartTheme()
 
@@ -157,36 +165,39 @@ const breakdownOptions: UiSegmentedOption<BreakdownKey>[] = [
   { value: 'model', label: '模型' },
   { value: 'feature', label: '功能' },
   { value: 'group', label: '群' },
+  { value: 'persona', label: '人格' },
 ]
 
-/** 维度筛选选项：并入历次 summary 的 by_* 桶（union），避免筛选后选项塌缩 */
-const dimensionOptions = reactive<Record<'provider' | 'model' | 'feature' | 'group', string[]>>({
+/** 维度筛选选项：独立 dimensions 端点下发，仅随 range 变化，不受页面筛选影响 */
+const dimensionOptions = reactive<{ provider: string[]; model: string[]; feature: string[]; group: string[]; persona: string[] }>({
   provider: [],
   model: [],
   feature: [],
   group: [],
+  persona: [],
 })
 
-function mergeDimensionOptions(summary: LlmUsageSummary) {
-  const sources: Record<keyof typeof dimensionOptions, UsageBucket[]> = {
-    provider: summary.by_provider,
-    model: summary.by_model,
-    feature: summary.by_feature,
-    group: summary.by_group,
-  }
-  for (const [dim, buckets] of Object.entries(sources) as [keyof typeof dimensionOptions, UsageBucket[]][]) {
-    const merged = new Set(dimensionOptions[dim])
-    for (const bucket of buckets) {
-      if (bucket.key === UNATTRIBUTED_KEY) continue
-      merged.add(bucket.key)
-    }
-    dimensionOptions[dim] = [...merged].sort()
-  }
+async function loadDimensions() {
+  try {
+    const requested = range.value
+    const result = await fetchLlmUsageDimensions(requested)
+    if (requested !== range.value) return // 快速切换 range 时丢弃过期响应
+    dimensions.value = result
+    dimensionOptions.provider = result.providers
+    dimensionOptions.model = result.models
+    dimensionOptions.feature = result.features
+    dimensionOptions.group = result.groups
+    dimensionOptions.persona = result.personas
+  } catch (e) { error.value = (e as Error).message || String(e) }
 }
+
+/** 后端把 NULL 维度值映射为该标签；它不是可筛选的真实值。
+ *  以后端下发的 unattributed_label 为准，空串仅是 dimensions 加载前的占位。 */
+const UNATTRIBUTED_KEY = computed(() => dimensions.value?.unattributed_label ?? data.value?.unattributed_label ?? '')
 
 const breakdownItems = computed<UsageBucket[]>(() => {
   if (!data.value) return []
-  const key = `by_${breakdown.value}` as 'by_provider' | 'by_model' | 'by_feature' | 'by_group'
+  const key = `by_${breakdown.value}` as 'by_provider' | 'by_model' | 'by_feature' | 'by_group' | 'by_persona'
   return data.value[key]
 })
 
@@ -230,9 +241,6 @@ const trendOption = computed<ECOption>(() => {
 
 const BAR_LIMIT = 12
 
-/** 后端 usage_store._group_by 把 NULL 维度值映射为该字面量；它不是可筛选的真实值 */
-const UNATTRIBUTED_KEY = '(未归因)'
-
 const barOption = computed<ECOption>(() => {
   const t = chartTheme.value
   const items = [...breakdownItems.value].slice(0, BAR_LIMIT).reverse()
@@ -245,7 +253,7 @@ const barOption = computed<ECOption>(() => {
       ...t.tooltip,
       formatter: (params: { name: string; value: number }) =>
         `${params.name}<br/>成本 $${fmtCost(params.value)}（${share(params.value)}）<br/>${
-          params.name === UNATTRIBUTED_KEY ? '未归因调用，不支持筛选' : '点击填入筛选器'
+          params.name === UNATTRIBUTED_KEY.value ? '未归因调用，不支持筛选' : '点击填入筛选器'
         }`,
     },
     xAxis: {
@@ -311,7 +319,7 @@ function pricingLabel(event: UsageEvent) {
 function onBarClick(params: ECElementEvent) {
   const name = params.name
   // (未归因) 桶对应后端 NULL 值，精确匹配永远为空结果，不做下钻
-  if (!name || name === UNATTRIBUTED_KEY) return
+  if (!name || name === UNATTRIBUTED_KEY.value) return
   filters[breakdown.value] = name
   reload()
 }
@@ -334,13 +342,22 @@ async function reload() {
   try {
     const [summary] = await Promise.all([fetchLlmUsageSummary(range.value, filters), loadTimeline(), loadEvents()])
     data.value = summary
-    mergeDimensionOptions(summary)
   } catch (e) { error.value = (e as Error).message || String(e) } finally { loading.value = false }
+}
+
+function changeRange(value: string) {
+  range.value = value
+  // dimensions 只受 range 约束：range 变化时与数据并行刷新
+  void loadDimensions()
+  reload()
 }
 function loadMore() { return loadEvents(false) }
 function toggleEvent(id: number) { expandedId.value = expandedId.value === id ? null : id }
 
-onMounted(reload)
+onMounted(() => {
+  void loadDimensions()
+  reload()
+})
 </script>
 
 <style scoped>

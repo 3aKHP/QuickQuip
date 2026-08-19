@@ -1131,11 +1131,16 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         )
 
         try:
-            response = await self._run_tool_call_loop(
-                provider=provider,
-                request=request,
-                context=tool_context,
-            )
+            # 拿到群级 persona 后把聊天主链路升级为带人格归因的 scope；
+            # scope 生命周期与 provider 调用同处一个函数，退出即复位。
+            # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
+            # 与 auto_memory 等派生调用的归因口径一致。
+            with usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None):
+                response = await self._run_tool_call_loop(
+                    provider=provider,
+                    request=request,
+                    context=tool_context,
+                )
         except LLMProviderError as exc:
             return {
                 "reply": f"LLM 调用失败：{exc}",
@@ -1211,6 +1216,7 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
                     canonical_name=current_identity.canonical_name,
                     user_text=stored_prompt,
                     assistant_text=text,
+                    persona_id=settings.persona_id,
                 )
             )
 
