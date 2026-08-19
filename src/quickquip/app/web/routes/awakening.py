@@ -139,9 +139,10 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "qa_threshold",
     ]:
         value = defaults[field_name]
-        if value is None:
-            # 旧配置未写新键：物化回退值（boredom_check_interval），语义不变
-            value = effective_boredom_scan_interval(cfg)
+        if field_name == "boredom_scan_interval" and value is None:
+            # 未设置即不写键：保持「回退 boredom_check_interval」的动态语义，
+            # 不把回退值物化进托管文件
+            continue
         lines.append(f"{field_name} = {_toml_value(value)}")
 
     for group_id in sorted(cfg.group_overrides):
@@ -262,6 +263,8 @@ def list_awakening():
     return {
         "load_error": cfg.load_error,
         "defaults": asdict(cfg.defaults),
+        # 回退规则的单一来源：前端只消费生效值，不重复实现回退链
+        "effective_boredom_scan_interval": effective_boredom_scan_interval(cfg),
         "rules": [{"name": name, "label": label} for name, label in _AWAKENING_RULES],
         "groups": [_format_group(group_id) for group_id in _known_group_ids()],
     }

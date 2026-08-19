@@ -9,7 +9,6 @@ from quickquip.app.message_pipeline import (
     reload_chat_rules_pipeline,
 )
 from quickquip.app.web.action_queue import WebAdminAction, action_queue
-from quickquip.chat.awakening import reload_config as reload_awakening_config
 from quickquip.chat.daily_briefing import normalize_period
 
 _SCOPE_KEY_RE = re.compile(r"^(?:\d{5,12}|private:\d{5,15})$")
@@ -67,11 +66,10 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
         return {"ok": True, "summary": summary}
 
     if action.action_type == "awakening_reload":
-        reload_awakening_config()
-        # 同一 job ID 重注册，使新的 boredom_scan_interval 无需重启立即生效
-        from quickquip.adapters.nonebot.awakening_plugin import register_boredom_scan_job
+        # 「重载配置 → 同一 job ID 重注册」共享入口，新扫描周期立即生效
+        from quickquip.adapters.nonebot.awakening_plugin import reload_awakening_and_reschedule
 
-        scan_interval = register_boredom_scan_job()
+        scan_interval = reload_awakening_and_reschedule()
         summary = reload_chat_rules_pipeline()
         return {"ok": True, "summary": summary, "boredom_scan_interval": scan_interval}
 

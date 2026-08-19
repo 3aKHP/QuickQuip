@@ -28,6 +28,7 @@ from quickquip.chat.awakening import (
     effective_boredom_scan_interval,
     get_config,
     get_state,
+    reload_config,
     run_boredom_check,
 )
 
@@ -153,11 +154,18 @@ def register_boredom_scan_job(sched=None) -> int | None:
     return interval
 
 
+def reload_awakening_and_reschedule() -> int | None:
+    """「重载 awakening.toml → 同一 job ID 重注册扫描任务」的唯一入口，
+    mtime 轮询与 awakening_reload 动作共用；返回生效的扫描周期秒数。"""
+    reload_config()
+    return register_boredom_scan_job()
+
+
 def reload_boredom_groups() -> None:
     """重载 opt-in 集合并清理由此取消 opt-in 群的唤醒状态。
 
-    mtime 轮询（web-admin 写入）与进程内命令路径共用，保证取消 opt-in 后
-    群的沉寂/冷却状态不残留。
+    供 web-admin 写入触发的 mtime 轮询使用；进程内命令路径
+    （/awakening boredom off）直接调用 clear_boredom_state 清除。
     """
     before = set(boredom_enabled_groups.all_groups())
     boredom_enabled_groups.load()

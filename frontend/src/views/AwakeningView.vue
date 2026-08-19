@@ -193,12 +193,13 @@ const draft = ref<Record<FieldKey, string>>(emptyDraft())
 const originalDraft = ref<Record<FieldKey, string>>(emptyDraft())
 
 const groups = computed(() => data.value?.groups || [])
-// 扫描周期为全局字段：未设置时回退检查间隔（后端 effective_boredom_scan_interval 同源规则）
+// 扫描周期为全局字段：生效值由后端 effective_boredom_scan_interval 统一计算（单一来源），
+// 前端只消费，不重复实现回退链；「（回退）」标注表示新键未显式设置
 const scanIntervalText = computed(() => {
   const defaults = data.value?.defaults || {}
-  const scan = defaults.boredom_scan_interval ?? defaults.boredom_check_interval ?? 300
-  const suffix = defaults.boredom_scan_interval == null ? '（回退）' : ''
-  return `${scan}s${suffix}`
+  const scan = data.value?.effective_boredom_scan_interval ?? 300
+  const explicit = (defaults.boredom_scan_interval ?? 0) > 0
+  return `${scan}s${explicit ? '' : '（回退）'}`
 })
 const selectedGroup = computed(() => groups.value.find((g: any) => g.group_id === selectedGroupId.value) || null)
 const topicsText = computed(() => {
