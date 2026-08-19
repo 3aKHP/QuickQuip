@@ -275,9 +275,29 @@ def test_utc8_early_morning_row_lands_on_business_day(tmp_path):
     expected_day = early_business.strftime("%Y-%m-%d")
     bucket = next(point for point in timeline if point["date"] == expected_day)
     assert bucket["cost"] == 0.01
-    # UTC 日期标签（前一日）不应出现在网格里
+    # 01:30 (+08:00) 的 UTC 日期必为业务日期的前一天，且该 UTC 日桶成本为零
     utc_day = early_business.astimezone(timezone.utc).strftime("%Y-%m-%d")
-    assert utc_day == expected_day or all(point["date"] != utc_day or point["cost"] == 0.0 for point in timeline)
+    assert utc_day != expected_day
+    assert all(point["date"] != utc_day or point["cost"] == 0.0 for point in timeline)
+
+
+def test_1d_hourly_bucket_lands_on_business_hour(tmp_path):
+    """业务时区 00:30（UTC 前一日 16:30）的行落入 T00:00:00+08:00 小时桶。"""
+    store = LLMUsageStore(tmp_path / "u.db")
+    store.record({"provider_id": "early-hour", "protocol": "openai", "model": "m", "stream": 1,
+                  "cost_usd": 0.05, "priced": 1, "state": "ok"})
+    now_business = datetime.now(_BUSINESS_TZ)
+    early_business = now_business.replace(hour=0, minute=30, second=0, microsecond=0)
+    if early_business > now_business:
+        early_business -= timedelta(days=1)
+    _set_row_ts(store, "early-hour", early_business.astimezone(timezone.utc))
+
+    timeline = store.timeline(_cutoff(1), range_days=1, metric="cost")
+    assert len(timeline) == 24
+    midnight_bucket = early_business.replace(minute=0).strftime("%Y-%m-%dT%H:00:00+08:00")
+    by_date = {point["date"]: point["cost"] for point in timeline}
+    assert by_date[midnight_bucket] == 0.05
+    assert sum(by_date.values()) == 0.05  # 只有一行，其余 23 桶全为零
 
 
 def test_multi_day_window_uses_business_midnight_boundary(tmp_path):

@@ -301,7 +301,8 @@ function fmtCompact(value: number) {
 }
 function pct(value: number) { return `${(value * 100).toFixed(1)}%` }
 function fmtDuration(value: number | null) { return value == null ? '-' : value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${Math.round(value)} ms` }
-// 事件时间与趋势标签显式按业务时区（Asia/Shanghai）格式化，不随操作员浏览器时区变化
+// 事件时间与趋势标签显式按业务时区格式化，不随操作员浏览器时区变化。
+// 与后端 quickquip.common.constants.BEIJING_TIMEZONE 同源：后端时区调整时此处必须同步修改。
 const BUSINESS_TIMEZONE = 'Asia/Shanghai'
 function formatTs(value: string) { return new Date(value).toLocaleString('zh-CN', { timeZone: BUSINESS_TIMEZONE }) }
 function formatBucketLabel(value: string) {

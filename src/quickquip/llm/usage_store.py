@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.constants import BEIJING_TIMEZONE
 from quickquip.common.paths import LLM_USAGE_DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -26,9 +26,24 @@ _SQLITE_BUSY_RETRY_ATTEMPTS = 100
 _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 # 统计业务时区固定为项目既有的 Asia/Shanghai；数据库时间戳持续使用 UTC，
-# 仅在窗口边界与聚合分桶时换算。Asia/Shanghai 无夏令时，偏移恒为 UTC+8。
+# 仅在窗口边界与聚合分桶时换算。偏移后缀与 SQLite 修正子从同一时区推导，
+# 保证 SQL 分桶与桶标签锁步一致。
 _BUSINESS_TZ = ZoneInfo(BEIJING_TIMEZONE)
-_SQLITE_TZ_MODIFIER = "+8 hours"
+
+
+def _tz_offset_parts() -> tuple[str, int, int]:
+    offset = datetime.now(_BUSINESS_TZ).utcoffset() or timedelta(0)
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    absolute = abs(total_minutes)
+    return sign, absolute // 60, absolute % 60
+
+
+_TZ_SIGN, _TZ_HOURS, _TZ_MINUTES = _tz_offset_parts()
+_TZ_LABEL_SUFFIX = f"{_TZ_SIGN}{_TZ_HOURS:02d}:{_TZ_MINUTES:02d}"
+_SQLITE_TZ_MODIFIER = f"{_TZ_SIGN}{_TZ_HOURS} hours" + (
+    f" {_TZ_MINUTES} minutes" if _TZ_MINUTES else ""
+)
 
 # NULL 维度桶（provider/model/feature/group/persona）统一显示标签，由后端下发；
 # 它不是任何列的真实值，不能作为筛选条件传给 API。
@@ -258,13 +273,13 @@ class LLMUsageStore:
         effective_days = range_days or 7
         aligned_start = window_start(effective_days)
         if effective_days <= 1:
-            # 小时桶按业务时区打标签（+08:00），不再把本地桶伪装成 UTC Z 标签
+            # 小时桶按业务时区打标签（显式偏移后缀），不再把本地桶伪装成 UTC Z 标签
             bucket_expr = (
-                f"strftime('%Y-%m-%dT%H:00:00+08:00', ts, '{_SQLITE_TZ_MODIFIER}')"
+                f"strftime('%Y-%m-%dT%H:00:00{_TZ_LABEL_SUFFIX}', ts, '{_SQLITE_TZ_MODIFIER}')"
             )
             step = timedelta(hours=1)
             start = aligned_start.astimezone(_BUSINESS_TZ)
-            fmt = "%Y-%m-%dT%H:00:00+08:00"
+            fmt = f"%Y-%m-%dT%H:00:00{_TZ_LABEL_SUFFIX}"
         else:
             bucket_expr = f"strftime('%Y-%m-%d', ts, '{_SQLITE_TZ_MODIFIER}')"
             step = timedelta(days=1)

@@ -2,11 +2,11 @@ from datetime import time
 import logging
 import tomllib
 
+from quickquip.common.constants import BEIJING_TIMEZONE as BEIJING_TIMEZONE  # noqa: F401 — re-export 保持兼容
 from quickquip.common.paths import CHAT_RULES_TOML_PATH
 
 logger = logging.getLogger(__name__)
 
-BEIJING_TIMEZONE = "Asia/Shanghai"
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
 
 # 短期最近消息上下文窗口（秒）：RecentMessageBuffer 的 TTL 与唤醒相关性判定
