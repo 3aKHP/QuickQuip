@@ -146,7 +146,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `timeout` | 判定超时秒数 | `2.0` |
 | `max_tokens` | 判定最大输出 token | `64` |
 
-快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。
+快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。技术失败（超时、provider 异常、空正文、截断、无效 JSON）一律按未触发处理（fail-closed），不会写入 60 秒判定缓存；只有成功解析的业务 true/false 会进缓存。选用带 reasoning 的模型时，reasoning token 计入 `max_tokens` 且延迟更高，需要同时调大 `max_tokens`（如 256）与 `timeout`（如 6 秒），否则会出现「预算被思考耗尽、可见判定为空」与大面积超时。
 
 ### `[image_preprocessing]` — 非视觉模型图片转述
 
