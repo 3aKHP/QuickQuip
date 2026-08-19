@@ -897,16 +897,20 @@ async def test_non_vision_strips_forward_images(wired_service, patch_provider_bu
 async def test_generate_reply_usage_scope_carries_group_and_persona(
     wired_service, patch_provider_builder, monkeypatch
 ):
-    """#109-A：聊天主链路在解析群设置后把 usage scope 升级为带人格归因。"""
+    """#109-A：聊天主链路的 provider 调用运行在带 group/persona 归因的 scope 内。"""
+    import contextlib
+
     import quickquip.llm.service as service_module
     from tests.fixtures.provider_stubs import StubProviderClient
 
     calls: list[tuple] = []
 
+    @contextlib.contextmanager
     def _record(feature, **kwargs):
         calls.append((feature, kwargs))
+        yield
 
-    monkeypatch.setattr(service_module, "set_usage_scope", _record)
+    monkeypatch.setattr(service_module, "usage_scope", _record)
     stub_client = StubProviderClient()
     patch_provider_builder(lambda provider: stub_client)
 

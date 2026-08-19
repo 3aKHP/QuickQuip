@@ -179,7 +179,9 @@ const dimensionOptions = reactive<{ provider: string[]; model: string[]; feature
 
 async function loadDimensions() {
   try {
-    const result = await fetchLlmUsageDimensions(range.value)
+    const requested = range.value
+    const result = await fetchLlmUsageDimensions(requested)
+    if (requested !== range.value) return // 快速切换 range 时丢弃过期响应
     dimensions.value = result
     dimensionOptions.provider = result.providers
     dimensionOptions.model = result.models
@@ -189,8 +191,9 @@ async function loadDimensions() {
   } catch (e) { error.value = (e as Error).message || String(e) }
 }
 
-/** 后端把 NULL 维度值映射为该标签；它不是可筛选的真实值 */
-const UNATTRIBUTED_KEY = computed(() => dimensions.value?.unattributed_label ?? '(未归因)')
+/** 后端把 NULL 维度值映射为该标签；它不是可筛选的真实值。
+ *  以后端下发的 unattributed_label 为准，空串仅是 dimensions 加载前的占位。 */
+const UNATTRIBUTED_KEY = computed(() => dimensions.value?.unattributed_label ?? data.value?.unattributed_label ?? '')
 
 const breakdownItems = computed<UsageBucket[]>(() => {
   if (!data.value) return []

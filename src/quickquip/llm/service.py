@@ -76,7 +76,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import set_usage_scope, usage_scope
+from quickquip.llm.usage import usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
@@ -890,14 +890,6 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
                 "llm_used": False,
             }
 
-        # 外层 wrapper 的 usage_scope 在退出时统一复位；这里在拿到群级 persona 后
-        # 升级为带人格归因的 scope，聊天主链路及其派生调用按实际人格计量。
-        set_usage_scope(
-            "chat",
-            group_id=str(chat_id) if chat_type == "group" else None,
-            persona_id=settings.persona_id or None,
-        )
-
         provider = self.config.providers.get(settings.provider_id)
         if provider is None:
             return {
@@ -1139,11 +1131,16 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         )
 
         try:
-            response = await self._run_tool_call_loop(
-                provider=provider,
-                request=request,
-                context=tool_context,
-            )
+            # 拿到群级 persona 后把聊天主链路升级为带人格归因的 scope；
+            # scope 生命周期与 provider 调用同处一个函数，退出即复位。
+            # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
+            # 与 auto_memory 等派生调用的归因口径一致。
+            with usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None):
+                response = await self._run_tool_call_loop(
+                    provider=provider,
+                    request=request,
+                    context=tool_context,
+                )
         except LLMProviderError as exc:
             return {
                 "reply": f"LLM 调用失败：{exc}",

@@ -196,8 +196,6 @@ def test_dimensions_returns_all_values_within_range_only(tmp_path):
 
 
 def test_persona_index_created_and_idempotent(tmp_path):
-    import sqlite3
-
     store = LLMUsageStore(tmp_path / "u.db")
     _seed_personas(store)
     with sqlite3.connect(store.path) as conn:
