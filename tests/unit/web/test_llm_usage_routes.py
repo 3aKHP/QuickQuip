@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from quickquip.llm.usage_store import LLMUsageStore, window_start
+
+_BUSINESS_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def _seed(store: LLMUsageStore) -> None:
@@ -77,7 +80,7 @@ def test_timeline_range_filter_and_date(tmp_path):
     _seed_old(store)
     tl7 = store.timeline(_cutoff(7))
     assert len(tl7) == 1
-    assert tl7[0]["date"] == datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert tl7[0]["date"] == datetime.now(_BUSINESS_TZ).strftime("%Y-%m-%d")
     tl30 = store.timeline(_cutoff(30))
     assert len(tl30) == 2  # 今天 + 10 天前
 
@@ -113,9 +116,9 @@ def test_timeline_1d_returns_24_hourly_buckets(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     timeline = store.timeline(_cutoff(1), range_days=1, metric="requests")
     assert len(timeline) == 24
-    start = window_start(1)
-    assert timeline[0]["date"] == start.strftime("%Y-%m-%dT%H:00:00Z")
-    assert timeline[-1]["date"] == (start + timedelta(hours=23)).strftime("%Y-%m-%dT%H:00:00Z")
+    start = window_start(1).astimezone(_BUSINESS_TZ)
+    assert timeline[0]["date"] == start.strftime("%Y-%m-%dT%H:00:00+08:00")
+    assert timeline[-1]["date"] == (start + timedelta(hours=23)).strftime("%Y-%m-%dT%H:00:00+08:00")
 
 
 def test_summary_and_timeline_share_aligned_window(tmp_path):
@@ -246,3 +249,66 @@ def test_events_cursor_pagination(tmp_path):
     assert first["next_cursor"]
     second = store.events(cutoff=_cutoff(7), limit=2, cursor=int(first["next_cursor"]))
     assert len(second["items"]) == 1
+
+
+def _set_row_ts(store: LLMUsageStore, provider_id: str, ts: datetime) -> None:
+    with sqlite3.connect(store.path) as conn:
+        conn.execute(
+            "UPDATE llm_usage_events SET ts = ? WHERE provider_id = ?",
+            (ts.isoformat(), provider_id),
+        )
+
+
+def test_utc8_early_morning_row_lands_on_business_day(tmp_path):
+    """UTC+8 凌晨（UTC 前一日 17:00 后）的记录计入业务时区当日日桶。"""
+    store = LLMUsageStore(tmp_path / "u.db")
+    store.record({"provider_id": "early", "protocol": "openai", "model": "m", "stream": 1,
+                  "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.01, "priced": 1, "state": "ok"})
+    now_business = datetime.now(_BUSINESS_TZ)
+    # 业务时区今日 01:30 = UTC 前一日 17:30（跨业务日界的凌晨记录）
+    early_business = now_business.replace(hour=1, minute=30, second=0, microsecond=0)
+    if early_business > now_business:
+        early_business -= timedelta(days=1)
+    _set_row_ts(store, "early", early_business.astimezone(timezone.utc))
+
+    timeline = store.timeline(_cutoff(7), range_days=7, metric="cost")
+    expected_day = early_business.strftime("%Y-%m-%d")
+    bucket = next(point for point in timeline if point["date"] == expected_day)
+    assert bucket["cost"] == 0.01
+    # UTC 日期标签（前一日）不应出现在网格里
+    utc_day = early_business.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    assert utc_day == expected_day or all(point["date"] != utc_day or point["cost"] == 0.0 for point in timeline)
+
+
+def test_multi_day_window_uses_business_midnight_boundary(tmp_path):
+    """7 天窗口下界是业务时区零点：边界前一秒排除、边界内包含。"""
+    store = LLMUsageStore(tmp_path / "u.db")
+    store.record({"provider_id": "edge-in", "protocol": "openai", "model": "m", "stream": 1,
+                  "cost_usd": 1.0, "priced": 1, "state": "ok"})
+    store.record({"provider_id": "edge-out", "protocol": "openai", "model": "m", "stream": 1,
+                  "cost_usd": 99.0, "priced": 1, "state": "ok"})
+
+    start_business = window_start(7).astimezone(_BUSINESS_TZ)
+    assert start_business.hour == 0 and start_business.minute == 0
+    _set_row_ts(store, "edge-in", start_business.astimezone(timezone.utc))
+    _set_row_ts(store, "edge-out", start_business.astimezone(timezone.utc) - timedelta(seconds=1))
+
+    summary = store.summary(_cutoff(7))
+    assert summary["total_cost"] == 1.0  # 边界外一行被排除
+
+
+def test_summary_timeline_events_share_business_window(tmp_path):
+    """summary / timeline / events 在业务时区窗口下口径一致。"""
+    store = LLMUsageStore(tmp_path / "u.db")
+    store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1,
+                  "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.02, "priced": 1, "state": "ok"})
+    store.record({"provider_id": "q", "protocol": "openai", "model": "m", "stream": 1,
+                  "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.03, "priced": 1, "state": "ok"})
+    cutoff = _cutoff(7)
+    summary = store.summary(cutoff)
+    timeline = store.timeline(cutoff, range_days=7, metric="cost")
+    events = store.events(cutoff=cutoff)
+
+    assert summary["total_calls"] == 2
+    assert abs(sum(point["cost"] for point in timeline) - summary["total_cost"]) < 1e-9
+    assert len(events["items"]) == 2
