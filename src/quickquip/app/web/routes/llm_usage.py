@@ -28,8 +28,22 @@ def _days(range_key: str) -> int:
         raise HTTPException(status_code=422, detail="range must be one of 1d, 7d, 30d, 90d") from exc
 
 
-def _filters(provider: str | None, model: str | None, feature: str | None, group: str | None, state: str | None) -> dict[str, str | None]:
-    return {"provider_id": provider, "model": model, "feature": feature, "group_id": group, "state": state}
+def _filters(
+    provider: str | None,
+    model: str | None,
+    feature: str | None,
+    group: str | None,
+    persona: str | None,
+    state: str | None,
+) -> dict[str, str | None]:
+    return {
+        "provider_id": provider,
+        "model": model,
+        "feature": feature,
+        "group_id": group,
+        "persona_id": persona,
+        "state": state,
+    }
 
 
 @router.get("/llm-usage/summary")
@@ -39,11 +53,16 @@ async def get_summary(
     model: str | None = None,
     feature: str | None = None,
     group: str | None = Query(None, alias="group"),
+    persona: str | None = None,
     state: str | None = None,
 ):
 
     _days(range_)
-    return await asyncio.to_thread(usage_store.summary, _cutoff(range_), **_filters(provider, model, feature, group, state))
+    return await asyncio.to_thread(
+        usage_store.summary,
+        _cutoff(range_),
+        **_filters(provider, model, feature, group, persona, state),
+    )
 
 
 @router.get("/llm-usage/timeline")
@@ -54,6 +73,7 @@ async def get_timeline(
     model: str | None = None,
     feature: str | None = None,
     group: str | None = Query(None, alias="group"),
+    persona: str | None = None,
     state: str | None = None,
 ):
 
@@ -65,7 +85,7 @@ async def get_timeline(
         _cutoff(range_),
         range_days=days,
         metric=metric,
-        **_filters(provider, model, feature, group, state),
+        **_filters(provider, model, feature, group, persona, state),
     )
 
 
@@ -78,6 +98,7 @@ async def get_events(
     model: str | None = None,
     feature: str | None = None,
     group: str | None = Query(None, alias="group"),
+    persona: str | None = None,
     state: str | None = None,
 ):
 
@@ -87,7 +108,7 @@ async def get_events(
         cutoff=_cutoff(range_),
         limit=limit,
         cursor=cursor,
-        **_filters(provider, model, feature, group, state),
+        **_filters(provider, model, feature, group, persona, state),
     )
 
 
@@ -98,3 +119,11 @@ async def get_event(event_id: int):
     if event is None:
         raise HTTPException(status_code=404, detail="usage event not found")
     return event
+
+
+@router.get("/llm-usage/dimensions")
+async def get_dimensions(range_: str = Query("7d", alias="range")):
+    """可选筛选维度。仅受 range 约束，不受 provider/model/feature/group/persona/state 影响。"""
+
+    _days(range_)
+    return await asyncio.to_thread(usage_store.dimensions, _cutoff(range_))

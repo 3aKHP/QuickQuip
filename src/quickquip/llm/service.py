@@ -76,7 +76,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import usage_scope
+from quickquip.llm.usage import set_usage_scope, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
@@ -890,6 +890,14 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
                 "llm_used": False,
             }
 
+        # 外层 wrapper 的 usage_scope 在退出时统一复位；这里在拿到群级 persona 后
+        # 升级为带人格归因的 scope，聊天主链路及其派生调用按实际人格计量。
+        set_usage_scope(
+            "chat",
+            group_id=str(chat_id) if chat_type == "group" else None,
+            persona_id=settings.persona_id or None,
+        )
+
         provider = self.config.providers.get(settings.provider_id)
         if provider is None:
             return {
@@ -1211,6 +1219,7 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
                     canonical_name=current_identity.canonical_name,
                     user_text=stored_prompt,
                     assistant_text=text,
+                    persona_id=settings.persona_id,
                 )
             )
 

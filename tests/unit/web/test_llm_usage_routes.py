@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from quickquip.llm.usage_store import LLMUsageStore, window_start
 
 
@@ -133,6 +135,108 @@ def test_summary_and_timeline_share_aligned_window(tmp_path):
     timeline = store.timeline(cutoff, range_days=7, metric="cost")
     assert summary["total_calls"] == 1  # 网格外旧行不被汇总计入
     assert abs(sum(point["cost"] for point in timeline) - summary["total_cost"]) < 1e-9
+
+
+def _seed_personas(store: LLMUsageStore) -> None:
+    """chat 行带 persona（p1/p2），vision 行无 persona（NULL）。"""
+    store.record({"provider_id": "claude-main", "protocol": "claude", "model": "sonnet",
+                  "feature": "chat", "group_id": "g1", "persona_id": "p1", "stream": 1,
+                  "input_tokens": 100, "output_tokens": 50, "cost_usd": 0.001,
+                  "priced": 1, "state": "ok"})
+    store.record({"provider_id": "kimi", "protocol": "claude", "model": "kimi-k2",
+                  "feature": "chat", "group_id": "g1", "persona_id": "p2", "stream": 1,
+                  "input_tokens": 300, "output_tokens": 40, "cost_usd": 0.002,
+                  "priced": 1, "state": "ok"})
+    store.record({"provider_id": "gemini-main", "protocol": "gemini", "model": "pro",
+                  "feature": "vision", "group_id": None, "persona_id": None, "stream": 1,
+                  "input_tokens": 200, "output_tokens": 30, "cost_usd": 0.0005,
+                  "priced": 1, "state": "ok"})
+
+
+def test_summary_by_persona_aggregates_and_labels_null(tmp_path):
+    from quickquip.llm.usage_store import UNATTRIBUTED_LABEL
+
+    store = LLMUsageStore(tmp_path / "u.db")
+    _seed_personas(store)
+    s = store.summary(_cutoff(7))
+    keys = [b["key"] for b in s["by_persona"]]
+    assert "p1" in keys and "p2" in keys
+    assert UNATTRIBUTED_LABEL in keys
+    assert s["unattributed_label"] == UNATTRIBUTED_LABEL
+    # unattributed 桶只包含 NULL 行（vision 1 次），不会吞并已知人格
+    bucket = next(b for b in s["by_persona"] if b["key"] == UNATTRIBUTED_LABEL)
+    assert bucket["calls"] == 1
+
+
+def test_persona_filter_across_summary_timeline_events(tmp_path):
+    store = LLMUsageStore(tmp_path / "u.db")
+    _seed_personas(store)
+    cutoff = _cutoff(7)
+    assert store.summary(cutoff, persona_id="p1")["total_calls"] == 1
+    assert store.summary(cutoff, persona_id="p2")["total_calls"] == 1
+    tl = store.timeline(cutoff, range_days=7, metric="requests", persona_id="p2")
+    assert sum(p["value"] for p in tl) == 1
+    ev = store.events(cutoff=cutoff, persona_id="p1")
+    assert len(ev["items"]) == 1
+    assert ev["items"][0]["persona_id"] == "p1"
+
+
+def test_dimensions_returns_all_values_within_range_only(tmp_path):
+    store = LLMUsageStore(tmp_path / "u.db")
+    _seed_personas(store)
+    _seed_old(store)
+    d = store.dimensions(_cutoff(7))
+    assert d["providers"] == ["claude-main", "gemini-main", "kimi"]  # old-prov 被 range 排除
+    assert sorted(d["personas"]) == ["p1", "p2"]  # NULL 不作为可筛选值返回
+    assert d["groups"] == ["g1"]  # NULL group 不返回
+    assert d["unattributed_label"]
+    # 30d 窗口包含旧行
+    d30 = store.dimensions(_cutoff(30))
+    assert "old-prov" in d30["providers"]
+
+
+def test_persona_index_created_and_idempotent(tmp_path):
+    import sqlite3
+
+    store = LLMUsageStore(tmp_path / "u.db")
+    _seed_personas(store)
+    with sqlite3.connect(store.path) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert "idx_usage_persona" in names
+    store._ensure_schema()  # 再次初始化幂等，不重建、不清空
+    with sqlite3.connect(store.path) as conn:
+        rows = conn.execute("SELECT COUNT(*) FROM llm_usage_events").fetchone()
+    assert rows[0] == 3
+
+
+def _route_store(monkeypatch, tmp_path):
+    from quickquip.app.web.routes import llm_usage as route
+
+    store = LLMUsageStore(tmp_path / "route.db")
+    monkeypatch.setattr(route, "usage_store", store)
+    return route, store
+
+
+async def test_route_summary_passes_persona_filter(monkeypatch, tmp_path):
+    route, store = _route_store(monkeypatch, tmp_path)
+    _seed_personas(store)
+    result = await route.get_summary(
+        range_="7d", provider=None, model=None, feature=None, group=None, persona="p1", state=None,
+    )
+    assert result["total_calls"] == 1
+    assert [b["key"] for b in result["by_persona"]] == ["p1"]
+
+
+async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):
+    fastapi = pytest.importorskip("fastapi")
+
+    route, store = _route_store(monkeypatch, tmp_path)
+    _seed_personas(store)
+    d = await route.get_dimensions(range_="7d")
+    assert sorted(d["personas"]) == ["p1", "p2"]
+    with pytest.raises(fastapi.HTTPException) as exc_info:
+        await route.get_dimensions(range_="3d")
+    assert exc_info.value.status_code == 422
 
 
 def test_events_cursor_pagination(tmp_path):

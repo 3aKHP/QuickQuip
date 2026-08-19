@@ -91,3 +91,29 @@ async def test_daily_briefing_retries_on_max_tokens(monkeypatch):
     assert model_used == "b/m2"
     assert responses[0].requests[0].max_output_tokens == 8192
     assert responses[1].requests[0].max_output_tokens == 8192
+
+
+@pytest.mark.asyncio
+async def test_daily_briefing_usage_scope_carries_persona(monkeypatch):
+    calls: list[tuple] = []
+
+    def _record(feature, **kwargs):
+        calls.append((feature, kwargs))
+
+    monkeypatch.setattr("quickquip.llm.briefing.set_usage_scope", _record)
+    monkeypatch.setattr(
+        "quickquip.llm.briefing.build_provider_client",
+        lambda provider: _StubClient(LLMResponse(text="播报", model="m1", finish_reason="stop")),
+    )
+
+    await generate_daily_briefing(
+        context=_context(),
+        persona=PersonaConfig(id="nightwatch", display_name="守夜人", system_prompt="你是测试人格。"),
+        group_id="1001",
+        briefing_config=_llm_config().daily_briefing,
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+    )
+
+    assert ("briefing", {"group_id": "1001", "persona_id": "nightwatch"}) in calls
