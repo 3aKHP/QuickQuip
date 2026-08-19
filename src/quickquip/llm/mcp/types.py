@@ -83,7 +83,9 @@ def format_mcp_era_tag(negotiation: str, era: str) -> str:
     Single source of truth for chat status and Web Admin alike:
     strict mode (negotiation == era) renders once instead of "modern/modern";
     plain legacy with unknown/legacy era renders nothing; anything mixed
-    renders "negotiation/era".
+    renders "negotiation/era". ``/modern/unknown`` on a failed modern
+    negotiation is intentional: it distinguishes "configured modern but era
+    unresolved" from a plain legacy server.
     """
     if negotiation == era:
         if negotiation != "legacy":

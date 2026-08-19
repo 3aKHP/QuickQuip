@@ -153,7 +153,7 @@ def test_dashboard_config_only_branch_era_tag_empty(tmp_path, monkeypatch):
         lambda: (_ for _ in ()).throw(RuntimeError("no runtime")),
     )
 
-    server_entry = SimpleNamespace(id="cfg-server", transport="stdio", enabled=True)
+    server_entry = SimpleNamespace(id="cfg-server", transport="stdio", enabled=True, negotiation="modern")
 
     def _fake_load(_path):
         return SimpleNamespace(load_error=None, mcp=SimpleNamespace(servers=[server_entry]))
@@ -165,3 +165,8 @@ def test_dashboard_config_only_branch_era_tag_empty(tmp_path, monkeypatch):
     assert server["id"] == "cfg-server"
     assert server["runtime_available"] is False
     assert server["era_tag"] == ""
+    # 响应形状与状态文件/运行时分支一致：信息性字段齐全
+    assert server["negotiation"] == "modern"
+    assert server["era"] == "unknown"
+    assert server["failure_kind"] == ""
+    assert server["negotiated_protocol_version"] == ""

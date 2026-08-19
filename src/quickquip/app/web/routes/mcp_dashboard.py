@@ -108,6 +108,7 @@ def get_mcp_dashboard():
 
     servers = []
     for s in config.mcp.servers:
+        negotiation = getattr(s, "negotiation", "legacy")
         servers.append({
             "id": s.id,
             "transport": s.transport,
@@ -116,7 +117,11 @@ def get_mcp_dashboard():
             "tool_count": 0,
             "error": None,
             "detail": "runtime 未连接（等待 bot 进程写入状态文件）",
+            "negotiation": negotiation,
+            "era": "unknown",
             "era_tag": "",
+            "failure_kind": "",
+            "negotiated_protocol_version": "",
             "tools": [],
             "runtime_available": False,
         })
