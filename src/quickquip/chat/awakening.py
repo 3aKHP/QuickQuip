@@ -604,6 +604,53 @@ _QA_SYSTEM = (
     '仅输出 {"score": 0.0} 到 {"score": 1.0}，score 越高越需要回答。'
 )
 
+# quick-judge 结果类别：业务 true/false 可缓存；其余为技术失败，
+# fail-closed（不触发群聊回复）且不得写入判定缓存。
+_JUDGE_BUSINESS_TRUE = "business_true"
+_JUDGE_BUSINESS_FALSE = "business_false"
+_JUDGE_TIMEOUT = "timeout"
+_JUDGE_PROVIDER_ERROR = "provider_error"
+_JUDGE_EMPTY = "empty"
+_JUDGE_LENGTH = "length"
+_JUDGE_INVALID_JSON = "invalid_json"
+_JUDGE_NO_PROVIDER = "no_provider"
+
+
+@dataclass(slots=True)
+class QuickJudgeOutcome:
+    """awakening 层的 quick-judge 判定结果。
+
+    ``triggered`` 为 None 表示技术失败（fail-closed）；诊断字段与
+    QuickJudgeResult.to_diagnostic() 同源，另含解析状态，禁止携带
+    聊天正文、prompt、模型原始响应、凭据或 endpoint。
+    """
+
+    category: str
+    triggered: bool | None
+    diagnostic: dict
+
+
+def _parse_judge_text(text: str, threshold: float) -> bool | None:
+    """严格解析业务判定；无法解析返回 None（区别于业务 false）。"""
+    try:
+        data = extract_json_object(text)
+        if "score" in data:
+            return float(data["score"]) >= threshold
+        if "trigger" in data:
+            trigger = data["trigger"]
+            if isinstance(trigger, bool):
+                return trigger
+            if isinstance(trigger, str):
+                return trigger.strip().lower() == "true"
+            return bool(trigger)
+    except (TypeError, ValueError):
+        pass
+    if re.search(r'"trigger"\s*:\s*true', text, re.IGNORECASE):
+        return True
+    if re.search(r'"trigger"\s*:\s*false', text, re.IGNORECASE):
+        return False
+    return None
+
 
 async def _llm_judge(
     svc: Any,
@@ -612,23 +659,46 @@ async def _llm_judge(
     threshold: float,
     timeout: float,
     max_tokens: int,
-) -> bool:
-    """Call quick_judge with timeout. Returns True if score passes threshold."""
+) -> QuickJudgeOutcome:
+    """Call quick_judge with timeout; classify the outcome for cache/log policy."""
+    # quick_judge uses its own system_prompt; we embed ours in the user prompt
+    full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
+    started = monotonic()
     try:
-        # quick_judge uses its own system_prompt; we embed ours in the user prompt
-        full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
         with usage_scope("awakening_judge"):
-            raw = await asyncio.wait_for(
-                svc.quick_judge(full_prompt, max_tokens=max_tokens),
+            result = await asyncio.wait_for(
+                svc.quick_judge_detailed(full_prompt, max_tokens=max_tokens),
                 timeout=timeout,
             )
-        return _extract_json_trigger(raw, threshold)
     except asyncio.TimeoutError:
-        logger.debug("awakening: quick_judge timed out (%.1fs)", timeout)
-        return False
+        return QuickJudgeOutcome(
+            _JUDGE_TIMEOUT, None, {"outcome": _JUDGE_TIMEOUT, "duration_ms": round((monotonic() - started) * 1000, 2)}
+        )
     except Exception:
-        logger.debug("awakening: quick_judge failed", exc_info=True)
-        return False
+        logger.warning(
+            "awakening: quick_judge call failed (%s)", _JUDGE_PROVIDER_ERROR, exc_info=True
+        )
+        return QuickJudgeOutcome(
+            _JUDGE_PROVIDER_ERROR, None,
+            {"outcome": _JUDGE_PROVIDER_ERROR, "duration_ms": round((monotonic() - started) * 1000, 2)},
+        )
+
+    diagnostic = result.to_diagnostic()
+    if result.outcome in {_JUDGE_NO_PROVIDER, _JUDGE_PROVIDER_ERROR, _JUDGE_EMPTY, _JUDGE_LENGTH}:
+        logger.warning("awakening: quick_judge technical failure: %s", diagnostic)
+        return QuickJudgeOutcome(result.outcome, None, diagnostic)
+
+    parsed = _parse_judge_text(result.text, threshold)
+    if parsed is None:
+        merged = {**diagnostic, "parsed": False}
+        logger.warning("awakening: quick_judge unparsable output: %s", merged)
+        return QuickJudgeOutcome(_JUDGE_INVALID_JSON, None, merged)
+
+    merged = {**diagnostic, "parsed": True}
+    logger.debug("awakening: quick_judge resolved: %s", merged)
+    return QuickJudgeOutcome(
+        _JUDGE_BUSINESS_TRUE if parsed else _JUDGE_BUSINESS_FALSE, parsed, merged
+    )
 
 
 def _extract_json_trigger(raw: str, threshold: float = 0.5) -> bool:
@@ -821,13 +891,16 @@ async def check_relevance(
             trigger_instruction=_RELEVANCE_INSTRUCTION,
         )
 
-    # Stage 2: LLM judge
+    # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
     context_lines = [f"[bot 回复 {i+1}] {msg}" for i, msg in enumerate(bot_msgs)]
     user_prompt = "\n".join(context_lines) + f"\n[用户消息] {message_text.strip()}"
-    triggered = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens)
-    st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, triggered)
+    outcome = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens)
+    if outcome.category == _JUDGE_BUSINESS_TRUE:
+        st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, True)
+    elif outcome.category == _JUDGE_BUSINESS_FALSE:
+        st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, False)
 
-    if not triggered:
+    if outcome.triggered is not True:
         return None
 
     return AwakeningTriggerResult(
@@ -875,11 +948,14 @@ async def check_qa(
             trigger_instruction=_QA_INSTRUCTION,
         )
 
-    # Stage 2: LLM judge
-    triggered = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens)
-    st.llm_cache_set(_RULE_QA, group_id, cache_text, triggered)
+    # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
+    outcome = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens)
+    if outcome.category == _JUDGE_BUSINESS_TRUE:
+        st.llm_cache_set(_RULE_QA, group_id, cache_text, True)
+    elif outcome.category == _JUDGE_BUSINESS_FALSE:
+        st.llm_cache_set(_RULE_QA, group_id, cache_text, False)
 
-    if not triggered:
+    if outcome.triggered is not True:
         return None
 
     return AwakeningTriggerResult(

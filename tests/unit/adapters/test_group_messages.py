@@ -23,6 +23,7 @@ from quickquip.chat.awakening import (
 )
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 from quickquip.llm.identity import IdentityIndex
+from quickquip.llm.service import QuickJudgeResult
 from tests.fixtures.onebot import DummyMessage, record_seg, text_seg
 
 
@@ -117,6 +118,11 @@ def _make_svc(settings):
             }
         ),
         quick_judge=AsyncMock(return_value='{"trigger": true}'),
+        quick_judge_detailed=AsyncMock(
+            return_value=QuickJudgeResult(
+                text='{"trigger": true}', outcome="ok", provider_id="prov", model="test-model"
+            )
+        ),
         store=SimpleNamespace(update_last_assistant_message_id=lambda *a, **k: None),
         recent_message_buffer=RecentMessageBuffer(),
     )
@@ -201,7 +207,7 @@ async def test_explicit_trigger_keeps_pre_save_context(harness_factory):
     kwargs = h.svc.generate_reply.await_args.kwargs
     assert [m["text"] for m in kwargs["recent_messages"]] == ["早上好", "今天吃什么", "周末去哪玩"]
     assert kwargs["prompt"] == "Kubernetes 部署怎么样"
-    h.svc.quick_judge.assert_not_awaited()
+    h.svc.quick_judge_detailed.assert_not_awaited()
 
 
 async def test_voice_transcript_can_hit_passive_trigger(harness_factory):
@@ -212,7 +218,7 @@ async def test_voice_transcript_can_hit_passive_trigger(harness_factory):
     message = DummyMessage([record_seg("voice.silk", text="Kubernetes ImagePullBackOff 又 warnings 了吗")])
     await h.handle(DummyGroupEvent(message))
 
-    h.svc.quick_judge.assert_awaited_once()
+    h.svc.quick_judge_detailed.assert_awaited_once()
     h.svc.generate_reply.assert_awaited_once()
     kwargs = h.svc.generate_reply.await_args.kwargs
     assert "[语音转文字：Kubernetes ImagePullBackOff 又 warnings 了吗]" in kwargs["prompt"]

@@ -7,6 +7,7 @@ from time import monotonic
 from unittest.mock import AsyncMock, MagicMock
 
 
+from quickquip.llm.service import QuickJudgeResult
 from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningDefaults,
@@ -39,10 +40,18 @@ from quickquip.chat.awakening import (
     check_qa,
     check_relevance,
     effective_boredom_scan_interval,
+    _parse_judge_text,
     load_awakening_config,
     run_boredom_check,
     select_passive_trigger_image_urls,
 )
+
+
+
+
+def _qj(text: str, outcome: str = "ok", **kwargs) -> QuickJudgeResult:
+    """构造 quick_judge_detailed 的 stub 返回值。"""
+    return QuickJudgeResult(text=text, outcome=outcome, provider_id="p", model="m", **kwargs)
 
 
 # =========================================================================
@@ -748,10 +757,10 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.0)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
         result = asyncio.run(check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s))
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_no_bot_messages(self):
         s = AwakeningState()
@@ -774,7 +783,7 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.3)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
@@ -788,7 +797,7 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.3)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": false}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": false}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
@@ -799,7 +808,7 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.8)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
@@ -815,7 +824,7 @@ class TestCheckRelevance:
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_cache_key_includes_threshold(self):
         s = AwakeningState()
@@ -823,36 +832,36 @@ class TestCheckRelevance:
         s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
         settings = _make_settings(relevance_threshold=0.8)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
         assert result is None
-        svc.quick_judge.assert_awaited_once()
+        svc.quick_judge_detailed.assert_awaited_once()
 
     def test_english_overlap_enters_llm(self):
         s = AwakeningState()
         s.bot_messages.add("g1", "the Kubernetes deployment failed with ImagePullBackOff")
         settings = _make_settings(relevance_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "Kubernetes ImagePullBackOff again?", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_awaited_once()
+        svc.quick_judge_detailed.assert_awaited_once()
 
     def test_code_identifier_overlap_enters_llm(self):
         s = AwakeningState()
         s.bot_messages.add("g1", "跑 pip_install_deps 的时候 warnings 一堆")
         settings = _make_settings(relevance_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "pip_install_deps 又 warnings 了吗", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_awaited_once()
+        svc.quick_judge_detailed.assert_awaited_once()
 
     def test_non_overlapping_english_skips_llm(self):
         s = AwakeningState()
@@ -863,7 +872,7 @@ class TestCheckRelevance:
             check_relevance("g1", "u1", "lakers won the game last night", settings, svc, s)
         )
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_shared_url_alone_does_not_pass_fast_filter(self):
         s = AwakeningState()
@@ -874,7 +883,7 @@ class TestCheckRelevance:
             check_relevance("g1", "u1", "我上传到 https://example.com/b 了", settings, svc, s)
         )
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_threshold_one_disables_llm(self):
         s = AwakeningState()
@@ -885,19 +894,105 @@ class TestCheckRelevance:
             check_relevance("g1", "u1", "Kubernetes ImagePullBackOff?", settings, svc, s)
         )
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_threshold_middle_value_uses_llm(self):
         s = AwakeningState()
         s.bot_messages.add("g1", "Kubernetes deployment failed")
         settings = _make_settings(relevance_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "Kubernetes deployment again?", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_awaited_once()
+        svc.quick_judge_detailed.assert_awaited_once()
+
+
+class TestLlmJudgeClassification:
+    """#75-C：结果类别决定缓存与触发行为（技术失败 fail-closed 不缓存）。"""
+
+    def _state_with_bot_msg(self) -> AwakeningState:
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        return s
+
+    def _run_relevance(self, svc, threshold=0.5, text="今天天气怎么样"):
+        s = self._state_with_bot_msg()
+        settings = _make_settings(relevance_threshold=threshold)
+        result = asyncio.run(check_relevance("g1", "u1", text, settings, svc, s))
+        return result, s
+
+    def test_business_true_triggers_and_caches_true(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.9}'))
+        result, s = self._run_relevance(svc)
+        assert result is not None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is True
+
+    def test_business_false_caches_false(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.2}'))
+        result, s = self._run_relevance(svc)
+        assert result is None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is False
+
+    def _assert_technical_failure(self, svc):
+        result, s = self._run_relevance(svc)
+        assert result is None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is None
+
+    def test_empty_result_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="empty"))
+        self._assert_technical_failure(svc)
+
+    def test_truncated_result_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(
+            return_value=_qj('{"trig', outcome="length", finish_reason="length")
+        )
+        self._assert_technical_failure(svc)
+
+    def test_provider_error_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="provider_error"))
+        self._assert_technical_failure(svc)
+
+    def test_no_provider_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(
+            return_value=_qj('{"trigger": false}', outcome="no_provider")
+        )
+        self._assert_technical_failure(svc)
+
+    def test_invalid_json_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("这不是 JSON"))
+        self._assert_technical_failure(svc)
+
+    def test_timeout_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(side_effect=asyncio.TimeoutError())
+        self._assert_technical_failure(svc)
+
+    def test_qa_technical_failure_no_cache(self):
+        s = AwakeningState()
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="empty"))
+        settings = _make_settings(qa_threshold=0.5)
+        result = asyncio.run(
+            check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
+        )
+        assert result is None
+        assert s.llm_cache_get(_RULE_QA, "g1", _llm_cache_text("请问怎么解决这个问题？", 0.5)) is None
+
+    def test_strict_parse_distinguishes_false_from_garbage(self):
+        assert _parse_judge_text('{"trigger": false}', 0.5) is False
+        assert _parse_judge_text("模型废话没有 JSON", 0.5) is None
+        assert _parse_judge_text('{"trigger": true}', 0.5) is True
+        assert _parse_judge_text('{"score": 0.7}', 0.8) is False
+        assert _parse_judge_text('{"score": 0.9}', 0.8) is True
 
 
 class TestCheckQA:
@@ -911,10 +1006,10 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.0)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
         result = asyncio.run(check_qa("g1", "u1", "请问这是什么？", settings, svc, s))
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_no_question_marker(self):
         s = AwakeningState()
@@ -926,7 +1021,7 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
         )
@@ -939,7 +1034,7 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": false}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": false}'))
         result = asyncio.run(
             check_qa("g1", "u1", "怎么了？", settings, svc, s)
         )
@@ -949,7 +1044,7 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.8)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
             check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
         )
@@ -964,7 +1059,7 @@ class TestCheckQA:
             check_qa("g1", "u1", "cached q?", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
 
 # =========================================================================
@@ -1005,7 +1100,7 @@ class TestCheckAwakeningTriggers:
         svc.config = MagicMock()
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
 
         import quickquip.chat.awakening as aw
         old_cfg = aw._config
@@ -1025,7 +1120,7 @@ class TestCheckAwakeningTriggers:
                 )
             )
             assert result is None
-            svc.quick_judge.assert_not_called()
+            svc.quick_judge_detailed.assert_not_called()
         finally:
             aw._config = old_cfg
 
@@ -1038,7 +1133,7 @@ class TestCheckAwakeningTriggers:
         svc.config = MagicMock()
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
 
         import quickquip.chat.awakening as aw
         old_cfg = aw._config
@@ -1058,7 +1153,7 @@ class TestCheckAwakeningTriggers:
                 )
             )
             assert result is None
-            svc.quick_judge.assert_not_called()
+            svc.quick_judge_detailed.assert_not_called()
         finally:
             aw._config = old_cfg
 
