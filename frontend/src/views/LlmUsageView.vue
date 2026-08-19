@@ -217,7 +217,7 @@ const trendOption = computed<ECOption>(() => {
       data: points.map(point => point.date),
       boundaryGap: false,
       axisLine: t.axisLine,
-      axisLabel: t.axisLabel,
+      axisLabel: { ...t.axisLabel, formatter: (value: string) => formatBucketLabel(value) },
       axisTick: { show: false },
     },
     yAxis: {
@@ -301,7 +301,16 @@ function fmtCompact(value: number) {
 }
 function pct(value: number) { return `${(value * 100).toFixed(1)}%` }
 function fmtDuration(value: number | null) { return value == null ? '-' : value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${Math.round(value)} ms` }
-function formatTs(value: string) { return new Date(value).toLocaleString() }
+// 事件时间与趋势标签显式按业务时区格式化，不随操作员浏览器时区变化。
+// 与后端 quickquip.common.constants.BEIJING_TIMEZONE 同源：后端时区调整时此处必须同步修改。
+const BUSINESS_TIMEZONE = 'Asia/Shanghai'
+function formatTs(value: string) { return new Date(value).toLocaleString('zh-CN', { timeZone: BUSINESS_TIMEZONE }) }
+function formatBucketLabel(value: string) {
+  if (value.includes('T')) {
+    return new Date(value).toLocaleString('zh-CN', { timeZone: BUSINESS_TIMEZONE, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+  return new Date(`${value}T00:00:00+08:00`).toLocaleDateString('zh-CN', { timeZone: BUSINESS_TIMEZONE, month: '2-digit', day: '2-digit' })
+}
 function stateLabel(value: string) { return value === 'ok' ? '成功' : value === 'cancelled' ? '取消' : '错误' }
 function metricDisplay(value: number) { return metric.value === 'cost' ? `$${fmtCost(value)}` : metric.value === 'duration' ? fmtDuration(value) : fmtNum(value) }
 function costBreakdown(event: UsageEvent) {

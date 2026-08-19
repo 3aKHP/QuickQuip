@@ -12,7 +12,9 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+from quickquip.common.constants import BEIJING_TIMEZONE
 from quickquip.common.paths import LLM_USAGE_DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,26 @@ _SQLITE_BUSY_TIMEOUT_MS = 10_000
 _SQLITE_BUSY_RETRY_DELAY_SECONDS = 0.1
 _SQLITE_BUSY_RETRY_ATTEMPTS = 100
 _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+
+# 统计业务时区固定为项目既有的 Asia/Shanghai；数据库时间戳持续使用 UTC，
+# 仅在窗口边界与聚合分桶时换算。偏移后缀与 SQLite 修正子从同一时区推导，
+# 保证 SQL 分桶与桶标签锁步一致。
+_BUSINESS_TZ = ZoneInfo(BEIJING_TIMEZONE)
+
+
+def _tz_offset_parts() -> tuple[str, int, int]:
+    offset = datetime.now(_BUSINESS_TZ).utcoffset() or timedelta(0)
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    absolute = abs(total_minutes)
+    return sign, absolute // 60, absolute % 60
+
+
+_TZ_SIGN, _TZ_HOURS, _TZ_MINUTES = _tz_offset_parts()
+_TZ_LABEL_SUFFIX = f"{_TZ_SIGN}{_TZ_HOURS:02d}:{_TZ_MINUTES:02d}"
+_SQLITE_TZ_MODIFIER = f"{_TZ_SIGN}{_TZ_HOURS} hours" + (
+    f" {_TZ_MINUTES} minutes" if _TZ_MINUTES else ""
+)
 
 # NULL 维度桶（provider/model/feature/group/persona）统一显示标签，由后端下发；
 # 它不是任何列的真实值，不能作为筛选条件传给 API。
@@ -33,17 +55,20 @@ def _utc_now() -> str:
 
 
 def window_start(range_days: int) -> datetime:
-    """趋势网格起点，同时作为同 range 汇总/明细查询的统一下界。
+    """趋势网格起点（业务时区 Asia/Shanghai 边界），返回等效 UTC 瞬时，
+    同时作为同 range 汇总/明细查询的统一下界。
 
-    1d：当前整点 - 23h（24 个小时桶）；多天：UTC 今天 - (N-1) 的零点
-    （N 个日历日桶）。summary/timeline/events 共用该起点，保证趋势合计
-    与总成本卡片口径一致。
+    1d：业务时区当前整点 - 23h（24 个小时桶）；多天：业务时区今天 - (N-1)
+    的零点（N 个日历日桶）。summary/timeline/events 共用该起点，保证趋势
+    合计与总成本卡片口径一致。
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(_BUSINESS_TZ)
     if range_days <= 1:
-        return now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
-    start_date = now.date() - timedelta(days=range_days - 1)
-    return datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+    else:
+        start_date = now.date() - timedelta(days=range_days - 1)
+        start = datetime.combine(start_date, datetime.min.time(), tzinfo=_BUSINESS_TZ)
+    return start.astimezone(timezone.utc)
 
 
 class LLMUsageStore:
@@ -248,14 +273,17 @@ class LLMUsageStore:
         effective_days = range_days or 7
         aligned_start = window_start(effective_days)
         if effective_days <= 1:
-            bucket_expr = "strftime('%Y-%m-%dT%H:00:00Z', ts)"
+            # 小时桶按业务时区打标签（显式偏移后缀），不再把本地桶伪装成 UTC Z 标签
+            bucket_expr = (
+                f"strftime('%Y-%m-%dT%H:00:00{_TZ_LABEL_SUFFIX}', ts, '{_SQLITE_TZ_MODIFIER}')"
+            )
             step = timedelta(hours=1)
-            start = aligned_start
-            fmt = "%Y-%m-%dT%H:00:00Z"
+            start = aligned_start.astimezone(_BUSINESS_TZ)
+            fmt = f"%Y-%m-%dT%H:00:00{_TZ_LABEL_SUFFIX}"
         else:
-            bucket_expr = "strftime('%Y-%m-%d', ts)"
+            bucket_expr = f"strftime('%Y-%m-%d', ts, '{_SQLITE_TZ_MODIFIER}')"
             step = timedelta(days=1)
-            start = aligned_start.date()
+            start = aligned_start.astimezone(_BUSINESS_TZ).date()
             fmt = "%Y-%m-%d"
         with self.connect() as conn:
             rows = conn.execute(
@@ -270,7 +298,12 @@ class LLMUsageStore:
         indexed = {r["d"]: r for r in rows}
         result = []
         cursor = start
-        end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) if effective_days <= 1 else datetime.now(timezone.utc).date()
+        now_business = datetime.now(_BUSINESS_TZ)
+        end = (
+            now_business.replace(minute=0, second=0, microsecond=0)
+            if effective_days <= 1
+            else now_business.date()
+        )
         if not fill_buckets:
             return [
                 {"date": r["d"], "cost": round(r["cost"], 6), "tokens": r["tokens"],
