@@ -213,23 +213,41 @@ def reload_config(path: str | Path | None = None) -> None:
 
 
 class BotMessageCache:
-    """Per-group cache of recent bot reply texts for relevance checking."""
+    """Per-group cache of recent bot reply texts for relevance checking.
 
-    __slots__ = ("_messages",)
+    Entries older than ``ttl_seconds`` (monotonic clock) are evicted lazily
+    on read; the 30-minute default matches the recent-message context window.
+    """
+
+    __slots__ = ("_messages", "_ttl_seconds", "_clock")
     _MAX_PER_GROUP = 5
+    _TTL_SECONDS = 30 * 60.0
 
-    def __init__(self) -> None:
-        self._messages: dict[str, deque[str]] = {}
+    def __init__(self, *, ttl_seconds: float | None = None, clock: Callable[[], float] | None = None) -> None:
+        self._messages: dict[str, deque[tuple[str, float]]] = {}
+        self._ttl_seconds = self._TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        self._clock = monotonic if clock is None else clock
 
-    def add(self, group_id: int | str, text: str) -> None:
+    def add(self, group_id: int | str, text: str, *, now: float | None = None) -> None:
         gid = str(group_id)
         if gid not in self._messages:
             self._messages[gid] = deque(maxlen=self._MAX_PER_GROUP)
-        if text.strip():
-            self._messages[gid].append(text.strip())
+        stripped = text.strip()
+        if stripped:
+            self._messages[gid].append((stripped, self._clock() if now is None else now))
 
-    def get_recent(self, group_id: int | str) -> list[str]:
-        return list(self._messages.get(str(group_id), []))
+    def get_recent(self, group_id: int | str, *, now: float | None = None) -> list[str]:
+        gid = str(group_id)
+        queue = self._messages.get(gid)
+        if queue is None:
+            return []
+        current = self._clock() if now is None else now
+        while queue and (current - queue[0][1]) > self._ttl_seconds:
+            queue.popleft()
+        if not queue:
+            del self._messages[gid]
+            return []
+        return [text for text, _ in queue]
 
     def clear_group(self, group_id: int | str) -> None:
         self._messages.pop(str(group_id), None)
@@ -381,6 +399,13 @@ _EXTEND_REJECT_TEXTS = {
 # Stopwords for word overlap calculation
 _STOPWORDS = frozenset("的了是在我你他她它们吗呢啊吧呀哦嘛嗯么这那就也都还不")
 
+# English stopwords filtered from latin token overlap (mirrors the Chinese set)
+_LATIN_STOPWORDS = frozenset(
+    "a an and are as at be been but by can did do does for from had has have he her his how i if in is it its "
+    "just me my no not of on or our she so that the their them these they this those to was we were what when "
+    "where which who why will with you your".split()
+)
+
 
 def _is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None) -> bool:
     if not dnd_start or not dnd_end:
@@ -495,13 +520,21 @@ def build_passive_trigger_raw_user_text(result: AwakeningTriggerResult, image_ur
     return _strip_structural_message_parts(text)
 
 
+# Normalized latin/digit runs: english words, numbers and code identifiers
+# (snake_case, camelCase, __dunder__) all stay intact as single tokens.
+_LATIN_TOKEN_RE = re.compile(r"[a-z_][a-z0-9_]*|\d+", re.IGNORECASE)
+
+
 def _extract_words(text: str) -> set[str]:
-    """Extract meaningful Chinese characters/bigrams from text (no jieba needed)."""
+    """Extract meaningful tokens from text: Chinese unigram/bigram plus
+    normalized english words, numbers and code identifiers."""
+    words: set[str] = {
+        token
+        for token in _LATIN_TOKEN_RE.findall(text.lower())
+        if token not in _LATIN_STOPWORDS
+    }
     # Keep only CJK characters, then extract bigrams + unigrams
     chars = [c for c in text if "一" <= c <= "鿿"]
-    if not chars:
-        return set()
-    words: set[str] = set()
     for c in chars:
         if c not in _STOPWORDS:
             words.add(c)

@@ -428,8 +428,8 @@ LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写�
 | `boredom_dnd_start` | 免打扰开始时间，格式 `HH:MM`，空值关闭 | `""` |
 | `boredom_dnd_end` | 免打扰结束时间，格式 `HH:MM`，空值关闭 | `""` |
 | `interest_topics` | 兴趣话题关键词列表，命中后触发 `awakening_interest` | `[]` |
-| `relevance_threshold` | 相关性唤醒判定阈值，`>= 1` 关闭 LLM 判定 | `1.0` |
-| `qa_threshold` | 答疑唤醒判定阈值，`>= 1` 关闭 LLM 判定 | `1.0` |
+| `relevance_threshold` | 相关性唤醒判定阈值，`<= 0` 或 `>= 1` 关闭 LLM 判定 | `1.0` |
+| `qa_threshold` | 答疑唤醒判定阈值，`<= 0` 或 `>= 1` 关闭 LLM 判定 | `1.0` |
 
 `extend_duration` 只会在群友通过前缀或艾特等显式 LLM 入口触发后生效。兴趣、兜底、无聊、相关性和答疑唤醒不会打开延长窗口；延长窗口内的图片-only、CQ-only、短语气词和过短无实义文本也会被忽略。
 

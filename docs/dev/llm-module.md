@@ -416,8 +416,8 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
   - `boredom_dnd_start`
   - `boredom_dnd_end`
   - `interest_topics`
-  - `relevance_threshold`
-  - `qa_threshold`
+  - `relevance_threshold`（`<= 0` 或 `>= 1` 均关闭相关性 LLM 判定）
+  - `qa_threshold`（`<= 0` 或 `>= 1` 均关闭答疑 LLM 判定）
 - `[[awakening.group_overrides]]`
   - `group_id`
   - 任意需要覆盖的默认字段

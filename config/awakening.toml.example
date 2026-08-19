@@ -10,8 +10,8 @@ boredom_check_interval = 300 # 无聊检查间隔秒数
 boredom_dnd_start = ""       # 免打扰开始 HH:MM，空=不启用
 boredom_dnd_end = ""         # 免打扰结束 HH:MM
 interest_topics = []         # 全局兴趣关键词
-relevance_threshold = 1.0    # 相关性唤醒阈值 0-1，>=1 关闭（不产生 LLM 调用）
-qa_threshold = 1.0           # 答疑唤醒阈值 0-1，>=1 关闭（不产生 LLM 调用）
+relevance_threshold = 1.0    # 相关性唤醒阈值 0-1；<=0 或 >=1 均关闭（不产生 LLM 调用）
+qa_threshold = 1.0           # 答疑唤醒阈值 0-1；<=0 或 >=1 均关闭（不产生 LLM 调用）
 
 # 按群覆盖（可选，取消注释并填写群号）
 # [[awakening.group_overrides]]
