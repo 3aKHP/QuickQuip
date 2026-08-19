@@ -218,3 +218,4 @@ async def test_voice_transcript_can_hit_passive_trigger(harness_factory):
     assert "[语音转文字：Kubernetes ImagePullBackOff 又 warnings 了吗]" in kwargs["prompt"]
     assert kwargs["prompt"].count("Kubernetes ImagePullBackOff") == 1
     assert "Kubernetes" not in [m["text"] for m in kwargs["recent_messages"]]
+    assert kwargs["raw_user_text"] == "Kubernetes ImagePullBackOff 又 warnings 了吗"

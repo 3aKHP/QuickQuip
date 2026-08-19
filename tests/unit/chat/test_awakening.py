@@ -352,6 +352,20 @@ class TestExtractWords:
         assert "pytest" in _extract_words("use PYTEST fixtures")
         assert "pytest" in _extract_words("pytest.ini 配置")
 
+    def test_url_fragments_not_tokenized(self):
+        words = _extract_words("看这个 https://example.com/foo 很有意思")
+        assert "https" not in words
+        assert "example" not in words
+        assert "com" not in words
+
+    def test_voice_transcript_content_participates(self):
+        words = _extract_words("[语音转文字：Kubernetes 部署又失败了]")
+        assert "kubernetes" in words
+        assert any("部署" in w or "失败" in w for w in words)
+
+    def test_structural_placeholders_not_tokenized(self):
+        assert _extract_words("[图片][语音][CQ:at,qq=123]") == set()
+
     def test_empty_text(self):
         assert _extract_words("") == set()
 
@@ -496,6 +510,21 @@ class TestPassiveTriggerImages:
         assert "不要编造具体图像细节" in with_image
         assert "这条触发消息包含图片" not in without_image
         assert build_passive_trigger_raw_user_text(result, ["https://example.test/a.png"]) == "[图片] 这是什么？"
+
+    def test_raw_user_text_preserves_voice_transcript(self):
+        voice_only = AwakeningTriggerResult(
+            rule_name=_RULE_RELEVANCE,
+            prompt="[语音转文字：Kubernetes 部署又失败了]",
+            trigger_reason="相关性唤醒",
+        )
+        assert build_passive_trigger_raw_user_text(voice_only, []) == "Kubernetes 部署又失败了"
+
+        mixed = AwakeningTriggerResult(
+            rule_name=_RULE_RELEVANCE,
+            prompt="看这个\n[语音2转文字：第二段]",
+            trigger_reason="相关性唤醒",
+        )
+        assert build_passive_trigger_raw_user_text(mixed, []) == "看这个 第二段"
 
 
 # =========================================================================
@@ -759,6 +788,17 @@ class TestCheckRelevance:
         svc = MagicMock()
         result = asyncio.run(
             check_relevance("g1", "u1", "lakers won the game last night", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge.assert_not_called()
+
+    def test_shared_url_alone_does_not_pass_fast_filter(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "看这个 https://example.com/a 很有意思")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "我上传到 https://example.com/b 了", settings, svc, s)
         )
         assert result is None
         svc.quick_judge.assert_not_called()
