@@ -77,6 +77,23 @@ MCP_FAILURE_KINDS = frozenset({
 })
 
 
+def format_mcp_era_tag(negotiation: str, era: str) -> str:
+    """Render the dual-era tag shown next to an MCP server's transport.
+
+    Single source of truth for chat status and Web Admin alike:
+    strict mode (negotiation == era) renders once instead of "modern/modern";
+    plain legacy with unknown/legacy era renders nothing; anything mixed
+    renders "negotiation/era".
+    """
+    if negotiation == era:
+        if negotiation != "legacy":
+            return f"/{negotiation}"
+        return ""
+    if negotiation != "legacy" or era not in ("unknown", "legacy"):
+        return f"/{negotiation}/{era}"
+    return ""
+
+
 @dataclass(slots=True)
 class MCPToolBinding:
     alias: str

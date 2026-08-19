@@ -18,6 +18,7 @@ from quickquip.llm.mcp.types import (
     MCP_FAILURE_TIMEOUT,
     MCP_FAILURE_TRANSPORT,
     MCPServerStatus,
+    format_mcp_era_tag,
 )
 from quickquip.llm.service_parts.constants import (
     MAX_STORED_MEMORY_ITEMS,
@@ -101,14 +102,7 @@ class HealthMixin:
         lines.append(f"工具数：{len(self._mcp_tool_names)}")
         for status in statuses:
             state = "ON" if status.connected else ("OFF" if not status.enabled else "ERROR")
-            era_tag = ""
-            if status.negotiation == status.era:
-                # Strict mode: configured negotiation and resolved era agree,
-                # render once instead of a duplicated "modern/modern" tag.
-                if status.negotiation != "legacy":
-                    era_tag = f"/{status.negotiation}"
-            elif status.negotiation != "legacy" or status.era not in ("unknown", "legacy"):
-                era_tag = f"/{status.negotiation}/{status.era}"
+            era_tag = format_mcp_era_tag(status.negotiation, status.era)
             error_part = ""
             if status.error:
                 if verbose:

@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from quickquip.common.paths import CONFIG_LLM_TOML, MCP_STATUS_JSON_PATH
 from quickquip.llm.config import load_llm_config
+from quickquip.llm.mcp.types import format_mcp_era_tag
 
 router = APIRouter()
 
@@ -36,6 +37,8 @@ def get_mcp_dashboard():
 
         servers = []
         for s in data["statuses"]:
+            negotiation = s.get("negotiation", "legacy")
+            era = s.get("era", "unknown")
             servers.append({
                 "id": s["id"],
                 "transport": s.get("transport", ""),
@@ -45,8 +48,9 @@ def get_mcp_dashboard():
                 "error": s.get("error"),
                 "detail": s.get("detail", ""),
                 "server_identity": s.get("server_identity", ""),
-                "negotiation": s.get("negotiation", "legacy"),
-                "era": s.get("era", "unknown"),
+                "negotiation": negotiation,
+                "era": era,
+                "era_tag": format_mcp_era_tag(negotiation, era),
                 "failure_kind": s.get("failure_kind", ""),
                 "negotiated_protocol_version": s.get("negotiated_protocol_version", ""),
                 "tools": server_tools.get(s["id"], []),
@@ -89,6 +93,7 @@ def get_mcp_dashboard():
                 "server_identity": status.server_identity,
                 "negotiation": status.negotiation,
                 "era": status.era,
+                "era_tag": format_mcp_era_tag(status.negotiation, status.era),
                 "failure_kind": status.failure_kind,
                 "negotiated_protocol_version": status.negotiated_protocol_version,
                 "tools": server_tools.get(status.id, []),
@@ -111,6 +116,7 @@ def get_mcp_dashboard():
             "tool_count": 0,
             "error": None,
             "detail": "runtime 未连接（等待 bot 进程写入状态文件）",
+            "era_tag": "",
             "tools": [],
             "runtime_available": False,
         })

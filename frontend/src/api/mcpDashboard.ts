@@ -16,6 +16,8 @@ export interface McpServer {
   server_identity?: string
   negotiation?: string
   era?: string
+  /** 服务端 format_mcp_era_tag 下发的唯一 era 标签；config-only 为空字符串 */
+  era_tag?: string
   failure_kind?: string
   negotiated_protocol_version?: string
   tools: McpTool[]
