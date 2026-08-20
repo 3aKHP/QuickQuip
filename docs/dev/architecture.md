@@ -2,6 +2,8 @@
 
 本文档记录整个仓库的目录与文件用途，以及"分发层"与"自用层"的划分原则。
 
+开发文档的公共/私有边界与职责索引见 [`README.md`](README.md)；源码结构规则见 [`style.md`](style.md)。
+
 ---
 
 ## 核心概念：分发层 vs 自用层
@@ -50,6 +52,17 @@ NoneBot2 event → tz_tracker_plugin matcher
 6. `rule_switch.is_enabled()` — 每步均受群级规则开关控制
 7. `rate_limit.allow()` — 发送前限流检查
 8. `stats_tracker` — 消息统计与规则触发计数
+
+### 依赖方向与组合根
+
+依赖方向为：`plugins → adapters/nonebot → app 与业务域`，以及 `app → 业务域 → common`。实际消息入口可以同时使用 `app` 暴露的已装配能力与框架无关业务函数，但框架无关业务域不得反向导入 `app`、NoneBot 或 Web 展示层。
+
+- `app/message_pipeline.py` 是应用组合根：创建共享依赖、绑定生命周期并暴露经装配的能力；领域策略、协议解析和持久化规则由各自领域拥有。
+- `adapters/nonebot/` 将 OneBot 事件、命令和调度适配为领域调用，不在适配层实现可脱离 NoneBot 的业务算法。
+- `app/web/` 是 Web Admin 的 FastAPI 装配和路由层。路由通过公开应用能力读取或触发运行时操作，不能复制 LLM、聊天、游戏或持久化领域规则。
+- `llm/provider/` 只处理规范化请求/响应和 provider 协议。MCP、工具执行、群策略、存储、Trace 展示和应用生命周期分别由拥有它们的模块负责。
+
+跨层共享时传递窄能力或领域接口，不以整个应用对象或内部单例作为通用依赖。完整的重构判断标准见 [`style.md`](style.md)。
 
 ---
 
