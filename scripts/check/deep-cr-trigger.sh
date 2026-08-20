@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Deterministic, read-only gate for Tier 2 deep review.
 #
-# Prints one JSON object and never changes repository state. Keep the domain
-# mapping aligned with docs/dev/branching.md "Two-tier code review".
+# Prints one JSON object and never changes repository state. This script owns
+# the exact high-risk path mapping and numeric thresholds; branching.md owns
+# the review process and links here instead of duplicating those details.
 set -u
 
 base="${1:-dev}"
@@ -22,8 +23,8 @@ classify() {
   case "$1" in
     src/quickquip/llm/provider/*|src/quickquip/llm/mcp/*) echo provider-mcp ;;
     src/quickquip/llm/service.py|src/quickquip/llm/service_parts/*|src/quickquip/llm/tool_*.py) echo llm-tools ;;
-    src/quickquip/llm/*store*|src/quickquip/common/persistence.py|src/quickquip/app/web/actions.py) echo persistence ;;
-    src/quickquip/chat/awakening.py|src/quickquip/adapters/nonebot/group_messages.py|src/quickquip/app/message_pipeline.py) echo message-policy ;;
+    src/quickquip/llm/*store*|src/quickquip/common/persistence.py|src/quickquip/app/web/action_queue.py|src/quickquip/app/web/session_store.py|src/quickquip/adapters/nonebot/web_admin_actions.py) echo persistence ;;
+    src/quickquip/chat/awakening.py|src/quickquip/adapters/nonebot/group_messages.py|src/quickquip/app/message_pipeline.py|src/quickquip/common/rate_limit.py|src/quickquip/common/sensitive_filter.py|src/quickquip/app/web/routes/sensitive_filter.py) echo message-policy ;;
     src/quickquip/app/web/*|frontend/src/*) echo web-admin ;;
     Dockerfile|docker-compose*.yml|prod.example/*|.github/workflows/release.yml) echo release-deployment ;;
     *) echo "" ;;
@@ -59,18 +60,21 @@ case "$branch:$base" in
 esac
 
 reasons=()
-if [ "$category_match" -eq 1 ]; then
-  reasons+=("category_match: touches $(printf '%s' "$categories" | paste -sd, - | sed 's/,/, /g')")
-else
-  reasons+=("no_category_match: no high-risk domain file changed")
-fi
-[ "$cross_boundary" -eq 1 ] && reasons+=("cross_boundary: ${category_count} distinct domains")
-[ "$size_floor" -eq 1 ] && reasons+=("size_floor: ${file_count} files, ${changed_lines} changed lines")
-[ "$release_branch" -eq 1 ] && reasons+=("release_branch: branch=${branch} base=${base}")
-[ "$base_resolved" -eq 0 ] && reasons+=("base '${base}' not resolvable locally")
-
 trigger=0
-if [ "$category_match" -eq 1 ] && { [ "$cross_boundary" -eq 1 ] || [ "$size_floor" -eq 1 ] || [ "$release_branch" -eq 1 ]; }; then trigger=1; fi
+if [ "$base_resolved" -eq 0 ]; then
+  trigger=1
+  reasons+=("base '${base}' not resolvable locally - cannot determine scope, treat as trigger")
+else
+  if [ "$category_match" -eq 1 ]; then
+    reasons+=("category_match: touches $(printf '%s' "$categories" | paste -sd, - | sed 's/,/, /g')")
+  else
+    reasons+=("no_category_match: no high-risk domain file changed")
+  fi
+  [ "$cross_boundary" -eq 1 ] && reasons+=("cross_boundary: ${category_count} distinct domains")
+  [ "$size_floor" -eq 1 ] && reasons+=("size_floor: ${file_count} files, ${changed_lines} changed lines")
+  [ "$release_branch" -eq 1 ] && reasons+=("release_branch: branch=${branch} base=${base}")
+  if [ "$category_match" -eq 1 ] && { [ "$cross_boundary" -eq 1 ] || [ "$size_floor" -eq 1 ] || [ "$release_branch" -eq 1 ]; }; then trigger=1; fi
+fi
 
 joined=""
 for reason in "${reasons[@]}"; do

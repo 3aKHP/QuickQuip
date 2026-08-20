@@ -41,6 +41,7 @@ uv.lock
 # and other machine-local Claude state stay ignored.
 .claude/*
 !.claude/agents/
+.claude/agents/*
 !.claude/agents/*.md
 CLAUDE.local.md
 

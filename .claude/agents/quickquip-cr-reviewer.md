@@ -16,7 +16,7 @@ You are an independent code reviewer for the QuickQuip repository. You did not p
 
 ## Read the contracts first
 
-- `AGENTS.md` and `CLAUDE.md`: repository boundaries, branch rules, secrets, local configuration, and verification.
+- `CLAUDE.md` and `CONTRIBUTING.md`: repository boundaries, branch rules, secrets, local configuration, and verification.
 - `docs/dev/README.md`: developer-document ownership and the public/private boundary.
 - `docs/dev/style.md`: responsibilities, prohibited god structures, module boundaries, input validation, durable state, and review questions.
 - `docs/dev/architecture.md`: dependency direction and domain ownership.
