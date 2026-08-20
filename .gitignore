@@ -37,8 +37,11 @@ uv.lock
 .vscode/
 .idea/
 
-# Claude Code
-.claude/
+# Claude Code local state. Reviewed collaborator agents are tracked; settings
+# and other machine-local Claude state stay ignored.
+.claude/*
+!.claude/agents/
+!.claude/agents/*.md
 CLAUDE.local.md
 
 #ZCode
