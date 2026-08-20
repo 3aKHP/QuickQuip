@@ -1373,3 +1373,148 @@ class TestRunBoredomCheck:
         bot.send_group_msg.assert_awaited_once_with(
             group_id=123, message=("message", "冒个泡", ["cXctaW1n"])
         )
+
+
+class TestRunBoredomCheckFailures:
+    """run_boredom_check 拒绝与异常路径的 characterization 测试（钉住现状，供 v1.12.1 重构对照）。
+
+    钉住的现状要点：
+    - 冷却标记 mark_boredom_triggered 在 send_group_msg 成功之后才执行，
+      故 generate_reply / send 任一抛异常都不会标冷却，也不会写统计。
+    - 单群异常被 try/except 吞掉（logger.warning），循环继续处理后续群。
+    """
+
+    @staticmethod
+    def _triggerable_state(*gids: str) -> AwakeningState:
+        """构造各群均已过沉寂门槛的 AwakeningState（boredom_silence_seconds=1）。"""
+        st = AwakeningState()
+        for gid in gids:
+            st.record_message(gid, "u1")
+            st._last_message_times[gid] = monotonic() - 2
+        return st
+
+    @staticmethod
+    def _make_fakes(gids, *, generate_reply=None, send=None):
+        bot = MagicMock()
+        bot.send_group_msg = send if send is not None else AsyncMock()
+        groups = MagicMock()
+        groups.all_groups.return_value = list(gids)
+        rule_switch = MagicMock()
+        rule_switch.is_enabled.return_value = True
+        svc = MagicMock()
+        svc.config.load_error = None
+        svc.get_group_settings.return_value = MagicMock(enabled=True)
+        svc.recent_message_buffer.list_recent.return_value = []
+        svc.generate_reply = (
+            generate_reply if generate_reply is not None
+            else AsyncMock(return_value={"reply": "冒个泡"})
+        )
+        return bot, groups, rule_switch, svc
+
+    @staticmethod
+    def _run(bot, groups, rule_switch, svc, state, **kwargs):
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        old_state = aw._state
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(
+                boredom_silence_seconds=1,
+                boredom_probability=1.0,
+                boredom_check_interval=1,
+            ),
+        )
+        aw._state = state
+        try:
+            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc, **kwargs))
+        finally:
+            aw._config = old_cfg
+            aw._state = old_state
+
+    def test_rate_limiter_rejects_no_send_no_cooldown(self):
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(["123"])
+        rate_limiter = MagicMock()
+        rate_limiter.allow.return_value = False
+
+        self._run(bot, groups, rule_switch, svc, st, rate_limiter=rate_limiter)
+
+        rate_limiter.allow.assert_called_once_with(
+            _RULE_BOREDOM, "boredom_timer", group_id="123"
+        )
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+        assert "123" not in st._last_boredom_trigger
+
+    def test_rule_switch_disabled_skips_group(self):
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(["123"])
+        rule_switch.is_enabled.return_value = False
+
+        self._run(bot, groups, rule_switch, svc, st)
+
+        # rule_switch 判定在 LLM 可用性检查之前：整个群被跳过
+        svc.get_group_settings.assert_not_called()
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+        assert "123" not in st._last_boredom_trigger
+
+    def test_generate_reply_exception_warns_and_continues(self, caplog):
+        async def _gen(group_id, **_kwargs):
+            if group_id == "123":
+                raise RuntimeError("llm boom")
+            return {"reply": f"reply-{group_id}"}
+
+        st = self._triggerable_state("123", "456")
+        bot, groups, rule_switch, svc = self._make_fakes(
+            ["123", "456"], generate_reply=AsyncMock(side_effect=_gen)
+        )
+        stats_tracker = MagicMock()
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="quickquip.chat.awakening"):
+            self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
+
+        # 失败群：warning 已记、不发送、不标冷却、不写统计
+        assert any(
+            r.levelno == logging.WARNING and "123" in r.getMessage()
+            for r in caplog.records
+        )
+        # 后续群仍被正常处理
+        bot.send_group_msg.assert_awaited_once_with(group_id=456, message="reply-456")
+        assert "123" not in st._last_boredom_trigger
+        assert "456" in st._last_boredom_trigger
+        stats_tracker.record_trigger.assert_called_once_with("456", _RULE_BOREDOM)
+
+    def test_send_exception_no_cooldown_no_stats(self):
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(
+            ["123"], send=AsyncMock(side_effect=RuntimeError("send boom"))
+        )
+        stats_tracker = MagicMock()
+
+        self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
+
+        bot.send_group_msg.assert_awaited_once()
+        # 冷却标记在 send 成功之后：send 抛异常 → 不标冷却、不写统计、不缓存 bot 消息
+        assert "123" not in st._last_boredom_trigger
+        stats_tracker.record_trigger.assert_not_called()
+        assert st.bot_messages.get_recent("123") == []
+
+    def test_mixed_groups_send_failure_states_independent(self):
+        async def _send(group_id, message):
+            if group_id == 456:  # send_group_msg 收到的是 int(gid)
+                raise RuntimeError("send boom")
+
+        st = self._triggerable_state("456", "789")
+        bot, groups, rule_switch, svc = self._make_fakes(
+            ["456", "789"], send=AsyncMock(side_effect=_send)
+        )
+        stats_tracker = MagicMock()
+
+        self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
+
+        # 首群 send 失败不阻塞次群；两群状态各自独立
+        assert bot.send_group_msg.await_count == 2
+        assert "456" not in st._last_boredom_trigger
+        assert "789" in st._last_boredom_trigger
+        stats_tracker.record_trigger.assert_called_once_with("789", _RULE_BOREDOM)
