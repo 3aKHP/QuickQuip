@@ -27,6 +27,20 @@ class StubProviderClient:
         )
 
 
+class StubBehaviorProviderClient:
+    """Single-behavior stub: returns the given LLMResponse, or raises the given error."""
+
+    def __init__(self, behavior: LLMResponse | Exception) -> None:
+        self.behavior = behavior
+        self.requests: list[LLMRequest] = []
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.requests.append(request)
+        if isinstance(self.behavior, Exception):
+            raise self.behavior
+        return self.behavior
+
+
 class StubToolCallingProviderClient:
     """Round 1 → tool call get_identity; round 2 → final text."""
 
