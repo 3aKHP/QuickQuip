@@ -38,7 +38,11 @@ LLM 相关核心文件如下：
 - `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结的定时任务注册与 `/summary` 命令
 - `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、健康检查、状态、自动记忆）
+- `src/quickquip/llm/quick_judge.py`
+  - quick_judge 诊断通道（`QuickJudgeResult`、provider 选择策略、detailed 通道），`LLMService` 仅保留薄委托
+- `src/quickquip/llm/single_shot.py`
+  - 一次性生成入口的共享管线骨架（defectify / turmfluch / card_le_nearest），各入口差异点通过 `CommandSingleShotSpec` 显式传入
 - `src/quickquip/llm/prompting.py`
   - 负责 system prompt 组装、场景块构建、统一发言者格式渲染与 messages 数组拼装
 - `src/quickquip/llm/summarize.py`
@@ -54,7 +58,11 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/provider/`（包）
   - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
-  - 负责统一工具声明、工具调用循环、工具结果和会话消息结构
+  - 负责工具调用循环编排（provider 重试、Agent Loop trace、会话消息推进）
+- `src/quickquip/llm/tool_discovery.py`
+  - 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler
+- `src/quickquip/llm/tool_result_pipeline.py`
+  - 负责工具执行前后的强制处理：参数与结果的敏感词扫描、单请求工具图片预算、非视觉模型图片降级
 - `src/quickquip/llm/tool_registry.py`
   - 负责工具白名单注册、参数校验和执行调度
 - `src/quickquip/llm/store.py`
