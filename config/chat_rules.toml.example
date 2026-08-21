@@ -459,34 +459,3 @@ context_window     = 6
 reply_template     = '只要曹孟德一息尚存，他就战无不胜！'
 rate_limit_key     = 'new_three_kingdoms'
 priority           = 94
-
-# ══════════════════════════════════════════════════════════
-# [festivals] — 节日自动化（可选）
-# ══════════════════════════════════════════════════════════
-#
-# 内置节日已覆盖：元旦、春节、元宵、端午、中秋、除夕。
-# 如需自定义节日：
-# [[festivals.custom]]
-# name = "群庆日"
-# month = 6
-# day = 15
-# calendar = "solar"  # "solar" 公历 / "lunar" 农历
-# greeting = "今天是群庆日！感谢大家一路相伴～"
-
-# ══════════════════════════════════════════════════════════
-# [games] — 互动游戏配置
-# ══════════════════════════════════════════════════════════
-#
-# 数字炸弹 (Number Bomb)：bot 在给定范围内随机选一个秘密数字，
-# 群友猜数字，bot 回复 "大了" / "小了"，猜中即胜。
-#
-# number_bomb_enabled          — 是否启用数字炸弹
-# number_bomb_timeout_seconds  — 超时秒数（默认 60）
-# number_bomb_min              — 秘密数字下限（默认 1）
-# number_bomb_max              — 秘密数字上限（默认 1000）
-
-[games]
-# number_bomb_enabled = true
-# number_bomb_timeout_seconds = 60
-# number_bomb_min = 1
-# number_bomb_max = 1000

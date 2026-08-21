@@ -310,7 +310,6 @@ default_model = "deepseek-chat"
 models = ["deepseek-chat", "deepseek-reasoner"]
 style_profile = "openai_family"
 # non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 非视觉模型：触发图片预处理+剥离
-# non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 标记为非视觉模型，触发图片预处理+剥离
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

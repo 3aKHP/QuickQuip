@@ -102,7 +102,7 @@ Push-Location $ProjectRoot
 Initialize-NodeToolchainPath
 $PnpmCommand = Get-PnpmCommand
 
-foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
+foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml")) {
     if (-not (Test-Path $requiredPath)) {
         Write-Host "Missing required file: $requiredPath" -ForegroundColor Red
         Pop-Location
