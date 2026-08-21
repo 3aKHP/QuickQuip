@@ -153,12 +153,33 @@ async def _generate_one(
         daily_store.upsert(group_id, summary_date, content, model_used)
 
 
+class DailySummaryNotEnabledError(RuntimeError):
+    """群未开启每日总结。"""
+
+
+class DailySummaryCooldownError(RuntimeError):
+    """命令触发过于频繁（冷却中）。"""
+
+
+class DailySummaryInsufficientMessagesError(RuntimeError):
+    """窗口内消息数不足，无法生成每日总结。携带 current/minimum 供调用方渲染文案。"""
+
+    def __init__(self, current: int, minimum: int) -> None:
+        self.current = current
+        self.minimum = minimum
+        super().__init__(f"not enough messages: {current}/{minimum}")
+
+
+class DailySummaryGenerationFailedError(RuntimeError):
+    """每日总结生成失败或被跳过（LLM 失败、persona 缺失等）。"""
+
+
 async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=None) -> dict[str, object]:
     group_key = str(group_id)
     if not daily_enabled_groups.contains(group_key):
-        raise RuntimeError("daily summary is not enabled for this group")
+        raise DailySummaryNotEnabledError("daily summary is not enabled for this group")
     if _on_cooldown(group_key):
-        raise RuntimeError("summary generation is on cooldown")
+        raise DailySummaryCooldownError("summary generation is on cooldown")
 
     _mark_triggered(group_key)
     _ensure_llm_bindings()
@@ -184,10 +205,10 @@ async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=
     messages = daily_collector.read_window(group_key, start_dt.timestamp(), now.timestamp())
     min_messages = svc.config.daily_summary.min_messages
     if len(messages) < min_messages:
-        raise RuntimeError(f"not enough messages: {len(messages)}/{min_messages}")
+        raise DailySummaryInsufficientMessagesError(len(messages), min_messages)
     result = await _run_generation(group_key, start_dt.timestamp(), now.timestamp(), date_label)
     if result is None:
-        raise RuntimeError("summary generation skipped or failed")
+        raise DailySummaryGenerationFailedError("summary generation skipped or failed")
 
     content, model_used = result
     if bot is None:
@@ -406,22 +427,17 @@ def register_daily_summary_commands(on_command) -> None:
                 await summary_cmd.finish("仅管理员可执行此操作")
             try:
                 await send_daily_summary_now(group_id, before_generate=lambda: summary_cmd.send("正在生成总结，请稍候……"))
-            except RuntimeError as exc:
-                message = str(exc)
-                if message == "daily summary is not enabled for this group":
-                    await summary_cmd.finish("本群未开启每日总结，请先使用 /summary on 开启。")
-                if message == "summary generation is on cooldown":
-                    await summary_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
-                if message.startswith("not enough messages:"):
-                    counts = message.removeprefix("not enough messages:").strip()
-                    current, minimum = counts.split("/", 1)
-                    await summary_cmd.finish(
-                        f"当前窗口消息数不足（{current} 条，"
-                        f"至少需要 {minimum} 条），无法生成总结。"
-                    )
-                if message == "summary generation skipped or failed":
-                    await summary_cmd.finish("总结生成失败，请查看日志。")
-                raise
+            except DailySummaryNotEnabledError:
+                await summary_cmd.finish("本群未开启每日总结，请先使用 /summary on 开启。")
+            except DailySummaryCooldownError:
+                await summary_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
+            except DailySummaryInsufficientMessagesError as exc:
+                await summary_cmd.finish(
+                    f"当前窗口消息数不足（{exc.current} 条，"
+                    f"至少需要 {exc.minimum} 条），无法生成总结。"
+                )
+            except DailySummaryGenerationFailedError:
+                await summary_cmd.finish("总结生成失败，请查看日志。")
             await summary_cmd.finish()
 
         # ── unknown subcommand ────────────────────────────────────────

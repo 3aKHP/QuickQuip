@@ -108,7 +108,10 @@ async def test_send_daily_summary_now_reports_not_enough_messages(monkeypatch):
     monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda group_id: False)
     monkeypatch.setattr(daily_summary_plugin, "_mark_triggered", lambda group_id: None)
 
-    with pytest.raises(RuntimeError, match="not enough messages: 1/2"):
+    with pytest.raises(
+        daily_summary_plugin.DailySummaryInsufficientMessagesError,
+        match="not enough messages: 1/2",
+    ):
         await daily_summary_plugin.send_daily_summary_now("123456", types.SimpleNamespace())
 
 
@@ -542,13 +545,13 @@ async def test_send_daily_summary_now_window_starts_yesterday_0600(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_send_daily_summary_now_error_messages_exact(monkeypatch):
-    """钉住裸 RuntimeError 消息文本（P3 改造前的契约）。"""
+async def test_send_daily_summary_now_raises_typed_not_enabled_and_cooldown(monkeypatch):
+    """钉住类型化异常契约（P3 改造后）：未开启 / 冷却分别抛对应类型，str 文本保持兼容。"""
     monkeypatch.setattr(
         daily_summary_plugin, "daily_enabled_groups",
         types.SimpleNamespace(contains=lambda gid: False),
     )
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryNotEnabledError) as exc_info:
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
     assert str(exc_info.value) == "daily summary is not enabled for this group"
 
@@ -557,14 +560,14 @@ async def test_send_daily_summary_now_error_messages_exact(monkeypatch):
         types.SimpleNamespace(contains=lambda gid: True),
     )
     monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda gid: True)
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryCooldownError) as exc_info:
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
     assert str(exc_info.value) == "summary generation is on cooldown"
 
 
 @pytest.mark.asyncio
-async def test_send_daily_summary_now_not_enough_messages_exact_format(monkeypatch):
-    """钉住裸 RuntimeError 消息格式 "not enough messages: X/Y"（P3 要改它）。"""
+async def test_send_daily_summary_now_insufficient_messages_carries_counts(monkeypatch):
+    """钉住：消息不足抛 DailySummaryInsufficientMessagesError，携带 current/minimum 属性。"""
     monkeypatch.setattr(daily_summary_plugin, "datetime", _fixed_datetime(2026, 5, 4, 15, 30))
     monkeypatch.setattr(
         daily_summary_plugin, "daily_enabled_groups",
@@ -584,14 +587,16 @@ async def test_send_daily_summary_now_not_enough_messages_exact_format(monkeypat
     monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda gid: False)
     monkeypatch.setattr(daily_summary_plugin, "_mark_triggered", lambda gid: None)
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryInsufficientMessagesError) as exc_info:
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
+    assert exc_info.value.current == 3
+    assert exc_info.value.minimum == 10
     assert str(exc_info.value) == "not enough messages: 3/10"
 
 
 @pytest.mark.asyncio
 async def test_send_daily_summary_now_raises_when_generation_returns_none(monkeypatch):
-    """钉住：_run_generation 返回 None 时抛 "summary generation skipped or failed"。"""
+    """钉住：_run_generation 返回 None 时抛 DailySummaryGenerationFailedError。"""
     monkeypatch.setattr(daily_summary_plugin, "datetime", _fixed_datetime(2026, 5, 4, 15, 30))
     monkeypatch.setattr(
         daily_summary_plugin, "daily_enabled_groups",
@@ -616,6 +621,6 @@ async def test_send_daily_summary_now_raises_when_generation_returns_none(monkey
 
     monkeypatch.setattr(daily_summary_plugin, "_run_generation", fake_run)
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryGenerationFailedError) as exc_info:
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
     assert str(exc_info.value) == "summary generation skipped or failed"
