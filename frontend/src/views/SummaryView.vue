@@ -92,21 +92,15 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { deleteSummary, fetchSummaryDetail, fetchSummaryGroups, fetchSummaries } from '../api/summaries'
+import type { SummaryDetailRow, SummaryListRow } from '../api/summaries'
 import { deletePeriodReport, fetchPeriodReportDetail, fetchPeriodReportGroups, fetchPeriodReports } from '../api/period_reports'
 import { renderMarkdown } from '../composables/useMarkdown'
 import { toast } from '../toast'
 
 type Tab = 'daily' | 'weekly' | 'monthly'
 
-interface SummaryListRow {
-  summary_date?: string
-  period_key?: string
-  generated_at?: string
-  model_used?: string
-  char_count?: number | string
-  published_at?: string | null
-  content?: string
-  [key: string]: unknown
+function rowKey(row: SummaryListRow): string {
+  return 'summary_date' in row ? row.summary_date : row.period_key
 }
 
 interface SummaryListItem {
@@ -117,10 +111,9 @@ interface SummaryListItem {
 }
 
 interface TabConfig {
-  keyField: string
   fetchGroups: () => Promise<string[]>
   fetchList: (gid: string) => Promise<SummaryListRow[]>
-  fetchDetail: (gid: string, key: string) => Promise<SummaryListRow>
+  fetchDetail: (gid: string, key: string) => Promise<SummaryDetailRow>
   remove: (gid: string, key: string) => Promise<unknown>
 }
 
@@ -132,21 +125,18 @@ const tabs: { key: Tab; label: string }[] = [
 
 const tabConfig: Record<Tab, TabConfig> = {
   daily: {
-    keyField: 'summary_date',
     fetchGroups: () => fetchSummaryGroups(),
     fetchList: (gid) => fetchSummaries(gid),
     fetchDetail: (gid, key) => fetchSummaryDetail(gid, key),
     remove: (gid, key) => deleteSummary(gid, key),
   },
   weekly: {
-    keyField: 'period_key',
     fetchGroups: () => fetchPeriodReportGroups('weekly'),
     fetchList: (gid) => fetchPeriodReports(gid, 'weekly'),
     fetchDetail: (gid, key) => fetchPeriodReportDetail(gid, 'weekly', key),
     remove: (gid, key) => deletePeriodReport(gid, 'weekly', key),
   },
   monthly: {
-    keyField: 'period_key',
     fetchGroups: () => fetchPeriodReportGroups('monthly'),
     fetchList: (gid) => fetchPeriodReports(gid, 'monthly'),
     fetchDetail: (gid, key) => fetchPeriodReportDetail(gid, 'monthly', key),
@@ -163,18 +153,17 @@ const list = ref<SummaryListRow[]>([])
 const listLoading = ref(false)
 const listError = ref<string | null>(null)
 const selected = ref<string | null>(null)
-const detail = ref<SummaryListRow | null>(null)
+const detail = ref<SummaryDetailRow | null>(null)
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
 
 const normalizedList = computed<SummaryListItem[]>(() => {
   return list.value
     .map((item) => {
-      const raw = item[current.value.keyField]
-      const key = raw != null ? String(raw) : ''
+      const key = rowKey(item)
       return {
         key: key || '未知',
-        model: (item.model_used as string) || '—',
+        model: item.model_used || '—',
         charCount: item.char_count ?? '—',
         published: Boolean(item.published_at),
       }
@@ -251,7 +240,7 @@ async function del(key: string) {
   if (!confirm(`删除 ${groupId.value} / ${key} ？`)) return
   try {
     await current.value.remove(groupId.value, key)
-    list.value = list.value.filter(item => String(item[current.value.keyField] || '') !== key)
+    list.value = list.value.filter(item => rowKey(item) !== key)
     if (selected.value === key) closeDetail()
     toast('已删除')
   } catch (e: unknown) {
