@@ -73,9 +73,10 @@ src/
 │   ├── common/        # 共享工具：rate_limit, persistence, message_deduper, sensitive_filter
 │   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, tool_registry, tool_loop, prompting, settings
 │   ├── games/         # 游戏系统：niuniu, blackjack, russian_roulette, number_bomb, economy, scores, registry
-│   ├── generation/    # 多模态生成：image, audio, music, asr
+│   ├── generation/    # 多模态生成：image, audio, music, asr, svg
 │   ├── tieba/         # 贴吧爬虫（Playwright）
 │   ├── search/        # 联网搜索（SearXNG）
+│   ├── sts/           # 杀戮尖塔公式化回复（lexicon、formulas）
 │   ├── adapters/nonebot/  # NoneBot2 适配层：matcher 注册、命令处理、scheduler、lifecycle
 │   └── app/           # 应用组装：管线实例化、Web Admin（FastAPI + Vue 3 SPA）
 └── plugins/           # NoneBot2 插件入口 shim，re-export 指向 quickquip.*
@@ -88,7 +89,7 @@ src/
 
 开发环境需先运行 `uv pip install -e .`（可编辑安装），让 Python 能解析 `src/` 下的包。
 
-消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → chain → text_rules → context_rules → timezone），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
+消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → chain → games → text_rules → context_rules → timezone → sts card_le（链尾）），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
 
 ## Commit 规范
 

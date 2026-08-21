@@ -58,8 +58,9 @@
   调用发生在 `resolve_reply` 内、早于框架层的限频判定，缓存能把被限频情形的成本压低
   （同 `chat/context_rules.py` 的 judge 缓存思路）。
 
-接入点：`app/message_pipeline.py` 的 `resolve_reply()` 规则链，位于 `context_rule` 之后、
-`timezone` 之前，复用 `rule_switch`（按群开关）与框架的 `rate_limit`。
+接入点：`app/message_pipeline.py` 的 `resolve_reply()` 规则链，位于 `timezone` 之后、
+规则链末尾（message_pipeline.py:317-335，代码注释明写不得抢占时区等具体规则），
+复用 `rule_switch`（按群开关）与框架的 `rate_limit`。
 
 ### 3.2 主动路径（`/turmfluch` 命令）
 
@@ -112,5 +113,5 @@ src/quickquip/sts/
 | 词表刷新脚本 | `scripts/refresh_sts_lexicon.py` |
 | 被动匹配器 | `src/quickquip/sts/formulas/card_le/passive.py` |
 | 命令注册 | `src/quickquip/adapters/nonebot/command_parts/sts.py` |
-| LLM 编排 | `src/quickquip/llm/service.py`（`generate_turmfluch_reply` / `generate_card_le_nearest`） |
+| LLM 编排 | `src/quickquip/llm/service.py`（`generate_turmfluch_reply` / `generate_card_le_nearest`；共享管线骨架已抽至 `llm/single_shot.py`，v1.12.1） |
 | 限频桶 | `src/quickquip/chat/config.py`（`_BUILTIN_RATE_LIMIT_RULES`） |

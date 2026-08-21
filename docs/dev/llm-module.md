@@ -32,13 +32,13 @@ LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每�
 LLM 相关核心文件如下：
 
 - `src/quickquip/adapters/nonebot/commands.py`
-  - 负责 `/llm`、`/search` 等命令注册
+  - 负责 `/llm`、`/search` 等命令注册；注册逻辑按域拆到 `command_parts/`（llm / memory / sts / media 等）
 - `src/quickquip/adapters/nonebot/group_messages.py`
   - 负责 NoneBot 群消息入口，并把消息交给应用层管线
 - `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机）
 - `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、健康检查、状态、自动记忆）
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、健康检查、状态、自动记忆）
 - `src/quickquip/llm/quick_judge.py`
   - quick_judge 诊断通道（`QuickJudgeResult`、provider 选择策略、detailed 通道），`LLMService` 仅保留薄委托
 - `src/quickquip/llm/single_shot.py`
@@ -52,7 +52,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/defectify.py`
   - `/defectify` 故障机器人转写逻辑
 - `src/quickquip/app/message_pipeline.py`
-  - 负责群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装
+  - 应用组合根：chat / games / tieba 单例装配、`resolve_reply()` 规则链、`reload_chat_rules_pipeline()`、`save_all()` / `close_persistent_stores()` 与 `_ensure_llm_bindings()`
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
 - `src/quickquip/llm/provider/`（包）
@@ -76,7 +76,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/message_segments.py`
   - 负责消息段叶子节点渲染、bot 身份集合归一化等共享小逻辑
 - `src/quickquip/llm/health.py`
-  - LLM 健康检查模块（配置、provider 探活、知识文件、工具、MCP 等 10 项检查）
+  - LLM 健康检查模块（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings、auto_memory 共 13 项检查）
 - `src/quickquip/llm/image_preprocessor.py`
   - 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点
 - `src/quickquip/adapters/nonebot/voice.py`
@@ -203,7 +203,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 - 每次触发时实际读取的条数由以下优先级决定：
   1. 本群通过 `/llm context_limit <n>` 设置的覆盖值（若有）
   2. `llm.toml` 的 `[runtime] history_limit`（全局默认，当前为 10）
-  3. 代码存储上限（`MAX_STORED_CONVERSATION_MESSAGES`，当前为 20，为最终截断）
+  3. 代码存储上限（`service_parts/constants.py` 的 `MAX_GROUP_STORED_CONVERSATION_MESSAGES`，当前为 20，为最终截断；私聊为 `MAX_PRIVATE_STORED_CONVERSATION_MESSAGES` = 256）
 - 群级覆盖写入 `data/llm.db`，重启或 `clear_context` 不会清除
 - 执行 `/llm reload` 或 `/llm context_limit reset` 可重置为全局默认
 - `clear_context` 只清空已存的会话消息，不改变上限设置
@@ -482,7 +482,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm current`
   - 查看当前群实际生效的 provider、model、persona、记忆开关、短期会话条数和长期记忆条数
 - `/llm health [verbose|detail|full]`
-  - 运行 LLM 健康检查（配置、provider 探活、知识文件、工具、MCP 等 10 项）
+  - 运行 LLM 健康检查（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings、auto_memory 共 13 项）
 - `/llm reload`
   - 仅管理员。重载 LLM 配置，并探活当前会话实际生效的 provider/model
   - reload 后探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费；api_key 未设置时自动跳过

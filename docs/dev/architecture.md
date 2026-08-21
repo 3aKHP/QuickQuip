@@ -30,7 +30,7 @@
 
 QuickQuip 代码组织为三层结构：
 
-1. **`src/quickquip/chat|common|llm|tieba|search|generation`** — 框架无关的业务逻辑
+1. **`src/quickquip/chat|common|llm|games|sts|tieba|search|generation`** — 框架无关的业务逻辑
 2. **`src/quickquip/adapters/nonebot/`** — NoneBot2 适配层（所有 matcher / command 注册在此）
 3. **`src/plugins/`** — NoneBot2 插件发现入口，只做 re-export，不含业务逻辑
 
@@ -46,12 +46,14 @@ NoneBot2 event → tz_tracker_plugin matcher
 规则回复链路：
 1. `repeat_detector` — 复读/刷屏检测（最高优先级）
 2. `good_girl_chain` / `custom_chain_games` — 接龙状态机（60s 超时）
-3. `text_reply_rules` — 正则彩蛋匹配（优先级 + 加权随机）
-4. `context_rules` — 语境感知规则（regex_context / llm_context 判定）
-5. `build_timezone_reply()` — 时区猜测（兜底）
-6. `rule_switch.is_enabled()` — 每步均受群级规则开关控制
-7. `rate_limit.allow()` — 发送前限流检查
-8. `stats_tracker` — 消息统计与规则触发计数
+3. `game_registry.process()` — 会话型游戏分发
+4. `text_reply_rules` — 正则彩蛋匹配（优先级 + 加权随机）
+5. `context_rules` — 语境感知规则（regex_context / llm_context 判定）
+6. `build_timezone_reply()` — 时区猜测
+7. STS `card_le` — 「xxx了」公式，位于规则链末尾（规则开关与限频预检后再 `match_card_le`，不得抢占时区等具体规则；message_pipeline.py:271-287, 323-335）
+8. `rule_switch.is_enabled()` — 每步均受群级规则开关控制
+9. `rate_limit.allow()` — 发送前限流检查
+10. `stats_tracker` — 消息统计与规则触发计数
 
 ### 依赖方向与组合根
 
@@ -101,10 +103,10 @@ QuickQuip/
 
 ```
 src/quickquip/
-├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集与生成编排、节日检测）
+├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集与生成编排、周期报告、唤醒、词云、节日检测）
 ├── common/                  # 通用工具（限流、持久化、消息去重、最近消息缓冲）
 ├── games/                   # 游戏模块（registry、scores、economy、config、各游戏实现）
-├── llm/                     # LLM 运行时（多 provider、工具调用循环、MCP 客户端、记忆存储、persona、身份映射、词表、健康检查；核心门面拆到 service_parts/）
+├── llm/                     # LLM 运行时（多 provider、工具调用循环、MCP 客户端、记忆存储、persona、身份映射、词表、健康检查、用量统计与定价、quick_judge、single_shot；核心门面拆到 service_parts/）
 ├── generation/              # 多模态产出配置、模型解析、图片/语音/音乐 provider 调用
 ├── tieba/                   # 贴吧爬虫与帖子池
 ├── search/                  # 项目内 SearXNG 搜索客户端
@@ -112,7 +114,7 @@ src/quickquip/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件；命令注册按域拆到 command_parts/）
 └── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）
     ├── web/                 # Web 管理后台 FastAPI 应用与路由
-    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、定时任务、审计、金币经济、牛牛大作战）
+    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、定时任务、审计、金币经济、牛牛大作战、唤醒、LLM 用量、周期报告、语录）
 ```
 
 **规则**：业务逻辑只进 `src/quickquip/`（包路径 `quickquip.*`），不进 `src/plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
@@ -164,11 +166,21 @@ data/
 ├── rule_switch.json        # 群规则开关状态
 ├── llm.db                  # LLM 对话历史与长期记忆（SQLite）
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
+├── period_reports.db       # 周期报告（周报/月报）存档（SQLite）
+├── weekly_report_groups.json   # 已启用周报的群列表
+├── monthly_report_groups.json  # 已启用月报的群列表
 ├── web_admin_sessions.db   # Web Admin 会话记录
 ├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
+├── llm_usage.db            # LLM 用量与成本统计（SQLite）
+├── mcp_status.json         # MCP server 装载状态快照
 ├── awakening_boredom_groups.json # 已启用无聊唤醒的群列表
+├── game_economy.db         # 游戏金币 / 签到 / 好感度（SQLite）
+├── game_scores.json        # 游戏战绩计分
+├── offline_messages.db     # 离线留言（SQLite）
+├── quotes.db               # 群语录（SQLite）
 ├── daily_msgs/             # 每日消息原始收集（{group_id}/{date}.jsonl）
+├── wordcloud_msgs/         # 词云消息原始收集
 ├── logs/                   # loguru 文件日志（保留 14 天）
 ├── fonts/                  # 词云字体文件（手动放置）
 ├── tieba/

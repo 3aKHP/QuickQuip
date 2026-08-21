@@ -72,7 +72,7 @@ hotfix/* (仅生产阻断) ────────────────→ m
 1. provider 与 MCP 协议、重试、取消、未信任结果；
 2. LLM 工具、外部副作用、敏感词与成功语义；
 3. SQLite/文件持久化、迁移、锁、关闭与恢复；
-4. 消息触发、群隔离、限流、Web Admin 与配置契约；
+4. 消息触发、群隔离、限流、Web Admin、配置契约、部署与发行；
 5. 全局结构、依赖方向、上帝结构与目录归属。
 
 每个候选发现由未产出该发现的 reviewer 重新检查所引契约和 `file:line`，按 0/25/50/75/100 评分；仅保留置信度至少 80、确属本变更引入且契约引用正确的发现。最后再将幸存发现归入 Blocking、Should-fix、Nits、Verified claims。Deep-CR 是 Standard PR 的补充，不替代每个拆分 PR 的独立 CR 与 Bot Review。

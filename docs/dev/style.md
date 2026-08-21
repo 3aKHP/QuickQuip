@@ -46,7 +46,7 @@ God file、God function、God class、mega-controller、service locator、宽 co
 
 ## QuickQuip 分层规则
 
-- `chat/`、`llm/`、`games/`、`generation/`、`tieba/`、`search/` 和 `common/` 是框架无关业务域。它们不导入 NoneBot、不注册 matcher，也不依赖 Web 展示层。
+- `chat/`、`llm/`、`games/`、`sts/`、`generation/`、`tieba/`、`search/` 和 `common/` 是框架无关业务域。它们不导入 NoneBot、不注册 matcher，也不依赖 Web 展示层。
 - `common/` 不反向依赖任一业务域。
 - `adapters/nonebot/` 只负责 OneBot/NoneBot 事件、命令、调度与生命周期适配；纯业务算法下沉到拥有它的领域。
 - `plugins/` 只为 NoneBot 发现机制 re-export，不承载业务逻辑。

@@ -45,6 +45,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、Docker Socket 取舍、推荐架构、现有 MCP server 列表 |
 | [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——从零开始，以项目实际规则为例，覆盖基础语法到进阶特性 |
 | [docs/dev/tool-discovery.md](dev/tool-discovery.md) | LLM 工具发现实现说明——manifest、动态加载循环、模式语义和测试覆盖 |
+| [docs/dev/sts-formula.md](dev/sts-formula.md) | STS 公式化回复模块——杀戮尖塔词表、card_le 与 turmfluch 公式的识别与生成链路 |
 
 ---
 

@@ -78,9 +78,11 @@ GHCR 分发镜像和生产模板镜像已内置 Docker CLI，以便需要时启�
 
 建议未来按三层来接 MCP：
 
-1. `src/quickquip/app/message_pipeline.py` / `src/quickquip/llm/tool_registry.py`
+1. `src/quickquip/llm/service.py`（MCP 生命周期归属 `service_parts/mcp_lifecycle.py`）/ `src/quickquip/llm/tool_registry.py`
 2. `src/quickquip/llm/mcp/`（包，v1.8.9 从单文件 `mcp.py` 拆分而来）
 3. `config/llm.toml` 内的 `[[mcp.servers]]` 定义
+
+MCP client 的连接生命周期（启动、重载、关闭、工具别名重注册）由 `service_parts/mcp_lifecycle.py` 单一持有。
 
 这样可以保持：
 
