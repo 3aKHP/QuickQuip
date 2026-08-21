@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 
 try:
     import nonebot
@@ -24,87 +22,41 @@ from quickquip.app.message_pipeline import (
     stats_tracker,
     strip_command_name as _strip_command_name,
 )
-from quickquip.chat.awakening import get_config, run_boredom_check
+from quickquip.chat.awakening import (
+    AWAKENING_RULE_NAMES,
+    AWAKENING_RULES,
+    BoredomEnabledGroups,
+    confirm_boredom_sent,
+    effective_boredom_scan_interval,
+    get_config,
+    get_state,
+    iter_boredom_send_plans,
+    reload_config,
+)
+from quickquip.common.bot_action_trace import bot_action_trace
 
 logger = logging.getLogger(__name__)
 
 _RULE_NAME = "awakening_boredom"
-_BOREDOM_GROUPS_PATH = Path("data/awakening_boredom_groups.json")
-
-
-def _safe_group_id(group_id: int | str) -> str:
-    s = str(group_id).strip()
-    if not s.isdigit():
-        raise ValueError(f"Invalid group_id: {group_id!r}")
-    return s
-
-
-class BoredomEnabledGroups:
-    """Manages the opt-in set of groups with boredom awakening enabled."""
-
-    def __init__(self, path: str | Path = _BOREDOM_GROUPS_PATH):
-        self.path = Path(path)
-        self._groups: set[str] = set()
-        self.load()
-
-    def load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            with self.path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            raw_groups = data.get("enabled", [])
-            validated: set[str] = set()
-            for g in raw_groups:
-                try:
-                    validated.add(_safe_group_id(g))
-                except ValueError:
-                    logger.warning("awakening: ignoring invalid group_id in %s: %r", self.path, g)
-            self._groups = validated
-        except (OSError, json.JSONDecodeError):
-            self._groups = set()
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                json.dump({"enabled": sorted(self._groups)}, f, ensure_ascii=False, indent=2)
-            tmp.replace(self.path)
-        except OSError:
-            logger.warning("awakening: failed to save boredom groups to %s", self.path)
-            tmp.unlink(missing_ok=True)
-
-    def add(self, group_id: int | str) -> None:
-        self._groups.add(_safe_group_id(group_id))
-        self.save()
-
-    def remove(self, group_id: int | str) -> None:
-        self._groups.discard(_safe_group_id(group_id))
-        self.save()
-
-    def contains(self, group_id: int | str) -> bool:
-        return _safe_group_id(group_id) in self._groups
-
-    def all_groups(self) -> list[str]:
-        return sorted(self._groups)
+BOREDOM_SCAN_JOB_ID = "awakening_boredom_check"
 
 
 boredom_enabled_groups = BoredomEnabledGroups()
 
 
-def _register_scheduler_jobs() -> None:
-    if not scheduler:
-        return
-    _ensure_llm_bindings()
+def register_boredom_scan_job(sched=None) -> int | None:
+    """以固定 job ID（重）注册无聊唤醒扫描任务；reload 路径复用本函数，
+    修改 ``boredom_scan_interval`` 后无需重启即可生效。返回生效的周期秒数，
+    scheduler 不可用时返回 None。"""
+    sched = scheduler if sched is None else sched
+    if not sched:
+        return None
     cfg = get_config()
-    interval = cfg.defaults.boredom_check_interval
-    if interval <= 0:
-        interval = 300
+    interval = effective_boredom_scan_interval(cfg)
 
     from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
 
-    job_id = "awakening_boredom_check"
+    job_id = BOREDOM_SCAN_JOB_ID
 
     async def _wrapped_boredom_check():
         try:
@@ -114,15 +66,28 @@ def _register_scheduler_jobs() -> None:
                 bot = nonebot.get_bot()
             except Exception:
                 return
+            _ensure_llm_bindings()
             svc = get_llm_service()
 
             def _build_reply(result: dict):
                 return build_llm_reply_message(result, Message, MessageSegment)
 
-            await run_boredom_check(
-                bot, boredom_enabled_groups, rule_switch, svc, rate_limiter, stats_tracker,
-                build_reply_message=_build_reply,
-            )
+            # 发送循环归适配层：chat 层只产出待发送计划，传输成功后
+            # 回调 confirm_boredom_sent 确认冷却/统计/缓存。
+            async for plan in iter_boredom_send_plans(
+                boredom_enabled_groups, rule_switch, svc, rate_limiter
+            ):
+                try:
+                    with bot_action_trace(**plan.trace_kwargs()):
+                        await bot.send_group_msg(
+                            group_id=int(plan.group_id),
+                            message=_build_reply(plan.reply_result),
+                        )
+                    confirm_boredom_sent(plan, stats_tracker)
+                except Exception:
+                    logger.warning(
+                        "awakening_boredom: failed for group %s", plan.group_id, exc_info=True
+                    )
             try:
                 record_job_result(job_id, True)
             except Exception:
@@ -134,14 +99,36 @@ def _register_scheduler_jobs() -> None:
                 pass
             raise
 
-    scheduler.add_job(
+    sched.add_job(
         _wrapped_boredom_check,
         "interval",
         seconds=interval,
         id=job_id,
         replace_existing=True,
     )
-    logger.info("awakening: boredom check job registered (interval=%ds)", interval)
+    logger.info("awakening: boredom scan job registered (interval=%ds)", interval)
+    return interval
+
+
+def reload_awakening_and_reschedule() -> int | None:
+    """「重载 awakening.toml → 同一 job ID 重注册扫描任务」的唯一入口，
+    mtime 轮询与 awakening_reload 动作共用；返回生效的扫描周期秒数。"""
+    reload_config()
+    return register_boredom_scan_job()
+
+
+def reload_boredom_groups() -> None:
+    """重载 opt-in 集合并清理由此取消 opt-in 群的唤醒状态。
+
+    供 web-admin 写入触发的 mtime 轮询使用；进程内命令路径
+    （/awakening boredom off）直接调用 clear_boredom_state 清除。
+    """
+    before = set(boredom_enabled_groups.all_groups())
+    boredom_enabled_groups.load()
+    removed = before - set(boredom_enabled_groups.all_groups())
+    state = get_state()
+    for gid in removed:
+        state.clear_boredom_state(gid)
 
 
 def register_awakening_commands(on_command) -> None:
@@ -162,16 +149,8 @@ def register_awakening_commands(on_command) -> None:
         settings = cfg.resolve_group(group_id)
 
         if action in {"status", "状态", ""}:
-            rules = [
-                ("awakening_extend", "唤醒延长"),
-                ("awakening_interest", "兴趣话题"),
-                ("awakening_fallback", "兜底概率"),
-                ("awakening_boredom", "无聊唤醒"),
-                ("awakening_relevance", "相关性唤醒"),
-                ("awakening_qa", "答疑唤醒"),
-            ]
             lines = ["唤醒模块状态："]
-            for rule_name, label in rules:
+            for rule_name, label in AWAKENING_RULES:
                 enabled = rule_switch.is_enabled(group_id, rule_name)
                 lines.append(f"  [{('ON' if enabled else 'OFF')}] {label} ({rule_name})")
 
@@ -195,8 +174,7 @@ def register_awakening_commands(on_command) -> None:
             if len(tokens) < 2:
                 await cmd.finish("用法: /awakening on <规则名>\n可选: awakening_extend, awakening_interest, awakening_fallback, awakening_boredom, awakening_relevance, awakening_qa")
             rule_name = tokens[1]
-            valid_rules = {"awakening_extend", "awakening_interest", "awakening_fallback", "awakening_boredom", "awakening_relevance", "awakening_qa"}
-            if rule_name not in valid_rules:
+            if rule_name not in AWAKENING_RULE_NAMES:
                 await cmd.finish(f"未知规则: {rule_name}")
             rule_switch.enable(group_id, rule_name)
             from quickquip.app.message_pipeline import RULE_SWITCH_PATH
@@ -209,8 +187,7 @@ def register_awakening_commands(on_command) -> None:
             if len(tokens) < 2:
                 await cmd.finish("用法: /awakening off <规则名>")
             rule_name = tokens[1]
-            valid_rules = {"awakening_extend", "awakening_interest", "awakening_fallback", "awakening_boredom", "awakening_relevance", "awakening_qa"}
-            if rule_name not in valid_rules:
+            if rule_name not in AWAKENING_RULE_NAMES:
                 await cmd.finish(f"未知规则: {rule_name}")
             rule_switch.disable(group_id, rule_name)
             from quickquip.app.message_pipeline import RULE_SWITCH_PATH
@@ -226,6 +203,7 @@ def register_awakening_commands(on_command) -> None:
                 await cmd.finish("本群无聊唤醒已开启。")
             if sub in {"off", "关闭", "禁用"}:
                 boredom_enabled_groups.remove(group_id)
+                get_state().clear_boredom_state(group_id)
                 await cmd.finish("本群无聊唤醒已关闭。")
             await cmd.finish("用法: /awakening boredom on|off")
 
@@ -241,5 +219,6 @@ def register_awakening_commands(on_command) -> None:
 
 
 def setup(on_command) -> None:
-    _register_scheduler_jobs()
+    _ensure_llm_bindings()
+    register_boredom_scan_job()
     register_awakening_commands(on_command)

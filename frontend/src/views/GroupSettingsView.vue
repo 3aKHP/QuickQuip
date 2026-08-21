@@ -209,28 +209,35 @@ import {
   listGroupSettings,
   saveGroupSettings,
 } from '../api/groupSettings'
+import type {
+  GroupOverrideEntry,
+  GroupSettingsDefaults,
+  GroupSettingsOptions,
+} from '../api/groupSettings'
+import { useGroupOverrideDraft } from '../composables/useGroupOverrideDraft'
 import { toast } from '../toast'
 
-const FIELDS = [
-  'enabled', 'memory_enabled', 'auto_memory_enabled', 'provider_id', 'model', 'persona_id',
-  'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit',
-]
-
-type DraftSettings = Record<string, any>
-
-const options = ref<any>(null)
-const groupList = ref<any[]>([])
+const options = ref<GroupSettingsOptions | null>(null)
+const groupList = ref<GroupOverrideEntry[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const selectedGroupId = ref('')
-const original = ref<DraftSettings>(emptyDraft())
-const draftTriState = ref<DraftSettings>(emptyDraft())
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
-function emptyDraft(): DraftSettings {
-  return Object.fromEntries(FIELDS.map(field => [field, null]))
-}
+const {
+  draft: draftTriState,
+  hasChanges,
+  modelInput,
+  prefixInput,
+  historyInput,
+  clearModel,
+  clearPrefix,
+  clearHistory,
+  applyData,
+  resetDraft,
+  buildPatch,
+} = useGroupOverrideDraft()
 
 function displayId(key: string): string {
   if (!key) return ''
@@ -242,7 +249,7 @@ const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
 
-function defaultHint(field: string): string {
+function defaultHint(field: keyof GroupSettingsDefaults): string {
   const value = defaults.value[field]
   if (value === true) return '开'
   if (value === false) return '关'
@@ -250,49 +257,17 @@ function defaultHint(field: string): string {
   return String(value)
 }
 
-const modelInput = computed({
-  get: () => draftTriState.value.model ?? '',
-  set: (value) => { draftTriState.value.model = value === '' ? null : value },
-})
-
-const prefixInput = computed({
-  get: () => draftTriState.value.trigger_prefix ?? '',
-  set: (value) => { draftTriState.value.trigger_prefix = value === '' ? null : value },
-})
-
-const historyInput = computed({
-  get: () => draftTriState.value.history_limit ?? '',
-  set: (value) => {
-    if (value === '' || value == null || Number.isNaN(Number(value))) {
-      draftTriState.value.history_limit = null
-    } else {
-      draftTriState.value.history_limit = Number(value)
-    }
-  },
-})
-
 const modelPlaceholder = computed(() => {
   const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find((p: any) => p.id === providerId)
+  const provider = providers.value.find(p => p.id === providerId)
   return provider?.default_model || '默认 model'
 })
 
 const modelSuggestions = computed(() => {
   const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find((p: any) => p.id === providerId)
+  const provider = providers.value.find(p => p.id === providerId)
   return provider?.models || []
 })
-
-const hasChanges = computed(() => {
-  for (const field of FIELDS) {
-    if (draftTriState.value[field] !== original.value[field]) return true
-  }
-  return false
-})
-
-function clearModel() { draftTriState.value.model = null }
-function clearPrefix() { draftTriState.value.trigger_prefix = null }
-function clearHistory() { draftTriState.value.history_limit = null }
 
 async function reloadAll() {
   loading.value = true
@@ -318,12 +293,7 @@ async function loadOne(groupId: string) {
   saveError.value = null
   try {
     const data = await fetchGroupSettings(groupId)
-    const snapshot = emptyDraft()
-    for (const field of FIELDS) {
-      if (data[field] !== undefined) snapshot[field] = data[field]
-    }
-    original.value = snapshot
-    draftTriState.value = { ...snapshot }
+    applyData(data)
   } catch (e: unknown) {
     saveError.value = (e as Error).message
   }
@@ -346,17 +316,11 @@ function startAdd() {
   }
   if (hasChanges.value && !confirm('当前修改未保存，切换会丢失。是否继续？')) return
   selectedGroupId.value = key
-  original.value = emptyDraft()
-  draftTriState.value = emptyDraft()
+  resetDraft()
 }
 
 async function onSave() {
-  const diff: Record<string, any> = {}
-  for (const field of FIELDS) {
-    if (draftTriState.value[field] !== original.value[field]) {
-      diff[field] = draftTriState.value[field]
-    }
-  }
+  const diff = buildPatch()
   if (!Object.keys(diff).length) return
   saving.value = true
   saveError.value = null
@@ -379,8 +343,7 @@ async function onClear() {
     await clearGroupSettings(selectedGroupId.value)
     toast('已清空')
     selectedGroupId.value = ''
-    original.value = emptyDraft()
-    draftTriState.value = emptyDraft()
+    resetDraft()
     await reloadAll()
   } catch (e: unknown) {
     toast((e as Error).message, 'error')

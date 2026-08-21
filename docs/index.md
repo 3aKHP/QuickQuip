@@ -36,14 +36,16 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 | 文件 | 说明 |
 |------|------|
-| [docs/dev/style.md](../docs/dev/style.md) | 代码规范与架构硬原则——单一职责、文件长度预警、分层纪律、抽取触发条件、反模式与重构节奏 |
-| [docs/dev/branching.md](../docs/dev/branching.md) | 分支模型与发布流程——精简 GitFlow、日常工作流、Release checklist、hotfix 例外 |
-| [docs/dev/architecture.md](../docs/dev/architecture.md) | 项目架构与结构——三层架构、消息流、目录用途、分发层/自用层划分、gitignore 规则 |
-| [docs/dev/game-framework.md](../docs/dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
-| [docs/dev/llm-module.md](../docs/dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
-| [docs/dev/mcp-integration.md](../docs/dev/mcp-integration.md) | MCP 集成约定——transport 选择、Docker Socket 取舍、推荐架构、现有 MCP server 列表 |
-| [docs/dev/regex-tutorial.md](../docs/dev/regex-tutorial.md) | 正则表达式教程——从零开始，以项目实际规则为例，覆盖基础语法到进阶特性 |
-| [docs/dev/tool-discovery.md](../docs/dev/tool-discovery.md) | LLM 工具发现实现说明——manifest、动态加载循环、模式语义和测试覆盖 |
+| [docs/dev/README.md](dev/README.md) | 开发文档索引——公共/私有边界、文档职责和维护规则 |
+| [docs/dev/style.md](dev/style.md) | 代码规范与架构原则——职责边界、禁止的上帝结构、输入/状态/测试契约 |
+| [docs/dev/branching.md](dev/branching.md) | 开发工作流与发布流程——六级变更分级、评审、验证、release 与 hotfix |
+| [docs/dev/architecture.md](dev/architecture.md) | 项目架构与结构——三层架构、依赖方向、组合根、目录用途与数据边界 |
+| [docs/dev/game-framework.md](dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
+| [docs/dev/llm-module.md](dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
+| [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、Docker Socket 取舍、推荐架构、现有 MCP server 列表 |
+| [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——从零开始，以项目实际规则为例，覆盖基础语法到进阶特性 |
+| [docs/dev/tool-discovery.md](dev/tool-discovery.md) | LLM 工具发现实现说明——manifest、动态加载循环、模式语义和测试覆盖 |
+| [docs/dev/sts-formula.md](dev/sts-formula.md) | STS 公式化回复模块——杀戮尖塔词表、card_le 与 turmfluch 公式的识别与生成链路 |
 
 ---
 

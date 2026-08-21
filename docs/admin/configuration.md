@@ -34,7 +34,7 @@
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SEARXNG_BASE_URL` | Bot 内置 `search_web` 和 `/search` 使用的 SearXNG 服务地址 | `http://127.0.0.1:8888` |
+| `SEARXNG_BASE_URL` | Bot 内置 `search_web` 和 `/search` 使用的 SearXNG 服务地址；代码无内置默认，未设置时调用直接报错 | —（`http://127.0.0.1:8888` 仅为 `.env.example` 给出的示例值） |
 | `QUICKQUIP_SEARXNG_BASE_URL` | Docker Compose 内注入给 QuickQuip / Web Admin 的 SearXNG 容器内地址；避免把本地直跑的 `127.0.0.1` 地址带入容器 | `http://searxng:8080` |
 | `SEARXNG_SAFE_SEARCH` | 传给 SearXNG 的安全搜索级别：`0` / `1` / `2` | `0` |
 | `SEARXNG_LANGUAGE` | 传给 SearXNG 的搜索语言；空值时使用 `all` | `all` |
@@ -105,18 +105,20 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
-| `enabled` | 全局 LLM 开关 | `true` |
+| `enabled` | 全局 LLM 开关（`llm.toml.example` 中显式设为 `true`） | `false` |
 | `memory_enabled` | 全局记忆注入开关 | `true` |
 | `default_provider` | 默认 provider ID | — |
 | `default_persona` | 默认人格 ID | — |
 | `history_limit` | 单次调用读取的对话轮数上限 | `10` |
-| `history_max_messages_per_group` | 单群存储的对话消息硬上限 | `20` |
-| `memory_limit` | 单次调用注入的记忆条数上限 | — |
-| `memory_max_items_per_group` | 单群存储的记忆条数硬上限 | — |
-| `max_prompt_chars` | system prompt 最大字符数 | — |
+| `history_max_messages_per_group` | 单群存储的对话消息数配置上限（群聊实际受代码硬上限 20 截断，见 `service_parts/constants.py`） | `40` |
+| `memory_limit` | 单次调用注入的记忆条数上限 | `6` |
+| `memory_max_items_per_group` | 单群存储的记忆条数硬上限 | `200` |
+| `max_prompt_chars` | system prompt 最大字符数 | `4000` |
 | `tool_calling_enabled` | 是否允许工具调用 | `false` |
 | `tool_max_rounds` | 单次工具调用循环最大轮数 | `8` |
 | `tool_max_calls_per_round` | 单轮最多执行工具调用数 | `16` |
+| `retry_max_attempts` | LLM 请求失败时的最大重试次数 | `3` |
+| `retry_base_delay` | 重试退避的基础延迟秒数 | `1.0` |
 | `auto_memory_enabled` | 自动记忆抽取全局默认开关 | `false` |
 | `auto_memory_prompt` | 自动记忆抽取自定义判定 prompt | `""` |
 | `auto_memory_max_tokens` | 自动记忆抽取判定最大输出 token | `256` |
@@ -128,7 +130,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `default_prefix` | 显式触发前缀 | `/ai` |
 | `allow_prefix` | 启用前缀触发 | `true` |
 | `allow_at` | 启用艾特触发 | `true` |
-| `empty_prompt_reply` | 空提示时的默认回复文本 | — |
+| `empty_prompt_reply` | 空提示时的默认回复文本 | `请在触发指令或艾特后面补上想说的话。` |
 
 `[triggers.auto_search]` — 自动联网判定：
 
@@ -146,7 +148,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `timeout` | 判定超时秒数 | `2.0` |
 | `max_tokens` | 判定最大输出 token | `64` |
 
-快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。
+快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。技术失败（超时、provider 异常、空正文、截断、无效 JSON）一律按未触发处理（fail-closed），不会写入 60 秒判定缓存；只有成功解析的业务 true/false 会进缓存。选用带 reasoning 的模型时，reasoning token 计入 `max_tokens` 且延迟更高，需要同时调大 `max_tokens`（如 256）与 `timeout`（如 6 秒），否则会出现「预算被思考耗尽、可见判定为空」与大面积超时。
 
 ### `[image_preprocessing]` — 非视觉模型图片转述
 
@@ -212,8 +214,35 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
 | `auth_method` | 认证方式：`api_key`（x-api-key 头，默认）或 `bearer`（Authorization: Bearer 头） | `api_key` |
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
+| `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
+
+### `[pricing.models]` — 模型定价（成本统计）
+
+per-MTok（每百万 token，USD）定价表，是 Web Admin LLM 用量页成本统计（`cost_usd`）的价格来源：
+
+```toml
+# 纯 model 名 = 官方价默认（所有 provider 的该 model 共享）
+[pricing.models."deepseek-chat"]
+input_per_mtok = 0.14
+output_per_mtok = 0.28
+cache_read_per_mtok = 0.003
+
+# "provider_id/model" = per-provider 覆盖（某中转实际价，优先于 model 默认）
+[pricing.models."my-provider/deepseek-chat"]
+input_per_mtok = 0.20
+output_per_mtok = 0.40
+```
+
+| 键 | 说明 |
+|----|------|
+| `input_per_mtok` | 输入价（USD/百万 token） |
+| `output_per_mtok` | 输出价（USD/百万 token） |
+| `cache_read_per_mtok` | 缓存读价；模型无该缓存机制时省略，计算时回退 input 价 |
+| `cache_write_per_mtok` | 缓存写价；同上，无缓存溢价时省略 |
+
+查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示"未定价"）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
 
 ### `[mcp]` — MCP 总开关
 
@@ -227,6 +256,14 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 |----|------|
 | `id` | Server 唯一标识 |
 | `transport` | 传输方式：`stdio` / `docker` / `http` / `sse` |
+| `enabled` | 是否启用该 server，默认 `true` |
+| `timeout_seconds` | 连接/请求超时秒数，默认 `30` |
+| `url` | 服务端点 URL（`transport = "http"` / `"sse"` 时必填） |
+| `headers` | 注入请求的 HTTP 头，值支持 `${ENV_VAR}` / `${ENV_VAR:-default}` |
+| `tool_prefix` | 自定义该 server 生成工具名的前缀；留空时按 server id 生成 |
+| `protocol_version` | `legacy` 协商时 initialize 握手使用的协议版本 pin，默认 `"2025-03-26"` |
+| `negotiation` | 协议协商模式（仅 `http` transport 生效）：`legacy`（默认）/ `auto` / `modern` |
+| `supported_protocol_versions` | `auto` / `modern` 协商时客户端声明的可接受版本列表（这两种模式必填） |
 | `image` | Docker 镜像（`transport = "docker"` 时） |
 | `command` | 启动命令（`transport = "stdio"` 时） |
 | `args` | 命令参数（`transport = "stdio"` 时） |
@@ -316,12 +353,12 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 | 键 | 说明 |
 |----|------|
-| `display_name` | 展示名 |
-| `model_id` | 模型 ID |
-| `supported_sizes` | 支持的尺寸列表 |
-| `supported_aspect_ratios` | 支持的比例列表 |
-| `default_quality` | 默认质量 |
-| `return_format` | 返回格式（`url` / `b64_json`） |
+| `id` | 模型唯一标识，用于 `default_model` 引用和 `/draw <id>` 选模型 |
+| `label` | 可选展示名 |
+| `model` | 调用 API 时传入的模型 ID |
+| `size` | 图片尺寸（`openai_images` / `gemini_imagen` 如 `1024x1024`；`minimax_images` 填宽高比） |
+| `quality` | 质量档（`openai_images` 协议下有效，如 `standard` / `hd`） |
+| `response_format` | 返回格式（`openai_images` 协议下有效：`b64_json` 默认 / `url`） |
 
 ### `[audio]` — 语音生成
 
@@ -331,7 +368,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `default_model` | 默认模型名 |
 | `prompt_blocklist` | 文本黑名单 |
 
-`[[audio.providers]]` 和 `[[audio.providers.models]]` 结构类似图片，额外包含 `supported_formats`、`default_sample_rate`、`default_bitrate`、`default_voice`、`voice_style_options` 等语音特有字段。
+`[[audio.providers]]` 和 `[[audio.providers.models]]` 结构类似图片，model 额外包含 `voice_id`、`sample_rate`、`bitrate`、`format`、`channel`、`speed`、`vol`、`pitch`、`emotion`、`output_format`、`extra_body` 等语音特有字段。
 
 当前支持的 provider protocol：
 
@@ -392,7 +429,7 @@ ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM �
 | `default_model` | 默认模型名 |
 | `prompt_blocklist` | 文本黑名单 |
 
-`[[music.providers]]` 和 `[[music.providers.models]]` 结构类似，额外包含 `supported_output_formats`、`lyrics_optimization` 等音乐特有字段。
+`[[music.providers]]` 和 `[[music.providers.models]]` 结构类似，model 额外包含 `format`、`output_format`、`add_watermark`、`lyrics_optimizer` 等音乐特有字段。
 
 `api_key_env` 由每个 provider 自行声明；示例配置中常见的键名包括 `MINIMAX_API_KEY`、`VOLCENGINE_API_KEY` 和 OpenAI-compatible ASR 使用的 `OPENAI_API_KEY`。
 
@@ -424,14 +461,17 @@ LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写�
 | `fallback_probability` | 普通消息低概率触发回应的概率；`0` 关闭 | `0` |
 | `boredom_silence_seconds` | 群聊沉寂多少秒后允许无聊唤醒；`0` 关闭 | `0` |
 | `boredom_probability` | 无聊检查命中时发送冒泡消息的概率 | `0` |
-| `boredom_check_interval` | 无聊唤醒定时检查间隔秒数 | `300` |
+| `boredom_scan_interval` | 无聊唤醒定时扫描周期秒数；未设置时回退 `boredom_check_interval` | `300` |
+| `boredom_check_interval` | 群级无聊唤醒成功后的冷却秒数 | `300` |
 | `boredom_dnd_start` | 免打扰开始时间，格式 `HH:MM`，空值关闭 | `""` |
 | `boredom_dnd_end` | 免打扰结束时间，格式 `HH:MM`，空值关闭 | `""` |
 | `interest_topics` | 兴趣话题关键词列表，命中后触发 `awakening_interest` | `[]` |
-| `relevance_threshold` | 相关性唤醒判定阈值，`>= 1` 关闭 LLM 判定 | `1.0` |
-| `qa_threshold` | 答疑唤醒判定阈值，`>= 1` 关闭 LLM 判定 | `1.0` |
+| `relevance_threshold` | 相关性唤醒判定阈值，`<= 0` 或 `>= 1` 关闭 LLM 判定 | `1.0` |
+| `qa_threshold` | 答疑唤醒判定阈值，`<= 0` 或 `>= 1` 关闭 LLM 判定 | `1.0` |
 
 `extend_duration` 只会在群友通过前缀或艾特等显式 LLM 入口触发后生效。兴趣、兜底、无聊、相关性和答疑唤醒不会打开延长窗口；延长窗口内的图片-only、CQ-only、短语气词和过短无实义文本也会被忽略。
+
+无聊唤醒的扫描与冷却分离：`boredom_scan_interval` 只控制定时扫描周期（修改后经 Web Admin 保存或 `awakening_reload` 自动生效，无需重启）；`boredom_check_interval` 是群级成功唤醒后的冷却。进程启动后未观察到某群消息时该群沉寂状态未知，不会触发无聊唤醒；群取消无聊唤醒 opt-in 后其沉寂与冷却状态立即清除。
 
 被动唤醒会携带群内近期历史图片（延长、兴趣、相关性、答疑和无聊唤醒注入，兜底唤醒不注入）。
 
@@ -491,6 +531,7 @@ my_global_rule = { global_limit = 3, user_limit = 1, scope = "global" }
 | `global_limit` | 每分钟全局上限 | — |
 | `user_limit` | 每分钟单用户上限 | — |
 | `scope` | `"group"`（按群分桶）或 `"global"`（全群合并） | `"group"` |
+| `window` | 滑动窗口秒数 | `60` |
 
 ### `[[rules]]` — 回复规则（可多个）
 
@@ -510,6 +551,8 @@ priority       = 50
 | `reply_template` | 回复模板（与 `reply_templates` 互斥） |
 | `rate_limit_key` | 使用的限流桶名 |
 | `priority` | 优先级（数字越大越先触发） |
+| `blocked_named_groups` | 命名捕获组黑名单：捕获值在列表中时该规则不触发，如 `{ target = ["bot"] }` |
+| `blocked_groups` | 按捕获组序号的黑名单，键为组序号字符串，如 `{ "1" = ["xxx"] }` |
 
 ### `[[rules.reply_templates]]` — 加权随机回复（可选）
 
@@ -531,7 +574,7 @@ weight   = 1
 [[context_rules]]
 name    = 'caocao_qiushou'
 patterns = ['竟然不许[！!]*']
-context_type = 'regex_context'
+type = 'regex_context'
 context_window = 5
 context_conditions = ['请假', '调休', '申请', '审批']
 reply_template = '竟然不许！？'
@@ -539,18 +582,20 @@ reply_template = '竟然不许！？'
 
 | 字段 | 说明 |
 |------|------|
-| `context_type` | `regex_context`（正则判定）或 `llm_context`（LLM 判定） |
+| `type` | `regex_context`（正则判定）或 `llm_context`（LLM 判定），缺省 `regex_context` |
 | `context_window` | 回溯最近 N 条消息判定语境 |
-| `context_conditions` | `regex_context` 时：每个 pattern 命中即通过 |
-| `llm_prompt` | `llm_context` 时：发给 LLM 的判定 prompt |
+| `context_conditions` | `regex_context` 时：最近 N 条消息中任意一条命中任意一个条件即放行；空条件永不放行 |
+| `llm_judge_prompt` | `llm_context` 时：发给 LLM 的判定 prompt |
+| `llm_timeout` | `llm_context` 判定超时秒数，默认 `2.0` |
+| `llm_cache_ttl` | `llm_context` 判定结果缓存秒数，默认 `60` |
 
 ### `[[chain_games]]` — 自定义接龙游戏
 
 ```toml
 [[chain_games]]
 name = 'my_game'
-start_pattern = '^开始(.+?)接龙$'
-steps = ['第一', '第二', '第三']
+trigger_pattern = '^开始(.+?)接龙$'
+chain = ['第一', '第二', '第三']
 ```
 
 `ChainGameManager` 通用引擎支持捕获组和 OR 候选匹配。

@@ -18,6 +18,7 @@
       <div class="default-item"><span>兜底概率</span><strong>{{ data.defaults.fallback_probability }}</strong></div>
       <div class="default-item"><span>无聊沉寂</span><strong>{{ data.defaults.boredom_silence_seconds }}s</strong></div>
       <div class="default-item"><span>无聊概率</span><strong>{{ data.defaults.boredom_probability }}</strong></div>
+      <div class="default-item"><span>无聊扫描</span><strong>{{ scanIntervalText }}</strong></div>
       <div class="default-item"><span>相关阈值</span><strong>{{ data.defaults.relevance_threshold }}</strong></div>
       <div class="default-item"><span>答疑阈值</span><strong>{{ data.defaults.qa_threshold }}</strong></div>
     </div>
@@ -107,6 +108,7 @@
                   />
                   <UiButton v-if="draft[field.key] !== ''" size="sm" variant="ghost" icon="X" @click="clearField(field.key)">跟随</UiButton>
                 </div>
+                <small v-if="field.hint" class="field-hint">{{ field.hint }}</small>
               </label>
             </div>
             <p v-if="settingsError" class="error">{{ settingsError }}</p>
@@ -166,6 +168,7 @@ type EditableField = {
   min?: number
   max?: number
   step?: number
+  hint?: string
 }
 
 const EDITABLE_FIELDS: EditableField[] = [
@@ -176,8 +179,8 @@ const EDITABLE_FIELDS: EditableField[] = [
   { key: 'boredom_check_interval', label: '检查间隔', unit: 's', inputType: 'number', min: 0, max: 604800, step: 1 },
   { key: 'boredom_dnd_start', label: '免打扰开始', unit: '', inputType: 'time' },
   { key: 'boredom_dnd_end', label: '免打扰结束', unit: '', inputType: 'time' },
-  { key: 'relevance_threshold', label: '相关阈值', unit: '', inputType: 'number', min: 0, max: 1, step: 0.01 },
-  { key: 'qa_threshold', label: '答疑阈值', unit: '', inputType: 'number', min: 0, max: 1, step: 0.01 },
+  { key: 'relevance_threshold', label: '相关阈值', unit: '', inputType: 'number', min: 0, max: 1, step: 0.01, hint: '<= 0 或 >= 1 均关闭相关性 LLM 判定' },
+  { key: 'qa_threshold', label: '答疑阈值', unit: '', inputType: 'number', min: 0, max: 1, step: 0.01, hint: '<= 0 或 >= 1 均关闭答疑 LLM 判定' },
 ]
 
 const data = ref<any>(null)
@@ -190,6 +193,14 @@ const draft = ref<Record<FieldKey, string>>(emptyDraft())
 const originalDraft = ref<Record<FieldKey, string>>(emptyDraft())
 
 const groups = computed(() => data.value?.groups || [])
+// 扫描周期为全局字段：生效值由后端 effective_boredom_scan_interval 统一计算（单一来源），
+// 前端只消费，不重复实现回退链；「（回退）」标注表示新键未显式设置
+const scanIntervalText = computed(() => {
+  const defaults = data.value?.defaults || {}
+  const scan = data.value?.effective_boredom_scan_interval ?? 300
+  const explicit = (defaults.boredom_scan_interval ?? 0) > 0
+  return `${scan}s${explicit ? '' : '（回退）'}`
+})
 const selectedGroup = computed(() => groups.value.find((g: any) => g.group_id === selectedGroupId.value) || null)
 const topicsText = computed(() => {
   const topics = selectedGroup.value?.settings?.interest_topics || []
@@ -421,6 +432,7 @@ load()
 .field-row input { flex: 1 1 auto; min-width: 0; height: 36px; border: 1px solid var(--qq-border-strong); border-radius: var(--qq-radius-btn); background: var(--qq-surface); color: var(--qq-text); font-family: var(--qq-font-base); font-size: var(--qq-text-md); padding: 7px 11px; outline: none; }
 .field-row input:focus { border-color: var(--qq-primary); background: var(--qq-surface-elevated); box-shadow: 0 0 0 3px var(--qq-primary-soft); }
 .field-row :deep(.ui-btn) { flex: 0 0 auto; }
+.field-hint { color: var(--qq-text-muted); font-size: var(--qq-text-xs); font-weight: 400; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--qq-gap-sm); }
 
 @media (max-width: 1000px) { .defaults-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .shell { grid-template-columns: 1fr; } .groups-panel { max-height: 240px; } }

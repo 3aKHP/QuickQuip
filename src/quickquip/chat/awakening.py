@@ -6,7 +6,7 @@ import random
 import re
 import tomllib
 from collections import deque
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from time import monotonic
@@ -14,11 +14,11 @@ from typing import Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from quickquip.chat.config import BEIJING_TIMEZONE
-from quickquip.common.bot_action_trace import bot_action_trace
+from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
-from quickquip.common.paths import CONFIG_AWAKENING_TOML
+from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
+from quickquip.common.paths import AWAKENING_BOREDOM_GROUPS_PATH, CONFIG_AWAKENING_TOML
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,9 @@ class AwakeningDefaults:
     boredom_silence_seconds: int = 0
     boredom_probability: float = 0.0
     boredom_check_interval: int = 300
+    # 全局 scheduler 扫描周期（秒）。None = 未设置，回退到 boredom_check_interval；
+    # boredom_check_interval 固定为群级成功唤醒冷却时间。
+    boredom_scan_interval: int | None = None
     boredom_dnd_start: str = ""
     boredom_dnd_end: str = ""
     interest_topics: list[str] = field(default_factory=list)
@@ -207,29 +210,55 @@ def reload_config(path: str | Path | None = None) -> None:
     _config = load_awakening_config(path or CONFIG_AWAKENING_TOML)
 
 
+def effective_boredom_scan_interval(config: AwakeningConfig | None = None) -> int:
+    """APScheduler 扫描周期：新字段优先；未设置时回退旧配置的
+    ``defaults.boredom_check_interval``（兼容尚未写新键的私有部署）。"""
+    cfg = config if config is not None else _config
+    if cfg.defaults.boredom_scan_interval is not None and cfg.defaults.boredom_scan_interval > 0:
+        return cfg.defaults.boredom_scan_interval
+    interval = cfg.defaults.boredom_check_interval
+    return interval if interval > 0 else 300
+
+
 # ---------------------------------------------------------------------------
 # Runtime state (in-memory, not persisted)
 # ---------------------------------------------------------------------------
 
 
 class BotMessageCache:
-    """Per-group cache of recent bot reply texts for relevance checking."""
+    """Per-group cache of recent bot reply texts for relevance checking.
 
-    __slots__ = ("_messages",)
+    Entries older than the recent-context TTL (monotonic clock) are evicted
+    lazily on read; the window is shared with ``RecentMessageBuffer``.
+    """
+
+    __slots__ = ("_messages", "_ttl_seconds")
     _MAX_PER_GROUP = 5
 
-    def __init__(self) -> None:
-        self._messages: dict[str, deque[str]] = {}
+    def __init__(self, *, ttl_seconds: float = RECENT_CONTEXT_TTL_SECONDS) -> None:
+        self._messages: dict[str, deque[tuple[str, float]]] = {}
+        self._ttl_seconds = ttl_seconds
 
-    def add(self, group_id: int | str, text: str) -> None:
+    def add(self, group_id: int | str, text: str, *, now: float | None = None) -> None:
         gid = str(group_id)
         if gid not in self._messages:
             self._messages[gid] = deque(maxlen=self._MAX_PER_GROUP)
-        if text.strip():
-            self._messages[gid].append(text.strip())
+        stripped = text.strip()
+        if stripped:
+            self._messages[gid].append((stripped, monotonic() if now is None else now))
 
-    def get_recent(self, group_id: int | str) -> list[str]:
-        return list(self._messages.get(str(group_id), []))
+    def get_recent(self, group_id: int | str, *, now: float | None = None) -> list[str]:
+        gid = str(group_id)
+        queue = self._messages.get(gid)
+        if queue is None:
+            return []
+        current = monotonic() if now is None else now
+        while queue and (current - queue[0][1]) > self._ttl_seconds:
+            queue.popleft()
+        if not queue:
+            del self._messages[gid]
+            return []
+        return [text for text, _ in queue]
 
     def clear_group(self, group_id: int | str) -> None:
         self._messages.pop(str(group_id), None)
@@ -277,10 +306,12 @@ class AwakeningState:
             return False
         return session.source == "explicit_llm" and (monotonic() - session.timestamp) < duration
 
-    def get_group_silence_seconds(self, group_id: int | str) -> float:
+    def get_group_silence_seconds(self, group_id: int | str) -> float | None:
+        """群沉寂秒数；本进程未观察到该群消息时返回 None（未知），
+        未知状态不允许无聊唤醒。"""
         ts = self._last_message_times.get(str(group_id))
         if ts is None:
-            return float("inf")
+            return None
         return monotonic() - ts
 
     def can_trigger_boredom(self, group_id: int | str, check_interval: int) -> bool:
@@ -291,6 +322,12 @@ class AwakeningState:
 
     def mark_boredom_triggered(self, group_id: int | str) -> None:
         self._last_boredom_trigger[str(group_id)] = monotonic()
+
+    def clear_boredom_state(self, group_id: int | str) -> None:
+        """清除群的沉寂与冷却状态（群取消无聊唤醒 opt-in 时调用）。"""
+        gid = str(group_id)
+        self._last_message_times.pop(gid, None)
+        self._last_boredom_trigger.pop(gid, None)
 
     def llm_cache_get(self, rule: str, group_id: int | str, text: str) -> bool | None:
         key = (rule, str(group_id), text)
@@ -315,6 +352,10 @@ class AwakeningState:
         self._llm_cache[(rule, str(group_id), text)] = (result, monotonic())
 
     def prune_stale(self, max_age: float = 7200) -> None:
+        """只清理延长会话。沉寂时间戳与群级冷却**不做固定时限淘汰**：
+        较大的 boredom_silence_seconds 会被提前满足（旧实现两小时即丢状态，
+        使沉寂回到未知），取消 opt-in 的清除由 clear_boredom_state 显式负责。
+        每群仅各一个浮点条目，不淘汰无增长风险。"""
         now = monotonic()
         for sessions in self._extend_sessions.values():
             stale = [uid for uid, session in sessions.items() if (now - session.timestamp) > max_age]
@@ -323,14 +364,6 @@ class AwakeningState:
         stale_groups = [gid for gid, sessions in self._extend_sessions.items() if not sessions]
         for gid in stale_groups:
             del self._extend_sessions[gid]
-
-        stale_msgs = [gid for gid, ts in self._last_message_times.items() if (now - ts) > max_age]
-        for gid in stale_msgs:
-            del self._last_message_times[gid]
-
-        stale_boredom = [gid for gid, ts in self._last_boredom_trigger.items() if (now - ts) > max_age]
-        for gid in stale_boredom:
-            del self._last_boredom_trigger[gid]
 
 
 _state = AwakeningState()
@@ -380,6 +413,13 @@ _EXTEND_REJECT_TEXTS = {
 
 # Stopwords for word overlap calculation
 _STOPWORDS = frozenset("的了是在我你他她它们吗呢啊吧呀哦嘛嗯么这那就也都还不")
+
+# English stopwords filtered from latin token overlap (mirrors the Chinese set)
+_LATIN_STOPWORDS = frozenset(
+    "a an and are as at be been but by can com did do does for get go got had has have he her his how http "
+    "https i if in io is it its just me my net no not ok of on or org our she so that the their them these "
+    "they this those to use used was we were what when where which who why will with www you your".split()
+)
 
 
 def _is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None) -> bool:
@@ -432,6 +472,14 @@ def _strip_structural_message_parts(text: str) -> str:
     cleaned = _URL_RE.sub(" ", cleaned)
     cleaned = _PLACEHOLDER_RE.sub(" ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+_VOICE_TRANSCRIPT_RE = re.compile(r"\[语音(?:\d+)?转文字：([^\]]+)\]")
+
+
+def _replace_voice_transcripts(text: str) -> str:
+    """把语音转写标记替换为其中的转写文本：转写是用户内容，不是结构占位符。"""
+    return _VOICE_TRANSCRIPT_RE.sub(lambda m: m.group(1).strip(), text)
 
 
 def _is_extend_eligible_message(message_text: str) -> bool:
@@ -489,19 +537,30 @@ def select_passive_trigger_image_urls(
 
 
 def build_passive_trigger_raw_user_text(result: AwakeningTriggerResult, image_urls: list[str]) -> str:
-    text = result.prompt.strip()
+    text = _replace_voice_transcripts(result.prompt.strip())
     if image_urls:
         return text
     return _strip_structural_message_parts(text)
 
 
+# Normalized latin/digit runs: english words, numbers and code identifiers
+# (snake_case, camelCase, __dunder__) all stay intact as single tokens.
+_LATIN_TOKEN_RE = re.compile(r"[a-z_][a-z0-9_]*|\d+", re.IGNORECASE)
+
+
 def _extract_words(text: str) -> set[str]:
-    """Extract meaningful Chinese characters/bigrams from text (no jieba needed)."""
+    """Extract meaningful tokens from text: Chinese unigram/bigram plus
+    normalized english words, numbers and code identifiers. URLs, CQ codes
+    and structural placeholders are stripped first; voice transcript markers
+    are replaced by their content so spoken words still participate."""
+    cleaned = _strip_structural_message_parts(_replace_voice_transcripts(text))
+    words: set[str] = {
+        token
+        for token in _LATIN_TOKEN_RE.findall(cleaned.lower())
+        if token not in _LATIN_STOPWORDS
+    }
     # Keep only CJK characters, then extract bigrams + unigrams
-    chars = [c for c in text if "一" <= c <= "鿿"]
-    if not chars:
-        return set()
-    words: set[str] = set()
+    chars = [c for c in cleaned if "一" <= c <= "鿿"]
     for c in chars:
         if c not in _STOPWORDS:
             words.add(c)
@@ -545,6 +604,77 @@ _QA_SYSTEM = (
     '仅输出 {"score": 0.0} 到 {"score": 1.0}，score 越高越需要回答。'
 )
 
+# quick-judge 结果类别：业务 true/false 可缓存；其余为技术失败，
+# fail-closed（不触发群聊回复）且不得写入判定缓存。
+# timeout/provider_error/invalid_json 为 awakening 层类别；service 层
+# 技术失败（empty/length/provider_error/no_provider）直接透传其 outcome，
+# 技术失败判定统一经 QuickJudgeResult.is_technical，不在此枚举字符串。
+_JUDGE_BUSINESS_TRUE = "business_true"
+_JUDGE_BUSINESS_FALSE = "business_false"
+_JUDGE_TIMEOUT = "timeout"
+_JUDGE_PROVIDER_ERROR = "provider_error"
+_JUDGE_INVALID_JSON = "invalid_json"
+
+
+@dataclass(slots=True)
+class QuickJudgeOutcome:
+    """awakening 层的 quick-judge 判定结果。
+
+    ``triggered`` 为 None 表示技术失败（fail-closed）；诊断字段与
+    QuickJudgeResult.to_diagnostic() 同源，另含解析状态，禁止携带
+    聊天正文、prompt、模型原始响应、凭据或 endpoint。
+    """
+
+    category: str
+    triggered: bool | None
+    diagnostic: dict
+
+
+def _parse_judge_text(text: str, threshold: float) -> bool | None:
+    """严格解析业务判定；无法解析返回 None（区别于业务 false）。
+
+    只接受完整 JSON 对象；残缺 JSON 或散文中出现的 "trigger" 字样
+    一律视为不可解析（fail-closed，不写缓存）。
+    """
+    try:
+        data = extract_json_object(text)
+    except (TypeError, ValueError):
+        return None
+    if "score" in data:
+        return float(data["score"]) >= threshold
+    if "trigger" in data:
+        trigger = data["trigger"]
+        if isinstance(trigger, bool):
+            return trigger
+        if isinstance(trigger, str):
+            return trigger.strip().lower() == "true"
+        return bool(trigger)
+    return None
+
+
+def _judge_target(svc: Any) -> dict:
+    """解析判定目标的 provider/model（仅诊断字段，无敏感信息）。"""
+    config = getattr(svc, "config", None)
+    qj = getattr(config, "quick_judge", None)
+    provider_id = ""
+    if qj is not None and qj.provider_id:
+        provider_id = str(qj.provider_id)
+    else:
+        runtime = getattr(config, "runtime", None)
+        provider_id = str(getattr(runtime, "default_provider", "") or "")
+    model = str(getattr(qj, "model", "") or "")
+    return {"provider": provider_id, "model": model}
+
+
+def _cache_business_outcome(
+    st: AwakeningState, rule: str, group_id: int | str, cache_text: str, outcome: QuickJudgeOutcome
+) -> None:
+    """仅业务 true/false 写入判定缓存；技术失败不缓存。"""
+    if outcome.category == _JUDGE_BUSINESS_TRUE:
+        st.llm_cache_set(rule, group_id, cache_text, True)
+    elif outcome.category == _JUDGE_BUSINESS_FALSE:
+        st.llm_cache_set(rule, group_id, cache_text, False)
+
 
 async def _llm_judge(
     svc: Any,
@@ -553,41 +683,50 @@ async def _llm_judge(
     threshold: float,
     timeout: float,
     max_tokens: int,
-) -> bool:
-    """Call quick_judge with timeout. Returns True if score passes threshold."""
+) -> QuickJudgeOutcome:
+    """Call quick_judge with timeout; classify the outcome for cache/log policy."""
+    # quick_judge uses its own system_prompt; we embed ours in the user prompt
+    full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
+    started = monotonic()
     try:
-        # quick_judge uses its own system_prompt; we embed ours in the user prompt
-        full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
         with usage_scope("awakening_judge"):
-            raw = await asyncio.wait_for(
-                svc.quick_judge(full_prompt, max_tokens=max_tokens),
+            result = await asyncio.wait_for(
+                svc.quick_judge_detailed(full_prompt, max_tokens=max_tokens),
                 timeout=timeout,
             )
-        return _extract_json_trigger(raw, threshold)
     except asyncio.TimeoutError:
-        logger.debug("awakening: quick_judge timed out (%.1fs)", timeout)
-        return False
+        diagnostic = {
+            "outcome": _JUDGE_TIMEOUT,
+            "duration_ms": round((monotonic() - started) * 1000, 2),
+            **_judge_target(svc),
+        }
+        logger.warning("awakening: quick_judge timed out after %.1fs: %s", timeout, diagnostic)
+        return QuickJudgeOutcome(_JUDGE_TIMEOUT, None, diagnostic)
     except Exception:
-        logger.debug("awakening: quick_judge failed", exc_info=True)
-        return False
+        diagnostic = {
+            "outcome": _JUDGE_PROVIDER_ERROR,
+            "duration_ms": round((monotonic() - started) * 1000, 2),
+            **_judge_target(svc),
+        }
+        logger.warning("awakening: quick_judge call failed: %s", diagnostic, exc_info=True)
+        return QuickJudgeOutcome(_JUDGE_PROVIDER_ERROR, None, diagnostic)
 
+    diagnostic = result.to_diagnostic()
+    if result.is_technical:
+        logger.warning("awakening: quick_judge technical failure: %s", diagnostic)
+        return QuickJudgeOutcome(result.outcome, None, diagnostic)
 
-def _extract_json_trigger(raw: str, threshold: float = 0.5) -> bool:
-    """Extract trigger decision from JSON-ish model output."""
-    try:
-        data = extract_json_object(raw)
-        if "score" in data:
-            return float(data["score"]) >= threshold
-        if "trigger" in data:
-            trigger = data["trigger"]
-            if isinstance(trigger, bool):
-                return trigger
-            if isinstance(trigger, str):
-                return trigger.strip().lower() == "true"
-            return bool(trigger)
-    except (TypeError, ValueError):
-        pass
-    return bool(re.search(r'"trigger"\s*:\s*true', raw, re.IGNORECASE))
+    parsed = _parse_judge_text(result.text, threshold)
+    if parsed is None:
+        merged = {**diagnostic, "parsed": False}
+        logger.warning("awakening: quick_judge unparsable output: %s", merged)
+        return QuickJudgeOutcome(_JUDGE_INVALID_JSON, None, merged)
+
+    merged = {**diagnostic, "parsed": True}
+    logger.debug("awakening: quick_judge resolved: %s", merged)
+    return QuickJudgeOutcome(
+        _JUDGE_BUSINESS_TRUE if parsed else _JUDGE_BUSINESS_FALSE, parsed, merged
+    )
 
 
 def _llm_cache_text(message_text: str, threshold: float) -> str:
@@ -604,6 +743,42 @@ _RULE_FALLBACK = "awakening_fallback"
 _RULE_BOREDOM = "awakening_boredom"
 _RULE_RELEVANCE = "awakening_relevance"
 _RULE_QA = "awakening_qa"
+
+# 唤醒规则唯一目录：(规则名, 中文标签)。adapter 命令的 status 展示与
+# on/off 校验、Web Admin 的规则列表都从这里取，不再各自维护副本。
+# 顺序即 /awakening status 的展示顺序。
+AWAKENING_RULES: tuple[tuple[str, str], ...] = (
+    (_RULE_EXTEND, "唤醒延长"),
+    (_RULE_INTEREST, "兴趣话题"),
+    (_RULE_FALLBACK, "兜底概率"),
+    (_RULE_BOREDOM, "无聊唤醒"),
+    (_RULE_RELEVANCE, "相关性唤醒"),
+    (_RULE_QA, "答疑唤醒"),
+)
+AWAKENING_RULE_NAMES: frozenset[str] = frozenset(name for name, _label in AWAKENING_RULES)
+
+
+class BoredomEnabledGroups(OptInGroupSet):
+    """无聊唤醒 opt-in 群集合的唯一写入所有者。
+
+    bot 命令路径（adapter 单例）与 Web Admin 路由共用本类；跨进程写入
+    由 OptInGroupSet 的 FileLock + 锁内重读合并保证不丢更新。
+    """
+
+    log_label = "awakening"
+
+    def __init__(self, path: str | Path = AWAKENING_BOREDOM_GROUPS_PATH) -> None:
+        super().__init__(path)
+
+    def _normalize_group_id(self, group_id: int | str) -> str:
+        return normalize_digit_group_id(group_id)
+
+    def _load_entry(self, raw: object) -> str | None:
+        try:
+            return normalize_digit_group_id(raw)
+        except ValueError:
+            logger.warning("awakening: ignoring invalid group_id in %s: %r", self.path, raw)
+            return None
 
 _BOREDOM_INSTRUCTION = "群聊沉寂已久，你可以自然地冒个泡说点什么。不要说明自己是因为无聊唤醒或定时机制才发言。"
 _EXTEND_INSTRUCTION = "这名群友刚刚显式召唤过你，现在仍在同一段短对话窗口内。只有能自然接上时才回应，保持简短，不要说明唤醒延长或触发机制。"
@@ -704,6 +879,9 @@ def check_boredom(
         return None
     st = state or _state
     silence = st.get_group_silence_seconds(group_id)
+    if silence is None:
+        # 本进程未观察到该群消息：沉寂未知，不允许无聊唤醒
+        return None
     if silence < settings.boredom_silence_seconds:
         return None
     if not st.can_trigger_boredom(group_id, settings.boredom_check_interval):
@@ -759,13 +937,13 @@ async def check_relevance(
             trigger_instruction=_RELEVANCE_INSTRUCTION,
         )
 
-    # Stage 2: LLM judge
+    # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
     context_lines = [f"[bot 回复 {i+1}] {msg}" for i, msg in enumerate(bot_msgs)]
     user_prompt = "\n".join(context_lines) + f"\n[用户消息] {message_text.strip()}"
-    triggered = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens)
-    st.llm_cache_set(_RULE_RELEVANCE, group_id, cache_text, triggered)
+    outcome = await _llm_judge(svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens)
+    _cache_business_outcome(st, _RULE_RELEVANCE, group_id, cache_text, outcome)
 
-    if not triggered:
+    if outcome.triggered is not True:
         return None
 
     return AwakeningTriggerResult(
@@ -813,11 +991,11 @@ async def check_qa(
             trigger_instruction=_QA_INSTRUCTION,
         )
 
-    # Stage 2: LLM judge
-    triggered = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens)
-    st.llm_cache_set(_RULE_QA, group_id, cache_text, triggered)
+    # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
+    outcome = await _llm_judge(svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens)
+    _cache_business_outcome(st, _RULE_QA, group_id, cache_text, outcome)
 
-    if not triggered:
+    if outcome.triggered is not True:
         return None
 
     return AwakeningTriggerResult(
@@ -898,6 +1076,36 @@ async def check_awakening_triggers(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class BoredomSendPlan:
+    """一条待发送的无聊唤醒计划：策略与 LLM 生成已完成，只欠传输。
+
+    冷却标记、bot 消息缓存与统计以发送成功为前提，由发送方在传输成功后
+    调用 ``confirm_boredom_sent`` 确认；发送失败不得确认。
+    """
+
+    group_id: str
+    trigger: AwakeningTriggerResult
+    reply_result: dict
+
+    def trace_kwargs(self) -> dict[str, Any]:
+        """``bot_action_trace`` 的逐字段参数（字段集与旧内联实现一致）。"""
+        return {
+            "trigger_kind": "awakening",
+            "reason_code": _RULE_BOREDOM,
+            "reason_detail": self.trigger.trigger_reason,
+            "rule_name": _RULE_BOREDOM,
+            "chat_type": "group",
+            "group_id": self.group_id,
+            "user_id": "boredom_timer",
+            "reply_preview": self.reply_result["reply"],
+            "llm_used": bool(self.reply_result.get("llm_used")),
+            "provider_id": str(self.reply_result.get("provider_id", "")),
+            "model": str(self.reply_result.get("model", "")),
+            "source": "awakening.boredom_timer",
+        }
+
+
 def _is_group_llm_enabled(svc: Any, group_id: int | str) -> bool:
     config = getattr(svc, "config", None)
     if getattr(config, "load_error", None):
@@ -910,17 +1118,17 @@ def _is_group_llm_enabled(svc: Any, group_id: int | str) -> bool:
     return bool(getattr(settings, "enabled", False))
 
 
-async def run_boredom_check(
-    bot: Any,
+async def iter_boredom_send_plans(
     boredom_enabled_groups: Any,
     rule_switch: Any,
     svc: Any,
     rate_limiter: Any | None = None,
-    stats_tracker: Any | None = None,
-    build_reply_message: Any | None = None,
-) -> None:
-    """无聊唤醒巡检。``build_reply_message`` 由适配层注入（把 generate_reply
-    结果转为可发送内容，带图时拼 Message）；缺省只发纯文本。"""
+) -> AsyncIterator[BoredomSendPlan]:
+    """无聊唤醒巡检的策略与生成阶段：逐群产出待发送计划。
+
+    纯领域流程，不触碰传输（``int(gid)`` 协议转换与消息拼装归适配层）。
+    单群 ``generate_reply`` 异常记 warning 后跳过，循环继续后续群。
+    """
     cfg = get_config()
     st = get_state()
     st.prune_stale()
@@ -950,32 +1158,20 @@ async def run_boredom_check(
                 store_user_message=False,
                 message_id=None,
             )
-            with bot_action_trace(
-                trigger_kind="awakening",
-                reason_code=_RULE_BOREDOM,
-                reason_detail=result.trigger_reason,
-                rule_name=_RULE_BOREDOM,
-                chat_type="group",
-                group_id=gid,
-                user_id="boredom_timer",
-                reply_preview=reply_result["reply"],
-                llm_used=bool(reply_result.get("llm_used")),
-                provider_id=str(reply_result.get("provider_id", "")),
-                model=str(reply_result.get("model", "")),
-                source="awakening.boredom_timer",
-            ):
-                await bot.send_group_msg(
-                    group_id=int(gid),
-                    message=(
-                        build_reply_message(reply_result)
-                        if build_reply_message is not None
-                        else reply_result["reply"]
-                    ),
-                )
-            st.mark_boredom_triggered(gid)
-            st.bot_messages.add(gid, reply_result["reply"])
-            if stats_tracker is not None:
-                stats_tracker.record_trigger(gid, _RULE_BOREDOM)
-            logger.info("awakening_boredom: sent to group %s (%s)", gid, result.trigger_reason)
         except Exception:
             logger.warning("awakening_boredom: failed for group %s", gid, exc_info=True)
+            continue
+        yield BoredomSendPlan(group_id=str(gid), trigger=result, reply_result=reply_result)
+
+
+def confirm_boredom_sent(plan: BoredomSendPlan, stats_tracker: Any | None = None) -> None:
+    """发送成功后的状态确认：标冷却、缓存 bot 消息、记触发统计。
+
+    仅在传输成功后调用；发送失败时调用会错误地进入冷却。
+    """
+    st = get_state()
+    st.mark_boredom_triggered(plan.group_id)
+    st.bot_messages.add(plan.group_id, plan.reply_result["reply"])
+    if stats_tracker is not None:
+        stats_tracker.record_trigger(plan.group_id, _RULE_BOREDOM)
+    logger.info("awakening_boredom: sent to group %s (%s)", plan.group_id, plan.trigger.trigger_reason)

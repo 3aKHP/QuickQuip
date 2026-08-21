@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from unittest.mock import AsyncMock, MagicMock
 
 
+from quickquip.llm.service import QuickJudgeResult
 from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningDefaults,
     AwakeningGroupOverride,
     AwakeningState,
     AwakeningTriggerResult,
+    BoredomEnabledGroups,
     BotMessageCache,
     ResolvedAwakeningSettings,
     _QA_FAST_PATTERNS,
@@ -21,7 +26,6 @@ from quickquip.chat.awakening import (
     _RULE_INTEREST,
     _RULE_QA,
     _RULE_RELEVANCE,
-    _extract_json_trigger,
     _extract_words,
     _is_extend_eligible_message,
     _is_in_dnd_window,
@@ -37,10 +41,21 @@ from quickquip.chat.awakening import (
     check_interest,
     check_qa,
     check_relevance,
+    effective_boredom_scan_interval,
+    _llm_judge,
+    _parse_judge_text,
     load_awakening_config,
-    run_boredom_check,
+    confirm_boredom_sent,
+    iter_boredom_send_plans,
     select_passive_trigger_image_urls,
 )
+
+
+
+
+def _qj(text: str, outcome: str = "ok", **kwargs) -> QuickJudgeResult:
+    """构造 quick_judge_detailed 的 stub 返回值。"""
+    return QuickJudgeResult(text=text, outcome=outcome, provider_id="p", model="m", **kwargs)
 
 
 # =========================================================================
@@ -235,6 +250,35 @@ class TestBotMessageCache:
         c.clear_group("g1")
         assert c.get_recent("g1") == []
 
+    def test_ttl_visible_before_30_minutes(self):
+        c = BotMessageCache()
+        c.add("g1", "fresh", now=1000.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 - 1.0) == ["fresh"]
+
+    def test_ttl_boundary_keeps_entry(self):
+        c = BotMessageCache()
+        c.add("g1", "edge", now=1000.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0) == ["edge"]
+
+    def test_ttl_evicts_after_30_minutes(self):
+        c = BotMessageCache()
+        c.add("g1", "old", now=1000.0)
+        c.add("g1", "new", now=1000.0 + 60.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 + 1.0) == ["new"]
+
+    def test_ttl_eviction_keeps_order(self):
+        c = BotMessageCache()
+        c.add("g1", "a", now=100.0)
+        c.add("g1", "b", now=200.0)
+        c.add("g1", "c", now=300.0)
+        assert c.get_recent("g1", now=200.0 + 30 * 60.0 + 0.5) == ["c"]
+
+    def test_all_expired_entry_removes_group(self):
+        c = BotMessageCache()
+        c.add("g1", "old", now=1000.0)
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 + 1.0) == []
+        assert c.get_recent("g1", now=1000.0 + 30 * 60.0 + 2.0) == []
+
 
 # =========================================================================
 # AwakeningState
@@ -259,9 +303,30 @@ class TestAwakeningState:
 
     def test_silence_seconds(self):
         s = AwakeningState()
-        assert s.get_group_silence_seconds("g1") == float("inf")
+        assert s.get_group_silence_seconds("g1") is None
         s.record_message("g1", "u1")
         assert s.get_group_silence_seconds("g1") < 1.0
+
+    def test_clear_boredom_state(self):
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s.mark_boredom_triggered("g1")
+        s.clear_boredom_state("g1")
+        assert s.get_group_silence_seconds("g1") is None
+        assert s.can_trigger_boredom("g1", 60) is True
+
+    def test_prune_stale_keeps_silence_and_cooldown_state(self):
+        """沉寂/冷却状态不做固定时限淘汰：较大 boredom_silence_seconds
+        不会因旧状态被清理而提前满足。"""
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s._last_message_times["g1"] = monotonic() - 7200  # 两小时前的消息
+        s.mark_boredom_triggered("g1")
+        s._last_boredom_trigger["g1"] = monotonic() - 7200
+        s.prune_stale(max_age=7200)
+        assert s.get_group_silence_seconds("g1") is not None
+        assert s.get_group_silence_seconds("g1") >= 7200
+        assert s.can_trigger_boredom("g1", 300) is True
 
     def test_boredom_trigger_guard(self):
         s = AwakeningState()
@@ -296,11 +361,55 @@ class TestExtractWords:
         assert len(words) > 0
         assert any("天气" in w for w in words)
 
+    def test_english_words_normalized(self):
+        words = _extract_words("Deploy the Kubernetes cluster")
+        assert "deploy" in words
+        assert "kubernetes" in words
+        assert "cluster" in words
+
+    def test_numbers_extracted(self):
+        words = _extract_words("upgrade to python 3.12")
+        assert "python" in words
+        assert "3" in words
+        assert "12" in words
+
+    def test_code_identifiers_kept_intact(self):
+        words = _extract_words("run pip_install_deps in GitHub Actions")
+        assert "pip_install_deps" in words
+        assert "github" in words
+        assert "actions" in words
+
+    def test_camel_case_identifier(self):
+        words = _extract_words("fix WebSocketError retry")
+        assert "websocketerror" in words
+        assert "retry" in words
+
+    def test_case_insensitive_overlap(self):
+        assert "pytest" in _extract_words("use PYTEST fixtures")
+        assert "pytest" in _extract_words("pytest.ini 配置")
+
+    def test_url_fragments_not_tokenized(self):
+        words = _extract_words("看这个 https://example.com/foo 很有意思")
+        assert "https" not in words
+        assert "example" not in words
+        assert "com" not in words
+
+    def test_voice_transcript_content_participates(self):
+        words = _extract_words("[语音转文字：Kubernetes 部署又失败了]")
+        assert "kubernetes" in words
+        assert any("部署" in w or "失败" in w for w in words)
+
+    def test_structural_placeholders_not_tokenized(self):
+        assert _extract_words("[图片][语音][CQ:at,qq=123]") == set()
+
     def test_empty_text(self):
         assert _extract_words("") == set()
 
-    def test_no_cjk(self):
-        assert _extract_words("hello world 123") == set()
+    def test_no_cjk_yields_latin_tokens(self):
+        assert _extract_words("hello world 123") == {"hello", "world", "123"}
+
+    def test_latin_stopwords_dropped(self):
+        assert _extract_words("what is this") == set()
 
 
 class TestWordOverlapRatio:
@@ -357,18 +466,6 @@ class TestQAFastPattern:
     def test_no_match_on_plain_text(self):
         assert not _QA_FAST_PATTERNS.search("今天天气真好")
         assert not _QA_FAST_PATTERNS.search("哈哈哈笑死")
-
-
-class TestExtractJsonTrigger:
-    def test_score_uses_threshold(self):
-        assert _extract_json_trigger('{"score": 0.7}', threshold=0.5) is True
-        assert _extract_json_trigger('{"score": 0.4}', threshold=0.5) is False
-
-    def test_trigger_boolean_fallback(self):
-        assert _extract_json_trigger('```json\n{"trigger": true}\n```', threshold=0.9) is True
-
-    def test_trigger_string_false_is_false(self):
-        assert _extract_json_trigger('{"trigger": "false"}') is False
 
 
 class TestExtendEligibility:
@@ -437,6 +534,44 @@ class TestPassiveTriggerImages:
         assert "不要编造具体图像细节" in with_image
         assert "这条触发消息包含图片" not in without_image
         assert build_passive_trigger_raw_user_text(result, ["https://example.test/a.png"]) == "[图片] 这是什么？"
+
+    def test_raw_user_text_preserves_voice_transcript(self):
+        voice_only = AwakeningTriggerResult(
+            rule_name=_RULE_RELEVANCE,
+            prompt="[语音转文字：Kubernetes 部署又失败了]",
+            trigger_reason="相关性唤醒",
+        )
+        assert build_passive_trigger_raw_user_text(voice_only, []) == "Kubernetes 部署又失败了"
+
+        mixed = AwakeningTriggerResult(
+            rule_name=_RULE_RELEVANCE,
+            prompt="看这个\n[语音2转文字：第二段]",
+            trigger_reason="相关性唤醒",
+        )
+        assert build_passive_trigger_raw_user_text(mixed, []) == "看这个 第二段"
+
+
+class TestBoredomScanInterval:
+    def test_scan_interval_from_toml(self, tmp_path: Path):
+        path = tmp_path / "awakening.toml"
+        path.write_text(
+            "[awakening.defaults]\nboredom_scan_interval = 120\nboredom_check_interval = 600\n",
+            encoding="utf-8",
+        )
+        cfg = load_awakening_config(path)
+        assert cfg.defaults.boredom_scan_interval == 120
+        assert effective_boredom_scan_interval(cfg) == 120
+
+    def test_scan_interval_falls_back_to_check_interval(self, tmp_path: Path):
+        path = tmp_path / "awakening.toml"
+        path.write_text("[awakening.defaults]\nboredom_check_interval = 600\n", encoding="utf-8")
+        cfg = load_awakening_config(path)
+        assert cfg.defaults.boredom_scan_interval is None
+        assert effective_boredom_scan_interval(cfg) == 600
+
+    def test_scan_interval_invalid_falls_back_to_default_300(self, tmp_path: Path):
+        cfg = AwakeningConfig(defaults=AwakeningDefaults(boredom_check_interval=0))
+        assert effective_boredom_scan_interval(cfg) == 300
 
 
 # =========================================================================
@@ -568,6 +703,33 @@ class TestCheckBoredom:
         settings = _make_settings(boredom_silence_seconds=60, boredom_probability=1.0)
         assert check_boredom("g1", settings, s) is None
 
+    def test_unknown_silence_never_triggers(self):
+        """重启后未观察到群消息：沉寂未知，不允许无聊唤醒。"""
+        s = AwakeningState()
+        settings = _make_settings(boredom_silence_seconds=60, boredom_probability=1.0)
+        assert check_boredom("g1", settings, s) is None
+
+    def test_long_silence_threshold_not_prematurely_met(self):
+        """沉寂 7200s 且门槛 10800s：prune 后状态保留且不提前触发。"""
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s._last_message_times["g1"] = monotonic() - 7200
+        s.prune_stale(max_age=7200)
+        settings = _make_settings(boredom_silence_seconds=10800, boredom_probability=1.0)
+        assert check_boredom("g1", settings, s) is None
+
+    def test_dnd_blocks_boredom(self):
+        s = AwakeningState()
+        s.record_message("g1", "u1")
+        s._last_message_times["g1"] = monotonic() - 7200
+        settings = _make_settings(
+            boredom_silence_seconds=3600,
+            boredom_probability=1.0,
+            boredom_dnd_start="00:00",
+            boredom_dnd_end="23:59",
+        )
+        assert check_boredom("g1", settings, s) is None
+
 
 # =========================================================================
 # Trigger checks (async)
@@ -587,10 +749,10 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.0)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
         result = asyncio.run(check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s))
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_no_bot_messages(self):
         s = AwakeningState()
@@ -613,7 +775,7 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.3)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
@@ -627,7 +789,7 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.3)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": false}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": false}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
@@ -638,7 +800,7 @@ class TestCheckRelevance:
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.8)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
@@ -654,7 +816,7 @@ class TestCheckRelevance:
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_cache_key_includes_threshold(self):
         s = AwakeningState()
@@ -662,12 +824,195 @@ class TestCheckRelevance:
         s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
         settings = _make_settings(relevance_threshold=0.8)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
             check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
         )
         assert result is None
-        svc.quick_judge.assert_awaited_once()
+        svc.quick_judge_detailed.assert_awaited_once()
+
+    def test_english_overlap_enters_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "the Kubernetes deployment failed with ImagePullBackOff")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
+        result = asyncio.run(
+            check_relevance("g1", "u1", "Kubernetes ImagePullBackOff again?", settings, svc, s)
+        )
+        assert result is not None
+        svc.quick_judge_detailed.assert_awaited_once()
+
+    def test_code_identifier_overlap_enters_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "跑 pip_install_deps 的时候 warnings 一堆")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
+        result = asyncio.run(
+            check_relevance("g1", "u1", "pip_install_deps 又 warnings 了吗", settings, svc, s)
+        )
+        assert result is not None
+        svc.quick_judge_detailed.assert_awaited_once()
+
+    def test_non_overlapping_english_skips_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "the Kubernetes deployment failed with ImagePullBackOff")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "lakers won the game last night", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge_detailed.assert_not_called()
+
+    def test_shared_url_alone_does_not_pass_fast_filter(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "看这个 https://example.com/a 很有意思")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "我上传到 https://example.com/b 了", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge_detailed.assert_not_called()
+
+    def test_threshold_one_disables_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "Kubernetes ImagePullBackOff")
+        settings = _make_settings(relevance_threshold=1.0)
+        svc = MagicMock()
+        result = asyncio.run(
+            check_relevance("g1", "u1", "Kubernetes ImagePullBackOff?", settings, svc, s)
+        )
+        assert result is None
+        svc.quick_judge_detailed.assert_not_called()
+
+    def test_threshold_middle_value_uses_llm(self):
+        s = AwakeningState()
+        s.bot_messages.add("g1", "Kubernetes deployment failed")
+        settings = _make_settings(relevance_threshold=0.5)
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
+        result = asyncio.run(
+            check_relevance("g1", "u1", "Kubernetes deployment again?", settings, svc, s)
+        )
+        assert result is not None
+        svc.quick_judge_detailed.assert_awaited_once()
+
+
+class TestLlmJudgeClassification:
+    """#75-C：结果类别决定缓存与触发行为（技术失败 fail-closed 不缓存）。"""
+
+    def _state_with_bot_msg(self) -> AwakeningState:
+        s = AwakeningState()
+        s.bot_messages.add("g1", "今天天气非常不错")
+        return s
+
+    def _run_relevance(self, svc, threshold=0.5, text="今天天气怎么样"):
+        s = self._state_with_bot_msg()
+        settings = _make_settings(relevance_threshold=threshold)
+        result = asyncio.run(check_relevance("g1", "u1", text, settings, svc, s))
+        return result, s
+
+    def test_business_true_triggers_and_caches_true(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.9}'))
+        result, s = self._run_relevance(svc)
+        assert result is not None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is True
+
+    def test_business_false_caches_false(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.2}'))
+        result, s = self._run_relevance(svc)
+        assert result is None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is False
+
+    def _assert_technical_failure(self, svc):
+        result, s = self._run_relevance(svc)
+        assert result is None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is None
+
+    def test_empty_result_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="empty"))
+        self._assert_technical_failure(svc)
+
+    def test_truncated_result_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(
+            return_value=_qj('{"trig', outcome="length", finish_reason="length")
+        )
+        self._assert_technical_failure(svc)
+
+    def test_provider_error_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="provider_error"))
+        self._assert_technical_failure(svc)
+
+    def test_no_provider_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(
+            return_value=_qj('{"trigger": false}', outcome="no_provider")
+        )
+        self._assert_technical_failure(svc)
+
+    def test_invalid_json_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("这不是 JSON"))
+        self._assert_technical_failure(svc)
+
+    def test_timeout_fail_closed_no_cache(self):
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(side_effect=asyncio.TimeoutError())
+        self._assert_technical_failure(svc)
+
+    def test_timeout_diagnostic_carries_provider_and_model(self):
+        from types import SimpleNamespace
+
+        svc = SimpleNamespace(
+            config=SimpleNamespace(
+                quick_judge=SimpleNamespace(provider_id="minimax", model="MiniMax-M2.7"),
+            ),
+        )
+
+        async def _timeout(prompt, max_tokens=64):
+            raise asyncio.TimeoutError()
+
+        svc.quick_judge_detailed = _timeout
+        outcome = asyncio.run(
+            _llm_judge(svc, "sys", "user", 0.5, timeout=0.05, max_tokens=64)
+        )
+        assert outcome.category == "timeout"
+        assert outcome.triggered is None
+        assert outcome.diagnostic["provider"] == "minimax"
+        assert outcome.diagnostic["model"] == "MiniMax-M2.7"
+        assert outcome.diagnostic["duration_ms"] >= 0
+
+    def test_qa_technical_failure_no_cache(self):
+        s = AwakeningState()
+        svc = MagicMock()
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="empty"))
+        settings = _make_settings(qa_threshold=0.5)
+        result = asyncio.run(
+            check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
+        )
+        assert result is None
+        assert s.llm_cache_get(_RULE_QA, "g1", _llm_cache_text("请问怎么解决这个问题？", 0.5)) is None
+
+    def test_strict_parse_distinguishes_false_from_garbage(self):
+        assert _parse_judge_text('{"trigger": false}', 0.5) is False
+        assert _parse_judge_text("模型废话没有 JSON", 0.5) is None
+        assert _parse_judge_text('{"trigger": true}', 0.5) is True
+        assert _parse_judge_text('{"score": 0.7}', 0.8) is False
+        assert _parse_judge_text('{"score": 0.9}', 0.8) is True
+
+    def test_strict_parse_rejects_fragment_and_embedded_trigger_text(self):
+        # 残缺 JSON 与正文中出现 "trigger" 字样的输出都不是业务判定
+        assert _parse_judge_text('{"trigger": false', 0.5) is None
+        assert _parse_judge_text('不要输出 "trigger": true 哦', 0.5) is None
+        assert _parse_judge_text("前缀噪音 {\"trigger\": true} 后缀噪音", 0.5) is True
 
 
 class TestCheckQA:
@@ -681,10 +1026,10 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.0)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
         result = asyncio.run(check_qa("g1", "u1", "请问这是什么？", settings, svc, s))
         assert result is None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_no_question_marker(self):
         s = AwakeningState()
@@ -696,7 +1041,7 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": true}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
             check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
         )
@@ -709,7 +1054,7 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.5)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"trigger": false}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": false}'))
         result = asyncio.run(
             check_qa("g1", "u1", "怎么了？", settings, svc, s)
         )
@@ -719,7 +1064,7 @@ class TestCheckQA:
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.8)
         svc = MagicMock()
-        svc.quick_judge = AsyncMock(return_value='{"score": 0.6}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
             check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
         )
@@ -734,7 +1079,7 @@ class TestCheckQA:
             check_qa("g1", "u1", "cached q?", settings, svc, s)
         )
         assert result is not None
-        svc.quick_judge.assert_not_called()
+        svc.quick_judge_detailed.assert_not_called()
 
 
 # =========================================================================
@@ -775,7 +1120,7 @@ class TestCheckAwakeningTriggers:
         svc.config = MagicMock()
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
 
         import quickquip.chat.awakening as aw
         old_cfg = aw._config
@@ -795,7 +1140,7 @@ class TestCheckAwakeningTriggers:
                 )
             )
             assert result is None
-            svc.quick_judge.assert_not_called()
+            svc.quick_judge_detailed.assert_not_called()
         finally:
             aw._config = old_cfg
 
@@ -808,7 +1153,7 @@ class TestCheckAwakeningTriggers:
         svc.config = MagicMock()
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
-        svc.quick_judge = AsyncMock(return_value='{"score": 1.0}')
+        svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
 
         import quickquip.chat.awakening as aw
         old_cfg = aw._config
@@ -828,7 +1173,7 @@ class TestCheckAwakeningTriggers:
                 )
             )
             assert result is None
-            svc.quick_judge.assert_not_called()
+            svc.quick_judge_detailed.assert_not_called()
         finally:
             aw._config = old_cfg
 
@@ -914,7 +1259,32 @@ class TestCheckAwakeningTriggers:
             aw._config = old_cfg
 
 
-class TestRunBoredomCheck:
+logger = logging.getLogger(__name__)
+
+
+async def _drive_boredom_send(
+    bot, groups, rule_switch, svc, *, rate_limiter=None, stats_tracker=None, build_reply_message=None
+):
+    """测试本地的最小发送驱动，镜像 adapter 的 ``_wrapped_boredom_check`` 循环：
+    chat 层只产出待发送计划；传输（``int(gid)`` 转换与消息拼装）归发送方，
+    成功后 ``confirm_boredom_sent`` 确认；send 异常按 adapter 语义记 warning 后吞掉继续。
+    """
+    async for plan in iter_boredom_send_plans(groups, rule_switch, svc, rate_limiter):
+        try:
+            await bot.send_group_msg(
+                group_id=int(plan.group_id),
+                message=(
+                    build_reply_message(plan.reply_result)
+                    if build_reply_message is not None
+                    else plan.reply_result["reply"]
+                ),
+            )
+            confirm_boredom_sent(plan, stats_tracker)
+        except Exception:
+            logger.warning("awakening_boredom: failed for group %s", plan.group_id, exc_info=True)
+
+
+class TestBoredomSendFlow:
     def test_skips_when_group_llm_disabled(self):
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
@@ -938,8 +1308,11 @@ class TestRunBoredomCheck:
             ),
         )
         aw._state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        aw._state.record_message("123", "u1")
+        aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
         finally:
             aw._config = old_cfg
             aw._state = old_state
@@ -972,8 +1345,11 @@ class TestRunBoredomCheck:
             ),
         )
         aw._state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        aw._state.record_message("123", "u1")
+        aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
         finally:
             aw._config = old_cfg
             aw._state = old_state
@@ -982,8 +1358,8 @@ class TestRunBoredomCheck:
         bot.send_group_msg.assert_awaited_once_with(group_id=123, message="冒个泡")
         stats_tracker.record_trigger.assert_called_once_with("123", "awakening_boredom")
 
-    def test_sends_with_images_via_injected_reply_builder(self):
-        """适配层注入 build_reply_message 时，带图回复经拼装器发送（不丢图）。"""
+    def test_sends_with_images_via_reply_builder(self):
+        """发送方拼装回复（镜像适配层注入的 build_llm_reply_message）时，带图回复不丢图。"""
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
         groups = MagicMock()
@@ -1012,9 +1388,12 @@ class TestRunBoredomCheck:
             ),
         )
         aw._state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        aw._state.record_message("123", "u1")
+        aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(
-                run_boredom_check(bot, groups, rule_switch, svc, build_reply_message=_build_reply)
+                _drive_boredom_send(bot, groups, rule_switch, svc, build_reply_message=_build_reply)
             )
         finally:
             aw._config = old_cfg
@@ -1023,3 +1402,190 @@ class TestRunBoredomCheck:
         bot.send_group_msg.assert_awaited_once_with(
             group_id=123, message=("message", "冒个泡", ["cXctaW1n"])
         )
+
+
+class TestBoredomSendFlowFailures:
+    """无聊巡检「计划产出 + 发送确认」拒绝与异常路径的 characterization 测试
+    （钉住现状，供 v1.12.1 重构对照）。
+
+    钉住的现状要点：
+    - 冷却标记 mark_boredom_triggered 在发送成功确认（confirm_boredom_sent）时才执行，
+      故 generate_reply / send 任一抛异常都不会标冷却，也不会写统计。
+    - generate_reply 异常在 chat 层（iter_boredom_send_plans 内）记 warning 后跳过；
+      send 异常由发送方（adapter / 本测试驱动）记 warning 吞掉，循环继续处理后续群。
+    """
+
+    @staticmethod
+    def _triggerable_state(*gids: str) -> AwakeningState:
+        """构造各群均已过沉寂门槛的 AwakeningState（boredom_silence_seconds=1）。"""
+        st = AwakeningState()
+        for gid in gids:
+            st.record_message(gid, "u1")
+            st._last_message_times[gid] = monotonic() - 2
+        return st
+
+    @staticmethod
+    def _make_fakes(gids, *, generate_reply=None, send=None):
+        from types import SimpleNamespace
+
+        bot = MagicMock()
+        bot.send_group_msg = send if send is not None else AsyncMock()
+        groups = MagicMock()
+        groups.all_groups.return_value = list(gids)
+        rule_switch = MagicMock()
+        rule_switch.is_enabled.return_value = True
+        # spec 限定 svc 属性面，防止源码改名后 MagicMock 自动造属性而测试仍绿；
+        # 被访问的值用 SimpleNamespace 给出真实形状（characterization 应钉住访问契约）
+        svc = MagicMock(
+            spec=["config", "get_group_settings", "recent_message_buffer", "generate_reply"]
+        )
+        svc.config = SimpleNamespace(load_error=None)
+        svc.get_group_settings.return_value = SimpleNamespace(enabled=True)
+        svc.recent_message_buffer.list_recent.return_value = []
+        svc.generate_reply = (
+            generate_reply if generate_reply is not None
+            else AsyncMock(return_value={"reply": "冒个泡"})
+        )
+        return bot, groups, rule_switch, svc
+
+    @staticmethod
+    def _run(bot, groups, rule_switch, svc, state, **kwargs):
+        import quickquip.chat.awakening as aw
+        old_cfg = aw._config
+        old_state = aw._state
+        aw._config = AwakeningConfig(
+            defaults=AwakeningDefaults(
+                boredom_silence_seconds=1,
+                boredom_probability=1.0,
+                boredom_check_interval=1,
+            ),
+        )
+        aw._state = state
+        try:
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, **kwargs))
+        finally:
+            aw._config = old_cfg
+            aw._state = old_state
+
+    def test_rate_limiter_rejects_no_send_no_cooldown(self):
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(["123"])
+        rate_limiter = MagicMock()
+        rate_limiter.allow.return_value = False
+
+        self._run(bot, groups, rule_switch, svc, st, rate_limiter=rate_limiter)
+
+        rate_limiter.allow.assert_called_once_with(
+            _RULE_BOREDOM, "boredom_timer", group_id="123"
+        )
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+        assert "123" not in st._last_boredom_trigger
+
+    def test_rule_switch_disabled_skips_group(self):
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(["123"])
+        rule_switch.is_enabled.return_value = False
+
+        self._run(bot, groups, rule_switch, svc, st)
+
+        # rule_switch 判定在 LLM 可用性检查之前：整个群被跳过
+        svc.get_group_settings.assert_not_called()
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+        assert "123" not in st._last_boredom_trigger
+
+    def test_llm_config_load_error_skips_group(self):
+        """svc.config.load_error 为真时 _is_group_llm_enabled 直接拒绝（位于 rule_switch
+        之后、沉寂判定之前）：跳过该群，不生成、不发送、不标冷却。"""
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(["123"])
+        svc.config.load_error = "全部 provider 均被跳过"
+
+        self._run(bot, groups, rule_switch, svc, st)
+
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+        assert "123" not in st._last_boredom_trigger
+
+    def test_generate_reply_exception_warns_and_continues(self, caplog):
+        async def _gen(group_id, **_kwargs):
+            if group_id == "123":
+                raise RuntimeError("llm boom")
+            return {"reply": f"reply-{group_id}"}
+
+        st = self._triggerable_state("123", "456")
+        bot, groups, rule_switch, svc = self._make_fakes(
+            ["123", "456"], generate_reply=AsyncMock(side_effect=_gen)
+        )
+        stats_tracker = MagicMock()
+
+        with caplog.at_level(logging.WARNING, logger="quickquip.chat.awakening"):
+            self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
+
+        # 失败群：warning 已记、不发送、不标冷却、不写统计
+        assert any(
+            r.levelno == logging.WARNING and "123" in r.getMessage()
+            for r in caplog.records
+        )
+        # 后续群仍被正常处理
+        bot.send_group_msg.assert_awaited_once_with(group_id=456, message="reply-456")
+        assert "123" not in st._last_boredom_trigger
+        assert "456" in st._last_boredom_trigger
+        stats_tracker.record_trigger.assert_called_once_with("456", _RULE_BOREDOM)
+
+    def test_send_exception_no_cooldown_no_stats(self):
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(
+            ["123"], send=AsyncMock(side_effect=RuntimeError("send boom"))
+        )
+        stats_tracker = MagicMock()
+
+        self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
+
+        bot.send_group_msg.assert_awaited_once()
+        # 冷却标记在 send 成功之后：send 抛异常 → 不标冷却、不写统计、不缓存 bot 消息
+        assert "123" not in st._last_boredom_trigger
+        stats_tracker.record_trigger.assert_not_called()
+        assert st.bot_messages.get_recent("123") == []
+
+    def test_mixed_groups_send_failure_states_independent(self):
+        async def _send(group_id, message):
+            if group_id == 456:  # send_group_msg 收到的是 int(gid)
+                raise RuntimeError("send boom")
+
+        st = self._triggerable_state("456", "789")
+        bot, groups, rule_switch, svc = self._make_fakes(
+            ["456", "789"], send=AsyncMock(side_effect=_send)
+        )
+        stats_tracker = MagicMock()
+
+        self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
+
+        # 首群 send 失败不阻塞次群；两群状态各自独立
+        assert bot.send_group_msg.await_count == 2
+        assert "456" not in st._last_boredom_trigger
+        assert "789" in st._last_boredom_trigger
+        stats_tracker.record_trigger.assert_called_once_with("789", _RULE_BOREDOM)
+
+
+def test_boredom_opt_in_cross_writer_stays_consistent(tmp_path: Path):
+    """命令路径与 Web 路径交叉写入同一 opt-in 文件后状态一致。
+
+    bot 进程持有长驻实例（/awakening boredom on|off），Web Admin 每次请求
+    新建实例（POST /awakening/{gid}/boredom）；两边写入都在 FileLock 内
+    先重读磁盘再合并，互不丢更新。
+    """
+    path = tmp_path / "awakening_boredom_groups.json"
+    command_side = BoredomEnabledGroups(path)
+    command_side.add("10001")
+
+    web_side = BoredomEnabledGroups(path)
+    web_side.add("10002")
+
+    # 命令侧的 remove 不得覆盖掉 web 侧刚写入的 10002
+    command_side.remove("10001")
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"enabled": ["10002"]}
+    assert command_side.all_groups() == ["10002"]
+    assert BoredomEnabledGroups(path).all_groups() == ["10002"]

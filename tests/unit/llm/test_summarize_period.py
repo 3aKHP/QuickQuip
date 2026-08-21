@@ -74,6 +74,69 @@ async def test_period_report_success_first_provider(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_period_report_usage_scope_carries_persona(monkeypatch):
+    calls: list[tuple] = []
+
+    def _record(feature, **kwargs):
+        calls.append((feature, kwargs))
+
+    monkeypatch.setattr("quickquip.llm.summarize.set_usage_scope", _record)
+    monkeypatch.setattr(
+        "quickquip.llm.summarize.build_provider_client",
+        lambda provider: _StubClient(LLMResponse(text="周报", model="m1", finish_reason="stop")),
+    )
+
+    await generate_period_report(
+        _sample_messages(),
+        PersonaConfig(id="archivist", display_name="档案员", system_prompt="你是测试人格。"),
+        "10001",
+        period_label="2026 年第 24 周",
+        period_kind="weekly",
+        name_table={},
+        length_hint=2000,
+        model_cascade=["a/m1"],
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+    )
+
+    assert ("period_report", {"group_id": "10001", "persona_id": "archivist"}) in calls
+
+
+@pytest.mark.asyncio
+async def test_daily_summary_usage_scope_carries_persona(monkeypatch):
+    from quickquip.llm.config import DailySummaryConfig
+    from quickquip.llm.summarize import generate_daily_summary
+
+    calls: list[tuple] = []
+
+    def _record(feature, **kwargs):
+        calls.append((feature, kwargs))
+
+    monkeypatch.setattr("quickquip.llm.summarize.set_usage_scope", _record)
+    monkeypatch.setattr(
+        "quickquip.llm.summarize.build_provider_client",
+        lambda provider: _StubClient(LLMResponse(text="日报", model="m1", finish_reason="stop")),
+    )
+
+    await generate_daily_summary(
+        _sample_messages(),
+        PersonaConfig(id="archivist", display_name="档案员", system_prompt="你是测试人格。"),
+        "10001",
+        date_label="2026-06-14",
+        name_table={},
+        summary_config=DailySummaryConfig(),
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+    )
+
+    assert ("summary", {"group_id": "10001", "persona_id": "archivist"}) in calls
+
+
+@pytest.mark.asyncio
 async def test_period_report_cascade_on_provider_error(monkeypatch):
     """首个 provider 抛错时应级联到下一个。"""
     class _FailingClient:

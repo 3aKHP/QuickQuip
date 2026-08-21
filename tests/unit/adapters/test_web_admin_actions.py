@@ -38,7 +38,14 @@ async def test_awakening_reload_action_reloads_config_and_rules(monkeypatch):
     calls: list[str] = []
     monkeypatch.setattr(web_admin_actions, "_ensure_llm_bindings", lambda: None)
     monkeypatch.setattr(web_admin_actions, "get_llm_service", lambda: object())
-    monkeypatch.setattr(web_admin_actions, "reload_awakening_config", lambda: calls.append("awakening"))
+
+    import quickquip.adapters.nonebot.awakening_plugin as awakening_plugin
+
+    def _fake_reload_and_reschedule():
+        calls.append("awakening+reschedule")
+        return 300
+
+    monkeypatch.setattr(awakening_plugin, "reload_awakening_and_reschedule", _fake_reload_and_reschedule)
     monkeypatch.setattr(web_admin_actions, "reload_chat_rules_pipeline", lambda: calls.append("rules") or {"rules": 1})
 
     result = await web_admin_actions.execute_web_admin_action(
@@ -52,8 +59,8 @@ async def test_awakening_reload_action_reloads_config_and_rules(monkeypatch):
         )
     )
 
-    assert result == {"ok": True, "summary": {"rules": 1}}
-    assert calls == ["awakening", "rules"]
+    assert result == {"ok": True, "summary": {"rules": 1}, "boredom_scan_interval": 300}
+    assert calls == ["awakening+reschedule", "rules"]
 
 
 @pytest.mark.asyncio

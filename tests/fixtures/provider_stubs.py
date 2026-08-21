@@ -6,8 +6,8 @@ per-instance state only — no class-level mutables.
 """
 from __future__ import annotations
 
-from plugins.llm_provider import LLMRequest, LLMResponse
-from plugins.llm_tools import LLMToolCall
+from quickquip.llm.provider import LLMRequest, LLMResponse
+from quickquip.llm.tools import LLMToolCall
 
 
 class StubProviderClient:
@@ -25,6 +25,20 @@ class StubProviderClient:
             input_tokens=11,
             output_tokens=7,
         )
+
+
+class StubBehaviorProviderClient:
+    """Single-behavior stub: returns the given LLMResponse, or raises the given error."""
+
+    def __init__(self, behavior: LLMResponse | Exception) -> None:
+        self.behavior = behavior
+        self.requests: list[LLMRequest] = []
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        self.requests.append(request)
+        if isinstance(self.behavior, Exception):
+            raise self.behavior
+        return self.behavior
 
 
 class StubToolCallingProviderClient:

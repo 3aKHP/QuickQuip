@@ -38,8 +38,8 @@ search_max_calls_per_round = 3
 [triggers.quick_judge]
 provider_id = ""   # 引用 [[providers]] 中的 id，留空用 default_provider
 model = ""         # 留空用该 provider 的 default_model
-timeout = 2.0      # 秒
-max_tokens = 64
+timeout = 2.0      # 秒；reasoning 模型延迟更高，需调大（如 6.0）
+max_tokens = 64    # reasoning 模型的思考 token 计入该预算，需调大（如 256）
 
 [tools]
 # enabled 是工具名单：留空 [] 用默认白名单 + 全部 MCP 工具；
@@ -310,7 +310,6 @@ default_model = "deepseek-chat"
 models = ["deepseek-chat", "deepseek-reasoner"]
 style_profile = "openai_family"
 # non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 非视觉模型：触发图片预处理+剥离
-# non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 标记为非视觉模型，触发图片预处理+剥离
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

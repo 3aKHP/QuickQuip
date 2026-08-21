@@ -27,6 +27,8 @@ export interface LlmUsageSummary {
   by_feature: UsageBucket[]
   by_model: UsageBucket[]
   by_group: UsageBucket[]
+  by_persona: UsageBucket[]
+  unattributed_label: string
   unpriced_calls_count: number
   unpriced_tokens_total: number
   error_count: number
@@ -82,7 +84,17 @@ export interface UsageFilters {
   model?: string
   feature?: string
   group?: string
+  persona?: string
   state?: string
+}
+
+export interface UsageDimensions {
+  providers: string[]
+  models: string[]
+  features: string[]
+  groups: string[]
+  personas: string[]
+  unattributed_label: string
 }
 
 function query(filters: UsageFilters = {}): string {
@@ -118,4 +130,8 @@ export async function fetchLlmUsageEvents(
 
 export async function fetchLlmUsageEvent(id: number): Promise<UsageEvent> {
   return request(`/api/llm-usage/events/${id}`)
+}
+
+export async function fetchLlmUsageDimensions(range = '7d'): Promise<UsageDimensions> {
+  return request(`/api/llm-usage/dimensions?range=${encodeURIComponent(range)}`)
 }

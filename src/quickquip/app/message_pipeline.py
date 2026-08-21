@@ -25,16 +25,16 @@ from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector
 from quickquip.chat.rule_switch import GroupRuleSwitch
 from quickquip.chat.text_rules import match_text_rule
-from quickquip.chat.timezones import find_best_timezones
+from quickquip.chat.timezone_reply import (  # noqa: F401 — re-exported for plugin shim
+    build_timezone_reply as build_timezone_reply,
+    detect_kind as detect_kind,
+)
 from quickquip.chat.config import (
     BEIJING_TIMEZONE,
     CHAIN_GAME_CONFIGS,
     RATE_LIMIT_RULES,
     RATE_LIMIT_WINDOW_SECONDS,
-    SLEEP_TARGET,
-    SLEEP_WORDS,
-    WAKE_TARGET,
-    WAKE_WORDS,
+    RECENT_CONTEXT_TTL_SECONDS,
 )
 from quickquip.chat.daily_summary import (
     DailyMessageCollector,
@@ -73,6 +73,7 @@ from quickquip.common.paths import (
 )
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
+from quickquip.tieba.service import TiebaService
 
 
 class _LazyStoreProxy:
@@ -109,7 +110,7 @@ good_girl_chain = GoodGirlChainManager()
 custom_chain_games = ChainGameManager([ChainGameDef.from_dict(d) for d in CHAIN_GAME_CONFIGS])
 stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
-recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=1800)
+recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=RECENT_CONTEXT_TTL_SECONDS)
 message_deduper = RecentMessageDeduper()
 awakening_state = _get_awakening_state()
 
@@ -137,6 +138,9 @@ game_economy = GameEconomyStore(config=games_config.economy)
 game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))
 game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))
 niuniu_store = NiuNiuStore(config=games_config.niuniu)
+
+# 贴吧服务：构造不做磁盘 IO，帖子池由 startup()/web 装配显式 load()
+tieba_service = TiebaService()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
@@ -215,56 +219,6 @@ def reload_chat_rules_pipeline() -> dict[str, int]:
         "chain_games": len(chat_config.CHAIN_GAME_CONFIGS),
         "rate_limit_rules": len(chat_config.RATE_LIMIT_RULES),
         "awakening_config_error": 1 if _get_awakening_config().load_error else 0,
-    }
-
-
-def detect_kind(text: str):
-    if any(word in text for word in WAKE_WORDS):
-        return "wake"
-    if any(word in text for word in SLEEP_WORDS):
-        return "sleep"
-    return None
-
-
-def build_timezone_reply(
-    text: str,
-    sender_name: str = "这位朋友",
-    now: datetime | None = None,
-):
-    kind = detect_kind(text)
-    if not kind:
-        return None
-
-    now_cst = now or datetime.now(ZoneInfo(BEIJING_TIMEZONE))
-
-    if kind == "wake":
-        target = WAKE_TARGET
-        action = "起床"
-        rate_limit_key = "timezone_wake"
-    else:
-        target = SLEEP_TARGET
-        action = "睡觉"
-        rate_limit_key = "timezone_sleep"
-
-    candidates = find_best_timezones(now_cst, target, limit=3)
-    if len(candidates) < 3:
-        return None
-
-    primary = candidates[0]["city_zh"]
-    second = candidates[1]["city_zh"]
-    third = candidates[2]["city_zh"]
-
-    return {
-        "reply": (
-            f"现在是北京时间{now_cst:%Y-%m-%d %H:%M}，"
-            f"位于{primary}的@{sender_name} 要{action}了。"
-            f"TA也有可能在{second}或{third}。"
-        ),
-        "rate_limit_key": rate_limit_key,
-        "kind": kind,
-        "rule_name": rate_limit_key,
-        "trigger_kind": "rule",
-        "trigger_reason": f"时区作息关键词触发：{action}",
     }
 
 

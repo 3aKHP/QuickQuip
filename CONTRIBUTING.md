@@ -1,6 +1,6 @@
 # Contributing to QuickQuip
 
-感谢参与!本文件是**全贡献者通用**的约定。分支模型与发布流程见 [`docs/dev/branching.md`](docs/dev/branching.md),代码规范见 [`docs/dev/style.md`](docs/dev/style.md)。
+感谢参与!本文件是**全贡献者通用**的约定。开发文档职责见 [`docs/dev/README.md`](docs/dev/README.md)，分支模型、变更分级与发布流程见 [`docs/dev/branching.md`](docs/dev/branching.md)，代码规范见 [`docs/dev/style.md`](docs/dev/style.md)。
 
 ## 环境搭建
 
@@ -67,3 +67,11 @@ Conventional Commits:`<type>(<scope>): <subject>`,多行 body 说明动机。
 
 - type:`feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `perf` / `style`
 - scope 常用:`llm` / `chat` / `games` / `web-admin` / `niuniu` / `tieba` / `ci` / `docs`
+
+## PR 与文档扫尾
+
+变更按 [`docs/dev/branching.md`](docs/dev/branching.md) 的 Develop direct、Quick PR、Standard PR、Huge PR、Hot-Fix 或 Release 工作流执行。Standard PR 需要未参与实现的独立 CR 与一轮 Bot Review；Huge PR 还需要 Tier 2 Deep-CR。
+
+PR 描述说明动机、范围、验证方式和未验证项。解决 Issue 时在正文单独使用 `Closes #<issue>`；仅关联工作使用 `Refs #<issue>`。
+
+行为、配置、协议、命令、版本或路径变化后，搜索 `README.md`、`CHANGELOG.md`、`docs/`、配置模板与 `prod.example/` 中的旧术语，并在同一变更更新拥有该事实的文档。

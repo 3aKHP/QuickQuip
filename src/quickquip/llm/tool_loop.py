@@ -1,57 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
-from quickquip.common.sensitive_filter import (
-    SCRUB_PLACEHOLDER,
-    get_filter as _get_sensitive_filter,
-    log_hits as _log_sensitive_hits,
-)
 from quickquip.llm.provider import LLMProviderError, LLMRequest, _is_retryable
 from quickquip.llm.provider.trace import trace_agent_loop
+from quickquip.llm.tool_discovery import ToolDiscovery
+from quickquip.llm.tool_result_pipeline import ToolResultPipeline
 from quickquip.llm.tools import LLMConversationMessage, LLMToolResult
-
-
-# Threshold above which a scrubbed tool result is judged too noisy to keep
-# even with placeholders, and gets replaced wholesale. Picked empirically:
-# >5 distinct block hits in one tool result almost always means a search
-# returned a hot-topic page rather than scattered incidental matches, and
-# scrubbing those gives a Swiss-cheese result the model can't reason over.
-_TOOL_RESULT_SCRUB_HIT_LIMIT = 5
-# Below this content length, even a single block hit makes the remaining
-# fragment too thin to be useful — replace wholesale instead.
-_TOOL_RESULT_MIN_USABLE_LEN = 200
-_TOOL_RESULT_BLOCK_REPLACEMENT = (
-    "工具返回内容包含违规内容，已整体丢弃。请尝试其他查询、来源或换个表述。"
-)
-_TOOL_ARGS_BLOCK_REPLACEMENT = (
-    "工具调用参数包含违规内容，已拒绝执行。请用其他表述重新尝试。"
-)
-_TOOL_IMAGE_PREPROCESSING_UNAVAILABLE = (
-    "工具返回了图片，但当前模型无法直接读取图片，且前置图片识别服务不可用；已省略图片。"
-)
-_TOOL_IMAGE_PREPROCESSING_FAILED = "工具图片转述失败，已省略图片。"
-
-
-def _append_tool_notice(result: LLMToolResult, notice: str) -> LLMToolResult:
-    content = "\n".join(part for part in (result.content, notice) if part)
-    return LLMToolResult(
-        call_id=result.call_id,
-        name=result.name,
-        content=content,
-        images=list(result.images),
-        is_error=result.is_error,
-    )
-
-
-def _request_image_budget(request: LLMRequest) -> int:
-    existing_images = sum(
-        len(message.image_urls) + len(message.inline_images)
-        for message in request.messages
-        if message.role == "user"
-    )
-    return max(0, 5 - existing_images)
 
 
 async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int, base_delay: float, logger):
@@ -103,74 +58,23 @@ async def run_tool_call_loop(
     effective_search_max_calls = max(1, min(search_max_calls_per_round, search_failsafe_max_calls_per_round))
     current_request = request
     counted_rounds = 0
-    enabled_names = [name for name in enabled_tool_names or [] if name.strip()]
-    loaded_names = [name for name in initial_tool_names or [] if name.strip()]
-    if not loaded_names:
-        loaded_names = [spec.name for spec in request.tools]
-    max_loaded_tools = max(1, min(tool_discovery_max_loaded_tools, 64))
-    discovery_search_limit = max(1, min(tool_discovery_search_limit, 20))
-    remaining_tool_image_budget = _request_image_budget(request)
-
-    def _loaded_request_tools():
-        if not tool_discovery_enabled:
-            return current_request.tools
-        return tool_registry.get_specs(loaded_names)
-
-    def _append_loaded_tool(name: str) -> bool:
-        if name in loaded_names:
-            return False
-        if enabled_names and name not in enabled_names:
-            return False
-        if len(loaded_names) >= max_loaded_tools:
-            return False
-        loaded_names.append(name)
-        return True
-
-    def _discover_tools_from_call(call) -> list[str]:
-        try:
-            arguments = json.loads(call.arguments_json or "{}")
-        except json.JSONDecodeError:
-            return []
-        query = str(arguments.get("query", "")).strip()
-        category = str(arguments.get("category", "")).strip()
-        try:
-            limit = int(arguments.get("limit", discovery_search_limit) or discovery_search_limit)
-        except (TypeError, ValueError):
-            limit = discovery_search_limit
-        matches = tool_registry.search_manifest(
-            query,
-            enabled_names=enabled_names or None,
-            exclude_names=[tool_search_name],
-            category=category,
-            limit=max(1, min(limit, discovery_search_limit)),
-        )
-        loaded: list[str] = []
-        for entry in matches:
-            if _append_loaded_tool(entry.name):
-                loaded.append(entry.name)
-        return loaded
-
-    def _load_tools_from_list_call(call) -> list[str]:
-        try:
-            arguments = json.loads(call.arguments_json or "{}")
-        except json.JSONDecodeError:
-            return []
-        mode = str(arguments.get("mode", "")).strip().lower()
-        if mode != "load":
-            return []
-        raw_names = arguments.get("names", [])
-        if not isinstance(raw_names, list):
-            return []
-        loaded: list[str] = []
-        for raw_name in raw_names[:discovery_search_limit]:
-            name = str(raw_name).strip()
-            if not name or name == tool_list_name or name == tool_search_name:
-                continue
-            if not tool_registry.has_tool(name):
-                continue
-            if _append_loaded_tool(name):
-                loaded.append(name)
-        return loaded
+    discovery = ToolDiscovery(
+        enabled=tool_discovery_enabled,
+        tool_registry=tool_registry,
+        tool_search_name=tool_search_name,
+        tool_list_name=tool_list_name,
+        enabled_tool_names=enabled_tool_names,
+        initial_tool_names=initial_tool_names,
+        search_limit=tool_discovery_search_limit,
+        max_loaded_tools=tool_discovery_max_loaded_tools,
+        request_tools=request.tools,
+    )
+    result_pipeline = ToolResultPipeline(
+        provider=provider,
+        request=request,
+        context=context,
+        image_preprocessor=image_preprocessor,
+    )
 
     if tool_discovery_enabled:
         current_request = LLMRequest(
@@ -180,7 +84,7 @@ async def run_tool_call_loop(
             temperature=current_request.temperature,
             max_output_tokens=current_request.max_output_tokens,
             thinking_budget=current_request.thinking_budget,
-            tools=_loaded_request_tools(),
+            tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
         )
@@ -241,10 +145,9 @@ async def run_tool_call_loop(
             [call.name for call in selected_calls],
         )
         tool_results: list[LLMToolResult] = []
-        sensitive = _get_sensitive_filter()
-        scope_key = getattr(context, "chat_scope", None) or str(getattr(context, "group_id", "?"))
+        result_pipeline.begin_round()
         for call in selected_calls:
-            if tool_discovery_enabled and call.name not in loaded_names:
+            if tool_discovery_enabled and not discovery.is_loaded(call.name):
                 tool_results.append(
                     LLMToolResult(
                         call_id=call.id,
@@ -255,147 +158,16 @@ async def run_tool_call_loop(
                 )
                 continue
 
-            # Pre-execution: scan the LLM-constructed arguments. The model
-            # can fold a user's borderline phrasing into a search query and
-            # turn an innocuous question into a payload that would trip the
-            # next provider request — block before we even call the tool.
-            if sensitive.is_loaded:
-                args_scan = sensitive.scan(call.arguments_json or "")
-                if args_scan.hits:
-                    _log_sensitive_hits(
-                        f"tool_args:{call.name}", scope_key, args_scan,
-                    )
-                if args_scan.blocked:
-                    tool_results.append(
-                        LLMToolResult(
-                            call_id=call.id,
-                            name=call.name,
-                            content=_TOOL_ARGS_BLOCK_REPLACEMENT,
-                            is_error=True,
-                        )
-                    )
-                    continue
+            blocked_result = result_pipeline.check_call_arguments(call)
+            if blocked_result is not None:
+                tool_results.append(blocked_result)
+                continue
 
             result = await tool_registry.execute(call, context)
-
-            # Post-execution: scan the tool result. This is the highest-risk
-            # entry point — search/fetch tools pull external content that
-            # the user can steer (via query) but we cannot pre-vet. A single
-            # tool_result rich in flagged terms then rides into the next
-            # provider request as part of `messages` and trips the gateway.
-            if sensitive.is_loaded and result.content:
-                result_scan = sensitive.scan(result.content)
-                if result_scan.hits:
-                    _log_sensitive_hits(
-                        f"tool_result:{call.name}", scope_key, result_scan,
-                    )
-                if result_scan.blocked:
-                    block_count = sum(
-                        1 for h in result_scan.hits if h.severity == "block"
-                    )
-                    if (
-                        block_count > _TOOL_RESULT_SCRUB_HIT_LIMIT
-                        or len(result.content) < _TOOL_RESULT_MIN_USABLE_LEN
-                    ):
-                        result = LLMToolResult(
-                            call_id=result.call_id,
-                            name=result.name,
-                            content=_TOOL_RESULT_BLOCK_REPLACEMENT,
-                            is_error=True,
-                        )
-                    else:
-                        scrubbed = sensitive.scrub(result.content, SCRUB_PLACEHOLDER)
-                        result = LLMToolResult(
-                            call_id=result.call_id,
-                            name=result.name,
-                            content=scrubbed,
-                            is_error=True,
-                        )
-
-            if result.is_error and result.images:
-                result = LLMToolResult(
-                    call_id=result.call_id,
-                    name=result.name,
-                    content=result.content,
-                    is_error=True,
-                )
-
-            if result.images:
-                accepted_images = result.images[:remaining_tool_image_budget]
-                omitted_images = len(result.images) - len(accepted_images)
-                result = LLMToolResult(
-                    call_id=result.call_id,
-                    name=result.name,
-                    content=result.content,
-                    images=accepted_images,
-                    is_error=result.is_error,
-                )
-                remaining_tool_image_budget -= len(accepted_images)
-                if omitted_images:
-                    result = _append_tool_notice(
-                        result,
-                        f"MCP 工具省略了 {omitted_images} 个超出当前请求图片预算的图片项。",
-                    )
-
-            if result.images and context.model in provider.non_vision_models:
-                if image_preprocessor is None:
-                    result = LLMToolResult(
-                        call_id=result.call_id,
-                        name=result.name,
-                        content="\n".join(
-                            part for part in (result.content, _TOOL_IMAGE_PREPROCESSING_UNAVAILABLE) if part
-                        ),
-                        is_error=result.is_error,
-                    )
-                else:
-                    descriptions = await image_preprocessor.describe_inline_images(result.images)
-                    descriptions_by_label = {
-                        description.source_url: description
-                        for description in descriptions
-                    }
-                    description_parts: list[str] = []
-                    failed_count = 0
-                    for image in result.images:
-                        description = descriptions_by_label.get(image.source_label)
-                        if (
-                            description is None
-                            or not description.success
-                            or not description.text_description.strip()
-                        ):
-                            failed_count += 1
-                            continue
-                        description_parts.append(
-                            f"[{image.source_label}]\n{description.text_description.strip()}"
-                        )
-                    description_blob = "\n".join(description_parts)
-                    if description_blob and sensitive.is_loaded:
-                        description_scan = sensitive.scan(description_blob)
-                        if description_scan.hits:
-                            _log_sensitive_hits(
-                                f"tool_image_description:{call.name}", scope_key, description_scan,
-                            )
-                        if description_scan.blocked:
-                            result = LLMToolResult(
-                                call_id=result.call_id,
-                                name=result.name,
-                                content=_TOOL_RESULT_BLOCK_REPLACEMENT,
-                                is_error=True,
-                            )
-                            description_parts = []
-                            failed_count = 0
-                    if description_parts or failed_count:
-                        notices = list(description_parts)
-                        if failed_count:
-                            notices.append(f"{_TOOL_IMAGE_PREPROCESSING_FAILED}（{failed_count} 张）")
-                        result = LLMToolResult(
-                            call_id=result.call_id,
-                            name=result.name,
-                            content="\n".join(part for part in [result.content, *notices] if part),
-                            is_error=result.is_error,
-                        )
+            result = await result_pipeline.process_result(call, result)
             tool_results.append(result)
             if tool_discovery_enabled and call.name == tool_search_name and not result.is_error:
-                newly_loaded = _discover_tools_from_call(call)
+                newly_loaded = discovery.load_from_search_call(call)
                 if newly_loaded:
                     logger.info(
                         "LLM tool discovery loaded tools: provider=%s model=%s names=%s",
@@ -404,7 +176,7 @@ async def run_tool_call_loop(
                         newly_loaded,
                     )
             if tool_discovery_enabled and call.name == tool_list_name and not result.is_error:
-                newly_loaded = _load_tools_from_list_call(call)
+                newly_loaded = discovery.load_from_list_call(call)
                 if newly_loaded:
                     logger.info(
                         "LLM tool list loaded tools: provider=%s model=%s names=%s",
@@ -431,7 +203,7 @@ async def run_tool_call_loop(
             temperature=current_request.temperature,
             max_output_tokens=current_request.max_output_tokens,
             thinking_budget=current_request.thinking_budget,
-            tools=_loaded_request_tools(),
+            tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
         )

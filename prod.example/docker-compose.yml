@@ -16,7 +16,7 @@ services:
       - ./llbot-data:/root/llonebot
     environment:
       - TZ=Asia/Shanghai
-      - QUICK_LOGIN_QQ=${QQ_ACCOUNT}
+      - QUICK_LOGIN_QQ=${QQ_ACCOUNT:?请设置 QQ 号}
     ports:
       - "127.0.0.1:3001:3001"
       - "127.0.0.1:3080:3080"

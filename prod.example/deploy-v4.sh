@@ -55,7 +55,7 @@ run_step() {
     fi
 }
 
-for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproject.toml" "requirements.txt" "src/quickquip" "src/plugins" "config/llm.toml" "llm_about/_example/vocab.yaml" "llm_about/_example/identities.yaml" "docker/searxng/settings.yml"; do
+for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproject.toml" "requirements.txt" "src/quickquip" "src/plugins" "config/llm.toml" "llm_about/_example/vocab.yaml" "llm_about/_example/identities.yaml"; do
     [ -e "$required_path" ] || { echo "${R}Missing required file: $required_path${N}" >&2; exit 1; }
 done
 

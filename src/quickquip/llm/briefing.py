@@ -119,7 +119,7 @@ async def generate_daily_briefing(
     default_provider_id: str,
     default_model: str,
 ) -> tuple[str, str]:
-    set_usage_scope("briefing", group_id=str(group_id))
+    set_usage_scope("briefing", group_id=str(group_id), persona_id=persona.id)
     system_prompt = _build_system_prompt(persona, context, briefing_config)
     user_message = LLMConversationMessage(role="user", content=_build_user_prompt(context))
     cascade = briefing_config.model_cascade or [f"{default_provider_id}/{default_model}"]

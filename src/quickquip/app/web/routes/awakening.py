@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -11,13 +10,20 @@ from filelock import FileLock
 from pydantic import BaseModel
 import tomllib
 
-from quickquip.common.paths import RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH
+from quickquip.common.paths import (
+    AWAKENING_BOREDOM_GROUPS_PATH,
+    RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH,
+)
 from quickquip.app.web.action_queue import action_queue
 from quickquip.app.web.audit import audit_logger
 from quickquip.chat.awakening import (
+    AWAKENING_RULE_NAMES,
+    AWAKENING_RULES,
     AwakeningConfig,
     AwakeningGroupOverride,
+    BoredomEnabledGroups,
     CONFIG_AWAKENING_TOML,
+    effective_boredom_scan_interval,
     get_config,
     load_awakening_config,
     reload_config,
@@ -26,17 +32,10 @@ from quickquip.chat.awakening import (
 router = APIRouter()
 
 _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
-_BOREDOM_GROUPS_PATH = Path("data/awakening_boredom_groups.json")
+# 兼容别名： boredom opt-in 文件路径的唯一所有者是 common.paths；
+# 保留本模块级名字是因为既有测试以它为 patch 点。
+_BOREDOM_GROUPS_PATH = AWAKENING_BOREDOM_GROUPS_PATH
 _CONFIG_PATH = CONFIG_AWAKENING_TOML
-_AWAKENING_RULES = [
-    ("awakening_extend", "唤醒延长"),
-    ("awakening_interest", "兴趣话题"),
-    ("awakening_relevance", "相关性唤醒"),
-    ("awakening_qa", "答疑唤醒"),
-    ("awakening_boredom", "无聊唤醒"),
-    ("awakening_fallback", "兜底概率"),
-]
-_VALID_RULES = {name for name, _label in _AWAKENING_RULES}
 _OVERRIDE_FIELDS = [
     "extend_duration",
     "fallback_probability",
@@ -129,6 +128,7 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "fallback_probability",
         "boredom_silence_seconds",
         "boredom_probability",
+        "boredom_scan_interval",
         "boredom_check_interval",
         "boredom_dnd_start",
         "boredom_dnd_end",
@@ -136,7 +136,12 @@ def _render_awakening_config(cfg: AwakeningConfig) -> str:
         "relevance_threshold",
         "qa_threshold",
     ]:
-        lines.append(f"{field_name} = {_toml_value(defaults[field_name])}")
+        value = defaults[field_name]
+        if field_name == "boredom_scan_interval" and value is None:
+            # 未设置即不写键：保持「回退 boredom_check_interval」的动态语义，
+            # 不把回退值物化进托管文件
+            continue
+        lines.append(f"{field_name} = {_toml_value(value)}")
 
     for group_id in sorted(cfg.group_overrides):
         override = cfg.group_overrides[group_id]
@@ -197,24 +202,8 @@ def _apply_group_settings(group_id: str, payload: dict[str, Any]) -> tuple[dict[
 
 
 def _load_boredom_groups() -> set[str]:
-    if not _BOREDOM_GROUPS_PATH.exists():
-        return set()
-    try:
-        data = json.loads(_BOREDOM_GROUPS_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
-    groups = data.get("enabled", [])
-    return {str(g) for g in groups if _GROUP_ID_RE.match(str(g))}
-
-
-def _save_boredom_groups(groups: set[str]) -> None:
-    _BOREDOM_GROUPS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _BOREDOM_GROUPS_PATH.with_suffix(".json.tmp")
-    tmp.write_text(
-        json.dumps({"enabled": sorted(groups)}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    tmp.replace(_BOREDOM_GROUPS_PATH)
+    store = BoredomEnabledGroups(_BOREDOM_GROUPS_PATH)
+    return {g for g in store.all_groups() if _GROUP_ID_RE.match(g)}
 
 
 def _known_group_ids() -> list[str]:
@@ -241,7 +230,7 @@ def _format_group(group_id: str) -> dict:
                 "label": label,
                 "enabled": rule_switch.is_enabled(group_id, rule_name),
             }
-            for rule_name, label in _AWAKENING_RULES
+            for rule_name, label in AWAKENING_RULES
         ],
         "settings": asdict(settings),
         "override": asdict(override) if override is not None else {"group_id": group_id, **{field_name: None for field_name in _ALL_GROUP_OVERRIDE_FIELDS}},
@@ -256,7 +245,9 @@ def list_awakening():
     return {
         "load_error": cfg.load_error,
         "defaults": asdict(cfg.defaults),
-        "rules": [{"name": name, "label": label} for name, label in _AWAKENING_RULES],
+        # 回退规则的单一来源：前端只消费生效值，不重复实现回退链
+        "effective_boredom_scan_interval": effective_boredom_scan_interval(cfg),
+        "rules": [{"name": name, "label": label} for name, label in AWAKENING_RULES],
         "groups": [_format_group(group_id) for group_id in _known_group_ids()],
     }
 
@@ -270,7 +261,7 @@ def get_awakening_group(group_id: str):
 @router.post("/awakening/{group_id}/rules/{rule_name}")
 def set_awakening_rule(group_id: str, rule_name: str, body: ToggleBody, request: Request):
     _validate_group_id(group_id)
-    if rule_name not in _VALID_RULES:
+    if rule_name not in AWAKENING_RULE_NAMES:
         raise HTTPException(status_code=404, detail="unknown awakening rule")
     from quickquip.app.message_pipeline import rule_switch
 
@@ -294,14 +285,11 @@ def set_awakening_rule(group_id: str, rule_name: str, body: ToggleBody, request:
 @router.post("/awakening/{group_id}/boredom")
 def set_boredom_opt_in(group_id: str, body: ToggleBody, request: Request):
     _validate_group_id(group_id)
-    with _lock_for(_BOREDOM_GROUPS_PATH):
-        groups = _load_boredom_groups()
-        old_enabled = group_id in groups
-        if body.enabled:
-            groups.add(group_id)
-        else:
-            groups.discard(group_id)
-        _save_boredom_groups(groups)
+    # 与 bot 命令路径共用同一写入所有者：set_enabled 在 FileLock 内
+    # 重读磁盘、合并修改后原子落盘，跨进程交叉写入不丢更新；
+    # 返回的变更前状态取自锁内，audit 的 summary_before 在并发下也准确。
+    store = BoredomEnabledGroups(_BOREDOM_GROUPS_PATH)
+    old_enabled = store.set_enabled(group_id, body.enabled)
     audit_logger.log(
         request,
         action="toggle",

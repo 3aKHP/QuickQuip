@@ -1,100 +1,136 @@
-# QuickQuip 分支模型与发布流程
+# QuickQuip 开发工作流与发布流程
 
-本项目采用**精简 GitFlow**：一条常驻 `dev` 集成分支 + 一条 `main` 发布专线。所有日常改动先进 `dev`，积累到一定量或需要发版时再通过 release PR 合入 `main` 并打 tag。
+本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，架构与领域所有权见 [`architecture.md`](architecture.md)。
 
-代码规范与架构硬原则见 [`style.md`](style.md)。本文件只讲分支与发布节奏；Commit message 格式与 CHANGELOG 修改规则遵循项目既有约定（Conventional Commits + Keep a Changelog）。
+## 硬规则
 
----
+- 只有收到明确指令时才 commit、push、开 PR、合并或打 tag。
+- 一个分支或 PR 只承载一个主要意图；大变更先拆分。
+- 行为、配置、协议、部署契约或用户文档变化时，同一变更更新拥有该事实的文档；`feat`、`fix`、`refactor` 依项目约定维护本地 changelog 草稿。
+- 不提交 secret、`.env`、`data/`、真实 `prod/`、本机工作材料或生成物。
+- 使用 Conventional Commits；PR 保留 merge 历史，不 squash。
 
-## 分支总览
+## 分支模型
 
+```text
+feature/fix/refactor/docs/test/chore/* → dev → release PR → main → tag / GitHub Release
+                                      ↑                 │
+                                      └── main back-merge┘
+hotfix/* (仅生产阻断) ────────────────→ main → dev
 ```
-                     ┌─────────────────────────────────────────────┐
-                     │                                             ▼
-   feature/fix/  ──▶ dev  ──(release PR)──▶  main  ──(tag vX.Y.Z)──▶ GitHub Release
-   refactor/chore     ▲                          │
-   (短生命周期)        └───── back-merge ────────┘
-                          (main → dev)
-```
 
-| 分支 | 角色 | 常驻 | 允许的直接 push | 默认 PR base |
+| 分支 | 职责 | 默认落点 |
+|---|---|---|
+| `dev` | 日常集成与下一版本候选 | 所有日常 PR |
+| `main` | 已发布版本与 release 专线 | release PR、生产 hotfix |
+| `feat/*`、`fix/*`、`refactor/*`、`docs/*`、`test/*`、`chore/*`、`perf/*` | 短生命周期工作分支 | `dev` |
+| `release/*` | 冻结的发布准备分支（仅当 release 需要额外收束） | `main` |
+| `hotfix/*` | `main` 或已发布版本的阻断性修复 | `main` |
+
+分支名采用 `<type>/<topic>` 或 `<type>/v<target-version>-<topic>`。`hotfix/*` 只能从 `main` 创建。
+
+## 变更分级工作流
+
+每次变更都按以下六级之一执行。分级决定分支形态、评审门槛和合并路径；难以判断时向上分级。
+
+| 等级 | 范围 | 分支 | 评审 | 合并 |
 |---|---|---|---|---|
-| `main` | 发布专线，每个 release commit 对应一个 tag | 是 | 仅 hotfix | — |
-| `dev` | 集成分支，所有日常改动的汇聚点 | 是 | chore/docs 小修补 | — |
-| `feat/*` / `fix/*` / `refactor/*` / `docs/*` / `chore/*` / `test/*` / `perf/*` | 短生命周期工作分支 | 否 | — | **dev** |
-| `hotfix/*` | 紧急修复，仅生产事故时使用 | 否 | — | **main** |
+| **Develop direct** | chore/docs、小范围、低风险 | 直接在 `dev` | 无 | 用户明确要求后 push |
+| **Quick PR** | 小/中型低风险 | 从 `dev` 建短分支 | Bot Review，一轮 | Bot 通过后请求人工合并 |
+| **Standard PR** | 中型或高风险域 | 从 `dev` 建短分支 | 独立 CR + Bot Review，并行 | 无未解决 Blocking/Should-fix 后请求人工合并 |
+| **Huge PR** | 大型、跨模块、高风险 | 短分支；必要时拆多个 PR | 全量 Tier 2 Deep-CR；每个拆分 PR 保持 Standard | Deep-CR 结论收口后请求人工合并 |
+| **Hot-Fix** | `main` 或 tag 的阻断回归 | 从 `main` | 按风险，非平凡变更至少 Tier 1 | PR 到 `main`，再回灌 `dev` |
+| **Release** | 公开发布 | `dev → main`；必要时 `release/*` | 独立 CR + 发行物/消费者验收 | 合并 `main` 后打 tag |
 
----
+### Develop direct
 
-## 日常工作流
+触发条件：仅限 chore/docs、小范围、低风险改动，并且用户明确要求 commit 与 push。完成最小验证后以可审查的 Conventional Commit 直接推送 `dev`；绝不直接推送 `main`。
 
-1. **拉分支**：`git checkout -b <type>/<topic> dev`（base 必须是 dev，不是 main）
-2. **实现**：遵循 [`style.md`](style.md) 的单一职责、400 行预警线、分层纪律。feat/fix/refactor 级改动**不直接编辑 `CHANGELOG.md`**，改记一条本地 changelog 草稿（机制见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)），草稿正文附 PR 描述
-3. **本地验证**：pre-push hook 会自动跑 ruff + type-check + pytest；失败则修，不加 `--no-verify`
-4. **推送 + 开 PR**：PR base 选 dev。PR 描述写清动机、范围、验证方式
-5. **CI + Review**：CI 在所有 PR 上自动跑；@khpilot bot 会提供自动化 code review
-6. **合并**：`gh pr merge --merge`（保留完整分支历史，**不 squash**）
-7. **删分支**：合并后删掉本地和远程 feature 分支
+### Quick PR
 
----
+触发条件：不属于 chore/docs 的小/中型低风险改动，或作者希望通过 PR 审查的低风险改动。流程为：从 `dev` 创建短分支 → 实现与验证 → 向 `dev` 开 PR → Bot Review 一轮并处理其结论 → 无 Blocking 后请求人工合并。Quick PR 不要求独立 CR。
 
-## Release 流程
+### Standard PR
 
-> 触发条件：`dev` 积累了足够多的改动，或外部要求发布新版本。
+触发条件：中型改动，或触及以下任一高风险域但未达到 Huge PR 门槛：provider/MCP 协议和流式行为、模型工具及外部副作用、持久化/迁移/恢复、LLM 触发与群隔离、敏感词和数据卫生、Web Admin API/鉴权、部署与发行、跨模块重构。
 
-1. **在 dev 上 bump 版本**：编辑 `pyproject.toml` 的 `version` 字段
-2. **整理 CHANGELOG**（遵循项目 Keep a Changelog 约定）：
-   - 汇总本期改动：以协作者本地维护的 changelog 草稿（主，机制见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)）+ 已合并 commit 历史（兜底）为来源，按对应分类写入 `## [Unreleased]` 段（草稿暂不清，保留至 release 确认后；见第 6 步）
-   - 将 `## [Unreleased]` 改为 `## [X.Y.Z] - YYYY-MM-DD`（版本号不带 `v` 前缀）
-   - 在其上方插入新的空 `## [Unreleased]` 段
-   - 在文件底部的链接区更新 `[Unreleased]` 和新版本的比较链接
-3. **commit + push 到 dev**
-4. **开 release PR**：`dev → main`，标题 `release: vX.Y.Z — <一句话摘要>`
-5. **合并 release PR**：`gh pr merge --merge`
-6. **打 tag**：在 main 上 `git tag vX.Y.Z && git push origin vX.Y.Z`
-   - tag push 会触发 `release.yml`：完整 tests + Windows lazy package + Docker 镜像 + GitHub Release
-   - release 流水线通过后，清掉已发布的本地 changelog 草稿（草稿不进 git，删除前确认 CHANGELOG 已正确汇总）
-7. **back-merge main → dev**：
-   - 若 dev 是 main 的直接祖先（常见）：`git checkout dev && git merge --ff-only main && git push`
-   - 若 dev 已有新提交（release 后又开了 feature）：开一个 `chore/back-merge-vX.Y.Z` PR，base = dev
+流程为：从 `dev` 创建短分支 → 实现与验证 → 开 PR → 并行运行两条评审：
 
-**版本号约定**：遵循语义化版本。特殊版本号可作为致敬（如 v1.7.10、v1.8.9 致敬 Minecraft），需在 CHANGELOG 该版本段开头写明致敬理由。
+- 未参与实现会话的独立 CR reviewer（Tier 1；可使用 `.claude/agents/quickquip-cr-reviewer.md`）。
+- GitHub PR 侧 Bot Review，一轮。
 
----
+将两条结论汇总为 Blocking、Should-fix、Nits、Verified claims。Blocking 必须修复；Should-fix 除非 PR 记录延后理由，否则修复。完成后请求人工合并。
 
-## 例外：紧急 hotfix 直接上 main
+### Huge PR
 
-> 仅当生产事故、安全漏洞等**等不及走 dev → main 双跳**的情况。日常改动禁止走这条路。
+触发条件：大型、跨模块、高风险改动，以及面向 `main`、tag 或 release 准备的改动。高风险路径映射和数值门槛以 `scripts/check/deep-cr-trigger.sh <base>` 的输出为唯一权威；它无法解析 base 时 fail-safe 地要求 Deep-CR，而不会假定变更低风险。
 
-1. **拉分支**：`git checkout -b hotfix/<topic> main`（base 是 main）
-2. **修复 + 补 CHANGELOG**：hotfix 不走草稿流程，直接编辑 `CHANGELOG.md`（在对应版本段或新建一个 patch 版本段）
-3. **PR 回 main**：`gh pr merge --merge`
-4. **打 tag**：`vX.Y.Z+1`（patch 号）
-5. **back-merge main → dev**：同 release 流程的第 7 步，**不可省略**，否则 dev 永久落后
+开始前在本地私有工作区编写专题计划，写明目标与验收条件、涉及子系统、风险与失败模式，以及拆分方案。必要时把实现拆为多个 Standard PR，每个 PR 只保留一个主要意图。
 
----
+整体变更执行 Tier 2 Deep-CR：先运行 `scripts/check/deep-cr-trigger.sh <base>`；当输出 `trigger: true` 时，组织五个独立透镜审查：
 
-## 分支命名
+1. provider 与 MCP 协议、重试、取消、未信任结果；
+2. LLM 工具、外部副作用、敏感词与成功语义；
+3. SQLite/文件持久化、迁移、锁、关闭与恢复；
+4. 消息触发、群隔离、限流、Web Admin、配置契约、部署与发行；
+5. 全局结构、依赖方向、上帝结构与目录归属。
 
-格式：`<type>/<topic>` 或 `<type>/v<version>-<topic>`
+每个候选发现由未产出该发现的 reviewer 重新检查所引契约和 `file:line`，按 0/25/50/75/100 评分；仅保留置信度至少 80、确属本变更引入且契约引用正确的发现。最后再将幸存发现归入 Blocking、Should-fix、Nits、Verified claims。Deep-CR 是 Standard PR 的补充，不替代每个拆分 PR 的独立 CR 与 Bot Review。
 
-- `type` 用 Conventional Commits 类型：`feat` / `fix` / `refactor` / `docs` / `chore` / `test` / `perf` / `style`
-- `hotfix` 是**专用类型**，base 必须为 main，见上方[例外：紧急 hotfix](#例外紧急-hotfix-直接上-main) 章节，不纳入常规 dev 工作流
-- 发版期对齐的多分支工作用 `<type>/v<version>-<topic>`（如 `feat/v1.9.0-proxy-support`）
-- 零星 PR 用 `<type>/<topic>` 即可（如 `docs/branching-model`）
+### Hot-Fix
 
----
+仅用于 `main` 或已发布 tag 的阻断回归，例如机器人不能启动、provider 请求全面失败、跨群/敏感数据泄漏、持久化损坏、工具重复副作用或 Web Admin 失去基本可用性。流程：从 `main` 建分支 → 修复最小失败路径 → 可行时增加回归测试 → 更新 CHANGELOG 和相关文档 → 本地验证 → PR 到 `main` → 打 patch tag → 回灌 `dev`。日常紧急修复仍走 `dev`。
 
-## chore / docs 落点
+### Release
 
-- **默认进 dev**：版本号 bump、typo、文档微调等小修补，直接 push 到 dev 即可（不走 PR 也可，走 PR 更利于触发 CI）
-- **禁止直接上 main**：除 release 窗口期的 release commit 和上述 hotfix 例外
+Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外收束，可使用 `release/v<version>-<topic>`。发布评审至少达到 Standard，满足 Deep-CR 触发条件时按 Huge 执行，并完成与风险相称的 Windows/Docker/Linux 消费者验收。详情见下方「发布生命周期」。
 
----
+## 日常迭代与验证
 
-## CI 与保护规则
+1. 对齐范围：说明改动、可能涉及的文件、风险和成功条件。
+2. 选择以上分级；除 Develop direct 外均从 `dev` 创建短分支。
+3. 以小且可审查的提交实现；只有收到指令才 commit。
+4. 更新拥有该行为或边界的文档、配置模板与本地 changelog 草稿。
+5. 执行与风险相称的验证；PR 合并前按等级完成评审。
 
-- **CI 触发**（`.github/workflows/ci.yml`）：`push` 到 `main` 或 `dev`、以及所有 `pull_request` 都会跑 tests；tag push 触发完整 release 流水线
-- **分支保护**（建议配置，对应"dev 为主、main 留例外"模型）：
-  - `main`：要求 PR、要求 CI 通过、禁止 force push、留 admin bypass
-  - `dev`：允许直接 push（chore/docs 小修补）、要求 CI 通过、禁止 force push
+| 变更类型 | 最小验证 |
+|---|---|
+| 仅文档 | 链接与过时术语搜索；可行时运行前端 type-check |
+| 小型 Python 改动 | `.venv/bin/ruff check .` 与相关 pytest |
+| 小型前端改动 | `pnpm --dir frontend type-check` 与必要的 build/组件检查 |
+| LLM/MCP、持久化、消息管线、Web Admin、配置或部署 | Ruff、相关 pytest、前端 type-check（触及前端时）、示例配置校验与实际边界 smoke |
+| release / `main` 候选 | 完整 pytest、Ruff、示例配置校验、前端 type-check/build、发行 workflow 产物验证，以及可行的真实消费者验收 |
+
+常用命令：
+
+```bash
+.venv/bin/ruff check .
+.venv/bin/python scripts/ci/validate_toml_examples.py
+.venv/bin/python -m pytest -n auto
+pnpm --dir frontend type-check
+pnpm --dir frontend build
+```
+
+无法执行的网络、Playwright、真实 provider 或平台验证必须在 PR/交接中明确报告为未验证，而不能作为通过。
+
+## 两级代码评审
+
+- **Tier 1（默认）**：对所有 Standard PR 和非平凡 Hot-Fix 运行一轮独立、只读的 CR。`.claude/agents/quickquip-cr-reviewer.md` 是可复用的 reviewer 定义；任何未参与实现的合格审查者均可执行相同契约。
+- **Tier 2（Deep-CR）**：仅用于 Huge PR。五个领域 finder 独立寻找候选，再由其他审查者复核证据与置信度。`scripts/check/deep-cr-trigger.sh` 只负责确定是否达到门槛；它不替代实际审查。
+
+评审输出统一使用：Blocking（合并前修复）、Should-fix（除非记录延后理由否则修复）、Nits（可选）和 Verified claims（可记录于 PR/merge notes）。
+
+## 发布生命周期
+
+1. 在 `dev` 冻结候选 SHA、`pyproject.toml` 版本、CHANGELOG、公开文档和配置模板。
+2. 汇总本地 changelog 草稿与已合并历史，将 `Unreleased` 形成新版本段并更新比较链接；确认草稿在 release 成功后再清理。
+3. 为 `dev → main` 开 release PR，标题为 `release: vX.Y.Z — <摘要>`；完成分级要求的评审和验证。
+4. 合并 release PR 后，在 `main` 的已接受提交上创建并推送 `vX.Y.Z` tag。
+5. tag 触发 `release.yml`：完整测试、Windows 懒人包、Docker 镜像与 GitHub Release。核对 tag、版本、ZIP、镜像 revision/digest 和 Release notes 一致。
+6. 把 `main` 回灌 `dev`：若能快进则 `git merge --ff-only main`；否则开 `chore/back-merge-vX.Y.Z` PR。确认 post-merge CI 后清理已发布的本地草稿与短分支。
+
+## CI、Issue 与文档扫尾
+
+- CI 在 `main`、`dev` push 和 PR 上运行；tag 运行发行 workflow。`main` 应要求 PR、成功 CI 和禁止 force push；`dev` 禁止 force push，Develop direct 例外只适用于 chore/docs。
+- 解决 Issue 的 PR 正文使用单独一行 `Closes #<issue>`；仅关联但未完成的使用 `Refs #<issue>`。
+- 行为、配置、协议、命令、版本或路径变化后，按范围对 `README.md`、`CHANGELOG.md`、`CONTRIBUTING.md`、`docs/`、配置模板与 `prod.example/` 搜索旧术语。发现陈旧说明在同一变更中更新。

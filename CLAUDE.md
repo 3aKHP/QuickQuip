@@ -12,6 +12,8 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 | 想看... | 去哪里 |
 |---|---|
 | 架构设计、分层、消息流 | `docs/dev/` |
+| 开发文档职责与公共/私有边界 | `docs/dev/README.md` |
+| 变更分级、评审与发布流程 | `docs/dev/branching.md` |
 | 部署与运维配置 | `docs/admin/` |
 | 用户向命令与功能说明 | `docs/user/` |
 | 公开生产运维模板 | `prod.example/` |
@@ -44,7 +46,7 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 - **main 仅接收 release PR 和紧急 hotfix**，禁止直接 push 日常改动
 - 发版时开 `dev → main` 的 release PR，main 打 tag 后 back-merge 回 dev
 
-完整流程、release checklist、hotfix 例外条件见 [`docs/dev/branching.md`](docs/dev/branching.md)。分支命名：`<type>/<topic>` 或 `<type>/v<version>-<topic>`，例 `feat/v1.9.0-proxy-support`
+完整流程、变更分级、release checklist、hotfix 例外条件见 [`docs/dev/branching.md`](docs/dev/branching.md)。chore/docs 小修补可走 Develop direct；其他变更按 Quick PR、Standard PR、Huge PR、Hot-Fix 或 Release 分级执行。分支命名：`<type>/<topic>` 或 `<type>/v<version>-<topic>`，例 `feat/v1.9.0-proxy-support`
 
 ## 常用命令
 
@@ -71,9 +73,10 @@ src/
 │   ├── common/        # 共享工具：rate_limit, persistence, message_deduper, sensitive_filter
 │   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, tool_registry, tool_loop, prompting, settings
 │   ├── games/         # 游戏系统：niuniu, blackjack, russian_roulette, number_bomb, economy, scores, registry
-│   ├── generation/    # 多模态生成：image, audio, music, asr
+│   ├── generation/    # 多模态生成：image, audio, music, asr, svg
 │   ├── tieba/         # 贴吧爬虫（Playwright）
 │   ├── search/        # 联网搜索（SearXNG）
+│   ├── sts/           # 杀戮尖塔公式化回复（lexicon、formulas）
 │   ├── adapters/nonebot/  # NoneBot2 适配层：matcher 注册、命令处理、scheduler、lifecycle
 │   └── app/           # 应用组装：管线实例化、Web Admin（FastAPI + Vue 3 SPA）
 └── plugins/           # NoneBot2 插件入口 shim，re-export 指向 quickquip.*
@@ -86,7 +89,7 @@ src/
 
 开发环境需先运行 `uv pip install -e .`（可编辑安装），让 Python 能解析 `src/` 下的包。
 
-消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → chain → text_rules → context_rules → timezone），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
+消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → good_girl_chain → custom_chain_games → games registry → text_rules → context_rules → timezone → STS card_le（链尾，规则开关与限频预检通过后才匹配，不得抢占时区等具体规则）），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
 
 ## Commit 规范
 

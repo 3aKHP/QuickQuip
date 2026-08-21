@@ -22,6 +22,7 @@ from quickquip.llm.mcp.types import (
     _detect_alias_conflicts,
     _sanitize_error_message,
     _sanitize_url,
+    format_mcp_era_tag,
 )
 
 
@@ -225,6 +226,35 @@ def test_failure_kinds_cover_expected_categories():
     expected = {"config", "probe", "legacy-handshake", "modern-negotiation",
                 "auth", "timeout", "routing", "transport"}
     assert MCP_FAILURE_KINDS == expected
+
+
+# ---------------------------------------------------------------------------
+# Era tag formatting (single source for chat status + Web Admin)
+# ---------------------------------------------------------------------------
+
+def test_era_tag_strict_modern_renders_once():
+    assert format_mcp_era_tag("modern", "modern") == "/modern"
+
+
+def test_era_tag_strict_legacy_renders_nothing():
+    assert format_mcp_era_tag("legacy", "legacy") == ""
+
+
+def test_era_tag_legacy_unknown_renders_nothing():
+    assert format_mcp_era_tag("legacy", "unknown") == ""
+
+
+def test_era_tag_mixed_renders_both():
+    assert format_mcp_era_tag("auto", "legacy") == "/auto/legacy"
+    assert format_mcp_era_tag("auto", "modern") == "/auto/modern"
+    assert format_mcp_era_tag("modern", "legacy") == "/modern/legacy"
+    assert format_mcp_era_tag("legacy", "modern") == "/legacy/modern"
+
+
+def test_era_tag_is_exported_from_mcp_package():
+    from quickquip.llm.mcp import format_mcp_era_tag as package_export
+
+    assert package_export is format_mcp_era_tag
 
 
 # ---------------------------------------------------------------------------

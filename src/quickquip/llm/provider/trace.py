@@ -90,6 +90,15 @@ def trace_agent_loop(func):
     return wrapped
 
 
+def current_agent_loop_id() -> str | None:
+    """Current agent loop id, or ``None`` outside any ``@trace_agent_loop`` boundary.
+
+    跨模块归因的唯一公开入口：不要读取可变的 ``AgentLoopTrace``/``_AGENT_LOOP_TRACE``。
+    """
+    loop = _AGENT_LOOP_TRACE.get()
+    return loop.loop_id if loop is not None else None
+
+
 def trace_active() -> bool:
     """Return whether global or operation-scoped HTTP tracing is active."""
 

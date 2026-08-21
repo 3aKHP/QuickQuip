@@ -229,7 +229,7 @@ class GameEconomyStore:
 3. **自带超时** — 所有交互式游戏必须有 `expires_at` 机制，防止僵尸 session
 4. **金币 None-safe** — 所有 `self._economy` 调用前检查 `is not None`
 5. **原子操作** — 多用户金币变动用 `transfer_gold`，不要手动 add + deduct
-6. **单文件原则** — 每个游戏一个 `.py` 文件，业务逻辑不跨文件拆分
+6. **单文件原则（session 型）** — session 型游戏一个 `.py` 文件，业务逻辑不跨文件拆分；RPG 系统可按域拆包（如 `niuniu/`）
 
 ---
 
@@ -252,18 +252,19 @@ GameRegistry 不管理超时——各游戏自行在 `process()` 中检查。这
 
 ## CD 系统（NiuNiu 示例）
 
-使用模块级 dict + `time.time()` 的简单方案（重启重置）：
+使用 `games/niuniu/cooldown.py` 的 `CooldownTracker`（`threading.Lock` 线程安全，查询时自动清理过期条目，重启重置）：
 
 ```python
-_cd_map: dict[str, float] = {}
+from quickquip.games.niuniu.cooldown import CooldownTracker
 
-def _check_cd(cd_map, uid: str) -> float:
-    remaining = cd_map.get(uid, 0) - time.time()
-    return remaining if remaining > 0 else 0
+_cd = CooldownTracker()
 
-def _set_cd(cd_map, uid: str, seconds: float):
-    cd_map[uid] = time.time() + seconds
+remaining = _cd.check(uid)  # 剩余 CD 秒数，0 表示就绪或已过期
+_cd.set(uid, 300)           # 设置 300 秒 CD
+_cd.clear(uid)              # 手动清除
 ```
+
+牛牛各动作直接使用模块级单例 `glue_cd` / `fence_cd` / `fenced_cd` / `arrested_cd`。
 
 ---
 

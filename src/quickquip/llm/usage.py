@@ -81,11 +81,8 @@ async def _record_usage(
     """落一行用量（成功/错误/取消皆记）；任何异常只 logger 不抛。"""
     try:
         scope = _USAGE_SCOPE.get()
-        try:
-            from quickquip.llm.provider.trace import _AGENT_LOOP_TRACE
-            loop = _AGENT_LOOP_TRACE.get()  # 复用 trace.py 的 agent loop 边界，零接线
-        except Exception:
-            loop = None
+        from quickquip.llm.provider.trace import current_agent_loop_id
+        loop_id = current_agent_loop_id()  # 复用 trace.py 的 agent loop 边界，零接线
         model = response.model if response is not None else request.model
         duration_ms = (time.monotonic() - started) * 1000
 
@@ -133,7 +130,7 @@ async def _record_usage(
             "feature": scope.feature if scope else None,
             "group_id": scope.group_id if scope else None,
             "persona_id": scope.persona_id if scope else None,
-            "agent_loop_id": loop.loop_id if loop else None,
+            "agent_loop_id": loop_id,
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,

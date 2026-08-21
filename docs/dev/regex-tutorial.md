@@ -1,10 +1,27 @@
 # 从零开始学习正则表达式 —— 以 QuickQuip 项目为例
 
+> ⚠️ **过期提示（2026-08 发布前加注）**
+>
+> 本教程写于文字规则体系 **TOML 化之前**（最后更新 2026-03-16），其中与项目代码绑定的部分已过期：
+>
+> - **4.x 节与练习题中的规则配置示例是旧版 Python dict 语法**，现行规则配置为 TOML `[[rules]]` 格式，权威参考为 [`config/chat_rules.toml.example`](../../config/chat_rules.toml.example)（实际部署使用 `config/chat_rules.toml`）。
+> - **文中所有行号引用均已失效**；凡写"`src/quickquip/chat/config.py` 第 N 行"处，请以 TOML 模板文件为准。
+> - 部分示例规则（`kpl_final`、`master_protection`、`maggot_arrival`、`huaizhen_oversize`）是部署方私有规则，**已不在公开仓库**。
+> - 优先级等具体数值以 `config/chat_rules.toml.example` 为准。
+>
+> **仍然有效的部分：** 正则语法本身、匹配思路（锚点/捕获组/反向引用/贪婪与非贪婪）与调试技巧不受配置格式变化影响，可放心学习。
+>
+> **现行参考点：**
+>
+> - 规则配置模板：`config/chat_rules.toml.example`
+> - 规则匹配引擎：`src/quickquip/chat/text_rules.py`（预编译 `_COMPILED_PATTERNS` + `recompile_patterns()` 热重载）
+> - 上下文规则：`src/quickquip/chat/context_rules.py`
+
 > **面向读者：** 零基础的 Python 初学者，希望通过真实项目案例理解正则表达式。
 >
 > **前置要求：** 了解基本的 Python 语法（字符串、函数调用）。
 >
-> **源码指引：** 本文引用的源码路径以 `src/quickquip/` 下的主实现为准。`src/plugins/` 目录是 NoneBot2 插件入口层，只做 re-export，不包含业务逻辑。例如文字规则配置位于 `src/quickquip/chat/config.py`，模板渲染实现位于 `src/quickquip/chat/text_rules.py`。
+> **源码指引：** 本文引用的源码路径以 `src/quickquip/` 下的主实现为准。`src/plugins/` 目录是 NoneBot2 插件入口层，只做 re-export，不包含业务逻辑。文字规则配置现为 `config/chat_rules.toml`（权威模板为 `config/chat_rules.toml.example`，由 `src/quickquip/chat/config.py` 加载），模板渲染实现位于 `src/quickquip/chat/text_rules.py`。
 
 ---
 
@@ -120,13 +137,13 @@ r"四区"      # 匹配文本中出现的"四区"二字
 r"怀真"      # 匹配文本中出现的"怀真"二字
 ```
 
-QuickQuip 中大量"梗触发"使用的就是这种简单匹配：
+QuickQuip 中大量"梗触发"使用的就是这种简单匹配（下例为 TOML 化前的旧 dict 写法；`master_protection` 为部署方私有示例，已不在公开仓库）：
 
 ```python
-# src/quickquip/chat/config.py 中的 divine_arrival 规则
+# 旧版 config.py 中的 divine_arrival 规则
 {"patterns": [r"神临", r"降临"], ...}
 
-# master_protection 规则
+# master_protection 规则（私有示例，已迁出公开仓库）
 {"patterns": [r"四区", r"4区", r"四出", r"4出"], ...}
 ```
 
@@ -208,7 +225,7 @@ r"[！!。，,？?]*"  # 匹配零个或多个中英文标点
 
 ### 4.1 纯文字匹配——`divine_arrival` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 59-64 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
@@ -237,7 +254,7 @@ r"[！!。，,？?]*"  # 匹配零个或多个中英文标点
 
 ### 4.2 锚点 + 捕获组——`like_reply` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 87-92 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
@@ -282,7 +299,7 @@ print(m.group(1))  # "打游戏"（第一个捕获组）
 
 ### 4.3 非贪婪匹配 + 命名捕获组——`play_target` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 66-71 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
@@ -324,7 +341,7 @@ print(m.groupdict())         # {"target": "原神"}
 
 ### 4.4 反向引用——`double_char_ni_de` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 73-78 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
@@ -368,7 +385,7 @@ re.search(r"^([\u4e00-\u9fa5])(\1)你的$", "牛马你的")
 
 ### 4.5 字符范围 + 量词——`sandwich_de` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 80-85 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
@@ -412,7 +429,7 @@ print(m.group(2))  # "红茶"
 
 ### 4.6 可选分组 + 多捕获——`kpl_final` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 123-128 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前）。注：该规则为部署方私有示例，已不在公开仓库，此处仅作正则教学案例。
 
 ```python
 {
@@ -469,7 +486,7 @@ print(m.group(2))  # "红茶"
 
 ### 4.7 命名捕获组 + 黑名单过滤——`i_do` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 130-136 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
@@ -514,7 +531,7 @@ I_DO_BLOCKED_VERBS = {"不会", "不能", "不要", "喜欢", "知道", "觉得"
 
 ### 4.8 `fullmatch` + 接龙状态机——`good_girl_chain`
 
-**源码位置：** `src/quickquip/chat/good_girl_chain.py` 第 8 行
+**源码位置：** 见 `src/quickquip/chat/good_girl_chain.py`（`GOOD_GIRL_START_PATTERN`）
 
 ```python
 GOOD_GIRL_START_PATTERN = re.compile(r"^(.+?)是好(.+?)吗[？?]*$")
@@ -549,14 +566,14 @@ lead_char = start_match.group(1)[0]  # "小"（取第一个字）
 
 ### 4.9 启动模式匹配——`genshin_start` 规则
 
-**源码位置：** `src/quickquip/chat/config.py` 第 102-107 行
+**规则出处：** 旧版 `src/quickquip/chat/config.py`（TOML 化前；现行规则见 `config/chat_rules.toml.example`）
 
 ```python
 {
     "name": "genshin_start",
     "patterns": [r"^(.+?)[，,]\s*启动[！!]*$"],
     "reply_template": "该启动$1了，少爷",
-    "priority": 90,
+    "priority": 90,  # 注：旧版示例值，现行数值以 chat_rules.toml.example 为准
 }
 ```
 
@@ -590,7 +607,7 @@ lead_char = start_match.group(1)[0]  # "小"（取第一个字）
 
 QuickQuip 的回复模板中使用 `$1`、`$2` 作为占位符，而 Python 的 `str.format()` 使用 `{}`。项目通过 `re.sub()` 巧妙地桥接了两者。
 
-**源码位置：** `src/quickquip/chat/text_rules.py` 第 18-26 行
+**源码位置：** 见 `src/quickquip/chat/text_rules.py`（`replace_regex_groups` 函数）
 
 ```python
 def replace_regex_groups(template: str, match: re.Match) -> str:
@@ -628,7 +645,7 @@ template = "还在$1"
 
 ### 5.2 `match.groupdict()` 与动态上下文
 
-**源码位置：** `src/quickquip/chat/text_rules.py` 第 67 行
+**源码位置：** 见 `src/quickquip/chat/text_rules.py`（规则匹配主循环中的上下文合并）
 
 ```python
 context = {**base_context, **match.groupdict()}
@@ -674,6 +691,8 @@ for rule in TEXT_REPLY_RULES:
         match = re.search(pattern, text)  # 内联使用
 ```
 
+> **注（已过期）：** 现行实现改为统一预编译——`text_rules.py` 启动时将全部规则 pattern 编译进 `_COMPILED_PATTERNS`，并通过 `recompile_patterns()` 支持热重载，不再逐条内联 `re.search`。上例仅为说明"内联 vs 预编译"两种风格。
+
 > **性能说明：** Python 的 `re` 模块内部有缓存机制（默认缓存最近 512 个模式），所以对于少量模式，内联方式也不会有明显性能损失。
 
 ---
@@ -682,7 +701,9 @@ for rule in TEXT_REPLY_RULES:
 
 下表列出了 QuickQuip 项目中所有正则表达式的位置、模式和用途：
 
-### 6.1 文字彩蛋规则（`src/quickquip/chat/config.py` → `TEXT_REPLY_RULES`）
+### 6.1 文字彩蛋规则（旧版 `src/quickquip/chat/config.py` → `TEXT_REPLY_RULES`；现行配置见 `config/chat_rules.toml.example`）
+
+> 注：`maggot_arrival`、`master_protection`、`huaizhen_oversize`、`kpl_final` 为部署方私有示例，已不在公开仓库，下表保留仅作正则教学参考。
 
 | # | 规则名 | 正则表达式 | 用途 | 关键技术 |
 |---|--------|-----------|------|---------|
@@ -691,11 +712,11 @@ for rule in TEXT_REPLY_RULES:
 | 3 | `double_char_ni_de` | `r"^([\u4e00-\u9fa5])(\1)你的$"` | 匹配叠字+"你的" | 反向引用、Unicode范围 |
 | 4 | `sandwich_de` | `r"^([\u4e00-\u9fa5])(.{2,})\1的$"` | 匹配"三明治"结构 | 反向引用、量词范围 |
 | 5 | `like_reply` | `r"^我喜欢(.+)$"`、`r"^喜欢(.+)$"` | 提取喜欢的内容 | 锚点、捕获组 |
-| 6 | `maggot_arrival` | `r"区临"`、`r"区来了"` | 触发"区从天降"变体 | 纯文字匹配 |
+| 6 | `maggot_arrival`（私有示例，已迁出） | `r"区临"`、`r"区来了"` | 触发"区从天降"变体 | 纯文字匹配 |
 | 7 | `genshin_start` | `r"^(.+?)[，,]\s*启动[！!]*$"` | "XX，启动！"格式 | 字符类、可选量词 |
-| 8 | `master_protection` | `r"四区"`、`r"4区"`、`r"四出"`、`r"4出"` | 最高优先级保护 | 纯文字匹配 |
-| 9 | `huaizhen_oversize` | `r"怀真"`、`r"赵怀真"` | 触发固定回复 | 纯文字匹配 |
-| 10 | `kpl_final` | `r"^(.+?)尽力[，,]\s*(.+?)犯罪[，,]\s*(.+?)(?:的)?(.{2})不团队$"` | 复杂多捕获组 | 非捕获组、多组 |
+| 8 | `master_protection`（私有示例，已迁出） | `r"四区"`、`r"4区"`、`r"四出"`、`r"4出"` | 最高优先级保护 | 纯文字匹配 |
+| 9 | `huaizhen_oversize`（私有示例，已迁出） | `r"怀真"`、`r"赵怀真"` | 触发固定回复 | 纯文字匹配 |
+| 10 | `kpl_final`（私有示例，已迁出） | `r"^(.+?)尽力[，,]\s*(.+?)犯罪[，,]\s*(.+?)(?:的)?(.{2})不团队$"` | 复杂多捕获组 | 非捕获组、多组 |
 | 11 | `i_do` | `r"^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$"` | "我XX"格式 | 命名捕获组、黑名单 |
 
 ### 6.2 接龙触发（`src/quickquip/chat/good_girl_chain.py`）
@@ -926,7 +947,7 @@ def match_text_rule(text, user_id, sender_name, now=None):
     return matched_rules[0] if matched_rules else None
 ```
 
-**问题：** 如果一条消息同时匹配了 `divine_arrival`（priority=100）和 `master_protection`（priority=65536），最终会触发哪个规则？为什么？
+**问题：** 如果一条消息同时匹配了 `divine_arrival`（priority=100）和 `master_protection`（priority=65536），最终会触发哪个规则？为什么？（注：`master_protection` 为部署方私有示例，已不在公开仓库；具体优先级数值以 `config/chat_rules.toml.example` 为准。）
 
 <details>
 <summary>参考答案</summary>
@@ -935,7 +956,7 @@ def match_text_rule(text, user_id, sender_name, now=None):
 
 排序使用 `-item["priority"]`（取负数），所以 priority 越大越靠前。`65536 > 100`，因此 `master_protection` 排在 `divine_arrival` 之前，成为最终选中的规则。
 
-这就是项目中使用 `PRIORITY_ABSOLUTE = 65_536` 的原因——确保某些规则永远优先。
+这就是项目中曾使用 `PRIORITY_ABSOLUTE = 65_536` 的原因——确保某些规则永远优先。（注：该常量为旧版写法，现行 TOML 配置中直接为规则填写足够大的 priority 数值，以 `config/chat_rules.toml.example` 为准。）
 
 </details>
 
