@@ -32,7 +32,7 @@ from quickquip.sts.config import (
     TURMFLUCH_RULE_NAME,
 )
 from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
-from quickquip.sts.formulas.card_le.prompting import build_nearest_prompt, build_turmfluch_prompt
+from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
@@ -83,6 +83,11 @@ from quickquip.llm.service_parts import (
 )
 from quickquip.llm.usage import usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
+from quickquip.llm.single_shot import (
+    CommandSingleShotSpec,
+    run_card_le_nearest,
+    run_command_single_shot,
+)
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
 from quickquip.llm.tool_loop import run_tool_call_loop
@@ -118,6 +123,45 @@ _GROUP_CACHE_MAX = 512
 
 
 logger = logging.getLogger(__name__)
+
+
+def _defectify_reply_text(raw_text: str) -> str | None:
+    return raw_text or None
+
+
+def _turmfluch_reply_text(raw_text: str) -> str | None:
+    name = extract_card_le_name(raw_text)
+    if name is None:
+        return None
+    return f"{name}了"
+
+
+# 一次性生成入口的差异点束；共享管线本体在 quickquip.llm.single_shot
+_DEFECTIFY_SPEC = CommandSingleShotSpec(
+    rate_limit_key=LLM_RULE_NAME,
+    rule_name=DEFECTIFY_RULE_NAME,
+    usage_reply="用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
+    invalid_reply="模型没有返回可显示的文本。",
+    temperature=0.9,
+    input_channel="defectify_input",
+    output_channel="defectify_output",
+    usage_scope_name="defectify",
+    prompt_builder=build_defectify_prompt,
+    response_parser=_defectify_reply_text,
+)
+_TURMFLUCH_SPEC = CommandSingleShotSpec(
+    rate_limit_key=TURMFLUCH_RATE_LIMIT_KEY,
+    rule_name=TURMFLUCH_RULE_NAME,
+    usage_reply="用法：/turmfluch <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /turmfluch。",
+    invalid_reply="模型没有返回合法的卡牌/遗物名。",
+    temperature=0.7,
+    input_channel="turmfluch_input",
+    output_channel="turmfluch_output",
+    usage_scope_name="turmfluch",
+    prompt_builder=build_turmfluch_prompt,
+    response_parser=_turmfluch_reply_text,
+    log_label="/turmfluch",
+)
 
 
 class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
@@ -384,131 +428,24 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         quoted_user_id: str = "",
         quoted_is_bot_self: bool = False,
     ) -> dict[str, str]:
-        normalized_prompt = prompt.strip()
-        normalized_image_urls = [url.strip() for url in (image_urls or []) if url.strip()]
-        normalized_quoted_text = quoted_text.strip()
-        normalized_quoted_image_urls = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
-        if not normalized_prompt and not normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls:
-            return {
-                "reply": "用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": False,
-            }
-
-        scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        sensitive = _get_sensitive_filter()
-        input_blob = "\n".join(
-            part for part in (normalized_prompt, normalized_quoted_text) if part
-        )
-        input_scan = _scan_sensitive_text(
-            input_blob,
-            channel="defectify_input",
-            scope=scope_key,
-            sensitive_filter=sensitive,
-        )
-        if input_scan.blocked:
-            return {
-                "reply": DEFAULT_BLOCK_REPLY,
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": False,
-            }
-
-        if self.config.load_error:
-            return {
-                "reply": f"LLM 配置不可用：{self.config.load_error}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": False,
-            }
-
-        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
-        provider = self.config.providers.get(settings.provider_id)
-        if provider is None:
-            return {
-                "reply": f"当前 provider 不存在：{settings.provider_id}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": False,
-            }
-
-        prompt_pack = build_defectify_prompt(
-            prompt=normalized_prompt,
-            image_urls=normalized_image_urls,
-            quoted_text=normalized_quoted_text,
-            quoted_image_urls=normalized_quoted_image_urls,
+        # 薄编排：管线本体在 quickquip.llm.single_shot。显式传本模块级
+        # build_provider_client / _get_sensitive_filter，保持既有 patch 点有效。
+        return await run_command_single_shot(
+            spec=_DEFECTIFY_SPEC,
+            config=self.config,
+            chat_id=chat_id,
+            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
+            resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
+            get_sensitive=_get_sensitive_filter,
+            client_builder=build_provider_client,
+            merge_image_urls=self._merge_image_urls,
+            prompt=prompt,
+            image_urls=image_urls,
+            quoted_text=quoted_text,
+            quoted_image_urls=quoted_image_urls,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
         )
-        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
-        defectify_provider = replace(provider, stream_enabled=False)
-        request = LLMRequest(
-            model=settings.model or provider.default_model,
-            system_prompt=prompt_pack.system_prompt,
-            messages=[
-                LLMConversationMessage(
-                    role="user",
-                    content=prompt_pack.user_prompt,
-                    image_urls=effective_image_urls,
-                )
-            ],
-            temperature=0.9,
-            max_output_tokens=provider.max_output_tokens,
-            thinking_budget=None,
-            tools=[],
-            allow_tool_calls=False,
-            tool_choice="none",
-        )
-
-        try:
-            with usage_scope("defectify", group_id=str(chat_id)):
-                response = await build_provider_client(defectify_provider).complete(request)
-        except LLMProviderError as exc:
-            return {
-                "reply": f"LLM 调用失败：{exc}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
-        except Exception as exc:
-            return {
-                "reply": f"LLM 调用异常：{exc}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
-
-        text = strip_leading_reasoning_content(response.text).strip()
-        if not text:
-            return {
-                "reply": "模型没有返回可显示的文本。",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": DEFECTIFY_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
-        output_scan = _scan_sensitive_text(
-            text,
-            channel="defectify_output",
-            scope=scope_key,
-            sensitive_filter=sensitive,
-        )
-        if output_scan.blocked:
-            text = DEFAULT_OUTPUT_FALLBACK
-        return {
-            "reply": text,
-            "rate_limit_key": LLM_RULE_NAME,
-            "rule_name": DEFECTIFY_RULE_NAME,
-            "llm_used": True,
-            "provider_id": provider.id,
-            "model": request.model,
-        }
 
     async def generate_turmfluch_reply(
         self,
@@ -523,138 +460,23 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         quoted_user_id: str = "",
     ) -> dict[str, Any]:
         """/turmfluch 命令：把输入提炼成一句「<卡牌或遗物名>了」。"""
-        normalized_prompt = prompt.strip()
-        normalized_image_urls = [url.strip() for url in (image_urls or []) if url.strip()]
-        normalized_quoted_text = quoted_text.strip()
-        normalized_quoted_image_urls = [url.strip() for url in (quoted_image_urls or []) if url.strip()]
-        if (
-            not normalized_prompt
-            and not normalized_image_urls
-            and not normalized_quoted_text
-            and not normalized_quoted_image_urls
-        ):
-            return {
-                "reply": "用法：/turmfluch <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /turmfluch。",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": False,
-            }
-
-        scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        sensitive = _get_sensitive_filter()
-        input_blob = "\n".join(part for part in (normalized_prompt, normalized_quoted_text) if part)
-        input_scan = _scan_sensitive_text(
-            input_blob,
-            channel="turmfluch_input",
-            scope=scope_key,
-            sensitive_filter=sensitive,
-        )
-        if input_scan.blocked:
-            return {
-                "reply": DEFAULT_BLOCK_REPLY,
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": False,
-            }
-
-        if self.config.load_error:
-            return {
-                "reply": f"LLM 配置不可用：{self.config.load_error}",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": False,
-            }
-
-        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
-        provider = self.config.providers.get(settings.provider_id)
-        if provider is None:
-            return {
-                "reply": f"当前 provider 不存在：{settings.provider_id}",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": False,
-            }
-
-        prompt_pack = build_turmfluch_prompt(
-            prompt=normalized_prompt,
-            image_urls=normalized_image_urls,
-            quoted_text=normalized_quoted_text,
-            quoted_image_urls=normalized_quoted_image_urls,
+        # 薄编排：同 generate_defectify_reply，管线本体在 quickquip.llm.single_shot。
+        return await run_command_single_shot(
+            spec=_TURMFLUCH_SPEC,
+            config=self.config,
+            chat_id=chat_id,
+            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
+            resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
+            get_sensitive=_get_sensitive_filter,
+            client_builder=build_provider_client,
+            merge_image_urls=self._merge_image_urls,
+            prompt=prompt,
+            image_urls=image_urls,
+            quoted_text=quoted_text,
+            quoted_image_urls=quoted_image_urls,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
         )
-        effective_image_urls = self._merge_image_urls(normalized_image_urls, normalized_quoted_image_urls)
-        turmfluch_provider = replace(provider, stream_enabled=False)
-        request = LLMRequest(
-            model=settings.model or provider.default_model,
-            system_prompt=prompt_pack.system_prompt,
-            messages=[
-                LLMConversationMessage(
-                    role="user",
-                    content=prompt_pack.user_prompt,
-                    image_urls=effective_image_urls,
-                )
-            ],
-            temperature=0.7,
-            max_output_tokens=provider.max_output_tokens,  # 不限小预算：推理模型的 reasoning_content 计入 max_tokens
-            thinking_budget=None,
-            tools=[],
-            allow_tool_calls=False,
-            tool_choice="none",
-        )
-
-        try:
-            with usage_scope("turmfluch", group_id=str(chat_id)):
-                response = await build_provider_client(turmfluch_provider).complete(request)
-        except LLMProviderError as exc:
-            logger.warning("/turmfluch LLM call failed: %s", exc)
-            return {
-                "reply": f"LLM 调用失败：{exc}",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
-        except Exception as exc:
-            logger.exception("/turmfluch LLM call raised unexpectedly")
-            return {
-                "reply": f"LLM 调用异常：{exc}",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
-
-        raw_text = strip_leading_reasoning_content(response.text).strip()
-        name = extract_card_le_name(raw_text)
-        if name is None:
-            return {
-                "reply": "模型没有返回合法的卡牌/遗物名。",
-                "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-                "rule_name": TURMFLUCH_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
-        text = f"{name}了"
-        output_scan = _scan_sensitive_text(
-            text,
-            channel="turmfluch_output",
-            scope=scope_key,
-            sensitive_filter=sensitive,
-        )
-        if output_scan.blocked:
-            text = DEFAULT_OUTPUT_FALLBACK
-        return {
-            "reply": text,
-            "rate_limit_key": TURMFLUCH_RATE_LIMIT_KEY,
-            "rule_name": TURMFLUCH_RULE_NAME,
-            "llm_used": True,
-            "provider_id": provider.id,
-            "model": request.model,
-        }
 
     async def generate_card_le_nearest(
         self,
@@ -668,51 +490,15 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
 
         走 ``[triggers.quick_judge]`` 配置的专用便宜模型，不走群主模型。
         """
-        if self.config.load_error:
-            return None
-        qj = self.config.quick_judge
-        provider_id = qj.provider_id if qj.provider_id else self.config.runtime.default_provider
-        if not provider_id or provider_id not in self.config.providers:
-            provider_id = next(iter(self.config.providers), None)
-        if not provider_id:
-            return None
-        provider = self.config.providers[provider_id]
-        scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        sensitive = _get_sensitive_filter()
-        if _scan_sensitive_text(
-            captured, channel="card_le_input", scope=scope_key, sensitive_filter=sensitive
-        ).blocked:
-            return None
-
-        prompt_pack = build_nearest_prompt(captured=captured)
-        nearest_provider = replace(provider, stream_enabled=False)
-        request = LLMRequest(
-            model=qj.model if qj.model else provider.default_model,
-            system_prompt=prompt_pack.system_prompt,
-            messages=[LLMConversationMessage(role="user", content=prompt_pack.user_prompt)],
-            temperature=0.5,  # 最近匹配偏低温求稳
-            max_output_tokens=provider.max_output_tokens,
-            thinking_budget=None,
-            tools=[],
-            allow_tool_calls=False,
-            tool_choice="none",
+        # 薄编排：管线本体在 quickquip.llm.single_shot，patch 点同上。
+        return await run_card_le_nearest(
+            config=self.config,
+            chat_id=chat_id,
+            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
+            get_sensitive=_get_sensitive_filter,
+            client_builder=build_provider_client,
+            captured=captured,
         )
-        try:
-            with usage_scope("card_le_nearest", group_id=str(chat_id)):
-                response = await build_provider_client(nearest_provider).complete(request)
-        except Exception:
-            logger.exception("STS card_le nearest LLM call failed for %r", captured)
-            return None
-
-        name = extract_card_le_name(strip_leading_reasoning_content(response.text).strip())
-        if name is None:
-            return None
-        text = f"{name}了"
-        if _scan_sensitive_text(
-            text, channel="card_le_output", scope=scope_key, sensitive_filter=sensitive
-        ).blocked:
-            return None
-        return {"reply": text, "llm_used": True, "provider_id": provider.id, "model": request.model}
 
     def _collect_known_participants(
         self,
