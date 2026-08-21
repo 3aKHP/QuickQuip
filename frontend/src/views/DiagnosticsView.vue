@@ -1,6 +1,6 @@
 <template>
   <div class="diag-view">
-    <UiPageHeader title="诊断" subtitle="LLM 样本请求与文本规则回归测试" />
+    <UiPageHeader title="诊断" subtitle="LLM 运行时操作、样本请求与文本规则回归测试" />
 
     <div class="diag-stack">
       <DiagRuntimeOpsCard />
