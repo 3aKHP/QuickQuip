@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import logging
 from pathlib import Path
 import re
-from time import monotonic
 from typing import Any, TYPE_CHECKING
 
 from quickquip.chat.config import BEIJING_TIMEZONE
@@ -53,6 +52,11 @@ from quickquip.llm.provider import (
     LLMRequest,
     build_provider_client,
     strip_leading_reasoning_content,
+)
+from quickquip.llm.quick_judge import (
+    QuickJudgeResult as QuickJudgeResult,  # noqa: F401 — re-exported for callers/tests
+    run_quick_judge,
+    run_quick_judge_detailed,
 )
 from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS as DEFAULT_ENABLED_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
@@ -114,45 +118,6 @@ _GROUP_CACHE_MAX = 512
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class QuickJudgeResult:
-    """quick-judge 的结构化结果（内部诊断通道）。
-
-    ``outcome``: ok | empty | length | provider_error | no_provider；
-    ``is_technical``（非 ok）是唯一的技术失败判定入口，调用方不得
-    自行枚举 outcome 字符串。``to_diagnostic()`` 只输出允许记录的字段；
-    ``error`` 仅供调用方重新抛出（quick_judge 公共契约），不得进入日志或诊断记录。
-    """
-
-    text: str
-    outcome: str
-    provider_id: str
-    model: str
-    finish_reason: str | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    thinking_tokens: int | None = None
-    duration_ms: float = 0.0
-    error: Exception | None = None
-
-    @property
-    def is_technical(self) -> bool:
-        return self.outcome != "ok"
-
-    def to_diagnostic(self) -> dict:
-        return {
-            "outcome": self.outcome,
-            "provider": self.provider_id,
-            "model": self.model,
-            "finish_reason": self.finish_reason,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "thinking_tokens": self.thinking_tokens,
-            "duration_ms": round(self.duration_ms, 2),
-        }
-
 
 
 class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
@@ -344,77 +309,18 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         不走群配置、不注入记忆、不启用工具，只发单条 system+user。
         优先使用 [triggers.quick_judge] 配置的 provider/model。
         """
-        result = await self.quick_judge_detailed(prompt, max_tokens)
-        if result.outcome == "provider_error" and result.error is not None:
-            # 保持既有公共契约：provider 异常继续上抛（调用方 fail-closed 自行处理）
-            raise result.error
-        return result.text
+        # 薄委托：通道本体在 quickquip.llm.quick_judge。显式传本模块级
+        # build_provider_client，保持既有 patch 点有效，且不向通道传递 self。
+        return await run_quick_judge(
+            self.config, prompt, max_tokens, client_builder=build_provider_client
+        )
 
     async def quick_judge_detailed(self, prompt: str, max_tokens: int = 64) -> QuickJudgeResult:
         """``quick_judge`` 的结构化内部通道：按结果类别返回诊断字段，
         不抛 provider 异常。诊断只含 provider/model/类别/finish reason/
         token/耗时，禁止携带 prompt、模型原始响应、凭据或 endpoint。"""
-        qj = self.config.quick_judge
-        provider_id = qj.provider_id if qj.provider_id else self.config.runtime.default_provider
-        if not provider_id or provider_id not in self.config.providers:
-            provider_id = next(iter(self.config.providers), None)
-        if not provider_id:
-            return QuickJudgeResult(
-                text='{"trigger": false}',
-                outcome="no_provider",
-                provider_id="",
-                model="",
-            )
-
-        provider = self.config.providers[provider_id]
-        judge_provider = replace(provider, stream_enabled=False)
-
-        model = qj.model if qj.model else judge_provider.default_model
-
-        request = LLMRequest(
-            model=model,
-            system_prompt="你是一个仅输出 JSON 的判定器。",
-            messages=[
-                LLMConversationMessage(role="user", content=prompt),
-            ],
-            temperature=0.0,
-            max_output_tokens=max_tokens,
-            thinking_budget=None,
-            tools=[],
-            allow_tool_calls=False,
-            tool_choice="none",
-        )
-        client = build_provider_client(judge_provider)
-        started = monotonic()
-        try:
-            response = await client.complete(request)
-        except Exception as exc:
-            return QuickJudgeResult(
-                text="",
-                outcome="provider_error",
-                provider_id=provider_id,
-                model=model,
-                duration_ms=(monotonic() - started) * 1000,
-                error=exc,
-            )
-        text = strip_leading_reasoning_content(response.text or "")
-        finish_reason = (response.finish_reason or "").strip()
-        outcome = "ok"
-        if finish_reason.lower() in {"length", "max_tokens"}:
-            # 截断优先于空正文判定：reasoning 耗尽预算时可见正文为空但根因是 length
-            outcome = "length"
-        elif not text:
-            outcome = "empty"
-        return QuickJudgeResult(
-            text=text,
-            outcome=outcome,
-            provider_id=provider_id,
-            model=model,
-            finish_reason=finish_reason or None,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            thinking_tokens=response.thinking_tokens,
-            duration_ms=(monotonic() - started) * 1000,
+        return await run_quick_judge_detailed(
+            self.config, prompt, max_tokens, client_builder=build_provider_client
         )
 
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
