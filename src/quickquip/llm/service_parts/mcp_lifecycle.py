@@ -10,8 +10,10 @@ MRO contract: McpLifecycleMixin reads only host-owned public attributes —
 in ``LLMService.__init__``) — plus its own ``self._mcp_*`` state, initialised
 by ``_init_mcp_lifecycle()`` (mirroring the ``_init_auto_memory()`` precedent).
 It never reaches into another mixin's private state; other mixins and the host
-must go through the public methods (``ensure_mcp_ready`` / ``startup`` /
-``shutdown`` / ``reload_mcp`` / ``start_mcp_background``) instead of touching
+must go through the public interface (``ensure_mcp_ready`` / ``startup`` /
+``shutdown`` / ``reload_mcp`` / ``start_mcp_background`` for lifecycle actions,
+``mcp_tool_names`` / ``is_mcp_dirty`` / ``is_mcp_initializing`` for read-only
+state, ``mark_mcp_dirty`` for invalidation) instead of touching
 ``self._mcp_*``.
 """
 from __future__ import annotations
@@ -30,6 +32,27 @@ class McpLifecycleMixin:
         self._mcp_dirty = True
         self._mcp_lock = asyncio.Lock()
         self._mcp_startup_task: asyncio.Task[None] | None = None
+
+    # ── public narrow interface over ``self._mcp_*`` ─────────────────
+    # Tests pin the private names (they write ``svc._mcp_dirty`` /
+    # ``host._mcp_tool_names`` directly), so the private attributes stay;
+    # these accessors read them live.
+
+    @property
+    def mcp_tool_names(self) -> frozenset[str]:
+        """Read-only view of the MCP tool aliases currently in the registry."""
+        return frozenset(self._mcp_tool_names)
+
+    def is_mcp_dirty(self) -> bool:
+        return self._mcp_dirty
+
+    def mark_mcp_dirty(self) -> None:
+        self._mcp_dirty = True
+
+    def is_mcp_initializing(self) -> bool:
+        # Delegates through ``self`` so instance-level monkeypatching of
+        # ``_is_mcp_initializing`` (pinned by tests) keeps working.
+        return self._is_mcp_initializing()
 
     def _clear_mcp_tools(self) -> None:
         for name in self._mcp_tool_names:

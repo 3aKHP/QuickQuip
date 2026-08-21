@@ -15,6 +15,7 @@ from quickquip.llm.service_parts.constants import (
     TOOL_LIST_NAME,
     TOOL_SEARCH_NAME,
 )
+from quickquip.llm.service_parts.mcp_lifecycle import McpLifecycleMixin
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 from quickquip.search.web_search import SearXNGSearchClient, format_search_response
 
@@ -26,14 +27,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ToolMixin:
+class ToolMixin(McpLifecycleMixin):
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
     # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
     # self._model_label (also ScopeMixin); _register_builtin_tools additionally
     # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin), and
-    # reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready
-    # (public interface of McpLifecycleMixin). ScopeMixin, McpLifecycleMixin and
-    # DrawSvgToolMixin must precede ToolMixin in the LLMService base list.
+    # reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready.
+    # MCP tool names are read via the public ``mcp_tool_names`` accessor —
+    # ToolMixin inherits McpLifecycleMixin (which owns the ``_mcp_*`` state)
+    # so that narrow interface is available on any host, minimal fakes included.
+    # ScopeMixin and DrawSvgToolMixin must precede ToolMixin in the LLMService
+    # base list.
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
@@ -234,11 +238,11 @@ class ToolMixin:
     def _get_enabled_tool_names(self, chat_type: str = "group") -> list[str]:
         configured = self.config.tools.enabled
         if not configured:
-            names = [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names)]
+            names = [*DEFAULT_ENABLED_TOOLS, *sorted(self.mcp_tool_names)]
         elif self.config.tools.enabled_mode == "replace":
             names = list(configured)
         else:  # append：默认白名单 + MCP 工具之上追加，opt-in 工具的启用路径
-            names = [*DEFAULT_ENABLED_TOOLS, *sorted(self._mcp_tool_names), *configured]
+            names = [*DEFAULT_ENABLED_TOOLS, *sorted(self.mcp_tool_names), *configured]
         names = list(dict.fromkeys(names))
         if chat_type == "private":
             names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]

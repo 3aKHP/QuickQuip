@@ -165,7 +165,7 @@ _TURMFLUCH_SPEC = CommandSingleShotSpec(
 )
 
 
-class LLMService(ScopeMixin, McpLifecycleMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
@@ -268,7 +268,7 @@ class LLMService(ScopeMixin, McpLifecycleMixin, ToolMixin, DrawSvgToolMixin, Hea
         self.identities = IdentityIndex.from_file(self.identity_path)
         self._group_vocabs.clear()
         self._group_identities.clear()
-        self._mcp_dirty = True
+        self.mark_mcp_dirty()
         return self.config
 
     def reload_personas(self) -> tuple[int, str | None]:
