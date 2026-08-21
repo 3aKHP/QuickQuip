@@ -81,14 +81,14 @@ class HealthMixin:
             return "\n".join(lines)
 
         lines.append("总开关：ON")
-        if self._is_mcp_initializing():
+        if self.is_mcp_initializing():
             lines.append("运行态：初始化中")
         shared = self._get_shared_mcp_health()
-        if shared is not None and self._mcp_dirty:
+        if shared is not None and self.is_mcp_dirty():
             summary, _tool_count = shared
             lines.append(f"运行态：{summary}")
             return "\n".join(lines)
-        if self._mcp_dirty and not self._get_mcp_statuses():
+        if self.is_mcp_dirty() and not self._get_mcp_statuses():
             lines.append("运行态：待初始化")
             return "\n".join(lines)
 
@@ -99,7 +99,7 @@ class HealthMixin:
 
         connected = sum(1 for item in statuses if item.connected)
         lines.append(f"连接数：{connected}/{len(statuses)}")
-        lines.append(f"工具数：{len(self._mcp_tool_names)}")
+        lines.append(f"工具数：{len(self.mcp_tool_names)}")
         for status in statuses:
             state = "ON" if status.connected else ("OFF" if not status.enabled else "ERROR")
             era_tag = format_mcp_era_tag(status.negotiation, status.era)
@@ -124,18 +124,18 @@ class HealthMixin:
     def _summarize_mcp_status(self) -> str:
         if not self.config.mcp.enabled:
             return "OFF"
-        if self._is_mcp_initializing():
+        if self.is_mcp_initializing():
             return "初始化中"
         statuses = self._get_mcp_statuses()
         shared = self._get_shared_mcp_health()
-        if shared is not None and self._mcp_dirty:
+        if shared is not None and self.is_mcp_dirty():
             return shared[0]
-        if self._mcp_dirty and not statuses:
+        if self.is_mcp_dirty() and not statuses:
             return "待初始化"
         if not statuses:
             return "ON (0/0)"
         connected = sum(1 for item in statuses if item.connected)
-        return f"ON ({connected}/{len(statuses)}，{len(self._mcp_tool_names)} tools)"
+        return f"ON ({connected}/{len(statuses)}，{len(self.mcp_tool_names)} tools)"
 
     def list_providers(self) -> list[ProviderConfig]:
         return list(self.config.providers.values())
@@ -228,7 +228,7 @@ class HealthMixin:
             tool_names=self._get_enabled_tool_names(chat_type=chat_type),
             mcp_status_summary=self._summarize_mcp_status(),
             mcp_enabled=self.config.mcp.enabled,
-            mcp_tool_count=(self._get_shared_mcp_health() or ("", len(self._mcp_tool_names)))[1],
+            mcp_tool_count=(self._get_shared_mcp_health() or ("", len(self.mcp_tool_names)))[1],
             recent_buffer_bound=self.recent_message_buffer is not None,
             stats_bound=self.stats_tracker is not None,
             rule_switch_bound=self.rule_switch is not None,

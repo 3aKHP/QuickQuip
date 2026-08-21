@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
@@ -44,7 +45,8 @@ from quickquip.chat.awakening import (
     _llm_judge,
     _parse_judge_text,
     load_awakening_config,
-    run_boredom_check,
+    confirm_boredom_sent,
+    iter_boredom_send_plans,
     select_passive_trigger_image_urls,
 )
 
@@ -1257,7 +1259,32 @@ class TestCheckAwakeningTriggers:
             aw._config = old_cfg
 
 
-class TestRunBoredomCheck:
+logger = logging.getLogger(__name__)
+
+
+async def _drive_boredom_send(
+    bot, groups, rule_switch, svc, *, rate_limiter=None, stats_tracker=None, build_reply_message=None
+):
+    """测试本地的最小发送驱动，镜像 adapter 的 ``_wrapped_boredom_check`` 循环：
+    chat 层只产出待发送计划；传输（``int(gid)`` 转换与消息拼装）归发送方，
+    成功后 ``confirm_boredom_sent`` 确认；send 异常按 adapter 语义记 warning 后吞掉继续。
+    """
+    async for plan in iter_boredom_send_plans(groups, rule_switch, svc, rate_limiter):
+        try:
+            await bot.send_group_msg(
+                group_id=int(plan.group_id),
+                message=(
+                    build_reply_message(plan.reply_result)
+                    if build_reply_message is not None
+                    else plan.reply_result["reply"]
+                ),
+            )
+            confirm_boredom_sent(plan, stats_tracker)
+        except Exception:
+            logger.warning("awakening_boredom: failed for group %s", plan.group_id, exc_info=True)
+
+
+class TestBoredomSendFlow:
     def test_skips_when_group_llm_disabled(self):
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
@@ -1285,7 +1312,7 @@ class TestRunBoredomCheck:
         aw._state.record_message("123", "u1")
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
         finally:
             aw._config = old_cfg
             aw._state = old_state
@@ -1322,7 +1349,7 @@ class TestRunBoredomCheck:
         aw._state.record_message("123", "u1")
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
         finally:
             aw._config = old_cfg
             aw._state = old_state
@@ -1331,8 +1358,8 @@ class TestRunBoredomCheck:
         bot.send_group_msg.assert_awaited_once_with(group_id=123, message="冒个泡")
         stats_tracker.record_trigger.assert_called_once_with("123", "awakening_boredom")
 
-    def test_sends_with_images_via_injected_reply_builder(self):
-        """适配层注入 build_reply_message 时，带图回复经拼装器发送（不丢图）。"""
+    def test_sends_with_images_via_reply_builder(self):
+        """发送方拼装回复（镜像适配层注入的 build_llm_reply_message）时，带图回复不丢图。"""
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
         groups = MagicMock()
@@ -1366,7 +1393,7 @@ class TestRunBoredomCheck:
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(
-                run_boredom_check(bot, groups, rule_switch, svc, build_reply_message=_build_reply)
+                _drive_boredom_send(bot, groups, rule_switch, svc, build_reply_message=_build_reply)
             )
         finally:
             aw._config = old_cfg
@@ -1377,13 +1404,15 @@ class TestRunBoredomCheck:
         )
 
 
-class TestRunBoredomCheckFailures:
-    """run_boredom_check 拒绝与异常路径的 characterization 测试（钉住现状，供 v1.12.1 重构对照）。
+class TestBoredomSendFlowFailures:
+    """无聊巡检「计划产出 + 发送确认」拒绝与异常路径的 characterization 测试
+    （钉住现状，供 v1.12.1 重构对照）。
 
     钉住的现状要点：
-    - 冷却标记 mark_boredom_triggered 在 send_group_msg 成功之后才执行，
+    - 冷却标记 mark_boredom_triggered 在发送成功确认（confirm_boredom_sent）时才执行，
       故 generate_reply / send 任一抛异常都不会标冷却，也不会写统计。
-    - 单群异常被 try/except 吞掉（logger.warning），循环继续处理后续群。
+    - generate_reply 异常在 chat 层（iter_boredom_send_plans 内）记 warning 后跳过；
+      send 异常由发送方（adapter / 本测试驱动）记 warning 吞掉，循环继续处理后续群。
     """
 
     @staticmethod
@@ -1433,7 +1462,7 @@ class TestRunBoredomCheckFailures:
         )
         aw._state = state
         try:
-            asyncio.run(run_boredom_check(bot, groups, rule_switch, svc, **kwargs))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, **kwargs))
         finally:
             aw._config = old_cfg
             aw._state = old_state
@@ -1491,7 +1520,6 @@ class TestRunBoredomCheckFailures:
         )
         stats_tracker = MagicMock()
 
-        import logging
         with caplog.at_level(logging.WARNING, logger="quickquip.chat.awakening"):
             self._run(bot, groups, rule_switch, svc, st, stats_tracker=stats_tracker)
 

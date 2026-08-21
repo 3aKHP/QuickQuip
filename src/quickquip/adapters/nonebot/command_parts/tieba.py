@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from quickquip.adapters.nonebot.command_parts.common import _is_admin, _is_private_chat, _parse_tieba_command_args, _strip_command_name
-from quickquip.app.message_pipeline import STATS_PATH, rate_limiter, rule_switch, stats_tracker
+from quickquip.app.message_pipeline import STATS_PATH, rate_limiter, rule_switch, stats_tracker, tieba_service
 from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
-from quickquip.tieba.service import tieba_service
+from quickquip.tieba.formatting import build_thread_preview, format_sources, format_status
+from quickquip.tieba.store import TiebaForumState
+
+
+def _render_forum_report(
+    forum_keyword: str | None,
+    render: Callable[[tuple[str, ...], list[tuple[str, TiebaForumState | None]]], str],
+) -> str:
+    """解析来源贴吧列表、读取各吧状态，交给 render 投影文案；异常分类由调用方负责。"""
+    forums = tieba_service.resolve_forum_keywords(forum_keyword, require_enabled=False)
+    states = [(forum, tieba_service.get_forum_state(forum)) for forum in forums]
+    return render(forums, states)
 
 
 def register_tieba_commands(on_command, Message, MessageSegment) -> None:
@@ -37,8 +50,8 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
             tieba_service.mark_sent(thread)
             stats_tracker.record_trigger(event.group_id, TIEBA_RULE_NAME)
             if text_only:
-                await tieba_cmd.finish(tieba_service.build_thread_preview(thread))
-            message = Message([MessageSegment.text(tieba_service.build_thread_preview(thread))])
+                await tieba_cmd.finish(build_thread_preview(thread))
+            message = Message([MessageSegment.text(build_thread_preview(thread))])
             image_url = thread.cover_image_url or (thread.image_urls[0] if thread.image_urls else "")
             if image_url:
                 message.append(MessageSegment.image(image_url))
@@ -46,15 +59,26 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
 
         if action == "status":
             try:
-                await tieba_cmd.finish(tieba_service.format_status(forum_keyword=forum_keyword))
+                report = _render_forum_report(forum_keyword, lambda forums, states: format_status(
+                    tieba_service.config,
+                    states,
+                    total_cached=tieba_service.count_threads(forums),
+                    playwright_ready=tieba_service.playwright_ready(),
+                ))
             except TiebaServiceError as exc:
                 await tieba_cmd.finish(f"贴吧状态读取失败：{exc}")
+            await tieba_cmd.finish(report)
 
         if action == "source":
             try:
-                await tieba_cmd.finish(tieba_service.format_sources(forum_keyword=forum_keyword))
+                report = _render_forum_report(forum_keyword, lambda _forums, states: format_sources(
+                    tieba_service.config,
+                    states,
+                    show_usage_hint=forum_keyword is None,
+                ))
             except TiebaServiceError as exc:
                 await tieba_cmd.finish(f"贴吧来源读取失败：{exc}")
+            await tieba_cmd.finish(report)
 
         if action == "refresh":
             if not _is_admin(event):
@@ -106,7 +130,7 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
             await tieba_peek_cmd.finish(f"现爬失败：{exc}")
         if thread is None:
             await tieba_peek_cmd.finish(f"{forum_keyword}吧未找到有效帖子")
-        message = Message([MessageSegment.text(tieba_service.build_thread_preview(thread))])
+        message = Message([MessageSegment.text(build_thread_preview(thread))])
         image_url = thread.cover_image_url or (thread.image_urls[0] if thread.image_urls else "")
         if image_url:
             message.append(MessageSegment.image(image_url))

@@ -74,6 +74,7 @@ from quickquip.common.paths import (
 )
 from quickquip.common.rate_limit import KeyedRateLimiter
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
+from quickquip.tieba.service import TiebaService
 
 
 class _LazyStoreProxy:
@@ -138,6 +139,9 @@ game_economy = GameEconomyStore(config=games_config.economy)
 game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))
 game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))
 niuniu_store = NiuNiuStore(config=games_config.niuniu)
+
+# 贴吧服务：构造不做磁盘 IO，帖子池由 startup()/web 装配显式 load()
+tieba_service = TiebaService()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)

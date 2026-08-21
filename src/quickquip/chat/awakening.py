@@ -6,7 +6,7 @@ import random
 import re
 import tomllib
 from collections import deque
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from time import monotonic
@@ -15,7 +15,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
-from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
@@ -1077,6 +1076,36 @@ async def check_awakening_triggers(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class BoredomSendPlan:
+    """一条待发送的无聊唤醒计划：策略与 LLM 生成已完成，只欠传输。
+
+    冷却标记、bot 消息缓存与统计以发送成功为前提，由发送方在传输成功后
+    调用 ``confirm_boredom_sent`` 确认；发送失败不得确认。
+    """
+
+    group_id: str
+    trigger: AwakeningTriggerResult
+    reply_result: dict
+
+    def trace_kwargs(self) -> dict[str, Any]:
+        """``bot_action_trace`` 的逐字段参数（字段集与旧内联实现一致）。"""
+        return {
+            "trigger_kind": "awakening",
+            "reason_code": _RULE_BOREDOM,
+            "reason_detail": self.trigger.trigger_reason,
+            "rule_name": _RULE_BOREDOM,
+            "chat_type": "group",
+            "group_id": self.group_id,
+            "user_id": "boredom_timer",
+            "reply_preview": self.reply_result["reply"],
+            "llm_used": bool(self.reply_result.get("llm_used")),
+            "provider_id": str(self.reply_result.get("provider_id", "")),
+            "model": str(self.reply_result.get("model", "")),
+            "source": "awakening.boredom_timer",
+        }
+
+
 def _is_group_llm_enabled(svc: Any, group_id: int | str) -> bool:
     config = getattr(svc, "config", None)
     if getattr(config, "load_error", None):
@@ -1089,17 +1118,17 @@ def _is_group_llm_enabled(svc: Any, group_id: int | str) -> bool:
     return bool(getattr(settings, "enabled", False))
 
 
-async def run_boredom_check(
-    bot: Any,
+async def iter_boredom_send_plans(
     boredom_enabled_groups: Any,
     rule_switch: Any,
     svc: Any,
     rate_limiter: Any | None = None,
-    stats_tracker: Any | None = None,
-    build_reply_message: Any | None = None,
-) -> None:
-    """无聊唤醒巡检。``build_reply_message`` 由适配层注入（把 generate_reply
-    结果转为可发送内容，带图时拼 Message）；缺省只发纯文本。"""
+) -> AsyncIterator[BoredomSendPlan]:
+    """无聊唤醒巡检的策略与生成阶段：逐群产出待发送计划。
+
+    纯领域流程，不触碰传输（``int(gid)`` 协议转换与消息拼装归适配层）。
+    单群 ``generate_reply`` 异常记 warning 后跳过，循环继续后续群。
+    """
     cfg = get_config()
     st = get_state()
     st.prune_stale()
@@ -1129,32 +1158,20 @@ async def run_boredom_check(
                 store_user_message=False,
                 message_id=None,
             )
-            with bot_action_trace(
-                trigger_kind="awakening",
-                reason_code=_RULE_BOREDOM,
-                reason_detail=result.trigger_reason,
-                rule_name=_RULE_BOREDOM,
-                chat_type="group",
-                group_id=gid,
-                user_id="boredom_timer",
-                reply_preview=reply_result["reply"],
-                llm_used=bool(reply_result.get("llm_used")),
-                provider_id=str(reply_result.get("provider_id", "")),
-                model=str(reply_result.get("model", "")),
-                source="awakening.boredom_timer",
-            ):
-                await bot.send_group_msg(
-                    group_id=int(gid),
-                    message=(
-                        build_reply_message(reply_result)
-                        if build_reply_message is not None
-                        else reply_result["reply"]
-                    ),
-                )
-            st.mark_boredom_triggered(gid)
-            st.bot_messages.add(gid, reply_result["reply"])
-            if stats_tracker is not None:
-                stats_tracker.record_trigger(gid, _RULE_BOREDOM)
-            logger.info("awakening_boredom: sent to group %s (%s)", gid, result.trigger_reason)
         except Exception:
             logger.warning("awakening_boredom: failed for group %s", gid, exc_info=True)
+            continue
+        yield BoredomSendPlan(group_id=str(gid), trigger=result, reply_result=reply_result)
+
+
+def confirm_boredom_sent(plan: BoredomSendPlan, stats_tracker: Any | None = None) -> None:
+    """发送成功后的状态确认：标冷却、缓存 bot 消息、记触发统计。
+
+    仅在传输成功后调用；发送失败时调用会错误地进入冷却。
+    """
+    st = get_state()
+    st.mark_boredom_triggered(plan.group_id)
+    st.bot_messages.add(plan.group_id, plan.reply_result["reply"])
+    if stats_tracker is not None:
+        stats_tracker.record_trigger(plan.group_id, _RULE_BOREDOM)
+    logger.info("awakening_boredom: sent to group %s (%s)", plan.group_id, plan.trigger.trigger_reason)

@@ -3,7 +3,7 @@ service should thread each result back into the next request's context.
 """
 from __future__ import annotations
 
-import quickquip.llm.service as llm_runtime_module
+import quickquip.llm.service_parts.tools as llm_tools_module
 from plugins.web_search import SearchResponse, SearchResult
 
 from tests.fixtures.provider_stubs import StubSearchOnlyProviderClient
@@ -34,7 +34,7 @@ def _fake_searxng_client(*args, **kwargs):
 async def test_search_web_tool_loop(llm_service, monkeypatch, patch_provider_builder):
     stub = StubSearchOnlyProviderClient()
     patch_provider_builder(lambda provider: stub)
-    monkeypatch.setattr(llm_runtime_module, "SearXNGSearchClient", _fake_searxng_client)
+    monkeypatch.setattr(llm_tools_module, "SearXNGSearchClient", _fake_searxng_client)
     monkeypatch.setenv("SEARXNG_BASE_URL", "http://127.0.0.1:8888")
 
     result = await llm_service.generate_reply(

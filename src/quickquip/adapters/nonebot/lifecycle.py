@@ -13,6 +13,7 @@ from quickquip.app.message_pipeline import (
     daily_briefing_enabled_groups,
     weekly_enabled_groups,
     monthly_enabled_groups,
+    tieba_service,
 )
 from quickquip.adapters.nonebot.awakening_plugin import (
     boredom_enabled_groups,
@@ -21,7 +22,6 @@ from quickquip.adapters.nonebot.awakening_plugin import (
 )
 from quickquip.adapters.nonebot.web_admin_actions import process_web_admin_actions
 from quickquip.common.paths import CONFIG_AWAKENING_TOML
-from quickquip.tieba.service import tieba_service
 
 logger = logging.getLogger(__name__)
 

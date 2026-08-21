@@ -5,8 +5,6 @@ import urllib.request
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
-from quickquip.tieba.service import tieba_service
-
 _ALLOWED_IMAGE_HOST_RE = re.compile(r"^https?://[^/]*\.baidu\.com/")
 _IMAGE_PROXY_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -41,10 +39,11 @@ def _preview(text: str) -> str:
 
 @router.get("/tieba/forums")
 def list_forums():
-    store = tieba_service.store
+    from quickquip.app.message_pipeline import tieba_service
+
     forums = []
-    for keyword in store.list_forum_keywords():
-        state = store.get_forum_state(keyword)
+    for keyword in tieba_service.list_forum_keywords():
+        state = tieba_service.get_forum_state(keyword)
         if state is None:
             continue
         forums.append({
@@ -68,12 +67,13 @@ def list_threads(
     offset: int = Query(default=0, ge=0, le=10000),
 ):
     _validate_forum(forum)
-    store = tieba_service.store
-    state = store.get_forum_state(forum)
+    from quickquip.app.message_pipeline import tieba_service
+
+    state = tieba_service.get_forum_state(forum)
     if state is None:
         return {"threads": [], "total": 0, "has_more": False}
 
-    threads = store.list_threads([forum])
+    threads = tieba_service.list_threads([forum])
     if keyword:
         kw = keyword.strip().lower()
         threads = [
@@ -109,7 +109,9 @@ def list_threads(
 def get_thread(forum: str, tid: str):
     _validate_forum(forum)
     _validate_tid(tid)
-    state = tieba_service.store.get_forum_state(forum)
+    from quickquip.app.message_pipeline import tieba_service
+
+    state = tieba_service.get_forum_state(forum)
     if state is None:
         raise HTTPException(status_code=404, detail="forum not found")
     thread = state.threads.get(tid)
@@ -139,6 +141,8 @@ def proxy_image(url: str = Query(..., max_length=512)):
 async def sync_tieba(forum: str | None = Query(default=None, max_length=32)):
     if forum is not None:
         _validate_forum(forum)
+
+    from quickquip.app.message_pipeline import tieba_service
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -173,6 +177,7 @@ async def sync_tieba(forum: str | None = Query(default=None, max_length=32)):
 @router.get("/tieba/peek")
 async def peek_tieba(forum: str = Query(..., max_length=32)):
     from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
+    from quickquip.app.message_pipeline import tieba_service
 
     _validate_forum(forum)
     try:

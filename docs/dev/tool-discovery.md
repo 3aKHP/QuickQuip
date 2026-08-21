@@ -22,8 +22,9 @@ QuickQuip 支持 OpenAI / Claude / Gemini 三类 provider，因此工具发现�
 |------|------|
 | `src/quickquip/llm/tools.py` | 定义 `ToolManifestEntry` |
 | `src/quickquip/llm/tool_registry.py` | 保存真实工具 spec/handler，生成 manifest，执行搜索 |
-| `src/quickquip/llm/service.py` | 注册 `tool_search` / `tool_list`，决定启用工具列表和常驻工具列表 |
-| `src/quickquip/llm/tool_loop.py` | 在工具调用循环中动态加载搜索命中或精确加载的工具 |
+| `src/quickquip/llm/service_parts/tools.py` | 注册 `tool_search` / `tool_list`，决定启用工具列表和常驻工具列表 |
+| `src/quickquip/llm/tool_discovery.py` | 持有单次循环的已加载工具集（`loaded_names`），实现 `tool_search` / `tool_list` 元工具 handler |
+| `src/quickquip/llm/tool_loop.py` | 工具调用循环本体，把命中或精确加载的工具交给发现状态并带进下一轮请求 |
 | `src/quickquip/llm/prompting.py` | discovery 模式下生成工具发现提示 |
 | `src/quickquip/llm/config.py` | 读取 `[tools]` 下的 discovery 配置 |
 
@@ -38,7 +39,7 @@ QuickQuip 支持 OpenAI / Claude / Gemini 三类 provider，因此工具发现�
 5. 启用后，首轮 `LLMRequest.tools` 只包含 `always_loaded`。
 6. 模型调用 `tool_search`，或用 `tool_list` 兜底查看工具目录。
 7. `ToolRegistry.search_manifest()` 按工具名、描述、参数名、分类和关键词打分。
-8. `run_tool_call_loop()` 把命中的工具名，或 `tool_list mode="load"` 指定的精确工具名，加入 `loaded_names`。
+8. `ToolDiscovery` 把命中的工具名，或 `tool_list mode="load"` 指定的精确工具名，加入 `loaded_names`。
 9. 下一轮 `LLMRequest.tools` 包含常驻工具和新加载工具。
 
 ---

@@ -108,7 +108,7 @@ QuickQuip 各文本链路共享的部署级词表。
 
 ## 接入点
 
-主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_loop.py` 和
+主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_result_pipeline.py` 和
 `src/quickquip/adapters/nonebot/command_parts/media.py`。
 
 | 接入点 | 位置 | 行为 |
