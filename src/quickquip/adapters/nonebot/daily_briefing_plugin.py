@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from time import time
 from zoneinfo import ZoneInfo
 
 try:
@@ -24,6 +23,12 @@ from quickquip.app.message_pipeline import (
 )
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.adapters.nonebot._scheduling import (
+    cron_to_hhmm,
+    mark_triggered,
+    on_cooldown,
+    parse_cron,
+)
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.chat.daily_briefing import (
@@ -39,34 +44,9 @@ logger = logging.getLogger(__name__)
 
 _LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
 _RULE_NAME = "daily_briefing"
-_MANUAL_COOLDOWN_SECONDS = 60
 _NEWS_PROVIDER = NullBriefingNewsProvider()
 _PERIOD_LABELS = {"morning": "早报", "noon": "午报", "evening": "晚报"}
 _last_manual_trigger: dict[str, float] = {}
-
-
-def _cron_to_hhmm(cron_expr: str) -> str:
-    parts = cron_expr.split()
-    if len(parts) != 5:
-        return cron_expr
-    minute_field, hour_field = parts[0], parts[1]
-    try:
-        return f"{int(hour_field):02d}:{int(minute_field):02d}"
-    except ValueError:
-        return f"{hour_field}:{minute_field}"
-
-
-def _parse_cron(cron_expr: str) -> dict[str, str]:
-    parts = cron_expr.split()
-    if len(parts) != 5:
-        return {"minute": "0", "hour": "8", "day": "*", "month": "*", "day_of_week": "*"}
-    return {
-        "minute": parts[0],
-        "hour": parts[1],
-        "day": parts[2],
-        "month": parts[3],
-        "day_of_week": parts[4],
-    }
 
 
 def _default_period_for_now(now: datetime) -> str:
@@ -78,12 +58,11 @@ def _default_period_for_now(now: datetime) -> str:
 
 
 def _on_cooldown(group_id: int | str) -> bool:
-    last = _last_manual_trigger.get(str(group_id))
-    return last is not None and time() - last < _MANUAL_COOLDOWN_SECONDS
+    return on_cooldown(_last_manual_trigger, group_id)
 
 
 def _mark_triggered(group_id: int | str) -> None:
-    _last_manual_trigger[str(group_id)] = time()
+    mark_triggered(_last_manual_trigger, group_id)
 
 
 def _is_group_enabled(group_id: int | str) -> bool:
@@ -269,7 +248,7 @@ def _register_scheduler_jobs() -> None:
             "cron",
             id=job_id,
             replace_existing=True,
-            **_parse_cron(getattr(cfg, f"{period}_cron")),
+            **parse_cron(getattr(cfg, f"{period}_cron"), fallback_hour="8"),
         )
     logger.info(
         "daily_briefing: jobs registered (morning=%s, noon=%s, evening=%s)",
@@ -309,9 +288,9 @@ def register_daily_briefing_commands(on_command) -> None:
             rule_switch.save(RULE_SWITCH_PATH)
             await briefing_cmd.finish(
                 "本群每日播报已开启。"
-                f" 早报 { _cron_to_hhmm(cfg.morning_cron) }，"
-                f" 午报 { _cron_to_hhmm(cfg.noon_cron) }，"
-                f" 晚报 { _cron_to_hhmm(cfg.evening_cron) }。"
+                f" 早报 { cron_to_hhmm(cfg.morning_cron) }，"
+                f" 午报 { cron_to_hhmm(cfg.noon_cron) }，"
+                f" 晚报 { cron_to_hhmm(cfg.evening_cron) }。"
             )
 
         if action in {"off", "关闭", "禁用"}:
@@ -328,9 +307,9 @@ def register_daily_briefing_commands(on_command) -> None:
                 "每日播报状态\n"
                 f"全局开关：{'ON' if cfg.enabled else 'OFF'}\n"
                 f"本群开关：{'已开启 ✓' if enabled else '已关闭'}\n"
-                f"早报：{_cron_to_hhmm(cfg.morning_cron)}\n"
-                f"午报：{_cron_to_hhmm(cfg.noon_cron)}\n"
-                f"晚报：{_cron_to_hhmm(cfg.evening_cron)}"
+                f"早报：{cron_to_hhmm(cfg.morning_cron)}\n"
+                f"午报：{cron_to_hhmm(cfg.noon_cron)}\n"
+                f"晚报：{cron_to_hhmm(cfg.evening_cron)}"
             )
 
         if action in {"now", "立即", "测试"}:
