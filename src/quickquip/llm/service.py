@@ -727,6 +727,59 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             is_non_vision=is_non_vision,
         )
 
+    def _load_scrubbed_history_and_participants(
+        self,
+        *,
+        chat_id: int | str,
+        chat_type: str,
+        scope_key: str,
+        settings: ResolvedGroupSettings,
+        sensitive: SensitiveFilter,
+        user_id: int | str,
+        sender_name: str,
+        recent_messages: list[dict[str, str]] | None,
+        quoted_sender_name: str,
+        quoted_user_id: str,
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        default_history_limit = self._default_history_limit(chat_type)
+        history = self.store.list_recent_conversation_messages(
+            scope_key,
+            min(
+                settings.history_limit if settings.history_limit is not None else default_history_limit,
+                self._max_stored_conversation_messages(chat_type),
+            ),
+        )
+        if sensitive.is_loaded and history:
+            # Re-scan history with the *current* word list — entries written
+            # under an older list may now contain blocked content. Scrubbing
+            # here keeps the next request's context clean without rewriting
+            # the on-disk store.
+            history_blocked = 0
+            for item in history:
+                for field_name in ("content", "raw_content"):
+                    original = item.get(field_name)
+                    if not original:
+                        continue
+                    scrubbed = sensitive.scrub(str(original), SCRUB_PLACEHOLDER)
+                    if scrubbed != original:
+                        item[field_name] = scrubbed
+                        history_blocked += 1
+            if history_blocked:
+                logger.info(
+                    "sensitive_filter[history] scrubbed scope=%s fields=%d",
+                    scope_key, history_blocked,
+                )
+        participants = self._collect_known_participants(
+            user_id=user_id,
+            sender_name=sender_name,
+            history=history,
+            recent_messages=recent_messages,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            group_id=str(chat_id),
+        )
+        return history, participants
+
     async def _generate_reply_for_scope(
         self,
         *,
@@ -863,42 +916,18 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         image_descriptions = image_outcome.image_descriptions
         is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
-        default_history_limit = self._default_history_limit(chat_type)
-        history = self.store.list_recent_conversation_messages(
-            scope_key,
-            min(
-                settings.history_limit if settings.history_limit is not None else default_history_limit,
-                self._max_stored_conversation_messages(chat_type),
-            ),
-        )
-        if sensitive.is_loaded and history:
-            # Re-scan history with the *current* word list — entries written
-            # under an older list may now contain blocked content. Scrubbing
-            # here keeps the next request's context clean without rewriting
-            # the on-disk store.
-            history_blocked = 0
-            for item in history:
-                for field_name in ("content", "raw_content"):
-                    original = item.get(field_name)
-                    if not original:
-                        continue
-                    scrubbed = sensitive.scrub(str(original), SCRUB_PLACEHOLDER)
-                    if scrubbed != original:
-                        item[field_name] = scrubbed
-                        history_blocked += 1
-            if history_blocked:
-                logger.info(
-                    "sensitive_filter[history] scrubbed scope=%s fields=%d",
-                    scope_key, history_blocked,
-                )
-        participants = self._collect_known_participants(
+        # ── history load + sensitive scrub + participants ────────────
+        history, participants = self._load_scrubbed_history_and_participants(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            scope_key=scope_key,
+            settings=settings,
+            sensitive=sensitive,
             user_id=user_id,
             sender_name=sender_name,
-            history=history,
             recent_messages=recent_messages,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
-            group_id=str(chat_id),
         )
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
