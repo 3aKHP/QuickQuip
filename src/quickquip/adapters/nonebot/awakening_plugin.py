@@ -26,12 +26,14 @@ from quickquip.chat.awakening import (
     AWAKENING_RULE_NAMES,
     AWAKENING_RULES,
     BoredomEnabledGroups,
+    confirm_boredom_sent,
     effective_boredom_scan_interval,
     get_config,
     get_state,
+    iter_boredom_send_plans,
     reload_config,
-    run_boredom_check,
 )
+from quickquip.common.bot_action_trace import bot_action_trace
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +72,22 @@ def register_boredom_scan_job(sched=None) -> int | None:
             def _build_reply(result: dict):
                 return build_llm_reply_message(result, Message, MessageSegment)
 
-            await run_boredom_check(
-                bot, boredom_enabled_groups, rule_switch, svc, rate_limiter, stats_tracker,
-                build_reply_message=_build_reply,
-            )
+            # 发送循环归适配层：chat 层只产出待发送计划，传输成功后
+            # 回调 confirm_boredom_sent 确认冷却/统计/缓存。
+            async for plan in iter_boredom_send_plans(
+                boredom_enabled_groups, rule_switch, svc, rate_limiter
+            ):
+                try:
+                    with bot_action_trace(**plan.trace_kwargs()):
+                        await bot.send_group_msg(
+                            group_id=int(plan.group_id),
+                            message=_build_reply(plan.reply_result),
+                        )
+                    confirm_boredom_sent(plan, stats_tracker)
+                except Exception:
+                    logger.warning(
+                        "awakening_boredom: failed for group %s", plan.group_id, exc_info=True
+                    )
             try:
                 record_job_result(job_id, True)
             except Exception:
