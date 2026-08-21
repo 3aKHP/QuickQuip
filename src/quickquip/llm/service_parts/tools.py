@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
+from quickquip.llm.provider import build_provider_client
 from quickquip.llm.service_parts.constants import (
     DEFAULT_ALWAYS_LOADED_TOOLS,
     DEFAULT_ENABLED_TOOLS,
@@ -16,6 +16,7 @@ from quickquip.llm.service_parts.constants import (
     TOOL_SEARCH_NAME,
 )
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
+from quickquip.search.web_search import SearXNGSearchClient, format_search_response
 
 if TYPE_CHECKING:
     from quickquip.chat.message_stats import GroupStatsTracker
@@ -29,8 +30,10 @@ class ToolMixin:
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
     # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
     # self._model_label (also ScopeMixin); _register_builtin_tools additionally
-    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin). ScopeMixin
-    # and DrawSvgToolMixin must precede ToolMixin in the LLMService base list.
+    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin), and
+    # reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready
+    # (public interface of McpLifecycleMixin). ScopeMixin, McpLifecycleMixin and
+    # DrawSvgToolMixin must precede ToolMixin in the LLMService base list.
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
@@ -301,8 +304,6 @@ class ToolMixin:
         self.image_preprocessor = preprocessor
 
     def rebuild_image_preprocessor(self) -> None:
-        from quickquip.llm import service as service_module
-
         img_cfg = self.config.image_preprocessing
         if not img_cfg.enabled or not img_cfg.provider_id:
             self.image_preprocessor = None
@@ -324,7 +325,7 @@ class ToolMixin:
             self.image_preprocessor = None
             return
 
-        vis_client = service_module.build_provider_client(replace(vis_provider_cfg, stream_enabled=False))
+        vis_client = build_provider_client(replace(vis_provider_cfg, stream_enabled=False))
         self.image_preprocessor = VisionImagePreprocessor(
             provider_client=vis_client,
             model=vision_model,
@@ -333,72 +334,6 @@ class ToolMixin:
             prompt=img_cfg.prompt,
         )
 
-    def _clear_mcp_tools(self) -> None:
-        for name in self._mcp_tool_names:
-            self.tool_registry.unregister(name)
-        self._mcp_tool_names.clear()
-
-    def _register_mcp_tools(self) -> None:
-        self._clear_mcp_tools()
-        for binding in self.mcp_manager.bindings.values():
-            async def _handler(arguments, context, *, alias=binding.alias):
-                return await self.mcp_manager.execute(alias, arguments, context)
-
-            self.tool_registry.register(
-                LLMToolSpec(
-                    name=binding.alias,
-                    description=f"[MCP/{binding.server_id}] {binding.description}",
-                    input_schema=binding.input_schema,
-                ),
-                _handler,
-                source=f"mcp:{binding.server_id}",
-                category=f"mcp:{binding.server_id}",
-                keywords=[binding.server_id, binding.tool_name, "mcp"],
-            )
-            self._mcp_tool_names.add(binding.alias)
-
-    async def ensure_mcp_ready(self, force: bool = False, force_pull: bool = False) -> None:
-        async with self._mcp_lock:
-            if not force and not self._mcp_dirty:
-                return
-            await self.mcp_manager.sync(self.config.mcp, force_pull=force_pull)
-            self._register_mcp_tools()
-            self._mcp_dirty = False
-
-    def _is_mcp_initializing(self) -> bool:
-        return self._mcp_startup_task is not None and not self._mcp_startup_task.done()
-
-    async def _run_mcp_startup(self, force: bool, force_pull: bool = False) -> None:
-        try:
-            await self.ensure_mcp_ready(force=force, force_pull=force_pull)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("MCP background startup failed")
-        finally:
-            self._mcp_startup_task = None
-
-    def start_mcp_background(self, force: bool = False, force_pull: bool = False) -> None:
-        if self._is_mcp_initializing():
-            return
-        self._mcp_startup_task = asyncio.create_task(
-            self._run_mcp_startup(force=force, force_pull=force_pull),
-            name="quickquip-mcp-startup",
-        )
-
-    async def startup(self, *, background: bool = False) -> None:
-        if background:
-            self.start_mcp_background(force=True)
-            return
-        await self.ensure_mcp_ready(force=True)
-
-    async def shutdown(self) -> None:
-        if self._mcp_startup_task is not None:
-            self._mcp_startup_task.cancel()
-            await asyncio.gather(self._mcp_startup_task, return_exceptions=True)
-            self._mcp_startup_task = None
-        await self.mcp_manager.aclose()
-
     async def reload_runtime(self, *, background: bool = False) -> LLMConfig:
         self.reload_config()
         if background:
@@ -406,14 +341,6 @@ class ToolMixin:
             return self.config
         await self.ensure_mcp_ready(force=True)
         return self.config
-
-    async def reload_mcp(self, *, background: bool = False) -> None:
-        """重连所有 MCP 服务器，对 docker transport 强制 pull 最新镜像。"""
-        self._mcp_dirty = True
-        if background:
-            self.start_mcp_background(force=True, force_pull=True)
-            return
-        await self.ensure_mcp_ready(force=True, force_pull=True)
 
     async def _tool_get_identity(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         query = str(arguments.get("query", "")).strip()
@@ -554,12 +481,10 @@ class ToolMixin:
 
     async def _tool_search_web(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         _ = context
-        from quickquip.llm import service as service_module
-
         query = str(arguments.get("query", "")).strip()
         topic = str(arguments.get("topic", "general")).strip() or "general"
-        response = await service_module.SearXNGSearchClient().search(query, topic=topic, max_results=5)
-        return service_module.format_search_response(response, include_answer=True, max_results=3)
+        response = await SearXNGSearchClient().search(query, topic=topic, max_results=5)
+        return format_search_response(response, include_answer=True, max_results=3)
 
     async def _tool_get_group_stats(
         self,

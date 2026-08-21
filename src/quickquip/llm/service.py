@@ -77,6 +77,7 @@ from quickquip.llm.service_parts import (
     AutoMemoryMixin,
     DrawSvgToolMixin,
     HealthMixin,
+    McpLifecycleMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
@@ -164,7 +165,7 @@ _TURMFLUCH_SPEC = CommandSingleShotSpec(
 )
 
 
-class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(ScopeMixin, McpLifecycleMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
@@ -182,10 +183,7 @@ class LLMService(ScopeMixin, ToolMixin, DrawSvgToolMixin, HealthMixin, StateMixi
         self.stats_tracker: "GroupStatsTracker | None" = None
         self.rule_switch: "GroupRuleSwitch | None" = None
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
-        self._mcp_tool_names: set[str] = set()
-        self._mcp_dirty = True
-        self._mcp_lock = asyncio.Lock()
-        self._mcp_startup_task: asyncio.Task[None] | None = None
+        self._init_mcp_lifecycle()
         self._session_presets: dict[str, str] = {}
         self._init_auto_memory()
         self._init_error: str | None = None

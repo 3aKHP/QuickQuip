@@ -442,7 +442,7 @@ def test_reload_config_rebuilds_image_preprocessor(llm_service, monkeypatch):
         built.append(provider)
         return _StubClient()
 
-    monkeypatch.setattr("quickquip.llm.service.build_provider_client", _build)
+    monkeypatch.setattr("quickquip.llm.service_parts.tools.build_provider_client", _build)
     llm_service.config_path.write_text(
         MIN_LLM_CONFIG_TOML
         + """
