@@ -166,7 +166,7 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，默认监听 
 - 每日总结 / 每日播报群组管理
 - `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 在线编辑（保存前校验 TOML 语法）
 - 敏感词过滤器只读状态查看；`config/sensitive_words.toml` 只通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑
-- 记忆、对话、人格、资料、唤醒、贴吧、词云、语录、定时任务、审计、金币经济和牛牛面板
+- 记忆、对话、人格、资料、唤醒、LLM 用量、贴吧、词云、语录、定时任务、审计、金币经济和牛牛面板
 - 实时日志 / LLM Trace / 日志归档面板（日志读取 `../data/logs`，LLM HTTP 调用索引和正文读取 `../data/llm_trace.db`）
 
 管理界面同时有两层门：
