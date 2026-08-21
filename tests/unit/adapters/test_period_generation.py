@@ -184,9 +184,279 @@ def test_period_cooldown_independent_of_daily():
     """回归 Bot MEDIUM：周报/月报冷却字典独立于每日总结，同群两类"立即生成"不互相阻挡。"""
     plugin._last_manual_trigger.clear()
     plugin._last_period_manual_trigger.clear()
-    plugin._mark_triggered("10001")
-    assert plugin._on_cooldown("10001")
-    assert not plugin._on_period_cooldown("10001")
-    plugin._mark_period_triggered("10002")
-    assert plugin._on_period_cooldown("10002")
-    assert not plugin._on_cooldown("10002")
+    try:
+        plugin._mark_triggered("10001")
+        assert plugin._on_cooldown("10001")
+        assert not plugin._on_period_cooldown("10001")
+        plugin._mark_period_triggered("10002")
+        assert plugin._on_period_cooldown("10002")
+        assert not plugin._on_cooldown("10002")
+    finally:
+        plugin._last_manual_trigger.clear()
+        plugin._last_period_manual_trigger.clear()
+
+
+# ── characterization: v1.12.1 生成编排下沉前的行为钉住 ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_skips_below_min_messages(monkeypatch):
+    """钉住：窗口消息数 < min_messages 时返回 None 且不调用 LLM。"""
+    counts = _patch_period_deps(monkeypatch, msg_count=3)  # min_messages=5
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+    )
+
+    assert result is None
+    assert counts.generate == 0
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_proceeds_at_exact_min_messages(monkeypatch):
+    """钉住：消息数恰好等于 min_messages 时照常生成（边界含等号）。"""
+    counts = _patch_period_deps(monkeypatch, msg_count=5)  # min_messages=5
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+    )
+
+    assert result == ("周期报告正文", "model-1")
+    assert counts.generate == 1
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_returns_none_when_sample_empty(monkeypatch):
+    """钉住：分天采样结果为空时返回 None 且不调用 LLM。"""
+    counts = _patch_period_deps(monkeypatch, msg_count=50)
+    monkeypatch.setattr(plugin, "sample_messages_by_day", lambda msgs, per_day: [])
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+    )
+
+    assert result is None
+    assert counts.generate == 0
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_falls_back_to_first_persona(monkeypatch):
+    """钉住：群 persona_id 不在 personas 表时回退到字典里第一个 persona。"""
+    first, second = object(), object()
+    counts = _patch_period_deps(monkeypatch, msg_count=50)
+
+    fake_svc = plugin.get_llm_service()
+    fake_svc.config.personas = {"a": first, "b": second}
+    fake_svc.get_group_settings = lambda gid: types.SimpleNamespace(
+        persona_id="missing", provider_id="prov-1", model="model-1",
+    )
+
+    captured: dict = {}
+
+    async def capture_generate(sampled, persona, group_id, **kw):
+        captured["persona"] = persona
+        return ("正文", "model-1")
+
+    monkeypatch.setattr(plugin, "generate_period_report", capture_generate)
+
+    await plugin._run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+    )
+
+    assert captured["persona"] is first
+    assert counts.generate == 0  # fake_generate 被 capture_generate 替换
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_returns_none_when_no_persona(monkeypatch):
+    """钉住：personas 为空表时返回 None 且不调用 LLM。"""
+    counts = _patch_period_deps(monkeypatch, msg_count=50)
+    plugin.get_llm_service().config.personas = {}
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+    )
+
+    assert result is None
+    assert counts.generate == 0
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_swallows_llm_exception(monkeypatch):
+    """钉住：generate_period_report 抛异常时返回 None（不外抛）。"""
+    _patch_period_deps(monkeypatch, msg_count=50)
+
+    async def boom(*a, **kw):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(plugin, "generate_period_report", boom)
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_monthly_uses_monthly_config(monkeypatch):
+    """钉住：monthly 走 monthly_report 配置（独立 min_messages），period_kind 透传。"""
+    counts = _patch_period_deps(monkeypatch, msg_count=50)
+    # 抬高 monthly 门槛到窗口消息数以上 → monthly 跳过而 weekly 不跳过
+    plugin.get_llm_service().config.monthly_report.min_messages = 100
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_MONTHLY, 1_000.0, 100_000.0, "2026-05",
+    )
+    assert result is None
+    assert counts.generate == 0
+
+    captured: dict = {}
+
+    async def capture_generate(sampled, persona, group_id, **kw):
+        captured["period_kind"] = kw["period_kind"]
+        captured["length_hint"] = kw["length_hint"]
+        return ("正文", "model-1")
+
+    monkeypatch.setattr(plugin, "generate_period_report", capture_generate)
+    plugin.get_llm_service().config.monthly_report.min_messages = 5
+
+    result = await plugin._run_period_generation(
+        "10001", plugin.PERIOD_MONTHLY, 1_000.0, 100_000.0, "2026-05",
+    )
+    assert result == ("正文", "model-1")
+    assert captured["period_kind"] == plugin.PERIOD_MONTHLY
+    assert captured["length_hint"] == 300  # monthly_report.length_hint
+
+
+@pytest.mark.asyncio
+async def test_generate_period_one_upserts_with_window_period_key(monkeypatch):
+    """钉住：_generate_period_one 用 compute_period_window(now) 的 period_key 入库并返回结果。"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    counts = _patch_period_deps(monkeypatch, msg_count=50)
+    upserts: list[tuple] = []
+    monkeypatch.setattr(
+        plugin, "period_store",
+        types.SimpleNamespace(upsert=lambda *a: upserts.append(a)),
+    )
+
+    now = datetime(2026, 5, 4, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))  # 周一
+    result = await plugin._generate_period_one("10001", plugin.PERIOD_WEEKLY, now=now)
+
+    assert result == ("周期报告正文", "model-1")
+    assert counts.upsert == 0  # period_store 已被整体替换
+    assert upserts == [("10001", plugin.PERIOD_WEEKLY, "2026-W18", "周期报告正文", "model-1")]
+
+
+@pytest.mark.asyncio
+async def test_job_generate_period_reports_noop_without_groups(monkeypatch):
+    """钉住：无启用群时不生成、不读窗口。"""
+    counts = _patch_period_deps(monkeypatch, msg_count=50)
+    monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
+        all_groups=lambda: [],
+    ))
+
+    await plugin._job_generate_period_reports(plugin.PERIOD_WEEKLY)
+
+    assert counts.read == 0
+    assert counts.generate == 0
+
+
+@pytest.mark.asyncio
+async def test_job_generate_period_reports_single_group_failure_isolated(monkeypatch):
+    """钉住：单群生成抛异常不影响其他群，job 本身不外抛。"""
+    _patch_period_deps(monkeypatch, msg_count=50)
+    calls: list[str] = []
+
+    async def fake_generate_one(group_id, period_type, *, now=None):
+        calls.append(group_id)
+        if group_id == "10001":
+            raise RuntimeError("boom")
+        return None
+
+    monkeypatch.setattr(plugin, "_period_enabled_groups", lambda pt: types.SimpleNamespace(
+        all_groups=lambda: ["10001", "10002"],
+    ))
+    monkeypatch.setattr(plugin, "_generate_period_one", fake_generate_one)
+
+    await plugin._job_generate_period_reports(plugin.PERIOD_WEEKLY)
+
+    assert sorted(calls) == ["10001", "10002"]
+
+
+def _patch_publish_period_deps(monkeypatch):
+    """打桩周期发布依赖，返回 (events, bot)。"""
+    events: list = []
+    bot = types.SimpleNamespace(name="fake-bot")
+
+    async def fake_send(_bot, group_id, content, **kw):
+        events.append(("send", group_id))
+
+    monkeypatch.setattr(plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))
+    monkeypatch.setattr(plugin, "send_long_group_message", fake_send)
+    monkeypatch.setattr(plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext())
+    return events, bot
+
+
+@pytest.mark.asyncio
+async def test_publish_period_one_marks_after_send(monkeypatch):
+    """钉住：send 成功后才 mark_published。"""
+    events, bot = _patch_publish_period_deps(monkeypatch)
+    monkeypatch.setattr(plugin, "period_store", types.SimpleNamespace(
+        mark_published=lambda gid, pt, key: events.append(("mark", gid, pt, key)),
+    ))
+
+    row = {"group_id": "10001", "period_key": "2026-W18", "content": "正文", "model_used": "m"}
+    await plugin._publish_period_one(bot, row, plugin.PERIOD_WEEKLY)
+
+    assert events == [("send", 10001), ("mark", "10001", plugin.PERIOD_WEEKLY, "2026-W18")]
+
+
+@pytest.mark.asyncio
+async def test_publish_period_one_send_failure_not_marked(monkeypatch):
+    """钉住：发送失败时不 mark_published，异常不外抛。"""
+    events, bot = _patch_publish_period_deps(monkeypatch)
+
+    async def failing_send(_bot, group_id, content, **kw):
+        events.append(("send", group_id))
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(plugin, "send_long_group_message", failing_send)
+    monkeypatch.setattr(plugin, "period_store", types.SimpleNamespace(
+        mark_published=lambda gid, pt, key: events.append(("mark", gid, pt, key)),
+    ))
+
+    row = {"group_id": "10001", "period_key": "2026-W18", "content": "正文", "model_used": "m"}
+    await plugin._publish_period_one(bot, row, plugin.PERIOD_WEEKLY)
+
+    assert events == [("send", 10001)]
+
+
+@pytest.mark.asyncio
+async def test_job_publish_period_reports_only_enabled_groups(monkeypatch):
+    """钉住：周期发布 job 只发仍在启用集合里的群；未发布但已禁用的群被跳过。"""
+    events, bot = _patch_publish_period_deps(monkeypatch)
+    rows = [
+        {"group_id": "10001", "period_key": "2026-W18", "content": "a", "model_used": "m"},
+        {"group_id": "10002", "period_key": "2026-W18", "content": "b", "model_used": "m"},
+    ]
+    monkeypatch.setattr(plugin, "period_store", types.SimpleNamespace(
+        get_unpublished=lambda pt: rows,
+        mark_published=lambda gid, pt, key: events.append(("mark", gid, pt, key)),
+    ))
+    monkeypatch.setattr(plugin, "weekly_enabled_groups", types.SimpleNamespace(
+        all_groups=lambda: ["10001"],
+    ))
+
+    await plugin._job_publish_period_reports(plugin.PERIOD_WEEKLY)
+
+    sends = [e for e in events if e[0] == "send"]
+    assert sends == [("send", 10001)]
+
+
+def test_period_enabled_groups_rejects_unknown_type():
+    """钉住：_period_enabled_groups 对未知 period_type 抛 ValueError。"""
+    with pytest.raises(ValueError, match="未知 period_type"):
+        plugin._period_enabled_groups("yearly")
