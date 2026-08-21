@@ -110,7 +110,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `default_provider` | 默认 provider ID | — |
 | `default_persona` | 默认人格 ID | — |
 | `history_limit` | 单次调用读取的对话轮数上限 | `10` |
-| `history_max_messages_per_group` | 单群存储的对话消息硬上限 | `40` |
+| `history_max_messages_per_group` | 单群存储的对话消息数配置上限（群聊实际受代码硬上限 20 截断，见 `service_parts/constants.py`） | `40` |
 | `memory_limit` | 单次调用注入的记忆条数上限 | `6` |
 | `memory_max_items_per_group` | 单群存储的记忆条数硬上限 | `200` |
 | `max_prompt_chars` | system prompt 最大字符数 | `4000` |
