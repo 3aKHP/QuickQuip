@@ -207,16 +207,18 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import { fetchProviders, probeProviders, runRegression, runSampleRequest } from '../api/diagnostics'
+import type { DiagnosticsProvider, RegressionResult, SampleRequestResult } from '../api/diagnostics'
 import { clearLlmContext, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../api/llmRuntime'
+import type { RuntimeAction, RuntimeActionResponse } from '../api/llmRuntime'
 import { toast } from '../toast'
 
-const providers = ref<any[]>([])
+const providers = ref<DiagnosticsProvider[]>([])
 const sampleLoading = ref(false)
 const sampleError = ref<string | null>(null)
-const sampleResult = ref<any>(null)
+const sampleResult = ref<SampleRequestResult | null>(null)
 const regressionLoading = ref(false)
 const regressionError = ref<string | null>(null)
-const regressionResults = ref<any[]>([])
+const regressionResults = ref<RegressionResult[]>([])
 const regressionInput = ref('')
 const healthLoading = ref(false)
 const healthLoadingVerbose = ref(false)
@@ -224,11 +226,15 @@ const healthText = ref('')
 const probeLoading = ref(false)
 const probeText = ref('')
 const runtimeError = ref<string | null>(null)
-const runtimeLoading = ref('')
+
+type RuntimeActionKind = 'llm' | 'mcp' | 'personas' | 'rules'
+type RuntimeLoading = RuntimeActionKind | 'clear' | 'delete-msg' | ''
+
+const runtimeLoading = ref<RuntimeLoading>('')
 const contextScope = ref('')
 const contextMessageId = ref('')
 const actionsLoading = ref(false)
-const actions = ref<any[]>([])
+const actions = ref<RuntimeAction[]>([])
 
 interface SampleRequest {
   provider_id: string
@@ -255,7 +261,7 @@ function onProviderChange() {
   sample.value.model = ''
 }
 
-function prettyJson(obj: any): string {
+function prettyJson(obj: unknown): string {
   try {
     return JSON.stringify(obj, null, 2)
   } catch {
@@ -287,13 +293,15 @@ function statusLabel(status: string): string {
   } as Record<string, string>)[status] || status
 }
 
-function actionVariant(status: string): string {
+type TagVariant = 'info' | 'success' | 'warn' | 'danger'
+
+function actionVariant(status: string): TagVariant {
   return ({
     queued: 'info',
     running: 'warn',
     succeeded: 'success',
     failed: 'danger',
-  } as Record<string, string>)[status] || 'info'
+  } as Record<string, TagVariant>)[status] || 'info'
 }
 
 function formatActionTime(raw: string): string {
@@ -364,11 +372,11 @@ async function runProbe() {
   }
 }
 
-async function runRuntimeAction(action: string) {
+async function runRuntimeAction(action: RuntimeActionKind) {
   runtimeLoading.value = action
   runtimeError.value = null
   try {
-    let data: any
+    let data: RuntimeActionResponse
     if (action === 'llm') data = await reloadLlmRuntime()
     else if (action === 'mcp') data = await reloadMcpRuntime()
     else if (action === 'personas') data = await reloadPersonas()
@@ -430,14 +438,14 @@ async function sendSample() {
   sampleError.value = null
   sampleResult.value = null
   try {
-    sampleResult.value = await runSampleRequest(JSON.stringify({
+    sampleResult.value = await runSampleRequest({
       provider_id: sample.value.provider_id,
       model: sample.value.model || null,
       system_prompt: sample.value.system_prompt,
       user_prompt: sample.value.user_prompt,
       stream: false,
       max_output_tokens: sample.value.max_output_tokens,
-    }))
+    })
   } catch (e: unknown) {
     sampleError.value = (e as Error).message
   } finally {
@@ -462,7 +470,7 @@ async function runRegress() {
       }
       return { label: '', text: line.trim() }
     })
-    const data = await runRegression(JSON.stringify({ samples }))
+    const data = await runRegression(samples)
     regressionResults.value = data.samples || []
   } catch (e: unknown) {
     regressionError.value = (e as Error).message

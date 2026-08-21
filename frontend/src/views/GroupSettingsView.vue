@@ -209,27 +209,34 @@ import {
   listGroupSettings,
   saveGroupSettings,
 } from '../api/groupSettings'
+import type {
+  GroupOverrideDraft,
+  GroupOverrideEntry,
+  GroupOverrideField,
+  GroupOverridePatch,
+  GroupSettingsDefaults,
+  GroupSettingsOptions,
+} from '../api/groupSettings'
 import { toast } from '../toast'
 
-const FIELDS = [
+const FIELDS: readonly GroupOverrideField[] = [
   'enabled', 'memory_enabled', 'auto_memory_enabled', 'provider_id', 'model', 'persona_id',
   'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit',
 ]
 
-type DraftSettings = Record<string, any>
-
-const options = ref<any>(null)
-const groupList = ref<any[]>([])
+const options = ref<GroupSettingsOptions | null>(null)
+const groupList = ref<GroupOverrideEntry[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const selectedGroupId = ref('')
-const original = ref<DraftSettings>(emptyDraft())
-const draftTriState = ref<DraftSettings>(emptyDraft())
+const original = ref<GroupOverrideDraft>(emptyDraft())
+const draftTriState = ref<GroupOverrideDraft>(emptyDraft())
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
-function emptyDraft(): DraftSettings {
-  return Object.fromEntries(FIELDS.map(field => [field, null]))
+function emptyDraft(): GroupOverrideDraft {
+  // fromEntries 按 FIELDS 全量构造，键集合与 GroupOverrideDraft 一一对应
+  return Object.fromEntries(FIELDS.map(field => [field, null])) as GroupOverrideDraft
 }
 
 function displayId(key: string): string {
@@ -242,7 +249,7 @@ const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
 
-function defaultHint(field: string): string {
+function defaultHint(field: keyof GroupSettingsDefaults): string {
   const value = defaults.value[field]
   if (value === true) return '开'
   if (value === false) return '关'
@@ -273,13 +280,13 @@ const historyInput = computed({
 
 const modelPlaceholder = computed(() => {
   const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find((p: any) => p.id === providerId)
+  const provider = providers.value.find(p => p.id === providerId)
   return provider?.default_model || '默认 model'
 })
 
 const modelSuggestions = computed(() => {
   const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
-  const provider = providers.value.find((p: any) => p.id === providerId)
+  const provider = providers.value.find(p => p.id === providerId)
   return provider?.models || []
 })
 
@@ -320,7 +327,8 @@ async function loadOne(groupId: string) {
     const data = await fetchGroupSettings(groupId)
     const snapshot = emptyDraft()
     for (const field of FIELDS) {
-      if (data[field] !== undefined) snapshot[field] = data[field]
+      const value = data[field]
+      if (value !== undefined) Object.assign(snapshot, { [field]: value })
     }
     original.value = snapshot
     draftTriState.value = { ...snapshot }
@@ -351,7 +359,7 @@ function startAdd() {
 }
 
 async function onSave() {
-  const diff: Record<string, any> = {}
+  const diff: GroupOverridePatch = {}
   for (const field of FIELDS) {
     if (draftTriState.value[field] !== original.value[field]) {
       diff[field] = draftTriState.value[field]
