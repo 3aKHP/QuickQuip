@@ -184,12 +184,16 @@ def test_period_cooldown_independent_of_daily():
     """回归 Bot MEDIUM：周报/月报冷却字典独立于每日总结，同群两类"立即生成"不互相阻挡。"""
     plugin._last_manual_trigger.clear()
     plugin._last_period_manual_trigger.clear()
-    plugin._mark_triggered("10001")
-    assert plugin._on_cooldown("10001")
-    assert not plugin._on_period_cooldown("10001")
-    plugin._mark_period_triggered("10002")
-    assert plugin._on_period_cooldown("10002")
-    assert not plugin._on_cooldown("10002")
+    try:
+        plugin._mark_triggered("10001")
+        assert plugin._on_cooldown("10001")
+        assert not plugin._on_period_cooldown("10001")
+        plugin._mark_period_triggered("10002")
+        assert plugin._on_period_cooldown("10002")
+        assert not plugin._on_cooldown("10002")
+    finally:
+        plugin._last_manual_trigger.clear()
+        plugin._last_period_manual_trigger.clear()
 
 
 # ── characterization: v1.12.1 生成编排下沉前的行为钉住 ──────────────────

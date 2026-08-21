@@ -6,8 +6,8 @@ per-instance state only — no class-level mutables.
 """
 from __future__ import annotations
 
-from plugins.llm_provider import LLMRequest, LLMResponse
-from plugins.llm_tools import LLMToolCall
+from quickquip.llm.provider import LLMRequest, LLMResponse
+from quickquip.llm.tools import LLMToolCall
 
 
 class StubProviderClient:

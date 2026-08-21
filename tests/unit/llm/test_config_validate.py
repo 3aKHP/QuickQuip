@@ -232,3 +232,21 @@ def test_llm_salvages_where_generation_fails_fast(tmp_path: Path):
     assert gen_loaded.load_error is not None
     assert "bad" in gen_loaded.load_error
     assert "未知协议" in gen_loaded.load_error
+
+
+def test_empty_personas_is_fatal_load_error(tmp_path: Path):
+    """provider 正常但完全没有人格（无 [[personas]] 且 personas/ 目录不存在）时，
+    load_error 置为 fatal 且校验 early-return——不得被重构改为静默默认人格。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        """
+        + _good_provider(),
+    )
+    assert loaded.load_error == "LLM 配置中没有可用的人格"
+    assert loaded.personas == {}
+    # fatal 后 early-return：provider 已解析保留，但配置整体不可用
+    assert set(loaded.providers) == {"good"}
+    assert not loaded.is_available

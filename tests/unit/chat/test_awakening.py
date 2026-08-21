@@ -1395,15 +1395,21 @@ class TestRunBoredomCheckFailures:
 
     @staticmethod
     def _make_fakes(gids, *, generate_reply=None, send=None):
+        from types import SimpleNamespace
+
         bot = MagicMock()
         bot.send_group_msg = send if send is not None else AsyncMock()
         groups = MagicMock()
         groups.all_groups.return_value = list(gids)
         rule_switch = MagicMock()
         rule_switch.is_enabled.return_value = True
-        svc = MagicMock()
-        svc.config.load_error = None
-        svc.get_group_settings.return_value = MagicMock(enabled=True)
+        # spec 限定 svc 属性面，防止源码改名后 MagicMock 自动造属性而测试仍绿；
+        # 被访问的值用 SimpleNamespace 给出真实形状（characterization 应钉住访问契约）
+        svc = MagicMock(
+            spec=["config", "get_group_settings", "recent_message_buffer", "generate_reply"]
+        )
+        svc.config = SimpleNamespace(load_error=None)
+        svc.get_group_settings.return_value = SimpleNamespace(enabled=True)
         svc.recent_message_buffer.list_recent.return_value = []
         svc.generate_reply = (
             generate_reply if generate_reply is not None
@@ -1454,6 +1460,19 @@ class TestRunBoredomCheckFailures:
 
         # rule_switch 判定在 LLM 可用性检查之前：整个群被跳过
         svc.get_group_settings.assert_not_called()
+        svc.generate_reply.assert_not_called()
+        bot.send_group_msg.assert_not_called()
+        assert "123" not in st._last_boredom_trigger
+
+    def test_llm_config_load_error_skips_group(self):
+        """svc.config.load_error 为真时 _is_group_llm_enabled 直接拒绝（位于 rule_switch
+        之后、沉寂判定之前）：跳过该群，不生成、不发送、不标冷却。"""
+        st = self._triggerable_state("123")
+        bot, groups, rule_switch, svc = self._make_fakes(["123"])
+        svc.config.load_error = "全部 provider 均被跳过"
+
+        self._run(bot, groups, rule_switch, svc, st)
+
         svc.generate_reply.assert_not_called()
         bot.send_group_msg.assert_not_called()
         assert "123" not in st._last_boredom_trigger
