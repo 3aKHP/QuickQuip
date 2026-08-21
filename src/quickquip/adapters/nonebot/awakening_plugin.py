@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 
 try:
     import nonebot
@@ -25,6 +23,9 @@ from quickquip.app.message_pipeline import (
     strip_command_name as _strip_command_name,
 )
 from quickquip.chat.awakening import (
+    AWAKENING_RULE_NAMES,
+    AWAKENING_RULES,
+    BoredomEnabledGroups,
     effective_boredom_scan_interval,
     get_config,
     get_state,
@@ -35,66 +36,7 @@ from quickquip.chat.awakening import (
 logger = logging.getLogger(__name__)
 
 _RULE_NAME = "awakening_boredom"
-_BOREDOM_GROUPS_PATH = Path("data/awakening_boredom_groups.json")
 BOREDOM_SCAN_JOB_ID = "awakening_boredom_check"
-
-
-def _safe_group_id(group_id: int | str) -> str:
-    s = str(group_id).strip()
-    if not s.isdigit():
-        raise ValueError(f"Invalid group_id: {group_id!r}")
-    return s
-
-
-class BoredomEnabledGroups:
-    """Manages the opt-in set of groups with boredom awakening enabled."""
-
-    def __init__(self, path: str | Path = _BOREDOM_GROUPS_PATH):
-        self.path = Path(path)
-        self._groups: set[str] = set()
-        self.load()
-
-    def load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            with self.path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            raw_groups = data.get("enabled", [])
-            validated: set[str] = set()
-            for g in raw_groups:
-                try:
-                    validated.add(_safe_group_id(g))
-                except ValueError:
-                    logger.warning("awakening: ignoring invalid group_id in %s: %r", self.path, g)
-            self._groups = validated
-        except (OSError, json.JSONDecodeError):
-            self._groups = set()
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                json.dump({"enabled": sorted(self._groups)}, f, ensure_ascii=False, indent=2)
-            tmp.replace(self.path)
-        except OSError:
-            logger.warning("awakening: failed to save boredom groups to %s", self.path)
-            tmp.unlink(missing_ok=True)
-
-    def add(self, group_id: int | str) -> None:
-        self._groups.add(_safe_group_id(group_id))
-        self.save()
-
-    def remove(self, group_id: int | str) -> None:
-        self._groups.discard(_safe_group_id(group_id))
-        self.save()
-
-    def contains(self, group_id: int | str) -> bool:
-        return _safe_group_id(group_id) in self._groups
-
-    def all_groups(self) -> list[str]:
-        return sorted(self._groups)
 
 
 boredom_enabled_groups = BoredomEnabledGroups()
@@ -193,16 +135,8 @@ def register_awakening_commands(on_command) -> None:
         settings = cfg.resolve_group(group_id)
 
         if action in {"status", "状态", ""}:
-            rules = [
-                ("awakening_extend", "唤醒延长"),
-                ("awakening_interest", "兴趣话题"),
-                ("awakening_fallback", "兜底概率"),
-                ("awakening_boredom", "无聊唤醒"),
-                ("awakening_relevance", "相关性唤醒"),
-                ("awakening_qa", "答疑唤醒"),
-            ]
             lines = ["唤醒模块状态："]
-            for rule_name, label in rules:
+            for rule_name, label in AWAKENING_RULES:
                 enabled = rule_switch.is_enabled(group_id, rule_name)
                 lines.append(f"  [{('ON' if enabled else 'OFF')}] {label} ({rule_name})")
 
@@ -226,8 +160,7 @@ def register_awakening_commands(on_command) -> None:
             if len(tokens) < 2:
                 await cmd.finish("用法: /awakening on <规则名>\n可选: awakening_extend, awakening_interest, awakening_fallback, awakening_boredom, awakening_relevance, awakening_qa")
             rule_name = tokens[1]
-            valid_rules = {"awakening_extend", "awakening_interest", "awakening_fallback", "awakening_boredom", "awakening_relevance", "awakening_qa"}
-            if rule_name not in valid_rules:
+            if rule_name not in AWAKENING_RULE_NAMES:
                 await cmd.finish(f"未知规则: {rule_name}")
             rule_switch.enable(group_id, rule_name)
             from quickquip.app.message_pipeline import RULE_SWITCH_PATH
@@ -240,8 +173,7 @@ def register_awakening_commands(on_command) -> None:
             if len(tokens) < 2:
                 await cmd.finish("用法: /awakening off <规则名>")
             rule_name = tokens[1]
-            valid_rules = {"awakening_extend", "awakening_interest", "awakening_fallback", "awakening_boredom", "awakening_relevance", "awakening_qa"}
-            if rule_name not in valid_rules:
+            if rule_name not in AWAKENING_RULE_NAMES:
                 await cmd.finish(f"未知规则: {rule_name}")
             rule_switch.disable(group_id, rule_name)
             from quickquip.app.message_pipeline import RULE_SWITCH_PATH
