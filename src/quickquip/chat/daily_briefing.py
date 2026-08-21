@@ -85,6 +85,15 @@ def _weekday_label(dt: datetime) -> str:
     return weekdays[dt.weekday()]
 
 
+def default_period_for_now(now: datetime) -> BriefingPeriod:
+    """按时刻选择默认时段：[0,11)=morning，[11,18)=noon，[18,24)=evening。"""
+    if now.hour < 11:
+        return "morning"
+    if now.hour < 18:
+        return "noon"
+    return "evening"
+
+
 def normalize_period(raw: str) -> BriefingPeriod | None:
     normalized = raw.strip().lower()
     aliases = {

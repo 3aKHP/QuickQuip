@@ -36,6 +36,7 @@ from quickquip.chat.daily_briefing import (
     NullBriefingNewsProvider,
     build_briefing_context,
     build_fallback_briefing,
+    default_period_for_now,
     normalize_period,
 )
 from quickquip.llm.briefing import generate_daily_briefing
@@ -47,14 +48,6 @@ _RULE_NAME = "daily_briefing"
 _NEWS_PROVIDER = NullBriefingNewsProvider()
 _PERIOD_LABELS = {"morning": "早报", "noon": "午报", "evening": "晚报"}
 _last_manual_trigger: dict[str, float] = {}
-
-
-def _default_period_for_now(now: datetime) -> str:
-    if now.hour < 11:
-        return "morning"
-    if now.hour < 18:
-        return "noon"
-    return "evening"
 
 
 def _on_cooldown(group_id: int | str) -> bool:
@@ -169,7 +162,7 @@ async def send_daily_briefing_now(
         raise RuntimeError("briefing generation is on cooldown")
 
     _mark_triggered(group_key)
-    selected_period = period or _default_period_for_now(datetime.now(tz=_LOCAL_TZ))
+    selected_period = period or default_period_for_now(datetime.now(tz=_LOCAL_TZ))
     if bot is None:
         if nonebot is None:
             raise RuntimeError("bot runtime is not available")
@@ -317,7 +310,7 @@ def register_daily_briefing_commands(on_command) -> None:
                 await briefing_cmd.finish("仅管理员可执行此操作")
             period = normalize_period(tokens[1]) if len(tokens) >= 2 else None
             if period is None:
-                period = _default_period_for_now(datetime.now(tz=_LOCAL_TZ))
+                period = default_period_for_now(datetime.now(tz=_LOCAL_TZ))
             try:
                 await send_daily_briefing_now(
                     group_id,
