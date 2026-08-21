@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import logging
 from pathlib import Path
 import re
@@ -20,6 +20,7 @@ from quickquip.common.sensitive_filter import (
     DEFAULT_BLOCK_REPLY,
     DEFAULT_OUTPUT_FALLBACK,
     SCRUB_PLACEHOLDER,
+    SensitiveFilter,
     get_filter as _get_sensitive_filter,
     log_hits as _log_sensitive_hits,
     reload_filter as _reload_sensitive_filter,
@@ -163,6 +164,17 @@ _TURMFLUCH_SPEC = CommandSingleShotSpec(
     response_parser=_turmfluch_reply_text,
     log_label="/turmfluch",
 )
+
+
+@dataclass
+class _ImagePreprocessingOutcome:
+    """图像预处理段继续走主生成链路时向调用方回传的状态。"""
+
+    effective_image_urls: list[str]
+    request_quoted_image_urls: list[str]
+    request_forward_image_urls: list[str]
+    image_descriptions: list[ImageDescription]
+    is_non_vision: bool
 
 
 class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
@@ -576,118 +588,23 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             image_preprocessor=self.image_preprocessor,
         )
 
-    async def _generate_reply_for_scope(
+    async def _preprocess_images_for_model(
         self,
         *,
         chat_id: int | str,
-        chat_type: str,
-        user_id: int | str,
-        sender_name: str,
-        prompt: str,
-        image_urls: list[str] | None = None,
-        recent_messages: list[dict[str, str]] | None = None,
-        quoted_text: str = "",
-        quoted_image_urls: list[str] | None = None,
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-        quoted_is_bot_self: bool = False,
-        forward_text: str = "",
-        forward_image_urls: list[str] | None = None,
-        voice_text: str = "",
-        raw_user_text: str | None = None,
-        store_user_message: bool = True,
-        message_id: str | None = None,
-        include_recent_images: bool = False,
-    ) -> dict[str, object]:
-        prompt = prompt.strip()
-        normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
-        normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
-        normalized_quoted_text = quoted_text.strip()
-        normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
-        normalized_forward_text = forward_text.strip()
-        normalized_forward_image_urls = [url for url in (forward_image_urls or []) if url.strip()]
-        normalized_voice_text = voice_text.strip()
-        if normalized_voice_text:
-            prompt = "\n".join(item for item in [prompt, normalized_voice_text] if item).strip()
-        request_image_urls = list(normalized_image_urls)
-        request_quoted_image_urls = list(normalized_quoted_image_urls)
-        request_forward_image_urls = list(normalized_forward_image_urls)
-        if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
-            prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
-        stored_prompt = (
-            normalized_raw_user_text if normalized_raw_user_text is not None else prompt
-        )[: self.config.runtime.max_prompt_chars]
-
-        if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
-            return {
-                "reply": self.config.triggers.empty_prompt_reply,
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
-
-        scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        sensitive = _get_sensitive_filter()
-        if sensitive.is_loaded:
-            input_blob = "\n".join(
-                part for part in (
-                    prompt,
-                    normalized_quoted_text,
-                    normalized_forward_text,
-                ) if part
-            )
-            input_scan = sensitive.scan(input_blob)
-            if input_scan.hits:
-                _log_sensitive_hits("input", scope_key, input_scan)
-            if input_scan.blocked:
-                return {
-                    "reply": DEFAULT_BLOCK_REPLY,
-                    "rate_limit_key": LLM_RULE_NAME,
-                    "rule_name": LLM_RULE_NAME,
-                    "llm_used": False,
-                }
-
-        if self.config.load_error:
-            return {
-                "reply": f"LLM 配置不可用：{self.config.load_error}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
-
-        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
-        if not settings.enabled:
-            return {
-                "reply": f"{self._scope_subject(chat_type)} LLM 已关闭。",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
-
-        provider = self.config.providers.get(settings.provider_id)
-        if provider is None:
-            return {
-                "reply": f"当前 provider 不存在：{settings.provider_id}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
-
-        persona = self.config.personas.get(settings.persona_id)
-        if persona is None:
-            return {
-                "reply": f"当前 persona 不存在：{settings.persona_id}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
-
-        trimmed_prompt = prompt[: self.config.runtime.max_prompt_chars]
-        quoted_prompt = normalized_quoted_text[:MAX_QUOTED_MESSAGE_CHARS]
-        analysis_prompt = "\n".join(
-            item for item in [stored_prompt, quoted_prompt] if item
-        )[: self.config.runtime.max_prompt_chars]
-
+        scope_key: str,
+        provider: ProviderConfig,
+        settings: ResolvedGroupSettings,
+        request_image_urls: list[str],
+        request_quoted_image_urls: list[str],
+        request_forward_image_urls: list[str],
+        normalized_image_urls: list[str],
+        normalized_quoted_image_urls: list[str],
+        normalized_forward_image_urls: list[str],
+        recent_messages: list[dict[str, str]] | None,
+        include_recent_images: bool,
+        sensitive: SensitiveFilter,
+    ) -> dict[str, object] | _ImagePreprocessingOutcome:
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
@@ -801,6 +718,150 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             request_quoted_image_urls = []
             request_forward_image_urls = []
 
+        # ── end image preprocessing ─────────────────────────────────
+        return _ImagePreprocessingOutcome(
+            effective_image_urls=effective_image_urls,
+            request_quoted_image_urls=request_quoted_image_urls,
+            request_forward_image_urls=request_forward_image_urls,
+            image_descriptions=image_descriptions,
+            is_non_vision=is_non_vision,
+        )
+
+    async def _generate_reply_for_scope(
+        self,
+        *,
+        chat_id: int | str,
+        chat_type: str,
+        user_id: int | str,
+        sender_name: str,
+        prompt: str,
+        image_urls: list[str] | None = None,
+        recent_messages: list[dict[str, str]] | None = None,
+        quoted_text: str = "",
+        quoted_image_urls: list[str] | None = None,
+        quoted_sender_name: str = "",
+        quoted_user_id: str = "",
+        quoted_is_bot_self: bool = False,
+        forward_text: str = "",
+        forward_image_urls: list[str] | None = None,
+        voice_text: str = "",
+        raw_user_text: str | None = None,
+        store_user_message: bool = True,
+        message_id: str | None = None,
+        include_recent_images: bool = False,
+    ) -> dict[str, object]:
+        prompt = prompt.strip()
+        normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
+        normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
+        normalized_quoted_text = quoted_text.strip()
+        normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
+        normalized_forward_text = forward_text.strip()
+        normalized_forward_image_urls = [url for url in (forward_image_urls or []) if url.strip()]
+        normalized_voice_text = voice_text.strip()
+        if normalized_voice_text:
+            prompt = "\n".join(item for item in [prompt, normalized_voice_text] if item).strip()
+        request_image_urls = list(normalized_image_urls)
+        request_quoted_image_urls = list(normalized_quoted_image_urls)
+        request_forward_image_urls = list(normalized_forward_image_urls)
+        if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
+            prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
+        stored_prompt = (
+            normalized_raw_user_text if normalized_raw_user_text is not None else prompt
+        )[: self.config.runtime.max_prompt_chars]
+
+        if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
+            return {
+                "reply": self.config.triggers.empty_prompt_reply,
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
+
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        sensitive = _get_sensitive_filter()
+        if sensitive.is_loaded:
+            input_blob = "\n".join(
+                part for part in (
+                    prompt,
+                    normalized_quoted_text,
+                    normalized_forward_text,
+                ) if part
+            )
+            input_scan = sensitive.scan(input_blob)
+            if input_scan.hits:
+                _log_sensitive_hits("input", scope_key, input_scan)
+            if input_scan.blocked:
+                return {
+                    "reply": DEFAULT_BLOCK_REPLY,
+                    "rate_limit_key": LLM_RULE_NAME,
+                    "rule_name": LLM_RULE_NAME,
+                    "llm_used": False,
+                }
+
+        if self.config.load_error:
+            return {
+                "reply": f"LLM 配置不可用：{self.config.load_error}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
+
+        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
+        if not settings.enabled:
+            return {
+                "reply": f"{self._scope_subject(chat_type)} LLM 已关闭。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
+
+        provider = self.config.providers.get(settings.provider_id)
+        if provider is None:
+            return {
+                "reply": f"当前 provider 不存在：{settings.provider_id}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
+
+        persona = self.config.personas.get(settings.persona_id)
+        if persona is None:
+            return {
+                "reply": f"当前 persona 不存在：{settings.persona_id}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
+
+        trimmed_prompt = prompt[: self.config.runtime.max_prompt_chars]
+        quoted_prompt = normalized_quoted_text[:MAX_QUOTED_MESSAGE_CHARS]
+        analysis_prompt = "\n".join(
+            item for item in [stored_prompt, quoted_prompt] if item
+        )[: self.config.runtime.max_prompt_chars]
+
+        # ── image preprocessing & non-VLM stripping ──────────────────
+        image_outcome = await self._preprocess_images_for_model(
+            chat_id=chat_id,
+            scope_key=scope_key,
+            provider=provider,
+            settings=settings,
+            request_image_urls=request_image_urls,
+            request_quoted_image_urls=request_quoted_image_urls,
+            request_forward_image_urls=request_forward_image_urls,
+            normalized_image_urls=normalized_image_urls,
+            normalized_quoted_image_urls=normalized_quoted_image_urls,
+            normalized_forward_image_urls=normalized_forward_image_urls,
+            recent_messages=recent_messages,
+            include_recent_images=include_recent_images,
+            sensitive=sensitive,
+        )
+        if isinstance(image_outcome, dict):
+            return image_outcome
+        effective_image_urls = image_outcome.effective_image_urls
+        request_quoted_image_urls = image_outcome.request_quoted_image_urls
+        request_forward_image_urls = image_outcome.request_forward_image_urls
+        image_descriptions = image_outcome.image_descriptions
+        is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
         default_history_limit = self._default_history_limit(chat_type)
         history = self.store.list_recent_conversation_messages(
