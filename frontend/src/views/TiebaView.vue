@@ -11,7 +11,7 @@
     <div v-if="syncLog.length" class="sync-log-wrap">
       <div class="sync-log-head">
         <span>同步日志{{ syncing ? '（进行中…）' : '（已完成）' }}</span>
-        <button class="sync-log-close" @click="syncLog = []"><UiIcon name="X" :size="14" /></button>
+        <button class="sync-log-close" @click="clearLog"><UiIcon name="X" :size="14" /></button>
       </div>
       <pre ref="logEl" class="sync-log">{{ syncLog.join('\n') }}</pre>
     </div>
@@ -88,29 +88,12 @@
       </div>
     </div>
 
-    <div v-if="detail" class="detail-overlay" @click.self="detail = null">
-      <UiCard padding="lg" shadow="lg" class="detail-card">
-        <div class="detail-head">
-          <span class="mono">#{{ detail.tid }} · {{ detail.forum_keyword }}吧</span>
-          <button class="detail-close" @click="detail = null"><UiIcon name="X" :size="18" /></button>
-        </div>
-        <h3 class="detail-title">{{ detail.title }}</h3>
-        <div class="detail-meta">
-          <span v-if="detail.author_name">{{ detail.author_name }}</span>
-          <span>· {{ formatTime(detail.last_seen_at) }}</span>
-          <a :href="detail.thread_url" target="_blank" rel="noreferrer" class="detail-link">在贴吧打开</a>
-        </div>
-        <div class="detail-content">{{ detail.main_post_text || '（正文为空）' }}</div>
-        <div v-if="detail.image_urls && detail.image_urls.length" class="detail-images">
-          <img v-for="(src, i) in detail.image_urls" :key="i" :src="tiebaImgProxyUrl(src)" loading="lazy" />
-        </div>
-      </UiCard>
-    </div>
+    <ThreadDetailDialog v-if="detail" :detail="detail" @close="detail = null" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -118,8 +101,10 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, openTiebaSyncStream, peekTiebaThread } from '../api/tieba'
+import ThreadDetailDialog from '../components/tieba/ThreadDetailDialog.vue'
+import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, peekTiebaThread } from '../api/tieba'
 import type { TiebaForumInfo, TiebaThread, TiebaThreadRow } from '../api/tieba'
+import { useTiebaSync } from '../composables/useTiebaSync'
 import { toast } from '../toast'
 
 const PAGE_SIZE = 30
@@ -128,26 +113,7 @@ const forums = ref<TiebaForumInfo[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 
-const syncing = ref(false)
-const syncLog = ref<string[]>([])
-const logEl = ref<HTMLPreElement | null>(null)
 const peeking = ref(false)
-
-function startSync(forum: string | null) {
-  syncing.value = true
-  syncLog.value = [`▶ 开始同步${forum ? ' ' + forum + '吧' : '全部贴吧'}…`]
-  openTiebaSyncStream(
-    forum || '',
-    (msg) => {
-      syncLog.value.push(msg)
-      nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
-    },
-    () => {
-      syncing.value = false
-      loadAll()
-    },
-  )
-}
 
 const selectedForum = ref('')
 const keyword = ref('')
@@ -193,6 +159,8 @@ async function loadAll() {
     loading.value = false
   }
 }
+
+const { syncing, syncLog, logEl, startSync, clearLog } = useTiebaSync(loadAll)
 
 async function selectForum(forum: string) {
   if (forum === selectedForum.value) return
@@ -517,92 +485,6 @@ loadAll()
   display: flex;
   justify-content: center;
   padding: var(--qq-gap-sm);
-}
-
-.detail-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--qq-overlay-strong);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  z-index: 9998;
-  padding: var(--qq-gap-lg);
-  overflow-y: auto;
-}
-
-.detail-card {
-  width: min(720px, 100%);
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
-}
-
-.detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
-  margin-bottom: var(--qq-gap-sm);
-}
-
-.detail-close {
-  background: transparent;
-  border: none;
-  color: var(--qq-text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--qq-radius-sm);
-}
-
-.detail-close:hover {
-  color: var(--qq-text);
-  background: var(--qq-surface-elevated);
-}
-
-.detail-title {
-  font-size: var(--qq-text-lg);
-  color: var(--qq-text);
-  margin: 0 0 var(--qq-gap-sm) 0;
-}
-
-.detail-meta {
-  font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
-  display: flex;
-  gap: 6px;
-  margin-bottom: var(--qq-gap-md);
-}
-
-.detail-link {
-  color: var(--qq-primary);
-  text-decoration: none;
-}
-
-.detail-link:hover { text-decoration: underline; }
-
-.detail-content {
-  font-size: var(--qq-text-sm);
-  line-height: 1.7;
-  color: var(--qq-text);
-  white-space: pre-wrap;
-  word-break: break-word;
-  padding: var(--qq-gap-sm);
-  background: var(--qq-surface-strong);
-  border-radius: var(--qq-radius-sm);
-  margin-bottom: var(--qq-gap-md);
-}
-
-.detail-images {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: var(--qq-gap-xs);
-}
-
-.detail-images img {
-  width: 100%;
-  border-radius: var(--qq-radius-sm);
-  background: var(--qq-surface-strong);
 }
 
 @media (max-width: 900px) {
