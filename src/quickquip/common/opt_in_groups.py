@@ -104,6 +104,19 @@ class OptInGroupSet:
             self._groups.discard(gid)
             self._save_unlocked()
 
+    def set_enabled(self, group_id: int | str, enabled: bool) -> bool:
+        """锁内读取-修改-写入并返回变更前状态（供审计日志取准确的 before 值）。"""
+        gid = self._normalize_group_id(group_id)
+        with self._lock():
+            self.load()
+            old = gid in self._groups
+            if enabled:
+                self._groups.add(gid)
+            else:
+                self._groups.discard(gid)
+            self._save_unlocked()
+        return old
+
     def contains(self, group_id: int | str) -> bool:
         return self._normalize_group_id(group_id) in self._groups
 

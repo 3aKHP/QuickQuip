@@ -285,14 +285,11 @@ def set_awakening_rule(group_id: str, rule_name: str, body: ToggleBody, request:
 @router.post("/awakening/{group_id}/boredom")
 def set_boredom_opt_in(group_id: str, body: ToggleBody, request: Request):
     _validate_group_id(group_id)
-    # 与 bot 命令路径共用同一写入所有者：add/remove 在 FileLock 内
-    # 重读磁盘、合并修改后原子落盘，跨进程交叉写入不丢更新。
+    # 与 bot 命令路径共用同一写入所有者：set_enabled 在 FileLock 内
+    # 重读磁盘、合并修改后原子落盘，跨进程交叉写入不丢更新；
+    # 返回的变更前状态取自锁内，audit 的 summary_before 在并发下也准确。
     store = BoredomEnabledGroups(_BOREDOM_GROUPS_PATH)
-    old_enabled = store.contains(group_id)
-    if body.enabled:
-        store.add(group_id)
-    else:
-        store.remove(group_id)
+    old_enabled = store.set_enabled(group_id, body.enabled)
     audit_logger.log(
         request,
         action="toggle",
