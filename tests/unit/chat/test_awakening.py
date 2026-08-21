@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
@@ -14,6 +15,7 @@ from quickquip.chat.awakening import (
     AwakeningGroupOverride,
     AwakeningState,
     AwakeningTriggerResult,
+    BoredomEnabledGroups,
     BotMessageCache,
     ResolvedAwakeningSettings,
     _QA_FAST_PATTERNS,
@@ -1537,3 +1539,25 @@ class TestRunBoredomCheckFailures:
         assert "456" not in st._last_boredom_trigger
         assert "789" in st._last_boredom_trigger
         stats_tracker.record_trigger.assert_called_once_with("789", _RULE_BOREDOM)
+
+
+def test_boredom_opt_in_cross_writer_stays_consistent(tmp_path: Path):
+    """命令路径与 Web 路径交叉写入同一 opt-in 文件后状态一致。
+
+    bot 进程持有长驻实例（/awakening boredom on|off），Web Admin 每次请求
+    新建实例（POST /awakening/{gid}/boredom）；两边写入都在 FileLock 内
+    先重读磁盘再合并，互不丢更新。
+    """
+    path = tmp_path / "awakening_boredom_groups.json"
+    command_side = BoredomEnabledGroups(path)
+    command_side.add("10001")
+
+    web_side = BoredomEnabledGroups(path)
+    web_side.add("10002")
+
+    # 命令侧的 remove 不得覆盖掉 web 侧刚写入的 10002
+    command_side.remove("10001")
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"enabled": ["10002"]}
+    assert command_side.all_groups() == ["10002"]
+    assert BoredomEnabledGroups(path).all_groups() == ["10002"]

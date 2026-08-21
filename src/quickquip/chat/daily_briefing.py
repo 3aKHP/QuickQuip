@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
@@ -12,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.wordcloud import WORDCLOUD_STOPWORDS, WordCloudCollector, build_word_frequencies
+from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
 from quickquip.llm.config import DailyBriefingConfig
 
 logger = logging.getLogger(__name__)
@@ -80,16 +80,18 @@ class DailyBriefingContext:
         return self.message_count > 0
 
 
-def _safe_group_id(group_id: int | str) -> str:
-    s = str(group_id).strip()
-    if not s.isdigit():
-        raise ValueError(f"Invalid group_id (must be all digits): {group_id!r}")
-    return s
-
-
 def _weekday_label(dt: datetime) -> str:
     weekdays = ["一", "二", "三", "四", "五", "六", "日"]
     return weekdays[dt.weekday()]
+
+
+def default_period_for_now(now: datetime) -> BriefingPeriod:
+    """按时刻选择默认时段：[0,11)=morning，[11,18)=noon，[18,24)=evening。"""
+    if now.hour < 11:
+        return "morning"
+    if now.hour < 18:
+        return "noon"
+    return "evening"
 
 
 def normalize_period(raw: str) -> BriefingPeriod | None:
@@ -270,45 +272,13 @@ async def build_briefing_context(
     )
 
 
-class DailyBriefingEnabledGroups:
+class DailyBriefingEnabledGroups(OptInGroupSet):
     """Manages the opt-in set of groups with daily_briefing enabled (default: off)."""
 
+    log_label = "daily_briefing"
+
     def __init__(self, path: str | Path = "data/daily_briefing_groups.json"):
-        self.path = Path(path)
-        self._groups: set[str] = set()
-        self.load()
+        super().__init__(path)
 
-    def load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            with self.path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._groups = {str(g) for g in data.get("enabled", [])}
-        except (OSError, json.JSONDecodeError):
-            self._groups = set()
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                json.dump({"enabled": sorted(self._groups)}, f, ensure_ascii=False, indent=2)
-            tmp.replace(self.path)
-        except OSError:
-            logger.warning("daily_briefing: failed to save enabled groups to %s", self.path)
-            tmp.unlink(missing_ok=True)
-
-    def add(self, group_id: int | str) -> None:
-        self._groups.add(_safe_group_id(group_id))
-        self.save()
-
-    def remove(self, group_id: int | str) -> None:
-        self._groups.discard(_safe_group_id(group_id))
-        self.save()
-
-    def contains(self, group_id: int | str) -> bool:
-        return _safe_group_id(group_id) in self._groups
-
-    def all_groups(self) -> list[str]:
-        return sorted(self._groups)
+    def _normalize_group_id(self, group_id: int | str) -> str:
+        return normalize_digit_group_id(group_id)

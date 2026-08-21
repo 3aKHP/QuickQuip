@@ -11,7 +11,6 @@ LLM 生成管线（llm/summarize.py: generate_period_report）。
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from collections import defaultdict
@@ -20,6 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.opt_in_groups import OptInGroupSet
 from quickquip.common.paths import PERIOD_REPORTS_DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -209,51 +209,15 @@ class PeriodReportStore:
             conn.close()
 
 
-class PeriodReportEnabledGroups:
+class PeriodReportEnabledGroups(OptInGroupSet):
     """管理某个 period_type（weekly/monthly）的 opt-in 群集合（默认关闭）。"""
 
     def __init__(self, period_type: str, path: str | Path):
         if period_type not in _VALID_PERIOD_TYPES:
             raise ValueError(f"未知 period_type: {period_type!r}")
         self.period_type = period_type
-        self.path = Path(path)
-        self._groups: set[str] = set()
-        self.load()
-
-    def load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            with self.path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._groups = {str(g) for g in data.get("enabled", [])}
-        except (OSError, json.JSONDecodeError):
-            self._groups = set()
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                json.dump({"enabled": sorted(self._groups)}, f, ensure_ascii=False, indent=2)
-            tmp.replace(self.path)
-        except OSError:
-            logger.warning("period_report[%s]: failed to save enabled groups to %s", self.period_type, self.path)
-            tmp.unlink(missing_ok=True)
-
-    def add(self, group_id: int | str) -> None:
-        self._groups.add(str(group_id))
-        self.save()
-
-    def remove(self, group_id: int | str) -> None:
-        self._groups.discard(str(group_id))
-        self.save()
-
-    def contains(self, group_id: int | str) -> bool:
-        return str(group_id) in self._groups
-
-    def all_groups(self) -> list[str]:
-        return sorted(self._groups)
+        self.log_label = f"period_report[{period_type}]"
+        super().__init__(path)
 
 
 def compute_period_window(period_type: str, now: datetime) -> tuple[float, float, str, str]:

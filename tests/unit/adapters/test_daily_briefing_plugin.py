@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from quickquip.adapters.nonebot import daily_briefing_plugin
+from quickquip.chat.daily_briefing import default_period_for_now
 
 
 @pytest.mark.asyncio
@@ -72,7 +73,7 @@ def _fixed_datetime(hour, minute=0):
 def test_default_period_for_now_boundaries(hour, expected):
     """钉住：时段划分 [0,11)=morning，[11,18)=noon，[18,24)=evening。"""
     now = datetime(2026, 5, 4, hour, 0, tzinfo=LOCAL_TZ)
-    assert daily_briefing_plugin._default_period_for_now(now) == expected
+    assert default_period_for_now(now) == expected
 
 
 def _patch_render_deps(monkeypatch, *, message_count=10, min_for_llm=5,

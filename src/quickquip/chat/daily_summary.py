@@ -9,6 +9,7 @@ from time import time
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.common.opt_in_groups import OptInGroupSet
 from quickquip.common.paths import DAILY_MESSAGES_DIR, DAILY_SUMMARIES_DB_PATH
 
 logger = logging.getLogger(__name__)
@@ -243,46 +244,10 @@ class DailySummaryStore:
             conn.close()
 
 
-class DailySummaryEnabledGroups:
+class DailySummaryEnabledGroups(OptInGroupSet):
     """Manages the opt-in set of groups with daily_summary enabled (default: off)."""
 
+    log_label = "daily_summary"
+
     def __init__(self, path: str | Path = "data/daily_summary_groups.json"):
-        self.path = Path(path)
-        self._groups: set[str] = set()
-        self.load()
-
-    def load(self) -> None:
-        if not self.path.exists():
-            return
-        try:
-            with self.path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._groups = {str(g) for g in data.get("enabled", [])}
-        except (OSError, json.JSONDecodeError):
-            self._groups = set()
-
-    def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic write: write to a temp file then rename to avoid corruption on crash
-        tmp = self.path.with_suffix(".json.tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                json.dump({"enabled": sorted(self._groups)}, f, ensure_ascii=False, indent=2)
-            tmp.replace(self.path)
-        except OSError:
-            logger.warning("daily_summary: failed to save enabled groups to %s", self.path)
-            tmp.unlink(missing_ok=True)
-
-    def add(self, group_id: int | str) -> None:
-        self._groups.add(str(group_id))
-        self.save()
-
-    def remove(self, group_id: int | str) -> None:
-        self._groups.discard(str(group_id))
-        self.save()
-
-    def contains(self, group_id: int | str) -> bool:
-        return str(group_id) in self._groups
-
-    def all_groups(self) -> list[str]:
-        return sorted(self._groups)
+        super().__init__(path)

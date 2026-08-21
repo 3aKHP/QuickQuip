@@ -18,7 +18,8 @@ from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
-from quickquip.common.paths import CONFIG_AWAKENING_TOML
+from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
+from quickquip.common.paths import AWAKENING_BOREDOM_GROUPS_PATH, CONFIG_AWAKENING_TOML
 
 logger = logging.getLogger(__name__)
 
@@ -743,6 +744,42 @@ _RULE_FALLBACK = "awakening_fallback"
 _RULE_BOREDOM = "awakening_boredom"
 _RULE_RELEVANCE = "awakening_relevance"
 _RULE_QA = "awakening_qa"
+
+# 唤醒规则唯一目录：(规则名, 中文标签)。adapter 命令的 status 展示与
+# on/off 校验、Web Admin 的规则列表都从这里取，不再各自维护副本。
+# 顺序即 /awakening status 的展示顺序。
+AWAKENING_RULES: tuple[tuple[str, str], ...] = (
+    (_RULE_EXTEND, "唤醒延长"),
+    (_RULE_INTEREST, "兴趣话题"),
+    (_RULE_FALLBACK, "兜底概率"),
+    (_RULE_BOREDOM, "无聊唤醒"),
+    (_RULE_RELEVANCE, "相关性唤醒"),
+    (_RULE_QA, "答疑唤醒"),
+)
+AWAKENING_RULE_NAMES: frozenset[str] = frozenset(name for name, _label in AWAKENING_RULES)
+
+
+class BoredomEnabledGroups(OptInGroupSet):
+    """无聊唤醒 opt-in 群集合的唯一写入所有者。
+
+    bot 命令路径（adapter 单例）与 Web Admin 路由共用本类；跨进程写入
+    由 OptInGroupSet 的 FileLock + 锁内重读合并保证不丢更新。
+    """
+
+    log_label = "awakening"
+
+    def __init__(self, path: str | Path = AWAKENING_BOREDOM_GROUPS_PATH) -> None:
+        super().__init__(path)
+
+    def _normalize_group_id(self, group_id: int | str) -> str:
+        return normalize_digit_group_id(group_id)
+
+    def _load_entry(self, raw: object) -> str | None:
+        try:
+            return normalize_digit_group_id(raw)
+        except ValueError:
+            logger.warning("awakening: ignoring invalid group_id in %s: %r", self.path, raw)
+            return None
 
 _BOREDOM_INSTRUCTION = "群聊沉寂已久，你可以自然地冒个泡说点什么。不要说明自己是因为无聊唤醒或定时机制才发言。"
 _EXTEND_INSTRUCTION = "这名群友刚刚显式召唤过你，现在仍在同一段短对话窗口内。只有能自然接上时才回应，保持简短，不要说明唤醒延长或触发机制。"

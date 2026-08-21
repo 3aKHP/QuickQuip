@@ -26,6 +26,7 @@ DAILY_SUMMARIES_DB_PATH = DATA_DIR / "daily_summaries.db"
 PERIOD_REPORTS_DB_PATH = DATA_DIR / "period_reports.db"
 WEEKLY_REPORT_GROUPS_PATH = DATA_DIR / "weekly_report_groups.json"
 MONTHLY_REPORT_GROUPS_PATH = DATA_DIR / "monthly_report_groups.json"
+AWAKENING_BOREDOM_GROUPS_PATH = Path("data/awakening_boredom_groups.json")
 DAILY_MESSAGES_DIR = DATA_DIR / "daily_msgs"
 GAME_ECONOMY_DB_PATH = DATA_DIR / "game_economy.db"
 STATS_JSON_PATH = DATA_DIR / "stats.json"

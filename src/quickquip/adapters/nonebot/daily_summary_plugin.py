@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from time import time
 from zoneinfo import ZoneInfo
 
 try:
@@ -38,6 +37,12 @@ from quickquip.chat.period_report import (
     compute_period_window,
     sample_messages_by_day,
 )
+from quickquip.adapters.nonebot._scheduling import (
+    cron_to_hhmm,
+    mark_triggered,
+    on_cooldown,
+    parse_cron,
+)
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.llm.summarize import generate_daily_summary, generate_period_report
@@ -46,11 +51,8 @@ logger = logging.getLogger(__name__)
 
 _LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
 _RULE_NAME = "daily_summary"
-_MANUAL_COOLDOWN_SECONDS = 60
 
 # Per-group manual trigger cooldown: group_id -> last trigger timestamp.
-# asyncio is single-threaded; the check-then-mark sequence has no await
-# in between, so it is atomically safe within the event loop.
 _last_manual_trigger: dict[str, float] = {}
 
 async def _send_long_message(bot, group_id: int, content: str) -> None:
@@ -64,12 +66,11 @@ async def _send_long_message(bot, group_id: int, content: str) -> None:
 
 
 def _on_cooldown(group_id: int | str) -> bool:
-    last = _last_manual_trigger.get(str(group_id))
-    return last is not None and time() - last < _MANUAL_COOLDOWN_SECONDS
+    return on_cooldown(_last_manual_trigger, group_id)
 
 
 def _mark_triggered(group_id: int | str) -> None:
-    _last_manual_trigger[str(group_id)] = time()
+    mark_triggered(_last_manual_trigger, group_id)
 
 
 # 周报/月报手动触发冷却：独立于每日总结，避免同群两类"立即生成"互相阻挡。
@@ -77,28 +78,11 @@ _last_period_manual_trigger: dict[str, float] = {}
 
 
 def _on_period_cooldown(group_id: int | str) -> bool:
-    last = _last_period_manual_trigger.get(str(group_id))
-    return last is not None and time() - last < _MANUAL_COOLDOWN_SECONDS
+    return on_cooldown(_last_period_manual_trigger, group_id)
 
 
 def _mark_period_triggered(group_id: int | str) -> None:
-    _last_period_manual_trigger[str(group_id)] = time()
-
-
-def _cron_to_hhmm(cron_expr: str) -> str:
-    """Convert a 5-field cron expression to an HH:MM display string.
-
-    Returns the first hour:minute that matches (handles simple numeric fields).
-    Falls back to the raw expression if fields are not plain integers.
-    """
-    parts = cron_expr.split()
-    if len(parts) != 5:
-        return cron_expr
-    minute_field, hour_field = parts[0], parts[1]
-    try:
-        return f"{int(hour_field):02d}:{int(minute_field):02d}"
-    except ValueError:
-        return f"{hour_field}:{minute_field}"
+    mark_triggered(_last_period_manual_trigger, group_id)
 
 
 async def _run_generation(
@@ -169,12 +153,33 @@ async def _generate_one(
         daily_store.upsert(group_id, summary_date, content, model_used)
 
 
+class DailySummaryNotEnabledError(RuntimeError):
+    """群未开启每日总结。"""
+
+
+class DailySummaryCooldownError(RuntimeError):
+    """命令触发过于频繁（冷却中）。"""
+
+
+class DailySummaryInsufficientMessagesError(RuntimeError):
+    """窗口内消息数不足，无法生成每日总结。携带 current/minimum 供调用方渲染文案。"""
+
+    def __init__(self, current: int, minimum: int) -> None:
+        self.current = current
+        self.minimum = minimum
+        super().__init__(f"not enough messages: {current}/{minimum}")
+
+
+class DailySummaryGenerationFailedError(RuntimeError):
+    """每日总结生成失败或被跳过（LLM 失败、persona 缺失等）。"""
+
+
 async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=None) -> dict[str, object]:
     group_key = str(group_id)
     if not daily_enabled_groups.contains(group_key):
-        raise RuntimeError("daily summary is not enabled for this group")
+        raise DailySummaryNotEnabledError("daily summary is not enabled for this group")
     if _on_cooldown(group_key):
-        raise RuntimeError("summary generation is on cooldown")
+        raise DailySummaryCooldownError("summary generation is on cooldown")
 
     _mark_triggered(group_key)
     _ensure_llm_bindings()
@@ -200,10 +205,10 @@ async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=
     messages = daily_collector.read_window(group_key, start_dt.timestamp(), now.timestamp())
     min_messages = svc.config.daily_summary.min_messages
     if len(messages) < min_messages:
-        raise RuntimeError(f"not enough messages: {len(messages)}/{min_messages}")
+        raise DailySummaryInsufficientMessagesError(len(messages), min_messages)
     result = await _run_generation(group_key, start_dt.timestamp(), now.timestamp(), date_label)
     if result is None:
-        raise RuntimeError("summary generation skipped or failed")
+        raise DailySummaryGenerationFailedError("summary generation skipped or failed")
 
     content, model_used = result
     if bot is None:
@@ -305,19 +310,6 @@ async def _job_publish_summaries() -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-def _parse_cron(cron_expr: str) -> dict[str, str]:
-    parts = cron_expr.split()
-    if len(parts) != 5:
-        return {"minute": "0", "hour": "6", "day": "*", "month": "*", "day_of_week": "*"}
-    return {
-        "minute": parts[0],
-        "hour": parts[1],
-        "day": parts[2],
-        "month": parts[3],
-        "day_of_week": parts[4],
-    }
-
-
 def _register_scheduler_jobs() -> None:
     _ensure_llm_bindings()
     svc = get_llm_service()
@@ -362,14 +354,14 @@ def _register_scheduler_jobs() -> None:
         "cron",
         id="daily_summary_generate",
         replace_existing=True,
-        **_parse_cron(daily_cfg.generate_cron),
+        **parse_cron(daily_cfg.generate_cron, fallback_hour="6"),
     )
     scheduler.add_job(
         _wrapped_publish,
         "cron",
         id="daily_summary_publish",
         replace_existing=True,
-        **_parse_cron(daily_cfg.publish_cron),
+        **parse_cron(daily_cfg.publish_cron, fallback_hour="6"),
     )
     logger.info(
         "daily_summary: jobs registered (generate=%s, publish=%s)",
@@ -408,8 +400,8 @@ def register_daily_summary_commands(on_command) -> None:
             rule_switch.enable(group_id, _RULE_NAME)
             rule_switch.save(RULE_SWITCH_PATH)
             cfg = svc.config.daily_summary
-            gen_time = _cron_to_hhmm(cfg.generate_cron)
-            pub_time = _cron_to_hhmm(cfg.publish_cron)
+            gen_time = cron_to_hhmm(cfg.generate_cron)
+            pub_time = cron_to_hhmm(cfg.publish_cron)
             await summary_cmd.finish(
                 f"本群每日总结已开启。将于每日 {gen_time} 生成、{pub_time} 发布。"
             )
@@ -435,22 +427,17 @@ def register_daily_summary_commands(on_command) -> None:
                 await summary_cmd.finish("仅管理员可执行此操作")
             try:
                 await send_daily_summary_now(group_id, before_generate=lambda: summary_cmd.send("正在生成总结，请稍候……"))
-            except RuntimeError as exc:
-                message = str(exc)
-                if message == "daily summary is not enabled for this group":
-                    await summary_cmd.finish("本群未开启每日总结，请先使用 /summary on 开启。")
-                if message == "summary generation is on cooldown":
-                    await summary_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
-                if message.startswith("not enough messages:"):
-                    counts = message.removeprefix("not enough messages:").strip()
-                    current, minimum = counts.split("/", 1)
-                    await summary_cmd.finish(
-                        f"当前窗口消息数不足（{current} 条，"
-                        f"至少需要 {minimum} 条），无法生成总结。"
-                    )
-                if message == "summary generation skipped or failed":
-                    await summary_cmd.finish("总结生成失败，请查看日志。")
-                raise
+            except DailySummaryNotEnabledError:
+                await summary_cmd.finish("本群未开启每日总结，请先使用 /summary on 开启。")
+            except DailySummaryCooldownError:
+                await summary_cmd.finish("操作过于频繁，请稍后再试（每分钟限一次）。")
+            except DailySummaryInsufficientMessagesError as exc:
+                await summary_cmd.finish(
+                    f"当前窗口消息数不足（{exc.current} 条，"
+                    f"至少需要 {exc.minimum} 条），无法生成总结。"
+                )
+            except DailySummaryGenerationFailedError:
+                await summary_cmd.finish("总结生成失败，请查看日志。")
             await summary_cmd.finish()
 
         # ── unknown subcommand ────────────────────────────────────────
@@ -661,11 +648,11 @@ def _register_period_jobs() -> None:
         pub_id = f"{period_type}_report_publish"
         scheduler.add_job(
             _make_wrapped(gen_id, lambda pt=period_type: _job_generate_period_reports(pt)),
-            "cron", id=gen_id, replace_existing=True, **_parse_cron(cfg.generate_cron),
+            "cron", id=gen_id, replace_existing=True, **parse_cron(cfg.generate_cron, fallback_hour="6"),
         )
         scheduler.add_job(
             _make_wrapped(pub_id, lambda pt=period_type: _job_publish_period_reports(pt)),
-            "cron", id=pub_id, replace_existing=True, **_parse_cron(cfg.publish_cron),
+            "cron", id=pub_id, replace_existing=True, **parse_cron(cfg.publish_cron, fallback_hour="6"),
         )
         logger.info(
             "period_report[%s]: jobs registered (generate=%s, publish=%s)",
@@ -755,8 +742,8 @@ async def _handle_period_subcommand(
             await summary_cmd.finish("仅管理员可执行此操作")
         enabled.add(group_id)
         cfg = svc.config.weekly_report if period_type == PERIOD_WEEKLY else svc.config.monthly_report
-        gen_time = _cron_to_hhmm(cfg.generate_cron)
-        pub_time = _cron_to_hhmm(cfg.publish_cron)
+        gen_time = cron_to_hhmm(cfg.generate_cron)
+        pub_time = cron_to_hhmm(cfg.publish_cron)
         await summary_cmd.finish(f"本群{kind_word}已开启。将于每周期 {gen_time} 生成，每天 {pub_time} 发布（未发布的报告会自动补发）。")
         return True
 
