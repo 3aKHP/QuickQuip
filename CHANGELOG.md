@@ -6,6 +6,31 @@
 
 （暂无）
 
+## [1.12.1] - 2026-08-21
+
+本版为 maintenance / refactor release：一批唤醒与用量修复之外，主体是按 [`docs/dev/style.md`](docs/dev/style.md) 完成的代码规范化拆分——LLM 服务、工具循环、唤醒、总结编排与 Web Admin 前端的模块边界全面收紧，外部行为保持不变。维护者可感知收益：配置/规则/持久化的单一事实来源、跨进程写入一致性、更清晰的模块职责；部署者可感知收益：无迁移负担，配置与数据格式全兼容。
+
+### ✨ 新增 (Added)
+
+- **用量页支持人格维度**：LLM 用量统计新增人格（persona）聚合与筛选，聊天、私聊、日报、播报、周报、月报与自动记忆请求按实际人格归因计量；事件明细显示人格，无可靠来源的调用统一显示后端下发的「(未归因)」标签。
+
+### 🔧 变更 (Changed)
+
+- **MCP era 标签统一由服务端下发**：协议时代标签（modern / auto/legacy）后端单源，聊天状态与 Web Admin 一致渲染；用量归因改经公开 Trace 接口。
+- **代码规范化拆分（refactor，无行为变化）**：
+  - LLM 服务：quick-judge 通道、一次性生成管线、工具发现与结果后处理、MCP 生命周期各自独立成模块；主回复链路的超长函数拆分为图像预处理/历史加载/持久化三段。
+  - 唤醒：无聊巡检发送移至适配层，chat 领域零传输；opt-in 群开关持久化统一单一实现，bot 与 Web Admin 跨进程写入不再丢更新。
+  - 总结：每日总结/周期报告生成编排下沉 chat 领域层；`/summary now` 报错类型化（文案不变）。
+  - 贴吧：服务不再 import 即读盘，实例由组合根持有，登录 CLI 不再有覆盖空池风险。
+  - Web Admin 前端：API 层全面类型化并逐字段对齐后端；诊断页/贴吧页/群设置拆分。
+
+### 🐛 修复 (Fixed)
+
+- **被动唤醒输入去重与语音参与**：当前消息不再同时出现在 prompt 与上下文造成重复；语音转写参与被动唤醒判定；Bot 回复缓存加 30 分钟时效；英文/数字/代码标识符参与相关性快筛。
+- **无聊唤醒运行时语义**：扫描周期与冷却分离（新增 `boredom_scan_interval`，保存即生效）；重启后沉寂未知的群不再盲目冒泡；长沉寂门槛不再被状态清理提前满足；取消 opt-in 即时清理状态。
+- **quick-judge 失败分类**：技术失败（超时/异常/截断等）与业务 false 区分，技术失败不污染 60 秒判定缓存；诊断日志结构化且脱敏；新增 reasoning 模型预算指引（真实部署验收：完成率 5%→95%+）。
+- **用量统计时区统一**：趋势/汇总/明细统一按北京时间（Asia/Shanghai），凌晨记录不再错记前一日；管理端时间不随浏览器时区变化。
+
 ## [1.12.0] - 2026-08-18
 
 ### ✨ 新增 (Added)
@@ -714,7 +739,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/3aKHP/QuickQuip/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/3aKHP/QuickQuip/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/3aKHP/QuickQuip/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/3aKHP/QuickQuip/compare/v1.10.2...v1.11.0
