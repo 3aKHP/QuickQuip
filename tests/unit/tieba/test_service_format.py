@@ -6,12 +6,12 @@ import pytest
 
 from plugins.tieba_service import TiebaConfig, TiebaService
 from plugins.tieba_store import TiebaStore, TiebaThread
+from quickquip.tieba.formatting import build_thread_preview, format_sources, format_status
 
 
 @pytest.fixture
-def seeded_service(tmp_path: Path) -> TiebaService:
-    store_path = tmp_path / "pool.json"
-    store = TiebaStore(store_path, max_threads=3, recent_sent_limit=3)
+def seeded_store(tmp_path: Path) -> TiebaStore:
+    store = TiebaStore(tmp_path / "pool.json", max_threads=3, recent_sent_limit=3)
     store.record_sync_success(
         "测试",
         [
@@ -42,8 +42,12 @@ def seeded_service(tmp_path: Path) -> TiebaService:
     )
     store.record_sync_failure("第二", "需要登录", login_required=True, failed_at=20)
     store.save()
+    return store
 
-    config = TiebaConfig(
+
+@pytest.fixture
+def tieba_config(tmp_path: Path, seeded_store: TiebaStore) -> TiebaConfig:
+    return TiebaConfig(
         enabled=True,
         sync_interval_seconds=900,
         max_pool_size=240,
@@ -56,20 +60,31 @@ def seeded_service(tmp_path: Path) -> TiebaService:
         profile_dir=tmp_path / "profile",
         crawler_profile_dir=tmp_path / "crawler_profile",
         state_path=tmp_path / "storage_state.json",
-        store_path=store_path,
+        store_path=tmp_path / "pool.json",
         forum_keyword="测试",
         forum_keywords=("测试", "第二"),
     )
-    return TiebaService(config=config)
 
 
-def test_config_exposes_keywords(seeded_service: TiebaService):
-    assert seeded_service.config.forum_keyword == "测试"
-    assert seeded_service.config.forum_keywords == ("测试", "第二")
+def _forum_states(store: TiebaStore, forums: tuple[str, ...]):
+    return [(forum, store.get_forum_state(forum)) for forum in forums]
 
 
-def test_build_thread_preview_contains_expected_fields(seeded_service: TiebaService):
-    preview = seeded_service.build_thread_preview(
+def test_config_exposes_keywords(tieba_config: TiebaConfig):
+    assert tieba_config.forum_keyword == "测试"
+    assert tieba_config.forum_keywords == ("测试", "第二")
+
+
+def test_service_construction_does_not_load_store(tieba_config: TiebaConfig):
+    service = TiebaService(config=tieba_config)
+    assert service.count_threads(("测试", "第二")) == 0
+    service.load()
+    assert service.count_threads(("测试",)) == 3
+    assert service.count_threads(("第二",)) == 1
+
+
+def test_build_thread_preview_contains_expected_fields():
+    preview = build_thread_preview(
         TiebaThread(
             tid="104",
             title="测试标题",
@@ -87,22 +102,35 @@ def test_build_thread_preview_contains_expected_fields(seeded_service: TiebaServ
     assert preview.endswith("https://tieba.baidu.com/p/104")
 
 
-def test_format_status_includes_source_count(seeded_service: TiebaService):
-    status = seeded_service.format_status()
+def test_format_status_includes_source_count(tieba_config: TiebaConfig, seeded_store: TiebaStore):
+    status = format_status(
+        tieba_config,
+        _forum_states(seeded_store, tieba_config.forum_keywords),
+        total_cached=seeded_store.count(tieba_config.forum_keywords),
+        playwright_ready=False,
+    )
     assert "已配置来源：2 个" in status
     assert "来源：测试吧" in status
     assert "来源：第二吧" in status
     assert "缓存帖子：" in status
 
 
-def test_format_sources_lists_every_source(seeded_service: TiebaService):
-    sources = seeded_service.format_sources()
+def test_format_sources_lists_every_source(tieba_config: TiebaConfig, seeded_store: TiebaStore):
+    sources = format_sources(
+        tieba_config,
+        _forum_states(seeded_store, tieba_config.forum_keywords),
+        show_usage_hint=True,
+    )
     assert "贴吧来源" in sources
     assert "- 测试吧 | 缓存 3 条 | 状态 ok | 登录态 正常或未判定" in sources
     assert "- 第二吧 | 缓存 1 条 | 状态 login_required | 登录态 需要续签" in sources
 
 
-def test_format_sources_filter(seeded_service: TiebaService):
-    sources = seeded_service.format_sources("第二")
+def test_format_sources_filter(tieba_config: TiebaConfig, seeded_store: TiebaStore):
+    sources = format_sources(
+        tieba_config,
+        _forum_states(seeded_store, ("第二",)),
+        show_usage_hint=False,
+    )
     assert "已配置来源：2 个" in sources
     assert "- 第二吧 | 缓存 1 条 | 状态 login_required | 登录态 需要续签" in sources

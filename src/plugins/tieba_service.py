@@ -1,6 +1,7 @@
 from quickquip.tieba.config import TIEBA_RULE_NAME, TiebaConfig, load_tieba_config
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
-from quickquip.tieba.service import TiebaService, tieba_service
+from quickquip.tieba.service import TiebaService
+from quickquip.app.message_pipeline import tieba_service
 
 
 __all__ = [

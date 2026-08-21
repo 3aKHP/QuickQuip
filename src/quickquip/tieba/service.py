@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
-from quickquip.tieba.store import TiebaStore, TiebaThread
+from quickquip.tieba.store import TiebaForumState, TiebaStore, TiebaThread
 from quickquip.tieba.config import (
     TiebaConfig,
-    format_timestamp,
     load_tieba_config,
     normalize_forum_keyword,
 )
@@ -15,6 +14,13 @@ from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 
 
 class TiebaService:
+    """贴吧同步编排与后台循环生命周期。
+
+    构造不做磁盘 IO：帖子池由 load()/startup() 显式加载。共享实例由组合根
+    quickquip.app.message_pipeline 持有；独立入口（web admin、login CLI）
+    自行构造或从组合根获取后显式 load()。
+    """
+
     def __init__(self, config: TiebaConfig | None = None):
         self._use_env_config = config is None
         self.config = config or load_tieba_config()
@@ -23,10 +29,13 @@ class TiebaService:
             max_threads=self.config.max_pool_size,
             recent_sent_limit=self.config.recent_sent_limit,
         )
-        self.store.load()
         self.crawler = TiebaCrawler(self.config)
         self._sync_lock = asyncio.Lock()
         self._background_task: asyncio.Task[None] | None = None
+
+    def load(self) -> None:
+        """从磁盘加载帖子池。启动流程显式调用，import/构造时不触发。"""
+        self.store.load()
 
     def reload_config(self) -> TiebaConfig:
         if self._use_env_config:
@@ -36,10 +45,24 @@ class TiebaService:
         self.crawler.config = self.config
         return self.config
 
-    def _playwright_ready(self) -> bool:
+    def playwright_ready(self) -> bool:
         return self.crawler.playwright_ready()
 
-    def _resolve_forum_keywords(
+    # --- 窄读接口：供 adapter / web 层读取池状态，调用方不穿透 store ---
+
+    def list_forum_keywords(self) -> list[str]:
+        return self.store.list_forum_keywords()
+
+    def get_forum_state(self, forum_keyword: str) -> TiebaForumState | None:
+        return self.store.get_forum_state(forum_keyword)
+
+    def list_threads(self, forum_keywords: Iterable[str]) -> list[TiebaThread]:
+        return self.store.list_threads(forum_keywords)
+
+    def count_threads(self, forum_keywords: Iterable[str]) -> int:
+        return self.store.count(forum_keywords)
+
+    def resolve_forum_keywords(
         self,
         forum_keyword: str | None = None,
         *,
@@ -91,6 +114,23 @@ class TiebaService:
                 lines.append(f"- {forum_keyword}吧：{item['message']}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _classify_sync_error(exc: Exception) -> tuple[str, str, bool, bool]:
+        """分类同步异常，返回 (message, status, login_required, wrap)。
+
+        wrap=True 表示单来源时需包装成 TiebaServiceError 抛出；wrap=False
+        时原异常直接重抛（调用方依赖 TiebaLoginRequiredError 等具体类型）。
+        分支顺序与原 except 链一致：Playwright 缺失时 PLAYWRIGHT_ERROR_TYPES
+        退化为 RuntimeError，仍先于 TiebaServiceError 命中，语义不变。
+        """
+        if isinstance(exc, TiebaLoginRequiredError):
+            return str(exc), "login_required", True, False
+        if isinstance(exc, PLAYWRIGHT_ERROR_TYPES):
+            return f"Playwright 访问失败：{exc}", "error", False, True
+        if isinstance(exc, TiebaServiceError):
+            return str(exc), "error", False, False
+        return f"贴吧同步异常：{exc}", "error", False, True
+
     async def sync_now(
         self,
         *,
@@ -99,7 +139,7 @@ class TiebaService:
         on_progress: Callable[[str], None] | None = None,
     ) -> dict[str, object]:
         async with self._sync_lock:
-            selected_forums = self._resolve_forum_keywords(forum_keyword)
+            selected_forums = self.resolve_forum_keywords(forum_keyword)
             results: list[dict[str, object]] = []
 
             for selected_forum in selected_forums:
@@ -121,68 +161,22 @@ class TiebaService:
                     on_progress(f"▶ 开始同步 {selected_forum}吧")
                 try:
                     threads = await self.crawler.collect_threads(selected_forum, on_progress=on_progress)
-                except TiebaLoginRequiredError as exc:
-                    self.store.record_sync_failure(selected_forum, str(exc), login_required=True)
-                    if on_progress:
-                        on_progress(f"✗ {selected_forum}吧 需要重新登录：{exc}")
-                    if len(selected_forums) == 1:
-                        raise
-                    results.append(
-                        {
-                            "forum_keyword": selected_forum,
-                            "updated": 0,
-                            "count": self.store.count((selected_forum,)),
-                            "status": "login_required",
-                            "message": str(exc),
-                        }
-                    )
-                    continue
-                except PLAYWRIGHT_ERROR_TYPES as exc:
-                    message = f"Playwright 访问失败：{exc}"
-                    self.store.record_sync_failure(selected_forum, message)
-                    if on_progress:
-                        on_progress(f"✗ {selected_forum}吧 {message}")
-                    if len(selected_forums) == 1:
-                        raise TiebaServiceError(message) from exc
-                    results.append(
-                        {
-                            "forum_keyword": selected_forum,
-                            "updated": 0,
-                            "count": self.store.count((selected_forum,)),
-                            "status": "error",
-                            "message": message,
-                        }
-                    )
-                    continue
-                except TiebaServiceError as exc:
-                    self.store.record_sync_failure(selected_forum, str(exc))
-                    if on_progress:
-                        on_progress(f"✗ {selected_forum}吧 {exc}")
-                    if len(selected_forums) == 1:
-                        raise
-                    results.append(
-                        {
-                            "forum_keyword": selected_forum,
-                            "updated": 0,
-                            "count": self.store.count((selected_forum,)),
-                            "status": "error",
-                            "message": str(exc),
-                        }
-                    )
-                    continue
                 except Exception as exc:
-                    message = f"贴吧同步异常：{exc}"
-                    self.store.record_sync_failure(selected_forum, message)
+                    message, status, login_required, wrap = self._classify_sync_error(exc)
+                    self.store.record_sync_failure(selected_forum, message, login_required=login_required)
                     if on_progress:
-                        on_progress(f"✗ {selected_forum}吧 {message}")
+                        detail = f"需要重新登录：{exc}" if login_required else message
+                        on_progress(f"✗ {selected_forum}吧 {detail}")
                     if len(selected_forums) == 1:
-                        raise TiebaServiceError(message) from exc
+                        if wrap:
+                            raise TiebaServiceError(message) from exc
+                        raise
                     results.append(
                         {
                             "forum_keyword": selected_forum,
                             "updated": 0,
                             "count": self.store.count((selected_forum,)),
-                            "status": "error",
+                            "status": status,
                             "message": message,
                         }
                     )
@@ -209,6 +203,7 @@ class TiebaService:
             }
 
     async def startup(self) -> None:
+        self.load()
         self.reload_config()
         if not self.config.is_configured:
             return
@@ -235,7 +230,7 @@ class TiebaService:
             raise
 
     async def get_random_thread(self, forum_keyword: str | None = None) -> TiebaThread | None:
-        selected_forums = self._resolve_forum_keywords(forum_keyword)
+        selected_forums = self.resolve_forum_keywords(forum_keyword)
         if self.store.count(selected_forums) == 0:
             try:
                 await self.sync_now(force=True, forum_keyword=forum_keyword)
@@ -255,77 +250,14 @@ class TiebaService:
         return random.choice(valid) if valid else (random.choice(threads) if threads else None)
 
     def is_login_required(self, forum_keyword: str | None = None) -> bool:
-        selected_forums = self._resolve_forum_keywords(forum_keyword, require_enabled=False)
+        selected_forums = self.resolve_forum_keywords(forum_keyword, require_enabled=False)
         return self.store.any_login_required(selected_forums)
 
     def mark_sent(self, thread: TiebaThread) -> None:
         self.store.mark_sent(thread.tid, thread.forum_keyword)
 
-    def format_status(self, forum_keyword: str | None = None) -> str:
-        selected_forums = self._resolve_forum_keywords(forum_keyword, require_enabled=False)
-        lines = ["贴吧状态"]
-        lines.append(f"功能开关：{'ON' if self.config.enabled else 'OFF'}")
-        lines.append(f"已配置来源：{len(self.config.forum_keywords)} 个")
-        lines.append(f"Playwright：{'已就绪' if self._playwright_ready() else '未安装'}")
-        lines.append(f"缓存帖子：{self.store.count(selected_forums)}")
-        lines.append(f"偏好带图：{'ON' if self.config.prefer_image_threads else 'OFF'}")
-        lines.append(f"最近避重：{self.config.random_avoid_recent}")
-        lines.append(f"状态文件：{'已存在' if self.config.state_path.exists() else '缺失'}")
-
-        for selected_forum in selected_forums:
-            state = self.store.get_forum_state(selected_forum)
-            lines.append(f"来源：{selected_forum}吧")
-            lines.append(f"  缓存帖子：{len(state.threads) if state else 0}")
-            lines.append(f"  上次开始：{format_timestamp(state.last_sync_started_at) if state else '未记录'}")
-            lines.append(f"  上次完成：{format_timestamp(state.last_sync_completed_at) if state else '未记录'}")
-            lines.append(f"  上次状态：{state.last_sync_status if state else 'idle'}")
-            lines.append(f"  登录态：{'需要人工续签' if state and state.login_required else '正常或未判定'}")
-            if state and state.last_error:
-                lines.append(f"  最近错误：{state.last_error}")
-
-        lines.append("登录工具：python -m quickquip.tieba.login")
-        return "\n".join(lines)
-
-    def format_sources(self, forum_keyword: str | None = None) -> str:
-        selected_forums = self._resolve_forum_keywords(forum_keyword, require_enabled=False)
-        lines = ["贴吧来源"]
-        lines.append(f"功能开关：{'ON' if self.config.enabled else 'OFF'}")
-        if not self.config.forum_keywords:
-            lines.append("当前未配置任何贴吧来源")
-            lines.append("请在 .env 中设置 TIEBA_FORUM_KEYWORDS 或 TIEBA_FORUM_KEYWORD")
-            return "\n".join(lines)
-
-        lines.append(f"已配置来源：{len(self.config.forum_keywords)} 个")
-        if not selected_forums:
-            lines.append("当前未选中任何来源")
-            return "\n".join(lines)
-
-        for selected_forum in selected_forums:
-            state = self.store.get_forum_state(selected_forum)
-            count = len(state.threads) if state else 0
-            status = state.last_sync_status if state else "idle"
-            login_status = "需要续签" if state and state.login_required else "正常或未判定"
-            lines.append(f"- {selected_forum}吧 | 缓存 {count} 条 | 状态 {status} | 登录态 {login_status}")
-
-        if forum_keyword is None:
-            lines.append("可用：/tieba <贴吧名>、/tieba text <贴吧名>、/tieba status <贴吧名>")
-        return "\n".join(lines)
-
-    def build_thread_preview(self, thread: TiebaThread) -> str:
-        summary = thread.main_post_text or "主楼内容为空或当前未能提取正文。"
-        if len(summary) > 180:
-            summary = f"{summary[:180]}..."
-        lines = [f"【{thread.title}】"]
-        if thread.forum_keyword:
-            lines.append(f"来源：{thread.forum_keyword}吧")
-        if thread.author_name:
-            lines.append(f"作者：{thread.author_name}")
-        lines.append(summary)
-        lines.append(thread.thread_url)
-        return "\n".join(lines)
-
     async def interactive_login(self, forum_keyword: str | None = None) -> None:
-        selected_forums = self._resolve_forum_keywords(forum_keyword, require_enabled=False)
+        selected_forums = self.resolve_forum_keywords(forum_keyword, require_enabled=False)
         if not selected_forums:
             raise TiebaServiceError("请先在 .env 中设置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS")
         login_forum = selected_forums[0]
@@ -340,6 +272,3 @@ class TiebaService:
         self.store.save()
         print("登录态验证通过，浏览器资料目录已保存。")
         print(f"已导出跨平台登录态：{self.config.state_path}")
-
-
-tieba_service = TiebaService()

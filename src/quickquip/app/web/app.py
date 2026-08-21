@@ -10,6 +10,11 @@ _DIST = PROJECT_ROOT / "frontend" / "dist"
 
 def create_app() -> FastAPI:
     load_web_env()
+    # web 进程独立运行，不经过 bot 的 startup；显式加载一次贴吧帖子池快照
+    from quickquip.app.message_pipeline import tieba_service
+
+    tieba_service.load()
+
     app = FastAPI(title="QuickQuip Admin")
 
     app.include_router(auth.router, prefix="/ops/api")
