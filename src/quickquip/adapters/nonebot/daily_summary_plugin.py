@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -30,12 +29,12 @@ from quickquip.app.message_pipeline import (
 )
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.chat import summary_jobs
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.period_report import (
     PERIOD_MONTHLY,
     PERIOD_WEEKLY,
     compute_period_window,
-    sample_messages_by_day,
 )
 from quickquip.adapters.nonebot._scheduling import (
     cron_to_hhmm,
@@ -45,7 +44,6 @@ from quickquip.adapters.nonebot._scheduling import (
 )
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
 from quickquip.common.bot_action_trace import bot_action_trace
-from quickquip.llm.summarize import generate_daily_summary, generate_period_report
 
 logger = logging.getLogger(__name__)
 
@@ -83,74 +81,6 @@ def _on_period_cooldown(group_id: int | str) -> bool:
 
 def _mark_period_triggered(group_id: int | str) -> None:
     mark_triggered(_last_period_manual_trigger, group_id)
-
-
-async def _run_generation(
-    group_id: str,
-    start_ts: float,
-    end_ts: float,
-    date_label: str,
-) -> tuple[str, str] | None:
-    """Core generation logic shared by the scheduled job and the manual command.
-
-    Returns (content, model_used) on success, None if skipped or failed.
-    Does NOT persist to the store — callers decide what to do with the result.
-    """
-    _ensure_llm_bindings()
-    svc = get_llm_service()
-
-    messages = daily_collector.read_window(group_id, start_ts, end_ts)
-    llm_config = svc.config
-    daily_config = llm_config.daily_summary
-
-    if len(messages) < daily_config.min_messages:
-        logger.info(
-            "daily_summary: group %s has %d messages (< %d), skipping",
-            group_id, len(messages), daily_config.min_messages,
-        )
-        return None
-
-    settings = svc.get_group_settings(group_id)
-    persona = llm_config.personas.get(settings.persona_id) or next(
-        iter(llm_config.personas.values()), None
-    )
-    if persona is None:
-        logger.warning("daily_summary: no persona available for group %s", group_id)
-        return None
-
-    gs = stats_tracker.get_stats(group_id)
-    name_table: dict[str, str] = dict(gs.user_names) if gs and gs.user_names else {}
-
-    try:
-        return await generate_daily_summary(
-            messages=messages,
-            persona=persona,
-            group_id=group_id,
-            date_label=date_label,
-            name_table=name_table,
-            summary_config=daily_config,
-            llm_config=llm_config,
-            default_provider_id=settings.provider_id,
-            default_model=settings.model,
-            local_tz=_LOCAL_TZ,
-        )
-    except Exception:
-        logger.exception("daily_summary: generation failed for group %s", group_id)
-        return None
-
-
-async def _generate_one(
-    group_id: str,
-    start_ts: float,
-    end_ts: float,
-    date_label: str,
-    summary_date: str,
-) -> None:
-    """Generate and persist a summary for one group. Used by the scheduled job."""
-    result = await _run_generation(group_id, start_ts, end_ts, date_label)
-    if result is not None:
-        content, model_used = result
-        daily_store.upsert(group_id, summary_date, content, model_used)
 
 
 class DailySummaryNotEnabledError(RuntimeError):
@@ -206,7 +136,10 @@ async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=
     min_messages = svc.config.daily_summary.min_messages
     if len(messages) < min_messages:
         raise DailySummaryInsufficientMessagesError(len(messages), min_messages)
-    result = await _run_generation(group_key, start_dt.timestamp(), now.timestamp(), date_label)
+    result = await summary_jobs.run_summary_generation(
+        group_key, start_dt.timestamp(), now.timestamp(), date_label,
+        svc=svc, collector=daily_collector, stats_tracker=stats_tracker,
+    )
     if result is None:
         raise DailySummaryGenerationFailedError("summary generation skipped or failed")
 
@@ -233,57 +166,14 @@ async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=
 
 async def _job_generate_summaries() -> None:
     """06:00 scheduled job: generate summaries for the previous 06:00–06:00 window."""
-    now = datetime.now(tz=_LOCAL_TZ)
-    today_06 = now.replace(hour=6, minute=0, second=0, microsecond=0)
-    yesterday_06 = today_06 - timedelta(days=1)
-
-    start_ts = yesterday_06.timestamp()
-    end_ts = today_06.timestamp()
-    summary_date = yesterday_06.date().isoformat()
-    date_label = (
-        yesterday_06.strftime("%Y年%m月%d日 06:00")
-        + " 至 "
-        + today_06.strftime("%m月%d日 06:00")
+    _ensure_llm_bindings()
+    await summary_jobs.generate_summaries_job(
+        svc=get_llm_service(),
+        collector=daily_collector,
+        store=daily_store,
+        enabled_groups=daily_enabled_groups,
+        stats_tracker=stats_tracker,
     )
-
-    # Run all groups concurrently to avoid blocking the event loop for O(n) LLM calls
-    tasks = [
-        _generate_one(gid, start_ts, end_ts, date_label, summary_date)
-        for gid in daily_enabled_groups.all_groups()
-    ]
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def _publish_one(bot, row: dict) -> None:
-    """Send one summary to its group; mark published and clean up raw files on success."""
-    group_id = row["group_id"]
-    summary_date = row["summary_date"]
-    try:
-        with bot_action_trace(
-            trigger_kind="scheduled",
-            reason_code="daily_summary.publish",
-            reason_detail=f"定时发布每日总结：{summary_date}",
-            rule_name=_RULE_NAME,
-            chat_type="group",
-            group_id=group_id,
-            reply_preview=row["content"],
-            llm_used=str(row.get("model_used", "")) != "fallback",
-            model=str(row.get("model_used", "")),
-            source="daily_summary.scheduled_publish",
-        ):
-            await _send_long_message(bot, int(group_id), row["content"])
-        daily_store.mark_published(group_id, summary_date)
-        # Delete JSONL files only after confirmed delivery; covers the two dates in the window
-        import datetime as _dt
-        d = _dt.date.fromisoformat(summary_date)
-        daily_collector.delete_date_file(group_id, d)
-        daily_collector.delete_date_file(group_id, d - timedelta(days=1))
-        logger.info("daily_summary: published for group %s (%s)", group_id, summary_date)
-    except Exception:
-        logger.warning(
-            "daily_summary: publish failed for group %s (%s)", group_id, summary_date,
-            exc_info=True,
-        )
 
 
 async def _job_publish_summaries() -> None:
@@ -296,18 +186,28 @@ async def _job_publish_summaries() -> None:
         logger.warning("daily_summary: bot not available at publish time")
         return
 
-    unpublished = daily_store.get_unpublished()
-    if not unpublished:
-        return
+    async def _send(row: dict) -> None:
+        group_id = row["group_id"]
+        with bot_action_trace(
+            trigger_kind="scheduled",
+            reason_code="daily_summary.publish",
+            reason_detail=f"定时发布每日总结：{row['summary_date']}",
+            rule_name=_RULE_NAME,
+            chat_type="group",
+            group_id=group_id,
+            reply_preview=row["content"],
+            llm_used=str(row.get("model_used", "")) != "fallback",
+            model=str(row.get("model_used", "")),
+            source="daily_summary.scheduled_publish",
+        ):
+            await _send_long_message(bot, int(group_id), row["content"])
 
-    # Only publish for groups that are still enabled
-    enabled = set(daily_enabled_groups.all_groups())
-    tasks = [
-        _publish_one(bot, row)
-        for row in unpublished
-        if row["group_id"] in enabled
-    ]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    await summary_jobs.publish_summaries_job(
+        store=daily_store,
+        collector=daily_collector,
+        enabled_groups=daily_enabled_groups,
+        send=_send,
+    )
 
 
 def _register_scheduler_jobs() -> None:
@@ -476,104 +376,37 @@ def _period_enabled_groups(period_type: str):
     raise ValueError(f"未知 period_type: {period_type!r}")
 
 
-async def _run_period_generation(
-    group_id: str,
-    period_type: str,
-    start_ts: float,
-    end_ts: float,
-    period_label: str,
-) -> tuple[str, str] | None:
-    """Core generation logic shared by the scheduled job and the manual command.
-
-    Returns (content, model_used) on success, None if skipped or failed.
-    Does NOT persist to the store — callers decide what to do with the result.
-    """
-    _ensure_llm_bindings()
-    svc = get_llm_service()
-    llm_config = svc.config
-
-    if period_type == PERIOD_WEEKLY:
-        cfg = llm_config.weekly_report
-    else:
-        cfg = llm_config.monthly_report
-
-    messages = wordcloud_collector.read_window(group_id, start_ts, end_ts)
-    if len(messages) < cfg.min_messages:
-        logger.info(
-            "period_report[%s]: group %s has %d messages (< %d), skipping",
-            period_type, group_id, len(messages), cfg.min_messages,
-        )
-        return None
-
-    sampled = sample_messages_by_day(messages, cfg.sample_per_day)
-    if not sampled:
-        return None
-
-    settings = svc.get_group_settings(group_id)
-    persona = llm_config.personas.get(settings.persona_id) or next(
-        iter(llm_config.personas.values()), None
-    )
-    if persona is None:
-        logger.warning("period_report[%s]: no persona available for group %s", period_type, group_id)
-        return None
-
-    gs = stats_tracker.get_stats(group_id)
-    name_table: dict[str, str] = dict(gs.user_names) if gs and gs.user_names else {}
-
-    try:
-        return await generate_period_report(
-            sampled,
-            persona,
-            group_id,
-            period_label=period_label,
-            period_kind=period_type,
-            name_table=name_table,
-            length_hint=cfg.length_hint,
-            model_cascade=cfg.model_cascade,
-            llm_config=llm_config,
-            default_provider_id=settings.provider_id,
-            default_model=settings.model,
-            local_tz=_LOCAL_TZ,
-        )
-    except Exception:
-        logger.exception("period_report[%s]: generation failed for group %s", period_type, group_id)
-        return None
-
-
-async def _generate_period_one(group_id: str, period_type: str, *, now: datetime | None = None) -> tuple[str, str] | None:
-    """Generate and persist a period report for one group. Used by the scheduled job."""
-    if now is None:
-        now = datetime.now(tz=_LOCAL_TZ)
-    start_ts, end_ts, period_key, period_label = compute_period_window(period_type, now)
-
-    result = await _run_period_generation(group_id, period_type, start_ts, end_ts, period_label)
-    if result is not None:
-        content, model_used = result
-        period_store.upsert(group_id, period_type, period_key, content, model_used)
-    return result
-
-
 async def _job_generate_period_reports(period_type: str) -> None:
     """定时生成 job：为所有启用群生成上一个完整周期的周期报告。"""
-    enabled = _period_enabled_groups(period_type)
-    groups = enabled.all_groups()
-    if not groups:
+    _ensure_llm_bindings()
+    await summary_jobs.generate_period_reports_job(
+        period_type,
+        svc=get_llm_service(),
+        collector=wordcloud_collector,
+        store=period_store,
+        enabled_groups=_period_enabled_groups(period_type),
+        stats_tracker=stats_tracker,
+    )
+
+
+async def _job_publish_period_reports(period_type: str) -> None:
+    """定时发布 job：把所有未发布的周期报告发出去。"""
+    if nonebot is None:
         return
-    now = datetime.now(tz=_LOCAL_TZ)
-    tasks = [_generate_period_one(gid, period_type, now=now) for gid in groups]
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
-async def _publish_period_one(bot, row: dict, period_type: str) -> None:
-    """发送单个周期报告到群里并标记已发布。"""
-    group_id = row["group_id"]
-    period_key = row["period_key"]
-    node_name = "群周报" if period_type == PERIOD_WEEKLY else "群月报"
     try:
+        bot = nonebot.get_bot()
+    except Exception:
+        logger.warning("period_report[%s]: bot not available at publish time", period_type)
+        return
+
+    node_name = "群周报" if period_type == PERIOD_WEEKLY else "群月报"
+
+    async def _send(row: dict) -> None:
+        group_id = row["group_id"]
         with bot_action_trace(
             trigger_kind="scheduled",
             reason_code=f"period_report.publish.{period_type}",
-            reason_detail=f"定时发布{node_name}：{period_key}",
+            reason_detail=f"定时发布{node_name}：{row['period_key']}",
             rule_name=_PERIOD_RULE_NAMES[period_type],
             chat_type="group",
             group_id=group_id,
@@ -587,31 +420,13 @@ async def _publish_period_one(bot, row: dict, period_type: str) -> None:
                 node_name=node_name,
                 log_name=f"period_report_{period_type}",
             )
-        period_store.mark_published(group_id, period_type, period_key)
-        logger.info("period_report[%s]: published for group %s (%s)", period_type, group_id, period_key)
-    except Exception:
-        logger.warning(
-            "period_report[%s]: publish failed for group %s (%s)", period_type, group_id, period_key,
-            exc_info=True,
-        )
 
-
-async def _job_publish_period_reports(period_type: str) -> None:
-    """定时发布 job：把所有未发布的周期报告发出去。"""
-    if nonebot is None:
-        return
-    try:
-        bot = nonebot.get_bot()
-    except Exception:
-        logger.warning("period_report[%s]: bot not available at publish time", period_type)
-        return
-
-    unpublished = period_store.get_unpublished(period_type)
-    if not unpublished:
-        return
-    enabled = set(_period_enabled_groups(period_type).all_groups())
-    tasks = [_publish_period_one(bot, row, period_type) for row in unpublished if row["group_id"] in enabled]
-    await asyncio.gather(*tasks, return_exceptions=True)
+    await summary_jobs.publish_period_reports_job(
+        period_type,
+        store=period_store,
+        enabled_groups=_period_enabled_groups(period_type),
+        send=_send,
+    )
 
 
 def _register_period_jobs() -> None:
@@ -689,7 +504,11 @@ async def send_period_report_now(
 
     now = datetime.now(tz=_LOCAL_TZ)
     start_ts, end_ts, _, period_label = compute_period_window(period_type, now)
-    result = await _run_period_generation(group_key, period_type, start_ts, end_ts, period_label)
+    _ensure_llm_bindings()
+    result = await summary_jobs.run_period_generation(
+        group_key, period_type, start_ts, end_ts, period_label,
+        svc=get_llm_service(), collector=wordcloud_collector, stats_tracker=stats_tracker,
+    )
     if result is None:
         raise PeriodReportGenerationFailedError("period report generation skipped or failed")
 
@@ -784,4 +603,3 @@ async def _handle_period_subcommand(
         f"  status — 查看当前状态"
     )
     return True
-
