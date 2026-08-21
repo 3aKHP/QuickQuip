@@ -210,34 +210,34 @@ import {
   saveGroupSettings,
 } from '../api/groupSettings'
 import type {
-  GroupOverrideDraft,
   GroupOverrideEntry,
-  GroupOverrideField,
-  GroupOverridePatch,
   GroupSettingsDefaults,
   GroupSettingsOptions,
 } from '../api/groupSettings'
+import { useGroupOverrideDraft } from '../composables/useGroupOverrideDraft'
 import { toast } from '../toast'
-
-const FIELDS: readonly GroupOverrideField[] = [
-  'enabled', 'memory_enabled', 'auto_memory_enabled', 'provider_id', 'model', 'persona_id',
-  'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit',
-]
 
 const options = ref<GroupSettingsOptions | null>(null)
 const groupList = ref<GroupOverrideEntry[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 const selectedGroupId = ref('')
-const original = ref<GroupOverrideDraft>(emptyDraft())
-const draftTriState = ref<GroupOverrideDraft>(emptyDraft())
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
-function emptyDraft(): GroupOverrideDraft {
-  // fromEntries 按 FIELDS 全量构造，键集合与 GroupOverrideDraft 一一对应
-  return Object.fromEntries(FIELDS.map(field => [field, null])) as GroupOverrideDraft
-}
+const {
+  draft: draftTriState,
+  hasChanges,
+  modelInput,
+  prefixInput,
+  historyInput,
+  clearModel,
+  clearPrefix,
+  clearHistory,
+  applyData,
+  resetDraft,
+  buildPatch,
+} = useGroupOverrideDraft()
 
 function displayId(key: string): string {
   if (!key) return ''
@@ -257,27 +257,6 @@ function defaultHint(field: keyof GroupSettingsDefaults): string {
   return String(value)
 }
 
-const modelInput = computed({
-  get: () => draftTriState.value.model ?? '',
-  set: (value) => { draftTriState.value.model = value === '' ? null : value },
-})
-
-const prefixInput = computed({
-  get: () => draftTriState.value.trigger_prefix ?? '',
-  set: (value) => { draftTriState.value.trigger_prefix = value === '' ? null : value },
-})
-
-const historyInput = computed({
-  get: () => draftTriState.value.history_limit ?? '',
-  set: (value) => {
-    if (value === '' || value == null || Number.isNaN(Number(value))) {
-      draftTriState.value.history_limit = null
-    } else {
-      draftTriState.value.history_limit = Number(value)
-    }
-  },
-})
-
 const modelPlaceholder = computed(() => {
   const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
   const provider = providers.value.find(p => p.id === providerId)
@@ -289,17 +268,6 @@ const modelSuggestions = computed(() => {
   const provider = providers.value.find(p => p.id === providerId)
   return provider?.models || []
 })
-
-const hasChanges = computed(() => {
-  for (const field of FIELDS) {
-    if (draftTriState.value[field] !== original.value[field]) return true
-  }
-  return false
-})
-
-function clearModel() { draftTriState.value.model = null }
-function clearPrefix() { draftTriState.value.trigger_prefix = null }
-function clearHistory() { draftTriState.value.history_limit = null }
 
 async function reloadAll() {
   loading.value = true
@@ -325,13 +293,7 @@ async function loadOne(groupId: string) {
   saveError.value = null
   try {
     const data = await fetchGroupSettings(groupId)
-    const snapshot = emptyDraft()
-    for (const field of FIELDS) {
-      const value = data[field]
-      if (value !== undefined) Object.assign(snapshot, { [field]: value })
-    }
-    original.value = snapshot
-    draftTriState.value = { ...snapshot }
+    applyData(data)
   } catch (e: unknown) {
     saveError.value = (e as Error).message
   }
@@ -354,17 +316,11 @@ function startAdd() {
   }
   if (hasChanges.value && !confirm('当前修改未保存，切换会丢失。是否继续？')) return
   selectedGroupId.value = key
-  original.value = emptyDraft()
-  draftTriState.value = emptyDraft()
+  resetDraft()
 }
 
 async function onSave() {
-  const diff: GroupOverridePatch = {}
-  for (const field of FIELDS) {
-    if (draftTriState.value[field] !== original.value[field]) {
-      diff[field] = draftTriState.value[field]
-    }
-  }
+  const diff = buildPatch()
   if (!Object.keys(diff).length) return
   saving.value = true
   saveError.value = null
@@ -387,8 +343,7 @@ async function onClear() {
     await clearGroupSettings(selectedGroupId.value)
     toast('已清空')
     selectedGroupId.value = ''
-    original.value = emptyDraft()
-    draftTriState.value = emptyDraft()
+    resetDraft()
     await reloadAll()
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
