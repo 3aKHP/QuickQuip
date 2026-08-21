@@ -780,6 +780,80 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         )
         return history, participants
 
+    def _persist_turn_and_build_reply(
+        self,
+        *,
+        chat_id: int | str,
+        chat_type: str,
+        user_id: int | str,
+        sender_name: str,
+        scope_key: str,
+        settings: ResolvedGroupSettings,
+        provider: ProviderConfig,
+        model: str,
+        text: str,
+        stored_prompt: str,
+        store_user_message: bool,
+        message_id: str | None,
+        normalized_quoted_text: str,
+        normalized_quoted_image_urls: list[str],
+        normalized_forward_text: str,
+        normalized_forward_image_urls: list[str],
+        tool_context: ToolExecutionContext,
+    ) -> dict[str, object]:
+        current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
+        if store_user_message:
+            raw_turn_parts: list[str] = []
+            if normalized_quoted_text or normalized_quoted_image_urls:
+                q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
+                q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
+                raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
+            if normalized_forward_text or normalized_forward_image_urls:
+                fw_text = normalized_forward_text or "[合并转发消息]"
+                fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
+                raw_turn_parts.append(fw_text + fw_suffix)
+            raw_turn_parts.append(stored_prompt)
+            raw_turn = "\n".join(raw_turn_parts)
+            self.store.append_conversation_message(
+                scope_key,
+                user_id,
+                "user",
+                stored_prompt,
+                sender_name=sender_name,
+                canonical_name=current_identity.canonical_name,
+                message_id=str(message_id) if message_id else None,
+                raw_content=raw_turn,
+            )
+        self.store.append_conversation_message(scope_key, None, "assistant", text)
+        self.store.prune_conversation_messages(
+            scope_key,
+            self._history_retention_limit(chat_type),
+        )
+
+        if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
+            asyncio.create_task(
+                self._extract_auto_memory(
+                    scope_key=scope_key,
+                    user_id=user_id,
+                    sender_name=sender_name,
+                    canonical_name=current_identity.canonical_name,
+                    user_text=stored_prompt,
+                    assistant_text=text,
+                    persona_id=settings.persona_id,
+                )
+            )
+
+        return {
+            "reply": text,
+            "rate_limit_key": LLM_RULE_NAME,
+            "rule_name": LLM_RULE_NAME,
+            "llm_used": True,
+            "provider_id": provider.id,
+            "model": model,
+            # 工具外发图片（base64 PNG），适配层拼在文本后发送；上限见 MAX_OUTBOUND_TOOL_IMAGES
+            "images": outbound_images_payload(tool_context),
+        }
+
     async def _generate_reply_for_scope(
         self,
         *,
@@ -1042,58 +1116,26 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
                 # for both the user-visible reply and what we persist.
                 text = DEFAULT_OUTPUT_FALLBACK
 
-        current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
-        if store_user_message:
-            raw_turn_parts: list[str] = []
-            if normalized_quoted_text or normalized_quoted_image_urls:
-                q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
-                q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
-                raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
-            if normalized_forward_text or normalized_forward_image_urls:
-                fw_text = normalized_forward_text or "[合并转发消息]"
-                fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
-                raw_turn_parts.append(fw_text + fw_suffix)
-            raw_turn_parts.append(stored_prompt)
-            raw_turn = "\n".join(raw_turn_parts)
-            self.store.append_conversation_message(
-                scope_key,
-                user_id,
-                "user",
-                stored_prompt,
-                sender_name=sender_name,
-                canonical_name=current_identity.canonical_name,
-                message_id=str(message_id) if message_id else None,
-                raw_content=raw_turn,
-            )
-        self.store.append_conversation_message(scope_key, None, "assistant", text)
-        self.store.prune_conversation_messages(
-            scope_key,
-            self._history_retention_limit(chat_type),
+        # ── persistence + auto-memory dispatch + reply assembly ──────
+        return self._persist_turn_and_build_reply(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            user_id=user_id,
+            sender_name=sender_name,
+            scope_key=scope_key,
+            settings=settings,
+            provider=provider,
+            model=request.model,
+            text=text,
+            stored_prompt=stored_prompt,
+            store_user_message=store_user_message,
+            message_id=message_id,
+            normalized_quoted_text=normalized_quoted_text,
+            normalized_quoted_image_urls=normalized_quoted_image_urls,
+            normalized_forward_text=normalized_forward_text,
+            normalized_forward_image_urls=normalized_forward_image_urls,
+            tool_context=tool_context,
         )
-
-        if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
-            asyncio.create_task(
-                self._extract_auto_memory(
-                    scope_key=scope_key,
-                    user_id=user_id,
-                    sender_name=sender_name,
-                    canonical_name=current_identity.canonical_name,
-                    user_text=stored_prompt,
-                    assistant_text=text,
-                    persona_id=settings.persona_id,
-                )
-            )
-
-        return {
-            "reply": text,
-            "rate_limit_key": LLM_RULE_NAME,
-            "rule_name": LLM_RULE_NAME,
-            "llm_used": True,
-            "provider_id": provider.id,
-            "model": request.model,
-            # 工具外发图片（base64 PNG），适配层拼在文本后发送；上限见 MAX_OUTBOUND_TOOL_IMAGES
-            "images": outbound_images_payload(tool_context),
-        }
 
     async def generate_reply(
         self,
