@@ -15,7 +15,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
-from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
@@ -1176,36 +1175,3 @@ def confirm_boredom_sent(plan: BoredomSendPlan, stats_tracker: Any | None = None
     if stats_tracker is not None:
         stats_tracker.record_trigger(plan.group_id, _RULE_BOREDOM)
     logger.info("awakening_boredom: sent to group %s (%s)", plan.group_id, plan.trigger.trigger_reason)
-
-
-async def run_boredom_check(
-    bot: Any,
-    boredom_enabled_groups: Any,
-    rule_switch: Any,
-    svc: Any,
-    rate_limiter: Any | None = None,
-    stats_tracker: Any | None = None,
-    build_reply_message: Any | None = None,
-) -> None:
-    """兼容入口（保留旧签名）：发送循环仍在 chat 层，``bot`` 经 duck-typing 注入。
-
-    新路径由适配层持有发送循环：``iter_boredom_send_plans`` 产出计划，
-    发送成功后 ``confirm_boredom_sent`` 确认（见
-    ``adapters/nonebot/awakening_plugin._wrapped_boredom_check``）。
-    ``build_reply_message`` 由适配层注入（把 generate_reply 结果转为
-    可发送内容，带图时拼 Message）；缺省只发纯文本。
-    """
-    async for plan in iter_boredom_send_plans(boredom_enabled_groups, rule_switch, svc, rate_limiter):
-        try:
-            with bot_action_trace(**plan.trace_kwargs()):
-                await bot.send_group_msg(
-                    group_id=int(plan.group_id),
-                    message=(
-                        build_reply_message(plan.reply_result)
-                        if build_reply_message is not None
-                        else plan.reply_result["reply"]
-                    ),
-                )
-            confirm_boredom_sent(plan, stats_tracker)
-        except Exception:
-            logger.warning("awakening_boredom: failed for group %s", plan.group_id, exc_info=True)
