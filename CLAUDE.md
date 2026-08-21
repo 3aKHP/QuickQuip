@@ -89,7 +89,7 @@ src/
 
 开发环境需先运行 `uv pip install -e .`（可编辑安装），让 Python 能解析 `src/` 下的包。
 
-消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → chain → games → text_rules → context_rules → timezone → sts card_le（链尾）），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
+消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → good_girl_chain → custom_chain_games → games registry → text_rules → context_rules → timezone → STS card_le（链尾，规则开关与限频预检通过后才匹配，不得抢占时区等具体规则）），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
 
 ## Commit 规范
 

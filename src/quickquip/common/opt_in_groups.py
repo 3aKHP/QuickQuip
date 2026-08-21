@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_digit_group_id(group_id: int | str) -> str:
-    """严格群号归一化：去空白后必须全为数字，否则抛 ValueError。"""
+    """严格群号归一化：去空白后必须全为数字，否则抛 ValueError。
+
+    仅用于群号场景。私聊会话标识（``private:USER_ID``，由
+    ``LLMService.build_chat_scope_key`` 派生）不是全数字，不得走本函数；
+    本模块只承载"群 opt-in 集合"不变量，与私聊 scope_key 无关。
+    """
     s = str(group_id).strip()
     if not s.isdigit():
         raise ValueError(f"Invalid group_id (must be all digits): {group_id!r}")

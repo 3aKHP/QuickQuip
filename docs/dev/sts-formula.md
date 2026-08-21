@@ -59,7 +59,7 @@
   （同 `chat/context_rules.py` 的 judge 缓存思路）。
 
 接入点：`app/message_pipeline.py` 的 `resolve_reply()` 规则链，位于 `timezone` 之后、
-规则链末尾（message_pipeline.py:317-335，代码注释明写不得抢占时区等具体规则），
+规则链末尾（按符号定位：`resolve_reply` 中的 `match_card_le` block，代码注释明写不得抢占时区等具体规则），
 复用 `rule_switch`（按群开关）与框架的 `rate_limit`。
 
 ### 3.2 主动路径（`/turmfluch` 命令）

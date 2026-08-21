@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from collections.abc import Callable, Iterable
 
 from quickquip.tieba.store import TiebaForumState, TiebaStore, TiebaThread
@@ -244,10 +245,13 @@ class TiebaService:
 
     async def peek_random_thread(self, forum_keyword: str) -> TiebaThread | None:
         """现爬指定吧首页，随机返回一个帖子，不写入 pool。"""
-        import random
         threads = await self.crawler.collect_threads(forum_keyword, limit=5)
         valid = [t for t in threads if t.cover_image_url or t.image_urls]
-        return random.choice(valid) if valid else (random.choice(threads) if threads else None)
+        if valid:
+            return random.choice(valid)
+        if threads:
+            return random.choice(threads)
+        return None
 
     def is_login_required(self, forum_keyword: str | None = None) -> bool:
         selected_forums = self.resolve_forum_keywords(forum_keyword, require_enabled=False)
