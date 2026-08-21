@@ -65,7 +65,7 @@ async function parseResponse(res: Response) {
   return data
 }
 
-export async function request(path: string, options: RequestInit = {}): Promise<any> {
+export async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {}
   const incoming = options.headers
   if (incoming) {
@@ -86,5 +86,6 @@ export async function request(path: string, options: RequestInit = {}): Promise<
     ...options,
     headers,
   })
-  return parseResponse(res)
+  // 网络边界唯一断言点：parseResponse 返回 unknown，由调用方声明的 T 承担契约
+  return (await parseResponse(res)) as T
 }

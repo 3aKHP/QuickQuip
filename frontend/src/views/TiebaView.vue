@@ -119,11 +119,12 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, openTiebaSyncStream, peekTiebaThread } from '../api/tieba'
+import type { TiebaForumInfo, TiebaThread, TiebaThreadRow } from '../api/tieba'
 import { toast } from '../toast'
 
 const PAGE_SIZE = 30
 
-const forums = ref<any[]>([])
+const forums = ref<TiebaForumInfo[]>([])
 const loading = ref(false)
 const loadError = ref<string | null>(null)
 
@@ -150,23 +151,23 @@ function startSync(forum: string | null) {
 
 const selectedForum = ref('')
 const keyword = ref('')
-const threads = ref<any[]>([])
+const threads = ref<TiebaThreadRow[]>([])
 const total = ref(0)
 const hasMore = ref(false)
 const loadingThreads = ref(false)
 const loadingMore = ref(false)
 
-const detail = ref<any>(null)
+const detail = ref<TiebaThread | null>(null)
 
 const STATUS_MAP: Record<string, string> = { ok: '正常', running: '同步中', error: '错误', idle: '未同步' }
 const VARIANT_MAP: Record<string, string> = { ok: 'success', running: 'info', error: 'danger', idle: 'info' }
 
-function syncLabel(f: any): string {
+function syncLabel(f: TiebaForumInfo): string {
   if (f.login_required) return '需登录'
   return STATUS_MAP[f.last_sync_status] || f.last_sync_status
 }
 
-function syncVariant(f: any): string {
+function syncVariant(f: TiebaForumInfo): string {
   if (f.login_required) return 'warn'
   return VARIANT_MAP[f.last_sync_status] || 'info'
 }
@@ -245,7 +246,7 @@ function clearKeyword() {
   reload()
 }
 
-async function openDetail(tid: number) {
+async function openDetail(tid: string) {
   try {
     detail.value = await fetchTiebaThread(selectedForum.value, tid)
   } catch (e: unknown) {
