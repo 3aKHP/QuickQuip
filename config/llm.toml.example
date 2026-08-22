@@ -297,6 +297,7 @@ api_key_env = "GEMINI_API_KEY"
 default_model = "gemini-3.1-pro-high"
 models = ["gemini-3.1-pro-high", "gemini-3-flash-preview"]
 style_profile = "claude_family"
+# auth_method = "bearer"  # 原生 Gemini 网关可用 Bearer；启用后 key 仅进 Authorization，不进 URL
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

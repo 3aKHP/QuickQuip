@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMRequest
 from plugins.llm_tools import LLMConversationMessage, LLMToolSpec
@@ -68,6 +70,106 @@ async def test_gemini_function_call_payload_and_response():
     assert response.tool_calls[0].arguments_json == '{"query": "哈基镜"}'
 
 
+async def test_gemini_bearer_auth_keeps_gateway_token_out_of_url():
+    client = FakeGeminiClient(
+        replace(_provider_config(), auth_method="bearer"),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+
+    await client.complete(_tool_call_request())
+
+    assert client.last_url == (
+        "https://example.test/v1beta/models/gemini-test:generateContent"
+    )
+    assert client.last_headers["authorization"] == "Bearer test-key"
+    assert "test-key" not in client.last_url
+
+
+async def test_gemini_stream_bearer_auth_preserves_sse_query_only():
+    client = FakeGeminiClient(
+        replace(_provider_config(), auth_method="bearer"),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+
+    url, headers, _payload = await client._build_request_parts(
+        _tool_call_request(),
+        stream=True,
+    )
+
+    assert url == (
+        "https://example.test/v1beta/models/gemini-test:streamGenerateContent?alt=sse"
+    )
+    assert headers["authorization"] == "Bearer test-key"
+    assert "test-key" not in url
+
+
+async def test_gemini_replays_ordered_signed_parts_and_parallel_function_responses():
+    signed_parts = [
+        {"text": "Need both tools.", "thought": True, "thoughtSignature": "thought-sig"},
+        {
+            "functionCall": {"id": "call_1", "name": "get_identity", "args": {"query": "A"}},
+            "thoughtSignature": "call-sig-1",
+        },
+        {
+            "functionCall": {"name": "get_identity", "args": {"query": "B"}},
+            "thoughtSignature": "call-sig-2",
+        },
+    ]
+    response_data = {
+        "candidates": [{"finishReason": "STOP", "content": {"parts": signed_parts}}]
+    }
+    client = FakeGeminiClient(_provider_config(), response_data)
+
+    response = await client.complete(_tool_call_request())
+
+    assert [call.id for call in response.tool_calls] == ["call_1", "gemini_tool_3"]
+    assert [block["part"]["thoughtSignature"] for block in response.thinking_blocks] == [
+        "thought-sig",
+        "call-sig-1",
+        "call-sig-2",
+    ]
+    replay_request = _tool_call_request()
+    replay_request.messages = [
+        LLMConversationMessage(
+            role="assistant",
+            tool_calls=response.tool_calls,
+            thinking_blocks=response.thinking_blocks,
+        ),
+        LLMConversationMessage(
+            role="tool",
+            content="A result",
+            tool_call_id="call_1",
+            tool_name="get_identity",
+        ),
+        LLMConversationMessage(
+            role="tool",
+            content="B result",
+            tool_call_id="gemini_tool_3",
+            tool_name="get_identity",
+        ),
+    ]
+
+    await client.complete(replay_request)
+
+    model_turn, tool_turn = client.last_payload["contents"]
+    assert model_turn["parts"] == [
+        signed_parts[0],
+        signed_parts[1],
+        {
+            "functionCall": {
+                "id": "gemini_tool_3",
+                "name": "get_identity",
+                "args": {"query": "B"},
+            },
+            "thoughtSignature": "call-sig-2",
+        },
+    ]
+    assert [part["functionResponse"]["id"] for part in tool_turn["parts"]] == [
+        "call_1",
+        "gemini_tool_3",
+    ]
+
+
 async def test_gemini_cache_thinking_tokens_parsed():
     """cachedContentTokenCount/thoughtsTokenCount 从 usageMetadata 解析。"""
     request = LLMRequest(
@@ -94,3 +196,41 @@ async def test_gemini_stream_cache_thinking_tokens_parsed():
     resp = FakeGeminiClient._assemble_stream_response(chunks, "gemini-test")
     assert resp.cache_read_tokens == 250
     assert resp.thinking_tokens == 15
+
+
+def test_gemini_stream_preserves_signatures_from_thought_and_function_parts():
+    chunks = [
+        {
+            "candidates": [{
+                "content": {"parts": [{"text": "thinking", "thought": True}]}
+            }]
+        },
+        {
+            "candidates": [{
+                "content": {"parts": [{
+                    "text": " done",
+                    "thought": True,
+                    "thoughtSignature": "thought-sig",
+                }]}
+            }]
+        },
+        {
+            "candidates": [{
+                "content": {"parts": [{
+                    "functionCall": {"name": "get_identity", "args": {"query": "A"}},
+                    "thoughtSignature": "call-sig",
+                }]},
+                "finishReason": "STOP",
+            }]
+        },
+    ]
+
+    response = FakeGeminiClient._assemble_stream_response(chunks, "gemini-test")
+
+    assert response.text == ""
+    assert response.tool_calls[0].id == "gemini_tool_2"
+    assert [block["part"]["thoughtSignature"] for block in response.thinking_blocks] == [
+        "thought-sig",
+        "call-sig",
+    ]
+    assert response.thinking_blocks[0]["part"]["text"] == "thinking done"
