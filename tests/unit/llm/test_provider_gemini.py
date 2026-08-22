@@ -70,6 +70,45 @@ async def test_gemini_function_call_payload_and_response():
     assert response.tool_calls[0].arguments_json == '{"query": "哈基镜"}'
 
 
+async def test_gemini_builtin_tool_array_schemas_declare_items(llm_service):
+    client = FakeGeminiClient(
+        _provider_config(),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+    request = _tool_call_request()
+    request.tools = llm_service.tool_registry.list_specs()
+
+    _url, _headers, payload = await client._build_request_parts(request)
+
+    declarations = payload["tools"][0]["functionDeclarations"]
+    tool_list = next(item for item in declarations if item["name"] == "tool_list")
+    assert tool_list["parameters"]["properties"]["names"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+
+    missing_items: list[str] = []
+
+    def collect_missing_items(schema, path: str) -> None:
+        if not isinstance(schema, dict):
+            return
+        if schema.get("type") == "array" and "items" not in schema:
+            missing_items.append(path)
+        for name, subschema in schema.get("properties", {}).items():
+            collect_missing_items(subschema, f"{path}.properties[{name}]")
+        if "items" in schema:
+            collect_missing_items(schema["items"], f"{path}.items")
+        for index, subschema in enumerate(schema.get("anyOf", [])):
+            collect_missing_items(subschema, f"{path}.anyOf[{index}]")
+
+    for index, declaration in enumerate(declarations):
+        collect_missing_items(
+            declaration["parameters"],
+            f"functionDeclarations[{index}].parameters",
+        )
+    assert missing_items == []
+
+
 async def test_gemini_bearer_auth_keeps_gateway_token_out_of_url():
     client = FakeGeminiClient(
         replace(_provider_config(), auth_method="bearer"),
