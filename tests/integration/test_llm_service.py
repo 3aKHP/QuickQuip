@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import pytest
 
+from plugins.llm_provider import LLMResponse
+from plugins.llm_tools import LLMToolCall
 from plugins.message_stats import GroupStatsTracker
 from plugins.recent_message_buffer import RecentMessageBuffer
 from plugins.rule_switch import GroupRuleSwitch
@@ -257,6 +259,94 @@ async def test_tool_call_loop_runs_identity_tool(wired_service, patch_provider_b
     assert round2.messages[-1].role == "tool"
     assert round2.messages[-1].tool_name == "get_identity"
     assert "镜子" in round2.messages[-1].content
+
+
+async def test_gemini_tool_loop_carries_signed_replay_parts(wired_service, patch_provider_builder):
+    class SignedGeminiStub:
+        def __init__(self):
+            self.requests = []
+
+        async def complete(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                return LLMResponse(
+                    text="",
+                    model=request.model,
+                    tool_calls=[LLMToolCall(
+                        id="call_identity_1",
+                        name="get_identity",
+                        arguments_json='{"query":"哈基镜"}',
+                    )],
+                    thinking_blocks=[{
+                        "type": "gemini_part",
+                        "part": {
+                            "functionCall": {
+                                "id": "call_identity_1",
+                                "name": "get_identity",
+                                "args": {"query": "哈基镜"},
+                            },
+                            "thoughtSignature": "opaque-signature",
+                        },
+                    }],
+                )
+            return LLMResponse(text="签名回放成功。", model=request.model)
+
+    stub = SignedGeminiStub()
+    wired_service.config.providers["openai-main"].protocol = "gemini"
+    patch_provider_builder(lambda provider: stub)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "签名回放成功。"
+    assistant = stub.requests[1].messages[-2]
+    assert assistant.thinking_blocks[0]["part"]["thoughtSignature"] == "opaque-signature"
+    assert stub.requests[1].messages[-1].tool_call_id == "call_identity_1"
+
+
+async def test_gemini_tool_loop_rejects_truncated_function_call_batch(
+    wired_service,
+    patch_provider_builder,
+):
+    class OverflowGeminiStub:
+        def __init__(self):
+            self.requests = []
+
+        async def complete(self, request):
+            self.requests.append(request)
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id=f"call_{index}",
+                        name="get_identity",
+                        arguments_json='{"query":"哈基镜"}',
+                    )
+                    for index in range(4)
+                ],
+            )
+
+    stub = OverflowGeminiStub()
+    wired_service.config.providers["openai-main"].protocol = "gemini"
+    wired_service.config.runtime.tool_max_calls_per_round = 3
+    patch_provider_builder(lambda provider: stub)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="同时查四个人。",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+    assert len(stub.requests) == 1
 
 
 async def test_forward_message_content_rendered(wired_service, patch_provider_builder):

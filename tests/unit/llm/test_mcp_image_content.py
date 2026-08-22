@@ -214,14 +214,21 @@ async def test_claude_tool_image_uses_tool_result_content_blocks():
     assert tool_result["content"][1]["source"]["media_type"] == "image/png"
 
 
-async def test_gemini_tool_image_keeps_function_response_and_inline_data_in_one_turn():
+async def test_gemini_tool_image_follows_complete_function_response_batch():
     client = _InlineGeminiClient(_config("gemini"), _GEMINI_RESPONSE)
     await client.complete(_tool_request())
 
-    tool_turn = client.last_payload["contents"][-1]
-    assert tool_turn["role"] == "user"
-    assert "functionResponse" in tool_turn["parts"][0]
-    assert tool_turn["parts"][1]["inline_data"]["mime_type"] == "image/png"
+    function_turn, image_turn = client.last_payload["contents"][-2:]
+    assert function_turn["role"] == "user"
+    assert function_turn["parts"] == [{
+        "functionResponse": {
+            "id": "call_1",
+            "name": "operator_artwork",
+            "response": {"content": "safe tool text", "is_error": False},
+        }
+    }]
+    assert image_turn["role"] == "user"
+    assert image_turn["parts"][0]["inline_data"]["mime_type"] == "image/png"
 
 
 @pytest.mark.parametrize(

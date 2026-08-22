@@ -115,10 +115,24 @@ async def run_tool_call_loop(
             response.text = response.text or "工具调用轮次已达上限，未能完成最终回答。"
             return response
 
-        selected_calls = [
+        limited_calls = [
             *search_calls[:effective_search_max_calls],
             *other_calls[:max_calls],
         ]
+
+        if provider.protocol == "gemini":
+            if len(limited_calls) != len(response.tool_calls):
+                response.text = response.text or (
+                    "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+                )
+                response.tool_calls = []
+                return response
+            # Gemini binds functionResponse batches to the preceding ordered
+            # functionCall parts. Keep the provider's order when the full batch
+            # is within local limits.
+            selected_calls = list(response.tool_calls)
+        else:
+            selected_calls = limited_calls
 
         if not selected_calls:
             response.text = response.text or "工具调用请求为空，未能完成最终回答。"
