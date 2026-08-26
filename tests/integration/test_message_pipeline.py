@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 import quickquip.app.message_pipeline as message_pipeline
+from quickquip.chat.repeat_detector import RepeatAction
 from quickquip.games import game_scores as domain_game_scores
 from quickquip.app.message_pipeline import (
     build_reply,
@@ -22,12 +23,16 @@ from quickquip.app.message_pipeline import (
 @pytest.fixture(autouse=True)
 def _isolate_global_rule_switch():
     saved = dict(global_rule_switch.disabled)
+    saved_repeat_states = message_pipeline.repeat_detector.states.copy()
     global_rule_switch.disabled.clear()
+    message_pipeline.repeat_detector.states.clear()
     try:
         yield
     finally:
         global_rule_switch.disabled.clear()
         global_rule_switch.disabled.update(saved)
+        message_pipeline.repeat_detector.states.clear()
+        message_pipeline.repeat_detector.states.update(saved_repeat_states)
 
 
 def test_detect_kind_wake_sleep_none():
@@ -106,6 +111,57 @@ async def test_build_reply_returns_plain_text(frozen_now):
 async def test_resolve_reply_none_for_unrelated_message(frozen_now):
     assert await resolve_reply("今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now) is None
     assert await build_reply("今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now) is None
+
+
+async def test_repeat_fingerprint_never_becomes_reply_text():
+    fingerprint = "[CQ:face,id=264][CQ:face,id=264]"
+    assert await resolve_reply("", user_id=1, group_id=7001, repeat_fingerprint=fingerprint) is None
+
+    result = await resolve_reply("", user_id=2, group_id=7001, repeat_fingerprint=fingerprint)
+
+    assert result is not None
+    assert result["repeat_action"] == RepeatAction.COPY_ORIGINAL
+    assert result["reply"] == ""
+    assert "[CQ:" not in result["reply"]
+
+
+async def test_single_rich_segment_still_reaches_fourth_repeat_warning():
+    fingerprint = "[CQ:face,id=264]"
+
+    assert await resolve_reply("", user_id=1, group_id=7002, repeat_fingerprint=fingerprint) is None
+    second = await resolve_reply("", user_id=1, group_id=7002, repeat_fingerprint=fingerprint)
+    assert second is not None
+    assert second["repeat_action"] == RepeatAction.TRIM_LAST
+    assert await resolve_reply("", user_id=1, group_id=7002, repeat_fingerprint=fingerprint) is None
+    fourth = await resolve_reply("", user_id=1, group_id=7002, repeat_fingerprint=fingerprint)
+
+    assert fourth is not None
+    assert fourth["rule_name"] == "repeat_same_user_warning"
+    assert fourth["at_user_id"] == "1"
+
+
+@pytest.mark.parametrize(
+    ("group_id", "text", "rule_name"),
+    [
+        (7101, "@群友，启动", "genshin_start"),
+        (7102, "玩@群友玩的", "play_target"),
+        (7103, "哈@群友哈的", "sandwich_de"),
+        (7104, "我喜欢@群友", "like_reply"),
+        (7105, "不是@群友害了你", "ntk_bushi"),
+        (7106, "恭喜@群友可以称帝了", "ntk_gongxi"),
+    ],
+)
+async def test_capture_rules_only_echo_safe_projected_text(group_id, text, rule_name):
+    result = await resolve_reply(
+        text,
+        user_id=1,
+        group_id=group_id,
+        repeat_fingerprint=text.replace("@群友", "[CQ:at,qq=10001]"),
+    )
+
+    assert result is not None
+    assert result["rule_name"] == rule_name
+    assert "[CQ:" not in result["reply"]
 
 
 async def test_rule_switch_blocks_when_group_id_given(frozen_now):

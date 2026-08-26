@@ -22,7 +22,7 @@ from quickquip.games import BlackjackGame, GameEconomyStore, GameRegistry, NiuNi
 from quickquip.games.config import load_games_config
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
 from quickquip.chat.message_stats import GroupStatsTracker
-from quickquip.chat.repeat_detector import GroupRepeatDetector
+from quickquip.chat.repeat_detector import GroupRepeatDetector, RepeatAction
 from quickquip.chat.rule_switch import GroupRuleSwitch
 from quickquip.chat.text_rules import match_text_rule
 from quickquip.chat.timezone_reply import (  # noqa: F401 — re-exported for plugin shim
@@ -226,10 +226,23 @@ def resolve_repeat_reply(
     text: str,
     user_id: int | str,
     group_id: int | str | None,
+    repeat_fingerprint: str | None = None,
 ):
     if group_id is None:
         return None
-    return repeat_detector.process(group_id=group_id, user_id=user_id, text=text)
+    result = repeat_detector.process(
+        group_id=group_id,
+        user_id=user_id,
+        text=repeat_fingerprint if repeat_fingerprint is not None else text,
+    )
+    if result is None:
+        return None
+    action = result.get("repeat_action")
+    if action == RepeatAction.COPY_ORIGINAL:
+        result["reply"] = text
+    elif action == RepeatAction.TRIM_LAST:
+        result["reply"] = text[:-1]
+    return result
 
 
 def resolve_good_girl_chain_reply(
@@ -248,8 +261,14 @@ async def resolve_reply(
     group_id: int | str | None = None,
     now: datetime | None = None,
     recent_context: list[dict[str, str]] | None = None,
+    repeat_fingerprint: str | None = None,
 ):
-    repeat_reply = resolve_repeat_reply(text=text, user_id=user_id, group_id=group_id)
+    repeat_reply = resolve_repeat_reply(
+        text=text,
+        user_id=user_id,
+        group_id=group_id,
+        repeat_fingerprint=repeat_fingerprint,
+    )
     if repeat_reply:
         rule_name = repeat_reply.get("rule_name", "")
         if group_id is None or rule_switch.is_enabled(group_id, rule_name):
