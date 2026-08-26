@@ -6,6 +6,7 @@ from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.common.bot_action_trace import bot_action_trace
+from quickquip.chat.repeat_detector import RepeatAction
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     awakening_state,
@@ -36,6 +37,40 @@ def _result_reason(result: dict) -> str:
     return f"{kind} 触发：{rule_name}"
 
 
+def _trim_last_content_unit(message):
+    trimmed = message.copy()
+    while trimmed:
+        last_segment = trimmed[-1]
+        if getattr(last_segment, "type", "") != "text":
+            trimmed.pop()
+            break
+        text = str(getattr(last_segment, "data", {}).get("text", ""))
+        if not text:
+            trimmed.pop()
+            continue
+        remaining = text[:-1]
+        if remaining:
+            last_segment.data["text"] = remaining
+        else:
+            trimmed.pop()
+        break
+    return trimmed or None
+
+
+def _build_rule_reply_message(result: dict, incoming_message, Message, MessageSegment):
+    repeat_action = result.get("repeat_action")
+    if repeat_action == RepeatAction.COPY_ORIGINAL:
+        return incoming_message.copy()
+    if repeat_action == RepeatAction.TRIM_LAST:
+        return _trim_last_content_unit(incoming_message)
+    if "at_user_id" in result:
+        return Message([
+            MessageSegment.at(result["at_user_id"]),
+            MessageSegment.text(f" {result['reply']}"),
+        ])
+    return result["reply"]
+
+
 def register_message_matcher(on_message, Message, MessageSegment):
     matcher = on_message(priority=60, block=False)
 
@@ -50,7 +85,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         svc = get_llm_service()
 
         message = event.get_message()
-        text = str(message).strip()
+        repeat_fingerprint = str(message).strip()
         rendered_message = render_message_for_llm(
             message,
             bot_self_id=event.self_id,
@@ -58,6 +93,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
             identity_index=svc.identities,
             include_image_placeholder=True,
         )
+        rule_text = render_message_for_llm(
+            message,
+            bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
+            identity_index=svc.identities,
+            include_image_placeholder=False,
+        ).text
         sender_name = get_sender_name(event)
         user_id = event.user_id
         group_id = event.group_id
@@ -238,13 +280,23 @@ def register_message_matcher(on_message, Message, MessageSegment):
             return
 
         result = await resolve_reply(
-            text,
+            rule_text,
             user_id=user_id,
             sender_name=sender_name,
             group_id=group_id,
             recent_context=trigger_context,
+            repeat_fingerprint=repeat_fingerprint,
         )
         if not result:
+            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
+            return
+        reply_message = _build_rule_reply_message(
+            result,
+            message,
+            Message,
+            MessageSegment,
+        )
+        if reply_message is None:
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id, group_id=group_id):
@@ -252,27 +304,6 @@ def register_message_matcher(on_message, Message, MessageSegment):
             return
 
         stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
-
-        if "at_user_id" in result:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
-            message = Message([
-                MessageSegment.at(result["at_user_id"]),
-                MessageSegment.text(f" {result['reply']}"),
-            ])
-            with bot_action_trace(
-                trigger_kind=str(result.get("trigger_kind", "rule")),
-                reason_code=str(result.get("reason_code", result.get("rule_name", "unknown"))),
-                reason_detail=_result_reason(result),
-                rule_name=str(result.get("rule_name", "unknown")),
-                chat_type="group",
-                group_id=group_id,
-                user_id=user_id,
-                incoming_message_id=message_id,
-                incoming_preview=rendered_text,
-                reply_preview=message,
-                source="group_message.rule_reply",
-            ):
-                await matcher.finish(message)
 
         _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
         with bot_action_trace(
@@ -285,9 +316,9 @@ def register_message_matcher(on_message, Message, MessageSegment):
             user_id=user_id,
             incoming_message_id=message_id,
             incoming_preview=rendered_text,
-            reply_preview=result["reply"],
+            reply_preview=reply_message,
             source="group_message.rule_reply",
         ):
-            await matcher.finish(result["reply"])
+            await matcher.finish(reply_message)
 
     return matcher

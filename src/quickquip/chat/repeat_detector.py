@@ -1,11 +1,17 @@
 from collections import OrderedDict
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Optional
+
+
+class RepeatAction(StrEnum):
+    COPY_ORIGINAL = "copy_original"
+    TRIM_LAST = "trim_last"
 
 
 @dataclass
 class RepeatState:
-    text: str
+    fingerprint: str
     count: int
     first_sender_id: str
     last_sender_id: str
@@ -17,9 +23,6 @@ class GroupRepeatDetector:
         self.max_groups = max_groups
         self.states: OrderedDict[str, RepeatState] = OrderedDict()
 
-    def _trim_last_character(self, text: str) -> str:
-        return text[:-1]
-
     def _touch_state(self, group_key: str) -> None:
         if group_key in self.states:
             self.states.move_to_end(group_key)
@@ -28,18 +31,23 @@ class GroupRepeatDetector:
         while len(self.states) > self.max_groups:
             self.states.popitem(last=False)
 
-    def process(self, group_id: int | str, user_id: int | str, text: str) -> Optional[dict]:
-        normalized_text = text.strip()
-        if not normalized_text:
+    def process(
+        self,
+        group_id: int | str,
+        user_id: int | str,
+        text: str,
+    ) -> Optional[dict]:
+        normalized_fingerprint = text.strip()
+        if not normalized_fingerprint:
             return None
 
         group_key = str(group_id)
         user_key = str(user_id)
         state = self.states.get(group_key)
 
-        if state is None or state.text != normalized_text:
+        if state is None or state.fingerprint != normalized_fingerprint:
             self.states[group_key] = RepeatState(
-                text=normalized_text,
+                fingerprint=normalized_fingerprint,
                 count=1,
                 first_sender_id=user_key,
                 last_sender_id=user_key,
@@ -58,18 +66,17 @@ class GroupRepeatDetector:
         if state.count == 2:
             if user_key != previous_sender_id:
                 return {
-                    "reply": normalized_text,
+                    "repeat_action": RepeatAction.COPY_ORIGINAL,
                     "rate_limit_key": "repeat_follow_read",
                     "rule_name": "repeat_follow_read",
                     "trigger_kind": "rule",
                     "trigger_reason": "复读检测：不同用户连续复读",
                 }
 
-            trimmed = self._trim_last_character(normalized_text)
-            if not trimmed:
+            if len(normalized_fingerprint) <= 1:
                 return None
             return {
-                "reply": trimmed,
+                "repeat_action": RepeatAction.TRIM_LAST,
                 "rate_limit_key": "repeat_trim_last",
                 "rule_name": "repeat_trim_last",
                 "trigger_kind": "rule",
