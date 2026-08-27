@@ -237,3 +237,65 @@ async def test_claude_stream_cache_tokens_parsed():
     assert resp.cache_creation_tokens == 80
     assert resp.cache_read_tokens == 200
     assert resp.output_tokens == 50
+
+
+async def test_claude_stream_preserves_redacted_thinking():
+    """流式组装必须保留 redacted_thinking 块（完整载荷只在 content_block_start，无 delta），
+    否则回放 assistant 轮缺块，thinking+tool_use 场景遭上游 400。"""
+    chunks = [
+        {"_sse_event": "message_start", "message": {"model": "claude-test",
+            "usage": {"input_tokens": 10}}},
+        {"_sse_event": "content_block_start", "index": 0,
+            "content_block": {"type": "redacted_thinking", "data": "sig-abc"}},
+        {"_sse_event": "content_block_start", "index": 1,
+            "content_block": {"type": "thinking", "thinking": ""}},
+        {"_sse_event": "content_block_delta", "index": 1,
+            "delta": {"type": "thinking_delta", "thinking": "想一下"}},
+        {"_sse_event": "content_block_delta", "index": 1,
+            "delta": {"type": "signature_delta", "signature": "sig-1"}},
+        {"_sse_event": "content_block_start", "index": 2,
+            "content_block": {"type": "text", "text": ""}},
+        {"_sse_event": "content_block_delta", "index": 2,
+            "delta": {"type": "text_delta", "text": "好的"}},
+        {"_sse_event": "message_delta", "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 5}},
+    ]
+
+    resp = FakeClaudeClient._assemble_stream_response(chunks, "claude-test")
+
+    # 与 buffered _parse_response 同形状，顺序即 wire 顺序
+    assert resp.thinking_blocks == [
+        {"type": "redacted_thinking", "data": "sig-abc"},
+        {"type": "thinking", "thinking": "想一下", "signature": "sig-1"},
+    ]
+    assert resp.text == "好的"
+    assert resp.finish_reason == "end_turn"
+
+
+async def test_claude_redacted_thinking_round_trips_into_replay():
+    """thinking_blocks 里的 redacted_thinking 块原样进入下一轮请求的 assistant content。"""
+    request = LLMRequest(
+        model="claude-test",
+        system_prompt="系统提示",
+        messages=[
+            LLMConversationMessage(role="user", content="你好", image_urls=[]),
+            LLMConversationMessage(
+                role="assistant",
+                content="上次回复",
+                thinking_blocks=[{"type": "redacted_thinking", "data": "sig-abc"}],
+            ),
+            LLMConversationMessage(role="user", content="继续", image_urls=[]),
+        ],
+        temperature=0.2,
+        max_output_tokens=128,
+    )
+    client = FakeClaudeClient(
+        _provider_config(),
+        {"model": "claude-test", "content": [{"type": "text", "text": "ok"}]},
+    )
+
+    await client.complete(request)
+
+    assistant_content = client.last_payload["messages"][1]["content"]
+    assert assistant_content[0] == {"type": "redacted_thinking", "data": "sig-abc"}
+    assert assistant_content[1] == {"type": "text", "text": "上次回复"}

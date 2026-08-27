@@ -310,7 +310,7 @@ class ClaudeProviderClient(BaseProviderClient):
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
         text_parts: list[str] = []
         tool_calls_acc: dict[int, dict[str, str]] = {}  # block_index -> {id, name, input_json}
-        thinking_acc: dict[int, dict[str, str]] = {}    # block_index -> {thinking, signature}
+        thinking_acc: dict[int, dict[str, str]] = {}    # block_index -> {type, thinking, signature} 或 redacted {type, data}
         finish_reason: str | None = None
         model = fallback_model
         input_tokens: int | None = None
@@ -344,7 +344,13 @@ class ClaudeProviderClient(BaseProviderClient):
                         "input_json": "",
                     }
                 elif block.get("type") == "thinking":
-                    thinking_acc[current_block_index] = {"thinking": "", "signature": ""}
+                    thinking_acc[current_block_index] = {"type": "thinking", "thinking": "", "signature": ""}
+                elif block.get("type") == "redacted_thinking":
+                    # redacted_thinking 的完整 data 载荷只出现在 start 事件，无后续 delta
+                    thinking_acc[current_block_index] = {
+                        "type": "redacted_thinking",
+                        "data": str(block.get("data", "")),
+                    }
 
             elif event == "content_block_delta":
                 delta = chunk.get("delta", {})
@@ -355,10 +361,10 @@ class ClaudeProviderClient(BaseProviderClient):
                     if idx in tool_calls_acc:
                         tool_calls_acc[idx]["input_json"] += str(delta.get("partial_json", ""))
                 elif delta.get("type") == "thinking_delta":
-                    if idx in thinking_acc:
+                    if thinking_acc.get(idx, {}).get("type") == "thinking":
                         thinking_acc[idx]["thinking"] += str(delta.get("thinking", ""))
                 elif delta.get("type") == "signature_delta":
-                    if idx in thinking_acc:
+                    if thinking_acc.get(idx, {}).get("type") == "thinking":
                         thinking_acc[idx]["signature"] = str(delta.get("signature", ""))
 
             elif event == "message_delta":
@@ -378,7 +384,11 @@ class ClaudeProviderClient(BaseProviderClient):
             for idx, acc in sorted(tool_calls_acc.items())
         ]
         thinking_blocks = [
-            {"type": "thinking", "thinking": acc["thinking"], "signature": acc["signature"]}
+            (
+                {"type": "redacted_thinking", "data": acc["data"]}
+                if acc.get("type") == "redacted_thinking"
+                else {"type": "thinking", "thinking": acc["thinking"], "signature": acc["signature"]}
+            )
             for _, acc in sorted(thinking_acc.items())
         ]
         return LLMResponse(
