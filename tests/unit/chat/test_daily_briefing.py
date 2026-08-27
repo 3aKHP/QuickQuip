@@ -9,6 +9,7 @@ import pytest
 
 from quickquip.chat.daily_briefing import (
     DailyBriefingEnabledGroups,
+    _build_active_users,
     build_briefing_context,
     build_fallback_briefing,
     get_briefing_window,
@@ -130,6 +131,45 @@ async def test_build_noon_briefing_and_fallback(tmp_path: Path, briefing_config)
     assert "活跃用户：" in fallback
     if context.hot_words:
         assert "热词：" in fallback
+
+
+def test_build_active_users_strips_cq_codes_from_sender():
+    messages = [
+        {"user_id": "101", "sender": "[CQ:at,qq=all]张三"},
+        {"user_id": "102", "sender": "[CQ:face,id=1]"},
+        {"user_id": "103", "sender": "[管理]李四"},
+    ]
+
+    users = _build_active_users(messages, limit=5)
+    names = {user.user_id: user.display_name for user in users}
+
+    assert names["101"] == "张三"
+    assert names["102"] == "未知"
+    # 保守规则：普通方括号昵称不剥
+    assert names["103"] == "[管理]李四"
+
+
+async def test_fallback_briefing_renders_sanitized_display_name(tmp_path: Path, briefing_config):
+    collector = DailyMessageCollector(base_dir=tmp_path / "daily_msgs")
+    wc_collector = WordCloudCollector(base_dir=tmp_path / "wordcloud_msgs")
+    group_id = "10001"
+
+    ts = datetime(2026, 4, 15, 9, 0, tzinfo=LOCAL_TZ)
+    collector.record(group_id, "[CQ:at,qq=all]张三", "早上好", ts=ts.timestamp(), user_id="u1")
+
+    now = datetime(2026, 4, 15, 12, 30, tzinfo=LOCAL_TZ)
+    context = await build_briefing_context(
+        group_id=group_id,
+        period="noon",
+        now=now,
+        daily_collector=collector,
+        wordcloud_collector=wc_collector,
+        briefing_config=briefing_config,
+    )
+
+    fallback = build_fallback_briefing(context)
+    assert "[CQ:" not in fallback
+    assert "张三" in fallback
 
 
 def test_trim_output_respects_max_chars():

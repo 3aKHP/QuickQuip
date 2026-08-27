@@ -70,4 +70,9 @@ async def test_send_long_group_message_falls_back_to_chunks(monkeypatch):
     )
 
     assert [item["group_id"] for item in bot.sent] == [456, 456]
-    assert "".join(item["message"] for item in bot.sent) == "b" * 900
+    # 降级路径也必须以 text 段（array 格式）发送，裸 str 会被服务端按 CQ 码解析
+    for item in bot.sent:
+        message = item["message"]
+        assert len(message) == 1
+        assert message[0].type == "text"
+    assert "".join(item["message"][0].data["text"] for item in bot.sent) == "b" * 900
