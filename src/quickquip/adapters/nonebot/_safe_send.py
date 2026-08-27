@@ -7,6 +7,8 @@ matcher.send 会把 str 安全包装成文本段，但直调 ``bot.send_group_ms
 
 from __future__ import annotations
 
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
+
 
 async def send_group_text(bot, group_id: int, text: str) -> None:
     """以单 text 段发送群纯文本（array 段格式）。
@@ -14,6 +16,4 @@ async def send_group_text(bot, group_id: int, text: str) -> None:
     必须包成 ``Message``：裸 MessageSegment 会被 DataclassEncoder 序列化成
     单个对象而非段数组，不符合 OneBot V11 的 message 规范（string | array）。
     """
-    from nonebot.adapters.onebot.v11 import Message, MessageSegment  # 懒 import：保持模块 import 中立
-
     await bot.send_group_msg(group_id=group_id, message=Message([MessageSegment.text(text)]))
