@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from quickquip.adapters.nonebot._safe_send import send_group_text
+
 logger = logging.getLogger(__name__)
 
 # OneBot 协议实现端（NapCat / LLBot）在单条消息超过 ~2 KB 时可能截断。
@@ -62,5 +64,5 @@ async def send_long_group_message(
     except Exception:
         logger.warning("%s: forward msg failed, falling back to chunked send", log_name)
         for chunk in chunks:
-            await bot.send_group_msg(group_id=group_id, message=chunk)
+            await send_group_text(bot, group_id, chunk)
             await asyncio.sleep(0.5)

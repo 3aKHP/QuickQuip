@@ -23,6 +23,7 @@ from quickquip.app.message_pipeline import (
 )
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
+from quickquip.adapters.nonebot._safe_send import send_group_text
 from quickquip.adapters.nonebot._scheduling import (
     cron_to_hhmm,
     mark_triggered,
@@ -128,7 +129,7 @@ async def _send_one(bot, group_id: str, period: str) -> None:
             model=model_used,
             source="daily_briefing.scheduled",
         ):
-            await bot.send_group_msg(group_id=int(group_id), message=content)
+            await send_group_text(bot, int(group_id), content)
         logger.info(
             "daily_briefing: sent to group %s (%s via %s)",
             group_id,
@@ -182,7 +183,7 @@ async def send_daily_briefing_now(
         model=model_used,
         source="daily_briefing.manual",
     ):
-        await bot.send_group_msg(group_id=int(group_key), message=content)
+        await send_group_text(bot, int(group_key), content)
     return {"period": selected_period, "model_used": model_used, "char_count": len(content)}
 
 

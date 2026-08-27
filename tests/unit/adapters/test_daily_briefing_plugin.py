@@ -40,8 +40,41 @@ async def test_send_daily_briefing_now_reuses_renderer(monkeypatch):
 
     assert result == {"period": "noon", "model_used": "model-a", "char_count": len("briefing text")}
     assert rendered == [("123456", "noon")]
-    assert sent == [(123456, "briefing text")]
+    # 播报必须以 text 段（array 格式）发送，裸 str 会被服务端按 CQ 码解析
+    assert sent[0][0] == 123456
+    message = sent[0][1]
+    assert len(message) == 1
+    assert message[0].type == "text"
+    assert message[0].data["text"] == "briefing text"
     assert before_generate_calls == ["noon"]
+
+
+@pytest.mark.asyncio
+async def test_send_daily_briefing_now_sends_cq_like_text_as_literal_segment(monkeypatch):
+    """含 [CQ:...] 字面量的播报内容按纯文本段发出，不被激活。"""
+
+    async def fake_render(group_id, period):
+        return "活跃用户：[CQ:at,qq=all] 1条", "fallback"
+
+    sent: list = []
+
+    async def fake_send_group_msg(group_id, message):
+        sent.append(message)
+
+    class FakeBot:
+        send_group_msg = staticmethod(fake_send_group_msg)
+
+    monkeypatch.setattr(daily_briefing_plugin, "_is_group_enabled", lambda group_id: True)
+    monkeypatch.setattr(daily_briefing_plugin, "_on_cooldown", lambda group_id: False)
+    monkeypatch.setattr(daily_briefing_plugin, "_mark_triggered", lambda group_id: None)
+    monkeypatch.setattr(daily_briefing_plugin, "_render_briefing", fake_render)
+
+    await daily_briefing_plugin.send_daily_briefing_now("123456", "noon", FakeBot())
+
+    message = sent[0]
+    assert len(message) == 1
+    assert message[0].type == "text"
+    assert message[0].data["text"] == "活跃用户：[CQ:at,qq=all] 1条"
 
 
 # ── characterization: v1.12.1 生成编排下沉前的行为钉住 ──────────────────
