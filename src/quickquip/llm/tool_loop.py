@@ -122,9 +122,15 @@ async def run_tool_call_loop(
 
         if provider.protocol == "gemini":
             if len(limited_calls) != len(response.tool_calls):
-                response.text = response.text or (
-                    "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+                logger.warning(
+                    "Gemini tool batch rejected (fail-closed): provider=%s model=%s requested=%d kept=0",
+                    provider.id,
+                    response.model,
+                    len(response.tool_calls),
                 )
+                # 整批拒绝的提示必须追加而非兜底：模型附带的叙述文本不应顶替拒绝说明。
+                notice = "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+                response.text = "\n".join(part for part in (response.text, notice) if part)
                 response.tool_calls = []
                 return response
             # Gemini binds functionResponse batches to the preceding ordered
