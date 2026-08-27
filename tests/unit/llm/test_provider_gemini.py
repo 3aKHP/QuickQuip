@@ -109,6 +109,25 @@ async def test_gemini_builtin_tool_array_schemas_declare_items(llm_service):
     assert missing_items == []
 
 
+async def test_gemini_mcp_style_array_schema_gets_default_items():
+    # MCP 服务器透传的 schema 常声明 {"type": "array"} 而省略 items（合法 JSON Schema），
+    # 修复前会被 Gemini proto 以 400 拒绝（同 #137 内建工具缺陷）。
+    request = _tool_call_request()
+    request.tools = [
+        LLMToolSpec(
+            name="mcp_fake_list_things",
+            description="[MCP/fake] 列举事物",
+            input_schema={"type": "object", "properties": {"tags": {"type": "array"}}},
+        )
+    ]
+    client = FakeGeminiClient(_provider_config(), {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    await client.complete(request)
+
+    declaration = client.last_payload["tools"][0]["functionDeclarations"][0]
+    assert declaration["parameters"]["properties"]["tags"] == {"type": "array", "items": {}}
+
+
 async def test_gemini_bearer_auth_keeps_gateway_token_out_of_url():
     client = FakeGeminiClient(
         replace(_provider_config(), auth_method="bearer"),

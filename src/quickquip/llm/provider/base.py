@@ -273,6 +273,11 @@ def sanitize_gemini_schema(schema: Any) -> Any:
     long tail of JSON Schema keywords we don't know about, keep only the
     exact set the proto declares; property names under ``properties`` are
     user-defined and pass through untouched.
+
+    Arrays without ``items`` are valid JSON Schema (and common in
+    MCP-transmitted tool schemas) but rejected by the proto, so a permissive
+    ``items: {}`` is injected. List-valued ``type`` and pre-existing invalid
+    ``items`` are out of scope — those remain the schema author's responsibility.
     """
     if not isinstance(schema, dict):
         if isinstance(schema, list):
@@ -293,6 +298,8 @@ def sanitize_gemini_schema(schema: Any) -> Any:
             cleaned[key] = [sanitize_gemini_schema(item) for item in value]
         else:
             cleaned[key] = value
+    if cleaned.get("type") == "array" and "items" not in cleaned:
+        cleaned["items"] = {}
     return cleaned
 
 

@@ -220,3 +220,18 @@ class TestSanitizeGeminiSchema:
         }
         cleaned = sanitize_gemini_schema(schema)
         assert cleaned == {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+
+    def test_injects_default_items_for_array_without_items(self):
+        # MCP 透传的 schema 常省略 items（合法 JSON Schema，但 Gemini proto 拒绝）
+        schema = {"type": "object", "properties": {"ids": {"type": "array"}}}
+        cleaned = sanitize_gemini_schema(schema)
+        assert cleaned["properties"]["ids"] == {"type": "array", "items": {}}
+
+    def test_preserves_existing_items(self):
+        schema = {"type": "array", "items": {"type": "string"}}
+        assert sanitize_gemini_schema(schema) == {"type": "array", "items": {"type": "string"}}
+
+    def test_injects_items_inside_any_of(self):
+        schema = {"anyOf": [{"type": "array"}, {"type": "string"}]}
+        cleaned = sanitize_gemini_schema(schema)
+        assert cleaned == {"anyOf": [{"type": "array", "items": {}}, {"type": "string"}]}
