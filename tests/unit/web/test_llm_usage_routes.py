@@ -287,9 +287,9 @@ def test_1d_hourly_bucket_lands_on_business_hour(tmp_path):
     store.record({"provider_id": "early-hour", "protocol": "openai", "model": "m", "stream": 1,
                   "cost_usd": 0.05, "priced": 1, "state": "ok"})
     now_business = datetime.now(_BUSINESS_TZ)
+    # 固定取业务时区当天 00:30（允许略超前于 now）：timeline 的 24 桶是业务日整天，
+    # 原写法在 00:00–00:29 间回退到昨天，其 T00:00 桶落在窗口外（日期翻转窗口期必失败）。
     early_business = now_business.replace(hour=0, minute=30, second=0, microsecond=0)
-    if early_business > now_business:
-        early_business -= timedelta(days=1)
     _set_row_ts(store, "early-hour", early_business.astimezone(timezone.utc))
 
     timeline = store.timeline(_cutoff(1), range_days=1, metric="cost")
