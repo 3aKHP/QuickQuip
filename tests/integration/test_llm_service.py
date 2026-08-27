@@ -349,6 +349,56 @@ async def test_gemini_tool_loop_rejects_truncated_function_call_batch(
     assert len(stub.requests) == 1
 
 
+async def test_gemini_tool_loop_reject_notice_appended_to_existing_text(
+    wired_service,
+    patch_provider_builder,
+    caplog,
+):
+    """fail-closed 拒批时模型附带的叙述文本必须保留，拒绝提示追加在后并记 warning。"""
+
+    class NarratingOverflowStub:
+        def __init__(self):
+            self.requests = []
+
+        async def complete(self, request):
+            self.requests.append(request)
+            return LLMResponse(
+                text="我去查一下",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id=f"call_{index}",
+                        name="get_identity",
+                        arguments_json='{"query":"哈基镜"}',
+                    )
+                    for index in range(4)
+                ],
+            )
+
+    stub = NarratingOverflowStub()
+    wired_service.config.providers["openai-main"].protocol = "gemini"
+    wired_service.config.runtime.tool_max_calls_per_round = 3
+    patch_provider_builder(lambda provider: stub)
+
+    with caplog.at_level("WARNING", logger="quickquip.llm.service"):
+        result = await wired_service.generate_reply(
+            group_id=1001,
+            user_id=2002,
+            sender_name="测试用户",
+            prompt="同时查四个人。",
+            recent_messages=[],
+        )
+
+    assert result["reply"] == (
+        "我去查一下\n模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+    )
+    assert len(stub.requests) == 1
+    assert any(
+        "Gemini tool batch rejected" in record.message and "requested=4" in record.message
+        for record in caplog.records
+    )
+
+
 async def test_forward_message_content_rendered(wired_service, patch_provider_builder):
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
