@@ -765,6 +765,11 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
     Single-provider problems result in that provider being skipped (logged);
     only truly fatal issues (no providers at all, no personas at all) set
     ``load_error``.  This ensures one bad provider config never blocks others.
+
+    Two observability principles: a fallback after the *explicitly configured*
+    default provider is pruned is recorded in ``load_error`` (fail-visible,
+    same as an unknown default_provider; auto-selected defaults re-fall-back
+    silently), and disabled features' model_cascades are not validated at all.
     """
     errors: list[str] = []
 
@@ -773,6 +778,9 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
         return
 
     # -- default_provider fallback --
+    # 用户在配置里显式写的默认 provider（可能为 None）：剪除后回退只有对显式值
+    # 才记 load_error；自动选择的再回退保持静默（维持"尽力可用"语义）。
+    explicit_default_provider = config.runtime.default_provider
     if config.runtime.default_provider is None:
         config.runtime.default_provider = next(iter(config.providers))
     elif config.runtime.default_provider not in config.providers:
@@ -824,7 +832,18 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
     # Re-validate default_provider in case it was among the deleted ones.
     if config.runtime.default_provider not in config.providers:
         if config.providers:
-            config.runtime.default_provider = next(iter(config.providers))
+            fallback = next(iter(config.providers))
+            # Fail-visible，与上方 default_provider 指向不存在 id 的语义一致：
+            # 静默换用与配置不符的 provider 比显式拒绝更糟。全部剪除时不重复记录
+            # （下方聚合错误已覆盖）；自动选择的再回退不记录。
+            if (
+                explicit_default_provider is not None
+                and config.runtime.default_provider == explicit_default_provider
+            ):
+                errors.append(
+                    f"默认 provider {explicit_default_provider!r} 已被剪除，已回退为 {fallback!r}"
+                )
+            config.runtime.default_provider = fallback
         else:
             config.runtime.default_provider = None
 
@@ -838,12 +857,14 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
                 f"image_preprocessing.provider_id {config.image_preprocessing.provider_id!r} 不存在"
             )
 
-    for cascade_name, cascade_list in [
-        ("daily_summary.model_cascade", config.daily_summary.model_cascade),
-        ("daily_briefing.model_cascade", config.daily_briefing.model_cascade),
-        ("weekly_report.model_cascade", config.weekly_report.model_cascade),
-        ("monthly_report.model_cascade", config.monthly_report.model_cascade),
+    for cascade_name, feature_enabled, cascade_list in [
+        ("daily_summary.model_cascade", config.daily_summary.enabled, config.daily_summary.model_cascade),
+        ("daily_briefing.model_cascade", config.daily_briefing.enabled, config.daily_briefing.model_cascade),
+        ("weekly_report.model_cascade", config.weekly_report.enabled, config.weekly_report.model_cascade),
+        ("monthly_report.model_cascade", config.monthly_report.enabled, config.monthly_report.model_cascade),
     ]:
+        if not feature_enabled:
+            continue
         for entry in cascade_list:
             provider_id = entry.split("/", 1)[0].strip()
             if provider_id == "@default":
