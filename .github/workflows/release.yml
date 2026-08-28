@@ -101,6 +101,22 @@ jobs:
           )
           $missing = @($expected | Where-Object { -not (Test-Path $_) })
           if ($missing.Count -gt 0) { throw "Lazy package missing template files: $($missing -join ', ')" }
+          # 负向断言：包内不得存在实例化 .env（会让 start.bat 首启门控失效，
+          # rc.1 的打包污染正是 smoke 在 staging 内跑出来的 .env 混入了 zip）。
+          if (Test-Path "staging\.env") { throw "staging must not contain an instantiated .env before zipping" }
+
+      - name: Create release zip
+        run: 7z a QuickQuip-${{ github.ref_name }}-windows-x64.zip .\staging\*
+
+      - name: Audit release zip contents
+        shell: pwsh
+        run: |
+          # 产物级清洁审计（锚定 zip 本身，防步骤序回归）：zip 在 smoke 之前打包，
+          # smoke 事后在 staging 里产生的运行残留本就不该进包——这里再对成品兜底。
+          # 注意 .env 用精确名匹配：.env.example 与 config\niuniu_text*.toml 是预期内容。
+          $listing = 7z l -ba QuickQuip-${{ github.ref_name }}-windows-x64.zip | ForEach-Object { ($_ -split '\s{2,}')[-1] }
+          $forbidden = @($listing | Where-Object { $_ -match '^\.env$' -or $_ -match '__pycache__' -or $_ -match '\.pyc$' -or $_ -match '-smoke\..*\.log$' -or $_ -match '\.db$' })
+          if ($forbidden.Count -gt 0) { throw "Release zip contains build residue: $($forbidden -join ', ')" }
 
       - name: Smoke test lazy package
         shell: pwsh
@@ -157,9 +173,6 @@ jobs:
           } finally {
             Pop-Location
           }
-
-      - name: Create release zip
-        run: 7z a QuickQuip-${{ github.ref_name }}-windows-x64.zip .\staging\*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
