@@ -29,7 +29,19 @@ if [ "$cmd" = "status" ]; then
     elif [ "$RECENT_PMHQ" -gt 0 ]; then
         echo "ONLINE"
     else
-        QQ_ALIVE=$(docker exec "$BACKEND" /nix/store/8kk5nd62m32vmqx70jg37dmnypf9iddf-busybox-1.36.1/bin/ps aux 2>"$NULL_DEVICE" | grep -c '/opt/QQ/qq')
+        # QQ 进程探测：优先容器内 ps（PATH 解析，不写带 hash 的 nix store 绝对路径——
+        # llonebot:latest 重建会漂移），失败回退宿主机 docker top（pmhq 启动参数含
+        # /opt/QQ/qq）。两路都拿不到进程列表说明探测本身失效，输出 UNKNOWN 而非
+        # 误报 OFFLINE（cron_check_bot.sh 对 UNKNOWN 只记录不告警）。
+        PS_OUT=$(docker exec "$BACKEND" ps 2>"$NULL_DEVICE")
+        if [ -z "$PS_OUT" ]; then
+            PS_OUT=$(docker top "$BACKEND" 2>"$NULL_DEVICE")
+        fi
+        if [ -z "$PS_OUT" ]; then
+            echo "UNKNOWN"
+            exit 0
+        fi
+        QQ_ALIVE=$(printf '%s\n' "$PS_OUT" | grep -c '/opt/QQ/qq' || true)
         if [ "${QQ_ALIVE:-0}" -gt 0 ] 2>"$NULL_DEVICE"; then
             echo "IDLE"
         else
