@@ -26,7 +26,7 @@ from quickquip.chat.awakening import (
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.service import QuickJudgeResult
-from tests.fixtures.onebot import DummyMessage, at_seg, face_seg, record_seg, text_seg
+from tests.fixtures.onebot import DummyMessage, DummySegment, at_seg, face_seg, record_seg, text_seg
 
 
 class RecordingMatcher:
@@ -167,7 +167,7 @@ class Harness:
         def _on_message(**kwargs):
             return self.recorder
 
-        self.matcher = gm.register_message_matcher(_on_message, DummyMessage, record_seg.__class__)
+        self.matcher = gm.register_message_matcher(_on_message, DummyMessage, DummySegment)
 
     async def handle(self, event):
         handler = self.recorder.handlers[0]

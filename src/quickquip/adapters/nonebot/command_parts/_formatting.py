@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.adapters.nonebot._safe_send import send_group_text, send_private_text
 from quickquip.adapters.nonebot.command_parts._chat_utils import _chat_type
 from quickquip.common.bot_action_trace import overlay_bot_action_trace
 
@@ -144,6 +145,6 @@ async def _send_lyrics_forward(bot, event, lyric_result, heading: str) -> None:
             except Exception:
                 pass
         if group_id is not None:
-            await bot.send_group_msg(group_id=group_id, message=formatted)
+            await send_group_text(bot, group_id, formatted)
         else:
-            await bot.send_private_msg(user_id=event.user_id, message=formatted)
+            await send_private_text(bot, event.user_id, formatted)

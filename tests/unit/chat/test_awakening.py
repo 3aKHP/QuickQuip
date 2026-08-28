@@ -1262,8 +1262,18 @@ class TestCheckAwakeningTriggers:
 logger = logging.getLogger(__name__)
 
 
+def _default_build_reply(result):
+    """镜像适配层 ``build_llm_reply_message`` 的契约：恒返回段列表（无图单 text 段）。
+
+    chat 域测试不 import nonebot，用元组段列表镜像 wire 形状。
+    """
+    segments = [("text", result["reply"])]
+    segments.extend(("image", f"base64://{b64}") for b64 in result.get("images") or [])
+    return segments
+
+
 async def _drive_boredom_send(
-    bot, groups, rule_switch, svc, *, rate_limiter=None, stats_tracker=None, build_reply_message=None
+    bot, groups, rule_switch, svc, *, rate_limiter=None, stats_tracker=None
 ):
     """测试本地的最小发送驱动，镜像 adapter 的 ``_wrapped_boredom_check`` 循环：
     chat 层只产出待发送计划；传输（``int(gid)`` 转换与消息拼装）归发送方，
@@ -1273,11 +1283,7 @@ async def _drive_boredom_send(
         try:
             await bot.send_group_msg(
                 group_id=int(plan.group_id),
-                message=(
-                    build_reply_message(plan.reply_result)
-                    if build_reply_message is not None
-                    else plan.reply_result["reply"]
-                ),
+                message=_default_build_reply(plan.reply_result),
             )
             confirm_boredom_sent(plan, stats_tracker)
         except Exception:
@@ -1355,11 +1361,11 @@ class TestBoredomSendFlow:
             aw._state = old_state
 
         svc.generate_reply.assert_awaited_once()
-        bot.send_group_msg.assert_awaited_once_with(group_id=123, message="冒个泡")
+        bot.send_group_msg.assert_awaited_once_with(group_id=123, message=[("text", "冒个泡")])
         stats_tracker.record_trigger.assert_called_once_with("123", "awakening_boredom")
 
     def test_sends_with_images_via_reply_builder(self):
-        """发送方拼装回复（镜像适配层注入的 build_llm_reply_message）时，带图回复不丢图。"""
+        """发送方按适配层契约拼装回复（恒段列表）时，带图回复不丢图。"""
         bot = MagicMock()
         bot.send_group_msg = AsyncMock()
         groups = MagicMock()
@@ -1373,9 +1379,6 @@ class TestBoredomSendFlow:
         svc.generate_reply = AsyncMock(
             return_value={"reply": "冒个泡", "images": ["cXctaW1n"]}
         )
-
-        def _build_reply(result):
-            return ("message", result["reply"], result.get("images"))
 
         import quickquip.chat.awakening as aw
         old_cfg = aw._config
@@ -1392,15 +1395,13 @@ class TestBoredomSendFlow:
         aw._state.record_message("123", "u1")
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(
-                _drive_boredom_send(bot, groups, rule_switch, svc, build_reply_message=_build_reply)
-            )
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
         finally:
             aw._config = old_cfg
             aw._state = old_state
 
         bot.send_group_msg.assert_awaited_once_with(
-            group_id=123, message=("message", "冒个泡", ["cXctaW1n"])
+            group_id=123, message=[("text", "冒个泡"), ("image", "base64://cXctaW1n")]
         )
 
 
@@ -1529,7 +1530,7 @@ class TestBoredomSendFlowFailures:
             for r in caplog.records
         )
         # 后续群仍被正常处理
-        bot.send_group_msg.assert_awaited_once_with(group_id=456, message="reply-456")
+        bot.send_group_msg.assert_awaited_once_with(group_id=456, message=[("text", "reply-456")])
         assert "123" not in st._last_boredom_trigger
         assert "456" in st._last_boredom_trigger
         stats_tracker.record_trigger.assert_called_once_with("456", _RULE_BOREDOM)

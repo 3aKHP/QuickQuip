@@ -13,6 +13,14 @@ class DummySegment:
         self.type = segment_type
         self.data = data
 
+    @staticmethod
+    def text(text: str) -> "DummySegment":
+        return DummySegment("text", {"text": text})
+
+    @staticmethod
+    def image(file: str) -> "DummySegment":
+        return DummySegment("image", {"file": file})
+
 
 class DummyMessage(list):
     def __str__(self) -> str:

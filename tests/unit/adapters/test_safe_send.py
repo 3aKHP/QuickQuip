@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from nonebot.adapters.onebot.v11 import Message
 
-from quickquip.adapters.nonebot._safe_send import send_group_text
+from quickquip.adapters.nonebot._safe_send import send_group_text, send_private_text
 
 
 class _Bot:
@@ -11,6 +11,9 @@ class _Bot:
         self.sent: list[dict] = []
 
     async def send_group_msg(self, **kwargs):
+        self.sent.append(kwargs)
+
+    async def send_private_msg(self, **kwargs):
         self.sent.append(kwargs)
 
 
@@ -37,3 +40,28 @@ async def test_send_group_text_keeps_cq_like_text_literal():
     message = bot.sent[0]["message"]
     assert message[0].type == "text"
     assert message[0].data["text"] == "看这里 [CQ:at,qq=all]"
+
+
+@pytest.mark.asyncio
+async def test_send_private_text_sends_single_text_segment():
+    bot = _Bot()
+
+    await send_private_text(bot, 456, "hello")
+
+    assert bot.sent[0]["user_id"] == 456
+    message = bot.sent[0]["message"]
+    assert isinstance(message, Message)
+    assert len(message) == 1
+    assert message[0].type == "text"
+    assert message[0].data["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_send_private_text_keeps_cq_like_text_literal():
+    bot = _Bot()
+
+    await send_private_text(bot, 456, "歌词 [CQ:image,file=http://evil.test/x]")
+
+    message = bot.sent[0]["message"]
+    assert message[0].type == "text"
+    assert message[0].data["text"] == "歌词 [CQ:image,file=http://evil.test/x]"
