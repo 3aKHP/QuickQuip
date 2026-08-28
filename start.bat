@@ -47,7 +47,10 @@ if exist ".\python\pythonw.exe" (
 )
 
 echo Starting Web Admin...
-start "QuickQuip Admin" /MIN "%_PYTHONW%" web_api.py
+rem pythonw 没有控制台流，uvicorn/loguru 启动即写无效流会静默崩溃（无 traceback 可查）；
+rem 经 cmd /c 重定向为它提供有效输出流，并把运行日志追加到 data\web-admin.log。
+rem 任务栏会出现最小化的 "QuickQuip Admin" cmd 窗口，属正常（cmd 同步等待 pythonw）。
+start "QuickQuip Admin" /MIN cmd /c ""%_PYTHONW%" web_api.py >> "%~dp0data\web-admin.log" 2>&1"
 
 echo Opening Web Admin...
 start "QuickQuip Admin Window" "%_PYTHONW%" webview_launcher.py
