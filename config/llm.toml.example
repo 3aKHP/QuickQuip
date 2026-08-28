@@ -166,6 +166,7 @@ max_context_chars = 40000         # 注入消息样本的总字符上限
 max_output_chars = 320            # 播报正文最大字符数（超出会自动裁切）
 
 # 模型级联：逐个尝试直到成功；"@default" 表示使用当前群绑定的默认模型。
+# （仅 enabled = true 时才校验 cascade 引用的 provider，关闭时不产生 load_error）
 model_cascade = [
     "@default",
     "openai-main/gpt-5.4",
@@ -183,6 +184,7 @@ summary_length_hint = 2000    # 字数目标，注入 prompt（最小值 100）
 
 # 模型级联：逐个尝试直到成功；"@default" 表示使用当前群绑定的默认模型。
 # 下方模型名称仅为示例，请替换为你自己的 provider_id/model_id。
+# （仅 enabled = true 时才校验 cascade 引用的 provider，关闭时不产生 load_error）
 model_cascade = [
     "gemini-main/gemini-3.1-pro-high",
     "claude-main/claude-sonnet-4-6",
@@ -202,6 +204,7 @@ publish_cron  = "0 10 * * *"     # 每天 10:00 发布（周一发新报告，�
 min_messages  = 100              # 低于此条数时跳过生成（最小值 1）
 length_hint   = 2000             # 字数目标，注入 prompt（最小值 200）
 sample_per_day = 50              # 每天采样消息数上限，控制喂给 LLM 的总量（最小值 1）
+# 模型级联（仅 enabled = true 时才校验引用的 provider，关闭时不产生 load_error）
 model_cascade = [
     "gemini-main/gemini-3.1-pro-high",
     "claude-main/claude-sonnet-4-6",
@@ -218,6 +221,7 @@ publish_cron  = "0 10 * * *"     # 每天 10:00 发布（1 日发新报告，其
 min_messages  = 300              # 低于此条数时跳过生成
 length_hint   = 2500             # 字数目标（最小值 200）
 sample_per_day = 20              # 月报跨度长，每天采样更少（最小值 1）
+# 模型级联（仅 enabled = true 时才校验引用的 provider，关闭时不产生 load_error）
 model_cascade = [
     "gemini-main/gemini-3.1-pro-high",
     "claude-main/claude-sonnet-4-6",
