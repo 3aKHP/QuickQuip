@@ -17,3 +17,8 @@ async def send_group_text(bot, group_id: int, text: str) -> None:
     单个对象而非段数组，不符合 OneBot V11 的 message 规范（string | array）。
     """
     await bot.send_group_msg(group_id=group_id, message=Message([MessageSegment.text(text)]))
+
+
+async def send_private_text(bot, user_id: int, text: str) -> None:
+    """以单 text 段发送私聊纯文本（与 :func:`send_group_text` 同理）。"""
+    await bot.send_private_msg(user_id=user_id, message=Message([MessageSegment.text(text)]))
