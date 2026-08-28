@@ -227,6 +227,10 @@ jobs:
       - name: Smoke test Docker image
         run: |
           docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -c "import quickquip, plugins, web_api"'
+          # 存活探测：bot.py 必须活到 timeout（退出码 124）——import 冒烟抓不到
+          # nonebot.load_plugins 的路径约束。勿改成 -euxc：set -e 会让 124 直接
+          # 中止 shell，存活判定恒假。
+          docker run --rm quickquip:smoke sh -c 'timeout -k 5 15 python -u bot.py; [ $? -eq 124 ]'
           docker run --rm --shm-size=1g quickquip:smoke python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--no-sandbox']); browser.close(); p.stop()"
 
       - name: Build and push
