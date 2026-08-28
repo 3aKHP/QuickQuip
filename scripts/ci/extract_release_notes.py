@@ -11,7 +11,8 @@ import sys
 
 
 def main(tag: str) -> int:
-    version = tag.lstrip("v")
+    # Prerelease tags (v1.12.2-rc.1) resolve to their base version section (## [1.12.2]).
+    version = tag.lstrip("v").split("-", 1)[0]
     text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
     pattern = rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n^## |\Z)"
     match = re.search(pattern, text, re.MULTILINE | re.DOTALL)

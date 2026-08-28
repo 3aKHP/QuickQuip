@@ -56,6 +56,37 @@ def test_extracts_section_for_tag(tmp_path: Path):
     assert "pending" not in notes
 
 
+def test_prerelease_tag_uses_base_version(tmp_path: Path):
+    (tmp_path / "CHANGELOG.md").write_text(
+        _changelog(
+            """
+            # Changelog
+
+            ## [Unreleased]
+
+            - pending
+
+            ## [1.12.2] - 2026-08-28
+
+            ### 修复
+            - Fix A
+
+            ## [1.12.1] - 2026-08-21
+
+            - Older stuff
+            """
+        ),
+        encoding="utf-8",
+    )
+    result = _run(tmp_path, "v1.12.2-rc.1")
+    assert result.returncode == 0, result.stderr
+
+    notes = (tmp_path / "release_notes.md").read_text(encoding="utf-8")
+    assert "Fix A" in notes
+    assert "Older stuff" not in notes
+    assert "pending" not in notes
+
+
 def test_missing_tag_exits_nonzero(tmp_path: Path):
     (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## [0.8.0]\n- x\n", encoding="utf-8")
     result = _run(tmp_path, "v9.9.9")
