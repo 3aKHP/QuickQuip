@@ -7,10 +7,9 @@ import contextlib
 import json
 import types
 
-from nonebot.adapters.onebot.v11 import Message, MessageSegment
-
 from quickquip.adapters.nonebot import awakening_plugin
 from quickquip.chat.awakening import AwakeningConfig, AwakeningDefaults, get_state
+from tests.fixtures.onebot import DummyMessage, DummySegment
 
 
 class FakeScheduler:
@@ -117,9 +116,9 @@ def test_boredom_check_sends_message_not_str(monkeypatch):
 
     monkeypatch.setattr(awakening_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))
     # 测试环境 nonebot_plugin_apscheduler 抛 ValueError → 模块级 Message/MessageSegment 为 None，
-    # 此处补回真实 v11 类（消息类 import 本身无需 driver 初始化）
-    monkeypatch.setattr(awakening_plugin, "Message", Message)
-    monkeypatch.setattr(awakening_plugin, "MessageSegment", MessageSegment)
+    # 此处补回 Dummy 类（与其他 adapter 测试同一隔离范式）
+    monkeypatch.setattr(awakening_plugin, "Message", DummyMessage)
+    monkeypatch.setattr(awakening_plugin, "MessageSegment", DummySegment)
     monkeypatch.setattr(awakening_plugin, "_ensure_llm_bindings", lambda: None)
     monkeypatch.setattr(awakening_plugin, "get_llm_service", lambda: object())
     monkeypatch.setattr(awakening_plugin, "iter_boredom_send_plans", fake_iter_plans)
@@ -132,7 +131,7 @@ def test_boredom_check_sends_message_not_str(monkeypatch):
 
     assert len(sent) == 1
     message = sent[0]["message"]
-    assert isinstance(message, Message)
+    assert isinstance(message, DummyMessage)
     assert len(message) == 1
     assert message[0].type == "text"
-    assert message[0].data["text"] == "冒个泡 [CQ:at,qq=all]"
+    assert message[0].data == {"text": "冒个泡 [CQ:at,qq=all]"}
