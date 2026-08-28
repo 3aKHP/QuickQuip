@@ -41,16 +41,17 @@ def _wait_for_admin(base_url: str) -> None:
 
 
 def main() -> int:
-    admin_url = f"{_admin_base_url()}/ops"
+    base_url = _admin_base_url()
+    admin_url = f"{base_url}/ops"
     try:
         import webview  # type: ignore[import-untyped]
     except ImportError:
         print("pywebview not installed, falling back to browser", file=sys.stderr)
-        _wait_for_admin(_admin_base_url())
+        _wait_for_admin(base_url)
         webbrowser.open(admin_url)
         return 2
 
-    _wait_for_admin(_admin_base_url())
+    _wait_for_admin(base_url)
     webview.create_window("QuickQuip Admin", admin_url, width=1280, height=800)
     webview.start()
     return 0
