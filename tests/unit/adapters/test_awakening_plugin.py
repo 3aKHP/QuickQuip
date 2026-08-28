@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import types
+
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 from quickquip.adapters.nonebot import awakening_plugin
 from quickquip.chat.awakening import AwakeningConfig, AwakeningDefaults, get_state
@@ -85,3 +90,49 @@ def test_reload_boredom_groups_clears_state_for_removed_groups(monkeypatch, tmp_
     assert state.get_group_silence_seconds("456") is None  # 取消 opt-in 清除
     assert state.can_trigger_boredom("456", 60) is True
     assert state.get_group_silence_seconds("789") is not None
+
+
+def test_boredom_check_sends_message_not_str(monkeypatch):
+    """钉住：无聊唤醒发送循环发出的是 Message（array 段格式），不是裸 str——
+    裸 str 直调 bot.send_group_msg 会被服务端按 CQ 码解析。"""
+    sched = FakeScheduler()
+    _use_config(monkeypatch, boredom_scan_interval=120)
+    awakening_plugin.register_boredom_scan_job(sched)
+    func = sched.jobs[awakening_plugin.BOREDOM_SCAN_JOB_ID]["func"]
+
+    sent: list[dict] = []
+
+    async def fake_send_group_msg(**kwargs):
+        sent.append(kwargs)
+
+    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg)
+    plan = types.SimpleNamespace(
+        group_id="123",
+        reply_result={"reply": "冒个泡 [CQ:at,qq=all]"},
+        trace_kwargs=lambda: {"rule_name": "awakening_boredom"},
+    )
+
+    async def fake_iter_plans(groups, rule_switch, svc, rate_limiter):
+        yield plan
+
+    monkeypatch.setattr(awakening_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))
+    # 测试环境 nonebot_plugin_apscheduler 抛 ValueError → 模块级 Message/MessageSegment 为 None，
+    # 此处补回真实 v11 类（消息类 import 本身无需 driver 初始化）
+    monkeypatch.setattr(awakening_plugin, "Message", Message)
+    monkeypatch.setattr(awakening_plugin, "MessageSegment", MessageSegment)
+    monkeypatch.setattr(awakening_plugin, "_ensure_llm_bindings", lambda: None)
+    monkeypatch.setattr(awakening_plugin, "get_llm_service", lambda: object())
+    monkeypatch.setattr(awakening_plugin, "iter_boredom_send_plans", fake_iter_plans)
+    monkeypatch.setattr(
+        awakening_plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext()
+    )
+    monkeypatch.setattr(awakening_plugin, "confirm_boredom_sent", lambda plan, stats: None)
+
+    asyncio.run(func())
+
+    assert len(sent) == 1
+    message = sent[0]["message"]
+    assert isinstance(message, Message)
+    assert len(message) == 1
+    assert message[0].type == "text"
+    assert message[0].data["text"] == "冒个泡 [CQ:at,qq=all]"
