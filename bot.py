@@ -9,7 +9,9 @@ logger.add(
     "data/logs/quickquip_{time:YYYY-MM-DD}.log",
     rotation="00:00",
     retention="14 days",
-    level="DEBUG",
+    # INFO 以上才落盘：nonebot init 的 DEBUG 配置 dump 含 .env 全部密钥
+    # （含 API key 与 WEB_ADMIN_PASSWORD），不得写入文件日志。
+    level="INFO",
     encoding="utf-8",
 )
 
