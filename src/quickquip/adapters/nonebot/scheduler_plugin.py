@@ -8,6 +8,7 @@ except (ModuleNotFoundError, ValueError):
     nonebot = None
     scheduler = None
 
+from quickquip.adapters.nonebot._safe_send import send_group_text
 from quickquip.chat.config import SCHEDULED_MESSAGES
 from quickquip.common.bot_action_trace import bot_action_trace
 
@@ -77,7 +78,7 @@ def _register_jobs():
                             reply_preview=msg,
                             source="scheduler.scheduled_message",
                         ):
-                            await bot.send_group_msg(group_id=gid, message=msg)
+                            await send_group_text(bot, int(gid), msg)
                     except Exception:
                         logger.warning("scheduled_msg: failed to send to group %s", gid, exc_info=True)
                 try:
@@ -149,7 +150,7 @@ def _register_festival_job() -> None:
                         reply_preview=full_greeting,
                         source="scheduler.festival_greeting",
                     ):
-                        await bot.send_group_msg(group_id=int(gid), message=full_greeting)
+                        await send_group_text(bot, int(gid), full_greeting)
                 except Exception:
                     logger.warning(
                         "festival_check: failed to send greeting to group %s",
