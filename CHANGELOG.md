@@ -6,6 +6,23 @@
 
 （暂无）
 
+## [1.12.2] - 2026-08-28
+
+本版为跨平台发行与部署定型 release（v1.12 系列里程碑版本）：无新功能，主体是 CQ 码注入缺陷类的全面收口、provider 协议健壮性加固与发行/部署链路加固；发布前按里程碑计划在 Windows 懒人包、Windows Docker、Linux Docker、Linux 源码部署四条路径完成全链路验收，并对公开文档逐项校对。维护者可感知收益：协议边界 fail-visible、CQ 注入面清零；部署者可感知收益：四条发行路径均有真实环境证据与已知限制记录。
+
+### 变更
+
+- **发行流水线支持 RC 预发布 tag**：release notes 提取把 `v1.12.2-rc.1` 这类预发布 tag 归一化到基础版本段；Docker 的 `1.12`/`1` 浮动 tag 不再被预发布构建顶掉（与 `latest` 同规则）；`.env.example` 补充本地直跑场景的 `ONEBOT_WS_URLS` 注释示例（#146）。
+
+### 修复
+
+- **复读回复保留消息段**：复读指纹与被动规则文本分离，回放复制的 OneBot 消息段而非 CQ 码字符串，规则文本中的 CQ 字面量不再被激活为真实消息段（#138）。
+- **CQ 码注入面全面收口**：每日播报与长消息降级改走文本段（array 格式），播报活跃用户昵称在采集侧剔除 `[CQ:...]` 码（#140）；无聊唤醒直发、歌词转发降级（群/私聊）、定时消息与节日问候统一文本段发送，`build_llm_reply_message` 恒返回 Message——#138 同类缺陷的全部 7 处直发点收口完毕（#143）。
+- **Gemini 原生工具调用回放**：完整保留并回放 `thoughtSignature`，支持 Bearer 网关鉴权、并行工具批次和工具结果图片的协议安全分离（#136）；修复原生工具请求数组参数缺元素类型被上游拒绝的问题（#137）。
+- **provider 协议健壮性三处**：MCP 外部工具声明缺 items 的数组 schema 会被 Gemini 上游 400（#137 只覆盖了内建工具）；Claude 流式路径丢失 redacted_thinking 块导致下一轮回放遭 400；Gemini 工具批次 fail-closed 拒绝时模型的叙述文本会吞掉拒绝提示，现追加提示并记录 warning 日志（#141）。
+- **LLM 配置校验可观测性**：显式配置的默认 provider 被剪除后的回退记入 load_error 并显式拒绝服务（fail-visible，与 default_provider 指向不存在 id 的既有语义一致；自动选择的默认值仍静默再回退）；已禁用功能的 model_cascade 不再参与 provider 引用校验，示例 cascade 不再污染新部署的 load_error（#144）。
+- **部署与发行加固**：check_bot.sh 移除硬编码 nix store busybox 路径，改容器内 ps → docker top 分级进程探测，探测失效输出 UNKNOWN 而非误报 OFFLINE（消除 llonebot 镜像漂移引起的误报离线告警）；Windows webview 启动器读取 WEB_ADMIN_HOST/WEB_ADMIN_PORT（与 web_api.py 同源默认值，非法端口回退 5104）；懒人包 smoke 增加首启模板清单校验，start.bat 模板缺失输出 WARNING（#145）。
+
 ## [1.12.1] - 2026-08-21
 
 本版为 maintenance / refactor release：一批唤醒与用量修复之外，主体是按 [`docs/dev/style.md`](docs/dev/style.md) 完成的代码规范化拆分——LLM 服务、工具循环、唤醒、总结编排与 Web Admin 前端的模块边界全面收紧，外部行为保持不变。维护者可感知收益：配置/规则/持久化的单一事实来源、跨进程写入一致性、更清晰的模块职责；部署者可感知收益：无迁移负担，配置与数据格式全兼容。
@@ -739,7 +756,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.12.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.12.2...HEAD
+[1.12.2]: https://github.com/3aKHP/QuickQuip/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/3aKHP/QuickQuip/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/3aKHP/QuickQuip/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/3aKHP/QuickQuip/compare/v1.11.0...v1.11.1
