@@ -83,6 +83,25 @@ jobs:
           Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
           New-Item -ItemType Directory -Force staging\data | Out-Null
 
+      - name: Verify lazy package template manifest
+        shell: pwsh
+        run: |
+          # start.bat 首启依赖的模板清单：copy_if_missing 对缺失源静默跳过，
+          # 这里在打包前钉住"模板都在 staging 里"（对齐 Docker smoke 的 test -f 思路）。
+          $expected = @(
+            "staging\start.bat", "staging\.env.example",
+            "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
+            "staging\config\generation.toml.example", "staging\config\games.toml.example",
+            "staging\config\awakening.toml.example", "staging\config\sensitive_words.toml.example",
+            "staging\config\niuniu_text.toml.example", "staging\config\niuniu_text_safe.toml.example",
+            "staging\config\niuniu_text.toml", "staging\config\niuniu_text_safe.toml",
+            "staging\config\personas.example\_shared.toml", "staging\config\personas.example\private-persona.toml",
+            "staging\config\personas.example\quickquip-default.toml", "staging\config\personas.example\structured.toml",
+            "staging\llm_about\vocab.yaml.example", "staging\llm_about\identities.yaml.example"
+          )
+          $missing = @($expected | Where-Object { -not (Test-Path $_) })
+          if ($missing.Count -gt 0) { throw "Lazy package missing template files: $($missing -join ', ')" }
+
       - name: Smoke test lazy package
         shell: pwsh
         env:

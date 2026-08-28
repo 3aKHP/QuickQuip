@@ -21,6 +21,8 @@ if not exist "config\personas" (
     if exist "config\personas.example" (
         echo [First run] Copy config\personas.example -^> config\personas
         xcopy "config\personas.example" "config\personas\" /E /I /Q /Y >nul
+    ) else (
+        echo [WARNING] Missing config\personas.example, skipping personas copy
     )
 )
 call :copy_if_missing "llm_about\vocab.yaml.example" "llm_about\vocab.yaml"
@@ -61,6 +63,8 @@ if not exist "%~2" (
     if exist "%~1" (
         echo [First run] Copy %~1 -^> %~2
         copy "%~1" "%~2" >nul
+    ) else (
+        echo [WARNING] Missing template %~1, skipping %~2
     )
 )
 exit /b
@@ -71,6 +75,8 @@ if not exist "%~2" (
         echo [First run] Copy %~1 -^> %~2
         copy "%~1" "%~2" >nul
         set "_ENV_CREATED=1"
+    ) else (
+        echo [WARNING] Missing template %~1, skipping %~2
     )
 )
 exit /b
