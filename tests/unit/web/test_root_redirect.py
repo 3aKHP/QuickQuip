@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-fastapi = pytest.importorskip("fastapi")
-
-from fastapi import FastAPI  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
-from quickquip.app.web.app import _register_root_redirect  # noqa: E402
+from quickquip.app.web.app import _register_root_redirect
 
 
 def test_root_redirects_to_ops_console():

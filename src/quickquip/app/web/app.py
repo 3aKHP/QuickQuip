@@ -7,14 +7,15 @@ from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
 
 _DIST = PROJECT_ROOT / "frontend" / "dist"
+_OPS_PREFIX = "/ops"
 
 
 def _register_root_redirect(app: FastAPI) -> None:
-    # 管理台挂在 /ops 下，直接访问根路径此前得到 404（v1.12.2 验收发现）；
-    # 重定向到控制台入口，/ops 无斜杠由 Starlette mount 自动 307 到 /ops/。
+    # 管理台挂在 _OPS_PREFIX 下，直接访问根路径此前得到 404（v1.12.2 验收发现）；
+    # 重定向到控制台入口，无斜杠前缀由 Starlette mount 自动 307 补全。
     @app.get("/", include_in_schema=False)
     async def _root() -> RedirectResponse:
-        return RedirectResponse("/ops/")
+        return RedirectResponse(f"{_OPS_PREFIX}/")
 
 
 def create_app() -> FastAPI:
@@ -57,6 +58,6 @@ def create_app() -> FastAPI:
     _register_root_redirect(app)
 
     if _DIST.exists():
-        app.mount("/ops", StaticFiles(directory=_DIST, html=True), name="static")
+        app.mount(_OPS_PREFIX, StaticFiles(directory=_DIST, html=True), name="static")
 
     return app
