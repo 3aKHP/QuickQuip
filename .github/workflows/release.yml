@@ -114,8 +114,10 @@ jobs:
           # 产物级清洁审计（锚定 zip 本身，防步骤序回归）：zip 在 smoke 之前打包，
           # smoke 事后在 staging 里产生的运行残留本就不该进包——这里再对成品兜底。
           # 注意 .env 用精确名匹配：.env.example 与 config\niuniu_text*.toml 是预期内容。
+          # python\ 前缀是内嵌运行时（pip install 编译的字节码属正常内容），只审计应用区。
           $listing = 7z l -ba QuickQuip-${{ github.ref_name }}-windows-x64.zip | ForEach-Object { ($_ -split '\s{2,}')[-1] }
-          $forbidden = @($listing | Where-Object { $_ -match '^\.env$' -or $_ -match '__pycache__' -or $_ -match '\.pyc$' -or $_ -match '-smoke\..*\.log$' -or $_ -match '\.db$' })
+          $appEntries = @($listing | Where-Object { $_ -notlike 'python\*' })
+          $forbidden = @($appEntries | Where-Object { $_ -match '^\.env$' -or $_ -match '__pycache__' -or $_ -match '\.pyc$' -or $_ -match '-smoke\..*\.log$' -or $_ -match '\.db$' })
           if ($forbidden.Count -gt 0) { throw "Release zip contains build residue: $($forbidden -join ', ')" }
 
       - name: Smoke test lazy package
