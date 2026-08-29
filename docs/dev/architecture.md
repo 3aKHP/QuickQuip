@@ -149,13 +149,13 @@ src/quickquip/
 | `games.toml.example` | 分发层（追踪） | 游戏参数配置模板 |
 | `games.toml` | 自用层（gitignore） | 游戏参数（金币倍率、CD、赌注上限等） |
 | `niuniu_text.toml.example` | 分发层（追踪） | 牛牛自定义文案模板 |
-| `niuniu_text.toml` | 自用层（gitignore） | 部署者自定义牛牛文案 |
+| `niuniu_text.toml` | 分发层（追踪） | 默认自定义牛牛文案（勿写入私有内容） |
 | `niuniu_text_safe.toml.example` | 分发层（追踪） | 牛牛和谐版文案模板 |
-| `niuniu_text_safe.toml` | 自用层（gitignore） | 部署者自定义牛牛和谐版文案 |
+| `niuniu_text_safe.toml` | 分发层（追踪） | 默认和谐版牛牛文案（勿写入私有内容） |
 | `personas.example/` | 分发层（追踪） | persona 配置格式示例 |
 | `personas/` | 自用层（gitignore） | 真实 persona 定义（含人格描述、系统提示等） |
 
-**原则**：永远只编辑 `.toml` / `personas/`，不编辑 `.example`。`.example` 只在格式需要变更时更新。
+**原则**：永远只编辑 `.toml` / `personas/`，不编辑 `.example`。`.example` 只在格式需要变更时更新。例外：`niuniu_text.toml` / `niuniu_text_safe.toml` 虽是无 `.example` 后缀的 `.toml`，但属**被追踪的分发层，勿写入私有内容**——私有文案放在未被追踪的独立文件中，通过 `games.toml` 的 `niuniu_text_path` / `niuniu_safe_text_path` 指向（与 configuration.md 一致）。
 
 ---
 
