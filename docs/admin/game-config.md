@@ -43,9 +43,9 @@
 
 ```python
 # 当前注册的游戏
-game_registry.register(NumberBombGame(config=games_config.number_bomb))                             # 数字炸弹
-game_registry.register(BlackjackGame(economy=game_economy))          # 21 点
-game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯轮盘
+game_registry.register(NumberBombGame(config=games_config.number_bomb))                                          # 数字炸弹
+game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))          # 21 点
+game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))    # 俄罗斯轮盘
 # NiuNiu 不走 GameRegistry，删除 niuniu_store 行即可禁用
 ```
 
@@ -107,12 +107,12 @@ QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按�
 
 | 模式 | 说明 |
 |------|------|
-| `default` | 原版文案，包含"打胶""击剑"等措辞 |
+| `default` | 原版文案，包含“打胶”“击剑”等措辞 |
 | `safe` | 和谐版文案，事件描述和长度评价语调整为更中性的表达 |
 
 **加载逻辑**：`config/games.toml` 中的 `niuniu_text_path` / `niuniu_safe_text_path` 指向自定义 TOML 文件；为空时使用内置默认文案。`safe` 模式缺失的字段会自动从 `default` 继承补全。
 
-**群级切换**：管理员通过 `/牛牛文案 [模式名]` 命令切换本群文案模式（默认 `default`）。Web Admin 牛牛面板的"文案模式管理"卡片可视化操作群组文案设置。切换记录存储在 `niuniu_group_text` 表中。
+**群级切换**：管理员通过 `/牛牛文案 [模式名]` 命令切换本群文案模式（默认 `default`）。Web Admin 牛牛面板的“文案模式管理”卡片可视化操作群组文案设置。切换记录存储在 `niuniu_group_text` 表中。
 
 **扩展自定义文案**：参考 `config/niuniu_text.toml.example` 的格式，复制后修改对应键，在 `games.toml` 中设置 `niuniu_text_path` 指向该文件即可。
 
@@ -138,7 +138,7 @@ QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按�
 
 1. 金币数据在 `data/game_economy.db`，可用任意 SQLite 浏览器查看
 2. 所有金币操作都有原子事务保护（`BEGIN IMMEDIATE`）
-3. 转账失败会自动回滚，不会出现"一方扣了一方没加"的情况
+3. 转账失败会自动回滚，不会出现“一方扣了一方没加”的情况
 
 ### NiuNiu 数据问题
 

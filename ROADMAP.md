@@ -30,7 +30,7 @@
 
 `/llm reload` 已能重读配置并重建部分运行时对象。provider client 不缓存（每次请求新建），故 provider 配置改动 reload 后即时生效、in-flight 请求自然用旧配置跑完——此项无须专门处理。剩余待明确：
 
-1. MCP reconnect 的顺序、超时和失败回退（将与「指定 MCP 加载顺序防止依赖倒序」合并设计）。
+1. MCP reconnect 的顺序、超时和失败回退（将与“指定 MCP 加载顺序防止依赖倒序”合并设计）。
 2. Web Admin 保存配置后的用户提示和状态刷新（已部分落地：按 key 返回 `effect`，`awakening`/`chat_rules` 自动重载，`llm` 手动引导——自动 reload 会触发 MCP 全量重连且影响面大；剩余 `generation`/`games`/`niuniu_text*` 仍需重启）。
 3. reload 前后运行时状态的一致性验证（`/llm reload` 已探活当前 provider/model；全量 provider 巡检由 `/llm probe` 执行）。
 
@@ -86,7 +86,7 @@
 
 ### 长回复拆分为多条消息
 
-LLM 长回复目前作为单条合并转发节点发送。可评估拆分为多条顺序消息的形态，兼顾可读性与"分段输出"的自然感；需处理分段策略、避免刷屏、与 OneBot V11 消息节奏的配合。
+LLM 长回复目前作为单条合并转发节点发送。可评估拆分为多条顺序消息的形态，兼顾可读性与“分段输出”的自然感；需处理分段策略、避免刷屏、与 OneBot V11 消息节奏的配合。
 
 ---
 

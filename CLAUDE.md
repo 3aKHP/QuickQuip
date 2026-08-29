@@ -24,7 +24,7 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 - **Linux 环境（WSL2）**。Shell 用 bash，路径分隔符 `/`
 - **环境与依赖用 uv 管理**。`.venv` 由 `uv venv` 创建（Linux 布局 `.venv/bin/`），依赖用 `uv pip install` 安装。**日常运行直接用 `.venv/bin/python`**（或激活 `.venv/bin/activate` 后直接 `python`）；不把 `uv run` 用于日常命令，以免触发 uv 项目模式生成 `uv.lock`（已永久 gitignore）。跨平台 pre-push hook 例外，仍用 `uv run`
 - **项目采用 src layout**：源码位于 `src/quickquip/` 和 `src/plugins/`，开发时需 `uv pip install -e .`（可编辑安装）或设 `PYTHONPATH=src`
-- **不主动 push**。即使刚 commit 完，也等用户明确说"请推"
+- **不主动 push**。即使刚 commit 完，也等用户明确说“请推”
 - **不 squash merge**。合并 PR 用 `gh pr merge --merge`，保留完整分支历史
 
 ### 私有目录边界
@@ -35,7 +35,7 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 
 ## 启动准则
 
-- **需明确指令才 Commit**。讨论中提到"要提交"不算，必须出现"请提交 / 请 commit"这类祈使句
+- **需明确指令才 Commit**。讨论中提到“要提交”不算，必须出现“请提交 / 请 commit”这类祈使句
 
 ### 分支策略
 
@@ -107,7 +107,7 @@ git commit -m "feat(llm): add proxy support to ProviderConfig" \
 ## CHANGELOG 规范
 
 - feat/fix/refactor 级改动**不直接编辑 `CHANGELOG.md`**，改记一条本地草稿（机制见 [`CONTRIBUTING.md`](CONTRIBUTING.md)），避免并行分支在 `## [Unreleased]` 处冲突
-- 每条**一行**，只写"做了什么"和"为什么重要"，不写文件路径和实现细节
+- 每条**一行**，只写“做了什么”和“为什么重要”，不写文件路径和实现细节
 - PR 描述里附上该条目正文，便于 review
 - release 时由协作者汇总本地草稿（主）与已合并 commit 历史（兜底），按 `### ✨ 新增 (Added)` / `### 🔧 变更 (Changed)` / `### 🐛 修复 (Fixed)` / `### 🗑️ 移除 (Removed)` 分组写入 `CHANGELOG.md` 新版本段（沿用既有版本段的双语 emoji 小节形态），并清掉已发布草稿
 - chore/docs/style 不更新 CHANGELOG

@@ -18,7 +18,7 @@ FastAPI web-admin
      SQLite / 文件系统
 ```
 
-当前版本采用"双层门"：
+当前版本采用“双层门”：
 
 - **外层**：nginx `auth_basic`
 - **内层**：QuickQuip 自身的应用层 session 登录
@@ -65,17 +65,17 @@ FastAPI web-admin
 - `POST /ops/api/auth/login`
 - `POST /ops/api/auth/logout`
 
-业务路由本身不再假设"只要能访问到 FastAPI 就一定已经认证过"。
+业务路由本身不再假设“只要能访问到 FastAPI 就一定已经认证过”。
 
 ---
 
 ## 为什么不用前端 Bearer Token
 
-当前实现明确没有采用"登录后把长期 token 存进 `localStorage`，再用 `Authorization: Bearer ...` 调接口"的方案，原因是：
+当前实现明确没有采用“登录后把长期 token 存进 `localStorage`，再用 `Authorization: Bearer ...` 调接口”的方案，原因是：
 
 - 主密钥会长期暴露给浏览器 JS 运行环境
 - 没有真正的服务端会话失效能力
-- 退出登录语义较弱，本质上更接近"把主钥匙存到前端"
+- 退出登录语义较弱，本质上更接近“把主钥匙存到前端”
 
 QuickQuip 当前是一个同源 Vue SPA + FastAPI 后台，做服务端 session 更自然，也更容易和现有部署保持解耦。
 
@@ -93,12 +93,9 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 说明：
 
-- `WEB_ADMIN_PASSWORD`
-  应用层登录口令，必填
-- `WEB_ADMIN_SESSION_TTL_HOURS`
-  session 续期窗口，默认 `168`
-- `WEB_ADMIN_COOKIE_SECURE`
-  `auto | true | false`
+- `WEB_ADMIN_PASSWORD`  应用层登录口令，必填
+- `WEB_ADMIN_SESSION_TTL_HOURS`  session 续期窗口，默认 `168`
+- `WEB_ADMIN_COOKIE_SECURE`  `auto | true | false`
 
 `web_api.py` 会在启动时读取项目环境变量文件，并允许运行环境通过同名变量覆盖默认值。
 
@@ -169,7 +166,7 @@ Web Admin 当前提供 26 个标签页（前端使用 vue-router 4 hash 模式�
 
 敏感词过滤器没有独立标签页。后台提供只读接口 `GET /ops/api/sensitive-filter/status`，LLM 健康检查也会汇总过滤器加载状态和词表数量。`config/sensitive_words.toml` 属于高敏部署文件，只在服务器本地维护，Web Admin 不提供内容读取或在线编辑入口。
 
-诊断页的"探活 Provider"按钮会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动全量巡检；群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
+诊断页的“探活 Provider”按钮会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动全量巡检；群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
 
 LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Tool Loop 内的调用归入一个明显分组。请求正文是交给 HTTP 客户端的 UTF-8 JSON 序列化文本，详情页可在格式化 JSON 和传输原文之间切换；普通响应保留解析前的服务端 JSON 文本；流式响应完整消费 SSE 后，按 OpenAI、Claude 或 Gemini 协议重建为一份接近非流式结构的完整响应对象。详情页默认展示组合 JSON，也允许管理员切换到 SSE 传输原文。主列表和实时更新只传输调用元数据，选择记录后才读取请求正文、响应正文和 Header。故障切换、重试和 Tool Loop 后续轮次分别保留 HTTP 明细，并通过 Agent Loop ID 与组内序号关联。
 
