@@ -22,7 +22,7 @@
 | [`mcp-integration.md`](mcp-integration.md) | MCP 接入、协议协商、工具结果和安全边界 |
 | [`tool-discovery.md`](tool-discovery.md) | LLM 工具发现的策略、模式、限制和测试 |
 | [`game-framework.md`](game-framework.md) | 游戏注册、经济系统和扩展框架 |
-| [`regex-tutorial.md`](regex-tutorial.md) | 文字规则配置与正则维护指南 |
+| [`regex-tutorial.md`](regex-tutorial.md) | 零基础正则教学（以项目规则为实例）与现行规则体系速览 |
 | [`sts-formula.md`](sts-formula.md) | 杀戮尖塔公式化回复的词表与运行时说明 |
 
 当前已实现能力、用户可见行为与配置由 `README.md`、`docs/user/`、`docs/admin/` 和 `CHANGELOG.md` 分别承担。开发文档应链接到唯一权威来源，避免在多处复制易变清单。
@@ -33,4 +33,5 @@
 - 架构边界、协议行为、配置语义或持久化契约变更时，在同一变更中更新对应文档。
 - 公共文档使用仓库相对链接，不出现私有工作区路径、真实 `prod/` 内容、本机绝对路径、凭据或未经验证的平台结论。
 - Markdown 段落和列表项保持自然换行；仅在 Markdown 结构或语义需要时手动换行。
+- 中文散文使用弯引号（“” ‘’）；行内 code 里的命令示例保持 ASCII 直引号（`--preset` 等参数解析器只认直引号）。
 - 交付前按变化范围搜索过时术语、配置键、命令和路径，并如实记录无法执行的验证。

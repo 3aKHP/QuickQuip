@@ -178,6 +178,7 @@ data/
 ├── awakening_boredom_groups.json # 已启用无聊唤醒的群列表
 ├── game_economy.db         # 游戏金币 / 签到 / 好感度（SQLite）
 ├── game_scores.json        # 游戏战绩计分
+├── niuniu.db               # 牛牛大作战状态与操作流水（SQLite）
 ├── offline_messages.db     # 离线留言（SQLite）
 ├── quotes.db               # 群语录（SQLite）
 ├── daily_msgs/             # 每日消息原始收集（{group_id}/{date}.jsonl）
