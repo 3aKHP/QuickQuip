@@ -14,9 +14,11 @@ Copy-Item -Recurse prod.example prod
 cp -r prod.example prod
 ```
 
-> ⚠️ 若 `prod/` 已存在（此前初始化过），上面的复制命令会**嵌套**成 `prod/prod.example`
-> 而不是覆盖旧目录——deploy 脚本会随即以旧的生产设置运行并上传 `prod/sendkey.env`。
-> 脚本已内置嵌套检测并中止；正确做法是先把旧 `prod/` 移走或改名，再复制模板。
+> ⚠️ If `prod/` already exists (initialized before), the copy commands above will
+> **nest** into `prod/prod.example` instead of overwriting the old directory — the
+> deploy script would then run with your old production settings and upload
+> `prod/sendkey.env` to the remote host. Both deploy scripts detect the nesting and
+> abort; move the old `prod/` aside first, then re-copy the template.
 
 Then edit only files under `prod/` and the project root `.env`.
 

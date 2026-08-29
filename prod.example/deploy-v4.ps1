@@ -110,10 +110,10 @@ foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml"
     }
 }
 
-# prod/ 已存在时 `Copy-Item -Recurse prod.example prod` 会嵌套成 prod/prod.example 而不是
-# 覆盖，随后本脚本会以既有生产设置运行并把 prod/sendkey.env 上传到远端（v1.12.2 验收
-# 发现的外泄面）。嵌套即中止：正确做法是先移走/改名旧 prod/ 再复制模板。
-if (Test-Path "prod/prod.example") {
+# Nested prod/prod.example means the template was copied into an existing prod/
+# (Copy-Item -Recurse does not overwrite); abort so the script never runs with
+# production settings or uploads prod/sendkey.env. See prod.example/README.md.
+if (Test-Path -PathType Container "prod/prod.example") {
     Write-Host "prod/prod.example exists: the template was nested into an existing prod/ by 'Copy-Item -Recurse prod.example prod'." -ForegroundColor Red
     Write-Host "This script would run with your production settings and upload prod/sendkey.env. Move the old prod/ aside and re-copy the template." -ForegroundColor Red
     Pop-Location
