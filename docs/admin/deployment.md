@@ -96,7 +96,7 @@ docker compose --env-file ../.env up -d
 补充说明：
 
 - **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接 LLBot（`ONEBOT_WS_URLS` 指向 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在 LLBot WebUI 启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
-- `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存；`awakening.toml` 例外：bot 每 30 秒检测 mtime，外部修改会自动重载
+- `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存；`awakening.toml` 是这些文件中唯一的例外：bot 每 30 秒检测其 mtime，外部修改会自动重载
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
 
