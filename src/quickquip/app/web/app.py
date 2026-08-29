@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
 from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, period_reports, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime, llm_usage
@@ -6,6 +7,14 @@ from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
 
 _DIST = PROJECT_ROOT / "frontend" / "dist"
+
+
+def _register_root_redirect(app: FastAPI) -> None:
+    # 管理台挂在 /ops 下，直接访问根路径此前得到 404（v1.12.2 验收发现）；
+    # 重定向到控制台入口，/ops 无斜杠由 Starlette mount 自动 307 到 /ops/。
+    @app.get("/", include_in_schema=False)
+    async def _root() -> RedirectResponse:
+        return RedirectResponse("/ops/")
 
 
 def create_app() -> FastAPI:
@@ -44,6 +53,8 @@ def create_app() -> FastAPI:
     app.include_router(awakening.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(llm_runtime.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(llm_usage.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+
+    _register_root_redirect(app)
 
     if _DIST.exists():
         app.mount("/ops", StaticFiles(directory=_DIST, html=True), name="static")
