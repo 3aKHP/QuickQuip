@@ -59,6 +59,15 @@ for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproje
     [ -e "$required_path" ] || { echo "${R}Missing required file: $required_path${N}" >&2; exit 1; }
 done
 
+# Nested prod/prod.example means the template was copied into an existing prod/
+# (cp -r does not overwrite); abort so the script never runs with production
+# settings or uploads prod/sendkey.env. See prod.example/README.md.
+if [ -d "prod/prod.example" ]; then
+    echo "${R}prod/prod.example exists: the template was nested into an existing prod/ by 'cp -r prod.example prod'.${N}" >&2
+    echo "${R}This script would run with your production settings and upload prod/sendkey.env. Move the old prod/ aside and re-copy the template.${N}" >&2
+    exit 1
+fi
+
 echo "${C}Building frontend...${N}"
 run_step "frontend build" bash -c 'cd frontend && pnpm install --frozen-lockfile && pnpm build'
 
