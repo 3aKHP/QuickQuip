@@ -149,7 +149,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `timeout` | 判定超时秒数 | `2.0` |
 | `max_tokens` | 判定最大输出 token | `64` |
 
-快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。技术失败（超时、provider 异常、空正文、截断、无效 JSON）一律按未触发处理（fail-closed），不会写入 60 秒判定缓存；只有成功解析的业务 true/false 会进缓存。选用带 reasoning 的模型时，reasoning token 计入 `max_tokens` 且延迟更高，需要同时调大 `max_tokens`（如 256）与 `timeout`（如 6 秒），否则会出现「预算被思考耗尽、可见判定为空」与大面积超时。
+快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。技术失败（超时、provider 异常、空正文、截断、无效 JSON）一律按未触发处理（fail-closed），不会写入 60 秒判定缓存；只有成功解析的业务 true/false 会进缓存。选用带 reasoning 的模型时，reasoning token 计入 `max_tokens` 且延迟更高，需要同时调大 `max_tokens`（如 256）与 `timeout`（如 6 秒），否则会出现“预算被思考耗尽、可见判定为空”与大面积超时。
 
 ### `[image_preprocessing]` — 非视觉模型图片转述
 
@@ -245,7 +245,7 @@ output_per_mtok = 0.40
 | `cache_read_per_mtok` | 缓存读价；模型无该缓存机制时省略，计算时回退 input 价 |
 | `cache_write_per_mtok` | 缓存写价；同上，无缓存溢价时省略 |
 
-查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示"未定价"）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
+查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示“未定价”）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
 
 ### `[mcp]` — MCP 总开关
 
@@ -330,9 +330,7 @@ output_per_mtok = 0.40
 
 此文件不存在时，图片部分回退读取 `config/llm.toml` 中旧版 `[image_generation]` 段。
 
-图片、语音和音乐的 `prompt_blocklist` 是生成业务专属限制。配置了
-`config/sensitive_words.toml` 时，生成 prompt、标题、歌词和引用文本还会经过部署级统一
-敏感词过滤。该检查只处理文本，不审核输入或输出的图片像素、音频波形和音乐成品。
+图片、语音和音乐的 `prompt_blocklist` 是生成业务专属限制。配置了`config/sensitive_words.toml` 时，生成 prompt、标题、歌词和引用文本还会经过部署级统一敏感词过滤。该检查只处理文本，不审核输入或输出的图片像素、音频波形和音乐成品。
 
 ### `[image]` — 图片生成
 
@@ -388,8 +386,7 @@ output_per_mtok = 0.40
 
 ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM 上下文。协议端若已在消息段中提供 `text` / `transcript` / `transcription` 字段，QuickQuip 会优先使用该文本；否则通过 OneBot `get_record` 获取音频文件，再调用 ASR provider。
 
-转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider
-才能得到可扫描文本。
+转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider才能得到可扫描文本。
 
 | 键 | 说明 |
 |----|------|

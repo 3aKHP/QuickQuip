@@ -82,7 +82,7 @@ class GameResult:
     rule_name: str = "game_interaction"     # 统计用规则名
 ```
 
-**Session 管理**：每个游戏自己维护 `OrderedDict[str, Session]`，key 为 `group_id`。GameRegistry 只管理"哪个群在玩哪个游戏"的映射。
+**Session 管理**：每个游戏自己维护 `OrderedDict[str, Session]`，key 为 `group_id`。GameRegistry 只管理“哪个群在玩哪个游戏”的映射。
 
 ### 持久 RPG 系统：独立 Store
 
@@ -272,6 +272,6 @@ _cd.clear(uid)              # 手动清除
 ## 命令注册约定
 
 - Session 型游戏通过 `/game start`、`/game stop`、`/game score` 统一入口
-- 游戏内消息（如"拿牌"、"开枪"）由 `GameRegistry.process()` 统一分发
+- 游戏内消息（如“拿牌”、“开枪”）由 `GameRegistry.process()` 统一分发
 - RPG 系统在 `src/quickquip/adapters/nonebot/commands.py` 或对应 `command_parts/` 中用 `on_command()` 独立注册
 - 命令别名用 `aliases=` 参数（如 `aliases={"签到"}`），不用重复注册

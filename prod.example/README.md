@@ -44,12 +44,10 @@ cd /opt/QuickQuip/prod
 docker compose --env-file ../.env up -d --build
 ```
 
-The `web-admin` container serves the prebuilt frontend from `frontend/dist`, so build it
-before bringing the stack up (or just use the deploy scripts, which do this for you):
+The `web-admin` container serves the prebuilt frontend from `frontend/dist`, so build it before bringing the stack up (or just use the deploy scripts, which do this for you):
 
 ```bash
 cd frontend && pnpm install --frozen-lockfile && pnpm build
 ```
 
-For the full prerequisite checklist (Node.js/pnpm, `.env` keys, fonts, Tieba login state),
-see [docs/admin/deployment.md](../docs/admin/deployment.md).
+For the full prerequisite checklist (Node.js/pnpm, `.env` keys, fonts, Tieba login state), see [docs/admin/deployment.md](../docs/admin/deployment.md).

@@ -31,7 +31,7 @@
 
 ### ✨ 新增 (Added)
 
-- **用量页支持人格维度**：LLM 用量统计新增人格（persona）聚合与筛选，聊天、私聊、日报、播报、周报、月报与自动记忆请求按实际人格归因计量；事件明细显示人格，无可靠来源的调用统一显示后端下发的「(未归因)」标签。
+- **用量页支持人格维度**：LLM 用量统计新增人格（persona）聚合与筛选，聊天、私聊、日报、播报、周报、月报与自动记忆请求按实际人格归因计量；事件明细显示人格，无可靠来源的调用统一显示后端下发的“(未归因)”标签。
 
 ### 🔧 变更 (Changed)
 
@@ -81,7 +81,7 @@
 
 ### ✨ 新增 (Added)
 
-- **LLM 用量与成本计量**：每次 LLM 调用常驻捕获 token/成本/耗时/状态，成本引擎按各家缓存约定归一化计算（Claude exclusive→inclusive 还原、inclusive 减法避免缓存按全价计、修复 Claude cache_write 双算），错误/取消/超时同样留痕；价格由 `llm.toml` 的 `[pricing.models]` 配置，未覆盖模型标记「未定价」。
+- **LLM 用量与成本计量**：每次 LLM 调用常驻捕获 token/成本/耗时/状态，成本引擎按各家缓存约定归一化计算（Claude exclusive→inclusive 还原、inclusive 减法避免缓存按全价计、修复 Claude cache_write 双算），错误/取消/超时同样留痕；价格由 `llm.toml` 的 `[pricing.models]` 配置，未覆盖模型标记“未定价”。
 - **用量归因**：所有 LLM 调用入口携带功能与群维度标签（chat / defectify / turmfluch / vision / summary / profile 等 14 类），为成本按维度分解提供归因基础。
 - **Web Admin LLM 用量看板**：统一的 token/cost 总览与明细、成功率、缓存命中率、耗时趋势，支持按 provider/功能/模型/群四维分解与筛选，可下钻到请求级明细；旧用量数据库启动时自动迁移并保留历史记录。
 - **Provider 级 1h prompt-cache TTL**：provider 可配置 `cache_ttl` 启用 1 小时扩展缓存；群聊两次请求间隔常超 5 分钟默认窗口，1h 缓存可显著提升命中率、降低成本。
@@ -113,7 +113,7 @@
 
 ### ✨ 新增 (Added)
 
-- **杀戮尖塔「xxx了」公式化回复模块**：基于两代卡牌/遗物名词表，被动捕获群友整句「X了」用 LLM 映射到最近的真名回复，并提供 `/turmfluch` 命令把任意内容提炼成「名了」；独立 `sts` 顶层域，可扩展更多公式。被动路径走 `[triggers.quick_judge]` 专用便宜模型。
+- **杀戮尖塔“xxx了”公式化回复模块**：基于两代卡牌/遗物名词表，被动捕获群友整句“X了”用 LLM 映射到最近的真名回复，并提供 `/turmfluch` 命令把任意内容提炼成“名了”；独立 `sts` 顶层域，可扩展更多公式。被动路径走 `[triggers.quick_judge]` 专用便宜模型。
 - **MCP 工具图片交付**：支持将 MCP 工具返回的图片安全交付给视觉模型，并为非视觉模型提供受控转述或降级提示。
 - **MCP 双协议纪元支持**：per-server `negotiation` 配置（legacy/auto/modern），同一进程可同时连接 legacy 和 modern (2026-07-28) MCP Server。
 
@@ -127,8 +127,8 @@
 
 ### 🐛 修复 (Fixed)
 
-- **LLM 命令输出截断**：`/defectify`、`/turmfluch` 和被动「xxx了」的 `max_output_tokens` 硬上限（512/64）在推理模型上被 `reasoning_content` 耗尽，导致实际输出被截断；现统一使用 provider 自己的 `max_output_tokens`。
-- **被动「xxx了」频繁 HTTP Request was cancelled**：应用层 `asyncio.wait_for` 超时（12s）短于 provider HTTP 超时（45s），提前取消了携带 ~1644 token 词表 system prompt 的合法请求；已移除应用层超时，由 provider HTTP 超时做唯一守卫。
+- **LLM 命令输出截断**：`/defectify`、`/turmfluch` 和被动“xxx了”的 `max_output_tokens` 硬上限（512/64）在推理模型上被 `reasoning_content` 耗尽，导致实际输出被截断；现统一使用 provider 自己的 `max_output_tokens`。
+- **被动“xxx了”频繁 HTTP Request was cancelled**：应用层 `asyncio.wait_for` 超时（12s）短于 provider HTTP 超时（45s），提前取消了携带 ~1644 token 词表 system prompt 的合法请求；已移除应用层超时，由 provider HTTP 超时做唯一守卫。
 - 多模态相关文本链路现已复用部署级敏感词过滤器，覆盖图片、语音和音乐生成提示词、自动歌词、图片转述以及故障化输入输出。
 - 加固 MCP 非文本工具结果处理，避免未支持的图片、资源和媒体 payload 进入模型文本。
 
@@ -173,7 +173,7 @@
 - **推荐开发环境从 Windows 迁至 Linux（WSL2）**：`CLAUDE.md` / `CONTRIBUTING.md` 的 canonical 版本本地化为 Linux + uv，Windows 降级为本地覆盖（`CLAUDE.local.windows.example`）。Python 环境统一用 uv 管理，日常命令改用 `.venv/bin/python` 直接调用（不再 `uv run`，避免触发 uv 项目模式生成 `uv.lock`，后者已永久 gitignore）。
 - **前端构建工具链由 npm 迁移至 pnpm，Node 运行时从已 EOL 的 20 升到 24 LTS**：CI、根 `Dockerfile`、pre-push hook 与部署脚本同步切换；贡献者构建前端改用 pnpm（Node 20 已于 2026-04 EOL）。生产服务器不涉及——前端在开发者本机构建为静态产物上传，服务器只跑纯 Python 镜像 + bind-mount `dist/`，从未跑 Node。
 
-> "变量解析被Powershell咬了一口。""刚刚这条命令被Powershell绊了一下。""Powershell的转义有点娇气，我写个ps1脚本。" ——From Codex
+> “变量解析被Powershell咬了一口。”“刚刚这条命令被Powershell绊了一下。”“Powershell的转义有点娇气，我写个ps1脚本。” ——From Codex
 >
 > 再也不会这样了。让Powershell带着Here-String一起见鬼去吧。
 
@@ -181,8 +181,8 @@
 
 ### ✨ 新增 (Added)
 
-- **`/llm probe` 命令与 Web Admin provider 探活**：并发探活所有 provider（每个发一条 max_tokens=1 的请求），报告可达性与延迟。按需触发即每次计费，api_key 未设置的 provider 自动跳过——不做静默的后台定时探活（静默扣费是大忌）。Web Admin 诊断页同步加入「探活 Provider」按钮，与命令对等。
-- **Web Admin 配置保存按文件返回生效方式**：`awakening`/`chat_rules` 保存即自动重载（`chat_rules` 新接入 `rules_reload`），`llm` 引导手动 reload，`generation`/`games`/`niuniu_text*` 如实提示需重启——不再一律「需重启 bot 才会生效」。
+- **`/llm probe` 命令与 Web Admin provider 探活**：并发探活所有 provider（每个发一条 max_tokens=1 的请求），报告可达性与延迟。按需触发即每次计费，api_key 未设置的 provider 自动跳过——不做静默的后台定时探活（静默扣费是大忌）。Web Admin 诊断页同步加入“探活 Provider”按钮，与命令对等。
+- **Web Admin 配置保存按文件返回生效方式**：`awakening`/`chat_rules` 保存即自动重载（`chat_rules` 新接入 `rules_reload`），`llm` 引导手动 reload，`generation`/`games`/`niuniu_text*` 如实提示需重启——不再一律“需重启 bot 才会生效”。
 
 ### 🔧 变更 (Changed)
 
@@ -193,7 +193,7 @@
 
 ### 🔧 变更 (Changed)
 
-- **搜索后端配置梳理**：生产运维模板不再内置 SearXNG（改为显式声明外部依赖，匹配真实部署），与终端用户的开箱即用自包含模板职责分离，消除"搜索到底走哪"的长期混乱。
+- **搜索后端配置梳理**：生产运维模板不再内置 SearXNG（改为显式声明外部依赖，匹配真实部署），与终端用户的开箱即用自包含模板职责分离，消除“搜索到底走哪”的长期混乱。
 
 ### 🗑️ 移除 (Removed)
 
@@ -203,7 +203,7 @@
 
 ### ✨ 新增 (Added)
 
-- **Web Admin 适配群周报与群月报**：群组页新增"群周报""群月报"卡片，可按群开关并立即生成；总结页加入日/周/月切换，查阅与删除历史报告，与每日总结共享同一套回看交互。
+- **Web Admin 适配群周报与群月报**：群组页新增“群周报”“群月报”卡片，可按群开关并立即生成；总结页加入日/周/月切换，查阅与删除历史报告，与每日总结共享同一套回看交互。
 - **主动唤醒携带群内近期图片**：被动/无聊触发主动发言时，现在会注入群内最近发过的少量图片，让主动发言基于更完整的群内现场，而非仅当前触发消息里的图片。
 - **牛牛大作战：数值算法抽离 + 离线模拟沙箱**：数值计算抽离为独立纯函数模块，并新增离线模拟沙箱（可复现历史数值场景、扫描参数），为后续数值调整提供可验证的工具。
 - **牛牛大作战：与机器人击剑**：新增独立玩法，纯娱乐性质——长期数学期望为 0（胜负各半），运势只影响波动幅度不影响期望。
@@ -212,7 +212,7 @@
 
 - **牛牛大作战数值重设计**：
   - 真人击剑改为**严格零和**（赢家所得 = 输家所失），消除原非零和转移凭空创造/销毁数值的通胀/通缩。
-  - 打胶凹侧"萎缩"改为 **sublinear 加深**，消除原乘性翻倍导致的指数级数值爆炸。
+  - 打胶凹侧“萎缩”改为 **sublinear 加深**，消除原乘性翻倍导致的指数级数值爆炸。
   - 运势改为**幂压缩**（`luck^0.75`）：中位运势行为不变，仅温和化极端运势的实际影响。
   - 平局改为**两败俱伤**（双方各损少量）：作为有意的非零和破例，略微抵消打胶正期望带来的总量通胀。
   - shrinkage/nightmare 惩罚事件权重调低，减少连续触发。
@@ -220,7 +220,7 @@
 
 ### 🐛 修复 (Fixed)
 
-- **牛牛大作战：运势不再放大固定惩罚**：shrinkage/nightmare 等固定惩罚事件不再受运势影响——"神运"不再加重惩罚力度。
+- **牛牛大作战：运势不再放大固定惩罚**：shrinkage/nightmare 等固定惩罚事件不再受运势影响——“神运”不再加重惩罚力度。
 - **LLM 图片下载容错**：请求中单张图片下载失败不再拖垮整次回复（改为跳过该图并继续），避免过期/失效图片链接让整个对话失败。
 
 ## [1.9.0] - 2026-06-26
@@ -236,7 +236,7 @@
   - `openai_tts`：OpenAI TTS 兼容协议（`POST /audio/speech`），一个 handler 同时适配 edge-tts / GPT-SoVITS / piper 等本地服务的 OpenAI 兼容包装。`api_key_env` 可省略，本地无鉴权时不附加 Authorization 头。
   - `http_tts`：原始 HTTP POST 协议，请求体字段从 model 的 `extra_body` 模板派生，支持 `{text}` / `{voice}` 占位符替换，适配非 OpenAI 格式的本地服务（`__path` / `__method` 为内部控制字段）。
   - 本地协议的音色查询：若 model 在 `extra_body.voices` 配置了静态列表，`/tts voices` 可返回；否则返回空而不报错。
-- **Web Admin 视觉语言升级**：引入"QQ 蓝主导 + 青/琥珀辅助色 + 玻璃光场"的设计体系，借鉴 4sljq 主站设计语言并克制适配后台场景：
+- **Web Admin 视觉语言升级**：引入“QQ 蓝主导 + 青/琥珀辅助色 + 玻璃光场”的设计体系，借鉴 4sljq 主站设计语言并克制适配后台场景：
   - 设计 token 全面扩展：新增青/琥珀辅助色、Inter 字体栈（含 display 标题字）、玻璃层（shell-glass）、光场层（粒子/鼠标辉光）、机械缓动（linear/steps 替代 cubic-bezier）、日志/trace 专用色板等约 40 个 token。
   - 新增氛围层组件：`ParticleBackground`（克制强度的蓝青粒子光场，约为展示站 1/3 强度）、`MouseGlow`（跟随鼠标的蓝青锥形光晕）、`StatusBar`（顶部状态条，显示工作域路径 + CST 时钟 + 在线心跳）。
   - 新增路由切换动效：`page-shell` 三态过渡（前进/后退/切换）+ route trace sweep（换页时顶部一道蓝青光带横扫）。
@@ -252,7 +252,7 @@
 - `generation/config.py` 四模式（image/audio/music/asr）配置解析去重：`resolve_model` 统一到 `_ResolveModelMixin`，providers/models 解析骨架统一到 `_read_generation_section_data`。对外 import 路径与解析行为不变。
 - `command_parts/common.py`（470 行杂物模块）按主题拆分到 `_chat_utils` / `_fortune` / `_content` / `_parsing` / `_formatting` 五个子模块，原路径退化为 re-export shim。同时修复 `is_admin` / `strip_command_name` 的跨层 import 遗留（从 `app.message_pipeline` 改为直接从 `common.event_utils` 导入）。对外 import 路径不变。
 - `llm/store.py`（645 行单类）按业务域拆分到 `store_parts/` 子包：基础设施（连接/schema/守卫）→ `_StoreBase`，会话消息/记忆/归档/群设置各自独立为 mixin。对外 import 路径与 SQL 行为不变。
-- **群周报/月报发布改为每日轮询**：`publish_cron` 从"每周一/每月 1 日"改为"每天 10:00"，使 generate 成功但 publish 失败的报告能在次日自动补发，不再等到下个周期（原周报延迟一周、月报延迟一个月才补发）。
+- **群周报/月报发布改为每日轮询**：`publish_cron` 从“每周一/每月 1 日”改为“每天 10:00”，使 generate 成功但 publish 失败的报告能在次日自动补发，不再等到下个周期（原周报延迟一周、月报延迟一个月才补发）。
 - **周报/月报命令层错误处理改用自定义异常类**：`/summary weekly|monthly now` 的失败原因（未开启 / 冷却中 / 生成失败）改用专用异常类型向命令层传递，替代原先对 RuntimeError 消息做子串匹配的脆方案，避免无关错误被误判为这三种情况导致提示错乱。
 
 ### ⚡ 优化 (Performance)
@@ -261,8 +261,8 @@
 
 ## [1.8.9] - 2026-06-18
 
-> *"为什么版本号是 1.8.9 而不是 1.8.2？"*
-> *和当年的 1.7.10 一样，我们在向那个方块游戏致敬。1.8.9 不是一个带来新内容的版本，而是 1.8 系列最坚实、最稳定的收尾——无数服务器和 mod 长期驻留于此。QuickQuip 的 1.8.9 也是如此：不发新功能，而是清偿技术债，引入工程规范，让代码库从"能跑"走向"能维护"。*
+> *“为什么版本号是 1.8.9 而不是 1.8.2？”*
+> *和当年的 1.7.10 一样，我们在向那个方块游戏致敬。1.8.9 不是一个带来新内容的版本，而是 1.8 系列最坚实、最稳定的收尾——无数服务器和 mod 长期驻留于此。QuickQuip 的 1.8.9 也是如此：不发新功能，而是清偿技术债，引入工程规范，让代码库从“能跑”走向“能维护”。*
 
 ### 🔧 变更 (Changed)
 
@@ -507,7 +507,7 @@
 ### 修复
 
 - 数字炸弹积分记录从 `user_id` 修正为 `at_user_id`（获胜者）
-- 定时任务看板中 scheduled_message 任务在 bot 不可用时不误报为"成功"
+- 定时任务看板中 scheduled_message 任务在 bot 不可用时不误报为“成功”
 - 节日 cron 任务补充 `record_job_result` 执行追踪，与其他定时任务在状态看板中一致
 - MCP 看板及新标签页缺失图标（Server/Clock/ShieldCheck/ChevronLeft/ChevronRight）已注册
 - 未使用 import 清理（`game_registry.py` 的 `field`、`game_scores.py` 的 `Optional`），CI ruff 报错消除
@@ -571,7 +571,7 @@
 
 - 搜索工具语义化重排：`search_web` 硬编码走 SearXNG，Tavily 能力完全走 MCP 侧细粒度工具
 - 自动联网判定：`[triggers.auto_search]` 配置开关，LLM 需要时主动调用搜索
-- LLM 诊断工具：Web admin "诊断"标签页，样本请求 + JSON trace + 文本规则回归测试
+- LLM 诊断工具：Web admin “诊断”标签页，样本请求 + JSON trace + 文本规则回归测试
 - Windows 懒人包：GitHub Actions 构建嵌入式 Python 3.11 + 一键启动脚本
 - GHCR Docker 镜像：多阶段生产镜像 + `docker-compose.example.yml` 完整部署模板
 - 分群词表与身份覆盖：`llm_about/{群号}/` 目录自动合并，分群条目覆盖全局同名项
@@ -710,7 +710,7 @@
 ### 修复
 
 - Web 管理后台安全加固：登录速率限制、`X-Forwarded-For` IP 伪造防护、CSRF 检查、`filelock` 并发写入保护、`group_id` 统一校验规则、前端 401 处理与空状态修复
-- LLM 引用消息认人：user message 同时标注"当前提问者"和"引用发送者"
+- LLM 引用消息认人：user message 同时标注“当前提问者”和“引用发送者”
 - LLM 上下文结构修正：recent_messages 移至紧贴当前提问之前
 - 每日总结发送走合并转发卡片，规避 NapCat ~667 汉字截断
 - 每日总结生成检查 `finish_reason`，非正常结束自动降级

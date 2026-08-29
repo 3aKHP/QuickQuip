@@ -83,7 +83,7 @@ hotfix/* (仅生产阻断) ────────────────→ m
 
 ### Release
 
-Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外收束，可使用 `release/v<version>-<topic>`。发布评审至少达到 Standard，满足 Deep-CR 触发条件时按 Huge 执行，并完成与风险相称的 Windows/Docker/Linux 消费者验收。详情见下方「发布生命周期」。
+Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外收束，可使用 `release/v<version>-<topic>`。发布评审至少达到 Standard，满足 Deep-CR 触发条件时按 Huge 执行，并完成与风险相称的 Windows/Docker/Linux 消费者验收。详情见下方“发布生命周期”。
 
 ## 日常迭代与验证
 

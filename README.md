@@ -10,7 +10,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 ## 功能亮点
 
-- **时区作息猜测** — 根据"早安""晚安"等关键词反推全球时区，幽默揭穿群友真实所在地
+- **时区作息猜测** — 根据“早安”“晚安”等关键词反推全球时区，幽默揭穿群友真实所在地
 - **复读检测与互动** — 检测群内复读行为，自动跟读、变体复读或刷屏警告
 - **文字彩蛋规则** — 内置 25+ 条基于正则的趣味回复规则，支持优先级和加权随机，开箱即用《新三国》全套梗文。详见 [docs/user/three-kingdoms-memes.md](docs/user/three-kingdoms-memes.md)
 - **语境感知回复** — 支持 `regex_context`（正则二次判定）和 `llm_context`（LLM yes/no 裁决）两种模式
@@ -19,7 +19,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **节日自动化** — 内置 6 个节日（公历+农历），自动切换 bot 语气并发送 persona 口吻问候
 - **轻娱乐与互动** — `/roll` 掷骰子、`/choose` 随机选择、`/fortune` 每日运势、`/vote` 投票、`/quote` 语录收藏、`/find` 群聊搜索、`/tell` 离线留言
 - **词云生成** — `/wordcloud` 按 today/week/month/year 四档生成群聊词云图片
-- **STS 公式化回复** — 《杀戮尖塔》梗能力：消息命中"xxx了"时按卡牌名公式回复，`/turmfluch` 一次性生成诅咒文案（v1.10）。详见 [docs/dev/sts-formula.md](docs/dev/sts-formula.md)
+- **STS 公式化回复** — 《杀戮尖塔》梗能力：消息命中“xxx了”时按卡牌名公式回复，`/turmfluch` 一次性生成诅咒文案（v1.10）。详见 [docs/dev/sts-formula.md](docs/dev/sts-formula.md)
 - **LLM 扩展** — 兼容 OpenAI / Claude / Gemini 协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
 - **低频唤醒** — 按群配置唤醒延长、兴趣话题、相关性/答疑判定、无聊冒泡和兜底概率，所有入口受规则开关与限流保护
 - **LLM 用量/成本看板** — 全链路 token 计量与成本估算，按 provider/功能/模型/群/人格五维归因，Web Admin 提供用量面板与定价状态展示
@@ -30,8 +30,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
-完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。  
-全部文档索引见 [docs/index.md](docs/index.md)。
+完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。全部文档索引见 [docs/index.md](docs/index.md)。
 
 ---
 
@@ -151,10 +150,9 @@ Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 
 
 首次运行注意：
 
-- **SmartScreen 提示**：浏览器下载的 ZIP 带 Mark-of-the-Web，解压后首次运行 `start.bat`（或内嵌 python）可能弹出「Windows 已保护你的电脑」——点「更多信息」→「仍要运行」即可；用命令行 `tar` 解压则不会传播该标记。
-- **停止方式**：前台控制台（QQ Bot）按 `Ctrl+C`；Web Admin 是后台进程，关掉管理窗口不会带走它，需在 PowerShell 执行
-  `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match 'web_api.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId }`。
-- 运行期间任务栏会有一个最小化的「QuickQuip Admin」cmd 窗口（Web Admin 的启动壳），属正常现象，随 Web Admin 退出自动关闭；Web Admin 运行日志追加在 `data\web-admin.log`（无轮转）。
+- **SmartScreen 提示**：浏览器下载的 ZIP 带 Mark-of-the-Web，解压后首次运行 `start.bat`（或内嵌 python）可能弹出“Windows 已保护你的电脑”——点“更多信息”→“仍要运行”即可；用命令行 `tar` 解压则不会传播该标记。
+- **停止方式**：前台控制台（QQ Bot）按 `Ctrl+C`；Web Admin 是后台进程，关掉管理窗口不会带走它，需在 PowerShell 执行  `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match 'web_api.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId }`。
+- 运行期间任务栏会有一个最小化的“QuickQuip Admin”cmd 窗口（Web Admin 的启动壳），属正常现象，随 Web Admin 退出自动关闭；Web Admin 运行日志追加在 `data\web-admin.log`（无轮转）。
 
 生产部署模板位于 `prod.example/`；公开分发镜像位于 `ghcr.io/3akhp/quickquip`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
 
