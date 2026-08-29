@@ -43,9 +43,9 @@
 
 ```python
 # 当前注册的游戏
-game_registry.register(NumberBombGame(config=games_config.number_bomb))                             # 数字炸弹
-game_registry.register(BlackjackGame(economy=game_economy))          # 21 点
-game_registry.register(RussianRouletteGame(economy=game_economy))    # 俄罗斯轮盘
+game_registry.register(NumberBombGame(config=games_config.number_bomb))                                          # 数字炸弹
+game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))          # 21 点
+game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))    # 俄罗斯轮盘
 # NiuNiu 不走 GameRegistry，删除 niuniu_store 行即可禁用
 ```
 
