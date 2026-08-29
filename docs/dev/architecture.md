@@ -110,6 +110,7 @@ src/quickquip/
 ├── generation/              # 多模态产出配置、模型解析、图片/语音/音乐 provider 调用
 ├── tieba/                   # 贴吧爬虫与帖子池
 ├── search/                  # 项目内 SearXNG 搜索客户端
+├── sts/                     # 杀戮尖塔公式化回复（lexicon、formulas/card_le）
 ├── adapters/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件；命令注册按域拆到 command_parts/）
 └── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）

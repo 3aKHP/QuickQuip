@@ -80,6 +80,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    docker compose -f docker-compose.example.yml up -d searxng
    ```
 
+   注意：compose 解析时 `QQ_ACCOUNT` 为必填插值（llbot 服务 `${QQ_ACCOUNT:?}`）；若 `.env` 未设置（仅本机源码跑 bot 的场景），需临时设置或注释掉 llbot 服务。
+
    默认暴露到 `http://127.0.0.1:8888`，开启 JSON 搜索接口。
 
 5. **可选：启用 LLM**
@@ -186,7 +188,7 @@ src/
 
 消息流：`bot.py` → `plugins`（NoneBot2 发现）→ `adapters/nonebot`（matcher 分发）→ `app`（管线装配）→ `chat` / `games` / `llm` 等子系统。
 
-回复优先级从高到低：**复读 → 好女孩接龙 → 自定义接龙 → Session 游戏 → 彩蛋规则 → 语境规则 → 时区猜测 → STS card_le（链尾）**。每个环节受群级规则开关和滑动窗口限流保护。
+回复优先级从高到低：**复读 → 好姐姐接龙 → 自定义接龙 → Session 游戏 → 彩蛋规则 → 语境规则 → 时区猜测 → STS card_le（链尾）**。每个环节受群级规则开关和滑动窗口限流保护。
 
 目录约定：源码位于 `src/`（src layout），包路径 `quickquip.*` 不变；`src/plugins/` 是 NoneBot2 插件发现入口，只做 re-export；开发时需 `pip install -e .`（可编辑安装）。`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。游戏参数集中在 `config/games.toml`。
 
