@@ -10,6 +10,8 @@
 
 本版为跨平台发行与部署定型 release（v1.12 系列里程碑版本）：无新功能，主体是 CQ 码注入缺陷类的全面收口、provider 协议健壮性加固与发行/部署链路加固；发布前按里程碑计划在 Windows 懒人包、Windows Docker、Linux Docker、Linux 源码部署四条路径完成全链路验收，并对公开文档逐项校对。维护者可感知收益：协议边界 fail-visible、CQ 注入面清零；部署者可感知收益：四条发行路径均有真实环境证据与已知限制记录。
 
+> **关于版本号**：v1.12.2 向 [Minecraft: Java Edition 1.12.2](https://minecraft.wiki/w/Java_Edition_1.12.2) 致敬。那个 2017 年 9 月发布、只修复了 12 个缺陷的小版本，因足够稳定成了模组社区沿用多年的黄金底座。本版同样不引入新功能、专注于收口与加固——愿它也能被长期安稳地部署下去。
+
 ### 🔧 变更 (Changed)
 
 - **发行流水线支持 RC 预发布 tag**：release notes 提取把 `v1.12.2-rc.1` 这类预发布 tag 归一化到基础版本段；Docker 的 `1.12`/`1` 浮动 tag 不再被预发布构建顶掉（与 `latest` 同规则）；`.env.example` 补充本地直跑场景的 `ONEBOT_WS_URLS` 注释示例（#146）。
