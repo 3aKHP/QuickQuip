@@ -22,6 +22,7 @@
 - **provider 协议健壮性三处**：MCP 外部工具声明缺 items 的数组 schema 会被 Gemini 上游 400（#137 只覆盖了内建工具）；Claude 流式路径丢失 redacted_thinking 块导致下一轮回放遭 400；Gemini 工具批次 fail-closed 拒绝时模型的叙述文本会吞掉拒绝提示，现追加提示并记录 warning 日志（#141）。
 - **LLM 配置校验可观测性**：显式配置的默认 provider 被剪除后的回退记入 load_error 并显式拒绝服务（fail-visible，与 default_provider 指向不存在 id 的既有语义一致；自动选择的默认值仍静默再回退）；已禁用功能的 model_cascade 不再参与 provider 引用校验，示例 cascade 不再污染新部署的 load_error（#144）。
 - **部署与发行加固**：check_bot.sh 移除硬编码 nix store busybox 路径，改容器内 ps → docker top 分级进程探测，探测失效输出 UNKNOWN 而非误报 OFFLINE（消除 llonebot 镜像漂移引起的误报离线告警）；Windows webview 启动器读取 WEB_ADMIN_HOST/WEB_ADMIN_PORT（与 web_api.py 同源默认值，非法端口回退 5104）；懒人包 smoke 增加首启模板清单校验，start.bat 模板缺失输出 WARNING（#145）。
+- **RC1 四路径验收修复批**：bot 文件日志不再明文落盘 .env 全部密钥（nonebot 配置 DEBUG dump 被文件日志 INFO 级挡下，#148）；懒人包 ZIP 打包改在冒烟测试之前并对产物做清洁审计，`.env`/`__pycache__`/冒烟残留不再入包，首启门控恢复（#149）；懒人包 Web Admin 经 cmd 重定向启动，不再因 pythonw 无控制台流静默退出，运行日志落 `data\web-admin.log`（#150）；发行镜像随包提供 `/app/plugins`，纯镜像部署（GHCR/compose 自包含模板）首次可正常启动，配套增加 bot 存活 smoke（#151）。
 
 ## [1.12.1] - 2026-08-21
 
