@@ -4,7 +4,7 @@ LLM 模块的详细结构、边界和群内命令说明见 [docs/dev/llm-module.
 
 ## 前提条件
 
-- 一台 Linux 服务器（1 核 1G 即可）
+- 一台 Linux 服务器（建议 2 核 / 2G 内存并配置 2G swap：v1.12.2 验收实测此规格运行全栈稳态约 0.7G RSS、无 OOM；1 核 1G 无 swap 的极端规格未经全栈验证，不建议）
 - 已安装 Docker 和 Docker Compose
 - QQ 账号（用于 LLBot 登录）
 
@@ -141,7 +141,9 @@ docker compose --env-file ../.env logs -f llbot
 
 **LLBot 镜像版本**：compose 模板固定使用 `initialencounter/llonebot:v7.12.14-7.3.2-45758`。上游 `latest` 自 2026-08 起漂移到 pmhq 8.x——启动即要求在 auth.luckylillia.com 注册获取 `auth_token`（部分账号需人工审核），新部署会直接卡死在授权提示上。如需更换版本：NTQQ 强制升级导致旧构建无法登录时，到上游 Docker Hub 挑选新的 `vX.Y.Z-…` 版本 tag 更新模板；升级 pmhq 大版本前先确认其授权要求。
 
-**LLBot 重启会丢登录会话**：`docker compose restart llbot` 后 NTQQ 通常要求重新扫码（`llbot-qq/` 数据完好，属会话级失效），重启后按上面流程重新扫码即可。
+**LLBot WebUI 启用 OneBot 对接**：新部署的 llbot 四种网络对接方式（正向 WS / 反向 WS / HTTP / HTTP 上报）默认全部关闭。在 WebUI（`http://<服务器IP>:3080`）里启用所需方式——正向 WebSocket（服务端）的 token 为必填项，须与根目录 `.env` 的 `ONEBOT_ACCESS_TOKEN` 同值，QuickQuip 侧才连得上。
+
+**LLBot 重启与快速登录**：`llbot-qq/` 登录态目录完好时，容器重启后 llbot 可能走快速登录（`QUICK_LOGIN_QQ` 生效，免扫码），也可能要求重新扫码——快速登录存在时效性（验收中两种情况都出现过）。无论哪种，优先 `docker compose restart llbot` 而不是重建容器或删除 `llbot-qq/`；扫码后若消息无响应且日志出现 `getSelfNick` 等 TypeError，restart 一次触发快速登录即可恢复。
 
 ### 6. 验证运行
 
