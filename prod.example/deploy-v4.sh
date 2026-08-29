@@ -59,6 +59,15 @@ for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproje
     [ -e "$required_path" ] || { echo "${R}Missing required file: $required_path${N}" >&2; exit 1; }
 done
 
+# prod/ 已存在时 `cp -r prod.example prod` 会嵌套成 prod/prod.example 而不是覆盖，
+# 随后本脚本会以既有生产设置运行并把 prod/sendkey.env 上传到远端（v1.12.2 验收发现的
+# 外泄面）。嵌套即中止：正确做法是先移走/改名旧 prod/ 再复制模板。
+if [ -d "prod/prod.example" ]; then
+    echo "${R}prod/prod.example exists: the template was nested into an existing prod/ by 'cp -r prod.example prod'.${N}" >&2
+    echo "${R}This script would run with your production settings and upload prod/sendkey.env. Move the old prod/ aside and re-copy the template.${N}" >&2
+    exit 1
+fi
+
 echo "${C}Building frontend...${N}"
 run_step "frontend build" bash -c 'cd frontend && pnpm install --frozen-lockfile && pnpm build'
 

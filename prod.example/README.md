@@ -14,6 +14,10 @@ Copy-Item -Recurse prod.example prod
 cp -r prod.example prod
 ```
 
+> ⚠️ 若 `prod/` 已存在（此前初始化过），上面的复制命令会**嵌套**成 `prod/prod.example`
+> 而不是覆盖旧目录——deploy 脚本会随即以旧的生产设置运行并上传 `prod/sendkey.env`。
+> 脚本已内置嵌套检测并中止；正确做法是先把旧 `prod/` 移走或改名，再复制模板。
+
 Then edit only files under `prod/` and the project root `.env`.
 
 - `.env` at the repository root is the only QuickQuip application secret/config source.
