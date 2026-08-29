@@ -15,7 +15,7 @@ services:
   # 参考：https://github.com/LLOneBot/LuckyLilliaBot
   # 登录态 / 设备指纹保存在 llbot-qq/，切勿丢失否则 QQ 视作新设备。
   llbot:
-    image: initialencounter/llonebot:latest
+    image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # pin 说明见 docs/admin/deployment.md（latest 已漂移到需授权的 pmhq 8.x）
     container_name: llbot
     entrypoint:
       - /bin/sh

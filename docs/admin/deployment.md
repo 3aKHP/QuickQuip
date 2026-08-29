@@ -92,6 +92,7 @@ docker compose --env-file ../.env up -d
 
 补充说明：
 
+- **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接 LLBot（`ONEBOT_WS_URLS` 指向 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在 LLBot WebUI 启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client。
 - `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
@@ -137,6 +138,10 @@ docker compose --env-file ../.env logs -f llbot
 ```
 
 日志中会出现二维码或登录链接，用手机 QQ 扫码确认。登录成功后，登录态会持久化在 `llbot-qq/` 目录中，配置文件在 `llbot-data/` 中。也可通过 WebUI（`http://<服务器IP>:3080`）扫码。
+
+**LLBot 镜像版本**：compose 模板固定使用 `initialencounter/llonebot:v7.12.14-7.3.2-45758`。上游 `latest` 自 2026-08 起漂移到 pmhq 8.x——启动即要求在 auth.luckylillia.com 注册获取 `auth_token`（部分账号需人工审核），新部署会直接卡死在授权提示上。如需更换版本：NTQQ 强制升级导致旧构建无法登录时，到上游 Docker Hub 挑选新的 `vX.Y.Z-…` 版本 tag 更新模板；升级 pmhq 大版本前先确认其授权要求。
+
+**LLBot 重启会丢登录会话**：`docker compose restart llbot` 后 NTQQ 通常要求重新扫码（`llbot-qq/` 数据完好，属会话级失效），重启后按上面流程重新扫码即可。
 
 ### 6. 验证运行
 
