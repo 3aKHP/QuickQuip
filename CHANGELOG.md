@@ -23,6 +23,7 @@
 - **LLM 配置校验可观测性**：显式配置的默认 provider 被剪除后的回退记入 load_error 并显式拒绝服务（fail-visible，与 default_provider 指向不存在 id 的既有语义一致；自动选择的默认值仍静默再回退）；已禁用功能的 model_cascade 不再参与 provider 引用校验，示例 cascade 不再污染新部署的 load_error（#144）。
 - **部署与发行加固**：check_bot.sh 移除硬编码 nix store busybox 路径，改容器内 ps → docker top 分级进程探测，探测失效输出 UNKNOWN 而非误报 OFFLINE（消除 llonebot 镜像漂移引起的误报离线告警）；Windows webview 启动器读取 WEB_ADMIN_HOST/WEB_ADMIN_PORT（与 web_api.py 同源默认值，非法端口回退 5104）；懒人包 smoke 增加首启模板清单校验，start.bat 模板缺失输出 WARNING（#145）。
 - **RC1 四路径验收修复批**：bot 文件日志不再明文落盘 .env 全部密钥（nonebot 配置 DEBUG dump 被文件日志 INFO 级挡下，#148）；懒人包 ZIP 打包改在冒烟测试之前并对产物做清洁审计，`.env`/`__pycache__`/冒烟残留不再入包，首启门控恢复（#149）；懒人包 Web Admin 经 cmd 重定向启动，不再因 pythonw 无控制台流静默退出，运行日志落 `data\web-admin.log`（#150）；发行镜像随包提供 `/app/plugins`，纯镜像部署（GHCR/compose 自包含模板）首次可正常启动，配套增加 bot 存活 smoke（#151）。
+- **验收后收束批**：Web Admin 根路径不再 404——`/` 现重定向到管理台 `/ops/`（Linux Docker 验收发现，#155）；部署脚本增加模板嵌套保护——`cp -r prod.example prod` 误嵌套进已有生产 `prod/` 时中止部署，避免以生产设置运行并外泄运维密钥（源码路径验收发现，#156）。
 
 ## [1.12.1] - 2026-08-21
 
