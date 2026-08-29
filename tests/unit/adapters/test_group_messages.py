@@ -13,9 +13,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 import quickquip.adapters.nonebot.group_messages as gm
 import quickquip.chat.awakening as awakening_module
+from quickquip.chat.repeat_detector import RepeatAction
 from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningDefaults,
@@ -24,7 +26,7 @@ from quickquip.chat.awakening import (
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.service import QuickJudgeResult
-from tests.fixtures.onebot import DummyMessage, record_seg, text_seg
+from tests.fixtures.onebot import DummyMessage, DummySegment, at_seg, face_seg, record_seg, text_seg
 
 
 class RecordingMatcher:
@@ -69,7 +71,11 @@ class FakeDedup:
 
 
 class FakeRateLimiter:
+    def __init__(self):
+        self.allow_calls = []
+
     def allow(self, *args, **kwargs):
+        self.allow_calls.append((args, kwargs))
         return True
 
     def can_allow(self, *args, **kwargs):
@@ -138,7 +144,8 @@ class Harness:
         monkeypatch.setattr(gm, "_ensure_llm_bindings", lambda: None)
         monkeypatch.setattr(gm, "get_llm_service", lambda: self.svc)
         monkeypatch.setattr(gm, "message_deduper", FakeDedup())
-        monkeypatch.setattr(gm, "rate_limiter", FakeRateLimiter())
+        self.rate_limiter = FakeRateLimiter()
+        monkeypatch.setattr(gm, "rate_limiter", self.rate_limiter)
         monkeypatch.setattr(gm, "rule_switch", FakeRuleSwitch())
         monkeypatch.setattr(gm, "stats_tracker", FakeStats())
         monkeypatch.setattr(gm, "offline_message_store", SimpleNamespace(pop_pending=lambda g, u: None))
@@ -160,7 +167,7 @@ class Harness:
         def _on_message(**kwargs):
             return self.recorder
 
-        self.matcher = gm.register_message_matcher(_on_message, DummyMessage, record_seg.__class__)
+        self.matcher = gm.register_message_matcher(_on_message, DummyMessage, DummySegment)
 
     async def handle(self, event):
         handler = self.recorder.handlers[0]
@@ -178,6 +185,89 @@ def harness_factory(monkeypatch):
 def _seed_recent(harness, texts):
     for index, text in enumerate(texts):
         harness.recent.add_message(100, 50 + index, f"member-{index}", f"member-{index}", text)
+
+
+def _segment_snapshot(message):
+    return [(segment.type, dict(segment.data)) for segment in message]
+
+
+def test_repeat_original_preserves_all_message_segment_types():
+    incoming = Message([
+        MessageSegment.at(10001),
+        MessageSegment.face(264),
+        MessageSegment.image("same.jpg"),
+        MessageSegment("marketface", {"id": "custom-1"}),
+    ])
+    before = _segment_snapshot(incoming)
+
+    reply = gm._build_rule_reply_message(
+        {"repeat_action": RepeatAction.COPY_ORIGINAL, "reply": "safe preview"},
+        incoming,
+        Message,
+        MessageSegment,
+    )
+
+    assert isinstance(reply, Message)
+    assert _segment_snapshot(reply) == before
+    assert _segment_snapshot(incoming) == before
+    assert reply is not incoming
+    assert all(left is not right for left, right in zip(reply, incoming))
+
+
+@pytest.mark.parametrize(
+    ("incoming", "expected"),
+    [
+        (Message([MessageSegment.text("晚安")]), [("text", {"text": "晚"})]),
+        (
+            Message([MessageSegment.at(10001), MessageSegment.at(10002)]),
+            [("at", {"qq": "10001"})],
+        ),
+        (
+            Message([MessageSegment.face(264), MessageSegment.text("晚安")]),
+            [("face", {"id": "264"}), ("text", {"text": "晚"})],
+        ),
+        (Message([MessageSegment.text("hello"), MessageSegment.face(264)]), [("text", {"text": "hello"})]),
+    ],
+)
+def test_repeat_trim_removes_rightmost_content_unit(incoming, expected):
+    before = _segment_snapshot(incoming)
+
+    reply = gm._build_rule_reply_message(
+        {"repeat_action": RepeatAction.TRIM_LAST, "reply": "safe preview"},
+        incoming,
+        Message,
+        MessageSegment,
+    )
+
+    assert _segment_snapshot(reply) == expected
+    assert _segment_snapshot(incoming) == before
+
+
+def test_repeat_trim_suppresses_empty_message():
+    incoming = Message([MessageSegment.face(264)])
+
+    reply = gm._build_rule_reply_message(
+        {"repeat_action": RepeatAction.TRIM_LAST, "reply": ""},
+        incoming,
+        Message,
+        MessageSegment,
+    )
+
+    assert reply is None
+    assert _segment_snapshot(incoming) == [("face", {"id": "264"})]
+
+
+def test_plain_rule_reply_cq_literal_stays_text():
+    reply = gm._build_rule_reply_message(
+        {"reply": "[CQ:at,qq=10001]"},
+        Message([MessageSegment.text("trigger")]),
+        Message,
+        MessageSegment,
+    )
+    outbound = Message()
+    outbound += reply
+
+    assert _segment_snapshot(outbound) == [("text", {"text": "[CQ:at,qq=10001]"})]
 
 
 async def test_passive_trigger_excludes_current_message_from_context(harness_factory):
@@ -225,3 +315,48 @@ async def test_voice_transcript_can_hit_passive_trigger(harness_factory):
     assert kwargs["prompt"].count("Kubernetes ImagePullBackOff") == 1
     assert "Kubernetes" not in [m["text"] for m in kwargs["recent_messages"]]
     assert kwargs["raw_user_text"] == "Kubernetes ImagePullBackOff 又 warnings 了吗"
+
+
+async def test_passive_rules_receive_safe_text_and_separate_repeat_fingerprint(harness_factory):
+    h = harness_factory()
+    message = DummyMessage([
+        text_seg("玩"),
+        at_seg("10001"),
+        text_seg("玩的"),
+    ])
+
+    await h.handle(DummyGroupEvent(message))
+
+    h.svc.generate_reply.assert_not_awaited()
+    gm.resolve_reply.assert_awaited_once()
+    args, kwargs = gm.resolve_reply.await_args
+    assert "[CQ:" not in args[0]
+    assert "@" in args[0]
+    assert kwargs["repeat_fingerprint"] == "玩[CQ:at,qq=10001]玩的"
+
+
+async def test_face_segment_does_not_enter_passive_rule_text(harness_factory):
+    h = harness_factory()
+    message = DummyMessage([text_seg("我喜欢"), face_seg()])
+
+    await h.handle(DummyGroupEvent(message))
+
+    gm.resolve_reply.assert_awaited_once()
+    args, kwargs = gm.resolve_reply.await_args
+    assert args[0] == "我喜欢"
+    assert kwargs["repeat_fingerprint"] == "我喜欢[CQ:face]"
+
+
+async def test_empty_trimmed_repeat_does_not_send_or_consume_rate_limit(harness_factory):
+    h = harness_factory()
+    gm.resolve_reply.return_value = {
+        "repeat_action": RepeatAction.TRIM_LAST,
+        "reply": "",
+        "rate_limit_key": "repeat_trim_last",
+        "rule_name": "repeat_trim_last",
+    }
+
+    await h.handle(DummyGroupEvent(DummyMessage([face_seg()])))
+
+    assert h.recorder.sent == []
+    assert h.rate_limiter.allow_calls == []

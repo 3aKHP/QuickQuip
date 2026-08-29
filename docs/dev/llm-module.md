@@ -56,7 +56,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
 - `src/quickquip/llm/provider/`（包）
-  - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `trace.py`）
+  - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（provider 重试、Agent Loop trace、会话消息推进）
 - `src/quickquip/llm/tool_discovery.py`
@@ -387,7 +387,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
   - `temperature`
   - `max_output_tokens`
   - `style_overrides`（可选，追加到每次调用的 system prompt 末尾）
-  - `auth_method`（可选，`api_key` / `bearer`，默认 `api_key`，控制认证头格式）
+  - `auth_method`（可选，`api_key` / `bearer`，默认 `api_key`；Claude 控制 `x-api-key` / Bearer，Gemini 控制查询参数 key / Bearer）
   - `prompt_caching`（可选，`claude` 协议专用，启用 Anthropic Prompt Caching）
   - `cache_ttl`（可选，`claude` 协议专用，`"1h"` 启用 1h 扩展缓存、留空=默认 5min；仅 `prompt_caching` 开启时生效）
 - `[daily_briefing]`
@@ -402,6 +402,8 @@ Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每�
 工具调用开启后，QuickQuip 支持本地 `tool_search` 和 `tool_list` 元工具。该机制用于工具数量较多的场景：初始请求只暴露 `always_loaded` 中的常驻工具，模型需要其它能力时先调用 `tool_search`；搜索不到但工具可能存在时，可用 `tool_list` 查看工具组、工具名或按精确名称加载工具。工具循环会把匹配到或精确加载的真实工具加入下一轮 provider 请求。
 
 默认 `discovery_mode = "auto"`，当可延迟工具数超过 `discovery_min_tools` 后启用；工具较少时继续按原方式全量暴露。该设计不依赖 Claude 原生 tool search，OpenAI / Claude / Gemini 协议适配器共用同一套本地发现逻辑。
+
+Gemini 3 原生工具回合把 `thoughtSignature` 视为不可解释、不可重建的 provider 数据。非流式与 SSE 响应都会保存签名所在的完整有序 part，并在下一轮 model turn 原样回放；并行调用逐 part 保持自己的签名。Gemini 要求上一轮每个 `functionCall` 都有对应 `functionResponse`，因此单轮调用数超过运行时上限时整批拒绝执行。工具返回图片不会与 `functionResponse` 混入同一个 Content，而是在完整响应批次之后作为独立 user turn 发送。
 
 实现细节见 [tool-discovery.md](tool-discovery.md)，MCP 大工具集场景见 [mcp-integration.md](mcp-integration.md)。
 

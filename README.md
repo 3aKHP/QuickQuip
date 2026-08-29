@@ -80,6 +80,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    docker compose -f docker-compose.example.yml up -d searxng
    ```
 
+   注意：compose 解析时 `QQ_ACCOUNT` 为必填插值（llbot 服务 `${QQ_ACCOUNT:?}`）；若 `.env` 未设置（仅本机源码跑 bot 的场景），需临时设置或注释掉 llbot 服务。
+
    默认暴露到 `http://127.0.0.1:8888`，开启 JSON 搜索接口。
 
 5. **可选：启用 LLM**
@@ -147,6 +149,13 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
 
+首次运行注意：
+
+- **SmartScreen 提示**：浏览器下载的 ZIP 带 Mark-of-the-Web，解压后首次运行 `start.bat`（或内嵌 python）可能弹出「Windows 已保护你的电脑」——点「更多信息」→「仍要运行」即可；用命令行 `tar` 解压则不会传播该标记。
+- **停止方式**：前台控制台（QQ Bot）按 `Ctrl+C`；Web Admin 是后台进程，关掉管理窗口不会带走它，需在 PowerShell 执行
+  `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match 'web_api.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId }`。
+- 运行期间任务栏会有一个最小化的「QuickQuip Admin」cmd 窗口（Web Admin 的启动壳），属正常现象，随 Web Admin 退出自动关闭；Web Admin 运行日志追加在 `data\web-admin.log`（无轮转）。
+
 生产部署模板位于 `prod.example/`；公开分发镜像位于 `ghcr.io/3akhp/quickquip`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
 
 ### 运行测试
@@ -179,7 +188,7 @@ src/
 
 消息流：`bot.py` → `plugins`（NoneBot2 发现）→ `adapters/nonebot`（matcher 分发）→ `app`（管线装配）→ `chat` / `games` / `llm` 等子系统。
 
-回复优先级从高到低：**复读 → 好女孩接龙 → 自定义接龙 → Session 游戏 → 彩蛋规则 → 语境规则 → 时区猜测 → STS card_le（链尾）**。每个环节受群级规则开关和滑动窗口限流保护。
+回复优先级从高到低：**复读 → 好姐姐接龙 → 自定义接龙 → Session 游戏 → 彩蛋规则 → 语境规则 → 时区猜测 → STS card_le（链尾）**。每个环节受群级规则开关和滑动窗口限流保护。
 
 目录约定：源码位于 `src/`（src layout），包路径 `quickquip.*` 不变；`src/plugins/` 是 NoneBot2 插件发现入口，只做 re-export；开发时需 `pip install -e .`（可编辑安装）。`config/` 下 `.example` 文件入版本控制，无后缀为部署私有配置。游戏参数集中在 `config/games.toml`。
 

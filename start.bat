@@ -21,6 +21,8 @@ if not exist "config\personas" (
     if exist "config\personas.example" (
         echo [First run] Copy config\personas.example -^> config\personas
         xcopy "config\personas.example" "config\personas\" /E /I /Q /Y >nul
+    ) else (
+        echo [WARNING] Missing config\personas.example, skipping personas copy
     )
 )
 call :copy_if_missing "llm_about\vocab.yaml.example" "llm_about\vocab.yaml"
@@ -45,7 +47,10 @@ if exist ".\python\pythonw.exe" (
 )
 
 echo Starting Web Admin...
-start "QuickQuip Admin" /MIN "%_PYTHONW%" web_api.py
+rem pythonw 没有控制台流，uvicorn/loguru 启动即写无效流会静默崩溃（无 traceback 可查）；
+rem 经 cmd /c 重定向为它提供有效输出流，并把运行日志追加到 data\web-admin.log。
+rem 任务栏会出现最小化的 "QuickQuip Admin" cmd 窗口，属正常（cmd 同步等待 pythonw）。
+start "QuickQuip Admin" /MIN cmd /c ""%_PYTHONW%" web_api.py >> "%~dp0data\web-admin.log" 2>&1"
 
 echo Opening Web Admin...
 start "QuickQuip Admin Window" "%_PYTHONW%" webview_launcher.py
@@ -61,6 +66,8 @@ if not exist "%~2" (
     if exist "%~1" (
         echo [First run] Copy %~1 -^> %~2
         copy "%~1" "%~2" >nul
+    ) else (
+        echo [WARNING] Missing template %~1, skipping %~2
     )
 )
 exit /b
@@ -71,6 +78,8 @@ if not exist "%~2" (
         echo [First run] Copy %~1 -^> %~2
         copy "%~1" "%~2" >nul
         set "_ENV_CREATED=1"
+    ) else (
+        echo [WARNING] Missing template %~1, skipping %~2
     )
 )
 exit /b

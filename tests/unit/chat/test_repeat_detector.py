@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from quickquip.chat.repeat_detector import GroupRepeatDetector
+from quickquip.chat.repeat_detector import GroupRepeatDetector, RepeatAction
 
 
 def test_follow_read_on_different_users():
@@ -10,7 +10,7 @@ def test_follow_read_on_different_users():
     assert result is not None
     assert result["rule_name"] == "repeat_follow_read"
     assert result["rate_limit_key"] == "repeat_follow_read"
-    assert result["reply"] == "复读"
+    assert result["repeat_action"] == RepeatAction.COPY_ORIGINAL
 
 
 def test_trim_last_on_same_user_dup():
@@ -20,7 +20,7 @@ def test_trim_last_on_same_user_dup():
     assert result is not None
     assert result["rule_name"] == "repeat_trim_last"
     assert result["rate_limit_key"] == "repeat_trim_last"
-    assert result["reply"] == "晚"
+    assert result["repeat_action"] == RepeatAction.TRIM_LAST
 
 
 def test_same_user_warning_after_four_repeats():
@@ -29,7 +29,7 @@ def test_same_user_warning_after_four_repeats():
     trim = d.process(group_id=1001, user_id=1, text="哈哈")
     assert trim is not None
     assert trim["rule_name"] == "repeat_trim_last"
-    assert trim["reply"] == "哈"
+    assert trim["repeat_action"] == RepeatAction.TRIM_LAST
     assert d.process(group_id=1001, user_id=1, text="哈哈") is None
     warning = d.process(group_id=1001, user_id=1, text="哈哈")
     assert warning is not None

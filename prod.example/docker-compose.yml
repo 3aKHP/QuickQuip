@@ -5,7 +5,7 @@ services:
   # 并通过 QUICKQUIP_SEARXNG_BASE_URL 指向它（见 quickquip / web-admin 的 environment）。
   # 面向终端用户的开箱即用自带 searxng 见仓库根目录 docker-compose.example.yml。
   llbot:
-    image: initialencounter/llonebot:latest
+    image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # pin 说明见 docs/admin/deployment.md（latest 已漂移到需授权的 pmhq 8.x）
     container_name: llbot
     entrypoint:
       - /bin/sh

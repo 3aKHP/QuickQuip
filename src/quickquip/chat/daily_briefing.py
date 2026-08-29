@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -17,6 +18,9 @@ from quickquip.llm.config import DailyBriefingConfig
 logger = logging.getLogger(__name__)
 
 _LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
+# 群名片/昵称里的 CQ 码会被剔除：播报文本与 LLM prompt 都不应携带可激活的段语法。
+# 只剥 [CQ:...]（对齐 awakening.py），保留普通方括号昵称。
+_CQ_CODE_RE = re.compile(r"\[CQ:[^\]]+\]")
 _PERIOD_LABELS: dict[str, str] = {
     "morning": "早报",
     "noon": "午报",
@@ -169,7 +173,7 @@ def _build_active_users(messages: list[dict], limit: int) -> list[BriefingTopUse
     display_names: dict[str, str] = {}
     for entry in messages:
         user_id = str(entry.get("user_id", "")).strip()
-        sender = str(entry.get("sender", "")).strip() or "未知"
+        sender = _CQ_CODE_RE.sub("", str(entry.get("sender", ""))).strip() or "未知"
         key = user_id or sender
         counts[key] += 1
         display_names[key] = sender

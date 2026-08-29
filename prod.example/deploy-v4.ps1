@@ -110,6 +110,16 @@ foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml"
     }
 }
 
+# Nested prod/prod.example means the template was copied into an existing prod/
+# (Copy-Item -Recurse does not overwrite); abort so the script never runs with
+# production settings or uploads prod/sendkey.env. See prod.example/README.md.
+if (Test-Path -PathType Container "prod/prod.example") {
+    Write-Host "prod/prod.example exists: the template was nested into an existing prod/ by 'Copy-Item -Recurse prod.example prod'." -ForegroundColor Red
+    Write-Host "This script would run with your production settings and upload prod/sendkey.env. Move the old prod/ aside and re-copy the template." -ForegroundColor Red
+    Pop-Location
+    exit 1
+}
+
 Write-Host "Building frontend..." -ForegroundColor Cyan
 Push-Location "frontend"
 Invoke-Native "pnpm install --frozen-lockfile" { & $PnpmCommand install --frozen-lockfile }

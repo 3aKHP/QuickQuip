@@ -72,7 +72,10 @@ class ToolMixin(McpLifecycleMixin):
                         "group": {"type": "string"},
                         "page": {"type": "integer"},
                         "limit": {"type": "integer"},
-                        "names": {"type": "array"},
+                        "names": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                     },
                     "required": ["mode"],
                 },

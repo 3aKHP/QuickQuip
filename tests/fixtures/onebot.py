@@ -13,6 +13,14 @@ class DummySegment:
         self.type = segment_type
         self.data = data
 
+    @staticmethod
+    def text(text: str) -> "DummySegment":
+        return DummySegment("text", {"text": text})
+
+    @staticmethod
+    def image(file: str) -> "DummySegment":
+        return DummySegment("image", {"file": file})
+
 
 class DummyMessage(list):
     def __str__(self) -> str:
@@ -26,6 +34,8 @@ class DummyMessage(list):
                 parts.append("[CQ:image]")
             elif segment.type == "record":
                 parts.append("[CQ:record]")
+            else:
+                parts.append(f"[CQ:{segment.type}]")
         return "".join(parts)
 
 
@@ -55,6 +65,10 @@ def text_seg(text: str) -> DummySegment:
 
 def at_seg(qq: str) -> DummySegment:
     return DummySegment("at", {"qq": qq})
+
+
+def face_seg(face_id: str = "264") -> DummySegment:
+    return DummySegment("face", {"id": face_id})
 
 
 def image_seg(url: str) -> DummySegment:

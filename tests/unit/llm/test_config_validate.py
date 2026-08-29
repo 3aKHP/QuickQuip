@@ -44,8 +44,8 @@ def _load(tmp_path: Path, body: str):
     return load_llm_config(config_path)
 
 
-def test_bad_default_provider_pruned_and_default_silently_reselected(tmp_path: Path):
-    """默认 provider 因校验失败被剪除后，default_provider 静默重选到存活 provider。"""
+def test_bad_default_provider_pruned_and_default_reselected_with_error(tmp_path: Path):
+    """默认 provider 因校验失败被剪除后：回退到存活 provider 并记入 load_error（fail-visible）。"""
     loaded = _load(
         tmp_path,
         """
@@ -67,8 +67,11 @@ def test_bad_default_provider_pruned_and_default_silently_reselected(tmp_path: P
 
     assert set(loaded.providers) == {"good"}
     assert loaded.runtime.default_provider == "good"
-    # 剪除后仍有存活 provider：不产生 load_error（尽力可用）
-    assert loaded.load_error is None
+    # 剪除导致的回退不再静默：与 default_provider 指向不存在 id 的语义一致
+    assert loaded.load_error is not None
+    assert "已被剪除" in loaded.load_error
+    assert "bad" in loaded.load_error
+    assert "good" in loaded.load_error
 
 
 def test_unknown_default_provider_falls_back_with_error(tmp_path: Path):
@@ -158,9 +161,11 @@ def test_cascade_and_image_preprocessing_missing_provider_aggregated(tmp_path: P
         model = "m"
 
         [daily_summary]
+        enabled = true
         model_cascade = ["ghost_sum/m1", "@default/m2", "good/m3"]
 
         [weekly_report]
+        enabled = true
         model_cascade = ["ghost_week/m"]
         """
         + _good_provider()
@@ -173,6 +178,41 @@ def test_cascade_and_image_preprocessing_missing_provider_aggregated(tmp_path: P
         "image_preprocessing.provider_id 'ghost_img' 不存在; "
         "daily_summary.model_cascade 引用了不存在的 provider 'ghost_sum'; "
         "weekly_report.model_cascade 引用了不存在的 provider 'ghost_week'"
+    )
+
+
+def test_disabled_feature_cascade_not_validated(tmp_path: Path):
+    """已禁用功能的 model_cascade 不参与校验：ghost 引用不污染 load_error；
+    只开启其中一个功能时，load_error 恰好只含该功能的条目。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [daily_summary]
+        model_cascade = ["ghost_sum/m1"]
+
+        [weekly_report]
+        model_cascade = ["ghost_week/m"]
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+    assert loaded.load_error is None
+
+    loaded_partial = _load(
+        tmp_path,
+        """
+        [daily_summary]
+        enabled = true
+        model_cascade = ["ghost_sum/m1"]
+
+        [weekly_report]
+        model_cascade = ["ghost_week/m"]
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+    assert loaded_partial.load_error == (
+        "daily_summary.model_cascade 引用了不存在的 provider 'ghost_sum'"
     )
 
 

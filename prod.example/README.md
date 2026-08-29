@@ -14,6 +14,12 @@ Copy-Item -Recurse prod.example prod
 cp -r prod.example prod
 ```
 
+> ⚠️ If `prod/` already exists (initialized before), the copy commands above will
+> **nest** into `prod/prod.example` instead of overwriting the old directory — the
+> deploy script would then run with your old production settings and upload
+> `prod/sendkey.env` to the remote host. Both deploy scripts detect the nesting and
+> abort; move the old `prod/` aside first, then re-copy the template.
+
 Then edit only files under `prod/` and the project root `.env`.
 
 - `.env` at the repository root is the only QuickQuip application secret/config source.

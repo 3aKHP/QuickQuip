@@ -12,6 +12,7 @@ src/quickquip/games/
 ├── registry.py           ← GameRegistry / BaseGame / GameResult
 ├── scores.py             ← GameScores（JSON 持久化）
 ├── economy.py            ← GameEconomyStore（金币 / 签到 / 好感度）
+├── config.py             ← 游戏参数加载（games.toml → games_config）
 ├── number_bomb.py        ← 数字炸弹（BaseGame 示例）
 ├── blackjack.py          ← 21 点（BaseGame + 金币）
 ├── russian_roulette.py   ← 俄罗斯轮盘（BaseGame + 金币）

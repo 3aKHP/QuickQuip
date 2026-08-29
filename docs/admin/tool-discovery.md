@@ -31,7 +31,7 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "s
 
 | 键 | 说明 |
 |----|------|
-| `enabled` | 工具白名单。为空时启用内置工具和已连接的 MCP 工具 |
+| `enabled` | 工具白名单。为空时启用内置工具和已连接的 MCP 工具；v1.12 起非空时默认 append（追加），`enabled_mode = "replace"` 才是精确白名单（详见 configuration.md 升级说明） |
 | `discovery_mode` | `off` 全量暴露；`on` 强制工具发现；`auto` 超过阈值后自动启用 |
 | `discovery_min_tools` | `auto` 模式下，可延迟工具数超过该值才启用工具发现 |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 |

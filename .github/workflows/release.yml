@@ -83,6 +83,43 @@ jobs:
           Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
           New-Item -ItemType Directory -Force staging\data | Out-Null
 
+      - name: Verify lazy package template manifest
+        shell: pwsh
+        run: |
+          # start.bat 首启依赖的模板清单：copy_if_missing 对缺失源静默跳过，
+          # 这里在打包前钉住"模板都在 staging 里"（对齐 Docker smoke 的 test -f 思路）。
+          $expected = @(
+            "staging\start.bat", "staging\.env.example",
+            "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
+            "staging\config\generation.toml.example", "staging\config\games.toml.example",
+            "staging\config\awakening.toml.example", "staging\config\sensitive_words.toml.example",
+            "staging\config\niuniu_text.toml.example", "staging\config\niuniu_text_safe.toml.example",
+            "staging\config\niuniu_text.toml", "staging\config\niuniu_text_safe.toml",
+            "staging\config\personas.example\_shared.toml", "staging\config\personas.example\private-persona.toml",
+            "staging\config\personas.example\quickquip-default.toml", "staging\config\personas.example\structured.toml",
+            "staging\llm_about\vocab.yaml.example", "staging\llm_about\identities.yaml.example"
+          )
+          $missing = @($expected | Where-Object { -not (Test-Path $_) })
+          if ($missing.Count -gt 0) { throw "Lazy package missing template files: $($missing -join ', ')" }
+          # 负向断言：包内不得存在实例化 .env（会让 start.bat 首启门控失效，
+          # rc.1 的打包污染正是 smoke 在 staging 内跑出来的 .env 混入了 zip）。
+          if (Test-Path "staging\.env") { throw "staging must not contain an instantiated .env before zipping" }
+
+      - name: Create release zip
+        run: 7z a QuickQuip-${{ github.ref_name }}-windows-x64.zip .\staging\*
+
+      - name: Audit release zip contents
+        shell: pwsh
+        run: |
+          # 产物级清洁审计（锚定 zip 本身，防步骤序回归）：zip 在 smoke 之前打包，
+          # smoke 事后在 staging 里产生的运行残留本就不该进包——这里再对成品兜底。
+          # 注意 .env 用精确名匹配：.env.example 与 config\niuniu_text*.toml 是预期内容。
+          # python\ 前缀是内嵌运行时（pip install 编译的字节码属正常内容），只审计应用区。
+          $listing = 7z l -ba QuickQuip-${{ github.ref_name }}-windows-x64.zip | ForEach-Object { ($_ -split '\s{2,}')[-1] }
+          $appEntries = @($listing | Where-Object { $_ -notlike 'python\*' })
+          $forbidden = @($appEntries | Where-Object { $_ -match '^\.env$' -or $_ -match '__pycache__' -or $_ -match '\.pyc$' -or $_ -match '-smoke\..*\.log$' -or $_ -match '\.db$' })
+          if ($forbidden.Count -gt 0) { throw "Release zip contains build residue: $($forbidden -join ', ')" }
+
       - name: Smoke test lazy package
         shell: pwsh
         env:
@@ -139,9 +176,6 @@ jobs:
             Pop-Location
           }
 
-      - name: Create release zip
-        run: 7z a QuickQuip-${{ github.ref_name }}-windows-x64.zip .\staging\*
-
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -178,8 +212,8 @@ jobs:
           images: ghcr.io/3akhp/quickquip
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref_name, '-') }}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build smoke image
@@ -195,6 +229,10 @@ jobs:
       - name: Smoke test Docker image
         run: |
           docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -c "import quickquip, plugins, web_api"'
+          # 存活探测：bot.py 必须活到 timeout（退出码 124）——import 冒烟抓不到
+          # nonebot.load_plugins 的路径约束。勿改成 -euxc：set -e 会让 124 直接
+          # 中止 shell，存活判定恒假。
+          docker run --rm quickquip:smoke sh -c 'timeout -k 5 15 python -u bot.py; [ $? -eq 124 ]'
           docker run --rm --shm-size=1g quickquip:smoke python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--no-sandbox']); browser.close(); p.stop()"
 
       - name: Build and push

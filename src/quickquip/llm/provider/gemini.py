@@ -1,6 +1,7 @@
 """Google Gemini generateContent API provider client."""
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from typing import Any
 from urllib import parse
@@ -47,9 +48,15 @@ class GeminiProviderClient(BaseProviderClient):
             serialized.append(
                 {
                     "role": "user",
-                    "parts": await self._serialize_tool_result_parts(pending_tool_results),
+                    "parts": self._serialize_function_response_parts(pending_tool_results),
                 }
             )
+            # Gemini requires the complete functionResponse batch to stay in one
+            # Content. Ordinary multimodal parts follow as separate user turns.
+            for item in pending_tool_results:
+                image_parts = await self._serialize_tool_result_image_parts(item)
+                if image_parts:
+                    serialized.append({"role": "user", "parts": image_parts})
             pending_tool_results = []
 
         for message in messages:
@@ -59,15 +66,22 @@ class GeminiProviderClient(BaseProviderClient):
 
             await _flush_tool_results()
             if message.role == "assistant":
-                parts: list[dict[str, Any]] = []
-                if message.content:
-                    parts.append({"text": message.content})
-                for call in message.tool_calls:
-                    try:
-                        args = json.loads(call.arguments_json or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    parts.append({"functionCall": {"name": call.name, "args": args}})
+                parts = self._replay_parts(message.thinking_blocks)
+                if not parts:
+                    if message.content:
+                        parts.append({"text": message.content})
+                    for call in message.tool_calls:
+                        try:
+                            args = json.loads(call.arguments_json or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        parts.append({
+                            "functionCall": {
+                                "id": call.id,
+                                "name": call.name,
+                                "args": args,
+                            }
+                        })
                 serialized.append({"role": "model", "parts": parts or [{"text": ""}]})
                 continue
 
@@ -76,44 +90,67 @@ class GeminiProviderClient(BaseProviderClient):
         await _flush_tool_results()
         return serialized
 
-    async def _serialize_tool_result_parts(
-        self,
+    @staticmethod
+    def _replay_parts(thinking_blocks: list[Any]) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        for block in thinking_blocks:
+            if not isinstance(block, dict) or block.get("type") != "gemini_part":
+                continue
+            part = block.get("part")
+            if isinstance(part, dict):
+                parts.append(deepcopy(part))
+        return parts
+
+    @staticmethod
+    def _serialize_function_response_parts(
         tool_results: list[LLMConversationMessage],
     ) -> list[dict[str, Any]]:
         parts: list[dict[str, Any]] = []
         for item in tool_results:
-            parts.append(
-                {
-                    "functionResponse": {
-                        "name": item.tool_name,
-                        "response": {
-                            "content": item.content,
-                            "is_error": item.is_tool_error,
-                        },
-                    }
-                }
-            )
-            image_inputs = await self._prepare_image_inputs(
-                [],
-                [] if item.is_tool_error else item.inline_images,
-            )
-            parts.extend(
-                {
-                    "inline_data": {
-                        "mime_type": image.media_type,
-                        "data": image.data_base64,
-                    }
-                }
-                for image in image_inputs
-            )
+            function_response: dict[str, Any] = {
+                "name": item.tool_name,
+                "response": {
+                    "content": item.content,
+                    "is_error": item.is_tool_error,
+                },
+            }
+            if item.tool_call_id:
+                function_response["id"] = item.tool_call_id
+            parts.append({"functionResponse": function_response})
         return parts
+
+    async def _serialize_tool_result_image_parts(
+        self,
+        tool_result: LLMConversationMessage,
+    ) -> list[dict[str, Any]]:
+        image_inputs = await self._prepare_image_inputs(
+            [],
+            [] if tool_result.is_tool_error else tool_result.inline_images,
+        )
+        return [
+            {
+                "inline_data": {
+                    "mime_type": image.media_type,
+                    "data": image.data_base64,
+                }
+            }
+            for image in image_inputs
+        ]
 
     async def _build_request_parts(self, request: LLMRequest, *, stream: bool = False) -> tuple[str, dict[str, str], dict[str, Any]]:
         api_key = self._get_api_key()
         action = "streamGenerateContent" if stream else "generateContent"
-        url = self.config.base_url.rstrip("/") + f"/models/{request.model}:{action}?key={parse.quote(api_key)}"
+        url = self.config.base_url.rstrip("/") + f"/models/{request.model}:{action}"
+        headers = {"content-type": "application/json"}
+        if self.config.auth_method == "bearer":
+            headers["authorization"] = f"Bearer {api_key}"
+        else:
+            # Preserve the existing Gemini-compatible relay contract. Gateway
+            # deployments should select bearer auth so credentials stay out of
+            # URLs and Nginx access logs.
+            url += f"?key={parse.quote(api_key)}"
         if stream:
-            url += "&alt=sse"
+            url += "&alt=sse" if "?" in url else "?alt=sse"
         payload: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": request.system_prompt}]},
             "contents": await self._serialize_messages(request.messages),
@@ -139,10 +176,7 @@ class GeminiProviderClient(BaseProviderClient):
                     ]
                 }
             ]
-        headers = {
-            "content-type": "application/json",
-            **self.config.headers,
-        }
+        headers.update(self.config.headers)
         if self.config.user_agent:
             headers["user-agent"] = self.config.user_agent
         if self.config.extra_body:
@@ -153,88 +187,70 @@ class GeminiProviderClient(BaseProviderClient):
     def _parse_candidate(candidate: dict[str, Any], fallback_model: str) -> LLMResponse:
         content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
         parts = content.get("parts", []) if isinstance(content, dict) else []
+        normalized_parts = [
+            GeminiProviderClient._normalize_part(item, index)
+            for index, item in enumerate(parts if isinstance(parts, list) else [], 1)
+            if isinstance(item, dict)
+        ]
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
-        for index, item in enumerate(parts if isinstance(parts, list) else [], 1):
-            if not isinstance(item, dict):
-                continue
+        replay_required = any(
+            item.get("thought") is True or isinstance(item.get("thoughtSignature"), str)
+            for item in normalized_parts
+        )
+        thinking_blocks: list[dict[str, Any]] = []
+        for item in normalized_parts:
             if item.get("thought") is True:
-                continue
-            if "text" in item:
+                pass
+            elif "text" in item:
                 text_parts.append(str(item.get("text", "")))
             if "functionCall" in item:
                 function_call = item.get("functionCall", {})
+                call_id = str(function_call.get("id", "")).strip()
                 tool_calls.append(
                     LLMToolCall(
-                        id=f"tool_{index}",
+                        id=call_id,
                         name=str(function_call.get("name", "")).strip(),
                         arguments_json=_json_string(function_call.get("args", {})),
                     )
                 )
+                if replay_required:
+                    thinking_blocks.append({
+                        "type": "gemini_part",
+                        "part": deepcopy(item),
+                    })
+                continue
+            if replay_required:
+                thinking_blocks.append({"type": "gemini_part", "part": deepcopy(item)})
         return LLMResponse(
             text="".join(text_parts).strip(),
             model=fallback_model,
             tool_calls=tool_calls,
             finish_reason=str(candidate.get("finishReason", "")).strip() or None,
+            thinking_blocks=thinking_blocks,
         )
 
     @staticmethod
+    def _normalize_part(part: dict[str, Any], index: int) -> dict[str, Any]:
+        normalized = deepcopy(part)
+        function_call = normalized.get("functionCall")
+        if isinstance(function_call, dict) and not str(function_call.get("id", "")).strip():
+            function_call["id"] = f"gemini_tool_{index}"
+        return normalized
+
+    @staticmethod
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
-        text_parts: list[str] = []
-        tool_calls: list[LLMToolCall] = []
-        finish_reason: str | None = None
-        input_tokens: int | None = None
-        output_tokens: int | None = None
-        cache_read_tokens: int | None = None
-        thinking_tokens: int | None = None
-        tool_counter = 0
-
-        for chunk in chunks:
-            candidates = chunk.get("candidates", [])
-            if isinstance(candidates, list) and candidates:
-                candidate = candidates[0] if isinstance(candidates[0], dict) else {}
-                content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
-                parts = content.get("parts", []) if isinstance(content, dict) else []
-                for item in parts if isinstance(parts, list) else []:
-                    if not isinstance(item, dict):
-                        continue
-                    if item.get("thought") is True:
-                        continue
-                    if "text" in item:
-                        text_parts.append(str(item.get("text", "")))
-                    if "functionCall" in item:
-                        tool_counter += 1
-                        function_call = item.get("functionCall", {})
-                        tool_calls.append(
-                            LLMToolCall(
-                                id=f"tool_{tool_counter}",
-                                name=str(function_call.get("name", "")).strip(),
-                                arguments_json=_json_string(function_call.get("args", {})),
-                            )
-                        )
-                if candidate.get("finishReason"):
-                    finish_reason = str(candidate["finishReason"])
-            usage = chunk.get("usageMetadata", {})
-            if isinstance(usage, dict):
-                if usage.get("promptTokenCount") is not None:
-                    input_tokens = usage["promptTokenCount"]
-                if usage.get("candidatesTokenCount") is not None:
-                    output_tokens = usage["candidatesTokenCount"]
-                if usage.get("cachedContentTokenCount") is not None:
-                    cache_read_tokens = usage["cachedContentTokenCount"]
-                if usage.get("thoughtsTokenCount") is not None:
-                    thinking_tokens = usage["thoughtsTokenCount"]
-
-        return LLMResponse(
-            text="".join(text_parts).strip(),
-            model=fallback_model,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_read_tokens=cache_read_tokens,
-            thinking_tokens=thinking_tokens,
-        )
+        combined = GeminiProviderClient._combine_stream_trace(chunks, fallback_model)
+        candidates = combined.get("candidates", [])
+        candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
+        response = GeminiProviderClient._parse_candidate(candidate, fallback_model)
+        usage = combined.get("usageMetadata", {})
+        if isinstance(usage, dict):
+            response.input_tokens = usage.get("promptTokenCount")
+            response.output_tokens = usage.get("candidatesTokenCount")
+            response.cache_read_tokens = usage.get("cachedContentTokenCount")
+            response.thinking_tokens = usage.get("thoughtsTokenCount")
+        return response
 
     @staticmethod
     def _combine_stream_trace(
@@ -278,6 +294,9 @@ class GeminiProviderClient(BaseProviderClient):
                             and bool(parts[-1].get("thought")) == thought
                         ):
                             parts[-1]["text"] = str(parts[-1]["text"]) + str(raw_part.get("text", ""))
+                            for key, value in raw_part.items():
+                                if key != "text":
+                                    parts[-1][key] = deepcopy(value)
                         else:
                             parts.append(dict(raw_part))
                     else:

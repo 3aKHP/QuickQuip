@@ -68,6 +68,13 @@ COPY src/ src/
 # earlier, still present) is read by setuptools dynamic deps during metadata
 # generation, so it must remain in the image at this point.
 RUN pip install --no-deps --no-cache-dir .
+# WHY this copy is needed (do not "deduplicate" it away): pip install puts the
+# top-level `plugins` package into site-packages, but nonebot's load_plugins
+# (bot.py) derives module names relative to CWD (/app) and raises ValueError
+# for paths outside it. /app/plugins wins on sys.path (script dir first) and
+# satisfies the CWD constraint. Source-mount (hybrid) and dev layouts resolve
+# plugins under CWD already and are unaffected.
+COPY src/plugins/ plugins/
 COPY config/ config/
 COPY llm_about/ llm_about/
 COPY --from=frontend-builder /build/dist/ frontend/dist/
