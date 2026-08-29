@@ -67,6 +67,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 - `llm_about/{群号}/identities.yaml`
 
 一并用于容器运行。
+
 若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
 
 根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 只承载部署脚本、compose 编排、巡检脚本和运维通知密钥。
@@ -158,7 +159,7 @@ docker compose --env-file ../.env ps
 docker compose --env-file ../.env logs -f quickquip
 ```
 
-在群里发一条"早安"，如果 bot 回复了时区猜测，说明部署成功。
+在群里发一条“早安”，如果 bot 回复了时区猜测，说明部署成功。
 
 如果还启用了贴吧功能，可以继续验证：
 
@@ -293,4 +294,4 @@ docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 - `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在
 - `docker compose --env-file ../.env logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
 - 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建
-- `/llm reload` 会在重载后探活当前群实际生效的 provider/model；如需全量巡检，在群内执行 `/llm probe` 或在 Web Admin 诊断页点击"探活 Provider"，会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费
+- `/llm reload` 会在重载后探活当前群实际生效的 provider/model；如需全量巡检，在群内执行 `/llm probe` 或在 Web Admin 诊断页点击“探活 Provider”，会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费

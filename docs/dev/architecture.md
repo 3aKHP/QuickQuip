@@ -1,6 +1,6 @@
 # QuickQuip 项目架构与结构
 
-本文档记录整个仓库的目录与文件用途，以及"分发层"与"自用层"的划分原则。
+本文档记录整个仓库的目录与文件用途，以及“分发层”与“自用层”的划分原则。
 
 开发文档的公共/私有边界与职责索引见 [`README.md`](README.md)；源码结构规则见 [`style.md`](style.md)。
 
@@ -50,7 +50,7 @@ NoneBot2 event → tz_tracker_plugin matcher
 4. `text_reply_rules` — 正则彩蛋匹配（优先级 + 加权随机）
 5. `context_rules` — 语境感知规则（regex_context / llm_context 判定）
 6. `build_timezone_reply()` — 时区猜测
-7. STS `card_le` — 「xxx了」公式，位于规则链末尾（规则开关与限频预检后再 `match_card_le`，不得抢占时区等具体规则；按符号定位：`resolve_reply` 中的 `match_card_le` block）
+7. STS `card_le` — “xxx了”公式，位于规则链末尾（规则开关与限频预检后再 `match_card_le`，不得抢占时区等具体规则；按符号定位：`resolve_reply` 中的 `match_card_le` block）
 8. `rule_switch.is_enabled()` — 每步均受群级规则开关控制
 9. `rate_limit.allow()` — 发送前限流检查
 10. `stats_tracker` — 消息统计与规则触发计数

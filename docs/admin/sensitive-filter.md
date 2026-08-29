@@ -27,9 +27,9 @@ QuickQuip 在 LLM 和多模态相关文本的流量边界接入敏感词过滤�
 匹配前会做轻量归一化：
 - `casefold()` 大小写折叠
 - 移除零宽字符（U+200B/200C/200D/FEFF/00AD）
-- 移除 ASCII 空白（让 "六 四" 也能命中 "六四"）
+- 移除 ASCII 空白（让 “六 四” 也能命中 “六四”）
 
-**未实现**拼音/同形异构字归一化——那是无底洞，且误报会爆炸。这层定位是**绊线**，不是对抗"研究型对手"的纵深防御。
+**未实现**拼音/同形异构字归一化——那是无底洞，且误报会爆炸。这层定位是**绊线**，不是对抗“研究型对手”的纵深防御。
 
 ### 日志
 
@@ -62,7 +62,7 @@ cp config/sensitive_words.toml.example config/sensitive_words.toml
 | `territorial` | 绝对词 | 领土主权类表述 |
 | `ethnic_religion` | 绝对词 | 民族宗教（敏感方向） |
 | `banned_organizations` | 绝对词 | 被禁组织、邪教名称 |
-| `separatism` | 绝对词 | "X 独"模板很稳 |
+| `separatism` | 绝对词 | “X 独”模板很稳 |
 | `violence_terror` | 绝对词 | 暴恐组织名 + 招募/加入 |
 | `obscenity_minor` | 绝对词 | 涉未成年人色情 |
 | `obscenity_explicit` | 绝对词 | 露骨色情词 |
@@ -98,19 +98,13 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 
 ## 审查边界
 
-过滤器只处理文本，包括用户输入、ASR 转写、图片转述和歌词。图片像素、音频波形、
-TTS 音频、生成图片和音乐成品不经过本过滤器。部署者仍需依赖相应 provider 的内容安全
-机制；项目当前不提供图片、音频或音乐 moderation provider。
+过滤器只处理文本，包括用户输入、ASR 转写、图片转述和歌词。图片像素、音频波形、TTS 音频、生成图片和音乐成品不经过本过滤器。部署者仍需依赖相应 provider 的内容安全机制；项目当前不提供图片、音频或音乐 moderation provider。
 
-`config/generation.toml` 中的 `prompt_blocklist` 继续作为生成业务专属限制，与
-`config/sensitive_words.toml` 叠加生效。前者适合记录特定生成模型不接受的提示词，后者是
-QuickQuip 各文本链路共享的部署级词表。
+`config/generation.toml` 中的 `prompt_blocklist` 继续作为生成业务专属限制，与`config/sensitive_words.toml` 叠加生效。前者适合记录特定生成模型不接受的提示词，后者是QuickQuip 各文本链路共享的部署级词表。
 
 ## 接入点
 
-主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_result_pipeline.py`、
-`src/quickquip/llm/single_shot.py`、`src/quickquip/llm/service_parts/draw_svg.py` 和
-`src/quickquip/adapters/nonebot/command_parts/media.py`。
+主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_result_pipeline.py`、`src/quickquip/llm/single_shot.py`、`src/quickquip/llm/service_parts/draw_svg.py` 和`src/quickquip/adapters/nonebot/command_parts/media.py`。
 
 | 接入点 | 位置 | 行为 |
 |---|---|---|
@@ -150,7 +144,7 @@ QuickQuip 各文本链路共享的部署级词表。
 - ❌ 通过 Web Admin 或任何浏览器页面读取、回显、编辑 `config/sensitive_words.toml`
 - ❌ 把命中日志记得太详细（如完整原文 + 用户 ID + 时间）——日志本身会成为合规风险
 - ❌ 在群里**告知用户**触发了过滤——直接静默 + 后台日志即可，告知等于教用户绕过
-- ❌ 让 LLM 自己判断"这内容能不能发"——增加成本和延迟，且模型自己也不可靠
+- ❌ 让 LLM 自己判断“这内容能不能发”——增加成本和延迟，且模型自己也不可靠
 - ❌ 试图覆盖拼音、谐音、同形字等所有变体——误报会爆炸，得不偿失
 
 ## 测试
