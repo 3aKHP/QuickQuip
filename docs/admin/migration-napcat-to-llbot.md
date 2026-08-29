@@ -14,14 +14,14 @@ QuickQuip 设计之初即以 NapCat（Docker 镜像 `mlikiowa/napcat-docker`）�
 |---|---|---|
 | 原理 | DLL 注入 QQ 进程 | PMHQ 外部内存 Hook（独立进程） |
 | 被检测面 | QQ 进程内 DLL 模块可被扫描 | QQ 进程空间无修改，更难检测 |
-| Docker 镜像 | `mlikiowa/napcat-docker`（~1.2GB） | `initialencounter/llonebot:latest`（~880MB） |
+| Docker 镜像 | `mlikiowa/napcat-docker`（~1.2GB） | `initialencounter/llonebot:v7.12.14-7.3.2-45758`（~880MB） |
 | 签名服务器 | 无需（QQ 自带） | 无需（QQ 自带） |
 | 社区活跃度 | 9k+ stars | 3.3k+ stars，日更 |
 | OneBot V11 兼容 | 反向 WS、正向 WS | 反向 WS、正向 WS、HTTP、HTTP POST |
 
 核心区别：NapCat 把 DLL **塞进 QQ 进程内部**，腾讯可以扫描进程空间检测到外挂模块。LLBot 使用 **PMHQ（Pure Memory Hook for QQNT）**——一个独立进程通过 Linux 内存机制从外部与 QQ 交互，QQ 进程本身干干净净。
 
-**QuickQuip 核心业务代码无需任何改动**——两者均通过标准 OneBot V11 反向 WebSocket 与 NoneBot 通信，接口完全一致。
+**QuickQuip 核心业务代码无需任何改动**——两者均通过标准 OneBot V11 WebSocket（QuickQuip 默认正向，也支持反向）与 NoneBot 通信，接口完全一致。
 
 ## 迁移步骤
 
@@ -32,7 +32,7 @@ QuickQuip 设计之初即以 NapCat（Docker 镜像 `mlikiowa/napcat-docker`）�
 ```yaml
 services:
   llbot:
-    image: initialencounter/llonebot:latest
+    image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # 版本选择与 pin 原因见 deployment.md「LLBot 镜像版本」
     container_name: llbot
     entrypoint:
       - /bin/sh
@@ -136,7 +136,7 @@ LLBot 同时支持正向和反向 WebSocket。`docker-compose.example.yml` 默�
 |---|---|---|---|
 | 长消息限制 | ~667 汉字截断 | 更高（未实测） | 800 字分块策略对两者均有效 |
 | QQ 版本 | 3.2.28 | 3.2.25 | 略旧，腾讯可能未来强制升级 |
-| 自动登录 | `ACCOUNT` 环境变量 | `QUICK_LOGIN_QQ` 环境变量（可能不生效） | 重启后可能需要重新扫码 |
+| 自动登录 | `ACCOUNT` 环境变量 | `QUICK_LOGIN_QQ` 环境变量（有效但有时效性） | 重启后可能需要重新扫码；restart 可触发快速登录 |
 | WebUI 端口 | 6099 | 3080 | SSH 隧道端口变更 |
 | 日志格式 | `账号状态变更为在线` | `PMHQ WebSocket 连接成功` | 如有自定义监控需适配 |
 

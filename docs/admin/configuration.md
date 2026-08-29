@@ -29,6 +29,7 @@
 | `GITHUB_TOOLSETS` | GitHub MCP 启用的工具集，逗号分隔。可选：`context`, `repos`, `issues`, `pull_requests`, `users`, `actions` |
 | `GITHUB_READ_ONLY` | 设为非空时限制 GitHub MCP 为只读 |
 | `TAVILY_API_KEY` | Tavily API key（供 MCP sidecar 的 Tavily 工具使用，未启用 MCP Tavily 时无需填写） |
+| `MCP_PRTS_WIKI_TOKEN` | prts_wiki MCP 的鉴权 token（见 `config/llm.toml.example` 的 prts_wiki 示例） |
 
 ### 搜索
 
@@ -38,9 +39,9 @@
 | `QUICKQUIP_SEARXNG_BASE_URL` | Docker Compose 内注入给 QuickQuip / Web Admin 的 SearXNG 容器内地址；避免把本地直跑的 `127.0.0.1` 地址带入容器 | `http://searxng:8080` |
 | `SEARXNG_SAFE_SEARCH` | 传给 SearXNG 的安全搜索级别：`0` / `1` / `2` | `0` |
 | `SEARXNG_LANGUAGE` | 传给 SearXNG 的搜索语言；空值时使用 `all` | `all` |
-| `SEARXNG_PUBLIC_BASE_URL` | compose 中 SearXNG 对外展示的 base URL | `http://127.0.0.1:8888/` |
-| `SEARXNG_BIND_ADDRESS` | compose 暴露 SearXNG 时绑定的宿主地址 | `127.0.0.1` |
-| `SEARXNG_BIND_PORT` | compose 暴露 SearXNG 时绑定的宿主端口 | `8888` |
+| `SEARXNG_PUBLIC_BASE_URL` | compose 中 SearXNG 对外展示的 base URL；仅 docker-compose.example.yml（自包含模板）使用 | `http://127.0.0.1:8888/` |
+| `SEARXNG_BIND_ADDRESS` | compose 暴露 SearXNG 时绑定的宿主地址；仅 docker-compose.example.yml（自包含模板）使用 | `127.0.0.1` |
+| `SEARXNG_BIND_PORT` | compose 暴露 SearXNG 时绑定的宿主端口；仅 docker-compose.example.yml（自包含模板）使用 | `8888` |
 | `SEARXNG_SECRET` | SearXNG 实例密钥，用于容器环境变量 | — |
 
 `search_web` 固定走项目内 SearXNG。普通本地运行读取 `SEARXNG_BASE_URL`；`docker-compose.example.yml` 和 `prod.example/docker-compose.yml` 会优先把 `QUICKQUIP_SEARXNG_BASE_URL` 注入为容器内的 `SEARXNG_BASE_URL`。Tavily 等外部搜索能力建议通过 MCP sidecar 暴露为工具。
@@ -625,9 +626,11 @@ chain = ['第一', '第二', '第三']
 | 文件 | 层 | 说明 |
 |------|-----|------|
 | `config/niuniu_text.toml.example` | 分发层（追踪） | 自定义牛牛文案模板，含所有事件消息、长度评价、运势提示、CD 消息 |
-| `config/niuniu_text.toml` | 自用层（gitignore） | 部署者自定义文案（复制 example 后修改） |
+| `config/niuniu_text.toml` | 分发层（git 追踪，随模板分发，勿写入私有内容） | 默认自定义文案（上游维护，可按需调整但勿写私有内容） |
 | `config/niuniu_text_safe.toml.example` | 分发层（追踪） | 和谐版文案模板，字段与 default 一致但措辞中性化 |
-| `config/niuniu_text_safe.toml` | 自用层（gitignore） | 部署者自定义和谐版文案 |
+| `config/niuniu_text_safe.toml` | 分发层（git 追踪，随模板分发，勿写入私有内容） | 默认和谐版文案（上游维护，可按需调整但勿写私有内容） |
+
+私有自用文案请放在未被 git 追踪的独立文件中，并用 `niuniu_text_path` 指向。
 
 文案 TOML 结构中，`safe` 模式可仅填写需要覆写的字段，缺失字段自动从 `default` 继承。
 
@@ -649,7 +652,7 @@ style_prompt = '''
 scope = ['group']  # 可选：'group' / 'private'，不设则两端均显示
 ```
 
-Persona 文件支持自由扩展字段，运行时只使用已识别的键。
+Persona 文件支持自由扩展字段：平面字段之外，structured v2 扩展表同样会被消费。structured v2 格式参见 `config/personas.example/structured.toml`，其中 `[identity]`、`[biography]`、`[cognition]`、`[instinct]`、`[voice]` 等扩展表会被运行时渲染进 system prompt。
 
 ---
 
@@ -658,14 +661,14 @@ Persona 文件支持自由扩展字段，运行时只使用已识别的键。
 项目内置 `docker-compose.example.yml`（含 searxng 服务）和服务配置 `docker/searxng/settings.yml`：
 
 ```yaml
-# docker/searxng/settings.yml
+# docker/searxng/settings.yml（节选）
 search:
   formats:
     - html
     - json
 server:
   bind_address: "0.0.0.0"
-  secret_key: "change-me"
+  secret_key: "change-this-secret"
 ```
 
 默认暴露在 `http://127.0.0.1:8888`，开启 JSON 接口供 bot 直接调用。

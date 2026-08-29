@@ -6,6 +6,7 @@ LLM 模块的详细结构、边界和群内命令说明见 [docs/dev/llm-module.
 
 - 一台 Linux 服务器（建议 2 核 / 2G 内存并配置 2G swap：v1.12.2 验收实测此规格运行全栈稳态约 0.7G RSS、无 OOM；1 核 1G 无 swap 的极端规格未经全栈验证，不建议）
 - 已安装 Docker 和 Docker Compose
+- Node.js + pnpm（手动部署构建前端用；deploy 脚本路径本机需有）
 - QQ 账号（用于 LLBot 登录）
 
 ## 推荐服务器
@@ -42,7 +43,7 @@ scp -r /path/to/QuickQuip user@server:/path/to/QuickQuip
 cd /path/to/QuickQuip
 cp .env.example .env
 nano .env  # 填入 QQ 号、OneBot 配置和 API key
-cp -r prod.example prod
+cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（部署脚本会中止并提示），详见 prod.example/README.md
 ```
 
 同时确认：
@@ -72,6 +73,8 @@ cp -r prod.example prod
 
 ### 4. 启动服务
 
+启动前需先构建 Web Admin 前端（`cd frontend && pnpm install --frozen-lockfile && pnpm build`），产物 `frontend/dist` 会被 web-admin 容器只读挂载。手动部署路径需在服务器安装 Node.js + pnpm 后构建；使用 `prod/deploy-v4.sh` / `prod/deploy-v4.ps1` 部署脚本则在本机自动完成。
+
 ```bash
 cd /path/to/QuickQuip/prod
 docker compose --env-file ../.env up -d
@@ -92,8 +95,8 @@ docker compose --env-file ../.env up -d
 
 补充说明：
 
-- **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接 LLBot（`ONEBOT_WS_URLS` 指向 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在 LLBot WebUI 启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client。
-- `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存
+- **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接 LLBot（`ONEBOT_WS_URLS` 指向 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在 LLBot WebUI 启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
+- `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存；`awakening.toml` 是这些文件中唯一的例外：bot 每 30 秒检测其 mtime，外部修改会自动重载
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
 
@@ -111,7 +114,7 @@ python -m quickquip.tieba.login
 data/tieba/storage_state.json
 ```
 
-后续执行 `prod/deploy-v4.ps1` 时，该文件会自动单独上传到云端。
+后续执行 `prod/deploy-v4.ps1`（Windows）或 `bash prod/deploy-v4.sh`（Linux）时，该文件会自动单独上传到云端。
 
 ### 4.2 CJK 字体文件（词云与 SVG 画图）
 
@@ -166,7 +169,7 @@ docker compose --env-file ../.env logs -f quickquip
 
 ### 7. Web 管理后台
 
-compose 会同时启动 `web-admin` 容器（`python web_api.py`，默认监听 `127.0.0.1:5104`）。通过 nginx 反代后即可打开管理界面，提供：
+compose 会同时启动 `web-admin` 容器（`python web_api.py`，容器内监听 `0.0.0.0:5104`，宿主侧仅绑定 `127.0.0.1:5104`）。通过 nginx 反代后即可打开管理界面，提供：
 
 - 消息统计（各群消息数、活跃用户、规则触发次数）
 - 群级规则开关（toggle 开关，实时生效）
@@ -199,6 +202,8 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | `../config` | `/app/config` | **读写**（llm.toml 在线编辑需要） |
 | `../llm_about` | `/app/llm_about` | **读写**（资料页在线编辑需要） |
 | `../frontend/dist` | `/app/frontend/dist` | 只读 |
+| `../web_api.py` | `/app/web_api.py` | 只读 |
+| `../src` | `/app/src` | 只读（hybrid 源码热更新） |
 
 > 注意：`quickquip` 容器的 `config` 和 `llm_about` 挂载仍可保持只读（`:ro`），只有 `web-admin` 需要写权限。
 > `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
@@ -275,7 +280,7 @@ docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 
 ### 端口冲突
 
-如果服务器上 3001、3080、5104 或 8888 端口已被占用，在 `docker-compose.yml` 中修改宿主机端口映射即可。QuickQuip 的 8080 端口只用于容器内部通信，不需要对外暴露。
+如果服务器上 3001、3080 或 5104 端口已被占用，在 `docker-compose.yml` 中修改 compose 端口映射的宿主机侧即可；8888 仅当同机自建/自跑 searxng 时才相关。QuickQuip 的 8080 端口只用于容器内部通信，不需要对外暴露。
 
 ### LLM 配置不生效
 

@@ -112,5 +112,5 @@ QuickQuip 支持 OpenAI / Claude / Gemini 三类 provider，因此工具发现�
 建议修改该功能后至少运行：
 
 ```bash
-pytest tests/unit/llm tests/integration/test_llm_service.py tests/integration/test_llm_search.py tests/integration/test_llm_mcp.py
+.venv/bin/python -m pytest tests/unit/llm tests/integration/test_llm_service.py tests/integration/test_llm_search.py tests/integration/test_llm_mcp.py
 ```

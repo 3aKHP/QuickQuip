@@ -30,7 +30,7 @@ if [ "$cmd" = "status" ]; then
         echo "ONLINE"
     else
         # QQ 进程探测：优先容器内 ps（PATH 解析，不写带 hash 的 nix store 绝对路径——
-        # llonebot:latest 重建会漂移），失败回退宿主机 docker top（pmhq 启动参数含
+        # 镜像版本更换/重建会漂移），失败回退宿主机 docker top（pmhq 启动参数含
         # /opt/QQ/qq）。按退出码 + 输出双重判定（部分 docker 版本把 exec 失败信息
         # 写到 stdout）；两路都失败说明探测本身失效，输出 UNKNOWN 而非误报
         # OFFLINE（cron_check_bot.sh 对 UNKNOWN 只记录不告警）。

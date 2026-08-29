@@ -25,6 +25,11 @@ COPY src/ src/
 # earlier, still present) is read by setuptools dynamic deps during metadata
 # generation, so it must remain in the image at this point.
 RUN pip install --no-deps --no-cache-dir .
+# WHY this copy is needed (do not "deduplicate" it away; full rationale in the
+# root Dockerfile): pip install puts the top-level `plugins` package into
+# site-packages, but nonebot's load_plugins derives module names relative to
+# CWD (/app); /app/plugins wins on sys.path and satisfies that constraint.
+COPY src/plugins/ plugins/
 COPY llm_about/ llm_about/
 RUN mkdir -p data
 
