@@ -40,7 +40,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 - **Python** ≥ 3.11
 - **NoneBot2** + **OneBot V11 适配器**
-- OneBot V11 协议实现端（推荐 [LLBot](https://github.com/LLOneBot/LuckyLilliaBot)，备选 [NapCat](https://github.com/NapNeko/NapCatQQ)）
+- OneBot V11 协议实现端（当前部署模板默认 [LLBot](https://github.com/LLOneBot/LuckyLilliaBot) 7.3.2；各适配器状态与选择见 [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md)）
 
 ### 安装步骤
 
@@ -202,10 +202,11 @@ src/
 | [docs/user/group-commands.md](docs/user/group-commands.md) | 群内指令速查 |
 | [docs/user/private-commands.md](docs/user/private-commands.md) | 私聊指令速查 |
 | [docs/admin/deployment.md](docs/admin/deployment.md) | 云端部署指南 |
+| [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md) | OneBot 适配器状态与选择 |
 | [docs/admin/configuration.md](docs/admin/configuration.md) | 完整配置参考 |
 | [docs/admin/web-admin.md](docs/admin/web-admin.md) | Web 管理后台 |
 | [docs/admin/sensitive-filter.md](docs/admin/sensitive-filter.md) | 敏感词过滤器 |
-| [docs/admin/migration-napcat-to-llbot.md](docs/admin/migration-napcat-to-llbot.md) | NapCat 迁移 LLBot |
+| [docs/admin/migration-napcat-to-llbot.md](docs/admin/migration-napcat-to-llbot.md) | NapCat → LLBot 历史迁移记录 |
 | [docs/dev/llm-module.md](docs/dev/llm-module.md) | LLM 模块详解 |
 | [docs/dev/regex-tutorial.md](docs/dev/regex-tutorial.md) | 正则表达式教程 |
 | [ROADMAP.md](ROADMAP.md) | 演进路线 |

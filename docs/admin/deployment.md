@@ -7,7 +7,7 @@ LLM 模块的详细结构、边界和群内命令说明见 [docs/dev/llm-module.
 - 一台 Linux 服务器（建议 2 核 / 2G 内存并配置 2G swap：v1.12.2 验收实测此规格运行全栈稳态约 0.7G RSS、无 OOM；1 核 1G 无 swap 的极端规格未经全栈验证，不建议）
 - 已安装 Docker 和 Docker Compose
 - Node.js + pnpm（手动部署构建前端用；deploy 脚本路径本机需有）
-- QQ 账号（用于 LLBot 登录）
+- QQ 账号（用于 OneBot 协议端登录；当前部署模板默认适配器为 LLBot，各适配器状态见 [onebot-adapters.md](onebot-adapters.md)）
 
 ## 推荐服务器
 
@@ -96,7 +96,7 @@ docker compose --env-file ../.env up -d
 
 补充说明：
 
-- **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接 LLBot（`ONEBOT_WS_URLS` 指向 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在 LLBot WebUI 启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
+- **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，当前默认模板为 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在适配器管理界面启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client（连接拓扑详见 [onebot-adapters.md](onebot-adapters.md)）。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
 - `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存；`awakening.toml` 是这些文件中唯一的例外：bot 每 30 秒检测其 mtime，外部修改会自动重载
 - 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
@@ -132,22 +132,22 @@ SVG 画图的部署边界：
 - 文本渲染优先使用上述 NotoSansSC 字体；emoji 等字符依赖系统字体回退。官方 Playwright 基础镜像自带常用字体（含彩色 emoji），Docker 部署一般无需处理；裸机源码部署在精简系统上可能缺少 emoji 字体，图中 emoji 会显示为方框；Windows 使用系统字体（微软雅黑、Segoe UI Emoji），一般无需处理。
 - 渲染子进程的资源硬限制（地址空间 / CPU 时间）依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 保留 8 秒墙钟超时兜底。
 
-### 5. 首次登录 LLBot
+### 5. 首次登录 OneBot 协议端
 
-LLBot 首次启动需要扫码登录：
+协议端首次启动需要扫码登录。以下以当前默认适配器 **LLBot 7.3.2** 为例（完整 profile、版本 pin 原因与其他适配器状态见 [onebot-adapters.md](onebot-adapters.md)）：
 
 ```bash
-# 查看 LLBot 日志，找到登录二维码
+# 查看协议端日志，找到登录二维码
 docker compose --env-file ../.env logs -f llbot
 ```
 
-日志中会出现二维码或登录链接，用手机 QQ 扫码确认。登录成功后，登录态会持久化在 `llbot-qq/` 目录中，配置文件在 `llbot-data/` 中。也可通过 WebUI（`http://<服务器IP>:3080`）扫码。
+日志中会出现二维码或登录链接，用手机 QQ 扫码确认；也可通过 WebUI（`http://<服务器IP>:3080`）扫码。登录成功后，LLBot 登录态持久化在 `llbot-qq/` 目录，配置在 `llbot-data/` 中。
 
-**LLBot 镜像版本**：compose 模板固定使用 `initialencounter/llonebot:v7.12.14-7.3.2-45758`。上游 `latest` 自 2026-08 起漂移到 pmhq 8.x——启动即要求在 auth.luckylillia.com 注册获取 `auth_token`（部分账号需人工审核），新部署会直接卡死在授权提示上。如需更换版本：NTQQ 强制升级导致旧构建无法登录时，到上游 Docker Hub 挑选新的 `vX.Y.Z-…` 版本 tag 更新模板；升级 pmhq 大版本前先确认其授权要求。
+**镜像版本与 pin**：compose 模板固定使用 `initialencounter/llonebot:v7.12.14-7.3.2-45758`，不使用 `latest`——原因与更换版本的注意事项见 [onebot-adapters.md](onebot-adapters.md) 的 LLBot profile。
 
-**LLBot WebUI 启用 OneBot 对接**：新部署的 llbot 四种网络对接方式（正向 WS / 反向 WS / HTTP / HTTP 上报）默认全部关闭。在 WebUI（`http://<服务器IP>:3080`）里启用所需方式——正向 WebSocket（服务端）的 token 为必填项，须与根目录 `.env` 的 `ONEBOT_ACCESS_TOKEN` 同值，QuickQuip 侧才连得上。
+**WebUI 启用 OneBot 对接**：新部署的 LLBot 四种网络对接方式（正向 WS / 反向 WS / HTTP / HTTP 上报）默认全部关闭。在 WebUI（`http://<服务器IP>:3080`）里启用所需方式——正向 WebSocket（服务端）的 token 为必填项，须与根目录 `.env` 的 `ONEBOT_ACCESS_TOKEN` 同值，QuickQuip 侧才连得上。
 
-**LLBot 重启与快速登录**：`llbot-qq/` 登录态目录完好时，容器重启后 llbot 可能走快速登录（`QUICK_LOGIN_QQ` 生效，免扫码），也可能要求重新扫码——快速登录存在时效性（验收中两种情况都出现过）。无论哪种，优先 `docker compose restart llbot` 而不是重建容器或删除 `llbot-qq/`；扫码后若消息无响应且日志出现 `getSelfNick` 等 TypeError，restart 一次触发快速登录即可恢复。
+**重启与快速登录**：`llbot-qq/` 登录态目录完好时，容器重启后 LLBot 可能走快速登录（`QUICK_LOGIN_QQ` 生效，免扫码），也可能要求重新扫码——快速登录存在时效性（验收中两种情况都出现过）。无论哪种，优先 `docker compose restart llbot` 而不是重建容器或删除 `llbot-qq/`；扫码后若消息无响应且日志出现 `getSelfNick` 等 TypeError，restart 一次触发快速登录即可恢复。
 
 ### 6. 验证运行
 
@@ -281,7 +281,7 @@ docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 
 ### 端口冲突
 
-如果服务器上 3001、3080 或 5104 端口已被占用，在 `docker-compose.yml` 中修改 compose 端口映射的宿主机侧即可；8888 仅当同机自建/自跑 searxng 时才相关。QuickQuip 的 8080 端口只用于容器内部通信，不需要对外暴露。
+如果服务器上 OneBot 协议端端口（LLBot 默认 3001/3080）或 Web Admin 的 5104 已被占用，在 `docker-compose.yml` 中修改 compose 端口映射的宿主机侧即可；8888 仅当同机自建/自跑 searxng 时才相关。QuickQuip 的 8080 端口只用于容器内部通信，不需要对外暴露。
 
 ### LLM 配置不生效
 
