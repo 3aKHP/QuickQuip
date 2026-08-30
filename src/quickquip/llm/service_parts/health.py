@@ -4,7 +4,7 @@ import json
 
 from quickquip.common.paths import MCP_STATUS_JSON_PATH
 from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filter
-from quickquip.llm.config import PersonaConfig, ProviderConfig
+from quickquip.llm.config import DISABLED_PROVIDER_REPLY, PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
@@ -268,7 +268,7 @@ class HealthMixin:
         if provider is None:
             return f"当前 provider 不存在：{settings.provider_id}"
         if not provider.enabled:
-            return f"当前 provider 已禁用：{settings.provider_id}（enabled = false）"
+            return DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id)
         result = await probe_provider(provider, model=settings.model or None)
         body = format_probe_results([result])
         if result.status == "ok":

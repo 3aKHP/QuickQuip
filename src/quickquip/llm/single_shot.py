@@ -27,7 +27,7 @@ from quickquip.common.sensitive_filter import (
     SensitiveFilter,
     scan_and_log,
 )
-from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config import DISABLED_PROVIDER_REPLY, LLMConfig, ProviderConfig
 from quickquip.llm.provider import (
     BaseProviderClient,
     LLMProviderError,
@@ -183,7 +183,7 @@ async def run_command_single_shot(
     if provider is None:
         return _early_result(spec, f"当前 provider 不存在：{settings.provider_id}")
     if not provider.enabled:
-        return _early_result(spec, f"当前 provider 已禁用：{settings.provider_id}（enabled = false）")
+        return _early_result(spec, DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id))
 
     prompt_pack = spec.prompt_builder(
         prompt=normalized_prompt,

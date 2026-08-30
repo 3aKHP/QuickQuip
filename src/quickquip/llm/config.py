@@ -123,6 +123,10 @@ class ImagePreprocessingConfig:
     prompt: str = ""
 
 
+# 群聊用户可见的"当前 provider 已禁用"提示：回复主链 / 单发命令 / 当前探活共用，勿在各处另行拼装
+DISABLED_PROVIDER_REPLY = "当前 provider 已禁用：{provider_id}（enabled = false），请用 /llm use 切换其他 provider。"
+
+
 @dataclass(slots=True)
 class ProviderConfig:
     id: str
