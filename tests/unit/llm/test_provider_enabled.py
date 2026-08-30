@@ -1,9 +1,9 @@
 """钉住 provider enabled 开关的语义。
 
 enabled = false = 暂时禁用：provider 仍留在配置里（区别于坏 provider 的剪除语义），
-但不进入任何群聊可达入口——列表不展示、/llm use 拒绝；
+但不进入任何群聊可达入口——列表不展示、/llm use 拒绝、回复主链拒绝；
 显式单查（/llm models <id>）仍可见，但带"已禁用"标注。
-探活过滤见 test_provider_health.py，cascade 跳过见 briefing/summary 各自测试。
+探活过滤见 test_provider_health.py，cascade 跳过见 test_briefing.py。
 """
 
 from __future__ import annotations
@@ -95,3 +95,59 @@ def test_set_chat_model_rejects_disabled(tmp_path: Path):
     with pytest.raises(ValueError, match="已禁用"):
         service.set_chat_model(123, "p-off", "m1")
     assert service.set_chat_model(123, "p-on", "m1") == "m1"
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_rejects_disabled_provider(tmp_path: Path, monkeypatch):
+    """群设置停留在被禁 provider 时：主链拒绝、不构造 client、不计费。"""
+    service = _make_service(tmp_path)
+    service.store.update_group_settings(123, provider_id="p-off", model="m1")
+
+    built: list[str] = []
+
+    class _BoomClient:
+        async def complete(self, request):
+            raise AssertionError("disabled provider 不应被调用")
+
+    def _builder(provider):
+        built.append(provider.id)
+        return _BoomClient()
+
+    monkeypatch.setattr("quickquip.llm.service.build_provider_client", _builder)
+
+    result = await service.generate_reply(
+        group_id=123, user_id=1, sender_name="tester", prompt="hi"
+    )
+
+    assert "已禁用" in str(result.get("reply"))
+    assert result.get("llm_used") is False
+    assert built == []
+
+
+@pytest.mark.asyncio
+async def test_quick_judge_falls_back_past_disabled_provider(tmp_path: Path):
+    """quick_judge 选择链把 disabled 视为不可用：default 被禁时降级到下一个 enabled。"""
+    from quickquip.llm.provider import LLMResponse
+    from quickquip.llm.quick_judge import run_quick_judge_detailed
+
+    cfg = _load(tmp_path)
+    cfg.runtime.default_provider = "p-off"  # default 指向被禁 provider
+
+    built: list[str] = []
+
+    def _builder(provider):
+        built.append(provider.id)
+        return _StubJudgeClient(LLMResponse(text='{"trigger": false}', model="m1", finish_reason="stop"))
+
+    result = await run_quick_judge_detailed(cfg, "判定一下", client_builder=_builder)
+
+    assert built == ["p-on"]
+    assert result.provider_id == "p-on"
+
+
+class _StubJudgeClient:
+    def __init__(self, response) -> None:
+        self._response = response
+
+    async def complete(self, request):
+        return self._response

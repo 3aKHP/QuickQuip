@@ -134,6 +134,20 @@ async def build_health_report(
                 {"provider_id": settings.provider_id, "model": settings.model},
             )
         )
+    elif not provider.enabled:
+        items.append(
+            HealthCheckItem(
+                "provider",
+                "warn",
+                f"{provider.id} / {settings.model}；已禁用（enabled = false），群聊调用将被拒绝",
+                {
+                    "provider_id": provider.id,
+                    "protocol": provider.protocol,
+                    "model": settings.model,
+                    "enabled": False,
+                },
+            )
+        )
     else:
         model_ok = settings.model in provider.models or settings.model in provider.aliases
         env_status = _env_state(provider.api_key_env)
