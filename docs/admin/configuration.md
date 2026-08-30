@@ -10,7 +10,7 @@
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DRIVER` | NoneBot2 驱动器；使用 LLBot 正向 WebSocket 时需包含 `~websockets` | `~fastapi+~websockets` |
+| `DRIVER` | NoneBot2 驱动器；正向 WebSocket 连接 OneBot 协议端时需包含 `~websockets` | `~fastapi+~websockets` |
 | `HOST` | 监听地址 | `0.0.0.0` |
 | `PORT` | 监听端口 | `8080` |
 | `QQ_ACCOUNT` | QQ 号（云端部署必填） | — |

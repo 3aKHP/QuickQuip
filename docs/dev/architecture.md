@@ -206,6 +206,7 @@ docs/
 │   └── three-kingdoms-memes.md
 ├── admin/                  # 面向部署者/管理员
 │   ├── deployment.md
+│   ├── onebot-adapters.md
 │   ├── configuration.md
 │   ├── game-config.md
 │   ├── migration-napcat-to-llbot.md
@@ -224,7 +225,7 @@ docs/
 ### `prod.example/` 与 `prod/`
 
 - `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
-- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、LLBot 登录态目录和运维通知密钥。
+- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、OneBot 协议端登录态目录和运维通知密钥。
 - 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档，不承担生产环境变量覆盖职责。
 
 ### 私有环境变量与根 `.env` 的关系
