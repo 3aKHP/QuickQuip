@@ -950,6 +950,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
                 "rule_name": LLM_RULE_NAME,
                 "llm_used": False,
             }
+        if not provider.enabled:
+            return {
+                "reply": f"当前 provider 已禁用：{settings.provider_id}（enabled = false），请用 /llm use 切换其他 provider。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
 
         persona = self.config.personas.get(settings.persona_id)
         if persona is None:

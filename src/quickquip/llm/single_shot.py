@@ -182,6 +182,8 @@ async def run_command_single_shot(
     provider = config.providers.get(settings.provider_id)
     if provider is None:
         return _early_result(spec, f"当前 provider 不存在：{settings.provider_id}")
+    if not provider.enabled:
+        return _early_result(spec, f"当前 provider 已禁用：{settings.provider_id}（enabled = false）")
 
     prompt_pack = spec.prompt_builder(
         prompt=normalized_prompt,

@@ -129,6 +129,8 @@ class StateMixin:
         provider = self.config.providers.get(provider_id)
         if provider is None:
             raise ValueError(f"未知 provider：{provider_id}")
+        if not provider.enabled:
+            raise ValueError(f"provider {provider_id} 已禁用（enabled = false）")
         resolved = model.strip()
         if not resolved:
             resolved = provider.default_model
@@ -231,7 +233,8 @@ class StateMixin:
             provider = self.config.providers.get(provider_id)
             if provider is None:
                 return f"未知 provider：{provider_id}"
-            return "\n".join([f"{provider.id} 可用模型：", *_model_lines(provider)])
+            header = f"{provider.id} 可用模型（已禁用）：" if not provider.enabled else f"{provider.id} 可用模型："
+            return "\n".join([header, *_model_lines(provider)])
 
         lines = ["可用模型："]
         for provider in self.list_providers():
