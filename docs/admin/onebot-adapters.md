@@ -11,7 +11,7 @@ QuickQuip 应用层只依赖 NoneBot2 + OneBot V11 契约，不绑定任何具�
 **连接拓扑**
 
 - QuickQuip 默认正向 WebSocket：`ONEBOT_WS_URLS` 指向适配器 WS 服务端，`DRIVER` 须包含 `~websockets`（纯 `~fastapi` 无 WS client 能力）。
-- 也支持反向 WS：适配器主动连接 QuickQuip 的 `ws://<bot 地址>:8080/onebot/v11/ws/`，此时 QuickQuip 侧无需 WS client。
+- 也支持反向 WS：适配器主动连接 QuickQuip 的 `ws://<bot 地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧无需 WS client。
 - 鉴权统一走 `ONEBOT_ACCESS_TOKEN`（Bearer），两侧同值。
 
 **事件面**
@@ -63,7 +63,7 @@ QuickQuip 应用层只依赖 NoneBot2 + OneBot V11 契约，不绑定任何具�
 
 **风险**：7.x 线已停止更新（最后 tag 2026-05-24），后续维护有限；版本跑道受 NTQQ 强制升级地板限制，到期需更换基座。
 
-**运维细节**（DNS entrypoint 修正、重启与快速登录、登录态过期处理）：见 [deployment.md](deployment.md) 的 LLBot 章节。
+**运维细节**（DNS entrypoint 修正、重启与快速登录、登录态过期处理）：见 [deployment.md](deployment.md) 的 LLBot 相关小节。
 
 ### LLBot 8.x — 不在候选池
 
