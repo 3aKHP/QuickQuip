@@ -27,7 +27,7 @@ from quickquip.common.sensitive_filter import (
     SensitiveFilter,
     scan_and_log,
 )
-from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config import DISABLED_PROVIDER_REPLY, LLMConfig, ProviderConfig
 from quickquip.llm.provider import (
     BaseProviderClient,
     LLMProviderError,
@@ -182,6 +182,8 @@ async def run_command_single_shot(
     provider = config.providers.get(settings.provider_id)
     if provider is None:
         return _early_result(spec, f"当前 provider 不存在：{settings.provider_id}")
+    if not provider.enabled:
+        return _early_result(spec, DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id))
 
     prompt_pack = spec.prompt_builder(
         prompt=normalized_prompt,
@@ -249,11 +251,12 @@ async def run_card_le_nearest(
         return None
     qj = config.quick_judge
     provider_id = qj.provider_id if qj.provider_id else config.runtime.default_provider
-    if not provider_id or provider_id not in config.providers:
-        provider_id = next(iter(config.providers), None)
-    if not provider_id:
+    provider = config.providers.get(provider_id) if provider_id else None
+    # enabled = false 的 provider 视为不可用，降级到下一个可用候选
+    if provider is None or not provider.enabled:
+        provider = next((p for p in config.providers.values() if p.enabled), None)
+    if provider is None:
         return None
-    provider = config.providers[provider_id]
     scope_key = resolve_scope_key()
     sensitive = get_sensitive()
     if scan_and_log(

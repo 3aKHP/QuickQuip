@@ -150,6 +150,8 @@ async def generate_profile(
     provider_config = llm_config.providers.get(provider_id)
     if provider_config is None:
         raise LLMProviderError(f"Provider 未配置：{provider_id}")
+    if not provider_config.enabled:
+        raise LLMProviderError(f"Provider 已禁用：{provider_id}（enabled = false）")
     client = build_provider_client(replace(provider_config, stream_enabled=False))
     response = await client.complete(LLMRequest(
         model=model,

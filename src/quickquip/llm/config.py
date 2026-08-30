@@ -123,6 +123,10 @@ class ImagePreprocessingConfig:
     prompt: str = ""
 
 
+# 群聊用户可见的"当前 provider 已禁用"提示：回复主链 / 单发命令 / 当前探活共用，勿在各处另行拼装
+DISABLED_PROVIDER_REPLY = "当前 provider 已禁用：{provider_id}（enabled = false），请用 /llm use 切换其他 provider。"
+
+
 @dataclass(slots=True)
 class ProviderConfig:
     id: str
@@ -131,6 +135,7 @@ class ProviderConfig:
     api_key_env: str
     default_model: str
     models: list[str]
+    enabled: bool = True  # false = 暂时禁用：不展示、不探活、cascade 跳过、拒绝切换
     non_vision_models: list[str] = field(default_factory=list)
     timeout_seconds: float = 45.0
     temperature: float = 0.8
@@ -419,6 +424,7 @@ def _parse_single_provider(
         api_key_env=str(entry.get("api_key_env", "")).strip(),
         default_model=str(entry.get("default_model", "")).strip(),
         models=models,
+        enabled=as_bool(entry.get("enabled", True), default=True),
         non_vision_models=[str(item).strip() for item in entry.get("non_vision_models", []) if str(item).strip()],
         timeout_seconds=float(entry.get("timeout_seconds", 45)),
         temperature=float(entry.get("temperature", 0.8)),

@@ -4,7 +4,7 @@ import json
 
 from quickquip.common.paths import MCP_STATUS_JSON_PATH
 from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filter
-from quickquip.llm.config import PersonaConfig, ProviderConfig
+from quickquip.llm.config import DISABLED_PROVIDER_REPLY, PersonaConfig, ProviderConfig
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
@@ -138,7 +138,7 @@ class HealthMixin:
         return f"ON ({connected}/{len(statuses)}，{len(self.mcp_tool_names)} tools)"
 
     def list_providers(self) -> list[ProviderConfig]:
-        return list(self.config.providers.values())
+        return [p for p in self.config.providers.values() if p.enabled]
 
     def list_personas(self, chat_type: str = "group") -> list[PersonaConfig]:
         return [p for p in self.config.personas.values() if not p.scope or chat_type in p.scope]
@@ -267,6 +267,8 @@ class HealthMixin:
         provider = self.config.providers.get(settings.provider_id)
         if provider is None:
             return f"当前 provider 不存在：{settings.provider_id}"
+        if not provider.enabled:
+            return DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id)
         result = await probe_provider(provider, model=settings.model or None)
         body = format_probe_results([result])
         if result.status == "ok":

@@ -79,17 +79,18 @@ async def run_quick_judge_detailed(
     token/耗时，禁止携带 prompt、模型原始响应、凭据或 endpoint。"""
     qj = config.quick_judge
     provider_id = qj.provider_id if qj.provider_id else config.runtime.default_provider
-    if not provider_id or provider_id not in config.providers:
-        provider_id = next(iter(config.providers), None)
-    if not provider_id:
+    provider = config.providers.get(provider_id) if provider_id else None
+    # enabled = false 的 provider 视为不可用，降级到下一个可用候选
+    if provider is None or not provider.enabled:
+        provider = next((p for p in config.providers.values() if p.enabled), None)
+    if provider is None:
         return QuickJudgeResult(
             text='{"trigger": false}',
             outcome="no_provider",
             provider_id="",
             model="",
         )
-
-    provider = config.providers[provider_id]
+    provider_id = provider.id  # 诊断字段跟随实际降级后的 provider
     judge_provider = replace(provider, stream_enabled=False)
 
     model = qj.model if qj.model else judge_provider.default_model

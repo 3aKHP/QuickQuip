@@ -140,6 +140,9 @@ async def generate_daily_briefing(
         if provider_config is None:
             logger.warning("daily_briefing: provider %r not found in config, skipping", provider_id)
             continue
+        if not provider_config.enabled:
+            logger.info("daily_briefing: provider %r disabled, skipping", provider_id)
+            continue
 
         effective_config = replace(provider_config, stream_enabled=False)
         req = LLMRequest(

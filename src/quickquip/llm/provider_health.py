@@ -101,7 +101,7 @@ async def probe_all_providers(
     if not config.providers:
         return []
     return await asyncio.gather(
-        *(probe_provider(p, timeout=timeout) for p in config.providers.values())
+        *(probe_provider(p, timeout=timeout) for p in config.providers.values() if p.enabled)
     )
 
 

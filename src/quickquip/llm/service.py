@@ -26,7 +26,14 @@ from quickquip.common.sensitive_filter import (
     reload_filter as _reload_sensitive_filter,
     scan_and_log as _scan_sensitive_text,
 )
-from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
+from quickquip.llm.config import (
+    DISABLED_PROVIDER_REPLY,
+    LLMConfig,
+    PersonaConfig,
+    ProviderConfig,
+    load_llm_config,
+    load_personas_only,
+)
 from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.sts.config import (
     TURMFLUCH_RATE_LIMIT_KEY,
@@ -946,6 +953,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         if provider is None:
             return {
                 "reply": f"当前 provider 不存在：{settings.provider_id}",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
+        if not provider.enabled:
+            return {
+                "reply": DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id),
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
                 "llm_used": False,

@@ -200,6 +200,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `api_key_env` | API key 所在环境变量名 | — |
 | `default_model` | 默认模型 ID | — |
 | `models` | 可用模型 ID 数组 | — |
+| `enabled` | 暂时禁用该 provider：不进 `/llm providers`/`models` 列表、不参与探活、model_cascade 跳过、`/llm use` 拒绝；provider 保留在配置中，改回 `true` 即恢复 | `true` |
 | `timeout_seconds` | 请求超时（秒） | `45` |
 | `temperature` | 温度参数 | `0.8` |
 | `max_output_tokens` | 最大输出 token 数 | `800` |
