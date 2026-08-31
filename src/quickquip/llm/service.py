@@ -35,14 +35,16 @@ from quickquip.llm.config import (
     load_personas_only,
     provider_builtin_search_active,
 )
-from quickquip.llm.defectify import build_defectify_prompt
 from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.sts.config import (
+    DEFECTIFY_RATE_LIMIT_KEY,
+    DEFECTIFY_RULE_NAME,
     TURMFLUCH_RATE_LIMIT_KEY,
     TURMFLUCH_RULE_NAME,
 )
 from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
 from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
+from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
@@ -129,7 +131,6 @@ VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
-DEFECTIFY_RULE_NAME = "llm_defectify"
 _GROUP_CACHE_MAX = 512
 
 
@@ -149,7 +150,7 @@ def _turmfluch_reply_text(raw_text: str) -> str | None:
 
 # 一次性生成入口的差异点束；共享管线本体在 quickquip.llm.single_shot
 _DEFECTIFY_SPEC = CommandSingleShotSpec(
-    rate_limit_key=LLM_RULE_NAME,
+    rate_limit_key=DEFECTIFY_RATE_LIMIT_KEY,
     rule_name=DEFECTIFY_RULE_NAME,
     usage_reply="用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
     invalid_reply="模型没有返回可显示的文本。",
@@ -443,15 +444,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         *,
         chat_id: int | str,
         chat_type: str,
-        user_id: int | str,
-        sender_name: str,
         prompt: str,
         image_urls: list[str] | None = None,
         quoted_text: str = "",
         quoted_image_urls: list[str] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
-        quoted_is_bot_self: bool = False,
     ) -> dict[str, str]:
         # 薄编排：管线本体在 quickquip.llm.single_shot。显式传本模块级
         # build_provider_client / _get_sensitive_filter，保持既有 patch 点有效。

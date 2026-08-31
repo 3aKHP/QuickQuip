@@ -49,8 +49,6 @@ async def test_defectify_blocked_input_stops_provider(
     result = await llm_service.generate_defectify_reply(
         chat_id=1001,
         chat_type="group",
-        user_id=2002,
-        sender_name="测试用户",
         prompt="safe prompt",
         quoted_text="blocked quote",
     )
@@ -83,8 +81,6 @@ async def test_defectify_blocked_output_uses_fallback(
     result = await llm_service.generate_defectify_reply(
         chat_id=1001,
         chat_type="group",
-        user_id=2002,
-        sender_name="测试用户",
         prompt="safe prompt",
     )
 
@@ -108,8 +104,6 @@ async def test_defectify_unloaded_filter_keeps_existing_behavior(
     result = await llm_service.generate_defectify_reply(
         chat_id=1001,
         chat_type="group",
-        user_id=2002,
-        sender_name="测试用户",
         prompt="safe prompt",
     )
 

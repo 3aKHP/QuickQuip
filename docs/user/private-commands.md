@@ -93,7 +93,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 以下命令群聊、私聊用法一致，详见[群聊指令速查](group-commands.md)：
 
 - `/search [general / news / finance] <关键词>` — 联网搜索
-- `/defectify <内容>`（别名 `/故障化`）— 故障机器人转写；独立命令，不依赖会话是否开启，输出固定为五字结果加一行笑点解析
+- `/defectify <内容>`（别名 `/故障化`）— 故障机器人转写（尖塔角色 Defect 梗）；独立命令，不依赖会话是否开启，输出固定为五字结果加一行笑点解析
 - `/turmfluch <内容>` — 尖塔化“xxx了”；同样不依赖会话，无中文别名，用得太频繁会提示稍后再试
 - `/draw`、`/tts`、`/music` — 图片 / 语音 / 音乐生成
 - `/roll`、`/choose`、`/fortune`、`/vote` — 骰子、随机选择、每日运势、发起投票

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from quickquip.llm.defectify import build_defectify_prompt
+from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 
 
 def test_build_prompt_basic_structure():

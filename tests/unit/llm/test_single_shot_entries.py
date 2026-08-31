@@ -29,7 +29,6 @@ from tests.fixtures.provider_stubs import (
 from tests.fixtures.sensitive_filter import make_sensitive_filter
 
 _CHAT = {"chat_id": 1001, "chat_type": "group"}
-_DEFECTIFY_CALLER = {"user_id": "2002", "sender_name": "镜子"}
 
 # 成功路径（含 provider 异常与空响应）的完整 6 键契约
 _FULL_KEYS = {"reply", "rate_limit_key", "rule_name", "llm_used", "provider_id", "model"}
@@ -59,12 +58,12 @@ def _block_filter(monkeypatch, tmp_path, word: str) -> None:
 
 async def test_defectify_empty_input_returns_usage(llm_service):
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="   "
+        **_CHAT, prompt="   "
     )
     assert set(result) == _EARLY_KEYS
     assert result["reply"].startswith("用法：/defectify")
-    assert result["rate_limit_key"] == "llm_chat"
-    assert result["rule_name"] == "llm_defectify"
+    assert result["rate_limit_key"] == "sts_defectify"
+    assert result["rule_name"] == "sts_defectify"
     assert result["llm_used"] is False
 
 
@@ -74,7 +73,7 @@ async def test_defectify_sensitive_input_blocked(llm_service, monkeypatch, tmp_p
     _block_filter(monkeypatch, tmp_path, "合成阻断词")
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="这句话里有合成阻断词"
+        **_CHAT, prompt="这句话里有合成阻断词"
     )
     assert set(result) == _EARLY_KEYS
     assert result["reply"] == DEFAULT_BLOCK_REPLY
@@ -86,7 +85,7 @@ async def test_defectify_load_error_short_circuits(llm_service, monkeypatch):
     monkeypatch.setattr(llm_service.config, "load_error", "TOML 语法错误：boom")
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="测试内容"
+        **_CHAT, prompt="测试内容"
     )
     assert set(result) == _EARLY_KEYS
     assert result["reply"] == "LLM 配置不可用：TOML 语法错误：boom"
@@ -98,7 +97,7 @@ async def test_defectify_missing_provider(llm_service):
     llm_service._update_chat_settings(1001, "group", provider_id="missing-provider")
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="测试内容"
+        **_CHAT, prompt="测试内容"
     )
     assert set(result) == _EARLY_KEYS
     assert result["reply"] == "当前 provider 不存在：missing-provider"
@@ -110,13 +109,13 @@ async def test_defectify_success_six_key_contract(llm_service, patch_provider_bu
     patch_provider_builder(lambda provider: stub)
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="小蓝熊的启动速度"
+        **_CHAT, prompt="小蓝熊的启动速度"
     )
     assert set(result) == _FULL_KEYS
     assert result["reply"].startswith("stub::gpt-test::")
     assert "小蓝熊的启动速度" in result["reply"]
-    assert result["rate_limit_key"] == "llm_chat"
-    assert result["rule_name"] == "llm_defectify"
+    assert result["rate_limit_key"] == "sts_defectify"
+    assert result["rule_name"] == "sts_defectify"
     assert result["llm_used"] is True
     assert result["provider_id"] == "openai-main"
     assert result["model"] == "gpt-test"
@@ -133,7 +132,7 @@ async def test_defectify_provider_error_still_marks_llm_used(llm_service, patch_
     patch_provider_builder(lambda provider: stub)
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="测试内容"
+        **_CHAT, prompt="测试内容"
     )
     assert set(result) == _FULL_KEYS
     assert result["reply"] == "LLM 调用失败：provider down"
@@ -147,7 +146,7 @@ async def test_defectify_unexpected_exception(llm_service, patch_provider_builde
     patch_provider_builder(lambda provider: stub)
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="测试内容"
+        **_CHAT, prompt="测试内容"
     )
     assert set(result) == _FULL_KEYS
     assert result["reply"] == "LLM 调用异常：weird"
@@ -159,7 +158,7 @@ async def test_defectify_empty_response_text(llm_service, patch_provider_builder
     patch_provider_builder(lambda provider: stub)
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="测试内容"
+        **_CHAT, prompt="测试内容"
     )
     assert set(result) == _FULL_KEYS
     assert result["reply"] == "模型没有返回可显示的文本。"
@@ -172,7 +171,7 @@ async def test_defectify_output_scan_blocked_falls_back(llm_service, monkeypatch
     _block_filter(monkeypatch, tmp_path, "合成输出词")
 
     result = await llm_service.generate_defectify_reply(
-        **_CHAT, **_DEFECTIFY_CALLER, prompt="干净的输入"
+        **_CHAT, prompt="干净的输入"
     )
     assert set(result) == _FULL_KEYS
     assert result["reply"] == DEFAULT_OUTPUT_FALLBACK
