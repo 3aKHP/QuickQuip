@@ -307,6 +307,8 @@ style_profile = "claude_family"
 # builtin_search = true   # 声明 google_search 服务端搜索工具（grounding）：检索由 provider 侧
 #                         # 执行并计费；开启后该 provider 会话移除 search_web 工具，回复末尾
 #                         # 自动附上检索来源。仅 gemini 协议生效，其他协议下该键不生效。
+#                         # 注意：google_search 与 function calling 组合仅 Gemini 3 系列模型支持，
+#                         # 2.x 模型请关闭本键或全局 tool_calling_enabled，否则请求会被 API 拒绝。
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

@@ -140,6 +140,7 @@ async def test_gemini_bearer_auth_keeps_gateway_token_out_of_url():
         "https://example.test/v1beta/models/gemini-test:generateContent"
     )
     assert client.last_headers["authorization"] == "Bearer test-key"
+    assert "test-key" not in client.last_url
 
 
 # ---------------------------------------------------------------------------
