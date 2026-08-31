@@ -47,6 +47,12 @@ def _source_domain(url: str) -> str:
     return (host or "").strip().lower()
 
 
+# Gemini grounding 返回的 uri 是 vertexaisearch.cloud.google.com 重定向链，
+# 其 host 不指向真实站点（grounding chunk 的 title 才是站点名/域名），
+# 展示时该 host 视为无信息量。
+_REDIRECT_HOST_SUFFIX = "vertexaisearch.cloud.google.com"
+
+
 def append_web_search_source_block(
     text: str,
     report: LLMWebSearchReport,
@@ -55,8 +61,8 @@ def append_web_search_source_block(
 ) -> str:
     """在聊天回复末尾追加 grounding 来源块。
 
-    展示条目用「标题 — 域名」形式：grounding 链接多为 provider 侧的
-    重定向长链，直接贴出会刷屏；正文已出现的来源不重复列出。
+    展示条目用「标题 — 域名」形式；provider 侧的重定向长链不直接贴出，
+    正文已出现的来源不重复列出。
     """
     entries: list[str] = []
     seen_urls: set[str] = set()
@@ -65,15 +71,18 @@ def append_web_search_source_block(
             break
         if not source.url or source.url in seen_urls or source.url in text:
             continue
+        title = source.title.strip()
         domain = _source_domain(source.url)
-        if not domain:
+        if domain.endswith(_REDIRECT_HOST_SUFFIX):
+            domain = ""
+        if title and domain and title != domain:
+            entry = f"- {title} — {domain}"
+        elif title or domain:
+            entry = f"- {title or domain}"
+        else:
             continue
         seen_urls.add(source.url)
-        title = source.title.strip()
-        if title and title != domain:
-            entries.append(f"- {title} — {domain}")
-        else:
-            entries.append(f"- {domain}")
+        entries.append(entry)
     if not entries:
         return text
     return text + "\n\n来源：\n" + "\n".join(entries)

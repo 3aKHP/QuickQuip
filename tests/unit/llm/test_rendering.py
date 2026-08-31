@@ -189,3 +189,30 @@ def test_source_block_empty_sources_returns_text_unchanged():
     from plugins.message_rendering import append_web_search_source_block
 
     assert append_web_search_source_block("原样。", _report([])) == "原样。"
+
+
+def test_source_block_redirect_url_renders_title_only():
+    """Gemini grounding 的 uri 是 vertexaisearch 重定向链：host 无信息量，以 title 为准。"""
+    from plugins.message_rendering import append_web_search_source_block
+
+    text = append_web_search_source_block(
+        "回答。",
+        _report([
+            ("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC=", "youtube.com"),
+            ("https://vertexaisearch.cloud.google.com/grounding-api-redirect/XyZ=", "QuickQuip README"),
+        ]),
+    )
+
+    assert text.endswith("来源：\n- youtube.com\n- QuickQuip README")
+    assert "vertexaisearch" not in text
+
+
+def test_source_block_redirect_url_without_title_skipped():
+    from plugins.message_rendering import append_web_search_source_block
+
+    text = append_web_search_source_block(
+        "回答。",
+        _report([("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC=", "")]),
+    )
+
+    assert text == "回答。"
