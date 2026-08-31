@@ -235,8 +235,11 @@ async def build_health_report(
     )
 
     search_env = os.getenv("SEARXNG_BASE_URL", "").strip()
+    # 与同一报告区分 enabled/disabled 的口径一致：被禁用的 provider 不能
+    # 提供内置搜索覆盖，否则 SearXNG 缺失时误判 ok。
     builtin_covered = any(
-        provider_builtin_search_active(provider) for provider in config.providers.values()
+        provider.enabled and provider_builtin_search_active(provider)
+        for provider in config.providers.values()
     )
     search_needed = config.auto_search.enabled or "search_web" in tool_names
     if search_env:

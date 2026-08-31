@@ -240,15 +240,10 @@ class ToolMixin(McpLifecycleMixin):
     # _tool_search_tools / _tool_list_tools handlers.
 
     def _builtin_search_active(self, provider_id: str | None) -> bool:
-        """该 provider 会话是否由内置搜索接管联网检索（从而移除 search_web）。
-
-        getattr 兜底是为兼容最小 fake 宿主（见 tests/unit/llm/test_tools_enabled_mode.py
-        的 _FakeHost）：其 config 只挂 tools 属性。
-        """
+        """该 provider 会话是否由内置搜索接管联网检索（从而移除 search_web）。"""
         if not provider_id:
             return False
-        providers = getattr(self.config, "providers", None) or {}
-        provider = providers.get(provider_id)
+        provider = self.config.providers.get(provider_id)
         return provider is not None and provider_builtin_search_active(provider)
 
     def _get_enabled_tool_names(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:

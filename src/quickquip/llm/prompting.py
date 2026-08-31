@@ -19,6 +19,10 @@ MAX_RECENT_CONTEXT_IMAGES = 5
 MAX_IMAGE_DESCRIPTION_CHARS = 4000
 MAX_TOTAL_IMAGE_DESCRIPTION_CHARS = 12000
 
+# 两条联网检索引导路径（provider 内置 grounding / SearXNG search_web）共用
+# 的触发场景短语，单点维护避免两处文案漂移。
+_CURRENT_INFO_TRIGGER_HINT = "遇到需要最新事实、网页、新闻、价格、版本、公告或来源"
+
 
 def collect_recent_image_urls(
     recent_messages: Sequence[Mapping[str, object]] | None,
@@ -202,8 +206,7 @@ def build_system_prompt(
     vocab,
     beijing_timezone: str,
     search_tool_name: str,
-    auto_search_enabled: bool = False,
-    builtin_search_active: bool = False,
+    search_mode: str = "none",  # "builtin"（provider 内置 grounding）| "searxng"（search_web）| "none"
     tool_discovery_enabled: bool = False,
     tool_search_name: str = "tool_search",
     tool_list_name: str = "tool_list",
@@ -299,12 +302,13 @@ def build_system_prompt(
     if vocab_lines:
         lines.append("\n".join(vocab_lines))
 
-    if builtin_search_active:
+    if search_mode == "builtin":
         lines.append(
             "\n".join(
                 [
                     "联网检索说明：",
-                    "- 本次对话已启用 provider 内置联网搜索，遇到需要最新事实、网页、新闻、价格、版本、公告或来源的问题时，直接检索后作答。",
+                    "- 本次对话已启用 provider 内置联网搜索，"
+                    f"{_CURRENT_INFO_TRIGGER_HINT}的问题时，直接检索后作答。",
                     "- 检索在服务端自动完成，无需调用搜索工具；回复末尾会自动附带检索来源。",
                 ]
             )
@@ -325,10 +329,10 @@ def build_system_prompt(
             categories = [item for item in deferred_tool_categories or [] if item.strip()]
             if categories:
                 tool_lines.append(f"- 可搜索工具类别：{'、'.join(categories[:12])}")
-        if auto_search_enabled and not builtin_search_active:
+        if search_mode == "searxng":
             tool_lines.extend([
                 "- 当前联网后端：SearXNG。",
-                f"- 遇到需要最新事实、网页、新闻、价格、版本、公告或来源链接的问题时，请主动调用 {search_tool_name}。",
+                f"- {_CURRENT_INFO_TRIGGER_HINT}链接的问题时，请主动调用 {search_tool_name}。",
                 f"- 当前 {search_tool_name} 走项目内 SearXNG；搜索结果不够时，可以继续多次调用 {search_tool_name} 细化检索。",
                 "- 优先先搜再答，再根据搜索结果组织结论。",
             ])

@@ -222,8 +222,8 @@ async def test_gemini_parses_grounding_metadata_non_stream():
         "https://example.test/b",
     ]
     assert response.web_search.sources[0].title == "来源甲"
-    # 无 title 时回退为 URL 本身
-    assert response.web_search.sources[1].title == "https://example.test/b"
+    # title 缺失时保持空串，展示层回退为仅域名（不回填 provider 侧长链）
+    assert response.web_search.sources[1].title == ""
 
 
 async def test_gemini_parses_grounding_metadata_from_stream():

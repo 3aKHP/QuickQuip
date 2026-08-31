@@ -262,9 +262,11 @@ class GeminiProviderClient(BaseProviderClient):
             if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
+            # title 缺失时保持空串：grounding 链接是 provider 侧重定向长链，
+            # 回填为 title 会在展示层变成「长链 — 域名」，由渲染层回退为仅域名。
             sources.append(
                 LLMWebSearchSource(
-                    title=str(web.get("title") or "").strip() or url,
+                    title=str(web.get("title") or "").strip(),
                     url=url,
                 )
             )

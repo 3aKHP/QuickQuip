@@ -22,9 +22,9 @@ class _FakeHost(ToolMixin):
         mcp_names: set[str],
         providers: dict[str, ProviderConfig] | None = None,
     ) -> None:
-        self.config = type("Cfg", (), {"tools": tools})()
-        if providers is not None:
-            self.config.providers = providers
+        # 与真实 LLMConfig 对齐：providers 恒存在（默认空 dict），生产代码
+        # 直接访问 self.config.providers，无需 getattr 兜底。
+        self.config = type("Cfg", (), {"tools": tools, "providers": providers or {}})()
         self._mcp_tool_names = mcp_names
         self.tool_registry = ToolRegistry()
         for name in [*_BUILTIN_TOOLS, *sorted(mcp_names)]:

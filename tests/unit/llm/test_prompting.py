@@ -628,8 +628,7 @@ def test_builtin_search_guidance_replaces_searxng_lines():
         vocab=_builtin_vocab(),
         beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
-        auto_search_enabled=True,
-        builtin_search_active=True,
+        search_mode="builtin",
     )
 
     assert "联网检索说明" in prompt
@@ -653,8 +652,7 @@ def test_builtin_search_guidance_present_without_tools():
         vocab=_builtin_vocab(),
         beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
-        auto_search_enabled=True,
-        builtin_search_active=True,
+        search_mode="builtin",
     )
 
     assert "联网检索说明" in prompt
@@ -674,8 +672,7 @@ def test_builtin_search_inactive_keeps_searxng_guidance():
         vocab=_builtin_vocab(),
         beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
-        auto_search_enabled=True,
-        builtin_search_active=False,
+        search_mode="searxng",
     )
 
     assert "当前联网后端：SearXNG。" in prompt

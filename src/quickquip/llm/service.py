@@ -357,8 +357,11 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             vocab=self._resolve_vocab(str(group_id)),
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
-            auto_search_enabled=self.config.auto_search.enabled,
-            builtin_search_active=builtin_search_active,
+            search_mode=(
+                "builtin"
+                if builtin_search_active
+                else ("searxng" if self.config.auto_search.enabled else "none")
+            ),
             tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type, provider_id=provider_id),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
