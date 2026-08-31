@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.message_segments import message_has_segments, normalize_bot_self_ids, render_segment_leaf
+from quickquip.llm.provider.base import LLMWebSearchReport
 
 
 @dataclass(slots=True)
@@ -35,6 +37,46 @@ def _get_sender_name(sender) -> str:
     if nickname:
         return nickname
     return ""
+
+
+def _source_domain(url: str) -> str:
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return ""
+    return (host or "").strip().lower()
+
+
+def append_web_search_source_block(
+    text: str,
+    report: LLMWebSearchReport,
+    *,
+    max_sources: int = 3,
+) -> str:
+    """在聊天回复末尾追加 grounding 来源块。
+
+    展示条目用「标题 — 域名」形式：grounding 链接多为 provider 侧的
+    重定向长链，直接贴出会刷屏；正文已出现的来源不重复列出。
+    """
+    entries: list[str] = []
+    seen_urls: set[str] = set()
+    for source in report.sources:
+        if len(entries) >= max_sources:
+            break
+        if not source.url or source.url in seen_urls or source.url in text:
+            continue
+        domain = _source_domain(source.url)
+        if not domain:
+            continue
+        seen_urls.add(source.url)
+        title = source.title.strip()
+        if title and title != domain:
+            entries.append(f"- {title} — {domain}")
+        else:
+            entries.append(f"- {domain}")
+    if not entries:
+        return text
+    return text + "\n\n来源：\n" + "\n".join(entries)
 
 
 def render_message_for_llm(

@@ -10,7 +10,7 @@ from typing import Any
 from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_SENSITIVE_WORDS_TOML
 from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.generation.config import load_generation_config
-from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config import LLMConfig, ProviderConfig, provider_builtin_search_active
 from quickquip.llm.settings import ResolvedGroupSettings
 
 @dataclass(slots=True)
@@ -235,14 +235,34 @@ async def build_health_report(
     )
 
     search_env = os.getenv("SEARXNG_BASE_URL", "").strip()
+    builtin_covered = any(
+        provider_builtin_search_active(provider) for provider in config.providers.values()
+    )
     search_needed = config.auto_search.enabled or "search_web" in tool_names
-    search_status = "ok" if not search_needed or search_env else "warn"
+    if search_env:
+        search_status = "ok"
+        search_summary = "搜索后端已配置"
+    elif builtin_covered:
+        # 存在开启内置搜索的 provider 时，联网检索由其服务端 grounding 覆盖，
+        # SearXNG 缺失不再是该路径的阻断项。
+        search_status = "ok"
+        search_summary = "SearXNG 未配置，联网检索由开启 builtin_search 的 provider 内置搜索覆盖"
+    elif search_needed:
+        search_status = "warn"
+        search_summary = "搜索后端未配置"
+    else:
+        search_status = "ok"
+        search_summary = "搜索后端未配置"
     items.append(
         HealthCheckItem(
             "search",
             search_status,
-            "搜索后端已配置" if search_env else "搜索后端未配置",
-            {"needed": search_needed, "base_url_configured": bool(search_env)},
+            search_summary,
+            {
+                "needed": search_needed,
+                "base_url_configured": bool(search_env),
+                "builtin_search_covered": builtin_covered,
+            },
         )
     )
 

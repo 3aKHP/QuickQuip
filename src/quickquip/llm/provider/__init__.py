@@ -19,6 +19,8 @@ from quickquip.llm.provider.base import (
     LLMProviderError,
     LLMRequest,
     LLMResponse,
+    LLMWebSearchReport,
+    LLMWebSearchSource,
 )
 
 # Public utilities
@@ -59,6 +61,8 @@ __all__ = [
     "LLMProviderError",
     "LLMRequest",
     "LLMResponse",
+    "LLMWebSearchReport",
+    "LLMWebSearchSource",
     "build_provider_client",
     "sanitize_gemini_schema",
     "strip_leading_reasoning_content",

@@ -292,3 +292,79 @@ async def test_format_current_provider_probe_failure_prefaces_config_effective(l
     assert "配置已生效" in text
     assert "探活未通过" in text
     assert "Provider 探活（1 个）" in text  # body 仍在
+
+
+# ---------------------------------------------------------------------------
+# search 项：SearXNG 需求与 provider 内置搜索覆盖
+# ---------------------------------------------------------------------------
+
+async def test_health_search_warns_without_searxng_when_needed(llm_service, monkeypatch):
+    """MIN 配置 auto_search 开启（search_web 路径需要 SearXNG），环境缺失 → warn。"""
+    monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
+
+    report = await llm_service.build_health_report(10001)
+
+    items = {item.name: item for item in report.items}
+    assert items["search"].status == "warn"
+    assert items["search"].summary == "搜索后端未配置"
+    assert items["search"].details["builtin_search_covered"] is False
+
+
+async def test_health_search_ok_with_builtin_search_coverage(tmp_path, monkeypatch):
+    """开启 builtin_search 的 gemini provider 存在时：SearXNG 缺失降级 ok。"""
+    import textwrap
+
+    from plugins.llm_runtime import LLMService
+    from tests.fixtures.configs import write_llm_config_bundle
+
+    config_toml = textwrap.dedent(
+        """
+        [runtime]
+        enabled = true
+        default_provider = "gemini-main"
+        default_persona = "default"
+
+        [triggers.auto_search]
+        enabled = true
+
+        [tools]
+        enabled = []
+
+        [[personas]]
+        id = "default"
+        display_name = "默认人格"
+        system_prompt = "你是测试人格。"
+
+        [[providers]]
+        id = "gemini-main"
+        protocol = "gemini"
+        base_url = "https://example.test/v1beta"
+        api_key_env = "GEMINI_KEY"
+        default_model = "gemini-x"
+        models = ["gemini-x"]
+        builtin_search = true
+        """
+    ).strip()
+    paths = write_llm_config_bundle(tmp_path, config_toml=config_toml)
+    service = LLMService(**paths)
+    monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
+    monkeypatch.setenv("GEMINI_KEY", "test-key")
+
+    report = await service.build_health_report(10001)
+
+    items = {item.name: item for item in report.items}
+    assert items["search"].status == "ok"
+    assert "内置搜索" in items["search"].summary
+    assert items["search"].details["builtin_search_covered"] is True
+    # 工具列表按生效 provider 过滤：内置搜索会话不暴露 search_web
+    assert "search_web" not in items["tools"].details["tools"]
+
+
+async def test_health_search_ok_when_env_configured(llm_service, monkeypatch):
+    monkeypatch.setenv("SEARXNG_BASE_URL", "http://127.0.0.1:8888")
+
+    report = await llm_service.build_health_report(10001)
+
+    items = {item.name: item for item in report.items}
+    assert items["search"].status == "ok"
+    assert items["search"].summary == "搜索后端已配置"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from plugins.llm_config import ProviderConfig
-from plugins.llm_provider import LLMRequest
+from plugins.llm_provider import GeminiProviderClient, LLMRequest
 from plugins.llm_tools import LLMConversationMessage, LLMToolSpec
 
 from tests.fixtures.provider_fakes import FakeGeminiClient
@@ -140,7 +140,151 @@ async def test_gemini_bearer_auth_keeps_gateway_token_out_of_url():
         "https://example.test/v1beta/models/gemini-test:generateContent"
     )
     assert client.last_headers["authorization"] == "Bearer test-key"
-    assert "test-key" not in client.last_url
+
+
+# ---------------------------------------------------------------------------
+# builtin_search（google_search grounding）
+# ---------------------------------------------------------------------------
+
+_GROUNDING_RESPONSE = {
+    "candidates": [
+        {
+            "finishReason": "STOP",
+            "content": {"parts": [{"text": "有来源的回答"}]},
+            "groundingMetadata": {
+                "webSearchQueries": ["quickquip 是什么", ""],
+                "groundingChunks": [
+                    {"web": {"uri": "https://example.test/a", "title": "来源甲"}},
+                    {"web": {"uri": "https://example.test/a", "title": "重复来源"}},
+                    "不是字典的条目",
+                    {"web": {"uri": "", "title": "缺 uri"}},
+                    {"web": {"uri": "https://example.test/b"}},
+                    {"不是 web chunk": 1},
+                ],
+            },
+        }
+    ],
+    "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
+}
+
+
+async def test_gemini_builtin_search_declared_alongside_function_tools():
+    client = FakeGeminiClient(
+        _provider_config(),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+    request = _tool_call_request()
+    request.builtin_search = True
+
+    await client.complete(request)
+
+    assert client.last_payload["tools"][0]["functionDeclarations"][0]["name"] == "get_identity"
+    assert client.last_payload["tools"][1] == {"google_search": {}}
+
+
+async def test_gemini_builtin_search_declared_without_client_tools():
+    client = FakeGeminiClient(
+        _provider_config(),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+    request = _tool_call_request()
+    request.tools = []
+    request.allow_tool_calls = False
+    request.builtin_search = True
+
+    await client.complete(request)
+
+    # 声明独立于客户端工具：即使工具调用整体关闭也生效
+    assert client.last_payload["tools"] == [{"google_search": {}}]
+
+
+async def test_gemini_builtin_search_off_keeps_payload_unchanged():
+    client = FakeGeminiClient(
+        _provider_config(),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+
+    await client.complete(_tool_call_request())
+
+    assert "google_search" not in str(client.last_payload)
+
+
+async def test_gemini_parses_grounding_metadata_non_stream():
+    client = FakeGeminiClient(_provider_config(), _GROUNDING_RESPONSE)
+
+    response = await client.complete(_tool_call_request())
+
+    assert response.web_search is not None
+    assert response.web_search.queries == ["quickquip 是什么"]
+    assert [source.url for source in response.web_search.sources] == [
+        "https://example.test/a",
+        "https://example.test/b",
+    ]
+    assert response.web_search.sources[0].title == "来源甲"
+    # 无 title 时回退为 URL 本身
+    assert response.web_search.sources[1].title == "https://example.test/b"
+
+
+async def test_gemini_parses_grounding_metadata_from_stream():
+    # 流式路径：groundingMetadata 挂在某个 chunk 的 candidate 上，
+    # 经 _combine_stream_trace 合并后仍须到达 _parse_candidate。
+    chunks = [
+        {
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {"role": "model", "parts": [{"text": "流式"}]},
+                }
+            ]
+        },
+        {
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {"parts": [{"text": "回答"}]},
+                    "groundingMetadata": {
+                        "webSearchQueries": ["流式查询"],
+                        "groundingChunks": [
+                            {"web": {"uri": "https://example.test/s", "title": "流式来源"}},
+                        ],
+                    },
+                }
+            ]
+        },
+    ]
+
+    response = GeminiProviderClient._assemble_stream_response(chunks, "gemini-test")
+
+    assert response.text == "流式回答"
+    assert response.web_search is not None
+    assert response.web_search.queries == ["流式查询"]
+    assert response.web_search.sources[0].url == "https://example.test/s"
+
+
+async def test_gemini_without_grounding_metadata_yields_none():
+    client = FakeGeminiClient(
+        _provider_config(),
+        {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
+    )
+
+    response = await client.complete(_tool_call_request())
+
+    assert response.web_search is None
+
+
+async def test_gemini_empty_grounding_metadata_yields_none():
+    client = FakeGeminiClient(
+        _provider_config(),
+        {
+            "candidates": [
+                {"content": {"parts": [{"text": "ok"}]}, "groundingMetadata": {}}
+            ]
+        },
+    )
+
+    response = await client.complete(_tool_call_request())
+
+    assert response.web_search is None
 
 
 async def test_gemini_stream_bearer_auth_preserves_sse_query_only():

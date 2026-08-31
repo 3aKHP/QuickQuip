@@ -189,7 +189,9 @@ class HealthMixin:
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
         lines.append(f"工具调用：{'ON' if self.config.runtime.tool_calling_enabled else 'OFF'}")
         lines.append(f"MCP：{self._summarize_mcp_status()}")
-        lines.append(f"工具列表：{', '.join(self._get_enabled_tool_names(chat_type=chat_type)) or '无'}")
+        lines.append(
+            f"工具列表：{', '.join(self._get_enabled_tool_names(chat_type=chat_type, provider_id=settings.provider_id)) or '无'}"
+        )
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
         lines.append(f"Persona：{settings.persona_id}")
@@ -225,7 +227,7 @@ class HealthMixin:
             db_path=self.store.path,
             vocab_path=self.vocab_path,
             identity_path=self.identity_path,
-            tool_names=self._get_enabled_tool_names(chat_type=chat_type),
+            tool_names=self._get_enabled_tool_names(chat_type=chat_type, provider_id=settings.provider_id),
             mcp_status_summary=self._summarize_mcp_status(),
             mcp_enabled=self.config.mcp.enabled,
             mcp_tool_count=(self._get_shared_mcp_health() or ("", len(self.mcp_tool_names)))[1],

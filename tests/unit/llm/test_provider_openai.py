@@ -102,3 +102,18 @@ async def test_openai_stream_cache_thinking_tokens_parsed():
     assert resp.cache_read_tokens == 250
     assert resp.thinking_tokens == 15
     assert resp.output_tokens == 40
+
+
+async def test_openai_client_ignores_builtin_search_flag():
+    """builtin_search 仅在 gemini 协议有请求级效果；openai 载荷不受该字段影响。"""
+    client = FakeOpenAIClient(
+        _provider_config(),
+        {"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}]},
+    )
+    request = _tool_call_request()
+    request.builtin_search = True
+
+    await client.complete(request)
+
+    assert "google_search" not in str(client.last_payload)
+    assert "web_search" not in str(client.last_payload)

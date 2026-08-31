@@ -203,6 +203,7 @@ def build_system_prompt(
     beijing_timezone: str,
     search_tool_name: str,
     auto_search_enabled: bool = False,
+    builtin_search_active: bool = False,
     tool_discovery_enabled: bool = False,
     tool_search_name: str = "tool_search",
     tool_list_name: str = "tool_list",
@@ -298,6 +299,17 @@ def build_system_prompt(
     if vocab_lines:
         lines.append("\n".join(vocab_lines))
 
+    if builtin_search_active:
+        lines.append(
+            "\n".join(
+                [
+                    "联网检索说明：",
+                    "- 本次对话已启用 provider 内置联网搜索，遇到需要最新事实、网页、新闻、价格、版本、公告或来源的问题时，直接检索后作答。",
+                    "- 检索在服务端自动完成，无需调用搜索工具；回复末尾会自动附带检索来源。",
+                ]
+            )
+        )
+
     if tool_specs:
         tool_lines = [
             "工具使用规则：",
@@ -313,7 +325,7 @@ def build_system_prompt(
             categories = [item for item in deferred_tool_categories or [] if item.strip()]
             if categories:
                 tool_lines.append(f"- 可搜索工具类别：{'、'.join(categories[:12])}")
-        if auto_search_enabled:
+        if auto_search_enabled and not builtin_search_active:
             tool_lines.extend([
                 "- 当前联网后端：SearXNG。",
                 f"- 遇到需要最新事实、网页、新闻、价格、版本、公告或来源链接的问题时，请主动调用 {search_tool_name}。",
