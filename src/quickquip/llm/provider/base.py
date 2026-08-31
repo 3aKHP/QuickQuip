@@ -163,6 +163,20 @@ class LLMImageInput:
 
 
 @dataclass(slots=True)
+class LLMWebSearchSource:
+    title: str
+    url: str
+
+
+@dataclass(slots=True)
+class LLMWebSearchReport:
+    """Provider 原生搜索（grounding）的响应侧统一载体。"""
+
+    queries: list[str] = field(default_factory=list)
+    sources: list[LLMWebSearchSource] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class LLMRequest:
     model: str
     system_prompt: str
@@ -173,6 +187,7 @@ class LLMRequest:
     tools: list[LLMToolSpec] = field(default_factory=list)
     allow_tool_calls: bool = False
     tool_choice: str = "auto"
+    builtin_search: bool = False
 
 
 @dataclass(slots=True)
@@ -187,6 +202,7 @@ class LLMResponse:
     cache_read_tokens: int | None = None
     thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
+    web_search: LLMWebSearchReport | None = None
 
 
 def _text_from_block_list(content: Any) -> str:

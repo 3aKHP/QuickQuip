@@ -11,6 +11,8 @@ from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMRequest,
     LLMResponse,
+    LLMWebSearchReport,
+    LLMWebSearchSource,
     _json_string,
     sanitize_gemini_schema,
 )
@@ -176,6 +178,10 @@ class GeminiProviderClient(BaseProviderClient):
                     ]
                 }
             ]
+        if request.builtin_search:
+            # google_search 是服务端执行的工具声明，与客户端 functionDeclarations
+            # 并列成独立 tools 条目；不依赖 allow_tool_calls / 客户端工具列表。
+            payload.setdefault("tools", []).append({"google_search": {}})
         headers.update(self.config.headers)
         if self.config.user_agent:
             headers["user-agent"] = self.config.user_agent
@@ -222,13 +228,51 @@ class GeminiProviderClient(BaseProviderClient):
                 continue
             if replay_required:
                 thinking_blocks.append({"type": "gemini_part", "part": deepcopy(item)})
+        grounding = candidate.get("groundingMetadata")
+        web_search = (
+            GeminiProviderClient._parse_grounding_metadata(grounding)
+            if isinstance(grounding, dict)
+            else None
+        )
         return LLMResponse(
             text="".join(text_parts).strip(),
             model=fallback_model,
             tool_calls=tool_calls,
             finish_reason=str(candidate.get("finishReason", "")).strip() or None,
             thinking_blocks=thinking_blocks,
+            web_search=web_search,
         )
+
+    @staticmethod
+    def _parse_grounding_metadata(grounding: dict[str, Any]) -> LLMWebSearchReport | None:
+        queries = [
+            str(item).strip()
+            for item in grounding.get("webSearchQueries") or []
+            if str(item).strip()
+        ]
+        sources: list[LLMWebSearchSource] = []
+        seen_urls: set[str] = set()
+        for chunk in grounding.get("groundingChunks") or []:
+            if not isinstance(chunk, dict):
+                continue
+            web = chunk.get("web")
+            if not isinstance(web, dict):
+                continue
+            url = str(web.get("uri") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            # title 缺失时保持空串：grounding 链接是 provider 侧重定向长链，
+            # 回填为 title 会在展示层变成「长链 — 域名」，由渲染层回退为仅域名。
+            sources.append(
+                LLMWebSearchSource(
+                    title=str(web.get("title") or "").strip(),
+                    url=url,
+                )
+            )
+        if not queries and not sources:
+            return None
+        return LLMWebSearchReport(queries=queries, sources=sources)
 
     @staticmethod
     def _normalize_part(part: dict[str, Any], index: int) -> dict[str, Any]:

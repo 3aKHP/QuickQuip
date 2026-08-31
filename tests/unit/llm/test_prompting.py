@@ -589,3 +589,91 @@ def test_persona_sections_joined_by_double_newline():
 def test_persona_empty_extras_returns_empty():
     assert _compile_structured_persona({}) == ""
     assert _compile_structured_persona({"identity": {}}) == ""
+
+
+# ---------------------------------------------------------------------------
+# 内置搜索（grounding）与 search_web 的提示词引导互斥
+# ---------------------------------------------------------------------------
+
+def _builtin_persona():
+    return SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
+
+
+def _builtin_vocab():
+    return SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
+
+
+def _prompt_with_tools() -> list:
+    from quickquip.llm.tools import LLMToolSpec
+
+    return [
+        LLMToolSpec(
+            name="get_identity",
+            description="身份查询",
+            input_schema={"type": "object", "properties": {}},
+        )
+    ]
+
+
+def test_builtin_search_guidance_replaces_searxng_lines():
+    prompt = build_system_prompt(
+        persona=_builtin_persona(),
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="你好",
+        memories=[],
+        tool_specs=_prompt_with_tools(),
+        identities=None,
+        vocab=_builtin_vocab(),
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+        search_mode="builtin",
+    )
+
+    assert "联网检索说明" in prompt
+    assert "provider 内置联网搜索" in prompt
+    # SearXNG / search_web 引导块必须被压制，避免双路径引导
+    assert "当前联网后端：SearXNG。" not in prompt
+    assert "走项目内 SearXNG" not in prompt
+
+
+def test_builtin_search_guidance_present_without_tools():
+    """声明独立于 tool_calling_enabled：工具为空时 grounding 引导仍然注入。"""
+    prompt = build_system_prompt(
+        persona=_builtin_persona(),
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="你好",
+        memories=[],
+        tool_specs=[],
+        identities=None,
+        vocab=_builtin_vocab(),
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+        search_mode="builtin",
+    )
+
+    assert "联网检索说明" in prompt
+    assert "当前可用工具" not in prompt
+
+
+def test_builtin_search_inactive_keeps_searxng_guidance():
+    prompt = build_system_prompt(
+        persona=_builtin_persona(),
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="你好",
+        memories=[],
+        tool_specs=_prompt_with_tools(),
+        identities=None,
+        vocab=_builtin_vocab(),
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+        search_mode="searxng",
+    )
+
+    assert "当前联网后端：SearXNG。" in prompt
+    assert "联网检索说明" not in prompt

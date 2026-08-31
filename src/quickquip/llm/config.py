@@ -151,6 +151,16 @@ class ProviderConfig:
     prompt_caching: bool = False
     cache_ttl: str = ""  # Claude prompt-cache TTL；空=默认 5min，"1h"=扩展缓存
     auth_method: str = "api_key"  # "api_key" | "bearer"
+    builtin_search: bool = False  # 声明 provider 原生搜索工具；仅 gemini 协议有请求级效果
+
+
+def provider_builtin_search_active(provider: ProviderConfig) -> bool:
+    """builtin_search 的生效谓词：仅在 gemini 协议下有请求级效果。
+
+    请求声明、search_web 工具互斥与健康检查都以本函数为单一判定来源，
+    避免各消费点自行重复协议判断。
+    """
+    return provider.builtin_search and provider.protocol == "gemini"
 
 
 @dataclass(slots=True)
@@ -440,6 +450,7 @@ def _parse_single_provider(
         prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
+        builtin_search=as_bool(entry.get("builtin_search"), default=False),
     )
 
 
@@ -818,6 +829,14 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
             provider_errors.append(f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）")
         if provider.protocol == "claude" and provider.cache_ttl not in ("", "5m", "1h"):
             provider_errors.append(f"非法 cache_ttl {provider.cache_ttl!r}（claude 仅支持 5m / 1h，留空=默认 5min）")
+        if provider.builtin_search and provider.protocol != "gemini":
+            # 非 gemini 协议不剪除 provider：键误配只影响该键本身，记录
+            # warning 即可，请求级生效由 provider_builtin_search_active 兜底为惰性。
+            logger.warning(
+                "provider %s 的 builtin_search 仅支持 gemini 协议，当前协议 %r 下该配置不生效",
+                pid,
+                provider.protocol,
+            )
         if not provider.base_url:
             provider_errors.append("缺少 base_url")
         if not provider.api_key_env:

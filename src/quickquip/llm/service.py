@@ -33,8 +33,10 @@ from quickquip.llm.config import (
     ProviderConfig,
     load_llm_config,
     load_personas_only,
+    provider_builtin_search_active,
 )
 from quickquip.llm.defectify import build_defectify_prompt
+from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.sts.config import (
     TURMFLUCH_RATE_LIMIT_KEY,
     TURMFLUCH_RULE_NAME,
@@ -340,6 +342,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         participants: list[dict[str, str]] | None = None,
         provider_style_overrides: str = "",
         session_preset: str = "",
+        provider_id: str | None = None,
+        builtin_search_active: bool = False,
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -353,11 +357,15 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             vocab=self._resolve_vocab(str(group_id)),
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
-            auto_search_enabled=self.config.auto_search.enabled,
-            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type),
+            search_mode=(
+                "builtin"
+                if builtin_search_active
+                else ("searxng" if self.config.auto_search.enabled else "none")
+            ),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type, provider_id=provider_id),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            deferred_tool_categories=self._get_deferred_tool_categories(chat_type),
+            deferred_tool_categories=self._get_deferred_tool_categories(chat_type, provider_id=provider_id),
             chat_type=chat_type,
             participants=participants,
             provider_style_overrides=provider_style_overrides,
@@ -585,10 +593,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
-            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type, provider_id=provider.id),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type),
+            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=provider.id),
             initial_tool_names=[spec.name for spec in request.tools],
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
@@ -1028,7 +1036,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
-        tool_specs = self._get_enabled_tool_specs(chat_type=chat_type) if self.config.runtime.tool_calling_enabled else []
+        builtin_search_active = provider_builtin_search_active(provider)
+        tool_specs = (
+            self._get_enabled_tool_specs(chat_type=chat_type, provider_id=provider.id)
+            if self.config.runtime.tool_calling_enabled
+            else []
+        )
         session_preset = self.get_session_preset(scope_key) if chat_type == "private" else ""
         system_prompt = self._build_system_prompt(
             persona,
@@ -1042,6 +1055,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             participants=participants,
             provider_style_overrides=provider.style_overrides,
             session_preset=session_preset,
+            provider_id=provider.id,
+            builtin_search_active=builtin_search_active,
         )
         messages = self._build_messages(
             prompt=trimmed_prompt,
@@ -1071,6 +1086,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             tools=tool_specs,
             allow_tool_calls=bool(tool_specs),
             tool_choice="auto",
+            builtin_search=builtin_search_active,
         )
         tool_context = ToolExecutionContext(
             group_id=chat_id,
@@ -1119,6 +1135,16 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
         if not text:
             text = "模型没有返回可显示的文本。"
+
+        if response.web_search is not None:
+            logger.info(
+                "LLM built-in web search: provider=%s model=%s queries=%s sources=%s",
+                provider.id,
+                request.model,
+                response.web_search.queries,
+                [source.url for source in response.web_search.sources],
+            )
+            text = append_web_search_source_block(text, response.web_search)
 
         if sensitive.is_loaded:
             output_scan = sensitive.scan(text)

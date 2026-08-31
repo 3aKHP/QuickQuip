@@ -87,6 +87,7 @@ async def run_tool_call_loop(
             tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
+            builtin_search=current_request.builtin_search,
         )
 
     for round_index in range(search_failsafe_max_rounds + 1):
@@ -226,6 +227,7 @@ async def run_tool_call_loop(
             tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
+            builtin_search=current_request.builtin_search,
         )
 
     raise RuntimeError("工具调用循环未按预期结束")

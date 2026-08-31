@@ -19,6 +19,7 @@ QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发
 - 显式触发下的图片理解
 - 显式触发下的语音消息转写
 - 基于项目内搜索后端的联网搜索
+- gemini provider 的内置联网搜索（`google_search` grounding，按 provider 开启）
 - 标准化工具调用（身份查询、记忆查询、联网搜索）
 
 如果后续需要把外部工具后端扩展为 MCP，单独查看 [mcp-integration.md](mcp-integration.md)。当前文档只描述已经落在项目内的 LLM 与工具调用实现。
@@ -89,6 +90,8 @@ LLM 相关核心文件如下：
   - 负责从消息段中提取文本触发、艾特触发和图片 URL
 - `src/quickquip/search/web_search.py`
   - 负责项目内 SearXNG 搜索客户端，供 `/search` 与 `search_web` 工具使用
+- `src/quickquip/llm/provider/gemini.py` + `src/quickquip/llm/rendering.py`
+  - 负责内置搜索的请求声明（`google_search` 工具条目）、`groundingMetadata` 解析（`LLMWebSearchReport`）与回复来源块渲染
 
 兼容层说明：
 
@@ -532,6 +535,11 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 
 当前搜索结果由当前搜索后端返回摘要与来源链接，不自动写入长期记忆。
 
+LLM 侧的联网搜索有两条互斥路径：
+
+- **`search_web` 工具**（默认）：客户端执行，走项目内 SearXNG，受 `auto_search` 提示词引导与每轮调用上限约束。
+- **provider 内置搜索**：gemini provider 配置 `builtin_search = true` 后启用。请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明（不依赖 `tool_calling_enabled`），检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，回复末尾以「标题 — 域名」形式附至多 3 条来源。该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
+
 权限规则：
 
 - 查询型命令多数所有人可用
@@ -552,7 +560,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `data/` 需要持久化
 - 镜像构建时通过 `COPY src/` + `pip install --no-deps .` 安装项目包
 - API key 通过环境变量注入
-- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
+- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；开启 `builtin_search` 的 gemini provider 不依赖 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
 
 根目录 `.dockerignore` 已经做了收紧，避免把以下内容送进 Docker build 上下文：
 
