@@ -20,6 +20,9 @@ export default defineConfig({
       '/ops/api': {
         target: 'http://127.0.0.1:5104',
         changeOrigin: true,
+        // 后端 _enforce_same_origin 要求 Origin 与 Host 同源；
+        // dev 代理下浏览器 Origin 是 vite 端口，需随 changeOrigin 一并重写
+        headers: { origin: 'http://127.0.0.1:5104' },
       },
     },
   },

@@ -66,10 +66,12 @@ async function handleLogout(): Promise<void> {
 
 function attachUnauthorizedHandler(): void {
   setUnauthorizedHandler(() => {
+    // 仅此前已登录（会话真的失效）才提示；首访探测与登录失败的 401 不显示误导性报错
+    const wasAuthenticated = authenticated.value
     authenticated.value = false
     authReady.value = true
     authBusy.value = false
-    authError.value = '登录状态已失效，请重新登录。'
+    authError.value = wasAuthenticated ? '登录状态已失效，请重新登录。' : ''
   })
 }
 
