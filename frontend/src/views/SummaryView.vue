@@ -31,7 +31,7 @@
     />
 
     <Transition name="tab-pane" mode="out-in">
-      <div v-if="!selected" :key="activeTab" class="summary-list">
+      <div v-if="!selected && groupId" :key="activeTab" class="summary-list">
         <article
           v-for="item in normalizedList"
           :key="item.key"
@@ -55,7 +55,7 @@
         <UiEmpty v-if="groupId && !listLoading && normalizedList.length === 0" icon="FileText" title="暂无记录" />
       </div>
 
-      <UiCard v-else key="detail" padding="lg" shadow="md" class="detail-card">
+      <UiCard v-else-if="selected" key="detail" padding="lg" shadow="md" class="detail-card">
       <div class="detail-bar">
         <span class="detail-title">
           <UiIcon name="FileText" :size="20" />

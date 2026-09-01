@@ -25,8 +25,9 @@ defineProps<{
 }>()
 
 // 域图标砖：由当前路由自动派生所属工作域的图标与域色（六域锚点，见 variables.css --qq-domain-*）
+// 按 route.name 匹配：router 以 item.key 构建路由，key 是唯一真值源
 const route = useRoute()
-const navItem = computed(() => NAV_ITEMS.find((item) => item.path === route.path))
+const navItem = computed(() => NAV_ITEMS.find((item) => item.key === route.name))
 const domainIcon = computed(() => navItem.value?.icon)
 const section = computed(() => navItem.value?.section || '')
 
