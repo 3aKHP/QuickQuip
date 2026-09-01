@@ -14,6 +14,12 @@ try:
 except (ModuleNotFoundError, ValueError):
     Message = MessageSegment = None
 
+try:
+    from apscheduler.jobstores.base import JobLookupError
+except ImportError:  # pragma: no cover - apscheduler 随 nonebot-plugin-apscheduler 安装
+    class JobLookupError(Exception):
+        pass
+
 from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.adapters.nonebot._safe_send import send_group_text
 from quickquip.adapters.nonebot._scheduling import parse_cron
@@ -110,6 +116,21 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         await bot.send_group_msg(group_id=int(group_id), message=message)
 
 
+async def _fire_text_task(bot, job: ScheduledMessage, group_id: str, job_id: str) -> None:
+    """text 类任务单群触发：固定文案原样发出。"""
+    with bot_action_trace(
+        trigger_kind="scheduled",
+        reason_code="scheduled_message",
+        reason_detail=f"定时消息触发：{job_id}",
+        rule_name="scheduled_message",
+        chat_type="group",
+        group_id=group_id,
+        reply_preview=job.message,
+        source="scheduler.scheduled_message",
+    ):
+        await send_group_text(bot, int(group_id), job.message)
+
+
 def _make_send_task(job: ScheduledMessage, bot_getter, store: ScheduledMessageStore):
     job_id = f"{_JOB_ID_PREFIX}{job.id}"
 
@@ -124,8 +145,13 @@ def _make_send_task(job: ScheduledMessage, bot_getter, store: ScheduledMessageSt
         try:
             if scheduler:
                 scheduler.remove_job(job_id)
+        except JobLookupError:
+            pass  # job 已不在调度器中（如 reload 先行清理），属正常
         except Exception:
-            pass
+            # 存储已删但调度器残留会导致下个 tick 重复触发，必须留下告警
+            logger.warning(
+                "scheduled_msg: failed to remove APScheduler job %s", job_id, exc_info=True
+            )
 
     async def _send():
         fired = False
@@ -140,17 +166,7 @@ def _make_send_task(job: ScheduledMessage, bot_getter, store: ScheduledMessageSt
                     if job.kind == "llm":
                         await _fire_llm_task(bot, job, gid, job_id)
                     else:
-                        with bot_action_trace(
-                            trigger_kind="scheduled",
-                            reason_code="scheduled_message",
-                            reason_detail=f"定时消息触发：{job_id}",
-                            rule_name="scheduled_message",
-                            chat_type="group",
-                            group_id=gid,
-                            reply_preview=job.message,
-                            source="scheduler.scheduled_message",
-                        ):
-                            await send_group_text(bot, int(gid), job.message)
+                        await _fire_text_task(bot, job, gid, job_id)
                 except Exception:
                     logger.warning("scheduled_msg: failed to send to group %s", gid, exc_info=True)
             fired = True

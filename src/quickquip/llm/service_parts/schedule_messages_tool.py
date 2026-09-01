@@ -157,8 +157,10 @@ class ScheduleMessagesToolMixin:
             if job is None or group_id not in job.group_ids:
                 return f"当前群不存在定时消息任务 {job_id}。"
             if action == "set_enabled":
-                enabled = bool(arguments.get("enabled", True))
-                store.set_enabled(job_id, enabled)
+                enabled = arguments.get("enabled")
+                if enabled is None:
+                    return "set_enabled 需要提供 enabled 布尔值（true 启用 / false 停用）。"
+                store.set_enabled(job_id, bool(enabled))
                 _reload_scheduled_message_jobs()
                 state = "启用" if enabled else "停用"
                 return f"已将定时消息任务 {job_id} {state}。"

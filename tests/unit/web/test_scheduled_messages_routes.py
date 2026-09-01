@@ -148,3 +148,22 @@ def test_update_invalid_kind_returns_400(store):
         )
     assert exc.value.status_code == 400
     assert store.get(created["id"]).kind == "text"
+
+
+def test_update_empty_body_is_noop(store, enqueued, monkeypatch):
+    """空 PUT 不产生审计条目、不触发 reload、不落盘改动。"""
+    created = sm.create_scheduled_message(_create_body(), object())
+    before = store.get(created["id"]).to_dict()
+    audit_calls: list[dict] = []
+    monkeypatch.setattr(
+        sm.audit_logger, "log", lambda *a, **k: audit_calls.append(k)
+    )
+
+    updated = sm.update_scheduled_message(
+        created["id"], sm.ScheduledMessageUpdate(), object()
+    )
+
+    assert updated == before
+    assert audit_calls == []
+    assert enqueued == [("scheduler_reload", {})]  # 只有 create 那一次
+    assert store.get(created["id"]).to_dict() == before  # updated_at 未跳动

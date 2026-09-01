@@ -225,24 +225,48 @@ class ScheduledMessageStore:
             self._save_unlocked(jobs)
         return job
 
-    def update(self, job_id: str, **fields: Any) -> ScheduledMessage | None:
-        """更新指定字段（cron/group_ids/message/enabled/kind/recurring），返回更新后的任务；不存在返回 None。"""
-        allowed = {"cron", "group_ids", "message", "enabled", "kind", "recurring"}
+    _UPDATE_ALLOWED_FIELDS = {"cron", "group_ids", "message", "enabled", "kind", "recurring"}
+
+    def _update_locked(
+        self, jobs: list[ScheduledMessage], index: int, effective: dict[str, Any]
+    ) -> ScheduledMessage:
+        data = jobs[index].to_dict()
+        data.update(effective)
+        data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        updated = ScheduledMessage.from_dict(data)
+        jobs[index] = updated
+        self._save_unlocked(jobs)
+        return updated
+
+    def update_for_audit(
+        self, job_id: str, **fields: Any
+    ) -> tuple[ScheduledMessage | None, ScheduledMessage | None]:
+        """与 update 相同语义，但在同一锁视图内捕获 before/after，供审计日志取准确前置状态。
+
+        返回 ``(before, after)``；任务不存在时两者皆为 None；
+        无有效字段时为空操作，``after is before``，不落盘。
+        """
+        effective = {
+            k: v for k, v in fields.items() if k in self._UPDATE_ALLOWED_FIELDS and v is not None
+        }
         with self._lock():
             jobs = self._load_unlocked()
             for i, job in enumerate(jobs):
                 if job.id != job_id:
                     continue
-                data = job.to_dict()
-                for key, value in fields.items():
-                    if key in allowed and value is not None:
-                        data[key] = value
-                data["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                updated = ScheduledMessage.from_dict(data)
-                jobs[i] = updated
-                self._save_unlocked(jobs)
-                return updated
-        return None
+                if not effective:
+                    return job, job
+                return job, self._update_locked(jobs, i, effective)
+        return None, None
+
+    def update(self, job_id: str, **fields: Any) -> ScheduledMessage | None:
+        """更新指定字段（cron/group_ids/message/enabled/kind/recurring），返回更新后的任务；不存在返回 None。
+
+        无有效字段时为空操作：直接返回当前任务，不产生 updated_at 跳动、
+        落盘、审计与 reload 的副作用链。
+        """
+        _, after = self.update_for_audit(job_id, **fields)
+        return after
 
     def set_enabled(self, job_id: str, enabled: bool) -> ScheduledMessage | None:
         return self.update(job_id, enabled=enabled)

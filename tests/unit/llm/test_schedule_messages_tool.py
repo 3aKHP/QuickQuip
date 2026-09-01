@@ -151,6 +151,20 @@ async def test_set_enabled_and_delete_own_group(tool_env):
     assert len(tool_env.reloads) == 2
 
 
+async def test_set_enabled_requires_explicit_enabled(tool_env):
+    """LLM 漏传 enabled 时必须报错，不得把停用任务静默翻回启用。"""
+    own = tool_env.store.add(
+        cron="0 9 * * *", group_ids=["100"], message="本群任务", enabled=False, origin="llm"
+    )
+    svc = _FakeService()
+    out = await svc._tool_manage_scheduled_messages(
+        {"action": "set_enabled", "job_id": own.id}, _make_context(group_id=100)
+    )
+    assert "enabled" in out
+    assert tool_env.store.get(own.id).enabled is False  # 状态未被改动
+    assert tool_env.reloads == []
+
+
 async def test_list_filters_current_group_only(tool_env):
     mine = tool_env.store.add(
         cron="0 9 * * *", group_ids=["100"], message="本群任务", origin="llm"

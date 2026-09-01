@@ -91,7 +91,8 @@ def register_scheduler_commands(on_command, Message, MessageSegment) -> None:
             await schedule_cmd.finish("\n".join(lines))
 
         if sub == "add":
-            rest = args[len(tokens[0]):].strip() if len(tokens) > 1 else ""
+            parts1 = args.split(maxsplit=1)
+            rest = parts1[1].strip() if len(parts1) > 1 else ""
             kind, recurring, rest = _parse_add_flags(rest)
             parts = rest.split(maxsplit=5)
             if len(parts) < 6:

@@ -79,3 +79,32 @@ def test_validate_cron_rejects_invalid():
         validate_cron("61 7 * * *")
     with pytest.raises(ValueError):
         validate_cron("0 25 * * *")
+
+
+def test_update_with_no_effective_fields_is_noop(tmp_path):
+    """无有效字段的 update 为空操作：不跳 updated_at、不落盘。"""
+    store = ScheduledMessageStore(tmp_path / "sm.json")
+    job = store.add(cron="0 7 * * *", group_ids=[123], message="早安")
+    before = job.to_dict()
+
+    same = store.update(job.id)
+    assert same is not None
+    assert same.to_dict() == before
+    assert store.update(job.id, enabled=None, unknown_field="x").to_dict() == before
+
+
+def test_update_for_audit_captures_before_after(tmp_path):
+    """update_for_audit 在同一锁视图返回 before/after；不存在返回 (None, None)。"""
+    store = ScheduledMessageStore(tmp_path / "sm.json")
+    job = store.add(cron="0 7 * * *", group_ids=[123], message="早安")
+
+    before, after = store.update_for_audit(job.id, message="晚安")
+    assert before is not None and before.message == "早安"
+    assert after is not None and after.message == "晚安"
+    assert before.id == after.id
+    assert after.updated_at >= before.updated_at  # 秒级精度，同秒内允许相等
+
+    noop_before, noop_after = store.update_for_audit(job.id)
+    assert noop_after is noop_before or noop_after.to_dict() == noop_before.to_dict()
+
+    assert store.update_for_audit("sm_missing", message="x") == (None, None)

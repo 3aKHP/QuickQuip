@@ -106,11 +106,14 @@ def update_scheduled_message(job_id: str, body: ScheduledMessageUpdate, request:
     if "kind" in fields and fields["kind"] is not None:
         _validate_kind(fields["kind"])
     try:
-        updated = store.update(job_id, **fields)
+        before, updated = store.update_for_audit(job_id, **fields)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if updated is None:
+    if before is None or updated is None:
         raise HTTPException(status_code=404, detail="定时消息不存在")
+    if updated is before:
+        # 空操作：不产生审计条目，也不触发 bot 端 reload
+        return updated.to_dict()
     logger.warning("scheduled message updated via web admin: %s (%s)", job_id, sorted(fields))
     audit_logger.log(
         request,
