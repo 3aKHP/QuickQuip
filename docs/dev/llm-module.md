@@ -39,7 +39,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机）
 - `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、健康检查、状态、自动记忆）
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、健康检查、状态、自动记忆）
 - `src/quickquip/llm/quick_judge.py`
   - quick_judge 诊断通道（`QuickJudgeResult`、provider 选择策略、detailed 通道），`LLMService` 仅保留薄委托
 - `src/quickquip/llm/single_shot.py`

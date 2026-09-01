@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
-from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, period_reports, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime, llm_usage
+from quickquip.app.web.routes import stats, rules, groups, config, logs, diagnostics, memory, summaries, period_reports, personas, conversations, group_settings, rate_limit, tieba, wordcloud, llm_about, mcp_dashboard, cron_dashboard, audit, game_economy, niuniu, quotes, sensitive_filter, awakening, llm_runtime, llm_usage, scheduled_messages
 from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
 
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(awakening.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(llm_runtime.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
     app.include_router(llm_usage.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+    app.include_router(scheduled_messages.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
 
     _register_root_redirect(app)
 
