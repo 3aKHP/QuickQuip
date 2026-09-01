@@ -6,7 +6,7 @@
     @click="$emit('click', $event)"
   >
     <UiIcon v-if="loading" name="Loader2" :size="iconSize" class="ui-btn__loading spin" />
-    <UiIcon v-else-if="icon" :name="icon" :size="iconSize" />
+    <UiIcon v-else-if="icon" :name="icon" :size="iconSize" :motion="iconMotion" />
     <span v-if="$slots.default" class="ui-btn__text">
       <slot />
     </span>
@@ -36,6 +36,16 @@ defineEmits<{
 
 const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
 
+// 按图标语义自动分配 hover 微动效：刷新类旋转，方向类前移
+const SPIN_ICONS = new Set(['RefreshCw', 'RotateCw'])
+const NUDGE_ICONS = new Set(['Send', 'ArrowRight', 'ChevronRight', 'ExternalLink', 'Download', 'Upload'])
+const iconMotion = computed(() => {
+  if (!props.icon) return undefined
+  if (SPIN_ICONS.has(props.icon)) return 'spin' as const
+  if (NUDGE_ICONS.has(props.icon)) return 'nudge' as const
+  return undefined
+})
+
 const classes = computed(() => [
   'ui-btn',
   `ui-btn--${props.variant}`,
@@ -61,7 +71,7 @@ const classes = computed(() => [
 }
 
 .ui-btn:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.97);
 }
 
 .ui-btn:disabled {

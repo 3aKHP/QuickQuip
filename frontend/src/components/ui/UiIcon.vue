@@ -1,5 +1,10 @@
 <template>
-  <component :is="resolved" :size="size" :stroke-width="strokeWidth" />
+  <component
+    :is="resolved"
+    :size="size"
+    :stroke-width="strokeWidth"
+    :class="motion ? `qq-ico qq-ico--${motion}` : undefined"
+  />
 </template>
 
 <script setup lang="ts">
@@ -14,7 +19,8 @@ import {
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
   AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
-  CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert
+  CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
+  Quote, ZapOff
 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Component } from 'vue'
@@ -34,6 +40,7 @@ type IconName =
   | 'Play' | 'Save' | 'ChevronLeft' | 'Download' | 'Sparkles'
   | 'BellRing' | 'Radar' | 'Wrench' | 'ListTree' | 'Eraser' | 'Activity'
   | 'CalendarRange' | 'CalendarDays' | 'Copy' | 'MousePointerClick' | 'ShieldAlert'
+  | 'Quote' | 'ZapOff'
 
 const ICON_MAP: Record<IconName, Component> = {
   BarChart3, ToggleLeft, Users, Brain, FileText,
@@ -48,13 +55,16 @@ const ICON_MAP: Record<IconName, Component> = {
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
   AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
-  CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert
+  CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
+  Quote, ZapOff
 }
 
 const props = defineProps<{
   name: IconName | string
   size?: number
   strokeWidth?: number
+  /** 微动效：父级 hover 时触发（spin 旋转 / nudge 前移），见 transitions.css */
+  motion?: 'spin' | 'nudge'
 }>()
 
 const resolved = computed(() => {

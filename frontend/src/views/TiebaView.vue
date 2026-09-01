@@ -23,7 +23,7 @@
         <UiLoading v-if="loading && !forums.length" />
         <UiEmpty v-else-if="!forums.length" icon="BookOpen" title="尚无任何贴吧缓存" />
         <ul v-else class="forum-list">
-          <li v-for="f in forums" :key="f.forum_keyword" class="forum-item" :class="{ active: f.forum_keyword === selectedForum }" @click="selectForum(f.forum_keyword)">
+          <li v-for="f in forums" :key="f.forum_keyword" class="forum-item qq-selectable" :class="{ active: f.forum_keyword === selectedForum }" @click="selectForum(f.forum_keyword)">
             <div class="forum-head">
               <span class="forum-name">{{ f.forum_keyword }}吧</span>
               <UiTag size="sm" :variant="syncVariant(f)">{{ syncLabel(f) }}</UiTag>
@@ -274,11 +274,6 @@ loadAll()
 }
 
 .forum-item:last-child { border-bottom: none; }
-.forum-item:hover { background: var(--qq-surface-elevated); }
-.forum-item.active {
-  background: var(--qq-surface-elevated);
-  box-shadow: inset 3px 0 0 var(--qq-primary);
-}
 
 .forum-head {
   display: flex;

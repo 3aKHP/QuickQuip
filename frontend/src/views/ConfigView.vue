@@ -27,7 +27,7 @@
         <button
           v-for="c in configs"
           :key="c.key"
-          class="config-item"
+          class="config-item qq-selectable"
           :class="{ active: c.key === currentKey }"
           @click="switchTo(c.key)"
         >
@@ -264,14 +264,6 @@ async function save() {
   transition: background var(--qq-transition-fast);
 }
 
-.config-item:hover {
-  background: var(--qq-surface-hover);
-}
-
-.config-item.active {
-  background: var(--qq-primary-soft);
-  box-shadow: inset 3px 0 0 var(--qq-primary);
-}
 
 .config-item__label {
   font-size: var(--qq-text-sm);

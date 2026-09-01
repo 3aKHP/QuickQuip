@@ -1,9 +1,10 @@
 /* ==========================================================================
-   QuickQuip Design Token System  v2 — QQ 蓝 + 青 + 琥珀 / 玻璃光场 / linear·steps
+   QuickQuip Design Token System  v2.5 — QQ 蓝 + 青 + 琥珀 / 玻璃光场
    Primary: QQ 蓝  |  Accent: 青 (Cyan)  |  Highlight: 琥珀 (Amber)
    Light: 浅灰白底 / Dark: 深炭蓝底
-   Easing: linear / steps 优先（无 Material cubic-bezier）
-   玻璃仅用于氛围层（侧栏/状态条/抽屉/Toast）；内容区（卡片/表格/表单）保持实色。
+   Easing: 一次性过渡用 ease-out（起步快收尾柔）；linear / steps 仅用于循环动画。
+   玻璃仅用于氛围层（侧栏/状态条/抽屉/Toast）；内容区（卡片/表格/表单）保持实色，
+   以真实投影与 hover 浮起建立纵深层级。
    ========================================================================== */
 
 :root {
@@ -61,12 +62,24 @@
   --qq-info: #12b7f5;
   --qq-info-soft: rgba(18, 183, 245, 0.12);
 
-  /* ── Shadows（极简；hover 走描边而非浮起）── */
-  --qq-shadow-card: 0 1px 0 rgba(0, 0, 0, 0.04);
-  --qq-shadow-card-hover: 0 0 0 1px var(--qq-primary-soft);
-  --qq-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.05);
-  --qq-shadow-md: 0 2px 0 rgba(0, 0, 0, 0.04);
-  --qq-shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.10);
+  /* ── Domain Colors（六域锚点：蓝青主轴，游戏域蓝紫）── */
+  --qq-domain-ops: #12b7f5;
+  --qq-domain-ops-soft: rgba(18, 183, 245, 0.12);
+  --qq-domain-llm: #06b6d4;
+  --qq-domain-llm-soft: rgba(6, 182, 212, 0.12);
+  --qq-domain-content: #0891b2;
+  --qq-domain-content-soft: rgba(8, 145, 178, 0.12);
+  --qq-domain-system: #64748b;
+  --qq-domain-system-soft: rgba(100, 116, 139, 0.12);
+  --qq-domain-games: #6366f1;
+  --qq-domain-games-soft: rgba(99, 102, 241, 0.12);
+
+  /* ── Shadows（真实纵深；hover 浮起 + 描边变色）── */
+  --qq-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --qq-shadow-card-hover: 0 4px 12px rgba(18, 60, 95, 0.10), 0 0 0 1px var(--qq-primary-soft);
+  --qq-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --qq-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.07);
+  --qq-shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.12);
 
   /* ── Toast ── */
   --qq-toast-border-info: rgba(18, 183, 245, 0.50);
@@ -116,13 +129,15 @@
   --qq-line-base: 1.6;
   --qq-line-mono: 1.55;
 
-  /* ── Transitions（无 cubic-bezier，全 linear / steps）── */
-  --qq-ease-quiet: 120ms linear;
+  /* ── Transitions（一次性过渡 ease-out；循环动画 linear / ease-in-out）── */
+  --qq-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --qq-ease-loop: linear;
+  --qq-ease-pulse: ease-in-out;
   --qq-ease-step: steps(4, end);
   --qq-ease-snap: steps(1, end);
-  --qq-transition-fast: 120ms linear;
-  --qq-transition-base: 150ms linear;
-  --qq-transition-slow: 240ms linear;
+  --qq-transition-fast: 120ms var(--qq-ease-out);
+  --qq-transition-base: 150ms var(--qq-ease-out);
+  --qq-transition-slow: 240ms var(--qq-ease-out);
 
   /* ── Layout ── */
   --qq-domain-rail-width: 72px;
@@ -153,11 +168,9 @@
   --qq-shell-control-active: rgba(255, 255, 255, 0.54);
   --qq-shell-shadow: rgba(18, 60, 95, 0.05);
 
-  /* ── Background Field（粒子光场，克制强度）── */
-  --qq-background-field-opacity: 0.55;
+  /* ── Background Field（光场层，克制强度）── */
+  --qq-background-field-opacity: 0.85;
   --qq-background-field-blend: normal;
-  --qq-mouse-glow-opacity: 0.32;
-  --qq-mouse-glow-blend: normal;
 
   /* ── Route Trace Sweep（换页光带）── */
   --qq-route-trace-color: var(--qq-primary);
@@ -219,6 +232,18 @@
   --qq-accent: #f59e0b;
   --qq-accent-soft: rgba(245, 158, 11, 0.16);
 
+  /* 域色暗色微调：提高明度保持识别度 */
+  --qq-domain-ops: #34d0f7;
+  --qq-domain-ops-soft: rgba(18, 183, 245, 0.16);
+  --qq-domain-llm: #22d3ee;
+  --qq-domain-llm-soft: rgba(6, 182, 212, 0.16);
+  --qq-domain-content: #06b6d4;
+  --qq-domain-content-soft: rgba(6, 182, 212, 0.16);
+  --qq-domain-system: #94a3b8;
+  --qq-domain-system-soft: rgba(148, 163, 184, 0.14);
+  --qq-domain-games: #818cf8;
+  --qq-domain-games-soft: rgba(129, 140, 248, 0.16);
+
   --qq-success-soft: rgba(7, 193, 96, 0.16);
   --qq-warn-soft: rgba(250, 157, 59, 0.16);
   --qq-danger-soft: rgba(250, 81, 81, 0.16);
@@ -226,11 +251,11 @@
   --qq-danger-border: rgba(250, 81, 81, 0.30);
   --qq-info-soft: rgba(18, 183, 245, 0.16);
 
-  --qq-shadow-card: 0 1px 0 rgba(0, 0, 0, 0.22);
-  --qq-shadow-card-hover: 0 0 0 1px var(--qq-primary-soft);
-  --qq-shadow-sm: 0 1px 0 rgba(0, 0, 0, 0.26);
-  --qq-shadow-md: 0 2px 0 rgba(0, 0, 0, 0.22);
-  --qq-shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.42);
+  --qq-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --qq-shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.34), 0 0 0 1px var(--qq-primary-soft);
+  --qq-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --qq-shadow-md: 0 2px 6px rgba(0, 0, 0, 0.26);
+  --qq-shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.44);
 
   --qq-table-stripe: rgba(255, 255, 255, 0.015);
   --qq-rail-bg: #111820;
@@ -246,10 +271,8 @@
   --qq-shell-control-active: rgba(17, 24, 32, 0.58);
   --qq-shell-shadow: rgba(0, 0, 0, 0.24);
 
-  --qq-background-field-opacity: 0.50;
+  --qq-background-field-opacity: 0.78;
   --qq-background-field-blend: screen;
-  --qq-mouse-glow-opacity: 0.42;
-  --qq-mouse-glow-blend: screen;
 
   --qq-toggle-off: #3a4452;
   --qq-selection-bg: rgba(18, 183, 245, 0.30);

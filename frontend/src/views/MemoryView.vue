@@ -26,7 +26,7 @@
     </TransitionGroup>
 
     <UiCard v-if="groupId" padding="md" shadow="sm" class="add-card">
-      <h3>新增记忆</h3>
+      <h3 class="section-title">新增记忆</h3>
       <div class="add-form">
         <textarea v-model="newContent" rows="2" placeholder="内容" />
         <div class="add-row"><select v-model="newScope"><option value="group">group</option><option value="user">user</option></select><input v-model="newUserId" placeholder="user_id（可选）" style="width:120px" /><input v-model="newTags" placeholder="标签（逗号分隔）" /><UiButton variant="primary" icon="Plus" @click="addMemory">添加</UiButton></div>
@@ -71,7 +71,7 @@ async function addMemory() { if (!newContent.value.trim()) { toast('内容不能
 .edit-row input { flex: 1; min-width: 120px; }
 .edit-actions { display: flex; gap: var(--qq-gap-xs); }
 .add-card { margin-bottom: var(--qq-gap-md); }
-.add-card h3 { margin: 0 0 var(--qq-gap-sm) 0; font-size: var(--qq-text-base); color: var(--qq-text); }
+.add-card h3 { margin: 0 0 var(--qq-gap-sm) 0; }
 .add-form { display: flex; flex-direction: column; gap: var(--qq-gap-sm); }
 .add-form textarea { width: 100%; resize: vertical; }
 .add-row { display: flex; gap: var(--qq-gap-sm); flex-wrap: wrap; align-items: center; }

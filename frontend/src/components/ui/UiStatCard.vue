@@ -4,7 +4,7 @@
       <span class="ui-stat-card__label">{{ label }}</span>
       <UiIcon v-if="icon" :name="icon" :size="15" class="ui-stat-card__icon" />
     </div>
-    <strong class="ui-stat-card__value">{{ value }}</strong>
+    <strong class="ui-stat-card__value">{{ displayValue }}</strong>
     <small v-if="sub" class="ui-stat-card__sub">{{ sub }}</small>
   </article>
 </template>
@@ -12,19 +12,35 @@
 <script setup lang="ts">
 /**
  * 统计卡。DashboardView 的 .stat-card 为同构样式，后续可统一回填。
+ * 传入 countTo（数值）时启用 count-up 滚动动画，优先于 value 展示。
  */
+import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
+import { useCountUp } from '../../composables/useCountUp'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   label: string
   value: string
   sub?: string
   icon?: string
   variant?: 'default' | 'primary' | 'warn'
+  /** 数值型指标：传入后启用 count-up 滚动（覆盖 value 的展示） */
+  countTo?: number
+  /** count-up 展示格式化（如万缩写），默认千分位取整 */
+  countFormat?: (n: number) => string
 }>(), {
   sub: undefined,
   icon: undefined,
   variant: 'default',
+  countTo: undefined,
+  countFormat: undefined,
+})
+
+const counted = useCountUp(() => props.countTo)
+const displayValue = computed(() => {
+  if (props.countTo === undefined) return props.value
+  const n = Math.round(counted.value)
+  return props.countFormat ? props.countFormat(n) : n.toLocaleString()
 })
 </script>
 

@@ -1,12 +1,13 @@
 <template>
   <div>
     <UiPageHeader title="语录管理" subtitle="按群组浏览、搜索、管理名言语录" />
+    <UiStatStrip :items="stripItems" />
 
     <p v-if="loadError" class="error">{{ loadError }}</p>
 
     <!-- Group selector -->
     <UiCard padding="md" shadow="sm" class="section">
-      <h3 class="st">群组</h3>
+      <h3 class="st section-title">群组</h3>
       <div class="lookup">
         <select v-model="selectedGroup" @change="loadQuotes" class="group-select">
           <option value="">请选择群组</option>
@@ -22,7 +23,7 @@
       <!-- Search -->
       <UiCard padding="md" shadow="sm" class="section">
         <div class="toolbar">
-          <h3 class="st">语录（共 {{ total }} 条）</h3>
+          <h3 class="st section-title">语录（共 {{ total }} 条）</h3>
           <div class="search-row">
             <input v-model="keyword" placeholder="搜索关键词…" class="search-input" @keyup.enter="search" />
             <UiButton icon="Search" :loading="loading" @click="search">搜索</UiButton>
@@ -30,7 +31,7 @@
           </div>
         </div>
 
-        <UiLoading v-if="loading && !entries.length" />
+        <UiSkeleton v-if="loading && !entries.length" variant="table" :rows="6" />
         <UiEmpty v-else-if="!entries.length" icon="FileText" :title="keyword ? '无匹配语录' : '暂无语录'" />
 
         <div v-else class="table-scroll"><table class="data-table">
@@ -67,12 +68,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiStatStrip from '../components/ui/UiStatStrip.vue'
 import { listGroups, listQuotes, deleteQuote } from '../api/quotes'
 import { toast } from '../toast'
 
@@ -83,6 +86,12 @@ const selectedGroup = ref('')
 const loading = ref(false)
 const entries = ref<any[]>([])
 const total = ref(0)
+
+const stripItems = computed(() => {
+  const items = [{ label: '群组数', value: groups.value.length, icon: 'Users' }]
+  if (selectedGroup.value) items.push({ label: '当前群语录', value: total.value, icon: 'Quote' })
+  return items
+})
 const hasMore = ref(false)
 const keyword = ref('')
 const offset = ref(0)
@@ -151,7 +160,7 @@ function formatTime(ts: number): string {
 <style scoped>
 .error { color: var(--qq-danger); }
 .section { margin-bottom: var(--qq-gap-md); }
-.st { margin: 0; font-size: var(--qq-text-base); color: var(--qq-text); }
+.st { margin: 0; }
 .lookup { display: flex; align-items: center; gap: var(--qq-gap-md); margin-top: var(--qq-gap-sm); }
 .group-select {
   flex: 1; max-width: 320px;

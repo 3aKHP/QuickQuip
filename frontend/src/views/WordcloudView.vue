@@ -12,7 +12,7 @@
     <div v-if="result">
       <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique</span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
       <div class="res-grid"><div class="img-wrap"><img :src="imgUrl" class="wc-img" /></div>
-        <UiCard padding="md" shadow="sm" class="top-wrap"><h3 class="top-t">Top {{ result.top_words.length }} 词频</h3><ol class="top-list"><li v-for="(w, i) in result.top_words" :key="w.word"><span class="rk">{{ i + 1 }}</span><span class="wd">{{ w.word }}</span><span class="ct">{{ w.count }}</span></li></ol></UiCard>
+        <UiCard padding="md" shadow="sm" class="top-wrap"><h3 class="top-t section-title">Top {{ result.top_words.length }} 词频</h3><ol class="top-list"><li v-for="(w, i) in result.top_words" :key="w.word"><span class="rk">{{ i + 1 }}</span><span class="wd">{{ w.word }}</span><span class="ct">{{ w.count }}</span></li></ol></UiCard>
       </div>
     </div>
     <UiEmpty v-else-if="!groups.length && !loading" icon="BarChart3" title="暂无词云消息记录" />
@@ -54,7 +54,7 @@ loadGroups()
 .img-wrap { border-radius: var(--qq-radius-card); overflow: hidden; box-shadow: var(--qq-shadow-card); }
 .wc-img { width: 100%; display: block; background: var(--qq-white); }
 .top-wrap { max-height: 500px; overflow-y: auto; }
-.top-t { margin: 0 0 var(--qq-gap-sm); font-size: var(--qq-text-base); color: var(--qq-text); }
+.top-t { margin: 0 0 var(--qq-gap-sm); }
 .top-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
 .top-list li { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: var(--qq-gap-sm); padding: 4px 6px; border-radius: var(--qq-radius-sm); font-size: var(--qq-text-sm); }
 .top-list li:hover { background: var(--qq-surface-hover); }

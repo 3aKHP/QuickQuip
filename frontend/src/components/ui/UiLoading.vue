@@ -30,7 +30,7 @@ withDefaults(defineProps<{
   height: 10px;
   border-radius: var(--qq-radius-full);
   background: var(--qq-surface-strong);
-  animation: pulse 1.5s ease-in-out infinite;
+  animation: pulse 1.5s var(--qq-ease-pulse) infinite;
 }
 
 .ui-loading__bar--1 { width: 100%; animation-delay: 0s; }

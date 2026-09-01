@@ -4,17 +4,7 @@
 
     <UiCard padding="md" shadow="sm" class="toolbar-card">
       <div class="toolbar-inner">
-        <div class="tab-group">
-          <button
-            v-for="t in tabs"
-            :key="t.key"
-            class="tab-btn"
-            :class="{ active: activeTab === t.key }"
-            @click="switchTab(t.key)"
-          >
-            {{ t.label }}
-          </button>
-        </div>
+        <UiTabs :model-value="activeTab" :tabs="tabs" @change="switchTab" />
         <label>
           群组
           <select v-model="groupId" @change="loadList">
@@ -31,33 +21,41 @@
       <span>{{ listError }}</span>
     </div>
 
-    <UiLoading v-if="listLoading && !selected" text="正在加载记录" class="summary-loading" />
+    <UiSkeleton v-if="listLoading && !selected" :rows="5" class="summary-loading" />
 
-    <div v-else-if="!selected" class="summary-list">
-      <article
-        v-for="item in normalizedList"
-        :key="item.key"
-        class="summary-row"
-      >
-        <div class="summary-main">
-          <span class="sum-date">{{ item.key }}</span>
-          <span class="meta" :title="`${item.model} · ${item.charCount} 字`">
-            {{ item.model }} · {{ item.charCount }} 字
-          </span>
-          <UiTag class="status-tag" :variant="item.published ? 'success' : 'warn'">
-            {{ item.published ? '已发布' : '未发布' }}
-          </UiTag>
-        </div>
-        <div class="sum-actions">
-          <UiButton size="sm" icon="BookOpen" @click="open(item.key)">阅读</UiButton>
-          <UiButton size="sm" variant="danger" icon="Trash2" @click="del(item.key)">删除</UiButton>
-        </div>
-      </article>
+    <UiEmpty
+      v-if="!groupId && !selected && !listLoading"
+      icon="FileText"
+      title="选择一个群组查看总结记录"
+      description="每日总结、周报与月报按群组归档；从上方群组下拉框开始。"
+    />
 
-      <UiEmpty v-if="groupId && !listLoading && normalizedList.length === 0" icon="FileText" title="暂无记录" />
-    </div>
+    <Transition name="tab-pane" mode="out-in">
+      <div v-if="!selected && groupId" :key="activeTab" class="summary-list">
+        <article
+          v-for="item in normalizedList"
+          :key="item.key"
+          class="summary-row"
+        >
+          <div class="summary-main">
+            <span class="sum-date">{{ item.key }}</span>
+            <span class="meta" :title="`${item.model} · ${item.charCount} 字`">
+              {{ item.model }} · {{ item.charCount }} 字
+            </span>
+            <UiTag class="status-tag" :variant="item.published ? 'success' : 'warn'">
+              {{ item.published ? '已发布' : '未发布' }}
+            </UiTag>
+          </div>
+          <div class="sum-actions">
+            <UiButton size="sm" icon="BookOpen" @click="open(item.key)">阅读</UiButton>
+            <UiButton size="sm" variant="danger" icon="Trash2" @click="del(item.key)">删除</UiButton>
+          </div>
+        </article>
 
-    <UiCard v-else padding="lg" shadow="md" class="detail-card">
+        <UiEmpty v-if="groupId && !listLoading && normalizedList.length === 0" icon="FileText" title="暂无记录" />
+      </div>
+
+      <UiCard v-else-if="selected" key="detail" padding="lg" shadow="md" class="detail-card">
       <div class="detail-bar">
         <span class="detail-title">
           <UiIcon name="FileText" :size="20" />
@@ -78,7 +76,8 @@
 
         <div v-else class="sum-body markdown-body" v-html="renderedContent" />
       </div>
-    </UiCard>
+      </UiCard>
+    </Transition>
   </div>
 </template>
 
@@ -91,6 +90,8 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiTabs from '../components/ui/UiTabs.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import { deleteSummary, fetchSummaryDetail, fetchSummaryGroups, fetchSummaries } from '../api/summaries'
 import type { SummaryDetailRow, SummaryListRow } from '../api/summaries'
 import { deletePeriodReport, fetchPeriodReportDetail, fetchPeriodReportGroups, fetchPeriodReports } from '../api/period_reports'
@@ -277,34 +278,6 @@ function closeDetail() {
   align-items: center;
   gap: var(--qq-gap-md);
   flex-wrap: wrap;
-}
-
-.tab-group {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-card);
-  background: var(--qq-surface-strong);
-}
-
-.tab-btn {
-  border: 0;
-  padding: 5px 14px;
-  border-radius: calc(var(--qq-radius-card) - 3px);
-  background: transparent;
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-sm);
-  cursor: pointer;
-  transition: color var(--qq-transition-fast), background var(--qq-transition-fast);
-}
-
-.tab-btn:hover { color: var(--qq-text); }
-
-.tab-btn.active {
-  color: var(--qq-text);
-  background: var(--qq-surface);
-  box-shadow: var(--qq-shadow-card);
 }
 
 .toolbar-inner label {

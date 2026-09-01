@@ -27,6 +27,7 @@ import GameEconomyView from '../views/GameEconomyView.vue'
 import NiuNiuView from '../views/NiuNiuView.vue'
 
 export interface NavItem {
+  /** 路由构建的唯一真值源：router 以 `/${key}` 生成路径与 name；path 仅用于展示/链接 */
   key: string
   path: string
   label: string
