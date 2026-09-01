@@ -176,6 +176,7 @@ data/
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
 ├── llm_usage.db            # LLM 用量与成本统计（SQLite）
 ├── mcp_status.json         # MCP server 装载状态快照
+├── cron_jobs.json          # Cron 定时任务调度状态快照（bot 进程写，web-admin 读）
 ├── awakening_boredom_groups.json # 已启用无聊唤醒的群列表
 ├── game_economy.db         # 游戏金币 / 签到 / 好感度（SQLite）
 ├── game_scores.json        # 游戏战绩计分

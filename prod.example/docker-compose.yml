@@ -37,6 +37,7 @@ services:
     env_file:
       - ../.env
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
       PORT: "8080"
@@ -67,6 +68,7 @@ services:
     env_file:
       - ../.env
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"

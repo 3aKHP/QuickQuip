@@ -1,4 +1,6 @@
+import json
 import logging
+from datetime import datetime
 
 try:
     import nonebot
@@ -25,6 +27,7 @@ from quickquip.adapters.nonebot._safe_send import send_group_text
 from quickquip.adapters.nonebot._scheduling import parse_cron
 from quickquip.chat.scheduled_messages import ScheduledMessage, ScheduledMessageStore
 from quickquip.common.bot_action_trace import bot_action_trace
+from quickquip.common.paths import CRON_JOBS_JSON_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +38,8 @@ _job_run_results: dict[str, dict] = {}
 
 def record_job_result(job_id: str, success: bool, error: str | None = None):
     """Record the last run result of a scheduled job. Best-effort only."""
-    from datetime import datetime
-
     _job_run_results[job_id] = {
-        "last_run": datetime.now().isoformat(),
+        "last_run": datetime.now().astimezone().isoformat(),
         "last_status": "ok" if success else "error",
         "last_error": error[:500] if error else None,
     }
@@ -298,3 +299,66 @@ def _register_festival_job() -> None:
 
 
 _register_festival_job()
+
+
+# ── Cross-process status sync ────────────────────────────────────────────────
+#
+# 调度器活在 bot 进程内存里，web-admin 是独立进程，无法直接读取。
+# 仿 mcp_status.json：bot 进程定时把任务快照与最近执行结果原子落盘，
+# web 端 cron-dashboard 路由只读该文件。
+
+_CRON_STATUS_SYNC_JOB_ID = "cron_status_sync"
+_STATUS_PATH = CRON_JOBS_JSON_PATH
+
+
+def _sync_cron_status_file() -> None:
+    """把调度器任务快照写入共享状态文件（供 web-admin 跨进程读取）。Best-effort。"""
+    if not scheduler:
+        return
+    try:
+        jobs = []
+        for job in scheduler.get_jobs():
+            job_id = getattr(job, "id", None)
+            if not job_id or job_id == _CRON_STATUS_SYNC_JOB_ID:
+                continue
+            next_run = getattr(job, "next_run_time", None)
+            result = _job_run_results.get(job_id, {})
+            jobs.append({
+                "id": job_id,
+                "name": getattr(job, "name", None) or job_id,
+                "trigger": str(getattr(job, "trigger", "")),
+                "next_run": next_run.isoformat() if next_run else None,
+                "last_run": result.get("last_run"),
+                "last_status": result.get("last_status"),
+                "last_error": result.get("last_error"),
+            })
+        payload = {
+            "updated_at": datetime.now().astimezone().isoformat(),
+            "jobs": jobs,
+        }
+        _STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _STATUS_PATH.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        tmp.replace(_STATUS_PATH)
+    except Exception:
+        logger.warning("cron_status: failed to write status file", exc_info=True)
+
+
+def _register_cron_status_sync_job() -> None:
+    if not scheduler:
+        return
+    if nonebot is None:
+        return
+    scheduler.add_job(
+        _sync_cron_status_file,
+        "interval",
+        seconds=30,
+        id=_CRON_STATUS_SYNC_JOB_ID,
+        replace_existing=True,
+    )
+    logger.info("cron_status: sync job registered (every 30s)")
+
+
+_register_cron_status_sync_job()
