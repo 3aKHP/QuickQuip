@@ -47,7 +47,8 @@ max_tokens = 64    # reasoning 模型的思考 token 计入该预算，需调大
 # enabled 是工具名单：留空 [] 用默认白名单 + 全部 MCP 工具；
 # 非空时的作用方式由 enabled_mode 决定。
 #   append  （默认）在默认白名单 + MCP 工具之上追加——启用可选内置工具
-#           （如 draw_svg 画图，还需在 generation.toml [svg] 开 enabled）写这里。
+#           （如 draw_svg 画图，还需在 generation.toml [svg] 开 enabled；
+#           manage_scheduled_messages 让 LLM 管理当前群定时消息）写这里。
 #   replace 精确过滤：只暴露所列工具（含 MCP），用于主动收敛暴露面。
 enabled = []
 enabled_mode = "append"

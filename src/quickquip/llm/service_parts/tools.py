@@ -32,13 +32,14 @@ class ToolMixin(McpLifecycleMixin):
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
     # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
     # self._model_label (also ScopeMixin); _register_builtin_tools additionally
-    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin), and
-    # reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready.
+    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin) and
+    # self.register_schedule_messages_tool (defined in ScheduleMessagesToolMixin),
+    # and reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready.
     # MCP tool names are read via the public ``mcp_tool_names`` accessor —
     # ToolMixin inherits McpLifecycleMixin (which owns the ``_mcp_*`` state)
     # so that narrow interface is available on any host, minimal fakes included.
-    # ScopeMixin and DrawSvgToolMixin must precede ToolMixin in the LLMService
-    # base list.
+    # ScopeMixin, DrawSvgToolMixin and ScheduleMessagesToolMixin must precede
+    # ToolMixin in the LLMService base list.
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
@@ -229,6 +230,8 @@ class ToolMixin(McpLifecycleMixin):
         )
         # draw_svg 独立成 DrawSvgToolMixin（tools.py 已超长度预警线）
         self.register_draw_svg_tool()
+        # manage_scheduled_messages 独立成 ScheduleMessagesToolMixin（同上）
+        self.register_schedule_messages_tool()
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
         self.tool_registry.register(spec, handler)

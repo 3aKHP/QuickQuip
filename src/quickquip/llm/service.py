@@ -90,6 +90,7 @@ from quickquip.llm.service_parts import (
     DrawSvgToolMixin,
     HealthMixin,
     McpLifecycleMixin,
+    ScheduleMessagesToolMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
@@ -187,7 +188,7 @@ class _ImagePreprocessingOutcome:
     is_non_vision: bool
 
 
-class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
