@@ -7,7 +7,7 @@
 当前公式：
 
 - **“xxx了”**（`formulas/card_le/`）——把卡牌/遗物名当事件用，加“了”输出。
-- **“故障化”**（`formulas/defectify/`）——`/defectify` 命令，把输入转写成读音贴近「故障机器人」（STS 初始角色 Defect 的官方中文名）的五字梗。实现先于本域存在（prompt 原在 `llm/defectify.py`），已迁入归位。
+- **“故障化”**（`formulas/defectify/`）——`/defectify` 命令，把输入转写成读音贴近「故障机器人」（STS 初始角色 Defect 的官方中文名）的五字梗。
 
 “我说xxxx”“假如xxxx”等以后以兄弟子包形式加入。
 
@@ -61,7 +61,7 @@
 只有主动路径，无被动触发：
 
 - 「故障机器人」=《杀戮尖塔》初始角色 **Defect** 的官方中文名。公式把输入转写成读音依次贴近「故·障·机·器·人」的五字，附一行笑点解析；
-- 输入形态与 `/turmfluch` 相同（跟随文字 / 命令内图片 / 引用消息），共用 `llm/single_shot.py` 的 `CommandSingleShotSpec` 管线；差异点只有 prompt（`formulas/defectify/prompting.py`）、解析器（原样透传，无词表闭集校验）、temperature 与限频桶；
+- 输入形态与 `/turmfluch` 相同（跟随文字 / 命令内图片 / 引用消息），共用 `llm/single_shot.py` 的 `CommandSingleShotSpec` 管线；差异点只有 prompt（`formulas/defectify/prompting.py`）、解析器（原样透传，无词表闭集校验）、temperature、限频桶与 `log_label`（turmfluch 在 provider 异常路径记日志，defectify 不记）；
 - `sts_defectify` 限频桶（global scope，独立于 `llm_chat`，不与 LLM 聊天共享额度）；
 - LLM 编排同 turmfluch：`LLMService.generate_defectify_reply`，prompt 在本域、编排在 `llm/` 域。
 

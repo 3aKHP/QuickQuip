@@ -50,8 +50,6 @@ LLM 相关核心文件如下：
   - 每日总结生成逻辑（模型级联、prompt 构建）
 - `src/quickquip/llm/briefing.py`
   - 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联）
-- `src/quickquip/llm/defectify.py`
-  - `/defectify` 故障机器人转写逻辑
 - `src/quickquip/app/message_pipeline.py`
   - 应用组合根：chat / games / tieba 单例装配、`resolve_reply()` 规则链、`reload_chat_rules_pipeline()`、`save_all()` / `close_persistent_stores()` 与 `_ensure_llm_bindings()`
 - `src/quickquip/llm/config.py`
