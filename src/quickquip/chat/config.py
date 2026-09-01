@@ -98,12 +98,6 @@ try:
 except Exception:
     logger.exception("chat_rules 初始加载失败，使用内置默认值")
 
-SCHEDULED_MESSAGES: list[dict] = []
-# Example entry (uncomment and fill in to enable):
-# SCHEDULED_MESSAGES = [
-#     {"cron": "0 7 * * *", "group_ids": [123456], "message": "早上好！"},
-# ]
-
 REGION_ZH = {
     "Africa": "非洲",
     "America": "美洲",

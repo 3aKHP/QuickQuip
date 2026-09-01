@@ -8,8 +8,16 @@ except (ModuleNotFoundError, ValueError):
     nonebot = None
     scheduler = None
 
+try:
+    # 与 scheduler 分开导入：onebot 适配器在 driver 未初始化时也可用（测试环境）
+    from nonebot.adapters.onebot.v11 import Message, MessageSegment
+except (ModuleNotFoundError, ValueError):
+    Message = MessageSegment = None
+
+from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.adapters.nonebot._safe_send import send_group_text
-from quickquip.chat.config import SCHEDULED_MESSAGES
+from quickquip.adapters.nonebot._scheduling import parse_cron
+from quickquip.chat.scheduled_messages import ScheduledMessage, ScheduledMessageStore
 from quickquip.common.bot_action_trace import bot_action_trace
 
 logger = logging.getLogger(__name__)
@@ -37,71 +45,169 @@ def get_job_results() -> dict:
 
 # ── Job registration ─────────────────────────────────────────────────────────
 
+_JOB_ID_PREFIX = "scheduled_msg_"
+_LLM_RULE_NAME = "scheduled_message_llm"
 
-def _register_jobs():
-    if not scheduler or not SCHEDULED_MESSAGES:
+
+def _build_llm_task_prompt(job: ScheduledMessage) -> str:
+    """llm 类任务的信封式 prompt：合成 user 消息，标注这是定时触发。
+
+    与 awakening 的【内部触发说明】信封同一模式；合成消息以 user 角色进入
+    对话（参考 Claude Code Cron：定时触发的 prompt 入队为用户消息而非工具结果）。
+    """
+    return (
+        "【内部触发说明】这是群友之前设置的定时任务，现在到点自动触发。"
+        "请按照【任务指令】执行，以你平时在群里说话的语气自然地发出内容；"
+        "不要在回复里提及这条说明本身。\n"
+        f"【任务指令】{job.message}"
+    )
+
+
+async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str) -> None:
+    """llm 类任务单群触发：LLM 生成 → 安全外发（敏感词过滤在 generate_reply 内部）。"""
+    from quickquip.app.message_pipeline import (
+        _ensure_llm_bindings,
+        get_llm_service,
+        rule_switch,
+    )
+    from quickquip.chat.awakening import _is_group_llm_enabled
+
+    if not rule_switch.is_enabled(group_id, _LLM_RULE_NAME):
+        logger.info("scheduled_msg: llm job %s skipped in group %s (rule disabled)", job.id, group_id)
+        return
+    _ensure_llm_bindings()
+    svc = get_llm_service()
+    if not _is_group_llm_enabled(svc, group_id):
+        logger.info("scheduled_msg: llm job %s skipped in group %s (group LLM disabled)", job.id, group_id)
         return
 
-    bot_getter = nonebot.get_bot
+    result = await svc.generate_reply(
+        group_id=group_id,
+        user_id="scheduled_timer",
+        sender_name="定时任务",
+        prompt=_build_llm_task_prompt(job),
+        image_urls=[],
+        recent_messages=svc.recent_message_buffer.list_recent(group_id, limit=20),
+        include_recent_images=True,
+        raw_user_text="",
+        store_user_message=False,  # 合成消息不写入群对话历史
+        message_id=None,
+    )
+    reply_text = str(result.get("reply") or "").strip()
+    if not reply_text:
+        return
+    message = build_llm_reply_message(result, Message, MessageSegment)
+    with bot_action_trace(
+        trigger_kind="scheduled",
+        reason_code="scheduled_message_llm",
+        reason_detail=f"定时任务触发（LLM）：{job_id}",
+        rule_name=_LLM_RULE_NAME,
+        chat_type="group",
+        group_id=group_id,
+        reply_preview=reply_text[:100],
+        source="scheduler.scheduled_message",
+    ):
+        await bot.send_group_msg(group_id=int(group_id), message=message)
 
-    for index, entry in enumerate(SCHEDULED_MESSAGES):
-        cron_expr = entry["cron"]
-        group_ids = entry["group_ids"]
-        message = entry["message"]
 
-        parts = cron_expr.split()
-        cron_kwargs = {
-            "minute": parts[0],
-            "hour": parts[1],
-            "day": parts[2],
-            "month": parts[3],
-            "day_of_week": parts[4],
-        }
+def _make_send_task(job: ScheduledMessage, bot_getter, store: ScheduledMessageStore):
+    job_id = f"{_JOB_ID_PREFIX}{job.id}"
 
-        async def _send(gids=group_ids, msg=message, _idx=index):
-            job_id = f"scheduled_msg_{_idx}"
+    def _consume_one_shot() -> None:
+        """一次性任务触发后自动删除（存储 + 调度器）。"""
+        if job.recurring:
+            return
+        try:
+            store.remove(job.id)
+        except Exception:
+            logger.warning("scheduled_msg: failed to remove one-shot job %s", job.id, exc_info=True)
+        try:
+            if scheduler:
+                scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
+    async def _send():
+        fired = False
+        try:
             try:
+                bot = bot_getter()
+            except Exception:
+                logger.warning("scheduled_msg: bot not available, skipping")
+                return
+            for gid in job.group_ids:
                 try:
-                    bot = bot_getter()
-                except Exception:
-                    logger.warning("scheduled_msg: bot not available, skipping")
-                    return
-                for gid in gids:
-                    try:
+                    if job.kind == "llm":
+                        await _fire_llm_task(bot, job, gid, job_id)
+                    else:
                         with bot_action_trace(
                             trigger_kind="scheduled",
                             reason_code="scheduled_message",
-                            reason_detail=f"定时消息触发：scheduled_msg_{_idx}",
+                            reason_detail=f"定时消息触发：{job_id}",
                             rule_name="scheduled_message",
                             chat_type="group",
                             group_id=gid,
-                            reply_preview=msg,
+                            reply_preview=job.message,
                             source="scheduler.scheduled_message",
                         ):
-                            await send_group_text(bot, int(gid), msg)
-                    except Exception:
-                        logger.warning("scheduled_msg: failed to send to group %s", gid, exc_info=True)
-                try:
-                    record_job_result(job_id, True)
+                            await send_group_text(bot, int(gid), job.message)
                 except Exception:
-                    pass
-            except Exception as exc:
-                try:
-                    record_job_result(job_id, False, str(exc)[:500])
-                except Exception:
-                    pass
-                raise
+                    logger.warning("scheduled_msg: failed to send to group %s", gid, exc_info=True)
+            fired = True
+            try:
+                record_job_result(job_id, True)
+            except Exception:
+                pass
+        except Exception as exc:
+            try:
+                record_job_result(job_id, False, str(exc)[:500])
+            except Exception:
+                pass
+            raise
+        finally:
+            # bot 不可用而跳过的不算触发，一次性任务保留到下次
+            if fired:
+                _consume_one_shot()
 
-        scheduler.add_job(
-            _send,
-            "cron",
-            id=f"scheduled_msg_{index}",
-            replace_existing=True,
-            **cron_kwargs,
-        )
+    return _send
 
 
-_register_jobs()
+def reload_scheduled_message_jobs(store: ScheduledMessageStore | None = None) -> int:
+    """重读任务存储并重新注册所有定时消息 job，返回已注册数量。
+
+    斜杠命令 / LLM 工具变更后直接调用（同进程即时生效）；
+    Web Admin 写入后通过 ``scheduler_reload`` 管理动作间接触发。
+    """
+    if not scheduler:
+        return 0
+    store = store or ScheduledMessageStore()
+    for existing in scheduler.get_jobs():
+        if existing.id.startswith(_JOB_ID_PREFIX):
+            scheduler.remove_job(existing.id)
+    if nonebot is None:
+        return 0
+    bot_getter = nonebot.get_bot
+    count = 0
+    for job in store.list():
+        if not job.enabled:
+            continue
+        try:
+            cron_kwargs = parse_cron(job.cron, fallback_hour="0")
+            scheduler.add_job(
+                _make_send_task(job, bot_getter, store),
+                "cron",
+                id=f"{_JOB_ID_PREFIX}{job.id}",
+                replace_existing=True,
+                **cron_kwargs,
+            )
+            count += 1
+        except Exception:
+            logger.warning("scheduled_msg: failed to register job %s", job.id, exc_info=True)
+    logger.info("scheduled_msg: %d job(s) registered", count)
+    return count
+
+
+reload_scheduled_message_jobs()
 
 
 # ── Festival check ────────────────────────────────────────────────────────────
