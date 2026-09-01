@@ -338,6 +338,8 @@ function resize() {
   canvas.getContext('2d')?.setTransform(dpr, 0, 0, dpr, 0, 0)
   cx = window.innerWidth / 2; cy = window.innerHeight / 2
   initParticles(window.innerWidth, window.innerHeight)
+  // 静态模式：重设 canvas 尺寸会清空位图且无 RAF 循环，补画一帧
+  if (shouldStatic()) draw(performance.now())
 }
 
 function prefersReducedMotion(): boolean {
