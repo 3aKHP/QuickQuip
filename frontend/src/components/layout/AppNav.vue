@@ -36,7 +36,9 @@
 
       <div class="domain-rail__tools">
         <button class="rail-tool" :title="themeLabel" @click="$emit('toggleTheme')">
-          <UiIcon :name="themeIcon" :size="18" />
+          <Transition name="icon-swap" mode="out-in">
+            <UiIcon :key="themeIcon" :name="themeIcon" :size="18" />
+          </Transition>
         </button>
         <button class="rail-tool" title="退出" :disabled="logoutDisabled" @click="$emit('logout')">
           <UiIcon name="LogOut" :size="18" />
@@ -78,7 +80,9 @@
     </span>
     <div class="mobile-bar__actions">
       <button class="mobile-bar__theme-btn" :aria-label="themeLabel" @click="$emit('toggleTheme')">
-        <UiIcon :name="themeIcon" :size="18" />
+        <Transition name="icon-swap" mode="out-in">
+          <UiIcon :key="themeIcon" :name="themeIcon" :size="18" />
+        </Transition>
       </button>
       <button class="mobile-bar__theme-btn" title="退出" :disabled="logoutDisabled" @click="$emit('logout')">
         <UiIcon name="LogOut" :size="18" />
@@ -447,11 +451,27 @@ watch(activeSectionKey, (sectionKey) => {
 }
 
 .page-link.active::before {
+  transform: scaleY(1);
+}
+
+.page-link::before {
   content: "";
   width: 3px;
   height: 18px;
   border-radius: var(--qq-radius-full);
   background: var(--qq-primary);
+  transform: scaleY(0);
+  transform-origin: 50% 50%;
+  transition: transform var(--qq-transition-base);
+}
+
+.page-link svg {
+  transition: transform var(--qq-transition-base), color var(--qq-transition-fast);
+}
+
+.page-link.active svg {
+  transform: scale(1.08);
+  color: var(--qq-primary);
 }
 
 .mobile-bar,

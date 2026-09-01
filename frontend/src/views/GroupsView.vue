@@ -4,7 +4,7 @@
     <p v-if="error" class="error">{{ error }}</p>
     <UiLoading v-else-if="!loaded" />
     <div v-else class="groups-layout">
-      <UiCard padding="md" shadow="sm">
+      <UiCard padding="md" shadow="sm" accent="primary">
         <h3 class="card-title section-title"><UiIcon name="FileText" :size="18" /> 每日总结</h3>
         <ul class="glist">
           <li v-for="gid in groups.summary" :key="gid">
@@ -14,7 +14,7 @@
               <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('summary', gid)">移除</UiButton>
             </span>
           </li>
-          <li v-if="!groups.summary.length" class="empty-li"><UiEmpty icon="BookOpen" title="无" description="暂无开启每日总结的群组" /></li>
+          <li v-if="!groups.summary.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启每日总结的群组" /></li>
         </ul>
         <div class="add-row">
           <select v-model="newIds.summary"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('summary')" :key="gid" :value="gid">{{ gid }}</option></select>
@@ -23,7 +23,7 @@
         </div>
       </UiCard>
 
-      <UiCard padding="md" shadow="sm">
+      <UiCard padding="md" shadow="sm" accent="cyan">
         <h3 class="card-title section-title"><UiIcon name="Newspaper" :size="18" /> 每日简报</h3>
         <ul class="glist">
           <li v-for="gid in groups.briefing" :key="gid">
@@ -39,7 +39,7 @@
               <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('briefing', gid)">移除</UiButton>
             </span>
           </li>
-          <li v-if="!groups.briefing.length" class="empty-li"><UiEmpty icon="BookOpen" title="无" description="暂无开启每日简报的群组" /></li>
+          <li v-if="!groups.briefing.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启每日简报的群组" /></li>
         </ul>
         <div class="add-row">
           <select v-model="newIds.briefing"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('briefing')" :key="gid" :value="gid">{{ gid }}</option></select>
@@ -48,7 +48,7 @@
         </div>
       </UiCard>
 
-      <UiCard padding="md" shadow="sm">
+      <UiCard padding="md" shadow="sm" accent="accent">
         <h3 class="card-title section-title"><UiIcon name="CalendarRange" :size="18" /> 群周报</h3>
         <ul class="glist">
           <li v-for="gid in groups.weekly" :key="gid">
@@ -58,7 +58,7 @@
               <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('weekly', gid)">移除</UiButton>
             </span>
           </li>
-          <li v-if="!groups.weekly.length" class="empty-li"><UiEmpty icon="BookOpen" title="无" description="暂无开启群周报的群组" /></li>
+          <li v-if="!groups.weekly.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启群周报的群组" /></li>
         </ul>
         <div class="add-row">
           <select v-model="newIds.weekly"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('weekly')" :key="gid" :value="gid">{{ gid }}</option></select>
@@ -67,7 +67,7 @@
         </div>
       </UiCard>
 
-      <UiCard padding="md" shadow="sm">
+      <UiCard padding="md" shadow="sm" accent="success">
         <h3 class="card-title section-title"><UiIcon name="CalendarDays" :size="18" /> 群月报</h3>
         <ul class="glist">
           <li v-for="gid in groups.monthly" :key="gid">
@@ -77,7 +77,7 @@
               <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('monthly', gid)">移除</UiButton>
             </span>
           </li>
-          <li v-if="!groups.monthly.length" class="empty-li"><UiEmpty icon="BookOpen" title="无" description="暂无开启群月报的群组" /></li>
+          <li v-if="!groups.monthly.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启群月报的群组" /></li>
         </ul>
         <div class="add-row">
           <select v-model="newIds.monthly"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('monthly')" :key="gid" :value="gid">{{ gid }}</option></select>

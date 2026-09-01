@@ -1,5 +1,10 @@
 <template>
-  <component :is="resolved" :size="size" :stroke-width="strokeWidth" />
+  <component
+    :is="resolved"
+    :size="size"
+    :stroke-width="strokeWidth"
+    :class="motion ? `qq-ico qq-ico--${motion}` : undefined"
+  />
 </template>
 
 <script setup lang="ts">
@@ -55,6 +60,8 @@ const props = defineProps<{
   name: IconName | string
   size?: number
   strokeWidth?: number
+  /** 微动效：父级 hover 时触发（spin 旋转 / nudge 前移），见 transitions.css */
+  motion?: 'spin' | 'nudge'
 }>()
 
 const resolved = computed(() => {

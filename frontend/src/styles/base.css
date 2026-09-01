@@ -112,6 +112,7 @@ tbody td {
   border-bottom: 1px solid var(--qq-border);
   color: var(--qq-text);
   vertical-align: middle;
+  transition: background var(--qq-transition-fast);
 }
 
 tbody tr:hover td {

@@ -1,5 +1,9 @@
 <template>
-  <div class="ui-empty">
+  <div v-if="compact" class="ui-empty-inline">
+    <UiIcon v-if="icon" :name="icon" :size="14" class="ui-empty-inline__icon" />
+    <span class="ui-empty-inline__text">{{ description || title }}</span>
+  </div>
+  <div v-else class="ui-empty">
     <slot name="icon">
       <UiIcon v-if="icon" :name="icon" :size="48" class="ui-empty__icon" />
     </slot>
@@ -19,8 +23,11 @@ withDefaults(defineProps<{
   icon?: string
   title?: string
   description?: string
+  /** 面板内空态：收敛为行内小提示，不再大字居中 */
+  compact?: boolean
 }>(), {
   title: '暂无数据',
+  compact: false,
 })
 </script>
 
@@ -56,5 +63,20 @@ withDefaults(defineProps<{
 
 .ui-empty__action {
   margin-top: var(--qq-gap-lg);
+}
+
+/* 行内紧凑空态（面板内） */
+.ui-empty-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--qq-gap-sm) var(--qq-gap-xs);
+  color: var(--qq-text-quiet);
+  font-size: var(--qq-text-sm);
+}
+
+.ui-empty-inline__icon {
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 </style>

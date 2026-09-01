@@ -9,7 +9,7 @@
       <div class="f f-act"><UiButton icon="Search" @click="search">查询</UiButton><UiButton variant="ghost" size="sm" icon="RefreshCw" @click="reset">重置</UiButton></div>
     </div>
     <UiCard padding="md" shadow="sm">
-      <UiLoading v-if="loading" text="加载中..." />
+      <UiSkeleton v-if="loading" variant="table" :rows="8" />
       <div v-else-if="error" class="err">{{ error }}</div>
       <template v-else-if="items.length > 0">
         <div class="table-scroll"><table class="audit-table"><thead><tr><th>时间</th><th>操作者</th><th>操作</th><th>目标类型</th><th>目标 ID</th></tr></thead><tbody><template v-for="entry in items" :key="entry.id"><tr class="ar" @click="tg(entry.id)"><td class="col-t">{{ entry.timestamp }}</td><td class="mono">{{ entry.operator }}</td><td><UiTag size="sm" :variant="av(entry.action)">{{ entry.action }}</UiTag></td><td><UiTag size="sm" :variant="tv(entry.target_type)">{{ entry.target_type }}</UiTag></td><td class="mono col-tid">{{ entry.target_id }}</td></tr><tr v-if="exp.has(entry.id)"><td colspan="5"><div class="sum-panels"><div v-if="entry.summary_before" class="sp sp-before"><span class="sl">变更前</span><pre class="json">{{ pj(entry.summary_before) }}</pre></div><div v-if="entry.summary_after" class="sp sp-after"><span class="sl">变更后</span><pre class="json">{{ pj(entry.summary_after) }}</pre></div><div v-if="!entry.summary_before && !entry.summary_after" class="no-sum">无摘要</div></div></td></tr></template></tbody></table></div>
@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref, reactive, computed } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import { fetchAuditEntries, type AuditEntry, type AuditQueryParams } from '../api/audit'
 
 const loading = ref(true); const error = ref<string | null>(null); const items = ref<AuditEntry[]>([]); const total = ref(0); const page = ref(1); const limit = 50; const exp = ref(new Set<number>())
@@ -49,7 +49,14 @@ onMounted(() => load())
 .col-t { white-space: nowrap; font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
 .col-tid { font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ar { cursor: pointer; }
-.sum-panels { display: flex; gap: var(--qq-gap-sm); flex-wrap: wrap; padding: var(--qq-gap-sm) 0; }
+.sum-panels { display: flex; gap: var(--qq-gap-sm); flex-wrap: wrap; padding: var(--qq-gap-sm) 0; animation: audit-expand 200ms var(--qq-ease-out); }
+@keyframes audit-expand {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sum-panels { animation: none; }
+}
 .sp { flex: 1; min-width: 200px; }
 .sl { font-size: var(--qq-text-xs); font-weight: 500; color: var(--qq-text-muted); }
 .sp-before .sl { color: var(--qq-warn); }

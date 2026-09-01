@@ -30,7 +30,7 @@
           </div>
         </div>
 
-        <UiLoading v-if="loading && !entries.length" />
+        <UiSkeleton v-if="loading && !entries.length" variant="table" :rows="6" />
         <UiEmpty v-else-if="!entries.length" icon="FileText" :title="keyword ? '无匹配语录' : '暂无语录'" />
 
         <div v-else class="table-scroll"><table class="data-table">
@@ -72,6 +72,7 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { listGroups, listQuotes, deleteQuote } from '../api/quotes'
 import { toast } from '../toast'

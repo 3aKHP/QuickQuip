@@ -7,7 +7,9 @@
     </UiPageHeader>
 
     <p v-if="error" class="error">{{ error }}</p>
-    <UiLoading v-if="loading" />
+    <div v-if="loading" class="dash-cards">
+      <UiCard v-for="i in 4" :key="i" padding="md" shadow="sm"><UiSkeleton :rows="2" /></UiCard>
+    </div>
 
     <template v-else-if="data">
       <div class="domain-grid">
@@ -30,23 +32,10 @@
 
       <!-- Top stat cards -->
       <div class="dash-cards">
-        <article class="stat-card stat-card--primary">
-          <span class="stat-card__label">活跃群组</span>
-          <span class="stat-card__value">{{ fmt(data.totalGroups) }}</span>
-        </article>
-        <article class="stat-card">
-          <span class="stat-card__label">累计消息</span>
-          <span class="stat-card__value">{{ fmt(data.totalMessages) }}</span>
-        </article>
-        <article class="stat-card">
-          <span class="stat-card__label">活跃用户</span>
-          <span class="stat-card__value">{{ fmt(data.totalUsers) }}</span>
-        </article>
-        <article class="stat-card">
-          <span class="stat-card__label">金币用户</span>
-          <span class="stat-card__value">{{ fmt(data.goldUserCount) }}</span>
-          <span class="stat-card__sub">总金币 {{ fmt(data.totalGold) }}</span>
-        </article>
+        <UiStatCard label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" />
+        <UiStatCard label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" />
+        <UiStatCard label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" />
+        <UiStatCard label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" />
       </div>
 
       <!-- Row 2: rankings -->
@@ -63,7 +52,7 @@
               <span class="mini-bar-val">{{ fmt(g.count) }}</span>
             </div>
           </div>
-          <UiEmpty v-else icon="BarChart3" title="暂无数据" />
+          <UiEmpty v-else compact icon="BarChart3" title="暂无群消息数据" />
         </UiCard>
 
         <UiCard padding="md" shadow="sm" class="dash-half">
@@ -75,7 +64,7 @@
               <span class="mini-bar-val">{{ r.count }}</span>
             </div>
           </div>
-          <UiEmpty v-else icon="Zap" title="暂无数据" />
+          <UiEmpty v-else compact icon="Zap" title="暂无规则触发数据" />
         </UiCard>
       </div>
 
@@ -101,7 +90,7 @@
         <UiCard padding="md" shadow="sm" class="dash-half">
           <h3 class="dash-card-title section-title">LLM 对话</h3>
           <div class="cron-summary">
-            <span class="stat-card__value" style="font-size:var(--qq-text-2xl)">{{ fmt(data.llmConversations.count) }}</span>
+            <span class="llm-count">{{ fmt(data.llmConversations.count) }}</span>
             <span class="muted">条消息</span>
             <span v-if="data.llmConversations.latest" class="muted" style="margin-left:auto">最近 {{ fmtTime(data.llmConversations.latest) }}</span>
           </div>
@@ -119,6 +108,8 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiStatCard from '../components/ui/UiStatCard.vue'
+import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import { fetchDashboardData, type DashboardData } from '../api/dashboard'
 import { NAV_ITEMS, NAV_SECTIONS } from '../config/nav'
 
@@ -234,46 +225,12 @@ onMounted(async () => {
   margin-bottom: var(--qq-gap-lg);
 }
 
-.stat-card {
-  background: var(--qq-surface);
-  border-radius: var(--qq-radius-card);
-  box-shadow: var(--qq-shadow-card);
-  padding: var(--qq-gap-lg);
-  display: flex;
-  flex-direction: column;
-  gap: var(--qq-gap-xs);
-  position: relative;
-  overflow: hidden;
-}
-
-.stat-card--primary {
-  background: var(--qq-gradient-brand);
-  color: var(--qq-white);
-  box-shadow: 0 4px 16px var(--qq-primary-shadow);
-}
-
-.stat-card--primary .stat-card__label,
-.stat-card--primary .stat-card__value,
-.stat-card--primary .stat-card__sub { color: var(--qq-white); }
-
-.stat-card__label {
-  font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
-  font-weight: 500;
-}
-
-.stat-card__value {
-  font-size: var(--qq-text-3xl);
+.llm-count {
+  font-size: var(--qq-text-2xl);
   font-weight: 700;
   color: var(--qq-text);
   line-height: 1;
   font-variant-numeric: tabular-nums;
-}
-
-.stat-card__sub {
-  font-size: var(--qq-text-xs);
-  color: var(--qq-text-muted);
-  margin-top: 2px;
 }
 
 /* Card rows */
@@ -291,10 +248,6 @@ onMounted(async () => {
 @media (max-width: 640px) {
   .dash-cards {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .stat-card__value {
-    font-size: var(--qq-text-2xl);
   }
 
   .mini-bar-row {
