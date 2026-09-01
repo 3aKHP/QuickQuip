@@ -12,7 +12,7 @@
           <button
             v-for="file in files"
             :key="file.name"
-            class="archive-item"
+            class="archive-item qq-selectable"
             :class="{ active: file.name === selectedFile }"
             @click="selectFile(file.name)"
           >
@@ -179,10 +179,6 @@ onMounted(() => {
   cursor: pointer;
 }
 
-.archive-item.active {
-  border-color: var(--qq-primary-border);
-  background: var(--qq-primary-soft);
-}
 
 .archive-item-head,
 .archive-meta,

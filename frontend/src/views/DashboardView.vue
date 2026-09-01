@@ -1,10 +1,13 @@
 <template>
   <div class="dash-view">
-    <UiPageHeader title="概览" subtitle="QuickQuip 当前运行状态一览">
-      <template #actions>
-        <UiTag variant="info">v{{ quickQuipVersion }}</UiTag>
-      </template>
-    </UiPageHeader>
+    <header class="dash-hero">
+      <img class="dash-hero__logo" src="/brand.svg" alt="" width="48" height="48" aria-hidden="true">
+      <div class="dash-hero__info">
+        <h1 class="dash-hero__title">QuickQuip 管理台</h1>
+        <p class="dash-hero__subtitle">当前运行状态一览</p>
+      </div>
+      <UiTag variant="info">v{{ quickQuipVersion }}</UiTag>
+    </header>
 
     <p v-if="error" class="error">{{ error }}</p>
     <div v-if="loading" class="dash-cards">
@@ -102,7 +105,6 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
@@ -160,6 +162,52 @@ onMounted(async () => {
 }
 
 .error { color: var(--qq-danger); }
+
+/* Hero 位：总览域唯一使用品牌渐变晕染的大面积区块 */
+.dash-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-md);
+  padding: var(--qq-gap-lg);
+  margin-bottom: var(--qq-gap-lg);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  background:
+    radial-gradient(ellipse at 88% -30%, var(--qq-cyan-soft), transparent 55%),
+    linear-gradient(120deg, var(--qq-primary-soft), transparent 62%),
+    var(--qq-surface);
+  box-shadow: var(--qq-shadow-card);
+  overflow: hidden;
+}
+
+.dash-hero__logo {
+  width: 48px;
+  height: 48px;
+  display: block;
+  border-radius: var(--qq-radius-xl);
+  box-shadow: 0 4px 14px var(--qq-primary-shadow);
+  flex-shrink: 0;
+}
+
+.dash-hero__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-hero__title {
+  font-family: var(--qq-font-display);
+  font-size: var(--qq-text-xl);
+  font-weight: 600;
+  color: var(--qq-text);
+  line-height: 1.3;
+}
+
+.dash-hero__subtitle {
+  font-size: var(--qq-text-sm);
+  color: var(--qq-text-muted);
+  margin-top: var(--qq-gap-xs);
+}
 
 .domain-grid {
   display: grid;

@@ -5,7 +5,8 @@
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiLoading v-else-if="loading" />
     <div class="toolbar"><label>群组<select v-model="selectedGroup" @change="selectGroup"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g.group_id" :value="g.group_id">{{ g.group_id }}（{{ g.user_count }} 人 / {{ g.total_gold.toLocaleString() }} 💰）</option></select></label><UiButton :loading="loading" icon="RefreshCw" @click="loadGroups">刷新</UiButton></div>
-    <UiEmpty v-if="!loading && selectedGroup && !loadError && !rankings.length && !acctSearched" icon="Coins" title="暂无数据" />
+    <UiEmpty v-if="!loading && !selectedGroup" icon="Coins" title="选择一个群组查看金币经济" description="上方下拉框列出所有开启金币系统的群组，含用户数与总金币。" />
+    <UiEmpty v-else-if="!loading && selectedGroup && !loadError && !rankings.length && !acctSearched" icon="Coins" title="暂无数据" />
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">
       <h3 class="st section-title">金币排行 TOP 20</h3>

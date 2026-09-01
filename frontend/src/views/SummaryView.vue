@@ -23,6 +23,13 @@
 
     <UiSkeleton v-if="listLoading && !selected" :rows="5" class="summary-loading" />
 
+    <UiEmpty
+      v-if="!groupId && !selected && !listLoading"
+      icon="FileText"
+      title="选择一个群组查看总结记录"
+      description="每日总结、周报与月报按群组归档；从上方群组下拉框开始。"
+    />
+
     <Transition name="tab-pane" mode="out-in">
       <div v-if="!selected" :key="activeTab" class="summary-list">
         <article

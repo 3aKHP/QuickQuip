@@ -8,7 +8,7 @@
         <UiLoading v-if="listing && !scopes.length" />
         <UiEmpty v-else-if="!scopes.length" icon="BookUser" title="暂无资料文件" />
         <div v-else class="list-scroll">
-          <button v-for="scope in scopes" :key="scope.scope" class="list-item" :class="{ active: scope.scope === selectedScope }" @click="selectScope(scope.scope)">
+          <button v-for="scope in scopes" :key="scope.scope" class="list-item qq-selectable" :class="{ active: scope.scope === selectedScope }" @click="selectScope(scope.scope)">
             <div class="list-item-head"><span>{{ scope.label }}</span><UiTag v-if="scope.global" size="sm" variant="info">全局</UiTag><UiTag v-if="scope.existing_files < scope.total_files" size="sm" variant="warn">缺失</UiTag></div>
             <div class="list-item-meta"><span class="mono">{{ scope.path }}</span><span>{{ scope.existing_files }}/{{ scope.total_files }}</span></div>
           </button>
@@ -82,8 +82,6 @@ loadList()
 .list-panel { width: 280px; flex-shrink: 0; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
 .list-scroll { overflow-y: auto; flex: 1; }
 .list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
-.list-item:hover { background: var(--qq-surface-hover); }
-.list-item.active { background: var(--qq-primary-soft); border-left: 3px solid var(--qq-primary); }
 .list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; color: var(--qq-text); font-size: var(--qq-text-base); font-weight: 500; }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); display: flex; gap: var(--qq-gap-xs); }
 .mono { font-family: var(--qq-font-mono); }

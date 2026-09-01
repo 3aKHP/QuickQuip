@@ -140,6 +140,14 @@
         </div>
 
         <div class="drawer__footer">
+          <button
+            class="drawer-action"
+            :class="{ 'drawer-action--on': lowMotion }"
+            @click="toggleLowMotion"
+          >
+            <UiIcon :name="lowMotion ? 'ZapOff' : 'Zap'" :size="14" />
+            <span>{{ lowMotion ? '已开启低动态' : '低动态模式' }}</span>
+          </button>
           <button class="drawer-action" :disabled="logoutDisabled" @click="$emit('logout'); drawerOpen = false">
             <UiIcon name="LogOut" :size="14" />
             <span>退出</span>
@@ -677,9 +685,16 @@ watch(activeSectionKey, (sectionKey) => {
   }
 
   .drawer__footer {
+    display: flex;
+    gap: var(--qq-gap-xs);
     padding: var(--qq-gap-sm);
     padding-bottom: calc(var(--qq-gap-sm) + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid var(--qq-border);
+  }
+
+  .drawer-action--on {
+    color: var(--qq-accent);
+    background: var(--qq-accent-soft);
   }
 
   .drawer-action:disabled {

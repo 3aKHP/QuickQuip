@@ -49,6 +49,24 @@ html.theme-anim *::after {
   color: var(--qq-selection-fg);
 }
 
+/* ── 分栏可选中行（左列表/右编辑范式共享选中态）──
+   用法：列表行元素加 class="qq-selectable"，选中态由 .active 驱动。
+   hover 背景 + active 左侧内嵌指示条（box-shadow 不产生布局位移）。 */
+.qq-selectable {
+  transition:
+    background var(--qq-transition-fast),
+    box-shadow var(--qq-transition-fast);
+}
+
+.qq-selectable:hover {
+  background: var(--qq-surface-hover);
+}
+
+.qq-selectable.active {
+  background: var(--qq-primary-soft);
+  box-shadow: inset 3px 0 0 var(--qq-primary);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
