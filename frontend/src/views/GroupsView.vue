@@ -3,89 +3,36 @@
     <UiPageHeader title="功能群组管理" />
     <p v-if="error" class="error">{{ error }}</p>
     <UiLoading v-else-if="!loaded" />
-    <div v-else class="groups-layout">
-      <UiCard padding="md" shadow="sm" accent="primary">
-        <h3 class="card-title section-title"><UiIcon name="FileText" :size="18" /> 每日总结</h3>
-        <ul class="glist">
-          <li v-for="gid in groups.summary" :key="gid">
-            <span class="gid">{{ gid }}</span>
-            <span class="row-actions">
-              <UiButton size="sm" icon="Send" :loading="runningNow === `summary:${gid}`" @click="summaryNow(gid)">立即生成</UiButton>
-              <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('summary', gid)">移除</UiButton>
-            </span>
-          </li>
-          <li v-if="!groups.summary.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启每日总结的群组" /></li>
-        </ul>
-        <div class="add-row">
-          <select v-model="newIds.summary"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('summary')" :key="gid" :value="gid">{{ gid }}</option></select>
-          <input v-model="newManuals.summary" placeholder="或手动输入群号" @keyup.enter="addGroup('summary')" />
-          <UiButton icon="Plus" @click="addGroup('summary')">添加</UiButton>
+    <UiCard v-else padding="md" shadow="sm" accent="primary">
+      <UiTabs v-model="activeTab" :tabs="typeTabs" class="groups-tabs" />
+      <Transition name="tab-pane" mode="out-in">
+        <div :key="activeTab" class="tab-body">
+          <ul class="glist">
+            <li v-for="gid in groups[activeTab]" :key="gid">
+              <span class="gid">{{ gid }}</span>
+              <span class="row-actions">
+                <select v-if="activeTab === 'briefing'" v-model="briefingPeriods[gid]" class="period-select">
+                  <option value="">当前时段</option>
+                  <option value="morning">早报</option>
+                  <option value="noon">午报</option>
+                  <option value="evening">晚报</option>
+                </select>
+                <UiButton size="sm" icon="Send" :loading="runningNow === `${activeTab}:${gid}`" @click="runNow(gid)">立即生成</UiButton>
+                <UiButton size="sm" variant="danger" icon="X" @click="removeGroup(activeTab, gid)">移除</UiButton>
+              </span>
+            </li>
+            <li v-if="!groups[activeTab].length" class="empty-li">
+              <UiEmpty compact icon="BookOpen" :title="`暂无开启${typeLabels[activeTab]}的群组`" />
+            </li>
+          </ul>
+          <div class="add-row">
+            <select v-model="newIds[activeTab]"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups(activeTab)" :key="gid" :value="gid">{{ gid }}</option></select>
+            <input v-model="newManuals[activeTab]" placeholder="或手动输入群号" @keyup.enter="addGroup(activeTab)" />
+            <UiButton icon="Plus" @click="addGroup(activeTab)">添加</UiButton>
+          </div>
         </div>
-      </UiCard>
-
-      <UiCard padding="md" shadow="sm" accent="cyan">
-        <h3 class="card-title section-title"><UiIcon name="Newspaper" :size="18" /> 每日简报</h3>
-        <ul class="glist">
-          <li v-for="gid in groups.briefing" :key="gid">
-            <span class="gid">{{ gid }}</span>
-            <span class="row-actions">
-              <select v-model="briefingPeriods[gid]" class="period-select">
-                <option value="">当前时段</option>
-                <option value="morning">早报</option>
-                <option value="noon">午报</option>
-                <option value="evening">晚报</option>
-              </select>
-              <UiButton size="sm" icon="Send" :loading="runningNow === `briefing:${gid}`" @click="briefingNow(gid)">立即生成</UiButton>
-              <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('briefing', gid)">移除</UiButton>
-            </span>
-          </li>
-          <li v-if="!groups.briefing.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启每日简报的群组" /></li>
-        </ul>
-        <div class="add-row">
-          <select v-model="newIds.briefing"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('briefing')" :key="gid" :value="gid">{{ gid }}</option></select>
-          <input v-model="newManuals.briefing" placeholder="或手动输入群号" @keyup.enter="addGroup('briefing')" />
-          <UiButton icon="Plus" @click="addGroup('briefing')">添加</UiButton>
-        </div>
-      </UiCard>
-
-      <UiCard padding="md" shadow="sm" accent="accent">
-        <h3 class="card-title section-title"><UiIcon name="CalendarRange" :size="18" /> 群周报</h3>
-        <ul class="glist">
-          <li v-for="gid in groups.weekly" :key="gid">
-            <span class="gid">{{ gid }}</span>
-            <span class="row-actions">
-              <UiButton size="sm" icon="Send" :loading="runningNow === `weekly:${gid}`" @click="periodNow('weekly', gid)">立即生成</UiButton>
-              <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('weekly', gid)">移除</UiButton>
-            </span>
-          </li>
-          <li v-if="!groups.weekly.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启群周报的群组" /></li>
-        </ul>
-        <div class="add-row">
-          <select v-model="newIds.weekly"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('weekly')" :key="gid" :value="gid">{{ gid }}</option></select>
-          <input v-model="newManuals.weekly" placeholder="或手动输入群号" @keyup.enter="addGroup('weekly')" />
-          <UiButton icon="Plus" @click="addGroup('weekly')">添加</UiButton>
-        </div>
-      </UiCard>
-
-      <UiCard padding="md" shadow="sm" accent="success">
-        <h3 class="card-title section-title"><UiIcon name="CalendarDays" :size="18" /> 群月报</h3>
-        <ul class="glist">
-          <li v-for="gid in groups.monthly" :key="gid">
-            <span class="gid">{{ gid }}</span>
-            <span class="row-actions">
-              <UiButton size="sm" icon="Send" :loading="runningNow === `monthly:${gid}`" @click="periodNow('monthly', gid)">立即生成</UiButton>
-              <UiButton size="sm" variant="danger" icon="X" @click="removeGroup('monthly', gid)">移除</UiButton>
-            </span>
-          </li>
-          <li v-if="!groups.monthly.length" class="empty-li"><UiEmpty compact icon="BookOpen" title="暂无开启群月报的群组" /></li>
-        </ul>
-        <div class="add-row">
-          <select v-model="newIds.monthly"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups('monthly')" :key="gid" :value="gid">{{ gid }}</option></select>
-          <input v-model="newManuals.monthly" placeholder="或手动输入群号" @keyup.enter="addGroup('monthly')" />
-          <UiButton icon="Plus" @click="addGroup('monthly')">添加</UiButton>
-        </div>
-      </UiCard>
-    </div>
+      </Transition>
+    </UiCard>
   </div>
 </template>
 
@@ -94,9 +41,9 @@ import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiTabs from '../components/ui/UiTabs.vue'
 import { fetchGroups, fetchKnownGroups, runBriefingNow, runPeriodReportNow, runSummaryNow, updateGroup } from '../api/groups'
 import { toast } from '../toast'
 
@@ -110,6 +57,17 @@ const newIds = ref<Record<GroupType, string>>({ summary: '', briefing: '', weekl
 const newManuals = ref<Record<GroupType, string>>({ summary: '', briefing: '', weekly: '', monthly: '' })
 const runningNow = ref('')
 const briefingPeriods = ref<Record<string, string>>({})
+
+const activeTab = ref<GroupType>('summary')
+const typeTabs: { key: GroupType; label: string }[] = [
+  { key: 'summary', label: '每日总结' },
+  { key: 'briefing', label: '每日简报' },
+  { key: 'weekly', label: '群周报' },
+  { key: 'monthly', label: '群月报' },
+]
+const typeLabels: Record<GroupType, string> = {
+  summary: '每日总结', briefing: '每日简报', weekly: '群周报', monthly: '群月报',
+}
 
 onMounted(async () => {
   try {
@@ -148,6 +106,13 @@ async function removeGroup(type: GroupType, gid: string) {
   } catch (e: unknown) {
     toast(`操作失败：${(e as Error).message}`, 'error')
   }
+}
+
+function runNow(gid: string) {
+  const type = activeTab.value
+  if (type === 'summary') return summaryNow(gid)
+  if (type === 'briefing') return briefingNow(gid)
+  return periodNow(type, gid)
 }
 
 async function summaryNow(gid: string) {
@@ -189,9 +154,8 @@ async function periodNow(type: 'weekly' | 'monthly', gid: string) {
 
 <style scoped>
 .error { color: var(--qq-danger); }
-.groups-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--qq-gap-lg); }
-@media (max-width: 767px) { .groups-layout { grid-template-columns: 1fr; } }
-.card-title { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: var(--qq-gap-md); }
+.groups-tabs { margin-bottom: var(--qq-gap-md); }
+.tab-body { min-height: 120px; }
 .glist { list-style: none; margin-bottom: var(--qq-gap-sm); }
 .glist li { display: flex; align-items: center; justify-content: space-between; padding: var(--qq-gap-sm) 0; border-bottom: 1px solid var(--qq-border); font-size: var(--qq-text-sm); }
 .glist li:last-child { border-bottom: none; }

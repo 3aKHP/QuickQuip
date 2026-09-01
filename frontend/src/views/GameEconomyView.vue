@@ -1,6 +1,7 @@
 <template>
   <div>
     <UiPageHeader title="金币管理" subtitle="查看各群金币排行、账户详情，手动调整余额" />
+    <UiStatStrip v-if="groups.length" :items="stripItems" />
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiLoading v-else-if="loading" />
     <div class="toolbar"><label>群组<select v-model="selectedGroup" @change="selectGroup"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g.group_id" :value="g.group_id">{{ g.group_id }}（{{ g.user_count }} 人 / {{ g.total_gold.toLocaleString() }} 💰）</option></select></label><UiButton :loading="loading" icon="RefreshCw" @click="loadGroups">刷新</UiButton></div>
@@ -27,11 +28,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import { computed, onMounted, ref } from 'vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'
 import { listGroups, getRankings, getAccount, adjustGold } from '../api/game-economy'; import { toast } from '../toast'
 
 const loading = ref(false); const loadError = ref<string | null>(null); const groups = ref<any[]>([]); const selectedGroup = ref(''); const rankLoading = ref(false); const rankings = ref<any[]>([])
+
+const stripItems = computed(() => [
+  { label: '群组数', value: groups.value.length, icon: 'Users' },
+  { label: '金币用户', value: groups.value.reduce((n, g) => n + (g.user_count || 0), 0), icon: 'Coins' },
+  { label: '总金币', value: groups.value.reduce((n, g) => n + (g.total_gold || 0), 0), icon: 'Gauge' },
+])
 const searchUid = ref(''); const acctLoading = ref(false); const acctSearched = ref(false); const account = ref<any>(null)
 const adjustAmount = ref<number | null>(null); const adjustReason = ref(''); const adjLoading = ref(false); const adjustResult = ref(''); const adjustError = ref(false)
 

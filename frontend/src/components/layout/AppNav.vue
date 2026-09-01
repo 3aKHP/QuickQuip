@@ -26,6 +26,7 @@
           :key="section.key"
           class="domain-btn"
           :class="{ active: activeSectionKey === section.key }"
+          :style="activeSectionKey === section.key ? domainActiveStyle(section.key) : undefined"
           :title="section.label"
           @click="goToSection(section.key)"
         >
@@ -40,6 +41,16 @@
             <UiIcon :key="themeIcon" :name="themeIcon" :size="18" />
           </Transition>
         </button>
+        <button
+          class="rail-tool"
+          :class="{ 'rail-tool--on': lowMotion }"
+          :title="lowMotion ? '已开启低动态模式（光场静态渲染）' : '动态效果正常，点击开启低动态模式'"
+          @click="toggleLowMotion"
+        >
+          <Transition name="icon-swap" mode="out-in">
+            <UiIcon :key="lowMotion ? 'off' : 'on'" :name="lowMotion ? 'ZapOff' : 'Zap'" :size="18" />
+          </Transition>
+        </button>
         <button class="rail-tool" title="退出" :disabled="logoutDisabled" @click="$emit('logout')">
           <UiIcon name="LogOut" :size="18" />
         </button>
@@ -48,7 +59,10 @@
 
     <div class="section-panel">
       <div class="section-panel__head">
-        <span class="section-panel__eyebrow">QuickQuip</span>
+        <span class="section-panel__eyebrow">
+          <img class="section-panel__brand-logo" src="/brand.svg" alt="" width="16" height="16" aria-hidden="true">
+          <span class="section-panel__brand-word">QuickQuip</span>
+        </span>
         <h2>{{ activeSection?.label || '工作台' }}</h2>
         <p>{{ activeSection?.description || '选择一个工作域继续操作' }}</p>
       </div>
@@ -140,6 +154,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import UiIcon from '../ui/UiIcon.vue'
+import { useMotionPrefs } from '../../composables/useMotionPrefs'
 import type { NavItem, NavSection } from '../../config/nav'
 
 const props = defineProps<{
@@ -157,6 +172,7 @@ defineEmits<{
 
 const route = useRoute()
 const router = useRouter()
+const { lowMotion, toggleLowMotion } = useMotionPrefs()
 const drawerOpen = ref(false)
 const mobileOpenSections = ref(new Set<string>())
 
@@ -179,6 +195,12 @@ function itemsForSection(sectionKey: string): NavItem[] {
 function goToSection(sectionKey: string) {
   const first = itemsForSection(sectionKey)[0]
   if (first) router.push(first.path)
+}
+
+// 域导航 active 态染域色（六域锚点；总览域回退主色）
+function domainActiveStyle(sectionKey: string) {
+  const color = sectionKey === 'overview' ? 'var(--qq-primary)' : `var(--qq-domain-${sectionKey})`
+  return { color, boxShadow: `inset 2px 0 0 ${color}` }
 }
 
 function toggleMobileSection(sectionKey: string) {
@@ -319,6 +341,11 @@ watch(activeSectionKey, (sectionKey) => {
   cursor: not-allowed;
 }
 
+.rail-tool--on {
+  color: var(--qq-accent);
+  background: var(--qq-accent-soft);
+}
+
 .rail-tool:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--qq-primary-glow);
@@ -365,12 +392,23 @@ watch(activeSectionKey, (sectionKey) => {
 }
 
 .section-panel__eyebrow {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 4px;
   color: var(--qq-primary);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-xs);
   font-weight: 600;
+}
+
+.section-panel__brand-logo {
+  display: block;
+  border-radius: var(--qq-radius-sm);
+}
+
+.section-panel__brand-word {
+  letter-spacing: 0.04em;
 }
 
 .section-panel__head h2 {

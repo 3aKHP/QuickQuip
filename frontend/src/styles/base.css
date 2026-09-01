@@ -22,6 +22,27 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 主题切换过渡：toggleTheme 时短暂挂到 <html>，320ms 后移除 */
+html.theme-anim,
+html.theme-anim *,
+html.theme-anim *::before,
+html.theme-anim *::after {
+  transition:
+    background-color 240ms var(--qq-ease-out),
+    border-color 240ms var(--qq-ease-out),
+    color 240ms var(--qq-ease-out),
+    box-shadow 240ms var(--qq-ease-out) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-anim,
+  html.theme-anim *,
+  html.theme-anim *::before,
+  html.theme-anim *::after {
+    transition: none !important;
+  }
+}
+
 /* Selection — QQ 蓝选区 */
 ::selection {
   background: var(--qq-selection-bg);

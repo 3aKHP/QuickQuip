@@ -1,9 +1,10 @@
 <template>
   <div>
     <UiPageHeader title="牛牛大作战" subtitle="查看全局排行、用户详情，手动修正异常数据" />
+    <UiStatStrip v-if="totalUsers || textModes.length" :items="stripItems" />
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiCard padding="md" shadow="sm" accent="primary" class="section">
-      <div class="toolbar"><h3 class="st section-title">排行</h3><UiTabs :model-value="rankType" :tabs="rankTabs" @change="switchRank" /><span class="muted" style="margin-left:auto">共 {{ totalUsers.toLocaleString() }} 用户</span><UiButton size="sm" icon="RefreshCw" :loading="rankLoading" @click="loadRankings" /></div>
+      <div class="toolbar"><h3 class="st section-title">排行</h3><UiTabs :model-value="rankType" :tabs="rankTabs" @change="switchRank" /><UiButton style="margin-left:auto" size="sm" icon="RefreshCw" :loading="rankLoading" @click="loadRankings" /></div>
       <Transition name="tab-pane" mode="out-in">
         <div :key="rankType">
           <UiLoading v-if="rankLoading && !rankings.length" />
@@ -52,7 +53,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiTabs from '../components/ui/UiTabs.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiTabs from '../components/ui/UiTabs.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'
 import { getRankings, getUser, adjustLength, setLuck, setFenceLuck, getTextModes, setGroupTextMode } from '../api/niuniu'; import { toast } from '../toast'
 
 const loadError = ref<string | null>(null); const rankType = ref('natural'); const rankLoading = ref(false); const rankings = ref<any[]>([]); const totalUsers = ref(0)
@@ -67,6 +68,11 @@ const newGroupId = ref(''); const newGroupMode = ref(''); const addModeLoading =
 
 const RANK_LABELS: Record<string, string> = { natural: '自然数值', absolute: '绝对值', length: '长度', depth: '深度' }
 const RANK_COL_LABELS: Record<string, string> = { natural: '长度 (cm)', absolute: '长度 (cm)', length: '长度 (cm)', depth: '深度 (cm)' }
+const stripItems = computed(() => [
+  { label: '注册用户', value: totalUsers.value, icon: 'Swords' },
+  { label: '文案模式', value: textModes.value.length, icon: 'FileText' },
+])
+
 const rankTabs = [
   { key: 'natural', label: '自然' },
   { key: 'absolute', label: '绝对值' },

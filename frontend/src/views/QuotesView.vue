@@ -1,6 +1,7 @@
 <template>
   <div>
     <UiPageHeader title="语录管理" subtitle="按群组浏览、搜索、管理名言语录" />
+    <UiStatStrip :items="stripItems" />
 
     <p v-if="loadError" class="error">{{ loadError }}</p>
 
@@ -67,13 +68,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiStatStrip from '../components/ui/UiStatStrip.vue'
 import { listGroups, listQuotes, deleteQuote } from '../api/quotes'
 import { toast } from '../toast'
 
@@ -84,6 +86,12 @@ const selectedGroup = ref('')
 const loading = ref(false)
 const entries = ref<any[]>([])
 const total = ref(0)
+
+const stripItems = computed(() => {
+  const items = [{ label: '群组数', value: groups.value.length, icon: 'Users' }]
+  if (selectedGroup.value) items.push({ label: '当前群语录', value: total.value, icon: 'Quote' })
+  return items
+})
 const hasMore = ref(false)
 const keyword = ref('')
 const offset = ref(0)

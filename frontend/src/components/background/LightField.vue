@@ -10,12 +10,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTheme } from '../../composables/useTheme'
+import { useMotionPrefs } from '../../composables/useMotionPrefs'
 
 const props = defineProps<{
   mode: 'showcase' | 'ambient'
 }>()
 
 const { theme } = useTheme()
+const { lowMotion } = useMotionPrefs()
 const isDark = computed(() => theme.value === 'dark')
 const isShowcase = computed(() => props.mode === 'showcase')
 
@@ -321,7 +323,7 @@ function draw(now: number) {
       }
     }
   }
-  if (!prefersReducedMotion()) {
+  if (!shouldStatic()) {
     raf = requestAnimationFrame(draw)
   }
 }
@@ -342,10 +344,15 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+/** 静态渲染判定：系统 reduced-motion 或用户开启低动态 */
+function shouldStatic(): boolean {
+  return lowMotion.value || prefersReducedMotion()
+}
+
 function onVisibilityChange() {
   if (document.hidden) {
     if (raf) { cancelAnimationFrame(raf); raf = 0 }
-  } else if (!raf && !prefersReducedMotion()) {
+  } else if (!raf && !shouldStatic()) {
     raf = requestAnimationFrame(draw)
   }
 }
@@ -357,8 +364,8 @@ onMounted(() => {
   window.addEventListener('resize', resize)
   window.addEventListener('mousemove', onMouseMove, { passive: true })
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // 尊重 prefers-reduced-motion：只画一帧静态，不启动 RAF 循环
-  if (prefersReducedMotion()) {
+  // 尊重 reduced-motion / 低动态开关：只画一帧静态，不启动 RAF 循环
+  if (shouldStatic()) {
     draw(performance.now())
     return
   }
@@ -367,6 +374,16 @@ onMounted(() => {
 
 watch(theme, () => resize())
 watch(isShowcase, () => resize())
+
+// 低动态开关切换：即时停帧或恢复动画
+watch(lowMotion, (staticOnly) => {
+  if (staticOnly) {
+    if (raf) { cancelAnimationFrame(raf); raf = 0 }
+    draw(performance.now())
+  } else if (!raf && !document.hidden) {
+    raf = requestAnimationFrame(draw)
+  }
+})
 
 onUnmounted(() => {
   if (raf) cancelAnimationFrame(raf)

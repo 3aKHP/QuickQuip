@@ -1,6 +1,7 @@
 <template>
   <div class="audit-view">
     <UiPageHeader title="审计日志" subtitle="Web 管理后台所有变更操作的审计记录" />
+    <UiStatStrip v-if="!loading" :items="stripItems" />
     <div class="fbar">
       <div class="f"><label>操作类型</label><select v-model="filters.action"><option value="">全部</option><option value="create">create</option><option value="update">update</option><option value="delete">delete</option><option value="toggle">toggle</option></select></div>
       <div class="f"><label>目标类型</label><select v-model="filters.target_type"><option value="">全部</option><option value="rule">rule</option><option value="group">group</option><option value="memory">memory</option><option value="persona">persona</option><option value="config">config</option><option value="llm_about">llm_about</option><option value="group_setting">group_setting</option></select></div>
@@ -22,10 +23,15 @@
 
 <script setup lang="ts">
 import { onMounted, ref, reactive, computed } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiSkeleton from '../components/ui/UiSkeleton.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'
 import { fetchAuditEntries, type AuditEntry, type AuditQueryParams } from '../api/audit'
 
 const loading = ref(true); const error = ref<string | null>(null); const items = ref<AuditEntry[]>([]); const total = ref(0); const page = ref(1); const limit = 50; const exp = ref(new Set<number>())
+
+const stripItems = computed(() => [
+  { label: '记录总数', value: total.value, icon: 'ShieldCheck' },
+  { label: '当前页条数', value: items.value.length, icon: 'FileText' },
+])
 const filters = reactive<AuditQueryParams>({ action: '', target_type: '', since: '', until: '' })
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
 function av(a: string) { return ({ create: 'success', update: 'info', delete: 'danger', toggle: 'warn' } as any)[a] || 'info' }
