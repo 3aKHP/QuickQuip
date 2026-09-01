@@ -30,7 +30,8 @@ defineProps<{
 }
 
 .ui-page-header__title {
-  font-size: var(--qq-text-lg);
+  font-family: var(--qq-font-display);
+  font-size: var(--qq-text-xl);
   font-weight: 600;
   color: var(--qq-text);
   line-height: 1.3;

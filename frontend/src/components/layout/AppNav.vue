@@ -424,7 +424,7 @@ watch(activeSectionKey, (sectionKey) => {
   border-radius: var(--qq-radius-full);
   background: var(--qq-primary);
   opacity: 0;
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform 0.2s var(--qq-ease-out), opacity 0.2s var(--qq-ease-out);
 }
 
 .page-link:hover {

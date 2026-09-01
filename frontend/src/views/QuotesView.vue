@@ -6,7 +6,7 @@
 
     <!-- Group selector -->
     <UiCard padding="md" shadow="sm" class="section">
-      <h3 class="st">群组</h3>
+      <h3 class="st section-title">群组</h3>
       <div class="lookup">
         <select v-model="selectedGroup" @change="loadQuotes" class="group-select">
           <option value="">请选择群组</option>
@@ -22,7 +22,7 @@
       <!-- Search -->
       <UiCard padding="md" shadow="sm" class="section">
         <div class="toolbar">
-          <h3 class="st">语录（共 {{ total }} 条）</h3>
+          <h3 class="st section-title">语录（共 {{ total }} 条）</h3>
           <div class="search-row">
             <input v-model="keyword" placeholder="搜索关键词…" class="search-input" @keyup.enter="search" />
             <UiButton icon="Search" :loading="loading" @click="search">搜索</UiButton>
@@ -151,7 +151,7 @@ function formatTime(ts: number): string {
 <style scoped>
 .error { color: var(--qq-danger); }
 .section { margin-bottom: var(--qq-gap-md); }
-.st { margin: 0; font-size: var(--qq-text-base); color: var(--qq-text); }
+.st { margin: 0; }
 .lookup { display: flex; align-items: center; gap: var(--qq-gap-md); margin-top: var(--qq-gap-sm); }
 .group-select {
   flex: 1; max-width: 320px;

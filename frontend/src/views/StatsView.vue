@@ -77,7 +77,7 @@ function formatNum(n: number): string { return n >= 10000 ? (n / 10000).toFixed(
 .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--qq-text); }
 .bar-label.mono { font-family: var(--qq-font-mono); }
 .bar-track { height: 6px; background: var(--qq-surface-strong); border-radius: var(--qq-radius-full); overflow: hidden; }
-.bar-fill { height: 100%; background: var(--qq-primary); border-radius: var(--qq-radius-full); transition: width 0.4s ease; }
+.bar-fill { height: 100%; background: var(--qq-primary); border-radius: var(--qq-radius-full); transition: width 0.4s var(--qq-ease-out); }
 .bar-fill.alt { background: var(--qq-warn); }
 .bar-value { text-align: right; color: var(--qq-text-muted); font-variant-numeric: tabular-nums; }
 

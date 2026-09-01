@@ -1,5 +1,5 @@
 /* ==========================================================================
-   QuickQuip Transitions  v2 — 机械动效（linear / steps，无 cubic-bezier）
+   QuickQuip Transitions  v2.5 — 一次性过渡 ease-out，循环动画 linear
    ========================================================================== */
 
 /* ── 路由切换（page-shell 三态：前进 / 后退 / 切换）── */
@@ -11,9 +11,9 @@
 .page-shell-enter-active,
 .page-shell-leave-active {
   transition:
-    opacity 180ms linear,
-    transform 180ms linear,
-    filter 180ms linear;
+    opacity 180ms var(--qq-ease-out),
+    transform 180ms var(--qq-ease-out),
+    filter 180ms var(--qq-ease-out);
   transform-origin: 50% 18%;
   will-change: opacity, transform, filter;
 }
@@ -79,7 +79,7 @@
 /* ── Toast ── */
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity 150ms linear, transform 150ms linear;
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
 }
 
 .toast-enter-from,
@@ -91,7 +91,7 @@
 /* ── Slide-up（抽屉 / 模态）── */
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: transform 200ms linear;
+  transition: transform 200ms var(--qq-ease-out);
 }
 
 .slide-up-enter-from,

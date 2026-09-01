@@ -52,7 +52,7 @@
       <!-- Row 2: rankings -->
       <div class="dash-row">
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title">群消息排行 Top 5</h3>
+          <h3 class="dash-card-title section-title">群消息排行 Top 5</h3>
           <div v-if="data.groupMessages.length" class="mini-bar-list">
             <div v-for="(g, i) in data.groupMessages" :key="g.gid" class="mini-bar-row">
               <span class="mini-bar-rank">{{ i + 1 }}</span>
@@ -67,7 +67,7 @@
         </UiCard>
 
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title">规则触发 Top 5</h3>
+          <h3 class="dash-card-title section-title">规则触发 Top 5</h3>
           <div v-if="data.ruleTriggers.length" class="mini-bar-list">
             <div v-for="(r, i) in data.ruleTriggers" :key="r.rule" class="mini-bar-row">
               <span class="mini-bar-rank">{{ i + 1 }}</span>
@@ -82,7 +82,7 @@
       <!-- Row 3: cron + LLM -->
       <div class="dash-row">
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title">定时任务</h3>
+          <h3 class="dash-card-title section-title">定时任务</h3>
           <div class="cron-summary">
             <div class="cron-item">
               <UiTag :variant="data.cronJobs.total > 0 ? 'success' : 'info'" size="sm">{{ data.cronJobs.total }} 个任务</UiTag>
@@ -99,7 +99,7 @@
         </UiCard>
 
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title">LLM 对话</h3>
+          <h3 class="dash-card-title section-title">LLM 对话</h3>
           <div class="cron-summary">
             <span class="stat-card__value" style="font-size:var(--qq-text-2xl)">{{ fmt(data.llmConversations.count) }}</span>
             <span class="muted">条消息</span>
@@ -311,9 +311,6 @@ onMounted(async () => {
 }
 
 .dash-card-title {
-  font-size: var(--qq-text-base);
-  font-weight: 600;
-  color: var(--qq-text);
   margin-bottom: var(--qq-gap-md);
 }
 
@@ -358,7 +355,7 @@ onMounted(async () => {
   height: 100%;
   border-radius: var(--qq-radius-full);
   background: var(--qq-primary);
-  transition: width 0.5s ease;
+  transition: width 0.5s var(--qq-ease-out);
 }
 
 .mini-bar-val {

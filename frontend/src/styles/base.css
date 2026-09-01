@@ -136,3 +136,12 @@ code {
   font-family: var(--qq-font-mono);
   font-size: 0.92em;
 }
+
+/* Section title — 卡片内节标题统一层级（页面标题之下、正文之上） */
+.section-title {
+  font-family: var(--qq-font-display);
+  font-size: var(--qq-text-md);
+  font-weight: 600;
+  color: var(--qq-text);
+  line-height: var(--qq-line-tight);
+}

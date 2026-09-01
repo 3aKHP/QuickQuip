@@ -1,8 +1,7 @@
 <template>
   <div class="app-root">
     <!-- Ambient light field -->
-    <ParticleBackground />
-    <MouseGlow />
+    <LightField :mode="authenticated ? 'ambient' : 'showcase'" />
 
     <!-- Unauthenticated -->
     <LoginView
@@ -61,8 +60,7 @@ import { useRoute } from 'vue-router'
 import LoginView from './views/LoginView.vue'
 import AppNav from './components/layout/AppNav.vue'
 import StatusBar from './components/layout/StatusBar.vue'
-import ParticleBackground from './components/background/ParticleBackground.vue'
-import MouseGlow from './components/background/MouseGlow.vue'
+import LightField from './components/background/LightField.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
 import { toastMsg, toastType } from './toast'

@@ -7,14 +7,14 @@
     <UiEmpty v-if="!loading && selectedGroup && !loadError && !rankings.length && !acctSearched" icon="Coins" title="暂无数据" />
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">
-      <h3 class="st">金币排行 TOP 20</h3>
+      <h3 class="st section-title">金币排行 TOP 20</h3>
       <UiLoading v-if="rankLoading" />
       <UiEmpty v-else-if="!rankings.length" icon="BarChart3" title="暂无排行数据" />
       <div v-else class="table-scroll"><table><thead><tr><th class="num">#</th><th>QQ</th><th class="num">金币</th><th class="num">好感度</th><th class="num">连击</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.user_id"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="lookupUser(r.user_id)" class="acct-link">{{ r.user_id }}</a></td><td class="num">{{ r.gold.toLocaleString() }}</td><td class="num">{{ r.affection }}</td><td class="num">{{ r.sign_streak }} 天</td></tr></tbody></table></div>
     </UiCard>
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">
-      <h3 class="st">账户查询与调整</h3>
+      <h3 class="st section-title">账户查询与调整</h3>
       <div class="lookup"><input v-model="searchUid" placeholder="QQ 号" style="width:160px" @keyup.enter="searchAccount" /><UiButton icon="Search" :loading="acctLoading" @click="searchAccount">查询</UiButton></div>
       <div v-if="account" class="acct">
         <div class="acct-info"><span class="al">QQ</span><span class="mono">{{ account.user_id }}</span><span class="al">金币</span><strong>{{ account.gold.toLocaleString() }}</strong><span class="al">好感</span><span>{{ account.affection }}</span><span class="al">签到</span><span>{{ account.sign_streak }} 天</span><span class="al">最后签到</span><span class="muted">{{ account.last_sign_date || '从未签到' }}</span></div>
@@ -50,7 +50,7 @@ async function doAdjust() { if (adjustAmount.value == null || adjustAmount.value
 .toolbar { display: flex; align-items: center; gap: var(--qq-gap-md); flex-wrap: wrap; margin-bottom: var(--qq-gap-lg); padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 .toolbar label { display: flex; align-items: center; gap: var(--qq-gap-xs); color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .section { margin-bottom: var(--qq-gap-md); }
-.st { margin: 0 0 var(--qq-gap-md) 0; font-size: var(--qq-text-base); color: var(--qq-text); }
+.st { margin: 0 0 var(--qq-gap-md) 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .acct-link { color: var(--qq-primary); text-decoration: none; font-family: var(--qq-font-mono); }
 .acct-link:hover { text-decoration: underline; }

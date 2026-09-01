@@ -5,7 +5,7 @@
     <UiLoading v-else-if="!loaded" />
     <div v-else class="groups-layout">
       <UiCard padding="md" shadow="sm">
-        <h3 class="card-title"><UiIcon name="FileText" :size="18" /> 每日总结</h3>
+        <h3 class="card-title section-title"><UiIcon name="FileText" :size="18" /> 每日总结</h3>
         <ul class="glist">
           <li v-for="gid in groups.summary" :key="gid">
             <span class="gid">{{ gid }}</span>
@@ -24,7 +24,7 @@
       </UiCard>
 
       <UiCard padding="md" shadow="sm">
-        <h3 class="card-title"><UiIcon name="Newspaper" :size="18" /> 每日简报</h3>
+        <h3 class="card-title section-title"><UiIcon name="Newspaper" :size="18" /> 每日简报</h3>
         <ul class="glist">
           <li v-for="gid in groups.briefing" :key="gid">
             <span class="gid">{{ gid }}</span>
@@ -49,7 +49,7 @@
       </UiCard>
 
       <UiCard padding="md" shadow="sm">
-        <h3 class="card-title"><UiIcon name="CalendarRange" :size="18" /> 群周报</h3>
+        <h3 class="card-title section-title"><UiIcon name="CalendarRange" :size="18" /> 群周报</h3>
         <ul class="glist">
           <li v-for="gid in groups.weekly" :key="gid">
             <span class="gid">{{ gid }}</span>
@@ -68,7 +68,7 @@
       </UiCard>
 
       <UiCard padding="md" shadow="sm">
-        <h3 class="card-title"><UiIcon name="CalendarDays" :size="18" /> 群月报</h3>
+        <h3 class="card-title section-title"><UiIcon name="CalendarDays" :size="18" /> 群月报</h3>
         <ul class="glist">
           <li v-for="gid in groups.monthly" :key="gid">
             <span class="gid">{{ gid }}</span>
@@ -191,7 +191,7 @@ async function periodNow(type: 'weekly' | 'monthly', gid: string) {
 .error { color: var(--qq-danger); }
 .groups-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--qq-gap-lg); }
 @media (max-width: 767px) { .groups-layout { grid-template-columns: 1fr; } }
-.card-title { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: var(--qq-gap-md); font-size: var(--qq-text-base); color: var(--qq-text); }
+.card-title { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: var(--qq-gap-md); }
 .glist { list-style: none; margin-bottom: var(--qq-gap-sm); }
 .glist li { display: flex; align-items: center; justify-content: space-between; padding: var(--qq-gap-sm) 0; border-bottom: 1px solid var(--qq-border); font-size: var(--qq-text-sm); }
 .glist li:last-child { border-bottom: none; }
