@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 try:
     import nonebot
@@ -20,6 +21,7 @@ except ImportError:  # pragma: no cover - apscheduler 随 nonebot-plugin-apsched
     class JobLookupError(Exception):
         pass
 
+from quickquip.adapters.nonebot import cron_status_sync
 from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.adapters.nonebot._safe_send import send_group_text
 from quickquip.adapters.nonebot._scheduling import parse_cron
@@ -35,10 +37,8 @@ _job_run_results: dict[str, dict] = {}
 
 def record_job_result(job_id: str, success: bool, error: str | None = None):
     """Record the last run result of a scheduled job. Best-effort only."""
-    from datetime import datetime
-
     _job_run_results[job_id] = {
-        "last_run": datetime.now().isoformat(),
+        "last_run": datetime.now().astimezone().isoformat(),
         "last_status": "ok" if success else "error",
         "last_error": error[:500] if error else None,
     }
@@ -298,3 +298,8 @@ def _register_festival_job() -> None:
 
 
 _register_festival_job()
+
+
+# 跨进程状态同步：bot 进程每 30 秒把调度器快照落盘，web-admin 定时任务页读文件
+if scheduler and nonebot is not None:
+    cron_status_sync.register_cron_status_sync(scheduler, _job_run_results)

@@ -1,18 +1,35 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter
+
+from quickquip.common.paths import CRON_JOBS_JSON_PATH
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
+def _read_status_file() -> dict | None:
+    try:
+        data = json.loads(CRON_JOBS_JSON_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 @router.get("/cron-dashboard")
 def get_cron_dashboard():
     """Return all scheduled cron jobs with trigger, next run, and last execution status."""
+    # 1) bot 进程写入的共享状态文件（生产部署：调度器在 bot 进程，跨进程只能读文件）
+    data = _read_status_file()
+    if data is not None and isinstance(data.get("jobs"), list):
+        return {"jobs": data["jobs"], "updated_at": data.get("updated_at")}
+
+    # 2) 同进程调度器回退（本地开发 / 状态文件尚未生成）
     jobs: list[dict[str, Any]] = []
 
     try:
@@ -27,7 +44,7 @@ def get_cron_dashboard():
             return {}
 
     if apscheduler is None:
-        return {"jobs": []}
+        return {"jobs": jobs, "updated_at": None}
 
     job_results = get_job_results()
 
@@ -57,4 +74,4 @@ def get_cron_dashboard():
 
         jobs.append(job_data)
 
-    return {"jobs": jobs}
+    return {"jobs": jobs, "updated_at": None}

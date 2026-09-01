@@ -74,7 +74,7 @@
       <!-- Row 3: cron + LLM -->
       <div class="dash-row">
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title section-title">定时任务</h3>
+          <h3 class="dash-card-title section-title">调度器</h3>
           <div class="cron-summary">
             <div class="cron-item">
               <UiTag :variant="data.cronJobs.total > 0 ? 'success' : 'info'" size="sm">{{ data.cronJobs.total }} 个任务</UiTag>
