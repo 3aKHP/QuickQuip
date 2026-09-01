@@ -1,6 +1,6 @@
 <template>
   <div>
-    <UiPageHeader title="定时消息" subtitle="到点自动向群发送文本消息，cron 为服务器本地时间">
+    <UiPageHeader title="定时消息" subtitle="到点自动向群发送内容，cron 按北京时间（Asia/Shanghai）触发">
       <template #actions>
         <UiButton icon="RefreshCw" :disabled="loading" @click="loadJobs">刷新</UiButton>
         <UiButton variant="primary" icon="Plus" @click="startCreate">新建</UiButton>

@@ -21,7 +21,7 @@ SCHEDULE_MESSAGES_TOOL_SPEC = LLMToolSpec(
     name=SCHEDULE_MESSAGES_TOOL_NAME,
     description=(
         "管理当前群的定时消息任务（创建后机器人会按 cron 周期自动在群里发消息）。"
-        "cron 为 5 段式：分 时 日 月 周，按服务器本地时间（北京时间）执行，"
+        "cron 为 5 段式：分 时 日 月 周，按北京时间（Asia/Shanghai）执行，"
         "周字段 0=周一…6=周日（不支持 7），"
         "例如 \"0 9 * * *\" 表示每天 09:00。"
         "任务有两种 kind：\"text\" 为固定文案，到点原样发送 message；"
@@ -29,7 +29,8 @@ SCHEDULE_MESSAGES_TOOL_SPEC = LLMToolSpec(
         "提醒某人做某事、或需要结合群聊动态生成的内容应使用 llm 类。"
         "创建一次性任务（如\"今晚七点提醒我\"）时设 recurring=false，"
         "并把 cron 的分/时/日/月钉到具体日期值（周字段用 *），"
-        "请根据当前日期推算日/月字段；一次性任务触发后会自动删除。"
+        "系统提示词中提供了当前北京时间与星期，请据此推算日/月字段；"
+        "一次性任务触发后会自动删除。"
         "操作前请先用 action=\"list\" 查看当前群已有任务；"
         "set_enabled / delete 需要先从 list 结果中取得任务 id（job_id）。"
         "任务只作用于当前群，不能跨群操作。"

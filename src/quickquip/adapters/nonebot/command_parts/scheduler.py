@@ -18,7 +18,7 @@ _USAGE = (
     "/schedule list — 查看本群定时消息\n"
     "/schedule add [llm] [once] <cron 5段> <消息> — 添加定时消息\n"
     "  llm：内容为 LLM 任务指令；once：一次性任务（触发后自动删除）\n"
-    "  cron 周字段 0=周一…6=周日（不支持 7）；按服务器本地时间触发\n"
+    "  cron 周字段 0=周一…6=周日（不支持 7）；按北京时间（Asia/Shanghai）触发\n"
     "  如 /schedule add 0 9 * * * 早安\n"
     "  如 /schedule add llm once 0 19 5 9 * 提醒大家今晚看KPL\n"
     "/schedule del <id> — 删除定时消息\n"
