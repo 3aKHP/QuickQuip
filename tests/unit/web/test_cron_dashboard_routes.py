@@ -30,7 +30,7 @@ def test_dashboard_reads_shared_status_file(tmp_path, monkeypatch):
             }
         ],
     })
-    monkeypatch.setattr(cron_dashboard, "_STATUS_PATH", status_file)
+    monkeypatch.setattr(cron_dashboard, "CRON_JOBS_JSON_PATH", status_file)
 
     result = cron_dashboard.get_cron_dashboard()
 
@@ -45,7 +45,7 @@ def test_dashboard_status_file_empty_jobs_is_authoritative(tmp_path, monkeypatch
     """状态文件存在且 jobs 为空时如实返回空（bot 进程已确认无任务），不回退。"""
     status_file = tmp_path / "cron_jobs.json"
     _write_status_file(status_file, {"updated_at": "2026-09-02T06:30:00+08:00", "jobs": []})
-    monkeypatch.setattr(cron_dashboard, "_STATUS_PATH", status_file)
+    monkeypatch.setattr(cron_dashboard, "CRON_JOBS_JSON_PATH", status_file)
 
     result = cron_dashboard.get_cron_dashboard()
 
@@ -54,19 +54,30 @@ def test_dashboard_status_file_empty_jobs_is_authoritative(tmp_path, monkeypatch
 
 def test_dashboard_missing_status_file_falls_back(tmp_path, monkeypatch):
     """状态文件缺失（本地开发、bot 未启动）时回退同进程调度器，最终返回空列表。"""
-    monkeypatch.setattr(cron_dashboard, "_STATUS_PATH", tmp_path / "cron_jobs.json")
+    monkeypatch.setattr(cron_dashboard, "CRON_JOBS_JSON_PATH", tmp_path / "cron_jobs.json")
 
     result = cron_dashboard.get_cron_dashboard()
 
-    assert result == {"jobs": []}
+    assert result == {"jobs": [], "updated_at": None}
 
 
 def test_dashboard_malformed_status_file_falls_back(tmp_path, monkeypatch):
     """状态文件写到一半/损坏时回退而不是 500。"""
     status_file = tmp_path / "cron_jobs.json"
     status_file.write_text('{"jobs": [', encoding="utf-8")
-    monkeypatch.setattr(cron_dashboard, "_STATUS_PATH", status_file)
+    monkeypatch.setattr(cron_dashboard, "CRON_JOBS_JSON_PATH", status_file)
 
     result = cron_dashboard.get_cron_dashboard()
 
-    assert result == {"jobs": []}
+    assert result == {"jobs": [], "updated_at": None}
+
+
+def test_dashboard_non_dict_status_file_falls_back(tmp_path, monkeypatch):
+    """状态文件是合法 JSON 但顶层非对象（如数组）时回退而不是 500。"""
+    status_file = tmp_path / "cron_jobs.json"
+    status_file.write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(cron_dashboard, "CRON_JOBS_JSON_PATH", status_file)
+
+    result = cron_dashboard.get_cron_dashboard()
+
+    assert result == {"jobs": [], "updated_at": None}

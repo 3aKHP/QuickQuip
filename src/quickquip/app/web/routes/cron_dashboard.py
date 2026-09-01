@@ -12,14 +12,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_STATUS_PATH = CRON_JOBS_JSON_PATH
-
 
 def _read_status_file() -> dict | None:
     try:
-        return json.loads(_STATUS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(CRON_JOBS_JSON_PATH.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 @router.get("/cron-dashboard")
@@ -45,7 +44,7 @@ def get_cron_dashboard():
             return {}
 
     if apscheduler is None:
-        return {"jobs": jobs}
+        return {"jobs": jobs, "updated_at": None}
 
     job_results = get_job_results()
 
@@ -75,4 +74,4 @@ def get_cron_dashboard():
 
         jobs.append(job_data)
 
-    return {"jobs": jobs}
+    return {"jobs": jobs, "updated_at": None}
