@@ -101,4 +101,5 @@ def test_register_commands_keeps_command_count_and_order():
         "打胶运势",
         "击剑运势",
         "牛牛文案",
+        "schedule",
     ]
