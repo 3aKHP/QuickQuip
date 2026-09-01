@@ -22,6 +22,7 @@ import LogsArchiveView from '../views/LogsArchiveView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
 import McpDashboardView from '../views/McpDashboardView.vue'
 import CronDashboardView from '../views/CronDashboardView.vue'
+import ScheduledMessagesView from '../views/ScheduledMessagesView.vue'
 import AuditView from '../views/AuditView.vue'
 import GameEconomyView from '../views/GameEconomyView.vue'
 import NiuNiuView from '../views/NiuNiuView.vue'
@@ -76,6 +77,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'logs-trace',     path: '/logs-trace',     label: 'LLM Trace', icon: 'FileCode',        section: 'system',   component: LogsTraceView },
   { key: 'logs-archive',   path: '/logs-archive',   label: '日志归档', icon: 'FolderOpen',      section: 'system',   component: LogsArchiveView },
   { key: 'cron-dashboard', path: '/cron-dashboard', label: '定时任务', icon: 'Clock',           section: 'system',   component: CronDashboardView },
+  { key: 'scheduled-messages', path: '/scheduled-messages', label: '定时消息', icon: 'AlarmClock', section: 'system', component: ScheduledMessagesView },
   { key: 'audit',          path: '/audit',          label: '审计',     icon: 'ShieldCheck',     section: 'system',   component: AuditView },
   { key: 'game-economy',   path: '/game-economy',   label: '金币',     icon: 'Coins',           section: 'games',    component: GameEconomyView },
   { key: 'niuniu',         path: '/niuniu',         label: '牛牛',     icon: 'Swords',          section: 'games',    component: NiuNiuView },

@@ -73,6 +73,12 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
         summary = reload_chat_rules_pipeline()
         return {"ok": True, "summary": summary, "boredom_scan_interval": scan_interval}
 
+    if action.action_type == "scheduler_reload":
+        # Web 管理端增删改定时消息后，重读 JSON 并重注册 APScheduler job
+        from quickquip.adapters.nonebot.scheduler_plugin import reload_scheduled_message_jobs
+
+        return {"ok": True, "registered": reload_scheduled_message_jobs()}
+
     if action.action_type == "health_check":
         scope_key = _normalize_health_scope(action.payload.get("scope_key"))
         verbose = bool(action.payload.get("verbose", False))
