@@ -26,3 +26,9 @@ CARD_LE_RATE_LIMIT_KEY = "sts_card_le"
 TURMFLUCH_RULE_NAME = "sts_turmfluch"
 TURMFLUCH_RATE_LIMIT_KEY = "sts_turmfluch"
 TURMFLUCH_ALIASES: frozenset[str] = frozenset()  # 中文别名可在此追加，如 frozenset({"尖塔化"})
+
+# 公式「故障化」：/defectify 命令，把输入转写成读音贴近角色名
+# 「故障机器人」（Defect）的五字梗，独立限频桶（global scope）
+DEFECTIFY_RULE_NAME = "sts_defectify"
+DEFECTIFY_RATE_LIMIT_KEY = "sts_defectify"
+DEFECTIFY_ALIASES: frozenset[str] = frozenset({"故障化"})
