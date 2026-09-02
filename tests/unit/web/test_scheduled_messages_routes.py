@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +10,7 @@ HTTPException = fastapi.HTTPException
 
 from quickquip.app.web.routes import scheduled_messages as sm  # noqa: E402
 from quickquip.chat.scheduled_messages import ScheduledMessageStore  # noqa: E402
+from tests.fixtures.scheduled_cron import future_one_shot_cron, past_one_shot_cron  # noqa: E402
 
 
 @pytest.fixture()
@@ -36,10 +36,6 @@ def _create_body(**overrides) -> sm.ScheduledMessageCreate:
     data = {"cron": "0 7 * * *", "group_ids": ["10001", "10002"], "message": "早安"}
     data.update(overrides)
     return sm.ScheduledMessageCreate(**data)
-
-
-def _pinned_cron(dt: datetime) -> str:
-    return f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
 
 
 def test_crud_flow(store, enqueued):
@@ -178,7 +174,7 @@ def test_update_empty_body_is_noop(store, enqueued, monkeypatch):
 def test_create_one_off_with_past_date_returns_400(store, enqueued):
     """一次性任务钉在今年已过的日期会被拒绝（否则会静默等到来年）。"""
     pytest.importorskip("apscheduler")
-    past = _pinned_cron(datetime.now() - timedelta(days=1))
+    past = past_one_shot_cron()
     with pytest.raises(HTTPException) as exc:
         sm.create_scheduled_message(_create_body(cron=past, recurring=False), object())
     assert exc.value.status_code == 400
@@ -187,7 +183,7 @@ def test_create_one_off_with_past_date_returns_400(store, enqueued):
 
 
 def test_create_one_off_with_future_date_ok(store):
-    future = _pinned_cron(datetime.now() + timedelta(days=1))
+    future = future_one_shot_cron()
     created = sm.create_scheduled_message(
         _create_body(cron=future, recurring=False), object()
     )
@@ -197,14 +193,14 @@ def test_create_one_off_with_future_date_ok(store):
 
 def test_create_recurring_with_past_pinned_date_ok(store):
     """同样的钉死日期，recurring=True（每年重复的周年提醒）不受一次性校验限制。"""
-    past = _pinned_cron(datetime.now() - timedelta(days=1))
+    past = past_one_shot_cron()
     created = sm.create_scheduled_message(_create_body(cron=past, recurring=True), object())
     assert created["recurring"] is True
 
 
 def test_update_to_one_off_with_past_date_returns_400(store, enqueued):
     pytest.importorskip("apscheduler")
-    past = _pinned_cron(datetime.now() - timedelta(days=1))
+    past = past_one_shot_cron()
     created = sm.create_scheduled_message(_create_body(), object())
     with pytest.raises(HTTPException) as exc:
         sm.update_scheduled_message(
@@ -221,7 +217,7 @@ def test_update_to_one_off_with_past_date_returns_400(store, enqueued):
 
 def test_update_message_only_on_stale_one_off_not_blocked(store):
     """存量一次性任务（如日期已过但已禁用）只改文案时不触发未来时间校验。"""
-    past = _pinned_cron(datetime.now() - timedelta(days=1))
+    past = past_one_shot_cron()
     # 直接落盘构造存量任务：store.add 已拒绝创建过期一次性任务，
     # 过期任务只能来自校验上线前的历史数据或外部编辑。
     store.path.write_text(

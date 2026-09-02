@@ -4,6 +4,7 @@ import pytest
 
 from quickquip.adapters.nonebot.command_parts import scheduler as mod
 from quickquip.chat.scheduled_messages import ScheduledMessageStore
+from tests.fixtures.scheduled_cron import future_one_shot_cron
 
 
 class _FinishSentinel(Exception):
@@ -94,20 +95,22 @@ async def test_add_llm_kind(cmd_setup):
 @pytest.mark.asyncio
 async def test_add_once_non_recurring(cmd_setup):
     store, cmd = cmd_setup
-    await _run(cmd, _FakeEvent("/schedule add once 0 19 5 9 * 今晚看KPL"))
+    cron = future_one_shot_cron()
+    await _run(cmd, _FakeEvent(f"/schedule add once {cron} 今晚看KPL"))
 
     jobs = store.list()
     assert len(jobs) == 1
     assert jobs[0].kind == "text"
     assert jobs[0].recurring is False
-    assert jobs[0].cron == "0 19 5 9 *"
+    assert jobs[0].cron == cron
     assert jobs[0].message == "今晚看KPL"
 
 
 @pytest.mark.asyncio
 async def test_add_llm_once_flags_any_order(cmd_setup):
     store, cmd = cmd_setup
-    await _run(cmd, _FakeEvent("/schedule add llm once 0 19 5 9 * 提醒大家今晚看KPL"))
+    cron = future_one_shot_cron()
+    await _run(cmd, _FakeEvent(f"/schedule add llm once {cron} 提醒大家今晚看KPL"))
     await _run(cmd, _FakeEvent("/schedule add once llm 30 8 * * * 催大家打卡"))
 
     jobs = store.list()
@@ -238,7 +241,12 @@ async def test_list_shows_kind_and_once_tags(cmd_setup):
     store, cmd = cmd_setup
     plain = store.add(cron="0 9 * * *", group_ids=["10001"], message="普通文案")
     llm_job = store.add(cron="0 10 * * *", group_ids=["10001"], message="LLM 指令", kind="llm")
-    once_job = store.add(cron="0 19 5 9 *", group_ids=["10001"], message="一次性提醒", recurring=False)
+    once_job = store.add(
+        cron=future_one_shot_cron(),
+        group_ids=["10001"],
+        message="一次性提醒",
+        recurring=False,
+    )
 
     await _run(cmd, _FakeEvent("/schedule list"))
 
