@@ -11,6 +11,12 @@ tool_calling_enabled = true
 tool_max_rounds = 8
 tool_max_calls_per_round = 16
 
+# 上游 429/5xx/网络错误的自动重试（所有 LLM 调用路径统一生效；探活/诊断不受影响）
+# retry_max_attempts 含首次调用；第 n 次重试延迟 = base_delay * 2^n * (1 + 随机抖动)
+retry_max_attempts = 3
+retry_base_delay = 1.0
+retry_jitter = 0.5  # 抖动比例，0-1，0 为关闭
+
 # 保守版自动记忆抽取：每轮 LLM 回复结束后以独立的短 prompt 判断
 # "这轮对话里有没有值得长期记住的关于发言者的稳定事实"，命中则
 # 以 source="auto" 写入记忆库。默认关闭，开启后可按群用 /llm auto_memory
