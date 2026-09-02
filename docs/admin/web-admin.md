@@ -152,7 +152,7 @@ Web Admin 当前提供 27 个标签页（前端使用 vue-router 4 hash 模式�
 - **MCP** — MCP 服务器状态面板（transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
 - **用量** — LLM 用量/成本看板（provider/模型/功能/群/人格五维 breakdown 与筛选、定价状态展示）
 - **总结** — 查阅/删除每日总结、群周报、群月报存档（顶部切换日/周/月）
-- **语录** — 语录管理（按群浏览、关键词搜索、删除）
+- **语录** — 语录管理（按群浏览、关键词搜索、删除；发言人显示最新名片与 QQ 号，改名时附收藏时原名片）
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
 - **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
 - **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）

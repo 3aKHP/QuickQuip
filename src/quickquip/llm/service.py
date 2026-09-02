@@ -282,6 +282,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self._group_identities[cache_key] = merged
         return merged
 
+    def group_identities(self, group_id: str) -> IdentityIndex:
+        """按群返回合并后的身份索引，供装配层等外部调用方使用。"""
+        return self._resolve_identities(group_id)
 
     def reload_config(self) -> LLMConfig:
         self.config = load_llm_config(self.config_path)

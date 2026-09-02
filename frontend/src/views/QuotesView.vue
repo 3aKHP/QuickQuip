@@ -50,7 +50,13 @@
               <td class="content-cell">
                 <span class="quote-text">{{ q.content }}</span>
               </td>
-              <td class="sender">{{ q.quoted_sender_name }}</td>
+              <td class="sender">
+                <template v-if="q.sender_changed">
+                  {{ q.sender_display }}<span class="sender-old">(原: {{ q.quoted_sender_name }})</span>
+                </template>
+                <template v-else>{{ q.sender_display || q.quoted_sender_name }}</template>
+                <div v-if="q.quoted_user_id" class="sender-qq">QQ {{ q.quoted_user_id }}</div>
+              </td>
               <td class="time">{{ formatTime(q.saved_at) }}</td>
               <td class="act">
                 <UiButton size="sm" variant="danger" icon="Trash2" @click="doDelete(q)">删除</UiButton>
@@ -193,6 +199,8 @@ function formatTime(ts: number): string {
 .content-cell { max-width: 320px; }
 .quote-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sender { white-space: nowrap; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
+.sender-old { color: var(--qq-text-muted); opacity: 0.75; }
+.sender-qq { margin-top: 2px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .time { white-space: nowrap; font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
 .load-more { margin-top: var(--qq-gap-sm); text-align: center; }
 </style>
