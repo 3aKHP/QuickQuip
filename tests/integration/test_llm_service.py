@@ -1063,3 +1063,94 @@ async def test_generate_reply_usage_scope_carries_group_and_persona(
     )
 
     assert ("chat", {"group_id": "1001", "persona_id": "default"}) in calls
+
+
+async def test_clear_context_purges_store_and_recent_buffer(
+    wired_service, patch_provider_builder
+):
+    """clear_context 必须同时清持久会话库与进程内最近消息缓冲。
+
+    否则 build_messages 会继续把缓冲拼进提示词，/llm clear_context 之后
+    模型仍然"看得见"清空前的群聊。
+    """
+    buf = wired_service.recent_message_buffer
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    wired_service.store.append_conversation_message(
+        "1001", "2002", "user", "清空前的库内旧话", sender_name="乙"
+    )
+    deleted = wired_service.clear_context(1001)
+    assert deleted == 1
+    assert wired_service.store.list_recent_conversation_messages("1001", 10) == []
+    assert buf.list_recent(1001) == []
+
+    # 清空后下一条群消息到达：缓冲只重新累积新内容，旧消息没有回填路径。
+    buf.add_message(1001, "2002", "乙", "镜子", "清空后的新话")
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="乙",
+        prompt="清空后你还在吗？",
+        recent_messages=buf.list_recent(1001, limit=20),
+    )
+
+    req = stub.last_request
+    assert req is not None
+    history_content = req.messages[0].content
+    assert "清空后的新话" in history_content
+    assert "哈基镜今天又在发病" not in history_content
+    assert "刚才谁在神临" not in history_content
+    assert "清空前的库内旧话" not in history_content
+
+
+def test_clear_context_private_scope_uses_private_buffer_key(llm_service):
+    """私聊缓冲以 private:{user_id} 为 key，clear_context 需按同一 scope 清。"""
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    llm_service.bind_recent_message_buffer(buf)
+    buf.add_message("private:7001", "7001", "u", "U", "私聊旧话")
+    llm_service.store.append_conversation_message(
+        "private:7001", "7001", "user", "私聊旧话", sender_name="u"
+    )
+
+    deleted = llm_service.clear_context("7001", chat_type="private")
+
+    assert deleted == 1
+    assert llm_service.store.list_recent_conversation_messages("private:7001", 10) == []
+    assert buf.list_recent("private:7001") == []
+
+
+def test_end_private_session_without_save_clears_buffer(llm_service):
+    """session end（不存档）与 clear_context 共用同一条短期上下文清理路径。"""
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    llm_service.bind_recent_message_buffer(buf)
+    buf.add_message("private:7001", "7001", "u", "U", "私聊旧话")
+
+    llm_service.set_chat_enabled("7001", True, chat_type="private")
+    result = llm_service.end_private_session("7001", save=False)
+
+    assert result["deleted"] == 0
+    assert llm_service.store.list_recent_conversation_messages("private:7001", 10) == []
+    assert buf.list_recent("private:7001") == []
+
+
+def test_resume_private_session_clears_buffer(llm_service):
+    """恢复存档前清空当前短期上下文时，进程内缓冲必须一并清掉。"""
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    llm_service.bind_recent_message_buffer(buf)
+    llm_service.store.append_conversation_message(
+        "private:7001", "7001", "user", "存档前的话", sender_name="u"
+    )
+    llm_service.end_private_session("7001", save=True)
+
+    buf.add_message("private:7001", "7001", "u", "U", "存档后残留的缓冲")
+
+    result = llm_service.resume_private_session("7001")
+
+    assert result.get("archive_number") == 1
+    assert buf.list_recent("private:7001") == []
+    restored = [
+        m["content"]
+        for m in llm_service.store.list_recent_conversation_messages("private:7001", 10)
+    ]
+    assert "存档前的话" in restored

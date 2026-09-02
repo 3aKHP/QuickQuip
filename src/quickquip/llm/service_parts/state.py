@@ -37,7 +37,7 @@ class StateMixin:
             )
             self.store.archive_conversation_messages(user_id_str, archive_number)
         else:
-            self.store.clear_conversation_messages(scope_key)
+            self.clear_context(user_id, chat_type="private")
 
         self.set_chat_enabled(user_id, False, chat_type="private")
         self._session_presets.pop(scope_key, None)
@@ -55,9 +55,8 @@ class StateMixin:
             return {"error": f"存档 #{archive_number} 不存在"}
 
         scope_key = self.build_chat_scope_key(user_id, "private")
-        current_count = self.store.count_conversation_messages(scope_key)
-        if current_count > 0:
-            self.store.clear_conversation_messages(scope_key)
+        # 恢复前无条件清空当前短期上下文（含进程内缓冲），即使当前无存档消息。
+        self.clear_context(user_id, chat_type="private")
 
         self.store.restore_conversation_messages(user_id_str, archive_number)
         self._session_presets.pop(scope_key, None)
@@ -271,7 +270,13 @@ class StateMixin:
         return "\n".join(lines)
 
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
-        return self.store.clear_conversation_messages(self.build_chat_scope_key(group_id, chat_type))
+        scope_key = self.build_chat_scope_key(group_id, chat_type)
+        deleted = self.store.clear_conversation_messages(scope_key)
+        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲；只清前者会让
+        # build_messages 继续把缓冲拼进提示词，模型仍然"看得见"历史。
+        if self.recent_message_buffer:
+            self.recent_message_buffer.clear_scope(scope_key)
+        return deleted
 
     def clear_group_context(self, group_id: int | str) -> int:
         return self.clear_context(group_id, chat_type="group")

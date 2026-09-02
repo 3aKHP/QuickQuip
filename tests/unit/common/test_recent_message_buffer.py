@@ -62,3 +62,28 @@ def test_image_urls_returns_copy():
     recent[0]["image_urls"].append("http://x/evil.png")
     # Mutating the returned dict must not leak into the buffer's internal state.
     assert buf.list_recent(1, now_ts=1)[0]["image_urls"] == ["http://x/1.png"]
+
+
+def test_clear_scope_removes_group_and_keeps_others():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    buf.add_message(1, "u1", "a", "A", "群1消息", now_ts=0)
+    buf.add_message(2, "u2", "b", "B", "群2消息", now_ts=0)
+    assert buf.clear_scope(1) is True
+    assert buf.list_recent(1, now_ts=1) == []
+    assert [m["text"] for m in buf.list_recent(2, now_ts=1)] == ["群2消息"]
+
+
+def test_clear_scope_unknown_group_returns_false():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    assert buf.clear_scope(999) is False
+
+
+def test_clear_scope_then_new_messages_only_new_content():
+    # clear_context 语义：清空后缓冲只能重新累积清空之后的新消息，
+    # 旧消息没有回填路径。
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
+    buf.add_message(1, "u1", "a", "A", "清空前的旧话", now_ts=0)
+    buf.clear_scope(1)
+    buf.add_message(1, "u2", "b", "B", "清空后的新话", now_ts=2)
+    recent = buf.list_recent(1, now_ts=3)
+    assert [m["text"] for m in recent] == ["清空后的新话"]
