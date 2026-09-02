@@ -218,7 +218,7 @@ async def test_health_verbose_probes_provider_when_reachable(llm_service, monkey
         async def complete(self, request):
             return object()
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _OkClient())
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient())
 
     report = await llm_service.build_health_report(10001, probe_provider=True)
     items = {item.name: item for item in report.items}
@@ -235,7 +235,7 @@ async def test_format_provider_probe_returns_formatted_text(llm_service, monkeyp
         async def complete(self, request):
             return object()
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _OkClient())
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient())
 
     text = await llm_service.format_provider_probe()
     assert "Provider 探活" in text
@@ -257,7 +257,7 @@ async def test_format_current_provider_probe_only_probes_active_model(llm_servic
 
     monkeypatch.setattr(
         "quickquip.llm.provider.build_provider_client",
-        lambda provider: _CaptureClient(provider.id),
+        lambda provider, **_kwargs: _CaptureClient(provider.id),
     )
 
     # Add a second configured provider to prove current-probe does not fan out.
@@ -286,7 +286,7 @@ async def test_format_current_provider_probe_failure_prefaces_config_effective(l
         async def complete(self, request):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p: _FailClient())
+    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _FailClient())
 
     text = await llm_service.format_current_provider_probe(10001, chat_type="group")
     assert "配置已生效" in text

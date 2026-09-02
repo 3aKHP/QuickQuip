@@ -11,6 +11,7 @@ from quickquip.common.paths import CONFIG_LLM_TOML
 from quickquip.llm.config import load_llm_config
 from quickquip.llm.provider import (
     LLMRequest,
+    RetryPolicy,
     build_provider_client,
     collect_trace_calls,
     trace_store,
@@ -136,7 +137,8 @@ async def run_sample_request(body: SampleRequest):
         raise HTTPException(status_code=400, detail=f"model {model} not available")
 
     try:
-        client = build_provider_client(provider)
+        # 诊断采样要反映单次调用的真实行为，关闭自动重试
+        client = build_provider_client(provider, retry_policy=RetryPolicy.disabled())
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"failed to build client: {exc}") from exc
 

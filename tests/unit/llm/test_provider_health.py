@@ -44,7 +44,11 @@ class _FakeClient:
 
 
 def _patch_client(monkeypatch, factory):
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", factory)
+    # probe_provider 会传 retry_policy=（探活关闭自动重试），桩吸收关键字参数
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client",
+        lambda provider, **_kwargs: factory(provider),
+    )
 
 
 async def test_probe_provider_ok(monkeypatch):

@@ -344,3 +344,52 @@ def test_builtin_search_on_non_gemini_protocol_warns_and_stays_inert(tmp_path, c
     assert provider_builtin_search_active(provider) is False
     assert "good" in loaded.providers  # 不因该键误配剪除 provider
     assert any("builtin_search" in record.message for record in caplog.records)
+
+
+def test_runtime_retry_config_stamped_to_providers(tmp_path: Path):
+    """[runtime] 重试三键解析后统一盖章到所有 provider（旁路调用零改动继承）。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        retry_max_attempts = 5
+        retry_base_delay = 2.5
+        retry_jitter = 0.8
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    provider = loaded.providers["good"]
+    assert provider.retry_max_attempts == 5
+    assert provider.retry_base_delay == 2.5
+    assert provider.retry_jitter == 0.8
+    assert loaded.runtime.retry_jitter == 0.8
+
+
+def test_runtime_retry_defaults_without_keys(tmp_path: Path):
+    """未配置重试键时，runtime 与 provider 均落默认策略。"""
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    provider = loaded.providers["good"]
+    assert provider.retry_max_attempts == 3
+    assert provider.retry_base_delay == 1.0
+    assert provider.retry_jitter == 0.5
+
+
+def test_retry_jitter_clamped_to_unit_range(tmp_path: Path):
+    """retry_jitter 钳制到 [0, 1]。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        retry_jitter = 3.0
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.retry_jitter == 1.0
+    assert loaded.providers["good"].retry_jitter == 1.0
