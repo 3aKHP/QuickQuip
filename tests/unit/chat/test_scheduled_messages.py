@@ -105,6 +105,26 @@ def test_validate_one_off_schedule():
         validate_one_off_schedule("0 0 30 2 *")
 
 
+def test_store_add_rejects_one_off_with_past_date(tmp_path):
+    """存储层兜底：命令/LLM 工具等所有写路径都无法创建钉死已过期日期的一次性任务。"""
+    pytest.importorskip("apscheduler")
+    store = ScheduledMessageStore(tmp_path / "sm.json")
+    with pytest.raises(ValueError, match="在今年已过"):
+        store.add(
+            cron=_pinned_cron(datetime.now() - timedelta(days=1)),
+            group_ids=[123],
+            message="x",
+            recurring=False,
+        )
+    job = store.add(
+        cron=_pinned_cron(datetime.now() + timedelta(days=1)),
+        group_ids=[123],
+        message="x",
+        recurring=False,
+    )
+    assert job.recurring is False
+
+
 def test_update_with_no_effective_fields_is_noop(tmp_path):
     """无有效字段的 update 为空操作：不跳 updated_at、不落盘。"""
     store = ScheduledMessageStore(tmp_path / "sm.json")

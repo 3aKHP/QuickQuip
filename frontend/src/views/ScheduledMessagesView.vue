@@ -116,7 +116,7 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton fr
 import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'
 import UiToggle from '../components/ui/UiToggle.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiSegmented from '../components/ui/UiSegmented.vue'
-import { fetchScheduledMessages, createScheduledMessage, updateScheduledMessage, deleteScheduledMessage, type ScheduledMessageJob } from '../api/scheduledMessages'
+import { fetchScheduledMessages, createScheduledMessage, updateScheduledMessage, deleteScheduledMessage, type ScheduledMessageJob, type ScheduledMessagePatch } from '../api/scheduledMessages'
 import { fetchKnownGroups } from '../api/groups'
 import { toast } from '../toast'
 
@@ -129,6 +129,9 @@ const form = ref({ cron: '', message: '', enabled: true, kind: 'text' as 'text' 
 const mode = ref<FormMode>('simple')
 const simple = ref({ frequency: 'daily' as Frequency, time: '08:00', weekday: 0, dayOfMonth: 1, onceAt: '' })
 const knownGroups = ref<string[]>([]); const selectedGroups = ref<string[]>([]); const extraGroupIds = ref('')
+// 编辑时记录的原始值：保存补丁只携带实际变动的 cron/recurring，
+// 让存量过期一次性任务的"只改文案"不被后端未来时间校验阻塞。
+const originalCron = ref(''); const originalRecurring = ref(true)
 
 const modeOptions: { value: FormMode; label: string }[] = [{ value: 'simple', label: '简易模式' }, { value: 'advanced', label: '高级模式' }]
 const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -211,6 +214,7 @@ function startCreate() {
 function startEdit(job: ScheduledMessageJob) {
   editingId.value = job.id
   form.value = { cron: job.cron, message: job.message, enabled: job.enabled, kind: job.kind, recurring: job.recurring }
+  originalCron.value = job.cron; originalRecurring.value = job.recurring
   mode.value = parseCronToSimple(job.cron, job.recurring) ? 'simple' : 'advanced'
   selectedGroups.value = [...job.group_ids]; extraGroupIds.value = ''
   saveError.value = null; editing.value = true
@@ -239,7 +243,11 @@ async function onSave() {
   saving.value = true; saveError.value = null
   try {
     if (editingId.value) {
-      await updateScheduledMessage(editingId.value, { cron, group_ids: groupIds, message: form.value.message.trim(), enabled: form.value.enabled, kind: form.value.kind, recurring })
+      // 未变动的 cron/recurring 不进补丁：避免存量过期一次性任务的无关编辑被未来时间校验误伤
+      const patch: ScheduledMessagePatch = { group_ids: groupIds, message: form.value.message.trim(), enabled: form.value.enabled, kind: form.value.kind }
+      if (cron !== originalCron.value) patch.cron = cron
+      if (recurring !== originalRecurring.value) patch.recurring = recurring
+      await updateScheduledMessage(editingId.value, patch)
       toast('已保存')
     } else {
       await createScheduledMessage({ cron, group_ids: groupIds, message: form.value.message.trim(), enabled: form.value.enabled, kind: form.value.kind, recurring })

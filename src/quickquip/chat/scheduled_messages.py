@@ -239,6 +239,10 @@ class ScheduledMessageStore:
         origin: str = "web",
     ) -> ScheduledMessage:
         validate_cron(cron)
+        if not recurring:
+            # 一次性任务的未来触发时间校验落在存储层：Web 路由、/schedule 命令、
+            # LLM 工具三条写路径共用，避免钉死已过期日期的任务静默等到来年。
+            validate_one_off_schedule(cron)
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock():
             jobs = self._load_unlocked()

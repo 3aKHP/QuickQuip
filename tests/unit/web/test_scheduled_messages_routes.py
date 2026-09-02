@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -221,8 +222,26 @@ def test_update_to_one_off_with_past_date_returns_400(store, enqueued):
 def test_update_message_only_on_stale_one_off_not_blocked(store):
     """存量一次性任务（如日期已过但已禁用）只改文案时不触发未来时间校验。"""
     past = _pinned_cron(datetime.now() - timedelta(days=1))
-    job = store.add(cron=past, group_ids=["10001"], message="旧文案", recurring=False)
+    # 直接落盘构造存量任务：store.add 已拒绝创建过期一次性任务，
+    # 过期任务只能来自校验上线前的历史数据或外部编辑。
+    store.path.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "sm_stale",
+                        "cron": past,
+                        "group_ids": ["10001"],
+                        "message": "旧文案",
+                        "recurring": False,
+                        "origin": "web",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
     updated = sm.update_scheduled_message(
-        job.id, sm.ScheduledMessageUpdate(message="新文案"), object()
+        "sm_stale", sm.ScheduledMessageUpdate(message="新文案"), object()
     )
     assert updated["message"] == "新文案"
