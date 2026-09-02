@@ -25,23 +25,6 @@ class _FakeIdentityIndex:
         return _FakeMatch(self._canonical.get(str(user_id), ""))
 
 
-class _FakeService:
-    def __init__(self, index):
-        self._index = index
-        self.identities = index
-
-    def group_identities(self, group_id):
-        return self._index
-
-
-class _FakeStatsTracker:
-    def __init__(self, user_names):
-        self._user_names = user_names
-
-    def get_stats(self, group_id):
-        return SimpleNamespace(user_names=self._user_names)
-
-
 class _FakeStore:
     def __init__(self, rows):
         self._rows = rows
@@ -113,8 +96,11 @@ def _setup_quote(monkeypatch, *, user_names, index, store):
     替身 finish 记录输出后抛 _Finished，与真实 nonebot 的
     FinishedException 终止语义一致。
     """
-    monkeypatch.setattr(history, "stats_tracker", _FakeStatsTracker(user_names))
-    monkeypatch.setattr(history, "get_llm_service", lambda: _FakeService(index))
+    monkeypatch.setattr(
+        history, "get_sender_identity_sources",
+        lambda gid: (user_names or None, index),
+    )
+    monkeypatch.setattr(history, "get_llm_service", lambda: SimpleNamespace(identities=index))
     monkeypatch.setattr(history, "group_quote_store", store)
     monkeypatch.setattr(history, "_ensure_llm_bindings", lambda: None)
 
@@ -139,42 +125,48 @@ def _row(**overrides):
 
 
 def test_quote_display_name_prefers_latest_card(monkeypatch):
-    monkeypatch.setattr(history, "stats_tracker", _FakeStatsTracker({"u1": "新名片"}))
-    svc = _FakeService(_FakeIdentityIndex(canonical_by_uid={"u1": "规范名"}))
+    monkeypatch.setattr(
+        history, "get_sender_identity_sources",
+        lambda gid: ({"u1": "新名片"}, _FakeIdentityIndex(canonical_by_uid={"u1": "规范名"})),
+    )
 
-    assert _quote_display_name(svc, 100, "u1", "旧名片") == "新名片 (原: 旧名片)"
+    assert _quote_display_name(100, "u1", "旧名片") == "新名片 (原: 旧名片)"
 
 
 def test_quote_display_name_unchanged_shows_single_name(monkeypatch):
-    monkeypatch.setattr(history, "stats_tracker", _FakeStatsTracker({"u1": "同名"}))
-    svc = _FakeService(_FakeIdentityIndex())
+    monkeypatch.setattr(
+        history, "get_sender_identity_sources", lambda gid: ({"u1": "同名"}, _FakeIdentityIndex()),
+    )
 
-    assert _quote_display_name(svc, 100, "u1", "同名") == "同名"
+    assert _quote_display_name(100, "u1", "同名") == "同名"
 
 
 def test_quote_display_name_without_sources_keeps_snapshot(monkeypatch):
-    monkeypatch.setattr(history, "stats_tracker", _FakeStatsTracker({}))
-    svc = _FakeService(_FakeIdentityIndex())
+    monkeypatch.setattr(
+        history, "get_sender_identity_sources", lambda gid: (None, None),
+    )
 
-    assert _quote_display_name(svc, 100, "u1", "快照名") == "快照名"
+    assert _quote_display_name(100, "u1", "快照名") == "快照名"
 
 
 def test_resolve_sender_candidates_combines_stats_and_alias(monkeypatch):
     monkeypatch.setattr(
-        history, "stats_tracker", _FakeStatsTracker({"u1": "阿明", "u2": "别人"}),
-    )
-    svc = _FakeService(
-        _FakeIdentityIndex(by_alias={"阿明": SimpleNamespace(qq_ids=["u1", "u3"])}),
+        history, "get_sender_identity_sources",
+        lambda gid: (
+            {"u1": "阿明", "u2": "别人"},
+            _FakeIdentityIndex(by_alias={"阿明": SimpleNamespace(qq_ids=["u1", "u3"])}),
+        ),
     )
 
-    assert _resolve_sender_candidates(svc, 100, "阿明") == ["u1", "u3"]
+    assert _resolve_sender_candidates(100, "阿明") == ["u1", "u3"]
 
 
 def test_resolve_sender_candidates_no_match(monkeypatch):
-    monkeypatch.setattr(history, "stats_tracker", _FakeStatsTracker({}))
-    svc = _FakeService(_FakeIdentityIndex())
+    monkeypatch.setattr(
+        history, "get_sender_identity_sources", lambda gid: (None, None),
+    )
 
-    assert _resolve_sender_candidates(svc, 100, "路人") == []
+    assert _resolve_sender_candidates(100, "路人") == []
 
 
 async def test_quote_by_qq_queries_exact_user_id(monkeypatch):

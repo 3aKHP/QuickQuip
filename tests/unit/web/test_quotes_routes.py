@@ -44,14 +44,6 @@ class _FakeStatsTracker:
         return _FakeGroupStats(self._user_names)
 
 
-class _FakeService:
-    def __init__(self, canonical_by_uid):
-        self._canonical = canonical_by_uid
-
-    def group_identities(self, group_id):
-        return _FakeIdentityIndex(self._canonical)
-
-
 class _FakeStore:
     def __init__(self, rows):
         self._rows = rows
@@ -82,16 +74,11 @@ def _patch_sources(monkeypatch, rows, *, user_names, canonical_by_uid, llm_ok=Tr
     import quickquip.app.message_pipeline as message_pipeline
 
     monkeypatch.setattr(message_pipeline, "group_quote_store", _FakeStore(rows))
-    monkeypatch.setattr(message_pipeline, "stats_tracker", _FakeStatsTracker(user_names))
-    if llm_ok:
-        monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", lambda: None)
-        monkeypatch.setattr(
-            message_pipeline, "get_llm_service", lambda: _FakeService(canonical_by_uid),
-        )
-    else:
-        def _boom():
-            raise RuntimeError("llm unavailable")
-        monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", _boom)
+    identity = _FakeIdentityIndex(canonical_by_uid) if llm_ok else None
+    monkeypatch.setattr(
+        message_pipeline, "get_sender_identity_sources",
+        lambda gid: (user_names or None, identity),
+    )
 
 
 async def test_list_quotes_enriches_sender_display(monkeypatch):
@@ -118,7 +105,7 @@ async def test_list_quotes_falls_back_to_canonical_without_stats(monkeypatch):
 
 async def test_list_quotes_degrades_to_snapshot_when_llm_unavailable(monkeypatch):
     _patch_sources(
-        monkeypatch, [_row(quoted_user_id="")],
+        monkeypatch, [_row()],
         user_names={}, canonical_by_uid={}, llm_ok=False,
     )
 
@@ -134,3 +121,30 @@ async def test_by_seq_enriches_single_quote(monkeypatch):
     q = await quotes.get_by_seq("g1", 1, object())
     assert q["sender_display"] == "规范名"
     assert q["sender_changed"] is True
+
+
+async def test_list_quotes_falls_back_to_stats_without_llm(monkeypatch):
+    _patch_sources(
+        monkeypatch, [_row()],
+        user_names={"u1": "新名片"}, canonical_by_uid={}, llm_ok=False,
+    )
+
+    result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
+    entry = result["entries"][0]
+    assert entry["sender_display"] == "新名片"
+    assert entry["sender_changed"] is True
+
+
+def test_get_sender_identity_sources_degrades_when_llm_unavailable(monkeypatch):
+    import quickquip.app.message_pipeline as message_pipeline
+
+    monkeypatch.setattr(message_pipeline, "stats_tracker", _FakeStatsTracker({"u1": "名片"}))
+
+    def _boom():
+        raise RuntimeError("llm unavailable")
+
+    monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", _boom)
+
+    user_names, identity_index = message_pipeline.get_sender_identity_sources("g1")
+    assert user_names == {"u1": "名片"}
+    assert identity_index is None
