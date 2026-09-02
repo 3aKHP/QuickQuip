@@ -37,7 +37,7 @@ class StateMixin:
             )
             self.store.archive_conversation_messages(user_id_str, archive_number)
         else:
-            self.store.clear_conversation_messages(scope_key)
+            self.clear_context(user_id, chat_type="private")
 
         self.set_chat_enabled(user_id, False, chat_type="private")
         self._session_presets.pop(scope_key, None)
@@ -55,9 +55,8 @@ class StateMixin:
             return {"error": f"存档 #{archive_number} 不存在"}
 
         scope_key = self.build_chat_scope_key(user_id, "private")
-        current_count = self.store.count_conversation_messages(scope_key)
-        if current_count > 0:
-            self.store.clear_conversation_messages(scope_key)
+        # 恢复前无条件清空当前短期上下文（含进程内缓冲），即使当前无存档消息。
+        self.clear_context(user_id, chat_type="private")
 
         self.store.restore_conversation_messages(user_id_str, archive_number)
         self._session_presets.pop(scope_key, None)
