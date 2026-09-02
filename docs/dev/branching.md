@@ -128,6 +128,15 @@ pnpm --dir frontend build
 4. 合并 release PR 后，在 `main` 的已接受提交上创建并推送 `vX.Y.Z` tag。
 5. tag 触发 `release.yml`：完整测试、Windows 懒人包、Docker 镜像与 GitHub Release。核对 tag、版本、ZIP、镜像 revision/digest 和 Release notes 一致。
 6. 把 `main` 回灌 `dev`：若能快进则 `git merge --ff-only main`；否则开 `chore/back-merge-vX.Y.Z` PR。确认 post-merge CI 后清理已发布的本地草稿与短分支。
+7. **back-merge 完成后必须专门做一次版本号 bump**：将 `pyproject.toml` 版本设为下一个 Minor 的开发起点 `X.Y+1.0-dev.0`（如发布 1.13.0 后设为 `1.14.0-dev.0`），以 `chore:` 提交推送 `dev`。这是发版扫尾的固定步骤，漏掉会让下一轮开发挂在已发布的旧版本号上。详见下方「版本号约定」。
+
+## 版本号约定
+
+`pyproject.toml` 的 `version` 是全项目唯一版本号来源（前端 `package.json` 独立演进，不随项目发版）。
+
+- **开发期（dev）**：版本号保持 `X.Y.0-dev.N` 形式，`N` 为 dev 相对 `main` 的合并批次（PR merge commit）数。批次计数命令：`git rev-list --count --merges origin/main..origin/dev`。随开发推进按需以 `chore:` 提交更新（Develop direct），如 `1.13.0-dev.13`。
+- **发版冻结**：release PR 将版本号定为正式 `X.Y.Z`（不带 `v` 前缀；tag 名带 `v`）。
+- **back-merge 后**：按「发布生命周期」第 7 步，把 dev 版本 bump 到 `X.Y+1.0-dev.0`，之后 N 随开发批次重新递增。
 
 ## CI、Issue 与文档扫尾
 
