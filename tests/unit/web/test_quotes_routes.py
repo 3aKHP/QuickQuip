@@ -48,7 +48,7 @@ class _FakeService:
     def __init__(self, canonical_by_uid):
         self._canonical = canonical_by_uid
 
-    def _resolve_identities(self, group_id):
+    def group_identities(self, group_id):
         return _FakeIdentityIndex(self._canonical)
 
 
