@@ -4,6 +4,7 @@ from loguru import logger
 
 import plugins
 from quickquip.common.env import load_root_env_file
+from quickquip.common.logging_bridge import install_stdlib_bridge
 
 logger.add(
     "data/logs/quickquip_{time:YYYY-MM-DD}.log",
@@ -14,6 +15,10 @@ logger.add(
     level="INFO",
     encoding="utf-8",
 )
+
+# stdlib logging 桥接进 loguru：quickquip.* 的 INFO 观测行（LLM 链路等）
+# 才能进入 stdout 与文件槽。桥接级别同样守住 INFO 下限，理由同上。
+install_stdlib_bridge()
 
 load_root_env_file()
 nonebot.init()
