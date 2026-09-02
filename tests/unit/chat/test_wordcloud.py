@@ -73,3 +73,23 @@ def test_build_word_frequencies_strips_bracketed_segments():
     # 方括号段被剥离，不应作为词出现
     assert "图片" not in freq
     assert "CQ" not in freq
+
+
+@pytest.mark.skipif(not HAS_JIEBA, reason="jieba not installed")
+def test_build_word_frequencies_strips_qq_mention_placeholder():
+    messages = [
+        {"text": "@QQ123456789 今天天气不错"},
+        {"text": "@QQ987654321 出来聊聊"},
+    ]
+    freq = build_word_frequencies(messages, stopwords=frozenset())
+    # 未登记成员的 @QQ<digits> 占位符被清洗，明文 QQ 号不得进入词频
+    assert all("123456789" not in word and "987654321" not in word for word in freq)
+    assert not any(word.startswith("QQ") for word in freq)
+
+
+@pytest.mark.skipif(not HAS_JIEBA, reason="jieba not installed")
+def test_build_word_frequencies_keeps_registered_name_mentions():
+    messages = [{"text": "@镜子 今天天气不错"}]
+    freq = build_word_frequencies(messages, stopwords=frozenset())
+    # 已登记成员的 @<规范名> 是正常社交信号，保留进词频
+    assert freq.get("镜子", 0) >= 1
