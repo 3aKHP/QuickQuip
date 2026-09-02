@@ -233,7 +233,8 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             lines = [f"🔍 「{keyword}」（共 {total} 条）："]
             for r in rows:
                 preview = r["content"][:40] + ("…" if len(r["content"]) > 40 else "")
-                lines.append(f"#{r['group_seq']} 「{preview}」—— {r['quoted_sender_name']}")
+                display = _quote_display_name(svc, group_id, r.get("quoted_user_id", ""), r["quoted_sender_name"])
+                lines.append(f"#{r['group_seq']} 「{preview}」—— {display}")
             await quote_cmd.finish("\n".join(lines))
 
         # /quote by <名字|QQ>  or  /quote b <名字|QQ> → by sender

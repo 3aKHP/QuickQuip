@@ -207,3 +207,19 @@ def test_resolve_display_unchanged_name_not_marked_changed():
         "u1", "同名", user_names={"u1": "同名"}, identity_index=None,
     )
     assert (resolved, changed) == ("同名", False)
+
+
+def test_resolve_display_placeholder_card_falls_through():
+    resolved, changed = resolve_quote_display_name(
+        "u1", "Alice",
+        user_names={"u1": "未知"},
+        identity_index=_FakeIdentityIndex({"u1": "规范名"}),
+    )
+    assert (resolved, changed) == ("规范名", True)
+
+    resolved, changed = resolve_quote_display_name(
+        "u1", "Alice",
+        user_names={"u1": "未知"},
+        identity_index=_FakeIdentityIndex(),
+    )
+    assert (resolved, changed) == ("Alice", False)

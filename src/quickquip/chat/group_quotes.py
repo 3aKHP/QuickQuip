@@ -34,9 +34,13 @@ def resolve_quote_display_name(
 
     resolved = ""
     if user_names:
-        resolved = str(user_names.get(uid, "") or "").strip()
+        candidate = str(user_names.get(uid, "") or "").strip()
+        if candidate not in _UNKNOWN_SNAPSHOT_NAMES:
+            resolved = candidate
     if not resolved and identity_index is not None:
-        resolved = str(identity_index.resolve_user(uid).canonical_name or "").strip()
+        candidate = str(identity_index.resolve_user(uid).canonical_name or "").strip()
+        if candidate not in _UNKNOWN_SNAPSHOT_NAMES:
+            resolved = candidate
     if not resolved:
         return snapshot, False
     if snapshot in _UNKNOWN_SNAPSHOT_NAMES or resolved == snapshot:
