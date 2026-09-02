@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 
 from quickquip.llm.config import ProviderConfig
+from quickquip.llm.provider.retry import RetryPolicy, backoff_delay
 from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, sanitize_error_message
 from quickquip.llm.tools import (
     LLMConversationMessage,
@@ -41,15 +42,23 @@ MAX_IMAGES_PER_REQUEST = 5
 
 
 class LLMProviderError(RuntimeError):
-    pass
+    """Provider 调用失败。
 
+    ``status_code`` 为上游 HTTP 状态码（非 HTTP 错误为 None）；``transport``
+    标记连接失败/超时等传输层错误。两者供重试分类（``_is_retryable``）使用，
+    消息文本保持原有格式（会被直接内插到用户可见回复中）。
+    """
 
-_RETRYABLE_HTTP_PREFIXES = ("HTTP 429", "HTTP 5", "网络错误")
+    def __init__(self, message: str, *, status_code: int | None = None, transport: bool = False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.transport = transport
 
 
 def _is_retryable(exc: LLMProviderError) -> bool:
-    msg = str(exc)
-    return any(msg.startswith(prefix) for prefix in _RETRYABLE_HTTP_PREFIXES)
+    if exc.transport:
+        return True
+    return exc.status_code is not None and (exc.status_code == 429 or exc.status_code >= 500)
 
 
 def _headers_to_text(headers: Any) -> str:
@@ -320,8 +329,13 @@ def sanitize_gemini_schema(schema: Any) -> Any:
 
 
 class BaseProviderClient:
-    def __init__(self, config: ProviderConfig):
+    def __init__(self, config: ProviderConfig, retry_policy: RetryPolicy | None = None):
         self.config = config
+        self.retry_policy = retry_policy or RetryPolicy(
+            max_attempts=config.retry_max_attempts,
+            base_delay=config.retry_base_delay,
+            jitter=config.retry_jitter,
+        )
         self._proxy: str | None = config.proxy or None
         if self._proxy:
             logger.info("provider %s 启用代理：%s", config.id, self._proxy)
@@ -350,17 +364,38 @@ class BaseProviderClient:
             )
         return api_key
 
+    async def _dispatch_with_retry(self, dispatch, request: LLMRequest) -> LLMResponse:
+        """执行一次 dispatch 调用，对可重试失败按 retry_policy 指数退避重试。
+
+        每次尝试内部已含 fallback_urls 链，退避等待发生在链与链之间；
+        被重试吸收的失败不产生额外 usage 记录（明细见 HTTP trace）。
+        """
+        policy = self.retry_policy
+        attempt = 0
+        while True:
+            try:
+                return await dispatch(request)
+            except LLMProviderError as exc:
+                attempt += 1
+                if attempt >= policy.max_attempts or not _is_retryable(exc):
+                    raise
+                delay = backoff_delay(attempt - 1, policy)
+                logger.warning(
+                    "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt, policy.max_attempts, delay, exc,
+                )
+                await asyncio.sleep(delay)
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        """Stream-then-fallback dispatch + usage metering.
+        """Stream-then-fallback dispatch + retry + usage metering.
 
         When ``config.stream_enabled`` is set, try the streaming endpoint
         first; on a non-LLMProviderError failure, fall back to the non-
-        streaming endpoint. LLMProviderError is re-raised unchanged so
-        callers (e.g. tool_loop retry) see the original status. This logic
-        is identical across all three provider subclasses, so it lives here
-        rather than being duplicated.
+        streaming endpoint. LLMProviderError is re-raised unchanged. Both
+        dispatch paths retry retryable failures (HTTP 429/5xx, transport
+        errors) with jittered exponential backoff per ``retry_policy``.
 
-        Every complete() (success/error/cancelled) is metered via
+        Every complete() (success/error/cancelled) is metered once via
         ``_record_usage``; metering failure never affects the main path.
         """
         started = time.monotonic()
@@ -369,14 +404,14 @@ class BaseProviderClient:
         try:
             if self.config.stream_enabled:
                 try:
-                    response = await self._complete_stream(request)
+                    response = await self._dispatch_with_retry(self._complete_stream, request)
                 except LLMProviderError:
                     raise
                 except Exception:
                     stream_used = False
-                    response = await self._complete_non_stream(request)
+                    response = await self._dispatch_with_retry(self._complete_non_stream, request)
             else:
-                response = await self._complete_non_stream(request)
+                response = await self._dispatch_with_retry(self._complete_non_stream, request)
         except asyncio.CancelledError:
             _schedule_usage_record(self, request, None, started, stream_used, "cancelled")
             raise
@@ -402,9 +437,12 @@ class BaseProviderClient:
                 raw = response.content
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
-            raise LLMProviderError(f"图片下载失败：HTTP {exc.response.status_code} {detail[:160]}") from exc
+            raise LLMProviderError(
+                f"图片下载失败：HTTP {exc.response.status_code} {detail[:160]}",
+                status_code=exc.response.status_code,
+            ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
-            raise LLMProviderError(f"图片下载网络错误：{exc}") from exc
+            raise LLMProviderError(f"图片下载网络错误：{exc}", transport=True) from exc
 
         if not raw:
             raise LLMProviderError(f"图片内容为空：{image_url}")
@@ -560,7 +598,10 @@ class BaseProviderClient:
                 error_type=type(exc).__name__,
                 error_message=f"HTTP {exc.response.status_code} {detail[:240]}",
             )
-            raise LLMProviderError(f"HTTP {exc.response.status_code} {detail[:240]}") from exc
+            raise LLMProviderError(
+                f"HTTP {exc.response.status_code} {detail[:240]}",
+                status_code=exc.response.status_code,
+            ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             await finish_http_trace(
                 call_id,
@@ -573,7 +614,7 @@ class BaseProviderClient:
                 error_type=type(exc).__name__,
                 error_message=str(exc),
             )
-            raise LLMProviderError(f"网络错误：{exc}") from exc
+            raise LLMProviderError(f"网络错误：{exc}", transport=True) from exc
         except LLMProviderError:
             raise
         except Exception as exc:
@@ -669,7 +710,10 @@ class BaseProviderClient:
                 error_type=type(exc).__name__,
                 error_message=f"HTTP {exc.response.status_code} {detail[:240]}",
             )
-            raise LLMProviderError(f"HTTP {exc.response.status_code} {detail[:240]}") from exc
+            raise LLMProviderError(
+                f"HTTP {exc.response.status_code} {detail[:240]}",
+                status_code=exc.response.status_code,
+            ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             await finish_http_trace(
                 call_id,
@@ -682,7 +726,7 @@ class BaseProviderClient:
                 error_type=type(exc).__name__,
                 error_message=str(exc),
             )
-            raise LLMProviderError(f"网络错误：{exc}") from exc
+            raise LLMProviderError(f"网络错误：{exc}", transport=True) from exc
         except Exception as exc:
             await finish_http_trace(
                 call_id,

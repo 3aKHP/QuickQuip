@@ -44,12 +44,13 @@ from quickquip.llm.provider.claude import ClaudeProviderClient
 from quickquip.llm.provider.claude import _detect_stainless_os as _detect_stainless_os  # noqa: F401
 from quickquip.llm.provider.gemini import GeminiProviderClient
 
+# Retry policy (public API: probes pass RetryPolicy.disabled() to the factory)
+from quickquip.llm.provider.retry import RetryPolicy
+
 # Private symbols re-exported because external code depends on them:
-#   _is_retryable       — quickquip.llm.tool_loop
 #   _TRACE_FLAG_FILE    — quickquip.app.web.routes.diagnostics
-# These use the `name as name` explicit re-export form so ruff treats them
-# as intentional re-exports rather than unused imports (F401).
-from quickquip.llm.provider.base import _is_retryable as _is_retryable  # noqa: F401
+# This uses the `name as name` explicit re-export form so ruff treats it
+# as an intentional re-export rather than an unused import (F401).
 from quickquip.llm.provider.trace import _TRACE_FLAG_FILE as _TRACE_FLAG_FILE  # noqa: F401
 
 __all__ = [
@@ -63,6 +64,7 @@ __all__ = [
     "LLMResponse",
     "LLMWebSearchReport",
     "LLMWebSearchSource",
+    "RetryPolicy",
     "build_provider_client",
     "sanitize_gemini_schema",
     "strip_leading_reasoning_content",

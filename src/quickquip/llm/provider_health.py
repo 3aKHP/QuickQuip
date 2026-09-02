@@ -63,7 +63,7 @@ async def probe_provider(
     传入 model 为 None 时用 provider.default_model。
     """
     set_usage_scope("health")
-    from quickquip.llm.provider import LLMRequest, build_provider_client
+    from quickquip.llm.provider import LLMRequest, RetryPolicy, build_provider_client
     from quickquip.llm.tools import LLMConversationMessage
 
     probe_model = _resolve_probe_model(provider, model)
@@ -78,7 +78,8 @@ async def probe_provider(
         temperature=0.0,
         max_output_tokens=_PROBE_MAX_TOKENS,
     )
-    client = build_provider_client(provider)
+    # 探活要反映 provider 当前真实可用性，关闭自动重试
+    client = build_provider_client(provider, retry_policy=RetryPolicy.disabled())
     started = time.monotonic()
     try:
         await asyncio.wait_for(client.complete(request), timeout=timeout)
