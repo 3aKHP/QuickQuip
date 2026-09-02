@@ -1,6 +1,6 @@
 <template>
   <div>
-    <UiPageHeader title="调度器监控" subtitle="Bot 进程所有 Cron 任务的调度状态与最近执行结果（只读运行时视图；群聊定时消息请在「定时消息」页管理）"><template #actions><UiButton icon="RefreshCw" :disabled="loading" @click="loadJobs">刷新</UiButton></template></UiPageHeader>
+    <UiPageHeader title="调度器监控" subtitle="Bot 进程 Cron 任务的调度状态与最近执行结果（只读）；群聊定时消息在「定时消息」页管理"><template #actions><UiButton icon="RefreshCw" :disabled="loading" @click="loadJobs">刷新</UiButton></template></UiPageHeader>
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiSkeleton v-if="loading && !jobs.length" variant="table" :rows="6" />
     <UiCard v-if="!loading && jobs.length" padding="none" shadow="sm">
