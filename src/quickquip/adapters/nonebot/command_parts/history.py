@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 def _group_identity_index(svc, group_id):
     try:
-        return svc._resolve_identities(str(group_id))
+        return svc.group_identities(str(group_id))
     except Exception:
+        logger.debug("语录发言人解析：身份索引不可用，回退快照名", exc_info=True)
         return None
 
 

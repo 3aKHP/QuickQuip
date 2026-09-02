@@ -18,7 +18,7 @@ def _sender_identity_sources(group_id: str) -> tuple[dict[str, str] | None, obje
         from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service
 
         _ensure_llm_bindings()
-        identity_index = get_llm_service()._resolve_identities(group_id)
+        identity_index = get_llm_service().group_identities(group_id)
     except Exception:
         logger.debug("语录发言人解析：身份索引不可用，回退快照名", exc_info=True)
     return (gs.user_names if gs else None), identity_index
