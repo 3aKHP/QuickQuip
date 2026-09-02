@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import types
-from datetime import datetime, timedelta
 
 from nonebot.adapters.onebot.v11 import Message
 
 from quickquip.adapters.nonebot import scheduler_plugin
 from quickquip.chat.scheduled_messages import ScheduledMessageStore
+from tests.fixtures.scheduled_cron import future_one_shot_cron
 
 
 class FakeCronScheduler:
@@ -82,10 +82,7 @@ def test_one_shot_job_deleted_after_fire(monkeypatch, tmp_path):
     )
 
     store = ScheduledMessageStore(tmp_path / "sm.json")
-    # 一次性任务的日期必须在未来（存储层校验），用动态日期避免时间炸弹
-    future = datetime.now() + timedelta(days=1)
-    cron = f"{future.minute} {future.hour} {future.day} {future.month} *"
-    store.add(cron=cron, group_ids=[123], message="看KPL", recurring=False)
+    store.add(cron=future_one_shot_cron(), group_ids=[123], message="看KPL", recurring=False)
 
     scheduler_plugin.reload_scheduled_message_jobs(store)
     job_id = f"scheduled_msg_{store.list()[0].id}"

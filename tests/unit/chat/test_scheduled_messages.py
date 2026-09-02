@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
 
 import pytest
 
@@ -12,10 +11,7 @@ from quickquip.chat.scheduled_messages import (
     validate_cron,
     validate_one_off_schedule,
 )
-
-
-def _pinned_cron(dt: datetime) -> str:
-    return f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
+from tests.fixtures.scheduled_cron import future_one_shot_cron, past_one_shot_cron
 
 
 def test_add_and_list_roundtrip(tmp_path):
@@ -92,12 +88,11 @@ def test_validate_cron_rejects_invalid():
 
 def test_validate_one_off_schedule():
     pytest.importorskip("apscheduler")
-    now = datetime.now()
     # 未来日期：放行
-    validate_one_off_schedule(_pinned_cron(now + timedelta(days=1)))
+    validate_one_off_schedule(future_one_shot_cron())
     # 今年已过的日期：拒绝（否则会静默等到来年）
     with pytest.raises(ValueError, match="在今年已过"):
-        validate_one_off_schedule(_pinned_cron(now - timedelta(days=1)))
+        validate_one_off_schedule(past_one_shot_cron())
     # 不钉日/月的表达式：今年时刻不唯一，仅要求存在未来触发
     validate_one_off_schedule("0 19 * * *")
     # 永不触发的表达式（2 月 30 日）：拒绝
@@ -111,13 +106,13 @@ def test_store_add_rejects_one_off_with_past_date(tmp_path):
     store = ScheduledMessageStore(tmp_path / "sm.json")
     with pytest.raises(ValueError, match="在今年已过"):
         store.add(
-            cron=_pinned_cron(datetime.now() - timedelta(days=1)),
+            cron=past_one_shot_cron(),
             group_ids=[123],
             message="x",
             recurring=False,
         )
     job = store.add(
-        cron=_pinned_cron(datetime.now() + timedelta(days=1)),
+        cron=future_one_shot_cron(),
         group_ids=[123],
         message="x",
         recurring=False,

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
 import pytest
 
 from quickquip.chat.scheduled_messages import ScheduledMessageStore
 from quickquip.llm.service_parts import schedule_messages_tool as smt
 from quickquip.llm.service_parts.schedule_messages_tool import ScheduleMessagesToolMixin
 from quickquip.llm.tools import ToolExecutionContext
+from tests.fixtures.scheduled_cron import future_one_shot_cron
 
 
 class _FakeService(ScheduleMessagesToolMixin):
@@ -79,11 +78,9 @@ async def test_create_llm_kind(tool_env):
 
 
 async def test_create_one_shot(tool_env):
-    """一次性提醒：recurring=false + cron 分/时/日/月钉到具体日期值。"""
+    """一次性提醒：recurring=false + cron 锚到动态计算的未来日期，避免钉死日期的过期时间炸弹。"""
     svc = _FakeService()
-    # 一次性任务的日期必须在未来（存储层校验），用动态日期避免时间炸弹
-    future = datetime.now() + timedelta(days=1)
-    cron = f"{future.minute} {future.hour} {future.day} {future.month} *"
+    cron = future_one_shot_cron()
     out = await svc._tool_manage_scheduled_messages(
         {
             "action": "create",
