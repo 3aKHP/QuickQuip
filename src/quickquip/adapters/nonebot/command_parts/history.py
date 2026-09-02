@@ -9,12 +9,46 @@ from time import time
 from quickquip.adapters.nonebot.command_parts.common import _is_private_chat, _parse_profile_mode, _select_profile_samples, _strip_command_name
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
 from quickquip.app.message_pipeline import _ensure_llm_bindings, daily_collector, get_llm_service, group_quote_store, stats_tracker
+from quickquip.chat.group_quotes import resolve_quote_display_name
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.llm.rendering import render_reply_for_llm
 
 
 logger = logging.getLogger(__name__)
+
+
+def _group_identity_index(svc, group_id):
+    try:
+        return svc._resolve_identities(str(group_id))
+    except Exception:
+        return None
+
+
+def _quote_display_name(svc, group_id, quoted_user_id: str, snapshot_name: str) -> str:
+    gs = stats_tracker.get_stats(group_id)
+    resolved, changed = resolve_quote_display_name(
+        quoted_user_id, snapshot_name,
+        user_names=gs.user_names if gs else None,
+        identity_index=_group_identity_index(svc, group_id),
+    )
+    if changed:
+        return f"{resolved} (原: {snapshot_name.strip()})"
+    return resolved or "未知"
+
+
+def _resolve_sender_candidates(svc, group_id, query: str) -> list[str]:
+    """把名字反查成候选 QQ 号列表（stats 最新名片精确匹配 + 身份资料别名）。"""
+    gs = stats_tracker.get_stats(group_id)
+    candidates: list[str] = []
+    if gs and gs.user_names:
+        candidates.extend(uid for uid, name in gs.user_names.items() if name == query)
+    index = _group_identity_index(svc, group_id)
+    if index is not None:
+        entry = index.by_alias.get(query)
+        if entry is not None:
+            candidates.extend(str(qq) for qq in entry.qq_ids)
+    return list(dict.fromkeys(candidates))
 
 
 def register_history_commands(on_command, Message, MessageSegment) -> None:
@@ -174,7 +208,8 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                 await quote_cmd.finish("语录库还是空的，引用一条消息发 /quote 来收藏吧")
             ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
             seq_str = f"#{q.get('group_seq', '?')} " if q.get('group_seq') else ""
-            await quote_cmd.finish(f"{seq_str}「{q['content']}」\n—— {q['quoted_sender_name']} ({ts})")
+            display = _quote_display_name(svc, group_id, q.get("quoted_user_id", ""), q["quoted_sender_name"])
+            await quote_cmd.finish(f"{seq_str}「{q['content']}」\n—— {display} ({ts})")
 
         # /quote N  or  /quote #N → get by group_seq
         seq_match = re.match(r"^#?(\d+)$", args)
@@ -184,7 +219,8 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             if q is None:
                 await quote_cmd.finish(f"本群没有编号为 #{seq} 的语录")
             ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
-            await quote_cmd.finish(f"#{seq} 「{q['content']}」\n—— {q['quoted_sender_name']} ({ts})")
+            display = _quote_display_name(svc, group_id, q.get("quoted_user_id", ""), q["quoted_sender_name"])
+            await quote_cmd.finish(f"#{seq} 「{q['content']}」\n—— {display} ({ts})")
 
         # /quote search <keyword>  or  /quote s <keyword>
         search_match = re.match(r"^(?:search|s)\s+(.+)$", args, re.IGNORECASE)
@@ -199,12 +235,34 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                 lines.append(f"#{r['group_seq']} 「{preview}」—— {r['quoted_sender_name']}")
             await quote_cmd.finish("\n".join(lines))
 
+        # /quote by <名字|QQ>  or  /quote b <名字|QQ> → by sender
+        by_match = re.match(r"^(?:by|b)\s+(.+)$", args, re.IGNORECASE)
+        if by_match:
+            query = by_match.group(1).strip()
+            is_qq = query.isdigit()
+            user_ids = [query] if is_qq else _resolve_sender_candidates(svc, group_id, query)
+            rows, total = group_quote_store.search_by_sender(
+                group_id,
+                user_ids=user_ids,
+                name_pattern="" if is_qq else query,
+                limit=10,
+            )
+            if not rows:
+                await quote_cmd.finish(f"未找到「{query}」发言的语录")
+            lines = [f"👤 「{query}」的语录（共 {total} 条）："]
+            for r in rows:
+                preview = r["content"][:40] + ("…" if len(r["content"]) > 40 else "")
+                display = _quote_display_name(svc, group_id, r.get("quoted_user_id", ""), r["quoted_sender_name"])
+                lines.append(f"#{r['group_seq']} 「{preview}」—— {display}")
+            await quote_cmd.finish("\n".join(lines))
+
         if not reply:
             await quote_cmd.finish(
                 "用法：\n"
                 "/quote — 随机一条\n"
                 "/quote N — 查看编号为 N 的语录\n"
                 "/quote search <关键词> — 搜索语录\n"
+                "/quote by <名字|QQ> — 查看某人发言的语录\n"
                 "引用消息 + /quote — 收藏语录"
             )
         rendered = render_reply_for_llm(
