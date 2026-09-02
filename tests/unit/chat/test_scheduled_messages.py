@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
-from quickquip.chat.scheduled_messages import ScheduledMessageStore, validate_cron
+from quickquip.chat.scheduled_messages import (
+    ScheduledMessageStore,
+    validate_cron,
+    validate_one_off_schedule,
+)
+
+
+def _pinned_cron(dt: datetime) -> str:
+    return f"{dt.minute} {dt.hour} {dt.day} {dt.month} *"
 
 
 def test_add_and_list_roundtrip(tmp_path):
@@ -79,6 +88,21 @@ def test_validate_cron_rejects_invalid():
         validate_cron("61 7 * * *")
     with pytest.raises(ValueError):
         validate_cron("0 25 * * *")
+
+
+def test_validate_one_off_schedule():
+    pytest.importorskip("apscheduler")
+    now = datetime.now()
+    # 未来日期：放行
+    validate_one_off_schedule(_pinned_cron(now + timedelta(days=1)))
+    # 今年已过的日期：拒绝（否则会静默等到来年）
+    with pytest.raises(ValueError, match="在今年已过"):
+        validate_one_off_schedule(_pinned_cron(now - timedelta(days=1)))
+    # 不钉日/月的表达式：今年时刻不唯一，仅要求存在未来触发
+    validate_one_off_schedule("0 19 * * *")
+    # 永不触发的表达式（2 月 30 日）：拒绝
+    with pytest.raises(ValueError, match="没有未来触发时间"):
+        validate_one_off_schedule("0 0 30 2 *")
 
 
 def test_update_with_no_effective_fields_is_noop(tmp_path):
