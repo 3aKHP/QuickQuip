@@ -120,8 +120,9 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `tool_calling_enabled` | 是否允许工具调用 | `false` |
 | `tool_max_rounds` | 单次工具调用循环最大轮数 | `8` |
 | `tool_max_calls_per_round` | 单轮最多执行工具调用数 | `16` |
-| `retry_max_attempts` | LLM 请求失败时的最大重试次数 | `3` |
-| `retry_base_delay` | 重试退避的基础延迟秒数 | `1.0` |
+| `retry_max_attempts` | LLM 请求失败时的最大尝试次数（含首次调用；仅对上游 429/5xx/网络错误生效） | `3` |
+| `retry_base_delay` | 重试退避的基础延迟秒数（按指数递增） | `1.0` |
+| `retry_jitter` | 重试退避的随机抖动比例（0-1，0 为关闭抖动） | `0.5` |
 | `auto_memory_enabled` | 自动记忆抽取全局默认开关 | `false` |
 | `auto_memory_prompt` | 自动记忆抽取自定义判定 prompt | `""` |
 | `auto_memory_max_tokens` | 自动记忆抽取判定最大输出 token | `256` |
