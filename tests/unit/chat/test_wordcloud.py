@@ -80,9 +80,10 @@ def test_build_word_frequencies_strips_qq_mention_placeholder():
     messages = [
         {"text": "@QQ123456789 今天天气不错"},
         {"text": "@QQ987654321 出来聊聊"},
+        {"text": "@QQ 兜底占位"},
     ]
     freq = build_word_frequencies(messages, stopwords=frozenset())
-    # 未登记成员的 @QQ<digits> 占位符被清洗，明文 QQ 号不得进入词频
+    # 未登记成员的 @QQ<digits> 占位符（含裸 @QQ 边界）被清洗，明文 QQ 号不得进入词频
     assert all("123456789" not in word and "987654321" not in word for word in freq)
     assert not any(word.startswith("QQ") for word in freq)
 

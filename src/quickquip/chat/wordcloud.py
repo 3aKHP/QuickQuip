@@ -131,7 +131,7 @@ def build_word_frequencies(messages: list[dict], stopwords: frozenset[str]) -> d
             continue
         text = re.sub(r'\[.*?\]', '', text)
         # 未登记成员的 @ 提及渲染为 @QQ<digits> 占位符，明文 QQ 号不得进入词频统计
-        text = re.sub(r'@QQ\d+', '', text)
+        text = re.sub(r'@QQ\d*', '', text)
         for word in jieba.cut(text):
             word = word.strip()
             if len(word) < 2:
