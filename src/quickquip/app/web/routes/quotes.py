@@ -2,38 +2,17 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from quickquip.chat.group_quotes import GroupQuoteStore, resolve_quote_display_name
+from quickquip.chat.group_quotes import GroupQuoteStore, attach_sender_display
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _sender_identity_sources(group_id: str) -> tuple[dict[str, str] | None, object | None]:
-    """取发言人名称解析所需的最新名片表与身份索引，LLM 服务不可用时降级。"""
-    from quickquip.app.message_pipeline import stats_tracker
-
-    gs = stats_tracker.get_stats(group_id)
-    identity_index = None
-    try:
-        from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service
-
-        _ensure_llm_bindings()
-        identity_index = get_llm_service().group_identities(group_id)
-    except Exception:
-        logger.debug("语录发言人解析：身份索引不可用，回退快照名", exc_info=True)
-    return (gs.user_names if gs else None), identity_index
-
-
 def _enrich_quote_rows(rows: list[dict], group_id: str) -> list[dict]:
-    user_names, identity_index = _sender_identity_sources(group_id)
-    for row in rows:
-        resolved, changed = resolve_quote_display_name(
-            row.get("quoted_user_id", ""), row.get("quoted_sender_name", ""),
-            user_names=user_names, identity_index=identity_index,
-        )
-        row["sender_display"] = resolved
-        row["sender_changed"] = changed
-    return rows
+    from quickquip.app.message_pipeline import get_sender_identity_sources
+
+    user_names, identity_index = get_sender_identity_sources(group_id)
+    return attach_sender_display(rows, user_names=user_names, identity_index=identity_index)
 
 
 @router.get("/quotes/groups")

@@ -286,7 +286,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         """按群返回合并后的身份索引，供装配层等外部调用方使用。"""
         return self._resolve_identities(group_id)
 
-
     def reload_config(self) -> LLMConfig:
         self.config = load_llm_config(self.config_path)
         _reload_sensitive_filter()

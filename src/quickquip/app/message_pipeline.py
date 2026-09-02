@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.service import get_llm_service
 from quickquip.llm.usage import drain_usage_tasks
 from quickquip.llm.usage_store import usage_store
@@ -163,6 +165,26 @@ def _ensure_llm_bindings() -> None:
     svc.bind_rule_switch(rule_switch)
     svc.bind_recent_message_buffer(recent_messages)
     _llm_bindings_done = True
+
+
+logger = logging.getLogger(__name__)
+
+
+def get_sender_identity_sources(
+    group_id: int | str,
+) -> tuple[dict[str, str] | None, IdentityIndex | None]:
+    """发言人展示名的两个来源：群内最新名片表与群级身份索引。
+
+    身份索引依赖 LLM 服务，不可用时降级为 None，由调用方回退快照名。
+    """
+    gs = stats_tracker.get_stats(group_id)
+    identity_index = None
+    try:
+        _ensure_llm_bindings()
+        identity_index = get_llm_service().group_identities(str(group_id))
+    except Exception:
+        logger.debug("语录发言人解析：身份索引不可用，回退快照名", exc_info=True)
+    return (gs.user_names if gs else None), identity_index
 
 
 def record_group_message(

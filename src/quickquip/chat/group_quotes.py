@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 _UNKNOWN_SNAPSHOT_NAMES = {"", "未知"}
 
+_QUOTE_ROW_COLUMNS = (
+    "id, group_id, quoted_user_id, quoted_sender_name,"
+    " content, saved_by_user_id, saved_at, group_seq"
+)
+
 
 def resolve_quote_display_name(
     quoted_user_id: str | int,
@@ -46,6 +51,23 @@ def resolve_quote_display_name(
     if snapshot in _UNKNOWN_SNAPSHOT_NAMES or resolved == snapshot:
         return resolved, False
     return resolved, True
+
+
+def attach_sender_display(
+    rows: list[dict],
+    *,
+    user_names: Mapping[str, str] | None = None,
+    identity_index: IdentityIndex | None = None,
+) -> list[dict]:
+    """逐行附加 ``sender_display``/``sender_changed``，供 Web API 富化使用。"""
+    for row in rows:
+        resolved, changed = resolve_quote_display_name(
+            row.get("quoted_user_id", ""), row.get("quoted_sender_name", ""),
+            user_names=user_names, identity_index=identity_index,
+        )
+        row["sender_display"] = resolved
+        row["sender_changed"] = changed
+    return rows
 
 
 class GroupQuoteStore:
@@ -233,8 +255,7 @@ class GroupQuoteStore:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
         row = self._db.execute(
-            "SELECT id, group_id, quoted_user_id, quoted_sender_name,"
-            " content, saved_by_user_id, saved_at, group_seq"
+            f"SELECT {_QUOTE_ROW_COLUMNS}"
             " FROM quotes WHERE group_id=? AND group_seq=?",
             (str(group_id), int(seq)),
         ).fetchone()
@@ -251,8 +272,7 @@ class GroupQuoteStore:
         gid = str(group_id)
         pattern = f"%{keyword}%"
         rows = self._db.execute(
-            "SELECT id, group_id, quoted_user_id, quoted_sender_name,"
-            " content, saved_by_user_id, saved_at, group_seq"
+            f"SELECT {_QUOTE_ROW_COLUMNS}"
             " FROM quotes WHERE group_id=? AND content LIKE ?"
             " ORDER BY id DESC LIMIT ? OFFSET ?",
             (gid, pattern, limit, offset),
@@ -290,8 +310,7 @@ class GroupQuoteStore:
         where = f" WHERE group_id=? AND ({' OR '.join(conditions)})"
 
         rows = self._db.execute(
-            "SELECT id, group_id, quoted_user_id, quoted_sender_name,"
-            " content, saved_by_user_id, saved_at, group_seq"
+            f"SELECT {_QUOTE_ROW_COLUMNS}"
             f" FROM quotes{where} ORDER BY id DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
         ).fetchall()
@@ -320,8 +339,7 @@ class GroupQuoteStore:
         if keyword:
             return self.search(gid, keyword, offset, limit)
         rows = self._db.execute(
-            "SELECT id, group_id, quoted_user_id, quoted_sender_name,"
-            " content, saved_by_user_id, saved_at, group_seq"
+            f"SELECT {_QUOTE_ROW_COLUMNS}"
             " FROM quotes WHERE group_id=?"
             " ORDER BY id DESC LIMIT ? OFFSET ?",
             (gid, limit, offset),
