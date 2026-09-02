@@ -54,7 +54,7 @@
             </select>
           </label>
           <label v-if="simple.frequency === 'once'" class="field">
-            <span>触发日期时间<em class="hint">到点触发一次后自动删除；必须选择未来的时间</em></span>
+            <span>触发日期时间（北京时间）<em class="hint">到点触发一次后自动删除；必须选择未来的时间</em></span>
             <input v-model="simple.onceAt" type="datetime-local" />
           </label>
           <template v-else>
@@ -118,23 +118,23 @@ import UiToggle from '../components/ui/UiToggle.vue'; import UiEmpty from '../co
 import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiSegmented from '../components/ui/UiSegmented.vue'
 import { fetchScheduledMessages, createScheduledMessage, updateScheduledMessage, deleteScheduledMessage, type ScheduledMessageJob, type ScheduledMessagePatch } from '../api/scheduledMessages'
 import { fetchKnownGroups } from '../api/groups'
+import { assembleCron, parseCronToSimple, onceAtInFuture, DEFAULT_SIMPLE_FIELDS, WEEKDAY_NAMES, type SimpleFields } from '../lib/scheduledCron'
 import { toast } from '../toast'
 
-type Frequency = 'daily' | 'weekly' | 'monthly' | 'once'
 type FormMode = 'simple' | 'advanced'
 
 const jobs = ref<ScheduledMessageJob[]>([]); const loading = ref(false); const loadError = ref<string | null>(null)
 const editing = ref(false); const editingId = ref<string | null>(null); const saving = ref(false); const saveError = ref<string | null>(null)
 const form = ref({ cron: '', message: '', enabled: true, kind: 'text' as 'text' | 'llm', recurring: true })
 const mode = ref<FormMode>('simple')
-const simple = ref({ frequency: 'daily' as Frequency, time: '08:00', weekday: 0, dayOfMonth: 1, onceAt: '' })
+const simple = ref<SimpleFields>({ ...DEFAULT_SIMPLE_FIELDS })
 const knownGroups = ref<string[]>([]); const selectedGroups = ref<string[]>([]); const extraGroupIds = ref('')
 // 编辑时记录的原始值：保存补丁只携带实际变动的 cron/recurring，
 // 让存量过期一次性任务的"只改文案"不被后端未来时间校验阻塞。
 const originalCron = ref(''); const originalRecurring = ref(true)
 
 const modeOptions: { value: FormMode; label: string }[] = [{ value: 'simple', label: '简易模式' }, { value: 'advanced', label: '高级模式' }]
-const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+const weekdayNames = WEEKDAY_NAMES
 const isOnce = computed(() => mode.value === 'simple' && simple.value.frequency === 'once')
 // 候选群 = 已知群 ∪ 当前已选群（编辑存量任务时其群可能不在已知列表里）
 const groupOptions = computed(() => [...new Set([...knownGroups.value, ...selectedGroups.value])])
@@ -147,58 +147,20 @@ function originLabel(origin: string): string { return { command: '命令', llm: 
 async function loadJobs() { loading.value = true; loadError.value = null; try { const d = await fetchScheduledMessages(); jobs.value = d.jobs || [] } catch (e: unknown) { loadError.value = (e as Error).message } finally { loading.value = false } }
 async function loadKnownGroups() { try { const d = await fetchKnownGroups(); knownGroups.value = d.groups || [] } catch { knownGroups.value = [] } }
 
-/** 简易模式字段 → 5 段 cron。once 钉死 分/时/日/月，周字段恒为 *。
- *  选择器还没填完整（如仅一次未选日期）时返回当前 cron，避免组装出 NaN。 */
-function assembleCron(): string {
-  const s = simple.value
-  if (s.frequency === 'once') {
-    const dt = new Date(s.onceAt)
-    if (Number.isNaN(dt.getTime())) return form.value.cron
-    return `${dt.getMinutes()} ${dt.getHours()} ${dt.getDate()} ${dt.getMonth() + 1} *`
-  }
-  if (!s.time) return form.value.cron
-  const [h, m] = s.time.split(':').map(Number)
-  if (s.frequency === 'daily') return `${m} ${h} * * *`
-  if (s.frequency === 'weekly') return `${m} ${h} * * ${s.weekday}`
-  return `${m} ${h} ${s.dayOfMonth} * *`
-}
-
-/** 5 段 cron → 简易模式字段；无法用简易模式表达时返回 false。
- *  钉死月/日的 cron 只有在一次性（recurring=false）时才解析为"仅一次"；
- *  recurring=true 的同款 cron 是"每年重复"，简易模式表达不了，保持高级模式。 */
-function parseCronToSimple(cron: string, recurring: boolean): boolean {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return false
-  const [mi, h, d, mo, w] = parts
-  const isInt = (v: string) => /^\d+$/.test(v)
-  if (!isInt(mi) || !isInt(h)) return false
-  const s = simple.value
-  s.time = `${pad(Number(h))}:${pad(Number(mi))}`
-  if (d === '*' && mo === '*' && w === '*') { s.frequency = 'daily'; return true }
-  if (d === '*' && mo === '*' && isInt(w) && Number(w) <= 6) { s.frequency = 'weekly'; s.weekday = Number(w); return true }
-  if (isInt(d) && mo === '*' && w === '*') { s.frequency = 'monthly'; s.dayOfMonth = Number(d); return true }
-  if (isInt(d) && isInt(mo) && w === '*') {
-    if (recurring) return false  // 钉死月/日的周期任务 = 每年重复，简易模式无此选项
-    // cron 不含年份：默认填今年，今年已过则取明年
-    s.frequency = 'once'
-    const now = new Date()
-    let year = now.getFullYear()
-    if (new Date(year, Number(mo) - 1, Number(d), Number(h), Number(mi)) <= now) year += 1
-    s.onceAt = `${year}-${pad(Number(mo))}-${pad(Number(d))}T${pad(Number(h))}:${pad(Number(mi))}`
-    return true
-  }
-  return false
-}
-
 /** 两种模式互相切换且内容不丢：简易→高级组装 cron；高级→简易尝试解析，失败则留在高级模式。 */
 function switchMode(next: FormMode) {
   if (next === mode.value) return
   saveError.value = null
   if (next === 'advanced') {
-    form.value.cron = assembleCron()
-  } else if (!parseCronToSimple(form.value.cron, form.value.recurring)) {
-    toast('当前 cron（或"每年重复"语义）无法用简易模式表达，已保留在高级模式', 'error')
-    return
+    const assembled = assembleCron(simple.value)
+    if (assembled !== null) form.value.cron = assembled  // 选择器未填完整时保留现状
+  } else {
+    const parsed = parseCronToSimple(form.value.cron, form.value.recurring)
+    if (!parsed) {
+      toast('当前 cron（或"每年重复"语义）无法用简易模式表达，已保留在高级模式', 'error')
+      return
+    }
+    simple.value = parsed
   }
   mode.value = next
 }
@@ -206,7 +168,7 @@ function switchMode(next: FormMode) {
 function startCreate() {
   editingId.value = null
   form.value = { cron: '', message: '', enabled: true, kind: 'text', recurring: true }
-  simple.value = { frequency: 'daily', time: '08:00', weekday: 0, dayOfMonth: 1, onceAt: '' }
+  simple.value = { ...DEFAULT_SIMPLE_FIELDS }
   selectedGroups.value = []; extraGroupIds.value = ''; mode.value = 'simple'
   saveError.value = null; editing.value = true
   loadKnownGroups()
@@ -215,42 +177,54 @@ function startEdit(job: ScheduledMessageJob) {
   editingId.value = job.id
   form.value = { cron: job.cron, message: job.message, enabled: job.enabled, kind: job.kind, recurring: job.recurring }
   originalCron.value = job.cron; originalRecurring.value = job.recurring
-  mode.value = parseCronToSimple(job.cron, job.recurring) ? 'simple' : 'advanced'
+  const parsed = parseCronToSimple(job.cron, job.recurring)
+  if (parsed) simple.value = parsed
+  mode.value = parsed ? 'simple' : 'advanced'
   selectedGroups.value = [...job.group_ids]; extraGroupIds.value = ''
   saveError.value = null; editing.value = true
   loadKnownGroups()
 }
 function cancelEdit() { editing.value = false; editingId.value = null }
 
-async function onSave() {
-  let cron: string
+interface Payload { cron: string; groupIds: string[]; message: string; enabled: boolean; kind: 'text' | 'llm'; recurring: boolean }
+
+/** 表单状态 → 提交负载的纯映射；校验失败返回 { error }。"仅一次"强制 recurring=false 的策略集中在此。 */
+function buildPayload(): Payload | { error: string } {
+  let cron: string | null
   if (mode.value === 'simple') {
     if (simple.value.frequency === 'once') {
-      if (!simple.value.onceAt) { saveError.value = '请选择一次性任务的触发日期时间'; return }
-      if (new Date(simple.value.onceAt) <= new Date()) { saveError.value = '一次性任务的触发时间必须在未来'; return }
+      if (!simple.value.onceAt) return { error: '请选择一次性任务的触发日期时间' }
+      if (!onceAtInFuture(simple.value.onceAt)) return { error: '一次性任务的触发时间必须在未来' }
     }
-    cron = assembleCron()
+    cron = assembleCron(simple.value)
+    if (cron === null) return { error: '请补全时间设置' }
   } else {
     cron = form.value.cron.trim()
-    if (!cron) { saveError.value = '请填写 cron 表达式'; return }
+    if (!cron) return { error: '请填写 cron 表达式' }
   }
   const extra = extraGroupIds.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
-  if (extra.some(g => !/^\d+$/.test(g))) { saveError.value = '手动填写的群号必须是全数字'; return }
+  if (extra.some(g => !/^\d+$/.test(g))) return { error: '手动填写的群号必须是全数字' }
   const groupIds = [...new Set([...selectedGroups.value, ...extra])]
-  if (!groupIds.length) { saveError.value = '请至少选择一个群'; return }
-  if (!form.value.message.trim()) { saveError.value = '消息内容不能为空'; return }
-  const recurring = isOnce.value ? false : form.value.recurring
+  if (!groupIds.length) return { error: '请至少选择一个群' }
+  const message = form.value.message.trim()
+  if (!message) return { error: '消息内容不能为空' }
+  return { cron, groupIds, message, enabled: form.value.enabled, kind: form.value.kind, recurring: isOnce.value ? false : form.value.recurring }
+}
+
+async function onSave() {
+  const r = buildPayload()
+  if ('error' in r) { saveError.value = r.error; return }
   saving.value = true; saveError.value = null
   try {
     if (editingId.value) {
       // 未变动的 cron/recurring 不进补丁：避免存量过期一次性任务的无关编辑被未来时间校验误伤
-      const patch: ScheduledMessagePatch = { group_ids: groupIds, message: form.value.message.trim(), enabled: form.value.enabled, kind: form.value.kind }
-      if (cron !== originalCron.value) patch.cron = cron
-      if (recurring !== originalRecurring.value) patch.recurring = recurring
+      const patch: ScheduledMessagePatch = { group_ids: r.groupIds, message: r.message, enabled: r.enabled, kind: r.kind }
+      if (r.cron !== originalCron.value) patch.cron = r.cron
+      if (r.recurring !== originalRecurring.value) patch.recurring = r.recurring
       await updateScheduledMessage(editingId.value, patch)
       toast('已保存')
     } else {
-      await createScheduledMessage({ cron, group_ids: groupIds, message: form.value.message.trim(), enabled: form.value.enabled, kind: form.value.kind, recurring })
+      await createScheduledMessage({ cron: r.cron, group_ids: r.groupIds, message: r.message, enabled: r.enabled, kind: r.kind, recurring: r.recurring })
       toast('已创建')
     }
     cancelEdit(); await loadJobs()
