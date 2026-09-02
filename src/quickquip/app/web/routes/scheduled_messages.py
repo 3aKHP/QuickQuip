@@ -17,6 +17,7 @@ from quickquip.chat.scheduled_messages import (
     VALID_KINDS,
     ScheduledMessageStore,
     validate_cron,
+    validate_one_off_schedule,
 )
 
 router = APIRouter()
@@ -68,6 +69,8 @@ def create_scheduled_message(body: ScheduledMessageCreate, request: Request):
     try:
         validate_cron(body.cron)
         _validate_kind(body.kind)
+        if not body.recurring:
+            validate_one_off_schedule(body.cron)
         job = _get_store().add(
             cron=body.cron,
             group_ids=body.group_ids,
@@ -105,6 +108,18 @@ def update_scheduled_message(job_id: str, body: ScheduledMessageUpdate, request:
             raise HTTPException(status_code=400, detail=str(e))
     if "kind" in fields and fields["kind"] is not None:
         _validate_kind(fields["kind"])
+    if "cron" in fields or "recurring" in fields:
+        # 仅在 cron/recurring 变动时校验一次性任务的未来触发时间，
+        # 避免改文案等无关字段被存量过期任务阻塞。
+        effective_cron = fields.get("cron") or before.cron
+        effective_recurring = fields.get("recurring")
+        if effective_recurring is None:
+            effective_recurring = before.recurring
+        if not effective_recurring:
+            try:
+                validate_one_off_schedule(effective_cron)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
     try:
         before, updated = store.update_for_audit(job_id, **fields)
     except ValueError as e:

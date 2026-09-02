@@ -20,6 +20,7 @@ from typing import Any
 
 from filelock import FileLock
 
+from quickquip.common.constants import BEIJING_TIMEZONE
 from quickquip.common.opt_in_groups import normalize_digit_group_id
 from quickquip.common.paths import SCHEDULED_MESSAGES_JSON_PATH
 
@@ -53,6 +54,42 @@ def validate_cron(cron_expr: str) -> None:
         CronTrigger.from_crontab(expr)
     except (ValueError, KeyError) as exc:
         raise ValueError(f"非法 cron 表达式 {cron_expr!r}: {exc}") from exc
+
+
+_INT_FIELD_RE = re.compile(r"^\d+$")
+
+
+def validate_one_off_schedule(cron_expr: str) -> None:
+    """校验一次性任务（recurring=False）的首次触发时间在可预期的未来，非法时抛 ValueError。
+
+    钉死月/日的表达式若今年对应时刻已过，APScheduler 会静默等到来年才触发，
+    与"一次性提醒"的直觉相悖，此处直接拒绝。apscheduler 不可用时退化为跳过。
+    """
+    validate_cron(cron_expr)
+    try:
+        from zoneinfo import ZoneInfo
+
+        from apscheduler.triggers.cron import CronTrigger
+    except ImportError:
+        return
+    tz = ZoneInfo(BEIJING_TIMEZONE)
+    now = datetime.now(tz)
+    trigger = CronTrigger.from_crontab(cron_expr.strip(), timezone=tz)
+    if trigger.get_next_fire_time(None, now) is None:
+        raise ValueError(f"一次性任务 {cron_expr!r} 没有未来触发时间")
+    parts = cron_expr.split()
+    minute, hour, day, month = parts[0], parts[1], parts[2], parts[3]
+    if not all(_INT_FIELD_RE.match(p) for p in (minute, hour, day, month)):
+        return  # 含通配/步进时今年时刻不唯一，上面的 next-fire 检查已足够
+    try:
+        this_year = datetime(now.year, int(month), int(day), int(hour), int(minute), tzinfo=tz)
+    except ValueError:
+        return  # 如钉在 2 月 29 日而今年非闰年：next-fire 检查已确认存在未来触发
+    if this_year <= now:
+        raise ValueError(
+            f"一次性任务的触发时间 {int(month)}月{int(day)}日 {int(hour):02d}:{int(minute):02d} "
+            "在今年已过，将静默等到明年才触发；请改用未来的日期时间"
+        )
 
 
 def normalize_group_ids(group_ids: Any) -> list[str]:
@@ -202,6 +239,10 @@ class ScheduledMessageStore:
         origin: str = "web",
     ) -> ScheduledMessage:
         validate_cron(cron)
+        if not recurring:
+            # 一次性任务的未来触发时间校验落在存储层：Web 路由、/schedule 命令、
+            # LLM 工具三条写路径共用，避免钉死已过期日期的任务静默等到来年。
+            validate_one_off_schedule(cron)
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock():
             jobs = self._load_unlocked()
