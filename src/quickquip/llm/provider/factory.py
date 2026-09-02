@@ -16,13 +16,9 @@ from quickquip.llm.provider.retry import RetryPolicy
 
 def build_provider_client(config: ProviderConfig, *, retry_policy: RetryPolicy | None = None) -> BaseProviderClient:
     if config.protocol == "openai":
-        client: BaseProviderClient = OpenAIProviderClient(config)
-    elif config.protocol == "claude":
-        client = ClaudeProviderClient(config)
-    elif config.protocol == "gemini":
-        client = GeminiProviderClient(config)
-    else:
-        raise LLMProviderError(f"未知 provider 协议：{config.protocol}")
-    if retry_policy is not None:
-        client.retry_policy = retry_policy
-    return client
+        return OpenAIProviderClient(config, retry_policy=retry_policy)
+    if config.protocol == "claude":
+        return ClaudeProviderClient(config, retry_policy=retry_policy)
+    if config.protocol == "gemini":
+        return GeminiProviderClient(config, retry_policy=retry_policy)
+    raise LLMProviderError(f"未知 provider 协议：{config.protocol}")

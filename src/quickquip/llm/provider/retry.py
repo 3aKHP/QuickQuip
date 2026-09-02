@@ -1,14 +1,21 @@
 """Retry policy and exponential-backoff computation for provider requests.
 
-The retry loop itself lives in :meth:`BaseProviderClient.complete`; this
-module only holds the policy value object and the pure delay computation so
-both stay trivially unit-testable and free of provider-layer imports.
+The retry loop itself lives in :meth:`BaseProviderClient._dispatch_with_retry`
+(invoked from ``complete()``); this module only holds the policy value object
+and the pure delay computation so both stay trivially unit-testable and free
+of provider-layer imports.
 """
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
 from typing import Callable
+
+from quickquip.llm.config import (
+    DEFAULT_RETRY_BASE_DELAY,
+    DEFAULT_RETRY_JITTER,
+    DEFAULT_RETRY_MAX_ATTEMPTS,
+)
 
 
 @dataclass(slots=True)
@@ -19,9 +26,9 @@ class RetryPolicy:
     ``base_delay * 2**n * (1 + uniform(0, jitter))``。
     """
 
-    max_attempts: int = 3
-    base_delay: float = 1.0
-    jitter: float = 0.5
+    max_attempts: int = DEFAULT_RETRY_MAX_ATTEMPTS
+    base_delay: float = DEFAULT_RETRY_BASE_DELAY
+    jitter: float = DEFAULT_RETRY_JITTER
 
     @classmethod
     def disabled(cls) -> "RetryPolicy":

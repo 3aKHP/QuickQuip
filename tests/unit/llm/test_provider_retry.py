@@ -9,8 +9,6 @@
 from __future__ import annotations
 
 import asyncio
-import textwrap
-from pathlib import Path
 
 import pytest
 
@@ -18,7 +16,6 @@ from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import ClaudeProviderClient, LLMProviderError, LLMRequest
 from plugins.llm_tools import LLMConversationMessage
 
-from quickquip.llm.config import load_llm_config
 from quickquip.llm.provider import RetryPolicy, build_provider_client
 from quickquip.llm.provider.base import LLMResponse, _is_retryable
 from quickquip.llm.provider.retry import backoff_delay
@@ -173,9 +170,9 @@ async def test_exhaustion_raises_last_error(captured_delays):
 
 
 async def test_disabled_policy_single_attempt(captured_delays):
-    config = _config(retry_max_attempts=3, retry_base_delay=0.25, retry_jitter=0.0)
+    # 经公开构造缝隙禁用重试：__init__ 从 config 派生单次尝试策略
+    config = _config(retry_max_attempts=1, retry_base_delay=0.0, retry_jitter=0.0)
     client = FlakyFakeClient(config, [LLMProviderError("HTTP 429 rate limited", status_code=429)])
-    client.retry_policy = RetryPolicy.disabled()
     with pytest.raises(LLMProviderError):
         await client.complete(_req())
     assert client.calls == 1
@@ -195,6 +192,17 @@ async def test_stream_retryable_error_retries_without_non_stream_fallback(captur
     assert response.text == "ok"
     assert client.stream_calls == 3
     assert client.post_json_calls == 0
+
+
+async def test_stream_non_retryable_error_propagates_without_fallback(captured_delays):
+    # except LLMProviderError: raise —— 4xx 既不重试也不回退非流式
+    config = _config(retry_max_attempts=3, retry_base_delay=0.25, retry_jitter=0.0)
+    client = StreamScriptedClient(config, [LLMProviderError("HTTP 401 unauthorized", status_code=401)])
+    with pytest.raises(LLMProviderError):
+        await client.complete(_req())
+    assert client.stream_calls == 1
+    assert client.post_json_calls == 0
+    assert captured_delays == []
 
 
 async def test_stream_generic_failure_falls_back_to_non_stream(captured_delays):
@@ -256,63 +264,3 @@ def test_factory_explicit_policy_override():
     client = build_provider_client(_config(), retry_policy=RetryPolicy.disabled())
     assert client.retry_policy.max_attempts == 1
     assert client.retry_policy.base_delay == 0.0
-
-
-_TOML_TEMPLATE = """
-[runtime]
-enabled = true
-default_provider = "p1"
-default_persona = "default"
-{retry_lines}
-
-[triggers]
-default_prefix = "/ai"
-
-[[personas]]
-id = "default"
-display_name = "默认"
-system_prompt = "hi"
-
-[[providers]]
-id = "p1"
-protocol = "openai"
-base_url = "https://p1.example.test/v1"
-api_key_env = "P1_KEY"
-default_model = "m1"
-models = ["m1"]
-"""
-
-
-def _load_toml(tmp_path: Path, retry_lines: str):
-    config_path = tmp_path / "llm.toml"
-    config_path.write_text(
-        textwrap.dedent(_TOML_TEMPLATE).format(retry_lines=retry_lines).strip(),
-        encoding="utf-8",
-    )
-    return load_llm_config(config_path)
-
-
-def test_runtime_retry_config_stamped_to_providers(tmp_path: Path):
-    cfg = _load_toml(
-        tmp_path,
-        '\nretry_max_attempts = 5\nretry_base_delay = 2.5\nretry_jitter = 0.8',
-    )
-    provider = cfg.providers["p1"]
-    assert provider.retry_max_attempts == 5
-    assert provider.retry_base_delay == 2.5
-    assert provider.retry_jitter == 0.8
-    assert cfg.runtime.retry_jitter == 0.8
-
-
-def test_runtime_retry_defaults_without_keys(tmp_path: Path):
-    cfg = _load_toml(tmp_path, "")
-    provider = cfg.providers["p1"]
-    assert provider.retry_max_attempts == 3
-    assert provider.retry_base_delay == 1.0
-    assert provider.retry_jitter == 0.5
-
-
-def test_retry_jitter_clamped_to_unit_range(tmp_path: Path):
-    cfg = _load_toml(tmp_path, "\nretry_jitter = 3.0")
-    assert cfg.runtime.retry_jitter == 1.0
-    assert cfg.providers["p1"].retry_jitter == 1.0

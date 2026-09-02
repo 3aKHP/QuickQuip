@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 
 MAX_IMAGE_PREPROCESSING_TOKENS = 2048
 
+# 上游 429/5xx 自动重试默认策略：RuntimeConfig / ProviderConfig 字段默认值、
+# load_llm_config 的 TOML fallback 与 RetryPolicy 字段默认值均单点引用此组常量
+DEFAULT_RETRY_MAX_ATTEMPTS = 3
+DEFAULT_RETRY_BASE_DELAY = 1.0
+DEFAULT_RETRY_JITTER = 0.5
+
 
 @dataclass(slots=True)
 class TriggerConfig:
@@ -49,9 +55,9 @@ class RuntimeConfig:
     tool_calling_enabled: bool = False
     tool_max_rounds: int = 8
     tool_max_calls_per_round: int = 16
-    retry_max_attempts: int = 3
-    retry_base_delay: float = 1.0
-    retry_jitter: float = 0.5
+    retry_max_attempts: int = DEFAULT_RETRY_MAX_ATTEMPTS
+    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY
+    retry_jitter: float = DEFAULT_RETRY_JITTER
     auto_memory_enabled: bool = False
     auto_memory_prompt: str = ""
     auto_memory_max_tokens: int = 256
@@ -154,9 +160,9 @@ class ProviderConfig:
     auth_method: str = "api_key"  # "api_key" | "bearer"
     builtin_search: bool = False  # 声明 provider 原生搜索工具；仅 gemini 协议有请求级效果
     # 上游 429/5xx 自动重试策略；load_llm_config 用 [runtime] 段统一盖章
-    retry_max_attempts: int = 3
-    retry_base_delay: float = 1.0
-    retry_jitter: float = 0.5
+    retry_max_attempts: int = DEFAULT_RETRY_MAX_ATTEMPTS
+    retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY
+    retry_jitter: float = DEFAULT_RETRY_JITTER
 
 
 def provider_builtin_search_active(provider: ProviderConfig) -> bool:
@@ -655,9 +661,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             tool_calling_enabled=as_bool(runtime_raw.get("tool_calling_enabled", False), default=False),
             tool_max_rounds=int(runtime_raw.get("tool_max_rounds", 8)),
             tool_max_calls_per_round=int(runtime_raw.get("tool_max_calls_per_round", 16)),
-            retry_max_attempts=int(runtime_raw.get("retry_max_attempts", 3)),
-            retry_base_delay=float(runtime_raw.get("retry_base_delay", 1.0)),
-            retry_jitter=min(1.0, max(0.0, float(runtime_raw.get("retry_jitter", 0.5)))),
+            retry_max_attempts=int(runtime_raw.get("retry_max_attempts", DEFAULT_RETRY_MAX_ATTEMPTS)),
+            retry_base_delay=float(runtime_raw.get("retry_base_delay", DEFAULT_RETRY_BASE_DELAY)),
+            retry_jitter=min(1.0, max(0.0, float(runtime_raw.get("retry_jitter", DEFAULT_RETRY_JITTER)))),
             auto_memory_enabled=as_bool(runtime_raw.get("auto_memory_enabled", False), default=False),
             auto_memory_prompt=str(runtime_raw.get("auto_memory_prompt", "")).strip(),
             auto_memory_max_tokens=max(32, int(runtime_raw.get("auto_memory_max_tokens", 256))),

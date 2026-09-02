@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import json
 import logging
@@ -364,7 +365,11 @@ class BaseProviderClient:
             )
         return api_key
 
-    async def _dispatch_with_retry(self, dispatch, request: LLMRequest) -> LLMResponse:
+    async def _dispatch_with_retry(
+        self,
+        dispatch: Callable[[LLMRequest], Awaitable[LLMResponse]],
+        request: LLMRequest,
+    ) -> LLMResponse:
         """执行一次 dispatch 调用，对可重试失败按 retry_policy 指数退避重试。
 
         每次尝试内部已含 fallback_urls 链，退避等待发生在链与链之间；

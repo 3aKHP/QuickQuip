@@ -4,6 +4,7 @@ Split from the former monolithic ``provider.py`` into:
 - :mod:`.trace` — request/response tracing infrastructure
 - :mod:`.base` — ``BaseProviderClient``, data classes, shared utilities
 - :mod:`.openai` / :mod:`.claude` / :mod:`.gemini` — concrete clients
+- :mod:`.retry` — ``RetryPolicy`` 策略值对象与指数退避延迟计算
 - :mod:`.factory` — ``build_provider_client`` dispatcher
 
 This ``__init__`` re-exports the full public surface (plus a few private
