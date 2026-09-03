@@ -198,16 +198,18 @@ LLM 默认只在以下场景触发：
 
 ### 4.2 LLM 短期会话
 
-LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制：
+LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
 
-- 单群最多保留 20 条（存储上限，不受配置影响）
-- 每次触发时实际读取的条数由以下优先级决定：
-  1. 本群通过 `/llm context_limit <n>` 设置的覆盖值（若有）
-  2. `llm.toml` 的 `[runtime] history_limit`（全局默认，当前为 10）
-  3. 代码存储上限（`service_parts/constants.py` 的 `MAX_GROUP_STORED_CONVERSATION_MESSAGES`，当前为 20，为最终截断；私聊为 `MAX_PRIVATE_STORED_CONVERSATION_MESSAGES` = 256）
-- 群级覆盖写入 `data/llm.db`，重启或 `clear_context` 不会清除
-- 执行 `/llm reload` 或 `/llm context_limit reset` 可重置为全局默认
-- `clear_context` 只清空已存的会话消息，不改变上限设置
+- 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长、不逐轮位移——这是自动前缀缓存跨轮命中的结构性前提
+- 锚点只在两种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）或**触顶**（窗口超过 cap，缩回 L_hot）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `llm.toml` 的 `[runtime]` / `[[providers]]` 用 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
+- 窗口单位是 token 估算（`token_estimate.py`），不再是行数；另有 1024 行的行数硬兜底（防海量超短行撑爆 provider 的 messages 数组）
+- 锚点只落在 user/assistant 对边界，且保留最少 4 行（防单条超长转发把窗口吃空）
+- 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
+- 锚点状态保存在进程内存中：进程重启 = 冷一次缓存，重启后首个请求按「距最新一条一个标准 CTX（8k token）跨度」重新懒初始化
+- `/llm context_limit <n>` **语义变更**：从「每次最多读取 n 条」变为「该群退化为保留最新 n 行的滚动窗」；`/llm context_limit reset` 恢复纪元自动管理。`[runtime] history_limit` 全局默认不再作为读取上限生效；`history_max_messages_per_group` 废弃（保留解析、不再生效）
+- `clear_context` 三件齐清：会话消息存储、最近消息缓冲、纪元锚点（私聊会话 start/end/resume 同路径）
+- `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点（system prompt 字节变化 = 缓存全灭 = 免费重置窗口）
+- history 渲染信任落库时定格的 `canonical_name`（渲染冻结），不再按当前身份索引重算——改名用户在前缀中保持旧名，正是冻结的目的
 
 **场景块消息结构**：当前 messages 数组采用“以 bot 回复为边界的场景块”模式：
 
@@ -580,6 +582,7 @@ LLM 侧的联网搜索有两条互斥路径：
 - 不做跨群共享人格状态
 - 不把 `群聊简介和概况.md` 全文直接注入模型
 - 不默认把所有外部工具都改成 MCP
+- 敏感词表更新会改写 history 行的当轮渲染字节（加载时以当前词表重 scrub，不回写存储），使该轮前缀缓存 miss——安全优先的刻意取舍
 
 注：每日总结（`daily_summary`）模块已实现模型级联策略，生成失败时自动降级到下一个 provider/model，顺序在 `[daily_summary] model_cascade` 中配置。这是总结生成专用的级联，不影响普通 LLM 对话的 provider 选择。
 
