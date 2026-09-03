@@ -155,9 +155,10 @@ class LLMUsageStore:
                     );
                     """
                 )
-                columns = {
-                    row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")
-                }
+                # 发版瞬间 quickquip 与 web-admin 两个容器会并发首开同一旧库，
+                # 进程内锁挡不住跨进程：另一进程可能在本进程迁移途中已补列。
+                # 因此每列 ALTER 前重查表结构；仍撞上 duplicate column name
+                # （该错误只会源于列已存在）同样视为已存在，保证两边都不抛。
                 migrations = {
                     "feature": "TEXT",
                     "group_id": "TEXT",
@@ -176,8 +177,19 @@ class LLMUsageStore:
                     "pricing_confidence": "TEXT",
                 }
                 for name, definition in migrations.items():
-                    if name not in columns:
-                        conn.execute(f"ALTER TABLE llm_usage_events ADD COLUMN {name} {definition}")
+                    columns = {
+                        row[1]
+                        for row in conn.execute("PRAGMA table_info(llm_usage_events)")
+                    }
+                    if name in columns:
+                        continue
+                    try:
+                        conn.execute(
+                            f"ALTER TABLE llm_usage_events ADD COLUMN {name} {definition}"
+                        )
+                    except sqlite3.OperationalError as error:
+                        if "duplicate column name" not in str(error):
+                            raise
                 conn.executescript(
                     """
                     CREATE INDEX IF NOT EXISTS idx_usage_ts       ON llm_usage_events(ts DESC, id DESC);
