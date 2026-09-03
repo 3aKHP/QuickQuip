@@ -6,6 +6,13 @@
 
 （暂无）
 
+## [1.13.2] - 2026-09-04
+
+### 修复
+
+- 击剑单场变化量过小导致运势影响难以感知：赌注基数由较短方长度的 4%~6% 调整为双方长度几何均值的 10%~15%，失衡对局的补偿下限由 0.3 提升至 0.5，并新增运势乘数上限护栏（默认 30，仅约束极端运势日，PvP 与机器人击剑共用）。新增配置 `fence_stake_mode` / `fence_stake_base_min` / `fence_stake_base_max` / `fence_stake_balance_floor` / `fence_stake_mf_cap`；击剑运势顶档提示文案与实际机制对齐（运势 ≥3 后胜率趋于稳定，运势继续放大输赢幅度）。击剑保持严格零和。
+- 发版瞬间两个服务容器并发首次打开同一旧版用量数据库时，后完成表结构快照的一方会对已存在的列重复执行迁移并报错：表现为一条用量记录静默丢失，或 Web Admin 用量看板一次性报错（下次访问自愈，无持久损坏）。迁移循环改为每列执行前重查表结构、重复列视为已存在继续，同时覆盖上次迁移中途退出的半迁移状态。
+
 ## [1.13.1] - 2026-09-03
 
 ### 修复
@@ -793,7 +800,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.13.2...HEAD
+[1.13.2]: https://github.com/3aKHP/QuickQuip/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/3aKHP/QuickQuip/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/3aKHP/QuickQuip/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/3aKHP/QuickQuip/compare/v1.12.1...v1.12.2

@@ -106,6 +106,18 @@ fence_devour_threshold = 50.0
 fence_draw_min = 0.5
 fence_draw_max = 2.0
 
+# ── 击剑赌注参数（零和转移量） ──────────────────────────────────────────
+# stake = 基数 × U(base_min, base_max) × balance × 事件倍率 × mf
+# 基数模式："geo" 为双方长度的几何均值（失衡对局仍有存在感），"min" 为较短方
+fence_stake_mode = "geo"
+# 基数百分比下限/上限
+fence_stake_base_min = 0.10
+fence_stake_base_max = 0.15
+# balance 下限：balance = max(此值, 短方/长方)，失衡对局的补偿系数
+fence_stake_balance_floor = 0.5
+# mf 上限护栏：mf = min(luck^luck_power, 此值)，仅约束极端运势日
+fence_stake_mf_cap = 30.0
+
 # ── 无牛牛目标击剑参数 ──────────────────────────────────────────────────
 # 挥空自伤范围 (cm)
 fence_self_hurt_min = 0.5
