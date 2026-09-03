@@ -27,6 +27,10 @@ from quickquip.games.niuniu.events import (
     NO_NIUNIU_EVENTS,
     _normal_fence_event,
 )
+from quickquip.games.niuniu.dynamics import (
+    _fence_stake_balance,
+    _fence_stake_base,
+)
 from quickquip.games.niuniu.fencing import _fence_win_prob, _fence_winner_is_role
 from quickquip.games.niuniu.gluing import _glue_growth
 from quickquip.games.niuniu.store import _roll_lognormal
@@ -592,6 +596,66 @@ class TestFenceWinnerIsRole:
 
     def test_defender_succubus_attacker_loses(self, cfg):
         assert _fence_winner_is_role(False, 10.0, -60.0, "succubus", cfg) is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Zero-sum fencing stake tuning (fence_stake_* config)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestFenceStakeBase:
+    @pytest.fixture
+    def cfg(self):
+        return NiuNiuConfig()
+
+    def test_geo_mode_uses_geometric_mean(self, cfg):
+        assert _fence_stake_base(4.0, 9.0, cfg) == pytest.approx(6.0)
+
+    def test_min_mode_uses_shorter_side(self):
+        cfg = NiuNiuConfig(fence_stake_mode="min")
+        assert _fence_stake_base(4.0, 9.0, cfg) == 4.0
+
+    def test_geo_mode_zero_side_gives_zero_base(self, cfg):
+        assert _fence_stake_base(0.0, 9.0, cfg) == 0.0
+
+
+class TestFenceStakeBalance:
+    def test_floor_applies_on_mismatch(self):
+        cfg = NiuNiuConfig(fence_stake_balance_floor=0.5)
+        assert _fence_stake_balance(2.0, 100.0, cfg) == 0.5
+
+    def test_matched_lengths_give_one(self):
+        cfg = NiuNiuConfig()
+        assert _fence_stake_balance(9.0, 9.0, cfg) == 1.0
+
+
+class TestFenceStakeMfCap:
+    def test_zerohsum_stake_capped_under_extreme_luck(
+        self, store, uid_a, uid_b, monkeypatch
+    ):
+        """luck=1e6, cap=30: matched 100/100 → stake = 100×0.15×1.0×30 = 450."""
+        store.update_length(uid_a, 100.0)
+        store.update_length(uid_b, 100.0)
+        store.set_fence_luck(uid_a, 1e6)
+        store.set_fence_luck(uid_b, 1.0)
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_random(monkeypatch, 0.0)  # attacker wins the roll
+        _patch_uniform(monkeypatch, 0.15)  # top of the base range
+        fencing(store, uid_a, uid_b, group_id="test")
+        a = store.get_length(uid_a)
+        b = store.get_length(uid_b)
+        assert a == pytest.approx(550.0)
+        assert b == pytest.approx(-350.0)
+        assert a + b == pytest.approx(200.0)  # zero-sum preserved
+
+    def test_bot_stake_capped(self, store, uid_a, monkeypatch):
+        """Bot fencing shares the mf cap: √100×0.6×30 = 180."""
+        store.update_length(uid_a, 100.0)
+        store.set_fence_luck(uid_a, 1e6)
+        _patch_random(monkeypatch, 0.0)  # win branch
+        _patch_uniform(monkeypatch, 0.6)
+        fencing(store, uid_a, "bot", oppo_is_bot=True, group_id="test")
+        assert store.get_length(uid_a) == pytest.approx(280.0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

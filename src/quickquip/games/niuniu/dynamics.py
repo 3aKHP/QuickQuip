@@ -74,6 +74,21 @@ def _fence_winner_is_role(
     return False
 
 
+def _fence_stake_base(my_len: float, oppo_len: float, cfg: NiuNiuConfig) -> float:
+    """Zero-sum stake base. "geo" mode uses √(|my|·|oppo|) so mismatched
+    duels keep a meaningful stake for both sides; "min" uses the shorter."""
+    a, b = abs(my_len), abs(oppo_len)
+    if cfg.fence_stake_mode == "geo":
+        return math.sqrt(a * b)
+    return min(a, b)
+
+
+def _fence_stake_balance(my_len: float, oppo_len: float, cfg: NiuNiuConfig) -> float:
+    """Mismatch compensation, floored at cfg.fence_stake_balance_floor."""
+    a, b = abs(my_len), abs(oppo_len)
+    return max(cfg.fence_stake_balance_floor, min(a, b) / max(a, b, 0.01))
+
+
 # ── gluing step (pure) ──────────────────────────────────────────────────────
 
 
@@ -462,8 +477,9 @@ def fence_resolve_zerohsum(
     Win determination and eligibility guards mirror the legacy fence_resolve;
     only the transfer is made symmetric and decay is dropped. dominate sever
     and succubus devour are full transfers (legacy 0.6× / 1.5× broke
-    conservation). NB: *luck* still scales stake and win_prob here — tightening
-    that is deferred to the gluing/luck redesign. NB: draw is an intentional
+    conservation). NB: *luck* still scales stake and win_prob here — the
+    amplitude side is bounded by cfg.fence_stake_mf_cap; the win_prob offset
+    keeps its ±0.1 form and clamps at [0.05, 0.95]. NB: draw is an intentional
     non-zero-sum exception (两败俱伤, anti-inflation — both sides lose,
     offsetting gluing's positive Σ drift).
     """
@@ -502,7 +518,7 @@ def fence_resolve_zerohsum(
     # luck is compressed by a sublinear power before scaling stake: median
     # luck (1.0) is unchanged (1**α == 1, so fencing stays punchy vs gluing)
     # while extreme luck is tamed. luck_power=1.0 reproduces raw multiply.
-    mf = my_luck ** luck_power
+    mf = min(my_luck ** luck_power, cfg.fence_stake_mf_cap)
     old_my, old_oppo = my_len, oppo_len
     msg_branch = "normal"
 
@@ -519,15 +535,17 @@ def fence_resolve_zerohsum(
             msg_branch = "dominate_sever"
         elif sever and not oppo_is_bot:
             # defender severs attacker — guard vs bot (legacy: bot phantom can't sever)
-            df = oppo_luck_provider() ** luck_power
+            df = min(oppo_luck_provider() ** luck_power, cfg.fence_stake_mf_cap)
             stake = round(abs(my_len) * min(0.95, 0.5 * df), 2)
             msg_branch = "dominate_sever"
         else:
-            base = min(abs(my_len), abs(oppo_len))
-            balance = max(0.3, base / max(abs(my_len), abs(oppo_len), 0.01))
+            base = _fence_stake_base(my_len, oppo_len, cfg)
+            balance = _fence_stake_balance(my_len, oppo_len, cfg)
             stake = round(
-                base * random.uniform(0.04, 0.06) * balance
-                * cfg.fence_dominate_multiplier * mf, 2
+                base * random.uniform(
+                    cfg.fence_stake_base_min, cfg.fence_stake_base_max
+                )
+                * balance * cfg.fence_dominate_multiplier * mf, 2
             )
     elif chosen["name"] == "draw":
         # 两败俱伤(有意破例,非零和):双方各损,用于略微抵消打胶正期望的 Σ 通胀。
@@ -542,14 +560,15 @@ def fence_resolve_zerohsum(
             action="fencing_draw", oppo_action="fencing_draw",
         )
     else:
-        base = min(abs(my_len), abs(oppo_len))
-        balance = max(0.3, base / max(abs(my_len), abs(oppo_len), 0.01))
+        base = _fence_stake_base(my_len, oppo_len, cfg)
+        balance = _fence_stake_balance(my_len, oppo_len, cfg)
         multiplier = {
             "critical": cfg.fence_critical_multiplier,
             "glancing": cfg.fence_glancing_multiplier,
         }.get(chosen["name"], 1.0)
         stake = round(
-            base * random.uniform(0.04, 0.06) * balance * multiplier * mf, 2
+            base * random.uniform(cfg.fence_stake_base_min, cfg.fence_stake_base_max)
+            * balance * multiplier * mf, 2
         )
 
     # ── symmetric zero-sum transfer, no decay ────────────────────────
@@ -593,15 +612,16 @@ def fence_resolve_zerohsum(
 
 def fence_resolve_bot(
     my_len: float, my_luck: float, text: NiuNiuText,
-    *, luck_power: float = 1.0,
+    *, luck_power: float = 1.0, mf_cap: float = float("inf"),
 ) -> FenceOutcome:
     """Bot 击剑: 纯娱乐, E[Δmy] = 0。
 
     win_prob 固定 0.5(luck 不进胜率 → 期望严格 0)。luck 只放大 stake(方差)。
     stake ∝ √max(my,0)(sublinear, my≥0 有效; my<0 由编排层拒绝)。bot 是简化
     靶子, 只 win/lose, 不走 sever/devour/draw(fence_bot draw 文案待后续)。
+    mf_cap 与 PvP 共用 cfg.fence_stake_mf_cap, 钳制极端运势日。
     """
-    mf = my_luck ** luck_power
+    mf = min(my_luck ** luck_power, mf_cap)
     stake = round(math.sqrt(max(my_len, 0.0)) * random.uniform(0.4, 0.6) * mf, 2)
     if random.random() < 0.5:
         my_len = round(my_len + stake, 2)

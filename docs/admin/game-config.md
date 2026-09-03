@@ -85,6 +85,11 @@ game_registry.register(RussianRouletteGame(economy=game_economy, config=games_co
 | `[niuniu]` | `fence_dominate_threshold` | 50.0 | 牛头人角色阈值（length ≥ N） |
 | `[niuniu]` | `fence_devour_steal_ratio` | 0.3 | 魅魔吞噬窃取比例 |
 | `[niuniu]` | `fence_devour_threshold` | 50.0 | 魅魔角色阈值（length ≤ -N） |
+| `[niuniu]` | `fence_stake_mode` | "geo" | 击剑赌注基数模式（geo=双方长度几何均值，min=较短方） |
+| `[niuniu]` | `fence_stake_base_min` | 0.10 | 赌注基数百分比下限 |
+| `[niuniu]` | `fence_stake_base_max` | 0.15 | 赌注基数百分比上限 |
+| `[niuniu]` | `fence_stake_balance_floor` | 0.5 | 失衡对局补偿下限（短方/长方） |
+| `[niuniu]` | `fence_stake_mf_cap` | 30.0 | 运势乘数上限（极端运势日的单剑波动护栏） |
 | `[niuniu]` | `glue_rpm_limit` | 30 | 打胶每分钟每群请求上限 |
 | `[niuniu]` | `fence_rpm_limit` | 20 | 击剑每分钟每群请求上限 |
 | `[niuniu]` | `rpm_window_seconds` | 60 | RPM 滑动窗口大小（秒） |
