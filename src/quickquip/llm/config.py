@@ -7,6 +7,7 @@ from typing import Any
 import tomllib
 
 from quickquip.common.config_utils import as_bool, as_dict, expand_env_value
+from quickquip.llm.epoch import EpochParams
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,15 @@ class RuntimeConfig:
     auto_memory_enabled: bool = False
     auto_memory_prompt: str = ""
     auto_memory_max_tokens: int = 256
+    # ── 会话纪元参数（全局缺省；[[providers]] 同名键可覆盖） ──────────
+    # context_tokens 是标尺而非阈值：懒初始化与 /llm use 新键的锚点跨度。
+    # T 宁短勿长：设短退化为滚动窗形态，设长则每轮全价且窗口更长。
+    epoch_context_tokens: int = 8000
+    epoch_cold_idle_seconds: int = 300
+    epoch_cold_target_tokens: int = 4000
+    epoch_cold_trigger_tokens: int = 5000
+    epoch_hot_target_tokens: int = 32000
+    epoch_cap_tokens: int = 64000
 
 
 @dataclass(slots=True)
@@ -163,6 +173,14 @@ class ProviderConfig:
     retry_max_attempts: int = DEFAULT_RETRY_MAX_ATTEMPTS
     retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY
     retry_jitter: float = DEFAULT_RETRY_JITTER
+    # 会话纪元参数的 provider 级覆盖；None = 继承 [runtime] 全局缺省。
+    # 解析合并见 LLMConfig.resolve_epoch_params（不走 retry 的就地盖章范式）。
+    epoch_context_tokens: int | None = None
+    epoch_cold_idle_seconds: int | None = None
+    epoch_cold_target_tokens: int | None = None
+    epoch_cold_trigger_tokens: int | None = None
+    epoch_hot_target_tokens: int | None = None
+    epoch_cap_tokens: int | None = None
 
 
 def provider_builtin_search_active(provider: ProviderConfig) -> bool:
@@ -268,6 +286,47 @@ class LLMConfig:
     @property
     def is_available(self) -> bool:
         return self.load_error is None and self.runtime.enabled and bool(self.providers)
+
+    def resolve_epoch_params(self, provider: ProviderConfig | None = None) -> "EpochParams":
+        """合并 [runtime] 全局缺省与 provider 级覆盖，产出纪元生效参数。
+
+        关系非法（需 ``0 < cold_target < cold_trigger ≤ hot_target < cap``
+        且 ``context_tokens > 0``、``cold_idle_seconds >= 0``）时：provider
+        覆盖回退 runtime 值，runtime 值回退内置默认；均告警不致命。
+        """
+        base = EpochParams(
+            context_tokens=self.runtime.epoch_context_tokens,
+            cold_idle_seconds=self.runtime.epoch_cold_idle_seconds,
+            cold_target_tokens=self.runtime.epoch_cold_target_tokens,
+            cold_trigger_tokens=self.runtime.epoch_cold_trigger_tokens,
+            hot_target_tokens=self.runtime.epoch_hot_target_tokens,
+            cap_tokens=self.runtime.epoch_cap_tokens,
+        )
+        if not _epoch_params_valid(base):
+            logger.warning("[runtime] epoch_* 参数关系非法，回退内置默认值")
+            base = EpochParams()
+        if provider is None:
+            return base
+        merged = EpochParams(
+            context_tokens=provider.epoch_context_tokens if provider.epoch_context_tokens is not None else base.context_tokens,
+            cold_idle_seconds=provider.epoch_cold_idle_seconds if provider.epoch_cold_idle_seconds is not None else base.cold_idle_seconds,
+            cold_target_tokens=provider.epoch_cold_target_tokens if provider.epoch_cold_target_tokens is not None else base.cold_target_tokens,
+            cold_trigger_tokens=provider.epoch_cold_trigger_tokens if provider.epoch_cold_trigger_tokens is not None else base.cold_trigger_tokens,
+            hot_target_tokens=provider.epoch_hot_target_tokens if provider.epoch_hot_target_tokens is not None else base.hot_target_tokens,
+            cap_tokens=provider.epoch_cap_tokens if provider.epoch_cap_tokens is not None else base.cap_tokens,
+        )
+        if not _epoch_params_valid(merged):
+            logger.warning("provider %s 的 epoch_* 覆盖参数关系非法，回退 [runtime] 值", provider.id)
+            return base
+        return merged
+
+
+def _epoch_params_valid(params: "EpochParams") -> bool:
+    return (
+        params.context_tokens > 0
+        and params.cold_idle_seconds >= 0
+        and 0 < params.cold_target_tokens < params.cold_trigger_tokens <= params.hot_target_tokens < params.cap_tokens
+    )
 
 _KNOWN_PERSONA_KEYS = {"id", "display_name", "system_prompt", "style_prompt", "scope"}
 
@@ -462,7 +521,21 @@ def _parse_single_provider(
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
         builtin_search=as_bool(entry.get("builtin_search"), default=False),
+        epoch_context_tokens=_as_optional_int(entry.get("epoch_context_tokens")),
+        epoch_cold_idle_seconds=_as_optional_int(entry.get("epoch_cold_idle_seconds")),
+        epoch_cold_target_tokens=_as_optional_int(entry.get("epoch_cold_target_tokens")),
+        epoch_cold_trigger_tokens=_as_optional_int(entry.get("epoch_cold_trigger_tokens")),
+        epoch_hot_target_tokens=_as_optional_int(entry.get("epoch_hot_target_tokens")),
+        epoch_cap_tokens=_as_optional_int(entry.get("epoch_cap_tokens")),
     )
+
+
+def _as_optional_int(raw: Any) -> int | None:
+    """provider 级可选整数键：缺省/空 = None（继承 runtime），否则 int。"""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return int(text) if text else None
 
 
 _MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}
@@ -667,6 +740,12 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             auto_memory_enabled=as_bool(runtime_raw.get("auto_memory_enabled", False), default=False),
             auto_memory_prompt=str(runtime_raw.get("auto_memory_prompt", "")).strip(),
             auto_memory_max_tokens=max(32, int(runtime_raw.get("auto_memory_max_tokens", 256))),
+            epoch_context_tokens=int(runtime_raw.get("epoch_context_tokens", 8000)),
+            epoch_cold_idle_seconds=int(runtime_raw.get("epoch_cold_idle_seconds", 300)),
+            epoch_cold_target_tokens=int(runtime_raw.get("epoch_cold_target_tokens", 4000)),
+            epoch_cold_trigger_tokens=int(runtime_raw.get("epoch_cold_trigger_tokens", 5000)),
+            epoch_hot_target_tokens=int(runtime_raw.get("epoch_hot_target_tokens", 32000)),
+            epoch_cap_tokens=int(runtime_raw.get("epoch_cap_tokens", 64000)),
         ),
         triggers=TriggerConfig(
             default_prefix=str(triggers_raw.get("default_prefix", "/ai")).strip() or "/ai",

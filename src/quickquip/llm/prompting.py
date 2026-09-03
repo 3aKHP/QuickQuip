@@ -413,9 +413,10 @@ def _build_scenes_from_history(
             user_id = item.get("user_id", "")
             sender_name = item.get("sender_name", "")
             raw_text = _history_text(item)
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
+            # 渲染冻结：history 行信任落库时定格的 canonical_name，不再按当前
+            # 身份索引重算——纪元窗口内前缀必须逐字节稳定（改名用户在前缀里
+            # 保持旧名正是目的）。recent/current/quoted 在当轮尾巴上，维持重算。
+            canonical_name = item.get("canonical_name", "")
             pending_speakers.append({
                 "user_id": user_id,
                 "sender_name": sender_name,
@@ -662,9 +663,10 @@ def build_messages(
             user_id = item.get("user_id", "")
             sender_name = item.get("sender_name", "")
             raw_text = _history_text(item)
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
+            # 渲染冻结：history 行信任落库时定格的 canonical_name，不再按当前
+            # 身份索引重算——纪元窗口内前缀必须逐字节稳定（改名用户在前缀里
+            # 保持旧名正是目的）。recent/current/quoted 在当轮尾巴上，维持重算。
+            canonical_name = item.get("canonical_name", "")
             pending_speakers.append({
                 "user_id": user_id,
                 "sender_name": sender_name,

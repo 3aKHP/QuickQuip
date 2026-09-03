@@ -86,7 +86,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                     await llm_cmd.finish(msg)
                 preset = _parse_preset(args)
                 svc.start_private_session(chat_id, preset=preset)
-                msg = f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，当前上下文上限为 {svc.get_default_history_limit('private')} 条。"
+                msg = f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，上下文由会话纪元自动管理。"
                 if preset:
                     preview = preset[:80] + ("..." if len(preset) > 80 else "")
                     msg += f"\n附加设定：{preview}"
@@ -217,7 +217,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if value in {"reset", "off"}:
                 svc.reset_chat_history_limit(chat_id, chat_type=chat_type)
                 await llm_cmd.finish(
-                    f"{scope_label}上下文上限已重置为默认（{svc.get_default_history_limit(chat_type)} 条）"
+                    f"{scope_label}上下文上限已重置为默认（会话纪元自动管理）"
                 )
             try:
                 n = int(value)
@@ -226,7 +226,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if n < 1:
                 await llm_cmd.finish("上下文上限须为正整数")
             svc.set_chat_history_limit(chat_id, n, chat_type=chat_type)
-            await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（/llm reload 可重置）")
+            await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（行数兜底，超出截断）")
 
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"

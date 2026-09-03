@@ -5,6 +5,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+from quickquip.llm.identity import IdentityEntry, IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription
 from quickquip.llm.prompting import (
     MAX_IMAGE_DESCRIPTION_CHARS,
@@ -318,6 +319,30 @@ def _assert_user_assistant_alternation(messages):
     assert roles, "messages should not be empty"
     for prev, cur in zip(roles, roles[1:]):
         assert prev != cur, f"roles must strictly alternate, got {roles}"
+
+
+def test_history_canonical_name_frozen_at_store_time():
+    """渲染冻结：history 行信任落库时定格的 canonical_name；身份索引后续变更
+    （改名/重新登记）不得改变已落库行的渲染字节——纪元内前缀稳定契约。"""
+    history = [
+        {"role": "user", "user_id": "2002", "sender_name": "镜千翎",
+         "canonical_name": "镜子", "content": "喵", "raw_content": "喵"},
+        {"role": "assistant", "content": "喵！"},
+    ]
+    kwargs = dict(
+        prompt="在吗", image_urls=[],
+        history=history, recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="B", current_user_id="3",
+    )
+    baseline = [(m.role, m.content) for m in build_messages(**kwargs)]
+    assert "镜子" in baseline[0][1]
+
+    # 身份索引把 2002 重新登记为另一个 canonical_name；history 渲染不得跟着变
+    changed = IdentityIndex(by_qq={"2002": IdentityEntry(canonical_name="镜皇", qq_ids=["2002"])})
+    rerendered = [(m.role, m.content) for m in build_messages(**kwargs, identities=changed)]
+    assert rerendered == baseline
+    assert "镜皇" not in rerendered[0][1]
 
 
 def test_build_messages_user_assistant_alternation():

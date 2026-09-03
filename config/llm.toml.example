@@ -2,7 +2,11 @@
 enabled = true
 default_provider = "openai-main"
 default_persona = "quickquip-default"
+# history_limit 自 1.14 起仅在群级 /llm context_limit <n> 显式覆盖时生效
+# （该群退化为保留最新 n 行的滚动窗）；默认路径由会话纪元自动管理。
 history_limit = 10
+# history_max_messages_per_group 已废弃（保留解析、不再生效）：存储裁剪由
+# 会话纪元锚点驱动，硬上限统一为 2048 行。
 history_max_messages_per_group = 40
 memory_limit = 6
 memory_max_items_per_group = 200
@@ -10,6 +14,17 @@ max_prompt_chars = 4000
 tool_calling_enabled = true
 tool_max_rounds = 8
 tool_max_calls_per_round = 16
+
+# 会话纪元（前缀缓存友好的只追加上下文窗口）。全局缺省，[[providers]] 可同名覆盖。
+# context_tokens 是标尺（懒初始化与换模型的锚点跨度），不是阈值；
+# cold_idle_seconds 宁短勿长（设短退化为滚动窗形态，设长则每轮全价且窗口更长）。
+# 关系须满足 0 < cold_target < cold_trigger ≤ hot_target < cap，非法回退默认并告警。
+# epoch_context_tokens = 8000
+# epoch_cold_idle_seconds = 300     # Kimi 可放宽 600，DeepSeek 可放宽 21600（provider 级覆盖）
+# epoch_cold_target_tokens = 4000
+# epoch_cold_trigger_tokens = 5000
+# epoch_hot_target_tokens = 32000
+# epoch_cap_tokens = 64000
 
 # 上游 429/5xx/网络错误的自动重试（所有 LLM 调用路径统一生效；探活/诊断不受影响）
 # retry_max_attempts 含首次调用；第 n 次重试延迟 = base_delay * 2^n * (1 + 随机抖动)
@@ -329,6 +344,8 @@ default_model = "deepseek-chat"
 models = ["deepseek-chat", "deepseek-reasoner"]
 style_profile = "openai_family"
 # non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 非视觉模型：触发图片预处理+剥离
+# DeepSeek 前缀缓存存活以小时计：冷场判定放宽到 6h（全局默认 300s 对它太短）
+epoch_cold_idle_seconds = 21600
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048
