@@ -1,6 +1,29 @@
 import asyncio
 
-from quickquip.llm.usage import _ENVELOPE_TOKENS, _USAGE_SCOPE, envelope_meter, set_usage_scope, usage_scope
+from quickquip.llm.usage import (
+    _ENVELOPE_TOKENS,
+    _EPOCH_HISTORY_TOKENS,
+    _USAGE_SCOPE,
+    envelope_meter,
+    epoch_meter,
+    set_usage_scope,
+    usage_scope,
+)
+
+
+def test_epoch_meter_sets_and_resets():
+    assert _EPOCH_HISTORY_TOKENS.get() is None
+    with epoch_meter(4200):
+        assert _EPOCH_HISTORY_TOKENS.get() == 4200
+    assert _EPOCH_HISTORY_TOKENS.get() is None
+
+
+def test_epoch_meter_nested_inner_resets_to_outer():
+    with epoch_meter(4000):
+        with epoch_meter(8000):
+            assert _EPOCH_HISTORY_TOKENS.get() == 8000
+        assert _EPOCH_HISTORY_TOKENS.get() == 4000
+    assert _EPOCH_HISTORY_TOKENS.get() is None
 
 
 def test_envelope_meter_sets_and_resets():

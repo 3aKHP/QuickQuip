@@ -79,6 +79,24 @@ def envelope_meter(tokens: int | None) -> Iterator[None]:
         _ENVELOPE_TOKENS.reset(token)
 
 
+_EPOCH_HISTORY_TOKENS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_epoch_history_tokens", default=None,
+)
+
+
+@contextmanager
+def epoch_meter(tokens: int | None) -> Iterator[None]:
+    """设置当前回合纪元 history（[anchor, head) 区间）的 token 估算值；退出复位。
+
+    与 envelope_meter 同范式：Agent Loop 内每行同值，看板按 AVG 解读，禁止 SUM。
+    """
+    token = _EPOCH_HISTORY_TOKENS.set(tokens)
+    try:
+        yield
+    finally:
+        _EPOCH_HISTORY_TOKENS.reset(token)
+
+
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
     try:
@@ -151,6 +169,7 @@ async def _record_usage(
             "persona_id": scope.persona_id if scope else None,
             "agent_loop_id": loop_id,
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
+            "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,
