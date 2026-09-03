@@ -762,3 +762,117 @@ class TestEventDataIntegrity:
 
     def test_normal_fence_event_has_no_require_role(self):
         assert "require_role" not in _normal_fence_event()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Text set partial-override merge (regression: safe mode replaced whole pools)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_SAFE_TEXT_TOML = """
+[[glue.events]]
+name = "shrinkage"
+weight = 8
+category = "shrinkage"
+neg = ["覆盖版萎缩 {diff} cm！"]
+
+[[glue.events]]
+name = "brand_new_event"
+weight = 1
+category = "zen"
+pos = ["新事件 +{diff} cm"]
+
+[[fence.events]]
+name = "dominate"
+weight = 30
+require_role = "niutouren"
+win_pos = ["覆盖版支配 +{gain} cm"]
+
+[[luck.glue]]
+min = 3.0
+max = 999.0
+text = "覆盖版神运"
+
+[cd]
+fence = ["覆盖版击剑冷却 {remaining}s"]
+"""
+
+
+@pytest.fixture
+def safe_store(tmp_path: Path) -> NiuNiuStore:
+    path = tmp_path / "niuniu_text_safe.toml"
+    path.write_text(_SAFE_TEXT_TOML, encoding="utf-8")
+    cfg = NiuNiuConfig(niuniu_safe_text_path=str(path))
+    return NiuNiuStore(str(tmp_path / "test_niuniu.db"), config=cfg)
+
+
+class TestTextPartialOverride:
+    def test_safe_keeps_default_glue_events(self, safe_store):
+        names = {e["name"] for e in safe_store.texts["safe"].glue_events}
+        default_names = {e["name"] for e in safe_store.texts["default"].glue_events}
+        assert default_names <= names
+
+    def test_safe_overrides_same_named_glue_event(self, safe_store):
+        e = next(
+            e for e in safe_store.texts["safe"].glue_events
+            if e["name"] == "shrinkage"
+        )
+        assert e["weight"] == 8
+        assert e["neg"] == ["覆盖版萎缩 {diff} cm！"]
+
+    def test_safe_appends_new_glue_event(self, safe_store):
+        names = [e["name"] for e in safe_store.texts["safe"].glue_events]
+        assert "brand_new_event" in names
+
+    def test_safe_keeps_default_fence_events(self, safe_store):
+        names = {e["name"] for e in safe_store.texts["safe"].fence_events}
+        default_names = {e["name"] for e in safe_store.texts["default"].fence_events}
+        assert default_names <= names
+
+    def test_safe_overrides_same_named_fence_event(self, safe_store):
+        e = next(
+            e for e in safe_store.texts["safe"].fence_events
+            if e["name"] == "dominate"
+        )
+        assert e["win_pos"] == ["覆盖版支配 +{gain} cm"]
+        assert e.get("require_role") == "niutouren"
+
+    def test_safe_luck_range_override_keeps_other_ranges(self, safe_store):
+        table = safe_store.texts["safe"].luck_glue
+        entry = next(e for e in table if e["min"] == 3.0 and e["max"] == 999.0)
+        assert entry["text"] == "覆盖版神运"
+        assert any(e["min"] == 0.0 and e["max"] == 0.2 for e in table)
+
+    def test_safe_cd_dict_merges_per_key(self, safe_store):
+        cd = safe_store.texts["safe"].cd
+        assert cd["fence"] == ["覆盖版击剑冷却 {remaining}s"]
+        assert cd["glue"]  # default key survives
+
+    def test_safe_other_dicts_fall_back(self, safe_store):
+        safe = safe_store.texts["safe"]
+        default = safe_store.texts["default"]
+        assert safe.fence_shared == default.fence_shared
+        assert safe.fence_bot == default.fence_bot
+        assert safe.commands == default.commands
+
+    def test_empty_safe_file_is_pure_default(self, tmp_path: Path):
+        path = tmp_path / "empty_safe.toml"
+        path.write_text("# nothing here\n", encoding="utf-8")
+        cfg = NiuNiuConfig(niuniu_safe_text_path=str(path))
+        store = NiuNiuStore(str(tmp_path / "db.db"), config=cfg)
+        safe = store.texts["safe"]
+        default = store.texts["default"]
+        assert [e["name"] for e in safe.glue_events] == [
+            e["name"] for e in default.glue_events
+        ]
+        assert [e["name"] for e in safe.fence_events] == [
+            e["name"] for e in default.fence_events
+        ]
+
+    def test_custom_default_partial_file_still_merges(self, tmp_path: Path):
+        path = tmp_path / "niuniu_text.toml"
+        path.write_text(_SAFE_TEXT_TOML, encoding="utf-8")
+        cfg = NiuNiuConfig(niuniu_text_path=str(path))
+        store = NiuNiuStore(str(tmp_path / "db.db"), config=cfg)
+        default = store.texts["default"]
+        names = {e["name"] for e in default.glue_events}
+        assert "normal" in names and "brand_new_event" in names
+        assert default.fence_bot["win"]  # untouched field stays available

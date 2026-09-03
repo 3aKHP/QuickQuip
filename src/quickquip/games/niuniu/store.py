@@ -28,6 +28,61 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _overlay_by_key(
+    base: list[dict], override: list[dict], key
+) -> list[dict]:
+    """Overlay *override* entries onto *base* by *key*, preserving base order.
+
+    Same-key entries are replaced in place; new keys are appended.
+    """
+    merged = list(base)
+    index = {key(e): i for i, e in enumerate(merged)}
+    for e in override:
+        k = key(e)
+        if k in index:
+            merged[index[k]] = e
+        else:
+            index[k] = len(merged)
+            merged.append(e)
+    return merged
+
+
+def _merge_text(base: NiuNiuText, override: NiuNiuText) -> NiuNiuText:
+    """Merge a partial custom text file over *base*.
+
+    List fields keyed by event name (glue_events / fence_events /
+    fence_no_target) or by range (glue_length_comments / luck_glue /
+    luck_fence) are overlaid entry-by-entry; dict fields are merged per key.
+    Anything the override leaves empty falls back to *base* wholesale.
+    """
+    out = NiuNiuText()
+    out.glue_events = _overlay_by_key(
+        base.glue_events, override.glue_events, lambda e: e["name"]
+    )
+    out.fence_events = _overlay_by_key(
+        base.fence_events, override.fence_events, lambda e: e["name"]
+    )
+    out.fence_no_target = _overlay_by_key(
+        base.fence_no_target, override.fence_no_target, lambda e: e["name"]
+    )
+    out.glue_length_comments = _overlay_by_key(
+        base.glue_length_comments,
+        override.glue_length_comments,
+        lambda e: (e["min"], e["max"]),
+    )
+    out.luck_glue = _overlay_by_key(
+        base.luck_glue, override.luck_glue, lambda e: (e["min"], e["max"])
+    )
+    out.luck_fence = _overlay_by_key(
+        base.luck_fence, override.luck_fence, lambda e: (e["min"], e["max"])
+    )
+    for attr in ("fence_shared", "fence_bot", "cd", "commands"):
+        merged = dict(getattr(base, attr))
+        merged.update(getattr(override, attr))
+        setattr(out, attr, merged)
+    return out
+
+
 def _random_initial_length(store: NiuNiuStore) -> float:
     """30th-percentile initial length × 0.9, or 10.0 for the first user."""
     with store._connect() as conn:
@@ -130,42 +185,26 @@ class NiuNiuStore:
     # ── text sets ─────────────────────────────────────────────────────
 
     def _load_texts(self) -> dict[str, NiuNiuText]:
-        """Load all text sets; 'default' is always present (from built-ins)."""
+        """Load all text sets; 'default' is always present (from built-ins).
+
+        Custom text files are partial overrides: entries they define replace
+        the matching built-in entry (by event name / range / dict key) and
+        everything they omit keeps the built-in default.
+        """
         texts: dict[str, NiuNiuText] = {"default": default_text()}
         cfg = self.config
         for mode_name, path_attr in [("safe", "niuniu_safe_text_path")]:
             path = getattr(cfg, path_attr, "")
             if path:
                 loaded = load_niuniu_text(path)
-                # Merge missing fields from defaults
-                if not loaded.glue_events:
-                    loaded.glue_events = texts["default"].glue_events
-                if not loaded.glue_length_comments:
-                    loaded.glue_length_comments = texts["default"].glue_length_comments
-                if not loaded.fence_shared:
-                    loaded.fence_shared = texts["default"].fence_shared
-                if not loaded.fence_events:
-                    loaded.fence_events = texts["default"].fence_events
-                if not loaded.fence_bot:
-                    loaded.fence_bot = texts["default"].fence_bot
-                if not loaded.fence_no_target:
-                    loaded.fence_no_target = texts["default"].fence_no_target
-                if not loaded.luck_glue:
-                    loaded.luck_glue = texts["default"].luck_glue
-                if not loaded.luck_fence:
-                    loaded.luck_fence = texts["default"].luck_fence
-                if not loaded.cd:
-                    loaded.cd = texts["default"].cd
-                if not loaded.commands:
-                    loaded.commands = texts["default"].commands
-                texts[mode_name] = loaded
+                texts[mode_name] = _merge_text(texts["default"], loaded)
         # Also try loading a custom default from config
         default_path = getattr(cfg, "niuniu_text_path", "")
         if default_path:
             loaded = load_niuniu_text(default_path)
             if loaded.glue_events:
                 # Only replace if the file actually had content
-                texts["default"] = loaded
+                texts["default"] = _merge_text(default_text(), loaded)
         return texts
 
     def get_text(self, group_id: str) -> NiuNiuText:
