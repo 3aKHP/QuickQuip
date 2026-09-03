@@ -27,6 +27,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# 模型可见的身份类工具输出统一附带的路由说明：画图/语音/搜索等能力可能由
+# 不同模型通道服务，Provider/Model 字段只描述当前对话的路由，避免模型
+# 据此把历史回复归因给虚构的其他"模型人格"。
+_MODEL_ROUTING_NOTE = (
+    "路由说明：Provider/Model 仅表示当前对话的路由配置；"
+    "画图、语音、搜索等其他能力可能由不同模型通道服务，"
+    "对话人格始终是同一个机器人。"
+)
+
 
 class ToolMixin(McpLifecycleMixin):
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
@@ -637,8 +646,10 @@ class ToolMixin(McpLifecycleMixin):
     ) -> str:
         detail = str(arguments.get("detail", "status")).strip() or "status"
         if detail == "current":
-            return self.format_current(context.group_id, chat_type=context.chat_type)
-        return self.format_status(context.group_id, chat_type=context.chat_type)
+            text = self.format_current(context.group_id, chat_type=context.chat_type)
+        else:
+            text = self.format_status(context.group_id, chat_type=context.chat_type)
+        return f"{text}\n{_MODEL_ROUTING_NOTE}"
 
     async def _tool_get_current_model(
         self,
@@ -656,6 +667,7 @@ class ToolMixin(McpLifecycleMixin):
             lines.append("- 艾特触发：OFF（私聊不适用）")
         else:
             lines.append(f"- 艾特触发：{'ON' if settings.allow_at else 'OFF'}")
+        lines.append(f"- {_MODEL_ROUTING_NOTE}")
         return "\n".join(lines)
 
     async def _tool_get_health_status(

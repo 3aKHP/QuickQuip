@@ -354,6 +354,16 @@ def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_c
     return stored_canonical
 
 
+def _history_text(item: dict[str, str]) -> str:
+    """历史 user 行的渲染文本：raw_content 占位符优先，落空回退 content。
+
+    过滤与渲染必须共用这一处表达式；content 为空但 raw_content 非空
+    （纯图片/引用消息落库形态）是有效 user 轮，整行丢弃会使其后的
+    assistant 回复相邻，破坏 user/assistant 交替。
+    """
+    return str(item.get("raw_content") or item.get("content", ""))
+
+
 # ---------------------------------------------------------------------------
 # Scene-based message assembly (new pipeline)
 # ---------------------------------------------------------------------------
@@ -373,7 +383,7 @@ def _build_scenes_from_history(
     pending_images: list[str] = []
 
     for item in history:
-        if item["role"] not in {"user", "assistant"} or not item.get("content", "").strip():
+        if item["role"] not in {"user", "assistant"} or not _history_text(item).strip():
             continue
 
         if item["role"] == "assistant":
@@ -388,7 +398,7 @@ def _build_scenes_from_history(
         else:
             user_id = item.get("user_id", "")
             sender_name = item.get("sender_name", "")
-            raw_text = item.get("raw_content") or item.get("content", "")
+            raw_text = _history_text(item)
             canonical_name = _resolve_canonical_name(
                 identities, user_id, sender_name, item.get("canonical_name", ""),
             )
@@ -621,7 +631,7 @@ def build_messages(
         pending_images.clear()
 
     for item in history:
-        if item["role"] not in {"user", "assistant"} or not item.get("content", "").strip():
+        if item["role"] not in {"user", "assistant"} or not _history_text(item).strip():
             continue
 
         if item["role"] == "assistant":
@@ -633,7 +643,7 @@ def build_messages(
         else:
             user_id = item.get("user_id", "")
             sender_name = item.get("sender_name", "")
-            raw_text = item.get("raw_content") or item.get("content", "")
+            raw_text = _history_text(item)
             canonical_name = _resolve_canonical_name(
                 identities, user_id, sender_name, item.get("canonical_name", ""),
             )
