@@ -45,7 +45,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/single_shot.py`
   - 一次性生成入口的共享管线骨架（defectify / turmfluch / card_le_nearest），各入口差异点通过 `CommandSingleShotSpec` 显式传入
 - `src/quickquip/llm/prompting.py`
-  - 负责 system prompt 组装、场景块构建、统一发言者格式渲染与 messages 数组拼装
+  - 负责 system prompt 组装（仅跨轮稳定段，字节稳定契约）、**当轮上下文信封渲染**（`build_turn_envelope`：时间/节日/participants/memories/词表命中，组装时渲染、不落库）、场景块构建、统一发言者格式渲染与 messages 数组拼装
 - `src/quickquip/llm/summarize.py`
   - 每日总结生成逻辑（模型级联、prompt 构建）
 - `src/quickquip/llm/briefing.py`
@@ -297,7 +297,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 当前做法是：
 
 - 只有当 prompt 命中某个别名或黑话
-- 才在本轮 system prompt 里追加一小段消歧说明
+- 才在当轮 user 消息头部的【轮次上下文】信封里追加一小段消歧说明（system prompt 已静态化，见下）
 
 例如：
 
@@ -336,6 +336,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - 消息中的艾特会优先渲染为 `@标准身份`
 - 未登记成员会降级显示为“当前显示名 + QQ 号 + 未登记”
 - **身份信息只在 messages 中呈现**：system prompt 不再重复声明“当前提问者是谁”——消除双信息源冲突
+- **system prompt 完全静态化（前缀缓存契约）**：当前时间/星期、节日提示、对话参与成员、持久记忆、词表命中等逐轮变化的内容一律只在当轮 user 消息头部的【轮次上下文】信封呈现（组装时渲染、不落库），system 跨轮、跨日字节稳定，自动前缀缓存可跨轮命中。信封 token 经 `envelope_meter` 落 `envelope_tokens` 列进用量账本：Agent Loop 内每行同值，看板只按 **AVG** 解读为每轮成本，**禁止 SUM**（同回合重复计）
 
 这样可以减少群友频繁改名带来的身份漂移，并且让模型在单一信息源中自然识别发言者归属。
 
