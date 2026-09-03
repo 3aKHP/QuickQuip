@@ -61,18 +61,11 @@ def _is_chuxi(today: date) -> Festival | None:
     return None
 
 
-def check_today_festival(today: date | None = None) -> Festival | None:
-    """Check if today is a festival, update _active_festival, and return it."""
-    global _active_festival, _checked_date
-
-    if today is None:
-        today = date.today()
-    _checked_date = today
-
+def _detect_festival(today: date) -> Festival | None:
+    """纯函数：给定日期判定节日，不读写任何全局状态。"""
     # 1) Solar calendar festivals
     for f in _FESTIVALS:
         if f.calendar == "solar" and f.month == today.month and f.day == today.day:
-            _active_festival = f
             return f
 
     # 2) Lunar calendar festivals
@@ -85,17 +78,21 @@ def check_today_festival(today: date | None = None) -> Festival | None:
     if lunar is not None:
         for f in _FESTIVALS:
             if f.calendar == "lunar" and f.month == lunar.month and f.day == lunar.day:
-                _active_festival = f
                 return f
 
     # 3) 除夕 (special case — check if tomorrow is 春节)
-    chuxi = _is_chuxi(today)
-    if chuxi is not None:
-        _active_festival = chuxi
-        return chuxi
+    return _is_chuxi(today)
 
-    _active_festival = None
-    return None
+
+def check_today_festival(today: date | None = None) -> Festival | None:
+    """Check if today is a festival, update _active_festival, and return it."""
+    global _active_festival, _checked_date
+
+    if today is None:
+        today = date.today()
+    _checked_date = today
+    _active_festival = _detect_festival(today)
+    return _active_festival
 
 
 def get_active_festival() -> Festival | None:
@@ -111,12 +108,14 @@ def get_active_festival() -> Festival | None:
     return _active_festival
 
 
-def get_festival_persona_appendix() -> str | None:
+def get_festival_persona_appendix(today: date | None = None) -> str | None:
     """Return a short (2-3 sentences) festive persona instruction for the active festival.
 
+    ``today`` 为 None 时走既有全局缓存路径（行为不变）；传入时按给定日期
+    纯判定、不读写全局状态，供可注入时钟的调用方（轮次信封）使用。
     Returns None when no festival is active.
     """
-    f = get_active_festival()
+    f = _detect_festival(today) if today is not None else get_active_festival()
     if f is None:
         return None
     return _PERSONA_APPENDIX.get(f.name)

@@ -77,8 +77,11 @@ async def test_generate_private_reply_uses_private_system_prompt(
     sys_prompt = stub.last_request.system_prompt
     assert "当前会话类型：私聊" in sys_prompt
     assert "当前私聊对象 QQ：3003" in sys_prompt
-    assert "阿桃在私聊里更愿意长篇回复。" in sys_prompt
+    # 持久记忆属动态段，改由当轮信封携带，不再进 system（前缀缓存契约）
+    assert "阿桃在私聊里更愿意长篇回复。" not in sys_prompt
     last_content = stub.last_request.messages[-1].content
+    assert "【轮次上下文】" in last_content
+    assert "阿桃在私聊里更愿意长篇回复。" in last_content
     assert "私聊里继续我们刚才的话题" in last_content
     # Alternating user/assistant seed produces 25 user scenes + 25 assistant + 1 current = 51
     assert len(stub.last_request.messages) == 51
