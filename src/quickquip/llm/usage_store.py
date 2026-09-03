@@ -131,6 +131,7 @@ class LLMUsageStore:
                         group_id              TEXT,
                         persona_id            TEXT,
                         agent_loop_id         TEXT,
+                        envelope_tokens       INTEGER,
                         stream                INTEGER NOT NULL,
                         duration_ms           REAL,
                         input_tokens          INTEGER,
@@ -163,6 +164,7 @@ class LLMUsageStore:
                     "group_id": "TEXT",
                     "persona_id": "TEXT",
                     "agent_loop_id": "TEXT",
+                    "envelope_tokens": "INTEGER",
                     "duration_ms": "REAL",
                     "fresh_input_tokens": "INTEGER",
                     "total_tokens": "INTEGER",
@@ -216,7 +218,9 @@ class LLMUsageStore:
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_read_tokens ELSE 0 END), 0) AS cache_read, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_creation_tokens ELSE 0 END), 0) AS cache_creation, "
                 f"COUNT(*) AS calls, COALESCE(SUM(CASE WHEN state = 'ok' THEN 1 ELSE 0 END), 0) AS successes, "
-                f"COALESCE(AVG(duration_ms), 0) AS avg_duration "
+                f"COALESCE(AVG(duration_ms), 0) AS avg_duration, "
+                f"AVG(CASE WHEN state = 'ok' THEN envelope_tokens END) AS avg_envelope, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND envelope_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS envelope_tracked "
                 f"FROM llm_usage_events WHERE {where}",
                 params,
             ).fetchone()
@@ -244,6 +248,10 @@ class LLMUsageStore:
                 "success_rate": round((total["successes"] or 0) / total["calls"], 4) if total["calls"] else 0.0,
                 "average_duration_ms": round(total["avg_duration"], 2),
                 "cache_hit_rate": round(total["cache_read"] / input_total, 4) if input_total else 0.0,
+                # 第四张账本【信封】：Agent Loop 内每行同值，只可按 AVG 解读为
+                # 每轮成本，禁止 SUM；coverage = 有估算行的成功调用占比
+                "avg_envelope_tokens": round(total["avg_envelope"], 1) if total["avg_envelope"] is not None else 0.0,
+                "envelope_coverage": round(total["envelope_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
                 "by_provider": self._group_by(conn, "provider_id", where, params),
                 "by_feature": self._group_by(conn, "feature", where, params),
                 "by_model": self._group_by(conn, "model", where, params),

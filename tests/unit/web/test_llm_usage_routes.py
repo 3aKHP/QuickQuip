@@ -228,6 +228,22 @@ async def test_route_summary_passes_persona_filter(monkeypatch, tmp_path):
     assert [b["key"] for b in result["by_persona"]] == ["p1"]
 
 
+async def test_route_summary_exposes_envelope_ledger(monkeypatch, tmp_path):
+    """summary 路由直传第四张账本两个键（信封每轮全价 token 均值 + 覆盖率）。"""
+    route, store = _route_store(monkeypatch, tmp_path)
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "envelope_tokens": 400})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "envelope_tokens": 800})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
+                  "stream": 1, "state": "ok"})
+    result = await route.get_summary(
+        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
+    )
+    assert result["avg_envelope_tokens"] == 600.0
+    assert result["envelope_coverage"] == round(2 / 3, 4)
+
+
 async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):
     fastapi = pytest.importorskip("fastapi")
 

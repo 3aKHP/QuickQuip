@@ -1,6 +1,21 @@
 import asyncio
 
-from quickquip.llm.usage import _USAGE_SCOPE, set_usage_scope, usage_scope
+from quickquip.llm.usage import _ENVELOPE_TOKENS, _USAGE_SCOPE, envelope_meter, set_usage_scope, usage_scope
+
+
+def test_envelope_meter_sets_and_resets():
+    assert _ENVELOPE_TOKENS.get() is None
+    with envelope_meter(123):
+        assert _ENVELOPE_TOKENS.get() == 123
+    assert _ENVELOPE_TOKENS.get() is None
+
+
+def test_envelope_meter_nested_inner_resets_to_outer():
+    with envelope_meter(100):
+        with envelope_meter(200):
+            assert _ENVELOPE_TOKENS.get() == 200
+        assert _ENVELOPE_TOKENS.get() == 100
+    assert _ENVELOPE_TOKENS.get() is None
 
 
 def test_usage_scope_contextmanager_sets_and_resets():

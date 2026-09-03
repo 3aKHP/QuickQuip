@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, replace
+from datetime import datetime
 import logging
 from pathlib import Path
 import re
 from typing import Any, TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.sensitive_filter import (
@@ -57,8 +59,10 @@ from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
+    build_turn_envelope,
     merge_image_urls,
 )
+from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.provider import (
     LLMProviderError,
     LLMRequest,
@@ -95,7 +99,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import usage_scope
+from quickquip.llm.usage import envelope_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -339,12 +343,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         persona: PersonaConfig,
         group_id: int | str,
         chat_type: str,
-        user_id: int | str,
-        sender_name: str,
-        prompt: str,
-        memories: list[dict[str, object]],
         tool_specs: list[LLMToolSpec],
-        participants: list[dict[str, str]] | None = None,
         provider_style_overrides: str = "",
         session_preset: str = "",
         provider_id: str | None = None,
@@ -353,14 +352,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         return build_system_prompt(
             persona=persona,
             group_id=group_id,
-            user_id=user_id,
-            sender_name=sender_name,
-            prompt=prompt,
-            memories=memories,
             tool_specs=tool_specs,
-            identities=self._resolve_identities(str(group_id)),
-            vocab=self._resolve_vocab(str(group_id)),
-            beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
             search_mode=(
                 "builtin"
@@ -372,9 +364,26 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             tool_list_name=TOOL_LIST_NAME,
             deferred_tool_categories=self._get_deferred_tool_categories(chat_type, provider_id=provider_id),
             chat_type=chat_type,
-            participants=participants,
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
+        )
+
+    def _build_turn_envelope(
+        self,
+        group_id: int | str,
+        chat_type: str,
+        prompt: str,
+        memories: list[dict[str, object]],
+        participants: list[dict[str, str]] | None = None,
+    ) -> str:
+        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。
+        return build_turn_envelope(
+            now=datetime.now(ZoneInfo(BEIJING_TIMEZONE)),
+            prompt=prompt,
+            memories=memories,
+            vocab=self._resolve_vocab(str(group_id)),
+            chat_type=chat_type,
+            participants=participants,
         )
 
     async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
@@ -421,6 +430,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         forward_image_urls: list[str] | None = None,
         image_descriptions: list[object] | None = None,
         include_recent_images: bool = False,
+        turn_envelope: str = "",
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -441,6 +451,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             forward_image_urls=forward_image_urls,
             image_descriptions=image_descriptions,
             include_recent_images=include_recent_images,
+            turn_envelope=turn_envelope,
         )
 
     async def generate_defectify_reply(
@@ -1049,16 +1060,18 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             persona,
             chat_id,
             chat_type,
-            user_id,
-            sender_name,
-            analysis_prompt or trimmed_prompt,
-            memories,
             tool_specs,
-            participants=participants,
             provider_style_overrides=provider.style_overrides,
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
+        )
+        turn_envelope = self._build_turn_envelope(
+            chat_id,
+            chat_type,
+            analysis_prompt or trimmed_prompt,
+            memories,
+            participants=participants,
         )
         messages = self._build_messages(
             prompt=trimmed_prompt,
@@ -1078,6 +1091,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             forward_image_urls=request_forward_image_urls,
             image_descriptions=image_descriptions or None,
             include_recent_images=include_recent_images and not is_non_vision,
+            turn_envelope=turn_envelope,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -1105,7 +1119,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # scope 生命周期与 provider 调用同处一个函数，退出即复位。
             # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
             # 与 auto_memory 等派生调用的归因口径一致。
-            with usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None):
+            with (
+                usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
+                envelope_meter(estimate_tokens(turn_envelope)),
+            ):
                 response = await self._run_tool_call_loop(
                     provider=provider,
                     request=request,

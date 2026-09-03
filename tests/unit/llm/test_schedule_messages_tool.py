@@ -190,3 +190,11 @@ async def test_list_empty(tool_env):
     svc = _FakeService()
     out = await svc._tool_manage_scheduled_messages({"action": "list"}, _make_context())
     assert "没有定时消息任务" in out
+
+
+def test_description_points_to_turn_envelope():
+    """时间戳移出 system 后，一次性任务日期推算的时间来源说明必须指向
+    当轮 user 消息头部的【轮次上下文】信封——锚定措辞防漂移回「系统提示词」。"""
+    desc = smt.SCHEDULE_MESSAGES_TOOL_SPEC.description
+    assert "【轮次上下文】" in desc
+    assert "系统提示词中提供了当前北京时间" not in desc

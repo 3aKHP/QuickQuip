@@ -3,6 +3,8 @@ quoted-reply injection, tool loop, and reasoning-content sanitization.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from plugins.llm_provider import LLMResponse
@@ -84,8 +86,10 @@ async def test_generate_reply_populates_system_prompt_and_tools(
     req = stub.last_request
     assert req is not None
     sys_prompt = req.system_prompt
-    # Vocab/identity content flows in
-    assert "镜千翎" in sys_prompt or "哈基镜" in sys_prompt
+    # system prompt 静态化（前缀缓存字节稳定契约）：词表命中、时间等
+    # 动态段不得残留在 system 中
+    assert "通常指" not in sys_prompt
+    assert "当前北京时间" not in sys_prompt
 
     # Tools registered
     tool_names = {t.name for t in req.tools}
@@ -111,6 +115,33 @@ async def test_generate_reply_populates_system_prompt_and_tools(
     assert "哈基镜是区吗？" in last_content
     assert "2002" in last_content
     assert "镜子" in last_content
+    # 词表命中/时间等动态内容改由当轮 user 消息头部的【轮次上下文】信封
+    # 携带；用户原文本身含「哈基镜」，必须断言信封专属构造而非裸词表名
+    assert "【轮次上下文】" in last_content
+    assert "通常指" in last_content
+    assert re.search(r"当前时间：\d{4}-\d{2}-\d{2} 星期. \d{2}:\d{2}（北京时间）", last_content)
+
+
+async def test_generate_reply_envelope_carries_time_for_cron_like_trigger(
+    wired_service, patch_provider_builder
+):
+    """cron llm 任务形态（store_user_message=False + 合成 prompt）：
+    时间感知由信封携带，system 不含时间——定时任务日期推算不回退。"""
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=0,
+        sender_name="scheduled_timer",
+        prompt="按 22:00 计划发送晚间提醒",
+        store_user_message=False,
+    )
+
+    req = stub.last_request
+    assert req is not None
+    assert re.search(r"当前时间：\d{4}-\d{2}-\d{2} 星期. \d{2}:\d{2}（北京时间）", req.messages[-1].content)
+    assert "当前北京时间" not in req.system_prompt
 
 
 async def test_quoted_reply_content_in_user_message(wired_service, patch_provider_builder):

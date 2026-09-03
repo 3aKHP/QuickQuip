@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from quickquip.llm.image_preprocessor import ImageDescription
 from quickquip.llm.prompting import (
@@ -12,6 +15,7 @@ from quickquip.llm.prompting import (
     _render_scene_to_text,
     build_messages,
     build_system_prompt,
+    build_turn_envelope,
     format_participant_label,
     merge_image_urls,
 )
@@ -564,18 +568,10 @@ def test_build_messages_current_image_precedes_recent():
 
 def test_system_prompt_disambiguates_quote_roles():
     persona = SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
-    vocab = SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
     prompt = build_system_prompt(
         persona=persona,
         group_id=1001,
-        user_id=2002,
-        sender_name="A",
-        prompt="B说了什么？",
-        memories=[],
         tool_specs=[],
-        identities=None,
-        vocab=vocab,
-        beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
     )
     assert "当前提问者永远是本条消息的发送者" in prompt
@@ -668,10 +664,6 @@ def _builtin_persona():
     return SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
 
 
-def _builtin_vocab():
-    return SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
-
-
 def _prompt_with_tools() -> list:
     from quickquip.llm.tools import LLMToolSpec
 
@@ -688,14 +680,7 @@ def test_builtin_search_guidance_replaces_searxng_lines():
     prompt = build_system_prompt(
         persona=_builtin_persona(),
         group_id=1001,
-        user_id=2002,
-        sender_name="A",
-        prompt="你好",
-        memories=[],
         tool_specs=_prompt_with_tools(),
-        identities=None,
-        vocab=_builtin_vocab(),
-        beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
         search_mode="builtin",
     )
@@ -712,14 +697,7 @@ def test_builtin_search_guidance_present_without_tools():
     prompt = build_system_prompt(
         persona=_builtin_persona(),
         group_id=1001,
-        user_id=2002,
-        sender_name="A",
-        prompt="你好",
-        memories=[],
         tool_specs=[],
-        identities=None,
-        vocab=_builtin_vocab(),
-        beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
         search_mode="builtin",
     )
@@ -732,17 +710,198 @@ def test_builtin_search_inactive_keeps_searxng_guidance():
     prompt = build_system_prompt(
         persona=_builtin_persona(),
         group_id=1001,
-        user_id=2002,
-        sender_name="A",
-        prompt="你好",
-        memories=[],
         tool_specs=_prompt_with_tools(),
-        identities=None,
-        vocab=_builtin_vocab(),
-        beijing_timezone="Asia/Shanghai",
         search_tool_name="search_web",
         search_mode="searxng",
     )
 
     assert "当前联网后端：SearXNG。" in prompt
     assert "联网检索说明" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_turn_envelope 与 system prompt 字节稳定性（前缀缓存契约）
+# 动态段（时间/节日/participants/memories/词表命中）一律走信封，
+# system prompt 跨轮、跨日字节稳定。
+# ---------------------------------------------------------------------------
+
+def _first_divergence(a: str, b: str) -> str:
+    """首个分叉点 ±40 字符窗口（移植 Reasonix firstDivergence；str 字符
+    切片而非 bytes，避免中文报错乱码），让字节稳定性失败能定位漂移段。"""
+    limit = min(len(a), len(b))
+    i = 0
+    while i < limit and a[i] == b[i]:
+        i += 1
+    start = max(i - 40, 0)
+    return f"...{a[start:i + 40]}... vs ...{b[start:i + 40]}..."
+
+
+def _static_prompt_kwargs() -> dict:
+    return {
+        "persona": SimpleNamespace(system_prompt="你是测试人格。", style_prompt="短一点。", extras={}),
+        "group_id": 1001,
+        "tool_specs": [],
+        "search_tool_name": "search_web",
+    }
+
+
+def _vocab_stub(matches=(), glossary=()):
+    return SimpleNamespace(
+        find_matches=lambda prompt: list(matches),
+        find_glossary=lambda prompt: list(glossary),
+    )
+
+
+def test_system_prompt_byte_stable_across_builds():
+    kwargs = _static_prompt_kwargs()
+    first = build_system_prompt(**kwargs)
+    second = build_system_prompt(**kwargs)
+    assert first == second, f"system prompt 不是字节稳定：\n{_first_divergence(first, second)}"
+
+
+def test_system_prompt_contains_no_dynamic_markers():
+    prompt = build_system_prompt(**_static_prompt_kwargs())
+    for marker in ("当前北京时间", "【轮次上下文】", "持久记忆", "参与成员", "词表命中", "节日"):
+        assert marker not in prompt, f"动态段标记泄漏进 system：{marker}"
+    assert not re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", prompt), "时钟不得回流进 system"
+
+
+def test_dynamic_inputs_isolated_from_system():
+    static = _static_prompt_kwargs()
+    env_a = build_turn_envelope(
+        now=datetime(2026, 3, 16, 9, 19, tzinfo=ZoneInfo("Asia/Shanghai")),
+        prompt="哈基镜是区吗？",
+        memories=[{"content": "镜子喜欢熬夜"}],
+        vocab=_vocab_stub(matches=[SimpleNamespace(alias="哈基镜", name="镜子", note=None)]),
+        participants=[{"canonical_name": "镜子", "sender_name": "镜", "user_id": "2002"}],
+    )
+    env_b = build_turn_envelope(
+        now=datetime(2026, 12, 31, 23, 59, tzinfo=ZoneInfo("Asia/Shanghai")),
+        prompt="完全无关的一句话",
+        memories=[],
+        vocab=_vocab_stub(),
+    )
+    sys_a = build_system_prompt(**static)
+    sys_b = build_system_prompt(**static)
+    assert sys_a == sys_b, f"动态输入泄漏进 system：\n{_first_divergence(sys_a, sys_b)}"
+    assert env_a != env_b
+    assert "镜子喜欢熬夜" in env_a and "镜子喜欢熬夜" not in env_b
+    assert "哈基镜" in env_a and "哈基镜" not in env_b
+
+
+def test_turn_envelope_renders_time_and_weekday(frozen_now):
+    envelope = build_turn_envelope(now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub())
+    assert envelope.startswith("【轮次上下文】")
+    assert "- 当前时间：2026-03-16 星期一 09:19（北京时间）" in envelope
+
+
+def test_turn_envelope_omits_empty_sections(frozen_now):
+    # 2026-03-16 非节日、无 participants/memories/词表命中 → 只剩头 + 时间行
+    envelope = build_turn_envelope(now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub())
+    assert envelope == "【轮次上下文】\n- 当前时间：2026-03-16 星期一 09:19（北京时间）"
+
+
+def test_turn_envelope_festival_on_injected_date():
+    from quickquip.chat.festival import get_active_festival
+
+    before = get_active_festival()
+    envelope = build_turn_envelope(
+        now=datetime(2026, 1, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        prompt="你好", memories=[], vocab=_vocab_stub(),
+    )
+    assert "- 节日：今天是元旦" in envelope
+    # 注入日期的纯判定路径不得污染全局缓存（cron/惰性路径语义不变）
+    assert get_active_festival() is before
+
+
+def test_turn_envelope_participants_and_memories(frozen_now):
+    participants = [
+        {"canonical_name": "镜子", "sender_name": "镜", "user_id": "2002"},
+        {"canonical_name": "", "sender_name": "", "user_id": "12345"},
+        *[{"canonical_name": "", "sender_name": f"昵称{i}", "user_id": str(i)} for i in range(8)],
+    ]
+    envelope = build_turn_envelope(
+        now=frozen_now, prompt="你好",
+        memories=[{"content": "记忆甲"}, {"content": "记忆乙"}],
+        vocab=_vocab_stub(),
+        participants=participants,
+    )
+    line = [ln for ln in envelope.splitlines() if ln.startswith("- 当前对话参与成员")][0]
+    # 名字解析优先级 canonical > sender > QQ 号；上限 8 人
+    assert "镜子" in line and "QQ 12345" in line and "昵称7" not in line
+    assert "以下是与当前群聊相关的持久记忆，仅在确实相关时参考：" in envelope
+    assert "1. 记忆甲" in envelope and "2. 记忆乙" in envelope
+
+
+def test_turn_envelope_memories_private_wording(frozen_now):
+    envelope = build_turn_envelope(
+        now=frozen_now, prompt="你好", memories=[{"content": "记忆甲"}],
+        vocab=_vocab_stub(), chat_type="private",
+    )
+    assert "以下是与当前私聊相关的持久记忆" in envelope
+
+
+def test_turn_envelope_vocab_and_glossary_hits(frozen_now):
+    vocab = _vocab_stub(
+        matches=[SimpleNamespace(alias="哈基镜", name="镜子", note="特别注意不要和王者荣耀的镜混淆")],
+        glossary=[("区", "群里常见的内部称谓，通常是熟人间的玩笑叫法。")],
+    )
+    envelope = build_turn_envelope(now=frozen_now, prompt="哈基镜是区吗？", memories=[], vocab=vocab)
+    assert "以下词表命中仅用于帮助你做称呼消歧，不要机械复读：" in envelope
+    assert "- 哈基镜 通常指 镜子；注意：特别注意不要和王者荣耀的镜混淆" in envelope
+    assert "以下黑话解释仅在当前话题相关时参考：" in envelope
+    assert "- 区：群里常见的内部称谓，通常是熟人间的玩笑叫法。" in envelope
+
+
+def test_turn_envelope_deterministic_same_inputs(frozen_now):
+    kwargs = dict(
+        now=frozen_now, prompt="哈基镜是区吗？", memories=[{"content": "记忆甲"}],
+        vocab=_vocab_stub(matches=[SimpleNamespace(alias="哈基镜", name="镜子", note=None)]),
+        participants=[{"canonical_name": "镜子", "sender_name": "", "user_id": "2002"}],
+    )
+    first = build_turn_envelope(**kwargs)
+    second = build_turn_envelope(**kwargs)
+    assert first == second, f"信封不是确定性渲染：\n{_first_divergence(first, second)}"
+
+
+_ENVELOPE_SAMPLE = "【轮次上下文】\n- 当前时间：2026-03-16 星期一 09:19（北京时间）"
+
+
+def test_build_messages_prepends_envelope_with_history():
+    history = [
+        {"role": "user", "user_id": "1", "sender_name": "A", "content": "hi", "raw_content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "user_id": "2", "sender_name": "B", "content": "b", "raw_content": "b"},
+    ]
+    msgs = build_messages(
+        prompt="现在几点", image_urls=[],
+        history=history, recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="B", current_user_id="2",
+        turn_envelope=_ENVELOPE_SAMPLE,
+    )
+    _assert_user_assistant_alternation(msgs)
+    content = msgs[-1].content
+    assert content.startswith(_ENVELOPE_SAMPLE + "\n")
+    # 末条 user 是 pending 上文与当前消息的合并：信封在最前，其后【上文】→【当前提问】
+    assert content.index("【轮次上下文】") < content.index(SCENE_MARKER_CONTEXT) < content.index(SCENE_MARKER_CURRENT)
+
+
+def test_build_messages_prepends_envelope_without_history():
+    msgs = build_messages(
+        prompt="现在几点", image_urls=[],
+        history=[], recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="B", current_user_id="2",
+        turn_envelope=_ENVELOPE_SAMPLE,
+    )
+    assert msgs[-1].content.startswith(_ENVELOPE_SAMPLE + "\n")
+
+
+def test_build_messages_empty_envelope_unchanged():
+    kwargs = dict(
+        prompt="新的", image_urls=[], history=[], recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="C", current_user_id="3",
+    )
+    assert build_messages(**kwargs)[-1].content == build_messages(**kwargs, turn_envelope="")[-1].content
