@@ -12,6 +12,7 @@ export interface CronJob {
 
 export interface CronDashboardResponse {
   jobs: CronJob[]
+  updated_at?: string | null
 }
 
 export async function fetchCronDashboard(): Promise<CronDashboardResponse> {

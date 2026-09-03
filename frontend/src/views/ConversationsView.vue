@@ -8,7 +8,7 @@
         <UiLoading v-if="listing && !conversations.length" />
         <UiEmpty v-else-if="!conversations.length" icon="BookOpen" title="暂无对话记录" />
         <div v-else class="list-scroll">
-          <button v-for="c in conversations" :key="c.group_id" class="list-item" :class="{ active: c.group_id === selectedKey }" @click="selectConversation(c.group_id)">
+          <button v-for="c in conversations" :key="c.group_id" class="list-item qq-selectable" :class="{ active: c.group_id === selectedKey }" @click="selectConversation(c.group_id)">
             <div class="list-item-head">
               <UiTag size="sm" :variant="typeVariant(c.type)">{{ typeLabel(c.type) }}</UiTag>
               <span class="mono list-item-id">{{ displayGroupId(c) }}</span>
@@ -99,8 +99,6 @@ loadConversations()
 .list-scroll { overflow-y: auto; flex: 1; }
 
 .list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; border-radius: 0; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
-.list-item:hover { background: var(--qq-surface-hover); }
-.list-item.active { background: var(--qq-primary-soft); border-left: 3px solid var(--qq-primary); }
 .list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; }
 .list-item-id { color: var(--qq-text); font-size: var(--qq-text-sm); }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); display: flex; gap: 4px; }

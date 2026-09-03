@@ -4,16 +4,16 @@
       <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.2" />
     </filter>
     <linearGradient id="brand-grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#60A5FA" />
-      <stop offset="100%" stop-color="#2563EB" />
+      <stop offset="0%" stop-color="#12B7F5" />
+      <stop offset="100%" stop-color="#0D9BE0" />
     </linearGradient>
     <linearGradient id="brand-grad2" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#818CF8" />
-      <stop offset="100%" stop-color="#3730A3" />
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#0E7490" />
     </linearGradient>
     <linearGradient id="brand-grad-tail" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2DD4BF" />
-      <stop offset="100%" stop-color="#0F766E" />
+      <stop offset="0%" stop-color="#22D3EE" />
+      <stop offset="100%" stop-color="#0891B2" />
     </linearGradient>
   </defs>
   <g filter="url(#brand-shadow)" transform="translate(24, 24) scale(0.82) translate(-24, -24)">

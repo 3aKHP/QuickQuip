@@ -24,12 +24,13 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 | 文件 | 说明 |
 |------|------|
-| [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、LLBot 登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
+| [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
+| [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、`llm.toml`、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
 | [admin/tool-discovery.md](admin/tool-discovery.md) | LLM 工具发现配置——大量 MCP 工具接入时的 `tool_search`、`tool_list`、常驻工具和排障建议 |
 | [admin/game-config.md](admin/game-config.md) | 游戏系统管理——游戏开关、参数配置、数据库文件、故障排查 |
 | [admin/sensitive-filter.md](admin/sensitive-filter.md) | 敏感词过滤器——词表配置、接入点、日志与测试方法 |
-| [admin/migration-napcat-to-llbot.md](admin/migration-napcat-to-llbot.md) | NapCat 迁移 LLBot——Compose 服务、OneBot 连接方式、回退步骤 |
+| [admin/migration-napcat-to-llbot.md](admin/migration-napcat-to-llbot.md) | NapCat → LLBot 历史迁移记录——当时的风控背景、迁移步骤与回退思路 |
 | [admin/web-admin.md](admin/web-admin.md) | Web 管理后台——鉴权结构、Session 管理、反向代理配置、日志/Trace/各标签页功能列表 |
 
 ## 开发手册（开发者阅读）
@@ -45,7 +46,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、Docker Socket 取舍、推荐架构、现有 MCP server 列表 |
 | [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——从零开始，以项目实际规则为例，覆盖基础语法到进阶特性 |
 | [docs/dev/tool-discovery.md](dev/tool-discovery.md) | LLM 工具发现实现说明——manifest、动态加载循环、模式语义和测试覆盖 |
-| [docs/dev/sts-formula.md](dev/sts-formula.md) | STS 公式化回复模块——杀戮尖塔词表、card_le 与 turmfluch 公式的识别与生成链路 |
+| [docs/dev/sts-formula.md](dev/sts-formula.md) | STS 公式化回复模块——杀戮尖塔词表、card_le / 故障化 / turmfluch 公式的识别与生成链路 |
 
 ---
 

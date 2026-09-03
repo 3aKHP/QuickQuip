@@ -18,7 +18,7 @@ TOOL_SEARCH_NAME = "tool_search"
 TOOL_LIST_NAME = "tool_list"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
-PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status"}
+PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status", "manage_scheduled_messages"}
 DEFAULT_ALWAYS_LOADED_TOOLS = [
     TOOL_SEARCH_NAME,
     TOOL_LIST_NAME,

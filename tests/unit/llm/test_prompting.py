@@ -132,6 +132,20 @@ def test_scenes_from_history_falls_back_to_content():
     assert scenes[0].speakers[0]["text"] == "plain text"
 
 
+def test_scenes_from_history_keeps_placeholder_only_user_rows():
+    """content 为空、raw_content 为占位符（纯图片/引用落库形态）的 user 行是有效轮次。"""
+    history = [
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "", "raw_content": "[图片 1 张]"},
+        {"role": "assistant", "content": "哦哦 sora 发图了"},
+        {"role": "user", "user_id": "2", "sender_name": "B", "content": "b", "raw_content": "b"},
+    ]
+    scenes = _build_scenes_from_history(history)
+    assert len(scenes) == 2
+    assert scenes[0].speakers[0]["text"] == "[图片 1 张]"
+    assert scenes[1].speakers[0]["text"] == "b"
+
+
 # ---------------------------------------------------------------------------
 # Scene building — recent buffer
 # ---------------------------------------------------------------------------
@@ -294,6 +308,14 @@ def test_build_messages_with_history():
     assert SCENE_MARKER_CURRENT in msgs[2].content
 
 
+def _assert_user_assistant_alternation(messages):
+    """严格交替断言：相邻消息角色必须不同（三家 provider 的顺序要求）。"""
+    roles = [m.role for m in messages]
+    assert roles, "messages should not be empty"
+    for prev, cur in zip(roles, roles[1:]):
+        assert prev != cur, f"roles must strictly alternate, got {roles}"
+
+
 def test_build_messages_user_assistant_alternation():
     """The final messages array must alternate user/assistant for provider compatibility."""
     history = [
@@ -310,6 +332,53 @@ def test_build_messages_user_assistant_alternation():
     roles = [m.role for m in msgs]
     # History scene → assistant → pending merged with current = user/assistant/user
     assert roles == ["user", "assistant", "user"]
+    _assert_user_assistant_alternation(msgs)
+
+
+def test_build_messages_keeps_placeholder_only_user_rows():
+    """纯图片/引用消息落库为空 content + 占位符 raw_content，过滤后不得丢失该 user 轮。"""
+    history = [
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "", "raw_content": "[图片 1 张]"},
+        {"role": "assistant", "content": "哦哦 sora 发图了"},
+        {"role": "user", "user_id": "2", "sender_name": "B", "content": "b", "raw_content": "b"},
+        {"role": "assistant", "content": "reply_b"},
+    ]
+    msgs = build_messages(
+        prompt="c", image_urls=[],
+        history=history, recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="C", current_user_id="3",
+    )
+    roles = [m.role for m in msgs]
+    assert roles == ["user", "assistant", "user", "assistant", "user"]
+    _assert_user_assistant_alternation(msgs)
+    # 占位符行回到上下文：既带占位符文本，也带发送者身份标注
+    assert SCENE_MARKER_CONTEXT in msgs[0].content
+    assert "[图片 1 张]" in msgs[0].content
+    assert "QQ 1" in msgs[0].content
+
+
+def test_build_messages_blank_placeholder_row_still_dropped():
+    """raw_content 为纯空白时整行仍视为空，占位符缺失时回退 content。"""
+    history = [
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "", "raw_content": "   "},
+        {"role": "assistant", "content": "reply_a"},
+        {"role": "user", "user_id": "2", "sender_name": "B", "content": "legacy"},
+        {"role": "assistant", "content": "reply_b"},
+    ]
+    msgs = build_messages(
+        prompt="c", image_urls=[],
+        history=history, recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="C", current_user_id="3",
+    )
+    _assert_user_assistant_alternation(msgs)
+    # 空白占位符行被丢弃（首个 assistant 前无 user 轮）；缺 raw_content 键回退 content
+    assert msgs[0].role == "assistant"
+    assert msgs[0].content == "reply_a"
+    assert "legacy" in msgs[1].content
 
 
 def test_build_messages_with_recent_buffer():
@@ -589,3 +658,91 @@ def test_persona_sections_joined_by_double_newline():
 def test_persona_empty_extras_returns_empty():
     assert _compile_structured_persona({}) == ""
     assert _compile_structured_persona({"identity": {}}) == ""
+
+
+# ---------------------------------------------------------------------------
+# 内置搜索（grounding）与 search_web 的提示词引导互斥
+# ---------------------------------------------------------------------------
+
+def _builtin_persona():
+    return SimpleNamespace(system_prompt="你是测试人格。", style_prompt="", extras={})
+
+
+def _builtin_vocab():
+    return SimpleNamespace(find_matches=lambda prompt: [], find_glossary=lambda prompt: [])
+
+
+def _prompt_with_tools() -> list:
+    from quickquip.llm.tools import LLMToolSpec
+
+    return [
+        LLMToolSpec(
+            name="get_identity",
+            description="身份查询",
+            input_schema={"type": "object", "properties": {}},
+        )
+    ]
+
+
+def test_builtin_search_guidance_replaces_searxng_lines():
+    prompt = build_system_prompt(
+        persona=_builtin_persona(),
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="你好",
+        memories=[],
+        tool_specs=_prompt_with_tools(),
+        identities=None,
+        vocab=_builtin_vocab(),
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+        search_mode="builtin",
+    )
+
+    assert "联网检索说明" in prompt
+    assert "provider 内置联网搜索" in prompt
+    # SearXNG / search_web 引导块必须被压制，避免双路径引导
+    assert "当前联网后端：SearXNG。" not in prompt
+    assert "走项目内 SearXNG" not in prompt
+
+
+def test_builtin_search_guidance_present_without_tools():
+    """声明独立于 tool_calling_enabled：工具为空时 grounding 引导仍然注入。"""
+    prompt = build_system_prompt(
+        persona=_builtin_persona(),
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="你好",
+        memories=[],
+        tool_specs=[],
+        identities=None,
+        vocab=_builtin_vocab(),
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+        search_mode="builtin",
+    )
+
+    assert "联网检索说明" in prompt
+    assert "当前可用工具" not in prompt
+
+
+def test_builtin_search_inactive_keeps_searxng_guidance():
+    prompt = build_system_prompt(
+        persona=_builtin_persona(),
+        group_id=1001,
+        user_id=2002,
+        sender_name="A",
+        prompt="你好",
+        memories=[],
+        tool_specs=_prompt_with_tools(),
+        identities=None,
+        vocab=_builtin_vocab(),
+        beijing_timezone="Asia/Shanghai",
+        search_tool_name="search_web",
+        search_mode="searxng",
+    )
+
+    assert "当前联网后端：SearXNG。" in prompt
+    assert "联网检索说明" not in prompt

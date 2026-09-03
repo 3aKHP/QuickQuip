@@ -94,6 +94,35 @@ async def test_daily_briefing_retries_on_max_tokens(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_daily_briefing_cascade_skips_disabled_provider(monkeypatch):
+    """cascade 第一档 provider 被 enabled = false 禁用时跳过，直接用下一档。"""
+    cfg = _llm_config()
+    cfg.providers["a"].enabled = False
+    stub_b = _StubClient(LLMResponse(text="备档播报", model="m2", finish_reason="stop"))
+    built: list[str] = []
+
+    def _builder(provider):
+        built.append(provider.id)
+        return stub_b
+
+    monkeypatch.setattr("quickquip.llm.briefing.build_provider_client", _builder)
+
+    content, model_used = await generate_daily_briefing(
+        context=_context(),
+        persona=PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。"),
+        group_id="1001",
+        briefing_config=cfg.daily_briefing,
+        llm_config=cfg,
+        default_provider_id="a",
+        default_model="m1",
+    )
+
+    assert content == "备档播报"
+    assert model_used == "b/m2"
+    assert built == ["b"]
+
+
+@pytest.mark.asyncio
 async def test_daily_briefing_usage_scope_carries_persona(monkeypatch):
     calls: list[tuple] = []
 

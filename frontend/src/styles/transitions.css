@@ -1,5 +1,5 @@
 /* ==========================================================================
-   QuickQuip Transitions  v2 — 机械动效（linear / steps，无 cubic-bezier）
+   QuickQuip Transitions  v2.5 — 一次性过渡 ease-out，循环动画 linear
    ========================================================================== */
 
 /* ── 路由切换（page-shell 三态：前进 / 后退 / 切换）── */
@@ -11,9 +11,9 @@
 .page-shell-enter-active,
 .page-shell-leave-active {
   transition:
-    opacity 180ms linear,
-    transform 180ms linear,
-    filter 180ms linear;
+    opacity 180ms var(--qq-ease-out),
+    transform 180ms var(--qq-ease-out),
+    filter 180ms var(--qq-ease-out);
   transform-origin: 50% 18%;
   will-change: opacity, transform, filter;
 }
@@ -79,7 +79,7 @@
 /* ── Toast ── */
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity 150ms linear, transform 150ms linear;
+  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
 }
 
 .toast-enter-from,
@@ -91,7 +91,7 @@
 /* ── Slide-up（抽屉 / 模态）── */
 .slide-up-enter-active,
 .slide-up-leave-active {
-  transition: transform 200ms linear;
+  transition: transform 200ms var(--qq-ease-out);
 }
 
 .slide-up-enter-from,
@@ -119,6 +119,59 @@
   position: absolute;
 }
 
+/* ── Icon 微动效（父级 hover 触发；需 UiIcon motion prop 打上类名）── */
+.qq-ico {
+  transition: transform var(--qq-transition-slow);
+}
+
+button:hover .qq-ico--spin,
+a:hover .qq-ico--spin {
+  transform: rotate(180deg);
+}
+
+button:hover .qq-ico--nudge,
+a:hover .qq-ico--nudge {
+  transform: translateX(2px);
+}
+
+/* ── Icon Swap（主题切换等图标替换：旋转 + 淡入）── */
+.icon-swap-enter-active,
+.icon-swap-leave-active {
+  transition:
+    opacity 160ms var(--qq-ease-out),
+    transform 200ms var(--qq-ease-out);
+}
+
+.icon-swap-enter-from {
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.6);
+}
+
+.icon-swap-leave-to {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.6);
+}
+
+/* ── Tab Pane（标签页内容切换：淡入 + 微位移）── */
+.tab-pane-enter-active {
+  transition:
+    opacity 160ms var(--qq-ease-out),
+    transform 160ms var(--qq-ease-out);
+}
+
+.tab-pane-leave-active {
+  transition: opacity 100ms var(--qq-ease-out);
+}
+
+.tab-pane-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.tab-pane-leave-to {
+  opacity: 0;
+}
+
 /* ── Reduced motion 降级 ── */
 @media (prefers-reduced-motion: reduce) {
   .page-shell-enter-active,
@@ -128,7 +181,15 @@
   .slide-up-enter-active,
   .slide-up-leave-active,
   .list-enter-active,
-  .list-leave-active {
+  .list-leave-active,
+  .tab-pane-enter-active,
+  .tab-pane-leave-active,
+  .icon-swap-enter-active,
+  .icon-swap-leave-active {
+    transition: none;
+  }
+
+  .qq-ico {
     transition: none;
   }
 

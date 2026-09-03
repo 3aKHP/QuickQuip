@@ -35,7 +35,7 @@
         <button
           v-for="g in groups"
           :key="g.group_id"
-          class="group-item"
+          class="group-item qq-selectable"
           :class="{ active: g.group_id === selectedGroupId }"
           @click="selectGroup(g.group_id)"
         >
@@ -405,8 +405,6 @@ load()
 .groups-panel { display: flex; flex-direction: column; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 var(--qq-gap-md); border-bottom: 1px solid var(--qq-border); color: var(--qq-text); font-size: var(--qq-text-sm); font-weight: 700; }
 .group-item { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-sm); width: 100%; padding: var(--qq-gap-sm) var(--qq-gap-md); border: 0; border-bottom: 1px solid var(--qq-border); background: transparent; color: var(--qq-text); cursor: pointer; font-family: var(--qq-font-base); text-align: left; }
-.group-item:hover, .group-item.active { background: var(--qq-surface-hover); }
-.group-item.active { box-shadow: inset 3px 0 0 var(--qq-primary); }
 .group-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tags, .head-tags { display: flex; gap: var(--qq-gap-xs); flex-wrap: wrap; justify-content: flex-end; }
 

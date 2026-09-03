@@ -26,14 +26,25 @@ from quickquip.common.sensitive_filter import (
     reload_filter as _reload_sensitive_filter,
     scan_and_log as _scan_sensitive_text,
 )
-from quickquip.llm.config import LLMConfig, PersonaConfig, ProviderConfig, load_llm_config, load_personas_only
-from quickquip.llm.defectify import build_defectify_prompt
+from quickquip.llm.config import (
+    DISABLED_PROVIDER_REPLY,
+    LLMConfig,
+    PersonaConfig,
+    ProviderConfig,
+    load_llm_config,
+    load_personas_only,
+    provider_builtin_search_active,
+)
+from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.sts.config import (
+    DEFECTIFY_RATE_LIMIT_KEY,
+    DEFECTIFY_RULE_NAME,
     TURMFLUCH_RATE_LIMIT_KEY,
     TURMFLUCH_RULE_NAME,
 )
 from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
 from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
+from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
@@ -79,6 +90,7 @@ from quickquip.llm.service_parts import (
     DrawSvgToolMixin,
     HealthMixin,
     McpLifecycleMixin,
+    ScheduleMessagesToolMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
@@ -120,7 +132,6 @@ VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
-DEFECTIFY_RULE_NAME = "llm_defectify"
 _GROUP_CACHE_MAX = 512
 
 
@@ -140,7 +151,7 @@ def _turmfluch_reply_text(raw_text: str) -> str | None:
 
 # 一次性生成入口的差异点束；共享管线本体在 quickquip.llm.single_shot
 _DEFECTIFY_SPEC = CommandSingleShotSpec(
-    rate_limit_key=LLM_RULE_NAME,
+    rate_limit_key=DEFECTIFY_RATE_LIMIT_KEY,
     rule_name=DEFECTIFY_RULE_NAME,
     usage_reply="用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
     invalid_reply="模型没有返回可显示的文本。",
@@ -177,7 +188,7 @@ class _ImagePreprocessingOutcome:
     is_non_vision: bool
 
 
-class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
@@ -271,6 +282,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         self._group_identities[cache_key] = merged
         return merged
 
+    def group_identities(self, group_id: str) -> IdentityIndex:
+        """按群返回合并后的身份索引，供装配层等外部调用方使用。"""
+        return self._resolve_identities(group_id)
 
     def reload_config(self) -> LLMConfig:
         self.config = load_llm_config(self.config_path)
@@ -333,6 +347,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         participants: list[dict[str, str]] | None = None,
         provider_style_overrides: str = "",
         session_preset: str = "",
+        provider_id: str | None = None,
+        builtin_search_active: bool = False,
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -346,11 +362,15 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             vocab=self._resolve_vocab(str(group_id)),
             beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
-            auto_search_enabled=self.config.auto_search.enabled,
-            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type),
+            search_mode=(
+                "builtin"
+                if builtin_search_active
+                else ("searxng" if self.config.auto_search.enabled else "none")
+            ),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type, provider_id=provider_id),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            deferred_tool_categories=self._get_deferred_tool_categories(chat_type),
+            deferred_tool_categories=self._get_deferred_tool_categories(chat_type, provider_id=provider_id),
             chat_type=chat_type,
             participants=participants,
             provider_style_overrides=provider_style_overrides,
@@ -428,15 +448,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         *,
         chat_id: int | str,
         chat_type: str,
-        user_id: int | str,
-        sender_name: str,
         prompt: str,
         image_urls: list[str] | None = None,
         quoted_text: str = "",
         quoted_image_urls: list[str] | None = None,
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
-        quoted_is_bot_self: bool = False,
     ) -> dict[str, str]:
         # 薄编排：管线本体在 quickquip.llm.single_shot。显式传本模块级
         # build_provider_client / _get_sensitive_filter，保持既有 patch 点有效。
@@ -578,10 +595,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
-            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type, provider_id=provider.id),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type),
+            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=provider.id),
             initial_tool_names=[spec.name for spec in request.tools],
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
@@ -950,6 +967,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
                 "rule_name": LLM_RULE_NAME,
                 "llm_used": False,
             }
+        if not provider.enabled:
+            return {
+                "reply": DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id),
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+            }
 
         persona = self.config.personas.get(settings.persona_id)
         if persona is None:
@@ -1014,7 +1038,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
-        tool_specs = self._get_enabled_tool_specs(chat_type=chat_type) if self.config.runtime.tool_calling_enabled else []
+        builtin_search_active = provider_builtin_search_active(provider)
+        tool_specs = (
+            self._get_enabled_tool_specs(chat_type=chat_type, provider_id=provider.id)
+            if self.config.runtime.tool_calling_enabled
+            else []
+        )
         session_preset = self.get_session_preset(scope_key) if chat_type == "private" else ""
         system_prompt = self._build_system_prompt(
             persona,
@@ -1028,6 +1057,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             participants=participants,
             provider_style_overrides=provider.style_overrides,
             session_preset=session_preset,
+            provider_id=provider.id,
+            builtin_search_active=builtin_search_active,
         )
         messages = self._build_messages(
             prompt=trimmed_prompt,
@@ -1057,6 +1088,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
             tools=tool_specs,
             allow_tool_calls=bool(tool_specs),
             tool_choice="auto",
+            builtin_search=builtin_search_active,
         )
         tool_context = ToolExecutionContext(
             group_id=chat_id,
@@ -1105,6 +1137,16 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Hea
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
         if not text:
             text = "模型没有返回可显示的文本。"
+
+        if response.web_search is not None:
+            logger.info(
+                "LLM built-in web search: provider=%s model=%s queries=%s sources=%s",
+                provider.id,
+                request.model,
+                response.web_search.queries,
+                [source.url for source in response.web_search.sources],
+            )
+            text = append_web_search_source_block(text, response.web_search)
 
         if sensitive.is_loaded:
             output_scan = sensitive.scan(text)

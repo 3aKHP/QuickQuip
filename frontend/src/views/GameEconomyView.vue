@@ -1,20 +1,22 @@
 <template>
   <div>
     <UiPageHeader title="金币管理" subtitle="查看各群金币排行、账户详情，手动调整余额" />
+    <UiStatStrip v-if="groups.length" :items="stripItems" />
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiLoading v-else-if="loading" />
     <div class="toolbar"><label>群组<select v-model="selectedGroup" @change="selectGroup"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g.group_id" :value="g.group_id">{{ g.group_id }}（{{ g.user_count }} 人 / {{ g.total_gold.toLocaleString() }} 💰）</option></select></label><UiButton :loading="loading" icon="RefreshCw" @click="loadGroups">刷新</UiButton></div>
-    <UiEmpty v-if="!loading && selectedGroup && !loadError && !rankings.length && !acctSearched" icon="Coins" title="暂无数据" />
+    <UiEmpty v-if="!loading && !selectedGroup" icon="Coins" title="选择一个群组查看金币经济" description="上方下拉框列出所有开启金币系统的群组，含用户数与总金币。" />
+    <UiEmpty v-else-if="!loading && selectedGroup && !loadError && !rankings.length && !acctSearched" icon="Coins" title="暂无数据" />
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">
-      <h3 class="st">金币排行 TOP 20</h3>
+      <h3 class="st section-title">金币排行 TOP 20</h3>
       <UiLoading v-if="rankLoading" />
       <UiEmpty v-else-if="!rankings.length" icon="BarChart3" title="暂无排行数据" />
       <div v-else class="table-scroll"><table><thead><tr><th class="num">#</th><th>QQ</th><th class="num">金币</th><th class="num">好感度</th><th class="num">连击</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.user_id"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="lookupUser(r.user_id)" class="acct-link">{{ r.user_id }}</a></td><td class="num">{{ r.gold.toLocaleString() }}</td><td class="num">{{ r.affection }}</td><td class="num">{{ r.sign_streak }} 天</td></tr></tbody></table></div>
     </UiCard>
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">
-      <h3 class="st">账户查询与调整</h3>
+      <h3 class="st section-title">账户查询与调整</h3>
       <div class="lookup"><input v-model="searchUid" placeholder="QQ 号" style="width:160px" @keyup.enter="searchAccount" /><UiButton icon="Search" :loading="acctLoading" @click="searchAccount">查询</UiButton></div>
       <div v-if="account" class="acct">
         <div class="acct-info"><span class="al">QQ</span><span class="mono">{{ account.user_id }}</span><span class="al">金币</span><strong>{{ account.gold.toLocaleString() }}</strong><span class="al">好感</span><span>{{ account.affection }}</span><span class="al">签到</span><span>{{ account.sign_streak }} 天</span><span class="al">最后签到</span><span class="muted">{{ account.last_sign_date || '从未签到' }}</span></div>
@@ -27,11 +29,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import { computed, onMounted, ref } from 'vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'
 import { listGroups, getRankings, getAccount, adjustGold } from '../api/game-economy'; import { toast } from '../toast'
 
 const loading = ref(false); const loadError = ref<string | null>(null); const groups = ref<any[]>([]); const selectedGroup = ref(''); const rankLoading = ref(false); const rankings = ref<any[]>([])
+
+const stripItems = computed(() => [
+  { label: '群组数', value: groups.value.length, icon: 'Users' },
+  { label: '金币用户', value: groups.value.reduce((n, g) => n + (g.user_count || 0), 0), icon: 'Coins' },
+  { label: '总金币', value: groups.value.reduce((n, g) => n + (g.total_gold || 0), 0), icon: 'Gauge' },
+])
 const searchUid = ref(''); const acctLoading = ref(false); const acctSearched = ref(false); const account = ref<any>(null)
 const adjustAmount = ref<number | null>(null); const adjustReason = ref(''); const adjLoading = ref(false); const adjustResult = ref(''); const adjustError = ref(false)
 
@@ -50,7 +58,7 @@ async function doAdjust() { if (adjustAmount.value == null || adjustAmount.value
 .toolbar { display: flex; align-items: center; gap: var(--qq-gap-md); flex-wrap: wrap; margin-bottom: var(--qq-gap-lg); padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 .toolbar label { display: flex; align-items: center; gap: var(--qq-gap-xs); color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .section { margin-bottom: var(--qq-gap-md); }
-.st { margin: 0 0 var(--qq-gap-md) 0; font-size: var(--qq-text-base); color: var(--qq-text); }
+.st { margin: 0 0 var(--qq-gap-md) 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .acct-link { color: var(--qq-primary); text-decoration: none; font-family: var(--qq-font-mono); }
 .acct-link:hover { text-decoration: underline; }

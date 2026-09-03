@@ -148,6 +148,9 @@ async def generate_daily_summary(
         if provider_config is None:
             logger.warning("daily_summary: provider %r not found in config, skipping", provider_id)
             continue
+        if not provider_config.enabled:
+            logger.info("daily_summary: provider %r disabled, skipping", provider_id)
+            continue
 
         effective_config = replace(provider_config, stream_enabled=False)
         req = LLMRequest(
@@ -307,6 +310,9 @@ async def generate_period_report(
         provider_config = llm_config.providers.get(provider_id)
         if provider_config is None:
             logger.warning("period_report: provider %r not found in config, skipping", provider_id)
+            continue
+        if not provider_config.enabled:
+            logger.info("period_report: provider %r disabled, skipping", provider_id)
             continue
 
         effective_config = replace(provider_config, stream_enabled=False)

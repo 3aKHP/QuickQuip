@@ -121,6 +121,10 @@ class RecentMessageBuffer:
             for item in items
         ]
 
+    def clear_scope(self, group_id: int | str) -> bool:
+        group_key = str(group_id)
+        return self.messages.pop(group_key, None) is not None
+
     def remove_by_message_id(self, group_id: int | str, message_id: str) -> bool:
         group_key = str(group_id)
         queue = self.messages.get(group_key)

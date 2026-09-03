@@ -22,11 +22,13 @@ import LogsArchiveView from '../views/LogsArchiveView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
 import McpDashboardView from '../views/McpDashboardView.vue'
 import CronDashboardView from '../views/CronDashboardView.vue'
+import ScheduledMessagesView from '../views/ScheduledMessagesView.vue'
 import AuditView from '../views/AuditView.vue'
 import GameEconomyView from '../views/GameEconomyView.vue'
 import NiuNiuView from '../views/NiuNiuView.vue'
 
 export interface NavItem {
+  /** 路由构建的唯一真值源：router 以 `/${key}` 生成路径与 name；path 仅用于展示/链接 */
   key: string
   path: string
   label: string
@@ -47,7 +49,7 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'ops', label: '群聊运营', icon: 'MessagesSquare', description: '群状态、规则、限流与 LLM 覆盖' },
   { key: 'llm', label: 'LLM 工坊', icon: 'BrainCircuit', description: '记忆、人格、资料与诊断工具' },
   { key: 'content', label: '内容流', icon: 'Newspaper', description: '总结、贴吧与词云产物' },
-  { key: 'system', label: '系统', icon: 'ServerCog', description: '配置、日志、定时任务与审计记录' },
+  { key: 'system', label: '系统', icon: 'ServerCog', description: '配置、日志、调度监控与审计记录' },
   { key: 'games', label: '游戏', icon: 'Gamepad2', description: '金币经济与牛牛大作战' },
 ]
 
@@ -74,7 +76,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'logs-live',      path: '/logs-live',      label: '实时日志', icon: 'Server',          section: 'system',   component: LogsLiveView },
   { key: 'logs-trace',     path: '/logs-trace',     label: 'LLM Trace', icon: 'FileCode',        section: 'system',   component: LogsTraceView },
   { key: 'logs-archive',   path: '/logs-archive',   label: '日志归档', icon: 'FolderOpen',      section: 'system',   component: LogsArchiveView },
-  { key: 'cron-dashboard', path: '/cron-dashboard', label: '定时任务', icon: 'Clock',           section: 'system',   component: CronDashboardView },
+  { key: 'cron-dashboard', path: '/cron-dashboard', label: '调度器监控', icon: 'Clock',           section: 'system',   component: CronDashboardView },
+  { key: 'scheduled-messages', path: '/scheduled-messages', label: '定时消息', icon: 'AlarmClock', section: 'system', component: ScheduledMessagesView },
   { key: 'audit',          path: '/audit',          label: '审计',     icon: 'ShieldCheck',     section: 'system',   component: AuditView },
   { key: 'game-economy',   path: '/game-economy',   label: '金币',     icon: 'Coins',           section: 'games',    component: GameEconomyView },
   { key: 'niuniu',         path: '/niuniu',         label: '牛牛',     icon: 'Swords',          section: 'games',    component: NiuNiuView },

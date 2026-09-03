@@ -1,5 +1,7 @@
 # NapCat → LLBot 迁移指南
 
+> **历史迁移记录**：本文档记录 QuickQuip 2026-05 从 NapCat 迁移到 LLBot 时的决策背景、迁移步骤与回退思路，保留当时的版本与环境前提。它不承担现行运维职责——当前适配器状态与选择见 [onebot-adapters.md](onebot-adapters.md)，现行部署流程见 [deployment.md](deployment.md)。
+
 QuickQuip 设计之初即以 NapCat（Docker 镜像 `mlikiowa/napcat-docker`）作为推荐的 OneBot V11 QQ 协议适配器。截至 2026 年 5 月中下旬，NapCat 遭遇腾讯高强度风控打击，社区和我们的生产环境均反复出现以下问题：
 
 1. **频繁 KickedOffLine**：上线后数小时内被强制踢下线
@@ -32,7 +34,7 @@ QuickQuip 设计之初即以 NapCat（Docker 镜像 `mlikiowa/napcat-docker`）�
 ```yaml
 services:
   llbot:
-    image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # 版本选择与 pin 原因见 deployment.md「LLBot 镜像版本」
+    image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # 版本选择与 pin 原因见 onebot-adapters.md 的 LLBot profile
     container_name: llbot
     entrypoint:
       - /bin/sh

@@ -44,7 +44,11 @@ class _FakeClient:
 
 
 def _patch_client(monkeypatch, factory):
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", factory)
+    # probe_provider 会传 retry_policy=（探活关闭自动重试），桩吸收关键字参数
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client",
+        lambda provider, **_kwargs: factory(provider),
+    )
 
 
 async def test_probe_provider_ok(monkeypatch):
@@ -160,6 +164,31 @@ async def test_probe_all_providers_runs_concurrently(monkeypatch):
 
 async def test_probe_all_providers_empty_config():
     assert await probe_all_providers(LLMConfig()) == []
+
+
+async def test_probe_all_providers_skips_disabled(monkeypatch):
+    """enabled = false 的 provider 不参与探活（不出结果、不建 client）。"""
+    monkeypatch.setenv("TEST_PROBE_KEY", "fake-key")
+
+    built_for: list[str] = []
+
+    def factory(provider):
+        built_for.append(provider.id)
+        return _FakeClient()
+
+    _patch_client(monkeypatch, factory)
+
+    config = LLMConfig()
+    config.providers = {
+        "p-on": _make_provider(id="p-on"),
+        "p-off": _make_provider(id="p-off", api_key_env="OFF_KEY"),
+    }
+    config.providers["p-off"].enabled = False
+
+    results = await probe_all_providers(config)
+
+    assert [r.provider_id for r in results] == ["p-on"]
+    assert built_for == ["p-on"]
 
 
 def test_format_probe_results_mixed_statuses():

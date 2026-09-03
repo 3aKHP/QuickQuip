@@ -4,7 +4,7 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from quickquip.llm.config import LLMConfig
+from quickquip.llm.config import LLMConfig, provider_builtin_search_active
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
 from quickquip.llm.provider import build_provider_client
 from quickquip.llm.service_parts.constants import (
@@ -12,6 +12,7 @@ from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS,
     MAX_TRIGGER_CONTEXT_MESSAGES,
     PRIVATE_UNAVAILABLE_TOOLS,
+    SEARCH_TOOL_NAME,
     TOOL_LIST_NAME,
     TOOL_SEARCH_NAME,
 )
@@ -26,18 +27,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# 模型可见的身份类工具输出统一附带的路由说明：画图/语音/搜索等能力可能由
+# 不同模型通道服务，Provider/Model 字段只描述当前对话的路由，避免模型
+# 据此把历史回复归因给虚构的其他"模型人格"。
+_MODEL_ROUTING_NOTE = (
+    "路由说明：Provider/Model 仅表示当前对话的路由配置；"
+    "画图、语音、搜索等其他能力可能由不同模型通道服务，"
+    "对话人格始终是同一个机器人。"
+)
+
 
 class ToolMixin(McpLifecycleMixin):
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
     # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
     # self._model_label (also ScopeMixin); _register_builtin_tools additionally
-    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin), and
-    # reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready.
+    # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin) and
+    # self.register_schedule_messages_tool (defined in ScheduleMessagesToolMixin),
+    # and reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready.
     # MCP tool names are read via the public ``mcp_tool_names`` accessor —
     # ToolMixin inherits McpLifecycleMixin (which owns the ``_mcp_*`` state)
     # so that narrow interface is available on any host, minimal fakes included.
-    # ScopeMixin and DrawSvgToolMixin must precede ToolMixin in the LLMService
-    # base list.
+    # ScopeMixin, DrawSvgToolMixin and ScheduleMessagesToolMixin must precede
+    # ToolMixin in the LLMService base list.
     def _register_builtin_tools(self) -> None:
         self.tool_registry.register(
             LLMToolSpec(
@@ -120,7 +131,7 @@ class ToolMixin(McpLifecycleMixin):
         )
         self.tool_registry.register(
             LLMToolSpec(
-                name="search_web",
+                name=SEARCH_TOOL_NAME,
                 description="使用当前搜索后端对最新信息进行联网搜索。",
                 input_schema={
                     "type": "object",
@@ -228,6 +239,8 @@ class ToolMixin(McpLifecycleMixin):
         )
         # draw_svg 独立成 DrawSvgToolMixin（tools.py 已超长度预警线）
         self.register_draw_svg_tool()
+        # manage_scheduled_messages 独立成 ScheduleMessagesToolMixin（同上）
+        self.register_schedule_messages_tool()
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
         self.tool_registry.register(spec, handler)
@@ -238,7 +251,14 @@ class ToolMixin(McpLifecycleMixin):
     # by service.py's prompt builder and tool loop, and by ToolMixin's own
     # _tool_search_tools / _tool_list_tools handlers.
 
-    def _get_enabled_tool_names(self, chat_type: str = "group") -> list[str]:
+    def _builtin_search_active(self, provider_id: str | None) -> bool:
+        """该 provider 会话是否由内置搜索接管联网检索（从而移除 search_web）。"""
+        if not provider_id:
+            return False
+        provider = self.config.providers.get(provider_id)
+        return provider is not None and provider_builtin_search_active(provider)
+
+    def _get_enabled_tool_names(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:
         configured = self.config.tools.enabled
         if not configured:
             names = [*DEFAULT_ENABLED_TOOLS, *sorted(self.mcp_tool_names)]
@@ -249,24 +269,28 @@ class ToolMixin(McpLifecycleMixin):
         names = list(dict.fromkeys(names))
         if chat_type == "private":
             names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
+        if self._builtin_search_active(provider_id):
+            # 内置搜索开启的 provider 会话移除 search_web，避免模型面前
+            # 出现客户端与 provider 原生两条竞争的搜索路径。
+            names = [name for name in names if name != SEARCH_TOOL_NAME]
         return [name for name in names if self.tool_registry.has_tool(name)]
 
-    def _get_always_loaded_tool_names(self, chat_type: str = "group") -> list[str]:
+    def _get_always_loaded_tool_names(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:
         configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
-        enabled = set(self._get_enabled_tool_names(chat_type=chat_type))
+        enabled = set(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id))
         names = [name for name in configured if name in enabled and self.tool_registry.has_tool(name)]
-        if self._is_tool_discovery_enabled(chat_type) and TOOL_SEARCH_NAME in enabled and TOOL_SEARCH_NAME not in names:
+        if self._is_tool_discovery_enabled(chat_type, provider_id=provider_id) and TOOL_SEARCH_NAME in enabled and TOOL_SEARCH_NAME not in names:
             names.insert(0, TOOL_SEARCH_NAME)
         return names
 
-    def _is_tool_discovery_enabled(self, chat_type: str = "group") -> bool:
+    def _is_tool_discovery_enabled(self, chat_type: str = "group", *, provider_id: str | None = None) -> bool:
         mode = self.config.tools.discovery_mode
         if mode == "off":
             return False
         # Cache the enabled-names list once — previously this was recomputed
         # up to 5+ times per call (inside list/set comprehensions), each time
         # rebuilding the filtered list through tool_registry.has_tool().
-        enabled = self._get_enabled_tool_names(chat_type=chat_type)
+        enabled = self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
         if TOOL_SEARCH_NAME not in enabled:
             return False
         enabled_set = set(enabled)
@@ -280,17 +304,17 @@ class ToolMixin(McpLifecycleMixin):
         deferred_count = len(enabled_set - always_names)
         return deferred_count > self.config.tools.discovery_min_tools
 
-    def _get_enabled_tool_specs(self, chat_type: str = "group") -> list[LLMToolSpec]:
-        if self._is_tool_discovery_enabled(chat_type):
-            return self.tool_registry.get_specs(self._get_always_loaded_tool_names(chat_type=chat_type))
-        return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type))
+    def _get_enabled_tool_specs(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[LLMToolSpec]:
+        if self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
+            return self.tool_registry.get_specs(self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id))
+        return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id))
 
-    def _get_deferred_tool_categories(self, chat_type: str = "group") -> list[str]:
-        if not self._is_tool_discovery_enabled(chat_type):
+    def _get_deferred_tool_categories(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:
+        if not self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
             return []
-        loaded = set(self._get_always_loaded_tool_names(chat_type=chat_type))
+        loaded = set(self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id))
         categories: list[str] = []
-        for entry in self.tool_registry.list_manifest(self._get_enabled_tool_names(chat_type=chat_type)):
+        for entry in self.tool_registry.list_manifest(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)):
             if entry.name in loaded:
                 continue
             category = entry.category or entry.source
@@ -374,8 +398,8 @@ class ToolMixin(McpLifecycleMixin):
         except (TypeError, ValueError):
             limit = self.config.tools.discovery_search_limit
         limit = max(1, min(limit, self.config.tools.discovery_search_limit))
-        current_enabled = self._get_enabled_tool_names(chat_type=context.chat_type)
-        loaded_names = set(self._get_always_loaded_tool_names(chat_type=context.chat_type))
+        current_enabled = self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=context.provider_id)
+        loaded_names = set(self._get_always_loaded_tool_names(chat_type=context.chat_type, provider_id=context.provider_id))
         matches = self.tool_registry.search_manifest(
             query,
             enabled_names=current_enabled,
@@ -409,7 +433,7 @@ class ToolMixin(McpLifecycleMixin):
             limit = 20
         page = max(1, page)
         limit = max(1, min(limit, 50))
-        enabled_names = self._get_enabled_tool_names(chat_type=context.chat_type)
+        enabled_names = self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=context.provider_id)
 
         if mode == "groups":
             groups = self.tool_registry.list_groups(enabled_names)
@@ -622,8 +646,10 @@ class ToolMixin(McpLifecycleMixin):
     ) -> str:
         detail = str(arguments.get("detail", "status")).strip() or "status"
         if detail == "current":
-            return self.format_current(context.group_id, chat_type=context.chat_type)
-        return self.format_status(context.group_id, chat_type=context.chat_type)
+            text = self.format_current(context.group_id, chat_type=context.chat_type)
+        else:
+            text = self.format_status(context.group_id, chat_type=context.chat_type)
+        return f"{text}\n{_MODEL_ROUTING_NOTE}"
 
     async def _tool_get_current_model(
         self,
@@ -641,6 +667,7 @@ class ToolMixin(McpLifecycleMixin):
             lines.append("- 艾特触发：OFF（私聊不适用）")
         else:
             lines.append(f"- 艾特触发：{'ON' if settings.allow_at else 'OFF'}")
+        lines.append(f"- {_MODEL_ROUTING_NOTE}")
         return "\n".join(lines)
 
     async def _tool_get_health_status(

@@ -8,7 +8,7 @@
         <UiLoading v-if="listing && !personas.length" />
         <UiEmpty v-else-if="!personas.length" icon="Users" title="暂无人格文件" />
         <div v-else class="list-scroll">
-          <button v-for="p in personas" :key="p.name" class="list-item" :class="{ active: p.name === selectedName }" @click="selectPersona(p.name)">
+          <button v-for="p in personas" :key="p.name" class="list-item qq-selectable" :class="{ active: p.name === selectedName }" @click="selectPersona(p.name)">
             <div class="list-item-head"><span class="display-name">{{ p.display_name || p.name }}</span><UiTag v-if="p.protected" size="sm" variant="info">共享</UiTag></div>
             <div class="list-item-meta"><span class="mono">{{ p.name }}.toml</span></div>
           </button>
@@ -67,8 +67,6 @@ loadList()
 .list-panel { width: 260px; flex-shrink: 0; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
 .list-scroll { overflow-y: auto; flex: 1; }
 .list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
-.list-item:hover { background: var(--qq-surface-hover); }
-.list-item.active { background: var(--qq-primary-soft); border-left: 3px solid var(--qq-primary); }
 .list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; }
 .display-name { font-size: var(--qq-text-base); font-weight: 500; color: var(--qq-text); }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); }

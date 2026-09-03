@@ -8,7 +8,7 @@
         <UiLoading v-if="listing && !scopes.length" />
         <UiEmpty v-else-if="!scopes.length" icon="BookUser" title="暂无资料文件" />
         <div v-else class="list-scroll">
-          <button v-for="scope in scopes" :key="scope.scope" class="list-item" :class="{ active: scope.scope === selectedScope }" @click="selectScope(scope.scope)">
+          <button v-for="scope in scopes" :key="scope.scope" class="list-item qq-selectable" :class="{ active: scope.scope === selectedScope }" @click="selectScope(scope.scope)">
             <div class="list-item-head"><span>{{ scope.label }}</span><UiTag v-if="scope.global" size="sm" variant="info">全局</UiTag><UiTag v-if="scope.existing_files < scope.total_files" size="sm" variant="warn">缺失</UiTag></div>
             <div class="list-item-meta"><span class="mono">{{ scope.path }}</span><span>{{ scope.existing_files }}/{{ scope.total_files }}</span></div>
           </button>
@@ -16,9 +16,13 @@
       </nav>
 
       <div class="editor-col">
-        <div v-if="selectedScope" class="kind-tabs">
-          <button v-for="kind in kinds" :key="kind.kind" class="kind-tab" :class="{ active: kind.kind === selectedKind }" @click="selectKind(kind.kind)"><span class="kind-label">{{ kind.label }}</span><span class="kind-file">{{ kind.filename }}</span></button>
-        </div>
+        <UiTabs
+          v-if="selectedScope"
+          :model-value="selectedKind"
+          :tabs="kindTabs"
+          class="kind-tabs"
+          @change="selectKind"
+        />
         <div v-if="!selectedScope" class="hint-panel"><UiEmpty icon="BookUser" title="从左侧选择全局或群级资料" /></div>
         <template v-else>
           <div class="editor-bar">
@@ -44,6 +48,7 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiTabs from '../components/ui/UiTabs.vue'
 import { listLlmAbout, fetchLlmAboutFile, saveLlmAboutFile, createLlmAboutGroup } from '../api/llmAbout'
 import { toast } from '../toast'
 
@@ -54,6 +59,7 @@ interface AboutScope { scope: string; label: string; global: boolean; path: stri
 const basePath = ref(''); const scopes = ref<AboutScope[]>([]); const kinds = ref<AboutKind[]>([]); const listing = ref(false); const listError = ref<string | null>(null)
 const selectedScope = ref(''); const selectedKind = ref('vocab'); const loadingContent = ref(false); const loadError = ref<string | null>(null); const saveError = ref<string | null>(null); const saving = ref(false); const content = ref(''); const originalContent = ref('')
 const currentScope = computed(() => scopes.value.find(s => s.scope === selectedScope.value) || null)
+const kindTabs = computed(() => kinds.value.map((k) => ({ key: k.kind, label: k.label, sub: k.filename })))
 const currentFile = computed(() => currentScope.value?.files.find(f => f.kind === selectedKind.value) || null)
 const currentPath = computed(() => currentFile.value?.path || '')
 const dirty = computed(() => content.value !== originalContent.value)
@@ -76,8 +82,6 @@ loadList()
 .list-panel { width: 280px; flex-shrink: 0; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
 .list-scroll { overflow-y: auto; flex: 1; }
 .list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
-.list-item:hover { background: var(--qq-surface-hover); }
-.list-item.active { background: var(--qq-primary-soft); border-left: 3px solid var(--qq-primary); }
 .list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; color: var(--qq-text); font-size: var(--qq-text-base); font-weight: 500; }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); display: flex; gap: var(--qq-gap-xs); }
 .mono { font-family: var(--qq-font-mono); }
@@ -85,12 +89,7 @@ loadList()
 .editor-col { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; gap: var(--qq-gap-sm); }
 .hint-panel { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 
-.kind-tabs { display: flex; gap: 1px; flex-wrap: wrap; }
-.kind-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface); border: none; border-radius: var(--qq-radius-sm); color: var(--qq-text-muted); cursor: pointer; font-family: var(--qq-font-base); font-size: var(--qq-text-sm); box-shadow: var(--qq-shadow-card); transition: all var(--qq-transition-fast); }
-.kind-tab:hover { color: var(--qq-text); }
-.kind-tab.active { color: var(--qq-primary); background: var(--qq-primary-soft); }
-.kind-label { font-weight: 500; }
-.kind-file { font-family: var(--qq-font-mono); font-size: 10px; color: var(--qq-text-muted); }
+.kind-tabs { align-self: flex-start; max-width: 100%; }
 
 .editor-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-md); flex-wrap: wrap; }
 .editor-bar-title { display: flex; align-items: center; gap: var(--qq-gap-sm); color: var(--qq-text); font-size: var(--qq-text-base); }

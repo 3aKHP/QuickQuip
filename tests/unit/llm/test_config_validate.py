@@ -290,3 +290,106 @@ def test_empty_personas_is_fatal_load_error(tmp_path: Path):
     # fatal 后 early-return：provider 已解析保留，但配置整体不可用
     assert set(loaded.providers) == {"good"}
     assert not loaded.is_available
+
+
+# ---------------------------------------------------------------------------
+# builtin_search 解析与协议惰性
+# ---------------------------------------------------------------------------
+
+def _gemini_provider(pid: str = "gemini-main", extra: str = "") -> str:
+    return f"""
+[[providers]]
+id = "{pid}"
+protocol = "gemini"
+base_url = "https://api.example.test/v1beta"
+api_key_env = "GEMINI_KEY"
+default_model = "gemini-x"
+models = ["gemini-x"]
+{extra}
+"""
+
+
+def test_builtin_search_defaults_to_false(tmp_path: Path):
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    assert loaded.providers["good"].builtin_search is False
+
+
+def test_builtin_search_parsed_on_gemini_provider(tmp_path: Path):
+    from quickquip.llm.config import provider_builtin_search_active
+
+    loaded = _load(tmp_path, _gemini_provider(extra="builtin_search = true") + _PERSONA)
+
+    provider = loaded.providers["gemini-main"]
+    assert provider.builtin_search is True
+    assert provider_builtin_search_active(provider) is True
+    assert loaded.load_error is None
+
+
+def test_builtin_search_on_non_gemini_protocol_warns_and_stays_inert(tmp_path, caplog):
+    """非 gemini 协议误配：记 warning、provider 不剪除、生效谓词为 False（请求级惰性）。"""
+    import logging
+
+    from quickquip.llm.config import provider_builtin_search_active
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            _good_provider().replace('models = ["gpt-x"]', 'models = ["gpt-x"]\nbuiltin_search = true')
+            + _PERSONA,
+        )
+
+    provider = loaded.providers["good"]
+    assert provider.builtin_search is True  # 保留原始配置意图，仅生效层面惰性
+    assert provider_builtin_search_active(provider) is False
+    assert "good" in loaded.providers  # 不因该键误配剪除 provider
+    assert any("builtin_search" in record.message for record in caplog.records)
+
+
+def test_runtime_retry_config_stamped_to_providers(tmp_path: Path):
+    """[runtime] 重试三键解析后统一盖章到所有 provider（旁路调用零改动继承）。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        retry_max_attempts = 5
+        retry_base_delay = 2.5
+        retry_jitter = 0.8
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    provider = loaded.providers["good"]
+    assert provider.retry_max_attempts == 5
+    assert provider.retry_base_delay == 2.5
+    assert provider.retry_jitter == 0.8
+    assert loaded.runtime.retry_jitter == 0.8
+
+
+def test_runtime_retry_defaults_without_keys(tmp_path: Path):
+    """未配置重试键时，runtime 与 provider 均落默认策略。"""
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    provider = loaded.providers["good"]
+    assert provider.retry_max_attempts == 3
+    assert provider.retry_base_delay == 1.0
+    assert provider.retry_jitter == 0.5
+
+
+def test_retry_jitter_clamped_to_unit_range(tmp_path: Path):
+    """retry_jitter 钳制到 [0, 1]。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        retry_jitter = 3.0
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.retry_jitter == 1.0
+    assert loaded.providers["good"].retry_jitter == 1.0

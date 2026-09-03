@@ -59,12 +59,12 @@ load()
 .stat { color: var(--qq-text); font-size: var(--qq-text-xs); }
 .stat .sat { color: var(--qq-danger); font-weight: 600; }
 .bar { height: 6px; background: var(--qq-surface); border-radius: var(--qq-radius-full); overflow: hidden; }
-.bar-fill { height: 100%; background: var(--qq-primary); transition: width 0.3s ease; }
+.bar-fill { height: 100%; background: var(--qq-primary); transition: width 0.3s var(--qq-ease-out); }
 .bar-fill.sat { background: var(--qq-danger); }
 .top { margin-top: var(--qq-gap-xs); padding-top: var(--qq-gap-xs); border-top: 1px solid var(--qq-border); }
 .top-head { font-size: var(--qq-text-xs); color: var(--qq-text-muted); margin-bottom: 3px; }
 .top-row { display: grid; grid-template-columns: minmax(100px, auto) 1fr auto; align-items: center; gap: var(--qq-gap-sm); font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
 .mini-bar { height: 4px; background: var(--qq-surface); border-radius: var(--qq-radius-full); overflow: hidden; }
-.mini-fill { height: 100%; background: var(--qq-primary); transition: width 0.3s ease; }
+.mini-fill { height: 100%; background: var(--qq-primary); transition: width 0.3s var(--qq-ease-out); }
 .mini-fill.sat { background: var(--qq-danger); }
 </style>

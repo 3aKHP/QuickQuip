@@ -22,10 +22,86 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 主题切换过渡：toggleTheme 时短暂挂到 <html>，320ms 后移除。
+   选择器收窄到实际承载主题色的容器，避免 320ms 窗口内全文档元素重算 transition。 */
+html.theme-anim body,
+html.theme-anim .app-shell-nav,
+html.theme-anim .section-panel,
+html.theme-anim .domain-btn,
+html.theme-anim .page-link,
+html.theme-anim .mobile-bar,
+html.theme-anim .drawer,
+html.theme-anim .dash-hero,
+html.theme-anim .domain-card,
+html.theme-anim .ui-card,
+html.theme-anim .ui-stat-card,
+html.theme-anim .ui-stat-strip,
+html.theme-anim .ui-btn,
+html.theme-anim .ui-tag,
+html.theme-anim .ui-tabs,
+html.theme-anim .ui-segmented,
+html.theme-anim .ui-toggle,
+html.theme-anim .ui-page-header,
+html.theme-anim .qq-selectable,
+html.theme-anim input,
+html.theme-anim select,
+html.theme-anim textarea {
+  transition:
+    background-color 240ms var(--qq-ease-out),
+    border-color 240ms var(--qq-ease-out),
+    color 240ms var(--qq-ease-out),
+    box-shadow 240ms var(--qq-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-anim body,
+  html.theme-anim .app-shell-nav,
+  html.theme-anim .section-panel,
+  html.theme-anim .domain-btn,
+  html.theme-anim .page-link,
+  html.theme-anim .mobile-bar,
+  html.theme-anim .drawer,
+  html.theme-anim .dash-hero,
+  html.theme-anim .domain-card,
+  html.theme-anim .ui-card,
+  html.theme-anim .ui-stat-card,
+  html.theme-anim .ui-stat-strip,
+  html.theme-anim .ui-btn,
+  html.theme-anim .ui-tag,
+  html.theme-anim .ui-tabs,
+  html.theme-anim .ui-segmented,
+  html.theme-anim .ui-toggle,
+  html.theme-anim .ui-page-header,
+  html.theme-anim .qq-selectable,
+  html.theme-anim input,
+  html.theme-anim select,
+  html.theme-anim textarea {
+    transition: none;
+  }
+}
+
 /* Selection — QQ 蓝选区 */
 ::selection {
   background: var(--qq-selection-bg);
   color: var(--qq-selection-fg);
+}
+
+/* ── 分栏可选中行（左列表/右编辑范式共享选中态）──
+   用法：列表行元素加 class="qq-selectable"，选中态由 .active 驱动。
+   hover 背景 + active 左侧内嵌指示条（box-shadow 不产生布局位移）。 */
+.qq-selectable {
+  transition:
+    background var(--qq-transition-fast),
+    box-shadow var(--qq-transition-fast);
+}
+
+.qq-selectable:hover {
+  background: var(--qq-surface-hover);
+}
+
+.qq-selectable.active {
+  background: var(--qq-primary-soft);
+  box-shadow: inset 3px 0 0 var(--qq-primary);
 }
 
 /* Scrollbar */
@@ -112,6 +188,7 @@ tbody td {
   border-bottom: 1px solid var(--qq-border);
   color: var(--qq-text);
   vertical-align: middle;
+  transition: background var(--qq-transition-fast);
 }
 
 tbody tr:hover td {
@@ -135,4 +212,13 @@ code {
   color: var(--qq-primary-ink);
   font-family: var(--qq-font-mono);
   font-size: 0.92em;
+}
+
+/* Section title — 卡片内节标题统一层级（页面标题之下、正文之上） */
+.section-title {
+  font-family: var(--qq-font-display);
+  font-size: var(--qq-text-md);
+  font-weight: 600;
+  color: var(--qq-text);
+  line-height: var(--qq-line-tight);
 }

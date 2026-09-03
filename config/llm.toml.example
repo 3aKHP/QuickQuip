@@ -11,6 +11,12 @@ tool_calling_enabled = true
 tool_max_rounds = 8
 tool_max_calls_per_round = 16
 
+# 上游 429/5xx/网络错误的自动重试（所有 LLM 调用路径统一生效；探活/诊断不受影响）
+# retry_max_attempts 含首次调用；第 n 次重试延迟 = base_delay * 2^n * (1 + 随机抖动)
+retry_max_attempts = 3
+retry_base_delay = 1.0
+retry_jitter = 0.5  # 抖动比例，0-1，0 为关闭
+
 # 保守版自动记忆抽取：每轮 LLM 回复结束后以独立的短 prompt 判断
 # "这轮对话里有没有值得长期记住的关于发言者的稳定事实"，命中则
 # 以 source="auto" 写入记忆库。默认关闭，开启后可按群用 /llm auto_memory
@@ -29,6 +35,8 @@ empty_prompt_reply = "请在触发指令或艾特后面补上想说的话。"
 # 自动联网判定：开启后模型会在需要最新信息时自行触发 search_web，
 # 搜索走项目内 SearXNG。search_max_calls_per_round 控制每次工具调用
 # 轮次中最多执行多少次搜索调用（1-32，默认 3）。
+# 本段只作用于 search_web 路径；provider 的 builtin_search（见 gemini 段）
+# 开启后该 provider 会话移除 search_web，改走服务端 grounding 检索。
 [triggers.auto_search]
 enabled = false
 search_max_calls_per_round = 3
@@ -45,7 +53,8 @@ max_tokens = 64    # reasoning 模型的思考 token 计入该预算，需调大
 # enabled 是工具名单：留空 [] 用默认白名单 + 全部 MCP 工具；
 # 非空时的作用方式由 enabled_mode 决定。
 #   append  （默认）在默认白名单 + MCP 工具之上追加——启用可选内置工具
-#           （如 draw_svg 画图，还需在 generation.toml [svg] 开 enabled）写这里。
+#           （如 draw_svg 画图，还需在 generation.toml [svg] 开 enabled；
+#           manage_scheduled_messages 让 LLM 管理当前群定时消息）写这里。
 #   replace 精确过滤：只暴露所列工具（含 MCP），用于主动收敛暴露面。
 enabled = []
 enabled_mode = "append"
@@ -302,6 +311,11 @@ default_model = "gemini-3.1-pro-high"
 models = ["gemini-3.1-pro-high", "gemini-3-flash-preview"]
 style_profile = "claude_family"
 # auth_method = "bearer"  # 原生 Gemini 网关可用 Bearer；启用后 key 仅进 Authorization，不进 URL
+# builtin_search = true   # 声明 google_search 服务端搜索工具（grounding）：检索由 provider 侧
+#                         # 执行并计费；开启后该 provider 会话移除 search_web 工具，回复末尾
+#                         # 自动附上检索来源。仅 gemini 协议生效，其他协议下该键不生效。
+#                         # 注意：google_search 与 function calling 组合仅 Gemini 3 系列模型支持，
+#                         # 2.x 模型请关闭本键或全局 tool_calling_enabled，否则请求会被 API 拒绝。
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

@@ -6,6 +6,33 @@
 
 （暂无）
 
+## [1.13.0] - 2026-09-03
+
+### 新增
+
+- LLM provider 支持临时禁用开关（`enabled = false`）：禁用的 provider 不再出现在群聊命令列表、不参与探活与级联回退、切换被拒绝，配置保留、一行恢复。
+- gemini provider 可开启内置联网搜索（`builtin_search`）：检索由 provider 侧 grounding 完成，回复自动附带至多 3 条来源；开启后该 provider 的会话不再使用 SearXNG 的 `search_web` 工具。检索成本计入 provider 侧计费。
+- 群聊定时消息：管理员可通过 `/schedule` 命令或 Web Admin「定时消息」页面创建定时群消息，支持固定文案与 LLM 动态生成两种类型及一次性任务（触发后自动删除）；群友也可以直接对 bot 说"今晚七点提醒我看 KPL"，由 AI 自行创建提醒任务。LLM 类任务受 `scheduled_message_llm` 规则开关控制，LLM 工具需在 `llm.toml` 的 `[tools]` 中启用 `manage_scheduled_messages`。
+- Web Admin「定时消息」页新建/编辑表单改为简易/高级双模式：简易模式用频次（每天/每周/每月/仅一次）加时间、日期选择器自动组装 cron，群号改为从已知群列表勾选；高级模式保留手写 5 段 cron，两种模式可互相切换且内容不丢。「仅一次」任务必须选择未来的触发时间；钉死月/日但今年时刻已过的一次性任务会被后端拒绝，避免静默等到明年才触发（不勾选「一次性任务」则为每年重复的周年提醒）。
+- 群语录发言人动态名片解析与按发言人检索：展示语录时结合 QQ 号动态解析最新群名片，对方改名后以"新名片（原：收藏时名片）"形式显示，随机语录、编号查看与搜索结果均已生效；新增 `/quote by 名字或QQ`（别名 `/quote b`）查看某位群友在本群发言的全部语录，支持按最新名片、收藏时名片或 QQ 号检索，最多显示 10 条；Web 管理后台语录列表同步展示发言人的最新名片与 QQ 号。
+
+### 变更
+
+- 「故障化」(/defectify) 归位尖塔公式域（`quickquip.sts`），并改用独立限频桶，不再与 LLM 聊天共享额度——「故障机器人」本是《杀戮尖塔》角色 Defect 的中文名，该命令与 /turmfluch 同属尖塔梗，现同域同构维护。
+- 管理控制台视觉翻新：氛围背景升级为全强度粒子光场（品牌色刻度粒子 + 光束 + 圆弧，三层视差纵深，鼠标邻近粒子增亮响应），登录页满强度呈现、控制台内以氛围强度运行；prefers-reduced-motion 渲染静态帧，侧栏提供低动态模式开关。同步松绑设计语言：一次性过渡改用 ease-out 缓动，卡片恢复真实投影与 hover 微浮起，页面标题与节标题拉开字体层级。
+- 管理控制台交互反馈增强：标签页切换改为共享组件（选中指示条滑动过渡），按钮图标带 hover 微动效，统计卡数字 count-up 滚动；空态按场景分级，列表与表格加载改用内容形状的 skeleton；功能群组管理四卡合并为单卡 + 标签页；审计/语录/金币/牛牛页面新增头部统计摘要条；确立六域锚点色，页头新增按路由派生的域图标砖，侧栏品牌区升级为 logo + 字标组合；主题切换增加全局颜色过渡，首次访问跟随系统深浅色偏好。修复登录页首次访问误报"登录状态已失效"与本地开发 vite 代理登录 403 的问题。
+- LLM 上游自动重试全面覆盖并加入随机抖动：此前仅主聊天链路具备上游 429/5xx 自动退避重试，一次性命令（/defectify 等）、总结、播报、评审、图片预处理等调用遇到上游波动会直接失败；现重试机制内建于 provider 层，所有 LLM 调用路径统一继承，退避延迟加入随机抖动以避免并发请求同步重试。新增 `[runtime] retry_jitter` 配置（默认 0.5，取值 0-1）；原 `retry_max_attempts`（含首次调用）与 `retry_base_delay` 继续有效，热重载即时生效。探活与诊断采样不受重试影响；usage 统计中错误记录按逻辑调用计数（重试吸收的中间失败不再单独计数），单次请求的每次 HTTP 尝试仍可在调用追踪中查看。
+- Web Admin「定时任务」页更名为「调度器监控」，副标题注明它是涵盖全部系统任务的只读运行时视图，群聊定时消息请前往「定时消息」页管理，消除两个页面的命名歧义。
+
+### 修复
+
+- Web Admin「定时任务」页在生产部署下始终空白的问题——调度器运行在 bot 进程内，页面现在读取 bot 进程每 30 秒落盘的共享状态文件 `data/cron_jobs.json`。同时修复容器时区：quickquip 与 web-admin 服务新增 `TZ` 环境变量（默认 `Asia/Shanghai`），任务时间与日志时间戳恢复为本地时区。
+- 群聊词云与词频统计不再泄露明文 QQ 号：未登记成员的 @ 提及占位符（`@QQ...`）在分词前被清洗；已登记成员的 `@规范名` 提及保留为正常词频信号。
+- stdlib logging 未桥接 loguru 的问题：LLM 链路等模块的 INFO 观测日志现在正常进入 stdout 与生产日志文件；httpx/httpcore/uvicorn.access 等逐请求高频日志保持 WARNING 以免刷屏。
+- `/llm clear_context` 后模型仍可见最近群聊的问题：此前清空只删除持久会话库，进程内最近消息缓冲（每群最多 20 条、保留 30 分钟）不受影响，构建提示词时仍会拼入上下文。现在清空短期上下文会同时清掉对应会话的内存缓冲，清空立即完全生效；私聊的会话开始、结束（含不存档结束）与恢复存档均走同一条清理路径。清空之后到达的新消息照常进入上下文，旧消息没有任何回填路径。
+- 纯图片/引用消息不再从对话历史中丢失：此类消息落库时正文为空、仅带占位符（如"[图片 1 张]"），此前组装上下文时被整体过滤，导致模型看不到"用户发过图"这一事实，且请求中出现连续两条助手消息、破坏消息交替约定。现在占位符消息照常回到上下文，发言者与占位内容均可见。
+- 模型状态查询结果补充路由说明：机器人向模型披露自身 provider/model 配置时，附带说明该字段仅表示当前对话的路由；画图、语音、搜索等能力可能由不同模型通道服务，对话人格始终同一，避免模型把不同功能走不同通道误解为对话中"更换过模型"并虚构归因。
+
 ## [1.12.2] - 2026-08-28
 
 本版为跨平台发行与部署定型 release（v1.12 系列里程碑版本）：无新功能，主体是 CQ 码注入缺陷类的全面收口、provider 协议健壮性加固与发行/部署链路加固；发布前按里程碑计划在 Windows 懒人包、Windows Docker、Linux Docker、Linux 源码部署四条路径完成全链路验收，并对公开文档逐项校对。维护者可感知收益：协议边界 fail-visible、CQ 注入面清零；部署者可感知收益：四条发行路径均有真实环境证据与已知限制记录。
@@ -760,7 +787,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.12.2...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/3aKHP/QuickQuip/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/3aKHP/QuickQuip/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/3aKHP/QuickQuip/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/3aKHP/QuickQuip/compare/v1.11.1...v1.12.0
@@ -807,6 +835,6 @@
 [0.8.0]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/3aKHP/QuickQuip/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/3aKHP/QuickQuip/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/3aKHP/QuickQuip/compare/bfdfcd0...v0.5.0
-[0.2.0]: https://github.com/3aKHP/QuickQuip/compare/3dc2ab0...bfdfcd0
+[0.5.0]: https://github.com/3aKHP/QuickQuip/compare/9fe89ce...v0.5.0
+[0.2.0]: https://github.com/3aKHP/QuickQuip/compare/3dc2ab0...9fe89ce
 [0.1.0]: https://github.com/3aKHP/QuickQuip/commit/3dc2ab0

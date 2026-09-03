@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <UiPageHeader title="实时日志" subtitle="只看当前运行日志，避免和 Trace、归档挤在一起">
+    <UiPageHeader title="实时日志" subtitle="查看当前运行日志，支持关键词与正则过滤">
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadCurrent">刷新状态</UiButton>
         <UiButton v-if="currentFile" icon="Download" @click="openDownload">下载当前文件</UiButton>

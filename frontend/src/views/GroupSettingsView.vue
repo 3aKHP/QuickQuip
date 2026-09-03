@@ -26,7 +26,7 @@
           <button
             v-for="g in groupList"
             :key="g.group_id"
-            class="group-item"
+            class="group-item qq-selectable"
             :class="{ active: g.group_id === selectedGroupId }"
             @click="selectGroup(g.group_id)"
           >
@@ -449,14 +449,6 @@ reloadAll()
   transition: background var(--qq-transition-fast);
 }
 
-.group-item:hover {
-  background: var(--qq-surface-hover);
-}
-
-.group-item.active {
-  background: var(--qq-primary-soft);
-  box-shadow: inset 3px 0 0 var(--qq-primary);
-}
 
 .group-item__top {
   display: flex;

@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <UiPageHeader title="日志归档" subtitle="专门看历史轮转文件，不和实时流挤在同一屏">
+    <UiPageHeader title="日志归档" subtitle="浏览、预览与下载已轮转的历史日志文件">
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadFiles">刷新归档</UiButton>
       </template>
@@ -12,7 +12,7 @@
           <button
             v-for="file in files"
             :key="file.name"
-            class="archive-item"
+            class="archive-item qq-selectable"
             :class="{ active: file.name === selectedFile }"
             @click="selectFile(file.name)"
           >
@@ -179,10 +179,6 @@ onMounted(() => {
   cursor: pointer;
 }
 
-.archive-item.active {
-  border-color: var(--qq-primary-border);
-  background: var(--qq-primary-soft);
-}
 
 .archive-item-head,
 .archive-meta,

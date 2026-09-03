@@ -33,7 +33,10 @@ const classes = computed(() => [
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   overflow: hidden;
-  transition: border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast);
+  transition:
+    border-color var(--qq-transition-fast),
+    box-shadow var(--qq-transition-fast),
+    transform var(--qq-transition-fast);
 }
 
 .ui-card--shadow-sm { box-shadow: var(--qq-shadow-card); }
@@ -48,10 +51,11 @@ const classes = computed(() => [
   cursor: pointer;
 }
 
-/* 描边式 hover，替代浮起投影 */
+/* hover 微浮起 + 投影加深 + 描边变色 */
 .ui-card--clickable:hover {
   border-color: var(--qq-primary-border);
   box-shadow: var(--qq-shadow-card-hover);
+  transform: translateY(-1px);
 }
 
 /* 语义色条 — 左侧 2px */

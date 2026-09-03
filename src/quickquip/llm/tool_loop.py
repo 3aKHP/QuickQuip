@@ -1,30 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-
-from quickquip.llm.provider import LLMProviderError, LLMRequest, _is_retryable
+from quickquip.llm.provider import LLMRequest
 from quickquip.llm.provider.trace import trace_agent_loop
 from quickquip.llm.tool_discovery import ToolDiscovery
 from quickquip.llm.tool_result_pipeline import ToolResultPipeline
 from quickquip.llm.tools import LLMConversationMessage, LLMToolResult
-
-
-async def _complete_with_retry(client, request: LLMRequest, *, max_attempts: int, base_delay: float, logger):
-    last_exc: LLMProviderError | None = None
-    for attempt in range(max_attempts):
-        try:
-            return await client.complete(request)
-        except LLMProviderError as exc:
-            last_exc = exc
-            if attempt + 1 >= max_attempts or not _is_retryable(exc):
-                raise
-            delay = base_delay * (2 ** attempt)
-            logger.warning(
-                "LLM call failed (attempt %d/%d), retrying in %.1fs: %s",
-                attempt + 1, max_attempts, delay, exc,
-            )
-            await asyncio.sleep(delay)
-    raise last_exc  # unreachable, but satisfies type checker
 
 
 @trace_agent_loop
@@ -53,8 +33,6 @@ async def run_tool_call_loop(
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))
     max_calls = max(1, min(runtime_config.tool_max_calls_per_round, 32))
-    retry_max = max(1, getattr(runtime_config, "retry_max_attempts", 3))
-    retry_delay = max(0.0, getattr(runtime_config, "retry_base_delay", 1.0))
     effective_search_max_calls = max(1, min(search_max_calls_per_round, search_failsafe_max_calls_per_round))
     current_request = request
     counted_rounds = 0
@@ -87,13 +65,12 @@ async def run_tool_call_loop(
             tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
+            builtin_search=current_request.builtin_search,
         )
 
     for round_index in range(search_failsafe_max_rounds + 1):
-        response = await _complete_with_retry(
-            client, current_request,
-            max_attempts=retry_max, base_delay=retry_delay, logger=logger,
-        )
+        # 上游 429/5xx 的退避重试由 provider client 的 complete() 内建
+        response = await client.complete(current_request)
         logger.info(
             "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
             provider.id,
@@ -226,6 +203,7 @@ async def run_tool_call_loop(
             tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
+            builtin_search=current_request.builtin_search,
         )
 
     raise RuntimeError("工具调用循环未按预期结束")

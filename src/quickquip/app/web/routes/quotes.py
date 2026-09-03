@@ -2,10 +2,17 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from quickquip.chat.group_quotes import GroupQuoteStore
+from quickquip.chat.group_quotes import GroupQuoteStore, attach_sender_display
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _enrich_quote_rows(rows: list[dict], group_id: str) -> list[dict]:
+    from quickquip.app.message_pipeline import get_sender_identity_sources
+
+    user_names, identity_index = get_sender_identity_sources(group_id)
+    return attach_sender_display(rows, user_names=user_names, identity_index=identity_index)
 
 
 @router.get("/quotes/groups")
@@ -28,6 +35,7 @@ async def list_quotes(
 
     store: GroupQuoteStore = group_quote_store
     rows, total = store.list_quotes(group_id, offset=offset, limit=limit, keyword=keyword)
+    rows = _enrich_quote_rows(rows, group_id)
     return {"entries": rows, "total": total, "has_more": offset + limit < total}
 
 
@@ -39,7 +47,7 @@ async def get_by_seq(group_id: str, seq: int, request: Request):
     q = store.get_by_seq(group_id, seq)
     if q is None:
         raise HTTPException(404, "quote not found")
-    return q
+    return _enrich_quote_rows([q], group_id)[0]
 
 
 @router.delete("/quotes/{quote_id}")

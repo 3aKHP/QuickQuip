@@ -115,7 +115,7 @@ src/quickquip/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件；命令注册按域拆到 command_parts/）
 └── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）
     ├── web/                 # Web 管理后台 FastAPI 应用与路由
-    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、定时任务、审计、金币经济、牛牛大作战、唤醒、LLM 用量、周期报告、语录）
+    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、调度器监控、定时消息、审计、金币经济、牛牛大作战、唤醒、LLM 用量、周期报告、语录）
 ```
 
 **规则**：业务逻辑只进 `src/quickquip/`（包路径 `quickquip.*`），不进 `src/plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
@@ -165,6 +165,7 @@ src/quickquip/
 data/
 ├── stats.json              # 群消息统计
 ├── rule_switch.json        # 群规则开关状态
+├── scheduled_messages.json # 群聊定时消息任务
 ├── llm.db                  # LLM 对话历史与长期记忆（SQLite）
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
 ├── period_reports.db       # 周期报告（周报/月报）存档（SQLite）
@@ -175,6 +176,7 @@ data/
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
 ├── llm_usage.db            # LLM 用量与成本统计（SQLite）
 ├── mcp_status.json         # MCP server 装载状态快照
+├── cron_jobs.json          # Cron 定时任务调度状态快照（bot 进程写，web-admin 读）
 ├── awakening_boredom_groups.json # 已启用无聊唤醒的群列表
 ├── game_economy.db         # 游戏金币 / 签到 / 好感度（SQLite）
 ├── game_scores.json        # 游戏战绩计分
@@ -206,6 +208,7 @@ docs/
 │   └── three-kingdoms-memes.md
 ├── admin/                  # 面向部署者/管理员
 │   ├── deployment.md
+│   ├── onebot-adapters.md
 │   ├── configuration.md
 │   ├── game-config.md
 │   ├── migration-napcat-to-llbot.md
@@ -224,7 +227,7 @@ docs/
 ### `prod.example/` 与 `prod/`
 
 - `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
-- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、LLBot 登录态目录和运维通知密钥。
+- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、OneBot 协议端登录态目录和运维通知密钥。
 - 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档，不承担生产环境变量覆盖职责。
 
 ### 私有环境变量与根 `.env` 的关系

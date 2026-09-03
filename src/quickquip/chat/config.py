@@ -28,6 +28,7 @@ _BUILTIN_RATE_LIMIT_RULES: dict[str, dict] = {
     "timezone_sleep": {"global_limit": 3, "user_limit": 1},
     "llm_chat": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     "sts_turmfluch": {"global_limit": 6, "user_limit": 3, "scope": "global"},
+    "sts_defectify": {"global_limit": 6, "user_limit": 3, "scope": "global"},
     # 被动「xxx了」：按群分桶、强限频，保持"偶发荒诞乱入"而非刷屏
     "sts_card_le": {"global_limit": 3, "user_limit": 1},
     "audio_gen": {"global_limit": 10, "user_limit": 2, "scope": "global"},
@@ -96,12 +97,6 @@ try:
     reload_chat_rules()
 except Exception:
     logger.exception("chat_rules 初始加载失败，使用内置默认值")
-
-SCHEDULED_MESSAGES: list[dict] = []
-# Example entry (uncomment and fill in to enable):
-# SCHEDULED_MESSAGES = [
-#     {"cron": "0 7 * * *", "group_ids": [123456], "message": "早上好！"},
-# ]
 
 REGION_ZH = {
     "Africa": "非洲",
