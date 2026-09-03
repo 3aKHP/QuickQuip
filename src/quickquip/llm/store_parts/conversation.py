@@ -71,7 +71,94 @@ class ConversationStoreMixin:
             for row in reversed(rows)
         ]
 
-    def prune_conversation_messages(self, group_id: int | str, keep_last: int) -> None:
+    def list_conversation_messages_since(
+        self,
+        group_id: int | str,
+        anchor_id: int,
+        *,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        """会话纪元范围读：返回 ``id >= anchor_id`` 的行（ASC 正序，含 id/message_id）。
+
+        与 ``list_recent_conversation_messages``（DESC LIMIT 尾读，auto_memory 专用）
+        是两种读模式：主生成链路用锚点范围读保证纪元内前缀逐字节稳定。
+        """
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, sender_name, canonical_name, role, content, message_id, raw_content
+                FROM conversation_messages
+                WHERE group_id = ? AND id >= ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (str(group_id), int(anchor_id), int(limit)),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "user_id": "" if row["user_id"] is None else str(row["user_id"]),
+                "sender_name": "" if row["sender_name"] is None else str(row["sender_name"]),
+                "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
+                "role": row["role"],
+                "content": row["content"],
+                "message_id": "" if row["message_id"] is None else str(row["message_id"]),
+                "raw_content": "" if row["raw_content"] is None else str(row["raw_content"]),
+            }
+            for row in rows
+        ]
+
+    def find_anchor_row_id_by_rows(self, group_id: int | str, keep_rows: int) -> int | None:
+        """返回「保留最新 keep_rows 行」的锚点行 id（第 keep_rows 新的行）。
+
+        总行数 <= keep_rows 时返回 None（无需锚定，从头读即可）。
+        """
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        if keep_rows < 1:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM conversation_messages
+                WHERE group_id = ?
+                ORDER BY id DESC
+                LIMIT 1 OFFSET ?
+                """,
+                (str(group_id), int(keep_rows) - 1),
+            ).fetchone()
+        return None if row is None else int(row["id"])
+
+    def find_next_user_row_id(self, group_id: int | str, from_id: int) -> int | None:
+        """返回 >= from_id 的第一条 user 行 id（锚点 pair 对齐用）；没有则 None。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM conversation_messages
+                WHERE group_id = ? AND id >= ? AND role = 'user'
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (str(group_id), int(from_id)),
+            ).fetchone()
+        return None if row is None else int(row["id"])
+
+    def crop_conversation_messages(
+        self,
+        group_id: int | str,
+        *,
+        floor_id: int | None,
+        keep_last: int,
+    ) -> None:
+        """按纪元锚点裁剪：删除 floor_id 以下（所有纪元键都不再需要）或超出
+        keep_last 硬上限的行。floor_id 取该 scope 所有纪元键的最老锚点；
+        锚点缺失（None）时只按 keep_last 兜底，绝不按窗口重估删行——进程
+        重启后懒初始化还要读旧行。
+        """
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
@@ -79,14 +166,17 @@ class ConversationStoreMixin:
                 """
                 DELETE FROM conversation_messages
                 WHERE group_id = ?
-                  AND id NOT IN (
-                      SELECT id FROM conversation_messages
-                      WHERE group_id = ?
-                      ORDER BY id DESC
-                      LIMIT ?
+                  AND (
+                      id < ?
+                      OR id NOT IN (
+                          SELECT id FROM conversation_messages
+                          WHERE group_id = ?
+                          ORDER BY id DESC
+                          LIMIT ?
+                      )
                   )
                 """,
-                (str(group_id), str(group_id), int(keep_last)),
+                (str(group_id), int(floor_id or 0), str(group_id), int(keep_last)),
             )
 
     def count_conversation_messages(self, group_id: int | str) -> int:

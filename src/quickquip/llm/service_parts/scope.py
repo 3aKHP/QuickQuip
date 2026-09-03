@@ -11,11 +11,6 @@ methods are available to all other mixins via ``self.`` It depends only on
 """
 from __future__ import annotations
 
-from quickquip.llm.service_parts.constants import (
-    DEFAULT_PRIVATE_HISTORY_LIMIT,
-    MAX_GROUP_STORED_CONVERSATION_MESSAGES,
-    MAX_PRIVATE_STORED_CONVERSATION_MESSAGES,
-)
 from quickquip.llm.tools import ToolExecutionContext
 
 
@@ -43,24 +38,6 @@ class ScopeMixin:
 
     def _model_label(self, chat_type: str) -> str:
         return "当前私聊模型配置" if chat_type == "private" else "当前群模型配置"
-
-    def _default_history_limit(self, chat_type: str) -> int:
-        if chat_type == "private":
-            return max(self.config.runtime.history_limit, DEFAULT_PRIVATE_HISTORY_LIMIT)
-        return self.config.runtime.history_limit
-
-    def get_default_history_limit(self, chat_type: str = "group") -> int:
-        return self._default_history_limit(chat_type)
-
-    def _max_stored_conversation_messages(self, chat_type: str) -> int:
-        if chat_type == "private":
-            return MAX_PRIVATE_STORED_CONVERSATION_MESSAGES
-        return MAX_GROUP_STORED_CONVERSATION_MESSAGES
-
-    def _history_retention_limit(self, chat_type: str) -> int:
-        if chat_type == "private":
-            return max(self.config.runtime.history_max_messages_per_group, MAX_PRIVATE_STORED_CONVERSATION_MESSAGES)
-        return min(self.config.runtime.history_max_messages_per_group, MAX_GROUP_STORED_CONVERSATION_MESSAGES)
 
     def _context_scope_key(self, context: ToolExecutionContext) -> str:
         if context.chat_scope:
