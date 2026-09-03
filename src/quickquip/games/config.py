@@ -125,6 +125,16 @@ class NiuNiuConfig:
     fence_draw_min: float = 0.5
     fence_draw_max: float = 2.0
 
+    # Zero-sum fencing stake tuning
+    # stake = base × U(base_min, base_max) × balance × multiplier × mf
+    # base_mode: "geo" 用几何均值 √(|my|·|oppo|)，"min" 用较短方
+    # mf = min(luck^luck_power, mf_cap)，护栏仅约束极端运势日
+    fence_stake_base_min: float = 0.10
+    fence_stake_base_max: float = 0.15
+    fence_stake_balance_floor: float = 0.5
+    fence_stake_mode: str = "geo"
+    fence_stake_mf_cap: float = 30.0
+
     # No-niuniu target tuning
     fence_self_hurt_min: float = 0.5
     fence_self_hurt_max: float = 2.5
