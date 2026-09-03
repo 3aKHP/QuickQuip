@@ -117,3 +117,9 @@ git commit -m "feat(llm): add proxy support to ProviderConfig" \
 `config/sensitive_words.toml` 是 LLM 敏感词过滤的词表文件，**禁止 Read/Edit/Write/Grep**。仓库只提供 `.example` 模板，真实词表已 gitignored 且仅存于部署机器。
 
 调试过滤器时：用测试 fixtures（`tests/unit/common/test_sensitive_filter.py`）中的合成词表，或查看运行时日志（`logger=quickquip.common.sensitive_filter`，只记录类别和 SHA-256 前缀）。
+
+## 隐私 ID 保护
+
+真实 QQ 群号、QQ 号、以及其他能定位到具体个人或群组的标识符，**禁止**出现在任何会进入公开仓库的内容里：源码、测试、文档、示例配置、commit message、PR 描述与评论。测试与示例统一使用合成段（`1000000000`/`1000000001`、`123456`、`987654321` 等）。真实 ID 只允许存在于 gitignored 的本地私有材料中，不进入版本控制。
+
+仓库用 `scripts/ci/check_id_literals.py` 在 CI 与 pre-push 中拦截公开文件里的 9–11 位数字字面量（白名单仅含上述合成值）；另有可选的 pre-commit 模板 `scripts/git-hooks/pre-commit`，从 gitignored 的根目录 `.redact-ids` 读取真实 ID 列表做提交前拦截，该列表本身不进仓库。

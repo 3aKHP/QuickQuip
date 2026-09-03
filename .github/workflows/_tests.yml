@@ -50,6 +50,9 @@ jobs:
       - name: Validate example configs
         run: python scripts/ci/validate_toml_examples.py
 
+      - name: Check ID literals
+        run: python scripts/ci/check_id_literals.py
+
       - name: Seed test chat rules
         run: cp config/chat_rules.toml.example config/chat_rules.toml
 

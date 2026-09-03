@@ -34,12 +34,14 @@ cp CLAUDE.local.windows.example CLAUDE.local.md
 
 `CLAUDE.local.md` 加载优先级高于 `CLAUDE.md`,AI 会话中 Windows 覆盖生效。
 
-**pre-push hook:** 仓库提供跨平台 hook 模板(`scripts/git-hooks/pre-push`,基于 uv),push 前自动跑 ruff + 前端 type-check + 配置校验 + pytest,镜像 CI。git hooks 不被追踪,各贡献者本地安装一次:
+**pre-push hook:** 仓库提供跨平台 hook 模板(`scripts/git-hooks/pre-push`,基于 uv),push 前自动跑 ruff + 前端 type-check + 配置校验 + ID 字面量守卫 + pytest,镜像 CI。git hooks 不被追踪,各贡献者本地安装一次:
 
 ```bash
 cp scripts/git-hooks/pre-push .git/hooks/pre-push
 chmod +x .git/hooks/pre-push
 ```
+
+安装后确认 `git config --get core.hooksPath` 为空(非空会让 `.git/hooks/` 下的钩子失效,hook 自检会拦截)。另有可选的 pre-commit 模板 `scripts/git-hooks/pre-commit`,从 gitignored 的根目录 `.redact-ids` 读取真实私有 ID 列表,在提交前拦截其进入公开仓库。
 
 ## 本地开发目录
 

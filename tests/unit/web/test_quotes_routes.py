@@ -62,7 +62,7 @@ def _row(**overrides):
     base = {
         "id": 1, "group_id": "g1", "quoted_user_id": "u1",
         "quoted_sender_name": "旧名片", "content": "金句",
-        "saved_by_user_id": "u2", "saved_at": 1700000000, "group_seq": 1,
+        "saved_by_user_id": "u2", "saved_at": 987654321, "group_seq": 1,
     }
     base.update(overrides)
     return base

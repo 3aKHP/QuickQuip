@@ -39,7 +39,7 @@ def _llm_config() -> LLMConfig:
 
 
 def _sample_messages(n: int = 5) -> list[dict]:
-    return [{"ts": 1750000000.0 + i * 3600, "sender": f"u{i}", "text": f"消息{i}"} for i in range(n)]
+    return [{"ts": 1600000000.0 + i * 3600, "sender": f"u{i}", "text": f"消息{i}"} for i in range(n)]
 
 
 @pytest.mark.asyncio
