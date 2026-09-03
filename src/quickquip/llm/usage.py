@@ -60,6 +60,25 @@ def set_usage_scope(
     _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
 
 
+_ENVELOPE_TOKENS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_envelope_tokens", default=None,
+)
+
+
+@contextmanager
+def envelope_meter(tokens: int | None) -> Iterator[None]:
+    """设置当前回合【轮次上下文】信封的 token 估算值；退出复位（镜像 usage_scope 范式）。
+
+    Agent Loop 内多次 complete() 落的每行都带同值——看板按 AVG 解读为每轮成本，
+    禁止 SUM（同回合会在多行上重复计）。
+    """
+    token = _ENVELOPE_TOKENS.set(tokens)
+    try:
+        yield
+    finally:
+        _ENVELOPE_TOKENS.reset(token)
+
+
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
     try:
@@ -131,6 +150,7 @@ async def _record_usage(
             "group_id": scope.group_id if scope else None,
             "persona_id": scope.persona_id if scope else None,
             "agent_loop_id": loop_id,
+            "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,

@@ -62,6 +62,7 @@ from quickquip.llm.prompting import (
     build_turn_envelope,
     merge_image_urls,
 )
+from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.provider import (
     LLMProviderError,
     LLMRequest,
@@ -98,7 +99,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import usage_scope
+from quickquip.llm.usage import envelope_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -1118,7 +1119,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # scope 生命周期与 provider 调用同处一个函数，退出即复位。
             # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
             # 与 auto_memory 等派生调用的归因口径一致。
-            with usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None):
+            with (
+                usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
+                envelope_meter(estimate_tokens(turn_envelope)),
+            ):
                 response = await self._run_tool_call_loop(
                     provider=provider,
                     request=request,
