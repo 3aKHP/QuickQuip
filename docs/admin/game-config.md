@@ -110,7 +110,7 @@ QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按�
 | `default` | 原版文案，包含“打胶”“击剑”等措辞 |
 | `safe` | 和谐版文案，事件描述和长度评价语调整为更中性的表达 |
 
-**加载逻辑**：`config/games.toml` 中的 `niuniu_text_path` / `niuniu_safe_text_path` 指向自定义 TOML 文件；为空时使用内置默认文案。`safe` 模式缺失的字段会自动从 `default` 继承补全。
+**加载逻辑**：`config/games.toml` 中的 `niuniu_text_path` / `niuniu_safe_text_path` 指向自定义 TOML 文件；为空时使用内置默认文案。自定义文案为**逐项覆盖**：事件按 `name`、长度评价与运势提示按区间、消息字典按键覆盖，未写入文件的条目自动从内置 `default` 文案继承补全。
 
 **群级切换**：管理员通过 `/牛牛文案 [模式名]` 命令切换本群文案模式（默认 `default`）。Web Admin 牛牛面板的“文案模式管理”卡片可视化操作群组文案设置。切换记录存储在 `niuniu_group_text` 表中。
 
