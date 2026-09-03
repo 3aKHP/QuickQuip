@@ -23,8 +23,9 @@ export interface LlmUsageSummary {
   success_rate: number
   average_duration_ms: number
   cache_hit_rate: number
-  avg_envelope_tokens: number
-  envelope_coverage: number
+  // 第四张账本（信封）：旧后端可能缺失，消费处需 ?? 0 兜底
+  avg_envelope_tokens?: number
+  envelope_coverage?: number
   by_provider: UsageBucket[]
   by_feature: UsageBucket[]
   by_model: UsageBucket[]
