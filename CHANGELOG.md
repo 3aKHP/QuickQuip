@@ -807,6 +807,5 @@
 [0.8.0]: https://github.com/3aKHP/QuickQuip/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/3aKHP/QuickQuip/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/3aKHP/QuickQuip/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/3aKHP/QuickQuip/compare/bfdfcd0...v0.5.0
-[0.2.0]: https://github.com/3aKHP/QuickQuip/compare/3dc2ab0...bfdfcd0
+[0.5.0]: https://github.com/3aKHP/QuickQuip/compare/58e1605...v0.5.0
 [0.1.0]: https://github.com/3aKHP/QuickQuip/commit/3dc2ab0
