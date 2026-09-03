@@ -23,6 +23,8 @@ export interface LlmUsageSummary {
   success_rate: number
   average_duration_ms: number
   cache_hit_rate: number
+  avg_envelope_tokens: number
+  envelope_coverage: number
   by_provider: UsageBucket[]
   by_feature: UsageBucket[]
   by_model: UsageBucket[]

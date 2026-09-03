@@ -46,6 +46,7 @@
         <UiStatCard label="请求 / 成功率" :value="fmtNum(data.request_count)" :sub="`${pct(data.success_rate)} 成功`" icon="Activity" />
         <UiStatCard label="平均耗时" :value="fmtDuration(data.average_duration_ms)" sub="所有请求" icon="Clock" />
         <UiStatCard label="缓存命中率" :value="pct(data.cache_hit_rate)" :sub="`${fmtNum(data.total_cache_read_tokens)} read tokens`" icon="Zap" />
+        <UiStatCard label="轮次信封" :value="`≈${fmtNum(Math.round(data.avg_envelope_tokens))} tok/轮`" :sub="`覆盖率 ${pct(data.envelope_coverage)} · 每轮全价（估算）`" icon="Mail" />
         <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens 未计价`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" />
       </div>
 
