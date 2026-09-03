@@ -6,6 +6,12 @@
 
 （暂无）
 
+## [1.13.1] - 2026-09-03
+
+### 修复
+
+- 牛牛大作战自定义文案文件（含 safe 和谐模式与 `niuniu_text_path` 自定义默认）的加载由整字段替换改为逐项覆盖合并：事件按 `name`、长度评价与运势提示按区间、消息字典按键覆盖，未写入文件的条目继承内置默认。此前自定义文件只要包含任意一个打胶/击剑事件，其余内置事件即整体失效——safe 模式下打胶「换蛋期萎缩」实际发生率高达约 44%（设计值 6.3%），镜面翻转、噩梦、赌徒、祝福等打胶事件与击剑的暴击/擦伤/翻盘/滑倒/平局事件完全不出现。
+
 ## [1.13.0] - 2026-09-03
 
 ### 新增
@@ -787,7 +793,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.13.1...HEAD
+[1.13.1]: https://github.com/3aKHP/QuickQuip/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/3aKHP/QuickQuip/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/3aKHP/QuickQuip/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/3aKHP/QuickQuip/compare/v1.12.0...v1.12.1
