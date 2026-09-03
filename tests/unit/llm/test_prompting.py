@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 import re
+from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 

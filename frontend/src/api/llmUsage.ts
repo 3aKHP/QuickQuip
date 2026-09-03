@@ -59,6 +59,7 @@ export interface UsageEvent {
   group_id: string | null
   persona_id: string | null
   agent_loop_id: string | null
+  envelope_tokens: number | null
   stream: number
   duration_ms: number | null
   input_tokens: number | null

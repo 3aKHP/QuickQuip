@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from typing import TYPE_CHECKING
 
+from quickquip.chat.festival import get_festival_persona_appendix
 from quickquip.llm.tools import (
     LLMConversationMessage,
     LLMSceneMessage,
@@ -10,6 +12,9 @@ from quickquip.llm.tools import (
     SCENE_MARKER_CONTEXT,
     SCENE_MARKER_CURRENT,
 )
+
+if TYPE_CHECKING:
+    from quickquip.llm.vocab import VocabIndex
 
 # Upper bound on how many images from the recent-message buffer are attached
 # to a passive/boredom trigger. Keeps multimodal token cost bounded regardless
@@ -304,7 +309,7 @@ def build_turn_envelope(
     now: datetime,
     prompt: str,
     memories: list[dict[str, object]],
-    vocab,
+    vocab: VocabIndex,
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
 ) -> str:
@@ -316,8 +321,6 @@ def build_turn_envelope(
     """
     lines: list[str] = ["【轮次上下文】"]
     lines.append(f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} {now:%H:%M}（北京时间）")
-
-    from quickquip.chat.festival import get_festival_persona_appendix
 
     festival_appendix = get_festival_persona_appendix(today=now.date())
     if festival_appendix:

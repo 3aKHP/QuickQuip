@@ -88,6 +88,7 @@
                 <div><dt>输入 / 输出</dt><dd>{{ fmtNum(event.input_tokens ?? 0) }} / {{ fmtNum(event.output_tokens ?? 0) }}</dd></div>
                 <div><dt>新鲜输入</dt><dd>{{ fmtNum(event.fresh_input_tokens ?? 0) }}</dd></div>
                 <div><dt>缓存</dt><dd>{{ fmtNum(event.cache_read_tokens ?? 0) }} read · {{ fmtNum(event.cache_creation_tokens ?? 0) }} write</dd></div>
+                <div v-if="event.envelope_tokens != null"><dt>信封</dt><dd>{{ fmtNum(event.envelope_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.thinking_tokens"><dt>思考</dt><dd>{{ fmtNum(event.thinking_tokens) }} tokens</dd></div>
                 <div><dt>成本分项</dt><dd>{{ costBreakdown(event) }}</dd></div>
                 <div><dt>定价</dt><dd>{{ pricingLabel(event) }}</dd></div>
