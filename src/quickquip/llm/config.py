@@ -531,11 +531,23 @@ def _parse_single_provider(
 
 
 def _as_optional_int(raw: Any) -> int | None:
-    """provider 级可选整数键：缺省/空 = None（继承 runtime），否则 int。"""
+    """provider 级可选整数键：缺省/空 = None（继承 runtime）。
+
+    TOML 数直转（float 截断，与既有 ``int(entry.get(...))`` 范式一致）；字符串
+    走 ``int()``；解析失败回退 None 并告警——键级笔误不得扩大为整 provider 剪除。
+    """
     if raw is None:
         return None
+    if isinstance(raw, (int, float)):
+        return int(raw)
     text = str(raw).strip()
-    return int(text) if text else None
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        logger.warning("epoch_* 覆盖值 %r 无法解析为整数，回退继承 [runtime]", raw)
+        return None
 
 
 _MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}

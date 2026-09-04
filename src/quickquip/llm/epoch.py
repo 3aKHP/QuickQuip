@@ -202,8 +202,12 @@ class EpochManager:
         覆盖两种场景：部署初始化（既有 scope 首跑）与 ``/llm use`` 新键——
         新模型首轮缓存本冷，预热顺带烧入宽上下文，不附带截肢。活动时间记为
         初始化时刻，避免首轮立即触发冷场重置把宽上下文裁掉。
+
+        读集先锚到最新 ``DEFAULT_EPOCH_MAX_ROWS`` 行的起点再读——直接
+        ``ASC + LIMIT`` 会读到最旧一批行，CTX 跨度就量在了错误的一端。
         """
-        rows = store.list_conversation_messages_since(key.scope_key, 0, limit=DEFAULT_EPOCH_MAX_ROWS)
+        start = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS) or 0
+        rows = store.list_conversation_messages_since(key.scope_key, start, limit=DEFAULT_EPOCH_MAX_ROWS)
         anchor = 0
         if rows:
             anchor = self._pair_align(store, key.scope_key, self._pick_anchor_by_tokens(rows, params.context_tokens))

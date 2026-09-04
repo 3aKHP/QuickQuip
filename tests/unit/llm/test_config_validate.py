@@ -522,3 +522,37 @@ def test_epoch_unknown_keys_ignored(tmp_path: Path):
 
     assert loaded.load_error is None
     assert loaded.resolve_epoch_params(loaded.providers["good"]).context_tokens == 8000
+
+
+def test_epoch_params_provider_override_float_coerced(tmp_path: Path):
+    """TOML 浮点字面量无损截断为 int——键级笔误不得扩大为整 provider 剪除。"""
+    loaded = _load(
+        tmp_path,
+        _good_provider().replace(
+            'models = ["gpt-x"]',
+            'models = ["gpt-x"]\nepoch_cold_idle_seconds = 21600.0',
+        )
+        + _PERSONA,
+    )
+
+    assert "good" in loaded.providers
+    assert loaded.providers["good"].epoch_cold_idle_seconds == 21600
+
+
+def test_epoch_params_provider_override_garbage_falls_back_to_runtime(tmp_path: Path, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            _good_provider().replace(
+                'models = ["gpt-x"]',
+                'models = ["gpt-x"]\nepoch_cap_tokens = "abc"',
+            )
+            + _PERSONA,
+        )
+
+    provider = loaded.providers["good"]  # provider 不被剪除
+    assert provider.epoch_cap_tokens is None  # 该键回退继承 runtime
+    assert loaded.resolve_epoch_params(provider).cap_tokens == 64000
+    assert any("epoch" in record.message for record in caplog.records)

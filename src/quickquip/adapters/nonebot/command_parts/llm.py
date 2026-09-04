@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _parse_preset, _parse_resume, _strip_command_name
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, rate_limiter
+from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS
 from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
 
 
@@ -225,6 +226,8 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 await llm_cmd.finish("用法：/llm context_limit <条数> | reset")
             if n < 1:
                 await llm_cmd.finish("上下文上限须为正整数")
+            if n > DEFAULT_EPOCH_MAX_ROWS:
+                await llm_cmd.finish(f"上下文上限最大 {DEFAULT_EPOCH_MAX_ROWS} 条（纪元行数兜底上限）")
             svc.set_chat_history_limit(chat_id, n, chat_type=chat_type)
             await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（行数兜底，超出截断）")
 

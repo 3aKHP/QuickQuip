@@ -185,10 +185,26 @@ def test_anchor_pair_boundary_and_min_rows(store: LLMStore) -> None:
     assert rows[0]["role"] == "user"
 
 
+def test_lazy_init_measures_ctx_span_from_true_head(store: LLMStore) -> None:
+    """回归：scope 行数 > DEFAULT_EPOCH_MAX_ROWS 时，CTX 跨度也必须从真 head
+    起量（曾误读最旧 1024 行，锚点量在第 1024 行处，窗口被放大到 1024 行）。"""
+    _seed_pairs(store, "1001", 600, chars=1)  # 1200 行
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)  # CTX=200
+
+    anchor = mgr.current_anchor(_KEY)
+    rows = _rows_since(store, "1001", anchor)
+    assert rows[0]["role"] == "user"
+    assert estimate_rows_budget(rows) <= _SMALL.context_tokens + 2 * 25
+    # 真 head 起量：≈200 token ≈ 十几行量级；错误读集下会膨胀到 ~1024 行
+    assert len(rows) <= 30
+
+
 def test_row_backstop_advances_anchor(store: LLMStore) -> None:
-    _seed_pairs(store, "1001", 600, chars=1)  # 1200 行 > DEFAULT_EPOCH_MAX_ROWS
+    """纪元窗口随回合增长超过行数硬兜底时锚点必须推进（而非 LIMIT 截最新端）。"""
+    _seed_pairs(store, "1001", 20, chars=1)
     params = EpochParams(
-        context_tokens=200000,  # 懒初始化锚在头部第一行
+        context_tokens=200000,  # 懒初始化保留全量（锚在第一行）
         cold_idle_seconds=300,
         cold_target_tokens=100000,
         cold_trigger_tokens=150000,
@@ -196,11 +212,15 @@ def test_row_backstop_advances_anchor(store: LLMStore) -> None:
         cap_tokens=190000,
     )
     mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=params)
+    old_anchor = mgr.current_anchor(_KEY)
+
+    _seed_pairs(store, "1001", 560, chars=1)  # 再长 1120 行，总量 1160 > 1024
     event = mgr.maybe_advance(_KEY, store=store, params=params)
 
     assert event is not None and event.reason == "rows"
     anchor = mgr.current_anchor(_KEY)
-    assert anchor is not None and anchor > 0
+    assert anchor > old_anchor
     rows = _rows_since(store, "1001", anchor)
     assert len(rows) <= DEFAULT_EPOCH_MAX_ROWS
     assert rows[0]["role"] == "user"  # 行数兜底同样 pair 对齐
