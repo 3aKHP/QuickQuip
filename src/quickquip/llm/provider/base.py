@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import json
@@ -40,6 +41,11 @@ logger = logging.getLogger(__name__)
 # Max images attached to a single provider request. Caps multimodal token
 # cost; also bounds how many recent-buffer images a passive trigger carries.
 MAX_IMAGES_PER_REQUEST = 5
+
+# 图片下载实例级缓存：一轮对话内工具循环重建请求与 429/5xx 退避重试会反复
+# 序列化同一批图片 URL；TTL 与容量双重兜底内存占用（QQ CDN 链接本身短时效）。
+_IMAGE_CACHE_TTL_SECONDS = 600
+_IMAGE_CACHE_MAX_ENTRIES = 32
 
 
 class LLMProviderError(RuntimeError):
@@ -340,6 +346,7 @@ class BaseProviderClient:
         self._proxy: str | None = config.proxy or None
         if self._proxy:
             logger.info("provider %s 启用代理：%s", config.id, self._proxy)
+        self._image_cache: OrderedDict[str, tuple[float, LLMImageInput]] = OrderedDict()
 
     def _client_kwargs(self, *, stream_read: bool = False) -> dict[str, Any]:
         """Build httpx.AsyncClient kwargs honoring proxy and timeout config.
@@ -430,6 +437,28 @@ class BaseProviderClient:
         return response
 
     async def _download_image(self, image_url: str) -> LLMImageInput:
+        """下载并缓存图片：实例级 LRU（TTL 600s、容量 32，仅缓存成功结果）。
+
+        同一 provider client 实例在一轮对话内被工具循环逐轮重建请求、退避重试
+        多次序列化同一批图片 URL；缓存把重复下载压成一次。失败不进门，下一轮
+        重试仍能拿到真实错误。并发不加锁：两个协程同时 miss 同一 URL 的代价
+        至多一次重复下载；缓存读写均为同步字典操作、中间无 await，不会撕裂。
+        """
+        now = time.monotonic()
+        cached = self._image_cache.get(image_url)
+        if cached is not None:
+            cached_at, cached_input = cached
+            if now - cached_at < _IMAGE_CACHE_TTL_SECONDS:
+                self._image_cache.move_to_end(image_url)
+                return cached_input
+            del self._image_cache[image_url]
+        image_input = await self._download_image_uncached(image_url)
+        self._image_cache[image_url] = (now, image_input)
+        if len(self._image_cache) > _IMAGE_CACHE_MAX_ENTRIES:
+            self._image_cache.popitem(last=False)
+        return image_input
+
+    async def _download_image_uncached(self, image_url: str) -> LLMImageInput:
         try:
             async with httpx.AsyncClient(**self._client_kwargs()) as client:
                 response = await client.get(
