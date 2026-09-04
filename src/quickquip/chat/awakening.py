@@ -1145,14 +1145,12 @@ async def iter_boredom_send_plans(
         if rate_limiter is not None and not rate_limiter.allow(_RULE_BOREDOM, "boredom_timer", group_id=gid):
             continue
         try:
-            trigger_context = svc.recent_message_buffer.list_recent(gid, limit=20) if hasattr(svc, "recent_message_buffer") else []
             reply_result = await svc.generate_reply(
                 group_id=gid,
                 user_id="boredom_timer",
                 sender_name="系统",
                 prompt=build_awakening_prompt(result),
                 image_urls=[],
-                recent_messages=trigger_context,
                 include_recent_images=True,
                 raw_user_text="",
                 store_user_message=False,

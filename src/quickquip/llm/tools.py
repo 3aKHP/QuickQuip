@@ -112,3 +112,4 @@ class LLMSceneMessage:
 
 SCENE_MARKER_CONTEXT = "【上文】"
 SCENE_MARKER_CURRENT = "【当前提问】"
+SCENE_MARKER_LIVE = "【现场】"

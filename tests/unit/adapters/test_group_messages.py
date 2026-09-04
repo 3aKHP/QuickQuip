@@ -280,10 +280,11 @@ async def test_passive_trigger_excludes_current_message_from_context(harness_fac
 
     h.svc.generate_reply.assert_awaited_once()
     kwargs = h.svc.generate_reply.await_args.kwargs
-    assert [m["text"] for m in kwargs["recent_messages"]] == ["早上好", "今天吃什么", "周末去哪玩"]
+    # 现场补丁由 service 自取（list_patch 按 message_id 去重，集成测试覆盖），
+    # 适配层不再传 recent_messages 快照
+    assert "recent_messages" not in kwargs
     assert kwargs["prompt"].count("Kubernetes ImagePullBackOff again?") == 1
     assert kwargs["raw_user_text"] == "Kubernetes ImagePullBackOff again?"
-    assert len(kwargs["recent_messages"]) <= 20
 
 
 async def test_explicit_trigger_keeps_pre_save_context(harness_factory):
@@ -295,7 +296,7 @@ async def test_explicit_trigger_keeps_pre_save_context(harness_factory):
 
     h.svc.generate_reply.assert_awaited_once()
     kwargs = h.svc.generate_reply.await_args.kwargs
-    assert [m["text"] for m in kwargs["recent_messages"]] == ["早上好", "今天吃什么", "周末去哪玩"]
+    assert "recent_messages" not in kwargs  # service 自取补丁
     assert kwargs["prompt"] == "Kubernetes 部署怎么样"
     h.svc.quick_judge_detailed.assert_not_awaited()
 
@@ -313,7 +314,7 @@ async def test_voice_transcript_can_hit_passive_trigger(harness_factory):
     kwargs = h.svc.generate_reply.await_args.kwargs
     assert "[语音转文字：Kubernetes ImagePullBackOff 又 warnings 了吗]" in kwargs["prompt"]
     assert kwargs["prompt"].count("Kubernetes ImagePullBackOff") == 1
-    assert "Kubernetes" not in [m["text"] for m in kwargs["recent_messages"]]
+    assert "recent_messages" not in kwargs  # service 自取补丁
     assert kwargs["raw_user_text"] == "Kubernetes ImagePullBackOff 又 warnings 了吗"
 
 

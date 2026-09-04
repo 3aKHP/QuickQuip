@@ -1494,3 +1494,76 @@ async def test_media_meter_wired_with_attached_image_count(wired_service, patch_
         recent_messages=[],
     )
     assert seen == [1, 0]
+
+
+# ── 【现场】补丁（PR-B3）─────────────────────────────────────────────
+
+
+async def test_scene_patch_self_served_with_history_dedup(wired_service, patch_provider_builder):
+    """群聊不传 recent_messages 时 service 自取补丁：
+    history 已覆盖的 message_id 与当前触发消息都不进【现场】。"""
+    buf = wired_service.recent_message_buffer
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    wired_service.store.append_conversation_message(
+        "1001", "3003", "user", "已落库的旧话", sender_name="丁", message_id="m-old",
+    )
+    buf.add_message(1001, "3003", "丁", "丁", "已落库的旧话", message_id="m-old")
+    buf.add_message(1001, "4004", "丙", "4s", "真现场发言", message_id="m-live")
+    buf.add_message(1001, "2002", "乙", "镜子", "触发问题", message_id="m-cur")
+
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙",
+        prompt="触发问题", message_id="m-cur",
+    )
+
+    content = stub.requests[-1].messages[-1].content
+    assert "【现场】" in content
+    live_seg = content[content.index("【现场】"):]
+    assert "真现场发言" in live_seg
+    # 已落库消息只出现在 history 一侧，不在【现场】重复
+    assert "已落库的旧话" not in live_seg
+    # 当前触发消息不进入【现场】（只以【当前提问】身份出现一次）
+    assert content.count("触发问题") == 1
+
+
+async def test_scene_patch_explicit_empty_list_disables_self_serve(wired_service, patch_provider_builder):
+    """recent_messages=[] 是显式空（测试注入口语义），不触发自取。"""
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="问题", recent_messages=[],
+    )
+
+    assert "【现场】" not in stub.requests[-1].messages[-1].content
+
+
+async def test_scene_patch_incremental_across_turns(wired_service, patch_provider_builder, monkeypatch):
+    """跨轮增量：已服役且超出滑动保底窗的消息不再进入下一轮补丁。"""
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=3600)
+    wired_service.bind_recent_message_buffer(buf)
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    now = [1000.0]
+    monkeypatch.setattr("quickquip.common.recent_message_buffer.time", lambda: now[0])
+
+    buf.add_message(1001, "3003", "丁", "丁", "首轮现场", message_id="m-t1")
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="第一轮", message_id="m-q1",
+    )
+    now[0] += 400  # 超出 recent_context_floor_seconds=300 的保底窗
+    buf.add_message(1001, "4004", "丙", "4s", "二轮新发言", message_id="m-t2")
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="第二轮", message_id="m-q2",
+    )
+
+    first = stub.requests[0].messages[-1].content
+    second = stub.requests[1].messages[-1].content
+    assert "首轮现场" in first
+    assert "【现场】" in second
+    second_live = second[second.index("【现场】"):]
+    assert "二轮新发言" in second_live
+    assert "首轮现场" not in second_live

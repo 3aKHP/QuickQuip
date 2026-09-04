@@ -93,7 +93,6 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         sender_name="定时任务",
         prompt=_build_llm_task_prompt(job),
         image_urls=[],
-        recent_messages=svc.recent_message_buffer.list_recent(group_id, limit=20),
         include_recent_images=True,
         raw_user_text="",
         store_user_message=False,  # 合成消息不写入群对话历史

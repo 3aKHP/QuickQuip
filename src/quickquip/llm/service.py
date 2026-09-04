@@ -781,17 +781,19 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self,
         *,
         chat_id: int | str,
+        chat_type: str,
         scope_key: str,
         settings: ResolvedGroupSettings,
         sensitive: SensitiveFilter,
         user_id: int | str,
         sender_name: str,
         recent_messages: list[dict[str, str]] | None,
+        message_id: str | None,
         quoted_sender_name: str,
         quoted_user_id: str,
         epoch_key: EpochKey,
         epoch_params: EpochParams,
-    ) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None]:
         # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
@@ -827,6 +829,24 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     "sensitive_filter[history] scrubbed scope=%s fields=%d",
                     scope_key, history_blocked,
                 )
+        # 【现场】补丁自取：仅群聊、调用方未显式注入（None=自取，[]=显式空，
+        # 后者是测试注入口）、buffer 已绑定。去重 = history 已覆盖的
+        # message_id ∪ 当前触发消息（_remember_recent_message 先于本调用，
+        # 触发消息已在 buffer）。读即服役：取出后立即推进游标。
+        if recent_messages is None and chat_type == "group" and self.recent_message_buffer is not None:
+            exclude_ids = {
+                str(item["message_id"]) for item in history if item.get("message_id")
+            }
+            if message_id:
+                exclude_ids.add(str(message_id))
+            recent_messages = self.recent_message_buffer.list_patch(
+                scope_key,
+                exclude_message_ids=exclude_ids,
+                budget_tokens=self.config.runtime.recent_context_token_budget,
+                floor_seconds=self.config.runtime.recent_context_floor_seconds,
+                token_estimator=estimate_tokens,
+            )
+            self.recent_message_buffer.note_patch_served(scope_key)
         participants = self._collect_known_participants(
             user_id=user_id,
             sender_name=sender_name,
@@ -836,7 +856,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_user_id=quoted_user_id,
             group_id=str(chat_id),
         )
-        return history, participants
+        return history, participants, recent_messages
 
     def _persist_turn_and_build_reply(
         self,
@@ -1040,6 +1060,31 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             item for item in [stored_prompt, quoted_prompt] if item
         )[: self.config.runtime.max_prompt_chars]
 
+        # ── history load + sensitive scrub + 【现场】补丁自取 + participants ──
+        # 先于图片预处理：补丁去重要用 history 的 message_id，而预处理的
+        # 近期图候选与 participants 都消费补丁。注意 epoch 锚点推进因此早于
+        # 预处理早退路径（图片拦截/下载失败），锚点轻幅漂移属可接受边界。
+        epoch_key = EpochKey(
+            scope_key=scope_key,
+            provider_id=provider.id,
+            model=settings.model or provider.default_model,
+        )
+        history, participants, scene_patch = self._load_scrubbed_history_and_participants(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            scope_key=scope_key,
+            settings=settings,
+            sensitive=sensitive,
+            user_id=user_id,
+            sender_name=sender_name,
+            recent_messages=recent_messages,
+            message_id=message_id,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            epoch_key=epoch_key,
+            epoch_params=self.config.resolve_epoch_params(provider),
+        )
+
         # ── image preprocessing & non-VLM stripping ──────────────────
         image_outcome = await self._preprocess_images_for_model(
             chat_id=chat_id,
@@ -1052,7 +1097,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             normalized_image_urls=normalized_image_urls,
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_image_urls=normalized_forward_image_urls,
-            recent_messages=recent_messages,
+            recent_messages=scene_patch,
             include_recent_images=include_recent_images,
             sensitive=sensitive,
         )
@@ -1080,25 +1125,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     if part
                 )
                 image_descriptions = [d for d in image_descriptions if not d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
-        # ── history load + sensitive scrub + participants ────────────
-        epoch_key = EpochKey(
-            scope_key=scope_key,
-            provider_id=provider.id,
-            model=settings.model or provider.default_model,
-        )
-        history, participants = self._load_scrubbed_history_and_participants(
-            chat_id=chat_id,
-            scope_key=scope_key,
-            settings=settings,
-            sensitive=sensitive,
-            user_id=user_id,
-            sender_name=sender_name,
-            recent_messages=recent_messages,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-            epoch_key=epoch_key,
-            epoch_params=self.config.resolve_epoch_params(provider),
-        )
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
         memories: list[dict[str, object]] = []
@@ -1138,7 +1164,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             prompt=trimmed_prompt,
             image_urls=effective_image_urls,
             history=history,
-            recent_messages=recent_messages,
+            recent_messages=scene_patch,
             chat_type=chat_type,
             group_id=str(chat_id),
             current_sender_name=sender_name,
