@@ -57,6 +57,32 @@ async def test_extracts_from_current_message():
 
 
 @pytest.mark.asyncio
+async def test_forward_text_capped_with_marker():
+    # 总量封顶：保头硬切 + 截断标记；递归内部不逐层裁剪，只在最外层出口生效
+    from quickquip.adapters.nonebot._forward import MAX_FORWARD_TEXT_CHARS
+
+    payload = {
+        "messages": [
+            {
+                "sender": {"nickname": f"U{i}", "user_id": 10000 + i},
+                "content": [{"type": "text", "data": {"text": "长文本" * 40}}],
+            }
+            for i in range(50)  # 50 节点 × 120 字 = 6000 字 > 4000 上限
+        ]
+    }
+    bot = _StubBot({"fid_long": payload})
+    msg = DummyMessage([forward_seg("fid_long"), text_seg("看看")])
+
+    text, _ = await extract_forward_content(bot=bot, message=msg, bot_self_id="12345")
+
+    marker = "…（合并转发内容过长，已截断）"
+    assert text.endswith(marker)
+    assert len(text) <= MAX_FORWARD_TEXT_CHARS + len(marker)
+    assert "1. " in text  # 保头：首个节点仍在
+    assert "U49" not in text  # 尾部节点被切掉
+
+
+@pytest.mark.asyncio
 async def test_extracts_from_reply_when_current_has_none():
     bot = _StubBot({"fid_via_reply": _forward_payload()})
     # Current message is the quote + @bot + user's question: no forward segment

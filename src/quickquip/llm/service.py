@@ -655,7 +655,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
-        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls, request_forward_image_urls)
+        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
+        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls)
 
         image_plan = None
         if is_non_vision:
@@ -1061,6 +1062,22 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions = image_outcome.image_descriptions
         is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
+        # 转发图注并入 normalized_forward_text：当轮渲染（_build_messages）与落库
+        # （_persist_turn_and_build_reply）共用同一变量，两条路径字节一致；
+        # 并入后从 image_descriptions 摘除，避免视觉转述行与落库 caption 双重出现
+        forward_descs = [d for d in image_descriptions if d.context_label.startswith("转发消息图片")]
+        if forward_descs:
+            forward_caption_count, forward_caption_blob = _image_caption_blob(forward_descs)
+            if forward_caption_count:
+                normalized_forward_text = "\n".join(
+                    part
+                    for part in (
+                        normalized_forward_text,
+                        f"[转发图片 {forward_caption_count} 张：{forward_caption_blob}]",
+                    )
+                    if part
+                )
+                image_descriptions = [d for d in image_descriptions if not d.context_label.startswith("转发消息图片")]
         # ── history load + sensitive scrub + participants ────────────
         epoch_key = EpochKey(
             scope_key=scope_key,

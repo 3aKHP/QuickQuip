@@ -447,7 +447,9 @@ async def test_forward_message_content_rendered(wired_service, patch_provider_bu
     last_user = stub.last_request.messages[-1]
     assert "转发" in last_user.content
     assert "1. Alice（QQ 10001）：这是合并转发" in last_user.content
-    assert last_user.image_urls == ["https://example.test/forward.png"]
+    # 转发图片不再作为媒体本体附带（VLM 路径同）；[附图 N 张] 文本后缀仍在
+    assert last_user.image_urls == []
+    assert "[附图 1 张]" in last_user.content
 
 
 async def test_reasoning_content_sanitized_at_service_level(
@@ -1383,3 +1385,41 @@ async def test_vision_path_keeps_v1_raw_content(wired_service, patch_provider_bu
     raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
     assert raw == "看看这张图"
     assert stub_preprocessor.call_count == 0
+
+
+async def test_forward_captions_persist_byte_stable_across_turns(wired_service, patch_provider_builder):
+    """转发图注并入 normalized_forward_text：当轮渲染与落库同源，下轮 history 字节复现。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这个转发",
+        forward_text="1. Alice（QQ 10001）：转发内容",
+        forward_image_urls=["https://example.test/forward.png"],
+        recent_messages=[],
+    )
+    desc = "stub description of https://example.test/forward.png"
+    # 当轮渲染：图注并入转发 speaker 行，不再出现独立的视觉转述行
+    turn1_content = stub.requests[0].messages[-1].content
+    assert desc in turn1_content
+    assert "视觉转述" not in turn1_content
+    # 落库：raw_content 含并入后的转发图注行
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert "[转发图片 1 张：" in raw
+    assert desc in raw
+
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="第二轮", recent_messages=[],
+    )
+    assert len(stub.requests) == 2
+    # 落库字节即前缀字节：第二轮 history 首条原样复现转发图注
+    assert "[转发图片 1 张：" in stub.requests[1].messages[0].content
+    assert desc in stub.requests[1].messages[0].content

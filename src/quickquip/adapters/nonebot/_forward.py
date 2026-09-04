@@ -15,6 +15,9 @@ from quickquip.llm.prompting import format_participant_label
 logger = logging.getLogger(__name__)
 
 MAX_FORWARD_DEPTH = 8
+# 转发组合文本总量封顶（字符）：超长转发是 trace 里 23k 级尖峰与 provider
+# 413 的来源；只在最外层出口硬切，递归内部不逐层裁剪。
+MAX_FORWARD_TEXT_CHARS = 4000
 
 
 def _get_field(obj, key: str, default: str = "") -> str:
@@ -242,7 +245,7 @@ async def extract_forward_content(
     if not raw_nodes:
         return "", []
 
-    return await _render_forward_nodes(
+    rendered_text, image_urls = await _render_forward_nodes(
         bot,
         list(raw_nodes),
         bot_keys=bot_keys,
@@ -251,3 +254,6 @@ async def extract_forward_content(
         depth=0,
         visited_forward_ids={forward_id} if forward_id else set(),
     )
+    if len(rendered_text) > MAX_FORWARD_TEXT_CHARS:
+        rendered_text = rendered_text[:MAX_FORWARD_TEXT_CHARS].rstrip() + "…（合并转发内容过长，已截断）"
+    return rendered_text, image_urls
