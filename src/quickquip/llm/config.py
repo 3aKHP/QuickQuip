@@ -307,18 +307,26 @@ class LLMConfig:
             base = EpochParams()
         if provider is None:
             return base
-        merged = EpochParams(
-            context_tokens=provider.epoch_context_tokens if provider.epoch_context_tokens is not None else base.context_tokens,
-            cold_idle_seconds=provider.epoch_cold_idle_seconds if provider.epoch_cold_idle_seconds is not None else base.cold_idle_seconds,
-            cold_target_tokens=provider.epoch_cold_target_tokens if provider.epoch_cold_target_tokens is not None else base.cold_target_tokens,
-            cold_trigger_tokens=provider.epoch_cold_trigger_tokens if provider.epoch_cold_trigger_tokens is not None else base.cold_trigger_tokens,
-            hot_target_tokens=provider.epoch_hot_target_tokens if provider.epoch_hot_target_tokens is not None else base.hot_target_tokens,
-            cap_tokens=provider.epoch_cap_tokens if provider.epoch_cap_tokens is not None else base.cap_tokens,
-        )
+        overrides = {}
+        for config_field, param_field in _EPOCH_OVERRIDE_PAIRS:
+            value = getattr(provider, config_field)
+            overrides[param_field] = getattr(base, param_field) if value is None else value
+        merged = EpochParams(**overrides)
         if not _epoch_params_valid(merged):
             logger.warning("provider %s 的 epoch_* 覆盖参数关系非法，回退 [runtime] 值", provider.id)
             return base
         return merged
+
+
+# (ProviderConfig 覆盖键, EpochParams 字段) 映射——新增纪元参数时只需加一行
+_EPOCH_OVERRIDE_PAIRS = (
+    ("epoch_context_tokens", "context_tokens"),
+    ("epoch_cold_idle_seconds", "cold_idle_seconds"),
+    ("epoch_cold_target_tokens", "cold_target_tokens"),
+    ("epoch_cold_trigger_tokens", "cold_trigger_tokens"),
+    ("epoch_hot_target_tokens", "hot_target_tokens"),
+    ("epoch_cap_tokens", "cap_tokens"),
+)
 
 
 def _epoch_params_valid(params: "EpochParams") -> bool:

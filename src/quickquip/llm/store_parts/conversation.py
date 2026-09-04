@@ -5,6 +5,18 @@ from __future__ import annotations
 from quickquip.llm.store_parts._base import _utc_now
 
 
+def _normalize_conversation_row(row) -> dict[str, str]:
+    """会话行的公共归一化（NULL → 空串）。两个读方法共用，勿各自复制。"""
+    return {
+        "user_id": "" if row["user_id"] is None else str(row["user_id"]),
+        "sender_name": "" if row["sender_name"] is None else str(row["sender_name"]),
+        "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
+        "role": row["role"],
+        "content": row["content"],
+        "raw_content": "" if row["raw_content"] is None else str(row["raw_content"]),
+    }
+
+
 class ConversationStoreMixin:
     """会话消息存储域。依赖 _StoreBase 的 _connect / _unavailable。"""
 
@@ -59,17 +71,7 @@ class ConversationStoreMixin:
                 """,
                 (str(group_id), int(limit)),
             ).fetchall()
-        return [
-            {
-                "user_id": "" if row["user_id"] is None else str(row["user_id"]),
-                "sender_name": "" if row["sender_name"] is None else str(row["sender_name"]),
-                "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
-                "role": row["role"],
-                "content": row["content"],
-                "raw_content": "" if row["raw_content"] is None else str(row["raw_content"]),
-            }
-            for row in reversed(rows)
-        ]
+        return [_normalize_conversation_row(row) for row in reversed(rows)]
 
     def list_conversation_messages_since(
         self,
@@ -98,14 +100,9 @@ class ConversationStoreMixin:
             ).fetchall()
         return [
             {
+                **_normalize_conversation_row(row),
                 "id": int(row["id"]),
-                "user_id": "" if row["user_id"] is None else str(row["user_id"]),
-                "sender_name": "" if row["sender_name"] is None else str(row["sender_name"]),
-                "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
-                "role": row["role"],
-                "content": row["content"],
                 "message_id": "" if row["message_id"] is None else str(row["message_id"]),
-                "raw_content": "" if row["raw_content"] is None else str(row["raw_content"]),
             }
             for row in rows
         ]
