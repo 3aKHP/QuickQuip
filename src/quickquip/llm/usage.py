@@ -97,6 +97,26 @@ def epoch_meter(tokens: int | None) -> Iterator[None]:
         _EPOCH_HISTORY_TOKENS.reset(token)
 
 
+_MEDIA_IMAGE_COUNT: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_media_image_count", default=None,
+)
+
+
+@contextmanager
+def media_meter(count: int | None) -> Iterator[None]:
+    """设置当前回合实际随请求附带的图片数；退出复位（镜像 epoch_meter 范式）。
+
+    Agent Loop 内多次 complete() 落的每行都带同值——看板按 AVG 解读为每轮
+    附带量，禁止 SUM。计数取自组装后的 LLMRequest（provider 序列化另有
+    每请求 5 张上限）。
+    """
+    token = _MEDIA_IMAGE_COUNT.set(count)
+    try:
+        yield
+    finally:
+        _MEDIA_IMAGE_COUNT.reset(token)
+
+
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
     try:
@@ -170,6 +190,7 @@ async def _record_usage(
             "agent_loop_id": loop_id,
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
+            "media_image_count": _MEDIA_IMAGE_COUNT.get(),
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,

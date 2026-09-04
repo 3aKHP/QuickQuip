@@ -249,7 +249,9 @@ def test_current_scene_collects_all_images():
     )
     assert "current.png" in scene.images
     assert "quoted.png" in scene.images
-    assert "forward.png" in scene.images
+    # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅保留 [附图 N 张] 文本
+    assert "forward.png" not in scene.images
+    assert any("[附图 1 张]" in s["text"] for s in scene.speakers if s["canonical_name"] == "转发消息")
 
 
 # ---------------------------------------------------------------------------

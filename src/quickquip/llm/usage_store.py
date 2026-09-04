@@ -133,6 +133,7 @@ class LLMUsageStore:
                         agent_loop_id         TEXT,
                         envelope_tokens       INTEGER,
                         epoch_history_tokens  INTEGER,
+                        media_image_count     INTEGER,
                         stream                INTEGER NOT NULL,
                         duration_ms           REAL,
                         input_tokens          INTEGER,
@@ -168,6 +169,7 @@ class LLMUsageStore:
                     "agent_loop_id": "TEXT",
                     "envelope_tokens": "INTEGER",
                     "epoch_history_tokens": "INTEGER",
+                    "media_image_count": "INTEGER",
                     "duration_ms": "REAL",
                     "fresh_input_tokens": "INTEGER",
                     "total_tokens": "INTEGER",
@@ -236,7 +238,9 @@ class LLMUsageStore:
                 f"AVG(CASE WHEN state = 'ok' THEN envelope_tokens END) AS avg_envelope, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' AND envelope_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS envelope_tracked, "
                 f"AVG(CASE WHEN state = 'ok' THEN epoch_history_tokens END) AS avg_epoch_history, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' AND epoch_history_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS epoch_tracked "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND epoch_history_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS epoch_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN media_image_count END) AS avg_media_images, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND media_image_count IS NOT NULL THEN 1 ELSE 0 END), 0) AS media_tracked "
                 f"FROM llm_usage_events WHERE {where}",
                 params,
             ).fetchone()
@@ -272,6 +276,10 @@ class LLMUsageStore:
                 # 只可按 AVG 解读（验收口径 ≈4.2k），coverage 语义同上
                 "avg_epoch_history_tokens": round(total["avg_epoch_history"], 1) if total["avg_epoch_history"] is not None else 0.0,
                 "epoch_coverage": round(total["epoch_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                # 第六张账本【媒体】：当轮实际随请求附带的图片数；同信封口径
+                # 只可按 AVG 解读，coverage 语义同上
+                "avg_media_image_count": round(total["avg_media_images"], 1) if total["avg_media_images"] is not None else 0.0,
+                "media_coverage": round(total["media_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
                 "by_provider": self._group_by(conn, "provider_id", where, params),
                 "by_feature": self._group_by(conn, "feature", where, params),
                 "by_model": self._group_by(conn, "model", where, params),

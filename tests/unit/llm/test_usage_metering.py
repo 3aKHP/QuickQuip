@@ -202,6 +202,38 @@ async def test_record_usage_carries_epoch_history_tokens_within_meter(monkeypatc
     assert [r["epoch_history_tokens"] for r in rows] == [4200, 4200, None]
 
 
+async def test_record_usage_carries_media_image_count_within_meter(monkeypatch, tmp_path):
+    """media_meter 内落的行带 media_image_count，meter 外落行则为 NULL；
+    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
+    from quickquip.llm.usage import _record_usage, media_meter
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
+    with media_meter(2):
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT media_image_count FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [r["media_image_count"] for r in rows] == [2, 2, None]
+
+
 async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
     """e2e: 真实 _record_usage 把 row 写入 store（验证 row dict 列名匹配 schema）。"""
     from quickquip.llm.usage import _record_usage

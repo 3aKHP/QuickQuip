@@ -447,7 +447,9 @@ async def test_forward_message_content_rendered(wired_service, patch_provider_bu
     last_user = stub.last_request.messages[-1]
     assert "转发" in last_user.content
     assert "1. Alice（QQ 10001）：这是合并转发" in last_user.content
-    assert last_user.image_urls == ["https://example.test/forward.png"]
+    # 转发图片不再作为媒体本体附带（VLM 路径同）；[附图 N 张] 文本后缀仍在
+    assert last_user.image_urls == []
+    assert "[附图 1 张]" in last_user.content
 
 
 async def test_reasoning_content_sanitized_at_service_level(
@@ -1330,3 +1332,165 @@ async def test_set_persona_advances_anchor_to_cold_water(wired_service, monkeypa
 
     assert len(calls) == 1
     assert calls[0] == EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
+
+
+async def test_non_vision_persists_image_captions_in_raw_content(wired_service, patch_provider_builder):
+    """非 VLM 路径：图注以文本身份落库（[图片 N 张：…]），下一轮 history 字节复现。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    caption_part = "[图片 1 张：stub description of https://example.test/cat.png]"
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert caption_part in raw
+
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="第二轮", recent_messages=[],
+    )
+    assert len(stub.requests) == 2
+    # 落库字节即前缀字节：第二轮 history 首条原样复现同一图注
+    assert caption_part in stub.requests[1].messages[0].content
+
+
+async def test_vision_path_keeps_v1_raw_content(wired_service, patch_provider_builder):
+    """VLM 路径零行为变化：不落图注、不调预处理器、raw_content 保持 v1 形态。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert raw == "看看这张图"
+    assert stub_preprocessor.call_count == 0
+
+
+async def test_forward_captions_persist_byte_stable_across_turns(wired_service, patch_provider_builder):
+    """转发图注并入 normalized_forward_text：当轮渲染与落库同源，下轮 history 字节复现。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这个转发",
+        forward_text="1. Alice（QQ 10001）：转发内容",
+        forward_image_urls=["https://example.test/forward.png"],
+        recent_messages=[],
+    )
+    desc = "stub description of https://example.test/forward.png"
+    # 当轮渲染：图注并入转发 speaker 行，不再出现独立的视觉转述行
+    turn1_content = stub.requests[0].messages[-1].content
+    assert desc in turn1_content
+    assert "视觉转述" not in turn1_content
+    # 落库：raw_content 含并入后的转发图注行
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert "[转发图片 1 张：" in raw
+    assert desc in raw
+
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="第二轮", recent_messages=[],
+    )
+    assert len(stub.requests) == 2
+    # 落库字节即前缀字节：第二轮 history 首条原样复现转发图注
+    assert "[转发图片 1 张：" in stub.requests[1].messages[0].content
+    assert desc in stub.requests[1].messages[0].content
+
+
+async def test_recent_context_image_captions_not_persisted(wired_service, patch_provider_builder):
+    """近期缓冲图片的图注不落库：那是他人消息的内容，落库会把图注记到触发者
+    名下（张数虚报+归属错乱）且 recent 窗口存续期间跨轮重复累积。当轮渲染
+    保留带标签的视觉转述行。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="纯文字触发",
+        recent_messages=[{
+            "sender_name": "他人", "user_id": "3003",
+            "text": "看看这个", "image_urls": ["https://example.test/other.png"],
+        }],
+        include_recent_images=True,
+    )
+    # 当轮渲染：近期图注以带标签的视觉转述行出现（正确归属）
+    assert "stub description of https://example.test/other.png" in stub.requests[0].messages[-1].content
+    # 落库：触发者的 raw_turn 不含他人图注
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert raw == "纯文字触发"
+
+
+async def test_media_meter_wired_with_attached_image_count(wired_service, patch_provider_builder, monkeypatch):
+    """媒体账本 service 接线：VLM 带图轮计 1；非 VLM 剥离后计 0（0 是有效信号）。"""
+    import quickquip.llm.service as svc
+    from quickquip.llm.usage import media_meter as real_media_meter
+
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    seen: list[int | None] = []
+
+    def spy(count):
+        seen.append(count)
+        return real_media_meter(count)
+
+    monkeypatch.setattr(svc, "media_meter", spy)
+    patch_provider_builder(lambda provider: StubProviderClient())
+
+    # VLM 路径：图随请求附带
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    assert seen == [1]
+
+    # 非 VLM 路径：图被剥离转图注，附带数恒 0
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="再看看",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    assert seen == [1, 0]

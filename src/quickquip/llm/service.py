@@ -50,8 +50,10 @@ from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
+    FORWARD_IMAGE_CONTEXT_PREFIX,
     IMAGE_PREPROCESSING_FAILED_REPLY,
     IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
+    RECENT_IMAGE_CONTEXT_PREFIX,
     match_image_descriptions,
     plan_non_vision_images,
 )
@@ -104,7 +106,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import envelope_meter, epoch_meter, usage_scope
+from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -141,6 +143,8 @@ VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
+MAX_PERSISTED_IMAGE_DESC_CHARS = 200
+MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS = 800
 _GROUP_CACHE_MAX = 512
 
 
@@ -195,6 +199,16 @@ class _ImagePreprocessingOutcome:
     request_forward_image_urls: list[str]
     image_descriptions: list[ImageDescription]
     is_non_vision: bool
+
+
+def _image_caption_blob(descriptions: list[ImageDescription]) -> tuple[int, str]:
+    """图注落库文本：单条截 200、整坨截 800，顺序 = 候选顺序（确定性）。
+
+    截断必须在落库前完成——落库字节即前缀字节，下一轮换侧 history 原样复现。
+    """
+    descs = [d.text_description.strip() for d in descriptions if d.text_description.strip()]
+    blob = "；".join(d[:MAX_PERSISTED_IMAGE_DESC_CHARS].rstrip() for d in descs)
+    return len(descs), blob[:MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS]
 
 
 class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
@@ -643,7 +657,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
-        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls, request_forward_image_urls)
+        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
+        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls)
 
         image_plan = None
         if is_non_vision:
@@ -664,13 +679,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 }
 
         if effective_image_urls:
+            # images= 是实际附带数（转发图不附带，不计入）；sources 各分项同理
+            # 只列附带来源，避免 total 与分项和对不上误导排查
             sources: list[str] = []
             if normalized_image_urls:
                 sources.append(f"直接={len(normalized_image_urls)}")
             if normalized_quoted_image_urls:
                 sources.append(f"引用={len(normalized_quoted_image_urls)}")
-            if normalized_forward_image_urls:
-                sources.append(f"转发={len(normalized_forward_image_urls)}")
             logger.info(
                 "group=%s model=%s non_vision=%s images=%d (%s)",
                 chat_id, current_model, is_non_vision,
@@ -841,6 +856,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         normalized_quoted_image_urls: list[str],
         normalized_forward_text: str,
         normalized_forward_image_urls: list[str],
+        image_descriptions: list[ImageDescription] | None = None,
         tool_context: ToolExecutionContext,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
@@ -854,6 +870,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 fw_text = normalized_forward_text or "[合并转发消息]"
                 fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
                 raw_turn_parts.append(fw_text + fw_suffix)
+            if image_descriptions:
+                # 非 VLM 路径：图注以文本身份落库（媒体本体永不进前缀）；
+                # 下一轮换侧 history 直接复用落库字节，转述内容不再随轮丢失
+                caption_count, caption_blob = _image_caption_blob(image_descriptions)
+                if caption_count:
+                    raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
             raw_turn_parts.append(stored_prompt)
             raw_turn = "\n".join(raw_turn_parts)
             self.store.append_conversation_message(
@@ -1042,6 +1064,22 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions = image_outcome.image_descriptions
         is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
+        # 转发图注并入 normalized_forward_text：当轮渲染（_build_messages）与落库
+        # （_persist_turn_and_build_reply）共用同一变量，两条路径字节一致；
+        # 并入后从 image_descriptions 摘除，避免视觉转述行与落库 caption 双重出现
+        forward_descs = [d for d in image_descriptions if d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
+        if forward_descs:
+            forward_caption_count, forward_caption_blob = _image_caption_blob(forward_descs)
+            if forward_caption_count:
+                normalized_forward_text = "\n".join(
+                    part
+                    for part in (
+                        normalized_forward_text,
+                        f"[转发图片 {forward_caption_count} 张：{forward_caption_blob}]",
+                    )
+                    if part
+                )
+                image_descriptions = [d for d in image_descriptions if not d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
         # ── history load + sensitive scrub + participants ────────────
         epoch_key = EpochKey(
             scope_key=scope_key,
@@ -1146,6 +1184,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
                 envelope_meter(estimate_tokens(turn_envelope)),
                 epoch_meter(estimate_rows_budget(history)),
+                # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
+                # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
+                media_meter(len(messages[-1].image_urls)),
             ):
                 # 只有请求才续期 provider 侧缓存；失败请求也可能已写缓存，保守续期
                 self._epochs.note_activity(epoch_key)
@@ -1218,6 +1259,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_text=normalized_forward_text,
             normalized_forward_image_urls=normalized_forward_image_urls,
+            # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
+            # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
+            # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
+            image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
             tool_context=tool_context,
         )
 

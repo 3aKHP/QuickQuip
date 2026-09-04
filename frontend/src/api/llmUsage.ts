@@ -29,6 +29,9 @@ export interface LlmUsageSummary {
   // 第五张账本（纪元 history）：同信封口径，旧后端可能缺失
   avg_epoch_history_tokens?: number
   epoch_coverage?: number
+  // 第六张账本（图片附件）：同信封口径，旧后端可能缺失
+  avg_media_image_count?: number
+  media_coverage?: number
   by_provider: UsageBucket[]
   by_feature: UsageBucket[]
   by_model: UsageBucket[]
@@ -64,6 +67,7 @@ export interface UsageEvent {
   agent_loop_id: string | null
   envelope_tokens: number | null
   epoch_history_tokens: number | null
+  media_image_count: number | null
   stream: number
   duration_ms: number | null
   input_tokens: number | null

@@ -518,8 +518,7 @@ def _build_scene_from_current_message(
             "canonical_name": "转发消息",
             "text": f"[转发] {fw_text}",
         })
-        if forward_image_urls:
-            all_images.extend(forward_image_urls)
+        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
 
     # Image pre-processing results as context lines
     if image_descriptions:
