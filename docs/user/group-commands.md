@@ -146,7 +146,7 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | `/llm trigger at on / off` | 开关艾特触发（仅群聊有此命令） |
 | `/llm memory on / off` | 开关记忆注入 |
 | `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、跟随全局默认、查看 |
-| `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 设置本群上下文读取条数，群聊最高 20 条（全局默认 10）；重启和 `/llm clear_context` 不影响此设置 |
+| `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本群上下文改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理，窗口随对话增长、冷场后收缩）；重启和 `/llm clear_context` 不影响此设置 |
 | `/llm clear_context` | 清空本群短期上下文，AI“串台”或记错上下文时用 |
 | `/llm delete_msg` | 引用一条消息发送本命令，或 `/llm delete_msg <消息ID>`，从上下文删除该条 |
 | `/llm reload` | 重载 LLM 配置并重置本群上下文条数覆盖；作用于整个部署，重载后的探活会发一条真实请求，可能产生计费 |

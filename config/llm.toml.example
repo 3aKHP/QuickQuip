@@ -2,8 +2,9 @@
 enabled = true
 default_provider = "openai-main"
 default_persona = "quickquip-default"
-# history_limit 自 1.14 起仅在群级 /llm context_limit <n> 显式覆盖时生效
-# （该群退化为保留最新 n 行的滚动窗）；默认路径由会话纪元自动管理。
+# history_limit 自 1.14 起仅在会话级 /llm context_limit <n> 显式覆盖时生效
+# （群聊/私聊均可；该会话退化为保留最新 n 行的滚动窗，上限 1024）；
+# 默认路径由会话纪元自动管理。
 history_limit = 10
 # history_max_messages_per_group 已废弃（保留解析、不再生效）：存储裁剪由
 # 会话纪元锚点驱动，硬上限统一为 2048 行。

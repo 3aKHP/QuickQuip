@@ -206,7 +206,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读
 - 锚点只落在 user/assistant 对边界，且保留最少 4 行（防单条超长转发把窗口吃空）
 - 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
 - 锚点状态保存在进程内存中：进程重启 = 冷一次缓存，重启后首个请求按「距最新一条一个标准 CTX（8k token）跨度」重新懒初始化
-- `/llm context_limit <n>` **语义变更**：从「每次最多读取 n 条」变为「该群退化为保留最新 n 行的滚动窗」；`/llm context_limit reset` 恢复纪元自动管理。`[runtime] history_limit` 全局默认不再作为读取上限生效；`history_max_messages_per_group` 废弃（保留解析、不再生效）
+- `/llm context_limit <n>` **语义变更**：从「每次最多读取 n 条」变为「该会话（群聊/私聊均可，上限 1024 条）退化为保留最新 n 行的滚动窗」；`/llm context_limit reset` 恢复纪元自动管理。`[runtime] history_limit` 全局默认不再作为读取上限生效；`history_max_messages_per_group` 废弃（保留解析、不再生效）
 - `clear_context` 三件齐清：会话消息存储、最近消息缓冲、纪元锚点（私聊会话 start/end/resume 同路径）
 - `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点（system prompt 字节变化 = 缓存全灭 = 免费重置窗口）
 - history 渲染信任落库时定格的 `canonical_name`（渲染冻结），不再按当前身份索引重算——改名用户在前缀中保持旧名，正是冻结的目的
@@ -516,8 +516,8 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm memory on`
 - `/llm memory off`
 - `/llm auto_memory status|on|off|reset`
-- `/llm context_limit <n>` — 设置本群上下文读取上限（1-20），持久化，不受 clear_context 影响
-- `/llm context_limit reset` — 重置为全局默认
+- `/llm context_limit <n>` — 把本会话上下文改为固定保留最新 n 行（1-1024），持久化，不受 clear_context 影响；默认由会话纪元自动管理
+- `/llm context_limit reset` — 恢复纪元自动管理
 - `/llm clear_context`
 - `/remember <内容>`
 - `/memories [关键词]`
