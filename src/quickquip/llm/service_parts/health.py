@@ -42,7 +42,7 @@ _MCP_FAILURE_FALLBACK_LABEL = "连接失败"
 
 class HealthMixin:
     # MRO contract: HealthMixin calls self._get_enabled_tool_names (ToolMixin),
-    # self.build_chat_scope_key / self._default_history_limit / self._scope_label
+    # self.build_chat_scope_key / self._scope_label
     # (ScopeMixin), and self._auto_memory_* (AutoMemoryMixin). All three must
     # precede HealthMixin in the LLMService base list.
     def _get_mcp_statuses(self) -> list[MCPServerStatus]:
@@ -177,13 +177,11 @@ class HealthMixin:
             return "\n".join(lines)
 
         scope_key = self.build_chat_scope_key(group_id, chat_type)
-        default_history_limit = self._default_history_limit(chat_type)
-        effective_history_limit = settings.history_limit if settings.history_limit is not None else default_history_limit
-        history_limit_note = (
-            f"（会话覆盖，默认 {default_history_limit}）"
-            if settings.history_limit is not None
-            else f"（默认 {default_history_limit}）"
-        )
+        if settings.history_limit is not None:
+            # 显式 /llm context_limit 覆盖 = 行数兜底滚动窗；默认 = 会话纪元自动管理
+            window_note = f"行数兜底 {settings.history_limit} 条（会话覆盖）"
+        else:
+            window_note = "会话纪元自动管理"
         lines.append(f"总开关：{'ON' if settings.enabled else 'OFF'}")
         lines.append(f"当前会话：{self._scope_label(chat_type)}")
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
@@ -203,7 +201,7 @@ class HealthMixin:
         else:
             lines.append(f"艾特触发：{'ON' if settings.allow_at else 'OFF'}")
         lines.append(
-            f"短期会话：已存 {self.store.count_conversation_messages(scope_key)} 条 / 读取上限 {effective_history_limit} 条{history_limit_note}"
+            f"短期会话：已存 {self.store.count_conversation_messages(scope_key)} 条 / {window_note}"
         )
         lines.append(
             f"长期记忆：已存 {self.store.count_memories(scope_key)} 条 / 上限 {MAX_STORED_MEMORY_ITEMS} 条"

@@ -63,6 +63,13 @@ from quickquip.llm.prompting import (
     merge_image_urls,
 )
 from quickquip.llm.token_estimate import estimate_tokens
+from quickquip.llm.epoch import (
+    DEFAULT_EPOCH_MAX_ROWS,
+    EpochKey,
+    EpochManager,
+    EpochParams,
+    estimate_rows_budget,
+)
 from quickquip.llm.provider import (
     LLMProviderError,
     LLMRequest,
@@ -76,10 +83,8 @@ from quickquip.llm.quick_judge import (
 )
 from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS as DEFAULT_ENABLED_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
-    DEFAULT_PRIVATE_HISTORY_LIMIT as DEFAULT_PRIVATE_HISTORY_LIMIT,  # noqa: F401 — re-exported via plugins/llm_runtime
-    MAX_GROUP_STORED_CONVERSATION_MESSAGES as MAX_GROUP_STORED_CONVERSATION_MESSAGES,  # noqa: F401 — re-exported
     MAX_MEMORY_RETRIEVAL_ITEMS,
-    MAX_PRIVATE_STORED_CONVERSATION_MESSAGES as MAX_PRIVATE_STORED_CONVERSATION_MESSAGES,  # noqa: F401 — re-exported
+    MAX_STORED_CONVERSATION_MESSAGES,
     MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_TRIGGER_CONTEXT_MESSAGES,
     PRIVATE_UNAVAILABLE_TOOLS as PRIVATE_UNAVAILABLE_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
@@ -99,7 +104,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import envelope_meter, usage_scope
+from quickquip.llm.usage import envelope_meter, epoch_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -212,6 +217,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
         self._init_mcp_lifecycle()
         self._session_presets: dict[str, str] = {}
+        # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
+        self._epochs = EpochManager()
         self._init_auto_memory()
         self._init_error: str | None = None
 
@@ -759,7 +766,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self,
         *,
         chat_id: int | str,
-        chat_type: str,
         scope_key: str,
         settings: ResolvedGroupSettings,
         sensitive: SensitiveFilter,
@@ -768,14 +774,23 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         recent_messages: list[dict[str, str]] | None,
         quoted_sender_name: str,
         quoted_user_id: str,
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-        default_history_limit = self._default_history_limit(chat_type)
-        history = self.store.list_recent_conversation_messages(
-            scope_key,
-            min(
-                settings.history_limit if settings.history_limit is not None else default_history_limit,
-                self._max_stored_conversation_messages(chat_type),
-            ),
+        epoch_key: EpochKey,
+        epoch_params: EpochParams,
+    ) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+        # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
+        # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
+        # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
+        # 两种读模式，勿在此"统一"。
+        self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        anchor = self._epochs.current_anchor(epoch_key) or 0
+        if settings.history_limit is not None:
+            # 显式 /llm context_limit 覆盖：尊重"更小窗口"意图，退化为该会话的
+            # 行数兜底滚动窗（每轮按行数重新锚定）。
+            backstop = self.store.find_anchor_row_id_by_rows(scope_key, settings.history_limit)
+            if backstop is not None:
+                anchor = max(anchor, backstop)
+        history = self.store.list_conversation_messages_since(
+            scope_key, anchor, limit=DEFAULT_EPOCH_MAX_ROWS,
         )
         if sensitive.is_loaded and history:
             # Re-scan history with the *current* word list — entries written
@@ -812,7 +827,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self,
         *,
         chat_id: int | str,
-        chat_type: str,
         user_id: int | str,
         sender_name: str,
         scope_key: str,
@@ -853,9 +867,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 raw_content=raw_turn,
             )
         self.store.append_conversation_message(scope_key, None, "assistant", text)
-        self.store.prune_conversation_messages(
+        # 纪元裁剪：floor = 该 scope 所有纪元键的最老锚点（None = 只按硬上限兜底，
+        # 绝不按窗口重估删行——重启后懒初始化还要读旧行）
+        self.store.crop_conversation_messages(
             scope_key,
-            self._history_retention_limit(chat_type),
+            floor_id=self._epochs.oldest_anchor(scope_key),
+            keep_last=MAX_STORED_CONVERSATION_MESSAGES,
         )
 
         if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
@@ -1026,9 +1043,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
         # ── history load + sensitive scrub + participants ────────────
+        epoch_key = EpochKey(
+            scope_key=scope_key,
+            provider_id=provider.id,
+            model=settings.model or provider.default_model,
+        )
         history, participants = self._load_scrubbed_history_and_participants(
             chat_id=chat_id,
-            chat_type=chat_type,
             scope_key=scope_key,
             settings=settings,
             sensitive=sensitive,
@@ -1037,6 +1058,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             recent_messages=recent_messages,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
+            epoch_key=epoch_key,
+            epoch_params=self.config.resolve_epoch_params(provider),
         )
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
@@ -1122,7 +1145,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
                 envelope_meter(estimate_tokens(turn_envelope)),
+                epoch_meter(estimate_rows_budget(history)),
             ):
+                # 只有请求才续期 provider 侧缓存；失败请求也可能已写缓存，保守续期
+                self._epochs.note_activity(epoch_key)
                 response = await self._run_tool_call_loop(
                     provider=provider,
                     request=request,
@@ -1178,7 +1204,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # ── persistence + auto-memory dispatch + reply assembly ──────
         return self._persist_turn_and_build_reply(
             chat_id=chat_id,
-            chat_type=chat_type,
             user_id=user_id,
             sender_name=sender_name,
             scope_key=scope_key,

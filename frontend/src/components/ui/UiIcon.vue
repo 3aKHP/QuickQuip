@@ -20,7 +20,7 @@ import {
   AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
   CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
-  Quote, ZapOff, AlarmClock
+  Quote, ZapOff, AlarmClock, Mail, Layers
 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Component } from 'vue'
@@ -40,7 +40,7 @@ type IconName =
   | 'Play' | 'Save' | 'ChevronLeft' | 'Download' | 'Sparkles'
   | 'BellRing' | 'Radar' | 'Wrench' | 'ListTree' | 'Eraser' | 'Activity'
   | 'CalendarRange' | 'CalendarDays' | 'Copy' | 'MousePointerClick' | 'ShieldAlert'
-  | 'Quote' | 'ZapOff' | 'AlarmClock'
+  | 'Quote' | 'ZapOff' | 'AlarmClock' | 'Mail' | 'Layers'
 
 const ICON_MAP: Record<IconName, Component> = {
   BarChart3, ToggleLeft, Users, Brain, FileText,
@@ -56,7 +56,7 @@ const ICON_MAP: Record<IconName, Component> = {
   AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
   CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
-  Quote, ZapOff, AlarmClock
+  Quote, ZapOff, AlarmClock, Mail, Layers
 }
 
 const props = defineProps<{

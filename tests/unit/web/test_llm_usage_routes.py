@@ -244,6 +244,22 @@ async def test_route_summary_exposes_envelope_ledger(monkeypatch, tmp_path):
     assert result["envelope_coverage"] == round(2 / 3, 4)
 
 
+async def test_route_summary_exposes_epoch_ledger(monkeypatch, tmp_path):
+    """summary 路由直传第五张账本两个键（纪元 history 每轮 token 均值 + 覆盖率）。"""
+    route, store = _route_store(monkeypatch, tmp_path)
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "epoch_history_tokens": 4000})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "epoch_history_tokens": 4400})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
+                  "stream": 1, "state": "ok"})
+    result = await route.get_summary(
+        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
+    )
+    assert result["avg_epoch_history_tokens"] == 4200.0
+    assert result["epoch_coverage"] == round(2 / 3, 4)
+
+
 async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):
     fastapi = pytest.importorskip("fastapi")
 

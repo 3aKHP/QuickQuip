@@ -465,7 +465,7 @@ async def test_reasoning_content_sanitized_at_service_level(
     assert result["reply"] == "给群友看的答案"
 
 
-async def test_history_is_pruned_after_cap(wired_service, patch_provider_builder):
+async def test_history_is_cropped_after_cap(wired_service, patch_provider_builder):
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
 
@@ -476,11 +476,11 @@ async def test_history_is_pruned_after_cap(wired_service, patch_provider_builder
         prompt="哈基镜是区吗？",
         recent_messages=[],
     )
-    # Explicit prune below history_max_messages_per_group cap
+    # Explicit crop by hard row cap (floor=None = 锚点缺失时只按 keep_last 兜底)
     for i in range(20):
         wired_service.store.append_conversation_message(1001, "u", "assistant", f"补充{i}")
-    cap = min(wired_service.config.runtime.history_max_messages_per_group, 20)
-    wired_service.store.prune_conversation_messages(1001, cap)
+    cap = 10
+    wired_service.store.crop_conversation_messages(1001, floor_id=None, keep_last=cap)
     assert len(wired_service.store.list_recent_conversation_messages(1001, 100)) == cap
 
     deleted = wired_service.clear_group_context(1001)
@@ -1185,3 +1185,148 @@ def test_resume_private_session_clears_buffer(llm_service):
         for m in llm_service.store.list_recent_conversation_messages("private:7001", 10)
     ]
     assert "存档前的话" in restored
+
+
+# ── 会话纪元（PR-B1）─────────────────────────────────────────────
+
+from quickquip.llm.epoch import EpochKey  # noqa: E402
+
+
+class _RecordingStub(StubProviderClient):
+    """StubProviderClient + 全量请求留存（跨轮前缀比对用）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.requests = []
+
+    async def complete(self, request):
+        self.requests.append(request)
+        return await super().complete(request)
+
+
+def _fingerprints(request):
+    return [(m.role, m.content) for m in request.messages]
+
+
+async def test_epoch_history_byte_stable_across_turns(wired_service, patch_provider_builder):
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    for i in range(3):
+        await wired_service.generate_reply(
+            group_id=1001,
+            user_id=2002,
+            sender_name="n",
+            prompt=f"第{i}轮问题",
+            recent_messages=[],
+        )
+
+    assert len(stub.requests) == 3
+    fp2 = _fingerprints(stub.requests[1])
+    fp3 = _fingerprints(stub.requests[2])
+    # 纪元内前缀逐字节稳定：第 2 轮除当轮 user 消息（信封+当前提问）外的全部
+    # 内容，必须逐字节复现为第 3 轮的头部
+    assert fp2[:-1], "第 2 轮应已有 history"
+    assert fp3[: len(fp2) - 1] == fp2[:-1]
+    assert len(fp3) > len(fp2)
+    # 锚点在暖轮间不移动
+    key = EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
+    assert wired_service._epochs.current_anchor(key) is not None
+
+
+async def test_epoch_cold_reset_after_idle(wired_service, patch_provider_builder, monkeypatch):
+    runtime = wired_service.config.runtime
+    runtime.epoch_context_tokens = 100
+    runtime.epoch_cold_idle_seconds = 300
+    runtime.epoch_cold_trigger_tokens = 80
+    runtime.epoch_cold_target_tokens = 40
+    runtime.epoch_hot_target_tokens = 10000
+    runtime.epoch_cap_tokens = 20000
+
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    now = [1_000.0]
+    monkeypatch.setattr(wired_service._epochs, "_clock", lambda: now[0])
+    key = EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
+
+    for i in range(3):
+        await wired_service.generate_reply(
+            group_id=1001,
+            user_id=2002,
+            sender_name="n",
+            prompt=f"第{i}轮问题",
+            recent_messages=[],
+        )
+    anchor_before = wired_service._epochs.current_anchor(key)
+
+    now[0] += 301  # 冷场：距上次请求 > T 且窗口 > H_cold
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="第3轮问题",
+        recent_messages=[],
+    )
+
+    anchor_after = wired_service._epochs.current_anchor(key)
+    assert anchor_after > anchor_before  # 冷场挪锚
+    history_text = "".join(m.content for m in stub.requests[-1].messages[:-1])
+    assert "第0轮问题" not in history_text  # 最早一对被裁出窗口
+    assert "第1轮问题" in history_text  # MIN_EPOCH_ROWS 保护下保留最近两对
+    assert "第2轮问题" in history_text
+
+
+async def test_clear_context_also_resets_epoch(wired_service, patch_provider_builder):
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="你好", recent_messages=[],
+    )
+    key = EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
+    assert wired_service._epochs.current_anchor(key) is not None
+
+    wired_service.clear_group_context(1001)
+    assert wired_service._epochs.current_anchor(key) is None
+
+    # 下一轮重新懒初始化，不崩溃、不残留旧锚点
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="再来", recent_messages=[],
+    )
+    assert wired_service._epochs.current_anchor(key) is not None
+
+
+async def test_set_model_starts_new_epoch_key(wired_service, patch_provider_builder):
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="你好", recent_messages=[],
+    )
+    old_key = EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
+    assert wired_service._epochs.current_anchor(old_key) is not None
+
+    wired_service.set_group_model(1001, "openai-main", "gpt-test")
+    result = await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="换模型了", recent_messages=[],
+    )
+
+    assert result["reply"].startswith("stub::gpt-test::")
+    new_key = EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-test")
+    # 新键懒初始化（CTX 跨度锚定）；旧键状态保留，互不干扰
+    assert wired_service._epochs.current_anchor(new_key) is not None
+    assert wired_service._epochs.current_anchor(old_key) is not None
+
+
+async def test_set_persona_advances_anchor_to_cold_water(wired_service, monkeypatch):
+    calls = []
+    original = wired_service._epochs.advance_to_cold_water
+
+    def spy(key, **kwargs):
+        calls.append(key)
+        return original(key, **kwargs)
+
+    monkeypatch.setattr(wired_service._epochs, "advance_to_cold_water", spy)
+    wired_service.set_group_persona(1001, "default")
+
+    assert len(calls) == 1
+    assert calls[0] == EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")

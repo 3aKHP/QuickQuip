@@ -34,8 +34,8 @@ def register_session_commands(on_command, Message, MessageSegment) -> None:
         preset = _parse_preset(args)
         svc.start_private_session(event.user_id, preset=preset)
         msg = (
-            f"当前私聊会话已开启，之后的普通消息、图片和引用回复都会进入 LLM。"
-            f" 当前上下文上限为 {svc.get_default_history_limit('private')} 条。"
+            "当前私聊会话已开启，之后的普通消息、图片和引用回复都会进入 LLM。"
+            " 上下文由会话纪元自动管理。"
         )
         if preset:
             preview = preset[:80] + ("..." if len(preset) > 80 else "")

@@ -368,7 +368,7 @@ def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_c
     return stored_canonical
 
 
-def _history_text(item: dict[str, str]) -> str:
+def _history_text(item: dict[str, object]) -> str:
     """历史 user 行的渲染文本：raw_content 占位符优先，落空回退 content。
 
     过滤与渲染必须共用这一处表达式；content 为空但 raw_content 非空
@@ -383,7 +383,7 @@ def _history_text(item: dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 def _build_scenes_from_history(
-    history: list[dict[str, str]],
+    history: list[dict[str, object]],
     *,
     identities=None,
 ) -> list[LLMSceneMessage]:
@@ -410,12 +410,11 @@ def _build_scenes_from_history(
                 pending_speakers = []
                 pending_images = []
         else:
-            user_id = item.get("user_id", "")
-            sender_name = item.get("sender_name", "")
+            user_id = str(item.get("user_id") or "")
+            sender_name = str(item.get("sender_name") or "")
             raw_text = _history_text(item)
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
+            # 渲染冻结：history 行信任落库定格的 canonical_name（前缀稳定契约，见 docs/dev/llm-module.md §4.2）
+            canonical_name = str(item.get("canonical_name") or "")
             pending_speakers.append({
                 "user_id": user_id,
                 "sender_name": sender_name,
@@ -594,7 +593,7 @@ def build_messages(
     *,
     prompt: str,
     image_urls: list[str],
-    history: list[dict[str, str]],
+    history: list[dict[str, object]],
     recent_messages: list[dict[str, str]] | None,
     max_trigger_context_messages: int,
     include_recent_images: bool = False,
@@ -656,15 +655,14 @@ def build_messages(
             _flush_pending()
             messages.append(LLMConversationMessage(
                 role="assistant",
-                content=item["content"],
+                content=str(item["content"]),
             ))
         else:
-            user_id = item.get("user_id", "")
-            sender_name = item.get("sender_name", "")
+            user_id = str(item.get("user_id") or "")
+            sender_name = str(item.get("sender_name") or "")
             raw_text = _history_text(item)
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
+            # 渲染冻结：history 行信任落库定格的 canonical_name（前缀稳定契约，见 docs/dev/llm-module.md §4.2）
+            canonical_name = str(item.get("canonical_name") or "")
             pending_speakers.append({
                 "user_id": user_id,
                 "sender_name": sender_name,

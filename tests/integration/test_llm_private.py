@@ -100,3 +100,24 @@ def test_end_private_session_clears_history(configured_service):
     assert ctx["deleted"] == 5
     assert configured_service.get_chat_settings(3003, chat_type="private").enabled is False
     assert configured_service.store.list_recent_conversation_messages(scope_key, 100) == []
+
+
+async def test_private_scope_uses_same_epoch_mechanism(configured_service, monkeypatch):
+    from quickquip.llm.epoch import EpochKey
+
+    stub = StubProviderClient()
+    monkeypatch.setattr(llm_runtime_module, "build_provider_client", lambda provider: stub)
+    configured_service.start_private_session(3003)
+
+    await configured_service.generate_private_reply(user_id=3003, sender_name="阿桃", prompt="第一句")
+    key = EpochKey(scope_key="private:3003", provider_id="openai-main", model="gpt-test")
+    # 私聊与群聊同一纪元机制：首轮即懒初始化锚点
+    assert configured_service._epochs.current_anchor(key) is not None
+
+    await configured_service.generate_private_reply(user_id=3003, sender_name="阿桃", prompt="第二句")
+    # 第二轮请求带上第一轮 history（只追加窗口）
+    assert len(stub.last_request.messages) > 1
+
+    # start_private_session 走 clear_context → 纪元锚点同清
+    configured_service.start_private_session(3003)
+    assert configured_service._epochs.current_anchor(key) is None

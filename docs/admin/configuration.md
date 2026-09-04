@@ -112,8 +112,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `memory_enabled` | 全局记忆注入开关 | `true` |
 | `default_provider` | 默认 provider ID | — |
 | `default_persona` | 默认人格 ID | — |
-| `history_limit` | 单次调用读取的对话轮数上限 | `10` |
-| `history_max_messages_per_group` | 单群存储的对话消息数配置上限（群聊实际受代码硬上限 20 截断，见 `service_parts/constants.py`） | `40` |
+| `history_limit` | 单次调用读取的对话行数兜底——**自 1.14 起语义变更**：不再默认生效（默认路径由会话纪元自动管理）；仅当某会话通过 `/llm context_limit <n>` 显式覆盖时（群聊/私聊均可，上限 1024 条），该会话退化为保留最新 n 行的滚动窗 | `10` |
+| `history_max_messages_per_group` | **自 1.14 起废弃（保留解析、不再生效）**：存储裁剪由会话纪元锚点驱动，硬上限统一为 2048 行（`service_parts/constants.py`） | `40` |
 | `memory_limit` | 单次调用注入的记忆条数上限 | `6` |
 | `memory_max_items_per_group` | 单群存储的记忆条数硬上限 | `200` |
 | `max_prompt_chars` | system prompt 最大字符数 | `4000` |
@@ -126,6 +126,14 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `auto_memory_enabled` | 自动记忆抽取全局默认开关 | `false` |
 | `auto_memory_prompt` | 自动记忆抽取自定义判定 prompt | `""` |
 | `auto_memory_max_tokens` | 自动记忆抽取判定最大输出 token | `256` |
+| `epoch_context_tokens` | 会话纪元标尺（标准 CTX）：懒初始化与 `/llm use` 新键的锚点跨度 | `8000` |
+| `epoch_cold_idle_seconds` | 冷场判定 T：距该键上次 LLM 请求超过此秒数视为缓存已冷（宁短勿长：设短退化为滚动窗形态，设长则每轮全价且窗口更长） | `300` |
+| `epoch_cold_target_tokens` | 冷场重置后窗口缩到的 token 估算目标（L_cold） | `4000` |
+| `epoch_cold_trigger_tokens` | 冷场重置触发水位：冷场且窗口超过此值才缩（H_cold） | `5000` |
+| `epoch_hot_target_tokens` | 触顶重置后窗口缩到的 token 估算目标（L_hot，长话题保护） | `32000` |
+| `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
+
+以上 6 个 `epoch_*` 键均可在 `[[providers]]` 条目里同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `[runtime]` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，非法时回退并记 warning。
 
 ### `[triggers]` — 触发方式
 
@@ -221,6 +229,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
+
+> **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 

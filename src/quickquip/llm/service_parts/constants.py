@@ -4,9 +4,10 @@ from __future__ import annotations
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
 MAX_STORED_MEMORY_ITEMS = 200
-DEFAULT_PRIVATE_HISTORY_LIMIT = 256
-MAX_GROUP_STORED_CONVERSATION_MESSAGES = 20
-MAX_PRIVATE_STORED_CONVERSATION_MESSAGES = 256
+# 会话消息统一存储硬上限（群聊/私聊同值）：纪元裁剪以锚点为主键，此值仅为
+# 锚点全部缺失（进程重启后）或单 scope 行数失控时的兜底。64k token 纪元
+# ≈1.3k 行，2048 留约 1.5× 余量。
+MAX_STORED_CONVERSATION_MESSAGES = 2048
 
 # ── builtin tool names & discovery defaults ─────────────────────────
 # Single source of truth for tool-name constants shared between
