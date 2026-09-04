@@ -556,3 +556,28 @@ def test_epoch_params_provider_override_garbage_falls_back_to_runtime(tmp_path: 
     assert provider.epoch_cap_tokens is None  # 该键回退继承 runtime
     assert loaded.resolve_epoch_params(provider).cap_tokens == 64000
     assert any("epoch" in record.message for record in caplog.records)
+
+
+def test_recent_context_defaults_when_unconfigured(tmp_path: Path):
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    assert loaded.runtime.recent_context_token_budget == 800
+    assert loaded.runtime.recent_context_floor_seconds == 300
+
+
+def test_recent_context_runtime_parsed(tmp_path: Path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        recent_context_token_budget = 1200
+        recent_context_floor_seconds = 120
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.recent_context_token_budget == 1200
+    assert loaded.runtime.recent_context_floor_seconds == 120

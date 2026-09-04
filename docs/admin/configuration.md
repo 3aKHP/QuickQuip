@@ -132,8 +132,10 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `epoch_cold_trigger_tokens` | 冷场重置触发水位：冷场且窗口超过此值才缩（H_cold） | `5000` |
 | `epoch_hot_target_tokens` | 触顶重置后窗口缩到的 token 估算目标（L_hot，长话题保护） | `32000` |
 | `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
+| `recent_context_token_budget` | 【现场】补丁每轮 token 预算：近期消息缓冲服役给 LLM 的上限（从最新往回截） | `800` |
+| `recent_context_floor_seconds` | 【现场】滑动保底窗秒数：窗内消息即使已服役过也会重附（增量语义之外的保底） | `300` |
 
-以上 6 个 `epoch_*` 键均可在 `[[providers]]` 条目里同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `[runtime]` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，非法时回退并记 warning。
+以上 6 个 `epoch_*` 键均可在 `[[providers]]` 条目里同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `[runtime]` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，非法时回退并记 warning。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
 
 ### `[triggers]` — 触发方式
 
