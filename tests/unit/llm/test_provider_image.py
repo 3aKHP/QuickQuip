@@ -93,6 +93,10 @@ async def test_download_image_failure_not_cached(monkeypatch):
 
 async def test_download_image_ttl_expiry_refetches(monkeypatch):
     # 过期条目惰性失效：白盒把时间戳回溯到 TTL 之前 → 重新下载。
+    # 注意必须相对当前 monotonic 回溯（CI 是全新 VM，开机不足 600s 时
+    # 绝对值 0.0 仍在 TTL 窗口内）
+    import time
+
     client = BaseProviderClient(_make_config())
 
     downloaded: list[str] = []
@@ -103,7 +107,7 @@ async def test_download_image_ttl_expiry_refetches(monkeypatch):
 
     monkeypatch.setattr(client, "_download_image_uncached", fake_uncached)
     first = await client._prepare_image_inputs(["a.png"])
-    client._image_cache["a.png"] = (0.0, first[0])  # monotonic 时钟下必已过期
+    client._image_cache["a.png"] = (time.monotonic() - 601.0, first[0])
     second = await client._prepare_image_inputs(["a.png"])
     assert downloaded == ["a.png", "a.png"]
     assert second[0] is not first[0]
