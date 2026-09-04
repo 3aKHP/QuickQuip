@@ -211,11 +211,20 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读
 - `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点（system prompt 字节变化 = 缓存全灭 = 免费重置窗口）
 - history 渲染信任落库时定格的 `canonical_name`（渲染冻结），不再按当前身份索引重算——改名用户在前缀中保持旧名，正是冻结的目的
 
+**近期消息缓冲 = 【现场】补丁**：`recent_message_buffer.py` 对 LLM 请求路径不再提供全量快照，而是增量补丁（`list_patch`）：
+
+- 候选 =（上次服役之后的新消息）∪（`recent_context_floor_seconds`=300s 滑动保底窗内的消息），再按 message_id 剔除 history 已覆盖者与当前触发消息，最后从最新往回截到 `recent_context_token_budget`=800 token（估算，至少保留最新一条）
+- 读即服役：取出后 `note_patch_served` 推进按群游标；失败轮丢失超保底窗的旧补丁，由保底窗兜底
+- 预算只在服役侧执行：buffer 写入侧仍按 20 条 + TTL 1800s 收口（内存上界不动），estimator/budget/floor 全部由 service 按 `[runtime]` 配置注入（仅全局键，无 provider 覆盖）
+- 适配层不再向 `generate_reply` 传快照；service 在群聊且未显式注入时自取（`recent_messages=[]` 显式空是测试注入口）。私聊不自取
+- `list_recent` 全量快照保留给两个不适用增量语义的消费者：`context_rules` 规则引擎与「读近期消息」模型工具
+
 **场景块消息结构**：当前 messages 数组采用“以 bot 回复为边界的场景块”模式：
 
 - 连续的多人发言归入同一 `role="user"` 场景块（bot 回复打断场景）
 - 所有发言者使用统一格式：`身份（QQ 号）：内容`
-- 场景以 `【上文】`（历史/缓冲）或 `【当前提问】`（最后一轮提问）标记
+- 场景以 `【上文】`（历史）或 `【当前提问】`（最后一轮提问）标记；现场补丁独立成 `【现场】` 段（带说明行，标识为氛围而非直接对话），尾巴顺序定型 `【轮次上下文】→【上文】→【现场】→【当前提问】`
+- 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，但不从合成内容抽取自动记忆（`store_user_message` 与 `trigger_auto_memory` 双开关）；合成 user_id（`boredom_timer`/`scheduled_timer`）不进信封参与者
 - 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
 - 引用消息会同时保留“当前提问者”和“引用发送者”，并显式区分机器人自己，避免 A 引用 B 时被误读成 B 在发言
 - 合并转发会递归展开多层节点，并保留每层的文字和图片信息，不再只剩一个占位外壳；组合文本总长封顶 4000 字符，超出在最外层出口硬切并追加「…（合并转发内容过长，已截断）」
