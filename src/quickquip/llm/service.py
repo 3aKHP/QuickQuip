@@ -104,7 +104,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import envelope_meter, epoch_meter, usage_scope
+from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -1182,6 +1182,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
                 envelope_meter(estimate_tokens(turn_envelope)),
                 epoch_meter(estimate_rows_budget(history)),
+                # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
+                # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
+                media_meter(len(messages[-1].image_urls)),
             ):
                 # 只有请求才续期 provider 侧缓存；失败请求也可能已写缓存，保守续期
                 self._epochs.note_activity(epoch_key)

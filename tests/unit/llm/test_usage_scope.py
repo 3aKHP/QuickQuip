@@ -3,12 +3,29 @@ import asyncio
 from quickquip.llm.usage import (
     _ENVELOPE_TOKENS,
     _EPOCH_HISTORY_TOKENS,
+    _MEDIA_IMAGE_COUNT,
     _USAGE_SCOPE,
     envelope_meter,
     epoch_meter,
+    media_meter,
     set_usage_scope,
     usage_scope,
 )
+
+
+def test_media_meter_sets_and_resets():
+    assert _MEDIA_IMAGE_COUNT.get() is None
+    with media_meter(2):
+        assert _MEDIA_IMAGE_COUNT.get() == 2
+    assert _MEDIA_IMAGE_COUNT.get() is None
+
+
+def test_media_meter_nested_inner_resets_to_outer():
+    with media_meter(1):
+        with media_meter(3):
+            assert _MEDIA_IMAGE_COUNT.get() == 3
+        assert _MEDIA_IMAGE_COUNT.get() == 1
+    assert _MEDIA_IMAGE_COUNT.get() is None
 
 
 def test_epoch_meter_sets_and_resets():

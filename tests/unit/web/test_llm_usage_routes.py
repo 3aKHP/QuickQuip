@@ -260,6 +260,22 @@ async def test_route_summary_exposes_epoch_ledger(monkeypatch, tmp_path):
     assert result["epoch_coverage"] == round(2 / 3, 4)
 
 
+async def test_route_summary_exposes_media_ledger(monkeypatch, tmp_path):
+    """summary 路由直传第六张账本两个键（当轮附带图片数均值 + 覆盖率）。"""
+    route, store = _route_store(monkeypatch, tmp_path)
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "media_image_count": 1})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "media_image_count": 3})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
+                  "stream": 1, "state": "ok"})
+    result = await route.get_summary(
+        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
+    )
+    assert result["avg_media_image_count"] == 2.0
+    assert result["media_coverage"] == round(2 / 3, 4)
+
+
 async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):
     fastapi = pytest.importorskip("fastapi")
 
