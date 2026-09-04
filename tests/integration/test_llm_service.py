@@ -1573,7 +1573,8 @@ async def test_synthetic_turn_persists_paired_row_without_auto_memory(
     llm_service, patch_provider_builder, monkeypatch
 ):
     """合成触发（唤醒/cron 同形态）：store_user_message=True + trigger_auto_memory=False
-    → user/assistant 成对落库（assistant 不再孤行），auto_memory 不调度。"""
+    → user/assistant 成对落库（assistant 不再孤行），auto_memory 不调度。
+    不传 recent_messages，与生产调用接线一致（llm_service 未绑 buffer，自取不触发）。"""
     import asyncio
 
     llm_service.config.runtime.auto_memory_enabled = True
@@ -1591,7 +1592,6 @@ async def test_synthetic_turn_persists_paired_row_without_auto_memory(
         user_id="boredom_timer",
         sender_name="系统",
         prompt="【内部触发说明】群聊冷了，来热热场。",
-        recent_messages=[],
         raw_user_text="【自动唤醒】群内冷场已超过 45 分钟",
         store_user_message=True,
         trigger_auto_memory=False,
@@ -1618,7 +1618,6 @@ async def test_cron_turn_persists_structured_summary(llm_service, patch_provider
         user_id="scheduled_timer",
         sender_name="定时任务",
         prompt="【内部触发说明】…【任务指令】" + "很长" * 100,
-        recent_messages=[],
         raw_user_text="【定时消息】按 0 9 * * * 发送：" + "很长" * 30,
         store_user_message=True,
         trigger_auto_memory=False,
@@ -1658,7 +1657,8 @@ def test_synthetic_user_id_excluded_from_participants(llm_service):
 
 
 async def test_patch_meter_wired_with_scene_patch_tokens(wired_service, patch_provider_builder, monkeypatch):
-    """补丁账本 service 接线：自取补丁轮计【现场】估算值；显式空注入轮计 None。"""
+    """补丁账本三态：自取有货=正值；自取/显式空=0（有效信号，计入 coverage）；
+    私聊（未自取）=None。"""
     import quickquip.llm.service as svc
     from quickquip.llm.token_estimate import estimate_tokens
     from quickquip.llm.usage import patch_meter as real_patch_meter
@@ -1679,9 +1679,99 @@ async def test_patch_meter_wired_with_scene_patch_tokens(wired_service, patch_pr
     await wired_service.generate_reply(
         group_id=1001, user_id=2002, sender_name="乙", prompt="问题", message_id="m-q1",
     )
+    # 第二轮：显式空注入（自取空态的同构模拟）→ 0 而非 None
     await wired_service.generate_reply(
         group_id=1001, user_id=2002, sender_name="乙", prompt="显式空", recent_messages=[],
     )
+    # 第三轮：私聊（chat_type=private 不自取）→ None
+    wired_service.start_private_session(2002)
+    await wired_service.generate_private_reply(
+        user_id=2002, sender_name="乙", prompt="私聊问",
+    )
 
     assert seen[0] == estimate_tokens("现场一句")
-    assert seen[1] is None
+    assert seen[1] == 0
+    assert seen[2] is None
+
+
+async def test_private_reply_never_self_serves_scene_patch(wired_service, patch_provider_builder):
+    """私聊 gate：buffer 私聊 key 有消息也不自取——【现场】块是群聊专属语义。"""
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    wired_service.recent_message_buffer.add_message(
+        "private:2002", "2002", "乙", "乙", "私聊现场话"
+    )
+    wired_service.start_private_session(2002)
+    await wired_service.generate_private_reply(user_id=2002, sender_name="乙", prompt="私聊问")
+
+    content = stub.requests[-1].messages[-1].content
+    assert "【现场】" not in content
+    assert "私聊现场话" not in content
+
+
+async def test_synthetic_turn_self_serves_scene_patch(wired_service, patch_provider_builder):
+    """合成轮（无聊唤醒生产接线）：不传 recent_messages、走自取——
+    【现场】块照常出现且合成配对行落库。锚定生产接线（与机制测试直调互补）。"""
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=3600)
+    wired_service.bind_recent_message_buffer(buf)
+    buf.add_message(1001, "3003", "丁", "丁", "现场闲聊", message_id="m-x")
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id="boredom_timer",
+        sender_name="系统",
+        prompt="【内部触发说明】群聊冷了，来热热场。",
+        raw_user_text="【自动唤醒】群内冷场已超过 45 分钟",
+        store_user_message=True,
+        trigger_auto_memory=False,
+        message_id=None,
+    )
+
+    content = stub.requests[-1].messages[-1].content
+    assert "【现场】" in content
+    assert "现场闲聊" in content
+    # 合成配对行成对落库；渲染层非数字 id 不包装成伪 QQ 身份
+    rows = wired_service.store.list_recent_conversation_messages("1001", 10)
+    assert [r["role"] for r in rows] == ["user", "assistant"]
+    assert rows[0]["user_id"] == "boredom_timer"
+    assert "QQ boredom_timer" not in content
+
+
+async def test_passive_recent_images_use_full_snapshot_not_patch(
+    wired_service, patch_provider_builder, monkeypatch
+):
+    """被动唤醒近期图是全量快照语义：图行落在服役游标与保底窗之外时，
+    【现场】文本补丁已不含它，但图仍随请求附带（不被增量语义收窄）。"""
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=3600)
+    wired_service.bind_recent_message_buffer(buf)
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    now = [1000.0]
+    monkeypatch.setattr("quickquip.common.recent_message_buffer.time", lambda: now[0])
+
+    buf.add_message(
+        1001, "3003", "丁", "丁", "看看这张", message_id="m-img",
+        image_urls=["https://example.test/meme.png"],
+    )
+    # 显式触发轮：自取 + 服役推游标到 1000（include_recent_images=False 不附近期图）
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="第一轮", message_id="m-q1",
+    )
+    # 冷场超保底窗后被动唤醒（include_recent_images=True）：
+    # list_patch 候选为空（图行 created_at=1000 ≤ 游标 1000 且 < 1100），
+    # 图源走 list_recent 全量快照仍能拿到
+    now[0] = 1400.0
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="刚才那张图什么意思",
+        message_id="m-q2", include_recent_images=True,
+    )
+
+    second = stub.requests[1].messages[-1]
+    assert "https://example.test/meme.png" in second.image_urls
+    # 文本侧仍是增量语义：补丁为空 → 无【现场】块，图行不进文本上下文
+    assert "【现场】" not in second.content
+    assert "看看这张" not in second.content

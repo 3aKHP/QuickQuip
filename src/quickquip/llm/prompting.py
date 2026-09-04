@@ -59,6 +59,10 @@ def format_participant_label(
     normalized_user_id = user_id.strip()
     normalized_sender_name = sender_name.strip()
     normalized_canonical_name = canonical_name.strip()
+    if normalized_user_id and not normalized_user_id.isdigit():
+        # 合成触发源（boredom_timer / scheduled_timer）不是 QQ 号：直接以名字呈现，
+        # 不包装成「（QQ xxx，未登记）」伪身份——system prompt 教模型按 QQ 号认人
+        return normalized_sender_name or normalized_user_id
     if normalized_canonical_name and normalized_sender_name and normalized_canonical_name != normalized_sender_name:
         return f"{normalized_canonical_name}（QQ {normalized_user_id}，当前显示名：{normalized_sender_name}）"
     if normalized_canonical_name:
@@ -604,6 +608,7 @@ def build_messages(
     recent_messages: list[dict[str, str]] | None,
     max_trigger_context_messages: int,
     include_recent_images: bool = False,
+    recent_images_messages: list[dict[str, str]] | None = None,
     max_recent_images: int = MAX_RECENT_CONTEXT_IMAGES,
     chat_type: str = "group",
     identities=None,
@@ -684,10 +689,13 @@ def build_messages(
     )
     # 现场图片仍附在末条 user 消息（尾巴段，不进前缀），供被动/无聊触发"看见"
     # 群里最近分享的图。newest-first 由 collect_recent_image_urls 保证，重复跳过。
+    # 图片源与文本补丁解耦：被动唤醒的近期图是全量快照语义（TTL 窗），服务层
+    # 传入 recent_images_messages；缺省回落到补丁列表（显式注入路径同源）。
+    images_source = recent_images_messages if recent_images_messages is not None else recent_messages
     recent_images: list[str] = []
-    if recent_messages and include_recent_images:
+    if images_source and include_recent_images:
         recent_images = collect_recent_image_urls(
-            recent_messages,
+            images_source,
             max_trigger_context_messages=max_trigger_context_messages,
             max_recent_images=max_recent_images,
         )

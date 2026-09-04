@@ -55,6 +55,13 @@ def test_label_unregistered():
     assert "未登记" in label
 
 
+def test_label_synthetic_id_not_wrapped_as_qq():
+    """合成触发源（boredom_timer 等）不是 QQ 号：直接以名字呈现，
+    不包装成「（QQ xxx，未登记）」伪身份（模型按 QQ 号认人）。"""
+    assert format_participant_label(user_id="boredom_timer", sender_name="系统") == "系统"
+    assert format_participant_label(user_id="scheduled_timer", sender_name="") == "scheduled_timer"
+
+
 def test_label_missing_all():
     assert format_participant_label(user_id="") == "未知用户"
 

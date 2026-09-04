@@ -451,6 +451,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         forward_image_urls: list[str] | None = None,
         image_descriptions: list[object] | None = None,
         include_recent_images: bool = False,
+        recent_images_messages: list[dict[str, str]] | None = None,
         turn_envelope: str = "",
     ) -> list[LLMConversationMessage]:
         return build_messages(
@@ -459,6 +460,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             history=history,
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
+            recent_images_messages=recent_images_messages,
             chat_type=chat_type,
             identities=self._resolve_identities(group_id),
             current_sender_name=current_sender_name,
@@ -1092,6 +1094,21 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         )
 
         # ── image preprocessing & non-VLM stripping ──────────────────
+        # 被动唤醒「看见近期图」是全量快照语义（TTL 窗，list_recent），不随【现场】
+        # 补丁的增量游标收窄——无聊唤醒恰在冷场（补丁最空）时触发，增量图源会让
+        # 该特性静默失效。文本上下文仍走增量补丁（scene_patch）；显式注入
+        # recent_messages（测试注入口）时注入列表即图源，不被 buffer 覆盖。
+        if (
+            include_recent_images
+            and recent_messages is None
+            and chat_type == "group"
+            and self.recent_message_buffer is not None
+        ):
+            recent_images_source: list[dict[str, str]] | None = (
+                self.recent_message_buffer.list_recent(scope_key)
+            )
+        else:
+            recent_images_source = scene_patch
         image_outcome = await self._preprocess_images_for_model(
             chat_id=chat_id,
             scope_key=scope_key,
@@ -1103,7 +1120,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             normalized_image_urls=normalized_image_urls,
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_image_urls=normalized_forward_image_urls,
-            recent_messages=scene_patch,
+            recent_messages=recent_images_source,
             include_recent_images=include_recent_images,
             sensitive=sensitive,
         )
@@ -1171,6 +1188,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             image_urls=effective_image_urls,
             history=history,
             recent_messages=scene_patch,
+            recent_images_messages=recent_images_source,
             chat_type=chat_type,
             group_id=str(chat_id),
             current_sender_name=sender_name,
@@ -1219,11 +1237,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
                 # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
                 media_meter(len(messages[-1].image_urls)),
-                # 补丁账本：【现场】块 token 估算，与预算同单位（AVG=预算利用率）；
-                # 无私自补丁（私聊/显式注入空）时记 None，coverage 反映自取覆盖率
+                # 补丁账本：【现场】块 token 估算，与预算同单位（AVG=预算利用率）。
+                # 三态：None=未自取（私聊/buffer 未绑定）；0=自取但补丁为空（有效
+                # 信号，与 media 的 0 同理）；正值=自取有货。空补丁轮计入 coverage
+                # 分子，否则 patch_coverage 测的是「非空补丁轮占比」而非自取覆盖率
                 patch_meter(
                     sum(estimate_tokens(str(item.get("text", ""))) for item in scene_patch)
-                    if scene_patch
+                    if scene_patch is not None
                     else None
                 ),
             ):
