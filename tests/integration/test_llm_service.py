@@ -1655,3 +1655,33 @@ def test_synthetic_user_id_excluded_from_participants(llm_service):
     assert "scheduled_timer" not in ids
     assert "2002" in ids
     assert "无名氏" in names  # 空 id 的名字回退不受过滤影响
+
+
+async def test_patch_meter_wired_with_scene_patch_tokens(wired_service, patch_provider_builder, monkeypatch):
+    """补丁账本 service 接线：自取补丁轮计【现场】估算值；显式空注入轮计 None。"""
+    import quickquip.llm.service as svc
+    from quickquip.llm.token_estimate import estimate_tokens
+    from quickquip.llm.usage import patch_meter as real_patch_meter
+
+    seen: list[int | None] = []
+
+    def spy(tokens):
+        seen.append(tokens)
+        return real_patch_meter(tokens)
+
+    monkeypatch.setattr(svc, "patch_meter", spy)
+    patch_provider_builder(lambda provider: StubProviderClient())
+
+    # 独立 buffer（fixture 预置的无 id 种子消息会一并进补丁，干扰求和断言）
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=3600)
+    wired_service.bind_recent_message_buffer(buf)
+    buf.add_message(1001, "3003", "丁", "丁", "现场一句", message_id="m-p1")
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="问题", message_id="m-q1",
+    )
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="乙", prompt="显式空", recent_messages=[],
+    )
+
+    assert seen[0] == estimate_tokens("现场一句")
+    assert seen[1] is None

@@ -117,6 +117,25 @@ def media_meter(count: int | None) -> Iterator[None]:
         _MEDIA_IMAGE_COUNT.reset(token)
 
 
+_PATCH_TOKENS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_patch_tokens", default=None,
+)
+
+
+@contextmanager
+def patch_meter(tokens: int | None) -> Iterator[None]:
+    """设置当前回合【现场】补丁的 token 估算值；退出复位（镜像 media_meter 范式）。
+
+    与预算同单位（estimate_tokens 逐条求和），看板按 AVG 直接读作预算利用率，
+    禁止 SUM。补丁在尾巴段每轮全价、不计入纪元 CTX 预算。
+    """
+    token = _PATCH_TOKENS.set(tokens)
+    try:
+        yield
+    finally:
+        _PATCH_TOKENS.reset(token)
+
+
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
     try:
@@ -191,6 +210,7 @@ async def _record_usage(
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
             "media_image_count": _MEDIA_IMAGE_COUNT.get(),
+            "patch_tokens": _PATCH_TOKENS.get(),
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,

@@ -106,7 +106,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, usage_scope
+from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, patch_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -1219,6 +1219,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
                 # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
                 media_meter(len(messages[-1].image_urls)),
+                # 补丁账本：【现场】块 token 估算，与预算同单位（AVG=预算利用率）；
+                # 无私自补丁（私聊/显式注入空）时记 None，coverage 反映自取覆盖率
+                patch_meter(
+                    sum(estimate_tokens(str(item.get("text", ""))) for item in scene_patch)
+                    if scene_patch
+                    else None
+                ),
             ):
                 # 只有请求才续期 provider 侧缓存；失败请求也可能已写缓存，保守续期
                 self._epochs.note_activity(epoch_key)

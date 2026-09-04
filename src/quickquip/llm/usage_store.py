@@ -134,6 +134,7 @@ class LLMUsageStore:
                         envelope_tokens       INTEGER,
                         epoch_history_tokens  INTEGER,
                         media_image_count     INTEGER,
+                        patch_tokens          INTEGER,
                         stream                INTEGER NOT NULL,
                         duration_ms           REAL,
                         input_tokens          INTEGER,
@@ -170,6 +171,7 @@ class LLMUsageStore:
                     "envelope_tokens": "INTEGER",
                     "epoch_history_tokens": "INTEGER",
                     "media_image_count": "INTEGER",
+                    "patch_tokens": "INTEGER",
                     "duration_ms": "REAL",
                     "fresh_input_tokens": "INTEGER",
                     "total_tokens": "INTEGER",
@@ -240,7 +242,9 @@ class LLMUsageStore:
                 f"AVG(CASE WHEN state = 'ok' THEN epoch_history_tokens END) AS avg_epoch_history, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' AND epoch_history_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS epoch_tracked, "
                 f"AVG(CASE WHEN state = 'ok' THEN media_image_count END) AS avg_media_images, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' AND media_image_count IS NOT NULL THEN 1 ELSE 0 END), 0) AS media_tracked "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND media_image_count IS NOT NULL THEN 1 ELSE 0 END), 0) AS media_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN patch_tokens END) AS avg_patch, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND patch_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS patch_tracked "
                 f"FROM llm_usage_events WHERE {where}",
                 params,
             ).fetchone()
@@ -280,6 +284,10 @@ class LLMUsageStore:
                 # 只可按 AVG 解读，coverage 语义同上
                 "avg_media_image_count": round(total["avg_media_images"], 1) if total["avg_media_images"] is not None else 0.0,
                 "media_coverage": round(total["media_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                # 第七张账本【现场补丁】：【现场】块 token 估算（与预算同单位，
+                # AVG 直接读作预算利用率）；尾巴段每轮全价，不计入纪元 CTX 预算
+                "avg_patch_tokens": round(total["avg_patch"], 1) if total["avg_patch"] is not None else 0.0,
+                "patch_coverage": round(total["patch_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
                 "by_provider": self._group_by(conn, "provider_id", where, params),
                 "by_feature": self._group_by(conn, "feature", where, params),
                 "by_model": self._group_by(conn, "model", where, params),

@@ -173,6 +173,47 @@ def test_media_image_count_migration_and_summary(tmp_path):
     assert s["media_coverage"] == round(2 / 3, 4)
 
 
+def test_patch_tokens_migration_and_summary(tmp_path):
+    """旧 schema 库（缺 patch_tokens 一列）自动 ALTER 补列；summary 透出均值
+    与覆盖率（第七张账本【现场补丁】：AVG 直接读作预算利用率）。"""
+    import sqlite3
+
+    from quickquip.llm.usage_store import window_start
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("""
+            CREATE TABLE llm_usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL,
+                model TEXT NOT NULL, feature TEXT, group_id TEXT, persona_id TEXT,
+                agent_loop_id TEXT, envelope_tokens INTEGER, stream INTEGER NOT NULL,
+                duration_ms REAL,
+                input_tokens INTEGER, fresh_input_tokens INTEGER, total_tokens INTEGER,
+                input_token_semantics TEXT, output_tokens INTEGER,
+                cache_creation_tokens INTEGER, cache_read_tokens INTEGER, thinking_tokens INTEGER,
+                cost_usd REAL NOT NULL DEFAULT 0.0, input_cost_usd REAL NOT NULL DEFAULT 0.0,
+                output_cost_usd REAL NOT NULL DEFAULT 0.0,
+                cache_read_cost_usd REAL NOT NULL DEFAULT 0.0,
+                cache_creation_cost_usd REAL NOT NULL DEFAULT 0.0,
+                pricing_model TEXT, pricing_source TEXT, pricing_confidence TEXT,
+                priced INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL DEFAULT 'ok', error_message TEXT
+            )
+        """)
+    store = LLMUsageStore(path)
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "patch_tokens": 300})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "patch_tokens": 500})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok"})
+    with store.connect() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
+    assert "patch_tokens" in columns
+
+    s = store.summary(window_start(7).isoformat())
+    assert s["avg_patch_tokens"] == 400.0
+    assert s["patch_coverage"] == round(2 / 3, 4)
+
+
 def _create_legacy_usage_db(path):
     import sqlite3
 

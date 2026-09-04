@@ -276,6 +276,22 @@ async def test_route_summary_exposes_media_ledger(monkeypatch, tmp_path):
     assert result["media_coverage"] == round(2 / 3, 4)
 
 
+async def test_route_summary_exposes_patch_ledger(monkeypatch, tmp_path):
+    """summary 路由直传第七张账本两个键（现场补丁 token 均值 + 覆盖率）。"""
+    route, store = _route_store(monkeypatch, tmp_path)
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "patch_tokens": 300})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+                  "stream": 1, "state": "ok", "patch_tokens": 500})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
+                  "stream": 1, "state": "ok"})
+    result = await route.get_summary(
+        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
+    )
+    assert result["avg_patch_tokens"] == 400.0
+    assert result["patch_coverage"] == round(2 / 3, 4)
+
+
 async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):
     fastapi = pytest.importorskip("fastapi")
 

@@ -4,13 +4,30 @@ from quickquip.llm.usage import (
     _ENVELOPE_TOKENS,
     _EPOCH_HISTORY_TOKENS,
     _MEDIA_IMAGE_COUNT,
+    _PATCH_TOKENS,
     _USAGE_SCOPE,
     envelope_meter,
     epoch_meter,
     media_meter,
+    patch_meter,
     set_usage_scope,
     usage_scope,
 )
+
+
+def test_patch_meter_sets_and_resets():
+    assert _PATCH_TOKENS.get() is None
+    with patch_meter(360):
+        assert _PATCH_TOKENS.get() == 360
+    assert _PATCH_TOKENS.get() is None
+
+
+def test_patch_meter_nested_inner_resets_to_outer():
+    with patch_meter(100):
+        with patch_meter(300):
+            assert _PATCH_TOKENS.get() == 300
+        assert _PATCH_TOKENS.get() == 100
+    assert _PATCH_TOKENS.get() is None
 
 
 def test_media_meter_sets_and_resets():
