@@ -1567,3 +1567,91 @@ async def test_scene_patch_incremental_across_turns(wired_service, patch_provide
     second_live = second[second.index("【现场】"):]
     assert "二轮新发言" in second_live
     assert "首轮现场" not in second_live
+
+
+async def test_synthetic_turn_persists_paired_row_without_auto_memory(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """合成触发（唤醒/cron 同形态）：store_user_message=True + trigger_auto_memory=False
+    → user/assistant 成对落库（assistant 不再孤行），auto_memory 不调度。"""
+    import asyncio
+
+    llm_service.config.runtime.auto_memory_enabled = True
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+    memory_calls = []
+
+    async def _spy(**kwargs):
+        memory_calls.append(kwargs)
+
+    monkeypatch.setattr(llm_service, "_extract_auto_memory", _spy)
+
+    await llm_service.generate_reply(
+        group_id=1001,
+        user_id="boredom_timer",
+        sender_name="系统",
+        prompt="【内部触发说明】群聊冷了，来热热场。",
+        recent_messages=[],
+        raw_user_text="【自动唤醒】群内冷场已超过 45 分钟",
+        store_user_message=True,
+        trigger_auto_memory=False,
+        message_id=None,
+    )
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    rows = llm_service.store.list_recent_conversation_messages("1001", 10)
+    assert [r["role"] for r in rows] == ["user", "assistant"]
+    assert rows[0]["user_id"] == "boredom_timer"
+    assert "【自动唤醒】群内冷场已超过 45 分钟" in (rows[0]["raw_content"] or rows[0]["content"])
+    assert memory_calls == []
+
+
+async def test_cron_turn_persists_structured_summary(llm_service, patch_provider_builder):
+    """cron 合成行落库结构化摘要（【定时消息】前缀），不抄任务指令全文进 raw。"""
+    stub = StubProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    await llm_service.generate_reply(
+        group_id=1001,
+        user_id="scheduled_timer",
+        sender_name="定时任务",
+        prompt="【内部触发说明】…【任务指令】" + "很长" * 100,
+        recent_messages=[],
+        raw_user_text="【定时消息】按 0 9 * * * 发送：" + "很长" * 30,
+        store_user_message=True,
+        trigger_auto_memory=False,
+        message_id=None,
+    )
+
+    rows = llm_service.store.list_recent_conversation_messages("1001", 10)
+    assert [r["role"] for r in rows] == ["user", "assistant"]
+    assert rows[0]["user_id"] == "scheduled_timer"
+    assert rows[0]["content"].startswith("【定时消息】按 0 9 * * * 发送：")
+
+
+def test_synthetic_user_id_excluded_from_participants(llm_service):
+    """非数字 user_id（合成触发源）不进信封参与者；数字 id 与名字回退照常。"""
+    participants = llm_service._collect_known_participants(
+        user_id="boredom_timer",
+        sender_name="系统",
+        history=[
+            {"role": "user", "user_id": "boredom_timer", "sender_name": "系统", "canonical_name": ""},
+            {"role": "user", "user_id": "2002", "sender_name": "乙", "canonical_name": "镜子"},
+            {"role": "assistant", "content": "reply"},
+        ],
+        recent_messages=[
+            {"user_id": "scheduled_timer", "sender_name": "定时任务", "canonical_name": ""},
+            {"user_id": "", "sender_name": "无名氏", "canonical_name": ""},
+        ],
+        quoted_sender_name="",
+        quoted_user_id="",
+        group_id="1001",
+    )
+    ids = [p["user_id"] for p in participants]
+    names = [p["sender_name"] for p in participants]
+    assert "boredom_timer" not in ids
+    assert "scheduled_timer" not in ids
+    assert "2002" in ids
+    assert "无名氏" in names  # 空 id 的名字回退不受过滤影响

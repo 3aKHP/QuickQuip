@@ -94,8 +94,11 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         prompt=_build_llm_task_prompt(job),
         image_urls=[],
         include_recent_images=True,
-        raw_user_text="",
-        store_user_message=False,  # 合成消息不写入群对话历史
+        # 合成配对行：落库结构化摘要（任务指令为管理端配置文本，同轮 prompt
+        # 已过输入扫描），消除 history 里的 assistant 孤行；不抽记忆
+        raw_user_text=f"【定时消息】按 {job.cron} 发送：{job.message[:60]}",
+        store_user_message=True,
+        trigger_auto_memory=False,
         message_id=None,
     )
     reply_text = str(result.get("reply") or "").strip()

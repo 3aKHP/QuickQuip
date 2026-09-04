@@ -576,6 +576,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
 
         def _push(raw_user_id: int | str | None, raw_sender_name: str = "", raw_canonical_name: str = "") -> None:
             user_key = str(raw_user_id or "").strip()
+            if user_key and not user_key.isdigit():
+                # 合成触发源（boredom_timer/scheduled_timer 等）不是群成员，
+                # 不进信封参与者（触发者本人与 history 合成行两路都过滤）
+                return
             sender_value = raw_sender_name.strip()
             canonical_value = raw_canonical_name.strip()
             if not user_key and not sender_value:
@@ -871,6 +875,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         text: str,
         stored_prompt: str,
         store_user_message: bool,
+        trigger_auto_memory: bool,
         message_id: str | None,
         normalized_quoted_text: str,
         normalized_quoted_image_urls: list[str],
@@ -917,7 +922,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             keep_last=MAX_STORED_CONVERSATION_MESSAGES,
         )
 
-        if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
+        if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
             asyncio.create_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
@@ -961,6 +966,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         voice_text: str = "",
         raw_user_text: str | None = None,
         store_user_message: bool = True,
+        trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, object]:
@@ -1280,6 +1286,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             text=text,
             stored_prompt=stored_prompt,
             store_user_message=store_user_message,
+            trigger_auto_memory=trigger_auto_memory,
             message_id=message_id,
             normalized_quoted_text=normalized_quoted_text,
             normalized_quoted_image_urls=normalized_quoted_image_urls,
@@ -1311,6 +1318,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         voice_text: str = "",
         raw_user_text: str | None = None,
         store_user_message: bool = True,
+        trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, object]:
@@ -1333,6 +1341,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 voice_text=voice_text,
                 raw_user_text=raw_user_text,
                 store_user_message=store_user_message,
+                trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
             )
@@ -1355,6 +1364,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         voice_text: str = "",
         raw_user_text: str | None = None,
         store_user_message: bool = True,
+        trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, object]:
@@ -1377,6 +1387,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 voice_text=voice_text,
                 raw_user_text=raw_user_text,
                 store_user_message=store_user_message,
+                trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
             )
