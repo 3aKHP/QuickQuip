@@ -1330,3 +1330,56 @@ async def test_set_persona_advances_anchor_to_cold_water(wired_service, monkeypa
 
     assert len(calls) == 1
     assert calls[0] == EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
+
+
+async def test_non_vision_persists_image_captions_in_raw_content(wired_service, patch_provider_builder):
+    """非 VLM 路径：图注以文本身份落库（[图片 N 张：…]），下一轮 history 字节复现。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    caption_part = "[图片 1 张：stub description of https://example.test/cat.png]"
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert caption_part in raw
+
+    await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="n", prompt="第二轮", recent_messages=[],
+    )
+    assert len(stub.requests) == 2
+    # 落库字节即前缀字节：第二轮 history 首条原样复现同一图注
+    assert caption_part in stub.requests[1].messages[0].content
+
+
+async def test_vision_path_keeps_v1_raw_content(wired_service, patch_provider_builder):
+    """VLM 路径零行为变化：不落图注、不调预处理器、raw_content 保持 v1 形态。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    stub_preprocessor = StubImagePreprocessor()
+    wired_service.image_preprocessor = stub_preprocessor
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert raw == "看看这张图"
+    assert stub_preprocessor.call_count == 0

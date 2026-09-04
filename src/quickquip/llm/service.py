@@ -141,6 +141,8 @@ VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
+MAX_PERSISTED_IMAGE_DESC_CHARS = 200
+MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS = 800
 _GROUP_CACHE_MAX = 512
 
 
@@ -195,6 +197,16 @@ class _ImagePreprocessingOutcome:
     request_forward_image_urls: list[str]
     image_descriptions: list[ImageDescription]
     is_non_vision: bool
+
+
+def _image_caption_blob(descriptions: list[ImageDescription]) -> tuple[int, str]:
+    """图注落库文本：单条截 200、整坨截 800，顺序 = 候选顺序（确定性）。
+
+    截断必须在落库前完成——落库字节即前缀字节，下一轮换侧 history 原样复现。
+    """
+    descs = [d.text_description.strip() for d in descriptions if d.text_description.strip()]
+    blob = "；".join(d[:MAX_PERSISTED_IMAGE_DESC_CHARS].rstrip() for d in descs)
+    return len(descs), blob[:MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS]
 
 
 class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
@@ -841,6 +853,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         normalized_quoted_image_urls: list[str],
         normalized_forward_text: str,
         normalized_forward_image_urls: list[str],
+        image_descriptions: list[ImageDescription] | None = None,
         tool_context: ToolExecutionContext,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
@@ -854,6 +867,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 fw_text = normalized_forward_text or "[合并转发消息]"
                 fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
                 raw_turn_parts.append(fw_text + fw_suffix)
+            if image_descriptions:
+                # 非 VLM 路径：图注以文本身份落库（媒体本体永不进前缀）；
+                # 下一轮换侧 history 直接复用落库字节，转述内容不再随轮丢失
+                caption_count, caption_blob = _image_caption_blob(image_descriptions)
+                if caption_count:
+                    raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
             raw_turn_parts.append(stored_prompt)
             raw_turn = "\n".join(raw_turn_parts)
             self.store.append_conversation_message(
@@ -1218,6 +1237,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_text=normalized_forward_text,
             normalized_forward_image_urls=normalized_forward_image_urls,
+            image_descriptions=image_descriptions or None,
             tool_context=tool_context,
         )
 
