@@ -677,13 +677,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 }
 
         if effective_image_urls:
+            # images= 是实际附带数（转发图不附带，不计入）；sources 各分项同理
+            # 只列附带来源，避免 total 与分项和对不上误导排查
             sources: list[str] = []
             if normalized_image_urls:
                 sources.append(f"直接={len(normalized_image_urls)}")
             if normalized_quoted_image_urls:
                 sources.append(f"引用={len(normalized_quoted_image_urls)}")
-            if normalized_forward_image_urls:
-                sources.append(f"转发={len(normalized_forward_image_urls)}")
             logger.info(
                 "group=%s model=%s non_vision=%s images=%d (%s)",
                 chat_id, current_model, is_non_vision,
@@ -1257,7 +1257,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_text=normalized_forward_text,
             normalized_forward_image_urls=normalized_forward_image_urls,
-            image_descriptions=image_descriptions or None,
+            # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
+            # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
+            # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
+            image_descriptions=[d for d in image_descriptions if not d.context_label.startswith("近期上下文图片")] or None,
             tool_context=tool_context,
         )
 

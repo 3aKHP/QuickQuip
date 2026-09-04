@@ -1423,3 +1423,74 @@ async def test_forward_captions_persist_byte_stable_across_turns(wired_service, 
     # 落库字节即前缀字节：第二轮 history 首条原样复现转发图注
     assert "[转发图片 1 张：" in stub.requests[1].messages[0].content
     assert desc in stub.requests[1].messages[0].content
+
+
+async def test_recent_context_image_captions_not_persisted(wired_service, patch_provider_builder):
+    """近期缓冲图片的图注不落库：那是他人消息的内容，落库会把图注记到触发者
+    名下（张数虚报+归属错乱）且 recent 窗口存续期间跨轮重复累积。当轮渲染
+    保留带标签的视觉转述行。"""
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    stub = _RecordingStub()
+    patch_provider_builder(lambda provider: stub)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="纯文字触发",
+        recent_messages=[{
+            "sender_name": "他人", "user_id": "3003",
+            "text": "看看这个", "image_urls": ["https://example.test/other.png"],
+        }],
+        include_recent_images=True,
+    )
+    # 当轮渲染：近期图注以带标签的视觉转述行出现（正确归属）
+    assert "stub description of https://example.test/other.png" in stub.requests[0].messages[-1].content
+    # 落库：触发者的 raw_turn 不含他人图注
+    stored = wired_service.store.list_recent_conversation_messages(1001, 10)
+    raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
+    assert raw == "纯文字触发"
+
+
+async def test_media_meter_wired_with_attached_image_count(wired_service, patch_provider_builder, monkeypatch):
+    """媒体账本 service 接线：VLM 带图轮计 1；非 VLM 剥离后计 0（0 是有效信号）。"""
+    import quickquip.llm.service as svc
+    from quickquip.llm.usage import media_meter as real_media_meter
+
+    from tests.fixtures.provider_stubs import StubImagePreprocessor
+
+    seen: list[int | None] = []
+
+    def spy(count):
+        seen.append(count)
+        return real_media_meter(count)
+
+    monkeypatch.setattr(svc, "media_meter", spy)
+    patch_provider_builder(lambda provider: StubProviderClient())
+
+    # VLM 路径：图随请求附带
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="看看这张图",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    assert seen == [1]
+
+    # 非 VLM 路径：图被剥离转图注，附带数恒 0
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
+    wired_service.image_preprocessor = StubImagePreprocessor()
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="n",
+        prompt="再看看",
+        image_urls=["https://example.test/cat.png"],
+        recent_messages=[],
+    )
+    assert seen == [1, 0]
