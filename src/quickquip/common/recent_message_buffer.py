@@ -36,6 +36,22 @@ class RecentMessageBuffer:
     def _now(self, now_ts: float | None = None) -> float:
         return time() if now_ts is None else now_ts
 
+    @staticmethod
+    def _item_to_dict(
+        item: RecentMessage, *, include_created_at: bool = False
+    ) -> dict[str, Any]:
+        row = {
+            "user_id": item.user_id,
+            "sender_name": item.sender_name,
+            "canonical_name": item.canonical_name,
+            "text": item.text,
+            "message_id": item.message_id,
+            "image_urls": list(item.image_urls),
+        }
+        if include_created_at:
+            row["created_at"] = item.created_at
+        return row
+
     def _touch_group(self, group_key: str) -> None:
         if group_key in self.messages:
             self.messages.move_to_end(group_key)
@@ -112,17 +128,7 @@ class RecentMessageBuffer:
         items = list(queue)
         if limit is not None:
             items = items[-int(limit):]
-        return [
-            {
-                "user_id": item.user_id,
-                "sender_name": item.sender_name,
-                "canonical_name": item.canonical_name,
-                "text": item.text,
-                "message_id": item.message_id,
-                "image_urls": list(item.image_urls),
-            }
-            for item in items
-        ]
+        return [self._item_to_dict(item) for item in items]
 
     def list_patch(
         self,
@@ -171,18 +177,7 @@ class RecentMessageBuffer:
             total += cost
         kept.reverse()
 
-        return [
-            {
-                "user_id": item.user_id,
-                "sender_name": item.sender_name,
-                "canonical_name": item.canonical_name,
-                "text": item.text,
-                "message_id": item.message_id,
-                "image_urls": list(item.image_urls),
-                "created_at": item.created_at,
-            }
-            for item in kept
-        ]
+        return [self._item_to_dict(item, include_created_at=True) for item in kept]
 
     def note_patch_served(self, group_id: int | str, now_ts: float | None = None) -> None:
         """推进补丁游标到 now（读即服役：失败轮丢失超保底窗的旧补丁，由 floor 兜底）。"""
