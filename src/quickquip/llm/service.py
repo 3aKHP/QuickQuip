@@ -50,8 +50,10 @@ from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
+    FORWARD_IMAGE_CONTEXT_PREFIX,
     IMAGE_PREPROCESSING_FAILED_REPLY,
     IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
+    RECENT_IMAGE_CONTEXT_PREFIX,
     match_image_descriptions,
     plan_non_vision_images,
 )
@@ -1065,7 +1067,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # 转发图注并入 normalized_forward_text：当轮渲染（_build_messages）与落库
         # （_persist_turn_and_build_reply）共用同一变量，两条路径字节一致；
         # 并入后从 image_descriptions 摘除，避免视觉转述行与落库 caption 双重出现
-        forward_descs = [d for d in image_descriptions if d.context_label.startswith("转发消息图片")]
+        forward_descs = [d for d in image_descriptions if d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
         if forward_descs:
             forward_caption_count, forward_caption_blob = _image_caption_blob(forward_descs)
             if forward_caption_count:
@@ -1077,7 +1079,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     )
                     if part
                 )
-                image_descriptions = [d for d in image_descriptions if not d.context_label.startswith("转发消息图片")]
+                image_descriptions = [d for d in image_descriptions if not d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
         # ── history load + sensitive scrub + participants ────────────
         epoch_key = EpochKey(
             scope_key=scope_key,
@@ -1260,7 +1262,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
             # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
             # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
-            image_descriptions=[d for d in image_descriptions if not d.context_label.startswith("近期上下文图片")] or None,
+            image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
             tool_context=tool_context,
         )
 

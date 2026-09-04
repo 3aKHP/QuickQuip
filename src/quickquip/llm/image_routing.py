@@ -13,6 +13,11 @@ from quickquip.llm.prompting import collect_recent_image_urls
 IMAGE_PREPROCESSING_UNAVAILABLE_REPLY = "当前模型无法直接读取图片，且前置图片识别服务不可用。请稍后重试或切换视觉模型。"
 IMAGE_PREPROCESSING_FAILED_REPLY = "前置图片识别失败，为避免错误猜测，本次没有调用主模型。请稍后重试或切换视觉模型。"
 
+# 候选来源标签前缀：service.py 落库/并入逻辑按此前缀过滤（转发并入转发文本、
+# 近期缓冲图注不落库），改名必须同步，故收敛为单一事实来源。
+FORWARD_IMAGE_CONTEXT_PREFIX = "转发消息图片"
+RECENT_IMAGE_CONTEXT_PREFIX = "近期上下文图片"
+
 
 @dataclass(frozen=True, slots=True)
 class ImageCandidate:
@@ -66,7 +71,7 @@ def plan_non_vision_images(
     seen: set[str] = set()
     _append_candidates(candidates, seen, image_urls, "当前消息图片")
     _append_candidates(candidates, seen, quoted_image_urls, "引用消息图片")
-    _append_candidates(candidates, seen, forward_image_urls, "转发消息图片")
+    _append_candidates(candidates, seen, forward_image_urls, FORWARD_IMAGE_CONTEXT_PREFIX)
 
     if len(candidates) > MAX_IMAGES_PER_PREPROCESSING_REQUEST:
         return ImageRoutingPlan(
@@ -82,7 +87,7 @@ def plan_non_vision_images(
             max_trigger_context_messages=max_trigger_context_messages,
             max_recent_images=MAX_IMAGES_PER_PREPROCESSING_REQUEST - len(candidates),
         )
-        _append_candidates(candidates, seen, recent_image_urls, "近期上下文图片")
+        _append_candidates(candidates, seen, recent_image_urls, RECENT_IMAGE_CONTEXT_PREFIX)
 
     return ImageRoutingPlan(candidates=candidates)
 
