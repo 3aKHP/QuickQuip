@@ -165,3 +165,17 @@ def test_restore_writes_into_live_results_dict(monkeypatch, tmp_path):
     cron_status_sync.sync_cron_status_file(sched, results)
     on_disk = json.loads(status_file.read_text(encoding="utf-8"))
     assert on_disk["jobs"][0]["last_run"] == "2026-09-05T01:00:05+08:00"
+
+
+def test_load_job_results_non_utf8_file_warns(monkeypatch, tmp_path, caplog):
+    """非 UTF-8 字节（如编辑器另存 ANSI/GBK）按损坏处理：告警 + 空恢复，
+    不击穿恢复块（Deep-CR：UnicodeDecodeError 是 ValueError 子类，
+    不在原 except 组合内，曾可中断 scheduler_plugin 模块导入）。"""
+    import logging
+
+    status_file = tmp_path / "cron_jobs.json"
+    status_file.write_bytes('{"jobs": [{"id": "x", "last_error": "中文"}]}'.encode("gbk"))
+    monkeypatch.setattr(cron_status_sync, "CRON_JOBS_JSON_PATH", status_file)
+    with caplog.at_level(logging.WARNING, logger="quickquip.adapters.nonebot.cron_status_sync"):
+        assert cron_status_sync.load_job_results() == {}
+    assert any("failed to read" in r.message for r in caplog.records)

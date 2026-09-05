@@ -185,6 +185,9 @@ function startCreate() {
   editingId.value = null
   form.value = { cron: '', message: '', enabled: true, kind: 'text', recurring: true }
   simple.value = { ...DEFAULT_SIMPLE_FIELDS }
+  // 半填态（只选了日期或时间）下 onceAt 维持 ''，重置的 ''→'' 不触发反向
+  // watch——双 ref 必须显式清，否则废弃会话的半填值泄漏进下一个任务
+  onceDate.value = ''; onceTime.value = ''
   selectedGroups.value = []; extraGroupIds.value = ''; mode.value = 'simple'
   saveError.value = null; editing.value = true
   loadKnownGroups()
@@ -195,6 +198,8 @@ function startEdit(job: ScheduledMessageJob) {
   originalCron.value = job.cron; originalRecurring.value = job.recurring
   const parsed = parseCronToSimple(job.cron, job.recurring)
   if (parsed) simple.value = parsed
+  // 同 startCreate：daily/weekly/monthly 回填的 onceAt='' 不触发反向 watch
+  onceDate.value = ''; onceTime.value = ''
   mode.value = parsed ? 'simple' : 'advanced'
   selectedGroups.value = [...job.group_ids]; extraGroupIds.value = ''
   saveError.value = null; editing.value = true

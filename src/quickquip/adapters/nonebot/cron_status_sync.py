@@ -65,7 +65,9 @@ def load_job_results(path=None) -> dict[str, dict]:
         data = json.loads(file_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    except (json.JSONDecodeError, OSError):
+    # UnicodeDecodeError（ValueError 子类，非 UTF-8 字节）同样按损坏处理——
+    # 击穿恢复块会中断 scheduler_plugin 模块导入，调度整体静默停摆
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         logger.warning("cron_status: failed to read status file for restore", exc_info=True)
         return {}
     results: dict[str, dict] = {}
