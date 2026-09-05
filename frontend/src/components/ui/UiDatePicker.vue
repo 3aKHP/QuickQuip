@@ -41,7 +41,7 @@ const props = withDefaults(defineProps<{
   modelValue: string
   mode?: 'date' | 'time'
   placeholder?: string
-  /** 输入框的可读名称（库经 aria-labels.input 透传，attr 不回落） */
+  /** 输入框的可读名称（库只认 aria-labels.input 配置，不透传原生 aria-label attr） */
   ariaLabel?: string
 }>(), {
   mode: 'date',
