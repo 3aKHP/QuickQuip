@@ -17,7 +17,8 @@ class FakeCronScheduler:
     def __init__(self):
         self.jobs: dict[str, dict] = {}
 
-    def add_job(self, func, trigger, *, id, replace_existing, **cron_kwargs):
+    def add_job(self, func, trigger, *, id, name=None, replace_existing=True, **cron_kwargs):
+        assert name == id, "#179: 任务可读名应与 id 一致"
         self.jobs[id] = {"func": func, "trigger": trigger, "cron": cron_kwargs}
 
     def get_jobs(self):

@@ -150,6 +150,7 @@ def register_lifecycle(driver) -> None:
             "interval",
             minutes=5,
             id="persistence_auto_save",
+            name="persistence_auto_save",
             replace_existing=True,
         )
         scheduler.add_job(
@@ -157,6 +158,7 @@ def register_lifecycle(driver) -> None:
             "interval",
             seconds=30,
             id="web_admin_state_sync",
+            name="web_admin_state_sync",
             replace_existing=True,
         )
         scheduler.add_job(
@@ -164,6 +166,7 @@ def register_lifecycle(driver) -> None:
             "interval",
             seconds=5,
             id="web_admin_action_queue",
+            name="web_admin_action_queue",
             replace_existing=True,
         )
     except ModuleNotFoundError:
