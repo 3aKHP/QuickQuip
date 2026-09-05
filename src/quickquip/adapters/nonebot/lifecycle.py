@@ -93,22 +93,74 @@ def register_lifecycle(driver) -> None:
     try:
         from nonebot_plugin_apscheduler import scheduler
 
+        # 维护任务接入执行记录（#199）：与 daily_summary_plugin 的 best-effort
+        # 范式一致——成功/失败两路记录，record 调用自身吞异常，任务异常原样 re-raise。
+        # 懒 import scheduler_plugin：lifecycle 被 tz_tracker 插件链在模块级引入，
+        # 顶层 import 会把 scheduler_plugin 的模块级副作用提前到该链上。
+        def _auto_save_with_result() -> None:
+            from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
+
+            try:
+                save_all()
+                try:
+                    record_job_result("persistence_auto_save", True)
+                except Exception:
+                    pass
+            except Exception as exc:
+                try:
+                    record_job_result("persistence_auto_save", False, str(exc)[:500])
+                except Exception:
+                    pass
+                raise
+
+        def _state_sync_with_result() -> None:
+            from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
+
+            try:
+                _reload_if_changed()
+                try:
+                    record_job_result("web_admin_state_sync", True)
+                except Exception:
+                    pass
+            except Exception as exc:
+                try:
+                    record_job_result("web_admin_state_sync", False, str(exc)[:500])
+                except Exception:
+                    pass
+                raise
+
+        async def _action_queue_with_result() -> None:
+            from quickquip.adapters.nonebot.scheduler_plugin import record_job_result
+
+            try:
+                await process_web_admin_actions()
+                try:
+                    record_job_result("web_admin_action_queue", True)
+                except Exception:
+                    pass
+            except Exception as exc:
+                try:
+                    record_job_result("web_admin_action_queue", False, str(exc)[:500])
+                except Exception:
+                    pass
+                raise
+
         scheduler.add_job(
-            save_all,
+            _auto_save_with_result,
             "interval",
             minutes=5,
             id="persistence_auto_save",
             replace_existing=True,
         )
         scheduler.add_job(
-            _reload_if_changed,
+            _state_sync_with_result,
             "interval",
             seconds=30,
             id="web_admin_state_sync",
             replace_existing=True,
         )
         scheduler.add_job(
-            process_web_admin_actions,
+            _action_queue_with_result,
             "interval",
             seconds=5,
             id="web_admin_action_queue",
