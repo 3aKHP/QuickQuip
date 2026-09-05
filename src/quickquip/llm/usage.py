@@ -193,7 +193,12 @@ async def _record_usage(
             priced = 1 if priced_flag else 0
             fresh_input_tokens = usage.fresh_input
             total_tokens = usage.total_tokens
-            input_token_semantics = usage.input_token_semantics
+            # input_tokens 列存的是原始上报值：claude 协议按 exclusive 口径上报
+            # （不含 cache_read/cache_creation），其余协议 inclusive。标签描述
+            # 列值口径，与 canonical（恒 inclusive）是两回事（issue #202）
+            input_token_semantics = (
+                "exclusive" if client.config.protocol == "claude" else "inclusive"
+            )
             if rates is not None:
                 pricing_model = f"{client.config.id}/{model}" if f"{client.config.id}/{model}" in configured else model
                 pricing_source = rates.source

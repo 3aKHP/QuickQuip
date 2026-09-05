@@ -287,3 +287,34 @@ def test_half_migrated_schema_is_completed(tmp_path):
         ).fetchone()
     assert {"group_id", "total_tokens", "pricing_confidence"} <= columns
     assert kept["feature"] == "chat"
+
+
+def test_claude_input_semantics_backfill_migration(tmp_path):
+    """issue #202：_ensure_schema 把历史 claude 行的 inclusive 标签 backfill 为
+    exclusive（input_tokens 列自始存 exclusive 原始值）；非 claude 行不动；
+    重跑幂等。"""
+    import sqlite3
+
+    path = tmp_path / "u.db"
+    store = LLMUsageStore(path)
+    for i, protocol in enumerate(("claude", "claude", "openai")):
+        store.record({
+            "provider_id": f"p{i}", "protocol": protocol, "model": "m",
+            "stream": 1, "input_tokens": 10, "cache_read_tokens": 200,
+            "input_token_semantics": "inclusive", "state": "ok",
+        })
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE llm_usage_events SET input_token_semantics = 'inclusive'"
+        )  # 模拟 backfill 前的历史库（新代码已派生 exclusive，手工还原成旧形态）
+
+    reopened = LLMUsageStore(path)  # 触发 _ensure_schema backfill
+    reopened._ensure_schema()
+    with reopened.connect() as conn:
+        rows = conn.execute(
+            "SELECT protocol, input_token_semantics FROM llm_usage_events"
+            " ORDER BY protocol, provider_id"
+        ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        ("claude", "exclusive"), ("claude", "exclusive"), ("openai", "inclusive"),
+    ]

@@ -105,7 +105,6 @@ def test_cost_components_expose_canonical_buckets():
     assert priced is True
     assert usage.fresh_input == 100
     assert usage.total_tokens == 430
-    assert usage.input_token_semantics == "inclusive"
     assert components["input_cost_usd"] == 100 * 2 / 1e6
     assert components["cache_read_cost_usd"] == 200 * 0.2 / 1e6
 

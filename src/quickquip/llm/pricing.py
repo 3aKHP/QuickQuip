@@ -37,10 +37,6 @@ class CanonicalUsage:
             return None
         return (self.prompt or 0) + (self.completion or 0)
 
-    @property
-    def input_token_semantics(self) -> str:
-        return "inclusive"
-
 
 def normalize_usage(
     protocol: str,
