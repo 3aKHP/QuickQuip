@@ -573,7 +573,7 @@ def _default_commands() -> dict[str, Any]:
         "register.already_exists": "你已经有过牛牛啦！当前长度 {length} cm",
         "register.positive": "牛牛长出来啦！足足有 {length} cm 呢！",
         "register.negative": "牛牛长出来了？牛牛不见了！你是个可爱的女孩子！！深度足足有 {abs_length} cm 呢！",
-        "register.missing": "你还没有牛牛呢！请发送 注册牛牛 领取你的牛牛！",
+        "register.missing": "你还没有牛牛呢！请发送 /注册牛牛 领取你的牛牛！",
         "unsubscribe.success": "从今往后你就没有牛牛啦！",
         "unsubscribe.insufficient_gold": "你的金币不足 {required}，无法注销牛牛！（当前 {balance} 金币）",
         "my.header": "🐂 我的牛牛",

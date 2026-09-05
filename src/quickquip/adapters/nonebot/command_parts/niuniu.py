@@ -102,7 +102,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         uid = str(event.user_id)
         length = niuniu_store.get_length(uid)
         if length is None:
-            await nn_unsubscribe.finish("你还没有牛牛呢！请发送 注册牛牛 领取你的牛牛！")
+            await nn_unsubscribe.finish("你还没有牛牛呢！请发送 /注册牛牛 领取你的牛牛！")
         balance = game_economy.get_balance(uid, str(event.group_id))
         if balance["gold"] < niuniu_store.config.unsubscribe_gold:
             await nn_unsubscribe.finish(
@@ -121,7 +121,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         uid = str(event.user_id)
         length = niuniu_store.get_length(uid)
         if length is None:
-            await nn_my.finish("你还没有牛牛呢！请发送 注册牛牛 领取你的牛牛！")
+            await nn_my.finish("你还没有牛牛呢！请发送 /注册牛牛 领取你的牛牛！")
         natural_rank = niuniu_store.get_rank_position(uid, "natural")
         if length > 0:
             rank_str = f"第 {natural_rank} 名"
@@ -360,7 +360,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             await nn_glue_luck.finish("私聊不支持此命令")
         uid = str(event.user_id)
         if not niuniu_store.exists(uid):
-            await nn_glue_luck.finish("你还没有牛牛呢！请先发送 注册牛牛")
+            await nn_glue_luck.finish("你还没有牛牛呢！请先发送 /注册牛牛")
         luck = niuniu_store.get_glue_luck(uid)
         label = _evaluate_luck(luck)
         tips = _glue_luck_tips(luck)
@@ -376,7 +376,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             await nn_fence_luck.finish("私聊不支持此命令")
         uid = str(event.user_id)
         if not niuniu_store.exists(uid):
-            await nn_fence_luck.finish("你还没有牛牛呢！请先发送 注册牛牛")
+            await nn_fence_luck.finish("你还没有牛牛呢！请先发送 /注册牛牛")
         luck = niuniu_store.get_fence_luck(uid)
         label = _evaluate_luck(luck)
         tips = _fence_luck_tips(luck)
