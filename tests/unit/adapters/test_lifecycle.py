@@ -184,13 +184,17 @@ async def test_lifecycle_jobs_record_results(monkeypatch):
         raise RuntimeError("async-boom")
 
     monkeypatch.setattr(lifecycle, "save_all", boom)
+    monkeypatch.setattr(lifecycle, "_reload_if_changed", boom)
     monkeypatch.setattr(lifecycle, "process_web_admin_actions", async_boom)
     with pytest.raises(RuntimeError, match="boom-500"):
         captured["persistence_auto_save"]()
+    with pytest.raises(RuntimeError, match="boom-500"):
+        captured["web_admin_state_sync"]()
     with pytest.raises(RuntimeError, match="async-boom"):
         await captured["web_admin_action_queue"]()
     results = scheduler_plugin.get_job_results()
-    assert results["persistence_auto_save"]["last_status"] == "error"
-    assert "boom-500" in results["persistence_auto_save"]["last_error"]
+    for job in ("persistence_auto_save", "web_admin_state_sync"):
+        assert results[job]["last_status"] == "error"
+        assert "boom-500" in results[job]["last_error"]
     assert results["web_admin_action_queue"]["last_status"] == "error"
     assert "async-boom" in results["web_admin_action_queue"]["last_error"]

@@ -86,10 +86,8 @@ def test_dashboard_non_dict_status_file_falls_back(tmp_path, monkeypatch):
 def test_cron_dashboard_non_utf8_file_falls_back(monkeypatch, tmp_path):
     """非 UTF-8 的状态文件走优雅回退（既有相邻缺口：UnicodeDecodeError
     曾逃出路由变 500，与「损坏 JSON 回退而非 500」的既有契约不符）。"""
-    from quickquip.app.web.routes import cron_dashboard as route
-
     status_file = tmp_path / "cron_jobs.json"
     status_file.write_bytes('{"jobs": [{"id": "x", "last_error": "中文"}]}'.encode("gbk"))
-    monkeypatch.setattr(route, "CRON_JOBS_JSON_PATH", status_file)
+    monkeypatch.setattr(cron_dashboard, "CRON_JOBS_JSON_PATH", status_file)
 
-    assert route._read_status_file() is None
+    assert cron_dashboard._read_status_file() is None

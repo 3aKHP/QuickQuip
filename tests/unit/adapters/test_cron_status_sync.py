@@ -129,7 +129,7 @@ def test_load_job_results_skips_never_run_and_bad_time(monkeypatch, tmp_path):
 
     restored = cron_status_sync.load_job_results()
     assert set(restored) == {"ran_ok", "bad_status_shape"}
-    # 归一：畸形 status/error 类型不进内存表（从isoformat(int) 的 TypeError 也会击穿恢复块）
+    # 归一：畸形 status/error 类型不进内存表——类型归一在解析阶段完成
     assert restored["bad_status_shape"]["last_status"] is None
     assert restored["bad_status_shape"]["last_error"] is None
 
