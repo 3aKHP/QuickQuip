@@ -56,12 +56,12 @@
           <label v-if="simple.frequency === 'once'" class="field">
             <span>触发日期时间（北京时间）<em class="hint">到点触发一次后自动删除；必须选择未来的时间</em></span>
             <div class="once-row">
-              <input v-model="onceDate" type="date" aria-label="触发日期（北京时间）" />
-              <input v-model="onceTime" type="time" aria-label="触发时间（北京时间）" />
+              <UiDatePicker v-model="onceDate" mode="date" placeholder="选择日期" aria-label="触发日期（北京时间）" />
+              <UiDatePicker v-model="onceTime" mode="time" placeholder="选择时间" aria-label="触发时间（北京时间）" />
             </div>
           </label>
           <template v-else>
-            <label class="field"><span>触发时间（北京时间）</span><input v-model="simple.time" type="time" /></label>
+            <label class="field"><span>触发时间（北京时间）</span><UiDatePicker v-model="simple.time" mode="time" placeholder="选择时间" /></label>
             <label v-if="simple.frequency === 'weekly'" class="field"><span>星期</span>
               <select v-model="simple.weekday">
                 <option v-for="(name, i) in weekdayNames" :key="i" :value="i">{{ name }}</option>
@@ -119,6 +119,7 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton fr
 import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'
 import UiToggle from '../components/ui/UiToggle.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiSegmented from '../components/ui/UiSegmented.vue'
+import UiDatePicker from '../components/ui/UiDatePicker.vue'
 import { fetchScheduledMessages, createScheduledMessage, updateScheduledMessage, deleteScheduledMessage, type ScheduledMessageJob, type ScheduledMessagePatch } from '../api/scheduledMessages'
 import { fetchKnownGroups } from '../api/groups'
 import { assembleCron, parseCronToSimple, onceAtInFuture, DEFAULT_SIMPLE_FIELDS, WEEKDAY_NAMES, type SimpleFields } from '../lib/scheduledCron'
@@ -139,10 +140,11 @@ const originalCron = ref(''); const originalRecurring = ref(true)
 const modeOptions: { value: FormMode; label: string }[] = [{ value: 'simple', label: '简易模式' }, { value: 'advanced', label: '高级模式' }]
 const weekdayNames = WEEKDAY_NAMES
 const isOnce = computed(() => mode.value === 'simple' && simple.value.frequency === 'once')
-// 「仅一次」触发时间拆为日期+时间两个原生选择器（#198）：datetime-local 在中文
-// 环境的空值占位符是「yyyy/mm/日 --:--」混合格式。simple.onceAt 契约不变——
-// 恒为 '' 或完整 "YYYY-MM-DDTHH:MM"，部分填写归一为空，交给「请选择」校验兜底。
-// 不用裸 computed 拆装：先选时间再选日期时 setter 互踩会丢已选部分。
+// 「仅一次」触发时间拆为日期+时间两个选择器（#198 起拆分；原生 date 控件在中文
+// Chromium 的空值占位符固化为「yyyy/mm/日」且无法用 placeholder 定制，后改为
+// UiDatePicker）。字符串契约不变：onceDate/onceTime 为 '' 或 "YYYY-MM-DD"/"HH:MM"，
+// simple.onceAt 恒为 '' 或完整 "YYYY-MM-DDTHH:MM"，部分填写归一为空，交给「请选择」
+// 校验兜底。不用裸 computed 拆装：先选时间再选日期时 setter 互踩会丢已选部分。
 const onceDate = ref(''); const onceTime = ref('')
 watch([onceDate, onceTime], ([d, t]) => {
   const composed = d && t ? `${d}T${t}` : ''
@@ -272,7 +274,7 @@ onMounted(loadJobs)
 .field { display: flex; flex-direction: column; gap: var(--qq-gap-xs); font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
 .field--row { flex-direction: row; align-items: center; justify-content: space-between; }
 .once-row { display: flex; gap: var(--qq-gap-xs); }
-.once-row input { flex: 1; }
+.once-row .ui-date-picker { flex: 1; min-width: 0; }
 .field input, .field textarea, .field select { background: var(--qq-surface-strong); color: var(--qq-text); border: 1px solid var(--qq-border); border-radius: var(--qq-radius-sm); padding: var(--qq-gap-xs) var(--qq-gap-sm); font-family: var(--qq-font-base); font-size: var(--qq-text-sm); outline: none; }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--qq-primary); }
 .field-label { font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
