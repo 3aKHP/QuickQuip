@@ -439,7 +439,8 @@ def _build_scenes_from_history(
 
 
 def _build_scene_from_recent_buffer(
-    recent_messages: list[dict[str, str]],
+    # list_patch 返回的行含 created_at: float（list_recent 行不含），故值域用 object
+    recent_messages: list[dict[str, object]],
     *,
     identities=None,
 ) -> LLMSceneMessage | None:
@@ -455,10 +456,10 @@ def _build_scene_from_recent_buffer(
             identities, user_id, sender_name, item.get("canonical_name", ""),
         )
         speakers.append({
-            "user_id": user_id,
-            "sender_name": sender_name,
-            "canonical_name": canonical_name,
-            "text": item["text"],
+            "user_id": str(user_id),
+            "sender_name": str(sender_name),
+            "canonical_name": str(canonical_name),
+            "text": str(item["text"]),
         })
 
     return LLMSceneMessage(
