@@ -302,6 +302,16 @@ def _register_festival_job() -> None:
 _register_festival_job()
 
 
-# 跨进程状态同步：bot 进程每 30 秒把调度器快照落盘，web-admin 定时任务页读文件
+# 跨进程状态同步：bot 进程每 30 秒把调度器快照落盘，web-admin 定时任务页读文件。
+# 重启恢复（#200）：落盘注册前把上次快照里的执行结果灌回内存表。
+# - 必须原地更新：_job_run_results 的 dict 引用已被 sync 闭包捕获，rebind 会让
+#   record_job_result 写新 dict 而 sync 仍序列化旧空 dict，恢复整体静默失效
+# - 不按当前已注册 job 剪枝：模块加载时 daily_summary 等任务尚未注册，剪枝会
+#   误删活任务记录；陈旧 id 由 sync 的 get_jobs() 驱动序列化在首 tick 自动清除
+# - 门控在 scheduler 可用环境（bot 进程）执行：pytest / web 进程不读真实文件
 if scheduler and nonebot is not None:
+    for _restored_id, _restored_entry in cron_status_sync.load_job_results().items():
+        _job_run_results[_restored_id] = _restored_entry
+    if _job_run_results:
+        logger.info("scheduler: restored last-run results for %d job(s)", len(_job_run_results))
     cron_status_sync.register_cron_status_sync(scheduler, _job_run_results)

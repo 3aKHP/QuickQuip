@@ -16,7 +16,9 @@ router = APIRouter()
 def _read_status_file() -> dict | None:
     try:
         data = json.loads(CRON_JOBS_JSON_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    # UnicodeDecodeError（非 UTF-8 字节，如编辑器另存为 ANSI）同样按损坏回退，
+    # 不让路由 500——与 cron_status_sync.load_job_results 的读取防御同口径
+    except (FileNotFoundError, json.JSONDecodeError, OSError, UnicodeDecodeError):
         return None
     return data if isinstance(data, dict) else None
 
