@@ -6,6 +6,13 @@
 
 （暂无）
 
+## [1.14.2] - 2026-09-05
+
+### 🐛 修复 (Fixed)
+
+- 调度器监控页的「任务名称」列此前显示的是内部函数名（如 `_auto_save_with_result` 这类下划线开头的闭包限定名）：全部后台定时任务注册时现在显式传入与任务 ID 一致的可读名称，监控页、状态文件与日志全链路同名，排查调度问题时不再需要「脑内翻译」。
+- Web 管理后台的全部原生日期/时间输入框（定时消息的「仅一次」触发日期时间、每日触发时间与审计页的起止筛选）替换为统一的日历/时间选择器组件：中文环境下原生日期控件的空值占位符是浏览器固化的「yyyy/mm/日」中英混合格式且无法用 placeholder 定制（1.14.1 拆分日期+时间只消掉了日期时间混排的半截），新组件自带中文占位符、弹层日历、键盘输入与暗色主题适配，输入值格式与既有校验语义完全不变。
+
 ## [1.14.1] - 2026-09-05
 
 ### 🐛 修复 (Fixed)
@@ -826,7 +833,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.14.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.14.2...HEAD
+[1.14.2]: https://github.com/3aKHP/QuickQuip/compare/v1.14.1...v1.14.2
 [1.14.1]: https://github.com/3aKHP/QuickQuip/compare/v1.14.0...v1.14.1
 [1.14.0]: https://github.com/3aKHP/QuickQuip/compare/v1.13.2...v1.14.0
 [1.13.2]: https://github.com/3aKHP/QuickQuip/compare/v1.13.1...v1.13.2

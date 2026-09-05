@@ -215,6 +215,7 @@ def reload_scheduled_message_jobs(store: ScheduledMessageStore | None = None) ->
                 _make_send_task(job, bot_getter, store),
                 "cron",
                 id=f"{_JOB_ID_PREFIX}{job.id}",
+                name=f"{_JOB_ID_PREFIX}{job.id}",
                 replace_existing=True,
                 **cron_kwargs,
             )
@@ -292,6 +293,7 @@ def _register_festival_job() -> None:
         _check_and_greet,
         "cron",
         id="festival_check",
+        name="festival_check",
         replace_existing=True,
         hour="1",
         minute="0",

@@ -5,8 +5,8 @@
     <div class="fbar">
       <div class="f"><label>操作类型</label><select v-model="filters.action"><option value="">全部</option><option value="create">create</option><option value="update">update</option><option value="delete">delete</option><option value="toggle">toggle</option></select></div>
       <div class="f"><label>目标类型</label><select v-model="filters.target_type"><option value="">全部</option><option value="rule">rule</option><option value="group">group</option><option value="memory">memory</option><option value="persona">persona</option><option value="config">config</option><option value="llm_about">llm_about</option><option value="group_setting">group_setting</option></select></div>
-      <div class="f"><label>起始</label><input v-model="filters.since" type="date" /></div>
-      <div class="f"><label>结束</label><input v-model="filters.until" type="date" /></div>
+      <div class="f"><label>起始</label><UiDatePicker v-model="filters.since" placeholder="开始日期" /></div>
+      <div class="f"><label>结束</label><UiDatePicker v-model="filters.until" placeholder="结束日期" /></div>
       <div class="f f-act"><UiButton icon="Search" @click="search">查询</UiButton><UiButton variant="ghost" size="sm" icon="RefreshCw" @click="reset">重置</UiButton></div>
     </div>
     <UiCard padding="md" shadow="sm">
@@ -24,6 +24,7 @@
 <script setup lang="ts">
 import { onMounted, ref, reactive, computed } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'
+import UiDatePicker from '../components/ui/UiDatePicker.vue'
 import { fetchAuditEntries, type AuditEntry, type AuditQueryParams } from '../api/audit'
 
 const loading = ref(true); const error = ref<string | null>(null); const items = ref<AuditEntry[]>([]); const total = ref(0); const page = ref(1); const limit = 50; const exp = ref(new Set<number>())

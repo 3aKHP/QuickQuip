@@ -104,6 +104,7 @@ def register_boredom_scan_job(sched=None) -> int | None:
         "interval",
         seconds=interval,
         id=job_id,
+        name=job_id,
         replace_existing=True,
     )
     logger.info("awakening: boredom scan job registered (interval=%ds)", interval)

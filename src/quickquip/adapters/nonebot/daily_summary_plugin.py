@@ -253,6 +253,7 @@ def _register_scheduler_jobs() -> None:
         _wrapped_generate,
         "cron",
         id="daily_summary_generate",
+        name="daily_summary_generate",
         replace_existing=True,
         **parse_cron(daily_cfg.generate_cron, fallback_hour="6"),
     )
@@ -260,6 +261,7 @@ def _register_scheduler_jobs() -> None:
         _wrapped_publish,
         "cron",
         id="daily_summary_publish",
+        name="daily_summary_publish",
         replace_existing=True,
         **parse_cron(daily_cfg.publish_cron, fallback_hour="6"),
     )
@@ -463,11 +465,11 @@ def _register_period_jobs() -> None:
         pub_id = f"{period_type}_report_publish"
         scheduler.add_job(
             _make_wrapped(gen_id, lambda pt=period_type: _job_generate_period_reports(pt)),
-            "cron", id=gen_id, replace_existing=True, **parse_cron(cfg.generate_cron, fallback_hour="6"),
+            "cron", id=gen_id, name=gen_id, replace_existing=True, **parse_cron(cfg.generate_cron, fallback_hour="6"),
         )
         scheduler.add_job(
             _make_wrapped(pub_id, lambda pt=period_type: _job_publish_period_reports(pt)),
-            "cron", id=pub_id, replace_existing=True, **parse_cron(cfg.publish_cron, fallback_hour="6"),
+            "cron", id=pub_id, name=pub_id, replace_existing=True, **parse_cron(cfg.publish_cron, fallback_hour="6"),
         )
         logger.info(
             "period_report[%s]: jobs registered (generate=%s, publish=%s)",
