@@ -241,7 +241,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
     @nn_len_rank.handle()
     async def _(event):
         if _is_private_chat(event):
-            await nn_len_rank.finish("私聊不支持此命令，请使用 牛牛长度总排行")
+            await nn_len_rank.finish("私聊不支持此命令，请使用 /牛牛长度总排行")
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "牛牛长度排行").strip()
         n = int(args) if args.isdigit() else 10
@@ -265,7 +265,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
     @nn_depth_rank.handle()
     async def _(event):
         if _is_private_chat(event):
-            await nn_depth_rank.finish("私聊不支持此命令，请使用 牛牛深度总排行")
+            await nn_depth_rank.finish("私聊不支持此命令，请使用 /牛牛深度总排行")
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "牛牛深度排行").strip()
         n = int(args) if args.isdigit() else 10
@@ -302,7 +302,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
     @nn_abs_rank.handle()
     async def _(event):
         if _is_private_chat(event):
-            await nn_abs_rank.finish("私聊不支持此命令，请使用 牛牛绝对值总排行")
+            await nn_abs_rank.finish("私聊不支持此命令，请使用 /牛牛绝对值总排行")
         text = str(event.get_message()).strip()
         args = _strip_command_name(text, "牛牛绝对值排行").strip()
         n = int(args) if args.isdigit() else 10
