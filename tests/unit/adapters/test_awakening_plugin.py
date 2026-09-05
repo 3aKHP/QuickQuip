@@ -16,7 +16,7 @@ class FakeScheduler:
     def __init__(self) -> None:
         self.jobs: dict[str, dict] = {}
 
-    def add_job(self, func, trigger, *, seconds, id, name, replace_existing):
+    def add_job(self, func, trigger, *, seconds, id, name=None, replace_existing):
         assert trigger == "interval"
         assert name == id, "#179: 任务可读名应与 id 一致"
         self.jobs[id] = {
