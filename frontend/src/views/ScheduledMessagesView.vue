@@ -55,7 +55,10 @@
           </label>
           <label v-if="simple.frequency === 'once'" class="field">
             <span>触发日期时间（北京时间）<em class="hint">到点触发一次后自动删除；必须选择未来的时间</em></span>
-            <input v-model="simple.onceAt" type="datetime-local" />
+            <div class="once-row">
+              <input v-model="onceDate" type="date" aria-label="触发日期（北京时间）" />
+              <input v-model="onceTime" type="time" aria-label="触发时间（北京时间）" />
+            </div>
           </label>
           <template v-else>
             <label class="field"><span>触发时间（北京时间）</span><input v-model="simple.time" type="time" /></label>
@@ -111,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'
 import UiToggle from '../components/ui/UiToggle.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
@@ -136,6 +139,19 @@ const originalCron = ref(''); const originalRecurring = ref(true)
 const modeOptions: { value: FormMode; label: string }[] = [{ value: 'simple', label: '简易模式' }, { value: 'advanced', label: '高级模式' }]
 const weekdayNames = WEEKDAY_NAMES
 const isOnce = computed(() => mode.value === 'simple' && simple.value.frequency === 'once')
+// 「仅一次」触发时间拆为日期+时间两个原生选择器（#198）：datetime-local 在中文
+// 环境的空值占位符是「yyyy/mm/日 --:--」混合格式。simple.onceAt 契约不变——
+// 恒为 '' 或完整 "YYYY-MM-DDTHH:MM"，部分填写归一为空，交给「请选择」校验兜底。
+// 不用裸 computed 拆装：先选时间再选日期时 setter 互踩会丢已选部分。
+const onceDate = ref(''); const onceTime = ref('')
+watch([onceDate, onceTime], ([d, t]) => {
+  const composed = d && t ? `${d}T${t}` : ''
+  if (composed !== simple.value.onceAt) simple.value.onceAt = composed
+})
+watch(() => simple.value.onceAt, (v) => {
+  const [d = '', t = ''] = v.split('T')
+  if (d !== onceDate.value || t !== onceTime.value) { onceDate.value = d; onceTime.value = t }
+})
 // 候选群 = 已知群 ∪ 当前已选群（编辑存量任务时其群可能不在已知列表里）
 const groupOptions = computed(() => [...new Set([...knownGroups.value, ...selectedGroups.value])])
 
@@ -250,6 +266,8 @@ onMounted(loadJobs)
 .modal-title { font-size: var(--qq-text-lg); font-weight: 600; color: var(--qq-text); }
 .field { display: flex; flex-direction: column; gap: var(--qq-gap-xs); font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
 .field--row { flex-direction: row; align-items: center; justify-content: space-between; }
+.once-row { display: flex; gap: var(--qq-gap-xs); }
+.once-row input { flex: 1; }
 .field input, .field textarea, .field select { background: var(--qq-surface-strong); color: var(--qq-text); border: 1px solid var(--qq-border); border-radius: var(--qq-radius-sm); padding: var(--qq-gap-xs) var(--qq-gap-sm); font-family: var(--qq-font-base); font-size: var(--qq-text-sm); outline: none; }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--qq-primary); }
 .field-label { font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
