@@ -318,3 +318,48 @@ def test_claude_input_semantics_backfill_migration(tmp_path):
     assert [tuple(r) for r in rows] == [
         ("claude", "exclusive"), ("claude", "exclusive"), ("openai", "inclusive"),
     ]
+    reopened._ensure_schema()  # 二跑幂等：0 行受影响，标签不再变化
+    with reopened.connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM llm_usage_events"
+            " WHERE protocol = 'claude' AND input_token_semantics != 'exclusive'"
+        ).fetchone()[0] == 0
+
+
+def test_claude_backfill_keeps_summary_values_stable(tmp_path):
+    """issue #202 回归锚定：backfill 只翻标签列，summary 聚合数值前后一致
+    （ok 行的存储列 COALESCE 优先，CASE 分支翻转不改变任何行形态的取值）。"""
+    import sqlite3
+
+    from quickquip.llm.usage_store import window_start
+
+    path = tmp_path / "u.db"
+    store = LLMUsageStore(path)
+    # claude 行：input=100（exclusive 原始值）、read=200、creation=80、
+    # 存储列 fresh=100 / total=430（normalize 后写入，聚合只看这里）
+    store.record({
+        "provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+        "stream": 1, "input_tokens": 100, "cache_read_tokens": 200,
+        "cache_creation_tokens": 80, "output_tokens": 50,
+        "fresh_input_tokens": 100, "total_tokens": 430,
+        "input_token_semantics": "exclusive", "cost_usd": 0.01, "priced": 1,
+        "state": "ok",
+    })
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE llm_usage_events SET input_token_semantics = 'inclusive'")
+
+    cutoff = window_start(7).isoformat()
+    # 同一实例 _schema_ready 已置位 → 取的是 backfill 前口径
+    before = store.summary(cutoff)
+    # 新实例首开触发 backfill → 标签翻 exclusive
+    reopened = LLMUsageStore(path)
+    after = reopened.summary(cutoff)
+
+    # 存储列 total_tokens=430（canonical，含 output）COALESCE 短路优先
+    assert after["total_tokens"] == before["total_tokens"] == 430
+    assert after["total_fresh_input_tokens"] == before["total_fresh_input_tokens"] == 100
+    assert after["total_calls"] == before["total_calls"] == 1
+    assert after["cache_hit_rate"] == before["cache_hit_rate"] == round(200 / 380, 4)
+    with reopened.connect() as conn:
+        sem = conn.execute("SELECT input_token_semantics FROM llm_usage_events").fetchone()[0]
+    assert sem == "exclusive"

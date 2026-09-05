@@ -195,7 +195,9 @@ async def _record_usage(
             total_tokens = usage.total_tokens
             # input_tokens 列存的是原始上报值：claude 协议按 exclusive 口径上报
             # （不含 cache_read/cache_creation），其余协议 inclusive。标签描述
-            # 列值口径，与 canonical（恒 inclusive）是两回事（issue #202）
+            # 列值口径，与 canonical（恒 inclusive）是两回事（issue #202）。
+            # 「claude ⇒ exclusive」口径另见 pricing.normalize_usage 的归一化侧
+            # 与 usage_store 的 SQL CASE——新增协议时需同步
             input_token_semantics = (
                 "exclusive" if client.config.protocol == "claude" else "inclusive"
             )
