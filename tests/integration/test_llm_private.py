@@ -77,8 +77,11 @@ async def test_generate_private_reply_uses_private_system_prompt(
     sys_prompt = stub.last_request.system_prompt
     assert "当前会话类型：私聊" in sys_prompt
     assert "当前私聊对象 QQ：3003" in sys_prompt
-    assert "阿桃在私聊里更愿意长篇回复。" in sys_prompt
+    # 持久记忆属动态段，改由当轮信封携带，不再进 system（前缀缓存契约）
+    assert "阿桃在私聊里更愿意长篇回复。" not in sys_prompt
     last_content = stub.last_request.messages[-1].content
+    assert "【轮次上下文】" in last_content
+    assert "阿桃在私聊里更愿意长篇回复。" in last_content
     assert "私聊里继续我们刚才的话题" in last_content
     # Alternating user/assistant seed produces 25 user scenes + 25 assistant + 1 current = 51
     assert len(stub.last_request.messages) == 51
@@ -97,3 +100,24 @@ def test_end_private_session_clears_history(configured_service):
     assert ctx["deleted"] == 5
     assert configured_service.get_chat_settings(3003, chat_type="private").enabled is False
     assert configured_service.store.list_recent_conversation_messages(scope_key, 100) == []
+
+
+async def test_private_scope_uses_same_epoch_mechanism(configured_service, monkeypatch):
+    from quickquip.llm.epoch import EpochKey
+
+    stub = StubProviderClient()
+    monkeypatch.setattr(llm_runtime_module, "build_provider_client", lambda provider: stub)
+    configured_service.start_private_session(3003)
+
+    await configured_service.generate_private_reply(user_id=3003, sender_name="阿桃", prompt="第一句")
+    key = EpochKey(scope_key="private:3003", provider_id="openai-main", model="gpt-test")
+    # 私聊与群聊同一纪元机制：首轮即懒初始化锚点
+    assert configured_service._epochs.current_anchor(key) is not None
+
+    await configured_service.generate_private_reply(user_id=3003, sender_name="阿桃", prompt="第二句")
+    # 第二轮请求带上第一轮 history（只追加窗口）
+    assert len(stub.last_request.messages) > 1
+
+    # start_private_session 走 clear_context → 纪元锚点同清
+    configured_service.start_private_session(3003)
+    assert configured_service._epochs.current_anchor(key) is None

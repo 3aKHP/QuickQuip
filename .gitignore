@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Local private-ID blocklist for the pre-commit hook (never commit)
+.redact-ids
+
 # Python caches and bytecode
 __pycache__/
 *.py[cod]

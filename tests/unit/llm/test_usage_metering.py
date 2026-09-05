@@ -138,6 +138,134 @@ async def test_complete_error_message_masks_url(monkeypatch, tmp_path):
     assert "api.example.com" not in row["error_message"]
 
 
+async def test_record_usage_carries_envelope_tokens_within_meter(monkeypatch, tmp_path):
+    """envelope_meter 内落的行带 envelope_tokens，meter 外落行则为 NULL；
+    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
+    from quickquip.llm.usage import _record_usage, envelope_meter
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
+    with envelope_meter(456):
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT envelope_tokens FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [r["envelope_tokens"] for r in rows] == [456, 456, None]
+
+
+async def test_record_usage_carries_epoch_history_tokens_within_meter(monkeypatch, tmp_path):
+    """epoch_meter 内落的行带 epoch_history_tokens，meter 外落行则为 NULL；
+    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
+    from quickquip.llm.usage import _record_usage, epoch_meter
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
+    with epoch_meter(4200):
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT epoch_history_tokens FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [r["epoch_history_tokens"] for r in rows] == [4200, 4200, None]
+
+
+async def test_record_usage_carries_media_image_count_within_meter(monkeypatch, tmp_path):
+    """media_meter 内落的行带 media_image_count，meter 外落行则为 NULL；
+    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
+    from quickquip.llm.usage import _record_usage, media_meter
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
+    with media_meter(2):
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT media_image_count FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [r["media_image_count"] for r in rows] == [2, 2, None]
+
+
+async def test_record_usage_carries_patch_tokens_within_meter(monkeypatch, tmp_path):
+    """patch_meter 内落的行带 patch_tokens，meter 外落行则为 NULL；
+    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
+    from quickquip.llm.usage import _record_usage, patch_meter
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
+    with patch_meter(360):
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT patch_tokens FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [r["patch_tokens"] for r in rows] == [360, 360, None]
+
+
 async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
     """e2e: 真实 _record_usage 把 row 写入 store（验证 row dict 列名匹配 schema）。"""
     from quickquip.llm.usage import _record_usage
@@ -205,3 +333,40 @@ async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
     expected = 100 * 2 / 1e6 + 50 * 10 / 1e6
     assert abs(row["cost_usd"] - expected) < 1e-9
     assert row["priced"] == 1
+
+
+async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_path):
+    """issue #202：input_tokens 列存原始上报值，标签须描述列值口径——
+    claude 协议 exclusive（不含 cache_read/creation），其余 inclusive。"""
+    from quickquip.llm.usage import _record_usage
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    async def _record(protocol: str) -> str | None:
+        class FakeClient:
+            config = ProviderConfig(
+                id="p", protocol=protocol, base_url="https://x/v1",
+                api_key_env="K", default_model="m", models=["m"],
+            )
+
+        class FakeReq:
+            model = "m"
+
+        response = LLMResponse(
+            text="ok", model="m", input_tokens=100, output_tokens=50,
+            cache_read_tokens=200,
+        )
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        with fake_store.connect() as conn:
+            return conn.execute(
+                "SELECT input_token_semantics FROM llm_usage_events"
+                " WHERE protocol = ?", (protocol,)
+            ).fetchone()[0]
+
+    assert await _record("claude") == "exclusive"
+    assert await _record("openai") == "inclusive"
+    assert await _record("gemini") == "inclusive"

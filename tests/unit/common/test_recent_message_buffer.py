@@ -87,3 +87,70 @@ def test_clear_scope_then_new_messages_only_new_content():
     buf.add_message(1, "u2", "b", "B", "清空后的新话", now_ts=2)
     recent = buf.list_recent(1, now_ts=3)
     assert [m["text"] for m in recent] == ["清空后的新话"]
+
+
+# ── list_patch：LLM 请求路径的增量补丁读取 ──────────────────
+
+
+def test_list_patch_budget_keeps_newest():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=600)
+    for i in range(5):
+        buf.add_message(1, i, "n", "c", "x" * 10, now_ts=i)
+    patch = buf.list_patch(1, budget_tokens=25, floor_seconds=0, token_estimator=len, now_ts=10)
+    # 预算 25 = 每条 10 → 保留最新两条；至少保留最新一条（超预算也保留）
+    assert [m["created_at"] for m in patch] == [3.0, 4.0]
+    patch = buf.list_patch(1, budget_tokens=5, floor_seconds=0, token_estimator=len, now_ts=10)
+    assert [m["created_at"] for m in patch] == [4.0]
+
+
+def test_list_patch_incremental_cursor_second_serve_only_new():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=600)
+    buf.add_message(1, "u1", "a", "A", "旧1", now_ts=0)
+    buf.add_message(1, "u2", "b", "B", "旧2", now_ts=1)
+    first = buf.list_patch(1, budget_tokens=800, floor_seconds=0, token_estimator=len, now_ts=10)
+    buf.note_patch_served(1, now_ts=10)
+    buf.add_message(1, "u3", "c", "C", "新1", now_ts=12)
+    second = buf.list_patch(1, budget_tokens=800, floor_seconds=0, token_estimator=len, now_ts=20)
+    assert [m["text"] for m in first] == ["旧1", "旧2"]
+    assert [m["text"] for m in second] == ["新1"]
+
+
+def test_list_patch_sliding_floor_union():
+    # 滑动保底窗内的消息即使已服役过也会重附（增量 ∪ 保底）
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=600)
+    buf.add_message(1, "u1", "a", "A", "窗内", now_ts=98)
+    buf.list_patch(1, budget_tokens=800, floor_seconds=0, token_estimator=len, now_ts=100)
+    buf.note_patch_served(1, now_ts=100)
+    buf.add_message(1, "u2", "b", "B", "新增", now_ts=105)
+    patch = buf.list_patch(1, budget_tokens=800, floor_seconds=30, token_estimator=len, now_ts=120)
+    assert [m["text"] for m in patch] == ["窗内", "新增"]
+
+
+def test_list_patch_excludes_message_ids():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=600)
+    buf.add_message(1, "u1", "a", "A", "已进history", message_id="m-1", now_ts=0)
+    buf.add_message(1, "u2", "b", "B", "触发消息自身", message_id="m-2", now_ts=1)
+    buf.add_message(1, "u3", "c", "C", "无id始终保留", now_ts=2)
+    buf.add_message(1, "u4", "d", "D", "真现场", message_id="m-3", now_ts=3)
+    patch = buf.list_patch(
+        1,
+        exclude_message_ids={"m-1", "m-2"},
+        budget_tokens=800,
+        floor_seconds=0,
+        token_estimator=len,
+        now_ts=10,
+    )
+    assert [m["text"] for m in patch] == ["无id始终保留", "真现场"]
+
+
+def test_clear_scope_clears_patch_cursor():
+    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=600)
+    buf.add_message(1, "u1", "a", "A", "旧话", now_ts=0)
+    buf.list_patch(1, budget_tokens=800, floor_seconds=0, token_estimator=len, now_ts=10)
+    buf.note_patch_served(1, now_ts=10)
+    buf.clear_scope(1)
+    # 清空后新写入的消息 created_at 早于旧游标（时钟回放/测试注入场景）：
+    # 游标若未随 clear 清除，这条消息会被错误排除
+    buf.add_message(1, "u2", "b", "B", "新话", now_ts=5)
+    patch = buf.list_patch(1, budget_tokens=800, floor_seconds=0, token_estimator=len, now_ts=20)
+    assert [m["text"] for m in patch] == ["新话"]

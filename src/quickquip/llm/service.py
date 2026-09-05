@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, replace
+from datetime import datetime
 import logging
 from pathlib import Path
 import re
 from typing import Any, TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.sensitive_filter import (
@@ -48,8 +50,10 @@ from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
+    FORWARD_IMAGE_CONTEXT_PREFIX,
     IMAGE_PREPROCESSING_FAILED_REPLY,
     IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
+    RECENT_IMAGE_CONTEXT_PREFIX,
     match_image_descriptions,
     plan_non_vision_images,
 )
@@ -57,7 +61,16 @@ from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
+    build_turn_envelope,
     merge_image_urls,
+)
+from quickquip.llm.token_estimate import estimate_tokens
+from quickquip.llm.epoch import (
+    DEFAULT_EPOCH_MAX_ROWS,
+    EpochKey,
+    EpochManager,
+    EpochParams,
+    estimate_rows_budget,
 )
 from quickquip.llm.provider import (
     LLMProviderError,
@@ -72,10 +85,8 @@ from quickquip.llm.quick_judge import (
 )
 from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS as DEFAULT_ENABLED_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
-    DEFAULT_PRIVATE_HISTORY_LIMIT as DEFAULT_PRIVATE_HISTORY_LIMIT,  # noqa: F401 — re-exported via plugins/llm_runtime
-    MAX_GROUP_STORED_CONVERSATION_MESSAGES as MAX_GROUP_STORED_CONVERSATION_MESSAGES,  # noqa: F401 — re-exported
     MAX_MEMORY_RETRIEVAL_ITEMS,
-    MAX_PRIVATE_STORED_CONVERSATION_MESSAGES as MAX_PRIVATE_STORED_CONVERSATION_MESSAGES,  # noqa: F401 — re-exported
+    MAX_STORED_CONVERSATION_MESSAGES,
     MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_TRIGGER_CONTEXT_MESSAGES,
     PRIVATE_UNAVAILABLE_TOOLS as PRIVATE_UNAVAILABLE_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
@@ -95,7 +106,7 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import usage_scope
+from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, patch_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -132,6 +143,8 @@ VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
+MAX_PERSISTED_IMAGE_DESC_CHARS = 200
+MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS = 800
 _GROUP_CACHE_MAX = 512
 
 
@@ -188,6 +201,16 @@ class _ImagePreprocessingOutcome:
     is_non_vision: bool
 
 
+def _image_caption_blob(descriptions: list[ImageDescription]) -> tuple[int, str]:
+    """图注落库文本：单条截 200、整坨截 800，顺序 = 候选顺序（确定性）。
+
+    截断必须在落库前完成——落库字节即前缀字节，下一轮换侧 history 原样复现。
+    """
+    descs = [d.text_description.strip() for d in descriptions if d.text_description.strip()]
+    blob = "；".join(d[:MAX_PERSISTED_IMAGE_DESC_CHARS].rstrip() for d in descs)
+    return len(descs), blob[:MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS]
+
+
 class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
     def __init__(
         self,
@@ -208,6 +231,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
         self._init_mcp_lifecycle()
         self._session_presets: dict[str, str] = {}
+        # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
+        self._epochs = EpochManager()
         self._init_auto_memory()
         self._init_error: str | None = None
 
@@ -339,12 +364,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         persona: PersonaConfig,
         group_id: int | str,
         chat_type: str,
-        user_id: int | str,
-        sender_name: str,
-        prompt: str,
-        memories: list[dict[str, object]],
         tool_specs: list[LLMToolSpec],
-        participants: list[dict[str, str]] | None = None,
         provider_style_overrides: str = "",
         session_preset: str = "",
         provider_id: str | None = None,
@@ -353,14 +373,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         return build_system_prompt(
             persona=persona,
             group_id=group_id,
-            user_id=user_id,
-            sender_name=sender_name,
-            prompt=prompt,
-            memories=memories,
             tool_specs=tool_specs,
-            identities=self._resolve_identities(str(group_id)),
-            vocab=self._resolve_vocab(str(group_id)),
-            beijing_timezone=BEIJING_TIMEZONE,
             search_tool_name=SEARCH_TOOL_NAME,
             search_mode=(
                 "builtin"
@@ -372,9 +385,26 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             tool_list_name=TOOL_LIST_NAME,
             deferred_tool_categories=self._get_deferred_tool_categories(chat_type, provider_id=provider_id),
             chat_type=chat_type,
-            participants=participants,
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
+        )
+
+    def _build_turn_envelope(
+        self,
+        group_id: int | str,
+        chat_type: str,
+        prompt: str,
+        memories: list[dict[str, object]],
+        participants: list[dict[str, str]] | None = None,
+    ) -> str:
+        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。
+        return build_turn_envelope(
+            now=datetime.now(ZoneInfo(BEIJING_TIMEZONE)),
+            prompt=prompt,
+            memories=memories,
+            vocab=self._resolve_vocab(str(group_id)),
+            chat_type=chat_type,
+            participants=participants,
         )
 
     async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
@@ -421,6 +451,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         forward_image_urls: list[str] | None = None,
         image_descriptions: list[object] | None = None,
         include_recent_images: bool = False,
+        recent_images_messages: list[dict[str, str]] | None = None,
+        turn_envelope: str = "",
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -428,6 +460,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             history=history,
             recent_messages=recent_messages,
             max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
+            recent_images_messages=recent_images_messages,
             chat_type=chat_type,
             identities=self._resolve_identities(group_id),
             current_sender_name=current_sender_name,
@@ -441,6 +474,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             forward_image_urls=forward_image_urls,
             image_descriptions=image_descriptions,
             include_recent_images=include_recent_images,
+            turn_envelope=turn_envelope,
         )
 
     async def generate_defectify_reply(
@@ -544,6 +578,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
 
         def _push(raw_user_id: int | str | None, raw_sender_name: str = "", raw_canonical_name: str = "") -> None:
             user_key = str(raw_user_id or "").strip()
+            if user_key and not user_key.isdigit():
+                # 合成触发源（boredom_timer/scheduled_timer 等）不是群成员，
+                # 不进信封参与者（触发者本人与 history 合成行两路都过滤）
+                return
             sender_value = raw_sender_name.strip()
             canonical_value = raw_canonical_name.strip()
             if not user_key and not sender_value:
@@ -625,7 +663,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
-        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls, request_forward_image_urls)
+        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
+        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls)
 
         image_plan = None
         if is_non_vision:
@@ -646,13 +685,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 }
 
         if effective_image_urls:
+            # images= 是实际附带数（转发图不附带，不计入）；sources 各分项同理
+            # 只列附带来源，避免 total 与分项和对不上误导排查
             sources: list[str] = []
             if normalized_image_urls:
                 sources.append(f"直接={len(normalized_image_urls)}")
             if normalized_quoted_image_urls:
                 sources.append(f"引用={len(normalized_quoted_image_urls)}")
-            if normalized_forward_image_urls:
-                sources.append(f"转发={len(normalized_forward_image_urls)}")
             logger.info(
                 "group=%s model=%s non_vision=%s images=%d (%s)",
                 chat_id, current_model, is_non_vision,
@@ -755,16 +794,26 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         user_id: int | str,
         sender_name: str,
         recent_messages: list[dict[str, str]] | None,
+        message_id: str | None,
         quoted_sender_name: str,
         quoted_user_id: str,
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-        default_history_limit = self._default_history_limit(chat_type)
-        history = self.store.list_recent_conversation_messages(
-            scope_key,
-            min(
-                settings.history_limit if settings.history_limit is not None else default_history_limit,
-                self._max_stored_conversation_messages(chat_type),
-            ),
+        epoch_key: EpochKey,
+        epoch_params: EpochParams,
+    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None]:
+        # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
+        # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
+        # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
+        # 两种读模式，勿在此"统一"。
+        self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        anchor = self._epochs.current_anchor(epoch_key) or 0
+        if settings.history_limit is not None:
+            # 显式 /llm context_limit 覆盖：尊重"更小窗口"意图，退化为该会话的
+            # 行数兜底滚动窗（每轮按行数重新锚定）。
+            backstop = self.store.find_anchor_row_id_by_rows(scope_key, settings.history_limit)
+            if backstop is not None:
+                anchor = max(anchor, backstop)
+        history = self.store.list_conversation_messages_since(
+            scope_key, anchor, limit=DEFAULT_EPOCH_MAX_ROWS,
         )
         if sensitive.is_loaded and history:
             # Re-scan history with the *current* word list — entries written
@@ -786,6 +835,24 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     "sensitive_filter[history] scrubbed scope=%s fields=%d",
                     scope_key, history_blocked,
                 )
+        # 【现场】补丁自取：仅群聊、调用方未显式注入（None=自取，[]=显式空，
+        # 后者是测试注入口）、buffer 已绑定。去重 = history 已覆盖的
+        # message_id ∪ 当前触发消息（_remember_recent_message 先于本调用，
+        # 触发消息已在 buffer）。读即服役：取出后立即推进游标。
+        if recent_messages is None and chat_type == "group" and self.recent_message_buffer is not None:
+            exclude_ids = {
+                str(item["message_id"]) for item in history if item.get("message_id")
+            }
+            if message_id:
+                exclude_ids.add(str(message_id))
+            recent_messages = self.recent_message_buffer.list_patch(
+                scope_key,
+                exclude_message_ids=exclude_ids,
+                budget_tokens=self.config.runtime.recent_context_token_budget,
+                floor_seconds=self.config.runtime.recent_context_floor_seconds,
+                token_estimator=estimate_tokens,
+            )
+            self.recent_message_buffer.note_patch_served(scope_key)
         participants = self._collect_known_participants(
             user_id=user_id,
             sender_name=sender_name,
@@ -795,13 +862,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_user_id=quoted_user_id,
             group_id=str(chat_id),
         )
-        return history, participants
+        return history, participants, recent_messages
 
     def _persist_turn_and_build_reply(
         self,
         *,
         chat_id: int | str,
-        chat_type: str,
         user_id: int | str,
         sender_name: str,
         scope_key: str,
@@ -811,11 +877,13 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         text: str,
         stored_prompt: str,
         store_user_message: bool,
+        trigger_auto_memory: bool,
         message_id: str | None,
         normalized_quoted_text: str,
         normalized_quoted_image_urls: list[str],
         normalized_forward_text: str,
         normalized_forward_image_urls: list[str],
+        image_descriptions: list[ImageDescription] | None = None,
         tool_context: ToolExecutionContext,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
@@ -829,6 +897,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 fw_text = normalized_forward_text or "[合并转发消息]"
                 fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
                 raw_turn_parts.append(fw_text + fw_suffix)
+            if image_descriptions:
+                # 非 VLM 路径：图注以文本身份落库（媒体本体永不进前缀）；
+                # 下一轮换侧 history 直接复用落库字节，转述内容不再随轮丢失
+                caption_count, caption_blob = _image_caption_blob(image_descriptions)
+                if caption_count:
+                    raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
             raw_turn_parts.append(stored_prompt)
             raw_turn = "\n".join(raw_turn_parts)
             self.store.append_conversation_message(
@@ -842,12 +916,15 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 raw_content=raw_turn,
             )
         self.store.append_conversation_message(scope_key, None, "assistant", text)
-        self.store.prune_conversation_messages(
+        # 纪元裁剪：floor = 该 scope 所有纪元键的最老锚点（None = 只按硬上限兜底，
+        # 绝不按窗口重估删行——重启后懒初始化还要读旧行）
+        self.store.crop_conversation_messages(
             scope_key,
-            self._history_retention_limit(chat_type),
+            floor_id=self._epochs.oldest_anchor(scope_key),
+            keep_last=MAX_STORED_CONVERSATION_MESSAGES,
         )
 
-        if store_user_message and settings.auto_memory_enabled and settings.memory_enabled:
+        if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
             asyncio.create_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
@@ -891,6 +968,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         voice_text: str = "",
         raw_user_text: str | None = None,
         store_user_message: bool = True,
+        trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, object]:
@@ -990,7 +1068,47 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             item for item in [stored_prompt, quoted_prompt] if item
         )[: self.config.runtime.max_prompt_chars]
 
+        # ── history load + sensitive scrub + 【现场】补丁自取 + participants ──
+        # 先于图片预处理：补丁去重要用 history 的 message_id，而预处理的
+        # 近期图候选与 participants 都消费补丁。注意 epoch 锚点推进因此早于
+        # 预处理早退路径（图片拦截/下载失败），锚点轻幅漂移属可接受边界。
+        epoch_key = EpochKey(
+            scope_key=scope_key,
+            provider_id=provider.id,
+            model=settings.model or provider.default_model,
+        )
+        history, participants, scene_patch = self._load_scrubbed_history_and_participants(
+            chat_id=chat_id,
+            chat_type=chat_type,
+            scope_key=scope_key,
+            settings=settings,
+            sensitive=sensitive,
+            user_id=user_id,
+            sender_name=sender_name,
+            recent_messages=recent_messages,
+            message_id=message_id,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+            epoch_key=epoch_key,
+            epoch_params=self.config.resolve_epoch_params(provider),
+        )
+
         # ── image preprocessing & non-VLM stripping ──────────────────
+        # 被动唤醒「看见近期图」是全量快照语义（TTL 窗，list_recent），不随【现场】
+        # 补丁的增量游标收窄——无聊唤醒恰在冷场（补丁最空）时触发，增量图源会让
+        # 该特性静默失效。文本上下文仍走增量补丁（scene_patch）；显式注入
+        # recent_messages（测试注入口）时注入列表即图源，不被 buffer 覆盖。
+        if (
+            include_recent_images
+            and recent_messages is None
+            and chat_type == "group"
+            and self.recent_message_buffer is not None
+        ):
+            recent_images_source: list[dict[str, str]] | None = (
+                self.recent_message_buffer.list_recent(scope_key)
+            )
+        else:
+            recent_images_source = scene_patch
         image_outcome = await self._preprocess_images_for_model(
             chat_id=chat_id,
             scope_key=scope_key,
@@ -1002,7 +1120,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             normalized_image_urls=normalized_image_urls,
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_image_urls=normalized_forward_image_urls,
-            recent_messages=recent_messages,
+            recent_messages=recent_images_source,
             include_recent_images=include_recent_images,
             sensitive=sensitive,
         )
@@ -1014,19 +1132,22 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions = image_outcome.image_descriptions
         is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
-        # ── history load + sensitive scrub + participants ────────────
-        history, participants = self._load_scrubbed_history_and_participants(
-            chat_id=chat_id,
-            chat_type=chat_type,
-            scope_key=scope_key,
-            settings=settings,
-            sensitive=sensitive,
-            user_id=user_id,
-            sender_name=sender_name,
-            recent_messages=recent_messages,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-        )
+        # 转发图注并入 normalized_forward_text：当轮渲染（_build_messages）与落库
+        # （_persist_turn_and_build_reply）共用同一变量，两条路径字节一致；
+        # 并入后从 image_descriptions 摘除，避免视觉转述行与落库 caption 双重出现
+        forward_descs = [d for d in image_descriptions if d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
+        if forward_descs:
+            forward_caption_count, forward_caption_blob = _image_caption_blob(forward_descs)
+            if forward_caption_count:
+                normalized_forward_text = "\n".join(
+                    part
+                    for part in (
+                        normalized_forward_text,
+                        f"[转发图片 {forward_caption_count} 张：{forward_caption_blob}]",
+                    )
+                    if part
+                )
+                image_descriptions = [d for d in image_descriptions if not d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
         memories: list[dict[str, object]] = []
@@ -1049,22 +1170,25 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             persona,
             chat_id,
             chat_type,
-            user_id,
-            sender_name,
-            analysis_prompt or trimmed_prompt,
-            memories,
             tool_specs,
-            participants=participants,
             provider_style_overrides=provider.style_overrides,
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
         )
+        turn_envelope = self._build_turn_envelope(
+            chat_id,
+            chat_type,
+            analysis_prompt or trimmed_prompt,
+            memories,
+            participants=participants,
+        )
         messages = self._build_messages(
             prompt=trimmed_prompt,
             image_urls=effective_image_urls,
             history=history,
-            recent_messages=recent_messages,
+            recent_messages=scene_patch,
+            recent_images_messages=recent_images_source,
             chat_type=chat_type,
             group_id=str(chat_id),
             current_sender_name=sender_name,
@@ -1078,6 +1202,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             forward_image_urls=request_forward_image_urls,
             image_descriptions=image_descriptions or None,
             include_recent_images=include_recent_images and not is_non_vision,
+            turn_envelope=turn_envelope,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -1105,7 +1230,25 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # scope 生命周期与 provider 调用同处一个函数，退出即复位。
             # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
             # 与 auto_memory 等派生调用的归因口径一致。
-            with usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None):
+            with (
+                usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
+                envelope_meter(estimate_tokens(turn_envelope)),
+                epoch_meter(estimate_rows_budget(history)),
+                # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
+                # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
+                media_meter(len(messages[-1].image_urls)),
+                # 补丁账本：【现场】块 token 估算，与预算同单位（AVG=预算利用率）。
+                # 三态：None=未自取（私聊/buffer 未绑定）；0=自取但补丁为空（有效
+                # 信号，与 media 的 0 同理）；正值=自取有货。空补丁轮计入 coverage
+                # 分子，否则 patch_coverage 测的是「非空补丁轮占比」而非自取覆盖率
+                patch_meter(
+                    sum(estimate_tokens(str(item.get("text", ""))) for item in scene_patch)
+                    if scene_patch is not None
+                    else None
+                ),
+            ):
+                # 只有请求才续期 provider 侧缓存；失败请求也可能已写缓存，保守续期
+                self._epochs.note_activity(epoch_key)
                 response = await self._run_tool_call_loop(
                     provider=provider,
                     request=request,
@@ -1161,7 +1304,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # ── persistence + auto-memory dispatch + reply assembly ──────
         return self._persist_turn_and_build_reply(
             chat_id=chat_id,
-            chat_type=chat_type,
             user_id=user_id,
             sender_name=sender_name,
             scope_key=scope_key,
@@ -1171,11 +1313,16 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             text=text,
             stored_prompt=stored_prompt,
             store_user_message=store_user_message,
+            trigger_auto_memory=trigger_auto_memory,
             message_id=message_id,
             normalized_quoted_text=normalized_quoted_text,
             normalized_quoted_image_urls=normalized_quoted_image_urls,
             normalized_forward_text=normalized_forward_text,
             normalized_forward_image_urls=normalized_forward_image_urls,
+            # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
+            # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
+            # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
+            image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
             tool_context=tool_context,
         )
 
@@ -1198,6 +1345,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         voice_text: str = "",
         raw_user_text: str | None = None,
         store_user_message: bool = True,
+        trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, object]:
@@ -1220,6 +1368,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 voice_text=voice_text,
                 raw_user_text=raw_user_text,
                 store_user_message=store_user_message,
+                trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
             )
@@ -1242,6 +1391,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         voice_text: str = "",
         raw_user_text: str | None = None,
         store_user_message: bool = True,
+        trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
     ) -> dict[str, object]:
@@ -1264,6 +1414,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 voice_text=voice_text,
                 raw_user_text=raw_user_text,
                 store_user_message=store_user_message,
+                trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
             )

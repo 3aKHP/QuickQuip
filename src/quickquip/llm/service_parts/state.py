@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from quickquip.llm.config import ProviderConfig
+from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
 
 
@@ -146,7 +147,23 @@ class StateMixin:
     def set_chat_persona(self, chat_id: int | str, persona_id: str, chat_type: str = "group") -> None:
         if persona_id not in self.config.personas:
             raise ValueError(f"未知 persona：{persona_id}")
+        # persona 切换 = system 字节变化 = 该纪元键缓存全灭 = 免费重置窗口，
+        # 按冷场水位挪锚点（不看 idle）。取切换前的 (provider, model) 键——
+        # 被杀的正是它。换 provider/model 无需挂钩：纪元键自动开新纪元。
+        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
         self._update_chat_settings(chat_id, chat_type, persona_id=persona_id)
+        provider = self.config.providers.get(settings.provider_id)
+        if provider is not None:
+            epoch_key = EpochKey(
+                scope_key=self.build_chat_scope_key(chat_id, chat_type),
+                provider_id=provider.id,
+                model=settings.model or provider.default_model,
+            )
+            self._epochs.advance_to_cold_water(
+                epoch_key,
+                store=self.store,
+                params=self.config.resolve_epoch_params(provider),
+            )
 
     def set_group_persona(self, group_id: int | str, persona_id: str) -> None:
         self.set_chat_persona(group_id, persona_id, chat_type="group")
@@ -272,10 +289,12 @@ class StateMixin:
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
         scope_key = self.build_chat_scope_key(group_id, chat_type)
         deleted = self.store.clear_conversation_messages(scope_key)
-        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲；只清前者会让
-        # build_messages 继续把缓冲拼进提示词，模型仍然"看得见"历史。
+        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点；只清前者
+        # 会让 build_messages 继续把缓冲拼进提示词，或让纪元锚点指向已删除的行，
+        # 模型仍然"看得见"历史。三件齐清（私聊会话 start/end/resume 也走这里）。
         if self.recent_message_buffer:
             self.recent_message_buffer.clear_scope(scope_key)
+        self._epochs.reset_scope(scope_key)
         return deleted
 
     def clear_group_context(self, group_id: int | str) -> int:

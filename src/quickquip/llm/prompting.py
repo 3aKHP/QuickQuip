@@ -2,15 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING
 
+from quickquip.chat.festival import get_festival_persona_appendix
 from quickquip.llm.tools import (
     LLMConversationMessage,
     LLMSceneMessage,
     LLMToolSpec,
     SCENE_MARKER_CONTEXT,
     SCENE_MARKER_CURRENT,
+    SCENE_MARKER_LIVE,
 )
+
+if TYPE_CHECKING:
+    from quickquip.llm.vocab import VocabIndex
 
 # Upper bound on how many images from the recent-message buffer are attached
 # to a passive/boredom trigger. Keeps multimodal token cost bounded regardless
@@ -54,6 +59,10 @@ def format_participant_label(
     normalized_user_id = user_id.strip()
     normalized_sender_name = sender_name.strip()
     normalized_canonical_name = canonical_name.strip()
+    if normalized_user_id and not normalized_user_id.isdigit():
+        # 合成触发源（boredom_timer / scheduled_timer）不是 QQ 号：直接以名字呈现，
+        # 不包装成「（QQ xxx，未登记）」伪身份——system prompt 教模型按 QQ 号认人
+        return normalized_sender_name or normalized_user_id
     if normalized_canonical_name and normalized_sender_name and normalized_canonical_name != normalized_sender_name:
         return f"{normalized_canonical_name}（QQ {normalized_user_id}，当前显示名：{normalized_sender_name}）"
     if normalized_canonical_name:
@@ -197,14 +206,7 @@ def build_system_prompt(
     *,
     persona,
     group_id: int | str,
-    user_id: int | str,
-    sender_name: str,
-    prompt: str,
-    memories: list[dict[str, object]],
     tool_specs: list[LLMToolSpec],
-    identities,
-    vocab,
-    beijing_timezone: str,
     search_tool_name: str,
     search_mode: str = "none",  # "builtin"（provider 内置 grounding）| "searxng"（search_web）| "none"
     tool_discovery_enabled: bool = False,
@@ -212,13 +214,13 @@ def build_system_prompt(
     tool_list_name: str = "tool_list",
     deferred_tool_categories: list[str] | None = None,
     chat_type: str = "group",
-    participants: list[dict[str, str]] | None = None,
     provider_style_overrides: str = "",
     session_preset: str = "",
 ) -> str:
-    now_cst = datetime.now(ZoneInfo(beijing_timezone))
-    weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-
+    """组装 system prompt。只含跨轮、跨日稳定的段落（前缀缓存字节稳定契约）；
+    时间/节日/participants/memories/词表命中等逐轮变化的内容一律走
+    build_turn_envelope，不得在此引入时钟或逐轮输入。
+    """
     lines: list[str] = []
 
     # Structured persona fields (compiled from TOML tables in extras)
@@ -248,15 +250,8 @@ def build_system_prompt(
     lines.append("- 所有消息均标注了发言者身份，格式为：身份（QQ 号）或 身份（QQ 号，当前显示名）")
     lines.append(f"- 以「{SCENE_MARKER_CURRENT}」标记的是当前需要回复的消息")
     lines.append(f"- 以「{SCENE_MARKER_CONTEXT}」标记的是上文对话历史")
+    lines.append(f"- 以「{SCENE_MARKER_LIVE}」标记的是上一轮对话之后群内的其他发言（现场氛围，非直接对话）")
 
-    lines.append("当前元数据：")
-    lines.append(f"- 当前北京时间：{now_cst:%Y-%m-%d %H:%M}")
-    lines.append(f"- 当前星期：{weekday_names[now_cst.weekday()]}")
-    from quickquip.chat.festival import get_festival_persona_appendix
-    festival_appendix = get_festival_persona_appendix()
-    if festival_appendix:
-        lines.append("节日提示：")
-        lines.append(f"- {festival_appendix}")
     if chat_type == "private":
         lines.append("- 当前会话类型：私聊")
         lines.append(f"- 当前私聊对象 QQ：{group_id}")
@@ -268,39 +263,6 @@ def build_system_prompt(
     if session_preset.strip():
         lines.append("本次会话的附加设定：")
         lines.append(session_preset.strip())
-    if participants:
-        participant_lines = ["当前对话参与成员："]
-        for item in participants[:8]:
-            name = item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
-            participant_lines.append(f"- {name}")
-        lines.append("\n".join(participant_lines))
-
-    if memories:
-        if chat_type == "private":
-            lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
-        else:
-            lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
-        for index, memory in enumerate(memories, 1):
-            lines.append(f"{index}. {memory['content']}")
-
-    vocab_lines: list[str] = []
-    vocab_matches = vocab.find_matches(prompt)
-    if vocab_matches:
-        vocab_lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
-        for item in vocab_matches:
-            line = f"- {item.alias} 通常指 {item.name}"
-            if item.note:
-                line += f"；注意：{item.note}"
-            vocab_lines.append(line)
-
-    glossary_matches = vocab.find_glossary(prompt)
-    if glossary_matches:
-        vocab_lines.append("以下黑话解释仅在当前话题相关时参考：")
-        for term, meaning in glossary_matches:
-            vocab_lines.append(f"- {term}：{meaning}")
-
-    if vocab_lines:
-        lines.append("\n".join(vocab_lines))
 
     if search_mode == "builtin":
         lines.append(
@@ -345,6 +307,64 @@ def build_system_prompt(
     return "\n\n".join(line for line in lines if line)
 
 
+_WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+
+
+def build_turn_envelope(
+    *,
+    now: datetime,
+    prompt: str,
+    memories: list[dict[str, object]],
+    vocab: VocabIndex,
+    chat_type: str = "group",
+    participants: list[dict[str, str]] | None = None,
+) -> str:
+    """渲染当轮上下文信封，由 build_messages prepend 到最终 user 消息头部。
+
+    组装时渲染、不落库。``now`` 为必传的可注入时钟（调用方给北京时间），
+    本函数自身不含任何隐藏时钟/全局状态，相同输入字节稳定。
+    空段整段省略；时间行恒在，故返回值永不为空串。
+    """
+    lines: list[str] = ["【轮次上下文】"]
+    lines.append(f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} {now:%H:%M}（北京时间）")
+
+    festival_appendix = get_festival_persona_appendix(today=now.date())
+    if festival_appendix:
+        lines.append(f"- 节日：{festival_appendix}")
+
+    if participants:
+        names = [
+            item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
+            for item in participants[:8]
+        ]
+        lines.append(f"- 当前对话参与成员：{'、'.join(names)}")
+
+    if memories:
+        if chat_type == "private":
+            lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
+        else:
+            lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
+        for index, memory in enumerate(memories, 1):
+            lines.append(f"{index}. {memory['content']}")
+
+    vocab_matches = vocab.find_matches(prompt)
+    if vocab_matches:
+        lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
+        for item in vocab_matches:
+            line = f"- {item.alias} 通常指 {item.name}"
+            if item.note:
+                line += f"；注意：{item.note}"
+            lines.append(line)
+
+    glossary_matches = vocab.find_glossary(prompt)
+    if glossary_matches:
+        lines.append("以下黑话解释仅在当前话题相关时参考：")
+        for term, meaning in glossary_matches:
+            lines.append(f"- {term}：{meaning}")
+
+    return "\n".join(lines)
+
+
 def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_canonical: str) -> str:
     if identities is None or not user_id.strip():
         return stored_canonical
@@ -354,7 +374,7 @@ def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_c
     return stored_canonical
 
 
-def _history_text(item: dict[str, str]) -> str:
+def _history_text(item: dict[str, object]) -> str:
     """历史 user 行的渲染文本：raw_content 占位符优先，落空回退 content。
 
     过滤与渲染必须共用这一处表达式；content 为空但 raw_content 非空
@@ -369,7 +389,7 @@ def _history_text(item: dict[str, str]) -> str:
 # ---------------------------------------------------------------------------
 
 def _build_scenes_from_history(
-    history: list[dict[str, str]],
+    history: list[dict[str, object]],
     *,
     identities=None,
 ) -> list[LLMSceneMessage]:
@@ -396,12 +416,11 @@ def _build_scenes_from_history(
                 pending_speakers = []
                 pending_images = []
         else:
-            user_id = item.get("user_id", "")
-            sender_name = item.get("sender_name", "")
+            user_id = str(item.get("user_id") or "")
+            sender_name = str(item.get("sender_name") or "")
             raw_text = _history_text(item)
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
+            # 渲染冻结：history 行信任落库定格的 canonical_name（前缀稳定契约，见 docs/dev/llm-module.md §4.2）
+            canonical_name = str(item.get("canonical_name") or "")
             pending_speakers.append({
                 "user_id": user_id,
                 "sender_name": sender_name,
@@ -420,27 +439,27 @@ def _build_scenes_from_history(
 
 
 def _build_scene_from_recent_buffer(
-    recent_messages: list[dict[str, str]],
+    # list_patch 返回的行含 created_at: float（list_recent 行不含），故值域用 object
+    recent_messages: list[dict[str, object]],
     *,
-    max_trigger_context_messages: int,
     identities=None,
 ) -> LLMSceneMessage | None:
-    """Convert the recent-message buffer into a single scene."""
+    """把近期消息补丁（list_patch 已按预算截好）转成独立【现场】scene。"""
     if not recent_messages:
         return None
 
     speakers: list[dict[str, str]] = []
-    for item in recent_messages[-max_trigger_context_messages:]:
+    for item in recent_messages:
         user_id = item["user_id"]
         sender_name = item.get("sender_name", "")
         canonical_name = _resolve_canonical_name(
             identities, user_id, sender_name, item.get("canonical_name", ""),
         )
         speakers.append({
-            "user_id": user_id,
-            "sender_name": sender_name,
-            "canonical_name": canonical_name,
-            "text": item["text"],
+            "user_id": str(user_id),
+            "sender_name": str(sender_name),
+            "canonical_name": str(canonical_name),
+            "text": str(item["text"]),
         })
 
     return LLMSceneMessage(
@@ -505,8 +524,7 @@ def _build_scene_from_current_message(
             "canonical_name": "转发消息",
             "text": f"[转发] {fw_text}",
         })
-        if forward_image_urls:
-            all_images.extend(forward_image_urls)
+        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
 
     # Image pre-processing results as context lines
     if image_descriptions:
@@ -563,8 +581,15 @@ def _render_scene_to_text(
 
     Called once at assembly time, never stored.
     """
-    marker = SCENE_MARKER_CURRENT if scene.scene_type == "current" else SCENE_MARKER_CONTEXT
+    if scene.scene_type == "current":
+        marker = SCENE_MARKER_CURRENT
+    elif scene.scene_type == "recent":
+        marker = SCENE_MARKER_LIVE
+    else:
+        marker = SCENE_MARKER_CONTEXT
     lines = [marker]
+    if scene.scene_type == "recent":
+        lines.append("（以下是上一轮对话之后群内的其他发言，供理解现场氛围，非与你的直接对话）")
     for speaker in scene.speakers:
         label = format_participant_label(
             user_id=speaker.get("user_id", ""),
@@ -580,10 +605,11 @@ def build_messages(
     *,
     prompt: str,
     image_urls: list[str],
-    history: list[dict[str, str]],
+    history: list[dict[str, object]],
     recent_messages: list[dict[str, str]] | None,
     max_trigger_context_messages: int,
     include_recent_images: bool = False,
+    recent_images_messages: list[dict[str, str]] | None = None,
     max_recent_images: int = MAX_RECENT_CONTEXT_IMAGES,
     chat_type: str = "group",
     identities=None,
@@ -597,6 +623,7 @@ def build_messages(
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
     image_descriptions: list[object] | None = None,
+    turn_envelope: str = "",
 ) -> list[LLMConversationMessage]:
     """Build the final messages array using scene-based grouping.
 
@@ -606,20 +633,22 @@ def build_messages(
 
     The resulting array maintains user/assistant alternation, which
     satisfies the ordering requirements of all three providers.
+
+    ``turn_envelope``（通常由 build_turn_envelope 渲染）非空时 prepend
+    到最终 user 消息文本头部；组装时渲染、不落库。
     """
     messages: list[LLMConversationMessage] = []
 
     # Group pending human messages into a scene, flush when we hit an
-    # assistant message.
+    # assistant message.  history 行是纯文本（图片已图注化），scene 不带图。
     pending_speakers: list[dict[str, str]] = []
-    pending_images: list[str] = []
 
     def _flush_pending():
         if not pending_speakers:
             return
         scene = LLMSceneMessage(
             speakers=list(pending_speakers),
-            images=list(pending_images),
+            images=[],
             scene_type="history",
         )
         messages.append(LLMConversationMessage(
@@ -628,7 +657,6 @@ def build_messages(
             image_urls=scene.images,
         ))
         pending_speakers.clear()
-        pending_images.clear()
 
     for item in history:
         if item["role"] not in {"user", "assistant"} or not _history_text(item).strip():
@@ -638,15 +666,14 @@ def build_messages(
             _flush_pending()
             messages.append(LLMConversationMessage(
                 role="assistant",
-                content=item["content"],
+                content=str(item["content"]),
             ))
         else:
-            user_id = item.get("user_id", "")
-            sender_name = item.get("sender_name", "")
+            user_id = str(item.get("user_id") or "")
+            sender_name = str(item.get("sender_name") or "")
             raw_text = _history_text(item)
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
+            # 渲染冻结：history 行信任落库定格的 canonical_name（前缀稳定契约，见 docs/dev/llm-module.md §4.2）
+            canonical_name = str(item.get("canonical_name") or "")
             pending_speakers.append({
                 "user_id": user_id,
                 "sender_name": sender_name,
@@ -654,36 +681,25 @@ def build_messages(
                 "text": raw_text,
             })
 
-    # Recent buffer: merge into pending rather than creating a separate scene,
-    # so the boundary between recent buffer and history is invisible to the LLM.
-    if recent_messages:
-        recent_slice = recent_messages[-max_trigger_context_messages:]
-        for item in recent_slice:
-            user_id = item["user_id"]
-            sender_name = item.get("sender_name", "")
-            canonical_name = _resolve_canonical_name(
-                identities, user_id, sender_name, item.get("canonical_name", ""),
-            )
-            pending_speakers.append({
-                "user_id": user_id,
-                "sender_name": sender_name,
-                "canonical_name": canonical_name,
-                "text": item["text"],
-            })
-        # Attach recent-buffer images so passive/boredom triggers can "see" what
-        # was shared in the group recently.  Collect newest-last, then reverse so
-        # the newest come first; after merging behind the current images and the
-        # provider's per-request cap, this keeps the newest recent images and
-        # drops the oldest.  Duplicates across messages are skipped.
-        if include_recent_images:
-            recent_image_urls = collect_recent_image_urls(
-                recent_messages,
-                max_trigger_context_messages=max_trigger_context_messages,
-                max_recent_images=max_recent_images,
-            )
-            pending_images.extend(
-                url for url in recent_image_urls if url not in pending_images
-            )
+    # Recent buffer 改岗：不再并入 pending（上文），渲染为独立【现场】 scene，
+    # 让模型能区分"与我对话"与"现场氛围"。增量与去重由 list_patch 在服役侧保证。
+    recent_scene = (
+        _build_scene_from_recent_buffer(recent_messages, identities=identities)
+        if recent_messages
+        else None
+    )
+    # 现场图片仍附在末条 user 消息（尾巴段，不进前缀），供被动/无聊触发"看见"
+    # 群里最近分享的图。newest-first 由 collect_recent_image_urls 保证，重复跳过。
+    # 图片源与文本补丁解耦：被动唤醒的近期图是全量快照语义（TTL 窗），服务层
+    # 传入 recent_images_messages；缺省回落到补丁列表（显式注入路径同源）。
+    images_source = recent_images_messages if recent_images_messages is not None else recent_messages
+    recent_images: list[str] = []
+    if images_source and include_recent_images:
+        recent_images = collect_recent_image_urls(
+            images_source,
+            max_trigger_context_messages=max_trigger_context_messages,
+            max_recent_images=max_recent_images,
+        )
 
     # Build current scene first, then merge any pending context into it.
     # This avoids consecutive role="user" messages and keeps the
@@ -704,33 +720,22 @@ def build_messages(
         image_descriptions=image_descriptions,
     )
 
+    envelope_prefix = f"{turn_envelope}\n" if turn_envelope.strip() else ""
+    # 尾巴顺序定型：【轮次上下文】→【上文】(若有)→【现场】(若有)→【当前提问】
+    tail_parts: list[str] = []
     if pending_speakers:
-        # Merge context into the current scene so we emit a single
-        # role="user" message with 【上文】/【当前提问】 separating
-        # the two parts in text.
-        context_text = _render_scene_to_text(
-            LLMSceneMessage(
-                speakers=list(pending_speakers),
-                images=list(pending_images),
-                scene_type="history",
-            ),
+        tail_parts.append(_render_scene_to_text(
+            LLMSceneMessage(speakers=list(pending_speakers), images=[], scene_type="history"),
             identities=identities,
-        )
-        current_text = _render_scene_to_text(current_scene, identities=identities)
-        combined_images = merge_image_urls(
-            current_scene.images, pending_images,
-        )
-        messages.append(LLMConversationMessage(
-            role="user",
-            content=context_text + "\n" + current_text,
-            image_urls=combined_images,
         ))
-    else:
-        messages.append(LLMConversationMessage(
-            role="user",
-            content=_render_scene_to_text(current_scene, identities=identities),
-            image_urls=current_scene.images,
-        ))
+    if recent_scene is not None:
+        tail_parts.append(_render_scene_to_text(recent_scene, identities=identities))
+    tail_parts.append(_render_scene_to_text(current_scene, identities=identities))
+    messages.append(LLMConversationMessage(
+        role="user",
+        content=envelope_prefix + "\n".join(tail_parts),
+        image_urls=merge_image_urls(current_scene.images, recent_images),
+    ))
 
     return messages
 

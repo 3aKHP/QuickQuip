@@ -5,6 +5,15 @@
 
 set -euo pipefail
 
+# Self-check: hooks must live in the default .git/hooks directory. A stray
+# core.hooksPath (e.g. left over from moving the repo across machines or OSes)
+# silently disables these hooks.
+if [ -n "$(git config core.hooksPath || true)" ]; then
+    echo "[pre-push] core.hooksPath is set; hooks may not run from .git/hooks." >&2
+    echo "[pre-push] Run: git config --unset core.hooksPath" >&2
+    exit 1
+fi
+
 command -v uv >/dev/null 2>&1 || { echo "[pre-push] uv 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
 command -v pnpm >/dev/null 2>&1 || { echo "[pre-push] pnpm 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
 
@@ -22,7 +31,11 @@ echo "[pre-push] pnpm type-check ..."
 echo "[pre-push] Validating example configs..."
 uv run python scripts/ci/validate_toml_examples.py
 
-# 4. Tests (requires chat_rules.toml to exist)
+# 4. Guard against real-looking ID literals in public files
+echo "[pre-push] Checking ID literals..."
+uv run python scripts/ci/check_id_literals.py
+
+# 5. Tests (requires chat_rules.toml to exist)
 if [ ! -f config/chat_rules.toml ]; then
     cp config/chat_rules.toml.example config/chat_rules.toml
 fi

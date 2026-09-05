@@ -60,6 +60,82 @@ def set_usage_scope(
     _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
 
 
+_ENVELOPE_TOKENS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_envelope_tokens", default=None,
+)
+
+
+@contextmanager
+def envelope_meter(tokens: int | None) -> Iterator[None]:
+    """设置当前回合【轮次上下文】信封的 token 估算值；退出复位（镜像 usage_scope 范式）。
+
+    Agent Loop 内多次 complete() 落的每行都带同值——看板按 AVG 解读为每轮成本，
+    禁止 SUM（同回合会在多行上重复计）。
+    """
+    token = _ENVELOPE_TOKENS.set(tokens)
+    try:
+        yield
+    finally:
+        _ENVELOPE_TOKENS.reset(token)
+
+
+_EPOCH_HISTORY_TOKENS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_epoch_history_tokens", default=None,
+)
+
+
+@contextmanager
+def epoch_meter(tokens: int | None) -> Iterator[None]:
+    """设置当前回合纪元 history（[anchor, head) 区间）的 token 估算值；退出复位。
+
+    与 envelope_meter 同范式：Agent Loop 内每行同值，看板按 AVG 解读，禁止 SUM。
+    """
+    token = _EPOCH_HISTORY_TOKENS.set(tokens)
+    try:
+        yield
+    finally:
+        _EPOCH_HISTORY_TOKENS.reset(token)
+
+
+_MEDIA_IMAGE_COUNT: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_media_image_count", default=None,
+)
+
+
+@contextmanager
+def media_meter(count: int | None) -> Iterator[None]:
+    """设置当前回合实际随请求附带的图片数；退出复位（镜像 epoch_meter 范式）。
+
+    Agent Loop 内多次 complete() 落的每行都带同值——看板按 AVG 解读为每轮
+    附带量，禁止 SUM。计数取自组装后的 LLMRequest（provider 序列化另有
+    每请求 5 张上限）。
+    """
+    token = _MEDIA_IMAGE_COUNT.set(count)
+    try:
+        yield
+    finally:
+        _MEDIA_IMAGE_COUNT.reset(token)
+
+
+_PATCH_TOKENS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_patch_tokens", default=None,
+)
+
+
+@contextmanager
+def patch_meter(tokens: int | None) -> Iterator[None]:
+    """设置当前回合【现场】补丁的 token 估算值；退出复位（镜像 media_meter 范式）。
+
+    与预算同单位（estimate_tokens 逐条求和），看板按 AVG 直接读作预算利用率，
+    禁止 SUM。补丁在尾巴段每轮全价、不计入纪元 CTX 预算。
+    """
+    token = _PATCH_TOKENS.set(tokens)
+    try:
+        yield
+    finally:
+        _PATCH_TOKENS.reset(token)
+
+
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
     try:
@@ -117,7 +193,14 @@ async def _record_usage(
             priced = 1 if priced_flag else 0
             fresh_input_tokens = usage.fresh_input
             total_tokens = usage.total_tokens
-            input_token_semantics = usage.input_token_semantics
+            # input_tokens 列存的是原始上报值：claude 协议按 exclusive 口径上报
+            # （不含 cache_read/cache_creation），其余协议 inclusive。标签描述
+            # 列值口径，与 canonical（恒 inclusive）是两回事（issue #202）。
+            # 「claude ⇒ exclusive」口径另见 pricing.normalize_usage 的归一化侧
+            # 与 usage_store 的 SQL CASE——新增协议时需同步
+            input_token_semantics = (
+                "exclusive" if client.config.protocol == "claude" else "inclusive"
+            )
             if rates is not None:
                 pricing_model = f"{client.config.id}/{model}" if f"{client.config.id}/{model}" in configured else model
                 pricing_source = rates.source
@@ -131,6 +214,10 @@ async def _record_usage(
             "group_id": scope.group_id if scope else None,
             "persona_id": scope.persona_id if scope else None,
             "agent_loop_id": loop_id,
+            "envelope_tokens": _ENVELOPE_TOKENS.get(),
+            "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
+            "media_image_count": _MEDIA_IMAGE_COUNT.get(),
+            "patch_tokens": _PATCH_TOKENS.get(),
             "stream": 1 if stream_used else 0,
             "duration_ms": duration_ms,
             "input_tokens": response.input_tokens if response else None,

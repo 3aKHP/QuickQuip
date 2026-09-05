@@ -82,7 +82,7 @@ def fencing(
     """Execute a fencing battle. Returns result message."""
     my_len = store.get_length(my_uid)
     if my_len is None:
-        return "你还没有牛牛呢！请先发送 注册牛牛"
+        return "你还没有牛牛呢！请先发送 /注册牛牛"
 
     text = store.get_text(group_id)
     oppo_len = store.get_length(oppo_uid)

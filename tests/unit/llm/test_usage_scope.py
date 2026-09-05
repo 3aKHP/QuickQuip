@@ -1,6 +1,78 @@
 import asyncio
 
-from quickquip.llm.usage import _USAGE_SCOPE, set_usage_scope, usage_scope
+from quickquip.llm.usage import (
+    _ENVELOPE_TOKENS,
+    _EPOCH_HISTORY_TOKENS,
+    _MEDIA_IMAGE_COUNT,
+    _PATCH_TOKENS,
+    _USAGE_SCOPE,
+    envelope_meter,
+    epoch_meter,
+    media_meter,
+    patch_meter,
+    set_usage_scope,
+    usage_scope,
+)
+
+
+def test_patch_meter_sets_and_resets():
+    assert _PATCH_TOKENS.get() is None
+    with patch_meter(360):
+        assert _PATCH_TOKENS.get() == 360
+    assert _PATCH_TOKENS.get() is None
+
+
+def test_patch_meter_nested_inner_resets_to_outer():
+    with patch_meter(100):
+        with patch_meter(300):
+            assert _PATCH_TOKENS.get() == 300
+        assert _PATCH_TOKENS.get() == 100
+    assert _PATCH_TOKENS.get() is None
+
+
+def test_media_meter_sets_and_resets():
+    assert _MEDIA_IMAGE_COUNT.get() is None
+    with media_meter(2):
+        assert _MEDIA_IMAGE_COUNT.get() == 2
+    assert _MEDIA_IMAGE_COUNT.get() is None
+
+
+def test_media_meter_nested_inner_resets_to_outer():
+    with media_meter(1):
+        with media_meter(3):
+            assert _MEDIA_IMAGE_COUNT.get() == 3
+        assert _MEDIA_IMAGE_COUNT.get() == 1
+    assert _MEDIA_IMAGE_COUNT.get() is None
+
+
+def test_epoch_meter_sets_and_resets():
+    assert _EPOCH_HISTORY_TOKENS.get() is None
+    with epoch_meter(4200):
+        assert _EPOCH_HISTORY_TOKENS.get() == 4200
+    assert _EPOCH_HISTORY_TOKENS.get() is None
+
+
+def test_epoch_meter_nested_inner_resets_to_outer():
+    with epoch_meter(4000):
+        with epoch_meter(8000):
+            assert _EPOCH_HISTORY_TOKENS.get() == 8000
+        assert _EPOCH_HISTORY_TOKENS.get() == 4000
+    assert _EPOCH_HISTORY_TOKENS.get() is None
+
+
+def test_envelope_meter_sets_and_resets():
+    assert _ENVELOPE_TOKENS.get() is None
+    with envelope_meter(123):
+        assert _ENVELOPE_TOKENS.get() == 123
+    assert _ENVELOPE_TOKENS.get() is None
+
+
+def test_envelope_meter_nested_inner_resets_to_outer():
+    with envelope_meter(100):
+        with envelope_meter(200):
+            assert _ENVELOPE_TOKENS.get() == 200
+        assert _ENVELOPE_TOKENS.get() == 100
+    assert _ENVELOPE_TOKENS.get() is None
 
 
 def test_usage_scope_contextmanager_sets_and_resets():

@@ -131,6 +131,10 @@ class LLMUsageStore:
                         group_id              TEXT,
                         persona_id            TEXT,
                         agent_loop_id         TEXT,
+                        envelope_tokens       INTEGER,
+                        epoch_history_tokens  INTEGER,
+                        media_image_count     INTEGER,
+                        patch_tokens          INTEGER,
                         stream                INTEGER NOT NULL,
                         duration_ms           REAL,
                         input_tokens          INTEGER,
@@ -164,6 +168,10 @@ class LLMUsageStore:
                     "group_id": "TEXT",
                     "persona_id": "TEXT",
                     "agent_loop_id": "TEXT",
+                    "envelope_tokens": "INTEGER",
+                    "epoch_history_tokens": "INTEGER",
+                    "media_image_count": "INTEGER",
+                    "patch_tokens": "INTEGER",
                     "duration_ms": "REAL",
                     "fresh_input_tokens": "INTEGER",
                     "total_tokens": "INTEGER",
@@ -200,6 +208,16 @@ class LLMUsageStore:
                     CREATE INDEX IF NOT EXISTS idx_usage_persona  ON llm_usage_events(persona_id, ts DESC);
                     """
                 )
+                # 历史 claude 行标签 backfill（issue #202）：input_tokens 列自始存
+                # exclusive 原始值，落库标签却恒写 inclusive。UPDATE 天然幂等，
+                # 首次执行修完全库后，后续重跑 0 行受影响
+                conn.execute(
+                    """
+                    UPDATE llm_usage_events
+                    SET input_token_semantics = 'exclusive'
+                    WHERE protocol = 'claude' AND input_token_semantics = 'inclusive'
+                    """
+                )
             self._schema_ready = True
 
     def record(self, row: dict) -> None:
@@ -228,7 +246,15 @@ class LLMUsageStore:
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_read_tokens ELSE 0 END), 0) AS cache_read, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_creation_tokens ELSE 0 END), 0) AS cache_creation, "
                 f"COUNT(*) AS calls, COALESCE(SUM(CASE WHEN state = 'ok' THEN 1 ELSE 0 END), 0) AS successes, "
-                f"COALESCE(AVG(duration_ms), 0) AS avg_duration "
+                f"COALESCE(AVG(duration_ms), 0) AS avg_duration, "
+                f"AVG(CASE WHEN state = 'ok' THEN envelope_tokens END) AS avg_envelope, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND envelope_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS envelope_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN epoch_history_tokens END) AS avg_epoch_history, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND epoch_history_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS epoch_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN media_image_count END) AS avg_media_images, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND media_image_count IS NOT NULL THEN 1 ELSE 0 END), 0) AS media_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN patch_tokens END) AS avg_patch, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND patch_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS patch_tracked "
                 f"FROM llm_usage_events WHERE {where}",
                 params,
             ).fetchone()
@@ -256,6 +282,22 @@ class LLMUsageStore:
                 "success_rate": round((total["successes"] or 0) / total["calls"], 4) if total["calls"] else 0.0,
                 "average_duration_ms": round(total["avg_duration"], 2),
                 "cache_hit_rate": round(total["cache_read"] / input_total, 4) if input_total else 0.0,
+                # 第四张账本【信封】：Agent Loop 内每行同值，只可按 AVG 解读为
+                # 每轮成本，禁止 SUM；coverage = 有估算行的成功调用占比
+                "avg_envelope_tokens": round(total["avg_envelope"], 1) if total["avg_envelope"] is not None else 0.0,
+                "envelope_coverage": round(total["envelope_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                # 第五张账本【纪元】：[anchor, head) history 段 token 估算；同信封口径
+                # 只可按 AVG 解读（验收口径 ≈4.2k），coverage 语义同上
+                "avg_epoch_history_tokens": round(total["avg_epoch_history"], 1) if total["avg_epoch_history"] is not None else 0.0,
+                "epoch_coverage": round(total["epoch_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                # 第六张账本【媒体】：当轮实际随请求附带的图片数；同信封口径
+                # 只可按 AVG 解读，coverage 语义同上
+                "avg_media_image_count": round(total["avg_media_images"], 1) if total["avg_media_images"] is not None else 0.0,
+                "media_coverage": round(total["media_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                # 第七张账本【现场补丁】：【现场】块 token 估算（与预算同单位，
+                # AVG 直接读作预算利用率）；尾巴段每轮全价，不计入纪元 CTX 预算
+                "avg_patch_tokens": round(total["avg_patch"], 1) if total["avg_patch"] is not None else 0.0,
+                "patch_coverage": round(total["patch_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
                 "by_provider": self._group_by(conn, "provider_id", where, params),
                 "by_feature": self._group_by(conn, "feature", where, params),
                 "by_model": self._group_by(conn, "model", where, params),

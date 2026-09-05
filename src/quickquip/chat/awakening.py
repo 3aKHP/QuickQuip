@@ -1145,17 +1145,19 @@ async def iter_boredom_send_plans(
         if rate_limiter is not None and not rate_limiter.allow(_RULE_BOREDOM, "boredom_timer", group_id=gid):
             continue
         try:
-            trigger_context = svc.recent_message_buffer.list_recent(gid, limit=20) if hasattr(svc, "recent_message_buffer") else []
             reply_result = await svc.generate_reply(
                 group_id=gid,
                 user_id="boredom_timer",
                 sender_name="系统",
                 prompt=build_awakening_prompt(result),
                 image_urls=[],
-                recent_messages=trigger_context,
                 include_recent_images=True,
-                raw_user_text="",
-                store_user_message=False,
+                # 合成配对行：落库结构化诱因摘要（代码生成，不抄群聊正文；
+                # 同轮 prompt 已过输入扫描，history 渲染时再 scrub 兜底），
+                # 消除 history 里的 assistant 孤行；不从合成内容抽记忆
+                raw_user_text=f"【自动唤醒】{result.trigger_reason or result.rule_name}"[:60],
+                store_user_message=True,
+                trigger_auto_memory=False,
                 message_id=None,
             )
         except Exception:

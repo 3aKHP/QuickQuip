@@ -45,7 +45,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/single_shot.py`
   - 一次性生成入口的共享管线骨架（defectify / turmfluch / card_le_nearest），各入口差异点通过 `CommandSingleShotSpec` 显式传入
 - `src/quickquip/llm/prompting.py`
-  - 负责 system prompt 组装、场景块构建、统一发言者格式渲染与 messages 数组拼装
+  - 负责 system prompt 组装（仅跨轮稳定段，字节稳定契约）、**当轮上下文信封渲染**（`build_turn_envelope`：时间/节日/participants/memories/词表命中，组装时渲染、不落库）、场景块构建、统一发言者格式渲染与 messages 数组拼装
 - `src/quickquip/llm/summarize.py`
   - 每日总结生成逻辑（模型级联、prompt 构建）
 - `src/quickquip/llm/briefing.py`
@@ -198,25 +198,38 @@ LLM 默认只在以下场景触发：
 
 ### 4.2 LLM 短期会话
 
-LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制：
+LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
 
-- 单群最多保留 20 条（存储上限，不受配置影响）
-- 每次触发时实际读取的条数由以下优先级决定：
-  1. 本群通过 `/llm context_limit <n>` 设置的覆盖值（若有）
-  2. `llm.toml` 的 `[runtime] history_limit`（全局默认，当前为 10）
-  3. 代码存储上限（`service_parts/constants.py` 的 `MAX_GROUP_STORED_CONVERSATION_MESSAGES`，当前为 20，为最终截断；私聊为 `MAX_PRIVATE_STORED_CONVERSATION_MESSAGES` = 256）
-- 群级覆盖写入 `data/llm.db`，重启或 `clear_context` 不会清除
-- 执行 `/llm reload` 或 `/llm context_limit reset` 可重置为全局默认
-- `clear_context` 只清空已存的会话消息，不改变上限设置
+- 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长、不逐轮位移——这是自动前缀缓存跨轮命中的结构性前提
+- 锚点只在两种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）或**触顶**（窗口超过 cap，缩回 L_hot）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `llm.toml` 的 `[runtime]` / `[[providers]]` 用 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
+- 窗口单位是 token 估算（`token_estimate.py`），不再是行数；另有 1024 行的行数硬兜底（防海量超短行撑爆 provider 的 messages 数组）
+- 锚点只落在 user/assistant 对边界，且保留最少 4 行（防单条超长转发把窗口吃空）
+- 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
+- 锚点状态保存在进程内存中：进程重启 = 冷一次缓存，重启后首个请求按「距最新一条一个标准 CTX（8k token）跨度」重新懒初始化
+- `/llm context_limit <n>` **语义变更**：从「每次最多读取 n 条」变为「该会话（群聊/私聊均可，上限 1024 条）退化为保留最新 n 行的滚动窗」；`/llm context_limit reset` 恢复纪元自动管理。`[runtime] history_limit` 全局默认不再作为读取上限生效；`history_max_messages_per_group` 废弃（保留解析、不再生效）
+- `clear_context` 三件齐清：会话消息存储、最近消息缓冲、纪元锚点（私聊会话 start/end/resume 同路径）
+- `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点（system prompt 字节变化 = 缓存全灭 = 免费重置窗口）
+- history 渲染信任落库时定格的 `canonical_name`（渲染冻结），不再按当前身份索引重算——改名用户在前缀中保持旧名，正是冻结的目的
+
+**近期消息缓冲 = 【现场】补丁**：`recent_message_buffer.py` 对 LLM 请求路径不再提供全量快照，而是增量补丁（`list_patch`）：
+
+- 候选 =（上次服役之后的新消息）∪（`recent_context_floor_seconds`=300s 滑动保底窗内的消息），再按 message_id 剔除 history 已覆盖者与当前触发消息，最后从最新往回截到 `recent_context_token_budget`=800 token（估算，至少保留最新一条；非法取值回退默认并告警）
+- 读即服役：取出后 `note_patch_served` 推进按群游标；失败轮丢失超保底窗的旧补丁，由保底窗兜底
+- **被动唤醒的近期图不受增量语义收窄**：`include_recent_images` 路径的图片源是 `list_recent` 全量快照（TTL 窗语义，与文本补丁解耦）——无聊唤醒恰在冷场（补丁最空）时触发，图若随增量游标收窄该特性会静默失效
+- 预算只在服役侧执行：buffer 写入侧仍按 20 条 + TTL 1800s 收口（内存上界不动），estimator/budget/floor 全部由 service 按 `[runtime]` 配置注入（仅全局键，无 provider 覆盖）
+- 适配层不再向 `generate_reply` 传快照；service 在群聊且未显式注入时自取（`recent_messages=[]` 显式空是测试注入口）。私聊不自取
+- `list_recent` 全量快照保留给两个不适用增量语义的消费者：`context_rules` 规则引擎与「读近期消息」模型工具
 
 **场景块消息结构**：当前 messages 数组采用“以 bot 回复为边界的场景块”模式：
 
 - 连续的多人发言归入同一 `role="user"` 场景块（bot 回复打断场景）
 - 所有发言者使用统一格式：`身份（QQ 号）：内容`
-- 场景以 `【上文】`（历史/缓冲）或 `【当前提问】`（最后一轮提问）标记
+- 场景以 `【上文】`（历史）或 `【当前提问】`（最后一轮提问）标记；现场补丁独立成 `【现场】` 段（带说明行，标识为氛围而非直接对话），尾巴顺序定型 `【轮次上下文】→【上文】→【现场】→【当前提问】`
+- 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，但不从合成内容抽取自动记忆（`store_user_message` 与 `trigger_auto_memory` 双开关）；合成 user_id（`boredom_timer`/`scheduled_timer`）既不进信封参与者，渲染时也直接以名字呈现（不包装成「（QQ xxx，未登记）」伪身份）
 - 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
 - 引用消息会同时保留“当前提问者”和“引用发送者”，并显式区分机器人自己，避免 A 引用 B 时被误读成 B 在发言
-- 合并转发会递归展开多层节点，并保留每层的文字和图片信息，不再只剩一个占位外壳
+- 合并转发会递归展开多层节点，并保留每层的文字和图片信息，不再只剩一个占位外壳；组合文本总长封顶 4000 字符，超出在最外层出口硬切并追加「…（合并转发内容过长，已截断）」
+- 非视觉模型的图注以文本身份落库：落库 `raw_content` 追加 `[图片 N 张：…]`（转发图注并入转发文本），落库字节即下一轮 history 的前缀字节，转述内容不随轮丢失、前缀稳定
 
 这样做的好处：
 - 模型只看到一种“某人说了某话”的语法，消除历史/缓冲/当前三种格式的解析负担
@@ -228,10 +241,11 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续，但有硬限制
 图片理解遵循显式触发和受限被动唤醒规则：
 
 - 必须和 `/ai` 或 `@机器人` 同时出现
-- 单次最多处理 5 张当前、引用或转发图片
+- 单次最多处理 5 张当前、引用图片与近期上下文图片；转发图片不再作为图片本体附带（视觉模型同样不附），只以文字/图注形式进入
 - 被动唤醒在 `awakening_extend`、`awakening_interest`、`awakening_relevance` 和 `awakening_qa` 中携带群内近期历史图片
 - 近期历史图片使用当前请求剩余的图片名额，并优先保留最新图片
 - 当前单张图片大小限制为 5MB
+- provider 图片下载按客户端实例缓存（TTL 10 分钟、容量 32 张 LRU，仅缓存成功结果）：同一轮内工具循环重建请求与退避重试不再重复下载同一 URL
 - 如果只有图片没有文字提示，会自动补一个默认识图提示
 - 视觉主模型直接接收原图；列入 `non_vision_models` 的主模型接收带来源和序号的视觉转述
 - 前置视觉识别不可用、返回空内容或任一图片识别失败时，本轮终止并提示用户重试
@@ -297,7 +311,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 当前做法是：
 
 - 只有当 prompt 命中某个别名或黑话
-- 才在本轮 system prompt 里追加一小段消歧说明
+- 才在当轮 user 消息头部的【轮次上下文】信封里追加一小段消歧说明（system prompt 已静态化，见下）
 
 例如：
 
@@ -336,6 +350,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - 消息中的艾特会优先渲染为 `@标准身份`
 - 未登记成员会降级显示为“当前显示名 + QQ 号 + 未登记”
 - **身份信息只在 messages 中呈现**：system prompt 不再重复声明“当前提问者是谁”——消除双信息源冲突
+- **system prompt 完全静态化（前缀缓存契约）**：当前时间/星期、节日提示、对话参与成员、持久记忆、词表命中等逐轮变化的内容一律只在当轮 user 消息头部的【轮次上下文】信封呈现（组装时渲染、不落库），system 跨轮、跨日字节稳定，自动前缀缓存可跨轮命中。信封 token 经 `envelope_meter` 落 `envelope_tokens` 列进用量账本：Agent Loop 内每行同值，看板只按 **AVG** 解读为每轮成本，**禁止 SUM**（同回合重复计）
 
 这样可以减少群友频繁改名带来的身份漂移，并且让模型在单一信息源中自然识别发言者归属。
 
@@ -513,8 +528,8 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm memory on`
 - `/llm memory off`
 - `/llm auto_memory status|on|off|reset`
-- `/llm context_limit <n>` — 设置本群上下文读取上限（1-20），持久化，不受 clear_context 影响
-- `/llm context_limit reset` — 重置为全局默认
+- `/llm context_limit <n>` — 把本会话上下文改为固定保留最新 n 行（1-1024），持久化，不受 clear_context 影响；默认由会话纪元自动管理
+- `/llm context_limit reset` — 恢复纪元自动管理
 - `/llm clear_context`
 - `/remember <内容>`
 - `/memories [关键词]`
@@ -579,6 +594,7 @@ LLM 侧的联网搜索有两条互斥路径：
 - 不做跨群共享人格状态
 - 不把 `群聊简介和概况.md` 全文直接注入模型
 - 不默认把所有外部工具都改成 MCP
+- 敏感词表更新会改写 history 行的当轮渲染字节（加载时以当前词表重 scrub，不回写存储），使该轮前缀缓存 miss——安全优先的刻意取舍
 
 注：每日总结（`daily_summary`）模块已实现模型级联策略，生成失败时自动降级到下一个 provider/model，顺序在 `[daily_summary] model_cascade` 中配置。这是总结生成专用的级联，不影响普通 LLM 对话的 provider 选择。
 

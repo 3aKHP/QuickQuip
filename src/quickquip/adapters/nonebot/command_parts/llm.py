@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _parse_preset, _parse_resume, _strip_command_name
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, rate_limiter
+from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS
 from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
 
 
@@ -86,7 +87,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                     await llm_cmd.finish(msg)
                 preset = _parse_preset(args)
                 svc.start_private_session(chat_id, preset=preset)
-                msg = f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，当前上下文上限为 {svc.get_default_history_limit('private')} 条。"
+                msg = f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，上下文由会话纪元自动管理。"
                 if preset:
                     preview = preset[:80] + ("..." if len(preset) > 80 else "")
                     msg += f"\n附加设定：{preview}"
@@ -217,7 +218,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if value in {"reset", "off"}:
                 svc.reset_chat_history_limit(chat_id, chat_type=chat_type)
                 await llm_cmd.finish(
-                    f"{scope_label}上下文上限已重置为默认（{svc.get_default_history_limit(chat_type)} 条）"
+                    f"{scope_label}上下文上限已重置为默认（会话纪元自动管理）"
                 )
             try:
                 n = int(value)
@@ -225,8 +226,10 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 await llm_cmd.finish("用法：/llm context_limit <条数> | reset")
             if n < 1:
                 await llm_cmd.finish("上下文上限须为正整数")
+            if n > DEFAULT_EPOCH_MAX_ROWS:
+                await llm_cmd.finish(f"上下文上限最大 {DEFAULT_EPOCH_MAX_ROWS} 条（纪元行数兜底上限）")
             svc.set_chat_history_limit(chat_id, n, chat_type=chat_type)
-            await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（/llm reload 可重置）")
+            await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（行数兜底，超出截断）")
 
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"

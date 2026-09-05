@@ -15,7 +15,7 @@ def gluing(store: NiuNiuStore, uid: str, group_id: str) -> tuple[str, float]:
     """Perform a gluing operation. Returns (result_message, new_length)."""
     origin = store.get_length(uid)
     if origin is None:
-        return "你还没有牛牛呢！请先发送 注册牛牛", 0.0
+        return "你还没有牛牛呢！请先发送 /注册牛牛", 0.0
 
     # Arrested check
     remaining = arrested_cd.check(uid)

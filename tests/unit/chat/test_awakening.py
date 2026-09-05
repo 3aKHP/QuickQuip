@@ -1361,6 +1361,14 @@ class TestBoredomSendFlow:
             aw._state = old_state
 
         svc.generate_reply.assert_awaited_once()
+        # 合成配对行契约（cron 侧 test_scheduler_plugin 同款锚定）：user/assistant
+        # 成对落库 + 不抽自动记忆 + raw 为结构化摘要；漏传/回退任一开关即此处红
+        kwargs = svc.generate_reply.await_args.kwargs
+        assert kwargs["store_user_message"] is True
+        assert kwargs["trigger_auto_memory"] is False
+        assert kwargs["raw_user_text"].startswith("【自动唤醒】")
+        assert kwargs["include_recent_images"] is True
+        assert kwargs["message_id"] is None
         bot.send_group_msg.assert_awaited_once_with(group_id=123, message=[("text", "冒个泡")])
         stats_tracker.record_trigger.assert_called_once_with("123", "awakening_boredom")
 

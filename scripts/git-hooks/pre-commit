@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Pre-commit hook: keep real private IDs out of the public repo.
+# Reads the ID list from .redact-ids at the repo root (gitignored, one ID per
+# line, '#' comments allowed). This hook file itself contains no real IDs.
+# Install: cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x
+set -euo pipefail
+
+LIST=.redact-ids
+[ -f "$LIST" ] || exit 0
+
+IDS=$(grep -vE '^[[:space:]]*(#|$)' "$LIST" || true)
+[ -z "$IDS" ] && exit 0
+
+ADDED=$(git diff --cached --diff-filter=ACM | grep '^+' | grep -v '^+++' || true)
+[ -z "$ADDED" ] && exit 0
+
+hits=0
+while IFS= read -r id; do
+  [ -z "$id" ] && continue
+  if printf '%s\n' "$ADDED" | grep -qF -- "$id"; then
+    hits=$((hits + 1))
+  fi
+done <<< "$IDS"
+
+if [ "$hits" -gt 0 ]; then
+  echo "❌ 待提交内容命中 .redact-ids 中列出的真实私有 ID（${hits} 条，不回显具体值）。" >&2
+  echo "   请改用合成占位符（见 CLAUDE.md「隐私 ID 保护」）。" >&2
+  exit 1
+fi

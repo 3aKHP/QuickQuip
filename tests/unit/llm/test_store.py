@@ -49,14 +49,66 @@ def test_conversation_append_and_list_recent(store: LLMStore) -> None:
     assert rows[1]["user_id"] == ""
 
 
-def test_conversation_prune_keeps_last_n(store: LLMStore) -> None:
+def test_conversation_crop_keeps_last_n_when_no_floor(store: LLMStore) -> None:
     for i in range(5):
         store.append_conversation_message(1002, "u", "user", f"msg{i}")
-    store.prune_conversation_messages(1002, keep_last=2)
+    store.crop_conversation_messages(1002, floor_id=None, keep_last=2)
     rows = store.list_recent_conversation_messages(1002, 100)
     assert len(rows) == 2
     assert rows[0]["content"] == "msg3"
     assert rows[1]["content"] == "msg4"
+
+
+def test_conversation_crop_deletes_below_floor(store: LLMStore) -> None:
+    for i in range(5):
+        store.append_conversation_message(1002, "u", "user", f"msg{i}")
+    floor = store.find_anchor_row_id_by_rows(1002, 3)
+    assert floor is not None
+    # floor = 第 3 新的行（msg2）；keep_last 足够大不起作用
+    store.crop_conversation_messages(1002, floor_id=floor, keep_last=100)
+    rows = store.list_recent_conversation_messages(1002, 100)
+    assert [r["content"] for r in rows] == ["msg2", "msg3", "msg4"]
+
+
+def test_conversation_list_since_returns_asc_with_ids(store: LLMStore) -> None:
+    store.append_conversation_message(1007, "u", "user", "q1", message_id="m1", raw_content="q1 raw")
+    store.append_conversation_message(1007, None, "assistant", "a1")
+    store.append_conversation_message(1007, "u", "user", "q2", message_id="m2")
+    all_rows = store.list_conversation_messages_since(1007, 0, limit=100)
+    assert [r["content"] for r in all_rows] == ["q1", "a1", "q2"]
+    assert all_rows[0]["id"] > 0
+    assert all_rows[0]["message_id"] == "m1"
+    assert all_rows[2]["message_id"] == "m2"
+    assert all_rows[1]["message_id"] == ""  # None 归一化为空串
+    # 锚点含端点：id >= anchor
+    since = store.list_conversation_messages_since(1007, all_rows[1]["id"], limit=100)
+    assert [r["content"] for r in since] == ["a1", "q2"]
+    # limit 兜底（ASC 从锚点侧取，仅用于探测/锚定路径，主读路径不做 LIMIT 截断）
+    capped = store.list_conversation_messages_since(1007, 0, limit=2)
+    assert [r["content"] for r in capped] == ["q1", "a1"]
+
+
+def test_find_anchor_row_id_by_rows(store: LLMStore) -> None:
+    assert store.find_anchor_row_id_by_rows(1008, 2) is None  # 空表
+    for i in range(5):
+        store.append_conversation_message(1008, "u", "user", f"msg{i}")
+    anchor = store.find_anchor_row_id_by_rows(1008, 2)
+    assert anchor is not None
+    rows = store.list_conversation_messages_since(1008, anchor, limit=100)
+    assert [r["content"] for r in rows] == ["msg3", "msg4"]  # 保留最新 2 行
+    assert store.find_anchor_row_id_by_rows(1008, 10) is None  # 总行数不足
+    assert store.find_anchor_row_id_by_rows(1008, 0) is None  # 非法入参
+
+
+def test_find_next_user_row_id(store: LLMStore) -> None:
+    store.append_conversation_message(1009, "u", "user", "q1")
+    store.append_conversation_message(1009, None, "assistant", "a1")
+    store.append_conversation_message(1009, "u", "user", "q2")
+    rows = store.list_conversation_messages_since(1009, 0, limit=100)
+    first_user, assistant, second_user = rows[0]["id"], rows[1]["id"], rows[2]["id"]
+    assert store.find_next_user_row_id(1009, first_user) == first_user
+    assert store.find_next_user_row_id(1009, assistant) == second_user
+    assert store.find_next_user_row_id(1009, second_user + 1) is None
 
 
 def test_conversation_count(store: LLMStore) -> None:

@@ -393,3 +393,231 @@ def test_retry_jitter_clamped_to_unit_range(tmp_path: Path):
 
     assert loaded.runtime.retry_jitter == 1.0
     assert loaded.providers["good"].retry_jitter == 1.0
+
+
+def test_epoch_params_defaults_when_unconfigured(tmp_path: Path):
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    assert loaded.runtime.epoch_context_tokens == 8000
+    assert loaded.runtime.epoch_cold_idle_seconds == 300
+    assert loaded.runtime.epoch_cold_target_tokens == 4000
+    assert loaded.runtime.epoch_cold_trigger_tokens == 5000
+    assert loaded.runtime.epoch_hot_target_tokens == 32000
+    assert loaded.runtime.epoch_cap_tokens == 64000
+    provider = loaded.providers["good"]
+    assert provider.epoch_context_tokens is None  # 未配置 = 继承 runtime
+    params = loaded.resolve_epoch_params(provider)
+    assert params.context_tokens == 8000
+    assert params.cold_idle_seconds == 300
+    assert params.cap_tokens == 64000
+
+
+def test_epoch_params_runtime_parsed(tmp_path: Path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        epoch_context_tokens = 6000
+        epoch_cold_idle_seconds = 600
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    params = loaded.resolve_epoch_params(loaded.providers["good"])
+    assert params.context_tokens == 6000
+    assert params.cold_idle_seconds == 600
+    assert params.cold_target_tokens == 4000  # 未配置的键保持默认
+
+
+def test_epoch_params_provider_override_wins(tmp_path: Path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        epoch_cold_idle_seconds = 300
+        """
+        + _good_provider().replace(
+            'models = ["gpt-x"]',
+            'models = ["gpt-x"]\nepoch_cold_idle_seconds = 21600\nepoch_cap_tokens = 128000',
+        )
+        + _PERSONA,
+    )
+
+    provider = loaded.providers["good"]
+    assert provider.epoch_cold_idle_seconds == 21600
+    params = loaded.resolve_epoch_params(provider)
+    assert params.cold_idle_seconds == 21600  # provider 覆盖优先
+    assert params.cap_tokens == 128000
+    assert params.cold_target_tokens == 4000  # 未覆盖的键继承 runtime
+
+
+def test_epoch_params_invalid_runtime_relation_falls_back_to_defaults(tmp_path: Path, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            """
+            [runtime]
+            enabled = true
+            default_provider = "good"
+            epoch_cold_target_tokens = 9000
+            epoch_cold_trigger_tokens = 5000
+            """
+            + _good_provider()
+            + _PERSONA,
+        )
+
+    params = loaded.resolve_epoch_params(loaded.providers["good"])
+    assert params.cold_target_tokens == 4000  # 关系非法（target >= trigger）回退内置默认
+    assert params.cold_trigger_tokens == 5000
+    assert any("epoch" in record.message for record in caplog.records)
+
+
+def test_epoch_params_invalid_provider_override_falls_back_to_runtime(tmp_path: Path, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            """
+            [runtime]
+            enabled = true
+            default_provider = "good"
+            epoch_cold_idle_seconds = 600
+            """
+            + _good_provider().replace(
+                'models = ["gpt-x"]',
+                'models = ["gpt-x"]\nepoch_cold_target_tokens = 100\nepoch_cold_trigger_tokens = 50',
+            )
+            + _PERSONA,
+        )
+
+    params = loaded.resolve_epoch_params(loaded.providers["good"])
+    assert params.cold_target_tokens == 4000  # provider 覆盖非法回退 runtime（此处 runtime 即默认）
+    assert params.cold_idle_seconds == 600  # runtime 合法值不受牵连
+    assert any("epoch" in record.message for record in caplog.records)
+
+
+def test_epoch_unknown_keys_ignored(tmp_path: Path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        epoch_future_knob = 123
+        """
+        + _good_provider().replace(
+            'models = ["gpt-x"]',
+            'models = ["gpt-x"]\nepoch_another_future_knob = "x"',
+        )
+        + _PERSONA,
+    )
+
+    assert loaded.load_error is None
+    assert loaded.resolve_epoch_params(loaded.providers["good"]).context_tokens == 8000
+
+
+def test_epoch_params_provider_override_float_coerced(tmp_path: Path):
+    """TOML 浮点字面量无损截断为 int——键级笔误不得扩大为整 provider 剪除。"""
+    loaded = _load(
+        tmp_path,
+        _good_provider().replace(
+            'models = ["gpt-x"]',
+            'models = ["gpt-x"]\nepoch_cold_idle_seconds = 21600.0',
+        )
+        + _PERSONA,
+    )
+
+    assert "good" in loaded.providers
+    assert loaded.providers["good"].epoch_cold_idle_seconds == 21600
+
+
+def test_epoch_params_provider_override_garbage_falls_back_to_runtime(tmp_path: Path, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            _good_provider().replace(
+                'models = ["gpt-x"]',
+                'models = ["gpt-x"]\nepoch_cap_tokens = "abc"',
+            )
+            + _PERSONA,
+        )
+
+    provider = loaded.providers["good"]  # provider 不被剪除
+    assert provider.epoch_cap_tokens is None  # 该键回退继承 runtime
+    assert loaded.resolve_epoch_params(provider).cap_tokens == 64000
+    assert any("epoch" in record.message for record in caplog.records)
+
+
+def test_recent_context_defaults_when_unconfigured(tmp_path: Path):
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    assert loaded.runtime.recent_context_token_budget == 800
+    assert loaded.runtime.recent_context_floor_seconds == 300
+
+
+def test_recent_context_runtime_parsed(tmp_path: Path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        recent_context_token_budget = 1200
+        recent_context_floor_seconds = 120
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.recent_context_token_budget == 1200
+    assert loaded.runtime.recent_context_floor_seconds == 120
+
+
+def test_recent_context_invalid_values_fall_back_with_warning(tmp_path, caplog):
+    """budget<=0 / floor<0 回退默认并告警；floor=0 合法（纯增量、无保底窗）。"""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            """
+            [runtime]
+            enabled = true
+            default_provider = "good"
+            recent_context_token_budget = 0
+            recent_context_floor_seconds = -5
+            """
+            + _good_provider()
+            + _PERSONA,
+        )
+
+    assert loaded.runtime.recent_context_token_budget == 800
+    assert loaded.runtime.recent_context_floor_seconds == 300
+    assert any("recent_context_token_budget" in r.message for r in caplog.records)
+    assert any("recent_context_floor_seconds" in r.message for r in caplog.records)
+
+
+def test_recent_context_floor_zero_is_valid(tmp_path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        recent_context_floor_seconds = 0
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.recent_context_floor_seconds == 0
