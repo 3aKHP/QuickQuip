@@ -149,13 +149,15 @@ async def test_lifecycle_jobs_record_results(monkeypatch):
 
     driver = _FakeDriver()
     captured: dict[str, object] = {}
-    captured_names: dict[str, object] = {}
+    captured_names: dict[str, str | None] = {}
+
+    def _record_job(fn, kwargs):
+        captured[kwargs["id"]] = fn
+        captured_names[kwargs["id"]] = kwargs.get("name")
+
     fake_scheduler_module = types.ModuleType("nonebot_plugin_apscheduler")
     fake_scheduler_module.scheduler = types.SimpleNamespace(
-        add_job=lambda fn, *args, **kwargs: (
-            captured.__setitem__(kwargs["id"], fn),
-            captured_names.__setitem__(kwargs["id"], kwargs.get("name")),
-        )
+        add_job=lambda fn, *args, **kwargs: _record_job(fn, kwargs)
     )
     monkeypatch.setitem(sys.modules, "nonebot_plugin_apscheduler", fake_scheduler_module)
     monkeypatch.setattr(scheduler_plugin, "_job_run_results", {})
