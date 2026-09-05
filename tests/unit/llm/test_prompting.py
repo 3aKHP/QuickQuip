@@ -24,6 +24,7 @@ from quickquip.llm.tools import (
     LLMSceneMessage,
     SCENE_MARKER_CONTEXT,
     SCENE_MARKER_CURRENT,
+    SCENE_MARKER_LIVE,
 )
 
 
@@ -52,6 +53,13 @@ def test_label_unregistered():
     assert "路人" in label
     assert "QQ 123" in label
     assert "未登记" in label
+
+
+def test_label_synthetic_id_not_wrapped_as_qq():
+    """合成触发源（boredom_timer 等）不是 QQ 号：直接以名字呈现，
+    不包装成「（QQ xxx，未登记）」伪身份（模型按 QQ 号认人）。"""
+    assert format_participant_label(user_id="boredom_timer", sender_name="系统") == "系统"
+    assert format_participant_label(user_id="scheduled_timer", sender_name="") == "scheduled_timer"
 
 
 def test_label_missing_all():
@@ -156,18 +164,19 @@ def test_scenes_from_history_keeps_placeholder_only_user_rows():
 # ---------------------------------------------------------------------------
 
 def test_scene_from_recent_buffer_empty():
-    assert _build_scene_from_recent_buffer([], max_trigger_context_messages=5) is None
+    assert _build_scene_from_recent_buffer([]) is None
 
 
-def test_scene_from_recent_buffer_truncates():
+def test_scene_from_recent_buffer_keeps_order():
+    # 补丁由 list_patch 在服役侧按预算截好，scene 构建原样保留顺序
     msgs = [
         {"user_id": str(i), "sender_name": f"user{i}", "text": f"msg{i}"}
         for i in range(10)
     ]
-    scene = _build_scene_from_recent_buffer(msgs, max_trigger_context_messages=3)
+    scene = _build_scene_from_recent_buffer(msgs)
     assert scene is not None
-    assert len(scene.speakers) == 3
-    assert scene.speakers[0]["text"] == "msg7"
+    assert len(scene.speakers) == 10
+    assert scene.speakers[0]["text"] == "msg0"
     assert scene.speakers[-1]["text"] == "msg9"
 
 
@@ -423,13 +432,35 @@ def test_build_messages_with_recent_buffer():
         max_trigger_context_messages=3,
         current_sender_name="C", current_user_id="3",
     )
-    # Pending context merged with current into a single user message
+    # 现场补丁与当前提问合并为单条 user 消息，recent 独立成【现场】段
     assert len(msgs) == 1
     assert msgs[0].role == "user"
     assert "recent1" in msgs[0].content
     assert "recent2" in msgs[0].content
-    assert SCENE_MARKER_CONTEXT in msgs[0].content
+    assert SCENE_MARKER_LIVE in msgs[0].content
+    assert "非与你的直接对话" in msgs[0].content
+    assert SCENE_MARKER_CONTEXT not in msgs[0].content
     assert SCENE_MARKER_CURRENT in msgs[0].content
+    assert msgs[0].content.index(SCENE_MARKER_LIVE) < msgs[0].content.index(SCENE_MARKER_CURRENT)
+
+
+def test_build_messages_recent_not_merged_into_context():
+    """回归：recent 补丁不再混入【上文】，history 尾行与现场分属两段。"""
+    history = [
+        {"role": "user", "user_id": "1", "sender_name": "A", "content": "旧话", "raw_content": "旧话"},
+    ]
+    recent = [{"user_id": "2", "sender_name": "B", "text": "现场发言"}]
+    msgs = build_messages(
+        prompt="当前", image_urls=[],
+        history=history, recent_messages=recent,
+        max_trigger_context_messages=3,
+        current_sender_name="C", current_user_id="3",
+    )
+    content = msgs[-1].content
+    context_seg = content[content.index(SCENE_MARKER_CONTEXT):content.index(SCENE_MARKER_LIVE)]
+    live_seg = content[content.index(SCENE_MARKER_LIVE):content.index(SCENE_MARKER_CURRENT)]
+    assert "旧话" in context_seg and "现场发言" not in context_seg
+    assert "现场发言" in live_seg and "旧话" not in live_seg
 
 
 def test_build_messages_with_quoted_in_current():
@@ -912,6 +943,31 @@ def test_build_messages_prepends_envelope_with_history():
     assert content.startswith(_ENVELOPE_SAMPLE + "\n")
     # 末条 user 是 pending 上文与当前消息的合并：信封在最前，其后【上文】→【当前提问】
     assert content.index("【轮次上下文】") < content.index(SCENE_MARKER_CONTEXT) < content.index(SCENE_MARKER_CURRENT)
+
+
+def test_build_messages_tail_order_envelope_context_live_current():
+    """尾巴四段顺序定型：【轮次上下文】→【上文】→【现场】→【当前提问】。"""
+    history = [
+        {"role": "user", "user_id": "1", "sender_name": "A", "content": "hi", "raw_content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "user_id": "2", "sender_name": "B", "content": "b", "raw_content": "b"},
+    ]
+    recent = [{"user_id": "9", "sender_name": "Z", "text": "现场"}]
+    msgs = build_messages(
+        prompt="现在几点", image_urls=[],
+        history=history, recent_messages=recent,
+        max_trigger_context_messages=5,
+        current_sender_name="B", current_user_id="2",
+        turn_envelope=_ENVELOPE_SAMPLE,
+    )
+    _assert_user_assistant_alternation(msgs)
+    content = msgs[-1].content
+    assert (
+        content.index("【轮次上下文】")
+        < content.index(SCENE_MARKER_CONTEXT)
+        < content.index(SCENE_MARKER_LIVE)
+        < content.index(SCENE_MARKER_CURRENT)
+    )
 
 
 def test_build_messages_prepends_envelope_without_history():

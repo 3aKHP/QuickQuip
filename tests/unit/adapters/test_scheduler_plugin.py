@@ -144,7 +144,10 @@ def test_llm_task_generates_and_sends(monkeypatch, tmp_path):
 
     assert len(generate_calls) == 1
     call = generate_calls[0]
-    assert call["store_user_message"] is False
+    # 合成配对行：落库结构化摘要但不抽记忆（消除 history 的 assistant 孤行）
+    assert call["store_user_message"] is True
+    assert call["trigger_auto_memory"] is False
+    assert call["raw_user_text"] == "【定时消息】按 0 19 * * * 发送：提醒大家看KPL"
     assert "【任务指令】提醒大家看KPL" in call["prompt"]
     assert [item["group_id"] for item in sent] == [123]
     _assert_single_text_segment(sent[0]["message"], "七点了，该看KPL了")

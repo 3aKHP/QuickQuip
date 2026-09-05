@@ -27,6 +27,12 @@ tool_max_calls_per_round = 16
 # epoch_hot_target_tokens = 32000
 # epoch_cap_tokens = 64000
 
+# 【现场】补丁（近期消息缓冲的 LLM 服役口径；仅全局，无 provider 覆盖）。
+# 每轮最多把 budget token 的群内近期发言附为【现场】块；
+# floor_seconds 是滑动保底窗：窗内消息即使已服役过也会重附（增量之外的保底）。
+# recent_context_token_budget = 800
+# recent_context_floor_seconds = 300
+
 # 上游 429/5xx/网络错误的自动重试（所有 LLM 调用路径统一生效；探活/诊断不受影响）
 # retry_max_attempts 含首次调用；第 n 次重试延迟 = base_delay * 2^n * (1 + 随机抖动)
 retry_max_attempts = 3

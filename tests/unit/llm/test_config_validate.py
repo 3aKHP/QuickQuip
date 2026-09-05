@@ -556,3 +556,68 @@ def test_epoch_params_provider_override_garbage_falls_back_to_runtime(tmp_path: 
     assert provider.epoch_cap_tokens is None  # 该键回退继承 runtime
     assert loaded.resolve_epoch_params(provider).cap_tokens == 64000
     assert any("epoch" in record.message for record in caplog.records)
+
+
+def test_recent_context_defaults_when_unconfigured(tmp_path: Path):
+    loaded = _load(tmp_path, _good_provider() + _PERSONA)
+
+    assert loaded.runtime.recent_context_token_budget == 800
+    assert loaded.runtime.recent_context_floor_seconds == 300
+
+
+def test_recent_context_runtime_parsed(tmp_path: Path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        recent_context_token_budget = 1200
+        recent_context_floor_seconds = 120
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.recent_context_token_budget == 1200
+    assert loaded.runtime.recent_context_floor_seconds == 120
+
+
+def test_recent_context_invalid_values_fall_back_with_warning(tmp_path, caplog):
+    """budget<=0 / floor<0 回退默认并告警；floor=0 合法（纯增量、无保底窗）。"""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
+        loaded = _load(
+            tmp_path,
+            """
+            [runtime]
+            enabled = true
+            default_provider = "good"
+            recent_context_token_budget = 0
+            recent_context_floor_seconds = -5
+            """
+            + _good_provider()
+            + _PERSONA,
+        )
+
+    assert loaded.runtime.recent_context_token_budget == 800
+    assert loaded.runtime.recent_context_floor_seconds == 300
+    assert any("recent_context_token_budget" in r.message for r in caplog.records)
+    assert any("recent_context_floor_seconds" in r.message for r in caplog.records)
+
+
+def test_recent_context_floor_zero_is_valid(tmp_path):
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        default_provider = "good"
+        recent_context_floor_seconds = 0
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+
+    assert loaded.runtime.recent_context_floor_seconds == 0

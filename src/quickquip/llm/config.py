@@ -71,6 +71,9 @@ class RuntimeConfig:
     epoch_cold_trigger_tokens: int = 5000
     epoch_hot_target_tokens: int = 32000
     epoch_cap_tokens: int = 64000
+    # ── 【现场】补丁（近期消息缓冲的 LLM 服役口径；仅全局，无 provider 覆盖） ──
+    recent_context_token_budget: int = 800
+    recent_context_floor_seconds: int = 300
 
 
 @dataclass(slots=True)
@@ -711,6 +714,22 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     personas = load_personas_only(config_path)
 
     runtime_raw = expand_env_value(as_dict(data.get("runtime")))
+    # 【现场】补丁两键防护：非法取值静默通过会让 budget=0 的「关停」意图
+    # 实际仍服役最新 1 条且无告警——与相邻 epoch_* 键的回退范式对齐
+    recent_context_token_budget = int(runtime_raw.get("recent_context_token_budget", 800))
+    if recent_context_token_budget <= 0:
+        logger.warning(
+            "[runtime] recent_context_token_budget=%d 非法（须 > 0），回退默认值 800",
+            recent_context_token_budget,
+        )
+        recent_context_token_budget = 800
+    recent_context_floor_seconds = int(runtime_raw.get("recent_context_floor_seconds", 300))
+    if recent_context_floor_seconds < 0:
+        logger.warning(
+            "[runtime] recent_context_floor_seconds=%d 非法（须 >= 0），回退默认值 300",
+            recent_context_floor_seconds,
+        )
+        recent_context_floor_seconds = 300
     triggers_raw = expand_env_value(as_dict(data.get("triggers")))
     tools_raw = expand_env_value(as_dict(data.get("tools")))
     mcp_raw = expand_env_value(as_dict(data.get("mcp")))
@@ -766,6 +785,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             epoch_cold_trigger_tokens=int(runtime_raw.get("epoch_cold_trigger_tokens", 5000)),
             epoch_hot_target_tokens=int(runtime_raw.get("epoch_hot_target_tokens", 32000)),
             epoch_cap_tokens=int(runtime_raw.get("epoch_cap_tokens", 64000)),
+            recent_context_token_budget=recent_context_token_budget,
+            recent_context_floor_seconds=recent_context_floor_seconds,
         ),
         triggers=TriggerConfig(
             default_prefix=str(triggers_raw.get("default_prefix", "/ai")).strip() or "/ai",

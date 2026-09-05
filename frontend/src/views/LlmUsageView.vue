@@ -49,6 +49,7 @@
         <UiStatCard label="轮次信封" :value="`≈${fmtNum(Math.round(data.avg_envelope_tokens ?? 0))} tok/轮`" :sub="`覆盖率 ${pct(data.envelope_coverage ?? 0)} · 每轮全价（估算）`" icon="Mail" />
         <UiStatCard label="纪元窗口" :value="`≈${fmtNum(Math.round(data.avg_epoch_history_tokens ?? 0))} tok/轮`" :sub="`覆盖率 ${pct(data.epoch_coverage ?? 0)} · history 段（估算）`" icon="Layers" />
         <UiStatCard label="图片附件" :value="`≈${(data.avg_media_image_count ?? 0).toFixed(1)} 张/轮`" :sub="`覆盖率 ${pct(data.media_coverage ?? 0)} · 当轮实际附带（VLM）`" icon="Image" />
+        <UiStatCard label="现场补丁" :value="`≈${fmtNum(Math.round(data.avg_patch_tokens ?? 0))} tok/轮`" :sub="`覆盖率 ${pct(data.patch_coverage ?? 0)} · 均值即预算利用率`" icon="MessagesSquare" />
         <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens 未计价`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" />
       </div>
 
@@ -93,6 +94,7 @@
                 <div v-if="event.envelope_tokens != null"><dt>信封</dt><dd>{{ fmtNum(event.envelope_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.epoch_history_tokens != null"><dt>纪元</dt><dd>{{ fmtNum(event.epoch_history_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.media_image_count != null"><dt>图片附件</dt><dd>{{ event.media_image_count }} 张</dd></div>
+                <div v-if="event.patch_tokens != null"><dt>现场补丁</dt><dd>{{ fmtNum(event.patch_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.thinking_tokens"><dt>思考</dt><dd>{{ fmtNum(event.thinking_tokens) }} tokens</dd></div>
                 <div><dt>成本分项</dt><dd>{{ costBreakdown(event) }}</dd></div>
                 <div><dt>定价</dt><dd>{{ pricingLabel(event) }}</dd></div>
