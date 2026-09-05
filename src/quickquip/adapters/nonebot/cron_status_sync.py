@@ -52,6 +52,52 @@ def sync_cron_status_file(scheduler, job_results: dict) -> None:
         logger.warning("cron_status: failed to write status file", exc_info=True)
 
 
+def load_job_results(path=None) -> dict[str, dict]:
+    """从共享状态文件读回各任务的最近执行结果（bot 重启恢复，#200）。
+
+    文件缺失 = 首次启动，静默返回空；损坏 = 告警返回空（不阻塞调度）。
+    跳过「未执行」的行（last_run 为空）——尚未跑过的任务重启后仍是未执行；
+    跳过 naive/无法解析的 last_run——时间语义保持带时区 ISO 8601。
+    path 默认值在调用期解析，便于测试 monkeypatch CRON_JOBS_JSON_PATH。
+    """
+    file_path = path or CRON_JOBS_JSON_PATH
+    try:
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    # UnicodeDecodeError（ValueError 子类，非 UTF-8 字节）同样按损坏处理——
+    # 击穿恢复块会中断 scheduler_plugin 模块导入，调度整体静默停摆
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        logger.warning("cron_status: failed to read status file for restore", exc_info=True)
+        return {}
+    results: dict[str, dict] = {}
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    for entry in jobs if isinstance(jobs, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        job_id = entry.get("id")
+        last_run = entry.get("last_run")
+        # last_run 必须是非空 str：fromisoformat 对 int 等真值抛 TypeError，
+        # 会击穿调用侧（恢复块无兜底，中断 scheduler_plugin 模块导入）
+        if not isinstance(job_id, str) or not isinstance(last_run, str) or not last_run:
+            continue
+        try:
+            if datetime.fromisoformat(last_run).tzinfo is None:
+                continue
+        except ValueError:
+            continue
+        last_status = entry.get("last_status")
+        last_error = entry.get("last_error")
+        results[job_id] = {
+            "last_run": last_run,
+            # 状态/错误归一：本模块与 record_job_result 的取值域（ok|error|None；
+            # str|None），手改文件灌入的其它类型不进内存表
+            "last_status": last_status if last_status in ("ok", "error") else None,
+            "last_error": last_error if isinstance(last_error, str) else None,
+        }
+    return results
+
+
 def register_cron_status_sync(scheduler, job_results: dict) -> None:
     """注册定时落盘 job（每 30 秒），驱动 web-admin 定时任务页的数据源。"""
     scheduler.add_job(

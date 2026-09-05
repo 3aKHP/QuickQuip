@@ -140,3 +140,61 @@ def test_reload_if_changed_watches_period_report_groups(monkeypatch, tmp_path):
     lifecycle._reload_if_changed()
 
     assert calls == ["weekly", "monthly"]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_jobs_record_results(monkeypatch):
+    """#199：三个维护任务接入执行记录——ok/error 双路，异常原样 re-raise。"""
+    from quickquip.adapters.nonebot import scheduler_plugin
+
+    driver = _FakeDriver()
+    captured: dict[str, object] = {}
+    fake_scheduler_module = types.ModuleType("nonebot_plugin_apscheduler")
+    fake_scheduler_module.scheduler = types.SimpleNamespace(
+        add_job=lambda fn, *args, **kwargs: captured.__setitem__(kwargs["id"], fn)
+    )
+    monkeypatch.setitem(sys.modules, "nonebot_plugin_apscheduler", fake_scheduler_module)
+    monkeypatch.setattr(scheduler_plugin, "_job_run_results", {})
+
+    lifecycle.register_lifecycle(driver)
+    assert set(captured) == {
+        "persistence_auto_save", "web_admin_state_sync", "web_admin_action_queue",
+    }
+
+    # ok 路径：三个任务全部记录 success
+    monkeypatch.setattr(lifecycle, "save_all", lambda: None)
+    monkeypatch.setattr(lifecycle, "_reload_if_changed", lambda: None)
+
+    async def fake_process():
+        return None
+
+    monkeypatch.setattr(lifecycle, "process_web_admin_actions", fake_process)
+    captured["persistence_auto_save"]()
+    captured["web_admin_state_sync"]()
+    await captured["web_admin_action_queue"]()
+    results = scheduler_plugin.get_job_results()
+    assert all(results[job]["last_status"] == "ok" for job in captured)
+    assert all(results[job]["last_error"] is None for job in captured)
+
+    # error 路径：re-raise 原异常 + 记录 error 与摘要
+    def boom():
+        raise RuntimeError("boom-500")
+
+    async def async_boom():
+        raise RuntimeError("async-boom")
+
+    monkeypatch.setattr(lifecycle, "save_all", boom)
+    monkeypatch.setattr(lifecycle, "_reload_if_changed", boom)
+    monkeypatch.setattr(lifecycle, "process_web_admin_actions", async_boom)
+    with pytest.raises(RuntimeError, match="boom-500"):
+        captured["persistence_auto_save"]()
+    with pytest.raises(RuntimeError, match="boom-500"):
+        captured["web_admin_state_sync"]()
+    with pytest.raises(RuntimeError, match="async-boom"):
+        await captured["web_admin_action_queue"]()
+    results = scheduler_plugin.get_job_results()
+    for job in ("persistence_auto_save", "web_admin_state_sync"):
+        assert results[job]["last_status"] == "error"
+        assert "boom-500" in results[job]["last_error"]
+    assert results["web_admin_action_queue"]["last_status"] == "error"
+    assert "async-boom" in results["web_admin_action_queue"]["last_error"]
