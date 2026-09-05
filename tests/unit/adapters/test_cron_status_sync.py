@@ -116,6 +116,9 @@ def test_load_job_results_skips_never_run_and_bad_time(monkeypatch, tmp_path):
                 {"id": "never_ran", "last_run": None, "last_status": None, "last_error": None},
                 {"id": "naive_time", "last_run": "2026-09-05T07:59:00", "last_status": "ok"},
                 {"id": "garbage_time", "last_run": "not-a-time", "last_status": "ok"},
+                {"id": "numeric_run", "last_run": 1000000000, "last_status": "ok"},
+                {"id": "bad_status_shape", "last_run": "2026-09-05T07:59:00+08:00",
+                 "last_status": {"weird": 1}, "last_error": ["not", "str"]},
                 {"id": 12345, "last_run": "2026-09-05T07:59:00+08:00"},
                 "not-a-dict",
             ],
@@ -125,7 +128,10 @@ def test_load_job_results_skips_never_run_and_bad_time(monkeypatch, tmp_path):
     monkeypatch.setattr(cron_status_sync, "CRON_JOBS_JSON_PATH", status_file)
 
     restored = cron_status_sync.load_job_results()
-    assert set(restored) == {"ran_ok"}
+    assert set(restored) == {"ran_ok", "bad_status_shape"}
+    # 归一：畸形 status/error 类型不进内存表（从isoformat(int) 的 TypeError 也会击穿恢复块）
+    assert restored["bad_status_shape"]["last_status"] is None
+    assert restored["bad_status_shape"]["last_error"] is None
 
 
 def test_restore_writes_into_live_results_dict(monkeypatch, tmp_path):

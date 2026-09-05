@@ -75,17 +75,23 @@ def load_job_results(path=None) -> dict[str, dict]:
             continue
         job_id = entry.get("id")
         last_run = entry.get("last_run")
-        if not isinstance(job_id, str) or not last_run:
+        # last_run 必须是非空 str：fromisoformat 对 int 等真值抛 TypeError，
+        # 会击穿调用侧（恢复块无兜底，中断 scheduler_plugin 模块导入）
+        if not isinstance(job_id, str) or not isinstance(last_run, str) or not last_run:
             continue
         try:
             if datetime.fromisoformat(last_run).tzinfo is None:
                 continue
         except ValueError:
             continue
+        last_status = entry.get("last_status")
+        last_error = entry.get("last_error")
         results[job_id] = {
             "last_run": last_run,
-            "last_status": entry.get("last_status"),
-            "last_error": entry.get("last_error"),
+            # 状态/错误归一：本模块与 record_job_result 的取值域（ok|error|None；
+            # str|None），手改文件灌入的其它类型不进内存表
+            "last_status": last_status if last_status in ("ok", "error") else None,
+            "last_error": last_error if isinstance(last_error, str) else None,
         }
     return results
 
