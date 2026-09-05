@@ -95,8 +95,9 @@ function onUpdate(value: unknown) {
 }
 
 /* base.css 的全局 input[type=text] 会作用于选择器输入框（36px 高/边框，视觉一致），
-   只需为尾部日历图标留出避让空间 */
+   但它的 padding（7px 11px）也压掉了库的图标避让（--dp-input-icon-padding）：
+   日历/时钟图标 absolute 定位在输入框左缘，clear 图标在右缘，两侧都要补避让 */
 .ui-date-picker :deep(input.dp--input) {
-  padding-right: 34px;
+  padding-inline: 40px;
 }
 </style>

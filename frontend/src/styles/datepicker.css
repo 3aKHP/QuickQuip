@@ -2,6 +2,23 @@
 @import '@vuepic/vue-datepicker/dist/main.css';
 
 /*
+ * 紧凑尺寸：库默认面向移动端密度（--dp-font-size 1rem、--dp-time-font-size 2rem、
+ * cell 35px），与本项目 36px 输入框 / 13px 文字的密度不协调。:root 覆盖与库同级同特异性，
+ * 依赖本文件在 @import 之后声明（后者胜）。
+ */
+:root {
+  --dp-font-size: 0.8125rem;        /* 13px，对齐 --qq-text-sm 档 */
+  --dp-time-font-size: 1rem;        /* time-picker 大数字从 32px 收到 16px */
+  --dp-preview-font-size: 0.75rem;
+  --dp-cell-size: 30px;
+  --dp-button-height: 30px;
+  --dp-month-year-row-height: 30px;
+  --dp-button-icon-height: 16px;
+  --dp-time-inc-dec-button-size: 26px;
+  --dp-menu-min-width: 230px;
+}
+
+/*
  * 主题重映射：--dp-* → --qq-*。
  * - 类名/变量在库 v13+ 为 dp-- 前缀（官方 theming 文档页仍展示旧 dp__，以 dist 源码为准）；
  * - html 前缀把特异性提到 0,1,1，压过库的 .dp--theme-*（0,1,0），与构建产物加载顺序无关；
