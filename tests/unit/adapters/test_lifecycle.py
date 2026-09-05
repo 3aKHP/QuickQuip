@@ -149,9 +149,15 @@ async def test_lifecycle_jobs_record_results(monkeypatch):
 
     driver = _FakeDriver()
     captured: dict[str, object] = {}
+    captured_names: dict[str, str | None] = {}
+
+    def _record_job(fn, kwargs):
+        captured[kwargs["id"]] = fn
+        captured_names[kwargs["id"]] = kwargs.get("name")
+
     fake_scheduler_module = types.ModuleType("nonebot_plugin_apscheduler")
     fake_scheduler_module.scheduler = types.SimpleNamespace(
-        add_job=lambda fn, *args, **kwargs: captured.__setitem__(kwargs["id"], fn)
+        add_job=lambda fn, *args, **kwargs: _record_job(fn, kwargs)
     )
     monkeypatch.setitem(sys.modules, "nonebot_plugin_apscheduler", fake_scheduler_module)
     monkeypatch.setattr(scheduler_plugin, "_job_run_results", {})
@@ -160,6 +166,7 @@ async def test_lifecycle_jobs_record_results(monkeypatch):
     assert set(captured) == {
         "persistence_auto_save", "web_admin_state_sync", "web_admin_action_queue",
     }
+    assert captured_names == {job_id: job_id for job_id in captured}, "#179: 任务可读名应与 id 一致"
 
     # ok 路径：三个任务全部记录 success
     monkeypatch.setattr(lifecycle, "save_all", lambda: None)

@@ -105,6 +105,7 @@ def register_cron_status_sync(scheduler, job_results: dict) -> None:
         "interval",
         seconds=30,
         id=CRON_STATUS_SYNC_JOB_ID,
+        name=CRON_STATUS_SYNC_JOB_ID,
         replace_existing=True,
     )
     logger.info("cron_status: sync job registered (every 30s)")

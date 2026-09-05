@@ -241,6 +241,7 @@ def _register_scheduler_jobs() -> None:
             _wrapped_send,
             "cron",
             id=job_id,
+            name=job_id,
             replace_existing=True,
             **parse_cron(getattr(cfg, f"{period}_cron"), fallback_hour="8"),
         )
