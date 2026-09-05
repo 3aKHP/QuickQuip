@@ -333,3 +333,40 @@ async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
     expected = 100 * 2 / 1e6 + 50 * 10 / 1e6
     assert abs(row["cost_usd"] - expected) < 1e-9
     assert row["priced"] == 1
+
+
+async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_path):
+    """issue #202：input_tokens 列存原始上报值，标签须描述列值口径——
+    claude 协议 exclusive（不含 cache_read/creation），其余 inclusive。"""
+    from quickquip.llm.usage import _record_usage
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    async def _record(protocol: str) -> str | None:
+        class FakeClient:
+            config = ProviderConfig(
+                id="p", protocol=protocol, base_url="https://x/v1",
+                api_key_env="K", default_model="m", models=["m"],
+            )
+
+        class FakeReq:
+            model = "m"
+
+        response = LLMResponse(
+            text="ok", model="m", input_tokens=100, output_tokens=50,
+            cache_read_tokens=200,
+        )
+        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
+        with fake_store.connect() as conn:
+            return conn.execute(
+                "SELECT input_token_semantics FROM llm_usage_events"
+                " WHERE protocol = ?", (protocol,)
+            ).fetchone()[0]
+
+    assert await _record("claude") == "exclusive"
+    assert await _record("openai") == "inclusive"
+    assert await _record("gemini") == "inclusive"

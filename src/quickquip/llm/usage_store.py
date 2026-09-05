@@ -208,6 +208,16 @@ class LLMUsageStore:
                     CREATE INDEX IF NOT EXISTS idx_usage_persona  ON llm_usage_events(persona_id, ts DESC);
                     """
                 )
+                # 历史 claude 行标签 backfill（issue #202）：input_tokens 列自始存
+                # exclusive 原始值，落库标签却恒写 inclusive。UPDATE 天然幂等，
+                # 首次执行修完全库后，后续重跑 0 行受影响
+                conn.execute(
+                    """
+                    UPDATE llm_usage_events
+                    SET input_token_semantics = 'exclusive'
+                    WHERE protocol = 'claude' AND input_token_semantics = 'inclusive'
+                    """
+                )
             self._schema_ready = True
 
     def record(self, row: dict) -> None:
