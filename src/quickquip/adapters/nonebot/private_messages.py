@@ -6,6 +6,7 @@ from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.common.bot_action_trace import bot_action_trace
+from quickquip.chat.reply_probability import roll_reply
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
     get_llm_service,
@@ -85,7 +86,7 @@ def register_private_message_matcher(on_message):
         if llm_input is None:
             return
         _remember_recent_message(scope_key, user_id, sender_name, canonical_name, rendered_text, message_id)
-        if not rate_limiter.allow("llm_chat", user_id):
+        if not roll_reply("llm_chat") or not rate_limiter.allow("llm_chat", user_id):
             return
 
         result = await svc.generate_private_reply(
