@@ -55,7 +55,7 @@ run_step() {
     fi
 }
 
-for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproject.toml" "requirements.txt" "src/quickquip" "src/plugins" "config/llm.toml" "llm_about/_example/vocab.yaml" "llm_about/_example/identities.yaml"; do
+for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproject.toml" "requirements.txt" "src/quickquip" "src/plugins" "config/llm.toml" "llm_about/_example/vocab.yaml" "llm_about/_example/identities.yaml" "docker/searxng/settings.yml"; do
     [ -e "$required_path" ] || { echo "${R}Missing required file: $required_path${N}" >&2; exit 1; }
 done
 
@@ -78,6 +78,11 @@ run_step "tar archive" tar czf "$TempArchive" \
     --exclude='__pycache__' \
     --exclude='.venv' \
     --exclude='.vscode' \
+    --exclude='.claude' \
+    --exclude='.gemini' \
+    --exclude='AGENTS.md' \
+    --exclude='AGENTS.override.md' \
+    --exclude='CLAUDE.md' \
     --exclude='./data' \
     --exclude="$LocalPrivateWorkspace" \
     --exclude='prod/sendkey.env' \
@@ -85,6 +90,9 @@ run_step "tar archive" tar czf "$TempArchive" \
     --exclude='prod/README.md' \
     --exclude='prod/llbot-qq' \
     --exclude='prod/llbot-data' \
+    --exclude='prod/napcat-data' \
+    --exclude='prod/home_router_ed25519' \
+    --exclude='prod/home_router_ed25519.pub' \
     --exclude='frontend/node_modules' \
     --exclude='./tests' \
     --exclude='test_*.py' \
@@ -133,8 +141,9 @@ mkdir -p "$REMOTE_DIR"
 cd "$REMOTE_DIR"
 
 tar xzf /tmp/quickquip-deploy.tar.gz
-rm -f "$REMOTE_DIR"/test_*.py "$REMOTE_DIR/requirements-dev.txt"
-rm -rf "$REMOTE_DIR/tests" "$REMOTE_DIR/scripts"
+rm -f "$REMOTE_DIR/AGENTS.md" "$REMOTE_DIR/AGENTS.override.md" "$REMOTE_DIR/CLAUDE.md" "$REMOTE_DIR"/test_*.py
+rm -f "$REMOTE_DIR/requirements-dev.txt" "$REMOTE_DIR/docs/GROUP_COMMANDS.md"
+rm -rf "$REMOTE_DIR/.gemini" "$REMOTE_DIR/tests" "$REMOTE_DIR/scripts" "$REMOTE_DIR/frontend-v1" "$REMOTE_DIR/frontend-v2"
 
 if [ -f /tmp/quickquip-sendkey.env ]; then
     mkdir -p "$REMOTE_DIR/prod"

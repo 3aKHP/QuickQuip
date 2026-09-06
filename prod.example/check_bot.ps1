@@ -118,10 +118,26 @@ print()
 print('Scan the QR code with mobile QQ.')
 "@
 
-if (Test-Path $venvPython) {
-    $pyScript | & $venvPython - 2>$null
+# Prefer project venv, fall back to system python. Pick the first with qrcode.
+$candidates = @()
+if (Test-Path $venvPython) { $candidates += $venvPython }
+$sysPython = Get-Command python -ErrorAction SilentlyContinue
+if ($sysPython) { $candidates += $sysPython.Source }
+
+$chosenPython = $null
+foreach ($py in $candidates) {
+    & $py -c "import qrcode" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $chosenPython = $py
+        break
+    }
+}
+
+if ($chosenPython) {
+    $pyScript | & $chosenPython - 2>$null
 } else {
-    Write-Host "Project venv Python not found ($venvPython)"
+    Write-Err "qrcode is not installed in any Python (tried: $($candidates -join ', '))."
+    Write-Host "Run: .\.venv\Scripts\pip install qrcode" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Copy this URL or use the WebUI tunnel:"
     Write-Host "  $rawQrUrl" -ForegroundColor Green

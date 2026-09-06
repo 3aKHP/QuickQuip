@@ -116,9 +116,21 @@ step "QR URL: $qrUrl"
 echo "Rendering terminal QR code..."
 echo ""
 
-venvPy="$ProjectRoot/.venv/bin/python"
-if [ -x "$venvPy" ]; then
-    "$venvPy" - "$qrUrl" <<'PY'
+# Prefer project venv, fall back to system python. Pick the first with qrcode.
+candidates=()
+if [ -x "$ProjectRoot/.venv/bin/python" ]; then candidates+=("$ProjectRoot/.venv/bin/python"); fi
+if command -v python3 >/dev/null 2>&1; then candidates+=(python3); fi
+if command -v python >/dev/null 2>&1; then candidates+=(python); fi
+chosen=""
+for py in "${candidates[@]}"; do
+    if "$py" -c "import qrcode" 2>/dev/null; then
+        chosen="$py"
+        break
+    fi
+done
+
+if [ -n "$chosen" ]; then
+    "$chosen" - "$qrUrl" <<'PY'
 import sys
 import urllib.parse
 from urllib.parse import urlparse, parse_qs
@@ -145,8 +157,9 @@ print()
 print('Scan the QR code with mobile QQ.')
 PY
 else
-    printf '%sProject venv Python not found (%s)%s\n' "$Y" "$venvPy" "$N"
-    printf '\n'
+    err "qrcode is not installed in any Python (tried: ${candidates[*]})."
+    printf '%sRun: .venv/bin/pip install qrcode%s\n' "$Y" "$N"
+    echo ""
     echo "Copy this URL or use the WebUI tunnel:"
     printf '  %s%s%s\n' "$G" "$qrUrl" "$N"
     printf '  %sssh -L 3080:127.0.0.1:3080 %s%s\n' "$C" "$Server" "$N"
