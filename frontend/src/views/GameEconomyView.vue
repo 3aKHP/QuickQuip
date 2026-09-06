@@ -12,7 +12,7 @@
       <h3 class="st section-title">金币排行 TOP 20</h3>
       <UiLoading v-if="rankLoading" />
       <UiEmpty v-else-if="!rankings.length" icon="BarChart3" title="暂无排行数据" />
-      <div v-else class="table-scroll"><table><thead><tr><th class="num">#</th><th>QQ</th><th class="num">金币</th><th class="num">好感度</th><th class="num">连击</th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.user_id"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="lookupUser(r.user_id)" class="acct-link">{{ r.user_id }}</a></td><td class="num">{{ r.gold.toLocaleString() }}</td><td class="num">{{ r.affection }}</td><td class="num">{{ r.sign_streak }} 天</td></tr></tbody></table></div>
+      <div v-else class="table-scroll"><table><thead><tr><th class="num">#</th><th>QQ</th><th class="num">金币</th><th class="num">好感度<UiInfoTip text="签到累积的好感成长值。" /></th><th class="num">连击<UiInfoTip text="连续签到天数，中断后重新计数。" /></th></tr></thead><tbody><tr v-for="(r, i) in rankings" :key="r.user_id"><td class="num">{{ i + 1 }}</td><td><a href="#" @click.prevent="lookupUser(r.user_id)" class="acct-link">{{ r.user_id }}</a></td><td class="num">{{ r.gold.toLocaleString() }}</td><td class="num">{{ r.affection }}</td><td class="num">{{ r.sign_streak }} 天</td></tr></tbody></table></div>
     </UiCard>
 
     <UiCard v-if="selectedGroup" padding="md" shadow="sm" class="section">
@@ -30,7 +30,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiStatStrip from '../components/ui/UiStatStrip.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listGroups, getRankings, getAccount, adjustGold } from '../api/game-economy'; import { toast } from '../toast'
 
 const loading = ref(false); const loadError = ref<string | null>(null); const groups = ref<any[]>([]); const selectedGroup = ref(''); const rankLoading = ref(false); const rankings = ref<any[]>([])

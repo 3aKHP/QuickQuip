@@ -1,6 +1,6 @@
 <template>
   <div class="personas-view">
-    <UiPageHeader title="人格管理"><template #actions><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreate">新建</UiButton></template></UiPageHeader>
+    <UiPageHeader title="人格管理" subtitle="persona 决定 bot 的说话风格（system_prompt / style_prompt），按群在「群 LLM 设置」选用"><template #actions><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreate">新建</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
     <div class="split">
