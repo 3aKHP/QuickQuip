@@ -5,6 +5,7 @@ from quickquip.llm.history_projection import (
     PATH_STRUCTURED,
     project_loops_with_budget,
 )
+from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.store_parts.agent_records import (
     LoadedToolExecution,
 )
@@ -39,9 +40,6 @@ def _big_result_exec(execution_id: str, chars: int) -> LoadedToolExecution:
         result_retention="bounded",
         result_omission_reason=None,
     )
-
-
-from quickquip.llm.token_estimate import estimate_tokens
 
 
 def _token_estimate_of(messages) -> int:
