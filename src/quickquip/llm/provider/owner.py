@@ -78,6 +78,20 @@ def build_response_owner(
     )
 
 
+def primary_endpoint_url(config: ProviderConfig, model: str) -> str:
+    """主端点 URL（与各 client 的 _build_request_parts 同构）。
+
+    供历史投影在请求前构造目标 owner；敏感 query（gemini 的 key）不参与
+    指纹，可省略。
+    """
+    base = config.base_url.rstrip("/")
+    if config.protocol == "openai":
+        return f"{base}/chat/completions"
+    if config.protocol == "claude":
+        return f"{base}/messages?beta=true"
+    return f"{base}/models/{model}:generateContent"
+
+
 def tools_schema_fingerprint(specs: list[LLMToolSpec]) -> str:
     """工具 schema 指纹（§7.1：单独记录，参与 epoch projection profile）。"""
     payload = [

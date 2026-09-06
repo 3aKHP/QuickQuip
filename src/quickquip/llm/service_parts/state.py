@@ -3,6 +3,7 @@ from __future__ import annotations
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
+from quickquip.llm.store_parts.agent_records import HistoryMutation
 
 
 class StateMixin:
@@ -37,6 +38,12 @@ class StateMixin:
                 created_at=created_at,
             )
             self.store.archive_conversation_messages(user_id_str, archive_number)
+            # 整 Loop 迁移（§9.4）：Loop/Turn/delivery ID 与时间不变，
+            # 双侧 scope generation 增长，两侧 buffer/epoch 由 clear/调用方清理。
+            self.store.migrate_loops_between_scopes(
+                scope_key, f"archive:{user_id_str}:{archive_number}"
+            )
+            self._epochs.reset_scope(scope_key)
         else:
             self.clear_context(user_id, chat_type="private")
 
@@ -60,6 +67,10 @@ class StateMixin:
         self.clear_context(user_id, chat_type="private")
 
         self.store.restore_conversation_messages(user_id_str, archive_number)
+        # 恢复同样走整 Loop 迁移（§9.4）；clear_context 已清目标侧 buffer/epoch。
+        self.store.migrate_loops_between_scopes(
+            f"archive:{user_id_str}:{archive_number}", scope_key
+        )
         self._session_presets.pop(scope_key, None)
         preset = archive.get("preset") or ""
         if preset:
@@ -93,6 +104,8 @@ class StateMixin:
         return "\n".join(lines)
 
     def delete_session_archive_for_user(self, user_id: int | str, archive_number: int) -> bool:
+        archive_key = f"archive:{str(user_id)}:{archive_number}"
+        self.store.delete_loops_for_scope(archive_key)
         return self.store.delete_session_archive(str(user_id), archive_number)
 
     def get_session_preset(self, scope_key: str) -> str:
@@ -289,18 +302,54 @@ class StateMixin:
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
         scope_key = self.build_chat_scope_key(group_id, chat_type)
         deleted = self.store.clear_conversation_messages(scope_key)
+        # Agent 执行记录随域清理（§9.3）：主表行删除后侧表不能留孤儿。
+        self.store.delete_loops_for_scope(scope_key)
         # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点；只清前者
         # 会让 build_messages 继续把缓冲拼进提示词，或让纪元锚点指向已删除的行，
         # 模型仍然"看得见"历史。三件齐清（私聊会话 start/end/resume 也走这里）。
         if self.recent_message_buffer:
             self.recent_message_buffer.clear_scope(scope_key)
         self._epochs.reset_scope(scope_key)
+        self._bump_scope_generation(scope_key, HistoryMutation.CLEAR)
         return deleted
+
+    def _bump_scope_generation(self, scope_key: str, mutation: str) -> None:
+        """generation/revision 屏障（§4.2）：清空后迟到结果不得新建内容。"""
+        _, revision = self.store.agent_scope_state(scope_key)
+        self.store.mutate_history(scope_key, revision, mutation)
 
     def clear_group_context(self, group_id: int | str) -> int:
         return self.clear_context(group_id, chat_type="group")
 
     def delete_message_from_context(self, scope_key: str, message_id: str) -> bool:
-        db_deleted = self.store.delete_conversation_message_by_message_id(scope_key, message_id)
-        buf_deleted = self.recent_message_buffer.remove_by_message_id(scope_key, message_id) if self.recent_message_buffer else False
-        return db_deleted > 0 or buf_deleted
+        """撤回/删除入口（§9.2/§9.3）：先按 QQ receipt 定位确切 delivery。"""
+        delivery = self.store.lookup_delivery(scope_key, message_id)
+        if delivery is not None:
+            hit = False
+            if delivery.get("kind") == "text_chunk" and delivery.get("recall_status") == "active":
+                hit = self.store.recall_delivery_chunk(scope_key, str(delivery["delivery_id"]))
+                if hit:
+                    self._bump_scope_generation(scope_key, HistoryMutation.RECALL)
+            else:
+                hit = self.store.recall_delivery_chunk(scope_key, str(delivery["delivery_id"]))
+            if self.recent_message_buffer:
+                self.recent_message_buffer.remove_by_message_id(scope_key, message_id)
+            if hit:
+                return True
+        # 兼容回退：按平台 message_id 匹配主表行（legacy 行/兼容列）。
+        rows = self.store.conversation_rows_by_message_id(scope_key, message_id)
+        deleted_any = False
+        for row in rows:
+            if row["role"] == "user":
+                # 群友撤回触发消息：按整 Loop 删除处理（§9.3）。
+                deleted_any = self.store.delete_loop_by_anchor(scope_key, int(row["id"])) or deleted_any
+            else:
+                deleted_any = self.store.delete_turn_by_message_row(scope_key, int(row["id"])) or deleted_any
+        if deleted_any:
+            self._bump_scope_generation(scope_key, HistoryMutation.DELETE)
+        buf_deleted = (
+            self.recent_message_buffer.remove_by_message_id(scope_key, message_id)
+            if self.recent_message_buffer
+            else False
+        )
+        return deleted_any or buf_deleted

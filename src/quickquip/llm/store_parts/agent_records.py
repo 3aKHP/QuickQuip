@@ -1751,3 +1751,261 @@ class AgentRecordsStoreMixin:
             "DELETE FROM conversation_messages WHERE agent_loop_id = ?", (loop_id,)
         )
         conn.execute("DELETE FROM agent_loops WHERE loop_id = ?", (loop_id,))
+
+    # ── 维护操作（§9 引用、撤回、删除和私聊会话） ──────────────────
+
+    def delete_loops_for_scope(self, scope_key: str) -> int:
+        """清空场景的整域删除（§9.3）：全部 Loop 及其主表行，返回删除数。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            loops = [
+                row["loop_id"]
+                for row in conn.execute(
+                    "SELECT loop_id FROM agent_loops WHERE scope_key = ?", (scope_key,)
+                )
+            ]
+            for loop_id in loops:
+                self._delete_whole_loop(conn, loop_id)
+            conn.commit()
+            return len(loops)
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def delete_loop_by_anchor(self, scope_key: str, anchor_row_id: int) -> bool:
+        """按 user 触发行删除整个 Loop（§9.3）。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT loop_id FROM agent_loops WHERE scope_key = ? AND anchor_row_id = ?",
+                (scope_key, int(anchor_row_id)),
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return False
+            self._delete_whole_loop(conn, row["loop_id"])
+            conn.commit()
+            return True
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def delete_turn_by_message_row(self, scope_key: str, message_row_id: int) -> bool:
+        """删除一个 Turn 的全部正文范围与交付内容（§9.3）。
+
+        保留协议需要的状态占位：Turn 行与主表行移除，工具声明保留名称与
+        终态（结果正文清空），Loop 非公开证据（native/owner）清除。
+        """
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            turn = conn.execute(
+                """
+                SELECT t.turn_id, t.loop_id FROM agent_turns t
+                JOIN agent_loops l ON l.loop_id = t.loop_id
+                WHERE l.scope_key = ? AND t.message_row_id = ?
+                """,
+                (scope_key, int(message_row_id)),
+            ).fetchone()
+            if turn is None:
+                conn.commit()
+                return False
+            conn.execute(
+                "DELETE FROM conversation_messages WHERE id = ?", (int(message_row_id),)
+            )
+            conn.execute(
+                "DELETE FROM agent_deliveries WHERE turn_id = ?", (turn["turn_id"],)
+            )
+            conn.execute(
+                """
+                UPDATE agent_tool_executions
+                SET arguments_json = NULL, arguments_omission_reason = 'recall_cleanup',
+                    result_json = NULL, result_omission_reason = 'recall_cleanup',
+                    outbound_media_json = NULL
+                WHERE turn_id = ?
+                """,
+                (turn["turn_id"],),
+            )
+            conn.execute(
+                """
+                UPDATE agent_turns
+                SET native_state_json = NULL, native_omission_reason = 'recall_cleanup',
+                    owner_json = NULL, parts_json = ?, text_policy = 'redacted'
+                WHERE turn_id = ?
+                """,
+                (
+                    _dumps({"version": AGENT_RECORD_VERSION, "parts": []}),
+                    turn["turn_id"],
+                ),
+            )
+            conn.execute(
+                "UPDATE agent_loops SET replay_revision = replay_revision + 1 WHERE loop_id = ?",
+                (turn["loop_id"],),
+            )
+            conn.commit()
+            return True
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def recall_delivery_chunk(self, scope_key: str, delivery_id: str) -> bool:
+        """单 Chunk 撤回（§9.2）：遮蔽源范围并清除该 Loop 的工具/原生证据。
+
+        已确认发送的事实保留（recall_status=recalled）；其余 Chunk 正文
+        不动。返回是否命中。
+        """
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            delivery = conn.execute(
+                """
+                SELECT d.delivery_id, d.loop_id, d.turn_id, d.source_start, d.source_end
+                FROM agent_deliveries d
+                JOIN agent_loops l ON l.loop_id = d.loop_id
+                WHERE l.scope_key = ? AND d.delivery_id = ?
+                """,
+                (scope_key, delivery_id),
+            ).fetchone()
+            if delivery is None:
+                conn.commit()
+                return False
+            turn_id = delivery["turn_id"]
+            turn = conn.execute(
+                "SELECT message_row_id FROM agent_turns WHERE turn_id = ?", (turn_id,)
+            ).fetchone()
+            if turn is not None and turn["message_row_id"] is not None:
+                message = conn.execute(
+                    "SELECT content FROM conversation_messages WHERE id = ?",
+                    (turn["message_row_id"],),
+                ).fetchone()
+                if message is not None:
+                    text = message["content"] or ""
+                    start, end = int(delivery["source_start"] or 0), int(delivery["source_end"] or 0)
+                    # 等 code point 数遮蔽：保留坐标供后续撤回其他 Chunk。
+                    if 0 <= start <= end <= len(text):
+                        masked = text[:start] + "▇" * (end - start) + text[end:]
+                        conn.execute(
+                            "UPDATE conversation_messages SET content = ? WHERE id = ?",
+                            (masked, turn["message_row_id"]),
+                        )
+            conn.execute(
+                "UPDATE agent_deliveries SET recall_status = 'recalled' WHERE delivery_id = ?",
+                (delivery_id,),
+            )
+            # 该 Loop 的工具证据与原生状态整体清理（§9.2.3）。
+            conn.execute(
+                """
+                UPDATE agent_tool_executions
+                SET arguments_json = NULL, arguments_omission_reason = 'recall_cleanup',
+                    result_json = NULL, result_omission_reason = 'recall_cleanup',
+                    outbound_media_json = NULL
+                WHERE turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
+                """,
+                (delivery["loop_id"],),
+            )
+            conn.execute(
+                """
+                UPDATE agent_turns
+                SET native_state_json = NULL, native_omission_reason = 'recall_cleanup',
+                    owner_json = NULL
+                WHERE loop_id = ?
+                """,
+                (delivery["loop_id"],),
+            )
+            conn.execute(
+                "UPDATE agent_loops SET replay_revision = replay_revision + 1 WHERE loop_id = ?",
+                (delivery["loop_id"],),
+            )
+            conn.commit()
+            return True
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def migrate_loops_between_scopes(self, from_scope: str, to_scope: str) -> int:
+        """私聊归档/恢复的整 Loop 迁移（§9.4）：ID 与时间不变，双侧 generation 增长。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("INSERT OR IGNORE INTO agent_scopes (scope_key) VALUES (?)", (to_scope,))
+            moved = conn.execute(
+                "UPDATE agent_loops SET scope_key = ? WHERE scope_key = ?",
+                (to_scope, from_scope),
+            ).rowcount
+            if moved:
+                conn.execute(
+                    "UPDATE conversation_messages SET group_id = ? WHERE group_id = ?",
+                    (to_scope, from_scope),
+                )
+            for scope in (from_scope, to_scope):
+                conn.execute(
+                    """
+                    UPDATE agent_scopes
+                    SET generation = generation + 1, history_revision = history_revision + 1
+                    WHERE scope_key = ?
+                    """,
+                    (scope,),
+                )
+            conn.commit()
+            return int(moved or 0)
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def loops_with_tools(self, scope_key: str, loop_ids: Collection[str]) -> set[str]:
+        """判定哪些 Loop 携带工具事实（历史投影替换的门槛，§8.1）。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        if not loop_ids:
+            return set()
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in loop_ids)
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT t.loop_id AS loop_id FROM agent_turns t
+                JOIN agent_tool_executions e ON e.turn_id = t.turn_id
+                WHERE t.loop_id IN ({placeholders})
+                """,
+                tuple(loop_ids),
+            ).fetchall()
+        return {row["loop_id"] for row in rows}
+
+    def load_closed_loops_by_ids(self, scope_key: str, loop_ids: Collection[str]) -> list[LoadedLoop]:
+        """按 ID 读取完整已关闭 Loop（历史投影输入；顺序按 anchor ASC）。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        if not loop_ids:
+            return []
+        with self._connect() as conn:
+            placeholders = ",".join("?" for _ in loop_ids)
+            loops = conn.execute(
+                f"""
+                SELECT * FROM agent_loops
+                WHERE scope_key = ? AND closed_at IS NOT NULL AND loop_id IN ({placeholders})
+                ORDER BY anchor_row_id ASC
+                """,
+                (scope_key, *loop_ids),
+            ).fetchall()
+            return [self._load_one_loop(conn, loop) for loop in loops]

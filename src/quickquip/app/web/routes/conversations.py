@@ -119,13 +119,22 @@ class DeleteResult(BaseModel):
 
 @router.delete("/conversations/{group_key}/messages/{msg_id}")
 def delete_message(group_key: str, msg_id: int):
+    """行删除走 action queue（§9.3/§10）：Bot 进程执行领域操作。
+
+    assistant 主行 = 删除该 Turn 全部正文范围与交付内容；user 触发行 =
+    整 Loop 删除。Web 侧不再直接执行原始单表 DELETE——侧表与主表必须
+    在同一领域事务内收敛。
+    """
     _validate_group_key(group_key)
-    with _connect() as conn:
-        cursor = conn.execute(
-            "DELETE FROM conversation_messages WHERE group_id = ? AND id = ?",
-            (group_key, msg_id),
-        )
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="message not found")
-    logger.warning("conversation message deleted: group=%s id=%d", group_key, msg_id)
-    return {"ok": True}
+    if group_key.startswith("archive:"):
+        raise HTTPException(status_code=409, detail="archive scope deletions use the archive API")
+    from quickquip.app.web.action_queue import action_queue
+
+    queued = action_queue.enqueue(
+        "delete_conversation_row", {"scope_key": group_key, "row_id": msg_id}
+    )
+    logger.warning(
+        "conversation row deletion queued: group=%s id=%d action=%s",
+        group_key, msg_id, queued.get("id"),
+    )
+    return {"ok": True, "action_id": queued.get("id"), "status": "queued"}

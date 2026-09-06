@@ -98,6 +98,26 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
         deleted = svc.delete_message_from_context(scope_key, message_id)
         return {"deleted": deleted}
 
+    if action.action_type == "delete_conversation_row":
+        # Web 会话视图的行删除（§9.3）：assistant 主行 = 删除该 Turn 全部
+        # 正文范围与交付内容；user 触发行 = 整 Loop 删除。经 action queue
+        # 由 Bot 进程执行领域操作，禁止 Web 侧原始单表 DELETE。
+        scope_key = _validate_scope(action.payload.get("scope_key"))
+        row_id = int(action.payload.get("row_id") or 0)
+        if row_id <= 0:
+            raise ValueError("row_id is required")
+        row = svc.store.conversation_row_by_id(scope_key, row_id)
+        if row is None:
+            return {"deleted": False}
+        if row["role"] == "user":
+            deleted = svc.store.delete_loop_by_anchor(scope_key, row_id)
+        else:
+            deleted = svc.store.delete_turn_by_message_row(scope_key, row_id)
+        if deleted:
+            _, revision = svc.store.agent_scope_state(scope_key)
+            svc.store.mutate_history(scope_key, revision, "delete")
+        return {"deleted": bool(deleted)}
+
     raise ValueError(f"unknown runtime action: {action.action_type}")
 
 

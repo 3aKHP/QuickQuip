@@ -74,6 +74,14 @@ class RuntimeConfig:
     # ── 【现场】补丁（近期消息缓冲的 LLM 服役口径；仅全局，无 provider 覆盖） ──
     recent_context_token_budget: int = 800
     recent_context_floor_seconds: int = 300
+    # 应用侧输入预算（§8.3）：所有 provider 的缺省，可被 provider 覆盖。
+    # 不能从 epoch cap 推导实际模型上下文大小；未配置模型容量时文档与
+    # 日志按 capacity unknown 处理。
+    request_input_token_budget: int = 96_000
+    # D5 关闭 Loop 保留三上限（§2）：先触顶者触发整 Loop 清理。
+    agent_record_retention_days: int = 30
+    agent_record_max_loops_per_scope: int = 1000
+    agent_record_max_bytes_per_scope: int = 67_108_864
 
 
 @dataclass(slots=True)
@@ -184,6 +192,11 @@ class ProviderConfig:
     epoch_cold_trigger_tokens: int | None = None
     epoch_hot_target_tokens: int | None = None
     epoch_cap_tokens: int | None = None
+    # 应用侧输入预算（§8.3）：provider 覆盖 None = 继承 runtime 缺省。
+    request_input_token_budget: int | None = None
+    # wire model -> token 容量；只能来自维护者配置或可信已核实资料，
+    # 不从模型名称猜测。未配置的模型按 capacity unknown 处理。
+    model_context_windows: dict[str, int] = field(default_factory=dict)
 
 
 def provider_builtin_search_active(provider: ProviderConfig) -> bool:
@@ -538,6 +551,11 @@ def _parse_single_provider(
         epoch_cold_trigger_tokens=_as_optional_int(entry.get("epoch_cold_trigger_tokens")),
         epoch_hot_target_tokens=_as_optional_int(entry.get("epoch_hot_target_tokens")),
         epoch_cap_tokens=_as_optional_int(entry.get("epoch_cap_tokens")),
+        request_input_token_budget=_as_optional_int(entry.get("request_input_token_budget")),
+        model_context_windows={
+            str(name): max(1024, int(size))
+            for name, size in as_dict(entry.get("model_context_windows")).items()
+        },
     )
 
 
@@ -785,6 +803,18 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             epoch_cold_trigger_tokens=int(runtime_raw.get("epoch_cold_trigger_tokens", 5000)),
             epoch_hot_target_tokens=int(runtime_raw.get("epoch_hot_target_tokens", 32000)),
             epoch_cap_tokens=int(runtime_raw.get("epoch_cap_tokens", 64000)),
+            request_input_token_budget=max(
+                1024, int(runtime_raw.get("request_input_token_budget", 96_000))
+            ),
+            agent_record_retention_days=max(
+                1, int(runtime_raw.get("agent_record_retention_days", 30))
+            ),
+            agent_record_max_loops_per_scope=max(
+                1, int(runtime_raw.get("agent_record_max_loops_per_scope", 1000))
+            ),
+            agent_record_max_bytes_per_scope=max(
+                1024, int(runtime_raw.get("agent_record_max_bytes_per_scope", 67_108_864))
+            ),
             recent_context_token_budget=recent_context_token_budget,
             recent_context_floor_seconds=recent_context_floor_seconds,
         ),

@@ -54,6 +54,8 @@ class LoopProjectionDecision:
 class ProjectionResult:
     messages: list[LLMConversationMessage]
     decisions: tuple[LoopProjectionDecision, ...]
+    # 按 Loop 边界切分的消息段（loop_id -> messages），与 decisions 同序。
+    segments: dict[str, list[LLMConversationMessage]]
 
 
 def stable_wire_tool_call_id(loop_id: str, turn_id: str, call_index: int) -> str:
@@ -322,20 +324,23 @@ def project_loops(
     """把完整已关闭 Loop 投影为目标协议消息序列（§7.2 两条合法路径 + 档案）。"""
     messages: list[LLMConversationMessage] = []
     decisions: list[LoopProjectionDecision] = []
+    segments: dict[str, list[LLMConversationMessage]] = {}
     for loop in loops:
         for turn in loop.turns:
             _validate_tool_pairing(turn)
         path, reason = _decide_loop_path(loop, target=target, protocol=protocol)
         if path == PATH_NATIVE:
-            messages.extend(_project_loop_native(loop))
+            loop_messages = _project_loop_native(loop)
         elif path == PATH_STRUCTURED:
-            messages.append(_user_trigger_message(loop))
+            loop_messages = [_user_trigger_message(loop)]
             owner_match = target is not None and all(
                 owner_matches(turn.owner, target) for turn in loop.turns if turn.owner
             )
             for turn in loop.turns:
-                messages.extend(_project_turn_structured(turn, loop.loop_id, native_owner_match=owner_match))
+                loop_messages.extend(_project_turn_structured(turn, loop.loop_id, native_owner_match=owner_match))
         else:
-            messages.extend(_project_loop_archive(loop))
+            loop_messages = _project_loop_archive(loop)
+        messages.extend(loop_messages)
+        segments[loop.loop_id] = loop_messages
         decisions.append(LoopProjectionDecision(loop_id=loop.loop_id, path=path, reason=reason))
-    return ProjectionResult(messages=messages, decisions=tuple(decisions))
+    return ProjectionResult(messages=messages, decisions=tuple(decisions), segments=segments)

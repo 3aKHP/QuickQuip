@@ -38,6 +38,8 @@ from quickquip.llm.config import (
     provider_builtin_search_active,
 )
 from quickquip.llm.rendering import append_web_search_source_block
+from quickquip.llm.history_projection import project_loops
+from quickquip.llm.request_budget import RequestBudgetExceeded, enforce_request_budget
 from quickquip.sts.config import (
     DEFECTIFY_RATE_LIMIT_KEY,
     DEFECTIFY_RULE_NAME,
@@ -78,6 +80,7 @@ from quickquip.llm.provider import (
     build_provider_client,
     strip_leading_reasoning_content,
 )
+from quickquip.llm.provider.owner import build_response_owner, primary_endpoint_url
 from quickquip.llm.quick_judge import (
     QuickJudgeResult as QuickJudgeResult,  # noqa: F401 — re-exported for callers/tests
     run_quick_judge,
@@ -427,6 +430,36 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             self.config, prompt, max_tokens, client_builder=build_provider_client
         )
 
+    def maintain_agent_retention(self, scope_key: str) -> None:
+        """D5 保留维护（§8.4）：Loop 关闭后调用，按三上限清理最旧完整 Loop。
+
+        硬上限要求删除活动纪元覆盖的记录时返回的 blocked 锚点只记日志；
+        推进纪元由 epoch 管理按容量 reset 路径处理。
+        """
+        from quickquip.llm.store_parts.agent_records import RetentionPolicy
+
+        policy = RetentionPolicy(
+            retention_days=self.config.runtime.agent_record_retention_days,
+            max_loops=self.config.runtime.agent_record_max_loops_per_scope,
+            max_bytes=self.config.runtime.agent_record_max_bytes_per_scope,
+        )
+        active_anchors = [
+            anchor
+            for anchor in [self._epochs.oldest_anchor(scope_key)]
+            if anchor is not None
+        ]
+        report = self.store.prune_closed_loops(scope_key, active_anchors, policy)
+        if report.deleted_loop_ids:
+            logger.info(
+                "agent record pruned scope=%s loops=%d",
+                scope_key, len(report.deleted_loop_ids),
+            )
+        if report.blocked_active_anchors:
+            logger.info(
+                "agent record hard cap blocked by active epoch scope=%s anchors=%s",
+                scope_key, list(report.blocked_active_anchors),
+            )
+
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
         return merge_image_urls(*collections)
 
@@ -453,6 +486,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         include_recent_images: bool = False,
         recent_images_messages: list[dict[str, str]] | None = None,
         turn_envelope: str = "",
+        projected_history_segments: dict[str, list[LLMConversationMessage]] | None = None,
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -475,6 +509,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             image_descriptions=image_descriptions,
             include_recent_images=include_recent_images,
             turn_envelope=turn_envelope,
+            projected_history_segments=projected_history_segments,
         )
 
     async def generate_defectify_reply(
@@ -799,7 +834,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         quoted_user_id: str,
         epoch_key: EpochKey,
         epoch_params: EpochParams,
-    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None]:
+        provider: ProviderConfig | None = None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None, dict[str, list[LLMConversationMessage]]]:
         # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
@@ -862,7 +898,52 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_user_id=quoted_user_id,
             group_id=str(chat_id),
         )
-        return history, participants, recent_messages
+        projected_segments: dict[str, list[LLMConversationMessage]] = {}
+        if provider is not None:
+            projected_segments = self._projected_history_segments(
+                scope_key=scope_key,
+                history=history,
+                provider=provider,
+                model=epoch_key.model,
+            )
+        return history, participants, recent_messages, projected_segments
+
+    def _projected_history_segments(
+        self,
+        *,
+        scope_key: str,
+        history: list[dict[str, object]],
+        provider: ProviderConfig,
+        model: str,
+    ) -> dict[str, list[LLMConversationMessage]]:
+        """携带工具事实的 Loop 用投影替换行渲染（§8.1/§5.3.2）。
+
+        无工具的 Loop 保持行渲染（1.14 字节稳定前缀契约）。目标 owner 取
+        主端点；配置了 fallback_urls 的 provider 不启用原生路径（§7.3 的
+        逐候选重投影属后置增强，跨端点签名泄露风险先收紧为保守降级）。
+        """
+        loop_ids = {
+            str(row["agent_loop_id"])
+            for row in history
+            if row.get("agent_loop_id")
+        }
+        if not loop_ids:
+            return {}
+        tool_loop_ids = self.store.loops_with_tools(scope_key, loop_ids)
+        if not tool_loop_ids:
+            return {}
+        loaded = self.store.load_closed_loops_by_ids(scope_key, tool_loop_ids)
+        target = None
+        if not provider.fallback_urls:
+            target = build_response_owner(provider, primary_endpoint_url(provider, model), model)
+        result = project_loops(loaded, target=target, protocol=provider.protocol)
+        for decision in result.decisions:
+            if decision.reason is not None:
+                logger.info(
+                    "history projection degraded scope=%s loop=%s path=%s reason=%s",
+                    scope_key, decision.loop_id, decision.path, decision.reason,
+                )
+        return result.segments
 
     def _persist_turn_and_build_reply(
         self,
@@ -925,6 +1006,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         )
 
         if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
+            generation_at_schedule, _ = self.store.agent_scope_state(scope_key)
             asyncio.create_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
@@ -934,6 +1016,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     user_text=stored_prompt,
                     assistant_text=text,
                     persona_id=settings.persona_id,
+                    expected_generation=generation_at_schedule,
                 )
             )
 
@@ -1077,7 +1160,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             provider_id=provider.id,
             model=settings.model or provider.default_model,
         )
-        history, participants, scene_patch = self._load_scrubbed_history_and_participants(
+        history, participants, scene_patch, projected_segments = self._load_scrubbed_history_and_participants(
             chat_id=chat_id,
             chat_type=chat_type,
             scope_key=scope_key,
@@ -1091,6 +1174,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_user_id=quoted_user_id,
             epoch_key=epoch_key,
             epoch_params=self.config.resolve_epoch_params(provider),
+            provider=provider,
         )
 
         # ── image preprocessing & non-VLM stripping ──────────────────
@@ -1203,6 +1287,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             image_descriptions=image_descriptions or None,
             include_recent_images=include_recent_images and not is_non_vision,
             turn_envelope=turn_envelope,
+            projected_history_segments=projected_segments,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -1215,6 +1300,21 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             tool_choice="auto",
             builtin_search=builtin_search_active,
         )
+        try:
+            enforce_request_budget(self.config, provider, request)
+        except RequestBudgetExceeded as exc:
+            logger.warning(
+                "request budget exceeded scope=%s provider=%s model=%s: %s",
+                scope_key, provider.id, request.model, exc,
+            )
+            return {
+                "reply": "这次对话的上下文已经太长，无法安全发起模型请求，请用清空上下文命令重置后再试。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
         tool_context = ToolExecutionContext(
             group_id=chat_id,
             user_id=user_id,
