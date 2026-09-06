@@ -43,7 +43,7 @@
  * 会被滚动容器（.content）的溢出裁切吃掉越界部分，且个别引擎存在包含块
  * 偏移怪癖；fixed 直接脱离滚动容器，坐标由视口计算，不依赖 CSS 定位技巧。
  */
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import UiIcon from './UiIcon.vue'
 
 withDefaults(defineProps<{
@@ -59,7 +59,7 @@ withDefaults(defineProps<{
   ariaLabel: undefined,
 })
 
-const tipId = `ui-info-tip-${Math.random().toString(36).slice(2)}`
+const tipId = `ui-info-tip-${useId()}`
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 const btnEl = ref<HTMLElement | null>(null)
