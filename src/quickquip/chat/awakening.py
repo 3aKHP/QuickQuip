@@ -1124,15 +1124,18 @@ async def iter_boredom_send_plans(
     rule_switch: Any,
     svc: Any,
     rate_limiter: Any | None = None,
+    generate: Any | None = None,
 ) -> AsyncIterator[BoredomSendPlan]:
     """无聊唤醒巡检的策略与生成阶段：逐群产出待发送计划。
 
     纯领域流程，不触碰传输（``int(gid)`` 协议转换与消息拼装归适配层）。
-    单群 ``generate_reply`` 异常记 warning 后跳过，循环继续后续群。
+    ``generate`` 由适配层注入统一生成/交付流程（携带 DeliverySink）；
+    缺省回落 ``svc.generate_reply``。单群生成异常记 warning 后跳过。
     """
     cfg = get_config()
     st = get_state()
     st.prune_stale()
+    generate = generate or svc.generate_reply
 
     for gid in boredom_enabled_groups.all_groups():
         if not rule_switch.is_enabled(gid, _RULE_BOREDOM):
@@ -1148,7 +1151,7 @@ async def iter_boredom_send_plans(
         if rate_limiter is not None and not rate_limiter.allow(_RULE_BOREDOM, "boredom_timer", group_id=gid):
             continue
         try:
-            reply_result = await svc.generate_reply(
+            reply_result = await generate(
                 group_id=gid,
                 user_id="boredom_timer",
                 sender_name="系统",

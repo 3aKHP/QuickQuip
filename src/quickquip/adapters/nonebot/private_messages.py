@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
+from quickquip.adapters.nonebot._llm_reply import (
+    build_llm_reply_message,
+    make_matcher_sink,
+    record_final_receipt,
+    reply_interval_ms,
+)
 from quickquip.llm.inputs import extract_private_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
@@ -90,9 +95,18 @@ def register_private_message_matcher(on_message):
         if not roll_reply("llm_chat", group_id=f"private:{user_id}") or not rate_limiter.allow("llm_chat", user_id):
             return
 
+        from quickquip.llm.agent_records import TriggerKind
+
+        delivery_sink = make_matcher_sink(
+            matcher, Message, MessageSegment,
+            scope_key=scope_key,
+            interval_ms=reply_interval_ms(svc),
+        )
         result = await svc.generate_private_reply(
             user_id=user_id,
             sender_name=sender_name,
+            delivery_sink=delivery_sink,
+            trigger_kind=TriggerKind.PRIVATE_DIRECT,
             prompt=llm_input.prompt,
             image_urls=llm_input.image_urls,
             recent_messages=None,
@@ -122,10 +136,10 @@ def register_private_message_matcher(on_message):
             model=str(result.get("model", "")),
             source="private_message.llm",
         ):
-            resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
-        sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
-        if sent_msg_id:
-            svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+            if str(result.get("reply") or "").strip():
+                resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
+                sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                record_final_receipt(svc, result, sent_msg_id)
         return
 
     return matcher

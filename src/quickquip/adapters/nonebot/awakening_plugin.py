@@ -11,7 +11,12 @@ except (ModuleNotFoundError, ValueError):
     scheduler = None
     Message = MessageSegment = None
 
-from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
+from quickquip.adapters.nonebot._llm_reply import (
+    build_llm_reply_message,
+    make_group_bot_sink,
+    record_final_receipt,
+    reply_interval_ms,
+)
 
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
@@ -72,17 +77,50 @@ def register_boredom_scan_job(sched=None) -> int | None:
             def _build_reply(result: dict):
                 return build_llm_reply_message(result, Message, MessageSegment)
 
-            # 发送循环归适配层：chat 层只产出待发送计划，传输成功后
-            # 回调 confirm_boredom_sent 确认冷却/统计/缓存。
+            # 发送循环归适配层：chat 层只产出待发送计划，统一生成/交付
+            # 流程（含 DeliverySink）由本层注入；传输成功后回调
+            # confirm_boredom_sent 确认冷却/统计/缓存。
+            from quickquip.llm.agent_records import TriggerKind
+
+            def _generate_with_delivery(**kwargs):
+                sink = make_group_bot_sink(
+                    bot, Message, MessageSegment,
+                    group_id=str(kwargs["group_id"]),
+                    interval_ms=reply_interval_ms(svc),
+                )
+
+                async def _call(**kw):
+                    result = await svc.generate_reply(
+                        **kw,
+                        delivery_sink=sink,
+                        trigger_kind=TriggerKind.BOREDOM,
+                    )
+                    if not str(result.get("reply") or "").strip() and sink.sent_texts:
+                        # 逐 Turn 模式：可见文本已由 sink 交付，冷却缓存用
+                        # 末段实际文本（§10：唤醒 cooldown 在首次确认可见
+                        # 发送时更新一次）。
+                        patched = dict(result)
+                        patched["reply"] = sink.sent_texts[-1]
+                        return patched
+                    return result
+
+                return _call(**kwargs)
+
             async for plan in iter_boredom_send_plans(
-                boredom_enabled_groups, rule_switch, svc, rate_limiter
+                boredom_enabled_groups, rule_switch, svc, rate_limiter,
+                generate=_generate_with_delivery,
             ):
                 try:
                     with bot_action_trace(**plan.trace_kwargs()):
-                        await bot.send_group_msg(
-                            group_id=int(plan.group_id),
-                            message=_build_reply(plan.reply_result),
-                        )
+                        if str(plan.reply_result.get("reply") or "").strip():
+                            resp = await bot.send_group_msg(
+                                group_id=int(plan.group_id),
+                                message=_build_reply(plan.reply_result),
+                            )
+                            sent_msg_id = (
+                                str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                            )
+                            record_final_receipt(svc, plan.reply_result, sent_msg_id)
                     confirm_boredom_sent(plan, stats_tracker)
                 except Exception:
                     logger.warning(

@@ -22,7 +22,12 @@ except ImportError:  # pragma: no cover - apscheduler 随 nonebot-plugin-apsched
         pass
 
 from quickquip.adapters.nonebot import cron_status_sync
-from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
+from quickquip.adapters.nonebot._llm_reply import (
+    build_llm_reply_message,
+    make_group_bot_sink,
+    record_final_receipt,
+    reply_interval_ms,
+)
 from quickquip.adapters.nonebot._safe_send import send_group_text
 from quickquip.adapters.nonebot._scheduling import parse_cron
 from quickquip.chat.scheduled_messages import ScheduledMessage, ScheduledMessageStore
@@ -87,10 +92,19 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         logger.info("scheduled_msg: llm job %s skipped in group %s (group LLM disabled)", job.id, group_id)
         return
 
+    from quickquip.llm.agent_records import TriggerKind
+
+    delivery_sink = make_group_bot_sink(
+        bot, Message, MessageSegment,
+        group_id=group_id,
+        interval_ms=reply_interval_ms(svc),
+    )
     result = await svc.generate_reply(
         group_id=group_id,
         user_id="scheduled_timer",
         sender_name="定时任务",
+        delivery_sink=delivery_sink,
+        trigger_kind=TriggerKind.SCHEDULED_LLM,
         prompt=_build_llm_task_prompt(job),
         image_urls=[],
         include_recent_images=True,
@@ -103,6 +117,7 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
     )
     reply_text = str(result.get("reply") or "").strip()
     if not reply_text:
+        # 逐 Turn 模式：正文已由 sink 交付，one-shot 语义至此完成。
         return
     message = build_llm_reply_message(result, Message, MessageSegment)
     with bot_action_trace(
@@ -115,7 +130,9 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         reply_preview=reply_text[:100],
         source="scheduler.scheduled_message",
     ):
-        await bot.send_group_msg(group_id=int(group_id), message=message)
+        resp = await bot.send_group_msg(group_id=int(group_id), message=message)
+    sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+    record_final_receipt(svc, result, sent_msg_id)
 
 
 async def _fire_text_task(bot, job: ScheduledMessage, group_id: str, job_id: str) -> None:

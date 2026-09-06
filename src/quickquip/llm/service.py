@@ -673,6 +673,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         normalized_forward_text: str,
         normalized_forward_image_urls: list[str],
         image_descriptions: list[ImageDescription] | None,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
     ):
         """创建 Loop 与 user 触发行（§5.3.1），返回 TurnRecorder。
 
@@ -702,9 +704,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
         raw_turn_parts.append(stored_prompt)
         generation, _ = self.store.agent_scope_state(scope_key)
-        trigger = (
-            TriggerKind.PRIVATE_DIRECT if chat_type == "private" else TriggerKind.GROUP_DIRECT
-        )
+        if trigger_kind is not None:
+            trigger = trigger_kind
+        else:
+            trigger = (
+                TriggerKind.PRIVATE_DIRECT if chat_type == "private" else TriggerKind.GROUP_DIRECT
+            )
         try:
             handle = self.store.begin_loop(
                 scope_key,
@@ -732,7 +737,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 reply_chunk_max_chars=runtime.reply_chunk_max_chars,
                 reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
             ),
-            sink=self._delivery_sink,
+            sink=delivery_sink or self._delivery_sink,
             sensitive_scan=_get_sensitive_filter().scan if _get_sensitive_filter().is_loaded else None,
         )
 
@@ -1145,6 +1150,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
     ) -> dict[str, object]:
         prompt = prompt.strip()
         normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
@@ -1553,6 +1560,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         if recorder is not None:
             recorder.close(LoopStatus.COMPLETED, None)
             self.maintain_agent_retention(scope_key)
+            if recorder.final_turn_record is not None:
+                result_payload = dict(result_payload)
+                result_payload["agent_turn_row_id"] = recorder.final_turn_record.message_row_id
+                result_payload["scope_key"] = scope_key
         self._active_recorder = None
         if self.config.runtime.agent_delivery_enabled:
             # 逐 Turn 模式：正文已由 sink 交付，reply 不再二次发送（§5.1）。
@@ -1567,6 +1578,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         user_id: int | str,
         sender_name: str,
         prompt: str,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
         image_urls: list[str] | None = None,
         recent_messages: list[dict[str, str]] | None = None,
         quoted_text: str = "",
@@ -1605,6 +1618,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
+                delivery_sink=delivery_sink,
+                trigger_kind=trigger_kind,
             )
 
     async def generate_private_reply(
@@ -1613,6 +1628,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         user_id: int | str,
         sender_name: str,
         prompt: str,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
         image_urls: list[str] | None = None,
         recent_messages: list[dict[str, str]] | None = None,
         quoted_text: str = "",
@@ -1651,6 +1668,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
+                delivery_sink=delivery_sink,
+                trigger_kind=trigger_kind,
             )
 
 
