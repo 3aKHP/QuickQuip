@@ -475,3 +475,31 @@ def test_matcher_suppress_scoped_per_group(restore_chat_rules, frozen_now):
     assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001) is None
     # 另一个群不受影响
     assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1002) is not None
+
+
+# ── example 推荐默认值（直接解析文件，不依赖运行时容器）──────
+
+
+def test_example_ships_recommended_probability_defaults():
+    import tomllib
+
+    example_path = (
+        Path(__file__).resolve().parents[3] / "config" / "chat_rules.toml.example"
+    )
+    with open(example_path, "rb") as f:
+        data = tomllib.load(f)
+
+    buckets = data["rate_limit_rules"]
+    assert buckets["timezone_wake"]["probability"] == 0.5
+    assert buckets["timezone_sleep"]["probability"] == 0.5
+    assert buckets["sts_card_le"]["probability"] == 0.4
+    assert buckets["new_three_kingdoms"]["probability"] == 0.5
+    # 命令触发的桶不参与掷骰
+    assert "probability" not in buckets["image_gen"]
+
+    rule_probabilities = {r["name"]: r.get("probability") for r in data["rules"]}
+    assert rule_probabilities["ntk_long"] == 0.15
+    assert rule_probabilities["ntk_ququer"] == 0.3
+    assert rule_probabilities["ntk_sanjun"] == 0.8
+    # 未写字段的规则继承桶级基线
+    assert rule_probabilities["ntk_yongheng"] is None
