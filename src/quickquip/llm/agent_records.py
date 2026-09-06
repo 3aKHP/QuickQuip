@@ -72,6 +72,18 @@ class DeliveryStatus(enum.StrEnum):
     UNKNOWN = "unknown"
     SKIPPED = "skipped"
     SUPPRESSED = "suppressed"
+    # 仅迁移可写（§4.3.5）：旧 assistant 行无 QQ ID 时标记"发送事实未保留"，
+    # 不推断从未发送；运行期禁止产生该值。
+    LEGACY_UNTRACKED = "legacy_untracked"
+
+
+class ToolSkipReason(enum.StrEnum):
+    """not_executed 终态的有限原因（§5.3/§5.4/§5.5）。"""
+
+    ROUND_LIMIT = "limit"
+    BATCH_LIMIT = "batch_limit"
+    BLOCKED = "blocked"
+    RECOVERY = "recovery"
 
 
 class RecallStatus(enum.StrEnum):
