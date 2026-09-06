@@ -33,6 +33,24 @@ tool_max_calls_per_round = 16
 # recent_context_token_budget = 800
 # recent_context_floor_seconds = 300
 
+# 实际请求输入预算（应用侧估算口径，非模型平台上限）：每次 provider 请求前
+# 对最终 payload 估算，超限拒绝发起并提示清空上下文。provider 可单独覆盖。
+# request_input_token_budget = 96000
+
+# Agent 执行记录保留（按 scope，先触顶者触发整 Loop 清理）
+# agent_record_retention_days = 30
+# agent_record_max_loops_per_scope = 1000
+# agent_record_max_bytes_per_scope = 67108864
+
+# 逐 Turn 交付（默认关闭：安装新版本不改变群内消息量；记录与重放始终工作）
+# 开启后每次模型响应的普通正文先于工具执行分段外发；阈值/上限为 Unicode
+# code point 口径，独立于 OneBot 协议报文长度限制。
+# agent_delivery_enabled = false
+# reply_split_threshold_chars = 800
+# reply_chunk_max_chars = 1200
+# reply_send_interval_ms = 800
+# reply_max_chunks_per_loop = 64
+
 # 上游 429/5xx/网络错误的自动重试（所有 LLM 调用路径统一生效；探活/诊断不受影响）
 # retry_max_attempts 含首次调用；第 n 次重试延迟 = base_delay * 2^n * (1 + 随机抖动)
 retry_max_attempts = 3
