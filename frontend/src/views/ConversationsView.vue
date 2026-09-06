@@ -1,5 +1,5 @@
 <template>
-  <div class="conv-view">
+  <div class="conv-view page-view-fill">
     <UiPageHeader title="对话日志"><template #actions><UiButton icon="RefreshCw" :disabled="listing" @click="loadConversations">刷新</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
@@ -23,6 +23,7 @@
         <template v-else>
           <div class="filter-bar">
             <span class="mono selected-id">{{ selectedKey }}</span>
+            <UiInfoTip text="消息头括号内的名字是消息落库时定格的规范化昵称：群友后来改名，历史上下文仍保持旧名，以维持 LLM 前缀稳定、利于缓存命中。" />
             <input v-model="keyword" placeholder="按内容关键词过滤" class="filter-input" @keyup.enter="reload" />
             <UiButton icon="Search" :loading="loadingMessages" @click="reload">查询</UiButton>
             <UiButton v-if="keyword" variant="ghost" icon="X" @click="clearKeyword">清空</UiButton>
@@ -62,6 +63,7 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import { listConversations, fetchMessages, deleteMessage } from '../api/conversations'
@@ -88,7 +90,7 @@ loadConversations()
 </script>
 
 <style scoped>
-.conv-view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.conv-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; overflow: hidden; }
 .error { color: var(--qq-danger); }
 .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }

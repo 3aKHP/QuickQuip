@@ -1,5 +1,5 @@
 <template>
-  <div class="llm-about-view">
+  <div class="llm-about-view page-view-fill">
     <UiPageHeader title="资料"><template #actions><span class="hint"><UiIcon name="Info" :size="14" />保存后执行 /llm reload 或重启 bot 生效</span><span v-if="basePath" class="hint mono">{{ basePath }}</span><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreateGroup">新建群资料</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
@@ -74,7 +74,7 @@ loadList()
 </script>
 
 <style scoped>
-.llm-about-view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.llm-about-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; overflow: hidden; }
 .error { color: var(--qq-danger); font-size: var(--qq-text-sm); }
 .hint { display: inline-flex; align-items: center; gap: 6px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
 .split { display: flex; gap: var(--qq-gap-md); flex: 1; min-height: 0; }
