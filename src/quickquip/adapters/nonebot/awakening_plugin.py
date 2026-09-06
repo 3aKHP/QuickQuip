@@ -95,12 +95,12 @@ def register_boredom_scan_job(sched=None) -> int | None:
                         delivery_sink=sink,
                         trigger_kind=TriggerKind.BOREDOM,
                     )
-                    if not str(result.get("reply") or "").strip() and sink.sent_texts:
-                        # 逐 Turn 模式：可见文本已由 sink 交付，冷却缓存用
-                        # 末段实际文本（§10：唤醒 cooldown 在首次确认可见
-                        # 发送时更新一次）。
+                    # 逐 Turn 模式：正文已由 sink 交付（reply 为空）。可见
+                    # 文本走独立字段供冷却缓存/统计消费——绝不回填 reply，
+                    # 否则最终单发守卫被击穿造成末段双发（Deep-CR B1）。
+                    if sink.sent_texts:
                         patched = dict(result)
-                        patched["reply"] = sink.sent_texts[-1]
+                        patched["delivered_text"] = sink.sent_texts[-1]
                         return patched
                     return result
 

@@ -130,14 +130,23 @@ def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> boo
 
 
 def _validate_tool_pairing(turn: LoadedTurn) -> None:
-    """配对校验（§7.4）：声明与结果必须成对，损坏在投影期失败。"""
+    """配对校验（§7.4）：声明与结果必须成对，损坏在投影期失败。
+
+    合法清理态豁免：撤回/删除/政策省略会把 ``result_json`` 置空但保留
+    终态与 ``result_omission_reason``（§9.2/§8.4）——这不是结构损坏，
+    由 ``missing_result_explanation`` 生成确定说明参与重放。
+    """
     for execution in turn.tools:
         terminal = execution.status in {"succeeded", "failed", "indeterminate", "not_executed"}
         if not terminal:
             raise HistoryProjectionError(
                 f"turn={turn.turn_id} execution={execution.execution_id} 无终态（{execution.status}）"
             )
-        if execution.status in {"succeeded", "failed"} and execution.result is None:
+        if (
+            execution.status in {"succeeded", "failed"}
+            and execution.result is None
+            and not execution.result_omission_reason
+        ):
             raise HistoryProjectionError(
                 f"turn={turn.turn_id} execution={execution.execution_id} 终态无结果记录"
             )
@@ -333,8 +342,12 @@ def project_loops(
             loop_messages = _project_loop_native(loop)
         elif path == PATH_STRUCTURED:
             loop_messages = [_user_trigger_message(loop)]
+            # 与 _decide_loop_path 同谓词：只对"有原生块"的 Turn 要求 owner
+            # 匹配（owner 缺失视为不匹配），杜绝未验证目标的签名块回放。
             owner_match = target is not None and all(
-                owner_matches(turn.owner, target) for turn in loop.turns if turn.owner
+                owner_matches(turn.owner, target)
+                for turn in loop.turns
+                if _turn_native_blocks(turn) is not None
             )
             for turn in loop.turns:
                 loop_messages.extend(_project_turn_structured(turn, loop.loop_id, native_owner_match=owner_match))
@@ -467,10 +480,11 @@ def project_loops_with_budget(
         )
 
     def _mark(loop_id: str, level: str) -> None:
+        original = decisions[loop_id].reason
+        # 叠加而非覆盖：保留路径决策的原始降级原因（§7.2 可观测性）。
+        reason = f"reduced:{level}" if original is None else f"{original}+reduced:{level}"
         decisions[loop_id] = LoopProjectionDecision(
-            loop_id=loop_id,
-            path=decisions[loop_id].path,
-            reason=f"reduced:{level}",
+            loop_id=loop_id, path=decisions[loop_id].path, reason=reason,
         )
 
     loops_by_id = {loop.loop_id: loop for loop in loops}
@@ -482,9 +496,8 @@ def project_loops_with_budget(
         if decisions[loop_id].path == PATH_NATIVE:
             demoted = project_loops([loop], target=None, protocol=protocol)
             segments[loop_id] = demoted.segments[loop_id]
-            decisions[loop_id] = demoted.decisions[0]
             _mark(loop_id, "native_dropped")
-            if _estimate_messages_tokens(segments[loop_id]) + _total() - _estimate_messages_tokens(segments[loop_id]) <= budget_tokens:
+            if _total() <= budget_tokens:
                 continue
         # 阶梯 2：工具结果逐档收紧。
         for tier in _RESULT_TIERS:

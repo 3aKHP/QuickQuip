@@ -786,6 +786,14 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             '如需精确白名单请显式设置 enabled_mode = "replace"'
         )
 
+    if (
+        int(runtime_raw.get("reply_split_threshold_chars", 800))
+        > int(runtime_raw.get("reply_chunk_max_chars", 1200))
+    ):
+        return LLMConfig(
+            load_error="reply_split_threshold_chars 不能超过 reply_chunk_max_chars",
+            source_path=config_path,
+        )
     config = LLMConfig(
         runtime=RuntimeConfig(
             enabled=as_bool(runtime_raw.get("enabled", False), default=False),

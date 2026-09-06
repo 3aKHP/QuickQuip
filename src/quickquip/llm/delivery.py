@@ -172,12 +172,13 @@ def plan_text_chunks(
         return chunks, None
     if available <= 0:
         return [], "delivery_limit"
-    # 收缩重切：把整段按可用条数均分上限收紧到 max。
-    tight_max = max(params.chunk_max // available, 1)
-    tight = SplitParams(threshold=min(params.threshold, tight_max), chunk_max=tight_max)
+    # 收缩重切（§6.1 尾段）：把未提交的短段合并到 max——阈值抬到上限
+    # 才能最大化合并（参数变小只会产生更多分段）；最小分段数为
+    # ceil(len/chunk_max)，仍超出可用条数才整体拒付。
+    tight = SplitParams(threshold=params.chunk_max, chunk_max=params.chunk_max)
     try:
         squeezed = split_text_into_chunks(text, tight)
-    except RuntimeError:
+    except (RuntimeError, ValueError):
         return [], "delivery_limit"
     if len(squeezed) <= available:
         return [

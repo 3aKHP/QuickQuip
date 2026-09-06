@@ -45,6 +45,7 @@ tool_max_calls_per_round = 16
 # 逐 Turn 交付（默认关闭：安装新版本不改变群内消息量；记录与重放始终工作）
 # 开启后每次模型响应的普通正文先于工具执行分段外发；阈值/上限为 Unicode
 # code point 口径，独立于 OneBot 协议报文长度限制。
+# agent_replay_loop_tokens = 4096
 # agent_delivery_enabled = false
 # reply_split_threshold_chars = 800
 # reply_chunk_max_chars = 1200

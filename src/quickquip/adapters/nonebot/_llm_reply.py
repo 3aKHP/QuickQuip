@@ -77,6 +77,8 @@ class OneBotDeliverySink:
         self._send = send
         self._scope_key = scope_key
         self._interval_seconds = max(0, int(interval_ms)) / 1000.0
+        # 仅成功回执的可见文本：供冷却缓存/trace 预览消费；失败不污染
+        # （零成功交付不得触发冷却确认）。
         self.sent_texts: list[str] = []
 
     async def __call__(self, delivery_id: str, payload: dict[str, Any]) -> DeliveryReceipt:
@@ -93,7 +95,6 @@ class OneBotDeliverySink:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.sent_texts.append("")
             lowered = str(exc).lower()
             if "timeout" in lowered or "timed out" in lowered:
                 return DeliveryReceipt(status=DeliveryStatus.UNKNOWN, error_code=type(exc).__name__)
@@ -142,12 +143,17 @@ def make_private_bot_sink(bot, Message, MessageSegment, *, user_id: int | str, i
 
 def record_final_receipt(svc, result: dict[str, Any], sent_msg_id: str) -> None:
     """关闭开关模式下的最终单发回执：新链路用确切 row_id 回填兼容列（§4.1）。"""
+    import logging as _logging
+
     row_id = result.get("agent_turn_row_id")
     if row_id and sent_msg_id:
         try:
             svc.store.set_first_chunk_message_id(int(row_id), sent_msg_id)
             return
         except Exception:
+            _logging.getLogger(__name__).warning(
+                "final receipt backfill failed for row %s", row_id, exc_info=True
+            )
             return
     if sent_msg_id:
         scope_key = str(result.get("scope_key", "")) or None

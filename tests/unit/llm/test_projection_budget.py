@@ -97,11 +97,12 @@ def test_archive_and_minimal_levels_apply_under_tight_budget():
     result = project_loops_with_budget(
         loops, target=None, protocol="openai", budget_tokens=600,
     )
-    reasons = {d.loop_id: d.reason for d in result.decisions}
-    # 最旧 Loop 走到最小档案或被逐出；最新 Loop 保留最多信息。
-    assert reasons["loop_0"] in {
-        "reduced:minimal_archive", "reduced:evicted",
-    }
+    reasons = {d.loop_id: d.reason or "" for d in result.decisions}
+    # 最旧 Loop 走到最小档案或被逐出（reason 为叠加链）；最新 Loop 保留最多信息。
+    assert (
+        "reduced:minimal_archive" in reasons["loop_0"]
+        or reasons["loop_0"] == "reduced:evicted"
+    )
     # 全量估算收敛到预算内或只剩最小档案。
     assert _token_estimate_of(result.messages) <= max(600, 3 * 160)
 

@@ -30,6 +30,7 @@ async def run_tool_call_loop(
     tool_discovery_max_loaded_tools: int = 12,
     image_preprocessor=None,
     turn_recorder=None,
+    request_guard=None,
 ):
     from quickquip.llm.agent_records import ToolSkipReason
 
@@ -72,6 +73,10 @@ async def run_tool_call_loop(
         )
 
     for round_index in range(search_failsafe_max_rounds + 1):
+        if request_guard is not None:
+            # §8.3：每次 provider HTTP 尝试前对最终 payload 复检预算；
+            # 超限按契约终止 Loop（request_budget_exceeded），不放行 HTTP。
+            request_guard(current_request)
         # 上游 429/5xx 的退避重试由 provider client 的 complete() 内建
         response = await client.complete(current_request)
         logger.info(
@@ -117,10 +122,21 @@ async def run_tool_call_loop(
                 # 整批拒绝的提示必须追加而非兜底：模型附带的叙述文本不应顶替拒绝说明。
                 notice = "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
                 response.text = "\n".join(part for part in (response.text, notice) if part)
-                response.tool_calls = []
                 if turn_recorder is not None:
-                    turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                    # 整批拒绝仍保留声明事实（§3.2）：全部声明记
+                    # not_executed(batch_limit)，notice 文本照常交付。
+                    execution_ids = turn_recorder.on_turn(
+                        response,
+                        declared_calls=list(response.tool_calls),
+                        executable_calls=[],
+                        has_more_rounds=False,
+                    )
                     await turn_recorder.deliver_turn()
+                    for call in response.tool_calls:
+                        execution_id = execution_ids.get(call.id)
+                        if execution_id is not None:
+                            turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.BATCH_LIMIT)
+                response.tool_calls = []
                 return response
             # Gemini binds functionResponse batches to the preceding ordered
             # functionCall parts. Keep the provider's order when the full batch
@@ -157,8 +173,6 @@ async def run_tool_call_loop(
             )
             await turn_recorder.deliver_turn()
             # 超出每轮执行预算的声明逐项 not_executed(limit)（§5.3）。
-            from quickquip.llm.agent_records import ToolSkipReason
-
             executable_ids = {call.id for call in selected_calls}
             for call in response.tool_calls:
                 if call.id not in executable_ids:

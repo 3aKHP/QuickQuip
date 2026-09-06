@@ -1368,7 +1368,8 @@ class AgentRecordsStoreMixin:
                 conn.commit()
                 return
             # 收敛在途子项（§5.5）：未开始的交付 skipped、未落库回执 unknown、
-            # 声明未启动的工具 not_executed（终止原因见 Loop terminal_reason）。
+            # 声明未启动的工具 not_executed、执行中未落结果的工具 indeterminate
+            # （终止原因见 Loop terminal_reason）。
             conn.execute(
                 """
                 UPDATE agent_tool_executions
@@ -1382,6 +1383,15 @@ class AgentRecordsStoreMixin:
                     self._bounded_result_json(None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY),
                     _utc_now(), ToolExecutionStatus.DECLARED, handle.loop_id,
                 ),
+            )
+            conn.execute(
+                """
+                UPDATE agent_tool_executions
+                SET status = ?, finished_at = COALESCE(finished_at, ?)
+                WHERE status = ?
+                  AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
+                """,
+                (ToolExecutionStatus.INDETERMINATE, _utc_now(), ToolExecutionStatus.RUNNING, handle.loop_id),
             )
             conn.execute(
                 """

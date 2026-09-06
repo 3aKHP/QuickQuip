@@ -1179,7 +1179,10 @@ def confirm_boredom_sent(plan: BoredomSendPlan, stats_tracker: Any | None = None
     """
     st = get_state()
     st.mark_boredom_triggered(plan.group_id)
-    st.bot_messages.add(plan.group_id, plan.reply_result["reply"])
+    visible = str(plan.reply_result.get("reply") or "").strip() or str(
+        plan.reply_result.get("delivered_text") or ""
+    )
+    st.bot_messages.add(plan.group_id, visible)
     if stats_tracker is not None:
         stats_tracker.record_trigger(plan.group_id, _RULE_BOREDOM)
     logger.info("awakening_boredom: sent to group %s (%s)", plan.group_id, plan.trigger.trigger_reason)

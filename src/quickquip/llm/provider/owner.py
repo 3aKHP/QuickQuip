@@ -25,18 +25,24 @@ _PROFILE_FIELDS = ("protocol", "prompt_caching", "cache_ttl", "auth_method", "bu
 
 
 def normalize_endpoint(url: str) -> str:
-    """规范化端点：scheme/host/path + 排序后的非敏感 query 参数。"""
+    """规范化端点：scheme/host/path + 排序后的非敏感 query 参数。
+
+    流式/非流式动作归一（gemini 的 ``:streamGenerateContent?alt=sse`` →
+    ``:generateContent``）：两者必须产生等价 block（§4.4），不构成端点
+    身份差异；``alt`` 传输参数同理剔除。
+    """
     try:
         split = urlsplit(url.strip())
     except ValueError:
         return url.strip()
+    path = split.path.replace(":streamGenerateContent", ":generateContent")
     query = sorted(
         (key, value)
         for key, value in parse_qsl(split.query, keep_blank_values=True)
-        if key.lower() not in SENSITIVE_QUERY_KEYS
+        if key.lower() not in SENSITIVE_QUERY_KEYS and key.lower() != "alt"
     )
     return urlunsplit(
-        (split.scheme.lower(), split.netloc.lower(), split.path, urlencode(query), "")
+        (split.scheme.lower(), split.netloc.lower(), path, urlencode(query), "")
     )
 
 

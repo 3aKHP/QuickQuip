@@ -134,10 +134,11 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
 | `recent_context_token_budget` | 【现场】补丁每轮 token 预算：近期消息缓冲服役给 LLM 的上限（从最新往回截） | `800` |
 | `recent_context_floor_seconds` | 【现场】滑动保底窗秒数：窗内消息即使已服役过也会重附（增量语义之外的保底） | `300` |
-| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：超限拒绝发起请求 | `96000` |
+| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：超限拒绝发起请求；可在 `[[providers]]` 段按 provider 覆盖 | `96000` |
 | `agent_record_retention_days` | 已关闭对话轮（Loop）保留天数，按关闭时间计 | `30` |
 | `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
+| `agent_replay_loop_tokens` | 单个历史 Loop 的重放投影预算（token 估算，512-65536）；超限按固定阶梯确定性精简 | `4096` |
 | `agent_delivery_enabled` | 逐 Turn 交付开关：开启后每次模型响应的普通正文先于工具执行分段外发；关闭时仅最终正文单发，记录不受影响 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
 | `reply_chunk_max_chars` | 单段源文本上限，独立于 OneBot 协议报文长度 | `1200` |

@@ -38,7 +38,7 @@ from quickquip.llm.config import (
     provider_builtin_search_active,
 )
 from quickquip.llm.rendering import append_web_search_source_block
-from quickquip.llm.history_projection import project_loops_with_budget
+from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
 from quickquip.llm.request_budget import RequestBudgetExceeded, enforce_request_budget
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
@@ -439,6 +439,22 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         """绑定逐 Turn 交付出口（adapters 装配时调用）。"""
         self._delivery_sink = sink
 
+    def _build_request_guard(self, provider: ProviderConfig):
+        """逐轮预算门禁闭包（§8.3）：超限以 DeliveryAborted 终止 Loop。"""
+        from quickquip.llm.service_parts.agent_runtime import DeliveryAborted
+
+        def _guard(request: LLMRequest) -> None:
+            try:
+                enforce_request_budget(self.config, provider, request)
+            except RequestBudgetExceeded as exc:
+                logger.warning(
+                    "request budget exceeded mid-loop provider=%s model=%s: %s",
+                    provider.id, request.model, exc,
+                )
+                raise DeliveryAborted("request_budget_exceeded") from exc
+
+        return _guard
+
     def maintain_agent_retention(self, scope_key: str) -> None:
         """D5 保留维护（§8.4）：Loop 关闭后调用，按三上限清理最旧完整 Loop。
 
@@ -748,12 +764,14 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         request: LLMRequest,
         context: ToolExecutionContext,
         turn_recorder: TurnRecorder | None = None,
+        request_guard=None,
     ):
         return await run_tool_call_loop(
             provider=provider,
             request=request,
             context=context,
             turn_recorder=turn_recorder,
+            request_guard=request_guard,
             build_provider_client=build_provider_client,
             tool_registry=self.tool_registry,
             runtime_config=self.config.runtime,
@@ -1030,10 +1048,19 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         target = None
         if not provider.fallback_urls:
             target = build_response_owner(provider, primary_endpoint_url(provider, model), model)
-        result = project_loops_with_budget(
-            loaded, target=target, protocol=provider.protocol,
-            budget_tokens=self.config.runtime.agent_replay_loop_tokens,
-        )
+        try:
+            result = project_loops_with_budget(
+                loaded, target=target, protocol=provider.protocol,
+                budget_tokens=self.config.runtime.agent_replay_loop_tokens,
+            )
+        except HistoryProjectionError:
+            # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏
+            # Loop 留待运维检查；工具事实本轮缺席属可观测降级。
+            logger.exception(
+                "history projection failed structurally scope=%s loops=%d；本轮退回行渲染",
+                scope_key, len(loaded),
+            )
+            return {}
         for decision in result.decisions:
             if decision.reason is not None:
                 logger.info(
@@ -1063,9 +1090,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         normalized_forward_image_urls: list[str],
         image_descriptions: list[ImageDescription] | None = None,
         tool_context: ToolExecutionContext,
+        recorder_rows_written: bool = False,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
-        recorder_rows_written = getattr(self, "_active_recorder", None) is not None
+        recorder_rows_written = recorder_rows_written
         if store_user_message and not recorder_rows_written:
             raw_turn_parts: list[str] = []
             if normalized_quoted_text or normalized_quoted_image_urls:
@@ -1447,8 +1475,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 # 同 _persist_turn_and_build_reply 的落库口径：他人近期图注不落触发者名下。
                 image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
             )
-            # 门控标记：_persist_turn_and_build_reply 据此跳过重复行写入。
-            self._active_recorder = recorder
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
                 envelope_meter(estimate_tokens(turn_envelope)),
@@ -1473,6 +1499,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     request=request,
                     context=tool_context,
                     turn_recorder=recorder,
+                    request_guard=self._build_request_guard(provider),
                 )
         except DeliveryAborted as exc:
             if recorder is not None:
@@ -1559,6 +1586,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
             image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
             tool_context=tool_context,
+            recorder_rows_written=recorder is not None,
         )
         if recorder is not None:
             recorder.close(LoopStatus.COMPLETED, None)
@@ -1567,7 +1595,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 result_payload = dict(result_payload)
                 result_payload["agent_turn_row_id"] = recorder.final_turn_record.message_row_id
                 result_payload["scope_key"] = scope_key
-        self._active_recorder = None
         if self.config.runtime.agent_delivery_enabled:
             # 逐 Turn 模式：正文已由 sink 交付，reply 不再二次发送（§5.1）。
             result_payload = dict(result_payload)

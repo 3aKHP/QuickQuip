@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+import json
+
 from quickquip.llm.agent_records import (
     AGENT_RECORD_VERSION,
     DeliveryKind,
@@ -23,6 +25,8 @@ from quickquip.llm.agent_records import (
     DeliveryReceipt,
     DeliveryStatus,
     DeliverySummary,
+    MAX_NATIVE_STATE_BYTES,
+    NativeOmissionReason,
     LoopStatus,
     TextPolicy,
     ToolDeclarationRecord,
@@ -33,7 +37,7 @@ from quickquip.llm.agent_records import (
     TurnResponseRecord,
     new_agent_id,
 )
-from quickquip.llm.delivery import SplitParams, plan_text_chunks
+from quickquip.llm.delivery import SplitLimitError, SplitParams, plan_text_chunks
 from quickquip.llm.provider import LLMResponse, strip_leading_reasoning_content
 from quickquip.llm.store_parts.agent_records import (
     LoopHandle,
@@ -55,20 +59,8 @@ class DeliverySink(Protocol):
     async def __call__(self, delivery_id: str, payload: dict[str, Any]) -> DeliveryReceipt: ...
 
 
-class CollectingDeliverySink:
-    """测试用收集 sink；生产聊天路径缺失 sink 属编程错误。"""
-
-    def __init__(self) -> None:
-        self.deliveries: list[tuple[str, dict[str, Any]]] = []
-        self.receipts: list[DeliveryReceipt] = []
-
-    async def __call__(self, delivery_id: str, payload: dict[str, Any]) -> DeliveryReceipt:
-        self.deliveries.append((delivery_id, payload))
-        receipt = DeliveryReceipt(
-            status=DeliveryStatus.SENT, message_id=f"collect-{len(self.deliveries)}"
-        )
-        self.receipts.append(receipt)
-        return receipt
+def _dumps_compact(payload) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 class DeliveryAborted(RuntimeError):
@@ -161,12 +153,18 @@ class TurnRecorder:
             return items
         if self._sink is None:
             raise RuntimeError("agent_delivery_enabled=true 但缺少 DeliverySink（编程错误）")
-        chunks, limit_reason = plan_text_chunks(
-            text,
-            policy.split_params(),
-            reserved_delivery_slots=self._delivery_count,
-            max_chunks=policy.reply_max_chunks_per_loop,
-        )
+        try:
+            chunks, limit_reason = plan_text_chunks(
+                text,
+                policy.split_params(),
+                reserved_delivery_slots=self._delivery_count,
+                max_chunks=policy.reply_max_chunks_per_loop,
+            )
+        except SplitLimitError:
+            # §6.1.5：单个 grapheme 超限——拒绝该交付计划并明确终止，
+            # 不让内部 ValueError 以「LLM 调用异常」面世。
+            self._terminal_reason = "split_limit"
+            raise DeliveryAborted("split_limit") from None
         if limit_reason == "delivery_limit":
             self._terminal_reason = "delivery_limit"
             return []
@@ -223,12 +221,24 @@ class TurnRecorder:
         for declaration in declarations:
             parts.append({"type": "tool_ref", "execution_id": declaration.execution_id})
         native_state = None
+        native_omission = None
         if response.native_blocks:
-            native_state = {
+            candidate = {
                 "version": AGENT_RECORD_VERSION,
                 "owner": _owner_payload(response.owner),
                 "blocks": response.native_blocks,
             }
+            encoded = _dumps_compact(candidate)
+            if len(encoded.encode("utf-8")) > MAX_NATIVE_STATE_BYTES:
+                # 存储契约预检（§2 MAX_NATIVE_STATE_BYTES）：超限省略原生
+                # 副本、保留通用事实，而不是让提交抛错炸掉整条回复。
+                native_omission = NativeOmissionReason.SIZE_LIMIT
+                logger.warning(
+                    "native state exceeds %d bytes; omitting blocks for turn %s",
+                    MAX_NATIVE_STATE_BYTES, turn_id,
+                )
+            else:
+                native_state = candidate
         plan = self._plan_deliveries(turn_id, text, is_final=is_final)
         record = self._store.commit_turn(
             self._handle,
@@ -239,7 +249,7 @@ class TurnRecorder:
                 finish_reason=response.finish_reason,
                 parts=tuple(parts),
                 native_state=native_state,
-                native_omission_reason=None,
+                native_omission_reason=native_omission,
                 owner=_owner_payload(response.owner),
             ),
             declarations,
@@ -304,13 +314,18 @@ class TurnRecorder:
     ) -> None:
         if result is not None:
             content_bytes = len(result.content.encode("utf-8"))
+            failed = is_error or result.is_error
             self._store.finish_tool(
                 self._handle,
                 execution_id,
                 ToolResultRecord(
                     content=result.content,
-                    is_error=is_error or result.is_error,
+                    is_error=failed,
                     original_bytes=content_bytes,
+                    # 重放按 status 区分 error 语义（§7.2 冻结表达）：
+                    # is_error 只进 result_json 会让 functionResponse 丢失
+                    # 原链路的 is_error 标记。
+                    status=ToolExecutionStatus.FAILED if failed else ToolExecutionStatus.SUCCEEDED,
                 ),
                 result_retention=retention,
                 outbound_media=media,

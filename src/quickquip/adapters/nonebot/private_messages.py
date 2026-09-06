@@ -130,13 +130,13 @@ def register_private_message_matcher(on_message):
             user_id=user_id,
             incoming_message_id=message_id,
             incoming_preview=rendered_text,
-            reply_preview=result["reply"],
+            reply_preview=result["reply"] or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
             llm_used=bool(result.get("llm_used")),
             provider_id=str(result.get("provider_id", "")),
             model=str(result.get("model", "")),
             source="private_message.llm",
         ):
-            if str(result.get("reply") or "").strip():
+            if str(result.get("reply") or "").strip() or (result.get("images") or []):
                 resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
                 sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
                 record_final_receipt(svc, result, sent_msg_id)

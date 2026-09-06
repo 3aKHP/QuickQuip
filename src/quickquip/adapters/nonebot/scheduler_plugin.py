@@ -116,8 +116,9 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         message_id=None,
     )
     reply_text = str(result.get("reply") or "").strip()
-    if not reply_text:
-        # 逐 Turn 模式：正文已由 sink 交付，one-shot 语义至此完成。
+    has_images = bool(result.get("images") or [])
+    if not reply_text and not has_images:
+        # 逐 Turn 模式：正文已由 sink 交付且无外发图，one-shot 至此完成。
         return
     message = build_llm_reply_message(result, Message, MessageSegment)
     with bot_action_trace(
