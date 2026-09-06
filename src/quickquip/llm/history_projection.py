@@ -285,8 +285,10 @@ def _project_turn_structured(
 
 def _omitted_arguments_json(execution: LoadedToolExecution) -> str:
     """参数被政策省略时的有界档案描述（§8.4）：不把摘录重用作函数参数。"""
+    import json
+
     reason = execution.arguments_omission_reason or "omitted"
-    return '{"_omitted": "参数正文未保留（' + reason + '）"}'
+    return json.dumps({"_omitted": f"参数正文未保留（{reason}）"}, ensure_ascii=False)
 
 
 def _tool_messages(turn: LoadedTurn, *, wire_id_for) -> list[LLMConversationMessage]:

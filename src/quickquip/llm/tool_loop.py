@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.llm.agent_records import ToolSkipReason
 from quickquip.llm.provider import LLMRequest
 from quickquip.llm.provider.trace import trace_agent_loop
 from quickquip.llm.tool_discovery import ToolDiscovery
@@ -32,7 +33,6 @@ async def run_tool_call_loop(
     turn_recorder=None,
     request_guard=None,
 ):
-    from quickquip.llm.agent_records import ToolSkipReason
 
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))

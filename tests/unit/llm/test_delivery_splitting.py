@@ -102,8 +102,6 @@ def test_split_invariance_normalized_history_identical():
         # 源文本不因拆分改变：两种参数的拼回结果都恒等于原文。
         assert "".join(text[c.start : c.end] for c in chunks_a) == text
         assert "".join(text[c.start : c.end] for c in chunks_b) == text
-        # 两种参数的持久化正文行相同（拆分只影响交付，不影响历史）。
-        assert text == text
     # 计数口径：默认 1 段 vs 测试参数 7 段（五 Turn 合计）。
     total_default = sum(len(split_text_into_chunks(t, params_a)) for t in FIVE_TURN_TEXTS)
     total_test = sum(len(split_text_into_chunks(t, params_b)) for t in FIVE_TURN_TEXTS)

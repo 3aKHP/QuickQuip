@@ -327,16 +327,9 @@ class StateMixin:
         """撤回/删除入口（§9.2/§9.3）：先按 QQ receipt 定位确切 delivery。"""
         delivery = self.store.lookup_delivery(scope_key, message_id)
         if delivery is not None:
-            hit = False
-            if delivery.get("kind") == "text_chunk" and delivery.get("recall_status") == "active":
-                hit = self.store.recall_delivery_chunk(scope_key, str(delivery["delivery_id"]))
-                if hit:
-                    self._bump_scope_generation(scope_key, HistoryMutation.RECALL)
-            else:
-                hit = self.store.recall_delivery_chunk(scope_key, str(delivery["delivery_id"]))
-            if self.recent_message_buffer:
-                self.recent_message_buffer.remove_by_message_id(scope_key, message_id)
+            hit = self.store.recall_delivery_chunk(scope_key, str(delivery["delivery_id"]))
             if hit:
+                self._bump_scope_generation(scope_key, HistoryMutation.RECALL)
                 return True
         # 兼容回退：按平台 message_id 匹配主表行（legacy 行/兼容列）。
         rows = self.store.conversation_rows_by_message_id(scope_key, message_id)
@@ -351,7 +344,7 @@ class StateMixin:
             self._bump_scope_generation(scope_key, HistoryMutation.DELETE)
         buf_deleted = (
             self.recent_message_buffer.remove_by_message_id(scope_key, message_id)
-            if self.recent_message_buffer
+            if self.recent_message_buffer and not delivery
             else False
         )
         return deleted_any or buf_deleted

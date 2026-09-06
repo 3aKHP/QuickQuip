@@ -106,7 +106,6 @@ class TurnRecorder:
         self._sensitive_scan = sensitive_scan
         self._delivery_count = 0
         self._delivery_stats = {"sent": 0, "failed": 0, "unknown": 0, "skipped": 0, "suppressed": 0}
-        self._committed_turns = 0
         self._final_turn_record: TurnRecord | None = None
         self._terminal_reason: str | None = None
 
@@ -256,7 +255,6 @@ class TurnRecorder:
             plan,
             turn_id=turn_id,
         )
-        self._committed_turns += 1
         if is_final or not has_more_rounds:
             self._final_turn_record = record
         # 关闭开关的非最终 suppressed 交付落 planned 即收敛为 suppressed。

@@ -1093,7 +1093,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         recorder_rows_written: bool = False,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
-        recorder_rows_written = recorder_rows_written
         if store_user_message and not recorder_rows_written:
             raw_turn_parts: list[str] = []
             if normalized_quoted_text or normalized_quoted_image_urls:

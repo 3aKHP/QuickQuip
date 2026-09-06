@@ -868,7 +868,7 @@ class AgentRecordsStoreMixin:
                 ),
             )
             for declaration in tool_declarations:
-                self._insert_tool_declaration(conn, handle, turn_id, declaration)
+                self._insert_tool_declaration(conn, turn_id, declaration)
 
             delivery_ids = self._insert_delivery_plan(
                 conn, handle, turn_id, delivery_plan, text,
@@ -964,7 +964,6 @@ class AgentRecordsStoreMixin:
     @staticmethod
     def _insert_tool_declaration(
         conn: sqlite3.Connection,
-        handle: LoopHandle,
         turn_id: str,
         declaration: ToolDeclarationRecord,
     ) -> None:
