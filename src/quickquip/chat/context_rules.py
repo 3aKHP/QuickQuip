@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from quickquip.chat.config import CONTEXT_REPLY_RULES
+from quickquip.chat.reply_probability import PROBABILITY_CHECKED, roll_reply
 from quickquip.chat.text_rules import build_rule_context, render_rule_reply, select_reply_template
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
@@ -178,6 +179,13 @@ async def match_context_rule(
         if not current_match:
             continue
 
+        rate_limit_key = rule.get("rate_limit_key", rule["name"])
+        if not roll_reply(
+            rate_limit_key, rule, identity=str(rule["name"]), group_id=group_id
+        ):
+            # 概率未掷中：跳过这条规则，也不再花费 regex/LLM 语境判定成本
+            continue
+
         context_window = int(rule.get("context_window", 5))
         rule_type = rule.get("type", "regex_context")
         context_ok = False
@@ -199,13 +207,14 @@ async def match_context_rule(
         matched_rules.append(
             {
                 "rule_name": rule["name"],
-                "rate_limit_key": rule.get("rate_limit_key", rule["name"]),
+                "rate_limit_key": rate_limit_key,
                 "reply": render_rule_reply(template, context, current_match),
                 "trigger_kind": "rule",
                 "trigger_reason": f"语境规则匹配：{rule['name']}",
                 "context": context,
                 "priority": int(rule.get("priority", 0)),
                 "rule_index": rule_index,
+                PROBABILITY_CHECKED: True,
             }
         )
 

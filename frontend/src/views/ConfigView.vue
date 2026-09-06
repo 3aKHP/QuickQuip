@@ -1,5 +1,5 @@
 <template>
-  <div class="config-view">
+  <div class="config-view page-view-fill">
     <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后部分自动重载，其余需手动 reload 或重启">
       <template #actions>
         <span v-if="current && current.missing" class="warn">

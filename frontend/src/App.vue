@@ -190,6 +190,14 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
+/* 需要占满 .content 高度的编辑器类视图在根节点加 page-view-fill，
+   只为这些页接通高度链，避免全局拉伸其他视图 */
+.page-stage:has(> .page-view-fill) {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
 .auth-shell {
   position: relative;
   z-index: 1;

@@ -6,6 +6,7 @@ from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.common.bot_action_trace import bot_action_trace
+from quickquip.chat.reply_probability import roll_reply
 from quickquip.chat.repeat_detector import RepeatAction
 from quickquip.app.message_pipeline import (
     _ensure_llm_bindings,
@@ -169,7 +170,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
-            if not rate_limiter.allow("llm_chat", user_id):
+            if not roll_reply("llm_chat", group_id=group_id) or not rate_limiter.allow("llm_chat", user_id):
                 return
             result = await svc.generate_reply(
                 group_id=group_id,
@@ -234,7 +235,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         )
         if awakening_result and rule_switch.is_enabled(group_id, awakening_result.rule_name):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
-            if not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
+            if not roll_reply(awakening_result.rule_name, group_id=group_id) or not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
                 return
             # trigger_context was captured before the current message was stored,
             # so the passive prompt's user text stays the only copy of it.

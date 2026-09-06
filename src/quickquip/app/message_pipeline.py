@@ -26,6 +26,7 @@ from quickquip.chat.good_girl_chain import GoodGirlChainManager
 from quickquip.chat.message_stats import GroupStatsTracker
 from quickquip.chat.repeat_detector import GroupRepeatDetector, RepeatAction
 from quickquip.chat.rule_switch import GroupRuleSwitch
+from quickquip.chat.reply_probability import PROBABILITY_CHECKED, roll_reply
 from quickquip.chat.text_rules import match_text_rule
 from quickquip.chat.timezone_reply import (  # noqa: F401 — re-exported for plugin shim
     build_timezone_reply as build_timezone_reply,
@@ -53,7 +54,7 @@ from quickquip.chat.period_report import (
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
 from quickquip.sts.config import CARD_LE_RATE_LIMIT_KEY, CARD_LE_RULE_NAME
-from quickquip.sts.formulas.card_le.passive import match_card_le
+from quickquip.sts.formulas.card_le.passive import match_card_le, matches_card_le_pattern
 from quickquip.chat.awakening import (
     get_config as _get_awakening_config,
     get_state as _get_awakening_state,
@@ -285,6 +286,41 @@ async def resolve_reply(
     recent_context: list[dict[str, str]] | None = None,
     repeat_fingerprint: str | None = None,
 ):
+    """_resolve_reply_chain 的概率闸口：所有自动回复在返回前掷一次桶级概率。
+
+    匹配器内部已按规则级概率掷过骰的结果带 PROBABILITY_CHECKED 标记，
+    这里只兜底其余路径（复读、链游戏、内置游戏、时区等）。
+    """
+    result = await _resolve_reply_chain(
+        text,
+        user_id=user_id,
+        sender_name=sender_name,
+        group_id=group_id,
+        now=now,
+        recent_context=recent_context,
+        repeat_fingerprint=repeat_fingerprint,
+    )
+    if not result or result.get(PROBABILITY_CHECKED):
+        return result
+    exit_key = str(result.get("rate_limit_key") or result.get("rule_name", ""))
+    if not roll_reply(
+        exit_key,
+        identity=str(result.get("rule_name") or exit_key),
+        group_id=group_id,
+    ):
+        return None
+    return result
+
+
+async def _resolve_reply_chain(
+    text: str,
+    user_id: int | str,
+    sender_name: str = "这位朋友",
+    group_id: int | str | None = None,
+    now: datetime | None = None,
+    recent_context: list[dict[str, str]] | None = None,
+    repeat_fingerprint: str | None = None,
+):
     repeat_reply = resolve_repeat_reply(
         text=text,
         user_id=user_id,
@@ -334,6 +370,7 @@ async def resolve_reply(
         user_id=user_id,
         sender_name=sender_name,
         now=now_cst,
+        group_id=group_id,
     )
     if special_reply:
         rule_name = special_reply.get("rule_name", "")
@@ -362,10 +399,16 @@ async def resolve_reply(
             return tz_reply
 
     # STS「xxx了」置于链尾：广覆盖的梗规则，不得抢占时区（起床了/睡醒了）等具体规则
+    # 概率掷骰放在「X了」正则快筛之后、LLM 判定之前：非候选消息不消耗掷骰状态，
+    # 未掷中时连判定成本也不花费
     if (
         group_id is not None
+        and matches_card_le_pattern(text) is not None
         and rule_switch.is_enabled(group_id, CARD_LE_RULE_NAME)
         and rate_limiter.can_allow(CARD_LE_RATE_LIMIT_KEY, user_id, group_id=group_id)
+        and roll_reply(
+            CARD_LE_RATE_LIMIT_KEY, identity=CARD_LE_RULE_NAME, group_id=group_id
+        )
     ):
         sts_reply = await match_card_le(
             text=text,
@@ -373,6 +416,7 @@ async def resolve_reply(
             group_id=group_id,
         )
         if sts_reply:
+            sts_reply[PROBABILITY_CHECKED] = True
             return sts_reply
 
     return None

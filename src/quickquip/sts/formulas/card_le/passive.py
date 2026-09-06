@@ -50,6 +50,20 @@ def _cache_set(word: str, reply: str | None) -> None:
     _NEAREST_CACHE[word] = (reply, time.time() + _NEAREST_CACHE_TTL)
 
 
+def matches_card_le_pattern(text: str) -> str | None:
+    """「X了」同步快筛：命中且 X 非合法名时返回捕获词，否则 None。
+
+    供管线在概率掷骰等纯同步闸门前调用，避免为无关消息消耗掷骰状态。
+    """
+    m = _CARD_LE_RE.match(text)
+    if not m:
+        return None
+    captured = m.group(1)
+    if lexicon.is_card_name(captured):
+        return None  # 命中真名：别人已在玩梗，静默
+    return captured
+
+
 async def match_card_le(
     text: str,
     *,
@@ -58,12 +72,9 @@ async def match_card_le(
     chat_type: str = "group",
 ) -> dict | None:
     """整句「X了」命中且 X 非合法名时，返回「最近真名了」的规则回复；否则 None。"""
-    m = _CARD_LE_RE.match(text)
-    if not m:
+    captured = matches_card_le_pattern(text)
+    if captured is None:
         return None
-    captured = m.group(1)
-    if lexicon.is_card_name(captured):
-        return None  # 命中真名：别人已在玩梗，静默
 
     cached = _cache_get(captured)
     if cached is _MISSING:

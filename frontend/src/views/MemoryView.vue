@@ -26,7 +26,7 @@
     </TransitionGroup>
 
     <UiCard v-if="groupId" padding="md" shadow="sm" class="add-card">
-      <h3 class="section-title">新增记忆</h3>
+      <h3 class="section-title">新增记忆<UiInfoTip text="scope 选 group 对全群生效；选 user 需填 user_id，仅在涉及该用户的对话中被引用。条目的置信度（0–1）是可信度标记：手动添加为 1.0，自动抽取固定 0.5，编辑时可调整。" /></h3>
       <div class="add-form">
         <textarea v-model="newContent" rows="2" placeholder="内容" />
         <div class="add-row"><select v-model="newScope"><option value="group">group</option><option value="user">user</option></select><input v-model="newUserId" placeholder="user_id（可选）" style="width:120px" /><input v-model="newTags" placeholder="标签（逗号分隔）" /><UiButton variant="primary" icon="Plus" @click="addMemory">添加</UiButton></div>
@@ -37,7 +37,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchKnownGroups } from '../api/groups'; import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory'; import { toast } from '../toast'
 
 const groups = ref<string[]>([]); const groupId = ref(''); const keyword = ref(''); const memories = ref<any[]>([]); const loading = ref(false); const error = ref<string | null>(null); const editing = ref<number | null>(null); const editContent = ref(''); const editTags = ref(''); const editConf = ref(1.0); const newContent = ref(''); const newScope = ref('group'); const newUserId = ref(''); const newTags = ref('')

@@ -6,6 +6,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE, BEIJING_TIME_FORMAT, TEXT_REPLY_RULES
+from quickquip.chat.reply_probability import PROBABILITY_CHECKED, roll_reply
 
 logger = logging.getLogger(__name__)
 
@@ -84,33 +85,45 @@ def match_text_rule(
     user_id: int | str,
     sender_name: str,
     now: Optional[datetime] = None,
+    group_id: int | str | None = None,
 ) -> Optional[dict]:
     base_context = build_rule_context(user_id, sender_name, now=now)
     matched_rules = []
 
     for rule_index, rule in enumerate(TEXT_REPLY_RULES):
+        # 先收敛到该规则的单次命中（含黑名单过滤），再掷一次骰：
+        # 掷骰在 pattern 循环外，多 pattern 重叠命中时概率与状态不被重复消耗
+        match = None
         for compiled in _COMPILED_PATTERNS[rule_index]:
-            match = compiled.search(text)
-            if not match:
-                continue
-            if not is_rule_match_allowed(rule, match):
-                continue
+            candidate = compiled.search(text)
+            if candidate and is_rule_match_allowed(rule, candidate):
+                match = candidate
+                break
+        if match is None:
+            continue
 
-            context = {**base_context, **match.groupdict()}
-            template = select_reply_template(rule)
-            matched_rules.append(
-                {
-                    "rule_name": rule["name"],
-                    "rate_limit_key": rule.get("rate_limit_key", rule["name"]),
-                    "reply": render_rule_reply(template, context, match),
-                    "trigger_kind": "rule",
-                    "trigger_reason": f"文本规则匹配：{rule['name']}",
-                    "context": context,
-                    "priority": int(rule.get("priority", 0)),
-                    "rule_index": rule_index,
-                }
-            )
-            break
+        rate_limit_key = rule.get("rate_limit_key", rule["name"])
+        if not roll_reply(
+            rate_limit_key, rule, identity=str(rule["name"]), group_id=group_id
+        ):
+            # 概率未掷中：这条规则本次沉默，跳过它让后面的规则继续参与竞争
+            continue
+
+        context = {**base_context, **match.groupdict()}
+        template = select_reply_template(rule)
+        matched_rules.append(
+            {
+                "rule_name": rule["name"],
+                "rate_limit_key": rate_limit_key,
+                "reply": render_rule_reply(template, context, match),
+                "trigger_kind": "rule",
+                "trigger_reason": f"文本规则匹配：{rule['name']}",
+                "context": context,
+                "priority": int(rule.get("priority", 0)),
+                "rule_index": rule_index,
+                PROBABILITY_CHECKED: True,
+            }
+        )
 
     if not matched_rules:
         return None

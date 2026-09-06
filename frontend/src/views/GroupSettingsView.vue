@@ -111,7 +111,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>自动记忆抽取</label>
+                <label>自动记忆抽取<UiInfoTip text="开启后自动从该会话的对话中提炼记忆条目，结果可在「记忆」页查看与编辑。" /></label>
                 <select v-model="draftTriState.auto_memory_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('auto_memory_enabled') }}）</option>
                   <option :value="true">开</option>
@@ -122,7 +122,7 @@
           </section>
 
           <section class="form-section">
-            <h4>模型与人格</h4>
+            <h4>模型与人格<UiInfoTip text="三个字段选「跟随默认」即沿用 llm.toml 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
             <div class="form-grid">
               <div class="field">
                 <label>Provider</label>
@@ -157,14 +157,14 @@
             <h4>触发方式</h4>
             <div class="form-grid">
               <div class="field">
-                <label>触发前缀</label>
+                <label>触发前缀<UiInfoTip text="以该前缀开头的消息会触发 LLM 回复。全局默认 /ai，可在 llm.toml 的 [triggers] 调整。" /></label>
                 <div class="field-row">
                   <input v-model="prefixInput" :placeholder="defaults.trigger_prefix || '/ai'" />
                   <UiButton v-if="draftTriState.trigger_prefix !== null" size="sm" variant="ghost" icon="X" @click="clearPrefix">跟随</UiButton>
                 </div>
               </div>
               <div class="field">
-                <label>允许前缀触发</label>
+                <label>允许前缀触发<UiInfoTip text="关闭后即使消息以触发前缀开头也不进入 LLM，仅保留 @ 触发等方式。" /></label>
                 <select v-model="draftTriState.allow_prefix">
                   <option :value="null">跟随默认（{{ defaultHint('allow_prefix') }}）</option>
                   <option :value="true">开</option>
@@ -172,7 +172,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>允许 @ 触发</label>
+                <label>允许 @ 触发<UiInfoTip text="开启后 @机器人 的消息直接触发 LLM 回复，无需前缀。" /></label>
                 <select v-model="draftTriState.allow_at">
                   <option :value="null">跟随默认（{{ defaultHint('allow_at') }}）</option>
                   <option :value="true">开</option>
@@ -180,7 +180,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>历史条数</label>
+                <label>历史条数<UiInfoTip text="留空（跟随默认）时上下文由会话纪元自动管理；设置后该会话退化为固定保留最新 n 行的滚动窗，等效群内指令 /llm context_limit。" /></label>
                 <div class="field-row">
                   <input v-model.number="historyInput" type="number" min="0" max="200" :placeholder="String(defaults.history_limit ?? 10)" />
                   <UiButton v-if="draftTriState.history_limit !== null" size="sm" variant="ghost" icon="X" @click="clearHistory">跟随</UiButton>
@@ -199,6 +199,7 @@ import { computed, ref, watch } from 'vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -560,6 +561,9 @@ reloadAll()
 }
 
 .form-section h4 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin: 0;
   color: var(--qq-text);
   font-size: var(--qq-text-base);
@@ -583,6 +587,9 @@ reloadAll()
 }
 
 .field label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: var(--qq-text-muted);
   font-size: var(--qq-text-xs);
   font-weight: 600;

@@ -4,7 +4,7 @@
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiSkeleton v-if="loading && !jobs.length" variant="table" :rows="6" />
     <UiCard v-if="!loading && jobs.length" padding="none" shadow="sm">
-      <div class="table-scroll"><table class="job-table"><thead><tr><th>任务名称</th><th>触发器</th><th>下次执行</th><th>上次执行</th><th>状态</th></tr></thead><tbody><tr v-for="job in jobs" :key="job.id"><td class="name-cell">{{ job.name }}</td><td class="mono">{{ formatTrigger(job.trigger) }}</td><td class="mono">{{ formatTime(job.next_run) }}</td><td class="mono">{{ formatTime(job.last_run) }}</td><td><UiTag v-if="job.last_status === 'ok'" size="sm" variant="success">正常</UiTag><UiTag v-else-if="job.last_status === 'error'" size="sm" variant="danger" :title="job.last_error || ''">失败</UiTag><span v-else-if="!job.last_status && !job.last_run" class="no-data">未执行</span><span v-else class="no-data">&mdash;</span></td></tr></tbody></table></div>
+      <div class="table-scroll"><table class="job-table"><thead><tr><th>任务名称</th><th>触发器<UiInfoTip text="三种触发方式：cron = 周期表达式；interval = 固定间隔秒数；date = 一次性定点时刻。" /></th><th>下次执行</th><th>上次执行</th><th>状态</th></tr></thead><tbody><tr v-for="job in jobs" :key="job.id"><td class="name-cell">{{ job.name }}</td><td class="mono">{{ formatTrigger(job.trigger) }}</td><td class="mono">{{ formatTime(job.next_run) }}</td><td class="mono">{{ formatTime(job.last_run) }}</td><td><UiTag v-if="job.last_status === 'ok'" size="sm" variant="success">正常</UiTag><UiTag v-else-if="job.last_status === 'error'" size="sm" variant="danger" :title="job.last_error || ''">失败</UiTag><span v-else-if="!job.last_status && !job.last_run" class="no-data">未执行</span><span v-else class="no-data">&mdash;</span></td></tr></tbody></table></div>
     </UiCard>
     <UiEmpty v-else-if="!loading" icon="Clock" title="暂无调度任务" />
     <div v-if="jobs.length" class="refresh"><UiIcon name="RefreshCw" :size="12" /><span>每 30 秒自动刷新，快照时间 {{ snapshotText }}</span><span v-if="snapshotStale" class="stale">快照超过 5 分钟未更新，bot 进程可能未运行</span></div>
@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiIcon from '../components/ui/UiIcon.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiSkeleton from '../components/ui/UiSkeleton.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiIcon from '../components/ui/UiIcon.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchCronDashboard, type CronJob } from '../api/cronDashboard'
 
 const jobs = ref<CronJob[]>([]); const loading = ref(false); const loadError = ref<string | null>(null); const snapshotAt = ref<string | null>(null); let _timer: ReturnType<typeof setInterval> | null = null

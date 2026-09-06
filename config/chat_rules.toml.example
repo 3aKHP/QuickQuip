@@ -7,7 +7,7 @@
 # [rate_limit_rules] — 限流桶定义
 # ══════════════════════════════════════════════════════════
 #
-# 格式：桶名 = {global_limit = N, user_limit = M, scope = "group" | "global", window = S}
+# 格式：桶名 = {global_limit = N, user_limit = M, scope = "group" | "global", window = S, probability = P}
 #   global_limit  - 窗口内桶内最多触发次数
 #   user_limit    - 窗口内桶内同一用户最多触发次数
 #   scope         - （可选）分桶作用域，不写默认 "group"：
@@ -17,25 +17,57 @@
 #                              共享资源（LLM、搜索、爬虫）
 #   window        - （可选）滑动窗口秒数，不写默认 60s。适合做长冷却的彩蛋桶，
 #                   例如一天只触发两次的节日台词。
+#   probability   - （可选）桶级触发概率，取值 [0, 1]，不写默认 1（命中必回）。
+#                   每次命中先掷骰再进限流桶：未掷中则本次保持沉默、不消耗桶配额。
+#                   桶级概率作用于引用该桶的所有规则；规则可用自身的
+#                   probability 字段覆盖桶级值。覆写系统预定义桶时需整体重写
+#                   该桶条目（global_limit / user_limit 一并写全）。
+#   suppress_after_hit - （可选，默认 0 关闭）防连发：同一规则同一群命中后，
+#                   接下来 N 次命中强制沉默。专治"刚回完又回"的观感。
+#   pity_step     - （可选，默认 0 关闭）保底步进：连哑越多概率越高，
+#                   p_eff = probability × (1 + 连哑数 × pity_step)。
+#                   例：p=0.5、pity_step=0.2 时连哑 5 次后概率升满必回。
+#                   两个开关均按（规则, 群）独立计数，只存内存、重启即重置；
+#                   配 probability = 1 再开 suppress_after_hit 会出现
+#                   "一回一哑"的规律交替，建议与概率 < 1 搭配使用。
 #
 # 时区回复、LLM、贴吧、复读、接龙等系统规则的限流桶
-# 已在 quickquip/chat/config.py 中预定义，此处只需定义文字规则专用桶。
+# 已在 quickquip/chat/config.py 中预定义：默认直接继承内置定义即可，
+# 需要调整触发概率或密度时，可像下方"系统内置被动回复的推荐概率"段
+# 那样按桶整体覆写（覆写条目需把配额字段一并写全）。
 # 注意：多条规则可以共用同一个桶，命中任意一条都消耗同一个配额。
 # 梗文类桶保持默认 scope（group）即可；仅当桶里的规则会打外部 API 或共享池时，
 # 才考虑显式写 scope = "global"。
 
 [rate_limit_rules]
-group_meme         = {global_limit = 6, user_limit = 3}
-play_target        = {global_limit = 6, user_limit = 3}
-double_char_ni_de  = {global_limit = 6, user_limit = 3}
-sandwich_de        = {global_limit = 6, user_limit = 3}
-like_reply         = {global_limit = 6, user_limit = 3}
-divine_arrival     = {global_limit = 4, user_limit = 2}
-new_three_kingdoms = {global_limit = 12, user_limit = 6}
+group_meme         = {global_limit = 6, user_limit = 3, probability = 0.8}
+play_target        = {global_limit = 6, user_limit = 3, probability = 0.8}
+double_char_ni_de  = {global_limit = 6, user_limit = 3, probability = 0.8}
+sandwich_de        = {global_limit = 6, user_limit = 3, probability = 0.8}
+like_reply         = {global_limit = 6, user_limit = 3, probability = 0.7}
+divine_arrival     = {global_limit = 4, user_limit = 2, probability = 0.8}
+new_three_kingdoms = {global_limit = 12, user_limit = 6, probability = 0.5}
 # 文生图：全局共享配额（scope = "global"），每分钟全局最多 10 次，单用户最多 2 次
+# （/draw 命令触发，不参与概率掷骰）
 image_gen          = {global_limit = 10, user_limit = 2, scope = "global", window = 60}
 # 示例：10 分钟冷却的长窗口桶（window 字段按规则自定义）
 # long_cooldown    = {global_limit = 3, user_limit = 1, window = 600}
+# 示例：命中后仅 50% 概率回复的桶（先掷骰再进桶，掷不中不消耗配额）；
+#         再开防连发（命中后下一次同规则同群强制沉默）与保底（连哑 5 次
+#         后概率升满），收窄纯随机的连发/连哑方差。两者默认关闭。
+# lucky_bucket     = {global_limit = 6, user_limit = 3, probability = 0.5,
+#                     suppress_after_hit = 1, pity_step = 0.2}
+
+# ── 系统内置被动回复的推荐概率 ──
+# 这些桶的配额在 quickquip/chat/config.py 中预定义，这里按推荐密度覆写
+# （覆写是整条替换，global_limit / user_limit 需照抄内置值）。
+# 早晚高峰"晚安/起床了"人多，时区回复降半；被动「xxx了」压得更稀，
+# 保住"偶发乱入"的效果；bot 跟读复读降四成，别火上浇油。
+timezone_wake      = {global_limit = 3, user_limit = 1, probability = 0.5}
+timezone_sleep     = {global_limit = 3, user_limit = 1, probability = 0.5}
+sts_card_le        = {global_limit = 3, user_limit = 1, probability = 0.4}
+repeat_follow_read = {global_limit = 8, user_limit = 3, probability = 0.6}
+repeat_trim_last   = {global_limit = 8, user_limit = 3, probability = 0.6}
 
 # ══════════════════════════════════════════════════════════
 # [[rules]] — 回复规则列表
@@ -53,6 +85,9 @@ image_gen          = {global_limit = 10, user_limit = 2, scope = "global", windo
 #   reply_templates      - 加权随机回复列表（与 reply_template 二选一）
 #   blocked_named_groups - 命名捕获组黑名单；命中黑名单值时不触发，继续尝试下一条规则
 #   blocked_groups       - 位置捕获组黑名单（按组号索引），用法同上
+#   probability          - 规则级触发概率，取值 [0, 1]，不写默认沿用桶级概率
+#                         （桶级也未配置则必回）。命中后掷骰：未掷中时该规则本次
+#                         沉默，让低优先级规则继续竞争。写 0 等价于全局停用该规则。
 #
 # 模板变量：
 #   {sender_name}   - 发送者昵称
@@ -111,11 +146,13 @@ priority       = 60
 
 # ——— 示例：检测"我XX"（二字动词），过滤常见口语 ———
 # blocked_named_groups 指定捕获组 verb 的黑名单，命中黑名单时不触发
+# probability 覆盖桶级 0.8：「我XX」匹配面比「XX，启动」泛得多，压得更低
 [[rules]]
 name           = 'i_do'
 patterns       = ['^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$']
 reply_template = '不准$1'
 rate_limit_key = 'group_meme'
+probability    = 0.5
 priority       = 20
 
 [rules.blocked_named_groups]
@@ -260,6 +297,15 @@ verb = [
 # 下列 rules / context_rules 是《新三国》电视剧的知名台词与经典梗，
 # 知名度高、老少皆宜，作为默认回复入库。共用 new_three_kingdoms 限流桶。
 # 如不需要可整段删除或按需关闭（/disable 规则名）。
+#
+# 桶级 probability = 0.5 是全系列基线；触发词越是日常高频，规则级压得越低，
+# 冷门特定台词反而抬高到 0.8（说这话的人就是在玩梗，接住是服务）：
+#   0.15 — 单字命中（龙/聋），聊天里随处可见
+#   0.3  — 日常高频词（吃什么、来人、我在想……）
+#   0.4  — 中频短语（最后一刻、还活着吗）
+#   0.5  — 基线，未写 probability 的规则继承桶级
+#   0.8  — 特定台词（三军听令、当浮一大白……）
+# 每条规则未掷中只是该条本次沉默，不影响同系列其他规则。
 
 # ─── 1. rules（直接正则触发） ───────────────────────────────
 
@@ -268,6 +314,7 @@ name           = 'ntk_nizoule'
 patterns       = ['你走了']
 reply_template = '我们吃什么'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.3
 priority       = 100
 
 [[rules]]
@@ -275,6 +322,7 @@ name           = 'ntk_chishenme'
 patterns       = ['吃什么']
 reply_template = '是啊，吃什么'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.3
 priority       = 99
 
 [[rules]]
@@ -289,6 +337,7 @@ name           = 'ntk_sanjun'
 patterns       = ['三军听令']
 reply_template = '战至最后一刻'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 97
 
 [[rules]]
@@ -296,6 +345,7 @@ name           = 'ntk_zuihouyike'
 patterns       = ['(.{1,12}?)最后一刻']
 reply_template = '战至最后一刻，自刎归天！'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.4
 priority       = 96
 
 [[rules]]
@@ -303,6 +353,7 @@ name           = 'ntk_longerduo'
 patterns       = ['扎聋我自己的耳朵', '议论孔明先生']
 reply_template = '我再听到你们议论孔明先生，我就扎聋我自己的耳朵'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 95
 
 [[rules]]
@@ -310,6 +361,7 @@ name           = 'ntk_sibukong'
 patterns       = ['死不可怕']
 reply_template = '死是凉爽的夏夜'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 94
 
 [[rules]]
@@ -317,6 +369,7 @@ name           = 'ntk_xiaye'
 patterns       = ['凉爽的夏夜']
 reply_template = '可供人无忧的安眠'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 93
 
 [[rules]]
@@ -331,6 +384,7 @@ name           = 'ntk_long'
 patterns       = ['([龙聋])']
 reply_template = '$1，可是帝王之征啊'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.15
 priority       = 91
 
 [[rules]]
@@ -338,6 +392,7 @@ name           = 'ntk_huozhe'
 patterns       = ['还活着吗']
 reply_template = '生死不明'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.4
 priority       = 90
 
 [[rules]]
@@ -345,13 +400,16 @@ name           = 'ntk_shengsibuiming'
 patterns       = ['生死不明']
 reply_template = '那就是亖了'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 89
 
 [[rules]]
+# pattern 含「我在想」，日常口语命中率极高，整体压到 0.3
 name           = 'ntk_ququer'
 patterns       = ['蛐蛐儿', '有情有义', '我在想']
 reply_template = '我在想我的那些个蛐蛐儿，它们个个有情有义'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.3
 priority       = 88
 
 [[rules]]
@@ -359,6 +417,7 @@ name           = 'ntk_gongxi'
 patterns       = ['恭喜(?P<person>.+?)可以(称帝|撑地)了']
 reply_template = '恭喜{person}可以$2了'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 87
 
 [[rules]]
@@ -366,6 +425,7 @@ name           = 'ntk_dafu'
 patterns       = ['当浮一大白']
 reply_template = '当浮一大白'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 86
 
 [[rules]]
@@ -373,6 +433,7 @@ name           = 'ntk_dehaoa'
 patterns       = ['得好啊']
 reply_template = '当浮一大白'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.3
 priority       = 85
 
 [[rules]]
@@ -380,6 +441,7 @@ name           = 'ntk_bukeqi'
 patterns       = ['我是不会客气的']
 reply_template = '来人'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.8
 priority       = 84
 
 [[rules]]
@@ -387,6 +449,7 @@ name           = 'ntk_lairen'
 patterns       = ['来人']
 reply_template = '换大盏'
 rate_limit_key = 'new_three_kingdoms'
+probability    = 0.3
 priority       = 83
 
 # ─── 2. context_rules（需要历史上下文或 LLM 判定） ─────────

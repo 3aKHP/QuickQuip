@@ -3,7 +3,7 @@
     <div class="diag-card__head">
       <span class="diag-card__icon"><UiIcon name="Wrench" :size="18" /></span>
       <div>
-        <h3>运行时操作</h3>
+        <h3>运行时操作<UiInfoTip text="重载类操作只重新读取配置并重建索引，不会清空会话记录。真正的危险操作是「清空上下文」：会同时删除该会话的消息存储、内存缓冲与纪元锚点，不可恢复。" /></h3>
         <p>重载配置、人格、聊天规则和 MCP，并执行一次轻量健康检查。</p>
       </div>
     </div>
@@ -63,6 +63,7 @@ import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
 import UiIcon from '../ui/UiIcon.vue'
+import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { probeProviders } from '../../api/diagnostics'
 import { clearLlmContext, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../../api/llmRuntime'
@@ -275,6 +276,9 @@ onMounted(() => {
 }
 
 .diag-card__head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin: 0 0 2px;
   color: var(--qq-text);
   font-size: var(--qq-text-base);

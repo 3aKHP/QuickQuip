@@ -41,17 +41,25 @@
     <template v-else-if="data">
       <p class="bounds-note">{{ data.bounds_note }}</p>
 
-      <div class="stat-cards">
+      <div class="stat-cards stat-cards--kpi">
         <UiStatCard label="总成本" :value="`$${fmtCost(data.total_cost)}`" :sub="`${fmtNum(data.total_tokens)} tokens`" icon="Coins" variant="primary" />
         <UiStatCard label="请求 / 成功率" :value="fmtNum(data.request_count)" :sub="`${pct(data.success_rate)} 成功`" icon="Activity" />
         <UiStatCard label="平均耗时" :value="fmtDuration(data.average_duration_ms)" sub="所有请求" icon="Clock" />
-        <UiStatCard label="缓存命中率" :value="pct(data.cache_hit_rate)" :sub="`${fmtNum(data.total_cache_read_tokens)} read tokens`" icon="Zap" />
-        <UiStatCard label="轮次信封" :value="`≈${fmtNum(Math.round(data.avg_envelope_tokens ?? 0))} tok/轮`" :sub="`覆盖率 ${pct(data.envelope_coverage ?? 0)} · 每轮全价（估算）`" icon="Mail" />
-        <UiStatCard label="纪元窗口" :value="`≈${fmtNum(Math.round(data.avg_epoch_history_tokens ?? 0))} tok/轮`" :sub="`覆盖率 ${pct(data.epoch_coverage ?? 0)} · history 段（估算）`" icon="Layers" />
-        <UiStatCard label="图片附件" :value="`≈${(data.avg_media_image_count ?? 0).toFixed(1)} 张/轮`" :sub="`覆盖率 ${pct(data.media_coverage ?? 0)} · 当轮实际附带（VLM）`" icon="Image" />
-        <UiStatCard label="现场补丁" :value="`≈${fmtNum(Math.round(data.avg_patch_tokens ?? 0))} tok/轮`" :sub="`覆盖率 ${pct(data.patch_coverage ?? 0)} · 均值即预算利用率`" icon="MessagesSquare" />
-        <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens 未计价`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" />
+        <UiStatCard label="缓存命中率" :value="pct(data.cache_hit_rate)" :sub="`${fmtNum(data.total_cache_read_tokens)} read tokens`" icon="Zap" tip="输入的前缀缓存命中部分按折扣计价；read tokens 为周期内命中缓存读取的输入 token 总量。" />
+        <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" tip="「未定价」指使用了缺少定价表模型的调用：token 照常计量、成本按 0 估算，在 llm.toml 补充定价后恢复计入；「错误」为失败请求数。" />
       </div>
+      <section class="panel avg-panel">
+        <div class="panel-heading">
+          <h3>每轮均值与覆盖率<UiInfoTip text="覆盖率为计量到该字段的成功请求占比；偏低时均值只代表少数请求，参考意义有限。" /></h3>
+        </div>
+        <div class="avg-row" v-for="row in avgRows" :key="row.label">
+          <span class="avg-name">{{ row.label }}<UiInfoTip :text="row.tip" /></span>
+          <span class="avg-value">{{ row.value }}<small>{{ row.unit }}</small></span>
+          <span class="avg-bar"><i :style="{ width: row.barWidth }" /></span>
+          <span class="avg-cov">{{ row.coverage }}</span>
+          <span class="avg-note">{{ row.note }}</span>
+        </div>
+      </section>
 
       <section class="panel">
         <div class="panel-heading">
@@ -117,6 +125,7 @@ import EChart from '../components/ui/EChart.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiSegmented, { type UiSegmentedOption } from '../components/ui/UiSegmented.vue'
@@ -152,6 +161,17 @@ const eventsLoading = ref(false)
 const error = ref('')
 const breakdown = ref<BreakdownKey>('provider')
 const filters = reactive<UsageFilters>({ provider: '', model: '', feature: '', group: '', persona: '', state: '' })
+
+const avgRows = computed(() => {
+  if (!data.value) return []
+  const bar = (v: number | null) => `${Math.min(100, Math.max(0, (v ?? 0) * 100)).toFixed(1)}%`
+  return [
+    { label: '轮次信封', value: `≈${fmtNum(Math.round(data.value.avg_envelope_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.envelope_coverage), coverage: pct(data.value.envelope_coverage ?? 0), note: '每轮全价 · 估算', tip: '每轮注入 user 消息头部的【轮次上下文】信封：时间、节日、参与成员、记忆与词表命中等逐轮变化的内容。逐轮重渲染、不吃缓存，按全价计。' },
+    { label: '纪元窗口', value: `≈${fmtNum(Math.round(data.value.avg_epoch_history_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.epoch_coverage), coverage: pct(data.value.epoch_coverage ?? 0), note: 'history 段 · 估算', tip: '会话纪元读取的历史消息窗口（纪元锚点至最新消息）的 token 估算，是每轮上下文的主体；锚点随冷场或触顶前移而收缩。' },
+    { label: '图片附件', value: `≈${(data.value.avg_media_image_count ?? 0).toFixed(1)}`, unit: '张/轮', barWidth: bar(data.value.media_coverage), coverage: pct(data.value.media_coverage ?? 0), note: '当轮实际附带 · VLM', tip: 'VLM 请求当轮实际随请求附带的图片数，取自组装后的请求（每请求上限 5 张）。' },
+    { label: '现场补丁', value: `≈${fmtNum(Math.round(data.value.avg_patch_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.patch_coverage), coverage: pct(data.value.patch_coverage ?? 0), note: '均值即预算利用率', tip: '每轮追加的【现场】补丁 token，与补丁预算同单位，均值可直接读作预算利用率；不计入纪元上下文预算。' },
+  ]
+})
 
 const { chartTheme } = useChartTheme()
 
@@ -382,7 +402,22 @@ onMounted(() => {
 .filters { display: flex; flex-wrap: wrap; gap: var(--qq-gap-sm); }
 .filters select { min-width: 130px; font-size: var(--qq-text-sm); }
 .bounds-note, .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
-.stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--qq-gap-sm); }
+.stat-cards { display: grid; gap: var(--qq-gap-sm); }
+.stat-cards--kpi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.avg-row { display: grid; grid-template-columns: 96px auto minmax(120px, 1fr) 56px minmax(120px, auto); align-items: center; gap: var(--qq-gap-md); padding: 9px 0; border-bottom: 1px solid var(--qq-border); font-size: var(--qq-text-sm); }
+.avg-row:last-child { border-bottom: 0; }
+.avg-name { display: inline-flex; align-items: center; gap: 4px; color: var(--qq-text); font-weight: 600; white-space: nowrap; }
+.avg-value { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.avg-value small { margin-left: 4px; color: var(--qq-text-muted); font-weight: 400; }
+.avg-bar { display: block; height: 6px; border-radius: var(--qq-radius-full); background: var(--qq-surface-strong); overflow: hidden; }
+.avg-bar i { display: block; height: 100%; border-radius: inherit; background: var(--qq-gradient-brand); }
+.avg-cov { font-variant-numeric: tabular-nums; color: var(--qq-text-muted); text-align: right; white-space: nowrap; }
+.avg-note { color: var(--qq-text-muted); text-align: right; white-space: nowrap; }
+@media (max-width: 760px) {
+  .avg-row { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .avg-bar { grid-column: 1 / -1; }
+  .avg-cov { text-align: left; }
+}
 .panel { padding: var(--qq-gap-md); border: 1px solid var(--qq-border); border-radius: var(--qq-radius-card); background: var(--qq-surface); box-shadow: var(--qq-shadow-card); }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); flex-wrap: wrap; }
 .panel-heading h3 { margin: 0; font-size: var(--qq-text-md); }

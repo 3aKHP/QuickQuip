@@ -14,13 +14,13 @@
     </p>
 
     <div v-if="data" class="defaults-strip">
-      <div class="default-item"><span>唤醒延长</span><strong>{{ data.defaults.extend_duration }}s</strong></div>
-      <div class="default-item"><span>兜底概率</span><strong>{{ data.defaults.fallback_probability }}</strong></div>
-      <div class="default-item"><span>无聊沉寂</span><strong>{{ data.defaults.boredom_silence_seconds }}s</strong></div>
-      <div class="default-item"><span>无聊概率</span><strong>{{ data.defaults.boredom_probability }}</strong></div>
-      <div class="default-item"><span>无聊扫描</span><strong>{{ scanIntervalText }}</strong></div>
-      <div class="default-item"><span>相关阈值</span><strong>{{ data.defaults.relevance_threshold }}</strong></div>
-      <div class="default-item"><span>答疑阈值</span><strong>{{ data.defaults.qa_threshold }}</strong></div>
+      <div class="default-item"><span>唤醒延长<UiInfoTip text="显式触发 LLM（前缀/@）后继续回应同一用户的秒数，0 关闭。兜底、无聊等被动唤醒不会打开延长窗口。" /></span><strong>{{ data.defaults.extend_duration }}s</strong></div>
+      <div class="default-item"><span>兜底概率<UiInfoTip text="普通消息低概率直接触发回应的概率，0 关闭。" /></span><strong>{{ data.defaults.fallback_probability }}</strong></div>
+      <div class="default-item"><span>无聊沉寂<UiInfoTip text="群聊沉寂多少秒后允许无聊唤醒，0 关闭。" /></span><strong>{{ data.defaults.boredom_silence_seconds }}s</strong></div>
+      <div class="default-item"><span>无聊概率<UiInfoTip text="无聊扫描命中时发送冒泡消息的概率。" /></span><strong>{{ data.defaults.boredom_probability }}</strong></div>
+      <div class="default-item"><span>无聊扫描<UiInfoTip text="无聊唤醒的定时扫描周期（秒）；群级成功唤醒后的冷却是另一个参数「检查间隔」。" /></span><strong>{{ scanIntervalText }}</strong></div>
+      <div class="default-item"><span>相关阈值<UiInfoTip text="相关性唤醒判定阈值：消息与兴趣话题足够相关才唤醒，≤0 或 ≥1 关闭 LLM 判定。" /></span><strong>{{ data.defaults.relevance_threshold }}</strong></div>
+      <div class="default-item"><span>答疑阈值<UiInfoTip text="答疑唤醒判定阈值：疑似提问的消息才唤醒回答，≤0 或 ≥1 关闭 LLM 判定。" /></span><strong>{{ data.defaults.qa_threshold }}</strong></div>
     </div>
 
     <UiLoading v-if="loading && !data" />
@@ -77,7 +77,7 @@
               </div>
               <div class="rule-row boredom-row">
                 <div>
-                  <span class="rule-label">无聊唤醒群启用</span>
+                  <span class="rule-label">无聊唤醒群启用<UiInfoTip text="本群是否加入无聊唤醒白名单。取消后该群的沉寂与冷却状态立即清除；群消息未被观察到时沉寂状态未知，不会触发无聊唤醒。" /></span>
                   <span class="mono rule-name">data/awakening_boredom_groups.json</span>
                 </div>
                 <UiToggle :model-value="selectedGroup.boredom_opt_in" @update:model-value="toggleBoredom" />
@@ -139,6 +139,7 @@ import { computed, ref, watch } from 'vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -397,7 +398,7 @@ load()
 
 .defaults-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); }
 .default-item, .setting { min-width: 0; padding: var(--qq-gap-sm); border-radius: var(--qq-radius-sm); background: var(--qq-surface-strong); }
-.default-item span, .setting span { display: block; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
+.default-item span, .setting span { display: inline-flex; align-items: center; gap: 4px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
 .default-item strong, .setting strong { display: block; overflow: hidden; color: var(--qq-text); font-size: var(--qq-text-sm); text-overflow: ellipsis; white-space: nowrap; }
 
 .shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--qq-gap-md); flex: 1; min-height: 0; }
