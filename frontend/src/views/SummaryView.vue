@@ -1,5 +1,5 @@
 <template>
-  <div class="sum-view">
+  <div class="sum-view page-view-fill">
     <UiPageHeader title="总结" />
 
     <UiCard padding="md" shadow="sm" class="toolbar-card">
@@ -15,6 +15,8 @@
         <UiButton :loading="listLoading" icon="RefreshCw" :disabled="!groupId" @click="loadList">刷新</UiButton>
       </div>
     </UiCard>
+
+    <p v-if="groupId && !selected && !listLoading" class="pub-legend">「已发布」= 已推送到群聊；「未发布」= 已生成、等待下次调度推送。</p>
 
     <div v-if="listError" class="error-block">
       <UiIcon name="CircleX" :size="16" />
@@ -406,6 +408,12 @@ function closeDetail() {
 
 .detail-loading {
   padding: var(--qq-gap-md) 0;
+}
+
+.pub-legend {
+  margin: 0;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
 }
 
 .error-block {

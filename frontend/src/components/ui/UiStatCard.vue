@@ -1,10 +1,13 @@
 <template>
   <article :class="['ui-stat-card', `ui-stat-card--${variant}`]">
     <div class="ui-stat-card__head">
-      <span class="ui-stat-card__label">{{ label }}</span>
+      <span class="ui-stat-card__label">{{ label }}<UiInfoTip v-if="tip" :text="tip" /></span>
       <UiIcon v-if="icon" :name="icon" :size="15" class="ui-stat-card__icon" />
     </div>
-    <strong class="ui-stat-card__value">{{ displayValue }}</strong>
+    <div class="ui-stat-card__value-row">
+      <strong class="ui-stat-card__value">{{ displayValue }}</strong>
+      <small v-if="unit" class="ui-stat-card__unit">{{ unit }}</small>
+    </div>
     <small v-if="sub" class="ui-stat-card__sub">{{ sub }}</small>
   </article>
 </template>
@@ -16,11 +19,16 @@
  */
 import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
+import UiInfoTip from './UiInfoTip.vue'
 import { useCountUp } from '../../composables/useCountUp'
 
 const props = withDefaults(defineProps<{
   label: string
   value: string
+  /** 单位后缀：与数值同行的小号单位（如 tok/轮），避免单位混入大数值导致换行。 */
+  unit?: string
+  /** 标签术语的悬浮解释（UiInfoTip） */
+  tip?: string
   sub?: string
   icon?: string
   variant?: 'default' | 'primary' | 'warn'
@@ -29,6 +37,8 @@ const props = withDefaults(defineProps<{
   /** count-up 展示格式化（如万缩写），默认千分位取整 */
   countFormat?: (n: number) => string
 }>(), {
+  unit: undefined,
+  tip: undefined,
   sub: undefined,
   icon: undefined,
   variant: 'default',
@@ -79,6 +89,12 @@ const displayValue = computed(() => {
   font-size: var(--qq-text-sm);
 }
 
+.ui-stat-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .ui-stat-card__icon {
   color: var(--qq-text-muted);
   flex-shrink: 0;
@@ -90,9 +106,27 @@ const displayValue = computed(() => {
   color: rgba(255, 255, 255, 0.82);
 }
 
+.ui-stat-card__value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
 .ui-stat-card__value {
   font-size: var(--qq-text-2xl);
   font-variant-numeric: tabular-nums;
   line-height: var(--qq-line-tight);
+  white-space: nowrap;
+}
+
+.ui-stat-card__unit {
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-sm);
+  white-space: nowrap;
+}
+
+.ui-stat-card--primary .ui-stat-card__unit {
+  color: rgba(255, 255, 255, 0.82);
 }
 </style>

@@ -3,7 +3,7 @@
     <div class="diag-card__head">
       <span class="diag-card__icon"><UiIcon name="ListChecks" :size="18" /></span>
       <div>
-        <h3>文本规则回归</h3>
+        <h3>文本规则回归<UiInfoTip text="只走本地正则规则管线，不调用 LLM、不产生费用。" /></h3>
         <p>每行一条样本，快速确认哪些规则命中。</p>
       </div>
     </div>
@@ -49,6 +49,7 @@ import { ref } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiIcon from '../ui/UiIcon.vue'
+import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { runRegression } from '../../api/diagnostics'
 import type { RegressionResult } from '../../api/diagnostics'
@@ -112,6 +113,9 @@ async function runRegress() {
 }
 
 .diag-card__head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin: 0 0 2px;
   color: var(--qq-text);
   font-size: var(--qq-text-base);

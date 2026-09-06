@@ -3,7 +3,7 @@
     <div class="diag-card__head">
       <span class="diag-card__icon"><UiIcon name="Send" :size="18" /></span>
       <div>
-        <h3>样本请求</h3>
+        <h3>样本请求<UiInfoTip text="会真实调用所选 provider/model 并计入「用量」页的成本统计，按该模型定价计费。" /></h3>
         <p>按 provider / model 发送一次请求，查看解析结果和该次调用的原始 trace。</p>
       </div>
     </div>
@@ -96,6 +96,7 @@ import { computed, onMounted, ref } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiIcon from '../ui/UiIcon.vue'
+import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { fetchProviders, runSampleRequest } from '../../api/diagnostics'
 import type { DiagnosticsProvider, SampleRequestResult } from '../../api/diagnostics'
@@ -204,6 +205,9 @@ onMounted(() => {
 }
 
 .diag-card__head h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin: 0 0 2px;
   color: var(--qq-text);
   font-size: var(--qq-text-base);

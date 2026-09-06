@@ -1,6 +1,6 @@
 <template>
   <div>
-    <UiPageHeader title="规则开关" />
+    <UiPageHeader title="规则开关" subtitle="按群开关文本彩蛋与语境规则；规则内容、优先级与语境模式在「配置」页编辑 chat_rules.toml" />
     <p v-if="error" class="error">{{ error }}</p>
     <UiLoading v-else-if="!loaded" />
     <div v-else>

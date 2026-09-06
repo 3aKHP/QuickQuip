@@ -1,11 +1,83 @@
 from datetime import time
 import logging
+import math
 import tomllib
 
 from quickquip.common.constants import BEIJING_TIMEZONE as BEIJING_TIMEZONE  # noqa: F401 — re-export 保持兼容
 from quickquip.common.paths import CHAT_RULES_TOML_PATH
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_probability(raw: object, label: str) -> float | None:
+    """校验概率字段：合法值钳制到 [0, 1]，非法值（含 NaN）告警并视为未配置。
+
+    返回 None 表示未配置（沿用上层默认），由读取方决定回退顺序。
+    NaN 与任何数比较恒为 False，若不显式拦截会绕过钳制并静默永久沉默。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        logger.warning("%s 的 probability = %r 不是数字，按未配置处理", label, raw)
+        return None
+    value = float(raw)
+    if math.isnan(value) or math.isinf(value):
+        logger.warning("%s 的 probability = %r 不是有限数，按未配置处理", label, raw)
+        return None
+    if value < 0.0 or value > 1.0:
+        logger.warning("%s 的 probability = %r 超出 [0, 1]，已钳制", label, raw)
+        value = min(1.0, max(0.0, value))
+    return value
+
+
+def normalize_suppress_after_hit(raw: object, label: str) -> int:
+    """校验防连发字段：非负整数（整数值 float 宽容接受），非法值告警并按 0（关闭）处理。"""
+    if raw is None:
+        return 0
+    if isinstance(raw, float) and raw.is_integer():
+        raw = int(raw)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        logger.warning("%s 的 suppress_after_hit = %r 不是整数，按关闭处理", label, raw)
+        return 0
+    if raw < 0:
+        logger.warning("%s 的 suppress_after_hit = %r 为负，已按 0 处理", label, raw)
+        return 0
+    return raw
+
+
+def normalize_pity_step(raw: object, label: str) -> float:
+    """校验保底步进字段：非负有限数（含 NaN 拦截），非法值告警并按 0（关闭）处理。"""
+    if raw is None:
+        return 0.0
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        logger.warning("%s 的 pity_step = %r 不是数字，按关闭处理", label, raw)
+        return 0.0
+    value = float(raw)
+    if math.isnan(value) or math.isinf(value):
+        logger.warning("%s 的 pity_step = %r 不是有限数，按关闭处理", label, raw)
+        return 0.0
+    if value < 0.0:
+        logger.warning("%s 的 pity_step = %r 为负，已按 0 处理", label, raw)
+        return 0.0
+    return value
+
+
+def _normalize_rules_probability(rules: list[dict], label: str) -> list[dict]:
+    """把 rules / context_rules 列表里的 probability 字段归一化为 float。
+
+    原列表元素是 tomllib 解出的 dict，这里复制后写回，避免改动调用方数据。
+    """
+    normalized: list[dict] = []
+    for rule in rules:
+        rule = dict(rule)
+        name = str(rule.get("name", "<未命名>"))
+        probability = normalize_probability(rule.get("probability"), f"{label}.{name}")
+        if probability is not None:
+            rule["probability"] = probability
+        else:
+            rule.pop("probability", None)
+        normalized.append(rule)
+    return normalized
 
 BEIJING_TIME_FORMAT = "%Y-%m-%d %H:%M"
 
@@ -76,9 +148,40 @@ def reload_chat_rules() -> bool:
 
     # Parse new state into temporaries before touching module-level containers.
     new_rate_limits = dict(_BUILTIN_RATE_LIMIT_RULES)
-    new_rate_limits.update(raw_data.get("rate_limit_rules", {}))
-    new_text_rules = list(raw_data.get("rules", []))
-    new_context_rules = list(raw_data.get("context_rules", []))
+    for key, entry in raw_data.get("rate_limit_rules", {}).items():
+        merged = dict(entry)
+        for limit_field in ("global_limit", "user_limit"):
+            if limit_field not in merged:
+                # 覆写是整条替换：缺配额字段的条目会让限流器构建失败（启动即崩溃）
+                logger.warning(
+                    "rate_limit_rules.%s 缺少 %s，覆写/新建桶需把配额字段写全",
+                    key,
+                    limit_field,
+                )
+        probability = normalize_probability(merged.get("probability"), f"rate_limit_rules.{key}")
+        if probability is not None:
+            merged["probability"] = probability
+        else:
+            merged.pop("probability", None)
+        suppress_after_hit = normalize_suppress_after_hit(
+            merged.get("suppress_after_hit"), f"rate_limit_rules.{key}"
+        )
+        if suppress_after_hit > 0:
+            merged["suppress_after_hit"] = suppress_after_hit
+        else:
+            merged.pop("suppress_after_hit", None)
+        pity_step = normalize_pity_step(merged.get("pity_step"), f"rate_limit_rules.{key}")
+        if pity_step > 0.0:
+            merged["pity_step"] = pity_step
+        else:
+            merged.pop("pity_step", None)
+        new_rate_limits[key] = merged
+    new_text_rules = _normalize_rules_probability(
+        list(raw_data.get("rules", [])), label="rules"
+    )
+    new_context_rules = _normalize_rules_probability(
+        list(raw_data.get("context_rules", [])), label="context_rules"
+    )
     new_chain_games = list(raw_data.get("chain_games", []))
 
     # Atomic replacement.
