@@ -77,6 +77,21 @@ def register_lifecycle(driver) -> None:
     async def _startup_llm_runtime():
         svc = get_llm_service()
         await svc.startup(background=True)
+        # 崩溃恢复（§5.5）：新 Bot 进程补齐未关闭 Loop 的缺失终态；
+        # Web 只做迁移/查询，不代替 Bot 宣判活跃 Loop。
+        try:
+            report = svc.store.recover_unfinished_loops()
+            if report.closed_loops:
+                logger.info(
+                    "agent loop recovery closed %d loops (tools=%d/%d, deliveries=%d/%d)",
+                    len(report.closed_loops),
+                    len(report.tools_not_executed),
+                    len(report.tools_indeterminate),
+                    len(report.deliveries_skipped),
+                    len(report.deliveries_unknown),
+                )
+        except Exception:
+            logger.exception("agent loop recovery failed")
         await tieba_service.startup()
         _init_mtimes()
 

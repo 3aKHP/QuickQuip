@@ -80,6 +80,7 @@ class _StoreBase:
         self._unavailable = False
         try:
             self._ensure_schema()
+            self._ensure_agent_schema()
         except sqlite3.Error as exc:
             logger.error("LLMStore 数据库初始化失败 (%s)：%s", self.path, exc)
             self._unavailable = True
@@ -100,6 +101,9 @@ class _StoreBase:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
+        # agent 领域侧表使用 FK 级联（§4.2）；所有领域连接统一开启，
+        # 不依赖某个连接碰巧启用。
+        conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _ensure_schema(self) -> None:

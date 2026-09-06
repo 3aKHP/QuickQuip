@@ -90,7 +90,7 @@ class ConversationStoreMixin:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, user_id, sender_name, canonical_name, role, content, message_id, raw_content
+                SELECT id, user_id, sender_name, canonical_name, role, content, message_id, raw_content, agent_loop_id
                 FROM conversation_messages
                 WHERE group_id = ? AND id >= ?
                 ORDER BY id ASC
@@ -103,6 +103,7 @@ class ConversationStoreMixin:
                 **_normalize_conversation_row(row),
                 "id": int(row["id"]),
                 "message_id": "" if row["message_id"] is None else str(row["message_id"]),
+                "agent_loop_id": row["agent_loop_id"],
             }
             for row in rows
         ]
@@ -215,6 +216,40 @@ class ConversationStoreMixin:
                 (str(group_id), str(message_id)),
             )
             return int(cursor.rowcount)
+
+    def conversation_rows_by_message_id(self, group_id: int | str, message_id: str) -> list[dict[str, object]]:
+        """按平台 message_id 查询主表行（撤回回退路径；不删除）。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, role, agent_loop_id FROM conversation_messages
+                WHERE group_id = ? AND message_id = ?
+                ORDER BY id ASC
+                """,
+                (str(group_id), str(message_id)),
+            ).fetchall()
+        return [
+            {"id": int(row["id"]), "role": row["role"], "agent_loop_id": row["agent_loop_id"]}
+            for row in rows
+        ]
+
+    def conversation_row_by_id(self, group_id: int | str, row_id: int) -> dict[str, object] | None:
+        """按主键读取单行（Web 领域删除入口的范围判定）。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, role, agent_loop_id FROM conversation_messages
+                WHERE group_id = ? AND id = ?
+                """,
+                (str(group_id), int(row_id)),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"id": int(row["id"]), "role": row["role"], "agent_loop_id": row["agent_loop_id"]}
 
     def update_last_assistant_message_id(self, group_id: int | str, message_id: str) -> None:
         if self._unavailable:

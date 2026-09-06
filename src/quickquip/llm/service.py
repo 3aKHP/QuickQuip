@@ -38,6 +38,11 @@ from quickquip.llm.config import (
     provider_builtin_search_active,
 )
 from quickquip.llm.rendering import append_web_search_source_block
+from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
+from quickquip.llm.request_budget import RequestBudgetExceeded, enforce_request_budget
+from quickquip.llm.agent_records import LoopStatus, TriggerKind
+from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
+from quickquip.llm.store_parts.agent_records import AgentStoreError
 from quickquip.sts.config import (
     DEFECTIFY_RATE_LIMIT_KEY,
     DEFECTIFY_RULE_NAME,
@@ -78,6 +83,7 @@ from quickquip.llm.provider import (
     build_provider_client,
     strip_leading_reasoning_content,
 )
+from quickquip.llm.provider.owner import build_response_owner, primary_endpoint_url
 from quickquip.llm.quick_judge import (
     QuickJudgeResult as QuickJudgeResult,  # noqa: F401 — re-exported for callers/tests
     run_quick_judge,
@@ -227,6 +233,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self.mcp_manager = MCPClientManager()
         self.image_preprocessor = image_preprocessor
         self.stats_tracker: "GroupStatsTracker | None" = None
+        # 逐 Turn 交付出口（§5.1）：由适配层绑定；enabled 且缺失时属编程错误。
+        self._delivery_sink = None
         self.rule_switch: "GroupRuleSwitch | None" = None
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
         self._init_mcp_lifecycle()
@@ -427,6 +435,56 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             self.config, prompt, max_tokens, client_builder=build_provider_client
         )
 
+    def bind_delivery_sink(self, sink) -> None:
+        """绑定逐 Turn 交付出口（adapters 装配时调用）。"""
+        self._delivery_sink = sink
+
+    def _build_request_guard(self, provider: ProviderConfig):
+        """逐轮预算门禁闭包（§8.3）：超限以 DeliveryAborted 终止 Loop。"""
+        from quickquip.llm.service_parts.agent_runtime import DeliveryAborted
+
+        def _guard(request: LLMRequest) -> None:
+            try:
+                enforce_request_budget(self.config, provider, request)
+            except RequestBudgetExceeded as exc:
+                logger.warning(
+                    "request budget exceeded mid-loop provider=%s model=%s: %s",
+                    provider.id, request.model, exc,
+                )
+                raise DeliveryAborted("request_budget_exceeded") from exc
+
+        return _guard
+
+    def maintain_agent_retention(self, scope_key: str) -> None:
+        """D5 保留维护（§8.4）：Loop 关闭后调用，按三上限清理最旧完整 Loop。
+
+        硬上限要求删除活动纪元覆盖的记录时返回的 blocked 锚点只记日志；
+        推进纪元由 epoch 管理按容量 reset 路径处理。
+        """
+        from quickquip.llm.store_parts.agent_records import RetentionPolicy
+
+        policy = RetentionPolicy(
+            retention_days=self.config.runtime.agent_record_retention_days,
+            max_loops=self.config.runtime.agent_record_max_loops_per_scope,
+            max_bytes=self.config.runtime.agent_record_max_bytes_per_scope,
+        )
+        active_anchors = [
+            anchor
+            for anchor in [self._epochs.oldest_anchor(scope_key)]
+            if anchor is not None
+        ]
+        report = self.store.prune_closed_loops(scope_key, active_anchors, policy)
+        if report.deleted_loop_ids:
+            logger.info(
+                "agent record pruned scope=%s loops=%d",
+                scope_key, len(report.deleted_loop_ids),
+            )
+        if report.blocked_active_anchors:
+            logger.info(
+                "agent record hard cap blocked by active epoch scope=%s anchors=%s",
+                scope_key, list(report.blocked_active_anchors),
+            )
+
     def _merge_image_urls(self, *collections: list[str]) -> list[str]:
         return merge_image_urls(*collections)
 
@@ -453,6 +511,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         include_recent_images: bool = False,
         recent_images_messages: list[dict[str, str]] | None = None,
         turn_envelope: str = "",
+        projected_history_segments: dict[str, list[LLMConversationMessage]] | None = None,
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -475,6 +534,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             image_descriptions=image_descriptions,
             include_recent_images=include_recent_images,
             turn_envelope=turn_envelope,
+            projected_history_segments=projected_history_segments,
         )
 
     async def generate_defectify_reply(
@@ -614,17 +674,104 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             _push(item.get("user_id", ""), item.get("sender_name", ""), item.get("canonical_name", ""))
         return participants
 
+    def _begin_agent_recorder(
+        self,
+        *,
+        scope_key: str,
+        chat_type: str,
+        user_id: int | str,
+        sender_name: str,
+        stored_prompt: str,
+        message_id: str | None,
+        store_user_message: bool,
+        normalized_quoted_text: str,
+        normalized_quoted_image_urls: list[str],
+        normalized_forward_text: str,
+        normalized_forward_image_urls: list[str],
+        image_descriptions: list[ImageDescription] | None,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
+    ):
+        """创建 Loop 与 user 触发行（§5.3.1），返回 TurnRecorder。
+
+        合成触发（``store_user_message=False``）与 store 不可用时本期保持
+        旧路径（无 Loop 记录），属已记录的渐进边界。
+        """
+        from quickquip.llm.service_parts.agent_runtime import RecorderConfig, TurnRecorder
+        from quickquip.llm.store_parts.agent_records import UserTriggerPayload
+
+        if not store_user_message or self.store is None:
+            return None
+        current_identity = self._resolve_identities(scope_key.removeprefix("private:")).resolve_user(
+            user_id, sender_name
+        )
+        raw_turn_parts: list[str] = []
+        if normalized_quoted_text or normalized_quoted_image_urls:
+            q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
+            q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
+            raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
+        if normalized_forward_text or normalized_forward_image_urls:
+            fw_text = normalized_forward_text or "[合并转发消息]"
+            fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
+            raw_turn_parts.append(fw_text + fw_suffix)
+        if image_descriptions:
+            caption_count, caption_blob = _image_caption_blob(image_descriptions)
+            if caption_count:
+                raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
+        raw_turn_parts.append(stored_prompt)
+        generation, _ = self.store.agent_scope_state(scope_key)
+        if trigger_kind is not None:
+            trigger = trigger_kind
+        else:
+            trigger = (
+                TriggerKind.PRIVATE_DIRECT if chat_type == "private" else TriggerKind.GROUP_DIRECT
+            )
+        try:
+            handle = self.store.begin_loop(
+                scope_key,
+                generation,
+                trigger,
+                UserTriggerPayload(
+                    user_id=str(user_id),
+                    sender_name=sender_name,
+                    canonical_name=current_identity.canonical_name,
+                    content=stored_prompt,
+                    raw_content="\n".join(raw_turn_parts),
+                    message_id=str(message_id) if message_id else None,
+                ),
+            )
+        except AgentStoreError:
+            logger.exception("begin_loop 失败 scope=%s，本轮退回无记录路径", scope_key)
+            return None
+        runtime = self.config.runtime
+        return TurnRecorder(
+            store=self.store,
+            handle=handle,
+            config=RecorderConfig(
+                agent_delivery_enabled=runtime.agent_delivery_enabled,
+                reply_split_threshold_chars=runtime.reply_split_threshold_chars,
+                reply_chunk_max_chars=runtime.reply_chunk_max_chars,
+                reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
+            ),
+            sink=delivery_sink or self._delivery_sink,
+            sensitive_scan=_get_sensitive_filter().scan if _get_sensitive_filter().is_loaded else None,
+        )
+
     async def _run_tool_call_loop(
         self,
         *,
         provider: ProviderConfig,
         request: LLMRequest,
         context: ToolExecutionContext,
+        turn_recorder: TurnRecorder | None = None,
+        request_guard=None,
     ):
         return await run_tool_call_loop(
             provider=provider,
             request=request,
             context=context,
+            turn_recorder=turn_recorder,
+            request_guard=request_guard,
             build_provider_client=build_provider_client,
             tool_registry=self.tool_registry,
             runtime_config=self.config.runtime,
@@ -799,7 +946,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         quoted_user_id: str,
         epoch_key: EpochKey,
         epoch_params: EpochParams,
-    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None]:
+        provider: ProviderConfig | None = None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None, dict[str, list[LLMConversationMessage]]]:
         # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
@@ -862,7 +1010,64 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_user_id=quoted_user_id,
             group_id=str(chat_id),
         )
-        return history, participants, recent_messages
+        projected_segments: dict[str, list[LLMConversationMessage]] = {}
+        if provider is not None:
+            projected_segments = self._projected_history_segments(
+                scope_key=scope_key,
+                history=history,
+                provider=provider,
+                model=epoch_key.model,
+            )
+        return history, participants, recent_messages, projected_segments
+
+    def _projected_history_segments(
+        self,
+        *,
+        scope_key: str,
+        history: list[dict[str, object]],
+        provider: ProviderConfig,
+        model: str,
+    ) -> dict[str, list[LLMConversationMessage]]:
+        """携带工具事实的 Loop 用投影替换行渲染（§8.1/§5.3.2）。
+
+        无工具的 Loop 保持行渲染（1.14 字节稳定前缀契约）。目标 owner 取
+        主端点；配置了 fallback_urls 的 provider 不启用原生路径（§7.3 的
+        逐候选重投影属后置增强，跨端点签名泄露风险先收紧为保守降级）。
+        """
+        loop_ids = {
+            str(row["agent_loop_id"])
+            for row in history
+            if row.get("agent_loop_id")
+        }
+        if not loop_ids:
+            return {}
+        tool_loop_ids = self.store.loops_with_tools(scope_key, loop_ids)
+        if not tool_loop_ids:
+            return {}
+        loaded = self.store.load_closed_loops_by_ids(scope_key, tool_loop_ids)
+        target = None
+        if not provider.fallback_urls:
+            target = build_response_owner(provider, primary_endpoint_url(provider, model), model)
+        try:
+            result = project_loops_with_budget(
+                loaded, target=target, protocol=provider.protocol,
+                budget_tokens=self.config.runtime.agent_replay_loop_tokens,
+            )
+        except HistoryProjectionError:
+            # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏
+            # Loop 留待运维检查；工具事实本轮缺席属可观测降级。
+            logger.exception(
+                "history projection failed structurally scope=%s loops=%d；本轮退回行渲染",
+                scope_key, len(loaded),
+            )
+            return {}
+        for decision in result.decisions:
+            if decision.reason is not None:
+                logger.info(
+                    "history projection degraded scope=%s loop=%s path=%s reason=%s",
+                    scope_key, decision.loop_id, decision.path, decision.reason,
+                )
+        return result.segments
 
     def _persist_turn_and_build_reply(
         self,
@@ -885,9 +1090,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         normalized_forward_image_urls: list[str],
         image_descriptions: list[ImageDescription] | None = None,
         tool_context: ToolExecutionContext,
+        recorder_rows_written: bool = False,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
-        if store_user_message:
+        if store_user_message and not recorder_rows_written:
             raw_turn_parts: list[str] = []
             if normalized_quoted_text or normalized_quoted_image_urls:
                 q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
@@ -915,7 +1121,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 message_id=str(message_id) if message_id else None,
                 raw_content=raw_turn,
             )
-        self.store.append_conversation_message(scope_key, None, "assistant", text)
+        if not recorder_rows_written:
+            self.store.append_conversation_message(scope_key, None, "assistant", text)
         # 纪元裁剪：floor = 该 scope 所有纪元键的最老锚点（None = 只按硬上限兜底，
         # 绝不按窗口重估删行——重启后懒初始化还要读旧行）
         self.store.crop_conversation_messages(
@@ -925,6 +1132,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         )
 
         if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
+            generation_at_schedule, _ = self.store.agent_scope_state(scope_key)
             asyncio.create_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
@@ -934,6 +1142,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     user_text=stored_prompt,
                     assistant_text=text,
                     persona_id=settings.persona_id,
+                    expected_generation=generation_at_schedule,
                 )
             )
 
@@ -971,6 +1180,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
     ) -> dict[str, object]:
         prompt = prompt.strip()
         normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
@@ -1077,7 +1288,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             provider_id=provider.id,
             model=settings.model or provider.default_model,
         )
-        history, participants, scene_patch = self._load_scrubbed_history_and_participants(
+        history, participants, scene_patch, projected_segments = self._load_scrubbed_history_and_participants(
             chat_id=chat_id,
             chat_type=chat_type,
             scope_key=scope_key,
@@ -1091,6 +1302,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_user_id=quoted_user_id,
             epoch_key=epoch_key,
             epoch_params=self.config.resolve_epoch_params(provider),
+            provider=provider,
         )
 
         # ── image preprocessing & non-VLM stripping ──────────────────
@@ -1203,6 +1415,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             image_descriptions=image_descriptions or None,
             include_recent_images=include_recent_images and not is_non_vision,
             turn_envelope=turn_envelope,
+            projected_history_segments=projected_segments,
         )
         request = LLMRequest(
             model=settings.model or provider.default_model,
@@ -1215,6 +1428,21 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             tool_choice="auto",
             builtin_search=builtin_search_active,
         )
+        try:
+            enforce_request_budget(self.config, provider, request)
+        except RequestBudgetExceeded as exc:
+            logger.warning(
+                "request budget exceeded scope=%s provider=%s model=%s: %s",
+                scope_key, provider.id, request.model, exc,
+            )
+            return {
+                "reply": "这次对话的上下文已经太长，无法安全发起模型请求，请用清空上下文命令重置后再试。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": False,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
         tool_context = ToolExecutionContext(
             group_id=chat_id,
             user_id=user_id,
@@ -1225,11 +1453,27 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             chat_type=chat_type,
         )
 
+        recorder: TurnRecorder | None = None
         try:
             # 拿到群级 persona 后把聊天主链路升级为带人格归因的 scope；
             # scope 生命周期与 provider 调用同处一个函数，退出即复位。
             # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
             # 与 auto_memory 等派生调用的归因口径一致。
+            recorder = self._begin_agent_recorder(
+                scope_key=scope_key,
+                chat_type=chat_type,
+                user_id=user_id,
+                sender_name=sender_name,
+                stored_prompt=stored_prompt,
+                message_id=message_id,
+                store_user_message=store_user_message,
+                normalized_quoted_text=normalized_quoted_text,
+                normalized_quoted_image_urls=normalized_quoted_image_urls,
+                normalized_forward_text=normalized_forward_text,
+                normalized_forward_image_urls=normalized_forward_image_urls,
+                # 同 _persist_turn_and_build_reply 的落库口径：他人近期图注不落触发者名下。
+                image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
+            )
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
                 envelope_meter(estimate_tokens(turn_envelope)),
@@ -1253,8 +1497,23 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     provider=provider,
                     request=request,
                     context=tool_context,
+                    turn_recorder=recorder,
+                    request_guard=self._build_request_guard(provider),
                 )
+        except DeliveryAborted as exc:
+            if recorder is not None:
+                recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
+            return {
+                "reply": "" if self.config.runtime.agent_delivery_enabled else "本次回复未确认送达，已停止后续生成。",
+                "rate_limit_key": LLM_RULE_NAME,
+                "rule_name": LLM_RULE_NAME,
+                "llm_used": True,
+                "provider_id": provider.id,
+                "model": request.model,
+            }
         except LLMProviderError as exc:
+            if recorder is not None:
+                recorder.close(LoopStatus.FAILED, "provider_error")
             return {
                 "reply": f"LLM 调用失败：{exc}",
                 "rate_limit_key": LLM_RULE_NAME,
@@ -1266,6 +1525,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 "images": outbound_images_payload(tool_context),
             }
         except Exception as exc:
+            if recorder is not None:
+                recorder.close(LoopStatus.FAILED, "exception")
             return {
                 "reply": f"LLM 调用异常：{exc}",
                 "rate_limit_key": LLM_RULE_NAME,
@@ -1302,7 +1563,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 text = DEFAULT_OUTPUT_FALLBACK
 
         # ── persistence + auto-memory dispatch + reply assembly ──────
-        return self._persist_turn_and_build_reply(
+        result_payload = self._persist_turn_and_build_reply(
             chat_id=chat_id,
             user_id=user_id,
             sender_name=sender_name,
@@ -1324,7 +1585,20 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
             image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
             tool_context=tool_context,
+            recorder_rows_written=recorder is not None,
         )
+        if recorder is not None:
+            recorder.close(LoopStatus.COMPLETED, None)
+            self.maintain_agent_retention(scope_key)
+            if recorder.final_turn_record is not None:
+                result_payload = dict(result_payload)
+                result_payload["agent_turn_row_id"] = recorder.final_turn_record.message_row_id
+                result_payload["scope_key"] = scope_key
+        if self.config.runtime.agent_delivery_enabled:
+            # 逐 Turn 模式：正文已由 sink 交付，reply 不再二次发送（§5.1）。
+            result_payload = dict(result_payload)
+            result_payload["reply"] = ""
+        return result_payload
 
     async def generate_reply(
         self,
@@ -1333,6 +1607,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         user_id: int | str,
         sender_name: str,
         prompt: str,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
         image_urls: list[str] | None = None,
         recent_messages: list[dict[str, str]] | None = None,
         quoted_text: str = "",
@@ -1371,6 +1647,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
+                delivery_sink=delivery_sink,
+                trigger_kind=trigger_kind,
             )
 
     async def generate_private_reply(
@@ -1379,6 +1657,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         user_id: int | str,
         sender_name: str,
         prompt: str,
+        delivery_sink=None,
+        trigger_kind: TriggerKind | None = None,
         image_urls: list[str] | None = None,
         recent_messages: list[dict[str, str]] | None = None,
         quoted_text: str = "",
@@ -1417,6 +1697,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 trigger_auto_memory=trigger_auto_memory,
                 message_id=message_id,
                 include_recent_images=include_recent_images,
+                delivery_sink=delivery_sink,
+                trigger_kind=trigger_kind,
             )
 
 

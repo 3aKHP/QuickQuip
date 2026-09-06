@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
+from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMRequest,
@@ -352,12 +353,16 @@ class OpenAIProviderClient(BaseProviderClient):
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
-        data = await self._post_json_with_fallback(url, headers, payload)
-        return self._parse_response(data, request.model)
+        data, final_url = await self._post_json_candidate(url, headers, payload)
+        response = self._parse_response(data, request.model)
+        response.owner = build_response_owner(self.config, final_url, request.model)
+        return response
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
-        chunks = await self._post_stream_sse_with_fallback(url, headers, payload)
-        return self._assemble_stream_response(chunks, request.model)
+        chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
+        response = self._assemble_stream_response(chunks, request.model)
+        response.owner = build_response_owner(self.config, final_url, request.model)
+        return response

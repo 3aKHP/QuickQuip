@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import platform
+from copy import deepcopy
 from typing import Any
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
+from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMRequest,
@@ -132,6 +134,13 @@ class ClaudeProviderClient(BaseProviderClient):
 
             await _flush_tool_results()
             if message.role == "assistant":
+                if message.native_content is not None:
+                    # 原生路径（§7.2）：历史记录的原样 content 块深拷贝回放，
+                    # 不再从 text/tool_calls/thinking_blocks 重建（避免双写）。
+                    serialized.append(
+                        {"role": "assistant", "content": [deepcopy(block) for block in message.native_content]}
+                    )
+                    continue
                 content: list[dict[str, Any]] = [*message.thinking_blocks]
                 if message.content:
                     content.append({"type": "text", "text": message.content})
@@ -274,23 +283,39 @@ class ClaudeProviderClient(BaseProviderClient):
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
         thinking_blocks: list[dict[str, Any]] = []
+        native_blocks: list[dict[str, Any]] = []
         for index, item in enumerate(content if isinstance(content, list) else [], 1):
             if not isinstance(item, dict):
                 continue
             t = item.get("type")
             if t == "thinking":
-                thinking_blocks.append({"type": "thinking", "thinking": item.get("thinking", ""), "signature": item.get("signature", "")})
+                block = {"type": "thinking", "thinking": item.get("thinking", ""), "signature": item.get("signature", "")}
+                thinking_blocks.append(block)
+                native_blocks.append(dict(block))
             elif t == "redacted_thinking":
-                thinking_blocks.append({"type": "redacted_thinking", "data": item.get("data", "")})
+                block = {"type": "redacted_thinking", "data": item.get("data", "")}
+                thinking_blocks.append(block)
+                native_blocks.append(dict(block))
             elif t == "text":
                 text_parts.append(str(item.get("text", "")))
+                native_blocks.append({"type": "text", "text": str(item.get("text", ""))})
             elif t == "tool_use":
+                call_id = str(item.get("id", "")).strip() or f"tool_{index}"
+                call_name = str(item.get("name", "")).strip()
                 tool_calls.append(
                     LLMToolCall(
-                        id=str(item.get("id", "")).strip() or f"tool_{index}",
-                        name=str(item.get("name", "")).strip(),
+                        id=call_id,
+                        name=call_name,
                         arguments_json=_json_string(item.get("input", {})),
                     )
+                )
+                native_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": call_id,
+                        "name": call_name,
+                        "input": deepcopy(item.get("input", {})),
+                    }
                 )
 
         usage = data.get("usage", {})
@@ -304,11 +329,12 @@ class ClaudeProviderClient(BaseProviderClient):
             cache_creation_tokens=_cache_creation_tokens(usage),
             cache_read_tokens=usage.get("cache_read_input_tokens"),
             thinking_blocks=thinking_blocks,
+            native_blocks=native_blocks or None,
         )
 
     @staticmethod
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
-        text_parts: list[str] = []
+        text_acc: dict[int, str] = {}  # block_index -> 累积文本（保序表示需要）
         tool_calls_acc: dict[int, dict[str, str]] = {}  # block_index -> {id, name, input_json}
         thinking_acc: dict[int, dict[str, str]] = {}    # block_index -> {type, thinking, signature} 或 redacted {type, data}
         finish_reason: str | None = None
@@ -351,12 +377,15 @@ class ClaudeProviderClient(BaseProviderClient):
                         "type": "redacted_thinking",
                         "data": str(block.get("data", "")),
                     }
+                elif block.get("type") == "text":
+                    text_acc.setdefault(current_block_index, "")
 
             elif event == "content_block_delta":
                 delta = chunk.get("delta", {})
                 idx = chunk.get("index", current_block_index)
                 if delta.get("type") == "text_delta":
-                    text_parts.append(str(delta.get("text", "")))
+                    text_acc.setdefault(idx, "")
+                    text_acc[idx] += str(delta.get("text", ""))
                 elif delta.get("type") == "input_json_delta":
                     if idx in tool_calls_acc:
                         tool_calls_acc[idx]["input_json"] += str(delta.get("partial_json", ""))
@@ -391,11 +420,33 @@ class ClaudeProviderClient(BaseProviderClient):
             )
             for _, acc in sorted(thinking_acc.items())
         ]
+        # 保序原生块（§4.4）：与 _parse_response 的非流式形态等价，
+        # thinking/text/tool_use 按 block index 还原原始交错顺序。
+        indexed_blocks: list[tuple[int, dict[str, Any]]] = []
+        for idx, acc in thinking_acc.items():
+            if acc.get("type") == "redacted_thinking":
+                indexed_blocks.append((idx, {"type": "redacted_thinking", "data": acc["data"]}))
+            else:
+                indexed_blocks.append(
+                    (idx, {"type": "thinking", "thinking": acc["thinking"], "signature": acc["signature"]})
+                )
+        for idx, text in text_acc.items():
+            indexed_blocks.append((idx, {"type": "text", "text": text}))
+        for idx, acc in tool_calls_acc.items():
+            try:
+                tool_input = json.loads(acc["input_json"] or "{}")
+            except json.JSONDecodeError:
+                tool_input = {}
+            indexed_blocks.append(
+                (idx, {"type": "tool_use", "id": acc["id"] or f"tool_{idx + 1}", "name": acc["name"], "input": tool_input})
+            )
+        native_blocks = [block for _, block in sorted(indexed_blocks, key=lambda pair: pair[0])]
         return LLMResponse(
-            text="".join(text_parts).strip(),
+            text="".join(text for _, text in sorted(text_acc.items())).strip(),
             model=model,
             tool_calls=tool_calls,
             thinking_blocks=thinking_blocks,
+            native_blocks=native_blocks or None,
             finish_reason=finish_reason,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -471,11 +522,15 @@ class ClaudeProviderClient(BaseProviderClient):
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
-        data = await self._post_json_with_fallback(url, headers, payload)
-        return self._parse_response(data, request.model)
+        data, final_url = await self._post_json_candidate(url, headers, payload)
+        response = self._parse_response(data, request.model)
+        response.owner = build_response_owner(self.config, final_url, request.model)
+        return response
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         payload["stream"] = True
-        chunks = await self._post_stream_sse_with_fallback(url, headers, payload)
-        return self._assemble_stream_response(chunks, request.model)
+        chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
+        response = self._assemble_stream_response(chunks, request.model)
+        response.owner = build_response_owner(self.config, final_url, request.model)
+        return response
