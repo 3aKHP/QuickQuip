@@ -1473,6 +1473,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 normalized_forward_image_urls=normalized_forward_image_urls,
                 # 同 _persist_turn_and_build_reply 的落库口径：他人近期图注不落触发者名下。
                 image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
+                delivery_sink=delivery_sink,
             )
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
@@ -1588,7 +1589,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             recorder_rows_written=recorder is not None,
         )
         if recorder is not None:
-            recorder.close(LoopStatus.COMPLETED, None)
+            terminal_status = (
+                LoopStatus.INTERRUPTED if recorder.terminal_reason else LoopStatus.COMPLETED
+            )
+            recorder.close(terminal_status, recorder.terminal_reason)
             self.maintain_agent_retention(scope_key)
             if recorder.final_turn_record is not None:
                 result_payload = dict(result_payload)

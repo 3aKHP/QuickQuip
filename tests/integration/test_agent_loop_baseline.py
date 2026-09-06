@@ -141,10 +141,9 @@ async def test_all_turns_mode_seven_chunks_delivered_before_tools(
         AGENT_LOOP_TEST_SPLIT["chunk_max"],
     )
     sink = CollectingSink()
-    scenario_service.bind_delivery_sink(sink)
     patch_scenario_provider("openai")
 
-    result = await run_five_turn_scenario(scenario_service)
+    result = await run_five_turn_scenario(scenario_service, delivery_sink=sink)
 
     # 七个文字 Chunk（4 Turn × 1 + 末 Turn 3）。
     assert len(sink.deliveries) == 7
@@ -163,6 +162,34 @@ async def test_all_turns_mode_seven_chunks_delivered_before_tools(
             "SELECT COUNT(*) FROM agent_deliveries WHERE kind = 'text_chunk'"
         ).fetchone()[0]
     assert chunk_count == 7
+
+
+async def test_round_limit_records_declared_calls_as_not_executed(
+    scenario_service, patch_scenario_provider, monkeypatch
+):
+    monkeypatch.setattr(scenario_service.config.runtime, "tool_max_rounds", 1)
+    patch_scenario_provider("openai")
+
+    await run_five_turn_scenario(scenario_service)
+
+    with scenario_service.store._connect() as conn:
+        tool_rows = conn.execute(
+            "SELECT tool_name, status, result_json FROM agent_tool_executions ORDER BY rowid"
+        ).fetchall()
+
+    # Turn 0 executes its one call; Turn 1 is declared but rejected by the
+    # loop limit and must retain both calls as not_executed facts.
+    assert len(tool_rows) == 3
+    assert [row["status"] for row in tool_rows] == [
+        "succeeded", "not_executed", "not_executed"
+    ]
+    assert all("limit" in row["result_json"] for row in tool_rows[1:])
+    with scenario_service.store._connect() as conn:
+        loop_row = conn.execute(
+            "SELECT status, terminal_reason FROM agent_loops"
+        ).fetchone()
+    assert loop_row["status"] == "interrupted"
+    assert loop_row["terminal_reason"] == "tool_round_limit"
 
 
 # ── 重放：下次请求携带完整工具事实（§11.2） ─────────────────────────

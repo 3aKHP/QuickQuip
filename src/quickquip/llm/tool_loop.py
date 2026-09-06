@@ -102,7 +102,17 @@ async def run_tool_call_loop(
         if has_counted_calls and counted_rounds >= max_rounds:
             response.text = response.text or "工具调用轮次已达上限，未能完成最终回答。"
             if turn_recorder is not None:
-                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                execution_ids = turn_recorder.on_turn(
+                    response,
+                    declared_calls=list(response.tool_calls),
+                    executable_calls=[],
+                    has_more_rounds=False,
+                )
+                turn_recorder.mark_interrupted("tool_round_limit")
+                for call in response.tool_calls:
+                    execution_id = execution_ids.get(call.id)
+                    if execution_id is not None:
+                        turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.ROUND_LIMIT)
                 await turn_recorder.deliver_turn()
             return response
 
@@ -158,7 +168,17 @@ async def run_tool_call_loop(
         if round_index >= search_failsafe_max_rounds:
             response.text = response.text or "联网检索轮次过多，已触发安全上限，未能完成最终回答。"
             if turn_recorder is not None:
-                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                execution_ids = turn_recorder.on_turn(
+                    response,
+                    declared_calls=list(response.tool_calls),
+                    executable_calls=[],
+                    has_more_rounds=False,
+                )
+                turn_recorder.mark_interrupted("search_failsafe_limit")
+                for call in response.tool_calls:
+                    execution_id = execution_ids.get(call.id)
+                    if execution_id is not None:
+                        turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.ROUND_LIMIT)
                 await turn_recorder.deliver_turn()
             return response
 
