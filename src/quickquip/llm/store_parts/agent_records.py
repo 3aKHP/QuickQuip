@@ -280,6 +280,11 @@ def _utf8_head_tail(text: str, budget: int) -> tuple[str, list[tuple[int, int]]]
         tail_start += 1
         omitted = len(text) - head_end - (len(text) - tail_start)
         excerpt = text[:head_end] + f"…[省略 {omitted} 字符]…" + text[tail_start:]
+    while _utf8_bytes(excerpt) > budget and head_end > 0:
+        # 尾部无可收（tail_start 已到串尾）时收缩 head 直至收敛。
+        head_end -= 1
+        omitted = len(text) - head_end - (len(text) - tail_start)
+        excerpt = text[:head_end] + f"…[省略 {omitted} 字符]…" + text[tail_start:]
     ranges = [(0, head_end), (tail_start, len(text))] if tail_start < len(text) else [(0, head_end)]
     return excerpt, ranges
 

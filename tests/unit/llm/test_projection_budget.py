@@ -124,8 +124,6 @@ def test_native_dropped_before_result_tiers():
     decision = result.decisions[0]
     # 原生路径先降级（native_dropped 或更深的阶梯），签名块不再上 wire。
     assert decision.reason is not None
-    import json as _json
-    assert _json.dumps([{"sig": 1}])  # 保持 json 引用（审计可读性）
     for message in result.messages:
         assert message.native_content is None
 

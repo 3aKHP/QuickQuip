@@ -289,7 +289,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 user_id=user_id,
                 incoming_message_id=message_id,
                 incoming_preview=rendered_text,
-                reply_preview=result["reply"] or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
+                reply_preview=result["reply"] or (passive_sink.sent_texts[-1][:120] if passive_sink.sent_texts else ""),
                 llm_used=bool(result.get("llm_used")),
                 provider_id=str(result.get("provider_id", "")),
                 model=str(result.get("model", "")),

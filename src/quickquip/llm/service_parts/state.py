@@ -106,6 +106,8 @@ class StateMixin:
     def delete_session_archive_for_user(self, user_id: int | str, archive_number: int) -> bool:
         archive_key = f"archive:{str(user_id)}:{archive_number}"
         self.store.delete_loops_for_scope(archive_key)
+        _, revision = self.store.agent_scope_state(archive_key)
+        self.store.mutate_history(archive_key, revision, HistoryMutation.DELETE)
         return self.store.delete_session_archive(str(user_id), archive_number)
 
     def get_session_preset(self, scope_key: str) -> str:
