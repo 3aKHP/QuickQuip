@@ -1367,7 +1367,22 @@ class AgentRecordsStoreMixin:
             if row["closed_at"] is not None:
                 conn.commit()
                 return
-            # 收敛在途子项（§5.5）：未开始的交付 skipped、未落库回执 unknown。
+            # 收敛在途子项（§5.5）：未开始的交付 skipped、未落库回执 unknown、
+            # 声明未启动的工具 not_executed（终止原因见 Loop terminal_reason）。
+            conn.execute(
+                """
+                UPDATE agent_tool_executions
+                SET status = ?, result_json = COALESCE(result_json, ?),
+                    finished_at = COALESCE(finished_at, ?)
+                WHERE status = ?
+                  AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
+                """,
+                (
+                    ToolExecutionStatus.NOT_EXECUTED,
+                    self._bounded_result_json(None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY),
+                    _utc_now(), ToolExecutionStatus.DECLARED, handle.loop_id,
+                ),
+            )
             conn.execute(
                 """
                 UPDATE agent_deliveries SET status = ?

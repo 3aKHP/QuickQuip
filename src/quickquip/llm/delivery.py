@@ -10,6 +10,7 @@ wrappers 只属于显示（超长代码块的闭合/重开围栏），不进入�
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 # 切分算法版本（§6.1：版本固定；变更即行为变更，需评审）。
@@ -17,6 +18,14 @@ SPLIT_ALGORITHM_VERSION = 1
 
 # 句末标点边界（。！？.!? 后）。
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？.!?])\s*")
+
+
+class SplitLimitError(ValueError):
+    """单个 grapheme 超过单 Chunk 上限（§6.1.5）：拒绝该交付计划并明确终止。"""
+
+
+def _is_combining(index: int, text: str) -> bool:
+    return index < len(text) and unicodedata.combining(text[index]) != 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +101,14 @@ def _split_long_segment(text: str, start: int, end: int, chunk_max: int) -> list
             candidates.append(space + 1)
         positive = [c for c in candidates if 0 < c <= chunk_max]
         cut = cursor + (max(positive) if positive else chunk_max)
+        # 硬切尽量避开 grapheme cluster（§6.1.5）：组合标记不作为新 Chunk 的
+        # 开头；调整后超出 max 说明单个 grapheme 本身超限，明确拒绝。
+        while _is_combining(cut, text) and cut < end:
+            cut += 1
+        if cut - cursor > chunk_max:
+            raise SplitLimitError(
+                f"单个 grapheme 超过单 Chunk 上限（{chunk_max} code point），拒绝该交付计划"
+            )
         segments.append((cursor, cut))
         cursor = cut
     if end > cursor:
@@ -156,9 +173,8 @@ def plan_text_chunks(
     if available <= 0:
         return [], "delivery_limit"
     # 收缩重切：把整段按可用条数均分上限收紧到 max。
-    tight = SplitParams(threshold=params.threshold, chunk_max=max(
-        params.chunk_max // available, 1
-    ))
+    tight_max = max(params.chunk_max // available, 1)
+    tight = SplitParams(threshold=min(params.threshold, tight_max), chunk_max=tight_max)
     try:
         squeezed = split_text_into_chunks(text, tight)
     except RuntimeError:
