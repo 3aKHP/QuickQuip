@@ -117,6 +117,14 @@ class TurnRecorder:
     def final_turn_record(self) -> TurnRecord | None:
         return self._final_turn_record
 
+    @property
+    def terminal_reason(self) -> str | None:
+        return self._terminal_reason
+
+    def mark_interrupted(self, reason: str) -> None:
+        """记录未完成 Loop 的领域终止原因，由 service 在收尾时关闭。"""
+        self._terminal_reason = reason
+
     def _clean_text(self, raw: str) -> str:
         text = strip_leading_reasoning_content(raw or "")
         text = re.sub(r"\n{3,}", "\n\n", text).strip()
