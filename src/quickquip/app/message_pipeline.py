@@ -54,7 +54,7 @@ from quickquip.chat.period_report import (
 from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
 from quickquip.sts.config import CARD_LE_RATE_LIMIT_KEY, CARD_LE_RULE_NAME
-from quickquip.sts.formulas.card_le.passive import match_card_le
+from quickquip.sts.formulas.card_le.passive import match_card_le, matches_card_le_pattern
 from quickquip.chat.awakening import (
     get_config as _get_awakening_config,
     get_state as _get_awakening_state,
@@ -399,9 +399,11 @@ async def _resolve_reply_chain(
             return tz_reply
 
     # STS「xxx了」置于链尾：广覆盖的梗规则，不得抢占时区（起床了/睡醒了）等具体规则
-    # 概率掷骰放在 LLM 判定之前，未掷中时连判定成本也不花费
+    # 概率掷骰放在「X了」正则快筛之后、LLM 判定之前：非候选消息不消耗掷骰状态，
+    # 未掷中时连判定成本也不花费
     if (
         group_id is not None
+        and matches_card_le_pattern(text) is not None
         and rule_switch.is_enabled(group_id, CARD_LE_RULE_NAME)
         and rate_limiter.can_allow(CARD_LE_RATE_LIMIT_KEY, user_id, group_id=group_id)
         and roll_reply(

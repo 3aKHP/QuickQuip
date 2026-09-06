@@ -86,7 +86,8 @@ def register_private_message_matcher(on_message):
         if llm_input is None:
             return
         _remember_recent_message(scope_key, user_id, sender_name, canonical_name, rendered_text, message_id)
-        if not roll_reply("llm_chat") or not rate_limiter.allow("llm_chat", user_id):
+        # 私聊掷骰状态按用户隔离，避免 suppress/pity 跨私聊用户串扰
+        if not roll_reply("llm_chat", group_id=f"private:{user_id}") or not rate_limiter.allow("llm_chat", user_id):
             return
 
         result = await svc.generate_private_reply(

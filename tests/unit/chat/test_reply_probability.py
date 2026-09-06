@@ -450,6 +450,125 @@ pity_step = "很多"
     assert "pity_step" not in chat_config.RATE_LIMIT_RULES["bad_type"]
 
 
+def test_reload_rejects_nan_and_accepts_integral_float(tmp_path: Path, restore_chat_rules):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "chat_rules.toml").write_text(
+        """
+[[rules]]
+name = 'nan_rule'
+patterns = ['x']
+reply_template = 'y'
+probability = nan
+
+[rate_limit_rules.nan_bucket]
+global_limit = 1
+user_limit = 1
+probability = nan
+pity_step = nan
+
+[rate_limit_rules.float_suppress]
+global_limit = 1
+user_limit = 1
+suppress_after_hit = 2.0
+""",
+        encoding="utf-8",
+    )
+    with _chdir(tmp_path):
+        assert chat_config.reload_chat_rules() is True
+
+    # NaN 按未配置处理（不得绕过钳制造成永久静默）
+    by_name = {r["name"]: r for r in chat_config.TEXT_REPLY_RULES}
+    assert "probability" not in by_name["nan_rule"]
+    assert "probability" not in chat_config.RATE_LIMIT_RULES["nan_bucket"]
+    assert "pity_step" not in chat_config.RATE_LIMIT_RULES["nan_bucket"]
+    # 整数值 float 宽容接受
+    assert chat_config.RATE_LIMIT_RULES["float_suppress"]["suppress_after_hit"] == 2
+
+
+# ── 多 pattern 规则只掷一次骰 ────────────────────────────────
+
+
+def test_overlapping_patterns_roll_once(restore_chat_rules, monkeypatch, frozen_now):
+    chat_config.RATE_LIMIT_RULES["overlap_bucket"] = {
+        "global_limit": 9,
+        "user_limit": 9,
+    }
+    _install_rules(
+        [
+            {
+                "name": "overlap_rule",
+                "patterns": ["蛐蛐儿", "我在想"],
+                "reply_template": "回复",
+                "rate_limit_key": "overlap_bucket",
+                "probability": 0.0,
+            }
+        ]
+    )
+    calls = []
+    monkeypatch.setattr(
+        "quickquip.chat.reply_probability.random.random",
+        lambda: calls.append(1) or 0.0,
+    )
+    # 「我在想蛐蛐儿」同时命中两条 pattern：规则级概率 0 时一次掷骰都不该发生
+    assert match_text_rule("我在想蛐蛐儿", user_id=1, sender_name="n", now=frozen_now) is None
+    assert calls == []
+
+
+# ── card_le：掷骰在「X了」快筛之后、LLM 判定之前 ──────────────
+
+
+async def test_card_le_skips_when_probability_zero(restore_chat_rules, frozen_now):
+    from quickquip.app import message_pipeline as pipeline_module
+
+    chat_config.RATE_LIMIT_RULES["sts_card_le"] = {
+        "global_limit": 9,
+        "user_limit": 9,
+        "probability": 0.0,
+    }
+    calls = []
+
+    async def _fake_match(text, *, llm_service, group_id, chat_type="group"):
+        calls.append(text)
+        return {"rule_name": "sts_card_le", "rate_limit_key": "sts_card_le", "reply": "r"}
+
+    monkey_target = pipeline_module.match_card_le
+    pipeline_module.match_card_le = _fake_match
+    try:
+        result = await pipeline_module.resolve_reply(
+            "邦邦了", user_id=1, sender_name="n", group_id=5566, now=frozen_now
+        )
+    finally:
+        pipeline_module.match_card_le = monkey_target
+    assert result is None
+    assert calls == []  # 概率 0：连 LLM 判定都不调用
+
+
+async def test_card_le_rolls_only_for_pattern_hits(
+    restore_chat_rules, monkeypatch, frozen_now
+):
+    """非「X了」句式的消息不消耗掷骰状态（快筛前置于掷骰）。"""
+    import quickquip.chat.reply_probability as rp
+    from quickquip.app import message_pipeline as pipeline_module
+
+    chat_config.RATE_LIMIT_RULES["sts_card_le"] = {
+        "global_limit": 9,
+        "user_limit": 9,
+        "probability": 1.0,
+        "suppress_after_hit": 1,
+    }
+    monkeypatch.setattr(pipeline_module, "match_card_le", _NullMatcher())
+    await pipeline_module.resolve_reply(
+        "今天天气不错", user_id=1, sender_name="n", group_id=7788, now=frozen_now
+    )
+    # 与「X了」无关的消息不应为 sts_card_le 建立掷骰状态
+    assert ("sts_card_le", "7788") not in rp._ROLL_STATE
+
+
+class _NullMatcher:
+    async def __call__(self, text, *, llm_service, group_id, chat_type="group"):
+        return None
+
+
 # ── 文本规则匹配器：按群隔离的防连发 ─────────────────────────
 
 

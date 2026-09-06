@@ -1,5 +1,6 @@
 from datetime import time
 import logging
+import math
 import tomllib
 
 from quickquip.common.constants import BEIJING_TIMEZONE as BEIJING_TIMEZONE  # noqa: F401 — re-export 保持兼容
@@ -9,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_probability(raw: object, label: str) -> float | None:
-    """校验概率字段：合法值钳制到 [0, 1]，非法值告警并视为未配置。
+    """校验概率字段：合法值钳制到 [0, 1]，非法值（含 NaN）告警并视为未配置。
 
     返回 None 表示未配置（沿用上层默认），由读取方决定回退顺序。
+    NaN 与任何数比较恒为 False，若不显式拦截会绕过钳制并静默永久沉默。
     """
     if raw is None:
         return None
@@ -19,6 +21,9 @@ def normalize_probability(raw: object, label: str) -> float | None:
         logger.warning("%s 的 probability = %r 不是数字，按未配置处理", label, raw)
         return None
     value = float(raw)
+    if math.isnan(value) or math.isinf(value):
+        logger.warning("%s 的 probability = %r 不是有限数，按未配置处理", label, raw)
+        return None
     if value < 0.0 or value > 1.0:
         logger.warning("%s 的 probability = %r 超出 [0, 1]，已钳制", label, raw)
         value = min(1.0, max(0.0, value))
@@ -26,9 +31,11 @@ def normalize_probability(raw: object, label: str) -> float | None:
 
 
 def normalize_suppress_after_hit(raw: object, label: str) -> int:
-    """校验防连发字段：非负整数，非法值告警并按 0（关闭）处理。"""
+    """校验防连发字段：非负整数（整数值 float 宽容接受），非法值告警并按 0（关闭）处理。"""
     if raw is None:
         return 0
+    if isinstance(raw, float) and raw.is_integer():
+        raw = int(raw)
     if isinstance(raw, bool) or not isinstance(raw, int):
         logger.warning("%s 的 suppress_after_hit = %r 不是整数，按关闭处理", label, raw)
         return 0
@@ -39,13 +46,16 @@ def normalize_suppress_after_hit(raw: object, label: str) -> int:
 
 
 def normalize_pity_step(raw: object, label: str) -> float:
-    """校验保底步进字段：非负数，非法值告警并按 0（关闭）处理。"""
+    """校验保底步进字段：非负有限数（含 NaN 拦截），非法值告警并按 0（关闭）处理。"""
     if raw is None:
         return 0.0
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         logger.warning("%s 的 pity_step = %r 不是数字，按关闭处理", label, raw)
         return 0.0
     value = float(raw)
+    if math.isnan(value) or math.isinf(value):
+        logger.warning("%s 的 pity_step = %r 不是有限数，按关闭处理", label, raw)
+        return 0.0
     if value < 0.0:
         logger.warning("%s 的 pity_step = %r 为负，已按 0 处理", label, raw)
         return 0.0
@@ -140,6 +150,14 @@ def reload_chat_rules() -> bool:
     new_rate_limits = dict(_BUILTIN_RATE_LIMIT_RULES)
     for key, entry in raw_data.get("rate_limit_rules", {}).items():
         merged = dict(entry)
+        for limit_field in ("global_limit", "user_limit"):
+            if limit_field not in merged:
+                # 覆写是整条替换：缺配额字段的条目会让限流器构建失败（启动即崩溃）
+                logger.warning(
+                    "rate_limit_rules.%s 缺少 %s，覆写/新建桶需把配额字段写全",
+                    key,
+                    limit_field,
+                )
         probability = normalize_probability(merged.get("probability"), f"rate_limit_rules.{key}")
         if probability is not None:
             merged["probability"] = probability

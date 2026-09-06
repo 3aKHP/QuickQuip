@@ -50,10 +50,11 @@ NoneBot2 event → tz_tracker_plugin matcher
 4. `text_reply_rules` — 正则彩蛋匹配（优先级 + 加权随机）
 5. `context_rules` — 语境感知规则（regex_context / llm_context 判定）
 6. `build_timezone_reply()` — 时区猜测
-7. STS `card_le` — “xxx了”公式，位于规则链末尾（规则开关与限频预检后再 `match_card_le`，不得抢占时区等具体规则；按符号定位：`resolve_reply` 中的 `match_card_le` block）
+7. STS `card_le` — “xxx了”公式，位于规则链末尾（「X了」正则快筛、规则开关、限频预检与概率掷骰均先于 `match_card_le` 的 LLM 判定；不得抢占时区等具体规则；按符号定位：`resolve_reply` 中的 `match_card_le` block）
 8. `rule_switch.is_enabled()` — 每步均受群级规则开关控制
-9. `rate_limit.allow()` — 发送前限流检查
-10. `stats_tracker` — 消息统计与规则触发计数
+9. `reply_probability.roll_reply()` — 概率掷骰：text/context 规则在匹配器内掷一次并打 `PROBABILITY_CHECKED` 标记（card_le 在快筛后掷并打标），其余路径（复读/接龙/游戏/时区）由 `resolve_reply` 出口按限流桶兜底掷；显式 LLM、群唤醒与无聊唤醒在各自发送路径掷，私聊按用户隔离状态。未配置概率默认必回
+10. `rate_limit.allow()` — 发送前限流检查
+11. `stats_tracker` — 消息统计与规则触发计数
 
 ### 依赖方向与组合根
 

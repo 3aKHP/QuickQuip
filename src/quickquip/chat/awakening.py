@@ -15,6 +15,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
+from quickquip.chat.reply_probability import roll_reply
 from quickquip.common.json_utils import extract_json_object
 from quickquip.llm.usage import usage_scope
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
@@ -1141,6 +1142,8 @@ async def iter_boredom_send_plans(
         settings = cfg.resolve_group(gid)
         result = check_boredom(gid, settings, st)
         if result is None:
+            continue
+        if not roll_reply(_RULE_BOREDOM, group_id=gid):
             continue
         if rate_limiter is not None and not rate_limiter.allow(_RULE_BOREDOM, "boredom_timer", group_id=gid):
             continue
