@@ -344,3 +344,193 @@ def project_loops(
         segments[loop.loop_id] = loop_messages
         decisions.append(LoopProjectionDecision(loop_id=loop.loop_id, path=path, reason=reason))
     return ProjectionResult(messages=messages, decisions=tuple(decisions), segments=segments)
+
+
+# ── 确定性精简阶梯（§8.2） ─────────────────────────────────────────
+
+# 工具结果收紧阶梯（字符）。
+_RESULT_TIERS = (4096, 1024, 256, 0)
+
+
+def _estimate_messages_tokens(messages: list[LLMConversationMessage]) -> int:
+    from quickquip.llm.token_estimate import estimate_tokens
+
+    total = 0
+    for message in messages:
+        total += estimate_tokens(message.content)
+        for call in message.tool_calls:
+            total += estimate_tokens(call.arguments_json)
+    return total
+
+
+def _tighten_tool_results(
+    messages: list[LLMConversationMessage], tier_chars: int
+) -> list[LLMConversationMessage]:
+    tightened: list[LLMConversationMessage] = []
+    for message in messages:
+        if message.role == "tool" and len(message.content) > tier_chars:
+            half = tier_chars // 2
+            omitted = len(message.content) - 2 * half
+            content = (
+                message.content[:half] + f"…[省略 {omitted} 字符]…" + message.content[-half:]
+                if half
+                else "…[工具结果正文按预算未保留]…"
+            )
+            tightened.append(
+                LLMConversationMessage(
+                    role="tool", content=content,
+                    tool_call_id=message.tool_call_id, tool_name=message.tool_name,
+                    is_tool_error=message.is_tool_error,
+                )
+            )
+        else:
+            tightened.append(message)
+    return tightened
+
+
+def _project_loop_archive_bounded(
+    loop: LoadedLoop, char_budget: int | None
+) -> list[LLMConversationMessage]:
+    """档案投影的可选字符额度（§8.2.4：统一额度减半，首尾摘录冻结）。"""
+    if char_budget is None:
+        return _project_loop_archive(loop)
+
+    def _excerpt(text: str, budget: int) -> str:
+        if len(text) <= budget:
+            return text
+        half = max(1, budget // 2)
+        omitted = len(text) - 2 * half
+        return text[:half] + f"…[省略 {omitted} 字符]…" + text[-half:]
+
+    trigger = str(loop.user_row.get("content") or "") if loop.user_row else _ORPHAN_TRIGGER_NOTE
+    per_turn = max(64, char_budget // (len(loop.turns) + 1))
+    lines = [f"{_ARCHIVE_TAG} 以下为归档的历史会话记录（字符额度 {char_budget}）。"]
+    lines.append(f"用户：{_excerpt(trigger, per_turn)}")
+    for turn in loop.turns:
+        body = _excerpt(turn.text.strip(), per_turn) if turn.text.strip() else "（无普通正文）"
+        lines.append(f"Turn {turn.turn_index}：{body}")
+        if turn.tools:
+            counts: dict[str, int] = {}
+            for execution in turn.tools:
+                counts[execution.status] = counts.get(execution.status, 0) + 1
+            summary = "、".join(f"{name}×{count}" for name, count in counts.items())
+            lines.append(f"（Turn {turn.turn_index} 工具：{summary}，正文未保留）")
+    return [
+        LLMConversationMessage(role="user", content=trigger if char_budget >= len(trigger) else _excerpt(trigger, per_turn)),
+        LLMConversationMessage(role="assistant", content="\n".join(lines)),
+    ]
+
+
+def _project_loop_minimal(loop: LoadedLoop) -> list[LLMConversationMessage]:
+    """最小档案（§8.2.5）：Loop 身份、时间、触发类型、Turn 数、工具状态汇总。"""
+    counts: dict[str, int] = {}
+    for turn in loop.turns:
+        for execution in turn.tools:
+            counts[execution.status] = counts.get(execution.status, 0) + 1
+    summary = "、".join(f"{name}×{count}" for name, count in counts.items()) or "无工具"
+    text = (
+        f"{_ARCHIVE_TAG} 历史 Loop 摘要：时间 {loop.started_at[:19]}，触发 {loop.trigger_kind}，"
+        f"{len(loop.turns)} 个 Turn，工具 {summary}；正文因重放预算未保留。"
+    )
+    return [
+        LLMConversationMessage(role="user", content="[系统说明] 该段历史已按预算精简。"),
+        LLMConversationMessage(role="assistant", content=text),
+    ]
+
+
+def project_loops_with_budget(
+    loops: Sequence[LoadedLoop],
+    *,
+    target: ResponseOwner | None,
+    protocol: str,
+    budget_tokens: int,
+) -> ProjectionResult:
+    """带 §8.2 精简阶梯的投影：超预算时按固定顺序精简最旧 Loop。
+
+    阶梯：工具结果按 4096/1024/256/0 收紧 → 纯文本档案 → 档案字符额度
+    减半 → 最小档案 → 逐出最旧完整 Loop。所有精简只影响模型投影，完整
+    记录留在执行表；禁止空循环重试。
+    """
+    result = project_loops(loops, target=target, protocol=protocol)
+    if _estimate_messages_tokens(result.messages) <= budget_tokens or not loops:
+        return result
+
+    segments = {key: list(value) for key, value in result.segments.items()}
+    decisions = {d.loop_id: d for d in result.decisions}
+    order = [loop.loop_id for loop in loops]
+
+    def _total() -> int:
+        return sum(
+            _estimate_messages_tokens(segments[key])
+            for key in order
+            if key in segments
+        )
+
+    def _mark(loop_id: str, level: str) -> None:
+        decisions[loop_id] = LoopProjectionDecision(
+            loop_id=loop_id,
+            path=decisions[loop_id].path,
+            reason=f"reduced:{level}",
+        )
+
+    loops_by_id = {loop.loop_id: loop for loop in loops}
+    for loop_id in order:
+        if _total() <= budget_tokens:
+            break
+        loop = loops_by_id[loop_id]
+        # 阶梯 1：丢弃可选 native（重投影为无 target 的通用/档案形态）。
+        if decisions[loop_id].path == PATH_NATIVE:
+            demoted = project_loops([loop], target=None, protocol=protocol)
+            segments[loop_id] = demoted.segments[loop_id]
+            decisions[loop_id] = demoted.decisions[0]
+            _mark(loop_id, "native_dropped")
+            if _estimate_messages_tokens(segments[loop_id]) + _total() - _estimate_messages_tokens(segments[loop_id]) <= budget_tokens:
+                continue
+        # 阶梯 2：工具结果逐档收紧。
+        for tier in _RESULT_TIERS:
+            if _total() <= budget_tokens:
+                break
+            tightened = _tighten_tool_results(segments[loop_id], tier)
+            if tightened == segments[loop_id]:
+                continue
+            segments[loop_id] = tightened
+            _mark(loop_id, f"result_tier_{tier}")
+        if _total() <= budget_tokens:
+            break
+        # 阶梯 3：纯文本档案。
+        segments[loop_id] = _project_loop_archive(loop)
+        _mark(loop_id, "text_archive")
+        if _total() <= budget_tokens:
+            continue
+        # 阶梯 4：档案字符额度减半（按当前投影 token 的一半折算字符）。
+        half_chars = max(128, _estimate_messages_tokens(segments[loop_id]) // 2)
+        segments[loop_id] = _project_loop_archive_bounded(loop, half_chars)
+        _mark(loop_id, "archive_halved")
+        if _total() <= budget_tokens:
+            continue
+        # 阶梯 5：最小档案。
+        segments[loop_id] = _project_loop_minimal(loop)
+        _mark(loop_id, "minimal_archive")
+
+    # 阶梯 6：仍超限按完整 Loop 逐出（最旧先出），空 Loop 不重试。
+    index = 0
+    order_list = list(order)
+    while _total() > budget_tokens and index < len(order_list):
+        segments.pop(order_list[index], None)
+        decisions[order_list[index]] = LoopProjectionDecision(
+            loop_id=order_list[index], path=decisions[order_list[index]].path,
+            reason="reduced:evicted",
+        )
+        index += 1
+
+    final_messages: list[LLMConversationMessage] = []
+    final_decisions: list[LoopProjectionDecision] = []
+    for loop_id in order:
+        if loop_id in segments:
+            final_messages.extend(segments[loop_id])
+        final_decisions.append(decisions[loop_id])
+    return ProjectionResult(
+        messages=final_messages,
+        decisions=tuple(final_decisions),
+        segments={key: list(value) for key, value in segments.items()},
+    )

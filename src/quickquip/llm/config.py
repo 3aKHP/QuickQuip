@@ -85,6 +85,8 @@ class RuntimeConfig:
     # 逐 Turn 交付上线开关（§6.3）：默认关闭——安装新版本不立刻增加群内
     # 消息数；记录与投影始终工作。
     agent_delivery_enabled: bool = False
+    # 每个历史 Loop 的投影预算（§2：512..65536；可被更小的显式上下文预算收紧）。
+    agent_replay_loop_tokens: int = 4096
     reply_split_threshold_chars: int = 800
     reply_chunk_max_chars: int = 1200
     reply_send_interval_ms: int = 800
@@ -824,6 +826,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             ),
             agent_delivery_enabled=as_bool(
                 runtime_raw.get("agent_delivery_enabled"), default=False
+            ),
+            agent_replay_loop_tokens=min(
+                65_536, max(512, int(runtime_raw.get("agent_replay_loop_tokens", 4096)))
             ),
             reply_split_threshold_chars=max(
                 1, int(runtime_raw.get("reply_split_threshold_chars", 800))

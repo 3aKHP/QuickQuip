@@ -38,7 +38,7 @@ from quickquip.llm.config import (
     provider_builtin_search_active,
 )
 from quickquip.llm.rendering import append_web_search_source_block
-from quickquip.llm.history_projection import project_loops
+from quickquip.llm.history_projection import project_loops_with_budget
 from quickquip.llm.request_budget import RequestBudgetExceeded, enforce_request_budget
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
@@ -1030,7 +1030,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         target = None
         if not provider.fallback_urls:
             target = build_response_owner(provider, primary_endpoint_url(provider, model), model)
-        result = project_loops(loaded, target=target, protocol=provider.protocol)
+        result = project_loops_with_budget(
+            loaded, target=target, protocol=provider.protocol,
+            budget_tokens=self.config.runtime.agent_replay_loop_tokens,
+        )
         for decision in result.decisions:
             if decision.reason is not None:
                 logger.info(
