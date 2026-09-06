@@ -1745,6 +1745,26 @@ class AgentRecordsStoreMixin:
             deleted_loop_ids=tuple(deleted), blocked_active_anchors=tuple(blocked)
         )
 
+    def suppress_delivery(self, handle: LoopHandle, delivery_id: str) -> None:
+        """关闭交付开关时非最终正文的收敛（§6.3：suppressed_by_policy）。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE agent_deliveries SET status = ? WHERE delivery_id = ? AND loop_id = ? AND status = ?",
+                (DeliveryStatus.SUPPRESSED, delivery_id, handle.loop_id, DeliveryStatus.PLANNED),
+            )
+
+    def set_first_chunk_message_id(self, message_row_id: int, qq_message_id: str) -> None:
+        """兼容列回填（§4.1）：新 assistant 行取首个确认成功 Chunk 的 ID。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE conversation_messages SET message_id = ? WHERE id = ? AND message_id IS NULL",
+                (str(qq_message_id), int(message_row_id)),
+            )
+
     def _delete_whole_loop(self, conn: sqlite3.Connection, loop_id: str) -> None:
         """整 Loop 删除（§9.3）：显式按依赖顺序，主表行→Loop（级联侧表）。"""
         conn.execute(

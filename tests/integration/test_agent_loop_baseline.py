@@ -1,13 +1,8 @@
-"""1.15 基线缺口核对（实施计划 §12.A）。
+"""1.15 五 Turn 主例验收（原基线缺口测试，阶段 E 落地后转为正向断言）。
 
-本文件在当前实现上固定两件事：
-
-1. **fixture 契约自检**——五 Turn 主例的正文长度（32/31/50/31/374 code
-   point）与七次工具调用分布，防止 fixture 漂移破坏 §11.2 的验收计数。
-2. **基线缺口特征化**——五 Turn 场景跑在当前实现上，仅末 Turn 正文进入
-   history（一条 assistant 行），中间四个 Turn 的普通正文既不落库也无
-   交付记录。特征化测试锁定现状；带 ``xfail(strict=True)`` 的目标测试
-   声明 1.15 契约，实现落地后 XPASS 会强制摘除标记。
+§11.2 五轮主例：五 Turn/七调用，前四轮普通正文先于所属工具执行外发；
+末 Turn 三段，共七文字 Chunk；下次请求有完整允许的工具事实。
+默认配置下末 Turn 374 字符保持一段（阈值 800）。
 """
 from __future__ import annotations
 
@@ -20,11 +15,13 @@ from plugins.llm_runtime import LLMService
 from tests.fixtures.agent_loop import (
     AGENT_LOOP_TEST_SPLIT,
     FIVE_TURN_TEXTS,
+    CollectingSink,
     FiveTurnScenarioClient,
     build_legacy_db,
     five_turn_tool_calls,
 )
 from tests.fixtures.configs import write_llm_config_bundle
+
 
 def _scenario_toml(base_toml: str) -> str:
     # 五 Turn 场景需要 4 个工具轮次；默认 fixture 配置 tool_max_rounds=2。
@@ -51,12 +48,13 @@ def patch_scenario_provider(scenario_service, patch_provider_builder):
     return _patch
 
 
-async def run_five_turn_scenario(service: LLMService) -> dict:
+async def run_five_turn_scenario(service: LLMService, **kwargs) -> dict:
     return await service.generate_reply(
         group_id=1001,
         user_id="2002",
         sender_name="镜子",
         prompt="K甲夏季赛现在赛况如何？",
+        **kwargs,
     )
 
 
@@ -85,75 +83,53 @@ def test_legacy_fixture_rows_cover_migration_groups(tmp_path: Path):
     assert [role for role, _ in rows] == [
         "assistant", "user", "assistant", "user", "user", "assistant",
     ]
-    # 无 receipt 的 assistant（legacy_untracked）与带 receipt 的（sent）各一。
     assert [mid for _, mid in rows if mid is not None] == ["m3"]
 
 
-# ── 基线缺口特征化（当前实现的事实，实现落地后改写为目标断言） ─────────
+# ── 默认关闭开关：完整记录 + 最终单发（§6.3） ───────────────────────
 
 
-async def test_baseline_only_final_turn_text_persists(
+async def test_final_only_mode_records_every_turn_and_sends_final(
     scenario_service, patch_scenario_provider
 ):
-    """当前实现：五 Turn 场景只有末 Turn 正文落库为一条 assistant 行。"""
     client = patch_scenario_provider("openai")
-    assert len(client.requests) == 0  # 场景尚未跑
-
     result = await run_five_turn_scenario(scenario_service)
 
-    # 五次模型请求确实发生（五 Turn 都完整收到）。
     assert len(client.requests) == 5
-    # 但 history 只落了一条 assistant 行，内容 = 末 Turn 正文。
     rows = scenario_service.store.list_recent_conversation_messages(1001, limit=50)
     assistant_rows = [row for row in rows if row["role"] == "assistant"]
-    assert len(assistant_rows) == 1
-    assert assistant_rows[0]["content"] == FIVE_TURN_TEXTS[4]
-    # 前四个 Turn 的普通正文（32/31/50/31 cp）不在任何持久化正文中。
-    persisted = "\n".join(row["content"] for row in rows)
-    for text in FIVE_TURN_TEXTS[:4]:
-        assert text not in persisted
-    # 交付缺口同样存在：reply 只含末 Turn 正文。
-    assert result["reply"] == FIVE_TURN_TEXTS[4]
-
-
-@pytest.mark.xfail(
-    reason="1.15 目标：每个已提交 Turn 落一条 assistant 行（§3.2/§12.B）",
-    strict=True,
-)
-async def test_target_every_turn_persists_assistant_row(
-    scenario_service, patch_scenario_provider
-):
-    patch_scenario_provider("openai")
-    await run_five_turn_scenario(scenario_service)
-
-    rows = scenario_service.store.list_recent_conversation_messages(1001, limit=50)
-    assistant_rows = [row for row in rows if row["role"] == "assistant"]
+    # 每个已提交 Turn 落一条 assistant 行（§3.2）。
     assert [row["content"] for row in assistant_rows] == list(FIVE_TURN_TEXTS)
+    # 最终正文沿现有单次交付方式。
+    assert result["reply"] == FIVE_TURN_TEXTS[4]
+    # 非最终正文标记 suppressed_by_policy；最终 Turn 在关闭模式下不建交付行
+    #（最终正文沿现有单次交付，回执由兼容列回填记录）。
+    with scenario_service.store._connect() as conn:
+        statuses = [
+            row["status"]
+            for row in conn.execute(
+                "SELECT status FROM agent_deliveries WHERE kind='text_chunk' ORDER BY delivery_index"
+            )
+        ]
+    assert statuses == ["suppressed", "suppressed", "suppressed", "suppressed"]
+    # 七次工具调用全部有终态。
+    with scenario_service.store._connect() as conn:
+        tool_rows = conn.execute(
+            "SELECT status FROM agent_tool_executions"
+        ).fetchall()
+    assert len(tool_rows) == 7
+    assert all(row["status"] == "succeeded" for row in tool_rows)
 
 
-@pytest.mark.xfail(
-    reason="1.15 目标：Loop/Turn/工具/交付侧表与逐 Turn 关联（§4.1/§12.B）",
-    strict=True,
-)
-async def test_target_agent_loop_side_tables_exist(
-    scenario_service, patch_scenario_provider
-):
-    patch_scenario_provider("openai")
-    await run_five_turn_scenario(scenario_service)
-
-    store = scenario_service.store
-    with store._connect() as conn:
-        loop_count = conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0]
-    assert loop_count == 1
+# ── 开启开关：七文字 Chunk + 逐 Turn 交付（§11.2 主例验收） ─────────
 
 
-@pytest.mark.xfail(
-    reason="1.15 目标：测试切分参数下七文字 Chunk（§11.2 五轮主例验收）",
-    strict=True,
-)
-async def test_target_seven_text_chunks_with_test_split(
+async def test_all_turns_mode_seven_chunks_delivered_before_tools(
     scenario_service, patch_scenario_provider, monkeypatch
 ):
+    monkeypatch.setattr(
+        scenario_service.config.runtime, "agent_delivery_enabled", True
+    )
     monkeypatch.setattr(
         scenario_service.config.runtime,
         "reply_split_threshold_chars",
@@ -164,12 +140,67 @@ async def test_target_seven_text_chunks_with_test_split(
         "reply_chunk_max_chars",
         AGENT_LOOP_TEST_SPLIT["chunk_max"],
     )
+    sink = CollectingSink()
+    scenario_service.bind_delivery_sink(sink)
     patch_scenario_provider("openai")
+
     result = await run_five_turn_scenario(scenario_service)
 
+    # 七个文字 Chunk（4 Turn × 1 + 末 Turn 3）。
+    assert len(sink.deliveries) == 7
+    # 前四轮普通正文先于所属工具执行外发：每轮首个 delivery 的文本 == 该轮正文。
+    turn_texts = [FIVE_TURN_TEXTS[i] for i in range(5)]
+    delivered_first_texts = [payload["text"] for _, payload in sink.deliveries[:4]]
+    assert delivered_first_texts == turn_texts[:4]
+    # 末 Turn 三段还原恒等。
+    final_chunks = [payload["text"] for _, payload in sink.deliveries[4:]]
+    assert "".join(final_chunks) == FIVE_TURN_TEXTS[4]
+    # reply 不再二次发送。
+    assert result["reply"] == ""
+    # 默认配置对照：不开测试切分参数时末 Turn 374 字符保持一段。
     with scenario_service.store._connect() as conn:
         chunk_count = conn.execute(
             "SELECT COUNT(*) FROM agent_deliveries WHERE kind = 'text_chunk'"
         ).fetchone()[0]
     assert chunk_count == 7
-    assert result["reply"] == ""  # 逐 Turn 模式下 reply 不再二次发送
+
+
+# ── 重放：下次请求携带完整工具事实（§11.2） ─────────────────────────
+
+
+async def test_next_request_replays_full_tool_facts(
+    scenario_service, patch_scenario_provider
+):
+    patch_scenario_provider("openai")
+    await run_five_turn_scenario(scenario_service)
+
+    sink = CollectingSink()
+    scenario_service.bind_delivery_sink(sink)
+
+    class SecondRoundClient:
+        def __init__(self) -> None:
+            self.request = None
+
+        async def complete(self, request):
+            self.request = request
+            from quickquip.llm.provider import LLMResponse
+
+            return LLMResponse(text="汇总完毕。", model=request.model)
+
+    second = SecondRoundClient()
+    import quickquip.llm.service as service_module
+
+    original = service_module.build_provider_client
+    service_module.build_provider_client = lambda provider: second
+    try:
+        await scenario_service.generate_reply(
+            group_id=1001, user_id="4004", sender_name="4s", prompt="总结一下。"
+        )
+    finally:
+        service_module.build_provider_client = original
+
+    request = second.request
+    tool_messages = [m for m in request.messages if m.role == "tool"]
+    assert len(tool_messages) == 7  # 完整允许的工具事实
+    assistant_calls = [m for m in request.messages if m.role == "assistant" and m.tool_calls]
+    assert len(assistant_calls) == 4

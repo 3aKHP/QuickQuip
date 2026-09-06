@@ -82,6 +82,13 @@ class RuntimeConfig:
     agent_record_retention_days: int = 30
     agent_record_max_loops_per_scope: int = 1000
     agent_record_max_bytes_per_scope: int = 67_108_864
+    # 逐 Turn 交付上线开关（§6.3）：默认关闭——安装新版本不立刻增加群内
+    # 消息数；记录与投影始终工作。
+    agent_delivery_enabled: bool = False
+    reply_split_threshold_chars: int = 800
+    reply_chunk_max_chars: int = 1200
+    reply_send_interval_ms: int = 800
+    reply_max_chunks_per_loop: int = 64
 
 
 @dataclass(slots=True)
@@ -814,6 +821,21 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             ),
             agent_record_max_bytes_per_scope=max(
                 1024, int(runtime_raw.get("agent_record_max_bytes_per_scope", 67_108_864))
+            ),
+            agent_delivery_enabled=as_bool(
+                runtime_raw.get("agent_delivery_enabled"), default=False
+            ),
+            reply_split_threshold_chars=max(
+                1, int(runtime_raw.get("reply_split_threshold_chars", 800))
+            ),
+            reply_chunk_max_chars=max(
+                1, int(runtime_raw.get("reply_chunk_max_chars", 1200))
+            ),
+            reply_send_interval_ms=min(
+                10_000, max(0, int(runtime_raw.get("reply_send_interval_ms", 800)))
+            ),
+            reply_max_chunks_per_loop=min(
+                256, max(1, int(runtime_raw.get("reply_max_chunks_per_loop", 64)))
             ),
             recent_context_token_budget=recent_context_token_budget,
             recent_context_floor_seconds=recent_context_floor_seconds,

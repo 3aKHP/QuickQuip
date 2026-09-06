@@ -14,6 +14,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 from quickquip.llm.provider import LLMRequest, LLMResponse
 from quickquip.llm.tools import LLMToolCall
 
@@ -227,3 +228,22 @@ def build_legacy_db(path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+# ── 交付 sink（测试收集实现，§5.1） ─────────────────────────────────
+
+
+class CollectingSink:
+    """收集型交付 sink：记录 (delivery_id, payload) 并回执 sent。"""
+
+    def __init__(self) -> None:
+        self.deliveries: list[tuple[str, dict]] = []
+        self.receipts: list[DeliveryReceipt] = []
+
+    async def __call__(self, delivery_id: str, payload: dict) -> DeliveryReceipt:
+        self.deliveries.append((delivery_id, payload))
+        receipt = DeliveryReceipt(
+            status=DeliveryStatus.SENT, message_id=f"collect-{len(self.deliveries)}"
+        )
+        self.receipts.append(receipt)
+        return receipt

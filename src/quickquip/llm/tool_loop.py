@@ -29,7 +29,10 @@ async def run_tool_call_loop(
     tool_discovery_search_limit: int = 5,
     tool_discovery_max_loaded_tools: int = 12,
     image_preprocessor=None,
+    turn_recorder=None,
 ):
+    from quickquip.llm.agent_records import ToolSkipReason
+
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))
     max_calls = max(1, min(runtime_config.tool_max_calls_per_round, 32))
@@ -80,6 +83,9 @@ async def run_tool_call_loop(
             round_index,
         )
         if not response.tool_calls or not current_request.allow_tool_calls:
+            if turn_recorder is not None:
+                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                await turn_recorder.deliver_turn()
             return response
 
         meta_tool_names = {search_tool_name, tool_search_name, tool_list_name}
@@ -90,6 +96,9 @@ async def run_tool_call_loop(
 
         if has_counted_calls and counted_rounds >= max_rounds:
             response.text = response.text or "工具调用轮次已达上限，未能完成最终回答。"
+            if turn_recorder is not None:
+                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                await turn_recorder.deliver_turn()
             return response
 
         limited_calls = [
@@ -109,6 +118,9 @@ async def run_tool_call_loop(
                 notice = "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
                 response.text = "\n".join(part for part in (response.text, notice) if part)
                 response.tool_calls = []
+                if turn_recorder is not None:
+                    turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                    await turn_recorder.deliver_turn()
                 return response
             # Gemini binds functionResponse batches to the preceding ordered
             # functionCall parts. Keep the provider's order when the full batch
@@ -119,6 +131,9 @@ async def run_tool_call_loop(
 
         if not selected_calls:
             response.text = response.text or "工具调用请求为空，未能完成最终回答。"
+            if turn_recorder is not None:
+                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                await turn_recorder.deliver_turn()
             return response
 
         if has_counted_calls:
@@ -126,7 +141,30 @@ async def run_tool_call_loop(
 
         if round_index >= search_failsafe_max_rounds:
             response.text = response.text or "联网检索轮次过多，已触发安全上限，未能完成最终回答。"
+            if turn_recorder is not None:
+                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                await turn_recorder.deliver_turn()
             return response
+
+        # ── Turn 原子提交 + 文字交付（§5.3.5-6）：先于工具执行 ──────
+        execution_ids: dict[str, str] = {}
+        if turn_recorder is not None:
+            execution_ids = turn_recorder.on_turn(
+                response,
+                declared_calls=list(response.tool_calls),
+                executable_calls=selected_calls,
+                has_more_rounds=True,
+            )
+            await turn_recorder.deliver_turn()
+            # 超出每轮执行预算的声明逐项 not_executed(limit)（§5.3）。
+            from quickquip.llm.agent_records import ToolSkipReason
+
+            executable_ids = {call.id for call in selected_calls}
+            for call in response.tool_calls:
+                if call.id not in executable_ids:
+                    execution_id = execution_ids.get(call.id)
+                    if execution_id is not None:
+                        turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.ROUND_LIMIT)
 
         assistant_message = LLMConversationMessage(
             role="assistant",
@@ -144,25 +182,26 @@ async def run_tool_call_loop(
         tool_results: list[LLMToolResult] = []
         result_pipeline.begin_round()
         for call in selected_calls:
+            execution_id = execution_ids.get(call.id)
+            if turn_recorder is not None and execution_id is not None:
+                turn_recorder.on_tool_started(execution_id)
             if tool_discovery_enabled and not discovery.is_loaded(call.name):
-                tool_results.append(
-                    LLMToolResult(
-                        call_id=call.id,
-                        name=call.name,
-                        content=f"工具 {call.name} 尚未加载，请先调用 {tool_search_name} 搜索并加载相关工具。",
-                        is_error=True,
-                    )
+                result = LLMToolResult(
+                    call_id=call.id,
+                    name=call.name,
+                    content=f"工具 {call.name} 尚未加载，请先调用 {tool_search_name} 搜索并加载相关工具。",
+                    is_error=True,
                 )
-                continue
-
-            blocked_result = result_pipeline.check_call_arguments(call)
-            if blocked_result is not None:
-                tool_results.append(blocked_result)
-                continue
-
-            result = await tool_registry.execute(call, context)
-            result = await result_pipeline.process_result(call, result)
+            else:
+                blocked_result = result_pipeline.check_call_arguments(call)
+                if blocked_result is not None:
+                    result = blocked_result
+                else:
+                    result = await tool_registry.execute(call, context)
+                    result = await result_pipeline.process_result(call, result)
             tool_results.append(result)
+            if turn_recorder is not None and execution_id is not None:
+                turn_recorder.on_tool_finished(execution_id, result)
             if tool_discovery_enabled and call.name == tool_search_name and not result.is_error:
                 newly_loaded = discovery.load_from_search_call(call)
                 if newly_loaded:
