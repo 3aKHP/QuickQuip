@@ -27,7 +27,10 @@ def _strings(value: Any) -> Iterator[str]:
 
 def _native_text(turn: LoadedTurn) -> Iterator[str]:
     """Inspect readable protocol fields; opaque signatures and media stay opaque."""
-    for block in (turn.native_state or {}).get("blocks", []):
+    blocks = (turn.native_state or {}).get("blocks")
+    if not isinstance(blocks, list):
+        return
+    for block in blocks:
         if not isinstance(block, dict):
             continue
         for key in ("text", "thinking", "reasoning_content"):

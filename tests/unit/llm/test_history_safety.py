@@ -129,6 +129,17 @@ def test_numeric_tool_arguments_are_scanned(tmp_path):
     assert archived == {loop.loop_id}
 
 
+@pytest.mark.parametrize("blocks", [None, 7, "invalid", {"text": "invalid"}])
+def test_invalid_native_blocks_preserve_existing_projection_fallback(tmp_path, blocks):
+    loop, owner = _loop()
+    loop = replace(loop, turns=(replace(loop.turns[0], native_state={"blocks": blocks}),))
+    safe, archived = prepare_safe_history([loop], make_sensitive_filter(tmp_path, "block"))
+    assert not archived
+    before = project_loops_with_budget([loop], target=owner, protocol="claude", budget_tokens=10000)
+    after = project_loops_with_budget(safe, target=owner, protocol="claude", budget_tokens=10000)
+    assert before == after
+
+
 @pytest.mark.parametrize("protocol", ["openai", "claude", "gemini"])
 async def test_safe_history_serializes_without_native_or_blocked_payload(tmp_path, protocol):
     loop, owner = _loop(protocol)
