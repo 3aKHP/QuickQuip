@@ -64,6 +64,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm trigger prefix_mode on / off` | 开关前缀触发 |
 | `/llm memory on / off` | 开关记忆注入 |
 | `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、重置为全局默认、查看 |
+| `/llm delivery on / off / reset / status` | 分段发送（长回复按自然段拆成多条消息）的开关、重置为全局默认、查看；默认关闭 |
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理） |
 | `/llm clear_context` | 清空短期上下文，“串台”或记错上下文时用 |
 | `/llm delete_msg` | 引用一条消息发送本命令，或 `/llm delete_msg <消息ID>`，从上下文删除该条 |

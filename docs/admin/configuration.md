@@ -139,7 +139,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
 | `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按「请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留」推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在 `[[providers]]` 段按 provider 硬覆盖 | `4096` |
-| `agent_delivery_enabled` | 逐 Turn 交付开关：开启后每次模型响应的普通正文先于工具执行分段外发；关闭时仅最终正文单发，记录不受影响 | `false` |
+| `agent_delivery_enabled` | 逐 Turn 交付的全局默认：开启后每次模型响应的普通正文先于工具执行分段外发；关闭时仅最终正文单发，记录不受影响。各群/私聊会话可用 `/llm delivery on/off/reset/status` 或 Web Admin「群设置」按会话覆盖 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
 | `reply_chunk_max_chars` | 单段源文本上限，独立于 OneBot 协议报文长度 | `1200` |
 | `reply_send_interval_ms` | 同会话相邻发送开始时间的最小间隔（0-10000） | `800` |

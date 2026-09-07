@@ -93,7 +93,7 @@
 
           <section class="form-section">
             <h4>运行状态</h4>
-            <div class="form-grid form-grid--three">
+            <div class="form-grid">
               <div class="field">
                 <label>LLM 启用</label>
                 <select v-model="draftTriState.enabled">
@@ -114,6 +114,14 @@
                 <label>自动记忆抽取<UiInfoTip text="开启后自动从该会话的对话中提炼记忆条目，结果可在「记忆」页查看与编辑。" /></label>
                 <select v-model="draftTriState.auto_memory_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('auto_memory_enabled') }}）</option>
+                  <option :value="true">开</option>
+                  <option :value="false">关</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>分段发送<UiInfoTip text="开启后该会话的 LLM 回复按自然段拆成多条消息发出；关闭时长回复合并为一条。全局默认在 llm.toml 的 agent_delivery_enabled 配置。" /></label>
+                <select v-model="draftTriState.agent_delivery_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_enabled') }}）</option>
                   <option :value="true">开</option>
                   <option :value="false">关</option>
                 </select>
@@ -575,10 +583,6 @@ reloadAll()
   gap: var(--qq-gap-md);
 }
 
-.form-grid--three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .field {
   display: flex;
   min-width: 0;
@@ -623,8 +627,7 @@ reloadAll()
   }
 
   .default-strip,
-  .form-grid,
-  .form-grid--three {
+  .form-grid {
     grid-template-columns: 1fr;
   }
 }

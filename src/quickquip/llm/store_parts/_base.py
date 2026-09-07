@@ -58,6 +58,7 @@ class GroupSettingsOverride:
     enabled: bool | None = None
     memory_enabled: bool | None = None
     auto_memory_enabled: bool | None = None
+    agent_delivery_enabled: bool | None = None
     provider_id: str | None = None
     model: str | None = None
     persona_id: str | None = None
@@ -114,6 +115,8 @@ class _StoreBase:
                     group_id TEXT PRIMARY KEY,
                     enabled INTEGER,
                     memory_enabled INTEGER,
+                    auto_memory_enabled INTEGER,
+                    agent_delivery_enabled INTEGER,
                     provider_id TEXT,
                     model TEXT,
                     persona_id TEXT,
@@ -178,6 +181,8 @@ class _StoreBase:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN history_limit INTEGER")
             if "auto_memory_enabled" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN auto_memory_enabled INTEGER")
+            if "agent_delivery_enabled" not in existing_columns:
+                conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_enabled INTEGER")
             conversation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(conversation_messages)").fetchall()
