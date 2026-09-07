@@ -16,7 +16,7 @@ function Write-OK($msg) { Write-Host $msg -ForegroundColor Green }
 function Write-Err($msg) { Write-Host $msg -ForegroundColor Red }
 
 function Invoke-Server($cmd) {
-    $full = "bash $RemoteDir/prod/check_bot.sh $cmd"
+    $full = "REMOTE_DIR='$RemoteDir' bash '$RemoteDir/prod/check_bot.sh' $cmd"
     $result = ssh -o StrictHostKeyChecking=no $Server $full 2>&1 | ForEach-Object { "$_" }
     $result = ($result -join "`n").Trim()
     if ($LASTEXITCODE -ne 0) {

@@ -1,323 +1,106 @@
-# QuickQuip production deploy script (IPv4 / PowerShell)
-# Usage: run from project root:
-#   .\prod\deploy-v4.ps1
-# Local archive check:
-#   .\prod\deploy-v4.ps1 -LocalCheck
-
+# Local release driver. Shares the remote transaction with deploy-v4.sh.
 param(
-    [switch]$LocalCheck,
+    [Alias("LocalCheck")][switch]$DryRun,
+    [switch]$Status,
+    [switch]$Rollback,
+    [string]$ReleaseId = "",
+    [switch]$Migrate,
+    [switch]$SkipHealth,
     [string]$HostAlias = "quickquip-prod",
-    [string]$RemoteDir = "/opt/QuickQuip"
+    [string]$RemoteDir = "/opt/QuickQuip",
+    [int]$KeepReleases = 4
 )
-
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-
-$TempArchive = "$env:TEMP\quickquip-deploy.tar.gz"
-$TiebaStateArchive = "$env:TEMP\quickquip-tieba-state.tar.gz"
-$ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$LocalPrivateWorkspace = "d" + "ev"
-$TiebaStateFile = "data/tieba/storage_state.json"
-$SendkeyEnvFile = "prod/sendkey.env"
-$FontFile = "data/fonts/NotoSansSC-Regular.ttf"
-$SshArgs = @(
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=15",
-    "-o", "ServerAliveInterval=15",
-    "-o", "ServerAliveCountMax=3"
-)
-$ScpArgs = @(
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "BatchMode=yes",
-    "-o", "ConnectTimeout=15",
-    "-o", "ServerAliveInterval=15",
-    "-o", "ServerAliveCountMax=3"
-)
-
-function Initialize-NodeToolchainPath {
-    $preferred = @()
-    $voltaProgram = "C:\Program Files\Volta"
-    $voltaUserBin = Join-Path $env:LOCALAPPDATA "Volta\bin"
-    foreach ($path in @($voltaProgram, $voltaUserBin)) {
-        if ($path -and (Test-Path $path)) {
-            $preferred += $path
-        }
-    }
-
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $items = @()
-    foreach ($path in ($preferred + ($env:Path -split ';'))) {
-        if (-not $path) {
-            continue
-        }
-        $trimmed = $path.Trim()
-        if (-not $trimmed) {
-            continue
-        }
-        $normalized = $trimmed.TrimEnd('\')
-        if ($seen.Add($normalized)) {
-            $items += $trimmed
-        }
-    }
-    $env:Path = ($items -join ';')
+function Invoke-Native([string]$Description, [scriptblock]$Command) {
+    & $Command
+    if ($LASTEXITCODE -ne 0) { throw "$Description (exit $LASTEXITCODE)" }
 }
-
-function Get-PnpmCommand {
-    foreach ($candidate in @(
-        "C:\Program Files\Volta\pnpm.cmd",
-        "C:\Program Files\Volta\pnpm.exe",
-        (Join-Path $env:LOCALAPPDATA "Volta\bin\pnpm.cmd"),
-        (Join-Path $env:LOCALAPPDATA "Volta\bin\pnpm.exe")
-    )) {
-        if ($candidate -and (Test-Path $candidate)) {
-            return $candidate
-        }
-    }
-
-    $command = Get-Command "pnpm.exe" -ErrorAction SilentlyContinue
-    if ($command) {
-        return $command.Source
-    }
-
-    $command = Get-Command "pnpm.cmd" -ErrorAction SilentlyContinue
-    if ($command) {
-        return $command.Source
-    }
-
-    throw "No usable pnpm found. Install pnpm (e.g. volta install pnpm) or fix Volta."
-}
-
-function Invoke-Native {
-    param([string]$Desc, [scriptblock]$Cmd)
-    & $Cmd
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "FAILED: $Desc (exit $LASTEXITCODE)" -ForegroundColor Red
-        exit $LASTEXITCODE
-    }
-}
-
+$Mode = "deploy"
+if ($Status) { $Mode = "status" }
+if ($Rollback) { $Mode = "rollback" }
+if ($Migrate) { $Mode = "migrate" }
+if (([int]$Status.IsPresent + [int]$Rollback.IsPresent + [int]$Migrate.IsPresent) -gt 1) { throw "Choose only one action" }
+if ($DryRun -and ($Mode -ne "deploy" -or $SkipHealth)) { throw "DryRun supports deployment preview only" }
+if ($SkipHealth -and $Mode -notin @("deploy", "migrate")) { throw "SkipHealth supports deploy/migrate only" }
+if ($ReleaseId -and -not $Rollback) { throw "ReleaseId requires Rollback" }
+if ($ReleaseId -and $ReleaseId -cnotmatch '^[0-9]{8}-[0-9]{6}(-[a-f0-9]{12})?(-baseline)?$') { throw "Invalid release id" }
+if ($RemoteDir -cnotmatch '^/[a-zA-Z0-9_./-]+$' -or $RemoteDir -eq '/' -or $RemoteDir.Contains('/../')) { throw "Invalid absolute deployment root" }
+if ($HostAlias -cnotmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$') { throw "Invalid SSH alias" }
+if ($KeepReleases -lt 2 -or $KeepReleases -gt 100) { throw "KeepReleases must be 2..100" }
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ProjectRoot = Split-Path -Parent $ScriptDir
+$SshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3')
+$Id = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
+$Incoming = "$RemoteDir/.deploy/incoming/$Id"
+$Temp = Join-Path ([System.IO.Path]::GetTempPath()) "quickquip-$Id"
 Push-Location $ProjectRoot
-
-Initialize-NodeToolchainPath
-$PnpmCommand = Get-PnpmCommand
-
-foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
-    if (-not (Test-Path $requiredPath)) {
-        Write-Host "Missing required file: $requiredPath" -ForegroundColor Red
-        Pop-Location
-        exit 1
+try {
+    if (Test-Path -PathType Container 'prod/prod.example') { throw 'Nested prod/prod.example; initialize prod again' }
+    foreach ($file in @('remote-deploy-v4.sh', 'deploy-state.py')) {
+        if (-not (Test-Path (Join-Path $ScriptDir $file))) { throw "Missing $file" }
     }
-}
-
-# Nested prod/prod.example means the template was copied into an existing prod/
-# (Copy-Item -Recurse does not overwrite); abort so the script never runs with
-# production settings or uploads prod/sendkey.env. See prod.example/README.md.
-if (Test-Path -PathType Container "prod/prod.example") {
-    Write-Host "prod/prod.example exists: the template was nested into an existing prod/ by 'Copy-Item -Recurse prod.example prod'." -ForegroundColor Red
-    Write-Host "This script would run with your production settings and upload prod/sendkey.env. Move the old prod/ aside and re-copy the template." -ForegroundColor Red
+    if ($Mode -in @('deploy', 'migrate')) {
+        if (-not (Test-Path '.env')) { throw 'Root .env missing' }
+        $pnpm = Get-Command pnpm.cmd, pnpm.exe, pnpm -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $pnpm) { throw 'Install pnpm and put it on PATH' }
+        Push-Location frontend
+        try {
+            Invoke-Native 'frontend dependencies' { & $pnpm.Source install --frozen-lockfile }
+            Invoke-Native 'frontend build' { & $pnpm.Source build }
+        } finally { Pop-Location }
+        $entries = @(Get-Content (Join-Path $ScriptDir 'deploy-manifest.txt'))
+        foreach ($item in $entries) {
+            if ($item -cnotmatch '^[a-zA-Z0-9_./-]+$' -or $item.StartsWith('/') -or $item.Contains('..')) { throw 'Invalid manifest entry' }
+            if (-not (Test-Path $item)) { throw "Missing manifest entry: $item" }
+        }
+        New-Item -ItemType Directory $Temp | Out-Null
+        $List = Join-Path $Temp 'manifest.txt'
+        $Archive = Join-Path $Temp 'release.tar.gz'
+        [System.IO.File]::WriteAllText($List, (($entries -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
+        Invoke-Native 'release archive' { tar --exclude=__pycache__ --exclude='*.pyc' -czf $Archive -T $List }
+        if ($DryRun) {
+            Invoke-Native 'archive preview' { tar -tzf $Archive }
+            Write-Host 'Preview complete; frontend built locally, temporary archive removed, no remote connection or upload.'
+            return
+        }
+    }
+    Invoke-Native 'remote prerequisites and exclusive staging' {
+        ssh @SshArgs $HostAlias "command -v rsync >/dev/null && command -v flock >/dev/null && docker compose version >/dev/null && umask 077 && mkdir -p '$RemoteDir/.deploy/incoming' && chmod 700 '$RemoteDir/.deploy' '$RemoteDir/.deploy/incoming' && mkdir '$Incoming'"
+    }
+    Invoke-Native 'runner upload' {
+        scp @SshArgs (Join-Path $ScriptDir 'remote-deploy-v4.sh') (Join-Path $ScriptDir 'deploy-state.py') "${HostAlias}:$Incoming/"
+    }
+    if ($Mode -in @('deploy', 'migrate')) {
+        Invoke-Native 'archive upload' { scp @SshArgs $Archive "${HostAlias}:$Incoming/release.tar.gz" }
+        $shared = @('.env', 'prod/check_bot.sh', 'prod/cron_check_bot.sh')
+        foreach ($item in @('prod/sendkey.env', 'data/fonts/NotoSansSC-Regular.ttf', 'data/tieba/storage_state.json')) {
+            if (Test-Path $item) { $shared += $item }
+        }
+        foreach ($item in $shared) {
+            $parent = if ($item.Contains('/')) { $item.Substring(0, $item.LastIndexOf('/')) } else { '' }
+            Invoke-Native 'private shared staging' { ssh @SshArgs $HostAlias "umask 077; mkdir -p '$Incoming/shared/$parent'" }
+            Invoke-Native 'shared upload' { scp @SshArgs $item "${HostAlias}:$Incoming/shared/$item" }
+        }
+    }
+    $skip = if ($SkipHealth) { '1' } else { '0' }
+    Invoke-Native 'launch (if uncertain, inspect operation log before retrying)' {
+        ssh @SshArgs $HostAlias "DETACH=1 SKIP_HEALTH=$skip bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
+    }
+    $Log = "$RemoteDir/.deploy/$Id.log"
+    $ExitFile = "$RemoteDir/.deploy/$Id.exit"
+    $attempts = 0
+    while ($true) {
+        ssh @SshArgs $HostAlias "while [ ! -f '$ExitFile' ]; do sleep 1; done & watcher=`$!; tail -n +1 -f --pid=`$watcher '$Log'; wait `$watcher"
+        if ($LASTEXITCODE -eq 0) { break }
+        $attempts++
+        if ($attempts -gt 20) { throw "Connection lost; remote action may continue: $Log" }
+        Start-Sleep -Seconds 5
+    }
+    $code = ssh @SshArgs $HostAlias "cat '$ExitFile'"
+    if ($LASTEXITCODE -ne 0 -or "$code".Trim() -ne '0') { throw "Remote action failed (exit $code): $Log" }
+    Write-Host "$Mode complete. Status: prod/deploy-v4.ps1 -Status -HostAlias $HostAlias -RemoteDir $RemoteDir"
+} finally {
+    if (Test-Path $Temp) { Remove-Item -Recurse -Force $Temp }
     Pop-Location
-    exit 1
 }
-
-Write-Host "Building frontend..." -ForegroundColor Cyan
-Push-Location "frontend"
-Invoke-Native "pnpm install --frozen-lockfile" { & $PnpmCommand install --frozen-lockfile }
-Invoke-Native "pnpm build" { & $PnpmCommand build }
-Pop-Location
-
-Write-Host "Packing project..." -ForegroundColor Cyan
-Invoke-Native "tar archive" {
-    tar czf $TempArchive `
-        --exclude='.git' `
-        --exclude='.github' `
-        --exclude='__pycache__' `
-        --exclude='.venv' `
-        --exclude='.vscode' `
-        --exclude='.claude' `
-        --exclude='.gemini' `
-        --exclude='AGENTS.md' `
-        --exclude='AGENTS.override.md' `
-        --exclude='CLAUDE.md' `
-        --exclude='./data' `
-        --exclude="$LocalPrivateWorkspace" `
-        --exclude='prod/sendkey.env' `
-        --exclude='prod/sendkey.env.example' `
-        --exclude='prod/README.md' `
-        --exclude='prod/llbot-qq' `
-        --exclude='prod/llbot-data' `
-        --exclude='prod/napcat-data' `
-        --exclude='prod/home_router_ed25519' `
-        --exclude='prod/home_router_ed25519.pub' `
-        --exclude='frontend/node_modules' `
-        --exclude='./tests' `
-        --exclude='test_*.py' `
-        --exclude='./scripts' `
-        --exclude='requirements-dev.txt' `
-        --exclude='.pytest-tmp-*' `
-        --exclude='*.tar' `
-        --exclude='*.tar.gz' `
-        .
-}
-if (Test-Path $TiebaStateFile) {
-    Write-Host "Packing Tieba storage state..." -ForegroundColor Cyan
-    Invoke-Native "Tieba state archive" {
-        tar czf $TiebaStateArchive $TiebaStateFile
-    }
-}
-Pop-Location
-
-if (-not (Test-Path $TempArchive)) {
-    Write-Host "Archive was not created; aborting." -ForegroundColor Red
-    exit 1
-}
-
-if ($LocalCheck) {
-    $archiveInfo = Get-Item $TempArchive
-    $archiveSizeMB = [Math]::Round($archiveInfo.Length / 1MB, 2)
-    Write-Host "Local check complete. Archive size: ${archiveSizeMB} MB" -ForegroundColor Green
-    Remove-Item -Force $TempArchive -ErrorAction SilentlyContinue
-    Remove-Item -Force $TiebaStateArchive -ErrorAction SilentlyContinue
-    exit 0
-}
-
-Write-Host "Uploading to server..." -ForegroundColor Cyan
-Invoke-Native "scp archive" {
-    scp @ScpArgs $TempArchive "${HostAlias}:/tmp/quickquip-deploy.tar.gz"
-}
-if (Test-Path $TiebaStateArchive) {
-    Invoke-Native "scp Tieba state" {
-        scp @ScpArgs $TiebaStateArchive "${HostAlias}:/tmp/quickquip-tieba-state.tar.gz"
-    }
-}
-if (Test-Path $SendkeyEnvFile) {
-    Write-Host "Uploading ops notification env..." -ForegroundColor DarkCyan
-    Invoke-Native "scp sendkey env" {
-        scp @ScpArgs $SendkeyEnvFile "${HostAlias}:/tmp/quickquip-sendkey.env"
-    }
-}
-if (Test-Path $FontFile) {
-    Write-Host "Uploading wordcloud font..." -ForegroundColor DarkCyan
-    $fontInfo = Get-Item $FontFile
-    $fontSizeMB = [Math]::Round($fontInfo.Length / 1MB, 2)
-    Invoke-Native "ssh create font dir" {
-        ssh @SshArgs $HostAlias "mkdir -p $RemoteDir/data/fonts"
-    }
-    Write-Host "Uploading font (${fontSizeMB} MB)..." -ForegroundColor DarkCyan
-    Invoke-Native "scp font" {
-        scp @ScpArgs $FontFile "${HostAlias}:${RemoteDir}/data/fonts/NotoSansSC-Regular.ttf"
-    }
-}
-
-Write-Host "Extracting and rebuilding containers..." -ForegroundColor Cyan
-$RemoteDeployScript = @'
-set -eu
-REMOTE_DIR="__REMOTE_DIR__"
-NULL_DEVICE="/d""ev/null"
-mkdir -p "$REMOTE_DIR"
-cd "$REMOTE_DIR"
-
-tar xzf /tmp/quickquip-deploy.tar.gz
-rm -f "$REMOTE_DIR/AGENTS.md" "$REMOTE_DIR/AGENTS.override.md" "$REMOTE_DIR/CLAUDE.md" "$REMOTE_DIR"/test_*.py
-rm -f "$REMOTE_DIR/requirements-dev.txt" "$REMOTE_DIR/docs/GROUP_COMMANDS.md"
-rm -rf "$REMOTE_DIR/.gemini" "$REMOTE_DIR/tests" "$REMOTE_DIR/scripts" "$REMOTE_DIR/frontend-v1" "$REMOTE_DIR/frontend-v2"
-
-if [ -f /tmp/quickquip-sendkey.env ]; then
-    mkdir -p "$REMOTE_DIR/prod"
-    install -m 600 /tmp/quickquip-sendkey.env "$REMOTE_DIR/prod/sendkey.env"
-fi
-
-if [ -f /tmp/quickquip-tieba-state.tar.gz ]; then
-    mkdir -p "$REMOTE_DIR/data/tieba"
-    tar xzf /tmp/quickquip-tieba-state.tar.gz -C "$REMOTE_DIR"
-fi
-
-sed -i 's/\r$//' "$REMOTE_DIR/.env" 2>"$NULL_DEVICE" || true
-chmod 600 "$REMOTE_DIR/.env" 2>"$NULL_DEVICE" || true
-
-if [ -f "$REMOTE_DIR/prod/sendkey.env" ]; then
-    sed -i 's/\r$//' "$REMOTE_DIR/prod/sendkey.env" 2>"$NULL_DEVICE" || true
-    chmod 600 "$REMOTE_DIR/prod/sendkey.env" 2>"$NULL_DEVICE" || true
-fi
-
-if [ -d "$REMOTE_DIR/prod/llbot-data" ]; then
-    LLBOT_PYTHON=python3
-    for candidate in "$REMOTE_DIR/prod/llbot-data/default_config.json" "$REMOTE_DIR"/prod/llbot-data/data/config_*.json; do
-        if [ -e "$candidate" ] && [ ! -w "$candidate" ]; then
-            LLBOT_PYTHON="sudo -n python3"
-            break
-        fi
-    done
-    $LLBOT_PYTHON - "$REMOTE_DIR" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-remote_dir = Path(sys.argv[1])
-
-def read_env_value(path: Path, key: str) -> str:
-    try:
-        lines = path.read_text(encoding="utf-8-sig").splitlines()
-    except OSError:
-        return ""
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        name, value = line.split("=", 1)
-        if name == key:
-            value = value.strip()
-            if (value.startswith('"') and value.endswith('"')) or (
-                value.startswith("'") and value.endswith("'")
-            ):
-                value = value[1:-1]
-            return value
-    return ""
-
-token = read_env_value(remote_dir / ".env", "ONEBOT_ACCESS_TOKEN")
-if not token:
-    raise SystemExit(0)
-
-paths = [remote_dir / "prod/llbot-data/default_config.json"]
-paths.extend(sorted((remote_dir / "prod/llbot-data/data").glob("config_*.json")))
-for path in paths:
-    if not path.exists():
-        continue
-    data = json.loads(path.read_text(encoding="utf-8"))
-    connect = data.setdefault("ob11", {}).setdefault("connect", [])
-    while len(connect) <= 1:
-        connect.append({})
-    connect[1]["url"] = "ws://quickquip:8080/onebot/v11/ws/"
-    connect[1]["token"] = token
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
-    print(f"Synced LLBot OneBot reverse WebSocket config: {path}")
-PY
-fi
-
-chmod 750 "$REMOTE_DIR" "$REMOTE_DIR/prod" 2>"$NULL_DEVICE" || true
-if [ -f "$REMOTE_DIR/data/tieba/pool.json" ]; then
-    sudo chown "$(id -u):$(id -g)" "$REMOTE_DIR/data/tieba/pool.json" 2>"$NULL_DEVICE" || true
-fi
-
-rm -f /tmp/quickquip-deploy.tar.gz /tmp/quickquip-tieba-state.tar.gz /tmp/quickquip-sendkey.env
-
-cd "$REMOTE_DIR/prod"
-docker compose --env-file ../.env config --quiet
-docker compose --env-file ../.env build quickquip web-admin
-docker compose --env-file ../.env up -d --remove-orphans llbot quickquip web-admin
-docker compose --env-file ../.env up -d --force-recreate quickquip web-admin
-docker compose --env-file ../.env ps
-docker builder prune --filter 'until=48h' --force
-docker image prune -f
-'@
-$RemoteDeployScript = $RemoteDeployScript.Replace("__REMOTE_DIR__", $RemoteDir) -replace "`r`n", "`n"
-Invoke-Native "ssh remote deploy" {
-    $RemoteDeployScript | ssh @SshArgs $HostAlias "tr -d '\r' | bash -s"
-}
-
-Write-Host "Deploy complete." -ForegroundColor Green
-Write-Host "QuickQuip logs: ssh $HostAlias 'cd $RemoteDir/prod && docker compose --env-file ../.env logs -f quickquip'" -ForegroundColor Yellow
-Write-Host "Web Admin logs: ssh $HostAlias 'cd $RemoteDir/prod && docker compose --env-file ../.env logs -f web-admin'" -ForegroundColor Yellow
-
-Remove-Item -Force $TempArchive -ErrorAction SilentlyContinue
-Remove-Item -Force $TiebaStateArchive -ErrorAction SilentlyContinue

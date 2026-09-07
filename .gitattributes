@@ -8,6 +8,9 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
+# Cross-platform production templates use UTF-8 with LF.
+prod.example/*.ps1 text eol=lf
+
 # Image assets
 *.png binary
 *.jpg binary
