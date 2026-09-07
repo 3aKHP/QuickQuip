@@ -303,6 +303,16 @@ def test_group_settings_bool_conversion(store: LLMStore) -> None:
     assert override.allow_at is False
 
 
+def test_group_settings_agent_delivery_roundtrip(store: LLMStore) -> None:
+    store.update_group_settings(3003, agent_delivery_enabled=True)
+    assert store.get_group_settings(3003).agent_delivery_enabled is True
+    store.update_group_settings(3003, agent_delivery_enabled=False)
+    assert store.get_group_settings(3003).agent_delivery_enabled is False
+    # 显式 None 清空覆盖（回到跟随全局默认）
+    store.update_group_settings(3003, agent_delivery_enabled=None)
+    assert store.get_group_settings(3003).agent_delivery_enabled is None
+
+
 # ── _unavailable 守卫路径 ─────────────────────────────────────────────────────
 
 

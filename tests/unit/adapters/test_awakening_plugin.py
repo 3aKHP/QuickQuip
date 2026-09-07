@@ -112,7 +112,7 @@ def test_boredom_check_sends_message_not_str(monkeypatch):
         trace_kwargs=lambda: {"rule_name": "awakening_boredom"},
     )
 
-    async def fake_iter_plans(groups, rule_switch, svc, rate_limiter):
+    async def fake_iter_plans(groups, rule_switch, svc, rate_limiter, generate=None):
         yield plan
 
     monkeypatch.setattr(awakening_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))

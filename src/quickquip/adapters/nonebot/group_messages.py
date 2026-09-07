@@ -3,7 +3,12 @@ from __future__ import annotations
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
-from quickquip.adapters.nonebot._llm_reply import build_llm_reply_message
+from quickquip.adapters.nonebot._llm_reply import (
+    build_llm_reply_message,
+    make_matcher_sink,
+    record_final_receipt,
+    reply_interval_ms,
+)
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.common.bot_action_trace import bot_action_trace
 from quickquip.chat.reply_probability import roll_reply
@@ -172,11 +177,20 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
             if not roll_reply("llm_chat", group_id=group_id) or not rate_limiter.allow("llm_chat", user_id):
                 return
+            from quickquip.llm.agent_records import TriggerKind
+
+            delivery_sink = make_matcher_sink(
+                matcher, Message, MessageSegment,
+                scope_key=str(group_id),
+                interval_ms=reply_interval_ms(svc),
+            )
             result = await svc.generate_reply(
                 group_id=group_id,
                 user_id=user_id,
                 sender_name=sender_name,
                 prompt=llm_input.prompt,
+                delivery_sink=delivery_sink,
+                trigger_kind=TriggerKind.GROUP_DIRECT,
                 image_urls=llm_input.image_urls,
                 quoted_text=llm_input.quoted_text,
                 quoted_image_urls=llm_input.quoted_image_urls,
@@ -203,17 +217,18 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 user_id=user_id,
                 incoming_message_id=message_id,
                 incoming_preview=rendered_text,
-                reply_preview=result["reply"],
+                reply_preview=result["reply"] or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
                 llm_used=bool(result.get("llm_used")),
                 provider_id=str(result.get("provider_id", "")),
                 model=str(result.get("model", "")),
                 source="group_message.explicit_llm",
             ):
-                resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
-            sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
-            if sent_msg_id:
-                scope_key = str(group_id)
-                svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+                # 逐 Turn 模式正文已由 sink 交付（reply 为空），此处只处理
+                # 最终单发/错误提示路径，避免二次发送（§10）。
+                if str(result.get("reply") or "").strip() or (result.get("images") or []):
+                    resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
+                    sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                    record_final_receipt(svc, result, sent_msg_id)
             return
 
         from quickquip.chat.awakening import (
@@ -243,10 +258,19 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 awakening_result,
                 rendered_message.image_urls,
             )
+            from quickquip.llm.agent_records import TriggerKind
+
+            passive_sink = make_matcher_sink(
+                matcher, Message, MessageSegment,
+                scope_key=str(group_id),
+                interval_ms=reply_interval_ms(svc),
+            )
             result = await svc.generate_reply(
                 group_id=group_id,
                 user_id=user_id,
                 sender_name=sender_name,
+                delivery_sink=passive_sink,
+                trigger_kind=TriggerKind.GROUP_PASSIVE,
                 prompt=build_awakening_prompt(awakening_result, passive_image_urls),
                 image_urls=passive_image_urls,
                 include_recent_images=allows_recent_images(awakening_result.rule_name),
@@ -265,17 +289,16 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 user_id=user_id,
                 incoming_message_id=message_id,
                 incoming_preview=rendered_text,
-                reply_preview=result["reply"],
+                reply_preview=result["reply"] or (passive_sink.sent_texts[-1][:120] if passive_sink.sent_texts else ""),
                 llm_used=bool(result.get("llm_used")),
                 provider_id=str(result.get("provider_id", "")),
                 model=str(result.get("model", "")),
                 source="group_message.awakening",
             ):
-                resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
-            sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
-            if sent_msg_id:
-                scope_key = str(group_id)
-                svc.store.update_last_assistant_message_id(scope_key, sent_msg_id)
+                if str(result.get("reply") or "").strip() or (result.get("images") or []):
+                    resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
+                    sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                    record_final_receipt(svc, result, sent_msg_id)
             return
 
         result = await resolve_reply(

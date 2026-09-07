@@ -111,11 +111,20 @@ class AutoMemoryMixin:
         user_text: str,
         assistant_text: str,
         persona_id: str = "",
+        expected_generation: int | None = None,
     ) -> None:
         # persona 由调用方显式传入：create_task 复制的父 context 会被下面的
         # set_usage_scope 覆盖，不能依赖任务外 ContextVar 残留。
         set_usage_scope("auto_memory", group_id=scope_key, persona_id=persona_id or None)
         try:
+            # ── generation fencing（§10）────────────────────────────
+            # 任务在途期间清空/撤回会提升 scope generation；写入前重验，
+            # 迟到结果不得写回已清空的会话。
+            if expected_generation is not None:
+                current_generation, _ = self.store.agent_scope_state(scope_key)
+                if current_generation != expected_generation:
+                    return
+
             # ── quality gates ──────────────────────────────────────
             if not (user_text.strip() and assistant_text.strip()):
                 return
@@ -202,6 +211,11 @@ class AutoMemoryMixin:
                     continue
                 if _is_duplicate_memory(content, existing_contents):
                     continue
+                if expected_generation is not None:
+                    # 写入侧二次重验（§10）：判定期可能又发生了清空/撤回。
+                    current_generation, _ = self.store.agent_scope_state(scope_key)
+                    if current_generation != expected_generation:
+                        return
                 self.store.add_memory(
                     scope_key,
                     content,

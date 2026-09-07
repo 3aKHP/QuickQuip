@@ -1,5 +1,7 @@
 import { request } from './index'
 
+export type RuntimeActionStatus = 'queued' | 'running' | 'succeeded' | 'failed'
+
 /** enqueue() 的即时返回：仅含排队占位信息，无 payload/result */
 export interface QueuedActionRef {
   id: string
@@ -38,7 +40,7 @@ export interface RuntimeAction {
   id: string
   action_type: string
   payload: Record<string, unknown>
-  status: string
+  status: RuntimeActionStatus
   created_at: string
   updated_at: string
   result: RuntimeActionResult | null
@@ -92,4 +94,8 @@ export async function fetchLlmRuntimeActions(
   limit = 20,
 ): Promise<{ actions: RuntimeAction[] }> {
   return request(`/api/llm-runtime/actions?limit=${encodeURIComponent(String(limit))}`)
+}
+
+export async function fetchLlmRuntimeAction(id: string, signal?: AbortSignal): Promise<{ action: RuntimeAction }> {
+  return request(`/api/llm-runtime/actions/${encodeURIComponent(id)}`, { signal })
 }

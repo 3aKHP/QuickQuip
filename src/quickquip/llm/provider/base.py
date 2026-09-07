@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from quickquip.llm.config import ProviderConfig
+from quickquip.llm.agent_records import ResponseOwner
 from quickquip.llm.provider.retry import RetryPolicy, backoff_delay
 from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, sanitize_error_message
 from quickquip.llm.tools import (
@@ -219,6 +220,12 @@ class LLMResponse:
     thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
     web_search: LLMWebSearchReport | None = None
+    # 实际成功请求的归属（§7.1）：由 client 在成功路径按最终端点填充。
+    owner: "ResponseOwner | None" = None
+    # 协议原生的有序内容块（§4.4 保序表示）：Claude 的 content 序列 /
+    # Gemini 的 parts 序列，白名单深拷贝。OpenAI 无此结构（reasoning 单块
+    # 已由 thinking_blocks 承载）。供执行记录的 native_state 持久化。
+    native_blocks: list[dict[str, Any]] | None = None
 
 
 def _text_from_block_list(content: Any) -> str:
@@ -535,13 +542,18 @@ class BaseProviderClient:
         for fb in self.config.fallback_urls:
             yield self._swap_base_url(url, fb)
 
-    async def _execute_with_fallback(self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]) -> Any:
+    async def _execute_with_fallback(self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[Any, str]:
+        """按候选端点链执行，返回 ``(结果, 实际成功的 URL)``（§7.3）。
+
+        失败的可重试错误切换下一候选；不可重试立即抛。调用方用返回的
+        URL 构造实际 owner，不共享可变"最后成功端点"字段。
+        """
         if not self.config.fallback_urls:
-            return await fn(url, headers, payload)
+            return await fn(url, headers, payload), url
         last_exc: LLMProviderError | None = None
         for candidate in self._candidate_urls(url):
             try:
-                return await fn(candidate, headers, payload)
+                return await fn(candidate, headers, payload), candidate
             except LLMProviderError as exc:
                 if not _is_retryable(exc):
                     raise
@@ -549,9 +561,18 @@ class BaseProviderClient:
         raise last_exc  # type: ignore[misc]
 
     async def _post_json_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
-        return await self._execute_with_fallback(self._post_json, url, headers, payload)
+        data, _ = await self._execute_with_fallback(self._post_json, url, headers, payload)
+        return data
 
     async def _post_stream_sse_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+        events, _ = await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
+        return events
+
+    async def _post_json_candidate(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        """``_post_json_with_fallback`` 的候选可观测变体：带回实际端点。"""
+        return await self._execute_with_fallback(self._post_json, url, headers, payload)
+
+    async def _post_stream_sse_candidate(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
         return await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
 
     def _combine_stream_trace(

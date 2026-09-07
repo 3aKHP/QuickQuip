@@ -39,6 +39,7 @@ class GroupSettingsBody(BaseModel):
     enabled: bool | None = None
     memory_enabled: bool | None = None
     auto_memory_enabled: bool | None = None
+    agent_delivery_enabled: bool | None = None
     provider_id: str | None = Field(default=None, max_length=64)
     model: str | None = Field(default=None, max_length=128)
     persona_id: str | None = Field(default=None, max_length=64)
@@ -76,6 +77,7 @@ def get_options():
         "enabled": cfg.runtime.enabled,
         "memory_enabled": cfg.runtime.memory_enabled,
         "auto_memory_enabled": cfg.runtime.auto_memory_enabled,
+        "agent_delivery_enabled": cfg.runtime.agent_delivery_enabled,
         "provider_id": cfg.runtime.default_provider,
         "persona_id": cfg.runtime.default_persona,
         "trigger_prefix": cfg.triggers.default_prefix,
@@ -99,6 +101,7 @@ def _format_group_entry(group_id: str, row) -> dict:
         "enabled": None,
         "memory_enabled": None,
         "auto_memory_enabled": None,
+        "agent_delivery_enabled": None,
         "provider_id": None,
         "model": None,
         "persona_id": None,
@@ -113,6 +116,7 @@ def _format_group_entry(group_id: str, row) -> dict:
             "enabled": None if row["enabled"] is None else bool(row["enabled"]),
             "memory_enabled": None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
             "auto_memory_enabled": None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"]),
+            "agent_delivery_enabled": None if row["agent_delivery_enabled"] is None else bool(row["agent_delivery_enabled"]),
             "provider_id": row["provider_id"],
             "model": row["model"],
             "persona_id": row["persona_id"],
@@ -139,7 +143,7 @@ def list_group_settings():
         with store._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT group_id, enabled, memory_enabled, auto_memory_enabled, provider_id, model, persona_id,
+                SELECT group_id, enabled, memory_enabled, auto_memory_enabled, agent_delivery_enabled, provider_id, model, persona_id,
                        trigger_prefix, allow_prefix, allow_at, history_limit, updated_at
                 FROM group_settings
                 ORDER BY updated_at DESC

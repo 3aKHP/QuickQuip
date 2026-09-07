@@ -7,6 +7,7 @@ from typing import Any
 from urllib import parse
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
+from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMRequest,
@@ -68,6 +69,13 @@ class GeminiProviderClient(BaseProviderClient):
 
             await _flush_tool_results()
             if message.role == "assistant":
+                if message.native_content is not None:
+                    # 原生路径（§7.2）：历史记录的原样 parts 深拷贝回放，
+                    # 保留 functionCall 与 thoughtSignature 的原始位置。
+                    serialized.append(
+                        {"role": "model", "parts": [deepcopy(part) for part in message.native_content]}
+                    )
+                    continue
                 parts = self._replay_parts(message.thinking_blocks)
                 if not parts:
                     if message.content:
@@ -240,6 +248,7 @@ class GeminiProviderClient(BaseProviderClient):
             tool_calls=tool_calls,
             finish_reason=str(candidate.get("finishReason", "")).strip() or None,
             thinking_blocks=thinking_blocks,
+            native_blocks=[deepcopy(part) for part in normalized_parts] or None,
             web_search=web_search,
         )
 
@@ -353,7 +362,7 @@ class GeminiProviderClient(BaseProviderClient):
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
-        data = await self._post_json_with_fallback(url, headers, payload)
+        data, final_url = await self._post_json_candidate(url, headers, payload)
         candidates = data.get("candidates", [])
         candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
         response = self._parse_candidate(candidate, request.model)
@@ -362,9 +371,12 @@ class GeminiProviderClient(BaseProviderClient):
         response.output_tokens = usage.get("candidatesTokenCount")
         response.cache_read_tokens = usage.get("cachedContentTokenCount")
         response.thinking_tokens = usage.get("thoughtsTokenCount")
+        response.owner = build_response_owner(self.config, final_url, request.model)
         return response
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request, stream=True)
-        chunks = await self._post_stream_sse_with_fallback(url, headers, payload)
-        return self._assemble_stream_response(chunks, request.model)
+        chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
+        response = self._assemble_stream_response(chunks, request.model)
+        response.owner = build_response_owner(self.config, final_url, request.model)
+        return response

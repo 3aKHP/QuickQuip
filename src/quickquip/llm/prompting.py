@@ -624,6 +624,7 @@ def build_messages(
     forward_image_urls: list[str] | None = None,
     image_descriptions: list[object] | None = None,
     turn_envelope: str = "",
+    projected_history_segments: dict[str, list[LLMConversationMessage]] | None = None,
 ) -> list[LLMConversationMessage]:
     """Build the final messages array using scene-based grouping.
 
@@ -636,6 +637,11 @@ def build_messages(
 
     ``turn_envelope``（通常由 build_turn_envelope 渲染）非空时 prepend
     到最终 user 消息文本头部；组装时渲染、不落库。
+
+    ``projected_history_segments``（§8.1 Loop 投影）：键为 agent_loop_id。
+    携带工具事实的 Loop 不能用纯文本行表达，命中时该 Loop 的全部行让位
+    给投影消息序列（含工具调用与结果配对），插入位置 = 该 Loop 首行的
+    位置；无工具的 Loop 保持行渲染，维持 1.14 的字节稳定前缀。
     """
     messages: list[LLMConversationMessage] = []
 
@@ -658,7 +664,18 @@ def build_messages(
         ))
         pending_speakers.clear()
 
+    projected = projected_history_segments or {}
+    projected_loop_ids = set(projected)
+    seen_projected: set[str] = set()
+
     for item in history:
+        loop_id = item.get("agent_loop_id")
+        if loop_id and loop_id in projected_loop_ids:
+            if loop_id not in seen_projected:
+                seen_projected.add(loop_id)
+                _flush_pending()
+                messages.extend(projected[loop_id])
+            continue
         if item["role"] not in {"user", "assistant"} or not _history_text(item).strip():
             continue
 

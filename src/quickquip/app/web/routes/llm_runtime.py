@@ -133,3 +133,11 @@ def delete_message(body: DeleteMessageBody, request: Request):
 @router.get("/llm-runtime/actions")
 def list_actions(limit: int = 20):
     return {"actions": action_queue.list_recent(limit)}
+
+
+@router.get("/llm-runtime/actions/{action_id}")
+def get_action(action_id: str):
+    action = action_queue.get(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail="action not found")
+    return {"action": action}
