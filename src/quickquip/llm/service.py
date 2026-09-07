@@ -695,7 +695,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions: list[ImageDescription] | None,
         delivery_sink=None,
         trigger_kind: TriggerKind | None = None,
-        agent_delivery_enabled: bool = False,
+        agent_delivery_enabled: bool,
     ):
         """创建 Loop 与 user 触发行（§5.3.1），返回 TurnRecorder。
 

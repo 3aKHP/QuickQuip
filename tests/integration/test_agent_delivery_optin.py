@@ -16,15 +16,13 @@ from tests.fixtures.agent_loop import (
     CollectingSink,
     FiveTurnScenarioClient,
 )
-from tests.fixtures.configs import write_llm_config_bundle
+from tests.fixtures.configs import MIN_LLM_CONFIG_TOML, write_llm_config_bundle
 
 
 async def _service(tmp_path: Path) -> LLMService:
     paths = write_llm_config_bundle(
         tmp_path,
-        config_toml=write_llm_config_bundle.__globals__["MIN_LLM_CONFIG_TOML"].replace(
-            "tool_max_rounds = 2", "tool_max_rounds = 8"
-        ),
+        config_toml=MIN_LLM_CONFIG_TOML.replace("tool_max_rounds = 2", "tool_max_rounds = 8"),
     )
     service = LLMService(**paths)
     for attr, value in [
