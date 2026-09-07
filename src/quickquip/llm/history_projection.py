@@ -333,6 +333,7 @@ def project_loops(
     *,
     target: ResponseOwner | None,
     protocol: str,
+    archive_loop_ids: frozenset[str] = frozenset(),
 ) -> ProjectionResult:
     """把完整已关闭 Loop 投影为目标协议消息序列（§7.2 两条合法路径 + 档案）。"""
     messages: list[LLMConversationMessage] = []
@@ -341,7 +342,10 @@ def project_loops(
     for loop in loops:
         for turn in loop.turns:
             _validate_tool_pairing(turn)
-        path, reason = _decide_loop_path(loop, target=target, protocol=protocol)
+        path, reason = (
+            (PATH_ARCHIVE, "sensitive_history") if loop.loop_id in archive_loop_ids
+            else _decide_loop_path(loop, target=target, protocol=protocol)
+        )
         if path == PATH_NATIVE:
             loop_messages = _project_loop_native(loop)
         elif path == PATH_STRUCTURED:
@@ -513,6 +517,7 @@ def project_loops_with_budget(
     target: ResponseOwner | None,
     protocol: str,
     budget_tokens: int,
+    archive_loop_ids: frozenset[str] = frozenset(),
 ) -> ProjectionResult:
     """带 §8.2 精简阶梯的投影：超预算时按固定顺序精简最旧 Loop。
 
@@ -521,7 +526,9 @@ def project_loops_with_budget(
     逐出最旧完整 Loop。所有精简只影响模型投影，完整记录留在执行表；
     禁止空循环重试。
     """
-    result = project_loops(loops, target=target, protocol=protocol)
+    result = project_loops(
+        loops, target=target, protocol=protocol, archive_loop_ids=archive_loop_ids,
+    )
     if _estimate_messages_tokens(result.messages) <= budget_tokens or not loops:
         return result
 
@@ -559,7 +566,9 @@ def project_loops_with_budget(
                     continue
         # 阶梯 1：丢弃可选 native（重投影为无 target 的通用/档案形态）。
         if decisions[loop_id].path == PATH_NATIVE:
-            demoted = project_loops([loop], target=None, protocol=protocol)
+            demoted = project_loops(
+                [loop], target=None, protocol=protocol, archive_loop_ids=archive_loop_ids,
+            )
             segments[loop_id] = demoted.segments[loop_id]
             _mark(loop_id, "native_dropped")
             if _total() <= budget_tokens:

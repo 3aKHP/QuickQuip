@@ -39,6 +39,7 @@ from quickquip.llm.config import (
 )
 from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
+from quickquip.llm.history_safety import prepare_safe_history
 from quickquip.llm.request_budget import (
     RequestBudgetExceeded,
     derive_replay_budget,
@@ -992,12 +993,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # 后者是测试注入口）、buffer 已绑定。去重 = history 已覆盖的
         # message_id ∪ 当前触发消息（_remember_recent_message 先于本调用，
         # 触发消息已在 buffer）。读即服役：取出后立即推进游标。
+        exclude_ids = {
+            str(item["message_id"]) for item in history if item.get("message_id")
+        }
+        if message_id:
+            exclude_ids.add(str(message_id))
         if recent_messages is None and chat_type == "group" and self.recent_message_buffer is not None:
-            exclude_ids = {
-                str(item["message_id"]) for item in history if item.get("message_id")
-            }
-            if message_id:
-                exclude_ids.add(str(message_id))
             recent_messages = self.recent_message_buffer.list_patch(
                 scope_key,
                 exclude_message_ids=exclude_ids,
@@ -1006,6 +1007,11 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 token_estimator=estimate_tokens,
             )
             self.recent_message_buffer.note_patch_served(scope_key)
+        if recent_messages is not None:
+            recent_messages = [
+                item for item in recent_messages
+                if not item.get("message_id") or str(item["message_id"]) not in exclude_ids
+            ]
         participants = self._collect_known_participants(
             user_id=user_id,
             sender_name=sender_name,
@@ -1022,6 +1028,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 history=history,
                 provider=provider,
                 model=epoch_key.model,
+                sensitive=sensitive,
             )
         return history, participants, recent_messages, projected_segments
 
@@ -1032,6 +1039,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         history: list[dict[str, object]],
         provider: ProviderConfig,
         model: str,
+        sensitive: SensitiveFilter,
     ) -> dict[str, list[LLMConversationMessage]]:
         """携带工具事实的 Loop 用投影替换行渲染（§8.1/§5.3.2）。
 
@@ -1050,6 +1058,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         if not tool_loop_ids:
             return {}
         loaded = self.store.load_closed_loops_by_ids(scope_key, tool_loop_ids)
+        loaded, archive_loop_ids = prepare_safe_history(loaded, sensitive)
         target = None
         if not provider.fallback_urls:
             target = build_response_owner(provider, primary_endpoint_url(provider, model), model)
@@ -1057,6 +1066,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             result = project_loops_with_budget(
                 loaded, target=target, protocol=provider.protocol,
                 budget_tokens=derive_replay_budget(self.config, provider, model),
+                archive_loop_ids=archive_loop_ids,
             )
         except HistoryProjectionError:
             # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏
@@ -1072,7 +1082,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     "history projection degraded scope=%s loop=%s path=%s reason=%s",
                     scope_key, decision.loop_id, decision.path, decision.reason,
                 )
-        return result.segments
+        # Empty segments keep evicted Loops out of the row-rendering fallback.
+        return {loop.loop_id: result.segments.get(loop.loop_id, []) for loop in loaded}
 
     def _persist_turn_and_build_reply(
         self,
@@ -1315,6 +1326,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         )
 
         # ── image preprocessing & non-VLM stripping ──────────────────
+        scene_patch_snapshot = list(scene_patch) if scene_patch is not None else None
         # 被动唤醒「看见近期图」是全量快照语义（TTL 窗，list_recent），不随【现场】
         # 补丁的增量游标收窄——无聊唤醒恰在冷场（补丁最空）时触发，增量图源会让
         # 该特性静默失效。文本上下文仍走增量补丁（scene_patch）；显式注入
@@ -1401,14 +1413,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         turn_envelope: str = ""
         messages: list[LLMConversationMessage] = []
 
-        def _assemble_request(*, reuse_patch: bool = False) -> LLMRequest:
-            """请求装配（首轮与预算降级重试共用同一边界）。
-
-            reuse_patch=True 时注入首轮【现场】补丁：补丁游标读即服役，
-            降级后重取只会拿到 floor 滑窗，首轮（未派发）已含的更旧补丁
-            会静默丢失；首轮补丁按降级前（更大）的 history 去重，对缩后
-            history 的子集复用同样不产生重复。
-            """
+        def _assemble_request() -> LLMRequest:
+            """首轮和预算重建复用已消费的补丁，按最新历史重新去重。"""
             nonlocal history, participants, scene_patch, projected_segments
             nonlocal turn_envelope, messages
             history, participants, scene_patch, projected_segments = (
@@ -1420,7 +1426,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     sensitive=sensitive,
                     user_id=user_id,
                     sender_name=sender_name,
-                    recent_messages=scene_patch if reuse_patch else recent_messages,
+                    recent_messages=scene_patch_snapshot,
                     message_id=message_id,
                     quoted_sender_name=quoted_sender_name,
                     quoted_user_id=quoted_user_id,
@@ -1505,7 +1511,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     "epoch hot degrade for budget scope=%s anchor=%d->%d",
                     scope_key, degraded.old_anchor_id, degraded.new_anchor_id,
                 )
-                request = _assemble_request(reuse_patch=True)
+                request = _assemble_request()
         tool_context = ToolExecutionContext(
             group_id=chat_id,
             user_id=user_id,
