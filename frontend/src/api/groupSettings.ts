@@ -5,6 +5,7 @@ export type GroupOverrideField =
   | 'enabled'
   | 'memory_enabled'
   | 'auto_memory_enabled'
+  | 'agent_delivery_enabled'
   | 'provider_id'
   | 'model'
   | 'persona_id'
@@ -28,6 +29,7 @@ export interface GroupOverrideDraft {
   enabled: boolean | null
   memory_enabled: boolean | null
   auto_memory_enabled: boolean | null
+  agent_delivery_enabled: boolean | null
   provider_id: string | null
   model: string | null
   persona_id: string | null
@@ -70,6 +72,7 @@ export interface GroupSettingsDefaults {
   enabled?: boolean
   memory_enabled?: boolean
   auto_memory_enabled?: boolean
+  agent_delivery_enabled?: boolean
   provider_id?: string | null
   persona_id?: string | null
   trigger_prefix?: string | null

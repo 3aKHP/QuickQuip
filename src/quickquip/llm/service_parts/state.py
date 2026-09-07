@@ -128,6 +128,12 @@ class StateMixin:
         value = None if enabled is None else int(enabled)
         self._update_chat_settings(chat_id, chat_type, auto_memory_enabled=value)
 
+    def set_chat_agent_delivery_enabled(
+        self, chat_id: int | str, enabled: bool | None, chat_type: str = "group"
+    ) -> None:
+        value = None if enabled is None else int(enabled)
+        self._update_chat_settings(chat_id, chat_type, agent_delivery_enabled=value)
+
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)
 

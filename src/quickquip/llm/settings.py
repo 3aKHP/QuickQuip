@@ -15,6 +15,7 @@ class ResolvedGroupSettings:
     allow_prefix: bool
     allow_at: bool
     history_limit: int | None = None
+    agent_delivery_enabled: bool = False
 
 
 def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupSettings:
@@ -34,6 +35,11 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
             overrides.auto_memory_enabled
             if overrides.auto_memory_enabled is not None
             else config.runtime.auto_memory_enabled
+        ),
+        agent_delivery_enabled=(
+            overrides.agent_delivery_enabled
+            if overrides.agent_delivery_enabled is not None
+            else config.runtime.agent_delivery_enabled
         ),
         provider_id=provider_id,
         model=model,

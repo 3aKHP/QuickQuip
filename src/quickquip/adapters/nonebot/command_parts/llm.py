@@ -213,6 +213,26 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                     f"{scope_label}自动记忆抽取：{current}（全局默认 {default}）"
                 )
 
+        if tokens[:1] == ["delivery"] and len(tokens) >= 2:
+            sub = tokens[1].lower()
+            if sub == "on":
+                svc.set_chat_agent_delivery_enabled(chat_id, True, chat_type=chat_type)
+                await llm_cmd.finish(f"{scope_label}分段发送已开启")
+            if sub == "off":
+                svc.set_chat_agent_delivery_enabled(chat_id, False, chat_type=chat_type)
+                await llm_cmd.finish(f"{scope_label}分段发送已关闭")
+            if sub == "reset":
+                svc.set_chat_agent_delivery_enabled(chat_id, None, chat_type=chat_type)
+                default = "开" if svc.config.runtime.agent_delivery_enabled else "关"
+                await llm_cmd.finish(f"{scope_label}分段发送已跟随全局默认（当前：{default}）")
+            if sub == "status":
+                settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
+                default = "开" if svc.config.runtime.agent_delivery_enabled else "关"
+                current = "开" if settings.agent_delivery_enabled else "关"
+                await llm_cmd.finish(
+                    f"{scope_label}分段发送：{current}（全局默认 {default}）"
+                )
+
         if tokens[:1] == ["context_limit"] and len(tokens) >= 2:
             value = tokens[1].lower()
             if value in {"reset", "off"}:
@@ -234,7 +254,8 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|auto_memory on|off|reset|status|context_limit <n>|context_limit reset|clear_context|reload|mcp status"
+            "memory status|memory on|memory off|auto_memory on|off|reset|status|delivery on|off|reset|status|"
+            "context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
 
     search_cmd = on_command("search", priority=10, block=True)
