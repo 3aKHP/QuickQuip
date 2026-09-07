@@ -18,6 +18,7 @@
 | [`architecture.md`](architecture.md) | 目录结构、分层、依赖方向、组合根和数据/部署边界 |
 | [`style.md`](style.md) | 源码结构、可维护性、类型与输入边界、错误与状态、测试和评审问题 |
 | [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审、发布和 hotfix 流程 |
+| [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |
 | [`mcp-integration.md`](mcp-integration.md) | MCP 接入、协议协商、工具结果和安全边界 |
 | [`tool-discovery.md`](tool-discovery.md) | LLM 工具发现的策略、模式、限制和测试 |
