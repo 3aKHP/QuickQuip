@@ -194,5 +194,13 @@ class WebAdminActionQueue:
             ).fetchall()
         return [asdict(self._row_to_action(row)) for row in rows]
 
+    def get(self, action_id: str) -> dict[str, Any] | None:
+        self._ensure_schema()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM web_admin_actions WHERE id = ?", (action_id,),
+            ).fetchone()
+        return asdict(self._row_to_action(row)) if row is not None else None
+
 
 action_queue = WebAdminActionQueue()
