@@ -1563,8 +1563,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         except DeliveryAborted as exc:
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
+            # 逐 Turn 模式下静默：已交付的分段就是用户看到的全部。无记录路径
+            # 同样可能在这里终止（逐轮预算门禁不依赖 recorder），但它没有任何
+            # sink 交付，必须给出可见的中止提示而不是空串。
+            aborted_silently = recorder is not None and self.config.runtime.agent_delivery_enabled
             return {
-                "reply": "" if self.config.runtime.agent_delivery_enabled else "本次回复未确认送达，已停止后续生成。",
+                "reply": "" if aborted_silently else "本次回复未确认送达，已停止后续生成。",
                 "rate_limit_key": LLM_RULE_NAME,
                 "rule_name": LLM_RULE_NAME,
                 "llm_used": True,
@@ -1657,8 +1661,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 result_payload = dict(result_payload)
                 result_payload["agent_turn_row_id"] = recorder.final_turn_record.message_row_id
                 result_payload["scope_key"] = scope_key
-        if self.config.runtime.agent_delivery_enabled:
+        if recorder is not None and self.config.runtime.agent_delivery_enabled:
             # 逐 Turn 模式：正文已由 sink 交付，reply 不再二次发送（§5.1）。
+            # 无记录路径（同 scope 并发触发 / store 不可用）没有任何 sink 交付，
+            # reply 仍是唯一出口，置空会把整条回复静默吞掉。
             result_payload = dict(result_payload)
             result_payload["reply"] = ""
         return result_payload
