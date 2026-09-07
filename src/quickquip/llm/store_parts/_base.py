@@ -171,6 +171,9 @@ class _StoreBase:
                 ON session_archives(user_id, archive_number);
                 """
             )
+            # Serialize column discovery and ALTER for concurrent Bot/Web upgrades.
+            # executescript above must finish before acquiring this transaction.
+            conn.execute("BEGIN IMMEDIATE")
             existing_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(group_settings)").fetchall()

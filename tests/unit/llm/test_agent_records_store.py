@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, BrokenBarrierError
 
 import pytest
 
@@ -170,6 +173,74 @@ def test_migration_is_idempotent_and_concurrent_safe(tmp_path: Path):
         versions = conn.execute("SELECT COUNT(*) c FROM agent_schema_migrations").fetchone()["c"]
     assert count == 4
     assert versions == 1
+
+
+def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monkeypatch):
+    db_path = tmp_path / "llm.db"
+    build_legacy_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE group_settings (
+                group_id TEXT PRIMARY KEY, enabled INTEGER, memory_enabled INTEGER,
+                auto_memory_enabled INTEGER, provider_id TEXT, model TEXT,
+                persona_id TEXT, trigger_prefix TEXT, allow_prefix INTEGER,
+                allow_at INTEGER, history_limit INTEGER, updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO group_settings (group_id, enabled, updated_at) VALUES (?, ?, ?)",
+            ("1001", 1, "2026-09-01"),
+        )
+        original_rows = conn.execute("SELECT * FROM conversation_messages ORDER BY id").fetchall()
+        original_columns = [row[1] for row in conn.execute("PRAGMA table_info(conversation_messages)")]
+
+    start = Barrier(2)
+    column_reads = Barrier(2)
+
+    class UpgradeCursor(sqlite3.Cursor):
+        def fetchall(self):
+            rows = super().fetchall()
+            # Overlap the old-schema snapshots. A writer holding the migration
+            # lock proceeds after the timeout while the other connection waits.
+            try:
+                column_reads.wait(timeout=0.5)
+            except BrokenBarrierError:
+                pass
+            return rows
+
+    class UpgradeConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "PRAGMA table_info(group_settings)":
+                return self.cursor(factory=UpgradeCursor).execute(sql, parameters)
+            return super().execute(sql, parameters)
+
+    def connect(store):
+        conn = sqlite3.connect(store.path, factory=UpgradeConnection)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    monkeypatch.setattr(LLMStore, "_connect", connect)
+
+    def open_store():
+        start.wait(timeout=5)
+        return LLMStore(db_path)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(open_store) for _ in range(2)]
+        stores = [future.result(timeout=10) for future in futures]
+
+    assert all(not store._unavailable for store in stores)
+    for store in stores:
+        assert store.get_group_settings("1001").enabled is True
+    with sqlite3.connect(db_path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(group_settings)")]
+        assert columns.count("agent_delivery_enabled") == 1
+        select = ", ".join(original_columns)
+        assert conn.execute(f"SELECT {select} FROM conversation_messages ORDER BY id").fetchall() == original_rows
+        assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 4
+        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 1
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
 # ── Loop 生命周期 ─────────────────────────────────────────────────
