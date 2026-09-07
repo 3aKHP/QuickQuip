@@ -142,17 +142,10 @@ def test_within_budget_projection_untouched():
 
 
 def _native_estimate(messages) -> int:
-    """与实现同口径的估算（含原生/thinking 块）。"""
-    from quickquip.llm.token_estimate import estimate_native_blocks_tokens
+    """与实现同口径的估算（含原生/thinking 块；与 test_epoch 导入私有函数同例）。"""
+    from quickquip.llm.history_projection import _estimate_messages_tokens
 
-    total = 0
-    for message in messages:
-        total += estimate_tokens(message.content)
-        for call in message.tool_calls:
-            total += estimate_tokens(call.arguments_json)
-        total += estimate_native_blocks_tokens(message.thinking_blocks)
-        total += estimate_native_blocks_tokens(message.native_content)
-    return total
+    return _estimate_messages_tokens(messages)
 
 
 def _cot_loop(thinking_chars: int):
@@ -262,3 +255,54 @@ def test_huge_native_cot_still_reaches_deeper_ladder():
     assert "reduced:native_dropped" in (decision.reason or "")
     for message in result.messages:
         assert message.native_content is None
+
+
+def test_native_thinking_stripped_empty_turn_gets_placeholder():
+    # 纯 thinking 轮（零正文零工具）剥空后退占位正文：空 text 块会被 Claude 拒 400。
+    blocks = [{"type": "thinking", "thinking": "思" * 200, "signature": "sig"}]
+    loop = _loop(
+        "loop_pure_thinking",
+        (
+            _turn(
+                "turn_0",
+                text="",
+                tools=(),
+                native_state=_native_state(OWNER, blocks),
+                owner=_owner_dict(OWNER),
+            ),
+        ),
+    )
+    full = project_loops_with_budget(
+        [loop], target=OWNER, protocol="claude", budget_tokens=10**9
+    )
+    result = project_loops_with_budget(
+        [loop], target=OWNER, protocol="claude", budget_tokens=_native_estimate(full.messages) - 5
+    )
+    assert result.decisions[0].reason == "reduced:native_thinking_stripped"
+    stripped_assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert stripped_assistant.native_content is None
+    assert stripped_assistant.content, "剥空轮必须有非空占位正文"
+    assert estimate_tokens(stripped_assistant.content) > 0
+
+
+def test_native_message_text_not_double_counted():
+    # 原生消息正文内含于 native 块（serializer 忽略通用字段），估算不得双计。
+    from quickquip.llm.history_projection import _estimate_messages_tokens
+    from quickquip.llm.tools import LLMConversationMessage
+
+    body = "正文内容。" * 50
+    native_msg = LLMConversationMessage(
+        role="assistant",
+        content=body,
+        native_content=[{"type": "text", "text": body}],
+    )
+    counted_once = _estimate_messages_tokens([native_msg])
+    empty_body = LLMConversationMessage(
+        role="assistant",
+        content="",
+        native_content=[{"type": "text", "text": body}],
+    )
+    assert _estimate_messages_tokens([empty_body]) == counted_once
+    # 通用消息（无 native）仍单计 content。
+    plain = LLMConversationMessage(role="assistant", content=body)
+    assert _estimate_messages_tokens([plain]) == estimate_tokens(body)

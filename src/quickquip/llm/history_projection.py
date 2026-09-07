@@ -37,6 +37,8 @@ PATH_ARCHIVE = "archive"
 
 _ARCHIVE_TAG = "[历史档案]"
 _ORPHAN_TRIGGER_NOTE = "[系统说明] 该段历史的原始触发消息未保留。"
+# 剥空轮（纯 thinking、零正文零工具）的占位正文：空 text 块会被 Claude 拒 400。
+_STRIPPED_TURN_PLACEHOLDER = "…[历史推理内容已按预算精简]…"
 
 
 class HistoryProjectionError(RuntimeError):
@@ -375,9 +377,12 @@ def _estimate_messages_tokens(messages: list[LLMConversationMessage]) -> int:
 
     total = 0
     for message in messages:
-        total += estimate_tokens(message.content)
-        for call in message.tool_calls:
-            total += estimate_tokens(call.arguments_json)
+        # 原生路径消息的正文/工具声明已内含于 native 块（serializer 原样
+        # 发送、忽略通用字段），单计 content 会双倍计量同一 wire 内容。
+        if message.native_content is None:
+            total += estimate_tokens(message.content)
+            for call in message.tool_calls:
+                total += estimate_tokens(call.arguments_json)
         total += estimate_native_blocks_tokens(message.thinking_blocks)
         total += estimate_native_blocks_tokens(message.native_content)
     return total
@@ -465,7 +470,8 @@ def _strip_native_thinking(
 
     签名回传要求只约束活跃工具循环内的最近 assistant 轮；已关闭 Loop 的
     历史轮剥 thinking 属协议合法的保真降级。块剥空（纯 thinking 轮）退
-    通用正文表达，该轮无工具声明，配对不受影响。
+    通用正文表达并补占位（空 text 块会被 Claude 拒 400），该轮无工具
+    声明，配对不受影响。
     """
     stripped: list[LLMConversationMessage] = []
     changed = False
@@ -493,7 +499,10 @@ def _strip_native_thinking(
             )
         else:
             stripped.append(
-                LLMConversationMessage(role=message.role, content=message.content)
+                LLMConversationMessage(
+                    role=message.role,
+                    content=message.content or _STRIPPED_TURN_PLACEHOLDER,
+                )
             )
     return stripped if changed else messages
 

@@ -19,6 +19,11 @@ DEFAULT_RETRY_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_BASE_DELAY = 1.0
 DEFAULT_RETRY_JITTER = 0.5
 
+# agent_replay_loop_tokens 的解析钳制界（runtime 与 provider 覆盖共用；
+# request_budget 的推导下限/上限同源引用）。
+AGENT_REPLAY_LOOP_TOKENS_FLOOR = 512
+AGENT_REPLAY_LOOP_TOKENS_CEILING = 4_194_304
+
 
 @dataclass(slots=True)
 class TriggerConfig:
@@ -74,9 +79,9 @@ class RuntimeConfig:
     # ── 【现场】补丁（近期消息缓冲的 LLM 服役口径；仅全局，无 provider 覆盖） ──
     recent_context_token_budget: int = 800
     recent_context_floor_seconds: int = 300
-    # 应用侧输入预算（§8.3）：所有 provider 的缺省，可被 provider 覆盖。
-    # 不能从 epoch cap 推导实际模型上下文大小；未配置模型容量时文档与
-    # 日志按 capacity unknown 处理。
+    # 应用侧输入预算（§8.3）：显式与内置窗口表均未解析到模型容量
+    # （capacity unknown）时的缺省与兜底；可被 provider 覆盖（非正数视为
+    # 未配置），容量已知时按窗口推导优先。
     request_input_token_budget: int = 96_000
     # D5 关闭 Loop 保留三上限（§2）：先触顶者触发整 Loop 清理。
     agent_record_retention_days: int = 30
@@ -565,9 +570,13 @@ def _parse_single_provider(
         epoch_cold_trigger_tokens=_as_optional_int(entry.get("epoch_cold_trigger_tokens")),
         epoch_hot_target_tokens=_as_optional_int(entry.get("epoch_hot_target_tokens")),
         epoch_cap_tokens=_as_optional_int(entry.get("epoch_cap_tokens")),
-        request_input_token_budget=_as_optional_int(entry.get("request_input_token_budget")),
+        request_input_token_budget=_nonpositive_as_none(
+            entry.get("request_input_token_budget")
+        ),
         agent_replay_loop_tokens=_clamped_optional_int(
-            entry.get("agent_replay_loop_tokens"), floor=512, ceiling=4_194_304
+            entry.get("agent_replay_loop_tokens"),
+            floor=AGENT_REPLAY_LOOP_TOKENS_FLOOR,
+            ceiling=AGENT_REPLAY_LOOP_TOKENS_CEILING,
         ),
         model_context_windows={
             str(name): max(1024, int(size))
@@ -599,7 +608,7 @@ def _as_optional_int(raw: Any) -> int | None:
 def _clamped_optional_int(
     raw: Any, *, floor: int, ceiling: int
 ) -> int | None:
-    """provider 级可选整数键 + 范围钳制：缺省/越界告警并回退 None。"""
+    """provider 级可选整数键 + 范围钳制：缺省/不可解析回退 None，越界钳制到边界并告警。"""
     value = _as_optional_int(raw)
     if value is None:
         return None
@@ -609,6 +618,15 @@ def _clamped_optional_int(
             "provider 覆盖值 %d 超出 [%d, %d]，已钳制为 %d", value, floor, ceiling, clamped
         )
     return clamped
+
+
+def _nonpositive_as_none(raw: Any) -> int | None:
+    """非正数视为未配置（继承推导/缺省）：0/负值不是合法预算，告警不致命。"""
+    value = _as_optional_int(raw)
+    if value is not None and value <= 0:
+        logger.warning("provider 覆盖值 %d 非正数，按未配置处理（继承推导/缺省）", value)
+        return None
+    return value
 
 
 _MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}
@@ -859,7 +877,11 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 runtime_raw.get("agent_delivery_enabled"), default=False
             ),
             agent_replay_loop_tokens=min(
-                4_194_304, max(512, int(runtime_raw.get("agent_replay_loop_tokens", 4096)))
+                AGENT_REPLAY_LOOP_TOKENS_CEILING,
+                max(
+                    AGENT_REPLAY_LOOP_TOKENS_FLOOR,
+                    int(runtime_raw.get("agent_replay_loop_tokens", 4096)),
+                ),
             ),
             reply_split_threshold_chars=max(
                 1, int(runtime_raw.get("reply_split_threshold_chars", 800))

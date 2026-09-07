@@ -1,6 +1,12 @@
 import math
 
-from quickquip.llm.token_estimate import ASCII_TOKEN_RATIO, CJK_TOKEN_RATIO, estimate_tokens
+from quickquip.llm.token_estimate import (
+    ASCII_TOKEN_RATIO,
+    CJK_TOKEN_RATIO,
+    estimate_native_block_tokens,
+    estimate_native_blocks_tokens,
+    estimate_tokens,
+)
 
 
 def test_estimate_tokens_empty():
@@ -32,15 +38,11 @@ def test_estimate_tokens_mixed_rounds_up():
 # ── 协议原生块估算 ───────────────────────────────────────────────
 
 def test_estimate_native_block_tokens_claude_thinking_payload():
-    from quickquip.llm.token_estimate import estimate_native_block_tokens
-
     block = {"type": "thinking", "thinking": "思" * 100, "signature": "sig-123"}
     assert estimate_native_block_tokens(block) >= math.ceil(100 * CJK_TOKEN_RATIO)
 
 
 def test_estimate_native_block_tokens_tool_use_input_dict():
-    from quickquip.llm.token_estimate import estimate_native_block_tokens
-
     block = {
         "type": "tool_use",
         "id": "call_1",
@@ -51,32 +53,21 @@ def test_estimate_native_block_tokens_tool_use_input_dict():
 
 
 def test_estimate_native_block_tokens_gemini_function_call():
-    from quickquip.llm.token_estimate import estimate_native_block_tokens
-
     block = {"functionCall": {"name": "search_web", "args": {"query": "镜子"}}}
     assert estimate_native_block_tokens(block) > 0
 
 
 def test_estimate_native_block_tokens_unknown_shape_nonzero():
-    from quickquip.llm.token_estimate import estimate_native_block_tokens
-
     assert estimate_native_block_tokens({"type": "future_block", "payload": "x" * 100}) > 0
     assert estimate_native_block_tokens("raw-string-block") > 0
     assert estimate_native_block_tokens(None) > 0
 
 
 def test_estimate_native_block_tokens_media_flat_not_base64_inflated():
-    from quickquip.llm.token_estimate import (
-        NATIVE_MEDIA_FLAT_TOKENS,
-        estimate_native_block_tokens,
-    )
-
     block = {"inlineData": {"mimeType": "image/png", "data": "A" * 200_000}}
-    assert estimate_native_block_tokens(block) <= NATIVE_MEDIA_FLAT_TOKENS + 128
+    assert estimate_native_block_tokens(block) <= 1200 + 128
 
 
 def test_estimate_native_blocks_tokens_none_and_empty():
-    from quickquip.llm.token_estimate import estimate_native_blocks_tokens
-
     assert estimate_native_blocks_tokens(None) == 0
     assert estimate_native_blocks_tokens([]) == 0

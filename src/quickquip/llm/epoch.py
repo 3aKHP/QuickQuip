@@ -203,21 +203,27 @@ class EpochManager:
     ) -> EpochResetEvent | None:
         """容量 reset 路径（§8.3）：请求预算超限时的付费降级。
 
-        不看 idle 与 cap 触发条件，直接把锚点缩到热水位（L_hot）；无状态
-        （本进程未见过该键）或已无更小锚点时返回 None，由调用方走终止路径。
+        不看 idle 与 cap 触发条件，直接把锚点缩到热水位（L_hot）；与
+        ``maybe_advance`` 同款行数兜底先行（窗口行数超限时先按行数推进，
+        绝不让范围读截掉最新端）。无状态（本进程未见过该键）或已无更小
+        锚点时返回 None，由调用方走终止路径；仅行数兜底推进时返回该事件。
         """
         state = self._states.get(key)
         if state is None:
             return None
+        event: EpochResetEvent | None = None
+        row_anchor = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS)
+        if row_anchor is not None and row_anchor > state.anchor_id:
+            event = self._advance(state, store, key, row_anchor, reason="rows")
         rows = store.list_conversation_messages_since(
             key.scope_key, state.anchor_id, limit=DEFAULT_EPOCH_MAX_ROWS
         )
         candidate = self._pick_anchor_by_tokens(rows, params.hot_target_tokens)
-        if candidate <= state.anchor_id:
-            return None
-        return self._advance(
-            state, store, key, candidate, reason="hot", epoch_tokens=estimate_rows_budget(rows)
-        )
+        if candidate > state.anchor_id:
+            return self._advance(
+                state, store, key, candidate, reason="hot", epoch_tokens=estimate_rows_budget(rows)
+            )
+        return event
 
     # ── 内部 ─────────────────────────────────────────────────────
 

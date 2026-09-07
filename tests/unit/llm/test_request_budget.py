@@ -21,7 +21,6 @@ from quickquip.llm.request_budget import (
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.token_estimate import (
     NATIVE_MEDIA_FLAT_TOKENS,
-    estimate_native_blocks_tokens,
     estimate_tokens,
 )
 
@@ -231,6 +230,41 @@ def test_enforce_rejects_native_payload_over_window():
         enforce_request_budget(config, provider, request)
 
 
-def test_native_block_unknown_shape_still_counted():
-    blocks = [{"type": "future_kind", "payload": "x" * 2_000}]
-    assert estimate_native_blocks_tokens(blocks) > 0
+def test_estimate_request_tokens_no_double_count_for_native_messages():
+    body = "正文内容。" * 50
+    native_msg = LLMConversationMessage(
+        role="assistant",
+        content=body,
+        native_content=[{"type": "text", "text": body}],
+    )
+    with_body = estimate_request_tokens(_request([native_msg]))
+    without_body = estimate_request_tokens(
+        _request(
+            [
+                LLMConversationMessage(
+                    role="assistant",
+                    content="",
+                    native_content=[{"type": "text", "text": body}],
+                )
+            ]
+        )
+    )
+    assert with_body == without_body, "native 消息的通用正文不得双计"
+
+
+def test_derive_replay_budget_provider_override_clamped():
+    config = LLMConfig()
+    huge = _provider(agent_replay_loop_tokens=99_999_999)
+    assert derive_replay_budget(config, huge, "custom-model-x") == 4_194_304
+    tiny = _provider(agent_replay_loop_tokens=1)
+    assert derive_replay_budget(config, tiny, "custom-model-x") == 512
+
+
+def test_builtin_table_conservative_entries():
+    # Deep-CR 修正后的保守条目（存疑取低）：直连构造也按界钳制。
+    assert lookup_builtin_context_window("glm-4.5-air") == 128_000
+    assert lookup_builtin_context_window("glm-4.6") == 200_000
+    assert lookup_builtin_context_window("kimi-k2-0905") == 128_000
+    assert lookup_builtin_context_window("kimi-k2-thinking") == 256_000
+    assert lookup_builtin_context_window("qwen3-235b-a22b") == 32_768
+    assert lookup_builtin_context_window("qwen3-2507") == 262_144

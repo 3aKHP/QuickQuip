@@ -134,7 +134,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
 | `recent_context_token_budget` | 【现场】补丁每轮 token 预算：近期消息缓冲服役给 LLM 的上限（从最新往回截） | `800` |
 | `recent_context_floor_seconds` | 【现场】滑动保底窗秒数：窗内消息即使已服役过也会重附（增量语义之外的保底） | `300` |
-| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：按「provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省」解析，超限时先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝发起；可在 `[[providers]]` 段按 provider 覆盖 | `96000` |
+| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：按「provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省」解析，超限时主链先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝发起；工具调用循环内的逐轮门禁超限立即中止该循环（无降级重试）；可在 `[[providers]]` 段按 provider 覆盖（非正数视为未配置） | `96000` |
 | `agent_record_retention_days` | 已关闭对话轮（Loop）保留天数，按关闭时间计 | `30` |
 | `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
@@ -244,7 +244,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
-> **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。
+> **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
 
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 

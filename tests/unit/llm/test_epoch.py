@@ -344,3 +344,28 @@ def test_epoch_row_budget_ignores_native_state() -> None:
     }
     assert _row_budget(row) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
     assert estimate_rows_budget([row]) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
+
+
+def test_force_advance_to_hot_applies_rows_backstop(store: LLMStore) -> None:
+    # 口径锁定：容量降级同样先做行数兜底——窗口超 1024 行时绝不靠
+    # 范围读 LIMIT 截断（那会截掉最新端）。
+    big_cap = EpochParams(
+        context_tokens=200,
+        cold_idle_seconds=300,
+        cold_target_tokens=100,
+        cold_trigger_tokens=150,
+        hot_target_tokens=400,
+        cap_tokens=10_000_000,
+    )
+    # 先小窗口初始化锚点，再灌入超过 DEFAULT_EPOCH_MAX_ROWS 的行量，
+    # 让窗口行数越界（模拟锚点不动、对话持续增长的真实形态）。
+    _seed_pairs(store, "1001", pairs=4, chars=10)
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=big_cap)
+    _seed_pairs(store, "1001", pairs=600, chars=10)  # 窗口 > 1024 行
+    grown_rows = _rows_since(store, "1001", mgr.current_anchor(_KEY) or 0)
+    assert len(grown_rows) > DEFAULT_EPOCH_MAX_ROWS, "前置：窗口行数已越界"
+    event = mgr.force_advance_to_hot(_KEY, store=store, params=big_cap)
+    assert event is not None
+    rows = _rows_since(store, "1001", mgr.current_anchor(_KEY))
+    assert len(rows) <= DEFAULT_EPOCH_MAX_ROWS

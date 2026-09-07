@@ -16,7 +16,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config import (
+    AGENT_REPLAY_LOOP_TOKENS_CEILING,
+    AGENT_REPLAY_LOOP_TOKENS_FLOOR,
+    LLMConfig,
+    ProviderConfig,
+)
 from quickquip.llm.context_windows import resolve_context_window
 from quickquip.llm.provider import LLMRequest
 from quickquip.llm.token_estimate import (
@@ -37,8 +42,9 @@ _MIN_INPUT_BUDGET_TOKENS = 4096
 _SYSTEM_TOOLS_ALLOWANCE_TOKENS = 16_000
 # 重放推导中当前进行中 Loop（thinking/正文/工具结果）的比例预留。
 _LOOP_HEADROOM_FRACTION = 0.15
-# 重放预算绝对下界（与配置钳制下界一致）。
-_MIN_REPLAY_BUDGET_TOKENS = 512
+# 重放预算绝对下界（与 config 的钳制界单源）。
+_MIN_REPLAY_BUDGET_TOKENS = AGENT_REPLAY_LOOP_TOKENS_FLOOR
+_MAX_REPLAY_BUDGET_TOKENS = AGENT_REPLAY_LOOP_TOKENS_CEILING
 
 
 class RequestBudgetExceeded(RuntimeError):
@@ -98,7 +104,11 @@ def derive_replay_budget(
     capacity unknown 时即实际值）。
     """
     if provider.agent_replay_loop_tokens is not None:
-        return provider.agent_replay_loop_tokens
+        # 解析期已钳制；直连构造的配置对象在此兜底同界。
+        return min(
+            _MAX_REPLAY_BUDGET_TOKENS,
+            max(_MIN_REPLAY_BUDGET_TOKENS, provider.agent_replay_loop_tokens),
+        )
     arbiter = resolve_input_budget(
         config, provider, model, max_output_tokens=max_output_tokens
     )
@@ -123,11 +133,15 @@ def estimate_request_tokens(request: LLMRequest) -> int:
         total += estimate_tokens(spec.name) + estimate_tokens(spec.description)
         total += estimate_tokens(str(spec.input_schema))
     for message in request.messages:
-        total += estimate_tokens(message.content)
-        for call in message.tool_calls:
-            total += estimate_tokens(call.arguments_json)
-        total += estimate_native_blocks_tokens(message.thinking_blocks)
-        total += estimate_native_blocks_tokens(message.native_content)
+        # 原生路径消息的正文/工具声明已内含于 native 块（serializer 原样
+        # 发送、忽略通用字段），单计通用字段会双倍计量同一 wire 内容。
+        if message.native_content is not None:
+            total += estimate_native_blocks_tokens(message.native_content)
+        else:
+            total += estimate_tokens(message.content)
+            for call in message.tool_calls:
+                total += estimate_tokens(call.arguments_json)
+            total += estimate_native_blocks_tokens(message.thinking_blocks)
         # 媒体按已知协议成本粗估：每图固定档位（保守）。
         total += NATIVE_MEDIA_FLAT_TOKENS * len(message.image_urls)
     return total
