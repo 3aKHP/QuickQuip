@@ -26,6 +26,12 @@ QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发
 
 LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message 或 Gemini GenerateContent 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
 
+### 1.1 执行记录的请求边界
+
+群聊和私聊生成请求创建的执行记录按请求携带的 `trigger_kind` 保存触发类型；未显式指定时，群聊默认为 `group_direct`，私聊默认为 `private_direct`。被动群触发保存为 `group_passive`，供 Loop 详情与历史档案使用。历史记录保留已存分类，缺少原始触发证据时不推断回填。
+
+请求在模型调用、工具执行或分段发送期间被取消时，服务将已创建的 Loop 关闭为 `interrupted`，终止原因为 `request_cancelled`，并继续向调用方传播取消异常。收尾复用存储层的幂等关闭：已完成的 Turn、工具结果和发送回执保留；声明但未启动的工具收束为 `not_executed`，运行中且未记录结果的工具收束为 `indeterminate`，计划交付收束为 `skipped`，发送中且未记录回执的交付收束为 `unknown`。收尾不重试工具或消息发送；存储正常时，同会话后续请求可以创建新的 Loop。
+
 ---
 
 ## 2. 当前代码结构
