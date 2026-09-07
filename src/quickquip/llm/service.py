@@ -1543,6 +1543,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 # 同 _persist_turn_and_build_reply 的落库口径：他人近期图注不落触发者名下。
                 image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
                 delivery_sink=delivery_sink,
+                trigger_kind=trigger_kind,
                 agent_delivery_enabled=settings.agent_delivery_enabled,
             )
             with (
@@ -1571,6 +1572,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     turn_recorder=recorder,
                     request_guard=self._build_request_guard(provider),
                 )
+        except asyncio.CancelledError:
+            if recorder is not None:
+                recorder.close(LoopStatus.INTERRUPTED, "request_cancelled")
+            raise
         except DeliveryAborted as exc:
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
