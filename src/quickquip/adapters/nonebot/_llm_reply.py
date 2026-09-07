@@ -99,11 +99,14 @@ class OneBotDeliverySink:
             if "timeout" in lowered or "timed out" in lowered:
                 return DeliveryReceipt(status=DeliveryStatus.UNKNOWN, error_code=type(exc).__name__)
             return DeliveryReceipt(status=DeliveryStatus.FAILED, error_code=type(exc).__name__)
-        self.sent_texts.append(text)
         message_id = ""
         if isinstance(resp, dict):
             message_id = str(resp.get("message_id", "") or "").strip()
         if message_id:
+            # Only a trusted message id confirms a visible delivery.  An
+            # otherwise successful transport response without one is unknown
+            # and must not feed cooldowns, previews, or delivery statistics.
+            self.sent_texts.append(text)
             return DeliveryReceipt(status=DeliveryStatus.SENT, message_id=message_id)
         return DeliveryReceipt(status=DeliveryStatus.UNKNOWN, error_code="missing_message_id")
 

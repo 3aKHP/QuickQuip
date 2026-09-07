@@ -34,8 +34,16 @@ tool_max_calls_per_round = 16
 # recent_context_floor_seconds = 300
 
 # 实际请求输入预算（应用侧估算口径，非模型平台上限）：每次 provider 请求前
-# 对最终 payload 估算，超限拒绝发起并提示清空上下文。provider 可单独覆盖。
+# 对最终 payload 估算。按「provider 显式覆盖 > 模型窗口推导（窗口−输出预留）>
+# 本缺省」解析；超限先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝。
+# provider 可单独覆盖。
 # request_input_token_budget = 96000
+
+# 历史 Loop 重放投影预算的推导下限：实际预算按「请求输入预算 − 纪元可见窗
+# 上限 − system/工具预留 − 当前 Loop 比例预留」推导，配置了模型容量
+# （model_context_windows 或内置窗口表命中）的 provider 自动放大到窗口量级；
+# capacity unknown 时即本值。provider 可硬覆盖。
+# agent_replay_loop_tokens = 4096
 
 # Agent 执行记录保留（按 scope，先触顶者触发整 Loop 清理）
 # agent_record_retention_days = 30
@@ -45,7 +53,6 @@ tool_max_calls_per_round = 16
 # 逐 Turn 交付（默认关闭：安装新版本不改变群内消息量；记录与重放始终工作）
 # 开启后每次模型响应的普通正文先于工具执行分段外发；阈值/上限为 Unicode
 # code point 口径，独立于 OneBot 协议报文长度限制。
-# agent_replay_loop_tokens = 4096
 # agent_delivery_enabled = false
 # reply_split_threshold_chars = 800
 # reply_chunk_max_chars = 1200
@@ -339,6 +346,9 @@ style_profile = "claude_family"
 # auth_method = "bearer"      # 认证方式："api_key"=x-api-key 头（默认），"bearer"=Authorization: Bearer
 # prompt_caching = true       # 启用 Anthropic Prompt Caching（需中转站支持 CLI 格式）
 # headers = { x-app = "cli" } # 自定义 HTTP 头；不设置 x-app 时自动补为 "cli"
+# model_context_windows = { "claude-sonnet-4-6" = 200000 }  # wire 模型 → 上下文窗口；未配置的模型按内置家族表解析，中继自定义模型名建议显式声明
+# agent_replay_loop_tokens = 131072  # 重放投影预算硬覆盖（优先于按窗口推导）
+# request_input_token_budget = 96000 # 请求输入预算硬覆盖（优先于按窗口推导）
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048

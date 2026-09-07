@@ -293,3 +293,79 @@ def test_oldest_anchor_returns_min_across_keys(store: LLMStore) -> None:
     # key_a 冷场缩窗后锚点更新（id 更大），key_b 窗口更大锚点更老
     assert mgr.current_anchor(key_a) > mgr.current_anchor(key_b)
     assert oldest == mgr.current_anchor(key_b)
+
+
+# ── 容量 reset 路径（force_advance_to_hot）与口径锁定 ────────────
+
+
+def test_force_advance_to_hot_shrinks_to_hot_watermark(store: LLMStore) -> None:
+    # 模拟真实流：小窗口初始化 → 窗口增长超过热水位 → 容量 reset 强制收缩。
+    _seed_pairs(store, "1001", pairs=4, chars=40)
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+    _seed_pairs(store, "1001", pairs=12, chars=40)
+    grown = estimate_rows_budget(_rows_since(store, "1001", mgr.current_anchor(_KEY) or 0))
+    assert grown > _SMALL.hot_target_tokens, "前置：窗口已超过热水位"
+    event = mgr.force_advance_to_hot(_KEY, store=store, params=_SMALL)
+    assert event is not None
+    assert event.reason == "hot"
+    assert event.new_anchor_id > event.old_anchor_id
+    rows = _rows_since(store, "1001", mgr.current_anchor(_KEY))
+    # 推进后窗口收敛到热水位附近（允许一行对齐余量）。
+    per_row_max = max(estimate_rows_budget([row]) for row in rows) if rows else 0
+    assert estimate_rows_budget(rows) <= _SMALL.hot_target_tokens + per_row_max
+
+
+def test_force_advance_to_hot_stateless_and_converges(store: LLMStore) -> None:
+    _seed_pairs(store, "1001", pairs=10, chars=40)
+    mgr = EpochManager(clock=FakeClock())
+    # 本进程无该键状态：返回 None，由调用方走终止路径。
+    assert mgr.force_advance_to_hot(_KEY, store=store, params=_SMALL) is None
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+    # 反复收缩在热水位（含逐行对齐余量）内收敛：最终返回 None。
+    for _ in range(32):
+        if mgr.force_advance_to_hot(_KEY, store=store, params=_SMALL) is None:
+            break
+    else:
+        pytest.fail("force_advance_to_hot 未收敛")
+    assert mgr.force_advance_to_hot(_KEY, store=store, params=_SMALL) is None
+
+
+def test_epoch_row_budget_ignores_native_state() -> None:
+    # 口径锁定：纪元预算只读可见行正文，执行记录的原生状态不参与计量。
+    from quickquip.llm.epoch import ROW_OVERHEAD_TOKENS, _row_budget
+    from quickquip.llm.token_estimate import estimate_tokens
+
+    row = {
+        "raw_content": "字" * 100,
+        "content": "",
+        "native_state_json": "n" * 10_000,
+        "agent_loop_id": "loop_1",
+    }
+    assert _row_budget(row) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
+    assert estimate_rows_budget([row]) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
+
+
+def test_force_advance_to_hot_applies_rows_backstop(store: LLMStore) -> None:
+    # 口径锁定：容量降级同样先做行数兜底——窗口超 1024 行时绝不靠
+    # 范围读 LIMIT 截断（那会截掉最新端）。
+    big_cap = EpochParams(
+        context_tokens=200,
+        cold_idle_seconds=300,
+        cold_target_tokens=100,
+        cold_trigger_tokens=150,
+        hot_target_tokens=400,
+        cap_tokens=10_000_000,
+    )
+    # 先小窗口初始化锚点，再灌入超过 DEFAULT_EPOCH_MAX_ROWS 的行量，
+    # 让窗口行数越界（模拟锚点不动、对话持续增长的真实形态）。
+    _seed_pairs(store, "1001", pairs=4, chars=10)
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=big_cap)
+    _seed_pairs(store, "1001", pairs=600, chars=10)  # 窗口 > 1024 行
+    grown_rows = _rows_since(store, "1001", mgr.current_anchor(_KEY) or 0)
+    assert len(grown_rows) > DEFAULT_EPOCH_MAX_ROWS, "前置：窗口行数已越界"
+    event = mgr.force_advance_to_hot(_KEY, store=store, params=big_cap)
+    assert event is not None
+    rows = _rows_since(store, "1001", mgr.current_anchor(_KEY))
+    assert len(rows) <= DEFAULT_EPOCH_MAX_ROWS

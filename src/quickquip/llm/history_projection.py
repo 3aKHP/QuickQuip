@@ -37,6 +37,8 @@ PATH_ARCHIVE = "archive"
 
 _ARCHIVE_TAG = "[历史档案]"
 _ORPHAN_TRIGGER_NOTE = "[系统说明] 该段历史的原始触发消息未保留。"
+# 剥空轮（纯 thinking、零正文零工具）的占位正文：空 text 块会被 Claude 拒 400。
+_STRIPPED_TURN_PLACEHOLDER = "…[历史推理内容已按预算精简]…"
 
 
 class HistoryProjectionError(RuntimeError):
@@ -368,13 +370,21 @@ _RESULT_TIERS = (4096, 1024, 256, 0)
 
 
 def _estimate_messages_tokens(messages: list[LLMConversationMessage]) -> int:
-    from quickquip.llm.token_estimate import estimate_tokens
+    from quickquip.llm.token_estimate import (
+        estimate_native_blocks_tokens,
+        estimate_tokens,
+    )
 
     total = 0
     for message in messages:
-        total += estimate_tokens(message.content)
-        for call in message.tool_calls:
-            total += estimate_tokens(call.arguments_json)
+        # 原生路径消息的正文/工具声明已内含于 native 块（serializer 原样
+        # 发送、忽略通用字段），单计 content 会双倍计量同一 wire 内容。
+        if message.native_content is None:
+            total += estimate_tokens(message.content)
+            for call in message.tool_calls:
+                total += estimate_tokens(call.arguments_json)
+        total += estimate_native_blocks_tokens(message.thinking_blocks)
+        total += estimate_native_blocks_tokens(message.native_content)
     return total
 
 
@@ -453,6 +463,50 @@ def _project_loop_minimal(loop: LoadedLoop) -> list[LLMConversationMessage]:
     ]
 
 
+def _strip_native_thinking(
+    messages: list[LLMConversationMessage], protocol: str
+) -> list[LLMConversationMessage]:
+    """阶梯首档：原生块剥 thinking/thought 部分，保 tool_use/functionCall 配对。
+
+    签名回传要求只约束活跃工具循环内的最近 assistant 轮；已关闭 Loop 的
+    历史轮剥 thinking 属协议合法的保真降级。块剥空（纯 thinking 轮）退
+    通用正文表达并补占位（空 text 块会被 Claude 拒 400），该轮无工具
+    声明，配对不受影响。
+    """
+    stripped: list[LLMConversationMessage] = []
+    changed = False
+    for message in messages:
+        blocks = message.native_content
+        if blocks is None:
+            stripped.append(message)
+            continue
+        if protocol == "claude":
+            kept = [
+                block for block in blocks
+                if block.get("type") not in {"thinking", "redacted_thinking"}
+            ]
+        else:
+            kept = [block for block in blocks if not block.get("thought")]
+        if len(kept) == len(blocks):
+            stripped.append(message)
+            continue
+        changed = True
+        if kept:
+            stripped.append(
+                LLMConversationMessage(
+                    role=message.role, content=message.content, native_content=kept
+                )
+            )
+        else:
+            stripped.append(
+                LLMConversationMessage(
+                    role=message.role,
+                    content=message.content or _STRIPPED_TURN_PLACEHOLDER,
+                )
+            )
+    return stripped if changed else messages
+
+
 def project_loops_with_budget(
     loops: Sequence[LoadedLoop],
     *,
@@ -462,9 +516,10 @@ def project_loops_with_budget(
 ) -> ProjectionResult:
     """带 §8.2 精简阶梯的投影：超预算时按固定顺序精简最旧 Loop。
 
-    阶梯：工具结果按 4096/1024/256/0 收紧 → 纯文本档案 → 档案字符额度
-    减半 → 最小档案 → 逐出最旧完整 Loop。所有精简只影响模型投影，完整
-    记录留在执行表；禁止空循环重试。
+    阶梯：原生块剥 thinking → 丢弃可选 native（通用/档案形态）→ 工具结果
+    按 4096/1024/256/0 收紧 → 纯文本档案 → 档案字符额度减半 → 最小档案 →
+    逐出最旧完整 Loop。所有精简只影响模型投影，完整记录留在执行表；
+    禁止空循环重试。
     """
     result = project_loops(loops, target=target, protocol=protocol)
     if _estimate_messages_tokens(result.messages) <= budget_tokens or not loops:
@@ -494,6 +549,14 @@ def project_loops_with_budget(
         if _total() <= budget_tokens:
             break
         loop = loops_by_id[loop_id]
+        # 阶梯 0：原生块剥 thinking（保结构/配对），仍超限才整档丢弃。
+        if decisions[loop_id].path == PATH_NATIVE:
+            stripped = _strip_native_thinking(segments[loop_id], protocol)
+            if stripped is not segments[loop_id]:
+                segments[loop_id] = stripped
+                _mark(loop_id, "native_thinking_stripped")
+                if _total() <= budget_tokens:
+                    continue
         # 阶梯 1：丢弃可选 native（重投影为无 target 的通用/档案形态）。
         if decisions[loop_id].path == PATH_NATIVE:
             demoted = project_loops([loop], target=None, protocol=protocol)

@@ -39,7 +39,11 @@ from quickquip.llm.config import (
 )
 from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
-from quickquip.llm.request_budget import RequestBudgetExceeded, enforce_request_budget
+from quickquip.llm.request_budget import (
+    RequestBudgetExceeded,
+    derive_replay_budget,
+    enforce_request_budget,
+)
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
 from quickquip.llm.store_parts.agent_records import AgentStoreError
@@ -1051,7 +1055,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         try:
             result = project_loops_with_budget(
                 loaded, target=target, protocol=provider.protocol,
-                budget_tokens=self.config.runtime.agent_replay_loop_tokens,
+                budget_tokens=derive_replay_budget(self.config, provider, model),
             )
         except HistoryProjectionError:
             # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏
@@ -1288,6 +1292,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             provider_id=provider.id,
             model=settings.model or provider.default_model,
         )
+        epoch_params = self.config.resolve_epoch_params(provider)
         history, participants, scene_patch, projected_segments = self._load_scrubbed_history_and_participants(
             chat_id=chat_id,
             chat_type=chat_type,
@@ -1301,7 +1306,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
             epoch_key=epoch_key,
-            epoch_params=self.config.resolve_epoch_params(provider),
+            epoch_params=epoch_params,
             provider=provider,
         )
 
@@ -1388,53 +1393,80 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
         )
-        turn_envelope = self._build_turn_envelope(
-            chat_id,
-            chat_type,
-            analysis_prompt or trimmed_prompt,
-            memories,
-            participants=participants,
-        )
-        messages = self._build_messages(
-            prompt=trimmed_prompt,
-            image_urls=effective_image_urls,
-            history=history,
-            recent_messages=scene_patch,
-            recent_images_messages=recent_images_source,
-            chat_type=chat_type,
-            group_id=str(chat_id),
-            current_sender_name=sender_name,
-            current_user_id=str(user_id),
-            quoted_text=quoted_prompt,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-            quoted_image_urls=request_quoted_image_urls,
-            quoted_is_bot_self=quoted_is_bot_self,
-            forward_text=normalized_forward_text,
-            forward_image_urls=request_forward_image_urls,
-            image_descriptions=image_descriptions or None,
-            include_recent_images=include_recent_images and not is_non_vision,
-            turn_envelope=turn_envelope,
-            projected_history_segments=projected_segments,
-        )
-        request = LLMRequest(
-            model=settings.model or provider.default_model,
-            system_prompt=system_prompt,
-            messages=messages,
-            temperature=provider.temperature,
-            max_output_tokens=provider.max_output_tokens,
-            tools=tool_specs,
-            allow_tool_calls=bool(tool_specs),
-            tool_choice="auto",
-            builtin_search=builtin_search_active,
-        )
-        try:
-            enforce_request_budget(self.config, provider, request)
-        except RequestBudgetExceeded as exc:
-            logger.warning(
-                "request budget exceeded scope=%s provider=%s model=%s: %s",
-                scope_key, provider.id, request.model, exc,
+        # 装配闭包经 nonlocal 重绑定；下游账本 meter 消费降级后的最终值。
+        turn_envelope: str = ""
+        messages: list[LLMConversationMessage] = []
+
+        def _assemble_request(*, reuse_patch: bool = False) -> LLMRequest:
+            """请求装配（首轮与预算降级重试共用同一边界）。
+
+            reuse_patch=True 时注入首轮【现场】补丁：补丁游标读即服役，
+            降级后重取只会拿到 floor 滑窗，首轮（未派发）已含的更旧补丁
+            会静默丢失；首轮补丁按降级前（更大）的 history 去重，对缩后
+            history 的子集复用同样不产生重复。
+            """
+            nonlocal history, participants, scene_patch, projected_segments
+            nonlocal turn_envelope, messages
+            history, participants, scene_patch, projected_segments = (
+                self._load_scrubbed_history_and_participants(
+                    chat_id=chat_id,
+                    chat_type=chat_type,
+                    scope_key=scope_key,
+                    settings=settings,
+                    sensitive=sensitive,
+                    user_id=user_id,
+                    sender_name=sender_name,
+                    recent_messages=scene_patch if reuse_patch else recent_messages,
+                    message_id=message_id,
+                    quoted_sender_name=quoted_sender_name,
+                    quoted_user_id=quoted_user_id,
+                    epoch_key=epoch_key,
+                    epoch_params=epoch_params,
+                    provider=provider,
+                )
             )
+            turn_envelope = self._build_turn_envelope(
+                chat_id,
+                chat_type,
+                analysis_prompt or trimmed_prompt,
+                memories,
+                participants=participants,
+            )
+            messages = self._build_messages(
+                prompt=trimmed_prompt,
+                image_urls=effective_image_urls,
+                history=history,
+                recent_messages=scene_patch,
+                recent_images_messages=recent_images_source,
+                chat_type=chat_type,
+                group_id=str(chat_id),
+                current_sender_name=sender_name,
+                current_user_id=str(user_id),
+                quoted_text=quoted_prompt,
+                quoted_sender_name=quoted_sender_name,
+                quoted_user_id=quoted_user_id,
+                quoted_image_urls=request_quoted_image_urls,
+                quoted_is_bot_self=quoted_is_bot_self,
+                forward_text=normalized_forward_text,
+                forward_image_urls=request_forward_image_urls,
+                image_descriptions=image_descriptions or None,
+                include_recent_images=include_recent_images and not is_non_vision,
+                turn_envelope=turn_envelope,
+                projected_history_segments=projected_segments,
+            )
+            return LLMRequest(
+                model=settings.model or provider.default_model,
+                system_prompt=system_prompt,
+                messages=messages,
+                temperature=provider.temperature,
+                max_output_tokens=provider.max_output_tokens,
+                tools=tool_specs,
+                allow_tool_calls=bool(tool_specs),
+                tool_choice="auto",
+                builtin_search=builtin_search_active,
+            )
+
+        def _budget_exceeded_reply() -> dict:
             return {
                 "reply": "这次对话的上下文已经太长，无法安全发起模型请求，请用清空上下文命令重置后再试。",
                 "rate_limit_key": LLM_RULE_NAME,
@@ -1443,6 +1475,33 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 "provider_id": provider.id,
                 "model": request.model,
             }
+
+        # §8.3 先降级再拒绝：超限时锚点强制缩到热水位（付费 miss 一次），
+        # 复用首轮补丁重建请求重试一次；仍超限才终止本轮。
+        request = _assemble_request()
+        budget_retry_used = False
+        while True:
+            try:
+                enforce_request_budget(self.config, provider, request)
+                break
+            except RequestBudgetExceeded as exc:
+                logger.warning(
+                    "request budget exceeded scope=%s provider=%s model=%s: %s",
+                    scope_key, provider.id, request.model, exc,
+                )
+                if budget_retry_used:
+                    return _budget_exceeded_reply()
+                degraded = self._epochs.force_advance_to_hot(
+                    epoch_key, store=self.store, params=epoch_params
+                )
+                if degraded is None:
+                    return _budget_exceeded_reply()
+                budget_retry_used = True
+                logger.info(
+                    "epoch hot degrade for budget scope=%s anchor=%d->%d",
+                    scope_key, degraded.old_anchor_id, degraded.new_anchor_id,
+                )
+                request = _assemble_request(reuse_patch=True)
         tool_context = ToolExecutionContext(
             group_id=chat_id,
             user_id=user_id,

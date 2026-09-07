@@ -201,7 +201,7 @@ LLM 默认只在以下场景触发：
 LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
 
 - 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长、不逐轮位移——这是自动前缀缓存跨轮命中的结构性前提
-- 锚点只在两种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）或**触顶**（窗口超过 cap，缩回 L_hot）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `llm.toml` 的 `[runtime]` / `[[providers]]` 用 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
+- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次，付费 miss 换优雅降级）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `llm.toml` 的 `[runtime]` / `[[providers]]` 用 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
 - 窗口单位是 token 估算（`token_estimate.py`），不再是行数；另有 1024 行的行数硬兜底（防海量超短行撑爆 provider 的 messages 数组）
 - 锚点只落在 user/assistant 对边界，且保留最少 4 行（防单条超长转发把窗口吃空）
 - 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
