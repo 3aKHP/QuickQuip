@@ -150,3 +150,41 @@ async def test_middle_chunk_failure_keeps_earlier_facts(tmp_path: Path, patch_pr
     # 前两轮正文 = fixture 前两 Turn。
     assert sink.attempts[0][1][:20] == FIVE_TURN_TEXTS[0][:20]
     assert sink.attempts[1][1][:20] == FIVE_TURN_TEXTS[1][:20]
+
+
+async def test_no_record_fallback_keeps_reply_when_delivery_enabled(
+    tmp_path: Path, patch_provider_builder
+):
+    """同 scope 已有未关闭 Loop（并发触发）时退回无记录路径：reply 必须保留。
+
+    无记录路径没有 sink 交付，最终正文只能靠 reply 单次发送；逐 Turn 开关
+    不得在这条路径上把 reply 置空（2026-09-07 生产回归：同群并发触发的第二
+    条回复被静默吞掉）。
+    """
+    from quickquip.llm.agent_records import TriggerKind
+    from quickquip.llm.store_parts.agent_records import UserTriggerPayload
+    from tests.fixtures.agent_loop import CollectingSink, FiveTurnScenarioClient
+
+    service = await _service(tmp_path)
+    service.config.runtime.agent_delivery_enabled = True
+    sink = CollectingSink()
+    service.bind_delivery_sink(sink)
+    client = FiveTurnScenarioClient(protocol="openai")
+    patch_provider_builder(lambda provider: client)
+    # 模拟同群另一条触发仍在跑：scope 1001 上留一个未关闭 Loop。
+    generation, _ = service.store.agent_scope_state("1001")
+    service.store.begin_loop(
+        "1001", generation, TriggerKind.GROUP_DIRECT,
+        UserTriggerPayload(user_id="3003", sender_name="先手", content="先来的那条"),
+    )
+
+    result = await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="K甲赛况如何？",
+    )
+
+    assert len(client.requests) == 5  # 完整跑完五 Turn
+    assert sink.deliveries == []  # 无记录路径不经 sink
+    assert result["reply"] == FIVE_TURN_TEXTS[4]
+    with service.store._connect() as conn:
+        loop_count = conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0]
+    assert loop_count == 1  # 只有占位 Loop，本轮未建新 Loop
