@@ -41,3 +41,20 @@ def test_action_queue_reaps_stale_running_actions(tmp_path):
     recent = {item["id"]: item for item in queue.list_recent()}
     assert recent[first["id"]]["status"] == "failed"
     assert "timed out" in recent[first["id"]]["error"]
+
+
+def test_get_tracks_one_action_outside_recent_window(tmp_path):
+    queue = WebAdminActionQueue(tmp_path / "actions.db")
+    action_id = queue.enqueue("delete_conversation_row", {"row_id": 1})["id"]
+    assert queue.get(action_id)["status"] == "queued"
+    queue.claim(1)
+    assert queue.get(action_id)["status"] == "running"
+    queue.complete(action_id, {"deleted": True})
+    for _ in range(105):
+        queue.enqueue("llm_reload")
+    assert action_id not in {action["id"] for action in queue.list_recent(100)}
+    assert queue.get(action_id)["result"] == {"deleted": True}
+    queue.fail(action_id, "failed")
+    assert queue.get(action_id)["status"] == "failed"
+    assert queue.get("missing") is None
+    assert queue.get("' OR 1=1 --") is None

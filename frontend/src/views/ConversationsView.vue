@@ -1,6 +1,6 @@
 <template>
   <div class="conv-view page-view-fill">
-    <UiPageHeader title="对话日志"><template #actions><UiButton icon="RefreshCw" :disabled="listing" @click="loadConversations">刷新</UiButton></template></UiPageHeader>
+    <UiPageHeader title="对话日志"><template #actions><UiButton icon="RefreshCw" :disabled="listing || loadingMessages" @click="refreshAll">刷新</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
     <div class="split">
@@ -41,7 +41,11 @@
                   <span v-if="m.canonical_name && m.canonical_name !== m.sender_name" class="canonical">（{{ m.canonical_name }}）</span>
                   <span class="mono msg-id">#{{ m.id }}</span>
                   <span class="msg-time">{{ formatTime(m.created_at) }}</span>
-                  <button class="msg-delete" title="删除此条" @click="onDelete(m)"><UiIcon name="Trash2" :size="13" /></button>
+                  <button v-if="!selectedKey.startsWith('archive:')" class="msg-delete" title="删除此条" :disabled="deletion.get(selectedKey, m.id)?.state !== undefined && deletion.get(selectedKey, m.id)?.state !== 'failed'" @click="onDelete(m)"><UiIcon name="Trash2" :size="13" /></button>
+                </div>
+                <div v-if="deletion.get(selectedKey, m.id)" class="deletion-status" role="status">
+                  <span>{{ deletion.get(selectedKey, m.id)?.message }}</span>
+                  <button v-if="deletion.get(selectedKey, m.id)?.state === 'unknown' && deletion.get(selectedKey, m.id)?.actionId" class="msg-delete" title="重新查询删除结果" @click="deletion.resume(selectedKey, m.id)"><UiIcon name="RefreshCw" :size="14" /></button>
                 </div>
                 <div class="msg-body">{{ m.content }}</div>
               </div>
@@ -58,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -66,26 +70,82 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
-import { listConversations, fetchMessages, deleteMessage } from '../api/conversations'
-import { toast } from '../toast'
+import { listConversations, fetchMessages, type Conversation, type ConversationMessage } from '../api/conversations'
+import { useConversationDeletion } from '../composables/useConversationDeletion'
 
 const PAGE_SIZE = 50
-const conversations = ref<any[]>([]); const listing = ref(false); const listError = ref<string | null>(null)
-const selectedKey = ref(''); const keyword = ref(''); const messages = ref<any[]>([])
+const conversations = ref<Conversation[]>([]); const listing = ref(false); const listError = ref<string | null>(null)
+const selectedKey = ref(''); const keyword = ref(''); const messages = ref<ConversationMessage[]>([])
 const loadingMessages = ref(false); const loadingMore = ref(false); const loadError = ref<string | null>(null); const hasMore = ref(false)
+let messageRequest = 0
+let listRequest = 0
+let disposed = false
+onUnmounted(() => { disposed = true; messageRequest++; listRequest++ })
+const deletion = useConversationDeletion(async scope => {
+  await Promise.all([loadConversations(), selectedKey.value === scope ? reload() : Promise.resolve()])
+})
 
 function typeLabel(type: string): string { return { group: '群聊', private: '私聊', archive: '归档' }[type] || type }
 function typeVariant(type: string): string { return { group: 'info', private: 'success', archive: 'warn' }[type] || 'info' }
 function roleVariant(role: string): string { return { user: 'info', assistant: 'success', system: 'warn', tool: 'warn' }[role] || 'info' }
-function displayGroupId(conv: any): string { if (conv.type === 'private') return conv.group_id.slice('private:'.length); if (conv.type === 'archive') return conv.group_id.slice('archive:'.length); return conv.group_id }
+function displayGroupId(conv: Conversation): string { if (conv.type === 'private') return conv.group_id.slice('private:'.length); if (conv.type === 'archive') return conv.group_id.slice('archive:'.length); return conv.group_id }
 function formatTime(iso: string): string { if (!iso) return ''; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` }
 
-async function loadConversations() { listing.value = true; listError.value = null; try { const data = await listConversations(); conversations.value = data.conversations || [] } catch (e: unknown) { listError.value = (e as Error).message } finally { listing.value = false } }
+async function loadConversations() {
+  const requestId = ++listRequest
+  listing.value = true
+  listError.value = null
+  try {
+    const data = await listConversations()
+    if (requestId === listRequest && !disposed) conversations.value = data.conversations
+  } catch (e: unknown) {
+    if (requestId === listRequest && !disposed) listError.value = (e as Error).message
+  } finally {
+    if (requestId === listRequest && !disposed) listing.value = false
+  }
+}
 async function selectConversation(groupKey: string) { if (groupKey === selectedKey.value) return; selectedKey.value = groupKey; keyword.value = ''; await reload() }
-async function reload() { if (!selectedKey.value) return; loadingMessages.value = true; loadError.value = null; messages.value = []; hasMore.value = false; try { const data = await fetchMessages(selectedKey.value, { keyword: keyword.value || undefined, limit: PAGE_SIZE }); messages.value = data.messages || []; hasMore.value = !!data.has_more } catch (e: unknown) { loadError.value = (e as Error).message } finally { loadingMessages.value = false } }
-async function loadMore() { if (!messages.value.length) return; loadingMore.value = true; try { const data = await fetchMessages(selectedKey.value, { beforeId: messages.value[messages.value.length - 1].id, keyword: keyword.value || undefined, limit: PAGE_SIZE }); messages.value.push(...(data.messages || [])); hasMore.value = !!data.has_more } catch (e: unknown) { toast((e as Error).message, 'error') } finally { loadingMore.value = false } }
+async function reload() {
+  if (!selectedKey.value) return
+  const requestId = ++messageRequest
+  loadingMessages.value = true
+  loadingMore.value = false
+  loadError.value = null
+  messages.value = []
+  hasMore.value = false
+  try {
+    const data = await fetchMessages(selectedKey.value, { keyword: keyword.value || undefined, limit: PAGE_SIZE })
+    if (requestId !== messageRequest || disposed) return
+    messages.value = data.messages
+    hasMore.value = data.has_more
+  } catch (e: unknown) {
+    if (requestId === messageRequest && !disposed) loadError.value = (e as Error).message
+  } finally {
+    if (requestId === messageRequest && !disposed) loadingMessages.value = false
+  }
+}
+async function loadMore() {
+  if (!messages.value.length || loadingMessages.value || loadingMore.value) return
+  const requestId = ++messageRequest
+  loadingMore.value = true
+  try {
+    const data = await fetchMessages(selectedKey.value, { beforeId: messages.value[messages.value.length - 1].id, keyword: keyword.value || undefined, limit: PAGE_SIZE })
+    if (requestId !== messageRequest || disposed) return
+    messages.value.push(...data.messages)
+    hasMore.value = data.has_more
+  } catch (e: unknown) {
+    if (requestId === messageRequest && !disposed) loadError.value = (e as Error).message
+  } finally {
+    if (requestId === messageRequest && !disposed) loadingMore.value = false
+  }
+}
 function clearKeyword() { keyword.value = ''; reload() }
-async function onDelete(m: any) { if (!confirm(`删除消息 #${m.id}？`)) return; try { await deleteMessage(selectedKey.value, m.id); messages.value = messages.value.filter(x => x.id !== m.id); toast('已删除') } catch (e: unknown) { toast((e as Error).message, 'error') } }
+async function refreshAll() { await Promise.all([loadConversations(), reload()]) }
+async function onDelete(m: ConversationMessage) {
+  const scope = selectedKey.value
+  const prompt = m.role === 'user' ? `删除消息 #${m.id} 及其关联对话轮？` : `删除消息 #${m.id}？`
+  if (confirm(prompt)) await deletion.remove(scope, m.id)
+}
 loadConversations()
 </script>
 
@@ -126,6 +186,8 @@ loadConversations()
 .msg-time { color: var(--qq-text-muted); margin-left: auto; }
 .msg-delete { background: transparent; border: none; color: var(--qq-text-muted); cursor: pointer; padding: 2px 4px; border-radius: var(--qq-radius-sm); transition: all var(--qq-transition-fast); }
 .msg-delete:hover { color: var(--qq-danger); background: var(--qq-danger-soft); }
+.msg-delete:disabled { opacity: 0.4; cursor: default; }
+.deletion-status { display: flex; align-items: center; gap: 6px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); overflow-wrap: anywhere; }
 .msg-body { font-size: var(--qq-text-sm); color: var(--qq-text); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .load-more { display: flex; justify-content: center; padding: var(--qq-gap-sm); }
 
