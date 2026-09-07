@@ -1,6 +1,6 @@
 # QuickQuip 开发工作流与发布流程
 
-本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，架构与领域所有权见 [`architecture.md`](architecture.md)。
+本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，主题版本、累积更新与开发版本约定见 [`versioning.md`](versioning.md)。
 
 ## 硬规则
 
@@ -122,21 +122,17 @@ pnpm --dir frontend build
 
 ## 发布生命周期
 
-1. 在 `dev` 冻结候选 SHA、`pyproject.toml` 版本、CHANGELOG、公开文档和配置模板。
+1. 按 [`versioning.md`](versioning.md) 确定本次目标版本，在 `dev` 或用于额外收束的 `release/*` 冻结候选 SHA、`pyproject.toml` 版本、CHANGELOG、公开文档和配置模板；需要预发布验收时使用 `X.Y.Z-rc.N`，正式发布前定为 `X.Y.Z`。
 2. 汇总本地 changelog 草稿与已合并历史，将 `Unreleased` 形成新版本段并更新比较链接；确认草稿在 release 成功后再清理。
-3. 为 `dev → main` 开 release PR，标题为 `release: vX.Y.Z — <摘要>`；完成分级要求的评审和验证。
+3. 为 `dev → main`（使用发布准备分支时为 `release/* → main`）开 release PR，标题为 `release: vX.Y.Z — <摘要>`；完成分级要求的评审和验证。
 4. 合并 release PR 后，在 `main` 的已接受提交上创建并推送 `vX.Y.Z` tag。
 5. tag 触发 `release.yml`：完整测试、Windows 懒人包、Docker 镜像与 GitHub Release。核对 tag、版本、ZIP、镜像 revision/digest 和 Release notes 一致。
 6. 把 `main` 回灌 `dev`：若能快进则 `git merge --ff-only main`；否则开 `chore/back-merge-vX.Y.Z` PR。确认 post-merge CI 后清理已发布的本地草稿与短分支。
-7. **back-merge 完成后必须专门做一次版本号 bump**：将 `pyproject.toml` 版本设为下一个 Minor 的开发起点 `X.Y+1.0-dev.0`（如发布 1.13.0 后设为 `1.14.0-dev.0`），以 `chore:` 提交推送 `dev`。这是发版扫尾的固定步骤，漏掉会让下一轮开发挂在已发布的旧版本号上。详见下方「版本号约定」。
+7. back-merge 完成后核对 dev 的下一目标版本：常规发布后默认进入下一个 Patch 的 `-dev.0`，确定新主题时进入下一 Minor；已开始后续开发时保留其有效目标。需要调整时更新 `pyproject.toml`，按授权以 `chore:` 提交、推送。Hotfix 占用目标版本时，按 [`versioning.md`](versioning.md) 重新选择目标，确保后续开发使用开发版本标识。
 
 ## 版本号约定
 
-`pyproject.toml` 的 `version` 是全项目唯一版本号来源（前端 `package.json` 独立演进，不随项目发版）。
-
-- **开发期（dev）**：版本号保持 `X.Y.0-dev.N` 形式，`N` 为 dev 相对 `main` 的合并批次（PR merge commit）数。批次计数命令：`git rev-list --count --merges origin/main..origin/dev`。随开发推进按需以 `chore:` 提交更新（Develop direct），如 `1.13.0-dev.13`。
-- **发版冻结**：release PR 将版本号定为正式 `X.Y.Z`（不带 `v` 前缀；tag 名带 `v`）。
-- **back-merge 后**：按「发布生命周期」第 7 步，把 dev 版本 bump 到 `X.Y+1.0-dev.0`，之后 N 随开发批次重新递增。
+版本含义、兼容性说明、版本来源、dev 批次、RC 与 hotfix 目标处理统一维护在 [`versioning.md`](versioning.md)。该约定作为非强制性的发布决策参考，适用于采用后的版本；本文负责操作流程与验证要求。
 
 ## CI、Issue 与文档扫尾
 
