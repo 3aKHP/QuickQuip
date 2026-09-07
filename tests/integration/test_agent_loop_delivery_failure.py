@@ -185,9 +185,49 @@ async def test_no_record_fallback_keeps_reply_when_delivery_enabled(
     assert len(client.requests) == 5  # 完整跑完五 Turn
     assert sink.deliveries == []  # 无记录路径不经 sink
     assert result["reply"] == FIVE_TURN_TEXTS[4]
+    # 回执按群回填的钥匙必须携带；无 recorder 行号，精确回填键不出现。
+    assert result["scope_key"] == "1001"
+    assert "agent_turn_row_id" not in result
     with service.store._connect() as conn:
         loop_count = conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0]
     assert loop_count == 1  # 只有占位 Loop，本轮未建新 Loop
+
+
+async def test_no_record_fallback_receipt_backfills_assistant_row(
+    tmp_path: Path, patch_provider_builder
+):
+    """无记录路径的发送回执：按 scope 回填刚插入的 assistant 行 message_id。
+
+    2026-09-07 生产回归：该路径返回值缺 scope_key，record_final_receipt 两个
+    分支都拿不到钥匙，撤回遮蔽/引用定位按回执找不到这条消息。
+    """
+    from quickquip.adapters.nonebot._llm_reply import record_final_receipt
+    from quickquip.llm.agent_records import TriggerKind
+    from quickquip.llm.store_parts.agent_records import UserTriggerPayload
+    from tests.fixtures.agent_loop import CollectingSink, FiveTurnScenarioClient
+
+    service = await _service(tmp_path)
+    service.config.runtime.agent_delivery_enabled = True
+    service.bind_delivery_sink(CollectingSink())
+    client = FiveTurnScenarioClient(protocol="openai")
+    patch_provider_builder(lambda provider: client)
+    generation, _ = service.store.agent_scope_state("1001")
+    service.store.begin_loop(
+        "1001", generation, TriggerKind.GROUP_DIRECT,
+        UserTriggerPayload(user_id="3003", sender_name="先手", content="先来的那条"),
+    )
+
+    result = await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="K甲赛况如何？",
+    )
+    record_final_receipt(service, result, "qq-77")
+
+    with service.store._connect() as conn:
+        row = conn.execute(
+            "SELECT message_id FROM conversation_messages"
+            " WHERE role='assistant' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert row["message_id"] == "qq-77"
 
 
 async def test_no_record_fallback_surfaces_abort_when_delivery_enabled(
