@@ -62,6 +62,7 @@ async def test_missing_message_id_is_unknown_not_sent():
     receipt = await sink("dlv_1", {"text": "正文"})
     assert receipt.status == DeliveryStatus.UNKNOWN
     assert receipt.error_code == "missing_message_id"
+    assert sink.sent_texts == []
 
 
 async def test_timeout_classified_unknown_and_plain_error_failed():
@@ -81,6 +82,19 @@ async def test_timeout_classified_unknown_and_plain_error_failed():
     receipt2 = await sink2("dlv_1", {"text": "正文"})
     assert receipt2.status == DeliveryStatus.FAILED
     assert receipt2.error_code == "RuntimeError"
+    assert sink2.sent_texts == []
+
+
+async def test_timeout_is_not_recorded_as_visible_text():
+    reset_delivery_throttle()
+
+    async def timeout_send(text):
+        raise asyncio.TimeoutError("Request timed out")
+
+    sink = OneBotDeliverySink(timeout_send, scope_key="g-timeout", interval_ms=0)
+    receipt = await sink("dlv_1", {"text": "可能已送达"})
+    assert receipt.status == DeliveryStatus.UNKNOWN
+    assert sink.sent_texts == []
 
 
 async def test_same_scope_sends_are_throttled():
