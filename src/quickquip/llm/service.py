@@ -1157,6 +1157,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             "llm_used": True,
             "provider_id": provider.id,
             "model": model,
+            # 发送回执按群回填无记录路径的 assistant 行（无 agent_turn_row_id 时
+            # record_final_receipt 依赖此键定位）
+            "scope_key": scope_key,
             # 工具外发图片（base64 PNG），适配层拼在文本后发送；上限见 MAX_OUTBOUND_TOOL_IMAGES
             "images": outbound_images_payload(tool_context),
         }
@@ -1660,7 +1663,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             if recorder.final_turn_record is not None:
                 result_payload = dict(result_payload)
                 result_payload["agent_turn_row_id"] = recorder.final_turn_record.message_row_id
-                result_payload["scope_key"] = scope_key
         if recorder is not None and self.config.runtime.agent_delivery_enabled:
             # 逐 Turn 模式：正文已由 sink 交付，reply 不再二次发送（§5.1）。
             # 无记录路径（同 scope 并发触发 / store 不可用）没有任何 sink 交付，

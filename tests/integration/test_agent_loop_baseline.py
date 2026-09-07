@@ -102,6 +102,9 @@ async def test_final_only_mode_records_every_turn_and_sends_final(
     assert [row["content"] for row in assistant_rows] == list(FIVE_TURN_TEXTS)
     # 最终正文沿现有单次交付方式。
     assert result["reply"] == FIVE_TURN_TEXTS[4]
+    # 带 recorder 的路径：精确回填行号与按群回退键同时携带。
+    assert result["agent_turn_row_id"] is not None
+    assert result["scope_key"] == "1001"
     # 非最终正文标记 suppressed_by_policy；最终 Turn 在关闭模式下不建交付行
     #（最终正文沿现有单次交付，回执由兼容列回填记录）。
     with scenario_service.store._connect() as conn:
