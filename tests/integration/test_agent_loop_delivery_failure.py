@@ -188,3 +188,48 @@ async def test_no_record_fallback_keeps_reply_when_delivery_enabled(
     with service.store._connect() as conn:
         loop_count = conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0]
     assert loop_count == 1  # 只有占位 Loop，本轮未建新 Loop
+
+
+async def test_no_record_fallback_surfaces_abort_when_delivery_enabled(
+    tmp_path: Path, patch_provider_builder, monkeypatch
+):
+    """无记录路径上逐轮预算门禁触发 DeliveryAborted：必须给出可见提示而非空串。
+
+    门禁不依赖 recorder，所以并发退化的那轮同样可能中途超限；该轮没有任何
+    sink 交付，若沿逐 Turn 模式静默处理，用户什么都收不到。
+    """
+    import quickquip.llm.service as service_module
+    from quickquip.llm.agent_records import TriggerKind
+    from quickquip.llm.request_budget import RequestBudgetExceeded
+    from quickquip.llm.store_parts.agent_records import UserTriggerPayload
+    from tests.fixtures.agent_loop import CollectingSink, FiveTurnScenarioClient
+
+    service = await _service(tmp_path)
+    service.config.runtime.agent_delivery_enabled = True
+    sink = CollectingSink()
+    service.bind_delivery_sink(sink)
+    client = FiveTurnScenarioClient(protocol="openai")
+    patch_provider_builder(lambda provider: client)
+    generation, _ = service.store.agent_scope_state("1001")
+    service.store.begin_loop(
+        "1001", generation, TriggerKind.GROUP_DIRECT,
+        UserTriggerPayload(user_id="3003", sender_name="先手", content="先来的那条"),
+    )
+    # 预检与逐轮门禁共用 enforce_request_budget：前两次放行（预检 + 第一轮），
+    # 第三次（工具结果撑大请求后的第二轮）超限。
+    calls = {"n": 0}
+
+    def _budget(config, provider, request):
+        calls["n"] += 1
+        if calls["n"] >= 3:
+            raise RequestBudgetExceeded("input 9999 > budget 1")
+
+    monkeypatch.setattr(service_module, "enforce_request_budget", _budget)
+
+    result = await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="K甲赛况如何？",
+    )
+
+    assert len(client.requests) == 1  # 第二轮被门禁拦下
+    assert sink.deliveries == []
+    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
