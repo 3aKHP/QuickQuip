@@ -6,6 +6,18 @@
 
 （暂无）
 
+## [1.15.1] - 2026-09-08
+
+本版是 1.15 系列的累积更新：修复 Agent Loop 取消收尾与被动触发记录分类，部署脚本统一为按版本发布的事务式 v4 流程。
+
+**升级说明**：部署脚本重构为 `deploy-v4.sh/.ps1`，按版本目录发布、私有暂存上传、部署锁串行化共享配置更新，启动或健康检查失败时自动恢复上一版本。服务器需要 rsync、flock、Python >= 3.11.8 和 Docker Compose >= 2.27；既有平铺部署首次使用 `-Migrate` 迁移，已迁移环境继续直接执行 `bash prod/deploy-v4.sh`。数据库迁移和外部副作用的回退要求需独立评估。
+
+### 修复
+
+- 取消 LLM 请求时关闭当前执行记录，保留已完成的工具与发送事实，使同会话后续请求继续正常记录并分段交付。
+- 群聊被动触发在执行记录与历史档案中显示正确的触发分类，便于查询与排查自动回复。
+- 部署脚本支持按版本发布、迁移旧部署与健康验证回滚，统一 Bash 和 PowerShell 行为；上传和切换采用私有暂存与部署锁，失败时恢复本次修改的共享配置并明确报告恢复结果。
+
 ## [1.15.0] - 2026-09-07
 
 本版围绕 **Agent Loop 工具对话记录与交付**：保留跨轮工具事实，支持按会话开启分段发送，并按模型容量管理历史重放和请求预算。
@@ -877,7 +889,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/3aKHP/QuickQuip/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/3aKHP/QuickQuip/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/3aKHP/QuickQuip/compare/v1.14.2...v1.14.3
 [1.14.2]: https://github.com/3aKHP/QuickQuip/compare/v1.14.1...v1.14.2

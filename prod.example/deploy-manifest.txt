@@ -1,0 +1,11 @@
+.dockerignore
+bot.py
+web_api.py
+pyproject.toml
+requirements.txt
+config
+frontend/dist
+llm_about
+src
+prod/Dockerfile
+prod/docker-compose.yml

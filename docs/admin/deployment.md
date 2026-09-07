@@ -19,6 +19,24 @@ LLM 模块的详细结构、边界和群内命令说明见 [docs/dev/llm-module.
 
 ## 部署步骤
 
+### 自动部署与版本回滚
+
+日常部署推荐使用 `prod/deploy-v4.sh`（Bash）或 `prod/deploy-v4.ps1`（PowerShell）。两端共享远端事务执行器，按清单上传应用文件，预检和构建成功后切换版本目录，并验证容器、OneBot 连接与 Web Admin HTTP。完整前提、参数与目录结构见 [生产模板说明](../../prod.example/README.md)。服务器需具备 rsync、flock、Python ≥ 3.11.8 和 Docker Compose ≥ 2.27。
+
+```bash
+# 在本地项目目录执行，使用自己的 SSH alias
+bash prod/deploy-v4.sh -DryRun
+bash prod/deploy-v4.sh -HostAlias quickquip-prod
+bash prod/deploy-v4.sh -Status -HostAlias quickquip-prod
+bash prod/deploy-v4.sh -Rollback -HostAlias quickquip-prod
+```
+
+已有平铺部署首次使用 `-Migrate`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `-SkipHealth`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`。
+
+部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env` 和数据库。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`-DryRun` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
+
+运行态位于部署根目录的 `data/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
+
 ### 1. 服务器上安装 Docker
 
 ```bash
@@ -78,6 +96,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 
 ```bash
 cd /path/to/QuickQuip/prod
+docker compose --env-file ../.env build quickquip
 docker compose --env-file ../.env up -d
 ```
 
@@ -98,7 +117,7 @@ docker compose --env-file ../.env up -d
 
 - **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，当前默认模板为 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在适配器管理界面启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client（连接拓扑详见 [onebot-adapters.md](onebot-adapters.md)）。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
 - `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存；`awakening.toml` 是这些文件中唯一的例外：bot 每 30 秒检测其 mtime，外部修改会自动重载
-- 因此部署脚本在同步文件后会额外强制重建 `quickquip` 容器，避免新 persona 或词表已经上传但运行时仍在使用旧配置
+- 部署脚本在切换发行目录后强制重建应用容器一次，使源码和配置挂载指向本次发行目录
 - 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
 
 ### 4.1 首次准备贴吧登录态
@@ -229,7 +248,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
   ```bash
   cd /path/to/QuickQuip/prod
-  docker compose --env-file ../.env build quickquip web-admin
+  docker compose --env-file ../.env build quickquip
   docker compose --env-file ../.env up -d quickquip web-admin
   ```
 
@@ -244,7 +263,7 @@ docker compose --env-file ../.env restart quickquip web-admin
 
 # 更新依赖/Dockerfile/pyproject 后重建
 cd /path/to/QuickQuip/prod
-docker compose --env-file ../.env build quickquip web-admin
+docker compose --env-file ../.env build quickquip
 docker compose --env-file ../.env up -d quickquip web-admin
 
 # 查看日志

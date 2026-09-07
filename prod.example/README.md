@@ -1,53 +1,90 @@
 # QuickQuip Production Template
 
-This directory is the tracked template for the private `prod/` directory.
-
-Copy it before first use (Windows or Linux):
-
-```powershell
-# Windows (PowerShell)
-Copy-Item -Recurse prod.example prod
-```
+Copy this directory to the ignored `prod/` directory, then configure your SSH alias, compose topology and the project-root `.env`.
 
 ```bash
-# Linux / macOS
 cp -r prod.example prod
 ```
 
-> ⚠️ If `prod/` already exists (initialized before), the copy commands above will
-> **nest** into `prod/prod.example` instead of overwriting the old directory — the
-> deploy script would then run with your old production settings and upload
-> `prod/sendkey.env` to the remote host. Both deploy scripts detect the nesting and
-> abort; move the old `prod/` aside first, then re-copy the template.
+```powershell
+Copy-Item -Recurse prod.example prod
+```
 
-Then edit only files under `prod/` and the project root `.env`.
+When `prod/` already exists, move it aside before copying. The drivers reject a nested `prod/prod.example` directory.
 
-- `.env` at the repository root is the only QuickQuip application secret/config source.
-- `QUICKQUIP_SEARXNG_BASE_URL` may be set in `.env` if the containers should use a search service outside this compose project.
-- `prod/sendkey.env` is optional and used only by maintenance scripts.
-- `prod/` is ignored by git and may contain production-only operational state.
-- `quickquip-prod` in the helper scripts is a placeholder SSH host alias; change it under `prod/` before use.
+## Requirements
 
-Local helper scripts (run from the project root on your machine; both variants SSH into the server and share the same server-side workers):
+- Server: Linux, Bash, GNU coreutils/find, rsync, flock, Python >= 3.11.8, Docker and Docker Compose >= 2.27. The deployment user needs Docker access and write access to the deployment root. Root-owned LLBot configuration files use noninteractive sudo for shared-file snapshot, apply and restore; without permission the action stops before activation.
+- Bash client: Bash, rsync, SSH/SCP, tar, Node.js and pnpm.
+- PowerShell client: PowerShell 5.1 or 7, SSH/SCP, tar, Node.js and pnpm on PATH. The server materializes its archive with rsync.
+- Initialize SSH host trust before unattended use. `quickquip-prod` is a placeholder SSH alias.
+- Fill root `.env`, `config/llm.toml` and other enabled feature configuration. Set `QUICKQUIP_SEARXNG_BASE_URL` for the external search service.
 
-| Action | Windows | Linux |
+## Commands
+
+Both local drivers share `remote-deploy-v4.sh` and `deploy-state.py`.
+
+| Action | Bash | PowerShell |
 |---|---|---|
-| Deploy | `.\prod\deploy-v4.ps1` | `bash prod/deploy-v4.sh` |
-| Status / QR login | `.\prod\check_bot.ps1` | `bash prod/check_bot_local.sh` |
+| Deploy | `bash prod/deploy-v4.sh` | `prod/deploy-v4.ps1` |
+| Local preview | `bash prod/deploy-v4.sh -DryRun` | `prod/deploy-v4.ps1 -DryRun` |
+| Status | `bash prod/deploy-v4.sh -Status` | `prod/deploy-v4.ps1 -Status` |
+| Previous release | `bash prod/deploy-v4.sh -Rollback` | `prod/deploy-v4.ps1 -Rollback` |
+| Explicit rollback | `bash prod/deploy-v4.sh -Rollback <id>` | `prod/deploy-v4.ps1 -Rollback -ReleaseId <id>` |
+| Flat-layout migration and deploy | `bash prod/deploy-v4.sh -Migrate` | `prod/deploy-v4.ps1 -Migrate` |
+| First deployment awaiting QQ login | `bash prod/deploy-v4.sh -SkipHealth` | `prod/deploy-v4.ps1 -SkipHealth` |
 
-`check_bot_local.sh` uses a `_local` suffix because `check_bot.sh` is the server-side worker it invokes remotely — the whole `prod/` directory is synced to the server during deploy, so the names must not collide. `cron_check_bot.sh` runs on the server via cron.
+Shared parameters: `-HostAlias`, `-RemoteDir` (default `/opt/QuickQuip`), `-KeepReleases` (2..100, default 4). Remote paths use letters, digits, dot, slash, underscore or hyphen.
 
-On the server, run compose commands from `prod/`:
+`-DryRun` builds the frontend locally and previews the upload; PowerShell creates and removes a temporary archive. It makes no remote connection. `-LocalCheck` is a compatibility alias. Combining preview with migration, rollback or status is rejected. `-SkipHealth` applies only to deployment/migration and explicitly marks the result unverified; manual rollback always requires health verification.
 
-```bash
-cd /opt/QuickQuip/prod
-docker compose --env-file ../.env up -d --build
+For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` after an explicit `-SkipHealth` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `prod/check_bot.sh`; `prod/cron_check_bot.sh` remains the cron entry.
+
+## Layout and Transaction
+
+```text
+<root>/
+  .env                       application credentials
+  data/                      databases, logs, font and optional Tieba state
+  prod/                      LLBot state, maintenance scripts, sendkey.env
+  releases/<id>/             application, config, frontend and compose
+  current -> releases/<id>
+  previous -> releases/<id>
+  .deploy/                   private staging, operation logs and exit status
 ```
 
-The `web-admin` container serves the prebuilt frontend from `frontend/dist`, so build it before bringing the stack up (or just use the deploy scripts, which do this for you):
+`deploy-manifest.txt` lists application paths. Listed directories are recursive: review their contents before deployment. Root `.env`, maintenance scripts and optional `prod/sendkey.env`, font and `data/tieba/storage_state.json` are uploaded separately to private staging. LLBot login directories are never uploaded. For a test server, prepare an isolated checkout without real credentials or Tieba session files.
+
+Each operation has a UTC timestamp plus random suffix. Uploads enter an exclusive private directory; live files are modified only under the server deployment lock. The candidate compose is validated against the staged environment and its image built before shared files are applied. Unchanged application files use rsync hardlinks; release roots and transaction directories restrict access to the deployment user. Web Admin configuration writes use atomic file replacement, preserving older hardlinked content.
+
+Before activation, the server snapshots shared files that it will replace, including existing LLBot WebSocket configuration. It applies the candidate environment, switches `current`, and recreates application containers once. The health gate checks all three services, the bot connection log and Web Admin HTTP inside its container. SSH disconnects do not stop the detached transaction; drivers reconnect to its log.
+
+Successful operations remove private staging and rollback copies, retaining `.deploy/<id>.log` and `.exit`. Interrupted uploads can leave staging directories; inspect operation status before manually removing these. Failed recovery retains its private backup and returns exit code 2. The requested action still returns nonzero when automatic recovery succeeds.
+
+## Migration and Recovery
+
+`-Migrate` snapshots the server's existing application files and pins actual running images of `llbot`, `quickquip` and `web-admin` as a baseline, then deploys the local candidate. Flat files remain in place so existing bind mounts stay valid during preparation. Custom services or unsupported external bind mounts require an explicit migration design; the script stops before activation. Baselines are not automatically collected.
+
+Automatic recovery restores pre-operation shared files, links and containers, then verifies health. Manual rollback selects an existing release and its local images, retains the current root `.env` and runtime data, and verifies health. Missing rollback images are never pulled or rebuilt. Do not prune retained release tags manually.
+
+Database migrations and external effects are outside filesystem rollback. Check upgrade notes and prepare a separate data backup when required; code rollback can require coordinated data restore. Server-side configuration edits belong to their release; subsequent deployments use local candidate configuration.
+
+Retention removes older successfully deployed release directories and application images, protecting `current`, `previous` and migration baselines. Failed candidates and operation logs remain for manual inspection. Root `.env` remains the application credential source; transaction copies are private and transient.
+
+`deploy-v4-bak.sh` and `deploy-v4-bak.ps1` preserve the archived flat-layout drivers for inspection and controlled legacy tests. They refuse targets with a release directory or a current link. Use `deploy-v4` for current deployments.
+
+## Manual Compose Access
+
+On a release-layout server, export the root and release identity:
 
 ```bash
-cd frontend && pnpm install --frozen-lockfile && pnpm build
+export QUICKQUIP_ROOT=/opt/QuickQuip
+export QUICKQUIP_ENV_FILE="$QUICKQUIP_ROOT/.env"
+export QUICKQUIP_RELEASE="$(basename "$(readlink "$QUICKQUIP_ROOT/current")")"
+cd "$QUICKQUIP_ROOT/current/prod"
+docker compose --env-file "$QUICKQUIP_ENV_FILE" logs -f quickquip
 ```
 
-For the full prerequisite checklist (Node.js/pnpm, `.env` keys, fonts, Tieba login state), see [docs/admin/deployment.md](../docs/admin/deployment.md).
+For manual flat-layout installation, build the frontend, then run `docker compose --env-file ../.env build quickquip` and `docker compose --env-file ../.env up -d` from `prod/`. Both application services use the same image.
+
+Application prerequisites and platform notes: [deployment guide](../docs/admin/deployment.md).

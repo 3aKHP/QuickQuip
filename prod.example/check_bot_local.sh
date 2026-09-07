@@ -41,7 +41,7 @@ ProjectRoot="$(cd "$ScriptDir/.." && pwd)"
 
 invoke_server() {
     local cmd="$1" result rc
-    result=$(ssh -o StrictHostKeyChecking=no "$Server" "bash $RemoteDir/prod/check_bot.sh $cmd" 2>&1)
+    result=$(ssh -o StrictHostKeyChecking=no "$Server" "REMOTE_DIR='$RemoteDir' bash '$RemoteDir/prod/check_bot.sh' $cmd" 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ]; then
         err "SSH failed: $result"
