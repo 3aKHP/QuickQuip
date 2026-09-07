@@ -291,6 +291,13 @@ class TurnRecorder:
                 break
             item = plan.get(delivery_id)
             chunk_text = text[item.source_start : item.source_end] if item else text
+            # 范围恒等要求段落分隔换行归前段（§6.1），段尾空白只属于显示层：
+            # 发送前 rstrip；剥离后为空的纯空白段按策略抑制，不发送空消息。
+            chunk_text = chunk_text.rstrip()
+            if not chunk_text:
+                self._store.suppress_delivery(self._handle, delivery_id)
+                self._delivery_stats["suppressed"] += 1
+                continue
             attempt = self._store.start_delivery(self._handle, delivery_id)
             receipt = await self._sink(delivery_id, {"text": chunk_text})
             if receipt.status == DeliveryStatus.SENT and receipt.message_id:
