@@ -194,6 +194,31 @@ class EpochManager:
         state.last_activity_at = self._clock()
         return event
 
+    def force_advance_to_hot(
+        self,
+        key: EpochKey,
+        *,
+        store: LLMStore,
+        params: EpochParams,
+    ) -> EpochResetEvent | None:
+        """容量 reset 路径（§8.3）：请求预算超限时的付费降级。
+
+        不看 idle 与 cap 触发条件，直接把锚点缩到热水位（L_hot）；无状态
+        （本进程未见过该键）或已无更小锚点时返回 None，由调用方走终止路径。
+        """
+        state = self._states.get(key)
+        if state is None:
+            return None
+        rows = store.list_conversation_messages_since(
+            key.scope_key, state.anchor_id, limit=DEFAULT_EPOCH_MAX_ROWS
+        )
+        candidate = self._pick_anchor_by_tokens(rows, params.hot_target_tokens)
+        if candidate <= state.anchor_id:
+            return None
+        return self._advance(
+            state, store, key, candidate, reason="hot", epoch_tokens=estimate_rows_budget(rows)
+        )
+
     # ── 内部 ─────────────────────────────────────────────────────
 
     def _lazy_init(self, key: EpochKey, store: LLMStore, params: EpochParams) -> EpochState:

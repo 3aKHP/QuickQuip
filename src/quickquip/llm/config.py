@@ -85,7 +85,9 @@ class RuntimeConfig:
     # 逐 Turn 交付上线开关（§6.3）：默认关闭——安装新版本不立刻增加群内
     # 消息数；记录与投影始终工作。
     agent_delivery_enabled: bool = False
-    # 每个历史 Loop 的投影预算（§2：512..65536；可被更小的显式上下文预算收紧）。
+    # 历史重放投影预算（§8.2）：推导下限（512..4MiB）。实际预算由
+    # request_budget.derive_replay_budget 从请求输入预算（仲裁者）推导；
+    # provider 覆盖键为硬值，capacity unknown 时本值即实际值。
     agent_replay_loop_tokens: int = 4096
     reply_split_threshold_chars: int = 800
     reply_chunk_max_chars: int = 1200
@@ -203,8 +205,11 @@ class ProviderConfig:
     epoch_cap_tokens: int | None = None
     # 应用侧输入预算（§8.3）：provider 覆盖 None = 继承 runtime 缺省。
     request_input_token_budget: int | None = None
-    # wire model -> token 容量；只能来自维护者配置或可信已核实资料，
-    # 不从模型名称猜测。未配置的模型按 capacity unknown 处理。
+    # 历史重放投影预算的 provider 级硬覆盖（§8.2）；None = 推导
+    # （仲裁者减固定开销，runtime.agent_replay_loop_tokens 为下限）。
+    agent_replay_loop_tokens: int | None = None
+    # wire model -> token 容量；显式配置永远优先，未命中时按
+    # context_windows 内置策展表解析，均未命中按 capacity unknown 处理。
     model_context_windows: dict[str, int] = field(default_factory=dict)
 
 
@@ -561,6 +566,9 @@ def _parse_single_provider(
         epoch_hot_target_tokens=_as_optional_int(entry.get("epoch_hot_target_tokens")),
         epoch_cap_tokens=_as_optional_int(entry.get("epoch_cap_tokens")),
         request_input_token_budget=_as_optional_int(entry.get("request_input_token_budget")),
+        agent_replay_loop_tokens=_clamped_optional_int(
+            entry.get("agent_replay_loop_tokens"), floor=512, ceiling=4_194_304
+        ),
         model_context_windows={
             str(name): max(1024, int(size))
             for name, size in as_dict(entry.get("model_context_windows")).items()
@@ -586,6 +594,21 @@ def _as_optional_int(raw: Any) -> int | None:
     except ValueError:
         logger.warning("epoch_* 覆盖值 %r 无法解析为整数，回退继承 [runtime]", raw)
         return None
+
+
+def _clamped_optional_int(
+    raw: Any, *, floor: int, ceiling: int
+) -> int | None:
+    """provider 级可选整数键 + 范围钳制：缺省/越界告警并回退 None。"""
+    value = _as_optional_int(raw)
+    if value is None:
+        return None
+    clamped = min(ceiling, max(floor, value))
+    if clamped != value:
+        logger.warning(
+            "provider 覆盖值 %d 超出 [%d, %d]，已钳制为 %d", value, floor, ceiling, clamped
+        )
+    return clamped
 
 
 _MCP_NEGOTIATION_MODES = {"legacy", "auto", "modern"}
@@ -836,7 +859,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 runtime_raw.get("agent_delivery_enabled"), default=False
             ),
             agent_replay_loop_tokens=min(
-                65_536, max(512, int(runtime_raw.get("agent_replay_loop_tokens", 4096)))
+                4_194_304, max(512, int(runtime_raw.get("agent_replay_loop_tokens", 4096)))
             ),
             reply_split_threshold_chars=max(
                 1, int(runtime_raw.get("reply_split_threshold_chars", 800))

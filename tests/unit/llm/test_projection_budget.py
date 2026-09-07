@@ -136,3 +136,129 @@ def test_within_budget_projection_untouched():
     assert result.decisions[0].path == PATH_STRUCTURED
     assert result.decisions[0].reason is None
     assert [m.content for m in result.messages if m.role == "assistant"] == ["短正文。"]
+
+
+# ── 原生 CoT 计量与首档剥离 ──────────────────────────────────────
+
+
+def _native_estimate(messages) -> int:
+    """与实现同口径的估算（含原生/thinking 块）。"""
+    from quickquip.llm.token_estimate import estimate_native_blocks_tokens
+
+    total = 0
+    for message in messages:
+        total += estimate_tokens(message.content)
+        for call in message.tool_calls:
+            total += estimate_tokens(call.arguments_json)
+        total += estimate_native_blocks_tokens(message.thinking_blocks)
+        total += estimate_native_blocks_tokens(message.native_content)
+    return total
+
+
+def _cot_loop(thinking_chars: int):
+    blocks = [
+        {"type": "thinking", "thinking": "思" * thinking_chars, "signature": "sig"},
+        {"type": "tool_use", "id": "call_exec_0", "name": "get_identity", "input": {}},
+    ]
+    return _loop(
+        "loop_cot",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0"),),
+                native_state=_native_state(OWNER, blocks),
+                owner=_owner_dict(OWNER),
+            ),
+        ),
+    )
+
+
+def test_native_cot_counted_into_projection_estimate():
+    loop = _cot_loop(thinking_chars=4000)
+    full = project_loops_with_budget(
+        [loop], target=OWNER, protocol="claude", budget_tokens=10**9
+    )
+    assert _native_estimate(full.messages) > estimate_tokens("思" * 4000)
+
+
+def test_native_thinking_stripped_before_native_dropped():
+    loop = _cot_loop(thinking_chars=4000)
+    full = project_loops_with_budget(
+        [loop], target=OWNER, protocol="claude", budget_tokens=10**9
+    )
+    full_estimate = _native_estimate(full.messages)
+    # 预算略低于全量：剥 thinking（≈4000×0.7 token）即达标，不应走到 native_dropped。
+    result = project_loops_with_budget(
+        [loop], target=OWNER, protocol="claude", budget_tokens=full_estimate - 200
+    )
+    decision = result.decisions[0]
+    assert decision.reason == "reduced:native_thinking_stripped"
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content is not None
+    types = [block.get("type") for block in assistant.native_content]
+    assert "thinking" not in types
+    assert "tool_use" in types, "工具声明保留，配对完整"
+    assert any(m.role == "tool" for m in result.messages), "工具结果保留"
+
+
+def test_native_thinking_stripped_gemini_thought_parts():
+    from dataclasses import replace
+
+    gemini_owner = replace(OWNER, protocol="gemini")
+    blocks = [
+        {"text": "想" * 4000, "thought": True},
+        {"functionCall": {"name": "get_identity", "args": {}}},
+    ]
+    loop = _loop(
+        "loop_gcot",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0"),),
+                native_state=_native_state(gemini_owner, blocks),
+                owner=_owner_dict(gemini_owner),
+            ),
+        ),
+    )
+    full = project_loops_with_budget(
+        [loop], target=gemini_owner, protocol="gemini", budget_tokens=10**9
+    )
+    full_estimate = _native_estimate(full.messages)
+    result = project_loops_with_budget(
+        [loop], target=gemini_owner, protocol="gemini", budget_tokens=full_estimate - 200
+    )
+    decision = result.decisions[0]
+    assert decision.reason == "reduced:native_thinking_stripped"
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content is not None
+    assert all(not block.get("thought") for block in assistant.native_content)
+    assert any("functionCall" in block for block in assistant.native_content)
+
+
+def test_huge_native_cot_still_reaches_deeper_ladder():
+    # 大 CoT + 大工具结果：剥 thinking 后仍超限，继续走到 native_dropped
+    # 或更深档位，签名块不再上 wire。
+    blocks = [
+        {"type": "thinking", "thinking": "思" * 100_000, "signature": "sig"},
+        {"type": "tool_use", "id": "call_exec_0", "name": "get_identity", "input": {}},
+    ]
+    loop = _loop(
+        "loop_cot_deep",
+        (
+            _turn(
+                "turn_0",
+                tools=(_big_result_exec("exec_0", 8000),),
+                native_state=_native_state(OWNER, blocks),
+                owner=_owner_dict(OWNER),
+            ),
+        ),
+    )
+    result = project_loops_with_budget(
+        [loop], target=OWNER, protocol="claude", budget_tokens=400
+    )
+    decision = result.decisions[0]
+    assert decision.reason is not None
+    assert "reduced:native_thinking_stripped" in (decision.reason or "")
+    assert "reduced:native_dropped" in (decision.reason or "")
+    for message in result.messages:
+        assert message.native_content is None
