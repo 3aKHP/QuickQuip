@@ -12,8 +12,8 @@ services:
       - -c
       - "(sleep 5 && echo 'nameserver 127.0.0.11' > /etc/resolv.conf && echo 'options ndots:0' >> /etc/resolv.conf) & exec /bin/llonebot-service"
     volumes:
-      - ./llbot-qq:/root/.config/QQ
-      - ./llbot-data:/root/llonebot
+      - ${QUICKQUIP_ROOT:-..}/prod/llbot-qq:/root/.config/QQ
+      - ${QUICKQUIP_ROOT:-..}/prod/llbot-data:/root/llonebot
     environment:
       - TZ=Asia/Shanghai
       - QUICK_LOGIN_QQ=${QQ_ACCOUNT:?请设置 QQ 号}
@@ -24,6 +24,7 @@ services:
 
   quickquip:
     init: true
+    image: quickquip-app:${QUICKQUIP_RELEASE:-latest}
     build:
       context: ..
       dockerfile: prod/Dockerfile
@@ -35,7 +36,7 @@ services:
     depends_on:
       - llbot
     env_file:
-      - ../.env
+      - ${QUICKQUIP_ENV_FILE:-../.env}
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
@@ -47,7 +48,7 @@ services:
       PYTHONPATH: "/app/src"
     shm_size: "1gb"
     volumes:
-      - ../data:/app/data
+      - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config:ro
       - ../llm_about:/app/llm_about:ro
       - ../bot.py:/app/bot.py:ro
@@ -56,17 +57,11 @@ services:
 
   web-admin:
     init: true
-    build:
-      context: ..
-      dockerfile: prod/Dockerfile
-      args:
-        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
-        PIP_TRUSTED_HOST: "${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}"
-        PLAYWRIGHT_BASE_IMAGE: "${PLAYWRIGHT_BASE_IMAGE:-m.daocloud.io/mcr.microsoft.com/playwright/python:v1.58.0-noble}"
+    image: quickquip-app:${QUICKQUIP_RELEASE:-latest}
     container_name: quickquip-web-admin
     command: ["python", "-u", "web_api.py"]
     env_file:
-      - ../.env
+      - ${QUICKQUIP_ENV_FILE:-../.env}
     environment:
       TZ: "${TZ:-Asia/Shanghai}"
       WEB_ADMIN_HOST: "0.0.0.0"
@@ -76,7 +71,7 @@ services:
     ports:
       - "127.0.0.1:5104:5104"
     volumes:
-      - ../data:/app/data
+      - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config
       - ../llm_about:/app/llm_about
       - ../frontend/dist:/app/frontend/dist:ro

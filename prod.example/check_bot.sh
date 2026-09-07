@@ -4,12 +4,20 @@
 
 REMOTE_DIR="${REMOTE_DIR:-/opt/QuickQuip}"
 NULL_DEVICE="/d""ev/null"
-cd "$REMOTE_DIR/prod" 2>"$NULL_DEVICE" || { echo "ERROR: cannot cd to $REMOTE_DIR/prod"; exit 1; }
+if [ -L "$REMOTE_DIR/current" ]; then
+    export QUICKQUIP_ROOT="$REMOTE_DIR"
+    export QUICKQUIP_ENV_FILE="$REMOTE_DIR/.env"
+    QUICKQUIP_RELEASE="$(basename "$(readlink "$REMOTE_DIR/current")")"
+    export QUICKQUIP_RELEASE
+    cd "$REMOTE_DIR/current/prod" || exit 1
+else
+    cd "$REMOTE_DIR/prod" || exit 1
+fi
 
 BACKEND="${BACKEND:-llbot}"
 cmd="${1:-status}"
 
-COMPOSE=(docker compose --env-file ../.env)
+COMPOSE=(docker compose --env-file "$REMOTE_DIR/.env")
 
 if [ "$cmd" = "status" ]; then
     if ! "${COMPOSE[@]}" ps "$BACKEND" 2>"$NULL_DEVICE" | grep -q 'Up'; then
@@ -90,8 +98,8 @@ fi
 if [ "$cmd" = "force-recreate" ]; then
     echo "Force recreating $BACKEND container (fresh device fingerprint)..."
     "${COMPOSE[@]}" rm -sf "$BACKEND" 2>&1
-    rm -rf llbot-qq llbot-data 2>"$NULL_DEVICE" || true
-    mkdir -p llbot-qq llbot-data
+    rm -rf "$REMOTE_DIR/prod/llbot-qq" "$REMOTE_DIR/prod/llbot-data" 2>"$NULL_DEVICE" || true
+    mkdir -p "$REMOTE_DIR/prod/llbot-qq" "$REMOTE_DIR/prod/llbot-data"
     "${COMPOSE[@]}" up -d "$BACKEND" 2>&1
     sleep 5
     exec bash "$0" gen-qr
