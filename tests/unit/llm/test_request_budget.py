@@ -20,7 +20,6 @@ from quickquip.llm.request_budget import (
 )
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.token_estimate import (
-    NATIVE_MEDIA_FLAT_TOKENS,
     estimate_tokens,
 )
 
@@ -74,9 +73,10 @@ def test_estimate_request_tokens_counts_thinking_blocks():
 
 
 def test_estimate_request_tokens_media_not_double_counted_in_native():
+    # 精确断言：1200 媒体固定档 + 8 结构开销，base64 全量计入会被立刻检出。
     media_block = {"inlineData": {"mimeType": "image/png", "data": "A" * 100_000}}
     msg = LLMConversationMessage(role="user", content="", native_content=[media_block])
-    assert estimate_request_tokens(_request([msg])) <= NATIVE_MEDIA_FLAT_TOKENS + 64
+    assert estimate_request_tokens(_request([msg])) == 1200 + 8
 
 
 def test_count_wire_items_counts_native_and_thinking_parts():

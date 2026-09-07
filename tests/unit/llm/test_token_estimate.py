@@ -58,14 +58,18 @@ def test_estimate_native_block_tokens_gemini_function_call():
 
 
 def test_estimate_native_block_tokens_unknown_shape_nonzero():
-    assert estimate_native_block_tokens({"type": "future_block", "payload": "x" * 100}) > 0
+    # 载荷长度下界：固定值兜底实现（如恒返 1）无法通过。
+    assert estimate_native_block_tokens(
+        {"type": "future_block", "payload": "x" * 100}
+    ) >= math.ceil(100 * ASCII_TOKEN_RATIO)
     assert estimate_native_block_tokens("raw-string-block") > 0
     assert estimate_native_block_tokens(None) > 0
 
 
 def test_estimate_native_block_tokens_media_flat_not_base64_inflated():
+    # 精确断言：1200 媒体固定档 + 8 结构开销——base64 全量计入会被立刻检出。
     block = {"inlineData": {"mimeType": "image/png", "data": "A" * 200_000}}
-    assert estimate_native_block_tokens(block) <= 1200 + 128
+    assert estimate_native_block_tokens(block) == 1200 + 8
 
 
 def test_estimate_native_blocks_tokens_none_and_empty():

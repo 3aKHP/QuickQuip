@@ -40,6 +40,7 @@ _BUILTIN_PREFIX_RULES: tuple[tuple[str, int], ...] = (
     ("mistral-large", 128_000),
 )
 
+# 由 _BUILTIN_PREFIX_RULES 按前缀长度倒序派生的解析顺序（派生数据，非独立源）。
 _PREFIX_ORDER = sorted(_BUILTIN_PREFIX_RULES, key=lambda rule: -len(rule[0]))
 
 
