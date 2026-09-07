@@ -154,9 +154,10 @@ async def test_all_turns_mode_seven_chunks_delivered_before_tools(
     turn_texts = [FIVE_TURN_TEXTS[i] for i in range(5)]
     delivered_first_texts = [payload["text"] for _, payload in sink.deliveries[:4]]
     assert delivered_first_texts == turn_texts[:4]
-    # 末 Turn 三段还原恒等。
+    # 末 Turn 三段：显示层剥离段尾空白行，以空行分隔仍可还原原文。
     final_chunks = [payload["text"] for _, payload in sink.deliveries[4:]]
-    assert "".join(final_chunks) == FIVE_TURN_TEXTS[4]
+    assert all(chunk == chunk.rstrip() for chunk in final_chunks)
+    assert "\n\n".join(final_chunks) == FIVE_TURN_TEXTS[4]
     # reply 不再二次发送。
     assert result["reply"] == ""
     # 默认配置对照：不开测试切分参数时末 Turn 374 字符保持一段。
@@ -165,6 +166,57 @@ async def test_all_turns_mode_seven_chunks_delivered_before_tools(
             "SELECT COUNT(*) FROM agent_deliveries WHERE kind = 'text_chunk'"
         ).fetchone()[0]
     assert chunk_count == 7
+
+
+async def test_delivered_chunks_strip_trailing_blank_lines(
+    scenario_service, patch_provider_builder, monkeypatch
+):
+    """分段交付的显示层剥离：非末段不带段尾空行，纯空白段不外发空消息。
+
+    切分把段落分隔换行归前段（§6.1 范围恒等），段尾空白在发送前 rstrip；
+    前段近阈值、后段超阈值时空白边界可能独立成段，剥离后按策略抑制。
+    """
+    from quickquip.llm.provider import LLMRequest, LLMResponse
+
+    monkeypatch.setattr(
+        scenario_service.config.runtime, "agent_delivery_enabled", True
+    )
+    monkeypatch.setattr(
+        scenario_service.config.runtime, "reply_split_threshold_chars", 30
+    )
+    monkeypatch.setattr(
+        scenario_service.config.runtime, "reply_chunk_max_chars", 240
+    )
+    # 三段计划：A 段（尾随 \n\n 归前段）、纯空白段 " \n\n"、B 段。
+    text = "A" * 30 + "\n\n" + " \n\n" + "B" * 60
+
+    class SingleTurnClient:
+        def __init__(self) -> None:
+            self.requests: list[LLMRequest] = []
+
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            self.requests.append(request)
+            return LLMResponse(
+                text=text, model=request.model, finish_reason="stop",
+                input_tokens=10, output_tokens=10,
+            )
+
+    patch_provider_builder(lambda provider: SingleTurnClient())
+    sink = CollectingSink()
+
+    result = await run_five_turn_scenario(scenario_service, delivery_sink=sink)
+
+    assert [payload["text"] for _, payload in sink.deliveries] == ["A" * 30, "B" * 60]
+    assert all(payload["text"] == payload["text"].rstrip() for _, payload in sink.deliveries)
+    assert result["reply"] == ""  # 正文已由 sink 分段交付
+    with scenario_service.store._connect() as conn:
+        statuses = [
+            row["status"]
+            for row in conn.execute(
+                "SELECT status FROM agent_deliveries WHERE kind='text_chunk' ORDER BY delivery_index"
+            )
+        ]
+    assert statuses == ["sent", "suppressed", "sent"]
 
 
 async def test_round_limit_records_declared_calls_as_not_executed(
