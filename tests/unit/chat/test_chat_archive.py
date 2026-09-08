@@ -60,3 +60,13 @@ def test_image_urls_and_stats(tmp_path: Path):
     assert stats["available"] is True
     assert stats["messages"] == 1
     assert stats["groups"] == 1
+
+
+def test_dedupe_same_ts_same_text_without_message_id(tmp_path: Path):
+    """Bot Review 建议：ts 与 text 完全相同的无 ID 写入仍应去重（回灌双源）。"""
+    archive = ChatArchive(tmp_path / "a.db")
+    assert archive.record("10001", "n", "刷屏", ts=_ts(0)) is True
+    assert archive.record("10001", "n", "刷屏", ts=_ts(0)) is False
+    # 同秒同文但出现序号不同（occurrence）是不同消息，保留
+    assert archive.record("10001", "n", "刷屏", ts=_ts(0), occurrence=1) is True
+    assert len(archive.read_all("10001")) == 2

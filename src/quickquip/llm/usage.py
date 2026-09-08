@@ -241,7 +241,7 @@ async def _record_usage(
             "error_message": error_msg or None,
             # 成功请求的协议完成原因（STOP/MAX_TOKENS/SAFETY...）：级联丢弃
             # 语义下的失败定位不再依赖 trace 库（1.15.2 CE 线）。
-            "finish_reason": (response.finish_reason or None) if response else None,
+            "finish_reason": (response.finish_reason or "").strip() or None if response else None,
         }
         from quickquip.llm.usage_store import usage_store
         await asyncio.to_thread(usage_store.record, row)
