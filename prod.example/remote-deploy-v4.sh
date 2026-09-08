@@ -180,6 +180,11 @@ if [ "$Action" = rollback ]; then
     [ "$Target" != "$Prev" ] || fail "target is already current"
     verify_release "$Prev" || fail "current release cannot be used for recovery"
     verify_release "$Target" || fail "rollback target or image missing"
+    RollbackVersion=""
+    if [ -f "$Root/releases/$Target/pyproject.toml" ]; then
+        RollbackVersion="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$Root/releases/$Target/pyproject.toml" | head -1)"
+    fi
+    RollbackVersion="${RollbackVersion:-unknown}"
     # Empty shared snapshot: manual rollback retains the current environment.
     mkdir -p "$Incoming/shared"
     mkdir -m 700 "$Backup"
@@ -191,7 +196,7 @@ if [ "$Action" = rollback ]; then
     health "$Target" || fail "rollback health failed"
     set_link previous "$Prev"
     Succeeded=1
-    step "rollback complete: $Target (current credentials and data retained)"
+    step "rollback complete: $Target ($RollbackVersion) (current credentials and data retained)"
     exit 0
 fi
 
@@ -233,6 +238,14 @@ if ! docker image inspect "$llbot_image" >/dev/null 2>&1; then
     [ "$pulled" = 1 ] || fail "LLBot pull failed before activation"
 fi
 compose "$Id" build quickquip
+# Version identity: deployed pyproject version + the server-side build
+# timestamp captured when the image build finishes (e.g.
+# 1.15.3-dev.2+build.20260909.065235). It is echoed into the transaction
+# log lines below; if you maintain a private ops-trail tool, this is the
+# hook point to record "$VersionId" with it.
+BuildStamp="$(date +%Y%m%d.%H%M%S)"
+VersionId="${DEPLOY_VERSION:-unknown}+build.$BuildStamp"
+step "image built: quickquip-app:$Id ($VersionId)"
 snapshot_shared
 Changed=1
 shared_state apply "$Root" "$Incoming" "$Backup"
@@ -247,7 +260,7 @@ else
 fi
 set_link previous "$Prev"
 Succeeded=1
-step "release complete: $Id"
+step "release complete: $Id ($VersionId)"
 # Only collect completed deployments; never remove current, previous or baselines.
 touch "$Release/.complete"
 count=0
