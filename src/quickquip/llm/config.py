@@ -281,8 +281,9 @@ class DailyBriefingConfig:
 class WeeklyReportConfig:
     """群周报：每周自动生成上周群聊回顾。
 
-    数据源复用 wordcloud collector（always-on，不删除），按天采样后套用日报同款 LLM 管线。
-    period 标识为 ISO 周号（如 2026-W24）。
+    数据源为聊天归档（chat_archive，always-on），1.15.2 起全量消息进
+    压缩序列化器后一次成文（日分节/分钟块/连发合并），不再按天采样；
+    溢出由级联每跳字符预算兜底。period 标识为 ISO 周号（如 2026-W24）。
     """
 
     enabled: bool = False
@@ -290,7 +291,6 @@ class WeeklyReportConfig:
     publish_cron: str = "0 10 * * *"  # 每天 10:00 发布（周一发新报告，其余日子补发未发布的）
     min_messages: int = 100
     length_hint: int = 2000
-    sample_per_day: int = 50  # 每天采样消息数上限，控制总量
     model_cascade: list[str] = field(default_factory=list)
 
 
@@ -983,7 +983,6 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
             min_messages=max(1, int(weekly_report_raw.get("min_messages", 100))),
             length_hint=max(200, int(weekly_report_raw.get("length_hint", 2000))),
-            sample_per_day=max(1, int(weekly_report_raw.get("sample_per_day", 50))),
             model_cascade=[
                 str(item).strip()
                 for item in weekly_report_raw.get("model_cascade", [])

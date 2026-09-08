@@ -246,17 +246,66 @@ async def test_run_period_generation_proceeds_at_exact_min_messages(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_run_period_generation_returns_none_when_sample_empty(monkeypatch):
-    """钉住：分天采样结果为空时返回 None 且不调用 LLM。"""
+    """钉住：月报分天采样结果为空时返回 None 且不调用 LLM。"""
     counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
     monkeypatch.setattr(summary_jobs, "sample_messages_by_day", lambda msgs, per_day: [])
+
+    result = await summary_jobs.run_period_generation(
+        "10001", plugin.PERIOD_MONTHLY, 1_000.0, 100_000.0, "2026-05",
+        svc=deps.svc, collector=deps.collector, stats_tracker=deps.stats_tracker,
+    )
+
+    assert result is None
+    assert counts.generate == 0
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_weekly_full_volume_without_sampling(monkeypatch):
+    """钉住：1.15.2 起周报全量进压缩序列化器，不再按天采样。"""
+    counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
+
+    def explode(msgs, per_day):
+        raise AssertionError("周报路径不应调用分天采样")
+
+    monkeypatch.setattr(summary_jobs, "sample_messages_by_day", explode)
+
+    captured: dict = {}
+
+    async def capture_generate(sampled, persona, group_id, **kw):
+        captured["sampled_count"] = len(sampled)
+        return ("正文", "model-1")
+
+    monkeypatch.setattr(summary_jobs, "generate_period_report", capture_generate)
 
     result = await summary_jobs.run_period_generation(
         "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
         svc=deps.svc, collector=deps.collector, stats_tracker=deps.stats_tracker,
     )
 
-    assert result is None
-    assert counts.generate == 0
+    assert result == ("正文", "model-1")
+    assert captured["sampled_count"] == 50  # 全量透传
+
+
+@pytest.mark.asyncio
+async def test_run_period_generation_passes_bot_ids_from_env(monkeypatch):
+    """钉住：bot 账号从 QQ_ACCOUNT 环境变量解析并透传给序列化器。"""
+    _counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
+    monkeypatch.setenv("QQ_ACCOUNT", "12345, 678")
+
+    captured: dict = {}
+
+    async def capture_generate(sampled, persona, group_id, **kw):
+        captured["bot_user_ids"] = kw["bot_user_ids"]
+        return ("正文", "model-1")
+
+    monkeypatch.setattr(summary_jobs, "generate_period_report", capture_generate)
+
+    await summary_jobs.run_period_generation(
+        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
+        svc=deps.svc, collector=deps.collector, stats_tracker=deps.stats_tracker,
+    )
+
+    assert captured["bot_user_ids"] == frozenset({"12345", "678"})
 
 
 @pytest.mark.asyncio
