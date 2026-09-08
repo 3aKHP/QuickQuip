@@ -11,6 +11,7 @@ from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.chat.archive import ChatArchive
 from quickquip.chat.wordcloud import WORDCLOUD_STOPWORDS, build_word_frequencies
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
 from quickquip.llm.config import DailyBriefingConfig
@@ -225,7 +226,7 @@ async def build_briefing_context(
     group_id: int | str,
     period: BriefingPeriod,
     now: datetime,
-    archive,
+    archive: ChatArchive,
     briefing_config: DailyBriefingConfig,
     news_provider: BriefingNewsProvider | None = None,
 ) -> DailyBriefingContext:

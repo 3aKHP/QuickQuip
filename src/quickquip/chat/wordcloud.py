@@ -4,13 +4,9 @@ import logging
 from collections import Counter
 from io import BytesIO
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
-from quickquip.chat.config import BEIJING_TIMEZONE
 
 logger = logging.getLogger(__name__)
-
-_LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
 
 # ---------------------------------------------------------------------------
 # Constants

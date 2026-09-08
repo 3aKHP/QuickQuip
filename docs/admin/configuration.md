@@ -326,7 +326,7 @@ output_per_mtok = 0.40
 | `max_output_chars` | 最大输出字符数 |
 | `model_cascade` | 模型级联列表（provider + model，失败自动降级） |
 
-`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
+`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求 16384（周/月报 8192），输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
 
 ### `[daily_summary]` — 每日总结
 

@@ -47,6 +47,8 @@ class ChatArchive:
     def __init__(self, db_path: str | Path = CHAT_ARCHIVE_DB_PATH):
         self.db_path = Path(db_path)
         self._unavailable = False
+        self._retry_init_after: float = 0.0
+        self._dropped_since_unavailable = 0
         try:
             self._init_db()
         except sqlite3.Error as exc:
@@ -54,9 +56,31 @@ class ChatArchive:
             self._unavailable = True
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=5.0)
         conn.row_factory = sqlite3.Row
+        # synchronous 是每连接设置：必须在 _connect 里设，否则热路径每条
+        # 消息都以缺省 FULL 同步提交（WAL 下每次 commit fsync + 关连接
+        # checkpoint，实测毫秒级且阻塞事件循环）。busy_timeout 显式对齐
+        # sqlite3 缺省 5s，供 backfill/巡检并发写时明确等待上限。
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
+
+    def _maybe_retry_init(self) -> None:
+        """启动瞬间的初始化失败不做进程级永磁：按冷却惰性重试自愈。"""
+        if not self._unavailable:
+            return
+        now = time.monotonic()
+        if now < self._retry_init_after:
+            return
+        self._retry_init_after = now + 60.0
+        try:
+            self._init_db()
+        except sqlite3.Error:
+            return
+        logger.info("ChatArchive 数据库恢复可用（此前静默丢弃 %d 条消息）",
+                    self._dropped_since_unavailable)
+        self._unavailable = False
+        self._dropped_since_unavailable = 0
 
     def _init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,24 +120,34 @@ class ChatArchive:
         user_id: int | str | None = None,
         message_id: int | str | None = None,
         image_urls: list[str] | None = None,
+        occurrence: int = 0,
     ) -> bool:
         """Append one message; duplicates (by message_id or content hash) are ignored.
 
-        Returns True when a new row was actually inserted.
+        Returns True when a new row was actually inserted. ``occurrence`` 供
+        回灌等无 message_id 的来源区分同秒同人同文的**不同**消息（跨源按
+        相同计数对齐去重）；运行时路径不传（OneBot 群消息总带 message_id）。
+        撞键时只在原行缺 user_id 且新行携带时回填该字段，不覆盖已存内容。
         """
-        if self._unavailable or not str(text).strip():
+        if not str(text).strip():
             return False
+        if self._unavailable:
+            self._dropped_since_unavailable += 1
+            self._maybe_retry_init()
+            if self._unavailable:
+                return False
         gid = _safe_group_id(group_id)
         ts_val = ts if ts is not None else time()
         urls = [str(u) for u in (image_urls or []) if str(u).strip()]
         mid = str(message_id).strip() if message_id is not None else ""
+        uid = str(user_id) if user_id is not None else None
         if mid:
             dedupe_key = f"m:{gid}:{mid}"
         else:
             digest = hashlib.sha1(
                 f"{gid}|{int(ts_val)}|{sender_name}|{text}".encode("utf-8")
             ).hexdigest()
-            dedupe_key = f"h:{digest}"
+            dedupe_key = f"h:{digest}" if occurrence <= 0 else f"h:{digest}:{occurrence}"
         try:
             conn = self._connect()
             try:
@@ -127,7 +161,7 @@ class ChatArchive:
                     (
                         gid,
                         ts_val,
-                        str(user_id) if user_id is not None else None,
+                        uid,
                         sender_name,
                         mid or None,
                         text,
@@ -137,8 +171,17 @@ class ChatArchive:
                         datetime.now(tz=timezone.utc).isoformat(),
                     ),
                 )
+                inserted = cursor.rowcount > 0
+                if not inserted and uid is not None:
+                    # 双采集源回灌：先入库的 wordcloud 行缺 user_id，daily 行
+                    # 撞键时补齐归因字段。
+                    conn.execute(
+                        "UPDATE archive_messages SET user_id = ? WHERE dedupe_key = ?"
+                        " AND user_id IS NULL",
+                        (uid, dedupe_key),
+                    )
                 conn.commit()
-                return cursor.rowcount > 0
+                return inserted
             finally:
                 conn.close()
         except sqlite3.Error:
@@ -191,6 +234,29 @@ class ChatArchive:
             return [self._row_to_message(row) for row in rows]
         except sqlite3.Error:
             logger.warning("chat_archive: could not read all for group %s", group_id)
+            return []
+        finally:
+            conn.close()
+
+    def list_groups(self) -> list[dict]:
+        """按群聚合归档概览（Web Admin 词云群列表等）：天数近似为消息数。"""
+        if self._unavailable:
+            return []
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT group_id,
+                       COUNT(*) AS days,
+                       SUM(LENGTH(text) + 64) AS total_bytes,
+                       MAX(ts) AS latest_ts
+                FROM archive_messages
+                GROUP BY group_id
+                """
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            logger.warning("chat_archive: could not list groups")
             return []
         finally:
             conn.close()

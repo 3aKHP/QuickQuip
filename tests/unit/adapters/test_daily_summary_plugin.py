@@ -590,3 +590,42 @@ async def test_send_daily_summary_now_raises_when_generation_returns_none(monkey
     with pytest.raises(daily_summary_plugin.DailySummaryGenerationFailedError) as exc_info:
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
     assert str(exc_info.value) == "summary generation skipped or failed"
+
+
+@pytest.mark.asyncio
+async def test_job_publish_summaries_wiring_matches_signature(monkeypatch):
+    """钉住生产接线（Deep-CR：旧 collector kwarg 曾逃过单测直达定时任务）。"""
+    sent: list[dict] = []
+
+    class _Bot:
+        pass
+
+    class _NoneBotStub:
+        @staticmethod
+        def get_bot():
+            return _Bot()
+
+    monkeypatch.setattr(daily_summary_plugin, "nonebot", _NoneBotStub)
+    async def _fake_send_long(bot, gid, content):
+        sent.append({"gid": gid, "content": content})
+
+    monkeypatch.setattr(
+        daily_summary_plugin, "_send_long_message", _fake_send_long,
+    )
+    rows = [{"group_id": "10001", "summary_date": "2026-05-03", "content": "a", "model_used": "m"}]
+    marked: list[tuple] = []
+    monkeypatch.setattr(
+        daily_summary_plugin.daily_store, "get_unpublished",
+        lambda: rows, raising=False,
+    )
+    monkeypatch.setattr(
+        daily_summary_plugin.daily_store, "mark_published",
+        lambda gid, d: marked.append((gid, d)), raising=False,
+    )
+    monkeypatch.setattr(
+        daily_summary_plugin.daily_enabled_groups,
+        "all_groups", lambda: ["10001"], raising=False,
+    )
+    await daily_summary_plugin._job_publish_summaries()
+    assert sent == [{"gid": 10001, "content": "a"}]
+    assert marked == [("10001", "2026-05-03")]

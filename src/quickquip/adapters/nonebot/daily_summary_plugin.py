@@ -203,7 +203,6 @@ async def _job_publish_summaries() -> None:
 
     await summary_jobs.publish_summaries_job(
         store=daily_store,
-        collector=chat_archive,
         enabled_groups=daily_enabled_groups,
         send=_send,
     )

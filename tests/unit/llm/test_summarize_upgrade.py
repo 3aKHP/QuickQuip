@@ -15,7 +15,7 @@ from quickquip.llm.config import (
 from quickquip.llm.provider import LLMResponse
 from quickquip.llm.summarize import (
     _FALLBACK_CHAT_LOG_CHARS,
-    _chat_log_char_budget,
+    _hop_limits,
     _resolve_cascade,
     generate_daily_summary,
 )
@@ -49,18 +49,26 @@ def _llm_config(providers: list[ProviderConfig]) -> LLMConfig:
     )
 
 
-def test_chat_log_budget_derived_from_largest_window():
+def test_hop_limits_derived_from_own_window():
     wide = _provider("a", "big", {"big": 1_048_576})
-    narrow = _provider("b", "small", {"small": 128_000})
-    resolved = _resolve_cascade(["a/big", "b/small"], _llm_config([wide, narrow]), "a", "big")
-    budget = _chat_log_char_budget(resolved, max_output_tokens=16384)
+    budget, output = _hop_limits(wide, "big", max_output_tokens=16384)
     assert budget == 1_048_576 - 16384 - 8192
+    assert output == 16384  # 宽窗口不钳制输出
 
 
-def test_chat_log_budget_falls_back_when_capacity_unknown():
+def test_hop_limits_small_window_clamps_output_and_floors_budget():
+    # 小窗口模型：输出按窗口//8 钳制，预算 flooring 到 8192（不按 unknown 回退 300k）。
+    small = _provider("a", "s", {"s": 32_000})
+    budget, output = _hop_limits(small, "s", max_output_tokens=16384)
+    assert budget == 8192
+    assert output == 4000
+
+
+def test_hop_limits_capacity_unknown_falls_back():
     unknown = _provider("a", "mystery")
-    resolved = _resolve_cascade(["a/mystery"], _llm_config([unknown]), "a", "mystery")
-    assert _chat_log_char_budget(resolved, max_output_tokens=16384) == _FALLBACK_CHAT_LOG_CHARS
+    budget, output = _hop_limits(unknown, "mystery", max_output_tokens=16384)
+    assert budget == _FALLBACK_CHAT_LOG_CHARS
+    assert output == 16384
 
 
 def test_resolve_cascade_skips_invalid_and_disabled():
@@ -123,3 +131,41 @@ async def test_daily_summary_all_models_unresolvable_raises():
             llm_config=_llm_config([_provider("a", "m1")]),
             default_provider_id="a", default_model="m1", local_tz=LOCAL_TZ,
         )
+
+
+@pytest.mark.asyncio
+async def test_daily_summary_truncates_per_hop_for_narrow_fallback(monkeypatch):
+    """宽窗口主跳吃全量；窄窗口回退跳按自己的窗口缩量，而不是必溢出。"""
+    requests_by_model: dict[str, list] = {}
+
+    def _builder(provider):
+        class _Client:
+            async def complete(self, request):
+                requests_by_model.setdefault(request.model, []).append(request)
+                if request.model == "big":
+                    from quickquip.llm.provider import LLMProviderError
+                    raise LLMProviderError("primary down")
+                from plugins.llm_provider import LLMResponse
+                return LLMResponse(text="窄窗日报", model=request.model, finish_reason="stop")
+        return _Client()
+
+    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", _builder)
+    big_log = [{"ts": 1600000000.0 + i, "sender": f"u{i%10}", "text": "聊" * 100} for i in range(5000)]
+    content, model_used = await generate_daily_summary(
+        big_log,
+        PersonaConfig(id="default", display_name="默认", system_prompt="s"),
+        "10001", date_label="2026-09-09", name_table={},
+        summary_config=DailySummaryConfig(model_cascade=["a/big", "b/small"]),
+        llm_config=_llm_config([
+            _provider("a", "big", {"big": 1_048_576}),
+            _provider("b", "small", {"small": 200_000}),
+        ]),
+        default_provider_id="a", default_model="big", local_tz=LOCAL_TZ,
+    )
+    assert model_used == "b/small"
+    assert content == "窄窗日报"
+    big_req = requests_by_model["big"][0]
+    small_req = requests_by_model["small"][0]
+    assert len(big_req.messages[0].content) > 400_000  # 主跳全量
+    assert len(small_req.messages[0].content) < 200_000  # 回退跳缩量（窗口推导）
+    assert "已截取最近部分" in small_req.messages[0].content

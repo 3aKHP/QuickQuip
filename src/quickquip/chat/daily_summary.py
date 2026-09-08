@@ -11,18 +11,6 @@ from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH
 logger = logging.getLogger(__name__)
 
 
-def _safe_group_id(group_id: int | str) -> str:
-    """Return a filesystem-safe, digit-only group ID string.
-
-    QQ group IDs are always positive integers. Accepting anything else
-    would allow path traversal (e.g. group_id = "../../etc").
-    """
-    s = str(group_id).strip()
-    if not s.isdigit():
-        raise ValueError(f"Invalid group_id (must be all digits): {group_id!r}")
-    return s
-
-
 class DailySummaryStore:
     """SQLite store for persisting generated daily summaries."""
 
