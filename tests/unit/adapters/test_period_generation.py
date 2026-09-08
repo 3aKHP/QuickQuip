@@ -68,7 +68,7 @@ def _bind_plugin_deps(monkeypatch, counts, deps):
     monkeypatch.setattr(plugin, "_ensure_llm_bindings", lambda: None)
     monkeypatch.setattr(plugin, "get_llm_service", lambda: deps.svc)
     monkeypatch.setattr(plugin, "stats_tracker", deps.stats_tracker)
-    monkeypatch.setattr(plugin, "wordcloud_collector", deps.collector)
+    monkeypatch.setattr(plugin, "chat_archive", deps.collector)
     monkeypatch.setattr(plugin, "period_store", deps.store)
     monkeypatch.setattr(plugin, "send_long_group_message", fake_send)
     monkeypatch.setattr(plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext())

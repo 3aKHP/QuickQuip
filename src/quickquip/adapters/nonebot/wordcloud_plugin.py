@@ -13,7 +13,7 @@ from quickquip.chat.wordcloud import (
     build_word_frequencies,
     render_wordcloud_bytes,
 )
-from quickquip.app.message_pipeline import is_admin, wordcloud_collector
+from quickquip.app.message_pipeline import chat_archive, is_admin
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def setup(on_command) -> None:
         now = datetime.now(tz=_LOCAL_TZ)
         start_ts, end_ts, label = _time_window(subcommand, now)
 
-        messages = wordcloud_collector.read_window(group_id, start_ts, end_ts)
+        messages = chat_archive.read_window(group_id, start_ts, end_ts)
         if not messages:
             await cmd.finish(f"{label}暂无消息记录，无法生成词云。")
             return

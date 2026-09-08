@@ -11,7 +11,8 @@ from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
-from quickquip.chat.wordcloud import WORDCLOUD_STOPWORDS, WordCloudCollector, build_word_frequencies
+from quickquip.chat.archive import ChatArchive
+from quickquip.chat.wordcloud import WORDCLOUD_STOPWORDS, build_word_frequencies
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
 from quickquip.llm.config import DailyBriefingConfig
 
@@ -225,25 +226,21 @@ async def build_briefing_context(
     group_id: int | str,
     period: BriefingPeriod,
     now: datetime,
-    daily_collector,
-    wordcloud_collector: WordCloudCollector,
+    archive: ChatArchive,
     briefing_config: DailyBriefingConfig,
     news_provider: BriefingNewsProvider | None = None,
 ) -> DailyBriefingContext:
     start_dt, end_dt, window_label = get_briefing_window(period, now)
-    messages = daily_collector.read_window(group_id, start_dt.timestamp(), end_dt.timestamp())
+    messages = archive.read_window(group_id, start_dt.timestamp(), end_dt.timestamp())
     active_users = _build_active_users(messages, briefing_config.active_users_limit)
     sampled_messages = _sample_messages(messages, briefing_config.sample_messages_limit)
 
-    wordcloud_messages = wordcloud_collector.read_window(
-        group_id, start_dt.timestamp(), end_dt.timestamp()
-    )
     hot_words: list[str] = []
-    if wordcloud_messages:
+    if messages:
         try:
             freq = await asyncio.to_thread(
                 build_word_frequencies,
-                wordcloud_messages,
+                messages,
                 WORDCLOUD_STOPWORDS,
             )
             hot_words = [

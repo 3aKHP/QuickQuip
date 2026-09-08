@@ -39,8 +39,8 @@ from quickquip.chat.config import (
     RATE_LIMIT_WINDOW_SECONDS,
     RECENT_CONTEXT_TTL_SECONDS,
 )
+from quickquip.chat.archive import ChatArchive
 from quickquip.chat.daily_summary import (
-    DailyMessageCollector,
     DailySummaryEnabledGroups,
     DailySummaryStore,
 )
@@ -51,7 +51,6 @@ from quickquip.chat.period_report import (
     PeriodReportEnabledGroups,
     PeriodReportStore,
 )
-from quickquip.chat.wordcloud import WordCloudCollector
 from quickquip.chat.context_rules import match_context_rule
 from quickquip.sts.config import CARD_LE_RATE_LIMIT_KEY, CARD_LE_RULE_NAME
 from quickquip.sts.formulas.card_le.passive import match_card_le, matches_card_le_pattern
@@ -117,12 +116,13 @@ recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=REC
 message_deduper = RecentMessageDeduper()
 awakening_state = _get_awakening_state()
 
-daily_collector = DailyMessageCollector()
+# 聊天归档（1.15.2 A 线）：唯一消息归档源，日报/词云/简报/周月报共用；
+# 全群 always-on，永不删除（详见 quickquip.chat.archive 模块契约）。
+chat_archive = ChatArchive()
 daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
 daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
-wordcloud_collector = WordCloudCollector()
-# 群周报 / 群月报（数据源复用 wordcloud_collector，独立 store 与 enabled 集合）
+# 群周报 / 群月报（数据源复用 chat_archive，独立 store 与 enabled 集合）
 period_store = PeriodReportStore(PERIOD_REPORTS_DB_PATH)
 weekly_enabled_groups = PeriodReportEnabledGroups(PERIOD_WEEKLY, WEEKLY_REPORT_GROUPS_PATH)
 monthly_enabled_groups = PeriodReportEnabledGroups(PERIOD_MONTHLY, MONTHLY_REPORT_GROUPS_PATH)
@@ -188,24 +188,19 @@ def get_sender_identity_sources(
     return (gs.user_names if gs else None), identity_index
 
 
-def record_group_message(
+def record_chat_message(
     group_id: int | str,
     user_id: int | str,
     sender_name: str,
     rendered_text: str,
+    message_id: int | str | None = None,
+    image_urls: list[str] | None = None,
 ) -> None:
-    """Record a message for daily summary / briefing collection when either feature is enabled."""
-    if not (
-        daily_enabled_groups.contains(group_id)
-        or daily_briefing_enabled_groups.contains(group_id)
-    ):
-        return
-    daily_collector.record(group_id, sender_name, rendered_text, user_id=user_id)
-
-
-def record_wordcloud_message(group_id: int | str, sender_name: str, rendered_text: str) -> None:
-    """Always-on word cloud collection for all groups."""
-    wordcloud_collector.record(group_id, sender_name, rendered_text)
+    """归档一条群消息：全群 always-on，不再按 feature 开关门控。"""
+    chat_archive.record(
+        group_id, sender_name, rendered_text,
+        user_id=user_id, message_id=message_id, image_urls=image_urls,
+    )
 
 
 def save_all() -> None:

@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 
-from quickquip.common.paths import WORDCLOUD_MESSAGES_DIR
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.wordcloud import (
     WORDCLOUD_MIN_WORDS,
@@ -44,24 +43,18 @@ def _time_window(window: str, now: datetime) -> tuple[float, float]:
 
 @router.get("/wordcloud/groups")
 def list_wordcloud_groups():
-    base = WORDCLOUD_MESSAGES_DIR
-    if not base.exists():
-        return {"groups": []}
-    groups = []
-    for entry in sorted(base.iterdir()):
-        if not entry.is_dir() or not _GROUP_RE.match(entry.name):
-            continue
-        files = [f for f in entry.iterdir() if f.is_file() and f.suffix == ".jsonl"]
-        if not files:
-            continue
-        latest_mtime = max(f.stat().st_mtime for f in files)
-        total_bytes = sum(f.stat().st_size for f in files)
-        groups.append({
-            "group_id": entry.name,
-            "days": len(files),
-            "total_bytes": total_bytes,
-            "latest_mtime": int(latest_mtime),
-        })
+    from quickquip.app.message_pipeline import chat_archive
+
+    rows = chat_archive.list_groups()
+    groups = [
+        {
+            "group_id": row["group_id"],
+            "days": row["days"],
+            "total_bytes": row["total_bytes"],
+            "latest_mtime": int(row["latest_ts"]),
+        }
+        for row in rows
+    ]
     groups.sort(key=lambda g: g["latest_mtime"], reverse=True)
     return {"groups": groups}
 
@@ -79,9 +72,9 @@ async def render_wordcloud(
     now = datetime.now(tz=_LOCAL_TZ)
     start_ts, end_ts = _time_window(window, now)
 
-    from quickquip.app.message_pipeline import wordcloud_collector
+    from quickquip.app.message_pipeline import chat_archive
 
-    messages = wordcloud_collector.read_window(group, start_ts, end_ts)
+    messages = chat_archive.read_window(group, start_ts, end_ts)
     if not messages:
         raise HTTPException(status_code=404, detail="窗口内无消息记录")
 

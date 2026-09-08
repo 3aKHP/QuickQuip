@@ -184,8 +184,9 @@ data/
 ├── niuniu.db               # 牛牛大作战状态与操作流水（SQLite）
 ├── offline_messages.db     # 离线留言（SQLite）
 ├── quotes.db               # 群语录（SQLite）
-├── daily_msgs/             # 每日消息原始收集（{group_id}/{date}.jsonl）
-├── wordcloud_msgs/         # 词云消息原始收集
+├── chat_archive.db         # 聊天记录归档（SQLite，唯一消息归档源：日报/词云/简报/周月报共用，永不删除）
+├── daily_msgs/             # 旧每日消息 JSONL（已退役，仅回灌脚本读取后可清理）
+├── wordcloud_msgs/         # 旧词云消息 JSONL（已退役，仅回灌脚本读取后可清理）
 ├── logs/                   # loguru 文件日志（保留 14 天）
 ├── fonts/                  # 词云字体文件（手动放置）
 ├── tieba/

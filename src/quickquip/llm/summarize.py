@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from quickquip.llm.config import DailySummaryConfig, LLMConfig, PersonaConfig
+from quickquip.llm.config import (
+    DailySummaryConfig,
+    LLMConfig,
+    PersonaConfig,
+    ProviderConfig,
+)
+from quickquip.llm.context_windows import resolve_context_window
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.usage import set_usage_scope
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_MAX_OUTPUT_TOKENS = 4096
+_SUMMARY_MAX_OUTPUT_TOKENS = 16384
 _SUMMARY_TEMPERATURE = 0.7
 
 # 周报/月报篇幅更长，输出 token 上限上调。8192 token 约覆盖默认 length_hint
@@ -21,14 +28,19 @@ _SUMMARY_TEMPERATURE = 0.7
 _PERIOD_REPORT_MAX_OUTPUT_TOKENS = 8192
 _PERIOD_REPORT_TEMPERATURE = 0.7
 
-# Approximate character budget for the raw chat log passed to the LLM.
-# 300 000 chars is well within even 128k-token context windows for Chinese text.
-_MAX_CHAT_LOG_CHARS = 300_000
+# 聊天记录字符预算：按级联中可解析容量的模型取最大可用输入推导
+# （窗口 − 输出预留 − 信封/系统开销），中文按 1 字 ≈ 1 token 保守换算。
+# 级联全部 capacity unknown 时回退保守缺省。单发大输入不经 service 层
+# 的应用侧请求预算门禁（96k 缺省只约束 chat 主链路），上限即模型容量。
+_FALLBACK_CHAT_LOG_CHARS = 300_000
+_ENVELOPE_RESERVE_TOKENS = 8_192
 
 # Finish reasons that indicate a clean, complete response.
 # Providers: Gemini → "STOP", OpenAI → "stop", Claude → "end_turn" / "stop_sequence".
 # An empty/None finish_reason is also accepted (provider didn't populate the field).
-_NORMAL_FINISH_REASONS: frozenset[str] = frozenset({"stop", "end_turn", "stop_sequence", "STOP"})
+# 设计决策（1.15.2）：不在此集合内的 finish 一律不放行——宁错杀不放过，
+# 不完整/异常的日报不发，兜底交给级联换模型。
+_NORMAL_FINISH_REASONS: frozenset[str] = frozenset({"stop", "end_turn", "stop_sequence", "eos"})
 
 
 def _build_system_prompt(
@@ -90,6 +102,151 @@ def _truncate_chat_log(chat_log: str, max_chars: int) -> tuple[str, bool]:
     return truncated, True
 
 
+def _resolve_cascade(
+    cascade: list[str],
+    llm_config: LLMConfig,
+    default_provider_id: str,
+    default_model: str,
+) -> list[tuple[str, str, ProviderConfig]]:
+    """把级联条目解析为可用的 (provider_id, model, provider_config) 三元组。
+
+    无效条目/未配置/禁用的 provider 跳过并留档；全空时返回空列表
+    （调用方据此直接失败，不再构造请求）。
+    """
+    resolved: list[tuple[str, str, ProviderConfig]] = []
+    for entry in cascade:
+        if entry == "@default":
+            provider_id, model = default_provider_id, default_model
+        else:
+            parts = entry.split("/", 1)
+            if len(parts) != 2:
+                logger.warning("summary cascade: invalid entry %r, skipping", entry)
+                continue
+            provider_id, model = parts
+        provider_config = llm_config.providers.get(provider_id)
+        if provider_config is None:
+            logger.warning("summary cascade: provider %r not found in config, skipping", provider_id)
+            continue
+        if not provider_config.enabled:
+            logger.info("summary cascade: provider %r disabled, skipping", provider_id)
+            continue
+        resolved.append((provider_id, model, provider_config))
+    return resolved
+
+
+def _hop_limits(
+    provider_config: ProviderConfig,
+    model: str,
+    max_output_tokens: int,
+) -> tuple[int, int]:
+    """按单跳模型自己的容量推导（聊天记录字符预算, 输出 token 上限）。
+
+    预算 = 窗口 − 输出预留 − 信封预留（中文 1 字 ≈ 1 token 保守换算）；
+    capacity unknown 回退保守缺省。输出上限按窗口钳制（窗口 // 8，下限
+    1024）：小窗口模型本来就写不出长文，超发 max_output_tokens 只会让
+    输出上限较低的模型直接 400。预算 flooring 到 8192 字符——已知小窗口
+    也给一个可尝试的最小载荷，而不是按 unknown 回退 300k 超发。
+    """
+    window = resolve_context_window(provider_config.model_context_windows, model)
+    if not window:
+        return _FALLBACK_CHAT_LOG_CHARS, max_output_tokens
+    output_cap = min(max_output_tokens, max(1024, window // 8))
+    available = max(8192, window - max_output_tokens - _ENVELOPE_RESERVE_TOKENS)
+    return available, output_cap
+
+
+async def _run_summary_cascade(
+    feature_label: str,
+    group_id: int | str,
+    resolved: list[tuple[str, str, ProviderConfig]],
+    system_prompt: str,
+    raw_log: str,
+    build_user_content: Callable[[str, bool], str],
+    *,
+    temperature: float,
+    max_output_tokens: int,
+) -> tuple[str, str]:
+    """对已解析级联逐跳生成；每跳留档 finish/token/跳序，全败抛 RuntimeError。
+
+    聊天记录按**每跳自己的窗口**截断：宽窗口主跳吃全量、窄窗口回退跳
+    吃缩量，而不是全级联共用最宽模型的尺寸（否则回退跳必溢出）。
+    不完整不放行：非正常 finish_reason 的已生成正文一律丢弃（宁错杀不放过），
+    兜底交给下一跳模型。
+    """
+    hops: list[str] = []
+    last_error: Exception | None = None
+
+    for hop, (provider_id, model, provider_config) in enumerate(resolved, start=1):
+        char_budget, output_cap = _hop_limits(provider_config, model, max_output_tokens)
+        chat_log, was_truncated = _truncate_chat_log(raw_log, char_budget)
+        user_message = LLMConversationMessage(
+            role="user", content=build_user_content(chat_log, was_truncated)
+        )
+        effective_config = replace(provider_config, stream_enabled=False)
+        req = LLMRequest(
+            model=model,
+            system_prompt=system_prompt,
+            messages=[user_message],
+            temperature=temperature,
+            max_output_tokens=output_cap,
+        )
+
+        try:
+            client = build_provider_client(effective_config)
+            response = await client.complete(req)
+            text = response.text.strip()
+            finish = (response.finish_reason or "").strip()
+            usage_note = (
+                f"in={response.input_tokens} out={response.output_tokens} "
+                f"thinking={response.thinking_tokens}"
+            )
+            hops.append(f"{provider_id}/{model}:finish={finish or 'n/a'}({usage_note})")
+            if text and (not finish or finish.lower() in _NORMAL_FINISH_REASONS):
+                logger.info(
+                    "%s: generated for group %s via %s/%s hop=%d/%d "
+                    "(%d chars, finish=%s, %s)",
+                    feature_label, group_id, provider_id, model, hop, len(resolved),
+                    len(text), finish or "n/a", usage_note,
+                )
+                if hop > 1:
+                    logger.warning("%s: group %s 级联跳数 %d/%d，各跳：%s",
+                                   feature_label, group_id, hop, len(resolved), "; ".join(hops))
+                return text, f"{provider_id}/{model}"
+            if text:
+                logger.warning(
+                    "%s: %s/%s hop=%d/%d non-normal finish_reason=%r "
+                    "(%d chars discarded, %s), trying next",
+                    feature_label, provider_id, model, hop, len(resolved),
+                    response.finish_reason, len(text), usage_note,
+                )
+                last_error = RuntimeError(f"non-normal finish_reason: {response.finish_reason!r}")
+            else:
+                logger.warning(
+                    "%s: %s/%s hop=%d/%d returned empty text (%s), trying next",
+                    feature_label, provider_id, model, hop, len(resolved), usage_note,
+                )
+        except LLMProviderError as exc:
+            hops.append(f"{provider_id}/{model}:error={type(exc).__name__}")
+            logger.warning(
+                "%s: %s/%s hop=%d/%d provider error: %s, trying next",
+                feature_label, provider_id, model, hop, len(resolved), exc,
+            )
+            last_error = exc
+        except Exception as exc:
+            hops.append(f"{provider_id}/{model}:error={type(exc).__name__}")
+            logger.warning(
+                "%s: %s/%s hop=%d/%d unexpected error: %s, trying next",
+                feature_label, provider_id, model, hop, len(resolved), exc,
+            )
+            last_error = exc
+
+    logger.error(
+        "%s: group %s 级联全败（%d 跳）：%s；最后错误：%s",
+        feature_label, group_id, len(resolved), "; ".join(hops), last_error,
+    )
+    raise RuntimeError(f"所有模型均调用失败，最后错误：{last_error}")
+
+
 async def generate_daily_summary(
     messages: list[dict],
     persona: PersonaConfig,
@@ -112,89 +269,33 @@ async def generate_daily_summary(
         persona, date_label, name_table, summary_config.summary_length_hint
     )
 
-    raw_log = _format_messages(messages, local_tz)
-    chat_log, was_truncated = _truncate_chat_log(raw_log, _MAX_CHAT_LOG_CHARS)
-    truncation_note = (
-        "\n（注：由于消息量较大，上方记录已截取最近部分。）\n" if was_truncated else ""
-    )
-
-    # Wrap the chat log in explicit delimiters so the LLM clearly distinguishes
-    # user-generated content from instructions (prompt-injection mitigation).
-    user_content = (
-        f"以下是{date_label}的群聊记录（共 {len(messages)} 条消息）：\n"
-        f"{truncation_note}"
-        "=== 聊天记录开始 ===\n"
-        f"{chat_log}\n"
-        "=== 聊天记录结束 ===\n\n"
-        f"请生成约 {summary_config.summary_length_hint} 字的群聊日报。"
-    )
-    user_message = LLMConversationMessage(role="user", content=user_content)
-
     cascade = summary_config.model_cascade or [f"{default_provider_id}/{default_model}"]
-    last_error: Exception | None = None
+    resolved = _resolve_cascade(cascade, llm_config, default_provider_id, default_model)
+    if not resolved:
+        raise RuntimeError(f"daily_summary: 级联无可用模型（cascade={cascade}）")
 
-    for entry in cascade:
-        if entry == "@default":
-            provider_id = default_provider_id
-            model = default_model
-        else:
-            parts = entry.split("/", 1)
-            if len(parts) != 2:
-                logger.warning("daily_summary: invalid cascade entry %r, skipping", entry)
-                continue
-            provider_id, model = parts
+    raw_log = _format_messages(messages, local_tz)
 
-        provider_config = llm_config.providers.get(provider_id)
-        if provider_config is None:
-            logger.warning("daily_summary: provider %r not found in config, skipping", provider_id)
-            continue
-        if not provider_config.enabled:
-            logger.info("daily_summary: provider %r disabled, skipping", provider_id)
-            continue
-
-        effective_config = replace(provider_config, stream_enabled=False)
-        req = LLMRequest(
-            model=model,
-            system_prompt=system_prompt,
-            messages=[user_message],
-            temperature=_SUMMARY_TEMPERATURE,
-            max_output_tokens=_SUMMARY_MAX_OUTPUT_TOKENS,
+    def build_user_content(chat_log: str, was_truncated: bool) -> str:
+        # Wrap the chat log in explicit delimiters so the LLM clearly
+        # distinguishes user-generated content from instructions
+        # (prompt-injection mitigation).
+        truncation_note = (
+            "\n（注：由于消息量较大，上方记录已截取最近部分。）\n" if was_truncated else ""
+        )
+        return (
+            f"以下是{date_label}的群聊记录（共 {len(messages)} 条消息）：\n"
+            f"{truncation_note}"
+            "=== 聊天记录开始 ===\n"
+            f"{chat_log}\n"
+            "=== 聊天记录结束 ===\n\n"
+            f"请生成约 {summary_config.summary_length_hint} 字的群聊日报。"
         )
 
-        try:
-            client = build_provider_client(effective_config)
-            response = await client.complete(req)
-            text = response.text.strip()
-            finish = (response.finish_reason or "").strip()
-            if text and (not finish or finish in _NORMAL_FINISH_REASONS):
-                logger.info(
-                    "daily_summary: generated for group %s via %s/%s (%d chars, finish=%s)",
-                    group_id, provider_id, model, len(text), finish or "n/a",
-                )
-                return text, f"{provider_id}/{model}"
-            if text:
-                # Got content but non-normal finish (e.g. SAFETY, RECITATION, MAX_TOKENS)
-                logger.warning(
-                    "daily_summary: %s/%s non-normal finish_reason=%r (%d chars), trying next",
-                    provider_id, model, response.finish_reason, len(text),
-                )
-                last_error = RuntimeError(f"non-normal finish_reason: {response.finish_reason!r}")
-            else:
-                logger.warning(
-                    "daily_summary: %s/%s returned empty text, trying next", provider_id, model
-                )
-        except LLMProviderError as exc:
-            logger.warning(
-                "daily_summary: %s/%s provider error: %s, trying next", provider_id, model, exc
-            )
-            last_error = exc
-        except Exception as exc:
-            logger.warning(
-                "daily_summary: %s/%s unexpected error: %s, trying next", provider_id, model, exc
-            )
-            last_error = exc
-
-    raise RuntimeError(f"所有模型均调用失败，最后错误：{last_error}")
+    return await _run_summary_cascade(
+        "daily_summary", group_id, resolved, system_prompt, raw_log, build_user_content,
+        temperature=_SUMMARY_TEMPERATURE, max_output_tokens=_SUMMARY_MAX_OUTPUT_TOKENS,
+    )
 
 
 # ── 群周报 / 群月报 ──────────────────────────────────────────────────────
@@ -276,87 +377,28 @@ async def generate_period_report(
         persona, period_label, period_kind, name_table, length_hint
     )
 
-    raw_log = _format_period_messages(messages, local_tz)
-    chat_log, was_truncated = _truncate_chat_log(raw_log, _MAX_CHAT_LOG_CHARS)
-    truncation_note = (
-        "\n（注：由于消息量较大，上方记录已按天采样并截取。）\n" if was_truncated else ""
-    )
-
-    kind_word = "周报" if period_kind == "weekly" else "月报"
-    user_content = (
-        f"以下是{period_label}的群聊记录（已分天采样，共 {len(messages)} 条）：\n"
-        f"{truncation_note}"
-        "=== 聊天记录开始 ===\n"
-        f"{chat_log}\n"
-        "=== 聊天记录结束 ===\n\n"
-        f"请生成约 {length_hint} 字的群聊{kind_word}。"
-    )
-    user_message = LLMConversationMessage(role="user", content=user_content)
-
     cascade = model_cascade or [f"{default_provider_id}/{default_model}"]
-    last_error: Exception | None = None
+    resolved = _resolve_cascade(cascade, llm_config, default_provider_id, default_model)
+    if not resolved:
+        raise RuntimeError(f"period_report: 级联无可用模型（cascade={cascade}）")
 
-    for entry in cascade:
-        if entry == "@default":
-            provider_id = default_provider_id
-            model = default_model
-        else:
-            parts = entry.split("/", 1)
-            if len(parts) != 2:
-                logger.warning("period_report: invalid cascade entry %r, skipping", entry)
-                continue
-            provider_id, model = parts
+    raw_log = _format_period_messages(messages, local_tz)
+    kind_word = "周报" if period_kind == "weekly" else "月报"
 
-        provider_config = llm_config.providers.get(provider_id)
-        if provider_config is None:
-            logger.warning("period_report: provider %r not found in config, skipping", provider_id)
-            continue
-        if not provider_config.enabled:
-            logger.info("period_report: provider %r disabled, skipping", provider_id)
-            continue
-
-        effective_config = replace(provider_config, stream_enabled=False)
-        req = LLMRequest(
-            model=model,
-            system_prompt=system_prompt,
-            messages=[user_message],
-            temperature=_PERIOD_REPORT_TEMPERATURE,
-            max_output_tokens=_PERIOD_REPORT_MAX_OUTPUT_TOKENS,
+    def build_user_content(chat_log: str, was_truncated: bool) -> str:
+        truncation_note = (
+            "\n（注：由于消息量较大，上方记录已按天采样并截取。）\n" if was_truncated else ""
+        )
+        return (
+            f"以下是{period_label}的群聊记录（已分天采样，共 {len(messages)} 条）：\n"
+            f"{truncation_note}"
+            "=== 聊天记录开始 ===\n"
+            f"{chat_log}\n"
+            "=== 聊天记录结束 ===\n\n"
+            f"请生成约 {length_hint} 字的群聊{kind_word}。"
         )
 
-        try:
-            client = build_provider_client(effective_config)
-            response = await client.complete(req)
-            text = response.text.strip()
-            finish = (response.finish_reason or "").strip()
-            if text and (not finish or finish in _NORMAL_FINISH_REASONS):
-                logger.info(
-                    "period_report[%s]: generated for group %s via %s/%s (%d chars, finish=%s)",
-                    period_kind, group_id, provider_id, model, len(text), finish or "n/a",
-                )
-                return text, f"{provider_id}/{model}"
-            if text:
-                logger.warning(
-                    "period_report[%s]: %s/%s non-normal finish_reason=%r (%d chars), trying next",
-                    period_kind, provider_id, model, response.finish_reason, len(text),
-                )
-                last_error = RuntimeError(f"non-normal finish_reason: {response.finish_reason!r}")
-            else:
-                logger.warning(
-                    "period_report[%s]: %s/%s returned empty text, trying next",
-                    period_kind, provider_id, model,
-                )
-        except LLMProviderError as exc:
-            logger.warning(
-                "period_report[%s]: %s/%s provider error: %s, trying next",
-                period_kind, provider_id, model, exc,
-            )
-            last_error = exc
-        except Exception as exc:
-            logger.warning(
-                "period_report[%s]: %s/%s unexpected error: %s, trying next",
-                period_kind, provider_id, model, exc,
-            )
-            last_error = exc
-
-    raise RuntimeError(f"所有模型均调用失败，最后错误：{last_error}")
+    return await _run_summary_cascade(
+        f"period_report[{period_kind}]", group_id, resolved, system_prompt, raw_log, build_user_content,
+        temperature=_PERIOD_REPORT_TEMPERATURE, max_output_tokens=_PERIOD_REPORT_MAX_OUTPUT_TOKENS,
+    )

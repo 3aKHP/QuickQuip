@@ -22,6 +22,7 @@ CONFIG_SENSITIVE_WORDS_TOML = CONFIG_DIR / "sensitive_words.toml"
 CONFIG_AWAKENING_TOML = CONFIG_DIR / "awakening.toml"
 
 LLM_DB_PATH = DATA_DIR / "llm.db"
+CHAT_ARCHIVE_DB_PATH = DATA_DIR / "chat_archive.db"
 DAILY_SUMMARIES_DB_PATH = DATA_DIR / "daily_summaries.db"
 PERIOD_REPORTS_DB_PATH = DATA_DIR / "period_reports.db"
 WEEKLY_REPORT_GROUPS_PATH = DATA_DIR / "weekly_report_groups.json"

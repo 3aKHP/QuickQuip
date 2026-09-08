@@ -8,7 +8,7 @@ from time import time
 
 from quickquip.adapters.nonebot.command_parts.common import _is_private_chat, _parse_profile_mode, _select_profile_samples, _strip_command_name
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
-from quickquip.app.message_pipeline import _ensure_llm_bindings, daily_collector, get_llm_service, get_sender_identity_sources, group_quote_store, stats_tracker
+from quickquip.app.message_pipeline import _ensure_llm_bindings, chat_archive, get_llm_service, get_sender_identity_sources, group_quote_store, stats_tracker
 from quickquip.chat.group_quotes import resolve_quote_display_name
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
@@ -115,10 +115,10 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                     limit=profile_mode.memory_limit,
                     scope="user",
                 ),
-                asyncio.to_thread(daily_collector.read_all, group_id)
+                asyncio.to_thread(chat_archive.read_all, group_id)
                 if profile_mode.full_records
                 else asyncio.to_thread(
-                    daily_collector.read_window,
+                    chat_archive.read_window,
                     group_id,
                     now - (profile_mode.read_days or 7) * 86400,
                     now,
@@ -172,7 +172,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         group_id = event.group_id
         now = time()
         messages = await asyncio.to_thread(
-            daily_collector.read_window, group_id, now - 30 * 86400, now
+            chat_archive.read_window, group_id, now - 30 * 86400, now
         )
         kw_lower = keyword.lower()
         hits = [m for m in messages if kw_lower in m.get("text", "").lower()]

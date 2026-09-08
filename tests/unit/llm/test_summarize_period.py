@@ -69,7 +69,7 @@ async def test_period_report_success_first_provider(monkeypatch):
 
     assert content == "这是一份周报"
     assert model_used == "a/m1"
-    # period report 输出 token 上限应为 8192（高于日报的 4096）
+    # period report 输出 token 上限应为 8192（日报为 16384）
     assert stub.requests[0].max_output_tokens == 8192
 
 

@@ -9,8 +9,8 @@ adapter 负责 bot 获取、bot_action_trace、合并转发节点与 int(group_i
 不变量（T4 characterization 钉住）：
 - 生成编排返回 (content, model_used) 或 None，绝不外抛；多群并发用
   gather(return_exceptions=True) 隔离单群失败。
-- 发布闸门顺序：send → mark_published → delete_date_file（日报删窗口两天）；
-  send 失败不 mark 不删。
+- 发布闸门顺序：send → mark_published；send 失败不 mark。
+  1.15.2 起消息归档永不删除，发布不再清理原始数据。
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
@@ -155,19 +155,17 @@ async def publish_summary_one(
     row: dict,
     *,
     store,
-    collector,
     send: SendRow,
 ) -> None:
-    """Send one summary to its group; mark published and clean up raw files on success."""
+    """Send one summary to its group and mark published on success.
+
+    1.15.2 起：消息归档永不删除（chat_archive 契约），发布成功只标记状态。
+    """
     group_id = row["group_id"]
     summary_date = row["summary_date"]
     try:
         await send(row)
         store.mark_published(group_id, summary_date)
-        # Delete JSONL files only after confirmed delivery; covers the two dates in the window
-        d = date.fromisoformat(summary_date)
-        collector.delete_date_file(group_id, d)
-        collector.delete_date_file(group_id, d - timedelta(days=1))
         logger.info("daily_summary: published for group %s (%s)", group_id, summary_date)
     except Exception:
         logger.warning(
@@ -179,7 +177,6 @@ async def publish_summary_one(
 async def publish_summaries_job(
     *,
     store,
-    collector,
     enabled_groups,
     send: SendRow,
 ) -> None:
@@ -191,7 +188,7 @@ async def publish_summaries_job(
     # Only publish for groups that are still enabled
     enabled = set(enabled_groups.all_groups())
     tasks = [
-        publish_summary_one(row, store=store, collector=collector, send=send)
+        publish_summary_one(row, store=store, send=send)
         for row in unpublished
         if row["group_id"] in enabled
     ]

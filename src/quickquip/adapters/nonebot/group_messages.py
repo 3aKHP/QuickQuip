@@ -22,8 +22,7 @@ from quickquip.app.message_pipeline import (
     offline_message_store,
     rate_limiter,
     recent_messages,
-    record_group_message,
-    record_wordcloud_message,
+    record_chat_message,
     resolve_reply,
     rule_switch,
     stats_tracker,
@@ -122,8 +121,11 @@ def register_message_matcher(on_message, Message, MessageSegment):
         passive_trigger_text = rendered_text
 
         stats_tracker.record_message(group_id, user_id, sender_name)
-        record_group_message(group_id, user_id, sender_name, rendered_text)
-        record_wordcloud_message(group_id, sender_name, rendered_text)
+        record_chat_message(
+            group_id, user_id, sender_name, rendered_text,
+            message_id=message_id or None,
+            image_urls=rendered_message.image_urls,
+        )
         awakening_state.record_message(group_id, user_id)
 
         pending = offline_message_store.pop_pending(group_id, user_id)
