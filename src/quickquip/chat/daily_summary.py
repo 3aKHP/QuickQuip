@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
-from time import time
-from zoneinfo import ZoneInfo
 
-from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.opt_in_groups import OptInGroupSet
-from quickquip.common.paths import DAILY_MESSAGES_DIR, DAILY_SUMMARIES_DB_PATH
+from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH
 
 logger = logging.getLogger(__name__)
-
-_LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
 
 
 def _safe_group_id(group_id: int | str) -> str:
@@ -27,107 +21,6 @@ def _safe_group_id(group_id: int | str) -> str:
     if not s.isdigit():
         raise ValueError(f"Invalid group_id (must be all digits): {group_id!r}")
     return s
-
-
-class DailyMessageCollector:
-    """Appends chat messages to per-group per-date JSONL files for daily summarization."""
-
-    def __init__(self, base_dir: str | Path = DAILY_MESSAGES_DIR):
-        self.base_dir = Path(base_dir)
-
-    def _file_path(self, group_id: int | str, calendar_date: date) -> Path:
-        return self.base_dir / _safe_group_id(group_id) / f"{calendar_date.isoformat()}.jsonl"
-
-    def record(
-        self,
-        group_id: int | str,
-        sender_name: str,
-        text: str,
-        ts: float | None = None,
-        user_id: int | str | None = None,
-    ) -> None:
-        if not text.strip():
-            return
-        ts_val = ts if ts is not None else time()
-        local_date = datetime.fromtimestamp(ts_val, tz=_LOCAL_TZ).date()
-        path = self._file_path(group_id, local_date)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"sender": sender_name, "text": text, "ts": ts_val}
-        if user_id is not None:
-            payload["user_id"] = str(user_id)
-        line = json.dumps(payload, ensure_ascii=False)
-        try:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except OSError:
-            logger.warning("daily_summary: failed to write message for group %s", group_id)
-
-    def read_window(self, group_id: int | str, start_ts: float, end_ts: float) -> list[dict]:
-        """Return all messages in [start_ts, end_ts) sorted by timestamp."""
-        start_dt = datetime.fromtimestamp(start_ts, tz=_LOCAL_TZ)
-        end_dt = datetime.fromtimestamp(end_ts, tz=_LOCAL_TZ)
-
-        dates_to_check: list[date] = []
-        current = start_dt.date()
-        while current <= end_dt.date():
-            dates_to_check.append(current)
-            current += timedelta(days=1)
-
-        messages: list[dict] = []
-        for d in dates_to_check:
-            path = self._file_path(group_id, d)
-            if not path.exists():
-                continue
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    for raw_line in f:
-                        raw_line = raw_line.strip()
-                        if not raw_line:
-                            continue
-                        try:
-                            entry = json.loads(raw_line)
-                        except json.JSONDecodeError:
-                            continue
-                        ts_val = float(entry.get("ts", 0))
-                        if start_ts <= ts_val < end_ts:
-                            messages.append(entry)
-            except OSError:
-                logger.warning("daily_summary: could not read %s", path)
-
-        messages.sort(key=lambda x: float(x.get("ts", 0)))
-        return messages
-
-    def read_all(self, group_id: int | str) -> list[dict]:
-        """Return all persisted messages for a group sorted by timestamp."""
-        group_dir = self.base_dir / _safe_group_id(group_id)
-        if not group_dir.exists():
-            return []
-
-        messages: list[dict] = []
-        for path in sorted(group_dir.glob("*.jsonl")):
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    for raw_line in f:
-                        raw_line = raw_line.strip()
-                        if not raw_line:
-                            continue
-                        try:
-                            entry = json.loads(raw_line)
-                        except json.JSONDecodeError:
-                            continue
-                        messages.append(entry)
-            except OSError:
-                logger.warning("daily_summary: could not read %s", path)
-
-        messages.sort(key=lambda x: float(x.get("ts", 0)))
-        return messages
-
-    def delete_date_file(self, group_id: int | str, calendar_date: date) -> None:
-        path = self._file_path(group_id, calendar_date)
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            logger.warning("daily_summary: could not delete %s", path)
 
 
 class DailySummaryStore:

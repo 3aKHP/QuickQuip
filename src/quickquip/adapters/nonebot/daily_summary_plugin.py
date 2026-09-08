@@ -15,14 +15,13 @@ except (ModuleNotFoundError, ValueError):
 
 from quickquip.app.message_pipeline import (
     RULE_SWITCH_PATH,
-    daily_collector,
+    chat_archive,
     _ensure_llm_bindings,
     get_llm_service,
     daily_enabled_groups,
     daily_store,
     rule_switch,
     stats_tracker,
-    wordcloud_collector,
     weekly_enabled_groups,
     monthly_enabled_groups,
     period_store,
@@ -132,13 +131,13 @@ async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=
     )
     if before_generate is not None:
         await before_generate()
-    messages = daily_collector.read_window(group_key, start_dt.timestamp(), now.timestamp())
+    messages = chat_archive.read_window(group_key, start_dt.timestamp(), now.timestamp())
     min_messages = svc.config.daily_summary.min_messages
     if len(messages) < min_messages:
         raise DailySummaryInsufficientMessagesError(len(messages), min_messages)
     result = await summary_jobs.run_summary_generation(
         group_key, start_dt.timestamp(), now.timestamp(), date_label,
-        svc=svc, collector=daily_collector, stats_tracker=stats_tracker,
+        svc=svc, collector=chat_archive, stats_tracker=stats_tracker,
     )
     if result is None:
         raise DailySummaryGenerationFailedError("summary generation skipped or failed")
@@ -169,7 +168,7 @@ async def _job_generate_summaries() -> None:
     _ensure_llm_bindings()
     await summary_jobs.generate_summaries_job(
         svc=get_llm_service(),
-        collector=daily_collector,
+        collector=chat_archive,
         store=daily_store,
         enabled_groups=daily_enabled_groups,
         stats_tracker=stats_tracker,
@@ -204,7 +203,7 @@ async def _job_publish_summaries() -> None:
 
     await summary_jobs.publish_summaries_job(
         store=daily_store,
-        collector=daily_collector,
+        collector=chat_archive,
         enabled_groups=daily_enabled_groups,
         send=_send,
     )
@@ -363,7 +362,7 @@ def setup(on_command) -> None:
 
 
 # ── 群周报 / 群月报 ──────────────────────────────────────────────────────
-# 数据源复用 wordcloud_collector（always-on），分天采样后调 generate_period_report。
+# 数据源复用 chat_archive（always-on），分天采样后调 generate_period_report。
 # 与日报共享 LLM 级联校验骨架，但 prompt、period 标识、消息格式化（带日期前缀）独立。
 
 _PERIOD_RULE_NAMES = {"weekly": "weekly_report", "monthly": "monthly_report"}
@@ -384,7 +383,7 @@ async def _job_generate_period_reports(period_type: str) -> None:
     await summary_jobs.generate_period_reports_job(
         period_type,
         svc=get_llm_service(),
-        collector=wordcloud_collector,
+        collector=chat_archive,
         store=period_store,
         enabled_groups=_period_enabled_groups(period_type),
         stats_tracker=stats_tracker,
@@ -509,7 +508,7 @@ async def send_period_report_now(
     _ensure_llm_bindings()
     result = await summary_jobs.run_period_generation(
         group_key, period_type, start_ts, end_ts, period_label,
-        svc=get_llm_service(), collector=wordcloud_collector, stats_tracker=stats_tracker,
+        svc=get_llm_service(), collector=chat_archive, stats_tracker=stats_tracker,
     )
     if result is None:
         raise PeriodReportGenerationFailedError("period report generation skipped or failed")

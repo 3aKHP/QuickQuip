@@ -14,12 +14,11 @@ except (ModuleNotFoundError, ValueError):
 
 from quickquip.app.message_pipeline import (
     RULE_SWITCH_PATH,
+    chat_archive,
     daily_briefing_enabled_groups,
     _ensure_llm_bindings,
     get_llm_service,
-    daily_collector,
     rule_switch,
-    wordcloud_collector,
 )
 from quickquip.app.message_pipeline import is_admin as _is_admin
 from quickquip.app.message_pipeline import strip_command_name as _strip_command_name
@@ -75,8 +74,7 @@ async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, 
         group_id=group_id,
         period=period,
         now=now,
-        daily_collector=daily_collector,
-        wordcloud_collector=wordcloud_collector,
+        archive=chat_archive,
         briefing_config=briefing_cfg,
         news_provider=_NEWS_PROVIDER,
     )

@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter
-from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from time import time
 from zoneinfo import ZoneInfo
 
-from quickquip.common.paths import WORDCLOUD_MESSAGES_DIR
 from quickquip.chat.config import BEIJING_TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -54,65 +50,6 @@ def _safe_group_id(group_id: int | str) -> str:
     if not s.isdigit():
         raise ValueError(f"Invalid group_id (must be all digits): {group_id!r}")
     return s
-
-
-class WordCloudCollector:
-    """Appends chat messages to per-group per-date JSONL files for word cloud generation."""
-
-    def __init__(self, base_dir: str | Path = WORDCLOUD_MESSAGES_DIR):
-        self.base_dir = Path(base_dir)
-
-    def _file_path(self, group_id: int | str, calendar_date: date) -> Path:
-        return self.base_dir / _safe_group_id(group_id) / f"{calendar_date.isoformat()}.jsonl"
-
-    def record(self, group_id: int | str, sender_name: str, text: str, ts: float | None = None) -> None:
-        if not text.strip():
-            return
-        ts_val = ts if ts is not None else time()
-        local_date = datetime.fromtimestamp(ts_val, tz=_LOCAL_TZ).date()
-        path = self._file_path(group_id, local_date)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps({"sender": sender_name, "text": text, "ts": ts_val}, ensure_ascii=False)
-        try:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except OSError:
-            logger.warning("wordcloud: failed to write message for group %s", group_id)
-
-    def read_window(self, group_id: int | str, start_ts: float, end_ts: float) -> list[dict]:
-        """Return all messages in [start_ts, end_ts) sorted by timestamp."""
-        start_dt = datetime.fromtimestamp(start_ts, tz=_LOCAL_TZ)
-        end_dt = datetime.fromtimestamp(end_ts, tz=_LOCAL_TZ)
-
-        dates_to_check: list[date] = []
-        current = start_dt.date()
-        while current <= end_dt.date():
-            dates_to_check.append(current)
-            current += timedelta(days=1)
-
-        messages: list[dict] = []
-        for d in dates_to_check:
-            path = self._file_path(group_id, d)
-            if not path.exists():
-                continue
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    for raw_line in f:
-                        raw_line = raw_line.strip()
-                        if not raw_line:
-                            continue
-                        try:
-                            entry = json.loads(raw_line)
-                        except json.JSONDecodeError:
-                            continue
-                        ts_val = float(entry.get("ts", 0))
-                        if start_ts <= ts_val < end_ts:
-                            messages.append(entry)
-            except OSError:
-                logger.warning("wordcloud: failed to read messages for group %s date %s", group_id, d)
-
-        messages.sort(key=lambda m: m.get("ts", 0))
-        return messages
 
 
 # ---------------------------------------------------------------------------

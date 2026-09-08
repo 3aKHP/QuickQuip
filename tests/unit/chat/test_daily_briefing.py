@@ -15,8 +15,7 @@ from quickquip.chat.daily_briefing import (
     get_briefing_window,
     normalize_period,
 )
-from quickquip.chat.daily_summary import DailyMessageCollector
-from quickquip.chat.wordcloud import WordCloudCollector
+from quickquip.chat.archive import ChatArchive
 from quickquip.llm.briefing import _trim_output
 from quickquip.llm.config import DailyBriefingConfig
 
@@ -60,8 +59,7 @@ def test_noon_window_covers_today_so_far():
 
 
 async def test_build_morning_briefing_context(tmp_path: Path, briefing_config):
-    collector = DailyMessageCollector(base_dir=tmp_path / "daily_msgs")
-    wc_collector = WordCloudCollector(base_dir=tmp_path / "wordcloud_msgs")
+    archive = ChatArchive(tmp_path / "archive.db")
     group_id = "10001"
 
     yesterday = [
@@ -71,16 +69,14 @@ async def test_build_morning_briefing_context(tmp_path: Path, briefing_config):
         (datetime(2026, 4, 14, 18, 0, tzinfo=LOCAL_TZ), "u3", "王五", "晚上吃什么"),
     ]
     for ts, user_id, sender, text in yesterday:
-        collector.record(group_id, sender, text, ts=ts.timestamp(), user_id=user_id)
-        wc_collector.record(group_id, sender, text, ts=ts.timestamp())
+        archive.record(group_id, sender, text, ts=ts.timestamp(), user_id=user_id)
 
     now = datetime(2026, 4, 15, 8, 0, tzinfo=LOCAL_TZ)
     context = await build_briefing_context(
         group_id=group_id,
         period="morning",
         now=now,
-        daily_collector=collector,
-        wordcloud_collector=wc_collector,
+        archive=archive,
         briefing_config=briefing_config,
     )
     assert context.period_label == "早报"
@@ -96,8 +92,7 @@ async def test_build_morning_briefing_context(tmp_path: Path, briefing_config):
 
 
 async def test_build_noon_briefing_and_fallback(tmp_path: Path, briefing_config):
-    collector = DailyMessageCollector(base_dir=tmp_path / "daily_msgs")
-    wc_collector = WordCloudCollector(base_dir=tmp_path / "wordcloud_msgs")
+    archive = ChatArchive(tmp_path / "archive.db")
     group_id = "10001"
 
     today = [
@@ -107,16 +102,14 @@ async def test_build_noon_briefing_and_fallback(tmp_path: Path, briefing_config)
         (datetime(2026, 4, 15, 12, 5, tzinfo=LOCAL_TZ), "u3", "王五", "吃完饭继续聊"),
     ]
     for ts, user_id, sender, text in today:
-        collector.record(group_id, sender, text, ts=ts.timestamp(), user_id=user_id)
-        wc_collector.record(group_id, sender, text, ts=ts.timestamp())
+        archive.record(group_id, sender, text, ts=ts.timestamp(), user_id=user_id)
 
     now = datetime(2026, 4, 15, 12, 30, tzinfo=LOCAL_TZ)
     context = await build_briefing_context(
         group_id=group_id,
         period="noon",
         now=now,
-        daily_collector=collector,
-        wordcloud_collector=wc_collector,
+        archive=archive,
         briefing_config=briefing_config,
     )
     assert context.period_label == "午报"
@@ -150,20 +143,18 @@ def test_build_active_users_strips_cq_codes_from_sender():
 
 
 async def test_fallback_briefing_renders_sanitized_display_name(tmp_path: Path, briefing_config):
-    collector = DailyMessageCollector(base_dir=tmp_path / "daily_msgs")
-    wc_collector = WordCloudCollector(base_dir=tmp_path / "wordcloud_msgs")
+    archive = ChatArchive(tmp_path / "archive.db")
     group_id = "10001"
 
     ts = datetime(2026, 4, 15, 9, 0, tzinfo=LOCAL_TZ)
-    collector.record(group_id, "[CQ:at,qq=all]张三", "早上好", ts=ts.timestamp(), user_id="u1")
+    archive.record(group_id, "[CQ:at,qq=all]张三", "早上好", ts=ts.timestamp(), user_id="u1")
 
     now = datetime(2026, 4, 15, 12, 30, tzinfo=LOCAL_TZ)
     context = await build_briefing_context(
         group_id=group_id,
         period="noon",
         now=now,
-        daily_collector=collector,
-        wordcloud_collector=wc_collector,
+        archive=archive,
         briefing_config=briefing_config,
     )
 
@@ -189,16 +180,16 @@ def test_enabled_groups_persist(tmp_path: Path):
     assert reloaded.contains("10001") is False
 
 
-def test_daily_message_collector_read_all(tmp_path: Path):
-    collector = DailyMessageCollector(base_dir=tmp_path / "daily_msgs")
+def test_chat_archive_read_all(tmp_path: Path):
+    archive = ChatArchive(tmp_path / "archive.db")
     group_id = "10001"
     older = datetime(2026, 4, 14, 9, 0, tzinfo=LOCAL_TZ)
     newer = datetime(2026, 4, 15, 9, 0, tzinfo=LOCAL_TZ)
 
-    collector.record(group_id, "Alice", "旧消息", ts=older.timestamp(), user_id="1")
-    collector.record(group_id, "Alice", "新消息", ts=newer.timestamp(), user_id="1")
+    archive.record(group_id, "Alice", "旧消息", ts=older.timestamp(), user_id="1")
+    archive.record(group_id, "Alice", "新消息", ts=newer.timestamp(), user_id="1")
 
-    messages = collector.read_all(group_id)
+    messages = archive.read_all(group_id)
 
     assert [item["text"] for item in messages] == ["旧消息", "新消息"]
-    assert collector.read_all("99999") == []
+    assert archive.read_all("99999") == []

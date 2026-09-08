@@ -341,7 +341,7 @@ output_per_mtok = 0.40
 
 ### `[weekly_report]` / `[monthly_report]` — 群周报 / 群月报
 
-每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源复用词云采集（`wordcloud_msgs`，always-on 不删除），按天采样后套用每日日报同款 LLM 管线。与 `[daily_summary]` 相互独立，可单独开启。
+每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源为聊天记录归档（`chat_archive.db`，全群 always-on、永不删除），按天采样后套用每日日报同款 LLM 管线。与 `[daily_summary]` 相互独立，可单独开启。
 
 | 键 | 说明 |
 |----|------|

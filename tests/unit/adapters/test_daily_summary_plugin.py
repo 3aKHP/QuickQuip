@@ -68,7 +68,7 @@ async def test_send_daily_summary_now_reuses_manual_generation(monkeypatch):
 
     monkeypatch.setattr(daily_summary_plugin, "datetime", _FixedDateTime)
     monkeypatch.setattr(daily_summary_plugin, "daily_enabled_groups", _EnabledGroups())
-    monkeypatch.setattr(daily_summary_plugin.daily_collector, "read_window", lambda *args, **kwargs: ["m1", "m2"])
+    monkeypatch.setattr(daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1", "m2"])
     monkeypatch.setattr(
         daily_summary_plugin,
         "get_llm_service",
@@ -101,7 +101,7 @@ async def test_send_daily_summary_now_reports_not_enough_messages(monkeypatch):
 
     monkeypatch.setattr(daily_summary_plugin, "datetime", _FixedDateTime)
     monkeypatch.setattr(daily_summary_plugin, "daily_enabled_groups", _EnabledGroups())
-    monkeypatch.setattr(daily_summary_plugin.daily_collector, "read_window", lambda *args, **kwargs: ["m1"])
+    monkeypatch.setattr(daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1"])
     monkeypatch.setattr(
         daily_summary_plugin,
         "get_llm_service",
@@ -393,29 +393,23 @@ def _make_publish_deps():
 
 
 @pytest.mark.asyncio
-async def test_publish_one_marks_then_deletes_window_files_in_order(monkeypatch):
-    """钉住发布顺序：send → mark_published → delete_date_file(summary_date)
-    → delete_date_file(summary_date - 1)（确认送达后才删 JSONL，覆盖窗口两天）。"""
+async def test_publish_one_marks_published_in_order(monkeypatch):
+    """钉住发布顺序：send → mark_published；归档永不删除（1.15.2 契约）。"""
     events, fake_send = _make_publish_deps()
     store = types.SimpleNamespace(mark_published=lambda gid, d: events.append(("mark", gid, d)))
-    collector = types.SimpleNamespace(delete_date_file=lambda gid, d: events.append(("delete", gid, d)))
-
-    import datetime as dt
 
     row = {"group_id": "10001", "summary_date": "2026-05-03", "content": "正文", "model_used": "m"}
-    await summary_jobs.publish_summary_one(row, store=store, collector=collector, send=fake_send)
+    await summary_jobs.publish_summary_one(row, store=store, send=fake_send)
 
     assert events == [
         ("send", 10001),
         ("mark", "10001", "2026-05-03"),
-        ("delete", "10001", dt.date(2026, 5, 3)),
-        ("delete", "10001", dt.date(2026, 5, 2)),
     ]
 
 
 @pytest.mark.asyncio
 async def test_publish_one_send_failure_keeps_store_and_files(monkeypatch):
-    """钉住：发送失败时不 mark_published、不删 JSONL，异常不外抛。"""
+    """钉住：发送失败时不 mark_published，异常不外抛。"""
     events, _fake_send = _make_publish_deps()
 
     async def failing_send(row):
@@ -423,10 +417,9 @@ async def test_publish_one_send_failure_keeps_store_and_files(monkeypatch):
         raise RuntimeError("network down")
 
     store = types.SimpleNamespace(mark_published=lambda gid, d: events.append(("mark", gid, d)))
-    collector = types.SimpleNamespace(delete_date_file=lambda gid, d: events.append(("delete", gid, d)))
 
     row = {"group_id": "10001", "summary_date": "2026-05-03", "content": "正文", "model_used": "m"}
-    await summary_jobs.publish_summary_one(row, store=store, collector=collector, send=failing_send)
+    await summary_jobs.publish_summary_one(row, store=store, send=failing_send)
 
     assert events == [("send", 10001)]
 
@@ -443,11 +436,10 @@ async def test_job_publish_summaries_only_publishes_enabled_groups(monkeypatch):
         get_unpublished=lambda: rows,
         mark_published=lambda gid, d: events.append(("mark", gid, d)),
     )
-    collector = types.SimpleNamespace(delete_date_file=lambda gid, d: events.append(("delete", gid, d)))
     enabled_groups = types.SimpleNamespace(all_groups=lambda: ["10001"])
 
     await summary_jobs.publish_summaries_job(
-        store=store, collector=collector, enabled_groups=enabled_groups, send=fake_send,
+        store=store, enabled_groups=enabled_groups, send=fake_send,
     )
 
     sends = [e for e in events if e[0] == "send"]
@@ -461,7 +453,7 @@ async def test_job_publish_summaries_noop_without_unpublished(monkeypatch):
     store = types.SimpleNamespace(get_unpublished=lambda: [])
 
     await summary_jobs.publish_summaries_job(
-        store=store, collector=None,
+        store=store,
         enabled_groups=types.SimpleNamespace(all_groups=lambda: []),
         send=fake_send,
     )
@@ -490,7 +482,7 @@ async def test_send_daily_summary_now_window_starts_yesterday_0600(monkeypatch):
         "daily_enabled_groups",
         types.SimpleNamespace(contains=lambda gid: True),
     )
-    monkeypatch.setattr(daily_summary_plugin.daily_collector, "read_window", fake_read_window)
+    monkeypatch.setattr(daily_summary_plugin.chat_archive, "read_window", fake_read_window)
     monkeypatch.setattr(
         daily_summary_plugin,
         "get_llm_service",
@@ -547,7 +539,7 @@ async def test_send_daily_summary_now_insufficient_messages_carries_counts(monke
         types.SimpleNamespace(contains=lambda gid: True),
     )
     monkeypatch.setattr(
-        daily_summary_plugin.daily_collector, "read_window",
+        daily_summary_plugin.chat_archive, "read_window",
         lambda *a, **kw: ["m1", "m2", "m3"],
     )
     monkeypatch.setattr(
@@ -577,7 +569,7 @@ async def test_send_daily_summary_now_raises_when_generation_returns_none(monkey
         types.SimpleNamespace(contains=lambda gid: True),
     )
     monkeypatch.setattr(
-        daily_summary_plugin.daily_collector, "read_window",
+        daily_summary_plugin.chat_archive, "read_window",
         lambda *a, **kw: ["m1"],
     )
     monkeypatch.setattr(

@@ -79,9 +79,9 @@ async def render_wordcloud(
     now = datetime.now(tz=_LOCAL_TZ)
     start_ts, end_ts = _time_window(window, now)
 
-    from quickquip.app.message_pipeline import wordcloud_collector
+    from quickquip.app.message_pipeline import chat_archive
 
-    messages = wordcloud_collector.read_window(group, start_ts, end_ts)
+    messages = chat_archive.read_window(group, start_ts, end_ts)
     if not messages:
         raise HTTPException(status_code=404, detail="窗口内无消息记录")
 
