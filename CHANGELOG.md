@@ -6,6 +6,23 @@
 
 （暂无）
 
+## [1.15.2] - 2026-09-09
+
+本版围绕**总结/日报体系**：群聊消息统一为单一归档并全群常开采集，修复日报在 Gemini 系模型上的输出上限击穿问题，群周报改为全量消息压缩序列化后一次成文，并为内联媒体引入统一防护。
+
+**升级说明**：旧的 `daily_msgs/`、`wordcloud_msgs/` 双 JSONL 采集器退役，部署后可执行 `python scripts/backfill_chat_archive.py`（`--dry-run` 可预览）一次性回灌历史数据，确认无误后旧目录可手动清理；机器人自身发言入档需要在 LLOneBot 连接配置开启 `reportSelfMessage` 并重启，未开启时该功能静默无操作。
+
+### 变更
+
+- 群聊消息记录统一为单一聊天归档（`chat_archive.db`，SQLite，全群 always-on、永不删除）：每条消息只写一次，日报、词云、早午晚报、周报/月报与 `/history` 全部从同一归档读取。归档忠于原文（含消息 ID、用户 ID、图片 URL 与数量），多媒体不进入任何消费管线，各消费方保留自己的清洗策略。旧的 `daily_msgs/`、`wordcloud_msgs/` 双 JSONL 采集器退役；部署后可执行 `python scripts/backfill_chat_archive.py` 一次性把历史 JSONL 回灌进归档（按内容去重，`--dry-run` 可预览），回灌完成后旧目录可手动清理。
+- 群周报改为全量消息经压缩序列化后一次成文：聊天记录按天分节、同一分钟内的连续发言合并、相同消息连发折叠计数、链接只留域名。周报信息覆盖更完整，输入 token 开销约为原先一半。`weekly_report.sample_per_day` 配置项移除（周报不再按天采样；月报暂保留原策略）。
+
+### 修复
+
+- 群聊图片等内联媒体在发送给 LLM 前统一收口：动图（GIF）自动取首帧转为静态 PNG，相同内容的图片在单次请求内去重，并对内联图片总量引入解码字节预算（默认约 2MB，可在 provider 配置 `max_inline_media_bytes` 调整，0 为不限；超限时按优先级保留靠前的图片，第一张装不下连同其后全部跳过并记录日志）。修复大体积动图 base64 内联撑爆单请求、触发上游网关风控隔离的问题；畸形超大尺寸图片改为安全跳过，不再影响整轮请求。
+- 修复群日报在 Gemini 系模型上每晚被 `MAX_TOKENS` 击穿、级联丢弃已生成正文并三倍计费、忙碌日整晚失败的问题：日报输出 token 上限提升至 16384，聊天记录容量上限按级联模型的上下文窗口推导（1M 窗口模型不再被固定 300k 字符卡死，容量未知时保守回退）。级联每跳的模型、完成原因与 token 用量在日志中结构化留档，全败时输出各跳一览；不完整或异常的日报仍一律不放行，由级联换模型兜底。管理后台「总结」页新增「生成健康度」面板（近 7/30 天各链路成功/失败、完成原因分布与成本），用量明细新增 `finish_reason` 字段，失败定位不再依赖 HTTP trace。
+- 聊天归档补采机器人自己的群发言：此前机器人发出的消息从未进入归档，导致总结/周期报告缺失机器人参与的部分。自本版起机器人发言照常入档，并在周报/月报的聊天记录中以名字后缀 `(bot)` 标注。
+
 ## [1.15.1] - 2026-09-08
 
 本版是 1.15 系列的累积更新：修复 Agent Loop 取消收尾与被动触发记录分类，部署脚本统一为按版本发布的事务式 v4 流程。
@@ -889,7 +906,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.15.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.15.2...HEAD
+[1.15.2]: https://github.com/3aKHP/QuickQuip/compare/v1.15.1...v1.15.2
 [1.15.1]: https://github.com/3aKHP/QuickQuip/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/3aKHP/QuickQuip/compare/v1.14.3...v1.15.0
 [1.14.3]: https://github.com/3aKHP/QuickQuip/compare/v1.14.2...v1.14.3

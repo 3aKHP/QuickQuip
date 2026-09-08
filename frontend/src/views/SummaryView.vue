@@ -16,6 +16,50 @@
       </div>
     </UiCard>
 
+    <UiCard v-if="health" padding="md" shadow="sm" class="health-card">
+      <div class="health-head">
+        <strong>生成健康度</strong>
+        <label class="health-days">
+          近
+          <select v-model.number="healthDays" @change="loadHealth">
+            <option :value="7">7</option>
+            <option :value="30">30</option>
+          </select>
+          天
+        </label>
+        <UiButton size="sm" icon="RefreshCw" :loading="healthLoading" @click="loadHealth">刷新</UiButton>
+      </div>
+      <table v-if="health.features.length" class="health-table">
+        <thead><tr><th>链路</th><th>状态</th><th>调用</th><th>均耗时</th><th>成本</th></tr></thead>
+        <tbody>
+          <tr v-for="row in health.features" :key="`${row.feature}-${row.state}`">
+            <td>{{ featureLabel(row.feature) }}</td>
+            <td>
+              <UiTag :variant="row.state === 'ok' ? 'success' : 'danger'">{{ row.state }}</UiTag>
+            </td>
+            <td>{{ row.calls }}</td>
+            <td>{{ Math.round((row.avg_duration_ms ?? 0) / 1000) }}s</td>
+            <td>${{ Number(row.cost_usd ?? 0).toFixed(2) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="health-empty">近 {{ health.days }} 天无总结族调用记录。</p>
+      <details v-if="health.finish_reasons.length" class="health-details">
+        <summary>完成原因分布（正常口径：stop / STOP / end_turn / stop_sequence，其余会被级联丢弃）</summary>
+        <table class="health-table">
+          <thead><tr><th>链路</th><th>模型</th><th>finish</th><th>次数</th></tr></thead>
+          <tbody>
+            <tr v-for="(row, i) in health.finish_reasons" :key="i">
+              <td>{{ featureLabel(row.feature) }}</td>
+              <td>{{ row.model }}</td>
+              <td>{{ row.finish_reason || '（未上报）' }}</td>
+              <td>{{ row.calls }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
+    </UiCard>
+
     <p v-if="groupId && !selected && !listLoading" class="pub-legend">「已发布」= 已推送到群聊；「未发布」= 已生成、等待下次调度推送。</p>
 
     <div v-if="listError" class="error-block">
@@ -94,7 +138,8 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiTabs from '../components/ui/UiTabs.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
-import { deleteSummary, fetchSummaryDetail, fetchSummaryGroups, fetchSummaries } from '../api/summaries'
+import { deleteSummary, fetchSummariesHealth, fetchSummaryDetail, fetchSummaryGroups, fetchSummaries } from '../api/summaries'
+import type { SummariesHealth } from '../api/summaries'
 import type { SummaryDetailRow, SummaryListRow } from '../api/summaries'
 import { deletePeriodReport, fetchPeriodReportDetail, fetchPeriodReportGroups, fetchPeriodReports } from '../api/period_reports'
 import { renderMarkdown } from '../composables/useMarkdown'
@@ -179,7 +224,35 @@ const renderedContent = computed(() => {
   return content ? renderMarkdown(content) : ''
 })
 
-onMounted(() => loadGroups())
+onMounted(() => {
+  loadGroups()
+  loadHealth()
+})
+
+const health = ref<SummariesHealth | null>(null)
+const healthLoading = ref(false)
+const healthDays = ref(7)
+
+const featureLabels: Record<string, string> = {
+  summary: '日报',
+  briefing: '简报',
+  period_report: '周月报',
+}
+
+function featureLabel(feature: string): string {
+  return featureLabels[feature] ?? feature
+}
+
+async function loadHealth() {
+  healthLoading.value = true
+  try {
+    health.value = await fetchSummariesHealth(healthDays.value)
+  } catch {
+    health.value = null
+  } finally {
+    healthLoading.value = false
+  }
+}
 
 function switchTab(t: Tab) {
   if (activeTab.value === t) return
@@ -479,5 +552,61 @@ function closeDetail() {
 
 .markdown-body :deep(a) {
   color: var(--qq-primary);
+}
+
+.health-card {
+  margin-bottom: var(--qq-gap-md);
+}
+
+.health-head {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-md);
+}
+
+.health-head strong {
+  font-size: 0.95rem;
+}
+
+.health-days select {
+  margin: 0 4px;
+}
+
+.health-head .ui-button {
+  margin-left: auto;
+}
+
+.health-table {
+  width: 100%;
+  margin-top: var(--qq-gap-sm);
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.health-table th,
+.health-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--qq-border, rgba(0, 0, 0, 0.08));
+}
+
+.health-empty {
+  margin: var(--qq-gap-sm) 0 0;
+  color: var(--qq-text-muted);
+  font-size: 0.85rem;
+}
+
+.health-details {
+  margin-top: var(--qq-gap-sm);
+  font-size: 0.85rem;
+}
+
+.health-details summary {
+  cursor: pointer;
+  color: var(--qq-text-muted);
+}
+
+.health-details .health-table {
+  margin-top: var(--qq-gap-sm);
 }
 </style>

@@ -31,7 +31,8 @@ llm_about/**/*.yaml
 !llm_about/*.yaml.example
 !llm_about/_example/*.yaml
 tests/
-scripts/
+scripts/*
+!scripts/backfill_chat_archive.py
 README.md
 CHANGELOG.md
 ROADMAP.md

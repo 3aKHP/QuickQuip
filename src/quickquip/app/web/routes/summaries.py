@@ -1,6 +1,7 @@
 import logging
 import re
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -127,3 +128,65 @@ def list_summary_groups():
         return [r["group_id"] for r in rows]
     finally:
         conn.close()
+
+
+@router.get("/summaries-health")
+def summaries_health(days: int = 7):
+    """总结族（日报/简报/周月报）生成健康度：成功/失败/跳过、finish_reason
+    分布、级联跳数与成本（1.15.2 CE 线）。经 usage_store 读取以确保惰性
+    schema 迁移先于查询执行（升级窗口内旧库无 finish_reason 列）。"""
+    days = max(1, min(days, 90))
+    since = (
+        datetime.now(tz=timezone.utc) - timedelta(days=days)
+    ).isoformat()
+    from quickquip.llm.usage_store import usage_store
+
+    try:
+        usage_store._ensure_schema()
+        with usage_store.connect() as conn:
+            features = conn.execute(
+                """
+                SELECT feature, state,
+                       COUNT(*) AS calls,
+                       SUM(COALESCE(cost_usd, 0)) AS cost_usd,
+                       AVG(COALESCE(duration_ms, 0)) AS avg_duration_ms
+                FROM llm_usage_events
+                WHERE feature IN ('summary', 'briefing', 'period_report')
+                  AND ts >= ?
+                GROUP BY feature, state ORDER BY feature, state
+                """,
+                (since,),
+            ).fetchall()
+            finish_reasons = conn.execute(
+                """
+                SELECT feature, provider_id, model,
+                       COALESCE(finish_reason, '') AS finish_reason,
+                       COUNT(*) AS calls
+                FROM llm_usage_events
+                WHERE feature IN ('summary', 'briefing', 'period_report')
+                  AND state = 'ok' AND ts >= ?
+                GROUP BY feature, provider_id, model, finish_reason
+                ORDER BY calls DESC LIMIT 50
+                """,
+                (since,),
+            ).fetchall()
+            groups = conn.execute(
+                """
+                SELECT feature, group_id, COUNT(*) AS calls,
+                       SUM(CASE WHEN state != 'ok' THEN 1 ELSE 0 END) AS failed
+                FROM llm_usage_events
+                WHERE feature IN ('summary', 'briefing', 'period_report')
+                  AND ts >= ? AND group_id IS NOT NULL
+                GROUP BY feature, group_id ORDER BY calls DESC LIMIT 50
+                """,
+                (since,),
+            ).fetchall()
+        return {
+            "days": days,
+            "features": [dict(r) for r in features],
+            "finish_reasons": [dict(r) for r in finish_reasons],
+            "groups": [dict(r) for r in groups],
+        }
+    except sqlite3.Error:
+        logger.warning("summaries-health: 用量库暂不可用")
+        return {"days": days, "features": [], "finish_reasons": [], "groups": []}

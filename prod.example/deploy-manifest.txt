@@ -3,6 +3,7 @@ bot.py
 web_api.py
 pyproject.toml
 requirements.txt
+scripts/backfill_chat_archive.py
 config
 frontend/dist
 llm_about

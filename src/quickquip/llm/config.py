@@ -24,6 +24,12 @@ DEFAULT_RETRY_JITTER = 0.5
 AGENT_REPLAY_LOOP_TOKENS_FLOOR = 512
 AGENT_REPLAY_LOOP_TOKENS_CEILING = 4_194_304
 
+# 单请求内联媒体（解码后）总字节预算缺省（issue #228）：按网关
+# 「请求体字节数 ÷ 4 ≈ 输入 token、单请求 800K」上限推导——3.2MiB 请求体
+# → base64 反推 2.4MiB 解码量，再留文本与分钟窗累计余量取 2MiB。
+# provider 级 max_inline_media_bytes 可覆盖；0 = 不限。
+DEFAULT_MAX_INLINE_MEDIA_BYTES = 2_097_152
+
 
 @dataclass(slots=True)
 class TriggerConfig:
@@ -210,6 +216,9 @@ class ProviderConfig:
     epoch_cap_tokens: int | None = None
     # 应用侧输入预算（§8.3）：provider 覆盖 None = 继承 runtime 缺省。
     request_input_token_budget: int | None = None
+    # 单请求内联媒体（解码后）总字节预算；0 = 不限。
+    # 收口逻辑见 provider/media_guard.py。
+    max_inline_media_bytes: int = DEFAULT_MAX_INLINE_MEDIA_BYTES
     # 历史重放投影预算的 provider 级硬覆盖（§8.2）；None = 推导
     # （仲裁者减固定开销，runtime.agent_replay_loop_tokens 为下限）。
     agent_replay_loop_tokens: int | None = None
@@ -272,8 +281,9 @@ class DailyBriefingConfig:
 class WeeklyReportConfig:
     """群周报：每周自动生成上周群聊回顾。
 
-    数据源复用 wordcloud collector（always-on，不删除），按天采样后套用日报同款 LLM 管线。
-    period 标识为 ISO 周号（如 2026-W24）。
+    数据源为聊天归档（chat_archive，always-on），1.15.2 起全量消息进
+    压缩序列化器后一次成文（日分节/分钟块/连发合并），不再按天采样；
+    溢出由级联每跳字符预算兜底。period 标识为 ISO 周号（如 2026-W24）。
     """
 
     enabled: bool = False
@@ -281,7 +291,6 @@ class WeeklyReportConfig:
     publish_cron: str = "0 10 * * *"  # 每天 10:00 发布（周一发新报告，其余日子补发未发布的）
     min_messages: int = 100
     length_hint: int = 2000
-    sample_per_day: int = 50  # 每天采样消息数上限，控制总量
     model_cascade: list[str] = field(default_factory=list)
 
 
@@ -572,6 +581,9 @@ def _parse_single_provider(
         epoch_cap_tokens=_as_optional_int(entry.get("epoch_cap_tokens")),
         request_input_token_budget=_nonpositive_as_none(
             entry.get("request_input_token_budget")
+        ),
+        max_inline_media_bytes=max(
+            0, int(entry.get("max_inline_media_bytes", DEFAULT_MAX_INLINE_MEDIA_BYTES))
         ),
         agent_replay_loop_tokens=_clamped_optional_int(
             entry.get("agent_replay_loop_tokens"),
@@ -971,7 +983,6 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
             min_messages=max(1, int(weekly_report_raw.get("min_messages", 100))),
             length_hint=max(200, int(weekly_report_raw.get("length_hint", 2000))),
-            sample_per_day=max(1, int(weekly_report_raw.get("sample_per_day", 50))),
             model_cascade=[
                 str(item).strip()
                 for item in weekly_report_raw.get("model_cascade", [])

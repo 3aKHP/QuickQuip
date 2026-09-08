@@ -27,6 +27,41 @@ export async function fetchSummaryGroups(): Promise<string[]> {
   return request('/api/summaries-groups')
 }
 
+/** 对应 GET /api/summaries-health：总结族生成健康度聚合 */
+export interface HealthFeatureRow {
+  feature: string
+  state: string
+  calls: number
+  cost_usd: number | null
+  avg_duration_ms: number | null
+}
+
+export interface HealthFinishRow {
+  feature: string
+  provider_id: string
+  model: string
+  finish_reason: string
+  calls: number
+}
+
+export interface HealthGroupRow {
+  feature: string
+  group_id: string
+  calls: number
+  failed: number
+}
+
+export interface SummariesHealth {
+  days: number
+  features: HealthFeatureRow[]
+  finish_reasons: HealthFinishRow[]
+  groups: HealthGroupRow[]
+}
+
+export async function fetchSummariesHealth(days: number): Promise<SummariesHealth> {
+  return request(`/api/summaries-health?days=${days}`)
+}
+
 export async function fetchSummaries(groupId: string): Promise<SummaryRow[]> {
   return request(`/api/summaries/${groupId}`)
 }

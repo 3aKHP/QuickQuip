@@ -22,6 +22,7 @@ from quickquip.adapters.nonebot.awakening_plugin import setup as setup_awakening
 from quickquip.adapters.nonebot.group_messages import register_message_matcher
 from quickquip.adapters.nonebot.private_messages import register_private_message_matcher
 from quickquip.adapters.nonebot.recall_handler import register_recall_handlers
+from quickquip.adapters.nonebot.self_message_events import register_self_message_events
 from quickquip.adapters.nonebot.lifecycle import register_lifecycle
 from quickquip.common.bot_action_trace import install_nonebot_api_trace_hook
 
@@ -32,6 +33,7 @@ private_matcher = None
 if nonebot is not None:
     if Bot is not None:
         install_nonebot_api_trace_hook(Bot)
+        register_self_message_events()
     try:
         driver = nonebot.get_driver()
     except ValueError:

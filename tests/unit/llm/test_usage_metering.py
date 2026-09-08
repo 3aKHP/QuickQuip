@@ -370,3 +370,34 @@ async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_pa
     assert await _record("claude") == "exclusive"
     assert await _record("openai") == "inclusive"
     assert await _record("gemini") == "inclusive"
+
+
+async def test_record_usage_persists_finish_reason(monkeypatch, tmp_path):
+    """成功请求的 finish_reason 落行；错误行（无 response）为 NULL。"""
+    from quickquip.llm.usage import _record_usage
+    from quickquip.llm.usage_store import LLMUsageStore
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="claude", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    ok_response = LLMResponse(
+        text="ok", model="m", input_tokens=10, output_tokens=5, finish_reason="end_turn",
+    )
+    await _record_usage(FakeClient(), FakeReq(), ok_response, 0.0, True, "ok")
+    await _record_usage(FakeClient(), FakeReq(), None, 0.0, True, "error", "boom")
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT finish_reason FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [r["finish_reason"] for r in rows] == ["end_turn", None]

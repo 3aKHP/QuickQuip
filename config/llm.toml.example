@@ -252,7 +252,8 @@ model_cascade = [
 ]
 
 # 群周报 — 每周自动生成上周群聊回顾。
-# 数据源复用词云采集（wordcloud_msgs，always-on 不删除），按天采样后套用日报同款 LLM 管线。
+# 数据源为聊天归档（chat_archive，always-on），全量消息经压缩序列化
+# （日分节/分钟块/连发合并）后一次成文；不再按天采样。
 # 命令：/summary weekly on|off|status|now（在群里开启/关闭/查状态/立即生成上周）
 # period 标识为 ISO 周号（如 2026-W24）。
 [weekly_report]
@@ -261,7 +262,6 @@ generate_cron = "0 9 * * 1"      # 每周一 09:00 生成上周周报
 publish_cron  = "0 10 * * *"     # 每天 10:00 发布（周一发新报告，其余日子补发未发布的）
 min_messages  = 100              # 低于此条数时跳过生成（最小值 1）
 length_hint   = 2000             # 字数目标，注入 prompt（最小值 200）
-sample_per_day = 50              # 每天采样消息数上限，控制喂给 LLM 的总量（最小值 1）
 # 模型级联（仅 enabled = true 时才校验引用的 provider，关闭时不产生 load_error）
 model_cascade = [
     "gemini-main/gemini-3.1-pro-high",
@@ -350,6 +350,7 @@ style_profile = "claude_family"
 # model_context_windows = { "claude-sonnet-4-6" = 200000 }  # wire 模型 → 上下文窗口；未配置的模型按内置家族表解析，中继自定义模型名建议显式声明
 # agent_replay_loop_tokens = 131072  # 重放投影预算硬覆盖（优先于按窗口推导）
 # request_input_token_budget = 96000 # 请求输入预算硬覆盖（优先于按窗口推导）
+# max_inline_media_bytes = 2097152   # 单请求内联媒体解码字节总量预算（GIF 自动取首帧；0 = 不限）
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048

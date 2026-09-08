@@ -151,8 +151,7 @@ class Harness:
         monkeypatch.setattr(gm, "offline_message_store", SimpleNamespace(pop_pending=lambda g, u: None))
         monkeypatch.setattr(gm, "recent_messages", self.recent)
         monkeypatch.setattr(gm, "awakening_state", self.awakening_state)
-        monkeypatch.setattr(gm, "record_group_message", lambda *a, **k: None)
-        monkeypatch.setattr(gm, "record_wordcloud_message", lambda *a, **k: None)
+        monkeypatch.setattr(gm, "record_chat_message", lambda *a, **k: None)
         monkeypatch.setattr(gm, "get_sender_name", lambda event: "Alice")
         monkeypatch.setattr(gm, "resolve_reply", AsyncMock(return_value=None))
         monkeypatch.setattr(awakening_module, "_state", self.awakening_state)
@@ -361,3 +360,45 @@ async def test_empty_trimmed_repeat_does_not_send_or_consume_rate_limit(harness_
 
     assert h.recorder.sent == []
     assert h.rate_limiter.allow_calls == []
+
+
+# ── 1.15.2：bot 自产消息入归档（不进触发/统计链路） ────────────────────────
+
+
+async def test_self_message_archived_without_trigger(harness_factory, monkeypatch):
+    """自消息只入归档：record_chat_message 收到全参，LLM/快判不被触碰。"""
+    h = harness_factory()
+    recorded: list = []
+    monkeypatch.setattr(gm, "record_chat_message", lambda *a, **k: recorded.append((a, k)))
+
+    event = DummyGroupEvent(
+        DummyMessage([text_seg("bot 自产言论")]), user_id=999, self_id=999
+    )
+    await h.handle(event)
+
+    assert len(recorded) == 1
+    args, kwargs = recorded[0]
+    assert args[0] == 100
+    assert args[1] == 999
+    assert args[2] == "Alice"  # harness 打桩 get_sender_name → 固定返回
+    assert args[3] == "bot 自产言论"
+    assert kwargs.get("message_id") == "m1"
+    h.svc.generate_reply.assert_not_awaited()
+    h.svc.quick_judge_detailed.assert_not_awaited()
+
+
+async def test_self_message_archive_failure_does_not_propagate(harness_factory, monkeypatch):
+    """归档写入抛错时 handler 静默返回（不阻断消息主链路）。"""
+    h = harness_factory()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("archive down")
+
+    monkeypatch.setattr(gm, "record_chat_message", boom)
+
+    event = DummyGroupEvent(
+        DummyMessage([text_seg("x")]), user_id=999, self_id=999
+    )
+    await h.handle(event)  # 不抛即通过
+
+    h.svc.generate_reply.assert_not_awaited()

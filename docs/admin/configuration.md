@@ -246,6 +246,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
 
+> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `2097152`，`0` = 不限）限制单次请求全部内联图片的解码字节总量。发送前图片统一收口：动图（GIF）自动取首帧转静态 PNG、相同内容去重；预算按候选优先级（当前消息 → 引用 → 近期）前缀止停，第一张装不下的图片连同其后全部跳过并记录日志。该预算用于把请求体体积约束在上游网关风控上限之内（图片 base64 会被部分网关按文本估算 token）。
+
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
@@ -324,7 +326,7 @@ output_per_mtok = 0.40
 | `max_output_chars` | 最大输出字符数 |
 | `model_cascade` | 模型级联列表（provider + model，失败自动降级） |
 
-`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
+`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求 16384（周/月报 8192），输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
 
 ### `[daily_summary]` — 每日总结
 
@@ -339,7 +341,7 @@ output_per_mtok = 0.40
 
 ### `[weekly_report]` / `[monthly_report]` — 群周报 / 群月报
 
-每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源复用词云采集（`wordcloud_msgs`，always-on 不删除），按天采样后套用每日日报同款 LLM 管线。与 `[daily_summary]` 相互独立，可单独开启。
+每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源为聊天记录归档（`chat_archive.db`，全群 always-on、永不删除）。周报把全量消息经压缩序列化（按天分节、同分钟连发合并、复读折叠、URL 只留域名）后一次成文；月报按天采样控制总量。与 `[daily_summary]` 相互独立，可单独开启。
 
 | 键 | 说明 |
 |----|------|
@@ -348,7 +350,7 @@ output_per_mtok = 0.40
 | `publish_cron` | 发布 cron（默认 `0 10 * * *` 每天 10:00；周报/月报共用，每日发布新报告并补发未发布的） |
 | `min_messages` | 周期内最小消息数（不足时跳过；周报默认 100，月报默认 300） |
 | `length_hint` | 目标字数（周报默认 2000，月报默认 2500） |
-| `sample_per_day` | 每天采样消息数上限（控制喂给 LLM 的总量；周报默认 50，月报默认 20） |
+| `sample_per_day` | 每天采样消息数上限（仅月报生效，默认 20；周报全量进压缩序列化器，不采样） |
 | `model_cascade` | 模型级联列表，支持 `@default` 占位符 |
 
 > 周报/月报通过 `/summary weekly|monthly on|off|status|now` 在群内按群开启。period 标识：周报为 ISO 周号（如 `2026-W24`），月报为年月（如 `2026-06`）。
