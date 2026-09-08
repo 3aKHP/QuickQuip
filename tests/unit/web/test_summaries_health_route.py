@@ -1,7 +1,6 @@
 """summaries-health 路由：总结族生成健康度聚合（1.15.2 CE 线）。"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import pytest
 

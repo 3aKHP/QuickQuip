@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from quickquip.app.web.audit import audit_logger
-from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH, LLM_USAGE_DB_PATH
+from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
