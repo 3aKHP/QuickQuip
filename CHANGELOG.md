@@ -1,6 +1,6 @@
 # Changelog
 
-本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范；版本号按[项目版本约定](docs/dev/versioning.md)管理：三段式格式参考 SemVer，主题更新与系列内累积更新借鉴 Minecraft 风格，兼容性与升级要求以各版本发布说明为准。
 
 ## [Unreleased]
 
