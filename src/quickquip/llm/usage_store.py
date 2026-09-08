@@ -183,6 +183,7 @@ class LLMUsageStore:
                     "pricing_model": "TEXT",
                     "pricing_source": "TEXT",
                     "pricing_confidence": "TEXT",
+                    "finish_reason": "TEXT",
                 }
                 for name, definition in migrations.items():
                     columns = {
