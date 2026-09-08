@@ -23,6 +23,10 @@ import httpx
 
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.agent_records import ResponseOwner
+from quickquip.llm.provider.media_guard import (
+    MAX_IMAGE_BYTES,
+    guard_inline_media,
+)
 from quickquip.llm.provider.retry import RetryPolicy, backoff_delay
 from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, sanitize_error_message
 from quickquip.llm.tools import (
@@ -487,8 +491,8 @@ class BaseProviderClient:
 
         if not raw:
             raise LLMProviderError(f"图片内容为空：{image_url}")
-        if len(raw) > 5 * 1024 * 1024:
-            raise LLMProviderError(f"图片过大，当前限制为 5MB：{image_url}")
+        if len(raw) > MAX_IMAGE_BYTES:
+            raise LLMProviderError(f"图片过大，当前限制为 {MAX_IMAGE_BYTES // (1024 * 1024)}MB：{image_url}")
 
         return LLMImageInput(
             source_url=image_url,
@@ -503,32 +507,37 @@ class BaseProviderClient:
     ) -> list[LLMImageInput]:
         if not image_urls and not inline_images:
             return []
-        prepared: list[LLMImageInput] = []
+        # 收口顺序：URL 图先入列（下载失败不占名额），内联图补足剩余名额，
+        # 全部经 media_guard 做 GIF 首帧化、MIME 归一、内容去重与字节预算。
+        candidates: list[tuple[str, bytes, str]] = []
         for image_url in image_urls[:MAX_IMAGES_PER_REQUEST]:
             try:
-                prepared.append(await self._download_image(image_url))
+                downloaded = await self._download_image(image_url)
             except LLMProviderError:
                 # A single stale/forbidden URL (common for QQ CDN links pulled
                 # from the recent buffer) must not sink the whole request;
                 # skip it so the remaining images and text still go through.
                 logger.warning("provider: 跳过无法下载的图片 %s", image_url)
-        remaining = MAX_IMAGES_PER_REQUEST - len(prepared)
-        for image in (inline_images or [])[:remaining]:
-            if (
-                image.media_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}
-                or not image.data
-                or len(image.data) > 5 * 1024 * 1024
-            ):
-                logger.warning("provider: 跳过无效的内联图片 %s", image.source_label)
                 continue
-            prepared.append(
-                LLMImageInput(
-                    source_url=image.source_label,
-                    media_type=image.media_type,
-                    data_base64=base64.b64encode(image.data).decode("ascii"),
+            candidates.append(
+                (
+                    downloaded.source_url,
+                    base64.b64decode(downloaded.data_base64),
+                    downloaded.media_type,
                 )
             )
-        return prepared
+        remaining = MAX_IMAGES_PER_REQUEST - len(candidates)
+        for image in (inline_images or [])[:remaining]:
+            candidates.append((image.source_label, image.data, image.media_type))
+        kept, _dropped = guard_inline_media(candidates, self.config.max_inline_media_bytes)
+        return [
+            LLMImageInput(
+                source_url=item.label,
+                media_type=item.media_type,
+                data_base64=base64.b64encode(item.data).decode("ascii"),
+            )
+            for item in kept
+        ]
 
     def _swap_base_url(self, url: str, new_base: str) -> str:
         prefix = self.config.base_url.rstrip("/")

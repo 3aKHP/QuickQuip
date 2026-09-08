@@ -24,6 +24,11 @@ DEFAULT_RETRY_JITTER = 0.5
 AGENT_REPLAY_LOOP_TOKENS_FLOOR = 512
 AGENT_REPLAY_LOOP_TOKENS_CEILING = 4_194_304
 
+# 单请求内联媒体（解码后）总字节预算缺省（issue #228）：按网关
+# 「请求体字节数 ÷ 4 ≈ 输入 token、单请求 800K」上限推导并留余量。
+# provider 级 max_inline_media_bytes 可覆盖；0 = 不限。
+DEFAULT_MAX_INLINE_MEDIA_BYTES = 1_572_864
+
 
 @dataclass(slots=True)
 class TriggerConfig:
@@ -210,6 +215,9 @@ class ProviderConfig:
     epoch_cap_tokens: int | None = None
     # 应用侧输入预算（§8.3）：provider 覆盖 None = 继承 runtime 缺省。
     request_input_token_budget: int | None = None
+    # 单请求内联媒体（解码后）总字节预算；0 = 不限。
+    # 收口逻辑见 provider/media_guard.py。
+    max_inline_media_bytes: int = DEFAULT_MAX_INLINE_MEDIA_BYTES
     # 历史重放投影预算的 provider 级硬覆盖（§8.2）；None = 推导
     # （仲裁者减固定开销，runtime.agent_replay_loop_tokens 为下限）。
     agent_replay_loop_tokens: int | None = None
@@ -572,6 +580,9 @@ def _parse_single_provider(
         epoch_cap_tokens=_as_optional_int(entry.get("epoch_cap_tokens")),
         request_input_token_budget=_nonpositive_as_none(
             entry.get("request_input_token_budget")
+        ),
+        max_inline_media_bytes=max(
+            0, int(entry.get("max_inline_media_bytes", DEFAULT_MAX_INLINE_MEDIA_BYTES))
         ),
         agent_replay_loop_tokens=_clamped_optional_int(
             entry.get("agent_replay_loop_tokens"),

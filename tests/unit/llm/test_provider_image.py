@@ -1,6 +1,8 @@
 """_prepare_image_inputs: per-image fault tolerance and per-request cap."""
 from __future__ import annotations
 
+import base64
+
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import BaseProviderClient, LLMImageInput, LLMProviderError
 from quickquip.llm.provider.base import _IMAGE_CACHE_MAX_ENTRIES, MAX_IMAGES_PER_REQUEST
@@ -20,7 +22,9 @@ def _make_config(**overrides) -> ProviderConfig:
 
 
 def _img(url: str) -> LLMImageInput:
-    return LLMImageInput(source_url=url, media_type="image/png", data_base64="AA==")
+    # payload 按 URL 区分：media_guard 按内容哈希去重，相同字节会被折叠。
+    payload = base64.b64encode(f"image-of-{url}".encode()).decode("ascii")
+    return LLMImageInput(source_url=url, media_type="image/png", data_base64=payload)
 
 
 async def test_prepare_image_inputs_skips_failed_downloads(monkeypatch):
@@ -69,7 +73,7 @@ async def test_download_image_cached_across_prepare_calls(monkeypatch):
     first = await client._prepare_image_inputs(["a.png"])
     second = await client._prepare_image_inputs(["a.png"])
     assert downloaded == ["a.png"]
-    assert first[0] is second[0]
+    assert first[0].data_base64 == second[0].data_base64
 
 
 async def test_download_image_failure_not_cached(monkeypatch):

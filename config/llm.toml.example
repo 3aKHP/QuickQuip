@@ -350,6 +350,7 @@ style_profile = "claude_family"
 # model_context_windows = { "claude-sonnet-4-6" = 200000 }  # wire 模型 → 上下文窗口；未配置的模型按内置家族表解析，中继自定义模型名建议显式声明
 # agent_replay_loop_tokens = 131072  # 重放投影预算硬覆盖（优先于按窗口推导）
 # request_input_token_budget = 96000 # 请求输入预算硬覆盖（优先于按窗口推导）
+# max_inline_media_bytes = 1572864   # 单请求内联媒体解码字节总量预算（GIF 自动取首帧；0 = 不限）
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
