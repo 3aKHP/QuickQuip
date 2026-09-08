@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from quickquip.llm.inputs import extract_llm_input
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
@@ -28,6 +30,8 @@ from quickquip.app.message_pipeline import (
     stats_tracker,
 )
 from quickquip.app.message_pipeline import is_self_message as _is_self_message
+
+logger = logging.getLogger(__name__)
 
 
 def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "", image_urls: list[str] | None = None) -> None:
@@ -76,6 +80,35 @@ def _build_rule_reply_message(result: dict, incoming_message, Message, MessageSe
     return result["reply"]
 
 
+def _archive_self_message(event) -> None:
+    """bot 自产群消息仅入归档，不进触发/统计/唤醒链路。
+
+    bot 也是群聊参与者（周期报告需标记呈现其发言）。1.15.2 之前的
+    采集链路在自消息处直接 return，归档从未记录过 bot 消息。
+    """
+    try:
+        rendered = render_message_for_llm(
+            event.get_message(),
+            bot_self_id=event.self_id,
+            bot_self_ids={event.self_id},
+            include_image_placeholder=True,
+        )
+        record_chat_message(
+            event.group_id,
+            event.user_id,
+            get_sender_name(event),
+            rendered.text,
+            message_id=str(getattr(event, "message_id", "") or "") or None,
+            image_urls=rendered.image_urls,
+        )
+    except Exception:
+        logger.warning(
+            "group_messages: 自消息归档失败 group=%s",
+            getattr(event, "group_id", "?"),
+            exc_info=True,
+        )
+
+
 def register_message_matcher(on_message, Message, MessageSegment):
     matcher = on_message(priority=60, block=False)
 
@@ -84,6 +117,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         if getattr(event, "group_id", None) is None or getattr(event, "message_type", "") == "private":
             return
         if _is_self_message(event):
+            _archive_self_message(event)
             return
 
         _ensure_llm_bindings()

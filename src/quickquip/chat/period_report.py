@@ -1,11 +1,12 @@
 """群周报 / 群月报存储与采样。
 
-周报/月报数据源复用 wordcloud collector（always-on，不删除），按天采样后传给
-LLM 生成管线（llm/summarize.py: generate_period_report）。
+周报/月报数据源为聊天归档（chat_archive，always-on）。周报全量消息
+经压缩序列化（period_serializer）传给 LLM 生成管线；月报按天采样
+控制总量（llm/summarize.py: generate_period_report）。
 
 - PeriodReportStore：SQLite 存储，按 (group_id, period_type, period_key) 唯一。
 - PeriodReportEnabledGroups：周/月各自独立的 opt-in 群集合。
-- sample_messages_by_day：按天均匀采样，控制喂给 LLM 的总量。
+- sample_messages_by_day：月报按天均匀采样，控制喂给 LLM 的总量。
 - period_key_for：生成 ISO 周号（2026-W24）或年月（2026-06）。
 """
 

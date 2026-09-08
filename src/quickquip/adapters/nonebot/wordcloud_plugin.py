@@ -7,6 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.chat.period_serializer import bot_user_ids_from_env
 from quickquip.chat.wordcloud import (
     WORDCLOUD_MIN_WORDS,
     WORDCLOUD_STOPWORDS,
@@ -74,7 +75,10 @@ def setup(on_command) -> None:
         now = datetime.now(tz=_LOCAL_TZ)
         start_ts, end_ts, label = _time_window(subcommand, now)
 
-        messages = chat_archive.read_window(group_id, start_ts, end_ts)
+        # 词云口径剔除 bot 自身发言（bot 生成文本会污染热词）
+        messages = chat_archive.read_window(
+            group_id, start_ts, end_ts, exclude_user_ids=bot_user_ids_from_env()
+        )
         if not messages:
             await cmd.finish(f"{label}暂无消息记录，无法生成词云。")
             return

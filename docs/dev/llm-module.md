@@ -53,7 +53,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/prompting.py`
   - 负责 system prompt 组装（仅跨轮稳定段，字节稳定契约）、**当轮上下文信封渲染**（`build_turn_envelope`：时间/节日/participants/memories/词表命中，组装时渲染、不落库）、场景块构建、统一发言者格式渲染与 messages 数组拼装
 - `src/quickquip/llm/summarize.py`
-  - 每日总结生成逻辑（模型级联、prompt 构建）
+  - 每日总结与周/月报生成逻辑（模型级联、prompt 构建）；周期报告输入经 `src/quickquip/chat/period_serializer.py` 压缩序列化（日分节【MM-DD 周X】→ 分钟块 `[HH:MM]` 块首带时间戳 → 块内同身份连发以 `/` 合并、复读折叠 ×N、URL 只留域名、bot 发言标记 `(bot)`），周报全量进序列化器、月报仍按天采样（三期重设计）
 - `src/quickquip/llm/briefing.py`
   - 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联）
 - `src/quickquip/app/message_pipeline.py`

@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from time import time
@@ -200,8 +201,19 @@ class ChatArchive:
             "image_count": row["image_count"],
         }
 
-    def read_window(self, group_id: int | str, start_ts: float, end_ts: float) -> list[dict]:
-        """Return all messages in [start_ts, end_ts) sorted by timestamp."""
+    def read_window(
+        self,
+        group_id: int | str,
+        start_ts: float,
+        end_ts: float,
+        *,
+        exclude_user_ids: Iterable[str] | None = None,
+    ) -> list[dict]:
+        """Return all messages in [start_ts, end_ts) sorted by timestamp.
+
+        exclude_user_ids 供统计口径的消费侧剔除 bot 自身发言
+        （播报/词云）；归档本体始终保全量。
+        """
         if self._unavailable:
             return []
         conn = self._connect()
@@ -214,14 +226,21 @@ class ChatArchive:
                 """,
                 (_safe_group_id(group_id), start_ts, end_ts),
             ).fetchall()
-            return [self._row_to_message(row) for row in rows]
+            return self._filter_excluded(
+                [self._row_to_message(row) for row in rows], exclude_user_ids
+            )
         except sqlite3.Error:
             logger.warning("chat_archive: could not read window for group %s", group_id)
             return []
         finally:
             conn.close()
 
-    def read_all(self, group_id: int | str) -> list[dict]:
+    def read_all(
+        self,
+        group_id: int | str,
+        *,
+        exclude_user_ids: Iterable[str] | None = None,
+    ) -> list[dict]:
         """Return all archived messages for a group sorted by timestamp."""
         if self._unavailable:
             return []
@@ -231,12 +250,29 @@ class ChatArchive:
                 "SELECT * FROM archive_messages WHERE group_id = ? ORDER BY ts ASC, id ASC",
                 (_safe_group_id(group_id),),
             ).fetchall()
-            return [self._row_to_message(row) for row in rows]
+            return self._filter_excluded(
+                [self._row_to_message(row) for row in rows], exclude_user_ids
+            )
         except sqlite3.Error:
             logger.warning("chat_archive: could not read all for group %s", group_id)
             return []
         finally:
             conn.close()
+
+    @staticmethod
+    def _filter_excluded(
+        messages: list[dict], exclude_user_ids: Iterable[str] | None
+    ) -> list[dict]:
+        if not exclude_user_ids:
+            return messages
+        excluded = {str(u).strip() for u in exclude_user_ids if str(u).strip()}
+        if not excluded:
+            return messages
+        return [
+            m
+            for m in messages
+            if not (m.get("user_id") and str(m["user_id"]).strip() in excluded)
+        ]
 
     def list_groups(self) -> list[dict]:
         """按群聚合归档概览（Web Admin 词云群列表等）：天数近似为消息数。"""
