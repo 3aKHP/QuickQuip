@@ -91,6 +91,7 @@ async def run_summary_generation(
             default_provider_id=settings.provider_id,
             default_model=settings.model,
             local_tz=_LOCAL_TZ,
+            bot_user_ids=bot_user_ids_from_env(),
         )
     except Exception:
         logger.exception("daily_summary: generation failed for group %s", group_id)

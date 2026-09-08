@@ -73,8 +73,12 @@ async def render_wordcloud(
     start_ts, end_ts = _time_window(window, now)
 
     from quickquip.app.message_pipeline import chat_archive
+    from quickquip.chat.period_serializer import bot_user_ids_from_env
 
-    messages = chat_archive.read_window(group, start_ts, end_ts)
+    # 词云口径剔除 bot 自身发言（bot 生成文本会污染热词）
+    messages = chat_archive.read_window(
+        group, start_ts, end_ts, exclude_user_ids=bot_user_ids_from_env()
+    )
     if not messages:
         raise HTTPException(status_code=404, detail="窗口内无消息记录")
 

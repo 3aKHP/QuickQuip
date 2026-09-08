@@ -361,8 +361,9 @@ def setup(on_command) -> None:
 
 
 # ── 群周报 / 群月报 ──────────────────────────────────────────────────────
-# 数据源复用 chat_archive（always-on），分天采样后调 generate_period_report。
-# 与日报共享 LLM 级联校验骨架，但 prompt、period 标识、消息格式化（带日期前缀）独立。
+# 数据源复用 chat_archive（always-on）：周报全量、月报分天采样后调
+# generate_period_report（消息格式化由 period_serializer 压缩序列化）。
+# 与日报共享 LLM 级联校验骨架，但 prompt、period 标识独立。
 
 _PERIOD_RULE_NAMES = {"weekly": "weekly_report", "monthly": "monthly_report"}
 

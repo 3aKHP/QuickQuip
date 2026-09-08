@@ -193,3 +193,32 @@ def test_chat_archive_read_all(tmp_path: Path):
 
     assert [item["text"] for item in messages] == ["旧消息", "新消息"]
     assert archive.read_all("99999") == []
+
+
+async def test_briefing_context_excludes_bot_rows(tmp_path: Path, briefing_config, monkeypatch):
+    """播报统计口径剔除 bot 自身发言（活跃榜/消息数不含 bot）。"""
+    monkeypatch.setenv("QQ_ACCOUNT", "1002")
+    archive = ChatArchive(tmp_path / "archive.db")
+    group_id = "10001"
+
+    yesterday = [
+        (datetime(2026, 4, 14, 9, 0, tzinfo=LOCAL_TZ), "1001", "张三", "群友话题甲"),
+        (datetime(2026, 4, 14, 10, 0, tzinfo=LOCAL_TZ), "1002", "QuickQuip", "bot 刷屏词汇填充填充填充"),
+        (datetime(2026, 4, 14, 11, 0, tzinfo=LOCAL_TZ), "1002", "QuickQuip", "bot 刷屏词汇填充填充填充"),
+        (datetime(2026, 4, 14, 12, 0, tzinfo=LOCAL_TZ), "1001", "张三", "群友话题乙"),
+    ]
+    for ts, user_id, sender, text in yesterday:
+        archive.record(group_id, sender, text, ts=ts.timestamp(), user_id=user_id)
+
+    now = datetime(2026, 4, 15, 8, 0, tzinfo=LOCAL_TZ)
+    context = await build_briefing_context(
+        group_id=group_id,
+        period="morning",
+        now=now,
+        archive=archive,
+        briefing_config=briefing_config,
+    )
+
+    assert context.message_count == 2
+    assert [u.display_name for u in context.active_users] == ["张三"]
+    assert all("bot" not in (m.get("text") or "") for m in context.sample_messages)

@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 _SUMMARY_MAX_OUTPUT_TOKENS = 16384
 _SUMMARY_TEMPERATURE = 0.7
 
+# 日报中 bot 行正文截断上限（与周期序列化器同值）：bot 生成内容可能极长，
+# 只截 bot 行，用户原文保真。
+_BOT_BODY_MAX_CHARS = 400
+
 # 周报/月报篇幅更长，输出 token 上限上调。8192 token 约覆盖默认 length_hint
 # （周报 2000 / 月报 2500 字，中文约 1.5-2 字/token）；调高 length_hint 时
 # 注意可能在此截断——如需更长输出请同步上调此常量。
@@ -74,7 +78,12 @@ def _build_system_prompt(
     return "\n\n".join(parts)
 
 
-def _format_messages(messages: list[dict], local_tz: ZoneInfo) -> str:
+def _format_messages(
+    messages: list[dict],
+    local_tz: ZoneInfo,
+    bot_user_ids: frozenset[str] | set[str] = frozenset(),
+) -> str:
+    bots = {str(b).strip() for b in bot_user_ids if str(b).strip()}
     lines: list[str] = []
     for entry in messages:
         ts = float(entry.get("ts", 0))
@@ -82,6 +91,14 @@ def _format_messages(messages: list[dict], local_tz: ZoneInfo) -> str:
         text = str(entry.get("text", "")).strip()
         if not text:
             continue
+        user_id = entry.get("user_id")
+        identity = str(user_id).strip() if user_id is not None and str(user_id).strip() else str(sender)
+        if identity in bots:
+            # bot 发言标记呈现；生成内容（如合并转发渲染）可能极长，
+            # 只对 bot 行截断，用户原文保持保真。
+            sender = f"{sender}(bot)"
+            if len(text) > _BOT_BODY_MAX_CHARS:
+                text = text[:_BOT_BODY_MAX_CHARS] + "…"
         time_str = datetime.fromtimestamp(ts, tz=local_tz).strftime("%H:%M")
         lines.append(f"[{time_str}] {sender}：{text}")
     return "\n".join(lines)
@@ -259,6 +276,7 @@ async def generate_daily_summary(
     default_provider_id: str,
     default_model: str,
     local_tz: ZoneInfo,
+    bot_user_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[str, str]:
     """Generate a daily summary using the model cascade.
 
@@ -275,7 +293,7 @@ async def generate_daily_summary(
     if not resolved:
         raise RuntimeError(f"daily_summary: 级联无可用模型（cascade={cascade}）")
 
-    raw_log = _format_messages(messages, local_tz)
+    raw_log = _format_messages(messages, local_tz, bot_user_ids)
 
     def build_user_content(chat_log: str, was_truncated: bool) -> str:
         # Wrap the chat log in explicit delimiters so the LLM clearly

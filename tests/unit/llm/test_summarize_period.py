@@ -284,7 +284,7 @@ async def test_period_report_prompt_contains_period_context(monkeypatch):
     assert "周报" in system_prompt
     assert "2026 年第 24 周" in system_prompt
     assert "周报" in user_content
-    # 消息格式化应带 [MM-DD HH:MM] 日期前缀
+    # 1.15.2 起聊天记录经压缩序列化（分钟块/连发合并），分隔信封不变
     assert "===" in user_content
 
 
@@ -331,3 +331,46 @@ async def test_period_report_compact_log_and_format_note(monkeypatch):
     assert "聊天记录格式说明" in system_prompt
     assert "×N" in system_prompt
     assert "(bot)" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_daily_summary_marks_and_caps_bot_lines(monkeypatch):
+    """日报中 bot 行带 (bot) 后缀且超长截断；用户行不受影响。"""
+    from datetime import datetime
+
+    from quickquip.llm.config import DailySummaryConfig
+    from quickquip.llm.summarize import generate_daily_summary, _format_messages
+
+    stub = _StubClient(LLMResponse(text="日报", model="m1", finish_reason="stop"))
+    monkeypatch.setattr(
+        "quickquip.llm.summarize.build_provider_client", lambda p: stub
+    )
+
+    base = datetime(2026, 9, 8, 8, 12, 0, tzinfo=LOCAL_TZ).timestamp()
+    messages = [
+        {"ts": base, "sender": "张三", "text": "用户原文", "user_id": "1001"},
+        {"ts": base + 5, "sender": "QuickQuip", "text": "字" * 500, "user_id": "999"},
+    ]
+
+    text = _format_messages(messages, LOCAL_TZ, bot_user_ids={"999"})
+    lines = text.splitlines()
+    assert lines[0] == "[08:12] 张三：用户原文"
+    assert lines[1] == "[08:12] QuickQuip(bot)：" + "字" * 400 + "…"
+
+    # 端到端：bot_user_ids 透传进 user content
+    await generate_daily_summary(
+        messages,
+        PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。"),
+        "10001",
+        date_label="2026-09-08",
+        name_table={},
+        summary_config=DailySummaryConfig(),
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+        bot_user_ids={"999"},
+    )
+    user_content = stub.requests[0].messages[0].content
+    assert "QuickQuip(bot)：" in user_content
+    assert "字" * 401 not in user_content

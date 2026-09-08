@@ -70,3 +70,26 @@ def test_dedupe_same_ts_same_text_without_message_id(tmp_path: Path):
     # 同秒同文但出现序号不同（occurrence）是不同消息，保留
     assert archive.record("10001", "n", "刷屏", ts=_ts(0), occurrence=1) is True
     assert len(archive.read_all("10001")) == 2
+
+
+def test_read_window_excludes_bot_rows(tmp_path: Path):
+    """exclude_user_ids 供统计口径消费侧剔除 bot 行；不传则保全量。"""
+    archive = ChatArchive(tmp_path / "a.db")
+    base = 1_700_000_000.0
+    archive.record("10001", "张三", "用户消息", ts=base, user_id="1001")
+    archive.record("10001", "QuickQuip", "bot 消息", ts=base + 1, user_id="9999")
+    archive.record("10001", "路人", "无归因消息", ts=base + 2)
+
+    full = archive.read_window("10001", base, base + 10)
+    assert [m["text"] for m in full] == ["用户消息", "bot 消息", "无归因消息"]
+
+    filtered = archive.read_window(
+        "10001", base, base + 10, exclude_user_ids={"9999"}
+    )
+    assert [m["text"] for m in filtered] == ["用户消息", "无归因消息"]
+
+    # user_id 为空/None 的行（回灌历史形态）不受过滤影响
+    assert archive.read_all("10001", exclude_user_ids={"9999"}) == filtered
+
+    # 空集合不改变行为
+    assert archive.read_window("10001", base, base + 10, exclude_user_ids=set()) == full

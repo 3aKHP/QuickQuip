@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.archive import ChatArchive
+from quickquip.chat.period_serializer import bot_user_ids_from_env
 from quickquip.chat.wordcloud import WORDCLOUD_STOPWORDS, build_word_frequencies
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
 from quickquip.llm.config import DailyBriefingConfig
@@ -231,7 +232,14 @@ async def build_briefing_context(
     news_provider: BriefingNewsProvider | None = None,
 ) -> DailyBriefingContext:
     start_dt, end_dt, window_label = get_briefing_window(period, now)
-    messages = archive.read_window(group_id, start_dt.timestamp(), end_dt.timestamp())
+    # 播报统计口径（活跃榜/热词/消息数/采样）剔除 bot 自身发言，
+    # bot 生成文本会污染热词与活跃榜；归档本体保全量。
+    messages = archive.read_window(
+        group_id,
+        start_dt.timestamp(),
+        end_dt.timestamp(),
+        exclude_user_ids=bot_user_ids_from_env(),
+    )
     active_users = _build_active_users(messages, briefing_config.active_users_limit)
     sampled_messages = _sample_messages(messages, briefing_config.sample_messages_limit)
 
