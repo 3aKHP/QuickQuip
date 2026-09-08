@@ -21,15 +21,15 @@ def _group_payload() -> dict:
         "post_type": "message_sent",
         "message_type": "group",
         "sub_type": "normal",
-        "time": 1700000000,
-        "self_id": 2315478846,
-        "user_id": 2315478846,
+        "time": 1_700_000_000,
+        "self_id": 123456789,
+        "user_id": 123456789,
         "group_id": 10001,
         "message_id": 4242,
         "message": [{"type": "text", "data": {"text": "bot 的自发言论"}}],
         "raw_message": "bot 的自发言论",
         "font": 0,
-        "sender": {"user_id": 2315478846, "nickname": "QuickQuip", "card": ""},
+        "sender": {"user_id": 123456789, "nickname": "QuickQuip", "card": ""},
     }
 
 
@@ -38,14 +38,14 @@ def _private_payload() -> dict:
         "post_type": "message_sent",
         "message_type": "private",
         "sub_type": "friend",
-        "time": 1700000000,
-        "self_id": 2315478846,
-        "user_id": 2315478846,
+        "time": 1_700_000_000,
+        "self_id": 123456789,
+        "user_id": 123456789,
         "message_id": 4243,
         "message": [{"type": "text", "data": {"text": "私聊自消息"}}],
         "raw_message": "私聊自消息",
         "font": 0,
-        "sender": {"user_id": 2315478846, "nickname": "QuickQuip"},
+        "sender": {"user_id": 123456789, "nickname": "QuickQuip"},
     }
 
 
