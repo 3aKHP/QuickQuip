@@ -34,6 +34,8 @@ _PIL_FORMAT_MIME = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/web
 # 转码结果内容寻址缓存：工具循环逐轮重建请求会对同一批图片反复过 guard，
 # 以原始字节哈希为键复用转码结果，避免逐轮重复 Pillow 解码。
 # 值为不可变字节，无 TTL；容量对齐 provider 图片下载缓存（32 条）。
+# 设计假设：GIF 首帧 PNG 只由原始字节决定，与调用方 provider/预算无关——
+# 若未来需要按 provider 差异化转码策略，此缓存必须先行键扩展。
 _TRANSCODE_CACHE_MAX = 32
 _transcode_cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
 
