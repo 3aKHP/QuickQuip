@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from io import BytesIO
@@ -65,14 +66,26 @@ def _cache_put(key: str, value: tuple[bytes, str]) -> None:
 
 def _gif_first_frame_png(raw: bytes) -> bytes | None:
     try:
-        with Image.open(BytesIO(raw)) as img:
-            img.seek(0)
-            has_alpha = img.info.get("transparency") is not None
-            frame = img.convert("RGBA" if has_alpha else "RGB")
-            buf = BytesIO()
-            frame.save(buf, format="PNG")
-            return buf.getvalue()
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        # 与 MCP 交付层 _validated_image 同款防炸弹口径：把 Pillow 的
+        # DecompressionBombWarning 提升为错误，杜绝超大尺寸头 GIF 在
+        # 事件循环上分配巨型帧缓冲（DecompressionBombError 直接继承
+        # Exception，必须显式捕获）。
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(raw)) as img:
+                img.seek(0)
+                has_alpha = img.info.get("transparency") is not None
+                frame = img.convert("RGBA" if has_alpha else "RGB")
+                buf = BytesIO()
+                frame.save(buf, format="PNG")
+                return buf.getvalue()
+    except (
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+    ) as exc:
         logger.warning("media_guard: GIF 首帧提取失败，跳过该图：%s", exc)
         return None
 
@@ -81,7 +94,7 @@ def _sniff_media_type(raw: bytes) -> str | None:
     try:
         with Image.open(BytesIO(raw)) as img:
             return _PIL_FORMAT_MIME.get(img.format or "")
-    except (UnidentifiedImageError, OSError):
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError):
         return None
 
 
@@ -121,16 +134,18 @@ def guard_inline_media(
 ) -> tuple[list[GuardedMedia], list[str]]:
     """对单请求内联媒体做归一、去重与字节预算，返回（保留列表, 丢弃标签）。
 
-    ``candidates`` 为 ``(label, 原始字节, 声明 media_type)``，顺序保持；
-    ``max_total_bytes <= 0`` 表示不限总量。同内容只保留首份；单图超过
-    ``MAX_IMAGE_BYTES`` 整图丢弃；总量预算按顺序累计，装不下的图跳过、
-    后续更小的图仍可入选。
+    ``candidates`` 为 ``(label, 原始字节, 声明 media_type)``；``max_total_bytes <= 0``
+    表示不限总量。同内容只保留首份；单图超过 ``MAX_IMAGE_BYTES`` 整图丢弃。
+
+    预算按优先级前缀止停：候选顺序即重要性顺序（当前消息 → 引用 → 近期），
+    第一张装不下的图片连同其后全部丢弃——丢弃当前大图却保留后续无关小图，
+    会让模型看到错误 priority 的图片，比看不到更糟。
     """
     kept: list[GuardedMedia] = []
     dropped: list[str] = []
     seen: set[str] = set()
     total = 0
-    for label, raw, declared in candidates:
+    for index, (label, raw, declared) in enumerate(candidates):
         normalized = _normalize(label, raw, declared)
         if normalized is None:
             dropped.append(label)
@@ -151,15 +166,18 @@ def guard_inline_media(
             dropped.append(label)
             continue
         if max_total_bytes > 0 and total + len(data) > max_total_bytes:
+            remaining = [item[0] for item in candidates[index:]]
             logger.warning(
-                "media_guard: 跳过超预算内联媒体 %s（%d bytes，已保留 %d/%d bytes）",
+                "media_guard: 内联媒体超预算，丢弃 %s 及其后 %d 张"
+                "（%d bytes，已保留 %d/%d bytes）",
                 label,
+                len(remaining) - 1,
                 len(data),
                 total,
                 max_total_bytes,
             )
-            dropped.append(label)
-            continue
+            dropped.extend(remaining)
+            break
         seen.add(content_hash)
         total += len(data)
         kept.append(GuardedMedia(label=label, data=data, media_type=media_type, content_hash=content_hash))

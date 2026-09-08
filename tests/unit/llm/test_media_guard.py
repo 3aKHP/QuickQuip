@@ -96,6 +96,16 @@ def test_broken_gif_dropped():
     assert dropped == ["truncated.gif"]
 
 
+def test_decompression_bomb_gif_dropped_not_raised():
+    # 篡改逻辑屏幕描述符为 20000x20000（~50 字节改动，远小于单图上限）：
+    # 必须丢弃该图，不得让 DecompressionBombError 逃逸炸掉整个请求。
+    gif = bytearray(_animated_gif())
+    gif[6:10] = (20000).to_bytes(2, "little") + (20000).to_bytes(2, "little")
+    kept, dropped = guard_inline_media([("bomb.gif", bytes(gif), "image/gif")], 0)
+    assert kept == []
+    assert dropped == ["bomb.gif"]
+
+
 def test_duplicate_content_deduped_by_hash():
     png = _png_bytes()
     kept, dropped = guard_inline_media(
@@ -115,12 +125,20 @@ def test_identical_gifs_deduped_after_transcode():
     assert dropped == ["b.gif"]
 
 
-def test_budget_keeps_order_and_scans_past_oversized():
+def test_budget_stops_at_first_overflow():
+    # 前缀止停：候选顺序即优先级（当前→引用→近期），第一张装不下
+    # 连同其后全部丢弃——避免丢当前大图却保留后续无关小图让模型看错图。
     candidates = [_still("big1", 10, b"x"), _still("big2", 10, b"y"), _still("small", 4, b"z")]
     kept, dropped = guard_inline_media(candidates, 15)
-    # 10 保留（累计 10），第二张 10 会超（20 > 15）跳过，随后 4 仍可入选（14 ≤ 15）。
-    assert [item.label for item in kept] == ["big1", "small"]
-    assert dropped == ["big2"]
+    assert [item.label for item in kept] == ["big1"]
+    assert dropped == ["big2", "small"]
+
+
+def test_budget_lone_oversized_image_drops_everything():
+    candidates = [_still("huge", 100, b"x"), _still("small", 4, b"z")]
+    kept, dropped = guard_inline_media(candidates, 50)
+    assert kept == []
+    assert dropped == ["huge", "small"]
 
 
 def test_budget_zero_means_unlimited():

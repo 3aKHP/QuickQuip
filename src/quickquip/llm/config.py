@@ -25,9 +25,10 @@ AGENT_REPLAY_LOOP_TOKENS_FLOOR = 512
 AGENT_REPLAY_LOOP_TOKENS_CEILING = 4_194_304
 
 # 单请求内联媒体（解码后）总字节预算缺省（issue #228）：按网关
-# 「请求体字节数 ÷ 4 ≈ 输入 token、单请求 800K」上限推导并留余量。
+# 「请求体字节数 ÷ 4 ≈ 输入 token、单请求 800K」上限推导——3.2MiB 请求体
+# → base64 反推 2.4MiB 解码量，再留文本与分钟窗累计余量取 2MiB。
 # provider 级 max_inline_media_bytes 可覆盖；0 = 不限。
-DEFAULT_MAX_INLINE_MEDIA_BYTES = 1_572_864
+DEFAULT_MAX_INLINE_MEDIA_BYTES = 2_097_152
 
 
 @dataclass(slots=True)
