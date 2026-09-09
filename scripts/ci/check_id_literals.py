@@ -26,9 +26,11 @@ SCAN_PATHS = (
     "docs",
     "config",
     "prod.example",
+    ".github",
     "README.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
+    "SECURITY.md",
 )
 
 # Within config/, only example templates are public-safe to assert on; real
