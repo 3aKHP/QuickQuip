@@ -154,6 +154,8 @@ Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 
 - **停止方式**：前台控制台（QQ Bot）按 `Ctrl+C`；Web Admin 是后台进程，关掉管理窗口不会带走它，需在 PowerShell 执行  `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match 'web_api.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId }`。
 - 运行期间任务栏会有一个最小化的“QuickQuip Admin”cmd 窗口（Web Admin 的启动壳），属正常现象，随 Web Admin 退出自动关闭；Web Admin 运行日志追加在 `data\web-admin.log`（无轮转）。
 
+升级涉及旧 `data/daily_msgs/`、`data/wordcloud_msgs/` 历史时，在解压目录运行 `python\python.exe scripts\backfill_chat_archive.py --dry-run` 预览，再去掉 `--dry-run` 回灌。脚本分别统计新增、归因回填、已存在、跳过和写入失败；存在写入失败时返回非零。确认失败为零、归档数量符合预期后再清理旧 JSONL。
+
 生产部署模板位于 `prod.example/`；公开分发镜像位于 `ghcr.io/3akhp/quickquip`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
 
 ### 运行测试

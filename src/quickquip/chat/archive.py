@@ -21,12 +21,23 @@ import logging
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
-from time import time
+from time import monotonic, time
 
 from quickquip.common.paths import CHAT_ARCHIVE_DB_PATH
 
 logger = logging.getLogger(__name__)
+
+
+class RecordResult(str, Enum):
+    """一条归档写入的明确结果，供迁移与巡检区分失败和去重。"""
+
+    INSERTED = "inserted"
+    BACKFILLED = "backfilled"
+    DUPLICATE = "duplicate"
+    SKIPPED = "skipped"
+    FAILED = "failed"
 
 
 def _safe_group_id(group_id: int | str) -> str:
@@ -70,7 +81,7 @@ class ChatArchive:
         """启动瞬间的初始化失败不做进程级永磁：按冷却惰性重试自愈。"""
         if not self._unavailable:
             return
-        now = time.monotonic()
+        now = monotonic()
         if now < self._retry_init_after:
             return
         self._retry_init_after = now + 60.0
@@ -130,13 +141,36 @@ class ChatArchive:
         相同计数对齐去重）；运行时路径不传（OneBot 群消息总带 message_id）。
         撞键时只在原行缺 user_id 且新行携带时回填该字段，不覆盖已存内容。
         """
+        return self.record_result(
+            group_id,
+            sender_name,
+            text,
+            ts=ts,
+            user_id=user_id,
+            message_id=message_id,
+            image_urls=image_urls,
+            occurrence=occurrence,
+        ) is RecordResult.INSERTED
+
+    def record_result(
+        self,
+        group_id: int | str,
+        sender_name: str,
+        text: str,
+        ts: float | None = None,
+        user_id: int | str | None = None,
+        message_id: int | str | None = None,
+        image_urls: list[str] | None = None,
+        occurrence: int = 0,
+    ) -> RecordResult:
+        """Append one message and report whether it was inserted, updated or rejected."""
         if not str(text).strip():
-            return False
+            return RecordResult.SKIPPED
         if self._unavailable:
-            self._dropped_since_unavailable += 1
             self._maybe_retry_init()
             if self._unavailable:
-                return False
+                self._dropped_since_unavailable += 1
+                return RecordResult.FAILED
         gid = _safe_group_id(group_id)
         ts_val = ts if ts is not None else time()
         urls = [str(u) for u in (image_urls or []) if str(u).strip()]
@@ -173,21 +207,29 @@ class ChatArchive:
                     ),
                 )
                 inserted = cursor.rowcount > 0
+                backfilled = False
                 if not inserted and uid is not None:
                     # 双采集源回灌：先入库的 wordcloud 行缺 user_id，daily 行
                     # 撞键时补齐归因字段。
-                    conn.execute(
+                    update_cursor = conn.execute(
                         "UPDATE archive_messages SET user_id = ? WHERE dedupe_key = ?"
                         " AND user_id IS NULL",
                         (uid, dedupe_key),
                     )
+                    backfilled = update_cursor.rowcount > 0
                 conn.commit()
-                return inserted
+                if inserted:
+                    return RecordResult.INSERTED
+                if backfilled:
+                    return RecordResult.BACKFILLED
+                return RecordResult.DUPLICATE
             finally:
                 conn.close()
-        except sqlite3.Error:
-            logger.warning("chat_archive: failed to write message for group %s", gid)
-            return False
+        except sqlite3.Error as exc:
+            logger.warning(
+                "chat_archive: failed to write message for group %s: %s", gid, exc
+            )
+            return RecordResult.FAILED
 
     @staticmethod
     def _row_to_message(row: sqlite3.Row) -> dict:
@@ -275,7 +317,7 @@ class ChatArchive:
         ]
 
     def list_groups(self) -> list[dict]:
-        """按群聚合归档概览（Web Admin 词云群列表等）：天数近似为消息数。"""
+        """按群聚合归档概览（Web Admin 词云群列表等）。"""
         if self._unavailable:
             return []
         conn = self._connect()
@@ -283,7 +325,7 @@ class ChatArchive:
             rows = conn.execute(
                 """
                 SELECT group_id,
-                       COUNT(*) AS days,
+                       COUNT(DISTINCT date(ts, 'unixepoch', '+8 hours')) AS days,
                        SUM(LENGTH(text) + 64) AS total_bytes,
                        MAX(ts) AS latest_ts
                 FROM archive_messages
