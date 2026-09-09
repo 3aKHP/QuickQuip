@@ -18,6 +18,7 @@ from quickquip.llm.config import (
 )
 from quickquip.llm.context_windows import resolve_context_window
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
+from quickquip.llm.response_acceptance import is_response_accepted
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.usage import set_usage_scope
 
@@ -38,14 +39,6 @@ _PERIOD_REPORT_TEMPERATURE = 0.7
 # 的应用侧请求预算门禁（96k 缺省只约束 chat 主链路），上限即模型容量。
 _FALLBACK_CHAT_LOG_CHARS = 300_000
 _ENVELOPE_RESERVE_TOKENS = 8_192
-
-# Finish reasons that indicate a clean, complete response.
-# Providers: Gemini → "STOP", OpenAI → "stop", Claude → "end_turn" / "stop_sequence".
-# An empty/None finish_reason is also accepted (provider didn't populate the field).
-# 设计决策（1.15.2）：不在此集合内的 finish 一律不放行——宁错杀不放过，
-# 不完整/异常的日报不放行：非正常 finish_reason 的已生成正文一律丢弃，
-# 兜底交给级联换模型。
-_NORMAL_FINISH_REASONS: frozenset[str] = frozenset({"stop", "end_turn", "stop_sequence", "eos"})
 
 # 日报 / 周月报共用的输入协议说明（与 period_serializer 输出形态对齐）。
 _CHAT_LOG_FORMAT_NOTE = (
@@ -221,7 +214,7 @@ async def _run_summary_cascade(
                 f"thinking={response.thinking_tokens}"
             )
             hops.append(f"{provider_id}/{model}:finish={finish or 'n/a'}({usage_note})")
-            if text and (not finish or finish.lower() in _NORMAL_FINISH_REASONS):
+            if is_response_accepted(response):
                 logger.info(
                     "%s: generated for group %s via %s/%s hop=%d/%d "
                     "(%d chars, finish=%s, %s)",

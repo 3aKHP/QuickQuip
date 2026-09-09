@@ -38,6 +38,7 @@ QuickQuip 代码组织为三层结构：
 
 ```
 NoneBot2 event → tz_tracker_plugin matcher
+                → self_message_events (message_sent, priority 1, block=True)：群自消息归档，私聊自消息终止
                 → group_messages.register_message_matcher (priority 60, block=False)
                 → llm_service.generate_reply() [if LLM triggered]
                    or resolve_reply() [rule-based fallback]

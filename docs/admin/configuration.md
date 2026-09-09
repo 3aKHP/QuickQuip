@@ -246,7 +246,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
 
-> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `2097152`，`0` = 不限）限制单次请求全部内联图片的解码字节总量。发送前图片统一收口：动图（GIF）自动取首帧转静态 PNG、相同内容去重；预算按候选优先级（当前消息 → 引用 → 近期）前缀止停，第一张装不下的图片连同其后全部跳过并记录日志。该预算用于把请求体体积约束在上游网关风控上限之内（图片 base64 会被部分网关按文本估算 token）。
+> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `2097152`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片；第一张装不下的图片及后续低优先级图片全部跳过并记录日志。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算用于把请求体体积约束在上游网关风控上限之内（图片 base64 会被部分网关按文本估算 token）。
 
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 

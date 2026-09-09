@@ -132,9 +132,11 @@ def list_summary_groups():
 
 @router.get("/summaries-health")
 def summaries_health(days: int = 7):
-    """总结族（日报/简报/周月报）生成健康度：成功/失败/跳过、finish_reason
-    分布、级联跳数与成本（1.15.2 CE 线）。经 usage_store 读取以确保惰性
-    schema 迁移先于查询执行（升级窗口内旧库无 finish_reason 列）。"""
+    """总结族（日报/简报/周月报）各跳模型尝试的接受结果、完成原因与成本。
+
+    经 usage_store 读取以确保惰性 schema 迁移先于查询执行；历史调用的
+    正文接受结果保留为 unknown。
+    """
     days = max(1, min(days, 90))
     since = (
         datetime.now(tz=timezone.utc) - timedelta(days=days)
@@ -146,14 +148,15 @@ def summaries_health(days: int = 7):
         with usage_store.connect() as conn:
             features = conn.execute(
                 """
-                SELECT feature, state,
+                SELECT feature,
+                       COALESCE(response_outcome, 'unknown') AS outcome,
                        COUNT(*) AS calls,
                        SUM(COALESCE(cost_usd, 0)) AS cost_usd,
                        AVG(COALESCE(duration_ms, 0)) AS avg_duration_ms
                 FROM llm_usage_events
                 WHERE feature IN ('summary', 'briefing', 'period_report')
                   AND ts >= ?
-                GROUP BY feature, state ORDER BY feature, state
+                GROUP BY feature, outcome ORDER BY feature, outcome
                 """,
                 (since,),
             ).fetchall()
@@ -173,7 +176,10 @@ def summaries_health(days: int = 7):
             groups = conn.execute(
                 """
                 SELECT feature, group_id, COUNT(*) AS calls,
-                       SUM(CASE WHEN state != 'ok' THEN 1 ELSE 0 END) AS failed
+                       SUM(CASE WHEN response_outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                       SUM(CASE WHEN response_outcome IN ('discarded_finish', 'discarded_empty', 'provider_error') THEN 1 ELSE 0 END) AS failed,
+                       SUM(CASE WHEN response_outcome = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                       SUM(CASE WHEN response_outcome IS NULL THEN 1 ELSE 0 END) AS unknown
                 FROM llm_usage_events
                 WHERE feature IN ('summary', 'briefing', 'period_report')
                   AND ts >= ? AND group_id IS NOT NULL

@@ -155,7 +155,8 @@ class LLMUsageStore:
                         pricing_confidence    TEXT,
                         priced                INTEGER NOT NULL DEFAULT 0,
                         state                 TEXT NOT NULL DEFAULT 'ok',
-                        error_message         TEXT
+                        error_message         TEXT,
+                        response_outcome      TEXT
                     );
                     """
                 )
@@ -184,6 +185,7 @@ class LLMUsageStore:
                     "pricing_source": "TEXT",
                     "pricing_confidence": "TEXT",
                     "finish_reason": "TEXT",
+                    "response_outcome": "TEXT",
                 }
                 for name, definition in migrations.items():
                     columns = {

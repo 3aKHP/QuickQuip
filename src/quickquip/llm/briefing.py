@@ -7,6 +7,7 @@ from quickquip.chat.daily_briefing import DailyBriefingContext
 from quickquip.llm.config import DailyBriefingConfig, LLMConfig, PersonaConfig
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.provider import strip_leading_reasoning_content
+from quickquip.llm.response_acceptance import is_response_accepted
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.usage import set_usage_scope
 
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 _BRIEFING_MAX_OUTPUT_TOKENS = 8192
 _BRIEFING_TEMPERATURE = 0.8
-_NORMAL_FINISH_REASONS: frozenset[str] = frozenset({"stop", "end_turn", "stop_sequence", "STOP"})
 _PERIOD_INSTRUCTIONS = {
     "morning": "你现在要写一条群聊早报。重点是开场、回顾昨天的群聊氛围，并自然带出今天的开始。",
     "noon": "你现在要写一条群聊午报。重点是中场播报，概括今天到中午为止的节奏，语气轻快一些。",
@@ -161,7 +161,7 @@ async def generate_daily_briefing(
             response = await client.complete(req)
             text = _trim_output(response.text, briefing_config.max_output_chars)
             finish = (response.finish_reason or "").strip()
-            if text and (not finish or finish in _NORMAL_FINISH_REASONS):
+            if is_response_accepted(response, feature="briefing"):
                 logger.info(
                     "daily_briefing: generated for group %s via %s/%s (%d chars, finish=%s)",
                     group_id,

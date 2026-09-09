@@ -25,7 +25,7 @@ from quickquip.llm.config import ProviderConfig
 from quickquip.llm.agent_records import ResponseOwner
 from quickquip.llm.provider.media_guard import (
     MAX_IMAGE_BYTES,
-    guard_inline_media,
+    InlineMediaBudget,
 )
 from quickquip.llm.provider.retry import RetryPolicy, backoff_delay
 from quickquip.llm.sanitize import MAX_SAFE_ERROR_LENGTH, sanitize_error_message
@@ -504,7 +504,11 @@ class BaseProviderClient:
         self,
         image_urls: list[str],
         inline_images: list[LLMInlineImage] | None = None,
+        *,
+        budget: InlineMediaBudget | None = None,
     ) -> list[LLMImageInput]:
+        if budget is not None and budget.exhausted:
+            return []
         if not image_urls and not inline_images:
             return []
         # 收口顺序：URL 图先入列（下载失败不占名额），内联图补足剩余名额，
@@ -529,7 +533,8 @@ class BaseProviderClient:
         remaining = MAX_IMAGES_PER_REQUEST - len(candidates)
         for image in (inline_images or [])[:remaining]:
             candidates.append((image.source_label, image.data, image.media_type))
-        kept, _dropped = guard_inline_media(candidates, self.config.max_inline_media_bytes)
+        budget = budget if budget is not None else InlineMediaBudget(self.config.max_inline_media_bytes)
+        kept, _dropped = budget.guard(candidates)
         return [
             LLMImageInput(
                 source_url=item.label,
@@ -538,6 +543,34 @@ class BaseProviderClient:
             )
             for item in kept
         ]
+
+    async def _prepare_request_images(
+        self, messages: list[LLMConversationMessage],
+    ) -> list[list[LLMImageInput]]:
+        """预备整次请求的图片，返回与原消息逐项对齐的结果。
+
+        最新用户消息优先（其内部保留当前/引用/近期的候选顺序），随后按
+        新到旧处理工具结果及历史用户图片。序列化仍保留原消息和工具批次顺序。
+        每次组装独立创建预算，取消、重试和并发请求均不共享可变状态。
+        """
+        images: list[list[LLMImageInput]] = [[] for _ in messages]
+        order = [i for i in reversed(range(len(messages))) if messages[i].role in {"user", "tool"}]
+        current_user = next((i for i in order if messages[i].role == "user"), None)
+        if current_user is not None:
+            order.remove(current_user)
+            order.insert(0, current_user)
+        budget = InlineMediaBudget(self.config.max_inline_media_bytes)
+        for index in order:
+            if budget.exhausted:
+                break
+            message = messages[index]
+            if message.role == "tool" and message.is_tool_error:
+                continue
+            urls = message.image_urls if message.role == "user" else []
+            if not urls and not message.inline_images:
+                continue
+            images[index] = await self._prepare_image_inputs(urls, message.inline_images, budget=budget)
+        return images
 
     def _swap_base_url(self, url: str, new_base: str) -> str:
         prefix = self.config.base_url.rstrip("/")

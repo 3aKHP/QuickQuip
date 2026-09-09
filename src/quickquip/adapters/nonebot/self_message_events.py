@@ -3,14 +3,12 @@
 LLOneBot 开启 ``reportSelfMessage`` 后，bot 自身发言以
 ``post_type="message_sent"`` 上报（OneBot 11 扩展；LLOneBot 源码中
 ``senderUin === selfUin`` 时取 ``EventType.MESSAGE_SENT``）。
-nonebot-adapter-onebot v11 未内置该模型：事件会落到兜底 ``Event``，
-``get_type()`` 回报 ``"message_sent"``，``on_message`` 永不派发。
+nonebot-adapter-onebot v11 未内置该模型：事件会落到兜底 ``Event``。
 
-此处注册同构模型：继承既有群/私聊 MessageEvent，仅收窄 ``post_type``
-字面量并覆写 ``get_type()`` 回报 ``"message"``，使消息管线照常收到
-自消息，再由 group_messages / private_messages 的 ``is_self_message``
-守卫分流——群自消息仅入归档（bot 也是群聊参与者），不进触发/统计
-/唤醒链路。
+此处注册同构模型并保留独立的 ``message_sent`` 事件类型，再由专用
+matcher 在普通消息和命令 matcher 之前处理。群自消息仅入归档（bot
+也是群聊参与者），私聊自消息直接丢弃；两者都不进入命令、规则、
+统计或 LLM 链路。
 
 部署前提：LLOneBot ob11 连接配置 ``reportSelfMessage: true``
 （默认 false，需运维开启后重启 llbot）。
@@ -24,6 +22,7 @@ __all__ = [
     "GroupMessageSentEvent",
     "PrivateMessageSentEvent",
     "register_self_message_events",
+    "register_self_message_matcher",
 ]
 
 try:
@@ -46,9 +45,7 @@ if _ADAPTER_AVAILABLE:
         post_type: Literal["message_sent"]
 
         def get_type(self) -> str:
-            # 回报 "message" 让 on_message 管线照常派发，
-            # 自消息身份由 is_self_message（user_id == self_id）识别。
-            return "message"
+            return "message_sent"
 
     class PrivateMessageSentEvent(PrivateMessageEvent):
         """bot 自身私聊消息（post_type=message_sent，message_type=private）。"""
@@ -56,7 +53,7 @@ if _ADAPTER_AVAILABLE:
         post_type: Literal["message_sent"]
 
         def get_type(self) -> str:
-            return "message"
+            return "message_sent"
 
 
 def register_self_message_events() -> bool:
@@ -65,3 +62,22 @@ def register_self_message_events() -> bool:
         return False
     Adapter.add_custom_model(GroupMessageSentEvent, PrivateMessageSentEvent)
     return True
+
+
+def register_self_message_matcher(on_type, archive_group_message):
+    """优先处理自消息，避免命令和普通消息 matcher 看到事件。"""
+    if not _ADAPTER_AVAILABLE:
+        return None
+
+    matcher = on_type(
+        (GroupMessageSentEvent, PrivateMessageSentEvent),
+        priority=1,
+        block=True,
+    )
+
+    @matcher.handle()
+    async def _(event):
+        if isinstance(event, GroupMessageSentEvent):
+            archive_group_message(event)
+
+    return matcher

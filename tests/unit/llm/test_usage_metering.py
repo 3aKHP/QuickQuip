@@ -401,3 +401,53 @@ async def test_record_usage_persists_finish_reason(monkeypatch, tmp_path):
             "SELECT finish_reason FROM llm_usage_events ORDER BY id"
         ).fetchall()
     assert [r["finish_reason"] for r in rows] == ["end_turn", None]
+
+
+async def test_summary_usage_records_response_outcome_without_losing_cost(monkeypatch, tmp_path):
+    from quickquip.llm.usage import _record_usage, usage_scope
+    from quickquip.llm.usage_store import LLMUsageStore
+    from quickquip.llm.config import PricingRates
+    from plugins.llm_config import ProviderConfig
+    from plugins.llm_provider import LLMResponse
+
+    fake_store = LLMUsageStore(tmp_path / "u.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
+    monkeypatch.setattr(
+        "quickquip.llm.usage._configured_pricing",
+        lambda: {"m": PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
+    )
+
+    class FakeClient:
+        config = ProviderConfig(
+            id="p", protocol="openai", base_url="https://x/v1",
+            api_key_env="K", default_model="m", models=["m"],
+        )
+
+    class FakeReq:
+        model = "m"
+
+    responses = [
+        LLMResponse(text="完整", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"),
+        LLMResponse(text="残稿", model="m", input_tokens=100, output_tokens=50, finish_reason="MAX_TOKENS"),
+        LLMResponse(text="  ", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"),
+    ]
+    with usage_scope("summary", group_id="10001"):
+        for response in responses:
+            await _record_usage(FakeClient(), FakeReq(), response, 0.0, False, "ok")
+        await _record_usage(FakeClient(), FakeReq(), None, 0.0, False, "error", "boom")
+        await _record_usage(FakeClient(), FakeReq(), None, 0.0, False, "cancelled")
+
+    with fake_store.connect() as conn:
+        rows = conn.execute(
+            "SELECT state, response_outcome, cost_usd FROM llm_usage_events ORDER BY id"
+        ).fetchall()
+    assert [(row["state"], row["response_outcome"]) for row in rows] == [
+        ("ok", "accepted"),
+        ("ok", "discarded_finish"),
+        ("ok", "discarded_empty"),
+        ("error", "provider_error"),
+        ("cancelled", "cancelled"),
+    ]
+    assert rows[0]["cost_usd"] > 0
+    assert rows[1]["cost_usd"] == rows[0]["cost_usd"]
+    assert rows[2]["cost_usd"] == rows[0]["cost_usd"]

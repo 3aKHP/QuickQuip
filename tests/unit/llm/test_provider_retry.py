@@ -70,7 +70,7 @@ class StreamScriptedClient(ClaudeProviderClient):
     def _get_api_key(self) -> str:
         return "test-key"
 
-    async def _prepare_image_inputs(self, image_urls, inline_images=None):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
         return []
 
     async def _complete_stream(self, request):

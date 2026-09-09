@@ -18,9 +18,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SOURCE_ROOT if SOURCE_ROOT.is_dir() else PROJECT_ROOT))
 
-from quickquip.chat.archive import ChatArchive  # noqa: E402
+from quickquip.chat.archive import ChatArchive, RecordResult  # noqa: E402
 from quickquip.common.paths import DAILY_MESSAGES_DIR, WORDCLOUD_MESSAGES_DIR  # noqa: E402
 
 
@@ -67,8 +69,10 @@ def main() -> int:
 
     # daily 先入：其行带 user_id，wordcloud 行撞键时只回填缺失的归因字段。
     sources = (("daily_msgs", DAILY_MESSAGES_DIR), ("wordcloud_msgs", WORDCLOUD_MESSAGES_DIR))
+    failed_total = 0
     for label, root in sources:
-        seen = written = 0
+        counts: Counter[RecordResult] = Counter()
+        seen = 0
         occurrences: Counter[tuple[str, int, str, str]] = Counter()
         for group_id, entry in _iter_jsonl(root):
             seen += 1
@@ -76,21 +80,34 @@ def main() -> int:
                 continue
             key = (group_id, int(entry["ts"]), entry["sender"], entry["text"])
             occurrences[key] += 1
-            if archive.record(
+            result = archive.record_result(
                 group_id,
                 entry["sender"],
                 entry["text"],
                 ts=entry["ts"],
                 user_id=entry.get("user_id"),
                 occurrence=occurrences[key] - 1,
-            ):
-                written += 1
-        print(f"{label}: 读取 {seen} 条" + ("" if args.dry_run else f"，新写入 {written} 条（其余按内容哈希去重或仅回填 user_id）"))
+            )
+            counts[result] += 1
+        if args.dry_run:
+            print(f"{label}: 读取 {seen} 条")
+            continue
+        failed_total += counts[RecordResult.FAILED]
+        print(
+            f"{label}: 读取 {seen} 条，新写入 {counts[RecordResult.INSERTED]} 条，"
+            f"回填 user_id {counts[RecordResult.BACKFILLED]} 条，"
+            f"已存在 {counts[RecordResult.DUPLICATE]} 条，"
+            f"跳过 {counts[RecordResult.SKIPPED]} 条，"
+            f"写入失败 {counts[RecordResult.FAILED]} 条"
+        )
 
     final = archive.stats()
+    if not final.get("available"):
+        print("聊天归档数据库不可用，无法核验回灌结果。", file=sys.stderr)
+        return 1
     print(f"归档现状：{final['messages']} 条 / {final['groups']} 群"
           + ("（dry-run 未写入）" if args.dry_run else ""))
-    return 0
+    return 1 if failed_total else 0
 
 
 if __name__ == "__main__":

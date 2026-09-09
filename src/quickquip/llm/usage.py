@@ -242,7 +242,16 @@ async def _record_usage(
             # 成功请求的协议完成原因（STOP/MAX_TOKENS/SAFETY...）：级联丢弃
             # 语义下的失败定位不再依赖 trace 库（1.15.2 CE 线）。
             "finish_reason": (response.finish_reason or "").strip() or None if response else None,
+            "response_outcome": None,
         }
+        if scope and scope.feature in {"summary", "briefing", "period_report"}:
+            if state == "cancelled":
+                row["response_outcome"] = "cancelled"
+            elif state != "ok" or response is None:
+                row["response_outcome"] = "provider_error"
+            else:
+                from quickquip.llm.response_acceptance import classify_response
+                row["response_outcome"] = classify_response(response, feature=scope.feature)
         from quickquip.llm.usage_store import usage_store
         await asyncio.to_thread(usage_store.record, row)
     except (OSError, sqlite3.Error):
