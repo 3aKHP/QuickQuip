@@ -289,6 +289,61 @@ async def test_period_report_prompt_contains_period_context(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_envelope_message_count_excludes_skipped_empty(monkeypatch):
+    """信封「共 N 条」按序列化后的有效消息计（空文本被 _clean_entries 跳过）。"""
+    from datetime import datetime
+
+    stub = _StubClient(LLMResponse(text="ok", model="m1", finish_reason="stop"))
+    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)
+
+    base = datetime(2026, 9, 8, 8, 0, 0, tzinfo=LOCAL_TZ).timestamp()
+    messages = [
+        {"ts": base, "sender": "张三", "text": "有效", "user_id": "1001"},
+        {"ts": base + 1, "sender": "李四", "text": "   ", "user_id": "1002"},
+        {"ts": base + 2, "sender": "王五", "text": "", "user_id": "1003"},
+        {"ts": base + 3, "sender": "张三", "text": "又一条", "user_id": "1001"},
+    ]
+
+    await generate_period_report(
+        messages,
+        PersonaConfig(id="default", display_name="默认", system_prompt="s"),
+        "10001",
+        period_label="2026 年第 36 周",
+        period_kind="weekly",
+        name_table={},
+        length_hint=2000,
+        model_cascade=["a/m1"],
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+    )
+    weekly_user = stub.requests[0].messages[0].content
+    assert "共 2 条消息" in weekly_user
+    assert "共 4 条消息" not in weekly_user
+
+    from quickquip.llm.config import DailySummaryConfig
+    from quickquip.llm.summarize import generate_daily_summary
+
+    stub2 = _StubClient(LLMResponse(text="日报", model="m1", finish_reason="stop"))
+    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub2)
+    await generate_daily_summary(
+        messages,
+        PersonaConfig(id="default", display_name="默认", system_prompt="s"),
+        "10001",
+        date_label="2026-09-08",
+        name_table={},
+        summary_config=DailySummaryConfig(),
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+    )
+    daily_user = stub2.requests[0].messages[0].content
+    assert "共 2 条消息" in daily_user
+
+
+@pytest.mark.asyncio
 async def test_period_report_compact_log_and_format_note(monkeypatch):
     """1.15.2：周/月报输入用压缩序列化（分钟块/连发合并/bot 标记），
     system prompt 附格式说明。"""
