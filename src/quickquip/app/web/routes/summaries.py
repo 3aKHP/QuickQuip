@@ -2,6 +2,7 @@ import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -17,6 +18,15 @@ _DB = DAILY_SUMMARIES_DB_PATH
 
 _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+@lru_cache(maxsize=None)
+def _ensure_store_schema(db_path: str) -> None:
+    """实例化一次 store 以触发惰性迁移（run_id 列）。web 进程平时不实例化
+    报文 store，generation-log 直接 SELECT run_id，须先确保列存在。"""
+    from quickquip.chat.daily_summary import DailySummaryStore
+
+    DailySummaryStore(db_path)
 
 
 def _connect() -> sqlite3.Connection:
@@ -178,6 +188,7 @@ def summary_generation_log(group_id: str, summary_date: str):
     _validate_date(summary_date)
     if not _DB.exists():
         raise HTTPException(status_code=404, detail="db not found")
+    _ensure_store_schema(str(_DB))
     conn = _connect()
     try:
         row = conn.execute(

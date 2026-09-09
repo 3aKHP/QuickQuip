@@ -15,6 +15,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Iterator
 
 from quickquip.llm.pricing import estimate_cost_components, match_pricing, normalize_usage
@@ -168,8 +169,14 @@ async def _record_usage(
     stream_used: bool,
     state: str,
     error_msg: str = "",
+    finished_at: str | None = None,
 ) -> None:
-    """落一行用量（成功/错误/取消皆记）；任何异常只 logger 不抛。"""
+    """落一行用量（成功/错误/取消皆记）；任何异常只 logger 不抛。
+
+    ts 取 finished_at（调用结束、调度计量的时刻）而非落库时刻：计量任务是
+    fire-and-forget，落库可能晚于事件循环若干拍；级联场景下末跳的落库 ts
+    会晚于报文 generated_at，导致生成日志时间窗兜底丢失成功跳（PR #235 CR）。
+    """
     try:
         scope = _USAGE_SCOPE.get()
         from quickquip.llm.provider.trace import current_agent_loop_id
@@ -260,6 +267,8 @@ async def _record_usage(
             "finish_reason": (response.finish_reason or "").strip() or None if response else None,
             "response_outcome": None,
         }
+        if finished_at:
+            row["ts"] = finished_at
         if scope and scope.feature in {"summary", "briefing", "period_report"}:
             if state == "cancelled":
                 row["response_outcome"] = "cancelled"
@@ -291,9 +300,13 @@ def _schedule_usage_record(
     """Fire-and-forget 调度计量任务，绝不把写库等待挂到聊天请求上。
 
     事件循环对 task 只持弱引用，必须自持强引用防止任务被 GC 中途回收。
+    finished_at 在此处（调用结束、调度时刻）打点，随任务传入：计量任务真正
+    执行落库可能晚于事件循环若干拍，用落库时刻会把级联末跳排到报文
+    generated_at 之后，破坏生成日志的时间窗归因。
     """
+    finished_at = datetime.now(timezone.utc).isoformat()
     task = asyncio.create_task(
-        _record_usage(client, request, response, started, stream_used, state, error_msg)
+        _record_usage(client, request, response, started, stream_used, state, error_msg, finished_at)
     )
     _USAGE_TASKS.add(task)
     task.add_done_callback(_USAGE_TASKS.discard)

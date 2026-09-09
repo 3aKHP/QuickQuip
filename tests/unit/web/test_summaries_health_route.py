@@ -63,6 +63,7 @@ def test_summaries_health_aggregates_features(temp_usage_store):
 def test_summaries_health_works_before_any_llm_call(temp_usage_store):
     """升级窗口场景：库刚建（无任何事件、迁移仅由本路由触发）不 500。"""
     result = summaries_route.summaries_health(days=7)
+    assert set(result) == {"days", "features"}  # 钉住精简后的契约键集合
     assert result["features"] == []
 
 
@@ -165,3 +166,75 @@ async def test_real_cascade_persists_discarded_and_accepted_hops(temp_usage_stor
     hops = temp_usage_store.list_generation_hops(run_id="run-x")
     assert len(hops) == 2
     assert [h["response_outcome"] for h in hops] == ["discarded_finish", "accepted"]
+
+
+def test_generation_log_triggers_migration_on_old_schema_db(monkeypatch, tmp_path, temp_usage_store):
+    """旧库（无 run_id 列）经 web 进程直调路由不 500：路由先触发惰性迁移（CR S2）。"""
+    import sqlite3
+
+    db_path = tmp_path / "old_summaries.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id TEXT NOT NULL, summary_date TEXT NOT NULL,
+                generated_at TEXT NOT NULL, published_at TEXT DEFAULT NULL,
+                model_used TEXT, char_count INTEGER, content TEXT NOT NULL,
+                UNIQUE(group_id, summary_date)
+            )
+        """)
+        conn.execute(
+            "INSERT INTO summaries (group_id, summary_date, generated_at, content) VALUES (?, ?, ?, ?)",
+            ("10001", "2026-05-03", "2026-05-03T06:00:00+00:00", "旧报文"),
+        )
+    monkeypatch.setattr(summaries_route, "_DB", db_path)
+
+    result = summaries_route.summary_generation_log("10001", "2026-05-03")
+
+    assert result["ok"] is True
+    assert result["attribution"] == "time_window"
+
+
+async def test_usage_ts_stamped_at_schedule_time_not_insert_time(temp_usage_store, monkeypatch):
+    """B1 回归：ts 在调度计量（调用结束）时打点，而非落库时刻。
+
+    旧行为下计量任务是 fire-and-forget，级联末跳落库 ts 晚于报文 generated_at，
+    时间窗兜底会丢失成功跳并串到下一篇。用未来的 _utc_now 区分两种打点点：
+    落库时刻打点会写入 2099，调度时刻打点写入真实当前时间。
+    """
+    import quickquip.llm.usage_store as usage_store_module
+    from quickquip.llm.config import PricingRates, ProviderConfig
+    from quickquip.llm.summarize import _run_summary_cascade
+    from quickquip.llm.usage import drain_usage_tasks, usage_scope
+    from tests.fixtures.provider_fakes import FakeClaudeClient
+
+    monkeypatch.setattr(
+        usage_store_module, "_utc_now", lambda: "2099-01-01T00:00:00+00:00",
+    )
+    config = ProviderConfig(
+        id="p", protocol="claude", base_url="https://example.com/v1",
+        api_key_env="K", default_model="m", models=["m"],
+    )
+    responses = iter([
+        {"content": [{"type": "text", "text": "完整日报"}], "stop_reason": "end_turn",
+         "usage": {"input_tokens": 100, "output_tokens": 50}},
+    ])
+    monkeypatch.setattr(
+        "quickquip.llm.summarize.build_provider_client",
+        lambda effective: FakeClaudeClient(effective, next(responses)),
+    )
+    monkeypatch.setattr(
+        "quickquip.llm.usage._configured_pricing",
+        lambda: {"m": PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
+    )
+    with usage_scope("summary", group_id="10001", run_id="run-ts"):
+        await _run_summary_cascade(
+            "summary", "10001", [("p", "m", config)],
+            "system", "chat", lambda log, truncated: log,
+            temperature=0.2, max_output_tokens=100,
+        )
+    await drain_usage_tasks()
+
+    hops = temp_usage_store.list_generation_hops(run_id="run-ts")
+    assert len(hops) == 1
+    assert hops[0]["ts"] < "2099"  # 调度时刻打点，未受落库时刻 _utc_now 影响

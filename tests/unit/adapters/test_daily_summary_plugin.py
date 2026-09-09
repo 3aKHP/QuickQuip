@@ -271,6 +271,28 @@ async def test_generate_one_persists_on_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generate_one_passes_scope_run_id_to_upsert(monkeypatch):
+    """钉住接缝：真实生成路径 set_usage_scope 的 run_id 经 current_usage_run_id 传入 upsert。"""
+    from quickquip.llm.usage import set_usage_scope
+
+    upserts: list[tuple] = []
+    store = types.SimpleNamespace(upsert=lambda *a, **kw: upserts.append((a, kw)))
+
+    async def fake_run(group_id, start_ts, end_ts, date_label, **kw):
+        set_usage_scope("summary", group_id=group_id, run_id="r-1")
+        return ("正文", "model-x")
+
+    monkeypatch.setattr(summary_jobs, "run_summary_generation", fake_run)
+
+    await summary_jobs.generate_summary_one(
+        "10001", 1.0, 2.0, "label", "2026-05-03",
+        svc=None, collector=None, store=store, stats_tracker=None,
+    )
+
+    assert upserts == [(("10001", "2026-05-03", "正文", "model-x"), {"run_id": "r-1"})]
+
+
+@pytest.mark.asyncio
 async def test_generate_one_skips_persist_when_generation_returns_none(monkeypatch):
     """钉住：_run_generation 返回 None 时不入库。"""
     upserts: list[tuple] = []

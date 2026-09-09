@@ -211,6 +211,7 @@ class LLMUsageStore:
                     CREATE INDEX IF NOT EXISTS idx_usage_group    ON llm_usage_events(group_id, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_model    ON llm_usage_events(model, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_persona  ON llm_usage_events(persona_id, ts DESC);
+                    CREATE INDEX IF NOT EXISTS idx_usage_run_id   ON llm_usage_events(run_id);
                     """
                 )
                 # 历史 claude 行标签 backfill（issue #202）：input_tokens 列自始存
@@ -226,7 +227,8 @@ class LLMUsageStore:
             self._schema_ready = True
 
     def record(self, row: dict) -> None:
-        """落一行用量（ts 自动补 UTC now）。row 的键须是表列子集。"""
+        """落一行用量（ts 缺省补 UTC now；row 自带 ts 时以 row 为准——计量路径传入
+        调用结束时刻，见 usage._schedule_usage_record）。row 的键须是表列子集。"""
         self._ensure_schema()
         self._cleanup_if_due()
         full = {"ts": _utc_now(), **row}

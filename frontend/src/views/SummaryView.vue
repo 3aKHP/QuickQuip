@@ -121,7 +121,7 @@
             <span>{{ genLogError }}</span>
           </div>
           <template v-else-if="genLog">
-            <p v-if="!genLog.hops.length" class="health-empty">没有可归因的调用记录（手动触发未入库的生成不在此列）。</p>
+            <p v-if="!genLog.hops.length" class="health-empty">没有可归因的调用记录（手动触发未入库的生成、或用量记录已过保留期的不在此列）。</p>
             <template v-else>
               <ol class="genlog-list">
                 <li v-for="(hop, i) in genLog.hops" :key="i" class="genlog-hop">
@@ -347,14 +347,20 @@ function onGenLogToggle(event: Event) {
 
 async function loadGenLog() {
   if (!selected.value) return
+  // 捕获发起时的报文坐标；响应落地时已切走（慢网络）则丢弃，防止错串（CR S3）
+  const gid = groupId.value
+  const key = selected.value
   genLogLoading.value = true
   genLogError.value = null
   try {
-    genLog.value = await current.value.fetchGenerationLog(groupId.value, selected.value)
+    const data = await current.value.fetchGenerationLog(gid, key)
+    if (selected.value !== key || groupId.value !== gid) return
+    genLog.value = data
   } catch (e: unknown) {
+    if (selected.value !== key || groupId.value !== gid) return
     genLogError.value = (e as Error).message
   } finally {
-    genLogLoading.value = false
+    if (selected.value === key && groupId.value === gid) genLogLoading.value = false
   }
 }
 
@@ -768,6 +774,10 @@ function closeDetail() {
   border-top: 1px solid var(--qq-border, rgba(0, 0, 0, 0.08));
   padding-top: var(--qq-gap-sm);
   font-size: 0.85rem;
+}
+
+.genlog .mono {
+  font-family: var(--qq-font-mono);
 }
 
 .genlog summary {

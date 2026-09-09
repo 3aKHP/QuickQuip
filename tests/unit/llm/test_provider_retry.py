@@ -220,7 +220,7 @@ async def test_stream_generic_failure_falls_back_to_non_stream(captured_delays):
 async def test_absorbed_failures_record_single_ok_usage(monkeypatch, captured_delays):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
         calls.append((state, response is not None))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -234,7 +234,7 @@ async def test_absorbed_failures_record_single_ok_usage(monkeypatch, captured_de
 async def test_exhausted_retries_record_single_error_usage(monkeypatch, captured_delays):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
         calls.append((state, response is not None))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)

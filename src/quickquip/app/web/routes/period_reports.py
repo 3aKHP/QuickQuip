@@ -1,6 +1,7 @@
 import logging
 import re
 import sqlite3
+from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
@@ -18,6 +19,15 @@ _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 # period_key：周报 YYYY-Www（2026-W24），月报 YYYY-MM（2026-06）
 _PERIOD_KEY_RE = re.compile(r"^\d{4}-(?:W\d{2}|\d{2})$")
 _VALID_PERIOD_TYPES = {"weekly", "monthly"}
+
+
+@lru_cache(maxsize=None)
+def _ensure_store_schema(db_path: str) -> None:
+    """实例化一次 store 以触发惰性迁移（run_id 列）。web 进程平时不实例化
+    报文 store，generation-log 直接 SELECT run_id，须先确保列存在。"""
+    from quickquip.chat.period_report import PeriodReportStore
+
+    PeriodReportStore(db_path)
 
 
 def _connect() -> sqlite3.Connection:
@@ -109,6 +119,7 @@ def period_report_generation_log(group_id: str, period_type: str, period_key: st
     _validate_period_key(period_key)
     if not _DB.exists():
         raise HTTPException(status_code=404, detail="db not found")
+    _ensure_store_schema(str(_DB))
     conn = _connect()
     try:
         row = conn.execute(
