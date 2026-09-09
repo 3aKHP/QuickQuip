@@ -30,7 +30,7 @@ export async function fetchSummaryGroups(): Promise<string[]> {
 /** 对应 GET /api/summaries-health：总结族生成健康度聚合 */
 export interface HealthFeatureRow {
   feature: string
-  state: string
+  outcome: 'accepted' | 'discarded_finish' | 'discarded_empty' | 'provider_error' | 'cancelled' | 'unknown'
   calls: number
   cost_usd: number | null
   avg_duration_ms: number | null
@@ -48,7 +48,10 @@ export interface HealthGroupRow {
   feature: string
   group_id: string
   calls: number
+  accepted: number
   failed: number
+  cancelled: number
+  unknown: number
 }
 
 export interface SummariesHealth {

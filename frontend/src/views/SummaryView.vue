@@ -30,12 +30,12 @@
         <UiButton size="sm" icon="RefreshCw" :loading="healthLoading" @click="loadHealth">刷新</UiButton>
       </div>
       <table v-if="health.features.length" class="health-table">
-        <thead><tr><th>链路</th><th>状态</th><th>调用</th><th>均耗时</th><th>成本</th></tr></thead>
+        <thead><tr><th>链路</th><th>尝试结果</th><th>调用</th><th>均耗时</th><th>成本</th></tr></thead>
         <tbody>
-          <tr v-for="row in health.features" :key="`${row.feature}-${row.state}`">
+          <tr v-for="row in health.features" :key="`${row.feature}-${row.outcome}`">
             <td>{{ featureLabel(row.feature) }}</td>
             <td>
-              <UiTag :variant="row.state === 'ok' ? 'success' : 'danger'">{{ row.state }}</UiTag>
+              <UiTag :variant="row.outcome === 'accepted' ? 'success' : ['unknown', 'cancelled'].includes(row.outcome) ? 'warn' : 'danger'">{{ outcomeLabel(row.outcome) }}</UiTag>
             </td>
             <td>{{ row.calls }}</td>
             <td>{{ Math.round((row.avg_duration_ms ?? 0) / 1000) }}s</td>
@@ -43,9 +43,10 @@
           </tr>
         </tbody>
       </table>
+      <p v-if="health.features.length" class="health-empty">按模型尝试统计，每次级联可能包含多跳；成本包含已丢弃正文的调用。</p>
       <p v-else class="health-empty">近 {{ health.days }} 天无总结族调用记录。</p>
       <details v-if="health.finish_reasons.length" class="health-details">
-        <summary>完成原因分布（正常口径：stop / STOP / end_turn / stop_sequence，其余会被级联丢弃）</summary>
+        <summary>完成原因分布（正常：stop / end_turn / stop_sequence / eos，不区分大小写；未返回原因时按正文判断）</summary>
         <table class="health-table">
           <thead><tr><th>链路</th><th>模型</th><th>finish</th><th>次数</th></tr></thead>
           <tbody>
@@ -241,6 +242,19 @@ const featureLabels: Record<string, string> = {
 
 function featureLabel(feature: string): string {
   return featureLabels[feature] ?? feature
+}
+
+const outcomeLabels: Record<string, string> = {
+  accepted: '已接受正文',
+  discarded_finish: '完成原因异常',
+  discarded_empty: '空响应',
+  provider_error: '调用失败',
+  cancelled: '已取消',
+  unknown: '历史未知',
+}
+
+function outcomeLabel(outcome: string): string {
+  return outcomeLabels[outcome] ?? outcome
 }
 
 async function loadHealth() {
