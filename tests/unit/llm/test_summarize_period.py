@@ -334,12 +334,51 @@ async def test_period_report_compact_log_and_format_note(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_daily_summary_marks_and_caps_bot_lines(monkeypatch):
-    """日报中 bot 行带 (bot) 后缀且超长截断；用户行不受影响。"""
+async def test_period_report_monthly_uses_week_budget_assembly(monkeypatch):
+    """1.15.3：月报走分周预算组装，system prompt 注明周节与抽稀语义。"""
+    from datetime import datetime
+
+    stub = _StubClient(LLMResponse(text="月报", model="m1", finish_reason="stop"))
+    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)
+
+    messages = []
+    for day in (1, 8, 15):
+        base = datetime(2026, 9, day, 9, 0, 0, tzinfo=LOCAL_TZ).timestamp()
+        messages.extend(
+            {"ts": base + i, "sender": f"u{i}", "text": f"消息{day}-{i}"} for i in range(3)
+        )
+
+    await generate_period_report(
+        messages,
+        PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。"),
+        "10001",
+        period_label="2026 年 9 月",
+        period_kind="monthly",
+        name_table={},
+        length_hint=2500,
+        model_cascade=["a/m1"],
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+        input_char_budget=50_000,
+    )
+
+    user_content = stub.requests[0].messages[0].content
+    assert "【第1周" in user_content
+    assert "【09-01 周二】" in user_content
+    system_prompt = stub.requests[0].system_prompt
+    assert "月报" in system_prompt
+    assert "第N周" in system_prompt or "第1周" in system_prompt or "自然周" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_daily_summary_uses_compact_serializer(monkeypatch):
+    """日报输入与周月报同源：压缩序列化 + (bot) 标记 + 格式说明。"""
     from datetime import datetime
 
     from quickquip.llm.config import DailySummaryConfig
-    from quickquip.llm.summarize import generate_daily_summary, _format_messages
+    from quickquip.llm.summarize import generate_daily_summary
 
     stub = _StubClient(LLMResponse(text="日报", model="m1", finish_reason="stop"))
     monkeypatch.setattr(
@@ -348,16 +387,11 @@ async def test_daily_summary_marks_and_caps_bot_lines(monkeypatch):
 
     base = datetime(2026, 9, 8, 8, 12, 0, tzinfo=LOCAL_TZ).timestamp()
     messages = [
-        {"ts": base, "sender": "张三", "text": "用户原文", "user_id": "1001"},
-        {"ts": base + 5, "sender": "QuickQuip", "text": "字" * 500, "user_id": "999"},
+        {"ts": base, "sender": "张三", "text": "早", "user_id": "1001"},
+        {"ts": base + 10, "sender": "张三", "text": "都起了没", "user_id": "1001"},
+        {"ts": base + 15, "sender": "QuickQuip", "text": "我来了", "user_id": "999"},
     ]
 
-    text = _format_messages(messages, LOCAL_TZ, bot_user_ids={"999"})
-    lines = text.splitlines()
-    assert lines[0] == "[08:12] 张三：用户原文"
-    assert lines[1] == "[08:12] QuickQuip(bot)：" + "字" * 400 + "…"
-
-    # 端到端：bot_user_ids 透传进 user content
     await generate_daily_summary(
         messages,
         PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。"),
@@ -369,8 +403,16 @@ async def test_daily_summary_marks_and_caps_bot_lines(monkeypatch):
         default_provider_id="a",
         default_model="m1",
         local_tz=LOCAL_TZ,
-        bot_user_ids={"999"},
+        bot_user_ids=frozenset({"999"}),
     )
+
     user_content = stub.requests[0].messages[0].content
-    assert "QuickQuip(bot)：" in user_content
-    assert "字" * 401 not in user_content
+    assert "【09-08 周二】" in user_content
+    assert "[08:12] 张三：早 / 都起了没" in user_content
+    assert "QuickQuip(bot)：我来了" in user_content
+
+    system_prompt = stub.requests[0].system_prompt
+    assert "聊天记录格式说明" in system_prompt
+    assert "×N" in system_prompt
+    assert "(bot)" in system_prompt
+    assert "流水账" in system_prompt or "开篇" in system_prompt

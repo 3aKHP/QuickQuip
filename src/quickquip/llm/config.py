@@ -303,7 +303,9 @@ class MonthlyReportConfig:
     publish_cron: str = "0 10 * * *"  # 每天 10:00 发布（1 日发新报告，其余日子补发未发布的）
     min_messages: int = 300
     length_hint: int = 2500
-    sample_per_day: int = 20  # 月报跨度长，每天采样更少
+    # 终稿聊天记录字符预算（中文约 1 字 ≈ 1 token 时 ≥200k token）。
+    # 分周公平分配，周内高活跃日优先整日保留。
+    input_char_budget: int = 240_000
     model_cascade: list[str] = field(default_factory=list)
 
 
@@ -995,7 +997,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             publish_cron=str(monthly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
             min_messages=max(1, int(monthly_report_raw.get("min_messages", 300))),
             length_hint=max(200, int(monthly_report_raw.get("length_hint", 2500))),
-            sample_per_day=max(1, int(monthly_report_raw.get("sample_per_day", 20))),
+            input_char_budget=max(
+                8_000, int(monthly_report_raw.get("input_char_budget", 240_000))
+            ),
             model_cascade=[
                 str(item).strip()
                 for item in monthly_report_raw.get("model_cascade", [])
