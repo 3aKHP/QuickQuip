@@ -40,6 +40,7 @@ class DailySummaryStore:
                     generated_at TEXT NOT NULL,
                     published_at TEXT DEFAULT NULL,
                     model_used   TEXT,
+                    run_id       TEXT,
                     char_count   INTEGER,
                     content      TEXT NOT NULL,
                     UNIQUE(group_id, summary_date)
@@ -48,6 +49,11 @@ class DailySummaryStore:
             # Migrate: add published_at column if this DB predates it
             try:
                 conn.execute("ALTER TABLE summaries ADD COLUMN published_at TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            # Migrate: add run_id column（1.15.3 报文生成日志关联）if this DB predates it
+            try:
+                conn.execute("ALTER TABLE summaries ADD COLUMN run_id TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             conn.commit()
@@ -60,6 +66,7 @@ class DailySummaryStore:
         summary_date: str,
         content: str,
         model_used: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         if self._unavailable:
             raise RuntimeError("每日总结 数据库不可用")
@@ -69,16 +76,17 @@ class DailySummaryStore:
             conn.execute(
                 """
                 INSERT INTO summaries
-                    (group_id, summary_date, generated_at, model_used, char_count, content)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (group_id, summary_date, generated_at, model_used, run_id, char_count, content)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(group_id, summary_date) DO UPDATE SET
                     generated_at = excluded.generated_at,
                     model_used   = excluded.model_used,
+                    run_id       = excluded.run_id,
                     char_count   = excluded.char_count,
                     content      = excluded.content,
                     published_at = NULL
                 """,
-                (str(group_id), summary_date, generated_at, model_used, len(content), content),
+                (str(group_id), summary_date, generated_at, model_used, run_id, len(content), content),
             )
             conn.commit()
         finally:

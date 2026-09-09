@@ -414,7 +414,7 @@ async def test_generate_period_one_upserts_with_window_period_key(monkeypatch):
 
     counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
     upserts: list[tuple] = []
-    store = types.SimpleNamespace(upsert=lambda *a: upserts.append(a))
+    store = types.SimpleNamespace(upsert=lambda *a, **kw: upserts.append((a, kw)))
 
     now = datetime(2026, 5, 4, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))  # 周一
     result = await summary_jobs.generate_period_one(
@@ -425,7 +425,10 @@ async def test_generate_period_one_upserts_with_window_period_key(monkeypatch):
 
     assert result == ("周期报告正文", "model-1")
     assert counts.upsert == 0  # period_store 已被整体替换
-    assert upserts == [("10001", plugin.PERIOD_WEEKLY, "2026-W18", "周期报告正文", "model-1")]
+    assert upserts == [(
+        ("10001", plugin.PERIOD_WEEKLY, "2026-W18", "周期报告正文", "model-1"),
+        {"run_id": None},
+    )]
 
 
 @pytest.mark.asyncio

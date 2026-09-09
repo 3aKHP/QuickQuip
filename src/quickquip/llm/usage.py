@@ -11,6 +11,7 @@ import asyncio
 import logging
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -26,11 +27,23 @@ class UsageScope:
     feature: str
     group_id: str | None = None
     persona_id: str | None = None
+    run_id: str | None = None
 
 
 _USAGE_SCOPE: ContextVar[UsageScope | None] = ContextVar(
     "quickquip_llm_usage_scope", default=None,
 )
+
+
+def new_usage_run_id() -> str:
+    """生成一次"报文生成运行"的关联 ID：级联各跳与最终报文行共享。"""
+    return uuid.uuid4().hex
+
+
+def current_usage_run_id() -> str | None:
+    """读取当前 scope 的 run_id（零接线，同 current_agent_loop_id 范式）。"""
+    scope = _USAGE_SCOPE.get()
+    return scope.run_id if scope else None
 
 
 @contextmanager
@@ -39,9 +52,10 @@ def usage_scope(
     *,
     group_id: str | None = None,
     persona_id: str | None = None,
+    run_id: str | None = None,
 ) -> Iterator[None]:
     """设置当前协程的用量归因；退出时复位（照搬 collect_trace_calls 范式）。"""
-    token = _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
+    token = _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id, run_id))
     try:
         yield
     finally:
@@ -53,11 +67,12 @@ def set_usage_scope(
     *,
     group_id: str | None = None,
     persona_id: str | None = None,
+    run_id: str | None = None,
 ) -> None:
     """直接设置 scope（不 reset）。用于：(1) ``asyncio.create_task`` 隔离的子任务
     （跑在父 context 副本上，task 结束自动清理）；(2) 顶层 cron/handler 入口（调用方
     不再调 provider，残留无害）。调用链中间环节应优先用 ``usage_scope``（自动 reset）。"""
-    _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
+    _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id, run_id))
 
 
 _ENVELOPE_TOKENS: ContextVar[int | None] = ContextVar(
@@ -213,6 +228,7 @@ async def _record_usage(
             "feature": scope.feature if scope else None,
             "group_id": scope.group_id if scope else None,
             "persona_id": scope.persona_id if scope else None,
+            "run_id": scope.run_id if scope else None,
             "agent_loop_id": loop_id,
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),

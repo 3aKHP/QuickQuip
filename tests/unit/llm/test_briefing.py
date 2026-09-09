@@ -171,4 +171,9 @@ async def test_daily_briefing_usage_scope_carries_persona(monkeypatch):
         default_model="m1",
     )
 
-    assert ("briefing", {"group_id": "1001", "persona_id": "nightwatch"}) in calls
+    assert len(calls) == 1
+    feature, kwargs = calls[0]
+    assert feature == "briefing"
+    assert kwargs["group_id"] == "1001"
+    assert kwargs["persona_id"] == "nightwatch"
+    assert kwargs["run_id"]  # 每次简报生成携带非空 run_id

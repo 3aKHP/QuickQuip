@@ -255,7 +255,7 @@ async def test_run_generation_swallows_llm_exception(monkeypatch):
 async def test_generate_one_persists_on_success(monkeypatch):
     """钉住：_generate_one 生成成功时以 summary_date 入库。"""
     upserts: list[tuple] = []
-    store = types.SimpleNamespace(upsert=lambda *a: upserts.append(a))
+    store = types.SimpleNamespace(upsert=lambda *a, **kw: upserts.append((a, kw)))
 
     async def fake_run(group_id, start_ts, end_ts, date_label, **kw):
         return ("正文", "model-x")
@@ -267,7 +267,7 @@ async def test_generate_one_persists_on_success(monkeypatch):
         svc=None, collector=None, store=store, stats_tracker=None,
     )
 
-    assert upserts == [("10001", "2026-05-03", "正文", "model-x")]
+    assert upserts == [(("10001", "2026-05-03", "正文", "model-x"), {"run_id": None})]
 
 
 @pytest.mark.asyncio

@@ -101,7 +101,12 @@ async def test_period_report_usage_scope_carries_persona(monkeypatch):
         local_tz=LOCAL_TZ,
     )
 
-    assert ("period_report", {"group_id": "10001", "persona_id": "archivist"}) in calls
+    assert len(calls) == 1
+    feature, kwargs = calls[0]
+    assert feature == "period_report"
+    assert kwargs["group_id"] == "10001"
+    assert kwargs["persona_id"] == "archivist"
+    assert kwargs["run_id"]  # 每次生成携带非空 run_id
 
 
 @pytest.mark.asyncio
@@ -133,7 +138,12 @@ async def test_daily_summary_usage_scope_carries_persona(monkeypatch):
         local_tz=LOCAL_TZ,
     )
 
-    assert ("summary", {"group_id": "10001", "persona_id": "archivist"}) in calls
+    assert len(calls) == 1
+    feature, kwargs = calls[0]
+    assert feature == "summary"
+    assert kwargs["group_id"] == "10001"
+    assert kwargs["persona_id"] == "archivist"
+    assert kwargs["run_id"]  # 每次生成携带非空 run_id
 
 
 @pytest.mark.asyncio

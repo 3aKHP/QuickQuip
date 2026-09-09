@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from quickquip.app.web.audit import audit_logger
+from quickquip.app.web.generation_log import generation_log_response
 from quickquip.common.paths import DAILY_SUMMARIES_DB_PATH
 
 router = APIRouter()
@@ -132,10 +133,11 @@ def list_summary_groups():
 
 @router.get("/summaries-health")
 def summaries_health(days: int = 7):
-    """总结族（日报/简报/周月报）各跳模型尝试的接受结果、完成原因与成本。
+    """总结族（日报/简报/周月报）各跳模型尝试的接受结果与成本。
 
     经 usage_store 读取以确保惰性 schema 迁移先于查询执行；历史调用的
-    正文接受结果保留为 unknown。
+    正文接受结果保留为 unknown。明细级诊断（每跳的 finish/token/耗时）
+    在报文详情的「生成日志」里按 run_id/时间窗归因。
     """
     days = max(1, min(days, 90))
     since = (
@@ -160,39 +162,38 @@ def summaries_health(days: int = 7):
                 """,
                 (since,),
             ).fetchall()
-            finish_reasons = conn.execute(
-                """
-                SELECT feature, provider_id, model,
-                       COALESCE(finish_reason, '') AS finish_reason,
-                       COUNT(*) AS calls
-                FROM llm_usage_events
-                WHERE feature IN ('summary', 'briefing', 'period_report')
-                  AND state = 'ok' AND ts >= ?
-                GROUP BY feature, provider_id, model, finish_reason
-                ORDER BY calls DESC LIMIT 50
-                """,
-                (since,),
-            ).fetchall()
-            groups = conn.execute(
-                """
-                SELECT feature, group_id, COUNT(*) AS calls,
-                       SUM(CASE WHEN response_outcome = 'accepted' THEN 1 ELSE 0 END) AS accepted,
-                       SUM(CASE WHEN response_outcome IN ('discarded_finish', 'discarded_empty', 'provider_error') THEN 1 ELSE 0 END) AS failed,
-                       SUM(CASE WHEN response_outcome = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
-                       SUM(CASE WHEN response_outcome IS NULL THEN 1 ELSE 0 END) AS unknown
-                FROM llm_usage_events
-                WHERE feature IN ('summary', 'briefing', 'period_report')
-                  AND ts >= ? AND group_id IS NOT NULL
-                GROUP BY feature, group_id ORDER BY calls DESC LIMIT 50
-                """,
-                (since,),
-            ).fetchall()
         return {
             "days": days,
             "features": [dict(r) for r in features],
-            "finish_reasons": [dict(r) for r in finish_reasons],
-            "groups": [dict(r) for r in groups],
         }
     except sqlite3.Error:
         logger.warning("summaries-health: 用量库暂不可用")
-        return {"days": days, "features": [], "finish_reasons": [], "groups": []}
+        return {"days": days, "features": []}
+
+
+@router.get("/summaries/{group_id}/{summary_date}/generation-log")
+def summary_generation_log(group_id: str, summary_date: str):
+    """一份日报的生成日志：为得到它经历的级联各跳（耗时/token/finish 等）。"""
+    _validate_group_id(group_id)
+    _validate_date(summary_date)
+    if not _DB.exists():
+        raise HTTPException(status_code=404, detail="db not found")
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT group_id, summary_date, generated_at, run_id FROM summaries WHERE group_id = ? AND summary_date = ?",
+            (group_id, summary_date),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="summary not found")
+        prev = conn.execute(
+            """SELECT generated_at FROM summaries
+               WHERE group_id = ? AND summary_date < ?
+               ORDER BY summary_date DESC LIMIT 1""",
+            (group_id, summary_date),
+        ).fetchone()
+    finally:
+        conn.close()
+    return generation_log_response(
+        dict(row), prev["generated_at"] if prev else None, feature="summary",
+    )

@@ -130,6 +130,7 @@ class LLMUsageStore:
                         feature               TEXT,
                         group_id              TEXT,
                         persona_id            TEXT,
+                        run_id                TEXT,
                         agent_loop_id         TEXT,
                         envelope_tokens       INTEGER,
                         epoch_history_tokens  INTEGER,
@@ -186,6 +187,7 @@ class LLMUsageStore:
                     "pricing_confidence": "TEXT",
                     "finish_reason": "TEXT",
                     "response_outcome": "TEXT",
+                    "run_id": "TEXT",
                 }
                 for name, definition in migrations.items():
                     columns = {
@@ -235,6 +237,38 @@ class LLMUsageStore:
                 f"INSERT INTO llm_usage_events ({', '.join(cols)}) VALUES ({placeholders})",
                 list(full.values()),
             )
+
+    def list_generation_hops(
+        self,
+        *,
+        run_id: str | None = None,
+        feature: str | None = None,
+        group_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[dict]:
+        """报文「生成日志」的跳列表：优先 run_id 精确归因；历史报文无 run_id 时
+        按 feature + group_id + 时间窗 (since, until] 兜底。按时间正序返回。"""
+        self._ensure_schema()
+        if run_id:
+            where = "run_id = ?"
+            params: list = [run_id]
+        else:
+            where = "feature = ? AND group_id = ? AND ts > ? AND ts <= ?"
+            params = [feature, group_id, since, until]
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT ts, provider_id, model, duration_ms,
+                       input_tokens, output_tokens, total_tokens, cost_usd,
+                       finish_reason, state, error_message, response_outcome
+                FROM llm_usage_events
+                WHERE {where}
+                ORDER BY ts ASC, id ASC
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def summary(self, cutoff: str, **filters: str | None) -> dict:
         """聚合用量/成本（仅 state='ok' 行计入金额；error/cancelled 单独计数）。"""

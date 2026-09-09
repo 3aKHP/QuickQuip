@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from quickquip.app.web.audit import audit_logger
+from quickquip.app.web.generation_log import generation_log_response
 from quickquip.common.paths import PERIOD_REPORTS_DB_PATH
 
 router = APIRouter()
@@ -98,6 +99,36 @@ def get_period_report_text(group_id: str, period_type: str, period_key: str):
         return row["content"]
     finally:
         conn.close()
+
+
+@router.get("/period-reports/{group_id}/{period_type}/{period_key}/generation-log")
+def period_report_generation_log(group_id: str, period_type: str, period_key: str):
+    """一份周报/月报的生成日志：为得到它经历的级联各跳（耗时/token/finish 等）。"""
+    _validate_group_id(group_id)
+    _validate_period_type(period_type)
+    _validate_period_key(period_key)
+    if not _DB.exists():
+        raise HTTPException(status_code=404, detail="db not found")
+    conn = _connect()
+    try:
+        row = conn.execute(
+            """SELECT group_id, period_type, period_key, generated_at, run_id FROM period_reports
+               WHERE group_id = ? AND period_type = ? AND period_key = ?""",
+            (group_id, period_type, period_key),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="period report not found")
+        prev = conn.execute(
+            """SELECT generated_at FROM period_reports
+               WHERE group_id = ? AND period_type = ? AND period_key < ?
+               ORDER BY period_key DESC LIMIT 1""",
+            (group_id, period_type, period_key),
+        ).fetchone()
+    finally:
+        conn.close()
+    return generation_log_response(
+        dict(row), prev["generated_at"] if prev else None, feature="period_report",
+    )
 
 
 @router.delete("/period-reports/{group_id}/{period_type}/{period_key}")
