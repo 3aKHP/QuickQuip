@@ -38,7 +38,10 @@
     <div class="action-panel">
       <div class="action-panel__head">
         <h4>最近动作</h4>
-        <UiButton size="sm" icon="RefreshCw" :loading="actionsLoading" @click="loadActions">刷新</UiButton>
+        <div class="action-panel__tools">
+          <UiButton size="sm" icon="RefreshCw" :loading="actionsLoading" @click="loadActions">刷新</UiButton>
+          <UiButton size="sm" icon="Trash2" variant="danger" :disabled="!actions.length" :loading="actionsClearing" @click="clearActions">清空历史</UiButton>
+        </div>
       </div>
       <UiEmpty v-if="!actions.length" icon="Activity" title="暂无动作记录" />
       <div v-else class="action-list">
@@ -66,7 +69,7 @@ import UiIcon from '../ui/UiIcon.vue'
 import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { probeProviders } from '../../api/diagnostics'
-import { clearLlmContext, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../../api/llmRuntime'
+import { clearLlmContext, clearLlmRuntimeActions, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../../api/llmRuntime'
 import type { RuntimeAction, RuntimeActionResponse } from '../../api/llmRuntime'
 import { toast } from '../../toast'
 
@@ -84,6 +87,7 @@ const runtimeLoading = ref<RuntimeLoading>('')
 const contextScope = ref('')
 const contextMessageId = ref('')
 const actionsLoading = ref(false)
+const actionsClearing = ref(false)
 const actions = ref<RuntimeAction[]>([])
 
 function prettyJson(obj: unknown): string {
@@ -244,6 +248,22 @@ async function deleteContextMessage() {
   }
 }
 
+async function clearActions() {
+  if (!confirm('清空全部已结束的动作记录？排队中与执行中的动作会保留。')) return
+  actionsClearing.value = true
+  runtimeError.value = null
+  try {
+    const data = await clearLlmRuntimeActions()
+    toast(`已清空 ${data.deleted || 0} 条动作记录`)
+    await loadActions()
+  } catch (e: unknown) {
+    runtimeError.value = (e as Error).message
+    toast('清空失败', 'error')
+  } finally {
+    actionsClearing.value = false
+  }
+}
+
 onMounted(() => {
   loadActions()
 })
@@ -309,6 +329,7 @@ onMounted(() => {
 }
 
 .action-panel__head,
+.action-panel__tools,
 .action-main {
   display: flex;
   align-items: center;

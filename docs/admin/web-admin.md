@@ -177,7 +177,7 @@ LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Too
 
 ### Bot 执行动作队列
 
-`web_api.py` 是独立进程，不能直接复用 bot 进程里的 OneBot 连接。诊断页的运行时重载、LLM 健康检查、上下文清理、唤醒参数重载、群组页的“立即生成总结/播报/周报/月报”、定时消息页的任务重注册等需要 bot 进程执行的动作，会先写入 `data/web_admin_actions.db`。bot 端定时任务 `web_admin_action_queue` 每 5 秒领取并执行队列任务，结果回写到同一数据库；诊断页“最近动作”用于查看等待、执行中、成功或失败状态。动作队列数据库启用 WAL；若 bot 在领取任务后退出，后续轮询会将超时的 `running` 动作标记为失败，避免任务永久挂起。
+`web_api.py` 是独立进程，不能直接复用 bot 进程里的 OneBot 连接。诊断页的运行时重载、LLM 健康检查、上下文清理、唤醒参数重载、群组页的“立即生成总结/播报/周报/月报”、定时消息页的任务重注册等需要 bot 进程执行的动作，会先写入 `data/web_admin_actions.db`。bot 端定时任务 `web_admin_action_queue` 每 5 秒领取并执行队列任务，结果回写到同一数据库；诊断页“最近动作”用于查看等待、执行中、成功或失败状态，并可通过“清空历史”按钮清除已结束（成功/失败）的动作记录，排队中与执行中的动作不受影响。动作队列数据库启用 WAL；若 bot 在领取任务后退出，后续轮询会将超时的 `running` 动作标记为失败，避免任务永久挂起。
 
 普通配置文件和群级开关仍走文件持久化路径。bot 端 `web_admin_state_sync` 每 30 秒检测 `rule_switch.json`、`config/awakening.toml`、每日总结/播报群组文件、无聊唤醒群组文件的修改并重载。唤醒标签页和配置页保存 `config/awakening.toml` 后也会主动入队一次 `awakening_reload`。
 
