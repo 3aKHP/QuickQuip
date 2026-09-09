@@ -10,6 +10,7 @@ from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
+    LLMImageInput,
     LLMRequest,
     LLMResponse,
     LLMWebSearchReport,
@@ -20,11 +21,7 @@ from quickquip.llm.provider.base import (
 
 
 class GeminiProviderClient(BaseProviderClient):
-    async def _serialize_user_parts(self, message: LLMConversationMessage) -> list[dict[str, Any]]:
-        if message.inline_images:
-            image_inputs = await self._prepare_image_inputs(message.image_urls, message.inline_images)
-        else:
-            image_inputs = await self._prepare_image_inputs(message.image_urls)
+    def _serialize_user_parts(self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]) -> list[dict[str, Any]]:
         parts: list[dict[str, Any]] = [
             *[
                 {
@@ -42,7 +39,8 @@ class GeminiProviderClient(BaseProviderClient):
 
     async def _serialize_messages(self, messages: list[LLMConversationMessage]) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
-        pending_tool_results: list[LLMConversationMessage] = []
+        prepared_images = await self._prepare_request_images(messages)
+        pending_tool_results: list[tuple[LLMConversationMessage, list[LLMImageInput]]] = []
 
         async def _flush_tool_results() -> None:
             nonlocal pending_tool_results
@@ -51,20 +49,20 @@ class GeminiProviderClient(BaseProviderClient):
             serialized.append(
                 {
                     "role": "user",
-                    "parts": self._serialize_function_response_parts(pending_tool_results),
+                    "parts": self._serialize_function_response_parts([item for item, _ in pending_tool_results]),
                 }
             )
             # Gemini requires the complete functionResponse batch to stay in one
             # Content. Ordinary multimodal parts follow as separate user turns.
-            for item in pending_tool_results:
-                image_parts = await self._serialize_tool_result_image_parts(item)
+            for _, image_inputs in pending_tool_results:
+                image_parts = self._serialize_tool_result_image_parts(image_inputs)
                 if image_parts:
                     serialized.append({"role": "user", "parts": image_parts})
             pending_tool_results = []
 
-        for message in messages:
+        for message, image_inputs in zip(messages, prepared_images, strict=True):
             if message.role == "tool":
-                pending_tool_results.append(message)
+                pending_tool_results.append((message, image_inputs))
                 continue
 
             await _flush_tool_results()
@@ -95,7 +93,7 @@ class GeminiProviderClient(BaseProviderClient):
                 serialized.append({"role": "model", "parts": parts or [{"text": ""}]})
                 continue
 
-            serialized.append({"role": "user", "parts": await self._serialize_user_parts(message)})
+            serialized.append({"role": "user", "parts": self._serialize_user_parts(message, image_inputs)})
 
         await _flush_tool_results()
         return serialized
@@ -129,14 +127,10 @@ class GeminiProviderClient(BaseProviderClient):
             parts.append({"functionResponse": function_response})
         return parts
 
-    async def _serialize_tool_result_image_parts(
+    def _serialize_tool_result_image_parts(
         self,
-        tool_result: LLMConversationMessage,
+        image_inputs: list[LLMImageInput],
     ) -> list[dict[str, Any]]:
-        image_inputs = await self._prepare_image_inputs(
-            [],
-            [] if tool_result.is_tool_error else tool_result.inline_images,
-        )
         return [
             {
                 "inline_data": {

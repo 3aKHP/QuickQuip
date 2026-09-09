@@ -116,17 +116,17 @@ def _config(protocol: str) -> ProviderConfig:
 
 
 class _InlineOpenAIClient(FakeOpenAIClient):
-    async def _prepare_image_inputs(self, image_urls, inline_images=None):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
         return await BaseProviderClient._prepare_image_inputs(self, image_urls, inline_images)
 
 
 class _InlineClaudeClient(FakeClaudeClient):
-    async def _prepare_image_inputs(self, image_urls, inline_images=None):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
         return await BaseProviderClient._prepare_image_inputs(self, image_urls, inline_images)
 
 
 class _InlineGeminiClient(FakeGeminiClient):
-    async def _prepare_image_inputs(self, image_urls, inline_images=None):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
         return await BaseProviderClient._prepare_image_inputs(self, image_urls, inline_images)
 
 

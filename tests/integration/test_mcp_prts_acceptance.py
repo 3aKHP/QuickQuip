@@ -18,7 +18,7 @@ pytestmark = pytest.mark.network
 
 
 class _InlineClaudeClient(FakeClaudeClient):
-    async def _prepare_image_inputs(self, image_urls, inline_images=None):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
         return await BaseProviderClient._prepare_image_inputs(self, image_urls, inline_images)
 
 
