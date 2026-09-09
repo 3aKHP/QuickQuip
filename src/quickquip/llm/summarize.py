@@ -315,7 +315,7 @@ async def generate_daily_summary(
             "\n（注：由于消息量较大，上方记录已截取最近部分。）\n" if was_truncated else ""
         )
         return (
-            f"以下是{date_label}的群聊记录（共 {len(messages)} 条消息）：\n"
+            f"以下是{date_label}的群聊记录（共 {ser_stats.messages_in - ser_stats.messages_skipped} 条消息）：\n"
             f"{truncation_note}"
             "=== 聊天记录开始 ===\n"
             f"{chat_log}\n"
@@ -429,7 +429,7 @@ async def generate_period_report(
             ser_stats.repeat_collapses, ser_stats.urls_replaced,
             ser_stats.messages_truncated, ser_stats.bot_lines, ser_stats.messages_skipped,
         )
-        envelope_message_count = len(messages)
+        envelope_message_count = ser_stats.messages_in - ser_stats.messages_skipped
     kind_word = "周报" if period_kind == "weekly" else "月报"
 
     def build_user_content(chat_log: str, was_truncated: bool) -> str:
