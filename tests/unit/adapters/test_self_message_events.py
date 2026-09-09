@@ -2,8 +2,8 @@
 
 钉住的契约：reportSelfMessage 开启后 LLOneBot 以 post_type="message_sent"
 上报自身发言；注册自定义模型后，事件应解析为 GroupMessageSentEvent /
-PrivateMessageSentEvent、get_type() 回报 "message"（on_message 可派发）、
-is_self_message 可识别（user_id == self_id）。
+PrivateMessageSentEvent、get_type() 回报 "message_sent"（只由专用 matcher
+派发）、is_self_message 可识别（user_id == self_id）。
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def test_register_and_parse_group_self_message():
     assert register_self_message_events() is True
     event = Adapter.json_to_event(_group_payload())
     assert isinstance(event, GroupMessageSentEvent)
-    assert event.get_type() == "message"
+    assert event.get_type() == "message_sent"
     assert is_self_message(event)
     assert event.group_id == 10001
     assert "自发言论" in event.get_message().extract_plain_text()
@@ -67,7 +67,7 @@ def test_register_and_parse_private_self_message():
     assert register_self_message_events() is True
     event = Adapter.json_to_event(_private_payload())
     assert isinstance(event, PrivateMessageSentEvent)
-    assert event.get_type() == "message"
+    assert event.get_type() == "message_sent"
     assert is_self_message(event)
 
 
