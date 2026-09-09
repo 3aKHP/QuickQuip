@@ -1,0 +1,31 @@
+name: 功能提案 / Feature or enhancement
+description: 提出新能力或改进 / Propose a capability or improvement
+title: "[Enhancement] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前先搜索既有 issue；对已有 issue 点 👍 即可，不必重复开单。
+  - type: textarea
+    id: motivation
+    attributes:
+      label: 动机 / Motivation
+      description: 这解决什么用户或工作流问题？来自哪类使用场景？
+    validations:
+      required: true
+  - type: textarea
+    id: design-space
+    attributes:
+      label: 方案空间 / Design space
+      description: 考虑过的方向与取舍；为何倾向其中之一（可不填）。
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: 边界与非目标 / Boundaries & non-goals
+      description: 范围之外的内容；不应改变的行为。
+  - type: textarea
+    id: related
+    attributes:
+      label: 关联 / Related
+      description: 相关 issue（#N）、文档或文件锚点、外部参照。
