@@ -91,22 +91,32 @@ async def test_delivery_matrix_all_four_combos(tmp_path: Path, patch_provider_bu
 async def test_delivery_override_false_beats_global_on_and_reset_follows(
     tmp_path: Path, patch_provider_builder
 ):
-    """单域覆盖关优先于全局开；reset 单域只影响该域，另一域覆盖保留。"""
+    """单域覆盖关优先于全局开；reset 单域只清该域，另一域覆盖保留。"""
     service = await _service(tmp_path)
     service.config.runtime.agent_delivery_intermediate_enabled = True
     service.config.runtime.agent_delivery_final_enabled = True
 
+    # 两域写异值覆盖：中间轮显式关、最终轮显式开 → 组合 C
     service.set_chat_agent_delivery_enabled(1001, False, chat_type="group", domain="intermediate")
+    service.set_chat_agent_delivery_enabled(1001, True, chat_type="group", domain="final")
     result, sink = await _run(service, patch_provider_builder, group_id=1001)
-    # 全局双开 + 中间轮覆盖关 = 组合 C
     assert len(sink.deliveries) == 3
     assert result["reply"] == ""
 
+    # reset 只清中间轮：该域回 NULL 跟随全局，最终轮覆盖保留
     service.set_chat_agent_delivery_enabled(1001, None, chat_type="group", domain="intermediate")
     override = service.store.get_group_settings("1001")
     assert override.agent_delivery_intermediate is None
-    assert override.agent_delivery_final is None
+    assert override.agent_delivery_final is True
+    # 同群 resolve：中间轮已跟随全局开（五 Turn 剧本按请求内 assistant 行数计
+    # 轮次，同 scope 复跑必耗尽剧本，reset 生效路径以 resolve 断言钉住）
+    resolved = service.get_chat_settings(1001, chat_type="group")
+    assert resolved.agent_delivery_intermediate_enabled is True
+    assert resolved.agent_delivery_final_enabled is True
+
+    # 行为验证：新群走同样覆盖编排（中间轮关→reset），最终 = 组合 D
+    service.set_chat_agent_delivery_enabled(1003, False, chat_type="group", domain="intermediate")
+    service.set_chat_agent_delivery_enabled(1003, None, chat_type="group", domain="intermediate")
     result2, sink2 = await _run(service, patch_provider_builder, group_id=1003)
-    # 覆盖清空后跟随全局双开 = 组合 D
     assert len(sink2.deliveries) == 7
     assert result2["reply"] == ""

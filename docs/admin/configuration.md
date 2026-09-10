@@ -140,7 +140,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
 | `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按「请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留」推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在 `[[providers]]` 段按 provider 硬覆盖 | `4096` |
 | `agent_delivery_intermediate_enabled` | 中间轮交付的全局默认：开启后工具调用多轮回复中非最终轮的普通正文照常先于工具执行外发；关闭时非最终正文只记录不发送（`suppressed_by_policy`） | `false` |
-| `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息经 sink 外发；关闭时最终正文沿旧单发路径整条发送。两域独立，旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射。各群/私聊会话可用 `/llm delivery interim/final/all …` 或 Web Admin「群设置」按会话覆盖 | `false` |
+| `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息经 sink 外发；关闭时最终正文沿旧单发路径整条发送。两域独立，旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射。各群/私聊会话可用 `/llm delivery intermediate/final/all …` 或 Web Admin「群设置」按会话覆盖 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
 | `reply_chunk_max_chars` | 单段源文本上限，独立于 OneBot 协议报文长度 | `1200` |
 | `reply_send_interval_ms` | 同会话相邻发送开始时间的最小间隔（0-10000） | `800` |

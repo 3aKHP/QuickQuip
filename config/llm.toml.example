@@ -54,7 +54,7 @@ tool_max_calls_per_round = 16
 # 两域独立：intermediate 管非最终轮正文是否照常先于工具执行外发，final 管最终
 # 正文是否按自然段拆分经 sink 外发（关闭时最终正文沿旧单发路径整条发送）。
 # 阈值/上限为 Unicode code point 口径，独立于 OneBot 协议报文长度限制。
-# 各群/私聊会话可用 /llm delivery interim|final|all <on|off|reset> 按会话覆盖。
+# 各群/私聊会话可用 /llm delivery intermediate|final|all <on|off|reset> 按会话覆盖。
 # 旧键 agent_delivery_enabled 仍可读取，未显式配置的新键按旧键值映射。
 # agent_delivery_intermediate_enabled = false
 # agent_delivery_final_enabled = false

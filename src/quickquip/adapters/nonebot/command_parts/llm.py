@@ -1,9 +1,90 @@
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _parse_preset, _parse_resume, _strip_command_name
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, rate_limiter
 from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS
+from quickquip.llm.settings import DeliveryDomain
 from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
+
+
+_DELIVERY_DOMAIN_LABELS = {
+    DeliveryDomain.INTERMEDIATE: "中间轮发送",
+    DeliveryDomain.FINAL: "最终轮分段",
+    DeliveryDomain.ALL: "分段交付",
+}
+
+
+class DeliveryViews(NamedTuple):
+    """status 文案的四个取值：当前值两域 + 全局默认两域。"""
+
+    current_intermediate: str
+    current_final: str
+    default_intermediate: str
+    default_final: str
+
+
+async def _handle_delivery_command(
+    llm_cmd, svc, *, chat_id, chat_type, scope_label, tokens
+) -> None:
+    """`/llm delivery` 三域子命令。
+
+    域 token 与配置/存储同用 intermediate/final/all 一个词根；未匹配的
+    输入原样返回，由调用方继续后续分支（最终落用法提示）。
+    """
+    rest = [token.lower() for token in tokens[1:]]
+    try:
+        domain = DeliveryDomain(rest[0]) if rest else None
+    except ValueError:
+        domain = None
+    action = rest[1] if len(rest) >= 2 else ""
+
+    def _views() -> DeliveryViews:
+        settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
+        return DeliveryViews(
+            "开" if settings.agent_delivery_intermediate_enabled else "关",
+            "开" if settings.agent_delivery_final_enabled else "关",
+            "开" if svc.config.runtime.agent_delivery_intermediate_enabled else "关",
+            "开" if svc.config.runtime.agent_delivery_final_enabled else "关",
+        )
+
+    def _domain_default(scope_domain: DeliveryDomain) -> str:
+        views = _views()
+        if scope_domain is DeliveryDomain.INTERMEDIATE:
+            return views.default_intermediate
+        if scope_domain is DeliveryDomain.FINAL:
+            return views.default_final
+        return f"中间轮 {views.default_intermediate} / 最终轮 {views.default_final}"
+
+    if domain is not None and action == "on":
+        svc.set_chat_agent_delivery_enabled(chat_id, True, chat_type=chat_type, domain=domain)
+        await llm_cmd.finish(f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已开启")
+    if domain is not None and action == "off":
+        svc.set_chat_agent_delivery_enabled(chat_id, False, chat_type=chat_type, domain=domain)
+        await llm_cmd.finish(f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已关闭")
+    if domain is not None and action == "reset":
+        svc.set_chat_agent_delivery_enabled(chat_id, None, chat_type=chat_type, domain=domain)
+        await llm_cmd.finish(
+            f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已跟随全局默认（当前：{_domain_default(domain)}）"
+        )
+    if not rest or rest == ["status"] or (domain is not None and action == "status"):
+        views = _views()
+        # 概览与单域显式互斥，不依赖 finish 的终止副作用兜底控制流。
+        if domain is None or domain is DeliveryDomain.ALL:
+            await llm_cmd.finish(
+                f"{scope_label}分段交付：中间轮 {views.current_intermediate}（默认 {views.default_intermediate}）"
+                f" / 最终轮 {views.current_final}（默认 {views.default_final}）"
+            )
+        else:
+            current = (
+                views.current_intermediate
+                if domain is DeliveryDomain.INTERMEDIATE
+                else views.current_final
+            )
+            await llm_cmd.finish(
+                f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}：{current}（全局默认 {_domain_default(domain)}）"
+            )
 
 
 def register_llm_commands(on_command, Message, MessageSegment) -> None:
@@ -214,52 +295,11 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 )
 
         if tokens[:1] == ["delivery"]:
-            rest = [token.lower() for token in tokens[1:]]
-            domain_labels = {"interim": "中间轮发送", "final": "最终轮分段", "all": "分段交付"}
-            domain = rest[0] if rest and rest[0] in domain_labels else ""
-            action = rest[1] if len(rest) >= 2 else ""
-            # 命令域 token（interim）到 service 写入域（intermediate）的映射
-            service_domain = {"interim": "intermediate", "final": "final", "all": "all"}.get(domain, "")
-
-            def _delivery_views():
-                settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
-                return (
-                    "开" if settings.agent_delivery_intermediate_enabled else "关",
-                    "开" if settings.agent_delivery_final_enabled else "关",
-                    "开" if svc.config.runtime.agent_delivery_intermediate_enabled else "关",
-                    "开" if svc.config.runtime.agent_delivery_final_enabled else "关",
-                )
-
-            def _domain_default(domain: str) -> str:
-                _, _, default_intermediate, default_final = _delivery_views()
-                if domain == "interim":
-                    return default_intermediate
-                if domain == "final":
-                    return default_final
-                return f"中间轮 {default_intermediate} / 最终轮 {default_final}"
-
-            if domain and action == "on":
-                svc.set_chat_agent_delivery_enabled(chat_id, True, chat_type=chat_type, domain=service_domain)
-                await llm_cmd.finish(f"{scope_label}{domain_labels[domain]}已开启")
-            if domain and action == "off":
-                svc.set_chat_agent_delivery_enabled(chat_id, False, chat_type=chat_type, domain=service_domain)
-                await llm_cmd.finish(f"{scope_label}{domain_labels[domain]}已关闭")
-            if domain and action == "reset":
-                svc.set_chat_agent_delivery_enabled(chat_id, None, chat_type=chat_type, domain=service_domain)
-                await llm_cmd.finish(
-                    f"{scope_label}{domain_labels[domain]}已跟随全局默认（当前：{_domain_default(domain)}）"
-                )
-            if not rest or rest == ["status"] or (domain and action == "status"):
-                current_intermediate, current_final, default_intermediate, default_final = _delivery_views()
-                if domain in ("", "all"):
-                    await llm_cmd.finish(
-                        f"{scope_label}分段交付：中间轮 {current_intermediate}（默认 {default_intermediate}）"
-                        f" / 最终轮 {current_final}（默认 {default_final}）"
-                    )
-                current = current_intermediate if domain == "interim" else current_final
-                await llm_cmd.finish(
-                    f"{scope_label}{domain_labels[domain]}：{current}（全局默认 {_domain_default(domain)}）"
-                )
+            await _handle_delivery_command(
+                llm_cmd, svc,
+                chat_id=chat_id, chat_type=chat_type,
+                scope_label=scope_label, tokens=tokens,
+            )
 
         if tokens[:1] == ["context_limit"] and len(tokens) >= 2:
             value = tokens[1].lower()
@@ -282,7 +322,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|auto_memory on|off|reset|status|delivery interim|final|all <on|off|reset>|delivery status|"
+            "memory status|memory on|memory off|auto_memory on|off|reset|status|delivery intermediate|final|all <on|off|reset>|delivery status|"
             "context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
 

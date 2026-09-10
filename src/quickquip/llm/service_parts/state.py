@@ -3,6 +3,7 @@ from __future__ import annotations
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
+from quickquip.llm.settings import DeliveryDomain
 from quickquip.llm.store_parts.agent_records import HistoryMutation
 
 
@@ -133,22 +134,21 @@ class StateMixin:
         chat_id: int | str,
         enabled: bool | None,
         chat_type: str = "group",
-        domain: str = "all",
+        domain: DeliveryDomain = DeliveryDomain.ALL,
     ) -> None:
-        """按域写交付开关覆盖：intermediate / final / all（all 同时写两域）。"""
+        """按域写交付开关覆盖；非法域由 DeliveryDomain 枚举在解析期拒绝。"""
         value = None if enabled is None else int(enabled)
-        if domain == "intermediate":
-            self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate=value)
-        elif domain == "final":
-            self._update_chat_settings(chat_id, chat_type, agent_delivery_final=value)
-        elif domain == "all":
-            self._update_chat_settings(
-                chat_id, chat_type,
-                agent_delivery_intermediate=value,
-                agent_delivery_final=value,
-            )
-        else:
-            raise ValueError(f"未知交付开关域：{domain!r}")
+        match domain:
+            case DeliveryDomain.INTERMEDIATE:
+                self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate=value)
+            case DeliveryDomain.FINAL:
+                self._update_chat_settings(chat_id, chat_type, agent_delivery_final=value)
+            case DeliveryDomain.ALL:
+                self._update_chat_settings(
+                    chat_id, chat_type,
+                    agent_delivery_intermediate=value,
+                    agent_delivery_final=value,
+                )
 
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)

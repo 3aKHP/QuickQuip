@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
+
+
+class DeliveryDomain(enum.StrEnum):
+    """交付开关的写入域：中间轮正文 / 最终轮分段 / 两域同写。"""
+
+    INTERMEDIATE = "intermediate"
+    FINAL = "final"
+    ALL = "all"
 
 
 @dataclass(slots=True)

@@ -190,21 +190,24 @@ class _StoreBase:
             if "agent_delivery_enabled" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_enabled INTEGER")
             # 交付开关拆分（中间轮/最终轮）：加列时一次性把旧单开关值回填进
-            # 两列。回填只与加列绑定执行——若挂在启动路径无条件重跑，会与
-            # 后续 reset（列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择。
-            added_delivery_split_columns = False
+            # 两列。回填只与各自加列绑定执行——若挂在启动路径无条件重跑，会与
+            # 后续 reset（列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择；
+            # 按列独立门控，避免半迁移状态下跨列覆写另一列的已有取值。
             if "agent_delivery_intermediate" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_intermediate INTEGER")
-                added_delivery_split_columns = True
-            if "agent_delivery_final" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_final INTEGER")
-                added_delivery_split_columns = True
-            if added_delivery_split_columns:
                 conn.execute(
                     """
                     UPDATE group_settings
-                    SET agent_delivery_intermediate = agent_delivery_enabled,
-                        agent_delivery_final = agent_delivery_enabled
+                    SET agent_delivery_intermediate = agent_delivery_enabled
+                    WHERE agent_delivery_enabled IS NOT NULL
+                    """
+                )
+            if "agent_delivery_final" not in existing_columns:
+                conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_final INTEGER")
+                conn.execute(
+                    """
+                    UPDATE group_settings
+                    SET agent_delivery_final = agent_delivery_enabled
                     WHERE agent_delivery_enabled IS NOT NULL
                     """
                 )
