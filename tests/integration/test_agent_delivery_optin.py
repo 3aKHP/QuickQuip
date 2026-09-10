@@ -106,8 +106,8 @@ async def test_delivery_override_false_beats_global_on_and_reset_follows(
     # reset 只清中间轮：该域回 NULL 跟随全局，最终轮覆盖保留
     service.set_chat_agent_delivery_enabled(1001, None, chat_type="group", domain="intermediate")
     override = service.store.get_group_settings("1001")
-    assert override.agent_delivery_intermediate is None
-    assert override.agent_delivery_final is True
+    assert override.agent_delivery_intermediate_enabled is None
+    assert override.agent_delivery_final_enabled is True
     # 同群 resolve：中间轮已跟随全局开（五 Turn 剧本按请求内 assistant 行数计
     # 轮次，同 scope 复跑必耗尽剧本，reset 生效路径以 resolve 断言钉住）
     resolved = service.get_chat_settings(1001, chat_type="group")

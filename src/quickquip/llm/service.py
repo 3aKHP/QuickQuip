@@ -696,8 +696,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions: list[ImageDescription] | None,
         delivery_sink=None,
         trigger_kind: TriggerKind | None = None,
-        agent_delivery_intermediate: bool,
-        agent_delivery_final: bool,
+        agent_delivery_intermediate_enabled: bool,
+        agent_delivery_final_enabled: bool,
     ):
         """创建 Loop 与 user 触发行（§5.3.1），返回 TurnRecorder。
 
@@ -755,8 +755,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             store=self.store,
             handle=handle,
             config=RecorderConfig(
-                agent_delivery_intermediate_enabled=agent_delivery_intermediate,
-                agent_delivery_final_enabled=agent_delivery_final,
+                agent_delivery_intermediate_enabled=agent_delivery_intermediate_enabled,
+                agent_delivery_final_enabled=agent_delivery_final_enabled,
                 reply_split_threshold_chars=runtime.reply_split_threshold_chars,
                 reply_chunk_max_chars=runtime.reply_chunk_max_chars,
                 reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
@@ -1546,8 +1546,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
                 delivery_sink=delivery_sink,
                 trigger_kind=trigger_kind,
-                agent_delivery_intermediate=settings.agent_delivery_intermediate_enabled,
-                agent_delivery_final=settings.agent_delivery_final_enabled,
+                agent_delivery_intermediate_enabled=settings.agent_delivery_intermediate_enabled,
+                agent_delivery_final_enabled=settings.agent_delivery_final_enabled,
             )
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),

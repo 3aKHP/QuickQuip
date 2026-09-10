@@ -58,8 +58,8 @@ class GroupSettingsOverride:
     enabled: bool | None = None
     memory_enabled: bool | None = None
     auto_memory_enabled: bool | None = None
-    agent_delivery_intermediate: bool | None = None
-    agent_delivery_final: bool | None = None
+    agent_delivery_intermediate_enabled: bool | None = None
+    agent_delivery_final_enabled: bool | None = None
     provider_id: str | None = None
     model: str | None = None
     persona_id: str | None = None
@@ -76,7 +76,7 @@ def _backfill_delivery_split_columns(conn: sqlite3.Connection, existing_columns:
     （列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择；按列独立门控，
     半迁移状态下不跨列覆写另一列的已有取值。
     """
-    for column in ("agent_delivery_intermediate", "agent_delivery_final"):
+    for column in ("agent_delivery_intermediate_enabled", "agent_delivery_final_enabled"):
         if column in existing_columns:
             continue
         conn.execute(f"ALTER TABLE group_settings ADD COLUMN {column} INTEGER")
@@ -135,8 +135,8 @@ class _StoreBase:
                     memory_enabled INTEGER,
                     auto_memory_enabled INTEGER,
                     agent_delivery_enabled INTEGER,
-                    agent_delivery_intermediate INTEGER,
-                    agent_delivery_final INTEGER,
+                    agent_delivery_intermediate_enabled INTEGER,
+                    agent_delivery_final_enabled INTEGER,
                     provider_id TEXT,
                     model TEXT,
                     persona_id TEXT,

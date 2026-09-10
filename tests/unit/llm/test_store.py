@@ -304,19 +304,19 @@ def test_group_settings_bool_conversion(store: LLMStore) -> None:
 
 
 def test_group_settings_agent_delivery_roundtrip(store: LLMStore) -> None:
-    store.update_group_settings(3003, agent_delivery_intermediate=True)
+    store.update_group_settings(3003, agent_delivery_intermediate_enabled=True)
     override = store.get_group_settings(3003)
-    assert override.agent_delivery_intermediate is True
-    assert override.agent_delivery_final is None
-    store.update_group_settings(3003, agent_delivery_final=False)
+    assert override.agent_delivery_intermediate_enabled is True
+    assert override.agent_delivery_final_enabled is None
+    store.update_group_settings(3003, agent_delivery_final_enabled=False)
     override = store.get_group_settings(3003)
-    assert override.agent_delivery_intermediate is True
-    assert override.agent_delivery_final is False
+    assert override.agent_delivery_intermediate_enabled is True
+    assert override.agent_delivery_final_enabled is False
     # 显式 None 清空单域覆盖（另一域不受影响，回到跟随全局默认）
-    store.update_group_settings(3003, agent_delivery_intermediate=None)
+    store.update_group_settings(3003, agent_delivery_intermediate_enabled=None)
     override = store.get_group_settings(3003)
-    assert override.agent_delivery_intermediate is None
-    assert override.agent_delivery_final is False
+    assert override.agent_delivery_intermediate_enabled is None
+    assert override.agent_delivery_final_enabled is False
 
 
 def test_group_settings_agent_delivery_split_migration(tmp_path: Path) -> None:
@@ -352,18 +352,18 @@ def test_group_settings_agent_delivery_split_migration(tmp_path: Path) -> None:
 
     store = LLMStore(db_path)
     # 旧值 1/0 → 两域按同值回填（显式开关意图保留）；旧 NULL → 不回填
-    assert store.get_group_settings("9001").agent_delivery_intermediate is True
-    assert store.get_group_settings("9001").agent_delivery_final is True
-    assert store.get_group_settings("9002").agent_delivery_intermediate is False
-    assert store.get_group_settings("9002").agent_delivery_final is False
-    assert store.get_group_settings("9003").agent_delivery_intermediate is None
-    assert store.get_group_settings("9003").agent_delivery_final is None
+    assert store.get_group_settings("9001").agent_delivery_intermediate_enabled is True
+    assert store.get_group_settings("9001").agent_delivery_final_enabled is True
+    assert store.get_group_settings("9002").agent_delivery_intermediate_enabled is False
+    assert store.get_group_settings("9002").agent_delivery_final_enabled is False
+    assert store.get_group_settings("9003").agent_delivery_intermediate_enabled is None
+    assert store.get_group_settings("9003").agent_delivery_final_enabled is None
 
     # 迁移后 reset 一域为 NULL：旧列值仍在，重启不得把它再搬回来
-    store.update_group_settings("9001", agent_delivery_intermediate=None)
+    store.update_group_settings("9001", agent_delivery_intermediate_enabled=None)
     store_again = LLMStore(db_path)
-    assert store_again.get_group_settings("9001").agent_delivery_intermediate is None
-    assert store_again.get_group_settings("9001").agent_delivery_final is True
+    assert store_again.get_group_settings("9001").agent_delivery_intermediate_enabled is None
+    assert store_again.get_group_settings("9001").agent_delivery_final_enabled is True
 
 
 # ── _unavailable 守卫路径 ─────────────────────────────────────────────────────
@@ -419,7 +419,7 @@ def test_group_settings_agent_delivery_half_migration(tmp_path: Path) -> None:
             memory_enabled INTEGER,
             auto_memory_enabled INTEGER,
             agent_delivery_enabled INTEGER,
-            agent_delivery_intermediate INTEGER,
+            agent_delivery_intermediate_enabled INTEGER,
             provider_id TEXT,
             model TEXT,
             persona_id TEXT,
@@ -428,7 +428,7 @@ def test_group_settings_agent_delivery_half_migration(tmp_path: Path) -> None:
             allow_at INTEGER,
             updated_at TEXT NOT NULL
         );
-        INSERT INTO group_settings (group_id, agent_delivery_enabled, agent_delivery_intermediate, updated_at)
+        INSERT INTO group_settings (group_id, agent_delivery_enabled, agent_delivery_intermediate_enabled, updated_at)
         VALUES ('9101', 1, 0, '2026-09-11T00:00:00+00:00');
         """
     )
@@ -438,5 +438,5 @@ def test_group_settings_agent_delivery_half_migration(tmp_path: Path) -> None:
     store = LLMStore(db_path)
     override = store.get_group_settings("9101")
     # intermediate 列既有值（0，含刻意 reset 语义）不被 final 的加列回填覆写
-    assert override.agent_delivery_intermediate is False
-    assert override.agent_delivery_final is True
+    assert override.agent_delivery_intermediate_enabled is False
+    assert override.agent_delivery_final_enabled is True

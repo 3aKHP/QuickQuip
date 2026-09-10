@@ -47,13 +47,13 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
             else config.runtime.auto_memory_enabled
         ),
         agent_delivery_intermediate_enabled=(
-            overrides.agent_delivery_intermediate
-            if overrides.agent_delivery_intermediate is not None
+            overrides.agent_delivery_intermediate_enabled
+            if overrides.agent_delivery_intermediate_enabled is not None
             else config.runtime.agent_delivery_intermediate_enabled
         ),
         agent_delivery_final_enabled=(
-            overrides.agent_delivery_final
-            if overrides.agent_delivery_final is not None
+            overrides.agent_delivery_final_enabled
+            if overrides.agent_delivery_final_enabled is not None
             else config.runtime.agent_delivery_final_enabled
         ),
         provider_id=provider_id,

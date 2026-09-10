@@ -134,21 +134,21 @@ class StateMixin:
         chat_id: int | str,
         enabled: bool | None,
         chat_type: str = "group",
-        domain: DeliveryDomain = DeliveryDomain.ALL,
+        domain: DeliveryDomain | str = DeliveryDomain.ALL,
     ) -> None:
-        """按域写交付开关覆盖；域入参在此归一为枚举，非法值抛 ValueError。"""
+        """按域写交付开关覆盖；域入参接受枚举或其字符串值，非法值抛 ValueError。"""
         domain = DeliveryDomain(domain)
         value = None if enabled is None else int(enabled)
         match domain:
             case DeliveryDomain.INTERMEDIATE:
-                self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate=value)
+                self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate_enabled=value)
             case DeliveryDomain.FINAL:
-                self._update_chat_settings(chat_id, chat_type, agent_delivery_final=value)
+                self._update_chat_settings(chat_id, chat_type, agent_delivery_final_enabled=value)
             case DeliveryDomain.ALL:
                 self._update_chat_settings(
                     chat_id, chat_type,
-                    agent_delivery_intermediate=value,
-                    agent_delivery_final=value,
+                    agent_delivery_intermediate_enabled=value,
+                    agent_delivery_final_enabled=value,
                 )
 
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:

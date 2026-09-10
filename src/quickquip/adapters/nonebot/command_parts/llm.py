@@ -25,51 +25,53 @@ class DeliveryViews(NamedTuple):
     default_final: str
 
 
+def _delivery_views(svc, chat_id, chat_type: str) -> DeliveryViews:
+    settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
+    return DeliveryViews(
+        "开" if settings.agent_delivery_intermediate_enabled else "关",
+        "开" if settings.agent_delivery_final_enabled else "关",
+        "开" if svc.config.runtime.agent_delivery_intermediate_enabled else "关",
+        "开" if svc.config.runtime.agent_delivery_final_enabled else "关",
+    )
+
+
 async def _handle_delivery_command(
-    llm_cmd, svc, *, chat_id, chat_type, scope_label, tokens
+    llm_cmd, svc, *, chat_id, chat_type, scope_label, sub_tokens
 ) -> None:
-    """`/llm delivery` 三域子命令。
+    """`/llm delivery` 三域子命令（``sub_tokens`` 已剥去 delivery 动词）。
 
     域 token 与配置/存储同用 intermediate/final/all 一个词根；未匹配的
     输入原样返回，由调用方继续后续分支（最终落用法提示）。
     """
-    rest = [token.lower() for token in tokens[1:]]
+    rest = [token.lower() for token in sub_tokens]
     try:
         domain = DeliveryDomain(rest[0]) if rest else None
     except ValueError:
         domain = None
     action = rest[1] if len(rest) >= 2 else ""
-
-    def _views() -> DeliveryViews:
-        settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
-        return DeliveryViews(
-            "开" if settings.agent_delivery_intermediate_enabled else "关",
-            "开" if settings.agent_delivery_final_enabled else "关",
-            "开" if svc.config.runtime.agent_delivery_intermediate_enabled else "关",
-            "开" if svc.config.runtime.agent_delivery_final_enabled else "关",
-        )
+    # 单次取值快照，后续文案全部复用（避免重复读库）
+    views = _delivery_views(svc, chat_id, chat_type)
 
     def _domain_default(scope_domain: DeliveryDomain) -> str:
-        views = _views()
         if scope_domain is DeliveryDomain.INTERMEDIATE:
             return views.default_intermediate
         if scope_domain is DeliveryDomain.FINAL:
             return views.default_final
         return f"中间轮 {views.default_intermediate} / 最终轮 {views.default_final}"
 
-    if domain is not None and action == "on":
-        svc.set_chat_agent_delivery_enabled(chat_id, True, chat_type=chat_type, domain=domain)
-        await llm_cmd.finish(f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已开启")
-    if domain is not None and action == "off":
-        svc.set_chat_agent_delivery_enabled(chat_id, False, chat_type=chat_type, domain=domain)
-        await llm_cmd.finish(f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已关闭")
-    if domain is not None and action == "reset":
-        svc.set_chat_agent_delivery_enabled(chat_id, None, chat_type=chat_type, domain=domain)
-        await llm_cmd.finish(
-            f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已跟随全局默认（当前：{_domain_default(domain)}）"
-        )
+    # 动作互斥分发：一次命令只走一个动作，分支内自证，不依赖 finish 的
+    # 终止副作用。
+    if domain is not None and action in {"on", "off", "reset"}:
+        value = {"on": True, "off": False, "reset": None}[action]
+        svc.set_chat_agent_delivery_enabled(chat_id, value, chat_type=chat_type, domain=domain)
+        if action == "reset":
+            await llm_cmd.finish(
+                f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}已跟随全局默认"
+                f"（当前：{_domain_default(domain)}）"
+            )
+        suffix = "已开启" if value else "已关闭"
+        await llm_cmd.finish(f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}{suffix}")
     if not rest or rest == ["status"] or (domain is not None and action == "status"):
-        views = _views()
         # 概览与单域显式互斥，不依赖 finish 的终止副作用兜底控制流。
         if domain is None or domain is DeliveryDomain.ALL:
             await llm_cmd.finish(
@@ -298,7 +300,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             await _handle_delivery_command(
                 llm_cmd, svc,
                 chat_id=chat_id, chat_type=chat_type,
-                scope_label=scope_label, tokens=tokens,
+                scope_label=scope_label, sub_tokens=tokens[1:],
             )
 
         if tokens[:1] == ["context_limit"] and len(tokens) >= 2:

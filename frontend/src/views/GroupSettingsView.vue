@@ -120,16 +120,16 @@
               </div>
               <div class="field">
                 <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 llm.toml 的 agent_delivery_intermediate_enabled 配置。" /></label>
-                <select v-model="draftTriState.agent_delivery_intermediate">
-                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate') }}）</option>
+                <select v-model="draftTriState.agent_delivery_intermediate_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate_enabled') }}）</option>
                   <option :value="true">开</option>
                   <option :value="false">关</option>
                 </select>
               </div>
               <div class="field">
                 <label>最终轮分段<UiInfoTip text="开启后该会话的最终回复按自然段拆成多条消息发出；关闭时最终回复合并为一条。全局默认在 llm.toml 的 agent_delivery_final_enabled 配置。" /></label>
-                <select v-model="draftTriState.agent_delivery_final">
-                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_final') }}）</option>
+                <select v-model="draftTriState.agent_delivery_final_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_final_enabled') }}）</option>
                   <option :value="true">开</option>
                   <option :value="false">关</option>
                 </select>
