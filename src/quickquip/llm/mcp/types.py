@@ -411,13 +411,23 @@ def _format_tool_result(payload: dict[str, Any]) -> MCPToolCallResult:
                     MCPResultDiagnostic(code="invalid-content-item", content_index=index)
                 )
                 continue
+            mime_type = _mime_type_from(resource)
+            text = resource.get("text")
+            # 内联文本 + 文本族 MIME 的资源有界交付（如 GitHub MCP 的
+            # get_file_contents 文件正文）；blob / 非文本 MIME / 无正文维持扣留。
+            if isinstance(text, str) and text.strip() and _resource_mime_deliverable(mime_type):
+                body = text.strip()
+                if len(body) > _MAX_RESOURCE_TEXT_CHARS:
+                    body = body[:_MAX_RESOURCE_TEXT_CHARS].rstrip() + _RESOURCE_TRUNCATION_MARKER
+                result.text.append(body)
+                continue
             result.deferred.append(
                 MCPDeferredContentCandidate(
                     kind="resource",
                     content_index=index,
-                    mime_type=_mime_type_from(resource),
+                    mime_type=mime_type,
                     scheme=_uri_scheme(resource.get("uri")),
-                    has_text=isinstance(resource.get("text"), str),
+                    has_text=isinstance(text, str),
                     has_blob=isinstance(resource.get("blob"), str),
                 )
             )
@@ -459,12 +469,35 @@ _SUPPORTED_IMAGE_MIME_TYPES = frozenset({
     "image/gif",
     "image/webp",
 })
+
+
 _IMAGE_FORMAT_MIME_TYPES = {
     "PNG": "image/png",
     "JPEG": "image/jpeg",
     "GIF": "image/gif",
     "WEBP": "image/webp",
 }
+
+# 文本族 application 类型：内联 text 资源的交付白名单（text/* 前缀另判，
+# MIME 缺省视为文本）。白名单外的 MIME 即使带内联 text 也扣留。
+_DELIVERABLE_RESOURCE_MIME_TYPES = frozenset({
+    "application/json",
+    "application/xml",
+    "application/yaml",
+    "application/x-yaml",
+    "application/toml",
+    "application/javascript",
+})
+_MAX_RESOURCE_TEXT_CHARS = 60_000
+_RESOURCE_TRUNCATION_MARKER = "\n…[MCP resource 正文超长，已截断]"
+
+
+def _resource_mime_deliverable(mime_type: str) -> bool:
+    lowered = mime_type.lower()
+    if not lowered or lowered.startswith("text/"):
+        return True
+    return lowered in _DELIVERABLE_RESOURCE_MIME_TYPES
+
 _MAX_INLINE_IMAGE_BYTES = 5 * 1024 * 1024
 
 

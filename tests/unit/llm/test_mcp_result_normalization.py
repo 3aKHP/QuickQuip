@@ -49,8 +49,7 @@ def test_structured_content_preserves_existing_text_fallback_behavior():
         (
             {"content": [{"type": "resource", "resource": {
                 "uri": f"https://example.test/data?token={RESOURCE_QUERY_SENTINEL}",
-                "text": RESOURCE_BODY_SENTINEL,
-                "mimeType": "text/plain",
+                "blob": RESOURCE_BODY_SENTINEL,
             }}]},
             "1 个 resource 项",
         ),
@@ -123,3 +122,107 @@ def test_error_results_use_the_same_safe_normalization(payload):
     assert BASE64_SENTINEL not in result.content
     assert RESOURCE_QUERY_SENTINEL not in result.content
     assert RESOURCE_BODY_SENTINEL not in result.content
+
+
+@pytest.mark.parametrize("mime_type", ["text/plain", "application/json", "application/xml", ""])
+def test_inline_text_resource_delivered_for_text_family_mimes(mime_type):
+    """文本族 MIME（含缺省）的内联正文交付进文本管线，URI query 不随之渲染。"""
+    resource = {
+        "uri": f"https://example.test/file.py?token={RESOURCE_QUERY_SENTINEL}",
+        "text": RESOURCE_BODY_SENTINEL,
+    }
+    if mime_type:
+        resource["mimeType"] = mime_type
+    result = _format_tool_result({"content": [{"type": "resource", "resource": resource}]})
+
+    assert result.text == [RESOURCE_BODY_SENTINEL]
+    assert result.deferred == []
+    assert "resource 项" not in result.content
+    assert RESOURCE_QUERY_SENTINEL not in result.content
+
+
+def test_resource_text_withheld_for_non_text_mime():
+    """非文本 MIME（image/png）即使带内联 text 也扣留。"""
+    result = _format_tool_result(
+        {"content": [{"type": "resource", "resource": {
+            "uri": "https://example.test/pic.png",
+            "text": RESOURCE_BODY_SENTINEL,
+            "mimeType": "image/png",
+        }}]}
+    )
+
+    assert result.text == []
+    assert len(result.deferred) == 1
+    assert result.deferred[0].has_text is True
+    assert "1 个 resource 项" in result.content
+    assert RESOURCE_BODY_SENTINEL not in result.content
+
+
+def test_oversized_resource_text_truncated_with_marker():
+    """超长内联正文截断到上限并附固定标记。"""
+    from quickquip.llm.mcp.types import _MAX_RESOURCE_TEXT_CHARS
+
+    body = "x" * (_MAX_RESOURCE_TEXT_CHARS + 500)
+    result = _format_tool_result(
+        {"content": [{"type": "resource", "resource": {
+            "uri": "https://example.test/big.txt", "text": body, "mimeType": "text/plain",
+        }}]}
+    )
+
+    assert len(result.text) == 1
+    assert result.text[0].startswith("x" * 100)
+    assert "已截断" in result.text[0]
+    assert len(result.text[0]) <= _MAX_RESOURCE_TEXT_CHARS + 40
+
+
+def test_whitespace_resource_text_treated_as_absent():
+    """纯空白内联正文视为无正文，按扣留处理。"""
+    result = _format_tool_result(
+        {"content": [{"type": "resource", "resource": {
+            "uri": "https://example.test/blank.txt", "text": " \n ", "mimeType": "text/plain",
+        }}]}
+    )
+
+    assert result.text == []
+    assert len(result.deferred) == 1
+    assert "1 个 resource 项" in result.content
+
+
+def test_error_result_still_delivers_text_resource_body():
+    """错误结果（isError）下的内联文本资源正文同样交付，blob 仍扣留。"""
+    result = _format_tool_result(
+        {"isError": True, "content": [
+            {"type": "resource", "resource": {
+                "uri": "https://example.test/err.txt",
+                "text": "partial body",
+                "mimeType": "text/plain",
+            }},
+            {"type": "resource", "resource": {
+                "uri": "https://example.test/err.bin", "blob": BASE64_SENTINEL,
+            }},
+        ]}
+    )
+
+    assert result.is_error is True
+    assert result.text == ["partial body"]
+    assert len(result.deferred) == 1
+    assert "1 个 resource 项" in result.content
+    assert BASE64_SENTINEL not in result.content
+
+
+@pytest.mark.parametrize(("overflow", "expect_marker"), [(0, False), (1, True)])
+def test_resource_truncation_boundary_is_exact(overflow, expect_marker):
+    """60,000 整不截断；60,001 起截断并附标记。"""
+    from quickquip.llm.mcp.types import _MAX_RESOURCE_TEXT_CHARS
+
+    body = "y" * (_MAX_RESOURCE_TEXT_CHARS + overflow)
+    result = _format_tool_result(
+        {"content": [{"type": "resource", "resource": {
+            "uri": "https://example.test/b.txt", "text": body, "mimeType": "text/plain",
+        }}]}
+    )
+
+    assert len(result.text) == 1
+    assert ("已截断" in result.text[0]) is expect_marker
+    if not expect_marker:
+        assert result.text[0] == body
