@@ -35,10 +35,10 @@
 
       <!-- Top stat cards -->
       <div class="dash-cards">
-        <UiStatCard label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" />
-        <UiStatCard label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" />
-        <UiStatCard label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" />
-        <UiStatCard label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" />
+        <UiStatCard label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" tip="有过消息统计记录的群数量（自统计开始累计）；机器人自身发言不计入，也不等于机器人当前所在的全部群。" />
+        <UiStatCard label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" tip="各群成员消息数合计，机器人自己的回复不计；自统计开始累计、无时间窗口，重启不清零。" />
+        <UiStatCard label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" tip="统计中出现过的不同发言者数，同一 QQ 号跨群只计一次。" />
+        <UiStatCard label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" tip="游戏经济中建有金币账户的用户数（按群开户，同一 QQ 在两个群算两个）；副标题为全部群的金币余额合计。" />
       </div>
 
       <!-- Row 2: rankings -->
@@ -59,7 +59,7 @@
         </UiCard>
 
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title section-title">规则触发 Top 5</h3>
+          <h3 class="dash-card-title section-title">规则触发 Top 5<UiInfoTip text="机器人各类回复规则的触发次数：chat_rules.toml 关键词/复读等规则、LLM 对话触发（llm_chat）、唤醒规则与无聊主动搭话（awakening_boredom）均计入。" /></h3>
           <div v-if="data.ruleTriggers.length" class="mini-bar-list">
             <div v-for="(r, i) in data.ruleTriggers" :key="r.rule" class="mini-bar-row">
               <span class="mini-bar-rank">{{ i + 1 }}</span>
@@ -74,7 +74,7 @@
       <!-- Row 3: cron + LLM -->
       <div class="dash-row">
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title section-title">调度器</h3>
+          <h3 class="dash-card-title section-title">调度器<UiInfoTip text="定时任务（定时消息、节日问候、日报/简报生成等）最近一次执行的状态；「异常」表示最近一次运行报错，详情见调度页。" /></h3>
           <div class="cron-summary">
             <div class="cron-item">
               <UiTag :variant="data.cronJobs.total > 0 ? 'success' : 'info'" size="sm">{{ data.cronJobs.total }} 个任务</UiTag>
@@ -91,7 +91,7 @@
         </UiCard>
 
         <UiCard padding="md" shadow="sm" class="dash-half">
-          <h3 class="dash-card-title section-title">LLM 对话</h3>
+          <h3 class="dash-card-title section-title">LLM 对话<UiInfoTip text="llm.db 会话存档中的消息总条数（群聊/私聊/已归档会话合计，用户与机器人轮次都计入），右侧为最近一条的时间。" /></h3>
           <div class="cron-summary">
             <span class="llm-count">{{ fmt(data.llmConversations.count) }}</span>
             <span class="muted">条消息</span>
@@ -112,6 +112,7 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiStatCard from '../components/ui/UiStatCard.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchDashboardData, type DashboardData } from '../api/dashboard'
 import { NAV_ITEMS, NAV_SECTIONS } from '../config/nav'
 

@@ -31,7 +31,7 @@
           :class="{ active: c.key === currentKey }"
           @click="switchTo(c.key)"
         >
-          <span class="config-item__label">{{ c.label }}</span>
+          <span class="config-item__label">{{ c.label }} <UiInfoTip v-if="c.description" :text="c.description" /></span>
           <span class="config-item__file">{{ c.filename }}</span>
           <span v-if="c.missing" class="config-item__flag">缺失</span>
         </button>
@@ -64,7 +64,7 @@
 
       <aside class="config-side">
         <div class="side-card">
-          <h4>保存说明</h4>
+          <h4>保存说明 <UiInfoTip text="保存后的生效方式分三档：awakening.toml、chat_rules.toml 保存后自动重载；llm.toml 需到诊断页点「重载 LLM」或群内 /llm reload（会触发 MCP 全量重连，故不自动做）；generation.toml、games.toml、niuniu_text*.toml 无热重载机制，需重启 bot。" /></h4>
           <p>配置文件会直接写回仓库内的常规 TOML 文件。敏感词表等高敏文件只在服务器本地维护。</p>
         </div>
         <div class="side-card">
@@ -90,10 +90,12 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listConfigs, fetchConfig, saveConfig } from '../api/config'
+import type { ConfigListItem } from '../api/config'
 import { toast } from '../toast'
 
-const configs = ref<any[]>([])
+const configs = ref<ConfigListItem[]>([])
 const listError = ref<string | null>(null)
 const currentKey = ref('')
 const loaded = ref(false)

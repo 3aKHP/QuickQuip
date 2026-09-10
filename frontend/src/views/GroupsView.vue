@@ -4,7 +4,7 @@
     <p v-if="error" class="error">{{ error }}</p>
     <UiLoading v-else-if="!loaded" />
     <UiCard v-else padding="md" shadow="sm" accent="primary">
-      <UiTabs v-model="activeTab" :tabs="typeTabs" class="groups-tabs" />
+      <UiTabs v-model="activeTab" :tabs="typeTabs" class="groups-tabs" /><UiInfoTip :text="tabTips[activeTab]" />
       <Transition name="tab-pane" mode="out-in">
         <div :key="activeTab" class="tab-body">
           <ul class="glist">
@@ -16,8 +16,8 @@
                   <option value="morning">早报</option>
                   <option value="noon">午报</option>
                   <option value="evening">晚报</option>
-                </select>
-                <UiButton size="sm" icon="Send" :loading="runningNow === `${activeTab}:${gid}`" @click="runNow(gid)">立即生成</UiButton>
+                </select><UiInfoTip text="不指定时段时按当前时刻自动选择：0–11 点为早报、11–18 点为午报、18–24 点为晚报（北京时间）。" />
+                <UiButton size="sm" icon="Send" :loading="runningNow === `${activeTab}:${gid}`" @click="runNow(gid)">立即生成</UiButton><UiInfoTip text="点击后任务入队由机器人异步执行，生成完成直接发到群里：每日总结覆盖昨天 06:00 至当前时刻，周/月报生成上一个完整周期；触发有冷却限制，消息不足时跳过。" />
                 <UiButton size="sm" variant="danger" icon="X" @click="removeGroup(activeTab, gid)">移除</UiButton>
               </span>
             </li>
@@ -26,7 +26,7 @@
             </li>
           </ul>
           <div class="add-row">
-            <select v-model="newIds[activeTab]"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups(activeTab)" :key="gid" :value="gid">{{ gid }}</option></select>
+            <select v-model="newIds[activeTab]"><option value="">— 从已知群选择 —</option><option v-for="gid in availableGroups(activeTab)" :key="gid" :value="gid">{{ gid }}</option></select><UiInfoTip text="可选项来自消息统计：机器人历史上收到过消息的群才会出现；没出现的新群可在右侧手动输入群号。" />
             <input v-model="newManuals[activeTab]" placeholder="或手动输入群号" @keyup.enter="addGroup(activeTab)" />
             <UiButton icon="Plus" @click="addGroup(activeTab)">添加</UiButton>
           </div>
@@ -44,6 +44,7 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiTabs from '../components/ui/UiTabs.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchGroups, fetchKnownGroups, runBriefingNow, runPeriodReportNow, runSummaryNow, updateGroup } from '../api/groups'
 import { toast } from '../toast'
 
@@ -67,6 +68,12 @@ const typeTabs: { key: GroupType; label: string }[] = [
 ]
 const typeLabels: Record<GroupType, string> = {
   summary: '每日总结', briefing: '每日简报', weekly: '群周报', monthly: '群月报',
+}
+const tabTips: Record<GroupType, string> = {
+  summary: '开启后每天定时把前一个 06:00–06:00 窗口的群聊消息交给 LLM 生成长文总结并发布到群；生成/发布时间、最少消息数在 llm.toml 的 [daily_summary]。',
+  briefing: '每天早/午/晚三个时段定时播报到群：早报回顾昨天，午报、晚报回顾当天截至当前，含消息数、活跃用户、热词等；时段 cron 在 llm.toml 的 [daily_briefing]。',
+  weekly: '每周一生成上一个完整 ISO 周（上周）的群聊回顾，数据来自聊天归档，不足 min_messages 条则跳过；配置在 llm.toml 的 [weekly_report]。',
+  monthly: '每月 1 日生成上一个自然月（上月）的群聊回顾，数据来自聊天归档，不足 min_messages 条则跳过；配置在 llm.toml 的 [monthly_report]。',
 }
 
 onMounted(async () => {

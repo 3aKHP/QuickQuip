@@ -6,13 +6,13 @@
     <div v-else>
       <div class="toolbar">
         <label>群组<select v-model="selectedGroup"><option value="">— 选择群组 —</option><option v-for="gid in allGroups" :key="gid" :value="gid">{{ gid }}</option></select></label>
-        <label>手动添加<input v-model="newGroupId" placeholder="输入群号" @keyup.enter="addGroup" /></label>
+        <label>手动添加<UiInfoTip text="群组下拉只列出 bot 已知的群；这里可以手动输入群号，为尚未有过消息的群预先配置开关。群号需为 5–12 位纯数字。" /><input v-model="newGroupId" placeholder="输入群号" @keyup.enter="addGroup" /></label>
         <UiButton icon="Plus" @click="addGroup">添加</UiButton>
       </div>
 
       <div v-if="selectedGroup" class="rule-grid">
         <UiCard v-for="rule in allRules" :key="rule" padding="sm" shadow="sm" class="rule-row">
-          <div class="rule-left"><span class="rule-dot" /><span class="rule-name">{{ rule }}</span></div>
+          <div class="rule-left"><span class="rule-dot" /><span class="rule-name">{{ rule }}</span><UiInfoTip text="规则名是内部标识，来源有三类：内置模块规则、chat_rules.toml 里 [[rules]] 自定义规则的 name、连锁游戏自动派生的「游戏名」_start /「游戏名」_progress。开关按群记录「禁用名单」，默认全部启用，状态持久化在 data/rule_switch.json。" /></div>
           <UiToggle :model-value="isEnabled(rule)" @update:model-value="toggle(rule)" />
         </UiCard>
       </div>
@@ -25,7 +25,7 @@
 import { onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'; import UiToggle from '../components/ui/UiToggle.vue'
-import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchRules, updateRule } from '../api/rules'; import { fetchKnownGroups } from '../api/groups'; import { toast } from '../toast'
 
 const loaded = ref(false); const error = ref<string | null>(null); const disabled = ref<Record<string, string[]>>({}); const allRules = ref<string[]>([]); const allGroups = ref<string[]>([]); const selectedGroup = ref(''); const newGroupId = ref('')

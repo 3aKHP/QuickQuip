@@ -1,13 +1,13 @@
 <template>
   <div>
-    <UiPageHeader title="MCP 服务器" subtitle="MCP 服务器连接状态与工具清单" />
+    <UiPageHeader title="MCP 服务器" subtitle="MCP 服务器连接状态与工具清单"><template #subtitle><UiInfoTip text="MCP 是为 LLM 提供外部工具（搜索、抓取等）的协议；服务器在 config/llm.toml 的 [mcp.servers] 配置，此处只读展示连接状态。" /></template></UiPageHeader>
     <UiLoading v-if="loading" />
     <div v-else-if="error" class="err-block"><p>{{ error }}</p><UiButton icon="RefreshCw" size="sm" @click="load">重试</UiButton></div>
     <UiEmpty v-else-if="!servers.length" icon="Bot" title="暂无 MCP 服务器" description="在 config/llm.toml 中配置 [mcp.servers] 后即可在此查看状态" />
     <div v-else class="server-grid">
       <UiCard v-for="s in servers" :key="s.id" padding="md" shadow="sm">
         <div class="s-head"><div class="s-title"><span class="s-name">{{ s.id }}</span><span v-if="s.detail" class="s-detail">{{ s.detail }}</span></div><div class="s-status"><span class="dot" :class="dotClass(s)" /><span class="muted">{{ statusText(s) }}</span></div></div>
-        <div class="s-meta"><UiTag size="sm" variant="info">{{ s.transport }}</UiTag><UiTag v-if="s.era_tag" size="sm" variant="info">{{ s.era_tag }}</UiTag><span v-if="s.negotiated_protocol_version" class="muted">v{{ s.negotiated_protocol_version }}</span><span class="muted">{{ s.tool_count }} 个工具</span></div>
+        <div class="s-meta"><UiTag size="sm" variant="info">{{ s.transport }}</UiTag><UiInfoTip text="连接方式：stdio=本地子进程、docker=容器、http=Streamable HTTP 单端点、sse=经典 HTTP+SSE 长连接。" /><UiTag v-if="s.era_tag" size="sm" variant="info">{{ s.era_tag }}</UiTag><UiInfoTip v-if="s.era_tag" text="双协议纪元标签：前者为配置的协商模式（legacy/auto/modern），后者为实际协议纪元；两者一致时只显示一个。仅 http transport 生效，由 config/llm.toml 的 negotiation 键控制。" /><span v-if="s.negotiated_protocol_version" class="muted">v{{ s.negotiated_protocol_version }}<UiInfoTip text="握手协商后实际使用的 MCP 协议版本，连接成功后才有值；状态为「状态未知」时表示 Web 后台尚未拿到 bot 进程写入的状态（bot 可能未运行）。" /></span><span class="muted">{{ s.tool_count }} 个工具</span></div>
         <div v-if="s.error" class="s-error">{{ s.error }}</div>
         <div v-if="s.tools.length" class="s-tools">
           <button class="tools-toggle" @click="toggle(s.id)"><UiIcon :name="expanded.has(s.id) ? 'ChevronDown' : 'ChevronRight'" :size="14" /><span>工具列表 ({{ s.tools.length }})</span></button>
@@ -20,7 +20,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiIcon from '../components/ui/UiIcon.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiIcon from '../components/ui/UiIcon.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchMcpDashboard, type McpServer } from '../api/mcpDashboard'
 
 const servers = ref<McpServer[]>([]); const loading = ref(true); const error = ref<string | null>(null); const expanded = ref(new Set<string>())

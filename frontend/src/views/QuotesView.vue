@@ -23,7 +23,7 @@
       <!-- Search -->
       <UiCard padding="md" shadow="sm" class="section">
         <div class="toolbar">
-          <h3 class="st section-title">语录（共 {{ total }} 条）</h3>
+          <h3 class="st section-title">语录（共 {{ total }} 条）<UiInfoTip text="语录由群友在群内引用某条消息并发送 /quote 收藏产生，此页仅做浏览与管理。" /></h3>
           <div class="search-row">
             <input v-model="keyword" placeholder="搜索关键词…" class="search-input" @keyup.enter="search" />
             <UiButton icon="Search" :loading="loading" @click="search">搜索</UiButton>
@@ -37,10 +37,10 @@
         <div v-else class="table-scroll"><table class="data-table">
           <thead>
             <tr>
-              <th class="num">#</th>
+              <th class="num">#<UiInfoTip text="群内存续序号，从 1 起按收藏顺序递增；与群内 /quote N 指令查看的编号一致，删除后不重排。" /></th>
               <th>内容</th>
-              <th>发言人</th>
-              <th>时间</th>
+              <th>发言人<UiInfoTip text="展示名按优先级解析：最新群名片 → 身份资料标准名 → 收藏时快照；与快照不同名时括号标注原名。" /></th>
+              <th>时间<UiInfoTip text="语录被收藏入库的时间，而非原消息的发言时间。" /></th>
               <th class="act">操作</th>
             </tr>
           </thead>
@@ -82,6 +82,7 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiStatStrip from '../components/ui/UiStatStrip.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listGroups, listQuotes, deleteQuote } from '../api/quotes'
 import { toast } from '../toast'
 

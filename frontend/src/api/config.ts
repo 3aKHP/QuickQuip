@@ -1,7 +1,15 @@
 import { request } from './index'
 
+export interface ConfigListItem {
+  key: string
+  filename: string
+  label: string
+  description?: string
+  missing?: boolean
+}
+
 export async function listConfigs() {
-  return request('/api/config')
+  return request<{ configs: ConfigListItem[] }>('/api/config')
 }
 
 export async function fetchConfig(key: string) {

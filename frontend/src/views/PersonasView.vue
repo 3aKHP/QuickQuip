@@ -1,6 +1,6 @@
 <template>
   <div class="personas-view">
-    <UiPageHeader title="人格管理" subtitle="persona 决定 bot 的说话风格（system_prompt / style_prompt），按群在「群 LLM 设置」选用"><template #actions><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreate">新建</UiButton></template></UiPageHeader>
+    <UiPageHeader title="人格管理" subtitle="persona 决定 bot 的说话风格（system_prompt / style_prompt），按群在「群 LLM 设置」选用"><template #subtitle><UiInfoTip text="人格在加载 llm.toml 时读入，保存后需在群内执行 /llm reload 或重启 bot 生效。" /></template><template #actions><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreate">新建</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
     <div class="split">
@@ -9,7 +9,7 @@
         <UiEmpty v-else-if="!personas.length" icon="Users" title="暂无人格文件" />
         <div v-else class="list-scroll">
           <button v-for="p in personas" :key="p.name" class="list-item qq-selectable" :class="{ active: p.name === selectedName }" @click="selectPersona(p.name)">
-            <div class="list-item-head"><span class="display-name">{{ p.display_name || p.name }}</span><UiTag v-if="p.protected" size="sm" variant="info">共享</UiTag></div>
+            <div class="list-item-head"><span class="display-name">{{ p.display_name || p.name }}</span><UiTag v-if="p.protected" size="sm" variant="info">共享</UiTag><UiInfoTip v-if="p.protected" text="_shared.toml 不是可选人格，而是共享行为准则：加载时自动追加到每个人格的 system_prompt 和 style_prompt 尾部，因此不可删除。" /></div>
             <div class="list-item-meta"><span class="mono">{{ p.name }}.toml</span></div>
           </button>
         </div>
@@ -19,7 +19,7 @@
         <div v-if="!selectedName" class="hint-panel"><UiEmpty icon="FileText" title="从左侧选择一个人格开始编辑" /></div>
         <template v-else>
           <div class="editor-bar">
-            <div class="editor-bar-title"><span class="mono">{{ selectedName }}.toml</span><UiTag v-if="isCreating" size="sm" variant="success">待创建</UiTag><UiTag v-else-if="isProtected" size="sm" variant="info">不可删除</UiTag></div>
+            <div class="editor-bar-title"><span class="mono">{{ selectedName }}.toml</span><UiTag v-if="isCreating" size="sm" variant="success">待创建</UiTag><UiTag v-else-if="isProtected" size="sm" variant="info">不可删除</UiTag><UiInfoTip v-else-if="isProtected" text="受保护的保留文件名（当前仅 _shared），后端拒绝删除与同名创建。" /></div>
             <div class="editor-bar-actions">
               <UiButton v-if="!isCreating && !isProtected" variant="danger" icon="Trash2" :disabled="saving" @click="onDelete">删除</UiButton>
               <UiButton variant="primary" icon="Save" :loading="saving" :disabled="!content" @click="onSave">{{ isCreating ? '创建' : '保存' }}</UiButton>
@@ -43,6 +43,7 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listPersonas, fetchPersona, updatePersona, createPersona, deletePersona } from '../api/personas'
 import { toast } from '../toast'
 

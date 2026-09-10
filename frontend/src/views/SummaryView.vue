@@ -5,6 +5,7 @@
     <UiCard padding="md" shadow="sm" class="toolbar-card">
       <div class="toolbar-inner">
         <UiTabs :model-value="activeTab" :tabs="tabs" @change="switchTab" />
+        <UiInfoTip text="周报键为 ISO 周（如 2026-W24，周一起算），月报键为年月（如 2026-06）；内容均为上一个完整周期（上周/上月），由 llm.toml 的 [weekly_report]/[monthly_report] 定时生成。" />
         <label>
           群组
           <select v-model="groupId" @change="loadList">
@@ -18,7 +19,7 @@
 
     <UiCard v-if="health" padding="md" shadow="sm" class="health-card">
       <div class="health-head">
-        <strong>生成健康度</strong>
+        <strong>生成健康度<UiInfoTip text="汇总日报、简报、周月报三条生成链路近期的 LLM 调用结果：正文是否被采纳、异常分布、耗时与按模型定价估算的美元成本；未记录结果的历史调用计入「历史未知」。" /></strong>
         <label class="health-days">
           近
           <select v-model.number="healthDays" @change="loadHealth">
@@ -30,7 +31,7 @@
         <UiButton size="sm" icon="RefreshCw" :loading="healthLoading" @click="loadHealth">刷新</UiButton>
       </div>
       <table v-if="healthRows.length" class="health-table">
-        <thead><tr><th>链路</th><th>调用</th><th>接受</th><th>异常</th><th>均耗时</th><th>成本</th></tr></thead>
+        <thead><tr><th>链路<UiInfoTip text="三条生成链路：日报 = 每日群聊总结；简报 = 早/午/晚播报（llm.toml [daily_briefing]，直接发群、不在下方归档列表）；周月报 = 周报与月报共用同一链路统计。" /></th><th>调用</th><th>接受<UiInfoTip text="该跳响应被采纳的判定：正文非空且模型正常结束（finish_reason 为 stop/end_turn/stop_sequence/eos 之一）；级联中未被采纳才会尝试下一跳。" /></th><th>异常<UiInfoTip text="各异常标签含义：完成原因异常 = 模型非正常结束（截断/内容过滤等），正文被丢弃；空响应 = 模型返回空文本；调用失败 = 服务商报错；已取消 = 请求中途被取消；历史未知 = 旧版本未记录该次结果。" /></th><th>均耗时</th><th>成本</th></tr></thead>
         <tbody>
           <tr v-for="row in healthRows" :key="row.feature">
             <td>{{ featureLabel(row.feature) }}</td>
@@ -114,7 +115,7 @@
         <div v-else class="sum-body markdown-body" v-html="renderedContent" />
 
         <details v-if="detail && !detailLoading && !detailError" class="genlog" @toggle="onGenLogToggle">
-          <summary>生成日志</summary>
+          <summary>生成日志<UiInfoTip text="记录这份报文生成时经历的每一跳模型调用：按级联配置依次尝试，前一跳未被采纳（空响应/异常结束/调用失败）才走下一跳，「被采纳」的一跳即为正文来源。" /></summary>
           <UiLoading v-if="genLogLoading" text="正在读取生成日志" />
           <div v-else-if="genLogError" class="error-block">
             <UiIcon name="CircleX" :size="16" />
@@ -131,13 +132,14 @@
                     <span class="mono genlog-model">{{ hop.provider_id }}/{{ hop.model }}</span>
                     <UiTag size="sm" :variant="hopVariant(hop)">{{ hopLabel(hop) }}</UiTag>
                   </div>
-                  <div class="genlog-hop__meta mono">{{ hopMeta(hop) }}</div>
+                  <div class="genlog-hop__meta mono">{{ hopMeta(hop) }}<UiInfoTip text="finish 是模型上报的结束原因：stop/end_turn 等为正常结束；其他值（如 max_tokens、内容过滤）会导致该跳正文被判「完成原因异常」而丢弃；「未上报」表示服务商未返回该字段。" /></div>
                   <div v-if="hop.error_message" class="genlog-hop__error">{{ hop.error_message }}</div>
                 </li>
               </ol>
               <p class="genlog-foot">
                 共 {{ genLog.hops.length }} 跳 · 合计 {{ totalHopSeconds }}s · ${{ totalHopCost }} ·
                 {{ genLog.attribution === 'run_id' ? '精确归因' : '按时间窗推算（历史报文）' }}
+                <UiInfoTip text="精确归因 = 按生成时写入的 run_id 精确匹配本次调用；历史报文无 run_id，按「上一条同群同类报文之后、本报文之前、最长 6 小时」的时间窗推算，窗口内手动触发的调用可能被并入。" />
               </p>
             </template>
           </template>
@@ -158,6 +160,7 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiTabs from '../components/ui/UiTabs.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import { deleteSummary, fetchSummariesHealth, fetchSummaryDetail, fetchSummaryGenerationLog, fetchSummaryGroups, fetchSummaries } from '../api/summaries'
 import type { GenerationHop, GenerationLog, SummariesHealth } from '../api/summaries'

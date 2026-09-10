@@ -20,7 +20,7 @@
       <select v-model="filters.feature" aria-label="功能筛选" @change="reload">
         <option value="">全部功能</option>
         <option v-for="item in dimensionOptions.feature" :key="item" :value="item">{{ item }}</option>
-      </select>
+      </select><UiInfoTip text="调用场景标签，由发起调用的功能模块写入（如群聊回复、日报、简报）；写入时未标记场景的调用归入「（未归因）」。" />
       <select v-model="filters.group" aria-label="群筛选" @change="reload">
         <option value="">全部群</option>
         <option v-for="item in dimensionOptions.group" :key="item" :value="item">{{ item }}</option>
@@ -34,7 +34,7 @@
         <option value="ok">成功</option>
         <option value="error">错误</option>
         <option value="cancelled">取消</option>
-      </select>
+      </select><UiInfoTip text="「取消」指请求在执行中被中断，未拿到响应、不计 token 与成本；「错误」为调用失败。" />
     </div>
 
     <UiLoading v-if="loading && !data" />
@@ -43,7 +43,7 @@
 
       <div class="stat-cards stat-cards--kpi">
         <UiStatCard label="总成本" :value="`$${fmtCost(data.total_cost)}`" :sub="`${fmtNum(data.total_tokens)} tokens`" icon="Coins" variant="primary" />
-        <UiStatCard label="请求 / 成功率" :value="fmtNum(data.request_count)" :sub="`${pct(data.success_rate)} 成功`" icon="Activity" />
+        <UiStatCard label="请求 / 成功率" :value="fmtNum(data.request_count)" :sub="`${pct(data.success_rate)} 成功`" icon="Activity" tip="时间范围内的 LLM 请求总数（含错误与取消）；成功率 = 成功请求 ÷ 总请求，仅成功请求计入成本与 token。" />
         <UiStatCard label="平均耗时" :value="fmtDuration(data.average_duration_ms)" sub="所有请求" icon="Clock" />
         <UiStatCard label="缓存命中率" :value="pct(data.cache_hit_rate)" :sub="`${fmtNum(data.total_cache_read_tokens)} read tokens`" icon="Zap" tip="输入的前缀缓存命中部分按折扣计价；read tokens 为周期内命中缓存读取的输入 token 总量。" />
         <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" tip="「未定价」指使用了缺少定价表模型的调用：token 照常计量、成本按 0 估算，在 llm.toml 补充定价后恢复计入；「错误」为失败请求数。" />
@@ -97,16 +97,16 @@
                 <div><dt>人格</dt><dd>{{ event.persona_id || UNATTRIBUTED_KEY }}</dd></div>
                 <div><dt>耗时</dt><dd>{{ fmtDuration(event.duration_ms) }}</dd></div>
                 <div><dt>输入 / 输出</dt><dd>{{ fmtNum(event.input_tokens ?? 0) }} / {{ fmtNum(event.output_tokens ?? 0) }}</dd></div>
-                <div><dt>新鲜输入</dt><dd>{{ fmtNum(event.fresh_input_tokens ?? 0) }}</dd></div>
+                <div><dt>新鲜输入<UiInfoTip text="总输入中未走缓存、按 input 全价计费的 token（= 输入 − cache read − cache write）。" /></dt><dd>{{ fmtNum(event.fresh_input_tokens ?? 0) }}</dd></div>
                 <div><dt>缓存</dt><dd>{{ fmtNum(event.cache_read_tokens ?? 0) }} read · {{ fmtNum(event.cache_creation_tokens ?? 0) }} write</dd></div>
                 <div v-if="event.envelope_tokens != null"><dt>信封</dt><dd>{{ fmtNum(event.envelope_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.epoch_history_tokens != null"><dt>纪元</dt><dd>{{ fmtNum(event.epoch_history_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.media_image_count != null"><dt>图片附件</dt><dd>{{ event.media_image_count }} 张</dd></div>
                 <div v-if="event.patch_tokens != null"><dt>现场补丁</dt><dd>{{ fmtNum(event.patch_tokens) }} tokens（估算）</dd></div>
-                <div v-if="event.thinking_tokens"><dt>思考</dt><dd>{{ fmtNum(event.thinking_tokens) }} tokens</dd></div>
+                <div v-if="event.thinking_tokens"><dt>思考<UiInfoTip text="模型思考/推理（reasoning）消耗的 token，已包含在输出 token 计价内，不重复计费。" /></dt><dd>{{ fmtNum(event.thinking_tokens) }} tokens</dd></div>
                 <div><dt>成本分项</dt><dd>{{ costBreakdown(event) }}</dd></div>
-                <div><dt>定价</dt><dd>{{ pricingLabel(event) }}</dd></div>
-                <div v-if="event.agent_loop_id"><dt>Agent Loop</dt><dd>{{ event.agent_loop_id }}</dd></div>
+                <div><dt>定价<UiInfoTip text="本次计费匹配的 llm.toml [pricing.models] 条目：key（provider/model 优先、纯 model 兜底）· source · confidence；「未定价」表示价表缺该模型，成本按 0 估算。" /></dt><dd>{{ pricingLabel(event) }}</dd></div>
+                <div v-if="event.agent_loop_id"><dt>Agent Loop<UiInfoTip text="机器人一轮完整回复流程（一轮内可能含多次 LLM 调用与工具调用）的标识；同一 Loop 的请求共享该 ID，可串联查看同一轮的多次请求。" /></dt><dd>{{ event.agent_loop_id }}</dd></div>
                 <div v-if="event.error_message"><dt>错误</dt><dd class="error">{{ event.error_message }}</dd></div>
               </dl>
             </div>

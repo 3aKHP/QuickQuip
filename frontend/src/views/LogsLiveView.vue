@@ -9,14 +9,15 @@
 
     <UiCard padding="md" shadow="sm" class="panel">
       <div class="meta-row">
-        <UiTag size="sm" variant="info">{{ currentFileLabel }}</UiTag>
-        <UiTag size="sm" :variant="connected ? 'success' : 'warn'">{{ connected ? '已连接' : '连接中断' }}</UiTag>
+        <UiTag size="sm" variant="info">{{ currentFileLabel }}</UiTag><UiInfoTip text="机器人当前正在写入的日志文件，按日期命名 quickquip_YYYY-MM-DD.log，每天 0 点切换到新文件，仅保留最近 14 天；文件只记录 INFO 及以上级别（DEBUG 不落盘）。" />
+        <UiTag size="sm" :variant="connected ? 'success' : 'warn'">{{ connected ? '已连接' : '连接中断' }}</UiTag><UiInfoTip text="实时日志推送通道（SSE）的连接状态；断开后浏览器会自动重连，跨天轮转会自动跟随新的当日文件。" />
       </div>
 
       <div class="toolbar">
         <label class="filter">
           <UiIcon name="Search" :size="14" />
           <input v-model="filter" type="search" placeholder="过滤关键词 / 正则" />
+          <UiInfoTip text="按不区分大小写的正则过滤已加载到页面的日志行；页面进入时先回放文件末尾 320 行、最多保留约 1800 行，更早内容请到「日志归档」查看。" />
         </label>
         <label class="toggle">
           <input v-model="autoScroll" type="checkbox" />
@@ -44,6 +45,7 @@ import UiCard from '../components/ui/UiCard.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { buildLogDownloadUrl, buildLogStreamUrl, fetchLogIndex } from '../api/logs'
 
 interface LogLine { id: number; text: string }

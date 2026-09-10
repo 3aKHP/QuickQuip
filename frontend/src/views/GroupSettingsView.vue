@@ -16,7 +16,7 @@
     <div class="settings-shell">
       <aside class="group-panel">
         <div class="panel-head">
-          <span class="panel-title">覆盖对象</span>
+          <span class="panel-title">覆盖对象<UiInfoTip text="一条覆盖（override）是针对单个群或私聊会话的参数定制记录，未覆盖的字段一律沿用 llm.toml 全局默认；私聊对象以 private:QQ号 形式标识。" /></span>
           <span class="panel-count">{{ groupList.length }}</span>
         </div>
 
@@ -95,7 +95,7 @@
             <h4>运行状态</h4>
             <div class="form-grid">
               <div class="field">
-                <label>LLM 启用</label>
+                <label>LLM 启用<UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 llm.toml [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" /></label>
                 <select v-model="draftTriState.enabled">
                   <option :value="null">跟随默认（{{ defaultHint('enabled') }}）</option>
                   <option :value="true">开</option>
@@ -103,7 +103,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>记忆启用</label>
+                <label>记忆启用<UiInfoTip text="开启后每轮回复前会从该会话记忆库检索相关记忆注入提示词（注入条数为 llm.toml [runtime] memory_limit，默认 6）；关闭后既不读记忆，自动记忆抽取也不会生效。" /></label>
                 <select v-model="draftTriState.memory_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('memory_enabled') }}）</option>
                   <option :value="true">开</option>

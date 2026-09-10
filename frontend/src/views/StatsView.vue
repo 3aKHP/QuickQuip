@@ -10,10 +10,10 @@
         <UiCard padding="md" shadow="sm">
           <div class="group-head">
             <h3>群 {{ gid }}</h3>
-            <UiTag>总消息 {{ formatNum(gs.total_messages || 0) }}</UiTag>
+            <UiTag>总消息 {{ formatNum(gs.total_messages || 0) }}</UiTag><UiInfoTip text="该群成员发言总数，机器人自身发言不计；自统计开始累计、跨重启保留，无时间窗口。" />
           </div>
           <div v-if="computedStats[gid]?.users?.length" class="group-section">
-            <h4 class="section-label"><UiIcon name="Users" :size="14" /><span>活跃用户 Top {{ computedStats[gid].users.length }}</span></h4>
+            <h4 class="section-label"><UiIcon name="Users" :size="14" /><span>活跃用户 Top {{ computedStats[gid].users.length }}</span><UiInfoTip text="按发言条数排序的群成员前 15 名；名称取该成员最近一次的群名片。" /></h4>
             <div class="bar-list">
               <div v-for="[uid, cnt] in computedStats[gid].users" :key="uid" class="bar-row">
                 <span class="bar-label">{{ gs.user_names?.[uid] || uid }}</span>
@@ -23,7 +23,7 @@
             </div>
           </div>
           <div v-if="computedStats[gid]?.rules?.length" class="group-section">
-            <h4 class="section-label"><UiIcon name="Zap" :size="14" /><span>规则触发 Top {{ computedStats[gid].rules.length }}</span></h4>
+            <h4 class="section-label"><UiIcon name="Zap" :size="14" /><span>规则触发 Top {{ computedStats[gid].rules.length }}</span><UiInfoTip text="该群内机器人回复规则的触发次数：chat_rules.toml 规则、LLM 对话（llm_chat）、唤醒与无聊搭话均计入。" /></h4>
             <div class="bar-list">
               <div v-for="[rule, cnt] in computedStats[gid].rules" :key="rule" class="bar-row">
                 <span class="bar-label mono">{{ rule }}</span>
@@ -48,6 +48,7 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchStats } from '../api/stats'
 
 const data = ref<any>(null); const error = ref<string | null>(null); const loading = ref(false); const updatedAt = ref<string | null>(null); const computedStats = ref<Record<string, any>>({})
