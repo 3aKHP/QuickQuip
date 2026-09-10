@@ -28,7 +28,7 @@ def _req() -> LLMRequest:
 async def test_complete_ok_records_usage(monkeypatch):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
         calls.append((state, response is not None))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -50,7 +50,7 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
     entered = asyncio.Event()
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
         calls.append(state)
         entered.set()
         await gate.wait()
@@ -74,7 +74,7 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
 async def test_complete_error_records_state(monkeypatch):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
         calls.append((state, response))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -95,7 +95,7 @@ async def test_complete_cancelled_propagates(monkeypatch):
     CancelledError 正确传播且计量任务仍被调度执行。"""
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg=""):
+    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
         calls.append((state, response))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)

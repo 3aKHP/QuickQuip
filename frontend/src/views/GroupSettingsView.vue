@@ -39,8 +39,8 @@
               <UiTag v-else-if="g.enabled === false" size="sm" variant="danger">LLM 关</UiTag>
             </span>
             <span class="group-item__meta">
-              <span v-if="g.persona_id">{{ g.persona_id }}</span>
-              <span v-if="g.provider_id">{{ g.provider_id }}</span>
+              <span v-if="g.persona_id" class="mono">{{ g.persona_id }}</span>
+              <span v-if="g.provider_id" class="mono">{{ g.provider_id }}</span>
               <span v-if="g.model" class="mono">{{ g.model }}</span>
               <span v-if="!g.persona_id && !g.provider_id && !g.model">仅覆盖开关或触发方式</span>
             </span>

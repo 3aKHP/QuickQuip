@@ -255,7 +255,7 @@ async def test_run_generation_swallows_llm_exception(monkeypatch):
 async def test_generate_one_persists_on_success(monkeypatch):
     """钉住：_generate_one 生成成功时以 summary_date 入库。"""
     upserts: list[tuple] = []
-    store = types.SimpleNamespace(upsert=lambda *a: upserts.append(a))
+    store = types.SimpleNamespace(upsert=lambda *a, **kw: upserts.append((a, kw)))
 
     async def fake_run(group_id, start_ts, end_ts, date_label, **kw):
         return ("正文", "model-x")
@@ -267,7 +267,29 @@ async def test_generate_one_persists_on_success(monkeypatch):
         svc=None, collector=None, store=store, stats_tracker=None,
     )
 
-    assert upserts == [("10001", "2026-05-03", "正文", "model-x")]
+    assert upserts == [(("10001", "2026-05-03", "正文", "model-x"), {"run_id": None})]
+
+
+@pytest.mark.asyncio
+async def test_generate_one_passes_scope_run_id_to_upsert(monkeypatch):
+    """钉住接缝：真实生成路径 set_usage_scope 的 run_id 经 current_usage_run_id 传入 upsert。"""
+    from quickquip.llm.usage import set_usage_scope
+
+    upserts: list[tuple] = []
+    store = types.SimpleNamespace(upsert=lambda *a, **kw: upserts.append((a, kw)))
+
+    async def fake_run(group_id, start_ts, end_ts, date_label, **kw):
+        set_usage_scope("summary", group_id=group_id, run_id="r-1")
+        return ("正文", "model-x")
+
+    monkeypatch.setattr(summary_jobs, "run_summary_generation", fake_run)
+
+    await summary_jobs.generate_summary_one(
+        "10001", 1.0, 2.0, "label", "2026-05-03",
+        svc=None, collector=None, store=store, stats_tracker=None,
+    )
+
+    assert upserts == [(("10001", "2026-05-03", "正文", "model-x"), {"run_id": "r-1"})]
 
 
 @pytest.mark.asyncio

@@ -42,3 +42,20 @@ def test_health_check_rejects_invalid_scope():
         llm_runtime.queue_health_check(llm_runtime.HealthBody(scope_key="../config"), object())
 
     assert exc.value.status_code == 422
+
+
+def test_clear_actions_returns_deleted_count_and_audits(monkeypatch):
+    monkeypatch.setattr(llm_runtime.action_queue, "clear_finished", lambda: 7)
+    audits: list[dict] = []
+    monkeypatch.setattr(
+        llm_runtime.audit_logger,
+        "log",
+        lambda *args, **kwargs: audits.append(kwargs),
+    )
+
+    result = llm_runtime.clear_actions(object())
+
+    assert result == {"ok": True, "deleted": 7}
+    assert audits[0]["action"] == "clear"
+    assert audits[0]["target_type"] == "llm_runtime"
+    assert audits[0]["summary_after"] == {"deleted": 7}

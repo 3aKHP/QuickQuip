@@ -99,3 +99,8 @@ export async function fetchLlmRuntimeActions(
 export async function fetchLlmRuntimeAction(id: string, signal?: AbortSignal): Promise<{ action: RuntimeAction }> {
   return request(`/api/llm-runtime/actions/${encodeURIComponent(id)}`, { signal })
 }
+
+/** POST /api/llm-runtime/actions/clear：清空已结束（succeeded/failed）的动作历史 */
+export async function clearLlmRuntimeActions(): Promise<{ ok: boolean; deleted: number }> {
+  return request('/api/llm-runtime/actions/clear', { method: 'POST' })
+}

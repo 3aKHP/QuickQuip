@@ -135,6 +135,19 @@ def list_actions(limit: int = 20):
     return {"actions": action_queue.list_recent(limit)}
 
 
+@router.post("/llm-runtime/actions/clear")
+def clear_actions(request: Request):
+    deleted = action_queue.clear_finished()
+    audit_logger.log(
+        request,
+        action="clear",
+        target_type="llm_runtime",
+        target_id="actions",
+        summary_after={"deleted": deleted},
+    )
+    return {"ok": True, "deleted": deleted}
+
+
 @router.get("/llm-runtime/actions/{action_id}")
 def get_action(action_id: str):
     action = action_queue.get(action_id)

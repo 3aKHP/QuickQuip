@@ -58,3 +58,22 @@ def test_get_tracks_one_action_outside_recent_window(tmp_path):
     assert queue.get(action_id)["status"] == "failed"
     assert queue.get("missing") is None
     assert queue.get("' OR 1=1 --") is None
+
+
+def test_clear_finished_keeps_queued_and_running(tmp_path):
+    queue = WebAdminActionQueue(tmp_path / "actions.db")
+    done = queue.enqueue("llm_reload")
+    failed = queue.enqueue("mcp_reload")
+    queue.complete(done["id"], {"ok": True})
+    queue.fail(failed["id"], "boom")
+
+    running = queue.enqueue("health_check")
+    queue.claim(limit=1)
+    queued = queue.enqueue("rules_reload")
+
+    assert queue.clear_finished() == 2
+    remaining = {item["id"]: item for item in queue.list_recent()}
+    assert set(remaining) == {running["id"], queued["id"]}
+    assert remaining[running["id"]]["status"] == "running"
+    assert remaining[queued["id"]]["status"] == "queued"
+    assert queue.clear_finished() == 0

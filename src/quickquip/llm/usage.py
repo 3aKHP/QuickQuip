@@ -11,9 +11,11 @@ import asyncio
 import logging
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Iterator
 
 from quickquip.llm.pricing import estimate_cost_components, match_pricing, normalize_usage
@@ -26,11 +28,23 @@ class UsageScope:
     feature: str
     group_id: str | None = None
     persona_id: str | None = None
+    run_id: str | None = None
 
 
 _USAGE_SCOPE: ContextVar[UsageScope | None] = ContextVar(
     "quickquip_llm_usage_scope", default=None,
 )
+
+
+def new_usage_run_id() -> str:
+    """生成一次"报文生成运行"的关联 ID：级联各跳与最终报文行共享。"""
+    return uuid.uuid4().hex
+
+
+def current_usage_run_id() -> str | None:
+    """读取当前 scope 的 run_id（零接线，同 current_agent_loop_id 范式）。"""
+    scope = _USAGE_SCOPE.get()
+    return scope.run_id if scope else None
 
 
 @contextmanager
@@ -39,9 +53,10 @@ def usage_scope(
     *,
     group_id: str | None = None,
     persona_id: str | None = None,
+    run_id: str | None = None,
 ) -> Iterator[None]:
     """设置当前协程的用量归因；退出时复位（照搬 collect_trace_calls 范式）。"""
-    token = _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
+    token = _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id, run_id))
     try:
         yield
     finally:
@@ -53,11 +68,12 @@ def set_usage_scope(
     *,
     group_id: str | None = None,
     persona_id: str | None = None,
+    run_id: str | None = None,
 ) -> None:
     """直接设置 scope（不 reset）。用于：(1) ``asyncio.create_task`` 隔离的子任务
     （跑在父 context 副本上，task 结束自动清理）；(2) 顶层 cron/handler 入口（调用方
     不再调 provider，残留无害）。调用链中间环节应优先用 ``usage_scope``（自动 reset）。"""
-    _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id))
+    _USAGE_SCOPE.set(UsageScope(feature, group_id, persona_id, run_id))
 
 
 _ENVELOPE_TOKENS: ContextVar[int | None] = ContextVar(
@@ -153,8 +169,14 @@ async def _record_usage(
     stream_used: bool,
     state: str,
     error_msg: str = "",
+    finished_at: str | None = None,
 ) -> None:
-    """落一行用量（成功/错误/取消皆记）；任何异常只 logger 不抛。"""
+    """落一行用量（成功/错误/取消皆记）；任何异常只 logger 不抛。
+
+    ts 取 finished_at（调用结束、调度计量的时刻）而非落库时刻：计量任务是
+    fire-and-forget，落库可能晚于事件循环若干拍；级联场景下末跳的落库 ts
+    会晚于报文 generated_at，导致生成日志时间窗兜底丢失成功跳（PR #235 CR）。
+    """
     try:
         scope = _USAGE_SCOPE.get()
         from quickquip.llm.provider.trace import current_agent_loop_id
@@ -213,6 +235,7 @@ async def _record_usage(
             "feature": scope.feature if scope else None,
             "group_id": scope.group_id if scope else None,
             "persona_id": scope.persona_id if scope else None,
+            "run_id": scope.run_id if scope else None,
             "agent_loop_id": loop_id,
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
@@ -244,6 +267,8 @@ async def _record_usage(
             "finish_reason": (response.finish_reason or "").strip() or None if response else None,
             "response_outcome": None,
         }
+        if finished_at:
+            row["ts"] = finished_at
         if scope and scope.feature in {"summary", "briefing", "period_report"}:
             if state == "cancelled":
                 row["response_outcome"] = "cancelled"
@@ -275,9 +300,13 @@ def _schedule_usage_record(
     """Fire-and-forget 调度计量任务，绝不把写库等待挂到聊天请求上。
 
     事件循环对 task 只持弱引用，必须自持强引用防止任务被 GC 中途回收。
+    finished_at 在此处（调用结束、调度时刻）打点，随任务传入：计量任务真正
+    执行落库可能晚于事件循环若干拍，用落库时刻会把级联末跳排到报文
+    generated_at 之后，破坏生成日志的时间窗归因。
     """
+    finished_at = datetime.now(timezone.utc).isoformat()
     task = asyncio.create_task(
-        _record_usage(client, request, response, started, stream_used, state, error_msg)
+        _record_usage(client, request, response, started, stream_used, state, error_msg, finished_at)
     )
     _USAGE_TASKS.add(task)
     task.add_done_callback(_USAGE_TASKS.discard)

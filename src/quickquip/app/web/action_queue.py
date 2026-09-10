@@ -194,6 +194,17 @@ class WebAdminActionQueue:
             ).fetchall()
         return [asdict(self._row_to_action(row)) for row in rows]
 
+    def clear_finished(self) -> int:
+        self._ensure_schema()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                DELETE FROM web_admin_actions
+                WHERE status IN ('succeeded', 'failed')
+                """
+            )
+            return cur.rowcount
+
     def get(self, action_id: str) -> dict[str, Any] | None:
         self._ensure_schema()
         with self._connect() as conn:

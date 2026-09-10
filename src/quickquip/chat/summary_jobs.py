@@ -28,6 +28,7 @@ from quickquip.chat.period_report import (
 )
 from quickquip.chat.period_serializer import bot_user_ids_from_env
 from quickquip.llm.summarize import generate_daily_summary, generate_period_report
+from quickquip.llm.usage import current_usage_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ async def generate_summary_one(
     )
     if result is not None:
         content, model_used = result
-        store.upsert(group_id, summary_date, content, model_used)
+        store.upsert(group_id, summary_date, content, model_used, run_id=current_usage_run_id())
 
 
 async def generate_summaries_job(
@@ -289,7 +290,7 @@ async def generate_period_one(
     )
     if result is not None:
         content, model_used = result
-        store.upsert(group_id, period_type, period_key, content, model_used)
+        store.upsert(group_id, period_type, period_key, content, model_used, run_id=current_usage_run_id())
     return result
 
 
