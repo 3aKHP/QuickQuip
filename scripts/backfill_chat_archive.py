@@ -58,6 +58,11 @@ def _iter_jsonl(root: Path):
 
 
 def main() -> int:
+    # Windows 控制台默认代码页（如 cp1252）无法编码中文输出：统一重配为
+    # UTF-8 并以替换符兜底，避免 UnicodeEncodeError 中断回灌。
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="只统计，不写入")
     args = parser.parse_args()
