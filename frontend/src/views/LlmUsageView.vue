@@ -20,7 +20,7 @@
       <select v-model="filters.feature" aria-label="功能筛选" @change="reload">
         <option value="">全部功能</option>
         <option v-for="item in dimensionOptions.feature" :key="item" :value="item">{{ item }}</option>
-      </select><UiInfoTip text="调用场景标签，由发起调用的功能模块写入（如群聊回复、日报、简报）；写入时未标记场景的调用归入「（未归因）」。" />
+      </select><UiInfoTip text="调用场景标签，由发起调用的功能模块写入（如群聊回复、日报、简报）；写入时未标记场景的调用归入「(未归因)」。" />
       <select v-model="filters.group" aria-label="群筛选" @change="reload">
         <option value="">全部群</option>
         <option v-for="item in dimensionOptions.group" :key="item" :value="item">{{ item }}</option>
@@ -97,7 +97,7 @@
                 <div><dt>人格</dt><dd>{{ event.persona_id || UNATTRIBUTED_KEY }}</dd></div>
                 <div><dt>耗时</dt><dd>{{ fmtDuration(event.duration_ms) }}</dd></div>
                 <div><dt>输入 / 输出</dt><dd>{{ fmtNum(event.input_tokens ?? 0) }} / {{ fmtNum(event.output_tokens ?? 0) }}</dd></div>
-                <div><dt>新鲜输入<UiInfoTip text="总输入中未走缓存、按 input 全价计费的 token（= 输入 − cache read − cache write）。" /></dt><dd>{{ fmtNum(event.fresh_input_tokens ?? 0) }}</dd></div>
+                <div><dt>新鲜输入<UiInfoTip text="总输入中未走缓存、按 input 全价计费的 token；claude 协议行显示的输入本身即不含缓存 token。" /></dt><dd>{{ fmtNum(event.fresh_input_tokens ?? 0) }}</dd></div>
                 <div><dt>缓存</dt><dd>{{ fmtNum(event.cache_read_tokens ?? 0) }} read · {{ fmtNum(event.cache_creation_tokens ?? 0) }} write</dd></div>
                 <div v-if="event.envelope_tokens != null"><dt>信封</dt><dd>{{ fmtNum(event.envelope_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.epoch_history_tokens != null"><dt>纪元</dt><dd>{{ fmtNum(event.epoch_history_tokens) }} tokens（估算）</dd></div>

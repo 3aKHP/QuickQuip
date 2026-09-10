@@ -19,7 +19,7 @@
         <div v-if="!selectedName" class="hint-panel"><UiEmpty icon="FileText" title="从左侧选择一个人格开始编辑" /></div>
         <template v-else>
           <div class="editor-bar">
-            <div class="editor-bar-title"><span class="mono">{{ selectedName }}.toml</span><UiTag v-if="isCreating" size="sm" variant="success">待创建</UiTag><UiTag v-else-if="isProtected" size="sm" variant="info">不可删除</UiTag><UiInfoTip v-else-if="isProtected" text="受保护的保留文件名（当前仅 _shared），后端拒绝删除与同名创建。" /></div>
+            <div class="editor-bar-title"><span class="mono">{{ selectedName }}.toml</span><UiTag v-if="isCreating" size="sm" variant="success">待创建</UiTag><UiTag v-else-if="isProtected" size="sm" variant="info">不可删除</UiTag><UiInfoTip v-if="isProtected" text="受保护的保留文件名（当前仅 _shared），后端拒绝删除与同名创建。" /></div>
             <div class="editor-bar-actions">
               <UiButton v-if="!isCreating && !isProtected" variant="danger" icon="Trash2" :disabled="saving" @click="onDelete">删除</UiButton>
               <UiButton variant="primary" icon="Save" :loading="saving" :disabled="!content" @click="onSave">{{ isCreating ? '创建' : '保存' }}</UiButton>
