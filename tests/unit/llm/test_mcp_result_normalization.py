@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from quickquip.llm.mcp.types import _format_tool_result
+from quickquip.llm.mcp.types import (
+    _DELIVERABLE_RESOURCE_MIME_TYPES,
+    _MAX_RESOURCE_TEXT_CHARS,
+    _RESOURCE_TRUNCATION_MARKER,
+    _format_tool_result,
+)
 
 
 BASE64_SENTINEL = "MCP_IMAGE_BASE64_SECRET_5fd8e1"
@@ -124,7 +129,16 @@ def test_error_results_use_the_same_safe_normalization(payload):
     assert RESOURCE_BODY_SENTINEL not in result.content
 
 
-@pytest.mark.parametrize("mime_type", ["text/plain", "application/json", "application/xml", ""])
+@pytest.mark.parametrize(
+    "mime_type",
+    [
+        "text/plain",
+        "TEXT/PLAIN",
+        *sorted(_DELIVERABLE_RESOURCE_MIME_TYPES),
+        "application/json; charset=utf-8",
+        "",
+    ],
+)
 def test_inline_text_resource_delivered_for_text_family_mimes(mime_type):
     """文本族 MIME（含缺省）的内联正文交付进文本管线，URI query 不随之渲染。"""
     resource = {
@@ -160,8 +174,6 @@ def test_resource_text_withheld_for_non_text_mime():
 
 def test_oversized_resource_text_truncated_with_marker():
     """超长内联正文截断到上限并附固定标记。"""
-    from quickquip.llm.mcp.types import _MAX_RESOURCE_TEXT_CHARS
-
     body = "x" * (_MAX_RESOURCE_TEXT_CHARS + 500)
     result = _format_tool_result(
         {"content": [{"type": "resource", "resource": {
@@ -171,8 +183,8 @@ def test_oversized_resource_text_truncated_with_marker():
 
     assert len(result.text) == 1
     assert result.text[0].startswith("x" * 100)
-    assert "已截断" in result.text[0]
-    assert len(result.text[0]) <= _MAX_RESOURCE_TEXT_CHARS + 40
+    assert result.text[0].endswith(_RESOURCE_TRUNCATION_MARKER.strip())
+    assert len(result.text[0]) <= _MAX_RESOURCE_TEXT_CHARS + len(_RESOURCE_TRUNCATION_MARKER)
 
 
 def test_whitespace_resource_text_treated_as_absent():
@@ -212,9 +224,7 @@ def test_error_result_still_delivers_text_resource_body():
 
 @pytest.mark.parametrize(("overflow", "expect_marker"), [(0, False), (1, True)])
 def test_resource_truncation_boundary_is_exact(overflow, expect_marker):
-    """60,000 整不截断；60,001 起截断并附标记。"""
-    from quickquip.llm.mcp.types import _MAX_RESOURCE_TEXT_CHARS
-
+    """上限整不截断；超 1 起截断并附标记。"""
     body = "y" * (_MAX_RESOURCE_TEXT_CHARS + overflow)
     result = _format_tool_result(
         {"content": [{"type": "resource", "resource": {
