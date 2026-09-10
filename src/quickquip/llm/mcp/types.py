@@ -346,7 +346,13 @@ def _uri_scheme(value: Any) -> str:
 
 
 def _mime_type_from(item: dict[str, Any]) -> str:
-    return _safe_metadata(item.get("mimeType", item.get("mime_type", "")))
+    raw = item.get("mimeType", item.get("mime_type", ""))
+    if not isinstance(raw, str):
+        return ""
+    # MIME 语法参数（;charset=... 等）在清洗前剥离：清洗会把 ;/= 替换为 _，
+    # 带参数的合法 MIME（application/json; charset=utf-8）将无法命中
+    # 精确匹配的白名单（资源交付与图片校验同受影响）。
+    return _safe_metadata(raw.split(";", 1)[0].strip())
 
 
 def _format_tool_result(payload: dict[str, Any]) -> MCPToolCallResult:
@@ -411,6 +417,12 @@ def _format_tool_result(payload: dict[str, Any]) -> MCPToolCallResult:
                     MCPResultDiagnostic(code="invalid-content-item", content_index=index)
                 )
                 continue
+            # 内联文本 + 文本族 MIME 的资源有界交付（如 GitHub MCP 的
+            # get_file_contents 文件正文）；blob / 非文本 MIME / 无正文维持扣留。
+            body = _bounded_resource_text(resource)
+            if body is not None:
+                result.text.append(body)
+                continue
             result.deferred.append(
                 MCPDeferredContentCandidate(
                     kind="resource",
@@ -459,13 +471,48 @@ _SUPPORTED_IMAGE_MIME_TYPES = frozenset({
     "image/gif",
     "image/webp",
 })
+
+
 _IMAGE_FORMAT_MIME_TYPES = {
     "PNG": "image/png",
     "JPEG": "image/jpeg",
     "GIF": "image/gif",
     "WEBP": "image/webp",
 }
+
 _MAX_INLINE_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+# 文本族 application 类型：内联 text 资源的交付白名单（text/* 前缀另判，
+# MIME 缺省视为文本）。白名单外的 MIME 即使带内联 text 也扣留。
+_DELIVERABLE_RESOURCE_MIME_TYPES = frozenset({
+    "application/json",
+    "application/xml",
+    "application/yaml",
+    "application/x-yaml",
+    "application/toml",
+    "application/javascript",
+})
+_MAX_RESOURCE_TEXT_CHARS = 60_000
+_RESOURCE_TRUNCATION_MARKER = "\n…[MCP resource 正文超长，已截断]"
+
+
+def _resource_mime_deliverable(mime_type: str) -> bool:
+    lowered = mime_type.lower()
+    if not lowered or lowered.startswith("text/"):
+        return True
+    return lowered in _DELIVERABLE_RESOURCE_MIME_TYPES
+
+
+def _bounded_resource_text(resource: dict[str, Any]) -> str | None:
+    """内联文本资源的有界正文；None 表示扣留（无正文/空白/非文本 MIME）。"""
+    text = resource.get("text")
+    stripped = text.strip() if isinstance(text, str) else ""
+    if not stripped or not _resource_mime_deliverable(_mime_type_from(resource)):
+        return None
+    if len(stripped) > _MAX_RESOURCE_TEXT_CHARS:
+        return stripped[:_MAX_RESOURCE_TEXT_CHARS].rstrip() + _RESOURCE_TRUNCATION_MARKER
+    return stripped
 
 
 def _decode_image_candidate(candidate: MCPInlineImageCandidate) -> bytes | None:
