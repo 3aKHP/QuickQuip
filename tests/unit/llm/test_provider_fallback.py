@@ -14,7 +14,7 @@ class FakeStreamFallbackClient(OpenAIProviderClient):
         self.response_data = response_data
         self.stream_attempted = False
 
-    async def _prepare_image_inputs(self, image_urls):
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
         return []
 
     def _get_api_key(self) -> str:

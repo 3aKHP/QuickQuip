@@ -7,6 +7,7 @@ from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
+    LLMImageInput,
     LLMRequest,
     LLMResponse,
     _json_string,
@@ -23,7 +24,7 @@ class OpenAIProviderClient(BaseProviderClient):
                 return str(block.get("reasoning_content", ""))
         return ""
 
-    async def _serialize_message(self, message: LLMConversationMessage) -> dict[str, Any]:
+    def _serialize_message(self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]) -> dict[str, Any]:
         if message.role == "assistant":
             payload: dict[str, Any] = {
                 "role": "assistant",
@@ -54,10 +55,6 @@ class OpenAIProviderClient(BaseProviderClient):
                 "content": message.content,
             }
 
-        if message.inline_images:
-            image_inputs = await self._prepare_image_inputs(message.image_urls, message.inline_images)
-        else:
-            image_inputs = await self._prepare_image_inputs(message.image_urls)
         if image_inputs:
             content: list[dict[str, Any]] = [
                 *[
@@ -83,13 +80,14 @@ class OpenAIProviderClient(BaseProviderClient):
         }
         messages = [{"role": "system", "content": request.system_prompt}]
 
-        pending_tool_images = []
+        prepared_images = await self._prepare_request_images(request.messages)
+        pending_tool_images: list[LLMImageInput] = []
 
         async def _flush_tool_images() -> None:
             nonlocal pending_tool_images
             if not pending_tool_images:
                 return
-            image_inputs = await self._prepare_image_inputs([], pending_tool_images)
+            image_inputs = pending_tool_images
             if image_inputs:
                 messages.append({
                     "role": "user",
@@ -111,12 +109,12 @@ class OpenAIProviderClient(BaseProviderClient):
                 })
             pending_tool_images = []
 
-        for message in request.messages:
+        for message, image_inputs in zip(request.messages, prepared_images, strict=True):
             if message.role != "tool":
                 await _flush_tool_images()
-            messages.append(await self._serialize_message(message))
-            if message.role == "tool" and message.inline_images and not message.is_tool_error:
-                pending_tool_images.extend(message.inline_images)
+            messages.append(self._serialize_message(message, image_inputs))
+            if message.role == "tool":
+                pending_tool_images.extend(image_inputs)
         await _flush_tool_images()
 
         payload: dict[str, Any] = {

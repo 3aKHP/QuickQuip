@@ -621,3 +621,49 @@ def test_recent_context_floor_zero_is_valid(tmp_path):
     )
 
     assert loaded.runtime.recent_context_floor_seconds == 0
+
+
+def test_delivery_legacy_key_maps_to_both_domains(tmp_path: Path):
+    """旧单键按两域同值映射：true → 双开，缺省 → 双关。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        agent_delivery_enabled = true
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+    assert loaded.runtime.agent_delivery_intermediate_enabled is True
+    assert loaded.runtime.agent_delivery_final_enabled is True
+
+    loaded_off = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        agent_delivery_enabled = false
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+    assert loaded_off.runtime.agent_delivery_intermediate_enabled is False
+    assert loaded_off.runtime.agent_delivery_final_enabled is False
+
+
+def test_delivery_new_keys_beat_legacy_mapping(tmp_path: Path):
+    """新键显式配置优先于旧键映射；两域可各自独立取值。"""
+    loaded = _load(
+        tmp_path,
+        """
+        [runtime]
+        enabled = true
+        agent_delivery_enabled = true
+        agent_delivery_final_enabled = false
+        """
+        + _good_provider()
+        + _PERSONA,
+    )
+    assert loaded.runtime.agent_delivery_intermediate_enabled is True
+    assert loaded.runtime.agent_delivery_final_enabled is False

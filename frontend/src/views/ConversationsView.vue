@@ -10,7 +10,7 @@
         <div v-else class="list-scroll">
           <button v-for="c in conversations" :key="c.group_id" class="list-item qq-selectable" :class="{ active: c.group_id === selectedKey }" @click="selectConversation(c.group_id)">
             <div class="list-item-head">
-              <UiTag size="sm" :variant="typeVariant(c.type)">{{ typeLabel(c.type) }}</UiTag>
+              <UiTag size="sm" :variant="typeVariant(c.type)">{{ typeLabel(c.type) }}</UiTag><UiInfoTip v-if="c.type === 'archive'" text="私聊会话用 /end_session 结束后，消息整体转存为归档（archive:QQ号:编号），之后可在私聊用 /resume_session 恢复继续聊；归档会话只读，本页不能删除其中消息。" />
               <span class="mono list-item-id">{{ displayGroupId(c) }}</span>
             </div>
             <div class="list-item-meta"><span>{{ c.count }} 条</span><span>·</span><span>{{ formatTime(c.latest) }}</span></div>
@@ -35,7 +35,7 @@
             <div v-else class="messages-scroll">
               <div v-for="m in messages" :key="m.id" class="msg" :class="`msg--${m.role}`">
                 <div class="msg-head">
-                  <UiTag size="sm" :variant="roleVariant(m.role)">{{ m.role }}</UiTag>
+                  <UiTag size="sm" :variant="roleVariant(m.role)">{{ m.role }}</UiTag><UiInfoTip text="user 是群友/用户消息，assistant 是机器人的 LLM 回复，tool 是 LLM 调用工具（如联网搜索）的返回记录，仅在工具调用开启时产生。" />
                   <span v-if="m.sender_name" class="sender">{{ m.sender_name }}</span>
                   <span v-else-if="m.user_id" class="mono sender">uid {{ m.user_id }}</span>
                   <span v-if="m.canonical_name && m.canonical_name !== m.sender_name" class="canonical">（{{ m.canonical_name }}）</span>

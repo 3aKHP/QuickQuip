@@ -6,14 +6,14 @@
     <UiEmpty v-else-if="!rules.length" icon="Zap" title="无限流规则" />
     <div v-else class="rule-grid">
       <UiCard v-for="r in rules" :key="r.name" padding="md" shadow="sm">
-        <div class="rule-head"><span class="rule-name">{{ r.name }}</span><div class="rule-tags"><UiTag size="sm" :variant="r.scope === 'global' ? 'warn' : 'info'">{{ r.scope === 'global' ? '全局' : '按群' }}</UiTag><span class="window">窗口 {{ r.window_seconds }}s · 上限 {{ r.global_limit }}/{{ r.user_limit }}</span></div></div>
+        <div class="rule-head"><span class="rule-name">{{ r.name }} <UiInfoTip text="限流桶名：系统桶内置定义于后端，可在 chat_rules.toml 的 [rate_limit_rules] 整体覆写（配额字段需写全）或新增；多条规则可共用同一桶，命中任意一条都消耗同一配额。" /></span><div class="rule-tags"><UiTag size="sm" :variant="r.scope === 'global' ? 'warn' : 'info'">{{ r.scope === 'global' ? '全局' : '按群' }}</UiTag><UiInfoTip text="「全局」= 所有群和私聊共用一个桶，用于保护 LLM、搜索、爬虫等外部 API 或共享资源；「按群」= 每个群独立分桶，群 A 的触发不占群 B 的配额，私聊退化到合并桶。" /><span class="window">窗口 {{ r.window_seconds }}s · 上限 {{ r.global_limit }}/{{ r.user_limit }} <UiInfoTip text="滑动窗口限流：最近 n 秒内，整个桶最多触发 A 次（global_limit）、同一用户最多触发 B 次（user_limit），超限即拒绝。窗口秒数可在 chat_rules.toml 的 [rate_limit_rules] 用 window 键按桶覆盖，默认 60 秒。" /></span></div></div>
         <div v-if="!r.buckets.length" class="empty"><span class="muted">当前窗口无命中</span></div>
         <div v-else class="buckets">
           <div v-for="b in r.buckets" :key="b.group_id || '__global__'" class="bucket">
-            <div class="bucket-head"><span class="bucket-label">{{ bucketLabel(r, b) }}</span><span class="mono stat"><span :class="{ sat: b.global_used >= r.global_limit }">{{ b.global_used }}</span> / {{ r.global_limit }}</span></div>
+            <div class="bucket-head"><span class="bucket-label">{{ bucketLabel(r, b) }} <UiInfoTip text="「全局桶」是 scope=global 规则的唯一桶；「私聊/无群上下文」是按群规则在私聊或无群号场景下共用的兜底桶。" /></span><span class="mono stat"><span :class="{ sat: b.global_used >= r.global_limit }">{{ b.global_used }}</span> / {{ r.global_limit }}</span></div>
             <div class="bar"><div class="bar-fill" :class="{ sat: b.global_used >= r.global_limit }" :style="{ width: pct(b.global_used, r.global_limit) + '%' }" /></div>
             <div v-if="b.top_users.length" class="top">
-              <div class="top-head">活跃 {{ b.active_users }} 人</div>
+              <div class="top-head">活跃 {{ b.active_users }} 人 <UiInfoTip text="活跃人数 = 当前窗口内在该桶有命中记录的不同用户数；下方按用量从高到低最多列前 10 人。数字和进度条变红表示已触顶，之后的触发会被拒绝，直到窗口内旧记录滑出。" /></div>
               <div v-for="u in b.top_users" :key="u.user_id" class="top-row"><span class="mono">uid {{ u.user_id }}</span><div class="mini-bar"><div class="mini-fill" :class="{ sat: u.used >= r.user_limit }" :style="{ width: pct(u.used, r.user_limit) + '%' }" /></div><span class="mono used">{{ u.used }}/{{ r.user_limit }}</span></div>
             </div>
           </div>
@@ -25,7 +25,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchRateLimit } from '../api/rateLimit'
 
 const rules = ref<any[]>([]); const loading = ref(false); const loadError = ref<string | null>(null); const autoRefresh = ref(false); let timer: ReturnType<typeof setInterval> | null = null

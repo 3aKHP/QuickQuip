@@ -139,7 +139,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
 | `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按「请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留」推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在 `[[providers]]` 段按 provider 硬覆盖 | `4096` |
-| `agent_delivery_enabled` | 逐 Turn 交付的全局默认：开启后每次模型响应的普通正文先于工具执行分段外发；关闭时仅最终正文单发，记录不受影响。各群/私聊会话可用 `/llm delivery on/off/reset/status` 或 Web Admin「群设置」按会话覆盖 | `false` |
+| `agent_delivery_intermediate_enabled` | 中间轮交付的全局默认：开启后工具调用多轮回复中非最终轮的普通正文照常先于工具执行外发；关闭时非最终正文只记录不发送（`suppressed_by_policy`） | `false` |
+| `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息经 sink 外发；关闭时最终正文沿旧单发路径整条发送。两域独立，旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射。各群/私聊会话可用 `/llm delivery intermediate/final/all …` 或 Web Admin「群设置」按会话覆盖 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
 | `reply_chunk_max_chars` | 单段源文本上限，独立于 OneBot 协议报文长度 | `1200` |
 | `reply_send_interval_ms` | 同会话相邻发送开始时间的最小间隔（0-10000） | `800` |
@@ -246,7 +247,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
 
-> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `2097152`，`0` = 不限）限制单次请求全部内联图片的解码字节总量。发送前图片统一收口：动图（GIF）自动取首帧转静态 PNG、相同内容去重；预算按候选优先级（当前消息 → 引用 → 近期）前缀止停，第一张装不下的图片连同其后全部跳过并记录日志。该预算用于把请求体体积约束在上游网关风控上限之内（图片 base64 会被部分网关按文本估算 token）。
+> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `2097152`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片；第一张装不下的图片及后续低优先级图片全部跳过并记录日志。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算用于把请求体体积约束在上游网关风控上限之内（图片 base64 会被部分网关按文本估算 token）。
 
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 
@@ -341,7 +342,7 @@ output_per_mtok = 0.40
 
 ### `[weekly_report]` / `[monthly_report]` — 群周报 / 群月报
 
-每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源为聊天记录归档（`chat_archive.db`，全群 always-on、永不删除）。周报把全量消息经压缩序列化（按天分节、同分钟连发合并、复读折叠、URL 只留域名）后一次成文；月报按天采样控制总量。与 `[daily_summary]` 相互独立，可单独开启。
+每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源为聊天记录归档（`chat_archive.db`，全群 always-on、永不删除）。周报把全量消息经压缩序列化（按天分节、同分钟连发合并、复读折叠、URL 只留域名）后一次成文；月报按周公平分配字符预算组装输入，周内高活跃日优先整日保留，低活跃日抽稀，终稿输入维持在目标量级（默认约 24 万字符）。与 `[daily_summary]` 相互独立，可单独开启。
 
 | 键 | 说明 |
 |----|------|
@@ -350,7 +351,7 @@ output_per_mtok = 0.40
 | `publish_cron` | 发布 cron（默认 `0 10 * * *` 每天 10:00；周报/月报共用，每日发布新报告并补发未发布的） |
 | `min_messages` | 周期内最小消息数（不足时跳过；周报默认 100，月报默认 300） |
 | `length_hint` | 目标字数（周报默认 2000，月报默认 2500） |
-| `sample_per_day` | 每天采样消息数上限（仅月报生效，默认 20；周报全量进压缩序列化器，不采样） |
+| `input_char_budget` | 月报终稿聊天记录字符预算（默认 240000，最小 8000；分周公平分配，周内活跃日优先） |
 | `model_cascade` | 模型级联列表，支持 `@default` 占位符 |
 
 > 周报/月报通过 `/summary weekly|monthly on|off|status|now` 在群内按群开启。period 标识：周报为 ISO 周号（如 `2026-W24`），月报为年月（如 `2026-06`）。

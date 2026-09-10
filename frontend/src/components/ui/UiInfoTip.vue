@@ -5,9 +5,10 @@
     @focusin="open = true"
     @focusout="open = false"
   >
-    <button
+    <span
       ref="btnEl"
-      type="button"
+      role="button"
+      tabindex="0"
       class="ui-info-tip__btn"
       :aria-label="ariaLabel ?? '查看说明'"
       :aria-expanded="open"
@@ -15,10 +16,12 @@
       @mouseenter="open = true"
       @mouseleave="open = false"
       @click.stop="open = true"
+      @keydown.enter.stop.prevent="open = true"
+      @keydown.space.stop.prevent="open = true"
       @keydown.esc.stop.prevent="open = false"
     >
       <UiIcon name="CircleHelp" :size="size" />
-    </button>
+    </span>
     <Transition name="ui-info-tip">
       <span
         v-if="open"
@@ -38,6 +41,9 @@
 /**
  * 「?」悬浮说明。hover / 键盘聚焦显示，点击固定显示（触屏主路径），
  * Esc、点击外部或页面滚动关闭。说明文案走 text 属性，复杂内容用插槽覆盖。
+ *
+ * 触发元素用 span[role=button][tabindex=0] 而非 <button>：本组件常被放进
+ * tab、列表项等 <button> 内部，嵌套 button 违反 HTML 内容模型。
  *
  * 气泡为 position: fixed + 打开时 JS 实测像素坐标：absolute + 百分比居中
  * 会被滚动容器（.content）的溢出裁切吃掉越界部分，且个别引擎存在包含块
@@ -120,6 +126,9 @@ onBeforeUnmount(() => {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
+  /* inline-flex 内只有 SVG 时基线取盒子底缘，图标会骑在文字基线上偏上；
+     下移 0.15em 使图标与 CJK 文字视觉居中（flex 容器内此属性被忽略，无副作用） */
+  vertical-align: -0.15em;
 }
 
 .ui-info-tip__btn {
@@ -132,6 +141,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--qq-text-muted);
   cursor: help;
+  user-select: none;
   transition: color var(--qq-transition-fast);
 }
 

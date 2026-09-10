@@ -4,7 +4,9 @@
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
         <UiButton icon="Download" :loading="syncing" @click="startSync(null)">立即同步全部</UiButton>
+        <UiInfoTip text="除后台按 TIEBA_SYNC_INTERVAL_SECONDS 周期自动同步外，点此立即手动全量同步各吧缓存。" />
         <UiButton icon="Radar" :disabled="!selectedForum" :loading="peeking" @click="peekSelected">现爬一条</UiButton>
+        <UiInfoTip text="实时抓取该吧首页帖子、优先随机返回带图帖，仅预览不写入本地帖子池。" />
       </template>
     </UiPageHeader>
 
@@ -27,6 +29,8 @@
             <div class="forum-head">
               <span class="forum-name">{{ f.forum_keyword }}吧</span>
               <UiTag size="sm" :variant="syncVariant(f)">{{ syncLabel(f) }}</UiTag>
+              <UiInfoTip v-if="f.login_required" text="贴吧登录态已失效，同步会失败；需管理员在服务器运行 python -m quickquip.tieba.login 扫码续签后自动恢复。" />
+              <UiInfoTip v-else text="同步状态取最近一次同步结果：「未同步」表示该吧从未成功同步过；帖子计数为本地缓存池内帖子数，非贴吧实际帖数。" />
               <button class="forum-sync-btn" :disabled="syncing" @click.stop="startSync(f.forum_keyword)" title="立即同步此吧">
                 <UiIcon name="Download" :size="12" />
               </button>
@@ -66,6 +70,7 @@
                     <div class="thread-title">
                       <span class="title-text">{{ t.title }}</span>
                       <UiTag v-if="t.was_sent" size="sm" variant="success">已发送过</UiTag>
+                      <UiInfoTip v-if="t.was_sent" text="该帖此前已通过群内 /tieba 指令推送到群聊；随机抽帖时会避开最近发送过的若干条（TIEBA_RANDOM_AVOID_RECENT）。" />
                       <UiTag v-if="t.is_deleted" size="sm" variant="danger">已删除</UiTag>
                       <UiTag v-if="t.image_count" size="sm">{{ t.image_count }} 图</UiTag>
                     </div>
@@ -101,6 +106,7 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import ThreadDetailDialog from '../components/tieba/ThreadDetailDialog.vue'
 import { listTiebaForums, fetchTiebaThreads, fetchTiebaThread, tiebaImgProxyUrl, peekTiebaThread } from '../api/tieba'
 import type { TiebaForumInfo, TiebaThread, TiebaThreadRow } from '../api/tieba'

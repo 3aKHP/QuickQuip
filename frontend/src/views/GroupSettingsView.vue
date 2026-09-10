@@ -16,7 +16,7 @@
     <div class="settings-shell">
       <aside class="group-panel">
         <div class="panel-head">
-          <span class="panel-title">覆盖对象</span>
+          <span class="panel-title">覆盖对象<UiInfoTip text="一条覆盖（override）是针对单个群或私聊会话的参数定制记录，未覆盖的字段一律沿用 llm.toml 全局默认；私聊对象以 private:QQ号 形式标识。" /></span>
           <span class="panel-count">{{ groupList.length }}</span>
         </div>
 
@@ -39,8 +39,8 @@
               <UiTag v-else-if="g.enabled === false" size="sm" variant="danger">LLM 关</UiTag>
             </span>
             <span class="group-item__meta">
-              <span v-if="g.persona_id">{{ g.persona_id }}</span>
-              <span v-if="g.provider_id">{{ g.provider_id }}</span>
+              <span v-if="g.persona_id" class="mono">{{ g.persona_id }}</span>
+              <span v-if="g.provider_id" class="mono">{{ g.provider_id }}</span>
               <span v-if="g.model" class="mono">{{ g.model }}</span>
               <span v-if="!g.persona_id && !g.provider_id && !g.model">仅覆盖开关或触发方式</span>
             </span>
@@ -95,7 +95,7 @@
             <h4>运行状态</h4>
             <div class="form-grid">
               <div class="field">
-                <label>LLM 启用</label>
+                <label>LLM 启用<UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 llm.toml [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" /></label>
                 <select v-model="draftTriState.enabled">
                   <option :value="null">跟随默认（{{ defaultHint('enabled') }}）</option>
                   <option :value="true">开</option>
@@ -103,7 +103,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>记忆启用</label>
+                <label>记忆启用<UiInfoTip text="开启后每轮回复前会从该会话记忆库检索相关记忆注入提示词（注入条数为 llm.toml [runtime] memory_limit，默认 6）；关闭后既不读记忆，自动记忆抽取也不会生效。" /></label>
                 <select v-model="draftTriState.memory_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('memory_enabled') }}）</option>
                   <option :value="true">开</option>
@@ -119,9 +119,17 @@
                 </select>
               </div>
               <div class="field">
-                <label>分段发送<UiInfoTip text="开启后该会话的 LLM 回复按自然段拆成多条消息发出；关闭时长回复合并为一条。全局默认在 llm.toml 的 agent_delivery_enabled 配置。" /></label>
-                <select v-model="draftTriState.agent_delivery_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_enabled') }}）</option>
+                <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 llm.toml 的 agent_delivery_intermediate_enabled 配置。" /></label>
+                <select v-model="draftTriState.agent_delivery_intermediate_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate_enabled') }}）</option>
+                  <option :value="true">开</option>
+                  <option :value="false">关</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>最终轮分段<UiInfoTip text="开启后该会话的最终回复按自然段拆成多条消息发出；关闭时最终回复合并为一条。全局默认在 llm.toml 的 agent_delivery_final_enabled 配置。" /></label>
+                <select v-model="draftTriState.agent_delivery_final_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_final_enabled') }}）</option>
                   <option :value="true">开</option>
                   <option :value="false">关</option>
                 </select>

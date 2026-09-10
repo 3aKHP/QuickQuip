@@ -2,7 +2,7 @@ from __future__ import annotations
 
 try:
     import nonebot
-    from nonebot import on_command, on_message, on_notice
+    from nonebot import on_command, on_message, on_notice, on_type
     from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 except ModuleNotFoundError:
     nonebot = None
@@ -10,6 +10,7 @@ except ModuleNotFoundError:
     on_command = None
     on_message = None
     on_notice = None
+    on_type = None
     Message = None
     MessageSegment = None
 
@@ -19,16 +20,23 @@ from quickquip.adapters.nonebot.daily_briefing_plugin import setup as setup_dail
 from quickquip.adapters.nonebot.daily_summary_plugin import setup as setup_daily_summary
 from quickquip.adapters.nonebot.wordcloud_plugin import setup as setup_wordcloud
 from quickquip.adapters.nonebot.awakening_plugin import setup as setup_awakening
-from quickquip.adapters.nonebot.group_messages import register_message_matcher
+from quickquip.adapters.nonebot.group_messages import (
+    _archive_self_message,
+    register_message_matcher,
+)
 from quickquip.adapters.nonebot.private_messages import register_private_message_matcher
 from quickquip.adapters.nonebot.recall_handler import register_recall_handlers
-from quickquip.adapters.nonebot.self_message_events import register_self_message_events
+from quickquip.adapters.nonebot.self_message_events import (
+    register_self_message_events,
+    register_self_message_matcher,
+)
 from quickquip.adapters.nonebot.lifecycle import register_lifecycle
 from quickquip.common.bot_action_trace import install_nonebot_api_trace_hook
 
 
 matcher = None
 private_matcher = None
+self_message_matcher = None
 
 if nonebot is not None:
     if Bot is not None:
@@ -40,9 +48,13 @@ if nonebot is not None:
         driver = None
         on_message = None
         on_command = None
+        on_type = None
 
     if driver is not None:
         register_lifecycle(driver)
+
+if on_type is not None:
+    self_message_matcher = register_self_message_matcher(on_type, _archive_self_message)
 
 if on_message is not None:
     matcher = register_message_matcher(on_message, Message, MessageSegment)

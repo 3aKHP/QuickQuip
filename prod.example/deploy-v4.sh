@@ -10,8 +10,34 @@ DryRun=0
 SkipHealth=0
 KeepReleases=4
 ReleaseId=""
+Version=""
+
+usage() {
+    cat <<USAGE
+Usage: deploy-v4.sh [options]
+Default action: deploy the current working tree as a new release.
+
+Actions:
+  --status             Show current/previous releases and container status
+  --rollback [<id>]    Roll back to a previous release (default: previous)
+  --migrate            One-time migration of a legacy flat deployment
+
+Options:
+  --dry-run            Build frontend locally and preview the upload manifest
+  --skip-health        Skip the post-deploy health check (deploy/migrate only)
+  --host-alias <name>  SSH host alias (default $HostAlias)
+  --remote-dir <path>  Remote deployment root (default $RemoteDir)
+  --keep-releases <n>  Completed releases to retain, 2..100 (default $KeepReleases)
+  -h, --help           Show this help
+
+Legacy single-dash forms (-DryRun, -Status, -Rollback, -Migrate, -SkipHealth,
+-HostAlias, -RemoteDir, -KeepReleases, -LocalCheck) remain accepted as aliases.
+USAGE
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
+        -h|--help) usage; exit 0 ;;
         -DryRun|--dry-run|-LocalCheck|--local-check) DryRun=1 ;;
         -Status|--status) Mode=status; Modes=$((Modes + 1)) ;;
         -Rollback|--rollback)
@@ -22,11 +48,12 @@ while [ $# -gt 0 ]; do
         -HostAlias|--host-alias) HostAlias="${2:?missing host}"; shift ;;
         -RemoteDir|--remote-dir) RemoteDir="${2:?missing root}"; shift ;;
         -KeepReleases|--keep-releases) KeepReleases="${2:?missing retention}"; shift ;;
-        *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
+        *) printf 'Unknown argument: %s (see --help)\n' "$1" >&2; exit 2 ;;
     esac
     shift
 done
 die() { printf 'FAILED: %s\n' "$*" >&2; exit 1; }
+
 [[ "$Modes" -le 1 ]] || die "choose only one action"
 [[ "$DryRun" = 0 || ( "$Mode" = deploy && "$SkipHealth" = 0 ) ]] || die "DryRun supports deployment preview only"
 [[ "$SkipHealth" = 0 || "$Mode" = deploy || "$Mode" = migrate ]] || die "SkipHealth supports deploy/migrate only"
@@ -49,6 +76,8 @@ rsync_args=(--rsh "ssh ${ssh_args[*]}")
 if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     [ -f .env ] || die "root .env missing"
     [ -f "$ScriptDir/deploy-manifest.txt" ] || die "manifest missing"
+    Version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)"
+    [[ "$Version" =~ ^[0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.]+)*$ ]] || die "cannot parse project version from pyproject.toml"
     (cd frontend && pnpm install --frozen-lockfile && pnpm build)
     while IFS= read -r item; do
         [[ "$item" =~ ^[a-zA-Z0-9_./-]+$ && "$item" != /* && "$item" != *..* ]] || die "invalid manifest entry"
@@ -57,6 +86,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     if [ "$DryRun" = 1 ]; then
         tar --exclude=__pycache__ --exclude='*.pyc' -cf /dev/null -v -T "$ScriptDir/deploy-manifest.txt"
         printf 'Preview complete; frontend built locally, no remote connection or upload. Shared files: root .env, ops scripts, and present optional assets.\n'
+        printf 'Version identity for this release: v%s+build.<server build time>\n' "$Version"
         exit 0
     fi
     command -v rsync >/dev/null || die "local rsync required"
@@ -78,7 +108,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     rsync -aR --chmod=D700,F600 "${rsync_args[@]}" "${Shared[@]}" "$HostAlias:$Incoming/shared/"
 fi
 ssh "${ssh_args[@]}" "$HostAlias" \
-    "DETACH=1 SKIP_HEALTH=$SkipHealth bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
+    "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$SkipHealth bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
     || die "launch uncertain; inspect $RemoteDir/.deploy/$Id.log and .exit before retrying"
 Log="$RemoteDir/.deploy/$Id.log"
 ExitFile="$RemoteDir/.deploy/$Id.exit"
@@ -91,4 +121,4 @@ until ssh "${ssh_args[@]}" "$HostAlias" \
 done
 code="$(ssh "${ssh_args[@]}" "$HostAlias" "cat '$ExitFile'")" || die "cannot read completion status: $ExitFile"
 [ "$code" = 0 ] || die "remote action failed (exit $code): $Log"
-printf '%s complete. Status: bash prod/deploy-v4.sh -Status -HostAlias %s -RemoteDir %s\n' "$Mode" "$HostAlias" "$RemoteDir"
+printf '%s complete. Status: bash prod/deploy-v4.sh --status --host-alias %s --remote-dir %s\n' "$Mode" "$HostAlias" "$RemoteDir"

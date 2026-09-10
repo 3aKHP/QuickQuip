@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from quickquip.chat.period_serializer import (
     PeriodSerializeStats,
     bot_user_ids_from_env,
+    build_monthly_chat_input,
     serialize_period_chat,
 )
 
@@ -266,3 +267,68 @@ def test_bot_user_ids_from_env_parsing():
     assert bot_user_ids_from_env({"QQ_ACCOUNT": "123\t456\n789"}) == frozenset(
         {"123", "456", "789"}
     )
+
+
+# ── build_monthly_chat_input ───────────────────────────────────────────────
+
+
+def _month_msgs(day: int, n: int, *, hour: int = 10) -> list[dict]:
+    return [
+        _msg(f"u{day}-{i}", f"第{day}日消息{i}", _ts(day=day, hh=hour, mm=i % 60, ss=i // 60))
+        for i in range(n)
+    ]
+
+
+def test_monthly_input_week_headers_and_chronological_days():
+    """跨两周的月份：输出带周节标题，周内按日历序。"""
+    # 2026-09-07 周一、09-08 周二 → 第1周；09-14 周一 → 第2周
+    messages = _month_msgs(7, 2) + _month_msgs(8, 2) + _month_msgs(14, 2)
+
+    text, stats = build_monthly_chat_input(messages, local_tz=TZ, target_chars=50_000)
+
+    assert stats.weeks == 2
+    assert stats.days_full == 3
+    assert text.splitlines()[0].startswith("【第1周 09-07–09-08】")
+    assert "【09-07 周一】" in text
+    assert "【09-08 周二】" in text
+    assert "【第2周 09-14–09-14】" in text
+    assert "【09-14 周一】" in text
+    # 周内日历序：09-07 在 09-08 之前
+    assert text.index("【09-07") < text.index("【09-08")
+
+
+def test_monthly_input_quiet_days_kept_full_under_tight_budget():
+    """预算偏紧时平静日仍整日保留，活跃日竞争剩余预算。"""
+    quiet = _month_msgs(7, 2)          # 小体量
+    busy = _month_msgs(8, 40)          # 大体量
+    messages = quiet + busy
+
+    # 给足能装下平静日、但装不下整日活跃日的预算
+    full_text, full_stats = serialize_period_chat(messages, local_tz=TZ)
+    budget = len(full_text) // 2
+    text, stats = build_monthly_chat_input(messages, local_tz=TZ, target_chars=budget)
+
+    assert stats.chars <= budget
+    assert stats.days_full >= 1  # 平静日整日保留
+    assert "【09-07 周一】" in text
+    # 活跃日要么整日/抽稀进入，消息量应显著少于全量
+    assert stats.messages_selected < full_stats.messages_in
+
+
+def test_monthly_input_empty():
+    text, stats = build_monthly_chat_input([], local_tz=TZ)
+
+    assert text == ""
+    assert stats.messages_in == 0
+    assert stats.weeks == 0
+
+
+def test_monthly_input_deterministic():
+    messages = _month_msgs(7, 15) + _month_msgs(8, 30) + _month_msgs(9, 5)
+    budget = 2_000
+
+    text_a, stats_a = build_monthly_chat_input(messages, local_tz=TZ, target_chars=budget)
+    text_b, stats_b = build_monthly_chat_input(messages, local_tz=TZ, target_chars=budget)
+
+    assert text_a == text_b
+    assert stats_a == stats_b

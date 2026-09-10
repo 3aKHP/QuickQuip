@@ -15,7 +15,7 @@
         <div><dt>Model</dt><dd>{{ detail.model || '-' }}</dd></div>
         <div><dt>Status</dt><dd>{{ detail.response_status ?? detail.state }}</dd></div>
         <div><dt>Duration</dt><dd>{{ formatDuration(detail.duration_ms) }}</dd></div>
-        <div><dt>Wire Bytes</dt><dd>{{ formatBytes(detail.request_bytes + (detail.response_raw_bytes || detail.response_bytes)) }}</dd></div>
+        <div><dt>Wire Bytes<UiInfoTip text="请求字节数 + 线上响应字节数（流式响应按 SSE 原文计）。" /></dt><dd>{{ formatBytes(detail.request_bytes + (detail.response_raw_bytes || detail.response_bytes)) }}</dd></div>
         <div><dt>Agent Loop</dt><dd>{{ detail.agent_loop_id.slice(0, 8) }}</dd></div>
         <div><dt>HTTP Step</dt><dd>#{{ detail.loop_sequence }}</dd></div>
       </dl>
@@ -43,6 +43,7 @@
             {{ rawLabel }}
           </button>
         </div>
+        <UiInfoTip v-if="contentKind === 'body'" text="流式响应的两种视图：「组合 JSON」是客户端把 SSE 事件重建出的完整响应对象，「SSE 原文」是未加工的传输文本。" />
         <div class="payload-actions">
           <UiButton icon="Copy" size="sm" variant="ghost" title="复制当前文本" @click="copyCurrent" />
           <UiButton icon="Download" size="sm" variant="ghost" title="下载当前文本" @click="downloadCurrent" />
@@ -66,6 +67,7 @@ import type { TraceCallDetail } from '../../api/logs'
 import UiButton from '../ui/UiButton.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
 import UiLoading from '../ui/UiLoading.vue'
+import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { toast } from '../../toast'
 

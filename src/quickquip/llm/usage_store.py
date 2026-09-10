@@ -130,6 +130,7 @@ class LLMUsageStore:
                         feature               TEXT,
                         group_id              TEXT,
                         persona_id            TEXT,
+                        run_id                TEXT,
                         agent_loop_id         TEXT,
                         envelope_tokens       INTEGER,
                         epoch_history_tokens  INTEGER,
@@ -155,7 +156,8 @@ class LLMUsageStore:
                         pricing_confidence    TEXT,
                         priced                INTEGER NOT NULL DEFAULT 0,
                         state                 TEXT NOT NULL DEFAULT 'ok',
-                        error_message         TEXT
+                        error_message         TEXT,
+                        response_outcome      TEXT
                     );
                     """
                 )
@@ -184,6 +186,8 @@ class LLMUsageStore:
                     "pricing_source": "TEXT",
                     "pricing_confidence": "TEXT",
                     "finish_reason": "TEXT",
+                    "response_outcome": "TEXT",
+                    "run_id": "TEXT",
                 }
                 for name, definition in migrations.items():
                     columns = {
@@ -207,6 +211,7 @@ class LLMUsageStore:
                     CREATE INDEX IF NOT EXISTS idx_usage_group    ON llm_usage_events(group_id, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_model    ON llm_usage_events(model, ts DESC);
                     CREATE INDEX IF NOT EXISTS idx_usage_persona  ON llm_usage_events(persona_id, ts DESC);
+                    CREATE INDEX IF NOT EXISTS idx_usage_run_id   ON llm_usage_events(run_id);
                     """
                 )
                 # 历史 claude 行标签 backfill（issue #202）：input_tokens 列自始存
@@ -222,7 +227,8 @@ class LLMUsageStore:
             self._schema_ready = True
 
     def record(self, row: dict) -> None:
-        """落一行用量（ts 自动补 UTC now）。row 的键须是表列子集。"""
+        """落一行用量（ts 缺省补 UTC now；row 自带 ts 时以 row 为准——计量路径传入
+        调用结束时刻，见 usage._schedule_usage_record）。row 的键须是表列子集。"""
         self._ensure_schema()
         self._cleanup_if_due()
         full = {"ts": _utc_now(), **row}
@@ -233,6 +239,38 @@ class LLMUsageStore:
                 f"INSERT INTO llm_usage_events ({', '.join(cols)}) VALUES ({placeholders})",
                 list(full.values()),
             )
+
+    def list_generation_hops(
+        self,
+        *,
+        run_id: str | None = None,
+        feature: str | None = None,
+        group_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[dict]:
+        """报文「生成日志」的跳列表：优先 run_id 精确归因；历史报文无 run_id 时
+        按 feature + group_id + 时间窗 (since, until] 兜底。按时间正序返回。"""
+        self._ensure_schema()
+        if run_id:
+            where = "run_id = ?"
+            params: list = [run_id]
+        else:
+            where = "feature = ? AND group_id = ? AND ts > ? AND ts <= ?"
+            params = [feature, group_id, since, until]
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT ts, provider_id, model, duration_ms,
+                       input_tokens, output_tokens, total_tokens, cost_usd,
+                       finish_reason, state, error_message, response_outcome
+                FROM llm_usage_events
+                WHERE {where}
+                ORDER BY ts ASC, id ASC
+                """,
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def summary(self, cutoff: str, **filters: str | None) -> dict:
         """聚合用量/成本（仅 state='ok' 行计入金额；error/cancelled 单独计数）。"""

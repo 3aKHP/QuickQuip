@@ -25,13 +25,15 @@ LLM 模块的详细结构、边界和群内命令说明见 [docs/dev/llm-module.
 
 ```bash
 # 在本地项目目录执行，使用自己的 SSH alias
-bash prod/deploy-v4.sh -DryRun
-bash prod/deploy-v4.sh -HostAlias quickquip-prod
-bash prod/deploy-v4.sh -Status -HostAlias quickquip-prod
-bash prod/deploy-v4.sh -Rollback -HostAlias quickquip-prod
+bash prod/deploy-v4.sh --dry-run
+bash prod/deploy-v4.sh --host-alias quickquip-prod
+bash prod/deploy-v4.sh --status --host-alias quickquip-prod
+bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 ```
 
-已有平铺部署首次使用 `-Migrate`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `-SkipHealth`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`。
+已有平铺部署首次使用 `--migrate`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `--skip-health`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`；Bash 的旧式单横线参数（`-DryRun`、`-Status` 等）仍作为别名接受，完整接口见 `bash prod/deploy-v4.sh --help`。
+
+每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
 部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env` 和数据库。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`-DryRun` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
 

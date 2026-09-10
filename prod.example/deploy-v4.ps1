@@ -28,6 +28,7 @@ if ($ReleaseId -and $ReleaseId -cnotmatch '^[0-9]{8}-[0-9]{6}(-[a-f0-9]{12})?(-b
 if ($RemoteDir -cnotmatch '^/[a-zA-Z0-9_./-]+$' -or $RemoteDir -eq '/' -or $RemoteDir.Contains('/../')) { throw "Invalid absolute deployment root" }
 if ($HostAlias -cnotmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$') { throw "Invalid SSH alias" }
 if ($KeepReleases -lt 2 -or $KeepReleases -gt 100) { throw "KeepReleases must be 2..100" }
+$Version = ""
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $SshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3')
@@ -42,6 +43,10 @@ try {
     }
     if ($Mode -in @('deploy', 'migrate')) {
         if (-not (Test-Path '.env')) { throw 'Root .env missing' }
+        $versionLine = Select-String -Path 'pyproject.toml' -Pattern '^version = "(.+)"$' | Select-Object -First 1
+        if (-not $versionLine) { throw 'Cannot parse project version from pyproject.toml' }
+        $Version = $versionLine.Matches[0].Groups[1].Value
+        if ($Version -cnotmatch '^[0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.]+)*$') { throw "Invalid project version: $Version" }
         $pnpm = Get-Command pnpm.cmd, pnpm.exe, pnpm -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $pnpm) { throw 'Install pnpm and put it on PATH' }
         Push-Location frontend
@@ -62,6 +67,7 @@ try {
         if ($DryRun) {
             Invoke-Native 'archive preview' { tar -tzf $Archive }
             Write-Host 'Preview complete; frontend built locally, temporary archive removed, no remote connection or upload.'
+            Write-Host "Version identity for this release: v$Version+build.<server build time>"
             return
         }
     }
@@ -85,7 +91,7 @@ try {
     }
     $skip = if ($SkipHealth) { '1' } else { '0' }
     Invoke-Native 'launch (if uncertain, inspect operation log before retrying)' {
-        ssh @SshArgs $HostAlias "DETACH=1 SKIP_HEALTH=$skip bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
+        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$skip bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
     }
     $Log = "$RemoteDir/.deploy/$Id.log"
     $ExitFile = "$RemoteDir/.deploy/$Id.exit"

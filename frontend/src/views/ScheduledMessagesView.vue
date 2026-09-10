@@ -12,7 +12,7 @@
     <UiCard v-else padding="none" shadow="sm">
       <div class="table-scroll">
         <table class="job-table">
-          <thead><tr><th>ID</th><th>cron</th><th>群号</th><th>类型</th><th>启用</th><th>来源</th><th>消息</th><th>更新时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>cron</th><th>群号</th><th>类型<UiInfoTip text="固定文案 = 到点原样发送；LLM 任务 = 到点把内容作为指令交给 LLM、生成结果再发群。该群 LLM 被关闭时，LLM 任务的当次触发会被跳过。" /></th><th>启用</th><th>来源<UiInfoTip text="任务的创建渠道：命令 = 群内 /schedule 命令；LLM = LLM 的 manage_scheduled_messages 工具（需在 config/llm.toml [tools] 启用）；Web = 本后台创建。" /></th><th>消息</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="job in jobs" :key="job.id">
               <td class="mono">{{ job.id }}</td>
@@ -20,7 +20,7 @@
               <td class="mono">{{ job.group_ids.join(', ') }}</td>
               <td class="kind-cell">
                 <UiTag size="sm" :variant="job.kind === 'llm' ? 'cyan' : 'info'">{{ job.kind === 'llm' ? 'LLM 任务' : '固定文案' }}</UiTag>
-                <UiTag v-if="!job.recurring" size="sm" variant="warn">一次性</UiTag>
+                <template v-if="!job.recurring"><UiTag size="sm" variant="warn">一次性</UiTag><UiInfoTip text="一次性任务：首次触发成功后自动从列表删除。" /></template>
               </td>
               <td><UiToggle :model-value="job.enabled" @update:model-value="toggleEnabled(job, $event)" /></td>
               <td><UiTag size="sm" :variant="job.origin === 'web' ? 'info' : 'accent'">{{ originLabel(job.origin) }}</UiTag></td>
@@ -119,7 +119,7 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton fr
 import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'
 import UiToggle from '../components/ui/UiToggle.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'; import UiSegmented from '../components/ui/UiSegmented.vue'
-import UiDatePicker from '../components/ui/UiDatePicker.vue'
+import UiDatePicker from '../components/ui/UiDatePicker.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchScheduledMessages, createScheduledMessage, updateScheduledMessage, deleteScheduledMessage, type ScheduledMessageJob, type ScheduledMessagePatch } from '../api/scheduledMessages'
 import { fetchKnownGroups } from '../api/groups'
 import { assembleCron, parseCronToSimple, onceAtInFuture, DEFAULT_SIMPLE_FIELDS, WEEKDAY_NAMES, type SimpleFields } from '../lib/scheduledCron'

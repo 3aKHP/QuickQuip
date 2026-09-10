@@ -94,6 +94,32 @@ async def test_daily_briefing_retries_on_max_tokens(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_daily_briefing_retries_when_response_only_contains_reasoning(monkeypatch):
+    clients = {
+        "a": _StubClient(LLMResponse(
+            text="<think>只有思考过程</think>", model="m1", finish_reason="stop"
+        )),
+        "b": _StubClient(LLMResponse(text="完整播报", model="m2", finish_reason="stop")),
+    }
+    monkeypatch.setattr(
+        "quickquip.llm.briefing.build_provider_client", lambda provider: clients[provider.id]
+    )
+
+    content, model_used = await generate_daily_briefing(
+        context=_context(),
+        persona=PersonaConfig(id="default", display_name="默认", system_prompt="测试"),
+        group_id="1001",
+        briefing_config=_llm_config().daily_briefing,
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+    )
+
+    assert content == "完整播报"
+    assert model_used == "b/m2"
+
+
+@pytest.mark.asyncio
 async def test_daily_briefing_cascade_skips_disabled_provider(monkeypatch):
     """cascade 第一档 provider 被 enabled = false 禁用时跳过，直接用下一档。"""
     cfg = _llm_config()
@@ -145,4 +171,9 @@ async def test_daily_briefing_usage_scope_carries_persona(monkeypatch):
         default_model="m1",
     )
 
-    assert ("briefing", {"group_id": "1001", "persona_id": "nightwatch"}) in calls
+    assert len(calls) == 1
+    feature, kwargs = calls[0]
+    assert feature == "briefing"
+    assert kwargs["group_id"] == "1001"
+    assert kwargs["persona_id"] == "nightwatch"
+    assert kwargs["run_id"]  # 每次简报生成携带非空 run_id

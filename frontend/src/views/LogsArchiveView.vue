@@ -1,6 +1,7 @@
 <template>
   <div class="page">
     <UiPageHeader title="日志归档" subtitle="浏览、预览与下载已轮转的历史日志文件">
+      <template #subtitle><UiInfoTip text="日志按天轮转：每天 0 点切换到新的 quickquip_YYYY-MM-DD.log，仅保留最近 14 天，过期文件自动删除。" /></template>
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadFiles">刷新归档</UiButton>
       </template>
@@ -18,7 +19,7 @@
           >
             <div class="archive-item-head">
               <span class="archive-name">{{ file.name }}</span>
-              <UiTag v-if="file.is_current" size="sm" variant="success">当前</UiTag>
+              <UiTag v-if="file.is_current" size="sm" variant="success">当前</UiTag><UiInfoTip v-if="file.is_current" text="该文件是机器人当前正在写入的当日日志，内容仍在持续增长，刷新可看到更新。" />
             </div>
             <div class="archive-meta">
               <span>{{ formatBytes(file.size) }}</span>
@@ -37,7 +38,7 @@
           <template v-else>
             <div class="preview-head">
               <span class="preview-title">{{ selectedFile }}</span>
-              <UiTag size="sm">{{ previewLines.length }} 行</UiTag>
+              <UiTag size="sm">{{ previewLines.length }} 行</UiTag><UiInfoTip :text="`预览只显示该文件末尾的 ${PREVIEW_TAIL_LINES} 行；查看完整内容请使用「下载」。`" />
             </div>
             <pre class="preview-block">{{ previewLines.join('\n') }}</pre>
           </template>
@@ -55,6 +56,7 @@ import UiCard from '../components/ui/UiCard.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { buildLogDownloadUrl, fetchLogIndex, fetchLogTail } from '../api/logs'
 
 interface LogFileItem {
@@ -94,11 +96,14 @@ function downloadUrl(name: string): string {
   return buildLogDownloadUrl(name)
 }
 
+/** 预览尾读行数：说明文案与请求共用同一取值 */
+const PREVIEW_TAIL_LINES = 240
+
 async function loadPreview(name: string) {
   if (!name) return
   previewLoading.value = true
   try {
-    const data = await fetchLogTail(name, 240)
+    const data = await fetchLogTail(name, PREVIEW_TAIL_LINES)
     previewLines.value = data.lines || []
   } catch {
     previewLines.value = []

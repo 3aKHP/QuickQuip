@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from quickquip.chat.archive import ChatArchive
+from quickquip.chat.archive import ChatArchive, RecordResult
 
 
 def _ts(minutes: float) -> float:
@@ -93,3 +93,52 @@ def test_read_window_excludes_bot_rows(tmp_path: Path):
 
     # 空集合不改变行为
     assert archive.read_window("10001", base, base + 10, exclude_user_ids=set()) == full
+
+
+def test_record_result_distinguishes_insert_backfill_and_duplicate(tmp_path: Path):
+    archive = ChatArchive(tmp_path / "a.db")
+    kwargs = {"group_id": "10001", "sender_name": "n", "text": "内容", "ts": _ts(0)}
+
+    assert archive.record_result(**kwargs) is RecordResult.INSERTED
+    assert archive.record_result(**kwargs, user_id="1") is RecordResult.BACKFILLED
+    assert archive.record_result(**kwargs, user_id="1") is RecordResult.DUPLICATE
+    assert archive.record(**kwargs) is False
+
+
+def test_unavailable_archive_retries_with_monotonic_clock(tmp_path: Path, monkeypatch):
+    import sqlite3
+    from unittest.mock import patch
+
+    import quickquip.chat.archive as archive_module
+
+    clock = [1.0]
+    monkeypatch.setattr(archive_module, "monotonic", lambda: clock[0])
+    with patch.object(ChatArchive, "_connect", side_effect=sqlite3.OperationalError("database is locked")):
+        archive = ChatArchive(tmp_path / "a.db")
+        assert archive.record_result("10001", "n", "暂时不可用", message_id="m1") is RecordResult.FAILED
+    # The first failed retry starts the cooldown; the hot path remains fail-soft.
+    assert archive.record("10001", "n", "冷却中", message_id="m2") is False
+    clock[0] = 62.0
+    assert archive.record("10001", "n", "恢复后的消息", message_id="m3") is True
+    assert [row["message_id"] for row in archive.read_all("10001")] == ["m3"]
+
+
+def test_record_result_reports_connection_failure(tmp_path: Path):
+    import sqlite3
+    from unittest.mock import patch
+
+    archive = ChatArchive(tmp_path / "a.db")
+    with patch.object(archive, "_connect", side_effect=sqlite3.OperationalError("database is locked")):
+        assert archive.record_result("10001", "n", "未写入", message_id="m1") is RecordResult.FAILED
+    assert archive.read_all("10001") == []
+
+
+def test_list_groups_counts_distinct_asia_shanghai_dates(tmp_path: Path):
+    archive = ChatArchive(tmp_path / "a.db")
+    before_midnight = datetime(2026, 9, 9, 15, 59, tzinfo=timezone.utc).timestamp()
+    after_midnight = datetime(2026, 9, 9, 16, 1, tzinfo=timezone.utc).timestamp()
+    archive.record("10001", "n", "第一条", ts=before_midnight, message_id="m1")
+    archive.record("10001", "n", "同日第二条", ts=before_midnight + 30, message_id="m2")
+    archive.record("10001", "n", "次日", ts=after_midnight, message_id="m3")
+
+    assert archive.list_groups()[0]["days"] == 2

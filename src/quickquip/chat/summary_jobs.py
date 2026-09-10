@@ -25,10 +25,10 @@ from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.chat.period_report import (
     PERIOD_WEEKLY,
     compute_period_window,
-    sample_messages_by_day,
 )
 from quickquip.chat.period_serializer import bot_user_ids_from_env
 from quickquip.llm.summarize import generate_daily_summary, generate_period_report
+from quickquip.llm.usage import current_usage_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ async def generate_summary_one(
     )
     if result is not None:
         content, model_used = result
-        store.upsert(group_id, summary_date, content, model_used)
+        store.upsert(group_id, summary_date, content, model_used, run_id=current_usage_run_id())
 
 
 async def generate_summaries_job(
@@ -231,14 +231,10 @@ async def run_period_generation(
         )
         return None
 
-    if period_type == PERIOD_WEEKLY:
-        # 1.15.2 起周报全量进压缩序列化器（宽窗模型一次成文），
-        # 溢出由级联每跳字符预算兜底截断。
-        sampled = messages
-    else:
-        sampled = sample_messages_by_day(messages, cfg.sample_per_day)
-        if not sampled:
-            return None
+    # 周报/月报均全量进入序列化层：周报直接压缩序列化；月报由
+    # build_monthly_chat_input 按周公平预算组装（不再 sample_per_day）。
+    # 溢出由级联每跳字符预算兜底截断。
+    sampled = messages
 
     settings = svc.get_group_settings(group_id)
     persona = llm_config.personas.get(settings.persona_id) or next(
@@ -266,6 +262,7 @@ async def run_period_generation(
             default_model=settings.model,
             local_tz=_LOCAL_TZ,
             bot_user_ids=bot_user_ids_from_env(),
+            input_char_budget=getattr(cfg, "input_char_budget", None),
         )
     except Exception:
         logger.exception("period_report[%s]: generation failed for group %s", period_type, group_id)
@@ -293,7 +290,7 @@ async def generate_period_one(
     )
     if result is not None:
         content, model_used = result
-        store.upsert(group_id, period_type, period_key, content, model_used)
+        store.upsert(group_id, period_type, period_key, content, model_used, run_id=current_usage_run_id())
     return result
 
 

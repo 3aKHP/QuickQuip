@@ -166,7 +166,7 @@ async def test_mcp_non_text_result_reaches_provider_only_as_safe_notice(
                 {"type": "image", "data": image_sentinel, "mimeType": "image/png"},
                 {"type": "resource", "resource": {
                     "uri": f"https://example.test/data?token={resource_sentinel}",
-                    "text": resource_sentinel,
+                    "blob": resource_sentinel,
                 }},
             ]}
         ).content
@@ -186,6 +186,41 @@ async def test_mcp_non_text_result_reaches_provider_only_as_safe_notice(
     assert "resource 项" in provider_text
     assert image_sentinel not in provider_text
     assert resource_sentinel not in provider_text
+
+
+async def test_mcp_text_resource_body_reaches_provider_without_uri_query(
+    mcp_service,
+    patch_provider_builder,
+):
+    """内联文本资源正文进入 provider 请求，URI query 凭据不随之泄漏。"""
+    body_sentinel = "MCP_PROVIDER_RESOURCE_BODY_77e2"
+    token_sentinel = "MCP_PROVIDER_RESOURCE_TOKEN_44c6"
+    stub = StubMCPToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+
+    async def fake_execute(alias, arguments, context):
+        _ = alias, arguments, context
+        return _format_tool_result(
+            {"content": [{"type": "resource", "resource": {
+                "uri": f"https://example.test/file.py?token={token_sentinel}",
+                "text": body_sentinel,
+                "mimeType": "text/plain",
+            }}]}
+        ).content
+
+    mcp_service.mcp_manager.execute = fake_execute
+    await mcp_service.generate_reply(
+        group_id=2001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="帮我走 MCP 工具",
+        recent_messages=[],
+    )
+
+    provider_text = "\n".join(message.content for message in stub.requests[-1].messages)
+    assert body_sentinel in provider_text
+    assert "resource 项" not in provider_text
+    assert token_sentinel not in provider_text
 
 
 async def test_mcp_image_result_reaches_vision_provider_as_inline_bytes(

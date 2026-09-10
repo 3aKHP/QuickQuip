@@ -15,7 +15,7 @@ import hashlib
 import logging
 import warnings
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 
 from PIL import Image, UnidentifiedImageError
@@ -130,57 +130,61 @@ def _normalize(label: str, raw: bytes, declared: str) -> tuple[bytes, str] | Non
     return raw, sniffed
 
 
+@dataclass
+class InlineMediaBudget:
+    """一次请求组装的媒体预算，按优先级接收多批候选。
+
+    由请求组装函数创建并显式传递；跨消息共享去重和前缀止停状态。
+    max_total_bytes <= 0 表示不限字节，内容去重和单图限制持续生效。
+    """
+
+    max_total_bytes: int
+    total: int = field(default=0, init=False)
+    exhausted: bool = field(default=False, init=False)
+    _seen: set[str] = field(default_factory=set, init=False, repr=False)
+
+    def guard(self, candidates: list[tuple[str, bytes, str]]) -> tuple[list[GuardedMedia], list[str]]:
+        kept: list[GuardedMedia] = []
+        dropped: list[str] = []
+        for index, (label, raw, declared) in enumerate(candidates):
+            if self.exhausted:
+                dropped.extend(item[0] for item in candidates[index:])
+                break
+            normalized = _normalize(label, raw, declared)
+            if normalized is None:
+                dropped.append(label)
+                continue
+            data, media_type = normalized
+            content_hash = hashlib.sha256(data).hexdigest()
+            if content_hash in self._seen:
+                logger.info("media_guard: 去重内联媒体 %s（同内容已保留）", label)
+                dropped.append(label)
+                continue
+            if len(data) > MAX_IMAGE_BYTES:
+                logger.warning(
+                    "media_guard: 跳过超限内联媒体 %s（%d bytes > 单图上限 %d）",
+                    label, len(data), MAX_IMAGE_BYTES,
+                )
+                dropped.append(label)
+                continue
+            if self.max_total_bytes > 0 and self.total + len(data) > self.max_total_bytes:
+                logger.warning(
+                    "media_guard: 内联媒体超预算，丢弃 %s 及后续低优先级图片"
+                    "（%d bytes，已保留 %d/%d bytes）",
+                    label, len(data), self.total, self.max_total_bytes,
+                )
+                self.exhausted = True
+                dropped.extend(item[0] for item in candidates[index:])
+                break
+            self._seen.add(content_hash)
+            self.total += len(data)
+            kept.append(GuardedMedia(label=label, data=data, media_type=media_type, content_hash=content_hash))
+        return kept, dropped
+
+
 def guard_inline_media(
     candidates: list[tuple[str, bytes, str]],
     max_total_bytes: int,
 ) -> tuple[list[GuardedMedia], list[str]]:
-    """对单请求内联媒体做归一、去重与字节预算，返回（保留列表, 丢弃标签）。
-
-    ``candidates`` 为 ``(label, 原始字节, 声明 media_type)``；``max_total_bytes <= 0``
-    表示不限总量。同内容只保留首份；单图超过 ``MAX_IMAGE_BYTES`` 整图丢弃。
-
-    预算按优先级前缀止停：候选顺序即重要性顺序（当前消息 → 引用 → 近期），
-    第一张装不下的图片连同其后全部丢弃——丢弃当前大图却保留后续无关小图，
-    会让模型看到错误 priority 的图片，比看不到更糟。
-    """
-    kept: list[GuardedMedia] = []
-    dropped: list[str] = []
-    seen: set[str] = set()
-    total = 0
-    for index, (label, raw, declared) in enumerate(candidates):
-        normalized = _normalize(label, raw, declared)
-        if normalized is None:
-            dropped.append(label)
-            continue
-        data, media_type = normalized
-        content_hash = hashlib.sha256(data).hexdigest()
-        if content_hash in seen:
-            logger.info("media_guard: 去重内联媒体 %s（同内容已保留）", label)
-            dropped.append(label)
-            continue
-        if len(data) > MAX_IMAGE_BYTES:
-            logger.warning(
-                "media_guard: 跳过超限内联媒体 %s（%d bytes > 单图上限 %d）",
-                label,
-                len(data),
-                MAX_IMAGE_BYTES,
-            )
-            dropped.append(label)
-            continue
-        if max_total_bytes > 0 and total + len(data) > max_total_bytes:
-            remaining = [item[0] for item in candidates[index:]]
-            logger.warning(
-                "media_guard: 内联媒体超预算，丢弃 %s 及其后 %d 张"
-                "（%d bytes，已保留 %d/%d bytes）",
-                label,
-                len(remaining) - 1,
-                len(data),
-                total,
-                max_total_bytes,
-            )
-            dropped.extend(remaining)
-            break
-        seen.add(content_hash)
-        total += len(data)
-        kept.append(GuardedMedia(label=label, data=data, media_type=media_type, content_hash=content_hash))
-    return kept, dropped
+    """归一、去重并限制一批媒体；多批请求通过 InlineMediaBudget 共享额度。"""
+    return InlineMediaBudget(max_total_bytes).guard(candidates)

@@ -27,16 +27,18 @@ Both local drivers share `remote-deploy-v4.sh` and `deploy-state.py`.
 | Action | Bash | PowerShell |
 |---|---|---|
 | Deploy | `bash prod/deploy-v4.sh` | `prod/deploy-v4.ps1` |
-| Local preview | `bash prod/deploy-v4.sh -DryRun` | `prod/deploy-v4.ps1 -DryRun` |
-| Status | `bash prod/deploy-v4.sh -Status` | `prod/deploy-v4.ps1 -Status` |
-| Previous release | `bash prod/deploy-v4.sh -Rollback` | `prod/deploy-v4.ps1 -Rollback` |
-| Explicit rollback | `bash prod/deploy-v4.sh -Rollback <id>` | `prod/deploy-v4.ps1 -Rollback -ReleaseId <id>` |
-| Flat-layout migration and deploy | `bash prod/deploy-v4.sh -Migrate` | `prod/deploy-v4.ps1 -Migrate` |
-| First deployment awaiting QQ login | `bash prod/deploy-v4.sh -SkipHealth` | `prod/deploy-v4.ps1 -SkipHealth` |
+| Local preview | `bash prod/deploy-v4.sh --dry-run` | `prod/deploy-v4.ps1 -DryRun` |
+| Status | `bash prod/deploy-v4.sh --status` | `prod/deploy-v4.ps1 -Status` |
+| Previous release | `bash prod/deploy-v4.sh --rollback` | `prod/deploy-v4.ps1 -Rollback` |
+| Explicit rollback | `bash prod/deploy-v4.sh --rollback <id>` | `prod/deploy-v4.ps1 -Rollback -ReleaseId <id>` |
+| Flat-layout migration and deploy | `bash prod/deploy-v4.sh --migrate` | `prod/deploy-v4.ps1 -Migrate` |
+| First deployment awaiting QQ login | `bash prod/deploy-v4.sh --skip-health` | `prod/deploy-v4.ps1 -SkipHealth` |
 
-Shared parameters: `-HostAlias`, `-RemoteDir` (default `/opt/QuickQuip`), `-KeepReleases` (2..100, default 4). Remote paths use letters, digits, dot, slash, underscore or hyphen.
+Shared parameters (Bash canonical / legacy alias): `--host-alias` / `-HostAlias`, `--remote-dir` / `-RemoteDir` (default `/opt/QuickQuip`), `--keep-releases` / `-KeepReleases` (2..100, default 4). Remote paths use letters, digits, dot, slash, underscore or hyphen. Run `bash prod/deploy-v4.sh --help` for the full interface; legacy single-dash forms remain accepted as aliases.
 
-`-DryRun` builds the frontend locally and previews the upload; PowerShell creates and removes a temporary archive. It makes no remote connection. `-LocalCheck` is a compatibility alias. Combining preview with migration, rollback or status is rejected. `-SkipHealth` applies only to deployment/migration and explicitly marks the result unverified; manual rollback always requires health verification.
+`--dry-run` builds the frontend locally and previews the upload; PowerShell creates and removes a temporary archive. It makes no remote connection. `-LocalCheck` is a compatibility alias. Combining preview with migration, rollback or status is rejected. `--skip-health` applies only to deployment/migration and explicitly marks the result unverified; manual rollback always requires health verification.
+
+Every release carries a version identity built from the deployed `pyproject.toml` version plus a timestamp captured on the server when the image build finishes (for example `1.15.3-dev.2+build.20260909.065235`); it is echoed in the `image built` and `release complete` transaction log lines. If you maintain your own private ops-trail tooling, `remote-deploy-v4.sh` marks the spot where `$VersionId` is available for you to record it.
 
 For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` after an explicit `-SkipHealth` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `prod/check_bot.sh`; `prod/cron_check_bot.sh` remains the cron entry.
 

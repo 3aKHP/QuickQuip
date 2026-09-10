@@ -27,39 +27,50 @@ export async function fetchSummaryGroups(): Promise<string[]> {
   return request('/api/summaries-groups')
 }
 
-/** 对应 GET /api/summaries-health：总结族生成健康度聚合 */
+/** 对应 GET /api/summaries-health：总结族生成健康度聚合（feature × outcome 桶） */
 export interface HealthFeatureRow {
   feature: string
-  state: string
+  outcome: 'accepted' | 'discarded_finish' | 'discarded_empty' | 'provider_error' | 'cancelled' | 'unknown'
   calls: number
   cost_usd: number | null
   avg_duration_ms: number | null
 }
 
-export interface HealthFinishRow {
-  feature: string
-  provider_id: string
-  model: string
-  finish_reason: string
-  calls: number
-}
-
-export interface HealthGroupRow {
-  feature: string
-  group_id: string
-  calls: number
-  failed: number
-}
-
 export interface SummariesHealth {
   days: number
   features: HealthFeatureRow[]
-  finish_reasons: HealthFinishRow[]
-  groups: HealthGroupRow[]
 }
 
 export async function fetchSummariesHealth(days: number): Promise<SummariesHealth> {
   return request(`/api/summaries-health?days=${days}`)
+}
+
+/** 生成日志的一跳：对应 usage_store.list_generation_hops 的行投影 */
+export interface GenerationHop {
+  ts: string
+  provider_id: string
+  model: string
+  duration_ms: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  cost_usd: number | null
+  finish_reason: string | null
+  state: 'ok' | 'error' | 'cancelled'
+  error_message: string | null
+  response_outcome: string | null
+}
+
+/** 对应 GET .../generation-log：attribution = run_id 精确归因 / time_window 历史兜底 */
+export interface GenerationLog {
+  ok: boolean
+  attribution: 'run_id' | 'time_window'
+  run_id: string | null
+  hops: GenerationHop[]
+}
+
+export async function fetchSummaryGenerationLog(groupId: string, date: string): Promise<GenerationLog> {
+  return request(`/api/summaries/${groupId}/${date}/generation-log`)
 }
 
 export async function fetchSummaries(groupId: string): Promise<SummaryRow[]> {

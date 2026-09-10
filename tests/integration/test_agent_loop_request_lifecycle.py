@@ -36,7 +36,8 @@ async def test_cancellation_closes_loop_preserves_facts_and_allows_next_request(
     if private:
         llm_service.start_private_session(2002)
     runtime = llm_service.config.runtime
-    monkeypatch.setattr(runtime, "agent_delivery_enabled", delivery_enabled)
+    monkeypatch.setattr(runtime, "agent_delivery_intermediate_enabled", delivery_enabled)
+    monkeypatch.setattr(runtime, "agent_delivery_final_enabled", delivery_enabled)
     monkeypatch.setattr(runtime, "reply_split_threshold_chars", 120)
     monkeypatch.setattr(runtime, "reply_chunk_max_chars", 240)
     text = "A" * 120 + "\n\n" + "B" * 120 + "\n\n" + "C" * 120

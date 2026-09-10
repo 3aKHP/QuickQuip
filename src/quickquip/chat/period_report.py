@@ -1,12 +1,13 @@
-"""群周报 / 群月报存储与采样。
+"""群周报 / 群月报存储与窗口计算。
 
-周报/月报数据源为聊天归档（chat_archive，always-on）。周报全量消息
-经压缩序列化（period_serializer）传给 LLM 生成管线；月报按天采样
-控制总量（llm/summarize.py: generate_period_report）。
+周报/月报数据源为聊天归档（chat_archive，always-on）。周报全量消息经
+压缩序列化（period_serializer.serialize_period_chat）传给 LLM；月报由
+period_serializer.build_monthly_chat_input 按周公平预算组装输入
+（llm/summarize.py: generate_period_report）。
 
 - PeriodReportStore：SQLite 存储，按 (group_id, period_type, period_key) 唯一。
 - PeriodReportEnabledGroups：周/月各自独立的 opt-in 群集合。
-- sample_messages_by_day：月报按天均匀采样，控制喂给 LLM 的总量。
+- sample_messages_by_day：按天均匀抽样的通用工具（月报组装内部同类策略）。
 - period_key_for：生成 ISO 周号（2026-W24）或年月（2026-06）。
 """
 
@@ -124,11 +125,17 @@ class PeriodReportStore:
                     generated_at TEXT NOT NULL,
                     published_at TEXT DEFAULT NULL,
                     model_used   TEXT,
+                    run_id       TEXT,
                     char_count   INTEGER,
                     content      TEXT NOT NULL,
                     UNIQUE(group_id, period_type, period_key)
                 )
             """)
+            # Migrate: add run_id column（1.15.3 报文生成日志关联）if this DB predates it
+            try:
+                conn.execute("ALTER TABLE period_reports ADD COLUMN run_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
         finally:
             conn.close()
@@ -140,6 +147,7 @@ class PeriodReportStore:
         period_key: str,
         content: str,
         model_used: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         if self._unavailable:
             raise RuntimeError("周期报告数据库不可用")
@@ -151,16 +159,17 @@ class PeriodReportStore:
             conn.execute(
                 """
                 INSERT INTO period_reports
-                    (group_id, period_type, period_key, generated_at, model_used, char_count, content)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (group_id, period_type, period_key, generated_at, model_used, run_id, char_count, content)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(group_id, period_type, period_key) DO UPDATE SET
                     generated_at = excluded.generated_at,
                     model_used   = excluded.model_used,
+                    run_id       = excluded.run_id,
                     char_count   = excluded.char_count,
                     content      = excluded.content,
                     published_at = NULL
                 """,
-                (str(group_id), period_type, period_key, generated_at, model_used, len(content), content),
+                (str(group_id), period_type, period_key, generated_at, model_used, run_id, len(content), content),
             )
             conn.commit()
         finally:

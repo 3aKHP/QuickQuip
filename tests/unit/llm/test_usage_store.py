@@ -260,7 +260,7 @@ def test_concurrent_first_open_migration_is_race_safe(tmp_path):
         ).fetchone()["c"]
         columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
     assert count == 2
-    assert {"feature", "pricing_confidence"} <= columns
+    assert {"feature", "pricing_confidence", "response_outcome"} <= columns
 
 
 def test_half_migrated_schema_is_completed(tmp_path):

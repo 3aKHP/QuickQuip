@@ -34,10 +34,11 @@ def _patch_period_deps(monkeypatch, *, msg_count: int = 50, stats=None):
     svc = types.SimpleNamespace(
         config=types.SimpleNamespace(
             weekly_report=types.SimpleNamespace(
-                min_messages=5, sample_per_day=3, length_hint=200, model_cascade=["model-1"],
+                min_messages=5, length_hint=200, model_cascade=["model-1"],
             ),
             monthly_report=types.SimpleNamespace(
-                min_messages=5, sample_per_day=3, length_hint=300, model_cascade=["model-1"],
+                min_messages=5, length_hint=300, model_cascade=["model-1"],
+                input_char_budget=240_000,
             ),
             personas={"p1": object()},
         ),
@@ -48,7 +49,6 @@ def _patch_period_deps(monkeypatch, *, msg_count: int = 50, stats=None):
         counts.generate += 1
         return ("周期报告正文", "model-1")
 
-    monkeypatch.setattr(summary_jobs, "sample_messages_by_day", lambda msgs, per_day: msgs)
     monkeypatch.setattr(summary_jobs, "generate_period_report", fake_generate)
 
     deps = types.SimpleNamespace(
@@ -245,29 +245,33 @@ async def test_run_period_generation_proceeds_at_exact_min_messages(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_run_period_generation_returns_none_when_sample_empty(monkeypatch):
-    """钉住：月报分天采样结果为空时返回 None 且不调用 LLM。"""
+async def test_run_period_generation_monthly_full_volume_without_sampling(monkeypatch):
+    """钉住：1.15.3 起月报也全量进入序列化层，不再按天采样。"""
     counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
-    monkeypatch.setattr(summary_jobs, "sample_messages_by_day", lambda msgs, per_day: [])
+
+    captured: dict = {}
+
+    async def capture_generate(sampled, persona, group_id, **kw):
+        captured["sampled_count"] = len(sampled)
+        captured["input_char_budget"] = kw.get("input_char_budget")
+        return ("正文", "model-1")
+
+    monkeypatch.setattr(summary_jobs, "generate_period_report", capture_generate)
 
     result = await summary_jobs.run_period_generation(
         "10001", plugin.PERIOD_MONTHLY, 1_000.0, 100_000.0, "2026-05",
         svc=deps.svc, collector=deps.collector, stats_tracker=deps.stats_tracker,
     )
 
-    assert result is None
-    assert counts.generate == 0
+    assert result == ("正文", "model-1")
+    assert captured["sampled_count"] == 50
+    assert captured["input_char_budget"] == 240_000
 
 
 @pytest.mark.asyncio
 async def test_run_period_generation_weekly_full_volume_without_sampling(monkeypatch):
     """钉住：1.15.2 起周报全量进压缩序列化器，不再按天采样。"""
     counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
-
-    def explode(msgs, per_day):
-        raise AssertionError("周报路径不应调用分天采样")
-
-    monkeypatch.setattr(summary_jobs, "sample_messages_by_day", explode)
 
     captured: dict = {}
 
@@ -410,7 +414,7 @@ async def test_generate_period_one_upserts_with_window_period_key(monkeypatch):
 
     counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
     upserts: list[tuple] = []
-    store = types.SimpleNamespace(upsert=lambda *a: upserts.append(a))
+    store = types.SimpleNamespace(upsert=lambda *a, **kw: upserts.append((a, kw)))
 
     now = datetime(2026, 5, 4, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))  # 周一
     result = await summary_jobs.generate_period_one(
@@ -421,7 +425,10 @@ async def test_generate_period_one_upserts_with_window_period_key(monkeypatch):
 
     assert result == ("周期报告正文", "model-1")
     assert counts.upsert == 0  # period_store 已被整体替换
-    assert upserts == [("10001", plugin.PERIOD_WEEKLY, "2026-W18", "周期报告正文", "model-1")]
+    assert upserts == [(
+        ("10001", plugin.PERIOD_WEEKLY, "2026-W18", "周期报告正文", "model-1"),
+        {"run_id": None},
+    )]
 
 
 @pytest.mark.asyncio

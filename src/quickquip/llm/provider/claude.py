@@ -15,6 +15,7 @@ from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
+    LLMImageInput,
     LLMRequest,
     LLMResponse,
     _json_string,
@@ -79,11 +80,7 @@ def _cache_creation_tokens(usage: dict[str, Any]) -> int | None:
 
 
 class ClaudeProviderClient(BaseProviderClient):
-    async def _serialize_user_message(self, message: LLMConversationMessage) -> dict[str, Any]:
-        if message.inline_images:
-            image_inputs = await self._prepare_image_inputs(message.image_urls, message.inline_images)
-        else:
-            image_inputs = await self._prepare_image_inputs(message.image_urls)
+    def _serialize_user_message(self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]) -> dict[str, Any]:
         if image_inputs:
             content: list[dict[str, Any]] = [
                 *[
@@ -105,7 +102,8 @@ class ClaudeProviderClient(BaseProviderClient):
 
     async def _serialize_messages(self, messages: list[LLMConversationMessage]) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
-        pending_tool_results: list[LLMConversationMessage] = []
+        prepared_images = await self._prepare_request_images(messages)
+        pending_tool_results: list[tuple[LLMConversationMessage, list[LLMImageInput]]] = []
 
         async def _flush_tool_results() -> None:
             nonlocal pending_tool_results
@@ -118,18 +116,18 @@ class ClaudeProviderClient(BaseProviderClient):
                         {
                             "type": "tool_result",
                             "tool_use_id": item.tool_call_id,
-                            "content": await self._serialize_tool_result_content(item),
+                            "content": self._serialize_tool_result_content(item, image_inputs),
                             "is_error": item.is_tool_error,
                         }
-                        for item in pending_tool_results
+                        for item, image_inputs in pending_tool_results
                     ],
                 }
             )
             pending_tool_results = []
 
-        for message in messages:
+        for message, image_inputs in zip(messages, prepared_images, strict=True):
             if message.role == "tool":
-                pending_tool_results.append(message)
+                pending_tool_results.append((message, image_inputs))
                 continue
 
             await _flush_tool_results()
@@ -160,19 +158,16 @@ class ClaudeProviderClient(BaseProviderClient):
                 serialized.append({"role": "assistant", "content": content or [{"type": "text", "text": ""}]})
                 continue
 
-            serialized.append(await self._serialize_user_message(message))
+            serialized.append(self._serialize_user_message(message, image_inputs))
 
         await _flush_tool_results()
         return serialized
 
-    async def _serialize_tool_result_content(
+    def _serialize_tool_result_content(
         self,
         message: LLMConversationMessage,
+        image_inputs: list[LLMImageInput],
     ) -> str | list[dict[str, Any]]:
-        image_inputs = await self._prepare_image_inputs(
-            [],
-            [] if message.is_tool_error else message.inline_images,
-        )
         if not image_inputs:
             return message.content
         return [

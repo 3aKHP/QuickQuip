@@ -1,4 +1,5 @@
 import { request } from './index'
+import type { GenerationLog } from './summaries'
 
 export type PeriodType = 'weekly' | 'monthly'
 
@@ -43,4 +44,12 @@ export async function deletePeriodReport(
   return request(`/api/period-reports/${groupId}/${periodType}/${encodeURIComponent(periodKey)}`, {
     method: 'DELETE',
   })
+}
+
+export async function fetchPeriodReportGenerationLog(
+  groupId: string,
+  periodType: PeriodType,
+  periodKey: string,
+): Promise<GenerationLog> {
+  return request(`/api/period-reports/${groupId}/${periodType}/${encodeURIComponent(periodKey)}/generation-log`)
 }
