@@ -120,6 +120,9 @@ onBeforeUnmount(() => {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
+  /* inline-flex 内只有 SVG 时基线取盒子底缘，图标会骑在文字基线上偏上；
+     下移 0.15em 使图标与 CJK 文字视觉居中（flex 容器内此属性被忽略，无副作用） */
+  vertical-align: -0.15em;
 }
 
 .ui-info-tip__btn {
