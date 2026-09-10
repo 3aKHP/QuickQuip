@@ -51,10 +51,13 @@ tool_max_calls_per_round = 16
 # agent_record_max_bytes_per_scope = 67108864
 
 # 逐 Turn 交付（全局默认关闭：安装新版本不改变群内消息量；记录与重放始终工作）
-# 开启后每次模型响应的普通正文先于工具执行分段外发；阈值/上限为 Unicode
-# code point 口径，独立于 OneBot 协议报文长度限制。
-# 各群/私聊会话可用 /llm delivery on|off|reset|status 按会话覆盖此默认。
-# agent_delivery_enabled = false
+# 两域独立：intermediate 管非最终轮正文是否照常先于工具执行外发，final 管最终
+# 正文是否按自然段拆分经 sink 外发（关闭时最终正文沿旧单发路径整条发送）。
+# 阈值/上限为 Unicode code point 口径，独立于 OneBot 协议报文长度限制。
+# 各群/私聊会话可用 /llm delivery intermediate|final|all <on|off|reset> 按会话覆盖。
+# 旧键 agent_delivery_enabled 仍可读取，未显式配置的新键按旧键值映射。
+# agent_delivery_intermediate_enabled = false
+# agent_delivery_final_enabled = false
 # reply_split_threshold_chars = 800
 # reply_chunk_max_chars = 1200
 # reply_send_interval_ms = 800

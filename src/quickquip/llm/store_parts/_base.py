@@ -58,7 +58,8 @@ class GroupSettingsOverride:
     enabled: bool | None = None
     memory_enabled: bool | None = None
     auto_memory_enabled: bool | None = None
-    agent_delivery_enabled: bool | None = None
+    agent_delivery_intermediate_enabled: bool | None = None
+    agent_delivery_final_enabled: bool | None = None
     provider_id: str | None = None
     model: str | None = None
     persona_id: str | None = None
@@ -66,6 +67,23 @@ class GroupSettingsOverride:
     allow_prefix: bool | None = None
     allow_at: bool | None = None
     history_limit: int | None = None
+
+
+def _backfill_delivery_split_columns(conn: sqlite3.Connection, existing_columns: set[str]) -> None:
+    """交付开关拆分（中间轮/最终轮）的加列 + 一次性回填。
+
+    回填只与各自加列绑定执行——若挂在启动路径无条件重跑，会与后续 reset
+    （列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择；按列独立门控，
+    半迁移状态下不跨列覆写另一列的已有取值。
+    """
+    for column in ("agent_delivery_intermediate_enabled", "agent_delivery_final_enabled"):
+        if column in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE group_settings ADD COLUMN {column} INTEGER")
+        conn.execute(
+            f"UPDATE group_settings SET {column} = agent_delivery_enabled "
+            "WHERE agent_delivery_enabled IS NOT NULL"
+        )
 
 
 class _StoreBase:
@@ -117,6 +135,8 @@ class _StoreBase:
                     memory_enabled INTEGER,
                     auto_memory_enabled INTEGER,
                     agent_delivery_enabled INTEGER,
+                    agent_delivery_intermediate_enabled INTEGER,
+                    agent_delivery_final_enabled INTEGER,
                     provider_id TEXT,
                     model TEXT,
                     persona_id TEXT,
@@ -186,6 +206,7 @@ class _StoreBase:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN auto_memory_enabled INTEGER")
             if "agent_delivery_enabled" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_enabled INTEGER")
+            _backfill_delivery_split_columns(conn, existing_columns)
             conversation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(conversation_messages)").fetchall()

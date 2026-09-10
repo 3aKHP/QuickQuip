@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
+
+
+class DeliveryDomain(enum.StrEnum):
+    """交付开关的写入域：中间轮正文 / 最终轮分段 / 两域同写。"""
+
+    INTERMEDIATE = "intermediate"
+    FINAL = "final"
+    ALL = "all"
 
 
 @dataclass(slots=True)
@@ -15,7 +24,8 @@ class ResolvedGroupSettings:
     allow_prefix: bool
     allow_at: bool
     history_limit: int | None = None
-    agent_delivery_enabled: bool = False
+    agent_delivery_intermediate_enabled: bool = False
+    agent_delivery_final_enabled: bool = False
 
 
 def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupSettings:
@@ -36,10 +46,15 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
             if overrides.auto_memory_enabled is not None
             else config.runtime.auto_memory_enabled
         ),
-        agent_delivery_enabled=(
-            overrides.agent_delivery_enabled
-            if overrides.agent_delivery_enabled is not None
-            else config.runtime.agent_delivery_enabled
+        agent_delivery_intermediate_enabled=(
+            overrides.agent_delivery_intermediate_enabled
+            if overrides.agent_delivery_intermediate_enabled is not None
+            else config.runtime.agent_delivery_intermediate_enabled
+        ),
+        agent_delivery_final_enabled=(
+            overrides.agent_delivery_final_enabled
+            if overrides.agent_delivery_final_enabled is not None
+            else config.runtime.agent_delivery_final_enabled
         ),
         provider_id=provider_id,
         model=model,

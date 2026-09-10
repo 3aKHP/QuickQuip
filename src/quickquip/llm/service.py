@@ -696,7 +696,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions: list[ImageDescription] | None,
         delivery_sink=None,
         trigger_kind: TriggerKind | None = None,
-        agent_delivery_enabled: bool,
+        agent_delivery_intermediate_enabled: bool,
+        agent_delivery_final_enabled: bool,
     ):
         """创建 Loop 与 user 触发行（§5.3.1），返回 TurnRecorder。
 
@@ -754,7 +755,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             store=self.store,
             handle=handle,
             config=RecorderConfig(
-                agent_delivery_enabled=agent_delivery_enabled,
+                agent_delivery_intermediate_enabled=agent_delivery_intermediate_enabled,
+                agent_delivery_final_enabled=agent_delivery_final_enabled,
                 reply_split_threshold_chars=runtime.reply_split_threshold_chars,
                 reply_chunk_max_chars=runtime.reply_chunk_max_chars,
                 reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
@@ -1544,7 +1546,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
                 delivery_sink=delivery_sink,
                 trigger_kind=trigger_kind,
-                agent_delivery_enabled=settings.agent_delivery_enabled,
+                agent_delivery_intermediate_enabled=settings.agent_delivery_intermediate_enabled,
+                agent_delivery_final_enabled=settings.agent_delivery_final_enabled,
             )
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
@@ -1579,10 +1582,11 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         except DeliveryAborted as exc:
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
-            # 逐 Turn 模式下静默：已交付的分段就是用户看到的全部。无记录路径
-            # 同样可能在这里终止（逐轮预算门禁不依赖 recorder），但它没有任何
-            # sink 交付，必须给出可见的中止提示而不是空串。
-            aborted_silently = recorder is not None and settings.agent_delivery_enabled
+            # 静默的依据是「用户已看到至少一条成功交付的分段」——零交付时
+            # （如中间轮抑制 + 最终轮未及交付即中止）必须给出可见中止提示，
+            # 否则用户既无正文也无通知。无记录路径没有任何 sink 交付，
+            # 同样必须可见。
+            aborted_silently = recorder is not None and recorder.summary().sent > 0
             return {
                 "reply": "" if aborted_silently else "本次回复未确认送达，已停止后续生成。",
                 "rate_limit_key": LLM_RULE_NAME,
@@ -1676,10 +1680,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             if recorder.final_turn_record is not None:
                 result_payload = dict(result_payload)
                 result_payload["agent_turn_row_id"] = recorder.final_turn_record.message_row_id
-        if recorder is not None and settings.agent_delivery_enabled:
-            # 逐 Turn 模式：正文已由 sink 交付，reply 不再二次发送（§5.1）。
-            # 无记录路径（同 scope 并发触发 / store 不可用）没有任何 sink 交付，
-            # reply 仍是唯一出口，置空会把整条回复静默吞掉。
+        if recorder is not None and settings.agent_delivery_final_enabled:
+            # 最终轮分段模式：最终正文已由 sink 交付，reply 不再二次发送
+            # （§5.1）。中间轮单开（最终轮关）时最终正文仍走旧单发路径，
+            # reply 必须保留；无记录路径（同 scope 并发触发 / store 不可用）
+            # 没有任何 sink 交付，reply 仍是唯一出口，置空会把整条回复静默
+            # 吞掉。
             result_payload = dict(result_payload)
             result_payload["reply"] = ""
         return result_payload

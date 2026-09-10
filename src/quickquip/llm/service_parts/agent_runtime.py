@@ -5,9 +5,9 @@
 原顺序执行工具 batch → 关闭。D3：首个 failed/unknown 交付即终止后续
 发送、工具启动与生成。
 
-上线开关（§6.3）：``agent_delivery_enabled=false`` 时仍记录全部 Turn 与
-工具，非最终正文标记 ``suppressed_by_policy``，最终正文由适配层按现有
-单次交付方式发送。
+上线开关（§6.3，两域独立）：中间轮开关关闭时非最终正文标记
+``suppressed_by_policy``；最终轮开关关闭时最终正文由适配层按现有单次
+交付方式发送。任一域开启即激活 sink 逐 Turn 交付。
 """
 from __future__ import annotations
 
@@ -69,7 +69,9 @@ class DeliveryAborted(RuntimeError):
 
 @dataclass(slots=True)
 class RecorderConfig:
-    agent_delivery_enabled: bool = False
+    # 与配置键/设置解析/Web 字段同词根，跨层比对与全局搜索同一命名。
+    agent_delivery_intermediate_enabled: bool = False
+    agent_delivery_final_enabled: bool = False
     reply_split_threshold_chars: int = 800
     reply_chunk_max_chars: int = 1200
     reply_max_chunks_per_loop: int = 64
@@ -102,12 +104,24 @@ class TurnRecorder:
         self._store = store
         self._handle = handle
         self._config = config
-        self._sink = sink if config.agent_delivery_enabled else None
+        self._sink = (
+            sink
+            if (
+                config.agent_delivery_intermediate_enabled
+                or config.agent_delivery_final_enabled
+            )
+            else None
+        )
         self._sensitive_scan = sensitive_scan
         self._delivery_count = 0
         self._delivery_stats = {"sent": 0, "failed": 0, "unknown": 0, "skipped": 0, "suppressed": 0}
         self._final_turn_record: TurnRecord | None = None
         self._terminal_reason: str | None = None
+        # 待发状态显式声明：on_turn 写入、deliver_turn 消费后清空。
+        self._pending_record: TurnRecord | None = None
+        self._pending_text: str = ""
+        self._pending_plan: dict[str, DeliveryPlanItem] = {}
+        self._pending_suppressed_ids: set[str] = set()
 
     @property
     def handle(self) -> LoopHandle:
@@ -140,26 +154,28 @@ class TurnRecorder:
 
     def _plan_deliveries(
         self, turn_id: str, text: str, *, is_final: bool
-    ) -> list[DeliveryPlanItem]:
+    ) -> tuple[list[DeliveryPlanItem], set[str]]:
+        """规划交付项并单独返回抑制项 ID——抑制判定的唯一归属者。"""
         policy = self._config
         items: list[DeliveryPlanItem] = []
         if not text:
-            return items
-        if not policy.agent_delivery_enabled and not is_final:
-            # 关闭开关：非最终正文只记 suppressed（§6.3）。
-            items.append(
-                DeliveryPlanItem(
-                    delivery_id=new_agent_id("dlv"), kind=DeliveryKind.TEXT_CHUNK,
-                    turn_id=turn_id, chunk_index=0, source_start=0, source_end=len(text),
-                )
+            return items, set()
+        if is_final:
+            if not policy.agent_delivery_final_enabled:
+                # 最终轮关闭：最终正文沿现有单次交付，交付记录由 receipt
+                # 回填阶段写入。
+                return items, set()
+        elif not policy.agent_delivery_intermediate_enabled:
+            # 中间轮关闭：非最终正文只记 suppressed（§6.3）。
+            item = DeliveryPlanItem(
+                delivery_id=new_agent_id("dlv"), kind=DeliveryKind.TEXT_CHUNK,
+                turn_id=turn_id, chunk_index=0, source_start=0, source_end=len(text),
             )
+            items.append(item)
             self._delivery_stats["suppressed"] += 1
-            return items
-        if not policy.agent_delivery_enabled:
-            # 最终正文沿现有单次交付，交付记录由 receipt 回填阶段写入。
-            return items
+            return items, {item.delivery_id}
         if self._sink is None:
-            raise RuntimeError("agent_delivery_enabled=true 但缺少 DeliverySink（编程错误）")
+            raise RuntimeError("交付开关开启但缺少 DeliverySink（编程错误）")
         try:
             chunks, limit_reason = plan_text_chunks(
                 text,
@@ -174,7 +190,7 @@ class TurnRecorder:
             raise DeliveryAborted("split_limit") from None
         if limit_reason == "delivery_limit":
             self._terminal_reason = "delivery_limit"
-            return []
+            return [], set()
         for chunk in chunks:
             items.append(
                 DeliveryPlanItem(
@@ -186,7 +202,7 @@ class TurnRecorder:
                     source_end=chunk.end,
                 )
             )
-        return items
+        return items, set()
 
     def on_turn(
         self,
@@ -246,7 +262,7 @@ class TurnRecorder:
                 )
             else:
                 native_state = candidate
-        plan = self._plan_deliveries(turn_id, text, is_final=is_final)
+        plan, suppressed_ids = self._plan_deliveries(turn_id, text, is_final=is_final)
         record = self._store.commit_turn(
             self._handle,
             TurnResponseRecord(
@@ -265,30 +281,38 @@ class TurnRecorder:
         )
         if is_final or not has_more_rounds:
             self._final_turn_record = record
-        # 关闭开关的非最终 suppressed 交付落 planned 即收敛为 suppressed。
-        if not self._config.agent_delivery_enabled and not is_final:
-            for delivery_id in record.delivery_ids:
-                self._store.suppress_delivery(self._handle, delivery_id)
+        # 抑制项落 planned 即收敛为 suppressed；抑制清单由 _plan_deliveries
+        # 单一产出，deliver_turn 不得经 sink 发出抑制正文。
+        for delivery_id in suppressed_ids:
+            self._store.suppress_delivery(self._handle, delivery_id)
         if self._terminal_reason == "delivery_limit":
             raise DeliveryAborted("delivery_limit")
         self._pending_record = record
         self._pending_text = text
         self._pending_plan = {item.delivery_id: item for item in plan}
+        self._pending_suppressed_ids = set(suppressed_ids)
         return execution_ids
 
     async def deliver_turn(self) -> None:
         """提交后的文字 Chunk 交付（§5.3.6）：先于所属工具执行。"""
-        record = getattr(self, "_pending_record", None)
-        text = getattr(self, "_pending_text", "")
-        plan = getattr(self, "_pending_plan", {})
+        record = self._pending_record
+        text = self._pending_text
+        plan = self._pending_plan
+        suppressed_ids = self._pending_suppressed_ids
         self._pending_record = None
         self._pending_text = ""
         self._pending_plan = {}
-        if record is None or not self._config.agent_delivery_enabled or self._sink is None:
+        self._pending_suppressed_ids = set()
+        # sink 为 None 即两域全关（构造时判定）；最终轮关闭的 Turn 计划为空，
+        # 循环体自然跳过。
+        if record is None or self._sink is None:
             return
         for delivery_id in record.delivery_ids:
             if self._terminal_reason is not None:
                 break
+            if delivery_id in suppressed_ids:
+                # 中间轮关闭的 suppressed 项不进入 sink：防止把抑制正文发出。
+                continue
             item = plan.get(delivery_id)
             chunk_text = text[item.source_start : item.source_end] if item else text
             # 范围恒等要求段落分隔换行归前段（§6.1），段尾空白只属于显示层：

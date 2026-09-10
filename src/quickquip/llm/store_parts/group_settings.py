@@ -14,7 +14,7 @@ class GroupSettingsMixin:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT enabled, memory_enabled, auto_memory_enabled, agent_delivery_enabled, provider_id, model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit
+                SELECT enabled, memory_enabled, auto_memory_enabled, agent_delivery_intermediate_enabled, agent_delivery_final_enabled, provider_id, model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit
                 FROM group_settings
                 WHERE group_id = ?
                 """,
@@ -26,7 +26,8 @@ class GroupSettingsMixin:
             enabled=None if row["enabled"] is None else bool(row["enabled"]),
             memory_enabled=None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
             auto_memory_enabled=None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"]),
-            agent_delivery_enabled=None if row["agent_delivery_enabled"] is None else bool(row["agent_delivery_enabled"]),
+            agent_delivery_intermediate_enabled=None if row["agent_delivery_intermediate_enabled"] is None else bool(row["agent_delivery_intermediate_enabled"]),
+            agent_delivery_final_enabled=None if row["agent_delivery_final_enabled"] is None else bool(row["agent_delivery_final_enabled"]),
             provider_id=row["provider_id"],
             model=row["model"],
             persona_id=row["persona_id"],
@@ -44,7 +45,8 @@ class GroupSettingsMixin:
             "enabled",
             "memory_enabled",
             "auto_memory_enabled",
-            "agent_delivery_enabled",
+            "agent_delivery_intermediate_enabled",
+            "agent_delivery_final_enabled",
             "provider_id",
             "model",
             "persona_id",

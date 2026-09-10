@@ -94,8 +94,10 @@ class RuntimeConfig:
     agent_record_max_loops_per_scope: int = 1000
     agent_record_max_bytes_per_scope: int = 67_108_864
     # 逐 Turn 交付上线开关（§6.3）：默认关闭——安装新版本不立刻增加群内
-    # 消息数；记录与投影始终工作。
-    agent_delivery_enabled: bool = False
+    # 消息数；记录与投影始终工作。两域独立：中间轮正文是否发送、最终
+    # 正文是否走 sink 自然分段（关闭时沿旧单发路径）。
+    agent_delivery_intermediate_enabled: bool = False
+    agent_delivery_final_enabled: bool = False
     # 历史重放投影预算（§8.2）：推导下限（512..4MiB）。实际预算由
     # request_budget.derive_replay_budget 从请求输入预算（仲裁者）推导；
     # provider 覆盖键为硬值，capacity unknown 时本值即实际值。
@@ -849,6 +851,19 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             load_error="reply_split_threshold_chars 不能超过 reply_chunk_max_chars",
             source_path=config_path,
         )
+    legacy_agent_delivery = runtime_raw.get("agent_delivery_enabled")
+    legacy_fallback_active = legacy_agent_delivery is not None and (
+        "agent_delivery_intermediate_enabled" not in runtime_raw
+        or "agent_delivery_final_enabled" not in runtime_raw
+    )
+    if legacy_fallback_active:
+        logger.warning(
+            "[runtime] agent_delivery_enabled 已废弃：存在未显式配置的交付域，"
+            "该域正按旧键值映射，请迁移到 agent_delivery_intermediate_enabled / "
+            "agent_delivery_final_enabled"
+        )
+    elif legacy_agent_delivery is not None:
+        logger.debug("[runtime] agent_delivery_enabled 已被两枚新键取代，忽略旧键")
     config = LLMConfig(
         runtime=RuntimeConfig(
             enabled=as_bool(runtime_raw.get("enabled", False), default=False),
@@ -887,8 +902,13 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             agent_record_max_bytes_per_scope=max(
                 1024, int(runtime_raw.get("agent_record_max_bytes_per_scope", 67_108_864))
             ),
-            agent_delivery_enabled=as_bool(
-                runtime_raw.get("agent_delivery_enabled"), default=False
+            agent_delivery_intermediate_enabled=as_bool(
+                runtime_raw.get("agent_delivery_intermediate_enabled"),
+                default=as_bool(legacy_agent_delivery, default=False),
+            ),
+            agent_delivery_final_enabled=as_bool(
+                runtime_raw.get("agent_delivery_final_enabled"),
+                default=as_bool(legacy_agent_delivery, default=False),
             ),
             agent_replay_loop_tokens=min(
                 AGENT_REPLAY_LOOP_TOKENS_CEILING,

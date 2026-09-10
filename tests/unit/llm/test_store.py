@@ -304,13 +304,66 @@ def test_group_settings_bool_conversion(store: LLMStore) -> None:
 
 
 def test_group_settings_agent_delivery_roundtrip(store: LLMStore) -> None:
-    store.update_group_settings(3003, agent_delivery_enabled=True)
-    assert store.get_group_settings(3003).agent_delivery_enabled is True
-    store.update_group_settings(3003, agent_delivery_enabled=False)
-    assert store.get_group_settings(3003).agent_delivery_enabled is False
-    # 显式 None 清空覆盖（回到跟随全局默认）
-    store.update_group_settings(3003, agent_delivery_enabled=None)
-    assert store.get_group_settings(3003).agent_delivery_enabled is None
+    store.update_group_settings(3003, agent_delivery_intermediate_enabled=True)
+    override = store.get_group_settings(3003)
+    assert override.agent_delivery_intermediate_enabled is True
+    assert override.agent_delivery_final_enabled is None
+    store.update_group_settings(3003, agent_delivery_final_enabled=False)
+    override = store.get_group_settings(3003)
+    assert override.agent_delivery_intermediate_enabled is True
+    assert override.agent_delivery_final_enabled is False
+    # 显式 None 清空单域覆盖（另一域不受影响，回到跟随全局默认）
+    store.update_group_settings(3003, agent_delivery_intermediate_enabled=None)
+    override = store.get_group_settings(3003)
+    assert override.agent_delivery_intermediate_enabled is None
+    assert override.agent_delivery_final_enabled is False
+
+
+def test_group_settings_agent_delivery_split_migration(tmp_path: Path) -> None:
+    """旧单开关库升级：加列 + 一次性回填两域，重启不重复回填。"""
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE group_settings (
+            group_id TEXT PRIMARY KEY,
+            enabled INTEGER,
+            memory_enabled INTEGER,
+            auto_memory_enabled INTEGER,
+            agent_delivery_enabled INTEGER,
+            provider_id TEXT,
+            model TEXT,
+            persona_id TEXT,
+            trigger_prefix TEXT,
+            allow_prefix INTEGER,
+            allow_at INTEGER,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO group_settings (group_id, agent_delivery_enabled, updated_at)
+        VALUES ('9001', 1, '2026-09-11T00:00:00+00:00'),
+               ('9002', 0, '2026-09-11T00:00:00+00:00'),
+               ('9003', NULL, '2026-09-11T00:00:00+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = LLMStore(db_path)
+    # 旧值 1/0 → 两域按同值回填（显式开关意图保留）；旧 NULL → 不回填
+    assert store.get_group_settings("9001").agent_delivery_intermediate_enabled is True
+    assert store.get_group_settings("9001").agent_delivery_final_enabled is True
+    assert store.get_group_settings("9002").agent_delivery_intermediate_enabled is False
+    assert store.get_group_settings("9002").agent_delivery_final_enabled is False
+    assert store.get_group_settings("9003").agent_delivery_intermediate_enabled is None
+    assert store.get_group_settings("9003").agent_delivery_final_enabled is None
+
+    # 迁移后 reset 一域为 NULL：旧列值仍在，重启不得把它再搬回来
+    store.update_group_settings("9001", agent_delivery_intermediate_enabled=None)
+    store_again = LLMStore(db_path)
+    assert store_again.get_group_settings("9001").agent_delivery_intermediate_enabled is None
+    assert store_again.get_group_settings("9001").agent_delivery_final_enabled is True
 
 
 # ── _unavailable 守卫路径 ─────────────────────────────────────────────────────
@@ -350,3 +403,40 @@ def test_unavailable_group_settings_raises(unavailable_store: LLMStore) -> None:
         unavailable_store.get_group_settings(1)
     with pytest.raises(RuntimeError, match="数据库不可用"):
         unavailable_store.update_group_settings(1, enabled=True)
+
+
+def test_group_settings_agent_delivery_half_migration(tmp_path: Path) -> None:
+    """半迁移库（仅缺 final 列）：final 加列回填，intermediate 已有值不被覆写。"""
+    import sqlite3
+
+    db_path = tmp_path / "half.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE group_settings (
+            group_id TEXT PRIMARY KEY,
+            enabled INTEGER,
+            memory_enabled INTEGER,
+            auto_memory_enabled INTEGER,
+            agent_delivery_enabled INTEGER,
+            agent_delivery_intermediate_enabled INTEGER,
+            provider_id TEXT,
+            model TEXT,
+            persona_id TEXT,
+            trigger_prefix TEXT,
+            allow_prefix INTEGER,
+            allow_at INTEGER,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO group_settings (group_id, agent_delivery_enabled, agent_delivery_intermediate_enabled, updated_at)
+        VALUES ('9101', 1, 0, '2026-09-11T00:00:00+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = LLMStore(db_path)
+    override = store.get_group_settings("9101")
+    # intermediate 列既有值（0，含刻意 reset 语义）不被 final 的加列回填覆写
+    assert override.agent_delivery_intermediate_enabled is False
+    assert override.agent_delivery_final_enabled is True

@@ -3,6 +3,7 @@ from __future__ import annotations
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
+from quickquip.llm.settings import DeliveryDomain
 from quickquip.llm.store_parts.agent_records import HistoryMutation
 
 
@@ -129,10 +130,26 @@ class StateMixin:
         self._update_chat_settings(chat_id, chat_type, auto_memory_enabled=value)
 
     def set_chat_agent_delivery_enabled(
-        self, chat_id: int | str, enabled: bool | None, chat_type: str = "group"
+        self,
+        chat_id: int | str,
+        enabled: bool | None,
+        chat_type: str = "group",
+        domain: DeliveryDomain | str = DeliveryDomain.ALL,
     ) -> None:
+        """按域写交付开关覆盖；域入参接受枚举或其字符串值，非法值抛 ValueError。"""
+        domain = DeliveryDomain(domain)
         value = None if enabled is None else int(enabled)
-        self._update_chat_settings(chat_id, chat_type, agent_delivery_enabled=value)
+        match domain:
+            case DeliveryDomain.INTERMEDIATE:
+                self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate_enabled=value)
+            case DeliveryDomain.FINAL:
+                self._update_chat_settings(chat_id, chat_type, agent_delivery_final_enabled=value)
+            case DeliveryDomain.ALL:
+                self._update_chat_settings(
+                    chat_id, chat_type,
+                    agent_delivery_intermediate_enabled=value,
+                    agent_delivery_final_enabled=value,
+                )
 
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)
