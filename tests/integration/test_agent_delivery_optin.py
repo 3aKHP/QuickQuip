@@ -65,6 +65,8 @@ async def test_delivery_matrix_all_four_combos(tmp_path: Path, patch_provider_bu
     result_b, sink_b = await _run(service, patch_provider_builder, group_id=1002)
     assert _sink_texts(sink_b) == [text.rstrip() for text in FIVE_TURN_TEXTS[:4]]
     assert result_b["reply"] == FIVE_TURN_TEXTS[4]
+    # 最终轮走旧单发路径：精确回填钩子齐全（adapter record_final_receipt 消费）
+    assert result_b["agent_turn_row_id"] is not None
 
     # C：仅最终轮开 → 中间轮 suppressed 不外发（回归防线），最终三段经 sink
     service.set_chat_agent_delivery_enabled(1003, True, chat_type="group", domain="final")

@@ -279,3 +279,68 @@ async def test_no_record_fallback_surfaces_abort_when_delivery_enabled(
     assert len(client.requests) == 1  # 第二轮被门禁拦下
     assert sink.deliveries == []
     assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+
+
+async def test_intermediate_only_failure_aborts_silently(tmp_path: Path, patch_provider_builder):
+    """组合 B（仅中间轮开）：首段中间轮失败 → D3 终止且静默（已发即全部）。"""
+    from tests.fixtures.agent_loop import FiveTurnScenarioClient
+
+    service = await _service(tmp_path)
+    service.config.runtime.agent_delivery_intermediate_enabled = True
+    service.config.runtime.agent_delivery_final_enabled = False
+    for attr, value in [
+        ("reply_split_threshold_chars", AGENT_LOOP_TEST_SPLIT["threshold"]),
+        ("reply_chunk_max_chars", AGENT_LOOP_TEST_SPLIT["chunk_max"]),
+    ]:
+        setattr(service.config.runtime, attr, value)
+    sink = ScriptedSink([DeliveryReceipt(status=DeliveryStatus.FAILED, error_code="NetworkError")])
+    service.bind_delivery_sink(sink)
+    client = FiveTurnScenarioClient(protocol="openai")
+    patch_provider_builder(lambda provider: client)
+
+    result = await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="K甲赛况如何？",
+    )
+
+    assert len(sink.attempts) == 1  # 仅首个中间轮段尝试后终止
+    assert len(client.requests) == 1
+    # sink 模式激活（中间轮开）：静默，不再补发错误提示
+    assert result["reply"] == ""
+    with service.store._connect() as conn:
+        loop_row = conn.execute("SELECT status, terminal_reason FROM agent_loops").fetchone()
+    assert loop_row["status"] == "interrupted"
+    assert loop_row["terminal_reason"] == "delivery_failed"
+
+
+async def test_final_only_failure_after_suppressed_intermediate(tmp_path: Path, patch_provider_builder):
+    """组合 C（仅最终轮开）：中间轮 suppressed 不外发；最终首段失败 → 终止。"""
+    from tests.fixtures.agent_loop import FiveTurnScenarioClient
+
+    service = await _service(tmp_path)
+    service.config.runtime.agent_delivery_intermediate_enabled = False
+    service.config.runtime.agent_delivery_final_enabled = True
+    for attr, value in [
+        ("reply_split_threshold_chars", AGENT_LOOP_TEST_SPLIT["threshold"]),
+        ("reply_chunk_max_chars", AGENT_LOOP_TEST_SPLIT["chunk_max"]),
+    ]:
+        setattr(service.config.runtime, attr, value)
+    sink = ScriptedSink([DeliveryReceipt(status=DeliveryStatus.FAILED, error_code="NetworkError")])
+    service.bind_delivery_sink(sink)
+    client = FiveTurnScenarioClient(protocol="openai")
+    patch_provider_builder(lambda provider: client)
+
+    result = await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="K甲赛况如何？",
+    )
+
+    # 四个中间轮 suppressed 不进 sink：唯一一次尝试是最终轮首段
+    assert len(sink.attempts) == 1
+    assert sink.attempts[0][1] == FIVE_TURN_TEXTS[4][:20]
+    assert len(client.requests) == 5
+    assert result["reply"] == ""  # 最终轮开：sink 模式静默
+    with service.store._connect() as conn:
+        statuses = [
+            row["status"]
+            for row in conn.execute("SELECT status FROM agent_deliveries ORDER BY delivery_index")
+        ]
+    assert statuses == ["suppressed"] * 4 + ["failed", "skipped", "skipped"]

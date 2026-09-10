@@ -141,12 +141,14 @@ class StateMixin:
             self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate=value)
         elif domain == "final":
             self._update_chat_settings(chat_id, chat_type, agent_delivery_final=value)
-        else:
+        elif domain == "all":
             self._update_chat_settings(
                 chat_id, chat_type,
                 agent_delivery_intermediate=value,
                 agent_delivery_final=value,
             )
+        else:
+            raise ValueError(f"未知交付开关域：{domain!r}")
 
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)
