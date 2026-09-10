@@ -46,7 +46,7 @@
         <UiStatCard label="请求 / 成功率" :value="fmtNum(data.request_count)" :sub="`${pct(data.success_rate)} 成功`" icon="Activity" tip="时间范围内的 LLM 请求总数（含错误与取消）；成功率 = 成功请求 ÷ 总请求，仅成功请求计入成本与 token。" />
         <UiStatCard label="平均耗时" :value="fmtDuration(data.average_duration_ms)" sub="所有请求" icon="Clock" />
         <UiStatCard label="缓存命中率" :value="pct(data.cache_hit_rate)" :sub="`${fmtNum(data.total_cache_read_tokens)} read tokens`" icon="Zap" tip="输入的前缀缓存命中部分按折扣计价；read tokens 为周期内命中缓存读取的输入 token 总量。" />
-        <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" tip="「未定价」指使用了缺少定价表模型的调用：token 照常计量、成本按 0 估算，在 llm.toml 补充定价后恢复计入；「错误」为失败请求数。" />
+        <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" :tip="unpricedCardTip" />
       </div>
       <section class="panel avg-panel">
         <div class="panel-heading">
@@ -105,7 +105,7 @@
                 <div v-if="event.patch_tokens != null"><dt>现场补丁</dt><dd>{{ fmtNum(event.patch_tokens) }} tokens（估算）</dd></div>
                 <div v-if="event.thinking_tokens"><dt>思考<UiInfoTip text="模型思考/推理（reasoning）消耗的 token，已包含在输出 token 计价内，不重复计费。" /></dt><dd>{{ fmtNum(event.thinking_tokens) }} tokens</dd></div>
                 <div><dt>成本分项</dt><dd>{{ costBreakdown(event) }}</dd></div>
-                <div><dt>定价<UiInfoTip text="本次计费匹配的 llm.toml [pricing.models] 条目：key（provider/model 优先、纯 model 兜底）· source · confidence；「未定价」表示价表缺该模型，成本按 0 估算。" /></dt><dd>{{ pricingLabel(event) }}</dd></div>
+                <div><dt>定价<UiInfoTip :text="pricingRowTip" /></dt><dd>{{ pricingLabel(event) }}</dd></div>
                 <div v-if="event.agent_loop_id"><dt>Agent Loop<UiInfoTip text="机器人一轮完整回复流程（一轮内可能含多次 LLM 调用与工具调用）的标识；同一 Loop 的请求共享该 ID，可串联查看同一轮的多次请求。" /></dt><dd>{{ event.agent_loop_id }}</dd></div>
                 <div v-if="event.error_message"><dt>错误</dt><dd class="error">{{ event.error_message }}</dd></div>
               </dl>
@@ -147,6 +147,11 @@ import {
 } from '../api/llmUsage'
 
 type BreakdownKey = 'provider' | 'model' | 'feature' | 'group' | 'persona'
+
+/** 「未定价」口径唯一定义：统计卡片与事件详情「定价」行共用，避免同页两份文案漂移 */
+const UNPRICED_DEF = '「未定价」= 价表缺少该模型：token 照常计量、成本按 0 估算'
+const unpricedCardTip = `${UNPRICED_DEF}，在 llm.toml 补充定价后恢复计入；「错误」为失败请求数。`
+const pricingRowTip = `本次计费匹配的 llm.toml [pricing.models] 条目：key（provider/model 优先、纯 model 兜底）· source · confidence；${UNPRICED_DEF}。`
 
 const range = ref('7d')
 const metric = ref<UsageMetric>('cost')

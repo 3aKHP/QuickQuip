@@ -4,9 +4,9 @@
       <template #actions>
         <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
         <UiButton icon="Download" :loading="syncing" @click="startSync(null)">立即同步全部</UiButton>
-        <UiInfoTip text="除后台按 TIEBA_SYNC_INTERVAL_SECONDS（默认 900 秒）自动同步外，点此立即手动全量同步各吧缓存。" />
+        <UiInfoTip text="除后台按 TIEBA_SYNC_INTERVAL_SECONDS 周期自动同步外，点此立即手动全量同步各吧缓存。" />
         <UiButton icon="Radar" :disabled="!selectedForum" :loading="peeking" @click="peekSelected">现爬一条</UiButton>
-        <UiInfoTip text="实时抓取该吧首页前 5 帖、优先随机返回带图帖，仅预览不写入本地帖子池。" />
+        <UiInfoTip text="实时抓取该吧首页帖子、优先随机返回带图帖，仅预览不写入本地帖子池。" />
       </template>
     </UiPageHeader>
 
@@ -70,7 +70,7 @@
                     <div class="thread-title">
                       <span class="title-text">{{ t.title }}</span>
                       <UiTag v-if="t.was_sent" size="sm" variant="success">已发送过</UiTag>
-                      <UiInfoTip v-if="t.was_sent" text="该帖此前已通过群内 /贴吧 指令推送到群聊；随机抽帖时会避开最近发送过的若干条（TIEBA_RANDOM_AVOID_RECENT）。" />
+                      <UiInfoTip v-if="t.was_sent" text="该帖此前已通过群内 /tieba 指令推送到群聊；随机抽帖时会避开最近发送过的若干条（TIEBA_RANDOM_AVOID_RECENT）。" />
                       <UiTag v-if="t.is_deleted" size="sm" variant="danger">已删除</UiTag>
                       <UiTag v-if="t.image_count" size="sm">{{ t.image_count }} 图</UiTag>
                     </div>

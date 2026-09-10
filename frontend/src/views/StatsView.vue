@@ -10,7 +10,7 @@
         <UiCard padding="md" shadow="sm">
           <div class="group-head">
             <h3>群 {{ gid }}</h3>
-            <UiTag>总消息 {{ formatNum(gs.total_messages || 0) }}</UiTag><UiInfoTip text="该群成员发言总数，机器人自身发言不计；自统计开始累计、跨重启保留，无时间窗口。" />
+            <span class="group-head__stat"><UiTag>总消息 {{ formatNum(gs.total_messages || 0) }}</UiTag><UiInfoTip text="该群成员发言总数，机器人自身发言不计；自统计开始累计、跨重启保留，无时间窗口。" /></span>
           </div>
           <div v-if="computedStats[gid]?.users?.length" class="group-section">
             <h4 class="section-label"><UiIcon name="Users" :size="14" /><span>活跃用户 Top {{ computedStats[gid].users.length }}</span><UiInfoTip text="按发言条数排序的群成员前 15 名；名称取该成员最近一次的群名片。" /></h4>
@@ -69,6 +69,7 @@ function formatNum(n: number): string { return n >= 10000 ? (n / 10000).toFixed(
 .stats-list { display: flex; flex-direction: column; gap: var(--qq-gap-lg); }
 .group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); }
 .group-head h3 { margin: 0; font-size: var(--qq-text-md); font-weight: 600; color: var(--qq-text); }
+.group-head__stat { display: inline-flex; align-items: center; }
 
 .group-section { margin-top: var(--qq-gap-md); padding-top: var(--qq-gap-md); border-top: 1px solid var(--qq-border); }
 .section-label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--qq-text-sm); font-weight: 500; color: var(--qq-text-muted); margin-bottom: var(--qq-gap-sm); }

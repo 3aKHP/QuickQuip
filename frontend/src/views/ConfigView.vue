@@ -33,7 +33,7 @@
         >
           <span class="config-item__label">{{ c.label }} <UiInfoTip v-if="c.description" :text="c.description" /></span>
           <span class="config-item__file">{{ c.filename }}</span>
-          <span v-if="c.missing" class="config-item__flag">缺失</span>
+          <span v-if="c.exists === false || c.missing" class="config-item__flag">缺失</span>
         </button>
       </aside>
 
@@ -155,7 +155,7 @@ async function save() {
     const res = await saveConfig(currentKey.value, content.value)
     originalContent.value = content.value
     const entry = configs.value.find(c => c.key === currentKey.value)
-    if (entry) entry.missing = false
+    if (entry) { entry.missing = false; entry.exists = true }
     const effect = res?.effect
     if (effect === 'auto_reloading') {
       toast('已保存，正在自动重载（诊断页「最近动作」查看结果）')

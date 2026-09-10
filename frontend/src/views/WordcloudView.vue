@@ -10,7 +10,7 @@
     <p class="hint"><UiIcon name="Info" :size="14" />分词与渲染都在后端进行，单群全年数据可能需要数秒到十几秒</p>
     <p v-if="renderError" class="error">{{ renderError }}</p>
     <div v-if="result">
-      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique<UiInfoTip text="条 = 时间窗内归档消息数（已剔除 bot 自己的发言）；词 = jieba 分词并过滤停用词和单字后的总词次；unique = 不重复的词种数。有效词次不足 50 时无法生成。" /></span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
+      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique<UiInfoTip text="条 = 时间窗内归档消息数（已剔除 bot 自己的发言）；词 = jieba 分词并过滤停用词和单字后的总词次；unique = 不重复的词种数。有效词次过少时无法生成。" /></span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
       <div class="res-grid"><div class="img-wrap"><img :src="imgUrl" class="wc-img" /></div>
         <UiCard padding="md" shadow="sm" class="top-wrap"><h3 class="top-t section-title">Top {{ result.top_words.length }} 词频</h3><ol class="top-list"><li v-for="(w, i) in result.top_words" :key="w.word"><span class="rk">{{ i + 1 }}</span><span class="wd">{{ w.word }}</span><span class="ct">{{ w.count }}</span></li></ol></UiCard>
       </div>

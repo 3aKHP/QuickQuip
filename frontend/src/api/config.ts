@@ -5,6 +5,9 @@ export interface ConfigListItem {
   filename: string
   label: string
   description?: string
+  /** 列表接口返回的文件存在性（缺失文件为 false） */
+  exists?: boolean
+  /** 前端派生字段：列表接口不返回，仅由 load()/save() 回填当前编辑项 */
   missing?: boolean
 }
 

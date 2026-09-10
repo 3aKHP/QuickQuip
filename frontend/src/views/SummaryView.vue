@@ -31,7 +31,7 @@
         <UiButton size="sm" icon="RefreshCw" :loading="healthLoading" @click="loadHealth">刷新</UiButton>
       </div>
       <table v-if="healthRows.length" class="health-table">
-        <thead><tr><th>链路<UiInfoTip text="三条生成链路：日报 = 每日群聊总结；简报 = 早/午/晚播报（llm.toml [daily_briefing]，直接发群、不在下方归档列表）；周月报 = 周报与月报共用同一链路统计。" /></th><th>调用</th><th>接受<UiInfoTip text="该跳响应被采纳的判定：正文非空且模型正常结束（finish_reason 为 stop/end_turn/stop_sequence/eos 之一）；级联中未被采纳才会尝试下一跳。" /></th><th>异常<UiInfoTip text="各异常标签含义：完成原因异常 = 模型非正常结束（截断/内容过滤等），正文被丢弃；空响应 = 模型返回空文本；调用失败 = 服务商报错；已取消 = 请求中途被取消；历史未知 = 旧版本未记录该次结果。" /></th><th>均耗时</th><th>成本</th></tr></thead>
+        <thead><tr><th>链路<UiInfoTip text="三条生成链路：日报 = 每日群聊总结；简报 = 早/午/晚播报（llm.toml [daily_briefing]，直接发群、不在下方归档列表）；周月报 = 周报与月报共用同一链路统计。" /></th><th>调用</th><th>接受<UiInfoTip text="该跳响应被采纳的判定：正文非空且模型正常结束（finish_reason 为 stop/end_turn/stop_sequence/eos 之一）；级联中未被采纳才会尝试下一跳。" /></th><th>异常<UiInfoTip :text="outcomeTip" /></th><th>均耗时</th><th>成本</th></tr></thead>
         <tbody>
           <tr v-for="row in healthRows" :key="row.feature">
             <td>{{ featureLabel(row.feature) }}</td>
@@ -279,6 +279,9 @@ const outcomeLabels: Record<string, string> = {
   cancelled: '已取消',
   unknown: '历史未知',
 }
+
+// 「异常」表头说明：标签名直接引用 outcomeLabels，避免与映射表漂移；gloss 需随语义同步
+const outcomeTip = `各异常标签含义：${outcomeLabels.discarded_finish} = 模型非正常结束（截断/内容过滤等），正文被丢弃；${outcomeLabels.discarded_empty} = 模型返回空文本；${outcomeLabels.provider_error} = 服务商报错；${outcomeLabels.cancelled} = 请求中途被取消；${outcomeLabels.unknown} = 旧版本未记录该次结果。`
 
 function outcomeLabel(outcome: string): string {
   return outcomeLabels[outcome] ?? outcome
