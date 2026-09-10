@@ -131,7 +131,10 @@ async def test_all_turns_mode_seven_chunks_delivered_before_tools(
     scenario_service, patch_scenario_provider, monkeypatch
 ):
     monkeypatch.setattr(
-        scenario_service.config.runtime, "agent_delivery_enabled", True
+        scenario_service.config.runtime, "agent_delivery_intermediate_enabled", True
+    )
+    monkeypatch.setattr(
+        scenario_service.config.runtime, "agent_delivery_final_enabled", True
     )
     monkeypatch.setattr(
         scenario_service.config.runtime,
@@ -179,7 +182,10 @@ async def test_delivered_chunks_strip_trailing_blank_lines(
     from quickquip.llm.provider import LLMRequest, LLMResponse
 
     monkeypatch.setattr(
-        scenario_service.config.runtime, "agent_delivery_enabled", True
+        scenario_service.config.runtime, "agent_delivery_intermediate_enabled", True
+    )
+    monkeypatch.setattr(
+        scenario_service.config.runtime, "agent_delivery_final_enabled", True
     )
     monkeypatch.setattr(
         scenario_service.config.runtime, "reply_split_threshold_chars", 30

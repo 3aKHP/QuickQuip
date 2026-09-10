@@ -129,10 +129,24 @@ class StateMixin:
         self._update_chat_settings(chat_id, chat_type, auto_memory_enabled=value)
 
     def set_chat_agent_delivery_enabled(
-        self, chat_id: int | str, enabled: bool | None, chat_type: str = "group"
+        self,
+        chat_id: int | str,
+        enabled: bool | None,
+        chat_type: str = "group",
+        domain: str = "all",
     ) -> None:
+        """按域写交付开关覆盖：intermediate / final / all（all 同时写两域）。"""
         value = None if enabled is None else int(enabled)
-        self._update_chat_settings(chat_id, chat_type, agent_delivery_enabled=value)
+        if domain == "intermediate":
+            self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate=value)
+        elif domain == "final":
+            self._update_chat_settings(chat_id, chat_type, agent_delivery_final=value)
+        else:
+            self._update_chat_settings(
+                chat_id, chat_type,
+                agent_delivery_intermediate=value,
+                agent_delivery_final=value,
+            )
 
     def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)

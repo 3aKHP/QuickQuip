@@ -213,24 +213,52 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                     f"{scope_label}自动记忆抽取：{current}（全局默认 {default}）"
                 )
 
-        if tokens[:1] == ["delivery"] and len(tokens) >= 2:
-            sub = tokens[1].lower()
-            if sub == "on":
-                svc.set_chat_agent_delivery_enabled(chat_id, True, chat_type=chat_type)
-                await llm_cmd.finish(f"{scope_label}分段发送已开启")
-            if sub == "off":
-                svc.set_chat_agent_delivery_enabled(chat_id, False, chat_type=chat_type)
-                await llm_cmd.finish(f"{scope_label}分段发送已关闭")
-            if sub == "reset":
-                svc.set_chat_agent_delivery_enabled(chat_id, None, chat_type=chat_type)
-                default = "开" if svc.config.runtime.agent_delivery_enabled else "关"
-                await llm_cmd.finish(f"{scope_label}分段发送已跟随全局默认（当前：{default}）")
-            if sub == "status":
+        if tokens[:1] == ["delivery"]:
+            rest = [token.lower() for token in tokens[1:]]
+            domain_labels = {"interim": "中间轮发送", "final": "最终轮分段", "all": "分段交付"}
+            domain = rest[0] if rest and rest[0] in domain_labels else ""
+            action = rest[1] if len(rest) >= 2 else ""
+            # 命令域 token（interim）到 service 写入域（intermediate）的映射
+            service_domain = {"interim": "intermediate", "final": "final", "all": "all"}.get(domain, "")
+
+            def _delivery_views():
                 settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
-                default = "开" if svc.config.runtime.agent_delivery_enabled else "关"
-                current = "开" if settings.agent_delivery_enabled else "关"
+                return (
+                    "开" if settings.agent_delivery_intermediate_enabled else "关",
+                    "开" if settings.agent_delivery_final_enabled else "关",
+                    "开" if svc.config.runtime.agent_delivery_intermediate_enabled else "关",
+                    "开" if svc.config.runtime.agent_delivery_final_enabled else "关",
+                )
+
+            def _domain_default(domain: str) -> str:
+                _, _, default_intermediate, default_final = _delivery_views()
+                if domain == "interim":
+                    return default_intermediate
+                if domain == "final":
+                    return default_final
+                return f"中间轮 {default_intermediate} / 最终轮 {default_final}"
+
+            if domain and action == "on":
+                svc.set_chat_agent_delivery_enabled(chat_id, True, chat_type=chat_type, domain=service_domain)
+                await llm_cmd.finish(f"{scope_label}{domain_labels[domain]}已开启")
+            if domain and action == "off":
+                svc.set_chat_agent_delivery_enabled(chat_id, False, chat_type=chat_type, domain=service_domain)
+                await llm_cmd.finish(f"{scope_label}{domain_labels[domain]}已关闭")
+            if domain and action == "reset":
+                svc.set_chat_agent_delivery_enabled(chat_id, None, chat_type=chat_type, domain=service_domain)
                 await llm_cmd.finish(
-                    f"{scope_label}分段发送：{current}（全局默认 {default}）"
+                    f"{scope_label}{domain_labels[domain]}已跟随全局默认（当前：{_domain_default(domain)}）"
+                )
+            if not rest or rest == ["status"] or (domain and action == "status"):
+                current_intermediate, current_final, default_intermediate, default_final = _delivery_views()
+                if domain in ("", "all"):
+                    await llm_cmd.finish(
+                        f"{scope_label}分段交付：中间轮 {current_intermediate}（默认 {default_intermediate}）"
+                        f" / 最终轮 {current_final}（默认 {default_final}）"
+                    )
+                current = current_intermediate if domain == "interim" else current_final
+                await llm_cmd.finish(
+                    f"{scope_label}{domain_labels[domain]}：{current}（全局默认 {_domain_default(domain)}）"
                 )
 
         if tokens[:1] == ["context_limit"] and len(tokens) >= 2:
@@ -254,7 +282,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
         await llm_cmd.finish(
             "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"
             "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|auto_memory on|off|reset|status|delivery on|off|reset|status|"
+            "memory status|memory on|memory off|auto_memory on|off|reset|status|delivery interim|final|all <on|off|reset>|delivery status|"
             "context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
 

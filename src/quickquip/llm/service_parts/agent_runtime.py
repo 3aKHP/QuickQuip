@@ -5,9 +5,9 @@
 原顺序执行工具 batch → 关闭。D3：首个 failed/unknown 交付即终止后续
 发送、工具启动与生成。
 
-上线开关（§6.3）：``agent_delivery_enabled=false`` 时仍记录全部 Turn 与
-工具，非最终正文标记 ``suppressed_by_policy``，最终正文由适配层按现有
-单次交付方式发送。
+上线开关（§6.3，两域独立）：中间轮开关关闭时非最终正文标记
+``suppressed_by_policy``；最终轮开关关闭时最终正文由适配层按现有单次
+交付方式发送。任一域开启即激活 sink 逐 Turn 交付。
 """
 from __future__ import annotations
 
@@ -69,7 +69,8 @@ class DeliveryAborted(RuntimeError):
 
 @dataclass(slots=True)
 class RecorderConfig:
-    agent_delivery_enabled: bool = False
+    intermediate_delivery_enabled: bool = False
+    final_delivery_enabled: bool = False
     reply_split_threshold_chars: int = 800
     reply_chunk_max_chars: int = 1200
     reply_max_chunks_per_loop: int = 64
@@ -102,7 +103,11 @@ class TurnRecorder:
         self._store = store
         self._handle = handle
         self._config = config
-        self._sink = sink if config.agent_delivery_enabled else None
+        self._sink = (
+            sink
+            if (config.intermediate_delivery_enabled or config.final_delivery_enabled)
+            else None
+        )
         self._sensitive_scan = sensitive_scan
         self._delivery_count = 0
         self._delivery_stats = {"sent": 0, "failed": 0, "unknown": 0, "skipped": 0, "suppressed": 0}
@@ -145,8 +150,13 @@ class TurnRecorder:
         items: list[DeliveryPlanItem] = []
         if not text:
             return items
-        if not policy.agent_delivery_enabled and not is_final:
-            # 关闭开关：非最终正文只记 suppressed（§6.3）。
+        if is_final:
+            if not policy.final_delivery_enabled:
+                # 最终轮关闭：最终正文沿现有单次交付，交付记录由 receipt
+                # 回填阶段写入。
+                return items
+        elif not policy.intermediate_delivery_enabled:
+            # 中间轮关闭：非最终正文只记 suppressed（§6.3）。
             items.append(
                 DeliveryPlanItem(
                     delivery_id=new_agent_id("dlv"), kind=DeliveryKind.TEXT_CHUNK,
@@ -155,11 +165,8 @@ class TurnRecorder:
             )
             self._delivery_stats["suppressed"] += 1
             return items
-        if not policy.agent_delivery_enabled:
-            # 最终正文沿现有单次交付，交付记录由 receipt 回填阶段写入。
-            return items
         if self._sink is None:
-            raise RuntimeError("agent_delivery_enabled=true 但缺少 DeliverySink（编程错误）")
+            raise RuntimeError("交付开关开启但缺少 DeliverySink（编程错误）")
         try:
             chunks, limit_reason = plan_text_chunks(
                 text,
@@ -265,10 +272,14 @@ class TurnRecorder:
         )
         if is_final or not has_more_rounds:
             self._final_turn_record = record
-        # 关闭开关的非最终 suppressed 交付落 planned 即收敛为 suppressed。
-        if not self._config.agent_delivery_enabled and not is_final:
+        # 中间轮关闭的非最终 suppressed 交付落 planned 即收敛为 suppressed；
+        # 同批 ID 记入待发排除清单，deliver_turn 不得经 sink 发出抑制正文。
+        if not self._config.intermediate_delivery_enabled and not is_final:
             for delivery_id in record.delivery_ids:
                 self._store.suppress_delivery(self._handle, delivery_id)
+            self._pending_suppressed_ids = set(record.delivery_ids)
+        else:
+            self._pending_suppressed_ids = set()
         if self._terminal_reason == "delivery_limit":
             raise DeliveryAborted("delivery_limit")
         self._pending_record = record
@@ -281,14 +292,21 @@ class TurnRecorder:
         record = getattr(self, "_pending_record", None)
         text = getattr(self, "_pending_text", "")
         plan = getattr(self, "_pending_plan", {})
+        suppressed_ids = getattr(self, "_pending_suppressed_ids", set())
         self._pending_record = None
         self._pending_text = ""
         self._pending_plan = {}
-        if record is None or not self._config.agent_delivery_enabled or self._sink is None:
+        self._pending_suppressed_ids = set()
+        # sink 为 None 即两域全关（构造时判定）；最终轮关闭的 Turn 计划为空，
+        # 循环体自然跳过。
+        if record is None or self._sink is None:
             return
         for delivery_id in record.delivery_ids:
             if self._terminal_reason is not None:
                 break
+            if delivery_id in suppressed_ids:
+                # 中间轮关闭的 suppressed 项不进入 sink：防止把抑制正文发出。
+                continue
             item = plan.get(delivery_id)
             chunk_text = text[item.source_start : item.source_end] if item else text
             # 范围恒等要求段落分隔换行归前段（§6.1），段尾空白只属于显示层：

@@ -44,7 +44,8 @@ async def test_first_chunk_failure_stops_tools_and_generation(
 
     service = await _service(tmp_path)
     for attr, value in [
-        ("agent_delivery_enabled", True),
+        ("agent_delivery_intermediate_enabled", True),
+        ("agent_delivery_final_enabled", True),
         ("reply_split_threshold_chars", AGENT_LOOP_TEST_SPLIT["threshold"]),
         ("reply_chunk_max_chars", AGENT_LOOP_TEST_SPLIT["chunk_max"]),
     ]:
@@ -83,7 +84,8 @@ async def test_unknown_receipt_never_resent(tmp_path: Path, patch_provider_build
     from tests.fixtures.agent_loop import FiveTurnScenarioClient
 
     service = await _service(tmp_path)
-    service.config.runtime.agent_delivery_enabled = True
+    service.config.runtime.agent_delivery_intermediate_enabled = True
+    service.config.runtime.agent_delivery_final_enabled = True
     sink = ScriptedSink([DeliveryReceipt(status=DeliveryStatus.UNKNOWN, error_code="timeout")])
     service.bind_delivery_sink(sink)
     client = FiveTurnScenarioClient(protocol="openai")
@@ -113,7 +115,8 @@ async def test_middle_chunk_failure_keeps_earlier_facts(tmp_path: Path, patch_pr
 
     service = await _service(tmp_path)
     for attr, value in [
-        ("agent_delivery_enabled", True),
+        ("agent_delivery_intermediate_enabled", True),
+        ("agent_delivery_final_enabled", True),
         ("reply_split_threshold_chars", AGENT_LOOP_TEST_SPLIT["threshold"]),
         ("reply_chunk_max_chars", AGENT_LOOP_TEST_SPLIT["chunk_max"]),
     ]:
@@ -166,7 +169,8 @@ async def test_no_record_fallback_keeps_reply_when_delivery_enabled(
     from tests.fixtures.agent_loop import CollectingSink, FiveTurnScenarioClient
 
     service = await _service(tmp_path)
-    service.config.runtime.agent_delivery_enabled = True
+    service.config.runtime.agent_delivery_intermediate_enabled = True
+    service.config.runtime.agent_delivery_final_enabled = True
     sink = CollectingSink()
     service.bind_delivery_sink(sink)
     client = FiveTurnScenarioClient(protocol="openai")
@@ -207,7 +211,8 @@ async def test_no_record_fallback_receipt_backfills_assistant_row(
     from tests.fixtures.agent_loop import CollectingSink, FiveTurnScenarioClient
 
     service = await _service(tmp_path)
-    service.config.runtime.agent_delivery_enabled = True
+    service.config.runtime.agent_delivery_intermediate_enabled = True
+    service.config.runtime.agent_delivery_final_enabled = True
     service.bind_delivery_sink(CollectingSink())
     client = FiveTurnScenarioClient(protocol="openai")
     patch_provider_builder(lambda provider: client)
@@ -245,7 +250,8 @@ async def test_no_record_fallback_surfaces_abort_when_delivery_enabled(
     from tests.fixtures.agent_loop import CollectingSink, FiveTurnScenarioClient
 
     service = await _service(tmp_path)
-    service.config.runtime.agent_delivery_enabled = True
+    service.config.runtime.agent_delivery_intermediate_enabled = True
+    service.config.runtime.agent_delivery_final_enabled = True
     sink = CollectingSink()
     service.bind_delivery_sink(sink)
     client = FiveTurnScenarioClient(protocol="openai")
