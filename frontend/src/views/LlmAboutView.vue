@@ -9,7 +9,7 @@
         <UiEmpty v-else-if="!scopes.length" icon="BookUser" title="暂无资料文件" />
         <div v-else class="list-scroll">
           <button v-for="scope in scopes" :key="scope.scope" class="list-item qq-selectable" :class="{ active: scope.scope === selectedScope }" @click="selectScope(scope.scope)">
-            <div class="list-item-head"><span>{{ scope.label }}</span><UiTag v-if="scope.global" size="sm" variant="info">全局</UiTag><UiTag v-if="scope.existing_files < scope.total_files" size="sm" variant="warn">缺失</UiTag></div>
+            <div class="list-item-head"><span>{{ scope.label }}</span><UiTag v-if="scope.global" size="sm" variant="info">全局</UiTag><UiInfoTip v-if="scope.global" text="全局资料对所有群生效；群级文件与全局合并，同名词条以群级为准。" /><UiTag v-if="scope.existing_files < scope.total_files" size="sm" variant="warn">缺失</UiTag><UiInfoTip v-if="scope.existing_files < scope.total_files" text="每个 scope 应有 vocab.yaml 和 identities.yaml 两个文件；缺失的在保存后自动创建。" /></div>
             <div class="list-item-meta"><span class="mono">{{ scope.path }}</span><span>{{ scope.existing_files }}/{{ scope.total_files }}</span></div>
           </button>
         </div>
@@ -49,6 +49,7 @@ import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiTabs from '../components/ui/UiTabs.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listLlmAbout, fetchLlmAboutFile, saveLlmAboutFile, createLlmAboutGroup } from '../api/llmAbout'
 import { toast } from '../toast'
 
@@ -59,7 +60,7 @@ interface AboutScope { scope: string; label: string; global: boolean; path: stri
 const basePath = ref(''); const scopes = ref<AboutScope[]>([]); const kinds = ref<AboutKind[]>([]); const listing = ref(false); const listError = ref<string | null>(null)
 const selectedScope = ref(''); const selectedKind = ref('vocab'); const loadingContent = ref(false); const loadError = ref<string | null>(null); const saveError = ref<string | null>(null); const saving = ref(false); const content = ref(''); const originalContent = ref('')
 const currentScope = computed(() => scopes.value.find(s => s.scope === selectedScope.value) || null)
-const kindTabs = computed(() => kinds.value.map((k) => ({ key: k.kind, label: k.label, sub: k.filename })))
+const kindTabs = computed(() => kinds.value.map((k) => ({ key: k.kind, label: k.label, sub: k.filename, tip: k.description })))
 const currentFile = computed(() => currentScope.value?.files.find(f => f.kind === selectedKind.value) || null)
 const currentPath = computed(() => currentFile.value?.path || '')
 const dirty = computed(() => content.value !== originalContent.value)

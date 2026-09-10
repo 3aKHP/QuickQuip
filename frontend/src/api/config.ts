@@ -1,7 +1,16 @@
 import { request } from './index'
 
+export interface ConfigListItem {
+  key: string
+  filename: string
+  label: string
+  description?: string
+  /** 列表接口返回的文件存在性（缺失文件为 false） */
+  exists?: boolean
+}
+
 export async function listConfigs() {
-  return request('/api/config')
+  return request<{ configs: ConfigListItem[] }>('/api/config')
 }
 
 export async function fetchConfig(key: string) {

@@ -17,7 +17,7 @@
       :aria-selected="modelValue === t.key"
       @click="select(t.key)"
     >
-      <span class="ui-tabs__label">{{ t.label }}</span>
+      <span class="ui-tabs__label">{{ t.label }}<UiInfoTip v-if="t.tip" :text="t.tip" /></span>
       <span v-if="t.sub" class="ui-tabs__sub">{{ t.sub }}</span>
     </button>
   </div>
@@ -25,12 +25,15 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import UiInfoTip from './UiInfoTip.vue'
 
 export interface UiTabItem {
   key: string
   label: string
   /** 副标题（如文件名），纵向排列在主标签下方 */
   sub?: string
+  /** 标签术语的悬浮解释（UiInfoTip） */
+  tip?: string
 }
 
 const props = defineProps<{

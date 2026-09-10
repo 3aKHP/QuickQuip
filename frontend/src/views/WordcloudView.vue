@@ -3,14 +3,14 @@
     <UiPageHeader title="词云" subtitle="对选定群在指定时间窗内的消息做分词并渲染词云图"><template #actions><UiButton icon="RefreshCw" :disabled="loading" @click="loadGroups">刷新</UiButton></template></UiPageHeader>
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <div class="controls">
-      <label class="ctrl">群组<select v-model="groupId" :disabled="!groups.length"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g.group_id" :value="g.group_id">{{ g.group_id }}（{{ g.days }} 天 / {{ fmtBytes(g.total_bytes) }}）</option></select></label>
-      <label class="ctrl">时间窗<div class="win-row"><button v-for="w in WINS" :key="w.k" class="win-btn" :class="{ active: windowKey === w.k }" @click="windowKey = w.k">{{ w.l }}</button></div></label>
+      <label class="ctrl"><span>群组<UiInfoTip text="该群聊天归档的覆盖天数与估算体积（按消息文本长度估算，含固定开销）；只有已归档的消息才参与词云统计。" /></span><select v-model="groupId" :disabled="!groups.length"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g.group_id" :value="g.group_id">{{ g.group_id }}（{{ g.days }} 天 / {{ fmtBytes(g.total_bytes) }}）</option></select></label>
+      <label class="ctrl"><span>时间窗<UiInfoTip text="今日 = 北京时间 0 点至今；近7天/近30天/近一年 = 向前滚动 7/30/365 天。" /></span><div class="win-row"><button v-for="w in WINS" :key="w.k" class="win-btn" :class="{ active: windowKey === w.k }" @click="windowKey = w.k">{{ w.l }}</button></div></label>
       <UiButton variant="primary" icon="RefreshCw" :loading="rendering" :disabled="!groupId" @click="onRender">生成</UiButton>
     </div>
     <p class="hint"><UiIcon name="Info" :size="14" />分词与渲染都在后端进行，单群全年数据可能需要数秒到十几秒</p>
     <p v-if="renderError" class="error">{{ renderError }}</p>
     <div v-if="result">
-      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique</span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
+      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique<UiInfoTip text="条 = 时间窗内归档消息数（已剔除 bot 自己的发言）；词 = jieba 分词并过滤停用词和单字后的总词次；unique = 不重复的词种数。有效词次过少时无法生成。" /></span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
       <div class="res-grid"><div class="img-wrap"><img :src="imgUrl" class="wc-img" /></div>
         <UiCard padding="md" shadow="sm" class="top-wrap"><h3 class="top-t section-title">Top {{ result.top_words.length }} 词频</h3><ol class="top-list"><li v-for="(w, i) in result.top_words" :key="w.word"><span class="rk">{{ i + 1 }}</span><span class="wd">{{ w.word }}</span><span class="ct">{{ w.count }}</span></li></ol></UiCard>
       </div>
@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiIcon from '../components/ui/UiIcon.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiIcon from '../components/ui/UiIcon.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listWordcloudGroups, renderWordcloud } from '../api/wordcloud'; import { toast } from '../toast'
 
 const WINS = [{ k: 'today', l: '今日' }, { k: 'week', l: '近7天' }, { k: 'month', l: '近30天' }, { k: 'year', l: '近一年' }]

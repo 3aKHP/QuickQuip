@@ -16,13 +16,13 @@
       <div class="status-row">
         <label class="trace-switch">
           <UiToggle :model-value="traceActive" :disabled="!traceFlagFile" @update:model-value="toggleTrace" />
-          <span>{{ traceActive ? '正在采集' : '采集已关闭' }}</span>
+          <span>{{ traceActive ? '正在采集' : '采集已关闭' }}<UiInfoTip text="开关通过创建/删除开关文件（路径由环境变量 LLM_TRACE_FLAG_FILE 指定）控制全局采集：开启后每次 LLM HTTP 调用的完整请求与响应都会写入 data/llm_trace.db；未配置该环境变量时开关不可用。" /></span>
         </label>
         <UiTag size="sm" :variant="connected ? 'success' : 'warn'">
           {{ connected ? '实时流已连接' : '实时流连接中' }}
         </UiTag>
-        <span class="status-stat">{{ totalCount }} 次调用</span>
-        <span class="status-stat">{{ formatBytes(storageBytes) }}</span>
+        <span class="status-stat">{{ totalCount }} 次调用<UiInfoTip text="已落库的 LLM HTTP 调用记录总数；记录保留 14 天，过期自动清理。" /></span>
+        <span class="status-stat">{{ formatBytes(storageBytes) }}<UiInfoTip text="Trace 数据库在磁盘上的实际占用（data/llm_trace.db 及其 SQLite WAL/SHM 附属文件之和）。" /></span>
       </div>
 
       <div class="toolbar">
@@ -36,6 +36,7 @@
           <option value="success">Success</option>
           <option value="error">Error</option>
         </select>
+        <UiInfoTip text="Pending 表示请求已发出但响应尚未结束；超过 1 小时仍未结束的 Pending 会被自动标记为 Error。" />
       </div>
 
       <p v-if="error" class="error-banner">{{ error }}</p>
@@ -46,9 +47,9 @@
           <UiEmpty v-else-if="!filteredCalls.length" icon="FileCode" title="暂无 HTTP Trace" />
           <article v-for="group in groupedCalls" :key="group.loopId" class="loop-group">
             <header class="loop-head">
-              <span class="loop-title">AGENT LOOP</span>
+              <span class="loop-title">AGENT LOOP<UiInfoTip text="一次完整 LLM 交互分配一个 Agent Loop ID；其中的重试、故障切换和工具结果回送产生的多次 HTTP 调用归入同组，左侧 #N 是组内发起顺序。" /></span>
               <code>{{ shortId(group.loopId) }}</code>
-              <UiTag size="sm" :variant="loopVariant(group.calls)">{{ loopStatus(group.calls) }}</UiTag>
+              <UiTag size="sm" :variant="loopVariant(group.calls)">{{ loopStatus(group.calls) }}</UiTag><UiInfoTip text="由组内调用状态汇总得出：有 Pending 即 RUNNING；有 Error 且没有任何 Success 即 ERROR；否则 COMPLETE。" />
               <span>{{ group.calls.length }} 次 HTTP</span>
             </header>
             <button
@@ -105,6 +106,7 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiTag from '../components/ui/UiTag.vue'
 import UiToggle from '../components/ui/UiToggle.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import TraceDetailPanel from '../components/trace/TraceDetailPanel.vue'
 import { clearTraces, fetchTraceStatus, setTraceStatus } from '../api/diagnostics'
 import {

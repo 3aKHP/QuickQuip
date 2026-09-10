@@ -2,7 +2,7 @@
   <div class="config-view page-view-fill">
     <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后部分自动重载，其余需手动 reload 或重启">
       <template #actions>
-        <span v-if="current && current.missing" class="warn">
+        <span v-if="current && current.exists === false" class="warn">
           <UiIcon name="Info" :size="14" />
           {{ currentFilename }} 不存在，保存后将创建
         </span>
@@ -31,9 +31,9 @@
           :class="{ active: c.key === currentKey }"
           @click="switchTo(c.key)"
         >
-          <span class="config-item__label">{{ c.label }}</span>
+          <span class="config-item__label">{{ c.label }} <UiInfoTip v-if="c.description" :text="c.description" /></span>
           <span class="config-item__file">{{ c.filename }}</span>
-          <span v-if="c.missing" class="config-item__flag">缺失</span>
+          <span v-if="c.exists === false" class="config-item__flag">缺失</span>
         </button>
       </aside>
 
@@ -49,7 +49,7 @@
               <h3>{{ currentFilename }}</h3>
             </div>
             <div class="editor-state">
-              <span v-if="current && current.missing" class="state-pill state-pill--warn">将创建新文件</span>
+              <span v-if="current && current.exists === false" class="state-pill state-pill--warn">将创建新文件</span>
               <span v-else-if="dirty" class="state-pill state-pill--info">未保存</span>
               <span v-else class="state-pill state-pill--ok">已同步</span>
             </div>
@@ -64,7 +64,7 @@
 
       <aside class="config-side">
         <div class="side-card">
-          <h4>保存说明</h4>
+          <h4>保存说明 <UiInfoTip text="保存后的生效方式分三档：awakening.toml、chat_rules.toml 保存后自动重载；llm.toml 需到诊断页点「重载 LLM」或群内 /llm reload（会触发 MCP 全量重连，故不自动做）；generation.toml、games.toml、niuniu_text*.toml 无热重载机制，需重启 bot。" /></h4>
           <p>配置文件会直接写回仓库内的常规 TOML 文件。敏感词表等高敏文件只在服务器本地维护。</p>
         </div>
         <div class="side-card">
@@ -90,10 +90,12 @@ import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
+import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listConfigs, fetchConfig, saveConfig } from '../api/config'
+import type { ConfigListItem } from '../api/config'
 import { toast } from '../toast'
 
-const configs = ref<any[]>([])
+const configs = ref<ConfigListItem[]>([])
 const listError = ref<string | null>(null)
 const currentKey = ref('')
 const loaded = ref(false)
@@ -138,7 +140,7 @@ async function load(key: string) {
     content.value = data.content
     originalContent.value = data.content
     const entry = configs.value.find(c => c.key === key)
-    if (entry) entry.missing = data.missing || false
+    if (entry) entry.exists = !data.missing
     loaded.value = true
   } catch (e: unknown) {
     loadError.value = (e as Error).message
@@ -153,7 +155,7 @@ async function save() {
     const res = await saveConfig(currentKey.value, content.value)
     originalContent.value = content.value
     const entry = configs.value.find(c => c.key === currentKey.value)
-    if (entry) entry.missing = false
+    if (entry) entry.exists = true
     const effect = res?.effect
     if (effect === 'auto_reloading') {
       toast('已保存，正在自动重载（诊断页「最近动作」查看结果）')
