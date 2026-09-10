@@ -38,7 +38,7 @@
           <template v-else>
             <div class="preview-head">
               <span class="preview-title">{{ selectedFile }}</span>
-              <UiTag size="sm">{{ previewLines.length }} 行</UiTag><UiInfoTip text="预览只显示该文件末尾的 240 行；查看完整内容请使用「下载」。" />
+              <UiTag size="sm">{{ previewLines.length }} 行</UiTag><UiInfoTip :text="`预览只显示该文件末尾的 ${PREVIEW_TAIL_LINES} 行；查看完整内容请使用「下载」。`" />
             </div>
             <pre class="preview-block">{{ previewLines.join('\n') }}</pre>
           </template>
@@ -96,11 +96,14 @@ function downloadUrl(name: string): string {
   return buildLogDownloadUrl(name)
 }
 
+/** 预览尾读行数：说明文案与请求共用同一取值 */
+const PREVIEW_TAIL_LINES = 240
+
 async function loadPreview(name: string) {
   if (!name) return
   previewLoading.value = true
   try {
-    const data = await fetchLogTail(name, 240)
+    const data = await fetchLogTail(name, PREVIEW_TAIL_LINES)
     previewLines.value = data.lines || []
   } catch {
     previewLines.value = []

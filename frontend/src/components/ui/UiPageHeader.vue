@@ -5,7 +5,7 @@
     </div>
     <div class="ui-page-header__info">
       <h1 class="ui-page-header__title">{{ title }}</h1>
-      <p v-if="subtitle || $slots.subtitle" class="ui-page-header__subtitle">{{ subtitle }}<slot name="subtitle" /></p>
+      <p v-if="subtitle || $slots.subtitle" class="ui-page-header__subtitle">{{ subtitle }} <slot name="subtitle" /></p>
     </div>
     <div v-if="$slots.actions" class="ui-page-header__actions">
       <slot name="actions" />

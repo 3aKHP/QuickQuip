@@ -2,7 +2,7 @@
   <div class="config-view page-view-fill">
     <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后部分自动重载，其余需手动 reload 或重启">
       <template #actions>
-        <span v-if="current && current.missing" class="warn">
+        <span v-if="current && current.exists === false" class="warn">
           <UiIcon name="Info" :size="14" />
           {{ currentFilename }} 不存在，保存后将创建
         </span>
@@ -33,7 +33,7 @@
         >
           <span class="config-item__label">{{ c.label }} <UiInfoTip v-if="c.description" :text="c.description" /></span>
           <span class="config-item__file">{{ c.filename }}</span>
-          <span v-if="c.exists === false || c.missing" class="config-item__flag">缺失</span>
+          <span v-if="c.exists === false" class="config-item__flag">缺失</span>
         </button>
       </aside>
 
@@ -49,7 +49,7 @@
               <h3>{{ currentFilename }}</h3>
             </div>
             <div class="editor-state">
-              <span v-if="current && current.missing" class="state-pill state-pill--warn">将创建新文件</span>
+              <span v-if="current && current.exists === false" class="state-pill state-pill--warn">将创建新文件</span>
               <span v-else-if="dirty" class="state-pill state-pill--info">未保存</span>
               <span v-else class="state-pill state-pill--ok">已同步</span>
             </div>
@@ -140,7 +140,7 @@ async function load(key: string) {
     content.value = data.content
     originalContent.value = data.content
     const entry = configs.value.find(c => c.key === key)
-    if (entry) entry.missing = data.missing || false
+    if (entry) entry.exists = !data.missing
     loaded.value = true
   } catch (e: unknown) {
     loadError.value = (e as Error).message
@@ -155,7 +155,7 @@ async function save() {
     const res = await saveConfig(currentKey.value, content.value)
     originalContent.value = content.value
     const entry = configs.value.find(c => c.key === currentKey.value)
-    if (entry) { entry.missing = false; entry.exists = true }
+    if (entry) entry.exists = true
     const effect = res?.effect
     if (effect === 'auto_reloading') {
       toast('已保存，正在自动重载（诊断页「最近动作」查看结果）')

@@ -20,7 +20,7 @@
               <td class="mono">{{ job.group_ids.join(', ') }}</td>
               <td class="kind-cell">
                 <UiTag size="sm" :variant="job.kind === 'llm' ? 'cyan' : 'info'">{{ job.kind === 'llm' ? 'LLM 任务' : '固定文案' }}</UiTag>
-                <UiTag v-if="!job.recurring" size="sm" variant="warn">一次性</UiTag><UiInfoTip v-if="!job.recurring" text="一次性任务：首次触发成功后自动从列表删除。" />
+                <template v-if="!job.recurring"><UiTag size="sm" variant="warn">一次性</UiTag><UiInfoTip text="一次性任务：首次触发成功后自动从列表删除。" /></template>
               </td>
               <td><UiToggle :model-value="job.enabled" @update:model-value="toggleEnabled(job, $event)" /></td>
               <td><UiTag size="sm" :variant="job.origin === 'web' ? 'info' : 'accent'">{{ originLabel(job.origin) }}</UiTag></td>

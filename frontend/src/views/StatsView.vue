@@ -13,7 +13,7 @@
             <span class="group-head__stat"><UiTag>总消息 {{ formatNum(gs.total_messages || 0) }}</UiTag><UiInfoTip text="该群成员发言总数，机器人自身发言不计；自统计开始累计、跨重启保留，无时间窗口。" /></span>
           </div>
           <div v-if="computedStats[gid]?.users?.length" class="group-section">
-            <h4 class="section-label"><UiIcon name="Users" :size="14" /><span>活跃用户 Top {{ computedStats[gid].users.length }}</span><UiInfoTip text="按发言条数排序的群成员前 15 名；名称取该成员最近一次的群名片。" /></h4>
+            <h4 class="section-label"><UiIcon name="Users" :size="14" /><span>活跃用户 Top {{ computedStats[gid].users.length }}</span><UiInfoTip :text="`按发言条数排序的群成员前 ${USER_TOP_N} 名；名称取该成员最近一次的群名片。`" /></h4>
             <div class="bar-list">
               <div v-for="[uid, cnt] in computedStats[gid].users" :key="uid" class="bar-row">
                 <span class="bar-label">{{ gs.user_names?.[uid] || uid }}</span>
@@ -56,7 +56,10 @@ const data = ref<any>(null); const error = ref<string | null>(null); const loadi
 onMounted(() => load())
 
 async function load() { loading.value = true; error.value = null; try { data.value = await fetchStats(); updatedAt.value = new Date().toLocaleTimeString('zh-CN'); precomputeStats() } catch (e: unknown) { error.value = (e as Error).message } finally { loading.value = false } }
-function precomputeStats() { const out: Record<string, any> = {}; for (const [gid, gs] of Object.entries(data.value || {}) as [string, any][]) { const users = (Object.entries(gs.user_messages || {}) as [string, number][]).sort((a, b) => b[1] - a[1]).slice(0, 15); const rules = (Object.entries(gs.rule_triggers || {}) as [string, number][]).sort((a, b) => b[1] - a[1]).slice(0, 10); out[gid] = { users, rules, maxUser: Math.max(...users.map(([, v]) => v as number), 1), maxRule: Math.max(...rules.map(([, v]) => v as number), 1) } }; computedStats.value = out }
+/** 活跃用户榜上限：slice 与说明文案共用同一取值 */
+const USER_TOP_N = 15
+
+function precomputeStats() { const out: Record<string, any> = {}; for (const [gid, gs] of Object.entries(data.value || {}) as [string, any][]) { const users = (Object.entries(gs.user_messages || {}) as [string, number][]).sort((a, b) => b[1] - a[1]).slice(0, USER_TOP_N); const rules = (Object.entries(gs.rule_triggers || {}) as [string, number][]).sort((a, b) => b[1] - a[1]).slice(0, 10); out[gid] = { users, rules, maxUser: Math.max(...users.map(([, v]) => v as number), 1), maxRule: Math.max(...rules.map(([, v]) => v as number), 1) } }; computedStats.value = out }
 function pct(v: number, max: number): number { return max ? Math.max(4, Math.round((v / max) * 100)) : 0 }
 function formatNum(n: number): string { return n >= 10000 ? (n / 10000).toFixed(1) + '万' : n.toLocaleString('zh-CN') }
 </script>

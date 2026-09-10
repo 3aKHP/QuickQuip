@@ -106,6 +106,14 @@ const displayValue = computed(() => {
   color: rgba(255, 255, 255, 0.82);
 }
 
+/* 渐变卡上的说明图标需反色：UiInfoTip 默认 muted 色对比度不足，
+   其 hover 色 --qq-primary 与品牌渐变同色，悬停时图标会隐形 */
+.ui-stat-card--primary :deep(.ui-info-tip__btn),
+.ui-stat-card--primary :deep(.ui-info-tip__btn:hover),
+.ui-stat-card--primary :deep(.ui-info-tip__btn:focus-visible) {
+  color: rgba(255, 255, 255, 0.82);
+}
+
 .ui-stat-card__value-row {
   display: flex;
   align-items: baseline;

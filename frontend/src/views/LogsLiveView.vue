@@ -17,7 +17,7 @@
         <label class="filter">
           <UiIcon name="Search" :size="14" />
           <input v-model="filter" type="search" placeholder="过滤关键词 / 正则" />
-          <UiInfoTip text="按不区分大小写的正则过滤已加载到页面的日志行；页面进入时先回放文件末尾 320 行、最多保留约 1800 行，更早内容请到「日志归档」查看。" />
+          <UiInfoTip :text="`按不区分大小写的正则过滤已加载到页面的日志行；页面进入时先回放文件末尾 ${MAX_PENDING_LINES} 行、最多保留约 ${MAX_LINES} 行，更早内容请到「日志归档」查看。`" />
         </label>
         <label class="toggle">
           <input v-model="autoScroll" type="checkbox" />
@@ -160,7 +160,7 @@ function flushPending() {
 
 function connect() {
   source?.close()
-  source = new EventSource(buildLogStreamUrl(320))
+  source = new EventSource(buildLogStreamUrl(MAX_PENDING_LINES))
   source.onopen = () => {
     connected.value = true
   }

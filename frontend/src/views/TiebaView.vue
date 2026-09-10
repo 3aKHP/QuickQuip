@@ -30,7 +30,7 @@
               <span class="forum-name">{{ f.forum_keyword }}吧</span>
               <UiTag size="sm" :variant="syncVariant(f)">{{ syncLabel(f) }}</UiTag>
               <UiInfoTip v-if="f.login_required" text="贴吧登录态已失效，同步会失败；需管理员在服务器运行 python -m quickquip.tieba.login 扫码续签后自动恢复。" />
-              <UiInfoTip v-else text="「未同步」表示该吧从未成功同步过；帖子计数为本地缓存池内帖子数，非贴吧实际帖数。" />
+              <UiInfoTip v-else text="同步状态取最近一次同步结果：「未同步」表示该吧从未成功同步过；帖子计数为本地缓存池内帖子数，非贴吧实际帖数。" />
               <button class="forum-sync-btn" :disabled="syncing" @click.stop="startSync(f.forum_keyword)" title="立即同步此吧">
                 <UiIcon name="Download" :size="12" />
               </button>

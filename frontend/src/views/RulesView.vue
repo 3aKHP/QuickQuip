@@ -12,7 +12,7 @@
 
       <div v-if="selectedGroup" class="rule-grid">
         <UiCard v-for="rule in allRules" :key="rule" padding="sm" shadow="sm" class="rule-row">
-          <div class="rule-left"><span class="rule-dot" /><span class="rule-name">{{ rule }}</span><UiInfoTip text="规则名是内部标识，来源有三类：内置模块规则、chat_rules.toml 里 [[rules]] 自定义规则的 name、连锁游戏自动派生的「游戏名」_start /「游戏名」_progress。开关按群记录「禁用名单」，默认全部启用，状态持久化在 data/rule_switch.json。" /></div>
+          <div class="rule-left"><span class="rule-dot" /><span class="rule-name">{{ rule }}</span><UiInfoTip text="规则名是内部标识，来源有三类：内置模块规则、chat_rules.toml 里 [[rules]] / [[context_rules]] 自定义规则的 name、连锁游戏自动派生的「游戏名」_start /「游戏名」_progress。开关按群记录「禁用名单」，默认全部启用，状态持久化在 data/rule_switch.json。" /></div>
           <UiToggle :model-value="isEnabled(rule)" @update:model-value="toggle(rule)" />
         </UiCard>
       </div>
