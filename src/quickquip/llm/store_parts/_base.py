@@ -69,6 +69,23 @@ class GroupSettingsOverride:
     history_limit: int | None = None
 
 
+def _backfill_delivery_split_columns(conn: sqlite3.Connection, existing_columns: set[str]) -> None:
+    """交付开关拆分（中间轮/最终轮）的加列 + 一次性回填。
+
+    回填只与各自加列绑定执行——若挂在启动路径无条件重跑，会与后续 reset
+    （列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择；按列独立门控，
+    半迁移状态下不跨列覆写另一列的已有取值。
+    """
+    for column in ("agent_delivery_intermediate", "agent_delivery_final"):
+        if column in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE group_settings ADD COLUMN {column} INTEGER")
+        conn.execute(
+            f"UPDATE group_settings SET {column} = agent_delivery_enabled "
+            "WHERE agent_delivery_enabled IS NOT NULL"
+        )
+
+
 class _StoreBase:
     """LLMStore 的基础设施层：连接管理、schema 初始化、不可用守卫。
 
@@ -189,28 +206,7 @@ class _StoreBase:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN auto_memory_enabled INTEGER")
             if "agent_delivery_enabled" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_enabled INTEGER")
-            # 交付开关拆分（中间轮/最终轮）：加列时一次性把旧单开关值回填进
-            # 两列。回填只与各自加列绑定执行——若挂在启动路径无条件重跑，会与
-            # 后续 reset（列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择；
-            # 按列独立门控，避免半迁移状态下跨列覆写另一列的已有取值。
-            if "agent_delivery_intermediate" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_intermediate INTEGER")
-                conn.execute(
-                    """
-                    UPDATE group_settings
-                    SET agent_delivery_intermediate = agent_delivery_enabled
-                    WHERE agent_delivery_enabled IS NOT NULL
-                    """
-                )
-            if "agent_delivery_final" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_final INTEGER")
-                conn.execute(
-                    """
-                    UPDATE group_settings
-                    SET agent_delivery_final = agent_delivery_enabled
-                    WHERE agent_delivery_enabled IS NOT NULL
-                    """
-                )
+            _backfill_delivery_split_columns(conn, existing_columns)
             conversation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(conversation_messages)").fetchall()

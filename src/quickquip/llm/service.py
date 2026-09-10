@@ -755,8 +755,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             store=self.store,
             handle=handle,
             config=RecorderConfig(
-                intermediate_delivery_enabled=agent_delivery_intermediate,
-                final_delivery_enabled=agent_delivery_final,
+                agent_delivery_intermediate_enabled=agent_delivery_intermediate,
+                agent_delivery_final_enabled=agent_delivery_final,
                 reply_split_threshold_chars=runtime.reply_split_threshold_chars,
                 reply_chunk_max_chars=runtime.reply_chunk_max_chars,
                 reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
@@ -1582,13 +1582,11 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         except DeliveryAborted as exc:
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
-            # 逐 Turn 模式下静默：已交付的分段就是用户看到的全部。无记录路径
-            # 同样可能在这里终止（逐轮预算门禁不依赖 recorder），但它没有任何
-            # sink 交付，必须给出可见的中止提示而不是空串。
-            aborted_silently = recorder is not None and (
-                settings.agent_delivery_intermediate_enabled
-                or settings.agent_delivery_final_enabled
-            )
+            # 静默的依据是「用户已看到至少一条成功交付的分段」——零交付时
+            # （如中间轮抑制 + 最终轮未及交付即中止）必须给出可见中止提示，
+            # 否则用户既无正文也无通知。无记录路径没有任何 sink 交付，
+            # 同样必须可见。
+            aborted_silently = recorder is not None and recorder.summary().sent > 0
             return {
                 "reply": "" if aborted_silently else "本次回复未确认送达，已停止后续生成。",
                 "rate_limit_key": LLM_RULE_NAME,

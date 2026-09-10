@@ -120,3 +120,12 @@ async def test_delivery_override_false_beats_global_on_and_reset_follows(
     result2, sink2 = await _run(service, patch_provider_builder, group_id=1003)
     assert len(sink2.deliveries) == 7
     assert result2["reply"] == ""
+
+
+async def test_delivery_invalid_domain_rejected(tmp_path: Path, patch_provider_builder):
+    """非法域值显式 ValueError，不静默跳过写入。"""
+    import pytest
+
+    service = await _service(tmp_path)
+    with pytest.raises(ValueError):
+        service.set_chat_agent_delivery_enabled(1001, True, chat_type="group", domain="interim")

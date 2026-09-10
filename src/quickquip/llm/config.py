@@ -852,11 +852,18 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             source_path=config_path,
         )
     legacy_agent_delivery = runtime_raw.get("agent_delivery_enabled")
-    if legacy_agent_delivery is not None:
+    legacy_fallback_active = legacy_agent_delivery is not None and (
+        "agent_delivery_intermediate_enabled" not in runtime_raw
+        or "agent_delivery_final_enabled" not in runtime_raw
+    )
+    if legacy_fallback_active:
         logger.warning(
-            "[runtime] agent_delivery_enabled 已由 agent_delivery_intermediate_enabled / "
-            "agent_delivery_final_enabled 取代，未显式配置的新键按旧键值映射"
+            "[runtime] agent_delivery_enabled 已废弃：存在未显式配置的交付域，"
+            "该域正按旧键值映射，请迁移到 agent_delivery_intermediate_enabled / "
+            "agent_delivery_final_enabled"
         )
+    elif legacy_agent_delivery is not None:
+        logger.debug("[runtime] agent_delivery_enabled 已被两枚新键取代，忽略旧键")
     config = LLMConfig(
         runtime=RuntimeConfig(
             enabled=as_bool(runtime_raw.get("enabled", False), default=False),

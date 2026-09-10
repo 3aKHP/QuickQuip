@@ -136,7 +136,8 @@ class StateMixin:
         chat_type: str = "group",
         domain: DeliveryDomain = DeliveryDomain.ALL,
     ) -> None:
-        """按域写交付开关覆盖；非法域由 DeliveryDomain 枚举在解析期拒绝。"""
+        """按域写交付开关覆盖；域入参在此归一为枚举，非法值抛 ValueError。"""
+        domain = DeliveryDomain(domain)
         value = None if enabled is None else int(enabled)
         match domain:
             case DeliveryDomain.INTERMEDIATE:
