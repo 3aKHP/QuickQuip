@@ -232,22 +232,10 @@ def test_collect_mention_profiles_skips_speakers_and_unregistered(tmp_path: Path
     assert profiles == []
 
 
-def test_collect_mention_profiles_caps_at_five(tmp_path: Path):
+def test_collect_mention_profiles_dedupes_candidates(tmp_path: Path):
+    """结构化候选与正则命中去重：同一 QQ 只注入一条，按首次出现顺序。"""
     service = _bare_service(tmp_path)
     profiles = service._collect_mention_profiles(
-        chat_id="100",
-        mentioned_qq_ids=[f"9{i:05d}" for i in range(8)],
-        prompt="",
-        quoted_text="",
-        forward_text="",
-        history=[],
-        scene_patch=[],
-        current_user_id="1111",
-        quoted_user_id="",
-    )
-    assert profiles == []  # 全部未登记 → 空
-    # 用登记 QQ 集验证上限：构造不了 5+ 登记 QQ，改验证候选序去重稳定性
-    assert service._collect_mention_profiles(
         chat_id="100",
         mentioned_qq_ids=["40004", "40004", "10002"],
         prompt="@QQ40004",
@@ -255,12 +243,40 @@ def test_collect_mention_profiles_caps_at_five(tmp_path: Path):
         forward_text="",
         history=[],
         scene_patch=[],
-        current_user_id="1",
+        current_user_id="11111",
         quoted_user_id="",
-    ) == [
+    )
+    assert profiles == [
         {"canonical_name": "4s", "user_id": "40004", "aliases": "Туманность、哈基四", "note": "大部分以四字开头的称呼通常指 4s"},
         {"canonical_name": "镜子", "user_id": "10002", "aliases": "镜千翎、哈基镜", "note": "特别注意不要和王者荣耀的镜混淆"},
     ]
+
+
+def test_collect_mention_profiles_caps_at_five(tmp_path: Path):
+    """候选超过上限时只注入前 5 条（按首次出现顺序截断）。"""
+    people = "\n".join(
+        f'  - canonical_name: 成员{i}\n    qq_ids:\n      - "7{i:05d}"'
+        for i in range(7)
+    )
+    path = tmp_path / "identities.yaml"
+    path.write_text(f"people:\n{people}\n", encoding="utf-8")
+    service = LLMService.__new__(LLMService)
+    service.identity_path = path
+    service.identities = IdentityIndex.from_file(path)
+    service._group_identities = OrderedDict()
+
+    profiles = service._collect_mention_profiles(
+        chat_id="100",
+        mentioned_qq_ids=[f"7{i:05d}" for i in range(7)],
+        prompt="",
+        quoted_text="",
+        forward_text="",
+        history=[],
+        scene_patch=[],
+        current_user_id="11111",
+        quoted_user_id="",
+    )
+    assert [p["user_id"] for p in profiles] == [f"7{i:05d}" for i in range(5)]
 
 
 # ── F3：出站 @QQ 数字 → at 段 ──────────────────────────────────────
@@ -311,9 +327,8 @@ class _FakeBot:
 
 
 @pytest.mark.asyncio
-async def test_fetch_mention_names_skips_registered_and_uses_cache(monkeypatch):
+async def test_fetch_mention_names_skips_registered_and_uses_cache():
     member_cards.reset_member_card_cache()
-    monkeypatch.setattr(member_cards, "_MEMBER_CARD_TTL_SECONDS", 3600.0)
     bot = _FakeBot(cards={"3003": "小透明"})
 
     names = await member_cards.fetch_mention_names(

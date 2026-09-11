@@ -41,9 +41,10 @@ def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name
 
 
 def collect_at_qq_ids(message) -> list[str]:
-    """提取消息段内全部 at 目标 QQ（含 bot 自身，按出现顺序去重）。
+    """提取消息段内全部 at 目标 QQ（按出现顺序去重）。
 
-    名片预取前置于身份判定，bot 自身与已登记成员在 fetch 侧过滤。
+    名片预取前置于身份判定：bot 自身在调用侧过滤（bot 被艾特是唤醒
+    常态，为自身查名片纯属浪费），已登记成员在 fetch 侧过滤。
     """
     qq_ids: list[str] = []
     for segment in list(message):
@@ -150,10 +151,11 @@ def register_message_matcher(on_message, Message, MessageSegment):
         # 认人主键统一走群合并身份索引：@ 提及、发言人解析、转发与引用
         # 与组装侧（service._resolve_identities）同源，群级覆盖在此路径生效
         identities = svc.group_identities(group_id)
+        bot_self_key = str(event.self_id)
         mention_names = await fetch_mention_names(
             bot,
             group_id,
-            collect_at_qq_ids(message),
+            [qq for qq in collect_at_qq_ids(message) if qq != bot_self_key],
             is_registered=lambda qq: identities.resolve_user(qq).is_registered,
         )
         rendered_message = render_message_for_llm(
@@ -344,6 +346,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 include_recent_images=allows_recent_images(awakening_result.rule_name),
                 raw_user_text=build_passive_trigger_raw_user_text(awakening_result, passive_image_urls),
                 message_id=message_id or None,
+                mentioned_qq_ids=list(rendered_message.mentioned_qq_ids),
             )
             stats_tracker.record_trigger(group_id, awakening_result.rule_name)
             awakening_state.bot_messages.add(group_id, result["reply"])

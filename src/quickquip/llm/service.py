@@ -156,7 +156,7 @@ LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
 
 # 艾特档案注入：正文/存量历史中以数字形态出现的 @ 提及（@QQ123456），
-# 以及信封档案条目数上限（名字在前、QQ 作配对键，见 dev 调研 §4.1）
+# 以及信封档案条目数上限（名字在前、QQ 作配对键，见 docs/dev/llm-module.md §5.5）
 _AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})")
 _MENTION_PROFILE_LIMIT = 5
 MAX_PERSISTED_IMAGE_DESC_CHARS = 200

@@ -17,8 +17,9 @@ if TYPE_CHECKING:
     from nonebot.adapters.onebot.v11 import MessageSegment as OneBotMessageSegment
 
 # 模型可能沿用输入形态输出「@QQ 号」（裸数字艾特）；发送前切分为真实
-# at 段，保证被艾特成员在客户端得到高亮与名字而非纯数字文本
-_OUTBOUND_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})")
+# at 段，保证被艾特成员在客户端得到高亮与名字而非纯数字文本。
+# 右边界 (?!\d)：超过 12 位的数字串（幻觉长号）不切分，保持原文本。
+_OUTBOUND_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})(?!\d)")
 
 
 def split_outbound_at_mentions(
