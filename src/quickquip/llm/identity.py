@@ -114,6 +114,7 @@ class IdentityIndex:
     def from_file(cls, path: str | Path) -> "IdentityIndex":
         identity_path = Path(path)
         if not identity_path.exists():
+            logger.info("身份资料文件不存在，按空身份索引处理：%s", identity_path)
             return cls()
 
         section = ""
@@ -191,6 +192,14 @@ class IdentityIndex:
             if entry is not None:
                 entries.append(entry)
 
+        if not entries:
+            logger.warning(
+                "身份资料文件 %s 存在但无有效条目（空白模板或字段缺失），按空身份索引处理",
+                identity_path,
+            )
+        else:
+            logger.info("身份资料文件 %s 已加载 %d 条身份", identity_path, len(entries))
+
         index = cls(entries=entries)
         index._build_indexes()
         return index
@@ -241,10 +250,15 @@ class IdentityIndex:
             is_registered=True,
         )
 
-    def render_mention(self, user_id: int | str) -> str:
+    def render_mention(self, user_id: int | str, fallback_name: str = "") -> str:
+        """渲染 @ 提及文本：登记成员用标准身份，未登记用 ``fallback_name``
+        （通常为群名片），两者皆无时退回 ``@QQ 号`` 数字形态。"""
         match = self.resolve_user(user_id)
         if match.is_registered and match.canonical_name:
             return f"@{match.canonical_name}"
+        normalized = fallback_name.strip()
+        if normalized:
+            return f"@{normalized}"
         return f"@QQ{match.user_id}"
 
     def search(self, query: str, limit: int = 5) -> list[IdentityEntry]:

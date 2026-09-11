@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from quickquip.llm.identity import IdentityIndex
 
@@ -46,9 +46,11 @@ def render_segment_leaf(
     bot_self_ids: Iterable[int | str] | None = None,
     identity_index: IdentityIndex | None = None,
     include_image_placeholder: bool = False,
+    mention_names: Mapping[str, str] | None = None,
 ) -> tuple[str, list[str], bool]:
     bot_keys = normalize_bot_self_ids(bot_self_ids=bot_self_ids)
     identities = identity_index or IdentityIndex()
+    names = mention_names or {}
     segment_type, data = segment_type_and_data(segment)
 
     if segment_type == "at":
@@ -56,7 +58,7 @@ def render_segment_leaf(
         if qq and qq in bot_keys:
             return "", [], True
         if qq:
-            return identities.render_mention(qq), [], False
+            return identities.render_mention(qq, fallback_name=names.get(qq, "")), [], False
         return "", [], False
 
     if segment_type == "text":

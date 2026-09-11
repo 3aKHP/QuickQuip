@@ -237,9 +237,10 @@ def build_system_prompt(
         lines.append(provider_style_overrides.strip())
 
     lines.append("认人规则：")
+    lines.append("- 优先按标准身份（名字）识别发言人；名字后括号内的 QQ 号仅用于区分同名成员。")
     lines.append("- 不同 QQ 号默认视为不同的人，不要把两个人合并成同一发言者。")
-    lines.append("- 优先按 QQ 号识别身份，其次再参考当前显示名、标准身份和别名。")
-    lines.append('- 当上下文里已经标出“标准身份（QQ …）”时，后续继续沿用，不要自行改口或张冠李戴。')
+    lines.append('- 上下文里已按「名字（QQ …）」标注发言者时，后续继续沿用该名字，不要自行改口或张冠李戴。')
+    lines.append("- 正文中被艾特的成员以「@名字」出现；以「@QQ 号」数字形态出现的艾特与发言标注中的号码一一对应。")
     lines.append("- 只输出给用户看的最终回答，禁止输出任何内部推理、思维链、草稿、隐藏分析或 <think>/<thinking>/<reasoning> 之类标签。")
     lines.append("引用判定：")
     lines.append("- 当前提问者永远是本条消息的发送者；引用发送者只是被引用对象，不是当前说话者。")
@@ -318,12 +319,15 @@ def build_turn_envelope(
     vocab: VocabIndex,
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
+    mention_profiles: list[dict[str, str]] | None = None,
 ) -> str:
     """渲染当轮上下文信封，由 build_messages prepend 到最终 user 消息头部。
 
     组装时渲染、不落库。``now`` 为必传的可注入时钟（调用方给北京时间），
     本函数自身不含任何隐藏时钟/全局状态，相同输入字节稳定。
     空段整段省略；时间行恒在，故返回值永不为空串。
+    ``mention_profiles`` 为被艾特但未发言成员的档案（名字在前、QQ 作
+    配对键），空列表整段省略。
     """
     lines: list[str] = ["【轮次上下文】"]
     lines.append(f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} {now:%H:%M}（北京时间）")
@@ -338,6 +342,22 @@ def build_turn_envelope(
             for item in participants[:8]
         ]
         lines.append(f"- 当前对话参与成员：{'、'.join(names)}")
+
+    if mention_profiles:
+        profile_lines: list[str] = []
+        for item in mention_profiles[:5]:
+            name = str(item.get("canonical_name", "")).strip()
+            qq = str(item.get("user_id", "")).strip()
+            if not name or not qq:
+                continue
+            label = f"{name}（QQ {qq}）"
+            aliases = str(item.get("aliases", "")).strip()
+            note = str(item.get("note", "")).strip()
+            parts = [part for part in (f"别名{aliases}" if aliases else "", note) if part]
+            profile_lines.append(f"- {label}：{'；'.join(parts)}" if parts else f"- {label}")
+        if profile_lines:
+            lines.append("以下成员在消息中被艾特但未在窗口内发言，档案按 QQ 号对应：")
+            lines.extend(profile_lines)
 
     if memories:
         if chat_type == "private":

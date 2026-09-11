@@ -31,7 +31,10 @@ def _patch_period_deps(monkeypatch, *, msg_count: int = 50, stats=None):
         counts.upsert += 1
 
     settings = types.SimpleNamespace(persona_id="p1", provider_id="prov-1", model="model-1")
+    from quickquip.llm.identity import IdentityIndex
+
     svc = types.SimpleNamespace(
+        group_identities=lambda gid: IdentityIndex(),
         config=types.SimpleNamespace(
             weekly_report=types.SimpleNamespace(
                 min_messages=5, length_hint=200, model_cascade=["model-1"],

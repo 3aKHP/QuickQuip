@@ -117,6 +117,8 @@ def _patch_render_deps(monkeypatch, *, message_count=10, min_for_llm=5,
     if personas is None:
         personas = {"p1": object()}
 
+    from quickquip.llm.identity import IdentityIndex
+
     fake_svc = types.SimpleNamespace(
         config=types.SimpleNamespace(
             daily_briefing=types.SimpleNamespace(min_messages_for_llm=min_for_llm),
@@ -126,6 +128,7 @@ def _patch_render_deps(monkeypatch, *, message_count=10, min_for_llm=5,
         get_group_settings=lambda gid: types.SimpleNamespace(
             persona_id=persona_id, provider_id="prov-1", model="model-1",
         ),
+        group_identities=lambda gid: IdentityIndex(),
     )
 
     async def fake_build_context(**kw):
