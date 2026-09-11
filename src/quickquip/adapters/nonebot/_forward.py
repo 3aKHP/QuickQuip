@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 import logging
 
 from quickquip.llm.message_segments import (
@@ -71,6 +71,7 @@ async def _render_forward_nodes(
     include_image_placeholder: bool,
     depth: int,
     visited_forward_ids: set[str],
+    mention_names: Mapping[str, str] | None = None,
 ) -> tuple[str, list[str]]:
     if depth >= MAX_FORWARD_DEPTH:
         return "[合并转发内容过深，已截断]", []
@@ -96,6 +97,7 @@ async def _render_forward_nodes(
             include_image_placeholder=include_image_placeholder,
             depth=depth + 1,
             visited_forward_ids=visited_forward_ids,
+            mention_names=mention_names,
         )
 
         speaker_label = _format_forward_sender(
@@ -123,6 +125,7 @@ async def _render_forward_content(
     include_image_placeholder: bool,
     depth: int,
     visited_forward_ids: set[str],
+    mention_names: Mapping[str, str] | None = None,
 ) -> tuple[str, list[str]]:
     if isinstance(content, str):
         return content.strip(), []
@@ -153,6 +156,7 @@ async def _render_forward_content(
                     include_image_placeholder=include_image_placeholder,
                     depth=depth + 1,
                     visited_forward_ids=next_visited,
+                    mention_names=mention_names,
                 )
             elif nested_id:
                 if nested_id in visited_forward_ids:
@@ -180,6 +184,7 @@ async def _render_forward_content(
                                 include_image_placeholder=include_image_placeholder,
                                 depth=depth + 1,
                                 visited_forward_ids=visited_forward_ids | {nested_id},
+                                mention_names=mention_names,
                             )
 
             if nested_text:
@@ -198,6 +203,7 @@ async def _render_forward_content(
             bot_self_ids=bot_keys,
             identity_index=identity_index,
             include_image_placeholder=include_image_placeholder,
+            mention_names=mention_names,
         )
         if text:
             plain_parts.append(text)
@@ -215,6 +221,7 @@ async def extract_forward_content(
     *,
     bot_self_ids: Iterable[int | str] | None = None,
     reply=None,
+    mention_names: Mapping[str, str] | None = None,
 ):
     bot_keys = normalize_bot_self_ids(bot_self_id=bot_self_id, bot_self_ids=bot_self_ids)
     identities = identity_index or IdentityIndex()
@@ -251,6 +258,7 @@ async def extract_forward_content(
         bot_keys=bot_keys,
         identity_index=identities,
         include_image_placeholder=True,
+        mention_names=mention_names,
         depth=0,
         visited_forward_ids={forward_id} if forward_id else set(),
     )

@@ -46,23 +46,36 @@ def _build_system_prompt(
     return "\n\n".join(parts)
 
 
-def _format_sample_messages(sample_messages: list[dict]) -> str:
+def _format_sample_messages(
+    sample_messages: list[dict],
+    identity_resolver=None,
+) -> str:
     if not sample_messages:
         return "（本窗口暂无消息样本）"
 
+    def _display(entry: dict) -> str:
+        sender = str(entry.get("sender", "")).strip() or "未知"
+        # 读时重解析：登记成员以标准身份呈现（读档链与总结链同构）
+        if identity_resolver is not None:
+            user_id = str(entry.get("user_id", "")).strip()
+            if user_id.isdigit():
+                resolved = identity_resolver(user_id).strip()
+                if resolved:
+                    return resolved[:24]
+        return sender
+
     lines: list[str] = []
     for entry in sample_messages:
-        sender = str(entry.get("sender", "")).strip() or "未知"
         text = str(entry.get("text", "")).strip()
         if not text:
             continue
         ts = str(entry.get("time_label", "")).strip()
         prefix = f"[{ts}] " if ts else ""
-        lines.append(f"{prefix}{sender}：{text}")
+        lines.append(f"{prefix}{_display(entry)}：{text}")
     return "\n".join(lines) if lines else "（本窗口暂无消息样本）"
 
 
-def _build_user_prompt(context: DailyBriefingContext) -> str:
+def _build_user_prompt(context: DailyBriefingContext, *, identity_resolver=None) -> str:
     lines = [
         f"播报类型：{context.period_label}",
         f"当前日期：{context.date_label} 星期{context.weekday_label}",
@@ -91,7 +104,7 @@ def _build_user_prompt(context: DailyBriefingContext) -> str:
 
     lines.append("消息样本：")
     lines.append("=== 样本开始 ===")
-    lines.append(_format_sample_messages(context.sample_messages))
+    lines.append(_format_sample_messages(context.sample_messages, identity_resolver=identity_resolver))
     lines.append("=== 样本结束 ===")
     lines.append("")
     lines.append("请直接输出最终播报正文，不要附加解释。")
@@ -118,10 +131,13 @@ async def generate_daily_briefing(
     llm_config: LLMConfig,
     default_provider_id: str,
     default_model: str,
+    identity_resolver=None,
 ) -> tuple[str, str]:
     set_usage_scope("briefing", group_id=str(group_id), persona_id=persona.id, run_id=new_usage_run_id())
     system_prompt = _build_system_prompt(persona, context, briefing_config)
-    user_message = LLMConversationMessage(role="user", content=_build_user_prompt(context))
+    user_message = LLMConversationMessage(
+        role="user", content=_build_user_prompt(context, identity_resolver=identity_resolver)
+    )
     cascade = briefing_config.model_cascade or [f"{default_provider_id}/{default_model}"]
     last_error: Exception | None = None
 

@@ -260,7 +260,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             reply,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=svc.identities,
+            identity_index=svc.group_identities(event.group_id),
         )
         if not rendered or not rendered.text.strip():
             await quote_cmd.finish("引用的消息没有文字内容，无法收藏")

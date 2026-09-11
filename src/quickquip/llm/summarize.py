@@ -272,6 +272,7 @@ async def generate_daily_summary(
     default_model: str,
     local_tz: ZoneInfo,
     bot_user_ids: frozenset[str] | set[str] = frozenset(),
+    identity_resolver=None,
 ) -> tuple[str, str]:
     """Generate a daily summary using the model cascade.
 
@@ -289,7 +290,8 @@ async def generate_daily_summary(
         raise RuntimeError(f"daily_summary: 级联无可用模型（cascade={cascade}）")
 
     raw_log, ser_stats = serialize_period_chat(
-        messages, local_tz=local_tz, bot_user_ids=bot_user_ids
+        messages, local_tz=local_tz, bot_user_ids=bot_user_ids,
+        identity_resolver=identity_resolver,
     )
     logger.info(
         "daily_summary: 序列化 %d 条消息 → %d 字符 / %d 行"
@@ -381,6 +383,7 @@ async def generate_period_report(
     local_tz: ZoneInfo,
     bot_user_ids: frozenset[str] | set[str] = frozenset(),
     input_char_budget: int | None = None,
+    identity_resolver=None,
 ) -> tuple[str, str]:
     """Generate a weekly or monthly group report using the model cascade.
 
@@ -400,7 +403,8 @@ async def generate_period_report(
     if period_kind == "monthly":
         budget = input_char_budget or DEFAULT_MONTHLY_INPUT_CHARS
         raw_log, month_stats = build_monthly_chat_input(
-            messages, local_tz=local_tz, bot_user_ids=bot_user_ids, target_chars=budget
+            messages, local_tz=local_tz, bot_user_ids=bot_user_ids, target_chars=budget,
+            identity_resolver=identity_resolver,
         )
         logger.info(
             "period_report[monthly]: 分周组装 %d 条消息 → %d 字符 / 预算 %d"
@@ -412,7 +416,8 @@ async def generate_period_report(
         envelope_message_count = month_stats.messages_selected
     else:
         raw_log, ser_stats = serialize_period_chat(
-            messages, local_tz=local_tz, bot_user_ids=bot_user_ids
+            messages, local_tz=local_tz, bot_user_ids=bot_user_ids,
+            identity_resolver=identity_resolver,
         )
         logger.info(
             "period_report[%s]: 序列化 %d 条消息 → %d 字符 / %d 行"

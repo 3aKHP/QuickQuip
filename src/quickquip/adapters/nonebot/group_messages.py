@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 
+from quickquip.adapters.nonebot.member_cards import fetch_mention_names
 from quickquip.llm.inputs import extract_llm_input
+from quickquip.llm.message_segments import segment_type_and_data
 from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot._llm_reply import (
@@ -36,6 +38,22 @@ logger = logging.getLogger(__name__)
 
 def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "", image_urls: list[str] | None = None) -> None:
     recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id=message_id, image_urls=image_urls)
+
+
+def collect_at_qq_ids(message) -> list[str]:
+    """提取消息段内全部 at 目标 QQ（含 bot 自身，按出现顺序去重）。
+
+    名片预取前置于身份判定，bot 自身与已登记成员在 fetch 侧过滤。
+    """
+    qq_ids: list[str] = []
+    for segment in list(message):
+        segment_type, data = segment_type_and_data(segment)
+        if segment_type != "at":
+            continue
+        qq = str(data.get("qq", "")).strip()
+        if qq and qq not in qq_ids:
+            qq_ids.append(qq)
+    return qq_ids
 
 
 def _result_reason(result: dict) -> str:
@@ -125,25 +143,36 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
         message = event.get_message()
         repeat_fingerprint = str(message).strip()
+        sender_name = get_sender_name(event)
+        user_id = event.user_id
+        group_id = event.group_id
+        message_id = str(getattr(event, "message_id", "") or "")
+        # 认人主键统一走群合并身份索引：@ 提及、发言人解析、转发与引用
+        # 与组装侧（service._resolve_identities）同源，群级覆盖在此路径生效
+        identities = svc.group_identities(group_id)
+        mention_names = await fetch_mention_names(
+            bot,
+            group_id,
+            collect_at_qq_ids(message),
+            is_registered=lambda qq: identities.resolve_user(qq).is_registered,
+        )
         rendered_message = render_message_for_llm(
             message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=svc.identities,
+            identity_index=identities,
             include_image_placeholder=True,
+            mention_names=mention_names,
         )
         rule_text = render_message_for_llm(
             message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=svc.identities,
+            identity_index=identities,
             include_image_placeholder=False,
+            mention_names=mention_names,
         ).text
-        sender_name = get_sender_name(event)
-        user_id = event.user_id
-        group_id = event.group_id
-        message_id = str(getattr(event, "message_id", "") or "")
-        identity = svc.identities.resolve_user(user_id, sender_name)
+        identity = identities.resolve_user(user_id, sender_name)
         canonical_name = identity.canonical_name
 
         if message_deduper.is_duplicate(group_id, message_id or None):
@@ -194,20 +223,22 @@ def register_message_matcher(on_message, Message, MessageSegment):
             message=message,
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=svc.identities,
+            identity_index=identities,
+            mention_names=mention_names,
             reply=getattr(event, "reply", None),
         )
         llm_input = extract_llm_input(
             message,
             event.self_id,
             llm_settings,
-            identity_index=svc.identities,
+            identity_index=identities,
             bot_self_ids={event.self_id},
             reply=getattr(event, "reply", None),
             is_to_me=bool(getattr(event, "to_me", False)),
             forward_text=forward_text,
             forward_image_urls=forward_image_urls,
             voice_text=voice_text,
+            mention_names=mention_names,
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
             _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
@@ -237,6 +268,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 forward_image_urls=llm_input.forward_image_urls,
                 voice_text=llm_input.voice_text,
                 message_id=message_id or None,
+                mentioned_qq_ids=list(llm_input.mentioned_qq_ids),
             )
             stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
             awakening_state.bot_messages.add(group_id, result["reply"])

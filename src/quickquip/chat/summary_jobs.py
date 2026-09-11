@@ -42,6 +42,28 @@ SendRow = Callable[[dict], Awaitable[None]]
 # ── 每日总结 ─────────────────────────────────────────────────────────────
 
 
+
+def _identity_resolver_from_svc(svc, group_id: str):
+    """QQ → 标准身份（空串=未登记）；归档消费链读时重解析用。
+
+    索引不可得（降级实例/测试替身）时返回 None，序列化回退显示名形态。
+    """
+
+    get_group_index = getattr(svc, "group_identities", None)
+    if get_group_index is None:
+        return None
+    try:
+        identity_index = get_group_index(group_id)
+    except Exception:
+        logger.warning("period_report: 身份索引不可用，按显示名序列化 group=%s", group_id)
+        return None
+
+    def _resolve(qq: str) -> str:
+        return identity_index.resolve_user(qq).canonical_name
+
+    return _resolve
+
+
 async def run_summary_generation(
     group_id: str,
     start_ts: float,
@@ -92,6 +114,7 @@ async def run_summary_generation(
             default_model=settings.model,
             local_tz=_LOCAL_TZ,
             bot_user_ids=bot_user_ids_from_env(),
+            identity_resolver=_identity_resolver_from_svc(svc, group_id),
         )
     except Exception:
         logger.exception("daily_summary: generation failed for group %s", group_id)
@@ -263,6 +286,7 @@ async def run_period_generation(
             local_tz=_LOCAL_TZ,
             bot_user_ids=bot_user_ids_from_env(),
             input_char_budget=getattr(cfg, "input_char_budget", None),
+            identity_resolver=_identity_resolver_from_svc(svc, group_id),
         )
     except Exception:
         logger.exception("period_report[%s]: generation failed for group %s", period_type, group_id)

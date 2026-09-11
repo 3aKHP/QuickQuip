@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from urllib.parse import urlparse
@@ -131,7 +131,11 @@ def bot_user_ids_from_env(environ: Mapping[str, str] | None = None) -> frozenset
 
 
 def _clean_entries(
-    messages: list[dict], *, max_body_chars: int, stats: dict
+    messages: list[dict],
+    *,
+    max_body_chars: int,
+    stats: dict,
+    identity_resolver: Callable[[str], str] | None = None,
 ) -> list[_Entry]:
     entries: list[_Entry] = []
     for entry in sorted(messages, key=lambda e: float(e.get("ts") or 0)):
@@ -147,6 +151,12 @@ def _clean_entries(
         sender = _fold_ws(entry.get("sender", ""))[:24] or "未知"
         user_id = entry.get("user_id")
         identity = str(user_id).strip() if user_id is not None and str(user_id).strip() else sender
+        # 读时重解析：登记成员以标准身份呈现（折叠键仍为 QQ），
+        # 未登记保持归档时的显示名
+        if identity_resolver is not None and identity.isdigit():
+            resolved = identity_resolver(identity).strip()
+            if resolved:
+                sender = resolved[:24]
         entries.append(
             _Entry(ts=float(entry.get("ts") or 0), identity=identity, sender=sender, text=text)
         )
@@ -181,17 +191,29 @@ def serialize_period_chat(
     max_line_parts: int = 8,
     max_body_chars: int = 400,
     repeat_threshold: int = 3,
+    identity_resolver: Callable[[str], str] | None = None,
 ) -> tuple[str, PeriodSerializeStats]:
     """把归档消息序列化为周期报告输入文本。
 
     输入为 read_window 形态的消息 dict（sender/text/ts/user_id），
     输出 (序列化文本, 统计)。确定性纯函数，无 I/O。
+    ``identity_resolver``（QQ → 标准身份，空串表示未登记）提供时，
+    登记成员渲染名用标准身份；同名不同 QQ 的碰撞者附 QQ 后缀区分。
     """
     stats: dict = {name: 0 for name in PeriodSerializeStats.__dataclass_fields__}
     message_list = list(messages)
     stats["messages_in"] = len(message_list)
-    entries = _clean_entries(message_list, max_body_chars=max_body_chars, stats=stats)
+    entries = _clean_entries(
+        message_list, max_body_chars=max_body_chars, stats=stats,
+        identity_resolver=identity_resolver,
+    )
     bots = {str(b).strip() for b in bot_user_ids if str(b).strip()}
+
+    # 碰撞触发式后缀：同一渲染名对应多个 QQ 时，给碰撞者补 QQ 区分
+    name_to_ids: dict[str, set[str]] = defaultdict(set)
+    for entry in entries:
+        name_to_ids[entry.sender].add(entry.identity)
+    colliding_names = {name for name, ids in name_to_ids.items() if len(ids) > 1}
 
     out_lines: list[str] = []
     prev_day: str | None = None
@@ -209,7 +231,12 @@ def serialize_period_chat(
         stats["repeat_collapses"] += collapses
         if run.message_count > 1:
             stats["merged_runs"] += 1
-        display = f"{run.sender}(bot)" if run.identity in bots else run.sender
+        if run.identity in bots:
+            display = f"{run.sender}(bot)"
+        elif run.sender in colliding_names:
+            display = f"{run.sender}（QQ {run.identity}）"
+        else:
+            display = run.sender
         for index, chunk in enumerate(chunks):
             prefix = block_prefix if index == 0 else ""
             out_lines.append(f"{prefix}{display}：{' / '.join(chunk)}")
@@ -289,6 +316,7 @@ def _sample_text_to_budget(
     max_line_parts: int,
     max_body_chars: int,
     repeat_threshold: int,
+    identity_resolver: Callable[[str], str] | None = None,
 ) -> tuple[str, PeriodSerializeStats] | None:
     """对单日消息等距抽稀，使序列化结果字符数 ≤ max_chars。
 
@@ -305,6 +333,7 @@ def _sample_text_to_budget(
             max_line_parts=max_line_parts,
             max_body_chars=max_body_chars,
             repeat_threshold=repeat_threshold,
+            identity_resolver=identity_resolver,
         )
 
     full_text, full_stats = _render(messages)
@@ -343,6 +372,7 @@ def build_monthly_chat_input(
     max_line_parts: int = 8,
     max_body_chars: int = 400,
     repeat_threshold: int = 3,
+    identity_resolver: Callable[[str], str] | None = None,
 ) -> tuple[str, MonthlyInputStats]:
     """组装月报输入：按周公平预算 + 周内活跃日优先。
 
@@ -384,6 +414,7 @@ def build_monthly_chat_input(
             max_line_parts=max_line_parts,
             max_body_chars=max_body_chars,
             repeat_threshold=repeat_threshold,
+            identity_resolver=identity_resolver,
         )
 
     for week_index, week_key in enumerate(week_keys, start=1):
@@ -437,6 +468,7 @@ def build_monthly_chat_input(
                 max_line_parts=max_line_parts,
                 max_body_chars=max_body_chars,
                 repeat_threshold=repeat_threshold,
+                identity_resolver=identity_resolver,
             )
             if fitted is not None:
                 fitted_text, fitted_stats = fitted
