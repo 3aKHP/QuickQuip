@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -8,10 +9,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _enrich_quote_rows(rows: list[dict], group_id: str) -> list[dict]:
-    from quickquip.app.message_pipeline import get_sender_identity_sources
+def _enrich_quote_rows(rows: list[dict], group_id: str, snapshot=None) -> list[dict]:
+    from quickquip.app.identities import web_identities
 
-    user_names, identity_index = get_sender_identity_sources(group_id)
+    snapshot = snapshot or web_identities.snapshot(group_id)
+    user_names, identity_index = snapshot.names, snapshot.index
     return attach_sender_display(rows, user_names=user_names, identity_index=identity_index)
 
 
@@ -34,8 +36,10 @@ async def list_quotes(
     from quickquip.app.message_pipeline import group_quote_store
 
     store: GroupQuoteStore = group_quote_store
-    rows, total = store.list_quotes(group_id, offset=offset, limit=limit, keyword=keyword)
-    rows = _enrich_quote_rows(rows, group_id)
+    from quickquip.app.identities import web_identities
+    snapshot = web_identities.snapshot(group_id)
+    rows, total = await asyncio.to_thread(store.list_quotes, group_id, offset=offset, limit=limit, keyword=keyword, identity_snapshot=snapshot)
+    rows = _enrich_quote_rows(rows, group_id, snapshot)
     return {"entries": rows, "total": total, "has_more": offset + limit < total}
 
 
@@ -44,10 +48,12 @@ async def get_by_seq(group_id: str, seq: int, request: Request):
     from quickquip.app.message_pipeline import group_quote_store
 
     store: GroupQuoteStore = group_quote_store
-    q = store.get_by_seq(group_id, seq)
+    from quickquip.app.identities import web_identities
+    snapshot = web_identities.snapshot(group_id)
+    q = store.get_by_seq(group_id, seq, identity_snapshot=snapshot)
     if q is None:
         raise HTTPException(404, "quote not found")
-    return _enrich_quote_rows([q], group_id)[0]
+    return _enrich_quote_rows([q], group_id, snapshot)[0]
 
 
 @router.delete("/quotes/{quote_id}")

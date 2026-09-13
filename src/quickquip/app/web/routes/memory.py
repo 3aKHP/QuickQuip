@@ -4,12 +4,15 @@ import logging
 import re
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Annotated, Literal
 
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import LLM_DB_PATH
 from quickquip.llm.store import LLMStore
+from quickquip.app.identities import web_identities
+from quickquip.common.record_content import QQ, plain, render, validate
+from quickquip.common.record_storage import save_parts
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -20,7 +23,7 @@ _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 
 
 def _store() -> LLMStore:
-    return LLMStore(_DB)
+    return LLMStore(_DB, identity_repository=web_identities)
 
 
 def _validate_group_id(group_id: str) -> None:
@@ -29,15 +32,23 @@ def _validate_group_id(group_id: str) -> None:
 
 
 class MemoryCreate(BaseModel):
-    content: str = Field(max_length=4096)
+    content: str = Field(default="", max_length=4096)
+    content_parts: dict | None = None
     scope: Literal["group", "user"] = "group"
     user_id: str | None = None
     tags: list[Annotated[str, Field(max_length=64)]] = Field(default=[], max_length=32)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
+    @model_validator(mode="after")
+    def require_body(self):
+        if self.content_parts is None and "content" not in self.model_fields_set:
+            raise ValueError("content or content_parts is required")
+        return self
+
 
 class MemoryUpdate(BaseModel):
     content: str | None = Field(default=None, max_length=4096)
+    content_parts: dict | None = None
     tags: list[Annotated[str, Field(max_length=64)]] | None = Field(default=None, max_length=32)
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
@@ -57,6 +68,7 @@ def list_memories(
 def create_memory(group_id: str, body: MemoryCreate, request: Request):
     _validate_group_id(group_id)
     store = _store()
+    parts = _validated_parts(body.content_parts)
     mem_id = store.add_memory(
         group_id,
         body.content,
@@ -65,6 +77,7 @@ def create_memory(group_id: str, body: MemoryCreate, request: Request):
         tags=body.tags,
         source="manual",
         confidence=body.confidence,
+        content_parts=parts,
     )
     logger.info("memory created: group=%s id=%d scope=%s", group_id, mem_id, body.scope)
     audit_logger.log(
@@ -72,7 +85,7 @@ def create_memory(group_id: str, body: MemoryCreate, request: Request):
         action="create",
         target_type="memory",
         target_id=f"{group_id}:{mem_id}",
-        summary_after={"scope": body.scope, "content": body.content[:100]},
+        summary_after={"scope": body.scope, "content": (render(parts) if parts is not None else body.content)[:100]},
     )
     return {"id": mem_id}
 
@@ -82,6 +95,7 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Reque
     _validate_group_id(group_id)
     store = _store()
     with store._connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT * FROM memories WHERE id = ? AND group_id = ?",
             (mem_id, group_id),
@@ -91,7 +105,8 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Reque
         old_content = row["content"]
         old_tags = row["tags_json"]
         old_conf = row["confidence"]
-        new_content = body.content if body.content is not None else old_content
+        parts = _validated_parts(body.content_parts)
+        new_content = render(parts) if parts is not None else body.content if body.content is not None else old_content
         new_tags = json.dumps(body.tags, ensure_ascii=False) if body.tags is not None else old_tags
         new_conf = body.confidence if body.confidence is not None else old_conf
         now = datetime.now(timezone.utc).isoformat()
@@ -99,6 +114,8 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Reque
             "UPDATE memories SET content=?, tags_json=?, confidence=?, updated_at=? WHERE id=?",
             (new_content, new_tags, new_conf, now, mem_id),
         )
+        if parts is not None or body.content is not None:
+            save_parts(conn, "memories", mem_id, group_id, parts if parts is not None else plain(new_content))
     logger.info("memory updated: group=%s id=%d", group_id, mem_id)
     audit_logger.log(
         request,
@@ -116,6 +133,7 @@ def delete_memory(group_id: str, mem_id: int, request: Request):
     _validate_group_id(group_id)
     store = _store()
     with store._connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             "SELECT * FROM memories WHERE id = ? AND group_id = ?",
             (mem_id, group_id),
@@ -156,3 +174,32 @@ def clear_memories(group_id: str, request: Request):
         summary_before={"deleted": count},
     )
     return {"deleted": count}
+
+
+def _validated_parts(parts):
+    if parts is None:
+        return None
+    try:
+        return validate(parts)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/members/{group_id}")
+def search_members(
+    group_id: str, query: str = Query(default="", max_length=256),
+    offset: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=100),
+):
+    _validate_group_id(group_id)
+    snapshot = web_identities.snapshot(group_id)
+    ids = set(snapshot.names) | set(snapshot.index.by_qq)
+    result = []
+    for qq in sorted(ids):
+        if not QQ.fullmatch(qq):
+            continue
+        entry = snapshot.index.by_qq.get(qq)
+        aliases = entry.aliases if entry else []
+        name = snapshot.name(qq)
+        if not query or any(query.casefold() in value.casefold() for value in [qq, name, snapshot.names.get(qq, ""), *aliases]):
+            result.append({"qq": qq, "name": name, "aliases": aliases})
+    return result[offset:offset + limit]

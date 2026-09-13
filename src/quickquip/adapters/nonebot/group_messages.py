@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.app.identities import identities as stored_identities
+
 import logging
 
 from quickquip.adapters.nonebot.member_cards import fetch_mention_names
@@ -196,8 +198,9 @@ def register_message_matcher(on_message, Message, MessageSegment):
         pending = offline_message_store.pop_pending(group_id, user_id)
         if pending:
             lines = [f"有 {len(pending)} 条留言捎给你："]
+            snapshot = stored_identities.snapshot(group_id)
             for m in pending:
-                lines.append(m.format_display())
+                lines.append(m.format_display(snapshot))
             reply_message = Message([
                 MessageSegment.at(user_id),
                 MessageSegment.text(" " + "\n".join(lines)),

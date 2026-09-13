@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.llm.identity import IdentityIndex
+from quickquip.app.identities import identities as _record_identities
 from quickquip.llm.service import get_llm_service
 from quickquip.llm.usage import drain_usage_tasks
 from quickquip.llm.usage_store import usage_store
@@ -147,6 +148,7 @@ tieba_service = TiebaService()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
+_record_identities.names_provider = lambda gid: getattr(stats_tracker.get_stats(gid), "user_names", {})
 rule_switch.load(RULE_SWITCH_PATH)
 _llm_bindings_done = False
 
@@ -174,18 +176,11 @@ logger = logging.getLogger(__name__)
 def get_sender_identity_sources(
     group_id: int | str,
 ) -> tuple[dict[str, str] | None, IdentityIndex | None]:
-    """发言人展示名的两个来源：群内最新名片表与群级身份索引。
-
-    身份索引依赖 LLM 服务，不可用时降级为 None，由调用方回退快照名。
-    """
-    gs = stats_tracker.get_stats(group_id)
-    identity_index = None
-    try:
-        _ensure_llm_bindings()
-        identity_index = get_llm_service().group_identities(str(group_id))
-    except Exception:
-        logger.debug("语录发言人解析：身份索引不可用，回退快照名", exc_info=True)
-    return (gs.user_names if gs else None), identity_index
+    """Return shared group identity sources without starting the LLM runtime."""
+    from quickquip.app.identities import identities
+    identities.names_provider = lambda gid: getattr(stats_tracker.get_stats(gid), "user_names", {})
+    snapshot = identities.snapshot(group_id)
+    return snapshot.names, snapshot.index
 
 
 def record_chat_message(

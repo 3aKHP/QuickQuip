@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.identity import IdentityEntry, IdentityIndex
+
 import pytest
 from types import SimpleNamespace
 
@@ -16,13 +18,14 @@ class _FakeMatch:
         self.canonical_name = canonical_name
 
 
-class _FakeIdentityIndex:
-    def __init__(self, by_alias=None, canonical_by_uid=None):
-        self.by_alias = by_alias or {}
-        self._canonical = canonical_by_uid or {}
 
-    def resolve_user(self, user_id, sender_name=""):
-        return _FakeMatch(self._canonical.get(str(user_id), ""))
+
+class _FakeIdentityIndex(IdentityIndex):
+    def __init__(self, by_alias=None, canonical_by_uid=None):
+        entries = [IdentityEntry(name, [qq]) for qq, name in (canonical_by_uid or {}).items()]
+        entries.extend(IdentityEntry(alias, list(value.qq_ids), [alias]) for alias, value in (by_alias or {}).items())
+        super().__init__(entries=entries)
+        self._build_indexes()
 
 
 class _FakeStore:
@@ -30,7 +33,7 @@ class _FakeStore:
         self._rows = rows
         self.calls = []
 
-    def search_by_sender(self, group_id, *, user_ids=(), name_pattern="", offset=0, limit=50):
+    def search_by_sender(self, group_id, *, user_ids=(), name_pattern="", offset=0, limit=50, identity_snapshot=None):
         self.calls.append({"user_ids": list(user_ids), "name_pattern": name_pattern})
         return [dict(r) for r in self._rows], len(self._rows)
 
@@ -63,7 +66,7 @@ class _FakeMessage(list):
 class _FakeSegment:
     @staticmethod
     def text(value):
-        return ("text", value)
+        return value
 
     @staticmethod
     def image(value):
@@ -124,13 +127,13 @@ def _row(**overrides):
     return base
 
 
-def test_quote_display_name_prefers_latest_card(monkeypatch):
+def test_quote_display_name_prefers_standard_identity(monkeypatch):
     monkeypatch.setattr(
         history, "get_sender_identity_sources",
         lambda gid: ({"u1": "新名片"}, _FakeIdentityIndex(canonical_by_uid={"u1": "规范名"})),
     )
 
-    assert _quote_display_name(100, "u1", "旧名片") == "新名片 (原: 旧名片)"
+    assert _quote_display_name(100, "u1", "旧名片") == "规范名 (原: 旧名片)"
 
 
 def test_quote_display_name_unchanged_shows_single_name(monkeypatch):
@@ -210,3 +213,12 @@ async def test_quote_by_no_match_reports_miss(monkeypatch):
         await matcher.handlers[0](_FakeGroupEvent("quote by 路人"))
 
     assert matcher.sent == ["未找到「路人」发言的语录"]
+
+
+def test_quote_same_name_candidates_include_qq(monkeypatch):
+    index = IdentityIndex(entries=[IdentityEntry("同名", ["12345"]), IdentityEntry("同名", ["23456"])])
+    index._build_indexes()
+    monkeypatch.setattr(history, "get_sender_identity_sources", lambda group: ({}, index))
+    assert _resolve_sender_candidates(10001, "同名") == ["12345", "23456"]
+    assert _quote_display_name(10001, "12345", "同名") == "同名（QQ 12345）"
+    assert _quote_display_name(10001, "23456", "同名") == "同名（QQ 23456）"

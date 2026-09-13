@@ -58,7 +58,7 @@ def render_segment_leaf(
         if qq and qq in bot_keys:
             return "", [], True
         if qq:
-            return identities.render_mention(qq, fallback_name=names.get(qq, "")), [], False
+            return identities.render_mention(qq, fallback_name=names.get(qq) or str(data.get("name", "") or "")), [], False
         return "", [], False
 
     if segment_type == "text":

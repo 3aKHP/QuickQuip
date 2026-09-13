@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -73,7 +72,7 @@ def _text(value: str) -> _Seg:
 
 
 def test_from_file_missing_logs_info_and_returns_empty(tmp_path: Path, caplog):
-    with caplog.at_level(logging.INFO, logger="quickquip.llm.identity"):
+    with caplog.at_level(logging.INFO, logger="quickquip.common.identity"):
         index = IdentityIndex.from_file(tmp_path / "absent.yaml")
     assert index.entries == []
     assert any("不存在" in record.message for record in caplog.records)
@@ -85,7 +84,7 @@ def test_from_file_empty_template_logs_warning(tmp_path: Path, caplog):
         "people:\n  - canonical_name: \n    qq_ids:\n      - \"\"\n",
         encoding="utf-8",
     )
-    with caplog.at_level(logging.WARNING, logger="quickquip.llm.identity"):
+    with caplog.at_level(logging.WARNING, logger="quickquip.common.identity"):
         index = IdentityIndex.from_file(path)
     assert index.entries == []
     assert any("无有效条目" in record.message for record in caplog.records)
@@ -94,7 +93,7 @@ def test_from_file_empty_template_logs_warning(tmp_path: Path, caplog):
 def test_from_file_loaded_logs_count(tmp_path: Path, caplog):
     path = tmp_path / "identities.yaml"
     path.write_text(_IDENTITIES_YAML, encoding="utf-8")
-    with caplog.at_level(logging.INFO, logger="quickquip.llm.identity"):
+    with caplog.at_level(logging.INFO, logger="quickquip.common.identity"):
         index = IdentityIndex.from_file(path)
     assert len(index.entries) == 2
     assert any("已加载 2 条身份" in record.message for record in caplog.records)
@@ -189,8 +188,8 @@ def _bare_service(tmp_path: Path) -> LLMService:
     service = LLMService.__new__(LLMService)
     service.identity_path = tmp_path / "identities.yaml"
     service.identity_path.write_text(_IDENTITIES_YAML, encoding="utf-8")
-    service.identities = IdentityIndex.from_file(service.identity_path)
-    service._group_identities = OrderedDict()
+    from quickquip.common.identity_sources import IdentityRepository
+    service._identity_repository = IdentityRepository(service.identity_path)
     return service
 
 
@@ -262,8 +261,8 @@ def test_collect_mention_profiles_caps_at_five(tmp_path: Path):
     path.write_text(f"people:\n{people}\n", encoding="utf-8")
     service = LLMService.__new__(LLMService)
     service.identity_path = path
-    service.identities = IdentityIndex.from_file(path)
-    service._group_identities = OrderedDict()
+    from quickquip.common.identity_sources import IdentityRepository
+    service._identity_repository = IdentityRepository(path)
 
     profiles = service._collect_mention_profiles(
         chat_id="100",

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from quickquip.common.identity_sources import identities
+from quickquip.common.record_content import decode, plain, render, validate
+from quickquip.common.record_storage import migrate, save_parts
+
 import logging
 import sqlite3
 import time
@@ -17,10 +21,13 @@ class PendingMessage:
     from_sender_name: str
     content: str
     created_at: int
+    content_parts_json: str | None = None
+    group_id: str = ""
 
-    def format_display(self) -> str:
+    def format_display(self, snapshot=None) -> str:
         ts = datetime.fromtimestamp(self.created_at).strftime("%m-%d %H:%M")
-        return f"[{self.from_sender_name} {ts}] {self.content}"
+        snapshot = snapshot or identities.snapshot(self.group_id)
+        return f"[{snapshot.name(self.from_user_id, self.from_sender_name)} {ts}] {render(decode(self.content, self.content_parts_json), snapshot)}"
 
 
 class OfflineMessageStore:
@@ -48,6 +55,7 @@ class OfflineMessageStore:
                 CREATE INDEX IF NOT EXISTS idx_om_from
                     ON offline_messages(group_id, from_user_id, id);
             """)
+            migrate(self._db, "offline_messages")
             self._db.commit()
             # Fast-reject set: (group_id, to_user_id) pairs that have pending rows.
             # Conservative: false positives cause one wasted DELETE RETURNING; false negatives would miss delivery.
@@ -69,17 +77,22 @@ class OfflineMessageStore:
         from_sender_name: str,
         to_user_id: str | int,
         content: str,
+        *, content_parts: dict | None = None,
     ) -> int:
         if self._unavailable:
             raise RuntimeError("离线消息 数据库不可用")
+        body = validate(content_parts) if content_parts is not None else plain(content)
+        if content_parts is not None:
+            content = render(body)
         g, t = str(group_id), str(to_user_id)
-        cur = self._db.execute(
-            "INSERT INTO offline_messages"
-            " (group_id, from_user_id, from_sender_name, to_user_id, content, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (g, str(from_user_id), from_sender_name, t, content, int(time.time())),
-        )
-        self._db.commit()
+        with self._db:
+            cur = self._db.execute(
+                "INSERT INTO offline_messages"
+                " (group_id, from_user_id, from_sender_name, to_user_id, content, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (g, str(from_user_id), from_sender_name, t, content, int(time.time())),
+            )
+            save_parts(self._db, "offline_messages", cur.lastrowid, g, body)
         self._pending.add((g, t))
         return cur.lastrowid  # type: ignore[return-value]
 
@@ -91,13 +104,13 @@ class OfflineMessageStore:
             return []
         rows = self._db.execute(
             "DELETE FROM offline_messages WHERE group_id=? AND to_user_id=?"
-            " RETURNING id, from_user_id, from_sender_name, content, created_at",
+            " RETURNING id, from_user_id, from_sender_name, content, created_at, content_parts_json, group_id",
             key,
         ).fetchall()
         self._db.commit()
         self._pending.discard(key)
         return sorted(
-            [PendingMessage(r[0], r[1], r[2], r[3], r[4]) for r in rows],
+            [PendingMessage(*r) for r in rows],
             key=lambda m: m.id,
         )
 
@@ -122,11 +135,11 @@ class OfflineMessageStore:
         if key not in self._pending:
             return []
         rows = self._db.execute(
-            "SELECT id, from_user_id, from_sender_name, content, created_at"
+            "SELECT id, from_user_id, from_sender_name, content, created_at, content_parts_json, group_id"
             " FROM offline_messages WHERE group_id=? AND to_user_id=? ORDER BY id",
             key,
         ).fetchall()
-        return [PendingMessage(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+        return [PendingMessage(*r) for r in rows]
 
     def close(self) -> None:
         if self._closed or self._db is None:

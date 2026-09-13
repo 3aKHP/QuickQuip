@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from quickquip.common.identity_sources import IdentityRepository, identities
+
 import json
 import logging
 import re
@@ -86,6 +88,8 @@ def _backfill_delivery_split_columns(conn: sqlite3.Connection, existing_columns:
         )
 
 
+
+
 class _StoreBase:
     """LLMStore 的基础设施层：连接管理、schema 初始化、不可用守卫。
 
@@ -93,13 +97,17 @@ class _StoreBase:
     访问这些能力，MRO 中 _StoreBase 必须排在域 mixin 之前。
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, identity_repository: IdentityRepository = identities):
+        self.identity_repository = identity_repository
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._unavailable = False
         try:
             self._ensure_schema()
             self._ensure_agent_schema()
+            from quickquip.common.record_storage import migrate
+            with self._connect() as conn:
+                migrate(conn, "memories")
         except sqlite3.Error as exc:
             logger.error("LLMStore 数据库初始化失败 (%s)：%s", self.path, exc)
             self._unavailable = True
