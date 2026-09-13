@@ -45,7 +45,9 @@ LLM 相关核心文件如下：
 - `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机）
 - `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、健康检查、状态、自动记忆）
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、健康检查、状态、自动记忆）。回复主链的输入收敛为 `llm/reply_types.py` 的 `ChatTurnRequest`，请求装配（替代旧闭包）、输入规范化、输出后处理与返回形状构造在 `llm/reply_chain.py`
+- `src/quickquip/llm/reply_chain.py`
+  - 回复主链的装配与产出 shaping：`TurnRequestAssembler`（首轮与预算降级重建共用的显式装配对象）、`normalize_turn_input`、`finalize_reply_text`、`reply_result` 工厂与触发行 `raw_content` 拼装；只收显式参数，不 import `LLMService`
 - `src/quickquip/llm/quick_judge.py`
   - quick_judge 诊断通道（`QuickJudgeResult`、provider 选择策略、detailed 通道），`LLMService` 仅保留薄委托
 - `src/quickquip/llm/single_shot.py`
@@ -75,7 +77,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/vocab.py`
   - 负责从 `llm_about/vocab.yaml` 读取群别名与黑话词表，并按需注入
 - `src/quickquip/llm/identity.py`
-  - 负责从 `llm_about/identities.yaml` 读取 QQ 号到标准身份的映射
+  - 身份域：从 `llm_about/identities.yaml` 读取 QQ 号到标准身份的映射（共享身份模型 re-export），并承载当轮信封的身份编排（参与者归并 `collect_known_participants`、被艾特成员档案采集 `collect_mention_profiles`，供 turn envelope 注入）
 - `src/quickquip/llm/rendering.py`
   - 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特
 - `src/quickquip/llm/message_segments.py`
@@ -165,7 +167,7 @@ LLM 默认只在以下场景触发：
 
 ### 3.1 唤醒模块
 
-唤醒模块位于 `src/quickquip/chat/awakening.py`，命令入口位于 `src/quickquip/adapters/nonebot/awakening_plugin.py`，配置文件为 `config/awakening.toml`。
+唤醒模块位于 `src/quickquip/chat/awakening/` 包（config / state / text_signals / judge / triggers / boredom 六个子模块 + facade，依赖单向），命令入口位于 `src/quickquip/adapters/nonebot/awakening_plugin.py`，配置文件为 `config/awakening.toml`。
 
 | 规则名 | 触发方式 |
 |------|----------|
