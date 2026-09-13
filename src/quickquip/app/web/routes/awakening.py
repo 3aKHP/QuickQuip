@@ -12,6 +12,7 @@ import tomllib
 
 from quickquip.common.paths import (
     AWAKENING_BOREDOM_GROUPS_PATH,
+    CONFIG_AWAKENING_TOML,
     RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH,
 )
 from quickquip.app.web.action_queue import action_queue
@@ -22,7 +23,6 @@ from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningGroupOverride,
     BoredomEnabledGroups,
-    CONFIG_AWAKENING_TOML,
     effective_boredom_scan_interval,
     get_config,
     load_awakening_config,

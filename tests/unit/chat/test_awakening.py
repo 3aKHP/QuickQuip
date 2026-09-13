@@ -19,18 +19,6 @@ from quickquip.chat.awakening import (
     BoredomEnabledGroups,
     BotMessageCache,
     ResolvedAwakeningSettings,
-    _QA_FAST_PATTERNS,
-    _RULE_BOREDOM,
-    _RULE_EXTEND,
-    _RULE_FALLBACK,
-    _RULE_INTEREST,
-    _RULE_QA,
-    _RULE_RELEVANCE,
-    _extract_words,
-    _is_extend_eligible_message,
-    _is_in_dnd_window,
-    _llm_cache_text,
-    _word_overlap_ratio,
     allows_recent_images,
     build_awakening_prompt,
     build_passive_trigger_raw_user_text,
@@ -42,12 +30,30 @@ from quickquip.chat.awakening import (
     check_qa,
     check_relevance,
     effective_boredom_scan_interval,
-    _llm_judge,
-    _parse_judge_text,
     load_awakening_config,
     confirm_boredom_sent,
     iter_boredom_send_plans,
     select_passive_trigger_image_urls,
+)
+from quickquip.chat.awakening.judge import (
+    _llm_cache_text,
+    _llm_judge,
+    _parse_judge_text,
+)
+from quickquip.chat.awakening.text_signals import (
+    _QA_FAST_PATTERNS,
+    _extract_words,
+    _is_extend_eligible_message,
+    _word_overlap_ratio,
+)
+from quickquip.chat.awakening.triggers import (
+    _RULE_BOREDOM,
+    _RULE_EXTEND,
+    _RULE_FALLBACK,
+    _RULE_INTEREST,
+    _RULE_QA,
+    _RULE_RELEVANCE,
+    _is_in_dnd_window,
 )
 
 
@@ -683,7 +689,7 @@ class TestCheckFallback:
         assert check_fallback("g1", "", settings) is None
 
     def test_trigger_uses_conservative_instruction(self, monkeypatch):
-        monkeypatch.setattr("quickquip.chat.awakening.random.random", lambda: 0.0)
+        monkeypatch.setattr("quickquip.chat.awakening.triggers.random.random", lambda: 0.0)
         settings = _make_settings(fallback_probability=1.0)
         result = check_fallback("g1", "马头蒸菜", settings)
         assert result is not None
@@ -1098,18 +1104,18 @@ class TestCheckAwakeningTriggers:
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        aw._config = AwakeningConfig(
-            defaults=AwakeningDefaults(interest_topics=["test"]),
-        )
-        try:
-            result = asyncio.run(
-                check_awakening_triggers("g1", "u1", "test message", llm_settings, svc, state=s)
+        result = asyncio.run(
+            check_awakening_triggers(
+                "g1",
+                "u1",
+                "test message",
+                llm_settings,
+                svc,
+                state=s,
+                config=AwakeningConfig(defaults=AwakeningDefaults(interest_topics=["test"])),
             )
-            assert result is None
-        finally:
-            aw._config = old_cfg
+        )
+        assert result is None
 
     def test_disabled_rule_skips_quick_judge(self):
         s = AwakeningState()
@@ -1122,27 +1128,20 @@ class TestCheckAwakeningTriggers:
         svc.config.personas = {}
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        aw._config = AwakeningConfig(
-            defaults=AwakeningDefaults(relevance_threshold=0.3),
-        )
-        try:
-            result = asyncio.run(
-                check_awakening_triggers(
-                    "g1",
-                    "u1",
-                    "今天天气怎么样",
-                    llm_settings,
-                    svc,
-                    state=s,
-                    rule_enabled=lambda rule_name: rule_name != _RULE_RELEVANCE,
-                )
+        result = asyncio.run(
+            check_awakening_triggers(
+                "g1",
+                "u1",
+                "今天天气怎么样",
+                llm_settings,
+                svc,
+                state=s,
+                rule_enabled=lambda rule_name: rule_name != _RULE_RELEVANCE,
+                config=AwakeningConfig(defaults=AwakeningDefaults(relevance_threshold=0.3)),
             )
-            assert result is None
-            svc.quick_judge_detailed.assert_not_called()
-        finally:
-            aw._config = old_cfg
+        )
+        assert result is None
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_rate_unavailable_skips_quick_judge(self):
         s = AwakeningState()
@@ -1155,27 +1154,20 @@ class TestCheckAwakeningTriggers:
         svc.config.personas = {}
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        aw._config = AwakeningConfig(
-            defaults=AwakeningDefaults(relevance_threshold=0.3),
-        )
-        try:
-            result = asyncio.run(
-                check_awakening_triggers(
-                    "g1",
-                    "u1",
-                    "今天天气怎么样",
-                    llm_settings,
-                    svc,
-                    state=s,
-                    rate_available=lambda rule_name: rule_name != _RULE_RELEVANCE,
-                )
+        result = asyncio.run(
+            check_awakening_triggers(
+                "g1",
+                "u1",
+                "今天天气怎么样",
+                llm_settings,
+                svc,
+                state=s,
+                rate_available=lambda rule_name: rule_name != _RULE_RELEVANCE,
+                config=AwakeningConfig(defaults=AwakeningDefaults(relevance_threshold=0.3)),
             )
-            assert result is None
-            svc.quick_judge_detailed.assert_not_called()
-        finally:
-            aw._config = old_cfg
+        )
+        assert result is None
+        svc.quick_judge_detailed.assert_not_called()
 
     def test_extend_takes_priority(self):
         s = AwakeningState()
@@ -1187,23 +1179,21 @@ class TestCheckAwakeningTriggers:
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
 
-        # Create a config with extend enabled and interest topics
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        aw._config = AwakeningConfig(
-            defaults=AwakeningDefaults(
-                extend_duration=30,
-                interest_topics=["test"],
-            ),
-        )
-        try:
-            result = asyncio.run(
-                check_awakening_triggers("g1", "u1", "test message", llm_settings, svc, state=s)
+        result = asyncio.run(
+            check_awakening_triggers(
+                "g1",
+                "u1",
+                "test message",
+                llm_settings,
+                svc,
+                state=s,
+                config=AwakeningConfig(
+                    defaults=AwakeningDefaults(extend_duration=30, interest_topics=["test"]),
+                ),
             )
-            assert result is not None
-            assert result.rule_name == _RULE_EXTEND
-        finally:
-            aw._config = old_cfg
+        )
+        assert result is not None
+        assert result.rule_name == _RULE_EXTEND
 
     def test_interest_does_not_open_extend_window(self):
         s = AwakeningState()
@@ -1214,28 +1204,24 @@ class TestCheckAwakeningTriggers:
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        aw._config = AwakeningConfig(
-            defaults=AwakeningDefaults(
-                extend_duration=30,
-                interest_topics=["Python"],
-            ),
+        config = AwakeningConfig(
+            defaults=AwakeningDefaults(extend_duration=30, interest_topics=["Python"]),
         )
-        try:
-            first = asyncio.run(
-                check_awakening_triggers("g1", "u1", "我在学Python", llm_settings, svc, state=s)
+        first = asyncio.run(
+            check_awakening_triggers(
+                "g1", "u1", "我在学Python", llm_settings, svc, state=s, config=config
             )
-            assert first is not None
-            assert first.rule_name == _RULE_INTEREST
-            assert first.opens_extend_window is False
+        )
+        assert first is not None
+        assert first.rule_name == _RULE_INTEREST
+        assert first.opens_extend_window is False
 
-            second = asyncio.run(
-                check_awakening_triggers("g1", "u1", "后续普通聊天内容", llm_settings, svc, state=s)
+        second = asyncio.run(
+            check_awakening_triggers(
+                "g1", "u1", "后续普通聊天内容", llm_settings, svc, state=s, config=config
             )
-            assert second is None
-        finally:
-            aw._config = old_cfg
+        )
+        assert second is None
 
     def test_all_disabled_returns_none(self):
         s = AwakeningState()
@@ -1247,16 +1233,18 @@ class TestCheckAwakeningTriggers:
         svc.config.quick_judge = MagicMock(timeout=2.0, max_tokens=64)
         svc.config.personas = {}
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        aw._config = AwakeningConfig()  # all defaults = disabled
-        try:
-            result = asyncio.run(
-                check_awakening_triggers("g1", "u1", "hello", llm_settings, svc, state=s)
+        result = asyncio.run(
+            check_awakening_triggers(
+                "g1",
+                "u1",
+                "hello",
+                llm_settings,
+                svc,
+                state=s,
+                config=AwakeningConfig(),  # all defaults = disabled
             )
-            assert result is None
-        finally:
-            aw._config = old_cfg
+        )
+        assert result is None
 
 
 logger = logging.getLogger(__name__)
@@ -1273,13 +1261,13 @@ def _default_build_reply(result):
 
 
 async def _drive_boredom_send(
-    bot, groups, rule_switch, svc, *, rate_limiter=None, stats_tracker=None
+    bot, groups, rule_switch, svc, *, rate_limiter=None, stats_tracker=None, config=None
 ):
     """测试本地的最小发送驱动，镜像 adapter 的 ``_wrapped_boredom_check`` 循环：
     chat 层只产出待发送计划；传输（``int(gid)`` 转换与消息拼装）归发送方，
     成功后 ``confirm_boredom_sent`` 确认；send 异常按 adapter 语义记 warning 后吞掉继续。
     """
-    async for plan in iter_boredom_send_plans(groups, rule_switch, svc, rate_limiter):
+    async for plan in iter_boredom_send_plans(groups, rule_switch, svc, rate_limiter, config=config):
         try:
             await bot.send_group_msg(
                 group_id=int(plan.group_id),
@@ -1303,25 +1291,25 @@ class TestBoredomSendFlow:
         svc.get_group_settings.return_value = MagicMock(enabled=False)
         svc.generate_reply = AsyncMock(return_value={"reply": "本群 LLM 已关闭。"})
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        old_state = aw._state
-        aw._config = AwakeningConfig(
+        from quickquip.chat.awakening import state as awakening_state
+
+        state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        state.record_message("123")
+        state._last_message_times["123"] = monotonic() - 2
+        old_state = awakening_state._state
+        awakening_state._state = state
+        config = AwakeningConfig(
             defaults=AwakeningDefaults(
                 boredom_silence_seconds=1,
                 boredom_probability=1.0,
                 boredom_check_interval=1,
             ),
         )
-        aw._state = AwakeningState()
-        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
-        aw._state.record_message("123")
-        aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, config=config))
         finally:
-            aw._config = old_cfg
-            aw._state = old_state
+            awakening_state._state = old_state
 
         svc.generate_reply.assert_not_called()
         bot.send_group_msg.assert_not_called()
@@ -1340,25 +1328,29 @@ class TestBoredomSendFlow:
         svc.generate_reply = AsyncMock(return_value={"reply": "冒个泡"})
         stats_tracker = MagicMock()
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        old_state = aw._state
-        aw._config = AwakeningConfig(
+        from quickquip.chat.awakening import state as awakening_state
+
+        state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        state.record_message("123")
+        state._last_message_times["123"] = monotonic() - 2
+        old_state = awakening_state._state
+        awakening_state._state = state
+        config = AwakeningConfig(
             defaults=AwakeningDefaults(
                 boredom_silence_seconds=1,
                 boredom_probability=1.0,
                 boredom_check_interval=1,
             ),
         )
-        aw._state = AwakeningState()
-        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
-        aw._state.record_message("123")
-        aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
+            asyncio.run(
+                _drive_boredom_send(
+                    bot, groups, rule_switch, svc, stats_tracker=stats_tracker, config=config
+                )
+            )
         finally:
-            aw._config = old_cfg
-            aw._state = old_state
+            awakening_state._state = old_state
 
         svc.generate_reply.assert_awaited_once()
         # 合成配对行契约（cron 侧 test_scheduler_plugin 同款锚定）：user/assistant
@@ -1388,25 +1380,25 @@ class TestBoredomSendFlow:
             return_value={"reply": "冒个泡", "images": ["cXctaW1n"]}
         )
 
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        old_state = aw._state
-        aw._config = AwakeningConfig(
+        from quickquip.chat.awakening import state as awakening_state
+
+        state = AwakeningState()
+        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
+        state.record_message("123")
+        state._last_message_times["123"] = monotonic() - 2
+        old_state = awakening_state._state
+        awakening_state._state = state
+        config = AwakeningConfig(
             defaults=AwakeningDefaults(
                 boredom_silence_seconds=1,
                 boredom_probability=1.0,
                 boredom_check_interval=1,
             ),
         )
-        aw._state = AwakeningState()
-        # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
-        aw._state.record_message("123")
-        aw._state._last_message_times["123"] = monotonic() - 2
         try:
-            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
+            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, config=config))
         finally:
-            aw._config = old_cfg
-            aw._state = old_state
+            awakening_state._state = old_state
 
         bot.send_group_msg.assert_awaited_once_with(
             group_id=123, message=[("text", "冒个泡"), ("image", "base64://cXctaW1n")]
@@ -1459,22 +1451,23 @@ class TestBoredomSendFlowFailures:
 
     @staticmethod
     def _run(bot, groups, rule_switch, svc, state, **kwargs):
-        import quickquip.chat.awakening as aw
-        old_cfg = aw._config
-        old_state = aw._state
-        aw._config = AwakeningConfig(
+        from quickquip.chat.awakening import state as awakening_state
+
+        old_state = awakening_state._state
+        awakening_state._state = state
+        config = AwakeningConfig(
             defaults=AwakeningDefaults(
                 boredom_silence_seconds=1,
                 boredom_probability=1.0,
                 boredom_check_interval=1,
             ),
         )
-        aw._state = state
         try:
-            asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, **kwargs))
+            asyncio.run(
+                _drive_boredom_send(bot, groups, rule_switch, svc, config=config, **kwargs)
+            )
         finally:
-            aw._config = old_cfg
-            aw._state = old_state
+            awakening_state._state = old_state
 
     def test_rate_limiter_rejects_no_send_no_cooldown(self):
         st = self._triggerable_state("123")
