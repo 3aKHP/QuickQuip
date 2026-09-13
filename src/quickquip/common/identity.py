@@ -7,6 +7,8 @@ import ast
 
 logger = logging.getLogger(__name__)
 
+IDENTITY_SECTIONS = ("people", "special_accounts")
+
 
 @dataclass(slots=True)
 class IdentityEntry:
@@ -79,22 +81,30 @@ def _parse_list_value(value: object) -> list[str]:
     return [_parse_scalar(normalized)]
 
 
-def _finalize_entry(section: str, payload: dict[str, object]) -> IdentityEntry | None:
-    canonical_name = _parse_scalar(str(payload.get("canonical_name", ""))).strip()
-    if not canonical_name:
-        return None
+def _entry_text(value: object) -> str:
+    """条目字段值的文本形态；空值（None 或解析器的空列表占位）按未填写处理。"""
+    if value is None or value == []:
+        return ""
+    return str(value)
 
+
+def declared_entry_fields(section: str, payload: dict[str, object]) -> tuple[str, list[str]]:
+    """提取条目声明的标准名与 QQ 号（规范化、去空值），供条目解析与占位判定共用。"""
+    canonical_name = _parse_scalar(_entry_text(payload.get("canonical_name"))).strip()
     if section == "special_accounts":
-        qq_ids = [_parse_scalar(str(payload.get("qq_id", ""))).strip()]
+        qq_ids = [_parse_scalar(_entry_text(payload.get("qq_id"))).strip()]
     else:
         qq_ids = _parse_list_value(payload.get("qq_ids"))
+    return canonical_name, [qq_id for qq_id in qq_ids if qq_id]
 
-    qq_ids = [qq_id for qq_id in qq_ids if qq_id]
-    aliases = _parse_list_value(payload.get("aliases"))
-    note = _parse_scalar(str(payload.get("note", ""))).strip()
-    if not qq_ids:
+
+def _finalize_entry(section: str, payload: dict[str, object]) -> IdentityEntry | None:
+    canonical_name, qq_ids = declared_entry_fields(section, payload)
+    if not canonical_name or not qq_ids:
         return None
 
+    aliases = _parse_list_value(payload.get("aliases"))
+    note = _parse_scalar(_entry_text(payload.get("note"))).strip()
     return IdentityEntry(
         canonical_name=canonical_name,
         qq_ids=qq_ids,
@@ -141,7 +151,7 @@ class IdentityIndex:
             stripped = cleaned.strip()
 
             if indent == 0 and stripped.endswith(":"):
-                if current is not None and section in {"people", "special_accounts"}:
+                if current is not None and section in IDENTITY_SECTIONS:
                     entry = _finalize_entry(section, current)
                     if entry is not None:
                         entries.append(entry)
@@ -150,7 +160,7 @@ class IdentityIndex:
                 current_list_key = None
                 continue
 
-            if section not in {"people", "special_accounts"}:
+            if section not in IDENTITY_SECTIONS:
                 continue
 
             if indent == 2 and stripped.startswith("- "):
@@ -191,7 +201,7 @@ class IdentityIndex:
                 current.setdefault(current_list_key, [])
                 current[current_list_key].append(_parse_scalar(stripped[2:].strip()))
 
-        if current is not None and section in {"people", "special_accounts"}:
+        if current is not None and section in IDENTITY_SECTIONS:
             entry = _finalize_entry(section, current)
             if entry is not None:
                 entries.append(entry)

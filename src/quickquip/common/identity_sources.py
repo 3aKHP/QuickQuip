@@ -9,7 +9,11 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from quickquip.common.identity import IdentityIndex
+from quickquip.common.identity import (
+    IDENTITY_SECTIONS,
+    IdentityIndex,
+    declared_entry_fields,
+)
 from quickquip.common.paths import LLM_IDENTITIES_YAML_PATH, STATS_JSON_PATH
 
 logger = logging.getLogger(__name__)
@@ -113,6 +117,20 @@ class IdentityRepository:
             return IdentitySnapshot(index, names)
 
 
+def _declares_substantive_entries(data) -> bool:
+    """文档是否声明了实质条目（标准名或 QQ 号至少一项已填写）。
+
+    字段选择与标量归一化复用解析层的 declared_entry_fields，
+    「占位条目按不存在处理」的口径与条目解析保持单点一致。
+    """
+    for section in IDENTITY_SECTIONS:
+        for entry in (data or {}).get(section, []) or []:
+            canonical_name, qq_ids = declared_entry_fields(section, entry)
+            if canonical_name or qq_ids:
+                return True
+    return False
+
+
 def _load_index(path):
     # Validate the document before the compatibility parser; incomplete writes must not replace a valid index.
     import yaml
@@ -120,12 +138,12 @@ def _load_index(path):
     data = yaml.safe_load(raw)
     if data is not None and not isinstance(data, dict):
         raise ValueError("identity document must be a mapping")
-    for section in ("people", "special_accounts"):
+    for section in IDENTITY_SECTIONS:
         entries = (data or {}).get(section, []) or []
         if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
             raise ValueError("identity entries must be mappings in a list")
     index = IdentityIndex.from_text(raw, path)
-    if any((data or {}).get(section) for section in ("people", "special_accounts")) and not index.entries:
+    if _declares_substantive_entries(data) and not index.entries:
         raise ValueError("identity document contains no valid entries")
     return index
 
