@@ -36,24 +36,24 @@ from quickquip.chat.awakening import (
     select_passive_trigger_image_urls,
 )
 from quickquip.chat.awakening.judge import (
-    _llm_cache_text,
-    _llm_judge,
+    llm_cache_text,
+    llm_judge,
     _parse_judge_text,
 )
 from quickquip.chat.awakening.text_signals import (
-    _QA_FAST_PATTERNS,
+    QA_FAST_PATTERNS,
     _extract_words,
-    _is_extend_eligible_message,
-    _word_overlap_ratio,
+    is_extend_eligible_message,
+    word_overlap_ratio,
 )
 from quickquip.chat.awakening.triggers import (
-    _RULE_BOREDOM,
+    RULE_BOREDOM,
     _RULE_EXTEND,
     _RULE_FALLBACK,
     _RULE_INTEREST,
     _RULE_QA,
     _RULE_RELEVANCE,
-    _is_in_dnd_window,
+    is_in_dnd_window,
 )
 
 
@@ -70,7 +70,7 @@ def _qj(text: str, outcome: str = "ok", **kwargs) -> QuickJudgeResult:
 
 
 def test_allows_recent_images_rules():
-    assert allows_recent_images(_RULE_BOREDOM) is True
+    assert allows_recent_images(RULE_BOREDOM) is True
     assert allows_recent_images(_RULE_EXTEND) is True
     assert allows_recent_images(_RULE_INTEREST) is True
     assert allows_recent_images(_RULE_RELEVANCE) is True
@@ -420,23 +420,23 @@ class TestExtractWords:
 
 class TestWordOverlapRatio:
     def test_identical_texts(self):
-        r = _word_overlap_ratio("今天天气怎么样", ["今天天气怎么样"])
+        r = word_overlap_ratio("今天天气怎么样", ["今天天气怎么样"])
         assert r > 0.8
 
     def test_related_texts(self):
-        r = _word_overlap_ratio("今天天气怎么样", ["今天天气很好啊"])
+        r = word_overlap_ratio("今天天气怎么样", ["今天天气很好啊"])
         assert r > 0.3
 
     def test_unrelated_texts(self):
-        r = _word_overlap_ratio("完全无关的内容", ["今天天气很好"])
+        r = word_overlap_ratio("完全无关的内容", ["今天天气很好"])
         assert r < 0.2
 
     def test_empty_texts(self):
-        assert _word_overlap_ratio("", ["hello"]) == 0.0
-        assert _word_overlap_ratio("hello", []) == 0.0
+        assert word_overlap_ratio("", ["hello"]) == 0.0
+        assert word_overlap_ratio("hello", []) == 0.0
 
     def test_max_across_multiple_bot_msgs(self):
-        r = _word_overlap_ratio(
+        r = word_overlap_ratio(
             "今天天气怎么样",
             ["完全无关", "今天天气很好"],
         )
@@ -445,51 +445,51 @@ class TestWordOverlapRatio:
 
 class TestDndWindow:
     def test_empty_strings(self):
-        assert _is_in_dnd_window("", "") is False
+        assert is_in_dnd_window("", "") is False
 
     def test_same_day_range(self):
-        assert _is_in_dnd_window("08:00", "20:00", now=datetime(2026, 5, 27, 12, 0)) is True
-        assert _is_in_dnd_window("08:00", "20:00", now=datetime(2026, 5, 27, 21, 0)) is False
+        assert is_in_dnd_window("08:00", "20:00", now=datetime(2026, 5, 27, 12, 0)) is True
+        assert is_in_dnd_window("08:00", "20:00", now=datetime(2026, 5, 27, 21, 0)) is False
 
     def test_overnight_range(self):
-        assert _is_in_dnd_window("23:00", "08:00", now=datetime(2026, 5, 27, 4, 0)) is True
-        assert _is_in_dnd_window("23:00", "08:00", now=datetime(2026, 5, 27, 12, 0)) is False
+        assert is_in_dnd_window("23:00", "08:00", now=datetime(2026, 5, 27, 4, 0)) is True
+        assert is_in_dnd_window("23:00", "08:00", now=datetime(2026, 5, 27, 12, 0)) is False
 
     def test_invalid_format(self):
-        assert _is_in_dnd_window("bad", "08:00") is False
+        assert is_in_dnd_window("bad", "08:00") is False
 
 
 class TestQAFastPattern:
     def test_matches_question_marks(self):
-        assert _QA_FAST_PATTERNS.search("这是什么？")
-        assert _QA_FAST_PATTERNS.search("what?")
+        assert QA_FAST_PATTERNS.search("这是什么？")
+        assert QA_FAST_PATTERNS.search("what?")
 
     def test_matches_question_keywords(self):
-        assert _QA_FAST_PATTERNS.search("请问怎么解决")
-        assert _QA_FAST_PATTERNS.search("为什么这样")
-        assert _QA_FAST_PATTERNS.search("能不能帮我看看")
+        assert QA_FAST_PATTERNS.search("请问怎么解决")
+        assert QA_FAST_PATTERNS.search("为什么这样")
+        assert QA_FAST_PATTERNS.search("能不能帮我看看")
 
     def test_no_match_on_plain_text(self):
-        assert not _QA_FAST_PATTERNS.search("今天天气真好")
-        assert not _QA_FAST_PATTERNS.search("哈哈哈笑死")
+        assert not QA_FAST_PATTERNS.search("今天天气真好")
+        assert not QA_FAST_PATTERNS.search("哈哈哈笑死")
 
 
 class TestExtendEligibility:
     def test_rejects_image_only_and_cq_only(self):
-        assert _is_extend_eligible_message("[图片]") is False
-        assert _is_extend_eligible_message("[CQ:image,file=abc]") is False
+        assert is_extend_eligible_message("[图片]") is False
+        assert is_extend_eligible_message("[CQ:image,file=abc]") is False
 
     def test_rejects_short_interjections(self):
-        assert _is_extend_eligible_message("哈哈") is False
-        assert _is_extend_eligible_message("草") is False
-        assert _is_extend_eligible_message("嗯") is False
+        assert is_extend_eligible_message("哈哈") is False
+        assert is_extend_eligible_message("草") is False
+        assert is_extend_eligible_message("嗯") is False
 
     def test_accepts_substantive_short_question(self):
-        assert _is_extend_eligible_message("是吗") is True
-        assert _is_extend_eligible_message("为啥？") is True
+        assert is_extend_eligible_message("是吗") is True
+        assert is_extend_eligible_message("为啥？") is True
 
     def test_accepts_substantive_text(self):
-        assert _is_extend_eligible_message("下午没课可以继续聊") is True
+        assert is_extend_eligible_message("下午没课可以继续聊") is True
 
 
 class TestPassiveTriggerImages:
@@ -816,7 +816,7 @@ class TestCheckRelevance:
         s = AwakeningState()
         s.bot_messages.add("g1", "今天天气非常不错")
         settings = _make_settings(relevance_threshold=0.3)
-        s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
+        s.llm_cache_set(_RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.3), True)
         svc = MagicMock()
         result = asyncio.run(
             check_relevance("g1", "今天天气怎么样", settings, svc, s)
@@ -827,7 +827,7 @@ class TestCheckRelevance:
     def test_cache_key_includes_threshold(self):
         s = AwakeningState()
         s.bot_messages.add("g1", "今天天气非常不错")
-        s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
+        s.llm_cache_set(_RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.3), True)
         settings = _make_settings(relevance_threshold=0.8)
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
@@ -926,19 +926,19 @@ class TestLlmJudgeClassification:
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.9}'))
         result, s = self._run_relevance(svc)
         assert result is not None
-        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is True
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.5)) is True
 
     def test_business_false_caches_false(self):
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.2}'))
         result, s = self._run_relevance(svc)
         assert result is None
-        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is False
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.5)) is False
 
     def _assert_technical_failure(self, svc):
         result, s = self._run_relevance(svc)
         assert result is None
-        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.5)) is None
+        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.5)) is None
 
     def test_empty_result_fail_closed_no_cache(self):
         svc = MagicMock()
@@ -988,7 +988,7 @@ class TestLlmJudgeClassification:
 
         svc.quick_judge_detailed = _timeout
         outcome = asyncio.run(
-            _llm_judge(svc, "sys", "user", 0.5, timeout=0.05, max_tokens=64)
+            llm_judge(svc, "sys", "user", 0.5, timeout=0.05, max_tokens=64)
         )
         assert outcome.category == "timeout"
         assert outcome.triggered is None
@@ -1005,7 +1005,7 @@ class TestLlmJudgeClassification:
             check_qa("g1", "请问怎么解决这个问题？", settings, svc, s)
         )
         assert result is None
-        assert s.llm_cache_get(_RULE_QA, "g1", _llm_cache_text("请问怎么解决这个问题？", 0.5)) is None
+        assert s.llm_cache_get(_RULE_QA, "g1", llm_cache_text("请问怎么解决这个问题？", 0.5)) is None
 
     def test_strict_parse_distinguishes_false_from_garbage(self):
         assert _parse_judge_text('{"trigger": false}', 0.5) is False
@@ -1079,7 +1079,7 @@ class TestCheckQA:
     def test_cache_hit(self):
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.5)
-        s.llm_cache_set(_RULE_QA, "g1", _llm_cache_text("cached q?", 0.5), True)
+        s.llm_cache_set(_RULE_QA, "g1", llm_cache_text("cached q?", 0.5), True)
         svc = MagicMock()
         result = asyncio.run(
             check_qa("g1", "cached q?", settings, svc, s)
@@ -1478,7 +1478,7 @@ class TestBoredomSendFlowFailures:
         self._run(bot, groups, rule_switch, svc, st, rate_limiter=rate_limiter)
 
         rate_limiter.allow.assert_called_once_with(
-            _RULE_BOREDOM, "boredom_timer", group_id="123"
+            RULE_BOREDOM, "boredom_timer", group_id="123"
         )
         svc.generate_reply.assert_not_called()
         bot.send_group_msg.assert_not_called()
@@ -1534,7 +1534,7 @@ class TestBoredomSendFlowFailures:
         bot.send_group_msg.assert_awaited_once_with(group_id=456, message=[("text", "reply-456")])
         assert "123" not in st._last_boredom_trigger
         assert "456" in st._last_boredom_trigger
-        stats_tracker.record_trigger.assert_called_once_with("456", _RULE_BOREDOM)
+        stats_tracker.record_trigger.assert_called_once_with("456", RULE_BOREDOM)
 
     def test_send_exception_no_cooldown_no_stats(self):
         st = self._triggerable_state("123")
@@ -1568,7 +1568,7 @@ class TestBoredomSendFlowFailures:
         assert bot.send_group_msg.await_count == 2
         assert "456" not in st._last_boredom_trigger
         assert "789" in st._last_boredom_trigger
-        stats_tracker.record_trigger.assert_called_once_with("789", _RULE_BOREDOM)
+        stats_tracker.record_trigger.assert_called_once_with("789", RULE_BOREDOM)
 
 
 def test_boredom_opt_in_cross_writer_stays_consistent(tmp_path: Path):

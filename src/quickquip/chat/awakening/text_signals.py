@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from quickquip.chat.config import BEIJING_TIMEZONE
 
 # Common Chinese question markers for fast QA filtering
-_QA_FAST_PATTERNS = re.compile(
+QA_FAST_PATTERNS = re.compile(
     r"[？?]|(?:请问|求解|怎么[办样]?|如何|怎么回事|谁能帮|有没有人|有没[有谁]|求助|谁知道"
     r"|为啥|为什么|什么原因|怎样|能不能|可不可以|可以吗|是什么|怎么办|该怎么)"
 )
@@ -56,7 +56,7 @@ _LATIN_STOPWORDS = frozenset(
 )
 
 
-def _is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None) -> bool:
+def is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None) -> bool:
     if not dnd_start or not dnd_end:
         return False
     try:
@@ -76,7 +76,7 @@ def _is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None)
         return current_minutes >= start_minutes or current_minutes < end_minutes
 
 
-def _strip_structural_message_parts(text: str) -> str:
+def strip_structural_message_parts(text: str) -> str:
     cleaned = _CQ_CODE_RE.sub(" ", text)
     cleaned = _URL_RE.sub(" ", cleaned)
     cleaned = _PLACEHOLDER_RE.sub(" ", cleaned)
@@ -86,13 +86,13 @@ def _strip_structural_message_parts(text: str) -> str:
 _VOICE_TRANSCRIPT_RE = re.compile(r"\[语音(?:\d+)?转文字：([^\]]+)\]")
 
 
-def _replace_voice_transcripts(text: str) -> str:
+def replace_voice_transcripts(text: str) -> str:
     """把语音转写标记替换为其中的转写文本：转写是用户内容，不是结构占位符。"""
     return _VOICE_TRANSCRIPT_RE.sub(lambda m: m.group(1).strip(), text)
 
 
-def _is_extend_eligible_message(message_text: str) -> bool:
-    cleaned = _strip_structural_message_parts(message_text)
+def is_extend_eligible_message(message_text: str) -> bool:
+    cleaned = strip_structural_message_parts(message_text)
     if not cleaned or not _MEANINGFUL_TEXT_RE.search(cleaned):
         return False
 
@@ -101,7 +101,7 @@ def _is_extend_eligible_message(message_text: str) -> bool:
     if compact in _EXTEND_REJECT_TEXTS or punctuationless in _EXTEND_REJECT_TEXTS:
         return False
     is_short_question = (
-        bool(_QA_FAST_PATTERNS.search(cleaned))
+        bool(QA_FAST_PATTERNS.search(cleaned))
         or any(mark in cleaned for mark in "?？")
         or cleaned.rstrip().endswith(("吗", "嘛", "么"))
     )
@@ -120,7 +120,7 @@ def _extract_words(text: str) -> set[str]:
     normalized english words, numbers and code identifiers. URLs, CQ codes
     and structural placeholders are stripped first; voice transcript markers
     are replaced by their content so spoken words still participate."""
-    cleaned = _strip_structural_message_parts(_replace_voice_transcripts(text))
+    cleaned = strip_structural_message_parts(replace_voice_transcripts(text))
     words: set[str] = {
         token
         for token in _LATIN_TOKEN_RE.findall(cleaned.lower())
@@ -138,7 +138,7 @@ def _extract_words(text: str) -> set[str]:
     return words
 
 
-def _word_overlap_ratio(user_text: str, bot_texts: list[str]) -> float:
+def word_overlap_ratio(user_text: str, bot_texts: list[str]) -> float:
     """Fast word overlap between user message and bot messages. Returns max ratio."""
     user_words = _extract_words(user_text)
     if not user_words:

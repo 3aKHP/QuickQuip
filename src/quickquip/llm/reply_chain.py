@@ -245,10 +245,9 @@ class TurnRequestAssembler:
     include_recent_images: bool
     is_non_vision: bool
 
-    # 请求静态段
+    # 请求静态段（system_prompt 已含 session_preset 的渲染效果）
     tool_specs: list["LLMToolSpec"]
     builtin_search_active: bool
-    session_preset: str
     system_prompt: str
 
     # 装配产物（assemble() 每次重建）

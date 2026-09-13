@@ -13,22 +13,22 @@ from quickquip.chat.awakening.config import (
     get_config,
 )
 from quickquip.chat.awakening.judge import (
-    _QA_SYSTEM,
-    _RELEVANCE_SYSTEM,
+    QA_SYSTEM,
+    RELEVANCE_SYSTEM,
     AwakeningJudgeChannel,
-    _cache_business_outcome,
-    _llm_cache_text,
-    _llm_judge,
+    cache_business_outcome,
+    llm_cache_text,
+    llm_judge,
     resolve_judge_settings,
 )
 from quickquip.chat.awakening.state import AwakeningState, get_state
 from quickquip.chat.awakening.text_signals import (
-    _QA_FAST_PATTERNS,
-    _is_extend_eligible_message,
-    _is_in_dnd_window,
-    _replace_voice_transcripts,
-    _strip_structural_message_parts,
-    _word_overlap_ratio,
+    QA_FAST_PATTERNS,
+    is_extend_eligible_message,
+    is_in_dnd_window,
+    replace_voice_transcripts,
+    strip_structural_message_parts,
+    word_overlap_ratio,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ _PASSIVE_IMAGE_LIMIT = 2
 _RULE_EXTEND = "awakening_extend"
 _RULE_INTEREST = "awakening_interest"
 _RULE_FALLBACK = "awakening_fallback"
-_RULE_BOREDOM = "awakening_boredom"
+RULE_BOREDOM = "awakening_boredom"
 _RULE_RELEVANCE = "awakening_relevance"
 _RULE_QA = "awakening_qa"
 
@@ -71,7 +71,7 @@ AWAKENING_RULES: tuple[tuple[str, str], ...] = (
     (_RULE_EXTEND, "唤醒延长"),
     (_RULE_INTEREST, "兴趣话题"),
     (_RULE_FALLBACK, "兜底概率"),
-    (_RULE_BOREDOM, "无聊唤醒"),
+    (RULE_BOREDOM, "无聊唤醒"),
     (_RULE_RELEVANCE, "相关性唤醒"),
     (_RULE_QA, "答疑唤醒"),
 )
@@ -97,7 +97,7 @@ def allows_recent_images(rule_name: str) -> bool:
     message's images also get recent-buffer images; explicit triggers and
     the low-signal fallback do not.
     """
-    return rule_name == _RULE_BOREDOM or _passive_trigger_allows_images(rule_name)
+    return rule_name == RULE_BOREDOM or _passive_trigger_allows_images(rule_name)
 
 
 def select_passive_trigger_image_urls(
@@ -124,10 +124,10 @@ def select_passive_trigger_image_urls(
 def build_passive_trigger_raw_user_text(
     result: AwakeningTriggerResult, image_urls: list[str]
 ) -> str:
-    text = _replace_voice_transcripts(result.prompt.strip())
+    text = replace_voice_transcripts(result.prompt.strip())
     if image_urls:
         return text
-    return _strip_structural_message_parts(text)
+    return strip_structural_message_parts(text)
 
 
 def build_awakening_prompt(
@@ -180,7 +180,7 @@ def check_extend(
     text = message_text.strip()
     if settings.extend_duration <= 0 or not text:
         return None
-    if not _is_extend_eligible_message(text):
+    if not is_extend_eligible_message(text):
         return None
     st = state or get_state()
     if not st.is_in_extend_window(group_id, user_id, settings.extend_duration):
@@ -242,7 +242,7 @@ def check_boredom(
 ) -> AwakeningTriggerResult | None:
     if settings.boredom_silence_seconds <= 0 or settings.boredom_probability <= 0:
         return None
-    if _is_in_dnd_window(settings.boredom_dnd_start, settings.boredom_dnd_end):
+    if is_in_dnd_window(settings.boredom_dnd_start, settings.boredom_dnd_end):
         return None
     st = state or get_state()
     silence = st.get_group_silence_seconds(group_id)
@@ -256,7 +256,7 @@ def check_boredom(
     if random.random() >= settings.boredom_probability:
         return None
     return AwakeningTriggerResult(
-        rule_name=_RULE_BOREDOM,
+        rule_name=RULE_BOREDOM,
         prompt="",
         trigger_reason=f"无聊唤醒：沉寂 {silence:.0f}s",
         trigger_instruction=_BOREDOM_INSTRUCTION,
@@ -290,12 +290,12 @@ async def check_relevance(
         return None
 
     # Stage 1: fast word overlap filter
-    overlap = _word_overlap_ratio(message_text, bot_msgs)
+    overlap = word_overlap_ratio(message_text, bot_msgs)
     if overlap < 0.1:
         return None
 
     # Check LLM cache
-    cache_text = _llm_cache_text(message_text, settings.relevance_threshold)
+    cache_text = llm_cache_text(message_text, settings.relevance_threshold)
     cached = st.llm_cache_get(_RULE_RELEVANCE, group_id, cache_text)
     if cached is not None:
         if not cached:
@@ -310,10 +310,10 @@ async def check_relevance(
     # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
     context_lines = [f"[bot 回复 {i+1}] {msg}" for i, msg in enumerate(bot_msgs)]
     user_prompt = "\n".join(context_lines) + f"\n[用户消息] {message_text.strip()}"
-    outcome = await _llm_judge(
-        svc, _RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens
+    outcome = await llm_judge(
+        svc, RELEVANCE_SYSTEM, user_prompt, settings.relevance_threshold, timeout, max_tokens
     )
-    _cache_business_outcome(st, _RULE_RELEVANCE, group_id, cache_text, outcome)
+    cache_business_outcome(st, _RULE_RELEVANCE, group_id, cache_text, outcome)
 
     if outcome.triggered is not True:
         return None
@@ -344,13 +344,13 @@ async def check_qa(
         return None
 
     # Stage 1: fast regex filter - must contain question markers
-    if not _QA_FAST_PATTERNS.search(message_text):
+    if not QA_FAST_PATTERNS.search(message_text):
         return None
 
     st = state or get_state()
 
     # Check LLM cache
-    cache_text = _llm_cache_text(message_text, settings.qa_threshold)
+    cache_text = llm_cache_text(message_text, settings.qa_threshold)
     cached = st.llm_cache_get(_RULE_QA, group_id, cache_text)
     if cached is not None:
         if not cached:
@@ -363,10 +363,10 @@ async def check_qa(
         )
 
     # Stage 2: LLM judge（仅业务 true/false 写入判定缓存；技术失败 fail-closed 不缓存）
-    outcome = await _llm_judge(
-        svc, _QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens
+    outcome = await llm_judge(
+        svc, QA_SYSTEM, message_text.strip(), settings.qa_threshold, timeout, max_tokens
     )
-    _cache_business_outcome(st, _RULE_QA, group_id, cache_text, outcome)
+    cache_business_outcome(st, _RULE_QA, group_id, cache_text, outcome)
 
     if outcome.triggered is not True:
         return None

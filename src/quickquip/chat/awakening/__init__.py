@@ -4,7 +4,8 @@
 ``config``（TOML 形状与单例）→ ``state``（运行时状态）→ ``text_signals``
 （纯文本信号）→ ``judge``（LLM 判定通道）→ ``triggers``（六条触发规则与
 编排）→ ``boredom``（无聊唤醒巡检）。本 facade 只 re-export 真实公共契约
-（adapter / pipeline / Web 路由消费的名字），子模块不回导 facade。
+（adapter / pipeline / Web 路由与测试接缝消费的名字），子模块不回导
+facade；包内实现细节不在此出现。
 """
 from __future__ import annotations
 
@@ -26,7 +27,6 @@ from quickquip.chat.awakening.config import (
     reload_config,
 )
 from quickquip.chat.awakening.state import (
-    AwakeningExtendSession,
     AwakeningState,
     BotMessageCache,
     get_state,
@@ -53,7 +53,6 @@ __all__ = [
     "AWAKENING_RULES",
     "AwakeningConfig",
     "AwakeningDefaults",
-    "AwakeningExtendSession",
     "AwakeningGroupOverride",
     "AwakeningState",
     "AwakeningTriggerResult",

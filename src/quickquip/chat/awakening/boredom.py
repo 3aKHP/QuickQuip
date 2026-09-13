@@ -15,7 +15,7 @@ from quickquip.llm.reply_types import ReplyResult
 from quickquip.chat.awakening.config import AwakeningConfig, get_config
 from quickquip.chat.awakening.state import get_state
 from quickquip.chat.awakening.triggers import (
-    _RULE_BOREDOM,
+    RULE_BOREDOM,
     AwakeningTriggerResult,
     build_awakening_prompt,
     check_boredom,
@@ -134,9 +134,9 @@ class BoredomSendPlan:
         """``bot_action_trace`` 的逐字段参数（字段集与旧内联实现一致）。"""
         return {
             "trigger_kind": "awakening",
-            "reason_code": _RULE_BOREDOM,
+            "reason_code": RULE_BOREDOM,
             "reason_detail": self.trigger.trigger_reason,
-            "rule_name": _RULE_BOREDOM,
+            "rule_name": RULE_BOREDOM,
             "chat_type": "group",
             "group_id": self.group_id,
             "user_id": "boredom_timer",
@@ -185,7 +185,7 @@ async def iter_boredom_send_plans(
     generate = generate or svc.generate_reply
 
     for gid in boredom_enabled_groups.all_groups():
-        if not rule_switch.is_enabled(gid, _RULE_BOREDOM):
+        if not rule_switch.is_enabled(gid, RULE_BOREDOM):
             continue
         if not is_group_llm_enabled(svc, gid):
             continue
@@ -193,10 +193,10 @@ async def iter_boredom_send_plans(
         result = check_boredom(gid, settings, st)
         if result is None:
             continue
-        if not roll_reply(_RULE_BOREDOM, group_id=gid):
+        if not roll_reply(RULE_BOREDOM, group_id=gid):
             continue
         if rate_limiter is not None and not rate_limiter.allow(
-            _RULE_BOREDOM, "boredom_timer", group_id=gid
+            RULE_BOREDOM, "boredom_timer", group_id=gid
         ):
             continue
         try:
@@ -235,7 +235,7 @@ def confirm_boredom_sent(
     )
     st.bot_messages.add(plan.group_id, visible)
     if stats_tracker is not None:
-        stats_tracker.record_trigger(plan.group_id, _RULE_BOREDOM)
+        stats_tracker.record_trigger(plan.group_id, RULE_BOREDOM)
     logger.info(
         "awakening_boredom: sent to group %s (%s)", plan.group_id, plan.trigger.trigger_reason
     )

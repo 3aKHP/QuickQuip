@@ -14,8 +14,6 @@ __all__ = [
     "IdentityEntry",
     "IdentityIndex",
     "IdentityMatch",
-    "AT_QQ_PATTERN",
-    "MENTION_PROFILE_LIMIT",
     "collect_known_participants",
     "collect_mention_profiles",
 ]
@@ -23,8 +21,8 @@ __all__ = [
 
 # 正文/存量历史中以数字形态出现的 @ 提及（@QQ123456），以及信封档案条目数
 # 上限（名字在前、QQ 作配对键，见 docs/dev/llm-module.md §5.5）
-AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})")
-MENTION_PROFILE_LIMIT = 5
+_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})")
+_MENTION_PROFILE_LIMIT = 5
 
 
 def collect_known_participants(
@@ -128,7 +126,7 @@ def collect_mention_profiles(
     for item in scene_patch or []:
         scan_texts.append(str(item.get("text") or ""))
     for text in scan_texts:
-        for match in AT_QQ_PATTERN.finditer(text):
+        for match in _AT_QQ_PATTERN.finditer(text):
             _push(match.group(1))
 
     profiles: list[dict[str, str]] = []
@@ -146,6 +144,6 @@ def collect_mention_profiles(
                 "note": match.note,
             }
         )
-        if len(profiles) >= MENTION_PROFILE_LIMIT:
+        if len(profiles) >= _MENTION_PROFILE_LIMIT:
             break
     return profiles

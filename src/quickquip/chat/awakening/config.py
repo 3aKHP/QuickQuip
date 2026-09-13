@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 def _filter_config_fields(data: dict[str, Any], valid: set[str]) -> dict[str, Any]:
     """按字段名集过滤未知键并清洗 ``interest_topics``（两个 from_dict 共用）。
 
-    None 值视同未设置（保持 dataclass 默认/覆盖语义），非 list 的
-    interest_topics 原样丢弃。
+    None 值视同未设置（保持 dataclass 默认/覆盖语义）；非 list 的
+    interest_topics 原样透传（沿用拆分前行为）。
     """
     filtered: dict[str, Any] = {}
     for key, value in data.items():

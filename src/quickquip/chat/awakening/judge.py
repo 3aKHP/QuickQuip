@@ -54,13 +54,13 @@ class AwakeningJudgeChannel(QuickJudgeCaller, Protocol):
     def config(self) -> JudgeTargetSource: ...
 
 
-_RELEVANCE_SYSTEM = (
+RELEVANCE_SYSTEM = (
     "你是一个仅输出 JSON 的判定器。"
     "判断用户消息是否在延续或回应 bot 之前的对话。"
     '仅输出 {"score": 0.0} 到 {"score": 1.0}，score 越高越相关。'
 )
 
-_QA_SYSTEM = (
+QA_SYSTEM = (
     "你是一个仅输出 JSON 的判定器。"
     "判断用户消息是否是一个需要专业性回答的问题（而非日常闲聊问候）。"
     '仅输出 {"score": 0.0} 到 {"score": 1.0}，score 越高越需要回答。'
@@ -133,7 +133,7 @@ class JudgeSettings:
 
 def _judge_target(config: JudgeTargetSource) -> JudgeTarget:
     qj = config.quick_judge
-    provider_id = qj.provider_id or config.runtime.default_provider
+    provider_id = qj.provider_id or config.runtime.default_provider or ""
     return JudgeTarget(provider_id=str(provider_id), model=str(qj.model))
 
 
@@ -147,7 +147,7 @@ def resolve_judge_settings(config: JudgeTargetSource) -> JudgeSettings:
     )
 
 
-def _cache_business_outcome(
+def cache_business_outcome(
     st: AwakeningState, rule: str, group_id: int | str, cache_text: str, outcome: QuickJudgeOutcome
 ) -> None:
     """仅业务 true/false 写入判定缓存；技术失败不缓存。"""
@@ -157,7 +157,7 @@ def _cache_business_outcome(
         st.llm_cache_set(rule, group_id, cache_text, False)
 
 
-async def _llm_judge(
+async def llm_judge(
     svc: AwakeningJudgeChannel,
     system_prompt: str,
     user_prompt: str,
@@ -213,5 +213,5 @@ async def _llm_judge(
     )
 
 
-def _llm_cache_text(message_text: str, threshold: float) -> str:
+def llm_cache_text(message_text: str, threshold: float) -> str:
     return f"{threshold:.6g}\0{message_text}"

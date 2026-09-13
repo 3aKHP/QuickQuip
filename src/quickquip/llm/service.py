@@ -1345,7 +1345,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             is_non_vision=is_non_vision,
             tool_specs=tool_specs,
             builtin_search_active=builtin_search_active,
-            session_preset=session_preset,
             system_prompt=system_prompt,
         )
 
