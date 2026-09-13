@@ -113,7 +113,11 @@ def _make_svc(settings):
         identities=identities,
         group_identities=lambda group_id, _idx=identities: _idx,
         config=SimpleNamespace(
-            quick_judge=SimpleNamespace(timeout=2.0, max_tokens=64),
+            quick_judge=SimpleNamespace(
+                provider_id="prov", model="test-model", timeout=2.0, max_tokens=64
+            ),
+            runtime=SimpleNamespace(default_provider="prov"),
+            load_error=None,
             personas={},
         ),
         get_group_settings=lambda group_id: settings,

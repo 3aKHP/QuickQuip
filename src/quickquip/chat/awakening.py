@@ -6,22 +6,125 @@ import random
 import re
 import tomllib
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol, TYPE_CHECKING
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE, RECENT_CONTEXT_TTL_SECONDS
 from quickquip.chat.reply_probability import roll_reply
 from quickquip.common.json_utils import extract_json_object
+from quickquip.llm.reply_types import ReplyResult
 from quickquip.llm.usage import usage_scope
 from quickquip.common.opt_in_groups import OptInGroupSet, normalize_digit_group_id
 from quickquip.common.paths import AWAKENING_BOREDOM_GROUPS_PATH, CONFIG_AWAKENING_TOML
 
+if TYPE_CHECKING:
+    from quickquip.llm.quick_judge import QuickJudgeResult
+
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Narrow service interfaces (structural typing: LLMService satisfies as-is)
+# ---------------------------------------------------------------------------
+
+
+class LLMSettingsLike(Protocol):
+    """群级 LLM 设置在唤醒域内的最小读取面。"""
+
+    enabled: bool
+    persona_id: str
+
+
+class QuickJudgeSettingsView(Protocol):
+    provider_id: str
+    model: str
+    timeout: float
+    max_tokens: int
+
+
+class RuntimeDefaultProviderView(Protocol):
+    default_provider: str
+
+
+class JudgeTargetSource(Protocol):
+    """判定目标的窄读取面（``LLMService.config`` 即满足）。"""
+
+    quick_judge: QuickJudgeSettingsView
+    runtime: RuntimeDefaultProviderView
+
+
+class QuickJudgeCaller(Protocol):
+    async def quick_judge_detailed(self, prompt: str, max_tokens: int = 64) -> "QuickJudgeResult": ...
+
+
+class AwakeningJudgeChannel(QuickJudgeCaller, Protocol):
+    """触发判定链对 LLM 服务对象的全部依赖。"""
+
+    @property
+    def config(self) -> JudgeTargetSource: ...
+
+
+class PersonaTopicsSource(Protocol):
+    def persona_interest_topics(self, persona_id: str) -> list[str]: ...
+
+
+class GroupSettingsView(Protocol):
+    enabled: bool
+    persona_id: str
+
+
+class LoadErrorView(Protocol):
+    load_error: str | None
+
+
+class GroupLLMStatusSource(Protocol):
+    """群级 LLM 可用性判定的窄读取面（``LLMService`` 即满足）。"""
+
+    @property
+    def config(self) -> LoadErrorView: ...
+
+    def get_group_settings(self, group_id: int | str) -> GroupSettingsView: ...
+
+
+class BoredomGroupsView(Protocol):
+    def all_groups(self) -> Iterable[str]: ...
+
+
+class RuleSwitchView(Protocol):
+    def is_enabled(self, group_id: int | str, rule_name: str) -> bool: ...
+
+
+class RateLimiterView(Protocol):
+    def allow(self, rule_name: str, user_id: str, *, group_id: int | str) -> bool: ...
+
+
+class StatsRecorderView(Protocol):
+    def record_trigger(self, group_id: int | str, rule_name: str) -> None: ...
+
+
+class GenerateReplyFn(Protocol):
+    """无聊唤醒生成调用的关键字签名（``LLMService.generate_reply`` 即满足）。"""
+
+    async def __call__(
+        self,
+        *,
+        group_id: int | str,
+        user_id: int | str,
+        sender_name: str,
+        prompt: str,
+        image_urls: list[str] | None = ...,
+        include_recent_images: bool = ...,
+        raw_user_text: str | None = ...,
+        store_user_message: bool = ...,
+        trigger_auto_memory: bool = ...,
+        message_id: str | None = ...,
+    ) -> ReplyResult: ...
+
 
 # ---------------------------------------------------------------------------
 # Config dataclasses
@@ -442,16 +545,14 @@ def _is_in_dnd_window(dnd_start: str, dnd_end: str, now: datetime | None = None)
 def _get_effective_interest_topics(
     settings: ResolvedAwakeningSettings,
     persona_id: str,
-    svc: Any,
+    topics_source: PersonaTopicsSource,
 ) -> list[str]:
+    """合并配置话题与 persona 话题（去重、保序、大小写不敏感）。"""
     topics = list(settings.interest_topics)
     try:
-        persona = svc.config.personas.get(persona_id)
-        if persona is not None:
-            persona_cfg = persona.extras.get("awakening", {})
-            persona_topics = persona_cfg.get("interest_topics", [])
-            if isinstance(persona_topics, list):
-                topics.extend(str(t).strip() for t in persona_topics if str(t).strip())
+        persona_topics = topics_source.persona_interest_topics(persona_id)
+        if isinstance(persona_topics, list):
+            topics.extend(str(t).strip() for t in persona_topics if str(t).strip())
     except Exception:
         # fail-soft：persona 话题读取失败时降级为仅用配置话题，不阻断触发判定
         logger.debug("awakening: persona interest_topics unavailable for %s", persona_id, exc_info=True)
@@ -650,18 +751,37 @@ def _parse_judge_text(text: str, threshold: float) -> bool | None:
     return None
 
 
-def _judge_target(svc: Any) -> dict:
-    """解析判定目标的 provider/model（仅诊断字段，无敏感信息）。"""
-    config = getattr(svc, "config", None)
-    qj = getattr(config, "quick_judge", None)
-    provider_id = ""
-    if qj is not None and qj.provider_id:
-        provider_id = str(qj.provider_id)
-    else:
-        runtime = getattr(config, "runtime", None)
-        provider_id = str(getattr(runtime, "default_provider", "") or "")
-    model = str(getattr(qj, "model", "") or "")
-    return {"provider": provider_id, "model": model}
+@dataclass(frozen=True, slots=True)
+class JudgeTarget:
+    """判定目标的显式数据（仅诊断字段，无敏感信息）。"""
+
+    provider_id: str
+    model: str
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeSettings:
+    """一次判定所需的通道参数（orchestrator 单点解析后下传）。"""
+
+    timeout: float
+    max_tokens: int
+    target: JudgeTarget
+
+
+def _judge_target(config: JudgeTargetSource) -> JudgeTarget:
+    qj = config.quick_judge
+    provider_id = qj.provider_id or config.runtime.default_provider
+    return JudgeTarget(provider_id=str(provider_id), model=str(qj.model))
+
+
+def resolve_judge_settings(config: JudgeTargetSource) -> JudgeSettings:
+    """解析 quick_judge 通道参数；非法值（<=0）回退默认。"""
+    qj = config.quick_judge
+    return JudgeSettings(
+        timeout=qj.timeout if qj.timeout > 0 else 2.0,
+        max_tokens=qj.max_tokens if qj.max_tokens > 0 else 64,
+        target=_judge_target(config),
+    )
 
 
 def _cache_business_outcome(
@@ -675,7 +795,7 @@ def _cache_business_outcome(
 
 
 async def _llm_judge(
-    svc: Any,
+    svc: AwakeningJudgeChannel,
     system_prompt: str,
     user_prompt: str,
     threshold: float,
@@ -686,6 +806,7 @@ async def _llm_judge(
     # quick_judge uses its own system_prompt; we embed ours in the user prompt
     full_prompt = f"[系统指令] {system_prompt}\n\n[待判定内容] {user_prompt}"
     started = monotonic()
+    target = _judge_target(svc.config)
     try:
         with usage_scope("awakening_judge"):
             result = await asyncio.wait_for(
@@ -696,7 +817,8 @@ async def _llm_judge(
         diagnostic = {
             "outcome": _JUDGE_TIMEOUT,
             "duration_ms": round((monotonic() - started) * 1000, 2),
-            **_judge_target(svc),
+            "provider": target.provider_id,
+            "model": target.model,
         }
         logger.warning("awakening: quick_judge timed out after %.1fs: %s", timeout, diagnostic)
         return QuickJudgeOutcome(_JUDGE_TIMEOUT, None, diagnostic)
@@ -704,7 +826,8 @@ async def _llm_judge(
         diagnostic = {
             "outcome": _JUDGE_PROVIDER_ERROR,
             "duration_ms": round((monotonic() - started) * 1000, 2),
-            **_judge_target(svc),
+            "provider": target.provider_id,
+            "model": target.model,
         }
         logger.warning("awakening: quick_judge call failed: %s", diagnostic, exc_info=True)
         return QuickJudgeOutcome(_JUDGE_PROVIDER_ERROR, None, diagnostic)
@@ -828,9 +951,9 @@ def check_interest(
     message_text: str,
     settings: ResolvedAwakeningSettings,
     persona_id: str,
-    svc: Any,
+    topics_source: PersonaTopicsSource,
 ) -> AwakeningTriggerResult | None:
-    topics = _get_effective_interest_topics(settings, persona_id, svc)
+    topics = _get_effective_interest_topics(settings, persona_id, topics_source)
     text = message_text.strip()
     if not topics or not text:
         return None
@@ -897,7 +1020,7 @@ async def check_relevance(
     group_id: int | str,
     message_text: str,
     settings: ResolvedAwakeningSettings,
-    svc: Any,
+    svc: AwakeningJudgeChannel | None,
     state: AwakeningState | None = None,
     timeout: float = 2.0,
     max_tokens: int = 64,
@@ -954,7 +1077,7 @@ async def check_qa(
     group_id: int | str,
     message_text: str,
     settings: ResolvedAwakeningSettings,
-    svc: Any,
+    svc: AwakeningJudgeChannel | None,
     state: AwakeningState | None = None,
     timeout: float = 2.0,
     max_tokens: int = 64,
@@ -1010,17 +1133,18 @@ async def check_awakening_triggers(
     group_id: int | str,
     user_id: int | str,
     message_text: str,
-    llm_settings: Any,
-    svc: Any,
+    llm_settings: LLMSettingsLike,
+    svc: AwakeningJudgeChannel,
     *,
     state: AwakeningState | None = None,
     rule_enabled: Callable[[str], bool] | None = None,
     rate_available: Callable[[str], bool] | None = None,
+    config: AwakeningConfig | None = None,
 ) -> AwakeningTriggerResult | None:
-    if not bool(getattr(llm_settings, "enabled", True)):
+    if not bool(llm_settings.enabled):
         return None
 
-    cfg = get_config()
+    cfg = config if config is not None else get_config()
     settings = cfg.resolve_group(group_id)
     st = state or _state
 
@@ -1036,24 +1160,22 @@ async def check_awakening_triggers(
         if result is not None:
             return result
 
-    persona_id = getattr(llm_settings, "persona_id", "")
+    persona_id = llm_settings.persona_id
     if _rule_enabled(_RULE_INTEREST) and _rate_available(_RULE_INTEREST):
         result = check_interest(group_id, message_text, settings, persona_id, svc)
         if result is not None:
             return result
 
     # Stage 2: async checks (may call LLM, gated by threshold + fast filter)
-    qj_cfg = svc.config.quick_judge if hasattr(svc, "config") else None
-    timeout = qj_cfg.timeout if qj_cfg and qj_cfg.timeout > 0 else 2.0
-    max_tokens = qj_cfg.max_tokens if qj_cfg and qj_cfg.max_tokens > 0 else 64
+    judge = resolve_judge_settings(svc.config)
 
     if _rule_enabled(_RULE_RELEVANCE) and _rate_available(_RULE_RELEVANCE):
-        result = await check_relevance(group_id, message_text, settings, svc, st, timeout, max_tokens)
+        result = await check_relevance(group_id, message_text, settings, svc, st, judge.timeout, judge.max_tokens)
         if result is not None:
             return result
 
     if _rule_enabled(_RULE_QA) and _rate_available(_RULE_QA):
-        result = await check_qa(group_id, message_text, settings, svc, st, timeout, max_tokens)
+        result = await check_qa(group_id, message_text, settings, svc, st, judge.timeout, judge.max_tokens)
         if result is not None:
             return result
 
@@ -1071,6 +1193,18 @@ async def check_awakening_triggers(
 # ---------------------------------------------------------------------------
 
 
+class BoredomReplyResult(ReplyResult, total=False):
+    """生成返回形状 + 适配层交付后补写的 delivered_text 扩展键。"""
+
+    delivered_text: str
+
+
+class BoredomLLMSource(GroupLLMStatusSource, Protocol):
+    """无聊唤醒巡检对 LLM 服务对象的全部依赖。"""
+
+    generate_reply: GenerateReplyFn
+
+
 @dataclass(slots=True)
 class BoredomSendPlan:
     """一条待发送的无聊唤醒计划：策略与 LLM 生成已完成，只欠传输。
@@ -1081,7 +1215,8 @@ class BoredomSendPlan:
 
     group_id: str
     trigger: AwakeningTriggerResult
-    reply_result: dict
+    # 适配层在 sink 交付后会向 reply_result 补写 delivered_text（BoredomReplyResult）
+    reply_result: BoredomReplyResult
 
     def trace_kwargs(self) -> dict[str, Any]:
         """``bot_action_trace`` 的逐字段参数（字段集与旧内联实现一致）。"""
@@ -1101,24 +1236,26 @@ class BoredomSendPlan:
         }
 
 
-def _is_group_llm_enabled(svc: Any, group_id: int | str) -> bool:
-    config = getattr(svc, "config", None)
-    if getattr(config, "load_error", None):
+def is_group_llm_enabled(svc: GroupLLMStatusSource, group_id: int | str) -> bool:
+    """群级 LLM 可用性（配置加载成功且群开关打开）；供无聊唤醒巡检与定时消息复用。"""
+    if getattr(svc.config, "load_error", None):
         return False
     try:
         settings = svc.get_group_settings(group_id)
     except Exception:
         logger.debug("awakening_boredom: failed to resolve LLM settings for group %s", group_id, exc_info=True)
         return False
-    return bool(getattr(settings, "enabled", False))
+    return bool(settings.enabled)
 
 
 async def iter_boredom_send_plans(
-    boredom_enabled_groups: Any,
-    rule_switch: Any,
-    svc: Any,
-    rate_limiter: Any | None = None,
-    generate: Any | None = None,
+    boredom_enabled_groups: BoredomGroupsView,
+    rule_switch: RuleSwitchView,
+    svc: BoredomLLMSource,
+    rate_limiter: RateLimiterView | None = None,
+    generate: GenerateReplyFn | None = None,
+    *,
+    config: AwakeningConfig | None = None,
 ) -> AsyncIterator[BoredomSendPlan]:
     """无聊唤醒巡检的策略与生成阶段：逐群产出待发送计划。
 
@@ -1126,7 +1263,7 @@ async def iter_boredom_send_plans(
     ``generate`` 由适配层注入统一生成/交付流程（携带 DeliverySink）；
     缺省回落 ``svc.generate_reply``。单群生成异常记 warning 后跳过。
     """
-    cfg = get_config()
+    cfg = config if config is not None else get_config()
     st = get_state()
     st.prune_stale()
     generate = generate or svc.generate_reply
@@ -1134,7 +1271,7 @@ async def iter_boredom_send_plans(
     for gid in boredom_enabled_groups.all_groups():
         if not rule_switch.is_enabled(gid, _RULE_BOREDOM):
             continue
-        if not _is_group_llm_enabled(svc, gid):
+        if not is_group_llm_enabled(svc, gid):
             continue
         settings = cfg.resolve_group(gid)
         result = check_boredom(gid, settings, st)
@@ -1166,7 +1303,7 @@ async def iter_boredom_send_plans(
         yield BoredomSendPlan(group_id=str(gid), trigger=result, reply_result=reply_result)
 
 
-def confirm_boredom_sent(plan: BoredomSendPlan, stats_tracker: Any | None = None) -> None:
+def confirm_boredom_sent(plan: BoredomSendPlan, stats_tracker: StatsRecorderView | None = None) -> None:
     """发送成功后的状态确认：标冷却、缓存 bot 消息、记触发统计。
 
     仅在传输成功后调用；发送失败时调用会错误地进入冷却。

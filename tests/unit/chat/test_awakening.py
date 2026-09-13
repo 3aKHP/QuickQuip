@@ -665,10 +665,10 @@ class TestCheckInterest:
 
     def test_persona_topics_merged(self):
         settings = _make_settings(interest_topics=["global_topic"])
-        persona = MagicMock()
-        persona.extras = {"awakening": {"interest_topics": ["persona_topic"]}}
         svc = MagicMock()
-        svc.config.personas = {"p1": persona}
+        svc.persona_interest_topics = lambda persona_id: (
+            ["persona_topic"] if persona_id == "p1" else []
+        )
         result = check_interest("g1", "persona_topic在这里", settings, "p1", svc)
         assert result is not None
 
@@ -1505,7 +1505,7 @@ class TestBoredomSendFlowFailures:
         assert "123" not in st._last_boredom_trigger
 
     def test_llm_config_load_error_skips_group(self):
-        """svc.config.load_error 为真时 _is_group_llm_enabled 直接拒绝（位于 rule_switch
+        """svc.config.load_error 为真时 is_group_llm_enabled 直接拒绝（位于 rule_switch
         之后、沉寂判定之前）：跳过该群，不生成、不发送、不标冷却。"""
         st = self._triggerable_state("123")
         bot, groups, rule_switch, svc = self._make_fakes(["123"])

@@ -505,6 +505,20 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             self.config, prompt, max_tokens, client_builder=build_provider_client
         )
 
+    def persona_interest_topics(self, persona_id: str) -> list[str]:
+        """persona extras 中 awakening 兴趣话题的窄读取（清洗为非空字符串列表）。
+
+        配置形状知识归 persona 所有者；唤醒域经 ``PersonaTopicsSource``
+        结构化接口消费，不直达 ``config.personas`` 内部。
+        """
+        persona = self.config.personas.get(persona_id)
+        if persona is None:
+            return []
+        topics = persona.extras.get("awakening", {}).get("interest_topics", [])
+        if not isinstance(topics, list):
+            return []
+        return [str(t).strip() for t in topics if str(t).strip()]
+
     def bind_delivery_sink(self, sink) -> None:
         """绑定逐 Turn 交付出口（adapters 装配时调用）。"""
         self._delivery_sink = sink
