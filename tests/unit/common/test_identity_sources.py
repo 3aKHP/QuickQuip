@@ -19,7 +19,7 @@ people:
     note:
 
 # special_accounts:
-#   - qq_id: "9998887776"
+#   - qq_id: "1000000000"
 #     canonical_name: Bot
 """
 
