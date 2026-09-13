@@ -33,6 +33,7 @@ llm_about/**/*.yaml
 tests/
 scripts/*
 !scripts/backfill_chat_archive.py
+!scripts/backfill_record_identities.py
 README.md
 CHANGELOG.md
 ROADMAP.md

@@ -65,6 +65,7 @@ def test_backfill_shipped_and_standalone_help(tmp_path):
     import sys
     root = Path(__file__).resolve().parents[3]
     script = "scripts/backfill_record_identities.py"
+    assert "!" + script in (root / ".dockerignore").read_text().splitlines()
     for dockerfile in ("Dockerfile", "prod.example/Dockerfile"):
         assert any(line.startswith("COPY ") and script in line for line in (root / dockerfile).read_text().splitlines())
     assert script in (root / "prod.example/deploy-manifest.txt").read_text().splitlines()
