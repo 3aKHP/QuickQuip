@@ -304,12 +304,12 @@ class TestAwakeningState:
     def test_silence_seconds(self):
         s = AwakeningState()
         assert s.get_group_silence_seconds("g1") is None
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         assert s.get_group_silence_seconds("g1") < 1.0
 
     def test_clear_boredom_state(self):
         s = AwakeningState()
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         s.mark_boredom_triggered("g1")
         s.clear_boredom_state("g1")
         assert s.get_group_silence_seconds("g1") is None
@@ -319,7 +319,7 @@ class TestAwakeningState:
         """沉寂/冷却状态不做固定时限淘汰：较大 boredom_silence_seconds
         不会因旧状态被清理而提前满足。"""
         s = AwakeningState()
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         s._last_message_times["g1"] = monotonic() - 7200  # 两小时前的消息
         s.mark_boredom_triggered("g1")
         s._last_boredom_trigger["g1"] = monotonic() - 7200
@@ -642,13 +642,13 @@ class TestCheckInterest:
     def test_disabled_empty_topics(self):
         settings = _make_settings(interest_topics=[])
         svc = MagicMock()
-        assert check_interest("g1", "u1", "hello", settings, "", svc) is None
+        assert check_interest("g1", "hello", settings, "", svc) is None
 
     def test_match(self):
         settings = _make_settings(interest_topics=["Python", "编程"])
         svc = MagicMock()
         svc.config.personas = {}
-        result = check_interest("g1", "u1", "我在学Python", settings, "", svc)
+        result = check_interest("g1", "我在学Python", settings, "", svc)
         assert result is not None
         assert result.rule_name == _RULE_INTEREST
         assert result.matched_topic == "Python"
@@ -661,7 +661,7 @@ class TestCheckInterest:
         settings = _make_settings(interest_topics=["Python"])
         svc = MagicMock()
         svc.config.personas = {}
-        assert check_interest("g1", "u1", "今天天气好", settings, "", svc) is None
+        assert check_interest("g1", "今天天气好", settings, "", svc) is None
 
     def test_persona_topics_merged(self):
         settings = _make_settings(interest_topics=["global_topic"])
@@ -669,23 +669,23 @@ class TestCheckInterest:
         persona.extras = {"awakening": {"interest_topics": ["persona_topic"]}}
         svc = MagicMock()
         svc.config.personas = {"p1": persona}
-        result = check_interest("g1", "u1", "persona_topic在这里", settings, "p1", svc)
+        result = check_interest("g1", "persona_topic在这里", settings, "p1", svc)
         assert result is not None
 
 
 class TestCheckFallback:
     def test_disabled(self):
         settings = _make_settings(fallback_probability=0.0)
-        assert check_fallback("g1", "u1", "hello", settings) is None
+        assert check_fallback("g1", "hello", settings) is None
 
     def test_empty_text(self):
         settings = _make_settings(fallback_probability=1.0)
-        assert check_fallback("g1", "u1", "", settings) is None
+        assert check_fallback("g1", "", settings) is None
 
     def test_trigger_uses_conservative_instruction(self, monkeypatch):
         monkeypatch.setattr("quickquip.chat.awakening.random.random", lambda: 0.0)
         settings = _make_settings(fallback_probability=1.0)
-        result = check_fallback("g1", "u1", "马头蒸菜", settings)
+        result = check_fallback("g1", "马头蒸菜", settings)
         assert result is not None
         assert result.opens_extend_window is False
         assert "低概率" in result.trigger_instruction
@@ -699,7 +699,7 @@ class TestCheckBoredom:
 
     def test_insufficient_silence(self):
         s = AwakeningState()
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         settings = _make_settings(boredom_silence_seconds=60, boredom_probability=1.0)
         assert check_boredom("g1", settings, s) is None
 
@@ -712,7 +712,7 @@ class TestCheckBoredom:
     def test_long_silence_threshold_not_prematurely_met(self):
         """沉寂 7200s 且门槛 10800s：prune 后状态保留且不提前触发。"""
         s = AwakeningState()
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         s._last_message_times["g1"] = monotonic() - 7200
         s.prune_stale(max_age=7200)
         settings = _make_settings(boredom_silence_seconds=10800, boredom_probability=1.0)
@@ -720,7 +720,7 @@ class TestCheckBoredom:
 
     def test_dnd_blocks_boredom(self):
         s = AwakeningState()
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         s._last_message_times["g1"] = monotonic() - 7200
         settings = _make_settings(
             boredom_silence_seconds=3600,
@@ -741,7 +741,7 @@ class TestCheckRelevance:
         s = AwakeningState()
         s.bot_messages.add("g1", "hello")
         settings = _make_settings(relevance_threshold=1.0)
-        result = asyncio.run(check_relevance("g1", "u1", "hello", settings, None, s))
+        result = asyncio.run(check_relevance("g1", "hello", settings, None, s))
         assert result is None
 
     def test_zero_threshold_disabled(self):
@@ -750,14 +750,14 @@ class TestCheckRelevance:
         settings = _make_settings(relevance_threshold=0.0)
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
-        result = asyncio.run(check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s))
+        result = asyncio.run(check_relevance("g1", "今天天气怎么样", settings, svc, s))
         assert result is None
         svc.quick_judge_detailed.assert_not_called()
 
     def test_no_bot_messages(self):
         s = AwakeningState()
         settings = _make_settings(relevance_threshold=0.5)
-        result = asyncio.run(check_relevance("g1", "u1", "hello", settings, None, s))
+        result = asyncio.run(check_relevance("g1", "hello", settings, None, s))
         assert result is None
 
     def test_low_overlap_skips_llm(self):
@@ -766,7 +766,7 @@ class TestCheckRelevance:
         settings = _make_settings(relevance_threshold=0.5)
         svc = MagicMock()
         result = asyncio.run(
-            check_relevance("g1", "u1", "完全无关XYZ", settings, svc, s)
+            check_relevance("g1", "完全无关XYZ", settings, svc, s)
         )
         assert result is None
 
@@ -777,7 +777,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+            check_relevance("g1", "今天天气怎么样", settings, svc, s)
         )
         assert result is not None
         assert result.rule_name == _RULE_RELEVANCE
@@ -791,7 +791,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": false}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+            check_relevance("g1", "今天天气怎么样", settings, svc, s)
         )
         assert result is None
 
@@ -802,7 +802,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+            check_relevance("g1", "今天天气怎么样", settings, svc, s)
         )
         assert result is None
 
@@ -813,7 +813,7 @@ class TestCheckRelevance:
         s.llm_cache_set(_RULE_RELEVANCE, "g1", _llm_cache_text("今天天气怎么样", 0.3), True)
         svc = MagicMock()
         result = asyncio.run(
-            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+            check_relevance("g1", "今天天气怎么样", settings, svc, s)
         )
         assert result is not None
         svc.quick_judge_detailed.assert_not_called()
@@ -826,7 +826,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "今天天气怎么样", settings, svc, s)
+            check_relevance("g1", "今天天气怎么样", settings, svc, s)
         )
         assert result is None
         svc.quick_judge_detailed.assert_awaited_once()
@@ -838,7 +838,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "Kubernetes ImagePullBackOff again?", settings, svc, s)
+            check_relevance("g1", "Kubernetes ImagePullBackOff again?", settings, svc, s)
         )
         assert result is not None
         svc.quick_judge_detailed.assert_awaited_once()
@@ -850,7 +850,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "pip_install_deps 又 warnings 了吗", settings, svc, s)
+            check_relevance("g1", "pip_install_deps 又 warnings 了吗", settings, svc, s)
         )
         assert result is not None
         svc.quick_judge_detailed.assert_awaited_once()
@@ -861,7 +861,7 @@ class TestCheckRelevance:
         settings = _make_settings(relevance_threshold=0.5)
         svc = MagicMock()
         result = asyncio.run(
-            check_relevance("g1", "u1", "lakers won the game last night", settings, svc, s)
+            check_relevance("g1", "lakers won the game last night", settings, svc, s)
         )
         assert result is None
         svc.quick_judge_detailed.assert_not_called()
@@ -872,7 +872,7 @@ class TestCheckRelevance:
         settings = _make_settings(relevance_threshold=0.5)
         svc = MagicMock()
         result = asyncio.run(
-            check_relevance("g1", "u1", "我上传到 https://example.com/b 了", settings, svc, s)
+            check_relevance("g1", "我上传到 https://example.com/b 了", settings, svc, s)
         )
         assert result is None
         svc.quick_judge_detailed.assert_not_called()
@@ -883,7 +883,7 @@ class TestCheckRelevance:
         settings = _make_settings(relevance_threshold=1.0)
         svc = MagicMock()
         result = asyncio.run(
-            check_relevance("g1", "u1", "Kubernetes ImagePullBackOff?", settings, svc, s)
+            check_relevance("g1", "Kubernetes ImagePullBackOff?", settings, svc, s)
         )
         assert result is None
         svc.quick_judge_detailed.assert_not_called()
@@ -895,7 +895,7 @@ class TestCheckRelevance:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
-            check_relevance("g1", "u1", "Kubernetes deployment again?", settings, svc, s)
+            check_relevance("g1", "Kubernetes deployment again?", settings, svc, s)
         )
         assert result is not None
         svc.quick_judge_detailed.assert_awaited_once()
@@ -912,7 +912,7 @@ class TestLlmJudgeClassification:
     def _run_relevance(self, svc, threshold=0.5, text="今天天气怎么样"):
         s = self._state_with_bot_msg()
         settings = _make_settings(relevance_threshold=threshold)
-        result = asyncio.run(check_relevance("g1", "u1", text, settings, svc, s))
+        result = asyncio.run(check_relevance("g1", text, settings, svc, s))
         return result, s
 
     def test_business_true_triggers_and_caches_true(self):
@@ -996,7 +996,7 @@ class TestLlmJudgeClassification:
         svc.quick_judge_detailed = AsyncMock(return_value=_qj("", outcome="empty"))
         settings = _make_settings(qa_threshold=0.5)
         result = asyncio.run(
-            check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
+            check_qa("g1", "请问怎么解决这个问题？", settings, svc, s)
         )
         assert result is None
         assert s.llm_cache_get(_RULE_QA, "g1", _llm_cache_text("请问怎么解决这个问题？", 0.5)) is None
@@ -1019,7 +1019,7 @@ class TestCheckQA:
     def test_disabled_threshold(self):
         s = AwakeningState()
         settings = _make_settings(qa_threshold=1.0)
-        result = asyncio.run(check_qa("g1", "u1", "请问这是什么？", settings, None, s))
+        result = asyncio.run(check_qa("g1", "请问这是什么？", settings, None, s))
         assert result is None
 
     def test_zero_threshold_disabled(self):
@@ -1027,14 +1027,14 @@ class TestCheckQA:
         settings = _make_settings(qa_threshold=0.0)
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 1.0}'))
-        result = asyncio.run(check_qa("g1", "u1", "请问这是什么？", settings, svc, s))
+        result = asyncio.run(check_qa("g1", "请问这是什么？", settings, svc, s))
         assert result is None
         svc.quick_judge_detailed.assert_not_called()
 
     def test_no_question_marker(self):
         s = AwakeningState()
         settings = _make_settings(qa_threshold=0.5)
-        result = asyncio.run(check_qa("g1", "u1", "今天天气真好", settings, None, s))
+        result = asyncio.run(check_qa("g1", "今天天气真好", settings, None, s))
         assert result is None
 
     def test_question_triggers_llm(self):
@@ -1043,7 +1043,7 @@ class TestCheckQA:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": true}'))
         result = asyncio.run(
-            check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
+            check_qa("g1", "请问怎么解决这个问题？", settings, svc, s)
         )
         assert result is not None
         assert result.rule_name == _RULE_QA
@@ -1056,7 +1056,7 @@ class TestCheckQA:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"trigger": false}'))
         result = asyncio.run(
-            check_qa("g1", "u1", "怎么了？", settings, svc, s)
+            check_qa("g1", "怎么了？", settings, svc, s)
         )
         assert result is None
 
@@ -1066,7 +1066,7 @@ class TestCheckQA:
         svc = MagicMock()
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.6}'))
         result = asyncio.run(
-            check_qa("g1", "u1", "请问怎么解决这个问题？", settings, svc, s)
+            check_qa("g1", "请问怎么解决这个问题？", settings, svc, s)
         )
         assert result is None
 
@@ -1076,7 +1076,7 @@ class TestCheckQA:
         s.llm_cache_set(_RULE_QA, "g1", _llm_cache_text("cached q?", 0.5), True)
         svc = MagicMock()
         result = asyncio.run(
-            check_qa("g1", "u1", "cached q?", settings, svc, s)
+            check_qa("g1", "cached q?", settings, svc, s)
         )
         assert result is not None
         svc.quick_judge_detailed.assert_not_called()
@@ -1239,7 +1239,7 @@ class TestCheckAwakeningTriggers:
 
     def test_all_disabled_returns_none(self):
         s = AwakeningState()
-        s.record_message("g1", "u1")
+        s.record_message("g1")
         llm_settings = MagicMock()
         llm_settings.persona_id = ""
         svc = MagicMock()
@@ -1315,7 +1315,7 @@ class TestBoredomSendFlow:
         )
         aw._state = AwakeningState()
         # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
-        aw._state.record_message("123", "u1")
+        aw._state.record_message("123")
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
@@ -1352,7 +1352,7 @@ class TestBoredomSendFlow:
         )
         aw._state = AwakeningState()
         # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
-        aw._state.record_message("123", "u1")
+        aw._state.record_message("123")
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc, stats_tracker=stats_tracker))
@@ -1400,7 +1400,7 @@ class TestBoredomSendFlow:
         )
         aw._state = AwakeningState()
         # 沉寂状态需已知且已过门槛（boredom_silence_seconds=1）
-        aw._state.record_message("123", "u1")
+        aw._state.record_message("123")
         aw._state._last_message_times["123"] = monotonic() - 2
         try:
             asyncio.run(_drive_boredom_send(bot, groups, rule_switch, svc))
@@ -1429,7 +1429,7 @@ class TestBoredomSendFlowFailures:
         """构造各群均已过沉寂门槛的 AwakeningState（boredom_silence_seconds=1）。"""
         st = AwakeningState()
         for gid in gids:
-            st.record_message(gid, "u1")
+            st.record_message(gid)
             st._last_message_times[gid] = monotonic() - 2
         return st
 

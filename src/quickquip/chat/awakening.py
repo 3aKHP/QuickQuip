@@ -281,7 +281,7 @@ class AwakeningState:
         self.bot_messages = BotMessageCache()
         self._llm_cache: dict[tuple[str, str, str], tuple[bool, float]] = {}
 
-    def record_message(self, group_id: int | str, user_id: int | str) -> None:
+    def record_message(self, group_id: int | str) -> None:
         self._last_message_times[str(group_id)] = monotonic()
 
     def mark_awakened(self, group_id: int | str, user_id: int | str, source: str = "explicit_llm") -> None:
@@ -457,7 +457,8 @@ def _get_effective_interest_topics(
             if isinstance(persona_topics, list):
                 topics.extend(str(t).strip() for t in persona_topics if str(t).strip())
     except Exception:
-        pass
+        # fail-soft：persona 话题读取失败时降级为仅用配置话题，不阻断触发判定
+        logger.debug("awakening: persona interest_topics unavailable for %s", persona_id, exc_info=True)
     seen: set[str] = set()
     deduped: list[str] = []
     for t in topics:
@@ -781,6 +782,7 @@ class BoredomEnabledGroups(OptInGroupSet):
             logger.warning("awakening: ignoring invalid group_id in %s: %r", self.path, raw)
             return None
 
+
 _BOREDOM_INSTRUCTION = "群聊沉寂已久，你可以自然地冒个泡说点什么。不要说明自己是因为无聊唤醒或定时机制才发言。"
 _EXTEND_INSTRUCTION = "这名群友刚刚显式召唤过你，现在仍在同一段短对话窗口内。只有能自然接上时才回应，保持简短，不要说明唤醒延长或触发机制。"
 _INTEREST_INSTRUCTION_TEMPLATE = "这条群聊消息命中了你感兴趣的话题「{topic}」。请围绕这条消息自然接话，不要说明兴趣话题、关键词或唤醒机制。"
@@ -827,7 +829,6 @@ def check_extend(
 
 def check_interest(
     group_id: int | str,
-    user_id: int | str,
     message_text: str,
     settings: ResolvedAwakeningSettings,
     persona_id: str,
@@ -852,7 +853,6 @@ def check_interest(
 
 def check_fallback(
     group_id: int | str,
-    user_id: int | str,
     message_text: str,
     settings: ResolvedAwakeningSettings,
 ) -> AwakeningTriggerResult | None:
@@ -899,7 +899,6 @@ def check_boredom(
 
 async def check_relevance(
     group_id: int | str,
-    user_id: int | str,
     message_text: str,
     settings: ResolvedAwakeningSettings,
     svc: Any,
@@ -957,7 +956,6 @@ async def check_relevance(
 
 async def check_qa(
     group_id: int | str,
-    user_id: int | str,
     message_text: str,
     settings: ResolvedAwakeningSettings,
     svc: Any,
@@ -1044,7 +1042,7 @@ async def check_awakening_triggers(
 
     persona_id = getattr(llm_settings, "persona_id", "")
     if _rule_enabled(_RULE_INTEREST) and _rate_available(_RULE_INTEREST):
-        result = check_interest(group_id, user_id, message_text, settings, persona_id, svc)
+        result = check_interest(group_id, message_text, settings, persona_id, svc)
         if result is not None:
             return result
 
@@ -1054,18 +1052,18 @@ async def check_awakening_triggers(
     max_tokens = qj_cfg.max_tokens if qj_cfg and qj_cfg.max_tokens > 0 else 64
 
     if _rule_enabled(_RULE_RELEVANCE) and _rate_available(_RULE_RELEVANCE):
-        result = await check_relevance(group_id, user_id, message_text, settings, svc, st, timeout, max_tokens)
+        result = await check_relevance(group_id, message_text, settings, svc, st, timeout, max_tokens)
         if result is not None:
             return result
 
     if _rule_enabled(_RULE_QA) and _rate_available(_RULE_QA):
-        result = await check_qa(group_id, user_id, message_text, settings, svc, st, timeout, max_tokens)
+        result = await check_qa(group_id, message_text, settings, svc, st, timeout, max_tokens)
         if result is not None:
             return result
 
     # Stage 3: fallback
     if _rule_enabled(_RULE_FALLBACK) and _rate_available(_RULE_FALLBACK):
-        result = check_fallback(group_id, user_id, message_text, settings)
+        result = check_fallback(group_id, message_text, settings)
         if result is not None:
             return result
 
