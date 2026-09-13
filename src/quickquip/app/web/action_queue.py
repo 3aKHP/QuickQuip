@@ -129,7 +129,7 @@ class WebAdminActionQueue:
                 SELECT *
                 FROM web_admin_actions
                 WHERE status = 'queued'
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, rowid ASC
                 LIMIT ?
                 """,
                 (limit,),
@@ -187,7 +187,8 @@ class WebAdminActionQueue:
                 """
                 SELECT *
                 FROM web_admin_actions
-                ORDER BY created_at DESC
+                -- rowid 决胜：紧循环入队会产生相同微秒时间戳，最近列表须按入队次序稳定
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ?
                 """,
                 (limit,),
