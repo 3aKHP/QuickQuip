@@ -48,10 +48,10 @@ class _FakeStore:
     def __init__(self, rows):
         self._rows = rows
 
-    def list_quotes(self, group_id, offset=0, limit=50, keyword=""):
+    def list_quotes(self, group_id, offset=0, limit=50, keyword="", identity_snapshot=None):
         return [dict(r) for r in self._rows], len(self._rows)
 
-    def get_by_seq(self, group_id, seq):
+    def get_by_seq(self, group_id, seq, identity_snapshot=None):
         for r in self._rows:
             if r["group_seq"] == seq:
                 return dict(r)
@@ -74,7 +74,9 @@ def _patch_sources(monkeypatch, rows, *, user_names, canonical_by_uid, llm_ok=Tr
     import quickquip.app.message_pipeline as message_pipeline
 
     monkeypatch.setattr(message_pipeline, "group_quote_store", _FakeStore(rows))
-    identity = _FakeIdentityIndex(canonical_by_uid) if llm_ok else None
+    from quickquip.app.identities import IdentitySnapshot, web_identities
+    identity = _FakeIdentityIndex(canonical_by_uid if llm_ok else {})
+    monkeypatch.setattr(web_identities, "snapshot", lambda gid: IdentitySnapshot(identity, user_names))
     monkeypatch.setattr(
         message_pipeline, "get_sender_identity_sources",
         lambda gid: (user_names or None, identity),
@@ -89,7 +91,7 @@ async def test_list_quotes_enriches_sender_display(monkeypatch):
 
     result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
     entry = result["entries"][0]
-    assert entry["sender_display"] == "新名片"
+    assert entry["sender_display"] == "规范名"
     assert entry["sender_changed"] is True
     assert entry["quoted_sender_name"] == "旧名片"
 
@@ -147,4 +149,4 @@ def test_get_sender_identity_sources_degrades_when_llm_unavailable(monkeypatch):
 
     user_names, identity_index = message_pipeline.get_sender_identity_sources("g1")
     assert user_names == {"u1": "名片"}
-    assert identity_index is None
+    assert identity_index is not None

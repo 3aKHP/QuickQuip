@@ -100,6 +100,9 @@ class _StoreBase:
         try:
             self._ensure_schema()
             self._ensure_agent_schema()
+            from quickquip.common.record_content import migrate
+            with self._connect() as conn:
+                migrate(conn, "memories")
         except sqlite3.Error as exc:
             logger.error("LLMStore 数据库初始化失败 (%s)：%s", self.path, exc)
             self._unavailable = True

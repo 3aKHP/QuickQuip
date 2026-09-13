@@ -3,7 +3,7 @@
     <UiPageHeader title="记忆管理" />
     <div class="toolbar">
       <label>群组<select v-model="groupId" @change="load"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g" :value="g">{{ g }}</option></select></label>
-      <input v-model="keyword" placeholder="关键词过滤" class="kw-input" @keyup.enter="load" /><UiInfoTip text="只对记忆正文做子串匹配，不匹配标签；留空显示全部（最多 200 条）。" />
+      <input v-model="keyword" placeholder="关键词过滤" class="kw-input" @keyup.enter="load" /><UiInfoTip text="支持正文关键词、成员名字、别名和 QQ；留空显示全部（最多 200 条）。" />
       <UiButton :loading="loading" icon="RefreshCw" :disabled="!groupId" @click="load">刷新</UiButton>
       <UiButton v-if="groupId" variant="danger" icon="Trash2" @click="clearAll">清空全部</UiButton>
     </div>
@@ -13,11 +13,12 @@
 
     <TransitionGroup name="list" tag="div" class="mem-list">
       <UiCard v-for="m in memories" :key="m.id" padding="md" shadow="sm">
-        <div class="mem-meta"><span class="meta-id">#{{ m.id }}</span><UiTag size="sm" :variant="m.scope === 'user' ? 'success' : 'info'">{{ m.scope }}</UiTag><UiInfoTip :text="scopeTip" /><span v-if="m.user_id" class="meta-text">uid {{ m.user_id }}</span><span class="meta-text">conf {{ m.confidence.toFixed(2) }}</span><UiInfoTip :text="confTip" /><span class="meta-text">{{ m.updated_at.slice(0, 16).replace('T', ' ') }}</span></div>
-        <div v-if="editing !== m.id" class="mem-content">{{ m.content }}</div>
+        <div class="mem-meta"><span class="meta-id">#{{ m.id }}</span><UiTag size="sm" :variant="m.scope === 'user' ? 'success' : 'info'">{{ m.scope }}</UiTag><UiInfoTip :text="scopeTip" /><span v-if="m.user_id" class="meta-text">{{ m.user_display || m.user_id }} ({{ m.user_id }})</span><span class="meta-text">conf {{ m.confidence.toFixed(2) }}</span><UiInfoTip :text="confTip" /><span class="meta-text">{{ m.updated_at.slice(0, 16).replace('T', ' ') }}</span></div>
+        <div v-if="editing !== m.id" class="mem-content">{{ m.content_display ?? m.content }}</div>
+        <details v-if="editing !== m.id"><summary>查看原文</summary><pre>{{ m.content }}</pre></details>
         <div v-if="editing !== m.id && m.tags.length" class="mem-tags"><UiTag v-for="t in m.tags" :key="t">{{ t }}</UiTag></div>
         <div v-if="editing === m.id" class="edit-block">
-          <textarea v-model="editContent" rows="3" />
+          <RecordContentEditor v-model="editParts" :group-id="groupId" />
           <div class="edit-row"><input v-model="editTags" placeholder="标签（逗号分隔）" /><input v-model.number="editConf" type="number" step="0.1" min="0" max="1" style="width:90px" /></div>
           <div class="edit-actions"><UiButton variant="primary" icon="Check" @click="saveEdit(m)">保存</UiButton><UiButton variant="ghost" @click="editing = null">取消</UiButton></div>
         </div>
@@ -28,7 +29,7 @@
     <UiCard v-if="groupId" padding="md" shadow="sm" class="add-card">
       <h3 class="section-title">新增记忆<UiInfoTip :text="newMemoryTip" /></h3>
       <div class="add-form">
-        <textarea v-model="newContent" rows="2" placeholder="内容" />
+        <RecordContentEditor v-model="newParts" :group-id="groupId" />
         <div class="add-row"><select v-model="newScope"><option value="group">group</option><option value="user">user</option></select><input v-model="newUserId" placeholder="user_id（可选）" style="width:120px" /><input v-model="newTags" placeholder="标签（逗号分隔）" /><UiInfoTip text="标签仅用于管理页的人工分类浏览，不参与对话中的记忆检索——检索只匹配记忆正文。" /><UiButton variant="primary" icon="Plus" @click="addMemory">添加</UiButton></div>
       </div>
     </UiCard>
@@ -37,23 +38,26 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import RecordContentEditor from '../components/RecordContentEditor.vue'
+import { emptyRecordBody as emptyBody, type RecordBody } from '../api/recordContent'
+const editParts = ref<RecordBody>(emptyBody()); const newParts = ref<RecordBody>(emptyBody())
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchKnownGroups } from '../api/groups'; import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory'; import { toast } from '../toast'
 
-const groups = ref<string[]>([]); const groupId = ref(''); const keyword = ref(''); const memories = ref<any[]>([]); const loading = ref(false); const error = ref<string | null>(null); const editing = ref<number | null>(null); const editContent = ref(''); const editTags = ref(''); const editConf = ref(1.0); const newContent = ref(''); const newScope = ref('group'); const newUserId = ref(''); const newTags = ref('')
+const groups = ref<string[]>([]); const groupId = ref(''); const keyword = ref(''); const memories = ref<any[]>([]); const loading = ref(false); const error = ref<string | null>(null); const editing = ref<number | null>(null); const editTags = ref(''); const editConf = ref(1.0); const newScope = ref('group'); const newUserId = ref(''); const newTags = ref('')
 
 /** scope 与置信度口径：列表条目与「新增记忆」说明共用同一来源，避免两处文案漂移 */
 const scopeTip = 'group = 该群所有对话都会检索到；user = 仅在与该 uid 用户相关的对话中才被检索引用。'
 const confTip = 'conf = 置信度（0–1），检索时按置信度降序优先注入提示词；手动添加默认 1.0，自动抽取固定 0.5，可在编辑中调整。'
-const newMemoryTip = `scope 选 group 对全群生效；选 user 需填 user_id，仅在涉及该用户的对话中被引用。${confTip}`
+const newMemoryTip = `scope 选 group 对全群生效；选 user 需填 user_id，仅在与该用户的对话中被检索引用。${confTip}`
 
 onMounted(async () => { try { groups.value = (await fetchKnownGroups()).groups || [] } catch (e: unknown) { error.value = `加载失败: ${(e as Error).message}` } })
 async function load() { if (!groupId.value) return; loading.value = true; error.value = null; try { memories.value = await fetchMemories(groupId.value, keyword.value) } catch (e: unknown) { error.value = (e as Error).message } finally { loading.value = false } }
-function startEdit(m: any) { editing.value = m.id; editContent.value = m.content; editTags.value = m.tags.join(', '); editConf.value = m.confidence }
-async function saveEdit(m: any) { try { await updateMemory(groupId.value, m.id, { content: editContent.value, tags: editTags.value.split(',').map(t => t.trim()).filter(Boolean), confidence: isNaN(editConf.value) ? null : Number(editConf.value) }); editing.value = null; toast('已保存'); await load() } catch (e: unknown) { toast((e as Error).message, 'error') } }
+function startEdit(m: any) { editing.value = m.id; editParts.value = JSON.parse(JSON.stringify(m.content_parts || { version: 1, parts: [{ type: 'text', text: m.content }] })); editTags.value = m.tags.join(', '); editConf.value = m.confidence }
+async function saveEdit(m: any) { try { await updateMemory(groupId.value, m.id, { content_parts: editParts.value, tags: editTags.value.split(',').map(t => t.trim()).filter(Boolean), confidence: isNaN(editConf.value) ? null : Number(editConf.value) }); editing.value = null; toast('已保存'); await load() } catch (e: unknown) { toast((e as Error).message, 'error') } }
 async function del(id: number) { if (!confirm(`删除记忆 #${id}？`)) return; try { await deleteMemory(groupId.value, id); memories.value = memories.value.filter(m => m.id !== id); toast('已删除') } catch (e: unknown) { toast((e as Error).message, 'error') } }
 async function clearAll() { if (!confirm(`清空群 ${groupId.value} 全部记忆？`)) return; try { const r = await clearAllMemories(groupId.value); memories.value = []; toast(`已删除 ${r.deleted} 条`) } catch (e: unknown) { toast((e as Error).message, 'error') } }
-async function addMemory() { if (!newContent.value.trim()) { toast('内容不能为空', 'error'); return }; try { await createMemory(groupId.value, { content: newContent.value.trim(), scope: newScope.value, user_id: newUserId.value.trim() || null, tags: newTags.value.split(',').map(t => t.trim()).filter(Boolean) }); newContent.value = ''; newUserId.value = ''; newTags.value = ''; toast('已添加'); await load() } catch (e: unknown) { toast((e as Error).message, 'error') } }
+async function addMemory() { if (!newParts.value.parts.some(p => p.type !== 'text' || p.text.trim())) { toast('内容不能为空', 'error'); return }; try { await createMemory(groupId.value, { content_parts: newParts.value, scope: newScope.value, user_id: newUserId.value.trim() || null, tags: newTags.value.split(',').map(t => t.trim()).filter(Boolean) }); newParts.value = emptyBody(); newUserId.value = ''; newTags.value = ''; toast('已添加'); await load() } catch (e: unknown) { toast((e as Error).message, 'error') } }
 </script>
 
 <style scoped>

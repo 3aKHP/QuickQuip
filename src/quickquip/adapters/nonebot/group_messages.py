@@ -196,8 +196,10 @@ def register_message_matcher(on_message, Message, MessageSegment):
         pending = offline_message_store.pop_pending(group_id, user_id)
         if pending:
             lines = [f"有 {len(pending)} 条留言捎给你："]
+            from quickquip.app.identities import identities as record_identities
+            snapshot = record_identities.snapshot(group_id)
             for m in pending:
-                lines.append(m.format_display())
+                lines.append(m.format_display(snapshot))
             reply_message = Message([
                 MessageSegment.at(user_id),
                 MessageSegment.text(" " + "\n".join(lines)),

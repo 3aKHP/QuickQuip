@@ -278,8 +278,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             if not self._init_error:
                 self._init_error = f"词表加载失败：{exc}"
 
+        from quickquip.common.identity_sources import IdentityRepository, identities
+        self._identity_repository = identities if Path(self.identity_path) == identities.path else IdentityRepository(self.identity_path)
+        if self.store is not None:
+            self.store.identity_repository = self._identity_repository
         try:
-            self.identities = IdentityIndex.from_file(self.identity_path)
+            self.identities = self._identity_repository.snapshot("").index
         except Exception as exc:
             logger.exception("identities 加载失败")
             self.identities = IdentityIndex()
@@ -307,23 +311,20 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self._group_vocabs[cache_key] = merged
         return merged
 
+    @property
+    def identities(self) -> IdentityIndex:
+        repository = getattr(self, "_identity_repository", None)
+        return repository.snapshot("").index if repository else self._identities
+
+    @identities.setter
+    def identities(self, value: IdentityIndex) -> None:
+        self._identities = value
+
     def _resolve_identities(self, group_id: str) -> IdentityIndex:
-        if not group_id:
-            return self.identities
-        cache_key = str(group_id)
-        cached = self._group_identities.get(cache_key)
-        if cached is not None:
-            return cached
-        group_path = self.identity_path.parent / cache_key / "identities.yaml"
-        if group_path.exists():
-            group_identities = IdentityIndex.from_file(group_path)
-            merged = self.identities.merge(group_identities)
-        else:
-            merged = self.identities
-        if len(self._group_identities) >= _GROUP_CACHE_MAX:
-            self._group_identities.popitem(last=False)
-        self._group_identities[cache_key] = merged
-        return merged
+        repository = getattr(self, "_identity_repository", None)
+        if repository is not None:
+            return repository.snapshot(group_id).index
+        return self.identities
 
     def group_identities(self, group_id: str) -> IdentityIndex:
         """按群返回合并后的身份索引，供装配层等外部调用方使用。"""
@@ -334,7 +335,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         _reload_sensitive_filter()
         self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
-        self.identities = IdentityIndex.from_file(self.identity_path)
+        self._identity_repository.invalidate()
+        from quickquip.common.identity_sources import identities
+        identities.invalidate()
+        self.identities = self._identity_repository.snapshot("").index
         self._group_vocabs.clear()
         self._group_identities.clear()
         self.mark_mcp_dirty()

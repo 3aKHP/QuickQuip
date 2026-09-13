@@ -324,6 +324,10 @@ class ToolMixin(McpLifecycleMixin):
 
     def bind_group_stats_tracker(self, tracker: "GroupStatsTracker | None") -> None:
         self.stats_tracker = tracker
+        if hasattr(self, "_identity_repository"):
+            self._identity_repository.names_provider = (
+                (lambda gid: getattr(tracker.get_stats(gid), "user_names", {})) if tracker else None
+            )
 
     def bind_rule_switch(self, rule_switch: "GroupRuleSwitch | None") -> None:
         self.rule_switch = rule_switch
@@ -499,7 +503,9 @@ class ToolMixin(McpLifecycleMixin):
 
     async def _tool_list_memories(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
         keyword = str(arguments.get("keyword", "")).strip() or None
-        items = self.list_memories(context.group_id, keyword=keyword, chat_type=context.chat_type)
+        items = self.store.search_memories(
+            self._context_scope_key(context), user_id=context.user_id, query=keyword or "", limit=10,
+        )
         if not items:
             if keyword:
                 return f"{self._scope_subject(context.chat_type)}没有包含“{keyword}”的已存记忆。"
@@ -507,7 +513,7 @@ class ToolMixin(McpLifecycleMixin):
 
         lines = [f"{self._memory_label(context.chat_type)}："]
         for item in items[:10]:
-            lines.append(f"- #{item['id']} {item['content']}")
+            lines.append(f"- #{item['id']} {('[' + str(item['user_display']) + '] ') if item.get('user_display') else ''}{item.get('content_display', item['content'])}")
         return "\n".join(lines)
 
     async def _tool_search_web(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:

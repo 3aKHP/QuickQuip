@@ -153,23 +153,35 @@ class AutoMemoryMixin:
                 scope_key,
                 limit=_AUTO_MEMORY_CONTEXT_TURNS * 2,
             )
+            from quickquip.common.identity_sources import IdentitySnapshot
+            from quickquip.common.record_content import legacy, render
+            repository = getattr(self, "_identity_repository", None)
+            if repository is not None:
+                snapshot = repository.snapshot(scope_key)
+            else:
+                index = self.group_identities(str(scope_key)) if hasattr(self, "group_identities") else None
+                snapshot = IdentitySnapshot(index) if index is not None else IdentitySnapshot()
             context_parts: list[str] = []
             seen = 0
             for msg in reversed(history):
                 role = msg.get("role", "")
                 name = msg.get("canonical_name") or msg.get("sender_name", "?")
-                content = str(msg.get("raw_content") or msg.get("content", "")).strip()
+                name = snapshot.name(msg.get("user_id"), name)
+                source_text = str(msg.get("raw_content") or msg.get("content", ""))
+                content = (source_text if source_text == user_text else render(legacy(source_text), snapshot)).strip()
                 if not content:
                     continue
                 tag = {"user": "群友", "assistant": "bot"}.get(role, role)
-                context_parts.append(f"[{tag}] {name}: {content[:200]}")
+                speaker_id = str(msg.get("user_id") or "")
+                label = f"{name}（QQ {speaker_id}）" if speaker_id else name
+                context_parts.append(f"[{tag}] {label}: {content[:200]}")
                 seen += 1
                 if seen >= _AUTO_MEMORY_CONTEXT_TURNS:
                     break
             context_parts.reverse()
 
-            display_name = canonical_name or sender_name
-            name_line = f"当前要评估的发言者：{display_name}"
+            display_name = snapshot.name(user_id, canonical_name or sender_name)
+            name_line = f"当前要评估的发言者：{display_name}（QQ {user_id}）"
             if canonical_name and sender_name and canonical_name != sender_name:
                 name_line += f"（QQ昵称：{sender_name}）"
 

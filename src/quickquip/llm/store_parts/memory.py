@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 
+from quickquip.common.identity_sources import identities
+from quickquip.common.record_content import matches, plain, project, render, save_parts, validate
+
 from quickquip.llm.store_parts._base import _build_query_tokens, _utc_now
 
 
@@ -20,9 +23,13 @@ class MemoryStoreMixin:
         tags: list[str] | None = None,
         source: str = "manual",
         confidence: float = 1.0,
+        content_parts: dict | None = None,
     ) -> int:
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
+        body = validate(content_parts) if content_parts is not None else plain(content)
+        if content_parts is not None:
+            content = render(body)
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -41,6 +48,7 @@ class MemoryStoreMixin:
                     _utc_now(),
                 ),
             )
+            save_parts(conn, "memories", int(cursor.lastrowid), group_id, body)
             return int(cursor.lastrowid)
 
     def list_memories(
@@ -52,96 +60,58 @@ class MemoryStoreMixin:
     ) -> list[dict[str, object]]:
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
-        params: list[object] = [str(group_id)]
-        sql = """
-            SELECT id, scope, user_id, content, tags_json, source, confidence, created_at, updated_at
-            FROM memories
-            WHERE group_id = ?
-        """
-        if keyword:
-            sql += " AND content LIKE ?"
-            params.append(f"%{keyword}%")
-        sql += " ORDER BY id DESC LIMIT ?"
-        params.append(int(limit))
-
+        snapshot = getattr(self, "identity_repository", identities).snapshot(group_id)
         with self._connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "scope": row["scope"],
-                "user_id": row["user_id"],
-                "content": row["content"],
-                "tags": self._safe_load_tags(row["tags_json"]),
-                "source": row["source"],
-                "confidence": row["confidence"],
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+            rows = conn.execute("SELECT * FROM memories WHERE group_id=? ORDER BY id DESC", (str(group_id),))
+            result = []
+            for row in rows:
+                item = self._memory_row(row, snapshot)
+                if matches(item, keyword, snapshot, include_owner=True):
+                    result.append(item)
+                    if len(result) >= limit:
+                        break
+            return result
 
-    def search_memories(
-        self,
-        group_id: int | str,
-        *,
-        user_id: int | str | None,
-        query: str,
-        limit: int,
-        scope: str | None = None,
-    ) -> list[dict[str, object]]:
+    def _memory_row(self, row, snapshot):
+        item = project(row, snapshot)
+        item["tags"] = self._safe_load_tags(item.pop("tags_json"))
+        return item
+
+    def search_memories(self, group_id, *, user_id, query, limit, scope=None):
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
+        snapshot = getattr(self, "identity_repository", identities).snapshot(group_id)
         tokens = _build_query_tokens(query)
-        scope_clause: str
-        params: list[object]
-        if scope == "user":
-            scope_clause = "scope = 'user' AND user_id = ?"
-            params = [str(group_id), None if user_id is None else str(user_id)]
-        else:
-            scope_clause = "scope = 'group' OR (scope = 'user' AND user_id = ?)"
-            params = [str(group_id), None if user_id is None else str(user_id)]
-        sql = f"""
-            SELECT id, scope, user_id, content, tags_json, source, confidence, created_at, updated_at
-            FROM memories
-            WHERE group_id = ?
-              AND ({scope_clause})
-        """
-        if tokens:
-            sql += " AND (" + " OR ".join("content LIKE ?" for _ in tokens) + ")"
-            params.extend(f"%{token}%" for token in tokens)
-        sql += " ORDER BY confidence DESC, id DESC LIMIT ?"
-        params.append(int(limit))
-
         with self._connect() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "scope": row["scope"],
-                "user_id": row["user_id"],
-                "content": row["content"],
-                "tags": self._safe_load_tags(row["tags_json"]),
-                "source": row["source"],
-                "confidence": row["confidence"],
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-            for row in rows
-        ]
+            clause = "scope='user' AND user_id=?" if scope == "user" else "scope='group' OR (scope='user' AND user_id=?)"
+            rows = conn.execute(
+                f"SELECT * FROM memories WHERE group_id=? AND ({clause}) ORDER BY confidence DESC, id DESC",
+                (str(group_id), None if user_id is None else str(user_id)),
+            )
+            result = []
+            for row in rows:
+                item = self._memory_row(row, snapshot)
+                if not tokens or matches(item, query, snapshot, True) or any(matches(item, token, snapshot, True) for token in tokens):
+                    result.append(item)
+                    if len(result) >= limit:
+                        break
+            return result
 
-    def delete_memories(self, group_id: int | str, keyword: str) -> int:
+    def delete_memories(self, group_id, keyword):
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
+        snapshot = getattr(self, "identity_repository", identities).snapshot(group_id)
+        candidates = snapshot.candidates(keyword)
+        if len(candidates) > 1:
+            choices = "、".join(f"{snapshot.name(qq)}（{qq}）" for qq in sorted(candidates))
+            raise ValueError(f"成员存在歧义：{choices}。请使用 QQ 或 #编号")
         with self._connect() as conn:
-            cursor = conn.execute(
-                """
-                DELETE FROM memories
-                WHERE group_id = ? AND content LIKE ?
-                """,
-                (str(group_id), f"%{keyword}%"),
-            )
-            return int(cursor.rowcount)
+            if keyword.startswith("#") and keyword[1:].isdigit():
+                return conn.execute("DELETE FROM memories WHERE group_id=? AND id=?", (str(group_id), int(keyword[1:]))).rowcount
+            rows = conn.execute("SELECT * FROM memories WHERE group_id=?", (str(group_id),))
+            ids = [row["id"] for row in rows if matches(dict(row), keyword, snapshot, True)]
+            conn.executemany("DELETE FROM memories WHERE id=?", [(i,) for i in ids])
+            return len(ids)
 
     def prune_memories(self, group_id: int | str, keep_last: int) -> None:
         if self._unavailable:

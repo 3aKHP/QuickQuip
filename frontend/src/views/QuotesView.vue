@@ -39,7 +39,7 @@
             <tr>
               <th class="num">#<UiInfoTip text="群内存续序号，从 1 起按收藏顺序递增；与群内 /quote N 指令查看的编号一致，删除后不重排。" /></th>
               <th>内容</th>
-              <th>发言人<UiInfoTip text="展示名按优先级解析：最新群名片 → 身份资料标准名 → 收藏时快照；与快照不同名时括号标注原名。" /></th>
+              <th>发言人<UiInfoTip text="展示名按优先级解析：身份资料标准名 → 最新群名片 → 收藏时快照；与快照不同名时括号标注原名。" /></th>
               <th>时间<UiInfoTip text="语录被收藏入库的时间，而非原消息的发言时间。" /></th>
               <th class="act">操作</th>
             </tr>
@@ -48,7 +48,8 @@
             <tr v-for="q in entries" :key="q.id">
               <td class="num">{{ q.group_seq }}</td>
               <td class="content-cell">
-                <span class="quote-text">{{ q.content }}</span>
+                <span class="quote-text">{{ q.content_display ?? q.content }}</span>
+                <details><summary>查看原文</summary><pre>{{ q.content }}</pre></details>
               </td>
               <td class="sender">
                 <template v-if="q.sender_changed">

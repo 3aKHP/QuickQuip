@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from quickquip.common.identity_sources import identities, IdentitySnapshot
+from quickquip.common.record_content import migrate, plain, project, render, save_parts, validate, matches
+
 import logging
 import sqlite3
 import time
@@ -16,7 +19,7 @@ _UNKNOWN_SNAPSHOT_NAMES = {"", "未知"}
 
 _QUOTE_ROW_COLUMNS = (
     "id, group_id, quoted_user_id, quoted_sender_name,"
-    " content, saved_by_user_id, saved_at, group_seq"
+    " content, saved_by_user_id, saved_at, group_seq, content_parts_json"
 )
 
 
@@ -29,7 +32,7 @@ def resolve_quote_display_name(
 ) -> tuple[str, bool]:
     """解析语录发言人的展示名，返回 ``(展示名, 是否与收藏时快照不同)``。
 
-    名称来源优先级：stats_tracker 最新群名片 → 身份资料规范名 → 库内快照。
+    名称来源优先级：身份资料规范名 → stats_tracker 最新群名片 → 库内快照。
     快照缺失或为占位名时视为无原名，仅返回解析名。
     """
     snapshot = str(snapshot_name or "").strip()
@@ -37,18 +40,8 @@ def resolve_quote_display_name(
     if not uid:
         return snapshot, False
 
-    resolved = ""
-    if user_names:
-        candidate = str(user_names.get(uid, "") or "").strip()
-        if candidate not in _UNKNOWN_SNAPSHOT_NAMES:
-            resolved = candidate
-    if not resolved and identity_index is not None:
-        candidate = str(identity_index.resolve_user(uid).canonical_name or "").strip()
-        if candidate not in _UNKNOWN_SNAPSHOT_NAMES:
-            resolved = candidate
-    if not resolved:
-        return snapshot, False
-    if snapshot in _UNKNOWN_SNAPSHOT_NAMES or resolved == snapshot:
+    resolved = IdentitySnapshot(identity_index or IdentitySnapshot().index, dict(user_names or {})).name(uid, snapshot if snapshot not in _UNKNOWN_SNAPSHOT_NAMES else "")
+    if snapshot in {*_UNKNOWN_SNAPSHOT_NAMES, uid, f"QQ{uid}"} or resolved == snapshot:
         return resolved, False
     return resolved, True
 
@@ -60,7 +53,9 @@ def attach_sender_display(
     identity_index: IdentityIndex | None = None,
 ) -> list[dict]:
     """逐行附加 ``sender_display``/``sender_changed``，供 Web API 富化使用。"""
+    snapshot = IdentitySnapshot(identity_index or IdentitySnapshot().index, dict(user_names or {}))
     for row in rows:
+        row.update(project(row, snapshot))
         resolved, changed = resolve_quote_display_name(
             row.get("quoted_user_id", ""), row.get("quoted_sender_name", ""),
             user_names=user_names, identity_index=identity_index,
@@ -105,6 +100,7 @@ class GroupQuoteStore:
                     ON quotes(group_id, id);
             """)
             self._migrate()
+            migrate(self._db, "quotes")
             self._db.commit()
         except sqlite3.Error as exc:
             logger.error("GroupQuoteStore 数据库初始化失败 (%s)：%s", self._path, exc)
@@ -142,23 +138,29 @@ class GroupQuoteStore:
         quoted_sender_name: str,
         content: str,
         saved_by_user_id: str | int,
+        *, content_parts: dict | None = None,
     ) -> int:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
+        body = validate(content_parts, 500) if content_parts is not None else plain(content)
+        if content_parts is not None:
+            content = render(body)
         gid = str(group_id)
-        row = self._db.execute(
-            "SELECT COALESCE(MAX(group_seq), 0) + 1 FROM quotes WHERE group_id = ?",
-            (gid,),
-        ).fetchone()
-        next_seq = int(row[0]) if row else 1
-        cur = self._db.execute(
-            "INSERT INTO quotes"
-            " (group_id, quoted_user_id, quoted_sender_name, content, saved_by_user_id, saved_at, group_seq)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (gid, str(quoted_user_id), quoted_sender_name, content,
-             str(saved_by_user_id), int(self._time()), next_seq),
-        )
-        self._db.commit()
+        with self._db:
+            self._db.execute("BEGIN IMMEDIATE")
+            row = self._db.execute(
+                "SELECT COALESCE(MAX(group_seq), 0) + 1 FROM quotes WHERE group_id = ?",
+                (gid,),
+            ).fetchone()
+            next_seq = int(row[0]) if row else 1
+            cur = self._db.execute(
+                "INSERT INTO quotes"
+                " (group_id, quoted_user_id, quoted_sender_name, content, saved_by_user_id, saved_at, group_seq)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (gid, str(quoted_user_id), quoted_sender_name, content,
+                 str(saved_by_user_id), int(self._time()), next_seq),
+            )
+            save_parts(self._db, "quotes", cur.lastrowid, gid, body)
         return cur.lastrowid  # type: ignore[return-value]
 
     def _remember_random(self, group_id: str, quote_id: int) -> None:
@@ -186,7 +188,7 @@ class GroupQuoteStore:
             self._recent_random_ids.pop(group_id, None)
         return {item_id for item_id, _ in recent}
 
-    def random(self, group_id: str | int) -> dict | None:
+    def random(self, group_id: str | int, *, identity_snapshot=None) -> dict | None:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
         group_key = str(group_id)
@@ -195,7 +197,7 @@ class GroupQuoteStore:
         if recent_ids:
             placeholders = ",".join("?" for _ in recent_ids)
             row = self._db.execute(
-                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, content, saved_at"
+                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, content, saved_at, content_parts_json"
                 f" FROM quotes WHERE group_id=? AND id NOT IN ({placeholders})"
                 " ORDER BY RANDOM() LIMIT 1",
                 (group_key, *recent_ids),
@@ -205,7 +207,7 @@ class GroupQuoteStore:
             if recent_ids:
                 self._recent_random_ids.pop(group_key, None)
             row = self._db.execute(
-                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, content, saved_at"
+                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, content, saved_at, content_parts_json"
                 " FROM quotes WHERE group_id=? ORDER BY RANDOM() LIMIT 1",
                 (group_key,),
             ).fetchone()
@@ -214,14 +216,7 @@ class GroupQuoteStore:
             return None
 
         self._remember_random(group_key, int(row[0]))
-        return {
-            "id": row[0],
-            "group_seq": row[1],
-            "quoted_user_id": row[2],
-            "quoted_sender_name": row[3],
-            "content": row[4],
-            "saved_at": row[5],
-        }
+        return project(dict(row), identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id))
 
     def clear_recent_random_history(self, group_id: str | int) -> None:
         self._recent_random_ids.pop(str(group_id), None)
@@ -251,7 +246,7 @@ class GroupQuoteStore:
         ).fetchone()
         return row[0] if row else 0
 
-    def get_by_seq(self, group_id: str | int, seq: int) -> dict | None:
+    def get_by_seq(self, group_id: str | int, seq: int, *, identity_snapshot=None) -> dict | None:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
         row = self._db.execute(
@@ -261,33 +256,31 @@ class GroupQuoteStore:
         ).fetchone()
         if not row:
             return None
-        return dict(row)
+        return project(row, identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id))
 
     def search(
         self, group_id: str | int, keyword: str,
         offset: int = 0, limit: int = 50,
+        identity_snapshot: IdentitySnapshot | None = None,
     ) -> tuple[list[dict], int]:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
-        gid = str(group_id)
-        pattern = f"%{keyword}%"
-        rows = self._db.execute(
-            f"SELECT {_QUOTE_ROW_COLUMNS}"
-            " FROM quotes WHERE group_id=? AND content LIKE ?"
-            " ORDER BY id DESC LIMIT ? OFFSET ?",
-            (gid, pattern, limit, offset),
-        ).fetchall()
-        total_row = self._db.execute(
-            "SELECT COUNT(*) AS c FROM quotes WHERE group_id=? AND content LIKE ?",
-            (gid, pattern),
-        ).fetchone()
-        return [dict(r) for r in rows], int(total_row["c"]) if total_row else 0
+        snapshot = identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id)
+        rows = self._db.execute(f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes WHERE group_id=? ORDER BY id DESC", (str(group_id),))
+        result, total = [], 0
+        for row in rows:
+            if matches(dict(row), keyword, snapshot):
+                if offset <= total < offset + limit:
+                    result.append(project(row, snapshot))
+                total += 1
+        return result, total
 
     def search_by_sender(
         self, group_id: str | int, *,
         user_ids: Sequence[str | int] = (),
         name_pattern: str = "",
         offset: int = 0, limit: int = 50,
+        identity_snapshot: IdentitySnapshot | None = None,
     ) -> tuple[list[dict], int]:
         """按发言人检索：精确 QQ 号匹配与名称模糊匹配可组合，均为空时返回空。"""
         if self._unavailable:
@@ -317,7 +310,8 @@ class GroupQuoteStore:
         total_row = self._db.execute(
             f"SELECT COUNT(*) AS c FROM quotes{where}", params,
         ).fetchone()
-        return [dict(r) for r in rows], int(total_row["c"]) if total_row else 0
+        snapshot = identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id)
+        return [project(r, snapshot) for r in rows], int(total_row["c"]) if total_row else 0
 
     def delete(self, quote_id: int) -> bool:
         if self._unavailable:
@@ -332,12 +326,13 @@ class GroupQuoteStore:
     def list_quotes(
         self, group_id: str | int,
         offset: int = 0, limit: int = 50, keyword: str = "",
+        *, identity_snapshot: IdentitySnapshot | None = None,
     ) -> tuple[list[dict], int]:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
         gid = str(group_id)
         if keyword:
-            return self.search(gid, keyword, offset, limit)
+            return self.search(gid, keyword, offset, limit, identity_snapshot)
         rows = self._db.execute(
             f"SELECT {_QUOTE_ROW_COLUMNS}"
             " FROM quotes WHERE group_id=?"
@@ -348,7 +343,8 @@ class GroupQuoteStore:
             "SELECT COUNT(*) AS c FROM quotes WHERE group_id=?",
             (gid,),
         ).fetchone()
-        return [dict(r) for r in rows], int(total_row["c"]) if total_row else 0
+        snapshot = identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id)
+        return [project(r, snapshot) for r in rows], int(total_row["c"]) if total_row else 0
 
     def groups(self) -> list[dict]:
         if self._unavailable:
