@@ -113,6 +113,26 @@ class IdentityRepository:
             return IdentitySnapshot(index, names)
 
 
+def _is_placeholder_entry(entry: dict) -> bool:
+    """模板占位条目：标准名与 QQ 号均未填写，按不存在处理。"""
+    if str(entry.get("canonical_name") or "").strip():
+        return False
+    ids = entry.get("qq_ids")
+    if isinstance(ids, str):
+        ids = [ids]
+    if any(str(q).strip() for q in (ids or [])):
+        return False
+    return not str(entry.get("qq_id") or "").strip()
+
+
+def _declares_substantive_entries(data) -> bool:
+    for section in ("people", "special_accounts"):
+        for entry in (data or {}).get(section, []) or []:
+            if not _is_placeholder_entry(entry):
+                return True
+    return False
+
+
 def _load_index(path):
     # Validate the document before the compatibility parser; incomplete writes must not replace a valid index.
     import yaml
@@ -125,7 +145,7 @@ def _load_index(path):
         if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
             raise ValueError("identity entries must be mappings in a list")
     index = IdentityIndex.from_text(raw, path)
-    if any((data or {}).get(section) for section in ("people", "special_accounts")) and not index.entries:
+    if _declares_substantive_entries(data) and not index.entries:
         raise ValueError("identity document contains no valid entries")
     return index
 
