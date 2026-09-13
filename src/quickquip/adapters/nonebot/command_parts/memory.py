@@ -15,7 +15,7 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
     async def _(event, bot=None):
         if not _allow_scope_management(event):
             await remember_cmd.finish(MessageSegment.text("仅管理员可执行此操作"))
-        body, snapshot = await prepare_body(event.get_message(), _chat_id(event) if not _is_private_chat(event) else "", bot, "remember")
+        body, _ = await prepare_body(event.get_message(), _chat_id(event) if not _is_private_chat(event) else "", bot, "remember")
         content = render(body).strip()
         if not content:
             await remember_cmd.finish(MessageSegment.text("用法：/remember <要保存的记忆>"))
@@ -88,7 +88,7 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
             await tell_cmd.finish(MessageSegment.text("用法：/tell @某人 <内容>"))
         if str(to_user_id) == str(event.user_id):
             await tell_cmd.finish(MessageSegment.text("不能给自己留言"))
-        body, snapshot = await prepare_body(segments, event.group_id, bot)
+        body, _ = await prepare_body(segments, event.group_id, bot)
         content = render(body).strip()
         if not content:
             await tell_cmd.finish(MessageSegment.text("留言内容不能为空"))

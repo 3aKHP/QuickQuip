@@ -33,7 +33,9 @@ class IdentitySnapshot:
         query = query.strip().removeprefix("@")
         if query.startswith("QQ") and query[2:].isascii() and query[2:].isdigit():
             query = query[2:]
-        result = {query} if query.isascii() and query.isdigit() else set()
+        if query.isascii() and query.isdigit():
+            return {query}
+        result = set()
         for entry in self.index.entries:
             if query in [entry.canonical_name, *entry.aliases, *entry.qq_ids]:
                 result.update(q for q in entry.qq_ids if self.index.by_qq.get(q) is entry)
@@ -41,15 +43,34 @@ class IdentitySnapshot:
         return result
 
 
+    def ambiguous(self, candidates: set[str]) -> bool:
+        """Distinct entries are distinct people; one entry may own multiple QQs."""
+        people = set()
+        for qq in candidates:
+            entry = self.index.by_qq.get(qq)
+            people.add(("entry", id(entry)) if entry is not None else ("qq", qq))
+        return len(people) > 1
+
+
 class IdentityRepository:
     def __init__(self, path=LLM_IDENTITIES_YAML_PATH, stats_path=STATS_JSON_PATH):
         self.path, self.stats_path = Path(path), Path(stats_path)
         self._files = OrderedDict()
+        self._merged = OrderedDict()
+        self._base_override: IdentityIndex | None = None
         self._lock = threading.RLock()
         self.names_provider = None
 
+    def set_base_index(self, index: IdentityIndex):
+        """Compatibility replacement, owned by the repository until explicit reload."""
+        with self._lock:
+            self._base_override = index
+            self._merged.clear()
+
     def invalidate(self):
         with self._lock:
+            self._base_override = None
+            self._merged.clear()
             for key, (_, stamp, value) in list(self._files.items()):
                 self._files[key] = (float("-inf"), object(), value)
 
@@ -74,10 +95,17 @@ class IdentityRepository:
     def snapshot(self, scope) -> IdentitySnapshot:
         scope = str(scope)
         with self._lock:
-            index = self._read(self.path, _load_index, IdentityIndex())
+            index = self._base_override if self._base_override is not None else self._read(self.path, _load_index, IdentityIndex())
             if scope.isascii() and scope.isdigit():
                 group = self._read(self.path.parent / scope / "identities.yaml", _load_index, IdentityIndex())
-                index = index.merge(group)
+                cached = self._merged.get(scope)
+                if cached is None or cached[0] is not index or cached[1] is not group:
+                    cached = (index, group, index.merge(group))
+                    self._merged[scope] = cached
+                self._merged.move_to_end(scope)
+                if len(self._merged) > 512:
+                    self._merged.popitem(last=False)
+                index = cached[2]
             stats = self._read(self.stats_path, _load_stats, {})
             names = dict(stats.get(scope, {}).get("user_names", {}))
             if self.names_provider and not scope.startswith("private:"):

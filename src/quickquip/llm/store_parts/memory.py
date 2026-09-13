@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 
-from quickquip.common.identity_sources import identities
-from quickquip.common.record_content import matches, plain, project, render, save_parts, validate
+from quickquip.common.record_content import plain, project, render, validate
+from quickquip.common.record_storage import save_parts
+from quickquip.common.record_search import RecordQuery
 
 from quickquip.llm.store_parts._base import _build_query_tokens, _utc_now
 
@@ -60,14 +61,19 @@ class MemoryStoreMixin:
     ) -> list[dict[str, object]]:
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
-        snapshot = getattr(self, "identity_repository", identities).snapshot(group_id)
+        snapshot = self.identity_repository.snapshot(group_id)
+        matcher = RecordQuery(keyword, snapshot)
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM memories WHERE group_id=? ORDER BY id DESC", (str(group_id),))
+            sql = "SELECT * FROM memories WHERE group_id=? ORDER BY id DESC"
+            params = (str(group_id),)
+            if not keyword:
+                sql += " LIMIT ?"
+                params += (int(limit),)
+            rows = conn.execute(sql, params)
             result = []
             for row in rows:
-                item = self._memory_row(row, snapshot)
-                if matches(item, keyword, snapshot, include_owner=True):
-                    result.append(item)
+                if matcher.matches(dict(row), include_owner=True):
+                    result.append(self._memory_row(row, snapshot))
                     if len(result) >= limit:
                         break
             return result
@@ -80,8 +86,9 @@ class MemoryStoreMixin:
     def search_memories(self, group_id, *, user_id, query, limit, scope=None):
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
-        snapshot = getattr(self, "identity_repository", identities).snapshot(group_id)
+        snapshot = self.identity_repository.snapshot(group_id)
         tokens = _build_query_tokens(query)
+        matchers = [RecordQuery(value, snapshot) for value in dict.fromkeys([query, *tokens])]
         with self._connect() as conn:
             clause = "scope='user' AND user_id=?" if scope == "user" else "scope='group' OR (scope='user' AND user_id=?)"
             rows = conn.execute(
@@ -90,9 +97,8 @@ class MemoryStoreMixin:
             )
             result = []
             for row in rows:
-                item = self._memory_row(row, snapshot)
-                if not tokens or matches(item, query, snapshot, True) or any(matches(item, token, snapshot, True) for token in tokens):
-                    result.append(item)
+                if not tokens or any(matcher.matches(dict(row), True) for matcher in matchers):
+                    result.append(self._memory_row(row, snapshot))
                     if len(result) >= limit:
                         break
             return result
@@ -100,16 +106,17 @@ class MemoryStoreMixin:
     def delete_memories(self, group_id, keyword):
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
-        snapshot = getattr(self, "identity_repository", identities).snapshot(group_id)
+        snapshot = self.identity_repository.snapshot(group_id)
         candidates = snapshot.candidates(keyword)
-        if len(candidates) > 1:
+        if snapshot.ambiguous(candidates):
             choices = "、".join(f"{snapshot.name(qq)}（{qq}）" for qq in sorted(candidates))
             raise ValueError(f"成员存在歧义：{choices}。请使用 QQ 或 #编号")
         with self._connect() as conn:
             if keyword.startswith("#") and keyword[1:].isdigit():
                 return conn.execute("DELETE FROM memories WHERE group_id=? AND id=?", (str(group_id), int(keyword[1:]))).rowcount
+            matcher = RecordQuery(keyword, snapshot)
             rows = conn.execute("SELECT * FROM memories WHERE group_id=?", (str(group_id),))
-            ids = [row["id"] for row in rows if matches(dict(row), keyword, snapshot, True)]
+            ids = [row["id"] for row in rows if matcher.matches(dict(row), True)]
             conn.executemany("DELETE FROM memories WHERE id=?", [(i,) for i in ids])
             return len(ids)
 

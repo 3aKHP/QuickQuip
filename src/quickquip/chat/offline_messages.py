@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from quickquip.common.identity_sources import identities
-from quickquip.common.record_content import decode, migrate, plain, render, save_parts, validate
+from quickquip.common.record_content import decode, plain, render, validate
+from quickquip.common.record_storage import migrate, save_parts
 
 import logging
 import sqlite3

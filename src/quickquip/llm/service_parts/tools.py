@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.record_content import display
+
 import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -324,10 +326,9 @@ class ToolMixin(McpLifecycleMixin):
 
     def bind_group_stats_tracker(self, tracker: "GroupStatsTracker | None") -> None:
         self.stats_tracker = tracker
-        if hasattr(self, "_identity_repository"):
-            self._identity_repository.names_provider = (
-                (lambda gid: getattr(tracker.get_stats(gid), "user_names", {})) if tracker else None
-            )
+        self._identity_repository.names_provider = (
+            (lambda gid: getattr(tracker.get_stats(gid), "user_names", {})) if tracker else None
+        )
 
     def bind_rule_switch(self, rule_switch: "GroupRuleSwitch | None") -> None:
         self.rule_switch = rule_switch
@@ -513,7 +514,7 @@ class ToolMixin(McpLifecycleMixin):
 
         lines = [f"{self._memory_label(context.chat_type)}："]
         for item in items[:10]:
-            lines.append(f"- #{item['id']} {('[' + str(item['user_display']) + '] ') if item.get('user_display') else ''}{item.get('content_display', item['content'])}")
+            lines.append(f"- #{item['id']} {display(item)}")
         return "\n".join(lines)
 
     async def _tool_search_web(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:

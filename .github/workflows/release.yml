@@ -82,7 +82,7 @@ jobs:
           Copy-Item -Recurse config staging\
           Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
           New-Item -ItemType Directory -Force staging\scripts | Out-Null
-          Copy-Item scripts\backfill_chat_archive.py staging\scripts\
+          Copy-Item scripts\backfill_chat_archive.py, scripts\backfill_record_identities.py staging\scripts\
           New-Item -ItemType Directory -Force staging\data | Out-Null
 
       - name: Verify lazy package template manifest
@@ -91,7 +91,7 @@ jobs:
           # start.bat 首启依赖的模板清单：copy_if_missing 对缺失源静默跳过，
           # 这里在打包前钉住"模板都在 staging 里"（对齐 Docker smoke 的 test -f 思路）。
           $expected = @(
-            "staging\start.bat", "staging\.env.example", "staging\scripts\backfill_chat_archive.py",
+            "staging\start.bat", "staging\.env.example", "staging\scripts\backfill_chat_archive.py", "staging\scripts\backfill_record_identities.py",
             "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
             "staging\config\generation.toml.example", "staging\config\games.toml.example",
             "staging\config\awakening.toml.example", "staging\config\sensitive_words.toml.example",
@@ -132,6 +132,8 @@ jobs:
           Push-Location staging
           try {
             .\python\python.exe -c "import quickquip, plugins, web_api; print('app import ok')"
+            .\python\python.exe scripts\backfill_record_identities.py --help
+            if ($LASTEXITCODE -ne 0) { throw "Record identities script startup smoke test failed" }
             New-Item -ItemType Directory -Force data\daily_msgs\10001 | Out-Null
             '{"sender":"smoke","text":"backfill ok","ts":1788998400.0,"user_id":"1"}' | Set-Content -Encoding utf8 data\daily_msgs\10001\2026-09-10.jsonl
             .\python\python.exe scripts\backfill_chat_archive.py --dry-run

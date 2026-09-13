@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from quickquip.common.identity_sources import identities, IdentitySnapshot
-from quickquip.common.record_content import migrate, plain, project, render, save_parts, validate, matches
+from quickquip.common.identity_sources import identities, IdentitySnapshot, IdentityRepository
+from quickquip.common.identity import IdentityIndex
+from quickquip.common.record_content import plain, project, render, validate
+from quickquip.common.record_storage import migrate, save_parts
+from quickquip.common.record_search import RecordQuery
+
+from contextlib import closing
 
 import logging
 import sqlite3
@@ -29,6 +34,7 @@ def resolve_quote_display_name(
     *,
     user_names: Mapping[str, str] | None = None,
     identity_index: IdentityIndex | None = None,
+    identity_snapshot: IdentitySnapshot | None = None,
 ) -> tuple[str, bool]:
     """解析语录发言人的展示名，返回 ``(展示名, 是否与收藏时快照不同)``。
 
@@ -40,7 +46,8 @@ def resolve_quote_display_name(
     if not uid:
         return snapshot, False
 
-    resolved = IdentitySnapshot(identity_index or IdentitySnapshot().index, dict(user_names or {})).name(uid, snapshot if snapshot not in _UNKNOWN_SNAPSHOT_NAMES else "")
+    identities_for_row = identity_snapshot or IdentitySnapshot(identity_index or IdentityIndex(), dict(user_names or {}))
+    resolved = identities_for_row.name(uid, snapshot if snapshot not in _UNKNOWN_SNAPSHOT_NAMES else "")
     if snapshot in {*_UNKNOWN_SNAPSHOT_NAMES, uid, f"QQ{uid}"} or resolved == snapshot:
         return resolved, False
     return resolved, True
@@ -53,12 +60,12 @@ def attach_sender_display(
     identity_index: IdentityIndex | None = None,
 ) -> list[dict]:
     """逐行附加 ``sender_display``/``sender_changed``，供 Web API 富化使用。"""
-    snapshot = IdentitySnapshot(identity_index or IdentitySnapshot().index, dict(user_names or {}))
+    snapshot = IdentitySnapshot(identity_index or IdentityIndex(), dict(user_names or {}))
     for row in rows:
         row.update(project(row, snapshot))
         resolved, changed = resolve_quote_display_name(
             row.get("quoted_user_id", ""), row.get("quoted_sender_name", ""),
-            user_names=user_names, identity_index=identity_index,
+            identity_snapshot=snapshot,
         )
         row["sender_display"] = resolved
         row["sender_changed"] = changed
@@ -72,7 +79,9 @@ class GroupQuoteStore:
         *,
         recent_random_window_seconds: int = 600,
         time_func: Callable[[], float] = time.time,
+        identity_repository: IdentityRepository = identities,
     ):
+        self.identity_repository = identity_repository
         self._db: sqlite3.Connection | None = None
         self._closed = False
         self._path = Path(db_path)
@@ -105,6 +114,9 @@ class GroupQuoteStore:
         except sqlite3.Error as exc:
             logger.error("GroupQuoteStore 数据库初始化失败 (%s)：%s", self._path, exc)
             self._unavailable = True
+
+    def _snapshot(self, group_id, supplied=None) -> IdentitySnapshot:
+        return supplied if supplied is not None else self.identity_repository.snapshot(group_id)
 
     def _migrate(self) -> None:
         try:
@@ -216,7 +228,7 @@ class GroupQuoteStore:
             return None
 
         self._remember_random(group_key, int(row[0]))
-        return project(dict(row), identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id))
+        return project(dict(row), self._snapshot(group_id, identity_snapshot))
 
     def clear_recent_random_history(self, group_id: str | int) -> None:
         self._recent_random_ids.pop(str(group_id), None)
@@ -256,7 +268,7 @@ class GroupQuoteStore:
         ).fetchone()
         if not row:
             return None
-        return project(row, identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id))
+        return project(row, self._snapshot(group_id, identity_snapshot))
 
     def search(
         self, group_id: str | int, keyword: str,
@@ -265,14 +277,18 @@ class GroupQuoteStore:
     ) -> tuple[list[dict], int]:
         if self._unavailable:
             raise RuntimeError("群语录 数据库不可用")
-        snapshot = identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id)
-        rows = self._db.execute(f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes WHERE group_id=? ORDER BY id DESC", (str(group_id),))
+        snapshot = self._snapshot(group_id, identity_snapshot)
+        matcher = RecordQuery(keyword, snapshot)
         result, total = [], 0
-        for row in rows:
-            if matches(dict(row), keyword, snapshot):
-                if offset <= total < offset + limit:
-                    result.append(project(row, snapshot))
-                total += 1
+        # Isolate a long read from writes on the bot's event-loop connection.
+        with closing(sqlite3.connect(self._path)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes WHERE group_id=? ORDER BY id DESC", (str(group_id),))
+            for row in rows:
+                if matcher.matches(dict(row)):
+                    if offset <= total < offset + limit:
+                        result.append(project(row, snapshot))
+                    total += 1
         return result, total
 
     def search_by_sender(
@@ -310,7 +326,7 @@ class GroupQuoteStore:
         total_row = self._db.execute(
             f"SELECT COUNT(*) AS c FROM quotes{where}", params,
         ).fetchone()
-        snapshot = identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id)
+        snapshot = self._snapshot(group_id, identity_snapshot)
         return [project(r, snapshot) for r in rows], int(total_row["c"]) if total_row else 0
 
     def delete(self, quote_id: int) -> bool:
@@ -343,7 +359,7 @@ class GroupQuoteStore:
             "SELECT COUNT(*) AS c FROM quotes WHERE group_id=?",
             (gid,),
         ).fetchone()
-        snapshot = identity_snapshot or getattr(self, "identity_repository", identities).snapshot(group_id)
+        snapshot = self._snapshot(group_id, identity_snapshot)
         return [project(r, snapshot) for r in rows], int(total_row["c"]) if total_row else 0
 
     def groups(self) -> list[dict]:

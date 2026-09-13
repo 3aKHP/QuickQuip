@@ -6,6 +6,8 @@ per-scope turn counter and success/failure tallies.
 
 The mixin depends on the host class providing ``self.config``,
 ``self.store`` and ``self.quick_judge`` (all supplied by ``LLMService``).
+The host supplies ``self._identity_repository`` for current identity snapshots.
+
 State is initialised via :meth:`AutoMemoryMixin._init_auto_memory`, which
 the host class must call from its own ``__init__``.
 
@@ -15,6 +17,8 @@ and ``_init_auto_memory()`` must be called before any health report is
 built.
 """
 from __future__ import annotations
+
+from quickquip.common.record_content import legacy, render
 
 import logging
 from collections import OrderedDict
@@ -153,14 +157,7 @@ class AutoMemoryMixin:
                 scope_key,
                 limit=_AUTO_MEMORY_CONTEXT_TURNS * 2,
             )
-            from quickquip.common.identity_sources import IdentitySnapshot
-            from quickquip.common.record_content import legacy, render
-            repository = getattr(self, "_identity_repository", None)
-            if repository is not None:
-                snapshot = repository.snapshot(scope_key)
-            else:
-                index = self.group_identities(str(scope_key)) if hasattr(self, "group_identities") else None
-                snapshot = IdentitySnapshot(index) if index is not None else IdentitySnapshot()
+            snapshot = self._identity_repository.snapshot(scope_key)
             context_parts: list[str] = []
             seen = 0
             for msg in reversed(history):

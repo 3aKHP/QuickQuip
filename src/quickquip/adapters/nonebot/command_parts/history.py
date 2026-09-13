@@ -14,51 +14,52 @@ from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
 from quickquip.adapters.nonebot.record_content import prepare_body, reply_source
 from quickquip.app.identities import identities, IdentitySnapshot
-from quickquip.common.record_content import decode, legacy, render, matches
+from quickquip.common.record_content import decode, legacy, render
+from quickquip.common.record_search import RecordQuery
+from quickquip.common.identity import IdentityIndex
 
 
 logger = logging.getLogger(__name__)
 
 
+def _snapshot_from_sources(sources) -> IdentitySnapshot:
+    if isinstance(sources, IdentitySnapshot):
+        return sources
+    names, index = sources
+    return IdentitySnapshot(index or IdentityIndex(), dict(names or {}))
+
+
 def _quote_display_name(group_id, quoted_user_id: str, snapshot_name: str, sources=None) -> str:
-    user_names, identity_index = sources or get_sender_identity_sources(str(group_id))
-    resolved, changed = resolve_quote_display_name(
-        quoted_user_id, snapshot_name,
-        user_names=user_names, identity_index=identity_index,
-    )
-    if identity_index is not None and hasattr(identity_index, "entries"):
-        snapshot = IdentitySnapshot(identity_index, dict(user_names or {}))
-        if len(snapshot.candidates(resolved)) > 1:
-            resolved = f"{resolved}（QQ {quoted_user_id}）"
+    snapshot = _snapshot_from_sources(sources or get_sender_identity_sources(str(group_id)))
+    resolved, changed = resolve_quote_display_name(quoted_user_id, snapshot_name, identity_snapshot=snapshot)
+    if snapshot.ambiguous(snapshot.candidates(resolved)):
+        resolved = f"{resolved}（QQ {quoted_user_id}）"
     if changed:
         return f"{resolved} (原: {snapshot_name.strip()})"
     return resolved or "未知"
 
 
 def _format_quote_rows(rows, group_id, header: str, sources=None) -> str:
-    sources = sources or get_sender_identity_sources(str(group_id))
-    snapshot = IdentitySnapshot(sources[1] or IdentitySnapshot().index, sources[0] or {})
+    snapshot = _snapshot_from_sources(sources or get_sender_identity_sources(str(group_id)))
     lines = [header]
-    for r in rows:
-        content = render(decode(r["content"], r.get("content_parts_json")), snapshot)
+    for row in rows:
+        content = render(decode(row["content"], row.get("content_parts_json")), snapshot)
         preview = content[:40] + ("…" if len(content) > 40 else "")
-        display = _quote_display_name(group_id, r.get("quoted_user_id", ""), r["quoted_sender_name"], sources)
-        lines.append(f"#{r['group_seq']} 「{preview}」—— {display}")
+        name = _quote_display_name(group_id, row.get("quoted_user_id", ""), row["quoted_sender_name"], snapshot)
+        lines.append(f"#{row['group_seq']} 「{preview}」—— {name}")
     return "\n".join(lines)
 
 
 def _resolve_sender_candidates(group_id, query: str, sources=None) -> list[str]:
-    """把名字反查成候选 QQ 号列表（stats 最新名片精确匹配 + 身份资料别名）。"""
-    user_names, identity_index = sources or get_sender_identity_sources(str(group_id))
-    candidates: list[str] = []
-    if user_names:
-        candidates.extend(uid for uid, name in user_names.items() if name == query)
-    if identity_index is not None:
-        entries = getattr(identity_index, "entries", list(identity_index.by_alias.values()))
-        for entry in entries:
-            if query == getattr(entry, "canonical_name", "") or query in getattr(entry, "aliases", []) or identity_index.by_alias.get(query) is entry:
-                candidates.extend(str(qq) for qq in entry.qq_ids)
-    return list(dict.fromkeys(candidates))
+    snapshot = _snapshot_from_sources(sources or get_sender_identity_sources(str(group_id)))
+    return sorted(snapshot.candidates(query))
+
+
+def _find_hits(messages, keyword, snapshot):
+    matcher = RecordQuery(keyword, snapshot)
+    return [message for message in messages if matcher.matches(
+        {"content": message.get("text", ""), "user_id": message.get("user_id")}, True,
+    )]
 
 
 def register_history_commands(on_command, Message, MessageSegment) -> None:
@@ -185,7 +186,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             chat_archive.read_window, group_id, now - 30 * 86400, now
         )
         snapshot = identities.snapshot(group_id)
-        hits = [m for m in messages if matches({"content": m.get("text", ""), "user_id": m.get("user_id")}, keyword, snapshot, True)]
+        hits = await asyncio.to_thread(_find_hits, messages, keyword, snapshot)
         if not hits:
             await find_cmd.finish(MessageSegment.text(f"没有找到包含「{keyword}」的消息（最近 30 天）"))
         shown = hits[-5:]
@@ -207,7 +208,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             await quote_cmd.finish(MessageSegment.text("该命令仅支持群聊"))
         group_id = event.group_id
         sources = get_sender_identity_sources(str(group_id))
-        snapshot = IdentitySnapshot(sources[1] or IdentitySnapshot().index, sources[0] or {})
+        snapshot = _snapshot_from_sources(sources)
         args = _strip_command_name(str(event.get_message()).strip(), "quote").strip()
         reply = getattr(event, "reply", None)
 
@@ -236,7 +237,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         search_match = re.match(r"^(?:search|s)\s+(.+)$", args, re.IGNORECASE)
         if search_match:
             keyword = search_match.group(1).strip()
-            rows, total = group_quote_store.search(group_id, keyword, limit=10, identity_snapshot=snapshot)
+            rows, total = await asyncio.to_thread(group_quote_store.search, group_id, keyword, limit=10, identity_snapshot=snapshot)
             if not rows:
                 await quote_cmd.finish(MessageSegment.text(f"未找到包含「{keyword}」的语录"))
             await quote_cmd.finish(MessageSegment.text(_format_quote_rows(rows, group_id, f"🔍 「{keyword}」（共 {total} 条）：", sources)))
@@ -268,24 +269,27 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                 "引用消息 + /quote — 收藏语录")
             )
         quoted_user = str(getattr(reply, "user_id", "") or "")
-        body, snapshot = await prepare_body(reply_source(reply), group_id, bot, extra_ids=[quoted_user])
+        body, prepared_snapshot = await prepare_body(reply_source(reply), group_id, bot, extra_ids=[quoted_user])
         if not any(p["type"] == "text" and p["text"].strip() or p["type"] in {"member", "all"} for p in body["parts"]):
             await quote_cmd.finish(MessageSegment.text("引用的消息没有文字内容，无法收藏"))
-        content = render(body).strip()
+        content = render(body)
         sender = getattr(reply, "sender", None)
         sender_name = (sender.get("card") or sender.get("nickname")) if isinstance(sender, dict) else (getattr(sender, "card", "") or getattr(sender, "nickname", ""))
-        sender_name = sender_name or getattr(reply, "nickname", "") or snapshot.names.get(quoted_user, "")
+        sender_name = sender_name or getattr(reply, "nickname", "") or prepared_snapshot.names.get(quoted_user, "")
         if len(content) > 500:
             await quote_cmd.finish(MessageSegment.text("内容过长（限 500 字），无法收藏"))
-        group_quote_store.add(
-            group_id=group_id,
-            quoted_user_id=quoted_user,
-            quoted_sender_name=sender_name or "未知",
-            content=content,
-            saved_by_user_id=event.user_id,
-            content_parts=body,
-        )
+        try:
+            group_quote_store.add(
+                group_id=group_id,
+                quoted_user_id=quoted_user,
+                quoted_sender_name=sender_name or "未知",
+                content=content,
+                saved_by_user_id=event.user_id,
+                content_parts=body,
+            )
+        except ValueError as exc:
+            await quote_cmd.finish(MessageSegment.text(str(exc)))
         total = group_quote_store.count(group_id)
-        content = render(body, snapshot)
+        content = render(body, prepared_snapshot)
         preview = content[:30] + ("…" if len(content) > 30 else "")
         await quote_cmd.finish(MessageSegment.text(f"已收藏「{preview}」（本群共 {total} 条语录）"))

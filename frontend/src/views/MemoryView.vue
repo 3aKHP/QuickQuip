@@ -40,9 +40,10 @@
 import { onMounted, ref } from 'vue'
 import RecordContentEditor from '../components/RecordContentEditor.vue'
 import { emptyRecordBody as emptyBody, type RecordBody } from '../api/recordContent'
-const editParts = ref<RecordBody>(emptyBody()); const newParts = ref<RecordBody>(emptyBody())
 import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchKnownGroups } from '../api/groups'; import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory'; import { toast } from '../toast'
+
+const editParts = ref<RecordBody>(emptyBody()); const newParts = ref<RecordBody>(emptyBody())
 
 const groups = ref<string[]>([]); const groupId = ref(''); const keyword = ref(''); const memories = ref<any[]>([]); const loading = ref(false); const error = ref<string | null>(null); const editing = ref<number | null>(null); const editTags = ref(''); const editConf = ref(1.0); const newScope = ref('group'); const newUserId = ref(''); const newTags = ref('')
 

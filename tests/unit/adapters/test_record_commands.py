@@ -100,3 +100,37 @@ async def test_quote_pure_media_rejected(tmp_path, monkeypatch, snapshot):
         await matcher.handlers[0](event)
     assert store.count(10001) == 0
     store.close()
+
+
+async def test_quote_trailing_whitespace_limit_returns_feedback(tmp_path, monkeypatch, snapshot):
+    store = GroupQuoteStore(tmp_path / "quotes.db")
+    monkeypatch.setattr(history, "group_quote_store", store)
+    event = SimpleNamespace(group_id=10001, user_id=99999, message_type="group", reply=SimpleNamespace(user_id="12345", message="字" * 500 + " " * 5), get_message=lambda: Message("/quote"))
+    matcher = register(history.register_history_commands)["quote"]
+    with pytest.raises(Finished):
+        await matcher.handlers[0](event)
+    assert "内容过长" in matcher.sent[-1].data["text"]
+    assert store.count(10001) == 0
+    store.close()
+
+
+async def test_find_filters_in_worker_and_resolves_author(monkeypatch, snapshot):
+    import threading
+    main_thread = threading.get_ident()
+    worker_threads = []
+    original = history._find_hits
+    def filter_in_thread(*args):
+        worker_threads.append(threading.get_ident())
+        return original(*args)
+    monkeypatch.setattr(history, "_find_hits", filter_in_thread)
+    monkeypatch.setattr(history, "chat_archive", SimpleNamespace(read_window=lambda *args: [
+        {"user_id": "12345", "sender": "旧名", "text": "普通发言", "ts": 1},
+        {"user_id": "23456", "sender": "某人", "text": "[CQ:at,qq=12345]", "ts": 2},
+    ]))
+    event = SimpleNamespace(group_id=10001, user_id=99999, message_type="group", get_message=lambda: Message("/find 标准名"))
+    matcher = register(history.register_history_commands)["find"]
+    with pytest.raises(Finished):
+        await matcher.handlers[0](event)
+    assert worker_threads and worker_threads[0] != main_thread
+    text = matcher.sent[-1].data["text"]
+    assert "找到 2 条" in text and "标准名: 普通发言" in text and "@标准名" in text

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.record_content import display
+
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -365,7 +367,7 @@ def build_turn_envelope(
         else:
             lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
         for index, memory in enumerate(memories, 1):
-            lines.append(f"{index}. {('[' + str(memory['user_display']) + '] ') if memory.get('user_display') else ''}{memory.get('content_display', memory['content'])}")
+            lines.append(f"{index}. {display(memory)}")
 
     vocab_matches = vocab.find_matches(prompt)
     if vocab_matches:

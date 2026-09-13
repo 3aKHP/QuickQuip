@@ -6,97 +6,124 @@ import argparse
 import json
 import sqlite3
 import sys
+from contextlib import closing
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 
-from quickquip.common.paths import LLM_DB_PATH, QUOTES_DB_PATH, OFFLINE_MESSAGES_DB_PATH
-from quickquip.common.record_content import legacy, migrate, references, render, save_parts, validate
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SOURCE_ROOT if SOURCE_ROOT.is_dir() else PROJECT_ROOT))
+
+from quickquip.common.identity_sources import identities  # noqa: E402
+from quickquip.common.paths import LLM_DB_PATH, QUOTES_DB_PATH, OFFLINE_MESSAGES_DB_PATH  # noqa: E402
+from quickquip.common.record_content import legacy, references, render, validate  # noqa: E402
+from quickquip.common.record_storage import migrate, save_parts  # noqa: E402
 
 DATABASES = {"memories": LLM_DB_PATH, "quotes": QUOTES_DB_PATH, "offline_messages": OFFLINE_MESSAGES_DB_PATH}
 
 
-def backfill(path, table, *, apply=False, group=None, record_id=None, batch_size=200, before_write=None, preview_limit=0):
+class ApplyResult(Enum):
+    WRITTEN = "written"
+    INDEX_REPAIRED = "index_repaired"
+    CONCURRENT_SKIPPED = "concurrent_skipped"
+    UNCHANGED = "unchanged"
+
+
+def _iter_rows(reader, table, group, record_id, batch_size):
+    last_id = 0
+    while True:
+        conditions, params = ["id > ?"], [last_id]
+        if group is not None:
+            conditions.append("group_id=?")
+            params.append(str(group))
+        if record_id is not None:
+            conditions.append("id=?")
+            params.append(record_id)
+        rows = reader.execute(f"SELECT * FROM {table} WHERE {' AND '.join(conditions)} ORDER BY id LIMIT ?", (*params, batch_size)).fetchall()
+        if not rows:
+            return
+        yield from rows
+        last_id = rows[-1]["id"]
+
+
+def _prepare_writer(reader, path, table, report):
+    backup = path.with_name(path.name + ".identities-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".bak")
+    with closing(sqlite3.connect(backup)) as target:
+        reader.backup(target)
+    if report:
+        report({"backup": str(backup)})
+    writer = sqlite3.connect(path)
+    try:
+        with writer:
+            migrate(writer, table)
+    except Exception:
+        writer.close()
+        raise
+    return writer
+
+
+def _preview_row(row, body):
+    return {"id": row["id"], "group": row["group_id"], "content": row["content"],
+            "content_display": render(body, identities.snapshot(row["group_id"]))}
+
+
+def _apply_row(writer, table, row, encoded, body):
+    with writer:
+        writer.execute("BEGIN IMMEDIATE")
+        current = writer.execute(f"SELECT content, content_parts_json FROM {table} WHERE id=?", (row["id"],)).fetchone()
+        if current is None or current[0] != row["content"] or current[1] != encoded:
+            return ApplyResult.CONCURRENT_SKIPPED
+        if encoded is None:
+            save_parts(writer, table, row["id"], row["group_id"], body)
+            return ApplyResult.WRITTEN
+        existing = {r[0] for r in writer.execute(f"SELECT qq FROM {table}_member_refs WHERE record_id=?", (row["id"],))}
+        missing = references(body) - existing
+        writer.executemany(f"INSERT INTO {table}_member_refs(group_id, record_id, qq) VALUES (?, ?, ?)", [(row["group_id"], row["id"], qq) for qq in missing])
+        return ApplyResult.INDEX_REPAIRED if missing else ApplyResult.UNCHANGED
+
+
+def backfill(path, table, *, apply=False, group=None, record_id=None, batch_size=200, before_write=None, preview_limit=0, report=None):
     counts = dict(scanned=0, convertible=0, unparsed=0, existing=0, concurrent_skipped=0, failed=0, written=0, index_repaired=0)
     path = Path(path).resolve()
     if table not in DATABASES:
         raise ValueError("unsupported table")
-    # Preview must neither create a database nor migrate its schema.
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as reader:
+    if batch_size < 1 or preview_limit < 0:
+        raise ValueError("batch_size must be positive and preview_limit nonnegative")
+    # Preview neither creates a database nor migrates its schema.
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as reader:
         reader.row_factory = sqlite3.Row
-        columns = {r[1] for r in reader.execute(f"PRAGMA table_info({table})")}
-        if "content" not in columns:
+        if "content" not in {r[1] for r in reader.execute(f"PRAGMA table_info({table})")}:
             raise ValueError(f"missing record table: {table}")
-        writer = None
+        writer = _prepare_writer(reader, path, table, report) if apply else None
         try:
-            if apply:
-                backup = path.with_name(path.name + ".identities-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".bak")
-                with sqlite3.connect(backup) as target:
-                    reader.backup(target)
-                print(json.dumps({"backup": str(backup)}, ensure_ascii=False))
-                writer = sqlite3.connect(path)
-                with writer:
-                    migrate(writer, table)
-            last_id = 0
-            while True:
-                conditions = ["id > ?"]
-                params = [last_id]
-                if group is not None:
-                    conditions.append("group_id=?")
-                    params.append(str(group))
-                if record_id is not None:
-                    conditions.append("id=?")
-                    params.append(record_id)
-                rows = reader.execute(f"SELECT * FROM {table} WHERE {' AND '.join(conditions)} ORDER BY id LIMIT ?", (*params, batch_size)).fetchall()
-                if not rows:
-                    break
-                for row in rows:
-                    last_id = row["id"]
-                    counts["scanned"] += 1
+            for row in _iter_rows(reader, table, group, record_id, batch_size):
+                counts["scanned"] += 1
+                try:
                     encoded = row["content_parts_json"] if "content_parts_json" in row.keys() else None
-                    try:
-                        body = validate(json.loads(encoded), max_length=1_000_000) if encoded is not None else legacy(row["content"])
-                    except (ValueError, TypeError) as exc:
-                        counts["failed"] += 1
-                        print(json.dumps({"id": last_id, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
-                        continue
-                    if encoded is not None:
-                        counts["existing"] += 1
-                    else:
-                        special = any(p["type"] != "text" for p in body["parts"])
-                        counts["convertible" if special else "unparsed"] += 1
-                        if counts["scanned"] <= preview_limit:
-                            from quickquip.app.identities import identities
-                            print(json.dumps({"id": last_id, "group": row["group_id"], "content": row["content"], "content_display": render(body, identities.snapshot(row["group_id"]))}, ensure_ascii=False))
-                    if not apply:
-                        continue
-                    try:
+                    body = validate(json.loads(encoded), max_length=1_000_000) if encoded is not None else legacy(row["content"])
+                    category = "existing" if encoded is not None else "convertible" if any(p["type"] != "text" for p in body["parts"]) else "unparsed"
+                    counts[category] += 1
+                    if encoded is None and counts["scanned"] <= preview_limit and report:
+                        report(_preview_row(row, body))
+                    if writer is not None:
                         if before_write:
                             before_write(row)
-                        wrote = repaired = False
-                        with writer:
-                            # Reserve the writer before checking the content and missing-parts predicate.
-                            writer.execute("BEGIN IMMEDIATE")
-                            current = writer.execute(f"SELECT content, content_parts_json FROM {table} WHERE id=?", (last_id,)).fetchone()
-                            if current is None or current[0] != row["content"] or current[1] != encoded:
-                                counts["concurrent_skipped"] += 1
-                                continue
-                            if encoded is None:
-                                save_parts(writer, table, last_id, row["group_id"], body)
-                                wrote = True
-                            else:
-                                existing_refs = {r[0] for r in writer.execute(f"SELECT qq FROM {table}_member_refs WHERE record_id=?", (last_id,))}
-                                missing = references(body) - existing_refs
-                                writer.executemany(f"INSERT INTO {table}_member_refs(group_id, record_id, qq) VALUES (?, ?, ?)", [(row["group_id"], last_id, qq) for qq in missing])
-                                repaired = bool(missing)
-                        counts["written"] += wrote
-                        counts["index_repaired"] += repaired
-                    except Exception as exc:
-                        counts["failed"] += 1
-                        print(json.dumps({"id": last_id, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+                        result = _apply_row(writer, table, row, encoded, body)
+                        if result is not ApplyResult.UNCHANGED:
+                            counts[result.value] += 1
+                except Exception as exc:
+                    counts["failed"] += 1
+                    if report:
+                        report({"id": row["id"], "error": str(exc)})
         finally:
-            if writer:
+            if writer is not None:
                 writer.close()
     return counts
+
+
+def _emit(event):
+    print(json.dumps(event, ensure_ascii=False), file=sys.stderr if "error" in event else sys.stdout)
 
 
 def main(argv=None):
@@ -118,12 +145,12 @@ def main(argv=None):
         if args.database not in {table, "all"}:
             continue
         try:
-            counts = backfill(args.path or default, table, apply=args.apply, group=args.group, record_id=args.record_id, batch_size=args.batch_size, preview_limit=args.preview_limit)
+            counts = backfill(args.path or default, table, apply=args.apply, group=args.group, record_id=args.record_id, batch_size=args.batch_size, preview_limit=args.preview_limit, report=_emit)
             failed |= bool(counts["failed"])
-            print(json.dumps({"database": table, **counts}, ensure_ascii=False))
+            _emit({"database": table, **counts})
         except Exception as exc:
             failed = True
-            print(json.dumps({"database": table, "failed": 1, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            _emit({"database": table, "failed": 1, "error": str(exc)})
     return int(failed)
 
 

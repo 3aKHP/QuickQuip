@@ -73,3 +73,12 @@ def test_members_route_protected():
     app = create_app()
     with TestClient(app) as client:
         assert client.get("/ops/api/members/10001").status_code == 401
+
+
+def test_member_candidates_can_page_past_first_hundred(client, tmp_path):
+    members = {str(20000 + i): "同名片" for i in range(105)}
+    (tmp_path / "stats.json").write_text(json.dumps({"10001": {"user_names": members}}))
+    first = client.get("/api/members/10001?query=同名片&offset=0&limit=100").json()
+    second = client.get("/api/members/10001?query=同名片&offset=100&limit=100").json()
+    assert len(first) == 100 and len(second) == 5
+    assert {member["qq"] for member in first + second} == set(members)

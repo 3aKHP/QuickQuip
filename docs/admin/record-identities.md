@@ -12,6 +12,12 @@ python scripts/backfill_record_identities.py --database memories --group 123456 
 python scripts/backfill_record_identities.py --database quotes --record-id 42 --preview-limit 1
 ```
 
+Docker 镜像与生产部署清单均包含本脚本。使用生产 compose 时，先按 [部署模板的手动 compose 访问说明](../../prod.example/README.md#manual-compose-access) 设置环境并进入 compose 目录，再在应用容器内执行预览：
+
+```bash
+docker compose --env-file "$QUICKQUIP_ENV_FILE" exec -T quickquip python scripts/backfill_record_identities.py --preview-limit 0
+```
+
 `--database` 可选 `memories`、`quotes`、`offline_messages`、`all`；默认扫描 `data/llm.db`、`data/quotes.db`、`data/offline_messages.db`。`--path` 可指定单个数据库路径，必须同时选择一个具体数据库。`--record-id` 使用数据库主键；语录的数据库 ID 与群内显示序号分别维护。`--preview-limit 0` 仅输出统计，适合生产存量只读盘点。
 
 预览输出原文与当前可读正文，并统计 `scanned`（扫描）、`convertible`（包含可转换片段）、`unparsed`（普通文本或未识别格式）、`existing`（已有片段）、`concurrent_skipped`（并发跳过）、`failed`（失败）、`written`（写入）及 `index_repaired`（补充索引）。普通文本也可以补齐文本片段，原有内容保持不变。

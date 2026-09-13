@@ -10,8 +10,8 @@ export type RecordBody = { version: 1; parts: RecordPart[] }
 export type MemberCandidate = { qq: string; name: string }
 export const emptyRecordBody = (): RecordBody => ({ version: 1, parts: [{ type: 'text', text: '' }] })
 
-export async function fetchMemberCandidates(groupId: string, query: string): Promise<MemberCandidate[]> {
-  const result = await request<unknown>(`/api/members/${groupId}?query=${encodeURIComponent(query)}`)
+export async function fetchMemberCandidates(groupId: string, query: string, offset = 0): Promise<MemberCandidate[]> {
+  const result = await request<unknown>(`/api/members/${groupId}?query=${encodeURIComponent(query)}&offset=${offset}&limit=100`)
   if (!Array.isArray(result)) throw new Error('成员列表格式无效')
   return result.filter((item): item is MemberCandidate =>
     typeof item === 'object' && item !== null && typeof item.qq === 'string' && typeof item.name === 'string',

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.record_content import display
+
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
@@ -310,7 +312,7 @@ class StateMixin:
             return f"{self._scope_subject(chat_type)}没有已保存记忆"
         lines = [f"{self._memory_label(chat_type)}："]
         for item in memories:
-            lines.append(f"- #{item['id']} {('[' + str(item['user_display']) + '] ') if item.get('user_display') else ''}{item.get('content_display', item['content'])}")
+            lines.append(f"- #{item['id']} {display(item)}")
         return "\n".join(lines)
 
     def format_memory_status(self, group_id: int | str, chat_type: str = "group") -> str:

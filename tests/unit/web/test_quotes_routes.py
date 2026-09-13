@@ -137,16 +137,19 @@ async def test_list_quotes_falls_back_to_stats_without_llm(monkeypatch):
     assert entry["sender_changed"] is True
 
 
-def test_get_sender_identity_sources_degrades_when_llm_unavailable(monkeypatch):
-    import quickquip.app.message_pipeline as message_pipeline
+def test_get_sender_identity_sources_uses_shared_index_without_llm(monkeypatch):
+    from unittest.mock import Mock
+    import quickquip.app.message_pipeline as pipeline
+    from quickquip.app.identities import identities, IdentitySnapshot
+    from quickquip.common.identity import IdentityEntry, IdentityIndex
 
-    monkeypatch.setattr(message_pipeline, "stats_tracker", _FakeStatsTracker({"u1": "名片"}))
-
-    def _boom():
-        raise RuntimeError("llm unavailable")
-
-    monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", _boom)
-
-    user_names, identity_index = message_pipeline.get_sender_identity_sources("g1")
-    assert user_names == {"u1": "名片"}
-    assert identity_index is not None
+    index = IdentityIndex(entries=[IdentityEntry("标准名", ["12345"])])
+    index._build_indexes()
+    shared = IdentitySnapshot(index, {"12345": "名片"})
+    monkeypatch.setattr(identities, "snapshot", lambda group: shared)
+    forbidden = Mock(side_effect=AssertionError("identity lookup must not initialize LLM"))
+    monkeypatch.setattr(pipeline, "_ensure_llm_bindings", forbidden)
+    names, resolved_index = pipeline.get_sender_identity_sources("10001")
+    assert names == shared.names
+    assert resolved_index is shared.index
+    forbidden.assert_not_called()

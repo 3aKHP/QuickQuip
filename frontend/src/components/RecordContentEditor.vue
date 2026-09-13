@@ -9,12 +9,13 @@
     </div>
     <div class="controls">
       <UiButton size="sm" @click="appendText">添加文字</UiButton>
-      <input v-model="query" placeholder="按名字、别名或 QQ 查找成员" @keyup.enter="search" />
-      <UiButton size="sm" @click="search">查找成员</UiButton>
+      <input v-model="query" placeholder="按名字、别名或 QQ 查找成员" @keyup.enter="search()" />
+      <UiButton size="sm" @click="search()" :loading="loading">查找成员</UiButton>
       <span v-if="replaceIndex !== null">正在更换第 {{ replaceIndex + 1 }} 段 <button type="button" @click="replaceIndex = null">取消</button></span>
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
     <div class="controls"><UiButton v-for="member in candidates" :key="member.qq" size="sm" @click="select(member)">{{ member.name }} ({{ member.qq }})</UiButton></div>
+    <UiButton v-if="hasMore" size="sm" :loading="loading" @click="search(true)">继续加载成员</UiButton>
   </div>
 </template>
 
@@ -24,12 +25,27 @@ import { fetchMemberCandidates, type RecordBody, type RecordPart, type MemberCan
 import UiButton from './ui/UiButton.vue'
 const props = defineProps<{ modelValue: RecordBody; groupId: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: RecordBody] }>()
+const loading = ref(false); const hasMore = ref(false); let searchGeneration = 0
 const query = ref(''); const candidates = ref<MemberCandidate[]>([]); const error = ref(''); const replaceIndex = ref<number | null>(null)
 function update(parts: RecordPart[]) { emit('update:modelValue', { version: 1, parts }) }
 function changeText(i: number, text: string) { update(props.modelValue.parts.map((p, j) => i === j && p.type === 'text' ? { ...p, text } : p)) }
 function remove(i: number) { update(props.modelValue.parts.filter((_, j) => i !== j)); replaceIndex.value = null }
 function appendText() { update([...props.modelValue.parts, { type: 'text', text: '' }]) }
-async function search() { const group = props.groupId; error.value = ''; try { const result = await fetchMemberCandidates(group, query.value); if (group === props.groupId) { candidates.value = result; if (!result.length) error.value = '未找到成员' } } catch (e) { error.value = (e as Error).message } }
+async function search(more = false) {
+  if (more && loading.value) return
+  const generation = ++searchGeneration
+  const offset = more ? candidates.value.length : 0
+  error.value = ''; loading.value = true
+  try {
+    const result = await fetchMemberCandidates(props.groupId, query.value, offset)
+    if (generation !== searchGeneration) return
+    candidates.value = more ? [...candidates.value, ...result] : result
+    hasMore.value = result.length === 100
+    if (!candidates.value.length) error.value = '未找到成员'
+  } catch (e) { if (generation === searchGeneration) error.value = (e as Error).message }
+  finally { if (generation === searchGeneration) loading.value = false }
+}
+
 function select(member: MemberCandidate) {
   const part: RecordPart = { type: 'member', ...member, usage: 'mention' }
   const parts = [...props.modelValue.parts]
@@ -37,10 +53,11 @@ function select(member: MemberCandidate) {
     const previous = parts[replaceIndex.value]
     parts[replaceIndex.value] = { ...part, usage: previous?.type === 'member' ? previous.usage : 'mention' }
   } else parts.push(part, { type: 'text', text: '' })
-  update(parts); replaceIndex.value = null; candidates.value = []
+  update(parts); replaceIndex.value = null; candidates.value = []; hasMore.value = false; searchGeneration++; loading.value = false
 }
 
-watch(() => props.groupId, () => { candidates.value = []; replaceIndex.value = null })
+watch([() => props.groupId, query], () => { candidates.value = []; hasMore.value = false; searchGeneration++; loading.value = false })
+watch(() => props.groupId, () => { replaceIndex.value = null })
 </script>
 
 <style scoped>

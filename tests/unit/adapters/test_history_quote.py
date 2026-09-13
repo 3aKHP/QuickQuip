@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.identity import IdentityEntry, IdentityIndex
+
 import pytest
 from types import SimpleNamespace
 
@@ -16,13 +18,14 @@ class _FakeMatch:
         self.canonical_name = canonical_name
 
 
-class _FakeIdentityIndex:
-    def __init__(self, by_alias=None, canonical_by_uid=None):
-        self.by_alias = by_alias or {}
-        self._canonical = canonical_by_uid or {}
 
-    def resolve_user(self, user_id, sender_name=""):
-        return _FakeMatch(self._canonical.get(str(user_id), ""))
+
+class _FakeIdentityIndex(IdentityIndex):
+    def __init__(self, by_alias=None, canonical_by_uid=None):
+        entries = [IdentityEntry(name, [qq]) for qq, name in (canonical_by_uid or {}).items()]
+        entries.extend(IdentityEntry(alias, list(value.qq_ids), [alias]) for alias, value in (by_alias or {}).items())
+        super().__init__(entries=entries)
+        self._build_indexes()
 
 
 class _FakeStore:
@@ -213,7 +216,6 @@ async def test_quote_by_no_match_reports_miss(monkeypatch):
 
 
 def test_quote_same_name_candidates_include_qq(monkeypatch):
-    from quickquip.common.identity import IdentityEntry, IdentityIndex
     index = IdentityIndex(entries=[IdentityEntry("同名", ["12345"]), IdentityEntry("同名", ["23456"])])
     index._build_indexes()
     monkeypatch.setattr(history, "get_sender_identity_sources", lambda group: ({}, index))

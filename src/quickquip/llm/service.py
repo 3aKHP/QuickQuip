@@ -58,6 +58,7 @@ from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
 from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
 from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
+from quickquip.common.identity_sources import IdentityRepository, identities
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
     FORWARD_IMAGE_CONTEXT_PREFIX,
@@ -257,8 +258,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
 
+        self._identity_repository = identities if Path(self.identity_path) == identities.path else IdentityRepository(self.identity_path)
         try:
-            self.store = LLMStore(db_path)
+            self.store = LLMStore(db_path, identity_repository=self._identity_repository)
         except Exception as exc:
             logger.exception("LLMStore 初始化失败")
             self.store = None  # type: ignore[assignment]
@@ -278,20 +280,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             if not self._init_error:
                 self._init_error = f"词表加载失败：{exc}"
 
-        from quickquip.common.identity_sources import IdentityRepository, identities
-        self._identity_repository = identities if Path(self.identity_path) == identities.path else IdentityRepository(self.identity_path)
-        if self.store is not None:
-            self.store.identity_repository = self._identity_repository
-        try:
-            self.identities = self._identity_repository.snapshot("").index
-        except Exception as exc:
-            logger.exception("identities 加载失败")
-            self.identities = IdentityIndex()
-            if not self._init_error:
-                self._init_error = f"身份资料加载失败：{exc}"
-
         self._group_vocabs: OrderedDict[str, VocabIndex] = OrderedDict()
-        self._group_identities: OrderedDict[str, IdentityIndex] = OrderedDict()
 
     def _resolve_vocab(self, group_id: str) -> VocabIndex:
         if not group_id:
@@ -313,18 +302,14 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
 
     @property
     def identities(self) -> IdentityIndex:
-        repository = getattr(self, "_identity_repository", None)
-        return repository.snapshot("").index if repository else self._identities
+        return self._identity_repository.snapshot("").index
 
     @identities.setter
     def identities(self, value: IdentityIndex) -> None:
-        self._identities = value
+        self._identity_repository.set_base_index(value)
 
     def _resolve_identities(self, group_id: str) -> IdentityIndex:
-        repository = getattr(self, "_identity_repository", None)
-        if repository is not None:
-            return repository.snapshot(group_id).index
-        return self.identities
+        return self._identity_repository.snapshot(group_id).index
 
     def group_identities(self, group_id: str) -> IdentityIndex:
         """按群返回合并后的身份索引，供装配层等外部调用方使用。"""
@@ -336,11 +321,8 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self._identity_repository.invalidate()
-        from quickquip.common.identity_sources import identities
         identities.invalidate()
-        self.identities = self._identity_repository.snapshot("").index
         self._group_vocabs.clear()
-        self._group_identities.clear()
         self.mark_mcp_dirty()
         return self.config
 
@@ -1916,10 +1898,10 @@ def get_llm_service() -> LLMService:
             _llm_service._init_error = str(exc)
             _llm_service.config = LLMConfig(load_error=str(exc))  # type: ignore[attr-defined]
             _llm_service.vocab = VocabIndex()  # type: ignore[attr-defined]
+            _llm_service._identity_repository = IdentityRepository()
             _llm_service.identities = IdentityIndex()  # type: ignore[attr-defined]
             _llm_service.identity_path = LLM_IDENTITIES_YAML_PATH  # type: ignore[attr-defined]
             _llm_service.vocab_path = LLM_VOCAB_YAML_PATH  # type: ignore[attr-defined]
             _llm_service._group_vocabs = OrderedDict()  # type: ignore[attr-defined]
-            _llm_service._group_identities = OrderedDict()  # type: ignore[attr-defined]
             _llm_service.store = None  # type: ignore[attr-defined]
     return _llm_service  # type: ignore[return-value]

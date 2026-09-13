@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -37,7 +38,7 @@ async def list_quotes(
     store: GroupQuoteStore = group_quote_store
     from quickquip.app.identities import web_identities
     snapshot = web_identities.snapshot(group_id)
-    rows, total = store.list_quotes(group_id, offset=offset, limit=limit, keyword=keyword, identity_snapshot=snapshot)
+    rows, total = await asyncio.to_thread(store.list_quotes, group_id, offset=offset, limit=limit, keyword=keyword, identity_snapshot=snapshot)
     rows = _enrich_quote_rows(rows, group_id, snapshot)
     return {"entries": rows, "total": total, "has_more": offset + limit < total}
 
