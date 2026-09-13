@@ -28,6 +28,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _filter_config_fields(data: dict[str, Any], valid: set[str]) -> dict[str, Any]:
+    """按字段名集过滤未知键并清洗 ``interest_topics``（两个 from_dict 共用）。
+
+    None 值视同未设置（保持 dataclass 默认/覆盖语义），非 list 的
+    interest_topics 原样丢弃。
+    """
+    filtered: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in valid or value is None:
+            continue
+        if key == "interest_topics" and isinstance(value, list):
+            filtered[key] = [str(item).strip() for item in value if str(item).strip()]
+        else:
+            filtered[key] = value
+    return filtered
+
+
 @dataclass(slots=True)
 class AwakeningDefaults:
     extend_duration: int = 0
@@ -48,15 +65,7 @@ class AwakeningDefaults:
     def from_dict(cls, data: dict[str, Any] | None) -> AwakeningDefaults:
         if not data:
             return cls()
-        valid = {f.name for f in fields(cls)}
-        filtered: dict[str, Any] = {}
-        for k, v in data.items():
-            if k in valid and v is not None:
-                if k == "interest_topics" and isinstance(v, list):
-                    filtered[k] = [str(item).strip() for item in v if str(item).strip()]
-                else:
-                    filtered[k] = v
-        return cls(**filtered)
+        return cls(**_filter_config_fields(data, {f.name for f in fields(cls)}))
 
 
 @dataclass(slots=True)
@@ -81,14 +90,7 @@ class AwakeningGroupOverride:
         if not group_id:
             return None
         valid = {f.name for f in fields(cls)} - {"group_id"}
-        filtered: dict[str, Any] = {"group_id": group_id}
-        for k, v in data.items():
-            if k in valid and v is not None:
-                if k == "interest_topics" and isinstance(v, list):
-                    filtered[k] = [str(item).strip() for item in v if str(item).strip()]
-                else:
-                    filtered[k] = v
-        return cls(**filtered)
+        return cls(group_id=group_id, **_filter_config_fields(data, valid))
 
 
 @dataclass(slots=True)
@@ -113,33 +115,27 @@ class AwakeningConfig:
     source_path: Path | None = None
 
     def resolve_group(self, group_id: int | str) -> ResolvedAwakeningSettings:
+        """按 ``ResolvedAwakeningSettings`` 字段集合并 defaults 与群覆盖。
+
+        驱动字段集 = resolved 的 dataclass 字段：``boredom_scan_interval``
+        天然排除在外（它只服务 scheduler 扫描周期，经
+        ``effective_boredom_scan_interval`` 消费，不进群级 resolved 输出）。
+        覆盖值非 None 优先；``interest_topics`` 输出恒为新列表，避免与
+        defaults 共享可变引用。
+        """
         override = self.group_overrides.get(str(group_id))
         d = self.defaults
-        if override is None:
-            return ResolvedAwakeningSettings(
-                extend_duration=d.extend_duration,
-                fallback_probability=d.fallback_probability,
-                boredom_silence_seconds=d.boredom_silence_seconds,
-                boredom_probability=d.boredom_probability,
-                boredom_check_interval=d.boredom_check_interval,
-                boredom_dnd_start=d.boredom_dnd_start,
-                boredom_dnd_end=d.boredom_dnd_end,
-                interest_topics=list(d.interest_topics),
-                relevance_threshold=d.relevance_threshold,
-                qa_threshold=d.qa_threshold,
-            )
-        return ResolvedAwakeningSettings(
-            extend_duration=override.extend_duration if override.extend_duration is not None else d.extend_duration,
-            fallback_probability=override.fallback_probability if override.fallback_probability is not None else d.fallback_probability,
-            boredom_silence_seconds=override.boredom_silence_seconds if override.boredom_silence_seconds is not None else d.boredom_silence_seconds,
-            boredom_probability=override.boredom_probability if override.boredom_probability is not None else d.boredom_probability,
-            boredom_check_interval=override.boredom_check_interval if override.boredom_check_interval is not None else d.boredom_check_interval,
-            boredom_dnd_start=override.boredom_dnd_start if override.boredom_dnd_start is not None else d.boredom_dnd_start,
-            boredom_dnd_end=override.boredom_dnd_end if override.boredom_dnd_end is not None else d.boredom_dnd_end,
-            interest_topics=list(override.interest_topics) if override.interest_topics is not None else list(d.interest_topics),
-            relevance_threshold=override.relevance_threshold if override.relevance_threshold is not None else d.relevance_threshold,
-            qa_threshold=override.qa_threshold if override.qa_threshold is not None else d.qa_threshold,
-        )
+        values: dict[str, Any] = {}
+        for f in fields(ResolvedAwakeningSettings):
+            value = getattr(d, f.name)
+            if override is not None:
+                override_value = getattr(override, f.name)
+                if override_value is not None:
+                    value = override_value
+            if f.name == "interest_topics":
+                value = list(value)
+            values[f.name] = value
+        return ResolvedAwakeningSettings(**values)
 
 
 @dataclass(slots=True)
