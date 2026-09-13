@@ -396,6 +396,8 @@ async def test_period_report_compact_log_and_format_note(monkeypatch):
     assert "聊天记录格式说明" in system_prompt
     assert "×N" in system_prompt
     assert "(bot)" in system_prompt
+    assert "也就是你自己" in system_prompt
+    assert "避免归到任何第三方名下" in system_prompt
 
 
 @pytest.mark.asyncio
@@ -480,4 +482,6 @@ async def test_daily_summary_uses_compact_serializer(monkeypatch):
     assert "聊天记录格式说明" in system_prompt
     assert "×N" in system_prompt
     assert "(bot)" in system_prompt
+    assert "也就是你自己" in system_prompt
+    assert "避免归到任何第三方名下" in system_prompt
     assert "流水账" in system_prompt or "开篇" in system_prompt
