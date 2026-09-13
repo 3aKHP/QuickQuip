@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.rendering import render_message_for_llm, render_reply_for_llm
@@ -20,6 +20,8 @@ class ExtractedLLMInput:
     forward_text: str = ""
     forward_image_urls: list[str] = field(default_factory=list)
     voice_text: str = ""
+    # 消息内 @ 提及的 QQ 号（bot 自身除外）——随 prompt 传给服务层做信封档案注入
+    mentioned_qq_ids: list[str] = field(default_factory=list)
 
 
 def extract_llm_input(
@@ -34,12 +36,14 @@ def extract_llm_input(
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
     voice_text: str = "",
+    mention_names: Mapping[str, str] | None = None,
 ) -> ExtractedLLMInput | None:
     rendered = render_message_for_llm(
         message,
         bot_self_id=bot_self_id,
         bot_self_ids=bot_self_ids,
         identity_index=identity_index,
+        mention_names=mention_names,
     )
     rendered_reply = render_reply_for_llm(
         reply,
@@ -47,6 +51,7 @@ def extract_llm_input(
         bot_self_ids=bot_self_ids,
         identity_index=identity_index,
         include_image_placeholder=True,
+        mention_names=mention_names,
     )
     segments = list(message)
 
@@ -62,6 +67,7 @@ def extract_llm_input(
         "forward_text": forward_text,
         "forward_image_urls": list(forward_image_urls or []),
         "voice_text": voice_text.strip(),
+        "mentioned_qq_ids": list(rendered.mentioned_qq_ids),
     }
 
     if not segments:
@@ -113,15 +119,17 @@ def extract_llm_prompt(
     bot_self_ids: Iterable[int | str] | None = None,
     reply=None,
     is_to_me: bool = False,
+    mention_names: Mapping[str, str] | None = None,
 ) -> str | None:
     extracted = extract_llm_input(
         message,
         bot_self_id,
         settings,
-        identity_index=identity_index,
+        identity_index,
         bot_self_ids=bot_self_ids,
         reply=reply,
         is_to_me=is_to_me,
+        mention_names=mention_names,
     )
     if extracted is None:
         return None
@@ -139,18 +147,20 @@ def extract_private_llm_input(
     forward_text: str = "",
     forward_image_urls: list[str] | None = None,
     voice_text: str = "",
+    mention_names: Mapping[str, str] | None = None,
 ) -> ExtractedLLMInput | None:
     extracted = extract_llm_input(
         message,
         bot_self_id,
         settings,
-        identity_index=identity_index,
+        identity_index,
         bot_self_ids=bot_self_ids,
         reply=reply,
         is_to_me=False,
         forward_text=forward_text,
         forward_image_urls=forward_image_urls,
         voice_text=voice_text,
+        mention_names=mention_names,
     )
     if extracted is not None:
         return extracted
@@ -160,6 +170,7 @@ def extract_private_llm_input(
         bot_self_id=bot_self_id,
         bot_self_ids=bot_self_ids,
         identity_index=identity_index,
+        mention_names=mention_names,
     )
     rendered_reply = render_reply_for_llm(
         reply,
@@ -167,6 +178,7 @@ def extract_private_llm_input(
         bot_self_ids=bot_self_ids,
         identity_index=identity_index,
         include_image_placeholder=True,
+        mention_names=mention_names,
     )
 
     prompt = rendered.text.strip()

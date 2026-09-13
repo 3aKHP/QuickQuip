@@ -4,6 +4,7 @@ web_api.py
 pyproject.toml
 requirements.txt
 scripts/backfill_chat_archive.py
+scripts/backfill_record_identities.py
 config
 frontend/dist
 llm_about

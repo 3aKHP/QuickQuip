@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.record_content import display
+
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
@@ -224,9 +226,9 @@ class StateMixin:
     def set_group_allow_at(self, group_id: int | str, enabled: bool) -> None:
         self._update_chat_settings(group_id, "group", allow_at=int(enabled))
 
-    def remember_memory(self, chat_id: int | str, content: str, chat_type: str = "group") -> int:
+    def remember_memory(self, chat_id: int | str, content: str, chat_type: str = "group", *, content_parts: dict | None = None) -> int:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        memory_id = self.store.add_memory(scope_key, content.strip(), scope="group", source="manual")
+        memory_id = self.store.add_memory(scope_key, content.strip(), scope="group", source="manual", content_parts=content_parts)
         self.store.prune_memories(
             scope_key,
             min(self.config.runtime.memory_max_items_per_group, MAX_STORED_MEMORY_ITEMS),
@@ -310,7 +312,7 @@ class StateMixin:
             return f"{self._scope_subject(chat_type)}没有已保存记忆"
         lines = [f"{self._memory_label(chat_type)}："]
         for item in memories:
-            lines.append(f"- #{item['id']} {item['content']}")
+            lines.append(f"- #{item['id']} {display(item)}")
         return "\n".join(lines)
 
     def format_memory_status(self, group_id: int | str, chat_type: str = "group") -> str:

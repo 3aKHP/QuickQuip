@@ -6,6 +6,8 @@ per-scope turn counter and success/failure tallies.
 
 The mixin depends on the host class providing ``self.config``,
 ``self.store`` and ``self.quick_judge`` (all supplied by ``LLMService``).
+The host supplies ``self._identity_repository`` for current identity snapshots.
+
 State is initialised via :meth:`AutoMemoryMixin._init_auto_memory`, which
 the host class must call from its own ``__init__``.
 
@@ -15,6 +17,8 @@ and ``_init_auto_memory()`` must be called before any health report is
 built.
 """
 from __future__ import annotations
+
+from quickquip.common.record_content import legacy, render
 
 import logging
 from collections import OrderedDict
@@ -153,23 +157,28 @@ class AutoMemoryMixin:
                 scope_key,
                 limit=_AUTO_MEMORY_CONTEXT_TURNS * 2,
             )
+            snapshot = self._identity_repository.snapshot(scope_key)
             context_parts: list[str] = []
             seen = 0
             for msg in reversed(history):
                 role = msg.get("role", "")
                 name = msg.get("canonical_name") or msg.get("sender_name", "?")
-                content = str(msg.get("raw_content") or msg.get("content", "")).strip()
+                name = snapshot.name(msg.get("user_id"), name)
+                source_text = str(msg.get("raw_content") or msg.get("content", ""))
+                content = (source_text if source_text == user_text else render(legacy(source_text), snapshot)).strip()
                 if not content:
                     continue
                 tag = {"user": "群友", "assistant": "bot"}.get(role, role)
-                context_parts.append(f"[{tag}] {name}: {content[:200]}")
+                speaker_id = str(msg.get("user_id") or "")
+                label = f"{name}（QQ {speaker_id}）" if speaker_id else name
+                context_parts.append(f"[{tag}] {label}: {content[:200]}")
                 seen += 1
                 if seen >= _AUTO_MEMORY_CONTEXT_TURNS:
                     break
             context_parts.reverse()
 
-            display_name = canonical_name or sender_name
-            name_line = f"当前要评估的发言者：{display_name}"
+            display_name = snapshot.name(user_id, canonical_name or sender_name)
+            name_line = f"当前要评估的发言者：{display_name}（QQ {user_id}）"
             if canonical_name and sender_name and canonical_name != sender_name:
                 name_line += f"（QQ昵称：{sender_name}）"
 

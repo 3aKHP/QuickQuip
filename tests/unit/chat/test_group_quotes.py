@@ -164,13 +164,13 @@ class _FakeIdentityIndex:
         return _FakeMatch(self._by_uid.get(str(user_id), ""))
 
 
-def test_resolve_display_prefers_latest_card_over_identity():
+def test_resolve_display_prefers_identity_over_latest_card():
     resolved, changed = resolve_quote_display_name(
         "u1", "旧名片",
         user_names={"u1": "新名片"},
         identity_index=_FakeIdentityIndex({"u1": "规范名"}),
     )
-    assert (resolved, changed) == ("新名片", True)
+    assert (resolved, changed) == ("规范名", True)
 
 
 def test_resolve_display_falls_back_to_canonical_name():

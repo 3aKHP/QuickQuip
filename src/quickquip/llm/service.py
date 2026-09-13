@@ -58,6 +58,7 @@ from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
 from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
 from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import IdentityIndex
+from quickquip.common.identity_sources import IdentityRepository, identities
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
     FORWARD_IMAGE_CONTEXT_PREFIX,
@@ -154,6 +155,11 @@ VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
 LLM_RULE_NAME = "llm_chat"
 MAX_QUOTED_MESSAGE_CHARS = 1200
+
+# 艾特档案注入：正文/存量历史中以数字形态出现的 @ 提及（@QQ123456），
+# 以及信封档案条目数上限（名字在前、QQ 作配对键，见 docs/dev/llm-module.md §5.5）
+_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})")
+_MENTION_PROFILE_LIMIT = 5
 MAX_PERSISTED_IMAGE_DESC_CHARS = 200
 MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS = 800
 _GROUP_CACHE_MAX = 512
@@ -252,8 +258,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
 
+        self._identity_repository = identities if Path(self.identity_path) == identities.path else IdentityRepository(self.identity_path)
         try:
-            self.store = LLMStore(db_path)
+            self.store = LLMStore(db_path, identity_repository=self._identity_repository)
         except Exception as exc:
             logger.exception("LLMStore 初始化失败")
             self.store = None  # type: ignore[assignment]
@@ -273,16 +280,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             if not self._init_error:
                 self._init_error = f"词表加载失败：{exc}"
 
-        try:
-            self.identities = IdentityIndex.from_file(self.identity_path)
-        except Exception as exc:
-            logger.exception("identities 加载失败")
-            self.identities = IdentityIndex()
-            if not self._init_error:
-                self._init_error = f"身份资料加载失败：{exc}"
-
         self._group_vocabs: OrderedDict[str, VocabIndex] = OrderedDict()
-        self._group_identities: OrderedDict[str, IdentityIndex] = OrderedDict()
 
     def _resolve_vocab(self, group_id: str) -> VocabIndex:
         if not group_id:
@@ -302,23 +300,16 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self._group_vocabs[cache_key] = merged
         return merged
 
+    @property
+    def identities(self) -> IdentityIndex:
+        return self._identity_repository.snapshot("").index
+
+    @identities.setter
+    def identities(self, value: IdentityIndex) -> None:
+        self._identity_repository.set_base_index(value)
+
     def _resolve_identities(self, group_id: str) -> IdentityIndex:
-        if not group_id:
-            return self.identities
-        cache_key = str(group_id)
-        cached = self._group_identities.get(cache_key)
-        if cached is not None:
-            return cached
-        group_path = self.identity_path.parent / cache_key / "identities.yaml"
-        if group_path.exists():
-            group_identities = IdentityIndex.from_file(group_path)
-            merged = self.identities.merge(group_identities)
-        else:
-            merged = self.identities
-        if len(self._group_identities) >= _GROUP_CACHE_MAX:
-            self._group_identities.popitem(last=False)
-        self._group_identities[cache_key] = merged
-        return merged
+        return self._identity_repository.snapshot(group_id).index
 
     def group_identities(self, group_id: str) -> IdentityIndex:
         """按群返回合并后的身份索引，供装配层等外部调用方使用。"""
@@ -329,9 +320,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         _reload_sensitive_filter()
         self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
-        self.identities = IdentityIndex.from_file(self.identity_path)
+        self._identity_repository.invalidate()
+        identities.invalidate()
         self._group_vocabs.clear()
-        self._group_identities.clear()
         self.mark_mcp_dirty()
         return self.config
 
@@ -409,6 +400,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         prompt: str,
         memories: list[dict[str, object]],
         participants: list[dict[str, str]] | None = None,
+        mention_profiles: list[dict[str, str]] | None = None,
     ) -> str:
         # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。
         return build_turn_envelope(
@@ -418,7 +410,80 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             vocab=self._resolve_vocab(str(group_id)),
             chat_type=chat_type,
             participants=participants,
+            mention_profiles=mention_profiles,
         )
+
+    def _collect_mention_profiles(
+        self,
+        *,
+        chat_id: int | str,
+        mentioned_qq_ids: list[str],
+        prompt: str,
+        quoted_text: str,
+        forward_text: str,
+        history: list[dict[str, object]],
+        scene_patch: list[dict[str, str]] | None,
+        current_user_id: str,
+        quoted_user_id: str,
+    ) -> list[dict[str, str]]:
+        """收集被艾特但未在窗口内发言的登记成员档案（信封注入用）。
+
+        候选双路：入口结构化采集的 ``mentioned_qq_ids``（当前消息，精确）
+        ＋对 prompt/引用/转发/history/现场文本扫 ``@QQ 数字``（覆盖冻结
+        落库的存量形态）。已在窗口带发言人标签的成员跳过（场景行可见，
+        无需档案）；未登记成员跳过（无可注入）。确定性输出，同输入同字节。
+        """
+        identities = self._resolve_identities(str(chat_id))
+        visible: set[str] = set()
+        for uid in (current_user_id, quoted_user_id):
+            uid = str(uid or "").strip()
+            if uid:
+                visible.add(uid)
+        for item in history or []:
+            uid = str(item.get("user_id") or "").strip()
+            if uid:
+                visible.add(uid)
+        for item in scene_patch or []:
+            uid = str(item.get("user_id") or "").strip()
+            if uid:
+                visible.add(uid)
+
+        candidates: list[str] = []
+
+        def _push(qq: str) -> None:
+            normalized = str(qq or "").strip()
+            if normalized and normalized.isdigit() and normalized not in candidates:
+                candidates.append(normalized)
+
+        for qq in mentioned_qq_ids:
+            _push(str(qq))
+        scan_texts = [prompt, quoted_text, forward_text]
+        for item in history or []:
+            scan_texts.append(str(item.get("raw_content") or item.get("content") or ""))
+        for item in scene_patch or []:
+            scan_texts.append(str(item.get("text") or ""))
+        for text in scan_texts:
+            for match in _AT_QQ_PATTERN.finditer(text):
+                _push(match.group(1))
+
+        profiles: list[dict[str, str]] = []
+        for qq in candidates:
+            if qq in visible:
+                continue
+            match = identities.resolve_user(qq)
+            if not match.is_registered or not match.canonical_name:
+                continue
+            profiles.append(
+                {
+                    "canonical_name": match.canonical_name,
+                    "user_id": qq,
+                    "aliases": "、".join(match.aliases[:6]),
+                    "note": match.note,
+                }
+            )
+            if len(profiles) >= _MENTION_PROFILE_LIMIT:
+                break
+        return profiles
 
     async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
         """
@@ -1203,6 +1268,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         include_recent_images: bool = False,
         delivery_sink=None,
         trigger_kind: TriggerKind | None = None,
+        mentioned_qq_ids: list[str] | None = None,
     ) -> dict[str, object]:
         prompt = prompt.strip()
         normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
@@ -1437,12 +1503,24 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     provider=provider,
                 )
             )
+            mention_profiles = self._collect_mention_profiles(
+                chat_id=chat_id,
+                mentioned_qq_ids=mentioned_qq_ids or [],
+                prompt=analysis_prompt or trimmed_prompt,
+                quoted_text=quoted_prompt,
+                forward_text=normalized_forward_text,
+                history=history,
+                scene_patch=scene_patch,
+                current_user_id=str(user_id),
+                quoted_user_id=quoted_user_id,
+            )
             turn_envelope = self._build_turn_envelope(
                 chat_id,
                 chat_type,
                 analysis_prompt or trimmed_prompt,
                 memories,
                 participants=participants,
+                mention_profiles=mention_profiles,
             )
             messages = self._build_messages(
                 prompt=trimmed_prompt,
@@ -1714,6 +1792,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
+        mentioned_qq_ids: list[str] | None = None,
     ) -> dict[str, object]:
         with usage_scope("chat", group_id=str(group_id)):
             return await self._generate_reply_for_scope(
@@ -1739,6 +1818,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 include_recent_images=include_recent_images,
                 delivery_sink=delivery_sink,
                 trigger_kind=trigger_kind,
+                mentioned_qq_ids=mentioned_qq_ids,
             )
 
     async def generate_private_reply(
@@ -1764,6 +1844,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         trigger_auto_memory: bool = True,
         message_id: str | None = None,
         include_recent_images: bool = False,
+        mentioned_qq_ids: list[str] | None = None,
     ) -> dict[str, object]:
         with usage_scope("chat"):
             return await self._generate_reply_for_scope(
@@ -1789,6 +1870,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 include_recent_images=include_recent_images,
                 delivery_sink=delivery_sink,
                 trigger_kind=trigger_kind,
+                mentioned_qq_ids=mentioned_qq_ids,
             )
 
 
@@ -1816,6 +1898,10 @@ def get_llm_service() -> LLMService:
             _llm_service._init_error = str(exc)
             _llm_service.config = LLMConfig(load_error=str(exc))  # type: ignore[attr-defined]
             _llm_service.vocab = VocabIndex()  # type: ignore[attr-defined]
+            _llm_service._identity_repository = IdentityRepository()
             _llm_service.identities = IdentityIndex()  # type: ignore[attr-defined]
+            _llm_service.identity_path = LLM_IDENTITIES_YAML_PATH  # type: ignore[attr-defined]
+            _llm_service.vocab_path = LLM_VOCAB_YAML_PATH  # type: ignore[attr-defined]
+            _llm_service._group_vocabs = OrderedDict()  # type: ignore[attr-defined]
             _llm_service.store = None  # type: ignore[attr-defined]
     return _llm_service  # type: ignore[return-value]

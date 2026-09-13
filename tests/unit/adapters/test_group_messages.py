@@ -108,8 +108,10 @@ def _llm_settings(**overrides):
 
 
 def _make_svc(settings):
+    identities = IdentityIndex()
     return SimpleNamespace(
-        identities=IdentityIndex(),
+        identities=identities,
+        group_identities=lambda group_id, _idx=identities: _idx,
         config=SimpleNamespace(
             quick_judge=SimpleNamespace(timeout=2.0, max_tokens=64),
             personas={},
@@ -402,3 +404,54 @@ async def test_self_message_archive_failure_does_not_propagate(harness_factory, 
     await h.handle(event)  # 不抛即通过
 
     h.svc.generate_reply.assert_not_awaited()
+
+
+async def test_group_identity_index_used_for_at_rendering_and_mentioned_ids(harness_factory, monkeypatch):
+    """入口渲染用群合并身份索引：@ 已登记成员渲染标准身份、mentioned_qq_ids 随 prompt 传服务层。"""
+    from quickquip.llm.identity import IdentityEntry, IdentityIndex
+
+    group_index = IdentityIndex(
+        entries=[
+            IdentityEntry(canonical_name="镜子", qq_ids=["2002"], aliases=[], note=""),
+        ]
+    )
+    group_index._build_indexes()
+
+    h = harness_factory(_llm_settings(allow_at=True, allow_prefix=False))
+    h.svc.group_identities = lambda group_id: group_index
+
+    async def _no_fetch(bot, group_id, qqs, *, is_registered):
+        return {}
+
+    monkeypatch.setattr(gm, "fetch_mention_names", _no_fetch)
+
+    event = DummyGroupEvent(
+        DummyMessage([at_seg("2002"), text_seg(" 看看这个"), at_seg("3003")])
+    )
+    event.to_me = True
+    await h.handle(event)
+
+    h.svc.generate_reply.assert_awaited_once()
+    kwargs = h.svc.generate_reply.await_args.kwargs
+    assert "@镜子" in kwargs["prompt"]
+    assert kwargs["mentioned_qq_ids"] == ["2002", "3003"]
+
+
+async def test_unregistered_at_falls_back_to_member_card(harness_factory, monkeypatch):
+    """未登记 @ 退化群名片：卡片预取注入 mention_names，渲染 @名片 而非 @QQ 数字。"""
+    h = harness_factory(_llm_settings(allow_at=True, allow_prefix=False))
+
+    async def _fetch(bot, group_id, qqs, *, is_registered):
+        assert "3003" in qqs
+        return {"3003": "小透明"}
+
+    monkeypatch.setattr(gm, "fetch_mention_names", _fetch)
+
+    event = DummyGroupEvent(DummyMessage([at_seg("3003"), text_seg(" 在吗")]))
+    event.to_me = True
+    await h.handle(event)
+
+    h.svc.generate_reply.assert_awaited_once()
+    kwargs = h.svc.generate_reply.await_args.kwargs
+    assert "@小透明" in kwargs["prompt"]
+    assert "@QQ3003" not in kwargs["prompt"]

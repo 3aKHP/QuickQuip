@@ -312,7 +312,7 @@ docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 - `.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
 - `.env` 中是否填了 `QQ_ACCOUNT` 以及启用 MCP 时需要的 API key
 - 搜索服务是否运行，QuickQuip 容器内是否能访问配置里的 `SEARXNG_BASE_URL`
-- `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在
+- `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在。文件缺失（INFO）、存在但为空模板（WARNING）、正常加载（`已加载 N 条身份`）在 bot 日志中均有对应记录，可据此核对身份索引是否生效
 - `docker compose --env-file ../.env logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
 - 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建
 - `/llm reload` 会在重载后探活当前群实际生效的 provider/model；如需全量巡检，在群内执行 `/llm probe` 或在 Web Admin 诊断页点击“探活 Provider”，会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费

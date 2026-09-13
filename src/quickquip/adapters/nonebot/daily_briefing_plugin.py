@@ -95,6 +95,7 @@ async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, 
         return fallback_text, "fallback"
 
     try:
+        identity_index = svc.group_identities(group_id)
         content, model_used = await generate_daily_briefing(
             context=context,
             persona=persona,
@@ -103,6 +104,7 @@ async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, 
             llm_config=svc.config,
             default_provider_id=settings.provider_id,
             default_model=settings.model,
+            identity_resolver=lambda qq: identity_index.resolve_user(qq).canonical_name,
         )
         return content, model_used
     except Exception:

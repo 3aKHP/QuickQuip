@@ -119,6 +119,7 @@ def register_private_message_matcher(on_message):
             forward_image_urls=llm_input.forward_image_urls,
             voice_text=llm_input.voice_text,
             message_id=message_id or None,
+            mentioned_qq_ids=list(llm_input.mentioned_qq_ids),
         )
         trigger_source = llm_input.trigger_source or "private_message"
         with bot_action_trace(

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -14,6 +15,29 @@ from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 if TYPE_CHECKING:
     from nonebot.adapters.onebot.v11 import Message as OneBotMessage
     from nonebot.adapters.onebot.v11 import MessageSegment as OneBotMessageSegment
+
+# 模型可能沿用输入形态输出「@QQ 号」（裸数字艾特）；发送前切分为真实
+# at 段，保证被艾特成员在客户端得到高亮与名字而非纯数字文本。
+# 右边界 (?!\d)：超过 12 位的数字串（幻觉长号）不切分，保持原文本。
+_OUTBOUND_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})(?!\d)")
+
+
+def split_outbound_at_mentions(
+    text: str,
+    Message: type[OneBotMessage],
+    MessageSegment: type[OneBotMessageSegment],
+) -> list[Any]:
+    """把文本中的 ``@QQ 号`` 片段切分为 ``MessageSegment.at`` 与文本段。"""
+    segments: list[Any] = []
+    cursor = 0
+    for match in _OUTBOUND_AT_QQ_PATTERN.finditer(text):
+        if match.start() > cursor:
+            segments.append(MessageSegment.text(text[cursor:match.start()]))
+        segments.append(MessageSegment.at(int(match.group(1))))
+        cursor = match.end()
+    if cursor < len(text):
+        segments.append(MessageSegment.text(text[cursor:]))
+    return segments or [MessageSegment.text(text)]
 
 
 def build_llm_reply_message(
@@ -27,7 +51,7 @@ def build_llm_reply_message(
     按 CQ 码解析（matcher.send 才会安全包装 str），恒返回 Message 让直发与
     matcher 路径的传输语义一致（array 段格式）。
     """
-    segments = [MessageSegment.text(result["reply"])]
+    segments = split_outbound_at_mentions(str(result["reply"]), Message, MessageSegment)
     segments.extend(
         MessageSegment.image(f"base64://{b64}") for b64 in result.get("images") or []
     )
@@ -112,8 +136,12 @@ class OneBotDeliverySink:
 
 
 def text_only_message(text: str, Message: type[OneBotMessage], MessageSegment: type[OneBotMessageSegment]) -> OneBotMessage:
-    """纯文本 Message（§6.2）：分段正文不经 CQ 解析器。"""
-    return Message([MessageSegment.text(text)])
+    """纯文本 Message（§6.2）：分段正文不经 CQ 解析器。
+
+    正文中的 ``@QQ 号`` 数字艾特在此出口切分为真实 at 段（分段交付与
+    定时/唤醒等全部 sink 路径共用本出口）。
+    """
+    return Message(split_outbound_at_mentions(text, Message, MessageSegment))
 
 
 def make_matcher_sink(matcher, Message, MessageSegment, *, scope_key: str, interval_ms: int) -> OneBotDeliverySink:

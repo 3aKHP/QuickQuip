@@ -59,17 +59,23 @@ def _register_sts_command(on_command, spec: _StsCommandSpec) -> None:
         _ensure_llm_bindings()
         svc = get_llm_service()
 
+        chat_id_value = _chat_id(event)
+        chat_type_value = _chat_type(event)
+        identities = (
+            svc.group_identities(chat_id_value)
+            if chat_type_value == "group" else svc.identities
+        )
         rendered = render_message_for_llm(
             event.get_message(),
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=svc.identities,
+            identity_index=identities,
         )
         rendered_reply = render_reply_for_llm(
             getattr(event, "reply", None),
             bot_self_id=event.self_id,
             bot_self_ids={event.self_id},
-            identity_index=svc.identities,
+            identity_index=identities,
             include_image_placeholder=True,
         )
         prompt = _strip_leading_command_token(rendered.text)
@@ -77,7 +83,7 @@ def _register_sts_command(on_command, spec: _StsCommandSpec) -> None:
         quoted_image_urls = [] if rendered_reply is None else rendered_reply.image_urls
         quoted_sender_name = "" if rendered_reply is None else rendered_reply.sender_name
         quoted_user_id = "" if rendered_reply is None else rendered_reply.user_id
-        chat_type = _chat_type(event)
+        chat_type = chat_type_value
         chat_id = _chat_id(event)
         generate_reply = spec.generate_reply(svc)
         result = await generate_reply(

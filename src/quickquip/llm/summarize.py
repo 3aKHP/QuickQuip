@@ -46,7 +46,11 @@ _CHAT_LOG_FORMAT_NOTE = (
     "[HH:MM] 时间戳对其后直到下一个时间戳之间的所有行生效；"
     "同一行中以 / 分隔的是同一人连续发送的多条消息；"
     "“内容 ×N”表示同一人连续发送的 N 条相同消息；"
-    "名字带 (bot) 后缀的是本群机器人的发言。"
+    "名字带 (bot) 后缀的发言出自本部署的机器人账号，也就是你这一侧："
+    "其中通常混有你当前人格的话、同一账号上其他人格的话，"
+    "以及功能模块的自动播报（如游戏播报）。"
+    "撰文时请把这些当作你自己的言行，以当前人格的视角自然叙述，"
+    "避免归到任何第三方名下。"
 )
 
 _MONTHLY_WEEK_NOTE = (
@@ -272,6 +276,7 @@ async def generate_daily_summary(
     default_model: str,
     local_tz: ZoneInfo,
     bot_user_ids: frozenset[str] | set[str] = frozenset(),
+    identity_resolver=None,
 ) -> tuple[str, str]:
     """Generate a daily summary using the model cascade.
 
@@ -289,7 +294,8 @@ async def generate_daily_summary(
         raise RuntimeError(f"daily_summary: 级联无可用模型（cascade={cascade}）")
 
     raw_log, ser_stats = serialize_period_chat(
-        messages, local_tz=local_tz, bot_user_ids=bot_user_ids
+        messages, local_tz=local_tz, bot_user_ids=bot_user_ids,
+        identity_resolver=identity_resolver,
     )
     logger.info(
         "daily_summary: 序列化 %d 条消息 → %d 字符 / %d 行"
@@ -381,6 +387,7 @@ async def generate_period_report(
     local_tz: ZoneInfo,
     bot_user_ids: frozenset[str] | set[str] = frozenset(),
     input_char_budget: int | None = None,
+    identity_resolver=None,
 ) -> tuple[str, str]:
     """Generate a weekly or monthly group report using the model cascade.
 
@@ -400,7 +407,8 @@ async def generate_period_report(
     if period_kind == "monthly":
         budget = input_char_budget or DEFAULT_MONTHLY_INPUT_CHARS
         raw_log, month_stats = build_monthly_chat_input(
-            messages, local_tz=local_tz, bot_user_ids=bot_user_ids, target_chars=budget
+            messages, local_tz=local_tz, bot_user_ids=bot_user_ids, target_chars=budget,
+            identity_resolver=identity_resolver,
         )
         logger.info(
             "period_report[monthly]: 分周组装 %d 条消息 → %d 字符 / 预算 %d"
@@ -412,7 +420,8 @@ async def generate_period_report(
         envelope_message_count = month_stats.messages_selected
     else:
         raw_log, ser_stats = serialize_period_chat(
-            messages, local_tz=local_tz, bot_user_ids=bot_user_ids
+            messages, local_tz=local_tz, bot_user_ids=bot_user_ids,
+            identity_resolver=identity_resolver,
         )
         logger.info(
             "period_report[%s]: 序列化 %d 条消息 → %d 字符 / %d 行"

@@ -48,10 +48,10 @@ class _FakeStore:
     def __init__(self, rows):
         self._rows = rows
 
-    def list_quotes(self, group_id, offset=0, limit=50, keyword=""):
+    def list_quotes(self, group_id, offset=0, limit=50, keyword="", identity_snapshot=None):
         return [dict(r) for r in self._rows], len(self._rows)
 
-    def get_by_seq(self, group_id, seq):
+    def get_by_seq(self, group_id, seq, identity_snapshot=None):
         for r in self._rows:
             if r["group_seq"] == seq:
                 return dict(r)
@@ -74,7 +74,9 @@ def _patch_sources(monkeypatch, rows, *, user_names, canonical_by_uid, llm_ok=Tr
     import quickquip.app.message_pipeline as message_pipeline
 
     monkeypatch.setattr(message_pipeline, "group_quote_store", _FakeStore(rows))
-    identity = _FakeIdentityIndex(canonical_by_uid) if llm_ok else None
+    from quickquip.app.identities import IdentitySnapshot, web_identities
+    identity = _FakeIdentityIndex(canonical_by_uid if llm_ok else {})
+    monkeypatch.setattr(web_identities, "snapshot", lambda gid: IdentitySnapshot(identity, user_names))
     monkeypatch.setattr(
         message_pipeline, "get_sender_identity_sources",
         lambda gid: (user_names or None, identity),
@@ -89,7 +91,7 @@ async def test_list_quotes_enriches_sender_display(monkeypatch):
 
     result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
     entry = result["entries"][0]
-    assert entry["sender_display"] == "新名片"
+    assert entry["sender_display"] == "规范名"
     assert entry["sender_changed"] is True
     assert entry["quoted_sender_name"] == "旧名片"
 
@@ -135,16 +137,19 @@ async def test_list_quotes_falls_back_to_stats_without_llm(monkeypatch):
     assert entry["sender_changed"] is True
 
 
-def test_get_sender_identity_sources_degrades_when_llm_unavailable(monkeypatch):
-    import quickquip.app.message_pipeline as message_pipeline
+def test_get_sender_identity_sources_uses_shared_index_without_llm(monkeypatch):
+    from unittest.mock import Mock
+    import quickquip.app.message_pipeline as pipeline
+    from quickquip.app.identities import identities, IdentitySnapshot
+    from quickquip.common.identity import IdentityEntry, IdentityIndex
 
-    monkeypatch.setattr(message_pipeline, "stats_tracker", _FakeStatsTracker({"u1": "名片"}))
-
-    def _boom():
-        raise RuntimeError("llm unavailable")
-
-    monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", _boom)
-
-    user_names, identity_index = message_pipeline.get_sender_identity_sources("g1")
-    assert user_names == {"u1": "名片"}
-    assert identity_index is None
+    index = IdentityIndex(entries=[IdentityEntry("标准名", ["12345"])])
+    index._build_indexes()
+    shared = IdentitySnapshot(index, {"12345": "名片"})
+    monkeypatch.setattr(identities, "snapshot", lambda group: shared)
+    forbidden = Mock(side_effect=AssertionError("identity lookup must not initialize LLM"))
+    monkeypatch.setattr(pipeline, "_ensure_llm_bindings", forbidden)
+    names, resolved_index = pipeline.get_sender_identity_sources("10001")
+    assert names == shared.names
+    assert resolved_index is shared.index
+    forbidden.assert_not_called()

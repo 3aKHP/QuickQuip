@@ -38,6 +38,20 @@ def _llm_config() -> LLMConfig:
     )
 
 
+_FORMAT_NOTE_MARKERS = (
+    "聊天记录格式说明",
+    "×N",
+    "(bot)",
+    "你这一侧",
+    "避免归到任何第三方名下",
+)
+
+
+def _assert_format_note(system_prompt: str) -> None:
+    for marker in _FORMAT_NOTE_MARKERS:
+        assert marker in system_prompt
+
+
 def _sample_messages(n: int = 5) -> list[dict]:
     return [{"ts": 1600000000.0 + i * 3600, "sender": f"u{i}", "text": f"消息{i}"} for i in range(n)]
 
@@ -393,9 +407,7 @@ async def test_period_report_compact_log_and_format_note(monkeypatch):
     assert "【09-08 周二】" in user_content
 
     system_prompt = stub.requests[0].system_prompt
-    assert "聊天记录格式说明" in system_prompt
-    assert "×N" in system_prompt
-    assert "(bot)" in system_prompt
+    _assert_format_note(system_prompt)
 
 
 @pytest.mark.asyncio
@@ -477,7 +489,5 @@ async def test_daily_summary_uses_compact_serializer(monkeypatch):
     assert "QuickQuip(bot)：我来了" in user_content
 
     system_prompt = stub.requests[0].system_prompt
-    assert "聊天记录格式说明" in system_prompt
-    assert "×N" in system_prompt
-    assert "(bot)" in system_prompt
+    _assert_format_note(system_prompt)
     assert "流水账" in system_prompt or "开篇" in system_prompt

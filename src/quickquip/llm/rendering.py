@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from urllib.parse import urlsplit
 
 from quickquip.llm.identity import IdentityIndex
-from quickquip.llm.message_segments import message_has_segments, normalize_bot_self_ids, render_segment_leaf
+from quickquip.llm.message_segments import (
+    message_has_segments,
+    normalize_bot_self_ids,
+    render_segment_leaf,
+    segment_type_and_data,
+)
 from quickquip.llm.provider.base import LLMWebSearchReport
 
 
@@ -14,6 +19,8 @@ class RenderedMessage:
     text: str
     image_urls: list[str] = field(default_factory=list)
     mentioned_bot: bool = False
+    # 消息内 @ 提及的 QQ 号（bot 自身除外，按出现顺序、去重）——供信封档案注入
+    mentioned_qq_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -95,6 +102,7 @@ def render_message_for_llm(
     bot_self_ids: Iterable[int | str] | None = None,
     identity_index: IdentityIndex | None = None,
     include_image_placeholder: bool = False,
+    mention_names: Mapping[str, str] | None = None,
 ) -> RenderedMessage:
     if isinstance(message, str):
         return RenderedMessage(text=message.strip())
@@ -109,6 +117,7 @@ def render_message_for_llm(
     plain_parts: list[str] = []
     image_urls: list[str] = []
     mentioned_bot = False
+    mentioned_qq_ids: list[str] = []
     bot_keys = normalize_bot_self_ids(bot_self_id=bot_self_id, bot_self_ids=bot_self_ids)
     identities = identity_index or IdentityIndex()
 
@@ -118,17 +127,26 @@ def render_message_for_llm(
             bot_self_ids=bot_keys,
             identity_index=identities,
             include_image_placeholder=include_image_placeholder,
+            mention_names=mention_names,
         )
         if text:
             plain_parts.append(text)
         if segment_images:
             image_urls.extend(segment_images)
         mentioned_bot = mentioned_bot or was_bot
+        if was_bot:
+            continue
+        segment_type, segment_data = segment_type_and_data(segment)
+        if segment_type == "at":
+            at_qq = str(segment_data.get("qq", "")).strip()
+            if at_qq and at_qq not in mentioned_qq_ids:
+                mentioned_qq_ids.append(at_qq)
 
     return RenderedMessage(
         text="".join(plain_parts).strip(),
         image_urls=image_urls,
         mentioned_bot=mentioned_bot,
+        mentioned_qq_ids=mentioned_qq_ids,
     )
 
 
@@ -139,6 +157,7 @@ def render_reply_for_llm(
     bot_self_ids: Iterable[int | str] | None = None,
     identity_index: IdentityIndex | None = None,
     include_image_placeholder: bool = False,
+    mention_names: Mapping[str, str] | None = None,
 ) -> RenderedReply | None:
     if reply is None:
         return None
@@ -155,6 +174,7 @@ def render_reply_for_llm(
         bot_self_ids=bot_self_ids,
         identity_index=identity_index,
         include_image_placeholder=include_image_placeholder,
+        mention_names=mention_names,
     )
     user_id = str(getattr(reply, "user_id", "") or "").strip()
     sender_name = _get_sender_name(getattr(reply, "sender", None))

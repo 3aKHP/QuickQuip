@@ -89,7 +89,7 @@ def test_day_sections_with_weekdays_and_midnight_split():
 
 
 def test_identity_prefers_user_id_over_sender_name():
-    """同昵称不同 user_id 不合并；同 user_id 相邻消息合并（身份按 user_id）。"""
+    """同昵称不同 user_id 不合并；同名碰撞附 QQ 后缀区分（碰撞触发式后缀）。"""
     messages = [
         _msg("小明", "我是A", _ts(ss=0), user_id="111"),
         _msg("小明", "我是B", _ts(ss=10), user_id="222"),  # 同名不同人：另起行
@@ -100,9 +100,9 @@ def test_identity_prefers_user_id_over_sender_name():
 
     assert text == "\n".join([
         "【09-08 周二】",
-        "[08:12] 小明：我是A",
-        "小明：我是B",
-        "小明：我是A2",
+        "[08:12] 小明（QQ 111）：我是A",
+        "小明（QQ 222）：我是B",
+        "小明（QQ 111）：我是A2",
     ])
 
 
@@ -332,3 +332,33 @@ def test_monthly_input_deterministic():
 
     assert text_a == text_b
     assert stats_a == stats_b
+
+
+def test_identity_resolver_renders_canonical_for_registered():
+    """读时重解析：登记成员渲染名用标准身份，未登记保持归档显示名。"""
+    messages = [
+        _msg("旧名片", "第一句", _ts(ss=0), user_id="111"),
+        _msg("路人", "第二句", _ts(ss=10), user_id="222"),
+    ]
+
+    def resolver(qq: str) -> str:
+        return {"111": "标准甲"}.get(qq, "")
+
+    text, _ = serialize_period_chat(messages, local_tz=TZ, identity_resolver=resolver)
+
+    assert "[08:12] 标准甲：第一句" in text
+    assert "路人：第二句" in text
+
+
+def test_identity_resolver_collision_suffix_only_for_colliding_names():
+    """无同名碰撞时不附加 QQ 后缀，保持压缩形态。"""
+    messages = [
+        _msg("甲", "一", _ts(ss=0), user_id="111"),
+        _msg("乙", "二", _ts(ss=5), user_id="222"),
+    ]
+
+    text, _ = serialize_period_chat(
+        messages, local_tz=TZ, identity_resolver=lambda qq: ""
+    )
+
+    assert "甲（QQ" not in text and "乙（QQ" not in text
