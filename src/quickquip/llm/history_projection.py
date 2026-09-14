@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from quickquip.llm.agent_records import ResponseOwner
+from quickquip.llm.provider.base import LLMProviderError
 from quickquip.llm.provider.owner import owner_matches
 from quickquip.llm.store_parts.agent_records import (
     LoadedLoop,
@@ -34,6 +35,20 @@ from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 PATH_NATIVE = "native"
 PATH_STRUCTURED = "structured"
 PATH_ARCHIVE = "archive"
+
+# 原生路径协议白名单：claude content / gemini parts / Responses output items。
+NATIVE_REPLAY_PROTOCOLS = ("claude", "gemini", "openai_responses")
+
+# 结构化重建时允许从原生块转入 thinking_blocks 的类型（按协议派生）：
+# claude 签名 thinking、openai 的 DeepSeek 式 IR reasoning、gemini part。
+# openai_responses 为空集——其序列化端从不序列化 thinking_blocks，原始
+# reasoning item 装入只会虚增预算计量（wire 零效果）。
+_STRUCTURED_THINKING_TYPES: dict[str, frozenset[str]] = {
+    "claude": frozenset({"thinking", "redacted_thinking"}),
+    "openai": frozenset({"reasoning"}),
+    "gemini": frozenset({"gemini_part"}),
+    "openai_responses": frozenset(),
+}
 
 _ARCHIVE_TAG = "[历史档案]"
 _ORPHAN_TRIGGER_NOTE = "[系统说明] 该段历史的原始触发消息未保留。"
@@ -126,8 +141,22 @@ def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> boo
                     return False
             elif "text" not in block and "inlineData" not in block and "fileData" not in block:
                 return False
+        elif protocol == "openai_responses":
+            # output items 形态（复用终态校验）+ 回放安全条件：reasoning
+            # item 必须携带非空密文——store:false 手动上下文下缺密文的
+            # reasoning 不具备原生回放资格，降级走通用重建。
+            if kind == "reasoning" and not str(block.get("encrypted_content") or "").strip():
+                return False
         else:
             return False
+    if protocol != "openai_responses":
+        return True
+    from quickquip.llm.provider.openai_responses.response import validate_output_items
+
+    try:
+        validate_output_items(list(blocks), provider_id="history")
+    except LLMProviderError:
+        return False
     return True
 
 
@@ -184,11 +213,23 @@ def _decide_loop_path(
         for turn in loop.turns
         if _turn_native_blocks(turn) is not None
     )
-    if protocol in ("claude", "gemini") and has_any_native and target is not None and owner_matched:
-        for blocks in native_turn_blocks.values():
-            if blocks is not None and not _native_blocks_valid(protocol, blocks):
-                return PATH_ARCHIVE, "native_structure_invalid"
-        return PATH_NATIVE, None
+    if (
+        protocol in NATIVE_REPLAY_PROTOCOLS
+        and has_any_native
+        and target is not None
+        and owner_matched
+    ):
+        if all(
+            blocks is None or _native_blocks_valid(protocol, blocks)
+            for blocks in native_turn_blocks.values()
+        ):
+            return PATH_NATIVE, None
+        # 形状无效的处置按协议分叉：claude/gemini 先例走档案（签名/部件
+        # 损坏即记录损坏）；responses 的通用重建不依赖原生块，降 structured
+        # 保住工具事实。
+        if protocol == "openai_responses":
+            return PATH_STRUCTURED, "native_structure_invalid"
+        return PATH_ARCHIVE, "native_structure_invalid"
     if protocol == "claude":
         for turn in loop.turns:
             if not turn.tools:
@@ -205,7 +246,9 @@ def _decide_loop_path(
                 )
                 return PATH_ARCHIVE, reason
     if has_any_native:
-        return PATH_STRUCTURED, "owner_mismatch"
+        # 有原生副本但未获原生路径：target 缺失（fallback_urls 等）与真失配
+        # 分开标注，降级原因可观测不失真。
+        return PATH_STRUCTURED, "owner_mismatch" if target is not None else "owner_unknown"
     return PATH_STRUCTURED, None
 
 
@@ -219,6 +262,8 @@ def _user_trigger_message(loop: LoadedLoop) -> LLMConversationMessage:
 
 def _project_loop_native(
     loop: LoadedLoop,
+    *,
+    protocol: str,
 ) -> list[LLMConversationMessage]:
     messages = [_user_trigger_message(loop)]
     for turn in loop.turns:
@@ -226,7 +271,11 @@ def _project_loop_native(
         if blocks is None:
             # 同 Loop 内个别 Turn 无原生副本：该 Turn 退通用表达，
             # 其余 Turn 保持原生（Loop 级路径已由决策保证合法）。
-            messages.extend(_project_turn_structured(turn, loop.loop_id, native_owner_match=False))
+            messages.extend(
+                _project_turn_structured(
+                    turn, loop.loop_id, native_owner_match=False, protocol=protocol,
+                )
+            )
             continue
         messages.append(
             LLMConversationMessage(role="assistant", content=turn.text, native_content=list(blocks))
@@ -252,6 +301,7 @@ def _project_turn_structured(
     loop_id: str,
     *,
     native_owner_match: bool,
+    protocol: str,
 ) -> list[LLMConversationMessage]:
     tool_calls = [
         LLMToolCall(
@@ -266,12 +316,8 @@ def _project_turn_structured(
     if native_owner_match:
         blocks = _turn_native_blocks(turn)
         if blocks is not None:
-            thinking_blocks = [
-                block
-                for block in blocks
-                if block.get("type")
-                in {"thinking", "redacted_thinking", "reasoning", "gemini_part"}
-            ]
+            allowed = _STRUCTURED_THINKING_TYPES.get(protocol, frozenset())
+            thinking_blocks = [block for block in blocks if block.get("type") in allowed]
     messages = [
         LLMConversationMessage(
             role="assistant",
@@ -332,6 +378,75 @@ def _project_loop_archive(loop: LoadedLoop) -> list[LLMConversationMessage]:
     ]
 
 
+def _native_declared_call_ids(messages: list[LLMConversationMessage]) -> list[str]:
+    """原生批次声明的 function call_id（按出现顺序；仅 assistant native 消息）。"""
+    declared: list[str] = []
+    for message in messages:
+        if message.native_content is None:
+            continue
+        for item in message.native_content:
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                call_id = item.get("call_id")
+                if isinstance(call_id, str) and call_id:
+                    declared.append(call_id)
+    return declared
+
+
+def _demote_loop_to_structured(
+    loop: LoadedLoop,
+    *,
+    protocol: str,
+    archive_loop_ids: frozenset[str],
+    reason: str,
+) -> tuple[list[LLMConversationMessage], LoopProjectionDecision]:
+    """把单个 Loop 以 target=None 重投影为通用形态并标注降级原因。"""
+    demoted = project_loops(
+        [loop], target=None, protocol=protocol, archive_loop_ids=archive_loop_ids,
+    )
+    decision = demoted.decisions[0]
+    return demoted.segments[loop.loop_id], LoopProjectionDecision(
+        loop_id=loop.loop_id, path=decision.path, reason=reason,
+    )
+
+
+def _responses_replay_preflight(
+    loops: Sequence[LoadedLoop],
+    decisions: dict[str, LoopProjectionDecision],
+    segments: dict[str, list[LLMConversationMessage]],
+    *,
+    archive_loop_ids: frozenset[str],
+) -> None:
+    """Responses 原生回放的确定性守门（发送前消灭可预判的序列化失败）。
+
+    - 跨 Loop call_id 冲突 → 后到 Loop 降 structured（stable wire id 构造性唯一）。
+    - Loop 内原生声明集与 tool 应答集不一致（记录部分损坏）→ 该 Loop 降
+      structured（通用重建自 executions 出发，自洽配对）。
+    """
+    seen_call_ids: set[str] = set()
+    for loop in loops:
+        if decisions[loop.loop_id].path != PATH_NATIVE:
+            continue
+        declared = _native_declared_call_ids(segments[loop.loop_id])
+        answered = {
+            message.tool_call_id
+            for message in segments[loop.loop_id]
+            if message.role == "tool" and message.tool_call_id
+        }
+        if answered != set(declared):
+            segments[loop.loop_id], decisions[loop.loop_id] = _demote_loop_to_structured(
+                loop, protocol="openai_responses",
+                archive_loop_ids=archive_loop_ids, reason="native_pairing_incomplete",
+            )
+            continue
+        if any(call_id in seen_call_ids for call_id in declared):
+            segments[loop.loop_id], decisions[loop.loop_id] = _demote_loop_to_structured(
+                loop, protocol="openai_responses",
+                archive_loop_ids=archive_loop_ids, reason="native_call_id_collision",
+            )
+            continue
+        seen_call_ids.update(declared)
+
+
 def project_loops(
     loops: Sequence[LoadedLoop],
     *,
@@ -351,7 +466,7 @@ def project_loops(
             else _decide_loop_path(loop, target=target, protocol=protocol)
         )
         if path == PATH_NATIVE:
-            loop_messages = _project_loop_native(loop)
+            loop_messages = _project_loop_native(loop, protocol=protocol)
         elif path == PATH_STRUCTURED:
             loop_messages = [_user_trigger_message(loop)]
             # 与 _decide_loop_path 同谓词：只对"有原生块"的 Turn 要求 owner
@@ -364,7 +479,7 @@ def project_loops(
             for turn in loop.turns:
                 loop_messages.extend(
                     _project_turn_structured(
-                        turn, loop.loop_id, native_owner_match=owner_match
+                        turn, loop.loop_id, native_owner_match=owner_match, protocol=protocol,
                     )
                 )
         else:
@@ -372,6 +487,18 @@ def project_loops(
         messages.extend(loop_messages)
         segments[loop.loop_id] = loop_messages
         decisions.append(LoopProjectionDecision(loop_id=loop.loop_id, path=path, reason=reason))
+    if protocol == "openai_responses":
+        decisions_by_id = {decision.loop_id: decision for decision in decisions}
+        _responses_replay_preflight(
+            loops, decisions_by_id, segments, archive_loop_ids=archive_loop_ids,
+        )
+        # 守门可能替换个别 Loop 的投影/决策，消息序列按最终段重建。
+        messages = [
+            message
+            for loop in loops
+            for message in segments[loop.loop_id]
+        ]
+        decisions = [decisions_by_id[loop.loop_id] for loop in loops]
     return ProjectionResult(messages=messages, decisions=tuple(decisions), segments=segments)
 
 
@@ -488,7 +615,8 @@ def _strip_native_thinking(
     签名回传要求只约束活跃工具循环内的最近 assistant 轮；已关闭 Loop 的
     历史轮剥 thinking 属协议合法的保真降级。块剥空（纯 thinking 轮）退
     通用正文表达并补占位（空 text 块会被 Claude 拒 400），该轮无工具
-    声明，配对不受影响。
+    声明，配对不受影响。Responses 剥 ``reasoning`` items（旧轮密文非
+    必需，message/function_call 原样保留即配对完整）。
     """
     stripped: list[LLMConversationMessage] = []
     changed = False
@@ -502,6 +630,8 @@ def _strip_native_thinking(
                 block for block in blocks
                 if block.get("type") not in {"thinking", "redacted_thinking"}
             ]
+        elif protocol == "openai_responses":
+            kept = [block for block in blocks if block.get("type") != "reasoning"]
         else:
             kept = [block for block in blocks if not block.get("thought")]
         if len(kept) == len(blocks):

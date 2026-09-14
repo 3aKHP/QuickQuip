@@ -55,6 +55,7 @@ def _tool_exec(
     result: dict | None = None,
     arguments_json: str | None = '{"query":"镜子"}',
     retention: str = "bounded",
+    provider_call_id: str | None = None,
 ) -> LoadedToolExecution:
     if result is None and status == "succeeded":
         result = {
@@ -64,7 +65,7 @@ def _tool_exec(
     return LoadedToolExecution(
         execution_id=execution_id,
         call_index=int(execution_id.rsplit("_", 1)[-1]),
-        provider_call_id=f"call_{execution_id}",
+        provider_call_id=provider_call_id or f"call_{execution_id}",
         tool_name="get_identity",
         arguments_json=arguments_json,
         arguments_omission_reason=None,
@@ -136,6 +137,235 @@ GEMINI_PARTS = [
     {"text": "先查一下。"},
     {"functionCall": {"id": "gemini_tool_1", "name": "get_identity", "args": {"query": "镜子"}}},
 ]
+
+
+RESPONSES_OWNER = replace(OWNER, protocol="openai_responses")
+
+RESPONSES_OUTPUT_ITEMS = [
+    {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [{"type": "summary_text", "text": "需要先查询身份。"}],
+        "encrypted_content": "gAAAAABoGogL0EiS",
+    },
+    {
+        "type": "function_call",
+        "id": "fc_1",
+        "call_id": "call_resp_identity",
+        "name": "get_identity",
+        "arguments": '{"query":"镜子"}',
+    },
+]
+
+RESPONSES_FINAL_ITEMS = [
+    {
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": "镜子是群友。"}],
+    },
+]
+
+
+# ── OpenAI Responses：跨轮原生回放（PR-B） ───────────────────────
+
+
+def _responses_turn(turn_id: str, *, items, tools=(), owner=None, text="先查一下。"):
+    return _turn(
+        turn_id,
+        text=text,
+        tools=tools,
+        native_state=_native_state(owner, items),
+        owner=_owner_dict(owner) if owner else None,
+    )
+
+
+def test_responses_same_owner_replays_native_output_items():
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+            _responses_turn("turn_1", items=RESPONSES_FINAL_ITEMS, owner=RESPONSES_OWNER),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    assert result.decisions[0].path == PATH_NATIVE
+    assert result.decisions[0].reason is None
+    assistants = [m for m in result.messages if m.role == "assistant"]
+    # 原生批次逐字节回放：reasoning 密文、item id、顺序全部保持。
+    assert assistants[0].native_content == RESPONSES_OUTPUT_ITEMS
+    assert assistants[1].native_content == RESPONSES_FINAL_ITEMS
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    # 工具消息应答原生 function_call 的原 call_id（配对不重派生）。
+    assert tool_messages[0].tool_call_id == "call_resp_identity"
+
+
+def test_responses_owner_mismatch_degrades_to_structured():
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    # profile/端点/模型任一指纹变化都构成失配（切档位即降级）。
+    other = replace(RESPONSES_OWNER, profile_fingerprint="pf-other")
+    result = project_loops([loop], target=other, protocol="openai_responses")
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "owner_mismatch"
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content is None
+    # 通用重建不带原始 reasoning item（wire 无效果，纯预算虚增）。
+    assert not assistant.thinking_blocks
+    assert assistant.tool_calls[0].name == "get_identity"
+    assert assistant.tool_calls[0].id.startswith("call_")
+
+
+def test_responses_target_unknown_labelled_owner_unknown():
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops([loop], target=None, protocol="openai_responses")
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    # fallback_urls 等导致 target 缺失：与真失配分开标注（可观测不失真）。
+    assert decision.reason == "owner_unknown"
+
+
+def test_responses_reasoning_without_ciphertext_degrades_to_structured():
+    cipherless = [
+        {
+            "type": "reasoning",
+            "id": "rs_2",
+            "summary": [{"type": "summary_text", "text": "只有摘要。"}],
+        },
+        dict(RESPONSES_OUTPUT_ITEMS[1]),
+    ]
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=cipherless,
+                tools=(_tool_exec("exec_0"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    # store:false 回放要求 reasoning 带密文；缺失即不具回放资格。responses
+    # 的通用重建不依赖原生块 → structured（区别于 claude/gemini 的档案先例）。
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_structure_invalid"
+
+
+def test_responses_unknown_item_type_invalid():
+    blocks = [
+        dict(RESPONSES_OUTPUT_ITEMS[0]),
+        {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+    ]
+    loop = _loop(
+        "loop_1",
+        (_responses_turn("turn_0", items=blocks, owner=RESPONSES_OWNER),),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    assert result.decisions[0].path == PATH_STRUCTURED
+    assert result.decisions[0].reason == "native_structure_invalid"
+
+
+def test_responses_cross_loop_call_id_collision_demotes_later_loop():
+    first = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    # 中转回显短 id：跨 Loop 重复声明同一 call_id。
+    second = _loop(
+        "loop_2",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [first, second], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    assert result.decisions[0].path == PATH_NATIVE
+    decision = result.decisions[1]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_call_id_collision"
+    # 后到 Loop 重投影为 stable wire id（构造性唯一），配对自洽。
+    second_tool = [m for m in result.segments["loop_2"] if m.role == "tool"][0]
+    assert second_tool.tool_call_id != "call_resp_identity"
+    assert second_tool.tool_call_id.startswith("call_")
+
+
+def test_responses_native_pairing_mismatch_demotes_loop():
+    # 原生批次声明两个 function_call，执行记录只剩一个（记录部分损坏）。
+    twin_calls = [
+        dict(RESPONSES_OUTPUT_ITEMS[0]),
+        dict(RESPONSES_OUTPUT_ITEMS[1]),
+        {
+            "type": "function_call",
+            "id": "fc_2",
+            "call_id": "call_resp_second",
+            "name": "get_identity",
+            "arguments": '{"query":"4s"}',
+        },
+    ]
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=twin_calls,
+                tools=(_tool_exec("exec_0"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_pairing_incomplete"
 
 
 # ── 同 owner：原生路径 ─────────────────────────────────────────────

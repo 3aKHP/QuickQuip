@@ -43,6 +43,24 @@ def _native_text(turn: LoadedTurn) -> Iterator[str]:
         if isinstance(call, dict):
             yield from _strings(call.get("args"))
             yield str(call.get("name") or "")
+        # OpenAI Responses output items：可读载荷嵌在 message content 与
+        # reasoning summary 的 parts 里；function_call 的 name/arguments 在
+        # 块级直接扫描（executions 的 arguments_json 为主通道，此处兜住
+        # 记录不一致的形态）。encrypted_content 与签名同待遇不展开。
+        if block.get("type") == "function_call":
+            yield str(block.get("name") or "")
+            if isinstance(block.get("arguments"), str):
+                yield block["arguments"]
+        for nested_key in ("content", "summary"):
+            parts = block.get(nested_key)
+            if not isinstance(parts, list):
+                continue
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                for key in ("text", "refusal"):
+                    if isinstance(part.get(key), str):
+                        yield part[key]
 
 
 def _requires_archive(loop: LoadedLoop, sensitive: SensitiveFilter) -> bool:

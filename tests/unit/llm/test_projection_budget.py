@@ -231,6 +231,51 @@ def test_native_thinking_stripped_gemini_thought_parts():
     assert any("functionCall" in block for block in assistant.native_content)
 
 
+def test_native_thinking_stripped_responses_reasoning_items():
+    # Responses 跨轮回放超预算：tier-0 剥 reasoning items（密文旧轮非必需），
+    # message/function_call 原样保留即配对完整（PR-B 跨轮裁剪规则）。
+    from tests.unit.llm.test_history_projection import (
+        RESPONSES_OUTPUT_ITEMS,
+        RESPONSES_OWNER,
+    )
+
+    blocks = [
+        dict(RESPONSES_OUTPUT_ITEMS[0]),
+        dict(RESPONSES_OUTPUT_ITEMS[1]),
+    ]
+    loop = _loop(
+        "loop_rcot",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                native_state=_native_state(RESPONSES_OWNER, blocks),
+                owner=_owner_dict(RESPONSES_OWNER),
+            ),
+        ),
+    )
+    full = project_loops_with_budget(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses", budget_tokens=10**9
+    )
+    assert full.decisions[0].reason is None
+    full_estimate = _native_estimate(full.messages)
+    result = project_loops_with_budget(
+        [loop],
+        target=RESPONSES_OWNER,
+        protocol="openai_responses",
+        # 密文固定档 2048/item：剥掉即显著低于全量。
+        budget_tokens=full_estimate - 2048,
+    )
+    decision = result.decisions[0]
+    assert decision.reason == "reduced:native_thinking_stripped"
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content is not None
+    types = [block.get("type") for block in assistant.native_content]
+    assert "reasoning" not in types
+    assert "function_call" in types, "工具声明保留，配对完整"
+    assert any(m.role == "tool" for m in result.messages), "工具结果保留"
+
+
 def test_huge_native_cot_still_reaches_deeper_ladder():
     # 大 CoT + 大工具结果：剥 thinking 后仍超限，继续走到 native_dropped
     # 或更深档位，签名块不再上 wire。

@@ -153,10 +153,9 @@ def serialize_input_items(
         if message.role != "tool":
             _flush_tool_images()
         if message.role == "assistant" and message.native_content is not None:
-            # PR-A 前提：native_content 只由本协议的当前工具循环写入（内存
-            # 直传，同 provider/model），历史投影的跨轮原生回放对
-            # openai_responses 尚未开放（protocol 白名单挡在
-            # history_projection）。owner 五元组校验随 PR-B 跨轮回放一并接入。
+            # native_content 两个写入方在此汇流：当前工具循环的当轮续接
+            # （内存直传，同 provider/model）与历史投影的跨轮原生回放
+            # （history_projection 已完成 owner 五元组校验与确定性守门）。
             items = validate_output_items(
                 message.native_content, provider_id=provider_id
             )

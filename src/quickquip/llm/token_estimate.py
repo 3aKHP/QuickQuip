@@ -18,7 +18,7 @@ _CJK_ORD_FLOOR = 0x2E80
 NATIVE_MEDIA_FLAT_TOKENS = 1200
 # 原生块内不透明加密载荷（Responses reasoning 密文 encrypted_content）的固定档
 # 预留：密文字节数与回放时实际计入的 reasoning token 无线性关系，字符折算会
-# 系统性高估请求输入；按字段固定档预留（PR-A 循环内口径，跨轮规则随 PR-B）。
+# 系统性高估请求输入；按字段固定档预留（循环内续接与跨轮历史回放同口径）。
 NATIVE_ENCRYPTED_FLAT_TOKENS = 2048
 # 每个原生块的结构开销（块类型、id、字段名的 wire 折算下界）。
 _NATIVE_BLOCK_STRUCTURE_TOKENS = 8

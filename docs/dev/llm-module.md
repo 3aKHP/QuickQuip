@@ -63,7 +63,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
 - `src/quickquip/llm/provider/`（包）
-  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
+  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
 - `src/quickquip/llm/tool_discovery.py`
@@ -206,7 +206,7 @@ LLM 默认只在以下场景触发：
 
 ### 4.2 LLM 短期会话
 
-工具历史投影在请求内按当前敏感词表检查完整 Loop。命中 block 或包含输出过滤替换态时，使用清洗后的文本档案并保留工具终态汇总，省略原生块、工具参数和结果正文；所有预算降级沿用该请求副本，持久化原文保持不变。未命中的 Loop 保留原有协议重放路径。
+工具历史投影在请求内按当前敏感词表检查完整 Loop。命中 block 或包含输出过滤替换态时，使用清洗后的文本档案并保留工具终态汇总，省略原生块、工具参数和结果正文；所有预算降级沿用该请求副本，持久化原文保持不变。未命中的 Loop 保留原有协议重放路径；原生回放（Claude 签名块 / Gemini parts / Responses output items）以 owner 五元组精确匹配为前提，失配或形状损坏按协议各自降级（档案/通用重建），Responses 侧另有跨 Loop call_id 冲突与配对完整的发送前守门。
 
 LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
 

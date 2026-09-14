@@ -5,14 +5,23 @@ trace 与 usage 计量（``_post_json`` / ``_post_stream_sse`` / complete()
 模板方法）。序列化、终态解析与流折叠分别委托 request/response/stream
 模块；响应折叠与交叉验证完成后才向工具循环返回结果。
 
+历史降级重试（移植 vesicle portable checkpoint 思想）：请求以 400 失败
+且携带历史原生 reasoning（密文）时，剥去历史批次 reasoning item 重试
+一次——旧轮 reasoning 非协议必需，message/function_call 保留即工具事实
+不丢；当前循环批次（最后一条 user 消息之后）一律不动。二次失败如实
+上抛。鉴权/限流/5xx 不触发（基座已有对应处置）。
+
 WS 路径与 attempt-commit barrier 不随本协议后端引入（1.16.1 候选专项）。
 """
 from __future__ import annotations
 
+import logging
+from dataclasses import replace
 from typing import Any
 
 from quickquip.llm.provider.base import (
     BaseProviderClient,
+    LLMProviderError,
     LLMRequest,
     LLMResponse,
 )
@@ -24,6 +33,8 @@ from quickquip.llm.provider.openai_responses.profiles import (
 from quickquip.llm.provider.openai_responses.request import build_responses_payload
 from quickquip.llm.provider.openai_responses.response import parse_responses_body
 from quickquip.llm.provider.openai_responses.stream import fold_stream_events
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIResponsesProviderClient(BaseProviderClient):
@@ -123,3 +134,45 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         response = self._assemble_stream_response(chunks, request.model)
         response.owner = build_response_owner(self.config, final_url, request.model)
         return response
+
+    async def complete(self, request: LLMRequest) -> LLMResponse:
+        try:
+            return await super().complete(request)
+        except LLMProviderError as exc:
+            degraded = self._portable_history_request(request)
+            if degraded is None or exc.transport or exc.status_code != 400:
+                raise
+            logger.warning(
+                "%s responses request rejected with 400; retrying once without "
+                "history reasoning items",
+                self.config.id,
+            )
+            return await super().complete(degraded)
+
+    def _portable_history_request(self, request: LLMRequest) -> LLMRequest | None:
+        """剥历史原生 reasoning 的可重试请求；无历史密文可剥时返回 None。
+
+        边界：最后一条 user 消息之后的 assistant/tool 消息属当前工具循环
+        （协议要求原样回传，不动）；之前的 native 批次是已关闭 Loop 的
+        历史，reasoning item 非必需，剥除后 message/function_call 照旧。
+        """
+        last_user = max(
+            (index for index, m in enumerate(request.messages) if m.role == "user"),
+            default=-1,
+        )
+        stripped_messages = []
+        stripped_items = 0
+        for index, message in enumerate(request.messages):
+            blocks = message.native_content
+            if index >= last_user or blocks is None:
+                stripped_messages.append(message)
+                continue
+            kept = [
+                block for block in blocks
+                if not (isinstance(block, dict) and block.get("type") == "reasoning")
+            ]
+            stripped_items += len(blocks) - len(kept)
+            stripped_messages.append(replace(message, native_content=kept or None))
+        if not stripped_items:
+            return None
+        return replace(request, messages=stripped_messages)

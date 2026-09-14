@@ -174,3 +174,50 @@ async def test_safe_history_serializes_without_native_or_blocked_payload(tmp_pat
     assert MARKER not in wire
     assert "signature" not in wire
     assert "tool_use" not in wire and "functionCall" not in wire and "tool_calls" not in wire
+
+
+@pytest.mark.parametrize("location", ["message_text", "summary_text", "call_arguments"])
+def test_responses_native_nested_text_is_scanned(tmp_path, location):
+    """Responses output items 的可读载荷嵌在 content/summary parts 与参数里，
+    原生回放上 wire 前必须与 turn.text 同门槛受当前词表重扫。"""
+    blocks = [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "安全的摘要。"}],
+            "encrypted_content": "cipher-opaque",
+        },
+        {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_0",
+            "name": "lookup",
+            "arguments": '{"query":"safe"}',
+        },
+        {
+            "type": "message",
+            "id": "msg_1",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "answer"}],
+        },
+    ]
+    if location == "message_text":
+        blocks[2]["content"][0]["text"] = MARKER
+    elif location == "summary_text":
+        blocks[0]["summary"][0]["text"] = MARKER
+    else:
+        blocks[1]["arguments"] = '{"query":"blocked"}'
+    owner = ResponseOwner("p", "openai_responses", "m", "m", "endpoint", "profile")
+    turn = LoadedTurn(
+        "turn", 0, 2, "answer", (), {"blocks": blocks}, None, asdict(owner),
+        "stop", "allowed", "visible", "all_turns", (), (),
+    )
+    loop = LoadedLoop(
+        "loop", "1001", 1, "group_direct", "2026-09-01", "2026-09-01",
+        "completed", None, False, 0, 100, {"content": "question"}, (turn,),
+    )
+    sensitive = make_sensitive_filter(tmp_path, "block")
+    prepared, archived = prepare_safe_history([loop], sensitive)
+    assert loop.loop_id in archived
+    # 密文与 id 字段保持不透明（不在扫描面）。
+    assert prepared[0].turns[0].native_state is None

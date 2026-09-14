@@ -1058,3 +1058,154 @@ def test_usage_metering_input_semantics_inclusive():
     assert usage.prompt == 300  # inclusive：不叠加 cache_read
     assert usage.cache_read == 250
     assert usage.fresh_input == 50
+
+
+# ── 历史降级重试（PR-B：portable checkpoint 移植） ─────────────────────────
+
+
+_HISTORY_NATIVE = [
+    {
+        "type": "reasoning",
+        "id": "rs_hist",
+        "summary": [{"type": "summary_text", "text": "历史思考。"}],
+        "encrypted_content": "gAAA-hist-cipher",
+    },
+    {
+        "type": "message",
+        "id": "msg_hist",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "历史回答。"}],
+    },
+]
+
+_CURRENT_LOOP_NATIVE = [
+    {
+        "type": "reasoning",
+        "id": "rs_cur",
+        "summary": [{"type": "summary_text", "text": "当前思考。"}],
+        "encrypted_content": "gAAA-current-cipher",
+    },
+    {
+        "type": "function_call",
+        "id": "fc_cur",
+        "call_id": "call_cur",
+        "name": "get_identity",
+        "arguments": '{"query":"镜子"}',
+    },
+]
+
+
+def _history_replay_request() -> LLMRequest:
+    """历史原生批次（最后 user 之前）+ 当前循环原生批次（其后）。"""
+    return _request(
+        [
+            LLMConversationMessage(role="user", content="旧问题"),
+            LLMConversationMessage(
+                role="assistant", content="历史回答。", native_content=list(_HISTORY_NATIVE)
+            ),
+            LLMConversationMessage(role="user", content="新问题"),
+            LLMConversationMessage(
+                role="assistant", content="", native_content=list(_CURRENT_LOOP_NATIVE)
+            ),
+            LLMConversationMessage(
+                role="tool", content="镜子是群友。", tool_call_id="call_cur",
+                tool_name="get_identity",
+            ),
+        ]
+    )
+
+
+class _RejectingThenOkFake(FakeOpenAIResponsesClient):
+    """第一次 _post_json 抛指定错误，之后回放正常响应体。"""
+
+    def __init__(self, config, error: LLMProviderError, bodies: list[dict]):
+        super().__init__(config, bodies)
+        self.error = error
+
+    async def _post_json(self, url, headers, payload):
+        self.payloads.append(payload)
+        if self.error is not None:
+            error = self.error
+            self.error = None
+            raise error
+        return self.response_bodies.pop(0)
+
+
+_OK_BODY = _completed_body(
+    [{"type": "message", "role": "assistant",
+      "content": [{"type": "output_text", "text": "降级后回答"}]}]
+)
+
+
+async def test_client_400_history_reasoning_degrades_and_retries(caplog):
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 400 bad request", status_code=400), [_OK_BODY]
+    )
+    with caplog.at_level("WARNING", logger="quickquip.llm.provider.openai_responses.client"):
+        response = await client.complete(_history_replay_request())
+    assert response.text == "降级后回答"
+    assert len(client.payloads) == 2
+    assert any("retrying once without history reasoning" in r.message for r in caplog.records)
+    first_input = client.payloads[0]["input"]
+    second_input = client.payloads[1]["input"]
+    assert any(item.get("type") == "reasoning" for item in first_input)
+    # 降级请求：历史 reasoning 剥除、历史 message 保留（工具事实/正文不丢）。
+    assert not any(
+        item.get("id") == "rs_hist" for item in second_input
+    )
+    assert any(item.get("id") == "msg_hist" for item in second_input)
+    # 当前循环批次不受降级影响（协议要求原样回传）。
+    assert any(item.get("id") == "rs_cur" for item in second_input)
+    assert any(item.get("call_id") == "call_cur" for item in second_input)
+
+
+async def test_client_current_loop_reasoning_never_stripped_by_degrade():
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 400 bad request", status_code=400), [_OK_BODY]
+    )
+    await client.complete(_history_replay_request())
+    second_input = client.payloads[1]["input"]
+    reasoning_ids = {
+        item.get("id") for item in second_input if item.get("type") == "reasoning"
+    }
+    assert reasoning_ids == {"rs_cur"}
+
+
+async def test_client_400_without_history_reasoning_surfaces():
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 400 bad request", status_code=400), [_OK_BODY]
+    )
+    plain = _request(
+        [
+            LLMConversationMessage(role="user", content="问题"),
+            LLMConversationMessage(
+                role="assistant", content="历史回答。", native_content=list(_HISTORY_NATIVE[1:])
+            ),
+            LLMConversationMessage(role="user", content="新问题"),
+        ]
+    )
+    with pytest.raises(LLMProviderError):
+        await client.complete(plain)
+    # 无历史密文可剥：不重试。
+    assert len(client.payloads) == 1
+
+
+async def test_client_non_400_error_not_degrade_retried():
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 403 forbidden", status_code=403), [_OK_BODY]
+    )
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    assert len(client.payloads) == 1
+
+
+async def test_client_degrade_retry_second_failure_surfaces():
+    class _Always400Fake(FakeOpenAIResponsesClient):
+        async def _post_json(self, url, headers, payload):
+            self.payloads.append(payload)
+            raise LLMProviderError("HTTP 400 bad request", status_code=400)
+
+    client = _Always400Fake(_config(), [])
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    assert len(client.payloads) == 2
