@@ -12,6 +12,7 @@ import tomllib
 
 from quickquip.common.paths import (
     AWAKENING_BOREDOM_GROUPS_PATH,
+    CONFIG_AWAKENING_TOML,
     RULE_SWITCH_JSON_PATH as RULE_SWITCH_PATH,
 )
 from quickquip.app.web.action_queue import action_queue
@@ -22,7 +23,6 @@ from quickquip.chat.awakening import (
     AwakeningConfig,
     AwakeningGroupOverride,
     BoredomEnabledGroups,
-    CONFIG_AWAKENING_TOML,
     effective_boredom_scan_interval,
     get_config,
     load_awakening_config,
@@ -36,18 +36,9 @@ _GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 # 保留本模块级名字是因为既有测试以它为 patch 点。
 _BOREDOM_GROUPS_PATH = AWAKENING_BOREDOM_GROUPS_PATH
 _CONFIG_PATH = CONFIG_AWAKENING_TOML
-_OVERRIDE_FIELDS = [
-    "extend_duration",
-    "fallback_probability",
-    "boredom_silence_seconds",
-    "boredom_probability",
-    "boredom_check_interval",
-    "boredom_dnd_start",
-    "boredom_dnd_end",
-    "relevance_threshold",
-    "qa_threshold",
+_ALL_GROUP_OVERRIDE_FIELDS = [
+    f.name for f in fields(AwakeningGroupOverride) if f.name != "group_id"
 ]
-_ALL_GROUP_OVERRIDE_FIELDS = [f.name for f in fields(AwakeningGroupOverride) if f.name != "group_id"]
 _TIME_RE = re.compile(r"^(?:|(?:[01]\d|2[0-3]):[0-5]\d)$")
 
 
@@ -58,6 +49,9 @@ class ToggleBody(BaseModel):
 class AwakeningSettingsBody(BaseModel):
     # Optional fields use model_dump(exclude_unset=True) in the route.
     # Sending null clears a group override; omitting leaves it unchanged.
+    # 契约决策：interest_topics 不开放 Web 编辑（长尾内容，归
+    # config/awakening.toml 与 persona extras 维护）；如需开放须同步本
+    # Body、_OVERRIDE_FIELDS（由本模型派生）与 _validate_settings_payload。
     extend_duration: int | None = None
     fallback_probability: float | None = None
     boredom_silence_seconds: int | None = None
@@ -67,6 +61,10 @@ class AwakeningSettingsBody(BaseModel):
     boredom_dnd_end: str | None = None
     relevance_threshold: float | None = None
     qa_threshold: float | None = None
+
+
+# Web 设置接口的可写字段以 Body 模型为单一事实来源（锁步变更点收敛）。
+_OVERRIDE_FIELDS = list(AwakeningSettingsBody.model_fields)
 
 
 def _validate_group_id(group_id: str) -> None:
@@ -82,8 +80,15 @@ def _validate_settings_payload(payload: dict[str, Any]) -> None:
             continue
         if key in {"extend_duration", "boredom_silence_seconds", "boredom_check_interval"}:
             if type(value) is not int or value < 0 or value > 604800:
-                raise HTTPException(status_code=422, detail=f"{key} must be an integer between 0 and 604800")
-        elif key in {"fallback_probability", "boredom_probability", "relevance_threshold", "qa_threshold"}:
+                raise HTTPException(
+                    status_code=422, detail=f"{key} must be an integer between 0 and 604800"
+                )
+        elif key in {
+            "fallback_probability",
+            "boredom_probability",
+            "relevance_threshold",
+            "qa_threshold",
+        }:
             if type(value) not in {int, float} or value < 0 or value > 1:
                 raise HTTPException(status_code=422, detail=f"{key} must be between 0 and 1")
         elif key in {"boredom_dnd_start", "boredom_dnd_end"}:
@@ -175,25 +180,37 @@ def _write_awakening_config(cfg: AwakeningConfig, path: Path | None = None) -> N
         _write_awakening_config_unlocked(cfg, target_path)
 
 
-def _apply_group_settings(group_id: str, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _apply_group_settings(
+    group_id: str, payload: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
     target_path = _CONFIG_PATH
     with _lock_for(target_path):
         cfg = load_awakening_config(target_path)
         if cfg.load_error:
-            raise HTTPException(status_code=409, detail=f"awakening.toml load error: {cfg.load_error}")
+            raise HTTPException(
+                status_code=409, detail=f"awakening.toml load error: {cfg.load_error}"
+            )
         before = asdict(cfg.group_overrides[group_id]) if group_id in cfg.group_overrides else None
         existing = cfg.group_overrides.get(group_id)
-        override = AwakeningGroupOverride(**asdict(existing)) if existing is not None else AwakeningGroupOverride(group_id=group_id)
+        override = (
+            AwakeningGroupOverride(**asdict(existing))
+            if existing is not None
+            else AwakeningGroupOverride(group_id=group_id)
+        )
         for key, value in payload.items():
             setattr(override, key, value)
         next_overrides = dict(cfg.group_overrides)
         values = asdict(override)
-        has_any_override = any(values[field_name] is not None for field_name in _ALL_GROUP_OVERRIDE_FIELDS)
+        has_any_override = any(
+            values[field_name] is not None for field_name in _ALL_GROUP_OVERRIDE_FIELDS
+        )
         if has_any_override:
             next_overrides[group_id] = override
         else:
             next_overrides.pop(group_id, None)
-        next_cfg = AwakeningConfig(defaults=cfg.defaults, group_overrides=next_overrides, source_path=cfg.source_path)
+        next_cfg = AwakeningConfig(
+            defaults=cfg.defaults, group_overrides=next_overrides, source_path=cfg.source_path
+        )
         _write_awakening_config_unlocked(next_cfg, target_path)
         reload_config(target_path)
         after_override = get_config().group_overrides.get(group_id)
@@ -233,7 +250,14 @@ def _format_group(group_id: str) -> dict:
             for rule_name, label in AWAKENING_RULES
         ],
         "settings": asdict(settings),
-        "override": asdict(override) if override is not None else {"group_id": group_id, **{field_name: None for field_name in _ALL_GROUP_OVERRIDE_FIELDS}},
+        "override": (
+            asdict(override)
+            if override is not None
+            else {
+                "group_id": group_id,
+                **{field_name: None for field_name in _ALL_GROUP_OVERRIDE_FIELDS},
+            }
+        ),
         "has_override": group_id in cfg.group_overrides,
         "boredom_opt_in": group_id in boredom_groups,
     }
@@ -316,6 +340,10 @@ def set_awakening_settings(group_id: str, body: AwakeningSettingsBody, request: 
         target_type="awakening_settings",
         target_id=group_id,
         summary_before=before,
-        summary_after={"fields": list(payload.keys()), "override": after, "action_id": action["id"]},
+        summary_after={
+            "fields": list(payload.keys()),
+            "override": after,
+            "action_id": action["id"],
+        },
     )
     return {"ok": True, "queued": True, "action": action, "group": _format_group(group_id)}

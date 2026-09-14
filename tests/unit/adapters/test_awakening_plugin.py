@@ -79,9 +79,9 @@ def test_reload_boredom_groups_clears_state_for_removed_groups(monkeypatch, tmp_
 
     state = get_state()
     for gid in ("123", "456"):
-        state.record_message(gid, "u1")
+        state.record_message(gid)
         state.mark_boredom_triggered(gid)
-    state.record_message("789", "u1")  # 非 opt-in 群不受影响
+    state.record_message("789")  # 非 opt-in 群不受影响
 
     groups_path.write_text(json.dumps({"enabled": ["123"]}), encoding="utf-8")
     awakening_plugin.reload_boredom_groups()

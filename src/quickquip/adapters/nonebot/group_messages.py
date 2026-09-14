@@ -193,7 +193,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             message_id=message_id or None,
             image_urls=rendered_message.image_urls,
         )
-        awakening_state.record_message(group_id, user_id)
+        awakening_state.record_message(group_id)
 
         pending = offline_message_store.pop_pending(group_id, user_id)
         if pending:

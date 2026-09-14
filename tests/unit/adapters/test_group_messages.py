@@ -16,7 +16,8 @@ import pytest
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 import quickquip.adapters.nonebot.group_messages as gm
-import quickquip.chat.awakening as awakening_module
+import quickquip.chat.awakening.config as awakening_config_module
+import quickquip.chat.awakening.state as awakening_state_module
 from quickquip.chat.repeat_detector import RepeatAction
 from quickquip.chat.awakening import (
     AwakeningConfig,
@@ -113,7 +114,11 @@ def _make_svc(settings):
         identities=identities,
         group_identities=lambda group_id, _idx=identities: _idx,
         config=SimpleNamespace(
-            quick_judge=SimpleNamespace(timeout=2.0, max_tokens=64),
+            quick_judge=SimpleNamespace(
+                provider_id="prov", model="test-model", timeout=2.0, max_tokens=64
+            ),
+            runtime=SimpleNamespace(default_provider="prov"),
+            load_error=None,
             personas={},
         ),
         get_group_settings=lambda group_id: settings,
@@ -156,11 +161,11 @@ class Harness:
         monkeypatch.setattr(gm, "record_chat_message", lambda *a, **k: None)
         monkeypatch.setattr(gm, "get_sender_name", lambda event: "Alice")
         monkeypatch.setattr(gm, "resolve_reply", AsyncMock(return_value=None))
-        monkeypatch.setattr(awakening_module, "_state", self.awakening_state)
+        monkeypatch.setattr(awakening_state_module, "_state", self.awakening_state)
         monkeypatch.setattr(
-            awakening_module,
-            "get_config",
-            lambda: AwakeningConfig(
+            awakening_config_module,
+            "_config",
+            AwakeningConfig(
                 defaults=AwakeningDefaults(relevance_threshold=0.5, qa_threshold=1.0)
             ),
         )
