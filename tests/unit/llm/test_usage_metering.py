@@ -382,6 +382,8 @@ async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_pa
     assert await _record("claude") == "exclusive"
     assert await _record("openai") == "inclusive"
     assert await _record("gemini") == "inclusive"
+    # openai_responses 的 input_tokens 含 cached_tokens（inclusive，1.16 PR-A 核对）
+    assert await _record("openai_responses") == "inclusive"
 
 
 async def test_record_usage_persists_finish_reason(monkeypatch, tmp_path):

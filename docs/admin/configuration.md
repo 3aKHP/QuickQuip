@@ -219,7 +219,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `id` | Provider 唯一标识（如 `openai-main`、`gemini-main`） | — |
-| `protocol` | 协议类型：`openai` / `claude` / `gemini` | — |
+| `protocol` | 协议类型：`openai` / `claude` / `gemini` / `openai_responses` | — |
 | `base_url` | API 中转地址 | — |
 | `api_key_env` | API key 所在环境变量名 | — |
 | `default_model` | 默认模型 ID | — |
@@ -242,6 +242,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
+| `responses_profile` | `openai_responses` 协议专属：后端能力位。`openai-public`（官方 `/v1/responses`）或 `codex-http-relay`（Codex 形态中转，不发 `service_tier`、容忍 `codex.*` 结构事件、终态缺省字段时以流式完整 item 为回放基准） | `openai-public` |
+| `reasoning_effort` | `openai_responses` 协议专属：思考档位 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`（超出后端支持自动降档为 `xhigh`；留空不发送 `reasoning` 字段）。独立于 `thinking_budget` 数字口径（后者仅 claude/gemini 生效） | `""` |
 
 > **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
@@ -252,6 +254,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
+
+> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 回放尚未启用（旧轮次按普通文本投影）。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
 
 ### `[pricing.models]` — 模型定价（成本统计）
 

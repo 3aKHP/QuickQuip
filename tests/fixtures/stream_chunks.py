@@ -224,9 +224,10 @@ GEMINI_THOUGHT_LEAK_CHUNKS: list[dict] = [
 
 
 # ── OpenAI Responses ───────────────────────────────────────────────────────
-# 事件形状按官方 /v1/responses SSE 语义构造（sequence_number 连续递增，
-# 终态 response.completed 携带完整 output items 与 usage）。语义事件与
-# 结构型事件（response.created/output_item.added 等）按真实顺序穿插。
+# 事件形状按官方 /v1/responses SSE 语义构造（合成 fixture：本段非生产抓取；
+# sequence_number 连续递增，终态 response.completed 携带完整 output items 与
+# usage）。语义事件与结构型事件（response.created/output_item.added 等）按
+# 真实顺序穿插；上生产流量后应替换为实测抓取形状。
 
 RESPONSES_TEXT_CHUNKS: list[dict] = [
     {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_1"}},

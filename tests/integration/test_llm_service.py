@@ -512,13 +512,76 @@ async def test_responses_tool_loop_replays_native_items_in_second_payload(
     assert input_items[0]["role"] == "user"
     assert input_items[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
     assert input_items[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
-    assert input_items[3] == {
-        "type": "function_call_output",
-        "call_id": "call_identity_1",
-        "output": input_items[3]["output"],
-    }
-    assert "哈基镜" in input_items[3]["output"] or "镜子" in input_items[3]["output"]
+    output_item = input_items[3]
+    assert output_item["type"] == "function_call_output"
+    assert output_item["call_id"] == "call_identity_1"
+    assert "镜子" in output_item["output"]
     assert len(input_items) == 4  # 无通用字段二次投影
+
+
+async def test_responses_tool_loop_two_tool_rounds_accumulate_native_items(
+    wired_service,
+    patch_provider_builder,
+):
+    """连续两轮工具调用（验收项）：第三轮 payload 保序回放两个原生批次，
+    跨批次 call_id 唯一、各自的 function_call_output 紧随其后配对。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    second_tool_body = {
+        "id": "resp_2b",
+        "model": "gpt-test",
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_2",
+                "summary": [],
+                "encrypted_content": "gAAAAABsecondRound",
+            },
+            {
+                "type": "function_call",
+                "id": "fc_2",
+                "call_id": "call_identity_2",
+                "name": "get_identity",
+                "arguments": '{"query":"4s"}',
+            },
+        ],
+        "usage": {"input_tokens": 220, "output_tokens": 60},
+    }
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            second_tool_body,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜和4s分别是谁？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "哈基镜通常指镜子。"
+    assert len(fake.payloads) == 3
+    third = fake.payloads[2]["input"]
+    # 期望形态：user → 批次1(reasoning+call_1) → call_1 结果
+    #        → 批次2(reasoning+call_2) → call_2 结果
+    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert third[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    assert third[3]["type"] == "function_call_output"
+    assert third[3]["call_id"] == "call_identity_1"
+    assert "镜子" in third[3]["output"]
+    assert third[4] == second_tool_body["output"][0]
+    assert third[5] == second_tool_body["output"][1]
+    assert third[6]["type"] == "function_call_output"
+    assert third[6]["call_id"] == "call_identity_2"
+    assert len(third) == 7
 
 
 async def test_responses_tool_loop_rejects_truncated_batch(
@@ -589,8 +652,9 @@ async def test_responses_tool_loop_budget_guard_aborts_continuation(
 
     def _enforce_then_abort(config, prov, request, **kwargs):
         calls["count"] += 1
-        # 调用序：service 预检（1122）→ Loop 第一轮守卫 → Loop 第二轮守卫。
-        # 前两次放行（第一轮 HTTP 已发出），第三次（续接请求）超限拦截。
+        # 调用序：service 预检（初始请求装配后）→ Loop 第一轮守卫 → Loop
+        # 第二轮守卫。前两次放行（第一轮 HTTP 已发出），第三次（续接请求）
+        # 超限拦截。
         if calls["count"] <= 2:
             return real_enforce(config, prov, request, **kwargs)
         raise RequestBudgetExceeded("估算输入超出预算（测试注入）")

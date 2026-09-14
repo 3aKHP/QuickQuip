@@ -113,15 +113,19 @@ def parse_responses_body(
         raise _malformed("Provider 响应缺少有序 output items。", provider_id)
     status = body.get("status")
     if status != "completed":
-        error = body.get("error") or {}
+        error = body.get("error")
+        incomplete = body.get("incomplete_details")
         detail = (
             error.get("message")
-            or (body.get("incomplete_details") or {}).get("reason")
-            or status
-            or "unknown"
-        )
+            if isinstance(error, dict)
+            else None
+        ) or (
+            incomplete.get("reason")
+            if isinstance(incomplete, dict)
+            else None
+        ) or status
         raise LLMProviderError(
-            f"Provider 响应未完成：{detail}", status_code=400
+            f"[{provider_id}] Provider 响应未完成：{detail}", status_code=400
         )
 
     items = validate_output_items(body["output"], provider_id=provider_id)

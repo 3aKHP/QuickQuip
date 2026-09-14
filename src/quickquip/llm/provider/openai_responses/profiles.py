@@ -15,14 +15,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from quickquip.llm.config import REASONING_EFFORT_CHOICES
 from quickquip.llm.provider.base import LLMProviderError
 
 # 与 llm.toml 的 protocol 值 / owner 记录的 protocol 字段同源。
 OPENAI_RESPONSES_PROTOCOL = "openai_responses"
 
-# QuickQuip 侧思考档位六档（1.16 决策 3）：到各 profile 实际 wire effort 的
-# 映射集中 request.py 一处；本常量供配置校验与档位词表引用。
-REASONING_EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max", "ultra")
+# QuickQuip 侧思考档位六档（1.16 决策 3）：词表单源 config（本模块反向
+# 引用，config 不能 import provider 包）；到各 profile 实际 wire effort 的
+# 映射集中 request.py 一处。注册表键集与 config.RESPONSES_PROFILE_IDS
+# 的一致性由 test_provider_openai_responses 的守护测试断言。
+REASONING_EFFORT_TIERS = REASONING_EFFORT_CHOICES
 
 
 @dataclass(frozen=True, slots=True)

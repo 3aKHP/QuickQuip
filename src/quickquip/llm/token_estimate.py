@@ -22,6 +22,12 @@ NATIVE_MEDIA_FLAT_TOKENS = 1200
 NATIVE_ENCRYPTED_FLAT_TOKENS = 2048
 # 每个原生块的结构开销（块类型、id、字段名的 wire 折算下界）。
 _NATIVE_BLOCK_STRUCTURE_TOKENS = 8
+# 按字段名固定档计量的载荷（媒体 base64 与不透明密文），避免全量字符折算。
+_FLAT_FIELD_TOKENS = {
+    "inlineData": NATIVE_MEDIA_FLAT_TOKENS,
+    "fileData": NATIVE_MEDIA_FLAT_TOKENS,
+    "encrypted_content": NATIVE_ENCRYPTED_FLAT_TOKENS,
+}
 
 
 def estimate_tokens(text: str) -> int:
@@ -53,15 +59,10 @@ def estimate_native_block_tokens(block: Any) -> int:
     """
     if not isinstance(block, dict):
         return estimate_tokens(str(block)) + _NATIVE_BLOCK_STRUCTURE_TOKENS
-    flat_fields = {
-        "inlineData": NATIVE_MEDIA_FLAT_TOKENS,
-        "fileData": NATIVE_MEDIA_FLAT_TOKENS,
-        "encrypted_content": NATIVE_ENCRYPTED_FLAT_TOKENS,
-    }
     total = _NATIVE_BLOCK_STRUCTURE_TOKENS
     for key, value in block.items():
-        if key in flat_fields:
-            total += flat_fields[key]
+        if key in _FLAT_FIELD_TOKENS:
+            total += _FLAT_FIELD_TOKENS[key]
             continue
         total += _estimate_block_value(value)
     return total

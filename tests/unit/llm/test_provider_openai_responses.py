@@ -1,10 +1,11 @@
 """OpenAI Responses 协议后端：序列化 / 终态解析 / 流折叠 / 档位映射 / 接线。
 
-契约来源：dev/plans/2026-09-14-1.16.0-theme-kickoff.md §二（PR-A）与移植源
-prism-vesicle 的 request/response/stream 防御策略。
+契约来源：1.16.0 主题 PR-A（ROADMAP「OpenAI Responses 协议后端」条目）；
+模块级 docstring 与 docs/dev/llm-module.md 的 provider 节为公开契约面。
 """
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 
@@ -613,11 +614,22 @@ def test_factory_builds_responses_client():
 
 
 def test_profiles_registry_matches_config_vocabulary():
-    """config.py 校验词表（不能 import provider 包避免环）与注册表同步守护。"""
-    assert set(PROFILES) == {"openai-public", "codex-http-relay"}
-    assert REASONING_EFFORT_TIERS == (
-        "low", "medium", "high", "xhigh", "max", "ultra",
+    """profiles 注册表/档位词表与 config 单源常量双向同步（防词表漂移剪错 provider）。"""
+    from quickquip.llm.config import (
+        REASONING_EFFORT_CHOICES,
+        RESPONSES_PROFILE_IDS,
     )
+
+    assert set(PROFILES) == set(RESPONSES_PROFILE_IDS)
+    assert REASONING_EFFORT_TIERS == REASONING_EFFORT_CHOICES
+    # 映射表 profile 列自注册表派生，六档全覆盖
+    from quickquip.llm.provider.openai_responses.request import (
+        _REASONING_EFFORT_MAP,
+    )
+
+    assert set(_REASONING_EFFORT_MAP) == set(REASONING_EFFORT_TIERS)
+    for columns in _REASONING_EFFORT_MAP.values():
+        assert set(columns) == set(PROFILES)
 
 
 def _load_config(tmp_path: Path, provider_body: str):
@@ -744,3 +756,165 @@ def test_response_owner_endpoint_branch():
         primary_endpoint_url(_config(), "gpt-test")
         == "https://example.test/v1/responses"
     )
+
+
+# ── Deep-CR 补充用例 ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        _completed_body([], status="failed", error="boom"),  # error 非对象
+        _completed_body([], status="incomplete", incomplete_details="max_output_tokens"),
+    ],
+)
+def test_parse_body_non_dict_failure_fields_fail_closed(body):
+    """error/incomplete_details 为非 dict 真值时按 LLMProviderError 终止
+    （不得 AttributeError 逃逸成 complete() 的非流式 fallback）。"""
+    with pytest.raises(LLMProviderError):
+        parse_responses_body(body, provider_id="fake", fallback_model="gpt-test")
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"type": "response.failed", "response": "boom"},
+        {"type": "response.incomplete", "response": 42},
+        {"type": "error", "error": "oops"},
+    ],
+)
+def test_stream_non_dict_failure_payloads_fail_closed(event):
+    """失败事件的载荷形状先守卫：畸形载荷以 LLMProviderError 终止。"""
+    with pytest.raises(LLMProviderError):
+        _fold([event])
+
+
+def test_stream_failed_without_error_object_not_retryable():
+    """无 error 对象的 failed 是终态失败（对齐移植源），不做满额重发。"""
+    with pytest.raises(LLMProviderError) as excinfo:
+        _fold([{"type": "response.failed", "response": {}}])
+    assert excinfo.value.status_code == 400
+
+
+def test_stream_error_event_transport_retryable():
+    """error 事件（中转瞬断）按传输层失败归类，交基座退避重试。"""
+    with pytest.raises(LLMProviderError) as excinfo:
+        _fold([{"type": "error", "error": {"code": "EIO", "message": "断流"}}])
+    assert excinfo.value.transport is True
+
+
+def test_stream_missing_terminal_transport_retryable():
+    with pytest.raises(LLMProviderError) as excinfo:
+        _fold([{"type": "response.created"}, {"type": "response.in_progress"}])
+    assert excinfo.value.transport is True
+
+
+def test_stream_reasoning_delta_terminal_mismatch():
+    chunks = [dict(e) for e in RESPONSES_TOOL_CHUNKS]
+    for chunk in chunks:
+        if chunk.get("type") == "response.reasoning_summary_text.delta":
+            chunk["delta"] = "被篡改的思考"
+    with pytest.raises(LLMProviderError, match="reasoning"):
+        _fold(chunks)
+
+
+def test_stream_relay_reconcile_mismatch_fail_closed():
+    """中转终态 output 与流式 done items 语义不一致（非子集）时 fail-closed。"""
+    chunks = [dict(e) for e in RESPONSES_RELAY_TOOL_CHUNKS]
+    # 终态把 function_call 的 arguments 改成不同值：非子集关系
+    chunks[-1]["response"]["output"][-1]["arguments"] = '{"query":"tampered"}'
+    with pytest.raises(LLMProviderError, match="不一致"):
+        _fold(chunks, profile_id="codex-http-relay")
+
+
+def test_reasoning_effort_relay_profile_mapping():
+    control = reasoning_control(
+        _config(reasoning_effort="ultra"), resolve_profile("codex-http-relay")
+    )
+    assert control == {"effort": "xhigh", "summary": "auto"}
+
+
+def test_combine_stream_trace_annotations():
+    combine = OpenAIResponsesProviderClient._combine_stream_trace
+    completed = [
+        {"type": "response.completed", "response": {"id": "r1", "status": "completed"}}
+    ]
+    assert combine(completed, "m") == {"id": "r1", "status": "completed"}
+    failed = [
+        {
+            "type": "response.failed",
+            "response": {"error": {"code": "server_error", "message": "x"}},
+        }
+    ]
+    assert combine(failed, "m")["status"] == "failed"
+    assert combine(failed, "m")["error"]["code"] == "server_error"
+    assert combine([{"type": "response.created"}], "m")["status"] == (
+        "stream_ended_without_terminal"
+    )
+
+
+def test_sse_wire_format_end_to_end():
+    """真实 wire 形状（event:/data: 行、无 [DONE]）从基座 SSE 解析到折叠全链。"""
+    from quickquip.llm.provider.base import _parse_sse_text
+
+    raw = "\n".join(
+        f"event: {chunk['type']}\ndata: {json.dumps(chunk)}\n"
+        for chunk in RESPONSES_TEXT_CHUNKS
+    )
+    events = _parse_sse_text(raw)
+    response = _fold(events)
+    assert response.text == "你好，世界"
+    assert response.input_tokens == 300
+
+
+def test_cross_round_call_id_reuse_fail_closed():
+    """跨原生批次复用 call_id（模型/中转异常形态）按重复声明 fail-closed。"""
+    messages = [
+        LLMConversationMessage(
+            role="assistant",
+            native_content=[dict(item) for item in _NATIVE_TOOL_ITEMS],
+        ),
+        LLMConversationMessage(
+            role="tool", content="镜子", tool_call_id="call_1", tool_name="get_identity"
+        ),
+        LLMConversationMessage(
+            role="assistant",
+            native_content=[dict(item) for item in _NATIVE_TOOL_ITEMS],
+        ),
+        LLMConversationMessage(
+            role="tool", content="再来", tool_call_id="call_1", tool_name="get_identity"
+        ),
+    ]
+    with pytest.raises(LLMProviderError, match="重复声明"):
+        serialize_input_items(messages, [[] for _ in messages], provider_id="fake")
+
+
+def test_completed_finish_reason_accepted_by_summary_policy():
+    """completed 进入正常终值词表：总结族功能用 Responses provider 不误杀。"""
+    from quickquip.llm.response_acceptance import classify_response
+
+    response = parse_responses_body(
+        _completed_body(
+            [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "总结正文"}],
+                }
+            ]
+        ),
+        provider_id="fake",
+        fallback_model="gpt-test",
+    )
+    assert response.finish_reason == "completed"
+    assert classify_response(response) == "accepted"
+
+
+def test_usage_metering_input_semantics_inclusive():
+    """usage 落库行口径：openai_responses 标 inclusive（三处核对之一落测试）。"""
+    from quickquip.llm.pricing import normalize_usage
+
+    usage = normalize_usage("openai_responses", 300, 40, None, 250)
+    assert usage.prompt == 300  # inclusive：不叠加 cache_read
+    assert usage.cache_read == 250
+    assert usage.fresh_input == 50

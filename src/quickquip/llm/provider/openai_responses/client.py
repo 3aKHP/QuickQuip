@@ -72,19 +72,36 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         chunks: list[dict[str, Any]],
         fallback_model: str,
     ) -> dict[str, Any]:
-        """流式 trace 的可读重建：有终态直接采用，无终态给最小占位 body。
+        """流式 trace 的可读重建：有终态直接采用，失败流如实标注失败形态。
 
-        仅服务 trace 展示；失败流在此抛错只影响 trace 记录形态（基座会
-        捕获并保留原始 SSE），真正的语义错误由 ``_assemble_stream_response``
-        抛出。
+        仅服务 trace 展示；真正的语义错误由 ``_assemble_stream_response``
+        抛出（此处抛错只会被基座捕获并把 trace 记为重建失败，掩盖真实
+        的失败原因）。
         """
         for chunk in reversed(chunks):
+            if not isinstance(chunk, dict):
+                continue
+            chunk_type = chunk.get("type")
             if (
-                isinstance(chunk, dict)
-                and chunk.get("type") == "response.completed"
+                chunk_type == "response.completed"
                 and isinstance(chunk.get("response"), dict)
             ):
                 return chunk["response"]
+            if chunk_type == "response.failed":
+                return {
+                    "object": "response",
+                    "model": fallback_model,
+                    "status": "failed",
+                    "error": (chunk.get("response") or {}).get("error")
+                    if isinstance(chunk.get("response"), dict)
+                    else None,
+                }
+            if chunk_type in ("response.incomplete", "error"):
+                return {
+                    "object": "response",
+                    "model": fallback_model,
+                    "status": str(chunk_type),
+                }
         return {
             "object": "response",
             "model": fallback_model,

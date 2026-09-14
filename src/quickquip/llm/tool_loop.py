@@ -231,6 +231,9 @@ async def run_tool_call_loop(
             # （reasoning 密文 + function_call + message）整批交给下一轮原样
             # 序列化，通用字段不再二次投影。claude/gemini 的循环内续接继续走
             # thinking_blocks 通用重建，其 native_content 仍仅由重放投影写入。
+            # recorder 对 native_blocks 的通用持久化随执行记录落库（含密文，
+            # 字节超限自动省略）；读侧由 history_projection 的协议白名单挡住，
+            # 跨轮原生回放与 owner 校验随 PR-B 启用。
             assistant_message.native_content = response.native_blocks
 
         logger.info(

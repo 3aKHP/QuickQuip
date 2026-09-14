@@ -92,7 +92,11 @@ def fold_stream_events(
             raise _malformed(f"终态事件后又收到 {event_type}。")
         sequence = event.get("sequence_number")
         if sequence is not None:
-            if sequence != expected_sequence:
+            if (
+                not isinstance(sequence, int)
+                or isinstance(sequence, bool)
+                or sequence != expected_sequence
+            ):
                 raise _malformed(
                     f"事件序号从 {expected_sequence} 跳变到 {sequence}。"
                 )
@@ -124,7 +128,11 @@ def fold_stream_events(
                 output_index = event.get(
                     "output_index", len(relay_done_items)
                 )
-                if output_index != len(relay_done_items):
+                if (
+                    not isinstance(output_index, int)
+                    or isinstance(output_index, bool)
+                    or output_index != len(relay_done_items)
+                ):
                     raise _malformed(
                         f"中转完成的 output item 索引 {output_index} 与预期 "
                         f"{len(relay_done_items)} 不符。"
@@ -136,27 +144,49 @@ def fold_stream_events(
                 raise _malformed("completed 事件缺少终态 response。")
             terminal = response_body
         elif event_type == "response.failed":
-            error = (event.get("response") or {}).get("error") or {}
-            message = error.get("message") or "unknown"
+            # 载荷形状先守卫再取字段：畸形载荷以 malformed 终止，不允许
+            # AttributeError 逃逸成 complete() 的非流式 fallback。
+            response_body = event.get("response")
+            error = response_body.get("error") if isinstance(response_body, dict) else None
+            if not isinstance(error, dict):
+                error = {}
+                message = "unknown"
+            else:
+                message = error.get("message") or "unknown"
             code = error.get("code")
-            fatal = code in _FATAL_FAILURE_CODES
+            # 有 error 对象且码不在致命表内才视为瞬态（对齐移植源
+            # stream.ts：error != null && !fatal）；无 error 对象的 failed
+            # 是终态失败，不做满额重发。
+            fatal = not error or code in _FATAL_FAILURE_CODES
             raise LLMProviderError(
                 f"[{provider_id}] Responses 流失败（{code or 'unknown'}）：{message}",
                 status_code=400 if fatal else 500,
             )
         elif event_type == "response.incomplete":
-            reason = (event.get("response") or {}).get("incomplete_details") or {}
+            incomplete = event.get("response")
+            reason = (
+                incomplete.get("incomplete_details")
+                if isinstance(incomplete, dict)
+                else None
+            ) or {}
+            if not isinstance(reason, dict):
+                reason = {}
             raise LLMProviderError(
                 f"[{provider_id}] Responses 流未完成："
                 f"{reason.get('reason') or 'unknown'}",
                 status_code=400,
             )
         elif event_type == "error":
-            error = event.get("error") or {}
+            error = event.get("error")
+            if not isinstance(error, dict):
+                raise _malformed("error 事件载荷畸形。")
             raise LLMProviderError(
                 f"[{provider_id}] Responses 流错误"
                 f"（{error.get('code') or 'unknown'}）："
-                f"{error.get('message') or 'unknown error'}"
+                f"{error.get('message') or 'unknown error'}",
+                # 中转瞬断（连接重置、上游网关错误）按传输层失败归类，
+                # 交给基座退避重试（对齐移植源 stream_error 的可重试分类）。
+                transport=True,
             )
         elif event_type in _TOLERATED_EVENTS:
             continue
@@ -167,7 +197,10 @@ def fold_stream_events(
 
     if terminal is None:
         raise LLMProviderError(
-            f"[{provider_id}] Responses 流在 response.completed 前结束。"
+            f"[{provider_id}] Responses 流在 response.completed 前结束。",
+            # 连接干净关闭导致的截断按传输层失败归类，交基座退避重试；
+            # 撕裂的 TCP/帧错误已在 base._post_stream_sse 捕获为 transport。
+            transport=True,
         )
 
     effective_terminal = _reconcile_relay_terminal(

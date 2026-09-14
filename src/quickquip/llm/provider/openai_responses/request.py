@@ -20,8 +20,15 @@ from copy import deepcopy
 from typing import Any
 
 from quickquip.llm.config import ProviderConfig
-from quickquip.llm.provider.base import LLMImageInput, LLMProviderError, LLMRequest
+from quickquip.llm.provider.base import (
+    LLMImageInput,
+    LLMProviderError,
+    LLMRequest,
+    TOOL_IMAGE_FLUSH_NOTICE,
+)
 from quickquip.llm.provider.openai_responses.profiles import (
+    PROFILES,
+    REASONING_EFFORT_TIERS,
     ResponsesProfile,
     resolve_profile,
 )
@@ -34,17 +41,18 @@ INCLUDE_ENCRYPTED_REASONING = ["reasoning.encrypted_content"]
 
 # 六档（low/medium/high/xhigh/max/ultra）→ 各 profile 实际 effort 的映射表，
 # 集中一处（1.16 决策 3/4）。max/ultra 超出首批两 profile 的 wire 词表
-# （low..xhigh），按降档规则收敛到该 profile 最高档；新 profile 引入时在
-# 此补列。thinking_budget 数字口径不适用于本协议（claude/gemini 专属）。
+# （low..xhigh），按降档规则收敛到该 profile 最高档；profile 列自注册表
+# 派生（新增 profile 不补列会在此 KeyError/缺列即改，而不是运行期误导）。
+# thinking_budget 数字口径不适用于本协议（claude/gemini 专属）。
 _REASONING_EFFORT_MAP: dict[str, dict[str, str]] = {
     tier: {
         profile_id: ("xhigh" if tier in ("max", "ultra") else tier)
-        for profile_id in ("openai-public", "codex-http-relay")
+        for profile_id in PROFILES
     }
-    for tier in ("low", "medium", "high", "xhigh", "max", "ultra")
+    for tier in REASONING_EFFORT_TIERS
 }
 
-_TOOL_IMAGE_NOTICE = "以下图片来自刚才工具调用，仅用于继续推理。"
+_TOOL_IMAGE_NOTICE = TOOL_IMAGE_FLUSH_NOTICE
 
 
 def reasoning_control(config: ProviderConfig, profile: ResponsesProfile) -> dict | None:
@@ -143,7 +151,7 @@ def serialize_input_items(
             }
             for item in pending_tool_images
         ]
-        content.append({"type": "input_text", "text": _TOOL_IMAGE_NOTICE})
+        content.append({"type": "input_text", "text": TOOL_IMAGE_FLUSH_NOTICE})
         input_items.append({"role": "user", "content": content})
         pending_tool_images = []
 
@@ -151,6 +159,10 @@ def serialize_input_items(
         if message.role != "tool":
             _flush_tool_images()
         if message.role == "assistant" and message.native_content is not None:
+            # PR-A 前提：native_content 只由本协议的当前工具循环写入（内存
+            # 直传，同 provider/model），历史投影的跨轮原生回放对
+            # openai_responses 尚未开放（protocol 白名单挡在
+            # history_projection）。owner 五元组校验随 PR-B 跨轮回放一并接入。
             items = validate_output_items(
                 message.native_content, provider_id=provider_id
             )
