@@ -45,7 +45,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机）
 - `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、健康检查、状态、自动记忆）。回复主链的输入收敛为 `llm/reply_types.py` 的 `ChatTurnRequest`，请求装配（替代旧闭包）、输入规范化、输出后处理与返回形状构造在 `llm/reply_chain.py`
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、STS 单发入口、图像预处理、健康检查、状态、自动记忆）。回复主链的输入收敛为 `llm/reply_types.py` 的 `ChatTurnRequest`，请求装配（替代旧闭包）、输入规范化、输出后处理与返回形状构造在 `llm/reply_chain.py`
 - `src/quickquip/llm/reply_chain.py`
   - 回复主链的装配与产出 shaping：`TurnRequestAssembler`（首轮与预算降级重建共用的显式装配对象）、`normalize_turn_input`、`finalize_reply_text`、`reply_result` 工厂与触发行 `raw_content` 拼装；只收显式参数，不 import `LLMService`
 - `src/quickquip/llm/quick_judge.py`
