@@ -2042,3 +2042,106 @@ async def test_passive_recent_images_use_full_snapshot_not_patch(
     # 文本侧仍是增量语义：补丁为空 → 无【现场】块，图行不进文本上下文
     assert "【现场】" not in second.content
     assert "看看这张" not in second.content
+
+
+# ── Responses 跨轮原生回放（PR-B：A/B 联合验收「下一条用户消息」条款） ─────
+
+
+async def test_responses_cross_turn_replays_closed_loop_native_history(
+    wired_service,
+    patch_provider_builder,
+):
+    """已完成工具 Loop 的下一条用户消息：历史以原生形态回放（reasoning
+    密文逐字节 + function_call 原.call_id + 结果配对 + message item），
+    其后才接新触发消息。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    provider.agent_replay_loop_tokens = 16384
+    first = FakeOpenAIResponsesClient(
+        provider, [_RESPONSES_TOOL_ROUND_BODY, _RESPONSES_FINAL_BODY],
+    )
+    second = FakeOpenAIResponsesClient(provider, [_RESPONSES_FINAL_BODY])
+    clients = [first, second]
+    patch_provider_builder(lambda p: clients.pop(0))
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+        message_id="m-r1",
+    )
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="那我再问一次",
+        recent_messages=[],
+        message_id="m-r2",
+    )
+
+    third = second.payloads[0]["input"]
+    # 历史 Loop 原生回放：触发消息 → reasoning（密文逐字节）→ function_call
+    # （原 call_id）→ 结果 → 最终 message item，然后才是新触发 user 消息。
+    kinds = [item.get("type") or item.get("role") for item in third]
+    assert kinds[:3] == ["user", "reasoning", "function_call"]
+    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert third[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    assert third[3]["type"] == "function_call_output"
+    assert third[3]["call_id"] == "call_identity_1"
+    assert third[4]["type"] == "message"
+    assert third[4]["content"][0]["text"] == "哈基镜通常指镜子。"
+    assert any(
+        isinstance(item, dict) and item.get("role") == "user" and "那我再问一次" in str(
+            item.get("content")
+        )
+        for item in third
+    ), "新触发消息在历史之后"
+
+
+async def test_responses_cross_turn_owner_switch_degrades_history(
+    wired_service,
+    patch_provider_builder,
+):
+    """切 profile（owner 指纹含 responses_profile/reasoning_effort）：历史
+    不再原生回放，降级为通用投影（无 reasoning 密文上 wire，工具事实保留）。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    provider.agent_replay_loop_tokens = 16384
+    first = FakeOpenAIResponsesClient(
+        provider, [_RESPONSES_TOOL_ROUND_BODY, _RESPONSES_FINAL_BODY],
+    )
+    second = FakeOpenAIResponsesClient(provider, [_RESPONSES_FINAL_BODY])
+    clients = [first, second]
+    patch_provider_builder(lambda p: clients.pop(0))
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+        message_id="m-r1",
+    )
+    provider.responses_profile = "codex-http-relay"
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="那我再问一次",
+        recent_messages=[],
+        message_id="m-r2",
+    )
+
+    third = second.payloads[0]["input"]
+    assert not any(item.get("type") == "reasoning" for item in third)
+    # 通用投影保留工具事实：function_call（stable wire id）+ 结果配对。
+    calls = [item for item in third if item.get("type") == "function_call"]
+    outputs = [item for item in third if item.get("type") == "function_call_output"]
+    assert len(calls) == 1 and len(outputs) == 1
+    assert calls[0]["name"] == "get_identity"
+    assert calls[0]["call_id"] == outputs[0]["call_id"]
+    assert "镜子" in outputs[0]["output"]

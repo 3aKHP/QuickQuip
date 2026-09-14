@@ -62,13 +62,24 @@ class LLMProviderError(RuntimeError):
 
     ``status_code`` 为上游 HTTP 状态码（非 HTTP 错误为 None）；``transport``
     标记连接失败/超时等传输层错误。两者供重试分类（``_is_retryable``）使用，
-    消息文本保持原有格式（会被直接内插到用户可见回复中）。
+    消息文本保持原有格式（会被直接内插到用户可见回复中）。``http_reject``
+    区分"上游 HTTP 层拒绝请求"与协议层把畸形/失败终态归一出的同码错误
+    （如 Responses 的 failed/cancelled 终态）——降级重试类调用方只应响应
+    前者（协议层 400 重试必然徒劳）。
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None, transport: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        transport: bool = False,
+        http_reject: bool = False,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.transport = transport
+        self.http_reject = http_reject
 
 
 def _is_retryable(exc: LLMProviderError) -> bool:
@@ -723,6 +734,7 @@ class BaseProviderClient:
             raise LLMProviderError(
                 f"HTTP {exc.response.status_code} {detail[:240]}",
                 status_code=exc.response.status_code,
+                http_reject=True,
             ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             await finish_http_trace(
@@ -837,6 +849,7 @@ class BaseProviderClient:
             raise LLMProviderError(
                 f"HTTP {exc.response.status_code} {detail[:240]}",
                 status_code=exc.response.status_code,
+                http_reject=True,
             ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             await finish_http_trace(

@@ -1058,3 +1058,288 @@ def test_usage_metering_input_semantics_inclusive():
     assert usage.prompt == 300  # inclusive：不叠加 cache_read
     assert usage.cache_read == 250
     assert usage.fresh_input == 50
+
+
+# ── 历史降级重试（PR-B：portable checkpoint 移植） ─────────────────────────
+
+
+_HISTORY_NATIVE = [
+    {
+        "type": "reasoning",
+        "id": "rs_hist",
+        "summary": [{"type": "summary_text", "text": "历史思考。"}],
+        "encrypted_content": "gAAA-hist-cipher",
+    },
+    {
+        "type": "message",
+        "id": "msg_hist",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "历史回答。"}],
+    },
+]
+
+# 仅含 message item 的历史批次（无可剥 reasoning 的显式前提）。
+_HISTORY_MESSAGE_ONLY = {
+    "type": "message",
+    "id": "msg_hist",
+    "role": "assistant",
+    "content": [{"type": "output_text", "text": "历史回答。"}],
+}
+
+_CURRENT_LOOP_NATIVE = [
+    {
+        "type": "reasoning",
+        "id": "rs_cur",
+        "summary": [{"type": "summary_text", "text": "当前思考。"}],
+        "encrypted_content": "gAAA-current-cipher",
+    },
+    {
+        "type": "function_call",
+        "id": "fc_cur",
+        "call_id": "call_cur",
+        "name": "get_identity",
+        "arguments": '{"query":"镜子"}',
+    },
+]
+
+
+def _history_replay_request() -> LLMRequest:
+    """历史原生批次（最后 user 之前）+ 当前循环原生批次（其后）。"""
+    return _request(
+        [
+            LLMConversationMessage(role="user", content="旧问题"),
+            LLMConversationMessage(
+                role="assistant", content="历史回答。", native_content=list(_HISTORY_NATIVE)
+            ),
+            LLMConversationMessage(role="user", content="新问题"),
+            LLMConversationMessage(
+                role="assistant", content="", native_content=list(_CURRENT_LOOP_NATIVE)
+            ),
+            LLMConversationMessage(
+                role="tool", content="镜子是群友。", tool_call_id="call_cur",
+                tool_name="get_identity",
+            ),
+        ]
+    )
+
+
+class _RejectingThenOkFake(FakeOpenAIResponsesClient):
+    """第一次 _post_json 抛指定错误，之后回放正常响应体。"""
+
+    def __init__(self, config, error: LLMProviderError, bodies: list[dict]):
+        super().__init__(config, bodies)
+        self.error = error
+
+    async def _post_json(self, url, headers, payload):
+        self.payloads.append(payload)
+        if self.error is not None:
+            error = self.error
+            self.error = None
+            raise error
+        return self.response_bodies.pop(0)
+
+
+_OK_BODY = _completed_body(
+    [{"type": "message", "role": "assistant",
+      "content": [{"type": "output_text", "text": "降级后回答"}]}]
+)
+
+
+async def test_client_400_history_reasoning_degrades_and_retries(caplog):
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    with caplog.at_level("WARNING", logger="quickquip.llm.provider.openai_responses.client"):
+        response = await client.complete(_history_replay_request())
+    assert response.text == "降级后回答"
+    assert len(client.payloads) == 2
+    first_input = client.payloads[0]["input"]
+    second_input = client.payloads[1]["input"]
+    assert any(item.get("type") == "reasoning" for item in first_input)
+    # 降级请求：历史 reasoning 剥除、历史 message 保留（工具事实/正文不丢）。
+    assert not any(
+        item.get("id") == "rs_hist" for item in second_input
+    )
+    assert any(item.get("id") == "msg_hist" for item in second_input)
+    # 当前循环批次不受降级影响（协议要求原样回传）。
+    assert any(item.get("id") == "rs_cur" for item in second_input)
+    assert any(item.get("call_id") == "call_cur" for item in second_input)
+
+
+async def test_client_current_loop_reasoning_never_stripped_by_degrade():
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    await client.complete(_history_replay_request())
+    second_input = client.payloads[1]["input"]
+    reasoning_ids = {
+        item.get("id") for item in second_input if item.get("type") == "reasoning"
+    }
+    assert reasoning_ids == {"rs_cur"}
+
+
+async def test_client_400_without_history_reasoning_surfaces():
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    plain = _request(
+        [
+            LLMConversationMessage(role="user", content="问题"),
+            LLMConversationMessage(
+                role="assistant", content="历史回答。",
+                native_content=[dict(_HISTORY_MESSAGE_ONLY)],
+            ),
+            LLMConversationMessage(role="user", content="新问题"),
+        ]
+    )
+    with pytest.raises(LLMProviderError):
+        await client.complete(plain)
+    # 无历史密文可剥：不重试。
+    assert len(client.payloads) == 1
+
+
+async def test_client_non_400_error_not_degrade_retried():
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 403 forbidden", status_code=403), [_OK_BODY]
+    )
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    assert len(client.payloads) == 1
+
+
+async def test_client_degrade_retry_second_failure_surfaces():
+    class _Always400Fake(FakeOpenAIResponsesClient):
+        async def _post_json(self, url, headers, payload):
+            self.payloads.append(payload)
+            raise LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True)
+
+    client = _Always400Fake(_config(), [])
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    assert len(client.payloads) == 2
+
+
+async def test_client_protocol_level_400_not_degrade_retried():
+    """协议层归一的 400（failed/cancelled 终态、流致命码）不触发降级重试：
+    该类失败与请求历史形状无关，重试只会加倍成本与延迟。"""
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("Provider 响应未完成：cyber_policy", status_code=400),
+        [_OK_BODY],
+    )
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    assert len(client.payloads) == 1
+
+
+async def test_client_transport_error_not_degrade_retried():
+    from quickquip.llm.provider.retry import RetryPolicy
+
+    class _TransportFake(FakeOpenAIResponsesClient):
+        def __init__(self, config):
+            super().__init__(config, [])
+            self.retry_policy = RetryPolicy(max_attempts=1)
+
+        async def _post_json(self, url, headers, payload):
+            self.payloads.append(payload)
+            raise LLMProviderError("网络错误：断连", transport=True)
+
+    client = _TransportFake(_config())
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    # 传输错误走基座退避轨道，不触发降级重试。
+    assert len(client.payloads) == 1
+
+
+async def test_client_degrade_pure_reasoning_batch_gets_placeholder():
+    """纯 reasoning 历史批次剥空后退通用表达并补占位（空 content item
+    部分端点会拒）。"""
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 400 x", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    request = _request(
+        [
+            LLMConversationMessage(role="user", content="旧问题"),
+            LLMConversationMessage(
+                role="assistant", content="", native_content=[
+                    dict(_HISTORY_NATIVE[0]),
+                ],
+            ),
+            LLMConversationMessage(role="user", content="新问题"),
+        ]
+    )
+    await client.complete(request)
+    second = client.payloads[1]["input"]
+    assert not any(item.get("type") == "reasoning" for item in second)
+    degraded = [item for item in second if item.get("role") == "assistant"]
+    assert any(
+        isinstance(item.get("content"), str) and item["content"].strip()
+        for item in degraded
+    ), "剥空批次必须有非空占位正文"
+
+
+async def test_client_degrade_retry_metering_two_rows(monkeypatch):
+    """降级重试的计量口径（有意为之）：两次 complete() 各落一行 usage
+    （error + ok）——对应两次真实 HTTP 交互与两条 trace；与基座退避轨道
+    "被吸收的失败不产生额外行"（test_provider_retry）是两条不同契约。"""
+    from quickquip.llm.usage import drain_usage_tasks
+
+    calls = []
+
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
+        calls.append((state, response is not None))
+
+    monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    await client.complete(_history_replay_request())
+    await drain_usage_tasks()
+    assert calls == [("error", False), ("ok", True)]
+
+
+async def test_client_stream_400_history_reasoning_degrades_and_retries():
+    """流式主路径（生产默认）的降级重试：SSE 传输抛 HTTP 400 后剥历史
+    reasoning 重试一次，非流式端点不被触碰。"""
+
+    class _StreamRejectingThenOkFake(FakeOpenAIResponsesClient):
+        def __init__(self, config, error, bodies):
+            super().__init__(config, bodies)
+            self.config.stream_enabled = True
+            self.error = error
+            self.stream_payloads: list[dict] = []
+
+        async def _post_stream_sse(self, url, headers, payload):
+            self.stream_payloads.append(payload)
+            if self.error is not None:
+                error = self.error
+                self.error = None
+                raise error
+            # 复用非流式成功体构造流事件序列。
+            body = self.response_bodies.pop(0)
+            return [{"type": "response.completed", "response": body}]
+
+    client = _StreamRejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    response = await client.complete(_history_replay_request())
+    assert response.text == "降级后回答"
+    assert len(client.stream_payloads) == 2
+    assert not client.payloads, "非流式端点不被触碰"
+    second = client.stream_payloads[1]["input"]
+    assert not any(item.get("id") == "rs_hist" for item in second)
+    assert any(item.get("id") == "rs_cur" for item in second)
