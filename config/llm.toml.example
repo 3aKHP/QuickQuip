@@ -393,6 +393,29 @@ timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048
 
+[[providers]]
+# OpenAI Responses 协议（1.16 起）：store:false 手动上下文管理 + 每轮全量
+# input items 回放；reasoning 模型的工具循环会把 reasoning 密文与原生
+# output items 原样回传（当前循环内；跨轮回放随后续版本启用）。
+id = "openai-responses"
+protocol = "openai_responses"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-5.2"
+models = ["gpt-5.2", "gpt-5.1"]
+style_profile = "openai_family"
+# responses_profile：后端能力位。"openai-public"（官方 API）或
+# "codex-http-relay"（Codex 形态中转：不发 service_tier、容忍 codex.*
+# 结构事件、终态缺省字段时以流式完整 item 为回放基准）。
+# responses_profile = "openai-public"
+# reasoning_effort：思考档位，独立于 thinking_budget 数字口径（后者仅
+# claude/gemini 生效，Responses 忽略）。六档 low/medium/high/xhigh/max/ultra
+# 按后端实际 effort 映射（max/ultra 降档为 xhigh）；留空不发送 reasoning 字段。
+# reasoning_effort = "high"
+timeout_seconds = 45
+temperature = 0.8
+max_output_tokens = 2048
+
 # ════════════════════════════════════════════════════════════════════════════
 # 模型定价（per-MTok，USD）—— 供 LLM 用量/成本统计计算 cost_usd。
 #   · match_pricing 先查 "provider_id/model"（per-provider 覆盖，如某中转实际价），

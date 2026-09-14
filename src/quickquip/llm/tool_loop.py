@@ -128,17 +128,24 @@ async def run_tool_call_loop(
             *other_calls[:max_calls],
         ]
 
-        if provider.protocol == "gemini":
+        if provider.protocol in ("gemini", "openai_responses"):
+            protocol_label = (
+                "Gemini" if provider.protocol == "gemini" else "OpenAI Responses"
+            )
             if len(limited_calls) != len(response.tool_calls):
                 logger.warning(
-                    "Gemini tool batch rejected (fail-closed): "
+                    "%s tool batch rejected (fail-closed): "
                     "provider=%s model=%s requested=%d kept=0",
+                    protocol_label,
                     provider.id,
                     response.model,
                     len(response.tool_calls),
                 )
                 # 整批拒绝的提示必须追加而非兜底：模型附带的叙述文本不应顶替拒绝说明。
-                notice = "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+                # 部分执行对两协议都不可续接：Gemini 的 functionResponse 批次绑定
+                # 前序有序 functionCall parts；Responses 的 call_id 记账要求
+                # 声明与应答全有或全无（request.py fail-closed）。
+                notice = f"模型一次请求了过多工具，已拒绝执行不完整的 {protocol_label} 工具批次。"
                 response.text = "\n".join(part for part in (response.text, notice) if part)
                 if turn_recorder is not None:
                     # 整批拒绝仍保留声明事实（§3.2）：全部声明记
@@ -156,9 +163,9 @@ async def run_tool_call_loop(
                             turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.BATCH_LIMIT)
                 response.tool_calls = []
                 return response
-            # Gemini binds functionResponse batches to the preceding ordered
-            # functionCall parts. Keep the provider's order when the full batch
-            # is within local limits.
+            # 两协议都保持 provider 声明顺序回放完整批次：Gemini 的
+            # functionResponse 批次绑定前序有序 functionCall parts；Responses
+            # 的原生 output items 整批回传要求 items 与结果一一配对。
             selected_calls = list(response.tool_calls)
         else:
             selected_calls = limited_calls
@@ -219,6 +226,12 @@ async def run_tool_call_loop(
             tool_calls=selected_calls,
             thinking_blocks=response.thinking_blocks,
         )
+        if provider.protocol == "openai_responses" and response.native_blocks:
+            # Responses 循环内原生回传契约（PR-A）：已校验的有序 output items
+            # （reasoning 密文 + function_call + message）整批交给下一轮原样
+            # 序列化，通用字段不再二次投影。claude/gemini 的循环内续接继续走
+            # thinking_blocks 通用重建，其 native_content 仍仅由重放投影写入。
+            assistant_message.native_content = response.native_blocks
 
         logger.info(
             "LLM tool calls requested: provider=%s model=%s names=%s",

@@ -95,6 +95,8 @@ def primary_endpoint_url(config: ProviderConfig, model: str) -> str:
         return f"{base}/chat/completions"
     if config.protocol == "claude":
         return f"{base}/messages?beta=true"
+    if config.protocol == "openai_responses":
+        return f"{base}/responses"
     return f"{base}/models/{model}:generateContent"
 
 

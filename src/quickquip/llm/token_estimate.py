@@ -16,6 +16,10 @@ _CJK_ORD_FLOOR = 0x2E80
 
 # 协议原生块内媒体载荷（inlineData/fileData）的固定档估算（与请求预算口径一致）。
 NATIVE_MEDIA_FLAT_TOKENS = 1200
+# 原生块内不透明加密载荷（Responses reasoning 密文 encrypted_content）的固定档
+# 预留：密文字节数与回放时实际计入的 reasoning token 无线性关系，字符折算会
+# 系统性高估请求输入；按字段固定档预留（PR-A 循环内口径，跨轮规则随 PR-B）。
+NATIVE_ENCRYPTED_FLAT_TOKENS = 2048
 # 每个原生块的结构开销（块类型、id、字段名的 wire 折算下界）。
 _NATIVE_BLOCK_STRUCTURE_TOKENS = 8
 
@@ -49,10 +53,15 @@ def estimate_native_block_tokens(block: Any) -> int:
     """
     if not isinstance(block, dict):
         return estimate_tokens(str(block)) + _NATIVE_BLOCK_STRUCTURE_TOKENS
+    flat_fields = {
+        "inlineData": NATIVE_MEDIA_FLAT_TOKENS,
+        "fileData": NATIVE_MEDIA_FLAT_TOKENS,
+        "encrypted_content": NATIVE_ENCRYPTED_FLAT_TOKENS,
+    }
     total = _NATIVE_BLOCK_STRUCTURE_TOKENS
     for key, value in block.items():
-        if key in ("inlineData", "fileData"):
-            total += NATIVE_MEDIA_FLAT_TOKENS
+        if key in flat_fields:
+            total += flat_fields[key]
             continue
         total += _estimate_block_value(value)
     return total

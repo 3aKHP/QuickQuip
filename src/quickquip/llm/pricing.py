@@ -56,7 +56,9 @@ def normalize_usage(
             cache_read=cache_read_tokens,
             cache_write=cache_creation_tokens,
         )
-    # openai/gemini inclusive: input_tokens 已含 cached
+    # openai/gemini/openai_responses inclusive: input_tokens 已含 cached
+    # （openai_responses 的 input_tokens_details.cached_tokens 同口径，
+    # 1.16 PR-A 已核对）
     return CanonicalUsage(
         prompt=input_tokens,
         completion=output_tokens,
