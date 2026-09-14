@@ -152,10 +152,15 @@ def count_wire_items(request: LLMRequest) -> int:
     count = 0
     for message in request.messages:
         count += 1
+        if message.native_content is not None:
+            # 原生路径消息的正文/工具声明已内含于 native 块（serializer
+            # 原样发送、忽略通用字段），与 estimate_request_tokens 的
+            # 单计口径一致，不再叠加 tool_calls/thinking_blocks。
+            count += len(message.native_content)
+            continue
         count += len(message.tool_calls)
         count += len(message.image_urls)
         count += len(message.thinking_blocks or [])
-        count += len(message.native_content or [])
     count += len(request.tools)
     return count
 

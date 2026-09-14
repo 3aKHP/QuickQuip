@@ -100,6 +100,17 @@ def _validate_reasoning_item(item: dict[str, Any], provider_id: str) -> None:
         )
 
 
+def failure_detail(body: dict[str, Any]) -> str:
+    """终态失败/incomplete 的可读原因（error/incomplete_details 形状守卫）。"""
+    error = body.get("error")
+    if isinstance(error, dict) and error.get("message"):
+        return str(error["message"])
+    incomplete = body.get("incomplete_details")
+    if isinstance(incomplete, dict) and incomplete.get("reason"):
+        return str(incomplete["reason"])
+    return str(body.get("status") or "unknown")
+
+
 def parse_responses_body(
     body: Any, *, provider_id: str, fallback_model: str
 ) -> LLMResponse:
@@ -108,24 +119,19 @@ def parse_responses_body(
     ``native_blocks`` 承载当前工具循环的有序原生结果（reasoning 密文 +
     function_call + message 原样保序），供下一轮原样回传（PR-A 循环内
     契约）与执行记录持久化；跨轮回放由 PR-B 启用。
+
+    ``incomplete`` 是正常截断（reasoning token 计入 max_output_tokens，
+    思考模型下常见）：max_output_tokens 归一为兄弟协议的 ``length`` 终值
+    照常返回（可空正文——截断可能发生在可见输出之前），其余 reason 原样
+    作为终值；仅 ``failed``/``cancelled`` 等形态抛错。
     """
     if not isinstance(body, dict) or not isinstance(body.get("output"), list):
         raise _malformed("Provider 响应缺少有序 output items。", provider_id)
     status = body.get("status")
-    if status != "completed":
-        error = body.get("error")
-        incomplete = body.get("incomplete_details")
-        detail = (
-            error.get("message")
-            if isinstance(error, dict)
-            else None
-        ) or (
-            incomplete.get("reason")
-            if isinstance(incomplete, dict)
-            else None
-        ) or status
+    if status not in ("completed", "incomplete"):
         raise LLMProviderError(
-            f"[{provider_id}] Provider 响应未完成：{detail}", status_code=400
+            f"[{provider_id}] Provider 响应未完成：{failure_detail(body)}",
+            status_code=400,
         )
 
     items = validate_output_items(body["output"], provider_id=provider_id)
@@ -139,7 +145,16 @@ def parse_responses_body(
         for item in items
         if item.get("type") == "function_call"
     ]
-    if not text and not tool_calls:
+    finish_reason = str(status)
+    if status == "incomplete":
+        incomplete = body.get("incomplete_details")
+        reason = (
+            str(incomplete.get("reason"))
+            if isinstance(incomplete, dict) and incomplete.get("reason")
+            else "incomplete"
+        )
+        finish_reason = "length" if reason == "max_output_tokens" else reason
+    elif not text and not tool_calls:
         raise _malformed(
             "Provider 响应不包含正文或 function calls。", provider_id
         )
@@ -155,7 +170,7 @@ def parse_responses_body(
         text=text,
         model=str(body.get("model") or fallback_model),
         tool_calls=tool_calls,
-        finish_reason=str(status),
+        finish_reason=finish_reason,
         native_blocks=list(items),
         thinking_blocks=thinking_blocks,
         **usage,

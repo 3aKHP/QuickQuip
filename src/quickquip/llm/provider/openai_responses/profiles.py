@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from quickquip.llm.config import REASONING_EFFORT_CHOICES
+from quickquip.llm.config import (
+    DEFAULT_RESPONSES_PROFILE_ID,
+    REASONING_EFFORT_CHOICES,
+)
 from quickquip.llm.provider.base import LLMProviderError
 
 # 与 llm.toml 的 protocol 值 / owner 记录的 protocol 字段同源。
@@ -26,6 +29,7 @@ OPENAI_RESPONSES_PROTOCOL = "openai_responses"
 # 映射集中 request.py 一处。注册表键集与 config.RESPONSES_PROFILE_IDS
 # 的一致性由 test_provider_openai_responses 的守护测试断言。
 REASONING_EFFORT_TIERS = REASONING_EFFORT_CHOICES
+DEFAULT_PROFILE_ID = DEFAULT_RESPONSES_PROFILE_ID
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,9 +62,6 @@ PROFILES: dict[str, ResponsesProfile] = {
         reconcile_relay_items=True,
     ),
 }
-
-DEFAULT_PROFILE_ID = "openai-public"
-
 
 def resolve_profile(profile_id: str) -> ResponsesProfile:
     """按 id 解析 profile；未知 id fail-closed（中转形状漂移必须显式失败）。"""

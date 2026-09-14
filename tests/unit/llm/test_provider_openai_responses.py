@@ -541,15 +541,74 @@ def test_stream_failed_event_server_error_retryable():
     assert excinfo.value.status_code == 500  # 基座 _is_retryable 判可重试
 
 
-def test_stream_incomplete_event():
+def test_stream_incomplete_event_folds_to_length_finish():
+    """流式 incomplete 终态照常折叠：max_output_tokens 归一 length。"""
     chunks = [
         {
+            "type": "response.output_text.delta",
+            "sequence_number": 0,
+            "delta": "截断前的一半",
+        },
+        {
             "type": "response.incomplete",
-            "response": {"incomplete_details": {"reason": "max_output_tokens"}},
+            "sequence_number": 1,
+            "response": {
+                "id": "resp_4",
+                "model": "gpt-test",
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "截断前的一半"}
+                        ],
+                    }
+                ],
+            },
+        },
+    ]
+    response = _fold(chunks)
+    assert response.finish_reason == "length"
+    assert response.text == "截断前的一半"
+
+
+def test_stream_sequence_relaxed_after_unnumbered_event():
+    """中转剥除个别事件序号后退化为单调校验：缺口放行、回跳仍 fail-closed。"""
+    terminal = RESPONSES_TEXT_CHUNKS[-1]["response"]
+    gap_chunks = [
+        {"type": "response.created", "sequence_number": 0},
+        {"type": "codex.rate_limits"},  # 剥除序号（占了一个全局序号位）
+        {"type": "response.in_progress", "sequence_number": 2},  # 缺口 1
+        {"type": "response.output_text.delta", "sequence_number": 3, "delta": "你好"},
+        {"type": "response.output_text.delta", "sequence_number": 4, "delta": "，世界"},
+        {"type": "response.completed", "sequence_number": 5, "response": terminal},
+    ]
+    response = _fold(gap_chunks, profile_id="codex-http-relay")
+    assert response.text == "你好，世界"
+
+    backward = [
+        {"type": "response.created", "sequence_number": 0},
+        {"type": "codex.rate_limits"},
+        {"type": "response.in_progress", "sequence_number": 0},  # 回跳
+    ]
+    with pytest.raises(LLMProviderError, match="回跳"):
+        _fold(backward, profile_id="codex-http-relay")
+
+
+def test_stream_error_event_fatal_code_not_retryable():
+    """error 事件携带致命码（与 response.failed 共用判据）直接终态拒绝。"""
+    chunks = [
+        {
+            "type": "error",
+            "error": {"code": "insufficient_quota", "message": "quota"},
         }
     ]
-    with pytest.raises(LLMProviderError, match="max_output_tokens"):
+    with pytest.raises(LLMProviderError) as excinfo:
         _fold(chunks)
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.transport is False
 
 
 def test_stream_error_event():
@@ -765,14 +824,54 @@ def test_response_owner_endpoint_branch():
     "body",
     [
         _completed_body([], status="failed", error="boom"),  # error 非对象
-        _completed_body([], status="incomplete", incomplete_details="max_output_tokens"),
+        _completed_body(
+            [],
+            status="cancelled",
+            incomplete_details="max_output_tokens",  # 非 incomplete 状态不宽限
+        ),
     ],
 )
 def test_parse_body_non_dict_failure_fields_fail_closed(body):
-    """error/incomplete_details 为非 dict 真值时按 LLMProviderError 终止
+    """failed/cancelled 状态的非 dict 失败字段按 LLMProviderError 终止
     （不得 AttributeError 逃逸成 complete() 的非流式 fallback）。"""
     with pytest.raises(LLMProviderError):
         parse_responses_body(body, provider_id="fake", fallback_model="gpt-test")
+
+
+def test_parse_body_incomplete_max_output_tokens_normalized_to_length():
+    """incomplete 是正常截断：max_output_tokens 归一为兄弟协议的 length
+    终值照常返回（可空正文——截断可能发生在可见输出之前）。"""
+    body = _completed_body(
+        [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "截断前的一半"}],
+            }
+        ],
+        status="incomplete",
+        incomplete_details={"reason": "max_output_tokens"},
+    )
+    response = parse_responses_body(body, provider_id="fake", fallback_model="m")
+    assert response.finish_reason == "length"
+    assert response.text == "截断前的一半"
+
+    empty = _completed_body(
+        [{"type": "reasoning", "id": "rs_1", "encrypted_content": "x"}],
+        status="incomplete",
+        incomplete_details={"reason": "max_output_tokens"},
+    )
+    assert parse_responses_body(empty, provider_id="fake", fallback_model="m").text == ""
+
+
+def test_parse_body_incomplete_other_reasons_pass_through():
+    body = _completed_body(
+        [],
+        status="incomplete",
+        incomplete_details={"reason": "content_filter"},
+    )
+    response = parse_responses_body(body, provider_id="fake", fallback_model="m")
+    assert response.finish_reason == "content_filter"
 
 
 @pytest.mark.parametrize(
@@ -908,6 +1007,49 @@ def test_completed_finish_reason_accepted_by_summary_policy():
     )
     assert response.finish_reason == "completed"
     assert classify_response(response) == "accepted"
+
+
+def test_wire_items_native_no_double_count():
+    """native_content 消息按原生块单计（不叠加 tool_calls/thinking_blocks），
+    与 estimate_request_tokens 的单计口径一致。"""
+    from quickquip.llm.request_budget import count_wire_items
+
+    native_request = _request(
+        [
+            LLMConversationMessage(role="user", content="hi"),
+            LLMConversationMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    LLMToolCall(id="call_1", name="t", arguments_json="{}")
+                ],
+                thinking_blocks=[{"type": "reasoning", "reasoning_content": "x"}],
+                native_content=[dict(item) for item in _NATIVE_TOOL_ITEMS],
+            ),
+        ]
+    )
+    portable_request = _request(
+        [
+            LLMConversationMessage(role="user", content="hi"),
+            LLMConversationMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    LLMToolCall(id="call_1", name="t", arguments_json="{}")
+                ],
+                thinking_blocks=[{"type": "reasoning", "reasoning_content": "x"}],
+            ),
+        ]
+    )
+    native_count = count_wire_items(native_request) - count_wire_items(
+        _request([LLMConversationMessage(role="user", content="hi")])
+    )
+    portable_count = count_wire_items(portable_request) - count_wire_items(
+        _request([LLMConversationMessage(role="user", content="hi")])
+    )
+    # 原生路径：1 条消息 + 2 个原生块；通用路径：1 条消息 + 1 call + 1 thinking
+    assert native_count == 3
+    assert portable_count == 3
 
 
 def test_usage_metering_input_semantics_inclusive():

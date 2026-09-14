@@ -37,7 +37,7 @@ from quickquip.llm.provider.openai_responses.response import validate_output_ite
 # store:false 常量：手动上下文管理，服务端不留响应态，续接上下文由本端
 # input items 完整表达。显式请求 reasoning 密文以兼容目标中转的回传。
 STORE = False
-INCLUDE_ENCRYPTED_REASONING = ["reasoning.encrypted_content"]
+INCLUDE_ENCRYPTED_REASONING = ("reasoning.encrypted_content",)
 
 # 六档（low/medium/high/xhigh/max/ultra）→ 各 profile 实际 effort 的映射表，
 # 集中一处（1.16 决策 3/4）。max/ultra 超出首批两 profile 的 wire 词表

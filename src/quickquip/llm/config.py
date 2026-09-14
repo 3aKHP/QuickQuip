@@ -187,6 +187,7 @@ DISABLED_PROVIDER_REPLY = (
 # provider 包（base.py 依赖 config，反向才不构成环），守护测试断言两侧相等。
 RESPONSES_PROFILE_IDS = frozenset({"openai-public", "codex-http-relay"})
 REASONING_EFFORT_CHOICES = ("low", "medium", "high", "xhigh", "max", "ultra")
+DEFAULT_RESPONSES_PROFILE_ID = "openai-public"
 
 
 @dataclass(slots=True)
@@ -215,8 +216,9 @@ class ProviderConfig:
     auth_method: str = "api_key"  # "api_key" | "bearer"
     builtin_search: bool = False  # 声明 provider 原生搜索工具；仅 gemini 协议有请求级效果
     # openai_responses 专属：后端能力位 profile。词表单源
-    # RESPONSES_PROFILE_IDS（provider/openai_responses/profiles.py 反向引用）。
-    responses_profile: str = "openai-public"
+    # RESPONSES_PROFILE_IDS / DEFAULT_RESPONSES_PROFILE_ID（provider/
+    # openai_responses/profiles.py 反向引用）。
+    responses_profile: str = DEFAULT_RESPONSES_PROFILE_ID
     # openai_responses 专属：思考档位，词表单源 REASONING_EFFORT_CHOICES。
     # 独立于 thinking_budget 数字口径——后者仅 claude/gemini 生效，档位到
     # 各 profile 实际 effort 的映射集中 provider/openai_responses/request.py。
@@ -624,8 +626,10 @@ def _parse_single_provider(
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
         builtin_search=as_bool(entry.get("builtin_search"), default=False),
         responses_profile=(
-            str(entry.get("responses_profile", "openai-public")).strip().lower()
-            or "openai-public"
+            str(entry.get("responses_profile", DEFAULT_RESPONSES_PROFILE_ID))
+            .strip()
+            .lower()
+            or DEFAULT_RESPONSES_PROFILE_ID
         ),
         reasoning_effort=str(entry.get("reasoning_effort", "")).strip().lower(),
         epoch_context_tokens=_as_optional_int(entry.get("epoch_context_tokens")),

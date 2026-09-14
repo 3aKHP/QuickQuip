@@ -87,7 +87,9 @@ def test_count_wire_items_counts_native_and_thinking_parts():
         thinking_blocks=[{"type": "reasoning", "reasoning_content": "x"}],
         native_content=[{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
     )
-    assert count_wire_items(_request([msg])) == 4  # 1 消息 + 1 thinking + 2 native parts
+    # 原生路径单计：正文/thinking 已内含于 native 块（serializer 原样发送、
+    # 忽略通用字段），与 estimate_request_tokens 的单计口径一致。
+    assert count_wire_items(_request([msg])) == 3  # 1 消息 + 2 native parts
 
 
 # ── 窗口解析 ─────────────────────────────────────────────────────

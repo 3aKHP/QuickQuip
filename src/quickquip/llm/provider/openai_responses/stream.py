@@ -4,7 +4,8 @@
 
 - 语义事件（delta/output_item.done/completed/failed/incomplete/error）
   显式处理；结构型事件显式容忍忽略；**未知事件 fail-closed 抛错**。
-- ``sequence_number`` 连续性校验（字段缺失时容忍，兼容中转剥除）。
+- ``sequence_number`` 连续性校验；个别事件被中转剥除序号后退化为
+  单调递增校验（剥除事件消耗了全局序号位，严格等值会误报跳变）。
 - 终态（response.completed）之后再收到任何事件即畸形。
 - 流式累计（正文/reasoning/function arguments）与终态 body 逐项交叉
   验证，不一致判畸形——重试不得泄漏半截输出。
@@ -18,6 +19,7 @@ dict 列表并容忍无 ``[DONE]`` 终止（Responses 以 response.completed 收
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from quickquip.llm.provider.base import LLMProviderError, LLMResponse
@@ -78,6 +80,8 @@ def fold_stream_events(
     relay_done_items: list[dict[str, Any]] = []
     terminal: dict[str, Any] | None = None
     expected_sequence = 0
+    # 一旦出现无序号事件（中转剥除），序号校验退化为单调不减。
+    saw_unnumbered = False
 
     def _malformed(detail: str) -> LLMProviderError:
         return LLMProviderError(f"[{provider_id}] Responses 流畸形：{detail}")
@@ -91,15 +95,24 @@ def fold_stream_events(
         if terminal is not None:
             raise _malformed(f"终态事件后又收到 {event_type}。")
         sequence = event.get("sequence_number")
-        if sequence is not None:
-            if (
-                not isinstance(sequence, int)
-                or isinstance(sequence, bool)
-                or sequence != expected_sequence
-            ):
+        if sequence is None:
+            saw_unnumbered = True
+        elif not isinstance(sequence, int) or isinstance(sequence, bool):
+            raise _malformed(
+                f"事件序号从 {expected_sequence} 跳变到 {sequence}。"
+            )
+        elif saw_unnumbered:
+            # 剥除事件消耗了全局序号位：只拒绝回跳，不要求严格等值。
+            if sequence < expected_sequence:
                 raise _malformed(
-                    f"事件序号从 {expected_sequence} 跳变到 {sequence}。"
+                    f"事件序号从 {expected_sequence} 回跳到 {sequence}。"
                 )
+            expected_sequence = sequence + 1
+        elif sequence != expected_sequence:
+            raise _malformed(
+                f"事件序号从 {expected_sequence} 跳变到 {sequence}。"
+            )
+        else:
             expected_sequence += 1
 
         if event_type in ("response.output_text.delta", "response.refusal.delta"):
@@ -143,6 +156,13 @@ def fold_stream_events(
             if not isinstance(response_body, dict):
                 raise _malformed("completed 事件缺少终态 response。")
             terminal = response_body
+        elif event_type == "response.incomplete":
+            # incomplete 是正常截断终态（reasoning 计入输出上限时常见）：
+            # 折叠进终态由 parse_responses_body 归一为 length/原因终值。
+            response_body = event.get("response")
+            if not isinstance(response_body, dict):
+                raise _malformed("incomplete 事件缺少终态 response。")
+            terminal = response_body
         elif event_type == "response.failed":
             # 载荷形状先守卫再取字段：畸形载荷以 malformed 终止，不允许
             # AttributeError 逃逸成 complete() 的非流式 fallback。
@@ -162,27 +182,22 @@ def fold_stream_events(
                 f"[{provider_id}] Responses 流失败（{code or 'unknown'}）：{message}",
                 status_code=400 if fatal else 500,
             )
-        elif event_type == "response.incomplete":
-            incomplete = event.get("response")
-            reason = (
-                incomplete.get("incomplete_details")
-                if isinstance(incomplete, dict)
-                else None
-            ) or {}
-            if not isinstance(reason, dict):
-                reason = {}
-            raise LLMProviderError(
-                f"[{provider_id}] Responses 流未完成："
-                f"{reason.get('reason') or 'unknown'}",
-                status_code=400,
-            )
         elif event_type == "error":
             error = event.get("error")
             if not isinstance(error, dict):
                 raise _malformed("error 事件载荷畸形。")
+            code = error.get("code")
+            if code in _FATAL_FAILURE_CODES:
+                # 与 response.failed 共用致命码判据：重试必然徒劳的码
+                # 直接终态拒绝。
+                raise LLMProviderError(
+                    f"[{provider_id}] Responses 流错误"
+                    f"（{code}）：{error.get('message') or 'unknown error'}",
+                    status_code=400,
+                )
             raise LLMProviderError(
                 f"[{provider_id}] Responses 流错误"
-                f"（{error.get('code') or 'unknown'}）："
+                f"（{code or 'unknown'}）："
                 f"{error.get('message') or 'unknown error'}",
                 # 中转瞬断（连接重置、上游网关错误）按传输层失败归类，
                 # 交给基座退避重试（对齐移植源 stream_error 的可重试分类）。
@@ -248,7 +263,7 @@ def _reconcile_relay_terminal(
     done_items: list[dict[str, Any]],
     *,
     profile: ResponsesProfile,
-    fail,
+    fail: Callable[[str], LLMProviderError],
 ) -> dict[str, Any]:
     """codex-http-relay 终态核对：output 缺省/子集时以流式完整 items 为准。"""
     if not profile.reconcile_relay_items or not done_items:
