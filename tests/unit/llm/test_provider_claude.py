@@ -218,7 +218,8 @@ async def test_claude_cache_tokens_parsed():
     # 5m/1h 细分求和回退（无顶层 cache_creation_input_tokens 时）
     data2 = {"model": "claude-test", "content": [{"type": "text", "text": "ok"}],
              "usage": {"input_tokens": 100, "output_tokens": 50,
-                       "cache_creation": {"ephemeral_5m_input_tokens": 30, "ephemeral_1h_input_tokens": 50}}}
+                       "cache_creation": {"ephemeral_5m_input_tokens": 30,
+                                         "ephemeral_1h_input_tokens": 50}}}
     resp2 = await FakeClaudeClient(base, data2).complete(request)
     assert resp2.cache_creation_tokens == 80
     assert resp2.cache_read_tokens is None

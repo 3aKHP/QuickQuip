@@ -327,7 +327,9 @@ class TurnRecorder:
             if receipt.status == DeliveryStatus.SENT and receipt.message_id:
                 self._store.set_first_chunk_message_id(record.message_row_id, receipt.message_id)
             self._store.finish_delivery(attempt, receipt)
-            self._delivery_stats[str(receipt.status)] = self._delivery_stats.get(str(receipt.status), 0) + 1
+            self._delivery_stats[str(receipt.status)] = (
+                self._delivery_stats.get(str(receipt.status), 0) + 1
+            )
             self._delivery_count += 1
             if receipt.status in (DeliveryStatus.FAILED, DeliveryStatus.UNKNOWN):
                 # D3：终止当前 Loop 后续生成、工具启动和交付。

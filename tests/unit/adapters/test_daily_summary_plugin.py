@@ -68,11 +68,17 @@ async def test_send_daily_summary_now_reuses_manual_generation(monkeypatch):
 
     monkeypatch.setattr(daily_summary_plugin, "datetime", _FixedDateTime)
     monkeypatch.setattr(daily_summary_plugin, "daily_enabled_groups", _EnabledGroups())
-    monkeypatch.setattr(daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1", "m2"])
+    monkeypatch.setattr(
+        daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1", "m2"]
+    )
     monkeypatch.setattr(
         daily_summary_plugin,
         "get_llm_service",
-        lambda: types.SimpleNamespace(config=types.SimpleNamespace(daily_summary=types.SimpleNamespace(min_messages=1))),
+        lambda: types.SimpleNamespace(
+            config=types.SimpleNamespace(
+                daily_summary=types.SimpleNamespace(min_messages=1)
+            )
+        ),
     )
     monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda group_id: False)
     monkeypatch.setattr(daily_summary_plugin, "_mark_triggered", lambda group_id: None)
@@ -83,7 +89,9 @@ async def test_send_daily_summary_now_reuses_manual_generation(monkeypatch):
     async def before_generate():
         before_generate_calls.append("called")
 
-    result = await daily_summary_plugin.send_daily_summary_now("123456", types.SimpleNamespace(), before_generate)
+    result = await daily_summary_plugin.send_daily_summary_now(
+        "123456", types.SimpleNamespace(), before_generate
+    )
 
     assert result == {"model_used": "model-a", "char_count": len("summary text")}
     assert sent == [(123456, "summary text")]
@@ -101,11 +109,17 @@ async def test_send_daily_summary_now_reports_not_enough_messages(monkeypatch):
 
     monkeypatch.setattr(daily_summary_plugin, "datetime", _FixedDateTime)
     monkeypatch.setattr(daily_summary_plugin, "daily_enabled_groups", _EnabledGroups())
-    monkeypatch.setattr(daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1"])
+    monkeypatch.setattr(
+        daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1"]
+    )
     monkeypatch.setattr(
         daily_summary_plugin,
         "get_llm_service",
-        lambda: types.SimpleNamespace(config=types.SimpleNamespace(daily_summary=types.SimpleNamespace(min_messages=2))),
+        lambda: types.SimpleNamespace(
+            config=types.SimpleNamespace(
+                daily_summary=types.SimpleNamespace(min_messages=2)
+            )
+        ),
     )
     monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda group_id: False)
     monkeypatch.setattr(daily_summary_plugin, "_mark_triggered", lambda group_id: None)

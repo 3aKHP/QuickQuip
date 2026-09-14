@@ -93,7 +93,9 @@ def test_blocked_loop_uses_safe_archive_without_mutating_records(tmp_path, locat
         )
         serialized = json.dumps([asdict(message) for message in projection.messages])
         assert MARKER not in serialized
-        assert not any(message.native_content or message.tool_calls for message in projection.messages)
+        assert not any(
+            message.native_content or message.tool_calls for message in projection.messages
+        )
         assert not any(message.role == "tool" for message in projection.messages)
     assert loop == original
 
@@ -108,7 +110,9 @@ def test_unaffected_loop_preserves_native_bytes(tmp_path, mode):
     safe, archived = prepare_safe_history([loop], sensitive)
     assert safe[0] is loop
     assert not archived
-    original = project_loops_with_budget([loop], target=owner, protocol="claude", budget_tokens=10000)
+    original = project_loops_with_budget(
+        [loop], target=owner, protocol="claude", budget_tokens=10000
+    )
     result = project_loops_with_budget(safe, target=owner, protocol="claude", budget_tokens=10000)
     assert result == original
     assert result.messages[1].native_content == loop.turns[0].native_state["blocks"]
@@ -125,7 +129,9 @@ def test_numeric_tool_arguments_are_scanned(tmp_path):
     loop, _ = _loop()
     tool = replace(loop.turns[0].tools[0], arguments_json='{"user_id":123456789}')
     loop = replace(loop, turns=(replace(loop.turns[0], tools=(tool,)),))
-    _, archived = prepare_safe_history([loop], make_sensitive_filter(tmp_path, "block", "123456789"))
+    _, archived = prepare_safe_history(
+        [loop], make_sensitive_filter(tmp_path, "block", "123456789")
+    )
     assert archived == {loop.loop_id}
 
 

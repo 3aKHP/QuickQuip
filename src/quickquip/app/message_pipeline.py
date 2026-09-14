@@ -20,7 +20,15 @@ from quickquip.chat import context_rules as context_rules_module
 from quickquip.chat import rule_switch as rule_switch_module
 from quickquip.chat import text_rules as text_rules_module
 from quickquip.chat.chain_game import ChainGameDef, ChainGameManager
-from quickquip.games import BlackjackGame, GameEconomyStore, GameRegistry, NiuNiuStore, NumberBombGame, RussianRouletteGame, game_scores
+from quickquip.games import (
+    BlackjackGame,
+    GameEconomyStore,
+    GameRegistry,
+    NiuNiuStore,
+    NumberBombGame,
+    RussianRouletteGame,
+    game_scores,
+)
 
 from quickquip.games.config import load_games_config
 from quickquip.chat.good_girl_chain import GoodGirlChainManager
@@ -113,7 +121,9 @@ good_girl_chain = GoodGirlChainManager()
 custom_chain_games = ChainGameManager([ChainGameDef.from_dict(d) for d in CHAIN_GAME_CONFIGS])
 stats_tracker = GroupStatsTracker()
 rule_switch = GroupRuleSwitch()
-recent_messages = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=RECENT_CONTEXT_TTL_SECONDS)
+recent_messages = RecentMessageBuffer(
+    max_messages_per_group=20, ttl_seconds=RECENT_CONTEXT_TTL_SECONDS
+)
 message_deduper = RecentMessageDeduper()
 awakening_state = _get_awakening_state()
 
@@ -140,7 +150,9 @@ game_registry = GameRegistry(max_sessions=1024)
 game_registry.register(NumberBombGame(config=games_config.number_bomb))
 game_economy = GameEconomyStore(config=games_config.economy)
 game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))
-game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))
+game_registry.register(
+    RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette)
+)
 niuniu_store = NiuNiuStore(config=games_config.niuniu)
 
 # 贴吧服务：构造不做磁盘 IO，帖子池由 startup()/web 装配显式 load()
@@ -148,7 +160,9 @@ tieba_service = TiebaService()
 
 DATA_DIR.mkdir(exist_ok=True)
 stats_tracker.load(STATS_PATH)
-_record_identities.names_provider = lambda gid: getattr(stats_tracker.get_stats(gid), "user_names", {})
+_record_identities.names_provider = lambda gid: getattr(
+    stats_tracker.get_stats(gid), "user_names", {}
+)
 rule_switch.load(RULE_SWITCH_PATH)
 _llm_bindings_done = False
 

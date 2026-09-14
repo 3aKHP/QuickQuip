@@ -91,11 +91,14 @@ class TiebaCrawler:
         content = clean_text(await page.content(), limit=10_000)
         current_url = clean_text(page.url)
         if self.is_challenge_page(title, content, current_url):
-            raise TiebaLoginRequiredError(f"{forum_keyword} 吧主页命中百度安全验证，需要人工续签登录态")
+            raise TiebaLoginRequiredError(
+                f"{forum_keyword} 吧主页命中百度安全验证，需要人工续签登录态"
+            )
 
         if int(data.get("error_code", 0) or 0) != 0:
             raise TiebaServiceError(
-                f"贴吧首页接口返回异常：error_code={data.get('error_code')} {data.get('error_msg', '')}"
+                f"贴吧首页接口返回异常：error_code={data.get('error_code')} "
+                f"{data.get('error_msg', '')}"
             )
         return data
 
@@ -162,7 +165,9 @@ class TiebaCrawler:
             )
         return data
 
-    def extract_urls_from_content(self, content_items: list[dict[str, object]]) -> tuple[str, list[str]]:
+    def extract_urls_from_content(
+        self, content_items: list[dict[str, object]]
+    ) -> tuple[str, list[str]]:
         text_parts: list[str] = []
         image_urls: list[str] = []
         seen_images: set[str] = set()
@@ -184,11 +189,16 @@ class TiebaCrawler:
                 if not candidate or not candidate.startswith(("http://", "https://")):
                     continue
                 lowered = candidate.lower()
-                if any(marker in lowered for marker in ["portrait", "icon", "avatar", "emoticon", "ares.cdn.bcebos.com"]):
+                if any(
+                    marker in lowered
+                    for marker in ["portrait", "icon", "avatar", "emoticon", "ares.cdn.bcebos.com"]
+                ):
                     continue
                 if candidate in seen_images:
                     continue
-                if item_type in {3, 5} or any(ext in lowered for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
+                if item_type in {3, 5} or any(
+                    ext in lowered for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]
+                ):
                     seen_images.add(candidate)
                     image_urls.append(candidate)
 
@@ -307,9 +317,14 @@ class TiebaCrawler:
                     forum_feed_data = await self.load_forum_feed_data(page, forum_keyword)
                     links = self.extract_forum_links(forum_feed_data)
                     if not links:
-                        raise TiebaServiceError("未在贴吧首页提取到帖子链接，请先完成登录并确认页面可正常打开")
+                        raise TiebaServiceError(
+                            "未在贴吧首页提取到帖子链接，"
+                            "请先完成登录并确认页面可正常打开"
+                        )
 
-                    selected_links = links[: limit if limit is not None else self.config.detail_fetch_limit]
+                    selected_links = links[
+                        : limit if limit is not None else self.config.detail_fetch_limit
+                    ]
                     threads: list[TiebaThread] = []
                     for item in selected_links:
                         try:
@@ -323,12 +338,21 @@ class TiebaCrawler:
                                 continue
                             if not detail.cover_image_url:
                                 detail.cover_image_url = item.get("cover_image_url", "")
-                            if detail.cover_image_url and detail.cover_image_url not in detail.image_urls:
+                            if (
+                                detail.cover_image_url
+                                and detail.cover_image_url not in detail.image_urls
+                            ):
                                 detail.image_urls.insert(0, detail.cover_image_url)
-                            detail.fetched_at = datetime.now(tz=ZoneInfo(BEIJING_TIMEZONE)).timestamp()
+                            detail.fetched_at = datetime.now(
+                                tz=ZoneInfo(BEIJING_TIMEZONE)
+                            ).timestamp()
                             threads.append(detail)
                             if on_progress:
-                                img_hint = f" [{len(detail.image_urls)}图]" if detail.image_urls else ""
+                                img_hint = (
+                                    f" [{len(detail.image_urls)}图]"
+                                    if detail.image_urls
+                                    else ""
+                                )
                                 on_progress(f"✓ {detail.title[:30]}{img_hint}")
                         except TiebaLoginRequiredError:
                             raise  # login expiry aborts the entire forum
@@ -344,7 +368,9 @@ class TiebaCrawler:
 
     async def interactive_login(self, forum_keyword: str) -> None:
         if not forum_keyword:
-            raise TiebaServiceError("请先在 .env 中设置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS")
+            raise TiebaServiceError(
+                "请先在 .env 中设置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS"
+            )
         if not self.playwright_ready():
             raise TiebaServiceError("未安装 Playwright，请先执行 pip install -r requirements.txt")
 

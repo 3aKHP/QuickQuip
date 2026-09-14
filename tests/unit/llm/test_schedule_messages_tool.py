@@ -33,6 +33,28 @@ def tool_env(monkeypatch, tmp_path):
     return type("ScheduleToolEnv", (), {"store": store, "reloads": reloads})()
 
 
+def test_input_schema_descriptions_are_strings(llm_service):
+    """schema 契约守卫：description 等说明字段必须是 str。
+
+    隐式字符串拼接折叠时的尾逗号会把 description 变成单元素元组，
+    经 json 序列化成数组发往 provider（E501 折行 PR 曾引入，CR 拦截）。
+    """
+    def _walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in ("description", "type", "enum") and not isinstance(value, (str, list)):
+                    raise AssertionError(
+                        f"schema {key} is {type(value).__name__}, expected str/list"
+                    )
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    for spec in llm_service.tool_registry.list_specs():
+        _walk(spec.input_schema)
+
+
 async def test_private_chat_rejected(tool_env):
     svc = _FakeService()
     out = await svc._tool_manage_scheduled_messages(

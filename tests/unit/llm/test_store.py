@@ -71,7 +71,9 @@ def test_conversation_crop_deletes_below_floor(store: LLMStore) -> None:
 
 
 def test_conversation_list_since_returns_asc_with_ids(store: LLMStore) -> None:
-    store.append_conversation_message(1007, "u", "user", "q1", message_id="m1", raw_content="q1 raw")
+    store.append_conversation_message(
+        1007, "u", "user", "q1", message_id="m1", raw_content="q1 raw"
+    )
     store.append_conversation_message(1007, None, "assistant", "a1")
     store.append_conversation_message(1007, "u", "user", "q2", message_id="m2")
     all_rows = store.list_conversation_messages_since(1007, 0, limit=100)
@@ -428,7 +430,8 @@ def test_group_settings_agent_delivery_half_migration(tmp_path: Path) -> None:
             allow_at INTEGER,
             updated_at TEXT NOT NULL
         );
-        INSERT INTO group_settings (group_id, agent_delivery_enabled, agent_delivery_intermediate_enabled, updated_at)
+        INSERT INTO group_settings
+        (group_id, agent_delivery_enabled, agent_delivery_intermediate_enabled, updated_at)
         VALUES ('9101', 1, 0, '2026-09-11T00:00:00+00:00');
         """
     )

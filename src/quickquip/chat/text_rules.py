@@ -26,7 +26,9 @@ def recompile_patterns() -> None:
 recompile_patterns()
 
 
-def build_rule_context(user_id: int | str, sender_name: str, now: Optional[datetime] = None) -> dict:
+def build_rule_context(
+    user_id: int | str, sender_name: str, now: Optional[datetime] = None
+) -> dict:
     current_dt = now or datetime.now(ZoneInfo(BEIJING_TIMEZONE))
     return {
         "current_time": current_dt.strftime(BEIJING_TIME_FORMAT),

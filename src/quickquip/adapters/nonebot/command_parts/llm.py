@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _parse_preset, _parse_resume, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import (
+    _allow_scope_management,
+    _chat_id,
+    _chat_label,
+    _chat_type,
+    _parse_preset,
+    _parse_resume,
+    _strip_command_name,
+)
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, rate_limiter
 from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS
 from quickquip.llm.settings import DeliveryDomain
@@ -75,7 +83,8 @@ async def _handle_delivery_command(
         # 概览与单域显式互斥，不依赖 finish 的终止副作用兜底控制流。
         if domain is None or domain is DeliveryDomain.ALL:
             await llm_cmd.finish(
-                f"{scope_label}分段交付：中间轮 {views.current_intermediate}（默认 {views.default_intermediate}）"
+                f"{scope_label}分段交付："
+                f"中间轮 {views.current_intermediate}（默认 {views.default_intermediate}）"
                 f" / 最终轮 {views.current_final}（默认 {views.default_final}）"
             )
         else:
@@ -85,7 +94,8 @@ async def _handle_delivery_command(
                 else views.current_final
             )
             await llm_cmd.finish(
-                f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}：{current}（全局默认 {_domain_default(domain)}）"
+                f"{scope_label}{_DELIVERY_DOMAIN_LABELS[domain]}：{current}"
+                f"（全局默认 {_domain_default(domain)}）"
             )
 
 
@@ -163,14 +173,20 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                         scope_key = svc.build_chat_scope_key(chat_id, "private")
                         svc._session_presets[scope_key] = preset_override
                     preset = preset_override or result.get("preset", "")
-                    msg = f"已恢复存档 #{result['archive_number']}（{result['message_count']} 条消息）"
+                    msg = (
+                        f"已恢复存档 #{result['archive_number']}"
+                        f"（{result['message_count']} 条消息）"
+                    )
                     if preset:
                         preview = preset[:80] + ("..." if len(preset) > 80 else "")
                         msg += f"\n附加设定：{preview}"
                     await llm_cmd.finish(msg)
                 preset = _parse_preset(args)
                 svc.start_private_session(chat_id, preset=preset)
-                msg = f"{scope_label}会话已开启。也可以直接使用 /start_sesssion，上下文由会话纪元自动管理。"
+                msg = (
+                    f"{scope_label}会话已开启。"
+                    f"也可以直接使用 /start_sesssion，上下文由会话纪元自动管理。"
+                )
                 if preset:
                     preview = preset[:80] + ("..." if len(preset) > 80 else "")
                     msg += f"\n附加设定：{preview}"
@@ -186,10 +202,16 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 deleted = result["deleted"]
                 archive_number = result.get("archive_number")
                 if archive_number is not None:
-                    await llm_cmd.finish(f"{scope_label}会话已结束，已存档为 #{archive_number}（{deleted} 条消息）。")
+                    await llm_cmd.finish(
+                        f"{scope_label}会话已结束，已存档为 #{archive_number}"
+                        f"（{deleted} 条消息）。"
+                    )
                 else:
                     suffix = "（未存档）" if no_save else ""
-                    await llm_cmd.finish(f"{scope_label}会话已结束，并清空了 {deleted} 条短期上下文。{suffix}")
+                    await llm_cmd.finish(
+                        f"{scope_label}会话已结束，"
+                        f"并清空了 {deleted} 条短期上下文。{suffix}"
+                    )
             else:
                 svc.set_chat_enabled(chat_id, False, chat_type=chat_type)
                 await llm_cmd.finish(f"{scope_label} LLM 已关闭")
@@ -202,7 +224,9 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if config.load_error:
                 await llm_cmd.finish(f"LLM 配置重载失败：{config.load_error}")
             await llm_cmd.send("LLM 配置已重载，正在探活当前 provider/model…")
-            await llm_cmd.finish(await svc.format_current_provider_probe(chat_id, chat_type=chat_type))
+            await llm_cmd.finish(
+                await svc.format_current_provider_probe(chat_id, chat_type=chat_type)
+            )
 
         if args == "clear_context":
             deleted = svc.clear_context(chat_id, chat_type=chat_type)
@@ -216,7 +240,10 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if not target_msg_id and len(tokens) >= 2:
                 target_msg_id = tokens[1].strip()
             if not target_msg_id:
-                await llm_cmd.finish("用法：引用一条消息并发送 /llm delete_msg，或 /llm delete_msg <消息ID>")
+                await llm_cmd.finish(
+                    "用法：引用一条消息并发送 /llm delete_msg，"
+                    "或 /llm delete_msg <消息ID>"
+                )
             scope_key = svc.build_chat_scope_key(chat_id, chat_type)
             deleted = svc.delete_message_from_context(scope_key, target_msg_id)
             if deleted:
@@ -317,14 +344,20 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if n < 1:
                 await llm_cmd.finish("上下文上限须为正整数")
             if n > DEFAULT_EPOCH_MAX_ROWS:
-                await llm_cmd.finish(f"上下文上限最大 {DEFAULT_EPOCH_MAX_ROWS} 条（纪元行数兜底上限）")
+                await llm_cmd.finish(
+                    f"上下文上限最大 {DEFAULT_EPOCH_MAX_ROWS} 条（纪元行数兜底上限）"
+                )
             svc.set_chat_history_limit(chat_id, n, chat_type=chat_type)
             await llm_cmd.finish(f"{scope_label}上下文上限已设为 {n} 条（行数兜底，超出截断）")
 
         await llm_cmd.finish(
-            "LLM 命令用法：/llm status|current|on|off|providers|probe|models [provider]|use <provider> [model]|"
-            "personas|persona use <id>|trigger prefix <value>|trigger prefix_mode on|off|trigger at on|off|"
-            "memory status|memory on|memory off|auto_memory on|off|reset|status|delivery intermediate|final|all <on|off|reset>|delivery status|"
+            "LLM 命令用法：/llm status|current|on|off|providers|"
+            "probe|models [provider]|use <provider> [model]|"
+            "personas|persona use <id>|trigger prefix <value>|"
+            "trigger prefix_mode on|off|trigger at on|off|"
+            "memory status|memory on|memory off|"
+            "auto_memory on|off|reset|status|"
+            "delivery intermediate|final|all <on|off|reset>|delivery status|"
             "context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )
 

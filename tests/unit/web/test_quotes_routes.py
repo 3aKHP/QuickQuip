@@ -76,7 +76,9 @@ def _patch_sources(monkeypatch, rows, *, user_names, canonical_by_uid, llm_ok=Tr
     monkeypatch.setattr(message_pipeline, "group_quote_store", _FakeStore(rows))
     from quickquip.app.identities import IdentitySnapshot, web_identities
     identity = _FakeIdentityIndex(canonical_by_uid if llm_ok else {})
-    monkeypatch.setattr(web_identities, "snapshot", lambda gid: IdentitySnapshot(identity, user_names))
+    monkeypatch.setattr(
+        web_identities, "snapshot", lambda gid: IdentitySnapshot(identity, user_names)
+    )
     monkeypatch.setattr(
         message_pipeline, "get_sender_identity_sources",
         lambda gid: (user_names or None, identity),
@@ -89,7 +91,9 @@ async def test_list_quotes_enriches_sender_display(monkeypatch):
         user_names={"u1": "新名片"}, canonical_by_uid={"u1": "规范名"},
     )
 
-    result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
+    result = await quotes.list_quotes(
+        group_id="g1", offset=0, limit=50, keyword="", request=object()
+    )
     entry = result["entries"][0]
     assert entry["sender_display"] == "规范名"
     assert entry["sender_changed"] is True
@@ -99,7 +103,9 @@ async def test_list_quotes_enriches_sender_display(monkeypatch):
 async def test_list_quotes_falls_back_to_canonical_without_stats(monkeypatch):
     _patch_sources(monkeypatch, [_row()], user_names={}, canonical_by_uid={"u1": "规范名"})
 
-    result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
+    result = await quotes.list_quotes(
+        group_id="g1", offset=0, limit=50, keyword="", request=object()
+    )
     entry = result["entries"][0]
     assert entry["sender_display"] == "规范名"
     assert entry["sender_changed"] is True
@@ -111,7 +117,9 @@ async def test_list_quotes_degrades_to_snapshot_when_llm_unavailable(monkeypatch
         user_names={}, canonical_by_uid={}, llm_ok=False,
     )
 
-    result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
+    result = await quotes.list_quotes(
+        group_id="g1", offset=0, limit=50, keyword="", request=object()
+    )
     entry = result["entries"][0]
     assert entry["sender_display"] == "旧名片"
     assert entry["sender_changed"] is False
@@ -131,7 +139,9 @@ async def test_list_quotes_falls_back_to_stats_without_llm(monkeypatch):
         user_names={"u1": "新名片"}, canonical_by_uid={}, llm_ok=False,
     )
 
-    result = await quotes.list_quotes(group_id="g1", offset=0, limit=50, keyword="", request=object())
+    result = await quotes.list_quotes(
+        group_id="g1", offset=0, limit=50, keyword="", request=object()
+    )
     entry = result["entries"][0]
     assert entry["sender_display"] == "新名片"
     assert entry["sender_changed"] is True

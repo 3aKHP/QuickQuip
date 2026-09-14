@@ -35,7 +35,9 @@ def test_set_weekly_group_enables(monkeypatch):
     monkeypatch.setattr(message_pipeline, "weekly_enabled_groups", fake)
     _patch_audit_noop(monkeypatch)
 
-    assert groups.set_weekly_group("10001", groups.GroupToggle(enabled=True), object()) == {"ok": True}
+    assert groups.set_weekly_group(
+        "10001", groups.GroupToggle(enabled=True), object()
+    ) == {"ok": True}
     assert fake.contains("10001")
 
 

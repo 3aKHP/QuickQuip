@@ -17,7 +17,10 @@ DEFAULT_WEB_ADMIN_PORT = 5104
 def get_web_admin_host() -> str:
     """WEB_ADMIN_HOST（.env），缺省/空白回退默认。web_api 与 webview_launcher 同源。"""
     load_web_env()
-    return os.environ.get("WEB_ADMIN_HOST", DEFAULT_WEB_ADMIN_HOST).strip() or DEFAULT_WEB_ADMIN_HOST
+    return (
+        os.environ.get("WEB_ADMIN_HOST", DEFAULT_WEB_ADMIN_HOST).strip()
+        or DEFAULT_WEB_ADMIN_HOST
+    )
 
 
 def get_web_admin_port() -> int:

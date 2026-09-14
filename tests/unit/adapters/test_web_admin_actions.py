@@ -45,8 +45,14 @@ async def test_awakening_reload_action_reloads_config_and_rules(monkeypatch):
         calls.append("awakening+reschedule")
         return 300
 
-    monkeypatch.setattr(awakening_plugin, "reload_awakening_and_reschedule", _fake_reload_and_reschedule)
-    monkeypatch.setattr(web_admin_actions, "reload_chat_rules_pipeline", lambda: calls.append("rules") or {"rules": 1})
+    monkeypatch.setattr(
+        awakening_plugin, "reload_awakening_and_reschedule", _fake_reload_and_reschedule
+    )
+    monkeypatch.setattr(
+        web_admin_actions,
+        "reload_chat_rules_pipeline",
+        lambda: calls.append("rules") or {"rules": 1},
+    )
 
     result = await web_admin_actions.execute_web_admin_action(
         WebAdminAction(

@@ -7,7 +7,9 @@ from tests.fixtures.chain_game import make_chain_def
 
 class TestFullCapture:
     def test_start_and_progress(self):
-        cg = ChainGameManager([make_chain_def("full_group", r"^来一个(.+)$", ["好的", "$1", "666"])])
+        cg = ChainGameManager(
+            [make_chain_def("full_group", r"^来一个(.+)$", ["好的", "$1", "666"])]
+        )
         r = cg.process(group_id=1, text="来一个哈哈哈", now_ts=0)
         assert r is not None and r["reply"] == "好的"
         assert r["rule_name"] == "full_group_start"
@@ -16,7 +18,9 @@ class TestFullCapture:
         assert r["rule_name"] == "full_group_progress"
 
     def test_session_ends_after_odd_chain(self):
-        cg = ChainGameManager([make_chain_def("full_group", r"^来一个(.+)$", ["好的", "$1", "666"])])
+        cg = ChainGameManager(
+            [make_chain_def("full_group", r"^来一个(.+)$", ["好的", "$1", "666"])]
+        )
         cg.process(group_id=1, text="来一个哈哈哈", now_ts=0)
         cg.process(group_id=1, text="哈哈哈", now_ts=1)
         assert cg.process(group_id=1, text="哈哈哈", now_ts=2) is None
@@ -42,20 +46,26 @@ class TestCharIndexing:
 
 class TestChainShape:
     def test_multi_character_token(self):
-        cg = ChainGameManager([make_chain_def("multi_tok", r"^(.+)发车$", ["上车了", "准备好了", "出发！"])])
+        cg = ChainGameManager(
+            [make_chain_def("multi_tok", r"^(.+)发车$", ["上车了", "准备好了", "出发！"])]
+        )
         assert cg.process(group_id=5, text="快速发车", now_ts=0)["reply"] == "上车了"
         assert cg.process(group_id=5, text="准备好了", now_ts=1)["reply"] == "出发！"
         assert cg.process(group_id=5, text="准备好了", now_ts=2) is None
 
     def test_even_length_with_stop_token(self):
-        cg = ChainGameManager([make_chain_def("even_chain", r"^(.+)启动$", ["准备", "就绪", "冲", "STOP"])])
+        cg = ChainGameManager(
+            [make_chain_def("even_chain", r"^(.+)启动$", ["准备", "就绪", "冲", "STOP"])]
+        )
         assert cg.process(group_id=6, text="快速启动", now_ts=0)["reply"] == "准备"
         assert cg.process(group_id=6, text="就绪", now_ts=1)["reply"] == "冲"
         assert cg.process(group_id=6, text="STOP", now_ts=2) is None
         assert cg.process(group_id=6, text="就绪", now_ts=3) is None
 
     def test_stop_token_ends_session_early(self):
-        cg = ChainGameManager([make_chain_def("early_stop", r"^(.+)启动$", ["准备", "就绪", "冲", "STOP"])])
+        cg = ChainGameManager(
+            [make_chain_def("early_stop", r"^(.+)启动$", ["准备", "就绪", "冲", "STOP"])]
+        )
         cg.process(group_id=7, text="快速启动", now_ts=0)
         assert cg.process(group_id=7, text="STOP", now_ts=1) is None
         assert cg.process(group_id=7, text="就绪", now_ts=2) is None
@@ -69,7 +79,9 @@ class TestNoiseAndTimeout:
         assert cg.process(group_id=8, text="开始", now_ts=2)["reply"] == "完成"
 
     def test_timeout_invalidates_session(self):
-        cg = ChainGameManager([make_chain_def("timeout", r"^(.+)准备$", ["好", "开始", "完成"], timeout=5)])
+        cg = ChainGameManager(
+            [make_chain_def("timeout", r"^(.+)准备$", ["好", "开始", "完成"], timeout=5)]
+        )
         cg.process(group_id=9, text="ABC准备", now_ts=0)
         assert cg.process(group_id=9, text="开始", now_ts=6) is None
 
@@ -97,7 +109,9 @@ def test_chaingamedef_from_dict():
 
 class TestOrCandidates:
     def test_each_alternative_matches(self):
-        cg = ChainGameManager([make_chain_def("or_test", r"^(.+)出发$", ["准备", "就绪|ready|OK", "出发！"])])
+        cg = ChainGameManager(
+            [make_chain_def("or_test", r"^(.+)出发$", ["准备", "就绪|ready|OK", "出发！"])]
+        )
         assert cg.process(group_id=40, text="快速出发", now_ts=0)["reply"] == "准备"
         assert cg.process(group_id=40, text="就绪", now_ts=1)["reply"] == "出发！"
 
@@ -108,7 +122,9 @@ class TestOrCandidates:
         assert cg.process(group_id=42, text="OK", now_ts=1)["reply"] == "出发！"
 
     def test_non_candidate_ignored_session_survives(self):
-        cg = ChainGameManager([make_chain_def("or_test", r"^(.+)出发$", ["准备", "就绪|ready|OK", "出发！"])])
+        cg = ChainGameManager(
+            [make_chain_def("or_test", r"^(.+)出发$", ["准备", "就绪|ready|OK", "出发！"])]
+        )
         assert cg.process(group_id=43, text="快速出发", now_ts=0)["reply"] == "准备"
         assert cg.process(group_id=43, text="差不多得了", now_ts=1) is None
         assert cg.process(group_id=43, text="OK", now_ts=2)["reply"] == "出发！"

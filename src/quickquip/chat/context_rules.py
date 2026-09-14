@@ -59,7 +59,10 @@ def recompile_patterns() -> None:
         for rule in CONTEXT_REPLY_RULES
     ]
     for idx, rule in enumerate(CONTEXT_REPLY_RULES):
-        if rule.get("type", "regex_context") == "regex_context" and not _COMPILED_CONTEXT_CONDITIONS[idx]:
+        if (
+            rule.get("type", "regex_context") == "regex_context"
+            and not _COMPILED_CONTEXT_CONDITIONS[idx]
+        ):
             logger.warning(
                 "context rule %s 是 regex_context 但未配置 context_conditions，该规则将不会触发",
                 rule.get("name", f"#{idx}"),
@@ -85,7 +88,11 @@ def _check_regex_context(
     """本地历史判定：在最近 N 条消息中搜索 context_conditions。空条件视为不放行。"""
     if not conditions:
         return False
-    window = recent_messages[-context_window:] if len(recent_messages) > context_window else recent_messages
+    window = (
+        recent_messages[-context_window:]
+        if len(recent_messages) > context_window
+        else recent_messages
+    )
     for msg in window:
         if _match_any(conditions, msg.get("text", "")):
             return True
@@ -136,7 +143,10 @@ async def _check_llm_context(
     )
 
     try:
-        with usage_scope("context_rule_judge", group_id=str(group_id) if group_id is not None else None):
+        with usage_scope(
+            "context_rule_judge",
+            group_id=str(group_id) if group_id is not None else None,
+        ):
             raw = await asyncio.wait_for(
                 llm_service.quick_judge(full_prompt, max_tokens=64),
                 timeout=timeout,

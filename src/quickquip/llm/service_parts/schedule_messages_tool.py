@@ -49,20 +49,32 @@ SCHEDULE_MESSAGES_TOOL_SPEC = LLMToolSpec(
             },
             "message": {
                 "type": "string",
-                "description": "定时发送的内容（text 类为固定文案，llm 类为任务指令），action=create 时必填",
+                "description": (
+                    "定时发送的内容（text 类为固定文案，llm 类为任务指令），"
+                    "action=create 时必填"
+                ),
             },
             "kind": {
                 "type": "string",
                 "enum": ["text", "llm"],
-                "description": "任务类型：text 固定文案（默认）/ llm 任务指令，action=create 时可选",
+                "description": (
+                    "任务类型：text 固定文案（默认）/ llm 任务指令，"
+                    "action=create 时可选"
+                ),
             },
             "recurring": {
                 "type": "boolean",
-                "description": "是否周期重复（默认 true）；false 为一次性任务，触发后自动删除，action=create 时可选",
+                "description": (
+                    "是否周期重复（默认 true）；false 为一次性任务，触发后自动删除，"
+                    "action=create 时可选"
+                ),
             },
             "enabled": {
                 "type": "boolean",
-                "description": "action=create 时的初始启用状态（默认 true）；action=set_enabled 时的目标状态",
+                "description": (
+                    "action=create 时的初始启用状态（默认 true）；"
+                    "action=set_enabled 时的目标状态"
+                ),
             },
             "job_id": {
                 "type": "string",

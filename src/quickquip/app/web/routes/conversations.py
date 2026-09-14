@@ -176,7 +176,9 @@ def loop_detail(group_key: str, loop_id: str):
     for tool in tools:
         turn_index.setdefault(tool["turn_id"], {}).setdefault("tools", []).append(dict(tool))
     for delivery in deliveries:
-        turn_index.setdefault(delivery["turn_id"], {}).setdefault("deliveries", []).append(dict(delivery))
+        turn_index.setdefault(delivery["turn_id"], {}).setdefault(
+            "deliveries", []
+        ).append(dict(delivery))
     ordered = sorted(turn_index.values(), key=lambda t: t.get("turn_index") or 0)
     return {
         "loop": {

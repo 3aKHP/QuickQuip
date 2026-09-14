@@ -140,7 +140,9 @@ async def test_generate_reply_envelope_carries_time_for_cron_like_trigger(
 
     req = stub.last_request
     assert req is not None
-    assert re.search(r"当前时间：\d{4}-\d{2}-\d{2} 星期. \d{2}:\d{2}（北京时间）", req.messages[-1].content)
+    assert re.search(
+        r"当前时间：\d{4}-\d{2}-\d{2} 星期. \d{2}:\d{2}（北京时间）", req.messages[-1].content
+    )
     assert "当前北京时间" not in req.system_prompt
 
 
@@ -496,7 +498,9 @@ async def test_memory_crud_basic(wired_service):
     memories = wired_service.list_group_memories(1001)
     assert memories[0]["content"] == "阿桃喜欢薄荷糖。"
 
-    matched = wired_service.store.search_memories(1001, user_id=2002, query="阿桃喜欢什么？", limit=3)
+    matched = wired_service.store.search_memories(
+        1001, user_id=2002, query="阿桃喜欢什么？", limit=3
+    )
     assert matched
     assert matched[0]["content"] == "阿桃喜欢薄荷糖。"
 
@@ -795,7 +799,9 @@ async def test_auto_memory_per_chat_override_beats_global_default(
 # ── image preprocessor integration tests ──────────────────────────────
 
 
-async def test_image_preprocessor_called_for_non_vision_model(wired_service, patch_provider_builder):
+async def test_image_preprocessor_called_for_non_vision_model(
+    wired_service, patch_provider_builder
+):
     from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
     wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
     stub_preprocessor = StubImagePreprocessor()
@@ -892,7 +898,9 @@ async def test_vision_model_keeps_images_in_request(wired_service, patch_provide
     assert stub_preprocessor.call_count == 0
 
 
-async def test_non_vision_strips_even_when_preprocessor_fails(wired_service, patch_provider_builder):
+async def test_non_vision_strips_even_when_preprocessor_fails(
+    wired_service, patch_provider_builder
+):
     from tests.fixtures.provider_stubs import StubProviderClient
     from quickquip.llm.image_preprocessor import ImageDescription
 
@@ -1334,7 +1342,9 @@ async def test_set_persona_advances_anchor_to_cold_water(wired_service, monkeypa
     assert calls[0] == EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
 
 
-async def test_non_vision_persists_image_captions_in_raw_content(wired_service, patch_provider_builder):
+async def test_non_vision_persists_image_captions_in_raw_content(
+    wired_service, patch_provider_builder
+):
     """非 VLM 路径：图注以文本身份落库（[图片 N 张：…]），下一轮 history 字节复现。"""
     from tests.fixtures.provider_stubs import StubImagePreprocessor
 
@@ -1387,7 +1397,9 @@ async def test_vision_path_keeps_v1_raw_content(wired_service, patch_provider_bu
     assert stub_preprocessor.call_count == 0
 
 
-async def test_forward_captions_persist_byte_stable_across_turns(wired_service, patch_provider_builder):
+async def test_forward_captions_persist_byte_stable_across_turns(
+    wired_service, patch_provider_builder
+):
     """转发图注并入 normalized_forward_text：当轮渲染与落库同源，下轮 history 字节复现。"""
     from tests.fixtures.provider_stubs import StubImagePreprocessor
 
@@ -1448,14 +1460,19 @@ async def test_recent_context_image_captions_not_persisted(wired_service, patch_
         include_recent_images=True,
     )
     # 当轮渲染：近期图注以带标签的视觉转述行出现（正确归属）
-    assert "stub description of https://example.test/other.png" in stub.requests[0].messages[-1].content
+    assert (
+        "stub description of https://example.test/other.png"
+        in stub.requests[0].messages[-1].content
+    )
     # 落库：触发者的 raw_turn 不含他人图注
     stored = wired_service.store.list_recent_conversation_messages(1001, 10)
     raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
     assert raw == "纯文字触发"
 
 
-async def test_media_meter_wired_with_attached_image_count(wired_service, patch_provider_builder, monkeypatch):
+async def test_media_meter_wired_with_attached_image_count(
+    wired_service, patch_provider_builder, monkeypatch
+):
     """媒体账本 service 接线：VLM 带图轮计 1；非 VLM 剥离后计 0（0 是有效信号）。"""
     import quickquip.llm.service as svc
     from quickquip.llm.usage import media_meter as real_media_meter
@@ -1528,7 +1545,9 @@ async def test_scene_patch_self_served_with_history_dedup(wired_service, patch_p
     assert content.count("触发问题") == 1
 
 
-async def test_scene_patch_explicit_empty_list_disables_self_serve(wired_service, patch_provider_builder):
+async def test_scene_patch_explicit_empty_list_disables_self_serve(
+    wired_service, patch_provider_builder
+):
     """recent_messages=[] 是显式空（测试注入口语义），不触发自取。"""
     stub = _RecordingStub()
     patch_provider_builder(lambda provider: stub)
@@ -1540,7 +1559,9 @@ async def test_scene_patch_explicit_empty_list_disables_self_serve(wired_service
     assert "【现场】" not in stub.requests[-1].messages[-1].content
 
 
-async def test_scene_patch_incremental_across_turns(wired_service, patch_provider_builder, monkeypatch):
+async def test_scene_patch_incremental_across_turns(
+    wired_service, patch_provider_builder, monkeypatch
+):
     """跨轮增量：已服役且超出滑动保底窗的消息不再进入下一轮补丁。"""
     buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=3600)
     wired_service.bind_recent_message_buffer(buf)
@@ -1636,7 +1657,8 @@ def test_synthetic_user_id_excluded_from_participants(llm_service):
         user_id="boredom_timer",
         sender_name="系统",
         history=[
-            {"role": "user", "user_id": "boredom_timer", "sender_name": "系统", "canonical_name": ""},
+            {"role": "user", "user_id": "boredom_timer",
+             "sender_name": "系统", "canonical_name": ""},
             {"role": "user", "user_id": "2002", "sender_name": "乙", "canonical_name": "镜子"},
             {"role": "assistant", "content": "reply"},
         ],
@@ -1656,7 +1678,9 @@ def test_synthetic_user_id_excluded_from_participants(llm_service):
     assert "无名氏" in names  # 空 id 的名字回退不受过滤影响
 
 
-async def test_patch_meter_wired_with_scene_patch_tokens(wired_service, patch_provider_builder, monkeypatch):
+async def test_patch_meter_wired_with_scene_patch_tokens(
+    wired_service, patch_provider_builder, monkeypatch
+):
     """补丁账本三态：自取有货=正值；自取/显式空=0（有效信号，计入 coverage）；
     私聊（未自取）=None。"""
     import quickquip.llm.service as svc

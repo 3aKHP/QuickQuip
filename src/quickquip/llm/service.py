@@ -195,7 +195,11 @@ class LLMService(
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
 
-        self._identity_repository = identities if Path(self.identity_path) == identities.path else IdentityRepository(self.identity_path)
+        self._identity_repository = (
+            identities
+            if Path(self.identity_path) == identities.path
+            else IdentityRepository(self.identity_path)
+        )
         try:
             self.store = LLMStore(db_path, identity_repository=self._identity_repository)
         except Exception as exc:
@@ -282,7 +286,9 @@ class LLMService(
             self.config.runtime.default_persona = next(iter(new_personas))
         return len(new_personas), None
 
-    def get_chat_settings(self, chat_id: int | str, chat_type: str = "group") -> ResolvedGroupSettings:
+    def get_chat_settings(
+        self, chat_id: int | str, chat_type: str = "group"
+    ) -> ResolvedGroupSettings:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
         overrides = self.store.get_group_settings(scope_key)
         settings = resolve_group_settings(self.store, self.config, scope_key)
@@ -297,7 +303,9 @@ class LLMService(
     def get_group_settings(self, group_id: int | str) -> ResolvedGroupSettings:
         return self.get_chat_settings(group_id, chat_type="group")
 
-    def _update_chat_settings(self, chat_id: int | str, chat_type: str = "group", **fields: object) -> None:
+    def _update_chat_settings(
+        self, chat_id: int | str, chat_type: str = "group", **fields: object
+    ) -> None:
         self.store.update_group_settings(self.build_chat_scope_key(chat_id, chat_type), **fields)
 
     def _build_system_prompt(
@@ -321,10 +329,14 @@ class LLMService(
                 if builtin_search_active
                 else ("searxng" if self.config.auto_search.enabled else "none")
             ),
-            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type, provider_id=provider_id),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(
+                chat_type, provider_id=provider_id
+            ),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            deferred_tool_categories=self._get_deferred_tool_categories(chat_type, provider_id=provider_id),
+            deferred_tool_categories=self._get_deferred_tool_categories(
+                chat_type, provider_id=provider_id
+            ),
             chat_type=chat_type,
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
@@ -564,9 +576,9 @@ class LLMService(
 
         if not store_user_message or self.store is None:
             return None
-        current_identity = self._resolve_identities(scope_key.removeprefix("private:")).resolve_user(
-            user_id, sender_name
-        )
+        current_identity = self._resolve_identities(
+            scope_key.removeprefix("private:")
+        ).resolve_user(user_id, sender_name)
         raw_turn = build_raw_turn_text(
             stored_prompt,
             quoted_text=normalized_quoted_text,
@@ -611,7 +623,11 @@ class LLMService(
                 reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
             ),
             sink=delivery_sink or self._delivery_sink,
-            sensitive_scan=_get_sensitive_filter().scan if _get_sensitive_filter().is_loaded else None,
+            sensitive_scan=(
+                _get_sensitive_filter().scan
+                if _get_sensitive_filter().is_loaded
+                else None
+            ),
         )
 
     async def _run_tool_call_loop(
@@ -637,10 +653,14 @@ class LLMService(
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
-            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type, provider_id=provider.id),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(
+                context.chat_type, provider_id=provider.id
+            ),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=provider.id),
+            enabled_tool_names=self._get_enabled_tool_names(
+                chat_type=context.chat_type, provider_id=provider.id
+            ),
             initial_tool_names=[spec.name for spec in request.tools],
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
@@ -664,7 +684,12 @@ class LLMService(
         epoch_key: EpochKey,
         epoch_params: EpochParams,
         provider: ProviderConfig | None = None,
-    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None, dict[str, list[LLMConversationMessage]]]:
+    ) -> tuple[
+        list[dict[str, object]],
+        list[dict[str, str]],
+        list[dict[str, str]] | None,
+        dict[str, list[LLMConversationMessage]],
+    ]:
         # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
@@ -709,7 +734,11 @@ class LLMService(
         }
         if message_id:
             exclude_ids.add(str(message_id))
-        if recent_messages is None and chat_type == "group" and self.recent_message_buffer is not None:
+        if (
+            recent_messages is None
+            and chat_type == "group"
+            and self.recent_message_buffer is not None
+        ):
             recent_messages = self.recent_message_buffer.list_patch(
                 scope_key,
                 exclude_message_ids=exclude_ids,
@@ -930,7 +959,12 @@ class LLMService(
             model=settings.model or provider.default_model,
         )
         epoch_params = self.config.resolve_epoch_params(provider)
-        history, participants, scene_patch, projected_segments = self._load_scrubbed_history_and_participants(
+        (
+            history,
+            participants,
+            scene_patch,
+            projected_segments,
+        ) = self._load_scrubbed_history_and_participants(
             chat_id=request.chat_id,
             chat_type=request.chat_type,
             scope_key=scope_key,

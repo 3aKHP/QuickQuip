@@ -86,7 +86,8 @@ class DailySummaryStore:
                     content      = excluded.content,
                     published_at = NULL
                 """,
-                (str(group_id), summary_date, generated_at, model_used, run_id, len(content), content),
+                (str(group_id), summary_date, generated_at,
+                 model_used, run_id, len(content), content),
             )
             conn.commit()
         finally:

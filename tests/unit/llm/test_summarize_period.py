@@ -34,7 +34,11 @@ def _llm_config() -> LLMConfig:
     return LLMConfig(
         runtime=RuntimeConfig(default_provider="a", default_persona="default"),
         providers={"a": provider_a, "b": provider_b},
-        personas={"default": PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。")},
+        personas={
+            "default": PersonaConfig(
+                id="default", display_name="默认", system_prompt="你是测试人格。"
+            )
+        },
     )
 
 
@@ -53,7 +57,9 @@ def _assert_format_note(system_prompt: str) -> None:
 
 
 def _sample_messages(n: int = 5) -> list[dict]:
-    return [{"ts": 1600000000.0 + i * 3600, "sender": f"u{i}", "text": f"消息{i}"} for i in range(n)]
+    return [
+        {"ts": 1600000000.0 + i * 3600, "sender": f"u{i}", "text": f"消息{i}"} for i in range(n)
+    ]
 
 
 @pytest.mark.asyncio

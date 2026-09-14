@@ -88,7 +88,10 @@ def test_archive_and_minimal_levels_apply_under_tight_budget():
         _loop(
             f"loop_{i}",
             (
-                _turn("turn_0", text=f"第{i}轮正文。" * 20, tools=(_big_result_exec("exec_0", big),)),
+    _turn(
+        "turn_0", text=f"第{i}轮正文。" * 20,
+        tools=(_big_result_exec("exec_0", big),),
+    ),
                 _turn("turn_1", text=f"第{i}轮总结。" * 20),
             ),
         )

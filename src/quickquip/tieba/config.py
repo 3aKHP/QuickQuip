@@ -142,7 +142,13 @@ def load_tieba_config() -> TiebaConfig:
         forum_keywords=forum_keywords,
         sync_interval_seconds=max(
             60,
-            int(os.getenv("TIEBA_SYNC_INTERVAL_SECONDS", DEFAULT_SYNC_INTERVAL_SECONDS) or DEFAULT_SYNC_INTERVAL_SECONDS),
+            int(
+                os.getenv(
+                    "TIEBA_SYNC_INTERVAL_SECONDS",
+                    DEFAULT_SYNC_INTERVAL_SECONDS,
+                )
+                or DEFAULT_SYNC_INTERVAL_SECONDS
+            ),
         ),
         max_pool_size=max(
             20,
@@ -150,15 +156,24 @@ def load_tieba_config() -> TiebaConfig:
         ),
         recent_sent_limit=max(
             1,
-            int(os.getenv("TIEBA_RECENT_SENT_LIMIT", DEFAULT_RECENT_SENT_LIMIT) or DEFAULT_RECENT_SENT_LIMIT),
+            int(
+                os.getenv("TIEBA_RECENT_SENT_LIMIT", DEFAULT_RECENT_SENT_LIMIT)
+                or DEFAULT_RECENT_SENT_LIMIT
+            ),
         ),
         detail_fetch_limit=max(
             1,
-            int(os.getenv("TIEBA_DETAIL_FETCH_LIMIT", DEFAULT_DETAIL_FETCH_LIMIT) or DEFAULT_DETAIL_FETCH_LIMIT),
+            int(
+                os.getenv("TIEBA_DETAIL_FETCH_LIMIT", DEFAULT_DETAIL_FETCH_LIMIT)
+                or DEFAULT_DETAIL_FETCH_LIMIT
+            ),
         ),
         random_avoid_recent=max(
             0,
-            int(os.getenv("TIEBA_RANDOM_AVOID_RECENT", DEFAULT_RANDOM_AVOID_RECENT) or DEFAULT_RANDOM_AVOID_RECENT),
+            int(
+                os.getenv("TIEBA_RANDOM_AVOID_RECENT", DEFAULT_RANDOM_AVOID_RECENT)
+                or DEFAULT_RANDOM_AVOID_RECENT
+            ),
         ),
         prefer_image_threads=env_bool("TIEBA_PREFER_IMAGE_THREADS", True),
         browser_headless=env_bool("TIEBA_BROWSER_HEADLESS", True),

@@ -88,7 +88,9 @@ def test_random_falls_back_after_all_quotes_seen(tmp_path, clock):
 
 
 def test_recent_random_window_expires(tmp_path, clock):
-    store = GroupQuoteStore(tmp_path / "quotes.db", recent_random_window_seconds=10, time_func=clock)
+    store = GroupQuoteStore(
+        tmp_path / "quotes.db", recent_random_window_seconds=10, time_func=clock
+    )
     for i in range(2):
         store.add("g1", "u1", "A", f"quote {i}", "u2")
 

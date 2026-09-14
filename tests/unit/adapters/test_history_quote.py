@@ -23,7 +23,10 @@ class _FakeMatch:
 class _FakeIdentityIndex(IdentityIndex):
     def __init__(self, by_alias=None, canonical_by_uid=None):
         entries = [IdentityEntry(name, [qq]) for qq, name in (canonical_by_uid or {}).items()]
-        entries.extend(IdentityEntry(alias, list(value.qq_ids), [alias]) for alias, value in (by_alias or {}).items())
+        entries.extend(
+            IdentityEntry(alias, list(value.qq_ids), [alias])
+            for alias, value in (by_alias or {}).items()
+        )
         super().__init__(entries=entries)
         self._build_indexes()
 
@@ -33,7 +36,10 @@ class _FakeStore:
         self._rows = rows
         self.calls = []
 
-    def search_by_sender(self, group_id, *, user_ids=(), name_pattern="", offset=0, limit=50, identity_snapshot=None):
+    def search_by_sender(
+        self, group_id, *, user_ids=(), name_pattern="", offset=0, limit=50,
+        identity_snapshot=None,
+    ):
         self.calls.append({"user_ids": list(user_ids), "name_pattern": name_pattern})
         return [dict(r) for r in self._rows], len(self._rows)
 
@@ -216,7 +222,9 @@ async def test_quote_by_no_match_reports_miss(monkeypatch):
 
 
 def test_quote_same_name_candidates_include_qq(monkeypatch):
-    index = IdentityIndex(entries=[IdentityEntry("同名", ["12345"]), IdentityEntry("同名", ["23456"])])
+    index = IdentityIndex(
+        entries=[IdentityEntry("同名", ["12345"]), IdentityEntry("同名", ["23456"])]
+    )
     index._build_indexes()
     monkeypatch.setattr(history, "get_sender_identity_sources", lambda group: ({}, index))
     assert _resolve_sender_candidates(10001, "同名") == ["12345", "23456"]

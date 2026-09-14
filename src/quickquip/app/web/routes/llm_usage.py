@@ -25,7 +25,9 @@ def _days(range_key: str) -> int:
     try:
         return _RANGES[range_key]
     except KeyError as exc:
-        raise HTTPException(status_code=422, detail="range must be one of 1d, 7d, 30d, 90d") from exc
+        raise HTTPException(
+            status_code=422, detail="range must be one of 1d, 7d, 30d, 90d"
+        ) from exc
 
 
 def _filters(

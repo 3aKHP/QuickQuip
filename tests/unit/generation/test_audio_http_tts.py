@@ -133,7 +133,8 @@ def test_generate_audio_http_tts_path_leading_slash_guard(monkeypatch):
         id="local-http-tts", protocol="http_tts", base_url="http://127.0.0.1:5000", api_key_env=""
     )
     model = AudioModelConfig(
-        id="t", model="m", voice_id="v", format="mp3", extra_body={"__path": "synthesize", "text": "{text}"}
+        id="t", model="m", voice_id="v", format="mp3",
+        extra_body={"__path": "synthesize", "text": "{text}"},
     )
 
     asyncio.run(generate_audio(model, provider, "测试"))
@@ -157,7 +158,8 @@ def test_generate_audio_http_tts_empty_voice(monkeypatch):
         id="local-http-tts", protocol="http_tts", base_url="http://127.0.0.1:5000", api_key_env=""
     )
     model = AudioModelConfig(
-        id="t", model="m", voice_id="", format="mp3", extra_body={"__path": "/tts", "text": "{text}", "voice": "{voice}"}
+        id="t", model="m", voice_id="", format="mp3",
+        extra_body={"__path": "/tts", "text": "{text}", "voice": "{voice}"},
     )
 
     asyncio.run(generate_audio(model, provider, "测试"))
@@ -185,7 +187,8 @@ def test_generate_audio_http_tts_provider_extra_body_substitution(monkeypatch):
         extra_body={"speaker": "{voice}", "fallback_text": "{text}"},
     )
     model = AudioModelConfig(
-        id="t", model="m", voice_id="alloy", format="mp3", extra_body={"__path": "/tts", "text": "{text}"}
+        id="t", model="m", voice_id="alloy", format="mp3",
+        extra_body={"__path": "/tts", "text": "{text}"},
     )
 
     asyncio.run(generate_audio(model, provider, "你好"))
@@ -210,7 +213,8 @@ def test_generate_audio_http_tts_placeholder_not_leaked_from_text(monkeypatch):
         id="local-http-tts", protocol="http_tts", base_url="http://127.0.0.1:5000", api_key_env=""
     )
     model = AudioModelConfig(
-        id="t", model="m", voice_id="alloy", format="mp3", extra_body={"__path": "/tts", "text": "{text}"}
+        id="t", model="m", voice_id="alloy", format="mp3",
+        extra_body={"__path": "/tts", "text": "{text}"},
     )
 
     asyncio.run(generate_audio(model, provider, "say {voice} now"))

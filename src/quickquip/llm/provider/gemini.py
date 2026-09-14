@@ -21,7 +21,9 @@ from quickquip.llm.provider.base import (
 
 
 class GeminiProviderClient(BaseProviderClient):
-    def _serialize_user_parts(self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]) -> list[dict[str, Any]]:
+    def _serialize_user_parts(
+        self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]
+    ) -> list[dict[str, Any]]:
         parts: list[dict[str, Any]] = [
             *[
                 {
@@ -37,7 +39,9 @@ class GeminiProviderClient(BaseProviderClient):
             parts.append({"text": message.content})
         return parts or [{"text": ""}]
 
-    async def _serialize_messages(self, messages: list[LLMConversationMessage]) -> list[dict[str, Any]]:
+    async def _serialize_messages(
+        self, messages: list[LLMConversationMessage]
+    ) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
         prepared_images = await self._prepare_request_images(messages)
         pending_tool_results: list[tuple[LLMConversationMessage, list[LLMImageInput]]] = []
@@ -49,7 +53,9 @@ class GeminiProviderClient(BaseProviderClient):
             serialized.append(
                 {
                     "role": "user",
-                    "parts": self._serialize_function_response_parts([item for item, _ in pending_tool_results]),
+                    "parts": self._serialize_function_response_parts(
+                        [item for item, _ in pending_tool_results]
+                    ),
                 }
             )
             # Gemini requires the complete functionResponse batch to stay in one
@@ -71,7 +77,12 @@ class GeminiProviderClient(BaseProviderClient):
                     # 原生路径（§7.2）：历史记录的原样 parts 深拷贝回放，
                     # 保留 functionCall 与 thoughtSignature 的原始位置。
                     serialized.append(
-                        {"role": "model", "parts": [deepcopy(part) for part in message.native_content]}
+                        {
+                            "role": "model",
+                            "parts": [
+                                deepcopy(part) for part in message.native_content
+                            ],
+                        }
                     )
                     continue
                 parts = self._replay_parts(message.thinking_blocks)
@@ -93,7 +104,12 @@ class GeminiProviderClient(BaseProviderClient):
                 serialized.append({"role": "model", "parts": parts or [{"text": ""}]})
                 continue
 
-            serialized.append({"role": "user", "parts": self._serialize_user_parts(message, image_inputs)})
+            serialized.append(
+                {
+                    "role": "user",
+                    "parts": self._serialize_user_parts(message, image_inputs),
+                }
+            )
 
         await _flush_tool_results()
         return serialized
@@ -141,7 +157,9 @@ class GeminiProviderClient(BaseProviderClient):
             for image in image_inputs
         ]
 
-    async def _build_request_parts(self, request: LLMRequest, *, stream: bool = False) -> tuple[str, dict[str, str], dict[str, Any]]:
+    async def _build_request_parts(
+        self, request: LLMRequest, *, stream: bool = False
+    ) -> tuple[str, dict[str, str], dict[str, Any]]:
         api_key = self._get_api_key()
         action = "streamGenerateContent" if stream else "generateContent"
         url = self.config.base_url.rstrip("/") + f"/models/{request.model}:{action}"
@@ -340,7 +358,9 @@ class GeminiProviderClient(BaseProviderClient):
                             and "text" in parts[-1]
                             and bool(parts[-1].get("thought")) == thought
                         ):
-                            parts[-1]["text"] = str(parts[-1]["text"]) + str(raw_part.get("text", ""))
+                            parts[-1]["text"] = (
+                                str(parts[-1]["text"]) + str(raw_part.get("text", ""))
+                            )
                             for key, value in raw_part.items():
                                 if key != "text":
                                     parts[-1][key] = deepcopy(value)

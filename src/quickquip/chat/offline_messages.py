@@ -27,7 +27,10 @@ class PendingMessage:
     def format_display(self, snapshot=None) -> str:
         ts = datetime.fromtimestamp(self.created_at).strftime("%m-%d %H:%M")
         snapshot = snapshot or identities.snapshot(self.group_id)
-        return f"[{snapshot.name(self.from_user_id, self.from_sender_name)} {ts}] {render(decode(self.content, self.content_parts_json), snapshot)}"
+        return (
+            f"[{snapshot.name(self.from_user_id, self.from_sender_name)} {ts}] "
+            f"{render(decode(self.content, self.content_parts_json), snapshot)}"
+        )
 
 
 class OfflineMessageStore:
@@ -58,7 +61,8 @@ class OfflineMessageStore:
             migrate(self._db, "offline_messages")
             self._db.commit()
             # Fast-reject set: (group_id, to_user_id) pairs that have pending rows.
-            # Conservative: false positives cause one wasted DELETE RETURNING; false negatives would miss delivery.
+            # Conservative: false positives cause one wasted DELETE RETURNING;
+            # false negatives would miss delivery.
             self._pending: set[tuple[str, str]] = {
                 (r[0], r[1])
                 for r in self._db.execute(
@@ -104,7 +108,8 @@ class OfflineMessageStore:
             return []
         rows = self._db.execute(
             "DELETE FROM offline_messages WHERE group_id=? AND to_user_id=?"
-            " RETURNING id, from_user_id, from_sender_name, content, created_at, content_parts_json, group_id",
+            " RETURNING id, from_user_id, from_sender_name, "
+            "content, created_at, content_parts_json, group_id",
             key,
         ).fetchall()
         self._db.commit()
@@ -135,7 +140,8 @@ class OfflineMessageStore:
         if key not in self._pending:
             return []
         rows = self._db.execute(
-            "SELECT id, from_user_id, from_sender_name, content, created_at, content_parts_json, group_id"
+            "SELECT id, from_user_id, from_sender_name, "
+            "content, created_at, content_parts_json, group_id"
             " FROM offline_messages WHERE group_id=? AND to_user_id=? ORDER BY id",
             key,
         ).fetchall()

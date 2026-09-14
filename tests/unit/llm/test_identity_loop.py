@@ -246,8 +246,14 @@ def test_collect_mention_profiles_dedupes_candidates(tmp_path: Path):
         quoted_user_id="",
     )
     assert profiles == [
-        {"canonical_name": "4s", "user_id": "40004", "aliases": "Туманность、哈基四", "note": "大部分以四字开头的称呼通常指 4s"},
-        {"canonical_name": "镜子", "user_id": "10002", "aliases": "镜千翎、哈基镜", "note": "特别注意不要和王者荣耀的镜混淆"},
+        {
+            "canonical_name": "4s", "user_id": "40004",
+            "aliases": "Туманность、哈基四", "note": "大部分以四字开头的称呼通常指 4s",
+        },
+        {
+            "canonical_name": "镜子", "user_id": "10002", "aliases": "镜千翎、哈基镜",
+            "note": "特别注意不要和王者荣耀的镜混淆",
+        },
     ]
 
 

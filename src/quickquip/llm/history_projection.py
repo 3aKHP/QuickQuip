@@ -142,7 +142,8 @@ def _validate_tool_pairing(turn: LoadedTurn) -> None:
         terminal = execution.status in {"succeeded", "failed", "indeterminate", "not_executed"}
         if not terminal:
             raise HistoryProjectionError(
-                f"turn={turn.turn_id} execution={execution.execution_id} 无终态（{execution.status}）"
+                f"turn={turn.turn_id} execution={execution.execution_id} "
+                f"无终态（{execution.status}）"
             )
         if (
             execution.status in {"succeeded", "failed"}
@@ -266,7 +267,10 @@ def _project_turn_structured(
         blocks = _turn_native_blocks(turn)
         if blocks is not None:
             thinking_blocks = [
-                block for block in blocks if block.get("type") in {"thinking", "redacted_thinking", "reasoning", "gemini_part"}
+                block
+                for block in blocks
+                if block.get("type")
+                in {"thinking", "redacted_thinking", "reasoning", "gemini_part"}
             ]
     messages = [
         LLMConversationMessage(
@@ -358,7 +362,11 @@ def project_loops(
                 if _turn_native_blocks(turn) is not None
             )
             for turn in loop.turns:
-                loop_messages.extend(_project_turn_structured(turn, loop.loop_id, native_owner_match=owner_match))
+                loop_messages.extend(
+                    _project_turn_structured(
+                        turn, loop.loop_id, native_owner_match=owner_match
+                    )
+                )
         else:
             loop_messages = _project_loop_archive(loop)
         messages.extend(loop_messages)
@@ -445,7 +453,12 @@ def _project_loop_archive_bounded(
             summary = "、".join(f"{name}×{count}" for name, count in counts.items())
             lines.append(f"（Turn {turn.turn_index} 工具：{summary}，正文未保留）")
     return [
-        LLMConversationMessage(role="user", content=trigger if char_budget >= len(trigger) else _excerpt(trigger, per_turn)),
+        LLMConversationMessage(
+            role="user",
+            content=(
+                trigger if char_budget >= len(trigger) else _excerpt(trigger, per_turn)
+            ),
+        ),
         LLMConversationMessage(role="assistant", content="\n".join(lines)),
     ]
 

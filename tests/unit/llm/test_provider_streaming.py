@@ -60,7 +60,10 @@ class TestOpenAIStreaming:
 
 class TestStripLeadingReasoningContent:
     def test_think_block(self):
-        assert strip_leading_reasoning_content("<think>\n先想一想\n</think>\n最终答复") == "最终答复"
+        assert (
+            strip_leading_reasoning_content("<think>\n先想一想\n</think>\n最终答复")
+            == "最终答复"
+        )
 
     def test_thinking_fence(self):
         assert strip_leading_reasoning_content("```thinking\n分析\n```\n最终答复") == "最终答复"
@@ -68,7 +71,9 @@ class TestStripLeadingReasoningContent:
 
 class TestClaudeStreaming:
     def test_text_only(self):
-        resp = ClaudeProviderClient._assemble_stream_response(CLAUDE_TEXT_CHUNKS, "claude-sonnet-4-6")
+        resp = ClaudeProviderClient._assemble_stream_response(
+            CLAUDE_TEXT_CHUNKS, "claude-sonnet-4-6"
+        )
         assert resp.text == "你好世界"
         assert resp.finish_reason == "end_turn"
         assert resp.input_tokens == 15
@@ -76,7 +81,9 @@ class TestClaudeStreaming:
         assert resp.tool_calls == []
 
     def test_tool_use(self):
-        resp = ClaudeProviderClient._assemble_stream_response(CLAUDE_TOOL_CHUNKS, "claude-sonnet-4-6")
+        resp = ClaudeProviderClient._assemble_stream_response(
+            CLAUDE_TOOL_CHUNKS, "claude-sonnet-4-6"
+        )
         assert resp.text == ""
         assert len(resp.tool_calls) == 1
         assert resp.tool_calls[0].id == "toolu_1"

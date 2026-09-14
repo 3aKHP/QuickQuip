@@ -46,7 +46,11 @@ def _install_and_list(pip: str, spec: str) -> set[str] | None:
         capture_output=True,
         text=True,
     )
-    return {line.split("==")[0].lower() for line in result.stdout.strip().splitlines() if "==" in line}
+    return {
+        line.split("==")[0].lower()
+        for line in result.stdout.strip().splitlines()
+        if "==" in line
+    }
 
 
 def main() -> int:

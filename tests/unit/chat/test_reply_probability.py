@@ -70,13 +70,17 @@ def test_resolve_defaults_to_always_reply(restore_chat_rules):
 
 
 def test_key_level_probability_used_as_fallback(restore_chat_rules):
-    chat_config.RATE_LIMIT_RULES["prob_key"] = {"global_limit": 1, "user_limit": 1, "probability": 0.25}
+    chat_config.RATE_LIMIT_RULES["prob_key"] = {
+        "global_limit": 1, "user_limit": 1, "probability": 0.25
+    }
     assert resolve_probability("prob_key") == 0.25
     assert resolve_probability("prob_key", {"name": "x"}) == 0.25
 
 
 def test_rule_level_overrides_key_level(restore_chat_rules):
-    chat_config.RATE_LIMIT_RULES["prob_key"] = {"global_limit": 1, "user_limit": 1, "probability": 0.25}
+    chat_config.RATE_LIMIT_RULES["prob_key"] = {
+        "global_limit": 1, "user_limit": 1, "probability": 0.25
+    }
     rule = {"name": "x", "probability": 0.75}
     assert resolve_probability("prob_key", rule) == 0.75
 
@@ -589,11 +593,17 @@ def test_matcher_suppress_scoped_per_group(restore_chat_rules, frozen_now):
             }
         ]
     )
-    assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001) is not None
+    assert match_text_rule(
+        "你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001
+    ) is not None
     # 同群第二次被防连发压制 → 无候选规则
-    assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001) is None
+    assert match_text_rule(
+        "你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001
+    ) is None
     # 另一个群不受影响
-    assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1002) is not None
+    assert match_text_rule(
+        "你好", user_id=1, sender_name="n", now=frozen_now, group_id=1002
+    ) is not None
 
 
 # ── example 推荐默认值（直接解析文件，不依赖运行时容器）──────

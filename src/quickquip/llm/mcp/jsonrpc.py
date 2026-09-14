@@ -33,7 +33,9 @@ class JsonRpcSession:
 
     async def start(self) -> None:
         await self._transport.start()
-        self._reader_task = asyncio.create_task(self._reader_loop(), name=f"mcp-session-{self._server_id}")
+        self._reader_task = asyncio.create_task(
+            self._reader_loop(), name=f"mcp-session-{self._server_id}"
+        )
 
     async def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         request_id = self._next_id

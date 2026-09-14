@@ -439,7 +439,8 @@ class AgentRecordsStoreMixin:
                 self._add_agent_conversation_columns(conn)
                 self._backfill_legacy_loops(conn)
                 conn.execute(
-                    "INSERT OR REPLACE INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    "INSERT OR REPLACE INTO agent_schema_migrations (version, applied_at) "
+                    "VALUES (?, ?)",
                     (_AGENT_SCHEMA_VERSION, _utc_now()),
                 )
                 self._verify_agent_schema(conn)
@@ -558,7 +559,9 @@ class AgentRecordsStoreMixin:
             parts = _dumps(
                 {
                     "version": AGENT_RECORD_VERSION,
-                    "parts": [{"type": "text_ref", "start": 0, "end": len(text), "origin": "model"}],
+                    "parts": [
+                        {"type": "text_ref", "start": 0, "end": len(text), "origin": "model"}
+                    ],
                 }
             )
             conn.execute(
@@ -575,7 +578,8 @@ class AgentRecordsStoreMixin:
                 ),
             )
             conn.execute(
-                "UPDATE conversation_messages SET agent_loop_id = ?, agent_turn_id = ? WHERE id = ?",
+                "UPDATE conversation_messages SET agent_loop_id = ?, "
+                "agent_turn_id = ? WHERE id = ?",
                 (loop_id, turn_id, int(row["id"])),
             )
             qq_id = row["message_id"]
@@ -596,11 +600,13 @@ class AgentRecordsStoreMixin:
             delivery_index += 1
             if qq_id:
                 conn.execute(
-                    """
-                    INSERT INTO agent_delivery_attempts (attempt_id, delivery_id, attempt_index,
-                                                         status, started_at, finished_at, qq_message_id)
-                    VALUES (?, ?, 0, ?, ?, ?, ?)
-                    """,
+                    "\n"
+                    "                    INSERT INTO agent_delivery_attempts "
+                    "(attempt_id, delivery_id, attempt_index,\n"
+                    "                                                         "
+                    "status, started_at, finished_at, qq_message_id)\n"
+                    "                    VALUES (?, ?, 0, ?, ?, ?, ?)\n"
+                    "                    ",
                     (
                         f"legacy_attempt_{int(row['id'])}", delivery_id,
                         DeliveryStatus.SENT, row["created_at"], row["created_at"], str(qq_id),
@@ -612,7 +618,9 @@ class AgentRecordsStoreMixin:
         """迁移后完整性检查（§4.3.7）：FK、唯一约束抽查与侧表孤儿。"""
         violations = conn.execute("PRAGMA foreign_key_check").fetchall()
         if violations:
-            raise sqlite3.IntegrityError(f"agent schema 迁移后 foreign_key_check 失败：{violations[:3]}")
+            raise sqlite3.IntegrityError(
+                f"agent schema 迁移后 foreign_key_check 失败：{violations[:3]}"
+            )
         orphans = conn.execute(
             """
             SELECT COUNT(*) AS c FROM agent_turns t
@@ -712,7 +720,8 @@ class AgentRecordsStoreMixin:
             if generation != expected_generation:
                 conn.rollback()
                 raise ScopeGenerationMismatch(
-                    f"scope={scope_key} loop 创建被拒：generation {expected_generation} -> {generation}"
+                    f"scope={scope_key} loop 创建被拒："
+                    f"generation {expected_generation} -> {generation}"
                 )
             open_loop = conn.execute(
                 "SELECT loop_id FROM agent_loops WHERE scope_key = ? AND closed_at IS NULL",
@@ -836,7 +845,8 @@ class AgentRecordsStoreMixin:
             native_json = self._bounded_native_json(response)
 
             index_row = conn.execute(
-                "SELECT COALESCE(MAX(turn_index), -1) + 1 AS next FROM agent_turns WHERE loop_id = ?",
+                "SELECT COALESCE(MAX(turn_index), -1) + 1 AS next "
+                "FROM agent_turns WHERE loop_id = ?",
                 (handle.loop_id,),
             ).fetchone()
             turn_index = int(index_row["next"])
@@ -861,7 +871,9 @@ class AgentRecordsStoreMixin:
                 (
                     turn_id, handle.loop_id, turn_index, message_row_id,
                     parts_payload, native_json,
-                    None if response.native_omission_reason is None else str(response.native_omission_reason),
+                    None
+                    if response.native_omission_reason is None
+                    else str(response.native_omission_reason),
                     _dumps(response.owner) if response.owner is not None else None,
                     response.finish_reason, _utc_now(),
                     delivery_policy, response.text_policy, response.output_status,
@@ -926,9 +938,15 @@ class AgentRecordsStoreMixin:
         for part in parts:
             kind = part.get("type")
             if kind == "text_ref":
-                start, end, origin = int(part["start"]), int(part["end"]), part.get("origin", "model")
+                start, end, origin = (
+                    int(part["start"]),
+                    int(part["end"]),
+                    part.get("origin", "model"),
+                )
                 if not (0 <= start <= end <= len(text)):
-                    raise AgentStoreError(f"text_ref 范围 [{start},{end}) 超出已存正文长度 {len(text)}")
+                    raise AgentStoreError(
+                        f"text_ref 范围 [{start},{end}) 超出已存正文长度 {len(text)}"
+                    )
                 if origin not in _TEXT_PART_ORIGINS:
                     raise AgentStoreError(f"text_ref origin 非法：{origin}")
                 validated.append({"type": "text_ref", "start": start, "end": end, "origin": origin})
@@ -969,7 +987,10 @@ class AgentRecordsStoreMixin:
     ) -> None:
         arguments_json = declaration.arguments_json
         omission = declaration.arguments_omission_reason
-        if arguments_json is not None and _utf8_bytes(arguments_json) > MAX_PERSISTED_TOOL_ARGUMENT_BYTES:
+        if (
+            arguments_json is not None
+            and _utf8_bytes(arguments_json) > MAX_PERSISTED_TOOL_ARGUMENT_BYTES
+        ):
             arguments_json = None
             omission = "size_limit"
         conn.execute(
@@ -997,7 +1018,8 @@ class AgentRecordsStoreMixin:
         turn_text: str,
     ) -> list[str]:
         index_row = conn.execute(
-            "SELECT COALESCE(MAX(delivery_index), -1) + 1 AS next FROM agent_deliveries WHERE loop_id = ?",
+            "SELECT COALESCE(MAX(delivery_index), -1) + 1 AS next "
+            "FROM agent_deliveries WHERE loop_id = ?",
             (handle.loop_id,),
         ).fetchone()
         delivery_index = int(index_row["next"])
@@ -1034,8 +1056,19 @@ class AgentRecordsStoreMixin:
                     turn_id if item.kind != DeliveryKind.HOST_NOTICE else item.turn_id,
                     item.tool_execution_id, item.kind, delivery_index, item.chunk_index,
                     item.source_start, item.source_end,
-                    _dumps({"version": AGENT_RECORD_VERSION, "prefix": item.wrappers[0], "suffix": item.wrappers[1]}),
-                    _dumps({"version": AGENT_RECORD_VERSION, "refs": [list(ref) for ref in item.attachment_refs]}),
+                    _dumps(
+                        {
+                            "version": AGENT_RECORD_VERSION,
+                            "prefix": item.wrappers[0],
+                            "suffix": item.wrappers[1],
+                        }
+                    ),
+                    _dumps(
+                        {
+                            "version": AGENT_RECORD_VERSION,
+                            "refs": [list(ref) for ref in item.attachment_refs],
+                        }
+                    ),
                     item.notice_text, DeliveryStatus.PLANNED, _utc_now(),
                 ),
             )
@@ -1057,7 +1090,8 @@ class AgentRecordsStoreMixin:
             if status != ToolExecutionStatus.DECLARED:
                 raise LoopNotWritable(f"execution={execution_id} 状态 {status} 不允许开始执行")
             conn.execute(
-                "UPDATE agent_tool_executions SET status = ?, started_at = ? WHERE execution_id = ?",
+                "UPDATE agent_tool_executions SET status = ?, started_at = ? "
+                "WHERE execution_id = ?",
                 (ToolExecutionStatus.RUNNING, _utc_now(), execution_id),
             )
             conn.commit()
@@ -1139,7 +1173,8 @@ class AgentRecordsStoreMixin:
             )
             if closed:
                 conn.execute(
-                    "UPDATE agent_loops SET replay_revision = replay_revision + 1 WHERE loop_id = ?",
+                    "UPDATE agent_loops SET replay_revision = replay_revision + 1 "
+                    "WHERE loop_id = ?",
                     (handle.loop_id,),
                 )
             else:
@@ -1249,7 +1284,8 @@ class AgentRecordsStoreMixin:
             if row["status"] != DeliveryStatus.PLANNED:
                 raise LoopNotWritable(f"delivery={delivery_id} 状态 {row['status']} 不允许开始发送")
             index_row = conn.execute(
-                "SELECT COALESCE(MAX(attempt_index), -1) + 1 AS next FROM agent_delivery_attempts WHERE delivery_id = ?",
+                "SELECT COALESCE(MAX(attempt_index), -1) + 1 AS next "
+                "FROM agent_delivery_attempts WHERE delivery_id = ?",
                 (delivery_id,),
             ).fetchone()
             attempt_index = int(index_row["next"])
@@ -1288,7 +1324,8 @@ class AgentRecordsStoreMixin:
         try:
             conn.execute("BEGIN IMMEDIATE")
             attempt_row = conn.execute(
-                "SELECT status, finished_at, delivery_id FROM agent_delivery_attempts WHERE attempt_id = ?",
+                "SELECT status, finished_at, delivery_id "
+                "FROM agent_delivery_attempts WHERE attempt_id = ?",
                 (attempt.attempt_id,),
             ).fetchone()
             if attempt_row is None:
@@ -1340,7 +1377,8 @@ class AgentRecordsStoreMixin:
             ).fetchone()
             if loop_row is not None and loop_row["closed_at"] is not None:
                 conn.execute(
-                    "UPDATE agent_loops SET replay_revision = replay_revision + 1 WHERE loop_id = ?",
+                    "UPDATE agent_loops SET replay_revision = replay_revision + 1 "
+                    "WHERE loop_id = ?",
                     (delivery_row["loop_id"],),
                 )
             conn.execute(
@@ -1384,7 +1422,9 @@ class AgentRecordsStoreMixin:
                 """,
                 (
                     ToolExecutionStatus.NOT_EXECUTED,
-                    self._bounded_result_json(None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY),
+                    self._bounded_result_json(
+                        None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY
+                    ),
                     _utc_now(), ToolExecutionStatus.DECLARED, handle.loop_id,
                 ),
             )
@@ -1395,7 +1435,12 @@ class AgentRecordsStoreMixin:
                 WHERE status = ?
                   AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
                 """,
-                (ToolExecutionStatus.INDETERMINATE, _utc_now(), ToolExecutionStatus.RUNNING, handle.loop_id),
+                (
+                    ToolExecutionStatus.INDETERMINATE,
+                    _utc_now(),
+                    ToolExecutionStatus.RUNNING,
+                    handle.loop_id,
+                ),
             )
             conn.execute(
                 """
@@ -1405,11 +1450,13 @@ class AgentRecordsStoreMixin:
                 (DeliveryStatus.SKIPPED, handle.loop_id, DeliveryStatus.PLANNED),
             )
             conn.execute(
-                """
-                UPDATE agent_delivery_attempts SET status = ?, finished_at = COALESCE(finished_at, ?)
-                WHERE status = ?
-                  AND delivery_id IN (SELECT delivery_id FROM agent_deliveries WHERE loop_id = ?)
-                """,
+                "\n"
+                "                UPDATE agent_delivery_attempts SET status = ?, "
+                "finished_at = COALESCE(finished_at, ?)\n"
+                "                WHERE status = ?\n"
+                "                  AND delivery_id IN "
+                "(SELECT delivery_id FROM agent_deliveries WHERE loop_id = ?)\n"
+                "                ",
                 (DeliveryStatus.UNKNOWN, _utc_now(), DeliveryStatus.SENDING, handle.loop_id),
             )
             conn.execute(
@@ -1420,7 +1467,8 @@ class AgentRecordsStoreMixin:
                 (DeliveryStatus.UNKNOWN, handle.loop_id, DeliveryStatus.SENDING),
             )
             conn.execute(
-                "UPDATE agent_loops SET closed_at = ?, status = ?, terminal_reason = ? WHERE loop_id = ?",
+                "UPDATE agent_loops SET closed_at = ?, status = ?, terminal_reason = ? "
+                "WHERE loop_id = ?",
                 (_utc_now(), status, reason, handle.loop_id),
             )
             conn.commit()
@@ -1559,7 +1607,8 @@ class AgentRecordsStoreMixin:
         qq_ids = [
             r["qq_message_id"]
             for r in conn.execute(
-                "SELECT qq_message_id FROM agent_delivery_attempts WHERE delivery_id = ? AND qq_message_id IS NOT NULL",
+                "SELECT qq_message_id FROM agent_delivery_attempts "
+                "WHERE delivery_id = ? AND qq_message_id IS NOT NULL",
                 (row["delivery_id"],),
             )
         ]
@@ -1610,7 +1659,8 @@ class AgentRecordsStoreMixin:
         deliveries_unknown: list[str] = []
         with self._connect() as conn:
             loops = conn.execute(
-                "SELECT loop_id, scope_key, scope_generation, trigger_kind FROM agent_loops WHERE closed_at IS NULL"
+                "SELECT loop_id, scope_key, scope_generation, trigger_kind "
+                "FROM agent_loops WHERE closed_at IS NULL"
             ).fetchall()
         for loop in loops:
             handle = LoopHandle(
@@ -1653,14 +1703,17 @@ class AgentRecordsStoreMixin:
             ).fetchall()
             for row in declared:
                 conn.execute(
-                    """
-                    UPDATE agent_tool_executions
-                    SET status = ?, result_json = COALESCE(result_json, ?), finished_at = COALESCE(finished_at, ?)
-                    WHERE execution_id = ?
-                    """,
+                    "\n"
+                    "                    UPDATE agent_tool_executions\n"
+                    "                    SET status = ?, result_json = COALESCE(result_json, ?), "
+                    "finished_at = COALESCE(finished_at, ?)\n"
+                    "                    WHERE execution_id = ?\n"
+                    "                    ",
                     (
                         ToolExecutionStatus.NOT_EXECUTED,
-                        self._bounded_result_json(None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY),
+                        self._bounded_result_json(
+                            None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY
+                        ),
                         _utc_now(), row["execution_id"],
                     ),
                 )
@@ -1675,7 +1728,9 @@ class AgentRecordsStoreMixin:
             ).fetchall()
             for row in running:
                 conn.execute(
-                    "UPDATE agent_tool_executions SET status = ?, finished_at = COALESCE(finished_at, ?) WHERE execution_id = ?",
+                    "UPDATE agent_tool_executions SET status = ?, "
+                    "finished_at = COALESCE(finished_at, ?) "
+                    "WHERE execution_id = ?",
                     (ToolExecutionStatus.INDETERMINATE, _utc_now(), row["execution_id"]),
                 )
                 indeterminate.append(row["execution_id"])
@@ -1780,7 +1835,8 @@ class AgentRecordsStoreMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             conn.execute(
-                "UPDATE agent_deliveries SET status = ? WHERE delivery_id = ? AND loop_id = ? AND status = ?",
+                "UPDATE agent_deliveries SET status = ? "
+                "WHERE delivery_id = ? AND loop_id = ? AND status = ?",
                 (DeliveryStatus.SUPPRESSED, delivery_id, handle.loop_id, DeliveryStatus.PLANNED),
             )
 
@@ -1790,7 +1846,8 @@ class AgentRecordsStoreMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             conn.execute(
-                "UPDATE conversation_messages SET message_id = ? WHERE id = ? AND message_id IS NULL",
+                "UPDATE conversation_messages SET message_id = ? "
+                "WHERE id = ? AND message_id IS NULL",
                 (str(qq_message_id), int(message_row_id)),
             )
 
@@ -1945,7 +2002,10 @@ class AgentRecordsStoreMixin:
                 ).fetchone()
                 if message is not None:
                     text = message["content"] or ""
-                    start, end = int(delivery["source_start"] or 0), int(delivery["source_end"] or 0)
+                    start, end = (
+                        int(delivery["source_start"] or 0),
+                        int(delivery["source_end"] or 0),
+                    )
                     # 等 code point 数遮蔽：保留坐标供后续撤回其他 Chunk。
                     if 0 <= start <= end <= len(text):
                         masked = text[:start] + "▇" * (end - start) + text[end:]
@@ -2041,7 +2101,9 @@ class AgentRecordsStoreMixin:
             ).fetchall()
         return {row["loop_id"] for row in rows}
 
-    def load_closed_loops_by_ids(self, scope_key: str, loop_ids: Collection[str]) -> list[LoadedLoop]:
+    def load_closed_loops_by_ids(
+        self, scope_key: str, loop_ids: Collection[str]
+    ) -> list[LoadedLoop]:
         """按 ID 读取完整已关闭 Loop（历史投影输入；顺序按 anchor ASC）。"""
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")

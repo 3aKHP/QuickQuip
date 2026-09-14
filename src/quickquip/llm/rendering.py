@@ -182,7 +182,9 @@ def render_reply_for_llm(
         sender_name = str(getattr(reply, "nickname", "") or "").strip()
     if not sender_name:
         sender_name = user_id
-    is_bot_self = user_id in normalize_bot_self_ids(bot_self_id=bot_self_id, bot_self_ids=bot_self_ids)
+    is_bot_self = user_id in normalize_bot_self_ids(
+        bot_self_id=bot_self_id, bot_self_ids=bot_self_ids
+    )
 
     return RenderedReply(
         text=rendered.text,

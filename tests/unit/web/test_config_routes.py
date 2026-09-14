@@ -132,7 +132,10 @@ def test_sensitive_words_config_key_is_not_writable(monkeypatch, tmp_path):
 def test_put_awakening_config_queues_reload(monkeypatch, tmp_path):
     base = _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
-    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "a1"})
+    monkeypatch.setattr(
+        config.action_queue, "enqueue",
+        lambda action_type: captured.append(action_type) or {"id": "a1"},
+    )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
 
     result = config.put_config(
@@ -149,7 +152,10 @@ def test_put_awakening_config_queues_reload(monkeypatch, tmp_path):
 def test_put_chat_rules_config_queues_rules_reload(monkeypatch, tmp_path):
     _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
-    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "r1"})
+    monkeypatch.setattr(
+        config.action_queue, "enqueue",
+        lambda action_type: captured.append(action_type) or {"id": "r1"},
+    )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
 
     result = config.put_config(
@@ -166,7 +172,10 @@ def test_put_llm_config_does_not_queue_reload(monkeypatch, tmp_path):
     """llm 改动不自动 reload——reload_runtime 含探活会静默扣费（opt-in）。"""
     _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
-    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "x1"})
+    monkeypatch.setattr(
+        config.action_queue, "enqueue",
+        lambda action_type: captured.append(action_type) or {"id": "x1"},
+    )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
 
     result = config.put_config(
@@ -183,7 +192,10 @@ def test_put_llm_config_does_not_queue_reload(monkeypatch, tmp_path):
 def test_put_restart_needed_configs_do_not_queue_reload(monkeypatch, tmp_path, key):
     _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
-    monkeypatch.setattr(config.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "g1"})
+    monkeypatch.setattr(
+        config.action_queue, "enqueue",
+        lambda action_type: captured.append(action_type) or {"id": "g1"},
+    )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
 
     result = config.put_config(

@@ -83,7 +83,9 @@ def test_payload_summarizes_forward_message_types_without_content():
 
 def test_overlay_ignores_unknown_fields():
     with bot_action_trace(trigger_kind="command", reason_code="command.demo"):
-        with overlay_bot_action_trace(reason_code="command.specific", unknown_field="ignored") as trace:
+        with overlay_bot_action_trace(
+            reason_code="command.specific", unknown_field="ignored"
+        ) as trace:
             assert trace.reason_code == "command.specific"
             assert not hasattr(trace, "unknown_field")
 
@@ -128,7 +130,10 @@ async def test_install_nonebot_api_trace_hook_logs_action(monkeypatch):
 
 def test_log_bot_action_trace_returns_payload(monkeypatch):
     messages = []
-    monkeypatch.setattr("quickquip.common.bot_action_trace._logger.info", lambda *args: messages.append(args))
+    monkeypatch.setattr(
+        "quickquip.common.bot_action_trace._logger.info",
+        lambda *args: messages.append(args),
+    )
 
     payload = log_bot_action_trace(api="send_msg", data={"message": "hello"})
 

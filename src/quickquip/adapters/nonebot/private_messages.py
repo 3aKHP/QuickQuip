@@ -23,8 +23,17 @@ from quickquip.app.message_pipeline import (
 from quickquip.app.message_pipeline import is_self_message as _is_self_message
 
 
-def _remember_recent_message(scope_key, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "") -> None:
-    recent_messages.add_message(scope_key, user_id, sender_name, canonical_name, rendered_text, message_id=message_id)
+def _remember_recent_message(
+    scope_key,
+    user_id,
+    sender_name: str,
+    canonical_name: str,
+    rendered_text: str,
+    message_id: str = "",
+) -> None:
+    recent_messages.add_message(
+        scope_key, user_id, sender_name, canonical_name, rendered_text, message_id=message_id
+    )
 
 
 def register_private_message_matcher(on_message):
@@ -34,7 +43,10 @@ def register_private_message_matcher(on_message):
     async def _(bot, event):
         from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
-        if getattr(event, "group_id", None) is not None or getattr(event, "message_type", "") == "group":
+        if (
+            getattr(event, "group_id", None) is not None
+            or getattr(event, "message_type", "") == "group"
+        ):
             return
         if _is_self_message(event):
             return
@@ -90,9 +102,14 @@ def register_private_message_matcher(on_message):
 
         if llm_input is None:
             return
-        _remember_recent_message(scope_key, user_id, sender_name, canonical_name, rendered_text, message_id)
+        _remember_recent_message(
+            scope_key, user_id, sender_name, canonical_name, rendered_text, message_id
+        )
         # 私聊掷骰状态按用户隔离，避免 suppress/pity 跨私聊用户串扰
-        if not roll_reply("llm_chat", group_id=f"private:{user_id}") or not rate_limiter.allow("llm_chat", user_id):
+        if (
+            not roll_reply("llm_chat", group_id=f"private:{user_id}")
+            or not rate_limiter.allow("llm_chat", user_id)
+        ):
             return
 
         from quickquip.llm.agent_records import TriggerKind
@@ -131,7 +148,8 @@ def register_private_message_matcher(on_message):
             user_id=user_id,
             incoming_message_id=message_id,
             incoming_preview=rendered_text,
-            reply_preview=result["reply"] or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
+            reply_preview=result["reply"]
+            or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
             llm_used=bool(result.get("llm_used")),
             provider_id=str(result.get("provider_id", "")),
             model=str(result.get("model", "")),

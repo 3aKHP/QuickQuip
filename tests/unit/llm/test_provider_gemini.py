@@ -120,7 +120,9 @@ async def test_gemini_mcp_style_array_schema_gets_default_items():
             input_schema={"type": "object", "properties": {"tags": {"type": "array"}}},
         )
     ]
-    client = FakeGeminiClient(_provider_config(), {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+    client = FakeGeminiClient(
+        _provider_config(), {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+    )
 
     await client.complete(request)
 

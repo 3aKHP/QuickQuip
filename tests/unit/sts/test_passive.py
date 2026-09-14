@@ -52,7 +52,9 @@ async def test_cache_avoids_repeat_llm_call():
 
 async def test_regex_miss_returns_none_without_llm():
     svc = FakeLLM()
-    assert await passive.match_card_le("我吃完饭了，好饱", llm_service=svc, group_id=1) is None  # 了不在句末
+    assert await passive.match_card_le(
+        "我吃完饭了，好饱", llm_service=svc, group_id=1
+    ) is None  # 了不在句末
     assert await passive.match_card_le("睡了", llm_service=svc, group_id=1) is None  # 仅 1 字
     assert svc.calls == 0
 

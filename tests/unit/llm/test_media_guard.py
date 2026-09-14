@@ -91,7 +91,9 @@ def test_empty_data_dropped():
 
 
 def test_broken_gif_dropped():
-    kept, dropped = guard_inline_media([("truncated.gif", b"GIF89a" + b"\x00" * 32, "image/gif")], 0)
+    kept, dropped = guard_inline_media(
+        [("truncated.gif", b"GIF89a" + b"\x00" * 32, "image/gif")], 0
+    )
     assert kept == []
     assert dropped == ["truncated.gif"]
 

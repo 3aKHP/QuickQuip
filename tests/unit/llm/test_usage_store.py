@@ -40,13 +40,26 @@ def test_existing_schema_is_migrated_without_rewriting_rows(tmp_path):
 
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE llm_usage_events (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL, model TEXT NOT NULL, stream INTEGER NOT NULL, input_tokens INTEGER, output_tokens INTEGER, cost_usd REAL NOT NULL DEFAULT 0, priced INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'ok')")
-        conn.execute("INSERT INTO llm_usage_events (id, ts, provider_id, protocol, model, stream, input_tokens, output_tokens) VALUES (1, '2026-08-11T00:00:00+00:00', 'p', 'claude', 'm', 1, 10, 5)")
+        conn.execute(
+            "CREATE TABLE llm_usage_events (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, "
+            "provider_id TEXT NOT NULL, protocol TEXT NOT NULL, model TEXT NOT NULL, "
+            "stream INTEGER NOT NULL, input_tokens INTEGER, output_tokens INTEGER, "
+            "cost_usd REAL NOT NULL DEFAULT 0, priced INTEGER NOT NULL DEFAULT 0, "
+            "state TEXT NOT NULL DEFAULT 'ok')"
+        )
+        conn.execute(
+            "INSERT INTO llm_usage_events (id, ts, provider_id, protocol, model, stream, "
+            "input_tokens, output_tokens) VALUES (1, '2026-08-11T00:00:00+00:00', "
+            "'p', 'claude', 'm', 1, 10, 5)"
+        )
     store = LLMUsageStore(path)
-    store.record({"provider_id": "p2", "protocol": "openai", "model": "m2", "stream": 0, "state": "ok"})
+    store.record({"provider_id": "p2", "protocol": "openai", "model": "m2",
+                  "stream": 0, "state": "ok"})
     with store.connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
-        old = conn.execute("SELECT input_tokens, output_tokens FROM llm_usage_events WHERE id = 1").fetchone()
+        old = conn.execute(
+            "SELECT input_tokens, output_tokens FROM llm_usage_events WHERE id = 1"
+        ).fetchone()
     assert {"fresh_input_tokens", "total_tokens", "pricing_confidence"} <= columns
     assert (old[0], old[1]) == (10, 5)
 
@@ -79,9 +92,12 @@ def test_envelope_tokens_migration_and_summary(tmp_path):
             )
         """)
     store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "envelope_tokens": 400})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "envelope_tokens": 600})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok"})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "envelope_tokens": 400})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "envelope_tokens": 600})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok"})
     with store.connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
     assert "envelope_tokens" in columns
@@ -120,9 +136,12 @@ def test_epoch_history_tokens_migration_and_summary(tmp_path):
             )
         """)
     store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "epoch_history_tokens": 4000})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "epoch_history_tokens": 4400})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok"})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "epoch_history_tokens": 4000})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "epoch_history_tokens": 4400})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok"})
     with store.connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
     assert "epoch_history_tokens" in columns
@@ -161,9 +180,12 @@ def test_media_image_count_migration_and_summary(tmp_path):
             )
         """)
     store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "media_image_count": 1})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "media_image_count": 3})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok"})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "media_image_count": 1})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "media_image_count": 3})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok"})
     with store.connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
     assert "media_image_count" in columns
@@ -202,9 +224,12 @@ def test_patch_tokens_migration_and_summary(tmp_path):
             )
         """)
     store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "patch_tokens": 300})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok", "patch_tokens": 500})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1, "state": "ok"})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "patch_tokens": 300})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok", "patch_tokens": 500})
+    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+                  "state": "ok"})
     with store.connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
     assert "patch_tokens" in columns
@@ -218,7 +243,12 @@ def _create_legacy_usage_db(path):
     import sqlite3
 
     with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE llm_usage_events (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL, model TEXT NOT NULL, stream INTEGER NOT NULL, cost_usd REAL NOT NULL DEFAULT 0, priced INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'ok')")
+        conn.execute(
+            "CREATE TABLE llm_usage_events (id INTEGER PRIMARY KEY, ts TEXT NOT NULL, "
+            "provider_id TEXT NOT NULL, protocol TEXT NOT NULL, model TEXT NOT NULL, "
+            "stream INTEGER NOT NULL, cost_usd REAL NOT NULL DEFAULT 0, "
+            "priced INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'ok')"
+        )
 
 
 def test_concurrent_first_open_migration_is_race_safe(tmp_path):

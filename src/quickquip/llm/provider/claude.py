@@ -80,7 +80,9 @@ def _cache_creation_tokens(usage: dict[str, Any]) -> int | None:
 
 
 class ClaudeProviderClient(BaseProviderClient):
-    def _serialize_user_message(self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]) -> dict[str, Any]:
+    def _serialize_user_message(
+        self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]
+    ) -> dict[str, Any]:
         if image_inputs:
             content: list[dict[str, Any]] = [
                 *[
@@ -100,7 +102,9 @@ class ClaudeProviderClient(BaseProviderClient):
             return {"role": "user", "content": content}
         return {"role": "user", "content": message.content}
 
-    async def _serialize_messages(self, messages: list[LLMConversationMessage]) -> list[dict[str, Any]]:
+    async def _serialize_messages(
+        self, messages: list[LLMConversationMessage]
+    ) -> list[dict[str, Any]]:
         serialized: list[dict[str, Any]] = []
         prepared_images = await self._prepare_request_images(messages)
         pending_tool_results: list[tuple[LLMConversationMessage, list[LLMImageInput]]] = []
@@ -136,7 +140,12 @@ class ClaudeProviderClient(BaseProviderClient):
                     # 原生路径（§7.2）：历史记录的原样 content 块深拷贝回放，
                     # 不再从 text/tool_calls/thinking_blocks 重建（避免双写）。
                     serialized.append(
-                        {"role": "assistant", "content": [deepcopy(block) for block in message.native_content]}
+                        {
+                            "role": "assistant",
+                            "content": [
+                                deepcopy(block) for block in message.native_content
+                            ],
+                        }
                     )
                     continue
                 content: list[dict[str, Any]] = [*message.thinking_blocks]
@@ -155,7 +164,12 @@ class ClaudeProviderClient(BaseProviderClient):
                             "input": tool_input,
                         }
                     )
-                serialized.append({"role": "assistant", "content": content or [{"type": "text", "text": ""}]})
+                serialized.append(
+                    {
+                        "role": "assistant",
+                        "content": content or [{"type": "text", "text": ""}],
+                    }
+                )
                 continue
 
             serialized.append(self._serialize_user_message(message, image_inputs))
@@ -185,7 +199,9 @@ class ClaudeProviderClient(BaseProviderClient):
             ],
         ]
 
-    async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
+    async def _build_request_parts(
+        self, request: LLMRequest
+    ) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/messages?beta=true"
         api_key = self._get_api_key()
         auth_key = "authorization" if self.config.auth_method == "bearer" else "x-api-key"
@@ -246,7 +262,13 @@ class ClaudeProviderClient(BaseProviderClient):
                 if last_block.get("type") not in ("thinking", "redacted_thinking"):
                     last_block["cache_control"] = dict(cache_control)
             elif isinstance(content, str) and content:
-                last_msg["content"] = [{"type": "text", "text": content, "cache_control": dict(cache_control)}]
+                last_msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": content,
+                        "cache_control": dict(cache_control),
+                    }
+                ]
 
         payload: dict[str, Any] = {
             "model": request.model,
@@ -284,7 +306,11 @@ class ClaudeProviderClient(BaseProviderClient):
                 continue
             t = item.get("type")
             if t == "thinking":
-                block = {"type": "thinking", "thinking": item.get("thinking", ""), "signature": item.get("signature", "")}
+                block = {
+                    "type": "thinking",
+                    "thinking": item.get("thinking", ""),
+                    "signature": item.get("signature", ""),
+                }
                 thinking_blocks.append(block)
                 native_blocks.append(dict(block))
             elif t == "redacted_thinking":
@@ -331,7 +357,8 @@ class ClaudeProviderClient(BaseProviderClient):
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
         text_acc: dict[int, str] = {}  # block_index -> 累积文本（保序表示需要）
         tool_calls_acc: dict[int, dict[str, str]] = {}  # block_index -> {id, name, input_json}
-        thinking_acc: dict[int, dict[str, str]] = {}    # block_index -> {type, thinking, signature} 或 redacted {type, data}
+        # block_index -> {type, thinking, signature} 或 redacted {type, data}
+        thinking_acc: dict[int, dict[str, str]] = {}
         finish_reason: str | None = None
         model = fallback_model
         input_tokens: int | None = None
@@ -365,7 +392,11 @@ class ClaudeProviderClient(BaseProviderClient):
                         "input_json": "",
                     }
                 elif block.get("type") == "thinking":
-                    thinking_acc[current_block_index] = {"type": "thinking", "thinking": "", "signature": ""}
+                    thinking_acc[current_block_index] = {
+                        "type": "thinking",
+                        "thinking": "",
+                        "signature": "",
+                    }
                 elif block.get("type") == "redacted_thinking":
                     # redacted_thinking 的完整 data 载荷只出现在 start 事件，无后续 delta
                     thinking_acc[current_block_index] = {
@@ -411,7 +442,12 @@ class ClaudeProviderClient(BaseProviderClient):
             (
                 {"type": "redacted_thinking", "data": acc["data"]}
                 if acc.get("type") == "redacted_thinking"
-                else {"type": "thinking", "thinking": acc["thinking"], "signature": acc["signature"]}
+                else
+                {
+                    "type": "thinking",
+                    "thinking": acc["thinking"],
+                    "signature": acc["signature"],
+                }
             )
             for _, acc in sorted(thinking_acc.items())
         ]
@@ -423,7 +459,14 @@ class ClaudeProviderClient(BaseProviderClient):
                 indexed_blocks.append((idx, {"type": "redacted_thinking", "data": acc["data"]}))
             else:
                 indexed_blocks.append(
-                    (idx, {"type": "thinking", "thinking": acc["thinking"], "signature": acc["signature"]})
+                    (
+                        idx,
+                        {
+                            "type": "thinking",
+                            "thinking": acc["thinking"],
+                            "signature": acc["signature"],
+                        },
+                    )
                 )
         for idx, text in text_acc.items():
             indexed_blocks.append((idx, {"type": "text", "text": text}))
@@ -433,7 +476,15 @@ class ClaudeProviderClient(BaseProviderClient):
             except json.JSONDecodeError:
                 tool_input = {}
             indexed_blocks.append(
-                (idx, {"type": "tool_use", "id": acc["id"] or f"tool_{idx + 1}", "name": acc["name"], "input": tool_input})
+                (
+                    idx,
+                    {
+                        "type": "tool_use",
+                        "id": acc["id"] or f"tool_{idx + 1}",
+                        "name": acc["name"],
+                        "input": tool_input,
+                    },
+                )
             )
         native_blocks = [block for _, block in sorted(indexed_blocks, key=lambda pair: pair[0])]
         return LLMResponse(
@@ -495,9 +546,14 @@ class ClaudeProviderClient(BaseProviderClient):
                     block["text"] = str(block.get("text", "")) + str(delta.get("text", ""))
                 elif delta_type == "thinking_delta":
                     block["type"] = "thinking"
-                    block["thinking"] = str(block.get("thinking", "")) + str(delta.get("thinking", ""))
+                    block["thinking"] = (
+                        str(block.get("thinking", "")) + str(delta.get("thinking", ""))
+                    )
                 elif delta_type == "signature_delta":
-                    block["signature"] = str(block.get("signature", "")) + str(delta.get("signature", ""))
+                    block["signature"] = (
+                        str(block.get("signature", ""))
+                        + str(delta.get("signature", ""))
+                    )
                 elif delta_type == "input_json_delta":
                     tool_json[index] = tool_json.get(index, "") + str(delta.get("partial_json", ""))
             elif event == "message_delta":

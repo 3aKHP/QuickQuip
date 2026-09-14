@@ -111,7 +111,8 @@ async def test_final_only_mode_records_every_turn_and_sends_final(
         statuses = [
             row["status"]
             for row in conn.execute(
-                "SELECT status FROM agent_deliveries WHERE kind='text_chunk' ORDER BY delivery_index"
+                "SELECT status FROM agent_deliveries "
+                "WHERE kind='text_chunk' ORDER BY delivery_index"
             )
         ]
     assert statuses == ["suppressed", "suppressed", "suppressed", "suppressed"]
@@ -219,7 +220,8 @@ async def test_delivered_chunks_strip_trailing_blank_lines(
         statuses = [
             row["status"]
             for row in conn.execute(
-                "SELECT status FROM agent_deliveries WHERE kind='text_chunk' ORDER BY delivery_index"
+                "SELECT status FROM agent_deliveries "
+                "WHERE kind='text_chunk' ORDER BY delivery_index"
             )
         ]
     assert statuses == ["sent", "suppressed", "sent"]

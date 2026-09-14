@@ -6,9 +6,21 @@ import re
 from datetime import datetime
 from time import time
 
-from quickquip.adapters.nonebot.command_parts.common import _is_private_chat, _parse_profile_mode, _select_profile_samples, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import (
+    _is_private_chat,
+    _parse_profile_mode,
+    _select_profile_samples,
+    _strip_command_name,
+)
 from quickquip.adapters.nonebot.long_messages import send_long_group_message
-from quickquip.app.message_pipeline import _ensure_llm_bindings, chat_archive, get_llm_service, get_sender_identity_sources, group_quote_store, stats_tracker
+from quickquip.app.message_pipeline import (
+    _ensure_llm_bindings,
+    chat_archive,
+    get_llm_service,
+    get_sender_identity_sources,
+    group_quote_store,
+    stats_tracker,
+)
 from quickquip.chat.group_quotes import resolve_quote_display_name
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.provider import LLMProviderError
@@ -31,7 +43,9 @@ def _snapshot_from_sources(sources) -> IdentitySnapshot:
 
 def _quote_display_name(group_id, quoted_user_id: str, snapshot_name: str, sources=None) -> str:
     snapshot = _snapshot_from_sources(sources or get_sender_identity_sources(str(group_id)))
-    resolved, changed = resolve_quote_display_name(quoted_user_id, snapshot_name, identity_snapshot=snapshot)
+    resolved, changed = resolve_quote_display_name(
+        quoted_user_id, snapshot_name, identity_snapshot=snapshot
+    )
     if snapshot.ambiguous(snapshot.candidates(resolved)):
         resolved = f"{resolved}（QQ {quoted_user_id}）"
     if changed:
@@ -45,7 +59,9 @@ def _format_quote_rows(rows, group_id, header: str, sources=None) -> str:
     for row in rows:
         content = render(decode(row["content"], row.get("content_parts_json")), snapshot)
         preview = content[:40] + ("…" if len(content) > 40 else "")
-        name = _quote_display_name(group_id, row.get("quoted_user_id", ""), row["quoted_sender_name"], snapshot)
+        name = _quote_display_name(
+            group_id, row.get("quoted_user_id", ""), row["quoted_sender_name"], snapshot
+        )
         lines.append(f"#{row['group_seq']} 「{preview}」—— {name}")
     return "\n".join(lines)
 
@@ -88,7 +104,9 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             if m:
                 target_user_id = m.group(1)
         if not target_user_id:
-            await profile_cmd.finish(MessageSegment.text("用法：/profile [short|middle|long|full] @某人"))
+            await profile_cmd.finish(
+                MessageSegment.text("用法：/profile [short|middle|long|full] @某人")
+            )
 
         group_id = event.group_id
         profile_mode = _parse_profile_mode(str(event.get_message()))
@@ -136,10 +154,16 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                 ),
             )
         except Exception:
-            logger.exception("profile data collection failed for group=%s user=%s", group_id, target_user_id)
+            logger.exception(
+                "profile data collection failed for group=%s user=%s",
+                group_id,
+                target_user_id,
+            )
             await profile_cmd.finish(MessageSegment.text("收集用户数据时出错，请稍后重试"))
 
-        memories = [m.get("content_display", m["content"]) for m in memories_raw if m.get("content")]
+        memories = [
+            m.get("content_display", m["content"]) for m in memories_raw if m.get("content")
+        ]
         samples = _select_profile_samples(
             all_msgs,
             str(target_user_id),
@@ -188,9 +212,15 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         snapshot = identities.snapshot(group_id)
         hits = await asyncio.to_thread(_find_hits, messages, keyword, snapshot)
         if not hits:
-            await find_cmd.finish(MessageSegment.text(f"没有找到包含「{keyword}」的消息（最近 30 天）"))
+            await find_cmd.finish(
+                MessageSegment.text(f"没有找到包含「{keyword}」的消息（最近 30 天）")
+            )
         shown = hits[-5:]
-        header = f"找到 {len(hits)} 条，显示最新 5 条：" if len(hits) > 5 else f"找到 {len(hits)} 条："
+        header = (
+            f"找到 {len(hits)} 条，显示最新 5 条："
+            if len(hits) > 5
+            else f"找到 {len(hits)} 条："
+        )
         lines = [header]
         for m in shown:
             ts = datetime.fromtimestamp(m["ts"]).strftime("%m-%d %H:%M")
@@ -216,11 +246,20 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         if args.lower() == "random" or (not args and not reply):
             q = group_quote_store.random(group_id, identity_snapshot=snapshot)
             if q is None:
-                await quote_cmd.finish(MessageSegment.text("语录库还是空的，引用一条消息发 /quote 来收藏吧"))
+                await quote_cmd.finish(
+                    MessageSegment.text("语录库还是空的，引用一条消息发 /quote 来收藏吧")
+                )
             ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
             seq_str = f"#{q.get('group_seq', '?')} " if q.get('group_seq') else ""
-            display = _quote_display_name(group_id, q.get("quoted_user_id", ""), q["quoted_sender_name"], sources)
-            await quote_cmd.finish(MessageSegment.text(f"{seq_str}「{q.get('content_display', q['content'])}」\n—— {display} ({ts})"))
+            display = _quote_display_name(
+                group_id, q.get("quoted_user_id", ""), q["quoted_sender_name"], sources
+            )
+            await quote_cmd.finish(
+                MessageSegment.text(
+                    f"{seq_str}「{q.get('content_display', q['content'])}」"
+                    f"\n—— {display} ({ts})"
+                )
+            )
 
         # /quote N  or  /quote #N → get by group_seq
         seq_match = re.match(r"^#?(\d+)$", args)
@@ -230,17 +269,36 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             if q is None:
                 await quote_cmd.finish(MessageSegment.text(f"本群没有编号为 #{seq} 的语录"))
             ts = datetime.fromtimestamp(q["saved_at"]).strftime("%m-%d")
-            display = _quote_display_name(group_id, q.get("quoted_user_id", ""), q["quoted_sender_name"], sources)
-            await quote_cmd.finish(MessageSegment.text(f"#{seq} 「{q.get('content_display', q['content'])}」\n—— {display} ({ts})"))
+            display = _quote_display_name(
+                group_id, q.get("quoted_user_id", ""), q["quoted_sender_name"], sources
+            )
+            await quote_cmd.finish(
+                MessageSegment.text(
+                    f"#{seq} 「{q.get('content_display', q['content'])}」"
+                    f"\n—— {display} ({ts})"
+                )
+            )
 
         # /quote search <keyword>  or  /quote s <keyword>
         search_match = re.match(r"^(?:search|s)\s+(.+)$", args, re.IGNORECASE)
         if search_match:
             keyword = search_match.group(1).strip()
-            rows, total = await asyncio.to_thread(group_quote_store.search, group_id, keyword, limit=10, identity_snapshot=snapshot)
+            rows, total = await asyncio.to_thread(
+                group_quote_store.search,
+                group_id,
+                keyword,
+                limit=10,
+                identity_snapshot=snapshot,
+            )
             if not rows:
                 await quote_cmd.finish(MessageSegment.text(f"未找到包含「{keyword}」的语录"))
-            await quote_cmd.finish(MessageSegment.text(_format_quote_rows(rows, group_id, f"🔍 「{keyword}」（共 {total} 条）：", sources)))
+            await quote_cmd.finish(
+                MessageSegment.text(
+                    _format_quote_rows(
+                        rows, group_id, f"🔍 「{keyword}」（共 {total} 条）：", sources
+                    )
+                )
+            )
 
         # /quote by <名字|QQ>  or  /quote b <名字|QQ> → by sender
         by_match = re.match(r"^(?:by|b)\s+(.+)$", args, re.IGNORECASE)
@@ -257,7 +315,13 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             )
             if not rows:
                 await quote_cmd.finish(MessageSegment.text(f"未找到「{query}」发言的语录"))
-            await quote_cmd.finish(MessageSegment.text(_format_quote_rows(rows, group_id, f"👤 「{query}」的语录（共 {total} 条）：", sources)))
+            await quote_cmd.finish(
+                MessageSegment.text(
+                    _format_quote_rows(
+                        rows, group_id, f"👤 「{query}」的语录（共 {total} 条）：", sources
+                    )
+                )
+            )
 
         if not reply:
             await quote_cmd.finish(
@@ -269,13 +333,26 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
                 "引用消息 + /quote — 收藏语录")
             )
         quoted_user = str(getattr(reply, "user_id", "") or "")
-        body, prepared_snapshot = await prepare_body(reply_source(reply), group_id, bot, extra_ids=[quoted_user])
-        if not any(p["type"] == "text" and p["text"].strip() or p["type"] in {"member", "all"} for p in body["parts"]):
+        body, prepared_snapshot = await prepare_body(
+            reply_source(reply), group_id, bot, extra_ids=[quoted_user]
+        )
+        if not any(
+            p["type"] == "text" and p["text"].strip() or p["type"] in {"member", "all"}
+            for p in body["parts"]
+        ):
             await quote_cmd.finish(MessageSegment.text("引用的消息没有文字内容，无法收藏"))
         content = render(body)
         sender = getattr(reply, "sender", None)
-        sender_name = (sender.get("card") or sender.get("nickname")) if isinstance(sender, dict) else (getattr(sender, "card", "") or getattr(sender, "nickname", ""))
-        sender_name = sender_name or getattr(reply, "nickname", "") or prepared_snapshot.names.get(quoted_user, "")
+        sender_name = (
+            (sender.get("card") or sender.get("nickname"))
+            if isinstance(sender, dict)
+            else (getattr(sender, "card", "") or getattr(sender, "nickname", ""))
+        )
+        sender_name = (
+            sender_name
+            or getattr(reply, "nickname", "")
+            or prepared_snapshot.names.get(quoted_user, "")
+        )
         if len(content) > 500:
             await quote_cmd.finish(MessageSegment.text("内容过长（限 500 字），无法收藏"))
         try:

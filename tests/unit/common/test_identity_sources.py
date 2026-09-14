@@ -8,20 +8,22 @@ from quickquip.common.identity_sources import _load_index
 
 # 与部署分发的全局模板同形态：people 段只有一个未填写的占位条目，
 # special_accounts 整段处于注释状态。
-_PLACEHOLDER_TEMPLATE = """# ── QuickQuip 标准身份词表 ──────────────────────────────────────────────
-# 复制为 identities.yaml 后按你的群编辑。
-
-people:
-  - canonical_name:
-    qq_ids:
-      - ""
-    aliases:
-    note:
-
-# special_accounts:
-#   - qq_id: "1000000000"
-#     canonical_name: Bot
-"""
+_PLACEHOLDER_TEMPLATE = (
+    "# ── QuickQuip 标准身份词表 ──────────────────────────────────────────────\n"
+    "# 复制为 identities.yaml 后按你的群编辑。\n"
+    "\n"
+    "people:\n"
+    "  - canonical_name:\n"
+    "    qq_ids:\n"
+    '      - ""\n'
+    "    aliases:\n"
+    "    note:\n"
+    "\n"
+    "# special_accounts:\n"
+    '#   - qq_id: "1000000000"\n'
+    "#     canonical_name: Bot\n"
+    ""
+)
 
 
 def test_load_index_accepts_placeholder_only_template(tmp_path: Path):

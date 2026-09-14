@@ -115,11 +115,15 @@ async def generate_profile(
 ) -> tuple[str, str]:
     set_usage_scope("profile")
     sections = [
-        f"请以你的语气，为群友「{target_name}」写一篇人物志，目标长度约 {profile_mode.target_chars} 字。",
+            f"请以你的语气，为群友「{target_name}」写一篇人物志，"
+            f"目标长度约 {profile_mode.target_chars} 字。",
         f"\n群内发言总数：{message_count} 条",
     ]
     if profile_mode.id == "short":
-        sections[0] = f"请以你的语气，写一段关于群友「{target_name}」的简短人物志，目标长度约 {profile_mode.target_chars} 字。"
+        sections[0] = (
+            f"请以你的语气，写一段关于群友「{target_name}」的简短人物志，"
+            f"目标长度约 {profile_mode.target_chars} 字。"
+        )
         sections.append("风格自然随意，像在群里聊天，不要正式介绍。")
     else:
         sections.extend([
@@ -137,8 +141,16 @@ async def generate_profile(
         sections, recent_samples, profile_mode.max_input_tokens
     )
     if fitted_samples:
-        sample_title = "完整发言记录（按时间顺序，受输入上限约束）" if profile_mode.full_records else "近期发言样本（按时间顺序节选）"
-        sample_note = "\n（注：由于发言量较大，上方记录已在输入上限内保留最近部分。）" if samples_truncated else ""
+        sample_title = (
+            "完整发言记录（按时间顺序，受输入上限约束）"
+            if profile_mode.full_records
+            else "近期发言样本（按时间顺序节选）"
+        )
+        sample_note = (
+            "\n（注：由于发言量较大，上方记录已在输入上限内保留最近部分。）"
+            if samples_truncated
+            else ""
+        )
         sections.append(
             f"\n{sample_title}：\n" + "\n".join(f"- {s}" for s in fitted_samples) + sample_note
         )

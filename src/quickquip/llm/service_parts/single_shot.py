@@ -53,7 +53,10 @@ def _turmfluch_reply_text(raw_text: str) -> str | None:
 _DEFECTIFY_SPEC = CommandSingleShotSpec(
     rate_limit_key=DEFECTIFY_RATE_LIMIT_KEY,
     rule_name=DEFECTIFY_RULE_NAME,
-    usage_reply="用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
+    usage_reply=(
+        "用法：/defectify <文字>，也可以在命令里附图，"
+        "或引用一条消息/图片后直接发送 /defectify。"
+    ),
     invalid_reply="模型没有返回可显示的文本。",
     temperature=0.9,
     input_channel="defectify_input",
@@ -65,7 +68,10 @@ _DEFECTIFY_SPEC = CommandSingleShotSpec(
 _TURMFLUCH_SPEC = CommandSingleShotSpec(
     rate_limit_key=TURMFLUCH_RATE_LIMIT_KEY,
     rule_name=TURMFLUCH_RULE_NAME,
-    usage_reply="用法：/turmfluch <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /turmfluch。",
+    usage_reply=(
+        "用法：/turmfluch <文字>，也可以在命令里附图，"
+        "或引用一条消息/图片后直接发送 /turmfluch。"
+    ),
     invalid_reply="模型没有返回合法的卡牌/遗物名。",
     temperature=0.7,
     input_channel="turmfluch_input",

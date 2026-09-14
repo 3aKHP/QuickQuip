@@ -114,7 +114,9 @@ class VocabIndex:
             return []
 
         matches: list[tuple[str, str]] = []
-        for term, meaning in sorted(self.glossary.items(), key=lambda item: len(item[0]), reverse=True):
+        for term, meaning in sorted(
+            self.glossary.items(), key=lambda item: len(item[0]), reverse=True
+        ):
             if term not in normalized:
                 continue
             matches.append((term, meaning))

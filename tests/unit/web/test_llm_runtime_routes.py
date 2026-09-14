@@ -13,7 +13,9 @@ def test_health_check_is_queued_without_loading_llm_service(monkeypatch):
     monkeypatch.setattr(
         llm_runtime.action_queue,
         "enqueue",
-        lambda action_type, payload=None: captured.append((action_type, payload or {})) or {"id": "h1"},
+        lambda action_type, payload=None: (
+            captured.append((action_type, payload or {})) or {"id": "h1"}
+        ),
     )
     monkeypatch.setattr(llm_runtime.audit_logger, "log", lambda *args, **kwargs: None)
 
@@ -28,11 +30,15 @@ def test_health_check_accepts_explicit_scope(monkeypatch):
     monkeypatch.setattr(
         llm_runtime.action_queue,
         "enqueue",
-        lambda action_type, payload=None: captured.append((action_type, payload or {})) or {"id": "h1"},
+        lambda action_type, payload=None: (
+            captured.append((action_type, payload or {})) or {"id": "h1"}
+        ),
     )
     monkeypatch.setattr(llm_runtime.audit_logger, "log", lambda *args, **kwargs: None)
 
-    llm_runtime.queue_health_check(llm_runtime.HealthBody(scope_key="private:123456", verbose=False), object())
+    llm_runtime.queue_health_check(
+        llm_runtime.HealthBody(scope_key="private:123456", verbose=False), object()
+    )
 
     assert captured == [("health_check", {"verbose": False, "scope_key": "private:123456"})]
 

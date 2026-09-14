@@ -137,12 +137,16 @@ class EpochManager:
             # 冷场：provider 侧缓存已死，重置是免费 miss，缩回冷场水位。
             candidate = self._pick_anchor_by_tokens(rows, params.cold_target_tokens)
             if candidate > state.anchor_id:
-                event = self._advance(state, store, key, candidate, reason="cold", epoch_tokens=total)
+                event = self._advance(
+                    state, store, key, candidate, reason="cold", epoch_tokens=total
+                )
         elif total > params.cap_tokens:
             # 触顶：付费 miss 仅这一次，缩到热水位保住长话题。
             candidate = self._pick_anchor_by_tokens(rows, params.hot_target_tokens)
             if candidate > state.anchor_id:
-                event = self._advance(state, store, key, candidate, reason="hot", epoch_tokens=total)
+                event = self._advance(
+                    state, store, key, candidate, reason="hot", epoch_tokens=total
+                )
         return event
 
     def note_activity(self, key: EpochKey) -> None:
@@ -157,7 +161,11 @@ class EpochManager:
 
     def oldest_anchor(self, scope_key: str) -> int | None:
         """该 scope 所有键中最老的锚点（crop 的 floor）；无状态返回 None。"""
-        anchors = [state.anchor_id for key, state in self._states.items() if key.scope_key == scope_key]
+        anchors = [
+            state.anchor_id
+            for key, state in self._states.items()
+            if key.scope_key == scope_key
+        ]
         return min(anchors) if anchors else None
 
     def reset_scope(self, scope_key: str) -> None:
@@ -189,7 +197,9 @@ class EpochManager:
         if total > params.cold_trigger_tokens:
             candidate = self._pick_anchor_by_tokens(rows, params.cold_target_tokens)
             if candidate > state.anchor_id:
-                event = self._advance(state, store, key, candidate, reason=reason, epoch_tokens=total)
+                event = self._advance(
+                    state, store, key, candidate, reason=reason, epoch_tokens=total
+                )
         # persona 切换后缓存重新烧入，T 从切换点重新计。
         state.last_activity_at = self._clock()
         return event
@@ -238,10 +248,14 @@ class EpochManager:
         ``ASC + LIMIT`` 会读到最旧一批行，CTX 跨度就量在了错误的一端。
         """
         start = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS) or 0
-        rows = store.list_conversation_messages_since(key.scope_key, start, limit=DEFAULT_EPOCH_MAX_ROWS)
+        rows = store.list_conversation_messages_since(
+            key.scope_key, start, limit=DEFAULT_EPOCH_MAX_ROWS
+        )
         anchor = 0
         if rows:
-            anchor = self._pair_align(store, key.scope_key, self._pick_anchor_by_tokens(rows, params.context_tokens))
+            anchor = self._pair_align(
+                store, key.scope_key, self._pick_anchor_by_tokens(rows, params.context_tokens)
+            )
         return EpochState(anchor_id=anchor, last_activity_at=self._clock())
 
     def _advance(
@@ -258,7 +272,13 @@ class EpochManager:
         state.anchor_id = self._pair_align(store, key.scope_key, candidate_anchor)
         logger.info(
             "epoch advance scope=%s provider=%s model=%s reason=%s anchor=%d->%d tokens=%d",
-            key.scope_key, key.provider_id, key.model, reason, old_anchor, state.anchor_id, epoch_tokens,
+            key.scope_key,
+            key.provider_id,
+            key.model,
+            reason,
+            old_anchor,
+            state.anchor_id,
+            epoch_tokens,
         )
         return EpochResetEvent(
             reason=reason,

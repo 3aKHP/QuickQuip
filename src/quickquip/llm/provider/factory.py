@@ -14,7 +14,9 @@ from quickquip.llm.provider.openai import OpenAIProviderClient
 from quickquip.llm.provider.retry import RetryPolicy
 
 
-def build_provider_client(config: ProviderConfig, *, retry_policy: RetryPolicy | None = None) -> BaseProviderClient:
+def build_provider_client(
+    config: ProviderConfig, *, retry_policy: RetryPolicy | None = None
+) -> BaseProviderClient:
     if config.protocol == "openai":
         return OpenAIProviderClient(config, retry_policy=retry_policy)
     if config.protocol == "claude":

@@ -74,7 +74,9 @@ async def test_health_reports_bound_image_preprocessor(llm_service, monkeypatch)
     class _StubClient:
         pass
 
-    monkeypatch.setattr("quickquip.llm.service.build_provider_client", lambda provider: _StubClient())
+    monkeypatch.setattr(
+        "quickquip.llm.service.build_provider_client", lambda provider: _StubClient()
+    )
     llm_service.config_path.write_text(
         MIN_LLM_CONFIG_TOML
         + """
@@ -218,7 +220,9 @@ async def test_health_verbose_probes_provider_when_reachable(llm_service, monkey
         async def complete(self, request):
             return object()
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient())
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient()
+    )
 
     report = await llm_service.build_health_report(10001, probe_provider=True)
     items = {item.name: item for item in report.items}
@@ -235,7 +239,9 @@ async def test_format_provider_probe_returns_formatted_text(llm_service, monkeyp
         async def complete(self, request):
             return object()
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient())
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient()
+    )
 
     text = await llm_service.format_provider_probe()
     assert "Provider 探活" in text
@@ -278,7 +284,9 @@ async def test_format_current_provider_probe_only_probes_active_model(llm_servic
     assert "backup" not in text
 
 
-async def test_format_current_provider_probe_failure_prefaces_config_effective(llm_service, monkeypatch):
+async def test_format_current_provider_probe_failure_prefaces_config_effective(
+    llm_service, monkeypatch
+):
     """探活未通过时应前置'配置已生效'，避免 reload 成功但探活 ❌ 被误读为 reload 失败。"""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -286,7 +294,9 @@ async def test_format_current_provider_probe_failure_prefaces_config_effective(l
         async def complete(self, request):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _FailClient())
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _FailClient()
+    )
 
     text = await llm_service.format_current_provider_probe(10001, chat_type="group")
     assert "配置已生效" in text

@@ -137,7 +137,9 @@ async def test_quick_judge_falls_back_past_disabled_provider(tmp_path: Path):
 
     def _builder(provider):
         built.append(provider.id)
-        return _StubJudgeClient(LLMResponse(text='{"trigger": false}', model="m1", finish_reason="stop"))
+        return _StubJudgeClient(
+            LLMResponse(text='{"trigger": false}', model="m1", finish_reason="stop")
+        )
 
     result = await run_quick_judge_detailed(cfg, "判定一下", client_builder=_builder)
 

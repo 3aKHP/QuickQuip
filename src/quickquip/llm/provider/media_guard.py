@@ -143,7 +143,9 @@ class InlineMediaBudget:
     exhausted: bool = field(default=False, init=False)
     _seen: set[str] = field(default_factory=set, init=False, repr=False)
 
-    def guard(self, candidates: list[tuple[str, bytes, str]]) -> tuple[list[GuardedMedia], list[str]]:
+    def guard(
+        self, candidates: list[tuple[str, bytes, str]]
+    ) -> tuple[list[GuardedMedia], list[str]]:
         kept: list[GuardedMedia] = []
         dropped: list[str] = []
         for index, (label, raw, declared) in enumerate(candidates):
@@ -178,7 +180,11 @@ class InlineMediaBudget:
                 break
             self._seen.add(content_hash)
             self.total += len(data)
-            kept.append(GuardedMedia(label=label, data=data, media_type=media_type, content_hash=content_hash))
+            kept.append(
+                GuardedMedia(
+                    label=label, data=data, media_type=media_type, content_hash=content_hash
+                )
+            )
         return kept, dropped
 
 

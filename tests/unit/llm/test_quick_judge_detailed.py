@@ -119,5 +119,7 @@ async def test_public_quick_judge_returns_text_on_ok(llm_service, monkeypatch):
 
 
 def test_no_provider_returns_trigger_false_text():
-    result = QuickJudgeResult(text='{"trigger": false}', outcome="no_provider", provider_id="", model="")
+    result = QuickJudgeResult(
+        text='{"trigger": false}', outcome="no_provider", provider_id="", model=""
+    )
     assert result.to_diagnostic()["outcome"] == "no_provider"

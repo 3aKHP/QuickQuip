@@ -5,7 +5,14 @@ import re
 from datetime import datetime, timedelta, timezone
 from time import time
 
-from quickquip.adapters.nonebot.command_parts.common import _evaluate_luck, _fence_luck_tips, _glue_luck_tips, _is_admin, _is_private_chat, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import (
+    _evaluate_luck,
+    _fence_luck_tips,
+    _glue_luck_tips,
+    _is_admin,
+    _is_private_chat,
+    _strip_command_name,
+)
 from quickquip.app.message_pipeline import game_economy, niuniu_store
 from quickquip.common.rate_limit import SlidingWindowRateLimiter
 from quickquip.games.niuniu import fence_cd, fenced_cd, fencing, get_comment, glue_cd, gluing
@@ -106,7 +113,8 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         balance = game_economy.get_balance(uid, str(event.group_id))
         if balance["gold"] < niuniu_store.config.unsubscribe_gold:
             await nn_unsubscribe.finish(
-                f"你的金币不足 {niuniu_store.config.unsubscribe_gold}，无法注销牛牛！（当前 {balance['gold']} 金币）"
+                f"你的金币不足 {niuniu_store.config.unsubscribe_gold}，无法注销牛牛！"
+                f"（当前 {balance['gold']} 金币）"
             )
         game_economy.deduct_gold(uid, str(event.group_id), niuniu_store.config.unsubscribe_gold)
         niuniu_store.unsubscribe(uid)
@@ -128,7 +136,10 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         else:
             depth_rank = niuniu_store.get_rank_position(uid, "depth")
             abs_rank = niuniu_store.get_rank_position(uid, "absolute")
-            rank_str = f"总榜第 {natural_rank} 名 | 深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
+            rank_str = (
+                f"总榜第 {natural_rank} 名 | "
+                f"深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
+            )
         last_glue = niuniu_store.latest_record_time(uid, "gluing")
         glue_luck = niuniu_store.get_glue_luck(uid)
         fence_luck = niuniu_store.get_fence_luck(uid)
@@ -349,7 +360,10 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             act = action_labels.get(r["action"], r["action"])
             diff = r["diff"]
             sign = "+" if diff > 0 else ""
-            lines.append(f"{act} | {r['origin_length']} → {r['new_length']} ({sign}{diff}) | {_fmt_time(r['created_at'])}")
+            lines.append(
+                f"{act} | {r['origin_length']} → {r['new_length']} "
+                f"({sign}{diff}) | {_fmt_time(r['created_at'])}"
+            )
         await nn_records.finish("\n".join(lines))
 
     nn_glue_luck = on_command("打胶运势", priority=10, block=True)

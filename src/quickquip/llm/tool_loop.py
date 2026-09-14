@@ -37,7 +37,9 @@ async def run_tool_call_loop(
     client = build_provider_client(provider)
     max_rounds = max(0, min(runtime_config.tool_max_rounds, 16))
     max_calls = max(1, min(runtime_config.tool_max_calls_per_round, 32))
-    effective_search_max_calls = max(1, min(search_max_calls_per_round, search_failsafe_max_calls_per_round))
+    effective_search_max_calls = max(
+        1, min(search_max_calls_per_round, search_failsafe_max_calls_per_round)
+    )
     current_request = request
     counted_rounds = 0
     discovery = ToolDiscovery(
@@ -89,7 +91,12 @@ async def run_tool_call_loop(
         )
         if not response.tool_calls or not current_request.allow_tool_calls:
             if turn_recorder is not None:
-                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                turn_recorder.on_turn(
+                    response,
+                    declared_calls=[],
+                    executable_calls=[],
+                    has_more_rounds=False,
+                )
                 await turn_recorder.deliver_turn()
             return response
 
@@ -124,7 +131,8 @@ async def run_tool_call_loop(
         if provider.protocol == "gemini":
             if len(limited_calls) != len(response.tool_calls):
                 logger.warning(
-                    "Gemini tool batch rejected (fail-closed): provider=%s model=%s requested=%d kept=0",
+                    "Gemini tool batch rejected (fail-closed): "
+                    "provider=%s model=%s requested=%d kept=0",
                     provider.id,
                     response.model,
                     len(response.tool_calls),
@@ -158,7 +166,12 @@ async def run_tool_call_loop(
         if not selected_calls:
             response.text = response.text or "工具调用请求为空，未能完成最终回答。"
             if turn_recorder is not None:
-                turn_recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
+                turn_recorder.on_turn(
+                    response,
+                    declared_calls=[],
+                    executable_calls=[],
+                    has_more_rounds=False,
+                )
                 await turn_recorder.deliver_turn()
             return response
 
@@ -223,7 +236,10 @@ async def run_tool_call_loop(
                 result = LLMToolResult(
                     call_id=call.id,
                     name=call.name,
-                    content=f"工具 {call.name} 尚未加载，请先调用 {tool_search_name} 搜索并加载相关工具。",
+                    content=(
+                        f"工具 {call.name} 尚未加载，"
+                        f"请先调用 {tool_search_name} 搜索并加载相关工具。"
+                    ),
                     is_error=True,
                 )
             else:

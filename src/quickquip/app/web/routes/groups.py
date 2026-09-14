@@ -113,7 +113,10 @@ def run_briefing_now(group_id: str, body: BriefingNowBody, request: Request):
     _validate_group_id(group_id)
     from quickquip.app.message_pipeline import daily_briefing_enabled_groups, rule_switch
 
-    if not daily_briefing_enabled_groups.contains(group_id) or not rule_switch.is_enabled(group_id, "daily_briefing"):
+    if (
+        not daily_briefing_enabled_groups.contains(group_id)
+        or not rule_switch.is_enabled(group_id, "daily_briefing")
+    ):
         raise HTTPException(status_code=409, detail="daily briefing is not enabled for this group")
     from quickquip.chat.daily_briefing import normalize_period
 
@@ -143,7 +146,9 @@ def _period_report_enabled_groups(period_type: str):
     raise ValueError(f"unknown period_type: {period_type!r}")
 
 
-def _set_period_report_group(period_type: str, group_id: str, body: GroupToggle, request: Request) -> None:
+def _set_period_report_group(
+    period_type: str, group_id: str, body: GroupToggle, request: Request
+) -> None:
     enabled_groups = _period_report_enabled_groups(period_type)
     if body.enabled:
         enabled_groups.add(group_id)
@@ -161,8 +166,12 @@ def _run_period_report_now(period_type: str, group_id: str, request: Request):
     _validate_group_id(group_id)
     enabled_groups = _period_report_enabled_groups(period_type)
     if not enabled_groups.contains(group_id):
-        raise HTTPException(status_code=409, detail=f"{period_type} report is not enabled for this group")
-    action = action_queue.enqueue("period_report_now", {"group_id": group_id, "period_type": period_type})
+        raise HTTPException(
+            status_code=409, detail=f"{period_type} report is not enabled for this group"
+        )
+    action = action_queue.enqueue(
+        "period_report_now", {"group_id": group_id, "period_type": period_type}
+    )
     audit_logger.log(
         request,
         action="queue",

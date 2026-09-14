@@ -203,8 +203,14 @@ async def test_briefing_context_excludes_bot_rows(tmp_path: Path, briefing_confi
 
     yesterday = [
         (datetime(2026, 4, 14, 9, 0, tzinfo=LOCAL_TZ), "1001", "张三", "群友话题甲"),
-        (datetime(2026, 4, 14, 10, 0, tzinfo=LOCAL_TZ), "1002", "QuickQuip", "bot 刷屏词汇填充填充填充"),
-        (datetime(2026, 4, 14, 11, 0, tzinfo=LOCAL_TZ), "1002", "QuickQuip", "bot 刷屏词汇填充填充填充"),
+        (
+            datetime(2026, 4, 14, 10, 0, tzinfo=LOCAL_TZ),
+            "1002", "QuickQuip", "bot 刷屏词汇填充填充填充",
+        ),
+        (
+            datetime(2026, 4, 14, 11, 0, tzinfo=LOCAL_TZ),
+            "1002", "QuickQuip", "bot 刷屏词汇填充填充填充",
+        ),
         (datetime(2026, 4, 14, 12, 0, tzinfo=LOCAL_TZ), "1001", "张三", "群友话题乙"),
     ]
     for ts, user_id, sender, text in yesterday:

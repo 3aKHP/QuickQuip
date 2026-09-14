@@ -26,7 +26,9 @@ def test_list_llm_about_ignores_examples_and_invalid_dirs(monkeypatch, tmp_path)
     (base / "_example").mkdir(parents=True)
     (base / "abc").mkdir()
     (base / "1000000001").mkdir()
-    (base / "1000000001" / "vocab.yaml").write_text("核心成员:\n  Alice: [阿丽]\n", encoding="utf-8")
+    (base / "1000000001" / "vocab.yaml").write_text(
+        "核心成员:\n  Alice: [阿丽]\n", encoding="utf-8"
+    )
 
     result = llm_about.list_llm_about()
 
@@ -39,7 +41,9 @@ def test_put_llm_about_rejects_invalid_scope(monkeypatch, tmp_path):
     _patch_base(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        llm_about.put_llm_about_file("../config", "vocab", llm_about.LLMAboutContent(content=""), _mock_request())
+        llm_about.put_llm_about_file(
+            "../config", "vocab", llm_about.LLMAboutContent(content=""), _mock_request()
+        )
 
     assert exc.value.status_code == 422
 
@@ -48,7 +52,9 @@ def test_put_llm_about_rejects_unknown_kind(monkeypatch, tmp_path):
     _patch_base(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        llm_about.put_llm_about_file("global", "secret", llm_about.LLMAboutContent(content=""), _mock_request())
+        llm_about.put_llm_about_file(
+            "global", "secret", llm_about.LLMAboutContent(content=""), _mock_request()
+        )
 
     assert exc.value.status_code == 404
 
@@ -57,7 +63,9 @@ def test_put_llm_about_validates_vocab_shape(monkeypatch, tmp_path):
     _patch_base(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        llm_about.put_llm_about_file("global", "vocab", llm_about.LLMAboutContent(content="foo: bar\n"), _mock_request())
+        llm_about.put_llm_about_file(
+            "global", "vocab", llm_about.LLMAboutContent(content="foo: bar\n"), _mock_request()
+        )
 
     assert exc.value.status_code == 400
 

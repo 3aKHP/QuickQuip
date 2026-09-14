@@ -343,7 +343,9 @@ async def retrieve_generated_file(
         mime_type=str(payload_data.get("mime_type", "")).strip(),
     )
     if download:
-        file_result.bytes, detected_mime = await _download_bytes(file_url, timeout=provider.timeout_seconds)
+        file_result.bytes, detected_mime = await _download_bytes(
+            file_url, timeout=provider.timeout_seconds
+        )
         if not file_result.mime_type:
             file_result.mime_type = detected_mime
     return file_result
@@ -531,7 +533,11 @@ async def _openai_tts(
     )
     if not audio_bytes:
         raise GenerationProviderError("OpenAI TTS 返回空响应")
-    mime_type = _mime_for_audio_format(model_config.format) if model_config.format else detected_mime
+    mime_type = (
+        _mime_for_audio_format(model_config.format)
+        if model_config.format
+        else detected_mime
+    )
     return GeneratedAudioResult(
         audio_bytes=audio_bytes,
         mime_type=mime_type,

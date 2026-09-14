@@ -71,7 +71,9 @@ def test_backfill_dry_run_only_counts_input(tmp_path, monkeypatch, capsys):
     assert "归档现状：0 条 / 0 群（dry-run 未写入）" in output
 
 
-def test_backfill_real_archive_retries_failed_rows_and_remains_idempotent(tmp_path, monkeypatch, capsys):
+def test_backfill_real_archive_retries_failed_rows_and_remains_idempotent(
+    tmp_path, monkeypatch, capsys
+):
     import sqlite3
     from unittest.mock import patch
     from quickquip.chat.archive import ChatArchive
@@ -89,7 +91,9 @@ def test_backfill_real_archive_retries_failed_rows_and_remains_idempotent(tmp_pa
     monkeypatch.setattr(sys, "argv", [str(SCRIPT_PATH)])
     original = archive.record_result
     def fail_write(*args, **kwargs):
-        with patch.object(archive, "_connect", side_effect=sqlite3.OperationalError("database is locked")):
+        with patch.object(
+            archive, "_connect", side_effect=sqlite3.OperationalError("database is locked")
+        ):
             return original(*args, **kwargs)
     with patch.object(archive, "record_result", fail_write):
         assert module.main() == 1

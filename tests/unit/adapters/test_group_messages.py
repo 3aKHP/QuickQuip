@@ -155,7 +155,9 @@ class Harness:
         monkeypatch.setattr(gm, "rate_limiter", self.rate_limiter)
         monkeypatch.setattr(gm, "rule_switch", FakeRuleSwitch())
         monkeypatch.setattr(gm, "stats_tracker", FakeStats())
-        monkeypatch.setattr(gm, "offline_message_store", SimpleNamespace(pop_pending=lambda g, u: None))
+        monkeypatch.setattr(
+            gm, "offline_message_store", SimpleNamespace(pop_pending=lambda g, u: None)
+        )
         monkeypatch.setattr(gm, "recent_messages", self.recent)
         monkeypatch.setattr(gm, "awakening_state", self.awakening_state)
         monkeypatch.setattr(gm, "record_chat_message", lambda *a, **k: None)
@@ -232,7 +234,10 @@ def test_repeat_original_preserves_all_message_segment_types():
             Message([MessageSegment.face(264), MessageSegment.text("晚安")]),
             [("face", {"id": "264"}), ("text", {"text": "晚"})],
         ),
-        (Message([MessageSegment.text("hello"), MessageSegment.face(264)]), [("text", {"text": "hello"})]),
+        (
+            Message([MessageSegment.text("hello"), MessageSegment.face(264)]),
+            [("text", {"text": "hello"})],
+        ),
     ],
 )
 def test_repeat_trim_removes_rightmost_content_unit(incoming, expected):
@@ -278,7 +283,9 @@ def test_plain_rule_reply_cq_literal_stays_text():
 
 async def test_passive_trigger_excludes_current_message_from_context(harness_factory):
     h = harness_factory()
-    h.awakening_state.bot_messages.add(100, "the Kubernetes deployment failed with ImagePullBackOff")
+    h.awakening_state.bot_messages.add(
+        100, "the Kubernetes deployment failed with ImagePullBackOff"
+    )
     _seed_recent(h, ["早上好", "今天吃什么", "周末去哪玩"])
 
     event = DummyGroupEvent(DummyMessage([text_seg("Kubernetes ImagePullBackOff again?")]))
@@ -312,7 +319,9 @@ async def test_voice_transcript_can_hit_passive_trigger(harness_factory):
     h.awakening_state.bot_messages.add(100, "Kubernetes ImagePullBackOff warnings")
     _seed_recent(h, ["早上好"])
 
-    message = DummyMessage([record_seg("voice.silk", text="Kubernetes ImagePullBackOff 又 warnings 了吗")])
+    message = DummyMessage(
+        [record_seg("voice.silk", text="Kubernetes ImagePullBackOff 又 warnings 了吗")]
+    )
     await h.handle(DummyGroupEvent(message))
 
     h.svc.quick_judge_detailed.assert_awaited_once()
@@ -411,7 +420,9 @@ async def test_self_message_archive_failure_does_not_propagate(harness_factory, 
     h.svc.generate_reply.assert_not_awaited()
 
 
-async def test_group_identity_index_used_for_at_rendering_and_mentioned_ids(harness_factory, monkeypatch):
+async def test_group_identity_index_used_for_at_rendering_and_mentioned_ids(
+    harness_factory, monkeypatch
+):
     """入口渲染用群合并身份索引：@ 已登记成员渲染标准身份、mentioned_qq_ids 随 prompt 传服务层。"""
     from quickquip.llm.identity import IdentityEntry, IdentityIndex
 

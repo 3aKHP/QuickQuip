@@ -10,7 +10,12 @@ from quickquip.app.web import auth
 from quickquip.app.web.action_queue import WebAdminActionQueue
 from quickquip.app.web.routes import conversations, llm_runtime
 from quickquip.adapters.nonebot import web_admin_actions
-from quickquip.llm.agent_records import TriggerKind, TurnOutputStatus, TextPolicy, TurnResponseRecord
+from quickquip.llm.agent_records import (
+    TriggerKind,
+    TurnOutputStatus,
+    TextPolicy,
+    TurnResponseRecord,
+)
 from quickquip.llm.store import LLMStore
 from quickquip.llm.store_parts.agent_records import UserTriggerPayload
 
@@ -31,7 +36,10 @@ def _seed(store):
     generation, _ = store.agent_scope_state("12345")
     handle = store.begin_loop(
         "12345", generation, TriggerKind.GROUP_DIRECT,
-        UserTriggerPayload(user_id="23456", sender_name="Test", canonical_name="", content="question", raw_content="question"),
+        UserTriggerPayload(
+            user_id="23456", sender_name="Test", canonical_name="",
+            content="question", raw_content="question",
+        ),
     )
     store.commit_turn(handle, TurnResponseRecord(
         text="answer", text_policy=TextPolicy.ALLOWED, output_status=TurnOutputStatus.VISIBLE,
@@ -69,14 +77,22 @@ def test_action_route_is_authenticated_and_read_only(setup):
     queue, _ = setup
     action_id = queue.enqueue("delete_conversation_row", {"row_id": 1})["id"]
     app = FastAPI()
-    app.include_router(llm_runtime.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+    app.include_router(
+        llm_runtime.router, prefix="/ops/api", dependencies=auth.protected_dependencies
+    )
     client = TestClient(app)
     response = client.get(f"/ops/api/llm-runtime/actions/{action_id}")
     assert response.status_code in (401, 503)
     for dependency in auth.protected_dependencies:
         app.dependency_overrides[dependency.dependency] = lambda: None
-    assert client.get(f"/ops/api/llm-runtime/actions/{action_id}").json()["action"]["status"] == "queued"
+    assert (
+        client.get(f"/ops/api/llm-runtime/actions/{action_id}").json()["action"]["status"]
+        == "queued"
+    )
     assert client.get("/ops/api/llm-runtime/actions/missing").status_code == 404
     assert queue.get(action_id)["status"] == "queued"
     queue.fail(action_id, "worker failed")
-    assert client.get(f"/ops/api/llm-runtime/actions/{action_id}").json()["action"]["error"] == "worker failed"
+    assert (
+        client.get(f"/ops/api/llm-runtime/actions/{action_id}").json()["action"]["error"]
+        == "worker failed"
+    )

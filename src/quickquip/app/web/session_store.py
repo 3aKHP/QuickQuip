@@ -73,7 +73,8 @@ class WebAdminSessionStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO admin_sessions (session_id, created_at, expires_at, last_seen_at, client_ip, user_agent)
+                INSERT INTO admin_sessions
+                    (session_id, created_at, expires_at, last_seen_at, client_ip, user_agent)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (

@@ -6,7 +6,13 @@ import pytest
 
 from quickquip.chat.daily_briefing import DailyBriefingContext
 from quickquip.llm.briefing import generate_daily_briefing
-from quickquip.llm.config import DailyBriefingConfig, LLMConfig, PersonaConfig, ProviderConfig, RuntimeConfig
+from quickquip.llm.config import (
+    DailyBriefingConfig,
+    LLMConfig,
+    PersonaConfig,
+    ProviderConfig,
+    RuntimeConfig,
+)
 from quickquip.llm.provider import LLMResponse
 
 
@@ -58,7 +64,11 @@ def _llm_config() -> LLMConfig:
     return LLMConfig(
         runtime=runtime,
         providers={"a": provider_a, "b": provider_b},
-        personas={"default": PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。")},
+        personas={
+            "default": PersonaConfig(
+                id="default", display_name="默认", system_prompt="你是测试人格。"
+            )
+        },
         daily_briefing=DailyBriefingConfig(model_cascade=["a/m1", "b/m2"], max_output_chars=320),
     )
 
@@ -163,7 +173,9 @@ async def test_daily_briefing_usage_scope_carries_persona(monkeypatch):
 
     await generate_daily_briefing(
         context=_context(),
-        persona=PersonaConfig(id="nightwatch", display_name="守夜人", system_prompt="你是测试人格。"),
+        persona=PersonaConfig(
+            id="nightwatch", display_name="守夜人", system_prompt="你是测试人格。"
+        ),
         group_id="1001",
         briefing_config=_llm_config().daily_briefing,
         llm_config=_llm_config(),

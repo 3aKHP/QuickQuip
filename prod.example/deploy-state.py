@@ -23,7 +23,9 @@ SHARED_FILES = {
 SERVICES = ("llbot", "quickquip", "web-admin")
 
 
-def atomic_write(path: Path, data: bytes, mode: int, new_owner: tuple[int, int] | None = None) -> None:
+def atomic_write(
+    path: Path, data: bytes, mode: int, new_owner: tuple[int, int] | None = None
+) -> None:
     missing_parents = []
     parent = path.parent
     while new_owner is not None and not parent.exists():
@@ -122,7 +124,8 @@ def apply_shared(root: Path, incoming: Path, backup: Path) -> None:
                 connections.append({})
             connections[1]["url"] = "ws://quickquip:8080/onebot/v11/ws/"
             connections[1]["token"] = token or ""
-            atomic_write(path, (json.dumps(data, ensure_ascii=False, indent=4) + "\n").encode(), record["mode"])
+            payload = (json.dumps(data, ensure_ascii=False, indent=4) + "\n").encode()
+            atomic_write(path, payload, record["mode"])
 
 
 def restore_shared(root: Path, backup: Path) -> None:
@@ -136,15 +139,24 @@ def restore_shared(root: Path, backup: Path) -> None:
 
 def capture_baseline(root: Path, baseline: Path) -> None:
     """Capture server files and running image IDs without moving live bind sources."""
-    command = ["docker", "compose", "--env-file", str(root / ".env"), "-f", str(root / "prod/docker-compose.yml")]
+    command = [
+        "docker", "compose", "--env-file", str(root / ".env"),
+        "-f", str(root / "prod/docker-compose.yml"),
+    ]
     # No interpolation also preserves env_file references on Compose 2.27+.
     raw = subprocess.check_output(command + ["config", "--no-interpolate", "--format", "json"])
     config = json.loads(raw)
     if set(config["services"]) != set(SERVICES):
-        raise ValueError("migration requires exactly llbot, quickquip and web-admin; review custom services first")
+        raise ValueError(
+            "migration requires exactly llbot, quickquip and web-admin; "
+            "review custom services first"
+        )
     # Keep private runtime files out of the snapshot; copy only mounted app assets.
     baseline.mkdir(mode=0o700)
-    for name in ("src", "config", "llm_about", "frontend/dist", "bot.py", "web_api.py", "pyproject.toml", "requirements.txt", ".dockerignore"):
+    for name in (
+        "src", "config", "llm_about", "frontend/dist", "bot.py", "web_api.py",
+        "pyproject.toml", "requirements.txt", ".dockerignore",
+    ):
         source = checked_path(root, name)
         if source.is_dir():
             validate_tree(source)
@@ -155,7 +167,9 @@ def capture_baseline(root: Path, baseline: Path) -> None:
         container = spec.get("container_name")
         if not container:
             raise ValueError(f"migration needs container_name for {service}")
-        image = subprocess.check_output(["docker", "inspect", "--format", "{{.Image}}", container], text=True).strip()
+        image = subprocess.check_output(
+            ["docker", "inspect", "--format", "{{.Image}}", container], text=True
+        ).strip()
         tag = f"quickquip-{service}:{baseline.name}"
         subprocess.run(["docker", "tag", image, tag], check=True)
         spec["image"] = tag
@@ -173,14 +187,22 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             if not source.is_relative_to(root):
                 raise ValueError(f"external bind mount requires manual migration: {source}")
             relative = source.relative_to(root)
-            if relative.parts[0] == "data" or str(relative) in ("prod/llbot-qq", "prod/llbot-data", ".env"):
+            if relative.parts[0] == "data" or str(relative) in (
+                "prod/llbot-qq", "prod/llbot-data", ".env",
+            ):
                 volume["source"] = str(source)
             elif (baseline / relative).exists():
                 volume["source"] = str(baseline / relative)
             else:
                 raise ValueError(f"unsupported bind mount: {relative}")
     atomic_write(baseline / "prod/docker-compose.yml", json.dumps(config).encode(), 0o600)
-    subprocess.run(["docker", "compose", "--env-file", str(root / ".env"), "-f", str(baseline / "prod/docker-compose.yml"), "config", "--quiet"], check=True)
+    subprocess.run(
+        [
+            "docker", "compose", "--env-file", str(root / ".env"),
+            "-f", str(baseline / "prod/docker-compose.yml"), "config", "--quiet",
+        ],
+        check=True,
+    )
 
 
 def main() -> None:
@@ -201,5 +223,8 @@ if __name__ == "__main__":
     try:
         main()
     except PermissionError as exc:
-        print(f"deployment filesystem permission denied: {exc.filename or 'shared files'}", file=sys.stderr)
+        print(
+            f"deployment filesystem permission denied: {exc.filename or 'shared files'}",
+            file=sys.stderr,
+        )
         raise SystemExit(3) from None

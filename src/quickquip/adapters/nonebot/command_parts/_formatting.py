@@ -10,7 +10,11 @@ def _format_tts_models(audio_generation) -> str:
     for model_id, resolved in audio_generation.models.items():
         label = resolved.model_config.label or model_id
         default_mark = "（默认）" if model_id == audio_generation.default_model else ""
-        voice_hint = f" / 默认音色 {resolved.model_config.voice_id}" if resolved.model_config.voice_id else ""
+        voice_hint = (
+            f" / 默认音色 {resolved.model_config.voice_id}"
+            if resolved.model_config.voice_id
+            else ""
+        )
         lines.append(
             f"- {model_id}：{label} / provider {resolved.provider.id}{voice_hint}{default_mark}"
         )
