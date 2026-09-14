@@ -18,6 +18,21 @@
 
 ## 近期候选
 
+### OpenAI Responses 协议后端（1.16.0 主题，已定调）
+
+为 provider 层新增第四个协议后端（独立 `provider/openai_responses/` 包），对接 OpenAI Responses API：
+
+1. 采用 `store:false` + 每轮全量回放 input items 的无服务端状态路线，与既有历史投影、前缀缓存与字节稳定前缀契约对齐。
+2. 工具循环内建立原生 items（含 reasoning item）的回传契约，保留完整工具批次与顺序；加密 reasoning 的 token 计量并入窗口推导口径。
+3. 裸 HTTP + 手写 SSE 事件折叠复用现有协议无关基座；与 Skill 系统相互解耦，可独立排序落地。
+
+### Skill 系统（1.16.0 主题，已定调）
+
+为 LLM 引入 Skill 系统（独立 `llm/skills/` 包，三工具内核）：
+
+1. 以已完成实现为移植底稿，与 provider 层零耦合，可先于或后于 Responses 协议落地。
+2. 与 Responses 协议一起作为 1.16.0 全形态交付，分阶段实现由开发批次承载。
+
 ### 镜像瘦身与贴吧搬运运行时拆分
 
 当前分发镜像为了让贴吧搬运的浏览器自动化能力开箱可用，内置 Playwright + Chromium 运行时及其系统依赖。后续可以评估更轻的分发形态：
