@@ -38,7 +38,9 @@ class BotActionTrace:
     source: str = ""
 
 
-_current_trace: ContextVar[BotActionTrace | None] = ContextVar("quickquip_bot_action_trace", default=None)
+_current_trace: ContextVar[BotActionTrace | None] = ContextVar(
+    "quickquip_bot_action_trace", default=None
+)
 _installed_api_hooks: set[str] = set()
 _TRACE_FIELD_NAMES = {field.name for field in fields(BotActionTrace)}
 
@@ -79,7 +81,9 @@ def _message_types(message: Any) -> list[str]:
         return [type(message).__name__]
 
 
-def _infer_chat_fields(api: str, data: dict[str, Any], trace: BotActionTrace | None) -> tuple[str, str, str]:
+def _infer_chat_fields(
+    api: str, data: dict[str, Any], trace: BotActionTrace | None
+) -> tuple[str, str, str]:
     chat_type = trace.chat_type if trace else ""
     group_id = trace.group_id if trace else ""
     user_id = trace.user_id if trace else ""
@@ -143,7 +147,9 @@ def build_bot_action_trace_payload(
         "incoming_preview": "",
         "api": api,
         "outcome": "failed" if exception else "sent",
-        "error": "" if exception is None else f"{type(exception).__name__}: {_preview(exception, 240)}",
+        "error": (
+            "" if exception is None else f"{type(exception).__name__}: {_preview(exception, 240)}"
+        ),
         "sent_message_id": "" if exception else _sent_message_id(result),
         "message_types": _message_types(message) or _message_types(messages),
         "reply_preview": "",
@@ -254,7 +260,9 @@ def install_nonebot_api_trace_hook(BotClass: type[Any]) -> bool:
         return False
 
     @BotClass.on_called_api
-    async def _quickquip_bot_action_trace_hook(bot, exception, api: str, data: dict[str, Any], result: Any) -> None:
+    async def _quickquip_bot_action_trace_hook(
+        bot, exception, api: str, data: dict[str, Any], result: Any
+    ) -> None:
         if not _is_action_api(api):
             return
         log_bot_action_trace(api=api, data=data, result=result, exception=exception)

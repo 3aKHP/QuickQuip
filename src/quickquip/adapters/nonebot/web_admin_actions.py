@@ -82,7 +82,9 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
     if action.action_type == "health_check":
         scope_key = _normalize_health_scope(action.payload.get("scope_key"))
         verbose = bool(action.payload.get("verbose", False))
-        text = await svc.format_health(_chat_id(scope_key), chat_type=_chat_type(scope_key), verbose=verbose)
+        text = await svc.format_health(
+            _chat_id(scope_key), chat_type=_chat_type(scope_key), verbose=verbose
+        )
         return {"ok": True, "text": text}
 
     if action.action_type == "clear_context":

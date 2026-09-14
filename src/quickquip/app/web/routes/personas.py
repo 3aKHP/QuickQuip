@@ -30,7 +30,10 @@ class PersonaCreate(BaseModel):
 
 def _validate_name(name: str) -> None:
     if not _NAME_RE.match(name):
-        raise HTTPException(status_code=422, detail="persona name must match [A-Za-z0-9_][A-Za-z0-9_-]{0,63}")
+        raise HTTPException(
+            status_code=422,
+            detail="persona name must match [A-Za-z0-9_][A-Za-z0-9_-]{0,63}",
+        )
 
 
 def _persona_path(name: str) -> Path:

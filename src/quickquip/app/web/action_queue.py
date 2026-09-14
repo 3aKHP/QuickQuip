@@ -65,8 +65,12 @@ class WebAdminActionQueue:
             )
         self._schema_ready = True
 
-    def _reap_stale_running_locked(self, conn: sqlite3.Connection, timeout_seconds: int = 300) -> int:
-        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, int(timeout_seconds)))).isoformat()
+    def _reap_stale_running_locked(
+        self, conn: sqlite3.Connection, timeout_seconds: int = 300
+    ) -> int:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=max(1, int(timeout_seconds)))
+        ).isoformat()
         cur = conn.execute(
             """
             UPDATE web_admin_actions

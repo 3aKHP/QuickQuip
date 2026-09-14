@@ -16,7 +16,12 @@ async def prepare_body(message, scope, bot=None, command=None, extra_ids=()):
         snapshot.names.update(names)
     for part in body["parts"]:
         if part["type"] == "member":
-            part["name"] = part.get("name") or snapshot.names.get(part["qq"]) or snapshot.index.resolve_user(part["qq"]).canonical_name or ""
+            part["name"] = (
+                part.get("name")
+                or snapshot.names.get(part["qq"])
+                or snapshot.index.resolve_user(part["qq"]).canonical_name
+                or ""
+            )
     return body, snapshot
 
 

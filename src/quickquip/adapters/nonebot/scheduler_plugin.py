@@ -84,12 +84,18 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
     from quickquip.chat.awakening import is_group_llm_enabled
 
     if not rule_switch.is_enabled(group_id, _LLM_RULE_NAME):
-        logger.info("scheduled_msg: llm job %s skipped in group %s (rule disabled)", job.id, group_id)
+        logger.info(
+            "scheduled_msg: llm job %s skipped in group %s (rule disabled)",
+            job.id, group_id,
+        )
         return
     _ensure_llm_bindings()
     svc = get_llm_service()
     if not is_group_llm_enabled(svc, group_id):
-        logger.info("scheduled_msg: llm job %s skipped in group %s (group LLM disabled)", job.id, group_id)
+        logger.info(
+            "scheduled_msg: llm job %s skipped in group %s (group LLM disabled)",
+            job.id, group_id,
+        )
         return
 
     from quickquip.llm.agent_records import TriggerKind

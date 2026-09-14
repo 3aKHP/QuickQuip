@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from quickquip.games.registry import BaseGame as BaseGame, GameRegistry as GameRegistry, GameResult as GameResult
+from quickquip.games.registry import (
+    BaseGame as BaseGame,
+    GameRegistry as GameRegistry,
+    GameResult as GameResult,
+)
 from quickquip.games.scores import GameScores as GameScores
 from quickquip.games.scores import game_scores as game_scores
 from quickquip.games.blackjack import BlackjackGame as BlackjackGame

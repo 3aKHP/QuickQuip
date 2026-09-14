@@ -75,7 +75,9 @@ class TiebaService:
         if not self.config.forum_keywords:
             if not require_enabled:
                 return ()
-            raise TiebaServiceError("未配置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS，无法同步贴吧")
+            raise TiebaServiceError(
+                "未配置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS，无法同步贴吧"
+            )
 
         if forum_keyword is None:
             return self.config.forum_keywords
@@ -87,7 +89,9 @@ class TiebaService:
             raise TiebaServiceError(f"未配置贴吧来源：{normalized}吧")
         return (normalized,)
 
-    def _build_sync_message(self, results: list[dict[str, object]], selected_forums: tuple[str, ...]) -> str:
+    def _build_sync_message(
+        self, results: list[dict[str, object]], selected_forums: tuple[str, ...]
+    ) -> str:
         if not results:
             return "未执行任何贴吧同步"
 
@@ -104,7 +108,8 @@ class TiebaService:
 
         success_count = sum(1 for item in results if item["status"] == "ok")
         lines = [
-            f"贴吧缓存同步完成：{success_count}/{len(results)} 个来源成功，总缓存 {self.store.count(selected_forums)} 条"
+            f"贴吧缓存同步完成：{success_count}/{len(results)} 个来源成功，"
+            f"总缓存 {self.store.count(selected_forums)} 条"
         ]
         for item in results:
             forum_keyword = str(item["forum_keyword"])
@@ -161,10 +166,14 @@ class TiebaService:
                 if on_progress:
                     on_progress(f"▶ 开始同步 {selected_forum}吧")
                 try:
-                    threads = await self.crawler.collect_threads(selected_forum, on_progress=on_progress)
+                    threads = await self.crawler.collect_threads(
+                        selected_forum, on_progress=on_progress
+                    )
                 except Exception as exc:
                     message, status, login_required, wrap = self._classify_sync_error(exc)
-                    self.store.record_sync_failure(selected_forum, message, login_required=login_required)
+                    self.store.record_sync_failure(
+                        selected_forum, message, login_required=login_required
+                    )
                     if on_progress:
                         detail = f"需要重新登录：{exc}" if login_required else message
                         on_progress(f"✗ {selected_forum}吧 {detail}")
@@ -185,7 +194,10 @@ class TiebaService:
 
                 updated = self.store.record_sync_success(selected_forum, threads)
                 if on_progress:
-                    on_progress(f"✓ {selected_forum}吧 同步完成，新增/更新 {updated} 条，共 {self.store.count((selected_forum,))} 条")
+                    on_progress(
+                        f"✓ {selected_forum}吧 同步完成，新增/更新 {updated} 条，"
+                        f"共 {self.store.count((selected_forum,))} 条"
+                    )
                 results.append(
                     {
                         "forum_keyword": selected_forum,
@@ -210,7 +222,9 @@ class TiebaService:
             return
         if self._background_task is not None and not self._background_task.done():
             return
-        self._background_task = asyncio.create_task(self._run_background_loop(), name="quickquip-tieba-sync")
+        self._background_task = asyncio.create_task(
+            self._run_background_loop(), name="quickquip-tieba-sync"
+        )
 
     async def shutdown(self) -> None:
         if self._background_task is None:
@@ -263,7 +277,9 @@ class TiebaService:
     async def interactive_login(self, forum_keyword: str | None = None) -> None:
         selected_forums = self.resolve_forum_keywords(forum_keyword, require_enabled=False)
         if not selected_forums:
-            raise TiebaServiceError("请先在 .env 中设置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS")
+            raise TiebaServiceError(
+                "请先在 .env 中设置 TIEBA_FORUM_KEYWORD 或 TIEBA_FORUM_KEYWORDS"
+            )
         login_forum = selected_forums[0]
         await self.crawler.interactive_login(login_forum)
         for selected_forum in selected_forums:

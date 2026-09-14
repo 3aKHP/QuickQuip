@@ -31,7 +31,9 @@ class HealthBody(BaseModel):
 def _validate_scope_key(scope_key: str) -> str:
     key = scope_key.strip()
     if not _SCOPE_KEY_RE.match(key):
-        raise HTTPException(status_code=422, detail="scope_key must be 5-12 digits or 'private:USER_ID'")
+        raise HTTPException(
+            status_code=422, detail="scope_key must be 5-12 digits or 'private:USER_ID'"
+        )
     return key
 
 
@@ -59,14 +61,26 @@ def queue_health_check(body: HealthBody, request: Request):
 @router.post("/llm-runtime/reload")
 def reload_runtime(request: Request):
     action = action_queue.enqueue("llm_reload")
-    audit_logger.log(request, action="queue", target_type="llm_runtime", target_id="config", summary_after={"action_id": action["id"]})
+    audit_logger.log(
+        request,
+        action="queue",
+        target_type="llm_runtime",
+        target_id="config",
+        summary_after={"action_id": action["id"]},
+    )
     return {"ok": True, "queued": True, "action": action}
 
 
 @router.post("/llm-runtime/mcp/reload")
 def reload_mcp(request: Request):
     action = action_queue.enqueue("mcp_reload")
-    audit_logger.log(request, action="queue", target_type="llm_runtime", target_id="mcp", summary_after={"action_id": action["id"]})
+    audit_logger.log(
+        request,
+        action="queue",
+        target_type="llm_runtime",
+        target_id="mcp",
+        summary_after={"action_id": action["id"]},
+    )
     return {"ok": True, "queued": True, "action": action}
 
 

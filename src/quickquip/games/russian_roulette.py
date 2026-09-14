@@ -78,7 +78,12 @@ class RussianRouletteGame(BaseGame):
     def aliases(self) -> list[str]:
         return ["russian", "轮盘", "rr"]
 
-    def __init__(self, economy: GameEconomyStore | None = None, config: RussianRouletteConfig | None = None, max_sessions: int = 512):
+    def __init__(
+        self,
+        economy: GameEconomyStore | None = None,
+        config: RussianRouletteConfig | None = None,
+        max_sessions: int = 512,
+    ):
         self._economy = economy
         self._config = config or RussianRouletteConfig()
         self._sessions: OrderedDict[str, _RRSession] = OrderedDict()
@@ -89,7 +94,10 @@ class RussianRouletteGame(BaseGame):
     def start(self, group_id: str, user_id: str, start_arg: str = "") -> str:
         bet = self._parse_bet(start_arg)
         if bet is None:
-            return f"用法：/game start 俄罗斯轮盘 <赌注>\n赌注范围：{self._config.min_bet} ~ 你的金币余额"
+            return (
+                f"用法：/game start 俄罗斯轮盘 <赌注>\n"
+                f"赌注范围：{self._config.min_bet} ~ 你的金币余额"
+            )
 
         if bet < self._config.min_bet:
             return f"最低赌注为 {self._config.min_bet} 金币"

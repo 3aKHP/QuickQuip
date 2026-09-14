@@ -73,8 +73,16 @@ def roll_reply(
 
     suppress_after_hit = entry.get("suppress_after_hit", 0)
     pity_step = entry.get("pity_step", 0)
-    suppress_after_hit = suppress_after_hit if isinstance(suppress_after_hit, int) and not isinstance(suppress_after_hit, bool) else 0
-    pity_step = pity_step if isinstance(pity_step, (int, float)) and not isinstance(pity_step, bool) else 0
+    suppress_after_hit = (
+        suppress_after_hit
+        if isinstance(suppress_after_hit, int) and not isinstance(suppress_after_hit, bool)
+        else 0
+    )
+    pity_step = (
+        pity_step
+        if isinstance(pity_step, (int, float)) and not isinstance(pity_step, bool)
+        else 0
+    )
     tracks_state = suppress_after_hit > 0 or pity_step > 0
 
     state_key = _state_key(identity or rate_limit_key, group_id)

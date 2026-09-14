@@ -276,7 +276,8 @@ def register_daily_briefing_commands(on_command) -> None:
                 await briefing_cmd.finish("仅管理员可执行此操作")
             if not cfg.enabled:
                 await briefing_cmd.finish(
-                    "每日播报全局未开启，请先在 config/llm.toml 的 [daily_briefing] 中设置 enabled = true。"
+                    "每日播报全局未开启，"
+                    "请先在 config/llm.toml 的 [daily_briefing] 中设置 enabled = true。"
                 )
             daily_briefing_enabled_groups.add(group_id)
             rule_switch.enable(group_id, _RULE_NAME)
@@ -317,7 +318,9 @@ def register_daily_briefing_commands(on_command) -> None:
                 await send_daily_briefing_now(
                     group_id,
                     period,
-                    before_generate=lambda selected_period: briefing_cmd.send(f"正在生成{_PERIOD_LABELS[selected_period]}，请稍候……"),
+                    before_generate=lambda selected_period: briefing_cmd.send(
+                        f"正在生成{_PERIOD_LABELS[selected_period]}，请稍候……"
+                    ),
                 )
             except RuntimeError as exc:
                 message = str(exc)

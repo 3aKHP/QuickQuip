@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from quickquip.adapters.nonebot.command_parts.common import _is_private_chat, _parse_preset, _parse_resume, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import (
+    _is_private_chat,
+    _parse_preset,
+    _parse_resume,
+    _strip_command_name,
+)
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, stats_tracker
 
 
@@ -54,10 +59,14 @@ def register_session_commands(on_command, Message, MessageSegment) -> None:
         deleted = result["deleted"]
         archive_number = result.get("archive_number")
         if archive_number is not None:
-            await matcher.finish(f"当前私聊会话已结束，已存档为 #{archive_number}（{deleted} 条消息）。")
+            await matcher.finish(
+                f"当前私聊会话已结束，已存档为 #{archive_number}（{deleted} 条消息）。"
+            )
         else:
             suffix = "（未存档）" if no_save else ""
-            await matcher.finish(f"当前私聊会话已结束，并清空了 {deleted} 条短期上下文。{suffix}")
+            await matcher.finish(
+                f"当前私聊会话已结束，并清空了 {deleted} 条短期上下文。{suffix}"
+            )
 
     @start_session_cmd.handle()
     async def _(event):

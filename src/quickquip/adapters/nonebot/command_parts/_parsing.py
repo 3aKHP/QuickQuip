@@ -42,7 +42,12 @@ def _parse_profile_mode(message_text: str) -> ProfileModeConfig:
     return DEFAULT_PROFILE_MODE
 
 
-_PRESET_RE = re.compile(r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'|(\S.*))', re.DOTALL)
+_PRESET_RE = re.compile(
+    r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|'
+    r'\'((?:[^\'\\]|\\.)*)\''
+    r'|(\S.*))',
+    re.DOTALL,
+)
 _RESUME_RE = re.compile(r'--resume(?:\s+(\d+))?')
 _DICE_RE = re.compile(r"^(\d*)[dD](\d+)$")
 _DRAW_SIZE_RE = re.compile(r'--size\s+(\d+x\d+)', re.IGNORECASE)

@@ -4,7 +4,10 @@ from quickquip.common.event_utils import is_admin as _is_admin
 
 
 def _is_private_chat(event) -> bool:
-    return getattr(event, "message_type", "") == "private" or getattr(event, "group_id", None) is None
+    return (
+        getattr(event, "message_type", "") == "private"
+        or getattr(event, "group_id", None) is None
+    )
 
 
 def _chat_type(event) -> str:

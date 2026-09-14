@@ -264,7 +264,9 @@ async def run_period_generation(
         iter(llm_config.personas.values()), None
     )
     if persona is None:
-        logger.warning("period_report[%s]: no persona available for group %s", period_type, group_id)
+        logger.warning(
+            "period_report[%s]: no persona available for group %s", period_type, group_id
+        )
         return None
 
     gs = stats_tracker.get_stats(group_id)
@@ -314,7 +316,10 @@ async def generate_period_one(
     )
     if result is not None:
         content, model_used = result
-        store.upsert(group_id, period_type, period_key, content, model_used, run_id=current_usage_run_id())
+        store.upsert(
+            group_id, period_type, period_key, content, model_used,
+            run_id=current_usage_run_id(),
+        )
     return result
 
 
@@ -355,10 +360,14 @@ async def publish_period_one(
     try:
         await send(row)
         store.mark_published(group_id, period_type, period_key)
-        logger.info("period_report[%s]: published for group %s (%s)", period_type, group_id, period_key)
+        logger.info(
+            "period_report[%s]: published for group %s (%s)",
+            period_type, group_id, period_key,
+        )
     except Exception:
         logger.warning(
-            "period_report[%s]: publish failed for group %s (%s)", period_type, group_id, period_key,
+            "period_report[%s]: publish failed for group %s (%s)",
+            period_type, group_id, period_key,
             exc_info=True,
         )
 

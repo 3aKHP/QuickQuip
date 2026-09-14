@@ -14,23 +14,42 @@ class Festival:
 
 
 _FESTIVALS: list[Festival] = [
-    Festival(name="元旦", month=1, day=1, calendar="solar", greeting="新年快乐！愿新的一年大家万事顺遂。"),
-    Festival(name="春节", month=1, day=1, calendar="lunar", greeting="新春快乐！给大家拜年啦，祝大家身体健康、阖家幸福！"),
-    Festival(name="元宵节", month=1, day=15, calendar="lunar", greeting="元宵节快乐！记得吃汤圆哦～"),
-    Festival(name="端午节", month=5, day=5, calendar="lunar", greeting="端午安康！今天吃粽子了吗？"),
-    Festival(name="中秋节", month=8, day=15, calendar="lunar", greeting="中秋快乐！月圆人团圆，别忘了吃月饼～"),
+    Festival(
+        name="元旦", month=1, day=1, calendar="solar",
+        greeting="新年快乐！愿新的一年大家万事顺遂。",
+    ),
+    Festival(
+        name="春节", month=1, day=1, calendar="lunar",
+        greeting="新春快乐！给大家拜年啦，祝大家身体健康、阖家幸福！",
+    ),
+    Festival(
+        name="元宵节", month=1, day=15, calendar="lunar",
+        greeting="元宵节快乐！记得吃汤圆哦～",
+    ),
+    Festival(
+        name="端午节", month=5, day=5, calendar="lunar",
+        greeting="端午安康！今天吃粽子了吗？",
+    ),
+    Festival(
+        name="中秋节", month=8, day=15, calendar="lunar",
+        greeting="中秋快乐！月圆人团圆，别忘了吃月饼～",
+    ),
 ]
 
 _active_festival: Festival | None = None
 _checked_date: date | None = None
 
 _PERSONA_APPENDIX: dict[str, str] = {
-    "元旦": "今天是元旦，新年的第一天。请在回复中自然地融入新年的祝福和积极向上的语气，但不要生硬。",
+    "元旦": (
+        "今天是元旦，新年的第一天。请在回复中自然地融入新年的祝福和积极向上的语气，但不要生硬。"
+    ),
     "春节": "今天是春节。请在回复中自然地融入新春祝福的语气，可以适当使用拜年用语，但不要生硬。",
     "元宵节": "今天是元宵节。可以在回复中自然地提到元宵、汤圆、团圆等元素，语气温馨一些。",
     "端午节": "今天是端午节。可以在回复中自然地提到粽子、龙舟等元素，语气可以适当体现节日氛围。",
     "中秋节": "今天是中秋节。可以在回复中自然地提到月亮、月饼、团圆等元素，语气温馨一些。",
-    "除夕": "今天是除夕，辞旧迎新之际。请在回复中自然地融入辞旧迎新的氛围，可以祝福大家新年进步，但不要生硬。",
+    "除夕": (
+        "今天是除夕，辞旧迎新之际。请在回复中自然地融入辞旧迎新的氛围，可以祝福大家新年进步，但不要生硬。"
+    ),
 }
 
 

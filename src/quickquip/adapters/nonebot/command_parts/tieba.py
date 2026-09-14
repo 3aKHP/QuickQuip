@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from quickquip.adapters.nonebot.command_parts.common import _is_admin, _is_private_chat, _parse_tieba_command_args, _strip_command_name
-from quickquip.app.message_pipeline import STATS_PATH, rate_limiter, rule_switch, stats_tracker, tieba_service
+from quickquip.adapters.nonebot.command_parts.common import (
+    _is_admin,
+    _is_private_chat,
+    _parse_tieba_command_args,
+    _strip_command_name,
+)
+from quickquip.app.message_pipeline import (
+    STATS_PATH,
+    rate_limiter,
+    rule_switch,
+    stats_tracker,
+    tieba_service,
+)
 from quickquip.tieba.config import TIEBA_RULE_NAME
 from quickquip.tieba.errors import TiebaLoginRequiredError, TiebaServiceError
 from quickquip.tieba.formatting import build_thread_preview, format_sources, format_status
@@ -43,16 +54,24 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
                 await tieba_cmd.finish(f"贴吧搬运失败：{exc}")
             if thread is None:
                 if tieba_service.is_login_required(forum_keyword):
-                    await tieba_cmd.finish("贴吧登录态需要人工续签，请让管理员先运行 python -m quickquip.tieba.login")
+                    await tieba_cmd.finish(
+                        "贴吧登录态需要人工续签，"
+                        "请让管理员先运行 python -m quickquip.tieba.login"
+                    )
                 if forum_keyword:
-                    await tieba_cmd.finish(f"{forum_keyword}吧消息池为空，请稍后再试或让管理员执行 /tieba refresh {forum_keyword}")
+                    await tieba_cmd.finish(
+                        f"{forum_keyword}吧消息池为空，"
+                        f"请稍后再试或让管理员执行 /tieba refresh {forum_keyword}"
+                    )
                 await tieba_cmd.finish("当前贴吧池为空，请稍后再试或让管理员执行 /tieba refresh")
             tieba_service.mark_sent(thread)
             stats_tracker.record_trigger(event.group_id, TIEBA_RULE_NAME)
             if text_only:
                 await tieba_cmd.finish(build_thread_preview(thread))
             message = Message([MessageSegment.text(build_thread_preview(thread))])
-            image_url = thread.cover_image_url or (thread.image_urls[0] if thread.image_urls else "")
+            image_url = thread.cover_image_url or (
+                thread.image_urls[0] if thread.image_urls else ""
+            )
             if image_url:
                 message.append(MessageSegment.image(image_url))
             await tieba_cmd.finish(message)
@@ -125,7 +144,9 @@ def register_tieba_commands(on_command, Message, MessageSegment) -> None:
         try:
             thread = await tieba_service.peek_random_thread(forum_keyword)
         except TiebaLoginRequiredError:
-            await tieba_peek_cmd.finish("贴吧登录态需要人工续签，请运行 python -m quickquip.tieba.login")
+            await tieba_peek_cmd.finish(
+                "贴吧登录态需要人工续签，请运行 python -m quickquip.tieba.login"
+            )
         except TiebaServiceError as exc:
             await tieba_peek_cmd.finish(f"现爬失败：{exc}")
         if thread is None:

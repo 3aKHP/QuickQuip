@@ -79,7 +79,11 @@ def _file_meta(scope: str, kind: str) -> dict:
         "filename": _KINDS[kind]["filename"],
         "label": _KINDS[kind]["label"],
         "description": _KINDS[kind]["description"],
-        "path": f"llm_about/{_KINDS[kind]['filename']}" if scope == "global" else f"llm_about/{scope}/{_KINDS[kind]['filename']}",
+        "path": (
+            f"llm_about/{_KINDS[kind]['filename']}"
+            if scope == "global"
+            else f"llm_about/{scope}/{_KINDS[kind]['filename']}"
+        ),
         "exists": exists,
         "size": path.stat().st_size if exists else 0,
         "mtime": int(path.stat().st_mtime) if exists else 0,
@@ -123,7 +127,9 @@ def _validate_identities_content(content: str) -> None:
         if line and not line.startswith(" ") and ":" in line
     }
     if not sections.intersection({"people", "special_accounts"}):
-        raise HTTPException(status_code=400, detail="identities.yaml must contain people or special_accounts")
+        raise HTTPException(
+            status_code=400, detail="identities.yaml must contain people or special_accounts"
+        )
 
     tmp_path = ""
     try:
@@ -204,7 +210,12 @@ def get_llm_about_file(scope: str, kind: str):
     path = _resolve(scope, kind)
     if not path.exists():
         return {"scope": scope, "kind": kind, "content": "", "missing": True}
-    return {"scope": scope, "kind": kind, "content": path.read_text(encoding="utf-8"), "missing": False}
+    return {
+        "scope": scope,
+        "kind": kind,
+        "content": path.read_text(encoding="utf-8"),
+        "missing": False,
+    }
 
 
 @router.put("/llm-about/{scope}/{kind}")
@@ -220,7 +231,10 @@ def put_llm_about_file(scope: str, kind: str, body: LLMAboutContent, request: Re
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
-    logger.warning("llm_about updated via web admin: %s/%s (%d bytes)", scope, kind, len(body.content))
+    logger.warning(
+        "llm_about updated via web admin: %s/%s (%d bytes)",
+        scope, kind, len(body.content),
+    )
     audit_logger.log(
         request,
         action="update",

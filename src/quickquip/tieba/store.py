@@ -50,7 +50,9 @@ class TiebaThread:
             author_name=str(data.get("author_name", "")).strip(),
             main_post_text=str(data.get("main_post_text", "")).strip(),
             cover_image_url=str(data.get("cover_image_url", "")).strip(),
-            image_urls=[str(item).strip() for item in data.get("image_urls", []) if str(item).strip()],
+            image_urls=[
+                str(item).strip() for item in data.get("image_urls", []) if str(item).strip()
+            ],
             fetched_at=float(data.get("fetched_at", 0.0) or 0.0),
             last_seen_at=float(data.get("last_seen_at", 0.0) or 0.0),
             is_deleted=bool(data.get("is_deleted", False)),
@@ -280,7 +282,9 @@ class TiebaStore:
         state.login_required = login_required
         self.save()
 
-    def _selected_states(self, forum_keywords: Iterable[str] | None = None) -> list[TiebaForumState]:
+    def _selected_states(
+        self, forum_keywords: Iterable[str] | None = None
+    ) -> list[TiebaForumState]:
         if forum_keywords is None:
             return list(self.forums.values())
 
@@ -333,7 +337,11 @@ class TiebaStore:
             return None
 
         if prefer_images:
-            with_image = [thread for thread in available if thread.cover_image_url or thread.image_urls]
+            with_image = [
+                thread
+                for thread in available
+                if thread.cover_image_url or thread.image_urls
+            ]
             if with_image:
                 available = with_image
 

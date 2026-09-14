@@ -91,7 +91,9 @@ def setup(on_command) -> None:
             return
 
         if sum(freq.values()) < WORDCLOUD_MIN_WORDS:
-            await cmd.finish(f"{label}有效词汇不足（需至少 {WORDCLOUD_MIN_WORDS} 个词），无法生成词云。")
+            await cmd.finish(
+                f"{label}有效词汇不足（需至少 {WORDCLOUD_MIN_WORDS} 个词），无法生成词云。"
+            )
             return
 
         try:

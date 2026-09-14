@@ -341,7 +341,9 @@ class NiuNiuStore:
         today = self._today_str()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO niuniu_users (uid, length, luck, luck_date, fence_luck, fence_luck_date, created_at, updated_at) "
+                "INSERT INTO niuniu_users "
+                "(uid, length, luck, luck_date, fence_luck, "
+                "fence_luck_date, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (uid, length, glue_luck, today, fence_luck, today, now, now),
             )
@@ -381,7 +383,9 @@ class NiuNiuStore:
     def _add_record(self, uid: str, action: str, origin: float, new: float) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO niuniu_records (uid, action, origin_length, new_length, created_at) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO niuniu_records "
+                "(uid, action, origin_length, new_length, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (uid, action, round(origin, 2), round(new, 2), _utc_now()),
             )
 
@@ -390,7 +394,8 @@ class NiuNiuStore:
             raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT action, origin_length, new_length, created_at FROM niuniu_records WHERE uid = ? ORDER BY id DESC LIMIT ?",
+                "SELECT action, origin_length, new_length, created_at "
+                "FROM niuniu_records WHERE uid = ? ORDER BY id DESC LIMIT ?",
                 (uid, limit),
             ).fetchall()
         return [
@@ -409,7 +414,8 @@ class NiuNiuStore:
             raise RuntimeError("牛牛大作战 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT created_at FROM niuniu_records WHERE uid = ? AND action = ? ORDER BY id DESC LIMIT 1",
+                "SELECT created_at FROM niuniu_records "
+                "WHERE uid = ? AND action = ? ORDER BY id DESC LIMIT 1",
                 (uid, action),
             ).fetchone()
             return row["created_at"] if row else "暂无记录"
@@ -424,12 +430,15 @@ class NiuNiuStore:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
                 rows = conn.execute(
-                    f"SELECT uid, length FROM niuniu_users WHERE length > 0 AND uid IN ({placeholders}) ORDER BY length DESC LIMIT ?",
+                    f"SELECT uid, length FROM niuniu_users "
+                    f"WHERE length > 0 AND uid IN ({placeholders}) "
+                    f"ORDER BY length DESC LIMIT ?",
                     [*user_ids, limit],
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT uid, length FROM niuniu_users WHERE length > 0 ORDER BY length DESC LIMIT ?",
+                    "SELECT uid, length FROM niuniu_users "
+                    "WHERE length > 0 ORDER BY length DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
         return [{"uid": r["uid"], "length": r["length"]} for r in rows]
@@ -442,12 +451,15 @@ class NiuNiuStore:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
                 rows = conn.execute(
-                    f"SELECT uid, length FROM niuniu_users WHERE length < 0 AND uid IN ({placeholders}) ORDER BY length ASC LIMIT ?",
+                    f"SELECT uid, length FROM niuniu_users "
+                    f"WHERE length < 0 AND uid IN ({placeholders}) "
+                    f"ORDER BY length ASC LIMIT ?",
                     [*user_ids, limit],
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT uid, length FROM niuniu_users WHERE length < 0 ORDER BY length ASC LIMIT ?",
+                    "SELECT uid, length FROM niuniu_users "
+                    "WHERE length < 0 ORDER BY length ASC LIMIT ?",
                     (limit,),
                 ).fetchall()
         return [{"uid": r["uid"], "length": abs(r["length"])} for r in rows]
@@ -460,7 +472,9 @@ class NiuNiuStore:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
                 rows = conn.execute(
-                    f"SELECT uid, length FROM niuniu_users WHERE uid IN ({placeholders}) ORDER BY length DESC LIMIT ?",
+                    f"SELECT uid, length FROM niuniu_users "
+                    f"WHERE uid IN ({placeholders}) "
+                    f"ORDER BY length DESC LIMIT ?",
                     [*user_ids, limit],
                 ).fetchall()
             else:
@@ -478,7 +492,9 @@ class NiuNiuStore:
             if user_ids:
                 placeholders = ",".join("?" for _ in user_ids)
                 rows = conn.execute(
-                    f"SELECT uid, length FROM niuniu_users WHERE uid IN ({placeholders}) ORDER BY ABS(length) DESC LIMIT ?",
+                    f"SELECT uid, length FROM niuniu_users "
+                    f"WHERE uid IN ({placeholders}) "
+                    f"ORDER BY ABS(length) DESC LIMIT ?",
                     [*user_ids, limit],
                 ).fetchall()
             else:

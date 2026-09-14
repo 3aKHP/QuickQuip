@@ -46,8 +46,12 @@ def resolve_quote_display_name(
     if not uid:
         return snapshot, False
 
-    identities_for_row = identity_snapshot or IdentitySnapshot(identity_index or IdentityIndex(), dict(user_names or {}))
-    resolved = identities_for_row.name(uid, snapshot if snapshot not in _UNKNOWN_SNAPSHOT_NAMES else "")
+    identities_for_row = identity_snapshot or IdentitySnapshot(
+        identity_index or IdentityIndex(), dict(user_names or {})
+    )
+    resolved = identities_for_row.name(
+        uid, snapshot if snapshot not in _UNKNOWN_SNAPSHOT_NAMES else ""
+    )
     if snapshot in {*_UNKNOWN_SNAPSHOT_NAMES, uid, f"QQ{uid}"} or resolved == snapshot:
         return resolved, False
     return resolved, True
@@ -167,7 +171,8 @@ class GroupQuoteStore:
             next_seq = int(row[0]) if row else 1
             cur = self._db.execute(
                 "INSERT INTO quotes"
-                " (group_id, quoted_user_id, quoted_sender_name, content, saved_by_user_id, saved_at, group_seq)"
+                " (group_id, quoted_user_id, quoted_sender_name, "
+                "content, saved_by_user_id, saved_at, group_seq)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (gid, str(quoted_user_id), quoted_sender_name, content,
                  str(saved_by_user_id), int(self._time()), next_seq),
@@ -209,7 +214,8 @@ class GroupQuoteStore:
         if recent_ids:
             placeholders = ",".join("?" for _ in recent_ids)
             row = self._db.execute(
-                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, content, saved_at, content_parts_json"
+                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, "
+                "content, saved_at, content_parts_json"
                 f" FROM quotes WHERE group_id=? AND id NOT IN ({placeholders})"
                 " ORDER BY RANDOM() LIMIT 1",
                 (group_key, *recent_ids),
@@ -219,7 +225,8 @@ class GroupQuoteStore:
             if recent_ids:
                 self._recent_random_ids.pop(group_key, None)
             row = self._db.execute(
-                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, content, saved_at, content_parts_json"
+                "SELECT id, group_seq, quoted_user_id, quoted_sender_name, "
+                "content, saved_at, content_parts_json"
                 " FROM quotes WHERE group_id=? ORDER BY RANDOM() LIMIT 1",
                 (group_key,),
             ).fetchone()
@@ -283,7 +290,10 @@ class GroupQuoteStore:
         # Isolate a long read from writes on the bot's event-loop connection.
         with closing(sqlite3.connect(self._path)) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes WHERE group_id=? ORDER BY id DESC", (str(group_id),))
+            rows = conn.execute(
+                f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes WHERE group_id=? ORDER BY id DESC",
+                (str(group_id),),
+            )
             for row in rows:
                 if matcher.matches(dict(row)):
                     if offset <= total < offset + limit:

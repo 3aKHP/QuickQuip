@@ -365,7 +365,9 @@ def _build_asr_model(entry: dict[str, Any]) -> AsrModelConfig:
     )
 
 
-def _image_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> ImageProviderConfig:
+def _image_provider_factory(
+    pid: str, entry: dict[str, Any], models: list[Any]
+) -> ImageProviderConfig:
     return ImageProviderConfig(
         id=pid,
         protocol=str(entry.get("protocol", "openai_images")).strip() or "openai_images",
@@ -380,7 +382,9 @@ def _image_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) 
     )
 
 
-def _audio_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> AudioProviderConfig:
+def _audio_provider_factory(
+    pid: str, entry: dict[str, Any], models: list[Any]
+) -> AudioProviderConfig:
     return AudioProviderConfig(
         id=pid,
         protocol=str(entry.get("protocol", "minimax_t2a_http")).strip() or "minimax_t2a_http",
@@ -395,7 +399,9 @@ def _audio_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) 
     )
 
 
-def _music_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> MusicProviderConfig:
+def _music_provider_factory(
+    pid: str, entry: dict[str, Any], models: list[Any]
+) -> MusicProviderConfig:
     return MusicProviderConfig(
         id=pid,
         protocol=str(entry.get("protocol", "minimax_music")).strip() or "minimax_music",
@@ -413,7 +419,10 @@ def _music_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) 
 def _asr_provider_factory(pid: str, entry: dict[str, Any], models: list[Any]) -> AsrProviderConfig:
     return AsrProviderConfig(
         id=pid,
-        protocol=str(entry.get("protocol", "openai_transcriptions")).strip() or "openai_transcriptions",
+        protocol=(
+            str(entry.get("protocol", "openai_transcriptions")).strip()
+            or "openai_transcriptions"
+        ),
         base_url=str(entry.get("base_url", "")).strip(),
         api_key_env=str(entry.get("api_key_env", "")).strip(),
         timeout_seconds=float(entry.get("timeout_seconds", 60)),

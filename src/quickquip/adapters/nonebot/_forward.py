@@ -49,7 +49,13 @@ def _extract_forward_payload(message) -> tuple[str, list[object]]:
     return "", []
 
 
-def _format_forward_sender(sender_name: str, user_id: str, *, bot_keys: set[str], identities: IdentityIndex) -> str:
+def _format_forward_sender(
+    sender_name: str,
+    user_id: str,
+    *,
+    bot_keys: set[str],
+    identities: IdentityIndex,
+) -> str:
     normalized_user_id = user_id.strip()
     if normalized_user_id and normalized_user_id in bot_keys:
         return f"机器人（QQ {normalized_user_id}）"
@@ -167,7 +173,11 @@ async def _render_forward_content(
                     try:
                         result = await bot.call_api("get_forward_msg", message_id=nested_id)
                     except Exception:
-                        logger.warning("Failed to fetch nested forward message id=%s", nested_id, exc_info=True)
+                        logger.warning(
+                            "Failed to fetch nested forward message id=%s",
+                            nested_id,
+                            exc_info=True,
+                        )
                         nested_text = ""
                     else:
                         nested_nodes = []
@@ -263,5 +273,8 @@ async def extract_forward_content(
         visited_forward_ids={forward_id} if forward_id else set(),
     )
     if len(rendered_text) > MAX_FORWARD_TEXT_CHARS:
-        rendered_text = rendered_text[:MAX_FORWARD_TEXT_CHARS].rstrip() + "…（合并转发内容过长，已截断）"
+        rendered_text = (
+            rendered_text[:MAX_FORWARD_TEXT_CHARS].rstrip()
+            + "…（合并转发内容过长，已截断）"
+        )
     return rendered_text, image_urls

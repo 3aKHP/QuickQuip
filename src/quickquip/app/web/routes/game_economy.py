@@ -128,7 +128,8 @@ async def get_account(group_id: str, user_id: str, request: Request):
     store: GameEconomyStore = game_economy
     with store.connect() as conn:
         row = conn.execute(
-            "SELECT user_id, gold, affection, sign_streak, last_sign_date FROM gold_accounts WHERE user_id = ? AND group_id = ?",
+            "SELECT user_id, gold, affection, sign_streak, last_sign_date "
+            "FROM gold_accounts WHERE user_id = ? AND group_id = ?",
             (user_id, group_id),
         ).fetchone()
     if row is None:

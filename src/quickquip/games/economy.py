@@ -187,7 +187,15 @@ class GameEconomyStore:
                 """,
                 (str(group_id), top_n),
             ).fetchall()
-        return [{"user_id": r["user_id"], "gold": r["gold"], "affection": r["affection"], "sign_streak": r["sign_streak"]} for r in rows]
+        return [
+            {
+                "user_id": r["user_id"],
+                "gold": r["gold"],
+                "affection": r["affection"],
+                "sign_streak": r["sign_streak"],
+            }
+            for r in rows
+        ]
 
     # ── sign-in ──────────────────────────────────────────────────────────
 
@@ -277,7 +285,8 @@ class GameEconomyStore:
         with self._connect() as conn:
             self._ensure_account(conn, user_id, group_id)
             conn.execute(
-                "UPDATE gold_accounts SET affection = affection + ? WHERE user_id = ? AND group_id = ?",
+                "UPDATE gold_accounts SET affection = affection + ? "
+                "WHERE user_id = ? AND group_id = ?",
                 (amount, str(user_id), str(group_id)),
             )
             row = conn.execute(

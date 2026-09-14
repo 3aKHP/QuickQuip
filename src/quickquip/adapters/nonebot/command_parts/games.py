@@ -41,9 +41,14 @@ def register_games_commands(on_command, Message, MessageSegment) -> None:
             active_name = game_registry.get_active_game_name(group_id)
             if active_name:
                 await game_cmd.finish(f"本群已有进行中的游戏：{active_name}，请先 /game stop 结束")
-            opening = game_registry.start_game(group_id, str(event.user_id), game, start_arg=start_arg)
+            opening = game_registry.start_game(
+                group_id, str(event.user_id), game, start_arg=start_arg
+            )
             if opening is None:
-                await game_cmd.finish(f"本群已有进行中的游戏：{game_registry.get_active_game_name(group_id)}，请先 /game stop 结束")
+                await game_cmd.finish(
+                    f"本群已有进行中的游戏：{game_registry.get_active_game_name(group_id)}，"
+                    f"请先 /game stop 结束"
+                )
             await game_cmd.finish(opening)
 
         if sub == "stop":

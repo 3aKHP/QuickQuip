@@ -325,9 +325,17 @@ def fence_resolve(
         if oppo_is_bot:
             msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
         elif i_win:
-            msgs = (chosen.get("win_neg") or text.fence_shared["win_neg"]) if my_len < 0 else (chosen.get("win_pos") or text.fence_shared["win_pos"])
+            msgs = (
+                (chosen.get("win_neg") or text.fence_shared["win_neg"])
+                if my_len < 0
+                else (chosen.get("win_pos") or text.fence_shared["win_pos"])
+            )
         else:
-            msgs = (chosen.get("devoured_neg") or text.fence_shared["lose_neg"]) if my_len < 0 else (chosen.get("devoured_pos") or text.fence_shared["lose_pos"])
+            msgs = (
+                (chosen.get("devoured_neg") or text.fence_shared["lose_neg"])
+                if my_len < 0
+                else (chosen.get("devoured_pos") or text.fence_shared["lose_pos"])
+            )
         msg = random.choice(msgs).format(gain=steal, loss=loss_val, my_len=my_len)
         return FenceOutcome(my_new=my_len, oppo_new=oppo_len, msg=msg)
 
@@ -585,15 +593,31 @@ def fence_resolve_zerohsum(
         if oppo_is_bot:
             msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
         elif i_win:
-            msgs = (chosen.get("win_neg") or text.fence_shared["win_neg"]) if my_len < 0 else (chosen.get("win_pos") or text.fence_shared["win_pos"])
+            msgs = (
+                (chosen.get("win_neg") or text.fence_shared["win_neg"])
+                if my_len < 0
+                else (chosen.get("win_pos") or text.fence_shared["win_pos"])
+            )
         else:
-            msgs = (chosen.get("devoured_neg") or text.fence_shared["lose_neg"]) if my_len < 0 else (chosen.get("devoured_pos") or text.fence_shared["lose_pos"])
+            msgs = (
+                (chosen.get("devoured_neg") or text.fence_shared["lose_neg"])
+                if my_len < 0
+                else (chosen.get("devoured_pos") or text.fence_shared["lose_pos"])
+            )
         msg = random.choice(msgs).format(gain=stake, loss=loss_val, my_len=my_len)
     elif msg_branch == "dominate_sever":
         if i_win:
-            msgs = chosen.get("sever_pos", chosen.get("win_pos")) if old_oppo > 0 else chosen.get("sever_neg", chosen.get("win_neg"))
+            msgs = (
+                chosen.get("sever_pos", chosen.get("win_pos"))
+                if old_oppo > 0
+                else chosen.get("sever_neg", chosen.get("win_neg"))
+            )
         else:
-            msgs = chosen.get("severed_pos", chosen.get("lose_pos")) if old_my > 0 else chosen.get("severed_neg", chosen.get("lose_neg"))
+            msgs = (
+                chosen.get("severed_pos", chosen.get("lose_pos"))
+                if old_my > 0
+                else chosen.get("severed_neg", chosen.get("lose_neg"))
+            )
         msg = random.choice(msgs).format(
             gain=stake, loss=loss_val, my_len=my_len,
             old_oppo=old_oppo, new_oppo=oppo_len, old_my=old_my, new_my=my_len,
@@ -602,9 +626,17 @@ def fence_resolve_zerohsum(
         if oppo_is_bot:
             msgs = text.fence_bot["win"] if i_win else text.fence_bot["lose"]
         elif i_win:
-            msgs = (chosen.get("win_neg") or text.fence_shared["win_neg"]) if my_len < 0 else (chosen.get("win_pos") or text.fence_shared["win_pos"])
+            msgs = (
+                (chosen.get("win_neg") or text.fence_shared["win_neg"])
+                if my_len < 0
+                else (chosen.get("win_pos") or text.fence_shared["win_pos"])
+            )
         else:
-            msgs = (chosen.get("lose_neg") or text.fence_shared["lose_neg"]) if my_len < 0 else (chosen.get("lose_pos") or text.fence_shared["lose_pos"])
+            msgs = (
+                (chosen.get("lose_neg") or text.fence_shared["lose_neg"])
+                if my_len < 0
+                else (chosen.get("lose_pos") or text.fence_shared["lose_pos"])
+            )
         msg = random.choice(msgs).format(gain=stake, loss=loss_val, my_len=my_len)
 
     return FenceOutcome(my_new=my_len, oppo_new=oppo_len, msg=msg)

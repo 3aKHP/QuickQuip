@@ -86,13 +86,34 @@ AWAKENING_RULES: tuple[tuple[str, str], ...] = (
 )
 AWAKENING_RULE_NAMES: frozenset[str] = frozenset(name for name, _label in AWAKENING_RULES)
 
-_BOREDOM_INSTRUCTION = "群聊沉寂已久，你可以自然地冒个泡说点什么。不要说明自己是因为无聊唤醒或定时机制才发言。"
-_EXTEND_INSTRUCTION = "这名群友刚刚显式召唤过你，现在仍在同一段短对话窗口内。只有能自然接上时才回应，保持简短，不要说明唤醒延长或触发机制。"
-_INTEREST_INSTRUCTION_TEMPLATE = "这条群聊消息命中了你感兴趣的话题「{topic}」。请围绕这条消息自然接话，不要说明兴趣话题、关键词或唤醒机制。"
-_FALLBACK_INSTRUCTION = "你低概率决定参与这条群聊。只有在能自然接上时才简短回应，不要强行扩展，不要说明兜底概率或唤醒机制。"
-_RELEVANCE_INSTRUCTION = "判定结果显示用户在延续你之前的对话。请自然回应当前消息，不要说明相关性判定或唤醒机制。"
-_QA_INSTRUCTION = "判定结果显示用户提出了可能需要你回答的问题。请直接回答当前问题，不要说明答疑判定或唤醒机制。"
-_PASSIVE_IMAGE_INSTRUCTION = "这条触发消息包含图片，请结合图片与文字自然回应；如果图片不可见或信息不足，不要编造具体图像细节。"
+_BOREDOM_INSTRUCTION = (
+    "群聊沉寂已久，你可以自然地冒个泡说点什么。"
+    "不要说明自己是因为无聊唤醒或定时机制才发言。"
+)
+_EXTEND_INSTRUCTION = (
+    "这名群友刚刚显式召唤过你，现在仍在同一段短对话窗口内。"
+    "只有能自然接上时才回应，保持简短，不要说明唤醒延长或触发机制。"
+)
+_INTEREST_INSTRUCTION_TEMPLATE = (
+    "这条群聊消息命中了你感兴趣的话题「{topic}」。"
+    "请围绕这条消息自然接话，不要说明兴趣话题、关键词或唤醒机制。"
+)
+_FALLBACK_INSTRUCTION = (
+    "你低概率决定参与这条群聊。只有在能自然接上时才简短回应，"
+    "不要强行扩展，不要说明兜底概率或唤醒机制。"
+)
+_RELEVANCE_INSTRUCTION = (
+    "判定结果显示用户在延续你之前的对话。请自然回应当前消息，"
+    "不要说明相关性判定或唤醒机制。"
+)
+_QA_INSTRUCTION = (
+    "判定结果显示用户提出了可能需要你回答的问题。请直接回答当前问题，"
+    "不要说明答疑判定或唤醒机制。"
+)
+_PASSIVE_IMAGE_INSTRUCTION = (
+    "这条触发消息包含图片，请结合图片与文字自然回应；"
+    "如果图片不可见或信息不足，不要编造具体图像细节。"
+)
 
 
 def _passive_trigger_allows_images(rule_name: str) -> bool:

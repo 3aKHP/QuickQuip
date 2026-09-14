@@ -197,7 +197,10 @@ def register_awakening_commands(on_command) -> None:
             lines.append(f"唤醒延长: {settings.extend_duration}s")
             lines.append(f"兴趣话题: {settings.interest_topics or '(未配置)'}")
             lines.append(f"兜底概率: {settings.fallback_probability}")
-            lines.append(f"无聊沉寂: {settings.boredom_silence_seconds}s / 概率 {settings.boredom_probability}")
+            lines.append(
+                f"无聊沉寂: {settings.boredom_silence_seconds}s"
+                f" / 概率 {settings.boredom_probability}"
+            )
             lines.append(f"无聊检查间隔: {settings.boredom_check_interval}s")
             lines.append(f"相关性阈值: {settings.relevance_threshold} (>=1 关闭)")
             lines.append(f"答疑阈值: {settings.qa_threshold} (>=1 关闭)")
@@ -211,7 +214,11 @@ def register_awakening_commands(on_command) -> None:
             if not _is_admin(event):
                 await cmd.finish("仅管理员可执行此操作")
             if len(tokens) < 2:
-                await cmd.finish("用法: /awakening on <规则名>\n可选: awakening_extend, awakening_interest, awakening_fallback, awakening_boredom, awakening_relevance, awakening_qa")
+                await cmd.finish(
+                    "用法: /awakening on <规则名>\n"
+                    "可选: awakening_extend, awakening_interest, awakening_fallback, "
+                    "awakening_boredom, awakening_relevance, awakening_qa"
+                )
             rule_name = tokens[1]
             if rule_name not in AWAKENING_RULE_NAMES:
                 await cmd.finish(f"未知规则: {rule_name}")

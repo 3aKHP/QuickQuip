@@ -77,8 +77,11 @@ def list_threads(
     if keyword:
         kw = keyword.strip().lower()
         threads = [
-            t for t in threads
-            if kw in t.title.lower() or kw in t.main_post_text.lower() or kw in t.author_name.lower()
+            t
+            for t in threads
+            if kw in t.title.lower()
+            or kw in t.main_post_text.lower()
+            or kw in t.author_name.lower()
         ]
     total = len(threads)
     page = threads[offset:offset + limit]

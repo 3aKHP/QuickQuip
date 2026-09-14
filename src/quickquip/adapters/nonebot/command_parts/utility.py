@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import random
 
-from quickquip.adapters.nonebot.command_parts.common import _DICE_RE, _NUMBER_EMOJIS, _daily_fortune, _safe_shlex_split, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import (
+    _DICE_RE,
+    _NUMBER_EMOJIS,
+    _daily_fortune,
+    _safe_shlex_split,
+    _strip_command_name,
+)
 
 
 def register_utility_commands(on_command, Message, MessageSegment) -> None:

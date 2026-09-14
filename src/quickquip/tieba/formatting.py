@@ -31,10 +31,16 @@ def format_status(
     for forum_keyword, state in forum_states:
         lines.append(f"来源：{forum_keyword}吧")
         lines.append(f"  缓存帖子：{len(state.threads) if state else 0}")
-        lines.append(f"  上次开始：{format_timestamp(state.last_sync_started_at) if state else '未记录'}")
-        lines.append(f"  上次完成：{format_timestamp(state.last_sync_completed_at) if state else '未记录'}")
+        lines.append(
+            f"  上次开始：{format_timestamp(state.last_sync_started_at) if state else '未记录'}"
+        )
+        lines.append(
+            f"  上次完成：{format_timestamp(state.last_sync_completed_at) if state else '未记录'}"
+        )
         lines.append(f"  上次状态：{state.last_sync_status if state else 'idle'}")
-        lines.append(f"  登录态：{'需要人工续签' if state and state.login_required else '正常或未判定'}")
+        lines.append(
+            f"  登录态：{'需要人工续签' if state and state.login_required else '正常或未判定'}"
+        )
         if state and state.last_error:
             lines.append(f"  最近错误：{state.last_error}")
 
@@ -65,7 +71,9 @@ def format_sources(
         count = len(state.threads) if state else 0
         status = state.last_sync_status if state else "idle"
         login_status = "需要续签" if state and state.login_required else "正常或未判定"
-        lines.append(f"- {forum_keyword}吧 | 缓存 {count} 条 | 状态 {status} | 登录态 {login_status}")
+        lines.append(
+            f"- {forum_keyword}吧 | 缓存 {count} 条 | 状态 {status} | 登录态 {login_status}"
+        )
 
     if show_usage_hint:
         lines.append("可用：/tieba <贴吧名>、/tieba text <贴吧名>、/tieba status <贴吧名>")

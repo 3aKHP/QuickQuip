@@ -135,7 +135,11 @@ class OneBotDeliverySink:
         return DeliveryReceipt(status=DeliveryStatus.UNKNOWN, error_code="missing_message_id")
 
 
-def text_only_message(text: str, Message: type[OneBotMessage], MessageSegment: type[OneBotMessageSegment]) -> OneBotMessage:
+def text_only_message(
+    text: str,
+    Message: type[OneBotMessage],
+    MessageSegment: type[OneBotMessageSegment],
+) -> OneBotMessage:
     """纯文本 Message（§6.2）：分段正文不经 CQ 解析器。
 
     正文中的 ``@QQ 号`` 数字艾特在此出口切分为真实 at 段（分段交付与
@@ -144,7 +148,9 @@ def text_only_message(text: str, Message: type[OneBotMessage], MessageSegment: t
     return Message(split_outbound_at_mentions(text, Message, MessageSegment))
 
 
-def make_matcher_sink(matcher, Message, MessageSegment, *, scope_key: str, interval_ms: int) -> OneBotDeliverySink:
+def make_matcher_sink(
+    matcher, Message, MessageSegment, *, scope_key: str, interval_ms: int
+) -> OneBotDeliverySink:
     return OneBotDeliverySink(
         lambda text: matcher.send(text_only_message(text, Message, MessageSegment)),
         scope_key=scope_key,
@@ -152,7 +158,9 @@ def make_matcher_sink(matcher, Message, MessageSegment, *, scope_key: str, inter
     )
 
 
-def make_group_bot_sink(bot, Message, MessageSegment, *, group_id: int | str, interval_ms: int) -> OneBotDeliverySink:
+def make_group_bot_sink(
+    bot, Message, MessageSegment, *, group_id: int | str, interval_ms: int
+) -> OneBotDeliverySink:
     async def _send(text: str):
         return await bot.send_group_msg(
             group_id=int(group_id),
@@ -162,7 +170,9 @@ def make_group_bot_sink(bot, Message, MessageSegment, *, group_id: int | str, in
     return OneBotDeliverySink(_send, scope_key=str(group_id), interval_ms=interval_ms)
 
 
-def make_private_bot_sink(bot, Message, MessageSegment, *, user_id: int | str, interval_ms: int) -> OneBotDeliverySink:
+def make_private_bot_sink(
+    bot, Message, MessageSegment, *, user_id: int | str, interval_ms: int
+) -> OneBotDeliverySink:
     async def _send(text: str):
         return await bot.send_private_msg(
             user_id=int(user_id),
