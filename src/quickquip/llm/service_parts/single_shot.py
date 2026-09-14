@@ -25,6 +25,19 @@ from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
 from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 
 
+def _patch_point_callables():
+    """现取 provider builder 与敏感词过滤器工厂（两者宿主为 service 模块）。
+
+    ``quickquip.llm.service.build_provider_client`` / ``_get_sensitive_filter``
+    是既有测试与 single_shot 管线的模块级 patch 点；经此函数调用时现取
+    （与 usage.py 的惰性 ``get_llm_service`` 同款），不在 import 期建立
+    service → service_parts → service 的静态环。
+    """
+    from quickquip.llm import service
+
+    return service.build_provider_client, service._get_sensitive_filter
+
+
 def _defectify_reply_text(raw_text: str) -> str | None:
     return raw_text or None
 
@@ -79,18 +92,15 @@ class SingleShotEntriesMixin:
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
     ) -> dict[str, str]:
-        # 薄编排：管线本体在 quickquip.llm.single_shot。patch 点
-        # （build_provider_client / _get_sensitive_filter）绑定在 service 模块
-        # 命名空间，此处函数内导入现取，保持 quickquip.llm.service.* patch 语义。
-        from quickquip.llm import service as _service
+        client_builder, get_sensitive = _patch_point_callables()
         return await run_command_single_shot(
             spec=_DEFECTIFY_SPEC,
             config=self.config,
             chat_id=chat_id,
             resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
             resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
-            get_sensitive=_service._get_sensitive_filter,
-            client_builder=_service.build_provider_client,
+            get_sensitive=get_sensitive,
+            client_builder=client_builder,
             merge_image_urls=self._merge_image_urls,
             prompt=prompt,
             image_urls=image_urls,
@@ -113,18 +123,15 @@ class SingleShotEntriesMixin:
         quoted_user_id: str = "",
     ) -> dict[str, Any]:
         """/turmfluch 命令：把输入提炼成一句「<卡牌或遗物名>了」。"""
-        # 薄编排：管线本体在 quickquip.llm.single_shot。patch 点
-        # （build_provider_client / _get_sensitive_filter）绑定在 service 模块
-        # 命名空间，此处函数内导入现取，保持 quickquip.llm.service.* patch 语义。
-        from quickquip.llm import service as _service
+        client_builder, get_sensitive = _patch_point_callables()
         return await run_command_single_shot(
             spec=_TURMFLUCH_SPEC,
             config=self.config,
             chat_id=chat_id,
             resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
             resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
-            get_sensitive=_service._get_sensitive_filter,
-            client_builder=_service.build_provider_client,
+            get_sensitive=get_sensitive,
+            client_builder=client_builder,
             merge_image_urls=self._merge_image_urls,
             prompt=prompt,
             image_urls=image_urls,
@@ -146,15 +153,12 @@ class SingleShotEntriesMixin:
 
         走 ``[triggers.quick_judge]`` 配置的专用便宜模型，不走群主模型。
         """
-        # 薄编排：管线本体在 quickquip.llm.single_shot。patch 点
-        # （build_provider_client / _get_sensitive_filter）绑定在 service 模块
-        # 命名空间，此处函数内导入现取，保持 quickquip.llm.service.* patch 语义。
-        from quickquip.llm import service as _service
+        client_builder, get_sensitive = _patch_point_callables()
         return await run_card_le_nearest(
             config=self.config,
             chat_id=chat_id,
             resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            get_sensitive=_service._get_sensitive_filter,
-            client_builder=_service.build_provider_client,
+            get_sensitive=get_sensitive,
+            client_builder=client_builder,
             captured=captured,
         )

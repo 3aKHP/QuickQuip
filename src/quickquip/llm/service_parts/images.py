@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class _ImagePreprocessingOutcome:
+class ImagePreprocessingOutcome:
     """图像预处理段继续走主生成链路时向调用方回传的状态。"""
 
     effective_image_urls: list[str]
@@ -62,7 +62,7 @@ class ImagesMixin:
         recent_messages: list[dict[str, str]] | None,
         include_recent_images: bool,
         sensitive: SensitiveFilter,
-    ) -> dict[str, object] | _ImagePreprocessingOutcome:
+    ) -> dict[str, object] | ImagePreprocessingOutcome:
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
@@ -167,7 +167,7 @@ class ImagesMixin:
             request_forward_image_urls = []
 
         # ── end image preprocessing ─────────────────────────────────
-        return _ImagePreprocessingOutcome(
+        return ImagePreprocessingOutcome(
             effective_image_urls=effective_image_urls,
             request_quoted_image_urls=request_quoted_image_urls,
             request_forward_image_urls=request_forward_image_urls,
