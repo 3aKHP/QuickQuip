@@ -219,7 +219,9 @@ async def _record_usage(
             # （不含 cache_read/cache_creation），其余协议 inclusive。标签描述
             # 列值口径，与 canonical（恒 inclusive）是两回事（issue #202）。
             # 「claude ⇒ exclusive」口径另见 pricing.normalize_usage 的归一化侧
-            # 与 usage_store 的 SQL CASE——新增协议时需同步
+            # 与 usage_store 的 SQL CASE——新增协议时需同步。
+            # openai_responses 已核对（1.16 PR-A）：input_tokens 含
+            # cached_tokens，inclusive，走默认分支；三处无需改动。
             input_token_semantics = (
                 "exclusive" if client.config.protocol == "claude" else "inclusive"
             )

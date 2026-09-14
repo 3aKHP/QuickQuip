@@ -63,7 +63,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
 - `src/quickquip/llm/provider/`（包）
-  - 负责 OpenAI / Claude / Gemini 三类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
+  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
 - `src/quickquip/llm/tool_discovery.py`

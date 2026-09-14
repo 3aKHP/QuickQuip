@@ -9,8 +9,11 @@ class _Response(Protocol):
     finish_reason: str | None
 
 
+# 各协议"正常完成"终值的并集：openai "stop" / claude "end_turn" /
+# "stop_sequence" / gemini "STOP"（消费侧 lower）/ 通用 "eos" /
+# openai_responses "completed"。
 NORMAL_FINISH_REASONS: frozenset[str] = frozenset(
-    {"stop", "end_turn", "stop_sequence", "eos"}
+    {"stop", "end_turn", "stop_sequence", "eos", "completed"}
 )
 
 

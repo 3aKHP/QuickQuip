@@ -10,6 +10,7 @@ from quickquip.llm.provider.base import (
     LLMImageInput,
     LLMRequest,
     LLMResponse,
+    TOOL_IMAGE_FLUSH_NOTICE,
     _json_string,
     _text_from_block_list,
     strip_leading_reasoning_content,
@@ -107,7 +108,7 @@ class OpenAIProviderClient(BaseProviderClient):
                         ],
                         {
                             "type": "text",
-                            "text": "以下图片来自刚才工具调用，仅用于继续推理。",
+                            "text": TOOL_IMAGE_FLUSH_NOTICE,
                         },
                     ],
                 })

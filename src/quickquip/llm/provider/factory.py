@@ -11,6 +11,7 @@ from quickquip.llm.provider.base import BaseProviderClient, LLMProviderError
 from quickquip.llm.provider.claude import ClaudeProviderClient
 from quickquip.llm.provider.gemini import GeminiProviderClient
 from quickquip.llm.provider.openai import OpenAIProviderClient
+from quickquip.llm.provider.openai_responses import OpenAIResponsesProviderClient
 from quickquip.llm.provider.retry import RetryPolicy
 
 
@@ -23,4 +24,6 @@ def build_provider_client(
         return ClaudeProviderClient(config, retry_policy=retry_policy)
     if config.protocol == "gemini":
         return GeminiProviderClient(config, retry_policy=retry_policy)
+    if config.protocol == "openai_responses":
+        return OpenAIResponsesProviderClient(config, retry_policy=retry_policy)
     raise LLMProviderError(f"未知 provider 协议：{config.protocol}")

@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 # cost; also bounds how many recent-buffer images a passive trigger carries.
 MAX_IMAGES_PER_REQUEST = 5
 
+# 工具产出图片回灌模型时的合成 user 消息提示文案（openai 与
+# openai_responses 两个序列化端共用，用户可见文案单源）。
+TOOL_IMAGE_FLUSH_NOTICE = "以下图片来自刚才工具调用，仅用于继续推理。"
+
 # 图片下载实例级缓存：一轮对话内工具循环重建请求与 429/5xx 退避重试会反复
 # 序列化同一批图片 URL；TTL 与容量双重兜底内存占用（QQ CDN 链接本身短时效）。
 _IMAGE_CACHE_TTL_SECONDS = 600
@@ -227,8 +231,9 @@ class LLMResponse:
     # 实际成功请求的归属（§7.1）：由 client 在成功路径按最终端点填充。
     owner: "ResponseOwner | None" = None
     # 协议原生的有序内容块（§4.4 保序表示）：Claude 的 content 序列 /
-    # Gemini 的 parts 序列，白名单深拷贝。OpenAI 无此结构（reasoning 单块
-    # 已由 thinking_blocks 承载）。供执行记录的 native_state 持久化。
+    # Gemini 的 parts 序列 / OpenAI Responses 的有序 output items（含
+    # reasoning 密文），白名单深拷贝。Chat Completions 无此结构（reasoning
+    # 单块已由 thinking_blocks 承载）。供执行记录的 native_state 持久化。
     native_blocks: list[dict[str, Any]] | None = None
 
 

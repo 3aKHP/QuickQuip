@@ -432,6 +432,249 @@ async def test_gemini_tool_loop_reject_notice_appended_to_existing_text(
     )
 
 
+_RESPONSES_TOOL_ROUND_BODY = {
+    "id": "resp_1",
+    "model": "gpt-test",
+    "status": "completed",
+    "output": [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "需要先查询身份。"}],
+            "encrypted_content": "gAAAAABoGogL0EiS",
+        },
+        {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_identity_1",
+            "name": "get_identity",
+            "arguments": '{"query":"哈基镜"}',
+        },
+    ],
+    "usage": {"input_tokens": 120, "output_tokens": 66},
+}
+
+_RESPONSES_FINAL_BODY = {
+    "id": "resp_2",
+    "model": "gpt-test",
+    "status": "completed",
+    "output": [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "哈基镜通常指镜子。"}],
+        }
+    ],
+    "usage": {"input_tokens": 200, "output_tokens": 12},
+}
+
+
+def _as_responses_provider(wired_service):
+    provider = wired_service.config.providers["openai-main"]
+    provider.protocol = "openai_responses"
+    provider.responses_profile = "openai-public"
+    return provider
+
+
+async def test_responses_tool_loop_replays_native_items_in_second_payload(
+    wired_service,
+    patch_provider_builder,
+):
+    """第二次 HTTP payload 检查：reasoning 密文与原生 items 原样回传、顺序保持、
+    调用与结果完整配对（PR-A 循环内原生回传契约）。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "哈基镜通常指镜子。"
+    assert len(fake.payloads) == 2
+    second = fake.payloads[1]
+    assert second["store"] is False
+    assert second["include"] == ["reasoning.encrypted_content"]
+    input_items = second["input"]
+    # 用户消息 → 原生 reasoning（密文原样）→ 原生 function_call → 结果配对
+    assert input_items[0]["role"] == "user"
+    assert input_items[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert input_items[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    output_item = input_items[3]
+    assert output_item["type"] == "function_call_output"
+    assert output_item["call_id"] == "call_identity_1"
+    assert "镜子" in output_item["output"]
+    assert len(input_items) == 4  # 无通用字段二次投影
+
+
+async def test_responses_tool_loop_two_tool_rounds_accumulate_native_items(
+    wired_service,
+    patch_provider_builder,
+):
+    """连续两轮工具调用（验收项）：第三轮 payload 保序回放两个原生批次，
+    跨批次 call_id 唯一、各自的 function_call_output 紧随其后配对。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    second_tool_body = {
+        "id": "resp_2b",
+        "model": "gpt-test",
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_2",
+                "summary": [],
+                "encrypted_content": "gAAAAABsecondRound",
+            },
+            {
+                "type": "function_call",
+                "id": "fc_2",
+                "call_id": "call_identity_2",
+                "name": "get_identity",
+                "arguments": '{"query":"4s"}',
+            },
+        ],
+        "usage": {"input_tokens": 220, "output_tokens": 60},
+    }
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            second_tool_body,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜和4s分别是谁？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "哈基镜通常指镜子。"
+    assert len(fake.payloads) == 3
+    third = fake.payloads[2]["input"]
+    # 期望形态：user → 批次1(reasoning+call_1) → call_1 结果
+    #        → 批次2(reasoning+call_2) → call_2 结果
+    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert third[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    assert third[3]["type"] == "function_call_output"
+    assert third[3]["call_id"] == "call_identity_1"
+    assert "镜子" in third[3]["output"]
+    assert third[4] == second_tool_body["output"][0]
+    assert third[5] == second_tool_body["output"][1]
+    assert third[6]["type"] == "function_call_output"
+    assert third[6]["call_id"] == "call_identity_2"
+    assert len(third) == 7
+
+
+async def test_responses_tool_loop_rejects_truncated_batch(
+    wired_service,
+    patch_provider_builder,
+):
+    class OverflowResponsesStub:
+        def __init__(self):
+            self.requests = []
+
+        async def complete(self, request):
+            self.requests.append(request)
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id=f"call_{index}",
+                        name="get_identity",
+                        arguments_json='{"query":"哈基镜"}',
+                    )
+                    for index in range(4)
+                ],
+            )
+
+    _as_responses_provider(wired_service)
+    wired_service.config.runtime.tool_max_calls_per_round = 3
+    stub = OverflowResponsesStub()
+    patch_provider_builder(lambda provider: stub)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="同时查四个人。",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == (
+        "模型一次请求了过多工具，已拒绝执行不完整的 OpenAI Responses 工具批次。"
+    )
+    assert len(stub.requests) == 1
+
+
+async def test_responses_tool_loop_budget_guard_aborts_continuation(
+    wired_service,
+    patch_provider_builder,
+    monkeypatch,
+):
+    """循环内预算门禁：续接请求超预算在 HTTP 前终止 Loop（保护完整 items
+    不被裁剪重放），零交付时给出可见中止提示。"""
+    import quickquip.llm.service as service_module
+    from quickquip.llm.request_budget import RequestBudgetExceeded
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    real_enforce = service_module.enforce_request_budget
+    calls = {"count": 0}
+
+    def _enforce_then_abort(config, prov, request, **kwargs):
+        calls["count"] += 1
+        # 调用序：service 预检（初始请求装配后）→ Loop 第一轮守卫 → Loop
+        # 第二轮守卫。前两次放行（第一轮 HTTP 已发出），第三次（续接请求）
+        # 超限拦截。
+        if calls["count"] <= 2:
+            return real_enforce(config, prov, request, **kwargs)
+        raise RequestBudgetExceeded("估算输入超出预算（测试注入）")
+
+    monkeypatch.setattr(service_module, "enforce_request_budget", _enforce_then_abort)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+    )
+
+    # 预检 + 第一轮守卫放行（payload 1 已发出）；续接请求被门禁拦截，未产生第二次 HTTP
+    assert calls["count"] == 3
+    assert len(fake.payloads) == 1
+    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+
+
 async def test_forward_message_content_rendered(wired_service, patch_provider_builder):
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)

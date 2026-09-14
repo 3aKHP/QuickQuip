@@ -182,6 +182,14 @@ DISABLED_PROVIDER_REPLY = (
 )
 
 
+# openai_responses 配置词表（单一事实来源）：profile 注册表与六档映射
+# （provider/openai_responses/）从本模块取词表——config 不能 import
+# provider 包（base.py 依赖 config，反向才不构成环），守护测试断言两侧相等。
+RESPONSES_PROFILE_IDS = frozenset({"openai-public", "codex-http-relay"})
+REASONING_EFFORT_CHOICES = ("low", "medium", "high", "xhigh", "max", "ultra")
+DEFAULT_RESPONSES_PROFILE_ID = "openai-public"
+
+
 @dataclass(slots=True)
 class ProviderConfig:
     id: str
@@ -207,6 +215,14 @@ class ProviderConfig:
     cache_ttl: str = ""  # Claude prompt-cache TTL；空=默认 5min，"1h"=扩展缓存
     auth_method: str = "api_key"  # "api_key" | "bearer"
     builtin_search: bool = False  # 声明 provider 原生搜索工具；仅 gemini 协议有请求级效果
+    # openai_responses 专属：后端能力位 profile。词表单源
+    # RESPONSES_PROFILE_IDS / DEFAULT_RESPONSES_PROFILE_ID（provider/
+    # openai_responses/profiles.py 反向引用）。
+    responses_profile: str = DEFAULT_RESPONSES_PROFILE_ID
+    # openai_responses 专属：思考档位，词表单源 REASONING_EFFORT_CHOICES。
+    # 独立于 thinking_budget 数字口径——后者仅 claude/gemini 生效，档位到
+    # 各 profile 实际 effort 的映射集中 provider/openai_responses/request.py。
+    reasoning_effort: str = ""
     # 上游 429/5xx 自动重试策略；load_llm_config 用 [runtime] 段统一盖章
     retry_max_attempts: int = DEFAULT_RETRY_MAX_ATTEMPTS
     retry_base_delay: float = DEFAULT_RETRY_BASE_DELAY
@@ -609,6 +625,13 @@ def _parse_single_provider(
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
         builtin_search=as_bool(entry.get("builtin_search"), default=False),
+        responses_profile=(
+            str(entry.get("responses_profile", DEFAULT_RESPONSES_PROFILE_ID))
+            .strip()
+            .lower()
+            or DEFAULT_RESPONSES_PROFILE_ID
+        ),
+        reasoning_effort=str(entry.get("reasoning_effort", "")).strip().lower(),
         epoch_context_tokens=_as_optional_int(entry.get("epoch_context_tokens")),
         epoch_cold_idle_seconds=_as_optional_int(entry.get("epoch_cold_idle_seconds")),
         epoch_cold_target_tokens=_as_optional_int(entry.get("epoch_cold_target_tokens")),
@@ -1175,8 +1198,21 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
     bad_providers: list[str] = []
     for pid, provider in config.providers.items():
         provider_errors: list[str] = []
-        if provider.protocol not in {"openai", "claude", "gemini"}:
+        if provider.protocol not in {"openai", "claude", "gemini", "openai_responses"}:
             provider_errors.append(f"未知协议 {provider.protocol!r}")
+        # openai_responses 专属键的词表校验（模块级常量单源，供
+        # provider/openai_responses 反向引用与守护测试对齐）。
+        if provider.protocol == "openai_responses":
+            if provider.responses_profile not in RESPONSES_PROFILE_IDS:
+                provider_errors.append(
+                    f"非法 responses_profile {provider.responses_profile!r}"
+                    f"（可用：{' / '.join(sorted(RESPONSES_PROFILE_IDS))}）"
+                )
+            if provider.reasoning_effort not in ("", *REASONING_EFFORT_CHOICES):
+                provider_errors.append(
+                    f"非法 reasoning_effort {provider.reasoning_effort!r}"
+                    f"（可用：{'/'.join(REASONING_EFFORT_CHOICES)}，留空不发送）"
+                )
         if provider.auth_method not in {"api_key", "bearer"}:
             provider_errors.append(
                 f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）"
