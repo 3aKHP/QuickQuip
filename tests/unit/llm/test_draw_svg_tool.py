@@ -55,7 +55,9 @@ def svg_tool_env(monkeypatch):
     """隔离三处模块级单例：渲染限流器、生成配置、真实渲染。"""
     monkeypatch.setattr(
         svg_module, "_RENDER_RATE_LIMITER",
-        KeyedRateLimiter({"svg_render": {"global_limit": 10, "user_limit": 2, "scope": "global", "window": 60}}),
+        KeyedRateLimiter(
+            {"svg_render": {"global_limit": 10, "user_limit": 2, "scope": "global", "window": 60}}
+        ),
     )
     config = _FakeGenerationConfig()
     monkeypatch.setattr(generation_service, "get_config", lambda **_: config)

@@ -95,7 +95,8 @@ def test_generate_audio_openai_tts_empty_response(monkeypatch):
     monkeypatch.setattr("quickquip.generation.audio._http_raw_bytes", fake_http_raw_bytes)
 
     provider = AudioProviderConfig(
-        id="local-openai-tts", protocol="openai_tts", base_url="http://127.0.0.1:8000/v1", api_key_env=""
+        id="local-openai-tts", protocol="openai_tts",
+        base_url="http://127.0.0.1:8000/v1", api_key_env="",
     )
     model = AudioModelConfig(id="local-tts", model="tts-1", voice_id="alloy", format="mp3")
 

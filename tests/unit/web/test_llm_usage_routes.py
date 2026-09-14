@@ -37,7 +37,9 @@ def _seed_old(store: LLMUsageStore) -> None:
                   "priced": 1, "state": "ok"})
     old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
     with sqlite3.connect(store.path) as conn:
-        conn.execute("UPDATE llm_usage_events SET ts = ? WHERE provider_id = ?", (old_ts, "old-prov"))
+        conn.execute(
+            "UPDATE llm_usage_events SET ts = ? WHERE provider_id = ?", (old_ts, "old-prov")
+        )
 
 
 def _cutoff(days: int) -> str:
@@ -95,8 +97,16 @@ def test_summary_empty_store(tmp_path):
 
 def test_summary_filters_and_canonical_buckets(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat", "group_id": "g", "stream": 1, "input_tokens": 100, "fresh_input_tokens": 30, "total_tokens": 150, "input_token_semantics": "inclusive", "cache_read_tokens": 70, "output_tokens": 50, "cost_usd": 0.01, "priced": 1, "state": "ok", "duration_ms": 100})
-    store.record({"provider_id": "q", "protocol": "openai", "model": "n", "feature": "other", "stream": 1, "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.02, "priced": 1, "state": "ok"})
+    store.record(
+        {"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
+         "group_id": "g", "stream": 1, "input_tokens": 100, "fresh_input_tokens": 30,
+         "total_tokens": 150, "input_token_semantics": "inclusive",
+         "cache_read_tokens": 70, "output_tokens": 50, "cost_usd": 0.01,
+         "priced": 1, "state": "ok", "duration_ms": 100}
+    )
+    store.record({"provider_id": "q", "protocol": "openai", "model": "n",
+                  "feature": "other", "stream": 1, "input_tokens": 10,
+                  "output_tokens": 5, "cost_usd": 0.02, "priced": 1, "state": "ok"})
     summary = store.summary(_cutoff(7), provider_id="p", feature="chat")
     assert summary["request_count"] == 1
     assert summary["success_rate"] == 1.0
@@ -106,7 +116,9 @@ def test_summary_filters_and_canonical_buckets(tmp_path):
 
 def test_timeline_zero_fills_and_selects_metric(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
-    store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1, "input_tokens": 2, "output_tokens": 3, "cost_usd": 0.01, "priced": 1, "state": "ok"})
+    store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1,
+                  "input_tokens": 2, "output_tokens": 3, "cost_usd": 0.01,
+                  "priced": 1, "state": "ok"})
     timeline = store.timeline(_cutoff(7), range_days=7, metric="requests")
     assert len(timeline) == 7
     assert sum(point["value"] for point in timeline) == 1
@@ -126,9 +138,11 @@ def test_summary_and_timeline_share_aligned_window(tmp_path):
     网格起点外的行被两者一致排除，趋势合计 == 总成本卡片。"""
     store = LLMUsageStore(tmp_path / "u.db")
     store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1,
-                  "input_tokens": 2, "output_tokens": 3, "cost_usd": 0.01, "priced": 1, "state": "ok"})
+                  "input_tokens": 2, "output_tokens": 3, "cost_usd": 0.01,
+                  "priced": 1, "state": "ok"})
     store.record({"provider_id": "out", "protocol": "openai", "model": "m", "stream": 1,
-                  "input_tokens": 2, "output_tokens": 3, "cost_usd": 99.0, "priced": 1, "state": "ok"})
+                  "input_tokens": 2, "output_tokens": 3, "cost_usd": 99.0,
+                  "priced": 1, "state": "ok"})
     boundary = (window_start(7) - timedelta(hours=1)).isoformat()
     with sqlite3.connect(store.path) as conn:
         conn.execute("UPDATE llm_usage_events SET ts = ? WHERE provider_id = 'out'", (boundary,))
@@ -307,7 +321,8 @@ async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):
 def test_events_cursor_pagination(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     for index in range(3):
-        store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1, "state": "ok", "error_message": None})
+        store.record({"provider_id": "p", "protocol": "openai", "model": "m",
+                      "stream": 1, "state": "ok", "error_message": None})
     first = store.events(cutoff=_cutoff(7), limit=2)
     assert len(first["items"]) == 2
     assert first["next_cursor"]
@@ -327,7 +342,8 @@ def test_utc8_early_morning_row_lands_on_business_day(tmp_path):
     """UTC+8 凌晨（UTC 前一日 17:00 后）的记录计入业务时区当日日桶。"""
     store = LLMUsageStore(tmp_path / "u.db")
     store.record({"provider_id": "early", "protocol": "openai", "model": "m", "stream": 1,
-                  "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.01, "priced": 1, "state": "ok"})
+                  "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.01,
+                  "priced": 1, "state": "ok"})
     now_business = datetime.now(_BUSINESS_TZ)
     # 业务时区今日 01:30 = UTC 前一日 17:30（跨业务日界的凌晨记录）
     early_business = now_business.replace(hour=1, minute=30, second=0, microsecond=0)
@@ -385,9 +401,11 @@ def test_summary_timeline_events_share_business_window(tmp_path):
     """summary / timeline / events 在业务时区窗口下口径一致。"""
     store = LLMUsageStore(tmp_path / "u.db")
     store.record({"provider_id": "p", "protocol": "openai", "model": "m", "stream": 1,
-                  "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.02, "priced": 1, "state": "ok"})
+                  "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.02,
+                  "priced": 1, "state": "ok"})
     store.record({"provider_id": "q", "protocol": "openai", "model": "m", "stream": 1,
-                  "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.03, "priced": 1, "state": "ok"})
+                  "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.03,
+                  "priced": 1, "state": "ok"})
     cutoff = _cutoff(7)
     summary = store.summary(cutoff)
     timeline = store.timeline(cutoff, range_days=7, metric="cost")

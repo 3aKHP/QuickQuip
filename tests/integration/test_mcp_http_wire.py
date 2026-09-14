@@ -87,7 +87,8 @@ async def test_legacy_initialize_sends_correct_request_and_stores_session():
     try:
         result = await session.request(
             "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
         )
         # notifications/initialized follows initialize (mirrors MCPClient._initialize)
         await session.notify("notifications/initialized", {})
@@ -120,7 +121,8 @@ async def test_legacy_session_id_is_reused_on_subsequent_requests():
     try:
         await session.request(
             "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
         )
         await session.notify("notifications/initialized", {})
         # Session-id should now be stored on the transport
@@ -143,7 +145,8 @@ async def test_legacy_tools_list_pagination():
     try:
         await session.request(
             "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
         )
 
         # Collect all tools via the MCPClient-style pagination loop
@@ -182,7 +185,8 @@ async def test_legacy_tools_call_returns_text_content():
     try:
         await session.request(
             "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
         )
         result = await session.request(
             "tools/call",
@@ -204,7 +208,8 @@ async def test_legacy_sse_response_mode():
     try:
         result = await session.request(
             "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
         )
         # SSE response still delivers the same result as JSON
         assert result["serverInfo"]["name"] == "legacy-test-server"
@@ -255,7 +260,8 @@ async def test_legacy_requests_carry_no_modern_headers():
     try:
         await session.request(
             "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
+            {"protocolVersion": "2025-03-26", "capabilities": {},
+             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
         )
         init_headers = server.requests[0]["headers"]
         assert "mcp-protocol-version" not in init_headers
@@ -531,8 +537,13 @@ async def test_streaming_timeout_does_not_leak_client():
         async def slow_read():
             async with client.stream(
                 "POST", "/mcp",
-                content=json.dumps({"jsonrpc": "2.0", "id": 5, "method": "ping", "params": {}}).encode(),
-                headers={"Content-Type": "application/json", "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "ping"},
+                content=json.dumps(
+                    {"jsonrpc": "2.0", "id": 5, "method": "ping", "params": {}}
+                ).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "ping",
+                },
             ) as response:
                 async for line in response.aiter_lines():
                     pass
@@ -577,7 +588,9 @@ def _asgi_client(config: MCPServerConfig, server: Any) -> MCPClient:
     client = MCPClient(config)
     transport = _AsgiHttpTransport(config, app=server)
     client._transport = transport
-    client._session = JsonRpcSession(transport, server_id=config.id, timeout_seconds=config.timeout_seconds)
+    client._session = JsonRpcSession(
+        transport, server_id=config.id, timeout_seconds=config.timeout_seconds
+    )
     return client
 
 
@@ -640,7 +653,9 @@ async def test_transport_404_without_session_is_not_stale():
     async def always_404(scope, receive, send):
         if scope["type"] != "http":
             return
-        await send({"type": "http.response.start", "status": 404, "headers": [(b"content-length", b"0")]})
+        await send(
+            {"type": "http.response.start", "status": 404, "headers": [(b"content-length", b"0")]}
+        )
         await send({"type": "http.response.body", "body": b""})
 
     config = _http_config()

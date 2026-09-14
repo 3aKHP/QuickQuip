@@ -70,7 +70,12 @@ def test_put_body_fields_route_to_store(monkeypatch, tmp_path):
         agent_delivery_intermediate_enabled=True, agent_delivery_final_enabled=False
     )
     assert routes.put_group_settings("10001", body, object()) == {"ok": True}
-    assert calls == [("10001", {"agent_delivery_intermediate_enabled": True, "agent_delivery_final_enabled": False})]
+    assert calls == [
+        (
+            "10001",
+            {"agent_delivery_intermediate_enabled": True, "agent_delivery_final_enabled": False},
+        )
+    ]
 
     # 旧键名被 Pydantic 静默忽略（不落库、不报错）：旧前端 bundle 只带旧键
     # 提交 → payload 为空 → 400；与其他字段一起提交 → 其余字段落库、开关不动。
@@ -101,7 +106,10 @@ def test_list_group_settings_projects_both_delivery_domains(monkeypatch, tmp_pat
             history_limit INTEGER,
             updated_at TEXT NOT NULL
         );
-        INSERT INTO group_settings (group_id, agent_delivery_intermediate_enabled, agent_delivery_final_enabled, updated_at)
+        INSERT INTO group_settings (
+            group_id, agent_delivery_intermediate_enabled,
+            agent_delivery_final_enabled, updated_at
+        )
         VALUES ('10001', 1, 0, '2026-09-11T00:00:00+00:00');
         """
     )

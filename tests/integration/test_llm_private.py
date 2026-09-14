@@ -33,7 +33,9 @@ def test_private_status_reflects_session_off(configured_service):
 
 
 def test_private_memory_isolated_from_group(configured_service):
-    mid = configured_service.remember_memory(3003, "阿桃在私聊里更愿意长篇回复。", chat_type="private")
+    mid = configured_service.remember_memory(
+        3003, "阿桃在私聊里更愿意长篇回复。", chat_type="private"
+    )
     assert mid >= 1
     private_memories = configured_service.list_memories(3003, chat_type="private")
     assert private_memories[0]["content"] == "阿桃在私聊里更愿意长篇回复。"
@@ -109,12 +111,16 @@ async def test_private_scope_uses_same_epoch_mechanism(configured_service, monke
     monkeypatch.setattr(llm_runtime_module, "build_provider_client", lambda provider: stub)
     configured_service.start_private_session(3003)
 
-    await configured_service.generate_private_reply(user_id=3003, sender_name="阿桃", prompt="第一句")
+    await configured_service.generate_private_reply(
+        user_id=3003, sender_name="阿桃", prompt="第一句"
+    )
     key = EpochKey(scope_key="private:3003", provider_id="openai-main", model="gpt-test")
     # 私聊与群聊同一纪元机制：首轮即懒初始化锚点
     assert configured_service._epochs.current_anchor(key) is not None
 
-    await configured_service.generate_private_reply(user_id=3003, sender_name="阿桃", prompt="第二句")
+    await configured_service.generate_private_reply(
+        user_id=3003, sender_name="阿桃", prompt="第二句"
+    )
     # 第二轮请求带上第一轮 history（只追加窗口）
     assert len(stub.last_request.messages) > 1
 

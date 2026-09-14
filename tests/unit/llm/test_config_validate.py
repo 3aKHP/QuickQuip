@@ -335,7 +335,9 @@ def test_builtin_search_on_non_gemini_protocol_warns_and_stays_inert(tmp_path, c
     with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
         loaded = _load(
             tmp_path,
-            _good_provider().replace('models = ["gpt-x"]', 'models = ["gpt-x"]\nbuiltin_search = true')
+            _good_provider().replace(
+                'models = ["gpt-x"]', 'models = ["gpt-x"]\nbuiltin_search = true'
+            )
             + _PERSONA,
         )
 
@@ -493,7 +495,8 @@ def test_epoch_params_invalid_provider_override_falls_back_to_runtime(tmp_path: 
             """
             + _good_provider().replace(
                 'models = ["gpt-x"]',
-                'models = ["gpt-x"]\nepoch_cold_target_tokens = 100\nepoch_cold_trigger_tokens = 50',
+                'models = ["gpt-x"]\n'
+                'epoch_cold_target_tokens = 100\nepoch_cold_trigger_tokens = 50',
             )
             + _PERSONA,
         )

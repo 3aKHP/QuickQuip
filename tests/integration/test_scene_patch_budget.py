@@ -50,7 +50,9 @@ async def test_budget_rebuild_preserves_scene(scene_service, monkeypatch, budget
         service.store.append_conversation_message(1001, "3003", "user", f"old{index} " * 500)
         service.store.append_conversation_message(1001, None, "assistant", "answer " * 500)
     key = EpochKey("1001", "openai-main", "gpt-test")
-    service._epochs.maybe_advance(key, store=service.store, params=service.config.resolve_epoch_params())
+    service._epochs.maybe_advance(
+        key, store=service.store, params=service.config.resolve_epoch_params()
+    )
     before = service._epochs.current_anchor(key)
     result = await _reply(service)
     assert service._epochs.current_anchor(key) > before

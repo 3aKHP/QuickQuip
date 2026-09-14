@@ -131,7 +131,9 @@ def test_dashboard_runtime_branch_exposes_era_tag(tmp_path, monkeypatch):
         bindings={},
     )
     monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", lambda: None)
-    monkeypatch.setattr(message_pipeline, "get_llm_service", lambda: SimpleNamespace(mcp_manager=manager))
+    monkeypatch.setattr(
+        message_pipeline, "get_llm_service", lambda: SimpleNamespace(mcp_manager=manager)
+    )
 
     server = mcp_dashboard.get_mcp_dashboard()["servers"][0]
 
@@ -153,7 +155,9 @@ def test_dashboard_config_only_branch_era_tag_empty(tmp_path, monkeypatch):
         lambda: (_ for _ in ()).throw(RuntimeError("no runtime")),
     )
 
-    server_entry = SimpleNamespace(id="cfg-server", transport="stdio", enabled=True, negotiation="modern")
+    server_entry = SimpleNamespace(
+        id="cfg-server", transport="stdio", enabled=True, negotiation="modern"
+    )
 
     def _fake_load(_path):
         return SimpleNamespace(load_error=None, mcp=SimpleNamespace(servers=[server_entry]))

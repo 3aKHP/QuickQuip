@@ -99,7 +99,12 @@ def _grounding_response_data() -> dict:
                 "groundingMetadata": {
                     "webSearchQueries": ["QuickQuip 是什么"],
                     "groundingChunks": [
-                        {"web": {"uri": "https://example.test/quickquip", "title": "QuickQuip README"}},
+                        {
+                            "web": {
+                                "uri": "https://example.test/quickquip",
+                                "title": "QuickQuip README",
+                            }
+                        },
                     ],
                 },
             }

@@ -27,7 +27,8 @@ async def test_render_happy_path():
 async def test_render_ignores_svg_width_height_attributes():
     bomb = _GOOD_SVG.replace(
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60">',
-        '<svg xmlns="http://www.w3.org/2000/svg" width="99999" height="99999" viewBox="0 0 120 60">',
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        'width="99999" height="99999" viewBox="0 0 120 60">',
     )
     png = await render_svg_to_png(bomb)
     assert _png_size(png) == (240, 120)

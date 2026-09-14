@@ -64,7 +64,8 @@ def test_structured_content_preserves_existing_text_fallback_behavior():
         ),
         (
             {"content": [{"type": "resource_link", "uri":
-                f"https://example.test/file?token={RESOURCE_QUERY_SENTINEL}", "mimeType": "text/plain"}]},
+                f"https://example.test/file?token={RESOURCE_QUERY_SENTINEL}",
+                "mimeType": "text/plain"}]},
             "1 个 link 项",
         ),
         (
@@ -113,7 +114,10 @@ def test_malformed_resource_uri_is_not_rendered_or_allowed_to_break_normalizatio
 @pytest.mark.parametrize(
     "payload",
     [
-        {"isError": True, "content": [{"type": "image", "data": BASE64_SENTINEL, "mimeType": "image/png"}]},
+        {
+            "isError": True,
+            "content": [{"type": "image", "data": BASE64_SENTINEL, "mimeType": "image/png"}],
+        },
         {"isError": True, "content": [{"type": "resource", "resource": {
             "uri": f"https://example.test?token={RESOURCE_QUERY_SENTINEL}",
             "blob": RESOURCE_BODY_SENTINEL,

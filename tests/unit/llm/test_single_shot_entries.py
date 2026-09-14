@@ -67,7 +67,9 @@ async def test_defectify_empty_input_returns_usage(llm_service):
     assert result["llm_used"] is False
 
 
-async def test_defectify_sensitive_input_blocked(llm_service, monkeypatch, tmp_path, patch_provider_builder):
+async def test_defectify_sensitive_input_blocked(
+    llm_service, monkeypatch, tmp_path, patch_provider_builder
+):
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
     _block_filter(monkeypatch, tmp_path, "合成阻断词")
@@ -165,7 +167,9 @@ async def test_defectify_empty_response_text(llm_service, patch_provider_builder
     assert result["llm_used"] is True
 
 
-async def test_defectify_output_scan_blocked_falls_back(llm_service, monkeypatch, tmp_path, patch_provider_builder):
+async def test_defectify_output_scan_blocked_falls_back(
+    llm_service, monkeypatch, tmp_path, patch_provider_builder
+):
     stub = StubBehaviorProviderClient(LLMResponse(text="这回复带合成输出词", model="gpt-test"))
     patch_provider_builder(lambda provider: stub)
     _block_filter(monkeypatch, tmp_path, "合成输出词")
@@ -192,7 +196,9 @@ async def test_turmfluch_empty_input_returns_usage(llm_service):
     assert result["llm_used"] is False
 
 
-async def test_turmfluch_sensitive_input_blocked(llm_service, monkeypatch, tmp_path, patch_provider_builder):
+async def test_turmfluch_sensitive_input_blocked(
+    llm_service, monkeypatch, tmp_path, patch_provider_builder
+):
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
     _block_filter(monkeypatch, tmp_path, "合成阻断词")
@@ -275,7 +281,9 @@ async def test_turmfluch_unexpected_exception(llm_service, patch_provider_builde
     assert result["llm_used"] is True
 
 
-async def test_turmfluch_output_scan_blocked_falls_back(llm_service, monkeypatch, tmp_path, patch_provider_builder):
+async def test_turmfluch_output_scan_blocked_falls_back(
+    llm_service, monkeypatch, tmp_path, patch_provider_builder
+):
     stub = StubBehaviorProviderClient(LLMResponse(text="疑虑了", model="gpt-test"))
     patch_provider_builder(lambda provider: stub)
     _block_filter(monkeypatch, tmp_path, "疑虑")  # 词表名本身被合成过滤器拦下
@@ -310,7 +318,9 @@ async def test_card_le_nearest_success_returns_four_keys(llm_service, patch_prov
     assert "破防" in request.messages[-1].content
 
 
-async def test_card_le_nearest_uses_quick_judge_model_override(llm_service, monkeypatch, patch_provider_builder):
+async def test_card_le_nearest_uses_quick_judge_model_override(
+    llm_service, monkeypatch, patch_provider_builder
+):
     monkeypatch.setattr(llm_service.config.quick_judge, "model", "gpt-alt")
     stub = StubBehaviorProviderClient(LLMResponse(text="狂宴了", model="gpt-alt"))
     patch_provider_builder(lambda provider: stub)
@@ -331,7 +341,9 @@ async def test_card_le_nearest_no_provider_returns_none(llm_service):
     assert await llm_service.generate_card_le_nearest(captured="破防", **_CHAT) is None
 
 
-async def test_card_le_nearest_sensitive_input_returns_none(llm_service, monkeypatch, tmp_path, patch_provider_builder):
+async def test_card_le_nearest_sensitive_input_returns_none(
+    llm_service, monkeypatch, tmp_path, patch_provider_builder
+):
     stub = StubBehaviorProviderClient(LLMResponse(text="疑虑了", model="gpt-test"))
     patch_provider_builder(lambda provider: stub)
     _block_filter(monkeypatch, tmp_path, "合成阻断词")
@@ -353,7 +365,9 @@ async def test_card_le_nearest_invalid_name_returns_none(llm_service, patch_prov
     assert await llm_service.generate_card_le_nearest(captured="破防", **_CHAT) is None
 
 
-async def test_card_le_nearest_output_scan_blocked_returns_none(llm_service, monkeypatch, tmp_path, patch_provider_builder):
+async def test_card_le_nearest_output_scan_blocked_returns_none(
+    llm_service, monkeypatch, tmp_path, patch_provider_builder
+):
     stub = StubBehaviorProviderClient(LLMResponse(text="疑虑了", model="gpt-test"))
     patch_provider_builder(lambda provider: stub)
     _block_filter(monkeypatch, tmp_path, "疑虑")

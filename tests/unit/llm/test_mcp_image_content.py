@@ -100,7 +100,9 @@ def test_strict_decoder_enforces_five_mib_before_decoding():
     at_limit = base64.b64encode(b"x" * maximum).decode("ascii")
     above_limit = base64.b64encode(b"x" * (maximum + 1)).decode("ascii")
 
-    assert len(_decode_image_candidate(MCPInlineImageCandidate(0, at_limit, "image/png"))) == maximum
+    assert len(
+        _decode_image_candidate(MCPInlineImageCandidate(0, at_limit, "image/png"))
+    ) == maximum
     assert _decode_image_candidate(MCPInlineImageCandidate(0, above_limit, "image/png")) is None
 
 
@@ -240,7 +242,11 @@ async def test_gemini_tool_image_follows_complete_function_response_batch():
     ],
 )
 async def test_provider_never_serializes_images_for_tool_error(client_type, response):
-    protocol = {"_InlineOpenAIClient": "openai", "_InlineClaudeClient": "claude", "_InlineGeminiClient": "gemini"}[client_type.__name__]
+    protocol = {
+        "_InlineOpenAIClient": "openai",
+        "_InlineClaudeClient": "claude",
+        "_InlineGeminiClient": "gemini",
+    }[client_type.__name__]
     client = client_type(_config(protocol), response)
     await client.complete(_tool_request(is_error=True))
 

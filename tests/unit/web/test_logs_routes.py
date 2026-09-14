@@ -95,7 +95,9 @@ def test_list_logs_sorts_and_marks_current(monkeypatch, tmp_path):
     result = logs.list_logs()
 
     assert result["current_file"] == "quickquip_2026-05-10.log"
-    assert [item["name"] for item in result["files"]] == ["quickquip_2026-05-10.log", "quickquip_2026-05-09.log"]
+    assert [item["name"] for item in result["files"]] == [
+        "quickquip_2026-05-10.log", "quickquip_2026-05-09.log"
+    ]
     assert result["files"][0]["is_current"] is True
 
 

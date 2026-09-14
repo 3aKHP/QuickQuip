@@ -539,7 +539,9 @@ class TestPassiveTriggerImages:
         assert "这条触发消息包含图片" in with_image
         assert "不要编造具体图像细节" in with_image
         assert "这条触发消息包含图片" not in without_image
-        assert build_passive_trigger_raw_user_text(result, ["https://example.test/a.png"]) == "[图片] 这是什么？"
+        assert build_passive_trigger_raw_user_text(
+            result, ["https://example.test/a.png"]
+        ) == "[图片] 这是什么？"
 
     def test_raw_user_text_preserves_voice_transcript(self):
         voice_only = AwakeningTriggerResult(
@@ -933,7 +935,9 @@ class TestLlmJudgeClassification:
         svc.quick_judge_detailed = AsyncMock(return_value=_qj('{"score": 0.2}'))
         result, s = self._run_relevance(svc)
         assert result is None
-        assert s.llm_cache_get(_RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.5)) is False
+        assert s.llm_cache_get(
+            _RULE_RELEVANCE, "g1", llm_cache_text("今天天气怎么样", 0.5)
+        ) is False
 
     def _assert_technical_failure(self, svc):
         result, s = self._run_relevance(svc)
@@ -1005,7 +1009,9 @@ class TestLlmJudgeClassification:
             check_qa("g1", "请问怎么解决这个问题？", settings, svc, s)
         )
         assert result is None
-        assert s.llm_cache_get(_RULE_QA, "g1", llm_cache_text("请问怎么解决这个问题？", 0.5)) is None
+        assert s.llm_cache_get(
+            _RULE_QA, "g1", llm_cache_text("请问怎么解决这个问题？", 0.5)
+        ) is None
 
     def test_strict_parse_distinguishes_false_from_garbage(self):
         assert _parse_judge_text('{"trigger": false}', 0.5) is False
@@ -1273,7 +1279,9 @@ async def _drive_boredom_send(
     chat 层只产出待发送计划；传输（``int(gid)`` 转换与消息拼装）归发送方，
     成功后 ``confirm_boredom_sent`` 确认；send 异常按 adapter 语义记 warning 后吞掉继续。
     """
-    async for plan in iter_boredom_send_plans(groups, rule_switch, svc, rate_limiter, config=config):
+    async for plan in iter_boredom_send_plans(
+        groups, rule_switch, svc, rate_limiter, config=config
+    ):
         try:
             await bot.send_group_msg(
                 group_id=int(plan.group_id),

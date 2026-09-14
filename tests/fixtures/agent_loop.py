@@ -107,13 +107,15 @@ def _native_thinking_blocks(protocol: str, turn_index: int) -> list[dict]:
     label = f"turn{turn_index}"
     if protocol == "claude":
         return [
-            {"type": "thinking", "thinking": f"先核对榜单再回答（{label}）。", "signature": f"sig-{label}"},
+            {"type": "thinking", "thinking": f"先核对榜单再回答（{label}）。",
+             "signature": f"sig-{label}"},
             {"type": "redacted_thinking", "data": f"redacted-{label}"},
         ]
     if protocol == "gemini":
         # replay_required 形态：带 thoughtSignature 的 part 包成 gemini_part
         return [
-            {"type": "gemini_part", "part": {"text": f"检索线索（{label}）", "thoughtSignature": f"ts-{label}"}},
+            {"type": "gemini_part", "part": {"text": f"检索线索（{label}）",
+             "thoughtSignature": f"ts-{label}"}},
         ]
     return [{"type": "reasoning", "reasoning_content": f"解题思路（{label}）。"}]
 
@@ -125,8 +127,10 @@ OPENAI_NATIVE_TOOL_TURN = {
     "content": FIVE_TURN_TEXTS[1],
     "reasoning_content": "解题思路（turn1）。",
     "tool_calls": [
-        {"id": "call_1_0", "type": "function", "function": {"name": "get_identity", "arguments": '{"query":"4s"}'}},
-        {"id": "call_1_1", "type": "function", "function": {"name": "get_identity", "arguments": '{"query":"哈基镜"}'}},
+        {"id": "call_1_0", "type": "function",
+         "function": {"name": "get_identity", "arguments": '{"query":"4s"}'}},
+        {"id": "call_1_1", "type": "function",
+         "function": {"name": "get_identity", "arguments": '{"query":"哈基镜"}'}},
     ],
 }
 
@@ -136,7 +140,8 @@ CLAUDE_NATIVE_TOOL_TURN = {
         {"type": "thinking", "thinking": "先核对榜单再回答（turn1）。", "signature": "sig-turn1"},
         {"type": "text", "text": FIVE_TURN_TEXTS[1]},
         {"type": "tool_use", "id": "call_1_0", "name": "get_identity", "input": {"query": "4s"}},
-        {"type": "tool_use", "id": "call_1_1", "name": "get_identity", "input": {"query": "哈基镜"}},
+        {"type": "tool_use", "id": "call_1_1", "name": "get_identity",
+         "input": {"query": "哈基镜"}},
     ],
 }
 
@@ -146,7 +151,8 @@ GEMINI_NATIVE_TOOL_TURN = {
         {"text": "检索线索（turn1）。", "thoughtSignature": "ts-turn1", "thought": True},
         {"text": FIVE_TURN_TEXTS[1]},
         {"functionCall": {"id": "gemini_tool_1", "name": "get_identity", "args": {"query": "4s"}}},
-        {"functionCall": {"id": "gemini_tool_2", "name": "get_identity", "args": {"query": "哈基镜"}}},
+        {"functionCall": {"id": "gemini_tool_2", "name": "get_identity",
+         "args": {"query": "哈基镜"}}},
     ],
 }
 
@@ -210,7 +216,10 @@ def build_legacy_db(path: Path) -> None:
             conn.execute(
                 """
                 INSERT INTO conversation_messages
-                    (group_id, user_id, sender_name, canonical_name, role, content, message_id, raw_content, created_at)
+                    (
+                        group_id, user_id, sender_name, canonical_name, role,
+                        content, message_id, raw_content, created_at
+                    )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (

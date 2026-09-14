@@ -49,7 +49,10 @@ def test_invalid_entries_skipped(tmp_path):
                 "jobs": [
                     {"id": "sm_good", "cron": "0 7 * * *", "group_ids": ["123"], "message": "好"},
                     {"id": "", "cron": "0 7 * * *", "group_ids": ["123"], "message": "无 id"},
-                    {"id": "sm_bad", "cron": "not-a-cron", "group_ids": ["123"], "message": "坏 cron"},
+                    {
+                        "id": "sm_bad", "cron": "not-a-cron",
+                        "group_ids": ["123"], "message": "坏 cron",
+                    },
                     "not-a-dict",
                 ]
             }

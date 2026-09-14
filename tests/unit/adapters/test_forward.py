@@ -87,7 +87,10 @@ async def test_extracts_from_reply_when_current_has_none():
     bot = _StubBot({"fid_via_reply": _forward_payload()})
     # Current message is the quote + @bot + user's question: no forward segment
     current = DummyMessage([at_seg("12345"), text_seg("你怎么看这个")])
-    reply = DummyReply(message="[合并转发消息]", user_id="10001", sender=DummySender(nickname="Alice"), message_id="42")
+    reply = DummyReply(
+        message="[合并转发消息]", user_id="10001",
+        sender=DummySender(nickname="Alice"), message_id="42",
+    )
     reply.raw_message = DummyMessage([forward_seg("fid_via_reply")])
 
     text, images = await extract_forward_content(

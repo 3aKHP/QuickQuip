@@ -69,7 +69,11 @@ def _seed_loop_with_turn(store, scope="1001", *, text="工具轮正文", qq_id="
     from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 
     store.finish_delivery(attempt, DeliveryReceipt(status=DeliveryStatus.SENT, message_id=qq_id))
-    store.close_loop(handle, __import__("quickquip.llm.agent_records", fromlist=["LoopStatus"]).LoopStatus.COMPLETED, None)
+    store.close_loop(
+        handle,
+        __import__("quickquip.llm.agent_records", fromlist=["LoopStatus"]).LoopStatus.COMPLETED,
+        None,
+    )
     return handle, record
 
 
@@ -119,13 +123,15 @@ async def test_recall_by_qq_id_masks_chunk_and_clears_evidence(tmp_path: Path):
     store = service.store
     with store._connect() as conn:
         row = conn.execute(
-            "SELECT content FROM conversation_messages WHERE agent_loop_id IS NOT NULL AND role='assistant'"
+            "SELECT content FROM conversation_messages "
+            "WHERE agent_loop_id IS NOT NULL AND role='assistant'"
         ).fetchone()
         delivery = conn.execute(
             "SELECT recall_status FROM agent_deliveries WHERE delivery_id='dlv_seed_0'"
         ).fetchone()
         execution = conn.execute(
-            "SELECT result_json, result_omission_reason FROM agent_tool_executions WHERE execution_id='exec_seed_0'"
+            "SELECT result_json, result_omission_reason FROM agent_tool_executions "
+            "WHERE execution_id='exec_seed_0'"
         ).fetchone()
     assert "▇" in row["content"]  # 等 code point 遮蔽，保留坐标
     assert delivery["recall_status"] == "recalled"
@@ -170,7 +176,8 @@ async def test_clear_context_purges_loops_and_bumps_generation(tmp_path: Path):
     assert generation == 1
     with store._connect() as conn:
         orphans = conn.execute(
-            "SELECT COUNT(*) c FROM agent_turns t LEFT JOIN agent_loops l ON l.loop_id=t.loop_id WHERE l.loop_id IS NULL"
+            "SELECT COUNT(*) c FROM agent_turns t "
+            "LEFT JOIN agent_loops l ON l.loop_id=t.loop_id WHERE l.loop_id IS NULL"
         ).fetchone()["c"]
     assert orphans == 0  # 侧表无孤儿（阶段 B 验收面）
 

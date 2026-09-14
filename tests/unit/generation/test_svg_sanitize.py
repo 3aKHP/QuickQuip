@@ -42,7 +42,10 @@ class TestSanitizeSvg:
         with pytest.raises(SvgSanitizeError):
             sanitize_svg('<?xml version="1.0"?><!DOCTYPE d [<!ENTITY a "b">]>' + _wrap())
         with pytest.raises(SvgSanitizeError):
-            sanitize_svg('<!doctype svg public "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/svg.dtd">' + _wrap())
+            sanitize_svg(
+                '<!doctype svg public "-//W3C//DTD SVG 1.1//EN" '
+                '"http://www.w3.org/svg.dtd">' + _wrap()
+            )
         with pytest.raises(SvgSanitizeError):
             sanitize_svg("<!ENTITY xx 'yy'>" + _wrap())
 
@@ -80,7 +83,12 @@ class TestSanitizeSvg:
         with pytest.raises(SvgSanitizeError, match="baseFrequency"):
             sanitize_svg(_wrap('<filter id="f"><feTurbulence baseFrequency="0.0001"/></filter>'))
         with pytest.raises(SvgSanitizeError, match="filter"):
-            sanitize_svg(_wrap('<filter id="f" x="-100%" y="0" width="500%" height="100%"><feGaussianBlur stdDeviation="1"/></filter>'))
+            sanitize_svg(
+                _wrap(
+                    '<filter id="f" x="-100%" y="0" width="500%" height="100%">'
+                    '<feGaussianBlur stdDeviation="1"/></filter>'
+                )
+            )
 
     def test_filter_param_limits_single_quote_and_scientific_notation(self):
         """CR M2 回归：单引号与科学计数法形态不得绕过参数上限。"""
@@ -91,7 +99,9 @@ class TestSanitizeSvg:
         with pytest.raises(SvgSanitizeError, match="baseFrequency"):
             sanitize_svg(_wrap("<filter id='f'><feTurbulence baseFrequency='1e-5'/></filter>"))
         with pytest.raises(SvgSanitizeError, match="filter"):
-            sanitize_svg(_wrap("<filter id='f' width='5000%'><feGaussianBlur stdDeviation='1'/></filter>"))
+            sanitize_svg(
+                _wrap("<filter id='f' width='5000%'><feGaussianBlur stdDeviation='1'/></filter>")
+            )
 
     def test_filter_param_words_in_text_content_not_rejected(self):
         """文本内容里出现属性样式字样不触发误拒（过度拦截回归）。"""
@@ -131,7 +141,8 @@ class TestParseViewbox:
 class TestStripRootSizeAttrs:
     def test_strips_only_root_tag_sizes(self):
         svg = (
-            '<svg xmlns="http://www.w3.org/2000/svg" width="99999" height="99999" viewBox="0 0 120 60">'
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'width="99999" height="99999" viewBox="0 0 120 60">'
             '<rect width="10" height="10"/></svg>'
         )
         cleaned = strip_root_size_attrs(svg)
@@ -140,7 +151,9 @@ class TestStripRootSizeAttrs:
         assert '<rect width="10" height="10"/>' in cleaned
 
     def test_keeps_unquoted_and_single_quoted(self):
-        cleaned = strip_root_size_attrs("<svg width=99999 height='88888' viewBox='0 0 1 1'><rect width='2' height='2'/></svg>")
+        cleaned = strip_root_size_attrs(
+            "<svg width=99999 height='88888' viewBox='0 0 1 1'><rect width='2' height='2'/></svg>"
+        )
         assert "99999" not in cleaned.split("<rect")[0]
         assert "<rect width='2' height='2'/>" in cleaned
 

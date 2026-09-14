@@ -110,7 +110,9 @@ def test_config_warns_when_enabled_nonempty_without_mode(tmp_path, caplog):
 
 def test_config_no_append_semantics_warning_with_explicit_mode(tmp_path, caplog):
     config_path = tmp_path / "llm.toml"
-    config_path.write_text('[tools]\nenabled = ["draw_svg"]\nenabled_mode = "append"\n', encoding="utf-8")
+    config_path.write_text(
+        '[tools]\nenabled = ["draw_svg"]\nenabled_mode = "append"\n', encoding="utf-8"
+    )
     with caplog.at_level(logging.WARNING, logger="quickquip.llm.config"):
         load_llm_config(config_path)
     assert not any("enabled_mode" in record.message for record in caplog.records)

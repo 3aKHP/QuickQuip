@@ -61,11 +61,15 @@ if args[0] == "compose":
                 for name in ("llbot", "quickquip", "web-admin")
             }}))
         elif "--format" in args:
-            print(json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}))
+            print(json.dumps(
+                {"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}
+            ))
     elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
         sys.exit(1)
     elif "up" in args:
-        if os.environ.get("FAIL_UP") == "all" or (os.environ.get("FAIL_UP") == "new" and release == os.environ["TEST_NEW"]):
+        if os.environ.get("FAIL_UP") == "all" or (
+            os.environ.get("FAIL_UP") == "new" and release == os.environ["TEST_NEW"]
+        ):
             sys.exit(1)
     elif "ps" in args:
         print("test-container")
@@ -75,7 +79,12 @@ elif args[0] == "inspect":
     print("true")
 ''')
     docker.chmod(0o700)
-    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", TEST_ROOT=str(root), TEST_NEW=NEW)
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        TEST_ROOT=str(root),
+        TEST_NEW=NEW,
+    )
     return root, inbox, env
 
 
@@ -101,7 +110,9 @@ def test_success_commits_environment_and_previous(deployment):
 @pytest.mark.parametrize("failure", ["build", "up"])
 def test_failure_restores_original_files_and_links(deployment, failure):
     root, inbox, _ = deployment
-    result = run_deploy(deployment, **({"FAIL_BUILD": "1"} if failure == "build" else {"FAIL_UP": "new"}))
+    result = run_deploy(
+        deployment, **({"FAIL_BUILD": "1"} if failure == "build" else {"FAIL_UP": "new"})
+    )
     assert result.returncode == 1, result.stdout + result.stderr
     assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=old\n"
     assert (root / "current").readlink() == Path("releases") / OLD
@@ -134,9 +145,14 @@ def test_lock_rejects_second_action_before_live_mutation(deployment):
     assert not (root / "calls").exists()
 
 
-@pytest.mark.parametrize("args", [["-Rollback", "-DryRun"], ["-Status", "-Migrate"], ["-Status", "-SkipHealth"]])
+@pytest.mark.parametrize(
+    "args",
+    [["-Rollback", "-DryRun"], ["-Status", "-Migrate"], ["-Status", "-SkipHealth"]],
+)
 def test_bash_rejects_invalid_modes_before_side_effects(args):
-    result = subprocess.run(["bash", str(TEMPLATE / "deploy-v4.sh"), *args], capture_output=True, text=True)
+    result = subprocess.run(
+        ["bash", str(TEMPLATE / "deploy-v4.sh"), *args], capture_output=True, text=True
+    )
     assert result.returncode != 0
     assert "FAILED:" in result.stderr
 
@@ -148,7 +164,9 @@ def test_shared_transaction_restores_token_and_missing_files(tmp_path):
     (incoming / "shared/prod").mkdir(parents=True)
     (incoming / "shared/.env").write_text("ONEBOT_ACCESS_TOKEN=new\r\n")
     (incoming / "shared/prod/sendkey.env").write_text("SENDKEY=synthetic\n")
-    (incoming / "candidate-compose.json").write_text(json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}))
+    (incoming / "candidate-compose.json").write_text(
+        json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}})
+    )
     path = root / "prod/llbot-data/default_config.json"
     path.parent.mkdir(parents=True)
     original = b'{"ob11":{"connect":[{}, {"token":"old","url":"old-url"}]}}'

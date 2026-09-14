@@ -163,7 +163,11 @@ def test_line_part_cap_splits_bare_continuation():
 def test_url_replaced_by_domain():
     messages = [
         _msg("甲", "看 https://www.bilibili.com/video/BV1xx 很好", _ts(ss=0)),
-        _msg("甲", "还有 http://Github.com/a/b?c=1 和 https://news.ycombinator.com/item?id=1", _ts(ss=1)),
+        _msg(
+            "甲",
+            "还有 http://Github.com/a/b?c=1 和 https://news.ycombinator.com/item?id=1",
+            _ts(ss=1),
+        ),
     ]
 
     text, stats = serialize_period_chat(messages, local_tz=TZ)

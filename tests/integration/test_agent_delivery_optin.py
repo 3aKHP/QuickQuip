@@ -33,7 +33,9 @@ async def _service(tmp_path: Path) -> LLMService:
     return service
 
 
-async def _run(service: LLMService, patch_provider_builder, group_id: int) -> tuple[dict, CollectingSink]:
+async def _run(
+    service: LLMService, patch_provider_builder, group_id: int
+) -> tuple[dict, CollectingSink]:
     sink = CollectingSink()
     service.bind_delivery_sink(sink)
     client = FiveTurnScenarioClient(protocol="openai")

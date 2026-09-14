@@ -88,10 +88,13 @@ def test_merge_filters_empty_and_whitespace():
 
 def test_scenes_from_history_groups_between_assistant():
     history = [
-        {"role": "user", "user_id": "1", "sender_name": "A", "content": "msg1", "raw_content": "msg1"},
-        {"role": "user", "user_id": "2", "sender_name": "B", "content": "msg2", "raw_content": "msg2"},
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "msg1", "raw_content": "msg1"},
+        {"role": "user", "user_id": "2", "sender_name": "B",
+         "content": "msg2", "raw_content": "msg2"},
         {"role": "assistant", "content": "reply1"},
-        {"role": "user", "user_id": "1", "sender_name": "A", "content": "msg3", "raw_content": "msg3"},
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "msg3", "raw_content": "msg3"},
     ]
     scenes = _build_scenes_from_history(history)
     assert len(scenes) == 2
@@ -106,8 +109,10 @@ def test_scenes_from_history_groups_between_assistant():
 
 def test_scenes_from_history_no_assistant():
     history = [
-        {"role": "user", "user_id": "1", "sender_name": "A", "content": "msg1", "raw_content": "msg1"},
-        {"role": "user", "user_id": "2", "sender_name": "B", "content": "msg2", "raw_content": "msg2"},
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "msg1", "raw_content": "msg1"},
+        {"role": "user", "user_id": "2", "sender_name": "B",
+         "content": "msg2", "raw_content": "msg2"},
     ]
     scenes = _build_scenes_from_history(history)
     assert len(scenes) == 1
@@ -260,7 +265,9 @@ def test_current_scene_collects_all_images():
     assert "quoted.png" in scene.images
     # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅保留 [附图 N 张] 文本
     assert "forward.png" not in scene.images
-    assert any("[附图 1 张]" in s["text"] for s in scene.speakers if s["canonical_name"] == "转发消息")
+    assert any(
+        "[附图 1 张]" in s["text"] for s in scene.speakers if s["canonical_name"] == "转发消息"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +276,9 @@ def test_current_scene_collects_all_images():
 
 def test_render_current_scene():
     scene = LLMSceneMessage(
-        speakers=[{"user_id": "123", "sender_name": "扎师傅", "canonical_name": "扎师傅", "text": "你好"}],
+        speakers=[
+            {"user_id": "123", "sender_name": "扎师傅", "canonical_name": "扎师傅", "text": "你好"}
+        ],
         images=[], scene_type="current",
     )
     text = _render_scene_to_text(scene)
@@ -447,7 +456,8 @@ def test_build_messages_with_recent_buffer():
 def test_build_messages_recent_not_merged_into_context():
     """回归：recent 补丁不再混入【上文】，history 尾行与现场分属两段。"""
     history = [
-        {"role": "user", "user_id": "1", "sender_name": "A", "content": "旧话", "raw_content": "旧话"},
+        {"role": "user", "user_id": "1", "sender_name": "A",
+         "content": "旧话", "raw_content": "旧话"},
     ]
     recent = [{"user_id": "2", "sender_name": "B", "text": "现场发言"}]
     msgs = build_messages(
@@ -695,7 +705,8 @@ def test_persona_world_relationships_str_or_list():
 
 def test_persona_voice_habits_join_with_delimiter():
     out = _compile_structured_persona({
-        "voice": {"verbal_habits": ["常说嗯", "爱用反问"], "verbal_constraints": ["不爆粗", "不撒谎"]},
+        "voice": {"verbal_habits": ["常说嗯", "爱用反问"],
+                  "verbal_constraints": ["不爆粗", "不撒谎"]},
     })
     assert "口头习惯：常说嗯、爱用反问" in out
     assert "语言约束：\n- 不爆粗\n- 不撒谎" in out
@@ -796,7 +807,9 @@ def _first_divergence(a: str, b: str) -> str:
 
 def _static_prompt_kwargs() -> dict:
     return {
-        "persona": SimpleNamespace(system_prompt="你是测试人格。", style_prompt="短一点。", extras={}),
+        "persona": SimpleNamespace(
+            system_prompt="你是测试人格。", style_prompt="短一点。", extras={}
+        ),
         "group_id": 1001,
         "tool_specs": [],
         "search_tool_name": "search_web",
@@ -901,10 +914,16 @@ def test_turn_envelope_memories_private_wording(frozen_now):
 
 def test_turn_envelope_vocab_and_glossary_hits(frozen_now):
     vocab = _vocab_stub(
-        matches=[SimpleNamespace(alias="哈基镜", name="镜子", note="特别注意不要和王者荣耀的镜混淆")],
+        matches=[
+            SimpleNamespace(
+                alias="哈基镜", name="镜子", note="特别注意不要和王者荣耀的镜混淆"
+            )
+        ],
         glossary=[("区", "群里常见的内部称谓，通常是熟人间的玩笑叫法。")],
     )
-    envelope = build_turn_envelope(now=frozen_now, prompt="哈基镜是区吗？", memories=[], vocab=vocab)
+    envelope = build_turn_envelope(
+        now=frozen_now, prompt="哈基镜是区吗？", memories=[], vocab=vocab
+    )
     assert "以下词表命中仅用于帮助你做称呼消歧，不要机械复读：" in envelope
     assert "- 哈基镜 通常指 镜子；注意：特别注意不要和王者荣耀的镜混淆" in envelope
     assert "以下黑话解释仅在当前话题相关时参考：" in envelope
@@ -942,7 +961,11 @@ def test_build_messages_prepends_envelope_with_history():
     content = msgs[-1].content
     assert content.startswith(_ENVELOPE_SAMPLE + "\n")
     # 末条 user 是 pending 上文与当前消息的合并：信封在最前，其后【上文】→【当前提问】
-    assert content.index("【轮次上下文】") < content.index(SCENE_MARKER_CONTEXT) < content.index(SCENE_MARKER_CURRENT)
+    assert (
+        content.index("【轮次上下文】")
+        < content.index(SCENE_MARKER_CONTEXT)
+        < content.index(SCENE_MARKER_CURRENT)
+    )
 
 
 def test_build_messages_tail_order_envelope_context_live_current():
@@ -987,4 +1010,7 @@ def test_build_messages_empty_envelope_unchanged():
         max_trigger_context_messages=5,
         current_sender_name="C", current_user_id="3",
     )
-    assert build_messages(**kwargs)[-1].content == build_messages(**kwargs, turn_envelope="")[-1].content
+    assert (
+        build_messages(**kwargs)[-1].content
+        == build_messages(**kwargs, turn_envelope="")[-1].content
+    )

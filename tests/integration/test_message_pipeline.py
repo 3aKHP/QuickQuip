@@ -109,8 +109,12 @@ async def test_build_reply_returns_plain_text(frozen_now):
 
 
 async def test_resolve_reply_none_for_unrelated_message(frozen_now):
-    assert await resolve_reply("今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now) is None
-    assert await build_reply("今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now) is None
+    assert await resolve_reply(
+        "今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now
+    ) is None
+    assert await build_reply(
+        "今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now
+    ) is None
 
 
 async def test_repeat_fingerprint_never_becomes_reply_text():
@@ -166,7 +170,9 @@ async def test_capture_rules_only_echo_safe_projected_text(group_id, text, rule_
 
 async def test_rule_switch_blocks_when_group_id_given(frozen_now):
     global_rule_switch.disable(6001, "divine_arrival")
-    blocked = await resolve_reply("神临", user_id=123, sender_name="n", group_id=6001, now=frozen_now)
+    blocked = await resolve_reply(
+        "神临", user_id=123, sender_name="n", group_id=6001, now=frozen_now
+    )
     assert blocked is None or blocked.get("rule_name") != "divine_arrival"
 
 

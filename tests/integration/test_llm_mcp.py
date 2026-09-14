@@ -229,7 +229,10 @@ async def test_mcp_image_result_reaches_vision_provider_as_inline_bytes(
 ):
     stub = StubMCPToolCallingProviderClient()
     patch_provider_builder(lambda provider: stub)
-    image = LLMInlineImage(data=b"valid image bytes", media_type="image/png", source_label="MCP/fake/echo_text image 1")
+    image = LLMInlineImage(
+        data=b"valid image bytes", media_type="image/png",
+        source_label="MCP/fake/echo_text image 1",
+    )
 
     async def fake_execute(alias, arguments, context):
         _ = alias, arguments, context

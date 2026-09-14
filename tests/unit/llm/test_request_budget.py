@@ -66,7 +66,8 @@ def test_estimate_request_tokens_counts_native_content():
 def test_estimate_request_tokens_counts_thinking_blocks():
     thinking = "理" * 2000
     msg = LLMConversationMessage(
-        role="assistant", content="", thinking_blocks=[{"type": "reasoning", "reasoning_content": thinking}]
+        role="assistant", content="",
+        thinking_blocks=[{"type": "reasoning", "reasoning_content": thinking}],
     )
     base = estimate_request_tokens(_request([LLMConversationMessage(role="assistant", content="")]))
     assert estimate_request_tokens(_request([msg])) >= base + estimate_tokens(thinking)

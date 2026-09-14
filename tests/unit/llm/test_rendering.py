@@ -6,7 +6,15 @@ from plugins.llm_identity import IdentityIndex
 from plugins.message_rendering import render_message_for_llm, render_reply_for_llm
 
 from tests.fixtures.configs import IDENTITIES_YAML
-from tests.fixtures.onebot import DummyMessage, DummyReply, DummySender, at_seg, forward_seg, image_seg, text_seg
+from tests.fixtures.onebot import (
+    DummyMessage,
+    DummyReply,
+    DummySender,
+    at_seg,
+    forward_seg,
+    image_seg,
+    text_seg,
+)
 
 
 def _identity_index(tmp_path: Path) -> IdentityIndex:
@@ -167,7 +175,8 @@ def test_source_block_skips_urls_already_in_text_and_dedupes():
     )
 
     assert text == (
-        "详见 https://example.test/a 已在正文。\n\n来源：\n- 重复一 — example.test\n- 同域不同页 — example.test"
+        "详见 https://example.test/a 已在正文。\n\n来源：\n"
+        "- 重复一 — example.test\n- 同域不同页 — example.test"
     )
 
 
@@ -199,7 +208,10 @@ def test_source_block_redirect_url_renders_title_only():
         "回答。",
         _report([
             ("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC=", "youtube.com"),
-            ("https://vertexaisearch.cloud.google.com/grounding-api-redirect/XyZ=", "QuickQuip README"),
+            (
+                "https://vertexaisearch.cloud.google.com/grounding-api-redirect/XyZ=",
+                "QuickQuip README",
+            ),
         ]),
     )
 

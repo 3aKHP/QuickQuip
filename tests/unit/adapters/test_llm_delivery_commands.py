@@ -72,7 +72,11 @@ class _FakeService:
         return self.settings
 
     def set_chat_agent_delivery_enabled(
-        self, chat_id, enabled, chat_type: str = "group", domain: DeliveryDomain = DeliveryDomain.ALL
+        self,
+        chat_id,
+        enabled,
+        chat_type: str = "group",
+        domain: DeliveryDomain = DeliveryDomain.ALL,
     ) -> None:
         self.calls.append((enabled, chat_type, domain))
 
@@ -86,7 +90,9 @@ _SEG = type("Seg", (), {
 
 def _register(service) -> _FakeLlmCmd:
     cmd = _FakeLlmCmd()
-    llm_part.register_llm_commands(lambda name, **kw: (cmd if name == "llm" else _FakeLlmCmd()), list, _SEG)
+    llm_part.register_llm_commands(
+        lambda name, **kw: (cmd if name == "llm" else _FakeLlmCmd()), list, _SEG
+    )
     return cmd
 
 

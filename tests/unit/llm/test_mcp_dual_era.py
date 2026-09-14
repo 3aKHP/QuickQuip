@@ -50,7 +50,9 @@ def test_modern_server_info_falls_back_to_draft_metadata():
 
 def test_modern_server_info_rejects_missing_or_malformed_metadata():
     assert _extract_modern_server_info({}) == {}
-    assert _extract_modern_server_info({"_meta": {"io.modelcontextprotocol/serverInfo": "bad"}}) == {}
+    assert _extract_modern_server_info(
+        {"_meta": {"io.modelcontextprotocol/serverInfo": "bad"}}
+    ) == {}
     assert _extract_modern_server_info({"serverInfo": "bad"}) == {}
 
 
@@ -329,16 +331,28 @@ def test_sanitize_error_message_preserves_safe_text():
 
 def test_detect_alias_conflicts_no_duplicates():
     bindings = [
-        MCPToolBinding(alias="mcp_a_tool1", server_id="a", tool_name="tool1", description="", input_schema={}),
-        MCPToolBinding(alias="mcp_b_tool2", server_id="b", tool_name="tool2", description="", input_schema={}),
+        MCPToolBinding(
+            alias="mcp_a_tool1", server_id="a", tool_name="tool1",
+            description="", input_schema={},
+        ),
+        MCPToolBinding(
+            alias="mcp_b_tool2", server_id="b", tool_name="tool2",
+            description="", input_schema={},
+        ),
     ]
     assert _detect_alias_conflicts(bindings) == set()
 
 
 def test_detect_alias_conflicts_finds_exact_duplicates():
     bindings = [
-        MCPToolBinding(alias="mcp_a_tool1", server_id="a", tool_name="tool1", description="", input_schema={}),
-        MCPToolBinding(alias="mcp_a_tool1", server_id="b", tool_name="tool1", description="", input_schema={}),
+        MCPToolBinding(
+            alias="mcp_a_tool1", server_id="a", tool_name="tool1",
+            description="", input_schema={},
+        ),
+        MCPToolBinding(
+            alias="mcp_a_tool1", server_id="b", tool_name="tool1",
+            description="", input_schema={},
+        ),
     ]
     assert _detect_alias_conflicts(bindings) == {"mcp_a_tool1"}
 
@@ -353,8 +367,14 @@ def test_detect_alias_conflicts_finds_sanitization_collisions():
     assert alias1 == alias2
 
     bindings = [
-        MCPToolBinding(alias=alias1, server_id="srv", tool_name="foo.bar", description="", input_schema={}),
-        MCPToolBinding(alias=alias2, server_id="srv", tool_name="foo_bar", description="", input_schema={}),
+        MCPToolBinding(
+            alias=alias1, server_id="srv", tool_name="foo.bar",
+            description="", input_schema={},
+        ),
+        MCPToolBinding(
+            alias=alias2, server_id="srv", tool_name="foo_bar",
+            description="", input_schema={},
+        ),
     ]
     conflicts = _detect_alias_conflicts(bindings)
     assert alias1 in conflicts
@@ -441,7 +461,10 @@ def test_is_recognized_modern_error_body_accepts_version_error():
     """UnsupportedProtocolVersionError (-32022) IS a recognized modern error."""
     from quickquip.llm.mcp.codec import is_recognized_modern_error_body
 
-    modern_body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported version","data":{"supported":["2026-07-28"]}}}'
+    modern_body = (
+        b'{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported version",'
+        b'"data":{"supported":["2026-07-28"]}}}'
+    )
     assert is_recognized_modern_error_body(modern_body)
 
 
