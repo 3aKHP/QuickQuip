@@ -140,6 +140,13 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         return response
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        """降级重试门（历史密文可剥时才有资格）。
+
+        计量口径（有意为之，测试钉住）：首次失败的 complete() 与降级重试
+        各落一行 usage（error + ok）——两者对应两次真实 HTTP 交互与两条
+        trace，与"每次 complete() 计一次"的基座契约一致；基座退避吸收的
+        失败不产生额外行，本覆写不属于该轨道。
+        """
         try:
             return await super().complete(request)
         except LLMProviderError as exc:

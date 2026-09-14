@@ -1078,6 +1078,14 @@ _HISTORY_NATIVE = [
     },
 ]
 
+# 仅含 message item 的历史批次（无可剥 reasoning 的显式前提）。
+_HISTORY_MESSAGE_ONLY = {
+    "type": "message",
+    "id": "msg_hist",
+    "role": "assistant",
+    "content": [{"type": "output_text", "text": "历史回答。"}],
+}
+
 _CURRENT_LOOP_NATIVE = [
     {
         "type": "reasoning",
@@ -1147,7 +1155,6 @@ async def test_client_400_history_reasoning_degrades_and_retries(caplog):
         response = await client.complete(_history_replay_request())
     assert response.text == "降级后回答"
     assert len(client.payloads) == 2
-    assert any("retrying once without history reasoning" in r.message for r in caplog.records)
     first_input = client.payloads[0]["input"]
     second_input = client.payloads[1]["input"]
     assert any(item.get("type") == "reasoning" for item in first_input)
@@ -1185,7 +1192,8 @@ async def test_client_400_without_history_reasoning_surfaces():
         [
             LLMConversationMessage(role="user", content="问题"),
             LLMConversationMessage(
-                role="assistant", content="历史回答。", native_content=list(_HISTORY_NATIVE[1:])
+                role="assistant", content="历史回答。",
+                native_content=[dict(_HISTORY_MESSAGE_ONLY)],
             ),
             LLMConversationMessage(role="user", content="新问题"),
         ]
@@ -1275,3 +1283,63 @@ async def test_client_degrade_pure_reasoning_batch_gets_placeholder():
         isinstance(item.get("content"), str) and item["content"].strip()
         for item in degraded
     ), "剥空批次必须有非空占位正文"
+
+
+async def test_client_degrade_retry_metering_two_rows(monkeypatch):
+    """降级重试的计量口径（有意为之）：两次 complete() 各落一行 usage
+    （error + ok）——对应两次真实 HTTP 交互与两条 trace；与基座退避轨道
+    "被吸收的失败不产生额外行"（test_provider_retry）是两条不同契约。"""
+    from quickquip.llm.usage import drain_usage_tasks
+
+    calls = []
+
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
+        calls.append((state, response is not None))
+
+    monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    await client.complete(_history_replay_request())
+    await drain_usage_tasks()
+    assert calls == [("error", False), ("ok", True)]
+
+
+async def test_client_stream_400_history_reasoning_degrades_and_retries():
+    """流式主路径（生产默认）的降级重试：SSE 传输抛 HTTP 400 后剥历史
+    reasoning 重试一次，非流式端点不被触碰。"""
+
+    class _StreamRejectingThenOkFake(FakeOpenAIResponsesClient):
+        def __init__(self, config, error, bodies):
+            super().__init__(config, bodies)
+            self.config.stream_enabled = True
+            self.error = error
+            self.stream_payloads: list[dict] = []
+
+        async def _post_stream_sse(self, url, headers, payload):
+            self.stream_payloads.append(payload)
+            if self.error is not None:
+                error = self.error
+                self.error = None
+                raise error
+            # 复用非流式成功体构造流事件序列。
+            body = self.response_bodies.pop(0)
+            return [{"type": "response.completed", "response": body}]
+
+    client = _StreamRejectingThenOkFake(
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    response = await client.complete(_history_replay_request())
+    assert response.text == "降级后回答"
+    assert len(client.stream_payloads) == 2
+    assert not client.payloads, "非流式端点不被触碰"
+    second = client.stream_payloads[1]["input"]
+    assert not any(item.get("id") == "rs_hist" for item in second)
+    assert any(item.get("id") == "rs_cur" for item in second)

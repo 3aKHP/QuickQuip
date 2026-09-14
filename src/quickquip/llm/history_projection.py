@@ -4,8 +4,11 @@
 输出是目标协议可用的 ``LLMConversationMessage`` 序列。三条合法路径：
 
 - **native**：目标 owner 五元组精确匹配且协议结构校验通过时，原样使用
-  保存的有序原生块（Claude content / Gemini parts），保留签名与位置；
-  不追加通用副本。
+  保存的有序原生块（Claude content / Gemini parts / Responses output
+  items），保留签名与位置；不追加通用副本。Responses 回放要求每个
+  reasoning item 携带非空密文（store:false 回传要件），且在发送前过
+  确定性守门（Loop 内/跨 Loop call_id 冲突、声明/应答配对不完整 →
+  该 Loop 降 structured），见 ``provider.openai_responses.replay_guard``。
 - **structured**：有序普通正文 + 工具名/稳定 wire ID/结果/终态；去掉
   不具备有效来源的原生推理。Claude 带 thinking 的工具 Turn 不能走该路径
   （签名不可伪造），自动降级档案。
@@ -23,6 +26,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from quickquip.llm.agent_records import ResponseOwner
+from quickquip.llm.provider.openai_responses import (
+    blocks_replay_valid,
+    replay_guard_violations,
+)
 from quickquip.llm.provider.owner import owner_matches
 from quickquip.llm.store_parts.agent_records import (
     LoadedLoop,
@@ -113,11 +120,7 @@ def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> boo
     """协议结构校验（§7.2）：签名缺失/损坏、未知块形态都判无效并降级。"""
     if protocol == "openai_responses":
         # output items 形态：结构校验与回放安全条件（reasoning 必须带
-        # 非空密文）收敛在协议侧 blocks_replay_valid。
-        from quickquip.llm.provider.openai_responses.response import (
-            blocks_replay_valid,
-        )
-
+        # 非空密文）收敛在协议侧 blocks_replay_valid（经包 facade 导入）。
         return blocks_replay_valid(list(blocks))
     for block in blocks:
         if not isinstance(block, dict):
@@ -401,10 +404,6 @@ def _responses_replay_preflight(
     收敛在协议侧 ``replay_guard``；此处按违例把对应 Loop 降为 structured
     （stable wire id 构造性唯一，通用重建自 executions 出发自洽配对）。
     """
-    from quickquip.llm.provider.openai_responses.replay_guard import (
-        replay_guard_violations,
-    )
-
     native_loop_ids = [
         loop.loop_id for loop in loops if decisions[loop.loop_id].path == PATH_NATIVE
     ]
