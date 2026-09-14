@@ -45,6 +45,15 @@ class PersonaTopicsSource(Protocol):
     def persona_interest_topics(self, persona_id: str) -> list[str]: ...
 
 
+class AwakeningServiceView(AwakeningJudgeChannel, PersonaTopicsSource, Protocol):
+    """编排入口对 LLM 服务对象的完整读取面（judge 通道 + persona 话题）。
+
+    ``LLMService`` 结构化满足；子规则各自只消费自己声明的窄接口
+    （check_interest 消费 PersonaTopicsSource，check_relevance/check_qa
+    消费 AwakeningJudgeChannel）。
+    """
+
+
 @dataclass(slots=True)
 class AwakeningTriggerResult:
     rule_name: str
@@ -384,7 +393,7 @@ async def check_awakening_triggers(
     user_id: int | str,
     message_text: str,
     llm_settings: LLMSettingsLike,
-    svc: AwakeningJudgeChannel,
+    svc: AwakeningServiceView,
     *,
     state: AwakeningState | None = None,
     rule_enabled: Callable[[str], bool] | None = None,

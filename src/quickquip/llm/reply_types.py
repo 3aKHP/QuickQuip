@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from quickquip.llm.agent_records import TriggerKind
+    from quickquip.llm.service_parts.agent_runtime import DeliverySink
 
 
 class ReplyResult(TypedDict, total=False):
@@ -62,6 +63,6 @@ class ChatTurnRequest:
     trigger_auto_memory: bool = True
     message_id: str | None = None
     include_recent_images: bool = False
-    delivery_sink: Any = None
+    delivery_sink: "DeliverySink | None" = None
     trigger_kind: "TriggerKind | None" = None
     mentioned_qq_ids: list[str] | None = None

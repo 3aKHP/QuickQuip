@@ -1014,6 +1014,12 @@ class TestLlmJudgeClassification:
         assert _parse_judge_text('{"score": 0.7}', 0.8) is False
         assert _parse_judge_text('{"score": 0.9}', 0.8) is True
 
+    def test_strict_parse_fail_closed_on_malformed_score(self):
+        # score 值不可数值化：fail-closed 视为不可解析（None），不得抛异常击穿判定链
+        assert _parse_judge_text('{"score": "high"}', 0.8) is None
+        assert _parse_judge_text('{"score": null}', 0.8) is None
+        assert _parse_judge_text('{"score": {"v": 1}}', 0.8) is None
+
     def test_strict_parse_rejects_fragment_and_embedded_trigger_text(self):
         # 残缺 JSON 与正文中出现 "trigger" 字样的输出都不是业务判定
         assert _parse_judge_text('{"trigger": false', 0.5) is None

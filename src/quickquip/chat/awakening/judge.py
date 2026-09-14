@@ -95,15 +95,19 @@ class QuickJudgeOutcome:
 def _parse_judge_text(text: str, threshold: float) -> bool | None:
     """严格解析业务判定；无法解析返回 None（区别于业务 false）。
 
-    只接受完整 JSON 对象；残缺 JSON 或散文中出现的 "trigger" 字样
-    一律视为不可解析（fail-closed，不写缓存）。
+    只接受完整 JSON 对象；残缺 JSON、散文中出现的 "trigger" 字样，以及
+    score 值不可数值化（字符串/None/嵌套结构等）的输出一律视为不可解析
+    （fail-closed，不写缓存）。
     """
     try:
         data = extract_json_object(text)
     except (TypeError, ValueError):
         return None
     if "score" in data:
-        return float(data["score"]) >= threshold
+        try:
+            return float(data["score"]) >= threshold
+        except (TypeError, ValueError):
+            return None
     if "trigger" in data:
         trigger = data["trigger"]
         if isinstance(trigger, bool):
