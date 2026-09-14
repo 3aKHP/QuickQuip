@@ -157,8 +157,8 @@ def test_payload_tools_declaration():
         ("medium", "medium"),
         ("high", "high"),
         ("xhigh", "xhigh"),
-        ("max", "xhigh"),  # 超支持降档
-        ("ultra", "xhigh"),  # 超支持降档
+        ("max", "xhigh"),  # 超出官方已核对词表，降档到最高支持档
+        ("ultra", "xhigh"),  # 超出官方已核对词表，降档到最高支持档
     ],
 )
 def test_reasoning_effort_mapping(tier, expected_effort):
@@ -681,14 +681,10 @@ def test_profiles_registry_matches_config_vocabulary():
 
     assert set(PROFILES) == set(RESPONSES_PROFILE_IDS)
     assert REASONING_EFFORT_TIERS == REASONING_EFFORT_CHOICES
-    # 映射表 profile 列自注册表派生，六档全覆盖
-    from quickquip.llm.provider.openai_responses.request import (
-        _REASONING_EFFORT_MAP,
-    )
-
-    assert set(_REASONING_EFFORT_MAP) == set(REASONING_EFFORT_TIERS)
-    for columns in _REASONING_EFFORT_MAP.values():
-        assert set(columns) == set(PROFILES)
+    # profile 词表必须是六档的子集（降档规则以词表为边界派生）
+    for profile in PROFILES.values():
+        assert profile.wire_efforts <= set(REASONING_EFFORT_TIERS)
+        assert profile.wire_efforts
 
 
 def _load_config(tmp_path: Path, provider_body: str):
@@ -926,11 +922,13 @@ def test_stream_relay_reconcile_mismatch_fail_closed():
         _fold(chunks, profile_id="codex-http-relay")
 
 
-def test_reasoning_effort_relay_profile_mapping():
-    control = reasoning_control(
-        _config(reasoning_effort="ultra"), resolve_profile("codex-http-relay")
-    )
-    assert control == {"effort": "xhigh", "summary": "auto"}
+def test_reasoning_effort_relay_profile_identity_mapping():
+    """AGW/CPA 中转的 gpt-6/gpt-5.6 系六档全支持（服务器能力位核对）：恒等不降档。"""
+    for tier in ("low", "medium", "high", "xhigh", "max", "ultra"):
+        control = reasoning_control(
+            _config(reasoning_effort=tier), resolve_profile("codex-http-relay")
+        )
+        assert control == {"effort": tier, "summary": "auto"}
 
 
 def test_combine_stream_trace_annotations():

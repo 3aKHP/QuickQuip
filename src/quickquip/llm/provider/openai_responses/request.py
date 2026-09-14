@@ -27,7 +27,6 @@ from quickquip.llm.provider.base import (
     TOOL_IMAGE_FLUSH_NOTICE,
 )
 from quickquip.llm.provider.openai_responses.profiles import (
-    PROFILES,
     REASONING_EFFORT_TIERS,
     ResponsesProfile,
     resolve_profile,
@@ -39,39 +38,34 @@ from quickquip.llm.provider.openai_responses.response import validate_output_ite
 STORE = False
 INCLUDE_ENCRYPTED_REASONING = ("reasoning.encrypted_content",)
 
-# 六档（low/medium/high/xhigh/max/ultra）→ 各 profile 实际 effort 的映射表，
-# 集中一处（1.16 决策 3/4）。max/ultra 超出首批两 profile 的 wire 词表
-# （low..xhigh），按降档规则收敛到该 profile 最高档；profile 列自注册表
-# 派生（新增 profile 不补列会在此 KeyError/缺列即改，而不是运行期误导）。
+# 六档（low/medium/high/xhigh/max/ultra）映射规则集中本处（1.16 决策 3/4）：
+# 档位在 profile 词表内恒等发送，超出则降档到该 profile 声明的最高档
+# （词表即降档边界，见 profiles.py 的逐 profile 核对注记——openai-public
+# 按已核对范围收敛到 xhigh，codex-http-relay 六档全支持恒等）。
 # thinking_budget 数字口径不适用于本协议（claude/gemini 专属）。
-_REASONING_EFFORT_MAP: dict[str, dict[str, str]] = {
-    tier: {
-        profile_id: ("xhigh" if tier in ("max", "ultra") else tier)
-        for profile_id in PROFILES
-    }
-    for tier in REASONING_EFFORT_TIERS
-}
+_EFFORT_ORDER = REASONING_EFFORT_TIERS
 
 _TOOL_IMAGE_NOTICE = TOOL_IMAGE_FLUSH_NOTICE
 
 
 def reasoning_control(config: ProviderConfig, profile: ResponsesProfile) -> dict | None:
-    """reasoning 档位控制：未配置档位返回 None（不发送字段）。"""
+    """reasoning 档位控制：未配置档位返回 None（不发送字段）。
+
+    档位在 profile 词表内恒等发送；超出词表降档到该 profile 声明的
+    最高档（映射规则单点，词表见 profiles.py 的逐 profile 核对注记）。
+    """
     tier = (config.reasoning_effort or "").strip()
     if not tier:
         return None
-    mapped = _REASONING_EFFORT_MAP.get(tier, {}).get(profile.profile_id)
-    if mapped is None:
+    if tier not in _EFFORT_ORDER:
         raise LLMProviderError(
-            f"未知的 reasoning 档位：{tier!r}（可用："
-            f"{'/'.join(_REASONING_EFFORT_MAP)}）"
+            f"未知的 reasoning 档位：{tier!r}（可用：{'/'.join(_EFFORT_ORDER)}）"
         )
-    effort = mapped
-    if effort not in profile.wire_efforts:  # 降档规则的兜底断言
-        raise LLMProviderError(
-            f"reasoning 档位映射结果 {effort!r} 不在 profile "
-            f"{profile.profile_id} 支持集内"
-        )
+    effort = (
+        tier
+        if tier in profile.wire_efforts
+        else max(profile.wire_efforts, key=_EFFORT_ORDER.index)
+    )
     return {"effort": effort, "summary": "auto"}
 
 

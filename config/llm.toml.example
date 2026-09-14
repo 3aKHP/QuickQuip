@@ -409,8 +409,9 @@ style_profile = "openai_family"
 # 结构事件、终态缺省字段时以流式完整 item 为回放基准）。
 # responses_profile = "openai-public"
 # reasoning_effort：思考档位，独立于 thinking_budget 数字口径（后者仅
-# claude/gemini 生效，Responses 忽略）。六档 low/medium/high/xhigh/max/ultra
-# 按后端实际 effort 映射（max/ultra 降档为 xhigh）；留空不发送 reasoning 字段。
+# claude/gemini 生效，Responses 忽略）。六档 low/medium/high/xhigh/max/ultra，
+# 超出后端词表自动降档到其最高支持档（openai-public 已核对范围到 xhigh；
+# codex-http-relay 的 gpt-6/gpt-5.6 系六档全支持恒等）；留空不发送 reasoning 字段。
 # reasoning_effort = "high"
 # 注意：部分思考系模型只接受默认温度，如遇请求被拒可把 temperature 调回 1.0。
 timeout_seconds = 45

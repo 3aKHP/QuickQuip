@@ -29,6 +29,9 @@ OPENAI_RESPONSES_PROTOCOL = "openai_responses"
 # 映射集中 request.py 一处。注册表键集与 config.RESPONSES_PROFILE_IDS
 # 的一致性由 test_provider_openai_responses 的守护测试断言。
 REASONING_EFFORT_TIERS = REASONING_EFFORT_CHOICES
+# 档位从低到高序（与词表同源）：六档超出 profile 词表时降档到其声明
+# 的最高档（降档规则见 request.reasoning_control，词表即降档边界）。
+_EFFORT_ORDER = REASONING_EFFORT_TIERS
 DEFAULT_PROFILE_ID = DEFAULT_RESPONSES_PROFILE_ID
 
 
@@ -49,6 +52,8 @@ class ResponsesProfile:
 PROFILES: dict[str, ResponsesProfile] = {
     "openai-public": ResponsesProfile(
         profile_id="openai-public",
+        # 官方 API 的 effort 词表按 2026-09 已核对范围收敛（low..xhigh）；
+        # 官方端点实测六档全支持后放开。
         wire_efforts=frozenset({"low", "medium", "high", "xhigh"}),
         service_tier="auto",
         tolerate_relay_events=False,
@@ -56,7 +61,9 @@ PROFILES: dict[str, ResponsesProfile] = {
     ),
     "codex-http-relay": ResponsesProfile(
         profile_id="codex-http-relay",
-        wire_efforts=frozenset({"low", "medium", "high", "xhigh"}),
+        # AGW/CPA 中转的 gpt-6 / gpt-5.6 系六档全支持（2026-09-14 按
+        # 服务器网关能力位核对），恒等映射不降档。
+        wire_efforts=frozenset(REASONING_EFFORT_TIERS),
         service_tier=None,
         tolerate_relay_events=True,
         reconcile_relay_items=True,

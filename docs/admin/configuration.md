@@ -243,7 +243,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
 | `responses_profile` | `openai_responses` 协议专属：后端能力位。`openai-public`（官方 `/v1/responses`）或 `codex-http-relay`（Codex 形态中转，不发 `service_tier`、容忍 `codex.*` 结构事件、终态缺省字段时以流式完整 item 为回放基准） | `openai-public` |
-| `reasoning_effort` | `openai_responses` 协议专属：思考档位 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`（超出后端支持自动降档为 `xhigh`；留空不发送 `reasoning` 字段）。独立于 `thinking_budget` 数字口径（后者仅 claude/gemini 生效） | `""` |
+| `reasoning_effort` | `openai_responses` 协议专属：思考档位 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`（超出后端词表自动降档到其最高支持档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 的 gpt-6/gpt-5.6 系六档全支持恒等；留空不发送 `reasoning` 字段）。独立于 `thinking_budget` 数字口径（后者仅 claude/gemini 生效） | `""` |
 
 > **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
