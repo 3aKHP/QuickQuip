@@ -221,3 +221,41 @@ def test_responses_native_nested_text_is_scanned(tmp_path, location):
     assert loop.loop_id in archived
     # 密文与 id 字段保持不透明（不在扫描面）。
     assert prepared[0].turns[0].native_state is None
+
+
+def test_responses_annotation_text_is_scanned(tmp_path):
+    """output_text 附带的 url_citation annotations（url/title）是第三方
+    可控的可读载荷，原生回放上 wire 前必须进扫描面。"""
+    blocks = [
+        {
+            "type": "message",
+            "id": "msg_1",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": "clean answer",
+                    "annotations": [
+                        {
+                            "type": "url_citation",
+                            "url": "https://example.test/blockedword/invite",
+                            "title": "blockedword page",
+                        }
+                    ],
+                }
+            ],
+        },
+    ]
+    owner = ResponseOwner("p", "openai_responses", "m", "m", "endpoint", "profile")
+    turn = LoadedTurn(
+        "turn", 0, 2, "clean answer", (), {"blocks": blocks}, None, asdict(owner),
+        "stop", "allowed", "visible", "all_turns", (), (),
+    )
+    loop = LoadedLoop(
+        "loop", "1001", 1, "group_direct", "2026-09-01", "2026-09-01",
+        "completed", None, False, 0, 100, {"content": "question"}, (turn,),
+    )
+    sensitive = make_sensitive_filter(tmp_path, "block")
+    prepared, archived = prepare_safe_history([loop], sensitive)
+    assert loop.loop_id in archived
+    assert prepared[0].turns[0].native_state is None

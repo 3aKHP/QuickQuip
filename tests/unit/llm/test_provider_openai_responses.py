@@ -1139,7 +1139,9 @@ _OK_BODY = _completed_body(
 
 async def test_client_400_history_reasoning_degrades_and_retries(caplog):
     client = _RejectingThenOkFake(
-        _config(), LLMProviderError("HTTP 400 bad request", status_code=400), [_OK_BODY]
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
     )
     with caplog.at_level("WARNING", logger="quickquip.llm.provider.openai_responses.client"):
         response = await client.complete(_history_replay_request())
@@ -1161,7 +1163,9 @@ async def test_client_400_history_reasoning_degrades_and_retries(caplog):
 
 async def test_client_current_loop_reasoning_never_stripped_by_degrade():
     client = _RejectingThenOkFake(
-        _config(), LLMProviderError("HTTP 400 bad request", status_code=400), [_OK_BODY]
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
     )
     await client.complete(_history_replay_request())
     second_input = client.payloads[1]["input"]
@@ -1173,7 +1177,9 @@ async def test_client_current_loop_reasoning_never_stripped_by_degrade():
 
 async def test_client_400_without_history_reasoning_surfaces():
     client = _RejectingThenOkFake(
-        _config(), LLMProviderError("HTTP 400 bad request", status_code=400), [_OK_BODY]
+        _config(),
+        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
+        [_OK_BODY],
     )
     plain = _request(
         [
@@ -1203,9 +1209,69 @@ async def test_client_degrade_retry_second_failure_surfaces():
     class _Always400Fake(FakeOpenAIResponsesClient):
         async def _post_json(self, url, headers, payload):
             self.payloads.append(payload)
-            raise LLMProviderError("HTTP 400 bad request", status_code=400)
+            raise LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True)
 
     client = _Always400Fake(_config(), [])
     with pytest.raises(LLMProviderError):
         await client.complete(_history_replay_request())
     assert len(client.payloads) == 2
+
+
+async def test_client_protocol_level_400_not_degrade_retried():
+    """协议层归一的 400（failed/cancelled 终态、流致命码）不触发降级重试：
+    该类失败与请求历史形状无关，重试只会加倍成本与延迟。"""
+    client = _RejectingThenOkFake(
+        _config(),
+        LLMProviderError("Provider 响应未完成：cyber_policy", status_code=400),
+        [_OK_BODY],
+    )
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    assert len(client.payloads) == 1
+
+
+async def test_client_transport_error_not_degrade_retried():
+    from quickquip.llm.provider.retry import RetryPolicy
+
+    class _TransportFake(FakeOpenAIResponsesClient):
+        def __init__(self, config):
+            super().__init__(config, [])
+            self.retry_policy = RetryPolicy(max_attempts=1)
+
+        async def _post_json(self, url, headers, payload):
+            self.payloads.append(payload)
+            raise LLMProviderError("网络错误：断连", transport=True)
+
+    client = _TransportFake(_config())
+    with pytest.raises(LLMProviderError):
+        await client.complete(_history_replay_request())
+    # 传输错误走基座退避轨道，不触发降级重试。
+    assert len(client.payloads) == 1
+
+
+async def test_client_degrade_pure_reasoning_batch_gets_placeholder():
+    """纯 reasoning 历史批次剥空后退通用表达并补占位（空 content item
+    部分端点会拒）。"""
+    client = _RejectingThenOkFake(
+        _config(), LLMProviderError("HTTP 400 x", status_code=400, http_reject=True),
+        [_OK_BODY],
+    )
+    request = _request(
+        [
+            LLMConversationMessage(role="user", content="旧问题"),
+            LLMConversationMessage(
+                role="assistant", content="", native_content=[
+                    dict(_HISTORY_NATIVE[0]),
+                ],
+            ),
+            LLMConversationMessage(role="user", content="新问题"),
+        ]
+    )
+    await client.complete(request)
+    second = client.payloads[1]["input"]
+    assert not any(item.get("type") == "reasoning" for item in second)
+    degraded = [item for item in second if item.get("role") == "assistant"]
+    assert any(
+        isinstance(item.get("content"), str) and item["content"].strip()
+        for item in degraded
+    ), "剥空批次必须有非空占位正文"

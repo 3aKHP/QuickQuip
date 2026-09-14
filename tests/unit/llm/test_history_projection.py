@@ -281,6 +281,10 @@ def test_responses_reasoning_without_ciphertext_degrades_to_structured():
     # 的通用重建不依赖原生块 → structured（区别于 claude/gemini 的档案先例）。
     assert decision.path == PATH_STRUCTURED
     assert decision.reason == "native_structure_invalid"
+    # owner 匹配下走空集 thinking 过滤：原始 reasoning item 不入 thinking_blocks
+    # （responses 序列化端不消费该字段，装入只会虚增预算计量）。
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert not assistant.thinking_blocks
 
 
 def test_responses_unknown_item_type_invalid():
@@ -617,3 +621,132 @@ def test_wire_model_resolution_honors_extra_body_override():
     assert resolve_wire_model(config, "display-a") == "display-a"
     config.extra_body = {"model": "wire-b"}
     assert resolve_wire_model(config, "display-a") == "wire-b"
+
+
+# ── 守门细化（Deep-CR：Loop 内冲突与混合 Turn） ────────────────────
+
+
+def test_responses_intra_loop_duplicate_call_id_demotes():
+    """同一 Loop 内两个 Turn 的原生批次重复声明同一 call_id（中转回显
+    短 id 的现实形态）：降 structured，不让序列化期 fail-closed 炸请求。"""
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+            _responses_turn(
+                "turn_1",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_1", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_call_id_collision"
+    for message in result.messages:
+        assert message.native_content is None
+
+
+def test_responses_mixed_native_structured_turns_stay_native():
+    """同 Loop 内个别 Turn 无原生副本（字节超限省略/撤回清理）：该 Turn
+    退通用表达并经自身 tool_calls 声明，其余 Turn 保持原生——守门的
+    声明全集与序列化端同构，不误报配对不完整。"""
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+            _turn(
+                "turn_1",
+                text="第二转正文。",
+                tools=(_tool_exec("exec_1"),),
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    assert decision.path == PATH_NATIVE
+    assert decision.reason is None
+    assistants = [m for m in result.messages if m.role == "assistant"]
+    assert assistants[0].native_content == RESPONSES_OUTPUT_ITEMS
+    assert assistants[1].native_content is None
+    assert assistants[1].tool_calls, "无原生副本的 Turn 走通用重建"
+    # 各 Turn 的声明/应答自成配对：原生 call_id 与 stable wire id 互不串扰。
+    tool_ids = [m.tool_call_id for m in result.messages if m.role == "tool"]
+    assert "call_resp_identity" in tool_ids
+    assert len(tool_ids) == 2 and len(set(tool_ids)) == 2
+
+
+def test_responses_multiple_native_loops_distinct_ids_all_native():
+    first_items = RESPONSES_OUTPUT_ITEMS
+    second_items = [
+        {
+            "type": "reasoning",
+            "id": "rs_9",
+            "summary": [],
+            "encrypted_content": "gAAA-second-cipher",
+        },
+        {
+            "type": "function_call",
+            "id": "fc_9",
+            "call_id": "call_resp_nine",
+            "name": "get_identity",
+            "arguments": '{"query":"4s"}',
+        },
+    ]
+    loops = [
+        _loop(
+            "loop_1",
+            (_responses_turn(
+                "turn_0", items=first_items,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),),
+        ),
+        _loop(
+            "loop_2",
+            (_responses_turn(
+                "turn_0", items=second_items,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_nine"),),
+                owner=RESPONSES_OWNER,
+            ),),
+        ),
+    ]
+    result = project_loops(loops, target=RESPONSES_OWNER, protocol="openai_responses")
+    assert [d.path for d in result.decisions] == [PATH_NATIVE, PATH_NATIVE]
+    assert all(d.reason is None for d in result.decisions)
+
+
+@pytest.mark.parametrize("protocol", ["claude", "gemini", "openai"])
+def test_owner_unknown_label_applies_across_protocols(protocol):
+    """target 缺失（fallback_urls 等）+ 有原生副本：与真失配分开标注，
+    三个既有协议同享该标签语义（仅日志面，投影行为不变）。"""
+    owner = replace(OWNER, protocol=protocol)
+    blocks = [
+        {"type": "thinking", "thinking": "想", "signature": "sig"},
+        {"type": "text", "text": "答"},
+    ]
+    loop = _loop(
+        "loop_1",
+        (_turn("turn_0", native_state=_native_state(owner, blocks),
+               owner=_owner_dict(owner)),),
+    )
+    result = project_loops([loop], target=None, protocol=protocol)
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "owner_unknown"

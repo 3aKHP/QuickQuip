@@ -36,6 +36,10 @@ from quickquip.llm.provider.openai_responses.stream import fold_stream_events
 
 logger = logging.getLogger(__name__)
 
+# 降级重试中纯 reasoning 历史批次剥空后的占位正文（空 content item 部分
+# 端点会拒；与投影侧 _strip_native_thinking 的占位先例同意图）。
+_DEGRADED_PLACEHOLDER = "…[历史推理内容已按降级重试省略]…"
+
 
 class OpenAIResponsesProviderClient(BaseProviderClient):
     def _profile(self):
@@ -139,8 +143,13 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         try:
             return await super().complete(request)
         except LLMProviderError as exc:
+            # 只响应上游 HTTP 层的 400 拒绝：协议层归一出的同码错误
+            # （failed/cancelled 终态、流致命码）重试必然徒劳，只会加倍
+            # 成本与延迟；transport/429/5xx 由基座处置，鉴权类不属此门。
+            if exc.transport or exc.status_code != 400 or not exc.http_reject:
+                raise
             degraded = self._portable_history_request(request)
-            if degraded is None or exc.transport or exc.status_code != 400:
+            if degraded is None:
                 raise
             logger.warning(
                 "%s responses request rejected with 400; retrying once without "
@@ -172,7 +181,14 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
                 if not (isinstance(block, dict) and block.get("type") == "reasoning")
             ]
             stripped_items += len(blocks) - len(kept)
-            stripped_messages.append(replace(message, native_content=kept or None))
+            # 纯 reasoning 批次剥空后退通用表达：空正文 item 部分端点会拒，
+            # 补占位与投影侧剥 thinking 的先例一致。
+            if not kept and not message.content:
+                stripped_messages.append(
+                    replace(message, native_content=None, content=_DEGRADED_PLACEHOLDER)
+                )
+            else:
+                stripped_messages.append(replace(message, native_content=kept or None))
         if not stripped_items:
             return None
         return replace(request, messages=stripped_messages)

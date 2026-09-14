@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from quickquip.llm.agent_records import ResponseOwner
-from quickquip.llm.provider.base import LLMProviderError
 from quickquip.llm.provider.owner import owner_matches
 from quickquip.llm.store_parts.agent_records import (
     LoadedLoop,
@@ -112,6 +111,14 @@ def _turn_native_blocks(turn: LoadedTurn) -> list[dict[str, Any]] | None:
 
 def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> bool:
     """协议结构校验（§7.2）：签名缺失/损坏、未知块形态都判无效并降级。"""
+    if protocol == "openai_responses":
+        # output items 形态：结构校验与回放安全条件（reasoning 必须带
+        # 非空密文）收敛在协议侧 blocks_replay_valid。
+        from quickquip.llm.provider.openai_responses.response import (
+            blocks_replay_valid,
+        )
+
+        return blocks_replay_valid(list(blocks))
     for block in blocks:
         if not isinstance(block, dict):
             return False
@@ -141,22 +148,8 @@ def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> boo
                     return False
             elif "text" not in block and "inlineData" not in block and "fileData" not in block:
                 return False
-        elif protocol == "openai_responses":
-            # output items 形态（复用终态校验）+ 回放安全条件：reasoning
-            # item 必须携带非空密文——store:false 手动上下文下缺密文的
-            # reasoning 不具备原生回放资格，降级走通用重建。
-            if kind == "reasoning" and not str(block.get("encrypted_content") or "").strip():
-                return False
         else:
             return False
-    if protocol != "openai_responses":
-        return True
-    from quickquip.llm.provider.openai_responses.response import validate_output_items
-
-    try:
-        validate_output_items(list(blocks), provider_id="history")
-    except LLMProviderError:
-        return False
     return True
 
 
@@ -378,20 +371,6 @@ def _project_loop_archive(loop: LoadedLoop) -> list[LLMConversationMessage]:
     ]
 
 
-def _native_declared_call_ids(messages: list[LLMConversationMessage]) -> list[str]:
-    """原生批次声明的 function call_id（按出现顺序；仅 assistant native 消息）。"""
-    declared: list[str] = []
-    for message in messages:
-        if message.native_content is None:
-            continue
-        for item in message.native_content:
-            if isinstance(item, dict) and item.get("type") == "function_call":
-                call_id = item.get("call_id")
-                if isinstance(call_id, str) and call_id:
-                    declared.append(call_id)
-    return declared
-
-
 def _demote_loop_to_structured(
     loop: LoadedLoop,
     *,
@@ -418,33 +397,23 @@ def _responses_replay_preflight(
 ) -> None:
     """Responses 原生回放的确定性守门（发送前消灭可预判的序列化失败）。
 
-    - 跨 Loop call_id 冲突 → 后到 Loop 降 structured（stable wire id 构造性唯一）。
-    - Loop 内原生声明集与 tool 应答集不一致（记录部分损坏）→ 该 Loop 降
-      structured（通用重建自 executions 出发，自洽配对）。
+    违例判定（Loop 内 call_id 重复、声明/应答配对不完整、跨 Loop 冲突）
+    收敛在协议侧 ``replay_guard``；此处按违例把对应 Loop 降为 structured
+    （stable wire id 构造性唯一，通用重建自 executions 出发自洽配对）。
     """
-    seen_call_ids: set[str] = set()
-    for loop in loops:
-        if decisions[loop.loop_id].path != PATH_NATIVE:
-            continue
-        declared = _native_declared_call_ids(segments[loop.loop_id])
-        answered = {
-            message.tool_call_id
-            for message in segments[loop.loop_id]
-            if message.role == "tool" and message.tool_call_id
-        }
-        if answered != set(declared):
-            segments[loop.loop_id], decisions[loop.loop_id] = _demote_loop_to_structured(
-                loop, protocol="openai_responses",
-                archive_loop_ids=archive_loop_ids, reason="native_pairing_incomplete",
-            )
-            continue
-        if any(call_id in seen_call_ids for call_id in declared):
-            segments[loop.loop_id], decisions[loop.loop_id] = _demote_loop_to_structured(
-                loop, protocol="openai_responses",
-                archive_loop_ids=archive_loop_ids, reason="native_call_id_collision",
-            )
-            continue
-        seen_call_ids.update(declared)
+    from quickquip.llm.provider.openai_responses.replay_guard import (
+        replay_guard_violations,
+    )
+
+    native_loop_ids = [
+        loop.loop_id for loop in loops if decisions[loop.loop_id].path == PATH_NATIVE
+    ]
+    for loop_id, reason in replay_guard_violations(segments, native_loop_ids).items():
+        loop = next(item for item in loops if item.loop_id == loop_id)
+        segments[loop_id], decisions[loop_id] = _demote_loop_to_structured(
+            loop, protocol="openai_responses",
+            archive_loop_ids=archive_loop_ids, reason=reason,
+        )
 
 
 def project_loops(
@@ -517,12 +486,13 @@ def _estimate_messages_tokens(messages: list[LLMConversationMessage]) -> int:
     total = 0
     for message in messages:
         # 原生路径消息的正文/工具声明已内含于 native 块（serializer 原样
-        # 发送、忽略通用字段），单计 content 会双倍计量同一 wire 内容。
+        # 发送、忽略通用字段），单计 content 会双倍计量同一 wire 内容；
+        # thinking_blocks 同理跳过（与 request_budget 的单计口径一致）。
         if message.native_content is None:
             total += estimate_tokens(message.content)
             for call in message.tool_calls:
                 total += estimate_tokens(call.arguments_json)
-        total += estimate_native_blocks_tokens(message.thinking_blocks)
+            total += estimate_native_blocks_tokens(message.thinking_blocks)
         total += estimate_native_blocks_tokens(message.native_content)
     return total
 

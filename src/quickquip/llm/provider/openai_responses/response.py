@@ -57,6 +57,27 @@ def validate_output_items(
     return items
 
 
+def blocks_replay_valid(blocks: list) -> bool:
+    """持久化原生批次的跨轮回放资格（历史投影调用，bool 语义）。
+
+    结构校验复用终态校验；附加回放安全条件——``reasoning`` item 必须携带
+    非空 ``encrypted_content``：store:false 手动上下文下缺密文的 reasoning
+    不具备原生回放资格，投影层降级走通用重建。
+    """
+    for block in blocks:
+        if not isinstance(block, dict):
+            return False
+        if block.get("type") == "reasoning" and not str(
+            block.get("encrypted_content") or ""
+        ).strip():
+            return False
+    try:
+        validate_output_items(list(blocks), provider_id="history")
+    except LLMProviderError:
+        return False
+    return True
+
+
 def _validate_message_item(item: dict[str, Any], provider_id: str) -> None:
     if item.get("role") != "assistant" or not isinstance(item.get("content"), list):
         raise _malformed("Provider 响应包含畸形 message item。", provider_id)
