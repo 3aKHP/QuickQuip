@@ -158,7 +158,10 @@ class HealthMixin:
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
         lines.append(f"Persona：{settings.persona_id}")
-        lines.append(f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
+        lines.append(
+            f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
+            f"({settings.trigger_prefix})"
+        )
         if chat_type == "private":
             lines.append(f"会话状态：{'进行中' if settings.enabled else '未开启'}")
             lines.append("直聊触发：仅在会话开启后生效")
@@ -187,13 +190,17 @@ class HealthMixin:
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
         lines.append(f"工具调用：{'ON' if self.config.runtime.tool_calling_enabled else 'OFF'}")
         lines.append(f"MCP：{self._summarize_mcp_status()}")
-        lines.append(
-            f"工具列表：{', '.join(self._get_enabled_tool_names(chat_type=chat_type, provider_id=settings.provider_id)) or '无'}"
+        enabled_tool_names = self._get_enabled_tool_names(
+            chat_type=chat_type, provider_id=settings.provider_id
         )
+        lines.append(f"工具列表：{', '.join(enabled_tool_names) or '无'}")
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
         lines.append(f"Persona：{settings.persona_id}")
-        lines.append(f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
+        lines.append(
+            f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
+            f"({settings.trigger_prefix})"
+        )
         if chat_type == "private":
             lines.append(f"会话状态：{'进行中' if settings.enabled else '未开启'}")
             lines.append("直聊触发：仅在会话开启后生效")
@@ -204,7 +211,8 @@ class HealthMixin:
             f"短期会话：已存 {self.store.count_conversation_messages(scope_key)} 条 / {window_note}"
         )
         lines.append(
-            f"长期记忆：已存 {self.store.count_memories(scope_key)} 条 / 上限 {MAX_STORED_MEMORY_ITEMS} 条"
+            f"长期记忆：已存 {self.store.count_memories(scope_key)} 条 "
+            f"/ 上限 {MAX_STORED_MEMORY_ITEMS} 条"
         )
         if chat_type == "private":
             lines.append("临时上下文：私聊不额外注入群消息")
@@ -225,7 +233,9 @@ class HealthMixin:
             db_path=self.store.path,
             vocab_path=self.vocab_path,
             identity_path=self.identity_path,
-            tool_names=self._get_enabled_tool_names(chat_type=chat_type, provider_id=settings.provider_id),
+            tool_names=self._get_enabled_tool_names(
+                chat_type=chat_type, provider_id=settings.provider_id
+            ),
             mcp_status_summary=self._summarize_mcp_status(),
             mcp_enabled=self.config.mcp.enabled,
             mcp_tool_count=(self._get_shared_mcp_health() or ("", len(self.mcp_tool_names)))[1],
@@ -261,7 +271,9 @@ class HealthMixin:
         results = await probe_all_providers(self.config)
         return format_probe_results(results)
 
-    async def format_current_provider_probe(self, group_id: int | str, chat_type: str = "group") -> str:
+    async def format_current_provider_probe(
+        self, group_id: int | str, chat_type: str = "group"
+    ) -> str:
         """探活当前会话实际生效的 provider/model（/llm reload 后验证用）。"""
         settings = self.get_chat_settings(group_id, chat_type=chat_type)
         provider = self.config.providers.get(settings.provider_id)

@@ -33,10 +33,11 @@ class MemoryStoreMixin:
             content = render(body)
         with self._connect() as conn:
             cursor = conn.execute(
-                """
-                INSERT INTO memories (group_id, user_id, scope, content, tags_json, source, confidence, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                "\n"
+                "                INSERT INTO memories (group_id, user_id, scope, content, "
+                "tags_json, source, confidence, created_at, updated_at)\n"
+                "                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n"
+                "                ",
                 (
                     str(group_id),
                     None if user_id is None else str(user_id),
@@ -90,9 +91,14 @@ class MemoryStoreMixin:
         tokens = _build_query_tokens(query)
         matchers = [RecordQuery(value, snapshot) for value in dict.fromkeys([query, *tokens])]
         with self._connect() as conn:
-            clause = "scope='user' AND user_id=?" if scope == "user" else "scope='group' OR (scope='user' AND user_id=?)"
+            clause = (
+                "scope='user' AND user_id=?"
+                if scope == "user"
+                else "scope='group' OR (scope='user' AND user_id=?)"
+            )
             rows = conn.execute(
-                f"SELECT * FROM memories WHERE group_id=? AND ({clause}) ORDER BY confidence DESC, id DESC",
+                f"SELECT * FROM memories WHERE group_id=? AND ({clause}) "
+                f"ORDER BY confidence DESC, id DESC",
                 (str(group_id), None if user_id is None else str(user_id)),
             )
             result = []
@@ -113,7 +119,10 @@ class MemoryStoreMixin:
             raise ValueError(f"成员存在歧义：{choices}。请使用 QQ 或 #编号")
         with self._connect() as conn:
             if keyword.startswith("#") and keyword[1:].isdigit():
-                return conn.execute("DELETE FROM memories WHERE group_id=? AND id=?", (str(group_id), int(keyword[1:]))).rowcount
+                return conn.execute(
+                    "DELETE FROM memories WHERE group_id=? AND id=?",
+                    (str(group_id), int(keyword[1:])),
+                ).rowcount
             matcher = RecordQuery(keyword, snapshot)
             rows = conn.execute("SELECT * FROM memories WHERE group_id=?", (str(group_id),))
             ids = [row["id"] for row in rows if matcher.matches(dict(row), True)]

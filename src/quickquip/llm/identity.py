@@ -39,7 +39,11 @@ def collect_known_participants(
     participants: list[dict[str, str]] = []
     seen_user_ids: set[str] = set()
 
-    def _push(raw_user_id: int | str | None, raw_sender_name: str = "", raw_canonical_name: str = "") -> None:
+    def _push(
+        raw_user_id: int | str | None,
+        raw_sender_name: str = "",
+        raw_canonical_name: str = "",
+    ) -> None:
         user_key = str(raw_user_id or "").strip()
         if user_key and not user_key.isdigit():
             # 合成触发源（boredom_timer/scheduled_timer 等）不是群成员，

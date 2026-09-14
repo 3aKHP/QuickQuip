@@ -37,7 +37,12 @@ def message_has_segments(message) -> bool:
         segments = list(message)
     except TypeError:
         return False
-    return bool(segments and any(hasattr(segment, "type") or isinstance(segment, dict) for segment in segments))
+    return bool(
+        segments
+        and any(
+            hasattr(segment, "type") or isinstance(segment, dict) for segment in segments
+        )
+    )
 
 
 def render_segment_leaf(
@@ -58,7 +63,13 @@ def render_segment_leaf(
         if qq and qq in bot_keys:
             return "", [], True
         if qq:
-            return identities.render_mention(qq, fallback_name=names.get(qq) or str(data.get("name", "") or "")), [], False
+            return (
+                identities.render_mention(
+                    qq, fallback_name=names.get(qq) or str(data.get("name", "") or "")
+                ),
+                [],
+                False,
+            )
         return "", [], False
 
     if segment_type == "text":

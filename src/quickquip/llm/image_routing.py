@@ -10,8 +10,12 @@ from quickquip.llm.image_preprocessor import (
 from quickquip.llm.prompting import collect_recent_image_urls
 
 
-IMAGE_PREPROCESSING_UNAVAILABLE_REPLY = "当前模型无法直接读取图片，且前置图片识别服务不可用。请稍后重试或切换视觉模型。"
-IMAGE_PREPROCESSING_FAILED_REPLY = "前置图片识别失败，为避免错误猜测，本次没有调用主模型。请稍后重试或切换视觉模型。"
+IMAGE_PREPROCESSING_UNAVAILABLE_REPLY = (
+    "当前模型无法直接读取图片，且前置图片识别服务不可用。请稍后重试或切换视觉模型。"
+)
+IMAGE_PREPROCESSING_FAILED_REPLY = (
+    "前置图片识别失败，为避免错误猜测，本次没有调用主模型。请稍后重试或切换视觉模型。"
+)
 
 # 候选来源标签前缀：service.py 落库/并入逻辑按此前缀过滤（转发并入转发文本、
 # 近期缓冲图注不落库），改名必须同步，故收敛为单一事实来源。
@@ -77,7 +81,8 @@ def plan_non_vision_images(
         return ImageRoutingPlan(
             candidates=[],
             error_reply=(
-                f"一次最多识别 {MAX_IMAGES_PER_PREPROCESSING_REQUEST} 张图片，请减少图片数量后重试。"
+                f"一次最多识别 {MAX_IMAGES_PER_PREPROCESSING_REQUEST} 张图片，"
+                "请减少图片数量后重试。"
             ),
         )
 

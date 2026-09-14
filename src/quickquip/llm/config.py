@@ -176,7 +176,10 @@ class ImagePreprocessingConfig:
 
 
 # 群聊用户可见的"当前 provider 已禁用"提示：回复主链 / 单发命令 / 当前探活共用，勿在各处另行拼装
-DISABLED_PROVIDER_REPLY = "当前 provider 已禁用：{provider_id}（enabled = false），请用 /llm use 切换其他 provider。"
+DISABLED_PROVIDER_REPLY = (
+    "当前 provider 已禁用：{provider_id}（enabled = false）"
+    "，请用 /llm use 切换其他 provider。"
+)
 
 
 @dataclass(slots=True)
@@ -361,7 +364,9 @@ class LLMConfig:
             overrides[param_field] = getattr(base, param_field) if value is None else value
         merged = EpochParams(**overrides)
         if not _epoch_params_valid(merged):
-            logger.warning("provider %s 的 epoch_* 覆盖参数关系非法，回退 [runtime] 值", provider.id)
+            logger.warning(
+                "provider %s 的 epoch_* 覆盖参数关系非法，回退 [runtime] 值", provider.id
+            )
             return base
         return merged
 
@@ -381,7 +386,8 @@ def _epoch_params_valid(params: "EpochParams") -> bool:
     return (
         params.context_tokens > 0
         and params.cold_idle_seconds >= 0
-        and 0 < params.cold_target_tokens < params.cold_trigger_tokens <= params.hot_target_tokens < params.cap_tokens
+        and 0 < params.cold_target_tokens < params.cold_trigger_tokens
+        <= params.hot_target_tokens < params.cap_tokens
     )
 
 _KNOWN_PERSONA_KEYS = {"id", "display_name", "system_prompt", "style_prompt", "scope"}
@@ -397,7 +403,9 @@ def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfi
         raw_scope = entry.get("scope", [])
         if isinstance(raw_scope, str):
             raw_scope = [raw_scope]
-        parsed_scope = [s for s in (str(s).strip().lower() for s in raw_scope) if s in {"group", "private"}]
+        parsed_scope = [
+            s for s in (str(s).strip().lower() for s in raw_scope) if s in {"group", "private"}
+        ]
         extras = {k: v for k, v in entry.items() if k not in _KNOWN_PERSONA_KEYS}
         personas[persona_id] = PersonaConfig(
             id=persona_id,
@@ -485,26 +493,42 @@ def _load_personas_from_dir(personas_dir: Path) -> list[dict[str, Any]]:
             # Inject shared content
             if shared_system:
                 existing = str(entry.get("system_prompt", "")).rstrip()
-                entry["system_prompt"] = (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
+                entry["system_prompt"] = (
+                    (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
+                )
             if shared_style:
                 existing = str(entry.get("style_prompt", "")).rstrip()
-                entry["style_prompt"] = (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
+                entry["style_prompt"] = (
+                    (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
+                )
             personas.append(entry)
         elif "personas" in data:
             for entry in data["personas"]:
                 entry = dict(entry)
                 if shared_system:
                     existing = str(entry.get("system_prompt", "")).rstrip()
-                    entry["system_prompt"] = (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
+                    entry["system_prompt"] = (
+                        (existing + "\n\n" + shared_system).lstrip()
+                        if existing
+                        else shared_system
+                    )
                 if shared_style:
                     existing = str(entry.get("style_prompt", "")).rstrip()
-                    entry["style_prompt"] = (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
+                    entry["style_prompt"] = (
+                        (existing + "\n\n" + shared_style).lstrip()
+                        if existing
+                        else shared_style
+                    )
                 personas.append(entry)
 
     return personas
 
 
-def _read_providers(raw_providers: list[dict[str, Any]], *, style_profiles: dict[str, str] | None = None) -> dict[str, ProviderConfig]:
+def _read_providers(
+    raw_providers: list[dict[str, Any]],
+    *,
+    style_profiles: dict[str, str] | None = None,
+) -> dict[str, ProviderConfig]:
     style_profiles = style_profiles or {}
     providers: dict[str, ProviderConfig] = {}
     for entry in raw_providers:
@@ -561,7 +585,11 @@ def _parse_single_provider(
         default_model=str(entry.get("default_model", "")).strip(),
         models=models,
         enabled=as_bool(entry.get("enabled", True), default=True),
-        non_vision_models=[str(item).strip() for item in entry.get("non_vision_models", []) if str(item).strip()],
+        non_vision_models=[
+            str(item).strip()
+            for item in entry.get("non_vision_models", [])
+            if str(item).strip()
+        ],
         timeout_seconds=float(entry.get("timeout_seconds", 45)),
         temperature=float(entry.get("temperature", 0.8)),
         max_output_tokens=int(entry.get("max_output_tokens", 800)),
@@ -571,7 +599,11 @@ def _parse_single_provider(
         user_agent=str(entry.get("user_agent", "")).strip(),
         extra_body=expand_env_value(as_dict(entry.get("extra_body"))),
         aliases=aliases,
-        fallback_urls=[str(item).strip() for item in entry.get("fallback_urls", []) if str(item).strip()],
+        fallback_urls=[
+            str(item).strip()
+            for item in entry.get("fallback_urls", [])
+            if str(item).strip()
+        ],
         proxy=str(entry.get("proxy", "")).strip(),
         prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
@@ -735,7 +767,11 @@ def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig
                 headers={str(k): str(v) for k, v in raw_headers.items()},
                 image=str(entry.get("image", "")).strip(),
                 docker_command=str(entry.get("docker_command", "docker")).strip() or "docker",
-                docker_args=[str(item) for item in entry.get("docker_args", []) if str(item).strip()],
+                docker_args=[
+                    str(item)
+                    for item in entry.get("docker_args", [])
+                    if str(item).strip()
+                ],
                 mounts=[str(item).strip() for item in entry.get("mounts", []) if str(item).strip()],
                 network=str(entry.get("network", "")).strip() or None,
                 container_workdir=str(entry.get("container_workdir", "")).strip() or None,
@@ -772,7 +808,9 @@ def load_personas_only(config_path: str | Path) -> dict[str, PersonaConfig]:
     return _read_personas(raw_personas)
 
 
-def _read_providers_safe(raw_providers: Any, style_profiles: dict[str, str]) -> dict[str, ProviderConfig]:
+def _read_providers_safe(
+    raw_providers: Any, style_profiles: dict[str, str]
+) -> dict[str, ProviderConfig]:
     try:
         return _read_providers(
             raw_providers if isinstance(raw_providers, list) else [],
@@ -823,7 +861,11 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     monthly_report_raw = expand_env_value(as_dict(data.get("monthly_report")))
     image_preprocessing_raw = expand_env_value(as_dict(data.get("image_preprocessing")))
     raw_style_profiles = expand_env_value(as_dict(data.get("style_profiles")))
-    style_profiles = {str(k).strip(): str(v).strip() for k, v in raw_style_profiles.items() if str(k).strip() and str(v).strip()}
+    style_profiles = {
+        str(k).strip(): str(v).strip()
+        for k, v in raw_style_profiles.items()
+        if str(k).strip() and str(v).strip()
+    }
     raw_pricing = as_dict(data.get("pricing"))
     raw_providers = data.get("providers", [])
     raw_mcp_servers = mcp_raw.get("servers", [])
@@ -839,7 +881,8 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     if _enabled_tools and "enabled_mode" not in tools_raw:
         # v1.11 及更早 enabled 非空 = 精确白名单；未显式声明 mode 的升级部署提示语义变化
         logger.warning(
-            "[tools] enabled 非空且未设置 enabled_mode，按 append 语义在默认白名单与 MCP 工具之上追加；"
+            "[tools] enabled 非空且未设置 enabled_mode，"
+            "按 append 语义在默认白名单与 MCP 工具之上追加；"
             '如需精确白名单请显式设置 enabled_mode = "replace"'
         )
 
@@ -871,17 +914,27 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             default_provider=str(runtime_raw.get("default_provider", "")).strip() or None,
             default_persona=str(runtime_raw.get("default_persona", "")).strip() or None,
             history_limit=int(runtime_raw.get("history_limit", 10)),
-            history_max_messages_per_group=int(runtime_raw.get("history_max_messages_per_group", 40)),
+            history_max_messages_per_group=int(
+                runtime_raw.get("history_max_messages_per_group", 40)
+            ),
             memory_limit=int(runtime_raw.get("memory_limit", 6)),
             memory_max_items_per_group=int(runtime_raw.get("memory_max_items_per_group", 200)),
             max_prompt_chars=int(runtime_raw.get("max_prompt_chars", 4000)),
-            tool_calling_enabled=as_bool(runtime_raw.get("tool_calling_enabled", False), default=False),
+            tool_calling_enabled=as_bool(
+                runtime_raw.get("tool_calling_enabled", False), default=False
+            ),
             tool_max_rounds=int(runtime_raw.get("tool_max_rounds", 8)),
             tool_max_calls_per_round=int(runtime_raw.get("tool_max_calls_per_round", 16)),
-            retry_max_attempts=int(runtime_raw.get("retry_max_attempts", DEFAULT_RETRY_MAX_ATTEMPTS)),
+            retry_max_attempts=int(
+                runtime_raw.get("retry_max_attempts", DEFAULT_RETRY_MAX_ATTEMPTS)
+            ),
             retry_base_delay=float(runtime_raw.get("retry_base_delay", DEFAULT_RETRY_BASE_DELAY)),
-            retry_jitter=min(1.0, max(0.0, float(runtime_raw.get("retry_jitter", DEFAULT_RETRY_JITTER)))),
-            auto_memory_enabled=as_bool(runtime_raw.get("auto_memory_enabled", False), default=False),
+            retry_jitter=min(
+                1.0, max(0.0, float(runtime_raw.get("retry_jitter", DEFAULT_RETRY_JITTER)))
+            ),
+            auto_memory_enabled=as_bool(
+                runtime_raw.get("auto_memory_enabled", False), default=False
+            ),
             auto_memory_prompt=str(runtime_raw.get("auto_memory_prompt", "")).strip(),
             auto_memory_max_tokens=max(32, int(runtime_raw.get("auto_memory_max_tokens", 256))),
             epoch_context_tokens=int(runtime_raw.get("epoch_context_tokens", 8000)),
@@ -943,7 +996,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         ),
         auto_search=AutoSearchConfig(
             enabled=as_bool(auto_search_raw.get("enabled", False), default=False),
-            search_max_calls_per_round=max(1, min(int(auto_search_raw.get("search_max_calls_per_round", 3)), 32)),
+            search_max_calls_per_round=max(
+                1, min(int(auto_search_raw.get("search_max_calls_per_round", 3)), 32)
+            ),
         ),
         quick_judge=QuickJudgeConfig(
             provider_id=str(quick_judge_raw.get("provider_id", "")).strip(),
@@ -957,7 +1012,9 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             discovery_mode=str(tools_raw.get("discovery_mode", "auto")).strip().lower() or "auto",
             discovery_min_tools=max(1, int(tools_raw.get("discovery_min_tools", 10))),
             discovery_search_limit=max(1, min(int(tools_raw.get("discovery_search_limit", 5)), 20)),
-            discovery_max_loaded_tools=max(1, min(int(tools_raw.get("discovery_max_loaded_tools", 12)), 64)),
+            discovery_max_loaded_tools=max(
+                1, min(int(tools_raw.get("discovery_max_loaded_tools", 12)), 64)
+            ),
             always_loaded=[
                 str(item).strip()
                 for item in tools_raw.get("always_loaded", [])
@@ -972,8 +1029,10 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         personas=personas,
         daily_summary=DailySummaryConfig(
             enabled=as_bool(daily_summary_raw.get("enabled", False), default=False),
-            generate_cron=str(daily_summary_raw.get("generate_cron", "0 6 * * *")).strip() or "0 6 * * *",
-            publish_cron=str(daily_summary_raw.get("publish_cron", "0 12 * * *")).strip() or "0 12 * * *",
+            generate_cron=str(daily_summary_raw.get("generate_cron", "0 6 * * *")).strip()
+            or "0 6 * * *",
+            publish_cron=str(daily_summary_raw.get("publish_cron", "0 12 * * *")).strip()
+            or "0 12 * * *",
             min_messages=max(1, int(daily_summary_raw.get("min_messages", 30))),
             summary_length_hint=max(100, int(daily_summary_raw.get("summary_length_hint", 2000))),
             model_cascade=[
@@ -984,9 +1043,12 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         ),
         daily_briefing=DailyBriefingConfig(
             enabled=as_bool(daily_briefing_raw.get("enabled", False), default=False),
-            morning_cron=str(daily_briefing_raw.get("morning_cron", "0 8 * * *")).strip() or "0 8 * * *",
-            noon_cron=str(daily_briefing_raw.get("noon_cron", "0 12 * * *")).strip() or "0 12 * * *",
-            evening_cron=str(daily_briefing_raw.get("evening_cron", "0 22 * * *")).strip() or "0 22 * * *",
+            morning_cron=str(daily_briefing_raw.get("morning_cron", "0 8 * * *")).strip()
+            or "0 8 * * *",
+            noon_cron=str(daily_briefing_raw.get("noon_cron", "0 12 * * *")).strip()
+            or "0 12 * * *",
+            evening_cron=str(daily_briefing_raw.get("evening_cron", "0 22 * * *")).strip()
+            or "0 22 * * *",
             min_messages_for_llm=max(1, int(daily_briefing_raw.get("min_messages_for_llm", 5))),
             active_users_limit=max(1, int(daily_briefing_raw.get("active_users_limit", 5))),
             hot_words_limit=max(1, int(daily_briefing_raw.get("hot_words_limit", 5))),
@@ -1001,8 +1063,10 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         ),
         weekly_report=WeeklyReportConfig(
             enabled=as_bool(weekly_report_raw.get("enabled", False), default=False),
-            generate_cron=str(weekly_report_raw.get("generate_cron", "0 9 * * 1")).strip() or "0 9 * * 1",
-            publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
+            generate_cron=str(weekly_report_raw.get("generate_cron", "0 9 * * 1")).strip()
+            or "0 9 * * 1",
+            publish_cron=str(weekly_report_raw.get("publish_cron", "0 10 * * *")).strip()
+            or "0 10 * * *",
             min_messages=max(1, int(weekly_report_raw.get("min_messages", 100))),
             length_hint=max(200, int(weekly_report_raw.get("length_hint", 2000))),
             model_cascade=[
@@ -1013,8 +1077,10 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         ),
         monthly_report=MonthlyReportConfig(
             enabled=as_bool(monthly_report_raw.get("enabled", False), default=False),
-            generate_cron=str(monthly_report_raw.get("generate_cron", "0 9 1 * *")).strip() or "0 9 1 * *",
-            publish_cron=str(monthly_report_raw.get("publish_cron", "0 10 * * *")).strip() or "0 10 * * *",
+            generate_cron=str(monthly_report_raw.get("generate_cron", "0 9 1 * *")).strip()
+            or "0 9 1 * *",
+            publish_cron=str(monthly_report_raw.get("publish_cron", "0 10 * * *")).strip()
+            or "0 10 * * *",
             min_messages=max(1, int(monthly_report_raw.get("min_messages", 300))),
             length_hint=max(200, int(monthly_report_raw.get("length_hint", 2500))),
             input_char_budget=max(
@@ -1096,7 +1162,9 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
         config.runtime.default_persona = next(iter(config.personas))
     elif config.runtime.default_persona not in config.personas:
         fallback = next(iter(config.personas))
-        errors.append(f"默认 persona {config.runtime.default_persona!r} 不存在，已回退为 {fallback!r}")
+        errors.append(
+            f"默认 persona {config.runtime.default_persona!r} 不存在，已回退为 {fallback!r}"
+        )
         config.runtime.default_persona = fallback
 
     # -- tools --
@@ -1110,9 +1178,13 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
         if provider.protocol not in {"openai", "claude", "gemini"}:
             provider_errors.append(f"未知协议 {provider.protocol!r}")
         if provider.auth_method not in {"api_key", "bearer"}:
-            provider_errors.append(f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）")
+            provider_errors.append(
+                f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）"
+            )
         if provider.protocol == "claude" and provider.cache_ttl not in ("", "5m", "1h"):
-            provider_errors.append(f"非法 cache_ttl {provider.cache_ttl!r}（claude 仅支持 5m / 1h，留空=默认 5min）")
+            provider_errors.append(
+                f"非法 cache_ttl {provider.cache_ttl!r}（claude 仅支持 5m / 1h，留空=默认 5min）"
+            )
         if provider.builtin_search and provider.protocol != "gemini":
             # 非 gemini 协议不剪除 provider：键误配只影响该键本身，记录
             # warning 即可，请求级生效由 provider_builtin_search_active 兜底为惰性。
@@ -1129,7 +1201,11 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
             provider_errors.append("缺少 default_model")
         if provider.default_model and provider.default_model not in provider.models:
             provider.models.insert(0, provider.default_model)
-            logger.warning("provider %s 的 default_model %r 不在 models 列表中，已自动添加", pid, provider.default_model)
+            logger.warning(
+                "provider %s 的 default_model %r 不在 models 列表中，已自动添加",
+                pid,
+                provider.default_model,
+            )
 
         if provider_errors:
             logger.error("provider %s 配置无效：%s，已跳过", pid, "; ".join(provider_errors))
@@ -1167,10 +1243,26 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
             )
 
     for cascade_name, feature_enabled, cascade_list in [
-        ("daily_summary.model_cascade", config.daily_summary.enabled, config.daily_summary.model_cascade),
-        ("daily_briefing.model_cascade", config.daily_briefing.enabled, config.daily_briefing.model_cascade),
-        ("weekly_report.model_cascade", config.weekly_report.enabled, config.weekly_report.model_cascade),
-        ("monthly_report.model_cascade", config.monthly_report.enabled, config.monthly_report.model_cascade),
+        (
+            "daily_summary.model_cascade",
+            config.daily_summary.enabled,
+            config.daily_summary.model_cascade,
+        ),
+        (
+            "daily_briefing.model_cascade",
+            config.daily_briefing.enabled,
+            config.daily_briefing.model_cascade,
+        ),
+        (
+            "weekly_report.model_cascade",
+            config.weekly_report.enabled,
+            config.weekly_report.model_cascade,
+        ),
+        (
+            "monthly_report.model_cascade",
+            config.monthly_report.enabled,
+            config.monthly_report.model_cascade,
+        ),
     ]:
         if not feature_enabled:
             continue

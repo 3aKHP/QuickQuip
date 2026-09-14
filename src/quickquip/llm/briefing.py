@@ -104,7 +104,9 @@ def _build_user_prompt(context: DailyBriefingContext, *, identity_resolver=None)
 
     lines.append("消息样本：")
     lines.append("=== 样本开始 ===")
-    lines.append(_format_sample_messages(context.sample_messages, identity_resolver=identity_resolver))
+    lines.append(
+        _format_sample_messages(context.sample_messages, identity_resolver=identity_resolver)
+    )
     lines.append("=== 样本结束 ===")
     lines.append("")
     lines.append("请直接输出最终播报正文，不要附加解释。")
@@ -133,7 +135,9 @@ async def generate_daily_briefing(
     default_model: str,
     identity_resolver=None,
 ) -> tuple[str, str]:
-    set_usage_scope("briefing", group_id=str(group_id), persona_id=persona.id, run_id=new_usage_run_id())
+    set_usage_scope(
+        "briefing", group_id=str(group_id), persona_id=persona.id, run_id=new_usage_run_id()
+    )
     system_prompt = _build_system_prompt(persona, context, briefing_config)
     user_message = LLMConversationMessage(
         role="user", content=_build_user_prompt(context, identity_resolver=identity_resolver)
@@ -197,7 +201,11 @@ async def generate_daily_briefing(
                 )
                 last_error = RuntimeError(f"non-normal finish_reason: {response.finish_reason!r}")
                 continue
-            logger.warning("daily_briefing: %s/%s returned empty text, trying next", provider_id, model)
+            logger.warning(
+                "daily_briefing: %s/%s returned empty text, trying next",
+                provider_id,
+                model,
+            )
         except LLMProviderError as exc:
             logger.warning(
                 "daily_briefing: %s/%s provider error: %s, trying next",

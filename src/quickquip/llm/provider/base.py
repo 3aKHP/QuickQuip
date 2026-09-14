@@ -476,7 +476,9 @@ class BaseProviderClient:
                     image_url, headers={"User-Agent": "QuickQuip/1.0"}
                 )
                 response.raise_for_status()
-                media_type = response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                media_type = (
+                    response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                )
                 if not media_type.startswith("image/"):
                     raise LLMProviderError(f"图片 URL 不是受支持的图片类型：{image_url}")
                 raw = response.content
@@ -492,7 +494,9 @@ class BaseProviderClient:
         if not raw:
             raise LLMProviderError(f"图片内容为空：{image_url}")
         if len(raw) > MAX_IMAGE_BYTES:
-            raise LLMProviderError(f"图片过大，当前限制为 {MAX_IMAGE_BYTES // (1024 * 1024)}MB：{image_url}")
+            raise LLMProviderError(
+                f"图片过大，当前限制为 {MAX_IMAGE_BYTES // (1024 * 1024)}MB：{image_url}"
+            )
 
         return LLMImageInput(
             source_url=image_url,
@@ -533,7 +537,9 @@ class BaseProviderClient:
         remaining = MAX_IMAGES_PER_REQUEST - len(candidates)
         for image in (inline_images or [])[:remaining]:
             candidates.append((image.source_label, image.data, image.media_type))
-        budget = budget if budget is not None else InlineMediaBudget(self.config.max_inline_media_bytes)
+        budget = (
+            budget if budget is not None else InlineMediaBudget(self.config.max_inline_media_bytes)
+        )
         kept, _dropped = budget.guard(candidates)
         return [
             LLMImageInput(
@@ -569,7 +575,9 @@ class BaseProviderClient:
             urls = message.image_urls if message.role == "user" else []
             if not urls and not message.inline_images:
                 continue
-            images[index] = await self._prepare_image_inputs(urls, message.inline_images, budget=budget)
+            images[index] = await self._prepare_image_inputs(
+                urls, message.inline_images, budget=budget
+            )
         return images
 
     def _swap_base_url(self, url: str, new_base: str) -> str:
@@ -584,7 +592,9 @@ class BaseProviderClient:
         for fb in self.config.fallback_urls:
             yield self._swap_base_url(url, fb)
 
-    async def _execute_with_fallback(self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[Any, str]:
+    async def _execute_with_fallback(
+        self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> tuple[Any, str]:
         """按候选端点链执行，返回 ``(结果, 实际成功的 URL)``（§7.3）。
 
         失败的可重试错误切换下一候选；不可重试立即抛。调用方用返回的
@@ -602,19 +612,27 @@ class BaseProviderClient:
                 last_exc = exc
         raise last_exc  # type: ignore[misc]
 
-    async def _post_json_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_json_with_fallback(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> dict[str, Any]:
         data, _ = await self._execute_with_fallback(self._post_json, url, headers, payload)
         return data
 
-    async def _post_stream_sse_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _post_stream_sse_with_fallback(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         events, _ = await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
         return events
 
-    async def _post_json_candidate(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    async def _post_json_candidate(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], str]:
         """``_post_json_with_fallback`` 的候选可观测变体：带回实际端点。"""
         return await self._execute_with_fallback(self._post_json, url, headers, payload)
 
-    async def _post_stream_sse_candidate(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    async def _post_stream_sse_candidate(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], str]:
         return await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
 
     def _combine_stream_trace(
@@ -626,7 +644,9 @@ class BaseProviderClient:
             f"{type(self).__name__} must reconstruct its streamed response"
         )
 
-    async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_json(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request_headers = _headers_to_text(headers)
         started = time.monotonic()
@@ -739,7 +759,9 @@ class BaseProviderClient:
         )
         return result
 
-    async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _post_stream_sse(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {**headers, "accept": "text/event-stream"}
         started = time.monotonic()

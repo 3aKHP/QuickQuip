@@ -149,7 +149,9 @@ class StdioTransport(Transport):
             if not self.config.image:
                 raise MCPError(f"MCP server {self.config.id} 缺少 image")
 
-            command = [self.config.docker_command, "run", "-i", "--rm", "--pull", self.config.pull_policy]
+            command = [
+                self.config.docker_command, "run", "-i", "--rm", "--pull", self.config.pull_policy
+            ]
             if self.config.network:
                 command.extend(["--network", self.config.network])
             if self.config.container_workdir:
@@ -164,12 +166,18 @@ class StdioTransport(Transport):
             env = dict(os.environ)
             return command, env, self.config.cwd, dict(self.config.env)
 
-        raise MCPError(f"MCP server {self.config.id} 使用了未知 stdio transport：{self.config.transport}")
+        raise MCPError(
+            f"MCP server {self.config.id} 使用了未知 stdio transport：{self.config.transport}"
+        )
 
     async def start(self) -> None:
         command, env, cwd, docker_env = self._build_command()
         self._stdout_buffer.clear()
-        logger.info("Starting MCP server %s with transport=%s", self.config.id, self.config.transport)
+        logger.info(
+            "Starting MCP server %s with transport=%s",
+            self.config.id,
+            self.config.transport,
+        )
         with _temp_env_file(docker_env) as env_file:
             if env_file is not None:
                 image_idx = command.index(self.config.image)
@@ -183,8 +191,12 @@ class StdioTransport(Transport):
                 env=env,
             )
         # temp file is deleted here; the child process already captured its env
-        self._reader_task = asyncio.create_task(self._reader_loop(), name=f"mcp-reader-{self.config.id}")
-        self._stderr_task = asyncio.create_task(self._stderr_loop(), name=f"mcp-stderr-{self.config.id}")
+        self._reader_task = asyncio.create_task(
+            self._reader_loop(), name=f"mcp-reader-{self.config.id}"
+        )
+        self._stderr_task = asyncio.create_task(
+            self._stderr_loop(), name=f"mcp-stderr-{self.config.id}"
+        )
 
     async def send(self, payload: dict[str, Any]) -> None:
         if self.process is None or self.process.stdin is None:
@@ -373,7 +385,11 @@ class StreamableHttpTransport(Transport):
                 http_status=status,
             ) from exc
         except httpx.RequestError as exc:
-            kind = MCP_FAILURE_TIMEOUT if isinstance(exc, httpx.TimeoutException) else MCP_FAILURE_TRANSPORT
+            kind = (
+                MCP_FAILURE_TIMEOUT
+                if isinstance(exc, httpx.TimeoutException)
+                else MCP_FAILURE_TRANSPORT
+            )
             raise MCPError(
                 f"MCP server {self.config.id} 请求失败：{_sanitize_error_message(exc)}",
                 failure_kind=kind,
@@ -440,7 +456,9 @@ class SseTransport(Transport):
 
         if self._endpoint_error is not None:
             await self._cancel_sse_task()
-            raise MCPError(f"MCP server {self.config.id} SSE 连接失败：{self._endpoint_error}") from self._endpoint_error
+            raise MCPError(
+                f"MCP server {self.config.id} SSE 连接失败：{self._endpoint_error}"
+            ) from self._endpoint_error
 
     async def send(self, payload: dict[str, Any]) -> None:
         if self._client is None or self._post_url is None:
@@ -462,7 +480,11 @@ class SseTransport(Transport):
                 http_status=status,
             ) from exc
         except httpx.RequestError as exc:
-            kind = MCP_FAILURE_TIMEOUT if isinstance(exc, httpx.TimeoutException) else MCP_FAILURE_TRANSPORT
+            kind = (
+                MCP_FAILURE_TIMEOUT
+                if isinstance(exc, httpx.TimeoutException)
+                else MCP_FAILURE_TRANSPORT
+            )
             raise MCPError(
                 f"MCP server {self.config.id} 请求失败：{_sanitize_error_message(exc)}",
                 failure_kind=kind,

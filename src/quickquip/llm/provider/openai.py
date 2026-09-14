@@ -24,7 +24,9 @@ class OpenAIProviderClient(BaseProviderClient):
                 return str(block.get("reasoning_content", ""))
         return ""
 
-    def _serialize_message(self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]) -> dict[str, Any]:
+    def _serialize_message(
+        self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]
+    ) -> dict[str, Any]:
         if message.role == "assistant":
             payload: dict[str, Any] = {
                 "role": "assistant",
@@ -71,7 +73,9 @@ class OpenAIProviderClient(BaseProviderClient):
 
         return {"role": "user", "content": message.content}
 
-    async def _build_request_parts(self, request: LLMRequest) -> tuple[str, dict[str, str], dict[str, Any]]:
+    async def _build_request_parts(
+        self, request: LLMRequest
+    ) -> tuple[str, dict[str, str], dict[str, Any]]:
         url = self.config.base_url.rstrip("/") + "/chat/completions"
         headers = {
             **self.config.headers,
@@ -169,8 +173,16 @@ class OpenAIProviderClient(BaseProviderClient):
             finish_reason=str(choice.get("finish_reason", "")).strip() or None,
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
-            cache_read_tokens=prompt_details.get("cached_tokens") if isinstance(prompt_details, dict) else None,
-            thinking_tokens=completion_details.get("reasoning_tokens") if isinstance(completion_details, dict) else None,
+            cache_read_tokens=(
+                prompt_details.get("cached_tokens")
+                if isinstance(prompt_details, dict)
+                else None
+            ),
+            thinking_tokens=(
+                completion_details.get("reasoning_tokens")
+                if isinstance(completion_details, dict)
+                else None
+            ),
             thinking_blocks=thinking_blocks,
         )
 
@@ -216,10 +228,16 @@ class OpenAIProviderClient(BaseProviderClient):
                 if usage.get("completion_tokens") is not None:
                     output_tokens = usage["completion_tokens"]
                 prompt_details = usage.get("prompt_tokens_details") or {}
-                if isinstance(prompt_details, dict) and prompt_details.get("cached_tokens") is not None:
+                if (
+                    isinstance(prompt_details, dict)
+                    and prompt_details.get("cached_tokens") is not None
+                ):
                     cache_read_tokens = prompt_details["cached_tokens"]
                 completion_details = usage.get("completion_tokens_details") or {}
-                if isinstance(completion_details, dict) and completion_details.get("reasoning_tokens") is not None:
+                if (
+                    isinstance(completion_details, dict)
+                    and completion_details.get("reasoning_tokens") is not None
+                ):
                     thinking_tokens = completion_details["reasoning_tokens"]
 
         tool_calls = [
@@ -232,7 +250,9 @@ class OpenAIProviderClient(BaseProviderClient):
         ]
         thinking_blocks: list[dict[str, Any]] = []
         if reasoning_parts:
-            thinking_blocks.append({"type": "reasoning", "reasoning_content": "".join(reasoning_parts)})
+            thinking_blocks.append(
+                {"type": "reasoning", "reasoning_content": "".join(reasoning_parts)}
+            )
         return LLMResponse(
             text=strip_leading_reasoning_content("".join(text_parts)),
             model=model,

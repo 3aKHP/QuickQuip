@@ -165,7 +165,11 @@ class AutoMemoryMixin:
                 name = msg.get("canonical_name") or msg.get("sender_name", "?")
                 name = snapshot.name(msg.get("user_id"), name)
                 source_text = str(msg.get("raw_content") or msg.get("content", ""))
-                content = (source_text if source_text == user_text else render(legacy(source_text), snapshot)).strip()
+                content = (
+                    source_text
+                    if source_text == user_text
+                    else render(legacy(source_text), snapshot)
+                ).strip()
                 if not content:
                     continue
                 tag = {"user": "群友", "assistant": "bot"}.get(role, role)

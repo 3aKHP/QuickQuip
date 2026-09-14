@@ -154,7 +154,9 @@ async def run_quick_judge(
     不走群配置、不注入记忆、不启用工具，只发单条 system+user。
     优先使用 [triggers.quick_judge] 配置的 provider/model。
     """
-    result = await run_quick_judge_detailed(config, prompt, max_tokens, client_builder=client_builder)
+    result = await run_quick_judge_detailed(
+        config, prompt, max_tokens, client_builder=client_builder
+    )
     if result.outcome == "provider_error" and result.error is not None:
         # 保持既有公共契约：provider 异常继续上抛（调用方 fail-closed 自行处理）
         raise result.error

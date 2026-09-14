@@ -224,7 +224,11 @@ async def _record_usage(
                 "exclusive" if client.config.protocol == "claude" else "inclusive"
             )
             if rates is not None:
-                pricing_model = f"{client.config.id}/{model}" if f"{client.config.id}/{model}" in configured else model
+                pricing_model = (
+                    f"{client.config.id}/{model}"
+                    if f"{client.config.id}/{model}" in configured
+                    else model
+                )
                 pricing_source = rates.source
                 pricing_confidence = rates.confidence
 
@@ -306,7 +310,9 @@ def _schedule_usage_record(
     """
     finished_at = datetime.now(timezone.utc).isoformat()
     task = asyncio.create_task(
-        _record_usage(client, request, response, started, stream_used, state, error_msg, finished_at)
+        _record_usage(
+            client, request, response, started, stream_used, state, error_msg, finished_at
+        )
     )
     _USAGE_TASKS.add(task)
     task.add_done_callback(_USAGE_TASKS.discard)

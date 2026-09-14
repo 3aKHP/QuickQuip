@@ -592,7 +592,10 @@ def deliver_mcp_tool_result(
             LLMInlineImage(
                 data=decoded,
                 media_type=candidate.mime_type.lower(),
-                source_label=f"MCP/{_safe_metadata(server_id)}/{_safe_metadata(tool_name)} image {len(images) + 1}",
+                source_label=(
+                    f"MCP/{_safe_metadata(server_id)}/{_safe_metadata(tool_name)} "
+                    f"image {len(images) + 1}"
+                ),
             )
         )
     return LLMToolOutput(
