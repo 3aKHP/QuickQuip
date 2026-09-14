@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 import logging
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
@@ -24,7 +24,6 @@ from quickquip.common.sensitive_filter import (
     get_filter as _get_sensitive_filter,
     log_hits as _log_sensitive_hits,
     reload_filter as _reload_sensitive_filter,
-    scan_and_log as _scan_sensitive_text,
 )
 from quickquip.llm.config import (
     DISABLED_PROVIDER_REPLY,
@@ -45,15 +44,6 @@ from quickquip.llm.request_budget import (
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
 from quickquip.llm.store_parts.agent_records import AgentStoreError
-from quickquip.sts.config import (
-    DEFECTIFY_RATE_LIMIT_KEY,
-    DEFECTIFY_RULE_NAME,
-    TURMFLUCH_RATE_LIMIT_KEY,
-    TURMFLUCH_RULE_NAME,
-)
-from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
-from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
-from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 from quickquip.llm.identity import (
     IdentityIndex,
     collect_known_participants,
@@ -63,11 +53,7 @@ from quickquip.common.identity_sources import IdentityRepository, identities
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
     FORWARD_IMAGE_CONTEXT_PREFIX,
-    IMAGE_PREPROCESSING_FAILED_REPLY,
-    IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
     RECENT_IMAGE_CONTEXT_PREFIX,
-    match_image_descriptions,
-    plan_non_vision_images,
 )
 from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.prompting import (
@@ -124,19 +110,16 @@ from quickquip.llm.service_parts import (
     AutoMemoryMixin,
     DrawSvgToolMixin,
     HealthMixin,
+    ImagesMixin,
     McpLifecycleMixin,
     ScheduleMessagesToolMixin,
+    SingleShotEntriesMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
 )
 from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, patch_meter, usage_scope
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
-from quickquip.llm.single_shot import (
-    CommandSingleShotSpec,
-    run_card_le_nearest,
-    run_command_single_shot,
-)
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
 from quickquip.llm.tool_loop import run_tool_call_loop
@@ -171,57 +154,18 @@ _GROUP_CACHE_MAX = 512
 logger = logging.getLogger(__name__)
 
 
-def _defectify_reply_text(raw_text: str) -> str | None:
-    return raw_text or None
-
-
-def _turmfluch_reply_text(raw_text: str) -> str | None:
-    name = extract_card_le_name(raw_text)
-    if name is None:
-        return None
-    return f"{name}了"
-
-
-# 一次性生成入口的差异点束；共享管线本体在 quickquip.llm.single_shot
-_DEFECTIFY_SPEC = CommandSingleShotSpec(
-    rate_limit_key=DEFECTIFY_RATE_LIMIT_KEY,
-    rule_name=DEFECTIFY_RULE_NAME,
-    usage_reply="用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
-    invalid_reply="模型没有返回可显示的文本。",
-    temperature=0.9,
-    input_channel="defectify_input",
-    output_channel="defectify_output",
-    usage_scope_name="defectify",
-    prompt_builder=build_defectify_prompt,
-    response_parser=_defectify_reply_text,
-)
-_TURMFLUCH_SPEC = CommandSingleShotSpec(
-    rate_limit_key=TURMFLUCH_RATE_LIMIT_KEY,
-    rule_name=TURMFLUCH_RULE_NAME,
-    usage_reply="用法：/turmfluch <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /turmfluch。",
-    invalid_reply="模型没有返回合法的卡牌/遗物名。",
-    temperature=0.7,
-    input_channel="turmfluch_input",
-    output_channel="turmfluch_output",
-    usage_scope_name="turmfluch",
-    prompt_builder=build_turmfluch_prompt,
-    response_parser=_turmfluch_reply_text,
-    log_label="/turmfluch",
-)
-
-
-@dataclass
-class _ImagePreprocessingOutcome:
-    """图像预处理段继续走主生成链路时向调用方回传的状态。"""
-
-    effective_image_urls: list[str]
-    request_quoted_image_urls: list[str]
-    request_forward_image_urls: list[str]
-    image_descriptions: list[ImageDescription]
-    is_non_vision: bool
-
-
-class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(
+    ScopeMixin,
+    ToolMixin,
+    McpLifecycleMixin,
+    DrawSvgToolMixin,
+    ScheduleMessagesToolMixin,
+    SingleShotEntriesMixin,
+    ImagesMixin,
+    HealthMixin,
+    StateMixin,
+    AutoMemoryMixin,
+):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
@@ -568,90 +512,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             projected_history_segments=projected_history_segments,
         )
 
-    async def generate_defectify_reply(
-        self,
-        *,
-        chat_id: int | str,
-        chat_type: str,
-        prompt: str,
-        image_urls: list[str] | None = None,
-        quoted_text: str = "",
-        quoted_image_urls: list[str] | None = None,
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-    ) -> dict[str, str]:
-        # 薄编排：管线本体在 quickquip.llm.single_shot。显式传本模块级
-        # build_provider_client / _get_sensitive_filter，保持既有 patch 点有效。
-        return await run_command_single_shot(
-            spec=_DEFECTIFY_SPEC,
-            config=self.config,
-            chat_id=chat_id,
-            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
-            get_sensitive=_get_sensitive_filter,
-            client_builder=build_provider_client,
-            merge_image_urls=self._merge_image_urls,
-            prompt=prompt,
-            image_urls=image_urls,
-            quoted_text=quoted_text,
-            quoted_image_urls=quoted_image_urls,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-        )
-
-    async def generate_turmfluch_reply(
-        self,
-        *,
-        chat_id: int | str,
-        chat_type: str,
-        prompt: str,
-        image_urls: list[str] | None = None,
-        quoted_text: str = "",
-        quoted_image_urls: list[str] | None = None,
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-    ) -> dict[str, Any]:
-        """/turmfluch 命令：把输入提炼成一句「<卡牌或遗物名>了」。"""
-        # 薄编排：同 generate_defectify_reply，管线本体在 quickquip.llm.single_shot。
-        return await run_command_single_shot(
-            spec=_TURMFLUCH_SPEC,
-            config=self.config,
-            chat_id=chat_id,
-            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
-            get_sensitive=_get_sensitive_filter,
-            client_builder=build_provider_client,
-            merge_image_urls=self._merge_image_urls,
-            prompt=prompt,
-            image_urls=image_urls,
-            quoted_text=quoted_text,
-            quoted_image_urls=quoted_image_urls,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-        )
-
-    async def generate_card_le_nearest(
-        self,
-        *,
-        captured: str,
-        chat_id: int | str,
-        chat_type: str,
-    ) -> dict | None:
-        """被动路径：群友说的「{captured}了」里的 captured 不是合法名时，找最近的
-        真名，返回 ``{"reply": "名了", ...}``；无合法结果返回 None。
-
-        走 ``[triggers.quick_judge]`` 配置的专用便宜模型，不走群主模型。
-        """
-        # 薄编排：管线本体在 quickquip.llm.single_shot，patch 点同上。
-        return await run_card_le_nearest(
-            config=self.config,
-            chat_id=chat_id,
-            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            get_sensitive=_get_sensitive_filter,
-            client_builder=build_provider_client,
-            captured=captured,
-        )
-
     def _collect_known_participants(
         self,
         *,
@@ -785,135 +645,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
             image_preprocessor=self.image_preprocessor,
-        )
-
-    async def _preprocess_images_for_model(
-        self,
-        *,
-        chat_id: int | str,
-        scope_key: str,
-        provider: ProviderConfig,
-        settings: ResolvedGroupSettings,
-        request_image_urls: list[str],
-        request_quoted_image_urls: list[str],
-        request_forward_image_urls: list[str],
-        normalized_image_urls: list[str],
-        normalized_quoted_image_urls: list[str],
-        normalized_forward_image_urls: list[str],
-        recent_messages: list[dict[str, str]] | None,
-        include_recent_images: bool,
-        sensitive: SensitiveFilter,
-    ) -> dict[str, object] | _ImagePreprocessingOutcome:
-        # ── image preprocessing & non-VLM stripping ──────────────────
-        current_model = settings.model or provider.default_model
-        is_non_vision = current_model in provider.non_vision_models
-        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
-        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls)
-
-        image_plan = None
-        if is_non_vision:
-            image_plan = plan_non_vision_images(
-                image_urls=request_image_urls,
-                quoted_image_urls=request_quoted_image_urls,
-                forward_image_urls=request_forward_image_urls,
-                recent_messages=recent_messages,
-                include_recent_images=include_recent_images,
-                max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
-            )
-            if image_plan.error_reply:
-                return reply_result(image_plan.error_reply, llm_used=False)
-
-        if effective_image_urls:
-            # images= 是实际附带数（转发图不附带，不计入）；sources 各分项同理
-            # 只列附带来源，避免 total 与分项和对不上误导排查
-            sources: list[str] = []
-            if normalized_image_urls:
-                sources.append(f"直接={len(normalized_image_urls)}")
-            if normalized_quoted_image_urls:
-                sources.append(f"引用={len(normalized_quoted_image_urls)}")
-            logger.info(
-                "group=%s model=%s non_vision=%s images=%d (%s)",
-                chat_id, current_model, is_non_vision,
-                len(effective_image_urls), ", ".join(sources),
-            )
-
-        image_descriptions: list[ImageDescription] = []
-        ok_count = 0
-        if image_plan is not None and image_plan.candidates:
-            if self.image_preprocessor is None:
-                logger.error(
-                    "group=%s model=%s requires image preprocessing but no preprocessor is bound",
-                    chat_id,
-                    current_model,
-                )
-                return reply_result(
-                    IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
-                    llm_used=False,
-                    provider_id=provider.id,
-                    model=current_model,
-                )
-
-            raw_descriptions = await self.image_preprocessor.describe_images(
-                [candidate.url for candidate in image_plan.candidates]
-            )
-            description_match = match_image_descriptions(
-                image_plan.candidates,
-                raw_descriptions,
-            )
-            image_descriptions = description_match.descriptions
-            ok_count = len(image_descriptions)
-            if description_match.failed_urls:
-                logger.warning(
-                    "group=%s preprocessor: %d ok, %d failed (%s)",
-                    chat_id,
-                    ok_count,
-                    len(description_match.failed_urls),
-                    ", ".join(description_match.failed_urls),
-                )
-                return reply_result(
-                    IMAGE_PREPROCESSING_FAILED_REPLY,
-                    llm_used=True,
-                    provider_id=self.config.image_preprocessing.provider_id,
-                    model=self.config.image_preprocessing.model,
-                )
-            description_blob = "\n".join(
-                item.text_description for item in image_descriptions
-                if item.text_description
-            )
-            description_scan = _scan_sensitive_text(
-                description_blob,
-                channel="image_description",
-                scope=scope_key,
-                sensitive_filter=sensitive,
-            )
-            if description_scan.blocked:
-                return reply_result(
-                    DEFAULT_BLOCK_REPLY,
-                    llm_used=True,
-                    provider_id=self.config.image_preprocessing.provider_id,
-                    model=self.config.image_preprocessing.model,
-                )
-            logger.info("group=%s preprocessor: all %d images described", chat_id, ok_count)
-
-        if image_plan is not None and image_plan.candidates:
-            stripped_count = len(image_plan.candidates)
-            logger.info(
-                "group=%s non-VLM strip: replaced %d images with text descriptions",
-                chat_id,
-                stripped_count,
-            )
-            effective_image_urls = []
-            request_image_urls = []
-            request_quoted_image_urls = []
-            request_forward_image_urls = []
-
-        # ── end image preprocessing ─────────────────────────────────
-        return _ImagePreprocessingOutcome(
-            effective_image_urls=effective_image_urls,
-            request_quoted_image_urls=request_quoted_image_urls,
-            request_forward_image_urls=request_forward_image_urls,
-            image_descriptions=image_descriptions,
-            is_non_vision=is_non_vision,
         )
 
     def _load_scrubbed_history_and_participants(
