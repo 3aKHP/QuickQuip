@@ -43,3 +43,38 @@ def test_llm_runtime_all_symbols_resolvable_from_service():
 def test_llm_runtime_all_list_not_empty():
     """Sanity guard: __all__ should never be accidentally cleared."""
     assert len(llm_runtime.__all__) > 0
+
+
+# ---------------------------------------------------------------------------
+# quickquip.llm.skills 包的 re-export 契约
+# ---------------------------------------------------------------------------
+
+
+def test_skills_package_all_symbols_resolvable():
+    """skills.__all__ 里的每个符号都必须真实存在（防陈旧条目/笔误）。"""
+    from quickquip.llm import skills
+
+    missing = [name for name in skills.__all__ if not hasattr(skills, name)]
+    assert not missing, (
+        f"quickquip.llm.skills.__all__ 列出了不存在的符号：{missing}。"
+        "补齐 re-export 或从 __all__ 移除。"
+    )
+
+
+def test_skills_package_no_unlisted_public_leakage():
+    """dir(skills) 的公开非模块名必须 ⊆ __all__（防内部实现泄漏成公共面）。"""
+    import types
+
+    from quickquip.llm import skills
+
+    leaked = [
+        name
+        for name in dir(skills)
+        if not name.startswith("_")
+        and name not in skills.__all__
+        and not isinstance(getattr(skills, name), types.ModuleType)
+    ]
+    assert not leaked, (
+        f"quickquip.llm.skills 泄漏了 __all__ 之外的公开符号：{leaked}。"
+        "收入 __all__ 或改为下划线私有名。"
+    )

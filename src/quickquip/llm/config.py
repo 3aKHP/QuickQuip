@@ -122,6 +122,21 @@ class ToolsConfig:
 
 
 @dataclass(slots=True)
+class SkillsConfig:
+    """[skills] 段：Skill 目录与 4 个 skill 工具的资源/安全上限。"""
+
+    enabled: bool = True
+    # 空 = 默认项目根 skills/；相对路径按项目根解析。
+    catalog_dir: str = ""
+    catalog_max_bytes: int = 8192
+    resource_max_bytes: int = 65536
+    search_max_results: int = 50
+    search_max_output_bytes: int = 32768
+    script_timeout_ms: int = 30000
+    script_max_output_bytes: int = 65536
+
+
+@dataclass(slots=True)
 class MCPServerConfig:
     id: str
     transport: str = "stdio"
@@ -337,6 +352,7 @@ class LLMConfig:
     auto_search: AutoSearchConfig = field(default_factory=AutoSearchConfig)
     quick_judge: QuickJudgeConfig = field(default_factory=QuickJudgeConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    skills: SkillsConfig = field(default_factory=SkillsConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     personas: dict[str, PersonaConfig] = field(default_factory=dict)
@@ -713,6 +729,30 @@ def _parse_enabled_mode(raw: Any) -> str:
     return mode
 
 
+def _skills_positive_int(raw: Any, *, default: int, label: str, maximum: int | None = None) -> int:
+    """[skills] 正整数键：不可解析/非正数回退默认并告警；超过 maximum 钳制并告警。"""
+    value: int
+    if isinstance(raw, bool) or raw is None:
+        value = default
+        if raw is not None:
+            logger.warning("[skills] %s 非法取值 %r，回退默认值 %d", label, raw, default)
+    elif isinstance(raw, (int, float)):
+        value = int(raw)
+    else:
+        try:
+            value = int(str(raw).strip())
+        except ValueError:
+            logger.warning("[skills] %s 非法取值 %r，回退默认值 %d", label, raw, default)
+            return default
+    if value <= 0:
+        logger.warning("[skills] %s 须为正整数（当前 %r），回退默认值 %d", label, raw, default)
+        return default
+    if maximum is not None and value > maximum:
+        logger.warning("[skills] %s=%d 超过上限 %d，已钳制", label, value, maximum)
+        return maximum
+    return value
+
+
 def _read_mcp_servers(raw_servers: list[dict[str, Any]]) -> list[MCPServerConfig]:
     servers: list[MCPServerConfig] = []
     seen_ids: set[str] = set()
@@ -877,6 +917,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
         recent_context_floor_seconds = 300
     triggers_raw = expand_env_value(as_dict(data.get("triggers")))
     tools_raw = expand_env_value(as_dict(data.get("tools")))
+    skills_raw = expand_env_value(as_dict(data.get("skills")))
     mcp_raw = expand_env_value(as_dict(data.get("mcp")))
     daily_summary_raw = expand_env_value(as_dict(data.get("daily_summary")))
     daily_briefing_raw = expand_env_value(as_dict(data.get("daily_briefing")))
@@ -1043,6 +1084,41 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 for item in tools_raw.get("always_loaded", [])
                 if str(item).strip()
             ],
+        ),
+        skills=SkillsConfig(
+            enabled=as_bool(skills_raw.get("enabled", True), default=True),
+            catalog_dir=str(skills_raw.get("catalog_dir", "")).strip(),
+            catalog_max_bytes=_skills_positive_int(
+                skills_raw.get("catalog_max_bytes"),
+                default=8192,
+                label="catalog_max_bytes",
+            ),
+            resource_max_bytes=_skills_positive_int(
+                skills_raw.get("resource_max_bytes"),
+                default=65536,
+                label="resource_max_bytes",
+            ),
+            search_max_results=_skills_positive_int(
+                skills_raw.get("search_max_results"),
+                default=50,
+                label="search_max_results",
+            ),
+            search_max_output_bytes=_skills_positive_int(
+                skills_raw.get("search_max_output_bytes"),
+                default=32768,
+                label="search_max_output_bytes",
+            ),
+            script_timeout_ms=_skills_positive_int(
+                skills_raw.get("script_timeout_ms"),
+                default=30000,
+                label="script_timeout_ms",
+                maximum=120000,
+            ),
+            script_max_output_bytes=_skills_positive_int(
+                skills_raw.get("script_max_output_bytes"),
+                default=65536,
+                label="script_max_output_bytes",
+            ),
         ),
         mcp=MCPConfig(
             enabled=as_bool(mcp_raw.get("enabled", False), default=False),

@@ -5,6 +5,7 @@ from .images import ImagesMixin
 from .mcp_lifecycle import McpLifecycleMixin
 from .schedule_messages_tool import ScheduleMessagesToolMixin
 from .single_shot import SingleShotEntriesMixin
+from .skills import SkillsToolMixin
 from .scope import ScopeMixin
 from .state import StateMixin
 from .tools import ToolMixin
@@ -16,6 +17,7 @@ __all__ = [
     "McpLifecycleMixin",
     "ScheduleMessagesToolMixin",
     "SingleShotEntriesMixin",
+    "SkillsToolMixin",
     "ScopeMixin",
     "StateMixin",
     "ToolMixin",

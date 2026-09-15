@@ -68,6 +68,10 @@ config/llm.*.local.toml
 !config/*.example
 !config/personas.example/
 
+# Private deployed skills (public templates ship in skills.example/)
+/skills/
+!/skills.example/
+
 # Private production deployment assets
 /prod/
 !/prod.example/

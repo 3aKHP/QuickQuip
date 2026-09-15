@@ -114,6 +114,7 @@ from quickquip.llm.service_parts import (
     McpLifecycleMixin,
     ScheduleMessagesToolMixin,
     SingleShotEntriesMixin,
+    SkillsToolMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
@@ -160,6 +161,7 @@ class LLMService(
     McpLifecycleMixin,
     DrawSvgToolMixin,
     ScheduleMessagesToolMixin,
+    SkillsToolMixin,
     SingleShotEntriesMixin,
     ImagesMixin,
     HealthMixin,
@@ -194,6 +196,10 @@ class LLMService(
 
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
+        # skills 需要在 config 就位后做启动注册；空目录时留待每轮构建系统
+        # 提示时惰性注册（热部署，无 reload 钩子）。
+        self._init_skills()
+        self.register_skill_tools()
 
         self._identity_repository = (
             identities
@@ -318,6 +324,7 @@ class LLMService(
         session_preset: str = "",
         provider_id: str | None = None,
         builtin_search_active: bool = False,
+        skills_catalog_block: str = "",
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -340,6 +347,7 @@ class LLMService(
             chat_type=chat_type,
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
+            skills_catalog_block=skills_catalog_block,
         )
 
     def _build_turn_envelope(
@@ -1073,6 +1081,9 @@ class LLMService(
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
+            skills_catalog_block=self._skills_catalog_block(
+                provider=provider, model=settings.model
+            ),
         )
         # 装配对象持有当轮上下文；账本 meter 消费 assemble() 后的最终值。
         assembler = TurnRequestAssembler(

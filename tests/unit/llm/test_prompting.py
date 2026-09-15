@@ -830,6 +830,39 @@ def test_system_prompt_byte_stable_across_builds():
     assert first == second, f"system prompt 不是字节稳定：\n{_first_divergence(first, second)}"
 
 
+# ---------------------------------------------------------------------------
+# skills_catalog_block：静态段末尾挂载契约
+# ---------------------------------------------------------------------------
+
+_CATALOG_BLOCK = '<skill_catalog hash="abc123">\n- demo: 演示。\n</skill_catalog>'
+
+
+def test_skills_catalog_block_appended_at_static_tail():
+    base = build_system_prompt(**_static_prompt_kwargs())
+    with_block = build_system_prompt(
+        **_static_prompt_kwargs(), skills_catalog_block=_CATALOG_BLOCK
+    )
+    assert with_block == f"{base}\n\n{_CATALOG_BLOCK}"
+
+
+def test_skills_catalog_block_empty_leaves_prompt_byte_identical():
+    base = build_system_prompt(**_static_prompt_kwargs())
+    for empty in ("", "   ", "\n\n"):
+        assert (
+            build_system_prompt(**_static_prompt_kwargs(), skills_catalog_block=empty)
+            == base
+        )
+
+
+def test_skills_catalog_block_stable_across_builds():
+    kwargs = {**_static_prompt_kwargs(), "skills_catalog_block": _CATALOG_BLOCK}
+    first = build_system_prompt(**kwargs)
+    second = build_system_prompt(**kwargs)
+    assert first == second, (
+        f"带 catalog 块的 system prompt 漂移：\n{_first_divergence(first, second)}"
+    )
+
+
 def test_system_prompt_contains_no_dynamic_markers():
     prompt = build_system_prompt(**_static_prompt_kwargs())
     for marker in ("当前北京时间", "【轮次上下文】", "持久记忆", "参与成员", "词表命中", "节日"):

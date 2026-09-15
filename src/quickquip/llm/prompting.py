@@ -230,6 +230,7 @@ def build_system_prompt(
     chat_type: str = "group",
     provider_style_overrides: str = "",
     session_preset: str = "",
+    skills_catalog_block: str = "",
 ) -> str:
     """组装 system prompt。只含跨轮、跨日稳定的段落（前缀缓存字节稳定契约）；
     时间/节日/participants/memories/词表命中等逐轮变化的内容一律走
@@ -340,6 +341,10 @@ def build_system_prompt(
         for spec in tool_specs:
             tool_lines.append(f"- {spec.name}：{spec.description}")
         lines.append("\n".join(tool_lines))
+
+    # Skill catalog 常驻静态段末尾（目录不变则字节稳定，保持前缀缓存契约）。
+    if skills_catalog_block.strip():
+        lines.append(skills_catalog_block.strip())
 
     return "\n\n".join(line for line in lines if line)
 

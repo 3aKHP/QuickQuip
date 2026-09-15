@@ -8,6 +8,7 @@ from quickquip.common.env import PROJECT_ROOT
 CONFIG_DIR = PROJECT_ROOT / "config"
 DATA_DIR = PROJECT_ROOT / "data"
 LLM_ABOUT_DIR = PROJECT_ROOT / "llm_about"
+SKILLS_DIR = PROJECT_ROOT / "skills"
 CONFIG_PERSONAS_DIR = CONFIG_DIR / "personas"
 CHAT_RULES_TOML_PATH = Path("config/chat_rules.toml")
 TIEBA_DATA_DIR = Path("data/tieba")
