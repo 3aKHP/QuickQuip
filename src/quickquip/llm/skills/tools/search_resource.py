@@ -25,6 +25,8 @@ TOOL_DESCRIPTION = (
     "is_regex=true 时按正则表达式匹配。返回 file:line 命中及前后各 1 行"
     "上下文，命中数与输出体积受部署上限截断。适合命令、报错信息、精确术语"
     "等关键词型定位；找到后用 read_skill_resource 读取完整段落。"
+    "为防灾难性回溯，含嵌套量词或交叠分支的量化组等病态正则形态会被"
+    "拒绝——被拒之模式请改用字面搜索（is_regex=false）或改写。"
 )
 
 TOOL_KEYWORDS = ["skill", "技能", "搜索", "检索", "查找", "grep", "search", "关键词"]
@@ -32,6 +34,8 @@ TOOL_KEYWORDS = ["skill", "技能", "搜索", "检索", "查找", "grep", "searc
 # 单文件检索读取上限：超出只检索前段并标注，防超大资产撑爆内存。
 _SEARCH_FILE_READ_CAP_BYTES = 1024 * 1024
 _MAX_QUERY_CHARS = 200
+
+_QUANTIFIER_RE = re.compile(r"\{(?:\d+(?:,\d*)?|,\d+)\}")
 
 SEARCH_SKILL_RESOURCES_SPEC = LLMToolSpec(
     name=SEARCH_SKILL_RESOURCES_TOOL_NAME,
@@ -78,6 +82,16 @@ def search_skill_resources(
         return LLMToolOutput(
             content=f"query 超过 {_MAX_QUERY_CHARS} 字符上限。", is_error=True
         )
+    if is_regex:
+        reason = _find_pathological_regex(query)
+        if reason is not None:
+            return LLMToolOutput(
+                content=(
+                    f"正则形态不被允许（{reason}），可能在逐行检索中产生灾难性回溯；"
+                    "请改用字面搜索（is_regex=false）或改写为无嵌套量词、无交叠分支的形态。"
+                ),
+                is_error=True,
+            )
     flags = 0 if case_sensitive else re.IGNORECASE
     try:
         pattern = re.compile(query if is_regex else re.escape(query), flags)
@@ -165,3 +179,154 @@ def _format_hit(path: str, lines: list[str], index: int) -> str:
         marker = ">" if line_index == index else " "
         rows.append(f"{marker} {line_index + 1} | {lines[line_index]}")
     return "\n".join(rows)
+
+
+_INLINE_FLAG_CHARS = frozenset("aiLmsux-")
+
+
+class _RegexGroupFrame:
+    __slots__ = ("start", "has_quantifier", "branches", "current")
+
+    def __init__(self, start: int = 0) -> None:
+        self.start = start
+        self.has_quantifier = False
+        self.branches: list[str] = []
+        self.current = ""
+
+
+def _quantifier_span(query: str, pos: int) -> int | None:
+    """``pos`` 处若是一个量词 token，返回其结束位置；``{m,n}`` 需完整匹配才算。"""
+    if pos >= len(query):
+        return None
+    char = query[pos]
+    if char in "*+?":
+        return pos + 1
+    if char == "{":
+        match = _QUANTIFIER_RE.match(query, pos)
+        if match is not None:
+            return match.end()
+    return None
+
+
+def _consume_group_prefix(query: str, index: int) -> tuple[int, bool] | None:
+    """解析 ``(`` 处的组头，返回（组体起始位置, 是否为无组体的自包含原子）。
+
+    自包含原子（``(?P=name)``、``(?i)``）不需要入栈；无法识别的形态返回
+    ``None`` 表示本检查无意见，交给 ``re.compile`` 判定。
+    """
+    length = len(query)
+    if index + 1 >= length or query[index + 1] != "?":
+        return index + 1, False
+    rest = query[index + 2 :]
+    if rest.startswith("P="):
+        close = query.find(")", index + 4)
+        if close == -1:
+            return None
+        return close + 1, True
+    if rest.startswith(("<=", "<!")):
+        return index + 4, False
+    if rest.startswith(("P<", "<")):
+        close = query.find(">", index + 2)
+        if close == -1:
+            return None
+        return close + 1, False
+    if rest.startswith((":", "=", "!", ">")):
+        return index + 3, False
+    if rest.startswith("("):
+        # 条件组 (?(id)yes|no)：id 部分无嵌套，跳过即可。
+        close = query.find(")", index + 3)
+        if close == -1:
+            return None
+        return close + 1, False
+    cursor = index + 2
+    while cursor < length and query[cursor] in _INLINE_FLAG_CHARS:
+        cursor += 1
+    if cursor < length and query[cursor] == ":":
+        return cursor + 1, False
+    if cursor < length and query[cursor] == ")":
+        return cursor + 1, True
+    return None
+
+
+def _find_pathological_regex(query: str) -> str | None:
+    """走查式静态检查：返回病态形态的原因字符串，良性/无意见返回 ``None``。
+
+    只盯两类高危结构——带量词后缀的组体内再含量词（``(x+x+)+``），以及
+    带量词后缀的组顶层交替分支相互交叠（``(a|a)*``、``(a|ab)*``）。解析
+    遇到不认识或畸形的结构时返回 ``None`` 交由 ``re.compile`` 的错误路径
+    处理；本检查永不抛出异常。
+    """
+    frames: list[_RegexGroupFrame] = []
+    top = _RegexGroupFrame()
+    index = 0
+    length = len(query)
+    while index < length:
+        char = query[index]
+        frame = frames[-1] if frames else top
+        if char == "\\":
+            frame.current += query[index : index + 2]
+            index += 2
+            continue
+        if char == "[":
+            end = index + 1
+            if end < length and query[end] == "^":
+                end += 1
+            if end < length and query[end] == "]":
+                end += 1
+            while end < length and query[end] != "]":
+                end += 2 if query[end] == "\\" else 1
+            end = min(end + 1, length)
+            frame.current += query[index:end]
+            index = end
+            continue
+        if char == "(":
+            if query.startswith("(?#", index):
+                close = query.find(")", index + 3)
+                index = length if close == -1 else close + 1
+                continue
+            consumed = _consume_group_prefix(query, index)
+            if consumed is None:
+                return None
+            body_start, is_bare_atom = consumed
+            if is_bare_atom:
+                frame.current += query[index:body_start]
+                index = body_start
+                continue
+            frames.append(_RegexGroupFrame(start=index))
+            index = body_start
+            continue
+        if char == ")":
+            if not frames:
+                return None
+            frame = frames.pop()
+            suffix_end = _quantifier_span(query, index + 1)
+            if suffix_end is not None:
+                if frame.has_quantifier:
+                    return "量化组内嵌套量词"
+                branches = [*frame.branches, frame.current]
+                for left in range(len(branches)):
+                    for right in range(left + 1, len(branches)):
+                        first, second = branches[left], branches[right]
+                        if first.startswith(second) or second.startswith(first):
+                            return "量化组分支相互交叠"
+            close_end = suffix_end if suffix_end is not None else index + 1
+            parent = frames[-1] if frames else top
+            parent.current += query[frame.start : close_end]
+            if frame.has_quantifier or suffix_end is not None:
+                parent.has_quantifier = True
+            index = close_end
+            continue
+        if char == "|":
+            frame.branches.append(frame.current)
+            frame.current = ""
+            index += 1
+            continue
+        quantifier_end = _quantifier_span(query, index)
+        if quantifier_end is not None:
+            frame.has_quantifier = True
+            frame.current += query[index:quantifier_end]
+            index = quantifier_end
+            continue
+        frame.current += char
+        index += 1
+    return None

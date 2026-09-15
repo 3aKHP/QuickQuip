@@ -1,6 +1,8 @@
 """search_skill_resources 工具（tools/search_resource.py）。"""
 from __future__ import annotations
 
+import pytest
+
 from quickquip.llm.skills import (
     SkillActivationState,
     scan_skills,
@@ -169,3 +171,71 @@ def test_search_only_scans_catalogued_resources(make_skill):
     (root / "references" / "late.md").write_text("关键词", encoding="utf-8")
     result = _search(skills, state, query="关键词")
     assert "没有命中。" in result
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        r"(x+x+)+y",
+        r"(.*)*b",
+        r"(\w+\s*)+$",
+        "(a|a)*",
+        "(a|ab)*",
+        "(a|)*",
+        "((a+)b)*",
+        r"(?P<name>x+)+y",
+        "(?:x+x+)+",
+        "(?i:a|a)+",
+    ],
+)
+def test_search_rejects_pathological_regex(make_skill, query):
+    catalog_dir, writer = make_skill
+    writer("demo", files={"references/a.md": "xxxx"})
+    skills, state = _activated_env(catalog_dir, "demo")
+    result = _search(skills, state, query=query, is_regex=True)
+    assert isinstance(result, LLMToolOutput) and result.is_error
+    assert "灾难性回溯" in result.content
+    assert "is_regex=false" in result.content
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        r"E\d{4}",
+        "(ab)+",
+        "(错误|普通)行",
+        "a+b{1,3}",
+        "(a+(b|c)*)",
+        "(ab|cd)+",
+        "(a|bc)?",
+        "(?i)(AB|CD)+",
+        "(?<=x)y+",
+        "a{1,2}|b{2}",
+    ],
+)
+def test_search_allows_benign_regex(make_skill, query):
+    catalog_dir, writer = make_skill
+    writer("demo", files={"references/a.md": "错误码 E1001\n普通行\nabab"})
+    skills, state = _activated_env(catalog_dir, "demo")
+    result = _search(skills, state, query=query, is_regex=True)
+    assert not (isinstance(result, LLMToolOutput) and result.is_error), result
+
+
+def test_search_pathological_pattern_literal_mode_unaffected(make_skill):
+    """字面量模式不做正则静态检查，病态形态作为纯文本照常检索。"""
+    catalog_dir, writer = make_skill
+    writer("demo", files={"references/a.md": "日志 (x+x+)+y 出现"})
+    skills, state = _activated_env(catalog_dir, "demo")
+    result = _search(skills, state, query="(x+x+)+y")
+    assert isinstance(result, str)
+    assert "matches=1" in result
+
+
+def test_search_regex_lint_is_conservative_on_nested_quantifier(make_skill):
+    """``(ab?)+`` 实际可安全匹配，但按"量化组内含量词即拒"的保守规则被拒。"""
+    catalog_dir, writer = make_skill
+    writer("demo", files={"references/a.md": "abab"})
+    skills, state = _activated_env(catalog_dir, "demo")
+    result = _search(skills, state, query="(ab?)+", is_regex=True)
+    assert isinstance(result, LLMToolOutput) and result.is_error
+    assert "灾难性回溯" in result.content
