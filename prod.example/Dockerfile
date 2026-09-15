@@ -32,6 +32,7 @@ RUN pip install --no-deps --no-cache-dir .
 # CWD (/app); /app/plugins wins on sys.path and satisfies that constraint.
 COPY src/plugins/ plugins/
 COPY llm_about/ llm_about/
+COPY skills.example/ skills.example/
 RUN mkdir -p data
 
 EXPOSE 8080

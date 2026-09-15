@@ -17,6 +17,7 @@ SHARED_FILES = {
     "prod/sendkey.env": 0o600,
     "prod/check_bot.sh": 0o700,
     "prod/cron_check_bot.sh": 0o700,
+    "prod/host_metrics_collector.py": 0o700,
     "data/fonts/NotoSansSC-Regular.ttf": 0o644,
     "data/tieba/storage_state.json": 0o600,
 }

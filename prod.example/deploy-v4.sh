@@ -53,6 +53,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 die() { printf 'FAILED: %s\n' "$*" >&2; exit 1; }
+TmpManifest=""
+cleanup() { if [ -n "$TmpManifest" ]; then rm -f "$TmpManifest"; fi; }
+trap cleanup EXIT
 
 [[ "$Modes" -le 1 ]] || die "choose only one action"
 [[ "$DryRun" = 0 || ( "$Mode" = deploy && "$SkipHealth" = 0 ) ]] || die "DryRun supports deployment preview only"
@@ -83,8 +86,15 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         [[ "$item" =~ ^[a-zA-Z0-9_./-]+$ && "$item" != /* && "$item" != *..* ]] || die "invalid manifest entry"
         [ -e "$item" ] || die "manifest entry missing: $item"
     done < "$ScriptDir/deploy-manifest.txt"
+    UploadManifest="$ScriptDir/deploy-manifest.txt"
+    if [ -d skills ]; then
+        TmpManifest="$(mktemp "${TMPDIR:-/tmp}/quickquip-manifest.XXXXXX")"
+        cat "$UploadManifest" > "$TmpManifest"
+        printf 'skills\n' >> "$TmpManifest"
+        UploadManifest="$TmpManifest"
+    fi
     if [ "$DryRun" = 1 ]; then
-        tar --exclude=__pycache__ --exclude='*.pyc' -cf /dev/null -v -T "$ScriptDir/deploy-manifest.txt"
+        tar --exclude=__pycache__ --exclude='*.pyc' -cf /dev/null -v -T "$UploadManifest"
         printf 'Preview complete; frontend built locally, no remote connection or upload. Shared files: root .env, ops scripts, and present optional assets.\n'
         printf 'Version identity for this release: v%s+build.<server build time>\n' "$Version"
         exit 0
@@ -100,9 +110,9 @@ scp "${ssh_args[@]}" "$ScriptDir/remote-deploy-v4.sh" "$ScriptDir/deploy-state.p
 if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     ssh "${ssh_args[@]}" "$HostAlias" "umask 077; mkdir '$Incoming/tree' '$Incoming/shared'"
     rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' "${rsync_args[@]}" \
-        --files-from="$ScriptDir/deploy-manifest.txt" ./ "$HostAlias:$Incoming/tree/"
+        --files-from="$UploadManifest" ./ "$HostAlias:$Incoming/tree/"
     Shared=(.env prod/check_bot.sh prod/cron_check_bot.sh)
-    for item in prod/sendkey.env data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json; do
+    for item in prod/sendkey.env data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json prod/host_metrics_collector.py; do
         [ ! -f "$item" ] || Shared+=("$item")
     done
     rsync -aR --chmod=D700,F600 "${rsync_args[@]}" "${Shared[@]}" "$HostAlias:$Incoming/shared/"

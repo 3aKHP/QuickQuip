@@ -8,6 +8,7 @@ scripts/backfill_record_identities.py
 config
 frontend/dist
 llm_about
+skills.example
 src
 prod/Dockerfile
 prod/docker-compose.yml

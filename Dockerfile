@@ -78,6 +78,7 @@ RUN pip install --no-deps --no-cache-dir .
 COPY src/plugins/ plugins/
 COPY config/ config/
 COPY llm_about/ llm_about/
+COPY skills.example/ skills.example/
 COPY --from=frontend-builder /build/dist/ frontend/dist/
 
 RUN mkdir -p data
