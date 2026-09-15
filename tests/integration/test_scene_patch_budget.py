@@ -6,7 +6,17 @@ import pytest
 from quickquip.common.recent_message_buffer import RecentMessageBuffer
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.provider import LLMResponse
+from tests.fixtures.configs import MIN_LLM_CONFIG_TOML, write_llm_config_bundle
 from tests.fixtures.provider_stubs import StubBehaviorProviderClient
+
+
+@pytest.fixture
+def llm_config_paths(tmp_path):
+    # 本模块断言精确的预算/提示字节，必须与工作树里的部署资产（项目根
+    # skills/ 目录）隔离：默认配置会现扫该目录并注入 catalog 块。
+    return write_llm_config_bundle(
+        tmp_path, config_toml=f"{MIN_LLM_CONFIG_TOML}\n[skills]\nenabled = false\n"
+    )
 
 
 @pytest.fixture
