@@ -1063,6 +1063,12 @@ class LLMService(
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
+        # skills 现扫 + 惰性注册先于 tool specs 计算：新 skill 首次出现的
+        # 当轮即进入 spec 广告面；catalog 块与 specs 出自同一次扫描
+        # （一轮只扫一次目录）。
+        skills_catalog_block = self.prepare_skill_catalog_for_turn(
+            provider=provider, model=settings.model
+        )
         builtin_search_active = provider_builtin_search_active(provider)
         tool_specs = (
             self._get_enabled_tool_specs(chat_type=request.chat_type, provider_id=provider.id)
@@ -1081,9 +1087,7 @@ class LLMService(
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
-            skills_catalog_block=self._skills_catalog_block(
-                provider=provider, model=settings.model
-            ),
+            skills_catalog_block=skills_catalog_block,
         )
         # 装配对象持有当轮上下文；账本 meter 消费 assemble() 后的最终值。
         assembler = TurnRequestAssembler(

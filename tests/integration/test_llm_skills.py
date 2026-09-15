@@ -6,8 +6,9 @@
   一致；非空目录的 catalog 块挂系统提示静态段末尾、同目录重扫字节稳定。
 - 合规接缝（D6）：skill 工具产出与 search_web 结果同门槛过敏感词扫描
   （tool_result_pipeline 统一接缝：长文标记 scrub、短文/多命中整段丢弃）。
-- 热部署（D3）：首轮空目录 → 放入 skill → 次轮 catalog 块出现且工具经惰性
-  注册进入执行面（spec 广告滞后一轮的接缝行为见测试内标注）。
+- 热部署（D3）：首轮空目录 → 放入 skill → 次轮 catalog 块出现，且扫描/
+  惰性注册先于 specs 计算（prepare_skill_catalog_for_turn），4 个工具
+  当轮即进广告 specs、activate 当轮可执行。
 
 预置资产照单测先例复制 skills.example/ 到临时目录（忽略 __pycache__），
 保持目录扫描与 SHA-256 复验的确定性。
@@ -585,39 +586,21 @@ async def test_hot_deploy_lazy_registration(tmp_path, patch_provider_builder):
         trigger_auto_memory=False,
     )
 
-    # 次轮：catalog 块出现在系统提示静态段末尾，工具经惰性注册进入注册表，
-    # 当轮即可被执行路径调用（registry.execute 不校验 spec 广告）。
+    # 次轮：catalog 块出现在系统提示静态段末尾；扫描/惰性注册先于 specs
+    # 计算，4 个工具当轮即进广告 specs，activate 当轮可执行。
     second_request = second.requests[0]
     assert second_request.system_prompt.endswith("</skill_catalog>")
     assert "- late-demo: 热部署演示 skill。" in second_request.system_prompt
     for name in SKILL_TOOL_NAMES:
         assert service.tool_registry.has_tool(name)
-    # 已知接缝行为（已上报）：tool specs 在 _skills_catalog_block 惰性注册之前
-    # 计算（service.py 调用序），spec 广告滞后一轮，第三轮起进入广告面。
-    for name in SKILL_TOOL_NAMES:
-        assert name not in _spec_names(second_request)
+        assert name in _spec_names(second_request)
+    (activate_spec,) = [
+        spec for spec in second_request.tools if spec.name == "activate_skill"
+    ]
+    assert activate_spec.input_schema["properties"]["name"]["enum"] == ["late-demo"]
     (activation_message,) = _tool_messages(second.requests[-1])
     assert not activation_message.is_tool_error
     assert '[skill_activation name="late-demo" hash="' in activation_message.content
     assert 'status="activated"' in activation_message.content
     assert "热部署正文内容。" in activation_message.content
     assert result["reply"] == "次轮回答。"
-
-    # 第三轮：4 个工具进入广告 specs，activate 的 name enum 即当前名单。
-    third = ScriptedSkillClient(script=[], final_text="第三轮回答。")
-    patch_provider_builder(lambda provider: third)
-    await service.generate_reply(
-        group_id=1001,
-        user_id=2002,
-        sender_name="测试用户",
-        prompt="再说一次。",
-        recent_messages=[],
-        trigger_auto_memory=False,
-    )
-    spec_names = _spec_names(third.requests[0])
-    for name in SKILL_TOOL_NAMES:
-        assert name in spec_names
-    (activate_spec,) = [
-        spec for spec in third.requests[0].tools if spec.name == "activate_skill"
-    ]
-    assert activate_spec.input_schema["properties"]["name"]["enum"] == ["late-demo"]

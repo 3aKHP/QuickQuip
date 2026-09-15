@@ -70,6 +70,24 @@ def test_hot_deploy_registers_lazily(tmp_path):
         assert svc.tool_registry.has_tool(name)
 
 
+def test_prepare_for_turn_registers_before_specs(tmp_path):
+    """prepare_skill_catalog_for_turn：specs 计算前的生产入口（一轮一次扫描）。
+
+    热部署当轮：prepare 返回渲染块并完成惰性注册，随后计算的 enabled tool
+    specs 即含 4 个 skill 工具（广告面零滞后）。
+    """
+    catalog = tmp_path / "skills"
+    catalog.mkdir()
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    assert svc.prepare_skill_catalog_for_turn(provider=None, model="gpt-test") == ""
+    write_skill(catalog, "late", "热部署。")
+    block = svc.prepare_skill_catalog_for_turn(provider=None, model="gpt-test")
+    assert "- late: 热部署。" in block
+    spec_names = [spec.name for spec in svc._get_enabled_tool_specs()]
+    for name in _TOOL_NAMES:
+        assert name in spec_names
+
+
 def test_enum_refreshes_when_catalog_changes(tmp_path):
     catalog = tmp_path / "skills"
     write_skill(catalog, "aaa", "一。")

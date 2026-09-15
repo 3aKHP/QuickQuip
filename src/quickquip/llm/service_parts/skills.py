@@ -6,9 +6,11 @@
 ``build_chat_scope_key`` 方法。
 
 空目录短路（默认零扰动）：``[skills].enabled = false`` 或扫描为空时不
-注册工具、catalog 块不渲染；catalog 每轮构建系统提示时现扫，首次扫到
-非空即惰性注册工具（热部署，无 reload 钩子）；此后目录变空则块消失、
-handler fail-closed 返回"未安装"文本（不抛异常）。
+注册工具、catalog 块不渲染；catalog 每轮请求现扫一次（service.py 在
+tool specs 计算前调 ``prepare_skill_catalog_for_turn``，渲染块与当轮
+specs 出自同一次扫描），首次扫到非空即惰性注册工具（热部署，无 reload
+钩子，新 skill 当轮即进 spec 广告面）；此后目录变空则块消失、handler
+fail-closed 返回"未安装"文本（不抛异常）。
 """
 
 from __future__ import annotations
@@ -98,6 +100,15 @@ class SkillsToolMixin:
         skills = scan_skills(resolve_catalog_dir(config.catalog_dir))
         budget = derive_catalog_budget_bytes(context_window_tokens, config.catalog_max_bytes)
         return build_catalog(skills, budget_bytes=budget)
+
+    def prepare_skill_catalog_for_turn(self, *, provider, model: str) -> str:
+        """每轮 tool specs 计算前调用：现扫目录、按需惰性注册、返回渲染块。
+
+        调用方拿返回值直接构建系统提示（同轮不再二次调用
+        ``_skills_catalog_block``）：catalog 块与当轮 spec 广告面出自同
+        一次扫描，一轮只扫一次目录；新 skill 首次出现的当轮即进入广告面。
+        """
+        return self._skills_catalog_block(provider=provider, model=model)
 
     def _skills_catalog_block(self, *, provider, model: str) -> str:
         """每轮构建系统提示时调用：现扫目录、按需惰性注册、渲染静态段末尾块。"""
