@@ -21,8 +21,17 @@ SKILL_MD = (
     "| 概览 | `references/root-readme.md` |\n"
     "| 命令 | `references/docs-user-commands.md` |\n"
     "| 配置 | `references/docs-admin-skills.md` |\n"
+    "| PR 模板 | `references/github-pull_request_template.md` |\n"
     "| 索引 | `references/index.md` |\n"
 )
+
+EXTRA_FILES = {
+    ".claude/agents/quickquip-cr-reviewer.md": "# CR 评审\n\n按 `git diff` 评审。\n",
+    ".github/ISSUE_TEMPLATE/memo.md": "# Memo 模板\n",
+    ".github/PULL_REQUEST_TEMPLATE/release.md": "# Release 模板\n",
+    ".github/pull_request_template.md": "# PR 模板\n",
+    "prod.example/README.md": "# 生产模板\n\n复制为 `prod/`。\n",
+}
 
 
 def _make_repo(root: Path) -> None:
@@ -35,6 +44,10 @@ def _make_repo(root: Path) -> None:
     (root / "docs" / "admin" / "skills.md").write_text(
         "# Skill 系统\n\n`catalog_max_bytes` 控制预算。\n", encoding="utf-8"
     )
+    for relative, content in EXTRA_FILES.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
     skill_root = root / "skills.example" / "self-docs"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
@@ -56,14 +69,26 @@ def test_write_then_check_roundtrip(tmp_path: Path):
     references = tmp_path / "skills.example" / "self-docs" / "references"
     names = sorted(path.name for path in references.iterdir())
     assert names == [
+        "claude-agents-quickquip-cr-reviewer.md",
         "docs-admin-skills.md",
         "docs-user-commands.md",
+        "github-issue_template-memo.md",
+        "github-pull_request_template-release.md",
+        "github-pull_request_template.md",
         "index.md",
+        "prod.example-readme.md",
         "root-readme.md",
     ]
 
     readme = (references / "root-readme.md").read_text(encoding="utf-8")
     assert readme.startswith("<!-- Generated from README.md; do not edit -->\n\n# Demo")
+
+    cr = (references / "claude-agents-quickquip-cr-reviewer.md").read_text(encoding="utf-8")
+    assert cr.startswith(
+        "<!-- Generated from .claude/agents/quickquip-cr-reviewer.md; do not edit -->"
+    )
+    prod = (references / "prod.example-readme.md").read_text(encoding="utf-8")
+    assert prod.startswith("<!-- Generated from prod.example/README.md; do not edit -->")
 
     index = (references / "index.md").read_text(encoding="utf-8")
     assert index.startswith("<!-- Generated index; do not edit.")
@@ -73,7 +98,16 @@ def test_write_then_check_roundtrip(tmp_path: Path):
 
     check = _run(tmp_path, "--check")
     assert check.returncode == 0, check.stderr
-    assert "4 references are in sync" in check.stdout
+    assert "9 references are in sync" in check.stdout
+
+
+def test_missing_extra_source_file_fails(tmp_path: Path):
+    _make_repo(tmp_path)
+    (tmp_path / ".github" / "pull_request_template.md").unlink()
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "缺失" in result.stderr
+    assert ".github/pull_request_template.md" in result.stderr
 
 
 def test_write_sweeps_stale_staging_dirs(tmp_path: Path):

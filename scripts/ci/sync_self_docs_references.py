@@ -4,13 +4,16 @@ Usage:
     python scripts/ci/sync_self_docs_references.py          # write mode
     python scripts/ci/sync_self_docs_references.py --check  # read-only drift check
 
-Sources are limited to a closed allowlist: README.md / CHANGELOG.md /
-ROADMAP.md / CONTRIBUTING.md / SECURITY.md at the repo root plus every
-docs/**/*.md page (docs/assets/ excluded). Each page flattens to a
-deterministic one-level resource name under references/ (root files get a
-"root-" prefix, docs pages join path segments with "-"); name collisions are
-fatal. Generated files carry a "<!-- Generated from <source>; do not edit -->"
-marker, and a keyword-enhanced index.md (per-page title + backtick-quoted
+Sources are limited to a closed allowlist in three parts: the root-file list
+(README.md / CHANGELOG.md / ROADMAP.md / CONTRIBUTING.md / SECURITY.md /
+CODE_OF_CONDUCT.md / CLAUDE.md), every docs/**/*.md page (docs/assets/
+excluded), and an explicit extra-file list (.claude/, .github/ templates,
+prod.example/README.md). Local private files (AGENTS.md, CLAUDE.local.md)
+stay excluded structurally. Each page flattens to a deterministic one-level
+resource name under references/ (lowercase, "/" → "-", leading dots stripped
+from each path component, root files get a "root-" prefix); name collisions
+are fatal. Generated files carry a "<!-- Generated from <source>; do not edit
+-->" marker, and a keyword-enhanced index.md (per-page title + backtick-quoted
 command/config tokens) is produced as the grep-miss fallback.
 
 Fail-closed source checks reject symlinks, non-regular files, NUL bytes,
@@ -35,9 +38,26 @@ MAX_RESOURCES = 200
 MAX_RESOURCE_BYTES = 256 * 1024
 MAX_KEYWORDS_PER_RESOURCE = 10
 
-ROOT_SOURCE_FILES = ("README.md", "CHANGELOG.md", "ROADMAP.md", "CONTRIBUTING.md", "SECURITY.md")
+ROOT_SOURCE_FILES = (
+    "README.md",
+    "CHANGELOG.md",
+    "ROADMAP.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CLAUDE.md",
+)
 DOCS_DIR_NAME = "docs"
 DOCS_EXCLUDED_ROOTS = ("docs/assets",)
+
+# 显式额外名单：仓库相对路径，缺失即 fail-closed。
+EXTRA_SOURCE_FILES = (
+    ".claude/agents/quickquip-cr-reviewer.md",
+    ".github/ISSUE_TEMPLATE/memo.md",
+    ".github/PULL_REQUEST_TEMPLATE/release.md",
+    ".github/pull_request_template.md",
+    "prod.example/README.md",
+)
 
 SKILL_DIR = Path("skills.example") / "self-docs"
 REFERENCES_DIR_NAME = "references"
@@ -69,9 +89,10 @@ def generated_marker(public_path: str) -> str:
 
 def resource_name_for(public_path: str) -> str:
     normalized = public_path.replace("\\", "/").lower()
-    if "/" not in normalized:
-        return f"root-{normalized}"
-    return normalized.replace("/", "-")
+    parts = [part.lstrip(".") for part in normalized.split("/")]
+    if len(parts) == 1:
+        return f"root-{parts[0]}"
+    return "-".join(parts)
 
 
 def _walk_markdown_files(directory: Path, root: Path) -> list[Path]:
@@ -119,6 +140,16 @@ def collect_source_entries(root: Path) -> list[SourceEntry]:
     if docs_root.is_dir():
         for absolute in _walk_markdown_files(docs_root, root):
             add(absolute.relative_to(root).as_posix(), absolute)
+
+    for relative in EXTRA_SOURCE_FILES:
+        candidate = root / relative
+        try:
+            info = candidate.lstat()
+        except OSError:
+            raise SyncError(f"显式名单源文件缺失：{relative}") from None
+        if candidate.is_symlink() or not stat.S_ISREG(info.st_mode):
+            raise SyncError(f"显式名单源文件必须是常规文件：{relative}")
+        add(relative, candidate)
 
     entries.sort(key=lambda entry: entry.resource_name)
     return entries

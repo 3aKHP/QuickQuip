@@ -93,6 +93,21 @@ def test_covers_user_admin_dev_and_index(self_docs_skill: LoadedSkill):
     assert "references/index.md" in paths
 
 
+def test_covers_full_source_allowlist(self_docs_skill: LoadedSkill):
+    paths = {resource.path for resource in self_docs_skill.resources}
+    expected = {
+        "references/root-code_of_conduct.md",
+        "references/root-claude.md",
+        "references/claude-agents-quickquip-cr-reviewer.md",
+        "references/github-issue_template-memo.md",
+        "references/github-pull_request_template-release.md",
+        "references/github-pull_request_template.md",
+        "references/prod.example-readme.md",
+    }
+    assert expected <= paths
+    assert len(paths) == 41
+
+
 def test_no_leaked_checkout_path_api_key_or_private_id(self_docs_skill: LoadedSkill):
     redact_ids = _load_redact_ids()
     references_dir = SKILL_ROOT / "references"

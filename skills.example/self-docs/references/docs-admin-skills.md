@@ -68,5 +68,5 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 `skills.example/` 随附两个官方 Skill：
 
-- `self-docs`：内置公开文档副本（用户手册、管理手册、配置参考等），AI 被问到机器人用法、命令或配置时激活检索后作答。
+- `self-docs`：内置公开文档副本（用户手册、管理手册、配置参考、项目治理与协作约定等；同步源名单见 `scripts/ci/sync_self_docs_references.py`），AI 被问到机器人用法、命令、配置或项目协作约定时激活检索后作答。
 - `host-healthcheck`：汇报部署主机健康状态，默认采集容器内可见的宿主机指标与容器自身限额，零配置可用。可选的宿主机 cron 采集器与 compose 只读挂载增强见 `prod.example/` 模板注释。
