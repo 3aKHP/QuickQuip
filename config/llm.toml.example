@@ -119,6 +119,24 @@ discovery_search_limit = 5
 discovery_max_loaded_tools = 12
 always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
 
+[skills]
+# Skill 目录：每个子目录一个 Skill（SKILL.md + 可选 references/ + 可选
+# scripts/），目录名即 name。catalog（name+description 清单）常驻系统提示，
+# 模型经 activate_skill 激活后才能读取正文与资源、运行 scripts/ 脚本。
+# catalog_dir 留空 = 项目根 skills/；相对路径按项目根解析。
+enabled = true
+catalog_dir = ""
+# catalog 字节预算上限：实际预算取 min(模型上下文窗口 2%, 此值)。
+catalog_max_bytes = 8192
+# read_skill_resource 单次读取上限（字节）。
+resource_max_bytes = 65536
+# search_skill_resources 命中条数 / 输出字节上限。
+search_max_results = 50
+search_max_output_bytes = 32768
+# run_skill_script 默认超时（毫秒，上限 120000）与输出字节上限。
+script_timeout_ms = 30000
+script_max_output_bytes = 65536
+
 [mcp]
 enabled = false
 

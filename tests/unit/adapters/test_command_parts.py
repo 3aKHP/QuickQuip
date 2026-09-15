@@ -54,6 +54,7 @@ def test_register_commands_keeps_command_count_and_order():
         "stats",
         "turmfluch",
         "defectify",
+        "skill",
         "llm",
         "search",
         "draw",

@@ -114,6 +114,7 @@ from quickquip.llm.service_parts import (
     McpLifecycleMixin,
     ScheduleMessagesToolMixin,
     SingleShotEntriesMixin,
+    SkillsToolMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
@@ -160,6 +161,7 @@ class LLMService(
     McpLifecycleMixin,
     DrawSvgToolMixin,
     ScheduleMessagesToolMixin,
+    SkillsToolMixin,
     SingleShotEntriesMixin,
     ImagesMixin,
     HealthMixin,
@@ -194,6 +196,10 @@ class LLMService(
 
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
+        # skills 需要在 config 就位后做启动注册；空目录时留待每轮构建系统
+        # 提示时惰性注册（热部署，无 reload 钩子）。
+        self._init_skills()
+        self.register_skill_tools()
 
         self._identity_repository = (
             identities
@@ -318,6 +324,7 @@ class LLMService(
         session_preset: str = "",
         provider_id: str | None = None,
         builtin_search_active: bool = False,
+        skills_catalog_block: str = "",
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -340,6 +347,7 @@ class LLMService(
             chat_type=chat_type,
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
+            skills_catalog_block=skills_catalog_block,
         )
 
     def _build_turn_envelope(
@@ -694,7 +702,11 @@ class LLMService(
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
         # 两种读模式，勿在此"统一"。
-        self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        epoch_event = self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        if epoch_event is not None:
+            # 锚点推进 = 窗口内历史被丢弃：激活注入的正文可能随之出窗，
+            # 清掉登记让模型需要时重新激活（重新注入正文）。
+            self._skill_activations.clear_scope(scope_key)
         anchor = self._epochs.current_anchor(epoch_key) or 0
         if settings.history_limit is not None:
             # 显式 /llm context_limit 覆盖：尊重"更小窗口"意图，退化为该会话的
@@ -1055,6 +1067,12 @@ class LLMService(
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
+        # skills 现扫 + 惰性注册先于 tool specs 计算：新 skill 首次出现的
+        # 当轮即进入 spec 广告面；catalog 块与 specs 出自同一次扫描
+        # （一轮只扫一次目录）。
+        skills_catalog_block = self.prepare_skill_catalog_for_turn(
+            provider=provider, model=settings.model
+        )
         builtin_search_active = provider_builtin_search_active(provider)
         tool_specs = (
             self._get_enabled_tool_specs(chat_type=request.chat_type, provider_id=provider.id)
@@ -1073,6 +1091,7 @@ class LLMService(
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
+            skills_catalog_block=skills_catalog_block,
         )
         # 装配对象持有当轮上下文；账本 meter 消费 assemble() 后的最终值。
         assembler = TurnRequestAssembler(
@@ -1143,6 +1162,7 @@ class LLMService(
                         provider_id=provider.id,
                         model=llm_request.model,
                     )
+                self._skill_activations.clear_scope(scope_key)
                 budget_retry_used = True
                 logger.info(
                     "epoch hot degrade for budget scope=%s anchor=%d->%d",

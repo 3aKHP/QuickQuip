@@ -245,3 +245,71 @@ def test_sudo_new_shared_file_uses_invoking_user(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "chown", lambda path, uid, gid: owners.append((uid, gid)))
     STATE["apply_shared"](root, incoming, backup)
     assert owners == [(1234, 5678)]
+
+
+def _write_fake_docker_for_baseline(bin_dir: Path) -> None:
+    services = {
+        "services": {
+            "llbot": {"container_name": "llbot"},
+            "quickquip": {
+                "container_name": "quickquip",
+                "volumes": [
+                    {"type": "bind", "source": "../skills", "target": "/app/skills"}
+                ],
+            },
+            "web-admin": {"container_name": "web-admin"},
+        }
+    }
+    payload = json.dumps(services)
+    docker = bin_dir / "docker"
+    docker.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "args = sys.argv[1:]\n"
+        'if args[0] == "compose" and "config" in args and "--no-interpolate" in args:\n'
+        f"    print({payload!r})\n"
+        'elif args[0] == "inspect":\n'
+        '    print("sha256:fake")\n'
+    )
+    docker.chmod(0o700)
+
+
+def _minimal_server_root(tmp_path) -> Path:
+    root = tmp_path / "server"
+    (root / "prod").mkdir(parents=True)
+    (root / ".env").write_text("TOKEN=synthetic\n")
+    (root / "prod/docker-compose.yml").write_text("services: {}\n")
+    return root
+
+
+def test_capture_baseline_copies_skills_and_rewrites_volume(tmp_path, monkeypatch):
+    root = _minimal_server_root(tmp_path)
+    skill_md = root / "skills/demo/SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("---\nname: demo\ndescription: 演示\n---\n正文\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker_for_baseline(bin_dir)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    baseline = tmp_path / "baseline"
+    STATE["capture_baseline"](root, baseline)
+    assert (baseline / "skills/demo/SKILL.md").read_text() == skill_md.read_text()
+    config = json.loads((baseline / "prod/docker-compose.yml").read_text())
+    (volume,) = config["services"]["quickquip"]["volumes"]
+    assert volume["source"] == str(baseline / "skills")
+    assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
+
+
+def test_capture_baseline_without_skills_dir_materializes_empty(tmp_path, monkeypatch):
+    root = _minimal_server_root(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker_for_baseline(bin_dir)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    baseline = tmp_path / "baseline"
+    STATE["capture_baseline"](root, baseline)
+    assert (baseline / "skills").is_dir()
+    assert list((baseline / "skills").iterdir()) == []
+    config = json.loads((baseline / "prod/docker-compose.yml").read_text())
+    (volume,) = config["services"]["quickquip"]["volumes"]
+    assert volume["source"] == str(baseline / "skills")

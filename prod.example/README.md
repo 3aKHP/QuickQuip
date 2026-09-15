@@ -42,6 +42,8 @@ Every release carries a version identity built from the deployed `pyproject.toml
 
 For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` after an explicit `-SkipHealth` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `prod/check_bot.sh`; `prod/cron_check_bot.sh` remains the cron entry.
 
+`prod/host_metrics_collector.py` is an optional host-side cron collector (the host-healthcheck skill's L1 enhancement): it writes `<root>/data/host_metrics.json` atomically once per run with the host process count, full disk view and temperatures. The crontab install line is in the file header; the container reads the file read-only through the existing `data/` bind mount. Skills themselves ship from the local working tree: copy the ones you want from `skills.example/` into `skills/` and the drivers upload the directory with the release.
+
 ## Layout and Transaction
 
 ```text

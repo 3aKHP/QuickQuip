@@ -76,6 +76,10 @@ services:
       # 群友身份与黑话词表（可选）。将 llm_about/vocab.yaml.example 和
       # llm_about/identities.yaml.example 复制为 .yaml 并编辑后，取消注释：
       # - ./llm_about:/app/llm_about:ro
+      # Skill 扩展（可选）。将 skills.example/ 中需要的 skill 复制到 skills/ 后取消注释：
+      # - ./skills:/app/skills:ro
+      # host-healthcheck 可选增强（L2）：宿主机 /proc 只读挂载，默认关闭：
+      # - /proc:/host/proc:ro
       # 仅当 config/llm.toml 启用 docker transport MCP 时才挂载：
       # - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

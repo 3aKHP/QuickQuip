@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from quickquip.llm.skills import (
+    ACTIVATE_SKILL_TOOL_NAME,
+    READ_SKILL_RESOURCE_TOOL_NAME,
+    RUN_SKILL_SCRIPT_TOOL_NAME,
+    SEARCH_SKILL_RESOURCES_TOOL_NAME,
+)
+
 # ── scope / history limits ──────────────────────────────────────────
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
@@ -14,6 +21,7 @@ MAX_STORED_CONVERSATION_MESSAGES = 2048
 # ``service.py`` (tool-discovery policy + tool-loop invocation) and
 # ``service_parts/tools.py`` (builtin tool registration). Previously
 # these were duplicated byte-for-byte in both modules.
+# Skill 工具名定义在 llm/skills/tools/ 各工具模块，此处统一 re-export。
 SEARCH_TOOL_NAME = "search_web"
 TOOL_SEARCH_NAME = "tool_search"
 TOOL_LIST_NAME = "tool_list"
@@ -26,6 +34,7 @@ DEFAULT_ALWAYS_LOADED_TOOLS = [
     "get_identity",
     "list_memories",
     SEARCH_TOOL_NAME,
+    ACTIVATE_SKILL_TOOL_NAME,
 ]
 DEFAULT_ENABLED_TOOLS = [
     TOOL_SEARCH_NAME,
@@ -39,4 +48,8 @@ DEFAULT_ENABLED_TOOLS = [
     "get_llm_status",
     "get_current_model",
     "get_health_status",
+    ACTIVATE_SKILL_TOOL_NAME,
+    READ_SKILL_RESOURCE_TOOL_NAME,
+    SEARCH_SKILL_RESOURCES_TOOL_NAME,
+    RUN_SKILL_SCRIPT_TOOL_NAME,
 ]
