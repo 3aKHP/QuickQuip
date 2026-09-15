@@ -78,6 +78,26 @@ def test_activate_reinjects_after_content_change(make_skill):
     assert "v2 正文" in second
 
 
+def test_activate_record_false_returns_body_without_recording(make_skill):
+    """record=False：返回完整注入文本但不登记，重试仍走完整激活路径。"""
+    catalog_dir, writer = make_skill
+    writer("demo", body="正文内容。\n")
+    skills = _skills_by_name(catalog_dir)
+    state = SkillActivationState()
+    first = activate_skill(
+        name="demo", skills=skills, state=state, scope="s1", record=False
+    )
+    assert isinstance(first, str)
+    assert 'status="activated"' in first
+    assert "正文内容。" in first
+    assert not state.is_active("s1", "demo")
+    second = activate_skill(
+        name="demo", skills=skills, state=state, scope="s1", record=False
+    )
+    assert 'status="activated"' in second
+    assert "正文内容。" in second
+
+
 def test_activate_scopes_are_isolated(make_skill):
     catalog_dir, writer = make_skill
     writer("demo", body="正文\n")

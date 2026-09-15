@@ -35,3 +35,16 @@ def test_is_active_and_activated_names_scope_isolated():
     assert state.activated_names("s1") == ["alpha", "beta"]
     assert state.activated_names("s2") == ["gamma"]
     assert state.activated_names("s3") == []
+
+
+def test_clear_scope_removes_only_that_scope():
+    state = SkillActivationState()
+    state.record("s1", "alpha", "h")
+    state.record("s1", "beta", "h")
+    state.record("s2", "gamma", "h")
+    state.clear_scope("s1")
+    assert state.activated_names("s1") == []
+    assert state.is_active("s2", "gamma")
+    # 清过的 scope 可重新登记
+    state.record("s1", "alpha", "h2")
+    assert state.is_active("s1", "alpha")

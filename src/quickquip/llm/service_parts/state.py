@@ -50,6 +50,7 @@ class StateMixin:
                 scope_key, f"archive:{user_id_str}:{archive_number}"
             )
             self._epochs.reset_scope(scope_key)
+            self._skill_activations.clear_scope(scope_key)
         else:
             self.clear_context(user_id, chat_type="private")
 
@@ -214,11 +215,13 @@ class StateMixin:
                 provider_id=provider.id,
                 model=settings.model or provider.default_model,
             )
-            self._epochs.advance_to_cold_water(
+            reset_event = self._epochs.advance_to_cold_water(
                 epoch_key,
                 store=self.store,
                 params=self.config.resolve_epoch_params(provider),
             )
+            if reset_event is not None:
+                self._skill_activations.clear_scope(epoch_key.scope_key)
 
     def set_group_persona(self, group_id: int | str, persona_id: str) -> None:
         self.set_chat_persona(group_id, persona_id, chat_type="group")
@@ -380,12 +383,14 @@ class StateMixin:
         deleted = self.store.clear_conversation_messages(scope_key)
         # Agent 执行记录随域清理（§9.3）：主表行删除后侧表不能留孤儿。
         self.store.delete_loops_for_scope(scope_key)
-        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点；只清前者
-        # 会让 build_messages 继续把缓冲拼进提示词，或让纪元锚点指向已删除的行，
-        # 模型仍然"看得见"历史。三件齐清（私聊会话 start/end/resume 也走这里）。
+        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点 + Skill 激活
+        # 登记；只清前者会让 build_messages 继续把缓冲拼进提示词，或让纪元锚点指向
+        # 已删除的行，或让"已激活"登记挡住正文重注入，模型仍然"看得见"历史。
+        # 四件齐清（私聊会话 start/end/resume 也走这里）。
         if self.recent_message_buffer:
             self.recent_message_buffer.clear_scope(scope_key)
         self._epochs.reset_scope(scope_key)
+        self._skill_activations.clear_scope(scope_key)
         self._bump_scope_generation(scope_key, HistoryMutation.CLEAR)
         return deleted
 

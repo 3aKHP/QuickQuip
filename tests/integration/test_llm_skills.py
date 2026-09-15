@@ -544,6 +544,60 @@ async def test_skill_script_blocked_stdout_replaced_wholesale(
     assert result["reply"] == "脚本输出已被安全过滤。"
 
 
+async def test_activation_blocked_body_not_recorded_retry_reinjects(
+    tmp_path, monkeypatch, patch_provider_builder
+):
+    """激活正文命中拦截词：登记先于管道反转。
+
+    激活注入文本会在工具结果管道被标记 scrub（长文单命中形态）；若登记
+    先行，重试只拿到"已激活"短文本而永远拿不到正文。预扫命中时跳过
+    登记：两次激活结果同形态（同一 scrub 产物，非 already-active 短文本），
+    状态表不留登记。
+    """
+    catalog_dir = tmp_path / "skills"
+    write_skill(catalog_dir, "dirty", "拦截测试 skill。", body="正文含 blocked 一词。\n")
+    service = _service(tmp_path / "svc", skills_toml=_catalog_toml(catalog_dir))
+    sensitive = make_sensitive_filter(tmp_path, "block")
+    monkeypatch.setattr(
+        "quickquip.llm.tool_result_pipeline._get_sensitive_filter", lambda: sensitive
+    )
+    monkeypatch.setattr(
+        "quickquip.llm.service_parts.skills._get_sensitive_filter", lambda: sensitive
+    )
+    client = ScriptedSkillClient(
+        script=[
+            [LLMToolCall("call_activate_1", "activate_skill", '{"name":"dirty"}')],
+            [LLMToolCall("call_activate_2", "activate_skill", '{"name":"dirty"}')],
+        ],
+        final_text="两次激活都被安全过滤。",
+    )
+    patch_provider_builder(lambda provider: client)
+
+    result = await service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="激活 dirty 这个 skill。",
+        recent_messages=[],
+        trigger_auto_memory=False,
+    )
+
+    tool_messages = _tool_messages(client.requests[-1])
+    assert [message.tool_name for message in tool_messages] == [
+        "activate_skill",
+        "activate_skill",
+    ]
+    for message in tool_messages:
+        assert message.is_tool_error
+        assert SCRUB_PLACEHOLDER in message.content
+        assert "blocked" not in message.content
+        assert "already-active" not in message.content
+    # 未登记 → 重试仍走完整激活路径，两次产出逐字节一致。
+    assert tool_messages[0].content == tool_messages[1].content
+    assert not service._skill_activations.is_active("1001", "dirty")
+    assert result["reply"] == "两次激活都被安全过滤。"
+
+
 # ── 热部署：空目录 → 放入 skill → 惰性注册生效 ─────────────────────────────
 
 

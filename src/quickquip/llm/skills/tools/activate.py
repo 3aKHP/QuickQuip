@@ -58,8 +58,13 @@ def activate_skill(
     skills: Mapping[str, LoadedSkill],
     state: SkillActivationState,
     scope: str,
+    record: bool = True,
 ) -> str | LLMToolOutput:
-    """激活已安装 skill 并返回注入文本；未安装名字 fail-closed 错误文本。"""
+    """激活已安装 skill 并返回注入文本；未安装名字 fail-closed 错误文本。
+
+    ``record=False`` 用于调用方已知注入文本会被下游丢弃的场景（如敏感词
+    整段替换）：返回不变，但不留登记，重试仍能拿到完整正文。
+    """
     skill = skills.get(name)
     if skill is None:
         available = "、".join(sorted(skills)) or "（无）"
@@ -69,7 +74,8 @@ def activate_skill(
         )
     if state.is_duplicate(scope, name, skill.body_sha256):
         return format_activation_block(skill, status=ACTIVATION_STATUS_ALREADY_ACTIVE)
-    state.record(scope, name, skill.body_sha256)
+    if record:
+        state.record(scope, name, skill.body_sha256)
     return format_activation_block(skill, status=ACTIVATION_STATUS_ACTIVATED)
 
 

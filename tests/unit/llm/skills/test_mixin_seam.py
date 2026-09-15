@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from quickquip.common.sensitive_filter import SensitiveFilter
+from quickquip.llm.epoch import EpochKey
 from quickquip.llm.tools import ToolExecutionContext
 
 from tests.fixtures.configs import MIN_LLM_CONFIG_TOML, write_llm_config_bundle
+from tests.fixtures.sensitive_filter import make_sensitive_filter
 from tests.unit.llm.skills.conftest import write_skill
 from plugins.llm_runtime import LLMService
 
@@ -172,3 +175,97 @@ def test_format_skill_list_empty_catalog(tmp_path):
     catalog.mkdir()
     svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
     assert "当前未安装任何 Skill" in svc.format_skill_list(1001, chat_type="group")
+
+
+def test_clear_context_clears_activations(tmp_path):
+    """清空会话上下文后激活登记同步作废：重新激活重新注入正文。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "demo", "演示。", body="正文内容\n")
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    ctx = _context()
+    first = svc._tool_activate_skill({"name": "demo"}, ctx)
+    assert 'status="activated"' in first
+    again = svc._tool_activate_skill({"name": "demo"}, ctx)
+    assert 'status="already-active"' in again
+
+    svc.clear_context(1001, chat_type="group")
+    scope = svc.build_chat_scope_key(1001, "group")
+    assert not svc._skill_activations.is_active(scope, "demo")
+    third = svc._tool_activate_skill({"name": "demo"}, ctx)
+    assert 'status="activated"' in third
+    assert "正文内容" in third
+
+
+def test_epoch_advance_clears_activations(tmp_path, monkeypatch):
+    """锚点推进（冷场/触顶/行数兜底）时激活注入可能出窗，登记同步清。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "demo", "演示。", body="正文内容\n")
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    scope = svc.build_chat_scope_key(1001, "group")
+    svc._skill_activations.record(scope, "demo", "h")
+
+    provider = svc.config.providers["openai-main"]
+    epoch_key = EpochKey(
+        scope_key=scope, provider_id=provider.id, model="gpt-test"
+    )
+    epoch_params = svc.config.resolve_epoch_params(provider)
+
+    def _load():
+        return svc._load_scrubbed_history_and_participants(
+            chat_id=1001,
+            chat_type="group",
+            scope_key=scope,
+            settings=svc.get_chat_settings(1001),
+            sensitive=SensitiveFilter.empty(),
+            user_id=2002,
+            sender_name="测试",
+            recent_messages=[],
+            message_id=None,
+            quoted_sender_name="",
+            quoted_user_id="",
+            epoch_key=epoch_key,
+            epoch_params=epoch_params,
+        )
+
+    # 未推进：登记保留
+    monkeypatch.setattr(svc._epochs, "maybe_advance", lambda *a, **k: None)
+    _load()
+    assert svc._skill_activations.is_active(scope, "demo")
+
+    # 发生推进：登记清空
+    monkeypatch.setattr(svc._epochs, "maybe_advance", lambda *a, **k: object())
+    _load()
+    assert not svc._skill_activations.is_active(scope, "demo")
+
+
+def test_catalog_drops_blocked_descriptions(tmp_path, monkeypatch):
+    """description 命中拦截词：整只 skill 从 catalog 块、enum 与激活面同步消失。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "clean", "正常描述。")
+    write_skill(catalog, "dirty", "含 blocked 词。")
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    sensitive = make_sensitive_filter(tmp_path, "block")
+    monkeypatch.setattr(
+        "quickquip.llm.service_parts.skills._get_sensitive_filter", lambda: sensitive
+    )
+
+    block = svc.prepare_skill_catalog_for_turn(provider=None, model="gpt-test")
+    assert "- clean: 正常描述。" in block
+    assert "dirty" not in block
+    (spec,) = svc.tool_registry.get_specs(["activate_skill"])
+    assert spec.input_schema["properties"]["name"]["enum"] == ["clean"]
+    result = svc._tool_activate_skill({"name": "dirty"}, _context())
+    assert result.is_error
+    assert "未安装" in result.content
+
+
+def test_catalog_descriptions_kept_when_filter_not_loaded(tmp_path, monkeypatch):
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "dirty", "含 blocked 词。")
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    monkeypatch.setattr(
+        "quickquip.llm.service_parts.skills._get_sensitive_filter",
+        lambda: SensitiveFilter.empty(),
+    )
+    block = svc.prepare_skill_catalog_for_turn(provider=None, model="gpt-test")
+    assert "- dirty: 含 blocked 词。" in block

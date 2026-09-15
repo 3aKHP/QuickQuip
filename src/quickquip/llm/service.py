@@ -702,7 +702,11 @@ class LLMService(
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
         # 两种读模式，勿在此"统一"。
-        self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        epoch_event = self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        if epoch_event is not None:
+            # 锚点推进 = 窗口内历史被丢弃：激活注入的正文可能随之出窗，
+            # 清掉登记让模型需要时重新激活（重新注入正文）。
+            self._skill_activations.clear_scope(scope_key)
         anchor = self._epochs.current_anchor(epoch_key) or 0
         if settings.history_limit is not None:
             # 显式 /llm context_limit 覆盖：尊重"更小窗口"意图，退化为该会话的
@@ -1158,6 +1162,7 @@ class LLMService(
                         provider_id=provider.id,
                         model=llm_request.model,
                     )
+                self._skill_activations.clear_scope(scope_key)
                 budget_retry_used = True
                 logger.info(
                     "epoch hot degrade for budget scope=%s anchor=%d->%d",
