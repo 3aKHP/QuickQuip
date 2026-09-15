@@ -156,7 +156,7 @@ def capture_baseline(root: Path, baseline: Path) -> None:
     baseline.mkdir(mode=0o700)
     for name in (
         "src", "config", "llm_about", "frontend/dist", "bot.py", "web_api.py",
-        "pyproject.toml", "requirements.txt", ".dockerignore",
+        "pyproject.toml", "requirements.txt", ".dockerignore", "skills",
     ):
         source = checked_path(root, name)
         if source.is_dir():
@@ -164,6 +164,11 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             shutil.copytree(source, baseline / name, dirs_exist_ok=True)
         elif source.is_file():
             atomic_write(baseline / name, source.read_bytes(), 0o644)
+    # skills/ is a gitignored deployment directory and may be absent; an empty
+    # directory carries the "no skills deployed" semantics so the compose
+    # volume always points at the baseline copy.
+    if not (baseline / "skills").exists():
+        (baseline / "skills").mkdir()
     for service, spec in config["services"].items():
         container = spec.get("container_name")
         if not container:
