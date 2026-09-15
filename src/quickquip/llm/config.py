@@ -8,6 +8,7 @@ import tomllib
 
 from quickquip.common.config_utils import as_bool, as_dict, expand_env_value
 from quickquip.llm.epoch import EpochParams
+from quickquip.llm.skills import MAX_SCRIPT_TIMEOUT_MS
 
 logger = logging.getLogger(__name__)
 
@@ -1112,7 +1113,7 @@ def load_llm_config(path: str | Path) -> LLMConfig:
                 skills_raw.get("script_timeout_ms"),
                 default=30000,
                 label="script_timeout_ms",
-                maximum=120000,
+                maximum=MAX_SCRIPT_TIMEOUT_MS,
             ),
             script_max_output_bytes=_skills_positive_int(
                 skills_raw.get("script_max_output_bytes"),

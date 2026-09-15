@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import asyncio
+import os
 import shutil
 
 import pytest
@@ -146,6 +148,11 @@ async def test_run_py_success_and_literal_args(make_skill):
     for arg in args:
         assert arg in result.content  # 逐字传递，不经 shell 解释
     assert "[skill_script" in result.content
+    # marker 只嵌解释器 basename，不泄漏主机绝对路径
+    marker_line = result.content.splitlines()[0]
+    interpreter_name = marker_line.rsplit('interpreter="', 1)[1].removesuffix('"]')
+    assert "/" not in interpreter_name
+    assert "\\" not in interpreter_name
 
 
 async def test_run_no_shell_substitution(make_skill):
@@ -211,6 +218,78 @@ async def test_run_timeout_kills_process(make_skill):
     assert isinstance(result, LLMToolOutput) and result.is_error
     assert "已被终止" in result.content
     assert "800 ms" in result.content
+
+
+async def _wait_file(path, rounds=100):
+    for _ in range(rounds):
+        if path.exists():
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def _assert_pid_dead(pid: int) -> None:
+    for _ in range(100):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.05)
+    pytest.fail(f"进程 {pid} 仍存活")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="进程存活探测依赖 POSIX kill(0)")
+async def test_run_cancellation_kills_process(make_skill):
+    """工具调用被取消：杀脚本进程并排空管道，不留孤儿。"""
+    catalog_dir, writer = make_skill
+    writer(
+        "demo",
+        files={
+            "scripts/run.py": (
+                "import os, pathlib, time\n"
+                "pathlib.Path('pid.txt').write_text(str(os.getpid()))\n"
+                "time.sleep(30)\n"
+            )
+        },
+    )
+    skills, state, skill = _activated_env(catalog_dir, "demo")
+    run_task = asyncio.create_task(_run(skills, state))
+    pid_path = skill.root_dir / "pid.txt"
+    assert await _wait_file(pid_path), "脚本未能及时启动"
+    pid = int(pid_path.read_text())
+    run_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+    await _assert_pid_dead(pid)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="进程组语义为 POSIX 专属")
+async def test_run_timeout_kills_whole_process_group(make_skill):
+    """POSIX：脚本在独立进程组启动，超时按整组 SIGKILL，孙进程一并清理。"""
+    catalog_dir, writer = make_skill
+    writer(
+        "demo",
+        files={
+            "scripts/run.py": (
+                "import os, pathlib, subprocess, sys, time\n"
+                "grandchild = subprocess.Popen(\n"
+                "    [sys.executable, '-c', 'import time; time.sleep(30)']\n"
+                ")\n"
+                "pathlib.Path('pids.txt').write_text(f'{os.getpid()} {grandchild.pid}')\n"
+                "time.sleep(30)\n"
+            )
+        },
+    )
+    skills, state, skill = _activated_env(catalog_dir, "demo")
+    run_task = asyncio.create_task(_run(skills, state, timeout_ms=800))
+    pids_path = skill.root_dir / "pids.txt"
+    assert await _wait_file(pids_path), "脚本未能及时启动"
+    result = await run_task
+    assert isinstance(result, LLMToolOutput) and result.is_error
+    assert "已被终止" in result.content
+    parent_pid, grandchild_pid = (int(part) for part in pids_path.read_text().split())
+    await _assert_pid_dead(parent_pid)
+    await _assert_pid_dead(grandchild_pid)
 
 
 async def test_run_output_truncation(make_skill):

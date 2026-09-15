@@ -14,7 +14,9 @@
   （``.env`` 凭证隔离）；cwd 固定为该 skill 目录。
 - 墙钟超时（默认 ``script_timeout_ms``，硬上限 120000ms）与 stdout/stderr
   输出上限（``script_max_output_bytes``）：读取有界，超限即杀进程，
-  内存占用不随脚本输出膨胀。
+  内存占用不随脚本输出膨胀。POSIX 下脚本在独立进程组启动，终止按整组
+  SIGKILL（孙进程一并清理）；工具调用被取消时同样杀进程组并排空管道，
+  不留孤儿进程。
 """
 
 from __future__ import annotations
@@ -23,8 +25,10 @@ import asyncio
 import hashlib
 import os
 import shutil
+import signal
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from quickquip.llm.skills.catalog import (
     LoadedSkill,
@@ -161,10 +165,12 @@ async def run_skill_script(
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # POSIX：独立进程组（新 session），终止按整组 SIGKILL 清理孙进程。
+            **({"start_new_session": True} if os.name == "posix" else {}),
         )
     except OSError as exc:
         return LLMToolOutput(
-            content=f'无法启动解释器 "{interpreter[0]}"：{exc.strerror or exc}',
+            content=f'无法启动解释器 "{Path(interpreter[0]).name}"：{exc.strerror or exc}',
             is_error=True,
         )
 
@@ -178,15 +184,21 @@ async def run_skill_script(
     except TimeoutError:
         timed_out = True
         output_truncated = False
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass  # 超时判定与进程自然退出撞车：按超时处理即可
+        _terminate_process(process)
         stdout, stderr = await _drain_after_kill(process)
+    except BaseException:
+        # 取消/异常路径同样杀进程组并尽力排空管道，不留孤儿进程。
+        _terminate_process(process)
+        try:
+            await asyncio.shield(_drain_after_kill(process))
+        except BaseException:
+            pass
+        raise
 
     exit_code = process.returncode
     sections = [
-        f'[skill_script name="{skill.name}" path="{path}" interpreter="{interpreter[0]}"]',
+        f'[skill_script name="{skill.name}" path="{path}" '
+        f'interpreter="{Path(interpreter[0]).name}"]',
         f"stdout:\n{stdout}" if stdout else "stdout: (empty)",
         f"stderr:\n{stderr}" if stderr else "stderr: (empty)",
     ]
@@ -227,6 +239,17 @@ def _resolve_interpreter(path: str) -> list[str] | LLMToolOutput:
     )
 
 
+def _terminate_process(process: asyncio.subprocess.Process) -> None:
+    """终止脚本进程：POSIX 下整组 SIGKILL（孙进程一并清理），其余平台杀直接子进程。"""
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+    except ProcessLookupError:
+        pass  # 终止判定与进程自然退出撞车：无需再杀
+
+
 async def _collect_output(process: asyncio.subprocess.Process, cap: int) -> tuple[str, str, bool]:
     """有界收集 stdout/stderr：超过 cap 即杀进程并排空管道到 EOF（丢弃超额
     部分），保证传输层正常关闭；返回解码文本与截断标记。"""
@@ -243,10 +266,7 @@ async def _collect_output(process: asyncio.subprocess.Process, cap: int) -> tupl
                 break
             total += len(chunk)
             if total > cap and process.returncode is None:
-                try:
-                    process.kill()
-                except ProcessLookupError:
-                    pass  # 恰好在判定后退出：无需再杀
+                _terminate_process(process)
             if over:
                 continue
             chunks.append(chunk)
