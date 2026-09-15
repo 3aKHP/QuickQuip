@@ -283,6 +283,21 @@ output_per_mtok = 0.40
 
 查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示“未定价”）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
 
+### `[skills]` — Skill 系统
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `enabled` | Skill 系统总开关 | `true` |
+| `catalog_dir` | Skill 目录；留空 = 项目根 `skills/`，相对路径按项目根解析 | `""` |
+| `catalog_max_bytes` | 系统提示中 Skill 清单的字节预算上限，实际预算取 min(模型上下文窗口 2%, 此值) | `8192` |
+| `resource_max_bytes` | `read_skill_resource` 单次读取上限（字节） | `65536` |
+| `search_max_results` | `search_skill_resources` 命中条数上限 | `50` |
+| `search_max_output_bytes` | `search_skill_resources` 输出字节上限 | `32768` |
+| `script_timeout_ms` | `run_skill_script` 默认超时（毫秒）；单次调用可另行指定，硬上限 120000 | `30000` |
+| `script_max_output_bytes` | 脚本 stdout/stderr 各自的输出字节上限，超限截断 | `65536` |
+
+非法取值回退默认值并记录告警。`skills/` 为空目录或不存在时工具不注册、系统提示不变。部署方式、目录约定与安全模型见 [skills.md](skills.md)。
+
 ### `[mcp]` — MCP 总开关
 
 | 键 | 说明 |

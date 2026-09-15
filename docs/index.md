@@ -28,6 +28,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、`llm.toml`、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
 | [admin/tool-discovery.md](admin/tool-discovery.md) | LLM 工具发现配置——大量 MCP 工具接入时的 `tool_search`、`tool_list`、常驻工具和排障建议 |
+| [admin/skills.md](admin/skills.md) | Skill 系统部署与安全模型——`skills/` 目录约定、脚本执行隔离、资源上限与预置 Skill |
 | [admin/game-config.md](admin/game-config.md) | 游戏系统管理——游戏开关、参数配置、数据库文件、故障排查 |
 | [admin/sensitive-filter.md](admin/sensitive-filter.md) | 敏感词过滤器——词表配置、接入点、日志与测试方法 |
 | [admin/migration-napcat-to-llbot.md](admin/migration-napcat-to-llbot.md) | NapCat → LLBot 历史迁移记录——当时的风控背景、迁移步骤与回退思路 |
