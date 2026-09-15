@@ -303,8 +303,11 @@ def run_write(root: Path, contents: dict[str, str]) -> int:
     references_dir = skill_root / REFERENCES_DIR_NAME
     staging_dir = skill_root / f".references-staging-{os.getpid()}"
     old_dir = skill_root / f".references-old-{os.getpid()}"
-    shutil.rmtree(staging_dir, ignore_errors=True)
-    shutil.rmtree(old_dir, ignore_errors=True)
+    # 历史中断可能留下任意 pid 的暂存/旧目录：write 前一律清扫（含本次）。
+    for pattern in (".references-staging-*", ".references-old-*"):
+        for leftover in skill_root.glob(pattern):
+            if leftover.is_dir() and not leftover.is_symlink():
+                shutil.rmtree(leftover, ignore_errors=True)
     try:
         staging_dir.mkdir(parents=True)
         for name in sorted(contents):

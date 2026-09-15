@@ -76,6 +76,26 @@ def test_write_then_check_roundtrip(tmp_path: Path):
     assert "4 references are in sync" in check.stdout
 
 
+def test_write_sweeps_stale_staging_dirs(tmp_path: Path):
+    """历史中断残留的任意 pid 暂存/旧目录在 write 前被清扫。"""
+    _make_repo(tmp_path)
+    skill_root = tmp_path / "skills.example" / "self-docs"
+    for name in (".references-staging-999", ".references-old-999"):
+        leftover = skill_root / name
+        leftover.mkdir()
+        (leftover / "junk.md").write_text("残留\n", encoding="utf-8")
+
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (skill_root / "references").is_dir()
+    remaining = [
+        path.name
+        for path in skill_root.iterdir()
+        if path.name.startswith((".references-staging-", ".references-old-"))
+    ]
+    assert remaining == []
+
+
 def test_check_detects_changed_and_extra_and_missing(tmp_path: Path):
     _make_repo(tmp_path)
     assert _run(tmp_path).returncode == 0
