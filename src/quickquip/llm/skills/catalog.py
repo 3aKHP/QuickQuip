@@ -202,7 +202,13 @@ def scan_skills(catalog_dir: Path) -> list[LoadedSkill]:
     if not catalog_dir.is_dir():
         return []
     skills: list[LoadedSkill] = []
-    for child in sorted(catalog_dir.iterdir(), key=lambda path: path.name):
+    try:
+        children = sorted(catalog_dir.iterdir(), key=lambda path: path.name)
+    except OSError as exc:
+        # 扫描瞬间目录被移走/权限收紧：按未部署同语义处理，不向上抛。
+        logger.warning("skill catalog 目录读取失败（%s），按空目录处理", exc)
+        return []
+    for child in children:
         if child.is_symlink() or not child.is_dir():
             continue
         skill = _load_skill(child)
@@ -317,11 +323,19 @@ def _walk_skill_files(root_dir: Path) -> tuple[list[SkillResource], list[SkillDi
                         SkillDiagnostic("read-error", f"{relative}：{exc.strerror or exc}")
                     )
                     continue
+            try:
+                size_bytes = absolute.stat().st_size
+            except OSError as exc:
+                # walk 列名与 stat 之间文件被移走：记诊断跳过，不中断整轮扫描。
+                diagnostics.append(
+                    SkillDiagnostic("read-error", f"{relative}：{exc.strerror or exc}")
+                )
+                continue
             resources.append(
                 SkillResource(
                     path=relative,
                     kind=kind,
-                    size_bytes=absolute.stat().st_size,
+                    size_bytes=size_bytes,
                     sha256=sha256,
                 )
             )

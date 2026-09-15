@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -87,6 +88,49 @@ def test_scan_missing_dir_returns_empty_without_log(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         assert scan_skills(tmp_path / "nonexistent") == []
     assert caplog.records == []
+
+
+def test_scan_tolerates_catalog_iterdir_oserror(make_skill, monkeypatch, caplog):
+    """is_dir 通过而 iterdir 失败（扫描瞬间目录被移走）：warn 并返回 []。"""
+    catalog_dir, writer = make_skill
+    writer("demo")
+    real_iterdir = Path.iterdir
+
+    def flaky_iterdir(self):
+        if self == catalog_dir:
+            raise OSError("No such file or directory")
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", flaky_iterdir)
+    with caplog.at_level(logging.WARNING):
+        assert scan_skills(catalog_dir) == []
+    assert any("目录读取失败" in record.message for record in caplog.records)
+
+
+def test_scan_tolerates_resource_stat_oserror(make_skill, monkeypatch):
+    """walk 列名与 stat 之间资源文件消失：记 read-error 诊断跳过，skill 照常加载。"""
+    catalog_dir, writer = make_skill
+    writer("demo", files={"references/a.md": "内容"})
+    real_stat = Path.stat
+    real_is_file = Path.is_file
+
+    def flaky_stat(self, *args, **kwargs):
+        # lstat 委托 stat(follow_symlinks=False)：只对真实 stat 调用模拟消失。
+        if self.name == "a.md" and kwargs.get("follow_symlinks", True):
+            raise OSError("No such file or directory")
+        return real_stat(self, *args, **kwargs)
+
+    def fake_is_file(self):
+        if self.name == "a.md":
+            return True
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    monkeypatch.setattr(Path, "is_file", fake_is_file)
+    (skill,) = scan_skills(catalog_dir)
+    assert skill.name == "demo"
+    assert skill.resources == []
+    assert any(d.kind == "read-error" for d in skill.diagnostics)
 
 
 def test_scan_loads_valid_skill_with_resources(make_skill):
