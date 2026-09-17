@@ -25,11 +25,15 @@ DEFAULT_RETRY_JITTER = 0.5
 AGENT_REPLAY_LOOP_TOKENS_FLOOR = 512
 AGENT_REPLAY_LOOP_TOKENS_CEILING = 4_194_304
 
-# 单请求内联媒体（解码后）总字节预算缺省（issue #228）：按网关
-# 「请求体字节数 ÷ 4 ≈ 输入 token、单请求 800K」上限推导——3.2MiB 请求体
-# → base64 反推 2.4MiB 解码量，再留文本与分钟窗累计余量取 2MiB。
-# provider 级 max_inline_media_bytes 可覆盖；0 = 不限。
-DEFAULT_MAX_INLINE_MEDIA_BYTES = 2_097_152
+# 单请求内联媒体（解码后）总字节预算缺省（issue #228；2026-09 生产事故后
+# 调整为与 media_guard 单图解码上限对齐的 5MiB）：过小阈值会整图丢弃正常
+# 尺寸的引用大图（教材扫描/长截图常态超限）；超出额度的媒体先经降采样
+# 重编码压入预算，仅压缩仍不达标时才丢弃。该值同时决定请求体上限
+# （base64 膨胀约 4/3，5MiB 解码量对应最坏约 6.7MiB 请求体）：上游网关
+# 若按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算
+# token），应显式配置更小的 provider 级值。max_inline_media_bytes 可覆盖；
+# 0 = 不限。
+DEFAULT_MAX_INLINE_MEDIA_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(slots=True)
