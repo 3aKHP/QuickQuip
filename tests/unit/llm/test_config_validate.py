@@ -670,3 +670,41 @@ def test_delivery_new_keys_beat_legacy_mapping(tmp_path: Path):
     )
     assert loaded.runtime.agent_delivery_intermediate_enabled is True
     assert loaded.runtime.agent_delivery_final_enabled is False
+
+
+def test_empty_style_profile_is_valid_placeholder(tmp_path: Path):
+    """空内容家族是合法占位：引用方解析成功且无风格附加块，不触发未知引用错误。"""
+    loaded = _load(
+        tmp_path,
+        _PERSONA
+        + """
+        [style_profiles]
+        general = ""
+        openai_family = \"\"\"
+        - 保持群友语感。
+        \"\"\"
+
+        [[providers]]
+        id = "p1"
+        protocol = "openai"
+        base_url = "https://api.example.test/v1"
+        api_key_env = "P1_KEY"
+        default_model = "gpt-x"
+        models = ["gpt-x"]
+        style_profile = "general"
+
+        [[providers]]
+        id = "p2"
+        protocol = "openai"
+        base_url = "https://api.example.test/v1"
+        api_key_env = "P2_KEY"
+        default_model = "gpt-y"
+        models = ["gpt-y"]
+        style_profile = "openai_family"
+        """,
+    )
+    assert "general" in loaded.style_profiles
+    assert loaded.style_profiles["general"] == ""
+    assert loaded.providers["p1"].style_overrides == ""
+    assert loaded.providers["p2"].style_overrides.strip().startswith("- 保持群友语感。")
+    assert loaded.load_error is None

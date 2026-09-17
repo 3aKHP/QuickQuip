@@ -930,10 +930,12 @@ def load_llm_config(path: str | Path) -> LLMConfig:
     monthly_report_raw = expand_env_value(as_dict(data.get("monthly_report")))
     image_preprocessing_raw = expand_env_value(as_dict(data.get("image_preprocessing")))
     raw_style_profiles = expand_env_value(as_dict(data.get("style_profiles")))
+    # 空内容家族是合法占位（引用方无风格附加块），只过滤空键——家族内容
+    # 待调研定版期间以空串声明，避免被误判为未知引用。
     style_profiles = {
         str(k).strip(): str(v).strip()
         for k, v in raw_style_profiles.items()
-        if str(k).strip() and str(v).strip()
+        if str(k).strip()
     }
     raw_pricing = as_dict(data.get("pricing"))
     raw_providers = data.get("providers", [])
