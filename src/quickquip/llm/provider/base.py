@@ -556,7 +556,10 @@ class BaseProviderClient:
         budget = (
             budget if budget is not None else InlineMediaBudget(self.config.max_inline_media_bytes)
         )
-        kept, _dropped = budget.guard(candidates)
+        # guard 内含 Pillow 解码/转码/降采样重编码（病态图可达秒级），下沉
+        # 工作线程执行，不占事件循环；模块级缓存的跨线程安全由 media_guard
+        # 的缓存锁保证。
+        kept, _dropped = await asyncio.to_thread(budget.guard, candidates)
         return [
             LLMImageInput(
                 source_url=item.label,
