@@ -1,7 +1,6 @@
 """Google Gemini generateContent API provider client."""
 from __future__ import annotations
 
-import base64
 from copy import deepcopy
 import json
 from typing import Any
@@ -23,17 +22,47 @@ from quickquip.llm.provider.base import (
 
 
 def _inline_image_payload(part: dict[str, Any]) -> tuple[str, str] | None:
-    """响应 part 的内联图片载荷（REST 驼峰 / 宽容蛇形两种键）。"""
+    """响应 part 的内联图片载荷（REST 驼峰 / 宽容蛇形两种键）。
+
+    仅提取 ``image/*`` 媒体类型：其余 inlineData（如音频）保留在原生
+    parts 中，不被误剥除误外发。
+    """
     for key in ("inlineData", "inline_data"):
         payload = part.get(key)
         if isinstance(payload, dict):
             data = payload.get("data")
             if isinstance(data, str) and data.strip():
                 media_type = str(
-                    payload.get("mimeType") or payload.get("mime_type") or "image/png"
+                    payload.get("mimeType") or payload.get("mime_type") or ""
                 )
-                return data, media_type
+                if not media_type.startswith("image/"):
+                    return None
+                return data, media_type or "image/png"
     return None
+
+
+def _extract_inline_images(
+    parts: list[Any],
+) -> tuple[list[LLMGeneratedImage], list[dict[str, Any]]]:
+    """图片输出 parts（image 系模型的 inlineData）提取为归一附件并从
+    parts 剥除：不进 native_blocks/thinking_blocks 的原生回放（base64
+    回放是纯成本无收益），解码失败按无图跳过（from_base64 共享策略）。
+    非图片 parts 原样保留（含非图片 inlineData）。"""
+    images: list[LLMGeneratedImage] = []
+    remaining: list[dict[str, Any]] = []
+    for item in parts:
+        if isinstance(item, dict):
+            inline = _inline_image_payload(item)
+            if inline is not None:
+                data_b64, media_type = inline
+                image = LLMGeneratedImage.from_base64(
+                    data_b64, media_type=media_type, source="gemini.inline_data"
+                )
+                if image is not None:
+                    images.append(image)
+                continue
+        remaining.append(item)
+    return images, remaining
 
 
 class GeminiProviderClient(BaseProviderClient):
@@ -229,34 +258,16 @@ class GeminiProviderClient(BaseProviderClient):
     def _parse_candidate(candidate: dict[str, Any], fallback_model: str) -> LLMResponse:
         content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
         parts = content.get("parts", []) if isinstance(content, dict) else []
-        # 图片输出 parts（image 系模型的 inlineData）提取为归一附件并从
-        # parts 剥除：不进 native_blocks/thinking_blocks 的原生回放（base64
-        # 回放是纯成本无收益），由送达层按外发图片统一投递。剥除后
-        # functionCall 缺省 id 按剩余 parts 连续重编号。
-        generated_images: list[LLMGeneratedImage] = []
-        normalized_parts: list[dict[str, Any]] = []
-        for item in parts if isinstance(parts, list) else []:
-            if not isinstance(item, dict):
-                continue
-            inline = _inline_image_payload(item)
-            if inline is not None:
-                data_b64, media_type = inline
-                try:
-                    data = base64.b64decode(data_b64, validate=True)
-                except ValueError:
-                    data = b""
-                if data:
-                    generated_images.append(
-                        LLMGeneratedImage(
-                            data=data,
-                            media_type=media_type,
-                            source="gemini.inline_data",
-                        )
-                    )
-                continue
-            normalized_parts.append(
-                GeminiProviderClient._normalize_part(item, len(normalized_parts) + 1)
-            )
+        # 图片输出 parts 提取见 _extract_inline_images；剥除后 functionCall
+        # 缺省 id 按剩余 parts 连续重编号。
+        generated_images, kept_parts = _extract_inline_images(
+            parts if isinstance(parts, list) else []
+        )
+        normalized_parts: list[dict[str, Any]] = [
+            GeminiProviderClient._normalize_part(item, index)
+            for index, item in enumerate(kept_parts, 1)
+            if isinstance(item, dict)
+        ]
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
         replay_required = any(

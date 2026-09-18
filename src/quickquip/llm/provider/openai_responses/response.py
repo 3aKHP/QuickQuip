@@ -14,7 +14,6 @@
 """
 from __future__ import annotations
 
-import base64
 from typing import Any
 
 from quickquip.llm.provider.base import (
@@ -35,35 +34,27 @@ _IMAGE_OUTPUT_FORMATS = {
 
 
 def _extract_generated_images(
-    items: list[Any], provider_id: str
+    items: list[Any],
 ) -> tuple[list[LLMGeneratedImage], list[Any]]:
     """剥除内置 image_generation 工具条目并提取为归一图片附件。
 
     codex 类后端在服务端注入该工具（请求未声明也会出现）。条目无论
     提取成败都从 items 剥除：base64 不进 native_blocks（回放是纯成本
-    无收益），解码失败按无图跳过——图片丢失不应连累正文交付。
+    无收益），解码失败按无图跳过（``LLMGeneratedImage.from_base64``
+    共享策略）——图片丢失不应连累正文交付。
     """
     images: list[LLMGeneratedImage] = []
     remaining: list[Any] = []
     for item in items:
         if isinstance(item, dict) and item.get("type") == "image_generation_call":
-            result = item.get("result")
-            if isinstance(result, str) and result.strip():
-                try:
-                    data = base64.b64decode(result, validate=True)
-                except ValueError:
-                    data = b""
-                if data:
-                    fmt = str(item.get("output_format") or "png").strip().lower()
-                    images.append(
-                        LLMGeneratedImage(
-                            data=data,
-                            media_type=_IMAGE_OUTPUT_FORMATS.get(
-                                fmt, f"image/{fmt or 'png'}"
-                            ),
-                            source="responses.image_generation",
-                        )
-                    )
+            fmt = str(item.get("output_format") or "png").strip().lower() or "png"
+            image = LLMGeneratedImage.from_base64(
+                str(item.get("result") or ""),
+                media_type=_IMAGE_OUTPUT_FORMATS.get(fmt, f"image/{fmt}"),
+                source="responses.image_generation",
+            )
+            if image is not None:
+                images.append(image)
             continue
         remaining.append(item)
     return images, remaining
@@ -207,9 +198,7 @@ def parse_responses_body(
             status_code=400,
         )
 
-    generated_images, stripped_items = _extract_generated_images(
-        body["output"], provider_id
-    )
+    generated_images, stripped_items = _extract_generated_images(body["output"])
     items = validate_output_items(stripped_items, provider_id=provider_id)
     text = _message_text(items)
     tool_calls = [

@@ -339,15 +339,17 @@ def finalize_reply_text(
     model: str,
     sensitive: SensitiveFilter,
     scope_key: str,
+    allow_empty: bool = False,
 ) -> str:
     """输出后处理：剥推理头、折叠空行、内置搜索来源块与敏感词输出扫描。
 
     敏感命中只观察不改变重试；blocked 时正文与落库共用 fallback 文本
-    （毒化下一轮上下文的内容不落 history）。
+    （毒化下一轮上下文的内容不落 history）。``allow_empty``：响应携带
+    模型产出图片而无正文时保持空文本（占位提示会跟图片一起发给用户）。
     """
     text = strip_leading_reasoning_content(response.text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    if not text:
+    if not text and not allow_empty:
         text = "模型没有返回可显示的文本。"
 
     if response.web_search is not None:

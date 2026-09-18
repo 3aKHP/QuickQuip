@@ -1,4 +1,4 @@
-"""模型产出图片的收集与投递准备（协议中立）。
+"""模型产出图片（generated images）的收集与投递准备（协议中立）。
 
 `LLMResponse.generated_images`（Responses 内置 image_generation 条目 /
 Gemini inlineData parts 提取）在各协议适配器归一后，由工具循环在每轮
@@ -6,14 +6,16 @@ Gemini inlineData parts 提取）在各协议适配器归一后，由工具循�
 工具路径的外发图片同通道、同上限（MAX_OUTBOUND_TOOL_IMAGES）、同
 "后续调用失败不丢弃已产出图片"语义。
 
-限流与 generation/svg.py 的 svg_render 同风格自持实例：模型生图是
-API 侧成本，防 prompt injection 或模型自发刷图。
+字节上限与 draw_svg 的 MAX_OUTPUT_PNG_BYTES 同口径（平台单条消息尺寸
+限制）；限流与 generation/svg.py 的 svg_render 同风格自持实例：模型
+生图是 API 侧成本，防 prompt injection 或模型自发刷图。
 """
 from __future__ import annotations
 
 import logging
 
 from quickquip.common.rate_limit import KeyedRateLimiter
+from quickquip.generation.svg import MAX_OUTPUT_PNG_BYTES
 from quickquip.llm.provider import LLMResponse
 from quickquip.llm.tools import (
     MAX_OUTBOUND_TOOL_IMAGES,
@@ -25,19 +27,23 @@ logger = logging.getLogger(__name__)
 
 # 与 svg_render 对齐（全局 10 次/分钟、单用户 2 次/分钟）：两条画图路径
 # 在产品层面平权，限额同风格。仅在事件循环线程调用（限流器非线程安全）。
-_NATIVE_IMAGE_RATE_LIMITER = KeyedRateLimiter(
-    {"native_image": {"global_limit": 10, "user_limit": 2, "scope": "global", "window": 60}}
+_GENERATED_IMAGE_RATE_LIMITER = KeyedRateLimiter(
+    {"generated_image": {"global_limit": 10, "user_limit": 2, "scope": "global", "window": 60}}
 )
 
 
-def native_image_allowed(user_id: int | str, group_id: int | str | None = None) -> bool:
+def generated_image_allowed(
+    user_id: int | str, group_id: int | str | None = None
+) -> bool:
     """模型生图限流入口（供测试与观测复用）。"""
-    return _NATIVE_IMAGE_RATE_LIMITER.allow(
-        "native_image", user_id, group_id=group_id
+    return _GENERATED_IMAGE_RATE_LIMITER.allow(
+        "generated_image", user_id, group_id=group_id
     )
 
 
-def collect_native_images(response: LLMResponse, context: ToolExecutionContext) -> int:
+def collect_generated_images(
+    response: LLMResponse, context: ToolExecutionContext
+) -> int:
     """响应到达点收图：越限/超上限丢弃并留痕，返回实际收进数量。"""
     if not response.generated_images:
         return 0
@@ -45,15 +51,25 @@ def collect_native_images(response: LLMResponse, context: ToolExecutionContext) 
     for image in response.generated_images:
         if len(context.outbound_images) >= MAX_OUTBOUND_TOOL_IMAGES:
             logger.warning(
-                "native model images dropped (outbound cap %d): provider=%s model=%s",
+                "generated model images dropped (outbound cap %d): provider=%s model=%s",
                 MAX_OUTBOUND_TOOL_IMAGES,
                 context.provider_id,
                 context.model,
             )
             break
-        if not native_image_allowed(context.user_id, context.group_id):
+        if len(image.data) > MAX_OUTPUT_PNG_BYTES:
             logger.warning(
-                "native model image rate-limited: provider=%s model=%s user=%s",
+                "generated model image dropped (%d bytes > cap %d): "
+                "provider=%s model=%s",
+                len(image.data),
+                MAX_OUTPUT_PNG_BYTES,
+                context.provider_id,
+                context.model,
+            )
+            continue
+        if not generated_image_allowed(context.user_id, context.group_id):
+            logger.warning(
+                "generated model image rate-limited: provider=%s model=%s user=%s",
                 context.provider_id,
                 context.model,
                 context.user_id,

@@ -227,6 +227,22 @@ class LLMGeneratedImage:
     # 供观测与限流口径区分。
     source: str = ""
 
+    @classmethod
+    def from_base64(
+        cls, data_b64: str, *, media_type: str, source: str
+    ) -> "LLMGeneratedImage | None":
+        """各协议适配器共用的解码策略：非法 base64 返回 None（按无图跳过，
+        图片丢失不连累正文交付）。"""
+        if not isinstance(data_b64, str) or not data_b64.strip():
+            return None
+        try:
+            data = base64.b64decode(data_b64, validate=True)
+        except ValueError:
+            return None
+        if not data:
+            return None
+        return cls(data=data, media_type=media_type, source=source)
+
 
 @dataclass(slots=True)
 class LLMRequest:

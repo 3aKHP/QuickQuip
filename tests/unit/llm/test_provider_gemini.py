@@ -488,3 +488,28 @@ async def test_gemini_extracts_inline_image_parts():
     ]
     assert block_types == ["text", "functionCall"]
     assert response.tool_calls[0].id == "gemini_tool_2"
+
+
+async def test_gemini_non_image_inline_data_kept_in_parts():
+    audio_b64 = base64.b64encode(b"fake-audio").decode()
+    response_body = {
+        "candidates": [
+            {
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [
+                        {"text": "听写如下"},
+                        {"inlineData": {"mimeType": "audio/wav", "data": audio_b64}},
+                    ]
+                },
+            }
+        ],
+        "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
+    }
+    client = FakeGeminiClient(_provider_config(), response_body)
+
+    response = await client.complete(_tool_call_request())
+
+    assert response.generated_images == []
+    # 非图片 inlineData 不被误剥除，原样留在原生批次
+    assert any("inlineData" in part for part in (response.native_blocks or []))
