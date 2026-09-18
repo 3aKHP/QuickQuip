@@ -1453,3 +1453,45 @@ def test_stream_fold_with_builtin_image_generation_events():
     assert len(response.generated_images) == 1
     assert response.generated_images[0].source == "responses.image_generation"
     assert [item["type"] for item in (response.native_blocks or [])] == ["message"]
+
+
+def test_stream_relay_keepalive_events_tolerated_on_relay_profile():
+    terminal = _completed_body(
+        [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "保活也画好了", "annotations": []}
+                ],
+            }
+        ],
+        id="resp_ka",
+    )
+    chunks = [
+        {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_ka"}},
+        {"type": "response.in_progress", "sequence_number": 1},
+        {"type": "keepalive", "sequence_number": 2},
+        {"type": "keepalive", "sequence_number": 3},
+        {
+            "type": "response.output_text.delta",
+            "sequence_number": 4,
+            "item_id": "msg_1",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "保活也画好了",
+        },
+        {"type": "response.output_text.done", "sequence_number": 5, "text": "保活也画好了"},
+        {"type": "response.completed", "sequence_number": 6, "response": terminal},
+    ]
+    response = _fold(chunks, profile_id="codex-http-relay")
+    assert response.text == "保活也画好了"
+
+
+def test_stream_keepalive_rejected_on_public_profile():
+    chunks = [
+        {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_ka"}},
+        {"type": "keepalive", "sequence_number": 1},
+    ]
+    with pytest.raises(LLMProviderError, match="未知"):
+        _fold(chunks, profile_id="openai-public")

@@ -52,11 +52,14 @@ _TOLERATED_EVENTS = frozenset(
 )
 
 # codex-http-relay 的中转私有结构事件（profile 能力位放行）。
+# keepalive 是中转在长生成（如内置生图）期间的连接保活噪声，携带
+# 全局序号（占用序号位），放行后严格 +1 校验无缝续接。
 _RELAY_EVENTS = frozenset(
     {
         "codex.rate_limits",
         "codex.response.metadata",
         "responsesapi.websocket_timing",
+        "keepalive",
     }
 )
 
