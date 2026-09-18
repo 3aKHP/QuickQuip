@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from quickquip.llm.agent_records import ToolSkipReason
+from quickquip.llm.native_images import collect_native_images
 from quickquip.llm.provider import LLMRequest
 from quickquip.llm.provider.trace import trace_agent_loop
 from quickquip.llm.tool_discovery import ToolDiscovery
@@ -81,6 +82,9 @@ async def run_tool_call_loop(
             request_guard(current_request)
         # 上游 429/5xx 的退避重试由 provider client 的 complete() 内建
         response = await client.complete(current_request)
+        # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发
+        # 通道：与工具路径同上限同语义，后续调用失败不丢弃已产出图片。
+        collect_native_images(response, context)
         logger.info(
             "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
             provider.id,

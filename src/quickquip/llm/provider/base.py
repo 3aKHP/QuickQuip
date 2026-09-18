@@ -213,6 +213,22 @@ class LLMWebSearchReport:
 
 
 @dataclass(slots=True)
+class LLMGeneratedImage:
+    """模型在对话响应中产出的图片（协议中立，与输入侧媒体归一对称）。
+
+    源自 Responses 内置 image_generation 工具条目或 Gemini 响应的
+    inlineData 图片 parts；由送达层按外发图片统一投递，不进入
+    native_blocks 原生回放（base64 回放是纯成本无收益）。
+    """
+
+    data: bytes = field(repr=False)
+    media_type: str = ""
+    # 产出来源标签（如 "responses.image_generation" / "gemini.inline_data"），
+    # 供观测与限流口径区分。
+    source: str = ""
+
+
+@dataclass(slots=True)
 class LLMRequest:
     model: str
     system_prompt: str
@@ -239,6 +255,9 @@ class LLMResponse:
     thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
     web_search: LLMWebSearchReport | None = None
+    # 模型产出的图片附件（见 LLMGeneratedImage）：与 web_search 同级的
+    # 响应侧归一能力，由各协议适配器按自身能力提取。
+    generated_images: list[LLMGeneratedImage] = field(default_factory=list)
     # 实际成功请求的归属（§7.1）：由 client 在成功路径按最终端点填充。
     owner: "ResponseOwner | None" = None
     # 协议原生的有序内容块（§4.4 保序表示）：Claude 的 content 序列 /

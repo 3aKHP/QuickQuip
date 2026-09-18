@@ -1,6 +1,7 @@
 """Google Gemini generateContent API provider client."""
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 import json
 from typing import Any
@@ -10,6 +11,7 @@ from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
 from quickquip.llm.provider.base import (
     BaseProviderClient,
+    LLMGeneratedImage,
     LLMImageInput,
     LLMRequest,
     LLMResponse,
@@ -18,6 +20,20 @@ from quickquip.llm.provider.base import (
     _json_string,
     sanitize_gemini_schema,
 )
+
+
+def _inline_image_payload(part: dict[str, Any]) -> tuple[str, str] | None:
+    """响应 part 的内联图片载荷（REST 驼峰 / 宽容蛇形两种键）。"""
+    for key in ("inlineData", "inline_data"):
+        payload = part.get(key)
+        if isinstance(payload, dict):
+            data = payload.get("data")
+            if isinstance(data, str) and data.strip():
+                media_type = str(
+                    payload.get("mimeType") or payload.get("mime_type") or "image/png"
+                )
+                return data, media_type
+    return None
 
 
 class GeminiProviderClient(BaseProviderClient):
@@ -213,11 +229,34 @@ class GeminiProviderClient(BaseProviderClient):
     def _parse_candidate(candidate: dict[str, Any], fallback_model: str) -> LLMResponse:
         content = candidate.get("content", {}) if isinstance(candidate, dict) else {}
         parts = content.get("parts", []) if isinstance(content, dict) else []
-        normalized_parts = [
-            GeminiProviderClient._normalize_part(item, index)
-            for index, item in enumerate(parts if isinstance(parts, list) else [], 1)
-            if isinstance(item, dict)
-        ]
+        # 图片输出 parts（image 系模型的 inlineData）提取为归一附件并从
+        # parts 剥除：不进 native_blocks/thinking_blocks 的原生回放（base64
+        # 回放是纯成本无收益），由送达层按外发图片统一投递。剥除后
+        # functionCall 缺省 id 按剩余 parts 连续重编号。
+        generated_images: list[LLMGeneratedImage] = []
+        normalized_parts: list[dict[str, Any]] = []
+        for item in parts if isinstance(parts, list) else []:
+            if not isinstance(item, dict):
+                continue
+            inline = _inline_image_payload(item)
+            if inline is not None:
+                data_b64, media_type = inline
+                try:
+                    data = base64.b64decode(data_b64, validate=True)
+                except ValueError:
+                    data = b""
+                if data:
+                    generated_images.append(
+                        LLMGeneratedImage(
+                            data=data,
+                            media_type=media_type,
+                            source="gemini.inline_data",
+                        )
+                    )
+                continue
+            normalized_parts.append(
+                GeminiProviderClient._normalize_part(item, len(normalized_parts) + 1)
+            )
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
         replay_required = any(
@@ -262,6 +301,7 @@ class GeminiProviderClient(BaseProviderClient):
             thinking_blocks=thinking_blocks,
             native_blocks=[deepcopy(part) for part in normalized_parts] or None,
             web_search=web_search,
+            generated_images=generated_images,
         )
 
     @staticmethod
