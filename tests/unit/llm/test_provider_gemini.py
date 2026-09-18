@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 
 from plugins.llm_config import ProviderConfig
@@ -439,3 +440,76 @@ def test_gemini_stream_preserves_signatures_from_thought_and_function_parts():
         "call-sig",
     ]
     assert response.thinking_blocks[0]["part"]["text"] == "thinking done"
+
+
+# ---------------------------------------------------------------------------
+# 响应侧 inlineData 图片 parts（image 系模型输出）
+# ---------------------------------------------------------------------------
+
+_IMAGE_PNG_BASE64 = base64.b64encode(b"\x89PNG-gemini-bytes").decode()
+
+_INLINE_IMAGE_RESPONSE = {
+    "candidates": [
+        {
+            "finishReason": "STOP",
+            "content": {
+                "parts": [
+                    {"text": "给你画好了"},
+                    {"inlineData": {"mimeType": "image/png", "data": _IMAGE_PNG_BASE64}},
+                    {
+                        "functionCall": {
+                            "name": "report_status",
+                            "args": {"ok": True},
+                        }
+                    },
+                ]
+            },
+        }
+    ],
+    "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
+}
+
+
+async def test_gemini_extracts_inline_image_parts():
+    client = FakeGeminiClient(_provider_config(), _INLINE_IMAGE_RESPONSE)
+
+    response = await client.complete(_tool_call_request())
+
+    assert response.text == "给你画好了"
+    assert len(response.generated_images) == 1
+    image = response.generated_images[0]
+    assert image.data == b"\x89PNG-gemini-bytes"
+    assert image.media_type == "image/png"
+    assert image.source == "gemini.inline_data"
+    # 图片 part 剥除出原生批次；functionCall 缺省 id 按剩余 parts 连续编号
+    block_types = [
+        "functionCall" if "functionCall" in part else "text"
+        for part in (response.native_blocks or [])
+    ]
+    assert block_types == ["text", "functionCall"]
+    assert response.tool_calls[0].id == "gemini_tool_2"
+
+
+async def test_gemini_non_image_inline_data_kept_in_parts():
+    audio_b64 = base64.b64encode(b"fake-audio").decode()
+    response_body = {
+        "candidates": [
+            {
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [
+                        {"text": "听写如下"},
+                        {"inlineData": {"mimeType": "audio/wav", "data": audio_b64}},
+                    ]
+                },
+            }
+        ],
+        "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5},
+    }
+    client = FakeGeminiClient(_provider_config(), response_body)
+
+    response = await client.complete(_tool_call_request())
+
+    assert response.generated_images == []
+    # 非图片 inlineData 不被误剥除，原样留在原生批次
+    assert any("inlineData" in part for part in (response.native_blocks or []))

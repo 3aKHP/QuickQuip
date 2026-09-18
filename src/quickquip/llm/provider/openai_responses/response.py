@@ -3,7 +3,10 @@
 校验语义对齐移植源（prism-vesicle items.ts/response.ts）：
 
 - 未知 item 类型 fail-closed（含 web_search_call——QuickQuip 的原生搜索
-  仅 gemini 协议声明，Responses 侧未启用该工具族）。
+  仅 gemini 协议声明，Responses 侧未启用该工具族）。唯一例外是
+  ``image_generation_call``：codex 类后端会在服务端注入该工具，条目
+  剥除出 native_blocks 并提取为 ``generated_images``（见
+  ``_extract_generated_images``），其余条目照旧走严格校验。
 - ``message`` 只接受 assistant 角色 + ``output_text``/``refusal`` content。
 - ``reasoning`` 的 ``summary`` 仅供展示（thinking_blocks），密文
   ``encrypted_content`` 作为不透明字段保留在原 item 内供回放。
@@ -13,8 +16,48 @@ from __future__ import annotations
 
 from typing import Any
 
-from quickquip.llm.provider.base import LLMProviderError, LLMResponse
+from quickquip.llm.provider.base import (
+    LLMGeneratedImage,
+    LLMProviderError,
+    LLMResponse,
+)
 from quickquip.llm.tools import LLMToolCall
+
+# image_generation_call.output_format → media_type（未知格式按 image/<fmt> 透传）
+_IMAGE_OUTPUT_FORMATS = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
+
+
+def _extract_generated_images(
+    items: list[Any],
+) -> tuple[list[LLMGeneratedImage], list[Any]]:
+    """剥除内置 image_generation 工具条目并提取为归一图片附件。
+
+    codex 类后端在服务端注入该工具（请求未声明也会出现）。条目无论
+    提取成败都从 items 剥除：base64 不进 native_blocks（回放是纯成本
+    无收益），解码失败按无图跳过（``LLMGeneratedImage.from_base64``
+    共享策略）——图片丢失不应连累正文交付。
+    """
+    images: list[LLMGeneratedImage] = []
+    remaining: list[Any] = []
+    for item in items:
+        if isinstance(item, dict) and item.get("type") == "image_generation_call":
+            fmt = str(item.get("output_format") or "png").strip().lower() or "png"
+            image = LLMGeneratedImage.from_base64(
+                str(item.get("result") or ""),
+                media_type=_IMAGE_OUTPUT_FORMATS.get(fmt, f"image/{fmt}"),
+                source="responses.image_generation",
+            )
+            if image is not None:
+                images.append(image)
+            continue
+        remaining.append(item)
+    return images, remaining
 
 
 def validate_output_items(
@@ -155,7 +198,8 @@ def parse_responses_body(
             status_code=400,
         )
 
-    items = validate_output_items(body["output"], provider_id=provider_id)
+    generated_images, stripped_items = _extract_generated_images(body["output"])
+    items = validate_output_items(stripped_items, provider_id=provider_id)
     text = _message_text(items)
     tool_calls = [
         LLMToolCall(
@@ -175,7 +219,7 @@ def parse_responses_body(
             else "incomplete"
         )
         finish_reason = "length" if reason == "max_output_tokens" else reason
-    elif not text and not tool_calls:
+    elif not text and not tool_calls and not generated_images:
         raise _malformed(
             "Provider 响应不包含正文或 function calls。", provider_id
         )
@@ -194,6 +238,7 @@ def parse_responses_body(
         finish_reason=finish_reason,
         native_blocks=list(items),
         thinking_blocks=thinking_blocks,
+        generated_images=generated_images,
         **usage,
     )
 

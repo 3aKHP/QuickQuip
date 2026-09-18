@@ -40,6 +40,14 @@ _TOLERATED_EVENTS = frozenset(
         "response.reasoning_summary_part.done",
         "response.reasoning_summary_text.done",
         "response.function_call_arguments.done",
+        # 内置 image_generation 工具的进度事件族（官方语义事件）：codex 类
+        # 后端会在服务端注入该工具（请求未声明也会出现）；产出条目由
+        # response.py 提取为 generated_images 并从 native_blocks 剥除。
+        "response.image_generation_call.in_progress",
+        "response.image_generation_call.generating",
+        "response.image_generation_call.completed",
+        "response.image_generation_call.failed",
+        "response.image_generation_call.partial_image",
     }
 )
 

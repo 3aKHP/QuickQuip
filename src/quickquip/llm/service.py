@@ -1282,6 +1282,9 @@ class LLMService(
             model=llm_request.model,
             sensitive=sensitive,
             scope_key=scope_key,
+            # 纯图响应不补占位文本；以外发通道实际存活图片为准——图片
+            # 被限流/上限丢弃时回落占位提示，避免用户既无图又无说明。
+            allow_empty=bool(tool_context.outbound_images),
         )
 
         # ── persistence + auto-memory dispatch + reply assembly ──────

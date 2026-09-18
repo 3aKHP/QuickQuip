@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import textwrap
 from pathlib import Path
@@ -1343,3 +1344,112 @@ async def test_client_stream_400_history_reasoning_degrades_and_retries():
     second = client.stream_payloads[1]["input"]
     assert not any(item.get("id") == "rs_hist" for item in second)
     assert any(item.get("id") == "rs_cur" for item in second)
+
+
+# ── 内置 image_generation 条目（服务端注入工具） ──────────────────────────
+
+_PNG_BASE64 = base64.b64encode(b"\x89PNG-fake-bytes").decode()
+
+_IMAGE_CALL_ITEM = {
+    "type": "image_generation_call",
+    "id": "ig_1",
+    "status": "completed",
+    "size": "1024x1024",
+    "output_format": "png",
+    "result": _PNG_BASE64,
+}
+
+_TEXT_ITEM = {
+    "type": "message",
+    "role": "assistant",
+    "content": [{"type": "output_text", "text": "画好了！", "annotations": []}],
+}
+
+
+def test_parse_body_extracts_image_generation_call():
+    response = parse_responses_body(
+        _completed_body([dict(_IMAGE_CALL_ITEM), dict(_TEXT_ITEM)]),
+        provider_id="fake",
+        fallback_model="gpt-test",
+    )
+    assert response.text == "画好了！"
+    assert len(response.generated_images) == 1
+    image = response.generated_images[0]
+    assert image.data == b"\x89PNG-fake-bytes"
+    assert image.media_type == "image/png"
+    assert image.source == "responses.image_generation"
+    # 图片条目剥除出原生回放批次：base64 不进 native_blocks
+    assert [item["type"] for item in (response.native_blocks or [])] == ["message"]
+
+
+def test_parse_body_image_generation_bad_payload_stripped_silently():
+    output = [
+        {"type": "image_generation_call", "id": "ig_1", "status": "failed", "result": "%%%"},
+        dict(_TEXT_ITEM),
+    ]
+    response = parse_responses_body(
+        _completed_body(output), provider_id="fake", fallback_model="gpt-test"
+    )
+    assert response.generated_images == []
+    assert response.text == "画好了！"
+    assert [item["type"] for item in (response.native_blocks or [])] == ["message"]
+
+
+def test_parse_body_image_only_response_not_malformed():
+    response = parse_responses_body(
+        _completed_body([dict(_IMAGE_CALL_ITEM)]),
+        provider_id="fake",
+        fallback_model="gpt-test",
+    )
+    assert response.text == ""
+    assert len(response.generated_images) == 1
+
+
+def test_stream_fold_with_builtin_image_generation_events():
+    terminal = _completed_body(
+        [dict(_IMAGE_CALL_ITEM), dict(_TEXT_ITEM)], id="resp_ig"
+    )
+    chunks = [
+        {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_ig"}},
+        {"type": "response.in_progress", "sequence_number": 1},
+        {"type": "response.output_item.added", "sequence_number": 2, "output_index": 0},
+        {
+            "type": "response.image_generation_call.in_progress",
+            "sequence_number": 3,
+            "output_index": 0,
+            "item_id": "ig_1",
+        },
+        {
+            "type": "response.image_generation_call.generating",
+            "sequence_number": 4,
+            "output_index": 0,
+            "item_id": "ig_1",
+        },
+        {
+            "type": "response.image_generation_call.completed",
+            "sequence_number": 5,
+            "output_index": 0,
+            "item_id": "ig_1",
+        },
+        {
+            "type": "response.output_item.done",
+            "sequence_number": 6,
+            "output_index": 0,
+            "item": dict(_IMAGE_CALL_ITEM),
+        },
+        {
+            "type": "response.output_text.delta",
+            "sequence_number": 7,
+            "item_id": "msg_1",
+            "output_index": 1,
+            "content_index": 0,
+            "delta": "画好了！",
+        },
+        {"type": "response.output_text.done", "sequence_number": 8, "text": "画好了！"},
+        {"type": "response.completed", "sequence_number": 9, "response": terminal},
+    ]
+    response = _fold(chunks)
+    assert response.text == "画好了！"
+    assert len(response.generated_images) == 1
+    assert response.generated_images[0].source == "responses.image_generation"
+    assert [item["type"] for item in (response.native_blocks or [])] == ["message"]
