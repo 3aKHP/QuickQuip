@@ -9,6 +9,8 @@ history_limit = 10
 # history_max_messages_per_group 已废弃（保留解析、不再生效）：存储裁剪由
 # 会话纪元锚点驱动，硬上限统一为 2048 行。
 history_max_messages_per_group = 40
+# 全局记忆注入开关（/llm memory 按群覆盖的对象；关闭后所有会话不注入长期记忆）。
+# memory_enabled = true
 memory_limit = 6
 memory_max_items_per_group = 200
 max_prompt_chars = 4000
@@ -117,7 +119,7 @@ discovery_mode = "auto"       # off | on | auto
 discovery_min_tools = 10
 discovery_search_limit = 5
 discovery_max_loaded_tools = 12
-always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
+always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]
 
 [skills]
 # Skill 目录：每个子目录一个 Skill（SKILL.md + 可选 references/ + 可选
@@ -199,6 +201,7 @@ headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 # timeout_seconds = 30
 # image = "ghcr.io/github/github-mcp-server"
 # env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
+# tool_prefix = "gh"     # 自定义生成工具名前缀；留空按 server id 生成
 # include_tools = ["search_repositories", "get_file_contents", "search_code"]
 # exclude_tools = ["delete_file", "merge_pull_request"]
 #
@@ -397,6 +400,9 @@ style_profile = "openai_family"
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
+# enabled = false   # 暂时禁用该 provider：不进 /llm providers/models 列表、不参与探活与级联，
+#                   # /llm use 拒绝；配置保留，改回 true 即恢复。
+# stream_enabled = true  # 是否启用 SSE 流式响应（默认开启）。
 # aliases = { gpt4 = "gpt-5.4", mini = "gpt-5.2" }  # 短别名 → 完整模型 ID，用于 /llm use
 # fallback_urls = ["https://backup-relay.example/v1"]  # 主地址失败（5xx/网络）时自动切换
 # proxy = "http://127.0.0.1:7890"  # HTTP(S) 代理地址，Docker 容器内可用宿主机网桥 IP；代理宕机时 fallback_urls 同样不可达
@@ -413,11 +419,14 @@ models = ["claude-sonnet-4-6", "claude-opus-4-5", "claude-sonnet-4-5"]
 style_profile = "claude_family"
 # auth_method = "bearer"      # 认证方式："api_key"=x-api-key 头（默认），"bearer"=Authorization: Bearer
 # prompt_caching = true       # 启用 Anthropic Prompt Caching（需中转站支持 CLI 格式）
+# cache_ttl = "1h"            # Claude prompt cache TTL：留空 = 默认 5min，"1h" = 扩展缓存（仅 prompt_caching 开启时生效）
 # headers = { x-app = "cli" } # 自定义 HTTP 头；不设置 x-app 时自动补为 "cli"
 # model_context_windows = { "claude-sonnet-4-6" = 200000 }  # wire 模型 → 上下文窗口；未配置的模型按内置家族表解析，中继自定义模型名建议显式声明
 # agent_replay_loop_tokens = 131072  # 重放投影预算硬覆盖（优先于按窗口推导）
 # request_input_token_budget = 96000 # 请求输入预算硬覆盖（优先于按窗口推导）
-# max_inline_media_bytes = 2097152   # 单请求内联媒体解码字节总量预算（GIF 自动取首帧；0 = 不限）
+# max_inline_media_bytes = 5242880   # 单请求内联媒体解码字节总量预算，缺省 5MB（0 = 不限）。超出单图上限
+#                                    # 或剩余额度的图片先自动降采样重编码压入预算，压缩后仍装不下的跳过并
+#                                    # 记日志；GIF 自动取首帧。网关按更紧的请求体/token 口径风控时调小。
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
@@ -458,7 +467,8 @@ max_output_tokens = 2048
 [[providers]]
 # OpenAI Responses 协议（1.16 起）：store:false 手动上下文管理 + 每轮全量
 # input items 回放；reasoning 模型的工具循环会把 reasoning 密文与原生
-# output items 原样回传（当前循环内；跨轮回放随后续版本启用）。
+# output items 原样回传，跨轮历史经 owner 校验（同 provider/model/档位/端点）
+# 后按原生形态回放 reasoning 密文，切换任一维度自动降级为通用投影。
 id = "openai-responses"
 protocol = "openai_responses"
 base_url = "https://api.openai.com/v1"
@@ -470,8 +480,7 @@ style_profile = "openai_family"
 # "codex-http-relay"（Codex 形态中转：不发 service_tier、容忍 codex.*
 # 结构事件、终态缺省字段时以流式完整 item 为回放基准）。
 # responses_profile = "openai-public"
-# reasoning_effort：思考档位，独立于 thinking_budget 数字口径（后者仅
-# claude/gemini 生效，Responses 忽略）。六档 low/medium/high/xhigh/max/ultra，
+# reasoning_effort：思考档位。六档 low/medium/high/xhigh/max/ultra，
 # 超出后端词表自动降档到其最高支持档（openai-public 已核对范围到 xhigh；
 # codex-http-relay 的 gpt-6/gpt-5.6 系六档全支持恒等）；留空不发送 reasoning 字段。
 # reasoning_effort = "high"
