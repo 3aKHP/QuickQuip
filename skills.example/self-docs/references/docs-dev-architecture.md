@@ -78,24 +78,39 @@ NoneBot2 event → tz_tracker_plugin matcher
 QuickQuip/
 ├── bot.py                  # NoneBot2 启动入口
 ├── web_api.py              # Web 管理后台入口（独立进程，监听 5104）
+├── webview_launcher.py     # Windows 桌面壳启动器
+├── start.bat               # Windows 一键启动脚本
+├── Dockerfile              # 本地构建镜像
 ├── pyproject.toml          # 项目元数据与依赖声明
 ├── requirements.txt        # pip 安装用依赖列表
+├── requirements-dev.txt    # 开发期依赖（lint / 测试）
 ├── .env.example            # 本地部署环境变量模板
 ├── .env                    # 本地部署真实值（gitignore）
 ├── src/                    # Python 源码（src layout）
 │   ├── quickquip/          # 业务逻辑包
 │   └── plugins/            # NoneBot2 插件入口薄层
+├── tests/                  # pytest 测试套件
+├── scripts/                # 运维与数据回灌脚本（部分随镜像分发）
 ├── frontend/               # Web 管理后台前端（Vue 3 SPA）
 │   ├── src/                # 源码
 │   └── dist/               # 构建产物（gitignore）
 ├── docker-compose.example.yml  # Docker Compose 编排示例（含内置 SearXNG）
-├── prod.example/          # 生产运维目录模板（追踪）
-├── prod/                  # 真实生产运维目录（gitignore，由 prod.example/ 复制）
 ├── docker/
 │   └── searxng/
 │       └── settings.yml    # SearXNG 配置
-├── CHANGELOG.md            # 模块级变更记录
+├── config/                 # 配置文件目录（见下文专节）
+├── llm_about/              # vocab / identities 唯一生产部署路径（见下文专节）
+├── docs/                   # 公开文档（按 user / admin / dev 读者角色组织）
+├── skills.example/         # 预置官方 Skill 模板（复制到 skills/ 启用）
+├── prod.example/           # 生产运维目录模板（追踪）
+├── prod/                   # 真实生产运维目录（gitignore，由 prod.example/ 复制）
+├── CHANGELOG.md            # 变更记录
 ├── ROADMAP.md              # 演进方向
+├── CONTRIBUTING.md         # 贡献指南
+├── SECURITY.md             # 安全政策与漏洞上报
+├── CODE_OF_CONDUCT.md      # 行为准则
+├── CLAUDE.md               # AI 协作入口文档
+├── LICENSE                 # 许可证
 └── README.md               # 项目入口与快速开始
 ```
 
@@ -119,7 +134,7 @@ src/quickquip/
 │   └── nonebot/             # NoneBot2 适配层（生命周期、消息入口、命令注册、定时任务插件；命令注册按域拆到 command_parts/）
 └── app/                     # 应用级流水线装配（单例初始化、状态加载、游戏注册）
     ├── web/                 # Web 管理后台 FastAPI 应用与路由
-    │   └── routes/          # API 路由（统计、规则、群组、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、调度器监控、定时消息、审计、金币经济、牛牛大作战、唤醒、LLM 用量、周期报告、语录）
+    │   └── routes/          # API 路由（统计、规则、群组、群组设置、记忆、总结、对话、人格、资料、群LLM、配置、日志、限流、贴吧、词云、诊断、敏感词状态、MCP面板、调度器监控、定时消息、审计、金币经济、牛牛大作战、唤醒、LLM 用量、周期报告、语录）
 ```
 
 **规则**：业务逻辑只进 `src/quickquip/`（包路径 `quickquip.*`），不进 `src/plugins/`。NoneBot2 相关 import 只在 `adapters/nonebot/` 里出现。
@@ -177,6 +192,7 @@ data/
 ├── monthly_report_groups.json  # 已启用月报的群列表
 ├── web_admin_sessions.db   # Web Admin 会话记录
 ├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
+├── audit.db                # Web Admin 审计日志（SQLite）
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
 ├── llm_usage.db            # LLM 用量与成本统计（SQLite）
 ├── mcp_status.json         # MCP server 装载状态快照
@@ -209,6 +225,7 @@ docs/
 │   ├── group-commands.md
 │   ├── group-games.md
 │   ├── llm-tool-discovery.md
+│   ├── llm-skills.md
 │   ├── private-commands.md
 │   └── three-kingdoms-memes.md
 ├── admin/                  # 面向部署者/管理员
@@ -217,7 +234,10 @@ docs/
 │   ├── configuration.md
 │   ├── game-config.md
 │   ├── migration-napcat-to-llbot.md
+│   ├── mcp-servers.md
+│   ├── record-identities.md
 │   ├── sensitive-filter.md
+│   ├── skills.md
 │   ├── tool-discovery.md
 │   └── web-admin.md
 └── dev/                    # 面向开发者
@@ -263,7 +283,6 @@ docs/
 | `config/sensitive_words.toml` | 含部署者填充的敏感词词表 |
 | `config/chat_rules.toml` | 含私有群梗规则 |
 | `config/games.toml` | 含游戏参数配置 |
-| `config/niuniu_text.toml`, `config/niuniu_text_safe.toml` | 含部署者自定义牛牛文案 |
 | `config/personas/` | 含真实 persona 定义 |
 | `data/` | 运行时数据 |
 | `prod/` | 真实生产运维目录、运行态目录和运维密钥 |

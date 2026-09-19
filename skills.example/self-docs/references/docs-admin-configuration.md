@@ -2,7 +2,7 @@
 
 # QuickQuip 配置参考
 
-本文档列出 QuickQuip 所有可配置项，按文件和作用域分类。
+本文档列出 QuickQuip 主要可配置项，按文件和作用域分类。
 
 ---
 
@@ -18,6 +18,7 @@
 | `QQ_ACCOUNT` | QQ 号（云端部署必填） | — |
 | `ONEBOT_WS_URLS` | OneBot V11 WebSocket 地址列表 | — |
 | `ONEBOT_ACCESS_TOKEN` | OneBot 接入令牌 | — |
+| `TZ` | 容器与进程时区（日志、定时任务展示时间等） | `Asia/Shanghai` |
 
 ### LLM API Keys
 
@@ -77,9 +78,7 @@ LLM 工具 `search_web` 与 `/search` 命令固定走项目内 SearXNG。普通�
 | 变量 | 说明 |
 |------|------|
 | `MCP_ARXIV_PAPERS_MOUNT` | arXiv MCP server 论文保存卷挂载，格式 `host-path:container-path`。默认 `arxiv-papers:/root/.arxiv-mcp-server/papers` |
-| `MCP_PRTS_WIKI_ENABLED` | 是否启用 PRTS Wiki MCP server。默认 `false` |
-| `MCP_PRTS_GAMEDATA_MOUNT` | PRTS Wiki 游戏数据卷挂载，格式 `/absolute/path:/data/gamedata:ro` |
-| `MCP_PRTS_STORYJSON_MOUNT` | PRTS Wiki 剧情 JSON 卷挂载，格式 `/absolute/path:/data/storyjson:ro` |
+
 其他 `${ENV_VAR}` 与 `${ENV_VAR:-default}` 语法在 `config/llm.toml` 的 MCP server 配置中均可用。
 
 ### Web Admin
@@ -202,7 +201,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `discovery_min_tools` | `auto` 模式下触发工具发现的可延迟工具数量阈值 | `10` |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 | `5` |
 | `discovery_max_loaded_tools` | 一次 LLM 工具调用循环中最多动态加载的工具总数 | `12` |
-| `always_loaded` | 工具发现开启时仍然常驻暴露的工具名列表 | `["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]` |
+| `always_loaded` | 工具发现开启时仍然常驻暴露的工具名列表；未配置时回退下表内置默认集 | `["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]` |
 
 `tool_search` 和 `tool_list` 是本地元工具，不依赖 Claude 原生 tool search。接入大量 MCP 工具时，模型会先用 `tool_search` 搜索相关能力；搜索不到时可用 `tool_list` 列出工具组、工具名或按精确工具名加载工具，下一轮再调用被加载的真实工具。
 
@@ -257,7 +256,28 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
 
-> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 回放尚未启用（旧轮次按普通文本投影）。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
+> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：同一 provider / 模型 / 档位 / 端点的会话保留完整推理连续性，历史工具循环按原生形态回放；切换任一维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
+
+### `[style_profiles]` — 共享风格段
+
+定义可被多个 provider 复用的 system prompt 风格段（多行字符串），provider 通过 `style_profile` 键引用：
+
+```toml
+[style_profiles]
+my_family = """
+……风格条目……
+"""
+
+[[providers]]
+id = "my-provider"
+style_profile = "my_family"   # 引用共享段
+style_overrides = "……"        # 可选，叠加微调
+```
+
+- 拼接顺序：`style_profile` 段在前，`style_overrides` 追加在后，整体附加到每次调用的 system prompt 末尾。
+- 家族内容为空串是合法形态：声明家族占位、不注入任何内容，引用方等价于无风格附加块（例如为后续调校预留条目）。
+- 引用未定义的 `style_profile` 会记录 error 日志并忽略该引用，provider 仅保留 `style_overrides`。
+- 内置示例四家族（`openai_family` / `gemini_family` / `claude_family` / `general`）随 `config/llm.toml.example` 分发，按模型谱系对位命名，可直接复用或改写。
 
 ### `[pricing.models]` — 模型定价（成本统计）
 
@@ -323,9 +343,14 @@ output_per_mtok = 0.40
 | `image` | Docker 镜像（`transport = "docker"` 时） |
 | `command` | 启动命令（`transport = "stdio"` 时） |
 | `args` | 命令参数（`transport = "stdio"` 时） |
+| `cwd` | `stdio` 子进程工作目录；留空使用默认 |
 | `env` | 环境变量键值对，值支持 `${ENV_VAR}` / `${ENV_VAR:-default}` |
 | `mounts` | 卷挂载列表，格式 `host:container` 或 `host:container:ro` |
 | `docker_args` | 额外 Docker 运行参数 |
+| `docker_command` | docker transport 调用的 Docker 命令 | `docker` |
+| `pull_policy` | 镜像拉取策略：`always` / `missing` / `never` | `missing` |
+| `network` | 容器网络（如 `host`）；留空使用默认 | — |
+| `container_workdir` | 容器工作目录；留空使用镜像默认 | — |
 | `include_tools` | 该 server 暴露的工具白名单，支持 MCP 原始工具名或 QuickQuip 生成后的工具名 |
 | `exclude_tools` | 该 server 排除的工具列表，支持 MCP 原始工具名或 QuickQuip 生成后的工具名 |
 | `allowed_tools` | 兼容旧配置的白名单字段，新配置建议使用 `include_tools` |
@@ -348,7 +373,7 @@ output_per_mtok = 0.40
 | `max_output_chars` | 最大输出字符数 |
 | `model_cascade` | 模型级联列表（provider + model，失败自动降级） |
 
-`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求 16384（周/月报 8192），输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
+`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求：日报 16384、简报与周/月报 8192，输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
 
 ### `[daily_summary]` — 每日总结
 
@@ -381,7 +406,7 @@ output_per_mtok = 0.40
 
 ## config/generation.toml
 
-此文件不存在时，图片部分回退读取 `config/llm.toml` 中旧版 `[image_generation]` 段。
+此文件不存在时，各模态段回退读取 `config/llm.toml` 中的旧版配置段：图片 `[image_generation]`、语音 `[audio_generation]`、音乐 `[music_generation]`、语音识别 `[asr]`、SVG `[svg]`。
 
 图片、语音和音乐的 `prompt_blocklist` 是生成业务专属限制。配置了`config/sensitive_words.toml` 时，生成 prompt、标题、歌词和引用文本还会经过部署级统一敏感词过滤。该检查只处理文本，不审核输入或输出的图片像素、音频波形和音乐成品。
 
@@ -439,7 +464,7 @@ output_per_mtok = 0.40
 
 ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM 上下文。协议端若已在消息段中提供 `text` / `transcript` / `transcription` 字段，QuickQuip 会优先使用该文本；否则通过 OneBot `get_record` 获取音频文件，再调用 ASR provider。
 
-转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider才能得到可扫描文本。
+转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider 才能得到可扫描文本。
 
 | 键 | 说明 |
 |----|------|

@@ -22,6 +22,7 @@ QuickQuip 应用层只依赖 NoneBot2 + OneBot V11 契约，不绑定任何具�
 |---|---|
 | `message.group` | 群消息入口；依赖 `sender.card` / `nickname` / `role`、`to_me`、reply 段 |
 | `message.private` | 私聊消息入口（会话管理、AI 配置、记忆管理） |
+| `message_sent`（自身消息回显） | 机器人自身发言入档（聊天归档与日/周/月报的 bot 口径）；需在适配器侧开启自身消息上报（LLBot WebUI 的 `reportSelfMessage`），未开启时归档缺 bot 自身发言 |
 | `notice.group_recall` / `notice.friend_recall` | 撤回事件，用于消息上下文清理 |
 
 **action 面**

@@ -18,9 +18,9 @@ QuickQuip 设计之初即以 NapCat（Docker 镜像 `mlikiowa/napcat-docker`）�
 |---|---|---|
 | 原理 | DLL 注入 QQ 进程 | PMHQ 外部内存 Hook（独立进程） |
 | 被检测面 | QQ 进程内 DLL 模块可被扫描 | QQ 进程空间无修改，更难检测 |
-| Docker 镜像 | `mlikiowa/napcat-docker`（~1.2GB） | `initialencounter/llonebot:v7.12.14-7.3.2-45758`（~880MB） |
+| Docker 镜像 | `mlikiowa/napcat-docker`（迁移时实测 ~1.2GB） | `initialencounter/llonebot:v7.12.14-7.3.2-45758`（迁移时实测 ~880MB） |
 | 签名服务器 | 无需（QQ 自带） | 无需（QQ 自带） |
-| 社区活跃度 | 9k+ stars | 3.3k+ stars，日更 |
+| 社区活跃度 | 9k+ stars（迁移时） | 3.3k+ stars，日更（迁移时） |
 | OneBot V11 兼容 | 反向 WS、正向 WS | 反向 WS、正向 WS、HTTP、HTTP POST |
 
 核心区别：NapCat 把 DLL **塞进 QQ 进程内部**，腾讯可以扫描进程空间检测到外挂模块。LLBot 使用 **PMHQ（Pure Memory Hook for QQNT）**——一个独立进程通过 Linux 内存机制从外部与 QQ 交互，QQ 进程本身干干净净。

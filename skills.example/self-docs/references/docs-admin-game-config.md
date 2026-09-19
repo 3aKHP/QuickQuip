@@ -62,6 +62,7 @@ game_registry.register(RussianRouletteGame(economy=game_economy, config=games_co
 | `[economy]` | `sign_base_gold` | 10 | 签到基础金币 |
 | `[economy]` | `sign_streak_bonus` | 2 | 连续签到加成系数 |
 | `[economy]` | `sign_max_streak_bonus` | 30 | 连续签到加成上限 |
+| `[economy]` | `affection_per_sign` | 1 | 每次签到增加的好感度 |
 | `[number_bomb]` | `min_number` / `max_number` | 1 / 1000 | 数字范围 |
 | `[number_bomb]` | `timeout_seconds` | 60 | 超时秒数 |
 | `[blackjack]` | `min_bet` | 20 | 最低赌注 |
