@@ -279,7 +279,7 @@ ${ENV_VAR:-default}    带默认值；未设置时展开为 default（默认值�
 
 - 变量名需匹配 `[A-Za-z_][A-Za-z0-9_]*`；占位符支持嵌在更长字符串里（如 `"Bearer ${TOKEN}"`）；
 - 展开发生在**配置解析时**：进程启动加载 `llm.toml` 与 `/llm reload` 重载时各展开一次，运行期不重读环境变量；
-- 一次热重载后改动 `.env`，需要再次 `/llm reload` 才会生效。
+- `.env` 只在进程启动时加载一次：`/llm reload` 重载的是 TOML 展开（环境变量取自启动时快照），改动 `.env` 需要重启 bot 进程生效。
 
 ### 4.3 凭证安全惯例
 
@@ -407,6 +407,6 @@ url = "https://modern-mcp.example.com/mcp"
 
 > **文档信息**
 >
-> - 本文档基于 QuickQuip 项目编写，全部字段、默认值与行为描述以 `dev` 分支现行代码核对
+> - 本文档基于 QuickQuip 项目编写，全部字段、默认值与行为描述以现行实现为准
 > - 相关源码：`src/quickquip/llm/mcp/`、`src/quickquip/llm/config.py`、`src/quickquip/llm/service_parts/mcp_lifecycle.py`、`src/quickquip/adapters/nonebot/command_parts/llm.py`
 > - 最后更新：2026-09-19
