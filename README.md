@@ -20,13 +20,13 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **轻娱乐与互动** — `/roll` 掷骰子、`/choose` 随机选择、`/fortune` 每日运势、`/vote` 投票、`/quote` 语录收藏、`/find` 群聊搜索、`/tell` 离线留言
 - **词云生成** — `/wordcloud` 按 today/week/month/year 四档生成群聊词云图片
 - **STS 公式化回复** — 《杀戮尖塔》梗能力：消息命中“xxx了”时按卡牌名公式回复，`/turmfluch` 一次性生成诅咒文案（v1.10）。详见 [docs/dev/sts-formula.md](docs/dev/sts-formula.md)
-- **LLM 扩展** — 兼容 OpenAI / Claude / Gemini 协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
+- **LLM 扩展** — 兼容 OpenAI / Claude / Gemini / OpenAI Responses 四类协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、Skill 扩展包（部署者安装、AI 遇匹配请求自主激活）、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
 - **低频唤醒** — 按群配置唤醒延长、兴趣话题、相关性/答疑判定、无聊冒泡和兜底概率，所有入口受规则开关与限流保护
 - **LLM 用量/成本看板** — 全链路 token 计量与成本估算，按 provider/功能/模型/群/人格五维归因，Web Admin 提供用量面板与定价状态展示
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
 - **群周报与月报** — 每周/每月自动生成上一周期的群聊回顾，分天采样覆盖全周期，热词趋势与群内大事记一目了然
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
-- **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具），统一收口 `config/generation.toml`
+- **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具）；模型在对话中生成的图片也会直接送达群聊。统一收口 `config/generation.toml`
 - **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
@@ -177,7 +177,7 @@ src/
 │   │   └── web/          ← Web 管理后台 FastAPI + Vue 3 SPA
 │   ├── chat/             ← 规则回复（复读、接龙、彩蛋、节日、时区、统计）
 │   ├── games/            ← 游戏模块（registry、scores、economy、各游戏实现）
-│   ├── llm/              ← LLM 运行时（provider、MCP、工具调用、记忆）
+│   ├── llm/              ← LLM 运行时（provider、MCP、Skill 扩展、工具调用、记忆）
 │   ├── generation/       ← 多模态产出（图片、语音、音乐、SVG 渲染）
 │   ├── tieba/            ← 贴吧爬虫与帖子池
 │   ├── search/           ← 联网搜索后端
@@ -207,6 +207,8 @@ src/
 | [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md) | OneBot 适配器状态与选择 |
 | [docs/admin/configuration.md](docs/admin/configuration.md) | 完整配置参考 |
 | [docs/admin/web-admin.md](docs/admin/web-admin.md) | Web 管理后台 |
+| [docs/admin/skills.md](docs/admin/skills.md) | Skill 系统部署与安全模型 |
+| [docs/admin/mcp-servers.md](docs/admin/mcp-servers.md) | MCP Server 接入指南 |
 | [docs/admin/sensitive-filter.md](docs/admin/sensitive-filter.md) | 敏感词过滤器 |
 | [docs/admin/migration-napcat-to-llbot.md](docs/admin/migration-napcat-to-llbot.md) | NapCat → LLBot 历史迁移记录 |
 | [docs/dev/llm-module.md](docs/dev/llm-module.md) | LLM 模块详解 |

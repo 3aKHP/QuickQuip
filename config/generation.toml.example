@@ -92,6 +92,10 @@ default_model = "minimax-speech"
 #   sample_rate     — 采样率
 #   bitrate         — 比特率
 #   channel         — 声道数
+#   language_boost  — 语言提示（MiniMax，如 "zh"；留空不发送）
+#   subtitle_enable — 是否请求逐字字幕（MiniMax）
+#   pronunciation_dict — 发音词典（MiniMax，inline table；键为词、值为音标/替换读法）
+#   voice_modify    — 音色参数微调（MiniMax，inline table，如 pitch / rate / volume）
 #   speed / vol / pitch / emotion — 默认语音风格参数
 #   output_format   — 建议使用 hex，便于直接转成 QQ 语音段
 #   extra_body      — 自定义字段（见下方 openai_tts / http_tts 示例）

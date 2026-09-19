@@ -26,7 +26,7 @@ QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发
 
 如果后续需要把外部工具后端扩展为 MCP，单独查看 [mcp-integration.md](mcp-integration.md)。当前文档只描述已经落在项目内的 LLM 与工具调用实现。
 
-LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message 或 Gemini GenerateContent 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
+LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message、Gemini GenerateContent 或 OpenAI Responses 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
 
 ### 1.1 执行记录的请求边界
 
@@ -47,7 +47,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
   - 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机）
 - `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、STS 单发入口、图像预处理、健康检查、状态、自动记忆）。回复主链的输入收敛为 `llm/reply_types.py` 的 `ChatTurnRequest`，请求装配（替代旧闭包）、输入规范化、输出后处理与返回形状构造在 `llm/reply_chain.py`
+  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、Skill 工具、STS 单发入口、图像预处理、健康检查、状态、自动记忆、Agent Loop 运行时等，见 `service_parts/__init__.py`）。回复主链的输入收敛为 `llm/reply_types.py` 的 `ChatTurnRequest`，请求装配（替代旧闭包）、输入规范化、输出后处理与返回形状构造在 `llm/reply_chain.py`
 - `src/quickquip/llm/reply_chain.py`
   - 回复主链的装配与产出 shaping：`TurnRequestAssembler`（首轮与预算降级重建共用的显式装配对象）、`normalize_turn_input`、`finalize_reply_text`、`reply_result` 工厂与触发行 `raw_content` 拼装；只收显式参数，不 import `LLMService`
 - `src/quickquip/llm/quick_judge.py`
@@ -57,7 +57,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/prompting.py`
   - 负责 system prompt 组装（仅跨轮稳定段，字节稳定契约）、**当轮上下文信封渲染**（`build_turn_envelope`：时间/节日/participants/memories/词表命中，组装时渲染、不落库）、场景块构建、统一发言者格式渲染与 messages 数组拼装
 - `src/quickquip/llm/summarize.py`
-  - 每日总结与周/月报生成逻辑（模型级联、prompt 构建）；聊天记录输入统一经 `src/quickquip/chat/period_serializer.py` 压缩序列化（日分节【MM-DD 周X】→ 分钟块 `[HH:MM]` 块首带时间戳 → 块内同身份连发以 `/` 合并、复读折叠 ×N、URL 只留域名、bot 发言标记 `(bot)`）。周报与日报全量进序列化器；月报由 `build_monthly_chat_input` 按周公平分配 `input_char_budget` 字符预算组装（平静日整日保留，高活跃日优先用满剩余预算，放不下则等距抽稀），输出附 `【第N周 …】` 周节标题
+  - 每日总结与周/月报生成逻辑（模型级联、prompt 构建）；聊天记录输入统一经 `src/quickquip/chat/period_serializer.py` 压缩序列化（日分节【MM-DD 周X】→ 分钟块 `[HH:MM]` 块首带时间戳 → 块内同身份连发以 `/` 合并、复读折叠 ×N、URL 只留域名、bot 发言标记 `(bot)`）。周报与日报全量进序列化器；月报由 `src/quickquip/chat/period_serializer.py` 的 `build_monthly_chat_input` 按周公平分配 `input_char_budget` 字符预算组装（平静日整日保留，高活跃日优先用满剩余预算，放不下则等距抽稀），输出附 `【第N周 …】` 周节标题
 - `src/quickquip/llm/briefing.py`
   - 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联）
 - `src/quickquip/app/message_pipeline.py`
@@ -65,7 +65,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
 - `src/quickquip/llm/provider/`（包）
-  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
+  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client` / `replay_guard`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
 - `src/quickquip/llm/tool_discovery.py`
@@ -74,6 +74,8 @@ LLM 相关核心文件如下：
   - 负责工具执行前后的强制处理：参数与结果的敏感词扫描、单请求工具图片预算、非视觉模型图片降级
 - `src/quickquip/llm/tool_registry.py`
   - 负责工具白名单注册、参数校验和执行调度
+- `src/quickquip/llm/skills/`
+  - Skill 系统域包（1.16 起）：`parser`（SKILL.md frontmatter 与体积校验）、`catalog`（目录扫描、路径加固与内容校验）、`context`（会话激活状态）、`state`，以及 `tools/` 下的四枚工具（`activate_skill` 激活、`read_skill_resource` 读资料、`search_skill_resources` 检索、`run_skill_script` 执行脚本）；`service_parts/skills.py` 负责每轮目录扫描（零延迟热部署）、Skill 描述清单注入系统提示与激活接缝；命令入口 `/skill list`。部署、安全模型与编写教程见 [../admin/skills.md](../admin/skills.md) 与 [skill-tutorial.md](skill-tutorial.md)
 - `src/quickquip/llm/store.py`
   - 负责 SQLite 持久化（会话/记忆/归档/群设置）；v1.8.9 后按域拆为 `store_parts/` 子包的 mixin 组合
 - `src/quickquip/llm/vocab.py`
@@ -401,6 +403,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
   - `auto_memory_enabled`
   - `auto_memory_prompt`
   - `auto_memory_max_tokens`
+  - `agent_delivery_intermediate_enabled` / `agent_delivery_final_enabled`（Agent Loop 分段交付两域的全局默认：中间轮发送与最终轮分段；旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射）
 - `[triggers]`
   - `default_prefix`
   - `allow_prefix`
@@ -434,13 +437,15 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - `[daily_summary]`
   - 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表
 
+`[runtime]` 的完整键集（会话纪元 `epoch_*`、重试退避、请求/重放预算、回复分段、Loop 记录等）以 [../admin/configuration.md](../admin/configuration.md) 为准；本文 §4.2 详述纪元与预算机制。
+
 Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每个 `.toml` 一个人格文件，`_shared.toml` 存储共享行为准则与风格规则。
 
 ### 6.2 工具发现
 
 工具调用开启后，QuickQuip 支持本地 `tool_search` 和 `tool_list` 元工具。该机制用于工具数量较多的场景：初始请求只暴露 `always_loaded` 中的常驻工具，模型需要其它能力时先调用 `tool_search`；搜索不到但工具可能存在时，可用 `tool_list` 查看工具组、工具名或按精确名称加载工具。工具循环会把匹配到或精确加载的真实工具加入下一轮 provider 请求。
 
-默认 `discovery_mode = "auto"`，当可延迟工具数超过 `discovery_min_tools` 后启用；工具较少时继续按原方式全量暴露。该设计不依赖 Claude 原生 tool search，OpenAI / Claude / Gemini 协议适配器共用同一套本地发现逻辑。
+默认 `discovery_mode = "auto"`，当可延迟工具数超过 `discovery_min_tools` 后启用；工具较少时继续按原方式全量暴露。该设计不依赖 Claude 原生 tool search，OpenAI / Claude / Gemini / Responses 四类协议适配器共用同一套本地发现逻辑。
 
 Gemini 3 原生工具回合把 `thoughtSignature` 视为不可解释、不可重建的 provider 数据。非流式与 SSE 响应都会保存签名所在的完整有序 part，并在下一轮 model turn 原样回放；并行调用逐 part 保持自己的签名。Gemini 要求上一轮每个 `functionCall` 都有对应 `functionResponse`，因此单轮调用数超过运行时上限时整批拒绝执行。工具返回图片不会与 `functionResponse` 混入同一个 Content，而是在完整响应批次之后作为独立 user turn 发送。
 
@@ -452,7 +457,21 @@ Gemini 3 原生工具回合把 `thoughtSignature` 视为不可解释、不可重
 - 真正的硬上限仍然在代码里存在
 - 即使把 `history_max_messages_per_group` 写大，实际仍会被代码上限截断
 
-### 6.3 `config/awakening.toml`
+### 6.3 Skill 系统
+
+Skill 系统是 1.16 引入的运行时可扩展能力：部署者把 Skill 包（一个子目录一个 Skill：`SKILL.md` 指令正文 + 可选 `references/` 参考资料 + 可选 `scripts/` 脚本）放入 `skills/` 目录，已安装 Skill 的描述清单常驻系统提示，AI 遇到匹配的请求时自行激活，按需读取资料、检索内容或执行脚本后作答。未部署任何 Skill 时工具不注册、系统提示不变，实例行为与此前完全一致。
+
+运行时结构（`llm/skills/` 域包，文件级清单见 §2）：
+
+- `parser`：SKILL.md 校验（name 命名约束与长度、description 长度、包体积上限）
+- `catalog`：`skills/` 目录扫描——每轮请求现扫、改动零延迟生效（无缓存失效问题）；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
+- `context`：按会话维护激活状态，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
+- `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
+- `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
+
+配置集中在 `llm.toml` 的 `[skills]` 段（键与默认值见 [../admin/configuration.md](../admin/configuration.md)）；群友侧用 `/skill list` 查看已安装与已激活项。部署方式与安全模型见 [../admin/skills.md](../admin/skills.md)，编写自己的 Skill 见教程 [skill-tutorial.md](skill-tutorial.md)。
+
+### 6.4 `config/awakening.toml`
 
 唤醒模块配置集中在 `config/awakening.toml`：
 
@@ -479,7 +498,7 @@ persona TOML 可通过自由扩展字段追加兴趣话题：
 interest_topics = ["关键词"]
 ```
 
-### 6.4 `.env`
+### 6.5 `.env`
 
 本地开发与容器运行都需要：
 
@@ -496,7 +515,7 @@ interest_topics = ["关键词"]
 - `HOST`
 - `PORT`
 
-### 6.5 `config/generation.toml`
+### 6.6 `config/generation.toml`
 
 LLM 相关的多模态输入/产出配置在 `generation.toml` 中维护：
 

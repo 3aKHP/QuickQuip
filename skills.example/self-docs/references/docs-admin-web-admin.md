@@ -25,7 +25,7 @@ FastAPI web-admin
 - **外层**：nginx `auth_basic`
 - **内层**：QuickQuip 自身的应用层 session 登录
 
-这意味着即使 nginx 外层配置出现遗漏，FastAPI 里的管理接口仍然不会直接裸露。
+这意味着即使 nginx 外层配置出现遗漏，FastAPI 里的管理接口仍然不会直接裸露。内层登录还带速率限制：同一 IP 在 60 秒内登录失败达到 5 次后被临时封禁 300 秒，封禁期间的登录请求直接返回 429。
 
 ---
 
@@ -143,7 +143,7 @@ Web Admin 当前提供 27 个标签页（前端使用 vue-router 4 hash 模式�
 - **统计** — 各群消息数、活跃用户排行、规则触发 Top
 - **规则** — 按群启用/禁用任意规则，toggle 实时生效
 - **群组** — 每日总结 / 每日播报 / 群周报 / 群月报群管理（按群开关、立即生成）
-- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
+- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段，以及 Agent Loop 分段交付两域开关（中间轮发送 / 最终轮分段，与 `/llm delivery` 同一配置面）；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
 - **唤醒** — 按群查看并编辑唤醒参数，切换 `awakening_*` 规则和无聊唤醒 opt-in；兴趣话题由人格配置和规则开关控制
 - **限流** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）
 - **记忆** — 按群浏览与编辑 LLM 长期记忆，支持明确选择、替换和删除成员引用，提供原文查看
@@ -171,7 +171,7 @@ Web Admin 当前提供 27 个标签页（前端使用 vue-router 4 hash 模式�
 
 诊断页的“探活 Provider”按钮会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动全量巡检；群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
 
-LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Tool Loop 内的调用归入一个明显分组。请求正文是交给 HTTP 客户端的 UTF-8 JSON 序列化文本，详情页可在格式化 JSON 和传输原文之间切换；普通响应保留解析前的服务端 JSON 文本；流式响应完整消费 SSE 后，按 OpenAI、Claude 或 Gemini 协议重建为一份接近非流式结构的完整响应对象。详情页默认展示组合 JSON，也允许管理员切换到 SSE 传输原文。主列表和实时更新只传输调用元数据，选择记录后才读取请求正文、响应正文和 Header。故障切换、重试和 Tool Loop 后续轮次分别保留 HTTP 明细，并通过 Agent Loop ID 与组内序号关联。
+LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Tool Loop 内的调用归入一个明显分组。请求正文是交给 HTTP 客户端的 UTF-8 JSON 序列化文本，详情页可在格式化 JSON 和传输原文之间切换；普通响应保留解析前的服务端 JSON 文本；流式响应完整消费 SSE 后，按 OpenAI、Claude、Gemini 或 OpenAI Responses 协议重建为一份接近非流式结构的完整响应对象。详情页默认展示组合 JSON，也允许管理员切换到 SSE 传输原文。主列表和实时更新只传输调用元数据，选择记录后才读取请求正文、响应正文和 Header。故障切换、重试和 Tool Loop 后续轮次分别保留 HTTP 明细，并通过 Agent Loop ID 与组内序号关联。
 
 该页面面向最高权限管理员，正文和 Header 不做脱敏。页面会明确提示其中可能包含 API 凭证、系统提示和用户内容；当 MCP 工具图片实际发送给 provider 时，原始请求正文还会包含重新编码后的图片 base64，且记录体积会增大。建议只在排障期间开启采集。记录保存在 `data/llm_trace.db`，默认保留 14 天。
 

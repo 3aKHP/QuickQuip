@@ -76,6 +76,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 - 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
 - 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
 - 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
+- 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制；目录为空或不存时行为与此前完全一致，详见 [skills.md](skills.md)）
 - `prod/` 已由 `prod.example/` 复制而来，并按服务器环境调整 compose、部署脚本或巡检脚本
 - 如需 ServerChan 等运维通知，在 `prod/sendkey.env` 中维护；该文件不被 QuickQuip 应用读取
 
@@ -83,6 +84,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 
 - 根 `.env`
 - `config/` 目录下的运行配置（如 `llm.toml`、`generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
+- `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建）
 - `llm_about/vocab.yaml`
 - `llm_about/identities.yaml`
 - `llm_about/{群号}/vocab.yaml`
@@ -109,6 +111,7 @@ docker compose --env-file ../.env up -d
 - 不内置 SearXNG：搜索能力需由外部独立 searxng 实例提供，必须在 `.env` 中设置 `QUICKQUIP_SEARXNG_BASE_URL` 指向它（未设置时 compose 启动即报错）
 - 通过 `../.env` 向 bot 和 Web Admin 提供应用环境变量
 - 把 `../config` 只读挂载到容器内 `/app/config`
+- 把 `../skills` 只读挂载到容器内 `/app/skills`（Skill 技能包目录；宿主侧未创建时为空目录，Skill 系统自动处于无技能状态，详见 [skills.md](skills.md)）
 - 把 `../llm_about` 挂载到容器内 `/app/llm_about`
   - 其中包含全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
 - 把 `../data` 挂载到容器内 `/app/data`，用于持久化统计、规则开关、LLM 数据库
@@ -200,7 +203,7 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，容器内监�
 - 每日总结 / 每日播报群组管理
 - `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 在线编辑（保存前校验 TOML 语法）
 - 敏感词过滤器只读状态查看；`config/sensitive_words.toml` 只通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑
-- 记忆、对话、人格、资料、唤醒、LLM 用量、贴吧、词云、语录、调度器监控、审计、金币经济和牛牛面板
+- 记忆、对话、人格、资料、唤醒、LLM 用量、MCP、贴吧、词云、语录、调度器监控、审计、金币经济和牛牛面板
 - 实时日志 / LLM Trace / 日志归档面板（日志读取 `../data/logs`，LLM HTTP 调用索引和正文读取 `../data/llm_trace.db`）
 
 管理界面同时有两层门：
@@ -257,6 +260,14 @@ WEB_ADMIN_COOKIE_SECURE=auto
   ```
 
 - 只改了 `frontend/dist`（前端静态文件）时，`docker restart quickquip-web-admin` 即可，无需重建。
+
+**历史数据回灌（可选）**：`scripts/` 随镜像分发两个一次性回灌脚本——`backfill_record_identities.py` 把存量会话与语录回灌为群级身份候选（专文见 [record-identities.md](record-identities.md)）；`backfill_chat_archive.py` 把 1.15.2 之前退役的旧每日消息 / 词云 JSONL（`data/daily_msgs/`、`data/wordcloud_msgs/`）导入聊天记录归档库 `data/chat_archive.db`（导入完成后旧 JSONL 目录方可清理）。服务器容器内运行：
+
+```bash
+docker compose --env-file ../.env exec -T quickquip python scripts/backfill_chat_archive.py --dry-run
+```
+
+`--dry-run` 仅预览；确认统计符合预期后去掉该参数正式执行。脚本统计新增、归因回填、已存在、跳过与写入失败，存在写入失败时返回非零——确认失败为零后再清理旧 JSONL。Windows 懒人包的对应说明见 [README.md](../../README.md)。
 
 ## 日常维护
 

@@ -55,6 +55,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm personas` | 列出可用人格 |
 | `/llm memory status` | 记忆注入与长期记忆概况 |
 | `/llm mcp` | 外部工具（MCP）连接状态（`mcp status` 同此） |
+| `/skill list` | 查看已安装的 Skill 与当前会话已激活的项（Skill 是部署者安装的 AI 扩展能力包，见 [Skill 说明](llm-skills.md)） |
 
 改动类子命令私聊中任何人可用（群聊中仅管理员）：
 
@@ -87,6 +88,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/remember <内容>` | 添加一条长期记忆 |
 | `/memories [关键词]` | 列出，或按关键词筛选记忆 |
 | `/forget <关键词>` | 删除所有匹配关键词的记忆 |
+| `/forget #编号` | 精确删除指定编号的记忆（编号用 `/memories` 查看） |
 | `/forget_all` | 清空全部记忆 |
 
 ---

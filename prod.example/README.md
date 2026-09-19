@@ -16,7 +16,7 @@ When `prod/` already exists, move it aside before copying. The drivers reject a 
 
 - Server: Linux, Bash, GNU coreutils/find, rsync, flock, Python >= 3.11.8, Docker and Docker Compose >= 2.27. The deployment user needs Docker access and write access to the deployment root. Root-owned LLBot configuration files use noninteractive sudo for shared-file snapshot, apply and restore; without permission the action stops before activation.
 - Bash client: Bash, rsync, SSH/SCP, tar, Node.js and pnpm.
-- PowerShell client: PowerShell 5.1 or 7, SSH/SCP, tar, Node.js and pnpm on PATH. The server materializes its archive with rsync.
+- PowerShell client: PowerShell 5.1 or 7, SSH/SCP, tar, Node.js and pnpm on PATH. The server materializes the release archive with `deploy-state.py` (Python tarfile); rsync on the server is used for precondition checks only.
 - Initialize SSH host trust before unattended use. `quickquip-prod` is a placeholder SSH alias.
 - Fill root `.env`, `config/llm.toml` and other enabled feature configuration. Set `QUICKQUIP_SEARXNG_BASE_URL` for the external search service.
 

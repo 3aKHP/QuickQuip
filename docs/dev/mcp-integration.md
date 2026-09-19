@@ -270,7 +270,7 @@ url = "https://modern-mcp.example.com/mcp"
 
 - `stdio`、`docker`、`sse` transport 只支持 legacy。配置 `auto`/`modern` 会在配置校验阶段被跳过并记录 warning。
 - `supported_protocol_versions` 为空时 `auto`/`modern` 也会被跳过。
-- `auto` 探测的 verdict 在单次进程生命周期内保存。
+- `auto` 探测的结论在当前装载周期内保持：session 过期重连不重新探测，`/llm mcp reload` 或 `/llm reload` 触发的重新装载会重新探测。
 - modern version 无交集时明确报 negotiation failure。
 - `tools/call` 在 modern 模式下收到 `InputRequiredResult`（MRTR）时返回稳定的 unsupported 结果。
 

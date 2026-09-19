@@ -24,7 +24,8 @@ discovery_mode = "auto"
 discovery_min_tools = 10
 discovery_search_limit = 5
 discovery_max_loaded_tools = 12
-always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
+# 留空时使用内置默认集；自行列出时建议保留下列六项（activate_skill 供 Skill 系统激活使用）
+always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]
 ```
 
 字段说明：
@@ -32,11 +33,11 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "s
 | 键 | 说明 |
 |----|------|
 | `enabled` | 工具白名单。为空时启用内置工具和已连接的 MCP 工具；v1.12 起非空时默认 append（追加），`enabled_mode = "replace"` 才是精确白名单（详见 configuration.md 升级说明） |
-| `discovery_mode` | `off` 全量暴露；`on` 强制工具发现；`auto` 超过阈值后自动启用 |
+| `discovery_mode` | `off` 全量暴露；`on` 强制工具发现（`tool_search` 被白名单排除或当前没有可延迟工具时不生效）；`auto` 超过阈值后自动启用 |
 | `discovery_min_tools` | `auto` 模式下，可延迟工具数超过该值才启用工具发现 |
-| `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 |
-| `discovery_max_loaded_tools` | 一次工具调用循环中最多动态加载的工具总数 |
-| `always_loaded` | 工具发现开启时仍然直接暴露的常驻工具 |
+| `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数；同一上限也约束 `tool_list mode = "load"` 的单次加载数 |
+| `discovery_max_loaded_tools` | 一次工具调用循环中已加载工具的总数上限（`always_loaded` 常驻工具计入） |
+| `always_loaded` | 工具发现开启时仍然直接暴露的常驻工具。未配置时回退内置默认集：`tool_search` / `tool_list` / `get_identity` / `list_memories` / `search_web` / `activate_skill` |
 
 `tool_search` 用于按能力描述搜索工具；`tool_list` 用于列出工具组、工具名、工具摘要，并可用 `mode = "load"` 按精确名称加载工具。
 
@@ -67,6 +68,7 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "s
 - `get_identity`
 - `list_memories`
 - `search_web`
+- `activate_skill`（Skill 系统的激活入口；未部署 Skill 时无效果）
 
 如果某个 MCP 工具使用频率很高，也可以加入 `always_loaded`。例如：
 
@@ -93,7 +95,7 @@ discovery_mode = "auto"
 discovery_min_tools = 10
 discovery_search_limit = 5
 discovery_max_loaded_tools = 12
-always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
+always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]
 ```
 
 如果希望模型总是先搜索 GitHub 能力，再调用具体 GitHub 工具，保持 GitHub MCP 工具不在 `always_loaded` 中即可。

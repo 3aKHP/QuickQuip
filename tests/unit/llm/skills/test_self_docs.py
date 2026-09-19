@@ -105,7 +105,7 @@ def test_covers_full_source_allowlist(self_docs_skill: LoadedSkill):
         "references/prod.example-readme.md",
     }
     assert expected <= paths
-    assert len(paths) == 41
+    assert len(paths) == 45
 
 
 def test_no_leaked_checkout_path_api_key_or_private_id(self_docs_skill: LoadedSkill):
