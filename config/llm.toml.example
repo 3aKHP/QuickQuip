@@ -438,7 +438,7 @@ base_url = "https://your-gemini-relay.example/v1beta"
 api_key_env = "GEMINI_API_KEY"
 default_model = "gemini-3.1-pro-high"
 models = ["gemini-3.1-pro-high", "gemini-3-flash-preview"]
-style_profile = "claude_family"
+style_profile = "gemini_family"
 # auth_method = "bearer"  # 原生 Gemini 网关可用 Bearer；启用后 key 仅进 Authorization，不进 URL
 # builtin_search = true   # 声明 google_search 服务端搜索工具（grounding）：检索由 provider 侧
 #                         # 执行并计费；开启后该 provider 会话移除 search_web 工具，回复末尾
