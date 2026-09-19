@@ -69,9 +69,9 @@ uv pip install -e .                                # 可编辑安装（src layou
 ```
 src/
 ├── quickquip/
-│   ├── chat/          # 规则引擎：text_rules, repeat_detector, chain_game, context_rules, wordcloud, daily_summary/briefing
+│   ├── chat/          # 规则引擎：text_rules, repeat_detector, chain_game, context_rules, wordcloud, daily_summary/briefing, awakening/
 │   ├── common/        # 共享工具：rate_limit, persistence, message_deduper, sensitive_filter
-│   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, tool_registry, tool_loop, prompting, settings
+│   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, skills, tool_registry, tool_loop, prompting, settings
 │   ├── games/         # 游戏系统：niuniu, blackjack, russian_roulette, number_bomb, economy, scores, registry
 │   ├── generation/    # 多模态生成：image, audio, music, asr, svg
 │   ├── tieba/         # 贴吧爬虫（Playwright）
