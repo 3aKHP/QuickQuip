@@ -4,7 +4,10 @@ import random
 from datetime import datetime, timedelta, timezone
 from time import time
 
-from quickquip.adapters.nonebot.command_parts._parsing import _extract_at_target
+from quickquip.adapters.nonebot.command_parts._parsing import (
+    _extract_at_target,
+    _raw_message_text,
+)
 from quickquip.adapters.nonebot.command_parts.common import (
     _evaluate_luck,
     _fence_luck_tips,
@@ -205,10 +208,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             )
 
         # Extract @target — 段优先、raw_message 回退保 self-@（见 _extract_at_target）。
-        target_uid = _extract_at_target(
-            getattr(event, "raw_message", None) or str(event.get_message()),
-            event.get_message(),
-        )
+        target_uid = _extract_at_target(_raw_message_text(event), event.get_message())
         if not target_uid:
             await nn_fence.finish("你要和谁击剑？请 @一位用户")
 

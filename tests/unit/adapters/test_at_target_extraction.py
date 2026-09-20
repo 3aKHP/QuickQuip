@@ -8,13 +8,36 @@
 
 from __future__ import annotations
 
-from quickquip.adapters.nonebot.command_parts._parsing import _extract_at_target
+from quickquip.adapters.nonebot.command_parts._parsing import (
+    _extract_at_target,
+    _raw_message_text,
+)
 
 
 class _Seg:
     def __init__(self, type: str, **data):
         self.type = type
         self.data = data
+
+
+class _Event:
+    def __init__(self, raw_message, message):
+        self.raw_message = raw_message
+        self._message = message
+
+    def get_message(self):
+        return self._message
+
+
+def test_raw_message_text_prefers_raw():
+    event = _Event("/击剑[CQ:at,qq=123456789]", [_Seg("at", qq="987654321")])
+    assert _raw_message_text(event) == "/击剑[CQ:at,qq=123456789]"
+
+
+def test_raw_message_text_falls_back_to_segment_serialization():
+    for empty in (None, ""):
+        event = _Event(empty, [_Seg("at", qq="987654321")])
+        assert _raw_message_text(event) == str(event.get_message())
 
 
 def test_raw_with_name_field_extracts_target():

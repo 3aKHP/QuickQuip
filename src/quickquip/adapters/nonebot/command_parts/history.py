@@ -6,7 +6,10 @@ import re
 from datetime import datetime
 from time import time
 
-from quickquip.adapters.nonebot.command_parts._parsing import _extract_at_target
+from quickquip.adapters.nonebot.command_parts._parsing import (
+    _extract_at_target,
+    _raw_message_text,
+)
 from quickquip.adapters.nonebot.command_parts.common import (
     _is_private_chat,
     _parse_profile_mode,
@@ -91,10 +94,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         if not svc.config.is_available:
             await profile_cmd.finish(MessageSegment.text("LLM 功能未启用，无法生成人物志"))
 
-        target_user_id = _extract_at_target(
-            getattr(event, "raw_message", None) or str(event.get_message()),
-            event.get_message(),
-        )
+        target_user_id = _extract_at_target(_raw_message_text(event), event.get_message())
         if not target_user_id:
             await profile_cmd.finish(
                 MessageSegment.text("用法：/profile [short|middle|long|full] @某人")

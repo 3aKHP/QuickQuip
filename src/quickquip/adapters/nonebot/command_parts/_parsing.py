@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import re
 import shlex
+from typing import Any
 
 from quickquip.common.event_utils import strip_command_name as _strip_command_name
 from quickquip.llm.profile import DEFAULT_PROFILE_MODE, PROFILE_MODES, ProfileModeConfig
@@ -72,7 +74,12 @@ def _parse_resume(args: str) -> tuple[bool, int | None]:
     return True, int(num_str) if num_str else None
 
 
-def _extract_at_target(raw: str | None, segments) -> str | None:
+def _raw_message_text(event) -> str:
+    """event 的原始 CQ 文本；raw_message 缺失或为空时用段序列化兜底。"""
+    return getattr(event, "raw_message", None) or str(event.get_message())
+
+
+def _extract_at_target(raw: str | None, segments: Iterable[Any] | None) -> str | None:
     """提取消息里第一个被 @ 的普通用户 QQ 号，@全体不算目标。
 
     段解析优先：指向 bot 自身的 at 段会被 NoneBot 的 to_me 识别从
