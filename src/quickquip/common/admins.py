@@ -1,12 +1,13 @@
 """全局管理员注册表与角色解析——权限判定的唯一真相源。
 
 跨群只认 QQ 号，数据源 ``config/admins.toml``（TTL 节流 + mtime/size 戳
-热重载）；群内角色照旧由 OneBot 事件的 ``sender.role`` 提供；私聊事件无
-群角色，恒 MEMBER。
+热重载）；群内角色照旧由 OneBot 事件的 ``sender.role`` 提供；私聊事件
+（无 ``group_id``）恒 MEMBER。``has_admin_authority`` 为纯查询谓词；
+``check_admin_authority`` 是唯一的门禁入口，全局身份越界时记审计。
 
 审计（v1 轻量口径）：注册表加载/重载生效记 ``registry_loaded``（含名单，
-服务器私有日志留痕授权面变更）；全局管理员身份实际起效（越过了群角色
-边界）记 ``global_admin_unlock``。群角色正常通过不记，避免噪音。
+服务器私有日志留痕授权面变更）；门禁经全局身份越过群角色边界放行时记
+``global_admin_unlock``。群角色正常通过不记，避免噪音。
 """
 from __future__ import annotations
 
@@ -30,6 +31,18 @@ logger = logging.getLogger(__name__)
 
 _RELOAD_TTL_S = 5.0
 _ADMIN_TRACE_MARK = "ADMIN_TRACE"
+_GROUP_ADMIN_ROLES = ("admin", "owner")
+
+
+def _emit_admin_trace(payload: dict) -> None:
+    _logger.info(
+        f"{_ADMIN_TRACE_MARK} {json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
+    )
+
+
+def _sender_role(event) -> str | None:
+    sender = getattr(event, "sender", None)
+    return getattr(sender, "role", None) if sender is not None else None
 
 
 class ActorRole(IntEnum):
@@ -101,17 +114,12 @@ class AdminRegistry:
             self._admins = admins
             self._stamp = stamp
             self._failure_key = None
-            _logger.info(
-                f"{_ADMIN_TRACE_MARK} "
-                + json.dumps(
-                    {
-                        "kind": "registry_loaded",
-                        "count": len(admins),
-                        "admins": sorted(admins),
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                )
+            _emit_admin_trace(
+                {
+                    "kind": "registry_loaded",
+                    "count": len(admins),
+                    "admins": sorted(admins),
+                }
             )
 
     def _note_failure(self, key: tuple, exc: Exception, action: str) -> None:
@@ -166,12 +174,19 @@ def reset() -> None:
 
 
 def actor_role(event) -> ActorRole:
-    """解析事件发起者的角色；先查全局注册表（双身份归 GLOBAL_ADMIN）。"""
+    """解析事件发起者的角色；先查全局注册表（双身份归 GLOBAL_ADMIN）。
+
+    注册表命中仅对群聊事件生效（``group_id`` 缺失的私聊恒 MEMBER，
+    与「私聊不放行」的 v1 语义一致）。
+    """
     uid = str(getattr(event, "user_id", "") or "")
-    if uid and uid in _registry().snapshot():
+    if (
+        uid
+        and getattr(event, "group_id", None) is not None
+        and uid in _registry().snapshot()
+    ):
         return ActorRole.GLOBAL_ADMIN
-    sender = getattr(event, "sender", None)
-    role = getattr(sender, "role", None) if sender is not None else None
+    role = _sender_role(event)
     if role == "owner":
         return ActorRole.GROUP_OWNER
     if role == "admin":
@@ -180,7 +195,13 @@ def actor_role(event) -> ActorRole:
 
 
 def has_admin_authority(event) -> bool:
-    """管理员及以上权限门禁（群主/群管/全局管理员）。"""
+    """纯查询谓词：管理员及以上（群主/群管/全局管理员），无副作用。"""
+    return actor_role(event) >= ActorRole.GROUP_ADMIN
+
+
+def check_admin_authority(event) -> bool:
+    """门禁入口：结论与 :func:`has_admin_authority` 一致，全局身份越过
+    群角色边界放行时记 ``global_admin_unlock`` 审计。"""
     role = actor_role(event)
     if role >= ActorRole.GLOBAL_ADMIN:
         _audit_global_unlock(event)
@@ -190,20 +211,13 @@ def has_admin_authority(event) -> bool:
 
 def _audit_global_unlock(event) -> None:
     """全局身份实际起效才记：群角色本就足够时全局身份没有越过边界。"""
-    sender = getattr(event, "sender", None)
-    role = getattr(sender, "role", None) if sender is not None else None
-    if role in ("admin", "owner"):
+    if _sender_role(event) in _GROUP_ADMIN_ROLES:
         return
-    _logger.info(
-        f"{_ADMIN_TRACE_MARK} "
-        + json.dumps(
-            {
-                "kind": "global_admin_unlock",
-                "user_id": str(getattr(event, "user_id", "") or ""),
-                "group_id": str(getattr(event, "group_id", "") or ""),
-                "ts": time.time(),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
+    _emit_admin_trace(
+        {
+            "kind": "global_admin_unlock",
+            "user_id": str(getattr(event, "user_id", "") or ""),
+            "group_id": str(getattr(event, "group_id", "") or ""),
+            "ts": time.time(),
+        }
     )

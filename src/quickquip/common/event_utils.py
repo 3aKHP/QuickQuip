@@ -11,7 +11,7 @@ modules should gradually switch to importing directly from here.
 """
 from __future__ import annotations
 
-from quickquip.common.admins import has_admin_authority
+from quickquip.common.admins import check_admin_authority
 
 
 def get_sender_name(event) -> str:
@@ -25,7 +25,7 @@ def get_sender_name(event) -> str:
 
 
 def is_admin(event) -> bool:
-    return has_admin_authority(event)
+    return check_admin_authority(event)
 
 
 def is_self_message(event) -> bool:

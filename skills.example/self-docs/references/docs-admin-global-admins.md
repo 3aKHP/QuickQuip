@@ -35,8 +35,8 @@ global_admins = [
 应用日志中的 `ADMIN_TRACE` 行记录两类事件，便于回溯：
 
 - `registry_loaded`：注册表加载或热重载生效，含当前名单。
-- `global_admin_unlock`：全局管理员身份实际越过群角色边界放行了某次
-  管理操作（群角色本就足够时不会记录）。
+- `global_admin_unlock`：管理员门禁检查中，全局管理员身份越过群角色
+  边界放行时（群角色本就足够时不会记录）。
 
 ## 与 NoneBot 超用户的关系
 

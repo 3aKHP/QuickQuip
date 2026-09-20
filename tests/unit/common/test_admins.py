@@ -12,6 +12,7 @@ from quickquip.common.admins import (
     AdminRegistry,
     ActorRole,
     actor_role,
+    check_admin_authority,
     configure,
     has_admin_authority,
     reset,
@@ -108,6 +109,16 @@ def test_dual_identity_resolves_global(tmp_path):
     assert actor_role(_Event(_ADMIN, role="owner")) is ActorRole.GLOBAL_ADMIN
 
 
+def test_private_event_resolves_member_even_if_registered(tmp_path):
+    """私聊（group_id 缺失）不放行：注册表命中也恒 MEMBER。"""
+    path = tmp_path / "admins.toml"
+    _write(path, [_ADMIN])
+    configure(path)
+
+    assert actor_role(_Event(_ADMIN, role=None, group_id=None)) is ActorRole.MEMBER
+    assert has_admin_authority(_Event(_ADMIN, role=None, group_id=None)) is False
+
+
 def test_foreign_group_global_admin_passes_is_admin(tmp_path):
     """等价性验收：无群角色的全局管理员通过既有管理员门禁。"""
     from quickquip.common.event_utils import is_admin
@@ -173,6 +184,30 @@ def test_corrupt_file_keeps_last_valid(tmp_path):
 def test_missing_file_is_empty_registry(tmp_path):
     registry = AdminRegistry(tmp_path / "absent.toml", clock=_FakeClock())
     assert registry.snapshot() == frozenset()
+
+
+def test_empty_list_is_closed_state(tmp_path, admin_trace):
+    path = tmp_path / "admins.toml"
+    path.write_text("global_admins = []\n", encoding="utf-8")
+    registry = AdminRegistry(path, clock=_FakeClock())
+    assert registry.snapshot() == frozenset()
+    assert _trace_payloads(admin_trace) == [
+        {"kind": "registry_loaded", "count": 0, "admins": []}
+    ]
+
+
+def test_ttl_expired_stamp_unchanged_no_reread(tmp_path, admin_trace):
+    """TTL 到期但 mtime/size 未变：跳过重读，不产生新审计行。"""
+    path = tmp_path / "admins.toml"
+    _write(path, [_ADMIN])
+    _bump_mtime(path, 10**9)
+    clock = _FakeClock()
+    registry = AdminRegistry(path, clock=clock)
+    assert registry.contains(_ADMIN)
+
+    clock.advance(10)
+    assert registry.snapshot() == frozenset({_ADMIN})
+    assert len(_trace_payloads(admin_trace)) == 1
 
 
 def test_deletion_after_load_clears_and_audits(tmp_path, admin_trace):
@@ -261,15 +296,30 @@ def test_registry_loaded_audit_on_reload_change(tmp_path, admin_trace):
     assert _trace_payloads(admin_trace)[-1]["count"] == 2
 
 
+def test_query_predicate_is_side_effect_free(tmp_path, admin_trace):
+    """纯查询谓词不产生审计；门禁入口才记 global_admin_unlock。"""
+    path = tmp_path / "admins.toml"
+    _write(path, [_ADMIN])
+    configure(path)
+
+    assert has_admin_authority(_Event(_ADMIN, role=None)) is True
+    # 首查触发的 registry_loaded 属注册表自身留痕，与权限查询无关
+    assert [p for p in _trace_payloads(admin_trace) if p["kind"] == "global_admin_unlock"] == []
+
+    check_admin_authority(_Event(_ADMIN, role=None))
+    unlocks = [p for p in _trace_payloads(admin_trace) if p["kind"] == "global_admin_unlock"]
+    assert len(unlocks) == 1
+
+
 def test_global_unlock_audit_only_when_load_bearing(tmp_path, admin_trace):
     path = tmp_path / "admins.toml"
     _write(path, [_ADMIN])
     configure(path)
 
-    has_admin_authority(_Event(_ADMIN, role=None))
-    has_admin_authority(_Event(_ADMIN, role="admin"))
-    has_admin_authority(_Event(_OTHER, role="admin"))
-    assert has_admin_authority(_Event(_OTHER, role=None)) is False
+    check_admin_authority(_Event(_ADMIN, role=None))
+    check_admin_authority(_Event(_ADMIN, role="admin"))
+    check_admin_authority(_Event(_OTHER, role="admin"))
+    assert check_admin_authority(_Event(_OTHER, role=None)) is False
 
     unlocks = [p for p in _trace_payloads(admin_trace) if p["kind"] == "global_admin_unlock"]
     assert len(unlocks) == 1
