@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import random
-import re
 from datetime import datetime, timedelta, timezone
 from time import time
 
+from quickquip.adapters.nonebot.command_parts._parsing import _extract_at_target
 from quickquip.adapters.nonebot.command_parts.common import (
     _evaluate_luck,
     _fence_luck_tips,
@@ -204,22 +204,11 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
                 )
             )
 
-        # Extract @target — prefer raw_message (preserves self-@ that
-        # get_message segments may strip), fall back to segment parsing.
-        target_uid = None
-        raw = getattr(event, "raw_message", None) or str(event.get_message())
-        m = re.search(r"\[CQ:at,qq=(\d+)\]", raw)
-        if m:
-            target_uid = m.group(1)
-        if not target_uid:
-            for seg in event.get_message():
-                seg_type = getattr(seg, "type", None)
-                data = getattr(seg, "data", {})
-                if seg_type == "at":
-                    qq = str(data.get("qq", "") or "").strip()
-                    if qq and qq != "all":
-                        target_uid = qq
-                        break
+        # Extract @target — raw_message 优先以保住 self-@（见 _extract_at_target）。
+        target_uid = _extract_at_target(
+            getattr(event, "raw_message", None) or str(event.get_message()),
+            event.get_message(),
+        )
         if not target_uid:
             await nn_fence.finish("你要和谁击剑？请 @一位用户")
 

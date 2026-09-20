@@ -52,6 +52,9 @@ _RESUME_RE = re.compile(r'--resume(?:\s+(\d+))?')
 _DICE_RE = re.compile(r"^(\d*)[dD](\d+)$")
 _DRAW_SIZE_RE = re.compile(r'--size\s+(\d+x\d+)', re.IGNORECASE)
 _DRAW_QUALITY_RE = re.compile(r'--quality\s+(\S+)', re.IGNORECASE)
+# qq 数字后收尾放宽为 `,` 或 `]`：LLOneBot 的 at 码带 name= 扩展键，
+# 只认裸 `qq=数字]` 会漏掉全部 @ 目标。
+_AT_TARGET_RE = re.compile(r"\[CQ:at,qq=(\d+)[,\]]")
 
 
 def _parse_preset(args: str) -> str:
@@ -67,6 +70,27 @@ def _parse_resume(args: str) -> tuple[bool, int | None]:
         return False, None
     num_str = m.group(1)
     return True, int(num_str) if num_str else None
+
+
+def _extract_at_target(raw: str | None, segments) -> str | None:
+    """提取消息里第一个被 @ 的普通用户 QQ 号，@全体不算目标。
+
+    raw 优先：指向 bot 自身的 at 段会被 NoneBot 的 to_me 识别从
+    get_message() 里剥掉，raw_message 的 CQ 码才是 self-@ 的唯一完整来源，
+    段解析只作回退。
+    """
+    if raw:
+        m = _AT_TARGET_RE.search(raw)
+        if m:
+            return m.group(1)
+    for seg in segments or ():
+        seg_type = getattr(seg, "type", None)
+        data = getattr(seg, "data", {})
+        if seg_type == "at":
+            qq = str(data.get("qq", "") or "").strip()
+            if qq and qq != "all":
+                return qq
+    return None
 
 
 def _parse_tieba_command_args(args: str) -> tuple[str, str | None, bool]:
