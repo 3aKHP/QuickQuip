@@ -8,7 +8,7 @@ from typing import Optional
 
 from quickquip.games.config import BlackjackConfig
 from quickquip.games.economy import GameEconomyStore
-from quickquip.games.identity import display_name
+from quickquip.games.identity import display_name, display_names
 from quickquip.games.registry import BaseGame, GameResult
 
 
@@ -250,7 +250,8 @@ class BlackjackGame(BaseGame):
         s.expires_at = time() + self._config.timeout_seconds
         self._touch(key)
 
-        names = [display_name(gid, p.user_id) for p in s.players]
+        names_map = display_names(gid, (p.user_id for p in s.players))
+        names = [names_map[p.user_id] for p in s.players]
         return GameResult(
             reply=f"入场成功！已下注 {bet} 金币\n"
                    f"当前玩家（{len(s.players)}/{self._config.max_players}）：{'、'.join(names)}\n"
@@ -274,11 +275,12 @@ class BlackjackGame(BaseGame):
             s.deck_pos += 1
 
         # Build status
+        names_map = display_names(key, (p.user_id for p in s.players))
         lines = ["🃏 发牌完毕！"]
         for i, p in enumerate(s.players):
             bj = " ← Blackjack!" if _is_blackjack(p.cards) else ""
             lines.append(
-                f"玩家{i + 1} ({display_name(key, p.user_id)}) [{_cards_str(p.cards)}] "
+                f"玩家{i + 1} ({names_map[p.user_id]}) [{_cards_str(p.cards)}] "
                 f"共 {_score(p.cards)} 点 下注 {p.bet}{bj}"
             )
         lines.append(f"庄家 [{s.dealer_cards[0]} ?]")
@@ -417,12 +419,13 @@ class BlackjackGame(BaseGame):
         # Any player with blackjack beats dealer who doesn't have blackjack
         # Player with blackjack gets 1.5x their bet back
 
+        names_map = display_names(key, (p.user_id for p in s.players))
         for p in s.players:
             p_score = _score(p.cards)
             p_bj = _is_blackjack(p.cards)
             uid = p.user_id
             gid = key
-            name = display_name(gid, uid)
+            name = names_map[uid]
 
             if p_score > 21:
                 # Busted — lost bet already deducted

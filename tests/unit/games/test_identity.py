@@ -81,3 +81,72 @@ def test_display_resolver_batch(repo: IdentityRepository):
     assert name_of("10002") == "全局乙"
     assert name_of("10003") == "昵称丙"
     assert name_of("10004") == "QQ10004"
+
+
+def test_merge_trims_only_overridden_qq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """群内登记只裁全局条目里被覆盖的那个 QQ，同条目其余 QQ 保留全局 canonical。"""
+    tmp_path.joinpath("identities.yaml").write_text(
+        "people:\n"
+        "  - canonical_name: 双号户\n"
+        "    qq_ids:\n"
+        '      - "10001"\n'
+        '      - "10005"\n',
+        encoding="utf-8",
+    )
+    group_dir = tmp_path / _GROUP
+    group_dir.mkdir()
+    group_dir.joinpath("identities.yaml").write_text(_GROUP_YAML, encoding="utf-8")
+    monkeypatch.setattr(
+        games_identity,
+        "identities",
+        IdentityRepository(
+            path=tmp_path / "identities.yaml", stats_path=tmp_path / "stats.json"
+        ),
+    )
+
+    assert games_identity.display_name(_GROUP, "10001") == "群内甲"
+    assert games_identity.display_name(_GROUP, "10005") == "双号户"
+
+
+def test_placeholder_canonical_skipped_to_nickname(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """canonical_name 值本身是 QQ 数字串时按占位跳过，直接落昵称级。"""
+    tmp_path.joinpath("identities.yaml").write_text("", encoding="utf-8")
+    group_dir = tmp_path / _GROUP
+    group_dir.mkdir()
+    group_dir.joinpath("identities.yaml").write_text(
+        "people:\n"
+        "  - canonical_name: 10004\n"
+        "    qq_ids:\n"
+        '      - "10004"\n',
+        encoding="utf-8",
+    )
+    tmp_path.joinpath("stats.json").write_text(
+        f'{{"{_GROUP}": {{"user_names": {{"10004": "昵称丁"}}}}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        games_identity,
+        "identities",
+        IdentityRepository(
+            path=tmp_path / "identities.yaml", stats_path=tmp_path / "stats.json"
+        ),
+    )
+
+    assert games_identity.display_name(_GROUP, "10004") == "昵称丁"
+
+
+def test_display_names_disambiguates_duplicates(repo: IdentityRepository):
+    """同名显示名批量渲染时追加（QQ{号}）后缀，唯一名不加后缀。"""
+    stats_path = repo.stats_path
+    stats_path.write_text(
+        f'{{"{_GROUP}": {{"user_names": {{"10006": "同名", "10007": "同名"}}}}}}',
+        encoding="utf-8",
+    )
+    repo.invalidate()
+
+    names = games_identity.display_names(_GROUP, ("10002", "10006", "10007"))
+    assert names["10002"] == "全局乙"
+    assert names["10006"] == "同名（QQ10006）"
+    assert names["10007"] == "同名（QQ10007）"

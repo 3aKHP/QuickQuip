@@ -252,6 +252,8 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         return "\n".join(lines)
 
     def _rank_group(event) -> str | None:
+        # 总排行命令允许私聊调用，私聊事件没有 group_id 属性（不只是
+        # 值为空），必须 getattr 兜底；None 走纯全局 scope。
         gid = getattr(event, "group_id", None)
         return str(gid) if gid else None
 
