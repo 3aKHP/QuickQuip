@@ -17,7 +17,7 @@
 
 ## 配置
 
-编辑 `config/admins.toml`（首次使用从 `config/admins.example.toml` 复制）：
+编辑 `config/admins.toml`（首次使用从 `config/admins.toml.example` 复制）：
 
 ```toml
 global_admins = [

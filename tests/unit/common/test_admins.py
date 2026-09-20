@@ -175,6 +175,31 @@ def test_missing_file_is_empty_registry(tmp_path):
     assert registry.snapshot() == frozenset()
 
 
+def test_deletion_after_load_clears_and_audits(tmp_path, admin_trace):
+    """有名单后删除文件：清空为关闭态并记 registry_loaded count=0。"""
+    path = tmp_path / "admins.toml"
+    _write(path, [_ADMIN])
+    _bump_mtime(path, 10**9)
+    clock = _FakeClock()
+    registry = AdminRegistry(path, clock=clock)
+    assert registry.contains(_ADMIN)
+
+    path.unlink()
+    clock.advance(10)
+    assert registry.snapshot() == frozenset()
+    payloads = _trace_payloads(admin_trace)
+    assert payloads[-1] == {"kind": "registry_loaded", "count": 0, "admins": []}
+
+
+def test_int_user_id_hits_registry(tmp_path):
+    """生产 OneBot v11 事件的 user_id 是 int；int 形态同样命中注册表。"""
+    path = tmp_path / "admins.toml"
+    _write(path, ["1000000000"])
+    configure(path)
+
+    assert actor_role(_Event(1000000000, role=None)) is ActorRole.GLOBAL_ADMIN
+
+
 def test_invalid_entries_skipped(tmp_path):
     path = tmp_path / "admins.toml"
     path.write_text(

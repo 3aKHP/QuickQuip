@@ -33,7 +33,12 @@ _ADMIN_TRACE_MARK = "ADMIN_TRACE"
 
 
 class ActorRole(IntEnum):
-    """有序角色：门禁统一写法 ``actor_role(event) >= ActorRole.GROUP_ADMIN``。"""
+    """有序角色。
+
+    群管理档门禁请使用 :func:`has_admin_authority`（内含全局身份起效的
+    审计）；直接比较 ``actor_role(event) >= ...`` 留给未来的更高档门禁，
+    那些门禁需自带各自的审计口径。
+    """
 
     MEMBER = 0
     GROUP_ADMIN = 1
@@ -44,8 +49,9 @@ class ActorRole(IntEnum):
 class AdminRegistry:
     """``config/admins.toml`` 的进程内缓存。
 
-    调用节流（约 5s TTL）+ 文件 mtime/size 戳变更才重读；文件缺失或解析
-    失败时保留上次有效名单，缺失与空表均为合法的关闭态（行为与未启用一致）。
+    调用节流（约 5s TTL）+ 文件 mtime/size 戳变更才重读；文件缺失与空表
+    为合法的关闭态（清空并记 ``registry_loaded`` 留痕），解析失败保留上次
+    有效名单。
     """
 
     def __init__(self, path: Path | str = CONFIG_ADMINS_TOML, clock=time.monotonic):
@@ -55,6 +61,7 @@ class AdminRegistry:
         self._admins: frozenset[str] = frozenset()
         self._last_check = float("-inf")
         self._stamp: tuple[int, int] | None = None
+        self._failure_key: tuple | None = None
 
     def contains(self, qq: str) -> bool:
         return str(qq) in self.snapshot()
@@ -73,21 +80,27 @@ class AdminRegistry:
                 return
             self._last_check = now
             try:
-                stamp = (
-                    (self.path.stat().st_mtime_ns, self.path.stat().st_size)
-                    if self.path.exists()
-                    else None
-                )
-            except OSError:
-                logger.exception("全局管理员配置状态读取失败，保留上次名单：%s", self.path)
+                stat = self.path.stat()
+            except FileNotFoundError:
+                stamp = None
+            except OSError as exc:
+                self._note_failure(("unstatable",), exc, "状态读取失败")
                 return
+            else:
+                stamp = (stat.st_mtime_ns, stat.st_size)
             if stamp == self._stamp:
                 return
-            admins = self._load()
-            if admins is None:
-                return
+            if stamp is None:
+                admins = frozenset()
+            else:
+                try:
+                    admins = self._parse()
+                except Exception as exc:
+                    self._note_failure(stamp, exc, "解析失败")
+                    return
             self._admins = admins
             self._stamp = stamp
+            self._failure_key = None
             _logger.info(
                 f"{_ADMIN_TRACE_MARK} "
                 + json.dumps(
@@ -101,19 +114,20 @@ class AdminRegistry:
                 )
             )
 
-    def _load(self) -> frozenset[str] | None:
-        """解析注册表；返回 None 表示解析失败，调用方保留旧名单。"""
-        try:
-            raw = tomllib.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
-        except Exception:
-            logger.exception("全局管理员配置解析失败，保留上次名单：%s", self.path)
-            return None
+    def _note_failure(self, key: tuple, exc: Exception, action: str) -> None:
+        """同一失败形态只在首次记全栈 traceback，持续失败降为 warning。"""
+        if key != self._failure_key:
+            logger.exception("全局管理员配置%s，保留上次名单：%s", action, self.path)
+        else:
+            logger.warning("全局管理员配置%s（持续），保留上次名单：%s", action, self.path)
+        self._failure_key = key
+
+    def _parse(self) -> frozenset[str]:
+        """解析注册表；坏文档抛异常由调用方保旧名单。"""
+        raw = tomllib.loads(self.path.read_text(encoding="utf-8"))
         entries = raw.get("global_admins", [])
         if not isinstance(entries, list):
-            logger.error(
-                "全局管理员配置 global_admins 须为字符串列表，保留上次名单：%s", self.path
-            )
-            return None
+            raise ValueError("global_admins 须为字符串列表")
         valid: set[str] = set()
         for entry in entries:
             qq = str(entry).strip()
