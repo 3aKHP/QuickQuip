@@ -617,7 +617,7 @@ def _default_commands() -> dict[str, Any]:
         "rank.natural_header": "🏆 牛牛总排行（自然数值）：",
         "rank.abs_header": "🏆 牛牛绝对值排行：",
         "rank.abs_global_header": "🏆 牛牛绝对值排行（全局）：",
-        "rank.line": "{index}. QQ:{uid} — {length} {unit}",
+        "rank.line": "{index}. {name} — {length} {unit}",
         "text_mode.view": (
             "📝 本群牛牛文案模式：{mode}\n"
             "可用模式：{available}\n"

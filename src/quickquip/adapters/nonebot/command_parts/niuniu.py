@@ -15,6 +15,7 @@ from quickquip.adapters.nonebot.command_parts.common import (
 )
 from quickquip.app.message_pipeline import game_economy, niuniu_store
 from quickquip.common.rate_limit import SlidingWindowRateLimiter
+from quickquip.games.identity import display_resolver
 from quickquip.games.niuniu import fence_cd, fenced_cd, fencing, get_comment, glue_cd, gluing
 
 # Per-group RPM rate limiters — created lazily, reaped periodically
@@ -239,13 +240,22 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
                          group_id=str(event.group_id))
         await nn_fence.finish(result)
 
-    def _build_rank_text(entries: list[dict], title: str, unit: str = "cm") -> str:
+    def _build_rank_text(
+        entries: list[dict], title: str, unit: str = "cm", group_id: str | None = None
+    ) -> str:
         if not entries:
             return f"{title}\n暂无数据…"
+        name_of = display_resolver(group_id)
         lines = [f"🏆 {title}："]
         for i, e in enumerate(entries, 1):
-            lines.append(f"{i}. QQ:{e['uid']} — {e['length']} {unit}")
+            lines.append(f"{i}. {name_of(e['uid'])} — {e['length']} {unit}")
         return "\n".join(lines)
+
+    def _rank_group(event) -> str | None:
+        # 总排行命令允许私聊调用，私聊事件没有 group_id 属性（不只是
+        # 值为空），必须 getattr 兜底；None 走纯全局 scope。
+        gid = getattr(event, "group_id", None)
+        return str(gid) if gid else None
 
     nn_len_rank = on_command("牛牛长度排行", priority=10, block=True)
 
@@ -258,7 +268,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_length(limit=n)
-        await nn_len_rank.finish(_build_rank_text(entries, "牛牛长度排行"))
+        await nn_len_rank.finish(
+            _build_rank_text(entries, "牛牛长度排行", group_id=_rank_group(event))
+        )
 
     nn_len_rank_all = on_command("牛牛长度总排行", priority=10, block=True)
 
@@ -269,7 +281,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_length(limit=n)
-        await nn_len_rank_all.finish(_build_rank_text(entries, "牛牛长度总排行（全局）"))
+        await nn_len_rank_all.finish(
+            _build_rank_text(entries, "牛牛长度总排行（全局）", group_id=_rank_group(event))
+        )
 
     nn_depth_rank = on_command("牛牛深度排行", priority=10, block=True)
 
@@ -282,7 +296,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_depth(limit=n)
-        await nn_depth_rank.finish(_build_rank_text(entries, "牛牛深度排行"))
+        await nn_depth_rank.finish(
+            _build_rank_text(entries, "牛牛深度排行", group_id=_rank_group(event))
+        )
 
     nn_depth_rank_all = on_command("牛牛深度总排行", priority=10, block=True)
 
@@ -293,7 +309,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_depth(limit=n)
-        await nn_depth_rank_all.finish(_build_rank_text(entries, "牛牛深度总排行（全局）"))
+        await nn_depth_rank_all.finish(
+            _build_rank_text(entries, "牛牛深度总排行（全局）", group_id=_rank_group(event))
+        )
 
     nn_natural_rank = on_command("牛牛总排行", priority=10, block=True)
 
@@ -306,7 +324,11 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_natural(limit=n)
-        await nn_natural_rank.finish(_build_rank_text(entries, "牛牛总排行（自然数值）"))
+        await nn_natural_rank.finish(
+            _build_rank_text(
+                entries, "牛牛总排行（自然数值）", group_id=_rank_group(event)
+            )
+        )
 
     nn_abs_rank = on_command("牛牛绝对值排行", priority=10, block=True)
 
@@ -319,7 +341,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_absolute(limit=n)
-        await nn_abs_rank.finish(_build_rank_text(entries, "牛牛绝对值排行"))
+        await nn_abs_rank.finish(
+            _build_rank_text(entries, "牛牛绝对值排行", group_id=_rank_group(event))
+        )
 
     nn_abs_rank_all = on_command("牛牛绝对值总排行", priority=10, block=True)
 
@@ -330,7 +354,11 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_absolute(limit=n)
-        await nn_abs_rank_all.finish(_build_rank_text(entries, "牛牛绝对值总排行（全局）"))
+        await nn_abs_rank_all.finish(
+            _build_rank_text(
+                entries, "牛牛绝对值总排行（全局）", group_id=_rank_group(event)
+            )
+        )
 
     nn_records = on_command("我的牛牛战绩", priority=10, block=True)
 
