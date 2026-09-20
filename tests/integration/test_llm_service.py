@@ -2145,3 +2145,77 @@ async def test_responses_cross_turn_owner_switch_degrades_history(
     assert calls[0]["name"] == "get_identity"
     assert calls[0]["call_id"] == outputs[0]["call_id"]
     assert "镜子" in outputs[0]["output"]
+
+
+async def test_same_scope_concurrent_turns_serialize_with_full_accounting(
+    llm_service, patch_provider_builder
+):
+    """同 scope 并发轮次经闸门串行：两轮各自成 Loop，无 LoopNotWritable 旁路。
+
+    设计 §5.2 的回归守卫——旧实现（无闸门）下第二轮撞 begin_loop 单飞
+    约束退回无记录路径，load_closed_loops 只剩一个 Loop。
+    """
+    import asyncio as _asyncio
+
+    entered = _asyncio.Event()
+    release = _asyncio.Event()
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    patch_provider_builder(lambda provider: _SlowStub())
+
+    task_a = _asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="第一轮慢提问"))
+    await entered.wait()
+
+    # 第一轮持有闸门与 Loop：第二轮同 scope 只能排队
+    gate_entry = llm_service._scope_gate._entries.get("1001")
+    assert gate_entry is not None and gate_entry.lock.locked()
+
+    task_b = _asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="第二轮并发提问"))
+    await _asyncio.sleep(0.3)
+    assert not task_b.done(), "同 scope 第二轮应在闸门后排队而非并发进入"
+
+    release.set()
+    reply_a = await task_a
+    reply_b = await task_b
+
+    assert reply_a["reply"]
+    assert reply_b["reply"]
+    assert llm_service._scope_gate.bypassed_count == 0
+
+    loops = llm_service.store.load_closed_loops("1001")
+    assert len(loops) == 2, "两轮都应有各自的完整 Loop 记账"
+
+
+async def test_loop_not_writable_fallback_records_gate_bypass(llm_service):
+    """闸门旁路分支：LoopNotWritable 退回无记录路径时计入告警计数。"""
+    from quickquip.llm.store_parts.agent_records import UserTriggerPayload
+    from quickquip.llm.agent_records import TriggerKind
+
+    generation, _ = llm_service.store.agent_scope_state("1001")
+    llm_service.store.begin_loop(
+        "1001", generation, TriggerKind.GROUP_DIRECT,
+        UserTriggerPayload(
+            user_id="2002", sender_name="甲", canonical_name="",
+            content="占位", raw_content="占位", message_id=None,
+        ),
+    )
+
+    recorder = llm_service._begin_agent_recorder(
+        scope_key="1001", chat_type="group", user_id="2002", sender_name="甲",
+        stored_prompt="并发第二轮", message_id=None, store_user_message=True,
+        normalized_quoted_text="", normalized_quoted_image_urls=[],
+        normalized_forward_text="", normalized_forward_image_urls=[],
+        image_descriptions=None,
+        agent_delivery_intermediate_enabled=False,
+        agent_delivery_final_enabled=False,
+    )
+
+    assert recorder is None
+    assert llm_service._scope_gate.bypassed_count == 1

@@ -43,7 +43,8 @@ from quickquip.llm.request_budget import (
 )
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
-from quickquip.llm.store_parts.agent_records import AgentStoreError
+from quickquip.llm.service_parts.scope_gate import ScopeGate
+from quickquip.llm.store_parts.agent_records import AgentStoreError, LoopNotWritable
 from quickquip.llm.identity import (
     IdentityIndex,
     collect_known_participants,
@@ -191,6 +192,8 @@ class LLMService(
         self._session_presets: dict[str, str] = {}
         # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
         self._epochs = EpochManager()
+        # 同 scope 轮次串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权
+        self._scope_gate = ScopeGate()
         self._init_auto_memory()
         self._init_error: str | None = None
 
@@ -616,6 +619,11 @@ class LLMService(
                     message_id=str(message_id) if message_id else None,
                 ),
             )
+        except LoopNotWritable as exc:
+            # 闸门应已串行化同 scope 轮次：仍撞单飞约束即闸门旁路（编程
+            # 错误），告警计数后走既有无记录路径兜底。
+            self._scope_gate.record_bypass(scope_key, str(exc))
+            return None
         except AgentStoreError:
             logger.exception("begin_loop 失败 scope=%s，本轮退回无记录路径", scope_key)
             return None
@@ -918,6 +926,18 @@ class LLMService(
         )
 
     async def _generate_reply_for_scope(self, request: ChatTurnRequest) -> ReplyResult:
+        """同 scope 串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权。
+
+        取得执行权后再做配置解析与上下文装配，满足「取得执行权时再次
+        检查」的时序；长轮次（原生生图）期间同 scope 后续轮次在此排队。
+        """
+        scope_key = self.build_chat_scope_key(request.chat_id, request.chat_type)
+        async with self._scope_gate.guarded(scope_key):
+            return await self._generate_reply_for_scope_locked(request)
+
+    async def _generate_reply_for_scope_locked(
+        self, request: ChatTurnRequest
+    ) -> ReplyResult:
         turn = normalize_turn_input(
             request, max_prompt_chars=self.config.runtime.max_prompt_chars
         )
