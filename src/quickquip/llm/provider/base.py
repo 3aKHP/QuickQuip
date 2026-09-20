@@ -145,7 +145,7 @@ def _parse_sse_text(raw: str) -> list[dict[str, Any]]:
 
 
 def _parse_sse_and_measure(raw: str) -> tuple[list[dict[str, Any]], int]:
-    """SSE 解析 + 原文字节测量，供线程池执行（生图流可达数 MB）。"""
+    """SSE 解析 + 原文字节测量，供线程池执行。"""
     return _parse_sse_text(raw), len(raw.encode("utf-8"))
 
 
@@ -171,6 +171,8 @@ class _SSETextCapture:
         self._done = False
 
     def feed(self, chunk: str) -> bool:
+        # _scanned == len(self._pending) 表示 _pending 内已无未扫描字节
+        # （无悬空 \r 待消歧），此时整块暂存 _tail 不触发拼接也安全。
         if (
             "\n" not in chunk
             and "\r" not in chunk
@@ -950,29 +952,49 @@ class BaseProviderClient:
             )
             raise
 
-        # 生图等调用会产生数 MB 的 SSE 原文与终态事件：解析、终态重建
-        # 与序列化都是秒级 CPU，放线程池执行，避免同步阻塞事件循环。
-        events, raw_bytes = await asyncio.to_thread(_parse_sse_and_measure, raw)
+        # 解析与终态序列化放线程池执行（性能背景见 _SSETextCapture docstring）。
         try:
-            combined_response, combined_bytes = await asyncio.to_thread(
-                self._dump_stream_trace, events, _trace_model(url, payload)
+            events, raw_bytes = await asyncio.to_thread(_parse_sse_and_measure, raw)
+            try:
+                combined_response, combined_bytes = await asyncio.to_thread(
+                    self._dump_stream_trace, events, _trace_model(url, payload)
+                )
+            except Exception as exc:
+                logger.exception("LLM HTTP trace response reconstruction failed")
+                await finish_http_trace(
+                    call_id,
+                    state="success",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=raw_bytes,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type=type(exc).__name__,
+                    error_message=f"stream trace reconstruction failed: "
+                    f"{sanitize_error_message(str(exc))}"[:MAX_SAFE_ERROR_LENGTH],
+                )
+                return events
+        except asyncio.CancelledError:
+            # 流结束后线程池窗口内的取消同样必须关闭 trace（与流内取消
+            # 分支同契约），否则 call_id 永久停在 pending。
+            await asyncio.shield(
+                finish_http_trace(
+                    call_id,
+                    state="error",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=len(raw.encode("utf-8")),
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type="CancelledError",
+                    error_message="HTTP stream was cancelled",
+                )
             )
-        except Exception as exc:
-            logger.exception("LLM HTTP trace response reconstruction failed")
-            await finish_http_trace(
-                call_id,
-                state="success",
-                response_status=response_status,
-                response_headers=response_headers,
-                response_text="",
-                response_bytes=0,
-                response_raw_text=raw,
-                response_raw_bytes=raw_bytes,
-                duration_ms=(time.monotonic() - started) * 1000,
-                error_type=type(exc).__name__,
-                error_message="stream trace reconstruction failed",
-            )
-            return events
+            raise
         await finish_http_trace(
             call_id,
             state="success",
