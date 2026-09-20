@@ -21,6 +21,7 @@ CONFIG_GENERATION_TOML = CONFIG_DIR / "generation.toml"
 CONFIG_GAMES_TOML = CONFIG_DIR / "games.toml"
 CONFIG_SENSITIVE_WORDS_TOML = CONFIG_DIR / "sensitive_words.toml"
 CONFIG_AWAKENING_TOML = CONFIG_DIR / "awakening.toml"
+CONFIG_ADMINS_TOML = CONFIG_DIR / "admins.toml"
 
 LLM_DB_PATH = DATA_DIR / "llm.db"
 CHAT_ARCHIVE_DB_PATH = DATA_DIR / "chat_archive.db"

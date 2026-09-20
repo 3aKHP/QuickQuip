@@ -38,6 +38,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [admin/migration-napcat-to-llbot.md](admin/migration-napcat-to-llbot.md) | NapCat → LLBot 历史迁移记录——当时的风控背景、迁移步骤与回退思路 |
 | [admin/web-admin.md](admin/web-admin.md) | Web 管理后台——鉴权结构、Session 管理、反向代理配置、日志/Trace/各标签页功能列表 |
 | [admin/record-identities.md](admin/record-identities.md) | 记录身份迁移与验收——记忆/语录/留言的成员引用结构、启动自动迁移说明与历史回填（预览/写入）操作指引 |
+| [admin/global-admins.md](admin/global-admins.md) | 全局管理员——跨群只认 QQ 号的管理身份、`admins.toml` 配置与热重载、权限关系与审计留痕 |
 
 ## 开发手册（开发者阅读）
 

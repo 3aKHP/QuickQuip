@@ -739,6 +739,12 @@ chain = ['第一', '第二', '第三']
 
 ---
 
+## config/admins.toml
+
+全局管理员注册表，详见 [global-admins.md](global-admins.md) 和 `config/admins.toml.example`。`global_admins` 列表填 QQ 号数字字符串，热重载生效；文件缺失或为空即功能关闭。
+
+---
+
 ## config/personas/
 
 每个 `.toml` 文件定义一个人格，`_shared.toml` 为自动注入所有人格的共享行为准则。
