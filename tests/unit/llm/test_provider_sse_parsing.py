@@ -341,3 +341,89 @@ async def test_stream_cancellation_finishes_pending_trace(
     assert detail["state"] == "error"
     assert detail["error_type"] == "CancelledError"
     assert "partial" in detail["response_raw_text"]
+
+
+def _chunked(text: str, size: int) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def test_capture_roundtrip_across_chunk_boundaries():
+    """任意切分下 text() 精确还原原文：CRLF 跨块、裸 CR、多行块、无结尾尾块。
+
+    全部块喂完（不在 done 处提前断流）：行尾悬空 \\r 会在下一块到达后
+    消歧，终结行后的收尾空行跨块时由其后的块补齐。
+    """
+    from quickquip.llm.provider.base import _SSETextCapture
+
+    raw = (
+        'data: {"a":1}\r\n'
+        "\r\n"
+        'event: x\ndata: {"b":2}\n'
+        "\n"
+        "data: [DONE]\r\n"
+    )
+    for size in range(1, 12):
+        capture = _SSETextCapture()
+        done = False
+        for chunk in _chunked(raw, size):
+            if capture.feed(chunk):
+                done = True
+        assert done, f"size={size}"
+        assert capture.text() == raw, f"size={size}"
+
+
+def test_capture_bare_cr_line_endings():
+    """行尾悬空 \\r 等下一块消歧：后随非 \\n 即按裸 CR 断行。"""
+    from quickquip.llm.provider.base import _SSETextCapture
+
+    capture = _SSETextCapture()
+    assert capture.feed('data: {"a":1}\r') is False
+    assert capture.feed('data: [DONE]\r\n') is True
+    assert capture.text() == 'data: {"a":1}\rdata: [DONE]\r\n'
+
+
+def test_capture_giant_data_line_stays_fast():
+    """性能回归守卫：MB 级单 data 行分块吞噬必须远低于秒级。
+
+    逐字符/全量重扫实现（旧版）在 4KB 块下需要数十秒纯 CPU；扫描偏移
+    实现为毫秒级。5s 上限给慢 CI 留了两个数量级的裕量。
+    """
+    import time as _time
+
+    from quickquip.llm.provider.base import _SSETextCapture
+
+    raw = 'data: {"payload":"' + "x" * 2_000_000 + '"}\n\n' + "data: [DONE]\n\n"
+    capture = _SSETextCapture()
+    started = _time.perf_counter()
+    done = False
+    for chunk in _chunked(raw, 4096):
+        if capture.feed(chunk):
+            done = True
+            break
+    elapsed = _time.perf_counter() - started
+    assert done
+    assert capture.text() == raw
+    assert elapsed < 5.0, f"capture took {elapsed:.2f}s for a 2MB line"
+
+
+async def test_sse_stream_split_crlf_chunks_end_to_end(client, monkeypatch):
+    """真实入口下 CRLF 被切断在任意块边界的流仍正确折叠。"""
+    body = (
+        'data: {"choices":[{"delta":{"content":"he"}}]}\r'
+        "\n"
+        "\r"
+        "\n"
+        'data: {"choices":[{"delta":{"content":"y"}}]}\r\n'
+        "\r\n"
+        "data: [DONE]\r\n"
+        "\r\n"
+    )
+    response = _FakeStreamResponse(_chunked(body, 5))
+
+    def fake_stream(self, method, url, **kwargs):
+        return _FakeStreamContext(response)
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    events = await client._post_stream_sse("http://x", {}, {})
+    contents = [e["choices"][0]["delta"]["content"] for e in events]
+    assert contents == ["he", "y"]
