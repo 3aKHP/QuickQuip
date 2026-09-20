@@ -1,9 +1,26 @@
-"""ScopeGate（同 scope 串行闸门，设计 §5.2）单元测试。"""
+"""ScopeGate（同 scope 串行闸门，设计 §5.2）单元测试。
+
+回收类用例注入假时钟推进时间、以 ``tracked_scope_count`` 等可观测面
+断言，不触碰私有状态，也不依赖真实时钟基址（CI 容器 uptime 可能短于
+回收间隔）。
+"""
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from quickquip.llm.service_parts.scope_gate import ScopeGate
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 async def test_serializes_same_scope_and_parallelizes_distinct_scopes():
@@ -28,7 +45,7 @@ async def test_serializes_same_scope_and_parallelizes_distinct_scopes():
     assert order.index("exit-b1") < order.index("exit-a1")
 
 
-async def test_cancelled_waiter_releases_and_next_proceeds():
+async def test_cancelled_waiter_leaves_no_residue():
     gate = ScopeGate()
     release = asyncio.Event()
 
@@ -52,8 +69,26 @@ async def test_cancelled_waiter_releases_and_next_proceeds():
         pass  # 取消的等待者不得留下残留占用
 
 
+async def test_idle_entry_reaped_after_threshold():
+    clock = _FakeClock()
+    gate = ScopeGate(clock=clock)
+
+    async with gate.guarded("g"):
+        pass
+    assert gate.tracked_scope_count == 1
+
+    # 推进超过「回收间隔 + 空闲保留」两个阈值后，任何一次取闸门都会
+    # 顺带回收久置空闲条目。
+    clock.advance(2_000.0)
+    async with gate.guarded("h"):
+        pass
+
+    assert gate.tracked_scope_count == 1  # 只剩新用的 h
+
+
 async def test_held_and_waiting_entries_survive_reap():
-    gate = ScopeGate()
+    clock = _FakeClock()
+    gate = ScopeGate(clock=clock)
     release = asyncio.Event()
 
     async def holder() -> None:
@@ -64,50 +99,13 @@ async def test_held_and_waiting_entries_survive_reap():
     w = asyncio.create_task(holder())
     await asyncio.sleep(0.01)
 
-    # 强制越过回收间隔与空闲阈值：在持/排队条目绝不能被回收
-    gate._last_reap = 0.0
-    entry = gate._entries["g"]
-    entry.released_at = -1e9
-    gate._reap(1e9)
-
-    assert "g" in gate._entries
+    # 越过全部回收阈值并触发一次回收：在持/排队条目必须幸存
+    clock.advance(2_000.0)
+    async with gate.guarded("h"):
+        assert gate.tracked_scope_count >= 2  # g（在持）与 h 并存
 
     release.set()
     await asyncio.gather(h, w)
-
-
-def test_idle_entry_reaped_after_threshold():
-    import time as _time
-
-    from quickquip.llm.service_parts.scope_gate import _REAP_INTERVAL_S
-
-    gate = ScopeGate()
-
-    async def main() -> None:
-        async with gate.guarded("g"):
-            pass
-
-    asyncio.run(main())
-    entry = gate._entries["g"]
-    assert entry.active == 0
-    # 时间戳全部相对当前 monotonic 构造：CI 容器 uptime 可能小于回收
-    # 间隔，绝对值 0 会让「距上次回收的间隔」判断跳过本轮回收。
-    now = _time.monotonic()
-    entry.released_at = now - 10_000
-    gate._last_reap = now - (_REAP_INTERVAL_S + 1.0)
-    gate._reap(now)
-    assert "g" not in gate._entries
-
-
-def test_record_bypass_counts_and_logs(caplog):
-    import logging
-
-    gate = ScopeGate()
-    with caplog.at_level(logging.ERROR, logger="quickquip.llm.service_parts.scope_gate"):
-        gate.record_bypass("1001", "scope=1001 已有未关闭 Loop loop_x")
-
-    assert gate.bypassed_count == 1
-    assert "scope-gate-alarm" in caplog.text
 
 
 async def test_hold_reports_waited_seconds():
@@ -131,3 +129,36 @@ async def test_hold_reports_waited_seconds():
 
     async with gate.guarded("g") as hold:
         assert hold.waited_s < 0.01  # 无竞争时等待近零
+
+
+def test_record_bypass_counts_and_logs(caplog):
+    gate = ScopeGate()
+    with caplog.at_level(logging.ERROR, logger="quickquip.llm.service_parts.scope_gate"):
+        gate.record_bypass("1001", "scope=1001 已有未关闭 Loop loop_x")
+
+    assert gate.bypassed_count == 1
+    assert "scope-gate-alarm" in caplog.text
+
+
+async def test_degraded_service_generate_reply_returns_graceful_error(monkeypatch):
+    """降级单例（__new__ 构造不走 __init__）也能过闸门返回优雅错误。
+
+    回归守卫：闸门在 config.load_error 优雅返回之前被访问，降级属性
+    清单漏掉 _scope_gate 时该路径变 AttributeError（独立 CR B1）。
+    """
+    import quickquip.llm.service as service_module
+
+    def _boom(self, *args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(service_module, "_llm_service", None)
+    monkeypatch.setattr(service_module, "_init_attempted", False)
+    monkeypatch.setattr(service_module.LLMService, "__init__", _boom)
+
+    svc = service_module.get_llm_service()
+    assert svc._init_error == "boom"
+
+    result = await svc.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="测试"
+    )
+    assert "LLM 配置不可用" in result["reply"]

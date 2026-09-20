@@ -53,6 +53,7 @@ def reply_result(
     images: list[str] | None = None,
     scope_key: str | None = None,
     agent_turn_row_id: int | None = None,
+    cancelled_reason: str | None = None,
 ) -> ReplyResult:
     """回复返回 dict 的唯一构造点：基础四键恒在，其余键按路径显式携带。"""
     result: ReplyResult = {
@@ -71,6 +72,10 @@ def reply_result(
         result["scope_key"] = scope_key
     if agent_turn_row_id is not None:
         result["agent_turn_row_id"] = agent_turn_row_id
+    if cancelled_reason is not None:
+        # 本轮在生成前被取消（如被动触发排队超耐心）：适配层据此跳过
+        # 发送确认类副作用（冷却/统计），不得当作已发送。
+        result["cancelled_reason"] = cancelled_reason
     return result
 
 

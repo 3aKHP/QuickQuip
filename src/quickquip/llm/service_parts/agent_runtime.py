@@ -88,8 +88,9 @@ class RecorderConfig:
 class TurnRecorder:
     """单 Loop 的记录器：由 service 持有，tool_loop 通过钩子驱动。
 
-    不做 scope 排队（沿用入口限流）；generation 屏障由 store 写入校验
-    兜底（ScopeGenerationMismatch → Loop 关闭为 interrupted）。
+    scope 串行已由入口 ScopeGate（service_parts/scope_gate.py）保证；
+    generation 屏障由 store 写入校验兜底（ScopeGenerationMismatch →
+    Loop 关闭为 interrupted）。
     """
 
     def __init__(

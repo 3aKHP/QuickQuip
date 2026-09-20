@@ -3,6 +3,7 @@ quoted-reply injection, tool loop, and reasoning-content sanitization.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -2155,10 +2156,8 @@ async def test_same_scope_concurrent_turns_serialize_with_full_accounting(
     设计 §5.2 的回归守卫——旧实现（无闸门）下第二轮撞 begin_loop 单飞
     约束退回无记录路径，load_closed_loops 只剩一个 Loop。
     """
-    import asyncio as _asyncio
-
-    entered = _asyncio.Event()
-    release = _asyncio.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
 
     class _SlowStub(StubProviderClient):
         async def complete(self, request):
@@ -2168,17 +2167,13 @@ async def test_same_scope_concurrent_turns_serialize_with_full_accounting(
 
     patch_provider_builder(lambda provider: _SlowStub())
 
-    task_a = _asyncio.create_task(llm_service.generate_reply(
+    task_a = asyncio.create_task(llm_service.generate_reply(
         group_id=1001, user_id=2002, sender_name="甲", prompt="第一轮慢提问"))
     await entered.wait()
 
-    # 第一轮持有闸门与 Loop：第二轮同 scope 只能排队
-    gate_entry = llm_service._scope_gate._entries.get("1001")
-    assert gate_entry is not None and gate_entry.lock.locked()
-
-    task_b = _asyncio.create_task(llm_service.generate_reply(
+    task_b = asyncio.create_task(llm_service.generate_reply(
         group_id=1001, user_id=4004, sender_name="乙", prompt="第二轮并发提问"))
-    await _asyncio.sleep(0.3)
+    await asyncio.sleep(0.3)
     assert not task_b.done(), "同 scope 第二轮应在闸门后排队而非并发进入"
 
     release.set()
@@ -2225,12 +2220,10 @@ async def test_passive_trigger_queued_past_patience_is_cancelled(
     llm_service, patch_provider_builder, monkeypatch
 ):
     """被动触发排队超耐心预算：取消本轮（空回复、不调 LLM）。"""
-    import asyncio as _asyncio
-
     import quickquip.llm.service as service_module
 
-    entered = _asyncio.Event()
-    release = _asyncio.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
     calls: list[str] = []
 
     class _SlowStub(StubProviderClient):
@@ -2246,14 +2239,14 @@ async def test_passive_trigger_queued_past_patience_is_cancelled(
 
     from quickquip.llm.agent_records import TriggerKind
 
-    task_a = _asyncio.create_task(llm_service.generate_reply(
+    task_a = asyncio.create_task(llm_service.generate_reply(
         group_id=1001, user_id=2002, sender_name="甲", prompt="长生成轮"))
     await entered.wait()
 
-    task_b = _asyncio.create_task(llm_service.generate_reply(
+    task_b = asyncio.create_task(llm_service.generate_reply(
         group_id=1001, user_id=4004, sender_name="乙", prompt="被动插话",
         trigger_kind=TriggerKind.GROUP_PASSIVE))
-    await _asyncio.sleep(0.3)
+    await asyncio.sleep(0.3)
     release.set()
 
     reply_b = await task_b
@@ -2261,19 +2254,23 @@ async def test_passive_trigger_queued_past_patience_is_cancelled(
 
     assert reply_b["reply"] == ""
     assert reply_b["llm_used"] is False
+    assert reply_b["cancelled_reason"] == "queue_patience_exceeded"
     assert len(calls) == 1, "被取消的被动轮不得发起 LLM 调用"
+    # 取消轮零落库：无第二 Loop、无第二条 user 触发行
+    loops = llm_service.store.load_closed_loops("1001")
+    assert len(loops) == 1
+    user_rows = llm_service.store.list_recent_conversation_messages("1001", 10)
+    assert sum(1 for r in user_rows if r["role"] == "user") == 1
 
 
 async def test_direct_trigger_queued_long_still_completes(
     llm_service, patch_provider_builder, monkeypatch
 ):
     """主动触发不限耐心：排队后照常完成并保有完整记账。"""
-    import asyncio as _asyncio
-
     import quickquip.llm.service as service_module
 
-    entered = _asyncio.Event()
-    release = _asyncio.Event()
+    entered = asyncio.Event()
+    release = asyncio.Event()
 
     class _SlowStub(StubProviderClient):
         async def complete(self, request):
@@ -2286,14 +2283,14 @@ async def test_direct_trigger_queued_long_still_completes(
 
     from quickquip.llm.agent_records import TriggerKind
 
-    task_a = _asyncio.create_task(llm_service.generate_reply(
+    task_a = asyncio.create_task(llm_service.generate_reply(
         group_id=1001, user_id=2002, sender_name="甲", prompt="长生成轮"))
     await entered.wait()
 
-    task_b = _asyncio.create_task(llm_service.generate_reply(
+    task_b = asyncio.create_task(llm_service.generate_reply(
         group_id=1001, user_id=4004, sender_name="乙", prompt="主动提问",
         trigger_kind=TriggerKind.GROUP_DIRECT))
-    await _asyncio.sleep(0.3)
+    await asyncio.sleep(0.3)
     release.set()
 
     reply_b = await task_b
@@ -2303,3 +2300,38 @@ async def test_direct_trigger_queued_long_still_completes(
     assert llm_service._scope_gate.bypassed_count == 0
     loops = llm_service.store.load_closed_loops("1001")
     assert len(loops) == 2
+
+
+async def test_passive_trigger_short_wait_still_completes(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """被动触发短暂排队（未超耐心）照常完成并保有完整记账。"""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    patch_provider_builder(lambda provider: _SlowStub())
+
+    from quickquip.llm.agent_records import TriggerKind
+
+    task_a = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="前一轮"))
+    await entered.wait()
+
+    task_b = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="被动插话",
+        trigger_kind=TriggerKind.GROUP_PASSIVE))
+    await asyncio.sleep(0.3)
+    release.set()
+
+    reply_b = await task_b
+    await task_a
+
+    assert "stub::" in reply_b["reply"]
+    assert "cancelled_reason" not in reply_b
+    assert len(llm_service.store.load_closed_loops("1001")) == 2

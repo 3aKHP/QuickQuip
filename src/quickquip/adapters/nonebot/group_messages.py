@@ -388,7 +388,9 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 message_id=message_id or None,
                 mentioned_qq_ids=list(rendered_message.mentioned_qq_ids),
             )
-            stats_tracker.record_trigger(group_id, awakening_result.rule_name)
+            if not result.get("cancelled_reason"):
+                # 排队超耐心取消的轮零生成零发送，不计触发现值统计
+                stats_tracker.record_trigger(group_id, awakening_result.rule_name)
             awakening_state.bot_messages.add(group_id, result["reply"])
             with bot_action_trace(
                 trigger_kind="awakening",

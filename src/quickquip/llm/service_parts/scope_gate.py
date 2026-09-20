@@ -7,14 +7,16 @@
 配上下文，天然满足 §5.2「取得执行权时再次检查」的时序要求。
 
 进程内存态、无持久队列（§5.2 原文约束：不新增无界持久任务队列）；
-进程崩溃后由新进程执行既有 Loop 恢复。闸门被绕过（仍出现
-LoopNotWritable）时计入旁路计数——那是编程错误告警，不是常态降级。
+进程崩溃后由新进程执行既有 Loop 恢复。``record_bypass`` 计入所有残余
+成因（闸门未覆盖路径、上轮崩溃残留未关闭 Loop、跨进程写入）——出现
+即需排查，不是常态降级。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
@@ -22,12 +24,14 @@ logger = logging.getLogger(__name__)
 
 _REAP_INTERVAL_S = 300.0
 _IDLE_KEEP_S = 900.0
+# 取锁等待超过该秒数（或存在竞争）时记 info 日志，供长轮次排队观测。
+_SLOW_ACQUIRE_LOG_S = 1.0
 
 
 @dataclass(slots=True)
 class _GateEntry:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    # 最近一次释放的单调时钟；active>0（持有或排队中）的条目永不回收。
+    # 最近一次释放的时钟读数；active>0（持有或排队中）的条目永不回收。
     released_at: float = 0.0
     active: int = 0
 
@@ -40,19 +44,33 @@ class GateHold:
 
 
 class ScopeGate:
-    """Per-scope 互斥字典；空闲条目定期回收防无界增长。"""
+    """Per-scope 互斥字典；空闲条目定期回收防无界增长。
 
-    def __init__(self) -> None:
+    ``clock`` 注入时间源（默认 ``time.monotonic``），测试用假时钟推进
+    回收判定，不依赖真实时钟基址。
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
         self._entries: dict[str, _GateEntry] = {}
-        self._last_reap = time.monotonic()
+        self._last_reap = clock()
         self.bypassed_count: int = 0
 
+    @property
+    def tracked_scope_count(self) -> int:
+        """当前跟踪的 scope 条目数（持有/排队/空闲含未回收）。"""
+        return len(self._entries)
+
     def record_bypass(self, scope_key: str, detail: str) -> None:
-        """闸门旁路告警：begin_loop 仍在单飞约束上撞车即为编程错误。"""
+        """单飞约束仍在 LoopNotWritable 上撞车的残余成因告警。
+
+        可能成因：闸门未覆盖的生成路径、上轮崩溃残留未关闭 Loop、跨
+        进程写入。出现即需排查，不是常态降级。
+        """
         self.bypassed_count += 1
         logger.error(
-            "[scope-gate-alarm] LoopNotWritable 旁路 #%d scope=%s：闸门应已串行化，"
-            "该轮退回无记录路径（%s）",
+            "[scope-gate-alarm] LoopNotWritable 旁路 #%d scope=%s：该轮退回无"
+            "记录路径（成因待排查：闸门外路径/崩溃残留/跨进程写入；%s）",
             self.bypassed_count, scope_key, detail,
         )
 
@@ -65,8 +83,9 @@ class ScopeGate:
                 del self._entries[key]
 
     @asynccontextmanager
-    async def guarded(self, scope_key: str):
-        self._reap(time.monotonic())
+    async def guarded(self, scope_key: str) -> AsyncIterator[GateHold]:
+        now = self._clock()
+        self._reap(now)
         entry = self._entries.get(scope_key)
         if entry is None:
             entry = _GateEntry()
@@ -75,18 +94,18 @@ class ScopeGate:
         # 否则回收后新建的锁会与在持锁并发放行。
         entry.active += 1
         try:
-            wait_start = time.monotonic()
+            wait_start = self._clock()
             contended = entry.lock.locked()
             await entry.lock.acquire()
-            wait_ms = (time.monotonic() - wait_start) * 1000
-            if contended or wait_ms > 1000.0:
+            waited_s = self._clock() - wait_start
+            if contended or waited_s > _SLOW_ACQUIRE_LOG_S:
                 logger.info(
-                    "scope gate acquired scope=%s wait_ms=%.0f", scope_key, wait_ms
+                    "scope gate acquired scope=%s wait_s=%.1f", scope_key, waited_s
                 )
             try:
-                yield GateHold(waited_s=wait_ms / 1000.0)
+                yield GateHold(waited_s=waited_s)
             finally:
-                entry.released_at = time.monotonic()
+                entry.released_at = self._clock()
                 entry.lock.release()
         finally:
             entry.active -= 1

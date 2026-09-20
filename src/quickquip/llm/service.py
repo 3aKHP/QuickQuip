@@ -940,6 +940,10 @@ class LLMService(
         被动类触发（群被动唤醒/无聊唤醒）排队超过耐心预算即取消本轮：
         排到长生成之后的插话已是过期噪音，空回复出口由适配层既有守卫
         静默吞掉；主动/私聊/定时触发不限时——晚到也要发。
+
+        资格复查的有意取舍（§5.2 残余项）：rule_switch 开关、回复掷骰与
+        入口限流在适配层排队前消费，锁后不重掷——影响有界（每在途轮至
+        多补发一条主动触发），被动类已被耐心预算兜住。
         """
         scope_key = self.build_chat_scope_key(request.chat_id, request.chat_type)
         async with self._scope_gate.guarded(scope_key) as hold:
@@ -951,7 +955,9 @@ class LLMService(
                     "被动触发排队过期取消 scope=%s kind=%s wait_s=%.1f",
                     scope_key, request.trigger_kind, hold.waited_s,
                 )
-                return reply_result("", llm_used=False)
+                return reply_result(
+                    "", llm_used=False, cancelled_reason="queue_patience_exceeded"
+                )
             return await self._generate_reply_for_scope_locked(request)
 
     async def _generate_reply_for_scope_locked(
@@ -1509,4 +1515,7 @@ def get_llm_service() -> LLMService:
             _llm_service.vocab_path = LLM_VOCAB_YAML_PATH  # type: ignore[attr-defined]
             _llm_service._group_vocabs = OrderedDict()  # type: ignore[attr-defined]
             _llm_service.store = None  # type: ignore[attr-defined]
+            # 闸门在 generate_reply 链路上先于 load_error 优雅返回被访问，
+            # 降级实例缺这个属性会把优雅降级变成 AttributeError。
+            _llm_service._scope_gate = ScopeGate()  # type: ignore[attr-defined]
     return _llm_service  # type: ignore[return-value]

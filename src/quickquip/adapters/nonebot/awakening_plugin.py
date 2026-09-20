@@ -121,7 +121,10 @@ def register_boredom_scan_job(sched=None) -> int | None:
                                 str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
                             )
                             record_final_receipt(svc, plan.reply_result, sent_msg_id)
-                    confirm_boredom_sent(plan, stats_tracker)
+                    if not plan.reply_result.get("cancelled_reason"):
+                        # 排队超耐心取消的轮零发送：确认冷却/统计会把
+                        # 未发送写进已发送，违反 confirm 的传输成功前提。
+                        confirm_boredom_sent(plan, stats_tracker)
                 except Exception:
                     logger.warning(
                         "awakening_boredom: failed for group %s", plan.group_id, exc_info=True
