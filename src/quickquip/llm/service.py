@@ -100,6 +100,7 @@ from quickquip.llm.service_parts.constants import (
     MAX_STORED_CONVERSATION_MESSAGES,
     MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_TRIGGER_CONTEXT_MESSAGES,
+    PASSIVE_TRIGGER_QUEUE_PATIENCE_S,
     PRIVATE_UNAVAILABLE_TOOLS as PRIVATE_UNAVAILABLE_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
     SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
     SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
@@ -154,6 +155,12 @@ _GROUP_CACHE_MAX = 512
 
 
 logger = logging.getLogger(__name__)
+
+# 被动类触发：闸门排队超耐心预算即取消（§5.2）。主动 @/前缀、私聊、
+# 定时不在此列——用户要答案或计划任务按点发话，晚到也要发。
+_PASSIVE_QUEUE_KINDS = frozenset(
+    {TriggerKind.GROUP_PASSIVE, TriggerKind.BOREDOM}
+)
 
 
 class LLMService(
@@ -930,9 +937,21 @@ class LLMService(
 
         取得执行权后再做配置解析与上下文装配，满足「取得执行权时再次
         检查」的时序；长轮次（原生生图）期间同 scope 后续轮次在此排队。
+        被动类触发（群被动唤醒/无聊唤醒）排队超过耐心预算即取消本轮：
+        排到长生成之后的插话已是过期噪音，空回复出口由适配层既有守卫
+        静默吞掉；主动/私聊/定时触发不限时——晚到也要发。
         """
         scope_key = self.build_chat_scope_key(request.chat_id, request.chat_type)
-        async with self._scope_gate.guarded(scope_key):
+        async with self._scope_gate.guarded(scope_key) as hold:
+            if (
+                request.trigger_kind in _PASSIVE_QUEUE_KINDS
+                and hold.waited_s > PASSIVE_TRIGGER_QUEUE_PATIENCE_S
+            ):
+                logger.info(
+                    "被动触发排队过期取消 scope=%s kind=%s wait_s=%.1f",
+                    scope_key, request.trigger_kind, hold.waited_s,
+                )
+                return reply_result("", llm_used=False)
             return await self._generate_reply_for_scope_locked(request)
 
     async def _generate_reply_for_scope_locked(

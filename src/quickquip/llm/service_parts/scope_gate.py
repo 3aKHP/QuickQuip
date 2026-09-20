@@ -32,6 +32,13 @@ class _GateEntry:
     active: int = 0
 
 
+@dataclass(slots=True)
+class GateHold:
+    """取得执行权的回执：等待方可据此做过期判断（§5.2 被动触发取消）。"""
+
+    waited_s: float
+
+
 class ScopeGate:
     """Per-scope 互斥字典；空闲条目定期回收防无界增长。"""
 
@@ -77,7 +84,7 @@ class ScopeGate:
                     "scope gate acquired scope=%s wait_ms=%.0f", scope_key, wait_ms
                 )
             try:
-                yield
+                yield GateHold(waited_s=wait_ms / 1000.0)
             finally:
                 entry.released_at = time.monotonic()
                 entry.lock.release()

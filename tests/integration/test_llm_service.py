@@ -2219,3 +2219,87 @@ async def test_loop_not_writable_fallback_records_gate_bypass(llm_service):
 
     assert recorder is None
     assert llm_service._scope_gate.bypassed_count == 1
+
+
+async def test_passive_trigger_queued_past_patience_is_cancelled(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """被动触发排队超耐心预算：取消本轮（空回复、不调 LLM）。"""
+    import asyncio as _asyncio
+
+    import quickquip.llm.service as service_module
+
+    entered = _asyncio.Event()
+    release = _asyncio.Event()
+    calls: list[str] = []
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            calls.append("llm")
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    stub = _SlowStub()
+    patch_provider_builder(lambda provider: stub)
+    monkeypatch.setattr(service_module, "PASSIVE_TRIGGER_QUEUE_PATIENCE_S", 0.05)
+
+    from quickquip.llm.agent_records import TriggerKind
+
+    task_a = _asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="长生成轮"))
+    await entered.wait()
+
+    task_b = _asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="被动插话",
+        trigger_kind=TriggerKind.GROUP_PASSIVE))
+    await _asyncio.sleep(0.3)
+    release.set()
+
+    reply_b = await task_b
+    await task_a
+
+    assert reply_b["reply"] == ""
+    assert reply_b["llm_used"] is False
+    assert len(calls) == 1, "被取消的被动轮不得发起 LLM 调用"
+
+
+async def test_direct_trigger_queued_long_still_completes(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """主动触发不限耐心：排队后照常完成并保有完整记账。"""
+    import asyncio as _asyncio
+
+    import quickquip.llm.service as service_module
+
+    entered = _asyncio.Event()
+    release = _asyncio.Event()
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    patch_provider_builder(lambda provider: _SlowStub())
+    monkeypatch.setattr(service_module, "PASSIVE_TRIGGER_QUEUE_PATIENCE_S", 0.01)
+
+    from quickquip.llm.agent_records import TriggerKind
+
+    task_a = _asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="长生成轮"))
+    await entered.wait()
+
+    task_b = _asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="主动提问",
+        trigger_kind=TriggerKind.GROUP_DIRECT))
+    await _asyncio.sleep(0.3)
+    release.set()
+
+    reply_b = await task_b
+    await task_a
+
+    assert "stub::" in reply_b["reply"]
+    assert llm_service._scope_gate.bypassed_count == 0
+    loops = llm_service.store.load_closed_loops("1001")
+    assert len(loops) == 2

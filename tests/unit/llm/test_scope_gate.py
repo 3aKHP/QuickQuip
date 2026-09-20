@@ -103,3 +103,26 @@ def test_record_bypass_counts_and_logs(caplog):
 
     assert gate.bypassed_count == 1
     assert "scope-gate-alarm" in caplog.text
+
+
+async def test_hold_reports_waited_seconds():
+    gate = ScopeGate()
+    release = asyncio.Event()
+
+    async def holder() -> None:
+        async with gate.guarded("g"):
+            await release.wait()
+
+    async def waiter() -> None:
+        async with gate.guarded("g") as hold:
+            assert hold.waited_s > 0.01
+
+    h = asyncio.create_task(holder())
+    await asyncio.sleep(0.01)
+    w = asyncio.create_task(waiter())
+    await asyncio.sleep(0.05)
+    release.set()
+    await asyncio.gather(h, w)
+
+    async with gate.guarded("g") as hold:
+        assert hold.waited_s < 0.01  # 无竞争时等待近零
