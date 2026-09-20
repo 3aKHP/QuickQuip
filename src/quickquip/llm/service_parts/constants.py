@@ -53,3 +53,11 @@ DEFAULT_ENABLED_TOOLS = [
     SEARCH_SKILL_RESOURCES_TOOL_NAME,
     RUN_SKILL_SCRIPT_TOOL_NAME,
 ]
+
+# ── scope gate queue policy（设计 §5.2「过期被动触发按现有策略取消」）────
+# 被动类触发（群被动唤醒 / 无聊唤醒）在闸门后的排队预算：超时即取消
+# 本轮（空回复、不调 LLM、不发送）。聊天节奏下普通轮次持有 2–15s，
+# 预算给足四倍余量；只有排到长生成（原生生图 4–7 分钟）后才会触发
+# 取消——彼时再插话已是过期噪音。主动 @/前缀、私聊与定时触发不受
+# 限制：用户明确要答案或计划任务按点发话，晚到也要发。
+PASSIVE_TRIGGER_QUEUE_PATIENCE_S = 60.0

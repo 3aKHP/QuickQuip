@@ -43,7 +43,8 @@ from quickquip.llm.request_budget import (
 )
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
-from quickquip.llm.store_parts.agent_records import AgentStoreError
+from quickquip.llm.service_parts.scope_gate import ScopeGate
+from quickquip.llm.store_parts.agent_records import AgentStoreError, LoopNotWritable
 from quickquip.llm.identity import (
     IdentityIndex,
     collect_known_participants,
@@ -99,6 +100,7 @@ from quickquip.llm.service_parts.constants import (
     MAX_STORED_CONVERSATION_MESSAGES,
     MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_TRIGGER_CONTEXT_MESSAGES,
+    PASSIVE_TRIGGER_QUEUE_PATIENCE_S,
     PRIVATE_UNAVAILABLE_TOOLS as PRIVATE_UNAVAILABLE_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
     SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
     SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
@@ -154,6 +156,12 @@ _GROUP_CACHE_MAX = 512
 
 logger = logging.getLogger(__name__)
 
+# 被动类触发：闸门排队超耐心预算即取消（§5.2）。主动 @/前缀、私聊、
+# 定时不在此列——用户要答案或计划任务按点发话，晚到也要发。
+_PASSIVE_QUEUE_KINDS = frozenset(
+    {TriggerKind.GROUP_PASSIVE, TriggerKind.BOREDOM}
+)
+
 
 class LLMService(
     ScopeMixin,
@@ -191,6 +199,8 @@ class LLMService(
         self._session_presets: dict[str, str] = {}
         # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
         self._epochs = EpochManager()
+        # 同 scope 轮次串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权
+        self._scope_gate = ScopeGate()
         self._init_auto_memory()
         self._init_error: str | None = None
 
@@ -616,6 +626,11 @@ class LLMService(
                     message_id=str(message_id) if message_id else None,
                 ),
             )
+        except LoopNotWritable as exc:
+            # 闸门应已串行化同 scope 轮次：仍撞单飞约束即闸门旁路（编程
+            # 错误），告警计数后走既有无记录路径兜底。
+            self._scope_gate.record_bypass(scope_key, str(exc))
+            return None
         except AgentStoreError:
             logger.exception("begin_loop 失败 scope=%s，本轮退回无记录路径", scope_key)
             return None
@@ -918,6 +933,36 @@ class LLMService(
         )
 
     async def _generate_reply_for_scope(self, request: ChatTurnRequest) -> ReplyResult:
+        """同 scope 串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权。
+
+        取得执行权后再做配置解析与上下文装配，满足「取得执行权时再次
+        检查」的时序；长轮次（原生生图）期间同 scope 后续轮次在此排队。
+        被动类触发（群被动唤醒/无聊唤醒）排队超过耐心预算即取消本轮：
+        排到长生成之后的插话已是过期噪音，空回复出口由适配层既有守卫
+        静默吞掉；主动/私聊/定时触发不限时——晚到也要发。
+
+        资格复查的有意取舍（§5.2 残余项）：rule_switch 开关、回复掷骰与
+        入口限流在适配层排队前消费，锁后不重掷——影响有界（每在途轮至
+        多补发一条主动触发），被动类已被耐心预算兜住。
+        """
+        scope_key = self.build_chat_scope_key(request.chat_id, request.chat_type)
+        async with self._scope_gate.guarded(scope_key) as hold:
+            if (
+                request.trigger_kind in _PASSIVE_QUEUE_KINDS
+                and hold.waited_s > PASSIVE_TRIGGER_QUEUE_PATIENCE_S
+            ):
+                logger.info(
+                    "被动触发排队过期取消 scope=%s kind=%s wait_s=%.1f",
+                    scope_key, request.trigger_kind, hold.waited_s,
+                )
+                return reply_result(
+                    "", llm_used=False, cancelled_reason="queue_patience_exceeded"
+                )
+            return await self._generate_reply_for_scope_locked(request)
+
+    async def _generate_reply_for_scope_locked(
+        self, request: ChatTurnRequest
+    ) -> ReplyResult:
         turn = normalize_turn_input(
             request, max_prompt_chars=self.config.runtime.max_prompt_chars
         )
@@ -1470,4 +1515,7 @@ def get_llm_service() -> LLMService:
             _llm_service.vocab_path = LLM_VOCAB_YAML_PATH  # type: ignore[attr-defined]
             _llm_service._group_vocabs = OrderedDict()  # type: ignore[attr-defined]
             _llm_service.store = None  # type: ignore[attr-defined]
+            # 闸门在 generate_reply 链路上先于 load_error 优雅返回被访问，
+            # 降级实例缺这个属性会把优雅降级变成 AttributeError。
+            _llm_service._scope_gate = ScopeGate()  # type: ignore[attr-defined]
     return _llm_service  # type: ignore[return-value]
