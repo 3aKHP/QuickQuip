@@ -79,6 +79,8 @@ async def test_held_and_waiting_entries_survive_reap():
 def test_idle_entry_reaped_after_threshold():
     import time as _time
 
+    from quickquip.llm.service_parts.scope_gate import _REAP_INTERVAL_S
+
     gate = ScopeGate()
 
     async def main() -> None:
@@ -88,9 +90,12 @@ def test_idle_entry_reaped_after_threshold():
     asyncio.run(main())
     entry = gate._entries["g"]
     assert entry.active == 0
-    entry.released_at = _time.monotonic() - 10_000
-    gate._last_reap = 0.0
-    gate._reap(_time.monotonic())
+    # 时间戳全部相对当前 monotonic 构造：CI 容器 uptime 可能小于回收
+    # 间隔，绝对值 0 会让「距上次回收的间隔」判断跳过本轮回收。
+    now = _time.monotonic()
+    entry.released_at = now - 10_000
+    gate._last_reap = now - (_REAP_INTERVAL_S + 1.0)
+    gate._reap(now)
     assert "g" not in gate._entries
 
 
