@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import AsyncIterator
 from unittest.mock import MagicMock
 
@@ -19,6 +20,7 @@ import pytest
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMProviderError, OpenAIProviderClient
 from quickquip.llm.provider import trace
+from quickquip.llm.provider.base import _SSETextCapture
 
 
 def _make_config(**overrides) -> ProviderConfig:
@@ -341,3 +343,120 @@ async def test_stream_cancellation_finishes_pending_trace(
     assert detail["state"] == "error"
     assert detail["error_type"] == "CancelledError"
     assert "partial" in detail["response_raw_text"]
+
+
+def _chunked(text: str, size: int) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def test_capture_roundtrip_across_chunk_boundaries():
+    """任意切分下 text() 精确还原原文：CRLF 跨块、裸 CR、多行块。
+
+    全部块喂完（不在 done 处提前断流），行尾悬空 \\r 在下一块到达后
+    消歧。done 行后的收尾空行消费由性能测试与端到端测试另行覆盖。
+    """
+    raw = (
+        'data: {"a":1}\r\n'
+        "\r\n"
+        'event: x\ndata: {"b":2}\n'
+        "\n"
+        "data: [DONE]\r\n"
+    )
+    for size in range(1, 12):
+        capture = _SSETextCapture()
+        done = False
+        for chunk in _chunked(raw, size):
+            if capture.feed(chunk):
+                done = True
+        assert done, f"size={size}"
+        assert capture.text() == raw, f"size={size}"
+
+
+def test_capture_bare_cr_line_endings():
+    """行尾悬空 \\r 等下一块消歧：后随非 \\n 即按裸 CR 断行。"""
+    capture = _SSETextCapture()
+    assert capture.feed('data: {"a":1}\r') is False
+    assert capture.feed('data: [DONE]\r\n') is True
+    assert capture.text() == 'data: {"a":1}\rdata: [DONE]\r\n'
+
+
+def test_capture_giant_data_line_stays_fast():
+    """性能回归守卫：MB 级单 data 行分块吞噬必须远低于秒级。
+
+    逐字符/全量重扫实现（旧版）在 4KB 块下需要数十秒纯 CPU；扫描偏移
+    实现为毫秒级。10s 上限给慢 CI 留了三个数量级的裕量，仍远低于旧实现。
+    """
+    raw = 'data: {"payload":"' + "x" * 2_000_000 + '"}\n\n' + "data: [DONE]\n\n"
+    capture = _SSETextCapture()
+    started = time.perf_counter()
+    done = False
+    for chunk in _chunked(raw, 4096):
+        if capture.feed(chunk):
+            done = True
+            break
+    elapsed = time.perf_counter() - started
+    assert done
+    assert capture.text() == raw
+    assert elapsed < 10.0, (
+        f"capture took {elapsed:.2f}s for a 2MB line"
+        "（扫描偏移实现应为毫秒级，超时说明退化为逐字符/全量重扫）"
+    )
+
+
+async def test_sse_stream_split_crlf_chunks_end_to_end(client, monkeypatch):
+    """真实入口下 CRLF 被切断在任意块边界的流仍正确折叠。"""
+    body = (
+        'data: {"choices":[{"delta":{"content":"he"}}]}\r'
+        "\n"
+        "\r"
+        "\n"
+        'data: {"choices":[{"delta":{"content":"y"}}]}\r\n'
+        "\r\n"
+        "data: [DONE]\r\n"
+        "\r\n"
+    )
+    response = _FakeStreamResponse(_chunked(body, 5))
+
+    def fake_stream(self, method, url, **kwargs):
+        return _FakeStreamContext(response)
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", fake_stream)
+    events = await client._post_stream_sse("http://x", {}, {})
+    contents = [e["choices"][0]["delta"]["content"] for e in events]
+    assert contents == ["he", "y"]
+
+
+async def test_stream_cancelled_during_post_stream_trace_finishes_pending_trace(
+    client, monkeypatch, tmp_path
+):
+    """流结束后线程池窗口内的取消也必须关闭 trace（不得永久停在 pending）。
+
+    慢速 _parse_sse_and_measure 让取消大概率落在解析线程窗口；即使落在
+    流内，断言的契约（取消即关闭）同样成立，测试不因时序漂移而脆断。
+    """
+    import quickquip.llm.provider.base as provider_base
+
+    store = trace.LLMTraceStore(tmp_path / "trace.db")
+    monkeypatch.setattr(trace, "trace_store", store)
+
+    def slow_measure(raw):
+        time.sleep(1.0)
+        return [], len(raw.encode("utf-8"))
+
+    monkeypatch.setattr(provider_base, "_parse_sse_and_measure", slow_measure)
+    _patch_stream(
+        monkeypatch,
+        ['data: {"choices":[{"delta":{"content":"hi"}}]}', "", "data: [DONE]", ""],
+    )
+
+    with trace.collect_trace_calls(force=True) as call_ids:
+        task = asyncio.create_task(client._post_stream_sse("http://x", {}, {}))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    detail = store.get_call(call_ids[0])
+    assert detail is not None
+    assert detail["state"] == "error"
+    assert detail["error_type"] == "CancelledError"

@@ -144,19 +144,9 @@ def _parse_sse_text(raw: str) -> list[dict[str, Any]]:
     return events
 
 
-def _take_sse_line(buffer: str) -> tuple[str, str] | None:
-    """Take one complete SSE line while preserving its original line ending."""
-
-    for index, char in enumerate(buffer):
-        if char == "\n":
-            return buffer[: index + 1], buffer[index + 1 :]
-        if char != "\r":
-            continue
-        if index + 1 == len(buffer):
-            return None
-        end = index + 2 if buffer[index + 1] == "\n" else index + 1
-        return buffer[:end], buffer[end:]
-    return None
+def _parse_sse_and_measure(raw: str) -> tuple[list[dict[str, Any]], int]:
+    """SSE 解析 + 原文字节测量，供线程池执行。"""
+    return _parse_sse_text(raw), len(raw.encode("utf-8"))
 
 
 def _is_sse_done_line(line: str) -> bool:
@@ -165,30 +155,68 @@ def _is_sse_done_line(line: str) -> bool:
 
 
 class _SSETextCapture:
-    """Accumulate exact SSE text while recognizing its terminal data line."""
+    """Accumulate exact SSE text while recognizing its terminal data line.
+
+    行边界检测用带扫描偏移的 ``str.find``（C 速度）且只扫描新到字节；
+    不含行结尾的 chunk 暂存进 ``_tail``，仅在出现行结尾时合并。生图等
+    内置工具会把多 MB 的 base64 放进单个 SSE data 行——逐字符扫描或逐
+    chunk 全量重扫都是 O(n²) 纯 Python CPU，足以把事件循环卡死分钟级。
+    """
 
     def __init__(self) -> None:
         self._raw_parts: list[str] = []
         self._pending = ""
+        self._scanned = 0
+        self._tail: list[str] = []
         self._done = False
 
     def feed(self, chunk: str) -> bool:
-        self._pending += chunk
-        while line_parts := _take_sse_line(self._pending):
-            line, self._pending = line_parts
+        # _scanned == len(self._pending) 表示 _pending 内已无未扫描字节
+        # （无悬空 \r 待消歧），此时整块暂存 _tail 不触发拼接也安全。
+        if (
+            "\n" not in chunk
+            and "\r" not in chunk
+            and self._scanned == len(self._pending)
+        ):
+            self._tail.append(chunk)
+            return False
+        self._pending += "".join(self._tail) + chunk
+        self._tail.clear()
+        while line := self._take_line():
             self._raw_parts.append(line)
             if _is_sse_done_line(line):
-                blank_parts = _take_sse_line(self._pending)
-                if blank_parts is not None and not blank_parts[0].rstrip("\r\n"):
-                    self._raw_parts.append(blank_parts[0])
+                blank = self._take_line()
+                if blank is not None and not blank.rstrip("\r\n"):
+                    self._raw_parts.append(blank)
                 self._pending = ""
+                self._scanned = 0
                 self._done = True
                 return True
         return False
 
     def text(self) -> str:
-        pending = "" if self._done else self._pending
+        pending = "" if self._done else self._pending + "".join(self._tail)
         return "".join(self._raw_parts) + pending
+
+    def _take_line(self) -> str | None:
+        pending = self._pending
+        newline = pending.find("\n", self._scanned)
+        carriage = pending.find("\r", self._scanned)
+        if carriage != -1 and (newline == -1 or carriage < newline):
+            if carriage + 1 == len(pending):
+                # 缓冲以 \r 结尾：可能还有未到达的 \n 配对，等下一块。
+                self._scanned = carriage
+                return None
+            end = carriage + 2 if pending[carriage + 1] == "\n" else carriage + 1
+        elif newline != -1:
+            end = newline + 1
+        else:
+            self._scanned = len(pending)
+            return None
+        line = pending[:end]
+        self._pending = pending[end:]
+        self._scanned = 0
+        return line
 
 
 @dataclass(slots=True)
@@ -698,6 +726,14 @@ class BaseProviderClient:
             f"{type(self).__name__} must reconstruct its streamed response"
         )
 
+    def _dump_stream_trace(
+        self, events: list[dict[str, Any]], fallback_model: str
+    ) -> tuple[str, int]:
+        """终态重建 + 序列化 + 字节测量，供线程池执行（秒级 CPU）。"""
+        combined = self._combine_stream_trace(events, fallback_model)
+        combined_response = json.dumps(combined, ensure_ascii=False, indent=2)
+        return combined_response, len(combined_response.encode("utf-8"))
+
     async def _post_json(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> dict[str, Any]:
@@ -916,35 +952,58 @@ class BaseProviderClient:
             )
             raise
 
-        events = _parse_sse_text(raw)
+        # 解析与终态序列化放线程池执行（性能背景见 _SSETextCapture docstring）。
         try:
-            combined = self._combine_stream_trace(events, _trace_model(url, payload))
-            combined_response = json.dumps(combined, ensure_ascii=False, indent=2)
-        except Exception as exc:
-            logger.exception("LLM HTTP trace response reconstruction failed")
-            await finish_http_trace(
-                call_id,
-                state="success",
-                response_status=response_status,
-                response_headers=response_headers,
-                response_text="",
-                response_bytes=0,
-                response_raw_text=raw,
-                response_raw_bytes=len(raw.encode("utf-8")),
-                duration_ms=(time.monotonic() - started) * 1000,
-                error_type=type(exc).__name__,
-                error_message=str(exc),
+            events, raw_bytes = await asyncio.to_thread(_parse_sse_and_measure, raw)
+            try:
+                combined_response, combined_bytes = await asyncio.to_thread(
+                    self._dump_stream_trace, events, _trace_model(url, payload)
+                )
+            except Exception as exc:
+                logger.exception("LLM HTTP trace response reconstruction failed")
+                await finish_http_trace(
+                    call_id,
+                    state="success",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=raw_bytes,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type=type(exc).__name__,
+                    error_message=f"stream trace reconstruction failed: "
+                    f"{sanitize_error_message(str(exc))}"[:MAX_SAFE_ERROR_LENGTH],
+                )
+                return events
+        except asyncio.CancelledError:
+            # 流结束后线程池窗口内的取消同样必须关闭 trace（与流内取消
+            # 分支同契约），否则 call_id 永久停在 pending。
+            await asyncio.shield(
+                finish_http_trace(
+                    call_id,
+                    state="error",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=len(raw.encode("utf-8")),
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type="CancelledError",
+                    error_message="HTTP stream was cancelled",
+                )
             )
-            return events
+            raise
         await finish_http_trace(
             call_id,
             state="success",
             response_status=response_status,
             response_headers=response_headers,
             response_text=combined_response,
-            response_bytes=len(combined_response.encode("utf-8")),
+            response_bytes=combined_bytes,
             response_raw_text=raw,
-            response_raw_bytes=len(raw.encode("utf-8")),
+            response_raw_bytes=raw_bytes,
             duration_ms=(time.monotonic() - started) * 1000,
         )
         return events
