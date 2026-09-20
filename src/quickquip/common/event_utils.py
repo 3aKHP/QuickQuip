@@ -1,15 +1,17 @@
-"""Pure utility functions for NoneBot event inspection.
+"""Utility functions for NoneBot event inspection.
 
 Extracted from ``app/message_pipeline.py`` — these helpers take a NoneBot
 ``Event`` and extract sender/admin/self info or strip command prefixes.
-They depend only on duck-typed event attributes (``sender``, ``user_id``,
-``self_id``) and carry no QuickQuip-internal state, so they belong in the
-``common`` layer rather than the ``app`` assembly module.
+They duck-type event attributes (``sender``, ``user_id``, ``self_id``);
+``is_admin`` 委托全局管理员注册表（``common/admins.py``）——这是全体既有
+调用方继承全局管理员语义的唯一接线点。
 
 ``message_pipeline`` re-exports them for backward compatibility; downstream
 modules should gradually switch to importing directly from here.
 """
 from __future__ import annotations
+
+from quickquip.common.admins import has_admin_authority
 
 
 def get_sender_name(event) -> str:
@@ -23,12 +25,7 @@ def get_sender_name(event) -> str:
 
 
 def is_admin(event) -> bool:
-    sender = getattr(event, "sender", None)
-    if sender:
-        role = getattr(sender, "role", None)
-        if role in ("admin", "owner"):
-            return True
-    return False
+    return has_admin_authority(event)
 
 
 def is_self_message(event) -> bool:
