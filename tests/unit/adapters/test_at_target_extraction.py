@@ -19,19 +19,19 @@ class _Seg:
 
 def test_raw_with_name_field_extracts_target():
     """LLOneBot 形态：at 码带 name= 扩展键。"""
-    raw = "/击剑[CQ:at,qq=2315478846,name=Mon3tr「哈基米显现」] "
-    assert _extract_at_target(raw, ()) == "2315478846"
+    raw = "/击剑[CQ:at,qq=1000000000,name=Mon3tr「哈基米显现」] "
+    assert _extract_at_target(raw, ()) == "1000000000"
 
 
 def test_raw_bare_form_extracts_target():
     """NapCat 形态：裸 qq= 数字紧接收尾括号。"""
-    assert _extract_at_target("/击剑[CQ:at,qq=2740766318]", ()) == "2740766318"
+    assert _extract_at_target("/击剑[CQ:at,qq=123456789]", ()) == "123456789"
 
 
 def test_self_at_survives_stripped_segments():
     """self-@ 场景：段被 to_me 剥掉，仅 raw_message 保留 at 码。"""
-    raw = "/击剑[CQ:at,qq=2315478846,name=Bot] "
-    assert _extract_at_target(raw, []) == "2315478846"
+    raw = "/击剑[CQ:at,qq=1000000000,name=Bot] "
+    assert _extract_at_target(raw, []) == "1000000000"
 
 
 def test_segments_fallback_when_raw_lacks_at():
@@ -53,6 +53,6 @@ def test_no_target_anywhere_returns_none():
 
 
 def test_raw_takes_precedence_over_segments():
-    raw = "/击剑[CQ:at,qq=111111111] "
-    segs = [_Seg("at", qq="222222222")]
-    assert _extract_at_target(raw, segs) == "111111111"
+    raw = "/击剑[CQ:at,qq=1000000000] "
+    segs = [_Seg("at", qq="1000000001")]
+    assert _extract_at_target(raw, segs) == "1000000000"
