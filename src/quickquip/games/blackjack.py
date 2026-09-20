@@ -8,6 +8,7 @@ from typing import Optional
 
 from quickquip.games.config import BlackjackConfig
 from quickquip.games.economy import GameEconomyStore
+from quickquip.games.identity import display_name
 from quickquip.games.registry import BaseGame, GameResult
 
 
@@ -249,7 +250,7 @@ class BlackjackGame(BaseGame):
         s.expires_at = time() + self._config.timeout_seconds
         self._touch(key)
 
-        names = [f"QQ:{p.user_id}" for p in s.players]
+        names = [display_name(gid, p.user_id) for p in s.players]
         return GameResult(
             reply=f"入场成功！已下注 {bet} 金币\n"
                    f"当前玩家（{len(s.players)}/{self._config.max_players}）：{'、'.join(names)}\n"
@@ -277,7 +278,7 @@ class BlackjackGame(BaseGame):
         for i, p in enumerate(s.players):
             bj = " ← Blackjack!" if _is_blackjack(p.cards) else ""
             lines.append(
-                f"玩家{i + 1} (QQ:{p.user_id}) [{_cards_str(p.cards)}] "
+                f"玩家{i + 1} ({display_name(key, p.user_id)}) [{_cards_str(p.cards)}] "
                 f"共 {_score(p.cards)} 点 下注 {p.bet}{bj}"
             )
         lines.append(f"庄家 [{s.dealer_cards[0]} ?]")
@@ -327,7 +328,10 @@ class BlackjackGame(BaseGame):
                 return self._settle(key, s, "全员停牌，自动结算")
 
             return GameResult(
-                reply=f"QQ:{uid} 停牌（{_cards_str(player.cards)} = {_score(player.cards)} 点）",
+                reply=(
+                    f"{display_name(key, uid)} 停牌"
+                    f"（{_cards_str(player.cards)} = {_score(player.cards)} 点）"
+                ),
                 at_user_id=uid,
             )
 
@@ -356,7 +360,7 @@ class BlackjackGame(BaseGame):
             if score > 21:
                 player.stood = True
                 msg = (
-                    f"QQ:{uid} 拿牌 {card}\n"
+                    f"{display_name(key, uid)} 拿牌 {card}\n"
                     f"手牌：{_cards_str(player.cards)} = {score} 点 💥 爆了！"
                 )
                 if self._all_stood(s):
@@ -373,7 +377,7 @@ class BlackjackGame(BaseGame):
             if score == 21:
                 player.stood = True
                 msg = (
-                    f"QQ:{uid} 拿牌 {card}\n"
+                    f"{display_name(key, uid)} 拿牌 {card}\n"
                     f"手牌：{_cards_str(player.cards)} = 21 点！自动停牌"
                 )
                 if self._all_stood(s):
@@ -388,7 +392,7 @@ class BlackjackGame(BaseGame):
                 return GameResult(reply=msg, at_user_id=uid)
 
             return GameResult(
-                reply=f"QQ:{uid} 拿牌 {card}\n"
+                reply=f"{display_name(key, uid)} 拿牌 {card}\n"
                        f"手牌：{_cards_str(player.cards)} = {score} 点",
                 at_user_id=uid,
             )
@@ -418,10 +422,11 @@ class BlackjackGame(BaseGame):
             p_bj = _is_blackjack(p.cards)
             uid = p.user_id
             gid = key
+            name = display_name(gid, uid)
 
             if p_score > 21:
                 # Busted — lost bet already deducted
-                lines.append(f"QQ:{uid} [{_cards_str(p.cards)}] {p_score} 点 爆牌 — -{p.bet} 💰")
+                lines.append(f"{name} [{_cards_str(p.cards)}] {p_score} 点 爆牌 — -{p.bet} 💰")
                 continue
 
             if dealer_score > 21:
@@ -430,7 +435,7 @@ class BlackjackGame(BaseGame):
                 if self._economy:
                     self._economy.add_gold(uid, gid, win)
                 lines.append(
-                    f"QQ:{uid} [{_cards_str(p.cards)}] {p_score} 点 庄家爆牌 — +{p.bet} 💰"
+                    f"{name} [{_cards_str(p.cards)}] {p_score} 点 庄家爆牌 — +{p.bet} 💰"
                 )
                 continue
 
@@ -440,14 +445,14 @@ class BlackjackGame(BaseGame):
                 if self._economy:
                     self._economy.add_gold(uid, gid, win)
                 lines.append(
-                    f"QQ:{uid} [{_cards_str(p.cards)}] Blackjack! — +{int(p.bet * 1.5)} 💰"
+                    f"{name} [{_cards_str(p.cards)}] Blackjack! — +{int(p.bet * 1.5)} 💰"
                 )
                 continue
 
             if dealer_bj and not p_bj:
                 # Dealer blackjack beats player
                 lines.append(
-                    f"QQ:{uid} [{_cards_str(p.cards)}] {p_score} 点 庄家 Blackjack — -{p.bet} 💰"
+                    f"{name} [{_cards_str(p.cards)}] {p_score} 点 庄家 Blackjack — -{p.bet} 💰"
                 )
                 continue
 
@@ -457,18 +462,18 @@ class BlackjackGame(BaseGame):
                 if self._economy:
                     self._economy.add_gold(uid, gid, win)
                 lines.append(
-                    f"QQ:{uid} [{_cards_str(p.cards)}] {p_score} > {dealer_score} 胜! — +{p.bet} 💰"
+                    f"{name} [{_cards_str(p.cards)}] {p_score} > {dealer_score} 胜! — +{p.bet} 💰"
                 )
             elif p_score < dealer_score:
                 lines.append(
-                    f"QQ:{uid} [{_cards_str(p.cards)}] {p_score} < {dealer_score} 负 — -{p.bet} 💰"
+                    f"{name} [{_cards_str(p.cards)}] {p_score} < {dealer_score} 负 — -{p.bet} 💰"
                 )
             else:
                 # Push — refund
                 if self._economy:
                     self._economy.add_gold(uid, gid, p.bet)
                 lines.append(
-                    f"QQ:{uid} [{_cards_str(p.cards)}] {p_score} = {dealer_score} 平 "
+                    f"{name} [{_cards_str(p.cards)}] {p_score} = {dealer_score} 平 "
                     f"— 退还 {p.bet} 💰"
                 )
 

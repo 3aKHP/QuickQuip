@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quickquip.adapters.nonebot.command_parts.common import _is_private_chat, _strip_command_name
 from quickquip.app.message_pipeline import game_economy, game_registry, game_scores
+from quickquip.games.identity import display_resolver
 
 
 def register_games_commands(on_command, Message, MessageSegment) -> None:
@@ -70,9 +71,10 @@ def register_games_commands(on_command, Message, MessageSegment) -> None:
             leaderboard = game_scores.get_leaderboard(group_id, game.name, top_n=10)
             if not leaderboard:
                 await game_cmd.finish(f"{game.name} 暂无排行数据")
+            name_of = display_resolver(group_id)
             lines = [f"{game.name} 排行榜（前 {len(leaderboard)} 名）："]
             for i, (uid, score) in enumerate(leaderboard, 1):
-                lines.append(f"{i}. QQ:{uid} — {score} 胜")
+                lines.append(f"{i}. {name_of(uid)} — {score} 胜")
             await game_cmd.finish("\n".join(lines))
 
         # No valid subcommand
@@ -122,7 +124,8 @@ def register_games_commands(on_command, Message, MessageSegment) -> None:
         rank = game_economy.get_rank(str(event.group_id), top_n=10)
         if not rank:
             await gold_rank_cmd.finish("本群暂无金币数据，快去签到吧！")
+        name_of = display_resolver(str(event.group_id))
         lines = ["🏆 本群金币排行："]
         for i, entry in enumerate(rank, 1):
-            lines.append(f"{i}. QQ:{entry['user_id']} — {entry['gold']} 💰")
+            lines.append(f"{i}. {name_of(entry['user_id'])} — {entry['gold']} 💰")
         await gold_rank_cmd.finish("\n".join(lines))

@@ -8,6 +8,7 @@ from typing import Optional
 
 from quickquip.games.config import RussianRouletteConfig
 from quickquip.games.economy import GameEconomyStore
+from quickquip.games.identity import display_name
 from quickquip.games.registry import BaseGame, GameResult
 
 _LIVE_MSGS = [
@@ -238,7 +239,7 @@ class RussianRouletteGame(BaseGame):
             reply=(
                 f"🔫 对决开始！双方各下注 {s.player1_bet} 金币\n"
                 f"弹仓：{bullet_count}/7 颗实弹\n"
-                f"QQ:{s.player1_id} 先开枪！发送 开枪"
+                f"{display_name(key, s.player1_id)} 先开枪！发送 开枪"
             ),
         )
 
@@ -252,13 +253,16 @@ class RussianRouletteGame(BaseGame):
 
         if uid not in (s.player1_id, s.player2_id):
             return GameResult(
-                reply=f"这是 QQ:{s.player1_id} 和 QQ:{s.player2_id} 的对决，请安静围观~",
+                reply=(
+                    f"这是 {display_name(key, s.player1_id)} 和 "
+                    f"{display_name(key, s.player2_id)} 的对决，请安静围观~"
+                ),
                 at_user_id=uid,
             )
 
         if uid != s.next_player:
             return GameResult(
-                reply=f"还没轮到你！该 QQ:{s.next_player} 开枪了",
+                reply=f"还没轮到你！该 {display_name(key, s.next_player)} 开枪了",
                 at_user_id=uid,
             )
 
@@ -281,8 +285,8 @@ class RussianRouletteGame(BaseGame):
             return GameResult(
                 reply=(
                     f"{death_msg}\n\n"
-                    f"🏆 QQ:{winner_id} 获胜！赢得 {s.player1_bet} 金币\n"
-                    f"💀 QQ:{loser_id} 损失 {s.player1_bet} 金币"
+                    f"🏆 {display_name(key, winner_id)} 获胜！赢得 {s.player1_bet} 金币\n"
+                    f"💀 {display_name(key, loser_id)} 损失 {s.player1_bet} 金币"
                 ),
                 at_user_id=loser_id,
                 finished=True,
@@ -301,7 +305,7 @@ class RussianRouletteGame(BaseGame):
             reply=(
                 f"{live_msg}\n"
                 f"下一枪存活概率：{survival}\n"
-                f"轮到 QQ:{next_player} 开枪！"
+                f"轮到 {display_name(key, next_player)} 开枪！"
             ),
             at_user_id=uid,
         )
@@ -330,8 +334,8 @@ class RussianRouletteGame(BaseGame):
         self._sessions.pop(key, None)
         return GameResult(
             reply=(
-                msg + f"QQ:{loser_id} 超时未开枪，判负！\n"
-                f"🏆 QQ:{winner_id} 获胜！赢得 {s.player1_bet} 金币"
+                msg + f"{display_name(key, loser_id)} 超时未开枪，判负！\n"
+                f"🏆 {display_name(key, winner_id)} 获胜！赢得 {s.player1_bet} 金币"
             ),
             at_user_id=loser_id,
             finished=True,
