@@ -12,7 +12,7 @@ from quickquip.adapters.nonebot.command_parts._parsing import _extract_at_target
 
 
 class _Seg:
-    def __init__(self, type: str, **data):  # noqa: A002
+    def __init__(self, type: str, **data):
         self.type = type
         self.data = data
 
@@ -29,19 +29,45 @@ def test_raw_bare_form_extracts_target():
 
 
 def test_self_at_survives_stripped_segments():
-    """self-@ 场景：段被 to_me 剥掉，仅 raw_message 保留 at 码。"""
+    """self-@ 场景：段被 to_me 剥空，raw_message 回退保住 bot 目标。"""
     raw = "/击剑[CQ:at,qq=1000000000,name=Bot] "
     assert _extract_at_target(raw, []) == "1000000000"
 
 
+def test_segments_take_precedence_over_raw():
+    """@bot 前导唤起 + @他人指定目标：段里剩他人（self-@ 已被剥），
+    raw 的首个 at 是 bot 自己——必须取段的他人。"""
+    raw = "[CQ:at,qq=1000000000] /profile[CQ:at,qq=123456789]"
+    segs = [_Seg("at", qq="123456789")]
+    assert _extract_at_target(raw, segs) == "123456789"
+
+
 def test_segments_fallback_when_raw_lacks_at():
-    """raw 无 at 时回退段解析。"""
+    """raw 无 at 时同样走段解析。"""
     segs = [_Seg("text", text="hi"), _Seg("at", qq="123456789")]
     assert _extract_at_target("没有艾特", segs) == "123456789"
 
 
+def test_first_at_in_raw_wins_for_multi_mention():
+    """多 @ 取第一个：防守方 CD 按目标扣锁，选谁影响游戏公平。"""
+    raw = "/击剑[CQ:at,qq=123456789,name=A][CQ:at,qq=987654321,name=B]"
+    assert _extract_at_target(raw, ()) == "123456789"
+
+
+def test_first_at_segment_wins_for_multi_mention():
+    segs = [_Seg("at", qq="123456789"), _Seg("at", qq="987654321")]
+    assert _extract_at_target(None, segs) == "123456789"
+
+
+def test_at_all_skipped_in_favor_of_real_target():
+    """@全体与 @真人混排时跳过 all，取真人。"""
+    assert _extract_at_target("/击剑[CQ:at,qq=all][CQ:at,qq=123456789]", ()) == "123456789"
+    segs = [_Seg("at", qq="all"), _Seg("at", qq="123456789")]
+    assert _extract_at_target(None, segs) == "123456789"
+
+
 def test_at_all_is_not_a_target():
-    """@全体不视为目标（raw 与段两条路径都不认）。"""
+    """仅 @全体不视为目标（raw 与段两条路径都不认）。"""
     assert _extract_at_target("/击剑[CQ:at,qq=all]", ()) is None
     assert _extract_at_target(None, [_Seg("at", qq="all")]) is None
 
@@ -50,9 +76,3 @@ def test_no_target_anywhere_returns_none():
     assert _extract_at_target("普通消息", [_Seg("text", text="普通消息")]) is None
     assert _extract_at_target("", ()) is None
     assert _extract_at_target(None, ()) is None
-
-
-def test_raw_takes_precedence_over_segments():
-    raw = "/击剑[CQ:at,qq=1000000000] "
-    segs = [_Seg("at", qq="1000000001")]
-    assert _extract_at_target(raw, segs) == "1000000000"

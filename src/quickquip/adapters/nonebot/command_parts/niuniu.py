@@ -204,7 +204,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
                 )
             )
 
-        # Extract @target — raw_message 优先以保住 self-@（见 _extract_at_target）。
+        # Extract @target — 段优先、raw_message 回退保 self-@（见 _extract_at_target）。
         target_uid = _extract_at_target(
             getattr(event, "raw_message", None) or str(event.get_message()),
             event.get_message(),

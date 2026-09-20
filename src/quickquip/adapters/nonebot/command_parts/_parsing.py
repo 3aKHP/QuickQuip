@@ -75,14 +75,12 @@ def _parse_resume(args: str) -> tuple[bool, int | None]:
 def _extract_at_target(raw: str | None, segments) -> str | None:
     """提取消息里第一个被 @ 的普通用户 QQ 号，@全体不算目标。
 
-    raw 优先：指向 bot 自身的 at 段会被 NoneBot 的 to_me 识别从
-    get_message() 里剥掉，raw_message 的 CQ 码才是 self-@ 的唯一完整来源，
-    段解析只作回退。
+    段解析优先：指向 bot 自身的 at 段会被 NoneBot 的 to_me 识别从
+    get_message() 里剥掉，剩下的段恰好是用户指向他人的目标（如
+    「@bot /profile @某人」应取某人）。段里已无 at 时（如「/击剑 @bot」
+    只有 self-@ 被剥空）回退 raw_message 的 CQ 码，那是被剥掉的
+    self-@ 的唯一残留来源。
     """
-    if raw:
-        m = _AT_TARGET_RE.search(raw)
-        if m:
-            return m.group(1)
     for seg in segments or ():
         seg_type = getattr(seg, "type", None)
         data = getattr(seg, "data", {})
@@ -90,6 +88,10 @@ def _extract_at_target(raw: str | None, segments) -> str | None:
             qq = str(data.get("qq", "") or "").strip()
             if qq and qq != "all":
                 return qq
+    if raw:
+        m = _AT_TARGET_RE.search(raw)
+        if m:
+            return m.group(1)
     return None
 
 
