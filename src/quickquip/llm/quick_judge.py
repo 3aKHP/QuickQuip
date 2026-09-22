@@ -70,7 +70,7 @@ class QuickJudgeResult:
 async def run_quick_judge_detailed(
     config: LLMConfig,
     prompt: str,
-    max_tokens: int = 64,
+    max_tokens: int | None = None,
     *,
     client_builder: ClientBuilder = build_provider_client,
 ) -> QuickJudgeResult:
@@ -78,6 +78,8 @@ async def run_quick_judge_detailed(
     不抛 provider 异常。诊断只含 provider/model/类别/finish reason/
     token/耗时，禁止携带 prompt、模型原始响应、凭据或 endpoint。"""
     qj = config.quick_judge
+    if max_tokens is None:
+        max_tokens = qj.max_tokens
     provider_id = qj.provider_id if qj.provider_id else config.runtime.default_provider
     provider = config.providers.get(provider_id) if provider_id else None
     # enabled = false 的 provider 视为不可用，降级到下一个可用候选
@@ -145,14 +147,16 @@ async def run_quick_judge_detailed(
 async def run_quick_judge(
     config: LLMConfig,
     prompt: str,
-    max_tokens: int = 64,
+    max_tokens: int | None = None,
     *,
     client_builder: ClientBuilder = build_provider_client,
 ) -> str:
     """
-    用于 context_rules 和 awakening 的极速判定调用。
-    不走群配置、不注入记忆、不启用工具，只发单条 system+user。
-    优先使用 [triggers.quick_judge] 配置的 provider/model。
+    一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
+    结构化判定（awakening、context_rules、auto_memory）走
+    ``run_quick_judge_detailed``。不走群配置、不注入记忆、不启用工具，
+    只发单条 system+user；优先使用 [triggers.quick_judge] 配置的
+    provider/model。
     """
     result = await run_quick_judge_detailed(
         config, prompt, max_tokens, client_builder=client_builder

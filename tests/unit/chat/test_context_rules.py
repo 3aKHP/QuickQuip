@@ -106,3 +106,70 @@ async def test_no_pattern_match_returns_none(frozen_now):
         group_id=12345,
     )
     assert result is None
+
+
+class _StubJudgeService:
+    """quick_judge_detailed 的最小 stub。"""
+
+    def __init__(self, judge):
+        self._judge = judge
+        self.calls: list[tuple] = []
+
+    async def quick_judge_detailed(self, prompt, max_tokens=None):
+        self.calls.append((prompt, max_tokens))
+        return self._judge
+
+
+def _qj(text: str, outcome: str = "ok", **kwargs):
+    from quickquip.llm.quick_judge import QuickJudgeResult
+
+    return QuickJudgeResult(text=text, outcome=outcome, provider_id="p", model="m", **kwargs)
+
+
+@pytest.mark.skipif(
+    not any(
+        rule.get("name") == "ntk_haoa" and rule.get("type") == "llm_context"
+        for rule in CONTEXT_REPLY_RULES
+    ),
+    reason="ntk_haoa llm_context rule not present",
+)
+async def test_llm_context_ok_verdict_triggers(frozen_now):
+    service = _StubJudgeService(_qj('{"trigger": true}'))
+    result = await match_context_rule(
+        text="好啊",
+        user_id=1,
+        sender_name="李四",
+        recent_messages=[{"text": "他过江了", "sender_name": "张三"}],
+        now=frozen_now,
+        llm_service=service,
+        group_id=12345,
+    )
+    assert result is not None
+    assert result["rule_name"] == "ntk_haoa"
+    # 判定预算不在调用方写死，缺省交由 [triggers.quick_judge] 配置决定
+    assert service.calls and service.calls[0][1] is None
+
+
+@pytest.mark.skipif(
+    not any(
+        rule.get("name") == "ntk_haoa" and rule.get("type") == "llm_context"
+        for rule in CONTEXT_REPLY_RULES
+    ),
+    reason="ntk_haoa llm_context rule not present",
+)
+async def test_llm_context_length_outcome_fails_closed_quietly(frozen_now, caplog):
+    import logging
+
+    service = _StubJudgeService(_qj("", outcome="length", finish_reason="length"))
+    with caplog.at_level(logging.DEBUG):
+        result = await match_context_rule(
+            text="好啊",
+            user_id=1,
+            sender_name="李四",
+            recent_messages=[{"text": "他过江了", "sender_name": "张三"}],
+            now=frozen_now,
+            llm_service=service,
+            group_id=23456,
+        )
+    assert result is None
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]

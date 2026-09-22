@@ -80,10 +80,19 @@ async def test_auto_memory_projection_preserves_history_and_model_strings(
     )
     before = llm_service.store.list_recent_conversation_messages(scope, 10)
     prompts = []
+
     async def judge(prompt, **kwargs):
+        from quickquip.llm.quick_judge import QuickJudgeResult
+
         prompts.append(prompt)
-        return '{"memories": ["模型写出的小明喜欢编程"]}'
-    monkeypatch.setattr(llm_service, "quick_judge", judge)
+        return QuickJudgeResult(
+            text='{"memories": ["模型写出的小明喜欢编程"]}',
+            outcome="ok",
+            provider_id="p",
+            model="m",
+        )
+
+    monkeypatch.setattr(llm_service, "quick_judge_detailed", judge)
     llm_service._auto_memory_turns[scope] = 9
     await llm_service._extract_auto_memory(
         scope_key=scope, user_id="12345", sender_name="旧卡", canonical_name="旧标准",
