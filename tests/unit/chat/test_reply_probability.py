@@ -233,9 +233,12 @@ class _CountingJudge:
         self.calls = 0
         self._trigger = trigger
 
-    async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
+    async def quick_judge_detailed(self, prompt: str, max_tokens: int | None = None):
         self.calls += 1
-        return '{"trigger": true}' if self._trigger else '{"trigger": false}'
+        from quickquip.llm.quick_judge import QuickJudgeResult
+
+        text = '{"trigger": true}' if self._trigger else '{"trigger": false}'
+        return QuickJudgeResult(text=text, outcome="ok", provider_id="p", model="m")
 
 
 async def test_context_rule_skips_llm_when_roll_fails(restore_chat_rules, frozen_now):
