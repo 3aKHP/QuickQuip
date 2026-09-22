@@ -43,7 +43,7 @@ class JudgeTargetSource(Protocol):
 
 class QuickJudgeCaller(Protocol):
     async def quick_judge_detailed(
-        self, prompt: str, max_tokens: int = 64
+        self, prompt: str, max_tokens: int | None = None
     ) -> "QuickJudgeResult": ...
 
 

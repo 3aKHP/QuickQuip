@@ -5,7 +5,7 @@ batch trigger + multi-turn context + fixed-confidence store, plus the
 per-scope turn counter and success/failure tallies.
 
 The mixin depends on the host class providing ``self.config``,
-``self.store`` and ``self.quick_judge`` (all supplied by ``LLMService``).
+``self.store`` and ``self.quick_judge_detailed`` (all supplied by ``LLMService``).
 The host supplies ``self._identity_repository`` for current identity snapshots.
 
 State is initialised via :meth:`AutoMemoryMixin._init_auto_memory`, which

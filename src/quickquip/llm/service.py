@@ -408,10 +408,11 @@ class LLMService(
 
     async def quick_judge(self, prompt: str, max_tokens: int | None = None) -> str:
         """
-        用于 context_rules 和 awakening 的极速判定调用。
-        不走群配置、不注入记忆、不启用工具，只发单条 system+user。
-        优先使用 [triggers.quick_judge] 配置的 provider/model；
-        max_tokens 缺省沿用 [triggers.quick_judge] max_tokens。
+        一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
+        结构化判定（awakening、context_rules、auto_memory）走
+        ``quick_judge_detailed``。不走群配置、不注入记忆、不启用工具，
+        只发单条 system+user；优先使用 [triggers.quick_judge] 配置的
+        provider/model，max_tokens 缺省沿用其 max_tokens。
         """
         # 薄委托：通道本体在 quickquip.llm.quick_judge。显式传本模块级
         # build_provider_client，保持既有 patch 点有效，且不向通道传递 self。

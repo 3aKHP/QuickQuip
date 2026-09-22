@@ -152,9 +152,11 @@ async def run_quick_judge(
     client_builder: ClientBuilder = build_provider_client,
 ) -> str:
     """
-    用于 context_rules 和 awakening 的极速判定调用。
-    不走群配置、不注入记忆、不启用工具，只发单条 system+user。
-    优先使用 [triggers.quick_judge] 配置的 provider/model。
+    一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
+    结构化判定（awakening、context_rules、auto_memory）走
+    ``run_quick_judge_detailed``。不走群配置、不注入记忆、不启用工具，
+    只发单条 system+user；优先使用 [triggers.quick_judge] 配置的
+    provider/model。
     """
     result = await run_quick_judge_detailed(
         config, prompt, max_tokens, client_builder=client_builder
