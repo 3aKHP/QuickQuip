@@ -47,7 +47,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/README.md](dev/README.md) | 开发文档索引——公共/私有边界、文档职责和维护规则 |
 | [docs/dev/style.md](dev/style.md) | 代码规范与架构原则——职责边界、禁止的上帝结构、输入/状态/测试契约 |
 | [docs/dev/testing.md](dev/testing.md) | 测试纪律——不要为了测试而测试；准入、断言、反模式与删留依据 |
-| [docs/dev/branching.md](dev/branching.md) | 开发工作流与发布流程——六级变更分级、双轨评审与 KHPilot Bot Review 机制、验证、release 与 hotfix |
+| [docs/dev/branching.md](dev/branching.md) | 开发工作流与发布流程——六级变更分级、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、验证、release 与 hotfix |
 | [docs/dev/versioning.md](dev/versioning.md) | 版本号约定——三段式版本、主题更新系列、dev 批次与发布候选规则 |
 | [docs/dev/architecture.md](dev/architecture.md) | 项目架构与结构——三层架构、依赖方向、组合根、目录用途与数据边界 |
 | [docs/dev/record-identities.md](dev/record-identities.md) | 记录正文与成员身份契约——正文片段结构、身份分层缓存与消费口径 |
