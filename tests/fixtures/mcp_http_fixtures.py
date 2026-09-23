@@ -1,18 +1,22 @@
 """In-process MCP HTTP server fixtures for wire-level testing.
 
-Two ASGI-callable servers:
+ASGI-callable servers:
 
 - :class:`LegacyMCPServer` — legacy (initialize/session) MCP Streamable HTTP.
   Records every received request for assertion and supports JSON / inline-SSE /
-  204 responses, session-id creation, and ``-32601`` for unknown methods.
+  204 responses, session-id creation, paginated ``tools/list``, and
+  ``-32601`` for unknown methods.
 
 - :class:`ModernMCPServer` — modern (2026-07-28 ``server/discover``) MCP.
   Records requests, validates ``_meta`` / routing headers, and supports
   request-scoped JSON responses.
 
-These are intentionally minimal for Wave 0; later waves extend them with
-stale-session 404, version mismatch, auth failures, ``input_required``
-downgrade, and other edge cases.
+- :class:`StaleSessionLegacyServer` — legacy server whose current session can
+  be invalidated on demand (404 on use), driving reconnect and no-replay
+  coverage.
+
+Servers are deliberately minimal; each wire behavior under test gets the
+smallest variant that triggers it.
 """
 from __future__ import annotations
 

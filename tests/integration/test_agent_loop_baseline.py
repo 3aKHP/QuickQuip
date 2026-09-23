@@ -55,9 +55,6 @@ async def run_five_turn_scenario(service: LLMService, **kwargs) -> dict:
     )
 
 
-# ── fixture 契约自检 ────────────────────────────────────────────────
-
-
 # ── 默认关闭开关：完整记录 + 最终单发（§6.3） ───────────────────────
 
 

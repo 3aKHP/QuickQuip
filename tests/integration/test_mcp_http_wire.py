@@ -250,11 +250,7 @@ async def test_legacy_requests_carry_no_modern_headers():
 
 
 # ---------------------------------------------------------------------------
-# Modern streaming spike
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Wave 3: stale-session handling
+# Stale-session handling
 # ---------------------------------------------------------------------------
 
 def _asgi_client(config: MCPServerConfig, server: Any) -> MCPClient:
@@ -347,7 +343,7 @@ async def test_transport_404_without_session_is_not_stale():
 
 
 # ---------------------------------------------------------------------------
-# Wave 4: modern session and auto negotiation
+# Modern session and auto negotiation
 # ---------------------------------------------------------------------------
 
 def _patch_modern_asgi(monkeypatch, app: Any) -> None:
