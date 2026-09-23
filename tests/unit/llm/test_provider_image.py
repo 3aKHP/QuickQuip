@@ -5,7 +5,9 @@ import base64
 
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import BaseProviderClient, LLMImageInput, LLMProviderError
-from quickquip.llm.provider.base import _IMAGE_CACHE_MAX_ENTRIES, MAX_IMAGES_PER_REQUEST
+from quickquip.llm.provider.base import (
+    _IMAGE_CACHE_MAX_ENTRIES, _IMAGE_CACHE_TTL_SECONDS, MAX_IMAGES_PER_REQUEST,
+)
 
 
 def _make_config(**overrides) -> ProviderConfig:
@@ -111,7 +113,7 @@ async def test_download_image_ttl_expiry_refetches(monkeypatch):
 
     monkeypatch.setattr(client, "_download_image_uncached", fake_uncached)
     first = await client._prepare_image_inputs(["a.png"])
-    client._image_cache["a.png"] = (time.monotonic() - 601.0, first[0])
+    client._image_cache["a.png"] = (time.monotonic() - _IMAGE_CACHE_TTL_SECONDS - 1, first[0])
     second = await client._prepare_image_inputs(["a.png"])
     assert downloaded == ["a.png", "a.png"]
     assert second[0] is not first[0]

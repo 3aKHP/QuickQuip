@@ -1,21 +1,10 @@
-"""Wave 0: Legacy HTTP wire characterization + modern streaming spike.
+"""MCP 客户端与进程内 HTTP 服务的协议集成。
 
-Two test groups:
-
-1. **Legacy characterization** — captures the exact wire behavior of
-   ``StreamableHttpTransport`` + ``JsonRpcSession`` against an in-process
-   legacy MCP server. These tests are regression guards for the "legacy
-   exact" requirement: Wave 3 must not change any of these behaviors.
-
-2. **Modern streaming spike** — proves that ``httpx.AsyncClient.stream()``
-   supports request-scoped JSON/SSE, cancellation, and timeout. These are
-   the building blocks for a hand-written modern MCP codec without adopting
-   SDK v2. If these pass, we have confidence the hand-written route works.
+覆盖 legacy 初始化/会话复用、现代协商与路由、工具请求（含分页聚合）、
+失效会话恢复及有副作用的调用禁止自动重放。
 """
 from __future__ import annotations
 
-import asyncio
-import json
 from typing import Any
 
 import httpx
@@ -32,7 +21,6 @@ from tests.fixtures.mcp_http_fixtures import (
     LegacyMCPServer,
     ModernMCPServer,
     StaleSessionLegacyServer,
-    StreamingModernMCPServer,
 )
 
 
@@ -135,44 +123,34 @@ async def test_legacy_session_id_is_reused_on_subsequent_requests():
         await session.aclose()
 
 
-async def test_legacy_tools_list_pagination():
-    """Paginated tools/list follows nextCursor until exhausted."""
-    server = LegacyMCPServer()  # default has 2 tools: echo, ping
+async def test_legacy_list_tools_paginates_until_exhausted():
+    """MCPClient.list_tools follows nextCursor until the catalog is exhausted."""
+    tools_catalog = [
+        {"name": "echo", "description": "Echo back the input text.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "ping", "description": "Return pong.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "quack", "description": "Return quack.",
+         "inputSchema": {"type": "object", "properties": {}}},
+    ]
+    server = LegacyMCPServer(tools=tools_catalog)
     config = _http_config()
-    transport = _AsgiHttpTransport(config, app=server)
-    session = JsonRpcSession(transport, server_id=config.id, timeout_seconds=5)
-    await session.start()
+    client = _asgi_client(config, server)
+    await client._session.start()
     try:
-        await session.request(
-            "initialize",
-            {"protocolVersion": "2025-03-26", "capabilities": {},
-             "clientInfo": {"name": "QuickQuip", "version": "1.0"}},
-        )
+        await client._initialize()
 
-        # Collect all tools via the MCPClient-style pagination loop
-        all_tools: list[dict[str, Any]] = []
-        cursor: str | None = None
-        while True:
-            params: dict[str, Any] = {}
-            if cursor:
-                params["cursor"] = cursor
-            result = await session.request("tools/list", params)
-            tools = result.get("tools", [])
-            all_tools.extend(tools)
-            cursor = str(result.get("nextCursor", "")).strip()
-            if not cursor:
-                break
+        tools = await client.list_tools()
 
-        tool_names = [t["name"] for t in all_tools]
-        assert tool_names == ["echo", "ping"]
-
-        # tools/list was called twice (first page + second page)
+        # All three tools collected across both pages, order preserved
+        assert [t["name"] for t in tools] == ["echo", "ping", "quack"]
+        # Wire saw exactly two tools/list: seed request, then cursor follow-up
         list_requests = [r for r in server.requests if r["method"] == "tools/list"]
         assert len(list_requests) == 2
         assert "cursor" not in list_requests[0]["params"]
         assert list_requests[1]["params"]["cursor"] == "echo"
     finally:
-        await session.aclose()
+        await client.aclose()
 
 
 async def test_legacy_tools_call_returns_text_content():
@@ -272,315 +250,7 @@ async def test_legacy_requests_carry_no_modern_headers():
 
 
 # ---------------------------------------------------------------------------
-# Modern streaming spike
-# ---------------------------------------------------------------------------
-
-async def test_modern_discover_returns_capabilities():
-    """server/discover returns the final 2026-07-28 identity contract."""
-    app = ModernMCPServer()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "server/discover",
-                "params": {
-                    "_meta": {
-                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                        "io.modelcontextprotocol/clientInfo": {
-                            "name": "QuickQuip",
-                            "version": "1.0",
-                        },
-                        "io.modelcontextprotocol/clientCapabilities": {},
-                    },
-                },
-            },
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "MCP-Protocol-Version": "2026-07-28",
-                "Mcp-Method": "server/discover",
-            },
-        )
-        result = response.json()["result"]
-        assert "2026-07-28" in result["supportedVersions"]
-        server_info = result["_meta"]["io.modelcontextprotocol/serverInfo"]
-        assert server_info["name"] == "modern-test-server"
-        assert server_info["version"] == "2.0.0"
-
-
-async def test_modern_discover_missing_routing_headers_rejected():
-    """Modern server rejects requests without routing headers (400)."""
-    app = ModernMCPServer()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "server/discover",
-                "params": {
-                    "_meta": {
-                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                    },
-                },
-            },
-            headers={
-                "Content-Type": "application/json",
-                # Missing MCP-Protocol-Version and Mcp-Method
-            },
-        )
-        assert response.status_code == 400
-        assert response.json()["error"]["code"] == -32600
-
-
-async def test_modern_discover_missing_envelope_metadata_rejected():
-    """Modern fixture rejects routing-only requests without params metadata."""
-    app = ModernMCPServer()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "server/discover",
-                "params": {},
-            },
-            headers={
-                "Content-Type": "application/json",
-                "MCP-Protocol-Version": "2026-07-28",
-                "Mcp-Method": "server/discover",
-            },
-        )
-        assert response.status_code == 400
-        assert response.json()["error"]["code"] == -32600
-
-
-async def test_modern_request_scoped_json():
-    """Modern tools/call returns JSON within a single request scope."""
-    app = ModernMCPServer()
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        response = await client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
-                    "name": "echo",
-                    "arguments": {"text": "modern hello"},
-                    "_meta": {
-                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                        "io.modelcontextprotocol/clientInfo": {
-                            "name": "QuickQuip",
-                            "version": "1.0",
-                        },
-                        "io.modelcontextprotocol/clientCapabilities": {},
-                    },
-                },
-            },
-            headers={
-                "Content-Type": "application/json",
-                "MCP-Protocol-Version": "2026-07-28",
-                "Mcp-Method": "tools/call",
-                "Mcp-Name": "echo",
-            },
-        )
-        result = response.json()["result"]
-        assert result["content"][0]["text"] == "echo: modern hello"
-
-
-async def test_modern_streaming_sse_parsed_within_request_scope():
-    """Request-scoped SSE: events arrive as readable lines within stream context."""
-    app = StreamingModernMCPServer(delay_seconds=0.01)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
-        steps: list[int] = []
-        async with client.stream(
-            "POST",
-            "/mcp",
-            content=json.dumps({
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {},
-            }).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "MCP-Protocol-Version": "2026-07-28",
-                "Mcp-Method": "tools/call",
-            },
-        ) as response:
-            async for line in response.aiter_lines():
-                if line.startswith("data:"):
-                    data = json.loads(line[len("data:"):].strip())
-                    steps.append(data["result"]["step"])
-
-        assert steps == [1, 2]
-
-
-async def test_streaming_cancellation_closes_response():
-    """Cancelling a streaming request delivers partial data and closes the stream.
-
-    Uses a real TCP server because httpx.ASGITransport buffers the entire
-    response body before delivery, making it unsuitable for testing
-    incremental streaming. This is a key Wave 0 finding: the modern codec's
-    request-scoped streaming tests need a real TCP server.
-
-    The server sends event-1 immediately, then waits 30s before event-2.
-    The client times out after receiving event-1, proving:
-    - Partial data IS delivered incrementally over a real connection
-    - Cancellation cleans up the httpx stream context
-    - No hang or resource leak
-    """
-    state: dict[str, bool] = {"step2_sent": False}
-    handler_tasks: set[asyncio.Task[None]] = set()
-
-    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        handler_tasks.add(asyncio.current_task())  # type: ignore[arg-type]
-        try:
-            await reader.read(65536)
-            # HTTP/1.1 chunked SSE response
-            writer.write(
-                b"HTTP/1.1 200 OK\r\n"
-                b"Content-Type: text/event-stream\r\n"
-                b"Transfer-Encoding: chunked\r\n"
-                b"\r\n"
-            )
-            await writer.drain()
-
-            event = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"step": 1}})
-            payload = f"data: {event}\n\n".encode()
-            writer.write(f"{len(payload):x}\r\n".encode() + payload + b"\r\n")
-            await writer.drain()
-
-            # Long delay — client should cancel during this
-            await asyncio.sleep(30)
-
-            state["step2_sent"] = True
-            event2 = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"step": 2}})
-            payload2 = f"data: {event2}\n\n".encode()
-            writer.write(f"{len(payload2):x}\r\n".encode() + payload2 + b"\r\n")
-            writer.write(b"0\r\n\r\n")
-            await writer.drain()
-        except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
-            pass
-        finally:
-            handler_tasks.discard(asyncio.current_task())  # type: ignore[arg-type]
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except (ConnectionResetError, BrokenPipeError):
-                pass
-
-    tcp_server = await asyncio.start_server(handler, "127.0.0.1", 0)
-    port = tcp_server.sockets[0].getsockname()[1]
-
-    received_steps: list[int] = []
-    try:
-        async def read_stream():
-            async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as client:
-                async with client.stream("POST", "/mcp", content=b"{}") as response:
-                    async for line in response.aiter_lines():
-                        if line.startswith("data:"):
-                            data = json.loads(line[len("data:"):].strip())
-                            received_steps.append(data["result"]["step"])
-
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(read_stream(), timeout=2.0)
-
-        assert received_steps == [1]
-        assert not state["step2_sent"]
-    finally:
-        for task in handler_tasks:
-            task.cancel()
-        tcp_server.close()
-        await tcp_server.wait_closed()
-
-
-async def test_streaming_timeout_does_not_leak_client():
-    """After a cancelled stream, the SAME client is still usable for new requests."""
-    # First app: streams slowly (triggers timeout)
-    slow_app = StreamingModernMCPServer(delay_seconds=30.0)
-    # Second app: responds immediately (verifies client reuse)
-    fast_app = ModernMCPServer()
-    # Use a single client with a composite app that routes based on delay state
-    call_count = {"n": 0}
-
-    async def composite_app(scope, receive, send):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            await slow_app(scope, receive, send)
-        else:
-            await fast_app(scope, receive, send)
-
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=composite_app),
-        base_url="http://test",
-    ) as client:
-        # First request: times out during streaming
-        async def slow_read():
-            async with client.stream(
-                "POST", "/mcp",
-                content=json.dumps(
-                    {"jsonrpc": "2.0", "id": 5, "method": "ping", "params": {}}
-                ).encode(),
-                headers={
-                    "Content-Type": "application/json",
-                    "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": "ping",
-                },
-            ) as response:
-                async for line in response.aiter_lines():
-                    pass
-
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(slow_read(), timeout=1.0)
-
-        # Second request on the SAME client: must succeed
-        response = await client.post(
-            "/mcp",
-            json={
-                "jsonrpc": "2.0",
-                "id": 6,
-                "method": "server/discover",
-                "params": {
-                    "_meta": {
-                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                        "io.modelcontextprotocol/clientInfo": {
-                            "name": "QuickQuip",
-                            "version": "1.0",
-                        },
-                        "io.modelcontextprotocol/clientCapabilities": {},
-                    },
-                },
-            },
-            headers={
-                "Content-Type": "application/json",
-                "MCP-Protocol-Version": "2026-07-28",
-                "Mcp-Method": "server/discover",
-            },
-        )
-        assert response.status_code == 200
-        assert "2026-07-28" in response.json()["result"]["supportedVersions"]
-
-
-# ---------------------------------------------------------------------------
-# Wave 3: stale-session handling
+# Stale-session handling
 # ---------------------------------------------------------------------------
 
 def _asgi_client(config: MCPServerConfig, server: Any) -> MCPClient:
@@ -673,7 +343,7 @@ async def test_transport_404_without_session_is_not_stale():
 
 
 # ---------------------------------------------------------------------------
-# Wave 4: modern session and auto negotiation
+# Modern session and auto negotiation
 # ---------------------------------------------------------------------------
 
 def _patch_modern_asgi(monkeypatch, app: Any) -> None:

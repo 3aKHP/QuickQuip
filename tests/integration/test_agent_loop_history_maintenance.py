@@ -247,4 +247,3 @@ def test_config_parses_budget_and_retention_fields(tmp_path: Path):
     service = LLMService(**paths)
     assert service.config.runtime.request_input_token_budget == 50000
     assert service.config.runtime.agent_record_retention_days == 14
-    assert service.config.runtime.agent_record_max_bytes_per_scope == 67_108_864

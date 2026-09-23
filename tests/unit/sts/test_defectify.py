@@ -3,17 +3,13 @@ from __future__ import annotations
 from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
 
 
-def test_build_prompt_basic_structure():
+def test_build_prompt_preserves_input_and_quote():
     prompt = build_defectify_prompt(
         prompt="小蓝熊的弱智兼容性和启动速度",
         quoted_text="这也太慢了",
         quoted_sender_name="张三",
         quoted_user_id="123",
     )
-    assert "槽1" in prompt.system_prompt
-    assert "槽2" in prompt.system_prompt
-    assert "笑点解析：" in prompt.system_prompt
-    assert "禁止输出 JSON" in prompt.system_prompt
     assert "小蓝熊的弱智兼容性和启动速度" in prompt.user_prompt
     assert "这也太慢了" in prompt.user_prompt
 

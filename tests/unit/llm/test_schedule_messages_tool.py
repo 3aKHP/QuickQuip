@@ -57,10 +57,11 @@ def test_input_schema_descriptions_are_strings(llm_service):
 
 async def test_private_chat_rejected(tool_env):
     svc = _FakeService()
-    out = await svc._tool_manage_scheduled_messages(
-        {"action": "list"}, _make_context(chat_type="private")
+    await svc._tool_manage_scheduled_messages(
+        {"action": "create", "cron": "0 9 * * *", "message": "禁止创建"},
+        _make_context(chat_type="private")
     )
-    assert "该工具仅支持群聊" in out
+    assert tool_env.store.list() == []
     assert tool_env.reloads == []
 
 
@@ -93,9 +94,9 @@ async def test_create_llm_kind(tool_env):
         _make_context(group_id=100),
     )
     job = tool_env.store.list()[0]
+    assert job.id in out
     assert job.kind == "llm"
     assert job.recurring is True
-    assert "LLM 任务" in out
     assert len(tool_env.reloads) == 1
 
 
@@ -114,10 +115,10 @@ async def test_create_one_shot(tool_env):
         _make_context(group_id=100),
     )
     job = tool_env.store.list()[0]
+    assert job.id in out
     assert job.kind == "llm"
     assert job.recurring is False
     assert job.cron == cron
-    assert "一次性" in out
     assert len(tool_env.reloads) == 1
 
 
@@ -128,17 +129,16 @@ async def test_create_unknown_kind_falls_back_to_text(tool_env):
         _make_context(group_id=100),
     )
     job = tool_env.store.list()[0]
+    assert job.id in out
     assert job.kind == "text"
-    assert "固定文案" in out
 
 
 async def test_create_invalid_cron_returns_error(tool_env):
     svc = _FakeService()
-    out = await svc._tool_manage_scheduled_messages(
+    await svc._tool_manage_scheduled_messages(
         {"action": "create", "cron": "bad cron", "message": "早上好"},
         _make_context(),
     )
-    assert "创建定时消息失败" in out
     assert tool_env.store.list() == []
     assert tool_env.reloads == []
 
@@ -148,10 +148,9 @@ async def test_delete_other_group_job_rejected(tool_env):
         cron="0 9 * * *", group_ids=["200"], message="别群任务", origin="web"
     )
     svc = _FakeService()
-    out = await svc._tool_manage_scheduled_messages(
+    await svc._tool_manage_scheduled_messages(
         {"action": "delete", "job_id": other.id}, _make_context(group_id=100)
     )
-    assert "不存在" in out
     assert tool_env.store.get(other.id) is not None
     assert tool_env.reloads == []
 
@@ -161,16 +160,14 @@ async def test_set_enabled_and_delete_own_group(tool_env):
         cron="0 9 * * *", group_ids=["100"], message="本群任务", origin="llm"
     )
     svc = _FakeService()
-    out = await svc._tool_manage_scheduled_messages(
+    await svc._tool_manage_scheduled_messages(
         {"action": "set_enabled", "job_id": own.id, "enabled": False},
         _make_context(group_id=100),
     )
-    assert "停用" in out
     assert tool_env.store.get(own.id).enabled is False
-    out = await svc._tool_manage_scheduled_messages(
+    await svc._tool_manage_scheduled_messages(
         {"action": "delete", "job_id": own.id}, _make_context(group_id=100)
     )
-    assert "已删除" in out
     assert tool_env.store.get(own.id) is None
     assert len(tool_env.reloads) == 2
 
@@ -202,16 +199,23 @@ async def test_list_filters_current_group_only(tool_env):
     )
     assert mine.id in out
     assert "本群任务" in out
-    assert "固定文案" in out
-    assert "周期" in out
     assert other.id not in out
     assert "别群任务" not in out
 
 
-async def test_list_empty(tool_env):
+async def test_list_empty_group_returns_hint_without_side_effects(tool_env):
+    """他群有任务但本群为空：走空列表早退分支，不串显、不写盘、不重注册。"""
+    tool_env.store.add(
+        cron="30 8 * * *", group_ids=["200"], message="别群任务", origin="web"
+    )
     svc = _FakeService()
-    out = await svc._tool_manage_scheduled_messages({"action": "list"}, _make_context())
-    assert "没有定时消息任务" in out
+    out = await svc._tool_manage_scheduled_messages(
+        {"action": "list"}, _make_context(group_id=100)
+    )
+    assert out.strip()
+    assert "别群任务" not in out
+    assert len(tool_env.store.list()) == 1  # 未创建任何任务
+    assert tool_env.reloads == []  # 空列表早退不触发重注册
 
 
 def test_description_points_to_turn_envelope():

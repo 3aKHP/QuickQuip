@@ -54,6 +54,7 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 开发者文档索引 | `references/docs-dev-readme.md` |
 | 开发工作流、分支与发布 | `references/docs-dev-branching.md` |
 | 代码规范与架构原则 | `references/docs-dev-style.md` |
+| 测试纪律、反模式与删留依据 | `references/docs-dev-testing.md` |
 | 版本号约定 | `references/docs-dev-versioning.md` |
 | 游戏框架开发 | `references/docs-dev-game-framework.md` |
 | MCP 集成 | `references/docs-dev-mcp-integration.md` |

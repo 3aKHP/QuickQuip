@@ -68,7 +68,7 @@ def test_trace_store_lifecycle_metadata_detail_events_and_clear(tmp_path):
     assert store.list_events(after_event_id=0) == []
 
 
-def test_trace_store_cursor_pagination_and_concurrent_calls(tmp_path):
+def test_trace_store_cursor_pagination(tmp_path):
     store = trace.LLMTraceStore(tmp_path / "trace.db")
     call_ids = [_begin(store, provider_id=f"p{i}") for i in range(3)]
 

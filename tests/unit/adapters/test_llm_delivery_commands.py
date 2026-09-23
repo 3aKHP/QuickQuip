@@ -131,19 +131,21 @@ async def test_delivery_status_outputs(monkeypatch):
     cmd = _register(service)
     with pytest.raises(_FinishSentinel):
         await cmd.handler(_FakeEvent("/llm delivery final status"))
-    assert cmd.finished == ["当前私聊最终轮分段：关（全局默认 关）"]
+    assert len(cmd.finished) == 1
+    assert "最终轮分段：关" in cmd.finished[0]
 
     cmd2 = _register(service)
     with pytest.raises(_FinishSentinel):
         await cmd2.handler(_FakeEvent("/llm delivery"))
-    assert cmd2.finished == [
-        "当前私聊分段交付：中间轮 开（默认 关） / 最终轮 关（默认 关）"
-    ]
+    assert len(cmd2.finished) == 1
+    assert "中间轮 开" in cmd2.finished[0]
+    assert "最终轮 关" in cmd2.finished[0]
 
     cmd3 = _register(service)
     with pytest.raises(_FinishSentinel):
         await cmd3.handler(_FakeEvent("/llm delivery all status"))
     assert cmd3.finished == cmd2.finished
+    assert service.calls == []
 
 
 async def test_delivery_unknown_domain_is_noop(monkeypatch):

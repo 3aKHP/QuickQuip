@@ -18,7 +18,7 @@
 - `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：python scripts/backfill_record_identities.py、--apply、identities.yaml、/forget、#编号、@QQ 号、(bot)、monthly_report.sample_per_day、monthly_report.input_char_budget、/llm delivery
 - `CLAUDE.md` → `references/root-claude.md` — CLAUDE.md — AI 协作者说明 ｜ 关键词：docs/dev/、docs/dev/README.md、docs/dev/branching.md、docs/admin/、docs/user/、prod.example/、prod/、.venv、uv venv、.venv/bin/
 - `CODE_OF_CONDUCT.md` → `references/root-code_of_conduct.md` — RFC 325799 — QuickQuip Code of Conduct ｜ 关键词：∀t: Reading(t) → Reading(t)、submit(x) → (User(x) ↔ User(x))、|P| ∈ {0, 1} → ∀p ∈ P: Civil(p, air)、Comply(x) → ¬Violate(x)、Disagree(x) → (C ≡ C)、P(reply) + P(¬reply) = 1
-- `CONTRIBUTING.md` → `references/root-contributing.md` — Contributing to QuickQuip ｜ 关键词：docs/dev/README.md、docs/dev/branching.md、docs/dev/style.md、src/、uv venv、uv pip install、.venv/bin/python、.venv/Scripts/python.exe、python、CLAUDE.md
+- `CONTRIBUTING.md` → `references/root-contributing.md` — Contributing to QuickQuip ｜ 关键词：docs/dev/README.md、docs/dev/branching.md、docs/dev/style.md、docs/dev/testing.md、src/、uv venv、uv pip install、.venv/bin/python、.venv/Scripts/python.exe、python
 - `README.md` → `references/root-readme.md` — QuickQuip — QQ 群聊妙语机器人 ｜ 关键词：regex_context、llm_context、config/games.toml、/roll、/choose、/fortune、/vote、/quote、/find、/tell
 - `ROADMAP.md` → `references/root-roadmap.md` — ROADMAP ｜ 关键词：docs/、reasoning_effort、config/llm.toml、/llm reload、/llm、effect、awakening、chat_rules、llm、generation
 - `SECURITY.md` → `references/root-security.md` — 安全策略 / Security Policy ｜ 关键词：dev、-dev.N、-rc.N、cccp1945@vip.qq.com、[QuickQuip security]
@@ -54,23 +54,24 @@
 ## 开发文档
 
 - `docs/dev/architecture.md` → `references/docs-dev-architecture.md` — QuickQuip 项目架构与结构 ｜ 关键词：README.md、style.md、pip install -e .、python bot.py、.env、prod/、src/quickquip/adapters/nonebot/、src/plugins/、repeat_detector、good_girl_chain
-- `docs/dev/branching.md` → `references/docs-dev-branching.md` — QuickQuip 开发工作流与发布流程 ｜ 关键词：dev、main、style.md、architecture.md、versioning.md、feat、fix、refactor、.env、data/
+- `docs/dev/branching.md` → `references/docs-dev-branching.md` — QuickQuip 开发工作流与发布流程 ｜ 关键词：dev、main、style.md、testing.md、architecture.md、versioning.md、feat、fix、refactor、.env
 - `docs/dev/game-framework.md` → `references/docs-dev-game-framework.md` — 游戏框架开发者指南 ｜ 关键词：BaseGame、src/quickquip/app/message_pipeline.py、OrderedDict[str, Session]、group_id、src/quickquip/adapters/nonebot/commands.py、command_parts/、config/games.toml、src/quickquip/games/config.py、config.py、GameConfig
 - `docs/dev/llm-module.md` → `references/docs-dev-llm-module.md` — QuickQuip LLM 模块说明 ｜ 关键词：google_search、LLM_TRACE_FLAG_FILE、data/llm_trace.db、run_tool_call_loop、trigger_kind、group_direct、private_direct、group_passive、interrupted、request_cancelled
 - `docs/dev/mcp-integration.md` → `references/docs-dev-mcp-integration.md` — QuickQuip MCP 集成说明 ｜ 关键词：config/llm.toml、[[mcp.servers]]、stdio、docker、http、sse、${ENV_VAR}、${ENV_VAR:-default}、ToolRegistry、/llm mcp status
 - `docs/dev/mcp-tutorial.md` → `references/docs-dev-mcp-tutorial.md` — 从零理解 MCP —— 以 QuickQuip 项目为例 ｜ 关键词：llm-module.md、src/quickquip/llm/mcp/、src/quickquip/llm/config.py、src/quickquip/llm/service_parts/mcp_lifecycle.py、。配置权威模板为、MCPClient、mcp/client.py、ToolRegistry、mcp_*、tools/list
-- `docs/dev/README.md` → `references/docs-dev-readme.md` — QuickQuip 开发者文档 ｜ 关键词：docs/dev/、architecture.md、style.md、branching.md、versioning.md、record-identities.md、llm-module.md、mcp-integration.md、tool-discovery.md、game-framework.md
+- `docs/dev/README.md` → `references/docs-dev-readme.md` — QuickQuip 开发者文档 ｜ 关键词：docs/dev/、architecture.md、style.md、testing.md、branching.md、versioning.md、record-identities.md、llm-module.md、mcp-integration.md、tool-discovery.md
 - `docs/dev/record-identities.md` → `references/docs-dev-record-identities.md` — 记录正文与成员身份契约 ｜ 关键词：private:<QQ>、common/identity.py、common/identity_sources.py、app/identities.py、llm/identity.py、LLMService.group_identities()、/llm reload、data/stats.json、common/record_content.py、common/record_search.py
 - `docs/dev/regex-tutorial.md` → `references/docs-dev-regex-tutorial.md` — 从零开始学习正则表达式 —— 以 QuickQuip 项目为例 ｜ 关键词：src/quickquip/、src/plugins/、config/chat_rules.toml、config/chat_rules.toml.example、src/quickquip/chat/config.py、src/quickquip/chat/text_rules.py、你的、玩原神玩的、原神怎么你了、原神
 - `docs/dev/skill-tutorial.md` → `references/docs-dev-skill-tutorial.md` — 从零开始编写 Skill —— 以 QuickQuip 项目为例 ｜ 关键词：src/quickquip/llm/skills/、parser.py、catalog.py、tools/、src/quickquip/llm/service_parts/skills.py、/skill、config/llm.toml.example、[skills]、skills/、skills.example/self-docs
 - `docs/dev/sts-formula.md` → `references/docs-dev-sts-formula.md` — STS 公式化回复模块 ｜ 关键词：quickquip.sts、chat/、llm/、formulas/card_le/、formulas/defectify/、/defectify、nkhoit/spire-archive、scripts/refresh_sts_lexicon.py、src/quickquip/sts/sts_lexicon.json、SOURCE_SHA
 - `docs/dev/style.md` → `references/docs-dev-style.md` — QuickQuip 代码规范与架构原则 ｜ 关键词：architecture.md、branching.md、line-length = 100、E + F、any、data/、.env、prod/、utils.py、helpers.py
+- `docs/dev/testing.md` → `references/docs-dev-testing.md` — QuickQuip 测试纪律 ｜ 关键词：style.md、CONTRIBUTING.md、branching.md、in、len(MCP_FAILURE_KINDS) == 8、isinstance(result, str)、sleep、try、assert False、except Exception
 - `docs/dev/tool-discovery.md` → `references/docs-dev-tool-discovery.md` — LLM 工具发现实现说明 ｜ 关键词：tool_search、tool_list、LLMRequest.tools、src/quickquip/llm/tools.py、ToolManifestEntry、src/quickquip/llm/tool_registry.py、src/quickquip/llm/service_parts/tools.py、src/quickquip/llm/tool_discovery.py、loaded_names、src/quickquip/llm/tool_loop.py
 - `docs/dev/versioning.md` → `references/docs-dev-versioning.md` — QuickQuip 版本号约定 ｜ 关键词：Major.Minor.Patch、branching.md、pyproject.toml、version、frontend/package.json、1.15.1-dev.0、1.15.1-dev.1、1.15.1-rc.1、1.15.1、1.16.0-dev.0
 
 ## 其他
 
-- `.claude/agents/quickquip-cr-reviewer.md` → `references/claude-agents-quickquip-cr-reviewer.md` — claude-agents-quickquip-cr-reviewer ｜ 关键词：dev、git diff $(git merge-base HEAD dev) HEAD、git diff、CLAUDE.md、CONTRIBUTING.md、docs/dev/README.md、docs/dev/style.md、docs/dev/architecture.md、docs/dev/branching.md、llm-module.md
+- `.claude/agents/quickquip-cr-reviewer.md` → `references/claude-agents-quickquip-cr-reviewer.md` — claude-agents-quickquip-cr-reviewer ｜ 关键词：dev、git diff $(git merge-base HEAD dev) HEAD、git diff、CLAUDE.md、CONTRIBUTING.md、docs/dev/README.md、docs/dev/style.md、docs/dev/testing.md、docs/dev/architecture.md、docs/dev/branching.md
 - `.github/ISSUE_TEMPLATE/memo.md` → `references/github-issue_template-memo.md` — github-issue_template-memo ｜ 关键词：path/to/file.py
 - `.github/PULL_REQUEST_TEMPLATE/release.md` → `references/github-pull_request_template-release.md` — github-pull_request_template-release ｜ 关键词：vX.Y.Z、pyproject.toml、CHANGELOG.md、Unreleased、prod.example/、README.md、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build
 - `.github/pull_request_template.md` → `references/github-pull_request_template.md` — github-pull_request_template ｜ 关键词：Closes #<issue>、Refs #<issue>、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build

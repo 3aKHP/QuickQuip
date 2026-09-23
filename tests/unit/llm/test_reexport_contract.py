@@ -27,6 +27,7 @@ def test_llm_runtime_all_symbols_resolvable_from_service():
     quickquip.llm.service. Catches stale __all__ entries that don't correspond
     to anything service.py actually exposes.
     """
+    assert llm_runtime.__all__
     missing = [
         name
         for name in llm_runtime.__all__
@@ -38,11 +39,6 @@ def test_llm_runtime_all_symbols_resolvable_from_service():
         f"in service.py (with `import X as X` + noqa: F401) or remove the "
         f"stale entry from llm_runtime.__all__."
     )
-
-
-def test_llm_runtime_all_list_not_empty():
-    """Sanity guard: __all__ should never be accidentally cleared."""
-    assert len(llm_runtime.__all__) > 0
 
 
 # ---------------------------------------------------------------------------

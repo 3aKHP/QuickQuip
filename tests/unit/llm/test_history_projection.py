@@ -489,8 +489,8 @@ def test_structured_path_disambiguates_duplicate_provider_call_ids():
     loop = _loop(
         "loop_1",
         (
-            _turn("turn_0", tools=(_tool_exec("exec_0"),)),
-            _turn("turn_1", tools=(_tool_exec("exec_1"),)),
+            _turn("turn_0", tools=(_tool_exec("exec_0", provider_call_id="duplicate"),)),
+            _turn("turn_1", tools=(_tool_exec("exec_1", provider_call_id="duplicate"),)),
         ),
     )
     result = project_loops([loop], target=None, protocol="openai")

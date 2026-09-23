@@ -3,6 +3,7 @@ import math
 from quickquip.llm.token_estimate import (
     ASCII_TOKEN_RATIO,
     CJK_TOKEN_RATIO,
+    NATIVE_MEDIA_FLAT_TOKENS,
     estimate_native_block_tokens,
     estimate_native_blocks_tokens,
     estimate_tokens,
@@ -29,10 +30,7 @@ def test_estimate_tokens_fullwidth_punctuation_counts_as_cjk():
 
 
 def test_estimate_tokens_mixed_rounds_up():
-    text = "当前时间：2026-03-16 星期一"
-    cjk = sum(1 for ch in text if ord(ch) >= 0x2E80)
-    expected = math.ceil(cjk * CJK_TOKEN_RATIO + (len(text) - cjk) * ASCII_TOKEN_RATIO)
-    assert estimate_tokens(text) == expected
+    assert estimate_tokens("ab中文") == math.ceil(2 * CJK_TOKEN_RATIO + 2 * ASCII_TOKEN_RATIO)
 
 
 # ── 协议原生块估算 ───────────────────────────────────────────────
@@ -67,9 +65,13 @@ def test_estimate_native_block_tokens_unknown_shape_nonzero():
 
 
 def test_estimate_native_block_tokens_media_flat_not_base64_inflated():
-    # 精确断言：1200 媒体固定档 + 8 结构开销——base64 全量计入会被立刻检出。
+    # 媒体载荷按固定档计量，体积增长不改变估算。
     block = {"inlineData": {"mimeType": "image/png", "data": "A" * 200_000}}
-    assert estimate_native_block_tokens(block) == 1200 + 8
+    small = {"inlineData": {"mimeType": "image/png", "data": "A"}}
+    assert estimate_native_block_tokens(block) == estimate_native_block_tokens(small)
+    assert estimate_native_block_tokens(block) - estimate_native_block_tokens({}) == (
+        NATIVE_MEDIA_FLAT_TOKENS
+    )
 
 
 def test_estimate_native_blocks_tokens_none_and_empty():

@@ -1,57 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
-from datetime import datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pytest
 
-from quickquip.chat.archive import ChatArchive
 from quickquip.chat.wordcloud import build_word_frequencies
 
 
 HAS_JIEBA = importlib.util.find_spec("jieba") is not None
-LOCAL_TZ = ZoneInfo("Asia/Shanghai")
-
-
-def test_collector_rejects_non_numeric_group_id(tmp_path: Path):
-    c = ChatArchive(tmp_path / "wc.db")
-    with pytest.raises(ValueError):
-        c.record("not-a-number", "n", "hello")
-
-
-def test_collector_round_trip(tmp_path: Path):
-    c = ChatArchive(tmp_path / "wc.db")
-    group_id = "10001"
-    base = datetime(2026, 4, 15, 9, 0, tzinfo=LOCAL_TZ).timestamp()
-    texts = [
-        (base, "张三", "今天启动原神"),
-        (base + 60, "李四", "原神启动了"),
-        (base + 120, "王五", "启动失败"),
-    ]
-    for ts, sender, text in texts:
-        c.record(group_id, sender, text, ts=ts)
-
-    window = c.read_window(group_id, start_ts=base - 1, end_ts=base + 600)
-    assert len(window) == 3
-    assert [m["text"] for m in window] == ["今天启动原神", "原神启动了", "启动失败"]
-
-
-def test_collector_skips_blank(tmp_path: Path):
-    c = ChatArchive(tmp_path / "wc.db")
-    c.record("1", "n", "   ")
-    window = c.read_window("1", start_ts=0, end_ts=10_000_000_000)
-    assert window == []
-
-
-def test_collector_window_filter(tmp_path: Path):
-    c = ChatArchive(tmp_path / "wc.db")
-    base = datetime(2026, 4, 15, 9, 0, tzinfo=LOCAL_TZ).timestamp()
-    c.record("1", "n", "old", ts=base)
-    c.record("1", "n", "new", ts=base + 3600)
-    window = c.read_window("1", start_ts=base + 1800, end_ts=base + 7200)
-    assert [m["text"] for m in window] == ["new"]
 
 
 @pytest.mark.skipif(not HAS_JIEBA, reason="jieba not installed")

@@ -2,7 +2,7 @@
 
 # Contributing to QuickQuip
 
-感谢参与!本文件是**全贡献者通用**的约定。开发文档职责见 [`docs/dev/README.md`](docs/dev/README.md)，分支模型、变更分级与发布流程见 [`docs/dev/branching.md`](docs/dev/branching.md)，代码规范见 [`docs/dev/style.md`](docs/dev/style.md)。
+感谢参与!本文件是**全贡献者通用**的约定。开发文档职责见 [`docs/dev/README.md`](docs/dev/README.md)，分支模型、变更分级与发布流程见 [`docs/dev/branching.md`](docs/dev/branching.md)，代码规范见 [`docs/dev/style.md`](docs/dev/style.md)，测试纪律见 [`docs/dev/testing.md`](docs/dev/testing.md)。
 
 ## 环境搭建
 

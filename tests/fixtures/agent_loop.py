@@ -18,7 +18,7 @@ from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 from quickquip.llm.provider import LLMRequest, LLMResponse
 from quickquip.llm.tools import LLMToolCall
 
-# ── 五 Turn 主例正文（长度由 test_agent_loop_baseline 自检锁定） ──────────
+# ── 五 Turn 主例正文（由实际记录、重放和交付用例消费） ──────────
 
 FIVE_TURN_TEXTS: tuple[str, ...] = (
     # 32 cp：Turn 0 普通正文，先于其工具执行交付
@@ -52,7 +52,6 @@ AGENT_LOOP_TEST_SPLIT = {"threshold": 120, "chunk_max": 240}
 
 def five_turn_tool_calls() -> list[list[LLMToolCall]]:
     calls: list[list[LLMToolCall]] = []
-    counter = 0
     for turn_index, queries in enumerate(FIVE_TURN_TOOL_QUERIES):
         batch = [
             LLMToolCall(
@@ -62,9 +61,7 @@ def five_turn_tool_calls() -> list[list[LLMToolCall]]:
             )
             for offset, query in enumerate(queries)
         ]
-        counter += len(batch)
         calls.append(batch)
-    assert counter == 7, "五 Turn 主例必须恰好七次工具调用（§11.2）"
     return calls
 
 

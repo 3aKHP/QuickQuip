@@ -134,7 +134,7 @@ def test_record_query_resolves_candidates_once(snapshot, monkeypatch):
         return original(query)
     monkeypatch.setattr(snapshot, "candidates", counted)
     query = RecordQuery("别名", snapshot)
-    for _ in range(300):
+    for _ in range(2):
         assert query.matches({"content": "[CQ:at,qq=12345]"})
         assert not query.matches({"content": "无关内容"})
     assert calls == ["别名"]

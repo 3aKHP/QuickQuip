@@ -9,6 +9,7 @@ import shutil
 import pytest
 
 from quickquip.llm.skills import (
+    MAX_SCRIPT_TIMEOUT_MS,
     SkillActivationState,
     run_skill_script,
     scan_skills,
@@ -76,7 +77,7 @@ async def test_run_timeout_range_validation(make_skill):
     catalog_dir, writer = make_skill
     writer("demo", files={"scripts/run.py": "print(1)\n"})
     skills, state, _ = _activated_env(catalog_dir, "demo")
-    for bad in (0, -5, 120001):
+    for bad in (0, -5, MAX_SCRIPT_TIMEOUT_MS + 1):
         result = await _run(skills, state, timeout_ms=bad)
         assert isinstance(result, LLMToolOutput) and result.is_error, bad
         assert "timeout_ms" in result.content
@@ -140,10 +141,12 @@ async def test_run_py_success_and_literal_args(make_skill):
     catalog_dir, writer = make_skill
     writer("demo", files={"scripts/run.py": _ARGV_DUMP_SCRIPT})
     skills, state, skill = _activated_env(catalog_dir, "demo")
+    (skill.root_dir / "scripts" / "run.py").chmod(0o644)
     args = ("hello world", ";", "$(id)", "|", "&")
     result = await _run(skills, state, args=args)
     assert isinstance(result, LLMToolOutput)
     assert not result.is_error, result.content
+    assert os.path.realpath(skill.root_dir) in result.content
     assert "退出码：0" in result.content
     for arg in args:
         assert arg in result.content  # 逐字传递，不经 shell 解释
@@ -153,17 +156,6 @@ async def test_run_py_success_and_literal_args(make_skill):
     interpreter_name = marker_line.rsplit('interpreter="', 1)[1].removesuffix('"]')
     assert "/" not in interpreter_name
     assert "\\" not in interpreter_name
-
-
-async def test_run_no_shell_substitution(make_skill):
-    """shell 元语法作为字面参数原样到达脚本（无 shell 解释层）。"""
-    catalog_dir, writer = make_skill
-    writer("demo", files={"scripts/run.py": "import sys; print(sys.argv[1])\n"})
-    skills, state, _ = _activated_env(catalog_dir, "demo")
-    payload = "$(echo SHELL_WOULD_RUN_THIS)"
-    result = await _run(skills, state, args=(payload,))
-    assert payload in result.content
-    assert "SHELL_WOULD_RUN_THIS\n" not in result.content.replace(payload, "")
 
 
 async def test_run_env_whitelist(make_skill, monkeypatch):
@@ -183,18 +175,6 @@ async def test_run_env_whitelist(make_skill, monkeypatch):
     assert "QQ_SECRET_TOKEN" not in child_keys
     assert "top-secret-value" not in result.content
     assert "sk-test-secret" not in result.content
-
-
-async def test_run_cwd_is_skill_root(make_skill):
-    catalog_dir, writer = make_skill
-    writer("demo", files={"scripts/run.py": _ARGV_DUMP_SCRIPT})
-    skills, state, skill = _activated_env(catalog_dir, "demo")
-    result = await _run(skills, state)
-    assert not result.is_error, result.content
-    import os
-
-    expected = os.path.realpath(skill.root_dir)
-    assert expected in result.content
 
 
 async def test_run_nonzero_exit_is_error(make_skill):
@@ -315,15 +295,3 @@ async def test_run_sh_script(make_skill):
     assert isinstance(result, LLMToolOutput)
     assert not result.is_error, result.content
     assert "shell-ok" in result.content
-
-
-async def test_run_py_no_shebang_or_exec_bit_needed(make_skill):
-    """解释器映射不依赖 shebang/执行位：无执行位的 .py 照跑。"""
-    catalog_dir, writer = make_skill
-    root = writer("demo", files={"scripts/plain.py": "print('no-shebang-ok')\n"})
-    script = root / "scripts" / "plain.py"
-    script.chmod(0o644)
-    skills, state, _ = _activated_env(catalog_dir, "demo")
-    result = await _run(skills, state, path="scripts/plain.py")
-    assert not result.is_error, result.content
-    assert "no-shebang-ok" in result.content

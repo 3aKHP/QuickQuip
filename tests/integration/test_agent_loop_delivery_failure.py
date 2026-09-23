@@ -63,7 +63,7 @@ async def test_first_chunk_failure_stops_tools_and_generation(
     assert len(sink.attempts) == 1
     assert len(client.requests) == 1
     # 零送达：中止必须可见（静默依据是「已有成功交付」）
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         tool_status = [
             row["status"] for row in conn.execute("SELECT status FROM agent_tool_executions")
@@ -282,7 +282,7 @@ async def test_no_record_fallback_surfaces_abort_when_delivery_enabled(
 
     assert len(client.requests) == 1  # 第二轮被门禁拦下
     assert sink.deliveries == []
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
 
 
 async def test_intermediate_only_first_failure_surfaces_notice(
@@ -311,7 +311,7 @@ async def test_intermediate_only_first_failure_surfaces_notice(
     assert len(sink.attempts) == 1  # 仅首个中间轮段尝试后终止
     assert len(client.requests) == 1
     # 零送达（首段即失败）：中止提示必须可见
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         loop_row = conn.execute("SELECT status, terminal_reason FROM agent_loops").fetchone()
     assert loop_row["status"] == "interrupted"
@@ -346,7 +346,7 @@ async def test_final_only_failure_after_suppressed_intermediate(
     assert sink.attempts[0][1] == FIVE_TURN_TEXTS[4][:20]
     assert len(client.requests) == 5
     # 零送达（suppressed 不外发 + 最终首段失败）：中止提示必须可见
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         statuses = [
             row["status"]
@@ -379,7 +379,7 @@ async def test_zero_delivery_abort_surfaces_notice(tmp_path: Path, patch_provide
 
     # 中间轮全抑制、最终轮未及交付即中止：零送达 → 给出可见中止提示
     assert sink.deliveries == []
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         loop_row = conn.execute("SELECT status, terminal_reason FROM agent_loops").fetchone()
     assert loop_row["status"] == "interrupted"

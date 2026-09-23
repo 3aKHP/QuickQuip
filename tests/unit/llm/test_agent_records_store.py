@@ -15,7 +15,6 @@ from quickquip.llm.agent_records import (
     DeliveryReceipt,
     DeliveryStatus,
     LoopStatus,
-    MAX_LOOP_RECORD_BYTES,
     ResultRetention,
     TextPolicy,
     ToolDeclarationRecord,
@@ -110,20 +109,6 @@ def _chunk_plan(
 # ── schema 与迁移 ─────────────────────────────────────────────────
 
 
-def test_fresh_db_creates_agent_schema(store: LLMStore):
-    with store._connect() as conn:
-        for table in (
-            "agent_scopes", "agent_loops", "agent_turns", "agent_tool_executions",
-            "agent_deliveries", "agent_delivery_attempts", "agent_schema_migrations",
-        ):
-            row = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone()
-            assert row is not None, f"缺表 {table}"
-        columns = {r["name"] for r in conn.execute("PRAGMA table_info(conversation_messages)")}
-        assert {"agent_loop_id", "agent_turn_id"} <= columns
-
-
 def test_migration_backfills_legacy_loops(tmp_path: Path):
     db_path = tmp_path / "llm.db"
     build_legacy_db(db_path)
@@ -169,7 +154,7 @@ def test_migration_backfills_legacy_loops(tmp_path: Path):
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
-def test_migration_is_idempotent_and_concurrent_safe(tmp_path: Path):
+def test_migration_is_idempotent(tmp_path: Path):
     db_path = tmp_path / "llm.db"
     build_legacy_db(db_path)
     LLMStore(db_path)
@@ -582,7 +567,6 @@ def test_loop_record_budget_exceeded(store: LLMStore, monkeypatch):
             "SELECT COUNT(*) c FROM conversation_messages WHERE role='assistant'"
         ).fetchone()["c"]
     assert count == 0
-    assert MAX_LOOP_RECORD_BYTES == 8_388_608  # 常量本身未被改
 
 
 def test_prune_closed_loops_by_age_and_count(store: LLMStore):

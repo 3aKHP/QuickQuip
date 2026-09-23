@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from plugins.llm_provider import LLMResponse
-from quickquip.llm.service import QuickJudgeResult
 
 
 class _StubClient:
@@ -116,13 +115,6 @@ async def test_public_quick_judge_returns_text_on_ok(llm_service, monkeypatch):
         monkeypatch, LLMResponse(text='{"trigger": false}', model="gpt-test", finish_reason="stop")
     )
     assert await llm_service.quick_judge("判定一下") == '{"trigger": false}'
-
-
-def test_no_provider_returns_trigger_false_text():
-    result = QuickJudgeResult(
-        text='{"trigger": false}', outcome="no_provider", provider_id="", model=""
-    )
-    assert result.to_diagnostic()["outcome"] == "no_provider"
 
 
 @pytest.mark.asyncio

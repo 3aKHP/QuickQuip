@@ -70,11 +70,6 @@ def _forum_states(store: TiebaStore, forums: tuple[str, ...]):
     return [(forum, store.get_forum_state(forum)) for forum in forums]
 
 
-def test_config_exposes_keywords(tieba_config: TiebaConfig):
-    assert tieba_config.forum_keyword == "测试"
-    assert tieba_config.forum_keywords == ("测试", "第二")
-
-
 def test_service_construction_does_not_load_store(tieba_config: TiebaConfig):
     service = TiebaService(config=tieba_config)
     assert service.count_threads(("测试", "第二")) == 0

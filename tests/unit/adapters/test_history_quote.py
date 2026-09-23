@@ -13,13 +13,6 @@ from quickquip.adapters.nonebot.command_parts.history import (
 )
 
 
-class _FakeMatch:
-    def __init__(self, canonical_name: str):
-        self.canonical_name = canonical_name
-
-
-
-
 class _FakeIdentityIndex(IdentityIndex):
     def __init__(self, by_alias=None, canonical_by_uid=None):
         entries = [IdentityEntry(name, [qq]) for qq, name in (canonical_by_uid or {}).items()]
@@ -188,9 +181,9 @@ async def test_quote_by_qq_queries_exact_user_id(monkeypatch):
         await matcher.handlers[0](_FakeGroupEvent("quote by 12345"))
 
     assert store.calls == [{"user_ids": ["12345"], "name_pattern": ""}]
-    assert matcher.sent == [
-        "👤 「12345」的语录（共 1 条）：\n#3 「金句」—— 新名片 (原: 旧名片)",
-    ]
+    assert len(matcher.sent) == 1
+    for value in ("#3", "金句", "新名片", "旧名片"):
+        assert value in matcher.sent[0]
 
 
 async def test_quote_by_name_resolves_candidates(monkeypatch):
@@ -206,7 +199,8 @@ async def test_quote_by_name_resolves_candidates(monkeypatch):
         await matcher.handlers[0](_FakeGroupEvent("quote by 阿明"))
 
     assert store.calls == [{"user_ids": ["u1"], "name_pattern": "阿明"}]
-    assert matcher.sent == ["👤 「阿明」的语录（共 1 条）：\n#3 「金句」—— 阿明"]
+    assert len(matcher.sent) == 1
+    assert "金句" in matcher.sent[0] and "阿明" in matcher.sent[0]
 
 
 async def test_quote_by_no_match_reports_miss(monkeypatch):
@@ -218,7 +212,8 @@ async def test_quote_by_no_match_reports_miss(monkeypatch):
     with pytest.raises(_Finished):
         await matcher.handlers[0](_FakeGroupEvent("quote by 路人"))
 
-    assert matcher.sent == ["未找到「路人」发言的语录"]
+    assert matcher.sent
+    assert store.calls == [{"user_ids": [], "name_pattern": "路人"}]
 
 
 def test_quote_same_name_candidates_include_qq(monkeypatch):

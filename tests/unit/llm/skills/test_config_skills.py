@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 
 from quickquip.llm.config import SkillsConfig, load_llm_config
+from quickquip.llm.skills import MAX_SCRIPT_TIMEOUT_MS
 
 from tests.fixtures.configs import MIN_LLM_CONFIG_TOML
 
@@ -18,14 +19,6 @@ def test_skills_defaults_when_section_absent(tmp_path):
     config = _load(tmp_path)
     assert not config.load_error
     assert config.skills == SkillsConfig()
-    assert config.skills.enabled is True
-    assert config.skills.catalog_dir == ""
-    assert config.skills.catalog_max_bytes == 8192
-    assert config.skills.resource_max_bytes == 65536
-    assert config.skills.search_max_results == 50
-    assert config.skills.search_max_output_bytes == 32768
-    assert config.skills.script_timeout_ms == 30000
-    assert config.skills.script_max_output_bytes == 65536
 
 
 def test_skills_explicit_values_parsed(tmp_path):
@@ -67,10 +60,10 @@ script_max_output_bytes = true
 """,
         )
     skills = config.skills
-    assert skills.catalog_max_bytes == 8192
-    assert skills.resource_max_bytes == 65536
-    assert skills.search_max_results == 50
-    assert skills.script_max_output_bytes == 65536
+    assert skills.catalog_max_bytes == SkillsConfig().catalog_max_bytes
+    assert skills.resource_max_bytes == SkillsConfig().resource_max_bytes
+    assert skills.search_max_results == SkillsConfig().search_max_results
+    assert skills.script_max_output_bytes == SkillsConfig().script_max_output_bytes
     warnings = [record.getMessage() for record in caplog.records]
     assert any("catalog_max_bytes" in message for message in warnings)
     assert any("resource_max_bytes" in message for message in warnings)
@@ -87,8 +80,8 @@ def test_skills_timeout_clamped_to_max(tmp_path, caplog):
 script_timeout_ms = 999999
 """,
         )
-    assert config.skills.script_timeout_ms == 120000
-    assert any("钳制" in record.getMessage() for record in caplog.records)
+    assert config.skills.script_timeout_ms == MAX_SCRIPT_TIMEOUT_MS
+    assert any("script_timeout_ms" in record.getMessage() for record in caplog.records)
 
 
 def test_skills_missing_keys_keep_defaults(tmp_path):
@@ -100,5 +93,5 @@ enabled = false
 """,
     )
     assert config.skills.enabled is False
-    assert config.skills.catalog_max_bytes == 8192
-    assert config.skills.script_timeout_ms == 30000
+    assert config.skills.catalog_max_bytes == SkillsConfig().catalog_max_bytes
+    assert config.skills.script_timeout_ms == SkillsConfig().script_timeout_ms

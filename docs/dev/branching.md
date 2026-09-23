@@ -1,6 +1,6 @@
 # QuickQuip 开发工作流与发布流程
 
-本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，主题版本、累积更新与开发版本约定见 [`versioning.md`](versioning.md)。
+本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，测试纪律见 [`testing.md`](testing.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，主题版本、累积更新与开发版本约定见 [`versioning.md`](versioning.md)。
 
 ## 硬规则
 

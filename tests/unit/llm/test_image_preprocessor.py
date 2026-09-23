@@ -2,10 +2,11 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from quickquip.llm.image_preprocessor import (
-    DEFAULT_VISION_PROMPT,
     MAX_IMAGES_PER_PREPROCESSING_REQUEST,
     VisionImagePreprocessor,
 )
@@ -31,26 +32,6 @@ class _StubVisionProvider:
 # ── tests ─────────────────────────────────────────────────────────────
 
 
-def test_constructor_defaults():
-    v = VisionImagePreprocessor(
-        provider_client=_StubVisionProvider(),
-        model="gpt-4o",
-    )
-    assert v._model == "gpt-4o"
-    assert v._max_tokens == 300
-    assert v._temperature == 0.3
-    assert v._prompt == DEFAULT_VISION_PROMPT
-
-
-def test_constructor_custom_prompt():
-    v = VisionImagePreprocessor(
-        provider_client=_StubVisionProvider(),
-        model="gpt-4o",
-        prompt="自定义 prompt。",
-    )
-    assert v._prompt == "自定义 prompt。"
-
-
 @pytest.mark.asyncio
 async def test_describe_images_empty_returns_empty():
     v = VisionImagePreprocessor(provider_client=_StubVisionProvider(), model="gpt-4o")
@@ -61,9 +42,16 @@ async def test_describe_images_empty_returns_empty():
 @pytest.mark.asyncio
 async def test_describe_single_image():
     stub = _StubVisionProvider(replies=["一只橘猫坐在窗台上。"])
-    v = VisionImagePreprocessor(provider_client=stub, model="gpt-4o")
+    v = VisionImagePreprocessor(
+        provider_client=stub, model="gpt-4o", prompt="自定义 prompt。",
+        max_tokens=47, temperature=0.6,
+    )
     result = await v.describe_images(["https://example.test/cat.png"])
 
+    assert stub.requests[0].system_prompt == "自定义 prompt。"
+    assert stub.requests[0].model == "gpt-4o"
+    assert stub.requests[0].max_output_tokens == 47
+    assert stub.requests[0].temperature == 0.6
     assert len(result) == 1
     assert result[0].success is True
     assert result[0].source_url == "https://example.test/cat.png"
@@ -73,18 +61,26 @@ async def test_describe_single_image():
 
 @pytest.mark.asyncio
 async def test_describe_multiple_images_parallel():
-    stub = _StubVisionProvider(replies=["图1", "图2", "图3"])
-    v = VisionImagePreprocessor(provider_client=stub, model="gpt-4o", max_concurrency=3)
-    result = await v.describe_images([
-        "https://example.test/1.png",
-        "https://example.test/2.png",
-        "https://example.test/3.png",
-    ])
+    started = []
+    all_started = asyncio.Event()
 
-    assert len(result) == 3
+    class ConcurrentProvider:
+        async def complete(self, request):
+            url = request.messages[0].image_urls[0]
+            started.append(url)
+            if len(started) == 3:
+                all_started.set()
+            await all_started.wait()
+            return LLMResponse(text=url, model=request.model)
+
+    urls = [f"https://example.test/{i}.png" for i in range(3)]
+    v = VisionImagePreprocessor(
+        provider_client=ConcurrentProvider(), model="gpt-4o", max_concurrency=3,
+    )
+    result = await asyncio.wait_for(v.describe_images(urls), timeout=2)
     assert all(r.success for r in result)
-    assert [r.text_description for r in result] == ["图1", "图2", "图3"]
-    assert len(stub.requests) == 3
+    assert [r.text_description for r in result] == urls
+    assert [r.source_url for r in result] == urls
 
 
 @pytest.mark.asyncio

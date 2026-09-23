@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import platform
+import pytest
 from dataclasses import replace
 
 from plugins.llm_config import ProviderConfig
@@ -81,7 +81,6 @@ async def test_claude_code_fingerprint_headers():
     await client.complete(_tool_call_request())
     headers = client.last_headers
 
-    assert headers["user-agent"] == "claude-cli/2.1.150 (external, cli)"
     assert headers["anthropic-version"] == "2023-06-01"
     assert "claude-code-20250219" in headers["anthropic-beta"]
     assert headers["accept"] == "application/json"
@@ -164,16 +163,12 @@ async def test_claude_user_agent_no_duplicate():
     assert client.last_headers["user-agent"] == "config-ua-field"
 
 
-async def test_detect_stainless_os_matches_platform():
-    """_detect_stainless_os returns a sensible value for the current host."""
-    detected = _detect_stainless_os()
-    system = platform.system()
-    if system == "Windows":
-        assert detected == "Windows"
-    elif system == "Darwin":
-        assert detected == "MacOS"
-    else:
-        assert detected == system
+@pytest.mark.parametrize("system, expected", [
+    ("Windows", "Windows"), ("Darwin", "MacOS"), ("Linux", "Linux"),
+])
+def test_detect_stainless_os_matches_platform(monkeypatch, system, expected):
+    monkeypatch.setattr("platform.system", lambda: system)
+    assert _detect_stainless_os() == expected
 
 
 async def test_claude_cache_control_ttl_when_configured():

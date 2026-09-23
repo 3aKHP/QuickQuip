@@ -44,12 +44,8 @@ def test_format_accepts_name_resolver_override():
     t.record_message(9001, "u1", "张三")
     t.record_message(9001, "u1", "张三")
     out = t.format_stats(9001, name_resolver={"u1": "覆盖名"})
-    assert "覆盖名 — 2 条" in out
-
-
-def test_empty_stats_message():
-    t = GroupStatsTracker()
-    assert t.format_stats(9999) == "暂无统计数据"
+    assert "覆盖名" in out
+    assert "张三" not in out
 
 
 def test_reset():
@@ -57,7 +53,6 @@ def test_reset():
     t.record_message(9001, "u1")
     t.reset(9001)
     assert t.get_stats(9001) is None
-    assert t.format_stats(9001) == "暂无统计数据"
 
 
 def test_group_isolation():

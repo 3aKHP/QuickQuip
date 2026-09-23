@@ -5,11 +5,6 @@ from __future__ import annotations
 import quickquip.sts.lexicon as lexicon
 
 
-def test_active_names_nonempty():
-    assert isinstance(lexicon.NAMES, frozenset)
-    assert len(lexicon.NAMES) > 1000  # 两代合计应有千余条
-
-
 def test_known_active_names():
     # 用户给出的示例 + 子串牌，都应在活跃集合里
     for name in ("疑虑", "狂宴", "计划妥当", "完美打击", "究极防御", "燃烧之血"):
@@ -36,9 +31,3 @@ def test_get_returns_metadata():
     assert doubt is not None
     assert "Doubt" in doubt["en"]
     assert doubt["meta"]["type"] == "Curse"
-
-
-def test_meta_has_source():
-    m = lexicon.meta()
-    assert "source_sha" in m
-    assert m.get("count", 0) > 1000

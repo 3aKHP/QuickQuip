@@ -51,13 +51,6 @@ def test_image_urls_strips_empty_and_whitespace():
     assert recent[0]["image_urls"] == ["http://x/1.png"]
 
 
-def test_image_urls_default_empty():
-    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
-    buf.add_message(1, "u", "a", "A", "msg", now_ts=0)
-    recent = buf.list_recent(1, now_ts=1)
-    assert recent[0]["image_urls"] == []
-
-
 def test_image_urls_returns_copy():
     buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
     buf.add_message(1, "u", "a", "A", "msg", image_urls=["http://x/1.png"], now_ts=0)

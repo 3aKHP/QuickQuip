@@ -51,12 +51,6 @@ def test_raw_bare_form_extracts_target():
     assert _extract_at_target("/击剑[CQ:at,qq=123456789]", ()) == "123456789"
 
 
-def test_self_at_survives_stripped_segments():
-    """self-@ 场景：段被 to_me 剥空，raw_message 回退保住 bot 目标。"""
-    raw = "/击剑[CQ:at,qq=1000000000,name=Bot] "
-    assert _extract_at_target(raw, []) == "1000000000"
-
-
 def test_segments_take_precedence_over_raw():
     """@bot 前导唤起 + @他人指定目标：段里剩他人（self-@ 已被剥），
     raw 的首个 at 是 bot 自己——必须取段的他人。"""

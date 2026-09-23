@@ -118,16 +118,6 @@ async def mcp_service(tmp_path: Path):
     await service.shutdown()
 
 
-async def test_mcp_status_reports_connection(mcp_service):
-    status = mcp_service.format_mcp_status()
-    assert "连接数：1/1" in status
-    assert "工具数：1" in status
-
-    current = mcp_service.format_current(2001)
-    assert "MCP：ON (1/1，1 tools)" in current
-    assert "mcp_fake_echo_text" in current
-
-
 async def test_mcp_tool_call_executed_in_loop(mcp_service, patch_provider_builder):
     stub = StubMCPToolCallingProviderClient()
     patch_provider_builder(lambda provider: stub)

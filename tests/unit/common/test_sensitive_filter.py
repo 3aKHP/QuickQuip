@@ -5,7 +5,6 @@ from pathlib import Path
 from quickquip.common.sensitive_filter import (
     SCRUB_PLACEHOLDER,
     SensitiveFilter,
-    _normalize,
     _word_hash,
 )
 
@@ -190,12 +189,6 @@ words = ["overlap"]
     result = sf.scan("text with overlap inside")
     assert result.blocked
     assert sf.stats["total"] == 1  # dedup honored
-
-
-def test_normalize_helper():
-    assert _normalize("Hello​World") == "helloworld"
-    assert _normalize("a b\tc") == "abc"
-    assert _normalize("") == ""
 
 
 def test_word_hash_is_deterministic():

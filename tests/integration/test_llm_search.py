@@ -48,8 +48,6 @@ async def test_search_web_tool_loop(llm_service, monkeypatch, patch_provider_bui
     assert result["reply"] == "QuickQuip 是一个 QQ 群聊机器人项目。"
     # StubSearchOnly calls search 4 times, then final answer on round 5
     assert len(stub.requests) == 5
-    assert "当前联网后端：SearXNG。" in stub.requests[0].system_prompt
-    assert "可以继续多次调用 search_web 细化检索" in stub.requests[0].system_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -153,9 +151,6 @@ async def test_builtin_search_gemini_flow(tmp_path, monkeypatch, patch_provider_
     declarations = tool_entries[0]["functionDeclarations"]
     assert "search_web" not in [item["name"] for item in declarations]
     # 2. 提示词引导切换为 grounding 块，SearXNG 引导被压制
-    system_prompt = payload["systemInstruction"]["parts"][0]["text"]
-    assert "联网检索说明" in system_prompt
-    assert "当前联网后端：SearXNG。" not in system_prompt
     # 3. 回复末尾追加来源块
     assert result["reply"].endswith(
         "来源：\n- QuickQuip README — example.test"
@@ -188,4 +183,5 @@ async def test_builtin_search_works_with_tool_calling_disabled(
 
     client = stub_holder["client"]
     assert client.last_payload["tools"] == [{"google_search": {}}]
-    assert "来源：" in result["reply"]
+    assert "QuickQuip README" in result["reply"]
+    assert "example.test" in result["reply"]

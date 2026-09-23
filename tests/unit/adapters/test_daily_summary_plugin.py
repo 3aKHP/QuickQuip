@@ -100,37 +100,6 @@ async def test_send_daily_summary_now_reuses_manual_generation(monkeypatch):
     assert calls[0][3] == "2026年05月03日 06:00 至 05月04日 06:00"
 
 
-@pytest.mark.asyncio
-async def test_send_daily_summary_now_reports_not_enough_messages(monkeypatch):
-    class _EnabledGroups:
-        @staticmethod
-        def contains(group_id):
-            return group_id == "123456"
-
-    monkeypatch.setattr(daily_summary_plugin, "datetime", _FixedDateTime)
-    monkeypatch.setattr(daily_summary_plugin, "daily_enabled_groups", _EnabledGroups())
-    monkeypatch.setattr(
-        daily_summary_plugin.chat_archive, "read_window", lambda *args, **kwargs: ["m1"]
-    )
-    monkeypatch.setattr(
-        daily_summary_plugin,
-        "get_llm_service",
-        lambda: types.SimpleNamespace(
-            config=types.SimpleNamespace(
-                daily_summary=types.SimpleNamespace(min_messages=2)
-            )
-        ),
-    )
-    monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda group_id: False)
-    monkeypatch.setattr(daily_summary_plugin, "_mark_triggered", lambda group_id: None)
-
-    with pytest.raises(
-        daily_summary_plugin.DailySummaryInsufficientMessagesError,
-        match="not enough messages: 1/2",
-    ):
-        await daily_summary_plugin.send_daily_summary_now("123456", types.SimpleNamespace())
-
-
 # ── characterization: v1.12.1 生成编排契约钉住（P11 下沉后编排归 chat.summary_jobs） ──
 
 
@@ -544,15 +513,14 @@ async def test_send_daily_summary_now_window_starts_yesterday_0600(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_send_daily_summary_now_raises_typed_not_enabled_and_cooldown(monkeypatch):
-    """钉住类型化异常契约（P3 改造后）：未开启 / 冷却分别抛对应类型，str 文本保持兼容。"""
+    """未开启与冷却分别抛出对应类型的异常。"""
     monkeypatch.setattr(
         daily_summary_plugin,
         "daily_enabled_groups",
         types.SimpleNamespace(contains=lambda gid: False),
     )
-    with pytest.raises(daily_summary_plugin.DailySummaryNotEnabledError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryNotEnabledError):
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
-    assert str(exc_info.value) == "daily summary is not enabled for this group"
 
     monkeypatch.setattr(
         daily_summary_plugin,
@@ -560,9 +528,8 @@ async def test_send_daily_summary_now_raises_typed_not_enabled_and_cooldown(monk
         types.SimpleNamespace(contains=lambda gid: True),
     )
     monkeypatch.setattr(daily_summary_plugin, "_on_cooldown", lambda gid: True)
-    with pytest.raises(daily_summary_plugin.DailySummaryCooldownError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryCooldownError):
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
-    assert str(exc_info.value) == "summary generation is on cooldown"
 
 
 @pytest.mark.asyncio
@@ -592,7 +559,6 @@ async def test_send_daily_summary_now_insufficient_messages_carries_counts(monke
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
     assert exc_info.value.current == 3
     assert exc_info.value.minimum == 10
-    assert str(exc_info.value) == "not enough messages: 3/10"
 
 
 @pytest.mark.asyncio
@@ -623,9 +589,8 @@ async def test_send_daily_summary_now_raises_when_generation_returns_none(monkey
 
     monkeypatch.setattr(summary_jobs, "run_summary_generation", fake_run)
 
-    with pytest.raises(daily_summary_plugin.DailySummaryGenerationFailedError) as exc_info:
+    with pytest.raises(daily_summary_plugin.DailySummaryGenerationFailedError):
         await daily_summary_plugin.send_daily_summary_now("10001", types.SimpleNamespace())
-    assert str(exc_info.value) == "summary generation skipped or failed"
 
 
 @pytest.mark.asyncio

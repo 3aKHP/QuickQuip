@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import threading
 from typing import AsyncIterator
 from unittest.mock import MagicMock
 
@@ -431,16 +432,20 @@ async def test_stream_cancelled_during_post_stream_trace_finishes_pending_trace(
 ):
     """流结束后线程池窗口内的取消也必须关闭 trace（不得永久停在 pending）。
 
-    慢速 _parse_sse_and_measure 让取消大概率落在解析线程窗口；即使落在
-    流内，断言的契约（取消即关闭）同样成立，测试不因时序漂移而脆断。
+    事件同步确认解析线程已进入等待区，再取消外层请求并释放线程。
     """
     import quickquip.llm.provider.base as provider_base
 
     store = trace.LLMTraceStore(tmp_path / "trace.db")
     monkeypatch.setattr(trace, "trace_store", store)
 
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
     def slow_measure(raw):
-        time.sleep(1.0)
+        loop.call_soon_threadsafe(entered.set)
+        release.wait(timeout=5)
         return [], len(raw.encode("utf-8"))
 
     monkeypatch.setattr(provider_base, "_parse_sse_and_measure", slow_measure)
@@ -451,10 +456,13 @@ async def test_stream_cancelled_during_post_stream_trace_finishes_pending_trace(
 
     with trace.collect_trace_calls(force=True) as call_ids:
         task = asyncio.create_task(client._post_stream_sse("http://x", {}, {}))
-        await asyncio.sleep(0.2)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
 
     detail = store.get_call(call_ids[0])
     assert detail is not None

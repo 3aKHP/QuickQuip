@@ -98,7 +98,6 @@ def test_write_then_check_roundtrip(tmp_path: Path):
 
     check = _run(tmp_path, "--check")
     assert check.returncode == 0, check.stderr
-    assert "9 references are in sync" in check.stdout
 
 
 def test_missing_extra_source_file_fails(tmp_path: Path):

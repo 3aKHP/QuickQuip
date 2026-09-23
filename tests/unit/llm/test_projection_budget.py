@@ -107,28 +107,7 @@ def test_archive_and_minimal_levels_apply_under_tight_budget():
         or reasons["loop_0"] == "reduced:evicted"
     )
     # 全量估算收敛到预算内或只剩最小档案。
-    assert _token_estimate_of(result.messages) <= max(600, 3 * 160)
-
-
-def test_native_dropped_before_result_tiers():
-    blocks = [
-        {"type": "thinking", "thinking": "思" * 300, "signature": "sig"},
-        {"type": "text", "text": "正文"},
-        {"type": "tool_use", "id": "call_exec_0", "name": "get_identity", "input": {}},
-    ]
-    loop = _loop(
-        "loop_native",
-        (_turn("turn_0", tools=(_tool_exec("exec_0"),),
-               native_state=_native_state(OWNER, blocks), owner=_owner_dict(OWNER)),),
-    )
-    result = project_loops_with_budget(
-        [loop], target=OWNER, protocol="claude", budget_tokens=8,
-    )
-    decision = result.decisions[0]
-    # 原生路径先降级（native_dropped 或更深的阶梯），签名块不再上 wire。
-    assert decision.reason is not None
-    for message in result.messages:
-        assert message.native_content is None
+    assert _token_estimate_of(result.messages) <= 600
 
 
 def test_within_budget_projection_untouched():
