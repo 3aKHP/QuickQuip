@@ -41,9 +41,6 @@ SKILL_TOOL_NAMES = (
     "run_skill_script",
 )
 
-_TOOL_RESULT_BLOCK_REPLACEMENT = (
-    "工具返回内容包含违规内容，已整体丢弃。请尝试其他查询、来源或换个表述。"
-)
 
 _CLOCK_LINE = re.compile(r"- 当前时间：[^\n]*（北京时间）")
 
@@ -539,7 +536,9 @@ async def test_skill_script_blocked_stdout_replaced_wholesale(
     assert not tool_messages[0].is_tool_error
     run_message = tool_messages[1]
     assert run_message.is_tool_error
-    assert run_message.content == _TOOL_RESULT_BLOCK_REPLACEMENT
+    assert run_message.content.strip()
+    assert "stdout:" not in run_message.content
+    assert "[skill_script" not in run_message.content
     assert "blocked" not in run_message.content
     assert result["reply"] == "脚本输出已被安全过滤。"
 

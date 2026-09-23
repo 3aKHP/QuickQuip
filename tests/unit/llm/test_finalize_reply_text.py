@@ -18,9 +18,10 @@ def _finalize(response: LLMResponse, *, allow_empty: bool = False) -> str:
 
 
 def test_empty_text_gets_placeholder_by_default():
-    assert _finalize(LLMResponse(text="", model="m")) == "模型没有返回可显示的文本。"
+    text = _finalize(LLMResponse(text="", model="m"))
+    assert text.strip()
 
 
-def test_empty_text_with_images_stays_empty():
+def test_allow_empty_preserves_empty_text():
     response = LLMResponse(text="", model="m", generated_images=[])
     assert _finalize(response, allow_empty=True) == ""

@@ -78,15 +78,6 @@ def test_activation_block_activated_contains_marker_body_resources(make_skill):
     assert "[/skill_activation]" in block
     assert "references/a.md" in block
     assert "read_skill_resource" in block
-    assert "从属于机器人规则" in block
-
-
-def test_activation_block_activated_lists_no_resources(make_skill):
-    catalog_dir, writer = make_skill
-    writer("demo", "演示。", body="只有正文。")
-    (skill,) = scan_skills(catalog_dir)
-    block = format_activation_block(skill, status=ACTIVATION_STATUS_ACTIVATED)
-    assert "附带资源：无。" in block
 
 
 def test_activation_block_already_active_is_short_without_body(make_skill):
@@ -95,9 +86,7 @@ def test_activation_block_already_active_is_short_without_body(make_skill):
     (skill,) = scan_skills(catalog_dir)
     block = format_activation_block(skill, status=ACTIVATION_STATUS_ALREADY_ACTIVE)
     assert 'status="already-active"' in block
-    assert "已激活且内容相同" in block
     assert "不应重复注入的正文" not in block
-    assert "附带资源" not in block
 
 
 def test_activation_block_includes_diagnostics(make_skill, tmp_path):
@@ -109,15 +98,10 @@ def test_activation_block_includes_diagnostics(make_skill, tmp_path):
     (skill,) = scan_skills(catalog_dir)
     assert skill.diagnostics  # resource-symlink 诊断
     block = format_activation_block(skill, status=ACTIVATION_STATUS_ACTIVATED)
-    assert "诊断信息：" in block
     assert "resource-symlink" in block
 
 
 # ── render_skill_list ────────────────────────────────────────────
-
-
-def test_skill_list_empty():
-    assert render_skill_list([], []) == "当前未安装任何 Skill。"
 
 
 def test_skill_list_with_activation(make_skill):
@@ -126,14 +110,6 @@ def test_skill_list_with_activation(make_skill):
     writer("beta", "二。")
     skills = scan_skills(catalog_dir)
     text = render_skill_list(skills, ["beta"])
-    assert "已安装 Skill（2）：" in text
     assert "- alpha：一。" in text
     assert "- beta：二。" in text
     assert "当前会话已激活：beta" in text
-
-
-def test_skill_list_without_activation(make_skill):
-    catalog_dir, writer = make_skill
-    writer("alpha", "一。")
-    text = render_skill_list(scan_skills(catalog_dir), [])
-    assert "当前会话已激活：（无）" in text

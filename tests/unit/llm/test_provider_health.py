@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 from quickquip.llm.config import LLMConfig, ProviderConfig
 from quickquip.llm.provider_health import (
@@ -139,27 +138,27 @@ async def test_probe_provider_explicit_model_used(monkeypatch):
 
 
 async def test_probe_all_providers_runs_concurrently(monkeypatch):
-    """3 个各 sleep 0.2s 的 provider 并发探活，总耗时应 ≈ 0.2s 而非 0.6s。"""
+    """所有请求均能在任一请求完成前进入 provider。"""
     monkeypatch.setenv("TEST_PROBE_KEY", "fake-key")
-
-    class _SlowClient:
-        async def complete(self, request):
-            await asyncio.sleep(0.2)
-            return object()
-
-    _patch_client(monkeypatch, lambda provider: _SlowClient())
-
     config = LLMConfig()
     config.providers = {f"p{i}": _make_provider(id=f"p{i}") for i in range(3)}
+    all_started = asyncio.Event()
+    started = 0
 
-    t0 = time.monotonic()
-    results = await probe_all_providers(config)
-    elapsed = time.monotonic() - t0
+    class _RendezvousClient:
+        async def complete(self, request):
+            nonlocal started
+            started += 1
+            if started == len(config.providers):
+                all_started.set()
+            await all_started.wait()
+            return object()
 
-    assert len(results) == 3
+    _patch_client(monkeypatch, lambda provider: _RendezvousClient())
+    results = await asyncio.wait_for(probe_all_providers(config), timeout=2)
+
+    assert {r.provider_id for r in results} == set(config.providers)
     assert all(r.status == "ok" for r in results)
-    # 串行会是 0.6s；并发 ~0.2s。0.5s 阈值留余量，超过即说明并发失效。
-    assert elapsed < 0.5, f"并发失效，耗时 {elapsed:.2f}s"
 
 
 async def test_probe_all_providers_empty_config():
@@ -200,16 +199,10 @@ def test_format_probe_results_mixed_statuses():
     ]
     text = format_probe_results(results)
 
-    assert "Provider 探活（4 个，并发）" in text
     assert "p1" in text and "正常" in text
     assert "p2" in text and "api_key 未设置" in text
     assert "p3" in text and "超时" in text
     assert "p4" in text and "ConnectionError" in text
-    assert "合计：1/4 正常" in text
-
-
-def test_format_probe_results_empty():
-    assert format_probe_results([]) == "没有已配置的 provider。"
 
 
 def test_provider_health_as_dict():

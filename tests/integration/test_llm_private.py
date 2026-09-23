@@ -33,6 +33,7 @@ def test_private_status_reflects_session_off(configured_service):
 
 
 def test_private_memory_isolated_from_group(configured_service):
+    configured_service.remember_memory(3003, "同编号群的独立记忆")
     mid = configured_service.remember_memory(
         3003, "阿桃在私聊里更愿意长篇回复。", chat_type="private"
     )
@@ -46,6 +47,9 @@ def test_private_memory_isolated_from_group(configured_service):
     )
     assert matched
     assert matched[0]["content"] == "阿桃在私聊里更愿意长篇回复。"
+
+    assert configured_service.list_memories(3003)[0]["content"] == "同编号群的独立记忆"
+    assert [row["content"] for row in private_memories] == ["阿桃在私聊里更愿意长篇回复。"]
 
 
 async def test_generate_private_reply_uses_private_system_prompt(

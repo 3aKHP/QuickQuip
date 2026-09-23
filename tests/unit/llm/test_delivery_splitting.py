@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from quickquip.llm.delivery import SplitParams, plan_text_chunks, split_text_into_chunks
+from quickquip.llm.delivery import (
+    SplitLimitError, SplitParams, plan_text_chunks, split_text_into_chunks,
+)
 
 P = SplitParams(threshold=20, chunk_max=40)
 
@@ -47,15 +49,17 @@ def test_no_natural_boundary_hard_cuts():
 
 
 def test_consecutive_newlines_stay_with_preceding_chunk():
-    text = "段一\n\n\n\n段二"
+    text = "段一" * 10 + "\n\n\n\n" + "段二" * 10
     chunks = split_text_into_chunks(text, P)
     assert _identity(text, chunks)
     first = text[chunks[0].start : chunks[0].end]
     assert first.startswith("段一")
-    assert "\n" in first  # 分隔换行归前段
+    assert len(chunks) == 2
+    assert first.endswith("\n\n\n\n")
+    assert not text[chunks[1].start:].startswith("\n")
 
 
-def test_emoji_and_combining_characters_safe():
+def test_unicode_source_is_preserved():
     text = "👨‍👩‍👧‍👦家庭" * 30  # 组合 emoji（ZWJ 序列）
     chunks = split_text_into_chunks(text, P)
     assert _identity(text, chunks)
@@ -63,8 +67,8 @@ def test_emoji_and_combining_characters_safe():
 
 def test_oversized_single_grapheme_rejected():
     # 单个超长 grapheme 无法在 max 内切分时明确失败（§6.1.5）。
-    with pytest.raises(Exception):
-        split_text_into_chunks("🧬" * 0 + "́" * 100, SplitParams(threshold=1, chunk_max=1))
+    with pytest.raises(SplitLimitError):
+        split_text_into_chunks("́" * 100, SplitParams(threshold=1, chunk_max=1))
 
 
 def test_code_fence_kept_whole_within_max():
@@ -73,7 +77,7 @@ def test_code_fence_kept_whole_within_max():
     chunks = split_text_into_chunks(text, P)
     assert _identity(text, chunks)
     body = text[chunks[0].start : chunks[0].end]
-    assert body.startswith("```")
+    assert fence in body
 
 
 def test_plan_respects_delivery_limit():
@@ -81,11 +85,8 @@ def test_plan_respects_delivery_limit():
     chunks, reason = plan_text_chunks(
         text, P, reserved_delivery_slots=0, max_chunks=3,
     )
-    if reason == "delivery_limit":
-        assert chunks == []  # 不静默截尾（§6.1 尾段）
-    else:
-        assert len(chunks) <= 3
-        assert _identity(text, chunks)
+    assert reason == "delivery_limit"
+    assert chunks == []
 
 
 # ── 分段不变性（§11.2）：两套阈值下 normalized history 相同 ─────────
@@ -102,7 +103,7 @@ def test_split_invariance_normalized_history_identical():
         # 源文本不因拆分改变：两种参数的拼回结果都恒等于原文。
         assert "".join(text[c.start : c.end] for c in chunks_a) == text
         assert "".join(text[c.start : c.end] for c in chunks_b) == text
-    # 计数口径：默认 1 段 vs 测试参数 7 段（五 Turn 合计）。
+    # 两组参数产生不同分段，均须还原完整源文本。
     total_default = sum(len(split_text_into_chunks(t, params_a)) for t in FIVE_TURN_TEXTS)
     total_test = sum(len(split_text_into_chunks(t, params_b)) for t in FIVE_TURN_TEXTS)
-    assert (total_default, total_test) == (5, 7)
+    assert total_test > total_default

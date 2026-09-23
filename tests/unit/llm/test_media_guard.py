@@ -219,7 +219,9 @@ def test_budget_overflow_resizes_when_quality_alone_insufficient():
     assert kept[0].media_type == "image/jpeg"
     assert len(kept[0].data) <= 200_000
     with Image.open(BytesIO(kept[0].data)) as img:
-        assert img.size == (768, 512)
+        assert 0 < img.width < 1200
+        assert 0 < img.height < 800
+        assert img.width * 800 == img.height * 1200
 
 
 def test_budget_overflow_incompressible_drops_prefix():

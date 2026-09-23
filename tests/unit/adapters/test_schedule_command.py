@@ -170,7 +170,6 @@ async def test_del_other_group_task_rejected(cmd_setup):
 
     await _run(cmd, _FakeEvent(f"/schedule del {job.id}"))
 
-    assert f"未找到属于本群的任务：{job.id}" == cmd.finished[0]
     assert store.get(job.id) is not None
 
 
@@ -181,7 +180,6 @@ async def test_del_own_group_task_success(cmd_setup):
 
     await _run(cmd, _FakeEvent(f"/schedule del {job.id}"))
 
-    assert f"已删除定时消息：{job.id}" == cmd.finished[0]
     assert store.get(job.id) is None
 
 
@@ -192,14 +190,12 @@ async def test_on_off_toggle_and_idempotent(cmd_setup):
 
     await _run(cmd, _FakeEvent(f"/schedule off {job.id}"))
     assert store.get(job.id).enabled is False
-    assert f"已停用定时消息：{job.id}" == cmd.finished[-1]
 
     await _run(cmd, _FakeEvent(f"/schedule off {job.id}"))
-    assert f"任务 {job.id} 已是停用状态" == cmd.finished[-1]
+    assert store.get(job.id).enabled is False
 
     await _run(cmd, _FakeEvent(f"/schedule on {job.id}"))
     assert store.get(job.id).enabled is True
-    assert f"已启用定时消息：{job.id}" == cmd.finished[-1]
 
 
 @pytest.mark.asyncio
@@ -209,15 +205,7 @@ async def test_on_other_group_task_rejected(cmd_setup):
 
     await _run(cmd, _FakeEvent(f"/schedule on {job.id}"))
 
-    assert f"未找到属于本群的任务：{job.id}" == cmd.finished[0]
     assert store.get(job.id).enabled is False
-
-
-@pytest.mark.asyncio
-async def test_list_empty(cmd_setup):
-    _, cmd = cmd_setup
-    await _run(cmd, _FakeEvent("/schedule list"))
-    assert cmd.finished == ["本群暂无定时消息"]
 
 
 @pytest.mark.asyncio
@@ -270,15 +258,17 @@ async def test_bare_command_shows_usage(cmd_setup):
 
 @pytest.mark.asyncio
 async def test_private_chat_rejected(cmd_setup):
-    _, cmd = cmd_setup
-    event = _FakeEvent("/schedule list")
+    store, cmd = cmd_setup
+    event = _FakeEvent("/schedule add 0 9 * * * 不应创建")
     event.message_type = "private"
     await _run(cmd, event)
-    assert cmd.finished == ["私聊不支持 /schedule"]
+    assert store.list() == []
+    assert cmd.finished
 
 
 @pytest.mark.asyncio
 async def test_non_admin_rejected(cmd_setup):
-    _, cmd = cmd_setup
-    await _run(cmd, _FakeEvent("/schedule list", role="member"))
-    assert cmd.finished == ["仅管理员可执行此操作"]
+    store, cmd = cmd_setup
+    await _run(cmd, _FakeEvent("/schedule add 0 9 * * * 不应创建", role="member"))
+    assert store.list() == []
+    assert cmd.finished

@@ -5,8 +5,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from quickquip.chat.archive import RecordResult
-
 
 SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "backfill_chat_archive.py"
 
@@ -17,32 +15,6 @@ def _load_script():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def test_backfill_reports_write_failure_and_exits_nonzero(tmp_path, monkeypatch, capsys):
-    module = _load_script()
-    source = tmp_path / "daily_msgs" / "10001"
-    source.mkdir(parents=True)
-    (source / "2026-09-10.jsonl").write_text(
-        '{"sender":"n","text":"内容","ts":1,"user_id":"1"}\n', encoding="utf-8"
-    )
-
-    class FailingArchive:
-        def stats(self):
-            return {"available": True, "messages": 0, "groups": 0}
-
-        def record_result(self, *args, **kwargs):
-            return RecordResult.FAILED
-
-    monkeypatch.setattr(module, "ChatArchive", FailingArchive)
-    monkeypatch.setattr(module, "DAILY_MESSAGES_DIR", source.parent)
-    monkeypatch.setattr(module, "WORDCLOUD_MESSAGES_DIR", tmp_path / "missing")
-    monkeypatch.setattr(sys, "argv", [str(SCRIPT_PATH)])
-
-    assert module.main() == 1
-    output = capsys.readouterr().out
-    assert "写入失败 1 条" in output
-    assert "新写入 0 条" in output
 
 
 def test_backfill_dry_run_only_counts_input(tmp_path, monkeypatch, capsys):

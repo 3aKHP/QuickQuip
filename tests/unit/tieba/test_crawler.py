@@ -1,9 +1,4 @@
-"""Tieba crawler tests.
-
-Pure-Python helpers (is_challenge_page, extract_urls_from_content) run in the
-default suite. Browser-driving tests are marked @pytest.mark.playwright and
-skipped unless invoked explicitly (pytest -m playwright).
-"""
+"""贴吧内容提取、浏览器锁与登录态注入测试。"""
 from __future__ import annotations
 
 import json
@@ -86,15 +81,6 @@ class TestExtractUrlsFromContent:
         items = [{"type": 3, "origin_src": "data:image/png;base64,AAA"}]
         _, images = crawler.extract_urls_from_content(items)
         assert images == []
-
-
-@pytest.mark.playwright
-async def test_collect_threads_against_live_tieba(crawler: TiebaCrawler):
-    """Requires Playwright browsers installed and network access. Placeholder.
-
-    Invoke explicitly with: pytest -m playwright tests/unit/tieba/test_crawler.py
-    """
-    pytest.skip("live browser smoke test — implement against a staged fixture when needed")
 
 
 async def test_collect_threads_fails_when_profile_locked(

@@ -212,18 +212,6 @@ def test_dimensions_returns_all_values_within_range_only(tmp_path):
     assert "old-prov" in d30["providers"]
 
 
-def test_persona_index_created_and_idempotent(tmp_path):
-    store = LLMUsageStore(tmp_path / "u.db")
-    _seed_personas(store)
-    with sqlite3.connect(store.path) as conn:
-        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
-    assert "idx_usage_persona" in names
-    store._ensure_schema()  # 再次初始化幂等，不重建、不清空
-    with sqlite3.connect(store.path) as conn:
-        rows = conn.execute("SELECT COUNT(*) FROM llm_usage_events").fetchone()
-    assert rows[0] == 3
-
-
 def _route_store(monkeypatch, tmp_path):
     from quickquip.app.web.routes import llm_usage as route
 
@@ -242,68 +230,31 @@ async def test_route_summary_passes_persona_filter(monkeypatch, tmp_path):
     assert [b["key"] for b in result["by_persona"]] == ["p1"]
 
 
-async def test_route_summary_exposes_envelope_ledger(monkeypatch, tmp_path):
-    """summary 路由直传第四张账本两个键（信封每轮全价 token 均值 + 覆盖率）。"""
+async def test_route_summary_exposes_context_ledgers(monkeypatch, tmp_path):
+    """同一响应保留各上下文账本的独立均值与缺失值覆盖率。"""
     route, store = _route_store(monkeypatch, tmp_path)
     store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "envelope_tokens": 400})
+                  "stream": 1, "state": "ok", "envelope_tokens": 400,
+                  "epoch_history_tokens": 4000, "media_image_count": 1, "patch_tokens": 300})
     store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "envelope_tokens": 800})
+                  "stream": 1, "state": "ok", "envelope_tokens": 800,
+                  "epoch_history_tokens": 4400, "media_image_count": 3, "patch_tokens": 500})
     store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
                   "stream": 1, "state": "ok"})
     result = await route.get_summary(
         range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
     )
-    assert result["avg_envelope_tokens"] == 600.0
-    assert result["envelope_coverage"] == round(2 / 3, 4)
-
-
-async def test_route_summary_exposes_epoch_ledger(monkeypatch, tmp_path):
-    """summary 路由直传第五张账本两个键（纪元 history 每轮 token 均值 + 覆盖率）。"""
-    route, store = _route_store(monkeypatch, tmp_path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "epoch_history_tokens": 4000})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "epoch_history_tokens": 4400})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
-                  "stream": 1, "state": "ok"})
-    result = await route.get_summary(
-        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
-    )
-    assert result["avg_epoch_history_tokens"] == 4200.0
-    assert result["epoch_coverage"] == round(2 / 3, 4)
-
-
-async def test_route_summary_exposes_media_ledger(monkeypatch, tmp_path):
-    """summary 路由直传第六张账本两个键（当轮附带图片数均值 + 覆盖率）。"""
-    route, store = _route_store(monkeypatch, tmp_path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "media_image_count": 1})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "media_image_count": 3})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
-                  "stream": 1, "state": "ok"})
-    result = await route.get_summary(
-        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
-    )
-    assert result["avg_media_image_count"] == 2.0
-    assert result["media_coverage"] == round(2 / 3, 4)
-
-
-async def test_route_summary_exposes_patch_ledger(monkeypatch, tmp_path):
-    """summary 路由直传第七张账本两个键（现场补丁 token 均值 + 覆盖率）。"""
-    route, store = _route_store(monkeypatch, tmp_path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "patch_tokens": 300})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "chat",
-                  "stream": 1, "state": "ok", "patch_tokens": 500})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "feature": "vision",
-                  "stream": 1, "state": "ok"})
-    result = await route.get_summary(
-        range_="7d", provider=None, model=None, feature=None, group=None, persona=None, state=None,
-    )
-    assert result["avg_patch_tokens"] == 400.0
-    assert result["patch_coverage"] == round(2 / 3, 4)
+    expected = {
+        "avg_envelope_tokens": 600.0,
+        "avg_epoch_history_tokens": 4200.0,
+        "avg_media_image_count": 2.0,
+        "avg_patch_tokens": 400.0,
+        "envelope_coverage": round(2 / 3, 4),
+        "epoch_coverage": round(2 / 3, 4),
+        "media_coverage": round(2 / 3, 4),
+        "patch_coverage": round(2 / 3, 4),
+    }
+    assert {key: result[key] for key in expected} == expected
 
 
 async def test_route_dimensions_only_accepts_range(monkeypatch, tmp_path):

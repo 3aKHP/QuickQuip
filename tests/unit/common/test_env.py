@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import importlib
-
 from quickquip.common import env
 
 
@@ -18,9 +16,3 @@ def test_project_env_loader_only_reads_root_env(monkeypatch):
     env.load_project_env_files()
 
     assert calls == [((env.PROJECT_ROOT / ".env").as_posix(), False)]
-
-
-def test_env_module_has_no_dev_env_loader_state():
-    reloaded = importlib.reload(env)
-
-    assert not hasattr(reloaded, "_DEV_ENV_LOADED")

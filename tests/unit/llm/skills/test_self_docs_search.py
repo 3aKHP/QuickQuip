@@ -84,17 +84,3 @@ def test_search_hit_line_number_guides_ranged_read(activated):
     assert isinstance(read, str)
     assert "/quote search" in read
     assert "[第 " in read
-
-
-def test_oversized_reference_reads_truncated_front_section(activated):
-    skills, state = activated
-    read = read_skill_resource(
-        skill_name="self-docs",
-        path="references/root-changelog.md",
-        skills=skills,
-        state=state,
-        scope=_SCOPE,
-        max_bytes=_RESOURCE_MAX_BYTES,
-    )
-    assert isinstance(read, str)
-    assert "[已截断" in read

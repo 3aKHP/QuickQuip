@@ -8,7 +8,7 @@ Two ASGI-callable servers:
 
 - :class:`ModernMCPServer` — modern (2026-07-28 ``server/discover``) MCP.
   Records requests, validates ``_meta`` / routing headers, and supports
-  request-scoped SSE streaming.
+  request-scoped JSON responses.
 
 These are intentionally minimal for Wave 0; later waves extend them with
 stale-session 404, version mismatch, auth failures, ``input_required``
@@ -16,7 +16,6 @@ downgrade, and other edge cases.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any, Literal
 
@@ -401,53 +400,3 @@ class ModernMCPServer:
             "id": request_id,
             "error": {"code": -32601, "message": "Method not found"},
         }, extra_headers=[(b"mcp-protocol-version", self.PROTOCOL_VERSION.encode())])
-
-
-class StreamingModernMCPServer:
-    """Modern MCP server that streams SSE events with configurable delays.
-
-    Used by the Wave 0 spike to prove request-scoped streaming cancellation
-    and timeout behavior.  Sends the first SSE event immediately, then waits
-    ``delay_seconds`` before sending the second event.
-    """
-
-    PROTOCOL_VERSION = "2026-07-28"
-
-    def __init__(self, *, delay_seconds: float = 30.0) -> None:
-        self._delay = delay_seconds
-        self.first_event_sent = asyncio.Event()
-        self.second_event_attempted = False
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope["type"] != "http":
-            return
-
-        body = await _read_body(receive)
-        payload: dict[str, Any] = json.loads(body) if body else {}
-        request_id = payload.get("id")
-
-        headers = [
-            (b"content-type", b"text/event-stream"),
-            (b"mcp-protocol-version", self.PROTOCOL_VERSION.encode()),
-        ]
-        await send({"type": "http.response.start", "status": 200, "headers": headers})
-
-        first = json.dumps({"jsonrpc": "2.0", "id": request_id, "result": {"step": 1}})
-        await send({
-            "type": "http.response.body",
-            "body": f"data: {first}\n\n".encode(),
-            "more_body": True,
-        })
-        self.first_event_sent.set()
-
-        try:
-            await asyncio.sleep(self._delay)
-        except asyncio.CancelledError:
-            raise
-
-        self.second_event_attempted = True
-        second = json.dumps({"jsonrpc": "2.0", "id": request_id, "result": {"step": 2}})
-        await send({
-            "type": "http.response.body",
-            "body": f"data: {second}\n\n".encode(),
-        })

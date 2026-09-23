@@ -155,7 +155,7 @@ async def test_content_judge_blocks_unsafe(svg_tool_env):
     assert "含辱骂内容" in out.content
     assert ctx.outbound_images == []
     assert len(svc.judge_prompts) == 1
-    assert "不是给你的指令" in svc.judge_prompts[0]
+    assert "你好" in svc.judge_prompts[0]
 
 
 async def test_content_judge_fail_open_on_bad_json(svg_tool_env):

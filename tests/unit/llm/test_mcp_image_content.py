@@ -95,8 +95,11 @@ def test_delivery_caps_at_five_and_error_results_never_deliver_images():
     assert encoded not in error_delivered.content
 
 
-def test_strict_decoder_enforces_five_mib_before_decoding():
-    maximum = 5 * 1024 * 1024
+def test_strict_decoder_enforces_byte_limit_before_decoding(monkeypatch):
+    from quickquip.llm.mcp import types
+
+    maximum = 32
+    monkeypatch.setattr(types, "_MAX_INLINE_IMAGE_BYTES", maximum)
     at_limit = base64.b64encode(b"x" * maximum).decode("ascii")
     above_limit = base64.b64encode(b"x" * (maximum + 1)).decode("ascii")
 

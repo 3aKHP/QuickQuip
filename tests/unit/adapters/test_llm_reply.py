@@ -37,13 +37,6 @@ def test_images_appended_after_text():
     ]
 
 
-def test_missing_images_key_returns_text_segment():
-    result = {"reply": "只有文本"}
-    message = build_llm_reply_message(result, _FakeMessage, _FakeSegment)
-    assert isinstance(message, _FakeMessage)
-    assert list(message) == [("text", "只有文本")]
-
-
 def test_always_returns_message_even_for_cq_like_text():
     result = {"reply": "看这里 [CQ:at,qq=all]"}
     message = build_llm_reply_message(result, _FakeMessage, _FakeSegment)

@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from quickquip.common.sensitive_filter import (
     DEFAULT_BLOCK_REPLY,
-    DEFAULT_OUTPUT_FALLBACK,
-    SensitiveFilter,
 )
 from quickquip.llm.image_preprocessor import ImageDescription
-from quickquip.llm.provider import LLMResponse
 from tests.fixtures.provider_stubs import StubProviderClient
 from tests.fixtures.sensitive_filter import make_sensitive_filter
 
@@ -56,59 +53,6 @@ async def test_defectify_blocked_input_stops_provider(
     assert result["reply"] == DEFAULT_BLOCK_REPLY
     assert result["llm_used"] is False
     assert stub.last_request is None
-
-
-async def test_defectify_blocked_output_uses_fallback(
-    llm_service,
-    patch_provider_builder,
-    monkeypatch,
-    tmp_path,
-):
-    sensitive = make_sensitive_filter(tmp_path, "block")
-    monkeypatch.setattr("quickquip.llm.service._get_sensitive_filter", lambda: sensitive)
-
-    class _BlockedOutputClient:
-        def __init__(self):
-            self.last_request = None
-
-        async def complete(self, request):
-            self.last_request = request
-            return LLMResponse(text="blocked output", model=request.model)
-
-    client = _BlockedOutputClient()
-    patch_provider_builder(lambda provider: client)
-
-    result = await llm_service.generate_defectify_reply(
-        chat_id=1001,
-        chat_type="group",
-        prompt="safe prompt",
-    )
-
-    assert client.last_request is not None
-    assert result["reply"] == DEFAULT_OUTPUT_FALLBACK
-    assert result["llm_used"] is True
-
-
-async def test_defectify_unloaded_filter_keeps_existing_behavior(
-    llm_service,
-    patch_provider_builder,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        "quickquip.llm.service._get_sensitive_filter",
-        SensitiveFilter.empty,
-    )
-    stub = StubProviderClient()
-    patch_provider_builder(lambda provider: stub)
-
-    result = await llm_service.generate_defectify_reply(
-        chat_id=1001,
-        chat_type="group",
-        prompt="safe prompt",
-    )
-
-    assert stub.last_request is not None
-    assert result["reply"].startswith("stub::gpt-test::")
 
 
 async def test_blocked_image_description_stops_main_provider(

@@ -9,7 +9,6 @@ from quickquip.adapters.nonebot.voice import (
     extract_embedded_voice_transcripts,
     transcribe_message_records,
 )
-from quickquip.generation.config import load_generation_config
 from quickquip.generation.service import generation_service
 from quickquip.generation.asr import TranscriptionResult
 from tests.fixtures.onebot import DummyMessage, record_seg, text_seg
@@ -88,9 +87,3 @@ async def test_transcribe_message_records_uses_get_record_and_asr(tmp_path: Path
         generation_service._config = original_config
         generation_service._active_mtime = original_active_mtime
         generation_service._legacy_mtime = original_legacy_mtime
-
-
-def test_asr_config_can_be_reloaded_after_voice_test_cleanup(tmp_path: Path):
-    missing = tmp_path / "missing.toml"
-    loaded = load_generation_config(missing, legacy_llm_path=missing)
-    assert loaded.load_error

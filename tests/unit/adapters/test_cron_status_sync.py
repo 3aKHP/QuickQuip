@@ -134,9 +134,8 @@ def test_load_job_results_skips_never_run_and_bad_time(monkeypatch, tmp_path):
     assert restored["bad_status_shape"]["last_error"] is None
 
 
-def test_restore_writes_into_live_results_dict(monkeypatch, tmp_path):
-    """恢复集成：真实 record_job_result 写的 dict 与恢复灌入的是同一个对象——
-    模拟重启后 sync 闭包捕获的表被原地填充（rebind 会静默失效）。"""
+def test_loaded_results_keep_timestamp_when_resynced(monkeypatch, tmp_path):
+    """恢复结果再次同步落盘时保留原执行时间与状态。"""
     status_file = tmp_path / "cron_jobs.json"
     status_file.write_text(
         json.dumps({
@@ -151,7 +150,7 @@ def test_restore_writes_into_live_results_dict(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(cron_status_sync, "CRON_JOBS_JSON_PATH", status_file)
-    results = {}  # 即 sync 闭包捕获的对象
+    results = {}
 
     for job_id, entry in cron_status_sync.load_job_results().items():
         results[job_id] = entry

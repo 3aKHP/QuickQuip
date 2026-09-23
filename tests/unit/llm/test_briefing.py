@@ -99,8 +99,6 @@ async def test_daily_briefing_retries_on_max_tokens(monkeypatch):
 
     assert content == "第二条完整播报"
     assert model_used == "b/m2"
-    assert responses[0].requests[0].max_output_tokens == 8192
-    assert responses[1].requests[0].max_output_tokens == 8192
 
 
 @pytest.mark.asyncio

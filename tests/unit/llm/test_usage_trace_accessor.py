@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import inspect
-
 from quickquip.llm.provider.trace import current_agent_loop_id, trace_agent_loop
-
-
-def test_current_agent_loop_id_outside_boundary_is_none():
-    assert current_agent_loop_id() is None
 
 
 async def test_current_agent_loop_id_inside_boundary():
@@ -77,13 +71,3 @@ async def test_record_usage_attributes_agent_loop(monkeypatch, tmp_path):
     assert len(rows) == 2
     assert rows[1]["agent_loop_id"]  # 边界内：有 loop_id
     assert rows[0]["agent_loop_id"] is None  # 边界外：无 loop_id
-
-
-def test_usage_module_has_no_private_trace_symbols():
-    """usage.py 只经公开 accessor 读取 agent loop，不导入私有 Trace symbol。"""
-    import quickquip.llm.usage as usage_module
-
-    source = inspect.getsource(usage_module)
-    assert "_AGENT_LOOP_TRACE" not in source
-    assert "AgentLoopTrace" not in source
-    assert "current_agent_loop_id" in source

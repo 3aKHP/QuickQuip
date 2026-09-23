@@ -64,179 +64,33 @@ def test_existing_schema_is_migrated_without_rewriting_rows(tmp_path):
     assert (old[0], old[1]) == (10, 5)
 
 
-def test_envelope_tokens_migration_and_summary(tmp_path):
-    """旧 schema 库（缺 envelope_tokens 一列）自动 ALTER 补列；summary 透出均值与覆盖率
-    （第四张账本：loop 内每行同值，只按 AVG 解读，NULL 行不计入均值但拉低覆盖率）。"""
-    import sqlite3
-
+def test_context_meter_columns_migrate_and_aggregate(tmp_path):
     from quickquip.llm.usage_store import window_start
 
     path = tmp_path / "old.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("""
-            CREATE TABLE llm_usage_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL,
-                model TEXT NOT NULL, feature TEXT, group_id TEXT, persona_id TEXT,
-                agent_loop_id TEXT, stream INTEGER NOT NULL, duration_ms REAL,
-                input_tokens INTEGER, fresh_input_tokens INTEGER, total_tokens INTEGER,
-                input_token_semantics TEXT, output_tokens INTEGER,
-                cache_creation_tokens INTEGER, cache_read_tokens INTEGER, thinking_tokens INTEGER,
-                cost_usd REAL NOT NULL DEFAULT 0.0, input_cost_usd REAL NOT NULL DEFAULT 0.0,
-                output_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_read_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_creation_cost_usd REAL NOT NULL DEFAULT 0.0,
-                pricing_model TEXT, pricing_source TEXT, pricing_confidence TEXT,
-                priced INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL DEFAULT 'ok', error_message TEXT
-            )
-        """)
-    store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "envelope_tokens": 400})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "envelope_tokens": 600})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok"})
-    with store.connect() as conn:
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
-    assert "envelope_tokens" in columns
-
-    s = store.summary(window_start(7).isoformat())
-    assert s["avg_envelope_tokens"] == 500.0
-    assert s["envelope_coverage"] == round(2 / 3, 4)
-
-
-def test_epoch_history_tokens_migration_and_summary(tmp_path):
-    """旧 schema 库（缺 epoch_history_tokens 一列）自动 ALTER 补列；summary 透出均值
-    与覆盖率（第五张账本【纪元】：loop 内每行同值，只按 AVG 解读，验收口径 ≈4.2k）。"""
+    _create_legacy_usage_db(path)
     import sqlite3
 
-    from quickquip.llm.usage_store import window_start
-
-    path = tmp_path / "old.db"
     with sqlite3.connect(path) as conn:
-        conn.execute("""
-            CREATE TABLE llm_usage_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL,
-                model TEXT NOT NULL, feature TEXT, group_id TEXT, persona_id TEXT,
-                agent_loop_id TEXT, envelope_tokens INTEGER, stream INTEGER NOT NULL,
-                duration_ms REAL,
-                input_tokens INTEGER, fresh_input_tokens INTEGER, total_tokens INTEGER,
-                input_token_semantics TEXT, output_tokens INTEGER,
-                cache_creation_tokens INTEGER, cache_read_tokens INTEGER, thinking_tokens INTEGER,
-                cost_usd REAL NOT NULL DEFAULT 0.0, input_cost_usd REAL NOT NULL DEFAULT 0.0,
-                output_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_read_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_creation_cost_usd REAL NOT NULL DEFAULT 0.0,
-                pricing_model TEXT, pricing_source TEXT, pricing_confidence TEXT,
-                priced INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL DEFAULT 'ok', error_message TEXT
-            )
-        """)
+        for column in ("input_tokens", "output_tokens", "cache_creation_tokens",
+                       "cache_read_tokens", "thinking_tokens"):
+            conn.execute(f"ALTER TABLE llm_usage_events ADD COLUMN {column} INTEGER")
     store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "epoch_history_tokens": 4000})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "epoch_history_tokens": 4400})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok"})
-    with store.connect() as conn:
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
-    assert "epoch_history_tokens" in columns
-
-    s = store.summary(window_start(7).isoformat())
-    assert s["avg_epoch_history_tokens"] == 4200.0
-    assert s["epoch_coverage"] == round(2 / 3, 4)
-
-
-def test_media_image_count_migration_and_summary(tmp_path):
-    """旧 schema 库（缺 media_image_count 一列）自动 ALTER 补列；summary 透出均值
-    与覆盖率（第六张账本【媒体】：loop 内每行同值，只按 AVG 解读）。"""
-    import sqlite3
-
-    from quickquip.llm.usage_store import window_start
-
-    path = tmp_path / "old.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("""
-            CREATE TABLE llm_usage_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL,
-                model TEXT NOT NULL, feature TEXT, group_id TEXT, persona_id TEXT,
-                agent_loop_id TEXT, envelope_tokens INTEGER, stream INTEGER NOT NULL,
-                duration_ms REAL,
-                input_tokens INTEGER, fresh_input_tokens INTEGER, total_tokens INTEGER,
-                input_token_semantics TEXT, output_tokens INTEGER,
-                cache_creation_tokens INTEGER, cache_read_tokens INTEGER, thinking_tokens INTEGER,
-                cost_usd REAL NOT NULL DEFAULT 0.0, input_cost_usd REAL NOT NULL DEFAULT 0.0,
-                output_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_read_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_creation_cost_usd REAL NOT NULL DEFAULT 0.0,
-                pricing_model TEXT, pricing_source TEXT, pricing_confidence TEXT,
-                priced INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL DEFAULT 'ok', error_message TEXT
-            )
-        """)
-    store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "media_image_count": 1})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "media_image_count": 3})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok"})
-    with store.connect() as conn:
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
-    assert "media_image_count" in columns
-
-    s = store.summary(window_start(7).isoformat())
-    assert s["avg_media_image_count"] == 2.0
-    assert s["media_coverage"] == round(2 / 3, 4)
-
-
-def test_patch_tokens_migration_and_summary(tmp_path):
-    """旧 schema 库（缺 patch_tokens 一列）自动 ALTER 补列；summary 透出均值
-    与覆盖率（第七张账本【现场补丁】：AVG 直接读作预算利用率）。"""
-    import sqlite3
-
-    from quickquip.llm.usage_store import window_start
-
-    path = tmp_path / "old.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("""
-            CREATE TABLE llm_usage_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL, provider_id TEXT NOT NULL, protocol TEXT NOT NULL,
-                model TEXT NOT NULL, feature TEXT, group_id TEXT, persona_id TEXT,
-                agent_loop_id TEXT, envelope_tokens INTEGER, stream INTEGER NOT NULL,
-                duration_ms REAL,
-                input_tokens INTEGER, fresh_input_tokens INTEGER, total_tokens INTEGER,
-                input_token_semantics TEXT, output_tokens INTEGER,
-                cache_creation_tokens INTEGER, cache_read_tokens INTEGER, thinking_tokens INTEGER,
-                cost_usd REAL NOT NULL DEFAULT 0.0, input_cost_usd REAL NOT NULL DEFAULT 0.0,
-                output_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_read_cost_usd REAL NOT NULL DEFAULT 0.0,
-                cache_creation_cost_usd REAL NOT NULL DEFAULT 0.0,
-                pricing_model TEXT, pricing_source TEXT, pricing_confidence TEXT,
-                priced INTEGER NOT NULL DEFAULT 0,
-                state TEXT NOT NULL DEFAULT 'ok', error_message TEXT
-            )
-        """)
-    store = LLMUsageStore(path)
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "patch_tokens": 300})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok", "patch_tokens": 500})
-    store.record({"provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
-                  "state": "ok"})
-    with store.connect() as conn:
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")}
-    assert "patch_tokens" in columns
-
-    s = store.summary(window_start(7).isoformat())
-    assert s["avg_patch_tokens"] == 400.0
-    assert s["patch_coverage"] == round(2 / 3, 4)
+    fields = ("envelope_tokens", "epoch_history_tokens", "media_image_count", "patch_tokens")
+    for values in ((400, 4000, 1, 300), (600, 4400, 3, 500), (None, None, None, None)):
+        store.record({
+            "provider_id": "p", "protocol": "claude", "model": "m", "stream": 1,
+            "state": "ok", **dict(zip(fields, values)),
+        })
+    summary = store.summary(window_start(7).isoformat())
+    for average, coverage, expected in (
+        ("avg_envelope_tokens", "envelope_coverage", 500),
+        ("avg_epoch_history_tokens", "epoch_coverage", 4200),
+        ("avg_media_image_count", "media_coverage", 2),
+        ("avg_patch_tokens", "patch_coverage", 400),
+    ):
+        assert summary[average] == expected
+        assert summary[coverage] == round(2 / 3, 4)
 
 
 def _create_legacy_usage_db(path):

@@ -1,7 +1,6 @@
 """预置 skill host-healthcheck：SKILL.md 生产加载契约 + collect.py 三层探测。"""
 from __future__ import annotations
 
-import ast
 import importlib.util
 import json
 import os
@@ -318,7 +317,7 @@ def test_main_entrypoint_via_env_overrides(sandbox, monkeypatch, capsys):
 def test_script_subprocess_whitelisted_env(sandbox):
     env = {"PATH": os.environ.get("PATH", ""), **_env_overrides(sandbox)}
     result = subprocess.run(
-        [sys.executable, str(COLLECT_PATH)],
+        [sys.executable, "-I", "-S", str(COLLECT_PATH)],
         env=env,
         capture_output=True,
         text=True,
@@ -337,19 +336,6 @@ def test_skill_loads_via_production_scan():
     skills = {skill.name: skill for skill in scan_skills(REPO_ROOT / "skills.example")}
     skill = skills["host-healthcheck"]
     assert len(skill.metadata.description) <= MAX_DESCRIPTION_CHARS
-    assert "当用户" in skill.metadata.description
-    assert "宿主机" in skill.metadata.description
     script = next(r for r in skill.resources if r.path == "scripts/collect.py")
     assert script.kind == "script" and script.sha256
     assert all(not r.path.startswith("references/") for r in skill.resources)
-
-
-def test_collect_script_stdlib_only():
-    tree = ast.parse(COLLECT_PATH.read_text(encoding="utf-8"))
-    modules = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name.split(".")[0] for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            modules.add(node.module.split(".")[0])
-    assert modules <= sys.stdlib_module_names

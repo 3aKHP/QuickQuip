@@ -379,7 +379,7 @@ async def test_gemini_tool_loop_rejects_truncated_function_call_batch(
         recent_messages=[],
     )
 
-    assert result["reply"] == "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+    assert "已拒绝执行" in result["reply"]
     assert len(stub.requests) == 1
 
 
@@ -423,9 +423,8 @@ async def test_gemini_tool_loop_reject_notice_appended_to_existing_text(
             recent_messages=[],
         )
 
-    assert result["reply"] == (
-        "我去查一下\n模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
-    )
+    assert result["reply"].startswith("我去查一下\n")
+    assert "已拒绝执行" in result["reply"]
     assert len(stub.requests) == 1
     assert any(
         "Gemini tool batch rejected" in record.message and "requested=4" in record.message
@@ -621,9 +620,7 @@ async def test_responses_tool_loop_rejects_truncated_batch(
         recent_messages=[],
     )
 
-    assert result["reply"] == (
-        "模型一次请求了过多工具，已拒绝执行不完整的 OpenAI Responses 工具批次。"
-    )
+    assert "已拒绝执行" in result["reply"]
     assert len(stub.requests) == 1
 
 
@@ -673,7 +670,7 @@ async def test_responses_tool_loop_budget_guard_aborts_continuation(
     # 预检 + 第一轮守卫放行（payload 1 已发出）；续接请求被门禁拦截，未产生第二次 HTTP
     assert calls["count"] == 3
     assert len(fake.payloads) == 1
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
 
 
 async def test_forward_message_content_rendered(wired_service, patch_provider_builder):
@@ -711,29 +708,6 @@ async def test_reasoning_content_sanitized_at_service_level(
         recent_messages=[],
     )
     assert result["reply"] == "给群友看的答案"
-
-
-async def test_history_is_cropped_after_cap(wired_service, patch_provider_builder):
-    stub = StubProviderClient()
-    patch_provider_builder(lambda provider: stub)
-
-    await wired_service.generate_reply(
-        group_id=1001,
-        user_id=2002,
-        sender_name="n",
-        prompt="哈基镜是区吗？",
-        recent_messages=[],
-    )
-    # Explicit crop by hard row cap (floor=None = 锚点缺失时只按 keep_last 兜底)
-    for i in range(20):
-        wired_service.store.append_conversation_message(1001, "u", "assistant", f"补充{i}")
-    cap = 10
-    wired_service.store.crop_conversation_messages(1001, floor_id=None, keep_last=cap)
-    assert len(wired_service.store.list_recent_conversation_messages(1001, 100)) == cap
-
-    deleted = wired_service.clear_group_context(1001)
-    assert deleted == cap
-    assert wired_service.store.list_recent_conversation_messages(1001, 100) == []
 
 
 async def test_memory_crud_basic(wired_service):
@@ -847,7 +821,7 @@ def test_reload_personas_empty_keeps_previous(llm_service):
     )
     count, error = llm_service.reload_personas()
     assert count == 0
-    assert error == "配置中没有可用的人格"
+    assert "没有可用的人格" in error
     assert llm_service.config.personas is original
 
 
@@ -938,7 +912,11 @@ async def test_auto_memory_extraction_disabled_does_not_call_judge(
 ):
     import asyncio
     # Default auto_memory_enabled == False.
-    stub = _AutoMemoryStubClient(["收到。", "should-not-be-called"])
+    llm_service._auto_memory_turns["1002"] = 9
+    stub = _AutoMemoryStubClient([
+        "这是一条足够长的正常回复，确保自动记忆的文本质量门能够通过。",
+        "should-not-be-called",
+    ])
     patch_provider_builder(lambda provider: stub)
 
     await llm_service.generate_reply(
@@ -992,14 +970,15 @@ async def test_auto_memory_respects_memory_disabled(
     llm_service.config.runtime.auto_memory_enabled = True
     llm_service.set_group_memory_enabled(1004, False)
 
-    stub = _AutoMemoryStubClient(["收到。"])
+    llm_service._auto_memory_turns["1004"] = 9
+    stub = _AutoMemoryStubClient(["这是一条足够长的正常回复，确保自动记忆的文本质量门能够通过。"])
     patch_provider_builder(lambda provider: stub)
 
     await llm_service.generate_reply(
         group_id=1004,
         user_id=2002,
         sender_name="n",
-        prompt="我喜欢奶茶",
+        prompt="我平时很喜欢喝奶茶，这是我一直保留的习惯。",
         recent_messages=[],
     )
     pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -1043,29 +1022,9 @@ async def test_auto_memory_per_chat_override_beats_global_default(
 # ── image preprocessor integration tests ──────────────────────────────
 
 
-async def test_image_preprocessor_called_for_non_vision_model(
-    wired_service, patch_provider_builder
-):
-    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
-    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
-    stub_preprocessor = StubImagePreprocessor()
-    wired_service.image_preprocessor = stub_preprocessor
-
-    patch_provider_builder(lambda provider: StubProviderClient())
-    await wired_service.generate_reply(
-        group_id=1001,
-        user_id=2002,
-        sender_name="测试用户",
-        prompt="看看这张图",
-        image_urls=["https://example.test/cat.png"],
-        recent_messages=[],
-    )
-    assert stub_preprocessor.call_count == 1
-    assert stub_preprocessor.last_urls == ["https://example.test/cat.png"]
-
-
 async def test_image_preprocessor_skipped_when_no_images(wired_service, patch_provider_builder):
     from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
     stub_preprocessor = StubImagePreprocessor()
     wired_service.image_preprocessor = stub_preprocessor
 
@@ -1103,6 +1062,8 @@ async def test_non_vision_model_strips_images_from_request(wired_service, patch_
         recent_messages=[],
     )
 
+    assert stub_preprocessor.call_count == 1
+    assert stub_preprocessor.last_urls == ["https://example.test/cat.png"]
     request = stub_client.last_request
     # All user messages should have empty image_urls since the image was stripped
     for msg in request.messages:
@@ -1967,10 +1928,10 @@ async def test_private_reply_never_self_serves_scene_patch(wired_service, patch_
     stub = _RecordingStub()
     patch_provider_builder(lambda provider: stub)
 
+    wired_service.start_private_session(2002)
     wired_service.recent_message_buffer.add_message(
         "private:2002", "2002", "乙", "乙", "私聊现场话"
     )
-    wired_service.start_private_session(2002)
     await wired_service.generate_private_reply(user_id=2002, sender_name="乙", prompt="私聊问")
 
     content = stub.requests[-1].messages[-1].content

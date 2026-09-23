@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from pathlib import Path
 
 from plugins.tieba_store import TiebaStore, TiebaThread
@@ -54,7 +53,6 @@ def test_random_thread_prefers_images_and_avoids_recent(tmp_path: Path):
     store.mark_sent("100", "测试")
     store.mark_sent("102", "测试")
 
-    random.seed(0)
     selected = store.choose_random_thread(
         forum_keywords=("测试",), prefer_images=True, avoid_recent=2
     )

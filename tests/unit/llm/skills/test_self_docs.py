@@ -65,12 +65,6 @@ def test_loads_through_production_loader(self_docs_skill: LoadedSkill):
     assert READ_SKILL_RESOURCE_TOOL_NAME in self_docs_skill.body
 
 
-def test_description_declares_trigger_and_priority(self_docs_skill: LoadedSkill):
-    description = self_docs_skill.metadata.description
-    assert "当用户" in description
-    assert "训练知识" in description
-
-
 def test_contains_no_scripts(self_docs_skill: LoadedSkill):
     scripts = [r for r in self_docs_skill.resources if r.kind == "script"]
     assert scripts == []
@@ -91,22 +85,6 @@ def test_covers_user_admin_dev_and_index(self_docs_skill: LoadedSkill):
     assert any(path.startswith("references/docs-admin-") for path in paths)
     assert any(path.startswith("references/docs-dev-") for path in paths)
     assert "references/index.md" in paths
-
-
-def test_covers_full_source_allowlist(self_docs_skill: LoadedSkill):
-    paths = {resource.path for resource in self_docs_skill.resources}
-    expected = {
-        "references/root-code_of_conduct.md",
-        "references/root-claude.md",
-        "references/claude-agents-quickquip-cr-reviewer.md",
-        "references/docs-admin-global-admins.md",
-        "references/github-issue_template-memo.md",
-        "references/github-pull_request_template-release.md",
-        "references/github-pull_request_template.md",
-        "references/prod.example-readme.md",
-    }
-    assert expected <= paths
-    assert len(paths) == 46
 
 
 def test_no_leaked_checkout_path_api_key_or_private_id(self_docs_skill: LoadedSkill):

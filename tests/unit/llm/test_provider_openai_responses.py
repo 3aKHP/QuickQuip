@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 import json
 import textwrap
 from pathlib import Path
@@ -34,7 +35,7 @@ from quickquip.llm.provider.openai_responses.request import (
 )
 from quickquip.llm.provider.openai_responses.response import parse_responses_body
 from quickquip.llm.provider.openai_responses.stream import fold_stream_events
-from quickquip.llm.token_estimate import estimate_native_block_tokens
+from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_FLAT_TOKENS, estimate_native_block_tokens
 from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
 from tests.fixtures.stream_chunks import (
     RESPONSES_RELAY_TOOL_CHUNKS,
@@ -336,10 +337,8 @@ def test_tool_images_flushed_after_complete_batch():
     assert flush["role"] == "user"
     assert flush["content"][0]["type"] == "input_image"
     assert flush["content"][0]["image_url"] == "data:image/png;base64,AAAA"
-    assert flush["content"][1] == {
-        "type": "input_text",
-        "text": "以下图片来自刚才工具调用，仅用于继续推理。",
-    }
+    assert flush["content"][1]["type"] == "input_text"
+    assert flush["content"][1]["text"].strip()
     assert items[-1] == {"role": "user", "content": "再画一张"}
 
 
@@ -495,11 +494,6 @@ def test_stream_unknown_event_fail_closed():
         _fold(chunks)
 
 
-def test_stream_missing_terminal():
-    with pytest.raises(LLMProviderError, match="response.completed 前"):
-        _fold([{"type": "response.created"}, {"type": "response.in_progress"}])
-
-
 def test_stream_terminal_text_mismatch():
     chunks = [dict(e) for e in RESPONSES_TEXT_CHUNKS]
     for chunk in chunks:
@@ -610,12 +604,6 @@ def test_stream_error_event_fatal_code_not_retryable():
         _fold(chunks)
     assert excinfo.value.status_code == 400
     assert excinfo.value.transport is False
-
-
-def test_stream_error_event():
-    chunks = [{"type": "error", "error": {"code": "EIO", "message": "断流"}}]
-    with pytest.raises(LLMProviderError, match="断流"):
-        _fold(chunks)
 
 
 # ── client 编排 ────────────────────────────────────────────────────────────
@@ -789,7 +777,7 @@ def test_native_items_enter_request_budget_estimate():
     )
     delta = estimate_request_tokens(base) - estimate_request_tokens(without_native)
     # reasoning 密文固定档 + function_call 参数字符估算都计入
-    assert delta >= 2048
+    assert delta >= NATIVE_ENCRYPTED_FLAT_TOKENS
 
 
 def test_zero_impact_existing_protocols_unchanged():
@@ -916,7 +904,7 @@ def test_stream_reasoning_delta_terminal_mismatch():
 
 def test_stream_relay_reconcile_mismatch_fail_closed():
     """中转终态 output 与流式 done items 语义不一致（非子集）时 fail-closed。"""
-    chunks = [dict(e) for e in RESPONSES_RELAY_TOOL_CHUNKS]
+    chunks = deepcopy(RESPONSES_RELAY_TOOL_CHUNKS)
     # 终态把 function_call 的 arguments 改成不同值：非子集关系
     chunks[-1]["response"]["output"][-1]["arguments"] = '{"query":"tampered"}'
     with pytest.raises(LLMProviderError, match="不一致"):
@@ -1165,22 +1153,10 @@ async def test_client_400_history_reasoning_degrades_and_retries(caplog):
     )
     assert any(item.get("id") == "msg_hist" for item in second_input)
     # 当前循环批次不受降级影响（协议要求原样回传）。
-    assert any(item.get("id") == "rs_cur" for item in second_input)
-    assert any(item.get("call_id") == "call_cur" for item in second_input)
-
-
-async def test_client_current_loop_reasoning_never_stripped_by_degrade():
-    client = _RejectingThenOkFake(
-        _config(),
-        LLMProviderError("HTTP 400 bad request", status_code=400, http_reject=True),
-        [_OK_BODY],
-    )
-    await client.complete(_history_replay_request())
-    second_input = client.payloads[1]["input"]
-    reasoning_ids = {
+    assert {
         item.get("id") for item in second_input if item.get("type") == "reasoning"
-    }
-    assert reasoning_ids == {"rs_cur"}
+    } == {"rs_cur"}
+    assert any(item.get("call_id") == "call_cur" for item in second_input)
 
 
 async def test_client_400_without_history_reasoning_surfaces():

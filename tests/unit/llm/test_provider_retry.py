@@ -161,10 +161,11 @@ async def test_no_retry_on_other_4xx(captured_delays):
 
 async def test_exhaustion_raises_last_error(captured_delays):
     config = _config(retry_max_attempts=3, retry_base_delay=0.25, retry_jitter=0.0)
-    exc = LLMProviderError("HTTP 429 rate limited", status_code=429)
-    client = FlakyFakeClient(config, [exc, exc, exc])
-    with pytest.raises(LLMProviderError):
+    errors = [LLMProviderError(f"attempt {i}", status_code=429) for i in range(3)]
+    client = FlakyFakeClient(config, errors)
+    with pytest.raises(LLMProviderError) as exc:
         await client.complete(_req())
+    assert exc.value is errors[-1]
     assert client.calls == 3
     assert captured_delays == [0.25, 0.5]
 

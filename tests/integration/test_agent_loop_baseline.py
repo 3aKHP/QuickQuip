@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -17,8 +16,6 @@ from tests.fixtures.agent_loop import (
     FIVE_TURN_TEXTS,
     CollectingSink,
     FiveTurnScenarioClient,
-    build_legacy_db,
-    five_turn_tool_calls,
 )
 from tests.fixtures.configs import write_llm_config_bundle
 
@@ -59,31 +56,6 @@ async def run_five_turn_scenario(service: LLMService, **kwargs) -> dict:
 
 
 # ── fixture 契约自检 ────────────────────────────────────────────────
-
-
-def test_five_turn_fixture_contract():
-    assert [len(text) for text in FIVE_TURN_TEXTS] == [32, 31, 50, 31, 374]
-    batches = five_turn_tool_calls()
-    assert [len(batch) for batch in batches] == [1, 2, 2, 2, 0]
-    assert sum(len(batch) for batch in batches) == 7
-    # 末 Turn 必须存在空行分界：测试切分参数下形成三段的前提。
-    assert FIVE_TURN_TEXTS[4].count("\n\n") == 2
-
-
-def test_legacy_fixture_rows_cover_migration_groups(tmp_path: Path):
-    db_path = tmp_path / "llm.db"
-    build_legacy_db(db_path)
-    conn = sqlite3.connect(db_path)
-    try:
-        rows = conn.execute(
-            "SELECT role, message_id FROM conversation_messages ORDER BY id"
-        ).fetchall()
-    finally:
-        conn.close()
-    assert [role for role, _ in rows] == [
-        "assistant", "user", "assistant", "user", "user", "assistant",
-    ]
-    assert [mid for _, mid in rows if mid is not None] == ["m3"]
 
 
 # ── 默认关闭开关：完整记录 + 最终单发（§6.3） ───────────────────────
@@ -128,7 +100,7 @@ async def test_final_only_mode_records_every_turn_and_sends_final(
 # ── 开启开关：七文字 Chunk + 逐 Turn 交付（§11.2 主例验收） ─────────
 
 
-async def test_all_turns_mode_seven_chunks_delivered_before_tools(
+async def test_all_turns_mode_delivers_and_records_split_text(
     scenario_service, patch_scenario_provider, monkeypatch
 ):
     monkeypatch.setattr(

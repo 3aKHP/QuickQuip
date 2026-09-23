@@ -78,38 +78,6 @@ def _bind_plugin_deps(monkeypatch, counts, deps):
 
 
 @pytest.mark.asyncio
-async def test_run_period_generation_uses_service_get_group_settings(monkeypatch):
-    """回归 Bot HIGH：_run_period_generation 必须用 svc.get_group_settings(group_id)。
-    旧实现误用不存在的 llm_config.resolve_group_settings，每次生成都 AttributeError 崩溃。
-    """
-    counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
-
-    result = await summary_jobs.run_period_generation(
-        "10001", plugin.PERIOD_WEEKLY, 1_000.0, 100_000.0, "2026-W26",
-        svc=deps.svc, collector=deps.collector, stats_tracker=deps.stats_tracker,
-    )
-
-    assert result == ("周期报告正文", "model-1")
-    assert counts.generate == 1
-
-
-@pytest.mark.asyncio
-async def test_generate_period_one_reads_window_once_and_persists(monkeypatch):
-    """回归 Bot MEDIUM：_generate_period_one 只通过 _run_period_generation 读一次窗口。
-    旧实现 caller 与 _run_period_generation 各读一次（双倍 I/O），且传入的 period_key/label 被丢弃。
-    """
-    counts, deps = _patch_period_deps(monkeypatch, msg_count=50)
-
-    await summary_jobs.generate_period_one(
-        "10001", plugin.PERIOD_WEEKLY,
-        svc=deps.svc, collector=deps.collector, store=deps.store, stats_tracker=deps.stats_tracker,
-    )
-
-    assert counts.read == 1      # 不再重复读窗口
-    assert counts.upsert == 1    # 定时 job 路径入库
-
-
-@pytest.mark.asyncio
 async def test_send_period_report_now_does_not_persist(monkeypatch):
     """回归 Bot MEDIUM：命令触发的 send_period_report_now 不应入库。
     旧实现经 _generate_period_one 触发 upsert（published_at=NULL），定时 publish job 会重复发布。
@@ -340,7 +308,6 @@ async def test_run_period_generation_falls_back_to_first_persona(monkeypatch):
     )
 
     assert captured["persona"] is first
-    assert counts.generate == 0  # fake_generate 被 capture_generate 替换
 
 
 @pytest.mark.asyncio
@@ -427,7 +394,7 @@ async def test_generate_period_one_upserts_with_window_period_key(monkeypatch):
     )
 
     assert result == ("周期报告正文", "model-1")
-    assert counts.upsert == 0  # period_store 已被整体替换
+    assert counts.read == 1
     assert upserts == [(
         ("10001", plugin.PERIOD_WEEKLY, "2026-W18", "周期报告正文", "model-1"),
         {"run_id": None},

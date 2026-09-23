@@ -118,11 +118,15 @@ def test_disabled_skills_everything_off(tmp_path):
 
 def test_catalog_block_budget_uses_context_window(tmp_path):
     catalog = tmp_path / "skills"
-    write_skill(catalog, "demo", "演示。")
+    write_skill(catalog, "aaa", "a" * 200)
+    write_skill(catalog, "bbb", "b" * 200)
     svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
     provider = SimpleNamespace(model_context_windows={"gpt-test": 1_000_000})
-    block = svc._skills_catalog_block(provider=provider, model="gpt-test")
-    assert '<skill_catalog hash="' in block
+    large = svc._skills_catalog_block(provider=provider, model="gpt-test")
+    assert "- aaa:" in large and "- bbb:" in large
+    provider.model_context_windows["gpt-test"] = 2_000
+    small = svc._skills_catalog_block(provider=provider, model="gpt-test")
+    assert "- aaa:" in small and "- bbb:" not in small
 
 
 def test_emptied_catalog_block_disappears_and_handler_fails_closed(tmp_path):
@@ -168,13 +172,6 @@ def test_format_skill_list(tmp_path):
 def test_format_skill_list_disabled(tmp_path):
     svc = _service(tmp_path, "[skills]\nenabled = false\n")
     assert "未启用" in svc.format_skill_list(1001, chat_type="group")
-
-
-def test_format_skill_list_empty_catalog(tmp_path):
-    catalog = tmp_path / "skills"
-    catalog.mkdir()
-    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
-    assert "当前未安装任何 Skill" in svc.format_skill_list(1001, chat_type="group")
 
 
 def test_clear_context_clears_activations(tmp_path):

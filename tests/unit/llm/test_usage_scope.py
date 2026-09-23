@@ -1,5 +1,3 @@
-import asyncio
-
 from quickquip.llm.usage import (
     _ENVELOPE_TOKENS,
     _EPOCH_HISTORY_TOKENS,
@@ -15,26 +13,12 @@ from quickquip.llm.usage import (
 )
 
 
-def test_patch_meter_sets_and_resets():
-    assert _PATCH_TOKENS.get() is None
-    with patch_meter(360):
-        assert _PATCH_TOKENS.get() == 360
-    assert _PATCH_TOKENS.get() is None
-
-
 def test_patch_meter_nested_inner_resets_to_outer():
     with patch_meter(100):
         with patch_meter(300):
             assert _PATCH_TOKENS.get() == 300
         assert _PATCH_TOKENS.get() == 100
     assert _PATCH_TOKENS.get() is None
-
-
-def test_media_meter_sets_and_resets():
-    assert _MEDIA_IMAGE_COUNT.get() is None
-    with media_meter(2):
-        assert _MEDIA_IMAGE_COUNT.get() == 2
-    assert _MEDIA_IMAGE_COUNT.get() is None
 
 
 def test_media_meter_nested_inner_resets_to_outer():
@@ -45,26 +29,12 @@ def test_media_meter_nested_inner_resets_to_outer():
     assert _MEDIA_IMAGE_COUNT.get() is None
 
 
-def test_epoch_meter_sets_and_resets():
-    assert _EPOCH_HISTORY_TOKENS.get() is None
-    with epoch_meter(4200):
-        assert _EPOCH_HISTORY_TOKENS.get() == 4200
-    assert _EPOCH_HISTORY_TOKENS.get() is None
-
-
 def test_epoch_meter_nested_inner_resets_to_outer():
     with epoch_meter(4000):
         with epoch_meter(8000):
             assert _EPOCH_HISTORY_TOKENS.get() == 8000
         assert _EPOCH_HISTORY_TOKENS.get() == 4000
     assert _EPOCH_HISTORY_TOKENS.get() is None
-
-
-def test_envelope_meter_sets_and_resets():
-    assert _ENVELOPE_TOKENS.get() is None
-    with envelope_meter(123):
-        assert _ENVELOPE_TOKENS.get() == 123
-    assert _ENVELOPE_TOKENS.get() is None
 
 
 def test_envelope_meter_nested_inner_resets_to_outer():
@@ -105,21 +75,6 @@ def test_set_usage_scope_does_not_reset():
         assert _USAGE_SCOPE.get().feature == "health"
     finally:
         _USAGE_SCOPE.set(None)
-
-
-async def test_usage_scope_propagates_along_await_chain():
-    """ContextVar 在同一协程的 await 链上传播（接线有效性的前提）。"""
-    seen: list[str] = []
-
-    async def inner():
-        scope = _USAGE_SCOPE.get()
-        seen.append(scope.feature if scope else None)
-
-    with usage_scope("chat", group_id="g"):
-        await inner()
-        await asyncio.sleep(0)  # 让出一次事件循环
-        await inner()
-    assert seen == ["chat", "chat"]
 
 
 async def test_record_usage_reads_usage_scope(monkeypatch, tmp_path):

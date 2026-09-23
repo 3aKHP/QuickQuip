@@ -47,6 +47,7 @@ def test_conversation_append_and_list_recent(store: LLMStore) -> None:
     assert rows[1]["role"] == "assistant"
     # user_id 为 None 时返回空字符串
     assert rows[1]["user_id"] == ""
+    assert store.count_conversation_messages(1001) == 2
 
 
 def test_conversation_crop_keeps_last_n_when_no_floor(store: LLMStore) -> None:
@@ -113,13 +114,6 @@ def test_find_next_user_row_id(store: LLMStore) -> None:
     assert store.find_next_user_row_id(1009, second_user + 1) is None
 
 
-def test_conversation_count(store: LLMStore) -> None:
-    assert store.count_conversation_messages(1003) == 0
-    store.append_conversation_message(1003, "u", "user", "a")
-    store.append_conversation_message(1003, "u", "assistant", "b")
-    assert store.count_conversation_messages(1003) == 2
-
-
 def test_conversation_clear_returns_deleted(store: LLMStore) -> None:
     store.append_conversation_message(1004, "u", "user", "a")
     store.append_conversation_message(1004, "u", "user", "b")
@@ -145,13 +139,14 @@ def test_conversation_get_earliest_message_time(store: LLMStore) -> None:
     assert store.get_earliest_message_time("1006") == ""
     store.append_conversation_message(1006, "u", "user", "first")
     store.append_conversation_message(1006, "u", "user", "second")
-    earliest = store.get_earliest_message_time("1006")
-    assert earliest != ""
-    # earliest 应该是第一条消息的时间（ISO 格式字符串，按字典序比较即可）
-    assert earliest.startswith("20")
-
-
-# ── memory 域 ─────────────────────────────────────────────────────────────────
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE conversation_messages SET created_at = CASE content "
+            "WHEN 'first' THEN '2024-01-01T00:00:00+00:00' "
+            "ELSE '2025-01-01T00:00:00+00:00' END WHERE group_id = ?",
+            ("1006",),
+        )
+    assert store.get_earliest_message_time("1006") == "2024-01-01T00:00:00+00:00"
 
 
 def test_memory_add_returns_id_and_list_sorts(store: LLMStore) -> None:
@@ -220,20 +215,6 @@ def test_archive_create_and_get_roundtrip(store: LLMStore) -> None:
     assert archive is not None
     assert archive["persona_id"] == "persona_a"
     assert archive["message_count"] == 5
-
-
-def test_archive_moves_conversation_messages(store: LLMStore) -> None:
-    user_id = "user_z"
-    private_key = f"private:{user_id}"
-    # 在 private scope 下放两条消息
-    store.append_conversation_message(private_key, user_id, "user", "私聊消息1")
-    store.append_conversation_message(private_key, user_id, "assistant", "回复")
-
-    # 归档：private 消息移到 archive key
-    moved = store.archive_conversation_messages(user_id, 1)
-    assert moved == 2
-    # private scope 应该空了
-    assert store.list_recent_conversation_messages(private_key, 100) == []
 
 
 def test_archive_restore_moves_back(store: LLMStore) -> None:

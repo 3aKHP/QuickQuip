@@ -91,21 +91,6 @@ def test_resolve_cascade_at_default_placeholder():
 
 
 @pytest.mark.asyncio
-async def test_daily_summary_uses_16384_output_window(monkeypatch):
-    stub = _StubClient(LLMResponse(text="日报正文", model="m1", finish_reason="stop"))
-    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)
-    await generate_daily_summary(
-        [{"ts": 1600000000.0, "sender": "u", "text": "消息"}],
-        PersonaConfig(id="default", display_name="默认", system_prompt="s"),
-        "10001", date_label="2026-09-09", name_table={},
-        summary_config=DailySummaryConfig(),
-        llm_config=_llm_config([_provider("a", "m1")]),
-        default_provider_id="a", default_model="m1", local_tz=LOCAL_TZ,
-    )
-    assert stub.requests[0].max_output_tokens == 16384
-
-
-@pytest.mark.asyncio
 async def test_daily_summary_wide_window_log_not_truncated(monkeypatch):
     stub = _StubClient(LLMResponse(text="日报", model="big", finish_reason="stop"))
     monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)

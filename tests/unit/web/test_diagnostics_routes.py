@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -9,6 +10,7 @@ HTTPException = fastapi.HTTPException
 
 from quickquip.app.web.routes import diagnostics  # noqa: E402
 from quickquip.llm.provider_health import ProviderHealth  # noqa: E402
+from quickquip.llm.provider_health import format_probe_results  # noqa: E402
 
 
 async def test_probe_providers_returns_results_and_text(monkeypatch):
@@ -33,8 +35,7 @@ async def test_probe_providers_returns_results_and_text(monkeypatch):
     assert resp["results"][0]["provider_id"] == "p1"
     assert resp["results"][0]["status"] == "ok"
     assert resp["results"][1]["status"] == "error"
-    assert "Provider 探活" in resp["text"]
-    assert "合计：1/2 正常" in resp["text"]
+    assert resp["text"] == format_probe_results(fake_results)
 
 
 async def test_probe_providers_raises_on_config_error(monkeypatch):
@@ -45,8 +46,10 @@ async def test_probe_providers_raises_on_config_error(monkeypatch):
         lambda path: SimpleNamespace(load_error="TOML 语法错误"),
     )
 
+    probe = AsyncMock()
+    monkeypatch.setattr(diagnostics, "probe_all_providers", probe)
     with pytest.raises(HTTPException) as exc:
         await diagnostics.probe_providers()
 
     assert exc.value.status_code == 400
-    assert "config load error" in str(exc.value.detail)
+    probe.assert_not_awaited()
