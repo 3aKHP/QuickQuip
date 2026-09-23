@@ -54,7 +54,7 @@
 ## 开发文档
 
 - `docs/dev/architecture.md` → `references/docs-dev-architecture.md` — QuickQuip 项目架构与结构 ｜ 关键词：README.md、style.md、pip install -e .、python bot.py、.env、prod/、src/quickquip/adapters/nonebot/、src/plugins/、repeat_detector、good_girl_chain
-- `docs/dev/branching.md` → `references/docs-dev-branching.md` — QuickQuip 开发工作流与发布流程 ｜ 关键词：dev、main、style.md、architecture.md、versioning.md、feat、fix、refactor、.env、data/
+- `docs/dev/branching.md` → `references/docs-dev-branching.md` — QuickQuip 开发工作流与发布流程 ｜ 关键词：dev、main、style.md、testing.md、architecture.md、versioning.md、feat、fix、refactor、.env
 - `docs/dev/game-framework.md` → `references/docs-dev-game-framework.md` — 游戏框架开发者指南 ｜ 关键词：BaseGame、src/quickquip/app/message_pipeline.py、OrderedDict[str, Session]、group_id、src/quickquip/adapters/nonebot/commands.py、command_parts/、config/games.toml、src/quickquip/games/config.py、config.py、GameConfig
 - `docs/dev/llm-module.md` → `references/docs-dev-llm-module.md` — QuickQuip LLM 模块说明 ｜ 关键词：google_search、LLM_TRACE_FLAG_FILE、data/llm_trace.db、run_tool_call_loop、trigger_kind、group_direct、private_direct、group_passive、interrupted、request_cancelled
 - `docs/dev/mcp-integration.md` → `references/docs-dev-mcp-integration.md` — QuickQuip MCP 集成说明 ｜ 关键词：config/llm.toml、[[mcp.servers]]、stdio、docker、http、sse、${ENV_VAR}、${ENV_VAR:-default}、ToolRegistry、/llm mcp status
@@ -71,7 +71,7 @@
 
 ## 其他
 
-- `.claude/agents/quickquip-cr-reviewer.md` → `references/claude-agents-quickquip-cr-reviewer.md` — claude-agents-quickquip-cr-reviewer ｜ 关键词：dev、git diff $(git merge-base HEAD dev) HEAD、git diff、CLAUDE.md、CONTRIBUTING.md、docs/dev/README.md、docs/dev/style.md、docs/dev/architecture.md、docs/dev/branching.md、llm-module.md
+- `.claude/agents/quickquip-cr-reviewer.md` → `references/claude-agents-quickquip-cr-reviewer.md` — claude-agents-quickquip-cr-reviewer ｜ 关键词：dev、git diff $(git merge-base HEAD dev) HEAD、git diff、CLAUDE.md、CONTRIBUTING.md、docs/dev/README.md、docs/dev/style.md、docs/dev/testing.md、docs/dev/architecture.md、docs/dev/branching.md
 - `.github/ISSUE_TEMPLATE/memo.md` → `references/github-issue_template-memo.md` — github-issue_template-memo ｜ 关键词：path/to/file.py
 - `.github/PULL_REQUEST_TEMPLATE/release.md` → `references/github-pull_request_template-release.md` — github-pull_request_template-release ｜ 关键词：vX.Y.Z、pyproject.toml、CHANGELOG.md、Unreleased、prod.example/、README.md、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build
 - `.github/pull_request_template.md` → `references/github-pull_request_template.md` — github-pull_request_template ｜ 关键词：Closes #<issue>、Refs #<issue>、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build
