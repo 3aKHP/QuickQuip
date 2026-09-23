@@ -18,7 +18,7 @@
 | [`architecture.md`](architecture.md) | 目录结构、分层、依赖方向、组合根和数据/部署边界 |
 | [`style.md`](style.md) | 源码结构、可维护性、类型与输入边界、错误与状态、测试和评审问题 |
 | [`testing.md`](testing.md) | 测试纪律、准入与断言依据、典型反模式、合并删除和验证 |
-| [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审、发布和 hotfix 流程 |
+| [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、发布和 hotfix 流程 |
 | [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`record-identities.md`](record-identities.md) | 记录正文、共享身份、引用索引与兼容读取契约 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |
