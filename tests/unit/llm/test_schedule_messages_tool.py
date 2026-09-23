@@ -201,3 +201,26 @@ async def test_list_filters_current_group_only(tool_env):
     assert "本群任务" in out
     assert other.id not in out
     assert "别群任务" not in out
+
+
+async def test_list_empty_group_returns_hint_without_side_effects(tool_env):
+    """他群有任务但本群为空：走空列表早退分支，不串显、不写盘、不重注册。"""
+    tool_env.store.add(
+        cron="30 8 * * *", group_ids=["200"], message="别群任务", origin="web"
+    )
+    svc = _FakeService()
+    out = await svc._tool_manage_scheduled_messages(
+        {"action": "list"}, _make_context(group_id=100)
+    )
+    assert out.strip()
+    assert "别群任务" not in out
+    assert len(tool_env.store.list()) == 1  # 未创建任何任务
+    assert tool_env.reloads == []  # 空列表早退不触发重注册
+
+
+def test_description_points_to_turn_envelope():
+    """时间戳移出 system 后，一次性任务日期推算的时间来源说明必须指向
+    当轮 user 消息头部的【轮次上下文】信封——锚定措辞防漂移回「系统提示词」。"""
+    desc = smt.SCHEDULE_MESSAGES_TOOL_SPEC.description
+    assert "【轮次上下文】" in desc
+    assert "系统提示词中提供了当前北京时间" not in desc

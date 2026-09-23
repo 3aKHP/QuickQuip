@@ -647,6 +647,75 @@ class TestFencing:
         assert store.get_length(uid_a) < 20.0
         assert store.get_length(uid_b) < 20.0
 
+    def test_reversal_flips_transfer_direction(self, store, uid_a, uid_b, monkeypatch):
+        """reversal 翻转胜负：本会败的局，攻击方最终净转移为正。"""
+        store.update_length(uid_a, 10.0)
+        store.update_length(uid_b, 10.0)
+        store.set_fence_luck(uid_a, 1.0)
+        store.set_fence_luck(uid_b, 1.0)
+        _patch_fence_event(monkeypatch, "reversal")
+        _patch_uniform(monkeypatch, 0.9)
+        # 等长基础胜率 0.85；roll=0.9 → 基础判定为负，反转后攻击方胜
+        _patch_random(monkeypatch, 0.9)
+        fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) > 10.0
+        assert store.get_length(uid_b) < 10.0
+
+    def test_critical_multiplies_transfer(self, store, uid_a, uid_b, monkeypatch):
+        """critical 倍率：同骰下转移量为 normal 的 fence_critical_multiplier 倍。"""
+        cfg = store.config
+        store.set_fence_luck(uid_a, 1.0)  # 固定 luck：日运势随机滚会翻转胜负判定
+        store.set_fence_luck(uid_b, 1.0)
+
+        def _run(event_name: str) -> float:
+            store.update_length(uid_a, 10.0)
+            store.update_length(uid_b, 10.0)
+            _patch_fence_event(monkeypatch, event_name)
+            _patch_uniform(monkeypatch, 0.9)
+            _patch_random(monkeypatch, 0.9)
+            fencing(store, uid_a, uid_b, group_id="test")
+            return 10.0 - store.get_length(uid_a)  # 攻击方净损（两轮同判为负）
+
+        normal_loss = _run("normal")
+        critical_loss = _run("critical")
+        assert normal_loss > 0
+        assert abs(critical_loss - cfg.fence_critical_multiplier * normal_loss) < 0.05
+
+    def test_fence_luck_sways_outcome(self, store, uid_a, uid_b, monkeypatch):
+        """luck 偏置胜率：同骰下高 luck 翻转净转移方向（钳制上限内）。"""
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_uniform(monkeypatch, 0.9)
+        _patch_random(monkeypatch, 0.9)
+
+        store.update_length(uid_a, 10.0)
+        store.update_length(uid_b, 10.0)
+        store.set_fence_luck(uid_a, 1.0)
+        store.set_fence_luck(uid_b, 1.0)
+        fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) < 10.0  # 0.85 胜率下 roll 0.9 → 败
+
+        store.update_length(uid_a, 10.0)
+        store.update_length(uid_b, 10.0)
+        store.set_fence_luck(uid_a, 100.0)  # 偏置钳到 0.95 → roll 0.9 → 胜
+        fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) > 10.0
+
+    def test_target_no_niuniu_self_hurt_shrinks_attacker(self, store, uid_a, monkeypatch):
+        """self_hurt：损失落自身并写 fencing_self_hurt 记录，不注册对方、不写对方库。"""
+        store.update_length(uid_a, 10.0)
+        _patch_no_niuniu_event(monkeypatch, "self_hurt")
+        _patch_uniform(monkeypatch, 0.5)  # uniform(min,max) 固定返回 0.5 → loss=0.5
+        result = fencing(store, uid_a, "noone", group_id="test")
+        assert isinstance(result, str)
+        assert store.get_length(uid_a) < 10.0
+        recs = store.get_records(uid_a)
+        assert any(
+            r["action"] == "fencing_self_hurt" and r["origin_length"] == 10.0
+            for r in recs
+        )
+        assert not store.exists("noone")
+        assert fence_cd.check(uid_a) > 0
+
     def test_dominate_sever_for_niutouren(self, store, uid_a, uid_b, monkeypatch):
         """牛头人 winner can trigger sever (腰斩)."""
         store.update_length(uid_a, 80.0)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.llm.provider import LLMResponse
-from quickquip.llm.reply_chain import finalize_reply_text
+from quickquip.llm.reply_chain import EMPTY_REPLY_PLACEHOLDER, finalize_reply_text
 
 
 def _finalize(response: LLMResponse, *, allow_empty: bool = False) -> str:
@@ -19,9 +19,9 @@ def _finalize(response: LLMResponse, *, allow_empty: bool = False) -> str:
 
 def test_empty_text_gets_placeholder_by_default():
     text = _finalize(LLMResponse(text="", model="m"))
-    assert text.strip()
+    assert text == EMPTY_REPLY_PLACEHOLDER
 
 
 def test_allow_empty_preserves_empty_text():
-    response = LLMResponse(text="", model="m", generated_images=[])
+    response = LLMResponse(text="", model="m")
     assert _finalize(response, allow_empty=True) == ""

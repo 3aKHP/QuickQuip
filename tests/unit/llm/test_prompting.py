@@ -856,9 +856,17 @@ def test_dynamic_inputs_isolated_from_system():
 
 def test_turn_envelope_renders_time_and_weekday(frozen_now):
     envelope = build_turn_envelope(now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub())
-    assert "2026-03-16" in envelope
-    assert "星期一" in envelope
-    assert "09:19" in envelope
+    assert envelope.startswith("【轮次上下文】")
+    assert "- 当前时间：2026-03-16 星期一 09:19（北京时间）" in envelope
+
+
+def test_turn_envelope_omits_empty_sections(frozen_now):
+    # 2026-03-16 非节日、无 participants/memories/词表命中 → 头 + 时间行，仅两行
+    envelope = build_turn_envelope(now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub())
+    lines = envelope.splitlines()
+    assert lines[0] == "【轮次上下文】"
+    assert len(lines) == 2
+    assert lines[1].startswith("- 当前时间：")
 
 
 def test_turn_envelope_festival_on_injected_date():

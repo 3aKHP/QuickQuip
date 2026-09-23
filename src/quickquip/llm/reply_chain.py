@@ -337,6 +337,10 @@ class TurnRequestAssembler:
         )
 
 
+# 空正文且未放宽 allow_empty 时的兜底占位（用户可见，单一事实来源）。
+EMPTY_REPLY_PLACEHOLDER = "模型没有返回可显示的文本。"
+
+
 def finalize_reply_text(
     response: "LLMResponse",
     *,
@@ -355,7 +359,7 @@ def finalize_reply_text(
     text = strip_leading_reasoning_content(response.text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text and not allow_empty:
-        text = "模型没有返回可显示的文本。"
+        text = EMPTY_REPLY_PLACEHOLDER
 
     if response.web_search is not None:
         logger.info(

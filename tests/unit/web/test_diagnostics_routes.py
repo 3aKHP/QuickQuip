@@ -35,6 +35,8 @@ async def test_probe_providers_returns_results_and_text(monkeypatch):
     assert resp["results"][0]["provider_id"] == "p1"
     assert resp["results"][0]["status"] == "ok"
     assert resp["results"][1]["status"] == "error"
+    # 独立期望：合计行由 ok/error 计数直接决定，不用生产格式化函数自证
+    assert "合计：1/2 正常" in resp["text"]
     assert resp["text"] == format_probe_results(fake_results)
 
 

@@ -23,6 +23,7 @@ from plugins.llm_provider import (
 from plugins.llm_tools import LLMConversationMessage, LLMToolCall, LLMToolSpec
 
 from quickquip.llm.config import load_llm_config
+from quickquip.llm.provider.base import TOOL_IMAGE_FLUSH_NOTICE
 from quickquip.llm.provider.openai_responses.profiles import (
     PROFILES,
     REASONING_EFFORT_TIERS,
@@ -338,7 +339,7 @@ def test_tool_images_flushed_after_complete_batch():
     assert flush["content"][0]["type"] == "input_image"
     assert flush["content"][0]["image_url"] == "data:image/png;base64,AAAA"
     assert flush["content"][1]["type"] == "input_text"
-    assert flush["content"][1]["text"].strip()
+    assert flush["content"][1]["text"] == TOOL_IMAGE_FLUSH_NOTICE
     assert items[-1] == {"role": "user", "content": "再画一张"}
 
 
