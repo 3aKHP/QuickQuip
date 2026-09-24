@@ -148,3 +148,65 @@ async def test_period_report_now_action_uses_public_executor(monkeypatch):
 
     assert result == {"model_used": "m", "char_count": 5}
     assert calls == [("123456", "weekly", "bot")]
+
+
+@pytest.mark.asyncio
+async def test_epoch_snapshot_action_exports_state(monkeypatch, tmp_path):
+    from quickquip.llm.epoch import EpochKey, EpochManager, EpochParams
+    from quickquip.llm.envelope_cache import EnvelopeBreakdownCache
+    from quickquip.llm.store import LLMStore
+    from quickquip.llm.token_estimate import estimate_tokens
+
+    store = LLMStore(tmp_path / "snap.db")
+    store.append_conversation_message("123456789", "u1", "user", "问一句")
+    store.append_conversation_message("123456789", None, "assistant", "答一句")
+
+    class FakeConfig:
+        providers = {}
+
+        def resolve_epoch_params(self, provider=None):
+            return EpochParams()
+
+    class FakeSettings:
+        history_limit = 200
+
+    class FakeService:
+        pass
+
+    svc = FakeService()
+    svc.store = store
+    svc.config = FakeConfig()
+    svc.get_chat_settings = lambda chat_id, chat_type="group": FakeSettings()
+    svc._epochs = EpochManager(clock=lambda: 1_000.0)
+    svc._envelope_cache = EnvelopeBreakdownCache(clock=lambda: 1_000.0)
+    key = EpochKey(scope_key="123456789", provider_id="p1", model="m1")
+    svc._epochs.maybe_advance(key, store=store, params=EpochParams(context_tokens=10))
+    svc._envelope_cache.record(key, {"time": "【轮次上下文】", "memories": "记忆一条"})
+
+    monkeypatch.setattr(web_admin_actions, "_ensure_llm_bindings", lambda: None)
+    monkeypatch.setattr(web_admin_actions, "get_llm_service", lambda: svc)
+
+    result = await web_admin_actions.execute_web_admin_action(
+        WebAdminAction(
+            id="e1",
+            action_type="epoch_snapshot",
+            payload={},
+            status="running",
+            created_at="",
+            updated_at="",
+        )
+    )
+
+    assert isinstance(result["generated_at"], float)
+    entry = result["keys"][0]
+    assert entry["scope_key"] == "123456789"
+    assert entry["provider_id"] == "p1"
+    assert entry["anchor_id"] >= 0
+    assert entry["window_rows"] == 2
+    assert entry["window_tokens"] > 0
+    assert entry["history_limit"] == 200
+    assert entry["params"]["cap_tokens"] == EpochParams().cap_tokens
+    envelope = result["envelopes"][0]
+    assert envelope["recorded_at"] == 1_000.0
+    assert envelope["parts"]["time"] == estimate_tokens("【轮次上下文】")
+    assert envelope["total_tokens"] == sum(envelope["parts"].values())

@@ -25,7 +25,7 @@ def _validate_group_key(key: str) -> None:
 def _connect() -> sqlite3.Connection:
     if not _DB.exists():
         raise HTTPException(status_code=404, detail="llm.db not found")
-    conn = sqlite3.connect(_DB)
+    conn = sqlite3.connect(_DB, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 

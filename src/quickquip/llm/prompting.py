@@ -352,6 +352,90 @@ def build_system_prompt(
 _WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
+def build_turn_envelope_segments(
+    *,
+    now: datetime,
+    prompt: str,
+    memories: list[dict[str, object]],
+    vocab: VocabIndex,
+    chat_type: str = "group",
+    participants: list[dict[str, str]] | None = None,
+    mention_profiles: list[dict[str, str]] | None = None,
+) -> dict[str, str]:
+    """当轮上下文信封的六段分解（键序即拼接序）。
+
+    段键：time（头行+时间行，恒在）/ festival / participants / mentions /
+    memories / vocab；空段整段省略。vocab 段在分解口径上并入黑话解释
+    （glossary），六段契约由此定死。``build_turn_envelope`` 逐字节等于
+    ``"\\n".join(parts.values())``——两函数的行序改动必须同步。
+    """
+    parts: dict[str, str] = {}
+
+    time_lines: list[str] = ["【轮次上下文】"]
+    time_lines.append(
+        f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} "
+        f"{now:%H:%M}（北京时间）"
+    )
+    parts["time"] = "\n".join(time_lines)
+
+    festival_appendix = get_festival_persona_appendix(today=now.date())
+    if festival_appendix:
+        parts["festival"] = f"- 节日：{festival_appendix}"
+
+    if participants:
+        names = [
+            item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
+            for item in participants[:8]
+        ]
+        parts["participants"] = f"- 当前对话参与成员：{'、'.join(names)}"
+
+    if mention_profiles:
+        profile_lines: list[str] = []
+        for item in mention_profiles[:5]:
+            name = str(item.get("canonical_name", "")).strip()
+            qq = str(item.get("user_id", "")).strip()
+            if not name or not qq:
+                continue
+            label = f"{name}（QQ {qq}）"
+            aliases = str(item.get("aliases", "")).strip()
+            note = str(item.get("note", "")).strip()
+            extra = [part for part in (f"别名{aliases}" if aliases else "", note) if part]
+            profile_lines.append(f"- {label}：{'；'.join(extra)}" if extra else f"- {label}")
+        if profile_lines:
+            profile_lines.insert(0, "以下成员在消息中被艾特但未在窗口内发言，档案按 QQ 号对应：")
+            parts["mentions"] = "\n".join(profile_lines)
+
+    if memories:
+        memory_lines: list[str] = []
+        if chat_type == "private":
+            memory_lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
+        else:
+            memory_lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
+        for index, memory in enumerate(memories, 1):
+            memory_lines.append(f"{index}. {display(memory)}")
+        parts["memories"] = "\n".join(memory_lines)
+
+    vocab_lines: list[str] = []
+    vocab_matches = vocab.find_matches(prompt)
+    if vocab_matches:
+        vocab_lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
+        for item in vocab_matches:
+            line = f"- {item.alias} 通常指 {item.name}"
+            if item.note:
+                line += f"；注意：{item.note}"
+            vocab_lines.append(line)
+
+    glossary_matches = vocab.find_glossary(prompt)
+    if glossary_matches:
+        vocab_lines.append("以下黑话解释仅在当前话题相关时参考：")
+        for term, meaning in glossary_matches:
+            vocab_lines.append(f"- {term}：{meaning}")
+    if vocab_lines:
+        parts["vocab"] = "\n".join(vocab_lines)
+
+    return parts
+
+
 def build_turn_envelope(
     *,
     now: datetime,
@@ -370,63 +454,16 @@ def build_turn_envelope(
     ``mention_profiles`` 为被艾特但未发言成员的档案（名字在前、QQ 作
     配对键），空列表整段省略。
     """
-    lines: list[str] = ["【轮次上下文】"]
-    lines.append(
-        f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} "
-        f"{now:%H:%M}（北京时间）"
+    parts = build_turn_envelope_segments(
+        now=now,
+        prompt=prompt,
+        memories=memories,
+        vocab=vocab,
+        chat_type=chat_type,
+        participants=participants,
+        mention_profiles=mention_profiles,
     )
-
-    festival_appendix = get_festival_persona_appendix(today=now.date())
-    if festival_appendix:
-        lines.append(f"- 节日：{festival_appendix}")
-
-    if participants:
-        names = [
-            item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
-            for item in participants[:8]
-        ]
-        lines.append(f"- 当前对话参与成员：{'、'.join(names)}")
-
-    if mention_profiles:
-        profile_lines: list[str] = []
-        for item in mention_profiles[:5]:
-            name = str(item.get("canonical_name", "")).strip()
-            qq = str(item.get("user_id", "")).strip()
-            if not name or not qq:
-                continue
-            label = f"{name}（QQ {qq}）"
-            aliases = str(item.get("aliases", "")).strip()
-            note = str(item.get("note", "")).strip()
-            parts = [part for part in (f"别名{aliases}" if aliases else "", note) if part]
-            profile_lines.append(f"- {label}：{'；'.join(parts)}" if parts else f"- {label}")
-        if profile_lines:
-            lines.append("以下成员在消息中被艾特但未在窗口内发言，档案按 QQ 号对应：")
-            lines.extend(profile_lines)
-
-    if memories:
-        if chat_type == "private":
-            lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
-        else:
-            lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
-        for index, memory in enumerate(memories, 1):
-            lines.append(f"{index}. {display(memory)}")
-
-    vocab_matches = vocab.find_matches(prompt)
-    if vocab_matches:
-        lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
-        for item in vocab_matches:
-            line = f"- {item.alias} 通常指 {item.name}"
-            if item.note:
-                line += f"；注意：{item.note}"
-            lines.append(line)
-
-    glossary_matches = vocab.find_glossary(prompt)
-    if glossary_matches:
-        lines.append("以下黑话解释仅在当前话题相关时参考：")
-        for term, meaning in glossary_matches:
-            lines.append(f"- {term}：{meaning}")
-
-    return "\n".join(lines)
+    return "\n".join(parts.values())
 
 
 def _resolve_canonical_name(

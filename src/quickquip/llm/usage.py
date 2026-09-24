@@ -113,6 +113,24 @@ def epoch_meter(tokens: int | None) -> Iterator[None]:
         _EPOCH_HISTORY_TOKENS.reset(token)
 
 
+_EPOCH_HISTORY_ROWS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_epoch_history_rows", default=None,
+)
+
+
+@contextmanager
+def epoch_rows_meter(rows: int | None) -> Iterator[None]:
+    """设置当前回合纪元窗口的行数（len(history)）；退出复位（镜像 epoch_meter 范式）。
+
+    纪元看板"保留条数"锯齿的数据源；Agent Loop 内每行同值，按每轮单值解读。
+    """
+    token = _EPOCH_HISTORY_ROWS.set(rows)
+    try:
+        yield
+    finally:
+        _EPOCH_HISTORY_ROWS.reset(token)
+
+
 _MEDIA_IMAGE_COUNT: ContextVar[int | None] = ContextVar(
     "quickquip_llm_media_image_count", default=None,
 )
@@ -245,6 +263,7 @@ async def _record_usage(
             "agent_loop_id": loop_id,
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
+            "epoch_history_rows": _EPOCH_HISTORY_ROWS.get(),
             "media_image_count": _MEDIA_IMAGE_COUNT.get(),
             "patch_tokens": _PATCH_TOKENS.get(),
             "stream": 1 if stream_used else 0,

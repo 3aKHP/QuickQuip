@@ -25,6 +25,9 @@ _SQLITE_BUSY_RETRY_DELAY_SECONDS = 0.1
 _SQLITE_BUSY_RETRY_ATTEMPTS = 100
 _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
+# 纪元看板锯齿曲线的安全阀：单查询最多返回的轮数（触顶时保留最新若干轮）。
+_EPOCH_SERIES_MAX_LOOPS = 60_000
+
 # 统计业务时区固定为项目既有的 Asia/Shanghai；数据库时间戳持续使用 UTC，
 # 仅在窗口边界与聚合分桶时换算。偏移后缀与 SQLite 修正子从同一时区推导，
 # 保证 SQL 分桶与桶标签锁步一致。
@@ -134,6 +137,7 @@ class LLMUsageStore:
                         agent_loop_id         TEXT,
                         envelope_tokens       INTEGER,
                         epoch_history_tokens  INTEGER,
+                        epoch_history_rows    INTEGER,
                         media_image_count     INTEGER,
                         patch_tokens          INTEGER,
                         stream                INTEGER NOT NULL,
@@ -172,6 +176,7 @@ class LLMUsageStore:
                     "agent_loop_id": "TEXT",
                     "envelope_tokens": "INTEGER",
                     "epoch_history_tokens": "INTEGER",
+                    "epoch_history_rows": "INTEGER",
                     "media_image_count": "INTEGER",
                     "patch_tokens": "INTEGER",
                     "duration_ms": "REAL",
@@ -580,6 +585,49 @@ class LLMUsageStore:
             "items": [dict(row) for row in rows],
             "next_cursor": str(rows[-1]["id"]) if has_more and rows else None,
         }
+
+    def epoch_series(
+        self,
+        *,
+        cutoff: str,
+        group_id: str | None = None,
+        provider_id: str | None = None,
+        model: str | None = None,
+    ) -> list[dict]:
+        """纪元看板锯齿曲线的明细行（时间正序）。
+
+        SQL 端已按 ``agent_loop_id`` 去重（每轮取 ``MIN(id)`` 首行——Agent
+        Loop 内多次 provider 调用同值，禁止 SUM/重复计），并剔除纪元三项
+        计量全 NULL 的行；路由侧 ``_dedup_per_loop`` 留作保险。安全阀上限
+        内保最新若干轮（超出时图表早已不可渲染，截断保新）。
+        """
+        self._ensure_schema()
+        where, params = self._where(
+            cutoff,
+            {"group_id": group_id, "provider_id": provider_id, "model": model},
+        )
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, ts, agent_loop_id, envelope_tokens,
+                       epoch_history_tokens, epoch_history_rows
+                FROM (
+                    SELECT MIN(id) AS id, ts, agent_loop_id, envelope_tokens,
+                           epoch_history_tokens, epoch_history_rows
+                    FROM llm_usage_events
+                    WHERE {where}
+                      AND (epoch_history_tokens IS NOT NULL
+                           OR epoch_history_rows IS NOT NULL
+                           OR envelope_tokens IS NOT NULL)
+                    GROUP BY COALESCE(agent_loop_id, 'row:' || id)
+                    ORDER BY id DESC
+                    LIMIT {_EPOCH_SERIES_MAX_LOOPS}
+                )
+                ORDER BY id ASC
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def event(self, event_id: int) -> dict | None:
         self._ensure_schema()

@@ -14,11 +14,17 @@ import json
 import logging
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_SQLITE_BUSY_TIMEOUT_MS = 10_000
+_SQLITE_BUSY_RETRY_DELAY_SECONDS = 0.1
+_SQLITE_BUSY_RETRY_ATTEMPTS = 100
+_SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 
 def _utc_now() -> str:
@@ -126,8 +132,31 @@ class _StoreBase:
             return []
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000)
         conn.row_factory = sqlite3.Row
+        # WAL：bot 高频写与 web 只读并发下，回滚日志会让读侧在写事务期间整段
+        # locked（纪元看板窗口读取即受害者）；WAL 读写互不阻塞。journal_mode
+        # 切换本身可能撞锁，busy_timeout=0 + 有限重试与 usage_store/trace 同款。
+        try:
+            conn.execute("PRAGMA busy_timeout=0")
+            for attempt in range(_SQLITE_BUSY_RETRY_ATTEMPTS):
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as error:
+                    error_code = getattr(error, "sqlite_errorcode", None)
+                    if (
+                        error_code is None
+                        or error_code & 0xFF not in _SQLITE_RETRYABLE_LOCK_CODES
+                        or attempt == _SQLITE_BUSY_RETRY_ATTEMPTS - 1
+                    ):
+                        raise
+                    time.sleep(_SQLITE_BUSY_RETRY_DELAY_SECONDS)
+            conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception:
+            conn.close()
+            raise
         # agent 领域侧表使用 FK 级联（§4.2）；所有领域连接统一开启，
         # 不依赖某个连接碰巧启用。
         conn.execute("PRAGMA foreign_keys=ON")
@@ -197,6 +226,23 @@ class _StoreBase:
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_session_archives_user_number
                 ON session_archives(user_id, archive_number);
+
+                CREATE TABLE IF NOT EXISTS epoch_events (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts             TEXT NOT NULL,
+                    scope_key      TEXT NOT NULL,
+                    provider_id    TEXT NOT NULL,
+                    model          TEXT NOT NULL,
+                    reason         TEXT NOT NULL,
+                    old_anchor_id  INTEGER NOT NULL,
+                    new_anchor_id  INTEGER,
+                    epoch_tokens   INTEGER,
+                    evicted_rows   INTEGER,
+                    evicted_tokens INTEGER
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_epoch_events_scope
+                ON epoch_events(scope_key, id);
                 """
             )
             # Serialize column discovery and ALTER for concurrent Bot/Web upgrades.
