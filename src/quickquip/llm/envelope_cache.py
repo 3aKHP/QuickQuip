@@ -54,7 +54,12 @@ class EnvelopeBreakdownCache:
             del self._entries[key]
 
     def export(self) -> list[dict[str, object]]:
-        """快照导出（epoch_snapshot 消费）：值拷贝，避免消费方读到可变内部态。"""
+        """快照导出（epoch_snapshot 消费）：值拷贝，避免消费方读到可变内部态。
+
+        list() 先把 items 原子快照（C 层循环不释放 GIL）：导出经
+        asyncio.to_thread 在 worker 线程执行，迭代期间事件循环线程
+        record/clear 不致 RuntimeError。
+        """
         return [
             {
                 "scope_key": key.scope_key,
@@ -64,5 +69,5 @@ class EnvelopeBreakdownCache:
                 "total_tokens": entry.total_tokens,
                 "recorded_at": entry.recorded_at,
             }
-            for key, entry in self._entries.items()
+            for key, entry in list(self._entries.items())
         ]

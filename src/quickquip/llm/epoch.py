@@ -179,7 +179,10 @@ class EpochManager:
                 "anchor_id": state.anchor_id,
                 "last_activity_at": state.last_activity_at,
             }
-            for key, state in self._states.items()
+            # list() 先把 items 原子快照（C 层循环不释放 GIL）：epoch_snapshot
+            # 经 asyncio.to_thread 在 worker 线程执行，迭代期间事件循环线程
+            # 增删键不致 RuntimeError
+            for key, state in list(self._states.items())
         ]
 
     def oldest_anchor(self, scope_key: str) -> int | None:
