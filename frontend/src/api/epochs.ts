@@ -84,6 +84,19 @@ export interface EpochEnvelopeSnapshot {
   recorded_at: number
 }
 
+/**
+ * 信封六段的键序与展示名（与后端 build_turn_envelope_segments 段序一致）。
+ * 构成条与图例的唯一来源——新增/改名段只动这里。
+ */
+export const ENVELOPE_SEGMENTS: ReadonlyArray<{ key: string; name: string }> = [
+  { key: 'time', name: '时间' },
+  { key: 'festival', name: '节日' },
+  { key: 'participants', name: '参与成员' },
+  { key: 'mentions', name: '艾特档案' },
+  { key: 'memories', name: '持久记忆' },
+  { key: 'vocab', name: '词表命中' },
+]
+
 export interface EpochSnapshot {
   generated_at: number
   keys: EpochKeySnapshot[]

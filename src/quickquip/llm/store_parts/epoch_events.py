@@ -8,13 +8,23 @@ Web Admin 纪元看板的历史时间轴（悬崖标注/纪元分段/驱逐统�
 
 from __future__ import annotations
 
-from quickquip.llm.epoch import ROW_OVERHEAD_TOKENS
+import logging
+import sqlite3
+import threading
+from datetime import datetime, timedelta, timezone
+
+from quickquip.llm.epoch import row_budget
 from quickquip.llm.store_parts._base import _utc_now
-from quickquip.llm.token_estimate import estimate_tokens
+
+logger = logging.getLogger(__name__)
 
 # 驱逐统计的扫描上限：clear 等大范围事件的 token 求和封顶（超出按截断值，
 # rows 计数仍精确——COUNT 不受此限）。
 _EVICTED_SCAN_CAP = 4096
+
+# 事件表保留窗口：与看板最大 range（90d）及 usage 计量保留对齐；按日节流清理。
+_EPOCH_EVENTS_RETENTION_DAYS = 90
+_EPOCH_EVENTS_CLEANUP_LOCK = threading.Lock()
 
 
 class EpochEventsStoreMixin:
@@ -58,6 +68,25 @@ class EpochEventsStoreMixin:
                     int(evicted_tokens),
                 ),
             )
+        try:
+            self._cleanup_epoch_events_if_due()
+        except sqlite3.Error:
+            logger.warning("epoch_events 过期清理失败（不影响事件落库）", exc_info=True)
+
+    def _cleanup_epoch_events_if_due(self) -> None:
+        """按日节流清理过期事件：表只增不减会无界累积，窗口与看板 90d 对齐。"""
+        today = _utc_now()[:10]
+        if self._epoch_events_cleanup_date == today:
+            return
+        with _EPOCH_EVENTS_CLEANUP_LOCK:
+            if self._epoch_events_cleanup_date == today:
+                return
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=_EPOCH_EVENTS_RETENTION_DAYS)
+            ).isoformat()
+            with self._connect() as conn:
+                conn.execute("DELETE FROM epoch_events WHERE ts < ?", (cutoff,))
+            self._epoch_events_cleanup_date = today
 
     def list_epoch_events(
         self,
@@ -68,7 +97,11 @@ class EpochEventsStoreMixin:
         model: str | None = None,
         limit: int = 500,
     ) -> list[dict[str, object]]:
-        """按 scope 读取推进事件（id ASC = 时间序），供看板时间轴。"""
+        """按 scope 读取推进事件（id ASC = 时间序），供看板时间轴。
+
+        超限保留最新若干条（内层 DESC 截断、外层回正序）：丢最新事件会让
+        最近时刻的锚点推导停在过期值，比丢最旧的危害大。
+        """
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
         clauses = ["scope_key = ?"]
@@ -89,10 +122,13 @@ class EpochEventsStoreMixin:
                 SELECT ts, provider_id, model, reason,
                        old_anchor_id, new_anchor_id, epoch_tokens,
                        evicted_rows, evicted_tokens
-                FROM epoch_events
-                WHERE {' AND '.join(clauses)}
+                FROM (
+                    SELECT * FROM epoch_events
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY id DESC
+                    LIMIT ?
+                )
                 ORDER BY id ASC
-                LIMIT ?
                 """,
                 params,
             ).fetchall()
@@ -130,8 +166,6 @@ class EpochEventsStoreMixin:
                 [scope_key, *range_params, _EVICTED_SCAN_CAP],
             ).fetchall()
         total_rows = int(count_row["total"]) if count_row is not None else 0
-        tokens = sum(
-            estimate_tokens(str(row["raw_content"] or row["content"] or "")) + ROW_OVERHEAD_TOKENS
-            for row in rows
-        )
+        # 与纪元推进判定同口径（row_budget 单源），勿在此另立估算公式
+        tokens = sum(row_budget(dict(row)) for row in rows)
         return total_rows, tokens

@@ -17,6 +17,10 @@ from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS, estimate_rows_budget
 
 logger = logging.getLogger(__name__)
 
+# 快照导出的键数上限：按最近活跃保前 N 个。键随 scope×(provider, model)
+# 组合单调增长，不设上限会让快照在 bot 进程里越做越慢。
+_SNAPSHOT_MAX_KEYS = 50
+
 
 def _scope_parts(scope_key: str) -> tuple[str, str]:
     if scope_key.startswith("private:"):
@@ -49,7 +53,12 @@ def build_epoch_snapshot(svc) -> dict[str, object]:
     keys_out: list[dict[str, object]] = []
     history_limits: dict[str, int | None] = {}
 
-    for entry in svc._epochs.snapshot():
+    entries = sorted(
+        svc._epochs.snapshot(),
+        key=lambda entry: float(entry["last_activity_at"]),
+        reverse=True,
+    )[:_SNAPSHOT_MAX_KEYS]
+    for entry in entries:
         item: dict[str, object] = dict(entry)
         item["idle_seconds"] = max(0.0, generated_at - float(entry["last_activity_at"]))
         item["params"] = _epoch_params_dict(svc, str(entry["provider_id"]))

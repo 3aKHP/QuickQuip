@@ -31,22 +31,14 @@
  * 不落库是前缀缓存契约，历史时刻只展示"最近一封"。
  */
 import { computed } from 'vue'
+import { ENVELOPE_SEGMENTS } from '../../api/epochs'
 
 const props = defineProps<{
   parts: Record<string, number> | null
 }>()
 
-const ENV_META: ReadonlyArray<{ key: string; name: string }> = [
-  { key: 'time', name: '时间' },
-  { key: 'festival', name: '节日' },
-  { key: 'participants', name: '参与成员' },
-  { key: 'mentions', name: '艾特档案' },
-  { key: 'memories', name: '持久记忆' },
-  { key: 'vocab', name: '词表命中' },
-]
-
 const total = computed(() =>
-  ENV_META.reduce((sum, meta) => sum + (props.parts?.[meta.key] ?? 0), 0),
+  ENVELOPE_SEGMENTS.reduce((sum, meta) => sum + (props.parts?.[meta.key] ?? 0), 0),
 )
 
 interface Block {
@@ -60,7 +52,7 @@ const blocks = computed<Block[]>(() => {
   const sum = total.value
   if (!props.parts || sum <= 0) return []
   const out: Block[] = []
-  for (const meta of ENV_META) {
+  for (const meta of ENVELOPE_SEGMENTS) {
     const value = props.parts[meta.key] ?? 0
     if (!value) continue
     out.push({

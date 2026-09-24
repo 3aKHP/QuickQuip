@@ -108,6 +108,8 @@ class _StoreBase:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._unavailable = False
+        # epoch_events 过期清理的按日节流标记（EpochEventsStoreMixin 使用）
+        self._epoch_events_cleanup_date: str | None = None
         try:
             self._ensure_schema()
             self._ensure_agent_schema()

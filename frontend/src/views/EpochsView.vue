@@ -156,6 +156,7 @@ import WindowCompositionBar from '../components/epochs/WindowCompositionBar.vue'
 import EnvelopeCompositionBar from '../components/epochs/EnvelopeCompositionBar.vue'
 import { listConversations, type Conversation } from '../api/conversations'
 import {
+  ENVELOPE_SEGMENTS,
   fetchEpochTimeline,
   fetchEpochWindow,
   requestEpochSnapshot,
@@ -252,7 +253,7 @@ function reasonName(reason: string): string {
 // ── 会话与纪元键 ────────────────────────────────────────────────
 
 function conversationLabel(item: Conversation): string {
-  const kind = item.type === 'private' ? '私聊' : item.type === 'archive' ? '归档' : '群'
+  const kind = item.type === 'private' ? '私聊' : '群'
   return `${kind} ${item.group_id}（${item.count} 条）`
 }
 
@@ -277,7 +278,17 @@ function defaultKeyForGroup(): EpochKeySnapshot | null {
  * 回退到会话列表第一个（按最近活跃 DESC），让历史锯齿立即可看。
  */
 function ensureDefaultGroup() {
-  if (groupKey.value) return
+  if (groupKey.value && activeKeyId.value) return
+  if (groupKey.value) {
+    // 组已选但纪元键未就位（快照先于懒初始化到达）：键出现后补选默认键，
+    // 不覆盖用户的手动选择
+    const key = defaultKeyForGroup()
+    if (key) {
+      activeKeyId.value = `${key.provider_id}/${key.model}`
+      void reloadTimeline()
+    }
+    return
+  }
   const keys = snapshot.value?.keys ?? []
   const busiest = keys.slice().sort((a, b) => b.last_activity_at - a.last_activity_at)[0]
   if (busiest) {
@@ -542,19 +553,10 @@ const envelopeForActiveKey = computed(() => {
 
 const envelopeParts = computed<Record<string, number> | null>(() => envelopeForActiveKey.value?.parts ?? null)
 
-const ENVELOP_META: ReadonlyArray<{ key: string; name: string }> = [
-  { key: 'time', name: '时间' },
-  { key: 'festival', name: '节日' },
-  { key: 'participants', name: '参与成员' },
-  { key: 'mentions', name: '艾特档案' },
-  { key: 'memories', name: '持久记忆' },
-  { key: 'vocab', name: '词表命中' },
-]
-
 const envelopeLegend = computed(() => {
   const parts = envelopeParts.value
   if (!parts) return []
-  return ENVELOP_META.filter(meta => parts[meta.key]).map(meta => ({ ...meta, value: parts[meta.key] }))
+  return ENVELOPE_SEGMENTS.filter(meta => parts[meta.key]).map(meta => ({ ...meta, value: parts[meta.key] }))
 })
 
 const envelopeTimeLabel = computed(() => {
@@ -889,14 +891,18 @@ onMounted(async () => {
   snapshotTimer = setInterval(() => {
     void refreshSnapshot(true)
   }, SNAPSHOT_AUTO_MS)
+  // 快照优先：refreshSnapshot 内部 ensureDefaultGroup 选快照里最活跃的键；
+  // 键空（bot 重启后尚无 chat）时退到会话列表回退选中
+  await refreshSnapshot()
   try {
-    conversations.value = (await listConversations()).conversations
-    // 快照先到但键空（重启后无 chat）时，靠会话列表回退选中
-    ensureDefaultGroup()
+    // 归档会话无纪元语义（路由拒绝 archive: 键），不进选择器与回退
+    conversations.value = (await listConversations()).conversations.filter(
+      item => item.type !== 'archive',
+    )
   } catch {
     // 会话列表失败不阻断快照流；选择器保持空态
   }
-  await refreshSnapshot()
+  ensureDefaultGroup()
 })
 
 onUnmounted(() => {

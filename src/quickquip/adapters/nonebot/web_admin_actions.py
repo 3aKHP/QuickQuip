@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -89,8 +90,9 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
         return {"ok": True, "text": text}
 
     if action.action_type == "epoch_snapshot":
-        # 纪元看板实时态：锚点全量 + 窗口计量 + 生效参数 + 最近信封分解（只读）
-        return build_epoch_snapshot(svc)
+        # 纪元看板实时态：锚点全量 + 窗口计量 + 生效参数 + 最近信封分解（只读）。
+        # 逐键 SQLite 读 + token 估算可能数百毫秒，移出 bot 事件循环执行。
+        return await asyncio.to_thread(build_epoch_snapshot, svc)
 
     if action.action_type == "clear_context":
         scope_key = _validate_scope(action.payload.get("scope_key"))

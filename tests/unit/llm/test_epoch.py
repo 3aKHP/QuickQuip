@@ -7,6 +7,7 @@ MIN_EPOCH_ROWS 保护、reset_scope / persona 挪锚 / note_activity 续期语�
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -436,3 +437,43 @@ def test_event_write_failure_tolerated(store: LLMStore, monkeypatch) -> None:
     # 事件写失败不阻断主链路：锚点照常推进
     assert mgr.current_anchor(_KEY) is not None
     assert store.list_epoch_events("1001") == []
+
+
+def _record_hot(store: LLMStore, anchor: int) -> None:
+    store.record_epoch_event(
+        scope_key="1001",
+        provider_id="p1",
+        model="m1",
+        reason="hot",
+        old_anchor_id=anchor,
+        new_anchor_id=anchor + 1,
+    )
+
+
+def test_list_epoch_events_keeps_newest_when_over_limit(store: LLMStore) -> None:
+    # 超限截断保最新（丢弃最新会让锚点推导停在过期值），返回仍按时间正序
+    for i in range(5):
+        _record_hot(store, i)
+
+    events = store.list_epoch_events("1001", limit=3)
+
+    assert [e["new_anchor_id"] for e in events] == [3, 4, 5]
+
+
+def test_record_epoch_event_cleans_up_expired(store: LLMStore) -> None:
+    # 直接落一条远超保留窗口的旧事件，再 record 一条触发按日节流清理
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO epoch_events (
+                ts, scope_key, provider_id, model, reason,
+                old_anchor_id, new_anchor_id, epoch_tokens,
+                evicted_rows, evicted_tokens
+            ) VALUES (?, '1001', 'p1', 'm1', 'cold', 0, 1, -1, 0, 0)
+            """,
+            (datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat(),),
+        )
+
+    _record_hot(store, 1)
+
+    assert [e["reason"] for e in store.list_epoch_events("1001")] == ["hot"]

@@ -121,15 +121,18 @@ def _list_epoch_events_sync(
         return []
     conn.row_factory = sqlite3.Row
     try:
-        # 表由 bot 进程建 schema；首部署 web 先起的窗口期内容忍缺表
+        # 超限保最新（与锯齿 points 的截断方向一致）：内层 DESC 截断，外层回正序
         rows = conn.execute(
             f"""
             SELECT ts, provider_id, model, reason, old_anchor_id, new_anchor_id,
                    epoch_tokens, evicted_rows, evicted_tokens
-            FROM epoch_events
-            WHERE {' AND '.join(clauses)}
+            FROM (
+                SELECT * FROM epoch_events
+                WHERE {' AND '.join(clauses)}
+                ORDER BY id DESC
+                LIMIT 2000
+            )
             ORDER BY id ASC
-            LIMIT 2000
             """,
             params,
         ).fetchall()
