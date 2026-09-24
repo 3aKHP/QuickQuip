@@ -49,7 +49,9 @@ class StateMixin:
             self.store.migrate_loops_between_scopes(
                 scope_key, f"archive:{user_id_str}:{archive_number}"
             )
-            self._epochs.reset_scope(scope_key)
+            # 行已迁移到 archive scope，clear 事件的驱逐统计按 0 记（键抹除是事实本体）
+            self._epochs.reset_scope(scope_key, store=self.store)
+            self._envelope_cache.clear_scope(scope_key)
             self._skill_activations.clear_scope(scope_key)
         else:
             self.clear_context(user_id, chat_type="private")
@@ -380,16 +382,19 @@ class StateMixin:
 
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
         scope_key = self.build_chat_scope_key(group_id, chat_type)
+        # 纪元清键先于删行：clear 事件的驱逐统计要能读到窗口内的行
+        # （epoch_events 旁路，失败仅告警不影响清理）。
+        self._epochs.reset_scope(scope_key, store=self.store)
+        self._envelope_cache.clear_scope(scope_key)
         deleted = self.store.clear_conversation_messages(scope_key)
         # Agent 执行记录随域清理（§9.3）：主表行删除后侧表不能留孤儿。
         self.store.delete_loops_for_scope(scope_key)
-        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点 + Skill 激活
-        # 登记；只清前者会让 build_messages 继续把缓冲拼进提示词，或让纪元锚点指向
-        # 已删除的行，或让"已激活"登记挡住正文重注入，模型仍然"看得见"历史。
-        # 四件齐清（私聊会话 start/end/resume 也走这里）。
+        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点 + 信封分解
+        # 缓存 + Skill 激活登记；只清前者会让 build_messages 继续把缓冲拼进提示词，
+        # 或让纪元锚点指向已删除的行，或让"已激活"登记挡住正文重注入，模型仍然
+        # "看得见"历史。五件齐清（私聊会话 start/end/resume 也走这里）。
         if self.recent_message_buffer:
             self.recent_message_buffer.clear_scope(scope_key)
-        self._epochs.reset_scope(scope_key)
         self._skill_activations.clear_scope(scope_key)
         self._bump_scope_generation(scope_key, HistoryMutation.CLEAR)
         return deleted

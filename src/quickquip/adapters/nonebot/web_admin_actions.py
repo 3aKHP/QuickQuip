@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -10,6 +11,7 @@ from quickquip.app.message_pipeline import (
 )
 from quickquip.app.web.action_queue import WebAdminAction, action_queue
 from quickquip.chat.daily_briefing import normalize_period
+from quickquip.llm.epoch_snapshot import build_epoch_snapshot
 
 _SCOPE_KEY_RE = re.compile(r"^(?:\d{5,12}|private:\d{5,15})$")
 _WEB_ADMIN_HEALTH_SCOPE = "__web_admin__"
@@ -86,6 +88,11 @@ async def _execute_runtime_action(action: WebAdminAction) -> dict[str, Any]:
             _chat_id(scope_key), chat_type=_chat_type(scope_key), verbose=verbose
         )
         return {"ok": True, "text": text}
+
+    if action.action_type == "epoch_snapshot":
+        # 纪元看板实时态：锚点全量 + 窗口计量 + 生效参数 + 最近信封分解（只读）。
+        # 逐键 SQLite 读 + token 估算可能数百毫秒，移出 bot 事件循环执行。
+        return await asyncio.to_thread(build_epoch_snapshot, svc)
 
     if action.action_type == "clear_context":
         scope_key = _validate_scope(action.payload.get("scope_key"))

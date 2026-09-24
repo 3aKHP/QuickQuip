@@ -29,6 +29,7 @@ from quickquip.app.web.routes import (
     awakening,
     llm_runtime,
     llm_usage,
+    epochs,
     scheduled_messages,
 )
 from quickquip.app.web.settings import load_web_env
@@ -111,6 +112,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(
         llm_usage.router, prefix="/ops/api", dependencies=auth.protected_dependencies
+    )
+    app.include_router(
+        epochs.router, prefix="/ops/api", dependencies=auth.protected_dependencies
     )
     app.include_router(
         scheduled_messages.router, prefix="/ops/api", dependencies=auth.protected_dependencies

@@ -60,10 +60,11 @@ from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
-    build_turn_envelope,
+    build_turn_envelope_segments,
     merge_image_urls,
 )
 from quickquip.llm.token_estimate import estimate_tokens
+from quickquip.llm.envelope_cache import EnvelopeBreakdownCache
 from quickquip.llm.epoch import (
     DEFAULT_EPOCH_MAX_ROWS,
     EpochKey,
@@ -121,7 +122,14 @@ from quickquip.llm.service_parts import (
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, patch_meter, usage_scope
+from quickquip.llm.usage import (
+    envelope_meter,
+    epoch_meter,
+    epoch_rows_meter,
+    media_meter,
+    patch_meter,
+    usage_scope,
+)
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
@@ -199,6 +207,8 @@ class LLMService(
         self._session_presets: dict[str, str] = {}
         # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
         self._epochs = EpochManager()
+        # 最近一封信封的六段分解（进程内旁路，纪元看板实时态数据源）
+        self._envelope_cache = EnvelopeBreakdownCache()
         # 同 scope 轮次串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权
         self._scope_gate = ScopeGate()
         self._init_auto_memory()
@@ -368,9 +378,10 @@ class LLMService(
         memories: list[dict[str, object]],
         participants: list[dict[str, str]] | None = None,
         mention_profiles: list[dict[str, str]] | None = None,
-    ) -> str:
-        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。
-        return build_turn_envelope(
+    ) -> dict[str, str]:
+        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。返回六段分解，
+        # join 由 TurnRequestAssembler 统一执行（字节口径单点）。
+        return build_turn_envelope_segments(
             now=datetime.now(ZoneInfo(BEIJING_TIMEZONE)),
             prompt=prompt,
             memories=memories,
@@ -1256,10 +1267,15 @@ class LLMService(
                 agent_delivery_intermediate_enabled=settings.agent_delivery_intermediate_enabled,
                 agent_delivery_final_enabled=settings.agent_delivery_final_enabled,
             )
+            # 信封构成缓存：装配最终态已知（预算降级重建后的 assembler），
+            # 记最近一次六段分解供纪元看板实时态导出。
+            self._envelope_cache.record(epoch_key, assembler.envelope_parts)
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
                 envelope_meter(estimate_tokens(assembler.turn_envelope)),
                 epoch_meter(estimate_rows_budget(assembler.history)),
+                # 保留条数锯齿的计量源：窗口行数与 token 同口径同生命周期
+                epoch_rows_meter(len(assembler.history)),
                 # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
                 # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
                 media_meter(len(assembler.messages[-1].image_urls)),

@@ -205,8 +205,8 @@ class TurnRequestAssembler:
     首轮与预算降级重建复用同一实例；``assemble()`` 每次调用重取历史并
     重建信封 / messages（复用已消费的补丁快照），最新结果挂在本实例
     属性上（``history`` / ``scene_patch`` / ``turn_envelope`` /
-    ``messages``），供调用方做账本计量与持久化——原闭包经 6 个
-    nonlocal 重绑定外层变量的边界在此显式化。
+    ``envelope_parts`` / ``messages``），供调用方做账本计量与持久化——
+    原闭包经 6 个 nonlocal 重绑定外层变量的边界在此显式化。
     """
 
     # service 侧绑定可调用（窄缝：不传 LLMService 实例）
@@ -215,7 +215,8 @@ class TurnRequestAssembler:
         dict[str, list["LLMConversationMessage"]],
     ]]
     collect_mention_profiles: Callable[..., list[dict[str, str]]]
-    build_turn_envelope: Callable[..., str]
+    # 返回六段分解（键序即拼接序）；join 由本类统一执行，字节口径单点。
+    build_turn_envelope: Callable[..., dict[str, str]]
     build_messages: Callable[..., list["LLMConversationMessage"]]
 
     # 会话与历史上下文
@@ -260,6 +261,7 @@ class TurnRequestAssembler:
     participants: list[dict[str, str]] = field(default_factory=list)
     scene_patch: list[dict[str, str]] | None = None
     projected_segments: dict[str, list["LLMConversationMessage"]] = field(default_factory=dict)
+    envelope_parts: dict[str, str] = field(default_factory=dict)
     turn_envelope: str = ""
     messages: list["LLMConversationMessage"] = field(default_factory=list)
 
@@ -294,7 +296,7 @@ class TurnRequestAssembler:
             current_user_id=str(self.user_id),
             quoted_user_id=self.quoted_user_id,
         )
-        self.turn_envelope = self.build_turn_envelope(
+        self.envelope_parts = self.build_turn_envelope(
             self.chat_id,
             self.chat_type,
             self.analysis_prompt or self.trimmed_prompt,
@@ -302,6 +304,7 @@ class TurnRequestAssembler:
             participants=self.participants,
             mention_profiles=mention_profiles,
         )
+        self.turn_envelope = "\n".join(self.envelope_parts.values())
         self.messages = self.build_messages(
             prompt=self.trimmed_prompt,
             image_urls=self.effective_image_urls,

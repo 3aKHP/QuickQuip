@@ -7,6 +7,7 @@ MIN_EPOCH_ROWS 保护、reset_scope / persona 挪锚 / note_activity 续期语�
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -329,7 +330,7 @@ def test_force_advance_to_hot_stateless_and_converges(store: LLMStore) -> None:
 
 def test_epoch_row_budget_ignores_native_state() -> None:
     # 口径锁定：纪元预算只读可见行正文，执行记录的原生状态不参与计量。
-    from quickquip.llm.epoch import ROW_OVERHEAD_TOKENS, _row_budget
+    from quickquip.llm.epoch import ROW_OVERHEAD_TOKENS, row_budget
     from quickquip.llm.token_estimate import estimate_tokens
 
     row = {
@@ -338,7 +339,7 @@ def test_epoch_row_budget_ignores_native_state() -> None:
         "native_state_json": "n" * 10_000,
         "agent_loop_id": "loop_1",
     }
-    assert _row_budget(row) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
+    assert row_budget(row) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
     assert estimate_rows_budget([row]) == estimate_tokens("字" * 100) + ROW_OVERHEAD_TOKENS
 
 
@@ -364,3 +365,115 @@ def test_force_advance_to_hot_applies_rows_backstop(store: LLMStore, row_limit) 
     assert event is not None
     rows = _rows_since(store, "1001", mgr.current_anchor(_KEY))
     assert len(rows) <= row_limit
+
+
+def test_snapshot_exports_value_copies(store: LLMStore) -> None:
+    _seed_pairs(store, "1001", 5)
+    clock = FakeClock()
+    mgr = EpochManager(clock=clock)
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+    anchor = mgr.current_anchor(_KEY)
+
+    snap = mgr.snapshot()
+    assert len(snap) == 1
+    entry = snap[0]
+    assert entry["scope_key"] == "1001"
+    assert entry["provider_id"] == "p1"
+    assert entry["model"] == "m1"
+    assert entry["anchor_id"] == anchor
+    assert entry["last_activity_at"] == clock.now
+
+    # 值拷贝：改导出 dict 不影响进程内真值
+    entry["anchor_id"] = 999999
+    assert mgr.current_anchor(_KEY) == anchor
+
+
+def test_advance_records_init_and_hot_events(store: LLMStore) -> None:
+    # 先初始化（窗口 ≈ context_tokens），再生长越过 cap 触发热缩——
+    # 懒初始化窗口天然低于 cap，单轮播种触不了 hot。
+    _seed_pairs(store, "1001", 4)
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+    _seed_pairs(store, "1001", 40)
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+
+    events = store.list_epoch_events("1001")
+    reasons = [e["reason"] for e in events]
+    assert reasons[0] == "init"
+    assert "hot" in reasons
+
+    hot = next(e for e in events if e["reason"] == "hot")
+    assert hot["provider_id"] == "p1" and hot["model"] == "m1"
+    assert hot["new_anchor_id"] > hot["old_anchor_id"]
+    assert hot["evicted_rows"] > 0
+    assert hot["evicted_tokens"] > 0
+
+
+def test_reset_scope_records_clear_events(store: LLMStore) -> None:
+    _seed_pairs(store, "1001", 5)
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+    anchor = mgr.current_anchor(_KEY)
+
+    mgr.reset_scope("1001", store=store)
+
+    events = store.list_epoch_events("1001")
+    clear = events[-1]
+    assert clear["reason"] == "clear"
+    assert clear["old_anchor_id"] == anchor
+    assert clear["new_anchor_id"] is None
+    assert clear["evicted_rows"] > 0
+
+
+def test_event_write_failure_tolerated(store: LLMStore, monkeypatch) -> None:
+    _seed_pairs(store, "1001", 12)
+
+    def boom(**kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(store, "record_epoch_event", boom)
+    mgr = EpochManager(clock=FakeClock())
+    mgr.maybe_advance(_KEY, store=store, params=_SMALL)
+    # 事件写失败不阻断主链路：锚点照常推进
+    assert mgr.current_anchor(_KEY) is not None
+    assert store.list_epoch_events("1001") == []
+
+
+def _record_hot(store: LLMStore, anchor: int) -> None:
+    store.record_epoch_event(
+        scope_key="1001",
+        provider_id="p1",
+        model="m1",
+        reason="hot",
+        old_anchor_id=anchor,
+        new_anchor_id=anchor + 1,
+    )
+
+
+def test_list_epoch_events_keeps_newest_when_over_limit(store: LLMStore) -> None:
+    # 超限截断保最新（丢弃最新会让锚点推导停在过期值），返回仍按时间正序
+    for i in range(5):
+        _record_hot(store, i)
+
+    events = store.list_epoch_events("1001", limit=3)
+
+    assert [e["new_anchor_id"] for e in events] == [3, 4, 5]
+
+
+def test_record_epoch_event_cleans_up_expired(store: LLMStore) -> None:
+    # 直接落一条远超保留窗口的旧事件，再 record 一条触发按日节流清理
+    with store._connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO epoch_events (
+                ts, scope_key, provider_id, model, reason,
+                old_anchor_id, new_anchor_id, epoch_tokens,
+                evicted_rows, evicted_tokens
+            ) VALUES (?, '1001', 'p1', 'm1', 'cold', 0, 1, -1, 0, 0)
+            """,
+            (datetime(2000, 1, 1, tzinfo=timezone.utc).isoformat(),),
+        )
+
+    _record_hot(store, 1)
+
+    assert [e["reason"] for e in store.list_epoch_events("1001")] == ["hot"]
