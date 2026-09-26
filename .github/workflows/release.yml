@@ -80,6 +80,7 @@ jobs:
           Copy-Item -Recurse frontend\dist\* staging\frontend\dist\
 
           Copy-Item -Recurse config staging\
+          Copy-Item -Recurse skills.example staging\
           Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
           New-Item -ItemType Directory -Force staging\scripts | Out-Null
           Copy-Item scripts\backfill_chat_archive.py, scripts\backfill_record_identities.py staging\scripts\
@@ -99,7 +100,8 @@ jobs:
             "staging\config\niuniu_text.toml", "staging\config\niuniu_text_safe.toml",
             "staging\config\personas.example\_shared.toml", "staging\config\personas.example\private-persona.toml",
             "staging\config\personas.example\quickquip-default.toml", "staging\config\personas.example\structured.toml",
-            "staging\llm_about\vocab.yaml.example", "staging\llm_about\identities.yaml.example"
+            "staging\llm_about\vocab.yaml.example", "staging\llm_about\identities.yaml.example",
+            "staging\skills.example\self-docs\SKILL.md", "staging\skills.example\host-healthcheck\SKILL.md"
           )
           $missing = @($expected | Where-Object { -not (Test-Path $_) })
           if ($missing.Count -gt 0) { throw "Lazy package missing template files: $($missing -join ', ')" }

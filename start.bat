@@ -17,14 +17,8 @@ call :copy_if_missing "config\awakening.toml.example" "config\awakening.toml"
 call :copy_if_missing "config\sensitive_words.toml.example" "config\sensitive_words.toml"
 call :copy_if_missing "config\niuniu_text.toml.example" "config\niuniu_text.toml"
 call :copy_if_missing "config\niuniu_text_safe.toml.example" "config\niuniu_text_safe.toml"
-if not exist "config\personas" (
-    if exist "config\personas.example" (
-        echo [First run] Copy config\personas.example -^> config\personas
-        xcopy "config\personas.example" "config\personas\" /E /I /Q /Y >nul
-    ) else (
-        echo [WARNING] Missing config\personas.example, skipping personas copy
-    )
-)
+call :copy_dir_if_missing "config\personas.example" "config\personas"
+call :copy_dir_if_missing "skills.example" "skills"
 call :copy_if_missing "llm_about\vocab.yaml.example" "llm_about\vocab.yaml"
 call :copy_if_missing "llm_about\identities.yaml.example" "llm_about\identities.yaml"
 
@@ -61,8 +55,19 @@ echo Starting QQ Bot...
 pause
 exit /b
 
-:copy_if_missing
+@rem 目录级首启模板复制(xcopy /E /I /Q /Y),存在即跳过。
+:copy_dir_if_missing
 if not exist "%~2" (
+    if exist "%~1" (
+        echo [First run] Copy %~1 -^> %~2
+        xcopy "%~1" "%~2\" /E /I /Q /Y >nul
+    ) else (
+        echo [WARNING] Missing template %~1, skipping %~2
+    )
+)
+exit /b
+
+:copy_if_missing "%~2" (
     if exist "%~1" (
         echo [First run] Copy %~1 -^> %~2
         copy "%~1" "%~2" >nul
