@@ -744,6 +744,12 @@ class LLMService(
             backstop = self.store.find_anchor_row_id_by_rows(scope_key, settings.history_limit)
             if backstop is not None:
                 anchor = max(anchor, backstop)
+        # 窗口守卫（Deep-CR L1-3/L3-1）：生效锚点越过登记的激活尾部即激活轮
+        # 出窗，清掉登记让重新激活走完整注入——否则去重短路会向模型声称
+        # "正文不再重复注入"而正文已不可见。覆盖锚点推进类收缩（行数兜底；
+        # 纪元推进另有整体清除）；词表归档与投影降级类（行不动、可见面变）
+        # 不在本守卫内，残留登记的自救是模型自行 read_skill_resource。
+        self._skill_activations.drop_outdated(scope_key, anchor)
         history = self.store.list_conversation_messages_since(
             scope_key, anchor, limit=DEFAULT_EPOCH_MAX_ROWS,
         )

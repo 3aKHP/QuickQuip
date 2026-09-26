@@ -110,6 +110,17 @@ class ConversationStoreMixin:
             for row in rows
         ]
 
+    def latest_conversation_row_id(self, group_id: int | str) -> int:
+        """该会话当前最大行 id（无行时 0）——Skill 激活登记的尾部锚点用。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM conversation_messages WHERE group_id = ?",
+                (str(group_id),),
+            ).fetchone()
+        return int(row[0])
+
     def find_anchor_row_id_by_rows(self, group_id: int | str, keep_rows: int) -> int | None:
         """返回「保留最新 keep_rows 行」的锚点行 id（第 keep_rows 新的行）。
 

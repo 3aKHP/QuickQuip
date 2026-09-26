@@ -208,6 +208,7 @@ class SkillsToolMixin:
             state=self._skill_activations,
             scope=scope,
             record=record,
+            tail_row_id=self.store.latest_conversation_row_id(scope),
         )
 
     def _tool_read_skill_resource(
