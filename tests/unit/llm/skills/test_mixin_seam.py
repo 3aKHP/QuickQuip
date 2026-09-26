@@ -299,28 +299,61 @@ def test_skill_list_drops_blocked_descriptions(tmp_path, monkeypatch):
     assert "dirty" not in listing and "blocked" not in listing
 
 def test_reactivate_after_window_shrink_reinjects_body(tmp_path):
-    """Deep-CR L1-3/L3-1:窗口收缩把激活轮移出可见历史后,重新激活走完整
-    注入,而非"正文不再重复注入"的假陈述。
+    """Deep-CR L1-3/L3-1(真实链路):/llm context_limit 行数兜底使生效锚点
+    越过激活尾部,_load_scrubbed_history_and_participants 的守卫巡检清登记,
+    重新激活走完整注入而非"正文不再重复注入"的假陈述。
 
-    注意登记尾部 = 正文实际注入轮的会话尾部(去重短路不注入新正文、
-    不刷新尾部),因此首个断言前先预置会话行使尾部 > 0。"""
+    删掉 service.py 守卫行本测试必须失败(生产挂点约束)。"""
+    from quickquip.common.sensitive_filter import SensitiveFilter
+    from quickquip.llm.epoch import EpochKey, EpochParams
+    from quickquip.llm.settings import ResolvedGroupSettings
+
     catalog = tmp_path / "skills"
     write_skill(catalog, "demo", "演示。", body="独特正文标记 XYZ\n")
     svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
     ctx = _context()  # group_id=1001, chat_type="group"
     scope = svc.build_chat_scope_key(ctx.group_id, ctx.chat_type)
-    svc.store.append_conversation_message(ctx.group_id, 2002, "user", "预热消息")
 
+    # 预置 2 行 → 激活(登记尾部=2)→ 同 hash 去重短路 → 再预置 8 行(共 10)
+    for i in range(2):
+        svc.store.append_conversation_message(ctx.group_id, 2002, "user", f"预热{i}")
     first = svc._tool_activate_skill({"name": "demo"}, ctx)
     assert "独特正文标记" in str(first)
-
-    # 同 hash 去重短路(正文仍在窗口内,登记尾部未被刷新)
     second = svc._tool_activate_skill({"name": "demo"}, ctx)
     assert "不再重复注入" in str(second)
+    for i in range(8):
+        svc.store.append_conversation_message(ctx.group_id, 2002, "user", f"填充{i}")
+    assert svc._skill_activations.is_active(scope, "demo")
 
-    # 生效锚点越过登记尾部 → 巡检清登记 → 重新激活重注入正文
-    tail = svc.store.latest_conversation_row_id(scope)
-    assert tail > 0
-    svc._skill_activations.drop_outdated(scope, tail + 100)
+    # history_limit=3:行数兜底锚点=第 8 行,越过登记尾部(2)→ 守卫清登记
+    svc._load_scrubbed_history_and_participants(
+        chat_id=ctx.group_id,
+        chat_type=ctx.chat_type,
+        scope_key=scope,
+        settings=ResolvedGroupSettings(
+            enabled=True,
+            memory_enabled=True,
+            auto_memory_enabled=False,
+            provider_id="openai-main",
+            model="gpt-test",
+            persona_id="default",
+            trigger_prefix="/ai",
+            allow_prefix=True,
+            allow_at=True,
+            history_limit=3,
+        ),
+        sensitive=SensitiveFilter.empty(),
+        user_id=2002,
+        sender_name="测试",
+        recent_messages=None,
+        message_id=None,
+        quoted_sender_name="",
+        quoted_user_id="",
+        epoch_key=EpochKey(
+            scope_key=scope, provider_id="openai-main", model="gpt-test"
+        ),
+        epoch_params=EpochParams(),
+    )
+    assert not svc._skill_activations.is_active(scope, "demo")
     third = svc._tool_activate_skill({"name": "demo"}, ctx)
     assert "独特正文标记" in str(third)
