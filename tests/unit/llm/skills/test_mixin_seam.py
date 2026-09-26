@@ -281,3 +281,19 @@ def test_catalog_block_silent_when_tool_calling_disabled(tmp_path):
     )
     svc = LLMService(**bundle)
     assert svc._skills_catalog_block(provider=None, model="gpt-test") == ""
+
+
+def test_skill_list_drops_blocked_descriptions(tmp_path, monkeypatch):
+    """/skill list 与 catalog 路径同一剔除面：description 命中拦截词的
+    skill 不出现在命令回复里（Deep-CR L2-2/L4-1，此前仅 AI 面剔除）。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "clean", "正常描述。")
+    write_skill(catalog, "dirty", "含 blocked 词。")
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    sensitive = make_sensitive_filter(tmp_path, "block")
+    monkeypatch.setattr(
+        "quickquip.llm.service_parts.skills._get_sensitive_filter", lambda: sensitive
+    )
+    listing = svc.format_skill_list(3001)
+    assert "clean" in listing and "正常描述。" in listing
+    assert "dirty" not in listing and "blocked" not in listing
