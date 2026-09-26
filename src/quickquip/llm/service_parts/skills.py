@@ -140,6 +140,11 @@ class SkillsToolMixin:
         """每轮构建系统提示时调用：现扫目录、按需惰性注册、渲染静态段末尾块。"""
         if not self.config.skills.enabled:
             return ""
+        if not self.config.runtime.tool_calling_enabled:
+            # 工具面关闭时 catalog 块一并静默：块文本指引模型用
+            # activate_skill 激活，而该工具不会注册——注入即误导
+            # （Deep-CR L1-2）。
+            return ""
         window = (
             resolve_context_window(provider.model_context_windows, model)
             if provider is not None
