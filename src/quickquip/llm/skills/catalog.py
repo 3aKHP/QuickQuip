@@ -39,6 +39,11 @@ SKILL_FILE_NAME = "SKILL.md"
 # 单个 skill 编入清单的附属资源条数上限（超出停止遍历并记诊断）。
 MAX_RESOURCES_PER_SKILL = 200
 
+# scripts/ 下单个脚本文件的字节上限（超出不编入清单、不可执行，记诊断）。
+# 扫描期对每个脚本做 SHA-256 全量读盘，没有该上限时误放进目录的大文件
+# 会让每轮 LLM 请求的目录扫描同步读盘数百 MB（Deep-CR L2-3）。
+MAX_SCRIPT_FILE_BYTES = 256 * 1024
+
 _FALLBACK_BUDGET_BYTES = 8 * 1024
 _SHORTENED_DESCRIPTION_CHARS = 160
 _MIN_DESCRIPTION_CHARS = 80
@@ -314,15 +319,6 @@ def _walk_skill_files(root_dir: Path) -> tuple[list[SkillResource], list[SkillDi
                 )
                 break
             kind = classify_resource(relative)
-            sha256 = ""
-            if kind == "script":
-                try:
-                    sha256 = hashlib.sha256(absolute.read_bytes()).hexdigest()
-                except OSError as exc:
-                    diagnostics.append(
-                        SkillDiagnostic("read-error", f"{relative}：{exc.strerror or exc}")
-                    )
-                    continue
             try:
                 size_bytes = absolute.stat().st_size
             except OSError as exc:
@@ -331,6 +327,26 @@ def _walk_skill_files(root_dir: Path) -> tuple[list[SkillResource], list[SkillDi
                     SkillDiagnostic("read-error", f"{relative}：{exc.strerror or exc}")
                 )
                 continue
+            sha256 = ""
+            if kind == "script":
+                if size_bytes > MAX_SCRIPT_FILE_BYTES:
+                    # 哈希路径无读取上限（Deep-CR L2-3）：先按 stat 拒绝
+                    # 超限脚本，避免每轮扫描对误放大文件做全量读盘。
+                    diagnostics.append(
+                        SkillDiagnostic(
+                            "script-oversize",
+                            f"{relative}：脚本超过 {MAX_SCRIPT_FILE_BYTES} 字节上限，"
+                            "不编入清单。",
+                        )
+                    )
+                    continue
+                try:
+                    sha256 = hashlib.sha256(absolute.read_bytes()).hexdigest()
+                except OSError as exc:
+                    diagnostics.append(
+                        SkillDiagnostic("read-error", f"{relative}：{exc.strerror or exc}")
+                    )
+                    continue
             resources.append(
                 SkillResource(
                     path=relative,

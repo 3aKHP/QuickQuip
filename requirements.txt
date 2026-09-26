@@ -13,3 +13,5 @@ httpx>=0.28.0
 certifi>=2024.2.2
 lunardate
 PyYAML>=6.0
+# search_skill_resources 匹配超时:regex 引擎内建可中断超时(防 ReDoS)
+regex>=2023.12.25

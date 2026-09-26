@@ -325,3 +325,15 @@ def test_catalog_deterministic_render_order_independent_of_input_order(make_skil
     reverse = build_catalog(list(reversed(skills)), budget_bytes=8192)
     assert forward.names == reverse.names == ["a-skill", "b-skill"]
     assert forward.hash == reverse.hash
+
+
+def test_scan_rejects_oversized_script_with_diagnostic(make_skill):
+    """scripts/ 单文件超上限：不编入清单（不可执行）、不做哈希全量读盘，
+    记 script-oversize 诊断（Deep-CR L2-3）。"""
+    catalog_dir, writer = make_skill
+    big_script = b"print(1)\n" * 40_000  # ~320KB > 256KiB 上限
+    writer("demo", files={"scripts/big.py": big_script, "references/a.md": "正文"})
+    (skill,) = scan_skills(catalog_dir)
+    assert not any(r.path == "scripts/big.py" for r in skill.resources)
+    assert any(d.kind == "script-oversize" for d in skill.diagnostics)
+    assert any(r.path == "references/a.md" for r in skill.resources)

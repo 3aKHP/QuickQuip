@@ -266,3 +266,18 @@ def test_catalog_descriptions_kept_when_filter_not_loaded(tmp_path, monkeypatch)
     )
     block = svc.prepare_skill_catalog_for_turn(provider=None, model="gpt-test")
     assert "- dirty: 含 blocked 词。" in block
+
+
+def test_catalog_block_silent_when_tool_calling_disabled(tmp_path):
+    """工具面关闭时 catalog 块静默：块文本指引模型用 activate_skill 激活，
+    而该工具不会进入广告面——注入即误导（Deep-CR L1-2）。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "demo", "演示。", body="正文\n")
+    disabled = MIN_LLM_CONFIG_TOML.replace(
+        "tool_calling_enabled = true", "tool_calling_enabled = false"
+    )
+    bundle = write_llm_config_bundle(
+        tmp_path, config_toml=f'{disabled}\n[skills]\ncatalog_dir = "{catalog}"\n'
+    )
+    svc = LLMService(**bundle)
+    assert svc._skills_catalog_block(provider=None, model="gpt-test") == ""
