@@ -7,6 +7,7 @@
 - 私聊归档 → ``SessionArchiveMixin``
 - 群设置覆盖 → ``GroupSettingsMixin``
 - Agent 执行记录 → ``AgentRecordsStoreMixin``
+- 纪元推进事件 → ``EpochEventsStoreMixin``
 
 对外 import 路径不变：``from quickquip.llm.store import LLMStore, GroupSettingsOverride``。
 """
@@ -19,6 +20,7 @@ from quickquip.llm.store_parts._base import _build_query_tokens as _build_query_
 from quickquip.llm.store_parts._base import _utc_now as _utc_now  # noqa: F401
 from quickquip.llm.store_parts.agent_records import AgentRecordsStoreMixin
 from quickquip.llm.store_parts.conversation import ConversationStoreMixin
+from quickquip.llm.store_parts.epoch_events import EpochEventsStoreMixin
 from quickquip.llm.store_parts.group_settings import GroupSettingsMixin
 from quickquip.llm.store_parts.memory import MemoryStoreMixin
 from quickquip.llm.store_parts.session_archive import SessionArchiveMixin
@@ -31,6 +33,7 @@ class LLMStore(
     SessionArchiveMixin,
     GroupSettingsMixin,
     AgentRecordsStoreMixin,
+    EpochEventsStoreMixin,
 ):
     """组合各域 mixin的 LLM 存储。
 

@@ -113,9 +113,13 @@ def test_unavailable_archive_retries_with_monotonic_clock(tmp_path: Path, monkey
 
     clock = [1.0]
     monkeypatch.setattr(archive_module, "monotonic", lambda: clock[0])
-    with patch.object(ChatArchive, "_connect", side_effect=sqlite3.OperationalError("database is locked")):
+    with patch.object(
+        ChatArchive, "_connect", side_effect=sqlite3.OperationalError("database is locked")
+    ):
         archive = ChatArchive(tmp_path / "a.db")
-        assert archive.record_result("10001", "n", "暂时不可用", message_id="m1") is RecordResult.FAILED
+        assert archive.record_result(
+            "10001", "n", "暂时不可用", message_id="m1"
+        ) is RecordResult.FAILED
     # The first failed retry starts the cooldown; the hot path remains fail-soft.
     assert archive.record("10001", "n", "冷却中", message_id="m2") is False
     clock[0] = 62.0
@@ -128,7 +132,9 @@ def test_record_result_reports_connection_failure(tmp_path: Path):
     from unittest.mock import patch
 
     archive = ChatArchive(tmp_path / "a.db")
-    with patch.object(archive, "_connect", side_effect=sqlite3.OperationalError("database is locked")):
+    with patch.object(
+        archive, "_connect", side_effect=sqlite3.OperationalError("database is locked")
+    ):
         assert archive.record_result("10001", "n", "未写入", message_id="m1") is RecordResult.FAILED
     assert archive.read_all("10001") == []
 

@@ -37,10 +37,11 @@ class SessionArchiveMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             cursor = conn.execute(
-                """
-                INSERT INTO session_archives (user_id, archive_number, persona_id, preset, message_count, created_at, ended_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
+                "\n"
+                "                INSERT INTO session_archives (user_id, archive_number, "
+                "persona_id, preset, message_count, created_at, ended_at)\n"
+                "                VALUES (?, ?, ?, ?, ?, ?, ?)\n"
+                "                ",
                 (
                     user_id,
                     archive_number,
@@ -82,11 +83,12 @@ class SessionArchiveMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             row = conn.execute(
-                """
-                SELECT id, user_id, archive_number, persona_id, preset, message_count, created_at, ended_at
-                FROM session_archives
-                WHERE user_id = ? AND archive_number = ?
-                """,
+                "\n"
+                "                SELECT id, user_id, archive_number, persona_id, preset, "
+                "message_count, created_at, ended_at\n"
+                "                FROM session_archives\n"
+                "                WHERE user_id = ? AND archive_number = ?\n"
+                "                ",
                 (user_id, archive_number),
             ).fetchone()
         if row is None:
@@ -98,13 +100,14 @@ class SessionArchiveMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
-                """
-                SELECT id, user_id, archive_number, persona_id, preset, message_count, created_at, ended_at
-                FROM session_archives
-                WHERE user_id = ?
-                ORDER BY archive_number DESC
-                LIMIT ?
-                """,
+                "\n"
+                "                SELECT id, user_id, archive_number, persona_id, preset, "
+                "message_count, created_at, ended_at\n"
+                "                FROM session_archives\n"
+                "                WHERE user_id = ?\n"
+                "                ORDER BY archive_number DESC\n"
+                "                LIMIT ?\n"
+                "                ",
                 (user_id, limit),
             ).fetchall()
         return [{k: row[k] for k in row.keys()} for row in rows]

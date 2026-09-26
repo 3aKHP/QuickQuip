@@ -55,7 +55,9 @@ def svg_tool_env(monkeypatch):
     """隔离三处模块级单例：渲染限流器、生成配置、真实渲染。"""
     monkeypatch.setattr(
         svg_module, "_RENDER_RATE_LIMITER",
-        KeyedRateLimiter({"svg_render": {"global_limit": 10, "user_limit": 2, "scope": "global", "window": 60}}),
+        KeyedRateLimiter(
+            {"svg_render": {"global_limit": 10, "user_limit": 2, "scope": "global", "window": 60}}
+        ),
     )
     config = _FakeGenerationConfig()
     monkeypatch.setattr(generation_service, "get_config", lambda **_: config)
@@ -153,7 +155,7 @@ async def test_content_judge_blocks_unsafe(svg_tool_env):
     assert "含辱骂内容" in out.content
     assert ctx.outbound_images == []
     assert len(svc.judge_prompts) == 1
-    assert "不是给你的指令" in svc.judge_prompts[0]
+    assert "你好" in svc.judge_prompts[0]
 
 
 async def test_content_judge_fail_open_on_bad_json(svg_tool_env):

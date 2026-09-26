@@ -17,7 +17,6 @@ from quickquip.games.niuniu import (
     fence_cd,
     fenced_cd,
     fencing,
-    get_comment,
     glue_cd,
     gluing,
 )
@@ -112,11 +111,12 @@ class TestCooldownTracker:
         ct = CooldownTracker()
         assert ct.check("x") == 0.0
 
-    def test_set_then_check_returns_remaining(self):
+    def test_set_then_check_returns_remaining(self, monkeypatch):
+        monkeypatch.setattr(time, "time", lambda: 100.0)
         ct = CooldownTracker()
         ct.set("x", 60)
-        r = ct.check("x")
-        assert 59 <= r <= 60
+        monkeypatch.setattr(time, "time", lambda: 110.0)
+        assert ct.check("x") == 50.0
 
     def test_expired_returns_zero_and_cleans_up(self, monkeypatch):
         ct = CooldownTracker()
@@ -124,12 +124,6 @@ class TestCooldownTracker:
         monkeypatch.setattr(time, "time", lambda: ct._cd.get("x", 0) + 1)
         assert ct.check("x") == 0.0
         assert "x" not in ct._cd
-
-    def test_clear_removes_entry(self):
-        ct = CooldownTracker()
-        ct.set("x", 999)
-        ct.clear("x")
-        assert ct.check("x") == 0.0
 
     def test_multiple_users_independent(self):
         ct = CooldownTracker()
@@ -148,47 +142,10 @@ class TestCooldownTracker:
 
 
 class TestRollLognormal:
-    def test_never_zero_or_negative(self):
-        for _ in range(500):
-            assert _roll_lognormal(1.0) > 0
-
-    def test_median_near_one(self):
-        samples = sorted(_roll_lognormal(1.0) for _ in range(2000))
-        median = samples[len(samples) // 2]
-        assert 0.7 <= median <= 1.4
-
-    def test_about_half_below_one(self):
-        below = sum(1 for _ in range(2000) if _roll_lognormal(1.0) < 1.0)
-        assert 900 <= below <= 1100
-
-    def test_sigma_zero_always_returns_one(self, monkeypatch):
-        monkeypatch.setattr(random, "gauss", lambda mu, sigma: 0.0)
-        assert _roll_lognormal(0.5) == 1.0
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# get_comment
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestLengthComment:
-    def test_positive_normal(self):
-        assert isinstance(get_comment(5.0), str)
-
-    def test_positive_large(self):
-        assert isinstance(get_comment(75.0), str)
-
-    def test_negative_normal(self):
-        assert isinstance(get_comment(-30.0), str)
-
-    def test_negative_large(self):
-        assert isinstance(get_comment(-200.0), str)
-
-    def test_extreme_positive(self):
-        assert isinstance(get_comment(5000.0), str)
-
-    def test_extreme_negative(self):
-        assert isinstance(get_comment(-5000.0), str)
+    def test_gaussian_draw_maps_to_log10_luck(self, monkeypatch):
+        draws = iter((-1.0, 0.0, 1.0))
+        monkeypatch.setattr(random, "gauss", lambda mu, sigma: next(draws))
+        assert [_roll_lognormal(0.5) for _ in range(3)] == [0.1, 1.0, 10.0]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -197,18 +154,6 @@ class TestLengthComment:
 
 
 class TestGlueGrowth:
-    def test_positive_origin_grows_or_shrinks(self):
-        for _ in range(20):
-            val = _glue_growth(20.0)
-            assert isinstance(val, float)
-            assert -15 <= val <= 15
-
-    def test_negative_origin_grows_or_shrinks(self):
-        for _ in range(20):
-            val = _glue_growth(-20.0)
-            assert isinstance(val, float)
-            assert -15 <= val <= 15
-
     def test_coefficient_scales_result(self, monkeypatch):
         monkeypatch.setattr(random, "choice", lambda seq: 0.5)
         v1 = _glue_growth(10.0, coefficient=2.0)
@@ -221,6 +166,7 @@ class TestGlueGrowth:
         small = _glue_growth(10.0)
         large = _glue_growth(500.0)
         assert abs(large) > abs(small)
+        assert _glue_growth(-500.0) == large
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -261,15 +207,6 @@ class TestApplyDecay:
 
 
 class TestNiuNiuStoreCRUD:
-    def test_schema_creates_tables(self, store):
-        with store.connect() as conn:
-            rows = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-            names = {r["name"] for r in rows}
-            assert "niuniu_users" in names
-            assert "niuniu_records" in names
-
     def test_first_user_gets_10_length(self, store):
         length = store.register("first")
         assert length == 10.0
@@ -279,9 +216,6 @@ class TestNiuNiuStoreCRUD:
 
     def test_exists_false_for_missing(self, store):
         assert store.exists("noone") is False
-
-    def test_get_length(self, store, uid_a):
-        assert isinstance(store.get_length(uid_a), float)
 
     def test_get_length_none_for_missing(self, store):
         assert store.get_length("noone") is None
@@ -443,8 +377,9 @@ class TestNiuNiuStoreLuck:
 
     def test_luck_re_rolls_daily(self, store, uid_a, monkeypatch):
         store.set_glue_luck(uid_a, 5.0)
+        monkeypatch.setattr("quickquip.games.niuniu.store._roll_lognormal", lambda sigma: 2.5)
         monkeypatch.setattr(store, "_today_str", lambda: "2099-01-01")
-        assert store.get_glue_luck(uid_a) != 5.0
+        assert store.get_glue_luck(uid_a) == 2.5
 
     def test_luck_default_for_unregistered(self, store):
         assert store.get_glue_luck("nobody") == 1.0
@@ -562,11 +497,9 @@ class TestFenceWinProb:
         assert p_neg < 0.5
 
     def test_within_bounds(self):
-        for _ in range(100):
-            a = random.uniform(-200, 200)
-            b = random.uniform(-200, 200)
-            p = _fence_win_prob(a, b)
-            assert 0.05 <= p <= 0.85
+        for a in (-200.0, -0.001, 0.0, 0.001, 200.0):
+            for b in (-200.0, -0.001, 0.0, 0.001, 200.0):
+                assert 0.05 <= _fence_win_prob(a, b) <= 0.85
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -672,10 +605,6 @@ class TestFencing:
         result = fencing(store, uid_a, "noone", group_id="test")
         assert "对方" in result or "空气" in result or "无敌" in result
 
-    def test_target_no_niuniu_self_hurt(self, store, uid_a, monkeypatch):
-        _patch_no_niuniu_event(monkeypatch, "self_hurt")
-        assert isinstance(fencing(store, uid_a, "noone", group_id="test"), str)
-
     def test_force_register_then_fence(self, store, uid_a, monkeypatch):
         """force_register creates opponent then proceeds to real fencing."""
         events = iter(
@@ -690,10 +619,6 @@ class TestFencing:
         result = fencing(store, uid_a, "noone", group_id="test")
         assert store.exists("noone")
         assert isinstance(result, str)
-
-    def test_bot_gets_phantom_length(self, store, uid_a, monkeypatch):
-        _patch_fence_event(monkeypatch, "normal")
-        assert isinstance(fencing(store, uid_a, "bot_uid", oppo_is_bot=True, group_id="test"), str)
 
     def test_fencing_sets_attacker_cd(self, store, uid_a, uid_b, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
@@ -722,25 +647,74 @@ class TestFencing:
         assert store.get_length(uid_a) < 20.0
         assert store.get_length(uid_b) < 20.0
 
-    def test_dominate_downgrades_when_winner_not_niutouren(
-        self, store, uid_a, uid_b, monkeypatch
-    ):
-        """Neither player is 牛头人 → dominate downgrades to normal."""
+    def test_reversal_flips_transfer_direction(self, store, uid_a, uid_b, monkeypatch):
+        """reversal 翻转胜负：本会败的局，攻击方最终净转移为正。"""
         store.update_length(uid_a, 10.0)
-        store.update_length(uid_b, 15.0)
-        _patch_fence_event(monkeypatch, "dominate")
-        result = fencing(store, uid_a, uid_b, group_id="test")
-        assert isinstance(result, str)
+        store.update_length(uid_b, 10.0)
+        store.set_fence_luck(uid_a, 1.0)
+        store.set_fence_luck(uid_b, 1.0)
+        _patch_fence_event(monkeypatch, "reversal")
+        _patch_uniform(monkeypatch, 0.9)
+        # 等长基础胜率 0.85；roll=0.9 → 基础判定为负，反转后攻击方胜
+        _patch_random(monkeypatch, 0.9)
+        fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) > 10.0
+        assert store.get_length(uid_b) < 10.0
 
-    def test_succubus_downgrades_when_winner_not_succubus(
-        self, store, uid_a, uid_b, monkeypatch
-    ):
-        """Both players are positive → succubus downgrades to normal."""
+    def test_critical_multiplies_transfer(self, store, uid_a, uid_b, monkeypatch):
+        """critical 倍率：同骰下转移量为 normal 的 fence_critical_multiplier 倍。"""
+        cfg = store.config
+        store.set_fence_luck(uid_a, 1.0)  # 固定 luck：日运势随机滚会翻转胜负判定
+        store.set_fence_luck(uid_b, 1.0)
+
+        def _run(event_name: str) -> float:
+            store.update_length(uid_a, 10.0)
+            store.update_length(uid_b, 10.0)
+            _patch_fence_event(monkeypatch, event_name)
+            _patch_uniform(monkeypatch, 0.9)
+            _patch_random(monkeypatch, 0.9)
+            fencing(store, uid_a, uid_b, group_id="test")
+            return 10.0 - store.get_length(uid_a)  # 攻击方净损（两轮同判为负）
+
+        normal_loss = _run("normal")
+        critical_loss = _run("critical")
+        assert normal_loss > 0
+        assert abs(critical_loss - cfg.fence_critical_multiplier * normal_loss) < 0.05
+
+    def test_fence_luck_sways_outcome(self, store, uid_a, uid_b, monkeypatch):
+        """luck 偏置胜率：同骰下高 luck 翻转净转移方向（钳制上限内）。"""
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_uniform(monkeypatch, 0.9)
+        _patch_random(monkeypatch, 0.9)
+
         store.update_length(uid_a, 10.0)
-        store.update_length(uid_b, 20.0)
-        _patch_fence_event(monkeypatch, "succubus_devour")
-        result = fencing(store, uid_a, uid_b, group_id="test")
+        store.update_length(uid_b, 10.0)
+        store.set_fence_luck(uid_a, 1.0)
+        store.set_fence_luck(uid_b, 1.0)
+        fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) < 10.0  # 0.85 胜率下 roll 0.9 → 败
+
+        store.update_length(uid_a, 10.0)
+        store.update_length(uid_b, 10.0)
+        store.set_fence_luck(uid_a, 100.0)  # 偏置钳到 0.95 → roll 0.9 → 胜
+        fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) > 10.0
+
+    def test_target_no_niuniu_self_hurt_shrinks_attacker(self, store, uid_a, monkeypatch):
+        """self_hurt：损失落自身并写 fencing_self_hurt 记录，不注册对方、不写对方库。"""
+        store.update_length(uid_a, 10.0)
+        _patch_no_niuniu_event(monkeypatch, "self_hurt")
+        _patch_uniform(monkeypatch, 0.5)  # uniform(min,max) 固定返回 0.5 → loss=0.5
+        result = fencing(store, uid_a, "noone", group_id="test")
         assert isinstance(result, str)
+        assert store.get_length(uid_a) < 10.0
+        recs = store.get_records(uid_a)
+        assert any(
+            r["action"] == "fencing_self_hurt" and r["origin_length"] == 10.0
+            for r in recs
+        )
+        assert not store.exists("noone")
+        assert fence_cd.check(uid_a) > 0
 
     def test_dominate_sever_for_niutouren(self, store, uid_a, uid_b, monkeypatch):
         """牛头人 winner can trigger sever (腰斩)."""
@@ -763,12 +737,6 @@ class TestFencing:
         result = fencing(store, uid_a, uid_b, group_id="test")
         assert "吞噬" in result or "魅魔" in result
 
-    def test_reversal_flips_winner(self, store, uid_a, uid_b, monkeypatch):
-        store.update_length(uid_a, 10.0)
-        store.update_length(uid_b, 100.0)
-        _patch_fence_event(monkeypatch, "reversal")
-        assert isinstance(fencing(store, uid_a, uid_b, group_id="test"), str)
-
     def test_slip_attacker_always_loses(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 200.0)
         store.update_length(uid_b, 1.0)
@@ -779,24 +747,10 @@ class TestFencing:
         fencing(store, uid_a, uid_b, group_id="test")
         assert store.get_length(uid_a) < 200.0
 
-    def test_critical_multiplies_damage(self, store, uid_a, uid_b, monkeypatch):
-        store.update_length(uid_a, 30.0)
-        store.update_length(uid_b, 30.0)
-        _patch_fence_event(monkeypatch, "critical")
-        assert isinstance(fencing(store, uid_a, uid_b, group_id="test"), str)
-
     def test_bot_fencing_no_defender_db_write(self, store, uid_a, monkeypatch):
         _patch_fence_event(monkeypatch, "normal")
         fencing(store, uid_a, "bot", oppo_is_bot=True, group_id="test")
         assert not store.exists("bot")
-
-    def test_fence_luck_sways_outcome(self, store, uid_a, uid_b, monkeypatch):
-        store.update_length(uid_a, 20.0)
-        store.update_length(uid_b, 20.0)
-        store.set_fence_luck(uid_a, 100.0)
-        _patch_fence_event(monkeypatch, "normal")
-        assert isinstance(fencing(store, uid_a, uid_b, group_id="test"), str)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Event data integrity

@@ -69,9 +69,9 @@ uv pip install -e .                                # 可编辑安装（src layou
 ```
 src/
 ├── quickquip/
-│   ├── chat/          # 规则引擎：text_rules, repeat_detector, chain_game, context_rules, wordcloud, daily_summary/briefing
+│   ├── chat/          # 规则引擎：text_rules, repeat_detector, chain_game, context_rules, wordcloud, daily_summary/briefing, awakening/
 │   ├── common/        # 共享工具：rate_limit, persistence, message_deduper, sensitive_filter
-│   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, tool_registry, tool_loop, prompting, settings
+│   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, skills, tool_registry, tool_loop, prompting, settings
 │   ├── games/         # 游戏系统：niuniu, blackjack, russian_roulette, number_bomb, economy, scores, registry
 │   ├── generation/    # 多模态生成：image, audio, music, asr, svg
 │   ├── tieba/         # 贴吧爬虫（Playwright）
@@ -109,7 +109,7 @@ git commit -m "feat(llm): add proxy support to ProviderConfig" \
 - feat/fix/refactor 级改动**不直接编辑 `CHANGELOG.md`**，改记一条本地草稿（机制见 [`CONTRIBUTING.md`](CONTRIBUTING.md)），避免并行分支在 `## [Unreleased]` 处冲突
 - 每条**一行**，只写“做了什么”和“为什么重要”，不写文件路径和实现细节
 - PR 描述里附上该条目正文，便于 review
-- release 时由协作者汇总本地草稿（主）与已合并 commit 历史（兜底），按 `### ✨ 新增 (Added)` / `### 🔧 变更 (Changed)` / `### 🐛 修复 (Fixed)` / `### 🗑️ 移除 (Removed)` 分组写入 `CHANGELOG.md` 新版本段（沿用既有版本段的双语 emoji 小节形态），并清掉已发布草稿
+- release 时由协作者汇总本地草稿（主）与已合并 commit 历史（兜底），按 `### 新增` / `### 变更` / `### 修复` / `### 移除` 分组写入 `CHANGELOG.md` 新版本段（沿用 2026-09 统一后的纯中文小节形态），并清掉已发布草稿
 - chore/docs/style 不更新 CHANGELOG
 
 ## 敏感词文件保护

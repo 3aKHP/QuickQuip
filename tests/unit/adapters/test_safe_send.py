@@ -21,23 +21,12 @@ class _Bot:
 async def test_send_group_text_sends_single_text_segment():
     bot = _Bot()
 
-    await send_group_text(bot, 123, "hello")
+    await send_group_text(bot, 123, "看这里 [CQ:at,qq=all]")
 
     assert bot.sent[0]["group_id"] == 123
     message = bot.sent[0]["message"]
     assert isinstance(message, Message)
     assert len(message) == 1
-    assert message[0].type == "text"
-    assert message[0].data["text"] == "hello"
-
-
-@pytest.mark.asyncio
-async def test_send_group_text_keeps_cq_like_text_literal():
-    bot = _Bot()
-
-    await send_group_text(bot, 123, "看这里 [CQ:at,qq=all]")
-
-    message = bot.sent[0]["message"]
     assert message[0].type == "text"
     assert message[0].data["text"] == "看这里 [CQ:at,qq=all]"
 
@@ -46,22 +35,11 @@ async def test_send_group_text_keeps_cq_like_text_literal():
 async def test_send_private_text_sends_single_text_segment():
     bot = _Bot()
 
-    await send_private_text(bot, 456, "hello")
+    await send_private_text(bot, 456, "歌词 [CQ:image,file=http://evil.test/x]")
 
     assert bot.sent[0]["user_id"] == 456
     message = bot.sent[0]["message"]
     assert isinstance(message, Message)
     assert len(message) == 1
-    assert message[0].type == "text"
-    assert message[0].data["text"] == "hello"
-
-
-@pytest.mark.asyncio
-async def test_send_private_text_keeps_cq_like_text_literal():
-    bot = _Bot()
-
-    await send_private_text(bot, 456, "歌词 [CQ:image,file=http://evil.test/x]")
-
-    message = bot.sent[0]["message"]
     assert message[0].type == "text"
     assert message[0].data["text"] == "歌词 [CQ:image,file=http://evil.test/x]"

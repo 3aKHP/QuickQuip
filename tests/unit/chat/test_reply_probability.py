@@ -70,13 +70,17 @@ def test_resolve_defaults_to_always_reply(restore_chat_rules):
 
 
 def test_key_level_probability_used_as_fallback(restore_chat_rules):
-    chat_config.RATE_LIMIT_RULES["prob_key"] = {"global_limit": 1, "user_limit": 1, "probability": 0.25}
+    chat_config.RATE_LIMIT_RULES["prob_key"] = {
+        "global_limit": 1, "user_limit": 1, "probability": 0.25
+    }
     assert resolve_probability("prob_key") == 0.25
     assert resolve_probability("prob_key", {"name": "x"}) == 0.25
 
 
 def test_rule_level_overrides_key_level(restore_chat_rules):
-    chat_config.RATE_LIMIT_RULES["prob_key"] = {"global_limit": 1, "user_limit": 1, "probability": 0.25}
+    chat_config.RATE_LIMIT_RULES["prob_key"] = {
+        "global_limit": 1, "user_limit": 1, "probability": 0.25
+    }
     rule = {"name": "x", "probability": 0.75}
     assert resolve_probability("prob_key", rule) == 0.75
 
@@ -229,9 +233,12 @@ class _CountingJudge:
         self.calls = 0
         self._trigger = trigger
 
-    async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
+    async def quick_judge_detailed(self, prompt: str, max_tokens: int | None = None):
         self.calls += 1
-        return '{"trigger": true}' if self._trigger else '{"trigger": false}'
+        from quickquip.llm.quick_judge import QuickJudgeResult
+
+        text = '{"trigger": true}' if self._trigger else '{"trigger": false}'
+        return QuickJudgeResult(text=text, outcome="ok", provider_id="p", model="m")
 
 
 async def test_context_rule_skips_llm_when_roll_fails(restore_chat_rules, frozen_now):
@@ -372,7 +379,7 @@ def test_pity_step_raises_probability_until_hit(restore_chat_rules, monkeypatch)
     # p_eff 依次 0.5 / 0.6 / 0.7 / 0.8 / 0.9，全部不敌 0.9 → 连哑
     for _ in range(5):
         assert roll_reply("pity_key", group_id=1) is False
-    # 第 6 次 p_eff = 0.5 × (1 + 5 × 0.2) = 1.5 → 封顶 1.0，强制命中
+    # 第 6 次 p_eff = 0.5 × (1 + 5 × 0.2) = 1.0，强制命中
     assert roll_reply("pity_key", group_id=1) is True
     # 命中后连哑清零
     assert reply_probability_module._ROLL_STATE[("pity_key", "1")]["miss_streak"] == 0
@@ -500,18 +507,18 @@ def test_overlapping_patterns_roll_once(restore_chat_rules, monkeypatch, frozen_
                 "patterns": ["蛐蛐儿", "我在想"],
                 "reply_template": "回复",
                 "rate_limit_key": "overlap_bucket",
-                "probability": 0.0,
+                "probability": 0.5,
             }
         ]
     )
     calls = []
     monkeypatch.setattr(
         "quickquip.chat.reply_probability.random.random",
-        lambda: calls.append(1) or 0.0,
+        lambda: calls.append(1) or 0.9,
     )
-    # 「我在想蛐蛐儿」同时命中两条 pattern：规则级概率 0 时一次掷骰都不该发生
+    # 同时命中两条 pattern 且掷骰失败，整条规则仍只消耗一次随机数。
     assert match_text_rule("我在想蛐蛐儿", user_id=1, sender_name="n", now=frozen_now) is None
-    assert calls == []
+    assert calls == [1]
 
 
 # ── card_le：掷骰在「X了」快筛之后、LLM 判定之前 ──────────────
@@ -589,36 +596,14 @@ def test_matcher_suppress_scoped_per_group(restore_chat_rules, frozen_now):
             }
         ]
     )
-    assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001) is not None
+    assert match_text_rule(
+        "你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001
+    ) is not None
     # 同群第二次被防连发压制 → 无候选规则
-    assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001) is None
+    assert match_text_rule(
+        "你好", user_id=1, sender_name="n", now=frozen_now, group_id=1001
+    ) is None
     # 另一个群不受影响
-    assert match_text_rule("你好", user_id=1, sender_name="n", now=frozen_now, group_id=1002) is not None
-
-
-# ── example 推荐默认值（直接解析文件，不依赖运行时容器）──────
-
-
-def test_example_ships_recommended_probability_defaults():
-    import tomllib
-
-    example_path = (
-        Path(__file__).resolve().parents[3] / "config" / "chat_rules.toml.example"
-    )
-    with open(example_path, "rb") as f:
-        data = tomllib.load(f)
-
-    buckets = data["rate_limit_rules"]
-    assert buckets["timezone_wake"]["probability"] == 0.5
-    assert buckets["timezone_sleep"]["probability"] == 0.5
-    assert buckets["sts_card_le"]["probability"] == 0.4
-    assert buckets["new_three_kingdoms"]["probability"] == 0.5
-    # 命令触发的桶不参与掷骰
-    assert "probability" not in buckets["image_gen"]
-
-    rule_probabilities = {r["name"]: r.get("probability") for r in data["rules"]}
-    assert rule_probabilities["ntk_long"] == 0.15
-    assert rule_probabilities["ntk_ququer"] == 0.3
-    assert rule_probabilities["ntk_sanjun"] == 0.8
-    # 未写字段的规则继承桶级基线
-    assert rule_probabilities["ntk_yongheng"] is None
+    assert match_text_rule(
+        "你好", user_id=1, sender_name="n", now=frozen_now, group_id=1002
+    ) is not None

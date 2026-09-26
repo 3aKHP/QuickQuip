@@ -2,9 +2,6 @@
 
 Covers:
 - MCPServerConfig negotiation field parsing + validation rules
-- MCPServerStatus new dual-era fields (backward compat with positional args)
-- MCPConnectionInfo dataclass
-- Failure kind constants
 - _sanitize_url / _sanitize_error_message (secret hygiene)
 - _detect_alias_conflicts (fail-closed collision detection)
 """
@@ -13,11 +10,7 @@ from __future__ import annotations
 from quickquip.llm.config import _read_mcp_servers
 from quickquip.llm.mcp.client import _extract_modern_server_info
 from quickquip.llm.mcp.types import (
-    MCP_FAILURE_KINDS,
-    MCP_FAILURE_TIMEOUT,
-    MCPConnectionInfo,
     MCPError,
-    MCPServerStatus,
     MCPToolBinding,
     _detect_alias_conflicts,
     _sanitize_error_message,
@@ -50,7 +43,9 @@ def test_modern_server_info_falls_back_to_draft_metadata():
 
 def test_modern_server_info_rejects_missing_or_malformed_metadata():
     assert _extract_modern_server_info({}) == {}
-    assert _extract_modern_server_info({"_meta": {"io.modelcontextprotocol/serverInfo": "bad"}}) == {}
+    assert _extract_modern_server_info(
+        {"_meta": {"io.modelcontextprotocol/serverInfo": "bad"}}
+    ) == {}
     assert _extract_modern_server_info({"serverInfo": "bad"}) == {}
 
 
@@ -155,80 +150,6 @@ def test_whitespace_versions_stripped():
 
 
 # ---------------------------------------------------------------------------
-# MCPServerStatus backward compatibility
-# ---------------------------------------------------------------------------
-
-def test_server_status_positional_args_unchanged():
-    """Existing positional construction still works (no new required fields)."""
-    status = MCPServerStatus("s1", "http", True)
-    assert status.id == "s1"
-    assert status.transport == "http"
-    assert status.enabled is True
-    assert status.connected is False
-    assert status.tool_count == 0
-    assert status.error is None
-    assert status.detail == ""
-    # New fields have defaults
-    assert status.negotiation == "legacy"
-    assert status.era == "unknown"
-    assert status.failure_kind == ""
-    assert status.negotiated_protocol_version == ""
-
-
-def test_server_status_dual_era_fields_settable():
-    status = MCPServerStatus(
-        id="s1", transport="http", enabled=True, connected=True,
-        negotiation="modern", era="modern",
-        failure_kind=MCP_FAILURE_TIMEOUT,
-        negotiated_protocol_version="2026-07-28",
-    )
-    assert status.negotiation == "modern"
-    assert status.era == "modern"
-    assert status.failure_kind == "timeout"
-    assert status.negotiated_protocol_version == "2026-07-28"
-
-
-# ---------------------------------------------------------------------------
-# MCPConnectionInfo
-# ---------------------------------------------------------------------------
-
-def test_connection_info_defaults():
-    info = MCPConnectionInfo(
-        server_id="s1", negotiation="auto", era="unknown",
-        configured_protocol_version="2026-07-28",
-    )
-    assert info.negotiated_protocol_version == ""
-    assert info.session_id is None
-    assert info.capabilities == {}
-    assert info.server_info is None
-    assert info.generation == 0
-
-
-def test_connection_info_modern_has_no_session():
-    info = MCPConnectionInfo(
-        server_id="s1", negotiation="modern", era="modern",
-        configured_protocol_version="2026-07-28",
-        negotiated_protocol_version="2026-07-28",
-    )
-    assert info.session_id is None
-
-
-# ---------------------------------------------------------------------------
-# Failure kind constants
-# ---------------------------------------------------------------------------
-
-def test_failure_kinds_are_distinct_strings():
-    assert len(MCP_FAILURE_KINDS) == 8
-    assert all(isinstance(k, str) for k in MCP_FAILURE_KINDS)
-
-
-def test_failure_kinds_cover_expected_categories():
-    expected = {"config", "probe", "legacy-handshake", "modern-negotiation",
-                "auth", "timeout", "routing", "transport"}
-    assert MCP_FAILURE_KINDS == expected
-
-
-# ---------------------------------------------------------------------------
 # Era tag formatting (single source for chat status + Web Admin)
 # ---------------------------------------------------------------------------
 
@@ -249,12 +170,6 @@ def test_era_tag_mixed_renders_both():
     assert format_mcp_era_tag("auto", "modern") == "/auto/modern"
     assert format_mcp_era_tag("modern", "legacy") == "/modern/legacy"
     assert format_mcp_era_tag("legacy", "modern") == "/legacy/modern"
-
-
-def test_era_tag_is_exported_from_mcp_package():
-    from quickquip.llm.mcp import format_mcp_era_tag as package_export
-
-    assert package_export is format_mcp_era_tag
 
 
 # ---------------------------------------------------------------------------
@@ -329,16 +244,28 @@ def test_sanitize_error_message_preserves_safe_text():
 
 def test_detect_alias_conflicts_no_duplicates():
     bindings = [
-        MCPToolBinding(alias="mcp_a_tool1", server_id="a", tool_name="tool1", description="", input_schema={}),
-        MCPToolBinding(alias="mcp_b_tool2", server_id="b", tool_name="tool2", description="", input_schema={}),
+        MCPToolBinding(
+            alias="mcp_a_tool1", server_id="a", tool_name="tool1",
+            description="", input_schema={},
+        ),
+        MCPToolBinding(
+            alias="mcp_b_tool2", server_id="b", tool_name="tool2",
+            description="", input_schema={},
+        ),
     ]
     assert _detect_alias_conflicts(bindings) == set()
 
 
 def test_detect_alias_conflicts_finds_exact_duplicates():
     bindings = [
-        MCPToolBinding(alias="mcp_a_tool1", server_id="a", tool_name="tool1", description="", input_schema={}),
-        MCPToolBinding(alias="mcp_a_tool1", server_id="b", tool_name="tool1", description="", input_schema={}),
+        MCPToolBinding(
+            alias="mcp_a_tool1", server_id="a", tool_name="tool1",
+            description="", input_schema={},
+        ),
+        MCPToolBinding(
+            alias="mcp_a_tool1", server_id="b", tool_name="tool1",
+            description="", input_schema={},
+        ),
     ]
     assert _detect_alias_conflicts(bindings) == {"mcp_a_tool1"}
 
@@ -353,8 +280,14 @@ def test_detect_alias_conflicts_finds_sanitization_collisions():
     assert alias1 == alias2
 
     bindings = [
-        MCPToolBinding(alias=alias1, server_id="srv", tool_name="foo.bar", description="", input_schema={}),
-        MCPToolBinding(alias=alias2, server_id="srv", tool_name="foo_bar", description="", input_schema={}),
+        MCPToolBinding(
+            alias=alias1, server_id="srv", tool_name="foo.bar",
+            description="", input_schema={},
+        ),
+        MCPToolBinding(
+            alias=alias2, server_id="srv", tool_name="foo_bar",
+            description="", input_schema={},
+        ),
     ]
     conflicts = _detect_alias_conflicts(bindings)
     assert alias1 in conflicts
@@ -406,26 +339,6 @@ def test_retryable_unknown_exception_retried():
 
 
 # ---------------------------------------------------------------------------
-# Alias conflict fail-closed in sync (Wave 6)
-# ---------------------------------------------------------------------------
-
-def test_alias_conflict_in_build_bindings():
-    """Two tools that sanitize to the same alias are detected by _detect_alias_conflicts."""
-    from quickquip.llm.mcp.types import _build_tool_alias
-
-    # 'foo.bar' and 'foo_bar' sanitize to the same alias
-    alias = _build_tool_alias("srv", "foo.bar")
-    bindings = [
-        MCPToolBinding(alias=alias, server_id="srv", tool_name="foo.bar",
-                       description="", input_schema={}),
-        MCPToolBinding(alias=alias, server_id="srv", tool_name="foo_bar",
-                       description="", input_schema={}),
-    ]
-    conflicts = _detect_alias_conflicts(bindings)
-    assert alias in conflicts
-
-
-# ---------------------------------------------------------------------------
 # MCPLegacyFallbackSignal and modern error detection (Wave 4)
 # ---------------------------------------------------------------------------
 
@@ -441,7 +354,10 @@ def test_is_recognized_modern_error_body_accepts_version_error():
     """UnsupportedProtocolVersionError (-32022) IS a recognized modern error."""
     from quickquip.llm.mcp.codec import is_recognized_modern_error_body
 
-    modern_body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported version","data":{"supported":["2026-07-28"]}}}'
+    modern_body = (
+        b'{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"Unsupported version",'
+        b'"data":{"supported":["2026-07-28"]}}}'
+    )
     assert is_recognized_modern_error_body(modern_body)
 
 

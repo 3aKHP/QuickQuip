@@ -16,7 +16,7 @@ When `prod/` already exists, move it aside before copying. The drivers reject a 
 
 - Server: Linux, Bash, GNU coreutils/find, rsync, flock, Python >= 3.11.8, Docker and Docker Compose >= 2.27. The deployment user needs Docker access and write access to the deployment root. Root-owned LLBot configuration files use noninteractive sudo for shared-file snapshot, apply and restore; without permission the action stops before activation.
 - Bash client: Bash, rsync, SSH/SCP, tar, Node.js and pnpm.
-- PowerShell client: PowerShell 5.1 or 7, SSH/SCP, tar, Node.js and pnpm on PATH. The server materializes its archive with rsync.
+- PowerShell client: PowerShell 5.1 or 7, SSH/SCP, tar, Node.js and pnpm on PATH. The server materializes the release archive with `deploy-state.py` (Python tarfile); rsync on the server is used for precondition checks only.
 - Initialize SSH host trust before unattended use. `quickquip-prod` is a placeholder SSH alias.
 - Fill root `.env`, `config/llm.toml` and other enabled feature configuration. Set `QUICKQUIP_SEARXNG_BASE_URL` for the external search service.
 
@@ -41,6 +41,8 @@ Shared parameters (Bash canonical / legacy alias): `--host-alias` / `-HostAlias`
 Every release carries a version identity built from the deployed `pyproject.toml` version plus a timestamp captured on the server when the image build finishes (for example `1.15.3-dev.2+build.20260909.065235`); it is echoed in the `image built` and `release complete` transaction log lines. If you maintain your own private ops-trail tooling, `remote-deploy-v4.sh` marks the spot where `$VersionId` is available for you to record it.
 
 For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` after an explicit `-SkipHealth` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `prod/check_bot.sh`; `prod/cron_check_bot.sh` remains the cron entry.
+
+`prod/host_metrics_collector.py` is an optional host-side cron collector (the host-healthcheck skill's L1 enhancement): it writes `<root>/data/host_metrics.json` atomically once per run with the host process count, full disk view and temperatures. The crontab install line is in the file header; the container reads the file read-only through the existing `data/` bind mount. Skills themselves ship from the local working tree: copy the ones you want from `skills.example/` into `skills/` and the drivers upload the directory with the release.
 
 ## Layout and Transaction
 

@@ -164,8 +164,11 @@ async def test_fallback_briefing_renders_sanitized_display_name(tmp_path: Path, 
 
 
 def test_trim_output_respects_max_chars():
-    out = _trim_output("第一句。第二句。第三句。第四句。", max_chars=8)
-    assert out.endswith("……") or len(out) <= 8
+    source = "第一句。第二句。第三句。第四句。"
+    out = _trim_output(source, max_chars=8)
+    assert len(out) <= 8 + len("……")
+    assert source.startswith(out.removesuffix("……"))
+    assert "第三句" not in out
 
 
 def test_enabled_groups_persist(tmp_path: Path):
@@ -203,8 +206,14 @@ async def test_briefing_context_excludes_bot_rows(tmp_path: Path, briefing_confi
 
     yesterday = [
         (datetime(2026, 4, 14, 9, 0, tzinfo=LOCAL_TZ), "1001", "张三", "群友话题甲"),
-        (datetime(2026, 4, 14, 10, 0, tzinfo=LOCAL_TZ), "1002", "QuickQuip", "bot 刷屏词汇填充填充填充"),
-        (datetime(2026, 4, 14, 11, 0, tzinfo=LOCAL_TZ), "1002", "QuickQuip", "bot 刷屏词汇填充填充填充"),
+        (
+            datetime(2026, 4, 14, 10, 0, tzinfo=LOCAL_TZ),
+            "1002", "QuickQuip", "bot 刷屏词汇填充填充填充",
+        ),
+        (
+            datetime(2026, 4, 14, 11, 0, tzinfo=LOCAL_TZ),
+            "1002", "QuickQuip", "bot 刷屏词汇填充填充填充",
+        ),
         (datetime(2026, 4, 14, 12, 0, tzinfo=LOCAL_TZ), "1001", "张三", "群友话题乙"),
     ]
     for ts, user_id, sender, text in yesterday:

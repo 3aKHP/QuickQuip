@@ -25,7 +25,9 @@ _SCOPE_KEY_RE = re.compile(r"^(?:\d{5,12}|private:\d{5,15})$")
 
 def _validate_group_id(group_id: str) -> None:
     if not _SCOPE_KEY_RE.match(group_id):
-        raise HTTPException(status_code=422, detail="scope key must be 5-12 digits or 'private:USER_ID'")
+        raise HTTPException(
+            status_code=422, detail="scope key must be 5-12 digits or 'private:USER_ID'"
+        )
 
 
 def _store() -> LLMStore:
@@ -117,10 +119,24 @@ def _format_group_entry(group_id: str, row) -> dict:
     if row is not None:
         entry.update({
             "enabled": None if row["enabled"] is None else bool(row["enabled"]),
-            "memory_enabled": None if row["memory_enabled"] is None else bool(row["memory_enabled"]),
-            "auto_memory_enabled": None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"]),
-            "agent_delivery_intermediate_enabled": None if row["agent_delivery_intermediate_enabled"] is None else bool(row["agent_delivery_intermediate_enabled"]),
-            "agent_delivery_final_enabled": None if row["agent_delivery_final_enabled"] is None else bool(row["agent_delivery_final_enabled"]),
+            "memory_enabled": (
+                None if row["memory_enabled"] is None else bool(row["memory_enabled"])
+            ),
+            "auto_memory_enabled": (
+                None
+                if row["auto_memory_enabled"] is None
+                else bool(row["auto_memory_enabled"])
+            ),
+            "agent_delivery_intermediate_enabled": (
+                None
+                if row["agent_delivery_intermediate_enabled"] is None
+                else bool(row["agent_delivery_intermediate_enabled"])
+            ),
+            "agent_delivery_final_enabled": (
+                None
+                if row["agent_delivery_final_enabled"] is None
+                else bool(row["agent_delivery_final_enabled"])
+            ),
             "provider_id": row["provider_id"],
             "model": row["model"],
             "persona_id": row["persona_id"],
@@ -147,7 +163,10 @@ def list_group_settings():
         with store._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT group_id, enabled, memory_enabled, auto_memory_enabled, agent_delivery_intermediate_enabled, agent_delivery_final_enabled, provider_id, model, persona_id,
+                SELECT group_id, enabled, memory_enabled, auto_memory_enabled,
+                       agent_delivery_intermediate_enabled,
+                       agent_delivery_final_enabled, provider_id, model,
+                       persona_id,
                        trigger_prefix, allow_prefix, allow_at, history_limit, updated_at
                 FROM group_settings
                 ORDER BY updated_at DESC

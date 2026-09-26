@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 # cost; also bounds how many recent-buffer images a passive trigger carries.
 MAX_IMAGES_PER_REQUEST = 5
 
+# 工具产出图片回灌模型时的合成 user 消息提示文案（openai 与
+# openai_responses 两个序列化端共用，用户可见文案单源）。
+TOOL_IMAGE_FLUSH_NOTICE = "以下图片来自刚才工具调用，仅用于继续推理。"
+
 # 图片下载实例级缓存：一轮对话内工具循环重建请求与 429/5xx 退避重试会反复
 # 序列化同一批图片 URL；TTL 与容量双重兜底内存占用（QQ CDN 链接本身短时效）。
 _IMAGE_CACHE_TTL_SECONDS = 600
@@ -58,13 +62,24 @@ class LLMProviderError(RuntimeError):
 
     ``status_code`` 为上游 HTTP 状态码（非 HTTP 错误为 None）；``transport``
     标记连接失败/超时等传输层错误。两者供重试分类（``_is_retryable``）使用，
-    消息文本保持原有格式（会被直接内插到用户可见回复中）。
+    消息文本保持原有格式（会被直接内插到用户可见回复中）。``http_reject``
+    区分"上游 HTTP 层拒绝请求"与协议层把畸形/失败终态归一出的同码错误
+    （如 Responses 的 failed/cancelled 终态）——降级重试类调用方只应响应
+    前者（协议层 400 重试必然徒劳）。
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None, transport: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        transport: bool = False,
+        http_reject: bool = False,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.transport = transport
+        self.http_reject = http_reject
 
 
 def _is_retryable(exc: LLMProviderError) -> bool:
@@ -129,19 +144,9 @@ def _parse_sse_text(raw: str) -> list[dict[str, Any]]:
     return events
 
 
-def _take_sse_line(buffer: str) -> tuple[str, str] | None:
-    """Take one complete SSE line while preserving its original line ending."""
-
-    for index, char in enumerate(buffer):
-        if char == "\n":
-            return buffer[: index + 1], buffer[index + 1 :]
-        if char != "\r":
-            continue
-        if index + 1 == len(buffer):
-            return None
-        end = index + 2 if buffer[index + 1] == "\n" else index + 1
-        return buffer[:end], buffer[end:]
-    return None
+def _parse_sse_and_measure(raw: str) -> tuple[list[dict[str, Any]], int]:
+    """SSE 解析 + 原文字节测量，供线程池执行。"""
+    return _parse_sse_text(raw), len(raw.encode("utf-8"))
 
 
 def _is_sse_done_line(line: str) -> bool:
@@ -150,30 +155,68 @@ def _is_sse_done_line(line: str) -> bool:
 
 
 class _SSETextCapture:
-    """Accumulate exact SSE text while recognizing its terminal data line."""
+    """Accumulate exact SSE text while recognizing its terminal data line.
+
+    行边界检测用带扫描偏移的 ``str.find``（C 速度）且只扫描新到字节；
+    不含行结尾的 chunk 暂存进 ``_tail``，仅在出现行结尾时合并。生图等
+    内置工具会把多 MB 的 base64 放进单个 SSE data 行——逐字符扫描或逐
+    chunk 全量重扫都是 O(n²) 纯 Python CPU，足以把事件循环卡死分钟级。
+    """
 
     def __init__(self) -> None:
         self._raw_parts: list[str] = []
         self._pending = ""
+        self._scanned = 0
+        self._tail: list[str] = []
         self._done = False
 
     def feed(self, chunk: str) -> bool:
-        self._pending += chunk
-        while line_parts := _take_sse_line(self._pending):
-            line, self._pending = line_parts
+        # _scanned == len(self._pending) 表示 _pending 内已无未扫描字节
+        # （无悬空 \r 待消歧），此时整块暂存 _tail 不触发拼接也安全。
+        if (
+            "\n" not in chunk
+            and "\r" not in chunk
+            and self._scanned == len(self._pending)
+        ):
+            self._tail.append(chunk)
+            return False
+        self._pending += "".join(self._tail) + chunk
+        self._tail.clear()
+        while line := self._take_line():
             self._raw_parts.append(line)
             if _is_sse_done_line(line):
-                blank_parts = _take_sse_line(self._pending)
-                if blank_parts is not None and not blank_parts[0].rstrip("\r\n"):
-                    self._raw_parts.append(blank_parts[0])
+                blank = self._take_line()
+                if blank is not None and not blank.rstrip("\r\n"):
+                    self._raw_parts.append(blank)
                 self._pending = ""
+                self._scanned = 0
                 self._done = True
                 return True
         return False
 
     def text(self) -> str:
-        pending = "" if self._done else self._pending
+        pending = "" if self._done else self._pending + "".join(self._tail)
         return "".join(self._raw_parts) + pending
+
+    def _take_line(self) -> str | None:
+        pending = self._pending
+        newline = pending.find("\n", self._scanned)
+        carriage = pending.find("\r", self._scanned)
+        if carriage != -1 and (newline == -1 or carriage < newline):
+            if carriage + 1 == len(pending):
+                # 缓冲以 \r 结尾：可能还有未到达的 \n 配对，等下一块。
+                self._scanned = carriage
+                return None
+            end = carriage + 2 if pending[carriage + 1] == "\n" else carriage + 1
+        elif newline != -1:
+            end = newline + 1
+        else:
+            self._scanned = len(pending)
+            return None
+        line = pending[:end]
+        self._pending = pending[end:]
+        self._scanned = 0
+        return line
 
 
 @dataclass(slots=True)
@@ -195,6 +238,38 @@ class LLMWebSearchReport:
 
     queries: list[str] = field(default_factory=list)
     sources: list[LLMWebSearchSource] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class LLMGeneratedImage:
+    """模型在对话响应中产出的图片（协议中立，与输入侧媒体归一对称）。
+
+    源自 Responses 内置 image_generation 工具条目或 Gemini 响应的
+    inlineData 图片 parts；由送达层按外发图片统一投递，不进入
+    native_blocks 原生回放（base64 回放是纯成本无收益）。
+    """
+
+    data: bytes = field(repr=False)
+    media_type: str = ""
+    # 产出来源标签（如 "responses.image_generation" / "gemini.inline_data"），
+    # 供观测与限流口径区分。
+    source: str = ""
+
+    @classmethod
+    def from_base64(
+        cls, data_b64: str, *, media_type: str, source: str
+    ) -> "LLMGeneratedImage | None":
+        """各协议适配器共用的解码策略：非法 base64 返回 None（按无图跳过，
+        图片丢失不连累正文交付）。"""
+        if not isinstance(data_b64, str) or not data_b64.strip():
+            return None
+        try:
+            data = base64.b64decode(data_b64, validate=True)
+        except ValueError:
+            return None
+        if not data:
+            return None
+        return cls(data=data, media_type=media_type, source=source)
 
 
 @dataclass(slots=True)
@@ -224,11 +299,15 @@ class LLMResponse:
     thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
     web_search: LLMWebSearchReport | None = None
+    # 模型产出的图片附件（见 LLMGeneratedImage）：与 web_search 同级的
+    # 响应侧归一能力，由各协议适配器按自身能力提取。
+    generated_images: list[LLMGeneratedImage] = field(default_factory=list)
     # 实际成功请求的归属（§7.1）：由 client 在成功路径按最终端点填充。
     owner: "ResponseOwner | None" = None
     # 协议原生的有序内容块（§4.4 保序表示）：Claude 的 content 序列 /
-    # Gemini 的 parts 序列，白名单深拷贝。OpenAI 无此结构（reasoning 单块
-    # 已由 thinking_blocks 承载）。供执行记录的 native_state 持久化。
+    # Gemini 的 parts 序列 / OpenAI Responses 的有序 output items（含
+    # reasoning 密文），白名单深拷贝。Chat Completions 无此结构（reasoning
+    # 单块已由 thinking_blocks 承载）。供执行记录的 native_state 持久化。
     native_blocks: list[dict[str, Any]] | None = None
 
 
@@ -476,7 +555,9 @@ class BaseProviderClient:
                     image_url, headers={"User-Agent": "QuickQuip/1.0"}
                 )
                 response.raise_for_status()
-                media_type = response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                media_type = (
+                    response.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                )
                 if not media_type.startswith("image/"):
                     raise LLMProviderError(f"图片 URL 不是受支持的图片类型：{image_url}")
                 raw = response.content
@@ -492,7 +573,9 @@ class BaseProviderClient:
         if not raw:
             raise LLMProviderError(f"图片内容为空：{image_url}")
         if len(raw) > MAX_IMAGE_BYTES:
-            raise LLMProviderError(f"图片过大，当前限制为 {MAX_IMAGE_BYTES // (1024 * 1024)}MB：{image_url}")
+            raise LLMProviderError(
+                f"图片过大，当前限制为 {MAX_IMAGE_BYTES // (1024 * 1024)}MB：{image_url}"
+            )
 
         return LLMImageInput(
             source_url=image_url,
@@ -533,8 +616,13 @@ class BaseProviderClient:
         remaining = MAX_IMAGES_PER_REQUEST - len(candidates)
         for image in (inline_images or [])[:remaining]:
             candidates.append((image.source_label, image.data, image.media_type))
-        budget = budget if budget is not None else InlineMediaBudget(self.config.max_inline_media_bytes)
-        kept, _dropped = budget.guard(candidates)
+        budget = (
+            budget if budget is not None else InlineMediaBudget(self.config.max_inline_media_bytes)
+        )
+        # guard 内含 Pillow 解码/转码/降采样重编码（病态图可达秒级），下沉
+        # 工作线程执行，不占事件循环；模块级缓存的跨线程安全由 media_guard
+        # 的缓存锁保证。
+        kept, _dropped = await asyncio.to_thread(budget.guard, candidates)
         return [
             LLMImageInput(
                 source_url=item.label,
@@ -569,7 +657,9 @@ class BaseProviderClient:
             urls = message.image_urls if message.role == "user" else []
             if not urls and not message.inline_images:
                 continue
-            images[index] = await self._prepare_image_inputs(urls, message.inline_images, budget=budget)
+            images[index] = await self._prepare_image_inputs(
+                urls, message.inline_images, budget=budget
+            )
         return images
 
     def _swap_base_url(self, url: str, new_base: str) -> str:
@@ -584,7 +674,9 @@ class BaseProviderClient:
         for fb in self.config.fallback_urls:
             yield self._swap_base_url(url, fb)
 
-    async def _execute_with_fallback(self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[Any, str]:
+    async def _execute_with_fallback(
+        self, fn, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> tuple[Any, str]:
         """按候选端点链执行，返回 ``(结果, 实际成功的 URL)``（§7.3）。
 
         失败的可重试错误切换下一候选；不可重试立即抛。调用方用返回的
@@ -602,19 +694,27 @@ class BaseProviderClient:
                 last_exc = exc
         raise last_exc  # type: ignore[misc]
 
-    async def _post_json_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post_json_with_fallback(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> dict[str, Any]:
         data, _ = await self._execute_with_fallback(self._post_json, url, headers, payload)
         return data
 
-    async def _post_stream_sse_with_fallback(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _post_stream_sse_with_fallback(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         events, _ = await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
         return events
 
-    async def _post_json_candidate(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    async def _post_json_candidate(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], str]:
         """``_post_json_with_fallback`` 的候选可观测变体：带回实际端点。"""
         return await self._execute_with_fallback(self._post_json, url, headers, payload)
 
-    async def _post_stream_sse_candidate(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[list[dict[str, Any]], str]:
+    async def _post_stream_sse_candidate(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], str]:
         return await self._execute_with_fallback(self._post_stream_sse, url, headers, payload)
 
     def _combine_stream_trace(
@@ -626,7 +726,17 @@ class BaseProviderClient:
             f"{type(self).__name__} must reconstruct its streamed response"
         )
 
-    async def _post_json(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+    def _dump_stream_trace(
+        self, events: list[dict[str, Any]], fallback_model: str
+    ) -> tuple[str, int]:
+        """终态重建 + 序列化 + 字节测量，供线程池执行（秒级 CPU）。"""
+        combined = self._combine_stream_trace(events, fallback_model)
+        combined_response = json.dumps(combined, ensure_ascii=False, indent=2)
+        return combined_response, len(combined_response.encode("utf-8"))
+
+    async def _post_json(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request_headers = _headers_to_text(headers)
         started = time.monotonic()
@@ -698,6 +808,7 @@ class BaseProviderClient:
             raise LLMProviderError(
                 f"HTTP {exc.response.status_code} {detail[:240]}",
                 status_code=exc.response.status_code,
+                http_reject=True,
             ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             await finish_http_trace(
@@ -739,7 +850,9 @@ class BaseProviderClient:
         )
         return result
 
-    async def _post_stream_sse(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _post_stream_sse(
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {**headers, "accept": "text/event-stream"}
         started = time.monotonic()
@@ -810,6 +923,7 @@ class BaseProviderClient:
             raise LLMProviderError(
                 f"HTTP {exc.response.status_code} {detail[:240]}",
                 status_code=exc.response.status_code,
+                http_reject=True,
             ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             await finish_http_trace(
@@ -838,35 +952,58 @@ class BaseProviderClient:
             )
             raise
 
-        events = _parse_sse_text(raw)
+        # 解析与终态序列化放线程池执行（性能背景见 _SSETextCapture docstring）。
         try:
-            combined = self._combine_stream_trace(events, _trace_model(url, payload))
-            combined_response = json.dumps(combined, ensure_ascii=False, indent=2)
-        except Exception as exc:
-            logger.exception("LLM HTTP trace response reconstruction failed")
-            await finish_http_trace(
-                call_id,
-                state="success",
-                response_status=response_status,
-                response_headers=response_headers,
-                response_text="",
-                response_bytes=0,
-                response_raw_text=raw,
-                response_raw_bytes=len(raw.encode("utf-8")),
-                duration_ms=(time.monotonic() - started) * 1000,
-                error_type=type(exc).__name__,
-                error_message=str(exc),
+            events, raw_bytes = await asyncio.to_thread(_parse_sse_and_measure, raw)
+            try:
+                combined_response, combined_bytes = await asyncio.to_thread(
+                    self._dump_stream_trace, events, _trace_model(url, payload)
+                )
+            except Exception as exc:
+                logger.exception("LLM HTTP trace response reconstruction failed")
+                await finish_http_trace(
+                    call_id,
+                    state="success",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=raw_bytes,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type=type(exc).__name__,
+                    error_message=f"stream trace reconstruction failed: "
+                    f"{sanitize_error_message(str(exc))}"[:MAX_SAFE_ERROR_LENGTH],
+                )
+                return events
+        except asyncio.CancelledError:
+            # 流结束后线程池窗口内的取消同样必须关闭 trace（与流内取消
+            # 分支同契约），否则 call_id 永久停在 pending。
+            await asyncio.shield(
+                finish_http_trace(
+                    call_id,
+                    state="error",
+                    response_status=response_status,
+                    response_headers=response_headers,
+                    response_text="",
+                    response_bytes=0,
+                    response_raw_text=raw,
+                    response_raw_bytes=len(raw.encode("utf-8")),
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type="CancelledError",
+                    error_message="HTTP stream was cancelled",
+                )
             )
-            return events
+            raise
         await finish_http_trace(
             call_id,
             state="success",
             response_status=response_status,
             response_headers=response_headers,
             response_text=combined_response,
-            response_bytes=len(combined_response.encode("utf-8")),
+            response_bytes=combined_bytes,
             response_raw_text=raw,
-            response_raw_bytes=len(raw.encode("utf-8")),
+            response_raw_bytes=raw_bytes,
             duration_ms=(time.monotonic() - started) * 1000,
         )
         return events

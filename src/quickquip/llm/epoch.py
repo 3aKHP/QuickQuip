@@ -16,6 +16,8 @@
 - ``DEFAULT_EPOCH_MAX_ROWS`` 行数硬兜底：防海量 1-token 行撑爆 provider 侧
   messages 数组；行数约束一律转化为锚点推进，绝不对范围读直接 LIMIT 截断
   （ASC + LIMIT 会截掉最新行——错误的一端）。
+- 推进/初始化/清键经 ``epoch_events`` 表旁路落库（低频、失败仅告警）：
+  真值仍是本模块的进程内状态，事件表只服务历史时间轴与排障。
 """
 
 from __future__ import annotations
@@ -85,15 +87,19 @@ class EpochResetEvent:
     epoch_tokens: int = -1
 
 
-def _row_budget(row: dict[str, object]) -> int:
-    """单行 history 的预算估算：正文（raw_content 优先）+ 标签开销。"""
+def row_budget(row: dict[str, object]) -> int:
+    """单行 history 的预算估算：正文（raw_content 优先）+ 标签开销。
+
+    纪元预算的统一口径：EpochManager 推进判定、usage 计量与 Web 侧窗口
+    估算共用，勿在别处另立口径。
+    """
     text = str(row.get("raw_content") or row.get("content") or "")
     return estimate_tokens(text) + ROW_OVERHEAD_TOKENS
 
 
 def estimate_rows_budget(rows: list[dict[str, object]]) -> int:
     """一组 history 行的纪元预算估算（service 计量点与 EpochManager 共用口径）。"""
-    return sum(_row_budget(row) for row in rows)
+    return sum(row_budget(row) for row in rows)
 
 
 class EpochManager:
@@ -137,12 +143,16 @@ class EpochManager:
             # 冷场：provider 侧缓存已死，重置是免费 miss，缩回冷场水位。
             candidate = self._pick_anchor_by_tokens(rows, params.cold_target_tokens)
             if candidate > state.anchor_id:
-                event = self._advance(state, store, key, candidate, reason="cold", epoch_tokens=total)
+                event = self._advance(
+                    state, store, key, candidate, reason="cold", epoch_tokens=total
+                )
         elif total > params.cap_tokens:
             # 触顶：付费 miss 仅这一次，缩到热水位保住长话题。
             candidate = self._pick_anchor_by_tokens(rows, params.hot_target_tokens)
             if candidate > state.anchor_id:
-                event = self._advance(state, store, key, candidate, reason="hot", epoch_tokens=total)
+                event = self._advance(
+                    state, store, key, candidate, reason="hot", epoch_tokens=total
+                )
         return event
 
     def note_activity(self, key: EpochKey) -> None:
@@ -155,15 +165,47 @@ class EpochManager:
         state = self._states.get(key)
         return state.anchor_id if state is not None else None
 
+    def snapshot(self) -> list[dict[str, object]]:
+        """全量锚点状态的值拷贝导出（epoch_snapshot action 消费）。
+
+        只做值拷贝不触发任何判定（不懒初始化、不推进），未初始化的键
+        自然缺席——快照语义 = 进程内当前真值，非可能态。
+        """
+        return [
+            {
+                "scope_key": key.scope_key,
+                "provider_id": key.provider_id,
+                "model": key.model,
+                "anchor_id": state.anchor_id,
+                "last_activity_at": state.last_activity_at,
+            }
+            # list() 先把 items 原子快照（C 层循环不释放 GIL）：epoch_snapshot
+            # 经 asyncio.to_thread 在 worker 线程执行，迭代期间事件循环线程
+            # 增删键不致 RuntimeError
+            for key, state in list(self._states.items())
+        ]
+
     def oldest_anchor(self, scope_key: str) -> int | None:
         """该 scope 所有键中最老的锚点（crop 的 floor）；无状态返回 None。"""
-        anchors = [state.anchor_id for key, state in self._states.items() if key.scope_key == scope_key]
+        anchors = [
+            state.anchor_id
+            for key, state in self._states.items()
+            if key.scope_key == scope_key
+        ]
         return min(anchors) if anchors else None
 
-    def reset_scope(self, scope_key: str) -> None:
-        """clear_context 第三清：抹掉该 scope 的全部纪元键。"""
+    def reset_scope(self, scope_key: str, *, store: "LLMStore | None" = None) -> None:
+        """clear_context 第三清：抹掉该 scope 的全部纪元键。
+
+        带 store 时逐键落 ``reason='clear'`` 事件（new_anchor_id = NULL 表
+        示锚点已抹除）；事件失败只告警，绝不阻断清键。
+        """
         doomed = [key for key in self._states if key.scope_key == scope_key]
         for key in doomed:
+            if store is not None:
+                self._record_event(
+                    store, key, "clear", self._states[key].anchor_id, None
+                )
             del self._states[key]
 
     def advance_to_cold_water(
@@ -189,7 +231,9 @@ class EpochManager:
         if total > params.cold_trigger_tokens:
             candidate = self._pick_anchor_by_tokens(rows, params.cold_target_tokens)
             if candidate > state.anchor_id:
-                event = self._advance(state, store, key, candidate, reason=reason, epoch_tokens=total)
+                event = self._advance(
+                    state, store, key, candidate, reason=reason, epoch_tokens=total
+                )
         # persona 切换后缓存重新烧入，T 从切换点重新计。
         state.last_activity_at = self._clock()
         return event
@@ -238,16 +282,21 @@ class EpochManager:
         ``ASC + LIMIT`` 会读到最旧一批行，CTX 跨度就量在了错误的一端。
         """
         start = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS) or 0
-        rows = store.list_conversation_messages_since(key.scope_key, start, limit=DEFAULT_EPOCH_MAX_ROWS)
+        rows = store.list_conversation_messages_since(
+            key.scope_key, start, limit=DEFAULT_EPOCH_MAX_ROWS
+        )
         anchor = 0
         if rows:
-            anchor = self._pair_align(store, key.scope_key, self._pick_anchor_by_tokens(rows, params.context_tokens))
+            anchor = self._pair_align(
+                store, key.scope_key, self._pick_anchor_by_tokens(rows, params.context_tokens)
+            )
+        self._record_event(store, key, "init", 0, anchor)
         return EpochState(anchor_id=anchor, last_activity_at=self._clock())
 
     def _advance(
         self,
         state: EpochState,
-        store: LLMStore,
+        store: "LLMStore",
         key: EpochKey,
         candidate_anchor: int,
         *,
@@ -258,14 +307,56 @@ class EpochManager:
         state.anchor_id = self._pair_align(store, key.scope_key, candidate_anchor)
         logger.info(
             "epoch advance scope=%s provider=%s model=%s reason=%s anchor=%d->%d tokens=%d",
-            key.scope_key, key.provider_id, key.model, reason, old_anchor, state.anchor_id, epoch_tokens,
+            key.scope_key,
+            key.provider_id,
+            key.model,
+            reason,
+            old_anchor,
+            state.anchor_id,
+            epoch_tokens,
         )
+        self._record_event(store, key, reason, old_anchor, state.anchor_id, epoch_tokens)
         return EpochResetEvent(
             reason=reason,
             old_anchor_id=old_anchor,
             new_anchor_id=state.anchor_id,
             epoch_tokens=epoch_tokens,
         )
+
+    def _record_event(
+        self,
+        store: "LLMStore",
+        key: EpochKey,
+        reason: str,
+        old_anchor_id: int,
+        new_anchor_id: int | None,
+        epoch_tokens: int = -1,
+    ) -> None:
+        """锚点推进的旁路落库（epoch_events 表）：失败只告警，绝不阻断主链路。"""
+        try:
+            evicted_rows, evicted_tokens = store.conversation_range_stats(
+                key.scope_key, old_anchor_id, new_anchor_id
+            )
+            store.record_epoch_event(
+                scope_key=key.scope_key,
+                provider_id=key.provider_id,
+                model=key.model,
+                reason=reason,
+                old_anchor_id=old_anchor_id,
+                new_anchor_id=new_anchor_id,
+                epoch_tokens=epoch_tokens,
+                evicted_rows=evicted_rows,
+                evicted_tokens=evicted_tokens,
+            )
+        except Exception:
+            logger.warning(
+                "epoch event persist failed scope=%s provider=%s model=%s reason=%s",
+                key.scope_key,
+                key.provider_id,
+                key.model,
+                reason,
+                exc_info=True,
+            )
 
     def _pair_align(self, store: LLMStore, scope_key: str, anchor_id: int) -> int:
         """锚点只落在 user/assistant 对边界：对齐到 >= anchor 的首条 user 行。"""
@@ -281,7 +372,7 @@ class EpochManager:
         idx = len(rows)
         while idx > 0:
             idx -= 1
-            total += _row_budget(rows[idx])
+            total += row_budget(rows[idx])
             if total >= target_tokens:
                 break
         # MIN_EPOCH_ROWS 保护：单条超长行（如大转发）不得把窗口吃空到不足 4 行。

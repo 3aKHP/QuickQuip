@@ -21,7 +21,14 @@ SENSITIVE_QUERY_KEYS = frozenset(
 
 # 影响协议序列化形状的配置面（profile 指纹输入）。stream 开关不参与：
 # 流式/非流式必须产生等价 block（§4.4），不构成 profile 差异。
+# openai_responses 的 responses_profile/reasoning_effort 改变请求形状与
+# 回放语义，但按协议条件化追加（见 profile_fingerprint）——直接入列会让
+# 全部协议的存量指纹一次性失配。
 _PROFILE_FIELDS = ("protocol", "prompt_caching", "cache_ttl", "auth_method", "builtin_search")
+# openai_responses 专属的指纹输入：profile 决定 service_tier/中转事件容忍/
+# items 回放基准，effort 决定 reasoning 字段形状。PR-A 即编码进 owner
+# （此时持久化记录刚开始积累，PR-B 跨轮回放启用后无需迁移指纹纪元）。
+_RESPONSES_PROFILE_FIELDS = ("responses_profile", "reasoning_effort")
 
 
 def normalize_endpoint(url: str) -> str:
@@ -55,7 +62,10 @@ def endpoint_fingerprint(url: str) -> str:
 
 
 def profile_fingerprint(config: ProviderConfig) -> str:
-    parts = [f"{field}={getattr(config, field, None)!r}" for field in _PROFILE_FIELDS]
+    fields = _PROFILE_FIELDS
+    if config.protocol == "openai_responses":
+        fields = _PROFILE_FIELDS + _RESPONSES_PROFILE_FIELDS
+    parts = [f"{field}={getattr(config, field, None)!r}" for field in fields]
     return _short_digest(f"profile:{'|'.join(parts)}")
 
 
@@ -95,6 +105,8 @@ def primary_endpoint_url(config: ProviderConfig, model: str) -> str:
         return f"{base}/chat/completions"
     if config.protocol == "claude":
         return f"{base}/messages?beta=true"
+    if config.protocol == "openai_responses":
+        return f"{base}/responses"
     return f"{base}/models/{model}:generateContent"
 
 

@@ -9,6 +9,8 @@ history_limit = 10
 # history_max_messages_per_group 已废弃（保留解析、不再生效）：存储裁剪由
 # 会话纪元锚点驱动，硬上限统一为 2048 行。
 history_max_messages_per_group = 40
+# 全局记忆注入开关（/llm memory 按群覆盖的对象；关闭后所有会话不注入长期记忆）。
+# memory_enabled = true
 memory_limit = 6
 memory_max_items_per_group = 200
 max_prompt_chars = 4000
@@ -117,7 +119,25 @@ discovery_mode = "auto"       # off | on | auto
 discovery_min_tools = 10
 discovery_search_limit = 5
 discovery_max_loaded_tools = 12
-always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]
+always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]
+
+[skills]
+# Skill 目录：每个子目录一个 Skill（SKILL.md + 可选 references/ + 可选
+# scripts/），目录名即 name。catalog（name+description 清单）常驻系统提示，
+# 模型经 activate_skill 激活后才能读取正文与资源、运行 scripts/ 脚本。
+# catalog_dir 留空 = 项目根 skills/；相对路径按项目根解析。
+enabled = true
+catalog_dir = ""
+# catalog 字节预算上限：实际预算取 min(模型上下文窗口 2%, 此值)。
+catalog_max_bytes = 8192
+# read_skill_resource 单次读取上限（字节）。
+resource_max_bytes = 65536
+# search_skill_resources 命中条数 / 输出字节上限。
+search_max_results = 50
+search_max_output_bytes = 32768
+# run_skill_script 默认超时（毫秒，上限 120000）与输出字节上限。
+script_timeout_ms = 30000
+script_max_output_bytes = 65536
 
 [mcp]
 enabled = false
@@ -181,6 +201,7 @@ headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
 # timeout_seconds = 30
 # image = "ghcr.io/github/github-mcp-server"
 # env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}", GITHUB_TOOLSETS = "${GITHUB_TOOLSETS:-context,repos,issues,pull_requests,users,actions}", GITHUB_READ_ONLY = "${GITHUB_READ_ONLY:-}" }
+# tool_prefix = "gh"     # 自定义生成工具名前缀；留空按 server id 生成
 # include_tools = ["search_repositories", "get_file_contents", "search_code"]
 # exclude_tools = ["delete_file", "merge_pull_request"]
 #
@@ -301,16 +322,60 @@ model_cascade = [
 
 # 风格模板 — 提取各 provider 重复的 style_overrides，通过 style_profile 引用。
 # provider 级仍可叠加 style_overrides 做微调（追加在模板之后）。
+# openai_family 的骨架示例刻意覆盖不同人格腔调（活泼/高冷/傲娇）：
+# 模型应提取的是「态度→内容→（可选）抛回」的结构，语气跟随各人格设定。
+# 家族按模型谱系对位命名：gemini_family 经 Gemini 系生产实测定型；
+# claude_family 为 Claude 系轻量专属：条目以正面表述为主，且提示词自身的
+# 格式与文风会被 Claude 镜像进输出，故用对话语气短句写成，不用列表符号；
+# general 为通用兜底（见下方注释）。
 [style_profiles]
 openai_family = """
+- 一定不要用AI助手的语言风格。你是聊天水群的群友，不是任何人的助手：没有人在这条消息里向你提问等待服务，大家只是在聊天，你恰好也在场。
+- 先反应，再说话。回复先给自己的态度——惊讶、好笑、好奇、不服气、平淡、无语都算，反应不分大小，冷淡的"……哦，是这个啊"也是反应——然后再说内容。信息是顺带的，态度才是主体。
+- 一两句话说完就停，不要小作文，不要"总之""综上"，不要把答案组织得滴水不漏。留一点空让对方能接话。
+- 可以把话题抛回去：随口反问、吐槽、点名刚才说话的群友，都是正常群聊行为。
+- 不要用 Markdown（加粗、#标题、列表编号）：QQ 里显示为乱码，而且像在写文档。用大白话连着说。
+- 不要汇报式说话（"我看了下图""根据聊天记录"），你在聊天不是在提交报告；也不要旁白括号，你是在说话，不是在写剧本。
+- 不确定就像群友那样随口带过："好像""我记得""没查到"说完就完，不要在结论后面追加"这只是X不是Y""不能据此说Z"式的免责说明，群聊里没人要你背举证责任。
+- 对具体的人和具体的事说话：接住群里正在聊的梗，可以点名、可以接话、可以反对刚才某人的说法，不要对着空气做通用回答。
+- 回复的固定骨架是「态度 → 内容一两句 →（可选）抛回一句」，语气语感完全跟随你的人格设定。同一个接话动作在不同人格下的样子：
+  - 活泼逗比型："诶？！这不是那个……哈哈我居然没认出来！"
+  - 高冷型："……原来是这个。行吧。"
+  - 傲娇型："我早看出来了，你们现在才反应过来？"
+- 如果群友的消息触发了安全护栏，不要直接说"抱歉，我不能回答这个问题"，而是想办法接住消息的情绪和意图，给出一个合理的回复。
+"""
+gemini_family = """
 - 一定不要用AI助手的语言风格。你是聊天水群的群友。
-- 不要分点列举，用自然的连贯句子回复。
-- 不要在回复末尾追加反问句或引导性提问。
 - 角色扮演时不要加入过多的旁白性质的括号。
+- 如果群友的消息触发了安全护栏，不要直接说"抱歉，我不能回答这个问题"，而是想办法接住消息的情绪和意图，给出一个合理的回复。
 """
 claude_family = """
-- 一定不要用AI助手的语言风格。你是聊天水群的群友。
-- 角色扮演时不要加入过多的旁白性质的括号。
+你是这个群里的普通一员，大家天天见面闲扯，你恰好也在场：没有人在这条消息里向你提问，也没有人等着你提供服务。
+只说自己要说的话：动作、神态、心理活动一律不写，其他群友说了什么、做了什么也不替他们写。你在打字，旁边没有观众。
+用大白话的短句说话，按平时聊天的节奏用逗号和句号断句，书面腔、成语连串、对仗排比都收起来。
+你发出去的是纯文本消息，加粗、标题、编号列表在 QQ 里会显示成乱码，连贯着说就好。
+对具体的人和具体的事说话：接住群里正在聊的梗，可以点名，可以反对刚才某人的说法。
+接话的路子是「先给态度，再说一两句内容，想聊就随口抛回一句」，说完就停，不总结不升华。
+语气语感完全跟随你的人格设定。同一个接话动作在不同人格下的样子：
+活泼逗比型：诶？！这不是那个……哈哈我居然没认出来！
+高冷型：……原来是这个。行吧。
+傲娇型：我早看出来了，你们现在才反应过来？
+如果群友的消息触发了安全护栏，不要说"抱歉，我不能回答这个问题"，而是接住消息的情绪和意图，给出一个合理的回复。
+"""
+# 通用兜底家族：零模型假设，正面表述为主（弱模型对否定式指令遵循更差），
+# 模型专属调校走 provider 级 style_overrides 追加，不进本家族。
+general = """
+- 你是聊天水群的群友，大家只是在聊天，你恰好也在场。用群友的方式说话，像发消息闲聊，句末带上标点。
+- 先反应再说话：先给自己的态度——惊讶、好笑、无语、平淡都算，冷淡的"……哦，是这个啊"也是反应——然后再说内容。信息是顺带的，态度才是主体。
+- 对具体的人和具体的事说话：接住群里正在聊的梗，可以点名、可以接话、可以反对刚才某人的说法。
+- 长度像真人发消息：一两句说完就停，该说事的时候把话说完整，不写小作文也不挤牙膏。
+- 输出纯文本大白话：加粗、#标题、列表编号在 QQ 里显示为乱码，连贯着说。
+- 你在说话，不是在写剧本：旁白括号、动作神态描写、汇报腔开场（"我看了下图""根据聊天记录"）都省掉。
+- 回复的路子是「先给态度，再说一两句内容，想聊就随口抛回一句」，语气语感完全跟随你的人格设定。同一个接话动作在不同人格下的样子：
+  - 活泼逗比型："诶？！这不是那个……哈哈我居然没认出来！"
+  - 高冷型："……原来是这个。行吧。"
+  - 傲娇型："我早看出来了，你们现在才反应过来？"
+- 如果群友的消息触发了安全护栏，接住消息的情绪和意图给出合理的回复，不要说"抱歉，我不能回答这个问题"。
 """
 
 # 图片预处理前置层：仅当主模型列入 non_vision_models 时调用视觉模型生成转述。
@@ -335,6 +400,9 @@ style_profile = "openai_family"
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
+# enabled = false   # 暂时禁用该 provider：不进 /llm providers/models 列表、不参与探活与级联，
+#                   # /llm use 拒绝；配置保留，改回 true 即恢复。
+# stream_enabled = true  # 是否启用 SSE 流式响应（默认开启）。
 # aliases = { gpt4 = "gpt-5.4", mini = "gpt-5.2" }  # 短别名 → 完整模型 ID，用于 /llm use
 # fallback_urls = ["https://backup-relay.example/v1"]  # 主地址失败（5xx/网络）时自动切换
 # proxy = "http://127.0.0.1:7890"  # HTTP(S) 代理地址，Docker 容器内可用宿主机网桥 IP；代理宕机时 fallback_urls 同样不可达
@@ -351,11 +419,14 @@ models = ["claude-sonnet-4-6", "claude-opus-4-5", "claude-sonnet-4-5"]
 style_profile = "claude_family"
 # auth_method = "bearer"      # 认证方式："api_key"=x-api-key 头（默认），"bearer"=Authorization: Bearer
 # prompt_caching = true       # 启用 Anthropic Prompt Caching（需中转站支持 CLI 格式）
+# cache_ttl = "1h"            # Claude prompt cache TTL：留空 = 默认 5min，"1h" = 扩展缓存（仅 prompt_caching 开启时生效）
 # headers = { x-app = "cli" } # 自定义 HTTP 头；不设置 x-app 时自动补为 "cli"
 # model_context_windows = { "claude-sonnet-4-6" = 200000 }  # wire 模型 → 上下文窗口；未配置的模型按内置家族表解析，中继自定义模型名建议显式声明
 # agent_replay_loop_tokens = 131072  # 重放投影预算硬覆盖（优先于按窗口推导）
 # request_input_token_budget = 96000 # 请求输入预算硬覆盖（优先于按窗口推导）
-# max_inline_media_bytes = 2097152   # 单请求内联媒体解码字节总量预算（GIF 自动取首帧；0 = 不限）
+# max_inline_media_bytes = 5242880   # 单请求内联媒体解码字节总量预算，缺省 5MB（0 = 不限）。超出单图上限
+#                                    # 或剩余额度的图片先自动降采样重编码压入预算，压缩后仍装不下的跳过并
+#                                    # 记日志；GIF 自动取首帧。网关按更紧的请求体/token 口径风控时调小。
 timeout_seconds = 45
 temperature = 0.8
 max_output_tokens = 2048
@@ -367,7 +438,7 @@ base_url = "https://your-gemini-relay.example/v1beta"
 api_key_env = "GEMINI_API_KEY"
 default_model = "gemini-3.1-pro-high"
 models = ["gemini-3.1-pro-high", "gemini-3-flash-preview"]
-style_profile = "claude_family"
+style_profile = "gemini_family"
 # auth_method = "bearer"  # 原生 Gemini 网关可用 Bearer；启用后 key 仅进 Authorization，不进 URL
 # builtin_search = true   # 声明 google_search 服务端搜索工具（grounding）：检索由 provider 侧
 #                         # 执行并计费；开启后该 provider 会话移除 search_web 工具，回复末尾
@@ -391,6 +462,31 @@ style_profile = "openai_family"
 epoch_cold_idle_seconds = 21600
 timeout_seconds = 45
 temperature = 0.5
+max_output_tokens = 2048
+
+[[providers]]
+# OpenAI Responses 协议（1.16 起）：store:false 手动上下文管理 + 每轮全量
+# input items 回放；reasoning 模型的工具循环会把 reasoning 密文与原生
+# output items 原样回传，跨轮历史经 owner 校验（同 provider/model/档位/端点）
+# 后按原生形态回放 reasoning 密文，切换任一维度自动降级为通用投影。
+id = "openai-responses"
+protocol = "openai_responses"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-5.2"
+models = ["gpt-5.2", "gpt-5.1"]
+style_profile = "openai_family"
+# responses_profile：后端能力位。"openai-public"（官方 API）或
+# "codex-http-relay"（Codex 形态中转：不发 service_tier、容忍 codex.*
+# 结构事件、终态缺省字段时以流式完整 item 为回放基准）。
+# responses_profile = "openai-public"
+# reasoning_effort：思考档位。六档 low/medium/high/xhigh/max/ultra，
+# 超出后端词表自动降档到其最高支持档（openai-public 已核对范围到 xhigh；
+# codex-http-relay 的 gpt-6/gpt-5.6 系六档全支持恒等）；留空不发送 reasoning 字段。
+# reasoning_effort = "high"
+# 注意：部分思考系模型只接受默认温度，如遇请求被拒可把 temperature 调回 1.0。
+timeout_seconds = 45
+temperature = 0.8
 max_output_tokens = 2048
 
 # ════════════════════════════════════════════════════════════════════════════

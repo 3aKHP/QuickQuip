@@ -62,11 +62,16 @@ config/chat_rules.toml
 config/games.toml
 config/sensitive_words.toml
 config/awakening.toml
+config/admins.toml
 config/personas/
 config/llm.local.toml
 config/llm.*.local.toml
 !config/*.example
 !config/personas.example/
+
+# Private deployed skills (public templates ship in skills.example/)
+/skills/
+!/skills.example/
 
 # Private production deployment assets
 /prod/

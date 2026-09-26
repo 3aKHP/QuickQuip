@@ -204,7 +204,9 @@ async def run_command_single_shot(
 
     try:
         with usage_scope(spec.usage_scope_name, group_id=str(chat_id)):
-            response = await client_builder(replace(provider, stream_enabled=False)).complete(request)
+            response = await client_builder(
+                replace(provider, stream_enabled=False)
+            ).complete(request)
     except LLMProviderError as exc:
         if spec.log_label is not None:
             logger.warning("%s LLM call failed: %s", spec.log_label, exc)
@@ -273,7 +275,9 @@ async def run_card_le_nearest(
     )
     try:
         with usage_scope("card_le_nearest", group_id=str(chat_id)):
-            response = await client_builder(replace(provider, stream_enabled=False)).complete(request)
+            response = await client_builder(
+                replace(provider, stream_enabled=False)
+            ).complete(request)
     except Exception:
         logger.exception("STS card_le nearest LLM call failed for %r", captured)
         return None

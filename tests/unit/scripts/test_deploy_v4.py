@@ -61,11 +61,15 @@ if args[0] == "compose":
                 for name in ("llbot", "quickquip", "web-admin")
             }}))
         elif "--format" in args:
-            print(json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}))
+            print(json.dumps(
+                {"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}
+            ))
     elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
         sys.exit(1)
     elif "up" in args:
-        if os.environ.get("FAIL_UP") == "all" or (os.environ.get("FAIL_UP") == "new" and release == os.environ["TEST_NEW"]):
+        if os.environ.get("FAIL_UP") == "all" or (
+            os.environ.get("FAIL_UP") == "new" and release == os.environ["TEST_NEW"]
+        ):
             sys.exit(1)
     elif "ps" in args:
         print("test-container")
@@ -75,7 +79,12 @@ elif args[0] == "inspect":
     print("true")
 ''')
     docker.chmod(0o700)
-    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", TEST_ROOT=str(root), TEST_NEW=NEW)
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        TEST_ROOT=str(root),
+        TEST_NEW=NEW,
+    )
     return root, inbox, env
 
 
@@ -101,7 +110,9 @@ def test_success_commits_environment_and_previous(deployment):
 @pytest.mark.parametrize("failure", ["build", "up"])
 def test_failure_restores_original_files_and_links(deployment, failure):
     root, inbox, _ = deployment
-    result = run_deploy(deployment, **({"FAIL_BUILD": "1"} if failure == "build" else {"FAIL_UP": "new"}))
+    result = run_deploy(
+        deployment, **({"FAIL_BUILD": "1"} if failure == "build" else {"FAIL_UP": "new"})
+    )
     assert result.returncode == 1, result.stdout + result.stderr
     assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=old\n"
     assert (root / "current").readlink() == Path("releases") / OLD
@@ -134,9 +145,14 @@ def test_lock_rejects_second_action_before_live_mutation(deployment):
     assert not (root / "calls").exists()
 
 
-@pytest.mark.parametrize("args", [["-Rollback", "-DryRun"], ["-Status", "-Migrate"], ["-Status", "-SkipHealth"]])
+@pytest.mark.parametrize(
+    "args",
+    [["-Rollback", "-DryRun"], ["-Status", "-Migrate"], ["-Status", "-SkipHealth"]],
+)
 def test_bash_rejects_invalid_modes_before_side_effects(args):
-    result = subprocess.run(["bash", str(TEMPLATE / "deploy-v4.sh"), *args], capture_output=True, text=True)
+    result = subprocess.run(
+        ["bash", str(TEMPLATE / "deploy-v4.sh"), *args], capture_output=True, text=True
+    )
     assert result.returncode != 0
     assert "FAILED:" in result.stderr
 
@@ -148,7 +164,9 @@ def test_shared_transaction_restores_token_and_missing_files(tmp_path):
     (incoming / "shared/prod").mkdir(parents=True)
     (incoming / "shared/.env").write_text("ONEBOT_ACCESS_TOKEN=new\r\n")
     (incoming / "shared/prod/sendkey.env").write_text("SENDKEY=synthetic\n")
-    (incoming / "candidate-compose.json").write_text(json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}))
+    (incoming / "candidate-compose.json").write_text(
+        json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}})
+    )
     path = root / "prod/llbot-data/default_config.json"
     path.parent.mkdir(parents=True)
     original = b'{"ob11":{"connect":[{}, {"token":"old","url":"old-url"}]}}'
@@ -227,3 +245,71 @@ def test_sudo_new_shared_file_uses_invoking_user(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "chown", lambda path, uid, gid: owners.append((uid, gid)))
     STATE["apply_shared"](root, incoming, backup)
     assert owners == [(1234, 5678)]
+
+
+def _write_fake_docker_for_baseline(bin_dir: Path) -> None:
+    services = {
+        "services": {
+            "llbot": {"container_name": "llbot"},
+            "quickquip": {
+                "container_name": "quickquip",
+                "volumes": [
+                    {"type": "bind", "source": "../skills", "target": "/app/skills"}
+                ],
+            },
+            "web-admin": {"container_name": "web-admin"},
+        }
+    }
+    payload = json.dumps(services)
+    docker = bin_dir / "docker"
+    docker.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        "args = sys.argv[1:]\n"
+        'if args[0] == "compose" and "config" in args and "--no-interpolate" in args:\n'
+        f"    print({payload!r})\n"
+        'elif args[0] == "inspect":\n'
+        '    print("sha256:fake")\n'
+    )
+    docker.chmod(0o700)
+
+
+def _minimal_server_root(tmp_path) -> Path:
+    root = tmp_path / "server"
+    (root / "prod").mkdir(parents=True)
+    (root / ".env").write_text("TOKEN=synthetic\n")
+    (root / "prod/docker-compose.yml").write_text("services: {}\n")
+    return root
+
+
+def test_capture_baseline_copies_skills_and_rewrites_volume(tmp_path, monkeypatch):
+    root = _minimal_server_root(tmp_path)
+    skill_md = root / "skills/demo/SKILL.md"
+    skill_md.parent.mkdir(parents=True)
+    skill_md.write_text("---\nname: demo\ndescription: 演示\n---\n正文\n")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker_for_baseline(bin_dir)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    baseline = tmp_path / "baseline"
+    STATE["capture_baseline"](root, baseline)
+    assert (baseline / "skills/demo/SKILL.md").read_text() == skill_md.read_text()
+    config = json.loads((baseline / "prod/docker-compose.yml").read_text())
+    (volume,) = config["services"]["quickquip"]["volumes"]
+    assert volume["source"] == str(baseline / "skills")
+    assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
+
+
+def test_capture_baseline_without_skills_dir_materializes_empty(tmp_path, monkeypatch):
+    root = _minimal_server_root(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker_for_baseline(bin_dir)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    baseline = tmp_path / "baseline"
+    STATE["capture_baseline"](root, baseline)
+    assert (baseline / "skills").is_dir()
+    assert list((baseline / "skills").iterdir()) == []
+    config = json.loads((baseline / "prod/docker-compose.yml").read_text())
+    (volume,) = config["services"]["quickquip"]["volumes"]
+    assert volume["source"] == str(baseline / "skills")

@@ -1,14 +1,25 @@
 """Tests for quickquip.common.event_utils — pure event-inspection helpers."""
 from __future__ import annotations
 
+import pytest
 from types import SimpleNamespace
 
+from quickquip.common.admins import configure, reset
 from quickquip.common.event_utils import (
     get_sender_name,
     is_admin,
     is_self_message,
     strip_command_name,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_admin_registry(tmp_path):
+    """is_admin 已委托全局注册表；指向保证不存在的路径，隔离开发机真实
+    config/admins.toml，避免用例与真名单撞号。"""
+    configure(tmp_path / "absent.toml")
+    yield
+    reset()
 
 
 # ── get_sender_name ────────────────────────────────────────────────

@@ -36,10 +36,11 @@ class ConversationStoreMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT INTO conversation_messages (group_id, user_id, sender_name, canonical_name, role, content, message_id, raw_content, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                "\n"
+                "                INSERT INTO conversation_messages (group_id, user_id, "
+                "sender_name, canonical_name, role, content, message_id, raw_content, created_at)\n"
+                "                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n"
+                "                ",
                 (
                     str(group_id),
                     None if user_id is None else str(user_id),
@@ -89,13 +90,14 @@ class ConversationStoreMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
             rows = conn.execute(
-                """
-                SELECT id, user_id, sender_name, canonical_name, role, content, message_id, raw_content, agent_loop_id
-                FROM conversation_messages
-                WHERE group_id = ? AND id >= ?
-                ORDER BY id ASC
-                LIMIT ?
-                """,
+                "\n"
+                "                SELECT id, user_id, sender_name, canonical_name, role, content, "
+                "message_id, raw_content, agent_loop_id\n"
+                "                FROM conversation_messages\n"
+                "                WHERE group_id = ? AND id >= ?\n"
+                "                ORDER BY id ASC\n"
+                "                LIMIT ?\n"
+                "                ",
                 (str(group_id), int(anchor_id), int(limit)),
             ).fetchall()
         return [
@@ -107,6 +109,17 @@ class ConversationStoreMixin:
             }
             for row in rows
         ]
+
+    def latest_conversation_row_id(self, group_id: int | str) -> int:
+        """该会话当前最大行 id（无行时 0）——Skill 激活登记的尾部锚点用。"""
+        if self._unavailable:
+            raise RuntimeError("LLM存储 数据库不可用")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM conversation_messages WHERE group_id = ?",
+                (str(group_id),),
+            ).fetchone()
+        return int(row[0])
 
     def find_anchor_row_id_by_rows(self, group_id: int | str, keep_rows: int) -> int | None:
         """返回「保留最新 keep_rows 行」的锚点行 id（第 keep_rows 新的行）。
@@ -204,7 +217,9 @@ class ConversationStoreMixin:
             )
             return int(cursor.rowcount)
 
-    def delete_conversation_message_by_message_id(self, group_id: int | str, message_id: str) -> int:
+    def delete_conversation_message_by_message_id(
+        self, group_id: int | str, message_id: str
+    ) -> int:
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:
@@ -217,7 +232,9 @@ class ConversationStoreMixin:
             )
             return int(cursor.rowcount)
 
-    def conversation_rows_by_message_id(self, group_id: int | str, message_id: str) -> list[dict[str, object]]:
+    def conversation_rows_by_message_id(
+        self, group_id: int | str, message_id: str
+    ) -> list[dict[str, object]]:
         """按平台 message_id 查询主表行（撤回回退路径；不删除）。"""
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")

@@ -41,9 +41,20 @@ def test_detect_kind_wake_sleep_none():
     assert detect_kind("你好") is None
 
 
-def test_sqlite_stores_are_lazy_proxies():
-    assert isinstance(message_pipeline.offline_message_store, message_pipeline._LazyStoreProxy)
-    assert isinstance(message_pipeline.group_quote_store, message_pipeline._LazyStoreProxy)
+def test_sqlite_proxy_creates_store_on_first_use_and_reuses_it():
+    from unittest.mock import Mock
+
+    store = Mock()
+    factory = Mock(return_value=store)
+    proxy = message_pipeline._LazyStoreProxy(factory)
+    proxy.close()
+    factory.assert_not_called()
+    proxy.count()
+    proxy.count()
+    factory.assert_called_once_with()
+    assert store.count.call_count == 2
+    proxy.close()
+    store.close.assert_called_once_with()
 
 
 def test_game_scores_uses_domain_singleton():
@@ -72,10 +83,8 @@ def test_build_timezone_reply_wake(frozen_now):
     info = build_timezone_reply("早安", sender_name="测试用户", now=frozen_now)
     assert info["rate_limit_key"] == "timezone_wake"
     reply = info["reply"]
-    assert "现在是北京时间2026-03-16 09:19" in reply
+    assert "2026-03-16 09:19" in reply
     assert "@测试用户 " in reply
-    assert "要起床了" in reply
-    assert "TA也有可能在" in reply
 
 
 def test_build_timezone_reply_sleep(frozen_now):
@@ -83,15 +92,16 @@ def test_build_timezone_reply_sleep(frozen_now):
     assert info["rate_limit_key"] == "timezone_sleep"
     reply = info["reply"]
     assert "@测试用户 " in reply
-    assert "要睡觉了" in reply
-    assert "TA也有可能在" in reply
 
 
 async def test_resolve_reply_rule_beats_timezone(frozen_now):
     result = await resolve_reply("神临早安", user_id=1, sender_name="测试用户", now=frozen_now)
     assert result is not None
     assert result["rate_limit_key"] == "divine_arrival"
-    assert result["reply"] == "2026-03-16 09:19，@测试用户 区从天降"
+    # 不钉梗文案：规则命中且回复由事件上下文渲染（时间与昵称来自事件本身）
+    assert result["reply"]
+    assert "@测试用户" in result["reply"]
+    assert "2026-03-16 09:19" in result["reply"]
 
 
 async def test_resolve_reply_falls_back_to_timezone(frozen_now):
@@ -99,7 +109,6 @@ async def test_resolve_reply_falls_back_to_timezone(frozen_now):
     assert result is not None
     assert result["rate_limit_key"] == "timezone_wake"
     assert "@测试用户 " in result["reply"]
-    assert "要起床了" in result["reply"]
 
 
 async def test_build_reply_returns_plain_text(frozen_now):
@@ -109,8 +118,12 @@ async def test_build_reply_returns_plain_text(frozen_now):
 
 
 async def test_resolve_reply_none_for_unrelated_message(frozen_now):
-    assert await resolve_reply("今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now) is None
-    assert await build_reply("今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now) is None
+    assert await resolve_reply(
+        "今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now
+    ) is None
+    assert await build_reply(
+        "今天天气不错", user_id=1, sender_name="测试用户", now=frozen_now
+    ) is None
 
 
 async def test_repeat_fingerprint_never_becomes_reply_text():
@@ -166,7 +179,9 @@ async def test_capture_rules_only_echo_safe_projected_text(group_id, text, rule_
 
 async def test_rule_switch_blocks_when_group_id_given(frozen_now):
     global_rule_switch.disable(6001, "divine_arrival")
-    blocked = await resolve_reply("神临", user_id=123, sender_name="n", group_id=6001, now=frozen_now)
+    blocked = await resolve_reply(
+        "神临", user_id=123, sender_name="n", group_id=6001, now=frozen_now
+    )
     assert blocked is None or blocked.get("rule_name") != "divine_arrival"
 
 

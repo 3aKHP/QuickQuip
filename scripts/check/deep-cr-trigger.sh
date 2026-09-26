@@ -24,7 +24,7 @@ classify() {
     src/quickquip/llm/provider/*|src/quickquip/llm/mcp/*) echo provider-mcp ;;
     src/quickquip/llm/service.py|src/quickquip/llm/service_parts/*|src/quickquip/llm/tool_*.py) echo llm-tools ;;
     src/quickquip/llm/*store*|src/quickquip/common/persistence.py|src/quickquip/app/web/action_queue.py|src/quickquip/app/web/session_store.py|src/quickquip/adapters/nonebot/web_admin_actions.py) echo persistence ;;
-    src/quickquip/chat/awakening.py|src/quickquip/adapters/nonebot/group_messages.py|src/quickquip/app/message_pipeline.py|src/quickquip/common/rate_limit.py|src/quickquip/common/sensitive_filter.py|src/quickquip/app/web/routes/sensitive_filter.py) echo message-policy ;;
+    src/quickquip/chat/awakening*|src/quickquip/adapters/nonebot/group_messages.py|src/quickquip/app/message_pipeline.py|src/quickquip/common/rate_limit.py|src/quickquip/common/sensitive_filter.py|src/quickquip/app/web/routes/sensitive_filter.py) echo message-policy ;;
     src/quickquip/app/web/*|frontend/src/*) echo web-admin ;;
     Dockerfile|docker-compose*.yml|prod.example/*|.github/workflows/release.yml) echo release-deployment ;;
     *) echo "" ;;

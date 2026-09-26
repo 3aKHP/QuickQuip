@@ -25,6 +25,9 @@ _SQLITE_BUSY_RETRY_DELAY_SECONDS = 0.1
 _SQLITE_BUSY_RETRY_ATTEMPTS = 100
 _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
+# 纪元看板锯齿曲线的安全阀：单查询最多返回的轮数（触顶时保留最新若干轮）。
+_EPOCH_SERIES_MAX_LOOPS = 60_000
+
 # 统计业务时区固定为项目既有的 Asia/Shanghai；数据库时间戳持续使用 UTC，
 # 仅在窗口边界与聚合分桶时换算。偏移后缀与 SQLite 修正子从同一时区推导，
 # 保证 SQL 分桶与桶标签锁步一致。
@@ -134,6 +137,7 @@ class LLMUsageStore:
                         agent_loop_id         TEXT,
                         envelope_tokens       INTEGER,
                         epoch_history_tokens  INTEGER,
+                        epoch_history_rows    INTEGER,
                         media_image_count     INTEGER,
                         patch_tokens          INTEGER,
                         stream                INTEGER NOT NULL,
@@ -172,6 +176,7 @@ class LLMUsageStore:
                     "agent_loop_id": "TEXT",
                     "envelope_tokens": "INTEGER",
                     "epoch_history_tokens": "INTEGER",
+                    "epoch_history_rows": "INTEGER",
                     "media_image_count": "INTEGER",
                     "patch_tokens": "INTEGER",
                     "duration_ms": "REAL",
@@ -204,15 +209,22 @@ class LLMUsageStore:
                         if "duplicate column name" not in str(error):
                             raise
                 conn.executescript(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_usage_ts       ON llm_usage_events(ts DESC, id DESC);
-                    CREATE INDEX IF NOT EXISTS idx_usage_provider ON llm_usage_events(provider_id, ts DESC);
-                    CREATE INDEX IF NOT EXISTS idx_usage_feature  ON llm_usage_events(feature, ts DESC);
-                    CREATE INDEX IF NOT EXISTS idx_usage_group    ON llm_usage_events(group_id, ts DESC);
-                    CREATE INDEX IF NOT EXISTS idx_usage_model    ON llm_usage_events(model, ts DESC);
-                    CREATE INDEX IF NOT EXISTS idx_usage_persona  ON llm_usage_events(persona_id, ts DESC);
-                    CREATE INDEX IF NOT EXISTS idx_usage_run_id   ON llm_usage_events(run_id);
-                    """
+                    "\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_ts       "
+                    "ON llm_usage_events(ts DESC, id DESC);\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_provider "
+                    "ON llm_usage_events(provider_id, ts DESC);\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_feature  "
+                    "ON llm_usage_events(feature, ts DESC);\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_group    "
+                    "ON llm_usage_events(group_id, ts DESC);\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_model    "
+                    "ON llm_usage_events(model, ts DESC);\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_persona  "
+                    "ON llm_usage_events(persona_id, ts DESC);\n"
+                    "                    CREATE INDEX IF NOT EXISTS idx_usage_run_id   "
+                    "ON llm_usage_events(run_id);\n"
+                    "                    "
                 )
                 # 历史 claude 行标签 backfill（issue #202）：input_tokens 列自始存
                 # exclusive 原始值，落库标签却恒写 inclusive。UPDATE 天然幂等，
@@ -278,22 +290,35 @@ class LLMUsageStore:
         where, params = self._where(cutoff, filters)
         with self.connect() as conn:
             total = conn.execute(
-                f"SELECT COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) AS cost, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._total_tokens_expr()} ELSE 0 END), 0) AS tokens, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._fresh_input_expr()} ELSE 0 END), 0) AS fresh_input, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN output_tokens ELSE 0 END), 0) AS output, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_read_tokens ELSE 0 END), 0) AS cache_read, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_creation_tokens ELSE 0 END), 0) AS cache_creation, "
-                f"COUNT(*) AS calls, COALESCE(SUM(CASE WHEN state = 'ok' THEN 1 ELSE 0 END), 0) AS successes, "
+                f"SELECT COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) "
+                f"AS cost, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._total_tokens_expr()} "
+                f"ELSE 0 END), 0) AS tokens, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._fresh_input_expr()} "
+                f"ELSE 0 END), 0) AS fresh_input, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN output_tokens ELSE 0 END), 0) "
+                f"AS output, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_read_tokens "
+                f"ELSE 0 END), 0) AS cache_read, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_creation_tokens "
+                f"ELSE 0 END), 0) AS cache_creation, "
+                f"COUNT(*) AS calls, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN 1 ELSE 0 END), 0) AS successes, "
                 f"COALESCE(AVG(duration_ms), 0) AS avg_duration, "
                 f"AVG(CASE WHEN state = 'ok' THEN envelope_tokens END) AS avg_envelope, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' AND envelope_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS envelope_tracked, "
-                f"AVG(CASE WHEN state = 'ok' THEN epoch_history_tokens END) AS avg_epoch_history, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' AND epoch_history_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS epoch_tracked, "
-                f"AVG(CASE WHEN state = 'ok' THEN media_image_count END) AS avg_media_images, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' AND media_image_count IS NOT NULL THEN 1 ELSE 0 END), 0) AS media_tracked, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND envelope_tokens IS NOT NULL "
+                f"THEN 1 ELSE 0 END), 0) AS envelope_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN epoch_history_tokens END) "
+                f"AS avg_epoch_history, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND epoch_history_tokens "
+                f"IS NOT NULL THEN 1 ELSE 0 END), 0) AS epoch_tracked, "
+                f"AVG(CASE WHEN state = 'ok' THEN media_image_count END) "
+                f"AS avg_media_images, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND media_image_count "
+                f"IS NOT NULL THEN 1 ELSE 0 END), 0) AS media_tracked, "
                 f"AVG(CASE WHEN state = 'ok' THEN patch_tokens END) AS avg_patch, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' AND patch_tokens IS NOT NULL THEN 1 ELSE 0 END), 0) AS patch_tracked "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' AND patch_tokens IS NOT NULL "
+                f"THEN 1 ELSE 0 END), 0) AS patch_tracked "
                 f"FROM llm_usage_events WHERE {where}",
                 params,
             ).fetchone()
@@ -318,25 +343,47 @@ class LLMUsageStore:
                 "request_count": total["calls"],
                 "success_count": total["successes"],
                 "total_calls": total["successes"],
-                "success_rate": round((total["successes"] or 0) / total["calls"], 4) if total["calls"] else 0.0,
+                "success_rate": round((total["successes"] or 0) / total["calls"], 4)
+                if total["calls"]
+                else 0.0,
                 "average_duration_ms": round(total["avg_duration"], 2),
-                "cache_hit_rate": round(total["cache_read"] / input_total, 4) if input_total else 0.0,
+                "cache_hit_rate": round(total["cache_read"] / input_total, 4)
+                if input_total
+                else 0.0,
                 # 第四张账本【信封】：Agent Loop 内每行同值，只可按 AVG 解读为
                 # 每轮成本，禁止 SUM；coverage = 有估算行的成功调用占比
-                "avg_envelope_tokens": round(total["avg_envelope"], 1) if total["avg_envelope"] is not None else 0.0,
-                "envelope_coverage": round(total["envelope_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                "avg_envelope_tokens": round(total["avg_envelope"], 1)
+                if total["avg_envelope"] is not None
+                else 0.0,
+                "envelope_coverage": round(
+                    total["envelope_tracked"] / total["successes"], 4
+                )
+                if total["successes"]
+                else 0.0,
                 # 第五张账本【纪元】：[anchor, head) history 段 token 估算；同信封口径
                 # 只可按 AVG 解读（验收口径 ≈4.2k），coverage 语义同上
-                "avg_epoch_history_tokens": round(total["avg_epoch_history"], 1) if total["avg_epoch_history"] is not None else 0.0,
-                "epoch_coverage": round(total["epoch_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                "avg_epoch_history_tokens": round(total["avg_epoch_history"], 1)
+                if total["avg_epoch_history"] is not None
+                else 0.0,
+                "epoch_coverage": round(total["epoch_tracked"] / total["successes"], 4)
+                if total["successes"]
+                else 0.0,
                 # 第六张账本【媒体】：当轮实际随请求附带的图片数；同信封口径
                 # 只可按 AVG 解读，coverage 语义同上
-                "avg_media_image_count": round(total["avg_media_images"], 1) if total["avg_media_images"] is not None else 0.0,
-                "media_coverage": round(total["media_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                "avg_media_image_count": round(total["avg_media_images"], 1)
+                if total["avg_media_images"] is not None
+                else 0.0,
+                "media_coverage": round(total["media_tracked"] / total["successes"], 4)
+                if total["successes"]
+                else 0.0,
                 # 第七张账本【现场补丁】：【现场】块 token 估算（与预算同单位，
                 # AVG 直接读作预算利用率）；尾巴段每轮全价，不计入纪元 CTX 预算
-                "avg_patch_tokens": round(total["avg_patch"], 1) if total["avg_patch"] is not None else 0.0,
-                "patch_coverage": round(total["patch_tracked"] / total["successes"], 4) if total["successes"] else 0.0,
+                "avg_patch_tokens": round(total["avg_patch"], 1)
+                if total["avg_patch"] is not None
+                else 0.0,
+                "patch_coverage": round(total["patch_tracked"] / total["successes"], 4)
+                if total["successes"]
+                else 0.0,
                 "by_provider": self._group_by(conn, "provider_id", where, params),
                 "by_feature": self._group_by(conn, "feature", where, params),
                 "by_model": self._group_by(conn, "model", where, params),
@@ -382,8 +429,10 @@ class LLMUsageStore:
             rows = conn.execute(
                 f"SELECT {bucket_expr} AS d, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) AS cost, "
-                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._total_tokens_expr()} ELSE 0 END), 0) AS tokens, "
-                f"COUNT(*) AS requests, SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END) AS errors, "
+                f"COALESCE(SUM(CASE WHEN state = 'ok' THEN {self._total_tokens_expr()} "
+                f"ELSE 0 END), 0) AS tokens, "
+                f"COUNT(*) AS requests, "
+                f"SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END) AS errors, "
                 f"COALESCE(AVG(duration_ms), 0) AS duration "
                 f"FROM llm_usage_events WHERE {where} GROUP BY d ORDER BY d",
                 params,
@@ -400,7 +449,8 @@ class LLMUsageStore:
         if not fill_buckets:
             return [
                 {"date": r["d"], "cost": round(r["cost"], 6), "tokens": r["tokens"],
-                 "requests": r["requests"], "errors": r["errors"], "duration": round(r["duration"], 2),
+                 "requests": r["requests"], "errors": r["errors"],
+                 "duration": round(r["duration"], 2),
                  "value": self._timeline_value(r, metric)}
                 for r in rows
             ]
@@ -423,25 +473,46 @@ class LLMUsageStore:
     def _group_by(conn, col: str, where: str, params: list[object]) -> list[dict]:
         """按某列聚合 cost/calls（仅 state='ok'）。col 受控（非用户输入）。"""
         rows = conn.execute(
-            f"SELECT {col} AS k, COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd ELSE 0 END), 0) AS cost, "
-            f"COUNT(*) AS calls, COALESCE(SUM(CASE WHEN state = 'ok' THEN {LLMUsageStore._total_tokens_expr()} ELSE 0 END), 0) AS tokens, "
+            f"SELECT {col} AS k, COALESCE(SUM(CASE WHEN state = 'ok' THEN cost_usd "
+            f"ELSE 0 END), 0) AS cost, "
+            f"COUNT(*) AS calls, "
+            f"COALESCE(SUM(CASE WHEN state = 'ok' THEN "
+            f"{LLMUsageStore._total_tokens_expr()} "
+            f"ELSE 0 END), 0) AS tokens, "
             f"SUM(CASE WHEN state = 'error' THEN 1 ELSE 0 END) AS errors "
             f"FROM llm_usage_events WHERE {where} GROUP BY {col} "
             f"ORDER BY cost DESC",
             params,
         ).fetchall()
         return [
-            {"key": r["k"] if r["k"] is not None else UNATTRIBUTED_LABEL, "cost": round(r["cost"], 6), "calls": r["calls"], "tokens": r["tokens"], "errors": r["errors"]}
+            {
+                "key": r["k"] if r["k"] is not None else UNATTRIBUTED_LABEL,
+                "cost": round(r["cost"], 6),
+                "calls": r["calls"],
+                "tokens": r["tokens"],
+                "errors": r["errors"],
+            }
             for r in rows
         ]
 
     @staticmethod
     def _total_tokens_expr() -> str:
-        return "COALESCE(total_tokens, CASE WHEN input_token_semantics = 'exclusive' OR (input_token_semantics IS NULL AND protocol = 'claude') THEN COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_creation_tokens, 0) ELSE COALESCE(input_tokens, 0) END + COALESCE(output_tokens, 0))"
+        return (
+            "COALESCE(total_tokens, CASE WHEN input_token_semantics = 'exclusive' "
+            "OR (input_token_semantics IS NULL AND protocol = 'claude') "
+            "THEN COALESCE(input_tokens, 0) + COALESCE(cache_read_tokens, 0) "
+            "+ COALESCE(cache_creation_tokens, 0) ELSE COALESCE(input_tokens, 0) END "
+            "+ COALESCE(output_tokens, 0))"
+        )
 
     @staticmethod
     def _fresh_input_expr() -> str:
-        return "COALESCE(fresh_input_tokens, CASE WHEN input_token_semantics = 'exclusive' OR (input_token_semantics IS NULL AND protocol = 'claude') THEN COALESCE(input_tokens, 0) ELSE MAX(0, COALESCE(input_tokens, 0) - COALESCE(cache_read_tokens, 0) - COALESCE(cache_creation_tokens, 0)) END)"
+        return (
+            "COALESCE(fresh_input_tokens, CASE WHEN input_token_semantics = 'exclusive' "
+            "OR (input_token_semantics IS NULL AND protocol = 'claude') "
+            "THEN COALESCE(input_tokens, 0) ELSE MAX(0, COALESCE(input_tokens, 0) "
+            "- COALESCE(cache_read_tokens, 0) - COALESCE(cache_creation_tokens, 0)) END)"
+        )
 
     @staticmethod
     def _timeline_value(row: sqlite3.Row | None, metric: str) -> float | int:
@@ -510,12 +581,60 @@ class LLMUsageStore:
             ).fetchall()
         has_more = len(rows) > limit
         rows = rows[:limit]
-        return {"items": [dict(row) for row in rows], "next_cursor": str(rows[-1]["id"]) if has_more and rows else None}
+        return {
+            "items": [dict(row) for row in rows],
+            "next_cursor": str(rows[-1]["id"]) if has_more and rows else None,
+        }
+
+    def epoch_series(
+        self,
+        *,
+        cutoff: str,
+        group_id: str | None = None,
+        provider_id: str | None = None,
+        model: str | None = None,
+    ) -> list[dict]:
+        """纪元看板锯齿曲线的明细行（时间正序）。
+
+        SQL 端已按 ``agent_loop_id`` 去重（每轮取 ``MIN(id)`` 首行——Agent
+        Loop 内多次 provider 调用同值，禁止 SUM/重复计），并剔除纪元三项
+        计量全 NULL 的行；路由侧 ``_dedup_per_loop`` 留作保险。安全阀上限
+        内保最新若干轮（超出时图表早已不可渲染，截断保新）。
+        """
+        self._ensure_schema()
+        where, params = self._where(
+            cutoff,
+            {"group_id": group_id, "provider_id": provider_id, "model": model},
+        )
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT id, ts, agent_loop_id, envelope_tokens,
+                       epoch_history_tokens, epoch_history_rows
+                FROM (
+                    SELECT MIN(id) AS id, ts, agent_loop_id, envelope_tokens,
+                           epoch_history_tokens, epoch_history_rows
+                    FROM llm_usage_events
+                    WHERE {where}
+                      AND (epoch_history_tokens IS NOT NULL
+                           OR epoch_history_rows IS NOT NULL
+                           OR envelope_tokens IS NOT NULL)
+                    GROUP BY COALESCE(agent_loop_id, 'row:' || id)
+                    ORDER BY id DESC
+                    LIMIT {_EPOCH_SERIES_MAX_LOOPS}
+                )
+                ORDER BY id ASC
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def event(self, event_id: int) -> dict | None:
         self._ensure_schema()
         with self.connect() as conn:
-            row = conn.execute("SELECT * FROM llm_usage_events WHERE id = ?", (event_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM llm_usage_events WHERE id = ?", (event_id,)
+            ).fetchone()
         return dict(row) if row else None
 
     def _cleanup_if_due(self) -> None:

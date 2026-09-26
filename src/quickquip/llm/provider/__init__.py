@@ -19,6 +19,7 @@ from quickquip.llm.provider.base import (
     LLMImageInput,
     LLMProviderError,
     LLMRequest,
+    LLMGeneratedImage,
     LLMResponse,
     LLMWebSearchReport,
     LLMWebSearchSource,
@@ -44,6 +45,7 @@ from quickquip.llm.provider.openai import OpenAIProviderClient
 from quickquip.llm.provider.claude import ClaudeProviderClient
 from quickquip.llm.provider.claude import _detect_stainless_os as _detect_stainless_os  # noqa: F401
 from quickquip.llm.provider.gemini import GeminiProviderClient
+from quickquip.llm.provider.openai_responses import OpenAIResponsesProviderClient
 
 # Retry policy (public API: probes pass RetryPolicy.disabled() to the factory)
 from quickquip.llm.provider.retry import RetryPolicy
@@ -59,7 +61,9 @@ __all__ = [
     "OpenAIProviderClient",
     "ClaudeProviderClient",
     "GeminiProviderClient",
+    "OpenAIResponsesProviderClient",
     "LLMImageInput",
+    "LLMGeneratedImage",
     "LLMProviderError",
     "LLMRequest",
     "LLMResponse",

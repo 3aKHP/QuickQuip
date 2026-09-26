@@ -79,9 +79,9 @@ def test_reload_boredom_groups_clears_state_for_removed_groups(monkeypatch, tmp_
 
     state = get_state()
     for gid in ("123", "456"):
-        state.record_message(gid, "u1")
+        state.record_message(gid)
         state.mark_boredom_triggered(gid)
-    state.record_message("789", "u1")  # 非 opt-in 群不受影响
+    state.record_message("789")  # 非 opt-in 群不受影响
 
     groups_path.write_text(json.dumps({"enabled": ["123"]}), encoding="utf-8")
     awakening_plugin.reload_boredom_groups()
@@ -92,27 +92,32 @@ def test_reload_boredom_groups_clears_state_for_removed_groups(monkeypatch, tmp_
     assert state.get_group_silence_seconds("789") is not None
 
 
-def test_boredom_check_sends_message_not_str(monkeypatch):
-    """钉住：无聊唤醒发送循环发出的是 Message（array 段格式），不是裸 str——
-    裸 str 直调 bot.send_group_msg 会被服务端按 CQ 码解析。"""
+def test_boredom_check_sends_segments_and_confirms_only_success(monkeypatch):
+    """真实发送循环隔离失败群，仅确认成功发送，并保留文本段与图片段。"""
     sched = FakeScheduler()
     _use_config(monkeypatch, boredom_scan_interval=120)
     awakening_plugin.register_boredom_scan_job(sched)
     func = sched.jobs[awakening_plugin.BOREDOM_SCAN_JOB_ID]["func"]
 
     sent: list[dict] = []
+    confirmed = []
 
     async def fake_send_group_msg(**kwargs):
         sent.append(kwargs)
+        if kwargs["group_id"] == 456:
+            raise RuntimeError("send failed")
 
     bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg)
     plan = types.SimpleNamespace(
         group_id="123",
-        reply_result={"reply": "冒个泡 [CQ:at,qq=all]"},
+        reply_result={"reply": "冒个泡 [CQ:at,qq=all]", "images": ["cXctaW1n"]},
         trace_kwargs=lambda: {"rule_name": "awakening_boredom"},
     )
 
     async def fake_iter_plans(groups, rule_switch, svc, rate_limiter, generate=None):
+        yield types.SimpleNamespace(
+            group_id="456", reply_result={"reply": "发送失败"}, trace_kwargs=plan.trace_kwargs
+        )
         yield plan
 
     monkeypatch.setattr(awakening_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))
@@ -126,13 +131,19 @@ def test_boredom_check_sends_message_not_str(monkeypatch):
     monkeypatch.setattr(
         awakening_plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext()
     )
-    monkeypatch.setattr(awakening_plugin, "confirm_boredom_sent", lambda plan, stats: None)
+    monkeypatch.setattr(
+        awakening_plugin, "confirm_boredom_sent",
+        lambda plan, stats: confirmed.append(plan.group_id),
+    )
 
     asyncio.run(func())
 
-    assert len(sent) == 1
-    message = sent[0]["message"]
+    assert [item["group_id"] for item in sent] == [456, 123]
+    assert confirmed == ["123"]
+    message = sent[1]["message"]
     assert isinstance(message, DummyMessage)
-    assert len(message) == 1
+    assert len(message) == 2
     assert message[0].type == "text"
     assert message[0].data == {"text": "冒个泡 [CQ:at,qq=all]"}
+    assert message[1].type == "image"
+    assert message[1].data == {"file": "base64://cXctaW1n"}

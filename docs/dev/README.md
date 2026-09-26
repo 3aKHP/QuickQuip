@@ -17,7 +17,8 @@
 |---|---|
 | [`architecture.md`](architecture.md) | 目录结构、分层、依赖方向、组合根和数据/部署边界 |
 | [`style.md`](style.md) | 源码结构、可维护性、类型与输入边界、错误与状态、测试和评审问题 |
-| [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审、发布和 hotfix 流程 |
+| [`testing.md`](testing.md) | 测试纪律、准入与断言依据、典型反模式、合并删除和验证 |
+| [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、发布和 hotfix 流程 |
 | [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`record-identities.md`](record-identities.md) | 记录正文、共享身份、引用索引与兼容读取契约 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |
@@ -37,3 +38,4 @@
 - Markdown 段落和列表项保持自然换行；仅在 Markdown 结构或语义需要时手动换行。
 - 中文散文使用弯引号（“” ‘’）；行内 code 里的命令示例保持 ASCII 直引号（`--preset` 等参数解析器只认直引号）。
 - 交付前按变化范围搜索过时术语、配置键、命令和路径，并如实记录无法执行的验证。
+- 修改 self-docs 同步源内的公开文档（`docs/` 各页面、根目录公开 Markdown、AI 协作配置与 GitHub 模板等；权威名单见 `scripts/ci/sync_self_docs_references.py`）时，在同一变更中运行 `python scripts/ci/sync_self_docs_references.py` 并提交重新生成的 `skills.example/self-docs/references/`（预置 self-docs Skill 随仓库分发的文档副本）；CI 契约测试会强制这一同步，未提交的变更会被判红。

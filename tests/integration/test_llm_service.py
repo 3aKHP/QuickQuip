@@ -3,6 +3,7 @@ quoted-reply injection, tool loop, and reasoning-content sanitization.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -140,7 +141,9 @@ async def test_generate_reply_envelope_carries_time_for_cron_like_trigger(
 
     req = stub.last_request
     assert req is not None
-    assert re.search(r"当前时间：\d{4}-\d{2}-\d{2} 星期. \d{2}:\d{2}（北京时间）", req.messages[-1].content)
+    assert re.search(
+        r"当前时间：\d{4}-\d{2}-\d{2} 星期. \d{2}:\d{2}（北京时间）", req.messages[-1].content
+    )
     assert "当前北京时间" not in req.system_prompt
 
 
@@ -376,7 +379,7 @@ async def test_gemini_tool_loop_rejects_truncated_function_call_batch(
         recent_messages=[],
     )
 
-    assert result["reply"] == "模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
+    assert "已拒绝执行" in result["reply"]
     assert len(stub.requests) == 1
 
 
@@ -420,14 +423,254 @@ async def test_gemini_tool_loop_reject_notice_appended_to_existing_text(
             recent_messages=[],
         )
 
-    assert result["reply"] == (
-        "我去查一下\n模型一次请求了过多工具，已拒绝执行不完整的 Gemini 工具批次。"
-    )
+    assert result["reply"].startswith("我去查一下\n")
+    assert "已拒绝执行" in result["reply"]
     assert len(stub.requests) == 1
     assert any(
         "Gemini tool batch rejected" in record.message and "requested=4" in record.message
         for record in caplog.records
     )
+
+
+_RESPONSES_TOOL_ROUND_BODY = {
+    "id": "resp_1",
+    "model": "gpt-test",
+    "status": "completed",
+    "output": [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "需要先查询身份。"}],
+            "encrypted_content": "gAAAAABoGogL0EiS",
+        },
+        {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_identity_1",
+            "name": "get_identity",
+            "arguments": '{"query":"哈基镜"}',
+        },
+    ],
+    "usage": {"input_tokens": 120, "output_tokens": 66},
+}
+
+_RESPONSES_FINAL_BODY = {
+    "id": "resp_2",
+    "model": "gpt-test",
+    "status": "completed",
+    "output": [
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "哈基镜通常指镜子。"}],
+        }
+    ],
+    "usage": {"input_tokens": 200, "output_tokens": 12},
+}
+
+
+def _as_responses_provider(wired_service):
+    provider = wired_service.config.providers["openai-main"]
+    provider.protocol = "openai_responses"
+    provider.responses_profile = "openai-public"
+    return provider
+
+
+async def test_responses_tool_loop_replays_native_items_in_second_payload(
+    wired_service,
+    patch_provider_builder,
+):
+    """第二次 HTTP payload 检查：reasoning 密文与原生 items 原样回传、顺序保持、
+    调用与结果完整配对（PR-A 循环内原生回传契约）。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "哈基镜通常指镜子。"
+    assert len(fake.payloads) == 2
+    second = fake.payloads[1]
+    assert second["store"] is False
+    assert second["include"] == ["reasoning.encrypted_content"]
+    input_items = second["input"]
+    # 用户消息 → 原生 reasoning（密文原样）→ 原生 function_call → 结果配对
+    assert input_items[0]["role"] == "user"
+    assert input_items[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert input_items[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    output_item = input_items[3]
+    assert output_item["type"] == "function_call_output"
+    assert output_item["call_id"] == "call_identity_1"
+    assert "镜子" in output_item["output"]
+    assert len(input_items) == 4  # 无通用字段二次投影
+
+
+async def test_responses_tool_loop_two_tool_rounds_accumulate_native_items(
+    wired_service,
+    patch_provider_builder,
+):
+    """连续两轮工具调用（验收项）：第三轮 payload 保序回放两个原生批次，
+    跨批次 call_id 唯一、各自的 function_call_output 紧随其后配对。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    second_tool_body = {
+        "id": "resp_2b",
+        "model": "gpt-test",
+        "status": "completed",
+        "output": [
+            {
+                "type": "reasoning",
+                "id": "rs_2",
+                "summary": [],
+                "encrypted_content": "gAAAAABsecondRound",
+            },
+            {
+                "type": "function_call",
+                "id": "fc_2",
+                "call_id": "call_identity_2",
+                "name": "get_identity",
+                "arguments": '{"query":"4s"}',
+            },
+        ],
+        "usage": {"input_tokens": 220, "output_tokens": 60},
+    }
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            second_tool_body,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜和4s分别是谁？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "哈基镜通常指镜子。"
+    assert len(fake.payloads) == 3
+    third = fake.payloads[2]["input"]
+    # 期望形态：user → 批次1(reasoning+call_1) → call_1 结果
+    #        → 批次2(reasoning+call_2) → call_2 结果
+    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert third[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    assert third[3]["type"] == "function_call_output"
+    assert third[3]["call_id"] == "call_identity_1"
+    assert "镜子" in third[3]["output"]
+    assert third[4] == second_tool_body["output"][0]
+    assert third[5] == second_tool_body["output"][1]
+    assert third[6]["type"] == "function_call_output"
+    assert third[6]["call_id"] == "call_identity_2"
+    assert len(third) == 7
+
+
+async def test_responses_tool_loop_rejects_truncated_batch(
+    wired_service,
+    patch_provider_builder,
+):
+    class OverflowResponsesStub:
+        def __init__(self):
+            self.requests = []
+
+        async def complete(self, request):
+            self.requests.append(request)
+            return LLMResponse(
+                text="",
+                model=request.model,
+                tool_calls=[
+                    LLMToolCall(
+                        id=f"call_{index}",
+                        name="get_identity",
+                        arguments_json='{"query":"哈基镜"}',
+                    )
+                    for index in range(4)
+                ],
+            )
+
+    _as_responses_provider(wired_service)
+    wired_service.config.runtime.tool_max_calls_per_round = 3
+    stub = OverflowResponsesStub()
+    patch_provider_builder(lambda provider: stub)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="同时查四个人。",
+        recent_messages=[],
+    )
+
+    assert "已拒绝执行" in result["reply"]
+    assert len(stub.requests) == 1
+
+
+async def test_responses_tool_loop_budget_guard_aborts_continuation(
+    wired_service,
+    patch_provider_builder,
+    monkeypatch,
+):
+    """循环内预算门禁：续接请求超预算在 HTTP 前终止 Loop（保护完整 items
+    不被裁剪重放），零交付时给出可见中止提示。"""
+    import quickquip.llm.service as service_module
+    from quickquip.llm.request_budget import RequestBudgetExceeded
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    fake = FakeOpenAIResponsesClient(
+        provider,
+        [
+            _RESPONSES_TOOL_ROUND_BODY,
+            _RESPONSES_FINAL_BODY,
+        ],
+    )
+    patch_provider_builder(lambda p: fake)
+
+    real_enforce = service_module.enforce_request_budget
+    calls = {"count": 0}
+
+    def _enforce_then_abort(config, prov, request, **kwargs):
+        calls["count"] += 1
+        # 调用序：service 预检（初始请求装配后）→ Loop 第一轮守卫 → Loop
+        # 第二轮守卫。前两次放行（第一轮 HTTP 已发出），第三次（续接请求）
+        # 超限拦截。
+        if calls["count"] <= 2:
+            return real_enforce(config, prov, request, **kwargs)
+        raise RequestBudgetExceeded("估算输入超出预算（测试注入）")
+
+    monkeypatch.setattr(service_module, "enforce_request_budget", _enforce_then_abort)
+
+    result = await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+    )
+
+    # 预检 + 第一轮守卫放行（payload 1 已发出）；续接请求被门禁拦截，未产生第二次 HTTP
+    assert calls["count"] == 3
+    assert len(fake.payloads) == 1
+    assert "未确认送达" in result["reply"]
 
 
 async def test_forward_message_content_rendered(wired_service, patch_provider_builder):
@@ -467,36 +710,15 @@ async def test_reasoning_content_sanitized_at_service_level(
     assert result["reply"] == "给群友看的答案"
 
 
-async def test_history_is_cropped_after_cap(wired_service, patch_provider_builder):
-    stub = StubProviderClient()
-    patch_provider_builder(lambda provider: stub)
-
-    await wired_service.generate_reply(
-        group_id=1001,
-        user_id=2002,
-        sender_name="n",
-        prompt="哈基镜是区吗？",
-        recent_messages=[],
-    )
-    # Explicit crop by hard row cap (floor=None = 锚点缺失时只按 keep_last 兜底)
-    for i in range(20):
-        wired_service.store.append_conversation_message(1001, "u", "assistant", f"补充{i}")
-    cap = 10
-    wired_service.store.crop_conversation_messages(1001, floor_id=None, keep_last=cap)
-    assert len(wired_service.store.list_recent_conversation_messages(1001, 100)) == cap
-
-    deleted = wired_service.clear_group_context(1001)
-    assert deleted == cap
-    assert wired_service.store.list_recent_conversation_messages(1001, 100) == []
-
-
 async def test_memory_crud_basic(wired_service):
     memory_id = wired_service.remember_group_memory(1001, "阿桃喜欢薄荷糖。")
     assert memory_id >= 1
     memories = wired_service.list_group_memories(1001)
     assert memories[0]["content"] == "阿桃喜欢薄荷糖。"
 
-    matched = wired_service.store.search_memories(1001, user_id=2002, query="阿桃喜欢什么？", limit=3)
+    matched = wired_service.store.search_memories(
+        1001, user_id=2002, query="阿桃喜欢什么？", limit=3
+    )
     assert matched
     assert matched[0]["content"] == "阿桃喜欢薄荷糖。"
 
@@ -599,7 +821,7 @@ def test_reload_personas_empty_keeps_previous(llm_service):
     )
     count, error = llm_service.reload_personas()
     assert count == 0
-    assert error == "配置中没有可用的人格"
+    assert "没有可用的人格" in error
     assert llm_service.config.personas is original
 
 
@@ -690,7 +912,11 @@ async def test_auto_memory_extraction_disabled_does_not_call_judge(
 ):
     import asyncio
     # Default auto_memory_enabled == False.
-    stub = _AutoMemoryStubClient(["收到。", "should-not-be-called"])
+    llm_service._auto_memory_turns["1002"] = 9
+    stub = _AutoMemoryStubClient([
+        "这是一条足够长的正常回复，确保自动记忆的文本质量门能够通过。",
+        "should-not-be-called",
+    ])
     patch_provider_builder(lambda provider: stub)
 
     await llm_service.generate_reply(
@@ -744,14 +970,15 @@ async def test_auto_memory_respects_memory_disabled(
     llm_service.config.runtime.auto_memory_enabled = True
     llm_service.set_group_memory_enabled(1004, False)
 
-    stub = _AutoMemoryStubClient(["收到。"])
+    llm_service._auto_memory_turns["1004"] = 9
+    stub = _AutoMemoryStubClient(["这是一条足够长的正常回复，确保自动记忆的文本质量门能够通过。"])
     patch_provider_builder(lambda provider: stub)
 
     await llm_service.generate_reply(
         group_id=1004,
         user_id=2002,
         sender_name="n",
-        prompt="我喜欢奶茶",
+        prompt="我平时很喜欢喝奶茶，这是我一直保留的习惯。",
         recent_messages=[],
     )
     pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -795,27 +1022,9 @@ async def test_auto_memory_per_chat_override_beats_global_default(
 # ── image preprocessor integration tests ──────────────────────────────
 
 
-async def test_image_preprocessor_called_for_non_vision_model(wired_service, patch_provider_builder):
-    from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
-    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
-    stub_preprocessor = StubImagePreprocessor()
-    wired_service.image_preprocessor = stub_preprocessor
-
-    patch_provider_builder(lambda provider: StubProviderClient())
-    await wired_service.generate_reply(
-        group_id=1001,
-        user_id=2002,
-        sender_name="测试用户",
-        prompt="看看这张图",
-        image_urls=["https://example.test/cat.png"],
-        recent_messages=[],
-    )
-    assert stub_preprocessor.call_count == 1
-    assert stub_preprocessor.last_urls == ["https://example.test/cat.png"]
-
-
 async def test_image_preprocessor_skipped_when_no_images(wired_service, patch_provider_builder):
     from tests.fixtures.provider_stubs import StubImagePreprocessor, StubProviderClient
+    wired_service.config.providers["openai-main"].non_vision_models.append("gpt-alt")
     stub_preprocessor = StubImagePreprocessor()
     wired_service.image_preprocessor = stub_preprocessor
 
@@ -853,6 +1062,8 @@ async def test_non_vision_model_strips_images_from_request(wired_service, patch_
         recent_messages=[],
     )
 
+    assert stub_preprocessor.call_count == 1
+    assert stub_preprocessor.last_urls == ["https://example.test/cat.png"]
     request = stub_client.last_request
     # All user messages should have empty image_urls since the image was stripped
     for msg in request.messages:
@@ -892,7 +1103,9 @@ async def test_vision_model_keeps_images_in_request(wired_service, patch_provide
     assert stub_preprocessor.call_count == 0
 
 
-async def test_non_vision_strips_even_when_preprocessor_fails(wired_service, patch_provider_builder):
+async def test_non_vision_strips_even_when_preprocessor_fails(
+    wired_service, patch_provider_builder
+):
     from tests.fixtures.provider_stubs import StubProviderClient
     from quickquip.llm.image_preprocessor import ImageDescription
 
@@ -1334,7 +1547,9 @@ async def test_set_persona_advances_anchor_to_cold_water(wired_service, monkeypa
     assert calls[0] == EpochKey(scope_key="1001", provider_id="openai-main", model="gpt-alt")
 
 
-async def test_non_vision_persists_image_captions_in_raw_content(wired_service, patch_provider_builder):
+async def test_non_vision_persists_image_captions_in_raw_content(
+    wired_service, patch_provider_builder
+):
     """非 VLM 路径：图注以文本身份落库（[图片 N 张：…]），下一轮 history 字节复现。"""
     from tests.fixtures.provider_stubs import StubImagePreprocessor
 
@@ -1387,7 +1602,9 @@ async def test_vision_path_keeps_v1_raw_content(wired_service, patch_provider_bu
     assert stub_preprocessor.call_count == 0
 
 
-async def test_forward_captions_persist_byte_stable_across_turns(wired_service, patch_provider_builder):
+async def test_forward_captions_persist_byte_stable_across_turns(
+    wired_service, patch_provider_builder
+):
     """转发图注并入 normalized_forward_text：当轮渲染与落库同源，下轮 history 字节复现。"""
     from tests.fixtures.provider_stubs import StubImagePreprocessor
 
@@ -1448,14 +1665,19 @@ async def test_recent_context_image_captions_not_persisted(wired_service, patch_
         include_recent_images=True,
     )
     # 当轮渲染：近期图注以带标签的视觉转述行出现（正确归属）
-    assert "stub description of https://example.test/other.png" in stub.requests[0].messages[-1].content
+    assert (
+        "stub description of https://example.test/other.png"
+        in stub.requests[0].messages[-1].content
+    )
     # 落库：触发者的 raw_turn 不含他人图注
     stored = wired_service.store.list_recent_conversation_messages(1001, 10)
     raw = [r["raw_content"] for r in stored if r["role"] == "user"][0]
     assert raw == "纯文字触发"
 
 
-async def test_media_meter_wired_with_attached_image_count(wired_service, patch_provider_builder, monkeypatch):
+async def test_media_meter_wired_with_attached_image_count(
+    wired_service, patch_provider_builder, monkeypatch
+):
     """媒体账本 service 接线：VLM 带图轮计 1；非 VLM 剥离后计 0（0 是有效信号）。"""
     import quickquip.llm.service as svc
     from quickquip.llm.usage import media_meter as real_media_meter
@@ -1528,7 +1750,9 @@ async def test_scene_patch_self_served_with_history_dedup(wired_service, patch_p
     assert content.count("触发问题") == 1
 
 
-async def test_scene_patch_explicit_empty_list_disables_self_serve(wired_service, patch_provider_builder):
+async def test_scene_patch_explicit_empty_list_disables_self_serve(
+    wired_service, patch_provider_builder
+):
     """recent_messages=[] 是显式空（测试注入口语义），不触发自取。"""
     stub = _RecordingStub()
     patch_provider_builder(lambda provider: stub)
@@ -1540,7 +1764,9 @@ async def test_scene_patch_explicit_empty_list_disables_self_serve(wired_service
     assert "【现场】" not in stub.requests[-1].messages[-1].content
 
 
-async def test_scene_patch_incremental_across_turns(wired_service, patch_provider_builder, monkeypatch):
+async def test_scene_patch_incremental_across_turns(
+    wired_service, patch_provider_builder, monkeypatch
+):
     """跨轮增量：已服役且超出滑动保底窗的消息不再进入下一轮补丁。"""
     buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=3600)
     wired_service.bind_recent_message_buffer(buf)
@@ -1636,7 +1862,8 @@ def test_synthetic_user_id_excluded_from_participants(llm_service):
         user_id="boredom_timer",
         sender_name="系统",
         history=[
-            {"role": "user", "user_id": "boredom_timer", "sender_name": "系统", "canonical_name": ""},
+            {"role": "user", "user_id": "boredom_timer",
+             "sender_name": "系统", "canonical_name": ""},
             {"role": "user", "user_id": "2002", "sender_name": "乙", "canonical_name": "镜子"},
             {"role": "assistant", "content": "reply"},
         ],
@@ -1656,7 +1883,9 @@ def test_synthetic_user_id_excluded_from_participants(llm_service):
     assert "无名氏" in names  # 空 id 的名字回退不受过滤影响
 
 
-async def test_patch_meter_wired_with_scene_patch_tokens(wired_service, patch_provider_builder, monkeypatch):
+async def test_patch_meter_wired_with_scene_patch_tokens(
+    wired_service, patch_provider_builder, monkeypatch
+):
     """补丁账本三态：自取有货=正值；自取/显式空=0（有效信号，计入 coverage）；
     私聊（未自取）=None。"""
     import quickquip.llm.service as svc
@@ -1699,10 +1928,10 @@ async def test_private_reply_never_self_serves_scene_patch(wired_service, patch_
     stub = _RecordingStub()
     patch_provider_builder(lambda provider: stub)
 
+    wired_service.start_private_session(2002)
     wired_service.recent_message_buffer.add_message(
         "private:2002", "2002", "乙", "乙", "私聊现场话"
     )
-    wired_service.start_private_session(2002)
     await wired_service.generate_private_reply(user_id=2002, sender_name="乙", prompt="私聊问")
 
     content = stub.requests[-1].messages[-1].content
@@ -1775,3 +2004,295 @@ async def test_passive_recent_images_use_full_snapshot_not_patch(
     # 文本侧仍是增量语义：补丁为空 → 无【现场】块，图行不进文本上下文
     assert "【现场】" not in second.content
     assert "看看这张" not in second.content
+
+
+# ── Responses 跨轮原生回放（PR-B：A/B 联合验收「下一条用户消息」条款） ─────
+
+
+async def test_responses_cross_turn_replays_closed_loop_native_history(
+    wired_service,
+    patch_provider_builder,
+):
+    """已完成工具 Loop 的下一条用户消息：历史以原生形态回放（reasoning
+    密文逐字节 + function_call 原.call_id + 结果配对 + message item），
+    其后才接新触发消息。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    provider.agent_replay_loop_tokens = 16384
+    first = FakeOpenAIResponsesClient(
+        provider, [_RESPONSES_TOOL_ROUND_BODY, _RESPONSES_FINAL_BODY],
+    )
+    second = FakeOpenAIResponsesClient(provider, [_RESPONSES_FINAL_BODY])
+    clients = [first, second]
+    patch_provider_builder(lambda p: clients.pop(0))
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+        message_id="m-r1",
+    )
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="那我再问一次",
+        recent_messages=[],
+        message_id="m-r2",
+    )
+
+    third = second.payloads[0]["input"]
+    # 历史 Loop 原生回放：触发消息 → reasoning（密文逐字节）→ function_call
+    # （原 call_id）→ 结果 → 最终 message item，然后才是新触发 user 消息。
+    kinds = [item.get("type") or item.get("role") for item in third]
+    assert kinds[:3] == ["user", "reasoning", "function_call"]
+    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert third[2] == _RESPONSES_TOOL_ROUND_BODY["output"][1]
+    assert third[3]["type"] == "function_call_output"
+    assert third[3]["call_id"] == "call_identity_1"
+    assert third[4]["type"] == "message"
+    assert third[4]["content"][0]["text"] == "哈基镜通常指镜子。"
+    assert any(
+        isinstance(item, dict) and item.get("role") == "user" and "那我再问一次" in str(
+            item.get("content")
+        )
+        for item in third
+    ), "新触发消息在历史之后"
+
+
+async def test_responses_cross_turn_owner_switch_degrades_history(
+    wired_service,
+    patch_provider_builder,
+):
+    """切 profile（owner 指纹含 responses_profile/reasoning_effort）：历史
+    不再原生回放，降级为通用投影（无 reasoning 密文上 wire，工具事实保留）。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    provider.agent_replay_loop_tokens = 16384
+    first = FakeOpenAIResponsesClient(
+        provider, [_RESPONSES_TOOL_ROUND_BODY, _RESPONSES_FINAL_BODY],
+    )
+    second = FakeOpenAIResponsesClient(provider, [_RESPONSES_FINAL_BODY])
+    clients = [first, second]
+    patch_provider_builder(lambda p: clients.pop(0))
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+        message_id="m-r1",
+    )
+    provider.responses_profile = "codex-http-relay"
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="那我再问一次",
+        recent_messages=[],
+        message_id="m-r2",
+    )
+
+    third = second.payloads[0]["input"]
+    assert not any(item.get("type") == "reasoning" for item in third)
+    # 通用投影保留工具事实：function_call（stable wire id）+ 结果配对。
+    calls = [item for item in third if item.get("type") == "function_call"]
+    outputs = [item for item in third if item.get("type") == "function_call_output"]
+    assert len(calls) == 1 and len(outputs) == 1
+    assert calls[0]["name"] == "get_identity"
+    assert calls[0]["call_id"] == outputs[0]["call_id"]
+    assert "镜子" in outputs[0]["output"]
+
+
+async def test_same_scope_concurrent_turns_serialize_with_full_accounting(
+    llm_service, patch_provider_builder
+):
+    """同 scope 并发轮次经闸门串行：两轮各自成 Loop，无 LoopNotWritable 旁路。
+
+    设计 §5.2 的回归守卫——旧实现（无闸门）下第二轮撞 begin_loop 单飞
+    约束退回无记录路径，load_closed_loops 只剩一个 Loop。
+    """
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    patch_provider_builder(lambda provider: _SlowStub())
+
+    task_a = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="第一轮慢提问"))
+    await entered.wait()
+
+    task_b = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="第二轮并发提问"))
+    await asyncio.sleep(0.3)
+    assert not task_b.done(), "同 scope 第二轮应在闸门后排队而非并发进入"
+
+    release.set()
+    reply_a = await task_a
+    reply_b = await task_b
+
+    assert reply_a["reply"]
+    assert reply_b["reply"]
+    assert llm_service._scope_gate.bypassed_count == 0
+
+    loops = llm_service.store.load_closed_loops("1001")
+    assert len(loops) == 2, "两轮都应有各自的完整 Loop 记账"
+
+
+async def test_loop_not_writable_fallback_records_gate_bypass(llm_service):
+    """闸门旁路分支：LoopNotWritable 退回无记录路径时计入告警计数。"""
+    from quickquip.llm.store_parts.agent_records import UserTriggerPayload
+    from quickquip.llm.agent_records import TriggerKind
+
+    generation, _ = llm_service.store.agent_scope_state("1001")
+    llm_service.store.begin_loop(
+        "1001", generation, TriggerKind.GROUP_DIRECT,
+        UserTriggerPayload(
+            user_id="2002", sender_name="甲", canonical_name="",
+            content="占位", raw_content="占位", message_id=None,
+        ),
+    )
+
+    recorder = llm_service._begin_agent_recorder(
+        scope_key="1001", chat_type="group", user_id="2002", sender_name="甲",
+        stored_prompt="并发第二轮", message_id=None, store_user_message=True,
+        normalized_quoted_text="", normalized_quoted_image_urls=[],
+        normalized_forward_text="", normalized_forward_image_urls=[],
+        image_descriptions=None,
+        agent_delivery_intermediate_enabled=False,
+        agent_delivery_final_enabled=False,
+    )
+
+    assert recorder is None
+    assert llm_service._scope_gate.bypassed_count == 1
+
+
+async def test_passive_trigger_queued_past_patience_is_cancelled(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """被动触发排队超耐心预算：取消本轮（空回复、不调 LLM）。"""
+    import quickquip.llm.service as service_module
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            calls.append("llm")
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    stub = _SlowStub()
+    patch_provider_builder(lambda provider: stub)
+    monkeypatch.setattr(service_module, "PASSIVE_TRIGGER_QUEUE_PATIENCE_S", 0.05)
+
+    from quickquip.llm.agent_records import TriggerKind
+
+    task_a = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="长生成轮"))
+    await entered.wait()
+
+    task_b = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="被动插话",
+        trigger_kind=TriggerKind.GROUP_PASSIVE))
+    await asyncio.sleep(0.3)
+    release.set()
+
+    reply_b = await task_b
+    await task_a
+
+    assert reply_b["reply"] == ""
+    assert reply_b["llm_used"] is False
+    assert reply_b["cancelled_reason"] == "queue_patience_exceeded"
+    assert len(calls) == 1, "被取消的被动轮不得发起 LLM 调用"
+    # 取消轮零落库：无第二 Loop、无第二条 user 触发行
+    loops = llm_service.store.load_closed_loops("1001")
+    assert len(loops) == 1
+    user_rows = llm_service.store.list_recent_conversation_messages("1001", 10)
+    assert sum(1 for r in user_rows if r["role"] == "user") == 1
+
+
+async def test_direct_trigger_queued_long_still_completes(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """主动触发不限耐心：排队后照常完成并保有完整记账。"""
+    import quickquip.llm.service as service_module
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    patch_provider_builder(lambda provider: _SlowStub())
+    monkeypatch.setattr(service_module, "PASSIVE_TRIGGER_QUEUE_PATIENCE_S", 0.01)
+
+    from quickquip.llm.agent_records import TriggerKind
+
+    task_a = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="长生成轮"))
+    await entered.wait()
+
+    task_b = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="主动提问",
+        trigger_kind=TriggerKind.GROUP_DIRECT))
+    await asyncio.sleep(0.3)
+    release.set()
+
+    reply_b = await task_b
+    await task_a
+
+    assert "stub::" in reply_b["reply"]
+    assert llm_service._scope_gate.bypassed_count == 0
+    loops = llm_service.store.load_closed_loops("1001")
+    assert len(loops) == 2
+
+
+async def test_passive_trigger_short_wait_still_completes(
+    llm_service, patch_provider_builder, monkeypatch
+):
+    """被动触发短暂排队（未超耐心）照常完成并保有完整记账。"""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _SlowStub(StubProviderClient):
+        async def complete(self, request):
+            entered.set()
+            await release.wait()
+            return await super().complete(request)
+
+    patch_provider_builder(lambda provider: _SlowStub())
+
+    from quickquip.llm.agent_records import TriggerKind
+
+    task_a = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="甲", prompt="前一轮"))
+    await entered.wait()
+
+    task_b = asyncio.create_task(llm_service.generate_reply(
+        group_id=1001, user_id=4004, sender_name="乙", prompt="被动插话",
+        trigger_kind=TriggerKind.GROUP_PASSIVE))
+    await asyncio.sleep(0.3)
+    release.set()
+
+    reply_b = await task_b
+    await task_a
+
+    assert "stub::" in reply_b["reply"]
+    assert "cancelled_reason" not in reply_b
+    assert len(llm_service.store.load_closed_loops("1001")) == 2

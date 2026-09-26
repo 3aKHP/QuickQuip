@@ -4,8 +4,20 @@ from quickquip.adapters.nonebot.record_content import prepare_body
 from quickquip.app.identities import identities
 from quickquip.common.record_content import QQ, render
 
-from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _chat_id, _chat_label, _chat_type, _is_private_chat, _strip_command_name
-from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, get_sender_name, offline_message_store
+from quickquip.adapters.nonebot.command_parts.common import (
+    _allow_scope_management,
+    _chat_id,
+    _chat_label,
+    _chat_type,
+    _is_private_chat,
+    _strip_command_name,
+)
+from quickquip.app.message_pipeline import (
+    _ensure_llm_bindings,
+    get_llm_service,
+    get_sender_name,
+    offline_message_store,
+)
 
 
 def register_memory_commands(on_command, Message, MessageSegment) -> None:
@@ -15,7 +27,12 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
     async def _(event, bot=None):
         if not _allow_scope_management(event):
             await remember_cmd.finish(MessageSegment.text("仅管理员可执行此操作"))
-        body, _ = await prepare_body(event.get_message(), _chat_id(event) if not _is_private_chat(event) else "", bot, "remember")
+        body, _ = await prepare_body(
+            event.get_message(),
+            _chat_id(event) if not _is_private_chat(event) else "",
+            bot,
+            "remember",
+        )
         content = render(body).strip()
         if not content:
             await remember_cmd.finish(MessageSegment.text("用法：/remember <要保存的记忆>"))
@@ -24,10 +41,14 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         chat_type = _chat_type(event)
         chat_id = _chat_id(event)
         try:
-            memory_id = svc.remember_memory(chat_id, content, chat_type=chat_type, content_parts=body)
+            memory_id = svc.remember_memory(
+                chat_id, content, chat_type=chat_type, content_parts=body
+            )
         except ValueError as exc:
             await remember_cmd.finish(MessageSegment.text(str(exc)))
-        await remember_cmd.finish(MessageSegment.text(f"已写入{_chat_label(event)}记忆 #{memory_id}"))
+        await remember_cmd.finish(
+            MessageSegment.text(f"已写入{_chat_label(event)}记忆 #{memory_id}")
+        )
 
     memories_cmd = on_command("memories", priority=10, block=True)
 
@@ -36,7 +57,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         _ensure_llm_bindings()
         svc = get_llm_service()
         keyword = _strip_command_name(str(event.get_message()).strip(), "memories")
-        reply = svc.format_memories(_chat_id(event), keyword=keyword or None, chat_type=_chat_type(event))
+        reply = svc.format_memories(
+            _chat_id(event), keyword=keyword or None, chat_type=_chat_type(event)
+        )
         await memories_cmd.finish(MessageSegment.text(reply))
 
     forget_cmd = on_command("forget", priority=10, block=True)
@@ -54,7 +77,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
             deleted = svc.forget_memories(_chat_id(event), keyword, chat_type=_chat_type(event))
         except ValueError as exc:
             await forget_cmd.finish(MessageSegment.text(str(exc)))
-        await forget_cmd.finish(MessageSegment.text(f"已删除{_chat_label(event)}中的 {deleted} 条记忆"))
+        await forget_cmd.finish(
+            MessageSegment.text(f"已删除{_chat_label(event)}中的 {deleted} 条记忆")
+        )
 
     forget_all_cmd = on_command("forget_all", priority=10, block=True)
 
@@ -65,7 +90,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         _ensure_llm_bindings()
         svc = get_llm_service()
         deleted = svc.clear_memories(_chat_id(event), chat_type=_chat_type(event))
-        await forget_all_cmd.finish(MessageSegment.text(f"已清空{_chat_label(event)}全部长期记忆（共 {deleted} 条）"))
+        await forget_all_cmd.finish(
+            MessageSegment.text(f"已清空{_chat_label(event)}全部长期记忆（共 {deleted} 条）")
+        )
 
     tell_cmd = on_command("tell", priority=10, block=True)
 
@@ -129,4 +156,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         to_user_id = offline_message_store.retract_latest(event.group_id, event.user_id)
         if to_user_id is None:
             await untell_cmd.finish(MessageSegment.text("没有可撤回的留言"))
-        await untell_cmd.finish(MessageSegment.text(f"已撤回最新留言（收件人：{identities.snapshot(event.group_id).name(to_user_id)}）"))
+        await untell_cmd.finish(
+            MessageSegment.text(
+                f"已撤回最新留言（收件人："
+                f"{identities.snapshot(event.group_id).name(to_user_id)}）"
+            )
+        )

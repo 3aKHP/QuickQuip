@@ -49,9 +49,11 @@ class LLMConversationMessage:
     is_tool_error: bool = False
     thinking_blocks: list[Any] = field(default_factory=list)
     # 协议原生 assistant 内容块（§7.2 原生路径）：Claude 的有序 content /
-    # Gemini 的有序 parts。设置时序列化端原样深拷贝使用，不再从
-    # content/tool_calls/thinking_blocks 重建——原生已有正文/calls 时不能
-    # 追加通用副本。仅重放投影写入；当轮请求组装不使用。
+    # Gemini 的有序 parts / OpenAI Responses 的有序 output items。设置时
+    # 序列化端原样深拷贝使用，不再从 content/tool_calls/thinking_blocks
+    # 重建——原生已有正文/calls 时不能追加通用副本。写入方：重放投影
+    # （owner 校验后），以及 openai_responses 当前工具循环的当轮续接
+    # （tool_loop.py PR-A 契约）。
     native_content: list[Any] | None = None
 
 

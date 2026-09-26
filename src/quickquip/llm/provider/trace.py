@@ -262,7 +262,8 @@ class LLMTraceStore:
                     )
                 if "loop_sequence" not in trace_columns:
                     conn.execute(
-                        "ALTER TABLE llm_http_traces ADD COLUMN loop_sequence INTEGER NOT NULL DEFAULT 1"
+                        "ALTER TABLE llm_http_traces ADD COLUMN loop_sequence "
+                        "INTEGER NOT NULL DEFAULT 1"
                     )
                 if "response_raw_text" not in trace_columns:
                     conn.execute(
@@ -270,7 +271,8 @@ class LLMTraceStore:
                     )
                 if "response_raw_bytes" not in trace_columns:
                     conn.execute(
-                        "ALTER TABLE llm_http_traces ADD COLUMN response_raw_bytes INTEGER NOT NULL DEFAULT 0"
+                        "ALTER TABLE llm_http_traces ADD COLUMN response_raw_bytes "
+                        "INTEGER NOT NULL DEFAULT 0"
                     )
             self._schema_ready = True
 

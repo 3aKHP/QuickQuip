@@ -9,24 +9,21 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 import logging
 from pathlib import Path
-import re
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
 from quickquip.common.sensitive_filter import (
     DEFAULT_BLOCK_REPLY,
-    DEFAULT_OUTPUT_FALLBACK,
     SCRUB_PLACEHOLDER,
     SensitiveFilter,
     get_filter as _get_sensitive_filter,
     log_hits as _log_sensitive_hits,
     reload_filter as _reload_sensitive_filter,
-    scan_and_log as _scan_sensitive_text,
 )
 from quickquip.llm.config import (
     DISABLED_PROVIDER_REPLY,
@@ -37,7 +34,6 @@ from quickquip.llm.config import (
     load_personas_only,
     provider_builtin_search_active,
 )
-from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
 from quickquip.llm.history_safety import prepare_safe_history
 from quickquip.llm.request_budget import (
@@ -47,35 +43,28 @@ from quickquip.llm.request_budget import (
 )
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
-from quickquip.llm.store_parts.agent_records import AgentStoreError
-from quickquip.sts.config import (
-    DEFECTIFY_RATE_LIMIT_KEY,
-    DEFECTIFY_RULE_NAME,
-    TURMFLUCH_RATE_LIMIT_KEY,
-    TURMFLUCH_RULE_NAME,
+from quickquip.llm.service_parts.scope_gate import ScopeGate
+from quickquip.llm.store_parts.agent_records import AgentStoreError, LoopNotWritable
+from quickquip.llm.identity import (
+    IdentityIndex,
+    collect_known_participants,
+    collect_mention_profiles,
 )
-from quickquip.sts.formulas.card_le.parsing import extract_card_le_name
-from quickquip.sts.formulas.card_le.prompting import build_turmfluch_prompt
-from quickquip.sts.formulas.defectify.prompting import build_defectify_prompt
-from quickquip.llm.identity import IdentityIndex
 from quickquip.common.identity_sources import IdentityRepository, identities
 from quickquip.llm.image_preprocessor import ImageDescription, ImagePreprocessor
 from quickquip.llm.image_routing import (
     FORWARD_IMAGE_CONTEXT_PREFIX,
-    IMAGE_PREPROCESSING_FAILED_REPLY,
-    IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
     RECENT_IMAGE_CONTEXT_PREFIX,
-    match_image_descriptions,
-    plan_non_vision_images,
 )
 from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
-    build_turn_envelope,
+    build_turn_envelope_segments,
     merge_image_urls,
 )
 from quickquip.llm.token_estimate import estimate_tokens
+from quickquip.llm.envelope_cache import EnvelopeBreakdownCache
 from quickquip.llm.epoch import (
     DEFAULT_EPOCH_MAX_ROWS,
     EpochKey,
@@ -87,7 +76,6 @@ from quickquip.llm.provider import (
     LLMProviderError,
     LLMRequest,
     build_provider_client,
-    strip_leading_reasoning_content,
 )
 from quickquip.llm.provider.owner import build_response_owner, primary_endpoint_url
 from quickquip.llm.quick_judge import (
@@ -95,12 +83,25 @@ from quickquip.llm.quick_judge import (
     run_quick_judge,
     run_quick_judge_detailed,
 )
+from quickquip.llm.reply_chain import (
+    BUDGET_EXCEEDED_REPLY,
+    LLM_RULE_NAME as LLM_RULE_NAME,  # noqa: F401 — re-exported via plugins/llm_runtime
+    MAX_QUOTED_MESSAGE_CHARS as MAX_QUOTED_MESSAGE_CHARS,  # noqa: F401 — re-exported via plugins/llm_runtime
+    TurnRequestAssembler,
+    build_raw_turn_text,
+    finalize_reply_text,
+    image_caption_blob,
+    normalize_turn_input,
+    reply_result,
+)
+from quickquip.llm.reply_types import ChatTurnRequest, ReplyResult
 from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS as DEFAULT_ENABLED_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_MEMORY_RETRIEVAL_ITEMS,
     MAX_STORED_CONVERSATION_MESSAGES,
     MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_TRIGGER_CONTEXT_MESSAGES,
+    PASSIVE_TRIGGER_QUEUE_PATIENCE_S,
     PRIVATE_UNAVAILABLE_TOOLS as PRIVATE_UNAVAILABLE_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
     SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
     SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
@@ -112,19 +113,24 @@ from quickquip.llm.service_parts import (
     AutoMemoryMixin,
     DrawSvgToolMixin,
     HealthMixin,
+    ImagesMixin,
     McpLifecycleMixin,
     ScheduleMessagesToolMixin,
+    SingleShotEntriesMixin,
+    SkillsToolMixin,
     ScopeMixin,
     StateMixin,
     ToolMixin,
 )
-from quickquip.llm.usage import envelope_meter, epoch_meter, media_meter, patch_meter, usage_scope
-from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
-from quickquip.llm.single_shot import (
-    CommandSingleShotSpec,
-    run_card_le_nearest,
-    run_command_single_shot,
+from quickquip.llm.usage import (
+    envelope_meter,
+    epoch_meter,
+    epoch_rows_meter,
+    media_meter,
+    patch_meter,
+    usage_scope,
 )
+from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
 from quickquip.llm.tool_loop import run_tool_call_loop
@@ -153,82 +159,31 @@ CONFIG_PATH = CONFIG_LLM_TOML
 DB_PATH = LLM_DB_PATH
 VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
-LLM_RULE_NAME = "llm_chat"
-MAX_QUOTED_MESSAGE_CHARS = 1200
-
-# 艾特档案注入：正文/存量历史中以数字形态出现的 @ 提及（@QQ123456），
-# 以及信封档案条目数上限（名字在前、QQ 作配对键，见 docs/dev/llm-module.md §5.5）
-_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})")
-_MENTION_PROFILE_LIMIT = 5
-MAX_PERSISTED_IMAGE_DESC_CHARS = 200
-MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS = 800
 _GROUP_CACHE_MAX = 512
 
 
 logger = logging.getLogger(__name__)
 
-
-def _defectify_reply_text(raw_text: str) -> str | None:
-    return raw_text or None
-
-
-def _turmfluch_reply_text(raw_text: str) -> str | None:
-    name = extract_card_le_name(raw_text)
-    if name is None:
-        return None
-    return f"{name}了"
-
-
-# 一次性生成入口的差异点束；共享管线本体在 quickquip.llm.single_shot
-_DEFECTIFY_SPEC = CommandSingleShotSpec(
-    rate_limit_key=DEFECTIFY_RATE_LIMIT_KEY,
-    rule_name=DEFECTIFY_RULE_NAME,
-    usage_reply="用法：/defectify <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /defectify。",
-    invalid_reply="模型没有返回可显示的文本。",
-    temperature=0.9,
-    input_channel="defectify_input",
-    output_channel="defectify_output",
-    usage_scope_name="defectify",
-    prompt_builder=build_defectify_prompt,
-    response_parser=_defectify_reply_text,
-)
-_TURMFLUCH_SPEC = CommandSingleShotSpec(
-    rate_limit_key=TURMFLUCH_RATE_LIMIT_KEY,
-    rule_name=TURMFLUCH_RULE_NAME,
-    usage_reply="用法：/turmfluch <文字>，也可以在命令里附图，或引用一条消息/图片后直接发送 /turmfluch。",
-    invalid_reply="模型没有返回合法的卡牌/遗物名。",
-    temperature=0.7,
-    input_channel="turmfluch_input",
-    output_channel="turmfluch_output",
-    usage_scope_name="turmfluch",
-    prompt_builder=build_turmfluch_prompt,
-    response_parser=_turmfluch_reply_text,
-    log_label="/turmfluch",
+# 被动类触发：闸门排队超耐心预算即取消（§5.2）。主动 @/前缀、私聊、
+# 定时不在此列——用户要答案或计划任务按点发话，晚到也要发。
+_PASSIVE_QUEUE_KINDS = frozenset(
+    {TriggerKind.GROUP_PASSIVE, TriggerKind.BOREDOM}
 )
 
 
-@dataclass
-class _ImagePreprocessingOutcome:
-    """图像预处理段继续走主生成链路时向调用方回传的状态。"""
-
-    effective_image_urls: list[str]
-    request_quoted_image_urls: list[str]
-    request_forward_image_urls: list[str]
-    image_descriptions: list[ImageDescription]
-    is_non_vision: bool
-
-
-def _image_caption_blob(descriptions: list[ImageDescription]) -> tuple[int, str]:
-    """图注落库文本：单条截 200、整坨截 800，顺序 = 候选顺序（确定性）。
-
-    截断必须在落库前完成——落库字节即前缀字节，下一轮换侧 history 原样复现。
-    """
-    descs = [d.text_description.strip() for d in descriptions if d.text_description.strip()]
-    blob = "；".join(d[:MAX_PERSISTED_IMAGE_DESC_CHARS].rstrip() for d in descs)
-    return len(descs), blob[:MAX_PERSISTED_IMAGE_DESC_BLOB_CHARS]
-
-
-class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, ScheduleMessagesToolMixin, HealthMixin, StateMixin, AutoMemoryMixin):
+class LLMService(
+    ScopeMixin,
+    ToolMixin,
+    McpLifecycleMixin,
+    DrawSvgToolMixin,
+    ScheduleMessagesToolMixin,
+    SkillsToolMixin,
+    SingleShotEntriesMixin,
+    ImagesMixin,
+    HealthMixin,
+    StateMixin,
+    AutoMemoryMixin,
+):
     def __init__(
         self,
         config_path: str | Path = CONFIG_PATH,
@@ -252,13 +207,25 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         self._session_presets: dict[str, str] = {}
         # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
         self._epochs = EpochManager()
+        # 最近一封信封的六段分解（进程内旁路，纪元看板实时态数据源）
+        self._envelope_cache = EnvelopeBreakdownCache()
+        # 同 scope 轮次串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权
+        self._scope_gate = ScopeGate()
         self._init_auto_memory()
         self._init_error: str | None = None
 
         self._register_builtin_tools()
         self.config = load_llm_config(self.config_path)
+        # skills 需要在 config 就位后做启动注册；空目录时留待每轮构建系统
+        # 提示时惰性注册（热部署，无 reload 钩子）。
+        self._init_skills()
+        self.register_skill_tools()
 
-        self._identity_repository = identities if Path(self.identity_path) == identities.path else IdentityRepository(self.identity_path)
+        self._identity_repository = (
+            identities
+            if Path(self.identity_path) == identities.path
+            else IdentityRepository(self.identity_path)
+        )
         try:
             self.store = LLMStore(db_path, identity_repository=self._identity_repository)
         except Exception as exc:
@@ -345,7 +312,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             self.config.runtime.default_persona = next(iter(new_personas))
         return len(new_personas), None
 
-    def get_chat_settings(self, chat_id: int | str, chat_type: str = "group") -> ResolvedGroupSettings:
+    def get_chat_settings(
+        self, chat_id: int | str, chat_type: str = "group"
+    ) -> ResolvedGroupSettings:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
         overrides = self.store.get_group_settings(scope_key)
         settings = resolve_group_settings(self.store, self.config, scope_key)
@@ -360,7 +329,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
     def get_group_settings(self, group_id: int | str) -> ResolvedGroupSettings:
         return self.get_chat_settings(group_id, chat_type="group")
 
-    def _update_chat_settings(self, chat_id: int | str, chat_type: str = "group", **fields: object) -> None:
+    def _update_chat_settings(
+        self, chat_id: int | str, chat_type: str = "group", **fields: object
+    ) -> None:
         self.store.update_group_settings(self.build_chat_scope_key(chat_id, chat_type), **fields)
 
     def _build_system_prompt(
@@ -373,6 +344,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         session_preset: str = "",
         provider_id: str | None = None,
         builtin_search_active: bool = False,
+        skills_catalog_block: str = "",
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -384,13 +356,18 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 if builtin_search_active
                 else ("searxng" if self.config.auto_search.enabled else "none")
             ),
-            tool_discovery_enabled=self._is_tool_discovery_enabled(chat_type, provider_id=provider_id),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(
+                chat_type, provider_id=provider_id
+            ),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            deferred_tool_categories=self._get_deferred_tool_categories(chat_type, provider_id=provider_id),
+            deferred_tool_categories=self._get_deferred_tool_categories(
+                chat_type, provider_id=provider_id
+            ),
             chat_type=chat_type,
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
+            skills_catalog_block=skills_catalog_block,
         )
 
     def _build_turn_envelope(
@@ -401,9 +378,10 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         memories: list[dict[str, object]],
         participants: list[dict[str, str]] | None = None,
         mention_profiles: list[dict[str, str]] | None = None,
-    ) -> str:
-        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。
-        return build_turn_envelope(
+    ) -> dict[str, str]:
+        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。返回六段分解，
+        # join 由 TurnRequestAssembler 统一执行（字节口径单点）。
+        return build_turn_envelope_segments(
             now=datetime.now(ZoneInfo(BEIJING_TIMEZONE)),
             prompt=prompt,
             memories=memories,
@@ -426,70 +404,26 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         current_user_id: str,
         quoted_user_id: str,
     ) -> list[dict[str, str]]:
-        """收集被艾特但未在窗口内发言的登记成员档案（信封注入用）。
+        """信封档案编排下沉薄委托：本体在 ``llm/identity.py``。"""
+        return collect_mention_profiles(
+            self._resolve_identities(str(chat_id)),
+            mentioned_qq_ids=mentioned_qq_ids,
+            prompt=prompt,
+            quoted_text=quoted_text,
+            forward_text=forward_text,
+            history=history,
+            scene_patch=scene_patch,
+            current_user_id=current_user_id,
+            quoted_user_id=quoted_user_id,
+        )
 
-        候选双路：入口结构化采集的 ``mentioned_qq_ids``（当前消息，精确）
-        ＋对 prompt/引用/转发/history/现场文本扫 ``@QQ 数字``（覆盖冻结
-        落库的存量形态）。已在窗口带发言人标签的成员跳过（场景行可见，
-        无需档案）；未登记成员跳过（无可注入）。确定性输出，同输入同字节。
+    async def quick_judge(self, prompt: str, max_tokens: int | None = None) -> str:
         """
-        identities = self._resolve_identities(str(chat_id))
-        visible: set[str] = set()
-        for uid in (current_user_id, quoted_user_id):
-            uid = str(uid or "").strip()
-            if uid:
-                visible.add(uid)
-        for item in history or []:
-            uid = str(item.get("user_id") or "").strip()
-            if uid:
-                visible.add(uid)
-        for item in scene_patch or []:
-            uid = str(item.get("user_id") or "").strip()
-            if uid:
-                visible.add(uid)
-
-        candidates: list[str] = []
-
-        def _push(qq: str) -> None:
-            normalized = str(qq or "").strip()
-            if normalized and normalized.isdigit() and normalized not in candidates:
-                candidates.append(normalized)
-
-        for qq in mentioned_qq_ids:
-            _push(str(qq))
-        scan_texts = [prompt, quoted_text, forward_text]
-        for item in history or []:
-            scan_texts.append(str(item.get("raw_content") or item.get("content") or ""))
-        for item in scene_patch or []:
-            scan_texts.append(str(item.get("text") or ""))
-        for text in scan_texts:
-            for match in _AT_QQ_PATTERN.finditer(text):
-                _push(match.group(1))
-
-        profiles: list[dict[str, str]] = []
-        for qq in candidates:
-            if qq in visible:
-                continue
-            match = identities.resolve_user(qq)
-            if not match.is_registered or not match.canonical_name:
-                continue
-            profiles.append(
-                {
-                    "canonical_name": match.canonical_name,
-                    "user_id": qq,
-                    "aliases": "、".join(match.aliases[:6]),
-                    "note": match.note,
-                }
-            )
-            if len(profiles) >= _MENTION_PROFILE_LIMIT:
-                break
-        return profiles
-
-    async def quick_judge(self, prompt: str, max_tokens: int = 64) -> str:
-        """
-        用于 context_rules 和 awakening 的极速判定调用。
-        不走群配置、不注入记忆、不启用工具，只发单条 system+user。
-        优先使用 [triggers.quick_judge] 配置的 provider/model。
+        一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
+        结构化判定（awakening、context_rules、auto_memory）走
+        ``quick_judge_detailed``。不走群配置、不注入记忆、不启用工具，
+        只发单条 system+user；优先使用 [triggers.quick_judge] 配置的
+        provider/model，max_tokens 缺省沿用其 max_tokens。
         """
         # 薄委托：通道本体在 quickquip.llm.quick_judge。显式传本模块级
         # build_provider_client，保持既有 patch 点有效，且不向通道传递 self。
@@ -497,13 +431,29 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             self.config, prompt, max_tokens, client_builder=build_provider_client
         )
 
-    async def quick_judge_detailed(self, prompt: str, max_tokens: int = 64) -> QuickJudgeResult:
+    async def quick_judge_detailed(
+        self, prompt: str, max_tokens: int | None = None
+    ) -> QuickJudgeResult:
         """``quick_judge`` 的结构化内部通道：按结果类别返回诊断字段，
         不抛 provider 异常。诊断只含 provider/model/类别/finish reason/
         token/耗时，禁止携带 prompt、模型原始响应、凭据或 endpoint。"""
         return await run_quick_judge_detailed(
             self.config, prompt, max_tokens, client_builder=build_provider_client
         )
+
+    def persona_interest_topics(self, persona_id: str) -> list[str]:
+        """persona extras 中 awakening 兴趣话题的窄读取（清洗为非空字符串列表）。
+
+        配置形状知识归 persona 所有者；唤醒域经 ``PersonaTopicsSource``
+        结构化接口消费，不直达 ``config.personas`` 内部。
+        """
+        persona = self.config.personas.get(persona_id)
+        if persona is None:
+            return []
+        topics = persona.extras.get("awakening", {}).get("interest_topics", [])
+        if not isinstance(topics, list):
+            return []
+        return [str(t).strip() for t in topics if str(t).strip()]
 
     def bind_delivery_sink(self, sink) -> None:
         """绑定逐 Turn 交付出口（adapters 装配时调用）。"""
@@ -607,90 +557,6 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             projected_history_segments=projected_history_segments,
         )
 
-    async def generate_defectify_reply(
-        self,
-        *,
-        chat_id: int | str,
-        chat_type: str,
-        prompt: str,
-        image_urls: list[str] | None = None,
-        quoted_text: str = "",
-        quoted_image_urls: list[str] | None = None,
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-    ) -> dict[str, str]:
-        # 薄编排：管线本体在 quickquip.llm.single_shot。显式传本模块级
-        # build_provider_client / _get_sensitive_filter，保持既有 patch 点有效。
-        return await run_command_single_shot(
-            spec=_DEFECTIFY_SPEC,
-            config=self.config,
-            chat_id=chat_id,
-            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
-            get_sensitive=_get_sensitive_filter,
-            client_builder=build_provider_client,
-            merge_image_urls=self._merge_image_urls,
-            prompt=prompt,
-            image_urls=image_urls,
-            quoted_text=quoted_text,
-            quoted_image_urls=quoted_image_urls,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-        )
-
-    async def generate_turmfluch_reply(
-        self,
-        *,
-        chat_id: int | str,
-        chat_type: str,
-        prompt: str,
-        image_urls: list[str] | None = None,
-        quoted_text: str = "",
-        quoted_image_urls: list[str] | None = None,
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-    ) -> dict[str, Any]:
-        """/turmfluch 命令：把输入提炼成一句「<卡牌或遗物名>了」。"""
-        # 薄编排：同 generate_defectify_reply，管线本体在 quickquip.llm.single_shot。
-        return await run_command_single_shot(
-            spec=_TURMFLUCH_SPEC,
-            config=self.config,
-            chat_id=chat_id,
-            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            resolve_settings=lambda: self.get_chat_settings(chat_id, chat_type=chat_type),
-            get_sensitive=_get_sensitive_filter,
-            client_builder=build_provider_client,
-            merge_image_urls=self._merge_image_urls,
-            prompt=prompt,
-            image_urls=image_urls,
-            quoted_text=quoted_text,
-            quoted_image_urls=quoted_image_urls,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
-        )
-
-    async def generate_card_le_nearest(
-        self,
-        *,
-        captured: str,
-        chat_id: int | str,
-        chat_type: str,
-    ) -> dict | None:
-        """被动路径：群友说的「{captured}了」里的 captured 不是合法名时，找最近的
-        真名，返回 ``{"reply": "名了", ...}``；无合法结果返回 None。
-
-        走 ``[triggers.quick_judge]`` 配置的专用便宜模型，不走群主模型。
-        """
-        # 薄编排：管线本体在 quickquip.llm.single_shot，patch 点同上。
-        return await run_card_le_nearest(
-            config=self.config,
-            chat_id=chat_id,
-            resolve_scope_key=lambda: self.build_chat_scope_key(chat_id, chat_type),
-            get_sensitive=_get_sensitive_filter,
-            client_builder=build_provider_client,
-            captured=captured,
-        )
-
     def _collect_known_participants(
         self,
         *,
@@ -702,47 +568,16 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         quoted_user_id: str = "",
         group_id: str = "",
     ) -> list[dict[str, str]]:
-        participants: list[dict[str, str]] = []
-        seen_user_ids: set[str] = set()
-        identities = self._resolve_identities(group_id)
-
-        def _push(raw_user_id: int | str | None, raw_sender_name: str = "", raw_canonical_name: str = "") -> None:
-            user_key = str(raw_user_id or "").strip()
-            if user_key and not user_key.isdigit():
-                # 合成触发源（boredom_timer/scheduled_timer 等）不是群成员，
-                # 不进信封参与者（触发者本人与 history 合成行两路都过滤）
-                return
-            sender_value = raw_sender_name.strip()
-            canonical_value = raw_canonical_name.strip()
-            if not user_key and not sender_value:
-                return
-            dedupe_key = user_key or f"name:{sender_value}"
-            if dedupe_key in seen_user_ids:
-                return
-            seen_user_ids.add(dedupe_key)
-            if user_key:
-                identity = identities.resolve_user(user_key, sender_value)
-                if identity.is_registered:
-                    canonical_value = identity.canonical_name or canonical_value
-                    sender_value = sender_value or identity.sender_name or user_key
-            participants.append(
-                {
-                    "user_id": user_key,
-                    "sender_name": sender_value or user_key,
-                    "canonical_name": canonical_value,
-                }
-            )
-
-        _push(user_id, sender_name)
-        if quoted_sender_name or quoted_user_id:
-            _push(quoted_user_id, quoted_sender_name)
-        for item in recent_messages or []:
-            _push(item.get("user_id", ""), item.get("sender_name", ""), item.get("canonical_name", ""))
-        for item in history:
-            if item.get("role") != "user":
-                continue
-            _push(item.get("user_id", ""), item.get("sender_name", ""), item.get("canonical_name", ""))
-        return participants
+        """信封参与者编排下沉薄委托：本体在 ``llm/identity.py``。"""
+        return collect_known_participants(
+            self._resolve_identities(group_id),
+            user_id=user_id,
+            sender_name=sender_name,
+            history=history,
+            recent_messages=recent_messages,
+            quoted_sender_name=quoted_sender_name,
+            quoted_user_id=quoted_user_id,
+        )
 
     def _begin_agent_recorder(
         self,
@@ -774,23 +609,17 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
 
         if not store_user_message or self.store is None:
             return None
-        current_identity = self._resolve_identities(scope_key.removeprefix("private:")).resolve_user(
-            user_id, sender_name
+        current_identity = self._resolve_identities(
+            scope_key.removeprefix("private:")
+        ).resolve_user(user_id, sender_name)
+        raw_turn = build_raw_turn_text(
+            stored_prompt,
+            quoted_text=normalized_quoted_text,
+            quoted_image_urls=normalized_quoted_image_urls,
+            forward_text=normalized_forward_text,
+            forward_image_urls=normalized_forward_image_urls,
+            image_descriptions=image_descriptions,
         )
-        raw_turn_parts: list[str] = []
-        if normalized_quoted_text or normalized_quoted_image_urls:
-            q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
-            q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
-            raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
-        if normalized_forward_text or normalized_forward_image_urls:
-            fw_text = normalized_forward_text or "[合并转发消息]"
-            fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
-            raw_turn_parts.append(fw_text + fw_suffix)
-        if image_descriptions:
-            caption_count, caption_blob = _image_caption_blob(image_descriptions)
-            if caption_count:
-                raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
-        raw_turn_parts.append(stored_prompt)
         generation, _ = self.store.agent_scope_state(scope_key)
         if trigger_kind is not None:
             trigger = trigger_kind
@@ -808,10 +637,15 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                     sender_name=sender_name,
                     canonical_name=current_identity.canonical_name,
                     content=stored_prompt,
-                    raw_content="\n".join(raw_turn_parts),
+                    raw_content=raw_turn,
                     message_id=str(message_id) if message_id else None,
                 ),
             )
+        except LoopNotWritable as exc:
+            # 闸门应已串行化同 scope 轮次：仍撞单飞约束即闸门旁路（编程
+            # 错误），告警计数后走既有无记录路径兜底。
+            self._scope_gate.record_bypass(scope_key, str(exc))
+            return None
         except AgentStoreError:
             logger.exception("begin_loop 失败 scope=%s，本轮退回无记录路径", scope_key)
             return None
@@ -827,7 +661,11 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 reply_max_chunks_per_loop=runtime.reply_max_chunks_per_loop,
             ),
             sink=delivery_sink or self._delivery_sink,
-            sensitive_scan=_get_sensitive_filter().scan if _get_sensitive_filter().is_loaded else None,
+            sensitive_scan=(
+                _get_sensitive_filter().scan
+                if _get_sensitive_filter().is_loaded
+                else None
+            ),
         )
 
     async def _run_tool_call_loop(
@@ -853,154 +691,18 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
-            tool_discovery_enabled=self._is_tool_discovery_enabled(context.chat_type, provider_id=provider.id),
+            tool_discovery_enabled=self._is_tool_discovery_enabled(
+                context.chat_type, provider_id=provider.id
+            ),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
-            enabled_tool_names=self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=provider.id),
+            enabled_tool_names=self._get_enabled_tool_names(
+                chat_type=context.chat_type, provider_id=provider.id
+            ),
             initial_tool_names=[spec.name for spec in request.tools],
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
             image_preprocessor=self.image_preprocessor,
-        )
-
-    async def _preprocess_images_for_model(
-        self,
-        *,
-        chat_id: int | str,
-        scope_key: str,
-        provider: ProviderConfig,
-        settings: ResolvedGroupSettings,
-        request_image_urls: list[str],
-        request_quoted_image_urls: list[str],
-        request_forward_image_urls: list[str],
-        normalized_image_urls: list[str],
-        normalized_quoted_image_urls: list[str],
-        normalized_forward_image_urls: list[str],
-        recent_messages: list[dict[str, str]] | None,
-        include_recent_images: bool,
-        sensitive: SensitiveFilter,
-    ) -> dict[str, object] | _ImagePreprocessingOutcome:
-        # ── image preprocessing & non-VLM stripping ──────────────────
-        current_model = settings.model or provider.default_model
-        is_non_vision = current_model in provider.non_vision_models
-        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
-        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls)
-
-        image_plan = None
-        if is_non_vision:
-            image_plan = plan_non_vision_images(
-                image_urls=request_image_urls,
-                quoted_image_urls=request_quoted_image_urls,
-                forward_image_urls=request_forward_image_urls,
-                recent_messages=recent_messages,
-                include_recent_images=include_recent_images,
-                max_trigger_context_messages=MAX_TRIGGER_CONTEXT_MESSAGES,
-            )
-            if image_plan.error_reply:
-                return {
-                    "reply": image_plan.error_reply,
-                    "rate_limit_key": LLM_RULE_NAME,
-                    "rule_name": LLM_RULE_NAME,
-                    "llm_used": False,
-                }
-
-        if effective_image_urls:
-            # images= 是实际附带数（转发图不附带，不计入）；sources 各分项同理
-            # 只列附带来源，避免 total 与分项和对不上误导排查
-            sources: list[str] = []
-            if normalized_image_urls:
-                sources.append(f"直接={len(normalized_image_urls)}")
-            if normalized_quoted_image_urls:
-                sources.append(f"引用={len(normalized_quoted_image_urls)}")
-            logger.info(
-                "group=%s model=%s non_vision=%s images=%d (%s)",
-                chat_id, current_model, is_non_vision,
-                len(effective_image_urls), ", ".join(sources),
-            )
-
-        image_descriptions: list[ImageDescription] = []
-        ok_count = 0
-        if image_plan is not None and image_plan.candidates:
-            if self.image_preprocessor is None:
-                logger.error(
-                    "group=%s model=%s requires image preprocessing but no preprocessor is bound",
-                    chat_id,
-                    current_model,
-                )
-                return {
-                    "reply": IMAGE_PREPROCESSING_UNAVAILABLE_REPLY,
-                    "rate_limit_key": LLM_RULE_NAME,
-                    "rule_name": LLM_RULE_NAME,
-                    "llm_used": False,
-                    "provider_id": provider.id,
-                    "model": current_model,
-                }
-
-            raw_descriptions = await self.image_preprocessor.describe_images(
-                [candidate.url for candidate in image_plan.candidates]
-            )
-            description_match = match_image_descriptions(
-                image_plan.candidates,
-                raw_descriptions,
-            )
-            image_descriptions = description_match.descriptions
-            ok_count = len(image_descriptions)
-            if description_match.failed_urls:
-                logger.warning(
-                    "group=%s preprocessor: %d ok, %d failed (%s)",
-                    chat_id,
-                    ok_count,
-                    len(description_match.failed_urls),
-                    ", ".join(description_match.failed_urls),
-                )
-                return {
-                    "reply": IMAGE_PREPROCESSING_FAILED_REPLY,
-                    "rate_limit_key": LLM_RULE_NAME,
-                    "rule_name": LLM_RULE_NAME,
-                    "llm_used": True,
-                    "provider_id": self.config.image_preprocessing.provider_id,
-                    "model": self.config.image_preprocessing.model,
-                }
-            description_blob = "\n".join(
-                item.text_description for item in image_descriptions
-                if item.text_description
-            )
-            description_scan = _scan_sensitive_text(
-                description_blob,
-                channel="image_description",
-                scope=scope_key,
-                sensitive_filter=sensitive,
-            )
-            if description_scan.blocked:
-                return {
-                    "reply": DEFAULT_BLOCK_REPLY,
-                    "rate_limit_key": LLM_RULE_NAME,
-                    "rule_name": LLM_RULE_NAME,
-                    "llm_used": True,
-                    "provider_id": self.config.image_preprocessing.provider_id,
-                    "model": self.config.image_preprocessing.model,
-                }
-            logger.info("group=%s preprocessor: all %d images described", chat_id, ok_count)
-
-        if image_plan is not None and image_plan.candidates:
-            stripped_count = len(image_plan.candidates)
-            logger.info(
-                "group=%s non-VLM strip: replaced %d images with text descriptions",
-                chat_id,
-                stripped_count,
-            )
-            effective_image_urls = []
-            request_image_urls = []
-            request_quoted_image_urls = []
-            request_forward_image_urls = []
-
-        # ── end image preprocessing ─────────────────────────────────
-        return _ImagePreprocessingOutcome(
-            effective_image_urls=effective_image_urls,
-            request_quoted_image_urls=request_quoted_image_urls,
-            request_forward_image_urls=request_forward_image_urls,
-            image_descriptions=image_descriptions,
-            is_non_vision=is_non_vision,
         )
 
     def _load_scrubbed_history_and_participants(
@@ -1020,12 +722,21 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         epoch_key: EpochKey,
         epoch_params: EpochParams,
         provider: ProviderConfig | None = None,
-    ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[dict[str, str]] | None, dict[str, list[LLMConversationMessage]]]:
+    ) -> tuple[
+        list[dict[str, object]],
+        list[dict[str, str]],
+        list[dict[str, str]] | None,
+        dict[str, list[LLMConversationMessage]],
+    ]:
         # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
         # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
         # 两种读模式，勿在此"统一"。
-        self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        epoch_event = self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
+        if epoch_event is not None:
+            # 锚点推进 = 窗口内历史被丢弃：激活注入的正文可能随之出窗，
+            # 清掉登记让模型需要时重新激活（重新注入正文）。
+            self._skill_activations.clear_scope(scope_key)
         anchor = self._epochs.current_anchor(epoch_key) or 0
         if settings.history_limit is not None:
             # 显式 /llm context_limit 覆盖：尊重"更小窗口"意图，退化为该会话的
@@ -1033,6 +744,12 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             backstop = self.store.find_anchor_row_id_by_rows(scope_key, settings.history_limit)
             if backstop is not None:
                 anchor = max(anchor, backstop)
+        # 窗口守卫（Deep-CR L1-3/L3-1）：生效锚点越过登记的激活尾部即激活轮
+        # 出窗，清掉登记让重新激活走完整注入——否则去重短路会向模型声称
+        # "正文不再重复注入"而正文已不可见。覆盖锚点推进类收缩（行数兜底；
+        # 纪元推进另有整体清除）；词表归档与投影降级类（行不动、可见面变）
+        # 不在本守卫内，残留登记的自救是模型自行 read_skill_resource。
+        self._skill_activations.drop_outdated(scope_key, anchor)
         history = self.store.list_conversation_messages_since(
             scope_key, anchor, limit=DEFAULT_EPOCH_MAX_ROWS,
         )
@@ -1065,7 +782,11 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         }
         if message_id:
             exclude_ids.add(str(message_id))
-        if recent_messages is None and chat_type == "group" and self.recent_message_buffer is not None:
+        if (
+            recent_messages is None
+            and chat_type == "group"
+            and self.recent_message_buffer is not None
+        ):
             recent_messages = self.recent_message_buffer.list_patch(
                 scope_key,
                 exclude_message_ids=exclude_ids,
@@ -1177,23 +898,14 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
         if store_user_message and not recorder_rows_written:
-            raw_turn_parts: list[str] = []
-            if normalized_quoted_text or normalized_quoted_image_urls:
-                q_text = normalized_quoted_text or f"[图片 {len(normalized_quoted_image_urls)} 张]"
-                q_suffix = f" [附图 {len(normalized_quoted_image_urls)} 张]" if normalized_quoted_image_urls else ""
-                raw_turn_parts.append(f"[引用] {q_text}{q_suffix}")
-            if normalized_forward_text or normalized_forward_image_urls:
-                fw_text = normalized_forward_text or "[合并转发消息]"
-                fw_suffix = f" [附图 {len(normalized_forward_image_urls)} 张]" if normalized_forward_image_urls else ""
-                raw_turn_parts.append(fw_text + fw_suffix)
-            if image_descriptions:
-                # 非 VLM 路径：图注以文本身份落库（媒体本体永不进前缀）；
-                # 下一轮换侧 history 直接复用落库字节，转述内容不再随轮丢失
-                caption_count, caption_blob = _image_caption_blob(image_descriptions)
-                if caption_count:
-                    raw_turn_parts.append(f"[图片 {caption_count} 张：{caption_blob}]")
-            raw_turn_parts.append(stored_prompt)
-            raw_turn = "\n".join(raw_turn_parts)
+            raw_turn = build_raw_turn_text(
+                stored_prompt,
+                quoted_text=normalized_quoted_text,
+                quoted_image_urls=normalized_quoted_image_urls,
+                forward_text=normalized_forward_text,
+                forward_image_urls=normalized_forward_image_urls,
+                image_descriptions=image_descriptions,
+            )
             self.store.append_conversation_message(
                 scope_key,
                 user_id,
@@ -1229,142 +941,91 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 )
             )
 
-        return {
-            "reply": text,
-            "rate_limit_key": LLM_RULE_NAME,
-            "rule_name": LLM_RULE_NAME,
-            "llm_used": True,
-            "provider_id": provider.id,
-            "model": model,
-            # 发送回执按群回填无记录路径的 assistant 行（无 agent_turn_row_id 时
-            # record_final_receipt 依赖此键定位）
-            "scope_key": scope_key,
-            # 工具外发图片（base64 PNG），适配层拼在文本后发送；上限见 MAX_OUTBOUND_TOOL_IMAGES
-            "images": outbound_images_payload(tool_context),
-        }
+        # 发送回执按群回填无记录路径的 assistant 行（无 agent_turn_row_id 时
+        # record_final_receipt 依赖此键定位）；工具外发图片（base64 PNG）由
+        # 适配层拼在文本后发送（上限见 MAX_OUTBOUND_TOOL_IMAGES）
+        return reply_result(
+            text,
+            llm_used=True,
+            provider_id=provider.id,
+            model=model,
+            scope_key=scope_key,
+            images=outbound_images_payload(tool_context),
+        )
 
-    async def _generate_reply_for_scope(
-        self,
-        *,
-        chat_id: int | str,
-        chat_type: str,
-        user_id: int | str,
-        sender_name: str,
-        prompt: str,
-        image_urls: list[str] | None = None,
-        recent_messages: list[dict[str, str]] | None = None,
-        quoted_text: str = "",
-        quoted_image_urls: list[str] | None = None,
-        quoted_sender_name: str = "",
-        quoted_user_id: str = "",
-        quoted_is_bot_self: bool = False,
-        forward_text: str = "",
-        forward_image_urls: list[str] | None = None,
-        voice_text: str = "",
-        raw_user_text: str | None = None,
-        store_user_message: bool = True,
-        trigger_auto_memory: bool = True,
-        message_id: str | None = None,
-        include_recent_images: bool = False,
-        delivery_sink=None,
-        trigger_kind: TriggerKind | None = None,
-        mentioned_qq_ids: list[str] | None = None,
-    ) -> dict[str, object]:
-        prompt = prompt.strip()
-        normalized_raw_user_text = None if raw_user_text is None else raw_user_text.strip()
-        normalized_image_urls = [url for url in (image_urls or []) if url.strip()]
-        normalized_quoted_text = quoted_text.strip()
-        normalized_quoted_image_urls = [url for url in (quoted_image_urls or []) if url.strip()]
-        normalized_forward_text = forward_text.strip()
-        normalized_forward_image_urls = [url for url in (forward_image_urls or []) if url.strip()]
-        normalized_voice_text = voice_text.strip()
-        if normalized_voice_text:
-            prompt = "\n".join(item for item in [prompt, normalized_voice_text] if item).strip()
-        request_image_urls = list(normalized_image_urls)
-        request_quoted_image_urls = list(normalized_quoted_image_urls)
-        request_forward_image_urls = list(normalized_forward_image_urls)
-        if not prompt and normalized_image_urls and not normalized_quoted_text and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
-            prompt = "请描述这张图片，并优先回答群友最可能想知道的内容。"
-        stored_prompt = (
-            normalized_raw_user_text if normalized_raw_user_text is not None else prompt
-        )[: self.config.runtime.max_prompt_chars]
+    async def _generate_reply_for_scope(self, request: ChatTurnRequest) -> ReplyResult:
+        """同 scope 串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权。
 
-        if not prompt and not normalized_quoted_text and not normalized_image_urls and not normalized_quoted_image_urls and not normalized_forward_text and not normalized_forward_image_urls:
-            return {
-                "reply": self.config.triggers.empty_prompt_reply,
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
+        取得执行权后再做配置解析与上下文装配，满足「取得执行权时再次
+        检查」的时序；长轮次（原生生图）期间同 scope 后续轮次在此排队。
+        被动类触发（群被动唤醒/无聊唤醒）排队超过耐心预算即取消本轮：
+        排到长生成之后的插话已是过期噪音，空回复出口由适配层既有守卫
+        静默吞掉；主动/私聊/定时触发不限时——晚到也要发。
 
-        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        资格复查的有意取舍（§5.2 残余项）：rule_switch 开关、回复掷骰与
+        入口限流在适配层排队前消费，锁后不重掷——影响有界（每在途轮至
+        多补发一条主动触发），被动类已被耐心预算兜住。
+        """
+        scope_key = self.build_chat_scope_key(request.chat_id, request.chat_type)
+        async with self._scope_gate.guarded(scope_key) as hold:
+            if (
+                request.trigger_kind in _PASSIVE_QUEUE_KINDS
+                and hold.waited_s > PASSIVE_TRIGGER_QUEUE_PATIENCE_S
+            ):
+                logger.info(
+                    "被动触发排队过期取消 scope=%s kind=%s wait_s=%.1f",
+                    scope_key, request.trigger_kind, hold.waited_s,
+                )
+                return reply_result(
+                    "", llm_used=False, cancelled_reason="queue_patience_exceeded"
+                )
+            return await self._generate_reply_for_scope_locked(request)
+
+    async def _generate_reply_for_scope_locked(
+        self, request: ChatTurnRequest
+    ) -> ReplyResult:
+        turn = normalize_turn_input(
+            request, max_prompt_chars=self.config.runtime.max_prompt_chars
+        )
+        if not turn.has_content:
+            return reply_result(self.config.triggers.empty_prompt_reply, llm_used=False)
+
+        scope_key = self.build_chat_scope_key(request.chat_id, request.chat_type)
         sensitive = _get_sensitive_filter()
         if sensitive.is_loaded:
             input_blob = "\n".join(
                 part for part in (
-                    prompt,
-                    normalized_quoted_text,
-                    normalized_forward_text,
+                    turn.prompt,
+                    turn.quoted_text,
+                    turn.forward_text,
                 ) if part
             )
             input_scan = sensitive.scan(input_blob)
             if input_scan.hits:
                 _log_sensitive_hits("input", scope_key, input_scan)
             if input_scan.blocked:
-                return {
-                    "reply": DEFAULT_BLOCK_REPLY,
-                    "rate_limit_key": LLM_RULE_NAME,
-                    "rule_name": LLM_RULE_NAME,
-                    "llm_used": False,
-                }
+                return reply_result(DEFAULT_BLOCK_REPLY, llm_used=False)
 
         if self.config.load_error:
-            return {
-                "reply": f"LLM 配置不可用：{self.config.load_error}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
+            return reply_result(f"LLM 配置不可用：{self.config.load_error}", llm_used=False)
 
-        settings = self.get_chat_settings(chat_id, chat_type=chat_type)
+        settings = self.get_chat_settings(request.chat_id, chat_type=request.chat_type)
         if not settings.enabled:
-            return {
-                "reply": f"{self._scope_subject(chat_type)} LLM 已关闭。",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
+            return reply_result(
+                f"{self._scope_subject(request.chat_type)} LLM 已关闭。", llm_used=False
+            )
 
         provider = self.config.providers.get(settings.provider_id)
         if provider is None:
-            return {
-                "reply": f"当前 provider 不存在：{settings.provider_id}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
+            return reply_result(f"当前 provider 不存在：{settings.provider_id}", llm_used=False)
         if not provider.enabled:
-            return {
-                "reply": DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id),
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
+            return reply_result(
+                DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id), llm_used=False
+            )
 
         persona = self.config.personas.get(settings.persona_id)
         if persona is None:
-            return {
-                "reply": f"当前 persona 不存在：{settings.persona_id}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-            }
-
-        trimmed_prompt = prompt[: self.config.runtime.max_prompt_chars]
-        quoted_prompt = normalized_quoted_text[:MAX_QUOTED_MESSAGE_CHARS]
-        analysis_prompt = "\n".join(
-            item for item in [stored_prompt, quoted_prompt] if item
-        )[: self.config.runtime.max_prompt_chars]
+            return reply_result(f"当前 persona 不存在：{settings.persona_id}", llm_used=False)
 
         # ── history load + sensitive scrub + 【现场】补丁自取 + participants ──
         # 先于图片预处理：补丁去重要用 history 的 message_id，而预处理的
@@ -1376,18 +1037,23 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             model=settings.model or provider.default_model,
         )
         epoch_params = self.config.resolve_epoch_params(provider)
-        history, participants, scene_patch, projected_segments = self._load_scrubbed_history_and_participants(
-            chat_id=chat_id,
-            chat_type=chat_type,
+        (
+            history,
+            participants,
+            scene_patch,
+            projected_segments,
+        ) = self._load_scrubbed_history_and_participants(
+            chat_id=request.chat_id,
+            chat_type=request.chat_type,
             scope_key=scope_key,
             settings=settings,
             sensitive=sensitive,
-            user_id=user_id,
-            sender_name=sender_name,
-            recent_messages=recent_messages,
-            message_id=message_id,
-            quoted_sender_name=quoted_sender_name,
-            quoted_user_id=quoted_user_id,
+            user_id=request.user_id,
+            sender_name=request.sender_name,
+            recent_messages=request.recent_messages,
+            message_id=request.message_id,
+            quoted_sender_name=request.quoted_sender_name,
+            quoted_user_id=request.quoted_user_id,
             epoch_key=epoch_key,
             epoch_params=epoch_params,
             provider=provider,
@@ -1400,9 +1066,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         # 该特性静默失效。文本上下文仍走增量补丁（scene_patch）；显式注入
         # recent_messages（测试注入口）时注入列表即图源，不被 buffer 覆盖。
         if (
-            include_recent_images
-            and recent_messages is None
-            and chat_type == "group"
+            request.include_recent_images
+            and request.recent_messages is None
+            and request.chat_type == "group"
             and self.recent_message_buffer is not None
         ):
             recent_images_source: list[dict[str, str]] | None = (
@@ -1411,18 +1077,18 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         else:
             recent_images_source = scene_patch
         image_outcome = await self._preprocess_images_for_model(
-            chat_id=chat_id,
+            chat_id=request.chat_id,
             scope_key=scope_key,
             provider=provider,
             settings=settings,
-            request_image_urls=request_image_urls,
-            request_quoted_image_urls=request_quoted_image_urls,
-            request_forward_image_urls=request_forward_image_urls,
-            normalized_image_urls=normalized_image_urls,
-            normalized_quoted_image_urls=normalized_quoted_image_urls,
-            normalized_forward_image_urls=normalized_forward_image_urls,
+            request_image_urls=list(turn.image_urls),
+            request_quoted_image_urls=list(turn.quoted_image_urls),
+            request_forward_image_urls=list(turn.forward_image_urls),
+            normalized_image_urls=turn.image_urls,
+            normalized_quoted_image_urls=turn.quoted_image_urls,
+            normalized_forward_image_urls=turn.forward_image_urls,
             recent_messages=recent_images_source,
-            include_recent_images=include_recent_images,
+            include_recent_images=request.include_recent_images,
             sensitive=sensitive,
         )
         if isinstance(image_outcome, dict):
@@ -1433,173 +1099,150 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         image_descriptions = image_outcome.image_descriptions
         is_non_vision = image_outcome.is_non_vision
         # ── end image preprocessing ─────────────────────────────────
-        # 转发图注并入 normalized_forward_text：当轮渲染（_build_messages）与落库
+        # 转发图注并入 forward_text：当轮渲染（_build_messages）与落库
         # （_persist_turn_and_build_reply）共用同一变量，两条路径字节一致；
         # 并入后从 image_descriptions 摘除，避免视觉转述行与落库 caption 双重出现
-        forward_descs = [d for d in image_descriptions if d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
+        forward_text = turn.forward_text
+        forward_descs = [
+            d for d in image_descriptions
+            if d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)
+        ]
         if forward_descs:
-            forward_caption_count, forward_caption_blob = _image_caption_blob(forward_descs)
+            forward_caption_count, forward_caption_blob = image_caption_blob(forward_descs)
             if forward_caption_count:
-                normalized_forward_text = "\n".join(
+                forward_text = "\n".join(
                     part
                     for part in (
-                        normalized_forward_text,
+                        forward_text,
                         f"[转发图片 {forward_caption_count} 张：{forward_caption_blob}]",
                     )
                     if part
                 )
-                image_descriptions = [d for d in image_descriptions if not d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)]
+                image_descriptions = [
+                    d for d in image_descriptions
+                    if not d.context_label.startswith(FORWARD_IMAGE_CONTEXT_PREFIX)
+                ]
         if self.config.mcp.enabled:
             await self.ensure_mcp_ready()
         memories: list[dict[str, object]] = []
         if settings.memory_enabled:
             memories = self.store.search_memories(
                 scope_key,
-                user_id=user_id,
-                query=analysis_prompt or trimmed_prompt,
+                user_id=request.user_id,
+                query=turn.analysis_prompt or turn.trimmed_prompt,
                 limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
             )
 
+        # skills 现扫 + 惰性注册先于 tool specs 计算：新 skill 首次出现的
+        # 当轮即进入 spec 广告面；catalog 块与 specs 出自同一次扫描
+        # （一轮只扫一次目录）。
+        skills_catalog_block = self.prepare_skill_catalog_for_turn(
+            provider=provider, model=settings.model
+        )
         builtin_search_active = provider_builtin_search_active(provider)
         tool_specs = (
-            self._get_enabled_tool_specs(chat_type=chat_type, provider_id=provider.id)
+            self._get_enabled_tool_specs(chat_type=request.chat_type, provider_id=provider.id)
             if self.config.runtime.tool_calling_enabled
             else []
         )
-        session_preset = self.get_session_preset(scope_key) if chat_type == "private" else ""
+        session_preset = (
+            self.get_session_preset(scope_key) if request.chat_type == "private" else ""
+        )
         system_prompt = self._build_system_prompt(
             persona,
-            chat_id,
-            chat_type,
+            request.chat_id,
+            request.chat_type,
             tool_specs,
             provider_style_overrides=provider.style_overrides,
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
+            skills_catalog_block=skills_catalog_block,
         )
-        # 装配闭包经 nonlocal 重绑定；下游账本 meter 消费降级后的最终值。
-        turn_envelope: str = ""
-        messages: list[LLMConversationMessage] = []
-
-        def _assemble_request() -> LLMRequest:
-            """首轮和预算重建复用已消费的补丁，按最新历史重新去重。"""
-            nonlocal history, participants, scene_patch, projected_segments
-            nonlocal turn_envelope, messages
-            history, participants, scene_patch, projected_segments = (
-                self._load_scrubbed_history_and_participants(
-                    chat_id=chat_id,
-                    chat_type=chat_type,
-                    scope_key=scope_key,
-                    settings=settings,
-                    sensitive=sensitive,
-                    user_id=user_id,
-                    sender_name=sender_name,
-                    recent_messages=scene_patch_snapshot,
-                    message_id=message_id,
-                    quoted_sender_name=quoted_sender_name,
-                    quoted_user_id=quoted_user_id,
-                    epoch_key=epoch_key,
-                    epoch_params=epoch_params,
-                    provider=provider,
-                )
-            )
-            mention_profiles = self._collect_mention_profiles(
-                chat_id=chat_id,
-                mentioned_qq_ids=mentioned_qq_ids or [],
-                prompt=analysis_prompt or trimmed_prompt,
-                quoted_text=quoted_prompt,
-                forward_text=normalized_forward_text,
-                history=history,
-                scene_patch=scene_patch,
-                current_user_id=str(user_id),
-                quoted_user_id=quoted_user_id,
-            )
-            turn_envelope = self._build_turn_envelope(
-                chat_id,
-                chat_type,
-                analysis_prompt or trimmed_prompt,
-                memories,
-                participants=participants,
-                mention_profiles=mention_profiles,
-            )
-            messages = self._build_messages(
-                prompt=trimmed_prompt,
-                image_urls=effective_image_urls,
-                history=history,
-                recent_messages=scene_patch,
-                recent_images_messages=recent_images_source,
-                chat_type=chat_type,
-                group_id=str(chat_id),
-                current_sender_name=sender_name,
-                current_user_id=str(user_id),
-                quoted_text=quoted_prompt,
-                quoted_sender_name=quoted_sender_name,
-                quoted_user_id=quoted_user_id,
-                quoted_image_urls=request_quoted_image_urls,
-                quoted_is_bot_self=quoted_is_bot_self,
-                forward_text=normalized_forward_text,
-                forward_image_urls=request_forward_image_urls,
-                image_descriptions=image_descriptions or None,
-                include_recent_images=include_recent_images and not is_non_vision,
-                turn_envelope=turn_envelope,
-                projected_history_segments=projected_segments,
-            )
-            return LLMRequest(
-                model=settings.model or provider.default_model,
-                system_prompt=system_prompt,
-                messages=messages,
-                temperature=provider.temperature,
-                max_output_tokens=provider.max_output_tokens,
-                tools=tool_specs,
-                allow_tool_calls=bool(tool_specs),
-                tool_choice="auto",
-                builtin_search=builtin_search_active,
-            )
-
-        def _budget_exceeded_reply() -> dict:
-            return {
-                "reply": "这次对话的上下文已经太长，无法安全发起模型请求，请用清空上下文命令重置后再试。",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": False,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
+        # 装配对象持有当轮上下文；账本 meter 消费 assemble() 后的最终值。
+        assembler = TurnRequestAssembler(
+            load_history=self._load_scrubbed_history_and_participants,
+            collect_mention_profiles=self._collect_mention_profiles,
+            build_turn_envelope=self._build_turn_envelope,
+            build_messages=self._build_messages,
+            chat_id=request.chat_id,
+            chat_type=request.chat_type,
+            scope_key=scope_key,
+            settings=settings,
+            sensitive=sensitive,
+            user_id=request.user_id,
+            sender_name=request.sender_name,
+            message_id=request.message_id,
+            quoted_sender_name=request.quoted_sender_name,
+            quoted_user_id=request.quoted_user_id,
+            epoch_key=epoch_key,
+            epoch_params=epoch_params,
+            provider=provider,
+            scene_patch_snapshot=scene_patch_snapshot,
+            mentioned_qq_ids=request.mentioned_qq_ids,
+            analysis_prompt=turn.analysis_prompt,
+            trimmed_prompt=turn.trimmed_prompt,
+            quoted_prompt=turn.quoted_prompt,
+            memories=memories,
+            effective_image_urls=effective_image_urls,
+            recent_images_source=recent_images_source,
+            request_quoted_image_urls=request_quoted_image_urls,
+            request_forward_image_urls=request_forward_image_urls,
+            quoted_is_bot_self=request.quoted_is_bot_self,
+            forward_text=forward_text,
+            image_descriptions=image_descriptions,
+            include_recent_images=request.include_recent_images,
+            is_non_vision=is_non_vision,
+            tool_specs=tool_specs,
+            builtin_search_active=builtin_search_active,
+            system_prompt=system_prompt,
+        )
 
         # §8.3 先降级再拒绝：超限时锚点强制缩到热水位（付费 miss 一次），
         # 复用首轮补丁重建请求重试一次；仍超限才终止本轮。
-        request = _assemble_request()
+        llm_request = assembler.assemble()
         budget_retry_used = False
         while True:
             try:
-                enforce_request_budget(self.config, provider, request)
+                enforce_request_budget(self.config, provider, llm_request)
                 break
             except RequestBudgetExceeded as exc:
                 logger.warning(
                     "request budget exceeded scope=%s provider=%s model=%s: %s",
-                    scope_key, provider.id, request.model, exc,
+                    scope_key, provider.id, llm_request.model, exc,
                 )
                 if budget_retry_used:
-                    return _budget_exceeded_reply()
+                    return reply_result(
+                        BUDGET_EXCEEDED_REPLY,
+                        llm_used=False,
+                        provider_id=provider.id,
+                        model=llm_request.model,
+                    )
                 degraded = self._epochs.force_advance_to_hot(
                     epoch_key, store=self.store, params=epoch_params
                 )
                 if degraded is None:
-                    return _budget_exceeded_reply()
+                    return reply_result(
+                        BUDGET_EXCEEDED_REPLY,
+                        llm_used=False,
+                        provider_id=provider.id,
+                        model=llm_request.model,
+                    )
+                self._skill_activations.clear_scope(scope_key)
                 budget_retry_used = True
                 logger.info(
                     "epoch hot degrade for budget scope=%s anchor=%d->%d",
                     scope_key, degraded.old_anchor_id, degraded.new_anchor_id,
                 )
-                request = _assemble_request()
+                llm_request = assembler.assemble()
         tool_context = ToolExecutionContext(
-            group_id=chat_id,
-            user_id=user_id,
-            sender_name=sender_name,
+            group_id=request.chat_id,
+            user_id=request.user_id,
+            sender_name=request.sender_name,
             provider_id=provider.id,
-            model=request.model,
+            model=llm_request.model,
             chat_scope=scope_key,
-            chat_type=chat_type,
+            chat_type=request.chat_type,
         )
 
         recorder: TurnRecorder | None = None
@@ -1610,37 +1253,48 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # 与 auto_memory 等派生调用的归因口径一致。
             recorder = self._begin_agent_recorder(
                 scope_key=scope_key,
-                chat_type=chat_type,
-                user_id=user_id,
-                sender_name=sender_name,
-                stored_prompt=stored_prompt,
-                message_id=message_id,
-                store_user_message=store_user_message,
-                normalized_quoted_text=normalized_quoted_text,
-                normalized_quoted_image_urls=normalized_quoted_image_urls,
-                normalized_forward_text=normalized_forward_text,
-                normalized_forward_image_urls=normalized_forward_image_urls,
+                chat_type=request.chat_type,
+                user_id=request.user_id,
+                sender_name=request.sender_name,
+                stored_prompt=turn.stored_prompt,
+                message_id=request.message_id,
+                store_user_message=request.store_user_message,
+                normalized_quoted_text=turn.quoted_text,
+                normalized_quoted_image_urls=turn.quoted_image_urls,
+                normalized_forward_text=forward_text,
+                normalized_forward_image_urls=turn.forward_image_urls,
                 # 同 _persist_turn_and_build_reply 的落库口径：他人近期图注不落触发者名下。
-                image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
-                delivery_sink=delivery_sink,
-                trigger_kind=trigger_kind,
+                image_descriptions=[
+                    d for d in image_descriptions
+                    if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)
+                ] or None,
+                delivery_sink=request.delivery_sink,
+                trigger_kind=request.trigger_kind,
                 agent_delivery_intermediate_enabled=settings.agent_delivery_intermediate_enabled,
                 agent_delivery_final_enabled=settings.agent_delivery_final_enabled,
             )
+            # 信封构成缓存：装配最终态已知（预算降级重建后的 assembler），
+            # 记最近一次六段分解供纪元看板实时态导出。
+            self._envelope_cache.record(epoch_key, assembler.envelope_parts)
             with (
                 usage_scope("chat", group_id=scope_key, persona_id=settings.persona_id or None),
-                envelope_meter(estimate_tokens(turn_envelope)),
-                epoch_meter(estimate_rows_budget(history)),
+                envelope_meter(estimate_tokens(assembler.turn_envelope)),
+                epoch_meter(estimate_rows_budget(assembler.history)),
+                # 保留条数锯齿的计量源：窗口行数与 token 同口径同生命周期
+                epoch_rows_meter(len(assembler.history)),
                 # 媒体账本：当轮实际随请求附带的图片数（只有末条 user 消息携带
                 # image_urls；非 VLM 剥离后恒 0，0 也是有效信号）
-                media_meter(len(messages[-1].image_urls)),
+                media_meter(len(assembler.messages[-1].image_urls)),
                 # 补丁账本：【现场】块 token 估算，与预算同单位（AVG=预算利用率）。
                 # 三态：None=未自取（私聊/buffer 未绑定）；0=自取但补丁为空（有效
                 # 信号，与 media 的 0 同理）；正值=自取有货。空补丁轮计入 coverage
                 # 分子，否则 patch_coverage 测的是「非空补丁轮占比」而非自取覆盖率
                 patch_meter(
-                    sum(estimate_tokens(str(item.get("text", ""))) for item in scene_patch)
-                    if scene_patch is not None
+                    sum(
+                        estimate_tokens(str(item.get("text", "")))
+                        for item in assembler.scene_patch
+                    )
+                    if assembler.scene_patch is not None
                     else None
                 ),
             ):
@@ -1648,7 +1302,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 self._epochs.note_activity(epoch_key)
                 response = await self._run_tool_call_loop(
                     provider=provider,
-                    request=request,
+                    request=llm_request,
                     context=tool_context,
                     turn_recorder=recorder,
                     request_guard=self._build_request_guard(provider),
@@ -1665,87 +1319,70 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
             # 否则用户既无正文也无通知。无记录路径没有任何 sink 交付，
             # 同样必须可见。
             aborted_silently = recorder is not None and recorder.summary().sent > 0
-            return {
-                "reply": "" if aborted_silently else "本次回复未确认送达，已停止后续生成。",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-            }
+            return reply_result(
+                "" if aborted_silently else "本次回复未确认送达，已停止后续生成。",
+                llm_used=True,
+                provider_id=provider.id,
+                model=llm_request.model,
+            )
         except LLMProviderError as exc:
             if recorder is not None:
                 recorder.close(LoopStatus.FAILED, "provider_error")
-            return {
-                "reply": f"LLM 调用失败：{exc}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
+            return reply_result(
+                f"LLM 调用失败：{exc}",
+                llm_used=True,
+                provider_id=provider.id,
+                model=llm_request.model,
                 # 工具已产出的图片不因后续 LLM 调用失败而丢弃
-                "images": outbound_images_payload(tool_context),
-            }
+                images=outbound_images_payload(tool_context),
+            )
         except Exception as exc:
             if recorder is not None:
                 recorder.close(LoopStatus.FAILED, "exception")
-            return {
-                "reply": f"LLM 调用异常：{exc}",
-                "rate_limit_key": LLM_RULE_NAME,
-                "rule_name": LLM_RULE_NAME,
-                "llm_used": True,
-                "provider_id": provider.id,
-                "model": request.model,
-                "images": outbound_images_payload(tool_context),
-            }
-
-        text = strip_leading_reasoning_content(response.text)
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-        if not text:
-            text = "模型没有返回可显示的文本。"
-
-        if response.web_search is not None:
-            logger.info(
-                "LLM built-in web search: provider=%s model=%s queries=%s sources=%s",
-                provider.id,
-                request.model,
-                response.web_search.queries,
-                [source.url for source in response.web_search.sources],
+            return reply_result(
+                f"LLM 调用异常：{exc}",
+                llm_used=True,
+                provider_id=provider.id,
+                model=llm_request.model,
+                images=outbound_images_payload(tool_context),
             )
-            text = append_web_search_source_block(text, response.web_search)
 
-        if sensitive.is_loaded:
-            output_scan = sensitive.scan(text)
-            if output_scan.hits:
-                _log_sensitive_hits("output", scope_key, output_scan)
-            if output_scan.blocked:
-                # Don't write the blocked output to history — that would
-                # poison the next turn's context. Substitute the fallback
-                # for both the user-visible reply and what we persist.
-                text = DEFAULT_OUTPUT_FALLBACK
+        text = finalize_reply_text(
+            response,
+            provider_id=provider.id,
+            model=llm_request.model,
+            sensitive=sensitive,
+            scope_key=scope_key,
+            # 纯图响应不补占位文本；以外发通道实际存活图片为准——图片
+            # 被限流/上限丢弃时回落占位提示，避免用户既无图又无说明。
+            allow_empty=bool(tool_context.outbound_images),
+        )
 
         # ── persistence + auto-memory dispatch + reply assembly ──────
         result_payload = self._persist_turn_and_build_reply(
-            chat_id=chat_id,
-            user_id=user_id,
-            sender_name=sender_name,
+            chat_id=request.chat_id,
+            user_id=request.user_id,
+            sender_name=request.sender_name,
             scope_key=scope_key,
             settings=settings,
             provider=provider,
-            model=request.model,
+            model=llm_request.model,
             text=text,
-            stored_prompt=stored_prompt,
-            store_user_message=store_user_message,
-            trigger_auto_memory=trigger_auto_memory,
-            message_id=message_id,
-            normalized_quoted_text=normalized_quoted_text,
-            normalized_quoted_image_urls=normalized_quoted_image_urls,
-            normalized_forward_text=normalized_forward_text,
-            normalized_forward_image_urls=normalized_forward_image_urls,
+            stored_prompt=turn.stored_prompt,
+            store_user_message=request.store_user_message,
+            trigger_auto_memory=request.trigger_auto_memory,
+            message_id=request.message_id,
+            normalized_quoted_text=turn.quoted_text,
+            normalized_quoted_image_urls=turn.quoted_image_urls,
+            normalized_forward_text=forward_text,
+            normalized_forward_image_urls=turn.forward_image_urls,
             # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
             # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
             # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
-            image_descriptions=[d for d in image_descriptions if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)] or None,
+            image_descriptions=[
+                d for d in image_descriptions
+                if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)
+            ] or None,
             tool_context=tool_context,
             recorder_rows_written=recorder is not None,
         )
@@ -1793,9 +1430,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         message_id: str | None = None,
         include_recent_images: bool = False,
         mentioned_qq_ids: list[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> ReplyResult:
         with usage_scope("chat", group_id=str(group_id)):
-            return await self._generate_reply_for_scope(
+            return await self._generate_reply_for_scope(ChatTurnRequest(
                 chat_id=group_id,
                 chat_type="group",
                 user_id=user_id,
@@ -1819,7 +1456,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 delivery_sink=delivery_sink,
                 trigger_kind=trigger_kind,
                 mentioned_qq_ids=mentioned_qq_ids,
-            )
+            ))
 
     async def generate_private_reply(
         self,
@@ -1845,9 +1482,9 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
         message_id: str | None = None,
         include_recent_images: bool = False,
         mentioned_qq_ids: list[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> ReplyResult:
         with usage_scope("chat"):
-            return await self._generate_reply_for_scope(
+            return await self._generate_reply_for_scope(ChatTurnRequest(
                 chat_id=user_id,
                 chat_type="private",
                 user_id=user_id,
@@ -1871,7 +1508,7 @@ class LLMService(ScopeMixin, ToolMixin, McpLifecycleMixin, DrawSvgToolMixin, Sch
                 delivery_sink=delivery_sink,
                 trigger_kind=trigger_kind,
                 mentioned_qq_ids=mentioned_qq_ids,
-            )
+            ))
 
 
 _llm_service: LLMService | None = None
@@ -1904,4 +1541,7 @@ def get_llm_service() -> LLMService:
             _llm_service.vocab_path = LLM_VOCAB_YAML_PATH  # type: ignore[attr-defined]
             _llm_service._group_vocabs = OrderedDict()  # type: ignore[attr-defined]
             _llm_service.store = None  # type: ignore[attr-defined]
+            # 闸门在 generate_reply 链路上先于 load_error 优雅返回被访问，
+            # 降级实例缺这个属性会把优雅降级变成 AttributeError。
+            _llm_service._scope_gate = ScopeGate()  # type: ignore[attr-defined]
     return _llm_service  # type: ignore[return-value]

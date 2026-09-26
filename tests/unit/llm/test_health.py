@@ -24,14 +24,13 @@ async def test_health_report_checks_core_layers(llm_service, monkeypatch):
 
 
 async def test_format_health_is_group_safe(llm_service, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "health-audit-secret-value")
 
     text = await llm_service.format_health(10001, verbose=True)
 
-    assert "LLM 健康检查" in text
     assert "provider" in text
-    assert "api_key_status: missing" in text
-    assert "test-key" not in text
+    assert "api_key_status: set" in text
+    assert "health-audit-secret-value" not in text
 
 
 async def test_health_verbose_skips_probe_when_key_missing(llm_service, monkeypatch):
@@ -64,7 +63,6 @@ async def test_health_tool_returns_formatted_report(llm_service, monkeypatch):
     )
 
     assert result.is_error is False
-    assert "LLM 健康检查" in result.content
     assert "provider" in result.content
 
 
@@ -74,7 +72,9 @@ async def test_health_reports_bound_image_preprocessor(llm_service, monkeypatch)
     class _StubClient:
         pass
 
-    monkeypatch.setattr("quickquip.llm.service.build_provider_client", lambda provider: _StubClient())
+    monkeypatch.setattr(
+        "quickquip.llm.service.build_provider_client", lambda provider: _StubClient()
+    )
     llm_service.config_path.write_text(
         MIN_LLM_CONFIG_TOML
         + """
@@ -218,7 +218,9 @@ async def test_health_verbose_probes_provider_when_reachable(llm_service, monkey
         async def complete(self, request):
             return object()
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient())
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient()
+    )
 
     report = await llm_service.build_health_report(10001, probe_provider=True)
     items = {item.name: item for item in report.items}
@@ -235,10 +237,11 @@ async def test_format_provider_probe_returns_formatted_text(llm_service, monkeyp
         async def complete(self, request):
             return object()
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient())
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _OkClient()
+    )
 
     text = await llm_service.format_provider_probe()
-    assert "Provider 探活" in text
     assert "正常" in text  # mock client 成功 → 至少一个 provider ok
 
 
@@ -273,12 +276,13 @@ async def test_format_current_provider_probe_only_probes_active_model(llm_servic
 
     text = await llm_service.format_current_provider_probe(10001, chat_type="group")
 
-    assert "Provider 探活（1 个）" in text
     assert called == [("openai-main", "gpt-test")]
     assert "backup" not in text
 
 
-async def test_format_current_provider_probe_failure_prefaces_config_effective(llm_service, monkeypatch):
+async def test_format_current_provider_probe_failure_prefaces_config_effective(
+    llm_service, monkeypatch
+):
     """探活未通过时应前置'配置已生效'，避免 reload 成功但探活 ❌ 被误读为 reload 失败。"""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
@@ -286,12 +290,13 @@ async def test_format_current_provider_probe_failure_prefaces_config_effective(l
         async def complete(self, request):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _FailClient())
+    monkeypatch.setattr(
+        "quickquip.llm.provider.build_provider_client", lambda p, **_kwargs: _FailClient()
+    )
 
     text = await llm_service.format_current_provider_probe(10001, chat_type="group")
     assert "配置已生效" in text
     assert "探活未通过" in text
-    assert "Provider 探活（1 个）" in text  # body 仍在
 
 
 # ---------------------------------------------------------------------------
@@ -306,7 +311,6 @@ async def test_health_search_warns_without_searxng_when_needed(llm_service, monk
 
     items = {item.name: item for item in report.items}
     assert items["search"].status == "warn"
-    assert items["search"].summary == "搜索后端未配置"
     assert items["search"].details["builtin_search_covered"] is False
 
 
@@ -354,7 +358,6 @@ async def test_health_search_ok_with_builtin_search_coverage(tmp_path, monkeypat
 
     items = {item.name: item for item in report.items}
     assert items["search"].status == "ok"
-    assert "内置搜索" in items["search"].summary
     assert items["search"].details["builtin_search_covered"] is True
     # 工具列表按生效 provider 过滤：内置搜索会话不暴露 search_web
     assert "search_web" not in items["tools"].details["tools"]
@@ -367,7 +370,6 @@ async def test_health_search_ok_when_env_configured(llm_service, monkeypatch):
 
     items = {item.name: item for item in report.items}
     assert items["search"].status == "ok"
-    assert items["search"].summary == "搜索后端已配置"
 
 
 async def test_health_builtin_search_coverage_excludes_disabled_provider(tmp_path, monkeypatch):

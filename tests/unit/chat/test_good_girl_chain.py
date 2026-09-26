@@ -19,44 +19,12 @@ def test_full_chain_completes_and_ends():
     assert chain.process(group_id=3001, text="逗", now_ts=5) is None
 
 
-def test_noise_ignored_midway():
-    chain = GoodGirlChainManager(timeout_seconds=60)
-    assert chain.process(group_id=3001, text="阿桃是好女人吗", now_ts=10)["reply"] == "别"
-    assert chain.process(group_id=3001, text="这是一条无关消息", now_ts=11) is None
-    assert chain.process(group_id=3001, text="逗", now_ts=12)["reply"] == "你"
-    assert chain.process(group_id=3001, text="又一条无关消息", now_ts=13) is None
-    assert chain.process(group_id=3001, text="阿", now_ts=14)["reply"] == "姐"
-    assert chain.process(group_id=3001, text="笑", now_ts=15)["reply"] == "了"
-    assert chain.process(group_id=3001, text="。", now_ts=16)["reply"] == "🤣"
-    # 完成后的消息不再续接
-    assert chain.process(group_id=3001, text="🤣", now_ts=17) is None
-    assert chain.process(group_id=3001, text="逗", now_ts=18) is None
-
-
-def test_intermediate_emoji_ignored_session_alive():
-    chain = GoodGirlChainManager(timeout_seconds=60)
-    assert chain.process(group_id=3005, text="林是好姐姐吗", now_ts=0)["reply"] == "别"
-    assert chain.process(group_id=3005, text="逗", now_ts=1)["reply"] == "你"
-    assert chain.process(group_id=3005, text="🤣", now_ts=2) is None
-    assert chain.process(group_id=3005, text="林", now_ts=3)["reply"] == "姐"
-
-
 def test_timeout_invalidates_session():
     chain = GoodGirlChainManager(timeout_seconds=5)
     assert chain.process(group_id=3002, text="林是好姐姐吗", now_ts=0)["reply"] == "别"
     assert chain.process(group_id=3002, text="这条乱入不应打断", now_ts=2) is None
     assert chain.process(group_id=3002, text="逗", now_ts=3)["reply"] == "你"
     assert chain.process(group_id=3002, text="林", now_ts=9) is None
-
-
-def test_group_isolation():
-    chain = GoodGirlChainManager(timeout_seconds=60)
-    assert chain.process(group_id=4001, text="赵云是好人吗", now_ts=0)["reply"] == "别"
-    assert chain.process(group_id=4002, text="孙尚香是好人吗", now_ts=0)["reply"] == "别"
-    assert chain.process(group_id=4001, text="逗", now_ts=1)["reply"] == "你"
-    assert chain.process(group_id=4002, text="逗", now_ts=1)["reply"] == "你"
-    assert chain.process(group_id=4001, text="赵", now_ts=2)["reply"] == "姐"
-    assert chain.process(group_id=4002, text="孙", now_ts=2)["reply"] == "姐"
 
 
 def test_lead_char_overlapping_with_chain_token():

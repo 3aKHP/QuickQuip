@@ -38,8 +38,19 @@ from quickquip.app.message_pipeline import is_self_message as _is_self_message
 logger = logging.getLogger(__name__)
 
 
-def _remember_recent_message(group_id, user_id, sender_name: str, canonical_name: str, rendered_text: str, message_id: str = "", image_urls: list[str] | None = None) -> None:
-    recent_messages.add_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id=message_id, image_urls=image_urls)
+def _remember_recent_message(
+    group_id,
+    user_id,
+    sender_name: str,
+    canonical_name: str,
+    rendered_text: str,
+    message_id: str = "",
+    image_urls: list[str] | None = None,
+) -> None:
+    recent_messages.add_message(
+        group_id, user_id, sender_name, canonical_name, rendered_text,
+        message_id=message_id, image_urls=image_urls,
+    )
 
 
 def collect_at_qq_ids(message) -> list[str]:
@@ -135,7 +146,10 @@ def register_message_matcher(on_message, Message, MessageSegment):
 
     @matcher.handle()
     async def _(bot, event):
-        if getattr(event, "group_id", None) is None or getattr(event, "message_type", "") == "private":
+        if (
+            getattr(event, "group_id", None) is None
+            or getattr(event, "message_type", "") == "private"
+        ):
             return
         if _is_self_message(event):
             _archive_self_message(event)
@@ -193,7 +207,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             message_id=message_id or None,
             image_urls=rendered_message.image_urls,
         )
-        awakening_state.record_message(group_id, user_id)
+        awakening_state.record_message(group_id)
 
         pending = offline_message_store.pop_pending(group_id, user_id)
         if pending:
@@ -246,8 +260,14 @@ def register_message_matcher(on_message, Message, MessageSegment):
             mention_names=mention_names,
         )
         if llm_input is not None and rule_switch.is_enabled(group_id, "llm_chat"):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
-            if not roll_reply("llm_chat", group_id=group_id) or not rate_limiter.allow("llm_chat", user_id):
+            _remember_recent_message(
+                group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
+                image_urls=rendered_message.image_urls,
+            )
+            if (
+                not roll_reply("llm_chat", group_id=group_id)
+                or not rate_limiter.allow("llm_chat", user_id)
+            ):
                 return
             from quickquip.llm.agent_records import TriggerKind
 
@@ -290,7 +310,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 user_id=user_id,
                 incoming_message_id=message_id,
                 incoming_preview=rendered_text,
-                reply_preview=result["reply"] or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
+                reply_preview=result["reply"]
+                or (delivery_sink.sent_texts[-1][:120] if delivery_sink.sent_texts else ""),
                 llm_used=bool(result.get("llm_used")),
                 provider_id=str(result.get("provider_id", "")),
                 model=str(result.get("model", "")),
@@ -299,8 +320,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 # 逐 Turn 模式正文已由 sink 交付（reply 为空），此处只处理
                 # 最终单发/错误提示路径，避免二次发送（§10）。
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
-                    resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
-                    sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                    resp = await matcher.send(
+                        build_llm_reply_message(result, Message, MessageSegment)
+                    )
+                    sent_msg_id = (
+                        str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                    )
                     record_final_receipt(svc, result, sent_msg_id)
             return
 
@@ -319,11 +344,21 @@ def register_message_matcher(on_message, Message, MessageSegment):
             llm_settings,
             svc,
             rule_enabled=lambda rule_name: rule_switch.is_enabled(group_id, rule_name),
-            rate_available=lambda rule_name: rate_limiter.can_allow(rule_name, user_id, group_id=group_id),
+            rate_available=lambda rule_name: rate_limiter.can_allow(
+                rule_name, user_id, group_id=group_id
+            ),
         )
         if awakening_result and rule_switch.is_enabled(group_id, awakening_result.rule_name):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
-            if not roll_reply(awakening_result.rule_name, group_id=group_id) or not rate_limiter.allow(awakening_result.rule_name, user_id, group_id=group_id):
+            _remember_recent_message(
+                group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
+                image_urls=rendered_message.image_urls,
+            )
+            if (
+                not roll_reply(awakening_result.rule_name, group_id=group_id)
+                or not rate_limiter.allow(
+                    awakening_result.rule_name, user_id, group_id=group_id
+                )
+            ):
                 return
             # trigger_context was captured before the current message was stored,
             # so the passive prompt's user text stays the only copy of it.
@@ -347,11 +382,15 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 prompt=build_awakening_prompt(awakening_result, passive_image_urls),
                 image_urls=passive_image_urls,
                 include_recent_images=allows_recent_images(awakening_result.rule_name),
-                raw_user_text=build_passive_trigger_raw_user_text(awakening_result, passive_image_urls),
+                raw_user_text=build_passive_trigger_raw_user_text(
+                    awakening_result, passive_image_urls
+                ),
                 message_id=message_id or None,
                 mentioned_qq_ids=list(rendered_message.mentioned_qq_ids),
             )
-            stats_tracker.record_trigger(group_id, awakening_result.rule_name)
+            if not result.get("cancelled_reason"):
+                # 排队超耐心取消的轮零生成零发送，不计触发现值统计
+                stats_tracker.record_trigger(group_id, awakening_result.rule_name)
             awakening_state.bot_messages.add(group_id, result["reply"])
             with bot_action_trace(
                 trigger_kind="awakening",
@@ -363,15 +402,20 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 user_id=user_id,
                 incoming_message_id=message_id,
                 incoming_preview=rendered_text,
-                reply_preview=result["reply"] or (passive_sink.sent_texts[-1][:120] if passive_sink.sent_texts else ""),
+                reply_preview=result["reply"]
+                or (passive_sink.sent_texts[-1][:120] if passive_sink.sent_texts else ""),
                 llm_used=bool(result.get("llm_used")),
                 provider_id=str(result.get("provider_id", "")),
                 model=str(result.get("model", "")),
                 source="group_message.awakening",
             ):
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
-                    resp = await matcher.send(build_llm_reply_message(result, Message, MessageSegment))
-                    sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                    resp = await matcher.send(
+                        build_llm_reply_message(result, Message, MessageSegment)
+                    )
+                    sent_msg_id = (
+                        str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                    )
                     record_final_receipt(svc, result, sent_msg_id)
             return
 
@@ -384,7 +428,10 @@ def register_message_matcher(on_message, Message, MessageSegment):
             repeat_fingerprint=repeat_fingerprint,
         )
         if not result:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
+            _remember_recent_message(
+                group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
+                image_urls=rendered_message.image_urls,
+            )
             return
         reply_message = _build_rule_reply_message(
             result,
@@ -393,15 +440,24 @@ def register_message_matcher(on_message, Message, MessageSegment):
             MessageSegment,
         )
         if reply_message is None:
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
+            _remember_recent_message(
+                group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
+                image_urls=rendered_message.image_urls,
+            )
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id, group_id=group_id):
-            _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
+            _remember_recent_message(
+                group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
+                image_urls=rendered_message.image_urls,
+            )
             return
 
         stats_tracker.record_trigger(group_id, result.get("rule_name", "unknown"))
 
-        _remember_recent_message(group_id, user_id, sender_name, canonical_name, rendered_text, message_id, image_urls=rendered_message.image_urls)
+        _remember_recent_message(
+            group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
+            image_urls=rendered_message.image_urls,
+        )
         with bot_action_trace(
             trigger_kind=str(result.get("trigger_kind", "rule")),
             reason_code=str(result.get("reason_code", result.get("rule_name", "unknown"))),

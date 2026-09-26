@@ -88,8 +88,9 @@ class RecorderConfig:
 class TurnRecorder:
     """单 Loop 的记录器：由 service 持有，tool_loop 通过钩子驱动。
 
-    不做 scope 排队（沿用入口限流）；generation 屏障由 store 写入校验
-    兜底（ScopeGenerationMismatch → Loop 关闭为 interrupted）。
+    scope 串行已由入口 ScopeGate（service_parts/scope_gate.py）保证；
+    generation 屏障由 store 写入校验兜底（ScopeGenerationMismatch →
+    Loop 关闭为 interrupted）。
     """
 
     def __init__(
@@ -327,7 +328,9 @@ class TurnRecorder:
             if receipt.status == DeliveryStatus.SENT and receipt.message_id:
                 self._store.set_first_chunk_message_id(record.message_row_id, receipt.message_id)
             self._store.finish_delivery(attempt, receipt)
-            self._delivery_stats[str(receipt.status)] = self._delivery_stats.get(str(receipt.status), 0) + 1
+            self._delivery_stats[str(receipt.status)] = (
+                self._delivery_stats.get(str(receipt.status), 0) + 1
+            )
             self._delivery_count += 1
             if receipt.status in (DeliveryStatus.FAILED, DeliveryStatus.UNKNOWN):
                 # D3：终止当前 Loop 后续生成、工具启动和交付。

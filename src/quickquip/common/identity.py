@@ -225,7 +225,11 @@ class IdentityIndex:
         for entry in self.entries:
             remaining = [q for q in entry.qq_ids if q not in overridden]
             if remaining:
-                entries.append(IdentityEntry(entry.canonical_name, remaining, list(entry.aliases), entry.note))
+                entries.append(
+                    IdentityEntry(
+                        entry.canonical_name, remaining, list(entry.aliases), entry.note
+                    )
+                )
         result = IdentityIndex(entries=[*entries, *other.entries])
         result._build_indexes()
         return result

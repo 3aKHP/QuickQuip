@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from quickquip.llm.skills import (
+    ACTIVATE_SKILL_TOOL_NAME,
+    READ_SKILL_RESOURCE_TOOL_NAME,
+    RUN_SKILL_SCRIPT_TOOL_NAME,
+    SEARCH_SKILL_RESOURCES_TOOL_NAME,
+)
+
 # ── scope / history limits ──────────────────────────────────────────
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
@@ -14,6 +21,7 @@ MAX_STORED_CONVERSATION_MESSAGES = 2048
 # ``service.py`` (tool-discovery policy + tool-loop invocation) and
 # ``service_parts/tools.py`` (builtin tool registration). Previously
 # these were duplicated byte-for-byte in both modules.
+# Skill 工具名定义在 llm/skills/tools/ 各工具模块，此处统一 re-export。
 SEARCH_TOOL_NAME = "search_web"
 TOOL_SEARCH_NAME = "tool_search"
 TOOL_LIST_NAME = "tool_list"
@@ -26,6 +34,7 @@ DEFAULT_ALWAYS_LOADED_TOOLS = [
     "get_identity",
     "list_memories",
     SEARCH_TOOL_NAME,
+    ACTIVATE_SKILL_TOOL_NAME,
 ]
 DEFAULT_ENABLED_TOOLS = [
     TOOL_SEARCH_NAME,
@@ -39,4 +48,16 @@ DEFAULT_ENABLED_TOOLS = [
     "get_llm_status",
     "get_current_model",
     "get_health_status",
+    ACTIVATE_SKILL_TOOL_NAME,
+    READ_SKILL_RESOURCE_TOOL_NAME,
+    SEARCH_SKILL_RESOURCES_TOOL_NAME,
+    RUN_SKILL_SCRIPT_TOOL_NAME,
 ]
+
+# ── scope gate queue policy（设计 §5.2「过期被动触发按现有策略取消」）────
+# 被动类触发（群被动唤醒 / 无聊唤醒）在闸门后的排队预算：超时即取消
+# 本轮（空回复、不调 LLM、不发送）。聊天节奏下普通轮次持有 2–15s，
+# 预算给足四倍余量；只有排到长生成（原生生图 4–7 分钟）后才会触发
+# 取消——彼时再插话已是过期噪音。主动 @/前缀、私聊与定时触发不受
+# 限制：用户明确要答案或计划任务按点发话，晚到也要发。
+PASSIVE_TRIGGER_QUEUE_PATIENCE_S = 60.0

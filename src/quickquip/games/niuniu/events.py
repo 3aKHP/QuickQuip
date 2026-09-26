@@ -319,7 +319,8 @@ FENCE_EVENTS = [
             "🪓 牛头人断头台！对方牛牛被斩落 {loss} cm，你增长了 {gain} cm！",
         ],
         "sever_neg": [
-            "👹 牛头人支配！你击穿了对方的防线！深度从 {old_oppo} 翻倍至 {new_oppo} cm！你吸收 {gain} cm！",
+        "👹 牛头人支配！你击穿了对方的防线！"
+        "深度从 {old_oppo} 翻倍至 {new_oppo} cm！你吸收 {gain} cm！",
             "深渊之力！牛头人的一击让对方的凹度暴增至 {new_oppo} cm！你获得 {gain} cm！",
         ],
         "severed_pos": [

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from quickquip.generation.audio import generate_audio
 from quickquip.generation.config import AudioModelConfig, AudioProviderConfig
+from quickquip.generation.errors import GenerationProviderError
 
 
 def test_generate_audio_openai_tts(monkeypatch):
@@ -95,15 +98,13 @@ def test_generate_audio_openai_tts_empty_response(monkeypatch):
     monkeypatch.setattr("quickquip.generation.audio._http_raw_bytes", fake_http_raw_bytes)
 
     provider = AudioProviderConfig(
-        id="local-openai-tts", protocol="openai_tts", base_url="http://127.0.0.1:8000/v1", api_key_env=""
+        id="local-openai-tts", protocol="openai_tts",
+        base_url="http://127.0.0.1:8000/v1", api_key_env="",
     )
     model = AudioModelConfig(id="local-tts", model="tts-1", voice_id="alloy", format="mp3")
 
-    try:
+    with pytest.raises(GenerationProviderError):
         asyncio.run(generate_audio(model, provider, "测试"))
-        assert False, "应抛出空响应错误"
-    except Exception as exc:
-        assert "空响应" in str(exc)
 
 
 def test_generate_audio_openai_tts_strips_double_underscore_keys(monkeypatch):

@@ -161,10 +161,11 @@ async def test_no_retry_on_other_4xx(captured_delays):
 
 async def test_exhaustion_raises_last_error(captured_delays):
     config = _config(retry_max_attempts=3, retry_base_delay=0.25, retry_jitter=0.0)
-    exc = LLMProviderError("HTTP 429 rate limited", status_code=429)
-    client = FlakyFakeClient(config, [exc, exc, exc])
-    with pytest.raises(LLMProviderError):
+    errors = [LLMProviderError(f"attempt {i}", status_code=429) for i in range(3)]
+    client = FlakyFakeClient(config, errors)
+    with pytest.raises(LLMProviderError) as exc:
         await client.complete(_req())
+    assert exc.value is errors[-1]
     assert client.calls == 3
     assert captured_delays == [0.25, 0.5]
 
@@ -197,7 +198,9 @@ async def test_stream_retryable_error_retries_without_non_stream_fallback(captur
 async def test_stream_non_retryable_error_propagates_without_fallback(captured_delays):
     # except LLMProviderError: raise —— 4xx 既不重试也不回退非流式
     config = _config(retry_max_attempts=3, retry_base_delay=0.25, retry_jitter=0.0)
-    client = StreamScriptedClient(config, [LLMProviderError("HTTP 401 unauthorized", status_code=401)])
+    client = StreamScriptedClient(
+        config, [LLMProviderError("HTTP 401 unauthorized", status_code=401)]
+    )
     with pytest.raises(LLMProviderError):
         await client.complete(_req())
     assert client.stream_calls == 1
@@ -220,7 +223,10 @@ async def test_stream_generic_failure_falls_back_to_non_stream(captured_delays):
 async def test_absorbed_failures_record_single_ok_usage(monkeypatch, captured_delays):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
         calls.append((state, response is not None))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -234,7 +240,10 @@ async def test_absorbed_failures_record_single_ok_usage(monkeypatch, captured_de
 async def test_exhausted_retries_record_single_error_usage(monkeypatch, captured_delays):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
         calls.append((state, response is not None))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)

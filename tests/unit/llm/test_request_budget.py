@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import pytest
 
-from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config import (
+    AGENT_REPLAY_LOOP_TOKENS_CEILING, AGENT_REPLAY_LOOP_TOKENS_FLOOR,
+    LLMConfig, ProviderConfig,
+)
 from quickquip.llm.context_windows import (
     lookup_builtin_context_window,
     resolve_context_window,
@@ -20,7 +23,7 @@ from quickquip.llm.request_budget import (
 )
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.token_estimate import (
-    estimate_tokens,
+    NATIVE_MEDIA_FLAT_TOKENS, estimate_tokens,
 )
 
 
@@ -66,17 +69,23 @@ def test_estimate_request_tokens_counts_native_content():
 def test_estimate_request_tokens_counts_thinking_blocks():
     thinking = "理" * 2000
     msg = LLMConversationMessage(
-        role="assistant", content="", thinking_blocks=[{"type": "reasoning", "reasoning_content": thinking}]
+        role="assistant", content="",
+        thinking_blocks=[{"type": "reasoning", "reasoning_content": thinking}],
     )
     base = estimate_request_tokens(_request([LLMConversationMessage(role="assistant", content="")]))
     assert estimate_request_tokens(_request([msg])) >= base + estimate_tokens(thinking)
 
 
 def test_estimate_request_tokens_media_not_double_counted_in_native():
-    # 精确断言：1200 媒体固定档 + 8 结构开销，base64 全量计入会被立刻检出。
-    media_block = {"inlineData": {"mimeType": "image/png", "data": "A" * 100_000}}
-    msg = LLMConversationMessage(role="user", content="", native_content=[media_block])
-    assert estimate_request_tokens(_request([msg])) == 1200 + 8
+    def measured(data):
+        media_block = {"inlineData": {"mimeType": "image/png", "data": data}}
+        msg = LLMConversationMessage(role="user", content="", native_content=[media_block])
+        return estimate_request_tokens(_request([msg]))
+
+    empty = LLMConversationMessage(role="user", content="", native_content=[{}])
+    overhead = estimate_request_tokens(_request([empty]))
+    assert measured("A" * 100_000) == measured("A")
+    assert measured("A") - overhead == NATIVE_MEDIA_FLAT_TOKENS
 
 
 def test_count_wire_items_counts_native_and_thinking_parts():
@@ -86,7 +95,9 @@ def test_count_wire_items_counts_native_and_thinking_parts():
         thinking_blocks=[{"type": "reasoning", "reasoning_content": "x"}],
         native_content=[{"type": "text", "text": "a"}, {"type": "text", "text": "b"}],
     )
-    assert count_wire_items(_request([msg])) == 4  # 1 消息 + 1 thinking + 2 native parts
+    # 原生路径单计：正文/thinking 已内含于 native 块（serializer 原样发送、
+    # 忽略通用字段），与 estimate_request_tokens 的单计口径一致。
+    assert count_wire_items(_request([msg])) == 3  # 1 消息 + 2 native parts
 
 
 # ── 窗口解析 ─────────────────────────────────────────────────────
@@ -116,20 +127,26 @@ def test_resolve_input_budget_provider_explicit_wins():
 def test_resolve_input_budget_window_derived_when_known():
     config = LLMConfig()
     provider = _provider(model_context_windows={"custom-model-x": 262_144})
-    # 窗口 − (max_output 800 + 1024)
-    assert resolve_input_budget(config, provider, "custom-model-x") == 262_144 - 800 - 1024
+    # 窗口扣除输出预算与安全预留。
+    assert resolve_input_budget(config, provider, "custom-model-x") == (
+        262_144 - provider.max_output_tokens - 1024
+    )
 
 
 def test_resolve_input_budget_runtime_default_when_unknown():
     config = LLMConfig()
     provider = _provider()
-    assert resolve_input_budget(config, provider, "custom-model-x") == 96_000
+    assert resolve_input_budget(config, provider, "custom-model-x") == (
+        config.runtime.request_input_token_budget
+    )
 
 
 def test_resolve_input_budget_window_can_shrink_below_runtime_default():
     config = LLMConfig()
     provider = _provider(model_context_windows={"custom-model-x": 60_000})
-    assert resolve_input_budget(config, provider, "custom-model-x") == 60_000 - 800 - 1024
+    assert resolve_input_budget(config, provider, "custom-model-x") == (
+        60_000 - provider.max_output_tokens - 1024
+    )
 
 
 # ── 重放预算推导 ─────────────────────────────────────────────────
@@ -144,16 +161,19 @@ def test_derive_replay_budget_provider_override_verbatim():
 def test_derive_replay_budget_unknown_window_keeps_runtime_value():
     config = LLMConfig()
     provider = _provider()
-    # capacity unknown：推导耗尽后落在 runtime 下限（4096），与旧行为一致。
-    assert derive_replay_budget(config, provider, "custom-model-x") == 4_096
+    # 未知容量的预算受运行时下限约束。
+    assert derive_replay_budget(config, provider, "custom-model-x") == (
+        config.runtime.agent_replay_loop_tokens
+    )
 
 
 def test_derive_replay_budget_scales_with_window():
     config = LLMConfig()
     provider_256k = _provider(model_context_windows={"custom-model-x": 262_144})
-    assert derive_replay_budget(config, provider_256k, "custom-model-x") > 100_000
+    small = derive_replay_budget(config, provider_256k, "custom-model-x")
     provider_1m = _provider(model_context_windows={"custom-model-x": 1_000_000})
-    assert derive_replay_budget(config, provider_1m, "custom-model-x") > 500_000
+    large = derive_replay_budget(config, provider_1m, "custom-model-x")
+    assert large > small > config.runtime.agent_replay_loop_tokens
 
 
 def test_derive_replay_budget_smaller_epoch_cap_frees_replay():
@@ -255,9 +275,9 @@ def test_estimate_request_tokens_no_double_count_for_native_messages():
 def test_derive_replay_budget_provider_override_clamped():
     config = LLMConfig()
     huge = _provider(agent_replay_loop_tokens=99_999_999)
-    assert derive_replay_budget(config, huge, "custom-model-x") == 4_194_304
+    assert derive_replay_budget(config, huge, "custom-model-x") == AGENT_REPLAY_LOOP_TOKENS_CEILING
     tiny = _provider(agent_replay_loop_tokens=1)
-    assert derive_replay_budget(config, tiny, "custom-model-x") == 512
+    assert derive_replay_budget(config, tiny, "custom-model-x") == AGENT_REPLAY_LOOP_TOKENS_FLOOR
 
 
 def test_builtin_table_conservative_entries():

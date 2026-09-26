@@ -128,7 +128,7 @@ def test_llm_task_generates_and_sends(monkeypatch, tmp_path):
     monkeypatch.setattr(
         mp, "rule_switch", types.SimpleNamespace(is_enabled=lambda gid, name: True)
     )
-    monkeypatch.setattr(awakening_mod, "_is_group_llm_enabled", lambda svc, gid: True)
+    monkeypatch.setattr(awakening_mod, "is_group_llm_enabled", lambda svc, gid: True)
 
     store = ScheduledMessageStore(tmp_path / "sm.json")
     store.add(

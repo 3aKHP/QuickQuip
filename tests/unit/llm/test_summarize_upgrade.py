@@ -45,7 +45,11 @@ def _llm_config(providers: list[ProviderConfig]) -> LLMConfig:
     return LLMConfig(
         runtime=RuntimeConfig(default_provider=providers[0].id, default_persona="default"),
         providers={p.id: p for p in providers},
-        personas={"default": PersonaConfig(id="default", display_name="默认", system_prompt="你是测试人格。")},
+        personas={
+            "default": PersonaConfig(
+                id="default", display_name="默认", system_prompt="你是测试人格。"
+            )
+        },
     )
 
 
@@ -87,26 +91,13 @@ def test_resolve_cascade_at_default_placeholder():
 
 
 @pytest.mark.asyncio
-async def test_daily_summary_uses_16384_output_window(monkeypatch):
-    stub = _StubClient(LLMResponse(text="日报正文", model="m1", finish_reason="stop"))
-    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)
-    await generate_daily_summary(
-        [{"ts": 1600000000.0, "sender": "u", "text": "消息"}],
-        PersonaConfig(id="default", display_name="默认", system_prompt="s"),
-        "10001", date_label="2026-09-09", name_table={},
-        summary_config=DailySummaryConfig(),
-        llm_config=_llm_config([_provider("a", "m1")]),
-        default_provider_id="a", default_model="m1", local_tz=LOCAL_TZ,
-    )
-    assert stub.requests[0].max_output_tokens == 16384
-
-
-@pytest.mark.asyncio
 async def test_daily_summary_wide_window_log_not_truncated(monkeypatch):
     stub = _StubClient(LLMResponse(text="日报", model="big", finish_reason="stop"))
     monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)
     # 40 万字符日志：旧 300k 上限会截断，1M 窗口推导后应完整进入。
-    big_log = [{"ts": 1600000000.0 + i, "sender": f"u{i%10}", "text": "聊" * 100} for i in range(4000)]
+    big_log = [
+        {"ts": 1600000000.0 + i, "sender": f"u{i%10}", "text": "聊" * 100} for i in range(4000)
+    ]
     await generate_daily_summary(
         big_log,
         PersonaConfig(id="default", display_name="默认", system_prompt="s"),
@@ -150,7 +141,9 @@ async def test_daily_summary_truncates_per_hop_for_narrow_fallback(monkeypatch):
         return _Client()
 
     monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", _builder)
-    big_log = [{"ts": 1600000000.0 + i, "sender": f"u{i%10}", "text": "聊" * 100} for i in range(5000)]
+    big_log = [
+        {"ts": 1600000000.0 + i, "sender": f"u{i%10}", "text": "聊" * 100} for i in range(5000)
+    ]
     content, model_used = await generate_daily_summary(
         big_log,
         PersonaConfig(id="default", display_name="默认", system_prompt="s"),

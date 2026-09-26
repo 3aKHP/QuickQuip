@@ -55,6 +55,7 @@ def _tool_exec(
     result: dict | None = None,
     arguments_json: str | None = '{"query":"镜子"}',
     retention: str = "bounded",
+    provider_call_id: str | None = None,
 ) -> LoadedToolExecution:
     if result is None and status == "succeeded":
         result = {
@@ -64,7 +65,7 @@ def _tool_exec(
     return LoadedToolExecution(
         execution_id=execution_id,
         call_index=int(execution_id.rsplit("_", 1)[-1]),
-        provider_call_id=f"call_{execution_id}",
+        provider_call_id=provider_call_id or f"call_{execution_id}",
         tool_name="get_identity",
         arguments_json=arguments_json,
         arguments_omission_reason=None,
@@ -136,6 +137,239 @@ GEMINI_PARTS = [
     {"text": "先查一下。"},
     {"functionCall": {"id": "gemini_tool_1", "name": "get_identity", "args": {"query": "镜子"}}},
 ]
+
+
+RESPONSES_OWNER = replace(OWNER, protocol="openai_responses")
+
+RESPONSES_OUTPUT_ITEMS = [
+    {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [{"type": "summary_text", "text": "需要先查询身份。"}],
+        "encrypted_content": "gAAAAABoGogL0EiS",
+    },
+    {
+        "type": "function_call",
+        "id": "fc_1",
+        "call_id": "call_resp_identity",
+        "name": "get_identity",
+        "arguments": '{"query":"镜子"}',
+    },
+]
+
+RESPONSES_FINAL_ITEMS = [
+    {
+        "type": "message",
+        "id": "msg_1",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": "镜子是群友。"}],
+    },
+]
+
+
+# ── OpenAI Responses：跨轮原生回放（PR-B） ───────────────────────
+
+
+def _responses_turn(turn_id: str, *, items, tools=(), owner=None, text="先查一下。"):
+    return _turn(
+        turn_id,
+        text=text,
+        tools=tools,
+        native_state=_native_state(owner, items),
+        owner=_owner_dict(owner) if owner else None,
+    )
+
+
+def test_responses_same_owner_replays_native_output_items():
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+            _responses_turn("turn_1", items=RESPONSES_FINAL_ITEMS, owner=RESPONSES_OWNER),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    assert result.decisions[0].path == PATH_NATIVE
+    assert result.decisions[0].reason is None
+    assistants = [m for m in result.messages if m.role == "assistant"]
+    # 原生批次逐字节回放：reasoning 密文、item id、顺序全部保持。
+    assert assistants[0].native_content == RESPONSES_OUTPUT_ITEMS
+    assert assistants[1].native_content == RESPONSES_FINAL_ITEMS
+    tool_messages = [m for m in result.messages if m.role == "tool"]
+    # 工具消息应答原生 function_call 的原 call_id（配对不重派生）。
+    assert tool_messages[0].tool_call_id == "call_resp_identity"
+
+
+def test_responses_owner_mismatch_degrades_to_structured():
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    # profile/端点/模型任一指纹变化都构成失配（切档位即降级）。
+    other = replace(RESPONSES_OWNER, profile_fingerprint="pf-other")
+    result = project_loops([loop], target=other, protocol="openai_responses")
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "owner_mismatch"
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content is None
+    # 通用重建不带原始 reasoning item（wire 无效果，纯预算虚增）。
+    assert not assistant.thinking_blocks
+    assert assistant.tool_calls[0].name == "get_identity"
+    assert assistant.tool_calls[0].id.startswith("call_")
+
+
+def test_responses_target_unknown_labelled_owner_unknown():
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops([loop], target=None, protocol="openai_responses")
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    # fallback_urls 等导致 target 缺失：与真失配分开标注（可观测不失真）。
+    assert decision.reason == "owner_unknown"
+
+
+def test_responses_reasoning_without_ciphertext_degrades_to_structured():
+    cipherless = [
+        {
+            "type": "reasoning",
+            "id": "rs_2",
+            "summary": [{"type": "summary_text", "text": "只有摘要。"}],
+        },
+        dict(RESPONSES_OUTPUT_ITEMS[1]),
+    ]
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=cipherless,
+                tools=(_tool_exec("exec_0"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    # store:false 回放要求 reasoning 带密文；缺失即不具回放资格。responses
+    # 的通用重建不依赖原生块 → structured（区别于 claude/gemini 的档案先例）。
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_structure_invalid"
+    # owner 匹配下走空集 thinking 过滤：原始 reasoning item 不入 thinking_blocks
+    # （responses 序列化端不消费该字段，装入只会虚增预算计量）。
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert not assistant.thinking_blocks
+
+
+def test_responses_unknown_item_type_invalid():
+    blocks = [
+        dict(RESPONSES_OUTPUT_ITEMS[0]),
+        {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+    ]
+    loop = _loop(
+        "loop_1",
+        (_responses_turn("turn_0", items=blocks, owner=RESPONSES_OWNER),),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    assert result.decisions[0].path == PATH_STRUCTURED
+    assert result.decisions[0].reason == "native_structure_invalid"
+
+
+def test_responses_cross_loop_call_id_collision_demotes_later_loop():
+    first = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    # 中转回显短 id：跨 Loop 重复声明同一 call_id。
+    second = _loop(
+        "loop_2",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [first, second], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    assert result.decisions[0].path == PATH_NATIVE
+    decision = result.decisions[1]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_call_id_collision"
+    # 后到 Loop 重投影为 stable wire id（构造性唯一），配对自洽。
+    second_tool = [m for m in result.segments["loop_2"] if m.role == "tool"][0]
+    assert second_tool.tool_call_id != "call_resp_identity"
+    assert second_tool.tool_call_id.startswith("call_")
+
+
+def test_responses_native_pairing_mismatch_demotes_loop():
+    # 原生批次声明两个 function_call，执行记录只剩一个（记录部分损坏）。
+    twin_calls = [
+        dict(RESPONSES_OUTPUT_ITEMS[0]),
+        dict(RESPONSES_OUTPUT_ITEMS[1]),
+        {
+            "type": "function_call",
+            "id": "fc_2",
+            "call_id": "call_resp_second",
+            "name": "get_identity",
+            "arguments": '{"query":"4s"}',
+        },
+    ]
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=twin_calls,
+                tools=(_tool_exec("exec_0"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_pairing_incomplete"
 
 
 # ── 同 owner：原生路径 ─────────────────────────────────────────────
@@ -255,8 +489,8 @@ def test_structured_path_disambiguates_duplicate_provider_call_ids():
     loop = _loop(
         "loop_1",
         (
-            _turn("turn_0", tools=(_tool_exec("exec_0"),)),
-            _turn("turn_1", tools=(_tool_exec("exec_1"),)),
+            _turn("turn_0", tools=(_tool_exec("exec_0", provider_call_id="duplicate"),)),
+            _turn("turn_1", tools=(_tool_exec("exec_1", provider_call_id="duplicate"),)),
         ),
     )
     result = project_loops([loop], target=None, protocol="openai")
@@ -387,3 +621,132 @@ def test_wire_model_resolution_honors_extra_body_override():
     assert resolve_wire_model(config, "display-a") == "display-a"
     config.extra_body = {"model": "wire-b"}
     assert resolve_wire_model(config, "display-a") == "wire-b"
+
+
+# ── 守门细化（Deep-CR：Loop 内冲突与混合 Turn） ────────────────────
+
+
+def test_responses_intra_loop_duplicate_call_id_demotes():
+    """同一 Loop 内两个 Turn 的原生批次重复声明同一 call_id（中转回显
+    短 id 的现实形态）：降 structured，不让序列化期 fail-closed 炸请求。"""
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+            _responses_turn(
+                "turn_1",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_1", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "native_call_id_collision"
+    for message in result.messages:
+        assert message.native_content is None
+
+
+def test_responses_mixed_native_structured_turns_stay_native():
+    """同 Loop 内个别 Turn 无原生副本（字节超限省略/撤回清理）：该 Turn
+    退通用表达并经自身 tool_calls 声明，其余 Turn 保持原生——守门的
+    声明全集与序列化端同构，不误报配对不完整。"""
+    loop = _loop(
+        "loop_1",
+        (
+            _responses_turn(
+                "turn_0",
+                items=RESPONSES_OUTPUT_ITEMS,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),
+            _turn(
+                "turn_1",
+                text="第二转正文。",
+                tools=(_tool_exec("exec_1"),),
+            ),
+        ),
+    )
+    result = project_loops(
+        [loop], target=RESPONSES_OWNER, protocol="openai_responses"
+    )
+    decision = result.decisions[0]
+    assert decision.path == PATH_NATIVE
+    assert decision.reason is None
+    assistants = [m for m in result.messages if m.role == "assistant"]
+    assert assistants[0].native_content == RESPONSES_OUTPUT_ITEMS
+    assert assistants[1].native_content is None
+    assert assistants[1].tool_calls, "无原生副本的 Turn 走通用重建"
+    # 各 Turn 的声明/应答自成配对：原生 call_id 与 stable wire id 互不串扰。
+    tool_ids = [m.tool_call_id for m in result.messages if m.role == "tool"]
+    assert "call_resp_identity" in tool_ids
+    assert len(tool_ids) == 2 and len(set(tool_ids)) == 2
+
+
+def test_responses_multiple_native_loops_distinct_ids_all_native():
+    first_items = RESPONSES_OUTPUT_ITEMS
+    second_items = [
+        {
+            "type": "reasoning",
+            "id": "rs_9",
+            "summary": [],
+            "encrypted_content": "gAAA-second-cipher",
+        },
+        {
+            "type": "function_call",
+            "id": "fc_9",
+            "call_id": "call_resp_nine",
+            "name": "get_identity",
+            "arguments": '{"query":"4s"}',
+        },
+    ]
+    loops = [
+        _loop(
+            "loop_1",
+            (_responses_turn(
+                "turn_0", items=first_items,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                owner=RESPONSES_OWNER,
+            ),),
+        ),
+        _loop(
+            "loop_2",
+            (_responses_turn(
+                "turn_0", items=second_items,
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_nine"),),
+                owner=RESPONSES_OWNER,
+            ),),
+        ),
+    ]
+    result = project_loops(loops, target=RESPONSES_OWNER, protocol="openai_responses")
+    assert [d.path for d in result.decisions] == [PATH_NATIVE, PATH_NATIVE]
+    assert all(d.reason is None for d in result.decisions)
+
+
+@pytest.mark.parametrize("protocol", ["claude", "gemini", "openai"])
+def test_owner_unknown_label_applies_across_protocols(protocol):
+    """target 缺失（fallback_urls 等）+ 有原生副本：与真失配分开标注，
+    三个既有协议同享该标签语义（仅日志面，投影行为不变）。"""
+    owner = replace(OWNER, protocol=protocol)
+    blocks = [
+        {"type": "thinking", "thinking": "想", "signature": "sig"},
+        {"type": "text", "text": "答"},
+    ]
+    loop = _loop(
+        "loop_1",
+        (_turn("turn_0", native_state=_native_state(owner, blocks),
+               owner=_owner_dict(owner)),),
+    )
+    result = project_loops([loop], target=None, protocol=protocol)
+    decision = result.decisions[0]
+    assert decision.path == PATH_STRUCTURED
+    assert decision.reason == "owner_unknown"

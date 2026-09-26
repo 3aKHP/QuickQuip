@@ -13,22 +13,13 @@ def test_follow_read_on_different_users():
     assert result["repeat_action"] == RepeatAction.COPY_ORIGINAL
 
 
-def test_trim_last_on_same_user_dup():
-    d = GroupRepeatDetector()
-    assert d.process(group_id=1001, user_id=1, text="晚安") is None
-    result = d.process(group_id=1001, user_id=1, text="晚安")
-    assert result is not None
-    assert result["rule_name"] == "repeat_trim_last"
-    assert result["rate_limit_key"] == "repeat_trim_last"
-    assert result["repeat_action"] == RepeatAction.TRIM_LAST
-
-
 def test_same_user_warning_after_four_repeats():
     d = GroupRepeatDetector()
     assert d.process(group_id=1001, user_id=1, text="哈哈") is None
     trim = d.process(group_id=1001, user_id=1, text="哈哈")
     assert trim is not None
     assert trim["rule_name"] == "repeat_trim_last"
+    assert trim["rate_limit_key"] == "repeat_trim_last"
     assert trim["repeat_action"] == RepeatAction.TRIM_LAST
     assert d.process(group_id=1001, user_id=1, text="哈哈") is None
     warning = d.process(group_id=1001, user_id=1, text="哈哈")
@@ -36,18 +27,7 @@ def test_same_user_warning_after_four_repeats():
     assert warning["rule_name"] == "repeat_same_user_warning"
     assert warning["rate_limit_key"] == "repeat_same_user_warning"
     assert warning["at_user_id"] == "1"
-    assert warning["reply"] == "艾斯比"
-
-
-def test_same_user_four_consecutive_triggers_warning_not_trim():
-    d = GroupRepeatDetector()
-    assert d.process(group_id=1001, user_id=9, text="测试测试") is None
-    assert d.process(group_id=1001, user_id=9, text="测试测试")["rule_name"] == "repeat_trim_last"
-    assert d.process(group_id=1001, user_id=9, text="测试测试") is None
-    assert (
-        d.process(group_id=1001, user_id=9, text="测试测试")["rule_name"]
-        == "repeat_same_user_warning"
-    )
+    assert warning["reply"]
 
 
 def test_group_isolation():

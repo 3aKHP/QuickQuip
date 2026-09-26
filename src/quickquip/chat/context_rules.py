@@ -59,7 +59,10 @@ def recompile_patterns() -> None:
         for rule in CONTEXT_REPLY_RULES
     ]
     for idx, rule in enumerate(CONTEXT_REPLY_RULES):
-        if rule.get("type", "regex_context") == "regex_context" and not _COMPILED_CONTEXT_CONDITIONS[idx]:
+        if (
+            rule.get("type", "regex_context") == "regex_context"
+            and not _COMPILED_CONTEXT_CONDITIONS[idx]
+        ):
             logger.warning(
                 "context rule %s 是 regex_context 但未配置 context_conditions，该规则将不会触发",
                 rule.get("name", f"#{idx}"),
@@ -85,7 +88,11 @@ def _check_regex_context(
     """本地历史判定：在最近 N 条消息中搜索 context_conditions。空条件视为不放行。"""
     if not conditions:
         return False
-    window = recent_messages[-context_window:] if len(recent_messages) > context_window else recent_messages
+    window = (
+        recent_messages[-context_window:]
+        if len(recent_messages) > context_window
+        else recent_messages
+    )
     for msg in window:
         if _match_any(conditions, msg.get("text", "")):
             return True
@@ -136,13 +143,16 @@ async def _check_llm_context(
     )
 
     try:
-        with usage_scope("context_rule_judge", group_id=str(group_id) if group_id is not None else None):
-            raw = await asyncio.wait_for(
-                llm_service.quick_judge(full_prompt, max_tokens=64),
+        with usage_scope(
+            "context_rule_judge",
+            group_id=str(group_id) if group_id is not None else None,
+        ):
+            # max_tokens 缺省沿用 [triggers.quick_judge] 配置：
+            # reasoning 模型需要足够预算容纳思考链后才有可见正文。
+            result = await asyncio.wait_for(
+                llm_service.quick_judge_detailed(full_prompt),
                 timeout=timeout,
             )
-        data = extract_json_object(raw)
-        result = bool(data.get("trigger", False))
     except asyncio.TimeoutError:
         logger.warning("LLM context judge timeout for rule %s", rule.get("name"))
         return False
@@ -150,8 +160,36 @@ async def _check_llm_context(
         logger.exception("LLM context judge failed for rule %s", rule.get("name"))
         return False
 
-    _llm_cache_set(cache_key, result, cache_ttl)
-    return result
+    if result.outcome != "ok":
+        # length/empty 是 reasoning 耗尽输出预算的预期形态，按不触发处理；
+        # provider_error 等技术失败同样 fail-closed，均不缓存、留待下条消息重判。
+        if result.outcome == "provider_error":
+            logger.warning(
+                "LLM context judge provider error for rule %s: %s",
+                rule.get("name"),
+                result.to_diagnostic(),
+            )
+        else:
+            logger.info(
+                "LLM context judge indeterminate for rule %s: %s",
+                rule.get("name"),
+                result.to_diagnostic(),
+            )
+        return False
+
+    try:
+        data = extract_json_object(result.text)
+        result_bool = bool(data.get("trigger", False))
+    except Exception:
+        logger.warning(
+            "LLM context judge unparsable for rule %s: %s",
+            rule.get("name"),
+            result.to_diagnostic(),
+        )
+        return False
+
+    _llm_cache_set(cache_key, result_bool, cache_ttl)
+    return result_bool
 
 
 async def match_context_rule(

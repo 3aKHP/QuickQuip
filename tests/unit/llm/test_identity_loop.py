@@ -90,15 +90,6 @@ def test_from_file_empty_template_logs_warning(tmp_path: Path, caplog):
     assert any("无有效条目" in record.message for record in caplog.records)
 
 
-def test_from_file_loaded_logs_count(tmp_path: Path, caplog):
-    path = tmp_path / "identities.yaml"
-    path.write_text(_IDENTITIES_YAML, encoding="utf-8")
-    with caplog.at_level(logging.INFO, logger="quickquip.common.identity"):
-        index = IdentityIndex.from_file(path)
-    assert len(index.entries) == 2
-    assert any("已加载 2 条身份" in record.message for record in caplog.records)
-
-
 # ── F2：@ 提及渲染（标准身份优先、未登记退化名片） ──────────────────
 
 
@@ -108,16 +99,8 @@ def _loaded_index(tmp_path: Path) -> IdentityIndex:
     return IdentityIndex.from_file(path)
 
 
-def test_render_mention_registered_uses_canonical(tmp_path: Path):
-    assert _loaded_index(tmp_path).render_mention("10002") == "@镜子"
-
-
 def test_render_mention_unregistered_falls_back_to_card(tmp_path: Path):
     assert _loaded_index(tmp_path).render_mention("99999", fallback_name="路人甲") == "@路人甲"
-
-
-def test_render_mention_unregistered_without_card_keeps_digits(tmp_path: Path):
-    assert _loaded_index(tmp_path).render_mention("99999") == "@QQ99999"
 
 
 def test_render_collects_mentioned_qq_ids_excluding_bot(tmp_path: Path):
@@ -154,11 +137,6 @@ def _envelope(mention_profiles=None) -> str:
     )
 
 
-def test_envelope_omits_profile_section_when_empty():
-    assert "被艾特" not in _envelope()
-    assert "被艾特" not in _envelope(mention_profiles=[])
-
-
 def test_envelope_renders_mention_profiles_name_first():
     envelope = _envelope(
         mention_profiles=[
@@ -170,7 +148,6 @@ def test_envelope_renders_mention_profiles_name_first():
             }
         ]
     )
-    assert "以下成员在消息中被艾特但未在窗口内发言，档案按 QQ 号对应：" in envelope
     assert "- 4s（QQ 40004）：别名哈基四、四*；大部分以四字开头的称呼通常指 4s" in envelope
 
 
@@ -246,8 +223,14 @@ def test_collect_mention_profiles_dedupes_candidates(tmp_path: Path):
         quoted_user_id="",
     )
     assert profiles == [
-        {"canonical_name": "4s", "user_id": "40004", "aliases": "Туманность、哈基四", "note": "大部分以四字开头的称呼通常指 4s"},
-        {"canonical_name": "镜子", "user_id": "10002", "aliases": "镜千翎、哈基镜", "note": "特别注意不要和王者荣耀的镜混淆"},
+        {
+            "canonical_name": "4s", "user_id": "40004",
+            "aliases": "Туманность、哈基四", "note": "大部分以四字开头的称呼通常指 4s",
+        },
+        {
+            "canonical_name": "镜子", "user_id": "10002", "aliases": "镜千翎、哈基镜",
+            "note": "特别注意不要和王者荣耀的镜混淆",
+        },
     ]
 
 

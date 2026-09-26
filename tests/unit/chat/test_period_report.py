@@ -12,7 +12,6 @@ from quickquip.chat.period_report import (
     PeriodReportStore,
     compute_period_window,
     period_key_for,
-    period_label_for,
     sample_messages_by_day,
 )
 
@@ -36,16 +35,6 @@ def test_period_key_monthly():
 def test_period_key_invalid_type():
     with pytest.raises(ValueError):
         period_key_for("quarterly", date(2026, 6, 10))
-
-
-# ── period_label_for ──────────────────────────────────────────────────────
-
-def test_period_label_weekly():
-    assert period_label_for(PERIOD_WEEKLY, "2026-W24") == "2026 年第 24 周"
-
-
-def test_period_label_monthly():
-    assert period_label_for(PERIOD_MONTHLY, "2026-06") == "2026 年 6 月"
 
 
 # ── compute_period_window ─────────────────────────────────────────────────

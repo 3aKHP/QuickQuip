@@ -4,7 +4,10 @@ from quickquip.common.record_content import display
 
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.epoch import EpochKey
-from quickquip.llm.service_parts.constants import MAX_MEMORY_RETRIEVAL_ITEMS, MAX_STORED_MEMORY_ITEMS
+from quickquip.llm.service_parts.constants import (
+    MAX_MEMORY_RETRIEVAL_ITEMS,
+    MAX_STORED_MEMORY_ITEMS,
+)
 from quickquip.llm.settings import DeliveryDomain
 from quickquip.llm.store_parts.agent_records import HistoryMutation
 
@@ -46,7 +49,10 @@ class StateMixin:
             self.store.migrate_loops_between_scopes(
                 scope_key, f"archive:{user_id_str}:{archive_number}"
             )
-            self._epochs.reset_scope(scope_key)
+            # 行已迁移到 archive scope，clear 事件的驱逐统计按 0 记（键抹除是事实本体）
+            self._epochs.reset_scope(scope_key, store=self.store)
+            self._envelope_cache.clear_scope(scope_key)
+            self._skill_activations.clear_scope(scope_key)
         else:
             self.clear_context(user_id, chat_type="private")
 
@@ -119,7 +125,9 @@ class StateMixin:
     def set_group_enabled(self, group_id: int | str, enabled: bool) -> None:
         self.set_chat_enabled(group_id, enabled, chat_type="group")
 
-    def set_chat_memory_enabled(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
+    def set_chat_memory_enabled(
+        self, chat_id: int | str, enabled: bool, chat_type: str = "group"
+    ) -> None:
         self._update_chat_settings(chat_id, chat_type, memory_enabled=int(enabled))
 
     def set_group_memory_enabled(self, group_id: int | str, enabled: bool) -> None:
@@ -143,9 +151,13 @@ class StateMixin:
         value = None if enabled is None else int(enabled)
         match domain:
             case DeliveryDomain.INTERMEDIATE:
-                self._update_chat_settings(chat_id, chat_type, agent_delivery_intermediate_enabled=value)
+                self._update_chat_settings(
+                    chat_id, chat_type, agent_delivery_intermediate_enabled=value
+                )
             case DeliveryDomain.FINAL:
-                self._update_chat_settings(chat_id, chat_type, agent_delivery_final_enabled=value)
+                self._update_chat_settings(
+                    chat_id, chat_type, agent_delivery_final_enabled=value
+                )
             case DeliveryDomain.ALL:
                 self._update_chat_settings(
                     chat_id, chat_type,
@@ -153,7 +165,9 @@ class StateMixin:
                     agent_delivery_final_enabled=value,
                 )
 
-    def set_chat_history_limit(self, chat_id: int | str, limit: int, chat_type: str = "group") -> None:
+    def set_chat_history_limit(
+        self, chat_id: int | str, limit: int, chat_type: str = "group"
+    ) -> None:
         self._update_chat_settings(chat_id, chat_type, history_limit=limit)
 
     def set_group_history_limit(self, group_id: int | str, limit: int) -> None:
@@ -165,7 +179,9 @@ class StateMixin:
     def reset_group_history_limit(self, group_id: int | str) -> None:
         self.reset_chat_history_limit(group_id, chat_type="group")
 
-    def set_chat_model(self, chat_id: int | str, provider_id: str, model: str = "", chat_type: str = "group") -> str:
+    def set_chat_model(
+        self, chat_id: int | str, provider_id: str, model: str = "", chat_type: str = "group"
+    ) -> str:
         provider = self.config.providers.get(provider_id)
         if provider is None:
             raise ValueError(f"未知 provider：{provider_id}")
@@ -184,7 +200,9 @@ class StateMixin:
     def set_group_model(self, group_id: int | str, provider_id: str, model: str) -> str:
         return self.set_chat_model(group_id, provider_id, model, chat_type="group")
 
-    def set_chat_persona(self, chat_id: int | str, persona_id: str, chat_type: str = "group") -> None:
+    def set_chat_persona(
+        self, chat_id: int | str, persona_id: str, chat_type: str = "group"
+    ) -> None:
         if persona_id not in self.config.personas:
             raise ValueError(f"未知 persona：{persona_id}")
         # persona 切换 = system 字节变化 = 该纪元键缓存全灭 = 免费重置窗口，
@@ -199,16 +217,20 @@ class StateMixin:
                 provider_id=provider.id,
                 model=settings.model or provider.default_model,
             )
-            self._epochs.advance_to_cold_water(
+            reset_event = self._epochs.advance_to_cold_water(
                 epoch_key,
                 store=self.store,
                 params=self.config.resolve_epoch_params(provider),
             )
+            if reset_event is not None:
+                self._skill_activations.clear_scope(epoch_key.scope_key)
 
     def set_group_persona(self, group_id: int | str, persona_id: str) -> None:
         self.set_chat_persona(group_id, persona_id, chat_type="group")
 
-    def set_chat_trigger_prefix(self, chat_id: int | str, prefix: str, chat_type: str = "group") -> None:
+    def set_chat_trigger_prefix(
+        self, chat_id: int | str, prefix: str, chat_type: str = "group"
+    ) -> None:
         prefix = prefix.strip()
         if not prefix:
             raise ValueError("触发前缀不能为空")
@@ -217,7 +239,9 @@ class StateMixin:
     def set_group_trigger_prefix(self, group_id: int | str, prefix: str) -> None:
         self.set_chat_trigger_prefix(group_id, prefix, chat_type="group")
 
-    def set_chat_allow_prefix(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
+    def set_chat_allow_prefix(
+        self, chat_id: int | str, enabled: bool, chat_type: str = "group"
+    ) -> None:
         self._update_chat_settings(chat_id, chat_type, allow_prefix=int(enabled))
 
     def set_group_allow_prefix(self, group_id: int | str, enabled: bool) -> None:
@@ -226,9 +250,22 @@ class StateMixin:
     def set_group_allow_at(self, group_id: int | str, enabled: bool) -> None:
         self._update_chat_settings(group_id, "group", allow_at=int(enabled))
 
-    def remember_memory(self, chat_id: int | str, content: str, chat_type: str = "group", *, content_parts: dict | None = None) -> int:
+    def remember_memory(
+        self,
+        chat_id: int | str,
+        content: str,
+        chat_type: str = "group",
+        *,
+        content_parts: dict | None = None,
+    ) -> int:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        memory_id = self.store.add_memory(scope_key, content.strip(), scope="group", source="manual", content_parts=content_parts)
+        memory_id = self.store.add_memory(
+            scope_key,
+            content.strip(),
+            scope="group",
+            source="manual",
+            content_parts=content_parts,
+        )
         self.store.prune_memories(
             scope_key,
             min(self.config.runtime.memory_max_items_per_group, MAX_STORED_MEMORY_ITEMS),
@@ -238,14 +275,22 @@ class StateMixin:
     def remember_group_memory(self, group_id: int | str, content: str) -> int:
         return self.remember_memory(group_id, content, chat_type="group")
 
-    def list_memories(self, chat_id: int | str, keyword: str | None = None, chat_type: str = "group") -> list[dict[str, object]]:
-        return self.store.list_memories(self.build_chat_scope_key(chat_id, chat_type), limit=10, keyword=keyword)
+    def list_memories(
+        self, chat_id: int | str, keyword: str | None = None, chat_type: str = "group"
+    ) -> list[dict[str, object]]:
+        return self.store.list_memories(
+            self.build_chat_scope_key(chat_id, chat_type), limit=10, keyword=keyword
+        )
 
-    def list_group_memories(self, group_id: int | str, keyword: str | None = None) -> list[dict[str, object]]:
+    def list_group_memories(
+        self, group_id: int | str, keyword: str | None = None
+    ) -> list[dict[str, object]]:
         return self.list_memories(group_id, keyword=keyword, chat_type="group")
 
     def forget_memories(self, chat_id: int | str, keyword: str, chat_type: str = "group") -> int:
-        return self.store.delete_memories(self.build_chat_scope_key(chat_id, chat_type), keyword.strip())
+        return self.store.delete_memories(
+            self.build_chat_scope_key(chat_id, chat_type), keyword.strip()
+        )
 
     def forget_group_memories(self, group_id: int | str, keyword: str) -> int:
         return self.forget_memories(group_id, keyword, chat_type="group")
@@ -267,7 +312,10 @@ class StateMixin:
             if provider.fallback_urls:
                 note_parts.append(f"{len(provider.fallback_urls)} 个备用")
             suffix = f"（{', '.join(note_parts)}）" if note_parts else ""
-            lines.append(f"- {provider.id} [{provider.protocol}] 默认：{provider.default_model}{suffix}")
+            lines.append(
+                f"- {provider.id} [{provider.protocol}] "
+                f"默认：{provider.default_model}{suffix}"
+            )
         return "\n".join(lines)
 
     def format_models(self, provider_id: str | None = None) -> str:
@@ -289,7 +337,11 @@ class StateMixin:
             provider = self.config.providers.get(provider_id)
             if provider is None:
                 return f"未知 provider：{provider_id}"
-            header = f"{provider.id} 可用模型（已禁用）：" if not provider.enabled else f"{provider.id} 可用模型："
+            header = (
+                f"{provider.id} 可用模型（已禁用）："
+                if not provider.enabled
+                else f"{provider.id} 可用模型："
+            )
             return "\n".join([header, *_model_lines(provider)])
 
         lines = ["可用模型："]
@@ -306,7 +358,9 @@ class StateMixin:
             lines.append(f"- {persona.id}：{persona.display_name}")
         return "\n".join(lines)
 
-    def format_memories(self, group_id: int | str, keyword: str | None = None, chat_type: str = "group") -> str:
+    def format_memories(
+        self, group_id: int | str, keyword: str | None = None, chat_type: str = "group"
+    ) -> str:
         memories = self.list_memories(group_id, keyword=keyword, chat_type=chat_type)
         if not memories:
             return f"{self._scope_subject(chat_type)}没有已保存记忆"
@@ -328,15 +382,20 @@ class StateMixin:
 
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
         scope_key = self.build_chat_scope_key(group_id, chat_type)
+        # 纪元清键先于删行：clear 事件的驱逐统计要能读到窗口内的行
+        # （epoch_events 旁路，失败仅告警不影响清理）。
+        self._epochs.reset_scope(scope_key, store=self.store)
+        self._envelope_cache.clear_scope(scope_key)
         deleted = self.store.clear_conversation_messages(scope_key)
         # Agent 执行记录随域清理（§9.3）：主表行删除后侧表不能留孤儿。
         self.store.delete_loops_for_scope(scope_key)
-        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点；只清前者
-        # 会让 build_messages 继续把缓冲拼进提示词，或让纪元锚点指向已删除的行，
-        # 模型仍然"看得见"历史。三件齐清（私聊会话 start/end/resume 也走这里）。
+        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点 + 信封分解
+        # 缓存 + Skill 激活登记；只清前者会让 build_messages 继续把缓冲拼进提示词，
+        # 或让纪元锚点指向已删除的行，或让"已激活"登记挡住正文重注入，模型仍然
+        # "看得见"历史。五件齐清（私聊会话 start/end/resume 也走这里）。
         if self.recent_message_buffer:
             self.recent_message_buffer.clear_scope(scope_key)
-        self._epochs.reset_scope(scope_key)
+        self._skill_activations.clear_scope(scope_key)
         self._bump_scope_generation(scope_key, HistoryMutation.CLEAR)
         return deleted
 
@@ -362,9 +421,14 @@ class StateMixin:
         for row in rows:
             if row["role"] == "user":
                 # 群友撤回触发消息：按整 Loop 删除处理（§9.3）。
-                deleted_any = self.store.delete_loop_by_anchor(scope_key, int(row["id"])) or deleted_any
+                deleted_any = (
+                    self.store.delete_loop_by_anchor(scope_key, int(row["id"])) or deleted_any
+                )
             else:
-                deleted_any = self.store.delete_turn_by_message_row(scope_key, int(row["id"])) or deleted_any
+                deleted_any = (
+                    self.store.delete_turn_by_message_row(scope_key, int(row["id"]))
+                    or deleted_any
+                )
         if deleted_any:
             self._bump_scope_generation(scope_key, HistoryMutation.DELETE)
         buf_deleted = (

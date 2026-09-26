@@ -74,7 +74,9 @@ def test_get_text(db):
 def test_delete(db, monkeypatch):
     monkeypatch.setattr(period_reports.audit_logger, "log", lambda *a, **k: None)
     db.upsert("10001", PERIOD_WEEKLY, "2026-W24", "x", "m1")
-    assert period_reports.delete_period_report("10001", "weekly", "2026-W24", object()) == {"ok": True}
+    assert period_reports.delete_period_report(
+        "10001", "weekly", "2026-W24", object()
+    ) == {"ok": True}
     assert db.get("10001", PERIOD_WEEKLY, "2026-W24") is None
 
 
@@ -177,7 +179,8 @@ def test_generation_log_triggers_migration_on_old_schema_db(monkeypatch, tmp_pat
             )
         """)
         conn.execute(
-            "INSERT INTO period_reports (group_id, period_type, period_key, generated_at, content) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO period_reports "
+            "(group_id, period_type, period_key, generated_at, content) VALUES (?, ?, ?, ?, ?)",
             ("10001", "weekly", "2026-W24", "2026-06-14T06:00:00+00:00", "旧报文"),
         )
     monkeypatch.setattr(period_reports, "_DB", db_path)

@@ -99,9 +99,17 @@ class IdentityRepository:
     def snapshot(self, scope) -> IdentitySnapshot:
         scope = str(scope)
         with self._lock:
-            index = self._base_override if self._base_override is not None else self._read(self.path, _load_index, IdentityIndex())
+            index = (
+                self._base_override
+                if self._base_override is not None
+                else self._read(self.path, _load_index, IdentityIndex())
+            )
             if scope.isascii() and scope.isdigit():
-                group = self._read(self.path.parent / scope / "identities.yaml", _load_index, IdentityIndex())
+                group = self._read(
+                    self.path.parent / scope / "identities.yaml",
+                    _load_index,
+                    IdentityIndex(),
+                )
                 cached = self._merged.get(scope)
                 if cached is None or cached[0] is not index or cached[1] is not group:
                     cached = (index, group, index.merge(group))
@@ -132,7 +140,8 @@ def _declares_substantive_entries(data) -> bool:
 
 
 def _load_index(path):
-    # Validate the document before the compatibility parser; incomplete writes must not replace a valid index.
+    # Validate the document before the compatibility parser; incomplete writes
+    # must not replace a valid index.
     import yaml
     raw = path.read_text(encoding="utf-8")
     data = yaml.safe_load(raw)

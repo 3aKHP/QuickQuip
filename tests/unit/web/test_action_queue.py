@@ -50,14 +50,24 @@ def test_get_tracks_one_action_outside_recent_window(tmp_path):
     queue.claim(1)
     assert queue.get(action_id)["status"] == "running"
     queue.complete(action_id, {"deleted": True})
-    for _ in range(105):
+    for _ in range(3):
         queue.enqueue("llm_reload")
-    assert action_id not in {action["id"] for action in queue.list_recent(100)}
+    assert action_id not in {action["id"] for action in queue.list_recent(3)}
     assert queue.get(action_id)["result"] == {"deleted": True}
     queue.fail(action_id, "failed")
     assert queue.get(action_id)["status"] == "failed"
     assert queue.get("missing") is None
     assert queue.get("' OR 1=1 --") is None
+
+
+def test_recent_window_stable_when_timestamps_tie(monkeypatch, tmp_path):
+    queue = WebAdminActionQueue(tmp_path / "actions.db")
+    frozen = "2026-09-14T00:00:00+00:00"
+    monkeypatch.setattr("quickquip.app.web.action_queue._utc_now", lambda: frozen)
+    action_id = queue.enqueue("delete_conversation_row", {"row_id": 1})["id"]
+    for _ in range(3):
+        queue.enqueue("llm_reload")
+    assert action_id not in {action["id"] for action in queue.list_recent(3)}
 
 
 def test_clear_finished_keeps_queued_and_running(tmp_path):

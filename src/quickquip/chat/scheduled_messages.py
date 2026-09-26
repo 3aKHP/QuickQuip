@@ -301,7 +301,8 @@ class ScheduledMessageStore:
         return None, None
 
     def update(self, job_id: str, **fields: Any) -> ScheduledMessage | None:
-        """更新指定字段（cron/group_ids/message/enabled/kind/recurring），返回更新后的任务；不存在返回 None。
+        """更新指定字段（cron/group_ids/message/enabled/kind/recurring），
+        返回更新后的任务；不存在返回 None。
 
         无有效字段时为空操作：直接返回当前任务，不产生 updated_at 跳动、
         落盘、审计与 reload 的副作用链。

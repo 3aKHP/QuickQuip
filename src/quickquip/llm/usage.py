@@ -113,6 +113,24 @@ def epoch_meter(tokens: int | None) -> Iterator[None]:
         _EPOCH_HISTORY_TOKENS.reset(token)
 
 
+_EPOCH_HISTORY_ROWS: ContextVar[int | None] = ContextVar(
+    "quickquip_llm_epoch_history_rows", default=None,
+)
+
+
+@contextmanager
+def epoch_rows_meter(rows: int | None) -> Iterator[None]:
+    """设置当前回合纪元窗口的行数（len(history)）；退出复位（镜像 epoch_meter 范式）。
+
+    纪元看板"保留条数"锯齿的数据源；Agent Loop 内每行同值，按每轮单值解读。
+    """
+    token = _EPOCH_HISTORY_ROWS.set(rows)
+    try:
+        yield
+    finally:
+        _EPOCH_HISTORY_ROWS.reset(token)
+
+
 _MEDIA_IMAGE_COUNT: ContextVar[int | None] = ContextVar(
     "quickquip_llm_media_image_count", default=None,
 )
@@ -219,12 +237,18 @@ async def _record_usage(
             # （不含 cache_read/cache_creation），其余协议 inclusive。标签描述
             # 列值口径，与 canonical（恒 inclusive）是两回事（issue #202）。
             # 「claude ⇒ exclusive」口径另见 pricing.normalize_usage 的归一化侧
-            # 与 usage_store 的 SQL CASE——新增协议时需同步
+            # 与 usage_store 的 SQL CASE——新增协议时需同步。
+            # openai_responses 已核对（1.16 PR-A）：input_tokens 含
+            # cached_tokens，inclusive，走默认分支；三处无需改动。
             input_token_semantics = (
                 "exclusive" if client.config.protocol == "claude" else "inclusive"
             )
             if rates is not None:
-                pricing_model = f"{client.config.id}/{model}" if f"{client.config.id}/{model}" in configured else model
+                pricing_model = (
+                    f"{client.config.id}/{model}"
+                    if f"{client.config.id}/{model}" in configured
+                    else model
+                )
                 pricing_source = rates.source
                 pricing_confidence = rates.confidence
 
@@ -239,6 +263,7 @@ async def _record_usage(
             "agent_loop_id": loop_id,
             "envelope_tokens": _ENVELOPE_TOKENS.get(),
             "epoch_history_tokens": _EPOCH_HISTORY_TOKENS.get(),
+            "epoch_history_rows": _EPOCH_HISTORY_ROWS.get(),
             "media_image_count": _MEDIA_IMAGE_COUNT.get(),
             "patch_tokens": _PATCH_TOKENS.get(),
             "stream": 1 if stream_used else 0,
@@ -306,7 +331,9 @@ def _schedule_usage_record(
     """
     finished_at = datetime.now(timezone.utc).isoformat()
     task = asyncio.create_task(
-        _record_usage(client, request, response, started, stream_used, state, error_msg, finished_at)
+        _record_usage(
+            client, request, response, started, stream_used, state, error_msg, finished_at
+        )
     )
     _USAGE_TASKS.add(task)
     task.add_done_callback(_USAGE_TASKS.discard)

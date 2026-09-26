@@ -220,7 +220,8 @@ async def build_health_report(
         HealthCheckItem(
             "tools",
             tool_status,
-            f"工具调用 {'开启' if config.runtime.tool_calling_enabled else '关闭'}，可用工具 {enabled_tool_count} 个",
+            f"工具调用 {'开启' if config.runtime.tool_calling_enabled else '关闭'}，"
+            f"可用工具 {enabled_tool_count} 个",
             {"enabled": config.runtime.tool_calling_enabled, "tools": tool_names},
         )
     )
@@ -383,7 +384,9 @@ async def build_health_report(
             )
         )
 
-    bindings_ok = recent_buffer_bound and (chat_type == "private" or (stats_bound and rule_switch_bound))
+    bindings_ok = recent_buffer_bound and (
+        chat_type == "private" or (stats_bound and rule_switch_bound)
+    )
     items.append(
         HealthCheckItem(
             "runtime_bindings",

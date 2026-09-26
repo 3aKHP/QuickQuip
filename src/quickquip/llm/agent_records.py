@@ -4,7 +4,8 @@
 目标协议可用的表达；交付记录保存已计划与已尝试发送的内容。本模块只定义
 数据与有限枚举，不做 I/O——持久化归 ``store_parts/agent_records.py``，
 投影归 ``history_projection.py``，切分与交付状态机归 ``delivery.py``，
-scope 调度归 ``service_parts/agent_runtime.py``。
+scope 串行归 ``service_parts/scope_gate.py``，Loop 生命周期编排归
+``service_parts/agent_runtime.py``。
 
 所有枚举值即 SQLite 落库字符串；解析器必须拒绝未知值（§4.4），新增值
 只能在版本化结构升级时引入并保持旧值可读。

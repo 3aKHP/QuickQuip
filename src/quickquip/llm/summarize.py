@@ -142,7 +142,9 @@ def _resolve_cascade(
             provider_id, model = parts
         provider_config = llm_config.providers.get(provider_id)
         if provider_config is None:
-            logger.warning("summary cascade: provider %r not found in config, skipping", provider_id)
+            logger.warning(
+                "summary cascade: provider %r not found in config, skipping", provider_id
+            )
             continue
         if not provider_config.enabled:
             logger.info("summary cascade: provider %r disabled, skipping", provider_id)
@@ -283,7 +285,9 @@ async def generate_daily_summary(
     Returns (summary_text, model_used_label).
     Raises RuntimeError if all models in the cascade fail.
     """
-    set_usage_scope("summary", group_id=str(group_id), persona_id=persona.id, run_id=new_usage_run_id())
+    set_usage_scope(
+        "summary", group_id=str(group_id), persona_id=persona.id, run_id=new_usage_run_id()
+    )
     system_prompt = _build_system_prompt(
         persona, date_label, name_table, summary_config.summary_length_hint
     )
@@ -314,7 +318,8 @@ async def generate_daily_summary(
             "\n（注：由于消息量较大，上方记录已截取最近部分。）\n" if was_truncated else ""
         )
         return (
-            f"以下是{date_label}的群聊记录（共 {ser_stats.messages_in - ser_stats.messages_skipped} 条消息）：\n"
+            f"以下是{date_label}的群聊记录"
+            f"（共 {ser_stats.messages_in - ser_stats.messages_skipped} 条消息）：\n"
             f"{truncation_note}"
             "=== 聊天记录开始 ===\n"
             f"{chat_log}\n"
@@ -394,7 +399,12 @@ async def generate_period_report(
     Returns (report_text, model_used_label).
     Raises RuntimeError if all models in the cascade fail.
     """
-    set_usage_scope("period_report", group_id=str(group_id), persona_id=persona.id, run_id=new_usage_run_id())
+    set_usage_scope(
+        "period_report",
+        group_id=str(group_id),
+        persona_id=persona.id,
+        run_id=new_usage_run_id(),
+    )
     system_prompt = _build_period_system_prompt(
         persona, period_label, period_kind, name_table, length_hint
     )
@@ -448,6 +458,12 @@ async def generate_period_report(
         )
 
     return await _run_summary_cascade(
-        f"period_report[{period_kind}]", group_id, resolved, system_prompt, raw_log, build_user_content,
-        temperature=_PERIOD_REPORT_TEMPERATURE, max_output_tokens=_PERIOD_REPORT_MAX_OUTPUT_TOKENS,
+        f"period_report[{period_kind}]",
+        group_id,
+        resolved,
+        system_prompt,
+        raw_log,
+        build_user_content,
+        temperature=_PERIOD_REPORT_TEMPERATURE,
+        max_output_tokens=_PERIOD_REPORT_MAX_OUTPUT_TOKENS,
     )

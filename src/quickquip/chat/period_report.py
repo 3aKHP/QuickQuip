@@ -159,7 +159,8 @@ class PeriodReportStore:
             conn.execute(
                 """
                 INSERT INTO period_reports
-                    (group_id, period_type, period_key, generated_at, model_used, run_id, char_count, content)
+                    (group_id, period_type, period_key, generated_at, model_used,
+                     run_id, char_count, content)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(group_id, period_type, period_key) DO UPDATE SET
                     generated_at = excluded.generated_at,
@@ -169,7 +170,8 @@ class PeriodReportStore:
                     content      = excluded.content,
                     published_at = NULL
                 """,
-                (str(group_id), period_type, period_key, generated_at, model_used, run_id, len(content), content),
+                (str(group_id), period_type, period_key, generated_at,
+                 model_used, run_id, len(content), content),
             )
             conn.commit()
         finally:
@@ -181,7 +183,8 @@ class PeriodReportStore:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT * FROM period_reports WHERE group_id = ? AND period_type = ? AND period_key = ?",
+                "SELECT * FROM period_reports "
+                "WHERE group_id = ? AND period_type = ? AND period_key = ?",
                 (str(group_id), period_type, period_key),
             ).fetchone()
             return dict(row) if row else None
@@ -238,7 +241,9 @@ def compute_period_window(period_type: str, now: datetime) -> tuple[float, float
     """
     if period_type == PERIOD_WEEKLY:
         # 本周一
-        this_week_monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        this_week_monday = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         start = this_week_monday - timedelta(weeks=1)
         end = this_week_monday
         ref_date = start.date()  # 上周内任意一天都映射到同一 ISO 周
@@ -249,7 +254,9 @@ def compute_period_window(period_type: str, now: datetime) -> tuple[float, float
     if period_type == PERIOD_MONTHLY:
         # 本月 1 日
         this_month_first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        start = (this_month_first - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        start = (this_month_first - timedelta(days=1)).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        )
         end = this_month_first
         ref_date = start.date()
         key = period_key_for(period_type, ref_date)

@@ -432,7 +432,8 @@ def _default_fence_events() -> list[dict[str, Any]]:
                 "🪓 牛头人断头台！对方牛牛被斩落 {loss} cm，你增长了 {gain} cm！",
             ],
             "sever_neg": [
-                "👹 牛头人支配！你击穿了对方的防线！深度从 {old_oppo} 翻倍至 {new_oppo} cm！你吸收 {gain} cm！",
+        "👹 牛头人支配！你击穿了对方的防线！"
+        "深度从 {old_oppo} 翻倍至 {new_oppo} cm！你吸收 {gain} cm！",
                 "深渊之力！牛头人的一击让对方的凹度暴增至 {new_oppo} cm！你获得 {gain} cm！",
             ],
             "severed_pos": [
@@ -572,14 +573,21 @@ def _default_commands() -> dict[str, Any]:
     return {
         "register.already_exists": "你已经有过牛牛啦！当前长度 {length} cm",
         "register.positive": "牛牛长出来啦！足足有 {length} cm 呢！",
-        "register.negative": "牛牛长出来了？牛牛不见了！你是个可爱的女孩子！！深度足足有 {abs_length} cm 呢！",
+        "register.negative": (
+            "牛牛长出来了？牛牛不见了！你是个可爱的女孩子！！"
+            "深度足足有 {abs_length} cm 呢！"
+        ),
         "register.missing": "你还没有牛牛呢！请发送 /注册牛牛 领取你的牛牛！",
         "unsubscribe.success": "从今往后你就没有牛牛啦！",
-        "unsubscribe.insufficient_gold": "你的金币不足 {required}，无法注销牛牛！（当前 {balance} 金币）",
+        "unsubscribe.insufficient_gold": (
+            "你的金币不足 {required}，无法注销牛牛！（当前 {balance} 金币）"
+        ),
         "my.header": "🐂 我的牛牛",
         "my.length_line": "当前长度：{length} cm",
         "my.rank_positive": "第 {rank} 名",
-        "my.rank_negative": "总榜第 {natural_rank} 名 | 深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名",
+        "my.rank_negative": (
+            "总榜第 {natural_rank} 名 | 深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
+        ),
         "my.glue_luck": "打胶运势：{luck}（{label}）",
         "my.fence_luck": "击剑运势：{luck}（{label}）",
         "my.last_glue": "最后打胶：{time}",
@@ -609,8 +617,12 @@ def _default_commands() -> dict[str, Any]:
         "rank.natural_header": "🏆 牛牛总排行（自然数值）：",
         "rank.abs_header": "🏆 牛牛绝对值排行：",
         "rank.abs_global_header": "🏆 牛牛绝对值排行（全局）：",
-        "rank.line": "{index}. QQ:{uid} — {length} {unit}",
-        "text_mode.view": "📝 本群牛牛文案模式：{mode}\n可用模式：{available}\n管理员可使用 /牛牛文案 <模式名> 进行切换",
+        "rank.line": "{index}. {name} — {length} {unit}",
+        "text_mode.view": (
+            "📝 本群牛牛文案模式：{mode}\n"
+            "可用模式：{available}\n"
+            "管理员可使用 /牛牛文案 <模式名> 进行切换"
+        ),
         "text_mode.switched": "📝 本群牛牛文案已切换为：{mode}",
         "text_mode.unknown": "未知的文案模式：{mode}\n可用模式：{available}",
         "text_mode.no_permission": "只有群管理员才能切换文案模式哦~",

@@ -65,8 +65,12 @@ class WebAdminActionQueue:
             )
         self._schema_ready = True
 
-    def _reap_stale_running_locked(self, conn: sqlite3.Connection, timeout_seconds: int = 300) -> int:
-        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(1, int(timeout_seconds)))).isoformat()
+    def _reap_stale_running_locked(
+        self, conn: sqlite3.Connection, timeout_seconds: int = 300
+    ) -> int:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(seconds=max(1, int(timeout_seconds)))
+        ).isoformat()
         cur = conn.execute(
             """
             UPDATE web_admin_actions
@@ -129,7 +133,7 @@ class WebAdminActionQueue:
                 SELECT *
                 FROM web_admin_actions
                 WHERE status = 'queued'
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, rowid ASC
                 LIMIT ?
                 """,
                 (limit,),
@@ -187,7 +191,8 @@ class WebAdminActionQueue:
                 """
                 SELECT *
                 FROM web_admin_actions
-                ORDER BY created_at DESC
+                -- rowid 决胜：紧循环入队会产生相同微秒时间戳，最近列表须按入队次序稳定
+                ORDER BY created_at DESC, rowid DESC
                 LIMIT ?
                 """,
                 (limit,),

@@ -4,7 +4,7 @@
 
 ## 分层与缓存
 
-`common/identity.py` 定义身份表和合并规则，`common/identity_sources.py` 提供独立于 LLM provider 的文件缓存、群级合并缓存与身份快照，`app/identities.py` 装配 Bot 和 Web 的来源。`llm/identity.py` 保留兼容导入，`LLMService.group_identities()` 保留服务入口。
+`common/identity.py` 定义身份表和合并规则，`common/identity_sources.py` 提供独立于 LLM provider 的文件缓存、群级合并缓存与身份快照，`app/identities.py` 装配 Bot 和 Web 的来源。`llm/identity.py` 承载当轮信封的身份编排（参与者归并、被艾特成员档案采集）并保留兼容导入，`LLMService.group_identities()` 保留服务入口。
 
 Bot 与 Web 使用各自的进程缓存。每份文件至多每 5 秒检查一次修改时间与大小；加载失败记录日志并保留上次有效资料。`/llm reload` 显式失效 Bot 缓存。Web 从共享 `data/stats.json` 读取群名片。Bot 在写入入口复用有界 OneBot 名片查询；列表读取仅使用身份快照。
 

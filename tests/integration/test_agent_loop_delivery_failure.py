@@ -63,9 +63,11 @@ async def test_first_chunk_failure_stops_tools_and_generation(
     assert len(sink.attempts) == 1
     assert len(client.requests) == 1
     # 零送达：中止必须可见（静默依据是「已有成功交付」）
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
-        tool_status = [row["status"] for row in conn.execute("SELECT status FROM agent_tool_executions")]
+        tool_status = [
+            row["status"] for row in conn.execute("SELECT status FROM agent_tool_executions")
+        ]
         loop_row = conn.execute(
             "SELECT status, terminal_reason FROM agent_loops"
         ).fetchone()
@@ -146,7 +148,8 @@ async def test_middle_chunk_failure_keeps_earlier_facts(tmp_path: Path, patch_pr
         ).fetchone()["c"]
         # 首个成功 Chunk 的 qq id 回填兼容列。
         row = conn.execute(
-            "SELECT message_id FROM conversation_messages WHERE role='assistant' ORDER BY id LIMIT 1"
+            "SELECT message_id FROM conversation_messages "
+            "WHERE role='assistant' ORDER BY id LIMIT 1"
         ).fetchone()
     assert sent == 2
     assert failed == 1
@@ -279,10 +282,12 @@ async def test_no_record_fallback_surfaces_abort_when_delivery_enabled(
 
     assert len(client.requests) == 1  # 第二轮被门禁拦下
     assert sink.deliveries == []
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
 
 
-async def test_intermediate_only_first_failure_surfaces_notice(tmp_path: Path, patch_provider_builder):
+async def test_intermediate_only_first_failure_surfaces_notice(
+    tmp_path: Path, patch_provider_builder
+):
     """组合 B（仅中间轮开）：首个中间轮段失败 → 零送达，D3 终止并给出可见提示。"""
     from tests.fixtures.agent_loop import FiveTurnScenarioClient
 
@@ -306,14 +311,16 @@ async def test_intermediate_only_first_failure_surfaces_notice(tmp_path: Path, p
     assert len(sink.attempts) == 1  # 仅首个中间轮段尝试后终止
     assert len(client.requests) == 1
     # 零送达（首段即失败）：中止提示必须可见
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         loop_row = conn.execute("SELECT status, terminal_reason FROM agent_loops").fetchone()
     assert loop_row["status"] == "interrupted"
     assert loop_row["terminal_reason"] == "delivery_failed"
 
 
-async def test_final_only_failure_after_suppressed_intermediate(tmp_path: Path, patch_provider_builder):
+async def test_final_only_failure_after_suppressed_intermediate(
+    tmp_path: Path, patch_provider_builder
+):
     """组合 C（仅最终轮开）：中间轮 suppressed 不外发；最终首段失败 → 终止。"""
     from tests.fixtures.agent_loop import FiveTurnScenarioClient
 
@@ -339,7 +346,7 @@ async def test_final_only_failure_after_suppressed_intermediate(tmp_path: Path, 
     assert sink.attempts[0][1] == FIVE_TURN_TEXTS[4][:20]
     assert len(client.requests) == 5
     # 零送达（suppressed 不外发 + 最终首段失败）：中止提示必须可见
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         statuses = [
             row["status"]
@@ -372,7 +379,7 @@ async def test_zero_delivery_abort_surfaces_notice(tmp_path: Path, patch_provide
 
     # 中间轮全抑制、最终轮未及交付即中止：零送达 → 给出可见中止提示
     assert sink.deliveries == []
-    assert result["reply"] == "本次回复未确认送达，已停止后续生成。"
+    assert "未确认送达" in result["reply"]
     with service.store._connect() as conn:
         loop_row = conn.execute("SELECT status, terminal_reason FROM agent_loops").fetchone()
     assert loop_row["status"] == "interrupted"

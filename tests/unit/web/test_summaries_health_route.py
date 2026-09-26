@@ -41,10 +41,19 @@ def _insert_event(
 
 
 def test_summaries_health_aggregates_features(temp_usage_store):
-    _insert_event(temp_usage_store, feature="summary", state="ok", finish="STOP", outcome="accepted")
-    _insert_event(temp_usage_store, feature="summary", state="ok", finish="MAX_TOKENS", outcome="discarded_finish", model="flash")
-    _insert_event(temp_usage_store, feature="summary", state="error", finish=None, outcome="provider_error")
-    _insert_event(temp_usage_store, feature="summary", state="cancelled", finish=None, outcome="cancelled")
+    _insert_event(
+        temp_usage_store, feature="summary", state="ok", finish="STOP", outcome="accepted"
+    )
+    _insert_event(
+        temp_usage_store, feature="summary", state="ok", finish="MAX_TOKENS",
+        outcome="discarded_finish", model="flash",
+    )
+    _insert_event(
+        temp_usage_store, feature="summary", state="error", finish=None, outcome="provider_error"
+    )
+    _insert_event(
+        temp_usage_store, feature="summary", state="cancelled", finish=None, outcome="cancelled"
+    )
     _insert_event(temp_usage_store, feature="briefing", state="ok", finish="STOP")
     _insert_event(temp_usage_store, feature="chat", state="ok", finish="STOP")  # 不在总结族，排除
 
@@ -168,7 +177,9 @@ async def test_real_cascade_persists_discarded_and_accepted_hops(temp_usage_stor
     assert [h["response_outcome"] for h in hops] == ["discarded_finish", "accepted"]
 
 
-def test_generation_log_triggers_migration_on_old_schema_db(monkeypatch, tmp_path, temp_usage_store):
+def test_generation_log_triggers_migration_on_old_schema_db(
+    monkeypatch, tmp_path, temp_usage_store
+):
     """旧库（无 run_id 列）经 web 进程直调路由不 500：路由先触发惰性迁移（CR S2）。"""
     import sqlite3
 
@@ -184,7 +195,8 @@ def test_generation_log_triggers_migration_on_old_schema_db(monkeypatch, tmp_pat
             )
         """)
         conn.execute(
-            "INSERT INTO summaries (group_id, summary_date, generated_at, content) VALUES (?, ?, ?, ?)",
+            "INSERT INTO summaries (group_id, summary_date, generated_at, content) "
+            "VALUES (?, ?, ?, ?)",
             ("10001", "2026-05-03", "2026-05-03T06:00:00+00:00", "旧报文"),
         )
     monkeypatch.setattr(summaries_route, "_DB", db_path)

@@ -87,25 +87,36 @@ class DrawSvgToolMixin:
             return LLMToolOutput(content="缺少 svg 参数（需要完整 SVG 源码）", is_error=True)
         if len(context.outbound_images) >= MAX_OUTBOUND_TOOL_IMAGES:
             return LLMToolOutput(
-                content=f"本次回复图片已达上限（{MAX_OUTBOUND_TOOL_IMAGES} 张），不要再生成更多图片",
+                content=(
+                    f"本次回复图片已达上限（{MAX_OUTBOUND_TOOL_IMAGES} 张），"
+                    f"不要再生成更多图片"
+                ),
                 is_error=True,
             )
         svg_config = generation_service.get_config().svg
         if not svg_config.enabled:
-            return LLMToolOutput(content="SVG 画图功能未启用（generation.toml [svg] enabled）", is_error=True)
+            return LLMToolOutput(
+                content="SVG 画图功能未启用（generation.toml [svg] enabled）",
+                is_error=True,
+            )
 
         visible_text = extract_visible_text(svg)
         sensitive = _get_sensitive_filter()
         if sensitive.is_loaded:
             scan = sensitive.scan("\n".join(part for part in (visible_text, caption) if part))
             if scan.blocked:
-                return LLMToolOutput(content="图片文本包含不允许的内容，请修改后重试", is_error=True)
+                return LLMToolOutput(
+                    content="图片文本包含不允许的内容，请修改后重试", is_error=True
+                )
 
         if svg_config.content_judge:
             safe, reason = await self._judge_svg_content(visible_text, caption)
             if not safe:
                 detail = f"：{reason}" if reason else ""
-                return LLMToolOutput(content=f"图片文本内容安全校验未通过{detail}，请修改后重试", is_error=True)
+                return LLMToolOutput(
+                    content=f"图片文本内容安全校验未通过{detail}，请修改后重试",
+                    is_error=True,
+                )
 
         # 限流放在内容检查之后：被拦截的尝试不占渲染配额，避免低成本耗尽全局配额
         if not svg_render_allowed(context.user_id, context.group_id):

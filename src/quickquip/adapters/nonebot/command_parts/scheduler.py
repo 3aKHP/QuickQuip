@@ -96,7 +96,10 @@ def register_scheduler_commands(on_command, Message, MessageSegment) -> None:
             kind, recurring, rest = _parse_add_flags(rest)
             parts = rest.split(maxsplit=5)
             if len(parts) < 6:
-                await schedule_cmd.finish("用法：/schedule add [llm] [once] <cron 5段> <消息>，例如 /schedule add 0 9 * * * 早安")
+                await schedule_cmd.finish(
+                    "用法：/schedule add [llm] [once] <cron 5段> <消息>，"
+                    "例如 /schedule add 0 9 * * * 早安"
+                )
             cron = " ".join(parts[:5])
             message = parts[5]
             try:

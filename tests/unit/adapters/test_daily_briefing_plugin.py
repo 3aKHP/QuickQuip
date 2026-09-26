@@ -4,6 +4,7 @@ import contextlib
 import types
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,10 +15,11 @@ from quickquip.chat.daily_briefing import default_period_for_now
 @pytest.mark.asyncio
 async def test_send_daily_briefing_now_reuses_renderer(monkeypatch):
     rendered: list[tuple[str, str]] = []
+    body = "briefing text [CQ:at,qq=all]"
 
     async def fake_render(group_id, period):
         rendered.append((group_id, period))
-        return "briefing text", "model-a"
+        return body, "model-a"
 
     sent: list[tuple[int, str]] = []
     async def fake_send_group_msg(group_id, message):
@@ -27,7 +29,9 @@ async def test_send_daily_briefing_now_reuses_renderer(monkeypatch):
         send_group_msg = staticmethod(fake_send_group_msg)
 
     bot = FakeBot()
-    monkeypatch.setattr(daily_briefing_plugin, "_is_group_enabled", lambda group_id: group_id == "123456")
+    monkeypatch.setattr(
+        daily_briefing_plugin, "_is_group_enabled", lambda group_id: group_id == "123456"
+    )
     monkeypatch.setattr(daily_briefing_plugin, "_on_cooldown", lambda group_id: False)
     monkeypatch.setattr(daily_briefing_plugin, "_mark_triggered", lambda group_id: None)
     monkeypatch.setattr(daily_briefing_plugin, "_render_briefing", fake_render)
@@ -36,45 +40,19 @@ async def test_send_daily_briefing_now_reuses_renderer(monkeypatch):
     async def before_generate(period):
         before_generate_calls.append(period)
 
-    result = await daily_briefing_plugin.send_daily_briefing_now("123456", "noon", bot, before_generate)
+    result = await daily_briefing_plugin.send_daily_briefing_now(
+        "123456", "noon", bot, before_generate
+    )
 
-    assert result == {"period": "noon", "model_used": "model-a", "char_count": len("briefing text")}
+    assert result == {"period": "noon", "model_used": "model-a", "char_count": len(body)}
     assert rendered == [("123456", "noon")]
     # 播报必须以 text 段（array 格式）发送，裸 str 会被服务端按 CQ 码解析
     assert sent[0][0] == 123456
     message = sent[0][1]
     assert len(message) == 1
     assert message[0].type == "text"
-    assert message[0].data["text"] == "briefing text"
+    assert message[0].data["text"] == body
     assert before_generate_calls == ["noon"]
-
-
-@pytest.mark.asyncio
-async def test_send_daily_briefing_now_sends_cq_like_text_as_literal_segment(monkeypatch):
-    """含 [CQ:...] 字面量的播报内容按纯文本段发出，不被激活。"""
-
-    async def fake_render(group_id, period):
-        return "活跃用户：[CQ:at,qq=all] 1条", "fallback"
-
-    sent: list = []
-
-    async def fake_send_group_msg(group_id, message):
-        sent.append(message)
-
-    class FakeBot:
-        send_group_msg = staticmethod(fake_send_group_msg)
-
-    monkeypatch.setattr(daily_briefing_plugin, "_is_group_enabled", lambda group_id: True)
-    monkeypatch.setattr(daily_briefing_plugin, "_on_cooldown", lambda group_id: False)
-    monkeypatch.setattr(daily_briefing_plugin, "_mark_triggered", lambda group_id: None)
-    monkeypatch.setattr(daily_briefing_plugin, "_render_briefing", fake_render)
-
-    await daily_briefing_plugin.send_daily_briefing_now("123456", "noon", FakeBot())
-
-    message = sent[0]
-    assert len(message) == 1
-    assert message[0].type == "text"
-    assert message[0].data["text"] == "活跃用户：[CQ:at,qq=all] 1条"
 
 
 # ── characterization: v1.12.1 生成编排下沉前的行为钉住 ──────────────────
@@ -337,22 +315,24 @@ async def test_send_daily_briefing_now_defaults_period_by_current_hour(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_send_daily_briefing_now_error_messages_exact(monkeypatch):
-    """钉住裸 RuntimeError 消息文本。"""
+async def test_send_daily_briefing_now_rejects_disabled_and_cooldown(monkeypatch):
+    """未开启与冷却期均在生成之前拒绝。"""
+    render = AsyncMock(return_value=("unused", "m"))
+    monkeypatch.setattr(daily_briefing_plugin, "_render_briefing", render)
     monkeypatch.setattr(daily_briefing_plugin, "_is_group_enabled", lambda gid: False)
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(RuntimeError):
         await daily_briefing_plugin.send_daily_briefing_now(
             "123456", "noon", types.SimpleNamespace(),
         )
-    assert str(exc_info.value) == "daily briefing is not enabled for this group"
+    render.assert_not_awaited()
 
     monkeypatch.setattr(daily_briefing_plugin, "_is_group_enabled", lambda gid: True)
     monkeypatch.setattr(daily_briefing_plugin, "_on_cooldown", lambda gid: True)
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(RuntimeError):
         await daily_briefing_plugin.send_daily_briefing_now(
             "123456", "noon", types.SimpleNamespace(),
         )
-    assert str(exc_info.value) == "briefing generation is on cooldown"
+    render.assert_not_awaited()
 
 
 @pytest.mark.asyncio

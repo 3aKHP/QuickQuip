@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import random
-import re
 from datetime import datetime, timedelta, timezone
 from time import time
 
-from quickquip.adapters.nonebot.command_parts.common import _evaluate_luck, _fence_luck_tips, _glue_luck_tips, _is_admin, _is_private_chat, _strip_command_name
+from quickquip.adapters.nonebot.command_parts._parsing import (
+    _extract_at_target,
+    _raw_message_text,
+)
+from quickquip.adapters.nonebot.command_parts.common import (
+    _evaluate_luck,
+    _fence_luck_tips,
+    _glue_luck_tips,
+    _is_admin,
+    _is_private_chat,
+    _strip_command_name,
+)
 from quickquip.app.message_pipeline import game_economy, niuniu_store
 from quickquip.common.rate_limit import SlidingWindowRateLimiter
+from quickquip.games.identity import display_resolver
 from quickquip.games.niuniu import fence_cd, fenced_cd, fencing, get_comment, glue_cd, gluing
 
 # Per-group RPM rate limiters — created lazily, reaped periodically
@@ -106,7 +117,8 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         balance = game_economy.get_balance(uid, str(event.group_id))
         if balance["gold"] < niuniu_store.config.unsubscribe_gold:
             await nn_unsubscribe.finish(
-                f"你的金币不足 {niuniu_store.config.unsubscribe_gold}，无法注销牛牛！（当前 {balance['gold']} 金币）"
+                f"你的金币不足 {niuniu_store.config.unsubscribe_gold}，无法注销牛牛！"
+                f"（当前 {balance['gold']} 金币）"
             )
         game_economy.deduct_gold(uid, str(event.group_id), niuniu_store.config.unsubscribe_gold)
         niuniu_store.unsubscribe(uid)
@@ -128,7 +140,10 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         else:
             depth_rank = niuniu_store.get_rank_position(uid, "depth")
             abs_rank = niuniu_store.get_rank_position(uid, "absolute")
-            rank_str = f"总榜第 {natural_rank} 名 | 深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
+            rank_str = (
+                f"总榜第 {natural_rank} 名 | "
+                f"深度榜第 {depth_rank} 名 | 绝对值榜第 {abs_rank} 名"
+            )
         last_glue = niuniu_store.latest_record_time(uid, "gluing")
         glue_luck = niuniu_store.get_glue_luck(uid)
         fence_luck = niuniu_store.get_fence_luck(uid)
@@ -192,22 +207,8 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
                 )
             )
 
-        # Extract @target — prefer raw_message (preserves self-@ that
-        # get_message segments may strip), fall back to segment parsing.
-        target_uid = None
-        raw = getattr(event, "raw_message", None) or str(event.get_message())
-        m = re.search(r"\[CQ:at,qq=(\d+)\]", raw)
-        if m:
-            target_uid = m.group(1)
-        if not target_uid:
-            for seg in event.get_message():
-                seg_type = getattr(seg, "type", None)
-                data = getattr(seg, "data", {})
-                if seg_type == "at":
-                    qq = str(data.get("qq", "") or "").strip()
-                    if qq and qq != "all":
-                        target_uid = qq
-                        break
+        # Extract @target — 段优先、raw_message 回退保 self-@（见 _extract_at_target）。
+        target_uid = _extract_at_target(_raw_message_text(event), event.get_message())
         if not target_uid:
             await nn_fence.finish("你要和谁击剑？请 @一位用户")
 
@@ -228,13 +229,22 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
                          group_id=str(event.group_id))
         await nn_fence.finish(result)
 
-    def _build_rank_text(entries: list[dict], title: str, unit: str = "cm") -> str:
+    def _build_rank_text(
+        entries: list[dict], title: str, unit: str = "cm", group_id: str | None = None
+    ) -> str:
         if not entries:
             return f"{title}\n暂无数据…"
+        name_of = display_resolver(group_id)
         lines = [f"🏆 {title}："]
         for i, e in enumerate(entries, 1):
-            lines.append(f"{i}. QQ:{e['uid']} — {e['length']} {unit}")
+            lines.append(f"{i}. {name_of(e['uid'])} — {e['length']} {unit}")
         return "\n".join(lines)
+
+    def _rank_group(event) -> str | None:
+        # 总排行命令允许私聊调用，私聊事件没有 group_id 属性（不只是
+        # 值为空），必须 getattr 兜底；None 走纯全局 scope。
+        gid = getattr(event, "group_id", None)
+        return str(gid) if gid else None
 
     nn_len_rank = on_command("牛牛长度排行", priority=10, block=True)
 
@@ -247,7 +257,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_length(limit=n)
-        await nn_len_rank.finish(_build_rank_text(entries, "牛牛长度排行"))
+        await nn_len_rank.finish(
+            _build_rank_text(entries, "牛牛长度排行", group_id=_rank_group(event))
+        )
 
     nn_len_rank_all = on_command("牛牛长度总排行", priority=10, block=True)
 
@@ -258,7 +270,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_length(limit=n)
-        await nn_len_rank_all.finish(_build_rank_text(entries, "牛牛长度总排行（全局）"))
+        await nn_len_rank_all.finish(
+            _build_rank_text(entries, "牛牛长度总排行（全局）", group_id=_rank_group(event))
+        )
 
     nn_depth_rank = on_command("牛牛深度排行", priority=10, block=True)
 
@@ -271,7 +285,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_depth(limit=n)
-        await nn_depth_rank.finish(_build_rank_text(entries, "牛牛深度排行"))
+        await nn_depth_rank.finish(
+            _build_rank_text(entries, "牛牛深度排行", group_id=_rank_group(event))
+        )
 
     nn_depth_rank_all = on_command("牛牛深度总排行", priority=10, block=True)
 
@@ -282,7 +298,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_depth(limit=n)
-        await nn_depth_rank_all.finish(_build_rank_text(entries, "牛牛深度总排行（全局）"))
+        await nn_depth_rank_all.finish(
+            _build_rank_text(entries, "牛牛深度总排行（全局）", group_id=_rank_group(event))
+        )
 
     nn_natural_rank = on_command("牛牛总排行", priority=10, block=True)
 
@@ -295,7 +313,11 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_natural(limit=n)
-        await nn_natural_rank.finish(_build_rank_text(entries, "牛牛总排行（自然数值）"))
+        await nn_natural_rank.finish(
+            _build_rank_text(
+                entries, "牛牛总排行（自然数值）", group_id=_rank_group(event)
+            )
+        )
 
     nn_abs_rank = on_command("牛牛绝对值排行", priority=10, block=True)
 
@@ -308,7 +330,9 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_absolute(limit=n)
-        await nn_abs_rank.finish(_build_rank_text(entries, "牛牛绝对值排行"))
+        await nn_abs_rank.finish(
+            _build_rank_text(entries, "牛牛绝对值排行", group_id=_rank_group(event))
+        )
 
     nn_abs_rank_all = on_command("牛牛绝对值总排行", priority=10, block=True)
 
@@ -319,7 +343,11 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
         n = int(args) if args.isdigit() else 10
         n = min(n, 50)
         entries = niuniu_store.rank_by_absolute(limit=n)
-        await nn_abs_rank_all.finish(_build_rank_text(entries, "牛牛绝对值总排行（全局）"))
+        await nn_abs_rank_all.finish(
+            _build_rank_text(
+                entries, "牛牛绝对值总排行（全局）", group_id=_rank_group(event)
+            )
+        )
 
     nn_records = on_command("我的牛牛战绩", priority=10, block=True)
 
@@ -349,7 +377,10 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             act = action_labels.get(r["action"], r["action"])
             diff = r["diff"]
             sign = "+" if diff > 0 else ""
-            lines.append(f"{act} | {r['origin_length']} → {r['new_length']} ({sign}{diff}) | {_fmt_time(r['created_at'])}")
+            lines.append(
+                f"{act} | {r['origin_length']} → {r['new_length']} "
+                f"({sign}{diff}) | {_fmt_time(r['created_at'])}"
+            )
         await nn_records.finish("\n".join(lines))
 
     nn_glue_luck = on_command("打胶运势", priority=10, block=True)

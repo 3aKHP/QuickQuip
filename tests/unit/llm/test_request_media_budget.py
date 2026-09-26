@@ -48,7 +48,13 @@ def _payload_images(value):
             yield from _payload_images(child)
 
 
-@pytest.fixture(params=[("openai", OpenAIProviderClient), ("claude", ClaudeProviderClient), ("gemini", GeminiProviderClient)])
+@pytest.fixture(
+    params=[
+        ("openai", OpenAIProviderClient),
+        ("claude", ClaudeProviderClient),
+        ("gemini", GeminiProviderClient),
+    ]
+)
 def client(request, monkeypatch):
     protocol, client_type = request.param
     config = ProviderConfig(id="review", protocol=protocol, base_url="https://example.test/v1",
@@ -81,8 +87,11 @@ async def test_same_content_dedupes_across_user_and_tool_batches(client, monkeyp
     request = _request([
         LLMConversationMessage(role="user", content="look", image_urls=[url]),
         LLMConversationMessage(role="assistant", tool_calls=calls[:2]),
-        *[LLMConversationMessage(role="tool", content="result", tool_call_id=call.id,
-                                  tool_name=call.name, inline_images=[_image(raw)]) for call in calls[:2]],
+        *[
+            LLMConversationMessage(role="tool", content="result", tool_call_id=call.id,
+                                   tool_name=call.name, inline_images=[_image(raw)])
+            for call in calls[:2]
+        ],
         LLMConversationMessage(role="assistant", tool_calls=calls[2:]),
         LLMConversationMessage(role="tool", content="result", tool_call_id="t2",
                                tool_name="look", inline_images=[_image(raw)]),
@@ -93,11 +102,17 @@ async def test_same_content_dedupes_across_user_and_tool_batches(client, monkeyp
     if client.config.protocol == "openai":
         ids = [msg["tool_call_id"] for msg in payload["messages"] if msg["role"] == "tool"]
     elif client.config.protocol == "claude":
-        ids = [block["tool_use_id"] for msg in payload["messages"] if isinstance(msg["content"], list)
-               for block in msg["content"] if block["type"] == "tool_result"]
+        ids = [
+            block["tool_use_id"]
+            for msg in payload["messages"] if isinstance(msg["content"], list)
+            for block in msg["content"] if block["type"] == "tool_result"
+        ]
     else:
-        ids = [part["functionResponse"]["id"] for msg in payload["contents"] for part in msg["parts"]
-               if "functionResponse" in part]
+        ids = [
+            part["functionResponse"]["id"]
+            for msg in payload["contents"] for part in msg["parts"]
+            if "functionResponse" in part
+        ]
     assert ids == ["t0", "t1", "t2"]
 
 
@@ -119,7 +134,9 @@ async def test_unlimited_budget_still_dedupes_and_ignores_failed_tool_images(cli
     client.config = replace(client.config, max_inline_media_bytes=0)
     request = _request([
         LLMConversationMessage(role="user", content="old", inline_images=[_image(a)]),
-        LLMConversationMessage(role="user", content="current", inline_images=[_image(a), _image(b)]),
+        LLMConversationMessage(
+            role="user", content="current", inline_images=[_image(a), _image(b)]
+        ),
         LLMConversationMessage(role="assistant", tool_calls=[LLMToolCall("t1", "look", "{}")]),
         LLMConversationMessage(role="tool", content="failed", tool_name="look", tool_call_id="t1",
                                is_tool_error=True, inline_images=[_image(error_image)]),
@@ -136,7 +153,9 @@ async def test_concurrent_requests_have_independent_budgets(client, monkeypatch)
         return LLMImageInput(url, "image/png", base64.b64encode(raw).decode("ascii"))
     monkeypatch.setattr(client, "_download_image", download)
     request = _request([LLMConversationMessage(role="user", content="image", image_urls=["https://example.test/a.png"])])
-    results = await asyncio.gather(client._build_request_parts(request), client._build_request_parts(request))
+    results = await asyncio.gather(
+        client._build_request_parts(request), client._build_request_parts(request)
+    )
     assert [list(_payload_images(payload)) for _, _, payload in results] == [[raw], [raw]]
 
 

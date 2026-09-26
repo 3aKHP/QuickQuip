@@ -126,7 +126,10 @@ def test_render_keeps_scan_interval_fallback_dynamic(temp_awakening_config):
 
 def test_set_awakening_settings_queues_awakening_reload(monkeypatch, temp_awakening_config):
     captured: list[str] = []
-    monkeypatch.setattr(awakening_route.action_queue, "enqueue", lambda action_type: captured.append(action_type) or {"id": "a1"})
+    monkeypatch.setattr(
+        awakening_route.action_queue, "enqueue",
+        lambda action_type: captured.append(action_type) or {"id": "a1"},
+    )
     monkeypatch.setattr(awakening_route.audit_logger, "log", lambda *args, **kwargs: None)
 
     result = awakening_route.set_awakening_settings(

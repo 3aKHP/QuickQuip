@@ -53,6 +53,12 @@ services:
       - ../llm_about:/app/llm_about:ro
       - ../bot.py:/app/bot.py:ro
       - ../src:/app/src:ro
+      # Skill 目录（可选）：本地把 skills.example/ 中需要的 skill 复制进 skills/ 后
+      # 随发布上传；skills/ 缺失时按未部署处理（工具不注册、零可见）。
+      - ../skills:/app/skills:ro
+      # host-healthcheck 可选增强（L2）：宿主机 /proc 只读挂载，默认关闭。
+      # 只读、无 privileged、不挂 docker.sock；启用时去掉下一行的注释。
+      # - /proc:/host/proc:ro
     restart: unless-stopped
 
   web-admin:

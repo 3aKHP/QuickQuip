@@ -256,7 +256,9 @@ class MCPClient:
             raise MCPError(f"MCP 工具 {tool_name} 返回了不可识别的响应")
         return _format_tool_result(result)
 
-    async def _call_tool_modern(self, tool_name: str, arguments: dict[str, Any]) -> MCPToolCallResult:
+    async def _call_tool_modern(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> MCPToolCallResult:
         assert self._modern_session is not None
         result = await self._modern_session.request(
             "tools/call",
@@ -310,7 +312,11 @@ class MCPClientManager:
         if isinstance(exc, (MCPLegacyFallbackSignal,)):
             return False
         if isinstance(exc, MCPError):
-            if exc.failure_kind in (MCP_FAILURE_AUTH, MCP_FAILURE_CONFIG, MCP_FAILURE_MODERN_NEGOTIATION):
+            if exc.failure_kind in (
+                MCP_FAILURE_AUTH,
+                MCP_FAILURE_CONFIG,
+                MCP_FAILURE_MODERN_NEGOTIATION,
+            ):
                 return False
             if exc.http_status and 400 <= exc.http_status < 500:
                 return False

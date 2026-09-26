@@ -1,7 +1,16 @@
 from __future__ import annotations
 
-from quickquip.adapters.nonebot.command_parts.common import _allow_scope_management, _is_private_chat
-from quickquip.app.message_pipeline import RULE_SWITCH_PATH, _ensure_llm_bindings, get_llm_service, reload_chat_rules_pipeline, rule_switch
+from quickquip.adapters.nonebot.command_parts.common import (
+    _allow_scope_management,
+    _is_private_chat,
+)
+from quickquip.app.message_pipeline import (
+    RULE_SWITCH_PATH,
+    _ensure_llm_bindings,
+    get_llm_service,
+    reload_chat_rules_pipeline,
+    rule_switch,
+)
 from quickquip.common.event_utils import is_admin as _is_admin
 
 

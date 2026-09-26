@@ -28,7 +28,10 @@ def _req() -> LLMRequest:
 async def test_complete_ok_records_usage(monkeypatch):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
         calls.append((state, response is not None))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -50,7 +53,10 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
     entered = asyncio.Event()
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
         calls.append(state)
         entered.set()
         await gate.wait()
@@ -74,7 +80,10 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
 async def test_complete_error_records_state(monkeypatch):
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
         calls.append((state, response))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -95,7 +104,10 @@ async def test_complete_cancelled_propagates(monkeypatch):
     CancelledError 正确传播且计量任务仍被调度执行。"""
     calls = []
 
-    async def spy(client, request, response, started, stream_used, state, error_msg="", finished_at=None):
+    async def spy(
+        client, request, response, started, stream_used, state,
+        error_msg="", finished_at=None,
+    ):
         calls.append((state, response))
 
     monkeypatch.setattr("quickquip.llm.usage._record_usage", spy)
@@ -138,10 +150,11 @@ async def test_complete_error_message_masks_url(monkeypatch, tmp_path):
     assert "api.example.com" not in row["error_message"]
 
 
-async def test_record_usage_carries_envelope_tokens_within_meter(monkeypatch, tmp_path):
-    """envelope_meter 内落的行带 envelope_tokens，meter 外落行则为 NULL；
-    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
-    from quickquip.llm.usage import _record_usage, envelope_meter
+async def test_record_usage_carries_context_meters_and_resets(monkeypatch, tmp_path):
+    """同一请求的四种上下文计量一起落库，退出作用域后均复位。"""
+    from quickquip.llm.usage import (
+        _record_usage, envelope_meter, epoch_meter, media_meter, patch_meter,
+    )
     from quickquip.llm.usage_store import LLMUsageStore
     from plugins.llm_config import ProviderConfig
     from plugins.llm_provider import LLMResponse
@@ -159,111 +172,18 @@ async def test_record_usage_carries_envelope_tokens_within_meter(monkeypatch, tm
         model = "m"
 
     response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
-    with envelope_meter(456):
+    with envelope_meter(456), epoch_meter(4200), media_meter(2), patch_meter(360):
         await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
         await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
     await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
     with fake_store.connect() as conn:
         rows = conn.execute(
-            "SELECT envelope_tokens FROM llm_usage_events ORDER BY id"
+            "SELECT envelope_tokens, epoch_history_tokens, media_image_count, patch_tokens "
+            "FROM llm_usage_events ORDER BY id"
         ).fetchall()
-    assert [r["envelope_tokens"] for r in rows] == [456, 456, None]
-
-
-async def test_record_usage_carries_epoch_history_tokens_within_meter(monkeypatch, tmp_path):
-    """epoch_meter 内落的行带 epoch_history_tokens，meter 外落行则为 NULL；
-    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
-    from quickquip.llm.usage import _record_usage, epoch_meter
-    from quickquip.llm.usage_store import LLMUsageStore
-    from plugins.llm_config import ProviderConfig
-    from plugins.llm_provider import LLMResponse
-
-    fake_store = LLMUsageStore(tmp_path / "u.db")
-    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
-
-    class FakeClient:
-        config = ProviderConfig(
-            id="p", protocol="claude", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
-        )
-
-    class FakeReq:
-        model = "m"
-
-    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
-    with epoch_meter(4200):
-        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-    with fake_store.connect() as conn:
-        rows = conn.execute(
-            "SELECT epoch_history_tokens FROM llm_usage_events ORDER BY id"
-        ).fetchall()
-    assert [r["epoch_history_tokens"] for r in rows] == [4200, 4200, None]
-
-
-async def test_record_usage_carries_media_image_count_within_meter(monkeypatch, tmp_path):
-    """media_meter 内落的行带 media_image_count，meter 外落行则为 NULL；
-    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
-    from quickquip.llm.usage import _record_usage, media_meter
-    from quickquip.llm.usage_store import LLMUsageStore
-    from plugins.llm_config import ProviderConfig
-    from plugins.llm_provider import LLMResponse
-
-    fake_store = LLMUsageStore(tmp_path / "u.db")
-    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
-
-    class FakeClient:
-        config = ProviderConfig(
-            id="p", protocol="claude", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
-        )
-
-    class FakeReq:
-        model = "m"
-
-    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
-    with media_meter(2):
-        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-    with fake_store.connect() as conn:
-        rows = conn.execute(
-            "SELECT media_image_count FROM llm_usage_events ORDER BY id"
-        ).fetchall()
-    assert [r["media_image_count"] for r in rows] == [2, 2, None]
-
-
-async def test_record_usage_carries_patch_tokens_within_meter(monkeypatch, tmp_path):
-    """patch_meter 内落的行带 patch_tokens，meter 外落行则为 NULL；
-    同 meter 内多行（Agent Loop 多次 complete）带同值。"""
-    from quickquip.llm.usage import _record_usage, patch_meter
-    from quickquip.llm.usage_store import LLMUsageStore
-    from plugins.llm_config import ProviderConfig
-    from plugins.llm_provider import LLMResponse
-
-    fake_store = LLMUsageStore(tmp_path / "u.db")
-    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
-
-    class FakeClient:
-        config = ProviderConfig(
-            id="p", protocol="claude", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
-        )
-
-    class FakeReq:
-        model = "m"
-
-    response = LLMResponse(text="ok", model="m", input_tokens=10, output_tokens=5)
-    with patch_meter(360):
-        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-        await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-    await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
-    with fake_store.connect() as conn:
-        rows = conn.execute(
-            "SELECT patch_tokens FROM llm_usage_events ORDER BY id"
-        ).fetchall()
-    assert [r["patch_tokens"] for r in rows] == [360, 360, None]
+    assert [tuple(r) for r in rows] == [
+        (456, 4200, 2, 360), (456, 4200, 2, 360), (None, None, None, None),
+    ]
 
 
 async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
@@ -370,6 +290,8 @@ async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_pa
     assert await _record("claude") == "exclusive"
     assert await _record("openai") == "inclusive"
     assert await _record("gemini") == "inclusive"
+    # openai_responses 的 input_tokens 含 cached_tokens（inclusive，1.16 PR-A 核对）
+    assert await _record("openai_responses") == "inclusive"
 
 
 async def test_record_usage_persists_finish_reason(monkeypatch, tmp_path):
@@ -427,8 +349,13 @@ async def test_summary_usage_records_response_outcome_without_losing_cost(monkey
         model = "m"
 
     responses = [
-        LLMResponse(text="完整", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"),
-        LLMResponse(text="残稿", model="m", input_tokens=100, output_tokens=50, finish_reason="MAX_TOKENS"),
+        LLMResponse(
+            text="完整", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"
+        ),
+        LLMResponse(
+            text="残稿", model="m", input_tokens=100, output_tokens=50,
+            finish_reason="MAX_TOKENS",
+        ),
         LLMResponse(text="  ", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"),
     ]
     with usage_scope("summary", group_id="10001"):

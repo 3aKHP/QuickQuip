@@ -59,6 +59,7 @@ try {
             if ($item -cnotmatch '^[a-zA-Z0-9_./-]+$' -or $item.StartsWith('/') -or $item.Contains('..')) { throw 'Invalid manifest entry' }
             if (-not (Test-Path $item)) { throw "Missing manifest entry: $item" }
         }
+        if (Test-Path -PathType Container 'skills') { $entries += 'skills' }
         New-Item -ItemType Directory $Temp | Out-Null
         $List = Join-Path $Temp 'manifest.txt'
         $Archive = Join-Path $Temp 'release.tar.gz'
@@ -80,7 +81,7 @@ try {
     if ($Mode -in @('deploy', 'migrate')) {
         Invoke-Native 'archive upload' { scp @SshArgs $Archive "${HostAlias}:$Incoming/release.tar.gz" }
         $shared = @('.env', 'prod/check_bot.sh', 'prod/cron_check_bot.sh')
-        foreach ($item in @('prod/sendkey.env', 'data/fonts/NotoSansSC-Regular.ttf', 'data/tieba/storage_state.json')) {
+        foreach ($item in @('prod/sendkey.env', 'data/fonts/NotoSansSC-Regular.ttf', 'data/tieba/storage_state.json', 'prod/host_metrics_collector.py')) {
             if (Test-Path $item) { $shared += $item }
         }
         foreach ($item in $shared) {

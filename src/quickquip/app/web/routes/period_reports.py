@@ -60,7 +60,8 @@ def list_period_reports(group_id: str, period_type: str):
     conn = _connect()
     try:
         rows = conn.execute(
-            """SELECT group_id, period_type, period_key, generated_at, published_at, model_used, char_count
+            """SELECT group_id, period_type, period_key, generated_at, published_at,
+                      model_used, char_count
                FROM period_reports
                WHERE group_id = ? AND period_type = ?
                ORDER BY period_key DESC""",
@@ -81,7 +82,8 @@ def get_period_report(group_id: str, period_type: str, period_key: str):
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT * FROM period_reports WHERE group_id = ? AND period_type = ? AND period_key = ?",
+            "SELECT * FROM period_reports "
+            "WHERE group_id = ? AND period_type = ? AND period_key = ?",
             (group_id, period_type, period_key),
         ).fetchone()
         if not row:
@@ -91,7 +93,10 @@ def get_period_report(group_id: str, period_type: str, period_key: str):
         conn.close()
 
 
-@router.get("/period-reports/{group_id}/{period_type}/{period_key}/text", response_class=PlainTextResponse)
+@router.get(
+    "/period-reports/{group_id}/{period_type}/{period_key}/text",
+    response_class=PlainTextResponse,
+)
 def get_period_report_text(group_id: str, period_type: str, period_key: str):
     _validate_group_id(group_id)
     _validate_period_type(period_type)
@@ -101,7 +106,8 @@ def get_period_report_text(group_id: str, period_type: str, period_key: str):
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT content FROM period_reports WHERE group_id = ? AND period_type = ? AND period_key = ?",
+            "SELECT content FROM period_reports "
+            "WHERE group_id = ? AND period_type = ? AND period_key = ?",
             (group_id, period_type, period_key),
         ).fetchone()
         if not row:

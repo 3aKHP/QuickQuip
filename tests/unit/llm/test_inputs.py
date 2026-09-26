@@ -7,7 +7,15 @@ from plugins.llm_inputs import extract_llm_input, extract_llm_prompt, extract_pr
 from plugins.llm_runtime import ResolvedGroupSettings
 
 from tests.fixtures.configs import IDENTITIES_YAML
-from tests.fixtures.onebot import DummyMessage, DummyReply, DummySender, at_seg, image_seg, record_seg, text_seg
+from tests.fixtures.onebot import (
+    DummyMessage,
+    DummyReply,
+    DummySender,
+    at_seg,
+    image_seg,
+    record_seg,
+    text_seg,
+)
 
 
 PREFIX_SETTINGS = ResolvedGroupSettings(

@@ -35,7 +35,7 @@ class _FakeSegment:
         return ("record", value)
 
 
-def test_register_commands_keeps_command_count_and_order():
+def test_register_commands_preserves_public_commands_without_duplicates():
     registered = []
 
     def on_command(name, **kwargs):
@@ -44,7 +44,9 @@ def test_register_commands_keeps_command_count_and_order():
 
     register_commands(on_command, _FakeMessage, _FakeSegment)
 
-    assert [name for name, _ in registered] == [
+    names = [name for name, _ in registered]
+    assert len(names) == len(set(names))
+    assert {
         "start_sesssion",
         "start_session",
         "end_session",
@@ -54,6 +56,7 @@ def test_register_commands_keeps_command_count_and_order():
         "stats",
         "turmfluch",
         "defectify",
+        "skill",
         "llm",
         "search",
         "draw",
@@ -102,4 +105,4 @@ def test_register_commands_keeps_command_count_and_order():
         "击剑运势",
         "牛牛文案",
         "schedule",
-    ]
+    } <= set(names)

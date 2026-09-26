@@ -35,7 +35,10 @@ _FOREIGN_BLOCK_RE = re.compile(
 )
 # 属性值的三种引号形态；所有属性级检查统一经 _iter_tag_bodies 锚定到标签内
 _EVENT_ATTR_RE = re.compile(r"""\s+on[a-zA-Z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)""")
-_HREF_ATTR_RE = re.compile(r"""(\s+(?:xlink:)?href\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)""", re.IGNORECASE)
+_HREF_ATTR_RE = re.compile(
+    r"""(\s+(?:xlink:)?href\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)""",
+    re.IGNORECASE,
+)
 _TAG_RE = re.compile(r"<[^>]+>")
 _VIEWBOX_RE = re.compile(r"""viewBox\s*=\s*(["'])\s*([-\d.eE+,\s]+?)\1""", re.IGNORECASE)
 _SVG_ROOT_TAG_RE = re.compile(r"<svg\b[^>]*>", re.IGNORECASE)
@@ -245,4 +248,6 @@ def _check_filter_region(filter_tag: str) -> None:
             rf"""{attr}\s*=\s*["']([\d.]+)%["']""", filter_tag, re.IGNORECASE
         )
         if raw is not None and float(raw.group(1)) > MAX_FILTER_REGION_RATIO * 100:
-            raise SvgSanitizeError(f"filter {attr} 区域不能超过 {MAX_FILTER_REGION_RATIO * 100:.0f}%")
+            raise SvgSanitizeError(
+                f"filter {attr} 区域不能超过 {MAX_FILTER_REGION_RATIO * 100:.0f}%"
+            )

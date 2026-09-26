@@ -106,7 +106,7 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 
 ## 接入点
 
-主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_result_pipeline.py`、`src/quickquip/llm/single_shot.py`、`src/quickquip/llm/service_parts/draw_svg.py` 和`src/quickquip/adapters/nonebot/command_parts/media.py`。
+主要文件：`src/quickquip/llm/service.py`、`src/quickquip/llm/tool_result_pipeline.py`、`src/quickquip/llm/single_shot.py`、`src/quickquip/llm/service_parts/draw_svg.py`、`src/quickquip/llm/service_parts/skills.py` 和`src/quickquip/adapters/nonebot/command_parts/media.py`。
 
 | 接入点 | 位置 | 行为 |
 |---|---|---|
@@ -115,11 +115,13 @@ Web Admin 提供只读状态接口 `GET /ops/api/sensitive-filter/status`，返�
 | 输出侧 | LLM 响应取出后、写入 store 前 | block → 替换为 `DEFAULT_OUTPUT_FALLBACK`，写入历史的也是替换后的 |
 | **工具参数** | `tool_registry.execute()` 调用前 | block → 直接拒绝执行，返回错误 result，节省 token + 防止外部 API 收到违规查询 |
 | **工具结果** | `tool_registry.execute()` 返回后 | block 命中 ≤ 5 个且原文 ≥ 200 字 → scrub；否则整体替换为占位文本。两种分支都标记 `is_error=True`（让 LLM 知道结果不完整） |
+| **Skill 描述** | Skill 目录扫描后、描述清单注入系统提示前 | block 命中 → 整只剔除该 Skill（不出现在清单与工具面） |
+| **Skill 激活注入** | Skill 激活的指令正文并入会话前 | block → 本次不登记激活 |
 | **图片/语音生成输入** | `/draw`、`/tts` 调用生成 provider 前 | block → 终止命令，不向 provider 提交 prompt 或引用文本 |
 | **音乐生成输入** | 歌词生成或音乐生成 provider 调用前 | block → 终止命令，不提交 prompt、标题、歌词或引用文本 |
 | **歌词输出** | 外部歌词生成完成后、发送或继续谱曲前 | block → 使用输出兜底回复，不发送歌词，也不把歌词提交给音乐 provider |
 | **ASR 转写** | 转写文本并入普通 LLM prompt 后 | 复用输入侧扫描；原始音频会先发送给 ASR provider |
-| **图片转述** | 视觉模型返回描述后、描述注入主 LLM 前 | block → 终止主 LLM 请求；视觉模型已经读取原始图片 |
+| **图片转述** | 视觉模型返回描述后、描述注入主 LLM 前 | block → 终止主 LLM 请求；视觉模型已经读取原始图片。非视觉模型的工具结果图片转述文本走上方「工具结果」扫描分支（按工具结果规则替换） |
 | **故障化** | `/defectify` 直连 provider 的输入和输出边界 | 输入 block → 不调用 provider；输出 block → 使用输出兜底回复 |
 | **turmfluch** | `/turmfluch` 一次性生成的输入（`turmfluch_input`）与输出（`turmfluch_output`）边界（`src/quickquip/llm/single_shot.py`） | 输入 block → 不调用 provider；输出 block → 使用输出兜底回复 |
 | **STS card_le 输入** | `run_card_le_nearest()` 的 LLM 调用前（`card_le_input`，`src/quickquip/llm/single_shot.py`） | block → 不调用 LLM |

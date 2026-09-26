@@ -164,7 +164,11 @@ def _sample_messages(messages: list[dict], limit: int) -> list[dict]:
         sampled.append(
             {
                 **item,
-                "time_label": datetime.fromtimestamp(ts, tz=_LOCAL_TZ).strftime("%H:%M") if ts else "",
+                "time_label": (
+                    datetime.fromtimestamp(ts, tz=_LOCAL_TZ).strftime("%H:%M")
+                    if ts
+                    else ""
+                ),
             }
         )
     return sampled

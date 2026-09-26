@@ -12,6 +12,7 @@ from plugins.llm_provider import (
     ClaudeProviderClient,
     GeminiProviderClient,
     OpenAIProviderClient,
+    OpenAIResponsesProviderClient,
 )
 
 
@@ -85,3 +86,22 @@ class FakeGeminiClient(GeminiProviderClient):
         self.last_headers = headers
         self.last_url = url
         return self.response_data
+
+
+class FakeOpenAIResponsesClient(OpenAIResponsesProviderClient):
+    """按调用顺序回放预置响应体的 Responses client（记录每次请求 payload）。"""
+
+    def __init__(self, config: ProviderConfig, response_bodies: list[dict]):
+        super().__init__(_force_non_streaming(config))
+        self.response_bodies = list(response_bodies)
+        self.payloads: list[dict] = []
+
+    async def _prepare_image_inputs(self, image_urls, inline_images=None, *, budget=None):
+        return []
+
+    def _get_api_key(self) -> str:
+        return "test-key"
+
+    async def _post_json(self, url, headers, payload):
+        self.payloads.append(payload)
+        return self.response_bodies.pop(0)

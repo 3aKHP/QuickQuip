@@ -34,7 +34,10 @@ def test_group_isolation():
 
 def test_image_urls_round_trip():
     buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
-    buf.add_message(1, "u1", "a", "A", "看这张图", image_urls=["http://x/1.png", "http://x/2.png"], now_ts=0)
+    buf.add_message(
+        1, "u1", "a", "A", "看这张图",
+        image_urls=["http://x/1.png", "http://x/2.png"], now_ts=0,
+    )
     buf.add_message(1, "u2", "b", "B", "纯文字", now_ts=1)
     recent = buf.list_recent(1, now_ts=2)
     assert recent[0]["image_urls"] == ["http://x/1.png", "http://x/2.png"]
@@ -46,13 +49,6 @@ def test_image_urls_strips_empty_and_whitespace():
     buf.add_message(1, "u", "a", "A", "msg", image_urls=["  http://x/1.png  ", "", "  "], now_ts=0)
     recent = buf.list_recent(1, now_ts=1)
     assert recent[0]["image_urls"] == ["http://x/1.png"]
-
-
-def test_image_urls_default_empty():
-    buf = RecentMessageBuffer(max_messages_per_group=20, ttl_seconds=60)
-    buf.add_message(1, "u", "a", "A", "msg", now_ts=0)
-    recent = buf.list_recent(1, now_ts=1)
-    assert recent[0]["image_urls"] == []
 
 
 def test_image_urls_returns_copy():

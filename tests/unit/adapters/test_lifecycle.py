@@ -53,11 +53,15 @@ async def test_shutdown_closes_stores_even_if_save_all_fails(monkeypatch):
     fake_scheduler_module = types.ModuleType("nonebot_plugin_apscheduler")
     fake_scheduler_module.scheduler = types.SimpleNamespace(add_job=lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "nonebot_plugin_apscheduler", fake_scheduler_module)
-    monkeypatch.setattr(lifecycle, "tieba_service", types.SimpleNamespace(shutdown=fake_tieba_shutdown))
+    monkeypatch.setattr(
+        lifecycle, "tieba_service", types.SimpleNamespace(shutdown=fake_tieba_shutdown)
+    )
     monkeypatch.setattr(
         lifecycle,
         "get_llm_service",
-        lambda: types.SimpleNamespace(shutdown=fake_llm_shutdown, startup=lambda *args, **kwargs: None),
+        lambda: types.SimpleNamespace(
+            shutdown=fake_llm_shutdown, startup=lambda *args, **kwargs: None
+        ),
     )
     monkeypatch.setattr(lifecycle, "save_all", fake_save_all)
     monkeypatch.setattr(lifecycle, "close_persistent_stores", fake_close_persistent_stores)
@@ -82,12 +86,18 @@ def test_reload_if_changed_watches_awakening_config(monkeypatch, tmp_path):
     calls: list[str] = []
     monkeypatch.setattr(lifecycle, "RULE_SWITCH_PATH", rule_path)
     monkeypatch.setattr(lifecycle, "CONFIG_AWAKENING_TOML", awakening_path)
-    monkeypatch.setattr(lifecycle.rule_switch, "load", lambda path: calls.append(f"rule:{Path(path).name}"))
-    monkeypatch.setattr(lifecycle, "reload_awakening_and_reschedule", lambda: calls.append("awakening"))
+    monkeypatch.setattr(
+        lifecycle.rule_switch, "load", lambda path: calls.append(f"rule:{Path(path).name}")
+    )
+    monkeypatch.setattr(
+        lifecycle, "reload_awakening_and_reschedule", lambda: calls.append("awakening")
+    )
     monkeypatch.setattr(lifecycle.daily_enabled_groups, "path", daily_path)
     monkeypatch.setattr(lifecycle.daily_enabled_groups, "load", lambda: calls.append("daily"))
     monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "path", briefing_path)
-    monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "load", lambda: calls.append("briefing"))
+    monkeypatch.setattr(
+        lifecycle.daily_briefing_enabled_groups, "load", lambda: calls.append("briefing")
+    )
     monkeypatch.setattr(lifecycle.boredom_enabled_groups, "path", boredom_path)
     monkeypatch.setattr(lifecycle.boredom_enabled_groups, "load", lambda: calls.append("boredom"))
 
@@ -111,18 +121,25 @@ def test_reload_if_changed_watches_period_report_groups(monkeypatch, tmp_path):
     boredom_path = tmp_path / "boredom.json"
     weekly_path = tmp_path / "weekly.json"
     monthly_path = tmp_path / "monthly.json"
-    for path in (rule_path, awakening_path, daily_path, briefing_path, boredom_path, weekly_path, monthly_path):
+    for path in (
+        rule_path, awakening_path, daily_path, briefing_path,
+        boredom_path, weekly_path, monthly_path,
+    ):
         path.write_text("{}", encoding="utf-8")
 
     calls: list[str] = []
     monkeypatch.setattr(lifecycle, "RULE_SWITCH_PATH", rule_path)
     monkeypatch.setattr(lifecycle, "CONFIG_AWAKENING_TOML", awakening_path)
     monkeypatch.setattr(lifecycle.rule_switch, "load", lambda path: calls.append("rule"))
-    monkeypatch.setattr(lifecycle, "reload_awakening_and_reschedule", lambda: calls.append("awakening"))
+    monkeypatch.setattr(
+        lifecycle, "reload_awakening_and_reschedule", lambda: calls.append("awakening")
+    )
     monkeypatch.setattr(lifecycle.daily_enabled_groups, "path", daily_path)
     monkeypatch.setattr(lifecycle.daily_enabled_groups, "load", lambda: calls.append("daily"))
     monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "path", briefing_path)
-    monkeypatch.setattr(lifecycle.daily_briefing_enabled_groups, "load", lambda: calls.append("briefing"))
+    monkeypatch.setattr(
+        lifecycle.daily_briefing_enabled_groups, "load", lambda: calls.append("briefing")
+    )
     monkeypatch.setattr(lifecycle.boredom_enabled_groups, "path", boredom_path)
     monkeypatch.setattr(lifecycle.boredom_enabled_groups, "load", lambda: calls.append("boredom"))
     monkeypatch.setattr(lifecycle.weekly_enabled_groups, "path", weekly_path)

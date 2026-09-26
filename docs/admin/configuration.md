@@ -1,6 +1,6 @@
 # QuickQuip 配置参考
 
-本文档列出 QuickQuip 所有可配置项，按文件和作用域分类。
+本文档列出 QuickQuip 主要可配置项，按文件和作用域分类。
 
 ---
 
@@ -16,6 +16,7 @@
 | `QQ_ACCOUNT` | QQ 号（云端部署必填） | — |
 | `ONEBOT_WS_URLS` | OneBot V11 WebSocket 地址列表 | — |
 | `ONEBOT_ACCESS_TOKEN` | OneBot 接入令牌 | — |
+| `TZ` | 容器与进程时区（日志、定时任务展示时间等） | `Asia/Shanghai` |
 
 ### LLM API Keys
 
@@ -75,9 +76,7 @@ LLM 工具 `search_web` 与 `/search` 命令固定走项目内 SearXNG。普通�
 | 变量 | 说明 |
 |------|------|
 | `MCP_ARXIV_PAPERS_MOUNT` | arXiv MCP server 论文保存卷挂载，格式 `host-path:container-path`。默认 `arxiv-papers:/root/.arxiv-mcp-server/papers` |
-| `MCP_PRTS_WIKI_ENABLED` | 是否启用 PRTS Wiki MCP server。默认 `false` |
-| `MCP_PRTS_GAMEDATA_MOUNT` | PRTS Wiki 游戏数据卷挂载，格式 `/absolute/path:/data/gamedata:ro` |
-| `MCP_PRTS_STORYJSON_MOUNT` | PRTS Wiki 剧情 JSON 卷挂载，格式 `/absolute/path:/data/storyjson:ro` |
+
 其他 `${ENV_VAR}` 与 `${ENV_VAR:-default}` 语法在 `config/llm.toml` 的 MCP server 配置中均可用。
 
 ### Web Admin
@@ -200,7 +199,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `discovery_min_tools` | `auto` 模式下触发工具发现的可延迟工具数量阈值 | `10` |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数 | `5` |
 | `discovery_max_loaded_tools` | 一次 LLM 工具调用循环中最多动态加载的工具总数 | `12` |
-| `always_loaded` | 工具发现开启时仍然常驻暴露的工具名列表 | `["tool_search", "tool_list", "get_identity", "list_memories", "search_web"]` |
+| `always_loaded` | 工具发现开启时仍然常驻暴露的工具名列表；未配置时回退下表内置默认集 | `["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]` |
 
 `tool_search` 和 `tool_list` 是本地元工具，不依赖 Claude 原生 tool search。接入大量 MCP 工具时，模型会先用 `tool_search` 搜索相关能力；搜索不到时可用 `tool_list` 列出工具组、工具名或按精确工具名加载工具，下一轮再调用被加载的真实工具。
 
@@ -219,7 +218,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `id` | Provider 唯一标识（如 `openai-main`、`gemini-main`） | — |
-| `protocol` | 协议类型：`openai` / `claude` / `gemini` | — |
+| `protocol` | 协议类型：`openai` / `claude` / `gemini` / `openai_responses` | — |
 | `base_url` | API 中转地址 | — |
 | `api_key_env` | API key 所在环境变量名 | — |
 | `default_model` | 默认模型 ID | — |
@@ -242,16 +241,41 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
+| `responses_profile` | `openai_responses` 协议专属：后端能力位。`openai-public`（官方 `/v1/responses`）或 `codex-http-relay`（Codex 形态中转，不发 `service_tier`、容忍 `codex.*` 结构事件、终态缺省字段时以流式完整 item 为回放基准） | `openai-public` |
+| `reasoning_effort` | `openai_responses` 协议专属：思考档位 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`（超出后端词表自动降档到其最高支持档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 的 gpt-6/gpt-5.6 系六档全支持恒等；留空不发送 `reasoning` 字段）。独立于 `thinking_budget` 数字口径（后者仅 claude/gemini 生效） | `""` |
 
 > **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
 > **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
 
-> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `2097152`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片；第一张装不下的图片及后续低优先级图片全部跳过并记录日志。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算用于把请求体体积约束在上游网关风控上限之内（图片 base64 会被部分网关按文本估算 token）。
+> **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 
 > **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
+
+> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：同一 provider / 模型 / 档位 / 端点的会话保留完整推理连续性，历史工具循环按原生形态回放；切换任一维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
+
+### `[style_profiles]` — 共享风格段
+
+定义可被多个 provider 复用的 system prompt 风格段（多行字符串），provider 通过 `style_profile` 键引用：
+
+```toml
+[style_profiles]
+my_family = """
+……风格条目……
+"""
+
+[[providers]]
+id = "my-provider"
+style_profile = "my_family"   # 引用共享段
+style_overrides = "……"        # 可选，叠加微调
+```
+
+- 拼接顺序：`style_profile` 段在前，`style_overrides` 追加在后，整体附加到每次调用的 system prompt 末尾。
+- 家族内容为空串是合法形态：声明家族占位、不注入任何内容，引用方等价于无风格附加块（例如为后续调校预留条目）。
+- 引用未定义的 `style_profile` 会记录 error 日志并忽略该引用，provider 仅保留 `style_overrides`。
+- 内置示例四家族（`openai_family` / `gemini_family` / `claude_family` / `general`）随 `config/llm.toml.example` 分发，按模型谱系对位命名，可直接复用或改写。
 
 ### `[pricing.models]` — 模型定价（成本统计）
 
@@ -279,6 +303,21 @@ output_per_mtok = 0.40
 
 查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示“未定价”）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
 
+### `[skills]` — Skill 系统
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
+| `enabled` | Skill 系统总开关 | `true` |
+| `catalog_dir` | Skill 目录；留空 = 项目根 `skills/`，相对路径按项目根解析 | `""` |
+| `catalog_max_bytes` | 系统提示中 Skill 清单的字节预算上限，实际预算取 min(模型上下文窗口 2%, 此值) | `8192` |
+| `resource_max_bytes` | `read_skill_resource` 单次读取上限（字节） | `65536` |
+| `search_max_results` | `search_skill_resources` 命中条数上限 | `50` |
+| `search_max_output_bytes` | `search_skill_resources` 输出字节上限 | `32768` |
+| `script_timeout_ms` | `run_skill_script` 默认超时（毫秒）；单次调用可另行指定，硬上限 120000 | `30000` |
+| `script_max_output_bytes` | 脚本 stdout/stderr 各自的输出字节上限，超限截断 | `65536` |
+
+非法取值回退默认值并记录告警。`skills/` 为空目录或不存在时工具不注册、系统提示不变。部署方式、目录约定与安全模型见 [skills.md](skills.md)。
+
 ### `[mcp]` — MCP 总开关
 
 | 键 | 说明 |
@@ -302,9 +341,14 @@ output_per_mtok = 0.40
 | `image` | Docker 镜像（`transport = "docker"` 时） |
 | `command` | 启动命令（`transport = "stdio"` 时） |
 | `args` | 命令参数（`transport = "stdio"` 时） |
+| `cwd` | `stdio` 子进程工作目录；留空使用默认 |
 | `env` | 环境变量键值对，值支持 `${ENV_VAR}` / `${ENV_VAR:-default}` |
 | `mounts` | 卷挂载列表，格式 `host:container` 或 `host:container:ro` |
 | `docker_args` | 额外 Docker 运行参数 |
+| `docker_command` | docker transport 调用的 Docker 命令 | `docker` |
+| `pull_policy` | 镜像拉取策略：`always` / `missing` / `never` | `missing` |
+| `network` | 容器网络（如 `host`）；留空使用默认 | — |
+| `container_workdir` | 容器工作目录；留空使用镜像默认 | — |
 | `include_tools` | 该 server 暴露的工具白名单，支持 MCP 原始工具名或 QuickQuip 生成后的工具名 |
 | `exclude_tools` | 该 server 排除的工具列表，支持 MCP 原始工具名或 QuickQuip 生成后的工具名 |
 | `allowed_tools` | 兼容旧配置的白名单字段，新配置建议使用 `include_tools` |
@@ -327,7 +371,7 @@ output_per_mtok = 0.40
 | `max_output_chars` | 最大输出字符数 |
 | `model_cascade` | 模型级联列表（provider + model，失败自动降级） |
 
-`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求 16384（周/月报 8192），输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
+`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求：日报 16384、简报与周/月报 8192，输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
 
 ### `[daily_summary]` — 每日总结
 
@@ -360,7 +404,7 @@ output_per_mtok = 0.40
 
 ## config/generation.toml
 
-此文件不存在时，图片部分回退读取 `config/llm.toml` 中旧版 `[image_generation]` 段。
+此文件不存在时，各模态段回退读取 `config/llm.toml` 中的旧版配置段：图片 `[image_generation]`、语音 `[audio_generation]`、音乐 `[music_generation]`、语音识别 `[asr]`、SVG `[svg]`。
 
 图片、语音和音乐的 `prompt_blocklist` 是生成业务专属限制。配置了`config/sensitive_words.toml` 时，生成 prompt、标题、歌词和引用文本还会经过部署级统一敏感词过滤。该检查只处理文本，不审核输入或输出的图片像素、音频波形和音乐成品。
 
@@ -418,7 +462,7 @@ output_per_mtok = 0.40
 
 ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM 上下文。协议端若已在消息段中提供 `text` / `transcript` / `transcription` 字段，QuickQuip 会优先使用该文本；否则通过 OneBot `get_record` 获取音频文件，再调用 ASR provider。
 
-转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider才能得到可扫描文本。
+转写文本进入普通 LLM 请求前会经过统一敏感词过滤；原始音频需要先发送给 ASR provider 才能得到可扫描文本。
 
 | 键 | 说明 |
 |----|------|
@@ -690,6 +734,12 @@ chain = ['第一', '第二', '第三']
 私有自用文案请放在未被 git 追踪的独立文件中，并用 `niuniu_text_path` 指向。
 
 文案 TOML 结构中，`safe` 模式可仅填写需要覆写的条目：事件按 `name`、长度评价与运势提示按区间、消息字典按键覆盖，未覆写的条目自动从 `default` 继承。
+
+---
+
+## config/admins.toml
+
+全局管理员注册表，详见 [global-admins.md](global-admins.md) 和 `config/admins.toml.example`。`global_admins` 列表填 QQ 号数字字符串，热重载生效；文件缺失或为空即功能关闭。
 
 ---
 

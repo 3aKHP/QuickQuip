@@ -83,7 +83,7 @@ src/quickquip/sts/
         └── prompting.py  # LLM prompt（音槽谐音梗，无词表）
 ```
 
-> 依赖方向说明：STS 公式逻辑（prompt/词表/正则）在 `sts/`，但 LLM 调用编排（provider 解析、敏感词扫描、complete）驻留在 `LLMService`（`llm/` 域），因此存在 `llm/service.py` → `quickquip.sts.*` 的单向导入；`sts/` 本身不反向依赖 `llm/`。命令型入口的重复骨架已在 v1.12.1 收敛为 `llm/single_shot.py` 的 `CommandSingleShotSpec`；若公式进一步增多，再考虑把编排彻底下沉到公式包内。
+> 依赖方向说明：STS 公式逻辑（prompt/词表/正则）在 `sts/`，但 LLM 调用编排（provider 解析、敏感词扫描、complete）驻留在 `LLMService` 的 `service_parts/single_shot.py` mixin（`llm/` 域），因此存在 `llm/service_parts/single_shot.py` → `quickquip.sts.*` 的单向导入；`sts/` 本身不反向依赖 `llm/`。命令型入口的重复骨架已在 v1.12.1 收敛为 `llm/single_shot.py` 的 `CommandSingleShotSpec`；若公式进一步增多，再考虑把编排彻底下沉到公式包内。
 
 框架无关的业务逻辑都在 `sts/`；NoneBot 接线在适配层：命令注册在 `adapters/nonebot/command_parts/sts.py`，被动匹配器在 `app/message_pipeline.py`。
 
@@ -102,5 +102,5 @@ src/quickquip/sts/
 | 被动匹配器 | `src/quickquip/sts/formulas/card_le/passive.py` |
 | 故障化 prompt | `src/quickquip/sts/formulas/defectify/prompting.py` |
 | 命令注册 | `src/quickquip/adapters/nonebot/command_parts/sts.py`（turmfluch + defectify） |
-| LLM 编排 | `src/quickquip/llm/service.py`（`generate_defectify_reply` / `generate_turmfluch_reply` / `generate_card_le_nearest`；共享管线骨架已抽至 `llm/single_shot.py`，v1.12.1） |
+| LLM 编排 | `src/quickquip/llm/service_parts/single_shot.py`（`generate_defectify_reply` / `generate_turmfluch_reply` / `generate_card_le_nearest`；共享管线骨架在 `llm/single_shot.py`，经 `LLMService` mixin 组装暴露） |
 | 限频桶 | `src/quickquip/chat/config.py`（`_BUILTIN_RATE_LIMIT_RULES`） |

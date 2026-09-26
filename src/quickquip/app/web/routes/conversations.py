@@ -25,7 +25,7 @@ def _validate_group_key(key: str) -> None:
 def _connect() -> sqlite3.Connection:
     if not _DB.exists():
         raise HTTPException(status_code=404, detail="llm.db not found")
-    conn = sqlite3.connect(_DB)
+    conn = sqlite3.connect(_DB, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -176,7 +176,9 @@ def loop_detail(group_key: str, loop_id: str):
     for tool in tools:
         turn_index.setdefault(tool["turn_id"], {}).setdefault("tools", []).append(dict(tool))
     for delivery in deliveries:
-        turn_index.setdefault(delivery["turn_id"], {}).setdefault("deliveries", []).append(dict(delivery))
+        turn_index.setdefault(delivery["turn_id"], {}).setdefault(
+            "deliveries", []
+        ).append(dict(delivery))
     ordered = sorted(turn_index.values(), key=lambda t: t.get("turn_index") or 0)
     return {
         "loop": {

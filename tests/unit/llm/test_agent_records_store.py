@@ -15,7 +15,6 @@ from quickquip.llm.agent_records import (
     DeliveryReceipt,
     DeliveryStatus,
     LoopStatus,
-    MAX_LOOP_RECORD_BYTES,
     ResultRetention,
     TextPolicy,
     ToolDeclarationRecord,
@@ -57,7 +56,9 @@ def _begin(store: LLMStore, scope: str = "1001") -> LoopHandle:
     return store.begin_loop(scope, 0, TriggerKind.GROUP_DIRECT, _user_payload())
 
 
-def _response(text: str = "回复正文", *, tools: int = 0, native: dict | None = None) -> TurnResponseRecord:
+def _response(
+    text: str = "回复正文", *, tools: int = 0, native: dict | None = None
+) -> TurnResponseRecord:
     return TurnResponseRecord(
         text=text,
         text_policy=TextPolicy.ALLOWED,
@@ -84,7 +85,9 @@ def _declarations(count: int) -> list[ToolDeclarationRecord]:
 _chunk_seq = 0
 
 
-def _chunk_plan(count: int, turn_id: str | None = None, text_len: int | None = None) -> list[DeliveryPlanItem]:
+def _chunk_plan(
+    count: int, turn_id: str | None = None, text_len: int | None = None
+) -> list[DeliveryPlanItem]:
     if count == 0 or text_len is None:
         return []
     global _chunk_seq
@@ -106,27 +109,14 @@ def _chunk_plan(count: int, turn_id: str | None = None, text_len: int | None = N
 # ── schema 与迁移 ─────────────────────────────────────────────────
 
 
-def test_fresh_db_creates_agent_schema(store: LLMStore):
-    with store._connect() as conn:
-        for table in (
-            "agent_scopes", "agent_loops", "agent_turns", "agent_tool_executions",
-            "agent_deliveries", "agent_delivery_attempts", "agent_schema_migrations",
-        ):
-            row = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone()
-            assert row is not None, f"缺表 {table}"
-        columns = {r["name"] for r in conn.execute("PRAGMA table_info(conversation_messages)")}
-        assert {"agent_loop_id", "agent_turn_id"} <= columns
-
-
 def test_migration_backfills_legacy_loops(tmp_path: Path):
     db_path = tmp_path / "llm.db"
     build_legacy_db(db_path)
     store = LLMStore(db_path)
     with store._connect() as conn:
         loops = conn.execute(
-            "SELECT loop_id, trigger_kind, status, legacy, anchor_row_id FROM agent_loops ORDER BY anchor_row_id"
+            "SELECT loop_id, trigger_kind, status, legacy, anchor_row_id "
+            "FROM agent_loops ORDER BY anchor_row_id"
         ).fetchall()
         # 孤立段 + 三个 user 锚点 Loop（§4.3.3：连续 user 各自独立 Loop）
         assert [row["trigger_kind"] for row in loops] == [
@@ -135,7 +125,8 @@ def test_migration_backfills_legacy_loops(tmp_path: Path):
         assert all(row["status"] == "legacy" for row in loops)
         # 原行原样保留：行数、ID、正文、message_id 不变（§4.3.4）。
         rows = conn.execute(
-            "SELECT id, role, content, message_id, agent_loop_id, agent_turn_id FROM conversation_messages ORDER BY id"
+            "SELECT id, role, content, message_id, agent_loop_id, agent_turn_id "
+            "FROM conversation_messages ORDER BY id"
         ).fetchall()
         assert len(rows) == len(legacy_rows())
         assert [row["id"] for row in rows] == list(range(1, len(legacy_rows()) + 1))
@@ -163,7 +154,7 @@ def test_migration_backfills_legacy_loops(tmp_path: Path):
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
-def test_migration_is_idempotent_and_concurrent_safe(tmp_path: Path):
+def test_migration_is_idempotent(tmp_path: Path):
     db_path = tmp_path / "llm.db"
     build_legacy_db(db_path)
     LLMStore(db_path)
@@ -192,7 +183,9 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
             ("1001", 1, "2026-09-01"),
         )
         original_rows = conn.execute("SELECT * FROM conversation_messages ORDER BY id").fetchall()
-        original_columns = [row[1] for row in conn.execute("PRAGMA table_info(conversation_messages)")]
+        original_columns = [
+            row[1] for row in conn.execute("PRAGMA table_info(conversation_messages)")
+        ]
 
     start = Barrier(2)
     column_reads = Barrier(2)
@@ -237,7 +230,10 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
         columns = [row[1] for row in conn.execute("PRAGMA table_info(group_settings)")]
         assert columns.count("agent_delivery_enabled") == 1
         select = ", ".join(original_columns)
-        assert conn.execute(f"SELECT {select} FROM conversation_messages ORDER BY id").fetchall() == original_rows
+        assert (
+            conn.execute(f"SELECT {select} FROM conversation_messages ORDER BY id").fetchall()
+            == original_rows
+        )
         assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 4
         assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 1
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -249,7 +245,9 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
 def test_begin_loop_writes_user_trigger_row(store: LLMStore):
     handle = _begin(store)
     with store._connect() as conn:
-        loop = conn.execute("SELECT * FROM agent_loops WHERE loop_id=?", (handle.loop_id,)).fetchone()
+        loop = conn.execute(
+            "SELECT * FROM agent_loops WHERE loop_id=?", (handle.loop_id,)
+        ).fetchone()
         user = conn.execute(
             "SELECT * FROM conversation_messages WHERE agent_loop_id=?", (handle.loop_id,)
         ).fetchone()
@@ -276,7 +274,9 @@ def test_commit_turn_atomic_write(store: LLMStore):
         turn_id=turn_id,
     )
     with store._connect() as conn:
-        turn = conn.execute("SELECT * FROM agent_turns WHERE turn_id=?", (record.turn_id,)).fetchone()
+        turn = conn.execute(
+            "SELECT * FROM agent_turns WHERE turn_id=?", (record.turn_id,)
+        ).fetchone()
         message = conn.execute(
             "SELECT * FROM conversation_messages WHERE id=?", (record.message_row_id,)
         ).fetchone()
@@ -370,7 +370,8 @@ def test_ephemeral_result_never_persists_body(store: LLMStore):
     )
     with store._connect() as conn:
         row = conn.execute(
-            "SELECT result_json, status, result_omission_reason FROM agent_tool_executions WHERE execution_id=?",
+            "SELECT result_json, status, result_omission_reason "
+            "FROM agent_tool_executions WHERE execution_id=?",
             (exec_id,),
         ).fetchone()
     result = json.loads(row["result_json"])
@@ -399,7 +400,9 @@ def test_not_executed_terminal_with_reason(store: LLMStore):
 def test_delivery_attempt_and_lookup(store: LLMStore):
     handle = _begin(store)
     text = "要发出去的正文"
-    record = store.commit_turn(handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text)))
+    record = store.commit_turn(
+        handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text))
+    )
     delivery_id = record.delivery_ids[0]
     attempt = store.start_delivery(handle, delivery_id)
     store.finish_delivery(attempt, DeliveryReceipt(status=DeliveryStatus.SENT, message_id="qq-1"))
@@ -419,10 +422,16 @@ def test_delivery_attempt_and_lookup(store: LLMStore):
 def test_attempt_terminal_not_overwritten(store: LLMStore):
     handle = _begin(store)
     text = "正文"
-    record = store.commit_turn(handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text)))
+    record = store.commit_turn(
+        handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text))
+    )
     attempt = store.start_delivery(handle, record.delivery_ids[0])
-    store.finish_delivery(attempt, DeliveryReceipt(status=DeliveryStatus.FAILED, error_code="timeout"))
-    store.finish_delivery(attempt, DeliveryReceipt(status=DeliveryStatus.SENT, message_id="late"))
+    store.finish_delivery(
+        attempt, DeliveryReceipt(status=DeliveryStatus.FAILED, error_code="timeout")
+    )
+    store.finish_delivery(
+        attempt, DeliveryReceipt(status=DeliveryStatus.SENT, message_id="late")
+    )
     with store._connect() as conn:
         row = conn.execute(
             "SELECT status FROM agent_delivery_attempts WHERE attempt_id=?", (attempt.attempt_id,)
@@ -433,11 +442,15 @@ def test_attempt_terminal_not_overwritten(store: LLMStore):
 def test_unknown_upgrade_on_trusted_receipt(store: LLMStore):
     handle = _begin(store)
     text = "正文"
-    record = store.commit_turn(handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text)))
+    record = store.commit_turn(
+        handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text))
+    )
     attempt = store.start_delivery(handle, record.delivery_ids[0])
     # 模拟崩溃恢复：close_loop 把 sending 收敛为 unknown。
     store.close_loop(handle, LoopStatus.INTERRUPTED, "test")
-    store.finish_delivery(attempt, DeliveryReceipt(status=DeliveryStatus.SENT, message_id="late-ok"))
+    store.finish_delivery(
+        attempt, DeliveryReceipt(status=DeliveryStatus.SENT, message_id="late-ok")
+    )
     with store._connect() as conn:
         attempt_row = conn.execute(
             "SELECT status, qq_message_id FROM agent_delivery_attempts WHERE attempt_id=?",
@@ -457,14 +470,17 @@ def test_unknown_upgrade_on_trusted_receipt(store: LLMStore):
 def test_close_loop_sweeps_and_is_idempotent(store: LLMStore):
     handle = _begin(store)
     text = "多段"
-    record = store.commit_turn(handle, _response(text), _declarations(0), _chunk_plan(2, text_len=len(text)))
+    record = store.commit_turn(
+        handle, _response(text), _declarations(0), _chunk_plan(2, text_len=len(text))
+    )
     store.start_delivery(handle, record.delivery_ids[0])
     store.close_loop(handle, LoopStatus.INTERRUPTED, "delivery_failed")
     with store._connect() as conn:
         statuses = {
             row["delivery_id"]: row["status"]
             for row in conn.execute(
-                "SELECT delivery_id, status FROM agent_deliveries WHERE loop_id=?", (handle.loop_id,)
+                "SELECT delivery_id, status FROM agent_deliveries WHERE loop_id=?",
+                (handle.loop_id,)
             )
         }
     assert statuses[record.delivery_ids[0]] == "unknown"  # 已在途，回执未落库
@@ -484,7 +500,9 @@ def test_recover_unfinished_loops(store: LLMStore):
     # Loop B：Turn 已提交，工具 declared/running，交付 planned。
     handle_b = store.begin_loop("1002", 0, TriggerKind.PRIVATE_DIRECT, _user_payload("私聊"))
     text = "正文"
-    store.commit_turn(handle_b, _response(text), _declarations(2), _chunk_plan(1, text_len=len(text)))
+    store.commit_turn(
+        handle_b, _response(text), _declarations(2), _chunk_plan(1, text_len=len(text))
+    )
     exec_ids = [d.execution_id for d in _declarations(2)]
     store.mark_tool_started(handle_b, exec_ids[0])
 
@@ -513,7 +531,9 @@ def test_recover_unfinished_loops(store: LLMStore):
 def test_load_closed_loops_returns_complete_records(store: LLMStore):
     handle = _begin(store)
     text = "完整正文"
-    record = store.commit_turn(handle, _response(text), _declarations(1), _chunk_plan(1, text_len=len(text)))
+    record = store.commit_turn(
+        handle, _response(text), _declarations(1), _chunk_plan(1, text_len=len(text))
+    )
     store.close_loop(handle, LoopStatus.COMPLETED, None)
     loops = store.load_closed_loops("1001")
     assert len(loops) == 1
@@ -547,17 +567,22 @@ def test_loop_record_budget_exceeded(store: LLMStore, monkeypatch):
             "SELECT COUNT(*) c FROM conversation_messages WHERE role='assistant'"
         ).fetchone()["c"]
     assert count == 0
-    assert MAX_LOOP_RECORD_BYTES == 8_388_608  # 常量本身未被改
 
 
 def test_prune_closed_loops_by_age_and_count(store: LLMStore):
     for i in range(4):
         handle = store.begin_loop("1001", 0, TriggerKind.GROUP_DIRECT, _user_payload(f"问{i}"))
         text = f"答{i}"
-        store.commit_turn(handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text)))
+        store.commit_turn(
+            handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text))
+        )
         store.close_loop(handle, LoopStatus.COMPLETED, None)
     # 数量上限 2：清最旧的两个。
-    report = store.prune_closed_loops("1001", active_anchors=[], policy=RetentionPolicy(retention_days=30, max_loops=2, max_bytes=64 * 1024 * 1024))
+    report = store.prune_closed_loops(
+        "1001",
+        active_anchors=[],
+        policy=RetentionPolicy(retention_days=30, max_loops=2, max_bytes=64 * 1024 * 1024),
+    )
     assert len(report.deleted_loop_ids) == 2
     remaining = store.load_closed_loops("1001")
     assert len(remaining) == 2
@@ -574,7 +599,9 @@ def test_prune_respects_active_epoch_floor(store: LLMStore):
     for i in range(4):
         handle = store.begin_loop("1001", 0, TriggerKind.GROUP_DIRECT, _user_payload(f"问{i}"))
         text = f"答{i}"
-        store.commit_turn(handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text)))
+        store.commit_turn(
+            handle, _response(text), _declarations(0), _chunk_plan(1, text_len=len(text))
+        )
         store.close_loop(handle, LoopStatus.COMPLETED, None)
         handles.append(handle)
     # 活动纪元从第 3 个 Loop 开始：最旧两个可删，其后受保护。

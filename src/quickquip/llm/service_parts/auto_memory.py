@@ -5,7 +5,7 @@ batch trigger + multi-turn context + fixed-confidence store, plus the
 per-scope turn counter and success/failure tallies.
 
 The mixin depends on the host class providing ``self.config``,
-``self.store`` and ``self.quick_judge`` (all supplied by ``LLMService``).
+``self.store`` and ``self.quick_judge_detailed`` (all supplied by ``LLMService``).
 The host supplies ``self._identity_repository`` for current identity snapshots.
 
 State is initialised via :meth:`AutoMemoryMixin._init_auto_memory`, which
@@ -165,7 +165,11 @@ class AutoMemoryMixin:
                 name = msg.get("canonical_name") or msg.get("sender_name", "?")
                 name = snapshot.name(msg.get("user_id"), name)
                 source_text = str(msg.get("raw_content") or msg.get("content", ""))
-                content = (source_text if source_text == user_text else render(legacy(source_text), snapshot)).strip()
+                content = (
+                    source_text
+                    if source_text == user_text
+                    else render(legacy(source_text), snapshot)
+                ).strip()
                 if not content:
                     continue
                 tag = {"user": "群友", "assistant": "bot"}.get(role, role)
@@ -194,11 +198,37 @@ class AutoMemoryMixin:
             )
 
             # ── judge ───────────────────────────────────────────────
-            raw = await self.quick_judge(
+            judge = await self.quick_judge_detailed(
                 full_prompt,
                 max_tokens=self.config.runtime.auto_memory_max_tokens,
             )
-            data = extract_json_object(raw)
+            if judge.outcome != "ok":
+                # length/empty 是 reasoning 模型耗尽输出预算的预期形态，
+                # provider_error 为技术失败；本轮按无可抽取记忆跳过。
+                self._auto_memory_failures += 1
+                if judge.outcome == "provider_error":
+                    logger.warning(
+                        "auto_memory extraction provider error for scope=%s: %s",
+                        scope_key,
+                        judge.to_diagnostic(),
+                    )
+                else:
+                    logger.info(
+                        "auto_memory extraction skipped for scope=%s: %s",
+                        scope_key,
+                        judge.to_diagnostic(),
+                    )
+                return
+            try:
+                data = extract_json_object(judge.text)
+            except ValueError:
+                self._auto_memory_failures += 1
+                logger.warning(
+                    "auto_memory extraction unparsable for scope=%s: %s",
+                    scope_key,
+                    judge.to_diagnostic(),
+                )
+                return
             memories = data.get("memories", [])
             if not isinstance(memories, list):
                 return

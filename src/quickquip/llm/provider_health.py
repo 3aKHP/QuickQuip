@@ -87,10 +87,18 @@ async def probe_provider(
         return ProviderHealth(provider.id, probe_model, "ok", latency_ms=latency_ms)
     except asyncio.TimeoutError:
         latency_ms = round(timeout * 1000)
-        return ProviderHealth(provider.id, probe_model, "error", latency_ms=latency_ms, error="timeout")
+        return ProviderHealth(
+            provider.id, probe_model, "error", latency_ms=latency_ms, error="timeout"
+        )
     except Exception as exc:
         latency_ms = round((time.monotonic() - started) * 1000, 1)
-        return ProviderHealth(provider.id, probe_model, "error", latency_ms=latency_ms, error=type(exc).__name__)
+        return ProviderHealth(
+            provider.id,
+            probe_model,
+            "error",
+            latency_ms=latency_ms,
+            error=type(exc).__name__,
+        )
 
 
 async def probe_all_providers(

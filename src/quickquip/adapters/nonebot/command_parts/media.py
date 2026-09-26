@@ -3,7 +3,20 @@ from __future__ import annotations
 from io import BytesIO
 
 from quickquip.adapters.nonebot.command_parts._chat_utils import _scope_key
-from quickquip.adapters.nonebot.command_parts.common import _DRAW_QUALITY_RE, _DRAW_SIZE_RE, _extract_image_urls, _format_music_models, _format_tts_models, _format_voice_groups, _parse_music_args, _parse_tts_args, _resolve_message_content, _safe_shlex_split, _send_lyrics_forward, _strip_command_name
+from quickquip.adapters.nonebot.command_parts.common import (
+    _DRAW_QUALITY_RE,
+    _DRAW_SIZE_RE,
+    _extract_image_urls,
+    _format_music_models,
+    _format_tts_models,
+    _format_voice_groups,
+    _parse_music_args,
+    _parse_tts_args,
+    _resolve_message_content,
+    _safe_shlex_split,
+    _send_lyrics_forward,
+    _strip_command_name,
+)
 from quickquip.app.message_pipeline import rate_limiter
 from quickquip.common.sensitive_filter import (
     DEFAULT_OUTPUT_FALLBACK,
@@ -128,7 +141,11 @@ def register_media_commands(on_command, Message, MessageSegment) -> None:
 
         if raw_args.startswith("voices"):
             pieces = _safe_shlex_split(raw_args)
-            maybe_model = pieces[1] if len(pieces) > 1 and pieces[1] in audio_generation.models else None
+            maybe_model = (
+                pieces[1]
+                if len(pieces) > 1 and pieces[1] in audio_generation.models
+                else None
+            )
             keyword = ""
             if maybe_model is not None:
                 keyword = " ".join(pieces[2:]).strip()

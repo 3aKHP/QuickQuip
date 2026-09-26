@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from plugins.llm_provider import LLMResponse
-from quickquip.llm.service import QuickJudgeResult
 
 
 class _StubClient:
@@ -118,6 +117,26 @@ async def test_public_quick_judge_returns_text_on_ok(llm_service, monkeypatch):
     assert await llm_service.quick_judge("判定一下") == '{"trigger": false}'
 
 
-def test_no_provider_returns_trigger_false_text():
-    result = QuickJudgeResult(text='{"trigger": false}', outcome="no_provider", provider_id="", model="")
-    assert result.to_diagnostic()["outcome"] == "no_provider"
+@pytest.mark.asyncio
+async def test_detailed_omitted_max_tokens_uses_config(llm_service, monkeypatch):
+    """缺省 max_tokens 沿用 [triggers.quick_judge] max_tokens（reasoning 模型需要足够预算）。"""
+    stub = _patch_judge_provider(
+        monkeypatch, LLMResponse(text="{}", model="gpt-test", finish_reason="stop")
+    )
+    llm_service.config.quick_judge.max_tokens = 256
+
+    await llm_service.quick_judge_detailed("判定一下")
+
+    assert stub.requests[0].max_output_tokens == 256
+
+
+@pytest.mark.asyncio
+async def test_detailed_explicit_max_tokens_overrides_config(llm_service, monkeypatch):
+    stub = _patch_judge_provider(
+        monkeypatch, LLMResponse(text="{}", model="gpt-test", finish_reason="stop")
+    )
+    llm_service.config.quick_judge.max_tokens = 256
+
+    await llm_service.quick_judge_detailed("判定一下", max_tokens=48)
+
+    assert stub.requests[0].max_output_tokens == 48

@@ -650,6 +650,7 @@ def recompile_patterns() -> None:
 | `reply_templates` | | 加权随机回复列表（见 §6.3） |
 | `blocked_named_groups` | | 命名捕获组黑名单（见 §4.7） |
 | `blocked_groups` | | 位置捕获组黑名单，按组号索引，用法同上 |
+| `probability` | | 规则级触发概率 `[0, 1]`，覆盖所挂桶的桶级值；写 `0` 等价于停用该规则 |
 
 模板可用变量：`{sender_name}`（昵称）、`{current_time}`（北京时间）、`{user_id}`（QQ 号）、`{命名捕获组名}`、`$1` `$2` …（位置捕获组）。
 
@@ -659,7 +660,7 @@ def recompile_patterns() -> None:
 
 ```toml
 [rate_limit_rules]
-group_meme = {global_limit = 6, user_limit = 3}
+group_meme = {global_limit = 6, user_limit = 3, probability = 0.8}
 image_gen  = {global_limit = 10, user_limit = 2, scope = "global", window = 60}
 ```
 
@@ -669,8 +670,11 @@ image_gen  = {global_limit = 10, user_limit = 2, scope = "global", window = 60}
 | `user_limit` | 窗口内同一用户最多触发次数 |
 | `scope` | 分桶作用域，默认 `group`（按群独立分桶，私聊退化到合并桶）；`global` 为全群合并，用于保护 LLM、搜索、爬虫等跨会话共享资源 |
 | `window` | 滑动窗口秒数，默认 60，可做长冷却彩蛋桶 |
+| `probability` | 桶级触发概率 `[0, 1]`，默认 1；命中后先掷骰再进桶，未掷中保持沉默且不消耗配额 |
+| `suppress_after_hit` | 防连发：同一规则同一群命中后，接下来 N 次命中强制沉默；默认 0 关闭 |
+| `pity_step` | 保底步进：连哑越多概率越高（`p_eff = p × (1 + 连哑数 × 步进)`）；默认 0 关闭 |
 
-要点：多条规则可共用一个桶（命中任意一条都消耗同一配额）；时区、LLM、贴吧、复读、接龙等系统规则的桶已在 `src/quickquip/chat/config.py` 预定义，TOML 里只需定义文字规则专用桶。
+要点：多条规则可共用一个桶（命中任意一条都消耗同一配额）；时区、LLM、贴吧、复读、接龙等系统规则的桶已在 `src/quickquip/chat/config.py` 预定义，TOML 里只需定义文字规则专用桶。概率与防连发/保底的完整语义（掷骰时机、按规则×群的状态隔离、状态机类桶不建议配概率、系统预定义桶覆写需整条重写等）见 `docs/admin/configuration.md` 的「自动回复概率」节。
 
 ### 6.3 `reply_templates` 加权随机回复
 

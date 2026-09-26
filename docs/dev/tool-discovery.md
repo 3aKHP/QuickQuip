@@ -6,7 +6,7 @@
 
 ## 1. 设计目标
 
-QuickQuip 支持 OpenAI / Claude / Gemini 三类 provider，因此工具发现不依赖 Claude 原生 tool search。当前实现复用项目已有工具调用协议，在服务层维护一个本地工具目录：
+QuickQuip 支持 OpenAI / Claude / Gemini / OpenAI Responses 四类 provider，因此工具发现不依赖 Claude 原生 tool search。当前实现复用项目已有工具调用协议，在服务层维护一个本地工具目录：
 
 - 初始请求只暴露常驻工具
 - `tool_search` 根据 query 搜索工具 manifest

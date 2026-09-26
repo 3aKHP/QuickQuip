@@ -74,7 +74,8 @@ class ToolMixin(McpLifecycleMixin):
         self.tool_registry.register(
             LLMToolSpec(
                 name=TOOL_LIST_NAME,
-                description="列出工具组、工具名称或工具摘要，也可按精确工具名加载少量工具作为 tool_search 的兜底。",
+                description="列出工具组、工具名称或工具摘要，"
+                "也可按精确工具名加载少量工具作为 tool_search 的兜底。",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -227,7 +228,9 @@ class ToolMixin(McpLifecycleMixin):
         self.tool_registry.register(
             LLMToolSpec(
                 name="get_health_status",
-                description="执行一次轻量内部健康检查，覆盖 LLM 配置、当前 provider/model、资料库、数据库、工具、MCP、搜索和生成配置。仅在用户明确要求诊断或自检时调用。",
+                description="执行一次轻量内部健康检查，覆盖 LLM 配置、当前 provider/model、"
+                "资料库、数据库、工具、MCP、搜索和生成配置。"
+                "仅在用户明确要求诊断或自检时调用。",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -260,7 +263,9 @@ class ToolMixin(McpLifecycleMixin):
         provider = self.config.providers.get(provider_id)
         return provider is not None and provider_builtin_search_active(provider)
 
-    def _get_enabled_tool_names(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:
+    def _get_enabled_tool_names(
+        self, chat_type: str = "group", *, provider_id: str | None = None
+    ) -> list[str]:
         configured = self.config.tools.enabled
         if not configured:
             names = [*DEFAULT_ENABLED_TOOLS, *sorted(self.mcp_tool_names)]
@@ -277,15 +282,25 @@ class ToolMixin(McpLifecycleMixin):
             names = [name for name in names if name != SEARCH_TOOL_NAME]
         return [name for name in names if self.tool_registry.has_tool(name)]
 
-    def _get_always_loaded_tool_names(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:
+    def _get_always_loaded_tool_names(
+        self, chat_type: str = "group", *, provider_id: str | None = None
+    ) -> list[str]:
         configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
         enabled = set(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id))
-        names = [name for name in configured if name in enabled and self.tool_registry.has_tool(name)]
-        if self._is_tool_discovery_enabled(chat_type, provider_id=provider_id) and TOOL_SEARCH_NAME in enabled and TOOL_SEARCH_NAME not in names:
+        names = [
+            name for name in configured if name in enabled and self.tool_registry.has_tool(name)
+        ]
+        if (
+            self._is_tool_discovery_enabled(chat_type, provider_id=provider_id)
+            and TOOL_SEARCH_NAME in enabled
+            and TOOL_SEARCH_NAME not in names
+        ):
             names.insert(0, TOOL_SEARCH_NAME)
         return names
 
-    def _is_tool_discovery_enabled(self, chat_type: str = "group", *, provider_id: str | None = None) -> bool:
+    def _is_tool_discovery_enabled(
+        self, chat_type: str = "group", *, provider_id: str | None = None
+    ) -> bool:
         mode = self.config.tools.discovery_mode
         if mode == "off":
             return False
@@ -306,17 +321,31 @@ class ToolMixin(McpLifecycleMixin):
         deferred_count = len(enabled_set - always_names)
         return deferred_count > self.config.tools.discovery_min_tools
 
-    def _get_enabled_tool_specs(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[LLMToolSpec]:
+    def _get_enabled_tool_specs(
+        self, chat_type: str = "group", *, provider_id: str | None = None
+    ) -> list[LLMToolSpec]:
         if self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
-            return self.tool_registry.get_specs(self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id))
-        return self.tool_registry.list_specs(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id))
+            return self.tool_registry.get_specs(
+                self._get_always_loaded_tool_names(
+                    chat_type=chat_type, provider_id=provider_id
+                )
+            )
+        return self.tool_registry.list_specs(
+            self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+        )
 
-    def _get_deferred_tool_categories(self, chat_type: str = "group", *, provider_id: str | None = None) -> list[str]:
+    def _get_deferred_tool_categories(
+        self, chat_type: str = "group", *, provider_id: str | None = None
+    ) -> list[str]:
         if not self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
             return []
-        loaded = set(self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id))
+        loaded = set(
+            self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id)
+        )
         categories: list[str] = []
-        for entry in self.tool_registry.list_manifest(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)):
+        for entry in self.tool_registry.list_manifest(
+            self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+        ):
             if entry.name in loaded:
                 continue
             category = entry.category or entry.source
@@ -347,7 +376,10 @@ class ToolMixin(McpLifecycleMixin):
 
         vis_provider_cfg = self.config.providers.get(img_cfg.provider_id)
         if vis_provider_cfg is None:
-            logger.warning("image_preprocessing.provider_id %r not found in providers", img_cfg.provider_id)
+            logger.warning(
+                "image_preprocessing.provider_id %r not found in providers",
+                img_cfg.provider_id,
+            )
             self.image_preprocessor = None
             return
 
@@ -378,7 +410,9 @@ class ToolMixin(McpLifecycleMixin):
         await self.ensure_mcp_ready(force=True)
         return self.config
 
-    async def _tool_get_identity(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+    async def _tool_get_identity(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
         query = str(arguments.get("query", "")).strip()
         matches = self._resolve_identities(str(context.group_id)).search(query, limit=5)
         if not matches:
@@ -394,7 +428,9 @@ class ToolMixin(McpLifecycleMixin):
                 lines.append(f"  备注：{entry.note}")
         return "\n".join(lines)
 
-    async def _tool_search_tools(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+    async def _tool_search_tools(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
         query = str(arguments.get("query", "")).strip()
         category = str(arguments.get("category", "")).strip()
         raw_limit = arguments.get("limit", self.config.tools.discovery_search_limit)
@@ -403,8 +439,14 @@ class ToolMixin(McpLifecycleMixin):
         except (TypeError, ValueError):
             limit = self.config.tools.discovery_search_limit
         limit = max(1, min(limit, self.config.tools.discovery_search_limit))
-        current_enabled = self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=context.provider_id)
-        loaded_names = set(self._get_always_loaded_tool_names(chat_type=context.chat_type, provider_id=context.provider_id))
+        current_enabled = self._get_enabled_tool_names(
+            chat_type=context.chat_type, provider_id=context.provider_id
+        )
+        loaded_names = set(
+            self._get_always_loaded_tool_names(
+                chat_type=context.chat_type, provider_id=context.provider_id
+            )
+        )
         matches = self.tool_registry.search_manifest(
             query,
             enabled_names=current_enabled,
@@ -425,7 +467,9 @@ class ToolMixin(McpLifecycleMixin):
         lines.append("如需使用其中某个工具，请在下一轮直接调用对应工具名。")
         return "\n".join(lines)
 
-    async def _tool_list_tools(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+    async def _tool_list_tools(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
         mode = str(arguments.get("mode", "")).strip().lower()
         group = str(arguments.get("group", "")).strip()
         try:
@@ -438,7 +482,9 @@ class ToolMixin(McpLifecycleMixin):
             limit = 20
         page = max(1, page)
         limit = max(1, min(limit, 50))
-        enabled_names = self._get_enabled_tool_names(chat_type=context.chat_type, provider_id=context.provider_id)
+        enabled_names = self._get_enabled_tool_names(
+            chat_type=context.chat_type, provider_id=context.provider_id
+        )
 
         if mode == "groups":
             groups = self.tool_registry.list_groups(enabled_names)
@@ -468,7 +514,11 @@ class ToolMixin(McpLifecycleMixin):
             lines = [f"{header_mode}{group_part}：第 {page} 页，{start}-{end}/{total}"]
             for item in entries:
                 if mode in {"summaries", "group"}:
-                    args = f"；参数：{', '.join(item.argument_names)}" if item.argument_names else ""
+                    args = (
+                        f"；参数：{', '.join(item.argument_names)}"
+                        if item.argument_names
+                        else ""
+                    )
                     category = f"；组：{item.category}" if item.category else ""
                     lines.append(f"- {item.name}{category}{args}：{item.description}")
                 else:
@@ -502,10 +552,15 @@ class ToolMixin(McpLifecycleMixin):
 
         return "未知 mode。可用 mode：groups、names、summaries、group、load。"
 
-    async def _tool_list_memories(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+    async def _tool_list_memories(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
         keyword = str(arguments.get("keyword", "")).strip() or None
         items = self.store.search_memories(
-            self._context_scope_key(context), user_id=context.user_id, query=keyword or "", limit=10,
+            self._context_scope_key(context),
+            user_id=context.user_id,
+            query=keyword or "",
+            limit=10,
         )
         if not items:
             if keyword:
@@ -517,7 +572,9 @@ class ToolMixin(McpLifecycleMixin):
             lines.append(f"- #{item['id']} {display(item)}")
         return "\n".join(lines)
 
-    async def _tool_search_web(self, arguments: dict[str, object], context: ToolExecutionContext) -> str:
+    async def _tool_search_web(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
         _ = context
         query = str(arguments.get("query", "")).strip()
         topic = str(arguments.get("topic", "general")).strip() or "general"
@@ -542,13 +599,17 @@ class ToolMixin(McpLifecycleMixin):
 
         lines = ["当前群统计：", f"- 消息总数：{stats.total_messages}"]
         if stats.user_messages:
-            top_users = sorted(stats.user_messages.items(), key=lambda item: (-item[1], item[0]))[:top_n]
+            top_users = sorted(
+                stats.user_messages.items(), key=lambda item: (-item[1], item[0])
+            )[:top_n]
             lines.append(f"- 活跃用户 Top {len(top_users)}：")
             for rank, (user_id, count) in enumerate(top_users, 1):
                 display_name = stats.user_names.get(user_id, user_id)
                 lines.append(f"  {rank}. {display_name}（QQ {user_id}）— {count} 条")
         if stats.rule_triggers:
-            top_rules = sorted(stats.rule_triggers.items(), key=lambda item: (-item[1], item[0]))[:top_n]
+            top_rules = sorted(
+                stats.rule_triggers.items(), key=lambda item: (-item[1], item[0])
+            )[:top_n]
             lines.append(f"- 规则触发 Top {len(top_rules)}：")
             for rank, (rule_name, count) in enumerate(top_rules, 1):
                 lines.append(f"  {rank}. {rule_name} — {count} 次")
@@ -669,7 +730,10 @@ class ToolMixin(McpLifecycleMixin):
         lines.append(f"- Provider：{settings.provider_id}")
         lines.append(f"- Model：{settings.model}")
         lines.append(f"- Persona：{settings.persona_id}")
-        lines.append(f"- 前缀触发：{'ON' if settings.allow_prefix else 'OFF'} ({settings.trigger_prefix})")
+        lines.append(
+            f"- 前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
+            f"({settings.trigger_prefix})"
+        )
         if context.chat_type == "private":
             lines.append("- 艾特触发：OFF（私聊不适用）")
         else:
@@ -683,4 +747,6 @@ class ToolMixin(McpLifecycleMixin):
         context: ToolExecutionContext,
     ) -> str:
         verbose = bool(arguments.get("verbose", False))
-        return await self.format_health(context.group_id, chat_type=context.chat_type, verbose=verbose)
+        return await self.format_health(
+            context.group_id, chat_type=context.chat_type, verbose=verbose
+        )

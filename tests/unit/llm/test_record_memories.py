@@ -16,7 +16,10 @@ def test_memory_legacy_matching_scope_and_delete(tmp_path, snapshot):
     own = store.add_memory("10001", "个人事实无需出现名字", scope="user", user_id="12345")
     store.add_memory("10001", "他人的私密事实", scope="user", user_id="23456", content_parts=body)
     with store._connect() as conn:
-        conn.execute("UPDATE memories SET content_parts_json=NULL, content='[CQ:at,name=旧名,qq=12345] 历史' WHERE id=?", (member_id,))
+        conn.execute(
+            "UPDATE memories SET content_parts_json=NULL, "
+            "content='[CQ:at,name=旧名,qq=12345] 历史' WHERE id=?", (member_id,)
+        )
     rows = store.list_memories("10001", keyword="别名")
     assert len(rows) == 3
     assert rows[-1]["content_display"] == "@标准名 历史"
@@ -24,11 +27,18 @@ def test_memory_legacy_matching_scope_and_delete(tmp_path, snapshot):
     for query in ("别名", "标准名", "12345", "[CQ:at,name=旧名,qq=12345]"):
         hits = store.search_memories("10001", user_id="12345", query=query, limit=10)
         assert {r["id"] for r in hits} == {own, member_id}
-    assert [r["id"] for r in store.search_memories("10001", user_id="12345", query="", limit=1, scope="user")] == [own]
+    assert [
+        r["id"]
+        for r in store.search_memories("10001", user_id="12345", query="", limit=1, scope="user")
+    ] == [own]
     assert store.delete_memories("10001", f"#{member_id}") == 1
     with store._connect() as conn:
-        assert not conn.execute("SELECT * FROM memories_member_refs WHERE record_id=?", (member_id,)).fetchall()
-    snapshot.index = index(IdentityEntry("同名", ["12345"], [], ""), IdentityEntry("同名", ["23456"], [], ""))
+        assert not conn.execute(
+            "SELECT * FROM memories_member_refs WHERE record_id=?", (member_id,)
+        ).fetchall()
+    snapshot.index = index(
+        IdentityEntry("同名", ["12345"], [], ""), IdentityEntry("同名", ["23456"], [], "")
+    )
     with pytest.raises(ValueError, match="12345"):
         store.delete_memories("10001", "同名")
     store.clear_memories("10001")
@@ -53,21 +63,42 @@ async def test_memory_tool_does_not_expand_personal_scope(tmp_path, snapshot):
     assert "其他成员私密" not in result
 
 
-async def test_auto_memory_projection_preserves_history_and_model_strings(llm_service, snapshot, monkeypatch):
+async def test_auto_memory_projection_preserves_history_and_model_strings(
+    llm_service, snapshot, monkeypatch
+):
     monkeypatch.setattr(llm_service._identity_repository, "snapshot", lambda scope: snapshot)
     scope = "10001"
     historical = "[CQ:at,name=旧称呼,qq=23456] 的历史提及"
     literal = "代码示例 [CQ:at,qq=23456] 保持原文"
-    llm_service.store.append_conversation_message(scope, "12345", "user", historical, raw_content=historical, canonical_name="旧标准", sender_name="旧卡")
-    llm_service.store.append_conversation_message(scope, "12345", "user", literal, raw_content=literal, canonical_name="旧标准", sender_name="旧卡")
+    llm_service.store.append_conversation_message(
+        scope, "12345", "user", historical, raw_content=historical,
+        canonical_name="旧标准", sender_name="旧卡",
+    )
+    llm_service.store.append_conversation_message(
+        scope, "12345", "user", literal, raw_content=literal,
+        canonical_name="旧标准", sender_name="旧卡",
+    )
     before = llm_service.store.list_recent_conversation_messages(scope, 10)
     prompts = []
+
     async def judge(prompt, **kwargs):
+        from quickquip.llm.quick_judge import QuickJudgeResult
+
         prompts.append(prompt)
-        return '{"memories": ["模型写出的小明喜欢编程"]}'
-    monkeypatch.setattr(llm_service, "quick_judge", judge)
+        return QuickJudgeResult(
+            text='{"memories": ["模型写出的小明喜欢编程"]}',
+            outcome="ok",
+            provider_id="p",
+            model="m",
+        )
+
+    monkeypatch.setattr(llm_service, "quick_judge_detailed", judge)
     llm_service._auto_memory_turns[scope] = 9
-    await llm_service._extract_auto_memory(scope_key=scope, user_id="12345", sender_name="旧卡", canonical_name="旧标准", user_text=literal, assistant_text="收到，我会根据当前发言和近期语境判断是否值得记住这些信息。")
+    await llm_service._extract_auto_memory(
+        scope_key=scope, user_id="12345", sender_name="旧卡", canonical_name="旧标准",
+        user_text=literal,
+        assistant_text="收到，我会根据当前发言和近期语境判断是否值得记住这些信息。",
+    )
     assert "标准名（QQ 12345）" in prompts[0]
     assert "@未登记名片 的历史提及" in prompts[0]
     assert literal in prompts[0]

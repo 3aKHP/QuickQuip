@@ -73,7 +73,9 @@ def test_generate_music_minimax_hex(monkeypatch):
     monkeypatch.setattr("quickquip.generation.music._http_json", fake_http_json)
     monkeypatch.setattr("quickquip.generation.music._get_api_key", lambda provider: "secret")
 
-    result = asyncio.run(generate_music(model, provider, "Mandopop, Summer", lyrics="[Verse]\n海风吹"))
+    result = asyncio.run(
+        generate_music(model, provider, "Mandopop, Summer", lyrics="[Verse]\n海风吹")
+    )
 
     assert result.audio_bytes == b"hello"
     assert result.mime_type == "audio/mpeg"

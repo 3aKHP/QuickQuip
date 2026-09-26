@@ -65,11 +65,22 @@ def format_participant_label(
         # 合成触发源（boredom_timer / scheduled_timer）不是 QQ 号：直接以名字呈现，
         # 不包装成「（QQ xxx，未登记）」伪身份——system prompt 教模型按 QQ 号认人
         return normalized_sender_name or normalized_user_id
-    if normalized_canonical_name and normalized_sender_name and normalized_canonical_name != normalized_sender_name:
-        return f"{normalized_canonical_name}（QQ {normalized_user_id}，当前显示名：{normalized_sender_name}）"
+    if (
+        normalized_canonical_name
+        and normalized_sender_name
+        and normalized_canonical_name != normalized_sender_name
+    ):
+        return (
+            f"{normalized_canonical_name}（QQ {normalized_user_id}，"
+            f"当前显示名：{normalized_sender_name}）"
+        )
     if normalized_canonical_name:
         return f"{normalized_canonical_name}（QQ {normalized_user_id}）"
-    if normalized_sender_name and normalized_user_id and normalized_sender_name != normalized_user_id:
+    if (
+        normalized_sender_name
+        and normalized_user_id
+        and normalized_sender_name != normalized_user_id
+    ):
         if include_unregistered_note:
             return f"{normalized_sender_name}（QQ {normalized_user_id}，未登记）"
         return f"{normalized_sender_name}（QQ {normalized_user_id}）"
@@ -210,7 +221,8 @@ def build_system_prompt(
     group_id: int | str,
     tool_specs: list[LLMToolSpec],
     search_tool_name: str,
-    search_mode: str = "none",  # "builtin"（provider 内置 grounding）| "searxng"（search_web）| "none"
+    # "builtin"（provider 内置 grounding）| "searxng"（search_web）| "none"
+    search_mode: str = "none",
     tool_discovery_enabled: bool = False,
     tool_search_name: str = "tool_search",
     tool_list_name: str = "tool_list",
@@ -218,6 +230,7 @@ def build_system_prompt(
     chat_type: str = "group",
     provider_style_overrides: str = "",
     session_preset: str = "",
+    skills_catalog_block: str = "",
 ) -> str:
     """组装 system prompt。只含跨轮、跨日稳定的段落（前缀缓存字节稳定契约）；
     时间/节日/participants/memories/词表命中等逐轮变化的内容一律走
@@ -241,19 +254,36 @@ def build_system_prompt(
     lines.append("认人规则：")
     lines.append("- 优先按标准身份（名字）识别发言人；名字后括号内的 QQ 号仅用于区分同名成员。")
     lines.append("- 不同 QQ 号默认视为不同的人，不要把两个人合并成同一发言者。")
-    lines.append('- 上下文里已按「名字（QQ …）」标注发言者时，后续继续沿用该名字，不要自行改口或张冠李戴。')
-    lines.append("- 正文中被艾特的成员以「@名字」出现；以「@QQ 号」数字形态出现的艾特与发言标注中的号码一一对应。")
-    lines.append("- 只输出给用户看的最终回答，禁止输出任何内部推理、思维链、草稿、隐藏分析或 <think>/<thinking>/<reasoning> 之类标签。")
+    lines.append(
+        '- 上下文里已按「名字（QQ …）」标注发言者时，'
+        '后续继续沿用该名字，不要自行改口或张冠李戴。'
+    )
+    lines.append(
+        "- 正文中被艾特的成员以「@名字」出现；"
+        '以「@QQ 号」数字形态出现的艾特与发言标注中的号码一一对应。'
+    )
+    lines.append(
+        "- 只输出给用户看的最终回答，"
+        "禁止输出任何内部推理、思维链、草稿、隐藏分析或 "
+        "<think>/<thinking>/<reasoning> 之类标签。"
+    )
     lines.append("引用判定：")
     lines.append("- 当前提问者永远是本条消息的发送者；引用发送者只是被引用对象，不是当前说话者。")
-    lines.append("- 当 A 引用 B 的消息向你提问时，始终把 A 视为当前提问者，把 B 视为引用来源，不要把 B 当成当前发言者。")
+    lines.append(
+        "- 当 A 引用 B 的消息向你提问时，"
+        "始终把 A 视为当前提问者，把 B 视为引用来源，"
+        "不要把 B 当成当前发言者。"
+    )
     lines.append("- 即使引用来源是机器人自己，也要把当前提问者和引用来源分开理解。")
 
     lines.append("消息格式说明：")
     lines.append("- 所有消息均标注了发言者身份，格式为：身份（QQ 号）或 身份（QQ 号，当前显示名）")
     lines.append(f"- 以「{SCENE_MARKER_CURRENT}」标记的是当前需要回复的消息")
     lines.append(f"- 以「{SCENE_MARKER_CONTEXT}」标记的是上文对话历史")
-    lines.append(f"- 以「{SCENE_MARKER_LIVE}」标记的是上一轮对话之后群内的其他发言（现场氛围，非直接对话）")
+    lines.append(
+        f"- 以「{SCENE_MARKER_LIVE}」标记的是上一轮对话之后群内的其他发言"
+        f"（现场氛围，非直接对话）"
+    )
 
     if chat_type == "private":
         lines.append("- 当前会话类型：私聊")
@@ -287,9 +317,13 @@ def build_system_prompt(
         ]
         if tool_discovery_enabled:
             tool_lines.extend([
-                f"- 当前只展示常驻工具；需要未展示的外部能力、MCP 能力或专门查询能力时，先调用 {tool_search_name}。",
+                f"- 当前只展示常驻工具；"
+                f"需要未展示的外部能力、MCP 能力或专门查询能力时，"
+                f"先调用 {tool_search_name}。",
                 f"- {tool_search_name} 会按能力描述返回并加载少量相关工具，之后再调用对应工具名。",
-                f"- 如果 {tool_search_name} 没找到但你认为工具存在，用 {tool_list_name} 查看工具组、名称或摘要；确认工具名后用 {tool_list_name} 的 load 模式加载。",
+                f"- 如果 {tool_search_name} 没找到但你认为工具存在，"
+                f"用 {tool_list_name} 查看工具组、名称或摘要；"
+                f"确认工具名后用 {tool_list_name} 的 load 模式加载。",
             ])
             categories = [item for item in deferred_tool_categories or [] if item.strip()]
             if categories:
@@ -298,7 +332,8 @@ def build_system_prompt(
             tool_lines.extend([
                 "- 当前联网后端：SearXNG。",
                 f"- {_CURRENT_INFO_TRIGGER_HINT}链接的问题时，请主动调用 {search_tool_name}。",
-                f"- 当前 {search_tool_name} 走项目内 SearXNG；搜索结果不够时，可以继续多次调用 {search_tool_name} 细化检索。",
+                f"- 当前 {search_tool_name} 走项目内 SearXNG；"
+                f"搜索结果不够时，可以继续多次调用 {search_tool_name} 细化检索。",
                 "- 优先先搜再答，再根据搜索结果组织结论。",
             ])
         tool_lines.append("- 工具结果不足时，明确告诉用户不足，不要编造。")
@@ -307,10 +342,98 @@ def build_system_prompt(
             tool_lines.append(f"- {spec.name}：{spec.description}")
         lines.append("\n".join(tool_lines))
 
+    # Skill catalog 常驻静态段末尾（目录不变则字节稳定，保持前缀缓存契约）。
+    if skills_catalog_block.strip():
+        lines.append(skills_catalog_block.strip())
+
     return "\n\n".join(line for line in lines if line)
 
 
 _WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+
+
+def build_turn_envelope_segments(
+    *,
+    now: datetime,
+    prompt: str,
+    memories: list[dict[str, object]],
+    vocab: VocabIndex,
+    chat_type: str = "group",
+    participants: list[dict[str, str]] | None = None,
+    mention_profiles: list[dict[str, str]] | None = None,
+) -> dict[str, str]:
+    """当轮上下文信封的六段分解（键序即拼接序）。
+
+    段键：time（头行+时间行，恒在）/ festival / participants / mentions /
+    memories / vocab；空段整段省略。vocab 段在分解口径上并入黑话解释
+    （glossary），六段契约由此定死。``build_turn_envelope`` 逐字节等于
+    ``"\\n".join(parts.values())``——两函数的行序改动必须同步。
+    """
+    parts: dict[str, str] = {}
+
+    time_lines: list[str] = ["【轮次上下文】"]
+    time_lines.append(
+        f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} "
+        f"{now:%H:%M}（北京时间）"
+    )
+    parts["time"] = "\n".join(time_lines)
+
+    festival_appendix = get_festival_persona_appendix(today=now.date())
+    if festival_appendix:
+        parts["festival"] = f"- 节日：{festival_appendix}"
+
+    if participants:
+        names = [
+            item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
+            for item in participants[:8]
+        ]
+        parts["participants"] = f"- 当前对话参与成员：{'、'.join(names)}"
+
+    if mention_profiles:
+        profile_lines: list[str] = []
+        for item in mention_profiles[:5]:
+            name = str(item.get("canonical_name", "")).strip()
+            qq = str(item.get("user_id", "")).strip()
+            if not name or not qq:
+                continue
+            label = f"{name}（QQ {qq}）"
+            aliases = str(item.get("aliases", "")).strip()
+            note = str(item.get("note", "")).strip()
+            extra = [part for part in (f"别名{aliases}" if aliases else "", note) if part]
+            profile_lines.append(f"- {label}：{'；'.join(extra)}" if extra else f"- {label}")
+        if profile_lines:
+            profile_lines.insert(0, "以下成员在消息中被艾特但未在窗口内发言，档案按 QQ 号对应：")
+            parts["mentions"] = "\n".join(profile_lines)
+
+    if memories:
+        memory_lines: list[str] = []
+        if chat_type == "private":
+            memory_lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
+        else:
+            memory_lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
+        for index, memory in enumerate(memories, 1):
+            memory_lines.append(f"{index}. {display(memory)}")
+        parts["memories"] = "\n".join(memory_lines)
+
+    vocab_lines: list[str] = []
+    vocab_matches = vocab.find_matches(prompt)
+    if vocab_matches:
+        vocab_lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
+        for item in vocab_matches:
+            line = f"- {item.alias} 通常指 {item.name}"
+            if item.note:
+                line += f"；注意：{item.note}"
+            vocab_lines.append(line)
+
+    glossary_matches = vocab.find_glossary(prompt)
+    if glossary_matches:
+        vocab_lines.append("以下黑话解释仅在当前话题相关时参考：")
+        for term, meaning in glossary_matches:
+            vocab_lines.append(f"- {term}：{meaning}")
+    if vocab_lines:
+        parts["vocab"] = "\n".join(vocab_lines)
+
+    return parts
 
 
 def build_turn_envelope(
@@ -331,63 +454,21 @@ def build_turn_envelope(
     ``mention_profiles`` 为被艾特但未发言成员的档案（名字在前、QQ 作
     配对键），空列表整段省略。
     """
-    lines: list[str] = ["【轮次上下文】"]
-    lines.append(f"- 当前时间：{now:%Y-%m-%d} {_WEEKDAY_NAMES[now.weekday()]} {now:%H:%M}（北京时间）")
-
-    festival_appendix = get_festival_persona_appendix(today=now.date())
-    if festival_appendix:
-        lines.append(f"- 节日：{festival_appendix}")
-
-    if participants:
-        names = [
-            item.get("canonical_name") or item.get("sender_name") or f"QQ {item.get('user_id')}"
-            for item in participants[:8]
-        ]
-        lines.append(f"- 当前对话参与成员：{'、'.join(names)}")
-
-    if mention_profiles:
-        profile_lines: list[str] = []
-        for item in mention_profiles[:5]:
-            name = str(item.get("canonical_name", "")).strip()
-            qq = str(item.get("user_id", "")).strip()
-            if not name or not qq:
-                continue
-            label = f"{name}（QQ {qq}）"
-            aliases = str(item.get("aliases", "")).strip()
-            note = str(item.get("note", "")).strip()
-            parts = [part for part in (f"别名{aliases}" if aliases else "", note) if part]
-            profile_lines.append(f"- {label}：{'；'.join(parts)}" if parts else f"- {label}")
-        if profile_lines:
-            lines.append("以下成员在消息中被艾特但未在窗口内发言，档案按 QQ 号对应：")
-            lines.extend(profile_lines)
-
-    if memories:
-        if chat_type == "private":
-            lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
-        else:
-            lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
-        for index, memory in enumerate(memories, 1):
-            lines.append(f"{index}. {display(memory)}")
-
-    vocab_matches = vocab.find_matches(prompt)
-    if vocab_matches:
-        lines.append("以下词表命中仅用于帮助你做称呼消歧，不要机械复读：")
-        for item in vocab_matches:
-            line = f"- {item.alias} 通常指 {item.name}"
-            if item.note:
-                line += f"；注意：{item.note}"
-            lines.append(line)
-
-    glossary_matches = vocab.find_glossary(prompt)
-    if glossary_matches:
-        lines.append("以下黑话解释仅在当前话题相关时参考：")
-        for term, meaning in glossary_matches:
-            lines.append(f"- {term}：{meaning}")
-
-    return "\n".join(lines)
+    parts = build_turn_envelope_segments(
+        now=now,
+        prompt=prompt,
+        memories=memories,
+        vocab=vocab,
+        chat_type=chat_type,
+        participants=participants,
+        mention_profiles=mention_profiles,
+    )
+    return "\n".join(parts.values())
 
 
-def _resolve_canonical_name(identities, user_id: str, sender_name: str, stored_canonical: str) -> str:
+def _resolve_canonical_name(
+    identities, user_id: str, sender_name: str, stored_canonical: str
+) -> str:
     if identities is None or not user_id.strip():
         return stored_canonical
     match = identities.resolve_user(user_id, sender_name)
@@ -441,7 +522,8 @@ def _build_scenes_from_history(
             user_id = str(item.get("user_id") or "")
             sender_name = str(item.get("sender_name") or "")
             raw_text = _history_text(item)
-            # 渲染冻结：history 行信任落库定格的 canonical_name（前缀稳定契约，见 docs/dev/llm-module.md §4.2）
+            # 渲染冻结：history 行信任落库定格的 canonical_name
+            # （前缀稳定契约，见 docs/dev/llm-module.md §4.2）
             canonical_name = str(item.get("canonical_name") or "")
             pending_speakers.append({
                 "user_id": user_id,
@@ -519,7 +601,11 @@ def _build_scene_from_current_message(
     if quoted_text.strip() or (quoted_image_urls or []):
         q_user_id = quoted_user_id.strip()
         q_sender = "机器人自己" if quoted_is_bot_self else quoted_sender_name.strip()
-        q_canonical = "机器人自己" if quoted_is_bot_self else _resolve_canonical_name(identities, q_user_id, q_sender, "")
+        q_canonical = (
+            "机器人自己"
+            if quoted_is_bot_self
+            else _resolve_canonical_name(identities, q_user_id, q_sender, "")
+        )
         q_text = quoted_text.strip()
         if q_text:
             suffix = f" [附图 {len(quoted_image_urls)} 张]" if quoted_image_urls else ""
@@ -553,7 +639,9 @@ def _build_scene_from_current_message(
         successful = [
             desc
             for desc in image_descriptions
-            if getattr(desc, "success", False) and str(getattr(desc, "text_description", "")).strip()
+            if getattr(desc, "success", False) and str(
+                getattr(desc, "text_description", "")
+            ).strip()
         ]
         per_description_budget = min(
             MAX_IMAGE_DESCRIPTION_CHARS,
@@ -711,7 +799,8 @@ def build_messages(
             user_id = str(item.get("user_id") or "")
             sender_name = str(item.get("sender_name") or "")
             raw_text = _history_text(item)
-            # 渲染冻结：history 行信任落库定格的 canonical_name（前缀稳定契约，见 docs/dev/llm-module.md §4.2）
+            # 渲染冻结：history 行信任落库定格的 canonical_name
+            # （前缀稳定契约，见 docs/dev/llm-module.md §4.2）
             canonical_name = str(item.get("canonical_name") or "")
             pending_speakers.append({
                 "user_id": user_id,
@@ -731,7 +820,9 @@ def build_messages(
     # 群里最近分享的图。newest-first 由 collect_recent_image_urls 保证，重复跳过。
     # 图片源与文本补丁解耦：被动唤醒的近期图是全量快照语义（TTL 窗），服务层
     # 传入 recent_images_messages；缺省回落到补丁列表（显式注入路径同源）。
-    images_source = recent_images_messages if recent_images_messages is not None else recent_messages
+    images_source = (
+        recent_images_messages if recent_images_messages is not None else recent_messages
+    )
     recent_images: list[str] = []
     if images_source and include_recent_images:
         recent_images = collect_recent_image_urls(

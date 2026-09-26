@@ -18,7 +18,7 @@ from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 from quickquip.llm.provider import LLMRequest, LLMResponse
 from quickquip.llm.tools import LLMToolCall
 
-# ── 五 Turn 主例正文（长度由 test_agent_loop_baseline 自检锁定） ──────────
+# ── 五 Turn 主例正文（由实际记录、重放和交付用例消费） ──────────
 
 FIVE_TURN_TEXTS: tuple[str, ...] = (
     # 32 cp：Turn 0 普通正文，先于其工具执行交付
@@ -52,7 +52,6 @@ AGENT_LOOP_TEST_SPLIT = {"threshold": 120, "chunk_max": 240}
 
 def five_turn_tool_calls() -> list[list[LLMToolCall]]:
     calls: list[list[LLMToolCall]] = []
-    counter = 0
     for turn_index, queries in enumerate(FIVE_TURN_TOOL_QUERIES):
         batch = [
             LLMToolCall(
@@ -62,9 +61,7 @@ def five_turn_tool_calls() -> list[list[LLMToolCall]]:
             )
             for offset, query in enumerate(queries)
         ]
-        counter += len(batch)
         calls.append(batch)
-    assert counter == 7, "五 Turn 主例必须恰好七次工具调用（§11.2）"
     return calls
 
 
@@ -107,13 +104,15 @@ def _native_thinking_blocks(protocol: str, turn_index: int) -> list[dict]:
     label = f"turn{turn_index}"
     if protocol == "claude":
         return [
-            {"type": "thinking", "thinking": f"先核对榜单再回答（{label}）。", "signature": f"sig-{label}"},
+            {"type": "thinking", "thinking": f"先核对榜单再回答（{label}）。",
+             "signature": f"sig-{label}"},
             {"type": "redacted_thinking", "data": f"redacted-{label}"},
         ]
     if protocol == "gemini":
         # replay_required 形态：带 thoughtSignature 的 part 包成 gemini_part
         return [
-            {"type": "gemini_part", "part": {"text": f"检索线索（{label}）", "thoughtSignature": f"ts-{label}"}},
+            {"type": "gemini_part", "part": {"text": f"检索线索（{label}）",
+             "thoughtSignature": f"ts-{label}"}},
         ]
     return [{"type": "reasoning", "reasoning_content": f"解题思路（{label}）。"}]
 
@@ -125,8 +124,10 @@ OPENAI_NATIVE_TOOL_TURN = {
     "content": FIVE_TURN_TEXTS[1],
     "reasoning_content": "解题思路（turn1）。",
     "tool_calls": [
-        {"id": "call_1_0", "type": "function", "function": {"name": "get_identity", "arguments": '{"query":"4s"}'}},
-        {"id": "call_1_1", "type": "function", "function": {"name": "get_identity", "arguments": '{"query":"哈基镜"}'}},
+        {"id": "call_1_0", "type": "function",
+         "function": {"name": "get_identity", "arguments": '{"query":"4s"}'}},
+        {"id": "call_1_1", "type": "function",
+         "function": {"name": "get_identity", "arguments": '{"query":"哈基镜"}'}},
     ],
 }
 
@@ -136,7 +137,8 @@ CLAUDE_NATIVE_TOOL_TURN = {
         {"type": "thinking", "thinking": "先核对榜单再回答（turn1）。", "signature": "sig-turn1"},
         {"type": "text", "text": FIVE_TURN_TEXTS[1]},
         {"type": "tool_use", "id": "call_1_0", "name": "get_identity", "input": {"query": "4s"}},
-        {"type": "tool_use", "id": "call_1_1", "name": "get_identity", "input": {"query": "哈基镜"}},
+        {"type": "tool_use", "id": "call_1_1", "name": "get_identity",
+         "input": {"query": "哈基镜"}},
     ],
 }
 
@@ -146,7 +148,8 @@ GEMINI_NATIVE_TOOL_TURN = {
         {"text": "检索线索（turn1）。", "thoughtSignature": "ts-turn1", "thought": True},
         {"text": FIVE_TURN_TEXTS[1]},
         {"functionCall": {"id": "gemini_tool_1", "name": "get_identity", "args": {"query": "4s"}}},
-        {"functionCall": {"id": "gemini_tool_2", "name": "get_identity", "args": {"query": "哈基镜"}}},
+        {"functionCall": {"id": "gemini_tool_2", "name": "get_identity",
+         "args": {"query": "哈基镜"}}},
     ],
 }
 
@@ -210,7 +213,10 @@ def build_legacy_db(path: Path) -> None:
             conn.execute(
                 """
                 INSERT INTO conversation_messages
-                    (group_id, user_id, sender_name, canonical_name, role, content, message_id, raw_content, created_at)
+                    (
+                        group_id, user_id, sender_name, canonical_name, role,
+                        content, message_id, raw_content, created_at
+                    )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (

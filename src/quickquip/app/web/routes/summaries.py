@@ -192,7 +192,8 @@ def summary_generation_log(group_id: str, summary_date: str):
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT group_id, summary_date, generated_at, run_id FROM summaries WHERE group_id = ? AND summary_date = ?",
+            "SELECT group_id, summary_date, generated_at, run_id "
+            "FROM summaries WHERE group_id = ? AND summary_date = ?",
             (group_id, summary_date),
         ).fetchone()
         if not row:

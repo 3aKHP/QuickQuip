@@ -103,7 +103,9 @@ class DailySummaryGenerationFailedError(RuntimeError):
     """每日总结生成失败或被跳过（LLM 失败、persona 缺失等）。"""
 
 
-async def send_daily_summary_now(group_id: int | str, bot=None, before_generate=None) -> dict[str, object]:
+async def send_daily_summary_now(
+    group_id: int | str, bot=None, before_generate=None
+) -> dict[str, object]:
     group_key = str(group_id)
     if not daily_enabled_groups.contains(group_key):
         raise DailySummaryNotEnabledError("daily summary is not enabled for this group")
@@ -287,7 +289,12 @@ def register_daily_summary_commands(on_command) -> None:
 
         # ── /summary weekly|monthly ... 子命令分发 ──────────────────
         # 周期报告子命令独立解析，不与日报 on/off/status/now 冲突。
-        if args.split(None, 1)[:1] and args.split(None, 1)[0] in {"weekly", "monthly", "周报", "月报"}:
+        if args.split(None, 1)[:1] and args.split(None, 1)[0] in {
+            "weekly",
+            "monthly",
+            "周报",
+            "月报",
+        }:
             handled = await _handle_period_subcommand(args, group_id, summary_cmd, event)
             if handled:
                 return
@@ -326,7 +333,10 @@ def register_daily_summary_commands(on_command) -> None:
             if not _is_admin(event):
                 await summary_cmd.finish("仅管理员可执行此操作")
             try:
-                await send_daily_summary_now(group_id, before_generate=lambda: summary_cmd.send("正在生成总结，请稍候……"))
+                await send_daily_summary_now(
+                    group_id,
+                    before_generate=lambda: summary_cmd.send("正在生成总结，请稍候……"),
+                )
             except DailySummaryNotEnabledError:
                 await summary_cmd.finish("本群未开启每日总结，请先使用 /summary on 开启。")
             except DailySummaryCooldownError:
@@ -369,7 +379,8 @@ _PERIOD_RULE_NAMES = {"weekly": "weekly_report", "monthly": "monthly_report"}
 
 
 def _period_enabled_groups(period_type: str):
-    """按 period_type 返回对应的 enabled groups 实例（duck-typed，具备 add/remove/contains/all_groups）。"""
+    """按 period_type 返回对应的 enabled groups 实例（duck-typed，具备
+    add/remove/contains/all_groups）。"""
     if period_type == PERIOD_WEEKLY:
         return weekly_enabled_groups
     if period_type == PERIOD_MONTHLY:
@@ -464,11 +475,19 @@ def _register_period_jobs() -> None:
         pub_id = f"{period_type}_report_publish"
         scheduler.add_job(
             _make_wrapped(gen_id, lambda pt=period_type: _job_generate_period_reports(pt)),
-            "cron", id=gen_id, name=gen_id, replace_existing=True, **parse_cron(cfg.generate_cron, fallback_hour="6"),
+            "cron",
+            id=gen_id,
+            name=gen_id,
+            replace_existing=True,
+            **parse_cron(cfg.generate_cron, fallback_hour="6"),
         )
         scheduler.add_job(
             _make_wrapped(pub_id, lambda pt=period_type: _job_publish_period_reports(pt)),
-            "cron", id=pub_id, name=pub_id, replace_existing=True, **parse_cron(cfg.publish_cron, fallback_hour="6"),
+            "cron",
+            id=pub_id,
+            name=pub_id,
+            replace_existing=True,
+            **parse_cron(cfg.publish_cron, fallback_hour="6"),
         )
         logger.info(
             "period_report[%s]: jobs registered (generate=%s, publish=%s)",
@@ -561,10 +580,17 @@ async def _handle_period_subcommand(
         if not _is_admin(event):
             await summary_cmd.finish("仅管理员可执行此操作")
         enabled.add(group_id)
-        cfg = svc.config.weekly_report if period_type == PERIOD_WEEKLY else svc.config.monthly_report
+        cfg = (
+            svc.config.weekly_report
+            if period_type == PERIOD_WEEKLY
+            else svc.config.monthly_report
+        )
         gen_time = cron_to_hhmm(cfg.generate_cron)
         pub_time = cron_to_hhmm(cfg.publish_cron)
-        await summary_cmd.finish(f"本群{kind_word}已开启。将于每周期 {gen_time} 生成，每天 {pub_time} 发布（未发布的报告会自动补发）。")
+        await summary_cmd.finish(
+            f"本群{kind_word}已开启。将于每周期 {gen_time} 生成，"
+            f"每天 {pub_time} 发布（未发布的报告会自动补发）。"
+        )
         return True
 
     if sub in {"off", "关闭", "禁用"}:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 import re
 import shlex
+from typing import Any
 
 from quickquip.common.event_utils import strip_command_name as _strip_command_name
 from quickquip.llm.profile import DEFAULT_PROFILE_MODE, PROFILE_MODES, ProfileModeConfig
@@ -42,11 +44,19 @@ def _parse_profile_mode(message_text: str) -> ProfileModeConfig:
     return DEFAULT_PROFILE_MODE
 
 
-_PRESET_RE = re.compile(r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'|(\S.*))', re.DOTALL)
+_PRESET_RE = re.compile(
+    r'--preset\s+(?:"((?:[^"\\]|\\.)*)"|'
+    r'\'((?:[^\'\\]|\\.)*)\''
+    r'|(\S.*))',
+    re.DOTALL,
+)
 _RESUME_RE = re.compile(r'--resume(?:\s+(\d+))?')
 _DICE_RE = re.compile(r"^(\d*)[dD](\d+)$")
 _DRAW_SIZE_RE = re.compile(r'--size\s+(\d+x\d+)', re.IGNORECASE)
 _DRAW_QUALITY_RE = re.compile(r'--quality\s+(\S+)', re.IGNORECASE)
+# qq 数字后收尾放宽为 `,` 或 `]`：LLOneBot 的 at 码带 name= 扩展键，
+# 只认裸 `qq=数字]` 会漏掉全部 @ 目标。
+_AT_TARGET_RE = re.compile(r"\[CQ:at,qq=(\d+)[,\]]")
 
 
 def _parse_preset(args: str) -> str:
@@ -62,6 +72,34 @@ def _parse_resume(args: str) -> tuple[bool, int | None]:
         return False, None
     num_str = m.group(1)
     return True, int(num_str) if num_str else None
+
+
+def _raw_message_text(event) -> str:
+    """event 的原始 CQ 文本；raw_message 缺失或为空时用段序列化兜底。"""
+    return getattr(event, "raw_message", None) or str(event.get_message())
+
+
+def _extract_at_target(raw: str | None, segments: Iterable[Any] | None) -> str | None:
+    """提取消息里第一个被 @ 的普通用户 QQ 号，@全体不算目标。
+
+    段解析优先：指向 bot 自身的 at 段会被 NoneBot 的 to_me 识别从
+    get_message() 里剥掉，剩下的段恰好是用户指向他人的目标（如
+    「@bot /profile @某人」应取某人）。段里已无 at 时（如「/击剑 @bot」
+    只有 self-@ 被剥空）回退 raw_message 的 CQ 码，那是被剥掉的
+    self-@ 的唯一残留来源。
+    """
+    for seg in segments or ():
+        seg_type = getattr(seg, "type", None)
+        data = getattr(seg, "data", {})
+        if seg_type == "at":
+            qq = str(data.get("qq", "") or "").strip()
+            if qq and qq != "all":
+                return qq
+    if raw:
+        m = _AT_TARGET_RE.search(raw)
+        if m:
+            return m.group(1)
+    return None
 
 
 def _parse_tieba_command_args(args: str) -> tuple[str, str | None, bool]:

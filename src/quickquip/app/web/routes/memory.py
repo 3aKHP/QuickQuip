@@ -85,7 +85,10 @@ def create_memory(group_id: str, body: MemoryCreate, request: Request):
         action="create",
         target_type="memory",
         target_id=f"{group_id}:{mem_id}",
-        summary_after={"scope": body.scope, "content": (render(parts) if parts is not None else body.content)[:100]},
+        summary_after={
+            "scope": body.scope,
+            "content": (render(parts) if parts is not None else body.content)[:100],
+        },
     )
     return {"id": mem_id}
 
@@ -106,7 +109,13 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Reque
         old_tags = row["tags_json"]
         old_conf = row["confidence"]
         parts = _validated_parts(body.content_parts)
-        new_content = render(parts) if parts is not None else body.content if body.content is not None else old_content
+        new_content = (
+            render(parts)
+            if parts is not None
+            else body.content
+            if body.content is not None
+            else old_content
+        )
         new_tags = json.dumps(body.tags, ensure_ascii=False) if body.tags is not None else old_tags
         new_conf = body.confidence if body.confidence is not None else old_conf
         now = datetime.now(timezone.utc).isoformat()
@@ -115,7 +124,10 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Reque
             (new_content, new_tags, new_conf, now, mem_id),
         )
         if parts is not None or body.content is not None:
-            save_parts(conn, "memories", mem_id, group_id, parts if parts is not None else plain(new_content))
+            save_parts(
+                conn, "memories", mem_id, group_id,
+                parts if parts is not None else plain(new_content),
+            )
     logger.info("memory updated: group=%s id=%d", group_id, mem_id)
     audit_logger.log(
         request,
@@ -140,7 +152,11 @@ def delete_memory(group_id: str, mem_id: int, request: Request):
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="memory not found")
-        summary_before = {"content": row["content"][:100], "tags": row["tags_json"], "confidence": row["confidence"]}
+        summary_before = {
+            "content": row["content"][:100],
+            "tags": row["tags_json"],
+            "confidence": row["confidence"],
+        }
         cur = conn.execute(
             "DELETE FROM memories WHERE id = ? AND group_id = ?",
             (mem_id, group_id),
@@ -200,6 +216,9 @@ def search_members(
         entry = snapshot.index.by_qq.get(qq)
         aliases = entry.aliases if entry else []
         name = snapshot.name(qq)
-        if not query or any(query.casefold() in value.casefold() for value in [qq, name, snapshot.names.get(qq, ""), *aliases]):
+        if not query or any(
+            query.casefold() in value.casefold()
+            for value in [qq, name, snapshot.names.get(qq, ""), *aliases]
+        ):
             result.append({"qq": qq, "name": name, "aliases": aliases})
     return result[offset:offset + limit]

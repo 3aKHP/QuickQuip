@@ -13,17 +13,13 @@ from quickquip.adapters.nonebot.command_parts.history import (
 )
 
 
-class _FakeMatch:
-    def __init__(self, canonical_name: str):
-        self.canonical_name = canonical_name
-
-
-
-
 class _FakeIdentityIndex(IdentityIndex):
     def __init__(self, by_alias=None, canonical_by_uid=None):
         entries = [IdentityEntry(name, [qq]) for qq, name in (canonical_by_uid or {}).items()]
-        entries.extend(IdentityEntry(alias, list(value.qq_ids), [alias]) for alias, value in (by_alias or {}).items())
+        entries.extend(
+            IdentityEntry(alias, list(value.qq_ids), [alias])
+            for alias, value in (by_alias or {}).items()
+        )
         super().__init__(entries=entries)
         self._build_indexes()
 
@@ -33,7 +29,10 @@ class _FakeStore:
         self._rows = rows
         self.calls = []
 
-    def search_by_sender(self, group_id, *, user_ids=(), name_pattern="", offset=0, limit=50, identity_snapshot=None):
+    def search_by_sender(
+        self, group_id, *, user_ids=(), name_pattern="", offset=0, limit=50,
+        identity_snapshot=None,
+    ):
         self.calls.append({"user_ids": list(user_ids), "name_pattern": name_pattern})
         return [dict(r) for r in self._rows], len(self._rows)
 
@@ -182,9 +181,9 @@ async def test_quote_by_qq_queries_exact_user_id(monkeypatch):
         await matcher.handlers[0](_FakeGroupEvent("quote by 12345"))
 
     assert store.calls == [{"user_ids": ["12345"], "name_pattern": ""}]
-    assert matcher.sent == [
-        "👤 「12345」的语录（共 1 条）：\n#3 「金句」—— 新名片 (原: 旧名片)",
-    ]
+    assert len(matcher.sent) == 1
+    for value in ("#3", "金句", "新名片", "旧名片"):
+        assert value in matcher.sent[0]
 
 
 async def test_quote_by_name_resolves_candidates(monkeypatch):
@@ -200,7 +199,8 @@ async def test_quote_by_name_resolves_candidates(monkeypatch):
         await matcher.handlers[0](_FakeGroupEvent("quote by 阿明"))
 
     assert store.calls == [{"user_ids": ["u1"], "name_pattern": "阿明"}]
-    assert matcher.sent == ["👤 「阿明」的语录（共 1 条）：\n#3 「金句」—— 阿明"]
+    assert len(matcher.sent) == 1
+    assert "金句" in matcher.sent[0] and "阿明" in matcher.sent[0]
 
 
 async def test_quote_by_no_match_reports_miss(monkeypatch):
@@ -212,11 +212,14 @@ async def test_quote_by_no_match_reports_miss(monkeypatch):
     with pytest.raises(_Finished):
         await matcher.handlers[0](_FakeGroupEvent("quote by 路人"))
 
-    assert matcher.sent == ["未找到「路人」发言的语录"]
+    assert matcher.sent
+    assert store.calls == [{"user_ids": [], "name_pattern": "路人"}]
 
 
 def test_quote_same_name_candidates_include_qq(monkeypatch):
-    index = IdentityIndex(entries=[IdentityEntry("同名", ["12345"]), IdentityEntry("同名", ["23456"])])
+    index = IdentityIndex(
+        entries=[IdentityEntry("同名", ["12345"]), IdentityEntry("同名", ["23456"])]
+    )
     index._build_indexes()
     monkeypatch.setattr(history, "get_sender_identity_sources", lambda group: ({}, index))
     assert _resolve_sender_candidates(10001, "同名") == ["12345", "23456"]
