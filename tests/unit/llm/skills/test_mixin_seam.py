@@ -297,3 +297,30 @@ def test_skill_list_drops_blocked_descriptions(tmp_path, monkeypatch):
     listing = svc.format_skill_list(3001)
     assert "clean" in listing and "正常描述。" in listing
     assert "dirty" not in listing and "blocked" not in listing
+
+def test_reactivate_after_window_shrink_reinjects_body(tmp_path):
+    """Deep-CR L1-3/L3-1:窗口收缩把激活轮移出可见历史后,重新激活走完整
+    注入,而非"正文不再重复注入"的假陈述。
+
+    注意登记尾部 = 正文实际注入轮的会话尾部(去重短路不注入新正文、
+    不刷新尾部),因此首个断言前先预置会话行使尾部 > 0。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "demo", "演示。", body="独特正文标记 XYZ\n")
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    ctx = _context()  # group_id=1001, chat_type="group"
+    scope = svc.build_chat_scope_key(ctx.group_id, ctx.chat_type)
+    svc.store.append_conversation_message(ctx.group_id, 2002, "user", "预热消息")
+
+    first = svc._tool_activate_skill({"name": "demo"}, ctx)
+    assert "独特正文标记" in str(first)
+
+    # 同 hash 去重短路(正文仍在窗口内,登记尾部未被刷新)
+    second = svc._tool_activate_skill({"name": "demo"}, ctx)
+    assert "不再重复注入" in str(second)
+
+    # 生效锚点越过登记尾部 → 巡检清登记 → 重新激活重注入正文
+    tail = svc.store.latest_conversation_row_id(scope)
+    assert tail > 0
+    svc._skill_activations.drop_outdated(scope, tail + 100)
+    third = svc._tool_activate_skill({"name": "demo"}, ctx)
+    assert "独特正文标记" in str(third)

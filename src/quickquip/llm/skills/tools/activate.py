@@ -59,11 +59,14 @@ def activate_skill(
     state: SkillActivationState,
     scope: str,
     record: bool = True,
+    tail_row_id: int = 0,
 ) -> str | LLMToolOutput:
     """激活已安装 skill 并返回注入文本；未安装名字 fail-closed 错误文本。
 
     ``record=False`` 用于调用方已知注入文本会被下游丢弃的场景（如敏感词
     整段替换）：返回不变，但不留登记，重试仍能拿到完整正文。
+    ``tail_row_id`` 为激活时刻的会话尾部行 id，登记随窗口收缩巡检失效用
+    （Deep-CR L1-3/L3-1）。
     """
     skill = skills.get(name)
     if skill is None:
@@ -75,7 +78,7 @@ def activate_skill(
     if state.is_duplicate(scope, name, skill.body_sha256):
         return format_activation_block(skill, status=ACTIVATION_STATUS_ALREADY_ACTIVE)
     if record:
-        state.record(scope, name, skill.body_sha256)
+        state.record(scope, name, skill.body_sha256, tail_row_id=tail_row_id)
     return format_activation_block(skill, status=ACTIVATION_STATUS_ACTIVATED)
 
 

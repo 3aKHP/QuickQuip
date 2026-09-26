@@ -48,3 +48,17 @@ def test_clear_scope_removes_only_that_scope():
     # 清过的 scope 可重新登记
     state.record("s1", "alpha", "h2")
     assert state.is_active("s1", "alpha")
+
+
+def test_drop_outdated_clears_only_out_of_window():
+    """窗口守卫:登记尾部早于生效锚点才清;未知尾部与在窗登记保留。"""
+    state = SkillActivationState()
+    state.record("s", "a", "h1", tail_row_id=10)
+    state.record("s", "b", "h2", tail_row_id=20)
+    state.record("s", "c", "h3")  # 尾部未知(旧登记形态),不参与巡检
+    state.drop_outdated("s", anchor_row_id=15)
+    assert not state.is_active("s", "a")
+    assert state.is_active("s", "b")
+    assert state.is_active("s", "c")
+    state.drop_outdated("other", 999)  # 其他 scope 不受影响
+    assert state.is_active("s", "b")
