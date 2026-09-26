@@ -25,6 +25,14 @@ if not exist "config\personas" (
         echo [WARNING] Missing config\personas.example, skipping personas copy
     )
 )
+if not exist "skills" (
+    if exist "skills.example" (
+        echo [First run] Copy skills.example -^> skills
+        xcopy "skills.example" "skills\" /E /I /Q /Y >nul
+    ) else (
+        echo [WARNING] Missing skills.example, skipping skills copy
+    )
+)
 call :copy_if_missing "llm_about\vocab.yaml.example" "llm_about\vocab.yaml"
 call :copy_if_missing "llm_about\identities.yaml.example" "llm_about\identities.yaml"
 
