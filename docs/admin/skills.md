@@ -6,7 +6,7 @@ Skill 是受信任的部署资产：部署者把技能包放进 `skills/` 目录
 
 ## 部署目录
 
-运行目录为项目根的 `skills/`（已被 git 忽略），仓库随附的 `skills.example/` 承载官方预置 Skill 模板。部署照 `config/personas.example/` → `config/personas/` 的同一先例：从 `skills.example/` 复制或合并需要的 Skill 到 `skills/`，再按环境调整。Docker 镜像只含 `skills.example/`；容器化部署的目录供给方式见 `prod.example/` 模板。
+运行目录为项目根的 `skills/`（已被 git 忽略），仓库随附的 `skills.example/` 承载官方预置 Skill 模板。部署照 `config/personas.example/` → `config/personas/` 的同一先例：从 `skills.example/` 复制或合并需要的 Skill 到 `skills/`，再按环境调整；Windows 懒人包首启（`start.bat`）会自动完成整目录复制。Docker 镜像与 Windows 懒人包均只携带 `skills.example/`；容器化部署的目录供给方式见 `prod.example/` 模板。
 
 目录约定：
 

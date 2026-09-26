@@ -76,7 +76,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 - 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
 - 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
 - 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
-- 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制；目录为空或不存时行为与此前完全一致，详见 [skills.md](skills.md)）
+- 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制，Windows 懒人包首启自动完成；目录为空或不存时行为与此前完全一致，详见 [skills.md](skills.md)）
 - `prod/` 已由 `prod.example/` 复制而来，并按服务器环境调整 compose、部署脚本或巡检脚本
 - 如需 ServerChan 等运维通知，在 `prod/sendkey.env` 中维护；该文件不被 QuickQuip 应用读取
 

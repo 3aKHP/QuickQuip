@@ -47,7 +47,7 @@
 - `docs/admin/onebot-adapters.md` → `references/docs-admin-onebot-adapters.md` — OneBot 适配器状态与选择 ｜ 关键词：.env、ONEBOT_WS_URLS、DRIVER、~websockets、~fastapi、ws://<bot 地址>:8080/onebot/v11/ws、ONEBOT_ACCESS_TOKEN、message.group、sender.card、nickname
 - `docs/admin/record-identities.md` → `references/docs-admin-record-identities.md` — 记录身份迁移与验收 ｜ 关键词：requirements.txt、--database、memories、quotes、offline_messages、all、data/llm.db、data/quotes.db、data/offline_messages.db、--path
 - `docs/admin/sensitive-filter.md` → `references/docs-admin-sensitive-filter.md` — 敏感词过滤器（sensitive_filter） ｜ 关键词：Content Exists Risk、Content security warning、src/quickquip/common/sensitive_filter.py、config/sensitive_words.toml、[内容已屏蔽]、casefold()、political_leaders、political_events、territorial、ethnic_religion
-- `docs/admin/skills.md` → `references/docs-admin-skills.md` — Skill 系统（skills/） ｜ 关键词：skills/、SKILL.md、references/、scripts/、skills.example/、config/personas.example/、config/personas/、prod.example/、^[a-z0-9][a-z0-9-]*$、name
+- `docs/admin/skills.md` → `references/docs-admin-skills.md` — Skill 系统（skills/） ｜ 关键词：skills/、SKILL.md、references/、scripts/、skills.example/、config/personas.example/、config/personas/、start.bat、prod.example/、^[a-z0-9][a-z0-9-]*$
 - `docs/admin/tool-discovery.md` → `references/docs-admin-tool-discovery.md` — LLM 工具发现配置 ｜ 关键词：tool_search、config/llm.toml、enabled、enabled_mode = "replace"、discovery_mode、off、on、auto、discovery_min_tools、discovery_search_limit
 - `docs/admin/web-admin.md` → `references/docs-admin-web-admin.md` — Web Admin 管理后台 ｜ 关键词：/ops/、auth_basic、GET /ops/api/auth/me、WEB_ADMIN_PASSWORD、Set-Cookie、/ops/api/*、data/web_admin_sessions.db、session_id、localStorage、HttpOnly
 
