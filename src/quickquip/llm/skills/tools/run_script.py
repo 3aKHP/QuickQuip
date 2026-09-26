@@ -183,9 +183,8 @@ async def run_skill_script(
         timed_out = False
     except TimeoutError:
         timed_out = True
-        output_truncated = False
         _terminate_process(process)
-        stdout, stderr = await _drain_after_kill(process, output_cap)
+        stdout, stderr, output_truncated = await _drain_after_kill(process, output_cap)
     except BaseException:
         # 取消/异常路径同样杀进程组并尽力排空管道，不留孤儿进程。
         _terminate_process(process)
@@ -288,13 +287,18 @@ async def _collect_output(process: asyncio.subprocess.Process, cap: int) -> tupl
 
 async def _drain_after_kill(
     process: asyncio.subprocess.Process, cap: int
-) -> tuple[str, str]:
+) -> tuple[str, str, bool]:
     """超时杀进程后排空管道残余输出（有界截断，忽略读取异常）。"""
     try:
         stdout_raw, stderr_raw = await asyncio.wait_for(process.communicate(), timeout=5)
     except Exception:
-        return "", ""
-    return _decode_capped(stdout_raw, cap), _decode_capped(stderr_raw, cap)
+        return "", "", False
+    truncated = len(stdout_raw) > cap or len(stderr_raw) > cap
+    return (
+        _decode_capped(stdout_raw, cap),
+        _decode_capped(stderr_raw, cap),
+        truncated,
+    )
 
 
 def _decode_capped(raw: bytes, cap: int) -> str:

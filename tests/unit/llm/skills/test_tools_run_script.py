@@ -308,6 +308,7 @@ async def test_drain_after_kill_caps_output():
     """超时杀进程后的排空解码同样受 output cap 截断（Deep-CR L2-NV1）。"""
     from quickquip.llm.skills.tools.run_script import _drain_after_kill
 
-    stdout, stderr = await _drain_after_kill(_FakeDrainProc(), cap=1024)
+    stdout, stderr, truncated = await _drain_after_kill(_FakeDrainProc(), cap=1024)
     assert stdout == "A" * 1024
     assert stderr == "B" * 1024
+    assert truncated is True
