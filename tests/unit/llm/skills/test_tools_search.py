@@ -186,6 +186,14 @@ def test_search_only_scans_catalogued_resources(make_skill):
         r"(?P<name>x+)+y",
         "(?:x+x+)+",
         "(?i:a|a)+",
+        # 相邻可空量化原子链（Deep-CR Blocking，生产实证形态）
+        ".*.*.*.*z",
+        ".*.*z",
+        r"\s*\s*x",
+        ".?.?.?.?QQQQ",
+        "a?" * 5 + "b",
+        # 量化符总数超上限
+        "a+" * 21,
     ],
 )
 def test_search_rejects_pathological_regex(make_skill, query):
@@ -211,6 +219,13 @@ def test_search_rejects_pathological_regex(make_skill, query):
         "(?i)(AB|CD)+",
         "(?<=x)y+",
         "a{1,2}|b{2}",
+        # 防误杀：单个全能量词、非交叠/非全能相邻链、组保守不参与链
+        "error.*timeout",
+        "https?://",
+        r"[\w.-]+@[\w.-]+\.\w+",
+        ".*z",
+        r"\d*\d*z",
+        "(ab)?(cd)?",
     ],
 )
 def test_search_allows_benign_regex(make_skill, query):
@@ -239,3 +254,63 @@ def test_search_regex_lint_is_conservative_on_nested_quantifier(make_skill):
     result = _search(skills, state, query="(ab?)+", is_regex=True)
     assert isinstance(result, LLMToolOutput) and result.is_error
     assert "灾难性回溯" in result.content
+
+
+def test_search_regex_match_timeout_interrupts_backtracking(make_skill, monkeypatch):
+    """引擎超时层独立验证：禁用静态检查后，regex 引擎超时真正中断回溯。
+
+    ``(a|aa)+c`` 是 regex 引擎也会灾难性回溯的形态（实测 >8s）；静态
+    层本会先拒它（分支交叠），这里 monkeypatch 关掉第一层以单独验证
+    第二层的调用级超时。
+    """
+    catalog_dir, writer = make_skill
+    writer("demo", files={"references/a.txt": "a" * 60 + "\nplain\n"})
+    skills, state = _activated_env(catalog_dir, "demo")
+    monkeypatch.setattr(
+        "quickquip.llm.skills.tools.search_resource._find_pathological_regex",
+        lambda query: None,
+    )
+    monkeypatch.setattr(
+        "quickquip.llm.skills.tools.search_resource._REGEX_MATCH_TIMEOUT_S", 0.05
+    )
+    result = _search(skills, state, query=r"(a|aa)+c", is_regex=True)
+    assert isinstance(result, LLMToolOutput) and result.is_error
+    assert "正则匹配超时" in result.content
+    assert "is_regex=false" in result.content
+
+
+def test_search_wall_clock_budget_returns_partial(make_skill, monkeypatch):
+    """总预算耗尽时停止扫描并明确标注（防御纵深的第三层）。"""
+    catalog_dir, writer = make_skill
+    writer(
+        "demo",
+        files={"references/a.md": "命中甲\n", "references/b.md": "命中乙\n"},
+    )
+    skills, state = _activated_env(catalog_dir, "demo")
+    monkeypatch.setattr(
+        "quickquip.llm.skills.tools.search_resource._SEARCH_TIME_BUDGET_S", -1.0
+    )
+    result = _search(skills, state, query="命中")
+    assert isinstance(result, str)
+    assert "检索超时" in result
+
+
+@pytest.mark.parametrize(
+    ("fragment", "expected"),
+    [
+        ("a*", True),
+        ("a?", True),
+        ("a+", False),
+        ("a{0,}", True),
+        ("a{,5}", True),
+        ("a{0,3}", True),
+        ("a{0}", True),
+        ("a{3,5}", False),
+        ("a{2}", False),
+    ],
+)
+def test_nullable_quantifier_boundaries(fragment, expected):
+    from quickquip.llm.skills.tools.search_resource import _nullable_quantifier
+
+    query = "x" + fragment + "y"
+    assert _nullable_quantifier(query, 2) is expected

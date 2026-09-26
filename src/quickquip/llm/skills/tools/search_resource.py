@@ -11,7 +11,10 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Mapping
+
+import regex
 
 from quickquip.llm.skills.catalog import LoadedSkill, resolve_skill_file
 from quickquip.llm.skills.state import SkillActivationState
@@ -35,7 +38,20 @@ TOOL_KEYWORDS = ["skill", "技能", "搜索", "检索", "查找", "grep", "searc
 _SEARCH_FILE_READ_CAP_BYTES = 1024 * 1024
 _MAX_QUERY_CHARS = 200
 
+# 单次正则匹配的引擎级超时（秒）。regex 模块在 search(string, timeout=)
+# 调用级于回溯引擎内周期检查该值，超时抛内置 TimeoutError 真正中断回溯
+# ——这是防御纵深的核心层：病态模式最坏只损失本上限的执行时间，而不
+# 是冻结整个事件循环（stdlib re 的回溯在 C 层持有 GIL 且不可中断，
+# to_thread 也救不了；regex 引擎对部分经典形态有优化，但不免疫全部）。
+_REGEX_MATCH_TIMEOUT_S = 1.0
+# 单次检索调用的总墙钟预算（秒）：防"每行都不超时但行数多"的累积慢；
+# 超时停止扫描并返回已得部分结果。
+_SEARCH_TIME_BUDGET_S = 4.0
+
 _QUANTIFIER_RE = re.compile(r"\{(?:\d+(?:,\d*)?|,\d+)\}")
+# 静态检查的总量化符上限：正常查询远低于此；相邻可空量词链需要大量
+# 量词叠加才能进入指数/组合爆炸区。
+_MAX_TOTAL_QUANTIFIERS = 20
 
 SEARCH_SKILL_RESOURCES_SPEC = LLMToolSpec(
     name=SEARCH_SKILL_RESOURCES_TOOL_NAME,
@@ -92,10 +108,10 @@ def search_skill_resources(
                 ),
                 is_error=True,
             )
-    flags = 0 if case_sensitive else re.IGNORECASE
+    flags = 0 if case_sensitive else regex.IGNORECASE
     try:
-        pattern = re.compile(query if is_regex else re.escape(query), flags)
-    except re.error as exc:
+        pattern = regex.compile(query if is_regex else re.escape(query), flags)
+    except regex.error as exc:
         return LLMToolOutput(content=f"正则表达式无效：{exc}", is_error=True)
 
     max_results = max(1, max_results)
@@ -104,13 +120,17 @@ def search_skill_resources(
     hit_blocks: list[str] = []
     hit_count = 0
     stopped_early = False
+    timed_out = False
     skipped_binary = 0
     skipped_unreadable = 0
     oversized_files = 0
+    deadline = time.monotonic() + _SEARCH_TIME_BUDGET_S
 
     for resource in skill.resources:
         if hit_count >= max_results:
             stopped_early = True
+            break
+        if timed_out:
             break
         try:
             absolute = resolve_skill_file(skill, resource.path)
@@ -130,7 +150,21 @@ def search_skill_resources(
             continue
         lines = text.split("\n")
         for index, line in enumerate(lines):
-            if not pattern.search(line):
+            if time.monotonic() > deadline:
+                timed_out = True
+                break
+            try:
+                matched = pattern.search(line, timeout=_REGEX_MATCH_TIMEOUT_S)
+            except TimeoutError:
+                return LLMToolOutput(
+                    content=(
+                        f"正则匹配超时（{_REGEX_MATCH_TIMEOUT_S:g}s 上限），该模式可能在"
+                        "逐行检索中产生灾难性回溯；请改用字面搜索（is_regex=false）"
+                        "或改写为更简单的形态。"
+                    ),
+                    is_error=True,
+                )
+            if not matched:
                 continue
             hit_count += 1
             hit_blocks.append(_format_hit(resource.path, lines, index))
@@ -138,6 +172,12 @@ def search_skill_resources(
                 # 未穷完搜索空间，保守声明还有更多命中。
                 stopped_early = True
                 break
+
+    if hit_count == 0 and timed_out:
+        return (
+            f'[skill_search name="{skill.name}" query="{query}"]\n'
+            f"检索超时（{_SEARCH_TIME_BUDGET_S:g}s 预算耗尽），未能完成全部资源扫描。"
+        )
 
     if hit_count == 0:
         notes = []
@@ -161,6 +201,8 @@ def search_skill_resources(
 
     footer: list[str] = []
     shown = len(body_parts) - 1
+    if timed_out:
+        footer.append("（检索超时，仅显示已扫描部分）")
     if output_capped or stopped_early:
         footer.append(f"（命中较多，仅显示前 {shown} 处）")
     if skipped_binary:
@@ -185,13 +227,33 @@ _INLINE_FLAG_CHARS = frozenset("aiLmsux-")
 
 
 class _RegexGroupFrame:
-    __slots__ = ("start", "has_quantifier", "branches", "current")
+    __slots__ = (
+        "start",
+        "has_quantifier",
+        "branches",
+        "current",
+        "last_atom_end",
+        "last_atom_nullable",
+        "pending_adjacent",
+        "pending_universal",
+        "nullable_run",
+        "run_has_universal",
+    )
 
     def __init__(self, start: int = 0) -> None:
         self.start = start
         self.has_quantifier = False
         self.branches: list[str] = []
         self.current = ""
+        # 相邻可空量化原子链追踪：last_atom_* 记录上一个原子的边界与可空
+        # 性，pending_* 在该原子的量词被消费时结算，nullable_run 为当前
+        # 连续链长。run_has_universal 标记链中是否含全能原子。
+        self.last_atom_end = -1
+        self.last_atom_nullable = False
+        self.pending_adjacent = False
+        self.pending_universal = False
+        self.nullable_run = 0
+        self.run_has_universal = False
 
 
 def _quantifier_span(query: str, pos: int) -> int | None:
@@ -206,6 +268,47 @@ def _quantifier_span(query: str, pos: int) -> int | None:
         if match is not None:
             return match.end()
     return None
+
+
+# 全能原子：能匹配（几乎）任意输入。相邻的可空量化全能原子可对同一片
+# 输入做组合分割（C(len, n) 随链长指数增长），是灾难性回溯的主形态
+# （生产实证形态即 `.*.*.*.*z`）。
+_UNIVERSAL_ATOMS = frozenset({".", r"\s", r"\S", r"[\s\S]", r"[\S\s]", r"[^]"})
+
+
+def _is_universal_atom(atom_text: str) -> bool:
+    return atom_text in _UNIVERSAL_ATOMS
+
+
+def _nullable_quantifier(query: str, start: int) -> bool:
+    """该量词是否可匹配零次（``*``、``?``、``{0,...}``、``{,n}``）。"""
+    char = query[start]
+    if char in "*?":
+        return True
+    if char == "+":
+        return False
+    match = _QUANTIFIER_RE.match(query, start)
+    if match is None:
+        return False
+    body = match.group(0)[1:-1]  # "{m,n}" -> "m,n"
+    lower = ""
+    for digit in body:
+        if not digit.isdigit():
+            break
+        lower += digit
+    return not lower or int(lower) == 0
+
+
+def _register_atom(
+    frame: _RegexGroupFrame, query: str, atom_start: int, atom_end: int
+) -> None:
+    """登记一个刚消费完的原子：结算与上一可空量化原子的相邻性并重置可空态。"""
+    frame.pending_adjacent = (
+        frame.last_atom_end == atom_start and frame.last_atom_nullable
+    )
+    frame.last_atom_end = atom_end
+    frame.last_atom_nullable = False
+    frame.pending_universal = _is_universal_atom(query[atom_start:atom_end])
 
 
 def _consume_group_prefix(query: str, index: int) -> tuple[int, bool] | None:
@@ -251,23 +354,29 @@ def _consume_group_prefix(query: str, index: int) -> tuple[int, bool] | None:
 def _find_pathological_regex(query: str) -> str | None:
     """走查式静态检查：返回病态形态的原因字符串，良性/无意见返回 ``None``。
 
-    只盯两类高危结构——带量词后缀的组体内再含量词（``(x+x+)+``），以及
-    带量词后缀的组顶层交替分支相互交叠（``(a|a)*``、``(a|ab)*``）。解析
-    遇到不认识或畸形的结构时返回 ``None`` 交由 ``re.compile`` 的错误路径
-    处理；本检查永不抛出异常。
+    盯四类高危结构——带量词后缀的组体内再含量词（``(x+x+)+``）、带量词
+    后缀的组顶层交替分支相互交叠（``(a|a)*``、``(a|ab)*``）、相邻的可空
+    量化原子链（``.*.*.*z``、``a?a?a?b``；含全能原子的两连即拒）、以及
+    量化符总数超过上限。解析遇到不认识或畸形的结构时返回 ``None`` 交由
+    引擎的错误路径处理；本检查永不抛出异常。静态检查本质是已知形态的
+    黑名单，漏网形态由 regex 引擎的匹配超时兜底。
     """
     frames: list[_RegexGroupFrame] = []
     top = _RegexGroupFrame()
     index = 0
     length = len(query)
+    total_quantifiers = 0
     while index < length:
         char = query[index]
         frame = frames[-1] if frames else top
         if char == "\\":
+            atom_start = index
             frame.current += query[index : index + 2]
             index += 2
+            _register_atom(frame, query, atom_start, index)
             continue
         if char == "[":
+            atom_start = index
             end = index + 1
             if end < length and query[end] == "^":
                 end += 1
@@ -278,6 +387,7 @@ def _find_pathological_regex(query: str) -> str | None:
             end = min(end + 1, length)
             frame.current += query[index:end]
             index = end
+            _register_atom(frame, query, atom_start, index)
             continue
         if char == "(":
             if query.startswith("(?#", index):
@@ -289,8 +399,10 @@ def _find_pathological_regex(query: str) -> str | None:
                 return None
             body_start, is_bare_atom = consumed
             if is_bare_atom:
+                atom_start = index
                 frame.current += query[index:body_start]
                 index = body_start
+                _register_atom(frame, query, atom_start, index)
                 continue
             frames.append(_RegexGroupFrame(start=index))
             index = body_start
@@ -314,19 +426,51 @@ def _find_pathological_regex(query: str) -> str | None:
             parent.current += query[frame.start : close_end]
             if frame.has_quantifier or suffix_end is not None:
                 parent.has_quantifier = True
+            # 组作为 parent 的一个原子登记，但保守不参与可空量化链的
+            # 延续（组内交叠形态已由前两条规则捕获）。
+            parent.pending_adjacent = False
+            parent.pending_universal = False
+            parent.last_atom_end = close_end
+            parent.last_atom_nullable = False
             index = close_end
             continue
         if char == "|":
             frame.branches.append(frame.current)
             frame.current = ""
+            frame.nullable_run = 0
+            frame.run_has_universal = False
             index += 1
             continue
         quantifier_end = _quantifier_span(query, index)
         if quantifier_end is not None:
+            total_quantifiers += 1
+            if total_quantifiers > _MAX_TOTAL_QUANTIFIERS:
+                return "量化符总数超过上限"
             frame.has_quantifier = True
             frame.current += query[index:quantifier_end]
+            nullable = _nullable_quantifier(query, index)
+            if nullable:
+                if frame.pending_adjacent:
+                    frame.nullable_run += 1
+                    frame.run_has_universal = (
+                        frame.run_has_universal or frame.pending_universal
+                    )
+                else:
+                    frame.nullable_run = 1
+                    frame.run_has_universal = frame.pending_universal
+                if frame.nullable_run >= 2 and frame.run_has_universal:
+                    return "相邻的可空量化全能原子链"
+                if frame.nullable_run >= 4:
+                    return "连续可空量化原子链"
+            else:
+                frame.nullable_run = 0
+                frame.run_has_universal = False
+            frame.last_atom_end = quantifier_end
+            frame.last_atom_nullable = nullable
             index = quantifier_end
             continue
+        atom_start = index
         frame.current += char
         index += 1
+        _register_atom(frame, query, atom_start, index)
     return None
