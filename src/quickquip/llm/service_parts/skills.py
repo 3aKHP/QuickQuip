@@ -5,8 +5,10 @@
 ``tool_registry`` / ``config`` 属性与 ScopeMixin 的 ``_context_scope_key`` /
 ``build_chat_scope_key`` 方法。
 
-空目录短路（默认零扰动）：``[skills].enabled = false`` 或扫描为空时不
-注册工具、catalog 块不渲染；catalog 每轮请求现扫一次（service.py 在
+空目录短路（默认零扰动）：``[skills].enabled = false``、扫描为空或
+``runtime.tool_calling_enabled = false`` 时不渲染 catalog 块（工具注册
+与 spec 广告是两个概念：启动注册只看前两者，spec 广告面额外要求工具
+调用开启）；catalog 每轮请求现扫一次（service.py 在
 tool specs 计算前调 ``prepare_skill_catalog_for_turn``，渲染块与当轮
 specs 出自同一次扫描），首次扫到非空即惰性注册工具（热部署，无 reload
 钩子，新 skill 当轮即进 spec 广告面）；此后目录变空则块消失、handler
@@ -142,8 +144,8 @@ class SkillsToolMixin:
             return ""
         if not self.config.runtime.tool_calling_enabled:
             # 工具面关闭时 catalog 块一并静默：块文本指引模型用
-            # activate_skill 激活，而该工具不会注册——注入即误导
-            # （Deep-CR L1-2）。
+            # activate_skill 激活，而工具调用关闭时它不会进入当轮 spec
+            # 广告面（不可达）——注入即误导（Deep-CR L1-2）。
             return ""
         window = (
             resolve_context_window(provider.model_context_windows, model)

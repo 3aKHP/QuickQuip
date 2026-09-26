@@ -1,11 +1,12 @@
 """search_skill_resources：已激活 Skill 目录内的纯 Python 文本检索。
 
-不起子进程：用标准库 ``re`` 实现（无注入面、跨平台）。默认字面量、
-大小写不敏感；``is_regex=true`` 时按正则。命中以 ``file:line`` 返回并带
-±1 行上下文；结果数与输出字节分别按 ``search_max_results`` /
-``search_max_output_bytes`` 截断。遍历范围 = 扫描时编入清单的安全资源
-（符号链接与不安全路径已被排除），每个文件读取前再过一次
-``resolve_skill_file`` 同款加固。
+不起子进程、无注入面、跨平台：匹配用 ``regex`` 模块实现（调用级超时
+可中断回溯，配合静态形态检查与墙钟预算构成防 ReDoS 三层防御），字面
+量路径复用 ``re.escape``。默认字面量、大小写不敏感；``is_regex=true``
+时按正则。命中以 ``file:line`` 返回并带 ±1 行上下文；结果数与输出字节
+分别按 ``search_max_results`` / ``search_max_output_bytes`` 截断。
+遍历范围 = 扫描时编入清单的安全资源（符号链接与不安全路径已被排除），
+每个文件读取前再过一次 ``resolve_skill_file`` 同款加固。
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ TOOL_DESCRIPTION = (
     "is_regex=true 时按正则表达式匹配。返回 file:line 命中及前后各 1 行"
     "上下文，命中数与输出体积受部署上限截断。适合命令、报错信息、精确术语"
     "等关键词型定位；找到后用 read_skill_resource 读取完整段落。"
-    "为防灾难性回溯，含嵌套量词或交叠分支的量化组等病态正则形态会被"
-    "拒绝——被拒之模式请改用字面搜索（is_regex=false）或改写。"
+    "为防灾难性回溯，含嵌套量词或交叠分支的量化组、相邻可空量化原子链等"
+    "病态正则形态会被静态检查拒绝，漏网形态受引擎超时与时间预算兜底——"
+    "被拒之模式请改用字面搜索（is_regex=false）或改写。"
 )
 
 TOOL_KEYWORDS = ["skill", "技能", "搜索", "检索", "查找", "grep", "search", "关键词"]
