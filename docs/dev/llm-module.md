@@ -73,7 +73,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/tool_registry.py`
   - 负责工具白名单注册、参数校验和执行调度
 - `src/quickquip/llm/skills/`
-  - Skill 系统域包（1.16 起）：`parser`（SKILL.md frontmatter 与体积校验）、`catalog`（目录扫描、路径加固与内容校验）、`context`（会话激活状态）、`state`，以及 `tools/` 下的四枚工具（`activate_skill` 激活、`read_skill_resource` 读资料、`search_skill_resources` 检索、`run_skill_script` 执行脚本）；`service_parts/skills.py` 负责每轮目录扫描（零延迟热部署）、Skill 描述清单注入系统提示与激活接缝；命令入口 `/skill list`。部署、安全模型与编写教程见 [../admin/skills.md](../admin/skills.md) 与 [skill-tutorial.md](skill-tutorial.md)
+  - Skill 系统域包（1.16 起）：`parser`（SKILL.md frontmatter 与体积校验）、`catalog`（目录扫描、路径加固与内容校验）、`context`（catalog 块与激活标记的文本渲染）、`state`（per-会话激活状态登记），以及 `tools/` 下的四枚工具（`activate_skill` 激活、`read_skill_resource` 读资料、`search_skill_resources` 检索、`run_skill_script` 执行脚本）；`service_parts/skills.py` 负责每轮目录扫描（零延迟热部署）、Skill 描述清单注入系统提示与激活接缝；命令入口 `/skill list`。部署、安全模型与编写教程见 [../admin/skills.md](../admin/skills.md) 与 [skill-tutorial.md](skill-tutorial.md)
 - `src/quickquip/llm/store.py`
   - 负责 SQLite 持久化（会话/记忆/归档/群设置）；v1.8.9 后按域拆为 `store_parts/` 子包的 mixin 组合
 - `src/quickquip/llm/vocab.py`
@@ -463,7 +463,8 @@ Skill 系统是 1.16 引入的运行时可扩展能力：部署者把 Skill 包�
 
 - `parser`：SKILL.md 校验（name 命名约束与长度、description 长度、包体积上限）
 - `catalog`：`skills/` 目录扫描——每轮请求现扫、改动零延迟生效（无缓存失效问题）；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
-- `context`：按会话维护激活状态，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
+- `state`：按会话维护激活状态登记，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
+- `context`：catalog 块与激活标记的文本渲染（模型可见面的唯一出口，纯函数无状态）
 - `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
 - `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
 
