@@ -295,3 +295,20 @@ async def test_run_sh_script(make_skill):
     assert isinstance(result, LLMToolOutput)
     assert not result.is_error, result.content
     assert "shell-ok" in result.content
+
+
+class _FakeDrainProc:
+    """只实现 communicate() 的假进程：钉住 drain 截断行为（确定性单测）。"""
+
+    async def communicate(self):
+        return b"A" * 5000, b"B" * 5000
+
+
+async def test_drain_after_kill_caps_output():
+    """超时杀进程后的排空解码同样受 output cap 截断（Deep-CR L2-NV1）。"""
+    from quickquip.llm.skills.tools.run_script import _drain_after_kill
+
+    stdout, stderr, truncated = await _drain_after_kill(_FakeDrainProc(), cap=1024)
+    assert stdout == "A" * 1024
+    assert stderr == "B" * 1024
+    assert truncated is True

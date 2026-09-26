@@ -164,7 +164,9 @@ class SkillsToolMixin:
         """``/skill list``：已安装项 + 当前会话已激活项（只读，零历史语义）。"""
         if not self.config.skills.enabled:
             return "Skill 功能当前未启用（config/llm.toml [skills] enabled = false）。"
-        skills = scan_skills(resolve_catalog_dir(self.config.skills.catalog_dir))
+        skills = self._drop_blocked_skill_descriptions(
+            scan_skills(resolve_catalog_dir(self.config.skills.catalog_dir))
+        )
         scope = self.build_chat_scope_key(chat_id, chat_type)
         return render_skill_list(skills, self._skill_activations.activated_names(scope))
 
