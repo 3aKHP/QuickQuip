@@ -1006,7 +1006,7 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.15.4...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.0...HEAD
 [1.16.0]: https://github.com/3aKHP/QuickQuip/compare/v1.15.4...v1.16.0
 [1.15.4]: https://github.com/3aKHP/QuickQuip/compare/v1.15.3...v1.15.4
 [1.15.3]: https://github.com/3aKHP/QuickQuip/compare/v1.15.2...v1.15.3
