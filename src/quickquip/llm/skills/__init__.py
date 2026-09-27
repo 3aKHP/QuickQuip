@@ -35,11 +35,6 @@ from quickquip.llm.skills.context import (
     render_catalog_block,
     render_skill_list,
 )
-from quickquip.llm.skills.preset_drift import (
-    PresetDrift,
-    detect_preset_drift,
-    skill_dir_fingerprint,
-)
 from quickquip.llm.skills.parser import (
     MAX_DESCRIPTION_CHARS,
     MAX_NAME_LENGTH,
@@ -49,6 +44,12 @@ from quickquip.llm.skills.parser import (
     SkillDiagnostic,
     SkillMetadata,
     parse_skill_markdown,
+)
+from quickquip.llm.skills.preset_drift import (
+    PresetDrift,
+    detect_preset_drift,
+    preset_skill_names,
+    skill_dir_fingerprint,
 )
 from quickquip.llm.skills.state import SkillActivationState
 from quickquip.llm.skills.tools.activate import (
@@ -125,6 +126,7 @@ __all__ = [
     "detect_preset_drift",
     "format_activation_block",
     "parse_skill_markdown",
+    "preset_skill_names",
     "read_skill_resource",
     "render_catalog_block",
     "render_skill_list",

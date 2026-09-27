@@ -7,7 +7,8 @@
 
 每轮扫描附带预置漂移巡检（只读）：与 ``skills.example/`` 同名的已安装
 Skill 做全文件字节级指纹比对，分叉名单变化时记 WARNING（同状态不刷屏）；
-分叉信息只进日志与 ``/skill list``，不进 catalog 块与任何模型可见内容。
+分叉信息只进日志与 ``/skill list`` 命令回复，不进 catalog 块、系统提示
+与任何模型注入面。
 
 空目录短路（默认零扰动）：``[skills].enabled = false``、扫描为空或
 ``runtime.tool_calling_enabled = false`` 时不渲染 catalog 块（工具注册
@@ -117,26 +118,35 @@ class SkillsToolMixin:
         config = self.config.skills
         catalog_dir = resolve_catalog_dir(config.catalog_dir)
         skills = scan_skills(catalog_dir)
-        self._report_preset_drift(catalog_dir)
+        self._refresh_preset_drift(catalog_dir)
         skills = self._drop_blocked_skill_descriptions(skills)
         budget = derive_catalog_budget_bytes(context_window_tokens, config.catalog_max_bytes)
         return build_catalog(skills, budget_bytes=budget)
 
-    def _report_preset_drift(self, catalog_dir: Path) -> frozenset[str]:
-        """预置 Skill 漂移巡检（只读）：分叉名单变化时记 WARNING，平时静默。
+    @staticmethod
+    def _preset_drift_names(catalog_dir: Path) -> frozenset[str] | None:
+        """当前分叉名单的纯查询（不触碰记忆化状态）。
 
-        分叉信息只进日志与 ``/skill list``，不进 catalog 块与任何模型可见
-        内容。``skills.example/`` 缺失时 fail-open（pip 安装形态无此目录）；
-        巡检自身失败按无分叉处理，绝不打断当轮请求。
+        巡检自身失败返回 None：调用方按无分叉处理，诊断路径绝不波及
+        请求链路。
         """
         try:
             drift = detect_preset_drift(catalog_dir, SKILLS_EXAMPLE_DIR)
-        except Exception as exc:  # 诊断路径防御：漂移巡检不波及请求链路
+        except Exception as exc:  # 诊断路径防御
             logger.warning("预置 Skill 漂移巡检失败（按无分叉处理）：%s", exc)
+            return None
+        return frozenset(item.name for item in drift)
+
+    def _refresh_preset_drift(self, catalog_dir: Path) -> frozenset[str]:
+        """刷新记忆化的分叉名单并返回最新值：状态翻转才记日志，平时静默。
+
+        分叉信息只进日志与 ``/skill list`` 命令回复，不进 catalog 块、
+        系统提示与任何模型注入面。``skills.example/`` 缺失时 fail-open
+        （pip 安装形态无此目录）。
+        """
+        names = self._preset_drift_names(catalog_dir)
+        if names is None or names == self._skill_drift_names:
             return self._skill_drift_names
-        names = frozenset(item.name for item in drift)
-        if names == self._skill_drift_names:
-            return names
         if names:
             logger.warning(
                 "已安装 Skill 与当前版本预置副本分叉"
@@ -201,7 +211,10 @@ class SkillsToolMixin:
         return render_catalog_block(catalog)
 
     def format_skill_list(self, chat_id: int | str, chat_type: str = "group") -> str:
-        """``/skill list``：已安装项 + 当前会话已激活项 + 预置分叉标注（只读）。"""
+        """``/skill list``：已安装项 + 当前会话已激活项 + 预置分叉标注。
+
+        不改会话与历史状态；会刷新记忆化的漂移名单（分叉状态翻转时记日志）。
+        """
         if not self.config.skills.enabled:
             return "Skill 功能当前未启用（config/llm.toml [skills] enabled = false）。"
         catalog_dir = resolve_catalog_dir(self.config.skills.catalog_dir)
@@ -210,7 +223,7 @@ class SkillsToolMixin:
         return render_skill_list(
             skills,
             self._skill_activations.activated_names(scope),
-            diverged_names=self._report_preset_drift(catalog_dir),
+            diverged_names=self._refresh_preset_drift(catalog_dir),
         )
 
     # ── handlers ────────────────────────────────────────────────

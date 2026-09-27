@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import sys
 from pathlib import Path
+
+from quickquip.llm.skills import scan_skills
 
 SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "sync_preset_skills.py"
 
@@ -81,19 +84,93 @@ def test_apply_installs_missing_and_backs_up_diverged(tmp_path, monkeypatch, cap
     args = ["--skills-dir", str(skills_dir), "--example-dir", str(example_dir)]
 
     assert _run(module, monkeypatch, ["--apply", *args]) == 0
-    # 分叉项被覆盖为预置副本，旧副本整体备份
+    # 分叉项被覆盖为预置副本，旧副本整体备份进 .preset-backups/ 容器
     assert (skills_dir / "alpha/SKILL.md").read_text(encoding="utf-8") == "v2"
-    (backup,) = skills_dir.glob("alpha.preset-backup-*")
+    (backup,) = (skills_dir / ".preset-backups").glob("alpha.preset-backup-*")
     assert (backup / "SKILL.md").read_text(encoding="utf-8") == "v1"
     assert (backup / "references/a.md").read_text(encoding="utf-8") == "旧参考"
     # 缺失项直接安装；本地自建不动
     assert (skills_dir / "beta/SKILL.md").read_text(encoding="utf-8") == "v1"
     assert (skills_dir / "local-only/SKILL.md").read_text(encoding="utf-8") == "自建"
-    # 幂等：同步后 check 归零；备份目录不进“本地非预置”播报
+    # 幂等：同步后 check 归零；备份容器不进“本地非预置”播报
     assert _run(module, monkeypatch, ["--check", *args]) == 0
     output = capsys.readouterr().out
     local_only_lines = [line for line in output.splitlines() if line.startswith("另有")]
-    assert local_only_lines and all("preset-backup" not in line for line in local_only_lines)
+    assert local_only_lines
+    for line in local_only_lines:
+        assert "preset-backup" not in line
+        assert "local-only" in line
+
+
+def test_backup_container_is_invisible_to_runtime_scan(tmp_path, monkeypatch, caplog):
+    """--apply 留下的备份容器不得被 scan_skills 当 Skill 处理（否则目录名
+    与 frontmatter name 不符，每轮扫描一条 WARNING）。"""
+    module = _load_script()
+    skills_dir, example_dir = _pair(tmp_path)
+    _write(
+        example_dir / "alpha",
+        {"SKILL.md": "---\nname: alpha\ndescription: 预置 v2。\n---\n"},
+    )
+    _write(
+        skills_dir / "alpha",
+        {"SKILL.md": "---\nname: alpha\ndescription: 预置 v1。\n---\n"},
+    )
+    assert _run(
+        module,
+        monkeypatch,
+        ["--apply", "--skills-dir", str(skills_dir), "--example-dir", str(example_dir)],
+    ) == 0
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.skills.catalog"):
+        loaded = scan_skills(skills_dir)
+    assert [skill.name for skill in loaded] == ["alpha"]
+    assert not caplog.records
+
+
+def test_apply_rename_failure_preserves_original(tmp_path, monkeypatch, capsys):
+    """备份改名自身失败（如 Windows 文件占用）：部署者原副本必须原样保留，
+    且不得发生任何清理动作（回滚分支只允许在改名成功后介入）。"""
+    module = _load_script()
+    skills_dir, example_dir = _pair(tmp_path)
+    _write(example_dir / "alpha", {"SKILL.md": "v2"})
+    _write(skills_dir / "alpha", {"SKILL.md": "v1 定制"})
+
+    def _failing_rename(self, target):
+        raise OSError("simulated lock")
+
+    monkeypatch.setattr(Path, "rename", _failing_rename)
+    code = _run(
+        module,
+        monkeypatch,
+        ["--apply", "--skills-dir", str(skills_dir), "--example-dir", str(example_dir)],
+    )
+    assert code == 2
+    assert (skills_dir / "alpha/SKILL.md").read_text(encoding="utf-8") == "v1 定制"
+    container = skills_dir / ".preset-backups"
+    assert not container.exists() or list(container.iterdir()) == []
+    assert "alpha" in capsys.readouterr().err
+
+
+def test_apply_partial_copy_cleaned_up(tmp_path, monkeypatch, capsys):
+    """missing 分支拷贝中途失败：本次新建的半成品目标必须清掉，不留残缺
+    Skill 目录污染运行时扫描面。"""
+    module = _load_script()
+    skills_dir, example_dir = _pair(tmp_path)
+    _write(example_dir / "beta", {"SKILL.md": "v1", "references/a.md": "x"})
+
+    def _partial_copytree(src, dst):
+        dst.mkdir()
+        (dst / "SKILL.md").write_text("v1", encoding="utf-8")
+        raise OSError("simulated disk full")
+
+    monkeypatch.setattr(module.shutil, "copytree", _partial_copytree)
+    code = _run(
+        module,
+        monkeypatch,
+        ["--apply", "--skills-dir", str(skills_dir), "--example-dir", str(example_dir)],
+    )
+    assert code == 2
+    assert not (skills_dir / "beta").exists()
+    assert "beta" in capsys.readouterr().err
 
 
 def test_apply_skips_conflict_and_reports(tmp_path, monkeypatch, capsys):

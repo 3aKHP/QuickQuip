@@ -67,7 +67,14 @@ try {
             foreach ($candidate in @((Join-Path '.venv' 'Scripts/python.exe'), 'python', 'py')) {
                 if (Get-Command $candidate -ErrorAction SilentlyContinue) { $syncPy = $candidate; break }
             }
-            if ($syncPy) { & $syncPy scripts/sync_preset_skills.py --check }
+            if ($syncPy) {
+                # Honor "never blocks" even when a profile opts into native
+                # command error preference (PS 7.2+).
+                & {
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    & $syncPy scripts/sync_preset_skills.py --check
+                }
+            }
         }
         New-Item -ItemType Directory $Temp | Out-Null
         $List = Join-Path $Temp 'manifest.txt'

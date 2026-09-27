@@ -121,5 +121,8 @@ def test_skill_list_marks_diverged_preset_copies(make_skill):
     writer("beta", "二。")
     skills = scan_skills(catalog_dir)
     text = render_skill_list(skills, [], diverged_names={"beta"})
-    assert "- alpha：一。\n" in text or text.endswith("- alpha：一。")
-    assert "- beta：二。（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）" in text
+    lines = text.splitlines()
+    assert lines[1] == "- alpha：一。"
+    assert lines[2] == (
+        "- beta：二。（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）"
+    )

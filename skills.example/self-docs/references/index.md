@@ -73,7 +73,7 @@
 
 - `.claude/agents/quickquip-cr-reviewer.md` → `references/claude-agents-quickquip-cr-reviewer.md` — claude-agents-quickquip-cr-reviewer ｜ 关键词：dev、git diff $(git merge-base HEAD dev) HEAD、git diff、CLAUDE.md、CONTRIBUTING.md、docs/dev/README.md、docs/dev/style.md、docs/dev/testing.md、docs/dev/architecture.md、docs/dev/branching.md
 - `.github/ISSUE_TEMPLATE/memo.md` → `references/github-issue_template-memo.md` — github-issue_template-memo ｜ 关键词：path/to/file.py
-- `.github/PULL_REQUEST_TEMPLATE/release.md` → `references/github-pull_request_template-release.md` — github-pull_request_template-release ｜ 关键词：vX.Y.Z、pyproject.toml、CHANGELOG.md、Unreleased、prod.example/、README.md、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build
+- `.github/PULL_REQUEST_TEMPLATE/release.md` → `references/github-pull_request_template-release.md` — github-pull_request_template-release ｜ 关键词：vX.Y.Z、pyproject.toml、CHANGELOG.md、Unreleased、skills.example/、scripts/sync_preset_skills.py、prod.example/、README.md、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto
 - `.github/pull_request_template.md` → `references/github-pull_request_template.md` — github-pull_request_template ｜ 关键词：Closes #<issue>、Refs #<issue>、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build
 - `prod.example/README.md` → `references/prod.example-readme.md` — QuickQuip Production Template ｜ 关键词：prod/、.env、prod/prod.example、deploy-state.py、quickquip-prod、config/llm.toml、QUICKQUIP_SEARXNG_BASE_URL、remote-deploy-v4.sh、bash prod/deploy-v4.sh、prod/deploy-v4.ps1
 

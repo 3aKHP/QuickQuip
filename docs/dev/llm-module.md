@@ -465,7 +465,7 @@ Skill 系统是 1.16 引入的运行时可扩展能力：部署者把 Skill 包�
 - `catalog`：`skills/` 目录扫描——每轮请求现扫、改动零延迟生效（无缓存失效问题）；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
 - `state`：按会话维护激活状态登记，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
 - `context`：catalog 块与激活标记的文本渲染（模型可见面的唯一出口，纯函数无状态）
-- `preset_drift`：预置 Skill 漂移检测——`skills/` 与 `skills.example/` 同名目录的全文件字节级指纹比对（只读）；分叉名单变化时记 WARNING，`/skill list` 标注分叉条目，结果不进模型可见面；`skills.example/` 缺失时 fail-open。主机侧同步脚本 `scripts/sync_preset_skills.py` 按文件路径装载同一实现（stdlib，无 venv 依赖）
+- `preset_drift`：预置 Skill 漂移检测——`skills/` 与 `skills.example/` 同名目录的全文件字节级指纹比对（只读）；分叉名单变化时记 WARNING，`/skill list` 标注分叉条目，结果只进日志与命令回复，不进 catalog 块与系统提示；`skills.example/` 缺失时 fail-open。主机侧同步脚本 `scripts/sync_preset_skills.py` 按文件路径装载同一实现（stdlib，无 venv 依赖）
 - `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
 - `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
 

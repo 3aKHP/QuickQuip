@@ -363,14 +363,6 @@ def test_reactivate_after_window_shrink_reinjects_body(tmp_path):
 # ── 预置漂移巡检 ─────────────────────────────────────────────────
 
 
-def _preset_pair(tmp_path):
-    catalog = tmp_path / "skills"
-    example = tmp_path / "skills.example"
-    catalog.mkdir(exist_ok=True)
-    example.mkdir(exist_ok=True)
-    return catalog, example
-
-
 def _drift_warnings(caplog):
     return [
         record
@@ -379,9 +371,11 @@ def _drift_warnings(caplog):
     ]
 
 
-def test_preset_drift_warns_on_transition_and_dedupes(tmp_path, monkeypatch, caplog):
+def test_preset_drift_warns_on_transition_and_dedupes(
+    tmp_path, monkeypatch, caplog, preset_pair
+):
     """分叉名单变化才 WARNING：同状态重复扫描静默，消解记 INFO，再分叉再报。"""
-    catalog, example = _preset_pair(tmp_path)
+    catalog, example = preset_pair
     write_skill(example, "self-docs", "一致。")
     write_skill(catalog, "self-docs", "一致。")
     monkeypatch.setattr("quickquip.llm.service_parts.skills.SKILLS_EXAMPLE_DIR", example)
@@ -429,8 +423,8 @@ def test_preset_drift_fail_open_without_example_dir(tmp_path, monkeypatch, caplo
     assert not _drift_warnings(caplog)
 
 
-def test_format_skill_list_marks_preset_drift(tmp_path, monkeypatch):
-    catalog, example = _preset_pair(tmp_path)
+def test_format_skill_list_marks_preset_drift(tmp_path, monkeypatch, preset_pair):
+    catalog, example = preset_pair
     write_skill(example, "self-docs", "预置 v2。")
     write_skill(catalog, "self-docs", "预置 v1。")
     monkeypatch.setattr("quickquip.llm.service_parts.skills.SKILLS_EXAMPLE_DIR", example)

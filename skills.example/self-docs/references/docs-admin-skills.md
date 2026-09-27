@@ -75,6 +75,6 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 预置 Skill 经复制到达 `skills/`；QuickQuip 版本升级会更新 `skills.example/`，已复制的本地副本不会随之自动更新。三层配套闭合这一摩擦：
 
-- **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态不逐轮重复；回归一致时记 INFO），`/skill list` 在对应条目标注「与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新」。检测结果只进日志与命令回复，不进入 AI 可见内容，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
-- **同步脚本**：`python scripts/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的三态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）；`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/<name>.preset-backup-<时间戳>`（本地定制不丢，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，同步当轮生效，无需重启。
-- **部署入口**：`prod.example/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy 与 dry-run 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 release notes 的「预置 Skill 变动」小节指引手动执行同步。
+- **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态不逐轮重复；回归一致时记 INFO），`/skill list` 在对应条目标注「与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新」。检测结果只进日志与命令回复，不进入 catalog 块、系统提示与任何模型注入面，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
+- **同步脚本**：`python scripts/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的三态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）；`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/.preset-backups/<name>.preset-backup-<时间戳>`（备份容器自身无 SKILL.md，运行时扫描不感知；本地定制不丢，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，同步当轮生效，无需重启。
+- **部署入口**：`prod.example/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy、dry-run 与 migrate 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 Release notes 的「预置 Skill 变动」小节指引手动执行同步（该小节是 release PR 模板的固定检查项）。
