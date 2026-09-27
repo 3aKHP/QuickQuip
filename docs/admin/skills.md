@@ -32,7 +32,7 @@ Skill 是受信任的部署资产：部署者把技能包放进 `skills/` 目录
 
 Skill 的增删就是部署侧的文件操作：目录在每次构建系统提示时重新扫描（每轮请求一次），无需重启，进行中的会话下一轮请求即可看到增删；catalog 块字节变化只影响当轮的前缀缓存命中。运行时没有任何安装、更新或删除 Skill 的路径。
 
-群内 `/skill list` 可查看已安装 Skill 与当前会话已激活项（只读）。
+群内 `/skill list` 可查看已安装 Skill 与当前会话已激活项（只读）；与当前版本预置副本分叉的条目会附带更新提示（见「预置 Skill」节）。
 
 ## 工具面
 
@@ -68,3 +68,11 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 - `self-docs`：内置公开文档副本（用户手册、管理手册、配置参考、项目治理与协作约定等；同步源名单见 `scripts/ci/sync_self_docs_references.py`），AI 被问到机器人用法、命令、配置或项目协作约定时激活检索后作答。
 - `host-healthcheck`：汇报部署主机健康状态，默认采集容器内可见的宿主机指标与容器自身限额，零配置可用。可选的宿主机 cron 采集器与 compose 只读挂载增强见 `prod.example/` 模板注释。
+
+### 版本对齐：漂移检测与同步
+
+预置 Skill 经复制到达 `skills/`；QuickQuip 版本升级会更新 `skills.example/`，已复制的本地副本不会随之自动更新。三层配套闭合这一摩擦：
+
+- **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态不逐轮重复；回归一致时记 INFO），`/skill list` 在对应条目标注「与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新」。检测结果只进日志与命令回复，不进入 AI 可见内容，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
+- **同步脚本**：`python scripts/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的三态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）；`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/<name>.preset-backup-<时间戳>`（本地定制不丢，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，同步当轮生效，无需重启。
+- **部署入口**：`prod.example/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy 与 dry-run 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 release notes 的「预置 Skill 变动」小节指引手动执行同步。

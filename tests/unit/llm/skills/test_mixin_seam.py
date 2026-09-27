@@ -1,6 +1,7 @@
 """SkillsToolMixin 接缝：注册、惰性注册、catalog 块、format_skill_list。"""
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 from quickquip.common.sensitive_filter import SensitiveFilter
@@ -357,3 +358,85 @@ def test_reactivate_after_window_shrink_reinjects_body(tmp_path):
     assert not svc._skill_activations.is_active(scope, "demo")
     third = svc._tool_activate_skill({"name": "demo"}, ctx)
     assert "独特正文标记" in str(third)
+
+
+# ── 预置漂移巡检 ─────────────────────────────────────────────────
+
+
+def _preset_pair(tmp_path):
+    catalog = tmp_path / "skills"
+    example = tmp_path / "skills.example"
+    catalog.mkdir(exist_ok=True)
+    example.mkdir(exist_ok=True)
+    return catalog, example
+
+
+def _drift_warnings(caplog):
+    return [
+        record
+        for record in caplog.records
+        if record.name == "quickquip.llm.service_parts.skills" and "分叉" in record.getMessage()
+    ]
+
+
+def test_preset_drift_warns_on_transition_and_dedupes(tmp_path, monkeypatch, caplog):
+    """分叉名单变化才 WARNING：同状态重复扫描静默，消解记 INFO，再分叉再报。"""
+    catalog, example = _preset_pair(tmp_path)
+    write_skill(example, "self-docs", "一致。")
+    write_skill(catalog, "self-docs", "一致。")
+    monkeypatch.setattr("quickquip.llm.service_parts.skills.SKILLS_EXAMPLE_DIR", example)
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+
+    write_skill(example, "self-docs", "预置 v2。")
+    with caplog.at_level(logging.WARNING):
+        svc._skills_catalog_block(provider=None, model="gpt-test")
+        svc._skills_catalog_block(provider=None, model="gpt-test")
+    warnings = _drift_warnings(caplog)
+    assert len(warnings) == 1
+    assert "self-docs" in warnings[0].getMessage()
+    assert "sync_preset_skills.py" in warnings[0].getMessage()
+
+    caplog.clear()
+    write_skill(catalog, "self-docs", "预置 v2。")
+    with caplog.at_level(logging.INFO):
+        svc._skills_catalog_block(provider=None, model="gpt-test")
+    infos = [
+        record
+        for record in caplog.records
+        if record.name == "quickquip.llm.service_parts.skills" and "回归" in record.getMessage()
+    ]
+    assert len(infos) == 1
+    assert not _drift_warnings(caplog)
+
+    caplog.clear()
+    write_skill(example, "self-docs", "预置 v3。")
+    with caplog.at_level(logging.WARNING):
+        svc._skills_catalog_block(provider=None, model="gpt-test")
+    assert len(_drift_warnings(caplog)) == 1
+
+
+def test_preset_drift_fail_open_without_example_dir(tmp_path, monkeypatch, caplog):
+    """skills.example/ 缺失（pip 安装形态）：巡检静默跳过，catalog 照常。"""
+    catalog = tmp_path / "skills"
+    write_skill(catalog, "self-docs", "本地副本。")
+    monkeypatch.setattr(
+        "quickquip.llm.service_parts.skills.SKILLS_EXAMPLE_DIR", tmp_path / "no-example"
+    )
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    with caplog.at_level(logging.WARNING):
+        block = svc._skills_catalog_block(provider=None, model="gpt-test")
+    assert "- self-docs: 本地副本。" in block
+    assert not _drift_warnings(caplog)
+
+
+def test_format_skill_list_marks_preset_drift(tmp_path, monkeypatch):
+    catalog, example = _preset_pair(tmp_path)
+    write_skill(example, "self-docs", "预置 v2。")
+    write_skill(catalog, "self-docs", "预置 v1。")
+    monkeypatch.setattr("quickquip.llm.service_parts.skills.SKILLS_EXAMPLE_DIR", example)
+    svc = _service(tmp_path, f'[skills]\ncatalog_dir = "{catalog}"\n')
+    text = svc.format_skill_list(1001, chat_type="group")
+    assert (
+        "- self-docs：预置 v1。"
+        "（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）" in text
+    )

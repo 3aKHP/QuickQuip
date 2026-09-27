@@ -93,6 +93,17 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         printf 'skills\n' >> "$TmpManifest"
         UploadManifest="$TmpManifest"
     fi
+    if [ -d skills.example ]; then
+        # Preset skill drift report (best-effort): prints missing/diverged
+        # preset skills and the sync command; never blocks the deployment.
+        SyncPy=""
+        for candidate in .venv/bin/python python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1; then SyncPy="$candidate"; break; fi
+        done
+        if [ -n "$SyncPy" ]; then
+            "$SyncPy" scripts/sync_preset_skills.py --check || true
+        fi
+    fi
     if [ "$DryRun" = 1 ]; then
         tar --exclude=__pycache__ --exclude='*.pyc' -cf /dev/null -v -T "$UploadManifest"
         printf 'Preview complete; frontend built locally, no remote connection or upload. Shared files: root .env, ops scripts, and present optional assets.\n'

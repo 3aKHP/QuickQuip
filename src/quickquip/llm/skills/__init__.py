@@ -35,6 +35,11 @@ from quickquip.llm.skills.context import (
     render_catalog_block,
     render_skill_list,
 )
+from quickquip.llm.skills.preset_drift import (
+    PresetDrift,
+    detect_preset_drift,
+    skill_dir_fingerprint,
+)
 from quickquip.llm.skills.parser import (
     MAX_DESCRIPTION_CHARS,
     MAX_NAME_LENGTH,
@@ -92,6 +97,7 @@ __all__ = [
     "MAX_SCRIPT_TIMEOUT_MS",
     "MAX_SKILL_FILE_BYTES",
     "ParseSkillResult",
+    "PresetDrift",
     "READ_SKILL_RESOURCE_SPEC",
     "READ_SKILL_RESOURCE_TOOL_KEYWORDS",
     "READ_SKILL_RESOURCE_TOOL_NAME",
@@ -116,6 +122,7 @@ __all__ = [
     "build_catalog",
     "classify_resource",
     "derive_catalog_budget_bytes",
+    "detect_preset_drift",
     "format_activation_block",
     "parse_skill_markdown",
     "read_skill_resource",
@@ -127,5 +134,6 @@ __all__ = [
     "run_skill_script",
     "scan_skills",
     "search_skill_resources",
+    "skill_dir_fingerprint",
     "utf8_safe_boundary",
 ]

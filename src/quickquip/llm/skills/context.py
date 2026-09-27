@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Container
+
 from quickquip.llm.skills.catalog import LoadedSkill, SkillCatalog
 
 ACTIVATION_STATUS_ACTIVATED = "activated"
@@ -73,13 +75,25 @@ def _render_resource_list(skill: LoadedSkill) -> str:
     return f"附带资源（在 skill 根内用 read_skill_resource 读取）：\n{items}"
 
 
-def render_skill_list(skills: list[LoadedSkill], activated_names: list[str]) -> str:
-    """``/skill list`` 的只读渲染：已安装 name+description 与当前会话已激活项。"""
+def render_skill_list(
+    skills: list[LoadedSkill],
+    activated_names: list[str],
+    *,
+    diverged_names: Container[str] = (),
+) -> str:
+    """``/skill list`` 的只读渲染：已安装 name+description 与当前会话已激活项。
+
+    ``diverged_names`` 携带预置漂移检测结果：与当前版本预置副本字节级
+    分叉的已安装 Skill 在列表项尾部分叉标注（只读提示，不进模型面）。
+    """
     if not skills:
         return "当前未安装任何 Skill。"
     lines = [f"已安装 Skill（{len(skills)}）："]
     for skill in skills:
-        lines.append(f"- {skill.name}：{skill.metadata.description}")
+        line = f"- {skill.name}：{skill.metadata.description}"
+        if skill.name in diverged_names:
+            line += "（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）"
+        lines.append(line)
     if activated_names:
         lines.append(f"当前会话已激活：{'、'.join(activated_names)}")
     else:

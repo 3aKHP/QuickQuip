@@ -6,7 +6,7 @@
 >
 > **前置要求：** §1–§4 无编程要求；§5 需要了解 Python 基础语法（函数、字典、标准库导入）。
 >
-> **源码指引：** Skill 系统实现位于 `src/quickquip/llm/skills/`（frontmatter 校验 `parser.py`、目录扫描与路径加固 `catalog.py`、四个工具 `tools/`），工具注册与激活门控位于 `src/quickquip/llm/service_parts/skills.py`，`/skill` 命令位于 `src/quickquip/adapters/nonebot/command_parts/skills.py`。部署与安全模型的权威文档是 [docs/admin/skills.md](../admin/skills.md)，配置键与默认值见 `config/llm.toml.example` 的 `[skills]` 段。
+> **源码指引：** Skill 系统实现位于 `src/quickquip/llm/skills/`（frontmatter 校验 `parser.py`、目录扫描与路径加固 `catalog.py`、预置漂移检测 `preset_drift.py`、四个工具 `tools/`），工具注册与激活门控位于 `src/quickquip/llm/service_parts/skills.py`，`/skill` 命令位于 `src/quickquip/adapters/nonebot/command_parts/skills.py`。部署与安全模型的权威文档是 [docs/admin/skills.md](../admin/skills.md)，配置键与默认值见 `config/llm.toml.example` 的 `[skills]` 段。
 
 ---
 
@@ -139,6 +139,8 @@ mkdir -p skills/group-meme-pedia/references
 - host-healthcheck：当用户询问服务器/宿主机健康状态……时使用。……
 当前会话已激活：（无）
 ```
+
+与当前版本预置副本（`skills.example/`）字节级分叉的已安装条目会附带标注「（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）」，提示部署者同步预置更新，见 [docs/admin/skills.md](../admin/skills.md) 的「预置 Skill」节。
 
 `/skill` 只有 `list` 一个子参数，其他写法会收到用法提示。`[skills] enabled = false` 时该命令直接提示功能未启用。
 

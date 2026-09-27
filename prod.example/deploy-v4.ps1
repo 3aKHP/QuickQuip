@@ -60,6 +60,15 @@ try {
             if (-not (Test-Path $item)) { throw "Missing manifest entry: $item" }
         }
         if (Test-Path -PathType Container 'skills') { $entries += 'skills' }
+        if (Test-Path -PathType Container 'skills.example') {
+            # Preset skill drift report (best-effort): prints missing/diverged
+            # preset skills and the sync command; never blocks the deployment.
+            $syncPy = $null
+            foreach ($candidate in @((Join-Path '.venv' 'Scripts/python.exe'), 'python', 'py')) {
+                if (Get-Command $candidate -ErrorAction SilentlyContinue) { $syncPy = $candidate; break }
+            }
+            if ($syncPy) { & $syncPy scripts/sync_preset_skills.py --check }
+        }
         New-Item -ItemType Directory $Temp | Out-Null
         $List = Join-Path $Temp 'manifest.txt'
         $Archive = Join-Path $Temp 'release.tar.gz'

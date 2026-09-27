@@ -5,6 +5,10 @@
 ``tool_registry`` / ``config`` 属性与 ScopeMixin 的 ``_context_scope_key`` /
 ``build_chat_scope_key`` 方法。
 
+每轮扫描附带预置漂移巡检（只读）：与 ``skills.example/`` 同名的已安装
+Skill 做全文件字节级指纹比对，分叉名单变化时记 WARNING（同状态不刷屏）；
+分叉信息只进日志与 ``/skill list``，不进 catalog 块与任何模型可见内容。
+
 空目录短路（默认零扰动）：``[skills].enabled = false``、扫描为空或
 ``runtime.tool_calling_enabled = false`` 时不渲染 catalog 块（工具注册
 与 spec 广告是两个概念：启动注册只看前两者，spec 广告面额外要求工具
@@ -18,7 +22,9 @@ fail-closed 返回"未安装"文本（不抛异常）。
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
+from quickquip.common.paths import SKILLS_EXAMPLE_DIR
 from quickquip.common.sensitive_filter import (
     get_filter as _get_sensitive_filter,
     log_hits as _log_sensitive_hits,
@@ -39,6 +45,7 @@ from quickquip.llm.skills import (
     build_activate_skill_spec,
     build_catalog,
     derive_catalog_budget_bytes,
+    detect_preset_drift,
     format_activation_block,
     read_skill_resource,
     render_catalog_block,
@@ -61,6 +68,8 @@ class SkillsToolMixin:
         self._skill_registered_names: list[str] = []
         # 当轮扫描的 host 侧映射；空目录/未扫描时为空，handler fail-closed。
         self._skills_catalog_by_name = {}
+        # 上一轮预置漂移巡检的分叉名单（内存去重：状态不变不重复告警）。
+        self._skill_drift_names: frozenset[str] = frozenset()
 
     # ── 注册 ────────────────────────────────────────────────────
 
@@ -106,10 +115,41 @@ class SkillsToolMixin:
 
     def _scan_skill_catalog(self, *, context_window_tokens: int | None) -> SkillCatalog:
         config = self.config.skills
-        skills = scan_skills(resolve_catalog_dir(config.catalog_dir))
+        catalog_dir = resolve_catalog_dir(config.catalog_dir)
+        skills = scan_skills(catalog_dir)
+        self._report_preset_drift(catalog_dir)
         skills = self._drop_blocked_skill_descriptions(skills)
         budget = derive_catalog_budget_bytes(context_window_tokens, config.catalog_max_bytes)
         return build_catalog(skills, budget_bytes=budget)
+
+    def _report_preset_drift(self, catalog_dir: Path) -> frozenset[str]:
+        """预置 Skill 漂移巡检（只读）：分叉名单变化时记 WARNING，平时静默。
+
+        分叉信息只进日志与 ``/skill list``，不进 catalog 块与任何模型可见
+        内容。``skills.example/`` 缺失时 fail-open（pip 安装形态无此目录）；
+        巡检自身失败按无分叉处理，绝不打断当轮请求。
+        """
+        try:
+            drift = detect_preset_drift(catalog_dir, SKILLS_EXAMPLE_DIR)
+        except Exception as exc:  # 诊断路径防御：漂移巡检不波及请求链路
+            logger.warning("预置 Skill 漂移巡检失败（按无分叉处理）：%s", exc)
+            return self._skill_drift_names
+        names = frozenset(item.name for item in drift)
+        if names == self._skill_drift_names:
+            return names
+        if names:
+            logger.warning(
+                "已安装 Skill 与当前版本预置副本分叉"
+                "（可运行 scripts/sync_preset_skills.py 检视并同步）：%s",
+                "、".join(sorted(names)),
+            )
+        else:
+            logger.info(
+                "已安装 Skill 已回归与当前版本预置副本一致：%s",
+                "、".join(sorted(self._skill_drift_names)),
+            )
+        self._skill_drift_names = names
+        return names
 
     @staticmethod
     def _drop_blocked_skill_descriptions(skills: list[LoadedSkill]) -> list[LoadedSkill]:
@@ -161,14 +201,17 @@ class SkillsToolMixin:
         return render_catalog_block(catalog)
 
     def format_skill_list(self, chat_id: int | str, chat_type: str = "group") -> str:
-        """``/skill list``：已安装项 + 当前会话已激活项（只读，零历史语义）。"""
+        """``/skill list``：已安装项 + 当前会话已激活项 + 预置分叉标注（只读）。"""
         if not self.config.skills.enabled:
             return "Skill 功能当前未启用（config/llm.toml [skills] enabled = false）。"
-        skills = self._drop_blocked_skill_descriptions(
-            scan_skills(resolve_catalog_dir(self.config.skills.catalog_dir))
-        )
+        catalog_dir = resolve_catalog_dir(self.config.skills.catalog_dir)
+        skills = self._drop_blocked_skill_descriptions(scan_skills(catalog_dir))
         scope = self.build_chat_scope_key(chat_id, chat_type)
-        return render_skill_list(skills, self._skill_activations.activated_names(scope))
+        return render_skill_list(
+            skills,
+            self._skill_activations.activated_names(scope),
+            diverged_names=self._report_preset_drift(catalog_dir),
+        )
 
     # ── handlers ────────────────────────────────────────────────
 
