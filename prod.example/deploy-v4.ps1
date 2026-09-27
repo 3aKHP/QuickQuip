@@ -69,7 +69,7 @@ try {
             }
             if ($syncPy) {
                 # Honor "never blocks" even when a profile opts into native
-                # command error preference (PS 7.2+).
+                # command error preference (PS 7.3+).
                 & {
                     $PSNativeCommandUseErrorActionPreference = $false
                     & $syncPy scripts/sync_preset_skills.py --check
