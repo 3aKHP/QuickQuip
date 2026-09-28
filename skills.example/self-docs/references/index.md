@@ -39,7 +39,7 @@
 ## 管理文档（部署与运维）
 
 - `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：DRIVER、~websockets、~fastapi+~websockets、HOST、0.0.0.0、PORT、8080、QQ_ACCOUNT、ONEBOT_WS_URLS、ONEBOT_ACCESS_TOKEN
-- `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端部署指南 ｜ 关键词：prod/deploy-v4.sh、prod/deploy-v4.ps1、--migrate、--skip-health、-Rollback -ReleaseId <id>、-DryRun、-Status、bash prod/deploy-v4.sh --help、pyproject.toml、1.15.3-dev.2+build.20260909.065235
+- `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端部署指南 ｜ 关键词：prod/deploy-v4.sh、prod/deploy-v4.ps1、--migrate、--skip-health、-Rollback -ReleaseId <id>、bash prod/deploy-v4.sh --help、pyproject.toml、1.15.3-dev.2+build.20260909.065235、image built、release complete
 - `docs/admin/game-config.md` → `references/docs-admin-game-config.md` — 游戏系统管理 ｜ 关键词：data/、src/quickquip/games/、/game list、/game stop、/disable <rule_name>、/enable <rule_name>、src/quickquip/app/message_pipeline.py、game_registry.register()、config/games.toml、config/games.toml.example
 - `docs/admin/global-admins.md` → `references/docs-admin-global-admins.md` — 全局管理员 ｜ 关键词：config/admins.toml、config/admins.toml.example、ADMIN_TRACE、registry_loaded、global_admin_unlock、.env、SUPERUSERS
 - `docs/admin/mcp-servers.md` → `references/docs-admin-mcp-servers.md` — MCP Server 接入指南 ｜ 关键词：http、url、headers、stdio、command、args、env、docker、image、mounts
