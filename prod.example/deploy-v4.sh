@@ -29,25 +29,22 @@ Options:
   --remote-dir <path>  Remote deployment root (default $RemoteDir)
   --keep-releases <n>  Completed releases to retain, 2..100 (default $KeepReleases)
   -h, --help           Show this help
-
-Legacy single-dash forms (-DryRun, -Status, -Rollback, -Migrate, -SkipHealth,
--HostAlias, -RemoteDir, -KeepReleases, -LocalCheck) remain accepted as aliases.
 USAGE
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
-        -DryRun|--dry-run|-LocalCheck|--local-check) DryRun=1 ;;
-        -Status|--status) Mode=status; Modes=$((Modes + 1)) ;;
-        -Rollback|--rollback)
+        --dry-run|--local-check) DryRun=1 ;;
+        --status) Mode=status; Modes=$((Modes + 1)) ;;
+        --rollback)
             Mode=rollback; Modes=$((Modes + 1))
             if [ -n "${2:-}" ] && [[ "$2" != -* ]]; then ReleaseId="$2"; shift; fi ;;
-        -Migrate|--migrate) Mode=migrate; Modes=$((Modes + 1)) ;;
-        -SkipHealth|--skip-health) SkipHealth=1 ;;
-        -HostAlias|--host-alias) HostAlias="${2:?missing host}"; shift ;;
-        -RemoteDir|--remote-dir) RemoteDir="${2:?missing root}"; shift ;;
-        -KeepReleases|--keep-releases) KeepReleases="${2:?missing retention}"; shift ;;
+        --migrate) Mode=migrate; Modes=$((Modes + 1)) ;;
+        --skip-health) SkipHealth=1 ;;
+        --host-alias) HostAlias="${2:?missing host}"; shift ;;
+        --remote-dir) RemoteDir="${2:?missing root}"; shift ;;
+        --keep-releases) KeepReleases="${2:?missing retention}"; shift ;;
         *) printf 'Unknown argument: %s (see --help)\n' "$1" >&2; exit 2 ;;
     esac
     shift

@@ -214,7 +214,7 @@ if [ "$Action" = migrate ]; then
     # Existing containers retain their original bind mounts until first activation.
     Prev="$Baseline"
 elif [ -z "$Prev" ] && [ -f "$Root/prod/docker-compose.yml" ]; then
-    fail "flat deployment detected; use -Migrate first"
+    fail "flat deployment detected; use --migrate first"
 fi
 [ -z "$Prev" ] || verify_release "$Prev" || fail "previous release lacks a usable image; repair it before deploying"
 [ ! -e "$Release" ] || fail "release id already exists"

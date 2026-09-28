@@ -147,7 +147,7 @@ def test_lock_rejects_second_action_before_live_mutation(deployment):
 
 @pytest.mark.parametrize(
     "args",
-    [["-Rollback", "-DryRun"], ["-Status", "-Migrate"], ["-Status", "-SkipHealth"]],
+    [["--rollback", "--dry-run"], ["--status", "--migrate"], ["--status", "--skip-health"]],
 )
 def test_bash_rejects_invalid_modes_before_side_effects(args):
     result = subprocess.run(
@@ -155,6 +155,21 @@ def test_bash_rejects_invalid_modes_before_side_effects(args):
     )
     assert result.returncode != 0
     assert "FAILED:" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        "-DryRun", "-Status", "-Rollback", "-Migrate", "-SkipHealth",
+        "-HostAlias", "-RemoteDir", "-KeepReleases", "-LocalCheck",
+    ],
+)
+def test_bash_rejects_legacy_single_dash_aliases(legacy):
+    result = subprocess.run(
+        ["bash", str(TEMPLATE / "deploy-v4.sh"), legacy], capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "Unknown argument" in result.stderr
 
 
 def test_shared_transaction_restores_token_and_missing_files(tmp_path):
