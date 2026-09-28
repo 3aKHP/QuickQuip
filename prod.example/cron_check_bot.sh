@@ -3,7 +3,6 @@
 set -e
 
 REMOTE_DIR="${REMOTE_DIR:-/opt/QuickQuip}"
-NULL_DEVICE="/d""ev/null"
 cd "$REMOTE_DIR/prod"
 
 if [ -f "$REMOTE_DIR/prod/sendkey.env" ]; then
@@ -17,10 +16,10 @@ fi
 _notify() {
     local title="$1" desp="$2"
     if [ -n "${SENDKEY:-}" ]; then
-        curl -s -X POST "https://sctapi.ftqq.com/${SENDKEY}.send" -d "title=$title" -d "desp=$desp" -o "$NULL_DEVICE"
+        curl -s -X POST "https://sctapi.ftqq.com/${SENDKEY}.send" -d "title=$title" -d "desp=$desp" -o /dev/null
     fi
     if [ -n "${SERVER3_URL:-}" ]; then
-        curl -s -X POST "$SERVER3_URL" -d "title=$title" -d "desp=$desp" -o "$NULL_DEVICE"
+        curl -s -X POST "$SERVER3_URL" -d "title=$title" -d "desp=$desp" -o /dev/null
     fi
 }
 
