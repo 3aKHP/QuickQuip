@@ -80,6 +80,30 @@ set_link() {
     if [ -z "$value" ]; then rm -f "$Root/$name"; return 0; fi
     ln -s "releases/$value" "$temp" && mv -Tf "$temp" "$Root/$name"
 }
+# Shared skill catalog at the deployment root, beside data/. $1 = release id
+# whose skills/ directory provides the merge content. When $Root/skills is
+# absent, seed it from the previous current release (it carries skills
+# installed via Web Admin since that release) or start empty. The merge then
+# runs on every call: repository-added skills land in the catalog while
+# existing files (including Web Admin installs and edits) are kept and
+# deletions never propagate. Must run before any compose up, which would
+# auto-create an empty root-owned directory.
+seed_shared_skills() {
+    local release="$1"
+    if [ ! -d "$Root/skills" ]; then
+        if [ -n "$OriginalCurrent" ] && [ -d "$Root/releases/$OriginalCurrent/skills" ]; then
+            cp -a "$Root/releases/$OriginalCurrent/skills" "$Root/skills"
+            step "seeded shared skills/ from previous release $OriginalCurrent"
+        else
+            mkdir -p "$Root/skills"
+            step "created empty shared skills/ directory"
+        fi
+    fi
+    if [ -d "$Root/releases/$release/skills" ]; then
+        cp -an "$Root/releases/$release/skills/." "$Root/skills/"
+        step "merged release $release skills/ into shared catalog (existing files kept)"
+    fi
+}
 compose() {
     local release="$1"; shift
     QUICKQUIP_RELEASE="$release" docker compose --env-file "$QUICKQUIP_ENV_FILE" \
@@ -192,6 +216,7 @@ if [ "$Action" = rollback ]; then
     Changed=1
     set_link current "$Target"
     Activated=1
+    seed_shared_skills "$Target"
     up "$Target" || fail "rollback startup failed"
     health "$Target" || fail "rollback health failed"
     set_link previous "$Prev"
@@ -224,22 +249,8 @@ LinkDest=()
 rsync -ar --chmod=D755,F644 --exclude=__pycache__ --exclude='*.pyc' \
     "${LinkDest[@]}" "$Incoming/tree/" "$Release/"
 chmod 700 "$Release"
-# Shared skill catalog at the deployment root, beside data/. Seed it once before
-# any compose up can auto-create an empty root-owned directory: prefer the
-# previous current release (the catalog most recently active on this host),
-# fall back to the freshly uploaded release, else start empty.
-if [ ! -d "$Root/skills" ]; then
-    if [ -n "$OriginalCurrent" ] && [ -d "$Root/releases/$OriginalCurrent/skills" ]; then
-        cp -a "$Root/releases/$OriginalCurrent/skills" "$Root/skills"
-        step "seeded shared skills/ from previous release $OriginalCurrent"
-    elif [ -d "$Release/skills" ]; then
-        cp -a "$Release/skills" "$Root/skills"
-        step "seeded shared skills/ from uploaded release $Id"
-    else
-        mkdir -p "$Root/skills"
-        step "created empty shared skills/ directory"
-    fi
-fi
+# Must run before any compose up; see seed_shared_skills.
+seed_shared_skills "$Id"
 export QUICKQUIP_ENV_FILE="$Incoming/shared/.env"
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.

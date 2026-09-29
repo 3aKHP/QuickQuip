@@ -37,7 +37,7 @@ bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
-部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
+部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退；回滚会把目标 release 中新增的 Skill 同样非破坏性合并进共享目录）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
 
 运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
 
@@ -84,7 +84,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 
 - 根 `.env`
 - `config/` 目录下的运行配置（如 `llm.toml`、`generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
-- `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建；随 release 上传，作为服务器部署根共享 `skills/` 的种子来源）
+- `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建；每次部署把其中新增的 Skill 非破坏性合并进服务器部署根共享 `skills/`：已存在文件不被覆盖、删除不传播，已安装 Skill 的更新与删除经 Web 管理页或服务器手动维护）
 - `llm_about/vocab.yaml`
 - `llm_about/identities.yaml`
 - `llm_about/{群号}/vocab.yaml`
@@ -228,7 +228,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | `../data` | `/app/data` | 读写 |
 | `../config` | `/app/config` | **读写**（llm.toml 在线编辑需要） |
 | `../llm_about` | `/app/llm_about` | **读写**（资料页在线编辑需要） |
-| 部署根共享 `skills/` | `/app/skills` | **读写**（Skill 页在线安装/编辑/预置同步落盘） |
+| `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写**（Skill 页在线安装/编辑/预置同步落盘） |
 | `../frontend/dist` | `/app/frontend/dist` | 只读 |
 | `../web_api.py` | `/app/web_api.py` | 只读 |
 | `../src` | `/app/src` | 只读（hybrid 源码热更新） |

@@ -262,14 +262,16 @@ def test_sudo_new_shared_file_uses_invoking_user(tmp_path, monkeypatch):
     assert owners == [(1234, 5678)]
 
 
-def _write_fake_docker_for_baseline(bin_dir: Path) -> None:
+def _write_fake_docker_for_baseline(
+    bin_dir: Path, source: str = "${QUICKQUIP_ROOT:-..}/skills"
+) -> None:
     services = {
         "services": {
             "llbot": {"container_name": "llbot"},
             "quickquip": {
                 "container_name": "quickquip",
                 "volumes": [
-                    {"type": "bind", "source": "../skills", "target": "/app/skills"}
+                    {"type": "bind", "source": source, "target": "/app/skills"}
                 ],
             },
             "web-admin": {"container_name": "web-admin"},
@@ -311,6 +313,8 @@ def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypat
     assert not (baseline / "skills").exists()
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
+    # The literal ${QUICKQUIP_ROOT:-..}/skills placeholder resolves to the
+    # deployment-root shared directory.
     assert volume["source"] == str(root / "skills")
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
 
@@ -327,6 +331,24 @@ def test_capture_baseline_without_skills_dir_keeps_shared_source(tmp_path, monke
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
     assert volume["source"] == str(root / "skills")
+
+
+def test_resolve_defaulted_variables():
+    resolve = STATE["resolve_defaulted_variables"]
+    assert resolve("${QUICKQUIP_ROOT:-..}/skills") == "../skills"
+    assert resolve("${QUICKQUIP_ROOT:-/opt/QuickQuip}/skills") == "/opt/QuickQuip/skills"
+    assert resolve("/opt/QuickQuip/skills") == "/opt/QuickQuip/skills"
+    assert resolve("${QUICKQUIP_ROOT}/skills") == "${QUICKQUIP_ROOT}/skills"
+
+
+def test_capture_baseline_rejects_variable_without_default(tmp_path, monkeypatch):
+    root = _minimal_server_root(tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_docker_for_baseline(bin_dir, source="${QUICKQUIP_ROOT}/skills")
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    with pytest.raises(ValueError, match="unsupported bind mount"):
+        STATE["capture_baseline"](root, tmp_path / "baseline")
 
 
 def test_seed_skips_existing_shared_skills(deployment):
@@ -349,14 +371,18 @@ def test_seed_prefers_previous_current_release(deployment):
     new_skill = inbox / "tree/skills/new-skill/SKILL.md"
     new_skill.parent.mkdir(parents=True)
     new_skill.write_text("new")
+    updated = inbox / "tree/skills/old-skill/SKILL.md"
+    updated.parent.mkdir(parents=True)
+    updated.write_text("new-version")
     result = run_deploy(deployment)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "skills/old-skill/SKILL.md").read_text() == "old"
-    assert not (root / "skills/new-skill").exists()
+    assert (root / "skills/new-skill/SKILL.md").read_text() == "new"
     assert f"seeded shared skills/ from previous release {OLD}" in result.stdout
+    assert f"merged release {NEW} skills/ into shared catalog" in result.stdout
 
 
-def test_seed_falls_back_to_uploaded_release(deployment):
+def test_seed_empty_then_merges_uploaded_release(deployment):
     root, inbox, _ = deployment
     new_skill = inbox / "tree/skills/new-skill/SKILL.md"
     new_skill.parent.mkdir(parents=True)
@@ -364,7 +390,25 @@ def test_seed_falls_back_to_uploaded_release(deployment):
     result = run_deploy(deployment)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "skills/new-skill/SKILL.md").read_text() == "new"
-    assert "seeded shared skills/ from uploaded release" in result.stdout
+    assert "created empty shared skills/ directory" in result.stdout
+    assert f"merged release {NEW} skills/ into shared catalog" in result.stdout
+
+
+def test_merge_adds_repo_skills_without_overwriting(deployment):
+    root, inbox, _ = deployment
+    shared_skill = root / "skills/web-skill/SKILL.md"
+    shared_skill.parent.mkdir(parents=True)
+    shared_skill.write_text("web-edited")
+    repo_skill = inbox / "tree/skills/repo-skill/SKILL.md"
+    repo_skill.parent.mkdir(parents=True)
+    repo_skill.write_text("repo")
+    updated = inbox / "tree/skills/web-skill/SKILL.md"
+    updated.parent.mkdir(parents=True)
+    updated.write_text("repo-version")
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/repo-skill/SKILL.md").read_text() == "repo"
+    assert shared_skill.read_text() == "web-edited"
 
 
 def test_seed_creates_empty_directory_without_sources(deployment):
@@ -376,7 +420,7 @@ def test_seed_creates_empty_directory_without_sources(deployment):
     assert "created empty shared skills/ directory" in result.stdout
 
 
-def test_rollback_leaves_shared_skills_untouched(deployment):
+def test_rollback_keeps_shared_skills_and_merges_target(deployment):
     root, _, _ = deployment
     marker = root / "skills/marker.txt"
     marker.parent.mkdir()
@@ -384,9 +428,12 @@ def test_rollback_leaves_shared_skills_untouched(deployment):
     target = root / "releases" / NEW
     (target / "prod").mkdir(parents=True)
     (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    target_skill = target / "skills/rollback-skill/SKILL.md"
+    target_skill.parent.mkdir(parents=True)
+    target_skill.write_text("rollback")
     (root / "previous").symlink_to(f"releases/{NEW}")
     result = run_deploy(deployment, action="rollback")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "current").readlink() == Path("releases") / NEW
     assert marker.read_text() == "web-installed"
-    assert list((root / "skills").iterdir()) == [marker]
+    assert (root / "skills/rollback-skill/SKILL.md").read_text() == "rollback"
