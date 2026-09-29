@@ -16,6 +16,11 @@ from quickquip.llm.skills import (
     scan_skills,
     utf8_safe_boundary,
 )
+from quickquip.llm.skills.catalog import (
+    load_skill_with_diagnostics,
+    read_configured_catalog_dir,
+    resolve_file_in,
+)
 
 
 # ── 预算推导 ─────────────────────────────────────────────────────
@@ -54,6 +59,8 @@ def test_safe_path_accepts_plain_relative():
         "a/../b",
         "/abs/path",
         "C:/win/abs",
+        "C:evil.txt",
+        "z:relative",
         "back\\slash",
         "a//b",
         "./dot",
@@ -337,3 +344,103 @@ def test_scan_rejects_oversized_script_with_diagnostic(make_skill):
     assert not any(r.path == "scripts/big.py" for r in skill.resources)
     assert any(d.kind == "script-oversize" for d in skill.diagnostics)
     assert any(r.path == "references/a.md" for r in skill.resources)
+
+
+# ── 单目录装载（load_skill_with_diagnostics）────────────────────────
+
+
+def test_load_with_diagnostics_ok(make_skill):
+    catalog_dir, writer = make_skill
+    root = writer("demo", "演示。", files={"references/a.md": "参考"})
+
+    skill, diagnostics = load_skill_with_diagnostics(root)
+
+    assert skill is not None
+    assert skill.name == "demo"
+    assert [r.path for r in skill.resources] == ["references/a.md"]
+    assert diagnostics == []
+
+
+def test_load_with_diagnostics_missing_skill_md(make_skill):
+    catalog_dir, _ = make_skill
+    empty = catalog_dir / "empty-dir"
+    empty.mkdir()
+
+    skill, diagnostics = load_skill_with_diagnostics(empty)
+
+    assert skill is None
+    assert [d.kind for d in diagnostics] == ["missing-skill-file"]
+
+
+def test_load_with_diagnostics_parse_failure(make_skill):
+    catalog_dir, writer = make_skill
+    root = writer("demo")
+    (root / "SKILL.md").write_text("没有 frontmatter", encoding="utf-8")
+
+    skill, diagnostics = load_skill_with_diagnostics(root)
+
+    assert skill is None
+    assert any(d.kind == "missing-frontmatter" for d in diagnostics)
+
+
+def test_load_with_diagnostics_rejects_symlink_skill_md(make_skill):
+    catalog_dir, writer = make_skill
+    root = writer("demo")
+    target = root / "SKILL.md"
+    real = target.read_bytes()
+    target.unlink()
+    target.symlink_to(catalog_dir / "outside.md")
+    (catalog_dir / "outside.md").write_bytes(real)
+
+    skill, diagnostics = load_skill_with_diagnostics(root)
+
+    assert skill is None
+    assert [d.kind for d in diagnostics] == ["not-a-regular-file"]
+
+
+# ── resolve_file_in（目录直传形态）───────────────────────────────────
+
+
+def test_resolve_file_in_resolves_regular_file(make_skill):
+    catalog_dir, writer = make_skill
+    root = writer("demo", files={"references/a.md": "参考"})
+
+    resolved = resolve_file_in(root, "references/a.md")
+
+    assert resolved == root / "references" / "a.md"
+
+
+def test_resolve_file_in_rejects_symlink_escape(make_skill, tmp_path):
+    catalog_dir, writer = make_skill
+    root = writer("demo")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("x", encoding="utf-8")
+    (root / "references").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError):
+        resolve_file_in(root, "references/secret.txt")
+
+
+# ── read_configured_catalog_dir ──────────────────────────────────────
+
+
+def test_read_configured_catalog_dir_reads_value(tmp_path):
+    config = tmp_path / "llm.toml"
+    config.write_text('[skills]\ncatalog_dir = "/tmp/custom-skills"\n', encoding="utf-8")
+    assert read_configured_catalog_dir(config) == "/tmp/custom-skills"
+
+
+def test_read_configured_catalog_dir_fallbacks(tmp_path):
+    # 文件缺失
+    assert read_configured_catalog_dir(tmp_path / "missing.toml") == ""
+    config = tmp_path / "llm.toml"
+    # 节缺失 / 键缺失
+    config.write_text("[runtime]\nenabled = true\n", encoding="utf-8")
+    assert read_configured_catalog_dir(config) == ""
+    # 非字符串
+    config.write_text("[skills]\ncatalog_dir = 123\n", encoding="utf-8")
+    assert read_configured_catalog_dir(config) == ""
+    # TOML 解析失败
+    config.write_text("not [valid toml", encoding="utf-8")
+    assert read_configured_catalog_dir(config) == ""

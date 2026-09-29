@@ -30,7 +30,7 @@ Skill 是受信任的部署资产：部署者把技能包放进 `skills/` 目录
 
 非法取值回退默认值并记录告警。`skills/` 为空目录或不存在时，Skill 工具不注册、系统提示不增加任何内容——未部署 Skill 的实例行为与此前完全一致。
 
-Skill 的增删就是部署侧的文件操作：目录在每次构建系统提示时重新扫描（每轮请求一次），无需重启，进行中的会话下一轮请求即可看到增删；catalog 块字节变化只影响当轮的前缀缓存命中。运行时没有任何安装、更新或删除 Skill 的路径。
+Skill 的增删就是部署侧的文件操作：目录在每次构建系统提示时重新扫描（每轮请求一次），无需重启，进行中的会话下一轮请求即可看到增删；catalog 块字节变化只影响当轮的前缀缓存命中。运行时（bot 进程与 AI 工具面）没有任何安装、更新或删除 Skill 的路径；部署侧的在线管理入口见「Web 管理与导入」。
 
 群内 `/skill list` 可查看已安装 Skill 与当前会话已激活项（只读）；与当前版本预置副本分叉的条目会附带更新提示（见「预置 Skill」节）。
 
@@ -51,7 +51,7 @@ Skill 的增删就是部署侧的文件操作：目录在每次构建系统提�
 
 Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令正文会进入对话上下文，脚本会在部署主机上执行。运行时的结构性防御：
 
-- **无运行时变更路径**：AI 侧没有任何创建、修改或删除 Skill 文件的工具，Skill 内容只能经部署者文件操作变更。
+- **无运行时变更路径**：AI 侧没有任何创建、修改或删除 Skill 文件的工具，Skill 内容只能经部署侧通道（文件操作或 Web Admin 管理页，见「Web 管理与导入」）变更。
 - **路径加固**：读取、检索、执行都限制在对应 Skill 目录内，拒绝 `..` 穿越、绝对路径与符号链接逃逸。
 - **脚本执行隔离**：脚本经结构化 argv 直接启动，无 shell，参数逐字传递不经解释层；子进程环境白名单仅 `PATH`/`LANG`/`TZ`，不继承 bot 进程环境，`.env` 中的凭证对脚本不可见；工作目录固定为该 Skill 目录。
 - **执行前复验**：脚本执行前做 SHA-256 快照比对，目录扫描之后内容有变化即拒绝执行。
@@ -71,8 +71,37 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 ### 版本对齐：漂移检测与同步
 
-预置 Skill 经复制到达 `skills/`；QuickQuip 版本升级会更新 `skills.example/`，已复制的本地副本不会随之自动更新。三层配套闭合这一摩擦：
+预置 Skill 经复制到达 `skills/`；QuickQuip 版本升级会更新 `skills.example/`，已复制的本地副本不会随之自动更新。四层配套闭合这一摩擦：
 
 - **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态不逐轮重复；回归一致时记 INFO），`/skill list` 在对应条目标注「与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新」。检测结果只进日志与命令回复，不进入 catalog 块、系统提示与任何模型注入面，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
 - **同步脚本**：`python scripts/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的三态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）；`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/.preset-backups/<name>.preset-backup-<时间戳>`（备份容器自身无 SKILL.md，运行时扫描不感知；本地定制不丢，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，同步当轮生效，无需重启。
 - **部署入口**：`prod.example/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy、dry-run 与 migrate 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 Release notes 的「预置 Skill 变动」小节指引手动执行同步（该小节是 release PR 模板的固定检查项）。
+- **Web 管理面**：Web Admin「Skill」页顶面板按同一判定语义展示各预置 Skill 状态，支持勾选同步与一键同步全部待处理，覆盖分叉项前同样自动备份至 `skills/.preset-backups/`；详见「Web 管理与导入」。
+
+## Web 管理与导入
+
+Web Admin 导航「LLM 工坊」区的「Skill」页（`/ops/#/skills`）提供 Skill 目录的在线管理面，作用目录与 `[skills].catalog_dir` 的生效目录一致。所有写入直接落盘：运行时下次构建系统提示即重新扫描目录，保存即热生效，无需 reload 或重启。全部写操作（新建、编辑、删除、预置同步、安装）记入审计日志（`data/audit.db`，Web Admin 审计页可见）。
+
+### 管理与在线编辑
+
+- 列表覆盖目录内全部 Skill：解析或校验不通过、被运行时扫描静默跳过的坏项同样列出并附诊断（缺 `SKILL.md`、非 UTF-8、frontmatter 校验失败等）；与预置副本一致/已偏离的条目附预置态标注，含 `scripts/` 的条目附「含脚本」标注。
+- 详情页展示 frontmatter metadata、资源清单（路径、类型、大小）与诊断；`SKILL.md`、`references/`、`scripts/` 等文本资源可在线编辑或删除（`SKILL.md` 不可删，保存时按运行时同一 parser 校验），单文件读写上限 256KiB。
+- 新建 Skill 校验目录名规范（`^[a-z0-9][a-z0-9-]*$`，≤64 字符）并生成 frontmatter 骨架；删除 Skill 移除整个目录，不可恢复。
+
+### 预置同步（页面内）
+
+页顶「预置同步」面板与 `scripts/sync_preset_skills.py` 同一判定语义，逐项报告 `current`（已安装，与预置副本一致）/ `diverged`（已安装，与预置副本不同）/ `missing`（未安装）/ `conflict`（存在同名非目录项，需人工处理）；仅本地（非预置）的 Skill 单独列出。勾选后「同步所选」，或「一键同步全部待处理」；`diverged` 项覆盖前旧副本整体备份至 `skills/.preset-backups/`，确认本地定制无丢失后自行清理。
+
+### 安装第三方 Skill
+
+三种来源：本地 `.zip` 压缩包（≤16MiB）、本地文件夹（整目录上传）、GitHub 仓库链接。包内每个含 `SKILL.md` 的目录都会成为一个候选；安装以 frontmatter `name` 为目录名，压缩包内的原始目录名不参与校验。与现有 Skill 同名时须显式勾选覆盖安装，旧副本自动备份至 `skills/.preset-backups/`。
+
+安装是两阶段「检查 → 确认」交互：检查阶段只读产出候选报告——`description`、文件数与体积、解析诊断、是否携带 `scripts/` 可执行脚本（含脚本时红色警示并列出脚本清单）；确认后才写入目录。检查载荷在服务端暂存 30 分钟，超时需重新检查。候选验收与运行时扫描共用同一 parser（Agent Skills 开放标准的可移植核心），通过检查的 Skill 安装后即可被运行时装载。
+
+摄取护栏：zip 条目 ≤500、单文件 ≤1MiB、解压总量 ≤32MiB；拒绝符号链接与绝对路径条目。
+
+GitHub 导入经 `codeload.github.com` 下载仓库 zip：仅支持公开仓库，下载硬上限 32MiB、超时 20s，部署主机需可访问 `github.com` / `codeload.github.com`。接受 `https://github.com/<owner>/<repo>`、`…/tree/<ref>` 与 `…/tree/<ref>/<子目录>` 三种链接；多 Skill 仓库（monorepo）必须用 `/tree/` 子目录链接定位单个 Skill——按整仓摄取会把仓库其余部分一并计入护栏，容易触发条目数/体积上限；`/blob/` 单文件链接不受支持。
+
+### Web 管理面的安全边界
+
+项目安全原则是「尽提醒义务的最高自由度」：Web 管理面把 Skill 写入与导入能力开放给全部持有管理会话的人，页面在列表「含脚本」标注、脚本编辑横幅、安装检查报告的红色警示等处尽提醒义务，但不替代人工审阅。「只放置审阅过的 Skill」这一要求不变——Skill 可携带以 bot 进程权限在部署主机执行的 `scripts/` 脚本，导入第三方 Skill 前必须逐文件审阅其内容，检查报告即审阅界面。Web 写侧与运行时共用路径加固（拒绝 `..` 穿越、绝对路径与符号链接逃逸）；运行时的脚本执行隔离、执行前复验与资源上限对在线编辑/安装的 Skill 同样生效。

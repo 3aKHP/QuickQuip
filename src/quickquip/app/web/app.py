@@ -31,6 +31,7 @@ from quickquip.app.web.routes import (
     llm_usage,
     epochs,
     scheduled_messages,
+    skills,
 )
 from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
     app.include_router(
         scheduled_messages.router, prefix="/ops/api", dependencies=auth.protected_dependencies
     )
+    app.include_router(skills.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
 
     _register_root_redirect(app)
 
