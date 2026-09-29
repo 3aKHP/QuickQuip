@@ -80,15 +80,15 @@ set_link() {
     if [ -z "$value" ]; then rm -f "$Root/$name"; return 0; fi
     ln -s "releases/$value" "$temp" && mv -Tf "$temp" "$Root/$name"
 }
-# Shared skill catalog at the deployment root, beside data/. $1 = release id
-# whose skills/ directory provides the merge content. When $Root/skills is
-# absent, seed it from the previous current release (it carries skills
-# installed via Web Admin since that release) or start empty. The merge then
-# runs on every call: repository-added skills land in the catalog while
-# existing files (including Web Admin installs and edits) are kept and
-# deletions never propagate. Must run before any compose up, which would
-# auto-create an empty root-owned directory.
-seed_shared_skills() {
+# Seed (only when $Root/skills is missing) and merge (on every call) the
+# shared skill catalog at the deployment root, beside data/. $1 = release id
+# whose skills/ directory provides the merge content. Seeding prefers the
+# previous current release (the catalog most recently active on this host)
+# or starts empty. The merge is non-destructive: repository-added
+# skills land in the catalog while existing files (including Web Admin
+# installs and edits) are kept and deletions never propagate. Must run before
+# any compose up, which would auto-create an empty root-owned directory.
+sync_shared_skills() {
     local release="$1"
     if [ ! -d "$Root/skills" ]; then
         if [ -n "$OriginalCurrent" ] && [ -d "$Root/releases/$OriginalCurrent/skills" ]; then
@@ -100,8 +100,20 @@ seed_shared_skills() {
         fi
     fi
     if [ -d "$Root/releases/$release/skills" ]; then
-        cp -an "$Root/releases/$release/skills/." "$Root/skills/"
-        step "merged release $release skills/ into shared catalog (existing files kept)"
+        # The web-admin container runs as root; skills it installed can be
+        # root-owned and reject the deploy user's cp. Retry with noninteractive
+        # sudo and pull the whole catalog back to the deploy user.
+        if cp -an "$Root/releases/$release/skills/." "$Root/skills/" 2>/dev/null; then
+            step "merged release $release skills/ into shared catalog (existing files kept)"
+        elif sudo -n true 2>/dev/null; then
+            sudo -n cp -an "$Root/releases/$release/skills/." "$Root/skills/" \
+                || fail "shared skills/ merge failed even with sudo"
+            sudo -n chown -R "$(id -u):$(id -g)" "$Root/skills" \
+                || fail "shared skills/ ownership restore failed"
+            step "merged release $release skills/ with sudo; catalog ownership restored"
+        else
+            fail "shared skills/ merge failed: permission denied; fix with: sudo chown -R $(id -u):$(id -g) $Root/skills"
+        fi
     fi
 }
 compose() {
@@ -216,7 +228,7 @@ if [ "$Action" = rollback ]; then
     Changed=1
     set_link current "$Target"
     Activated=1
-    seed_shared_skills "$Target"
+    sync_shared_skills "$Target"
     up "$Target" || fail "rollback startup failed"
     health "$Target" || fail "rollback health failed"
     set_link previous "$Prev"
@@ -249,8 +261,6 @@ LinkDest=()
 rsync -ar --chmod=D755,F644 --exclude=__pycache__ --exclude='*.pyc' \
     "${LinkDest[@]}" "$Incoming/tree/" "$Release/"
 chmod 700 "$Release"
-# Must run before any compose up; see seed_shared_skills.
-seed_shared_skills "$Id"
 export QUICKQUIP_ENV_FILE="$Incoming/shared/.env"
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.
@@ -279,6 +289,8 @@ shared_state apply "$Root" "$Incoming" "$Backup"
 export QUICKQUIP_ENV_FILE="$Root/.env"
 set_link current "$Id"
 Activated=1
+# Must run before any compose up; see sync_shared_skills.
+sync_shared_skills "$Id"
 up "$Id" || fail "deployment startup failed"
 if [ "${SKIP_HEALTH:-0}" = 1 ]; then
     step "health explicitly skipped; release is UNVERIFIED"

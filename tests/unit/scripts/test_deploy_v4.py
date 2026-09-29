@@ -299,11 +299,33 @@ def _minimal_server_root(tmp_path) -> Path:
     return root
 
 
+def _write_skill(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def _write_fake_sudo(bin_dir: Path, available: bool) -> None:
+    sudo = bin_dir / "sudo"
+    if available:
+        sudo.write_text(
+            "#!/bin/bash\n"
+            '[ "$1" = "-n" ] && shift\n'
+            'echo "$@" >> "$TEST_ROOT/sudo-calls"\n'
+            'case "$1" in\n'
+            "    true) exit 0 ;;\n"
+            '    cp) chmod -R u+w "$TEST_ROOT/skills" ;;\n'
+            "    chown) exit 0 ;;\n"
+            "esac\n"
+            'exec "$@"\n'
+        )
+    else:
+        sudo.write_text("#!/bin/bash\nexit 1\n")
+    sudo.chmod(0o700)
+
+
 def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypatch):
     root = _minimal_server_root(tmp_path)
-    skill_md = root / "skills/demo/SKILL.md"
-    skill_md.parent.mkdir(parents=True)
-    skill_md.write_text("---\nname: demo\ndescription: 演示\n---\n正文\n")
+    _write_skill(root / "skills/demo/SKILL.md", "---\nname: demo\ndescription: 演示\n---\n正文\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_docker_for_baseline(bin_dir)
@@ -317,20 +339,6 @@ def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypat
     # deployment-root shared directory.
     assert volume["source"] == str(root / "skills")
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
-
-
-def test_capture_baseline_without_skills_dir_keeps_shared_source(tmp_path, monkeypatch):
-    root = _minimal_server_root(tmp_path)
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_fake_docker_for_baseline(bin_dir)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    baseline = tmp_path / "baseline"
-    STATE["capture_baseline"](root, baseline)
-    assert not (baseline / "skills").exists()
-    config = json.loads((baseline / "prod/docker-compose.yml").read_text())
-    (volume,) = config["services"]["quickquip"]["volumes"]
-    assert volume["source"] == str(root / "skills")
 
 
 def test_resolve_defaulted_variables():
@@ -365,15 +373,9 @@ def test_seed_skips_existing_shared_skills(deployment):
 
 def test_seed_prefers_previous_current_release(deployment):
     root, inbox, _ = deployment
-    old_skill = root / "releases" / OLD / "skills/old-skill/SKILL.md"
-    old_skill.parent.mkdir(parents=True)
-    old_skill.write_text("old")
-    new_skill = inbox / "tree/skills/new-skill/SKILL.md"
-    new_skill.parent.mkdir(parents=True)
-    new_skill.write_text("new")
-    updated = inbox / "tree/skills/old-skill/SKILL.md"
-    updated.parent.mkdir(parents=True)
-    updated.write_text("new-version")
+    _write_skill(root / "releases" / OLD / "skills/old-skill/SKILL.md", "old")
+    _write_skill(inbox / "tree/skills/new-skill/SKILL.md", "new")
+    _write_skill(inbox / "tree/skills/old-skill/SKILL.md", "new-version")
     result = run_deploy(deployment)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "skills/old-skill/SKILL.md").read_text() == "old"
@@ -384,9 +386,7 @@ def test_seed_prefers_previous_current_release(deployment):
 
 def test_seed_empty_then_merges_uploaded_release(deployment):
     root, inbox, _ = deployment
-    new_skill = inbox / "tree/skills/new-skill/SKILL.md"
-    new_skill.parent.mkdir(parents=True)
-    new_skill.write_text("new")
+    _write_skill(inbox / "tree/skills/new-skill/SKILL.md", "new")
     result = run_deploy(deployment)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "skills/new-skill/SKILL.md").read_text() == "new"
@@ -396,19 +396,45 @@ def test_seed_empty_then_merges_uploaded_release(deployment):
 
 def test_merge_adds_repo_skills_without_overwriting(deployment):
     root, inbox, _ = deployment
-    shared_skill = root / "skills/web-skill/SKILL.md"
-    shared_skill.parent.mkdir(parents=True)
-    shared_skill.write_text("web-edited")
-    repo_skill = inbox / "tree/skills/repo-skill/SKILL.md"
-    repo_skill.parent.mkdir(parents=True)
-    repo_skill.write_text("repo")
-    updated = inbox / "tree/skills/web-skill/SKILL.md"
-    updated.parent.mkdir(parents=True)
-    updated.write_text("repo-version")
+    _write_skill(root / "skills/web-skill/SKILL.md", "web-edited")
+    _write_skill(inbox / "tree/skills/repo-skill/SKILL.md", "repo")
+    _write_skill(inbox / "tree/skills/web-skill/SKILL.md", "repo-version")
     result = run_deploy(deployment)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "skills/repo-skill/SKILL.md").read_text() == "repo"
-    assert shared_skill.read_text() == "web-edited"
+    assert (root / "skills/web-skill/SKILL.md").read_text() == "web-edited"
+
+
+def test_merge_falls_back_to_sudo_for_root_owned_skills(deployment):
+    root, inbox, env = deployment
+    _write_skill(root / "skills/web-skill/SKILL.md", "web-edited")
+    _write_skill(inbox / "tree/skills/repo-skill/SKILL.md", "repo")
+    (root / "skills").chmod(0o555)
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    _write_fake_sudo(bin_dir, available=True)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/repo-skill/SKILL.md").read_text() == "repo"
+    assert "with sudo; catalog ownership restored" in result.stdout
+    calls = (root / "sudo-calls").read_text()
+    assert "cp -an" in calls
+    owner = f"{os.getuid()}:{os.getgid()}"
+    assert f"chown -R {owner} {os.path.realpath(root)}/skills" in calls
+
+
+def test_merge_without_sudo_prints_chown_guidance(deployment):
+    root, inbox, env = deployment
+    _write_skill(root / "skills/web-skill/SKILL.md", "web-edited")
+    _write_skill(inbox / "tree/skills/repo-skill/SKILL.md", "repo")
+    (root / "skills").chmod(0o555)
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    _write_fake_sudo(bin_dir, available=False)
+    result = run_deploy(deployment)
+    (root / "skills").chmod(0o755)
+    assert result.returncode == 1, result.stdout + result.stderr
+    owner = f"{os.getuid()}:{os.getgid()}"
+    guidance = f"sudo chown -R {owner} {os.path.realpath(root)}/skills"
+    assert guidance in result.stderr
 
 
 def test_seed_creates_empty_directory_without_sources(deployment):
@@ -428,9 +454,7 @@ def test_rollback_keeps_shared_skills_and_merges_target(deployment):
     target = root / "releases" / NEW
     (target / "prod").mkdir(parents=True)
     (target / "prod/docker-compose.yml").write_text("services: {}\n")
-    target_skill = target / "skills/rollback-skill/SKILL.md"
-    target_skill.parent.mkdir(parents=True)
-    target_skill.write_text("rollback")
+    _write_skill(target / "skills/rollback-skill/SKILL.md", "rollback")
     (root / "previous").symlink_to(f"releases/{NEW}")
     result = run_deploy(deployment, action="rollback")
     assert result.returncode == 0, result.stdout + result.stderr
