@@ -100,7 +100,7 @@ Web Admin 导航「LLM 工坊」区的「Skill」页（`/ops/#/skills`）提供 
 
 摄取护栏：zip 条目 ≤500、单文件 ≤1MiB、解压总量 ≤32MiB；拒绝符号链接与绝对路径条目。
 
-GitHub 导入经 `codeload.github.com` 下载仓库 zip：仅支持公开仓库，下载硬上限 32MiB、超时 20s，部署主机需可访问 `github.com` / `codeload.github.com`。接受 `https://github.com/<owner>/<repo>` 与 `https://github.com/<owner>/<repo>/tree/<ref>/<子目录>` 两种链接；多 Skill 仓库（monorepo）必须用 `/tree/` 子目录链接定位单个 Skill——按整仓摄取会把仓库其余部分一并计入护栏，容易触发条目数/体积上限；`/blob/` 单文件链接不受支持。
+GitHub 导入经 `codeload.github.com` 下载仓库 zip：仅支持公开仓库，下载硬上限 32MiB、超时 20s，部署主机需可访问 `github.com` / `codeload.github.com`。接受 `https://github.com/<owner>/<repo>`、`…/tree/<ref>` 与 `…/tree/<ref>/<子目录>` 三种链接；多 Skill 仓库（monorepo）必须用 `/tree/` 子目录链接定位单个 Skill——按整仓摄取会把仓库其余部分一并计入护栏，容易触发条目数/体积上限；`/blob/` 单文件链接不受支持。
 
 ### Web 管理面的安全边界
 
