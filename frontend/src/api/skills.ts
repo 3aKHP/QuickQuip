@@ -6,6 +6,9 @@ export interface SkillDiagnostic {
   message: string
 }
 
+/** 预置同步状态词表（唯一出处）；SkillSummary.preset_state 只取其中两态 */
+export type PresetSyncState = 'current' | 'diverged' | 'missing' | 'conflict'
+
 /** GET /skills 列表项：含扫描静默跳过的坏项（ok=false 时 diagnostics 携带诊断） */
 export interface SkillSummary {
   name: string
@@ -17,7 +20,7 @@ export interface SkillSummary {
   total_bytes: number
   mtime: number
   /** 预置态：current / diverged / null（非预置） */
-  preset_state: 'current' | 'diverged' | null
+  preset_state: Extract<PresetSyncState, 'current' | 'diverged'> | null
 }
 
 /** GET /skills/{name} 的资源条目 */
@@ -54,8 +57,6 @@ export interface SkillFileContent {
   size_bytes: number
 }
 
-export type PresetSyncState = 'current' | 'diverged' | 'missing' | 'conflict'
-
 /** GET /skills/presets 的预置行；label 为后端给好的中文文案，直接展示 */
 export interface PresetRow {
   name: string
@@ -83,8 +84,10 @@ export interface ImportCandidate {
   /** 候选根在归档内的相对路径，"" 表示根 */
   root: string
   ok: boolean
-  name: string
-  description: string
+  /** 解析失败的候选为 null */
+  name: string | null
+  /** 解析失败的候选为 null */
+  description: string | null
   has_scripts: boolean
   script_files: string[]
   file_count: number

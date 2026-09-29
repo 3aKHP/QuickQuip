@@ -5,7 +5,7 @@
         <UiInfoTip text="Skill 每次群聊轮次现扫生效，保存文件后无需重启。scripts/ 下的脚本以 bot 进程权限在本机运行，编辑与安装前请确认来源可信。" />
       </template>
       <template #actions>
-        <UiButton icon="RefreshCw" :disabled="listing" @click="loadAll">刷新</UiButton>
+        <UiButton icon="RefreshCw" :disabled="listing" @click="onRefresh">刷新</UiButton>
         <UiButton icon="Plus" @click="startCreate">新建</UiButton>
         <UiButton icon="Upload" @click="installOpen = true">安装</UiButton>
         <UiButton variant="danger" icon="Trash2" :disabled="!selectedName" @click="onDeleteSkill">删除</UiButton>
@@ -13,46 +13,7 @@
     </UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
-    <div class="preset-panel">
-      <div class="preset-head">
-        <span class="preset-title">预置同步</span>
-        <UiInfoTip text="对照仓库 skills.example/ 预置目录：missing 为尚未安装，diverged 为本地与预置不一致。同步 diverged 项前会将现有副本备份至 .preset-backups/。" />
-        <span class="preset-spacer" />
-        <UiButton size="sm" :disabled="!dirtyPresetCount || applyingPresets" :loading="applyingPresets" @click="onApplyPresets(false)">同步所选（{{ dirtyPresetCount }}）</UiButton>
-        <UiButton size="sm" variant="secondary" :disabled="applyingPresets" @click="onApplyPresets(true)">一键同步全部待处理</UiButton>
-      </div>
-      <p v-if="presetError" class="error">{{ presetError }}</p>
-      <div v-if="presets.length" class="preset-table-wrap">
-        <table class="preset-table">
-          <thead>
-            <tr><th class="col-check" /><th>名称</th><th>状态</th><th>备注</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="p in presets" :key="p.name">
-              <td class="col-check">
-                <input
-                  type="checkbox"
-                  :checked="selectedPresets.has(p.name)"
-                  :disabled="p.state === 'current' || p.state === 'conflict'"
-                  @change="togglePreset(p.name)"
-                />
-              </td>
-              <td class="mono">{{ p.name }}</td>
-              <td>
-                <UiTag size="sm" :variant="presetVariant(p.state)">{{ p.label }}</UiTag>
-              </td>
-              <td class="preset-note">
-                <span v-if="p.state === 'diverged'">同步将备份现有副本</span>
-                <span v-else-if="p.state === 'conflict'">与预置同名但来源不同，请手动处理</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-if="localOnly.length" class="preset-local">
-        仅本地（非预置）：{{ localOnly.join('、') }}
-      </p>
-    </div>
+    <PresetSyncPanel ref="presetPanelRef" :before-apply="confirmEditorLeave" @applied="onPresetsApplied" />
 
     <div class="split">
       <nav class="list-panel">
@@ -111,50 +72,38 @@
                 <span class="meta-val meta-val--muted">{{ detail.metadata.unknown_fields.join('、') }}（解析时忽略，不产生运行时行为）</span>
               </div>
             </div>
-
-            <div class="file-table-wrap">
-              <table class="file-table">
-                <thead>
-                  <tr><th>路径</th><th>类型</th><th>大小</th><th class="col-actions" /></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="r in detail.resources" :key="r.path" class="file-row" :class="{ active: r.path === filePath }">
-                    <td>
-                      <button class="file-open mono" @click="openFile(r.path)">
-                        {{ r.path }}
-                        <UiTag v-if="r.path.startsWith('scripts/')" size="sm" variant="danger">脚本</UiTag>
-                      </button>
-                    </td>
-                    <td class="file-kind">{{ r.kind }}</td>
-                    <td class="file-size">{{ formatSize(r.size_bytes) }}</td>
-                    <td class="col-actions">
-                      <UiButton
-                        v-if="r.path !== 'SKILL.md'"
-                        size="sm"
-                        variant="ghost"
-                        icon="Trash2"
-                        @click="onDeleteFile(r.path)"
-                      />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <SkillFileEditor
+              ref="editorRef"
+              :skill-name="selectedName"
+              :resources="detail.resources"
+              @saved="onFileSaved"
+              @file-deleted="onFileDeleted"
+            />
+          </template>
+          <template v-else-if="repairDiagnostics">
+            <div class="diag-banner">
+              <UiIcon name="AlertTriangle" :size="15" />
+              <div class="diag-list">
+                <div v-for="(d, i) in repairDiagnostics" :key="i" class="diag-item">
+                  <UiTag size="sm" variant="danger">{{ d.kind }}</UiTag>
+                  <span>{{ d.message }}</span>
+                </div>
+              </div>
             </div>
-
-            <template v-if="filePath">
-              <div v-if="filePath.startsWith('scripts/')" class="script-banner">
-                <UiIcon name="AlertTriangle" :size="15" />
-                该文件是可执行脚本，将以 bot 进程权限在本机运行
+            <div class="repair-card">
+              <p class="repair-text">该 Skill 的 SKILL.md 缺失或未通过解析校验，运行时会被扫描跳过。修复 SKILL.md 并保存后即可恢复加载，也可以直接删除整个目录。</p>
+              <div class="repair-actions">
+                <UiButton size="sm" variant="primary" icon="Pencil" @click="openSkillFileForRepair">编辑 SKILL.md</UiButton>
+                <UiButton size="sm" variant="danger" icon="Trash2" @click="onDeleteSkill">删除该 Skill</UiButton>
               </div>
-              <div class="editor-bar">
-                <span class="mono editor-path">{{ filePath }}</span>
-                <span v-if="fileDirty" class="dirty-pill">未保存</span>
-                <UiButton size="sm" variant="primary" icon="Save" :loading="savingFile" :disabled="!fileDirty" @click="onSaveFile">保存</UiButton>
-              </div>
-              <p v-if="fileError" class="error">{{ fileError }}</p>
-              <UiLoading v-if="loadingFile" />
-              <textarea v-else v-model="fileContent" class="file-editor" spellcheck="false" autocomplete="off" />
-            </template>
+            </div>
+            <SkillFileEditor
+              ref="editorRef"
+              :skill-name="selectedName"
+              :resources="[]"
+              @saved="onFileSaved"
+              @file-deleted="onFileDeleted"
+            />
           </template>
           <p v-else-if="detailError" class="error">{{ detailError }}</p>
         </template>
@@ -166,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -175,12 +124,10 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import SkillInstallDialog from '../components/skills/SkillInstallDialog.vue'
-import {
-  listSkills, createSkill, fetchSkill, deleteSkill,
-  fetchSkillFile, saveSkillFile, deleteSkillFile,
-  listSkillPresets, applySkillPresets,
-} from '../api/skills'
-import type { SkillSummary, SkillDetail, PresetRow, PresetSyncState } from '../api/skills'
+import SkillFileEditor from '../components/skills/SkillFileEditor.vue'
+import PresetSyncPanel from '../components/skills/PresetSyncPanel.vue'
+import { listSkills, createSkill, fetchSkill, deleteSkill } from '../api/skills'
+import type { SkillSummary, SkillDetail, SkillDiagnostic } from '../api/skills'
 import { toast } from '../toast'
 
 const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/
@@ -190,30 +137,21 @@ const listing = ref(false)
 const listError = ref<string | null>(null)
 const selectedName = ref('')
 const detail = ref<SkillDetail | null>(null)
+/** 修复模式：详情 404（坏 skill）时从错误结构解析出的诊断 */
+const repairDiagnostics = ref<SkillDiagnostic[] | null>(null)
 const loadingDetail = ref(false)
 const detailError = ref<string | null>(null)
 
-const filePath = ref('')
-const fileContent = ref('')
-const fileOriginal = ref('')
-const loadingFile = ref(false)
-const savingFile = ref(false)
-const fileError = ref<string | null>(null)
-const fileDirty = computed(() => fileContent.value !== fileOriginal.value)
-
-const presets = ref<PresetRow[]>([])
-const localOnly = ref<string[]>([])
-const presetError = ref<string | null>(null)
-const selectedPresets = ref<Set<string>>(new Set())
-const applyingPresets = ref(false)
-const dirtyPresetCount = computed(() => presets.value.filter(p => selectedPresets.value.has(p.name)).length)
+const editorRef = ref<InstanceType<typeof SkillFileEditor> | null>(null)
+const presetPanelRef = ref<InstanceType<typeof PresetSyncPanel> | null>(null)
 
 const installOpen = ref(false)
 
-onMounted(loadAll)
+onMounted(loadList)
 
-async function loadAll() {
-  await Promise.all([loadList(), loadPresets()])
+function onRefresh() {
+  void loadList()
+  void presetPanelRef.value?.reload()
 }
 
 async function loadList() {
@@ -229,131 +167,98 @@ async function loadList() {
   }
 }
 
-async function loadPresets() {
-  presetError.value = null
-  try {
-    const data = await listSkillPresets()
-    presets.value = data.presets || []
-    localOnly.value = data.local_only || []
-  } catch (e: unknown) {
-    presetError.value = (e as Error).message
+/** 详情 404 的 detail 结构为 {message, diagnostics:[{kind,message}]}，经 request 封装挂到 error.data */
+function extractDetailDiagnostics(e: unknown): SkillDiagnostic[] | null {
+  const err = e as { status?: number; data?: unknown }
+  if (err.status !== 404 || typeof err.data !== 'object' || err.data === null) return null
+  const body = (err.data as Record<string, unknown>).detail
+  if (typeof body !== 'object' || body === null) return null
+  const diagnostics = (body as Record<string, unknown>).diagnostics
+  if (!Array.isArray(diagnostics)) return null
+  const parsed: SkillDiagnostic[] = []
+  for (const item of diagnostics) {
+    if (typeof item !== 'object' || item === null) return null
+    const record = item as Record<string, unknown>
+    if (typeof record.kind !== 'string' || typeof record.message !== 'string') return null
+    parsed.push({ kind: record.kind, message: record.message })
   }
+  return parsed
 }
 
-function presetVariant(state: PresetSyncState) {
-  if (state === 'current') return 'success' as const
-  if (state === 'diverged') return 'warn' as const
-  if (state === 'conflict') return 'danger' as const
-  return 'info' as const
-}
-
-function togglePreset(name: string) {
-  const next = new Set(selectedPresets.value)
-  if (next.has(name)) next.delete(name)
-  else next.add(name)
-  selectedPresets.value = next
-}
-
-async function onApplyPresets(all: boolean) {
-  const names = all ? presets.value.filter(p => p.state === 'missing' || p.state === 'diverged').map(p => p.name) : [...selectedPresets.value]
-  if (!names.length) return
-  if (!confirm(all
-    ? `将同步全部 ${names.length} 个待处理预置 Skill，已偏离项的旧副本会备份至 .preset-backups/。是否继续？`
-    : `将同步所选 ${names.length} 个预置 Skill，已偏离项的旧副本会备份至 .preset-backups/。是否继续？`)) return
-  applyingPresets.value = true
-  presetError.value = null
-  try {
-    const res = await applySkillPresets(names)
-    if (res.failures.length) {
-      toast(`同步完成，${res.outcomes.length} 项成功，${res.failures.length} 项失败：${res.failures.join('、')}`, 'error', 5000)
-    } else {
-      toast(`已同步 ${res.outcomes.length} 个预置 Skill`)
-    }
-    selectedPresets.value = new Set()
-    await loadAll()
-    if (selectedName.value) await reloadDetail()
-  } catch (e: unknown) {
-    presetError.value = (e as Error).message
-    toast('预置同步失败', 'error')
-  } finally {
-    applyingPresets.value = false
-  }
+function confirmEditorLeave(): boolean {
+  return editorRef.value?.confirmLeave() ?? true
 }
 
 async function selectSkill(name: string) {
   if (name === selectedName.value) return
-  if (fileDirty.value && !confirm('当前文件有未保存的修改，切换后将丢失。是否继续？')) return
+  if (!confirmEditorLeave()) return
   selectedName.value = name
   await reloadDetail()
 }
 
+/** 切换/新建/安装后的全量加载；坏 skill 进入修复模式 */
 async function reloadDetail() {
   loadingDetail.value = true
   detailError.value = null
-  fileError.value = null
+  repairDiagnostics.value = null
   try {
     detail.value = await fetchSkill(selectedName.value)
-    filePath.value = ''
-    fileContent.value = ''
-    fileOriginal.value = ''
   } catch (e: unknown) {
     detail.value = null
-    detailError.value = (e as Error).message
+    const diagnostics = extractDetailDiagnostics(e)
+    if (diagnostics) repairDiagnostics.value = diagnostics
+    else detailError.value = (e as Error).message
   } finally {
     loadingDetail.value = false
   }
 }
 
-async function openFile(path: string) {
-  if (path === filePath.value) return
-  if (fileDirty.value && !confirm('当前文件有未保存的修改，切换后将丢失。是否继续？')) return
-  filePath.value = path
-  loadingFile.value = true
-  fileError.value = null
+/** 保存/删文件后的轻量刷新：只替换详情数据，编辑器状态由子组件自持不受影响 */
+async function refreshDetail() {
   try {
-    const data = await fetchSkillFile(selectedName.value, path)
-    fileContent.value = data.content
-    fileOriginal.value = data.content
+    detail.value = await fetchSkill(selectedName.value)
+    repairDiagnostics.value = null
   } catch (e: unknown) {
-    filePath.value = ''
-    fileError.value = (e as Error).message
-    toast((e as Error).message, 'error')
-  } finally {
-    loadingFile.value = false
-  }
-}
-
-async function onSaveFile() {
-  savingFile.value = true
-  fileError.value = null
-  try {
-    await saveSkillFile(selectedName.value, filePath.value, fileContent.value)
-    fileOriginal.value = fileContent.value
-    toast('已保存')
-    await loadList()
-  } catch (e: unknown) {
-    fileError.value = (e as Error).message
-    toast('保存失败', 'error')
-  } finally {
-    savingFile.value = false
-  }
-}
-
-async function onDeleteFile(path: string) {
-  if (!confirm(`确定删除文件 ${path}？该操作不可撤销。`)) return
-  try {
-    await deleteSkillFile(selectedName.value, path)
-    toast('已删除')
-    if (filePath.value === path) {
-      filePath.value = ''
-      fileContent.value = ''
-      fileOriginal.value = ''
+    const diagnostics = extractDetailDiagnostics(e)
+    if (diagnostics) {
+      detail.value = null
+      repairDiagnostics.value = diagnostics
+    } else {
+      toast((e as Error).message, 'error')
     }
-    await reloadDetail()
-    await loadList()
-  } catch (e: unknown) {
-    toast((e as Error).message, 'error')
   }
+}
+
+async function onFileSaved() {
+  await loadList()
+  await refreshDetail()
+}
+
+async function onFileDeleted() {
+  await loadList()
+  await refreshDetail()
+}
+
+async function onPresetsApplied() {
+  await loadList()
+  if (!selectedName.value) return
+  // 同步会改写磁盘上的目录内容，编辑器内容可能已过期，关闭之
+  editorRef.value?.reset()
+  await refreshDetail()
+}
+
+function skillSkeleton(name: string): string {
+  return [
+    '---',
+    `name: ${name}`,
+    'description: 一句话说明这个 Skill 能做什么、何时该被调用',
+    '---',
+    '',
+    `# ${name}`,
+    '',
+    '<!-- 在这里编写给 LLM 的指令正文 -->',
+    '',
+  ].join('\n')
 }
 
 function startCreate() {
@@ -368,28 +273,19 @@ function startCreate() {
     toast('同名 Skill 已存在', 'error')
     return
   }
+  if (!confirmEditorLeave()) return
   void doCreate(name)
 }
 
 async function doCreate(name: string) {
-  const content = [
-    '---',
-    `name: ${name}`,
-    'description: 一句话说明这个 Skill 能做什么、何时该被调用',
-    '---',
-    '',
-    `# ${name}`,
-    '',
-    '<!-- 在这里编写给 LLM 的指令正文 -->',
-    '',
-  ].join('\n')
   try {
-    await createSkill(name, content)
+    await createSkill(name, skillSkeleton(name))
     toast('已创建')
     await loadList()
     selectedName.value = name
     await reloadDetail()
-    await openFile('SKILL.md')
+    await nextTick()
+    await editorRef.value?.openPath('SKILL.md')
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
   }
@@ -405,23 +301,26 @@ async function onDeleteSkill() {
     toast('已删除')
     selectedName.value = ''
     detail.value = null
-    filePath.value = ''
-    await loadAll()
+    repairDiagnostics.value = null
+    await loadList()
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
   }
 }
 
 async function onInstalled(name: string) {
-  await loadAll()
+  if (!confirmEditorLeave()) {
+    await loadList()
+    return
+  }
+  await loadList()
   selectedName.value = name
   await reloadDetail()
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
-  return `${(n / 1024 / 1024).toFixed(2)} MiB`
+function openSkillFileForRepair() {
+  // SKILL.md 可能整个缺失（GET 404）：以骨架模板开路，保存即创建（PUT upsert）
+  void editorRef.value?.openPath('SKILL.md', skillSkeleton(selectedName.value))
 }
 </script>
 
@@ -429,72 +328,6 @@ function formatSize(n: number): string {
 .skills-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .error { color: var(--qq-danger); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }
-
-.preset-panel {
-  background: var(--qq-surface);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-card);
-  box-shadow: var(--qq-shadow-card);
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
-  margin-bottom: var(--qq-gap-md);
-  display: flex;
-  flex-direction: column;
-  gap: var(--qq-gap-xs);
-}
-
-.preset-head {
-  display: flex;
-  align-items: center;
-  gap: var(--qq-gap-xs);
-}
-
-.preset-title {
-  font-size: var(--qq-text-sm);
-  font-weight: 700;
-  color: var(--qq-text);
-}
-
-.preset-spacer { flex: 1; }
-
-.preset-table-wrap { overflow-x: auto; }
-
-.preset-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--qq-text-sm);
-  color: var(--qq-text);
-}
-
-.preset-table th {
-  text-align: left;
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
-  font-weight: 600;
-  padding: 4px var(--qq-gap-xs);
-  border-bottom: 1px solid var(--qq-border);
-}
-
-.preset-table td {
-  padding: 4px var(--qq-gap-xs);
-  border-bottom: 1px solid var(--qq-border-soft);
-}
-
-.preset-table tr:last-child td { border-bottom: none; }
-
-.preset-table .col-check { width: 28px; }
-
-.preset-table input[type="checkbox"] { accent-color: var(--qq-primary); }
-
-.preset-note {
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
-}
-
-.preset-local {
-  margin: 0;
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
-}
 
 .split { display: flex; gap: var(--qq-gap-md); flex: 1; min-height: 0; }
 
@@ -619,126 +452,32 @@ function formatSize(n: number): string {
 
 .meta-val--muted { color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
 
-.file-table-wrap {
+.repair-card {
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   box-shadow: var(--qq-shadow-card);
-  overflow-x: auto;
-}
-
-.file-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--qq-text-sm);
-}
-
-.file-table th {
-  text-align: left;
-  color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
-  font-weight: 600;
-  padding: var(--qq-gap-xs) var(--qq-gap-sm);
-  border-bottom: 1px solid var(--qq-border);
-}
-
-.file-table td {
-  padding: var(--qq-gap-xs) var(--qq-gap-sm);
-  border-bottom: 1px solid var(--qq-border-soft);
-  color: var(--qq-text);
-}
-
-.file-table tr:last-child td { border-bottom: none; }
-
-.file-row.active td { background: var(--qq-primary-soft); }
-
-.file-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  color: var(--qq-primary);
-  font-size: var(--qq-text-sm);
-  cursor: pointer;
-  padding: 0;
-  word-break: break-all;
-  text-align: left;
-}
-
-.file-open:hover { text-decoration: underline; }
-
-.file-kind { color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
-
-.file-size {
-  color: var(--qq-text-muted);
-  font-family: var(--qq-font-mono);
-  font-size: var(--qq-text-xs);
-  white-space: nowrap;
-}
-
-.col-actions { width: 44px; text-align: right; }
-
-.script-banner {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
-  border: 1px solid var(--qq-warn);
-  border-radius: var(--qq-radius-sm);
-  background: var(--qq-warn-soft);
-  color: var(--qq-warn);
-  font-size: var(--qq-text-sm);
-  font-weight: 600;
-}
-
-.editor-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--qq-gap-sm);
-}
-
-.editor-path {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--qq-text);
-  font-size: var(--qq-text-sm);
-}
-
-.dirty-pill {
-  flex-shrink: 0;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 10px;
-  border-radius: var(--qq-radius-full);
-  background: var(--qq-primary-soft);
-  color: var(--qq-primary);
-  font-size: var(--qq-text-xs);
-  font-weight: 700;
-}
-
-.file-editor {
-  flex: 1;
-  width: 100%;
-  min-height: 300px;
   padding: var(--qq-gap-md);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-card);
-  background: var(--qq-surface);
-  color: var(--qq-text);
-  font-family: var(--qq-font-mono);
-  font-size: var(--qq-text-sm);
-  line-height: 1.7;
-  resize: none;
-  outline: none;
-  box-shadow: var(--qq-shadow-card);
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-md);
+  flex-wrap: wrap;
 }
 
-.file-editor:focus { border-color: var(--qq-primary); }
+.repair-text {
+  flex: 1;
+  min-width: 240px;
+  margin: 0;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-sm);
+  line-height: 1.6;
+}
+
+.repair-actions {
+  display: flex;
+  gap: var(--qq-gap-sm);
+  flex-shrink: 0;
+}
 
 @media (max-width: 900px) {
   .split { flex-direction: column; }

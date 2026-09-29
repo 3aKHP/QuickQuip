@@ -20,7 +20,7 @@
         <template v-if="!candidates.length">
           <div v-if="tab === 'zip'" class="source-pane">
             <p class="source-hint">选择本地 .zip 压缩包（≤16MiB）。包内每个含 SKILL.md 的目录都会成为一个候选。</p>
-            <input ref="zipInput" type="file" accept=".zip" class="source-file" :disabled="inspecting" @change="onZipChange" />
+            <input type="file" accept=".zip" class="source-file" :disabled="inspecting" @change="onZipChange" />
           </div>
           <div v-else-if="tab === 'folder'" class="source-pane">
             <p class="source-hint">选择本地文件夹，将整目录上传检查。文件夹内每个含 SKILL.md 的目录都会成为一个候选。</p>
@@ -53,7 +53,7 @@
               <input type="radio" name="import-candidate" :value="c.root" v-model="selectedRoot" :disabled="!c.ok" />
               <div class="candidate-main">
                 <div class="candidate-head">
-                  <span class="candidate-name mono">{{ c.ok ? c.name : (c.root || '（根目录）') }}</span>
+                  <span class="candidate-name mono">{{ candidateTitle(c) }}</span>
                   <UiTag v-if="!c.ok" size="sm" variant="danger">解析失败</UiTag>
                   <UiTag v-else-if="c.conflict" size="sm" variant="warn">同名冲突</UiTag>
                   <UiTag v-else size="sm" variant="success">可安装</UiTag>
@@ -110,6 +110,7 @@ import UiTag from '../ui/UiTag.vue'
 import UiLoading from '../ui/UiLoading.vue'
 import { inspectSkillImport, inspectGithubImport, confirmSkillImport } from '../../api/skills'
 import type { ImportCandidate } from '../../api/skills'
+import { formatSize } from '../../lib/formatSize'
 import { toast } from '../../toast'
 
 const emit = defineEmits<{
@@ -125,6 +126,9 @@ const SOURCE_TABS: { key: SourceTab; label: string }[] = [
 ]
 
 const ZIP_LIMIT = 16 * 1024 * 1024
+// 与后端 skill_import.MAX_IMPORT_ENTRIES / MAX_IMPORT_TOTAL_BYTES 对齐的客户端预检
+const MAX_IMPORT_ENTRIES = 500
+const MAX_IMPORT_TOTAL_BYTES = 32 * 1024 * 1024
 
 const tab = ref<SourceTab>('zip')
 const inspecting = ref(false)
@@ -137,7 +141,6 @@ const candidates = ref<ImportCandidate[]>([])
 const selectedRoot = ref('')
 const overwrite = ref(false)
 
-const zipInput = ref<HTMLInputElement | null>(null)
 const folderInput = ref<HTMLInputElement | null>(null)
 
 // TS 不识别非标准属性 webkitdirectory，挂载时以 setAttribute 透传
@@ -178,10 +181,11 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`
-  return `${(n / 1024 / 1024).toFixed(2)} MiB`
+/** 解析失败的候选 name 为 null，以 root 占位展示 */
+function candidateTitle(c: ImportCandidate): string {
+  if (c.name) return c.name
+  if (c.ok) return '（未命名）'
+  return c.root ? `${c.root}（解析失败）` : '（根目录 · 解析失败）'
 }
 
 async function runInspect(fn: () => Promise<{ token: string; candidates: ImportCandidate[] }>, source = '') {
@@ -223,6 +227,16 @@ async function onFolderChange(e: Event) {
   const list = Array.from(input.files || [])
   input.value = ''
   if (!list.length) return
+  // 序列化前的客户端预检：条目数与累计体积与后端摄取护栏对齐
+  if (list.length > MAX_IMPORT_ENTRIES) {
+    error.value = `文件夹包含 ${list.length} 个文件，超过 ${MAX_IMPORT_ENTRIES} 条目上限，请改用压缩包或 GitHub 导入`
+    return
+  }
+  const totalBytes = list.reduce((sum, f) => sum + f.size, 0)
+  if (totalBytes > MAX_IMPORT_TOTAL_BYTES) {
+    error.value = `文件夹累计体积 ${formatSize(totalBytes)} 超过 32MiB 上限，请改用压缩包或 GitHub 导入`
+    return
+  }
   const files: Record<string, string> = {}
   for (const f of list) {
     const rel = (f.webkitRelativePath || f.name).replace(/^[^/]+\//, '')
