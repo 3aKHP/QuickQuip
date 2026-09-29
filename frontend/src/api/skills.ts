@@ -57,7 +57,7 @@ export interface SkillFileContent {
   size_bytes: number
 }
 
-/** GET /skills/presets 的预置行；label 为后端给好的中文文案，直接展示 */
+/** GET /skills/presets 的预置行；label 为后端给出的长文案，用于 UiInfoTip 补充说明 */
 export interface PresetRow {
   name: string
   state: PresetSyncState

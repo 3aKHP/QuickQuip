@@ -59,7 +59,7 @@
             </label>
           </div>
 
-          <div v-if="selected && selected.has_scripts" class="scripts-warning">
+          <div v-if="selected && selected.has_scripts" class="soft-note soft-note--danger">
             <div class="scripts-warning__head">
               <UiIcon name="AlertTriangle" :size="15" />
               该 Skill 携带可执行脚本，安装后将以 bot 进程权限在本机运行
@@ -150,7 +150,9 @@ const canConfirm = computed(() => {
 })
 
 function onTabChange(key: string) {
-  tab.value = key as SourceTab
+  const next = SOURCE_TABS.find(t => t.key === key)
+  if (!next) return
+  tab.value = next.key
   resetResult()
 }
 
@@ -465,13 +467,6 @@ async function onConfirm() {
   border-radius: var(--qq-radius-full);
   background: var(--qq-danger-soft);
   font-size: var(--qq-text-xs);
-}
-
-.scripts-warning {
-  border-radius: var(--qq-radius-sm);
-  background: var(--qq-danger-soft);
-  box-shadow: inset 3px 0 0 var(--qq-danger);
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
 }
 
 .scripts-warning__head {

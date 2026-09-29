@@ -1,5 +1,5 @@
 <template>
-  <div v-if="hasPending || loadError" class="preset-panel">
+  <div v-if="hasPending || loadError || localOnly.length" class="preset-panel">
     <div class="preset-head">
       <h3 class="section-title">预置同步</h3>
       <UiInfoTip text="对照仓库 skills.example/ 预置目录：missing 为尚未安装，diverged 为本地与预置不一致。同步 diverged 项前会将现有副本备份至 .preset-backups/。" />
@@ -66,10 +66,11 @@ const loadError = ref<string | null>(null)
 const selected = ref<Set<string>>(new Set())
 const applying = ref(false)
 const dirtyPresetCount = computed(() => presets.value.filter(p => selected.value.has(p.name)).length)
-// 仅在有待处理项（missing/diverged/conflict）或加载失败时渲染面板，全同步时不占位
+// 面板渲染条件：有待处理项（missing/diverged/conflict）、加载失败，或存在仅本地 Skill
+// （「仅本地」属常驻信息，不随待处理项清空而隐藏）
 const hasPending = computed(() => presets.value.some(p => p.state !== 'current'))
 
-// B5：状态列短词化，后端长文案挪 UiInfoTip
+// 状态列短词化：表格内短词受列宽限制，后端长文案 label 由旁边的 UiInfoTip 承载
 const STATE_SHORT: Record<PresetSyncState, string> = {
   current: '已同步',
   missing: '未安装',

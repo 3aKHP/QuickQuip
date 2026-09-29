@@ -33,7 +33,7 @@
     <UiEmpty v-if="!filePath && resources.length" compact icon="FileText" title="从上方资源表选择一个文件开始编辑" />
 
     <template v-if="filePath">
-      <div v-if="filePath.startsWith('scripts/')" class="script-banner">
+      <div v-if="filePath.startsWith('scripts/')" class="script-banner soft-note soft-note--warn">
         <UiIcon name="AlertTriangle" :size="15" />
         该文件是可执行脚本，将以 bot 进程权限在本机运行
       </div>
@@ -231,12 +231,6 @@ defineExpose({ confirmLeave, openPath, reset })
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
-  border-radius: var(--qq-radius-sm);
-  background: var(--qq-warn-soft);
-  box-shadow: inset 3px 0 0 var(--qq-warn);
-  color: var(--qq-warn);
-  font-size: var(--qq-text-sm);
   font-weight: 600;
 }
 

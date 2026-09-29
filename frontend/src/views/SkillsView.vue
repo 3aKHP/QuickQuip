@@ -50,7 +50,7 @@
               <h3 class="section-title mono">{{ selectedName }}</h3>
               <UiButton size="sm" variant="danger" icon="Trash2" title="删除整个 Skill 目录" @click="onDeleteSkill">删除</UiButton>
             </div>
-            <div v-if="detail.diagnostics.length" class="diag-banner">
+            <div v-if="detail.diagnostics.length" class="diag-banner soft-note soft-note--danger">
               <UiIcon name="AlertTriangle" :size="15" />
               <div class="diag-list">
                 <div v-for="(d, i) in detail.diagnostics" :key="i" class="diag-item">
@@ -84,7 +84,7 @@
             />
           </template>
           <template v-else-if="repairDiagnostics">
-            <div class="diag-banner">
+            <div class="diag-banner soft-note soft-note--danger">
               <UiIcon name="AlertTriangle" :size="15" />
               <div class="diag-list">
                 <div v-for="(d, i) in repairDiagnostics" :key="i" class="diag-item">
@@ -108,7 +108,13 @@
               @file-deleted="onFileDeleted"
             />
           </template>
-          <p v-else-if="detailError" class="error">{{ detailError }}</p>
+          <template v-else-if="detailError">
+            <div class="detail-bar">
+              <h3 class="section-title mono">{{ selectedName }}</h3>
+              <UiButton size="sm" variant="danger" icon="Trash2" title="删除整个 Skill 目录" @click="onDeleteSkill">删除</UiButton>
+            </div>
+            <p class="error">{{ detailError }}</p>
+          </template>
         </template>
       </div>
     </div>
@@ -426,12 +432,6 @@ function openSkillFileForRepair() {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
-  border-radius: var(--qq-radius-sm);
-  background: var(--qq-danger-soft);
-  box-shadow: inset 3px 0 0 var(--qq-danger);
-  color: var(--qq-danger);
-  font-size: var(--qq-text-sm);
 }
 
 .diag-banner > :first-child { margin-top: 2px; }
