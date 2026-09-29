@@ -10,7 +10,7 @@
             <td>
               <button class="file-open mono" @click="openPath(r.path)">
                 {{ r.path }}
-                <UiTag v-if="r.path.startsWith('scripts/')" size="sm" variant="danger">脚本</UiTag>
+                <UiTag v-if="r.path.startsWith('scripts/')" size="sm" variant="warn">脚本</UiTag>
               </button>
             </td>
             <td class="file-kind">{{ r.kind }}</td>
@@ -19,15 +19,18 @@
               <UiButton
                 v-if="r.path !== 'SKILL.md'"
                 size="sm"
-                variant="ghost"
+                variant="danger"
                 icon="Trash2"
+                title="删除该文件"
                 @click="onDeleteFile(r.path)"
-              />
+              >删除</UiButton>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <UiEmpty v-if="!filePath && resources.length" compact icon="FileText" title="从上方资源表选择一个文件开始编辑" />
 
     <template v-if="filePath">
       <div v-if="filePath.startsWith('scripts/')" class="script-banner">
@@ -37,7 +40,7 @@
       <div class="editor-bar">
         <span class="mono editor-path">{{ filePath }}</span>
         <span v-if="dirty" class="dirty-pill">未保存</span>
-        <UiButton size="sm" variant="primary" icon="Save" :loading="saving" :disabled="!dirty" @click="onSave">保存</UiButton>
+        <UiButton variant="primary" icon="Save" :loading="saving" :disabled="!dirty" @click="onSave">保存</UiButton>
       </div>
       <p v-if="loadError" class="error">{{ loadError }}</p>
       <UiLoading v-if="loading" />
@@ -52,6 +55,7 @@ import UiButton from '../ui/UiButton.vue'
 import UiTag from '../ui/UiTag.vue'
 import UiIcon from '../ui/UiIcon.vue'
 import UiLoading from '../ui/UiLoading.vue'
+import UiEmpty from '../ui/UiEmpty.vue'
 import { fetchSkillFile, saveSkillFile, deleteSkillFile } from '../../api/skills'
 import type { SkillResource } from '../../api/skills'
 import { formatSize } from '../../lib/formatSize'
@@ -191,7 +195,10 @@ defineExpose({ confirmLeave, openPath, reset })
 
 .file-table tr:last-child td { border-bottom: none; }
 
+/* 选中行对齐 qq-selectable 语言：primary-soft 底 + 左侧内嵌指示条 */
 .file-row.active td { background: var(--qq-primary-soft); }
+
+.file-row.active td:first-child { box-shadow: inset 3px 0 0 var(--qq-primary); }
 
 .file-open {
   display: inline-flex;
@@ -218,16 +225,16 @@ defineExpose({ confirmLeave, openPath, reset })
   white-space: nowrap;
 }
 
-.col-actions { width: 44px; text-align: right; }
+.col-actions { width: 64px; text-align: right; }
 
 .script-banner {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: var(--qq-gap-sm) var(--qq-gap-md);
-  border: 1px solid var(--qq-warn);
   border-radius: var(--qq-radius-sm);
   background: var(--qq-warn-soft);
+  box-shadow: inset 3px 0 0 var(--qq-warn);
   color: var(--qq-warn);
   font-size: var(--qq-text-sm);
   font-weight: 600;

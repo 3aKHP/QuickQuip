@@ -1,7 +1,7 @@
 <template>
-  <div class="preset-panel">
+  <div v-if="hasPending || loadError" class="preset-panel">
     <div class="preset-head">
-      <span class="preset-title">预置同步</span>
+      <h3 class="section-title">预置同步</h3>
       <UiInfoTip text="对照仓库 skills.example/ 预置目录：missing 为尚未安装，diverged 为本地与预置不一致。同步 diverged 项前会将现有副本备份至 .preset-backups/。" />
       <span class="preset-spacer" />
       <UiButton size="sm" :disabled="!dirtyPresetCount || applying" :loading="applying" @click="onApply(false)">同步所选（{{ dirtyPresetCount }}）</UiButton>
@@ -25,7 +25,8 @@
             </td>
             <td class="mono">{{ p.name }}</td>
             <td>
-              <UiTag size="sm" :variant="stateVariant(p.state)">{{ p.label }}</UiTag>
+              <UiTag size="sm" :variant="stateVariant(p.state)">{{ STATE_SHORT[p.state] }}</UiTag>
+              <UiInfoTip :text="p.label" />
             </td>
             <td class="preset-note">
               <span v-if="p.state === 'diverged'">同步将备份现有副本</span>
@@ -65,6 +66,16 @@ const loadError = ref<string | null>(null)
 const selected = ref<Set<string>>(new Set())
 const applying = ref(false)
 const dirtyPresetCount = computed(() => presets.value.filter(p => selected.value.has(p.name)).length)
+// 仅在有待处理项（missing/diverged/conflict）或加载失败时渲染面板，全同步时不占位
+const hasPending = computed(() => presets.value.some(p => p.state !== 'current'))
+
+// B5：状态列短词化，后端长文案挪 UiInfoTip
+const STATE_SHORT: Record<PresetSyncState, string> = {
+  current: '已同步',
+  missing: '未安装',
+  diverged: '已偏离',
+  conflict: '冲突',
+}
 
 onMounted(reload)
 
@@ -133,7 +144,6 @@ defineExpose({ reload })
   border-radius: var(--qq-radius-card);
   box-shadow: var(--qq-shadow-card);
   padding: var(--qq-gap-sm) var(--qq-gap-md);
-  margin-bottom: var(--qq-gap-md);
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-xs);
@@ -143,12 +153,6 @@ defineExpose({ reload })
   display: flex;
   align-items: center;
   gap: var(--qq-gap-xs);
-}
-
-.preset-title {
-  font-size: var(--qq-text-sm);
-  font-weight: 700;
-  color: var(--qq-text);
 }
 
 .preset-spacer { flex: 1; }

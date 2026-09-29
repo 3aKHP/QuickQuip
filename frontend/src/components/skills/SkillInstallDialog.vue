@@ -6,15 +6,7 @@
         <button class="install-close" @click="emit('close')"><UiIcon name="X" :size="18" /></button>
       </div>
 
-      <div class="install-tabs">
-        <button
-          v-for="t in SOURCE_TABS"
-          :key="t.key"
-          class="install-tab"
-          :class="{ active: tab === t.key }"
-          @click="switchTab(t.key)"
-        >{{ t.label }}</button>
-      </div>
+      <UiTabs :model-value="tab" :tabs="SOURCE_TABS" class="install-tabs" @change="onTabChange" />
 
       <div class="install-body">
         <template v-if="!candidates.length">
@@ -108,6 +100,7 @@ import UiIcon from '../ui/UiIcon.vue'
 import UiButton from '../ui/UiButton.vue'
 import UiTag from '../ui/UiTag.vue'
 import UiLoading from '../ui/UiLoading.vue'
+import UiTabs from '../ui/UiTabs.vue'
 import { inspectSkillImport, inspectGithubImport, confirmSkillImport } from '../../api/skills'
 import type { ImportCandidate } from '../../api/skills'
 import { formatSize } from '../../lib/formatSize'
@@ -156,9 +149,8 @@ const canConfirm = computed(() => {
   return true
 })
 
-function switchTab(t: SourceTab) {
-  if (t === tab.value) return
-  tab.value = t
+function onTabChange(key: string) {
+  tab.value = key as SourceTab
   resetResult()
 }
 
@@ -325,28 +317,9 @@ async function onConfirm() {
 }
 
 .install-tabs {
-  display: flex;
-  gap: var(--qq-gap-xs);
-  border-bottom: 1px solid var(--qq-border);
+  align-self: flex-start;
+  max-width: 100%;
   margin-bottom: var(--qq-gap-md);
-}
-
-.install-tab {
-  border: none;
-  background: transparent;
-  color: var(--qq-text-muted);
-  font-family: var(--qq-font-base);
-  font-size: var(--qq-text-sm);
-  font-weight: 600;
-  padding: var(--qq-gap-xs) var(--qq-gap-sm);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-
-.install-tab.active {
-  color: var(--qq-primary);
-  border-bottom-color: var(--qq-primary);
 }
 
 .install-body {
@@ -384,19 +357,8 @@ async function onConfirm() {
 .source-url-input {
   flex: 1;
   min-width: 0;
-  min-height: 36px;
-  padding: 0 var(--qq-gap-sm);
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-md);
-  background: var(--qq-surface);
-  color: var(--qq-text);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-sm);
-  outline: none;
-}
-
-.source-url-input:focus {
-  border-color: var(--qq-primary);
 }
 
 .result-head {
@@ -506,10 +468,10 @@ async function onConfirm() {
 }
 
 .scripts-warning {
-  border: 1px solid var(--qq-danger);
   border-radius: var(--qq-radius-sm);
   background: var(--qq-danger-soft);
-  padding: var(--qq-gap-sm);
+  box-shadow: inset 3px 0 0 var(--qq-danger);
+  padding: var(--qq-gap-sm) var(--qq-gap-md);
 }
 
 .scripts-warning__head {
