@@ -35,9 +35,9 @@ bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
-部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env` 和数据库。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
+部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退；回滚会把目标 release 中新增的 Skill 同样非破坏性合并进共享目录）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
 
-运行态位于部署根目录的 `data/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
+运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
 
 ### 1. 服务器上安装 Docker
 
@@ -74,7 +74,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 - 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
 - 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
 - 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
-- 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制，Windows 懒人包首启自动完成；目录为空或不存时行为与此前完全一致，详见 [skills.md](skills.md)）
+- 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制，Windows 懒人包首启自动完成；目录为空或不存在时 Skill 工具不注册，详见 [skills.md](skills.md)）
 - `prod/` 已由 `prod.example/` 复制而来，并按服务器环境调整 compose、部署脚本或巡检脚本
 - 如需 ServerChan 等运维通知，在 `prod/sendkey.env` 中维护；该文件不被 QuickQuip 应用读取
 
@@ -82,7 +82,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 
 - 根 `.env`
 - `config/` 目录下的运行配置（如 `llm.toml`、`generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
-- `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建）
+- `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建；每次部署把其中新增的 Skill 非破坏性合并进服务器部署根共享 `skills/`：已存在文件不被覆盖、删除不传播，已安装 Skill 的更新与删除经 Web 管理页或服务器手动维护）
 - `llm_about/vocab.yaml`
 - `llm_about/identities.yaml`
 - `llm_about/{群号}/vocab.yaml`
@@ -109,7 +109,7 @@ docker compose --env-file ../.env up -d
 - 不内置 SearXNG：搜索能力需由外部独立 searxng 实例提供，必须在 `.env` 中设置 `QUICKQUIP_SEARXNG_BASE_URL` 指向它（未设置时 compose 启动即报错）
 - 通过 `../.env` 向 bot 和 Web Admin 提供应用环境变量
 - 把 `../config` 只读挂载到容器内 `/app/config`
-- 把 `../skills` 只读挂载到容器内 `/app/skills`（Skill 技能包目录；宿主侧未创建时为空目录，Skill 系统自动处于无技能状态，详见 [skills.md](skills.md)）
+- 把部署根共享 `skills/` 挂载到容器内 `/app/skills`（Skill 技能包目录，与 `data/` 同级：`quickquip` 只读、`web-admin` 读写以支撑 Skill 页在线管理；扁平安装时即项目根 `skills/`；目录为空或不存在时 Skill 工具不注册，详见 [skills.md](skills.md)）
 - 把 `../llm_about` 挂载到容器内 `/app/llm_about`
   - 其中包含全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
 - 把 `../data` 挂载到容器内 `/app/data`，用于持久化统计、规则开关、LLM 数据库
@@ -226,11 +226,12 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | `../data` | `/app/data` | 读写 |
 | `../config` | `/app/config` | **读写**（llm.toml 在线编辑需要） |
 | `../llm_about` | `/app/llm_about` | **读写**（资料页在线编辑需要） |
+| `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写**（Skill 页在线安装/编辑/预置同步落盘） |
 | `../frontend/dist` | `/app/frontend/dist` | 只读 |
 | `../web_api.py` | `/app/web_api.py` | 只读 |
 | `../src` | `/app/src` | 只读（hybrid 源码热更新） |
 
-> 注意：`quickquip` 容器的 `config` 和 `llm_about` 挂载仍可保持只读（`:ro`），只有 `web-admin` 需要写权限。
+> 注意：`quickquip` 容器的 `config`、`llm_about` 与共享 `skills/` 挂载仍可保持只读（`:ro`），只有 `web-admin` 需要写权限。
 > `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
 
 ### 代码更新

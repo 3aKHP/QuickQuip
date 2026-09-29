@@ -76,7 +76,9 @@ services:
       # 群友身份与黑话词表（可选）。将 llm_about/vocab.yaml.example 和
       # llm_about/identities.yaml.example 复制为 .yaml 并编辑后，取消注释：
       # - ./llm_about:/app/llm_about:ro
-      # Skill 扩展（可选）。将 skills.example/ 中需要的 skill 复制到 skills/ 后取消注释：
+      # Skill 扩展（可选）。将 skills.example/ 中需要的 skill 复制到 skills/ 后，
+      # 与 web-admin 侧的 skills 挂载同时取消注释：bot 只读消费，web-admin 读写
+      # 支撑 Skill 管理页落盘持久化。
       # - ./skills:/app/skills:ro
       # host-healthcheck 可选增强（L2）：宿主机 /proc 只读挂载，默认关闭：
       # - /proc:/host/proc:ro
@@ -106,6 +108,8 @@ services:
       - ./config:/app/config
       # 群友身份（同上，可选）：
       # - ./llm_about:/app/llm_about
+      # Skill 扩展（可选，与 quickquip 侧成对启用；读写以支撑 Skill 管理页）：
+      # - ./skills:/app/skills
       # 仅当需要覆盖镜像内置前端时取消注释：
       # - ./frontend/dist:/app/frontend/dist:ro
     restart: unless-stopped

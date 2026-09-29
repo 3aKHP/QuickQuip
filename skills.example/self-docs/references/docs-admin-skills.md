@@ -8,7 +8,7 @@ Skill 是受信任的部署资产：部署者把技能包放进 `skills/` 目录
 
 ## 部署目录
 
-运行目录为项目根的 `skills/`（已被 git 忽略），仓库随附的 `skills.example/` 承载官方预置 Skill 模板。部署照 `config/personas.example/` → `config/personas/` 的同一先例：从 `skills.example/` 复制或合并需要的 Skill 到 `skills/`，再按环境调整；Windows 懒人包首启（`start.bat`）会自动完成整目录复制。Docker 镜像与 Windows 懒人包均只携带 `skills.example/`；容器化部署的目录供给方式见 `prod.example/` 模板。
+运行目录为项目根的 `skills/`（已被 git 忽略），仓库随附的 `skills.example/` 承载官方预置 Skill 模板。部署照 `config/personas.example/` → `config/personas/` 的同一先例：从 `skills.example/` 复制或合并需要的 Skill 到 `skills/`，再按环境调整；Windows 懒人包首启（`start.bat`）会自动完成整目录复制。Docker 镜像与 Windows 懒人包均只携带 `skills.example/`；release 布局的容器化部署把 `skills/` 作为部署根共享目录（与 data/ 同级）：bot 容器只读挂载、web-admin 容器读写挂载，Web 管理页的安装成果在容器重建与后续部署后仍然保留；每次部署把仓库 `skills/` 中新增的 Skill 非破坏性合并进共享目录（已存在文件不被覆盖、删除不传播），已安装 Skill 的更新与删除经 Web 管理页或服务器手动维护；目录供给细节见 `prod.example/` 模板。
 
 目录约定：
 
@@ -82,7 +82,7 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 ## Web 管理与导入
 
-Web Admin 导航「LLM 工坊」区的「Skill」页（`/ops/#/skills`）提供 Skill 目录的在线管理面，作用目录与 `[skills].catalog_dir` 的生效目录一致。所有写入直接落盘：运行时下次构建系统提示即重新扫描目录，保存即热生效，无需 reload 或重启。全部写操作（新建、编辑、删除、预置同步、安装）记入审计日志（`data/audit.db`，Web Admin 审计页可见）。
+Web Admin 导航「LLM 工坊」区的「Skill」页（`/ops/#/skills`）提供 Skill 目录的在线管理面，作用目录与 `[skills].catalog_dir` 的生效目录一致。所有写入直接落盘：运行时下次构建系统提示即重新扫描目录，保存即热生效，无需 reload 或重启。容器化部署下写入落在部署根共享 `skills/`（web-admin 容器读写挂载），容器重建与版本部署后仍然保留；部署流程只向共享目录合入仓库新增的 Skill，不覆盖也不删除已有内容。全部写操作（新建、编辑、删除、预置同步、安装）记入审计日志（`data/audit.db`，Web Admin 审计页可见）。
 
 ### 管理与在线编辑
 

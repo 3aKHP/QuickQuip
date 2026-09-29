@@ -42,7 +42,7 @@ Every release carries a version identity built from the deployed `pyproject.toml
 
 For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` after an explicit `--skip-health` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `prod/check_bot.sh`; `prod/cron_check_bot.sh` remains the cron entry.
 
-`prod/host_metrics_collector.py` is an optional host-side cron collector (the host-healthcheck skill's L1 enhancement): it writes `<root>/data/host_metrics.json` atomically once per run with the host process count, full disk view and temperatures. The crontab install line is in the file header; the container reads the file read-only through the existing `data/` bind mount. Skills themselves ship from the local working tree: copy the ones you want from `skills.example/` into `skills/` and the drivers upload the directory with the release.
+`prod/host_metrics_collector.py` is an optional host-side cron collector (the host-healthcheck skill's L1 enhancement): it writes `<root>/data/host_metrics.json` atomically once per run with the host process count, full disk view and temperatures. The crontab install line is in the file header; the container reads the file read-only through the existing `data/` bind mount. Skills live in a shared catalog at `<root>/skills` beside `data/`: the bot mounts it read-only and Web Admin read-write, so skills installed through the Web Admin Skill page survive container recreation and later deployments. The drivers upload the local `skills/` directory with each release, and every deployment non-destructively merges repository-added skills into the catalog: existing files, including Web Admin installs and edits, are kept and deletions never propagate, so skill updates and removals go through the Web Admin Skill page or manual maintenance on the server. When `<root>/skills` is absent, the server seeds it from the previous current release before the merge, or creates an empty directory. The catalog belongs to the deployment user; skills installed through Web Admin can be root-owned because the web-admin container runs as root. When the merge meets such entries it retries with noninteractive sudo and pulls ownership of the whole catalog back to the deployment user; without sudo permission the deployment stops and prints the manual `chown` command to run.
 
 ## Layout and Transaction
 
@@ -50,6 +50,7 @@ For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` afte
 <root>/
   .env                       application credentials
   data/                      databases, logs, font and optional Tieba state
+  skills/                    shared skill catalog (bot read-only, Web Admin read-write)
   prod/                      LLBot state, maintenance scripts, sendkey.env
   releases/<id>/             application, config, frontend and compose
   current -> releases/<id>
@@ -69,7 +70,7 @@ Successful operations remove private staging and rollback copies, retaining `.de
 
 `--migrate` snapshots the server's existing application files and pins actual running images of `llbot`, `quickquip` and `web-admin` as a baseline, then deploys the local candidate. Flat files remain in place so existing bind mounts stay valid during preparation. Custom services or unsupported external bind mounts require an explicit migration design; the script stops before activation. Baselines are not automatically collected.
 
-Automatic recovery restores pre-operation shared files, links and containers, then verifies health. Manual rollback selects an existing release and its local images, retains the current root `.env` and runtime data, and verifies health. Missing rollback images are never pulled or rebuilt. Do not prune retained release tags manually.
+Automatic recovery restores pre-operation shared files, links and containers, then verifies health. Manual rollback selects an existing release and its local images, retains the current root `.env`, runtime data and the shared `skills/` catalog (applying the same non-destructive merge from the rollback target's `skills/`), and verifies health. Historical releases whose compose mounts a release-local `skills/` keep using that frozen copy when rolled back. Missing rollback images are never pulled or rebuilt. Do not prune retained release tags manually.
 
 Database migrations and external effects are outside filesystem rollback. Check upgrade notes and prepare a separate data backup when required; code rollback can require coordinated data restore. Server-side configuration edits belong to their release; subsequent deployments use local candidate configuration.
 

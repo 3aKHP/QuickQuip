@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -22,6 +23,16 @@ SHARED_FILES = {
     "data/tieba/storage_state.json": 0o600,
 }
 SERVICES = ("llbot", "quickquip", "web-admin")
+# Deployment-root subdirectories whose bind-mounted content is shared state;
+# migration keeps their live source path. Prefix match: a mount of a data/ or
+# skills/ subdirectory is still shared state, not release-private content.
+ROOT_SHARED_SUBDIRS = ("data", "skills")
+DEFAULTED_VARIABLE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-([^}]*)\}")
+
+
+def resolve_defaulted_variables(source: str) -> str:
+    """Substitute ${VAR:-default} placeholders in a compose path with defaults."""
+    return DEFAULTED_VARIABLE.sub(lambda match: match.group(1), source)
 
 
 def atomic_write(
@@ -153,10 +164,12 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             "review custom services first"
         )
     # Keep private runtime files out of the snapshot; copy only mounted app assets.
+    # skills/ is shared root state beside data/; the volume rewrite below keeps
+    # its deployment-root source instead of a baseline copy.
     baseline.mkdir(mode=0o700)
     for name in (
         "src", "config", "llm_about", "frontend/dist", "bot.py", "web_api.py",
-        "pyproject.toml", "requirements.txt", ".dockerignore", "skills",
+        "pyproject.toml", "requirements.txt", ".dockerignore",
     ):
         source = checked_path(root, name)
         if source.is_dir():
@@ -164,11 +177,6 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             shutil.copytree(source, baseline / name, dirs_exist_ok=True)
         elif source.is_file():
             atomic_write(baseline / name, source.read_bytes(), 0o644)
-    # skills/ is a gitignored deployment directory and may be absent; an empty
-    # directory carries the "no skills deployed" semantics so the compose
-    # volume always points at the baseline copy.
-    if not (baseline / "skills").exists():
-        (baseline / "skills").mkdir()
     for service, spec in config["services"].items():
         container = spec.get("container_name")
         if not container:
@@ -187,13 +195,13 @@ def capture_baseline(root: Path, baseline: Path) -> None:
         for volume in spec.get("volumes", []):
             if volume.get("type") != "bind":
                 continue
-            source = Path(volume["source"])
+            source = Path(resolve_defaulted_variables(volume["source"]))
             if not source.is_absolute():
                 source = (root / "prod" / source).resolve()
             if not source.is_relative_to(root):
                 raise ValueError(f"external bind mount requires manual migration: {source}")
             relative = source.relative_to(root)
-            if relative.parts[0] == "data" or str(relative) in (
+            if relative.parts[0] in ROOT_SHARED_SUBDIRS or str(relative) in (
                 "prod/llbot-qq", "prod/llbot-data", ".env",
             ):
                 volume["source"] = str(source)
