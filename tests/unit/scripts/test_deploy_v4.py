@@ -297,7 +297,7 @@ def _minimal_server_root(tmp_path) -> Path:
     return root
 
 
-def test_capture_baseline_copies_skills_and_rewrites_volume(tmp_path, monkeypatch):
+def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypatch):
     root = _minimal_server_root(tmp_path)
     skill_md = root / "skills/demo/SKILL.md"
     skill_md.parent.mkdir(parents=True)
@@ -308,14 +308,14 @@ def test_capture_baseline_copies_skills_and_rewrites_volume(tmp_path, monkeypatc
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     baseline = tmp_path / "baseline"
     STATE["capture_baseline"](root, baseline)
-    assert (baseline / "skills/demo/SKILL.md").read_text() == skill_md.read_text()
+    assert not (baseline / "skills").exists()
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
-    assert volume["source"] == str(baseline / "skills")
+    assert volume["source"] == str(root / "skills")
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
 
 
-def test_capture_baseline_without_skills_dir_materializes_empty(tmp_path, monkeypatch):
+def test_capture_baseline_without_skills_dir_keeps_shared_source(tmp_path, monkeypatch):
     root = _minimal_server_root(tmp_path)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -323,8 +323,70 @@ def test_capture_baseline_without_skills_dir_materializes_empty(tmp_path, monkey
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     baseline = tmp_path / "baseline"
     STATE["capture_baseline"](root, baseline)
-    assert (baseline / "skills").is_dir()
-    assert list((baseline / "skills").iterdir()) == []
+    assert not (baseline / "skills").exists()
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
-    assert volume["source"] == str(baseline / "skills")
+    assert volume["source"] == str(root / "skills")
+
+
+def test_seed_skips_existing_shared_skills(deployment):
+    root, inbox, _ = deployment
+    marker = root / "skills/marker.txt"
+    marker.parent.mkdir()
+    marker.write_text("web-installed")
+    (root / "releases" / OLD / "skills/old-skill").mkdir(parents=True)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.read_text() == "web-installed"
+    assert not (root / "skills/old-skill").exists()
+
+
+def test_seed_prefers_previous_current_release(deployment):
+    root, inbox, _ = deployment
+    old_skill = root / "releases" / OLD / "skills/old-skill/SKILL.md"
+    old_skill.parent.mkdir(parents=True)
+    old_skill.write_text("old")
+    new_skill = inbox / "tree/skills/new-skill/SKILL.md"
+    new_skill.parent.mkdir(parents=True)
+    new_skill.write_text("new")
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/old-skill/SKILL.md").read_text() == "old"
+    assert not (root / "skills/new-skill").exists()
+    assert f"seeded shared skills/ from previous release {OLD}" in result.stdout
+
+
+def test_seed_falls_back_to_uploaded_release(deployment):
+    root, inbox, _ = deployment
+    new_skill = inbox / "tree/skills/new-skill/SKILL.md"
+    new_skill.parent.mkdir(parents=True)
+    new_skill.write_text("new")
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/new-skill/SKILL.md").read_text() == "new"
+    assert "seeded shared skills/ from uploaded release" in result.stdout
+
+
+def test_seed_creates_empty_directory_without_sources(deployment):
+    root, _, _ = deployment
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills").is_dir()
+    assert list((root / "skills").iterdir()) == []
+    assert "created empty shared skills/ directory" in result.stdout
+
+
+def test_rollback_leaves_shared_skills_untouched(deployment):
+    root, _, _ = deployment
+    marker = root / "skills/marker.txt"
+    marker.parent.mkdir()
+    marker.write_text("web-installed")
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert marker.read_text() == "web-installed"
+    assert list((root / "skills").iterdir()) == [marker]

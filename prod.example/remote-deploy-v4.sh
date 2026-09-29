@@ -224,6 +224,22 @@ LinkDest=()
 rsync -ar --chmod=D755,F644 --exclude=__pycache__ --exclude='*.pyc' \
     "${LinkDest[@]}" "$Incoming/tree/" "$Release/"
 chmod 700 "$Release"
+# Shared skill catalog at the deployment root, beside data/. Seed it once before
+# any compose up can auto-create an empty root-owned directory: prefer the
+# previous current release (the catalog most recently active on this host),
+# fall back to the freshly uploaded release, else start empty.
+if [ ! -d "$Root/skills" ]; then
+    if [ -n "$OriginalCurrent" ] && [ -d "$Root/releases/$OriginalCurrent/skills" ]; then
+        cp -a "$Root/releases/$OriginalCurrent/skills" "$Root/skills"
+        step "seeded shared skills/ from previous release $OriginalCurrent"
+    elif [ -d "$Release/skills" ]; then
+        cp -a "$Release/skills" "$Root/skills"
+        step "seeded shared skills/ from uploaded release $Id"
+    else
+        mkdir -p "$Root/skills"
+        step "created empty shared skills/ directory"
+    fi
+fi
 export QUICKQUIP_ENV_FILE="$Incoming/shared/.env"
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.

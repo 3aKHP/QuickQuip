@@ -153,10 +153,12 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             "review custom services first"
         )
     # Keep private runtime files out of the snapshot; copy only mounted app assets.
+    # skills/ is shared root state beside data/; the volume rewrite below keeps
+    # its deployment-root source instead of a baseline copy.
     baseline.mkdir(mode=0o700)
     for name in (
         "src", "config", "llm_about", "frontend/dist", "bot.py", "web_api.py",
-        "pyproject.toml", "requirements.txt", ".dockerignore", "skills",
+        "pyproject.toml", "requirements.txt", ".dockerignore",
     ):
         source = checked_path(root, name)
         if source.is_dir():
@@ -164,11 +166,6 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             shutil.copytree(source, baseline / name, dirs_exist_ok=True)
         elif source.is_file():
             atomic_write(baseline / name, source.read_bytes(), 0o644)
-    # skills/ is a gitignored deployment directory and may be absent; an empty
-    # directory carries the "no skills deployed" semantics so the compose
-    # volume always points at the baseline copy.
-    if not (baseline / "skills").exists():
-        (baseline / "skills").mkdir()
     for service, spec in config["services"].items():
         container = spec.get("container_name")
         if not container:
@@ -194,7 +191,7 @@ def capture_baseline(root: Path, baseline: Path) -> None:
                 raise ValueError(f"external bind mount requires manual migration: {source}")
             relative = source.relative_to(root)
             if relative.parts[0] == "data" or str(relative) in (
-                "prod/llbot-qq", "prod/llbot-data", ".env",
+                "prod/llbot-qq", "prod/llbot-data", ".env", "skills",
             ):
                 volume["source"] = str(source)
             elif (baseline / relative).exists():
