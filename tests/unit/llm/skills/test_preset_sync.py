@@ -9,6 +9,7 @@ from quickquip.llm.skills import preset_sync
 from quickquip.llm.skills.preset_sync import (
     BACKUP_CONTAINER_NAME,
     BACKUP_NAME_INFIX,
+    STATE_LABELS,
     PresetSkillRow,
     SyncOutcome,
     SyncState,
@@ -241,3 +242,11 @@ def test_apply_backup_rename_failure_preserves_original(preset_pair, monkeypatch
     assert "预置 v1 定制。" in (skills_dir / "alpha/SKILL.md").read_text(encoding="utf-8")
     container = skills_dir / BACKUP_CONTAINER_NAME
     assert not container.exists() or list(container.iterdir()) == []
+
+
+def test_state_labels_cover_all_states_uniquely():
+    """四态 label 与 SyncState 一一对应、互异且非空（单一 owner 防漂移）。"""
+    assert set(STATE_LABELS) == set(SyncState)
+    labels = list(STATE_LABELS.values())
+    assert all(labels)
+    assert len(set(labels)) == len(labels)

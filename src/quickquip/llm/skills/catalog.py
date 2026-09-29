@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import stat
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,7 +30,7 @@ from quickquip.llm.skills.parser import (
     MAX_SKILL_FILE_BYTES,
     SkillDiagnostic,
     SkillMetadata,
-    parse_skill_markdown,
+    parse_skill_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,6 @@ _SHORTENED_DESCRIPTION_CHARS = 160
 _MIN_DESCRIPTION_CHARS = 80
 # 每 token 字节近似（与蓝本一致：上下文窗口 2% 的 token 数 ×2 得字节预算）。
 _BYTES_PER_TOKEN = 2
-
-_UTF8_BOM = b"\xef\xbb\xbf"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +116,27 @@ def resolve_catalog_dir(configured: str = "") -> Path:
     return path
 
 
+def read_configured_catalog_dir(config_path: Path) -> str:
+    """从 llm.toml 直读 ``[skills].catalog_dir`` 原始字符串。
+
+    文件缺失/不可读、TOML 解析失败、节或键缺失、值非字符串一律回退 ``""``
+    （即默认目录）。分工说明：运行时类型化配置由 ``llm/config.py`` 在自身
+    解析管线内读取同一键（含校验与默认值），本函数服务 Web Admin 等只需要
+    生效目录原始值、不想连带装入整套运行时配置的场景；两侧共用
+    ``resolve_catalog_dir`` 的解析语义，config.py 侧维持现状不复用本函数。
+    """
+    try:
+        with Path(config_path).open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    section = data.get("skills")
+    if not isinstance(section, dict):
+        return ""
+    value = section.get("catalog_dir")
+    return value if isinstance(value, str) else ""
+
+
 def derive_catalog_budget_bytes(
     context_window_tokens: int | None, catalog_max_bytes: int
 ) -> int:
@@ -135,13 +155,14 @@ def assert_safe_relative_path(skill_relative_path: str) -> None:
     """校验 skill 相对路径字符串；任何不安全形状抛 ValueError。
 
     反斜杠一律拒绝：它在 Windows 是路径分隔符、在 POSIX 是合法文件名字符，
-    接受它会引入平台相关的归一化歧义。
+    接受它会引入平台相关的归一化歧义。盘符前缀（``C:`` 开头，不论是否带
+    斜杠）同样拒绝：Windows 下盘符相对路径会解析到该盘当前目录，可能逃逸。
     """
     if not skill_relative_path or "\0" in skill_relative_path:
         raise ValueError("Skill 路径不能为空。")
     if "\\" in skill_relative_path:
         raise ValueError(f"Skill 路径必须使用正斜杠：{skill_relative_path}")
-    if skill_relative_path.startswith("/") or re.match(r"^[A-Za-z]:/", skill_relative_path):
+    if skill_relative_path.startswith("/") or re.match(r"^[A-Za-z]:", skill_relative_path):
         raise ValueError(f"Skill 路径必须是相对路径：{skill_relative_path}")
     parts = skill_relative_path.split("/")
     if any(part in ("", ".", "..") for part in parts):
@@ -170,15 +191,15 @@ def utf8_safe_boundary(raw: bytes, max_bytes: int) -> int:
     return boundary
 
 
-def resolve_skill_file(skill: LoadedSkill, relative_path: str) -> Path:
-    """把 skill 相对路径解析为 skill 根内的常规文件。
+def resolve_file_in(root_dir: Path, relative_path: str) -> Path:
+    """把 skill 相对路径解析为 ``root_dir`` 内的常规文件。
 
     ``assert_safe_relative_path`` 拒绝穿越与绝对形态；lstat + realpath
     双重校验证明目标是常规文件且未随符号链接交换逃逸出根。失败抛
     ValueError（消息不含宿主机绝对路径）。
     """
     assert_safe_relative_path(relative_path)
-    absolute = skill.root_dir.joinpath(*relative_path.split("/"))
+    absolute = root_dir.joinpath(*relative_path.split("/"))
     try:
         info = absolute.lstat()
     except OSError:
@@ -187,12 +208,17 @@ def resolve_skill_file(skill: LoadedSkill, relative_path: str) -> Path:
         raise ValueError(f'Skill 资源 "{relative_path}" 不是 skill 根内的常规文件。')
     try:
         real_file = absolute.resolve(strict=True)
-        real_root = skill.root_dir.resolve(strict=True)
+        real_root = root_dir.resolve(strict=True)
     except OSError:
         raise ValueError(f'Skill 资源 "{relative_path}" 无法校验真实路径。') from None
     if real_file != real_root and real_root not in real_file.parents:
         raise ValueError(f'Skill 资源 "{relative_path}" 逃逸出 skill 根，已拒绝。')
     return absolute
+
+
+def resolve_skill_file(skill: LoadedSkill, relative_path: str) -> Path:
+    """``resolve_file_in`` 的 LoadedSkill 形态；加固链只有一份实现。"""
+    return resolve_file_in(skill.root_dir, relative_path)
 
 
 # ── 目录扫描 ─────────────────────────────────────────────────────
@@ -224,59 +250,75 @@ def scan_skills(catalog_dir: Path) -> list[LoadedSkill]:
     return skills
 
 
-def _load_skill(root_dir: Path) -> LoadedSkill | None:
+def load_skill_with_diagnostics(root_dir: Path) -> tuple[LoadedSkill | None, list[SkillDiagnostic]]:
+    """单个 skill 目录的完整 fail-closed 装载链（装载判定的单一 owner）。
+
+    返回 ``(skill, diagnostics)``：装载失败时 skill 为 None、diagnostics
+    携带失败诊断（缺 SKILL.md 为 ``missing-skill-file``——目录扫描对该形态
+    静默跳过，备份容器等杂项目录不刷告警）；成功时 diagnostics 为解析与
+    资源清单的警告性诊断（可为空）。catalog 扫描（失败转告警日志）与
+    Web Admin（转诊断 payload）共用，保证 fail-closed 链只有一份实现。
+    """
     name = root_dir.name
     skill_path = root_dir / SKILL_FILE_NAME
     try:
         info = skill_path.lstat()
     except OSError:
-        return None
+        return None, [SkillDiagnostic("missing-skill-file", "SKILL.md 不存在。")]
     if skill_path.is_symlink() or not stat.S_ISREG(info.st_mode):
-        _warn_skip(name, "not-a-regular-file", "SKILL.md 不是常规文件。")
-        return None
+        return None, [SkillDiagnostic("not-a-regular-file", "SKILL.md 不是常规文件。")]
     if info.st_size > MAX_SKILL_FILE_BYTES:
-        _warn_skip(name, "oversized-skill", f"SKILL.md 超过 {MAX_SKILL_FILE_BYTES} 字节上限。")
-        return None
+        return None, [
+            SkillDiagnostic(
+                "oversized-skill", f"SKILL.md 超过 {MAX_SKILL_FILE_BYTES} 字节上限。"
+            )
+        ]
     try:
         raw = skill_path.read_bytes()
         # 读后 lstat 复检：读出与首检之间被换成符号链接/非常规文件时拒绝。
         rechecked = skill_path.lstat()
         if skill_path.is_symlink() or not stat.S_ISREG(rechecked.st_mode):
-            _warn_skip(name, "not-a-regular-file", "SKILL.md 读取期间被替换为非常规文件。")
-            return None
+            return None, [
+                SkillDiagnostic(
+                    "not-a-regular-file", "SKILL.md 读取期间被替换为非常规文件。"
+                )
+            ]
     except OSError as exc:
-        _warn_skip(name, "read-error", f"SKILL.md 读取失败：{exc.strerror or exc}")
-        return None
-    if raw.startswith(_UTF8_BOM):
-        raw = raw[len(_UTF8_BOM):]
-    try:
-        content = raw.decode("utf-8", errors="strict")
-    except UnicodeDecodeError:
-        _warn_skip(name, "invalid-utf8", "SKILL.md 不是有效 UTF-8。")
-        return None
+        return None, [
+            SkillDiagnostic("read-error", f"SKILL.md 读取失败：{exc.strerror or exc}")
+        ]
 
-    parsed = parse_skill_markdown(content, expected_name=name)
+    parsed = parse_skill_bytes(raw, expected_name=name)
     if not parsed.ok or parsed.metadata is None:
-        first = (
-            parsed.diagnostics[0]
-            if parsed.diagnostics
-            else SkillDiagnostic("invalid", "未知校验失败")
-        )
-        _warn_skip(name, first.kind, first.message)
-        return None
+        diagnostics = parsed.diagnostics or [SkillDiagnostic("invalid", "未知校验失败")]
+        return None, diagnostics
 
     resources, resource_diagnostics = _walk_skill_files(root_dir)
     for diagnostic in resource_diagnostics:
         logger.warning("skill %s 资源清单诊断 [%s] %s", name, diagnostic.kind, diagnostic.message)
-    return LoadedSkill(
-        name=name,
-        root_dir=root_dir,
-        metadata=parsed.metadata,
-        body=parsed.body,
-        body_sha256=parsed.body_sha256,
-        resources=resources,
-        diagnostics=[*parsed.diagnostics, *resource_diagnostics],
+    diagnostics = [*parsed.diagnostics, *resource_diagnostics]
+    return (
+        LoadedSkill(
+            name=name,
+            root_dir=root_dir,
+            metadata=parsed.metadata,
+            body=parsed.body,
+            body_sha256=parsed.body_sha256,
+            resources=resources,
+            diagnostics=diagnostics,
+        ),
+        diagnostics,
     )
+
+
+def _load_skill(root_dir: Path) -> LoadedSkill | None:
+    skill, diagnostics = load_skill_with_diagnostics(root_dir)
+    if skill is not None:
+        return skill
+    first = diagnostics[0]
+    if first.kind != "missing-skill-file":
+        _warn_skip(root_dir.name, first.kind, first.message)
+    return None
 
 
 def _walk_skill_files(root_dir: Path) -> tuple[list[SkillResource], list[SkillDiagnostic]]:

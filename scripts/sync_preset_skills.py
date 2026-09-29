@@ -2,11 +2,12 @@
 """预置 Skill 同步工具：检视并对齐 skills/ 与 skills.example/。
 
 预置 Skill 经手动复制到达 skills/，版本升级后本地副本不会自动更新。本工具
-对每个预置 Skill 报告三态：
+对每个预置 Skill 报告四态：
 
     current   已安装且与当前版本预置副本逐字节一致
     diverged  已安装但与预置副本不同（升级后的陈旧副本或本地定制）
     missing   未安装
+    conflict  存在同名非目录项或符号链接，需人工处理
 
 默认（或 --check）只报告不写入，有 missing/diverged 时退出码 1；
 --apply 执行同步：missing 直接安装，diverged 先把本地副本整体移入
@@ -121,12 +122,7 @@ def main() -> int:
         return 2
 
     sync = _preset_sync()
-    state_labels = {
-        sync.SyncState.CURRENT: "已安装，与预置副本一致",
-        sync.SyncState.DIVERGED: "已安装，与预置副本不同",
-        sync.SyncState.MISSING: "未安装",
-        sync.SyncState.CONFLICT: "存在同名非目录项，需人工处理",
-    }
+    state_labels = sync.STATE_LABELS
 
     rows = sync.classify_presets(skills_dir, example_dir)
     counts = {state: sum(1 for row in rows if row.state is state) for state in sync.SyncState}

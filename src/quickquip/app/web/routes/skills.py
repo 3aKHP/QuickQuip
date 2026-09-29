@@ -2,40 +2,42 @@
 
 生效目录经 ``_effective_catalog_dir()`` 现读 ``config/llm.toml`` 的
 ``[skills].catalog_dir``（缺失/异常回退默认 ``SKILLS_DIR``），配合运行时
-每轮现扫实现天然热部署（W5/W6）。全部写操作 FileLock + tmp/replace 原子
-落盘并记审计；固定路径（``/skills/presets``、``/skills/import/*``）先于
-``/skills/{name}`` 声明，避免被参数路径吞掉。
+每轮现扫实现天然热部署（W5/W6）。文本资源写入走 FileLock + tmp/replace
+原子落盘；锁文件统一在 catalog 根（skill 内容树外，避免被资源扫描编入
+清单、被 preset_drift 计入指纹）；全部写操作记审计。固定路径
+（``/skills/presets``、``/skills/import/*``）先于 ``/skills/{name}`` 声明，
+避免被参数路径吞掉。
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import os
 import shutil
 import stat
-import tomllib
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from filelock import FileLock
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from quickquip.app.web import skill_import
+from quickquip.app.web import skill_import, skill_import_github, skill_import_stash
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import CONFIG_LLM_TOML, DATA_DIR, SKILLS_EXAMPLE_DIR
 from quickquip.llm.skills import preset_sync
 from quickquip.llm.skills.catalog import (
     SKILL_FILE_NAME,
-    LoadedSkill,
     assert_safe_relative_path,
+    load_skill_with_diagnostics,
+    read_configured_catalog_dir,
     resolve_catalog_dir,
-    resolve_skill_file,
-    scan_skills,
+    resolve_file_in,
 )
 from quickquip.llm.skills.parser import (
+    MAX_SKILL_FILE_BYTES,
     SKILL_NAME_PATTERN,
-    SkillMetadata,
     parse_skill_markdown,
 )
 
@@ -48,30 +50,22 @@ _EXAMPLE_DIR = SKILLS_EXAMPLE_DIR
 _STASH_DIR = DATA_DIR / "tmp" / "skill-import"
 _LLM_CONFIG_PATH = CONFIG_LLM_TOML
 
-# 读写文本资源统一上限 256KiB（与 MAX_SKILL_FILE_BYTES 对齐）。
-_MAX_RESOURCE_BYTES = 256 * 1024
-# zip 安装包以 base64 字符串承载，pydantic max_length 承担 16MiB 上限。
-_MAX_ARCHIVE_B64_CHARS = 16 * 1024 * 1024
-
-_UTF8_BOM = b"\xef\xbb\xbf"
-
-# state → 中文 label 与 scripts/sync_preset_skills.py 的呈现文案保持一致。
-_STATE_LABELS = {
-    preset_sync.SyncState.CURRENT: "已安装，与预置副本一致",
-    preset_sync.SyncState.DIVERGED: "已安装，与预置副本不同",
-    preset_sync.SyncState.MISSING: "未安装",
-    preset_sync.SyncState.CONFLICT: "存在同名非目录项，需人工处理",
-}
+# zip 安装包以 base64 字符串承载：pydantic 按字符数卡上限，换算为恰好放行
+# 16MiB 解码字节的 b64 长度；解码后的字节数在路由里再显式校验一次。
+_MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
+_MAX_ARCHIVE_B64_CHARS = math.ceil(_MAX_ARCHIVE_BYTES / 3) * 4
+# folder manifest 单值（base64 字符）上限：解码后 ≤1MiB 的粗检口径。
+_MAX_FILE_B64_CHARS = 2 * 1024 * 1024
 
 
 class SkillCreateBody(BaseModel):
     name: str = Field(min_length=1, max_length=64)
-    content: str = Field(max_length=_MAX_RESOURCE_BYTES)
+    content: str = Field(max_length=MAX_SKILL_FILE_BYTES)
 
 
 class SkillFileWriteBody(BaseModel):
     path: str = Field(min_length=1, max_length=512)
-    content: str = Field(max_length=_MAX_RESOURCE_BYTES)
+    content: str = Field(max_length=MAX_SKILL_FILE_BYTES)
 
 
 class PresetApplyBody(BaseModel):
@@ -82,6 +76,26 @@ class ImportInspectBody(BaseModel):
     kind: str = Field(min_length=1, max_length=16)
     archive_b64: str | None = Field(default=None, max_length=_MAX_ARCHIVE_B64_CHARS)
     files: dict[str, str] | None = None
+
+    @field_validator("files")
+    @classmethod
+    def _files_within_limits(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        # folder manifest 在请求模型层先挡一轮（条数/单值/总长），
+        # skill_import.ingest_folder 的逐项检查保留作纵深防御。
+        if value is None:
+            return value
+        if len(value) > skill_import.MAX_IMPORT_ENTRIES:
+            raise ValueError(
+                f"folder manifest has more than {skill_import.MAX_IMPORT_ENTRIES} files"
+            )
+        total = 0
+        for relpath, encoded in value.items():
+            if len(encoded) > _MAX_FILE_B64_CHARS:
+                raise ValueError(f"folder entry is too large: {relpath}")
+            total += len(encoded)
+            if total > _MAX_ARCHIVE_B64_CHARS:
+                raise ValueError("folder manifest exceeds the total size limit")
+        return value
 
 
 class GithubInspectBody(BaseModel):
@@ -96,18 +110,7 @@ class ImportConfirmBody(BaseModel):
 
 def _effective_catalog_dir() -> Path:
     """``[skills].catalog_dir`` 的生效目录：tomllib 直读，缺失/异常回退默认。"""
-    configured = ""
-    try:
-        with _LLM_CONFIG_PATH.open("rb") as handle:
-            data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
-        data = {}
-    section = data.get("skills")
-    if isinstance(section, dict):
-        value = section.get("catalog_dir")
-        if isinstance(value, str):
-            configured = value
-    return resolve_catalog_dir(configured)
+    return resolve_catalog_dir(read_configured_catalog_dir(_LLM_CONFIG_PATH))
 
 
 def _validate_name(name: str) -> None:
@@ -126,46 +129,104 @@ def _require_skill_dir(name: str) -> Path:
     return skill_dir
 
 
-def _lock_for(path: Path) -> FileLock:
-    return FileLock(str(path) + ".lock")
+def _skill_lock(catalog_dir: Path, name: str) -> FileLock:
+    """每 skill 一把锁，锁文件放 catalog 根（内容树外）。
+
+    锁文件若落在 skill 目录内会被资源扫描编入清单、被 preset_drift 计入
+    指纹（在线编辑过的预置 skill 会永久 diverged）。管理面低并发，粒度够。
+    """
+    return FileLock(str(catalog_dir / f"{name}.lock"))
 
 
 def _diagnostics_payload(diagnostics) -> list[dict]:
     return [{"kind": item.kind, "message": item.message} for item in diagnostics]
 
 
-def _collect_skill_diagnostics(skill_dir: Path) -> tuple[bool, str, list[dict]]:
-    """单个 skill 目录的可用性判定：缺 SKILL.md/非常规/非 UTF-8/解析失败。
+def _preset_states(catalog_dir: Path) -> dict[str, preset_sync.SyncState]:
+    return {
+        row.name: row.state
+        for row in preset_sync.classify_presets(catalog_dir, _EXAMPLE_DIR)
+    }
 
-    与 catalog 扫描同款 fail-closed 口径，供列表与详情对坏项给出诊断。
-    """
-    name = skill_dir.name
-    skill_path = skill_dir / SKILL_FILE_NAME
+
+def _resolve_for_write(skill_dir: Path, relative_path: str) -> Path:
+    """写侧路径加固第一步：相对形状校验并拼接落点（包含性校验分离）。"""
     try:
-        info = skill_path.lstat()
+        assert_safe_relative_path(relative_path)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail="path is not a safe skill-relative path",
+        ) from None
+    return skill_dir.joinpath(*relative_path.split("/"))
+
+
+def _require_contained(skill_dir: Path, path: Path) -> None:
+    """``path``（须已存在）的 realpath 必须位于 skill 根内。"""
+    real_root = skill_dir.resolve()
+    try:
+        real = path.resolve(strict=True)
     except OSError:
-        return False, "", [{"kind": "missing-skill-file", "message": "SKILL.md not found"}]
-    if skill_path.is_symlink() or not stat.S_ISREG(info.st_mode):
-        return False, "", [
-            {"kind": "not-a-regular-file", "message": "SKILL.md is not a regular file"}
-        ]
-    try:
-        raw = skill_path.read_bytes()
-    except OSError:
-        return False, "", [{"kind": "read-error", "message": "SKILL.md cannot be read"}]
-    if raw.startswith(_UTF8_BOM):
-        raw = raw[len(_UTF8_BOM):]
-    try:
-        content = raw.decode("utf-8", errors="strict")
-    except UnicodeDecodeError:
-        return False, "", [{"kind": "invalid-utf8", "message": "SKILL.md is not valid UTF-8"}]
-    parsed = parse_skill_markdown(content, expected_name=name)
-    diagnostics = _diagnostics_payload(parsed.diagnostics)
-    if not parsed.ok or parsed.metadata is None:
-        if not diagnostics:
-            diagnostics = [{"kind": "invalid", "message": "SKILL.md validation failed"}]
-        return False, "", diagnostics
-    return True, parsed.metadata.description, diagnostics
+        raise HTTPException(
+            status_code=422,
+            detail="path is not contained in the skill directory",
+        ) from None
+    if real != real_root and real_root not in real.parents:
+        raise HTTPException(
+            status_code=422,
+            detail="path is not contained in the skill directory",
+        )
+
+
+def _check_contained(skill_dir: Path, target: Path) -> None:
+    """写盘前复检：target 的父目录（此时已存在）必须真实位于 skill 根内。"""
+    _require_contained(skill_dir, target.parent)
+
+
+def _check_ancestor_contained(skill_dir: Path, target: Path) -> None:
+    """mkdir 之前的包含性校验：最深的已存在祖先不得随符号链接逃逸出根。"""
+    ancestor = target.parent
+    while not os.path.lexists(ancestor):
+        ancestor = ancestor.parent
+    _require_contained(skill_dir, ancestor)
+
+
+# ── 固定路径：预置同步与安装管线必须先于 /skills/{name} 声明 ──────────
+
+
+@router.get("/skills")
+def list_skills():
+    catalog_dir = _effective_catalog_dir()
+    states = _preset_states(catalog_dir)
+    items = []
+    if catalog_dir.is_dir():
+        for child in sorted(catalog_dir.iterdir()):
+            if child.is_symlink() or not child.is_dir():
+                continue
+            # 备份容器与安装暂存目录不是 skill。
+            if child.name == preset_sync.BACKUP_CONTAINER_NAME:
+                continue
+            if child.name.startswith(skill_import.INSTALL_STAGING_PREFIX):
+                continue
+            loaded, load_diagnostics = load_skill_with_diagnostics(child)
+            resource_count, has_scripts, total_bytes = _dir_stats(child)
+            state = states.get(child.name)
+            items.append({
+                "name": child.name,
+                "ok": loaded is not None,
+                "description": loaded.metadata.description if loaded else "",
+                "diagnostics": _diagnostics_payload(load_diagnostics),
+                "resource_count": resource_count,
+                "has_scripts": has_scripts,
+                "total_bytes": total_bytes,
+                "mtime": int(child.stat().st_mtime),
+                "preset_state": (
+                    state.value
+                    if state in (preset_sync.SyncState.CURRENT, preset_sync.SyncState.DIVERGED)
+                    else None
+                ),
+            })
+    return {"skills": items}
 
 
 def _dir_stats(skill_dir: Path) -> tuple[int, bool, int]:
@@ -192,83 +253,6 @@ def _dir_stats(skill_dir: Path) -> tuple[int, bool, int]:
     return resource_count, has_scripts, total_bytes
 
 
-def _preset_states(catalog_dir: Path) -> dict[str, preset_sync.SyncState]:
-    return {
-        row.name: row.state
-        for row in preset_sync.classify_presets(catalog_dir, _EXAMPLE_DIR)
-    }
-
-
-def _loadable_skill(catalog_dir: Path, name: str) -> LoadedSkill | None:
-    for skill in scan_skills(catalog_dir):
-        if skill.name == name:
-            return skill
-    return None
-
-
-def _resolve_for_write(skill_dir: Path, relative_path: str) -> Path:
-    """写侧路径加固：相对形状校验 + 落点 realpath 不得随符号链接逃逸出根。"""
-    try:
-        assert_safe_relative_path(relative_path)
-    except ValueError:
-        raise HTTPException(
-            status_code=422,
-            detail="path is not a safe skill-relative path",
-        ) from None
-    return skill_dir.joinpath(*relative_path.split("/"))
-
-
-def _check_contained(skill_dir: Path, target: Path) -> None:
-    real_root = skill_dir.resolve()
-    try:
-        real_parent = target.parent.resolve(strict=True)
-    except OSError:
-        raise HTTPException(
-            status_code=422,
-            detail="path is not contained in the skill directory",
-        ) from None
-    if real_parent != real_root and real_root not in real_parent.parents:
-        raise HTTPException(
-            status_code=422,
-            detail="path is not contained in the skill directory",
-        )
-
-
-# ── 固定路径：预置同步与安装管线必须先于 /skills/{name} 声明 ──────────
-
-
-@router.get("/skills")
-def list_skills():
-    catalog_dir = _effective_catalog_dir()
-    states = _preset_states(catalog_dir)
-    items = []
-    if catalog_dir.is_dir():
-        for child in sorted(catalog_dir.iterdir()):
-            if child.is_symlink() or not child.is_dir():
-                continue
-            if child.name == preset_sync.BACKUP_CONTAINER_NAME:
-                continue
-            ok, description, diagnostics = _collect_skill_diagnostics(child)
-            resource_count, has_scripts, total_bytes = _dir_stats(child)
-            state = states.get(child.name)
-            items.append({
-                "name": child.name,
-                "ok": ok,
-                "description": description,
-                "diagnostics": diagnostics,
-                "resource_count": resource_count,
-                "has_scripts": has_scripts,
-                "total_bytes": total_bytes,
-                "mtime": int(child.stat().st_mtime),
-                "preset_state": (
-                    state.value
-                    if state in (preset_sync.SyncState.CURRENT, preset_sync.SyncState.DIVERGED)
-                    else None
-                ),
-            })
-    return {"skills": items}
-
-
 @router.post("/skills", status_code=201)
 def create_skill(body: SkillCreateBody, request: Request):
     _validate_name(body.name)
@@ -285,14 +269,15 @@ def create_skill(body: SkillCreateBody, request: Request):
     target = catalog_dir / body.name
     if os.path.lexists(target):
         raise HTTPException(status_code=409, detail="skill already exists")
+    # 锁文件在 catalog 根，取锁前必须保证 catalog 目录存在。
     catalog_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        target.mkdir()
-    except FileExistsError:
-        raise HTTPException(status_code=409, detail="skill already exists") from None
     skill_file = target / SKILL_FILE_NAME
     tmp = skill_file.with_name(skill_file.name + ".tmp")
-    with _lock_for(skill_file):
+    with _skill_lock(catalog_dir, body.name):
+        try:
+            target.mkdir()
+        except FileExistsError:
+            raise HTTPException(status_code=409, detail="skill already exists") from None
         try:
             tmp.write_text(body.content, encoding="utf-8")
             tmp.replace(skill_file)
@@ -311,7 +296,11 @@ def list_presets():
     catalog_dir = _effective_catalog_dir()
     rows = preset_sync.classify_presets(catalog_dir, _EXAMPLE_DIR)
     presets = [
-        {"name": row.name, "state": row.state.value, "label": _STATE_LABELS[row.state]}
+        {
+            "name": row.name,
+            "state": row.state.value,
+            "label": preset_sync.STATE_LABELS[row.state],
+        }
         for row in rows
     ]
     local_only = preset_sync.local_only_names(catalog_dir, {row.name for row in rows})
@@ -348,10 +337,24 @@ def apply_presets_route(body: PresetApplyBody, request: Request):
     }
 
 
-def _inspect_and_stash(entries: list[skill_import.IngestEntry], meta: dict) -> dict:
+def _inspect_and_stash(
+    entries: list[skill_import.IngestEntry],
+    *,
+    kind: str,
+    source_url: str = "",
+    empty_detail: str | None = None,
+) -> dict:
+    """候选发现 + stash 落盘的共用收尾；``empty_detail`` 非空时零候选即 422。"""
     candidates = skill_import.discover_candidates(entries, _effective_catalog_dir())
-    token = skill_import.stash_payload(_STASH_DIR, entries, meta)
-    return {"token": token, "candidates": candidates}
+    if not candidates and empty_detail is not None:
+        raise HTTPException(status_code=422, detail=empty_detail)
+    token = skill_import_stash.stash_payload(
+        _STASH_DIR, entries, kind=kind, source_url=source_url
+    )
+    return {
+        "token": token,
+        "candidates": [asdict(candidate) for candidate in candidates],
+    }
 
 
 @router.post("/skills/import/inspect")
@@ -359,20 +362,23 @@ def inspect_import(body: ImportInspectBody):
     if body.kind == "zip":
         if body.archive_b64 is None:
             raise HTTPException(status_code=422, detail="archive_b64 is required for kind=zip")
-        entries = skill_import.ingest_zip(body.archive_b64)
+        archive_bytes = skill_import.decode_zip_b64(body.archive_b64)
+        if len(archive_bytes) > _MAX_ARCHIVE_BYTES:
+            raise HTTPException(status_code=422, detail="archive exceeds the 16MiB limit")
+        entries = skill_import.ingest_zip_bytes(archive_bytes)
     elif body.kind == "folder":
         if body.files is None:
             raise HTTPException(status_code=422, detail="files is required for kind=folder")
         entries = skill_import.ingest_folder(body.files)
     else:
         raise HTTPException(status_code=422, detail="kind must be 'zip' or 'folder'")
-    return _inspect_and_stash(entries, {"kind": body.kind})
+    return _inspect_and_stash(entries, kind=body.kind)
 
 
 @router.post("/skills/import/github/inspect")
 def inspect_github_import(body: GithubInspectBody):
-    target = skill_import.parse_github_url(body.url)
-    archive = skill_import.download_github_zip(target)
+    target = skill_import_github.parse_github_url(body.url)
+    archive = skill_import_github.download_github_zip(target)
     try:
         # subpath 过滤提前到 ingest 阶段：树外条目不触发条目数/总量护栏，
         # monorepo 里挑单个 Skill 不受整仓规模影响。
@@ -384,30 +390,24 @@ def inspect_github_import(body: GithubInspectBody):
                 "use a /tree/<ref>/<subdirectory> URL to point at a single skill directory"
             )
         raise
-    candidates = skill_import.discover_candidates(entries, _effective_catalog_dir())
-    if not candidates:
-        if target.subpath:
-            raise HTTPException(
-                status_code=422,
-                detail=f"no SKILL.md found under the subdirectory '{target.subpath}'",
-            )
-        raise HTTPException(
-            status_code=422,
-            detail="no SKILL.md found in the repository archive",
-        )
+    empty_detail = (
+        f"no SKILL.md found under the subdirectory '{target.subpath}'"
+        if target.subpath
+        else "no SKILL.md found in the repository archive"
+    )
+    result = _inspect_and_stash(
+        entries, kind="github", source_url=body.url, empty_detail=empty_detail
+    )
     if target.subpath:
         narrowed = [
             candidate
-            for candidate in candidates
+            for candidate in result["candidates"]
             if candidate["root"] == target.subpath
             or candidate["root"].endswith(f"/{target.subpath}")
         ]
         if narrowed:
-            candidates = narrowed
-    token = skill_import.stash_payload(
-        _STASH_DIR, entries, {"kind": "github", "url": body.url}
-    )
-    return {"token": token, "candidates": candidates}
+            result["candidates"] = narrowed
+    return result
 
 
 @router.post("/skills/import/confirm")
@@ -432,12 +432,14 @@ def confirm_import(body: ImportConfirmBody, request: Request):
 @router.get("/skills/{name}")
 def get_skill(name: str):
     skill_dir = _require_skill_dir(name)
-    loaded = _loadable_skill(_effective_catalog_dir(), name)
+    loaded, load_diagnostics = load_skill_with_diagnostics(skill_dir)
     if loaded is None:
-        _, _, diagnostics = _collect_skill_diagnostics(skill_dir)
         raise HTTPException(
             status_code=404,
-            detail={"message": "skill is not loadable", "diagnostics": diagnostics},
+            detail={
+                "message": "skill is not loadable",
+                "diagnostics": _diagnostics_payload(load_diagnostics),
+            },
         )
     resources = []
     for resource in loaded.resources:
@@ -461,11 +463,12 @@ def get_skill(name: str):
 @router.delete("/skills/{name}")
 def delete_skill(name: str, request: Request):
     skill_dir = _require_skill_dir(name)
-    with _lock_for(skill_dir):
+    catalog_dir = skill_dir.parent
+    with _skill_lock(catalog_dir, name):
         shutil.rmtree(skill_dir)
-    # filelock 不自动清理锁文件：目录删除后 best-effort 清掉孤儿 <name>.lock。
+    # filelock 不自动清理锁文件：删除后 best-effort 清掉孤儿 <name>.lock。
     try:
-        Path(f"{skill_dir}.lock").unlink(missing_ok=True)
+        (catalog_dir / f"{name}.lock").unlink(missing_ok=True)
     except OSError as exc:
         logger.debug("skill lock file cleanup failed for %s: %s", name, exc)
     logger.warning("skill deleted via web admin: %s", name)
@@ -477,14 +480,7 @@ def delete_skill(name: str, request: Request):
 def read_skill_file(name: str, path: str):
     skill_dir = _require_skill_dir(name)
     # 坏 skill 的文件同样需要可读可修，故只要求目录存在；加固走
-    # resolve_skill_file（lstat + realpath 双重校验），用最小桩提供 root_dir。
-    handle = LoadedSkill(
-        name=name,
-        root_dir=skill_dir,
-        metadata=SkillMetadata(name=name, description=""),
-        body="",
-        body_sha256="",
-    )
+    # resolve_file_in（lstat + realpath 双重校验）。
     try:
         assert_safe_relative_path(path)
     except ValueError:
@@ -492,22 +488,21 @@ def read_skill_file(name: str, path: str):
             status_code=422, detail="path is not a safe skill-relative path"
         ) from None
     try:
-        target = resolve_skill_file(handle, path)
+        target = resolve_file_in(skill_dir, path)
     except ValueError:
         raise HTTPException(status_code=404, detail="file not found") from None
     try:
         size = target.stat().st_size
     except OSError:
         raise HTTPException(status_code=404, detail="file not found") from None
-    if size > _MAX_RESOURCE_BYTES:
+    if size > MAX_SKILL_FILE_BYTES:
         raise HTTPException(status_code=413, detail="file exceeds the 256KiB limit")
-    raw = target.read_bytes()
-    if raw.startswith(_UTF8_BOM):
-        raw = raw[len(_UTF8_BOM):]
     try:
-        content = raw.decode("utf-8", errors="strict")
+        content = target.read_bytes().decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         raise HTTPException(status_code=415, detail="file is not valid UTF-8") from None
+    if content.startswith("\ufeff"):
+        content = content[1:]
     return {"path": path, "content": content, "size_bytes": size}
 
 
@@ -516,7 +511,7 @@ def write_skill_file(name: str, body: SkillFileWriteBody, request: Request):
     skill_dir = _require_skill_dir(name)
     target = _resolve_for_write(skill_dir, body.path)
     raw = body.content.encode("utf-8")
-    if len(raw) > _MAX_RESOURCE_BYTES:
+    if len(raw) > MAX_SKILL_FILE_BYTES:
         raise HTTPException(status_code=422, detail="content exceeds the 256KiB limit")
     if body.path == SKILL_FILE_NAME:
         parsed = parse_skill_markdown(body.content, expected_name=name)
@@ -529,13 +524,28 @@ def write_skill_file(name: str, body: SkillFileWriteBody, request: Request):
                 },
             )
     is_create = not os.path.lexists(target)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # 包含性校验先于 mkdir：最深的已存在祖先不得随符号链接逃逸出根。
+    _check_ancestor_contained(skill_dir, target)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise HTTPException(
+            status_code=409,
+            detail="target path conflicts with an existing non-directory entry",
+        ) from None
+    # mkdir 后、写盘前复检落点父目录（防范符号链接竞态交换）。
     _check_contained(skill_dir, target)
     tmp = target.with_name(target.name + ".tmp")
-    with _lock_for(target):
+    with _skill_lock(skill_dir.parent, name):
         try:
             tmp.write_text(body.content, encoding="utf-8")
             tmp.replace(target)
+        except (FileExistsError, NotADirectoryError):
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=409,
+                detail="target path conflicts with an existing non-directory entry",
+            ) from None
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
@@ -569,7 +579,7 @@ def delete_skill_file(name: str, path: str, request: Request):
     if target.is_symlink() or not stat.S_ISREG(info.st_mode):
         raise HTTPException(status_code=404, detail="file not found")
     _check_contained(skill_dir, target)
-    with _lock_for(target):
+    with _skill_lock(skill_dir.parent, name):
         target.unlink()
     logger.warning("skill file deleted via web admin: %s:%s", name, path)
     audit_logger.log(

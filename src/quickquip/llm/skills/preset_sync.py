@@ -35,6 +35,16 @@ class SyncState(StrEnum):
     CONFLICT = "conflict"
 
 
+# 四态的中文呈现文案（单一 owner）：主机侧同步脚本与 Web Admin 预置同步
+# 面板共用，避免两份副本漂移。
+STATE_LABELS: dict[SyncState, str] = {
+    SyncState.CURRENT: "已安装，与预置副本一致",
+    SyncState.DIVERGED: "已安装，与预置副本不同",
+    SyncState.MISSING: "未安装",
+    SyncState.CONFLICT: "存在同名非目录项，需人工处理",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class PresetSkillRow:
     """一个预置 Skill 的对齐状态。"""

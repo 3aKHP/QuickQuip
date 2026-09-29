@@ -8,6 +8,7 @@ from quickquip.llm.skills import (
     MAX_SKILL_FILE_BYTES,
     parse_skill_markdown,
 )
+from quickquip.llm.skills.parser import parse_skill_bytes
 
 from tests.unit.llm.skills.conftest import skill_markdown
 
@@ -158,3 +159,33 @@ def test_parse_metadata_nested_value_rejected():
 def test_parse_crlf_fences_tolerated():
     result = parse_skill_markdown("---\r\nname: demo\r\ndescription: x\r\n---\r\nbody\r\n")
     assert result.ok
+
+
+# ── parse_skill_bytes（字节形态统一入口）─────────────────────────────
+
+
+def test_parse_bytes_valid():
+    raw = skill_markdown("demo", "演示 skill。", body="正文\n").encode("utf-8")
+    result = parse_skill_bytes(raw)
+    assert result.ok
+    assert result.metadata is not None
+    assert result.metadata.name == "demo"
+
+
+def test_parse_bytes_strips_utf8_bom():
+    raw = b"\xef\xbb\xbf" + skill_markdown("demo", "带 BOM。").encode("utf-8")
+    result = parse_skill_bytes(raw)
+    assert result.ok
+
+
+def test_parse_bytes_invalid_utf8_is_diagnostic_not_exception():
+    result = parse_skill_bytes(b"\xff\xfe\x00")
+    assert not result.ok
+    assert _kinds(result) == ["invalid-utf8"]
+
+
+def test_parse_bytes_expected_name_mismatch():
+    raw = skill_markdown("other", "x").encode("utf-8")
+    result = parse_skill_bytes(raw, expected_name="demo")
+    assert not result.ok
+    assert _kinds(result) == ["name-directory-mismatch"]
