@@ -7,13 +7,12 @@
       <template #actions>
         <UiButton icon="RefreshCw" :disabled="listing" @click="onRefresh">刷新</UiButton>
         <UiButton icon="Plus" @click="startCreate">新建</UiButton>
-        <UiButton icon="Upload" @click="installOpen = true">安装</UiButton>
-        <UiButton variant="danger" icon="Trash2" :disabled="!selectedName" @click="onDeleteSkill">删除</UiButton>
+        <UiButton variant="primary" icon="Upload" @click="installOpen = true">安装</UiButton>
       </template>
     </UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
-    <PresetSyncPanel ref="presetPanelRef" :before-apply="confirmEditorLeave" @applied="onPresetsApplied" />
+    <PresetSyncPanel ref="presetPanelRef" class="preset-section" :before-apply="confirmEditorLeave" @applied="onPresetsApplied" />
 
     <div class="split">
       <nav class="list-panel">
@@ -32,7 +31,7 @@
               <UiTag v-if="!s.ok" size="sm" variant="danger">解析失败</UiTag>
               <UiTag v-else-if="s.preset_state === 'current'" size="sm" variant="info">预置</UiTag>
               <UiTag v-else-if="s.preset_state === 'diverged'" size="sm" variant="warn">预置·已偏离</UiTag>
-              <UiTag v-if="s.has_scripts" size="sm" variant="danger">含脚本</UiTag>
+              <UiTag v-if="s.has_scripts" size="sm" variant="warn">含脚本</UiTag>
             </div>
             <div v-if="!s.ok && s.diagnostics.length" class="list-item-desc list-item-desc--error">{{ s.diagnostics[0].message }}</div>
             <div v-else-if="s.description" class="list-item-desc">{{ s.description }}</div>
@@ -47,7 +46,11 @@
         <template v-else>
           <UiLoading v-if="loadingDetail" />
           <template v-else-if="detail">
-            <div v-if="detail.diagnostics.length" class="diag-banner">
+            <div class="detail-bar">
+              <h3 class="section-title mono">{{ selectedName }}</h3>
+              <UiButton size="sm" variant="danger" icon="Trash2" title="删除整个 Skill 目录" @click="onDeleteSkill">删除</UiButton>
+            </div>
+            <div v-if="detail.diagnostics.length" class="diag-banner soft-note soft-note--danger">
               <UiIcon name="AlertTriangle" :size="15" />
               <div class="diag-list">
                 <div v-for="(d, i) in detail.diagnostics" :key="i" class="diag-item">
@@ -81,7 +84,7 @@
             />
           </template>
           <template v-else-if="repairDiagnostics">
-            <div class="diag-banner">
+            <div class="diag-banner soft-note soft-note--danger">
               <UiIcon name="AlertTriangle" :size="15" />
               <div class="diag-list">
                 <div v-for="(d, i) in repairDiagnostics" :key="i" class="diag-item">
@@ -105,7 +108,13 @@
               @file-deleted="onFileDeleted"
             />
           </template>
-          <p v-else-if="detailError" class="error">{{ detailError }}</p>
+          <template v-else-if="detailError">
+            <div class="detail-bar">
+              <h3 class="section-title mono">{{ selectedName }}</h3>
+              <UiButton size="sm" variant="danger" icon="Trash2" title="删除整个 Skill 目录" @click="onDeleteSkill">删除</UiButton>
+            </div>
+            <p class="error">{{ detailError }}</p>
+          </template>
         </template>
       </div>
     </div>
@@ -325,9 +334,11 @@ function openSkillFileForRepair() {
 </script>
 
 <style scoped>
-.skills-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.skills-view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .error { color: var(--qq-danger); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }
+
+.preset-section { margin-bottom: var(--qq-gap-md); }
 
 .split { display: flex; gap: var(--qq-gap-md); flex: 1; min-height: 0; }
 
@@ -335,7 +346,6 @@ function openSkillFileForRepair() {
   width: 280px;
   flex-shrink: 0;
   background: var(--qq-surface);
-  border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   box-shadow: var(--qq-shadow-card);
   overflow: hidden;
@@ -351,7 +361,6 @@ function openSkillFileForRepair() {
   text-align: left;
   padding: var(--qq-gap-sm) var(--qq-gap-md);
   border: none;
-  border-bottom: 1px solid var(--qq-border-soft);
   background: transparent;
   cursor: pointer;
   font-family: var(--qq-font-base);
@@ -405,16 +414,24 @@ function openSkillFileForRepair() {
   box-shadow: var(--qq-shadow-card);
 }
 
+.detail-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-md);
+}
+
+.detail-bar .section-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .diag-banner {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  padding: var(--qq-gap-sm) var(--qq-gap-md);
-  border: 1px solid var(--qq-danger);
-  border-radius: var(--qq-radius-sm);
-  background: var(--qq-danger-soft);
-  color: var(--qq-danger);
-  font-size: var(--qq-text-sm);
 }
 
 .diag-banner > :first-child { margin-top: 2px; }

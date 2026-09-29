@@ -104,6 +104,26 @@ html.theme-anim textarea {
   box-shadow: inset 3px 0 0 var(--qq-primary);
 }
 
+/* ── Soft note — 诊断/警示条幅共享语言（soft 底 + 左侧 3px 内嵌色条，无边框）──
+   用法：class="soft-note soft-note--warn|danger"；布局差异（flex 等）由使用方 scoped 补充。 */
+.soft-note {
+  border-radius: var(--qq-radius-sm);
+  padding: var(--qq-gap-sm) var(--qq-gap-md);
+  font-size: var(--qq-text-sm);
+}
+
+.soft-note--warn {
+  background: var(--qq-warn-soft);
+  box-shadow: inset 3px 0 0 var(--qq-warn);
+  color: var(--qq-warn);
+}
+
+.soft-note--danger {
+  background: var(--qq-danger-soft);
+  box-shadow: inset 3px 0 0 var(--qq-danger);
+  color: var(--qq-danger);
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
