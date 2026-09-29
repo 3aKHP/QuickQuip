@@ -14,6 +14,9 @@ skills/.preset-backups/<name>.preset-backup-<时间戳> 再安装预置副本（
 容器自身无 SKILL.md，运行时扫描不感知；本地定制不丢，确认后自行清理）。
 bot 每轮请求现扫 skills/，同步当轮生效，无需重启。
 
+核心逻辑在包内 quickquip.llm.skills.preset_sync（stdlib 自包含，供
+Web Admin 后端复用），本脚本只承载 CLI 呈现，按文件路径装载该实现。
+
 用法：
     python scripts/sync_preset_skills.py            # 只报告
     python scripts/sync_preset_skills.py --check    # 只报告（部署脚本用）
@@ -24,12 +27,13 @@ from __future__ import annotations
 import argparse
 import functools
 import importlib.util
-import shutil
+
+# 本脚本不直接调用 shutil：保留该属性作为测试 patch 点（patch 全局 shutil
+# 模块对象的 copytree/rmtree 即对 preset_sync 生效）。
+import shutil  # noqa: F401
 import sys
-from dataclasses import dataclass
-from datetime import datetime
-from enum import StrEnum
 from pathlib import Path
+from types import ModuleType
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # 默认目录与 quickquip.common.paths 的 SKILLS_DIR / SKILLS_EXAMPLE_DIR 一致。
@@ -38,25 +42,43 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = PROJECT_ROOT / "skills"
 SKILLS_EXAMPLE_DIR = PROJECT_ROOT / "skills.example"
 
-# 备份容器目录：<skills>/.preset-backups/<name>.preset-backup-<时间戳>。
-# 容器自身无 SKILL.md，scan_skills 静默跳过（不进 catalog、不产生跳过
-# 告警）；容器名也不满足 Skill 目录名 ^[a-z0-9][a-z0-9-]*$。
-BACKUP_CONTAINER_NAME = ".preset-backups"
-BACKUP_NAME_INFIX = ".preset-backup-"
+_PACKAGE_DIR = PROJECT_ROOT / "src" / "quickquip" / "llm" / "skills"
 
 
-@functools.cache
-def _preset_drift():
-    """按文件路径装载运行时同一份 preset_drift 实现（延迟到首次使用）。
+def _register_parent_stubs() -> None:
+    """为路径装载的模块预注册合成父包，使包内 import 形式可解析。
+
+    只登记 sys.modules 中缺失的层级（同进程已 import 真实包时不得覆盖）；
+    stub 是仅携带 ``__path__``（指向真实目录）的空 ModuleType，不执行任何
+    包初始化，因此不会连带装入第三方依赖。
+    """
+    chain = (
+        ("quickquip", PROJECT_ROOT / "src" / "quickquip"),
+        ("quickquip.llm", PROJECT_ROOT / "src" / "quickquip" / "llm"),
+        ("quickquip.llm.skills", _PACKAGE_DIR),
+    )
+    for name, path in chain:
+        if name in sys.modules:
+            continue
+        stub = ModuleType(name)
+        stub.__path__ = [str(path)]
+        sys.modules[name] = stub
+
+
+def _load_packaged_module(module_name: str, filename: str):
+    """按文件路径装载包内 stdlib 自包含模块（与包内真身同一源文件）。
 
     本脚本是主机侧运维工具，要求在只有系统 Python、没有项目 venv 的部署
     驱动机上也能跑：走包 import 会连带装入 yaml/dotenv 等第三方依赖，故
-    直接装载这个刻意保持 stdlib 自包含的模块（合成名
-    ``quickquip_preset_drift``，与包内真身是同一源文件的两个模块对象；
-    指纹实现仍然只有一份）。
+    直接装载刻意保持 stdlib 自包含的源文件。同进程已存在同名模块时直接
+    复用（如 pytest 内真实包已 import），避免同一源文件的两个类对象并存。
     """
-    module_path = PROJECT_ROOT / "src" / "quickquip" / "llm" / "skills" / "preset_drift.py"
-    spec = importlib.util.spec_from_file_location("quickquip_preset_drift", module_path)
+    _register_parent_stubs()
+    existing = sys.modules.get(module_name)
+    if existing is not None:
+        return existing
+    module_path = _PACKAGE_DIR / filename
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"无法装载 {module_path}")
     module = importlib.util.module_from_spec(spec)
@@ -67,122 +89,11 @@ def _preset_drift():
     return module
 
 
-class SyncState(StrEnum):
-    CURRENT = "current"
-    DIVERGED = "diverged"
-    MISSING = "missing"
-    CONFLICT = "conflict"
-
-
-_STATE_LABELS: dict[SyncState, str] = {
-    SyncState.CURRENT: "已安装，与预置副本一致",
-    SyncState.DIVERGED: "已安装，与预置副本不同",
-    SyncState.MISSING: "未安装",
-    SyncState.CONFLICT: "存在同名非目录项，需人工处理",
-}
-
-
-@dataclass(frozen=True, slots=True)
-class PresetSkillRow:
-    """一个预置 Skill 的对齐状态。"""
-
-    name: str
-    state: SyncState
-
-
-@dataclass(frozen=True, slots=True)
-class SyncOutcome:
-    """一个同步成功项的结果；``backup`` 是 diverged 覆盖更新的备份路径。"""
-
-    name: str
-    backup: Path | None
-
-
-def _classify(skills_dir: Path, example_dir: Path) -> list[PresetSkillRow]:
-    drift_names = {
-        item.name for item in _preset_drift().detect_preset_drift(skills_dir, example_dir)
-    }
-    rows = []
-    for name in _preset_drift().preset_skill_names(example_dir):
-        installed = skills_dir / name
-        if installed.is_symlink() or (installed.exists() and not installed.is_dir()):
-            state = SyncState.CONFLICT
-        elif not installed.is_dir():
-            state = SyncState.MISSING
-        elif name in drift_names:
-            state = SyncState.DIVERGED
-        else:
-            state = SyncState.CURRENT
-        rows.append(PresetSkillRow(name=name, state=state))
-    return rows
-
-
-def _local_only_names(skills_dir: Path, preset_names: set[str]) -> list[str]:
-    """skills/ 下非预置、非本工具备份容器的本地 Skill 名（播报用）。"""
-    if not skills_dir.is_dir():
-        return []
-    return sorted(
-        child.name
-        for child in skills_dir.iterdir()
-        if not child.is_symlink()
-        and child.is_dir()
-        and child.name not in preset_names
-        and child.name != BACKUP_CONTAINER_NAME
-    )
-
-
-def _unique_backup_path(skills_dir: Path, name: str) -> Path:
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    container = skills_dir / BACKUP_CONTAINER_NAME
-    candidate = container / f"{name}{BACKUP_NAME_INFIX}{stamp}"
-    suffix = 2
-    while candidate.exists() or candidate.is_symlink():
-        candidate = container / f"{name}{BACKUP_NAME_INFIX}{stamp}-{suffix}"
-        suffix += 1
-    return candidate
-
-
-def _apply(
-    rows: list[PresetSkillRow], skills_dir: Path, example_dir: Path
-) -> tuple[list[SyncOutcome], list[str]]:
-    """执行同步，返回（成功项, 失败描述列表）。"""
-    outcomes: list[SyncOutcome] = []
-    failures: list[str] = []
-    for row in rows:
-        if row.state in (SyncState.CURRENT, SyncState.CONFLICT):
-            continue
-        source = example_dir / row.name
-        target = skills_dir / row.name
-        backup: Path | None = None
-        renamed = False
-        try:
-            if row.state is SyncState.DIVERGED:
-                backup = _unique_backup_path(skills_dir, row.name)
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                target.rename(backup)
-                renamed = True
-            shutil.copytree(source, target)
-        except OSError as exc:
-            if renamed:
-                # 备份改名成功、拷贝中途失败：清掉半成品并回滚本地原副本；
-                # 回滚自身也可能失败，原副本至少保留在备份路径。
-                assert backup is not None  # renamed=True 只在 backup 赋值之后成立
-                try:
-                    if target.exists():
-                        shutil.rmtree(target)
-                    backup.rename(target)
-                except OSError as rollback_exc:
-                    failures.append(
-                        f"{row.name}：回滚失败，原副本保留在 {backup}（{rollback_exc}）"
-                    )
-            elif row.state is SyncState.MISSING and target.exists():
-                # missing 分支拷贝中途失败：目标是本次新建的半成品，直接清理；
-                # diverged 分支改名失败时 target 是部署者原副本，绝不触碰。
-                shutil.rmtree(target, ignore_errors=True)
-            failures.append(f"{row.name}：{exc.strerror or exc}")
-            continue
-        outcomes.append(SyncOutcome(name=row.name, backup=backup))
-    return outcomes, failures
+@functools.cache
+def _preset_sync():
+    """依次装载 preset_drift 与 preset_sync（后者 import 前者；延迟到首次使用）。"""
+    _load_packaged_module("quickquip.llm.skills.preset_drift", "preset_drift.py")
+    return _load_packaged_module("quickquip.llm.skills.preset_sync", "preset_sync.py")
 
 
 def main() -> int:
@@ -209,18 +120,26 @@ def main() -> int:
         print(f"预置目录不存在：{example_dir}（pip 安装形态无此目录，无需同步）", file=sys.stderr)
         return 2
 
-    rows = _classify(skills_dir, example_dir)
-    counts = {state: sum(1 for row in rows if row.state is state) for state in SyncState}
+    sync = _preset_sync()
+    state_labels = {
+        sync.SyncState.CURRENT: "已安装，与预置副本一致",
+        sync.SyncState.DIVERGED: "已安装，与预置副本不同",
+        sync.SyncState.MISSING: "未安装",
+        sync.SyncState.CONFLICT: "存在同名非目录项，需人工处理",
+    }
+
+    rows = sync.classify_presets(skills_dir, example_dir)
+    counts = {state: sum(1 for row in rows if row.state is state) for state in sync.SyncState}
     print(f"预置 Skill 状态（{skills_dir} ↔ {example_dir}）：")
     for row in rows:
-        print(f"  {row.state.value:<9} {row.name}（{_STATE_LABELS[row.state]}）")
+        print(f"  {row.state.value:<9} {row.name}（{state_labels[row.state]}）")
 
-    local_only = _local_only_names(skills_dir, {row.name for row in rows})
+    local_only = sync.local_only_names(skills_dir, {row.name for row in rows})
     if local_only:
         print(f"另有 {len(local_only)} 个本地 Skill 非预置，不处理：{'、'.join(local_only)}")
 
-    pending = counts[SyncState.MISSING] + counts[SyncState.DIVERGED]
-    if counts[SyncState.CONFLICT]:
+    pending = counts[sync.SyncState.MISSING] + counts[sync.SyncState.DIVERGED]
+    if counts[sync.SyncState.CONFLICT]:
         print("存在同名冲突项，请先人工处理后再同步。", file=sys.stderr)
         return 2
     if not args.apply:
@@ -236,7 +155,7 @@ def main() -> int:
     if not pending:
         print("全部一致，无需同步。")
         return 0
-    outcomes, failures = _apply(rows, skills_dir, example_dir)
+    outcomes, failures = sync.apply_presets(rows, skills_dir, example_dir)
     for outcome in outcomes:
         if outcome.backup is not None:
             print(f"  {outcome.name}: 已备份到 {outcome.backup} 并安装预置副本")
@@ -249,7 +168,7 @@ def main() -> int:
         return 2
     print(
         f"同步完成：{pending} 项已对齐预置副本，"
-        f"{counts[SyncState.CURRENT]} 项原本一致。"
+        f"{counts[sync.SyncState.CURRENT]} 项原本一致。"
     )
     return 0
 
