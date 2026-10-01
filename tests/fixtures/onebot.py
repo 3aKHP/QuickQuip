@@ -21,6 +21,14 @@ class DummySegment:
     def image(file: str) -> "DummySegment":
         return DummySegment("image", {"file": file})
 
+    @staticmethod
+    def at(qq) -> "DummySegment":
+        return DummySegment("at", {"qq": str(qq)})
+
+    @staticmethod
+    def reply(message_id) -> "DummySegment":
+        return DummySegment("reply", {"id": str(message_id)})
+
 
 class DummyMessage(list):
     def __str__(self) -> str:

@@ -24,7 +24,9 @@ except ImportError:  # pragma: no cover - apscheduler 随 nonebot-plugin-apsched
 from quickquip.adapters.nonebot import cron_status_sync
 from quickquip.adapters.nonebot._llm_reply import (
     build_llm_reply_message,
+    commit_mentions,
     make_group_bot_sink,
+    mention_cooldown_seconds,
     record_final_receipt,
     reply_interval_ms,
 )
@@ -98,12 +100,16 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         )
         return
 
+    from quickquip.adapters.nonebot.group_messages import build_outbound_mention_resolver
     from quickquip.llm.agent_records import TriggerKind
 
+    mention_resolver = build_outbound_mention_resolver(group_id, bot.self_id, svc)
     delivery_sink = make_group_bot_sink(
         bot, Message, MessageSegment,
         group_id=group_id,
         interval_ms=reply_interval_ms(svc),
+        resolve_mention=mention_resolver,
+        cooldown_seconds=mention_cooldown_seconds(svc),
     )
     result = await svc.generate_reply(
         group_id=group_id,
@@ -126,7 +132,9 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
     if not reply_text and not has_images:
         # 逐 Turn 模式：正文已由 sink 交付且无外发图，one-shot 至此完成。
         return
-    message = build_llm_reply_message(result, Message, MessageSegment)
+    message = build_llm_reply_message(
+        result, Message, MessageSegment, resolve_mention=mention_resolver
+    )
     with bot_action_trace(
         trigger_kind="scheduled",
         reason_code="scheduled_message_llm",
@@ -139,6 +147,10 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
     ):
         resp = await bot.send_group_msg(group_id=int(group_id), message=message)
     sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+    if sent_msg_id and mention_resolver is not None:
+        commit_mentions(
+            str(group_id), message, cooldown_seconds=mention_cooldown_seconds(svc)
+        )
     record_final_receipt(svc, result, sent_msg_id)
 
 

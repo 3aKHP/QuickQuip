@@ -55,6 +55,15 @@ class IdentitySnapshot:
             people.add(("entry", id(entry)) if entry is not None else ("qq", qq))
         return len(people) > 1
 
+    def mentionable_names(self) -> set[str]:
+        """出站「@名字」解析的候选名集合：标准身份、别名与观察名片。"""
+        names: set[str] = set()
+        for entry in self.index.entries:
+            names.add(entry.canonical_name)
+            names.update(entry.aliases)
+        names.update(self.names.values())
+        return {name.strip() for name in names if name and name.strip()}
+
 
 class IdentityRepository:
     def __init__(self, path=LLM_IDENTITIES_YAML_PATH, stats_path=STATS_JSON_PATH):
