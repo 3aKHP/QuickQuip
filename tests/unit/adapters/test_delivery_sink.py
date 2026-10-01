@@ -5,9 +5,11 @@ import asyncio
 import time
 import types
 
+from nonebot.exception import ActionFailed
 
 from quickquip.adapters.nonebot._llm_reply import (
     OneBotDeliverySink,
+    make_matcher_sink,
     record_final_receipt,
     reset_delivery_throttle,
     text_only_message,
@@ -18,6 +20,10 @@ from quickquip.llm.agent_records import DeliveryStatus
 def _seg_text(message) -> str:
     """从 Message 提取纯文本段内容（验证不经 CQ 解析器）。"""
     return "".join(str(seg.data.get("text", "")) for seg in message)
+
+
+def _seg_types(message) -> list[str]:
+    return [seg.type for seg in message]
 
 
 class _Message:
@@ -35,8 +41,38 @@ class _Segment:
     @classmethod
     def text(cls, value: str):
         seg = cls()
+        seg.type = "text"
         seg.data["text"] = value
         return seg
+
+    @classmethod
+    def at(cls, qq):
+        seg = cls()
+        seg.type = "at"
+        seg.data["qq"] = str(qq)
+        return seg
+
+    @classmethod
+    def reply(cls, message_id):
+        seg = cls()
+        seg.type = "reply"
+        seg.data["id"] = str(message_id)
+        return seg
+
+
+class _RecordingMatcher:
+    def __init__(self, fail_on_reply: str | None = None):
+        self.sent = []
+        self.fail_on_reply = fail_on_reply
+
+    async def send(self, message):
+        self.sent.append(message)
+        has_reply = any(getattr(seg, "type", "") == "reply" for seg in message)
+        if has_reply and self.fail_on_reply == "action_failed":
+            raise ActionFailed("test", "reply segment rejected")
+        if has_reply and self.fail_on_reply == "timeout":
+            raise asyncio.TimeoutError("Request timed out")
+        return {"message_id": len(self.sent)}
 
 
 async def test_sent_receipt_requires_trusted_message_id():
@@ -105,6 +141,66 @@ async def test_same_scope_sends_are_throttled():
 def test_text_only_message_uses_text_segment():
     message = text_only_message("含[CQ:at,qq=all]的正文", _Message, _Segment)
     assert _seg_text(message) == "含[CQ:at,qq=all]的正文"  # 原样文本段，不进 CQ 解析器
+
+
+async def test_matcher_sink_quotes_first_chunk_only():
+    """reply 段只挂首个 chunk，后续 chunk 纯文本。"""
+    reset_delivery_throttle()
+    matcher = _RecordingMatcher()
+    sink = make_matcher_sink(
+        matcher, _Message, _Segment,
+        scope_key="g-quote", interval_ms=0, reply_to_message_id="12345",
+    )
+    receipt1 = await sink("dlv_1", {"text": "第一段"})
+    receipt2 = await sink("dlv_2", {"text": "第二段"})
+    assert receipt1.status == DeliveryStatus.SENT
+    assert receipt2.status == DeliveryStatus.SENT
+    assert _seg_types(matcher.sent[0]) == ["reply", "text"]
+    assert matcher.sent[0].segments[0].data["id"] == "12345"
+    assert _seg_types(matcher.sent[1]) == ["text"]
+
+
+async def test_reply_segment_action_failed_falls_back_to_plain():
+    """协议端显式拒绝 reply 段时去段重发，正文必达。"""
+    reset_delivery_throttle()
+    matcher = _RecordingMatcher(fail_on_reply="action_failed")
+    sink = make_matcher_sink(
+        matcher, _Message, _Segment,
+        scope_key="g-fallback", interval_ms=0, reply_to_message_id="12345",
+    )
+    receipt = await sink("dlv_1", {"text": "正文"})
+    assert receipt.status == DeliveryStatus.SENT
+    # 首次带 reply 段被拒，第二次纯文本补发成功。
+    assert len(matcher.sent) == 2
+    assert _seg_types(matcher.sent[0]) == ["reply", "text"]
+    assert _seg_types(matcher.sent[1]) == ["text"]
+    assert _seg_text(matcher.sent[1]) == "正文"
+
+
+async def test_reply_timeout_is_not_retried():
+    """超时属于传输层歧义（消息可能已发出），不重试，回执 UNKNOWN。"""
+    reset_delivery_throttle()
+    matcher = _RecordingMatcher(fail_on_reply="timeout")
+    sink = make_matcher_sink(
+        matcher, _Message, _Segment,
+        scope_key="g-timeout", interval_ms=0, reply_to_message_id="12345",
+    )
+    receipt = await sink("dlv_1", {"text": "正文"})
+    assert receipt.status == DeliveryStatus.UNKNOWN
+    assert len(matcher.sent) == 1  # 只有带 reply 段的一次尝试
+
+
+async def test_invalid_reply_id_sends_plain():
+    """非数字 message_id 按无引用处理（防御性：测试桩事件可能出现）。"""
+    reset_delivery_throttle()
+    matcher = _RecordingMatcher()
+    sink = make_matcher_sink(
+        matcher, _Message, _Segment,
+        scope_key="g-invalid", interval_ms=0, reply_to_message_id="m1",
+    )
+    receipt = await sink("dlv_1", {"text": "正文"})
+    assert receipt.status == DeliveryStatus.SENT
+    assert _seg_types(matcher.sent[0]) == ["text"]
 
 
 async def test_record_final_receipt_uses_exact_row_id():

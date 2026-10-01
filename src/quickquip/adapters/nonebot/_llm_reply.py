@@ -1,4 +1,4 @@
-"""LLM 回复消息拼装：文本 + 工具外发图片 + 生产 DeliverySink。
+"""LLM 回复消息拼装：文本 + 引用段 + 工具外发图片 + 生产 DeliverySink。
 
 群聊两个触发路径与私聊路径共用，保证带图回复的拼装逻辑只写一份。
 """
@@ -6,15 +6,23 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
+
+try:
+    from nonebot.exception import ActionFailed
+except ModuleNotFoundError:  # pragma: no cover - 无 nonebot 环境下不存在可捕获的 ActionFailed
+    ActionFailed = None
 
 from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 
 if TYPE_CHECKING:
     from nonebot.adapters.onebot.v11 import Message as OneBotMessage
     from nonebot.adapters.onebot.v11 import MessageSegment as OneBotMessageSegment
+
+logger = logging.getLogger(__name__)
 
 # 模型可能沿用输入形态输出「@QQ 号」（裸数字艾特）；发送前切分为真实
 # at 段，保证被艾特成员在客户端得到高亮与名字而非纯数字文本。
@@ -38,6 +46,45 @@ def split_outbound_at_mentions(
     if cursor < len(text):
         segments.append(MessageSegment.text(text[cursor:]))
     return segments or [MessageSegment.text(text)]
+
+
+def _normalize_reply_id(reply_to_message_id: Any) -> int | None:
+    """把 OneBot message_id 归一化为 int；非法值按无引用处理。"""
+    if reply_to_message_id is None:
+        return None
+    if isinstance(reply_to_message_id, int):
+        return reply_to_message_id
+    try:
+        return int(str(reply_to_message_id).strip())
+    except (TypeError, ValueError):
+        logger.warning("引用消息 id 非法，按无引用发送：%r", reply_to_message_id)
+        return None
+
+
+async def send_with_reply_fallback(
+    send: Callable[[Any], Awaitable[Any]],
+    message: OneBotMessage,
+    *,
+    reply_to_message_id: Any,
+    Message: type[OneBotMessage],
+    MessageSegment: type[OneBotMessageSegment],
+) -> Any:
+    """带引用段发送：协议端显式拒绝（ActionFailed）时去段重发，正文必达。
+
+    超时等传输层异常不重试（消息可能已发出，重发会导致重复），沿用
+    DeliverySink 对超时的既有 UNKNOWN 语义。
+    """
+    reply_id = _normalize_reply_id(reply_to_message_id)
+    if reply_id is None:
+        return await send(message)
+    quoted = Message([MessageSegment.reply(reply_id), *message])
+    try:
+        return await send(quoted)
+    except Exception as exc:
+        if ActionFailed is None or not isinstance(exc, ActionFailed):
+            raise
+        logger.warning("引用段发送被协议端拒绝，去引用重发正文", exc_info=True)
+        return await send(message)
 
 
 def build_llm_reply_message(
@@ -149,22 +196,50 @@ def text_only_message(
 
 
 def make_matcher_sink(
-    matcher, Message, MessageSegment, *, scope_key: str, interval_ms: int
+    matcher,
+    Message,
+    MessageSegment,
+    *,
+    scope_key: str,
+    interval_ms: int,
+    reply_to_message_id: Any = None,
 ) -> OneBotDeliverySink:
-    return OneBotDeliverySink(
-        lambda text: matcher.send(text_only_message(text, Message, MessageSegment)),
-        scope_key=scope_key,
-        interval_ms=interval_ms,
-    )
+    reply_id = _normalize_reply_id(reply_to_message_id)
+
+    async def _send(text: str):
+        nonlocal reply_id
+        message = text_only_message(text, Message, MessageSegment)
+        # 引用段只挂首个 chunk：消费后即置空，后续 chunk 纯文本。
+        current, reply_id = reply_id, None
+        return await send_with_reply_fallback(
+            matcher.send, message,
+            reply_to_message_id=current, Message=Message, MessageSegment=MessageSegment,
+        )
+
+    return OneBotDeliverySink(_send, scope_key=scope_key, interval_ms=interval_ms)
 
 
 def make_group_bot_sink(
-    bot, Message, MessageSegment, *, group_id: int | str, interval_ms: int
+    bot,
+    Message,
+    MessageSegment,
+    *,
+    group_id: int | str,
+    interval_ms: int,
+    reply_to_message_id: Any = None,
 ) -> OneBotDeliverySink:
+    reply_id = _normalize_reply_id(reply_to_message_id)
+
+    async def _send_message(message) -> Any:
+        return await bot.send_group_msg(group_id=int(group_id), message=message)
+
     async def _send(text: str):
-        return await bot.send_group_msg(
-            group_id=int(group_id),
-            message=text_only_message(text, Message, MessageSegment),
+        nonlocal reply_id
+        message = text_only_message(text, Message, MessageSegment)
+        current, reply_id = reply_id, None
+        return await send_with_reply_fallback(
+            _send_message, message,
+            reply_to_message_id=current, Message=Message, MessageSegment=MessageSegment,
         )
 
     return OneBotDeliverySink(_send, scope_key=str(group_id), interval_ms=interval_ms)

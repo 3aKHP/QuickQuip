@@ -14,6 +14,7 @@ from quickquip.adapters.nonebot._llm_reply import (
     make_matcher_sink,
     record_final_receipt,
     reply_interval_ms,
+    send_with_reply_fallback,
 )
 from quickquip.adapters.nonebot.voice import append_voice_transcripts, transcribe_message_records
 from quickquip.common.bot_action_trace import bot_action_trace
@@ -76,6 +77,13 @@ def _result_reason(result: dict) -> str:
     rule_name = str(result.get("rule_name", "unknown"))
     kind = str(result.get("trigger_kind", "rule"))
     return f"{kind} 触发：{rule_name}"
+
+
+def _quote_reply_target(group_id, message_id: str) -> str | None:
+    """群级开关开启时返回应引用的触发消息 id（机械化接线，LLM 无感）。"""
+    if message_id and rule_switch.is_enabled(group_id, "llm_quote_reply"):
+        return message_id
+    return None
 
 
 def _trim_last_content_unit(message):
@@ -271,10 +279,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 return
             from quickquip.llm.agent_records import TriggerKind
 
+            reply_to = _quote_reply_target(group_id, message_id)
             delivery_sink = make_matcher_sink(
                 matcher, Message, MessageSegment,
                 scope_key=str(group_id),
                 interval_ms=reply_interval_ms(svc),
+                reply_to_message_id=reply_to,
             )
             result = await svc.generate_reply(
                 group_id=group_id,
@@ -320,8 +330,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 # 逐 Turn 模式正文已由 sink 交付（reply 为空），此处只处理
                 # 最终单发/错误提示路径，避免二次发送（§10）。
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
-                    resp = await matcher.send(
-                        build_llm_reply_message(result, Message, MessageSegment)
+                    resp = await send_with_reply_fallback(
+                        matcher.send,
+                        build_llm_reply_message(result, Message, MessageSegment),
+                        reply_to_message_id=reply_to,
+                        Message=Message,
+                        MessageSegment=MessageSegment,
                     )
                     sent_msg_id = (
                         str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
@@ -368,10 +382,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
             )
             from quickquip.llm.agent_records import TriggerKind
 
+            reply_to = _quote_reply_target(group_id, message_id)
             passive_sink = make_matcher_sink(
                 matcher, Message, MessageSegment,
                 scope_key=str(group_id),
                 interval_ms=reply_interval_ms(svc),
+                reply_to_message_id=reply_to,
             )
             result = await svc.generate_reply(
                 group_id=group_id,
@@ -410,8 +426,12 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 source="group_message.awakening",
             ):
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
-                    resp = await matcher.send(
-                        build_llm_reply_message(result, Message, MessageSegment)
+                    resp = await send_with_reply_fallback(
+                        matcher.send,
+                        build_llm_reply_message(result, Message, MessageSegment),
+                        reply_to_message_id=reply_to,
+                        Message=Message,
+                        MessageSegment=MessageSegment,
                     )
                     sent_msg_id = (
                         str(resp.get("message_id", "")) if isinstance(resp, dict) else ""

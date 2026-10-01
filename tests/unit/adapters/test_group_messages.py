@@ -84,8 +84,11 @@ class FakeRateLimiter:
 
 
 class FakeRuleSwitch:
+    def __init__(self, disabled=()):
+        self.disabled = set(disabled)
+
     def is_enabled(self, group_id, rule):
-        return True
+        return rule not in self.disabled
 
 
 class FakeStats:
@@ -471,3 +474,55 @@ async def test_unregistered_at_falls_back_to_member_card(harness_factory, monkey
     kwargs = h.svc.generate_reply.await_args.kwargs
     assert "@小透明" in kwargs["prompt"]
     assert "@QQ3003" not in kwargs["prompt"]
+
+
+# ── 出站引用（llm_quote_reply） ─────────────────────────────────────
+
+
+async def test_explicit_reply_quotes_trigger_message(harness_factory):
+    """主动触发：最终单发带 reply 段引用触发消息。"""
+    h = harness_factory(_llm_settings(allow_prefix=True))
+
+    event = DummyGroupEvent(
+        DummyMessage([text_seg("/ai 你好")]), message_id="12345"
+    )
+    await h.handle(event)
+
+    sent = h.recorder.sent[-1]
+    assert sent[0].type == "reply"
+    assert sent[0].data["id"] == "12345"
+    assert sent[1].type == "text"
+
+
+async def test_quote_reply_switch_off_sends_plain(harness_factory, monkeypatch):
+    """llm_quote_reply 关闭后，回复不带引用段。"""
+    h = harness_factory(_llm_settings(allow_prefix=True))
+    monkeypatch.setattr(gm, "rule_switch", FakeRuleSwitch(disabled={"llm_quote_reply"}))
+
+    event = DummyGroupEvent(
+        DummyMessage([text_seg("/ai 你好")]), message_id="12345"
+    )
+    await h.handle(event)
+
+    sent = h.recorder.sent[-1]
+    assert all(seg.type != "reply" for seg in sent)
+
+
+async def test_passive_reply_quotes_trigger_message(harness_factory):
+    """被动唤醒（提问/兴趣触发）：回复同样引用触发消息。"""
+    h = harness_factory()
+    h.awakening_state.bot_messages.add(
+        100, "the Kubernetes deployment failed with ImagePullBackOff"
+    )
+    _seed_recent(h, ["早上好", "今天吃什么"])
+
+    event = DummyGroupEvent(
+        DummyMessage([text_seg("Kubernetes ImagePullBackOff again?")]),
+        message_id="23456",
+    )
+    await h.handle(event)
+
+    h.svc.generate_reply.assert_awaited_once()
+    sent = h.recorder.sent[-1]
+    assert sent[0].type == "reply"
+    assert sent[0].data["id"] == "23456"
