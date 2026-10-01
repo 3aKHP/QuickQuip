@@ -35,7 +35,7 @@ QuickQuip 应用层只依赖 NoneBot2 + OneBot V11 契约，不绑定任何具�
 
 **消息段**
 
-- 出站：`text`、`at`、`image`（base64:// 或 http(s) URL）、`record`（base64）。
+- 出站：`text`、`at`、`image`（base64:// 或 http(s) URL）、`record`（base64）、`reply`（引用锚定；协议端显式拒绝时发送侧去段重发正文）。
 - 入站：`image` 段 `data.url` 需可直连 GET（LLM 视觉、图生图直下）；语音经 `data.url` → 本地路径 → `get_record` 三级回退。
 
 **运行时职责**（适配器无关）
@@ -58,7 +58,7 @@ QuickQuip 应用层只依赖 NoneBot2 + OneBot V11 契约，不绑定任何具�
 | WebUI | `3080`（扫码登录、网络方式配置） |
 | 卷 | `llbot-qq/`（登录态，切勿丢失）、`llbot-data/`（配置与运行时数据） |
 | 快速登录 | `QUICK_LOGIN_QQ` 环境变量；有时效性，失效需重新扫码 |
-| 已验证能力 | v1.12.2 Windows/Linux Docker 验收：群/私聊、图片、语音 ASR、合并转发、撤回事件全链路真实消息验证 |
+| 已验证能力 | v1.12.2 Windows/Linux Docker 验收：群/私聊、图片、语音 ASR、合并转发、撤回事件全链路真实消息验证；v1.16.1-dev 验收（2026-10）：群聊 LLM 回复的出站 `reply` 段引用锚定（客户端正常渲染引用预览）与「@名字」转真实 `at` 段提醒 |
 
 **版本 pin 说明**：上游 `latest` 自 2026-08 起漂移到 pmhq 8.x——启动即要求在 auth.luckylillia.com 注册获取 `auth_token`（部分账号需人工审核），新部署会直接卡死在授权提示上。因此模板固定在 7.3.2。如需更换版本：NTQQ 强制升级导致旧构建无法登录时，到上游 Docker Hub 挑选新的 `vX.Y.Z-…` tag 更新模板；升级前先确认目标版本的授权要求。
 
