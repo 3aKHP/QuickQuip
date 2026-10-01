@@ -310,6 +310,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 interval_ms=reply_interval_ms(svc),
                 reply_to_message_id=reply_to,
                 resolve_mention=mention_resolver,
+                cooldown_seconds=mention_cooldown_seconds(svc),
             )
             result = await svc.generate_reply(
                 group_id=group_id,
@@ -426,6 +427,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 interval_ms=reply_interval_ms(svc),
                 reply_to_message_id=reply_to,
                 resolve_mention=mention_resolver,
+                cooldown_seconds=mention_cooldown_seconds(svc),
             )
             result = await svc.generate_reply(
                 group_id=group_id,

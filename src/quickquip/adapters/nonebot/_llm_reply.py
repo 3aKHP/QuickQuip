@@ -371,7 +371,7 @@ def make_matcher_sink(
     interval_ms: int,
     reply_to_message_id: Any = None,
     resolve_mention: Callable[[str], tuple[int, int] | None] | None = None,
-    mention_cooldown_seconds: float | None = None,
+    cooldown_seconds: float | None = None,
 ) -> OneBotDeliverySink:
     reply_id = _normalize_reply_id(reply_to_message_id)
 
@@ -389,7 +389,7 @@ def make_matcher_sink(
             and isinstance(resp, dict)
             and str(resp.get("message_id", "") or "").strip()
         ):
-            commit_mentions(scope_key, message, cooldown_seconds=mention_cooldown_seconds)
+            commit_mentions(scope_key, message, cooldown_seconds=cooldown_seconds)
         return resp
 
     return OneBotDeliverySink(_send, scope_key=scope_key, interval_ms=interval_ms)
@@ -404,7 +404,7 @@ def make_group_bot_sink(
     interval_ms: int,
     reply_to_message_id: Any = None,
     resolve_mention: Callable[[str], tuple[int, int] | None] | None = None,
-    mention_cooldown_seconds: float | None = None,
+    cooldown_seconds: float | None = None,
 ) -> OneBotDeliverySink:
     reply_id = _normalize_reply_id(reply_to_message_id)
 
@@ -425,7 +425,7 @@ def make_group_bot_sink(
             and str(resp.get("message_id", "") or "").strip()
         ):
             commit_mentions(
-                str(group_id), message, cooldown_seconds=mention_cooldown_seconds
+                str(group_id), message, cooldown_seconds=cooldown_seconds
             )
         return resp
 

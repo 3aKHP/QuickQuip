@@ -109,7 +109,7 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         group_id=group_id,
         interval_ms=reply_interval_ms(svc),
         resolve_mention=mention_resolver,
-        mention_cooldown_seconds=mention_cooldown_seconds(svc),
+        cooldown_seconds=mention_cooldown_seconds(svc),
     )
     result = await svc.generate_reply(
         group_id=group_id,

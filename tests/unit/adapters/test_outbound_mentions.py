@@ -255,6 +255,16 @@ def test_commit_ignores_non_at_and_malformed_segments():
     assert _resolver(snap)("镜子") == (10002, 2)
 
 
+def test_digit_channel_at_also_suppresses_name_channel_within_window():
+    """跨通道记账：数字通道产生的 at 段同样抑制同窗内同目标的名字通道提及。"""
+    snap = _snapshot([
+        IdentityEntry(canonical_name="镜子", qq_ids=["10002"], aliases=[], note=""),
+    ])
+    message = split_outbound_mentions("@QQ10002 先看", _FakeMessage, DummySegment)
+    commit_mentions("g1", message, cooldown_seconds=600.0)
+    assert _resolver(snap)("镜子 再来") is None
+
+
 # ── mention_cooldown_seconds 配置读取 ────────────────────────────────
 
 

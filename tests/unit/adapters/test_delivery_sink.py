@@ -248,7 +248,7 @@ async def test_matcher_sink_commits_mentions_after_confirmed_send():
     sink = make_matcher_sink(
         matcher, _Message, _Segment,
         scope_key="g-cool", interval_ms=0,
-        resolve_mention=resolver, mention_cooldown_seconds=600.0,
+        resolve_mention=resolver, cooldown_seconds=600.0,
     )
     receipt1 = await sink("dlv_1", {"text": "@镜子 第一条"})
     receipt2 = await sink("dlv_2", {"text": "@镜子 第二条"})
@@ -274,7 +274,7 @@ async def test_matcher_sink_unknown_send_does_not_consume_cooldown():
     sink = make_matcher_sink(
         no_id_matcher, _Message, _Segment,
         scope_key="g-miss", interval_ms=0,
-        resolve_mention=resolver, mention_cooldown_seconds=600.0,
+        resolve_mention=resolver, cooldown_seconds=600.0,
     )
     receipt = await sink("dlv_1", {"text": "@镜子 未确认"})
     assert receipt.status == DeliveryStatus.UNKNOWN
@@ -284,7 +284,7 @@ async def test_matcher_sink_unknown_send_does_not_consume_cooldown():
     sink2 = make_matcher_sink(
         matcher, _Message, _Segment,
         scope_key="g-miss", interval_ms=0,
-        resolve_mention=resolver, mention_cooldown_seconds=600.0,
+        resolve_mention=resolver, cooldown_seconds=600.0,
     )
     receipt2 = await sink2("dlv_2", {"text": "@镜子 正常"})
     assert receipt2.status == DeliveryStatus.SENT

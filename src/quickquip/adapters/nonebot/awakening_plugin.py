@@ -92,7 +92,7 @@ def register_boredom_scan_job(sched=None) -> int | None:
                     resolve_mention=build_outbound_mention_resolver(
                         kwargs["group_id"], bot.self_id, svc
                     ),
-                    mention_cooldown_seconds=mention_cooldown_seconds(svc),
+                    cooldown_seconds=mention_cooldown_seconds(svc),
                 )
 
                 async def _call(**kw):
