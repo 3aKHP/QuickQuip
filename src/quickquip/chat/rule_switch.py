@@ -21,6 +21,7 @@ _BUILTIN_SWITCHABLE_RULES: set[str] = {
     "sts_card_le",
     "llm_chat",
     "llm_quote_reply",
+    "llm_at_mention",
     "scheduled_message_llm",
     "tieba_random_post",
     "awakening_extend",

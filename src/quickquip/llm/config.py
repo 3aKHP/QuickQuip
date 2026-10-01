@@ -111,6 +111,8 @@ class RuntimeConfig:
     reply_chunk_max_chars: int = 1200
     reply_send_interval_ms: int = 800
     reply_max_chunks_per_loop: int = 64
+    # 出站「@名字」艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却）。
+    mention_cooldown_seconds: float = 600.0
 
 
 @dataclass(slots=True)
@@ -1052,6 +1054,10 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             ),
             reply_max_chunks_per_loop=min(
                 256, max(1, int(runtime_raw.get("reply_max_chunks_per_loop", 64)))
+            ),
+            mention_cooldown_seconds=min(
+                86_400.0,
+                max(0.0, float(runtime_raw.get("mention_cooldown_seconds", 600.0))),
             ),
             recent_context_token_budget=recent_context_token_budget,
             recent_context_floor_seconds=recent_context_floor_seconds,

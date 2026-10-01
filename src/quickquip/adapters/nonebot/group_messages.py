@@ -12,6 +12,8 @@ from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot._llm_reply import (
     build_llm_reply_message,
     make_matcher_sink,
+    make_mention_resolver,
+    mention_cooldown_seconds,
     record_final_receipt,
     reply_interval_ms,
     send_with_reply_fallback,
@@ -84,6 +86,23 @@ def _quote_reply_target(group_id, message_id: str) -> str | None:
     if message_id and rule_switch.is_enabled(group_id, "llm_quote_reply"):
         return message_id
     return None
+
+
+def _outbound_mention_resolver(group_id, self_id, svc):
+    """群级开关开启时构建「@名字」解析器；关闭时仅保留 @QQ数字 通道。"""
+    if not rule_switch.is_enabled(group_id, "llm_at_mention"):
+        return None
+    try:
+        snapshot = stored_identities.snapshot(group_id)
+    except Exception:
+        logger.warning("group_messages: 身份快照加载失败，@名字 通道本轮关闭", exc_info=True)
+        return None
+    return make_mention_resolver(
+        snapshot,
+        bot_qq=str(self_id),
+        scope_key=str(group_id),
+        cooldown_seconds=mention_cooldown_seconds(svc),
+    )
 
 
 def _trim_last_content_unit(message):
@@ -280,11 +299,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
             from quickquip.llm.agent_records import TriggerKind
 
             reply_to = _quote_reply_target(group_id, message_id)
+            mention_resolver = _outbound_mention_resolver(group_id, event.self_id, svc)
             delivery_sink = make_matcher_sink(
                 matcher, Message, MessageSegment,
                 scope_key=str(group_id),
                 interval_ms=reply_interval_ms(svc),
                 reply_to_message_id=reply_to,
+                resolve_mention=mention_resolver,
             )
             result = await svc.generate_reply(
                 group_id=group_id,
@@ -332,7 +353,10 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
                     resp = await send_with_reply_fallback(
                         matcher.send,
-                        build_llm_reply_message(result, Message, MessageSegment),
+                        build_llm_reply_message(
+                            result, Message, MessageSegment,
+                            resolve_mention=mention_resolver,
+                        ),
                         reply_to_message_id=reply_to,
                         Message=Message,
                         MessageSegment=MessageSegment,
@@ -383,11 +407,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
             from quickquip.llm.agent_records import TriggerKind
 
             reply_to = _quote_reply_target(group_id, message_id)
+            mention_resolver = _outbound_mention_resolver(group_id, event.self_id, svc)
             passive_sink = make_matcher_sink(
                 matcher, Message, MessageSegment,
                 scope_key=str(group_id),
                 interval_ms=reply_interval_ms(svc),
                 reply_to_message_id=reply_to,
+                resolve_mention=mention_resolver,
             )
             result = await svc.generate_reply(
                 group_id=group_id,
@@ -428,7 +454,10 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
                     resp = await send_with_reply_fallback(
                         matcher.send,
-                        build_llm_reply_message(result, Message, MessageSegment),
+                        build_llm_reply_message(
+                            result, Message, MessageSegment,
+                            resolve_mention=mention_resolver,
+                        ),
                         reply_to_message_id=reply_to,
                         Message=Message,
                         MessageSegment=MessageSegment,

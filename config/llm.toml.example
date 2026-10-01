@@ -65,6 +65,9 @@ tool_max_calls_per_round = 16
 # reply_send_interval_ms = 800
 # reply_max_chunks_per_loop = 64
 
+# 出站「@名字」艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却）
+# mention_cooldown_seconds = 600
+
 # 上游 429/5xx/网络错误的自动重试（所有 LLM 调用路径统一生效；探活/诊断不受影响）
 # retry_max_attempts 含首次调用；第 n 次重试延迟 = base_delay * 2^n * (1 + 随机抖动)
 retry_max_attempts = 3
