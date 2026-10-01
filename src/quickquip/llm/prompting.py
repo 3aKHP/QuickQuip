@@ -265,6 +265,7 @@ def build_system_prompt(
     if chat_type != "private":
         lines.append(
             "- 回复正文里写「@名字」或「@QQ 号」，发送时会转成真实艾特并提醒对方；"
+            "「@名字」的名字需取自成员档案的登记名或别名（备注描述里的称呼不参与解析）；"
             "只想提及、不想提醒时，直接写名字、不要带 @。"
         )
         lines.append(
