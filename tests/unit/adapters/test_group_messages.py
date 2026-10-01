@@ -18,6 +18,7 @@ from nonebot.adapters.onebot.v11 import Message, MessageSegment
 import quickquip.adapters.nonebot.group_messages as gm
 import quickquip.chat.awakening.config as awakening_config_module
 import quickquip.chat.awakening.state as awakening_state_module
+from quickquip.adapters.nonebot._llm_reply import reset_mention_cooldowns
 from quickquip.chat.repeat_detector import RepeatAction
 from quickquip.chat.awakening import (
     AwakeningConfig,
@@ -479,6 +480,13 @@ async def test_unregistered_at_falls_back_to_member_card(harness_factory, monkey
 # ── 出站引用与艾特（llm_quote_reply / llm_at_mention） ────────────────
 
 
+@pytest.fixture(autouse=True)
+def _clean_mention_cooldowns():
+    reset_mention_cooldowns()
+    yield
+    reset_mention_cooldowns()
+
+
 def _snap_with_jingzi():
     from quickquip.common.identity_sources import IdentitySnapshot
     from quickquip.llm.identity import IdentityEntry, IdentityIndex
@@ -541,12 +549,8 @@ async def test_passive_reply_quotes_trigger_message(harness_factory):
     assert sent[0].data["id"] == "23456"
 
 
-async def test_at_mention_resolves_registered_name(harness_factory, monkeypatch):
-    """llm_at_mention 开启：模型输出「@名字」转成真实 at 段。"""
-    from quickquip.adapters.nonebot._llm_reply import reset_mention_cooldowns
-
-    reset_mention_cooldowns()
-    h = harness_factory(_llm_settings(allow_prefix=True))
+def _enable_at_mention(h, monkeypatch):
+    """名字通道公共装配：登记「镜子」的身份快照 + 模型输出「@名字」。"""
     snapshot = _snap_with_jingzi()
     monkeypatch.setattr(
         gm, "stored_identities", SimpleNamespace(snapshot=lambda gid: snapshot)
@@ -557,6 +561,12 @@ async def test_at_mention_resolves_registered_name(harness_factory, monkeypatch)
         "provider_id": "prov",
         "model": "test-model",
     }
+
+
+async def test_at_mention_resolves_registered_name(harness_factory, monkeypatch):
+    """llm_at_mention 开启：模型输出「@名字」转成真实 at 段。"""
+    h = harness_factory(_llm_settings(allow_prefix=True))
+    _enable_at_mention(h, monkeypatch)
 
     event = DummyGroupEvent(
         DummyMessage([text_seg("/ai 评价一下")]), message_id="12345"
@@ -566,26 +576,13 @@ async def test_at_mention_resolves_registered_name(harness_factory, monkeypatch)
     sent = h.recorder.sent[-1]
     kinds = [(seg.type, dict(seg.data)) for seg in sent]
     assert ("at", {"qq": "2002"}) in kinds
-    reset_mention_cooldowns()
 
 
 async def test_at_mention_switch_off_keeps_name_as_text(harness_factory, monkeypatch):
     """llm_at_mention 关闭：「@名字」保留为纯文本。"""
-    from quickquip.adapters.nonebot._llm_reply import reset_mention_cooldowns
-
-    reset_mention_cooldowns()
     h = harness_factory(_llm_settings(allow_prefix=True))
     monkeypatch.setattr(gm, "rule_switch", FakeRuleSwitch(disabled={"llm_at_mention"}))
-    snapshot = _snap_with_jingzi()
-    monkeypatch.setattr(
-        gm, "stored_identities", SimpleNamespace(snapshot=lambda gid: snapshot)
-    )
-    h.svc.generate_reply.return_value = {
-        "reply": "@镜子 说得对",
-        "llm_used": True,
-        "provider_id": "prov",
-        "model": "test-model",
-    }
+    _enable_at_mention(h, monkeypatch)
 
     event = DummyGroupEvent(
         DummyMessage([text_seg("/ai 评价一下")]), message_id="12345"
@@ -596,4 +593,3 @@ async def test_at_mention_switch_off_keeps_name_as_text(harness_factory, monkeyp
     assert all(seg.type != "at" for seg in sent)
     text = "".join(seg.data.get("text", "") for seg in sent)
     assert "@镜子 说得对" in text
-    reset_mention_cooldowns()

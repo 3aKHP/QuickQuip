@@ -11,16 +11,15 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
-try:
-    from nonebot.exception import ActionFailed
-except ModuleNotFoundError:  # pragma: no cover - 无 nonebot 环境下不存在可捕获的 ActionFailed
-    ActionFailed = None
+from nonebot.exception import ActionFailed
 
 from quickquip.llm.agent_records import DeliveryReceipt, DeliveryStatus
 
 if TYPE_CHECKING:
     from nonebot.adapters.onebot.v11 import Message as OneBotMessage
     from nonebot.adapters.onebot.v11 import MessageSegment as OneBotMessageSegment
+
+    from quickquip.common.identity_sources import IdentitySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +35,51 @@ _OUTBOUND_AT_QQ_PATTERN = re.compile(r"@QQ(\d{5,12})(?!\d)")
 _DEFAULT_MAX_MENTIONS = 3
 _MENTION_COOLDOWN_SECONDS = 600.0
 _MAX_MENTION_NAME_LENGTH = 24
+# 冷却表上限：超出时先淘汰过期项，仍超则逐出最旧条目（与 rule_switch 的
+# max_groups 范式一致，长跑多群场景不无界增长）。
+_LAST_MENTION_AT_MAX = 4096
 _LAST_MENTION_AT: dict[tuple[str, int], float] = {}
+
+
+def _prune_mention_cooldowns(now: float, cooldown_seconds: float) -> None:
+    if len(_LAST_MENTION_AT) <= _LAST_MENTION_AT_MAX:
+        return
+    for key, ts in list(_LAST_MENTION_AT.items()):
+        if now - ts >= cooldown_seconds:
+            del _LAST_MENTION_AT[key]
+    while len(_LAST_MENTION_AT) > _LAST_MENTION_AT_MAX:
+        oldest = min(_LAST_MENTION_AT, key=lambda key: _LAST_MENTION_AT[key])
+        del _LAST_MENTION_AT[oldest]
+
+
+def commit_mentions(
+    scope_key: str,
+    message,
+    *,
+    cooldown_seconds: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """送达确认后提交艾特冷却：扫描消息中的 at 段并记账。
+
+    仅在发送方拿到可信 message_id 后调用；解析侧（make_mention_resolver）
+    只读冷却，发送失败/未知不消耗冷却名额。cooldown 为 0 时跳过写入。
+    """
+    cooldown = _MENTION_COOLDOWN_SECONDS if cooldown_seconds is None else float(cooldown_seconds)
+    if cooldown <= 0:
+        return
+    now = clock()
+    wrote = False
+    for segment in message:
+        if getattr(segment, "type", "") != "at":
+            continue
+        try:
+            qq_int = int(str(getattr(segment, "data", {}).get("qq", "")).strip())
+        except (TypeError, ValueError):
+            continue
+        _LAST_MENTION_AT[(scope_key, qq_int)] = now
+        wrote = True
+    if wrote:
+        _prune_mention_cooldowns(now, cooldown)
 
 
 def split_outbound_mentions(
@@ -85,36 +128,31 @@ def split_outbound_mentions(
 
 
 def make_mention_resolver(
-    snapshot,
+    snapshot: IdentitySnapshot,
     *,
+    scope_key: str,
     bot_qq: str | int | None = None,
-    scope_key: str = "",
     cooldown_seconds: float | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> Callable[[str], tuple[int, int] | None]:
     """构建「@名字」解析器：输入 @ 后的文本，返回 ``(qq, 消耗字符数)``。
 
-    在身份快照的已知名字（标准身份、别名、观察名片）上做最长匹配；
-    命中已知名字后不再向更短名字回退——歧义、艾特 bot 自身、冷却窗内
-    重复艾特同一人都使整段提及保留为文本。at-all 在结构上不可达：
-    本解析器只产出快照内的 int QQ。纯数字与 ``QQ<数字>`` 形态的名字
-    不参与解析（数字通道由扫描器的 @QQ 正则独占，防幻觉长号）。
+    在身份快照的已知名字（``IdentitySnapshot.mentionable_names``：标准身份、
+    别名、观察名片）上做最长匹配；命中已知名字后不再向更短名字回退——歧义、
+    艾特 bot 自身、冷却窗内重复艾特同一人都使整段提及保留为文本。at-all 在
+    结构上不可达：本解析器只产出快照内的 int QQ。纯数字与 ``QQ<数字>`` 形态的
+    名字不参与解析（数字通道由扫描器的 @QQ 正则独占，防幻觉长号）。
+
+    冷却只读不提交：命中冷却窗时降级为文本，但写账由发送侧
+    ``commit_mentions`` 在确认送达后执行——发送失败不消耗冷却名额。
     """
     cooldown = _MENTION_COOLDOWN_SECONDS if cooldown_seconds is None else float(cooldown_seconds)
-    names: set[str] = set()
-    index = getattr(snapshot, "index", None)
-    for entry in getattr(index, "entries", None) or []:
-        names.add(str(getattr(entry, "canonical_name", "") or ""))
-        names.update(str(alias or "") for alias in (getattr(entry, "aliases", None) or []))
-    names.update(str(name or "") for name in (getattr(snapshot, "names", None) or {}).values())
     names = {
-        name.strip()
-        for name in names
-        if name
-        and name.strip()
-        and len(name.strip()) <= _MAX_MENTION_NAME_LENGTH
-        and not name.strip().isdigit()
-        and not (name.strip().startswith("QQ") and name.strip()[2:].isdigit())
+        name
+        for name in snapshot.mentionable_names()
+        if len(name) <= _MAX_MENTION_NAME_LENGTH
+        and not name.isdigit()
+        and not (name.startswith("QQ") and name[2:].isdigit())
     }
     lengths = sorted({len(name) for name in names}, reverse=True)
     bot_key = str(bot_qq or "")
@@ -142,12 +180,14 @@ def make_mention_resolver(
                 qq_int = int(qq)
             except (TypeError, ValueError):
                 return None
-            key = (scope_key, qq_int)
-            now = clock()
-            last = _LAST_MENTION_AT.get(key)
-            if last is not None and now - last < cooldown:
-                return None
-            _LAST_MENTION_AT[key] = now
+            if cooldown > 0:
+                last = _LAST_MENTION_AT.get((scope_key, qq_int))
+                if last is not None and clock() - last < cooldown:
+                    logger.debug(
+                        "艾特冷却窗内降级为文本：name=%r qq=%s scope=%s",
+                        candidate, qq_int, scope_key,
+                    )
+                    return None
             return (qq_int, length)
         return None
 
@@ -201,9 +241,7 @@ async def send_with_reply_fallback(
     quoted = Message([MessageSegment.reply(reply_id), *message])
     try:
         return await send(quoted)
-    except Exception as exc:
-        if ActionFailed is None or not isinstance(exc, ActionFailed):
-            raise
+    except ActionFailed:
         logger.warning("引用段发送被协议端拒绝，去引用重发正文", exc_info=True)
         return await send(message)
 
@@ -333,6 +371,7 @@ def make_matcher_sink(
     interval_ms: int,
     reply_to_message_id: Any = None,
     resolve_mention: Callable[[str], tuple[int, int] | None] | None = None,
+    mention_cooldown_seconds: float | None = None,
 ) -> OneBotDeliverySink:
     reply_id = _normalize_reply_id(reply_to_message_id)
 
@@ -341,10 +380,17 @@ def make_matcher_sink(
         message = text_only_message(text, Message, MessageSegment, resolve_mention=resolve_mention)
         # 引用段只挂首个 chunk：消费后即置空，后续 chunk 纯文本。
         current, reply_id = reply_id, None
-        return await send_with_reply_fallback(
+        resp = await send_with_reply_fallback(
             matcher.send, message,
             reply_to_message_id=current, Message=Message, MessageSegment=MessageSegment,
         )
+        if (
+            resolve_mention is not None
+            and isinstance(resp, dict)
+            and str(resp.get("message_id", "") or "").strip()
+        ):
+            commit_mentions(scope_key, message, cooldown_seconds=mention_cooldown_seconds)
+        return resp
 
     return OneBotDeliverySink(_send, scope_key=scope_key, interval_ms=interval_ms)
 
@@ -358,6 +404,7 @@ def make_group_bot_sink(
     interval_ms: int,
     reply_to_message_id: Any = None,
     resolve_mention: Callable[[str], tuple[int, int] | None] | None = None,
+    mention_cooldown_seconds: float | None = None,
 ) -> OneBotDeliverySink:
     reply_id = _normalize_reply_id(reply_to_message_id)
 
@@ -368,10 +415,19 @@ def make_group_bot_sink(
         nonlocal reply_id
         message = text_only_message(text, Message, MessageSegment, resolve_mention=resolve_mention)
         current, reply_id = reply_id, None
-        return await send_with_reply_fallback(
+        resp = await send_with_reply_fallback(
             _send_message, message,
             reply_to_message_id=current, Message=Message, MessageSegment=MessageSegment,
         )
+        if (
+            resolve_mention is not None
+            and isinstance(resp, dict)
+            and str(resp.get("message_id", "") or "").strip()
+        ):
+            commit_mentions(
+                str(group_id), message, cooldown_seconds=mention_cooldown_seconds
+            )
+        return resp
 
     return OneBotDeliverySink(_send, scope_key=str(group_id), interval_ms=interval_ms)
 

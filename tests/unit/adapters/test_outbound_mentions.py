@@ -5,16 +5,22 @@
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from quickquip.adapters.nonebot._llm_reply import (
+    _MENTION_COOLDOWN_SECONDS,
     build_llm_reply_message,
+    commit_mentions,
     make_mention_resolver,
+    mention_cooldown_seconds,
     reset_mention_cooldowns,
     split_outbound_mentions,
 )
 from quickquip.common.identity import IdentityEntry, IdentityIndex
 from quickquip.common.identity_sources import IdentitySnapshot
+from tests.fixtures.onebot import DummySegment
 
 
 class _FakeSegment:
@@ -195,14 +201,29 @@ def test_max_mentions_cap_applies_to_both_channels():
     ]
 
 
+def test_resolve_is_read_only_without_commit():
+    """解析侧只读冷却：送达确认前重复解析不互相挤占。"""
+    snap = _snapshot([
+        IdentityEntry(canonical_name="镜子", qq_ids=["10002"], aliases=[], note=""),
+    ])
+    resolver = _resolver(snap)
+    assert resolver("镜子 你看") == (10002, 2)
+    assert resolver("镜子 再看") == (10002, 2)
+
+
 def test_cooldown_degrades_repeat_mention_within_window():
     snap = _snapshot([
         IdentityEntry(canonical_name="镜子", qq_ids=["10002"], aliases=[], note=""),
     ])
     now = [1000.0]
-    resolver = _resolver(snap, clock=lambda: now[0])
-    assert resolver("镜子 你看") == (10002, 2)
-    assert resolver("镜子 又来") is None  # 冷却窗内降级
+
+    def clock():
+        return now[0]
+
+    # 送达确认后记账：窗内同一目标降级为文本，出窗恢复
+    commit_mentions("g1", [DummySegment.at(10002)], cooldown_seconds=600.0, clock=clock)
+    resolver = _resolver(snap, clock=clock)
+    assert resolver("镜子 又来") is None
     now[0] += 601
     assert resolver("镜子 恢复") == (10002, 2)
 
@@ -211,10 +232,45 @@ def test_cooldown_is_scoped_per_group_and_target():
     snap = _snapshot([
         IdentityEntry(canonical_name="镜子", qq_ids=["10002"], aliases=[], note=""),
     ])
-    resolver_g1 = _resolver(snap, scope_key="g1")
-    resolver_g2 = _resolver(snap, scope_key="g2")
-    assert resolver_g1("镜子") == (10002, 2)
-    assert resolver_g2("镜子") == (10002, 2)  # 另一群不受影响
+    commit_mentions("g1", [DummySegment.at(10002)], cooldown_seconds=600.0)
+    assert _resolver(snap, scope_key="g1")("镜子") is None
+    assert _resolver(snap, scope_key="g2")("镜子") == (10002, 2)  # 另一群不受影响
+
+
+def test_zero_cooldown_disables_degradation():
+    snap = _snapshot([
+        IdentityEntry(canonical_name="镜子", qq_ids=["10002"], aliases=[], note=""),
+    ])
+    commit_mentions("g1", [DummySegment.at(10002)], cooldown_seconds=0.0)
+    resolver = _resolver(snap, cooldown_seconds=0.0)
+    assert resolver("镜子") == (10002, 2)
+    assert resolver("镜子") == (10002, 2)
+
+
+def test_commit_ignores_non_at_and_malformed_segments():
+    commit_mentions("g1", [DummySegment.text("@镜子"), DummySegment("at", {"qq": "abc"})])
+    snap = _snapshot([
+        IdentityEntry(canonical_name="镜子", qq_ids=["10002"], aliases=[], note=""),
+    ])
+    assert _resolver(snap)("镜子") == (10002, 2)
+
+
+# ── mention_cooldown_seconds 配置读取 ────────────────────────────────
+
+
+def test_mention_cooldown_seconds_reads_runtime_config():
+    svc = SimpleNamespace(
+        config=SimpleNamespace(runtime=SimpleNamespace(mention_cooldown_seconds=42.0))
+    )
+    assert mention_cooldown_seconds(svc) == 42.0
+
+
+def test_mention_cooldown_seconds_falls_back_for_stub_or_invalid():
+    assert mention_cooldown_seconds(object()) == _MENTION_COOLDOWN_SECONDS
+    bad = SimpleNamespace(
+        config=SimpleNamespace(runtime=SimpleNamespace(mention_cooldown_seconds="abc"))
+    )
+    assert mention_cooldown_seconds(bad) == _MENTION_COOLDOWN_SECONDS
 
 
 def test_build_llm_reply_message_passes_resolver_through():

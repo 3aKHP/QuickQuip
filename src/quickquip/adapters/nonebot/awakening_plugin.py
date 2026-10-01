@@ -13,7 +13,9 @@ except (ModuleNotFoundError, ValueError):
 
 from quickquip.adapters.nonebot._llm_reply import (
     build_llm_reply_message,
+    commit_mentions,
     make_group_bot_sink,
+    mention_cooldown_seconds,
     record_final_receipt,
     reply_interval_ms,
 )
@@ -74,12 +76,12 @@ def register_boredom_scan_job(sched=None) -> int | None:
             _ensure_llm_bindings()
             svc = get_llm_service()
 
-            def _build_reply(result: dict):
-                return build_llm_reply_message(result, Message, MessageSegment)
-
             # 发送循环归适配层：chat 层只产出待发送计划，统一生成/交付
             # 流程（含 DeliverySink）由本层注入；传输成功后回调
             # confirm_boredom_sent 确认冷却/统计/缓存。
+            from quickquip.adapters.nonebot.group_messages import (
+                build_outbound_mention_resolver,
+            )
             from quickquip.llm.agent_records import TriggerKind
 
             def _generate_with_delivery(**kwargs):
@@ -87,6 +89,10 @@ def register_boredom_scan_job(sched=None) -> int | None:
                     bot, Message, MessageSegment,
                     group_id=str(kwargs["group_id"]),
                     interval_ms=reply_interval_ms(svc),
+                    resolve_mention=build_outbound_mention_resolver(
+                        kwargs["group_id"], bot.self_id, svc
+                    ),
+                    mention_cooldown_seconds=mention_cooldown_seconds(svc),
                 )
 
                 async def _call(**kw):
@@ -113,13 +119,26 @@ def register_boredom_scan_job(sched=None) -> int | None:
                 try:
                     with bot_action_trace(**plan.trace_kwargs()):
                         if str(plan.reply_result.get("reply") or "").strip():
+                            mention_resolver = build_outbound_mention_resolver(
+                                plan.group_id, bot.self_id, svc
+                            )
+                            outbound = build_llm_reply_message(
+                                plan.reply_result, Message, MessageSegment,
+                                resolve_mention=mention_resolver,
+                            )
                             resp = await bot.send_group_msg(
                                 group_id=int(plan.group_id),
-                                message=_build_reply(plan.reply_result),
+                                message=outbound,
                             )
                             sent_msg_id = (
                                 str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
                             )
+                            if sent_msg_id and mention_resolver is not None:
+                                commit_mentions(
+                                    str(plan.group_id),
+                                    outbound,
+                                    cooldown_seconds=mention_cooldown_seconds(svc),
+                                )
                             record_final_receipt(svc, plan.reply_result, sent_msg_id)
                     if not plan.reply_result.get("cancelled_reason"):
                         # 排队超耐心取消的轮零发送：确认冷却/统计会把

@@ -11,6 +11,7 @@ from quickquip.llm.rendering import render_message_for_llm
 from quickquip.adapters.nonebot._forward import extract_forward_content
 from quickquip.adapters.nonebot._llm_reply import (
     build_llm_reply_message,
+    commit_mentions,
     make_matcher_sink,
     make_mention_resolver,
     mention_cooldown_seconds,
@@ -88,8 +89,11 @@ def _quote_reply_target(group_id, message_id: str) -> str | None:
     return None
 
 
-def _outbound_mention_resolver(group_id, self_id, svc):
-    """群级开关开启时构建「@名字」解析器；关闭时仅保留 @QQ数字 通道。"""
+def build_outbound_mention_resolver(group_id, self_id, svc):
+    """群级开关开启时构建「@名字」解析器；关闭时仅保留 @QQ数字 通道。
+
+    供本模块两条 LLM 路径与 awakening/scheduler 等群聊 LLM 发送方共用。
+    """
     if not rule_switch.is_enabled(group_id, "llm_at_mention"):
         return None
     try:
@@ -299,7 +303,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             from quickquip.llm.agent_records import TriggerKind
 
             reply_to = _quote_reply_target(group_id, message_id)
-            mention_resolver = _outbound_mention_resolver(group_id, event.self_id, svc)
+            mention_resolver = build_outbound_mention_resolver(group_id, event.self_id, svc)
             delivery_sink = make_matcher_sink(
                 matcher, Message, MessageSegment,
                 scope_key=str(group_id),
@@ -351,12 +355,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 # 逐 Turn 模式正文已由 sink 交付（reply 为空），此处只处理
                 # 最终单发/错误提示路径，避免二次发送（§10）。
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
+                    outbound = build_llm_reply_message(
+                        result, Message, MessageSegment,
+                        resolve_mention=mention_resolver,
+                    )
                     resp = await send_with_reply_fallback(
                         matcher.send,
-                        build_llm_reply_message(
-                            result, Message, MessageSegment,
-                            resolve_mention=mention_resolver,
-                        ),
+                        outbound,
                         reply_to_message_id=reply_to,
                         Message=Message,
                         MessageSegment=MessageSegment,
@@ -364,6 +369,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
                     sent_msg_id = (
                         str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
                     )
+                    # 冷却记账以送达确认（可信 message_id）为准：发送失败不消耗名额
+                    if sent_msg_id and mention_resolver is not None:
+                        commit_mentions(
+                            str(group_id),
+                            outbound,
+                            cooldown_seconds=mention_cooldown_seconds(svc),
+                        )
                     record_final_receipt(svc, result, sent_msg_id)
             return
 
@@ -407,7 +419,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             from quickquip.llm.agent_records import TriggerKind
 
             reply_to = _quote_reply_target(group_id, message_id)
-            mention_resolver = _outbound_mention_resolver(group_id, event.self_id, svc)
+            mention_resolver = build_outbound_mention_resolver(group_id, event.self_id, svc)
             passive_sink = make_matcher_sink(
                 matcher, Message, MessageSegment,
                 scope_key=str(group_id),
@@ -452,12 +464,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 source="group_message.awakening",
             ):
                 if str(result.get("reply") or "").strip() or (result.get("images") or []):
+                    outbound = build_llm_reply_message(
+                        result, Message, MessageSegment,
+                        resolve_mention=mention_resolver,
+                    )
                     resp = await send_with_reply_fallback(
                         matcher.send,
-                        build_llm_reply_message(
-                            result, Message, MessageSegment,
-                            resolve_mention=mention_resolver,
-                        ),
+                        outbound,
                         reply_to_message_id=reply_to,
                         Message=Message,
                         MessageSegment=MessageSegment,
@@ -465,6 +478,13 @@ def register_message_matcher(on_message, Message, MessageSegment):
                     sent_msg_id = (
                         str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
                     )
+                    # 冷却记账以送达确认（可信 message_id）为准：发送失败不消耗名额
+                    if sent_msg_id and mention_resolver is not None:
+                        commit_mentions(
+                            str(group_id),
+                            outbound,
+                            cooldown_seconds=mention_cooldown_seconds(svc),
+                        )
                     record_final_receipt(svc, result, sent_msg_id)
             return
 

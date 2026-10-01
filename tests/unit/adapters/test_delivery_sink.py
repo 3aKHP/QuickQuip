@@ -5,16 +5,30 @@ import asyncio
 import time
 import types
 
+import pytest
 from nonebot.exception import ActionFailed
 
 from quickquip.adapters.nonebot._llm_reply import (
     OneBotDeliverySink,
     make_matcher_sink,
+    make_mention_resolver,
     record_final_receipt,
     reset_delivery_throttle,
+    reset_mention_cooldowns,
     text_only_message,
 )
+from quickquip.common.identity import IdentityEntry, IdentityIndex
+from quickquip.common.identity_sources import IdentitySnapshot
 from quickquip.llm.agent_records import DeliveryStatus
+
+
+@pytest.fixture(autouse=True)
+def _clean_state():
+    reset_delivery_throttle()
+    reset_mention_cooldowns()
+    yield
+    reset_delivery_throttle()
+    reset_mention_cooldowns()
 
 
 def _seg_text(message) -> str:
@@ -215,3 +229,63 @@ async def test_record_final_receipt_uses_exact_row_id():
     # 无 row_id 的回退路径（记录器未启用的旧链路）。
     record_final_receipt(svc, {"scope_key": "1001"}, "qq-8")
     assert calls[-1] == ("legacy", "1001", "qq-8")
+
+
+def _jingzi_snapshot() -> IdentitySnapshot:
+    index = IdentityIndex(
+        entries=[IdentityEntry(canonical_name="镜子", qq_ids=["2002"], aliases=[], note="")]
+    )
+    index._build_indexes()
+    return IdentitySnapshot(index=index, names={})
+
+
+async def test_matcher_sink_commits_mentions_after_confirmed_send():
+    """带 resolver 的 sink：首次送达确认后记账，窗内同名提及降级为文本。"""
+    matcher = _RecordingMatcher()
+    resolver = make_mention_resolver(
+        _jingzi_snapshot(), scope_key="g-cool", bot_qq="999", cooldown_seconds=600.0
+    )
+    sink = make_matcher_sink(
+        matcher, _Message, _Segment,
+        scope_key="g-cool", interval_ms=0,
+        resolve_mention=resolver, mention_cooldown_seconds=600.0,
+    )
+    receipt1 = await sink("dlv_1", {"text": "@镜子 第一条"})
+    receipt2 = await sink("dlv_2", {"text": "@镜子 第二条"})
+    assert receipt1.status == DeliveryStatus.SENT
+    assert receipt2.status == DeliveryStatus.SENT
+    assert _seg_types(matcher.sent[0]) == ["at", "text"]
+    assert _seg_types(matcher.sent[1]) == ["text"]
+    assert _seg_text(matcher.sent[1]) == "@镜子 第二条"
+
+
+async def test_matcher_sink_unknown_send_does_not_consume_cooldown():
+    """发送无可信 message_id（UNKNOWN）不记账：后续同名提及仍真实艾特。"""
+
+    class _NoIdMatcher(_RecordingMatcher):
+        async def send(self, message):
+            self.sent.append(message)
+            return {}
+
+    resolver = make_mention_resolver(
+        _jingzi_snapshot(), scope_key="g-miss", bot_qq="999", cooldown_seconds=600.0
+    )
+    no_id_matcher = _NoIdMatcher()
+    sink = make_matcher_sink(
+        no_id_matcher, _Message, _Segment,
+        scope_key="g-miss", interval_ms=0,
+        resolve_mention=resolver, mention_cooldown_seconds=600.0,
+    )
+    receipt = await sink("dlv_1", {"text": "@镜子 未确认"})
+    assert receipt.status == DeliveryStatus.UNKNOWN
+    assert _seg_types(no_id_matcher.sent[0]) == ["at", "text"]  # 艾特尝试了，但未确认送达
+
+    matcher = _RecordingMatcher()
+    sink2 = make_matcher_sink(
+        matcher, _Message, _Segment,
+        scope_key="g-miss", interval_ms=0,
+        resolve_mention=resolver, mention_cooldown_seconds=600.0,
+    )
+    receipt2 = await sink2("dlv_2", {"text": "@镜子 正常"})
+    assert receipt2.status == DeliveryStatus.SENT
+    assert _seg_types(matcher.sent[-1]) == ["at", "text"]
