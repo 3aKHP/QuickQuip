@@ -2067,8 +2067,8 @@ async def test_responses_cross_turn_owner_switch_degrades_history(
     wired_service,
     patch_provider_builder,
 ):
-    """切 profile（owner 指纹含 responses_profile/reasoning_effort）：历史
-    不再原生回放，降级为通用投影（无 reasoning 密文上 wire，工具事实保留）。"""
+    """切 profile（owner 指纹含 responses_profile）：历史不再原生回放，
+    降级为通用投影（无 reasoning 密文上 wire，工具事实保留）。"""
     from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
 
     provider = _as_responses_provider(wired_service)
@@ -2107,6 +2107,57 @@ async def test_responses_cross_turn_owner_switch_degrades_history(
     assert calls[0]["name"] == "get_identity"
     assert calls[0]["call_id"] == outputs[0]["call_id"]
     assert "镜子" in outputs[0]["output"]
+
+
+async def test_responses_cross_turn_effort_switch_keeps_native_replay(
+    wired_service,
+    patch_provider_builder,
+):
+    """只切 reasoning_effort（owner 指纹不含档位）：历史仍原生回放，新
+    请求按新档上线（密文来源档经 owner.extra 随记录落库供 per-item 计量）。"""
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    provider.agent_replay_loop_tokens = 16384
+    provider.reasoning_effort = "low"
+    # 惰性构造：client 在生成时才快照 provider 配置，切档对第二轮生效
+    bodies = iter([[_RESPONSES_TOOL_ROUND_BODY, _RESPONSES_FINAL_BODY], [_RESPONSES_FINAL_BODY]])
+    fakes: list = []
+
+    def _build(p):
+        fake = FakeOpenAIResponsesClient(p, next(bodies))
+        fakes.append(fake)
+        return fake
+
+    patch_provider_builder(_build)
+
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="哈基镜是谁？",
+        recent_messages=[],
+        message_id="m-r1",
+    )
+    # 首轮请求按 low 档上线
+    assert fakes[0].payloads[0]["reasoning"]["effort"] == "low"
+    provider.reasoning_effort = "high"
+    await wired_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="那我再问一次",
+        recent_messages=[],
+        message_id="m-r2",
+    )
+
+    # 切档不断回放：历史 Loop 的 reasoning 密文原生保留
+    third = fakes[1].payloads[0]["input"]
+    kinds = [item.get("type") or item.get("role") for item in third]
+    assert kinds[:3] == ["user", "reasoning", "function_call"]
+    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    # 第二轮请求按 high 档上线
+    assert fakes[1].payloads[0]["reasoning"]["effort"] == "high"
 
 
 async def test_same_scope_concurrent_turns_serialize_with_full_accounting(

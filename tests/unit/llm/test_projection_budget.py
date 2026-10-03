@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from quickquip.llm.history_projection import (
+    PATH_NATIVE,
     PATH_STRUCTURED,
+    project_loops,
     project_loops_with_budget,
 )
 from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_TOKENS_DEFAULT, estimate_tokens
@@ -334,3 +336,45 @@ def test_native_message_text_not_double_counted():
     # 通用消息（无 native）仍单计 content。
     plain = LLMConversationMessage(role="assistant", content=body)
     assert _estimate_messages_tokens([plain]) == estimate_tokens(body)
+
+
+def test_projection_cipher_metered_at_owner_source_effort_not_current():
+    """混档来源档计价：密文生成于 max 档、当前请求 low 档时，投影估算按
+    owner 落库的来源档（max）计，不按当前档低估；未标注的旧记录回落当前档。"""
+    from quickquip.llm.history_projection import _estimate_messages_tokens
+    from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_TOKENS_BY_EFFORT
+    from tests.unit.llm.test_history_projection import (
+        RESPONSES_OUTPUT_ITEMS,
+        RESPONSES_OWNER,
+    )
+
+    def _cipher_loop(loop_id: str, owner: dict) -> object:
+        return _loop(
+            loop_id,
+            (
+                _turn(
+                    "turn_0",
+                    tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                    native_state=_native_state(RESPONSES_OWNER, RESPONSES_OUTPUT_ITEMS),
+                    owner=owner,
+                ),
+            ),
+        )
+
+    sourced = project_loops(
+        [_cipher_loop("loop_src", {**_owner_dict(RESPONSES_OWNER), "effort": "max"})],
+        target=RESPONSES_OWNER,
+        protocol="openai_responses",
+    )
+    legacy = project_loops(
+        [_cipher_loop("loop_legacy", _owner_dict(RESPONSES_OWNER))],
+        target=RESPONSES_OWNER,
+        protocol="openai_responses",
+    )
+    assert sourced.decisions[0].path == PATH_NATIVE
+    assert legacy.decisions[0].path == PATH_NATIVE
+    assert (
+        _estimate_messages_tokens(sourced.messages, effort="low")
+        - _estimate_messages_tokens(legacy.messages, effort="low")
+        == NATIVE_ENCRYPTED_TOKENS_BY_EFFORT["max"] - NATIVE_ENCRYPTED_TOKENS_BY_EFFORT["low"]
+    )

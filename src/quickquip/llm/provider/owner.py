@@ -21,14 +21,15 @@ SENSITIVE_QUERY_KEYS = frozenset(
 
 # 影响协议序列化形状的配置面（profile 指纹输入）。stream 开关不参与：
 # 流式/非流式必须产生等价 block（§4.4），不构成 profile 差异。
-# openai_responses 的 responses_profile/reasoning_effort 改变请求形状与
-# 回放语义，但按协议条件化追加（见 profile_fingerprint）——直接入列会让
-# 全部协议的存量指纹一次性失配。
+# openai_responses 的 responses_profile 改变请求形状与回放语义，按协议
+# 条件化追加（见 profile_fingerprint）——直接入列会让全部协议的存量
+# 指纹一次性失配。
 _PROFILE_FIELDS = ("protocol", "prompt_caching", "cache_ttl", "auth_method", "builtin_search")
 # openai_responses 专属的指纹输入：profile 决定 service_tier/中转事件容忍/
-# items 回放基准，effort 决定 reasoning 字段形状。PR-A 即编码进 owner
-# （此时持久化记录刚开始积累，PR-B 跨轮回放启用后无需迁移指纹纪元）。
-_RESPONSES_PROFILE_FIELDS = ("responses_profile", "reasoning_effort")
+# items 回放基准。reasoning_effort 按 2026-09-18 定调不入指纹（方案 b：
+# 切档不断回放，与 claude/gemini 思维参数先例拉齐）；密文的生成档位改经
+# owner.extra["effort"] 逐 turn 记录，供 per-effort 计量使用。
+_RESPONSES_PROFILE_FIELDS = ("responses_profile",)
 
 
 def normalize_endpoint(url: str) -> str:
@@ -81,9 +82,13 @@ def resolve_wire_model(config: ProviderConfig, request_model: str) -> str:
 
 
 def build_response_owner(
-    config: ProviderConfig, url: str, request_model: str
+    config: ProviderConfig, url: str, request_model: str, *, effort: str | None = None
 ) -> ResponseOwner:
-    """从实际成功的端点构造 owner（只含不可逆指纹与非敏感元数据）。"""
+    """从实际成功的端点构造 owner（只含不可逆指纹与非敏感元数据）。
+
+    ``effort`` 为本次请求实际上线的思考档位（密文来源档，供回放投影的
+    per-effort 计量）；不参与 owner 匹配（extra 槽）。
+    """
     return ResponseOwner(
         provider_id=config.id,
         protocol=config.protocol,
@@ -91,6 +96,7 @@ def build_response_owner(
         display_model=request_model,
         endpoint_fingerprint=endpoint_fingerprint(url),
         profile_fingerprint=profile_fingerprint(config),
+        extra={"effort": effort} if effort else {},
     )
 
 
