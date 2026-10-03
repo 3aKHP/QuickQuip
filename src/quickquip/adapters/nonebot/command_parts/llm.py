@@ -12,6 +12,7 @@ from quickquip.adapters.nonebot.command_parts.common import (
     _strip_command_name,
 )
 from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service, rate_limiter
+from quickquip.llm.config import REASONING_EFFORT_CHOICES
 from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS
 from quickquip.llm.settings import DeliveryDomain
 from quickquip.search.web_search import SearXNGSearchClient, WebSearchError, format_search_response
@@ -157,6 +158,23 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
 
         if tokens[:2] == ["memory", "status"]:
             await llm_cmd.finish(svc.format_memory_status(chat_id, chat_type=chat_type))
+
+        if tokens[:1] == ["effort"]:
+            # 查询无门槛；变更走内联管理门（probe 先例），早于下方的总闸门。
+            action = tokens[1].lower() if len(tokens) >= 2 else "status"
+            if action != "status":
+                if not _allow_scope_management(event):
+                    await llm_cmd.finish("仅管理员可执行此操作")
+                if action in {"default", "clear"}:
+                    svc.set_chat_reasoning_effort(chat_id, None, chat_type=chat_type)
+                elif action in REASONING_EFFORT_CHOICES:
+                    svc.set_chat_reasoning_effort(chat_id, action, chat_type=chat_type)
+                else:
+                    await llm_cmd.finish(
+                        f"用法：/llm effort <档>|effort default|effort clear|effort status"
+                        f" （档位：{'/'.join(REASONING_EFFORT_CHOICES)}）"
+                    )
+            await llm_cmd.finish(svc.format_effort_status(chat_id, chat_type=chat_type))
 
         if not _allow_scope_management(event):
             await llm_cmd.finish("仅管理员可执行此操作")
@@ -357,6 +375,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             "trigger prefix_mode on|off|trigger at on|off|"
             "memory status|memory on|memory off|"
             "auto_memory on|off|reset|status|"
+            "effort <档>|effort default|effort clear|effort status|"
             "delivery intermediate|final|all <on|off|reset>|delivery status|"
             "context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )

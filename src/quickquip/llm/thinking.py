@@ -169,6 +169,11 @@ def _model_family(model: str) -> str:
     return ""
 
 
+def family_defaults_to_max_thinking(model: str) -> bool:
+    """GLM/Kimi/MiniMax 家族不发思考参数时，模型自身默认档即最高档（调研 §二）。"""
+    return _model_family(model) in ("glm", "kimi", "minimax")
+
+
 def _claude_generation(model: str) -> tuple[int, int] | None:
     """claude-opus-4-8 → (4, 8)；claude-3-7-sonnet-20250219 → (3, 7)。"""
     name = model.strip().lower().rsplit("/", 1)[-1]

@@ -817,6 +817,7 @@ class LLMService(
                 provider=provider,
                 model=epoch_key.model,
                 sensitive=sensitive,
+                effort=settings.reasoning_effort,
             )
         return history, participants, recent_messages, projected_segments
 
@@ -828,12 +829,15 @@ class LLMService(
         provider: ProviderConfig,
         model: str,
         sensitive: SensitiveFilter,
+        effort: str = "",
     ) -> dict[str, list[LLMConversationMessage]]:
         """携带工具事实的 Loop 用投影替换行渲染（§8.1/§5.3.2）。
 
         无工具的 Loop 保持行渲染（1.14 字节稳定前缀契约）。目标 owner 取
         主端点；配置了 fallback_urls 的 provider 不启用原生路径（§7.3 的
         逐候选重投影属后置增强，跨端点签名泄露风险先收紧为保守降级）。
+        ``effort`` 为当前请求的生效思考档位（settings 解析后），作未标注
+        密文的回落档。
         """
         loop_ids = {
             str(row["agent_loop_id"])
@@ -855,7 +859,7 @@ class LLMService(
                 loaded, target=target, protocol=provider.protocol,
                 budget_tokens=derive_replay_budget(self.config, provider, model),
                 archive_loop_ids=archive_loop_ids,
-                effort=provider.reasoning_effort,
+                effort=effort or provider.reasoning_effort,
             )
         except HistoryProjectionError:
             # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏

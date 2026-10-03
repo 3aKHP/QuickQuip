@@ -16,7 +16,8 @@ class GroupSettingsMixin:
                 "\n"
                 "                SELECT enabled, memory_enabled, auto_memory_enabled, "
                 "agent_delivery_intermediate_enabled, agent_delivery_final_enabled, provider_id, "
-                "model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit\n"
+                "model, persona_id, trigger_prefix, allow_prefix, allow_at, history_limit, "
+                "reasoning_effort\n"
                 "                FROM group_settings\n"
                 "                WHERE group_id = ?\n"
                 "                ",
@@ -49,6 +50,7 @@ class GroupSettingsMixin:
             allow_prefix=None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
             allow_at=None if row["allow_at"] is None else bool(row["allow_at"]),
             history_limit=None if row["history_limit"] is None else int(row["history_limit"]),
+            reasoning_effort=row["reasoning_effort"] or None,
         )
 
     def update_group_settings(self, group_id: int | str, **fields: object) -> None:
@@ -68,6 +70,7 @@ class GroupSettingsMixin:
             "allow_prefix",
             "allow_at",
             "history_limit",
+            "reasoning_effort",
         }
         payload = {key: value for key, value in fields.items() if key in allowed_fields}
         if not payload:

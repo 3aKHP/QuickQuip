@@ -75,6 +75,8 @@ class GroupSettingsOverride:
     allow_prefix: bool | None = None
     allow_at: bool | None = None
     history_limit: int | None = None
+    # 思考档位覆盖（六档词表；None = 跟随 provider 配置档）
+    reasoning_effort: str | None = None
 
 
 def _backfill_delivery_split_columns(conn: sqlite3.Connection, existing_columns: set[str]) -> None:
@@ -262,6 +264,8 @@ class _StoreBase:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN auto_memory_enabled INTEGER")
             if "agent_delivery_enabled" not in existing_columns:
                 conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_enabled INTEGER")
+            if "reasoning_effort" not in existing_columns:
+                conn.execute("ALTER TABLE group_settings ADD COLUMN reasoning_effort TEXT")
             _backfill_delivery_split_columns(conn, existing_columns)
             conversation_columns = {
                 row["name"]

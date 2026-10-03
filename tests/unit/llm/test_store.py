@@ -302,6 +302,57 @@ def test_group_settings_agent_delivery_roundtrip(store: LLMStore) -> None:
     assert override.agent_delivery_final_enabled is False
 
 
+def test_group_settings_reasoning_effort_roundtrip(store: LLMStore) -> None:
+    assert store.get_group_settings(3004).reasoning_effort is None
+
+    store.update_group_settings(3004, reasoning_effort="high")
+    assert store.get_group_settings(3004).reasoning_effort == "high"
+
+    # 部分更新其他字段不清覆盖
+    store.update_group_settings(3004, model="gpt-4o")
+    assert store.get_group_settings(3004).reasoning_effort == "high"
+
+    # 显式 None 清空覆盖（回到跟随 provider 配置档）
+    store.update_group_settings(3004, reasoning_effort=None)
+    assert store.get_group_settings(3004).reasoning_effort is None
+
+
+def test_group_settings_reasoning_effort_migration(tmp_path: Path) -> None:
+    """旧库无 reasoning_effort 列：升级加列，既有行读回 None，可写新值。"""
+    import sqlite3
+
+    db_path = tmp_path / "legacy_effort.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE group_settings (
+            group_id TEXT PRIMARY KEY,
+            enabled INTEGER,
+            memory_enabled INTEGER,
+            auto_memory_enabled INTEGER,
+            agent_delivery_enabled INTEGER,
+            provider_id TEXT,
+            model TEXT,
+            persona_id TEXT,
+            trigger_prefix TEXT,
+            allow_prefix INTEGER,
+            allow_at INTEGER,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO group_settings (group_id, provider_id, updated_at)
+        VALUES ('9010', 'openai', '2026-09-11T00:00:00+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = LLMStore(db_path)
+    assert store.get_group_settings("9010").reasoning_effort is None
+    store.update_group_settings("9010", reasoning_effort="max")
+    # 重开库后值仍在（迁移幂等，不丢列）
+    assert LLMStore(db_path).get_group_settings("9010").reasoning_effort == "max"
+
+
 def test_group_settings_agent_delivery_split_migration(tmp_path: Path) -> None:
     """旧单开关库升级：加列 + 一次性回填两域，重启不重复回填。"""
     import sqlite3
