@@ -2,7 +2,12 @@
 
 内部词表六档（low/medium/high/xhigh/max/ultra，单源 config.REASONING_EFFORT_CHOICES），
 调用方传入档位与 provider/model，本层返回 wire 注入指令（``ThinkingDirective``）或
-None（不发送任何思考参数）。映射口径来自 2026-10 调研（dev/research
+None（不发送任何思考参数）。
+
+本层只做映射、不做门禁（fail-open，不替用户做决定）：除 claude budget 的
+1024 数学下限外，不拦截任何 协议×模型 组合；后端不支持某档位由上游 400
+暴露给用户。各后端支持面的调研结论见 docs/admin/configuration.md
+「各协议思考参数支持面」。映射口径来自 2026-10 调研（dev/research
 2026-10-03-reasoning-effort-runtime-switch §二）：
 
 - openai chat：顶层 ``reasoning_effort``。三档系 DeepSeek/GLM-5.3/Kimi k3
@@ -14,12 +19,13 @@ None（不发送任何思考参数）。映射口径来自 2026-10 调研（dev/
   （4.7+/5 系传旧式 type:"enabled" 直接 400）；Opus/Sonnet 4.6 有 max 无
   xhigh（xhigh 钳 high）；4.5 及更早（含 3.7 旧命名法）走旧式
   ``thinking.budget_tokens`` 固定值表（不按 max_tokens 比例换算），约束
-  budget ≥1024 且 < max_tokens；3.5 及更早无思考能力，不发送。非 Claude
-  家族模型挂 claude 协议（Kimi/MiMo 兼容端点）不发送 + 节流日志
-  fail-visible。
+  budget ≥1024 且 < max_tokens，max_tokens 过小使预算跌破 1024 时不发送
+  （数学上必 400 的唯一例外）。非 Claude 家族（Kimi/MiMo 兼容端点）与
+  不可解析代际一律按 adaptive + effort 形态照发。
 - gemini：3.x 走 ``thinkingLevel``（low→LOW、medium→MEDIUM、high 及以上
-  →HIGH）；2.5 走 ``thinkingBudget`` 固定值表（Flash 系上限 24576 钳制）；
-  2.0 系不支持思考参数，不发送；两者不可同传（上游 400）。
+  →HIGH）；2.x 走 ``thinkingBudget`` 固定值表（Flash 系上限 24576 钳制）；
+  非 Gemini 家族与不可解析代际按 thinkingLevel 照发。level 与 budget
+  不可同传（上游 400）。
 - openai_responses 不走本层：档位到 profile 词表的映射与降档收敛在
   ``provider/openai_responses/request.py`` 的 ``reasoning_control``
   （profile 即该协议的归一化层）。
@@ -213,25 +219,15 @@ def _resolve_claude(
     tier: str, provider: ProviderConfig, model: str, max_output_tokens: int | None
 ) -> ThinkingDirective | None:
     if _model_family(model) != "claude":
-        # 非 Claude 家族挂 claude 兼容协议（Kimi/MiMo 等）：其 Anthropic 形态
-        # 端点对 thinking/effort 参数的支持面无实测依据，不发送 + fail-visible。
+        # 非 Claude 家族挂 claude 兼容协议（Kimi/MiMo 等，端面为 Claude Code
+        # 类客户端设计）：按 adaptive + effort 形态照发，支持与否由上游判定。
         log_once(
-            logging.WARNING,
-            ("claude-unsupported", provider.id, model),
-            "provider %s 模型 %s 非 Claude 家族，claude 协议思考参数不发送（请求档 %s 未生效）",
-            provider.id, model, tier,
+            logging.INFO,
+            ("claude-foreign-family", provider.id, model),
+            "provider %s 模型 %s 非 Claude 家族，claude 协议思考参数按 adaptive 形态照发",
+            provider.id, model,
         )
-        return None
     gen = _claude_generation(model)
-    if gen is not None and gen < (3, 7):
-        # 3.5 及更早无思考能力（extended thinking 自 3.7 引入）：不发送。
-        log_once(
-            logging.WARNING,
-            ("claude-no-thinking", provider.id, model),
-            "provider %s 模型 %s 代际 %s 不支持思考参数，不发送（请求档 %s 未生效）",
-            provider.id, model, gen, tier,
-        )
-        return None
     if gen is not None and gen <= (4, 5):
         budget = _CLAUDE_BUDGET_TABLE[tier]
         if max_output_tokens is not None and budget >= max_output_tokens:
@@ -251,7 +247,7 @@ def _resolve_claude(
             clamped=(budget != _CLAUDE_BUDGET_TABLE[tier]),
         )
     # 4.6 起走 adaptive；4.6（Opus/Sonnet）有 max 无 xhigh → 钳 high；
-    # 不可解析代际的新型号按当前形态（adaptive）处理。
+    # 不可解析代际与非 Claude 家族按当前形态（adaptive）处理。
     table = _CLAUDE_ADAPTIVE_46 if gen == (4, 6) else _CLAUDE_ADAPTIVE_FULL
     wire = table[tier]
     return ThinkingDirective(
@@ -259,25 +255,17 @@ def _resolve_claude(
     )
 
 
-def _resolve_gemini(tier: str, provider: ProviderConfig, model: str) -> ThinkingDirective | None:
+def _resolve_gemini(tier: str, provider: ProviderConfig, model: str) -> ThinkingDirective:
     if _model_family(model) != "gemini":
+        # 非 Gemini 家族挂 gemini 兼容协议：按 thinkingLevel 形态照发，
+        # 支持与否由上游判定。
         log_once(
-            logging.WARNING,
-            ("gemini-unsupported", provider.id, model),
-            "provider %s 模型 %s 非 Gemini 家族，gemini 协议思考参数不发送（请求档 %s 未生效）",
-            provider.id, model, tier,
+            logging.INFO,
+            ("gemini-foreign-family", provider.id, model),
+            "provider %s 模型 %s 非 Gemini 家族，gemini 协议思考参数按 thinkingLevel 形态照发",
+            provider.id, model,
         )
-        return None
     gen = _gemini_generation(model)
-    if gen is not None and gen < (2, 5):
-        # 2.0 系不支持思考参数：不发送。
-        log_once(
-            logging.WARNING,
-            ("gemini-no-thinking", provider.id, model),
-            "provider %s 模型 %s 代际 %s 不支持思考参数，不发送（请求档 %s 未生效）",
-            provider.id, model, gen, tier,
-        )
-        return None
     if gen is not None and gen[0] == 2:
         budget = _GEMINI_BUDGET_TABLE[tier]
         # 2.5 Flash 系 thinkingBudget 上限 24576（Pro 系 32768）。
@@ -289,8 +277,9 @@ def _resolve_gemini(tier: str, provider: ProviderConfig, model: str) -> Thinking
             requested_tier=tier,
             clamped=(budget != _GEMINI_BUDGET_TABLE[tier]),
         )
-    # 3.x 及不可解析代际的新型号按当前形态（thinkingLevel）处理；按型号
-    # 裁剪面（3.1 Pro 无 MINIMAL 等）与本表无交集（本层不发 MINIMAL）。
+    # 3.x、2.0 及更早、不可解析代际与非 Gemini 家族按当前形态
+    # （thinkingLevel）处理；按型号裁剪面（3.1 Pro 无 MINIMAL 等）与本表
+    # 无交集（本层不发 MINIMAL）。
     return ThinkingDirective(
         kind="gemini_level",
         effort=_GEMINI_LEVEL_MAP[tier],
@@ -306,7 +295,7 @@ def resolve_thinking(
     *,
     max_output_tokens: int | None = None,
 ) -> ThinkingDirective | None:
-    """内部六档 → wire 注入指令；空档/无能力后端返回 None（不发送）。
+    """内部六档 → wire 注入指令；空档或 budget 数学下限不满足时返回 None。
 
     ``tier`` 为生效档位（调用方已完成 scope 覆盖解析）；空串/None 表示
     不发思考参数（模型默认档，现状语义）。非法档位抛 ValueError

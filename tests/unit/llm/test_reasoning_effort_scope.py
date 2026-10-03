@@ -83,6 +83,15 @@ base_url = "https://kimi.example.test/anthropic"
 api_key_env = "KIMI_KEY"
 default_model = "k3"
 models = ["k3"]
+
+[[providers]]
+id = "p-claude-floor"
+protocol = "claude"
+base_url = "https://claude.example.test/v1"
+api_key_env = "CLAUDE_KEY"
+default_model = "claude-sonnet-4-5"
+models = ["claude-sonnet-4-5"]
+max_output_tokens = 1024
 """
 
 
@@ -188,15 +197,24 @@ def test_format_effort_status_responses_profile_clamp(tmp_path: Path) -> None:
     assert "思考档位：max。本群设置为 ultra，该后端不支持该档位，已自动调整。" in line
 
 
-def test_format_effort_status_unsupported_combo(tmp_path: Path) -> None:
-    """非 Claude 家族挂 claude 协议：结果为模型默认档，说明覆盖未生效与原因。"""
+def test_format_effort_status_foreign_family_sends_anyway(tmp_path: Path) -> None:
+    """非 Claude 家族挂 claude 协议（fail-open）：按 adaptive 形态照发，状态行显示生效档。"""
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-kimi-claude", "k3")
     service.set_chat_reasoning_effort(123, "high")
     line = service.format_effort_status(123)
-    assert "思考档位：k3 自身默认档（即最高档）。" in line
-    assert "本群设置的 high 未能生效：" in line
-    assert "该渠道（claude 协议）与 k3 的组合当前无法下发思考档位。" in line
+    assert "思考档位：high。来自本群设置。" in line
+
+
+def test_format_effort_status_budget_floor(tmp_path: Path) -> None:
+    """claude budget 数学下限（max_output_tokens ≤1024）：唯一保留的不发送场景。"""
+    service = _make_service(tmp_path)
+    service.set_chat_model(123, "p-claude-floor", "claude-sonnet-4-5")
+    service.set_chat_reasoning_effort(123, "low")
+    line = service.format_effort_status(123)
+    assert "思考档位：claude-sonnet-4-5 自身默认档。" in line
+    assert "本群设置的 low 未能生效：" in line
+    assert "max_output_tokens 过小，思考预算无法达到 1024 tokens 的下限。" in line
 
 
 def test_format_effort_status_missing_provider(tmp_path: Path) -> None:

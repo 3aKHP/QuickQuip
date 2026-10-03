@@ -196,13 +196,14 @@ class HealthMixin:
             max_output_tokens=provider.max_output_tokens,
         )
         if directive is None:
+            # fail-open 后仅余 claude budget 数学下限（max_output_tokens ≤1024）
+            # 一种不发送场景。
             result = f"{label} 自身默认档"
             if family_defaults_to_max_thinking(model):
                 result += "（即最高档）"
             return (
                 f"思考档位：{result}。{origin}的 {requested} 未能生效："
-                f"该渠道（{provider.protocol} 协议）与 {label} 的组合"
-                f"当前无法下发思考档位。"
+                f"max_output_tokens 过小，思考预算无法达到 1024 tokens 的下限。"
             )
         if directive.clamped and directive.effort:
             return (

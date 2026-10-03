@@ -355,13 +355,14 @@ async def test_claude_thinking_drops_non_default_temperature():
     assert client2.last_payload["temperature"] == 1.0
 
 
-async def test_claude_non_anthropic_backend_sends_no_thinking_params():
+async def test_claude_non_anthropic_backend_sends_adaptive_thinking_params():
+    """非 Claude 家族挂 claude 兼容协议：fail-open 照发 adaptive + effort。"""
     config = _provider_config()
     config.reasoning_effort = "high"
     client = FakeClaudeClient(config, _text_body())
     await client.complete(_simple_request("kimi-for-coding"))
-    assert "thinking" not in client.last_payload
-    assert "output_config" not in client.last_payload
+    assert client.last_payload["thinking"] == {"type": "adaptive"}
+    assert client.last_payload["output_config"] == {"effort": "high"}
 
 
 async def test_claude_no_effort_sends_nothing():

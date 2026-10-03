@@ -157,13 +157,17 @@ def test_claude_budget_unsatisfiable_floor_sends_nothing(caplog):
     assert any("放弃发送" in record.message for record in caplog.records)
 
 
-def test_claude_non_anthropic_backend_sends_nothing(caplog):
-    with caplog.at_level(logging.WARNING, logger="quickquip.llm.thinking"):
+def test_claude_non_anthropic_backend_sends_adaptive(caplog):
+    """非 Claude 家族挂 claude 兼容协议（Kimi/MiMo 端面为 Claude Code 类客户端
+    设计）：fail-open 按 adaptive + effort 形态照发，支持与否由上游 400 判定。"""
+    with caplog.at_level(logging.INFO, logger="quickquip.llm.thinking"):
         directive = resolve_thinking(
             "high", _provider("claude", id="p-kimi"), "kimi-for-coding"
         )
-    assert directive is None
-    assert any("不发送" in record.message for record in caplog.records)
+    assert directive.kind == "claude_adaptive"
+    assert directive.effort == "high"
+    assert directive.clamped is False
+    assert any("照发" in record.message for record in caplog.records)
 
 
 def test_claude_unparseable_model_treated_as_current_shape():
@@ -181,14 +185,14 @@ def test_claude_legacy_naming_37_uses_budget():
     assert directive.budget_tokens == 8000
 
 
-def test_claude_35_and_earlier_sends_nothing(caplog):
-    """3.5 及更早无思考能力（extended thinking 自 3.7 引入）：不发送 + warning。"""
-    with caplog.at_level(logging.WARNING, logger="quickquip.llm.thinking"):
-        directive = resolve_thinking(
-            "high", _provider("claude", id="p-old"), "claude-3-5-sonnet-20241022"
-        )
-    assert directive is None
-    assert any("不支持思考" in record.message for record in caplog.records)
+def test_claude_35_and_earlier_falls_into_budget_shape():
+    """3.5 及更早按旧式 budget 形态照发：有无思考能力由上游 400 判定（fail-open）。"""
+    directive = resolve_thinking(
+        "high", _provider("claude", id="p-old"), "claude-3-5-sonnet-20241022",
+        max_output_tokens=64000,
+    )
+    assert directive.kind == "claude_budget"
+    assert directive.budget_tokens == 8000
 
 
 # ── gemini：代际分派 ─────────────────────────────────────────────
@@ -230,15 +234,19 @@ def test_gemini_25_flash_budget_capped():
     assert pro.clamped is False
 
 
-def test_gemini_20_sends_nothing(caplog):
-    """2.0 系不支持思考参数：不发送 + warning。"""
-    with caplog.at_level(logging.WARNING, logger="quickquip.llm.thinking"):
-        directive = resolve_thinking(
-            "high", _provider("gemini", id="p-g20"), "gemini-2.0-flash"
-        )
-    assert directive is None
-    assert any("不支持思考" in record.message for record in caplog.records)
+def test_gemini_20_falls_into_budget_shape():
+    """2.0 系按 thinkingBudget 形态照发：支持与否由上游 400 判定（fail-open）。"""
+    directive = resolve_thinking(
+        "high", _provider("gemini", id="p-g20"), "gemini-2.0-flash"
+    )
+    assert directive.kind == "gemini_budget"
+    assert directive.budget_tokens == 8000
 
 
-def test_gemini_non_gemini_model_sends_nothing():
-    assert resolve_thinking("high", _provider("gemini"), "gpt-5.5") is None
+def test_gemini_non_gemini_model_sends_level(caplog):
+    """非 Gemini 家族挂 gemini 协议：fail-open 按 thinkingLevel 形态照发。"""
+    with caplog.at_level(logging.INFO, logger="quickquip.llm.thinking"):
+        directive = resolve_thinking("high", _provider("gemini", id="p-foreign"), "gpt-5.5")
+    assert directive.kind == "gemini_level"
+    assert directive.effort == "HIGH"
+    assert any("照发" in record.message for record in caplog.records)
