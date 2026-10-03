@@ -855,6 +855,7 @@ class LLMService(
                 loaded, target=target, protocol=provider.protocol,
                 budget_tokens=derive_replay_budget(self.config, provider, model),
                 archive_loop_ids=archive_loop_ids,
+                effort=provider.reasoning_effort,
             )
         except HistoryProjectionError:
             # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏

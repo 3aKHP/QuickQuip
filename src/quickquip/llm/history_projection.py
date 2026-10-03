@@ -476,7 +476,9 @@ def project_loops(
 _RESULT_TIERS = (4096, 1024, 256, 0)
 
 
-def _estimate_messages_tokens(messages: list[LLMConversationMessage]) -> int:
+def _estimate_messages_tokens(
+    messages: list[LLMConversationMessage], *, effort: str | None = None
+) -> int:
     from quickquip.llm.token_estimate import (
         estimate_native_blocks_tokens,
         estimate_tokens,
@@ -491,8 +493,8 @@ def _estimate_messages_tokens(messages: list[LLMConversationMessage]) -> int:
             total += estimate_tokens(message.content)
             for call in message.tool_calls:
                 total += estimate_tokens(call.arguments_json)
-            total += estimate_native_blocks_tokens(message.thinking_blocks)
-        total += estimate_native_blocks_tokens(message.native_content)
+            total += estimate_native_blocks_tokens(message.thinking_blocks, effort=effort)
+        total += estimate_native_blocks_tokens(message.native_content, effort=effort)
     return total
 
 
@@ -630,18 +632,20 @@ def project_loops_with_budget(
     protocol: str,
     budget_tokens: int,
     archive_loop_ids: frozenset[str] = frozenset(),
+    effort: str | None = None,
 ) -> ProjectionResult:
     """带 §8.2 精简阶梯的投影：超预算时按固定顺序精简最旧 Loop。
 
     阶梯：原生块剥 thinking → 丢弃可选 native（通用/档案形态）→ 工具结果
     按 4096/1024/256/0 收紧 → 纯文本档案 → 档案字符额度减半 → 最小档案 →
     逐出最旧完整 Loop。所有精简只影响模型投影，完整记录留在执行表；
-    禁止空循环重试。
+    禁止空循环重试。``effort`` 为当前 provider 配置的思考档位，用于密文
+    块的 per-effort 预留（回放下密文与当前请求同档）。
     """
     result = project_loops(
         loops, target=target, protocol=protocol, archive_loop_ids=archive_loop_ids,
     )
-    if _estimate_messages_tokens(result.messages) <= budget_tokens or not loops:
+    if _estimate_messages_tokens(result.messages, effort=effort) <= budget_tokens or not loops:
         return result
 
     segments = {key: list(value) for key, value in result.segments.items()}
@@ -650,7 +654,7 @@ def project_loops_with_budget(
 
     def _total() -> int:
         return sum(
-            _estimate_messages_tokens(segments[key])
+            _estimate_messages_tokens(segments[key], effort=effort)
             for key in order
             if key in segments
         )
@@ -702,7 +706,7 @@ def project_loops_with_budget(
         if _total() <= budget_tokens:
             continue
         # 阶梯 4：档案字符额度减半（按当前投影 token 的一半折算字符）。
-        half_chars = max(128, _estimate_messages_tokens(segments[loop_id]) // 2)
+        half_chars = max(128, _estimate_messages_tokens(segments[loop_id], effort=effort) // 2)
         segments[loop_id] = _project_loop_archive_bounded(loop, half_chars)
         _mark(loop_id, "archive_halved")
         if _total() <= budget_tokens:

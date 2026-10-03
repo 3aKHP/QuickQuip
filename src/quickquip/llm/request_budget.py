@@ -126,8 +126,12 @@ def derive_replay_budget(
     )
 
 
-def estimate_request_tokens(request: LLMRequest) -> int:
-    """最终实际 payload 的输入估算：system/tools/messages 全量计入。"""
+def estimate_request_tokens(request: LLMRequest, *, effort: str | None = None) -> int:
+    """最终实际 payload 的输入估算：system/tools/messages 全量计入。
+
+    ``effort`` 为当前 provider 配置的思考档位，用于密文块的 per-effort
+    预留；None 按默认档画像。
+    """
     total = estimate_tokens(request.system_prompt)
     for spec in request.tools:
         total += estimate_tokens(spec.name) + estimate_tokens(spec.description)
@@ -136,12 +140,12 @@ def estimate_request_tokens(request: LLMRequest) -> int:
         # 原生路径消息的正文/工具声明已内含于 native 块（serializer 原样
         # 发送、忽略通用字段），单计通用字段会双倍计量同一 wire 内容。
         if message.native_content is not None:
-            total += estimate_native_blocks_tokens(message.native_content)
+            total += estimate_native_blocks_tokens(message.native_content, effort=effort)
         else:
             total += estimate_tokens(message.content)
             for call in message.tool_calls:
                 total += estimate_tokens(call.arguments_json)
-            total += estimate_native_blocks_tokens(message.thinking_blocks)
+            total += estimate_native_blocks_tokens(message.thinking_blocks, effort=effort)
         # 媒体按已知协议成本粗估：每图固定档位（保守）。
         total += NATIVE_MEDIA_FLAT_TOKENS * len(message.image_urls)
     return total
@@ -178,7 +182,7 @@ def check_request_budget(
     wire_model = request.model
     context_window = resolve_context_window(provider.model_context_windows, wire_model)
     output_reserve = (max_output_tokens or provider.max_output_tokens) + _RESERVE_TOKENS
-    estimated = estimate_request_tokens(request)
+    estimated = estimate_request_tokens(request, effort=provider.reasoning_effort)
     if context_window is None:
         effective_window = None
     else:
