@@ -138,7 +138,7 @@
           </section>
 
           <section class="form-section">
-            <h4>模型与人格<UiInfoTip text="三个字段选「跟随默认」即沿用 llm.toml 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
+            <h4>模型与人格<UiInfoTip text="本区字段选「跟随默认」即沿用 llm.toml 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
             <div class="form-grid">
               <div class="field">
                 <label>Provider</label>
@@ -164,6 +164,13 @@
                   <option v-for="p in personas" :key="p.id" :value="p.id">
                     {{ p.display_name || p.id }}（{{ p.id }}）
                   </option>
+                </select>
+              </div>
+              <div class="field">
+                <label>思考档位<UiInfoTip text="该会话的思考档位覆盖（等效群内指令 /llm effort）：六档 low/medium/high/xhigh/max/ultra；选「跟随 provider 配置档」即沿用 llm.toml 中生效 provider 的 reasoning_effort，provider 留空时回模型默认档（不发送思考参数）。" /></label>
+                <select v-model="draftTriState.reasoning_effort">
+                  <option :value="null">跟随 provider 配置档（当前：{{ effortFollowHint }}）</option>
+                  <option v-for="e in EFFORT_CHOICES" :key="e" :value="e">{{ e }}</option>
                 </select>
               </div>
             </div>
@@ -265,6 +272,15 @@ const selectedIsPrivate = computed(() => selectedGroupId.value.startsWith('priva
 const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
+
+/** 六档词表：与后端 REASONING_EFFORT_CHOICES（llm/config.py）保持一致 */
+const EFFORT_CHOICES = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
+
+const effortFollowHint = computed(() => {
+  const providerId = draftTriState.value.provider_id ?? defaults.value.provider_id
+  const provider = providers.value.find(p => p.id === providerId)
+  return provider?.reasoning_effort || '默认'
+})
 
 function defaultHint(field: keyof GroupSettingsDefaults): string {
   const value = defaults.value[field]
