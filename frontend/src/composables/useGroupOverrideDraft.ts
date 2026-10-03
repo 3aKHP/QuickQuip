@@ -9,7 +9,7 @@ import type {
 /** 可编辑字段表：草稿/原始快照/diff 的键集合唯一来源 */
 const FIELDS: readonly GroupOverrideField[] = [
   'enabled', 'memory_enabled', 'auto_memory_enabled', 'agent_delivery_intermediate_enabled', 'agent_delivery_final_enabled', 'provider_id', 'model', 'persona_id',
-  'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit',
+  'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit', 'reasoning_effort',
 ]
 
 function emptyDraft(): GroupOverrideDraft {

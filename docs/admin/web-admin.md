@@ -141,7 +141,7 @@ Web Admin 当前提供 29 个标签页（前端使用 vue-router 4 hash 模式�
 - **统计** — 各群消息数、活跃用户排行、规则触发 Top
 - **规则** — 按群启用/禁用任意规则，toggle 实时生效
 - **群组** — 每日总结 / 每日播报 / 群周报 / 群月报群管理（按群开关、立即生成）
-- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段，以及 Agent Loop 分段交付两域开关（中间轮发送 / 最终轮分段，与 `/llm delivery` 同一配置面）；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
+- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段、思考档位（reasoning_effort，三态：六档或跟随 provider 配置档，与 `/llm effort` 同一配置面），以及 Agent Loop 分段交付两域开关（中间轮发送 / 最终轮分段，与 `/llm delivery` 同一配置面）；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
 - **唤醒** — 按群查看并编辑唤醒参数，切换 `awakening_*` 规则和无聊唤醒 opt-in；兴趣话题由人格配置和规则开关控制
 - **限流** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）
 - **记忆** — 按群浏览与编辑 LLM 长期记忆，支持明确选择、替换和删除成员引用，提供原文查看
@@ -157,7 +157,7 @@ Web Admin 当前提供 29 个标签页（前端使用 vue-router 4 hash 模式�
 - **语录** — 语录管理（按群浏览、关键词搜索、删除；发言人优先显示标准身份及 QQ，改名时附收藏时原名片；正文使用当前身份并提供原文查看）
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
 - **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
-- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）
+- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）。`llm.toml` 在文本编辑区上方另带 provider 级思考档位结构化面板：行级修改只动目标 provider 的 `reasoning_effort` 行、注释与其余内容原样保留，目标段含多行字符串时拒绝并引导改用文本编辑
 - **实时日志** — 当前运行日志流、连接状态与当前文件下载
 - **LLM Trace** — 按 HTTP 调用索引 QuickQuip 与 LLM Provider 之间的完整 JSON 请求/响应文本，支持持久开关、实时状态更新、分页和按需加载正文
 - **日志归档** — 历史轮转日志浏览、预览与下载
