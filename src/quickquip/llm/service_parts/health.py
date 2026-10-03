@@ -4,10 +4,18 @@ import json
 
 from quickquip.common.paths import MCP_STATUS_JSON_PATH
 from quickquip.common.sensitive_filter import get_filter as _get_sensitive_filter
-from quickquip.llm.config import DISABLED_PROVIDER_REPLY, PersonaConfig, ProviderConfig
+from quickquip.llm.config import (
+    DISABLED_PROVIDER_REPLY,
+    REASONING_EFFORT_CHOICES,
+    PersonaConfig,
+    ProviderConfig,
+)
 from quickquip.llm.health import HealthReport
 from quickquip.llm.health import build_health_report, format_health_report
+from quickquip.llm.provider.openai_responses.profiles import resolve_profile
+from quickquip.llm.provider.openai_responses.request import reasoning_control
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
+from quickquip.llm.thinking import resolve_thinking
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_AUTH,
     MCP_FAILURE_CONFIG,
@@ -143,6 +151,45 @@ class HealthMixin:
     def list_personas(self, chat_type: str = "group") -> list[PersonaConfig]:
         return [p for p in self.config.personas.values() if not p.scope or chat_type in p.scope]
 
+    def _format_effort_status(self, settings) -> str:
+        """思考档位三层口径：provider 配置档 / 本群覆盖档 / 钳制后生效档。"""
+        provider = self.config.providers.get(settings.provider_id)
+        configured = (provider.reasoning_effort or "默认") if provider else "未知"
+        override = settings.reasoning_effort_override or "跟随配置"
+        requested = settings.reasoning_effort
+        if provider is None or not requested:
+            effective = requested or "默认"
+        elif requested not in REASONING_EFFORT_CHOICES:
+            effective = f"{requested}（未知档位）"
+        elif provider.protocol == "openai_responses":
+            # responses 协议的归一化层在 profile 词表（reasoning_control）。
+            control = reasoning_control(
+                provider, resolve_profile(provider.responses_profile), tier=requested
+            )
+            wire = (control or {}).get("effort") or requested
+            effective = f"{wire}（钳制自 {requested}）" if wire != requested else wire
+        else:
+            directive = resolve_thinking(
+                requested,
+                provider,
+                settings.model or provider.default_model,
+                max_output_tokens=provider.max_output_tokens,
+            )
+            if directive is None:
+                effective = f"{requested}（当前模型不生效）"
+            elif directive.clamped and directive.effort:
+                effective = f"{directive.effort}（钳制自 {requested}）"
+            elif directive.clamped:
+                effective = f"budget={directive.budget_tokens}（受 max_tokens 钳制）"
+            else:
+                effective = directive.effort or f"budget={directive.budget_tokens}"
+        return f"思考档位：配置 {configured} / 覆盖 {override} / 生效 {effective}"
+
+    def format_effort_status(self, chat_id: int | str, chat_type: str = "group") -> str:
+        return self._format_effort_status(
+            self.get_chat_settings(chat_id, chat_type=chat_type)
+        )
+
     def format_status(self, group_id: int | str, chat_type: str = "group") -> str:
         settings = self.get_chat_settings(group_id, chat_type=chat_type)
         lines = ["LLM 状态"]
@@ -157,6 +204,7 @@ class HealthMixin:
         lines.append(f"MCP：{self._summarize_mcp_status()}")
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
+        lines.append(self._format_effort_status(settings))
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(
             f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
@@ -196,6 +244,7 @@ class HealthMixin:
         lines.append(f"工具列表：{', '.join(enabled_tool_names) or '无'}")
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
+        lines.append(self._format_effort_status(settings))
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(
             f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
