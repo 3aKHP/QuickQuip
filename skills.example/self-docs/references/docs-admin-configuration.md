@@ -264,7 +264,17 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `max` | max | max | max | 32000 | HIGH | 32000 |
 | `ultra` | max | max | max | 32000 | HIGH | 32000 |
 
-openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档系（`medium`→`high`、`xhigh`→`high`、`max`/`ultra`→`max`，DeepSeek 附带 `thinking.type=enabled` 开关）；MiniMax 五档全集；xAI 止于 `xhigh`；其余后端透传。claude 旧式 budget 固定值表须满足 budget ≥1024 且小于 `max_output_tokens`（不满足时该请求不发送思考参数并记 warning）；3.5 及更早代际无思考能力，不发送并记 warning（含 `claude-3-7-sonnet-*` 等旧命名法的代际解析）。claude 思考开启时上游只接受默认温度：非默认 `temperature` 不下发并记日志。gemini 2.5 Flash 系的 `thinkingBudget` 上限 24576（Pro 系 32768），超出自动钳制；2.0 系不支持思考参数，不发送并记 warning。claude / gemini 协议下挂非本家模型的兼容端点（如 Kimi、MiMo 的 Anthropic 形态端点）不发送思考参数并记 warning。`openai_responses` 协议按 profile 词表降档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 五档恒等（`ultra` 降 `max`，2026-10 实测中转网关校验层拒绝 `ultra`）。
+openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档系（`medium`→`high`、`xhigh`→`high`、`max`/`ultra`→`max`，DeepSeek 附带 `thinking.type=enabled` 开关）；MiniMax 五档全集；xAI 止于 `xhigh`；其余后端透传。claude 旧式 budget 固定值表须满足 budget ≥1024 且小于 `max_output_tokens`；`max_output_tokens` 过小使预算跌破 1024 时该请求不发送思考参数并记 warning，这是归一化层唯一的不发送场景，其余组合一律按表照发。claude 思考开启时上游只接受默认温度：非默认 `temperature` 不下发并记日志。gemini 2.5 Flash 系的 `thinkingBudget` 上限 24576（Pro 系 32768），超出自动钳制。`openai_responses` 协议按 profile 词表降档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 五档恒等（`ultra` 降 `max`，2026-10 实测中转网关校验层拒绝 `ultra`）。
+
+#### 各协议思考参数支持面
+
+归一化层只做映射、不做门禁：除 claude budget 的 1024 数学下限外，任何 协议×模型 组合都按上表形态照发思考参数。后端不支持某档位时上游返回 400 等 4xx 错误，即为不支持的信号，群内用 `/llm effort default` 恢复即可。以下为 2026-10 调研的各后端支持面结论，供排障参考（不构成拦截依据）：
+
+- **claude 协议**：Anthropic 官方 extended thinking 自 3.7 代际引入，3.5 及更早代际无思考能力（照发旧式 budget 形态会被上游拒绝）；4.7+/5 系只接受 `adaptive + effort`，旧式 `type:"enabled"` 直接 400。
+- **claude 兼容端点**：Kimi（k3，思考词表 low/high/max）、MiMo（m2.5）、GLM Coding Plan 等均提供面向 Claude Code 类客户端的 Anthropic 形态端点，对 `adaptive + effort` 形态有实测旁证（端点把 Claude Code 的 effort 标签映射到自家思考档位）。照发意味着同时适用 Anthropic 温度契约：档位生效期间非默认 `temperature` 不下发，上游若实际忽略思考参数，温度配置也会随之不生效。个别端点对历史回放中的 thinking 内容块有特殊要求；QuickQuip 的群聊历史为纯文本重建，不涉及该面。
+- **gemini 协议**：`thinkingLevel` 为 3.x 形态；2.x 只认 `thinkingBudget`，其中 2.0 系无思考参数支持（照发会被上游拒绝）；level 与 budget 不可同传。
+- **openai chat**：`reasoning_effort` 词表按家族见上表；词表外档位被上游忽略或拒绝，表现以后端为准。
+- **openai_responses**：profile 词表即支持面（降档口径见上节）。
 
 > **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 

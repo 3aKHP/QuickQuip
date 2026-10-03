@@ -63,7 +63,7 @@ class _FakeGroupEvent:
 class _FakeService:
     def __init__(self) -> None:
         self.calls: list[tuple[object, str]] = []
-        self.status_line = "思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"
+        self.status_line = "思考档位：gpt-test 自身默认档。本群未单独设置。"
 
     def format_effort_status(self, chat_id, chat_type: str = "group") -> str:
         return self.status_line
@@ -102,22 +102,28 @@ async def _dispatch(monkeypatch, text: str, event_cls=_FakeEvent) -> tuple[list[
 
 
 async def test_effort_status_is_query_only(monkeypatch):
-    """裸 effort 与 effort status 等价，只读展示，不触发写入。"""
+    """裸 effort 与 effort status 等价，只读展示，不触发写入，也不附 400 提示。"""
     for text in ("/llm effort", "/llm effort status"):
         finished, service = await _dispatch(monkeypatch, text)
-        assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+        assert finished == ["思考档位：gpt-test 自身默认档。本群未单独设置。"]
         assert service.calls == []
 
 
 async def test_effort_set_and_default(monkeypatch):
-    """档位写入与 default 清覆盖（None）都路由到 service，反馈为状态行。"""
+    """档位写入与 default 清覆盖（None）都路由到 service，反馈为状态行；
+    仅实际设档附 400 排查提示。"""
     finished, service = await _dispatch(monkeypatch, "/llm effort high")
     assert service.calls == [("high", "private")]
-    assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+    assert finished == [
+        "思考档位：gpt-test 自身默认档。本群未单独设置。"
+        "\n若切换后出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，"
+        "发送 /llm effort default 即可恢复。"
+    ]
 
     finished, service = await _dispatch(monkeypatch, "/llm effort default")
     assert service.calls == [(None, "private")]
     assert len(finished) == 1
+    assert "400" not in finished[0]
 
 
 async def test_effort_unknown_tier_is_noop(monkeypatch):
@@ -136,7 +142,7 @@ async def test_effort_mutation_gated_for_non_admin(monkeypatch):
 
     finished, service = await _dispatch(monkeypatch, "/llm effort status", _FakeGroupEvent)
     assert service.calls == []
-    assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+    assert finished == ["思考档位：gpt-test 自身默认档。本群未单独设置。"]
 
 
 async def test_effort_mutation_allowed_for_group_admin(monkeypatch):

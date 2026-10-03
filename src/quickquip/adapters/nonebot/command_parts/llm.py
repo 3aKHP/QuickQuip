@@ -169,6 +169,11 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                     svc.set_chat_reasoning_effort(chat_id, None, chat_type=chat_type)
                 elif action in REASONING_EFFORT_CHOICES:
                     svc.set_chat_reasoning_effort(chat_id, action, chat_type=chat_type)
+                    await llm_cmd.finish(
+                        svc.format_effort_status(chat_id, chat_type=chat_type)
+                        + "\n若切换后出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，"
+                        "发送 /llm effort default 即可恢复。"
+                    )
                 else:
                     await llm_cmd.finish(
                         f"用法：/llm effort <档>|effort default|effort clear|effort status"

@@ -52,7 +52,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm providers`、`/llm models [provider]` | 列出可用的模型来源与其下模型 |
 | `/llm personas` | 列出可用人格 |
 | `/llm memory status` | 记忆注入与长期记忆概况 |
-| `/llm effort status` | 思考档位概况：渠道配置档 / 本会话覆盖档 / 实际生效档 |
+| `/llm effort status` | 思考档位概况：当前生效结果与来源说明（自动调整或未生效时会注明原因） |
 | `/llm mcp` | 外部工具（MCP）连接状态（`mcp status` 同此） |
 | `/skill list` | 查看已安装的 Skill 与当前会话已激活的项（Skill 是部署者安装的 AI 扩展能力包，见 [Skill 说明](llm-skills.md)） |
 
@@ -66,7 +66,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm trigger prefix_mode on / off` | 开关前缀触发 |
 | `/llm memory on / off` | 开关记忆注入 |
 | `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、重置为全局默认、查看 |
-| `/llm effort <档位>`（`default` 恢复跟随渠道配置） | 本会话思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；回复会给出实际生效档（部分模型词表较窄会自动降档）；不配置时模型用自身默认档 |
+| `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本会话思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；回复会给出实际下发结果（部分模型词表较窄会自动调整）；不配置时模型用自身默认档。切换后若回复出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
 | `/llm delivery intermediate / final / all <on / off / reset>` | 分段交付两域的开关：`intermediate` = 中间轮发送（多轮工具回复的过程正文照常发出），`final` = 最终轮分段（最终长回复按自然段拆成多条），`all` = 两域同时操作；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理） |
 | `/llm clear_context` | 清空短期上下文，“串台”或记错上下文时用 |

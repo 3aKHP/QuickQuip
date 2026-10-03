@@ -233,7 +233,7 @@ class GeminiProviderClient(BaseProviderClient):
                 "thinkingBudget": request.thinking_budget,
             }
         else:
-            # 思考档位：3.x thinkingLevel / 2.5 thinkingBudget 固定值表
+            # 思考档位：3.x thinkingLevel / 2.x thinkingBudget 固定值表
             # （thinking 模块；两者不可同传）。
             directive = resolve_thinking(
                 request.reasoning_effort or self.config.reasoning_effort,
