@@ -137,3 +137,16 @@ async def test_effort_mutation_gated_for_non_admin(monkeypatch):
     finished, service = await _dispatch(monkeypatch, "/llm effort status", _FakeGroupEvent)
     assert service.calls == []
     assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+
+
+async def test_effort_mutation_allowed_for_group_admin(monkeypatch):
+    """群聊管理员：设档与 clear 别名清覆盖都放行并路由到 service。"""
+    monkeypatch.setattr(llm_part, "_allow_scope_management", lambda event: True)
+
+    finished, service = await _dispatch(monkeypatch, "/llm effort high", _FakeGroupEvent)
+    assert service.calls == [("high", "group")]
+    assert len(finished) == 1
+
+    finished, service = await _dispatch(monkeypatch, "/llm effort clear", _FakeGroupEvent)
+    assert service.calls == [(None, "group")]
+    assert len(finished) == 1

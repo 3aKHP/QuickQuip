@@ -165,14 +165,14 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             if action != "status":
                 if not _allow_scope_management(event):
                     await llm_cmd.finish("仅管理员可执行此操作")
-                if action == "default":
+                if action in {"default", "clear"}:
                     svc.set_chat_reasoning_effort(chat_id, None, chat_type=chat_type)
                 elif action in REASONING_EFFORT_CHOICES:
                     svc.set_chat_reasoning_effort(chat_id, action, chat_type=chat_type)
                 else:
                     await llm_cmd.finish(
-                        f"用法：/llm effort <档>|effort default|effort status"
-                        f"（档位：{'/'.join(REASONING_EFFORT_CHOICES)}）"
+                        f"用法：/llm effort <档>|effort default|effort clear|effort status"
+                        f" （档位：{'/'.join(REASONING_EFFORT_CHOICES)}）"
                     )
             await llm_cmd.finish(svc.format_effort_status(chat_id, chat_type=chat_type))
 
@@ -375,7 +375,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             "trigger prefix_mode on|off|trigger at on|off|"
             "memory status|memory on|memory off|"
             "auto_memory on|off|reset|status|"
-            "effort <档>|effort default|effort status|"
+            "effort <档>|effort default|effort clear|effort status|"
             "delivery intermediate|final|all <on|off|reset>|delivery status|"
             "context_limit <n>|context_limit reset|clear_context|reload|mcp status"
         )

@@ -52,6 +52,14 @@ models = ["glm-5.3"]
 reasoning_effort = "low"
 
 [[providers]]
+id = "p-glm-default"
+protocol = "openai"
+base_url = "https://glm2.example.test/v1"
+api_key_env = "GLM2_KEY"
+default_model = "glm-5.3"
+models = ["glm-5.3"]
+
+[[providers]]
 id = "p-resp"
 protocol = "openai_responses"
 base_url = "https://resp.example.test/v1"
@@ -172,6 +180,20 @@ def test_format_effort_status_responses_profile_clamp(tmp_path: Path) -> None:
 def test_format_status_includes_effort_line(tmp_path: Path) -> None:
     service = _make_service(tmp_path)
     assert "思考档位：" in service.format_status(123)
+
+
+def test_format_effort_status_hints_max_default_family(tmp_path: Path) -> None:
+    """GLM/Kimi/MiniMax 系未配置档位时：生效 默认 附默认即最高档提示。"""
+    service = _make_service(tmp_path)
+    service.set_chat_model(123, "p-glm-default", "glm-5.3")
+    line = service.format_effort_status(123)
+    assert "生效 默认（该模型默认档即最高档）" in line
+
+    # 非默认即最高档家族（gpt-test）不带提示
+    service.set_chat_model(123, "p-plain", "gpt-test")
+    line = service.format_effort_status(123)
+    assert "生效 默认" in line
+    assert "最高档" not in line
     assert "思考档位：" in service.format_current(123)
 
 

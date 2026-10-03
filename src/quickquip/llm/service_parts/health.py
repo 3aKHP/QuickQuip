@@ -15,7 +15,8 @@ from quickquip.llm.health import build_health_report, format_health_report
 from quickquip.llm.provider.openai_responses.profiles import resolve_profile
 from quickquip.llm.provider.openai_responses.request import reasoning_control
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
-from quickquip.llm.thinking import resolve_thinking
+from quickquip.llm.settings import ResolvedGroupSettings
+from quickquip.llm.thinking import family_defaults_to_max_thinking, resolve_thinking
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_AUTH,
     MCP_FAILURE_CONFIG,
@@ -151,7 +152,7 @@ class HealthMixin:
     def list_personas(self, chat_type: str = "group") -> list[PersonaConfig]:
         return [p for p in self.config.personas.values() if not p.scope or chat_type in p.scope]
 
-    def _format_effort_status(self, settings) -> str:
+    def _format_effort_status(self, settings: ResolvedGroupSettings) -> str:
         """思考档位三层口径：provider 配置档 / 本群覆盖档 / 钳制后生效档。"""
         provider = self.config.providers.get(settings.provider_id)
         configured = (provider.reasoning_effort or "默认") if provider else "未知"
@@ -159,6 +160,10 @@ class HealthMixin:
         requested = settings.reasoning_effort
         if provider is None or not requested:
             effective = requested or "默认"
+            if not requested and provider and family_defaults_to_max_thinking(
+                settings.model or provider.default_model
+            ):
+                effective += "（该模型默认档即最高档）"
         elif requested not in REASONING_EFFORT_CHOICES:
             effective = f"{requested}（未知档位）"
         elif provider.protocol == "openai_responses":
