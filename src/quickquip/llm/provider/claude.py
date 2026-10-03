@@ -289,6 +289,7 @@ class ClaudeProviderClient(BaseProviderClient):
             max_output_tokens=request.max_output_tokens,
         )
         if thinking_directive is not None:
+            thinking_enabled = True
             if thinking_directive.kind == "claude_adaptive":
                 payload["thinking"] = {"type": "adaptive"}
                 payload["output_config"] = {"effort": thinking_directive.effort}
@@ -297,7 +298,10 @@ class ClaudeProviderClient(BaseProviderClient):
                     "type": "enabled",
                     "budget_tokens": thinking_directive.budget_tokens,
                 }
-            if request.temperature != 1.0:
+            else:
+                # 未知 kind：未注入任何思考参数，温度不下掉
+                thinking_enabled = False
+            if thinking_enabled and request.temperature != 1.0:
                 del payload["temperature"]
                 log_once(
                     logging.INFO,

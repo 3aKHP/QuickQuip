@@ -172,6 +172,25 @@ def test_claude_unparseable_model_treated_as_current_shape():
     assert directive.effort == "xhigh"
 
 
+def test_claude_legacy_naming_37_uses_budget():
+    """旧命名法 claude-3-7-sonnet-* 解析代际 (3,7)，走旧式 budget 形态。"""
+    directive = resolve_thinking(
+        "high", _provider("claude"), "claude-3-7-sonnet-20250219", max_output_tokens=64000
+    )
+    assert directive.kind == "claude_budget"
+    assert directive.budget_tokens == 8000
+
+
+def test_claude_35_and_earlier_sends_nothing(caplog):
+    """3.5 及更早无思考能力（extended thinking 自 3.7 引入）：不发送 + warning。"""
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.thinking"):
+        directive = resolve_thinking(
+            "high", _provider("claude", id="p-old"), "claude-3-5-sonnet-20241022"
+        )
+    assert directive is None
+    assert any("不支持思考" in record.message for record in caplog.records)
+
+
 # ── gemini：代际分派 ─────────────────────────────────────────────
 
 
@@ -197,6 +216,28 @@ def test_gemini_25_thinking_budget():
     assert directive.kind == "gemini_budget"
     assert directive.budget_tokens == 2000
     assert resolve_thinking("ultra", _provider("gemini"), "gemini-2.5-pro").budget_tokens == 32000
+
+
+def test_gemini_25_flash_budget_capped():
+    """2.5 Flash 系 thinkingBudget 上限 24576（Pro 系 32768）：max/ultra 钳制并标记。"""
+    directive = resolve_thinking("max", _provider("gemini"), "gemini-2.5-flash")
+    assert directive.kind == "gemini_budget"
+    assert directive.budget_tokens == 24576
+    assert directive.clamped is True
+    # Pro 系不钳
+    pro = resolve_thinking("max", _provider("gemini"), "gemini-2.5-pro")
+    assert pro.budget_tokens == 32000
+    assert pro.clamped is False
+
+
+def test_gemini_20_sends_nothing(caplog):
+    """2.0 系不支持思考参数：不发送 + warning。"""
+    with caplog.at_level(logging.WARNING, logger="quickquip.llm.thinking"):
+        directive = resolve_thinking(
+            "high", _provider("gemini", id="p-g20"), "gemini-2.0-flash"
+        )
+    assert directive is None
+    assert any("不支持思考" in record.message for record in caplog.records)
 
 
 def test_gemini_non_gemini_model_sends_nothing():

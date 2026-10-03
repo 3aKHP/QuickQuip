@@ -43,7 +43,6 @@ INCLUDE_ENCRYPTED_REASONING = ("reasoning.encrypted_content",)
 # （词表即降档边界，见 profiles.py 的逐 profile 核对注记——openai-public
 # 按已核对范围收敛到 xhigh；codex-http-relay 五档恒等，ultra 降档 max，
 # 2026-10-03 实测中转网关校验层拒绝 ultra）。
-# thinking_budget 数字口径不适用于本协议（claude/gemini 专属）。
 _EFFORT_ORDER = REASONING_EFFORT_TIERS
 
 _TOOL_IMAGE_NOTICE = TOOL_IMAGE_FLUSH_NOTICE
@@ -58,7 +57,7 @@ def reasoning_control(
     最高档（映射规则单点，词表见 profiles.py 的逐 profile 核对注记）。
     ``tier`` 为 scope 覆盖解析后的生效档；None 读 provider 配置档。
     """
-    tier = (config.reasoning_effort if tier is None else tier).strip()
+    tier = (config.reasoning_effort if tier is None else tier).strip().lower()
     if not tier:
         return None
     if tier not in _EFFORT_ORDER:
