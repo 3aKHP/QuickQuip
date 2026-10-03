@@ -129,9 +129,9 @@ def derive_replay_budget(
 def estimate_request_tokens(request: LLMRequest, *, effort: str | None = None) -> int:
     """最终实际 payload 的输入估算：system/tools/messages 全量计入。
 
-    ``effort`` 为当前 provider 配置的思考档位，作为密文预留的回落档；
-    消息标注的密文来源档（native_effort）优先，None 且未标注按默认档
-    画像。
+    ``effort`` 为当前请求的生效思考档位（调用方完成 scope 覆盖解析），
+    作为密文预留的回落档；消息标注的密文来源档（native_effort）优先，
+    None 且未标注按默认档画像。
     """
     total = estimate_tokens(request.system_prompt)
     for spec in request.tools:
@@ -184,7 +184,9 @@ def check_request_budget(
     wire_model = request.model
     context_window = resolve_context_window(provider.model_context_windows, wire_model)
     output_reserve = (max_output_tokens or provider.max_output_tokens) + _RESERVE_TOKENS
-    estimated = estimate_request_tokens(request, effort=provider.reasoning_effort)
+    estimated = estimate_request_tokens(
+        request, effort=request.reasoning_effort or provider.reasoning_effort
+    )
     if context_window is None:
         effective_window = None
     else:

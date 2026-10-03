@@ -173,3 +173,32 @@ def test_format_status_includes_effort_line(tmp_path: Path) -> None:
     service = _make_service(tmp_path)
     assert "思考档位：" in service.format_status(123)
     assert "思考档位：" in service.format_current(123)
+
+
+async def test_history_projection_receives_scope_effort(tmp_path: Path, monkeypatch) -> None:
+    """历史重放投影的密文回落档取请求生效档（群覆盖优先于 provider 配置档）。"""
+
+    class _CaptureClient:
+        async def complete(self, request):
+            return LLMResponse(text="ok", model=request.model, finish_reason="stop")
+
+    monkeypatch.setattr(
+        "quickquip.llm.service.build_provider_client", lambda provider: _CaptureClient()
+    )
+    service = _make_service(tmp_path)
+    captured: dict = {}
+    monkeypatch.setattr(
+        service,
+        "_projected_history_segments",
+        lambda **kwargs: captured.update(kwargs) or {},
+    )
+
+    service.set_chat_reasoning_effort(123, "max")
+    await service.generate_reply(group_id=123, user_id=1, sender_name="t", prompt="hi")
+    assert captured["effort"] == "max"
+
+    # 清覆盖后回落 provider 配置档（p-plain 未配置 → 空 = 默认档画像）
+    captured.clear()
+    service.set_chat_reasoning_effort(123, None)
+    await service.generate_reply(group_id=123, user_id=1, sender_name="t", prompt="hi")
+    assert captured["effort"] == ""

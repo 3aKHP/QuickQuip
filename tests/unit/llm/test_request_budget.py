@@ -23,7 +23,7 @@ from quickquip.llm.request_budget import (
 )
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.token_estimate import (
-    NATIVE_MEDIA_FLAT_TOKENS, estimate_tokens,
+    NATIVE_ENCRYPTED_TOKENS_BY_EFFORT, NATIVE_MEDIA_FLAT_TOKENS, estimate_tokens,
 )
 
 
@@ -79,8 +79,6 @@ def test_estimate_request_tokens_counts_thinking_blocks():
 def test_estimate_request_tokens_cipher_follows_per_message_source_effort():
     """密文计量按消息标注的密文来源档（native_effort），未标注回落
     当前请求档（effort 形参）——切档混档历史的 per-item 计价口径。"""
-    from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_TOKENS_BY_EFFORT
-
     cipher = {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "xx"}
     low_msg = LLMConversationMessage(
         role="assistant", native_content=[cipher], native_effort="low"
@@ -102,6 +100,23 @@ def test_estimate_request_tokens_cipher_follows_per_message_source_effort():
     assert estimate_request_tokens(_request([unmarked]), effort="high") > estimate_request_tokens(
         _request([unmarked]), effort="low"
     )
+
+
+def test_check_request_budget_cipher_fallback_follows_request_effort():
+    """循环内续接的未标注密文按请求生效档回落（群覆盖优先于 provider
+    配置档）——provider 配 low + 请求 max 时不得按 low 低估。"""
+    cipher = {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "xx"}
+    provider = _provider(reasoning_effort="low")
+    request = LLMRequest(
+        model="custom-model-x",
+        system_prompt="",
+        messages=[LLMConversationMessage(role="assistant", native_content=[cipher])],
+        temperature=0.8,
+        max_output_tokens=800,
+        reasoning_effort="max",
+    )
+    check = check_request_budget(LLMConfig(), provider, request)
+    assert check.estimated_input_tokens >= NATIVE_ENCRYPTED_TOKENS_BY_EFFORT["max"]
 
 
 def test_estimate_request_tokens_media_not_double_counted_in_native():
