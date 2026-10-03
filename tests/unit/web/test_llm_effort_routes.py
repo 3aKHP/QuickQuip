@@ -226,11 +226,16 @@ def test_verify_edit_rejects_semantic_drift():
     with pytest.raises(HTTPException) as exc:
         routes._verify_edit(before, drifted_target, "alpha", "high")
     assert exc.value.status_code == 500
-    # 其余 provider 档位漂移
-    drifted_other = [before[0], dict(before[1], reasoning_effort="max")]
+    assert "目标 provider" in exc.value.detail
+    # 其余 provider 档位漂移（目标先符合意图，确保命中其他 provider 分支）
+    drifted_other = [
+        dict(before[0], reasoning_effort="high"),
+        dict(before[1], reasoning_effort="max"),
+    ]
     with pytest.raises(HTTPException) as exc:
         routes._verify_edit(before, drifted_other, "alpha", "high")
     assert exc.value.status_code == 500
+    assert "其他 provider" in exc.value.detail
     # provider 序列变化
     with pytest.raises(HTTPException) as exc:
         routes._verify_edit(before, before[:1], "alpha", "high")

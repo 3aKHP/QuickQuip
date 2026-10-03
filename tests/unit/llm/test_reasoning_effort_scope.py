@@ -67,6 +67,14 @@ api_key_env = "RESP_KEY"
 default_model = "gpt-5.3-codex"
 models = ["gpt-5.3-codex"]
 responses_profile = "codex-http-relay"
+
+[[providers]]
+id = "p-gemini-flash"
+protocol = "gemini"
+base_url = "https://gemini.example.test/v1beta"
+api_key_env = "GEMINI_KEY"
+default_model = "gemini-2.5-flash"
+models = ["gemini-2.5-flash"]
 """
 
 
@@ -195,6 +203,16 @@ def test_format_effort_status_hints_max_default_family(tmp_path: Path) -> None:
     assert "生效 默认" in line
     assert "最高档" not in line
     assert "思考档位：" in service.format_current(123)
+
+
+def test_format_effort_status_gemini_flash_clamp_reason(tmp_path: Path) -> None:
+    """gemini 2.5 Flash 的 max 档被模型上限 24576 钳制：文案不写 max_tokens 钳制。"""
+    service = _make_service(tmp_path)
+    service.set_chat_model(123, "p-gemini-flash", "gemini-2.5-flash")
+    service.set_chat_reasoning_effort(123, "max")
+    line = service.format_effort_status(123)
+    assert "budget=24576（受模型上限钳制）" in line
+    assert "max_tokens" not in line
 
 
 async def test_history_projection_receives_scope_effort(tmp_path: Path, monkeypatch) -> None:
