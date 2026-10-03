@@ -155,16 +155,18 @@ class HealthMixin:
     def _format_effort_status(
         self, settings: ResolvedGroupSettings, chat_type: str = "group"
     ) -> str:
-        """思考档位口径：渠道配置 / 本群覆盖 / 实际下发结果（含自动调整原因）。"""
+        """思考档位口径：渠道配置 / 本群或私聊覆盖 / 实际下发结果（含自动调整原因）。"""
         provider = self.config.providers.get(settings.provider_id)
         scope = "私聊" if chat_type == "private" else "本群"
         configured = (provider.reasoning_effort or "未配置") if provider else "未知"
         override = settings.reasoning_effort_override or "未覆盖"
         requested = settings.reasoning_effort
         model = settings.model or (provider.default_model if provider else "")
-        if provider is None or not requested:
+        if provider is None:
+            effective = "无法解析：渠道配置缺失（可能已删除或改名）"
+        elif not requested:
             effective = "按模型自身默认档运行"
-            if not requested and provider and family_defaults_to_max_thinking(model):
+            if family_defaults_to_max_thinking(model):
                 effective = f"按模型自身默认档运行（{model} 的默认档即最高档）"
         elif requested not in REASONING_EFFORT_CHOICES:
             effective = f"档位 {requested} 无法识别（请检查配置）"
@@ -187,8 +189,8 @@ class HealthMixin:
             )
             if directive is None:
                 effective = (
-                    f"不下发：该渠道（{provider.protocol} 协议）不支持给 {model} "
-                    f"下发思考参数，模型按自身默认档运行"
+                    f"不下发：该渠道（{provider.protocol} 协议）与 {model} 的组合"
+                    f"当前无法下发思考参数，模型按自身默认档运行"
                 )
                 if family_defaults_to_max_thinking(model):
                     effective += "（该模型默认即最高档）"

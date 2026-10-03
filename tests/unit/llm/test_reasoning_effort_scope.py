@@ -1,9 +1,9 @@
 """思考档位的 scope 覆盖链：命令写 → 持久化 → 设置解析 → 请求装配 → 状态展示。
 
 档位词表单源 config.REASONING_EFFORT_CHOICES；scope 覆盖为三态
-（None = 跟随 provider 配置档）。展示面三层口径：配置档 / 覆盖档 /
-钳制后生效档（openai 系经 resolve_thinking，openai_responses 经 profile
-词表层 reasoning_control）。
+（None = 跟随 provider 配置档）。展示面三层口径：渠道配置 / 本群或私聊
+覆盖 / 实际下发结果（openai 系经 resolve_thinking，openai_responses 经
+profile 词表层 reasoning_control）。
 """
 
 from __future__ import annotations
@@ -200,8 +200,26 @@ def test_format_effort_status_unsupported_combo(tmp_path: Path) -> None:
     service.set_chat_reasoning_effort(123, "high")
     line = service.format_effort_status(123)
     assert "本群 high" in line
-    assert "不下发：该渠道（claude 协议）不支持给 k3 下发思考参数" in line
+    assert "不下发：该渠道（claude 协议）与 k3 的组合当前无法下发思考参数" in line
     assert "模型按自身默认档运行（该模型默认即最高档）" in line
+
+
+def test_format_effort_status_missing_provider(tmp_path: Path) -> None:
+    """渠道已删除但有覆盖：明确报渠道缺失，不伪造实际行为。"""
+    service = _make_service(tmp_path)
+    service.set_chat_reasoning_effort(123, "high")
+    service.store.update_group_settings("123", provider_id="p-deleted")
+    line = service.format_effort_status(123)
+    assert "渠道 未知" in line
+    assert "本群 high" in line
+    assert "无法解析：渠道配置缺失" in line
+
+
+def test_format_effort_status_private_scope_label(tmp_path: Path) -> None:
+    """私聊 scope 标签为「私聊」。"""
+    service = _make_service(tmp_path)
+    line = service.format_effort_status(123, chat_type="private")
+    assert "私聊 未覆盖" in line
 
 
 def test_format_status_includes_effort_line(tmp_path: Path) -> None:
