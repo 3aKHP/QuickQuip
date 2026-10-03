@@ -64,7 +64,7 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | `/llm providers`、`/llm models [provider]` | 列出模型来源与模型（provider 即 AI 服务来源，如 Gemini、OpenAI） |
 | `/llm personas` | 列出可用人格 |
 | `/llm memory status` | 记忆注入与长期记忆概况 |
-| `/llm effort status` | 思考档位概况：渠道配置 / 本群覆盖 / 实际下发结果（含自动调整、不支持下发等说明） |
+| `/llm effort status` | 思考档位概况：当前生效结果与来源说明（自动调整或未生效时会注明原因） |
 | `/llm mcp` | 外部工具（MCP）连接状态 |
 | `/skill list` | 查看已安装的 Skill 与当前会话已激活的项（Skill 是部署者安装的 AI 扩展能力包，见 [Skill 说明](llm-skills.md)） |
 | `/memories [关键词]` | 查看本群长期记忆，可按关键词筛选（写入和删除是管理员命令） |

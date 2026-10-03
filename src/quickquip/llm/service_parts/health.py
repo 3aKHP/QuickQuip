@@ -155,60 +155,77 @@ class HealthMixin:
     def _format_effort_status(
         self, settings: ResolvedGroupSettings, chat_type: str = "group"
     ) -> str:
-        """思考档位口径：渠道配置 / 本群或私聊覆盖 / 实际下发结果（含自动调整原因）。"""
+        """思考档位状态：结果先行一句话，随后说明来源与未生效/自动调整原因。"""
         provider = self.config.providers.get(settings.provider_id)
         scope = "私聊" if chat_type == "private" else "本群"
-        configured = (provider.reasoning_effort or "未配置") if provider else "未知"
-        override = settings.reasoning_effort_override or "未覆盖"
+        override = settings.reasoning_effort_override
         requested = settings.reasoning_effort
         model = settings.model or (provider.default_model if provider else "")
+        label = model or "模型"
         if provider is None:
-            effective = "无法解析：渠道配置缺失（可能已删除或改名）"
-        elif not requested:
-            effective = "按模型自身默认档运行"
+            note = "当前渠道配置缺失（可能已删除或改名）"
+            if override:
+                note += f"；{scope}设置为 {override}"
+            return f"思考档位：无法解析。{note}。"
+        if not requested:
+            result = f"{label} 自身默认档"
             if family_defaults_to_max_thinking(model):
-                effective = f"按模型自身默认档运行（{model} 的默认档即最高档）"
-        elif requested not in REASONING_EFFORT_CHOICES:
-            effective = f"档位 {requested} 无法识别（请检查配置）"
-        elif provider.protocol == "openai_responses":
+                result += "（即最高档）"
+            return f"思考档位：{result}。{scope}未单独设置。"
+        if requested not in REASONING_EFFORT_CHOICES:
+            return f"思考档位：{requested}。该档位无法识别，请检查配置。"
+        # 请求档来源与常规说明（无调整时只交代出处）
+        origin = f"{scope}设置" if override else "渠道配置"
+        note = f"来自{origin}" if override else f"来自渠道配置，{scope}未单独设置"
+        if provider.protocol == "openai_responses":
             # responses 协议的归一化层在 profile 词表（reasoning_control）。
             control = reasoning_control(
                 provider, resolve_profile(provider.responses_profile), tier=requested
             )
             wire = (control or {}).get("effort") or requested
             if wire != requested:
-                effective = f"按 {wire} 下发（该后端不支持 {requested}，已自动调整）"
-            else:
-                effective = f"按 {wire} 下发"
-        else:
-            directive = resolve_thinking(
-                requested,
-                provider,
-                model,
-                max_output_tokens=provider.max_output_tokens,
+                return (
+                    f"思考档位：{wire}。{origin}为 {requested}，"
+                    f"该后端不支持该档位，已自动调整。"
+                )
+            return f"思考档位：{wire}。{note}。"
+        directive = resolve_thinking(
+            requested,
+            provider,
+            model,
+            max_output_tokens=provider.max_output_tokens,
+        )
+        if directive is None:
+            result = f"{label} 自身默认档"
+            if family_defaults_to_max_thinking(model):
+                result += "（即最高档）"
+            return (
+                f"思考档位：{result}。{origin}的 {requested} 未能生效："
+                f"该渠道（{provider.protocol} 协议）与 {label} 的组合"
+                f"当前无法下发思考档位。"
             )
-            if directive is None:
-                effective = (
-                    f"不下发：该渠道（{provider.protocol} 协议）与 {model} 的组合"
-                    f"当前无法下发思考参数，模型按自身默认档运行"
-                )
-                if family_defaults_to_max_thinking(model):
-                    effective += "（该模型默认即最高档）"
-            elif directive.clamped and directive.effort:
-                effective = f"按 {directive.effort} 下发（该后端不支持 {requested}，已自动调整）"
-            elif directive.clamped:
-                # claude_budget 被 max_output_tokens 限制；gemini_budget 被模型上限限制
-                reason = (
-                    "受 max_output_tokens 限制"
-                    if directive.kind == "claude_budget"
-                    else "受模型上限限制"
-                )
-                effective = f"思考预算 {directive.budget_tokens} tokens（{reason}）"
-            elif directive.effort:
-                effective = f"按 {directive.effort} 下发"
-            else:
-                effective = f"思考预算 {directive.budget_tokens} tokens"
-        return f"思考档位：渠道 {configured} / {scope} {override} / 实际 {effective}"
+        if directive.clamped and directive.effort:
+            return (
+                f"思考档位：{directive.effort}。{origin}为 {requested}，"
+                f"该后端不支持该档位，已自动调整。"
+            )
+        if directive.clamped:
+            # claude_budget 受 max_output_tokens 限制；gemini_budget 受模型上限限制
+            reason = (
+                "受 max_output_tokens 限制"
+                if directive.kind == "claude_budget"
+                else "受模型上限限制"
+            )
+            return (
+                f"思考档位：{requested}（思考预算 {directive.budget_tokens} tokens）。"
+                f"{note}，{reason}。"
+            )
+        if directive.effort:
+            return f"思考档位：{directive.effort}。{note}。"
+        return (
+            f"思考档位：{requested}（思考预算 {directive.budget_tokens} tokens）。"
+            f"{note}。"
+        )
 
     def format_effort_status(self, chat_id: int | str, chat_type: str = "group") -> str:
         return self._format_effort_status(

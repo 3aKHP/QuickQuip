@@ -167,20 +167,16 @@ async def test_generate_reply_default_effort_sends_none(tmp_path: Path, monkeypa
 def test_format_effort_status_default(tmp_path: Path) -> None:
     service = _make_service(tmp_path)
     line = service.format_effort_status(123)
-    assert "渠道 未配置" in line
-    assert "本群 未覆盖" in line
-    assert "实际 按模型自身默认档运行" in line
+    assert "思考档位：gpt-test 自身默认档。本群未单独设置。" in line
 
 
 def test_format_effort_status_shows_openai_clamp(tmp_path: Path) -> None:
-    """三档系 GLM：medium 自动调整为 high，渠道/本群/实际三层各自可见。"""
+    """三档系 GLM：medium 自动调整为 high，结果先行并交代来源。"""
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-glm", "glm-5.3")
     service.set_chat_reasoning_effort(123, "medium")
     line = service.format_effort_status(123)
-    assert "渠道 low" in line
-    assert "本群 medium" in line
-    assert "实际 按 high 下发（该后端不支持 medium，已自动调整）" in line
+    assert "思考档位：high。本群设置为 medium，该后端不支持该档位，已自动调整。" in line
 
 
 def test_format_effort_status_responses_profile_clamp(tmp_path: Path) -> None:
@@ -189,37 +185,34 @@ def test_format_effort_status_responses_profile_clamp(tmp_path: Path) -> None:
     service.set_chat_model(123, "p-resp", "gpt-5.3-codex")
     service.set_chat_reasoning_effort(123, "ultra")
     line = service.format_effort_status(123)
-    assert "本群 ultra" in line
-    assert "实际 按 max 下发（该后端不支持 ultra，已自动调整）" in line
+    assert "思考档位：max。本群设置为 ultra，该后端不支持该档位，已自动调整。" in line
 
 
 def test_format_effort_status_unsupported_combo(tmp_path: Path) -> None:
-    """非 Claude 家族挂 claude 协议：明确说明不下发、原因与模型自身默认档。"""
+    """非 Claude 家族挂 claude 协议：结果为模型默认档，说明覆盖未生效与原因。"""
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-kimi-claude", "k3")
     service.set_chat_reasoning_effort(123, "high")
     line = service.format_effort_status(123)
-    assert "本群 high" in line
-    assert "不下发：该渠道（claude 协议）与 k3 的组合当前无法下发思考参数" in line
-    assert "模型按自身默认档运行（该模型默认即最高档）" in line
+    assert "思考档位：k3 自身默认档（即最高档）。" in line
+    assert "本群设置的 high 未能生效：" in line
+    assert "该渠道（claude 协议）与 k3 的组合当前无法下发思考档位。" in line
 
 
 def test_format_effort_status_missing_provider(tmp_path: Path) -> None:
-    """渠道已删除但有覆盖：明确报渠道缺失，不伪造实际行为。"""
+    """渠道已删除但有覆盖：明确报渠道缺失并保留覆盖信息，不伪造实际行为。"""
     service = _make_service(tmp_path)
     service.set_chat_reasoning_effort(123, "high")
     service.store.update_group_settings("123", provider_id="p-deleted")
     line = service.format_effort_status(123)
-    assert "渠道 未知" in line
-    assert "本群 high" in line
-    assert "无法解析：渠道配置缺失" in line
+    assert "思考档位：无法解析。当前渠道配置缺失（可能已删除或改名）；本群设置为 high。" in line
 
 
 def test_format_effort_status_private_scope_label(tmp_path: Path) -> None:
     """私聊 scope 标签为「私聊」。"""
     service = _make_service(tmp_path)
     line = service.format_effort_status(123, chat_type="private")
-    assert "私聊 未覆盖" in line
+    assert "私聊未单独设置" in line
 
 
 def test_format_status_includes_effort_line(tmp_path: Path) -> None:
@@ -232,13 +225,13 @@ def test_format_effort_status_hints_max_default_family(tmp_path: Path) -> None:
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-glm-default", "glm-5.3")
     line = service.format_effort_status(123)
-    assert "按模型自身默认档运行（glm-5.3 的默认档即最高档）" in line
+    assert "glm-5.3 自身默认档（即最高档）" in line
 
     # 非默认即最高档家族（gpt-test）不带提示
     service.set_chat_model(123, "p-plain", "gpt-test")
     line = service.format_effort_status(123)
-    assert "实际 按模型自身默认档运行" in line
-    assert "最高档" not in line
+    assert "gpt-test 自身默认档" in line
+    assert "即最高档" not in line
     assert "思考档位：" in service.format_current(123)
 
 
@@ -248,7 +241,7 @@ def test_format_effort_status_gemini_flash_clamp_reason(tmp_path: Path) -> None:
     service.set_chat_model(123, "p-gemini-flash", "gemini-2.5-flash")
     service.set_chat_reasoning_effort(123, "max")
     line = service.format_effort_status(123)
-    assert "思考预算 24576 tokens（受模型上限限制）" in line
+    assert "思考档位：max（思考预算 24576 tokens）。来自本群设置，受模型上限限制。" in line
     assert "max_output_tokens" not in line
 
 
