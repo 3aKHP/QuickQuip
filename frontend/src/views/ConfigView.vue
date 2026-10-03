@@ -199,20 +199,27 @@ async function onEffortChange(p: LlmEffortProvider, event: Event) {
   }
   effortSaving.value = p.id
   effortError.value = null
+  let saved = false
   try {
     await saveLlmEffort(p.id, effort)
+    saved = true
     toast('保存成功，需 /llm reload 或重启后生效')
-    await loadEffort()
-    // 结构化编辑已改盘内文件，重新拉取让 textarea 与面板同步
-    const data = await fetchConfig('llm')
-    content.value = data.content
-    originalContent.value = data.content
   } catch (e: unknown) {
     effortError.value = (e as Error).message
     toast('保存失败', 'error')
     await loadEffort()
   } finally {
     effortSaving.value = ''
+  }
+  if (!saved) return
+  // 保存已落盘：刷新面板与 textarea 保持同步；刷新失败只提示不同步，不掩盖保存结果
+  try {
+    await loadEffort()
+    const data = await fetchConfig('llm')
+    content.value = data.content
+    originalContent.value = data.content
+  } catch {
+    toast('已保存，但文件内容刷新失败，请点「重置」重新加载', 'error')
   }
 }
 
@@ -225,6 +232,10 @@ async function save() {
     originalContent.value = content.value
     const entry = configs.value.find(c => c.key === currentKey.value)
     if (entry) entry.exists = true
+    if (currentKey.value === 'llm') {
+      // 文本编辑可能改了档位行：刷新结构化面板（loadEffort 内部自捕获，不影响保存结果）
+      await loadEffort()
+    }
     const effect = res?.effect
     if (effect === 'auto_reloading') {
       toast('已保存，正在自动重载（诊断页「最近动作」查看结果）')

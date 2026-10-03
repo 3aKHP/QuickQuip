@@ -185,7 +185,13 @@ class HealthMixin:
             elif directive.clamped and directive.effort:
                 effective = f"{directive.effort}（钳制自 {requested}）"
             elif directive.clamped:
-                effective = f"budget={directive.budget_tokens}（受 max_tokens 钳制）"
+                # claude_budget 被 max_output_tokens 钳制；gemini_budget 被模型上限钳制
+                reason = (
+                    "受 max_tokens 钳制"
+                    if directive.kind == "claude_budget"
+                    else "受模型上限钳制"
+                )
+                effective = f"budget={directive.budget_tokens}（{reason}）"
             else:
                 effective = directive.effort or f"budget={directive.budget_tokens}"
         return f"思考档位：配置 {configured} / 覆盖 {override} / 生效 {effective}"
