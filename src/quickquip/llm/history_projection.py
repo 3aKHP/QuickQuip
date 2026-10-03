@@ -505,13 +505,18 @@ def _estimate_messages_tokens(
         # thinking_blocks 同理跳过（与 request_budget 的单计口径一致）。
         # 密文计量按消息标注的密文来源档（native_effort），未标注回落
         # 当前请求档（effort 形参）。
-        message_effort = message.native_effort or effort
         if message.native_content is None:
             total += estimate_tokens(message.content)
             for call in message.tool_calls:
                 total += estimate_tokens(call.arguments_json)
-            total += estimate_native_blocks_tokens(message.thinking_blocks, effort=message_effort)
-        total += estimate_native_blocks_tokens(message.native_content, effort=message_effort)
+            if message.thinking_blocks:
+                total += estimate_native_blocks_tokens(
+                    message.thinking_blocks, effort=message.native_effort or effort
+                )
+        elif message.native_content:
+            total += estimate_native_blocks_tokens(
+                message.native_content, effort=message.native_effort or effort
+            )
     return total
 
 
@@ -629,7 +634,10 @@ def _strip_native_thinking(
         if kept:
             stripped.append(
                 LLMConversationMessage(
-                    role=message.role, content=message.content, native_content=kept
+                    role=message.role,
+                    content=message.content,
+                    native_content=kept,
+                    native_effort=message.native_effort,
                 )
             )
         else:
@@ -637,6 +645,7 @@ def _strip_native_thinking(
                 LLMConversationMessage(
                     role=message.role,
                     content=message.content or _STRIPPED_TURN_PLACEHOLDER,
+                    native_effort=message.native_effort,
                 )
             )
     return stripped if changed else messages

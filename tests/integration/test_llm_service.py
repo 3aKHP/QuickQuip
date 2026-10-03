@@ -2152,10 +2152,10 @@ async def test_responses_cross_turn_effort_switch_keeps_native_replay(
     )
 
     # 切档不断回放：历史 Loop 的 reasoning 密文原生保留
-    third = fakes[1].payloads[0]["input"]
-    kinds = [item.get("type") or item.get("role") for item in third]
+    replayed_input = fakes[1].payloads[0]["input"]
+    kinds = [item.get("type") or item.get("role") for item in replayed_input]
     assert kinds[:3] == ["user", "reasoning", "function_call"]
-    assert third[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
+    assert replayed_input[1] == _RESPONSES_TOOL_ROUND_BODY["output"][0]
     # 第二轮请求按 high 档上线
     assert fakes[1].payloads[0]["reasoning"]["effort"] == "high"
 
