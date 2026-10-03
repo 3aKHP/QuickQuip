@@ -470,8 +470,9 @@ max_output_tokens = 2048
 [[providers]]
 # OpenAI Responses 协议（1.16 起）：store:false 手动上下文管理 + 每轮全量
 # input items 回放；reasoning 模型的工具循环会把 reasoning 密文与原生
-# output items 原样回传，跨轮历史经 owner 校验（同 provider/model/档位/端点）
-# 后按原生形态回放 reasoning 密文，切换任一维度自动降级为通用投影。
+# output items 原样回传，跨轮历史经 owner 校验（provider/协议/model/profile/
+# 端点五维，不含档位）后按原生形态回放 reasoning 密文：切换档位时新旧密文
+# 混档共存、按各密文生成档位逐条计量，切换其余维度自动降级为通用投影。
 id = "openai-responses"
 protocol = "openai_responses"
 base_url = "https://api.openai.com/v1"

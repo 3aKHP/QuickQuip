@@ -28,7 +28,7 @@
 设计约束：
 
 - 档位取值沿用六档映射（low/medium/high/xhigh/max/ultra）与超出后端支持自动降档的既有语义。
-- Responses 跨轮密文回放按 owner 五元组判定（provider/model/profile/端点，不含档位）：切换档位不断回放，新旧密文混档共存，回放估算按各密文的生成档位逐条计量。
+- Responses 跨轮密文回放按 owner 身份五维判定（provider/协议/model/profile/端点，不含档位）：切换档位不断回放，新旧密文混档共存，回放估算按各密文的生成档位逐条计量。
 
 ### 镜像瘦身与贴吧搬运运行时拆分
 

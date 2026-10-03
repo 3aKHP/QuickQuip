@@ -270,7 +270,7 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
 
-> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：同一 provider / 模型 / 档位 / 端点的会话保留完整推理连续性，历史工具循环按原生形态回放；切换任一维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
+> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：owner 身份维度为 provider / 协议 / 模型 / profile / 端点（不含档位），同一 owner 的会话保留完整推理连续性，历史工具循环按原生形态回放；切换档位时新旧密文混档共存、回放估算按各密文生成档位逐条计量，切换其余维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
 
 ### `[style_profiles]` — 共享风格段
 
