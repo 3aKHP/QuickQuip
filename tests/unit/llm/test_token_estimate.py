@@ -1,5 +1,6 @@
 import math
 
+from quickquip.llm.config import REASONING_EFFORT_CHOICES
 from quickquip.llm.token_estimate import (
     ASCII_TOKEN_RATIO,
     CJK_TOKEN_RATIO,
@@ -86,8 +87,6 @@ def test_estimate_native_blocks_tokens_none_and_empty():
 
 def test_encrypted_effort_mapping_covers_config_vocabulary():
     """密文档位表与 config 六档词表一一对应（防词表漂移漏档）。"""
-    from quickquip.llm.config import REASONING_EFFORT_CHOICES
-
     assert set(NATIVE_ENCRYPTED_TOKENS_BY_EFFORT) == set(REASONING_EFFORT_CHOICES)
 
 
@@ -100,9 +99,9 @@ def test_encrypted_payload_flat_tokens_tier_ordering():
 
 
 def test_encrypted_payload_flat_tokens_byte_floor():
-    """大条目按 b64/4 字节口径兜底（防档位表低估超大密文）。"""
+    """大条目按 b64 字符/4 口径兜底（防档位表低估超大密文）。"""
     # 档位值之下：固定档生效
-    assert encrypted_payload_flat_tokens("low", 100) == 64
-    # 超出档位值：字节下限生效
+    assert encrypted_payload_flat_tokens("low", 100) == NATIVE_ENCRYPTED_TOKENS_BY_EFFORT["low"]
+    # 超出档位值：字符下限生效
     assert encrypted_payload_flat_tokens("low", 100_000) == 100_000 // 4
     assert encrypted_payload_flat_tokens("max", 100_000) == 100_000 // 4

@@ -18,11 +18,14 @@ _CJK_ORD_FLOOR = 0x2E80
 NATIVE_MEDIA_FLAT_TOKENS = 1200
 # 原生块内不透明加密载荷（Responses reasoning 密文 encrypted_content）的
 # 固定档预留：密文字节数与回放时实际计入的 reasoning token 无线性关系，
-# 字符折算会系统性高估请求输入；按生成档位的 per-effort 固定档 + 单条字节
+# 字符折算会系统性高估请求输入；按生成档位的 per-effort 固定档 + 单条字符
 # 下限保护（max(档位值, b64 字符数/4)）预留（循环内续接与跨轮历史回放同
 # 口径）。档位初值为 2026-09-18 定调量级，梯度经 2026-10-03 实测画像确认
 # （low 档单条 ~1.7KB、实付 ~100 tok；max 档单条 1.4-4.3KB、实付 ~500 tok、
-# 单轮 11-17 条），随 usage 实付持续校准（juice 漂移风险由此对冲）。
+# 单轮 11-17 条）。档位值取保守上界而非实付均值：虚占的代价是投影更早落入
+# 精简阶梯，低估的代价是请求超预算被上游拒，预算安全方向优先；梯度 4× 对齐
+# 档位间 reasoning 预算的量级差。随 usage 实付持续校准（juice 漂移风险由此
+# 对冲）。
 NATIVE_ENCRYPTED_TOKENS_DEFAULT = 64
 NATIVE_ENCRYPTED_TOKENS_BY_EFFORT = {
     "low": 64,
@@ -43,7 +46,7 @@ _FLAT_FIELD_TOKENS = {
 
 
 def encrypted_payload_flat_tokens(effort: str | None, payload_chars: int) -> int:
-    """单条不透明密文的估算：per-effort 固定档与字节下限（b64/4）取大。
+    """单条不透明密文的估算：per-effort 固定档与字符下限（b64 字符数/4）取大。
 
     未知/留空档按默认档画像预留（对应模型默认档的实测分布）。
     """

@@ -5,7 +5,7 @@ from quickquip.llm.history_projection import (
     PATH_STRUCTURED,
     project_loops_with_budget,
 )
-from quickquip.llm.token_estimate import estimate_tokens
+from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_TOKENS_DEFAULT, estimate_tokens
 from quickquip.llm.store_parts.agent_records import (
     LoadedToolExecution,
 )
@@ -238,7 +238,6 @@ def test_native_thinking_stripped_responses_reasoning_items():
     )
     assert full.decisions[0].reason is None
     full_estimate = _native_estimate(full.messages)
-    from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_TOKENS_DEFAULT
 
     result = project_loops_with_budget(
         [loop],

@@ -39,7 +39,7 @@ DEFAULT_PROFILE_ID = DEFAULT_RESPONSES_PROFILE_ID
 class ResponsesProfile:
     profile_id: str
     # profile 实际接受的 wire reasoning.effort 词表；六档映射结果必须落在
-    # 该集合内，超出按降档规则收敛（见 request._REASONING_EFFORT_MAP）。
+    # 该集合内，超出按降档规则收敛（见 request.reasoning_control）。
     wire_efforts: frozenset[str]
     # 请求 service_tier 字段值；None = 不发送。
     service_tier: str | None
