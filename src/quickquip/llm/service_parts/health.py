@@ -152,53 +152,65 @@ class HealthMixin:
     def list_personas(self, chat_type: str = "group") -> list[PersonaConfig]:
         return [p for p in self.config.personas.values() if not p.scope or chat_type in p.scope]
 
-    def _format_effort_status(self, settings: ResolvedGroupSettings) -> str:
-        """思考档位三层口径：provider 配置档 / 本群覆盖档 / 钳制后生效档。"""
+    def _format_effort_status(
+        self, settings: ResolvedGroupSettings, chat_type: str = "group"
+    ) -> str:
+        """思考档位口径：渠道配置 / 本群覆盖 / 实际下发结果（含自动调整原因）。"""
         provider = self.config.providers.get(settings.provider_id)
-        configured = (provider.reasoning_effort or "默认") if provider else "未知"
-        override = settings.reasoning_effort_override or "跟随配置"
+        scope = "私聊" if chat_type == "private" else "本群"
+        configured = (provider.reasoning_effort or "未配置") if provider else "未知"
+        override = settings.reasoning_effort_override or "未覆盖"
         requested = settings.reasoning_effort
+        model = settings.model or (provider.default_model if provider else "")
         if provider is None or not requested:
-            effective = requested or "默认"
-            if not requested and provider and family_defaults_to_max_thinking(
-                settings.model or provider.default_model
-            ):
-                effective += "（该模型默认档即最高档）"
+            effective = "按模型自身默认档运行"
+            if not requested and provider and family_defaults_to_max_thinking(model):
+                effective = f"按模型自身默认档运行（{model} 的默认档即最高档）"
         elif requested not in REASONING_EFFORT_CHOICES:
-            effective = f"{requested}（未知档位）"
+            effective = f"档位 {requested} 无法识别（请检查配置）"
         elif provider.protocol == "openai_responses":
             # responses 协议的归一化层在 profile 词表（reasoning_control）。
             control = reasoning_control(
                 provider, resolve_profile(provider.responses_profile), tier=requested
             )
             wire = (control or {}).get("effort") or requested
-            effective = f"{wire}（钳制自 {requested}）" if wire != requested else wire
+            if wire != requested:
+                effective = f"按 {wire} 下发（该后端不支持 {requested}，已自动调整）"
+            else:
+                effective = f"按 {wire} 下发"
         else:
             directive = resolve_thinking(
                 requested,
                 provider,
-                settings.model or provider.default_model,
+                model,
                 max_output_tokens=provider.max_output_tokens,
             )
             if directive is None:
-                effective = f"{requested}（当前模型不生效）"
-            elif directive.clamped and directive.effort:
-                effective = f"{directive.effort}（钳制自 {requested}）"
-            elif directive.clamped:
-                # claude_budget 被 max_output_tokens 钳制；gemini_budget 被模型上限钳制
-                reason = (
-                    "受 max_tokens 钳制"
-                    if directive.kind == "claude_budget"
-                    else "受模型上限钳制"
+                effective = (
+                    f"不下发：该渠道（{provider.protocol} 协议）不支持给 {model} "
+                    f"下发思考参数，模型按自身默认档运行"
                 )
-                effective = f"budget={directive.budget_tokens}（{reason}）"
+                if family_defaults_to_max_thinking(model):
+                    effective += "（该模型默认即最高档）"
+            elif directive.clamped and directive.effort:
+                effective = f"按 {directive.effort} 下发（该后端不支持 {requested}，已自动调整）"
+            elif directive.clamped:
+                # claude_budget 被 max_output_tokens 限制；gemini_budget 被模型上限限制
+                reason = (
+                    "受 max_output_tokens 限制"
+                    if directive.kind == "claude_budget"
+                    else "受模型上限限制"
+                )
+                effective = f"思考预算 {directive.budget_tokens} tokens（{reason}）"
+            elif directive.effort:
+                effective = f"按 {directive.effort} 下发"
             else:
-                effective = directive.effort or f"budget={directive.budget_tokens}"
-        return f"思考档位：配置 {configured} / 覆盖 {override} / 生效 {effective}"
+                effective = f"思考预算 {directive.budget_tokens} tokens"
+        return f"思考档位：渠道 {configured} / {scope} {override} / 实际 {effective}"
 
     def format_effort_status(self, chat_id: int | str, chat_type: str = "group") -> str:
         return self._format_effort_status(
-            self.get_chat_settings(chat_id, chat_type=chat_type)
+            self.get_chat_settings(chat_id, chat_type=chat_type), chat_type=chat_type
         )
 
     def format_status(self, group_id: int | str, chat_type: str = "group") -> str:
@@ -215,7 +227,7 @@ class HealthMixin:
         lines.append(f"MCP：{self._summarize_mcp_status()}")
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
-        lines.append(self._format_effort_status(settings))
+        lines.append(self._format_effort_status(settings, chat_type=chat_type))
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(
             f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
@@ -255,7 +267,7 @@ class HealthMixin:
         lines.append(f"工具列表：{', '.join(enabled_tool_names) or '无'}")
         lines.append(f"Provider：{settings.provider_id}")
         lines.append(f"Model：{settings.model}")
-        lines.append(self._format_effort_status(settings))
+        lines.append(self._format_effort_status(settings, chat_type=chat_type))
         lines.append(f"Persona：{settings.persona_id}")
         lines.append(
             f"前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "

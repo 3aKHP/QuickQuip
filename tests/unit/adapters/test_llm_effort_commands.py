@@ -63,7 +63,7 @@ class _FakeGroupEvent:
 class _FakeService:
     def __init__(self) -> None:
         self.calls: list[tuple[object, str]] = []
-        self.status_line = "思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"
+        self.status_line = "思考档位：渠道 未配置 / 本群 未覆盖 / 实际 按模型自身默认档运行"
 
     def format_effort_status(self, chat_id, chat_type: str = "group") -> str:
         return self.status_line
@@ -105,7 +105,7 @@ async def test_effort_status_is_query_only(monkeypatch):
     """裸 effort 与 effort status 等价，只读展示，不触发写入。"""
     for text in ("/llm effort", "/llm effort status"):
         finished, service = await _dispatch(monkeypatch, text)
-        assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+        assert finished == ["思考档位：渠道 未配置 / 本群 未覆盖 / 实际 按模型自身默认档运行"]
         assert service.calls == []
 
 
@@ -113,7 +113,7 @@ async def test_effort_set_and_default(monkeypatch):
     """档位写入与 default 清覆盖（None）都路由到 service，反馈为状态行。"""
     finished, service = await _dispatch(monkeypatch, "/llm effort high")
     assert service.calls == [("high", "private")]
-    assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+    assert finished == ["思考档位：渠道 未配置 / 本群 未覆盖 / 实际 按模型自身默认档运行"]
 
     finished, service = await _dispatch(monkeypatch, "/llm effort default")
     assert service.calls == [(None, "private")]
@@ -136,7 +136,7 @@ async def test_effort_mutation_gated_for_non_admin(monkeypatch):
 
     finished, service = await _dispatch(monkeypatch, "/llm effort status", _FakeGroupEvent)
     assert service.calls == []
-    assert finished == ["思考档位：配置 默认 / 覆盖 跟随配置 / 生效 默认"]
+    assert finished == ["思考档位：渠道 未配置 / 本群 未覆盖 / 实际 按模型自身默认档运行"]
 
 
 async def test_effort_mutation_allowed_for_group_admin(monkeypatch):

@@ -75,6 +75,14 @@ base_url = "https://gemini.example.test/v1beta"
 api_key_env = "GEMINI_KEY"
 default_model = "gemini-2.5-flash"
 models = ["gemini-2.5-flash"]
+
+[[providers]]
+id = "p-kimi-claude"
+protocol = "claude"
+base_url = "https://kimi.example.test/anthropic"
+api_key_env = "KIMI_KEY"
+default_model = "k3"
+models = ["k3"]
 """
 
 
@@ -159,30 +167,41 @@ async def test_generate_reply_default_effort_sends_none(tmp_path: Path, monkeypa
 def test_format_effort_status_default(tmp_path: Path) -> None:
     service = _make_service(tmp_path)
     line = service.format_effort_status(123)
-    assert "配置 默认" in line
-    assert "覆盖 跟随配置" in line
-    assert "生效 默认" in line
+    assert "渠道 未配置" in line
+    assert "本群 未覆盖" in line
+    assert "实际 按模型自身默认档运行" in line
 
 
 def test_format_effort_status_shows_openai_clamp(tmp_path: Path) -> None:
-    """三档系 GLM：medium 钳到 high，三层口径各自可见。"""
+    """三档系 GLM：medium 自动调整为 high，渠道/本群/实际三层各自可见。"""
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-glm", "glm-5.3")
     service.set_chat_reasoning_effort(123, "medium")
     line = service.format_effort_status(123)
-    assert "配置 low" in line
-    assert "覆盖 medium" in line
-    assert "生效 high（钳制自 medium）" in line
+    assert "渠道 low" in line
+    assert "本群 medium" in line
+    assert "实际 按 high 下发（该后端不支持 medium，已自动调整）" in line
 
 
 def test_format_effort_status_responses_profile_clamp(tmp_path: Path) -> None:
-    """codex-http-relay 词表止于 max：ultra 经 profile 降档层落 max。"""
+    """codex-http-relay 词表止于 max：ultra 经 profile 降档层自动调整为 max。"""
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-resp", "gpt-5.3-codex")
     service.set_chat_reasoning_effort(123, "ultra")
     line = service.format_effort_status(123)
-    assert "覆盖 ultra" in line
-    assert "生效 max（钳制自 ultra）" in line
+    assert "本群 ultra" in line
+    assert "实际 按 max 下发（该后端不支持 ultra，已自动调整）" in line
+
+
+def test_format_effort_status_unsupported_combo(tmp_path: Path) -> None:
+    """非 Claude 家族挂 claude 协议：明确说明不下发、原因与模型自身默认档。"""
+    service = _make_service(tmp_path)
+    service.set_chat_model(123, "p-kimi-claude", "k3")
+    service.set_chat_reasoning_effort(123, "high")
+    line = service.format_effort_status(123)
+    assert "本群 high" in line
+    assert "不下发：该渠道（claude 协议）不支持给 k3 下发思考参数" in line
+    assert "模型按自身默认档运行（该模型默认即最高档）" in line
 
 
 def test_format_status_includes_effort_line(tmp_path: Path) -> None:
@@ -195,24 +214,24 @@ def test_format_effort_status_hints_max_default_family(tmp_path: Path) -> None:
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-glm-default", "glm-5.3")
     line = service.format_effort_status(123)
-    assert "生效 默认（该模型默认档即最高档）" in line
+    assert "按模型自身默认档运行（glm-5.3 的默认档即最高档）" in line
 
     # 非默认即最高档家族（gpt-test）不带提示
     service.set_chat_model(123, "p-plain", "gpt-test")
     line = service.format_effort_status(123)
-    assert "生效 默认" in line
+    assert "实际 按模型自身默认档运行" in line
     assert "最高档" not in line
     assert "思考档位：" in service.format_current(123)
 
 
 def test_format_effort_status_gemini_flash_clamp_reason(tmp_path: Path) -> None:
-    """gemini 2.5 Flash 的 max 档被模型上限 24576 钳制：文案不写 max_tokens 钳制。"""
+    """gemini 2.5 Flash 的 max 档受模型上限 24576 限制：文案不写 max_output_tokens。"""
     service = _make_service(tmp_path)
     service.set_chat_model(123, "p-gemini-flash", "gemini-2.5-flash")
     service.set_chat_reasoning_effort(123, "max")
     line = service.format_effort_status(123)
-    assert "budget=24576（受模型上限钳制）" in line
-    assert "max_tokens" not in line
+    assert "思考预算 24576 tokens（受模型上限限制）" in line
+    assert "max_output_tokens" not in line
 
 
 async def test_history_projection_receives_scope_effort(tmp_path: Path, monkeypatch) -> None:
