@@ -279,7 +279,12 @@ class LLMRequest:
     messages: list[LLMConversationMessage]
     temperature: float
     max_output_tokens: int
+    # 已废弃：旧式连续预算口径，仅 gemini 2.5 序列化端保留兼容读取（主链路
+    # 从不赋值）；思考档位统一走 reasoning_effort（D9）。
     thinking_budget: int | None = None
+    # scope 覆盖解析后的思考档位（六档词表；None/"" = 用 provider 配置档，
+    # 留空即模型默认档）。各协议适配器经 thinking.resolve_thinking 翻译。
+    reasoning_effort: str | None = None
     tools: list[LLMToolSpec] = field(default_factory=list)
     allow_tool_calls: bool = False
     tool_choice: str = "auto"

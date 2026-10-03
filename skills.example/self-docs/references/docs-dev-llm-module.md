@@ -68,6 +68,8 @@ LLM 相关核心文件如下：
   - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client` / `replay_guard`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
+- `src/quickquip/llm/thinking.py`
+  - 思考档位归一化层：内部六档（low/medium/high/xhigh/max/ultra）到各协议 wire 参数的映射与钳制（openai chat 家族钳制表、claude 代际分派 adaptive effort / 旧式 budget 固定值表、gemini 代际分派 thinkingLevel/thinkingBudget；openai_responses 走自身 profile 词表层）；钳制与无能力后端不发送均经节流日志 fail-visible
 - `src/quickquip/llm/tool_discovery.py`
   - 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler
 - `src/quickquip/llm/tool_result_pipeline.py`

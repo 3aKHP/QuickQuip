@@ -243,11 +243,26 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
 | `responses_profile` | `openai_responses` 协议专属：后端能力位。`openai-public`（官方 `/v1/responses`）或 `codex-http-relay`（Codex 形态中转，不发 `service_tier`、容忍 `codex.*` 结构事件、终态缺省字段时以流式完整 item 为回放基准） | `openai-public` |
-| `reasoning_effort` | `openai_responses` 协议专属：思考档位 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`（超出后端词表自动降档到其最高支持档：`openai-public` 已核对范围到 `xhigh`；`codex-http-relay` 五档恒等、`ultra` 降档 `max`——2026-10 实测中转网关校验层拒绝 `ultra`；留空不发送 `reasoning` 字段）。独立于 `thinking_budget` 数字口径（后者仅 claude/gemini 生效） | `""` |
+| `reasoning_effort` | 思考档位（全协议生效）：`low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空不发送思考参数（模型默认档）。到 wire 参数的翻译按协议与后端能力自动完成，超档自动钳制（详见下文「思考档位跨协议映射」） | `""` |
 
 > **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
 > **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
+
+#### 思考档位跨协议映射
+
+`reasoning_effort` 的内部六档到各协议 wire 参数的映射与钳制如下（`ultra` 为 Codex 订阅产品层档位，公开 API 词表止于 `max`，一切渠道自动降 `max`）：
+
+| 内部档 | openai chat（顶层 `reasoning_effort`） | claude 4.7+（adaptive `output_config.effort`） | claude 4.6（Opus/Sonnet） | claude ≤4.5（旧式 `budget_tokens`） | gemini 3.x（`thinkingLevel`） | gemini 2.5（`thinkingBudget`） |
+|---|---|---|---|---|---|---|
+| `low` | low | low | low | 1024 | LOW | 1000 |
+| `medium` | medium | medium | medium | 2000 | MEDIUM | 2000 |
+| `high` | high | high | high | 8000 | HIGH | 8000 |
+| `xhigh` | xhigh | xhigh | high（钳制） | 16000 | HIGH | 16000 |
+| `max` | max | max | max | 32000 | HIGH | 32000 |
+| `ultra` | max | max | max | 32000 | HIGH | 32000 |
+
+openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档系（`medium`→`high`、`xhigh`→`high`、`max`/`ultra`→`max`，DeepSeek 附带 `thinking.type=enabled` 开关）；MiniMax 五档全集；xAI 止于 `xhigh`；其余后端透传。claude 旧式 budget 固定值表须满足 budget ≥1024 且小于 `max_output_tokens`（不满足时该请求不发送思考参数并记 warning）。claude 思考开启时上游只接受默认温度：非默认 `temperature` 不下发并记日志。claude / gemini 协议下挂非本家模型的兼容端点（如 Kimi、MiMo 的 Anthropic 形态端点）不发送思考参数并记 warning。`openai_responses` 协议按 profile 词表降档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 五档恒等（`ultra` 降 `max`，2026-10 实测中转网关校验层拒绝 `ultra`）。
 
 > **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 

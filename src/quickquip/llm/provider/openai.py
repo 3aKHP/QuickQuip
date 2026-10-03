@@ -5,6 +5,7 @@ from typing import Any
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
+from quickquip.llm.thinking import resolve_thinking
 from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMImageInput,
@@ -128,6 +129,17 @@ class OpenAIProviderClient(BaseProviderClient):
             "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        # 思考档位（顶层 reasoning_effort）：scope 覆盖优先于 provider 配置档，
+        # 家族钳制表见 thinking 模块；extra_body 仍可最终覆盖。
+        directive = resolve_thinking(
+            request.reasoning_effort or self.config.reasoning_effort,
+            self.config,
+            request.model,
+        )
+        if directive is not None:
+            payload["reasoning_effort"] = directive.effort
+            if directive.thinking_type_enabled:
+                payload["thinking"] = {"type": "enabled"}
         if self.config.user_agent:
             headers["user-agent"] = self.config.user_agent
         if self.config.extra_body:

@@ -8,6 +8,7 @@ from urllib import parse
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
+from quickquip.llm.thinking import resolve_thinking
 from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMGeneratedImage,
@@ -227,9 +228,26 @@ class GeminiProviderClient(BaseProviderClient):
             },
         }
         if request.thinking_budget is not None:
+            # 已废弃的旧式连续预算（主链路从不赋值）：显式设置优先于档位映射。
             payload["generationConfig"]["thinkingConfig"] = {
                 "thinkingBudget": request.thinking_budget,
             }
+        else:
+            # 思考档位：3.x thinkingLevel / 2.5 thinkingBudget 固定值表
+            # （thinking 模块；两者不可同传）。
+            directive = resolve_thinking(
+                request.reasoning_effort or self.config.reasoning_effort,
+                self.config,
+                request.model,
+            )
+            if directive is not None and directive.kind == "gemini_level":
+                payload["generationConfig"]["thinkingConfig"] = {
+                    "thinkingLevel": directive.effort,
+                }
+            elif directive is not None and directive.kind == "gemini_budget":
+                payload["generationConfig"]["thinkingConfig"] = {
+                    "thinkingBudget": directive.budget_tokens,
+                }
         if request.allow_tool_calls and request.tools:
             payload["tools"] = [
                 {

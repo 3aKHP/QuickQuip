@@ -49,13 +49,16 @@ _EFFORT_ORDER = REASONING_EFFORT_TIERS
 _TOOL_IMAGE_NOTICE = TOOL_IMAGE_FLUSH_NOTICE
 
 
-def reasoning_control(config: ProviderConfig, profile: ResponsesProfile) -> dict | None:
+def reasoning_control(
+    config: ProviderConfig, profile: ResponsesProfile, *, tier: str | None = None
+) -> dict | None:
     """reasoning 档位控制：未配置档位返回 None（不发送字段）。
 
     档位在 profile 词表内恒等发送；超出词表降档到该 profile 声明的
     最高档（映射规则单点，词表见 profiles.py 的逐 profile 核对注记）。
+    ``tier`` 为 scope 覆盖解析后的生效档；None 读 provider 配置档。
     """
-    tier = (config.reasoning_effort or "").strip()
+    tier = (config.reasoning_effort if tier is None else tier).strip()
     if not tier:
         return None
     if tier not in _EFFORT_ORDER:
@@ -103,7 +106,9 @@ def build_responses_payload(
         ]
         payload["tool_choice"] = request.tool_choice
         payload["parallel_tool_calls"] = True
-    reasoning = reasoning_control(config, profile)
+    reasoning = reasoning_control(
+        config, profile, tier=request.reasoning_effort or None
+    )
     if reasoning is not None:
         payload["reasoning"] = reasoning
     if profile.service_tier is not None:

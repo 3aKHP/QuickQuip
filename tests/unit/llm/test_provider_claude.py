@@ -295,3 +295,76 @@ async def test_claude_redacted_thinking_round_trips_into_replay():
     assistant_content = client.last_payload["messages"][1]["content"]
     assert assistant_content[0] == {"type": "redacted_thinking", "data": "sig-abc"}
     assert assistant_content[1] == {"type": "text", "text": "上次回复"}
+
+
+# ── 思考档位（resolve_thinking 接线） ────────────────────────────
+
+
+def _simple_request(
+    model: str, *, effort: str | None = None, temperature: float = 1.0
+) -> LLMRequest:
+    return LLMRequest(
+        model=model,
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=temperature,
+        max_output_tokens=64000,
+        reasoning_effort=effort,
+    )
+
+
+def _text_body() -> dict:
+    return {"model": "m", "content": [{"type": "text", "text": "ok"}]}
+
+
+async def test_claude_adaptive_effort_on_new_models():
+    config = _provider_config()
+    config.reasoning_effort = "xhigh"
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(_simple_request("claude-opus-4-7"))
+    assert client.last_payload["thinking"] == {"type": "adaptive"}
+    assert client.last_payload["output_config"] == {"effort": "xhigh"}
+
+
+async def test_claude_46_clamps_xhigh_to_high():
+    config = _provider_config()
+    config.reasoning_effort = "xhigh"
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(_simple_request("claude-sonnet-4-6"))
+    assert client.last_payload["output_config"] == {"effort": "high"}
+
+
+async def test_claude_legacy_budget_on_45():
+    config = _provider_config()
+    config.reasoning_effort = "high"
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(_simple_request("claude-sonnet-4-5"))
+    assert client.last_payload["thinking"] == {"type": "enabled", "budget_tokens": 8000}
+    assert "output_config" not in client.last_payload
+
+
+async def test_claude_thinking_drops_non_default_temperature():
+    config = _provider_config()
+    config.reasoning_effort = "high"
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(_simple_request("claude-opus-4-7", temperature=0.2))
+    assert "temperature" not in client.last_payload
+    # 默认温度照常发送（显式 1.0 与上游默认一致）
+    client2 = FakeClaudeClient(config, _text_body())
+    await client2.complete(_simple_request("claude-opus-4-7", temperature=1.0))
+    assert client2.last_payload["temperature"] == 1.0
+
+
+async def test_claude_non_anthropic_backend_sends_no_thinking_params():
+    config = _provider_config()
+    config.reasoning_effort = "high"
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(_simple_request("kimi-for-coding"))
+    assert "thinking" not in client.last_payload
+    assert "output_config" not in client.last_payload
+
+
+async def test_claude_no_effort_sends_nothing():
+    client = FakeClaudeClient(_provider_config(), _text_body())
+    await client.complete(_simple_request("claude-opus-4-7"))
+    assert "thinking" not in client.last_payload
