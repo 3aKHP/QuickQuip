@@ -12,10 +12,6 @@ from pydantic import ValidationError  # noqa: E402
 from quickquip.app.web.routes import group_settings as routes  # noqa: E402
 
 
-def _patch_audit_noop(monkeypatch):
-    monkeypatch.setattr(routes.audit_logger, "log", lambda *a, **k: None)
-
-
 def test_options_providers_carry_reasoning_effort(monkeypatch, tmp_path):
     """options 的 providers 投影携带各 provider 配置档（供前端「跟随」提示）。"""
     import types
@@ -50,6 +46,7 @@ def test_options_providers_carry_reasoning_effort(monkeypatch, tmp_path):
 def test_put_reasoning_effort_routes_to_store_and_validates(monkeypatch, tmp_path):
     """PUT 的 reasoning_effort 透传落库；显式 null 清覆盖；非法档位 422（校验拒绝）。"""
     calls: list[tuple[str, dict]] = []
+    audits: list[dict] = []
 
     class FakeStore:
         def update_group_settings(self, group_id, **fields):
@@ -57,17 +54,27 @@ def test_put_reasoning_effort_routes_to_store_and_validates(monkeypatch, tmp_pat
 
     monkeypatch.setattr(routes, "_store", lambda: FakeStore())
     monkeypatch.setattr(routes, "_DB", tmp_path / "llm.db")
-    _patch_audit_noop(monkeypatch)
+    monkeypatch.setattr(
+        routes.audit_logger, "log",
+        lambda request, **kwargs: audits.append(kwargs),
+    )
 
     body = routes.GroupSettingsBody(reasoning_effort="high")
     assert routes.put_group_settings("10001", body, object()) == {"ok": True}
     assert calls == [("10001", {"reasoning_effort": "high"})]
+    assert audits == [{
+        "action": "update",
+        "target_type": "group_setting",
+        "target_id": "10001",
+        "summary_after": {"fields": ["reasoning_effort"]},
+    }]
 
     # 显式 null 与未发送的区分：null 进 payload（清覆盖），缺省不进 payload
     clear_body = routes.GroupSettingsBody(reasoning_effort=None)
     assert clear_body.model_dump(exclude_unset=True) == {"reasoning_effort": None}
     assert routes.put_group_settings("10001", clear_body, object()) == {"ok": True}
     assert calls[-1] == ("10001", {"reasoning_effort": None})
+    assert len(audits) == 2
 
     empty_body = routes.GroupSettingsBody()
     assert "reasoning_effort" not in empty_body.model_dump(exclude_unset=True)
@@ -75,6 +82,9 @@ def test_put_reasoning_effort_routes_to_store_and_validates(monkeypatch, tmp_pat
     for bogus in ("turbo", "HIGH", " "):
         with pytest.raises(ValidationError):
             routes.GroupSettingsBody(reasoning_effort=bogus)
+    # 校验拒绝不触发落库与审计
+    assert len(calls) == 2
+    assert len(audits) == 2
 
 
 def test_list_group_settings_projects_reasoning_effort(monkeypatch, tmp_path):

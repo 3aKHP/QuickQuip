@@ -36,8 +36,9 @@ _MULTILINE_DELIMITERS = ('"""', "'''")
 
 
 class EffortBody(BaseModel):
-    # 空串 = 删除该 provider 的 reasoning_effort 行（回模型默认档，不发送思考参数）
-    effort: str = ""
+    # 必传（空 body 直接 422）；空串 = 删除该 provider 的 reasoning_effort 行
+    #（回模型默认档，不发送思考参数）
+    effort: str
 
     @field_validator("effort")
     @classmethod
@@ -161,25 +162,26 @@ def put_llm_effort(provider_id: str, body: EffortBody, request: Request):
     effort = body.effort
     if not _LLM_TOML.exists():
         raise HTTPException(status_code=404, detail="llm.toml 不存在")
-    original = _LLM_TOML.read_text(encoding="utf-8")
-    try:
-        before = _project_providers(original)
-    except tomllib.TOMLDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"llm.toml 解析失败：{e}")
-    if provider_id not in [p["id"] for p in before]:
-        raise HTTPException(status_code=404, detail=f"provider {provider_id!r} 不存在")
-    old_effort = next(p["reasoning_effort"] for p in before if p["id"] == provider_id)
-
-    updated = _apply_effort_edit(original, provider_id, effort)
-
-    try:
-        after = _project_providers(updated)
-    except tomllib.TOMLDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"手术后 TOML 解析失败，已放弃写入：{e}")
-    _verify_edit(before, after, provider_id, effort)
-
     tmp = _LLM_TOML.with_suffix(_LLM_TOML.suffix + ".tmp")
+    # 读-手术-校验-落盘全程在锁内，避免与并发 PUT/文本编辑交错丢改
     with _lock_for(_LLM_TOML):
+        original = _LLM_TOML.read_text(encoding="utf-8")
+        try:
+            before = _project_providers(original)
+        except tomllib.TOMLDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"llm.toml 解析失败：{e}")
+        if provider_id not in [p["id"] for p in before]:
+            raise HTTPException(status_code=404, detail=f"provider {provider_id!r} 不存在")
+        old_effort = next(p["reasoning_effort"] for p in before if p["id"] == provider_id)
+
+        updated = _apply_effort_edit(original, provider_id, effort)
+
+        try:
+            after = _project_providers(updated)
+        except tomllib.TOMLDecodeError as e:
+            raise HTTPException(status_code=500, detail=f"手术后 TOML 解析失败，已放弃写入：{e}")
+        _verify_edit(before, after, provider_id, effort)
+
         try:
             tmp.write_text(updated, encoding="utf-8")
             tmp.replace(_LLM_TOML)

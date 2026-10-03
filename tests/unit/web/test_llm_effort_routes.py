@@ -132,7 +132,59 @@ def test_put_rejects_invalid_effort(monkeypatch, tmp_path):
     for bogus in ("turbo", "HIGH", " "):
         with pytest.raises(ValidationError):
             routes.EffortBody(effort=bogus)
+    # effort 必传：空 body 不再有隐性删除语义
+    with pytest.raises(ValidationError):
+        routes.EffortBody()
     assert path.read_text(encoding="utf-8") == original
+
+
+def test_put_writes_audit_with_before_after(monkeypatch, tmp_path):
+    """成功 PUT 记审计：action/target 与 provider 档位 before/after。"""
+    _write_sample(monkeypatch, tmp_path)
+    records: list[dict] = []
+    monkeypatch.setattr(
+        routes.audit_logger, "log",
+        lambda request, **kwargs: records.append(kwargs),
+    )
+
+    _put("beta", "max")
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["action"] == "update"
+    assert record["target_type"] == "config"
+    assert record["target_id"] == "llm"
+    assert record["summary_before"] == {"provider": "beta", "reasoning_effort": "low"}
+    assert record["summary_after"] == {"provider": "beta", "reasoning_effort": "max"}
+
+
+def test_put_failure_paths_write_no_audit(monkeypatch, tmp_path):
+    """失败路径（404 provider 不存在 / 400 多行字符串 fail-closed）不落审计。"""
+    records: list[dict] = []
+
+    def _spy():
+        # _write_sample 内置 noop 审计，每次重写样本后需重新装 spy
+        monkeypatch.setattr(
+            routes.audit_logger, "log",
+            lambda request, **kwargs: records.append(kwargs),
+        )
+
+    _write_sample(monkeypatch, tmp_path)
+    _spy()
+    with pytest.raises(HTTPException):
+        _put("gamma", "high")
+
+    content = _SAMPLE_TOML.replace(
+        'models = ["alpha-1"]',
+        'models = ["alpha-1"]\nstyle_overrides = """\n多行风格段\n"""',
+        1,
+    )
+    _write_sample(monkeypatch, tmp_path, content)
+    _spy()
+    with pytest.raises(HTTPException):
+        _put("alpha", "high")
+
+    assert records == []
 
 
 def test_put_unknown_provider_404(monkeypatch, tmp_path):
