@@ -513,3 +513,65 @@ async def test_gemini_non_image_inline_data_kept_in_parts():
     assert response.generated_images == []
     # 非图片 inlineData 不被误剥除，原样留在原生批次
     assert any("inlineData" in part for part in (response.native_blocks or []))
+
+
+# ── 思考档位（resolve_thinking 接线） ────────────────────────────
+
+
+def _simple_request(
+    model: str, *, effort: str | None = None, thinking_budget: int | None = None
+) -> LLMRequest:
+    return LLMRequest(
+        model=model,
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=0.2,
+        max_output_tokens=128,
+        thinking_budget=thinking_budget,
+        reasoning_effort=effort,
+    )
+
+
+def _text_body() -> dict:
+    return {
+        "candidates": [
+            {"finishReason": "STOP", "content": {"parts": [{"text": "ok"}]}}
+        ]
+    }
+
+
+async def test_gemini_3x_thinking_level():
+    config = _provider_config()
+    config.reasoning_effort = "xhigh"
+    client = FakeGeminiClient(config, _text_body())
+    await client.complete(_simple_request("gemini-3.7-flash"))
+    assert client.last_payload["generationConfig"]["thinkingConfig"] == {
+        "thinkingLevel": "HIGH"
+    }
+
+
+async def test_gemini_25_thinking_budget_table():
+    config = _provider_config()
+    config.reasoning_effort = "medium"
+    client = FakeGeminiClient(config, _text_body())
+    await client.complete(_simple_request("gemini-2.5-flash"))
+    assert client.last_payload["generationConfig"]["thinkingConfig"] == {
+        "thinkingBudget": 2000
+    }
+
+
+async def test_gemini_explicit_thinking_budget_wins_over_tier():
+    """已废弃的显式 thinking_budget 优先于档位映射（兼容读取）。"""
+    config = _provider_config()
+    config.reasoning_effort = "high"
+    client = FakeGeminiClient(config, _text_body())
+    await client.complete(_simple_request("gemini-3.7-flash", thinking_budget=1234))
+    assert client.last_payload["generationConfig"]["thinkingConfig"] == {
+        "thinkingBudget": 1234
+    }
+
+
+async def test_gemini_no_effort_sends_no_thinking_config():
+    client = FakeGeminiClient(_provider_config(), _text_body())
+    await client.complete(_simple_request("gemini-3.7-flash"))
+    assert "thinkingConfig" not in client.last_payload["generationConfig"]

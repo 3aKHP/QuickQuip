@@ -483,10 +483,13 @@ style_profile = "openai_family"
 # "codex-http-relay"（Codex 形态中转：不发 service_tier、容忍 codex.*
 # 结构事件、终态缺省字段时以流式完整 item 为回放基准）。
 # responses_profile = "openai-public"
-# reasoning_effort：思考档位。六档 low/medium/high/xhigh/max/ultra，
-# 超出后端词表自动降档到其最高支持档（openai-public 已核对范围到 xhigh；
-# codex-http-relay 五档恒等、ultra 降档 max——2026-10 实测中转网关校验层
-# 拒绝 ultra）；留空不发送 reasoning 字段。
+# reasoning_effort：思考档位（全协议生效）。六档 low/medium/high/xhigh/max/ultra，
+# 到各协议 wire 参数的翻译与钳制按后端能力自动完成（openai chat 顶层
+# reasoning_effort 家族钳制表；claude 按代际走 adaptive effort 或旧式
+# budget 固定值表；gemini 按代际走 thinkingLevel/thinkingBudget；
+# openai_responses 按 profile 词表降档——openai-public 已核对范围到 xhigh、
+# codex-http-relay 五档恒等；ultra 一切渠道降 max）；留空不发送思考参数，
+# 即模型默认档。
 # reasoning_effort = "high"
 # 注意：部分思考系模型只接受默认温度，如遇请求被拒可把 temperature 调回 1.0。
 timeout_seconds = 45

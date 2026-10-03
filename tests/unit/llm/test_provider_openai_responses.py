@@ -1501,3 +1501,15 @@ def test_stream_keepalive_rejected_on_public_profile():
     ]
     with pytest.raises(LLMProviderError, match="未知"):
         _fold(chunks, profile_id="openai-public")
+
+
+def test_reasoning_effort_request_scope_overrides_provider_config():
+    """scope 覆盖档（request.reasoning_effort）优先于 provider 配置档。"""
+    payload = _payload(
+        _request(
+            [LLMConversationMessage(role="user", content="hi")],
+            reasoning_effort="low",
+        ),
+        _config(reasoning_effort="high"),
+    )
+    assert payload["reasoning"] == {"effort": "low", "summary": "auto"}

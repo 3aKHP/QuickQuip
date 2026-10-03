@@ -7,12 +7,14 @@ first-party Claude Code session.
 from __future__ import annotations
 
 import json
+import logging
 import platform
 from copy import deepcopy
 from typing import Any
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
+from quickquip.llm.thinking import log_once, resolve_thinking
 from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMImageInput,
@@ -277,6 +279,36 @@ class ClaudeProviderClient(BaseProviderClient):
             "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        # 思考档位：4.7+ adaptive + output_config.effort；4.6 钳 xhigh→high；
+        # 4.5 及更早旧式 budget_tokens 固定值表（映射见 thinking 模块）。
+        # 思考开启时上游只接受默认温度——非默认温度整体下掉（rikkahub 先例）。
+        thinking_directive = resolve_thinking(
+            request.reasoning_effort or self.config.reasoning_effort,
+            self.config,
+            request.model,
+            max_output_tokens=request.max_output_tokens,
+        )
+        if thinking_directive is not None:
+            thinking_enabled = True
+            if thinking_directive.kind == "claude_adaptive":
+                payload["thinking"] = {"type": "adaptive"}
+                payload["output_config"] = {"effort": thinking_directive.effort}
+            elif thinking_directive.kind == "claude_budget":
+                payload["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": thinking_directive.budget_tokens,
+                }
+            else:
+                # 未知 kind：未注入任何思考参数，温度不下掉
+                thinking_enabled = False
+            if thinking_enabled and request.temperature != 1.0:
+                del payload["temperature"]
+                log_once(
+                    logging.INFO,
+                    ("claude-temp-drop", self.config.id, request.model),
+                    "provider %s 模型 %s 思考开启：temperature=%s 不下发（上游只接受默认温度）",
+                    self.config.id, request.model, request.temperature,
+                )
         if self.config.extra_body:
             payload.update(self.config.extra_body)
         if request.allow_tool_calls and request.tools:
