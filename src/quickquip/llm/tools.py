@@ -55,6 +55,10 @@ class LLMConversationMessage:
     # （owner 校验后），以及 openai_responses 当前工具循环的当轮续接
     # （tool_loop.py PR-A 契约）。
     native_content: list[Any] | None = None
+    # native_content 内密文的生成思考档位（回放投影自 owner.extra["effort"]
+    # 投影，仅原生路径消息携带）：per-effort 计量按该消息来源档而非当前
+    # 请求档，未标注（None）回落当前档。
+    native_effort: str | None = None
 
 
 @dataclass(slots=True)

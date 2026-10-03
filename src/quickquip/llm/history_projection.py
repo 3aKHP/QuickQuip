@@ -116,6 +116,15 @@ def _turn_native_blocks(turn: LoadedTurn) -> list[dict[str, Any]] | None:
     return blocks
 
 
+def _turn_native_effort(turn: LoadedTurn) -> str | None:
+    """该 Turn 密文的生成思考档位（owner 落库的 extra["effort"]）。"""
+    owner = turn.owner
+    if not isinstance(owner, dict):
+        return None
+    effort = owner.get("effort")
+    return effort if isinstance(effort, str) and effort else None
+
+
 def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> bool:
     """协议结构校验（§7.2）：签名缺失/损坏、未知块形态都判无效并降级。"""
     if protocol == "openai_responses":
@@ -274,7 +283,12 @@ def _project_loop_native(
             )
             continue
         messages.append(
-            LLMConversationMessage(role="assistant", content=turn.text, native_content=list(blocks))
+            LLMConversationMessage(
+                role="assistant",
+                content=turn.text,
+                native_content=list(blocks),
+                native_effort=_turn_native_effort(turn),
+            )
         )
         for execution in turn.tools:
             wire_id = execution.provider_call_id or stable_wire_tool_call_id(
@@ -489,12 +503,20 @@ def _estimate_messages_tokens(
         # 原生路径消息的正文/工具声明已内含于 native 块（serializer 原样
         # 发送、忽略通用字段），单计 content 会双倍计量同一 wire 内容；
         # thinking_blocks 同理跳过（与 request_budget 的单计口径一致）。
+        # 密文计量按消息标注的密文来源档（native_effort），未标注回落
+        # 当前请求档（effort 形参）。
         if message.native_content is None:
             total += estimate_tokens(message.content)
             for call in message.tool_calls:
                 total += estimate_tokens(call.arguments_json)
-            total += estimate_native_blocks_tokens(message.thinking_blocks, effort=effort)
-        total += estimate_native_blocks_tokens(message.native_content, effort=effort)
+            if message.thinking_blocks:
+                total += estimate_native_blocks_tokens(
+                    message.thinking_blocks, effort=message.native_effort or effort
+                )
+        elif message.native_content:
+            total += estimate_native_blocks_tokens(
+                message.native_content, effort=message.native_effort or effort
+            )
     return total
 
 
@@ -612,7 +634,10 @@ def _strip_native_thinking(
         if kept:
             stripped.append(
                 LLMConversationMessage(
-                    role=message.role, content=message.content, native_content=kept
+                    role=message.role,
+                    content=message.content,
+                    native_content=kept,
+                    native_effort=message.native_effort,
                 )
             )
         else:
@@ -620,6 +645,7 @@ def _strip_native_thinking(
                 LLMConversationMessage(
                     role=message.role,
                     content=message.content or _STRIPPED_TURN_PLACEHOLDER,
+                    native_effort=message.native_effort,
                 )
             )
     return stripped if changed else messages
@@ -639,8 +665,9 @@ def project_loops_with_budget(
     阶梯：原生块剥 thinking → 丢弃可选 native（通用/档案形态）→ 工具结果
     按 4096/1024/256/0 收紧 → 纯文本档案 → 档案字符额度减半 → 最小档案 →
     逐出最旧完整 Loop。所有精简只影响模型投影，完整记录留在执行表；
-    禁止空循环重试。``effort`` 为当前 provider 配置的思考档位，用于密文
-    块的 per-effort 预留（回放下密文与当前请求同档）。
+    禁止空循环重试。``effort`` 为当前 provider 配置的思考档位，作为密文
+    预留的回落档；投影消息按自身密文来源档（native_effort）计量，仅
+    未标注时回落到该形参。
     """
     result = project_loops(
         loops, target=target, protocol=protocol, archive_loop_ids=archive_loop_ids,

@@ -83,7 +83,8 @@ def estimate_native_block_tokens(block: Any, *, effort: str | None = None) -> in
     dict 字段（tool_use.input、functionCall.args 等）递归；
     媒体载荷（inlineData/fileData）按固定档，避免 base64 全量高估；
     密文载荷（encrypted_content）按 effort 分档 + 字节下限（effort 为
-    生成该密文的配置档位，回放下同一 owner 的密文与当前请求同档）。
+    生成该密文的思考档位：切档不断回放，调用方逐消息传密文来源档，
+    未标注的来源回落当前请求档）。
     """
     if not isinstance(block, dict):
         return estimate_tokens(str(block)) + _NATIVE_BLOCK_STRUCTURE_TOKENS
