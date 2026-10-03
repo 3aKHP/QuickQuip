@@ -280,7 +280,8 @@ class ClaudeProviderClient(BaseProviderClient):
             "max_tokens": request.max_output_tokens,
         }
         # 思考档位：4.7+ adaptive + output_config.effort；4.6 钳 xhigh→high；
-        # 4.5 及更早旧式 budget_tokens 固定值表（映射见 thinking 模块）。
+        # 4.5 及更早旧式 budget_tokens 固定值表；非 Claude 家族与不可解析代际
+        # 同走 adaptive（映射见 thinking 模块）。
         # 思考开启时上游只接受默认温度——非默认温度整体下掉（rikkahub 先例）。
         thinking_directive = resolve_thinking(
             request.reasoning_effort or self.config.reasoning_effort,

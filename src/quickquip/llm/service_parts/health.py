@@ -196,8 +196,7 @@ class HealthMixin:
             max_output_tokens=provider.max_output_tokens,
         )
         if directive is None:
-            # fail-open 后仅余 claude budget 数学下限（max_output_tokens ≤1024）
-            # 一种不发送场景。
+            # 仅 claude budget 数学下限（max_output_tokens ≤1024）一种不发送场景。
             result = f"{label} 自身默认档"
             if family_defaults_to_max_thinking(model):
                 result += "（即最高档）"

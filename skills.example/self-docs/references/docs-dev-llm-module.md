@@ -69,7 +69,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
 - `src/quickquip/llm/thinking.py`
-  - 思考档位归一化层：内部六档（low/medium/high/xhigh/max/ultra）到各协议 wire 参数的映射与钳制（openai chat 家族钳制表、claude 代际分派 adaptive effort / 旧式 budget 固定值表、gemini 代际分派 thinkingLevel/thinkingBudget；openai_responses 走自身 profile 词表层）；只做映射不做门禁，除 claude budget 1024 数学下限外一律照发（后端不支持由上游 400 暴露），钳制与照发决策均经节流日志 fail-visible
+  - 思考档位归一化层：内部六档（low/medium/high/xhigh/max/ultra）到各协议 wire 参数的映射与钳制（openai chat 家族钳制表、claude 代际分派 adaptive effort / 旧式 budget 固定值表、gemini 代际分派 thinkingLevel/thinkingBudget；openai_responses 走自身 profile 词表层）；纯映射层，除 claude budget 1024 数学下限外一律照发（后端不支持由上游 400 暴露），钳制与照发决策均经节流日志 fail-visible
 - `src/quickquip/llm/tool_discovery.py`
   - 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler
 - `src/quickquip/llm/tool_result_pipeline.py`

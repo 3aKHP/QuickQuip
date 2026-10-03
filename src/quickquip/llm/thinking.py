@@ -277,7 +277,7 @@ def _resolve_gemini(tier: str, provider: ProviderConfig, model: str) -> Thinking
             requested_tier=tier,
             clamped=(budget != _GEMINI_BUDGET_TABLE[tier]),
         )
-    # 3.x、2.0 及更早、不可解析代际与非 Gemini 家族按当前形态
+    # 3.x、1.x 及更早、不可解析代际与非 Gemini 家族按当前形态
     # （thinkingLevel）处理；按型号裁剪面（3.1 Pro 无 MINIMAL 等）与本表
     # 无交集（本层不发 MINIMAL）。
     return ThinkingDirective(

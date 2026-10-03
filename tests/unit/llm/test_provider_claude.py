@@ -365,6 +365,15 @@ async def test_claude_non_anthropic_backend_sends_adaptive_thinking_params():
     assert client.last_payload["output_config"] == {"effort": "high"}
 
 
+async def test_claude_non_anthropic_backend_drops_non_default_temperature():
+    """外族照发即适用 Anthropic 温度契约：非默认 temperature 随思考开启下掉。"""
+    config = _provider_config()
+    config.reasoning_effort = "high"
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(_simple_request("kimi-for-coding", temperature=0.2))
+    assert "temperature" not in client.last_payload
+
+
 async def test_claude_no_effort_sends_nothing():
     client = FakeClaudeClient(_provider_config(), _text_body())
     await client.complete(_simple_request("claude-opus-4-7"))
