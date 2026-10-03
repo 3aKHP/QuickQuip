@@ -36,7 +36,11 @@ from quickquip.llm.provider.openai_responses.request import (
 )
 from quickquip.llm.provider.openai_responses.response import parse_responses_body
 from quickquip.llm.provider.openai_responses.stream import fold_stream_events
-from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_FLAT_TOKENS, estimate_native_block_tokens
+from quickquip.llm.token_estimate import (
+    NATIVE_ENCRYPTED_TOKENS_DEFAULT,
+    encrypted_payload_flat_tokens,
+    estimate_native_block_tokens,
+)
 from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
 from tests.fixtures.stream_chunks import (
     RESPONSES_RELAY_TOOL_CHUNKS,
@@ -742,19 +746,41 @@ def test_config_prunes_invalid_responses_keys(tmp_path: Path, extra):
 # ── 预算口径 ───────────────────────────────────────────────────────────────
 
 
-def test_encrypted_content_flat_token_estimate():
-    """密文字节不折算 token：字段按固定档预留，长度翻倍估算不变。"""
+def test_encrypted_content_per_effort_token_estimate():
+    """密文估算跟着思考层级走：per-effort 固定档 + 大条目字节下限保护。
+
+    同档下常规尺寸条目估算与具体字节数无关（固定档）；超出 max(档位值,
+    b64/4) 下限的大条目按字节口径计（防档位表低估 256KiB 级大密文）。
+    """
     small = {
         "type": "reasoning",
         "id": "rs_1",
         "encrypted_content": "A" * 100,
+    }
+    medium = {
+        "type": "reasoning",
+        "id": "rs_1",
+        "encrypted_content": "A" * 200,
     }
     big = {
         "type": "reasoning",
         "id": "rs_1",
         "encrypted_content": "A" * 100_000,
     }
-    assert estimate_native_block_tokens(small) == estimate_native_block_tokens(big)
+    # 固定档内：常规尺寸条目估算不随字节数变化
+    assert estimate_native_block_tokens(small) == estimate_native_block_tokens(medium)
+    # 档位梯度：高档预留更大
+    assert estimate_native_block_tokens(small, effort="max") > estimate_native_block_tokens(
+        small, effort="low"
+    )
+    # 字节下限：max 档固定档 8192 < 100_000/4，大条目按字节口径
+    bare = {"type": "reasoning", "id": "rs_1"}
+    assert estimate_native_block_tokens(big, effort="max") - estimate_native_block_tokens(
+        bare, effort="max"
+    ) == 100_000 // 4
+    # 未知/留空档按默认档画像
+    assert encrypted_payload_flat_tokens(None, 0) == NATIVE_ENCRYPTED_TOKENS_DEFAULT
+    assert encrypted_payload_flat_tokens("bogus", 0) == NATIVE_ENCRYPTED_TOKENS_DEFAULT
 
 
 def test_native_items_enter_request_budget_estimate():
@@ -777,8 +803,8 @@ def test_native_items_enter_request_budget_estimate():
         ]
     )
     delta = estimate_request_tokens(base) - estimate_request_tokens(without_native)
-    # reasoning 密文固定档 + function_call 参数字符估算都计入
-    assert delta >= NATIVE_ENCRYPTED_FLAT_TOKENS
+    # reasoning 密文 per-effort 固定档（默认档）+ function_call 参数字符估算都计入
+    assert delta >= NATIVE_ENCRYPTED_TOKENS_DEFAULT
 
 
 def test_zero_impact_existing_protocols_unchanged():
@@ -912,13 +938,16 @@ def test_stream_relay_reconcile_mismatch_fail_closed():
         _fold(chunks, profile_id="codex-http-relay")
 
 
-def test_reasoning_effort_relay_profile_identity_mapping():
-    """AGW/CPA 中转的 gpt-6/gpt-5.6 系六档全支持（服务器能力位核对）：恒等不降档。"""
-    for tier in ("low", "medium", "high", "xhigh", "max", "ultra"):
+def test_reasoning_effort_relay_profile_mapping():
+    """AGW/CPA 中转五档恒等；ultra 经降档规则落 max（2026-10-03 实测网关拒绝 ultra）。"""
+    for tier in ("low", "medium", "high", "xhigh", "max"):
         control = reasoning_control(
             _config(reasoning_effort=tier), resolve_profile("codex-http-relay")
         )
         assert control == {"effort": tier, "summary": "auto"}
+    assert reasoning_control(
+        _config(reasoning_effort="ultra"), resolve_profile("codex-http-relay")
+    ) == {"effort": "max", "summary": "auto"}
 
 
 def test_combine_stream_trace_annotations():

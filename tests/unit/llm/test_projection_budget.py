@@ -5,7 +5,7 @@ from quickquip.llm.history_projection import (
     PATH_STRUCTURED,
     project_loops_with_budget,
 )
-from quickquip.llm.token_estimate import estimate_tokens
+from quickquip.llm.token_estimate import NATIVE_ENCRYPTED_TOKENS_DEFAULT, estimate_tokens
 from quickquip.llm.store_parts.agent_records import (
     LoadedToolExecution,
 )
@@ -238,12 +238,13 @@ def test_native_thinking_stripped_responses_reasoning_items():
     )
     assert full.decisions[0].reason is None
     full_estimate = _native_estimate(full.messages)
+
     result = project_loops_with_budget(
         [loop],
         target=RESPONSES_OWNER,
         protocol="openai_responses",
-        # 密文固定档 2048/item：剥掉即显著低于全量。
-        budget_tokens=full_estimate - 2048,
+        # 密文 per-effort 固定档（默认档 64/item）：剥掉即低于全量。
+        budget_tokens=full_estimate - NATIVE_ENCRYPTED_TOKENS_DEFAULT,
     )
     decision = result.decisions[0]
     assert decision.reason == "reduced:native_thinking_stripped"
