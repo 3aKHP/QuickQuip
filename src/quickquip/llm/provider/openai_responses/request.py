@@ -41,7 +41,8 @@ INCLUDE_ENCRYPTED_REASONING = ("reasoning.encrypted_content",)
 # 六档（low/medium/high/xhigh/max/ultra）映射规则集中本处（1.16 决策 3/4）：
 # 档位在 profile 词表内恒等发送，超出则降档到该 profile 声明的最高档
 # （词表即降档边界，见 profiles.py 的逐 profile 核对注记——openai-public
-# 按已核对范围收敛到 xhigh，codex-http-relay 六档全支持恒等）。
+# 按已核对范围收敛到 xhigh；codex-http-relay 五档恒等，ultra 降档 max，
+# 2026-10-03 实测中转网关校验层拒绝 ultra）。
 # thinking_budget 数字口径不适用于本协议（claude/gemini 专属）。
 _EFFORT_ORDER = REASONING_EFFORT_TIERS
 
