@@ -43,7 +43,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = PROJECT_ROOT / "skills"
 SKILLS_EXAMPLE_DIR = PROJECT_ROOT / "skills.example"
 
-_PACKAGE_DIR = PROJECT_ROOT / "src" / "quickquip" / "llm" / "skills"
+# 源码与 Docker 使用 src layout，Windows 懒人包将应用包置于项目根。
+_APPLICATION_DIR = PROJECT_ROOT / "src" / "quickquip"
+if not _APPLICATION_DIR.is_dir():
+    _APPLICATION_DIR = PROJECT_ROOT / "quickquip"
+_PACKAGE_DIR = _APPLICATION_DIR / "llm" / "skills"
 
 
 def _register_parent_stubs() -> None:
@@ -54,8 +58,8 @@ def _register_parent_stubs() -> None:
     包初始化，因此不会连带装入第三方依赖。
     """
     chain = (
-        ("quickquip", PROJECT_ROOT / "src" / "quickquip"),
-        ("quickquip.llm", PROJECT_ROOT / "src" / "quickquip" / "llm"),
+        ("quickquip", _APPLICATION_DIR),
+        ("quickquip.llm", _APPLICATION_DIR / "llm"),
         ("quickquip.llm.skills", _PACKAGE_DIR),
     )
     for name, path in chain:

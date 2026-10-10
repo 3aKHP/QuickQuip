@@ -3,12 +3,40 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from quickquip.llm.skills import scan_skills
 
 SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "sync_preset_skills.py"
+
+
+@pytest.mark.parametrize("layout", ["src", "flat"])
+def test_cli_runs_from_distributed_layout_without_dependencies(tmp_path, layout):
+    """发行布局中的脚本用标准库加载真实领域实现，支持报告和同步。"""
+    (tmp_path / "scripts").mkdir()
+    script = tmp_path / "scripts" / SCRIPT_PATH.name
+    shutil.copyfile(SCRIPT_PATH, script)
+    package = tmp_path / ("src/quickquip" if layout == "src" else "quickquip")
+    module_dir = package / "llm" / "skills"
+    module_dir.mkdir(parents=True)
+    sources = SCRIPT_PATH.parent.parent / "src" / "quickquip" / "llm" / "skills"
+    for filename in ("preset_sync.py", "preset_drift.py"):
+        shutil.copyfile(sources / filename, module_dir / filename)
+    _write(tmp_path / "skills.example" / "alpha", {"SKILL.md": "preset content"})
+    command = [sys.executable, "-S", str(script)]
+    report = subprocess.run([*command, "--check"], capture_output=True, text=True, cwd=tmp_path)
+    assert report.returncode == 1, report.stderr
+    assert "missing" in report.stdout
+    applied = subprocess.run([*command, "--apply"], capture_output=True, text=True, cwd=tmp_path)
+    assert applied.returncode == 0, applied.stderr
+    assert (tmp_path / "skills/alpha/SKILL.md").read_text() == "preset content"
+    current = subprocess.run([*command, "--check"], capture_output=True, text=True, cwd=tmp_path)
+    assert current.returncode == 0, current.stderr
 
 
 def _load_script():
