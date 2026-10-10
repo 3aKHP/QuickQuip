@@ -16,6 +16,7 @@ import math
 import os
 import shutil
 import stat
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -208,6 +209,8 @@ def list_skills():
                 continue
             if child.name.startswith(skill_import.INSTALL_STAGING_PREFIX):
                 continue
+            if child.name.startswith(preset_sync.SYNC_STAGING_PREFIX):
+                continue
             loaded, load_diagnostics = load_skill_with_diagnostics(child)
             resource_count, has_scripts, total_bytes = _dir_stats(child)
             state = states.get(child.name)
@@ -313,7 +316,11 @@ def apply_presets_route(body: PresetApplyBody, request: Request):
     rows = preset_sync.classify_presets(catalog_dir, _EXAMPLE_DIR)
     # 空（缺省或空列表）= 全部 missing+diverged，与脚本 --apply 语义一致。
     names = set(body.names) if body.names else None
-    outcomes, failures = preset_sync.apply_presets(rows, catalog_dir, _EXAMPLE_DIR, names)
+    catalog_dir.mkdir(parents=True, exist_ok=True)
+    outcomes, failures = preset_sync.apply_presets(
+        rows, catalog_dir, _EXAMPLE_DIR, names,
+        lock_factory=lambda name: _skill_lock(catalog_dir, name),
+    )
     logger.warning(
         "skill presets synced via web admin: %d applied, %d failed",
         len(outcomes),
@@ -418,6 +425,7 @@ def confirm_import(body: ImportConfirmBody, request: Request):
         body.root,
         _effective_catalog_dir(),
         overwrite=body.overwrite,
+        lock_factory=_skill_lock,
     )
     logger.warning(
         "skill installed via web admin: %s (root=%s, backup=%s)", name, body.root, backup
@@ -465,12 +473,9 @@ def delete_skill(name: str, request: Request):
     skill_dir = _require_skill_dir(name)
     catalog_dir = skill_dir.parent
     with _skill_lock(catalog_dir, name):
+        skill_dir = _require_skill_dir(name)
         shutil.rmtree(skill_dir)
-    # filelock 不自动清理锁文件：删除后 best-effort 清掉孤儿 <name>.lock。
-    try:
-        (catalog_dir / f"{name}.lock").unlink(missing_ok=True)
-    except OSError as exc:
-        logger.debug("skill lock file cleanup failed for %s: %s", name, exc)
+    # 保留锁文件，确保已等待与后续写入者锁定同一个 inode。
     logger.warning("skill deleted via web admin: %s", name)
     audit_logger.log(request, action="delete", target_type="skill", target_id=name)
     return {"ok": True}
@@ -523,22 +528,23 @@ def write_skill_file(name: str, body: SkillFileWriteBody, request: Request):
                     "diagnostics": _diagnostics_payload(parsed.diagnostics),
                 },
             )
-    is_create = not os.path.lexists(target)
-    # 包含性校验先于 mkdir：最深的已存在祖先不得随符号链接逃逸出根。
-    _check_ancestor_contained(skill_dir, target)
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        raise HTTPException(
-            status_code=409,
-            detail="target path conflicts with an existing non-directory entry",
-        ) from None
-    # mkdir 后、写盘前复检落点父目录（防范符号链接竞态交换）。
-    _check_contained(skill_dir, target)
-    tmp = target.with_name(target.name + ".tmp")
     with _skill_lock(skill_dir.parent, name):
+        skill_dir = _require_skill_dir(name)
+        is_create = not os.path.lexists(target)
+        _check_ancestor_contained(skill_dir, target)
         try:
-            tmp.write_text(body.content, encoding="utf-8")
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise HTTPException(
+                status_code=409,
+                detail="target path conflicts with an existing non-directory entry",
+            ) from None
+        _check_contained(skill_dir, target)
+        fd, temporary_path = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+        tmp = Path(temporary_path)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw)
             tmp.replace(target)
         except (FileExistsError, NotADirectoryError):
             tmp.unlink(missing_ok=True)
@@ -580,6 +586,8 @@ def delete_skill_file(name: str, path: str, request: Request):
         raise HTTPException(status_code=404, detail="file not found")
     _check_contained(skill_dir, target)
     with _skill_lock(skill_dir.parent, name):
+        _require_skill_dir(name)
+        _check_contained(skill_dir, target)
         target.unlink()
     logger.warning("skill file deleted via web admin: %s:%s", name, path)
     audit_logger.log(

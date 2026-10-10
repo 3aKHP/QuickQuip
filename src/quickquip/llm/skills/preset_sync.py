@@ -14,6 +14,9 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -26,6 +29,7 @@ from quickquip.llm.skills.preset_drift import detect_preset_drift, preset_skill_
 # 告警）；容器名也不满足 Skill 目录名 ^[a-z0-9][a-z0-9-]*$。
 BACKUP_CONTAINER_NAME = ".preset-backups"
 BACKUP_NAME_INFIX = ".preset-backup-"
+SYNC_STAGING_PREFIX = ".preset-sync-"
 
 
 class SyncState(StrEnum):
@@ -94,6 +98,7 @@ def local_only_names(skills_dir: Path, preset_names: set[str]) -> list[str]:
         and child.is_dir()
         and child.name not in preset_names
         and child.name != BACKUP_CONTAINER_NAME
+        and not child.name.startswith(SYNC_STAGING_PREFIX)
     )
 
 
@@ -118,6 +123,8 @@ def apply_presets(
     skills_dir: Path,
     example_dir: Path,
     names: set[str] | None = None,
+    *,
+    lock_factory: Callable[[str], AbstractContextManager] | None = None,
 ) -> tuple[list[SyncOutcome], list[str]]:
     """执行同步，返回（成功项, 失败描述列表）。
 
@@ -132,35 +139,49 @@ def apply_presets(
             continue
         if names is not None and row.name not in names:
             continue
-        source = example_dir / row.name
-        target = skills_dir / row.name
-        backup: Path | None = None
-        renamed = False
         try:
-            if row.state is SyncState.DIVERGED:
-                backup = unique_backup_path(skills_dir, row.name)
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                target.rename(backup)
-                renamed = True
-            shutil.copytree(source, target)
+            with lock_factory(row.name) if lock_factory else nullcontext():
+                outcome = _apply_preset(row, skills_dir, example_dir)
         except OSError as exc:
-            if renamed:
-                # 备份改名成功、拷贝中途失败：清掉半成品并回滚本地原副本；
-                # 回滚自身也可能失败，原副本至少保留在备份路径。
-                assert backup is not None  # renamed=True 只在 backup 赋值之后成立
-                try:
-                    if target.exists():
-                        shutil.rmtree(target)
-                    backup.rename(target)
-                except OSError as rollback_exc:
-                    failures.append(
-                        f"{row.name}：回滚失败，原副本保留在 {backup}（{rollback_exc}）"
-                    )
-            elif row.state is SyncState.MISSING and target.exists():
-                # missing 分支拷贝中途失败：目标是本次新建的半成品，直接清理；
-                # diverged 分支改名失败时 target 是部署者原副本，绝不触碰。
-                shutil.rmtree(target, ignore_errors=True)
             failures.append(f"{row.name}：{exc.strerror or exc}")
             continue
-        outcomes.append(SyncOutcome(name=row.name, backup=backup))
+        if outcome is not None:
+            outcomes.append(outcome)
     return outcomes, failures
+
+
+def _apply_preset(
+    row: PresetSkillRow, skills_dir: Path, example_dir: Path
+) -> SyncOutcome | None:
+    """持锁后复查状态，暂存完整副本再激活，仅清理本操作的暂存树。"""
+    current = next(
+        (item for item in classify_presets(skills_dir, example_dir) if item.name == row.name),
+        None,
+    )
+    if current is not None and current.state is SyncState.CURRENT:
+        return None
+    if current is None or current.state is not row.state:
+        raise OSError("状态已变化，请刷新后重试")
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=SYNC_STAGING_PREFIX, dir=skills_dir))
+    staging = staging_root / row.name
+    target = skills_dir / row.name
+    backup: Path | None = None
+    try:
+        shutil.copytree(example_dir / row.name, staging)
+        if row.state is SyncState.DIVERGED:
+            backup = unique_backup_path(skills_dir, row.name)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            target.rename(backup)
+        # 对 missing 的竞争目标不做清理；rename 失败时保留另一写入者的目录。
+        staging.rename(target)
+    except OSError:
+        if backup is not None and not target.exists() and not target.is_symlink():
+            try:
+                backup.rename(target)
+            except OSError as exc:
+                raise OSError(f"回滚失败，原副本保留在 {backup}（{exc}）") from exc
+        raise
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
+    return SyncOutcome(name=row.name, backup=backup)

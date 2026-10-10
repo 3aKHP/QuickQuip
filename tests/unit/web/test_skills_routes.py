@@ -87,6 +87,22 @@ def _write_skill(base: Path, name: str, *, extra: dict[str, bytes] | None = None
     return skill_dir
 
 
+def test_write_ignores_existing_temp_symlink(catalog_dir, tmp_path):
+    directory = _write_skill(catalog_dir, "safe")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep outside", encoding="utf-8")
+    (directory / "refs.md.tmp").symlink_to(outside)
+
+    skills.write_skill_file(
+        "safe", skills.SkillFileWriteBody(path="refs.md", content="new resource"),
+        _mock_request(),
+    )
+
+    assert outside.read_text(encoding="utf-8") == "keep outside"
+    assert not (directory / "refs.md").is_symlink()
+    assert (directory / "refs.md").read_text(encoding="utf-8") == "new resource"
+
+
 def _make_zip(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -468,7 +484,7 @@ def test_create_skill_invalid_content_400(catalog_dir):
     assert exc.value.detail["diagnostics"]
 
 
-def test_delete_skill_ok_removes_lock(catalog_dir, audit_trail):
+def test_delete_skill_keeps_shared_lock_identity(catalog_dir, audit_trail):
     _write_skill(catalog_dir, "good")
     lock_file = catalog_dir / "good.lock"
 
@@ -476,7 +492,7 @@ def test_delete_skill_ok_removes_lock(catalog_dir, audit_trail):
 
     assert result["ok"] is True
     assert not (catalog_dir / "good").exists()
-    assert not lock_file.exists()
+    assert lock_file.exists()
     assert [entry["action"] for entry in audit_trail] == ["delete"]
     assert audit_trail[0]["target_id"] == "good"
 

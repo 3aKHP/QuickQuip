@@ -222,6 +222,39 @@ def test_apply_missing_copy_failure_cleans_partial(preset_pair, monkeypatch):
     assert not (skills_dir / "beta").exists()
 
 
+def test_stale_missing_snapshot_preserves_completed_install(preset_pair):
+    skills_dir, example_dir = preset_pair
+    write_skill(example_dir, "alpha", "预置。")
+    rows = classify_presets(skills_dir, example_dir)
+    write_skill(skills_dir, "alpha", "并发安装。", files={"references/a.md": "定制资料"})
+
+    outcomes, failures = apply_presets(rows, skills_dir, example_dir)
+
+    assert outcomes == []
+    assert failures
+    assert "并发安装。" in (skills_dir / "alpha/SKILL.md").read_text(encoding="utf-8")
+    assert (skills_dir / "alpha/references/a.md").read_text(encoding="utf-8") == "定制资料"
+
+
+def test_missing_target_created_during_copy_is_never_cleaned(preset_pair, monkeypatch):
+    skills_dir, example_dir = preset_pair
+    write_skill(example_dir, "alpha", "预置。")
+    rows = classify_presets(skills_dir, example_dir)
+    copytree = shutil.copytree
+
+    def copy_then_create_target(source, staging):
+        copytree(source, staging)
+        write_skill(skills_dir, "alpha", "另一个写入者的完整副本。")
+
+    monkeypatch.setattr(shutil, "copytree", copy_then_create_target)
+    outcomes, failures = apply_presets(rows, skills_dir, example_dir)
+
+    assert outcomes == []
+    assert failures
+    assert "完整副本。" in (skills_dir / "alpha/SKILL.md").read_text(encoding="utf-8")
+    assert not list(skills_dir.glob(f"{preset_sync.SYNC_STAGING_PREFIX}*"))
+
+
 def test_apply_backup_rename_failure_preserves_original(preset_pair, monkeypatch):
     """备份改名自身失败（如 Windows 文件占用）：部署者原副本必须原样保留，
     且不得发生任何清理动作（回滚分支只允许在改名成功后介入）。"""

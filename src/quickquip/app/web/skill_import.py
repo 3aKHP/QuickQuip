@@ -25,6 +25,8 @@ import stat
 import tempfile
 import time
 import zipfile
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -278,6 +280,7 @@ def install_from_stash(
     catalog_dir: Path,
     *,
     overwrite: bool = False,
+    lock_factory: Callable[[Path, str], AbstractContextManager] | None = None,
 ) -> tuple[str, Path | None]:
     """以候选根 frontmatter ``name`` 建目标目录安装，返回 ``(name, backup)``。
 
@@ -317,30 +320,31 @@ def install_from_stash(
 
     catalog_dir.mkdir(parents=True, exist_ok=True)
     cleanup_stale_staging(catalog_dir)
-    target = catalog_dir / name
-    staging = Path(tempfile.mkdtemp(prefix=INSTALL_STAGING_PREFIX, dir=catalog_dir))
-    backup: Path | None = None
-    try:
-        if os.path.lexists(target):
-            if not overwrite:
-                raise HTTPException(status_code=409, detail=f"skill '{name}' already exists")
-            backup = preset_sync.unique_backup_path(catalog_dir, name)
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            target.rename(backup)
-        for entry in members:
-            relative = entry.path[len(prefix):]
-            assert_safe_relative_path(relative)
-            destination = staging.joinpath(*relative.split("/"))
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(entry.data)
-        staging.rename(target)
-    except Exception:
-        shutil.rmtree(staging, ignore_errors=True)
-        if backup is not None and not os.path.lexists(target):
-            try:
-                backup.rename(target)
-            except OSError:
-                logger.error("skill install rollback failed, old copy kept at %s", backup)
-        raise
+    with lock_factory(catalog_dir, name) if lock_factory else nullcontext():
+        target = catalog_dir / name
+        staging = Path(tempfile.mkdtemp(prefix=INSTALL_STAGING_PREFIX, dir=catalog_dir))
+        backup: Path | None = None
+        try:
+            for entry in members:
+                relative = entry.path[len(prefix):]
+                assert_safe_relative_path(relative)
+                destination = staging.joinpath(*relative.split("/"))
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(entry.data)
+            if os.path.lexists(target):
+                if not overwrite:
+                    raise HTTPException(status_code=409, detail=f"skill '{name}' already exists")
+                backup = preset_sync.unique_backup_path(catalog_dir, name)
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                target.rename(backup)
+            staging.rename(target)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            if backup is not None and not os.path.lexists(target):
+                try:
+                    backup.rename(target)
+                except OSError:
+                    logger.error("skill install rollback failed, old copy kept at %s", backup)
+            raise
     skill_import_stash.drop_stash(base, token)
     return name, backup
