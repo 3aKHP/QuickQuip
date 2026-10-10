@@ -700,11 +700,32 @@ def test_folder_manifest_model_limits(monkeypatch):
     with pytest.raises(ValidationError):
         skills.ImportInspectBody(kind="folder", files={"a.txt": "eA" * 3})
     monkeypatch.setattr(skills, "_MAX_FILE_B64_CHARS", 2 * 1024 * 1024)
-    monkeypatch.setattr(skills, "_MAX_ARCHIVE_B64_CHARS", 7)
+    monkeypatch.setattr(skills, "_MAX_FOLDER_B64_CHARS", 7)
     with pytest.raises(ValidationError):
         skills.ImportInspectBody(
             kind="folder", files={"a.txt": "eA==", "b.txt": "eA=="}
         )
+
+
+@pytest.mark.parametrize("total_mib", [17, 32])
+def test_folder_model_accepts_decoded_limit_with_per_file_padding(total_mib):
+    encoded = base64.b64encode(b"x" * (1024 * 1024)).decode()
+    body = skills.ImportInspectBody(
+        kind="folder", files={f"file{i}.txt": encoded for i in range(total_mib)}
+    )
+    entries = skill_import.ingest_folder(body.files)
+    assert sum(len(entry.data) for entry in entries) == total_mib * 1024 * 1024
+
+
+def test_folder_ingest_rejects_one_byte_over_decoded_limit():
+    encoded = base64.b64encode(b"x" * (1024 * 1024)).decode()
+    files = {f"file{i}.txt": encoded for i in range(32)}
+    files["extra.txt"] = "eA=="
+    body = skills.ImportInspectBody(kind="folder", files=files)
+    with pytest.raises(HTTPException) as exc:
+        skill_import.ingest_folder(body.files)
+    assert exc.value.status_code == 422
+    assert "total limit" in exc.value.detail
 
 
 def test_inspect_unknown_kind_422(catalog_dir, stash_dir):

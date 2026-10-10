@@ -57,6 +57,11 @@ _MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 _MAX_ARCHIVE_B64_CHARS = math.ceil(_MAX_ARCHIVE_BYTES / 3) * 4
 # folder manifest 单值（base64 字符）上限：解码后 ≤1MiB 的粗检口径。
 _MAX_FILE_B64_CHARS = 2 * 1024 * 1024
+# 文件夹按解码总量计费；各文件分别编码产生的 padding 留出有界余量。
+_MAX_FOLDER_B64_CHARS = (
+    math.ceil(skill_import.MAX_IMPORT_TOTAL_BYTES / 3) * 4
+    + 4 * skill_import.MAX_IMPORT_ENTRIES
+)
 
 
 class SkillCreateBody(BaseModel):
@@ -94,7 +99,7 @@ class ImportInspectBody(BaseModel):
             if len(encoded) > _MAX_FILE_B64_CHARS:
                 raise ValueError(f"folder entry is too large: {relpath}")
             total += len(encoded)
-            if total > _MAX_ARCHIVE_B64_CHARS:
+            if total > _MAX_FOLDER_B64_CHARS:
                 raise ValueError("folder manifest exceeds the total size limit")
         return value
 
