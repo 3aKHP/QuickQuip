@@ -16,7 +16,7 @@
           </div>
           <div v-else-if="tab === 'folder'" class="source-pane">
             <p class="source-hint">选择本地文件夹，将整目录上传检查。文件夹内每个含 SKILL.md 的目录都会成为一个候选。</p>
-            <input ref="folderInput" type="file" class="source-file" :disabled="inspecting" @change="onFolderChange" />
+            <input type="file" webkitdirectory multiple class="source-file" :disabled="inspecting" @change="onFolderChange" />
           </div>
           <div v-else class="source-pane">
             <p class="source-hint">支持 https://github.com/&lt;owner&gt;/&lt;repo&gt;[/tree/&lt;ref&gt;[/&lt;子目录&gt;]]，将从 codeload.github.com 下载 zip。</p>
@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import UiCard from '../ui/UiCard.vue'
 import UiIcon from '../ui/UiIcon.vue'
 import UiButton from '../ui/UiButton.vue'
@@ -133,13 +133,6 @@ const token = ref('')
 const candidates = ref<ImportCandidate[]>([])
 const selectedRoot = ref('')
 const overwrite = ref(false)
-
-const folderInput = ref<HTMLInputElement | null>(null)
-
-// TS 不识别非标准属性 webkitdirectory，挂载时以 setAttribute 透传
-onMounted(() => {
-  folderInput.value?.setAttribute('webkitdirectory', '')
-})
 
 const selected = computed(() => candidates.value.find(c => c.root === selectedRoot.value) || null)
 const canConfirm = computed(() => {

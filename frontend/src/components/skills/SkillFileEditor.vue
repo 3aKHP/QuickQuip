@@ -40,7 +40,7 @@
       <div class="editor-bar">
         <span class="mono editor-path">{{ filePath }}</span>
         <span v-if="dirty" class="dirty-pill">未保存</span>
-        <UiButton variant="primary" icon="Save" :loading="saving" :disabled="!dirty" @click="onSave">保存</UiButton>
+        <UiButton variant="primary" icon="Save" :loading="saving" :disabled="loading || !dirty" @click="onSave">保存</UiButton>
       </div>
       <p v-if="loadError" class="error">{{ loadError }}</p>
       <UiLoading v-if="loading" />
@@ -79,14 +79,18 @@ const loading = ref(false)
 const saving = ref(false)
 const loadError = ref<string | null>(null)
 const dirty = computed(() => content.value !== original.value)
+let editorRequest = 0
 
 watch(() => props.skillName, () => reset())
 
 function reset() {
+  editorRequest++
   filePath.value = ''
   content.value = ''
   original.value = ''
   loadError.value = null
+  loading.value = false
+  saving.value = false
 }
 
 /** 未保存编辑确认：安全（无脏内容或用户确认放弃）返回 true */
@@ -98,14 +102,22 @@ function confirmLeave(): boolean {
 async function openPath(path: string, seedContent?: string) {
   if (path === filePath.value) return
   if (!confirmLeave()) return
+  const request = ++editorRequest
+  const skillName = props.skillName
+  const isCurrent = () => request === editorRequest && skillName === props.skillName && filePath.value === path
   filePath.value = path
+  content.value = ''
+  original.value = ''
+  saving.value = false
   loading.value = true
   loadError.value = null
   try {
-    const data = await fetchSkillFile(props.skillName, path)
+    const data = await fetchSkillFile(skillName, path)
+    if (!isCurrent()) return
     content.value = data.content
     original.value = data.content
   } catch (e: unknown) {
+    if (!isCurrent()) return
     if (seedContent !== undefined && (e as { status?: number }).status === 404) {
       // 文件缺失：以种子内容开路，保存时由 PUT upsert 创建
       content.value = seedContent
@@ -116,23 +128,31 @@ async function openPath(path: string, seedContent?: string) {
       toast((e as Error).message, 'error')
     }
   } finally {
-    loading.value = false
+    if (request === editorRequest) loading.value = false
   }
 }
 
 async function onSave() {
+  if (loading.value || saving.value || !filePath.value) return
+  const request = editorRequest
+  const skillName = props.skillName
+  const path = filePath.value
+  const savedContent = content.value
+  const isCurrent = () => request === editorRequest && skillName === props.skillName && filePath.value === path
   saving.value = true
   loadError.value = null
   try {
-    await saveSkillFile(props.skillName, filePath.value, content.value)
-    original.value = content.value
+    await saveSkillFile(skillName, path, savedContent)
+    if (!isCurrent()) return
+    original.value = savedContent
     toast('已保存')
     emit('saved')
   } catch (e: unknown) {
+    if (!isCurrent()) return
     loadError.value = (e as Error).message
     toast('保存失败', 'error')
   } finally {
-    saving.value = false
+    if (isCurrent()) saving.value = false
   }
 }
 

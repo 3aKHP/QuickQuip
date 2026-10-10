@@ -11,7 +11,7 @@
           保存后会提示具体生效方式
         </span>
         <UiButton icon="RefreshCw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
-        <UiButton variant="primary" :loading="saving" icon="Save" @click="save">保存</UiButton>
+        <UiButton variant="primary" :loading="saving" :disabled="!loaded || !!effortSaving" icon="Save" @click="save">保存</UiButton>
       </template>
     </UiPageHeader>
 
@@ -128,6 +128,7 @@ const originalContent = ref('')
 const effortProviders = ref<LlmEffortProvider[]>([])
 const effortError = ref<string | null>(null)
 const effortSaving = ref('')
+let configRequest = 0
 
 /** 六档词表：与后端 REASONING_EFFORT_CHOICES（llm/config.py）保持一致 */
 const EFFORT_CHOICES = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
@@ -158,40 +159,54 @@ async function switchTo(key: string) {
 }
 
 async function load(key: string) {
+  const request = ++configRequest
   currentKey.value = key
+  effortProviders.value = []
+  effortError.value = null
+  effortSaving.value = ''
+  saving.value = false
   loaded.value = false
   loadError.value = null
   saveError.value = null
   try {
     const data = await fetchConfig(key)
+    if (request !== configRequest) return
     content.value = data.content
     originalContent.value = data.content
     const entry = configs.value.find(c => c.key === key)
     if (entry) entry.exists = !data.missing
     loaded.value = true
     if (key === 'llm') {
-      await loadEffort()
+      await loadEffort(request)
     } else {
       effortProviders.value = []
       effortError.value = null
     }
   } catch (e: unknown) {
+    if (request !== configRequest) return
     loadError.value = (e as Error).message
   }
 }
 
-async function loadEffort() {
+async function loadEffort(request = configRequest) {
+  if (currentKey.value !== 'llm' || request !== configRequest) return
   effortError.value = null
   try {
     const data = await fetchLlmEffort()
+    if (currentKey.value !== 'llm' || request !== configRequest) return
     effortProviders.value = data.providers || []
   } catch (e: unknown) {
+    if (currentKey.value !== 'llm' || request !== configRequest) return
     effortProviders.value = []
     effortError.value = (e as Error).message
   }
 }
 
 async function onEffortChange(p: LlmEffortProvider, event: Event) {
+  if (currentKey.value !== 'llm' || saving.value || effortSaving.value) return
+  const request = configRequest
+  const originalText = content.value
+  const isCurrent = () => currentKey.value === 'llm' && request === configRequest
   const effort = (event.target as HTMLSelectElement).value
   if (dirty.value && !confirm('编辑器中有未保存的修改，调整档位会刷新文件内容并丢弃这些修改。是否继续？')) {
     await loadEffort()
@@ -205,32 +220,47 @@ async function onEffortChange(p: LlmEffortProvider, event: Event) {
     saved = true
     toast('保存成功，需 /llm reload 或重启后生效')
   } catch (e: unknown) {
+    if (!isCurrent()) return
     effortError.value = (e as Error).message
     toast('保存失败', 'error')
     await loadEffort()
-  } finally {
-    effortSaving.value = ''
   }
-  if (!saved) return
+  if (!saved || !isCurrent()) {
+    if (isCurrent()) effortSaving.value = ''
+    return
+  }
   // 保存已落盘：刷新面板与 textarea 保持同步；刷新失败只提示不同步，不掩盖保存结果
   try {
-    await loadEffort()
+    await loadEffort(request)
+    if (!isCurrent()) return
     const data = await fetchConfig('llm')
+    if (!isCurrent()) return
+    if (content.value !== originalText) {
+      toast('已保存档位，保留编辑器中新输入的内容；请核对后再保存文本')
+      return
+    }
     content.value = data.content
     originalContent.value = data.content
   } catch {
+    if (!isCurrent()) return
     toast('已保存，但文件内容刷新失败，请点「重置」重新加载', 'error')
+  } finally {
+    if (isCurrent()) effortSaving.value = ''
   }
 }
 
 async function save() {
-  if (!currentKey.value) return
+  if (!currentKey.value || !loaded.value || saving.value || effortSaving.value) return
+  const request = configRequest
+  const key = currentKey.value
+  const savedContent = content.value
   saving.value = true
   saveError.value = null
   try {
-    const res = await saveConfig(currentKey.value, content.value)
-    originalContent.value = content.value
-    const entry = configs.value.find(c => c.key === currentKey.value)
+    const res = await saveConfig(key, savedContent)
+    if (request !== configRequest) return
+    originalContent.value = savedContent
+    const entry = configs.value.find(c => c.key === key)
     if (entry) entry.exists = true
     if (currentKey.value === 'llm') {
       // 文本编辑可能改了档位行：刷新结构化面板（loadEffort 内部自捕获，不影响保存结果）
@@ -247,10 +277,11 @@ async function save() {
       toast('已保存。如未自动生效，请到诊断页重载或重启 bot')
     }
   } catch (e: unknown) {
+    if (request !== configRequest) return
     saveError.value = (e as Error).message
     toast('保存失败', 'error')
   } finally {
-    saving.value = false
+    if (request === configRequest) saving.value = false
   }
 }
 </script>

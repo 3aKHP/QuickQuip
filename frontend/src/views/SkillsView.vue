@@ -150,6 +150,7 @@ const detail = ref<SkillDetail | null>(null)
 const repairDiagnostics = ref<SkillDiagnostic[] | null>(null)
 const loadingDetail = ref(false)
 const detailError = ref<string | null>(null)
+let detailRequest = 0
 
 const editorRef = ref<InstanceType<typeof SkillFileEditor> | null>(null)
 const presetPanelRef = ref<InstanceType<typeof PresetSyncPanel> | null>(null)
@@ -159,7 +160,9 @@ const installOpen = ref(false)
 onMounted(loadList)
 
 function onRefresh() {
+  if (!confirmEditorLeave()) return
   void loadList()
+  if (selectedName.value) void reloadDetail()
   void presetPanelRef.value?.reload()
 }
 
@@ -207,44 +210,64 @@ async function selectSkill(name: string) {
 
 /** 切换/新建/安装后的全量加载；坏 skill 进入修复模式 */
 async function reloadDetail() {
+  const request = ++detailRequest
+  const name = selectedName.value
+  const isCurrent = () => request === detailRequest && name === selectedName.value
   loadingDetail.value = true
+  detail.value = null
   detailError.value = null
   repairDiagnostics.value = null
   try {
-    detail.value = await fetchSkill(selectedName.value)
+    const data = await fetchSkill(name)
+    if (!isCurrent()) return
+    detail.value = data
   } catch (e: unknown) {
+    if (!isCurrent()) return
     detail.value = null
     const diagnostics = extractDetailDiagnostics(e)
     if (diagnostics) repairDiagnostics.value = diagnostics
     else detailError.value = (e as Error).message
   } finally {
-    loadingDetail.value = false
+    if (isCurrent()) loadingDetail.value = false
   }
 }
 
 /** 保存/删文件后的轻量刷新：只替换详情数据，编辑器状态由子组件自持不受影响 */
 async function refreshDetail() {
+  const request = ++detailRequest
+  const name = selectedName.value
+  const isCurrent = () => request === detailRequest && name === selectedName.value
   try {
-    detail.value = await fetchSkill(selectedName.value)
+    const data = await fetchSkill(name)
+    if (!isCurrent()) return
+    detail.value = data
     repairDiagnostics.value = null
   } catch (e: unknown) {
+    if (!isCurrent()) return
     const diagnostics = extractDetailDiagnostics(e)
     if (diagnostics) {
       detail.value = null
       repairDiagnostics.value = diagnostics
     } else {
+      if (!detail.value) detailError.value = (e as Error).message
       toast((e as Error).message, 'error')
     }
+  } finally {
+    if (isCurrent()) loadingDetail.value = false
   }
 }
 
 async function onFileSaved() {
+  const name = selectedName.value
   await loadList()
+  if (name !== selectedName.value) return
   await refreshDetail()
 }
 
 async function onFileDeleted() {
+  const name = selectedName.value
   await loadList()
+  if (name !== selectedName.value) return
   await refreshDetail()
 }
 
