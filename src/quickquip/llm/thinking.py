@@ -7,8 +7,7 @@ None（不发送任何思考参数）。
 本层只做映射、不做门禁（fail-open，不替用户做决定）：除 claude budget 的
 1024 数学下限外，不拦截任何 协议×模型 组合；后端不支持某档位由上游 400
 暴露给用户。各后端支持面的调研结论见 docs/admin/configuration.md
-「各协议思考参数支持面」。映射口径来自 2026-10 调研（dev/research
-2026-10-03-reasoning-effort-runtime-switch §二）：
+「各协议思考参数支持面」。各协议映射如下：
 
 - openai chat：顶层 ``reasoning_effort``。三档系 DeepSeek/GLM-5.3/Kimi k3
   （medium→high、xhigh→high、max/ultra→max，DeepSeek 官方映射即此口径）；

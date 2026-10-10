@@ -1,7 +1,7 @@
 """字符级 token 粗估：中文 ≈0.7 token/字、ASCII ≈0.35 token/字符。
 
-账本（信封/现场补丁）与纪元预算共用的定标换算比（dev/research 口径，
-由生产 usage 拟合验证），不引入 tokenizer 依赖；以 usage 实际值持续校准。
+账本（信封/现场补丁）与纪元预算共用由生产 usage 拟合验证的定标换算比，
+不引入 tokenizer 依赖；以 usage 实际值持续校准。
 """
 from __future__ import annotations
 

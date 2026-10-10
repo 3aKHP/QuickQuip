@@ -266,7 +266,7 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 #### 各协议思考参数支持面
 
-归一化层只做映射、不做门禁：除 claude budget 的 1024 数学下限外，任何 协议×模型 组合都按上表形态照发思考参数。后端不支持某档位时上游返回 400 等 4xx 错误，即为不支持的信号，群内用 `/llm effort default` 恢复即可。以下为 2026-10 调研的各后端支持面结论，供排障参考（不构成拦截依据）：
+归一化层只做映射、不做门禁：除 claude budget 的 1024 数学下限外，任何 协议×模型 组合都按上表形态照发思考参数。后端不支持某档位时上游返回 400 等 4xx 错误，即为不支持的信号。群内用 `/llm effort default` 清除会话覆盖并恢复跟随 provider 配置；provider 配置档也不受支持时，清除该 provider 的 `reasoning_effort` 并执行 `/llm reload`，让模型使用自身默认档。以下为 2026-10 调研的各后端支持面结论，供排障参考（不构成拦截依据）：
 
 - **claude 协议**：Anthropic 官方 extended thinking 自 3.7 代际引入，3.5 及更早代际无思考能力（照发旧式 budget 形态会被上游拒绝）；4.7+/5 系只接受 `adaptive + effort`，旧式 `type:"enabled"` 直接 400。
 - **claude 兼容端点**：Kimi（k3，思考词表 low/high/max）、MiMo（m2.5）、GLM Coding Plan 等均提供面向 Claude Code 类客户端的 Anthropic 形态端点，对 `adaptive + effort` 形态有实测旁证（端点把 Claude Code 的 effort 标签映射到自家思考档位）。照发意味着同时适用 Anthropic 温度契约：档位生效期间非默认 `temperature` 不下发，上游若实际忽略思考参数，温度配置也会随之不生效。个别端点对历史回放中的 thinking 内容块有特殊要求，QuickQuip 的历史回放分三层：无工具调用的对话轮与一切降级路径（owner 失配、敏感命中、预算精简、档案投影）为纯文本，不带 thinking；带工具调用的已关闭 Loop 在 owner 五元组匹配且结构有效时走原生回放，跨轮携带 thinking 内容（claude 签名块 / gemini thought parts / responses reasoning 密文）。对 claude 兼容端点的实际避坑机制是签名有效性闸门：无签名的 thinking 块自动降级为纯文本档案。注意 claude 协议暂无 openai_responses 式的「上游 400 时剥历史推理降级重试」兜底，返回签名块却拒绝历史 thinking 的端点存在暴露面。

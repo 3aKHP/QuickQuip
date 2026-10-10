@@ -21,6 +21,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **词云生成** — `/wordcloud` 按 today/week/month/year 四档生成群聊词云图片
 - **STS 公式化回复** — 《杀戮尖塔》梗能力：消息命中“xxx了”时按卡牌名公式回复，`/turmfluch` 一次性生成诅咒文案（v1.10）。详见 [docs/dev/sts-formula.md](docs/dev/sts-formula.md)
 - **LLM 扩展** — 兼容 OpenAI / Claude / Gemini / OpenAI Responses 四类协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、Skill 扩展包（部署者安装、AI 遇匹配请求自主激活）、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
+- **思考档位控制** — `/llm effort` 按群或私聊切换思考档位，四协议统一适配；Web Admin 支持 provider 默认档与会话覆盖配置
+- **群聊引用与艾特** — LLM 回复引用触发消息，`@名字` 可解析为真实艾特；按群开关、身份唯一解析与通知冷却共同控制互动
 - **低频唤醒** — 按群配置唤醒延长、兴趣话题、相关性/答疑判定、无聊冒泡和兜底概率，所有入口受规则开关与限流保护
 - **LLM 用量/成本看板** — 全链路 token 计量与成本估算，按 provider/功能/模型/群/人格五维归因，Web Admin 提供用量面板与定价状态展示
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级

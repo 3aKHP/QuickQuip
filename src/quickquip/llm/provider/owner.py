@@ -29,8 +29,8 @@ _PROFILE_FIELDS = ("protocol", "prompt_caching", "cache_ttl", "auth_method", "bu
 # items 回放基准。reasoning_effort 按 2026-09-18 定调不入指纹（方案 b：
 # 切档不断回放，与 claude/gemini 思维参数先例拉齐）；密文的生成档位改经
 # owner.extra["effort"] 逐 turn 记录，供 per-effort 计量使用。存量记录的
-# 指纹含旧 effort 输入，本变更部署后一次性失配降级（无数据损坏，工具
-# 事实保留），随后按新指纹恢复原生回放。
+# 指纹含旧 effort 输入，升级前的 Loop 持续使用通用投影（工具事实保留）；
+# 升级后生成的 Loop 使用新指纹进行原生回放。
 _RESPONSES_PROFILE_FIELDS = ("responses_profile",)
 
 
