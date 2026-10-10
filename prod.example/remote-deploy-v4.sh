@@ -228,7 +228,13 @@ if [ "$Action" = rollback ]; then
     Changed=1
     set_link current "$Target"
     Activated=1
-    sync_shared_skills "$Target"
+    SkillLayout="$(compose "$Target" config --format json | "$Python" "$StateTool" skill-layout "$Root")" \
+        || fail "rollback Skill mount layout could not be resolved"
+    if [ "$SkillLayout" = shared ]; then
+        sync_shared_skills "$Target"
+    else
+        step "rollback target does not use shared skills; shared catalog retained"
+    fi
     up "$Target" || fail "rollback startup failed"
     health "$Target" || fail "rollback health failed"
     set_link previous "$Prev"

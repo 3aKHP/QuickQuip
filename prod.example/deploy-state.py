@@ -219,6 +219,23 @@ def capture_baseline(root: Path, baseline: Path) -> None:
     )
 
 
+def skill_catalog_layout(root: Path) -> None:
+    """Classify resolved Compose bind sources without emitting configuration."""
+    config = json.load(sys.stdin)
+    shared = (root / "skills").resolve()
+    for spec in config["services"].values():
+        for volume in spec.get("volumes", []):
+            if volume.get("type") != "bind":
+                continue
+            source = Path(volume["source"])
+            if not source.is_absolute():
+                raise ValueError("resolved Compose bind source must be absolute")
+            if source.resolve().is_relative_to(shared):
+                print("shared")
+                return
+    print("local")
+
+
 def main() -> None:
     action, *args = sys.argv[1:]
     paths = [Path(arg).absolute() for arg in args]
@@ -229,6 +246,7 @@ def main() -> None:
         "apply": apply_shared,
         "restore": restore_shared,
         "baseline": capture_baseline,
+        "skill-layout": skill_catalog_layout,
     }
     actions[action](*paths)
 

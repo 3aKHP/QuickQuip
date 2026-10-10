@@ -35,7 +35,7 @@ bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
-部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退；回滚会把目标 release 中新增的 Skill 同样非破坏性合并进共享目录）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
+部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退；目标 compose 使用共享目录时，回滚把目标 release 中新增的 Skill 非破坏性合并进共享目录）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
 
 运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
 

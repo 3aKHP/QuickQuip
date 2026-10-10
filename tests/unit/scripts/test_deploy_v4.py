@@ -61,8 +61,21 @@ if args[0] == "compose":
                 for name in ("llbot", "quickquip", "web-admin")
             }}))
         elif "--format" in args:
+            if os.environ.get("FAIL_CONFIG_JSON") == "1":
+                print("invalid-json")
+                sys.exit(0)
+            source = os.environ.get("TEST_SKILL_BIND")
+            volumes = []
+            if source:
+                path = (root / "skills" if source.startswith("shared")
+                        else root / "releases" / release / "skills")
+                if source == "shared-child":
+                    path /= "demo"
+                volumes = [{"type": "bind", "source": str(path), "target": "/app/skills"}]
             print(json.dumps(
-                {"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}
+                {"services": {"quickquip": {
+                    "environment": {"ONEBOT_ACCESS_TOKEN": "new"}, "volumes": volumes,
+                }}}
             ))
     elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
         sys.exit(1)
@@ -446,7 +459,8 @@ def test_seed_creates_empty_directory_without_sources(deployment):
     assert "created empty shared skills/ directory" in result.stdout
 
 
-def test_rollback_keeps_shared_skills_and_merges_target(deployment):
+@pytest.mark.parametrize("bind", ["shared", "shared-child"])
+def test_rollback_keeps_shared_skills_and_merges_target(deployment, bind):
     root, _, _ = deployment
     marker = root / "skills/marker.txt"
     marker.parent.mkdir()
@@ -456,8 +470,59 @@ def test_rollback_keeps_shared_skills_and_merges_target(deployment):
     (target / "prod/docker-compose.yml").write_text("services: {}\n")
     _write_skill(target / "skills/rollback-skill/SKILL.md", "rollback")
     (root / "previous").symlink_to(f"releases/{NEW}")
-    result = run_deploy(deployment, action="rollback")
+    result = run_deploy(deployment, action="rollback", TEST_SKILL_BIND=bind)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / "current").readlink() == Path("releases") / NEW
     assert marker.read_text() == "web-installed"
     assert (root / "skills/rollback-skill/SKILL.md").read_text() == "rollback"
+
+
+@pytest.mark.parametrize("bind", ["local", "shared"])
+def test_rollback_requires_catalog_merge_only_for_shared_mount(deployment, bind):
+    root, _, env = deployment
+    _write_skill(root / "skills/marker.txt", "web-installed")
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    _write_skill(target / "skills/rollback-skill/SKILL.md", "rollback")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    _write_fake_sudo(bin_dir, available=False)
+    cp = bin_dir / "cp"
+    cp.write_text('#!/bin/bash\ntouch "$TEST_ROOT/merge-attempt"\nexit 1\n')
+    cp.chmod(0o700)
+
+    result = run_deploy(deployment, action="rollback", TEST_SKILL_BIND=bind)
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    target_started = any(
+        "up" in call and str(target / "prod/docker-compose.yml") in call for call in calls
+    )
+    assert (root / "skills/marker.txt").read_text() == "web-installed"
+    assert (target / "skills/rollback-skill/SKILL.md").read_text() == "rollback"
+    if bind == "local":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert target_started
+        assert not (root / "merge-attempt").exists()
+        assert (root / "current").readlink() == Path("releases") / NEW
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert not target_started
+        assert (root / "merge-attempt").exists()
+        assert (root / "current").readlink() == Path("releases") / OLD
+        assert "RECOVERY SUCCEEDED" in result.stdout
+
+
+def test_rollback_rejects_unknown_mount_layout(deployment):
+    root, _, _ = deployment
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback", FAIL_CONFIG_JSON="1")
+    assert result.returncode == 1
+    assert "layout could not be resolved" in result.stderr
+    assert (root / "current").readlink() == Path("releases") / OLD
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    assert not any(
+        "up" in call and str(target / "prod/docker-compose.yml") in call for call in calls
+    )
