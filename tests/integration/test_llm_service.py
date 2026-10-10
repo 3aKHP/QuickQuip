@@ -673,6 +673,33 @@ async def test_responses_tool_loop_budget_guard_aborts_continuation(
     assert "未确认送达" in result["reply"]
 
 
+async def test_responses_wire_effort_controls_continuation_budget(
+    wired_service, patch_provider_builder,
+):
+    """extra_body 下发 max 时，下一工具轮按真实生成档检查密文预算。"""
+    from copy import deepcopy
+
+    from tests.fixtures.provider_fakes import FakeOpenAIResponsesClient
+
+    provider = _as_responses_provider(wired_service)
+    provider.reasoning_effort = "low"
+    provider.extra_body = {"reasoning": {"effort": "max"}}
+    provider.request_input_token_budget = 6000
+    response = deepcopy(_RESPONSES_TOOL_ROUND_BODY)
+    response["output"][0]["encrypted_content"] = "X" * 1000
+    fake = FakeOpenAIResponsesClient(provider, [response, _RESPONSES_FINAL_BODY])
+    patch_provider_builder(lambda p: fake)
+
+    result = await wired_service.generate_reply(
+        group_id=1001, user_id=2002, sender_name="测试用户",
+        prompt="哈基镜是谁？", recent_messages=[],
+    )
+
+    assert len(fake.payloads) == 1
+    assert fake.payloads[0]["reasoning"]["effort"] == "max"
+    assert "未确认送达" in result["reply"]
+
+
 async def test_forward_message_content_rendered(wired_service, patch_provider_builder):
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)

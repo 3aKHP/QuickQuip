@@ -146,7 +146,7 @@ async def _fire_llm_task(bot, job: ScheduledMessage, group_id: str, job_id: str)
         source="scheduler.scheduled_message",
     ):
         resp = await bot.send_group_msg(group_id=int(group_id), message=message)
-    sent_msg_id = str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+    sent_msg_id = str(resp.get("message_id", "") or "").strip() if isinstance(resp, dict) else ""
     if sent_msg_id and mention_resolver is not None:
         commit_mentions(
             str(group_id), message, cooldown_seconds=mention_cooldown_seconds(svc)

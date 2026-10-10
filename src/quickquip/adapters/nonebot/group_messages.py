@@ -368,7 +368,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
                         MessageSegment=MessageSegment,
                     )
                     sent_msg_id = (
-                        str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                        str(resp.get("message_id", "") or "").strip()
+                        if isinstance(resp, dict) else ""
                     )
                     # 冷却记账以送达确认（可信 message_id）为准：发送失败不消耗名额
                     if sent_msg_id and mention_resolver is not None:
@@ -478,7 +479,8 @@ def register_message_matcher(on_message, Message, MessageSegment):
                         MessageSegment=MessageSegment,
                     )
                     sent_msg_id = (
-                        str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                        str(resp.get("message_id", "") or "").strip()
+                        if isinstance(resp, dict) else ""
                     )
                     # 冷却记账以送达确认（可信 message_id）为准：发送失败不消耗名额
                     if sent_msg_id and mention_resolver is not None:

@@ -240,6 +240,9 @@ async def run_tool_call_loop(
             # 字节超限自动省略）；跨轮原生回放由 history_projection 经 owner
             # 校验后写入 native_content（PR-B）。
             assistant_message.native_content = response.native_blocks
+            source_effort = response.owner.extra.get("effort") if response.owner else None
+            if isinstance(source_effort, str):
+                assistant_message.native_effort = source_effort
 
         logger.info(
             "LLM tool calls requested: provider=%s model=%s names=%s",

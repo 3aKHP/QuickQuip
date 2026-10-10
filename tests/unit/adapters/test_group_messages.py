@@ -578,6 +578,26 @@ async def test_at_mention_resolves_registered_name(harness_factory, monkeypatch)
     assert ("at", {"qq": "2002"}) in kinds
 
 
+@pytest.mark.parametrize("message_id", [None, 0, " "])
+async def test_missing_send_receipt_does_not_consume_mention_cooldown(
+    harness_factory, monkeypatch, message_id,
+):
+    h = harness_factory(_llm_settings(allow_prefix=True))
+    _enable_at_mention(h, monkeypatch)
+
+    async def send(message):
+        h.recorder.sent.append(message)
+        return {"message_id": message_id}
+
+    monkeypatch.setattr(h.recorder, "send", send)
+    for event_id in ("12345", "12346"):
+        await h.handle(DummyGroupEvent(
+            DummyMessage([text_seg("/ai 评价一下")]), message_id=event_id,
+        ))
+    for sent in h.recorder.sent[-2:]:
+        assert any(seg.type == "at" and seg.data["qq"] == "2002" for seg in sent)
+
+
 async def test_at_mention_switch_off_keeps_name_as_text(harness_factory, monkeypatch):
     """llm_at_mention 关闭：「@名字」保留为纯文本。"""
     h = harness_factory(_llm_settings(allow_prefix=True))

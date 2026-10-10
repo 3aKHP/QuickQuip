@@ -131,7 +131,8 @@ def register_boredom_scan_job(sched=None) -> int | None:
                                 message=outbound,
                             )
                             sent_msg_id = (
-                                str(resp.get("message_id", "")) if isinstance(resp, dict) else ""
+                                str(resp.get("message_id", "") or "").strip()
+                                if isinstance(resp, dict) else ""
                             )
                             if sent_msg_id and mention_resolver is not None:
                                 commit_mentions(
