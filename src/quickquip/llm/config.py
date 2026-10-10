@@ -111,6 +111,8 @@ class RuntimeConfig:
     reply_chunk_max_chars: int = 1200
     reply_send_interval_ms: int = 800
     reply_max_chunks_per_loop: int = 64
+    # 出站「@名字」艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却）。
+    mention_cooldown_seconds: float = 600.0
 
 
 @dataclass(slots=True)
@@ -239,9 +241,11 @@ class ProviderConfig:
     # RESPONSES_PROFILE_IDS / DEFAULT_RESPONSES_PROFILE_ID（provider/
     # openai_responses/profiles.py 反向引用）。
     responses_profile: str = DEFAULT_RESPONSES_PROFILE_ID
-    # openai_responses 专属：思考档位，词表单源 REASONING_EFFORT_CHOICES。
-    # 独立于 thinking_budget 数字口径——后者仅 claude/gemini 生效，档位到
-    # 各 profile 实际 effort 的映射集中 provider/openai_responses/request.py。
+    # 思考档位（全协议生效），词表单源 REASONING_EFFORT_CHOICES；留空 =
+    # 不发思考参数 = 模型默认档。到各协议 wire 参数的翻译与钳制集中在
+    # thinking.resolve_thinking（openai_responses 走其 profile 词表层）。
+    # 独立于已废弃的 thinking_budget 数字口径（LLMRequest 兼容字段，
+    # 主链路从未接线）。
     reasoning_effort: str = ""
     # 上游 429/5xx 自动重试策略；load_llm_config 用 [runtime] 段统一盖章
     retry_max_attempts: int = DEFAULT_RETRY_MAX_ATTEMPTS
@@ -1053,6 +1057,10 @@ def load_llm_config(path: str | Path) -> LLMConfig:
             reply_max_chunks_per_loop=min(
                 256, max(1, int(runtime_raw.get("reply_max_chunks_per_loop", 64)))
             ),
+            mention_cooldown_seconds=min(
+                86_400.0,
+                max(0.0, float(runtime_raw.get("mention_cooldown_seconds", 600.0))),
+            ),
             recent_context_token_budget=recent_context_token_budget,
             recent_context_floor_seconds=recent_context_floor_seconds,
         ),
@@ -1291,11 +1299,12 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
                     f"非法 responses_profile {provider.responses_profile!r}"
                     f"（可用：{' / '.join(sorted(RESPONSES_PROFILE_IDS))}）"
                 )
-            if provider.reasoning_effort not in ("", *REASONING_EFFORT_CHOICES):
-                provider_errors.append(
-                    f"非法 reasoning_effort {provider.reasoning_effort!r}"
-                    f"（可用：{'/'.join(REASONING_EFFORT_CHOICES)}，留空不发送）"
-                )
+        # 思考档位全协议校验（wire 翻译/钳制见 thinking.resolve_thinking）。
+        if provider.reasoning_effort not in ("", *REASONING_EFFORT_CHOICES):
+            provider_errors.append(
+                f"非法 reasoning_effort {provider.reasoning_effort!r}"
+                f"（可用：{'/'.join(REASONING_EFFORT_CHOICES)}，留空不发送）"
+            )
         if provider.auth_method not in {"api_key", "bearer"}:
             provider_errors.append(
                 f"未知 auth_method {provider.auth_method!r}（仅支持 api_key / bearer）"

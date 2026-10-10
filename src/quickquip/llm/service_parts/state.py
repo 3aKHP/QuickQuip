@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from quickquip.common.record_content import display
 
-from quickquip.llm.config import ProviderConfig
+from quickquip.llm.config import REASONING_EFFORT_CHOICES, ProviderConfig
 from quickquip.llm.epoch import EpochKey
 from quickquip.llm.service_parts.constants import (
     MAX_MEMORY_RETRIEVAL_ITEMS,
@@ -164,6 +164,18 @@ class StateMixin:
                     agent_delivery_intermediate_enabled=value,
                     agent_delivery_final_enabled=value,
                 )
+
+    def set_chat_reasoning_effort(
+        self, chat_id: int | str, effort: str | None, chat_type: str = "group"
+    ) -> None:
+        """写思考档位覆盖（六档词表；None = 清除覆盖，跟随 provider 配置档）。"""
+        if effort is not None:
+            effort = effort.strip().lower()
+            if effort not in REASONING_EFFORT_CHOICES:
+                raise ValueError(
+                    f"未知思考档位 {effort!r}（可用：{'/'.join(REASONING_EFFORT_CHOICES)}）"
+                )
+        self._update_chat_settings(chat_id, chat_type, reasoning_effort=effort)
 
     def set_chat_history_limit(
         self, chat_id: int | str, limit: int, chat_type: str = "group"

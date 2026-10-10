@@ -65,6 +65,16 @@ def make_skill(tmp_path):
     return catalog_dir, _writer
 
 
+@pytest.fixture
+def preset_pair(tmp_path):
+    """预置漂移检测的双侧目录：返回 (skills_dir, example_dir)。"""
+    skills_dir = tmp_path / "skills"
+    example_dir = tmp_path / "skills.example"
+    skills_dir.mkdir()
+    example_dir.mkdir()
+    return skills_dir, example_dir
+
+
 def load_single(catalog_dir: Path, name: str) -> LoadedSkill:
     skills = {skill.name: skill for skill in scan_skills(catalog_dir)}
     return skills[name]

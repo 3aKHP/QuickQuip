@@ -394,7 +394,7 @@ class TurnRecorder:
 def _owner_payload(owner) -> dict[str, Any] | None:
     if owner is None:
         return None
-    return {
+    payload = {
         "provider_id": owner.provider_id,
         "protocol": owner.protocol,
         "wire_model": owner.wire_model,
@@ -402,3 +402,11 @@ def _owner_payload(owner) -> dict[str, Any] | None:
         "endpoint_fingerprint": owner.endpoint_fingerprint,
         "profile_fingerprint": owner.profile_fingerprint,
     }
+    # 密文来源档（生成时的 wire 思考档位）：非身份字段，仅随记录落库供
+    # 回放投影的 per-effort 计量；owner_matches 不感知。
+    extra = getattr(owner, "extra", None)
+    if isinstance(extra, dict):
+        effort = extra.get("effort")
+        if isinstance(effort, str) and effort:
+            payload["effort"] = effort
+    return payload

@@ -676,3 +676,67 @@ def test_empty_style_profile_is_valid_placeholder(tmp_path: Path):
     assert loaded.providers["p1"].style_overrides == ""
     assert loaded.providers["p2"].style_overrides.strip().startswith("- 保持群友语感。")
     assert loaded.load_error is None
+
+
+def test_reasoning_effort_validated_across_protocols(tmp_path: Path):
+    """reasoning_effort 词表校验覆盖全协议：非法值剪除该 provider 并记错误。"""
+    good = tmp_path / "good.toml"
+    good.write_text(
+        """
+[runtime]
+default_provider = "c1"
+
+[[personas]]
+id = "p"
+display_name = "人格"
+system_prompt = "hi"
+
+[[providers]]
+id = "c1"
+protocol = "claude"
+base_url = "https://example.test/v1"
+api_key_env = "K1"
+default_model = "claude-sonnet-4-6"
+models = ["claude-sonnet-4-6"]
+reasoning_effort = "high"
+
+[[providers]]
+id = "g1"
+protocol = "gemini"
+base_url = "https://example.test/v1beta"
+api_key_env = "K2"
+default_model = "gemini-3.7-flash"
+models = ["gemini-3.7-flash"]
+reasoning_effort = "low"
+""",
+        encoding="utf-8",
+    )
+    loaded = load_llm_config(good)
+    assert loaded.providers["c1"].reasoning_effort == "high"
+    assert loaded.providers["g1"].reasoning_effort == "low"
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text(
+        """
+[runtime]
+default_provider = "o1"
+
+[[personas]]
+id = "p"
+display_name = "人格"
+system_prompt = "hi"
+
+[[providers]]
+id = "o1"
+protocol = "openai"
+base_url = "https://example.test/v1"
+api_key_env = "K3"
+default_model = "gpt-5.5"
+models = ["gpt-5.5"]
+reasoning_effort = "extreme"
+""",
+        encoding="utf-8",
+    )
+    loaded_bad = load_llm_config(bad)
+    assert "o1" not in loaded_bad.providers
+    assert "o1" in (loaded_bad.load_error or "")

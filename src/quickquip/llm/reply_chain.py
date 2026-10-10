@@ -337,6 +337,7 @@ class TurnRequestAssembler:
             allow_tool_calls=bool(self.tool_specs),
             tool_choice="auto",
             builtin_search=self.builtin_search_active,
+            reasoning_effort=self.settings.reasoning_effort or None,
         )
 
 

@@ -11,7 +11,7 @@
           保存后会提示具体生效方式
         </span>
         <UiButton icon="RefreshCw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
-        <UiButton variant="primary" :loading="saving" icon="Save" @click="save">保存</UiButton>
+        <UiButton variant="primary" :loading="saving" :disabled="!loaded || !!effortSaving" icon="Save" @click="save">保存</UiButton>
       </template>
     </UiPageHeader>
 
@@ -54,6 +54,25 @@
               <span v-else class="state-pill state-pill--ok">已同步</span>
             </div>
           </div>
+          <div v-if="currentKey === 'llm'" class="effort-panel">
+            <span class="effort-panel__title">
+              思考档位<UiInfoTip text="按 provider 结构化编辑 llm.toml 的 reasoning_effort：六档 low/medium/high/xhigh/max/ultra，「默认」即删除该行（不发送思考参数）。修改只动目标 provider 段的档位行，注释与其余内容原样保留；含多行字符串的段落请用下方文本编辑。保存后需 /llm reload 或重启生效。" />
+            </span>
+            <p v-if="effortError" class="error">{{ effortError }}</p>
+            <p v-else-if="!effortProviders.length" class="effort-empty">未解析到 provider</p>
+            <div v-for="p in effortProviders" :key="p.id" class="effort-row">
+              <span class="mono effort-row__id">{{ p.id }}</span>
+              <span class="effort-row__model">{{ p.default_model }}</span>
+              <select
+                :value="p.reasoning_effort"
+                :disabled="effortSaving === p.id"
+                @change="onEffortChange(p, $event)"
+              >
+                <option value="">默认</option>
+                <option v-for="e in EFFORT_CHOICES" :key="e" :value="e">{{ e }}</option>
+              </select>
+            </div>
+          </div>
           <textarea v-model="content" class="toml-editor" spellcheck="false" autocomplete="off" />
         </template>
 
@@ -93,6 +112,8 @@ import UiLoading from '../components/ui/UiLoading.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listConfigs, fetchConfig, saveConfig } from '../api/config'
 import type { ConfigListItem } from '../api/config'
+import { fetchLlmEffort, saveLlmEffort } from '../api/llmEffort'
+import type { LlmEffortProvider } from '../api/llmEffort'
 import { toast } from '../toast'
 
 const configs = ref<ConfigListItem[]>([])
@@ -104,6 +125,13 @@ const saveError = ref<string | null>(null)
 const saving = ref(false)
 const content = ref('')
 const originalContent = ref('')
+const effortProviders = ref<LlmEffortProvider[]>([])
+const effortError = ref<string | null>(null)
+const effortSaving = ref('')
+let configRequest = 0
+
+/** 六档词表：与后端 REASONING_EFFORT_CHOICES（llm/config.py）保持一致 */
+const EFFORT_CHOICES = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']
 
 const current = computed(() => configs.value.find(c => c.key === currentKey.value) || null)
 const currentFilename = computed(() => current.value?.filename || '')
@@ -131,31 +159,113 @@ async function switchTo(key: string) {
 }
 
 async function load(key: string) {
+  const request = ++configRequest
   currentKey.value = key
+  effortProviders.value = []
+  effortError.value = null
+  effortSaving.value = ''
+  saving.value = false
   loaded.value = false
   loadError.value = null
   saveError.value = null
   try {
     const data = await fetchConfig(key)
+    if (request !== configRequest) return
     content.value = data.content
     originalContent.value = data.content
     const entry = configs.value.find(c => c.key === key)
     if (entry) entry.exists = !data.missing
     loaded.value = true
+    if (key === 'llm') {
+      await loadEffort(request)
+    } else {
+      effortProviders.value = []
+      effortError.value = null
+    }
   } catch (e: unknown) {
+    if (request !== configRequest) return
     loadError.value = (e as Error).message
   }
 }
 
+async function loadEffort(request = configRequest) {
+  if (currentKey.value !== 'llm' || request !== configRequest) return
+  effortError.value = null
+  try {
+    const data = await fetchLlmEffort()
+    if (currentKey.value !== 'llm' || request !== configRequest) return
+    effortProviders.value = data.providers || []
+  } catch (e: unknown) {
+    if (currentKey.value !== 'llm' || request !== configRequest) return
+    effortProviders.value = []
+    effortError.value = (e as Error).message
+  }
+}
+
+async function onEffortChange(p: LlmEffortProvider, event: Event) {
+  if (currentKey.value !== 'llm' || saving.value || effortSaving.value) return
+  const request = configRequest
+  const originalText = content.value
+  const isCurrent = () => currentKey.value === 'llm' && request === configRequest
+  const effort = (event.target as HTMLSelectElement).value
+  if (dirty.value && !confirm('编辑器中有未保存的修改，调整档位会刷新文件内容并丢弃这些修改。是否继续？')) {
+    await loadEffort()
+    return
+  }
+  effortSaving.value = p.id
+  effortError.value = null
+  let saved = false
+  try {
+    await saveLlmEffort(p.id, effort)
+    saved = true
+    toast('保存成功，需 /llm reload 或重启后生效')
+  } catch (e: unknown) {
+    if (!isCurrent()) return
+    effortError.value = (e as Error).message
+    toast('保存失败', 'error')
+    await loadEffort()
+  }
+  if (!saved || !isCurrent()) {
+    if (isCurrent()) effortSaving.value = ''
+    return
+  }
+  // 保存已落盘：刷新面板与 textarea 保持同步；刷新失败只提示不同步，不掩盖保存结果
+  try {
+    await loadEffort(request)
+    if (!isCurrent()) return
+    const data = await fetchConfig('llm')
+    if (!isCurrent()) return
+    if (content.value !== originalText) {
+      toast('已保存档位，保留编辑器中新输入的内容；请核对后再保存文本')
+      return
+    }
+    content.value = data.content
+    originalContent.value = data.content
+  } catch {
+    if (!isCurrent()) return
+    toast('已保存，但文件内容刷新失败，请点「重置」重新加载', 'error')
+  } finally {
+    if (isCurrent()) effortSaving.value = ''
+  }
+}
+
 async function save() {
-  if (!currentKey.value) return
+  if (!currentKey.value || !loaded.value || saving.value || effortSaving.value) return
+  const request = configRequest
+  const key = currentKey.value
+  const savedContent = content.value
   saving.value = true
   saveError.value = null
   try {
-    const res = await saveConfig(currentKey.value, content.value)
-    originalContent.value = content.value
-    const entry = configs.value.find(c => c.key === currentKey.value)
+    const res = await saveConfig(key, savedContent)
+    if (request !== configRequest) return
+    originalContent.value = savedContent
+    const entry = configs.value.find(c => c.key === key)
     if (entry) entry.exists = true
+    if (currentKey.value === 'llm') {
+      // 文本编辑可能改了档位行：刷新结构化面板（loadEffort 内部自捕获，不影响保存结果）
+      await loadEffort()
+    }
     const effect = res?.effect
     if (effect === 'auto_reloading') {
       toast('已保存，正在自动重载（诊断页「最近动作」查看结果）')
@@ -167,10 +277,11 @@ async function save() {
       toast('已保存。如未自动生效，请到诊断页重载或重启 bot')
     }
   } catch (e: unknown) {
+    if (request !== configRequest) return
     saveError.value = (e as Error).message
     toast('保存失败', 'error')
   } finally {
-    saving.value = false
+    if (request === configRequest) saving.value = false
   }
 }
 </script>
@@ -372,6 +483,56 @@ async function save() {
 
 .toml-editor:focus {
   box-shadow: inset 0 0 0 1px var(--qq-primary);
+}
+
+.effort-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-xs);
+  padding: var(--qq-gap-sm);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-surface-strong);
+}
+
+.effort-panel__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+  font-weight: 700;
+}
+
+.effort-row {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-sm);
+}
+
+.effort-row__id {
+  min-width: 140px;
+  color: var(--qq-text);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-sm);
+  font-weight: 600;
+}
+
+.effort-row__model {
+  flex: 1;
+  min-width: 0;
+  color: var(--qq-text-muted);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.effort-empty {
+  margin: 0;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
 }
 
 .empty-editor {

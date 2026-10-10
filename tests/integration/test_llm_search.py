@@ -50,6 +50,27 @@ async def test_search_web_tool_loop(llm_service, monkeypatch, patch_provider_bui
     assert len(stub.requests) == 5
 
 
+async def test_tool_loop_keeps_reasoning_effort(llm_service, monkeypatch, patch_provider_builder):
+    """工具循环逐轮重建的 LLMRequest 保留 scope 覆盖的思考档位。"""
+    stub = StubSearchOnlyProviderClient()
+    patch_provider_builder(lambda provider: stub)
+    monkeypatch.setattr(llm_tools_module, "SearXNGSearchClient", _fake_searxng_client)
+    monkeypatch.setenv("SEARXNG_BASE_URL", "http://127.0.0.1:8888")
+    llm_service.set_chat_reasoning_effort(1001, "max")
+
+    result = await llm_service.generate_reply(
+        group_id=1001,
+        user_id=2002,
+        sender_name="测试用户",
+        prompt="QuickQuip 是什么？",
+        recent_messages=[],
+    )
+
+    assert result["reply"] == "QuickQuip 是一个 QQ 群聊机器人项目。"
+    assert len(stub.requests) == 5
+    assert all(request.reasoning_effort == "max" for request in stub.requests)
+
+
 # ---------------------------------------------------------------------------
 # gemini builtin_search（google_search grounding）端到端
 # ---------------------------------------------------------------------------

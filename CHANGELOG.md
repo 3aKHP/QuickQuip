@@ -6,6 +6,60 @@
 
 （暂无）
 
+## [1.16.1] - 2026-10-10
+
+本版补全 **Skill 管理与部署持久化、群聊引用回复与真实艾特、四协议思考档位控制**，并改善 Responses 历史回放的连续性与预算估算。
+
+**升级说明**：
+
+- 使用 release 布局部署时，请同步 `prod.example/` 中的部署脚本和 compose 模板。Skill 目录位于部署根的共享 `skills/`，bot 只读挂载、Web Admin 读写挂载；首次部署自动从旧 release 的目录供给已有 Skill。后续部署保留已有文件，已安装 Skill 的更新与删除通过 Web Admin 或手动维护。回滚保留共享目录；回滚到使用 release 内目录的旧模板时，该版本使用其原有 Skill 副本。
+- 群聊 LLM 的引用回复和名字艾特默认开启；可分别用 `/disable llm_quote_reply`、`/disable llm_at_mention` 关闭。同一成员的重复艾特默认冷却 600 秒，可通过 `[runtime] mention_cooldown_seconds` 调整。
+- Responses 原生回放的 owner 指纹移除思考档位维度。升级前按旧规则写入的 Loop 使用通用历史投影；升级后生成的 Loop 按新指纹校验，切档时保持原生回放。
+- Bash 部署驱动使用 `--dry-run`、`--status` 等 GNU 长选项；调用方需替换旧的 `-DryRun`、`-Status` 等单破折号别名。PowerShell 驱动参数形式保持不变。
+
+### 新增
+
+- **Skill 管理页**：Web Admin 提供已安装 Skill 的列表、详情、文件在线编辑与删除，支持从本地 ZIP、文件夹或 GitHub 仓库链接安装。导入前展示检查报告和脚本许可提示，写操作记录审计日志。
+- **预置 Skill 对齐**：自动检测已安装副本与当前预置版本的差异，在日志和 `/skill list` 中提示；新增 `scripts/sync_preset_skills.py` 报告与同步工具，Web Admin 支持勾选同步，覆盖前自动备份。部署驱动自动执行漂移报告。
+- **引用回复**：群聊 LLM 回复引用触发它的消息，覆盖主动召唤与消息触发的被动唤醒；分段发送时首段携带引用，协议端显式拒绝引用时回退发送正文。
+- **名字艾特**：AI 回复中的 `@名字` 可按群内身份、别名和群名片解析为真实艾特；无法唯一识别时保留文字，重复通知受冷却保护。
+- **运行时思考档位**：新增 `/llm effort <档位>`，支持 `low / medium / high / xhigh / max / ultra` 六档，按群或私聊持久化覆盖；`status` 查看当前档位及来源，`default` 或 `clear` 恢复跟随 provider 配置。群内变更要求管理权限，查询开放。
+- **思考档位 Web 配置面**：“群 LLM”页提供会话覆盖，“配置”页提供 provider 默认档的结构化编辑。provider 配置保存后通过 `/llm reload` 或重启生效，会话覆盖保留。
+
+### 变更
+
+- **四协议思考控制**：`reasoning_effort` 统一适配 OpenAI Chat、Claude、Gemini 和 OpenAI Responses，按协议与模型转换为思考参数并调整档位；兼容端点也按映射下发。上游不支持会话覆盖档时，用 `/llm effort default` 恢复跟随 provider；provider 配置档也不受支持时，清除其 `reasoning_effort` 并执行 `/llm reload`。Claude 思考开启时省略非默认温度，旧式预算无法满足最小要求时省略思考参数。
+- **Responses 切档回放**：思考档位独立于 owner 身份，混档历史保留原生密文，每条记录按生成档位分别估算预算。
+- **Skill 共享目录**：Web 安装成果对 bot 可见，跨容器重建和后续部署保留；部署时将新增 Skill 非破坏性合并进共享目录。
+- **Skill 页面体验**：安装作为主要操作，删除位于详情区；预置同步面板按待处理状态显示，提示、表格选中态与全站组件规范对齐。
+
+### 移除
+
+- Bash 部署驱动的 PowerShell 风格单破折号参数别名，统一使用 GNU 长选项。
+
+### 修复
+
+- 修复 Skill 管理面写入容器临时目录造成 bot 不可见、重建后安装成果丢失的问题，并补齐共享目录合并的权限处理与迁移顺序。
+- 修复 Responses reasoning 密文统一预留导致历史预算过早耗尽的问题，改为按来源思考档位和密文字节下限估算。
+- 修复 Codex 形态中转的 `ultra` 档位被网关拒绝的问题，该 profile 自动映射为 `max`。
+- 修复工具循环后续轮次的思考档位透传与预算回落口径，保证会话覆盖贯穿模型调用。
+- 修复 Web Admin 思考档位保存、刷新失败的反馈与配置面板同步。
+- 修复预置 Skill 同步与并发安装交错时误删完整目录的问题，同名写操作共享锁，失败仅清理自身暂存目录。
+- 修复 Skill 与配置编辑器的迟到响应串写，以及保存期间新输入被误标为已保存的问题；Skill 详情刷新保留当前选择与加载状态。
+- 修复本地文件夹安装入口未启用目录选择，以及 Windows、Docker 发行物缺少预置同步工具的问题；同步工具支持源码和懒人包的目录布局。
+- 修复文件夹导入请求误用 ZIP 编码预算的问题，合法的 32MiB 多文件清单可完整摄取，解码体积超限仍被拒绝。
+- 修复回滚历史版本时被未使用的共享 Skill 目录权限阻断的问题，按目标 compose 挂载决定是否同步。
+- 修复空发送回执被计入艾特冷却的问题，未确认送达时保留后续通知机会。
+- 修复 Responses 当前工具循环丢失实际生成档位的问题，provider 额外参数覆盖档位时，续接预算按实际下发档位检查。
+
+### 安全
+
+- Skill 资源在线保存使用独占创建的随机临时文件，防止目录中已有临时文件符号链接导致写入逃逸出 Skill 目录。
+
+### 预置 Skill 变动
+
+本版增强预置 Skill 的漂移检测、同步与管理能力，随附的 self-docs 文档副本已更新。源码或 Windows 部署者可先运行 `python scripts/sync_preset_skills.py` 查看状态，再运行 `python scripts/sync_preset_skills.py --apply` 对齐；Windows 懒人包使用内置的 `python\python.exe`。也可在 Web Admin 的 Skill 页确认并同步。Docker 部署通过 Web Admin 维护容器挂载的共享目录。同步覆盖前自动备份，同步后的内容在后续请求中生效。
+
 ## [1.16.0] - 2026-09-26
 
 本版两大主题：**Responses 协议接入与 Skill 系统落地**，辅以模型生图直送群聊、全局管理员身份、会话纪元可视化看板，以及长生成期间的一组稳定性修复（事件循环卡死、并发轮次记账丢失、中转流容错）。
@@ -1004,7 +1058,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.1...HEAD
+[1.16.1]: https://github.com/3aKHP/QuickQuip/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/3aKHP/QuickQuip/compare/v1.15.4...v1.16.0
 [1.15.4]: https://github.com/3aKHP/QuickQuip/compare/v1.15.3...v1.15.4
 [1.15.3]: https://github.com/3aKHP/QuickQuip/compare/v1.15.2...v1.15.3

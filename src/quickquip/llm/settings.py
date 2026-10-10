@@ -26,6 +26,10 @@ class ResolvedGroupSettings:
     history_limit: int | None = None
     agent_delivery_intermediate_enabled: bool = False
     agent_delivery_final_enabled: bool = False
+    # 生效请求档（scope 覆盖 ?? provider 配置档；"" = 模型默认档不发字段）
+    reasoning_effort: str = ""
+    # 原始 scope 覆盖（三态；None = 跟随 provider 配置档），供展示面区分
+    reasoning_effort_override: str | None = None
 
 
 def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupSettings:
@@ -67,4 +71,8 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
         ),
         allow_at=overrides.allow_at if overrides.allow_at is not None else config.triggers.allow_at,
         history_limit=overrides.history_limit,
+        reasoning_effort=(
+            overrides.reasoning_effort or (provider.reasoning_effort if provider else "")
+        ),
+        reasoning_effort_override=overrides.reasoning_effort,
     )

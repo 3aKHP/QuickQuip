@@ -144,6 +144,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `reply_chunk_max_chars` | 单段源文本上限，独立于 OneBot 协议报文长度 | `1200` |
 | `reply_send_interval_ms` | 同会话相邻发送开始时间的最小间隔（0-10000） | `800` |
 | `reply_max_chunks_per_loop` | 单次对话交付条目上限（含文字、媒体与通知，1-256） | `64` |
+| `mention_cooldown_seconds` | 出站「@名字」艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却，0-86400） | `600` |
 
 以上 6 个 `epoch_*` 键均可在 `[[providers]]` 条目里同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `[runtime]` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，非法时回退并记 warning。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
 
@@ -242,11 +243,36 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
 | `responses_profile` | `openai_responses` 协议专属：后端能力位。`openai-public`（官方 `/v1/responses`）或 `codex-http-relay`（Codex 形态中转，不发 `service_tier`、容忍 `codex.*` 结构事件、终态缺省字段时以流式完整 item 为回放基准） | `openai-public` |
-| `reasoning_effort` | `openai_responses` 协议专属：思考档位 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`（超出后端词表自动降档到其最高支持档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 的 gpt-6/gpt-5.6 系六档全支持恒等；留空不发送 `reasoning` 字段）。独立于 `thinking_budget` 数字口径（后者仅 claude/gemini 生效） | `""` |
+| `reasoning_effort` | 思考档位（全协议生效）：`low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空不发送思考参数（模型默认档）。到 wire 参数的翻译按协议与后端能力自动完成，超档自动钳制（详见下文「思考档位跨协议映射」）。群内可用 `/llm effort <档>` 按群覆盖本配置（`/llm effort default` 恢复跟随；`/llm status` 与 `/llm effort status` 展示配置档 / 覆盖档 / 生效档三层口径）；Web Admin「配置」页提供本键的结构化编辑面板，「群 LLM」页提供按群三态覆盖 | `""` |
 
 > **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
 
 > **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
+
+#### 思考档位跨协议映射
+
+`reasoning_effort` 的内部六档到各协议 wire 参数的映射与钳制如下（`ultra` 为 Codex 订阅产品层档位，公开 API 词表止于 `max`，一切渠道自动降 `max`）：
+
+| 内部档 | openai chat（顶层 `reasoning_effort`） | claude 4.7+（adaptive `output_config.effort`） | claude 4.6（Opus/Sonnet） | claude ≤4.5（旧式 `budget_tokens`） | gemini 3.x（`thinkingLevel`） | gemini 2.5（`thinkingBudget`） |
+|---|---|---|---|---|---|---|
+| `low` | low | low | low | 1024 | LOW | 1000 |
+| `medium` | medium | medium | medium | 2000 | MEDIUM | 2000 |
+| `high` | high | high | high | 8000 | HIGH | 8000 |
+| `xhigh` | xhigh | xhigh | high（钳制） | 16000 | HIGH | 16000 |
+| `max` | max | max | max | 32000 | HIGH | 32000 |
+| `ultra` | max | max | max | 32000 | HIGH | 32000 |
+
+openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档系（`medium`→`high`、`xhigh`→`high`、`max`/`ultra`→`max`，DeepSeek 附带 `thinking.type=enabled` 开关）；MiniMax 五档全集；xAI 止于 `xhigh`；其余后端透传。claude 旧式 budget 固定值表须满足 budget ≥1024 且小于 `max_output_tokens`；`max_output_tokens` 过小使预算跌破 1024 时该请求不发送思考参数并记 warning，这是归一化层唯一的不发送场景，其余组合一律按表照发。claude 思考开启时上游只接受默认温度：非默认 `temperature` 不下发并记日志。gemini 2.5 Flash 系的 `thinkingBudget` 上限 24576（Pro 系 32768），超出自动钳制。`openai_responses` 协议按 profile 词表降档：`openai-public` 已核对范围到 `xhigh`，`codex-http-relay` 五档恒等（`ultra` 降 `max`，2026-10 实测中转网关校验层拒绝 `ultra`）。
+
+#### 各协议思考参数支持面
+
+归一化层只做映射、不做门禁：除 claude budget 的 1024 数学下限外，任何 协议×模型 组合都按上表形态照发思考参数。后端不支持某档位时上游返回 400 等 4xx 错误，即为不支持的信号。群内用 `/llm effort default` 清除会话覆盖并恢复跟随 provider 配置；provider 配置档也不受支持时，清除该 provider 的 `reasoning_effort` 并执行 `/llm reload`，让模型使用自身默认档。以下为 2026-10 调研的各后端支持面结论，供排障参考（不构成拦截依据）：
+
+- **claude 协议**：Anthropic 官方 extended thinking 自 3.7 代际引入，3.5 及更早代际无思考能力（照发旧式 budget 形态会被上游拒绝）；4.7+/5 系只接受 `adaptive + effort`，旧式 `type:"enabled"` 直接 400。
+- **claude 兼容端点**：Kimi（k3，思考词表 low/high/max）、MiMo（m2.5）、GLM Coding Plan 等均提供面向 Claude Code 类客户端的 Anthropic 形态端点，对 `adaptive + effort` 形态有实测旁证（端点把 Claude Code 的 effort 标签映射到自家思考档位）。照发意味着同时适用 Anthropic 温度契约：档位生效期间非默认 `temperature` 不下发，上游若实际忽略思考参数，温度配置也会随之不生效。个别端点对历史回放中的 thinking 内容块有特殊要求，QuickQuip 的历史回放分三层：无工具调用的对话轮与一切降级路径（owner 失配、敏感命中、预算精简、档案投影）为纯文本，不带 thinking；带工具调用的已关闭 Loop 在 owner 五元组匹配且结构有效时走原生回放，跨轮携带 thinking 内容（claude 签名块 / gemini thought parts / responses reasoning 密文）。对 claude 兼容端点的实际避坑机制是签名有效性闸门：无签名的 thinking 块自动降级为纯文本档案。注意 claude 协议暂无 openai_responses 式的「上游 400 时剥历史推理降级重试」兜底，返回签名块却拒绝历史 thinking 的端点存在暴露面。
+- **gemini 协议**：`thinkingLevel` 为 3.x 形态；2.x 只认 `thinkingBudget`，其中 2.0 系无思考参数支持（照发会被上游拒绝）；level 与 budget 不可同传。
+- **openai chat**：`reasoning_effort` 词表按家族见上表；词表外档位被上游忽略或拒绝，表现以后端为准。
+- **openai_responses**：profile 词表即支持面（降档口径见上节）。
 
 > **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 
@@ -254,7 +280,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
 
-> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：同一 provider / 模型 / 档位 / 端点的会话保留完整推理连续性，历史工具循环按原生形态回放；切换任一维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
+> **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：owner 身份维度为 provider / 协议 / 模型 / profile / 端点（不含档位），同一 owner 的会话保留完整推理连续性，历史工具循环按原生形态回放；切换档位时新旧密文混档共存、回放估算按各密文生成档位逐条计量，切换其余维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
 
 ### `[style_profiles]` — 共享风格段
 

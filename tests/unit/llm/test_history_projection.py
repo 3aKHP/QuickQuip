@@ -623,6 +623,66 @@ def test_wire_model_resolution_honors_extra_body_override():
     assert resolve_wire_model(config, "display-a") == "wire-b"
 
 
+def _responses_provider_config(**overrides):
+    from quickquip.llm.config import ProviderConfig
+
+    base = dict(
+        id="p1", protocol="openai_responses", base_url="https://e.test/v1",
+        api_key_env="K", default_model="gpt-x", models=["gpt-x"],
+        responses_profile="codex-http-relay",
+    )
+    return ProviderConfig(**{**base, **overrides})
+
+
+def test_responses_reasoning_effort_not_in_profile_fingerprint():
+    """reasoning_effort 不入 owner 指纹（切档不断回放）；responses_profile
+    仍在（profile 决定序列化形状与回放语义）。"""
+    from quickquip.llm.provider.owner import profile_fingerprint
+
+    low = _responses_provider_config(reasoning_effort="low")
+    high = _responses_provider_config(reasoning_effort="high")
+    assert profile_fingerprint(low) == profile_fingerprint(high)
+    public = _responses_provider_config(
+        reasoning_effort="low", responses_profile="openai-public"
+    )
+    assert profile_fingerprint(public) != profile_fingerprint(low)
+
+
+def test_build_response_owner_records_cipher_source_effort():
+    """密文来源档经 owner.extra 逐 Turn 记录（不参与匹配）；未配置档位
+    （payload 无 reasoning 字段）时 extra 为空。"""
+    from quickquip.llm.provider.owner import build_response_owner
+
+    config = _responses_provider_config(reasoning_effort="low")
+    owner = build_response_owner(config, "https://e.test/v1/responses", "gpt-x", effort="low")
+    assert owner.extra == {"effort": "low"}
+    no_effort = build_response_owner(config, "https://e.test/v1/responses", "gpt-x")
+    assert no_effort.extra == {}
+
+
+def test_responses_native_replay_marks_cipher_source_effort():
+    """投影侧把 owner 落库的密文来源档标注到原生消息（native_effort），
+    未标注的旧记录回落 None（计量端再回落当前请求档）。"""
+    owner_with_effort = {**_owner_dict(RESPONSES_OWNER), "effort": "low"}
+    loop = _loop(
+        "loop_1",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0", provider_call_id="call_resp_identity"),),
+                native_state=_native_state(RESPONSES_OWNER, RESPONSES_OUTPUT_ITEMS),
+                owner=owner_with_effort,
+            ),
+            _responses_turn("turn_1", items=RESPONSES_FINAL_ITEMS, owner=RESPONSES_OWNER),
+        ),
+    )
+    result = project_loops([loop], target=RESPONSES_OWNER, protocol="openai_responses")
+    assert result.decisions[0].path == PATH_NATIVE
+    assistants = [m for m in result.messages if m.role == "assistant"]
+    assert assistants[0].native_effort == "low"
+    assert assistants[1].native_effort is None
+
+
 # ── 守门细化（Deep-CR：Loop 内冲突与混合 Turn） ────────────────────
 
 

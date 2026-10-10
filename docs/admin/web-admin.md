@@ -135,19 +135,20 @@ WEB_ADMIN_COOKIE_SECURE=true
 
 ## 功能标签页
 
-Web Admin 当前提供 28 个标签页（前端使用 vue-router 4 hash 模式，深链接形如 `/ops/#/stats`）。前端使用响应式设计、亮色/暗色主题切换，以及一套以 QQ 蓝为主色、青/琥珀为辅助色的设计 token 系统：氛围层（侧栏/状态条/抽屉/Toast）采用半透玻璃浮于克制动效的粒子光场之上，内容区（卡片/表格/表单）保持实色以保证可读性；全局缓动为 linear/steps 机械风格，换页时顶部有一道光带横扫。
+Web Admin 当前提供 29 个标签页（前端使用 vue-router 4 hash 模式，深链接形如 `/ops/#/stats`）。前端使用响应式设计、亮色/暗色主题切换，以及一套以 QQ 蓝为主色、青/琥珀为辅助色的设计 token 系统：氛围层（侧栏/状态条/抽屉/Toast）采用半透玻璃浮于克制动效的粒子光场之上，内容区（卡片/表格/表单）保持实色以保证可读性；全局缓动为 linear/steps 机械风格，换页时顶部有一道光带横扫。
 
 - **概览** — 汇总运行状态、常用入口和关键指标
 - **统计** — 各群消息数、活跃用户排行、规则触发 Top
 - **规则** — 按群启用/禁用任意规则，toggle 实时生效
 - **群组** — 每日总结 / 每日播报 / 群周报 / 群月报群管理（按群开关、立即生成）
-- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段，以及 Agent Loop 分段交付两域开关（中间轮发送 / 最终轮分段，与 `/llm delivery` 同一配置面）；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
+- **群 LLM** — 按群覆盖 provider/model/persona/前缀/历史条数等 runtime 字段、思考档位（reasoning_effort，三态：六档或跟随 provider 配置档，与 `/llm effort` 同一配置面），以及 Agent Loop 分段交付两域开关（中间轮发送 / 最终轮分段，与 `/llm delivery` 同一配置面）；列表会同时显示近期活跃群和数据库里已有覆盖配置的群
 - **唤醒** — 按群查看并编辑唤醒参数，切换 `awakening_*` 规则和无聊唤醒 opt-in；兴趣话题由人格配置和规则开关控制
 - **限流** — 实时限流观测（按 scope 分全局/按群视图，5s 可选自动刷新）
 - **记忆** — 按群浏览与编辑 LLM 长期记忆，支持明确选择、替换和删除成员引用，提供原文查看
 - **对话** — 按群浏览 LLM 对话历史（含私聊/归档，支持关键词过滤、游标翻页）。群聊和私聊的消息删除经任务队列交由 Bot 执行：回复行删除对应 Turn 正文，用户触发行删除关联对话轮；归档会话提供只读浏览。页面在收到确认删除结果后刷新消息及计数，排队期间保留原消息；等待超时可继续查询原任务，服务端任务仍可执行。
 - **人格** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）
 - **资料** — 在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件（保存后执行 `/llm reload` 或重启 bot 生效）
+- **Skill** — Skill 目录管理（「LLM 工坊」区，`/ops/#/skills`）：列表含扫描坏项诊断与预置态标注，详情页可在线编辑/删除 `SKILL.md` 与 `scripts/` 等文本资源，写入即热生效；页内预置同步对照 `skills.example/` 勾选或一键对齐（覆盖前自动备份 `.preset-backups/`）；安装向导支持本地压缩包/文件夹/GitHub 仓库链接三种来源，两阶段「检查 → 确认」出示候选报告（含可执行脚本红色警示）。格式约束与安全边界见 [skills.md](skills.md)
 - **诊断** — LLM runtime 重载、MCP 重连、上下文清理、样本请求、文本规则回归测试、provider 探活（并发，按需计费）和 LLM 健康状态
 - **MCP** — MCP 服务器状态面板（transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
 - **用量** — LLM 用量/成本看板（provider/模型/功能/群/人格五维 breakdown 与筛选、定价状态展示）
@@ -156,7 +157,7 @@ Web Admin 当前提供 28 个标签页（前端使用 vue-router 4 hash 模式�
 - **语录** — 语录管理（按群浏览、关键词搜索、删除；发言人优先显示标准身份及 QQ，改名时附收藏时原名片；正文使用当前身份并提供原文查看）
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
 - **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
-- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）
+- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）。`llm.toml` 在文本编辑区上方另带 provider 级思考档位结构化面板：行级修改只动目标 provider 的 `reasoning_effort` 行、注释与其余内容原样保留，目标段含多行字符串时拒绝并引导改用文本编辑
 - **实时日志** — 当前运行日志流、连接状态与当前文件下载
 - **LLM Trace** — 按 HTTP 调用索引 QuickQuip 与 LLM Provider 之间的完整 JSON 请求/响应文本，支持持久开关、实时状态更新、分页和按需加载正文
 - **日志归档** — 历史轮转日志浏览、预览与下载

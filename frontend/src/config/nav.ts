@@ -8,6 +8,7 @@ import SummaryView from '../views/SummaryView.vue'
 import ConversationsView from '../views/ConversationsView.vue'
 import PersonasView from '../views/PersonasView.vue'
 import LlmAboutView from '../views/LlmAboutView.vue'
+import SkillsView from '../views/SkillsView.vue'
 import LlmUsageView from '../views/LlmUsageView.vue'
 import EpochsView from '../views/EpochsView.vue'
 import GroupSettingsView from '../views/GroupSettingsView.vue'
@@ -66,6 +67,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle',   section: 'llm',      component: ConversationsView },
   { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',           section: 'llm',      component: PersonasView },
   { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',        section: 'llm',      component: LlmAboutView },
+  { key: 'skills',         path: '/skills',         label: 'Skill',    icon: 'Sparkles',        section: 'llm',      component: SkillsView },
   { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
   { key: 'mcp-dashboard',  path: '/mcp-dashboard',  label: 'MCP',      icon: 'Network',         section: 'llm',      component: McpDashboardView },
   { key: 'llm-usage',      path: '/llm-usage',      label: '用量',     icon: 'Activity',        section: 'llm',      component: LlmUsageView },

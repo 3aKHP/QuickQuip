@@ -113,3 +113,16 @@ def test_skill_list_with_activation(make_skill):
     assert "- alpha：一。" in text
     assert "- beta：二。" in text
     assert "当前会话已激活：beta" in text
+
+
+def test_skill_list_marks_diverged_preset_copies(make_skill):
+    catalog_dir, writer = make_skill
+    writer("alpha", "一。")
+    writer("beta", "二。")
+    skills = scan_skills(catalog_dir)
+    text = render_skill_list(skills, [], diverged_names={"beta"})
+    lines = text.splitlines()
+    assert lines[1] == "- alpha：一。"
+    assert lines[2] == (
+        "- beta：二。（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）"
+    )

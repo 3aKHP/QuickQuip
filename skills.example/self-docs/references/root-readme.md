@@ -23,13 +23,15 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **词云生成** — `/wordcloud` 按 today/week/month/year 四档生成群聊词云图片
 - **STS 公式化回复** — 《杀戮尖塔》梗能力：消息命中“xxx了”时按卡牌名公式回复，`/turmfluch` 一次性生成诅咒文案（v1.10）。详见 [docs/dev/sts-formula.md](docs/dev/sts-formula.md)
 - **LLM 扩展** — 兼容 OpenAI / Claude / Gemini / OpenAI Responses 四类协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、Skill 扩展包（部署者安装、AI 遇匹配请求自主激活）、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
+- **思考档位控制** — `/llm effort` 按群或私聊切换思考档位，四协议统一适配；Web Admin 支持 provider 默认档与会话覆盖配置
+- **群聊引用与艾特** — LLM 回复引用触发消息，`@名字` 可解析为真实艾特；按群开关、身份唯一解析与通知冷却共同控制互动
 - **低频唤醒** — 按群配置唤醒延长、兴趣话题、相关性/答疑判定、无聊冒泡和兜底概率，所有入口受规则开关与限流保护
 - **LLM 用量/成本看板** — 全链路 token 计量与成本估算，按 provider/功能/模型/群/人格五维归因，Web Admin 提供用量面板与定价状态展示
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
 - **群周报与月报** — 每周/每月自动生成上一周期的群聊回顾，分天采样覆盖全周期，热词趋势与群内大事记一目了然
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具）；模型在对话中生成的图片也会直接送达群聊。统一收口 `config/generation.toml`
-- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
+- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。全部文档索引见 [docs/index.md](docs/index.md)。

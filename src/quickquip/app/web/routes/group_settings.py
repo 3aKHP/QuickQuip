@@ -3,11 +3,11 @@ import re
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import CONFIG_LLM_TOML, LLM_DB_PATH
-from quickquip.llm.config import load_llm_config
+from quickquip.llm.config import REASONING_EFFORT_CHOICES, load_llm_config
 from quickquip.llm.store import LLMStore
 
 router = APIRouter()
@@ -50,6 +50,17 @@ class GroupSettingsBody(BaseModel):
     allow_prefix: bool | None = None
     allow_at: bool | None = None
     history_limit: int | None = Field(default=None, ge=0, le=200)
+    # 思考档位覆盖（六档词表单源 REASONING_EFFORT_CHOICES；null = 跟随 provider 配置档）
+    reasoning_effort: str | None = None
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def _check_reasoning_effort(cls, value: str | None) -> str | None:
+        if value is not None and value not in REASONING_EFFORT_CHOICES:
+            raise ValueError(
+                f"reasoning_effort 须为 {'/'.join(REASONING_EFFORT_CHOICES)} 之一"
+            )
+        return value
 
 
 @router.get("/group-settings/options")
@@ -65,6 +76,7 @@ def get_options():
             "id": p.id,
             "default_model": p.default_model,
             "models": list(p.models),
+            "reasoning_effort": p.reasoning_effort,
         }
         for p in cfg.providers.values()
     ]
@@ -114,6 +126,7 @@ def _format_group_entry(group_id: str, row) -> dict:
         "allow_prefix": None,
         "allow_at": None,
         "history_limit": None,
+        "reasoning_effort": None,
         "updated_at": None,
     }
     if row is not None:
@@ -144,6 +157,7 @@ def _format_group_entry(group_id: str, row) -> dict:
             "allow_prefix": None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
             "allow_at": None if row["allow_at"] is None else bool(row["allow_at"]),
             "history_limit": row["history_limit"],
+            "reasoning_effort": row["reasoning_effort"],
             "updated_at": row["updated_at"],
         })
     return entry
@@ -167,7 +181,8 @@ def list_group_settings():
                        agent_delivery_intermediate_enabled,
                        agent_delivery_final_enabled, provider_id, model,
                        persona_id,
-                       trigger_prefix, allow_prefix, allow_at, history_limit, updated_at
+                       trigger_prefix, allow_prefix, allow_at, history_limit,
+                       reasoning_effort, updated_at
                 FROM group_settings
                 ORDER BY updated_at DESC
                 """

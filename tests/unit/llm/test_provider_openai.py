@@ -117,3 +117,53 @@ async def test_openai_client_ignores_builtin_search_flag():
 
     assert "google_search" not in str(client.last_payload)
     assert "web_search" not in str(client.last_payload)
+
+
+# ── 思考档位（resolve_thinking 接线） ────────────────────────────
+
+
+def _simple_request(model: str, *, effort: str | None = None) -> LLMRequest:
+    return LLMRequest(
+        model=model,
+        system_prompt="",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=0.2,
+        max_output_tokens=128,
+        reasoning_effort=effort,
+    )
+
+
+def _text_body() -> dict:
+    return {"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}]}
+
+
+async def test_openai_effort_passthrough_for_openai_models():
+    config = _provider_config()
+    config.reasoning_effort = "high"
+    client = FakeOpenAIClient(config, _text_body())
+    await client.complete(_simple_request("gpt-test"))
+    assert client.last_payload["reasoning_effort"] == "high"
+    assert "thinking" not in client.last_payload
+
+
+async def test_openai_effort_absent_by_default():
+    client = FakeOpenAIClient(_provider_config(), _text_body())
+    await client.complete(_simple_request("gpt-test"))
+    assert "reasoning_effort" not in client.last_payload
+
+
+async def test_openai_deepseek_clamped_and_thinking_switch():
+    config = _provider_config()
+    config.reasoning_effort = "medium"
+    client = FakeOpenAIClient(config, _text_body())
+    await client.complete(_simple_request("deepseek-v4-pro"))
+    assert client.last_payload["reasoning_effort"] == "high"
+    assert client.last_payload["thinking"] == {"type": "enabled"}
+
+
+async def test_openai_request_scope_effort_overrides_provider_config():
+    config = _provider_config()
+    config.reasoning_effort = "low"
+    client = FakeOpenAIClient(config, _text_body())
+    await client.complete(_simple_request("gpt-test", effort="max"))
+    assert client.last_payload["reasoning_effort"] == "max"

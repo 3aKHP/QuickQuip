@@ -10,7 +10,7 @@ import pytest
 from quickquip.adapters.nonebot import member_cards
 from quickquip.adapters.nonebot._llm_reply import (
     build_llm_reply_message,
-    split_outbound_at_mentions,
+    split_outbound_mentions,
 )
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.prompting import build_turn_envelope
@@ -264,13 +264,13 @@ def test_collect_mention_profiles_caps_at_five(tmp_path: Path):
 # ── F3：出站 @QQ 数字 → at 段 ──────────────────────────────────────
 
 
-def test_split_outbound_at_mentions_plain_text_untouched():
-    segments = split_outbound_at_mentions("普通回复，无艾特", _FakeMessage, _FakeSegment)
+def test_split_outbound_mentions_plain_text_untouched():
+    segments = split_outbound_mentions("普通回复，无艾特", _FakeMessage, _FakeSegment)
     assert segments == [("text", "普通回复，无艾特")]
 
 
-def test_split_outbound_at_mentions_converts_digits():
-    segments = split_outbound_at_mentions(
+def test_split_outbound_mentions_converts_digits():
+    segments = split_outbound_mentions(
         "@QQ40004 的话没有档案，@QQ10002 可以", _FakeMessage, _FakeSegment
     )
     assert segments == [

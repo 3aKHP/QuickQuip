@@ -35,6 +35,7 @@ tests/
 scripts/*
 !scripts/backfill_chat_archive.py
 !scripts/backfill_record_identities.py
+!scripts/sync_preset_skills.py
 README.md
 CHANGELOG.md
 ROADMAP.md

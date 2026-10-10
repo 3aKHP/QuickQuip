@@ -3,7 +3,6 @@
 # Usage: bash prod/check_bot.sh [status|gen-qr|force-recreate|wait-login]
 
 REMOTE_DIR="${REMOTE_DIR:-/opt/QuickQuip}"
-NULL_DEVICE="/d""ev/null"
 if [ -L "$REMOTE_DIR/current" ]; then
     export QUICKQUIP_ROOT="$REMOTE_DIR"
     export QUICKQUIP_ENV_FILE="$REMOTE_DIR/.env"
@@ -20,15 +19,15 @@ cmd="${1:-status}"
 COMPOSE=(docker compose --env-file "$REMOTE_DIR/.env")
 
 if [ "$cmd" = "status" ]; then
-    if ! "${COMPOSE[@]}" ps "$BACKEND" 2>"$NULL_DEVICE" | grep -q 'Up'; then
+    if ! "${COMPOSE[@]}" ps "$BACKEND" 2>/dev/null | grep -q 'Up'; then
         echo "OFFLINE"
         exit 0
     fi
 
-    RECENT_DISCONNECT=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>"$NULL_DEVICE" | grep -ciE 'PMHQ WebSocket 连接关闭|PMHQ.*连接错误')
-    RECENT_PMHQ=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>"$NULL_DEVICE" | grep -ciE 'PMHQ WebSocket 连接成功')
-    HEARTBEAT=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>"$NULL_DEVICE" | grep -ciE 'meta_event')
-    ACTIVITY=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>"$NULL_DEVICE" | grep -ciE '\[收-|\[发-')
+    RECENT_DISCONNECT=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>/dev/null | grep -ciE 'PMHQ WebSocket 连接关闭|PMHQ.*连接错误')
+    RECENT_PMHQ=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>/dev/null | grep -ciE 'PMHQ WebSocket 连接成功')
+    HEARTBEAT=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>/dev/null | grep -ciE 'meta_event')
+    ACTIVITY=$("${COMPOSE[@]}" logs --since 5m "$BACKEND" 2>/dev/null | grep -ciE '\[收-|\[发-')
 
     if [ "$RECENT_DISCONNECT" -gt 0 ] && [ "$RECENT_PMHQ" -eq 0 ] && [ "$HEARTBEAT" -eq 0 ]; then
         echo "OFFLINE"
@@ -42,11 +41,11 @@ if [ "$cmd" = "status" ]; then
         # /opt/QQ/qq）。按退出码 + 输出双重判定（部分 docker 版本把 exec 失败信息
         # 写到 stdout）；两路都失败说明探测本身失效，输出 UNKNOWN 而非误报
         # OFFLINE（cron_check_bot.sh 对 UNKNOWN 只记录不告警）。
-        if ! PS_OUT=$(docker exec "$BACKEND" ps 2>"$NULL_DEVICE"); then
+        if ! PS_OUT=$(docker exec "$BACKEND" ps 2>/dev/null); then
             PS_OUT=""
         fi
         if [ -z "$PS_OUT" ]; then
-            if ! PS_OUT=$(docker top "$BACKEND" 2>"$NULL_DEVICE"); then
+            if ! PS_OUT=$(docker top "$BACKEND" 2>/dev/null); then
                 PS_OUT=""
             fi
         fi
@@ -55,7 +54,7 @@ if [ "$cmd" = "status" ]; then
             exit 0
         fi
         QQ_ALIVE=$(printf '%s\n' "$PS_OUT" | grep -c '/opt/QQ/qq' || true)
-        if [ "${QQ_ALIVE:-0}" -gt 0 ] 2>"$NULL_DEVICE"; then
+        if [ "${QQ_ALIVE:-0}" -gt 0 ] 2>/dev/null; then
             echo "IDLE"
         else
             echo "OFFLINE"
@@ -71,7 +70,7 @@ if [ "$cmd" = "gen-qr" ]; then
 
     for i in $(seq 1 30); do
         sleep 1
-        QR=$("${COMPOSE[@]}" logs --tail=200 "$BACKEND" 2>"$NULL_DEVICE" | grep -oP '或浏览器打开二维码网址:\s*\Khttps://[^\s]+' | tail -1)
+        QR=$("${COMPOSE[@]}" logs --tail=200 "$BACKEND" 2>/dev/null | grep -oP '或浏览器打开二维码网址:\s*\Khttps://[^\s]+' | tail -1)
         if [ -n "$QR" ]; then
             echo "QR:$QR"
             exit 0
@@ -85,8 +84,8 @@ if [ "$cmd" = "wait-login" ]; then
     max_wait="${2:-120}"
     for i in $(seq 1 "$max_wait"); do
         sleep 1
-        LOGGED_IN=$("${COMPOSE[@]}" logs --tail=30 "$BACKEND" 2>"$NULL_DEVICE" | grep -cE 'selfNick|Connected to the websocket server')
-        if [ "${LOGGED_IN:-0}" -gt 0 ] 2>"$NULL_DEVICE"; then
+        LOGGED_IN=$("${COMPOSE[@]}" logs --tail=30 "$BACKEND" 2>/dev/null | grep -cE 'selfNick|Connected to the websocket server')
+        if [ "${LOGGED_IN:-0}" -gt 0 ] 2>/dev/null; then
             echo "ONLINE"
             exit 0
         fi
@@ -98,7 +97,7 @@ fi
 if [ "$cmd" = "force-recreate" ]; then
     echo "Force recreating $BACKEND container (fresh device fingerprint)..."
     "${COMPOSE[@]}" rm -sf "$BACKEND" 2>&1
-    rm -rf "$REMOTE_DIR/prod/llbot-qq" "$REMOTE_DIR/prod/llbot-data" 2>"$NULL_DEVICE" || true
+    rm -rf "$REMOTE_DIR/prod/llbot-qq" "$REMOTE_DIR/prod/llbot-data" 2>/dev/null || true
     mkdir -p "$REMOTE_DIR/prod/llbot-qq" "$REMOTE_DIR/prod/llbot-data"
     "${COMPOSE[@]}" up -d "$BACKEND" 2>&1
     sleep 5

@@ -63,9 +63,11 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/config.py`
   - 负责读取 `config/llm.toml`
 - `src/quickquip/llm/provider/`（包）
-  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client` / `replay_guard`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
+  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Claude 签名 thinking 块在工具循环内经通用重建回传，带工具的已关闭 Loop 跨轮走原生回放（owner 五元组匹配且签名有效时）；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client` / `replay_guard`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
   - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
+- `src/quickquip/llm/thinking.py`
+  - 思考档位归一化层：内部六档（low/medium/high/xhigh/max/ultra）到各协议 wire 参数的映射与钳制（openai chat 家族钳制表、claude 代际分派 adaptive effort / 旧式 budget 固定值表、gemini 代际分派 thinkingLevel/thinkingBudget；openai_responses 走自身 profile 词表层）；纯映射层，除 claude budget 1024 数学下限外一律照发（后端不支持由上游 400 暴露），钳制与照发决策均经节流日志 fail-visible
 - `src/quickquip/llm/tool_discovery.py`
   - 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler
 - `src/quickquip/llm/tool_result_pipeline.py`
@@ -73,7 +75,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/llm/tool_registry.py`
   - 负责工具白名单注册、参数校验和执行调度
 - `src/quickquip/llm/skills/`
-  - Skill 系统域包（1.16 起）：`parser`（SKILL.md frontmatter 与体积校验）、`catalog`（目录扫描、路径加固与内容校验）、`context`（catalog 块与激活标记的文本渲染）、`state`（per-会话激活状态登记），以及 `tools/` 下的四枚工具（`activate_skill` 激活、`read_skill_resource` 读资料、`search_skill_resources` 检索、`run_skill_script` 执行脚本）；`service_parts/skills.py` 负责每轮目录扫描（零延迟热部署）、Skill 描述清单注入系统提示与激活接缝；命令入口 `/skill list`。部署、安全模型与编写教程见 [../admin/skills.md](../admin/skills.md) 与 [skill-tutorial.md](skill-tutorial.md)
+  - Skill 系统域包（1.16 起）：`parser`（SKILL.md frontmatter 与体积校验）、`catalog`（目录扫描、路径加固与内容校验）、`context`（catalog 块与激活标记的文本渲染）、`state`（per-会话激活状态登记）、`preset_drift`（预置副本字节级指纹与同名分叉检测，stdlib 自包含，同步脚本与运行时共用），以及 `tools/` 下的四枚工具（`activate_skill` 激活、`read_skill_resource` 读资料、`search_skill_resources` 检索、`run_skill_script` 执行脚本）；`service_parts/skills.py` 负责每轮目录扫描（零延迟热部署）、Skill 描述清单注入系统提示与激活接缝；命令入口 `/skill list`。部署、安全模型与编写教程见 [../admin/skills.md](../admin/skills.md) 与 [skill-tutorial.md](skill-tutorial.md)
 - `src/quickquip/llm/store.py`
   - 负责 SQLite 持久化（会话/记忆/归档/群设置）；v1.8.9 后按域拆为 `store_parts/` 子包的 mixin 组合
 - `src/quickquip/llm/vocab.py`
@@ -369,7 +371,9 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - 消息中的艾特在**入口 ingestion 时**按**群合并身份索引**渲染为 `@标准身份`（引用消息、合并转发子消息同索引）；未登记成员经群成员名片缓存（`get_group_member_info`，按 群×QQ 带 TTL）退化为 `@当前群名片`，查询失败才回退 `@QQ 号` 数字形态——名片预取覆盖消息顶层 @；引用/转发子消息内未登记 @ 不做名片预取，仅有段自带名称或与顶层重叠的预取名片时降级使用，否则回退数字形态
 - 未登记发言者降级显示为“当前显示名 + QQ 号 + 未登记”
 - **艾特档案注入（信封段）**：被艾特但未在窗口内发言的登记成员，其标准身份＋别名＋备注随当轮【轮次上下文】信封注入（名字在前、QQ 作配对键，上限 5 条）；候选来自入口结构化采集（at 段 QQ）与对窗口文本的 `@QQ 数字` 扫描（覆盖冻结落库的存量形态），已在窗口带发言人标签者跳过
-- **出站艾特还原**：模型回复文本中的 `@QQ 号` 数字形态在发送出口（`_llm_reply.py`）切分为真实 at 段
+- **出站艾特还原**：模型回复文本中的 `@QQ 号` 数字形态在发送出口（`_llm_reply.py`）切分为真实 at 段（右边界防幻觉长号）；群级开关 `llm_at_mention`（默认开）另启用「@名字」通道——按群合并身份快照的标准身份/别名/观察名片做最长匹配，歧义、艾特 bot 自身或未登记名字一律保留为纯文本（at-all 结构上不可达），群聊 LLM 路径（显式/被动/无聊唤醒/定时任务）共用同一解析出口
+- **艾特护栏**：单条回复真实艾特上限 3 个（两通道合计，超出降级为文本）；「@名字」通道对同一（群 × QQ）有 `mention_cooldown_seconds` 冷却（默认 600 秒，0 关闭）——冷却在送达确认（可信 message_id）后记账、解析侧只读，发送失败不消耗名额，窗内重复艾特降级为文本
+- **引用锚定**：群级开关 `llm_quote_reply`（默认开）让群聊 LLM 回复以引用段锚定触发它的那条消息（机械化接线，LLM 无感）；协议端显式拒绝引用段时去段重发正文，超时等传输异常不重试
 - **周期报告读时重解析**：日总结/周报/月报/每日播报的序列化输入在读取时按身份索引把登记成员渲染名换成标准身份（归档仅存 user_id，无需回填）；同名不同 QQ 碰撞时给碰撞者附 QQ 后缀（碰撞触发式，控制压缩文本体积）
 - **身份信息只在 messages 中呈现**：system prompt 不再重复声明“当前提问者是谁”——消除双信息源冲突
 - **system prompt 完全静态化（前缀缓存契约）**：当前时间/星期、节日提示、对话参与成员、持久记忆、词表命中等逐轮变化的内容一律只在当轮 user 消息头部的【轮次上下文】信封呈现（组装时渲染、不落库），system 跨轮、跨日字节稳定，自动前缀缓存可跨轮命中。信封 token 经 `envelope_meter` 落 `envelope_tokens` 列进用量账本：Agent Loop 内每行同值，看板只按 **AVG** 解读为每轮成本，**禁止 SUM**（同回合重复计）
@@ -465,6 +469,7 @@ Skill 系统是 1.16 引入的运行时可扩展能力：部署者把 Skill 包�
 - `catalog`：`skills/` 目录扫描——每轮请求现扫、改动零延迟生效（无缓存失效问题）；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
 - `state`：按会话维护激活状态登记，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
 - `context`：catalog 块与激活标记的文本渲染（模型可见面的唯一出口，纯函数无状态）
+- `preset_drift`：预置 Skill 漂移检测——`skills/` 与 `skills.example/` 同名目录的全文件字节级指纹比对（只读）；分叉名单变化时记 WARNING，`/skill list` 标注分叉条目，结果只进日志与命令回复，不进 catalog 块与系统提示；`skills.example/` 缺失时 fail-open。主机侧同步脚本 `scripts/sync_preset_skills.py` 按文件路径装载同一实现（stdlib，无 venv 依赖）
 - `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
 - `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
 

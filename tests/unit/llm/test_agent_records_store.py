@@ -550,6 +550,35 @@ def test_load_closed_loops_returns_complete_records(store: LLMStore):
     assert len(store.load_closed_loops("1001")) == 1
 
 
+def test_owner_cipher_source_effort_round_trip(store: LLMStore):
+    """owner 负载含密文来源档（effort）时：owner_json 与 native_state.owner
+    两处落库，load_closed_loops 回读均保留该键（回放投影的来源档标注来源）。"""
+    owner = {
+        "provider_id": "p1",
+        "protocol": "openai_responses",
+        "wire_model": "gpt-x",
+        "display_model": "gpt-x",
+        "endpoint_fingerprint": "ef",
+        "profile_fingerprint": "pf",
+        "effort": "low",
+    }
+    handle = _begin(store)
+    response = TurnResponseRecord(
+        text="正文",
+        text_policy=TextPolicy.ALLOWED,
+        output_status=TurnOutputStatus.VISIBLE,
+        finish_reason="stop",
+        native_state={"version": 1, "owner": owner, "blocks": [{"type": "message"}]},
+        owner=owner,
+    )
+    store.commit_turn(handle, response, [], [])
+    store.close_loop(handle, LoopStatus.COMPLETED, None)
+
+    turn = store.load_closed_loops("1001")[0].turns[0]
+    assert turn.owner["effort"] == "low"
+    assert turn.native_state["owner"]["effort"] == "low"
+
+
 # ── 字节预算与保留 ────────────────────────────────────────────────
 
 

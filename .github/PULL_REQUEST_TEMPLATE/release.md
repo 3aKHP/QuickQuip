@@ -17,6 +17,7 @@
 
 - [ ] `pyproject.toml` 版本冻结为目标版本
 - [ ] `CHANGELOG.md`：`Unreleased` 汇总为新版本段，更新底部比较链接
+- [ ] `skills.example/` 有变动时，Release notes 含「预置 Skill 变动」小节（提示部署者运行 `scripts/sync_preset_skills.py` 同步）
 - [ ] 公开文档、配置模板与 `prod.example/` 完成旧术语扫尾
 - [ ] `README.md` 功能亮点清单与本版新增能力对照（新功能是否露出、既有描述是否过期）
 - [ ] 分级要求的评审完成（至少 Standard；达到门槛时按 Huge 执行 Deep-CR）

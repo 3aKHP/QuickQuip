@@ -64,6 +64,7 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | `/llm providers`、`/llm models [provider]` | 列出模型来源与模型（provider 即 AI 服务来源，如 Gemini、OpenAI） |
 | `/llm personas` | 列出可用人格 |
 | `/llm memory status` | 记忆注入与长期记忆概况 |
+| `/llm effort status` | 思考档位概况：当前生效结果与来源说明（自动调整或未生效时会注明原因） |
 | `/llm mcp` | 外部工具（MCP）连接状态 |
 | `/skill list` | 查看已安装的 Skill 与当前会话已激活的项（Skill 是部署者安装的 AI 扩展能力包，见 [Skill 说明](llm-skills.md)） |
 | `/memories [关键词]` | 查看本群长期记忆，可按关键词筛选（写入和删除是管理员命令） |
@@ -151,6 +152,7 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | `/llm trigger at on / off` | 开关艾特触发（仅群聊有此命令） |
 | `/llm memory on / off` | 开关记忆注入 |
 | `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、跟随全局默认、查看 |
+| `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本群思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；改完回复会给出实际生效档（部分模型词表较窄会自动降档，如 ultra 落到 max）。注意：不配置时模型用自身默认档，GLM、Kimi、MiniMax 等模型的默认档即为最高档，恢复默认等于放弃档位带来的成本控制。切换后若回复出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
 | `/llm delivery intermediate / final / all <on / off / reset>` | 分段交付两域的按群开关：`intermediate` = 中间轮发送（多轮工具回复的过程正文照常发出），`final` = 最终轮分段（最终长回复按自然段拆成多条），`all` = 两域同时操作；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本群上下文改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理，窗口随对话增长、冷场后收缩）；重启和 `/llm clear_context` 不影响此设置 |
 | `/llm clear_context` | 清空本群短期上下文，AI“串台”或记错上下文时用 |
@@ -175,6 +177,13 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 ### 规则开关
 
 `/disable <规则名>` 禁用一条规则，`/enable <规则名>` 重新启用；规则名用 `/rules` 查看。设置会持久化，重启不丢。
+
+AI 聊天自带两个行为开关（默认开启）：
+
+| 规则名 | 说明 |
+|------|------|
+| `llm_quote_reply` | AI 回复时以引用形式锚定触发它的那条消息 |
+| `llm_at_mention` | AI 回复里的「@名字」转成真实艾特并提醒对方；关闭后名字保留为纯文本。同一成员短时间内重复艾特会被降级为纯文本（冷却时长见部署配置 `mention_cooldown_seconds`） |
 
 ### 唤醒模块
 

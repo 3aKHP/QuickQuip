@@ -8,7 +8,7 @@ import types
 
 from nonebot.adapters.onebot.v11 import Message
 
-from quickquip.adapters.nonebot import scheduler_plugin
+from quickquip.adapters.nonebot import group_messages, scheduler_plugin
 from quickquip.chat.scheduled_messages import ScheduledMessageStore
 from tests.fixtures.scheduled_cron import future_one_shot_cron
 
@@ -101,7 +101,7 @@ def test_llm_task_generates_and_sends(monkeypatch, tmp_path):
     async def fake_send_group_msg(**kwargs):
         sent.append(kwargs)
 
-    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg)
+    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg, self_id="999")
     sched = FakeCronScheduler()
     monkeypatch.setattr(scheduler_plugin, "scheduler", sched)
     monkeypatch.setattr(scheduler_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))
@@ -129,6 +129,10 @@ def test_llm_task_generates_and_sends(monkeypatch, tmp_path):
         mp, "rule_switch", types.SimpleNamespace(is_enabled=lambda gid, name: True)
     )
     monkeypatch.setattr(awakening_mod, "is_group_llm_enabled", lambda svc, gid: True)
+    # 名字通道解析器打桩：本测试不依赖真实身份存储与规则开关状态
+    monkeypatch.setattr(
+        group_messages, "build_outbound_mention_resolver", lambda *a, **k: None
+    )
 
     store = ScheduledMessageStore(tmp_path / "sm.json")
     store.add(
@@ -161,7 +165,7 @@ def test_llm_task_skipped_when_rule_disabled(monkeypatch, tmp_path):
     async def fake_send_group_msg(**kwargs):
         sent.append(kwargs)
 
-    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg)
+    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg, self_id="999")
     sched = FakeCronScheduler()
     monkeypatch.setattr(scheduler_plugin, "scheduler", sched)
     monkeypatch.setattr(scheduler_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))

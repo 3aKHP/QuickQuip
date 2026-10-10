@@ -39,7 +39,7 @@ DEFAULT_PROFILE_ID = DEFAULT_RESPONSES_PROFILE_ID
 class ResponsesProfile:
     profile_id: str
     # profile 实际接受的 wire reasoning.effort 词表；六档映射结果必须落在
-    # 该集合内，超出按降档规则收敛（见 request._REASONING_EFFORT_MAP）。
+    # 该集合内，超出按降档规则收敛（见 request.reasoning_control）。
     wire_efforts: frozenset[str]
     # 请求 service_tier 字段值；None = 不发送。
     service_tier: str | None
@@ -61,9 +61,13 @@ PROFILES: dict[str, ResponsesProfile] = {
     ),
     "codex-http-relay": ResponsesProfile(
         profile_id="codex-http-relay",
-        # AGW/CPA 中转的 gpt-6 / gpt-5.6 系六档全支持（2026-09-14 按
-        # 服务器网关能力位核对），恒等映射不降档。
-        wire_efforts=frozenset(REASONING_EFFORT_TIERS),
+        # AGW/CPA 中转 gpt-6 / gpt-5.6 系五档恒等（low..max）。Codex 客户端
+        # 目录对 sol/terra/astra 登记六档（含 ultra）、luna 系止于 max，但
+        # 2026-10-03 实测中转网关校验层拒绝 ultra（HTTP 400，合法值止于
+        # max）——网关能力位登记与 wire 透传是两回事，按实测收敛五档；
+        # ultra 经降档规则落 max（ultra 语义为 max 级预算 + 服务端多代理
+        # 编排，juice 与 max 相同，无实际能力损失）。
+        wire_efforts=frozenset({"low", "medium", "high", "xhigh", "max"}),
         service_tier=None,
         tolerate_relay_events=True,
         reconcile_relay_items=True,

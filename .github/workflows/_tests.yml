@@ -100,5 +100,8 @@ jobs:
       - name: Type check
         run: pnpm type-check
 
+      - name: Test editor request ordering
+        run: pnpm test
+
       - name: Build
         run: pnpm build

@@ -61,8 +61,21 @@ if args[0] == "compose":
                 for name in ("llbot", "quickquip", "web-admin")
             }}))
         elif "--format" in args:
+            if os.environ.get("FAIL_CONFIG_JSON") == "1":
+                print("invalid-json")
+                sys.exit(0)
+            source = os.environ.get("TEST_SKILL_BIND")
+            volumes = []
+            if source:
+                path = (root / "skills" if source.startswith("shared")
+                        else root / "releases" / release / "skills")
+                if source == "shared-child":
+                    path /= "demo"
+                volumes = [{"type": "bind", "source": str(path), "target": "/app/skills"}]
             print(json.dumps(
-                {"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}}
+                {"services": {"quickquip": {
+                    "environment": {"ONEBOT_ACCESS_TOKEN": "new"}, "volumes": volumes,
+                }}}
             ))
     elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
         sys.exit(1)
@@ -147,7 +160,7 @@ def test_lock_rejects_second_action_before_live_mutation(deployment):
 
 @pytest.mark.parametrize(
     "args",
-    [["-Rollback", "-DryRun"], ["-Status", "-Migrate"], ["-Status", "-SkipHealth"]],
+    [["--rollback", "--dry-run"], ["--status", "--migrate"], ["--status", "--skip-health"]],
 )
 def test_bash_rejects_invalid_modes_before_side_effects(args):
     result = subprocess.run(
@@ -155,6 +168,21 @@ def test_bash_rejects_invalid_modes_before_side_effects(args):
     )
     assert result.returncode != 0
     assert "FAILED:" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        "-DryRun", "-Status", "-Rollback", "-Migrate", "-SkipHealth",
+        "-HostAlias", "-RemoteDir", "-KeepReleases", "-LocalCheck",
+    ],
+)
+def test_bash_rejects_legacy_single_dash_aliases(legacy):
+    result = subprocess.run(
+        ["bash", str(TEMPLATE / "deploy-v4.sh"), legacy], capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "Unknown argument" in result.stderr
 
 
 def test_shared_transaction_restores_token_and_missing_files(tmp_path):
@@ -247,14 +275,16 @@ def test_sudo_new_shared_file_uses_invoking_user(tmp_path, monkeypatch):
     assert owners == [(1234, 5678)]
 
 
-def _write_fake_docker_for_baseline(bin_dir: Path) -> None:
+def _write_fake_docker_for_baseline(
+    bin_dir: Path, source: str = "${QUICKQUIP_ROOT:-..}/skills"
+) -> None:
     services = {
         "services": {
             "llbot": {"container_name": "llbot"},
             "quickquip": {
                 "container_name": "quickquip",
                 "volumes": [
-                    {"type": "bind", "source": "../skills", "target": "/app/skills"}
+                    {"type": "bind", "source": source, "target": "/app/skills"}
                 ],
             },
             "web-admin": {"container_name": "web-admin"},
@@ -282,34 +312,217 @@ def _minimal_server_root(tmp_path) -> Path:
     return root
 
 
-def test_capture_baseline_copies_skills_and_rewrites_volume(tmp_path, monkeypatch):
+def _write_skill(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def _write_fake_sudo(bin_dir: Path, available: bool) -> None:
+    sudo = bin_dir / "sudo"
+    if available:
+        sudo.write_text(
+            "#!/bin/bash\n"
+            '[ "$1" = "-n" ] && shift\n'
+            'echo "$@" >> "$TEST_ROOT/sudo-calls"\n'
+            'case "$1" in\n'
+            "    true) exit 0 ;;\n"
+            '    cp) chmod -R u+w "$TEST_ROOT/skills" ;;\n'
+            "    chown) exit 0 ;;\n"
+            "esac\n"
+            'exec "$@"\n'
+        )
+    else:
+        sudo.write_text("#!/bin/bash\nexit 1\n")
+    sudo.chmod(0o700)
+
+
+def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypatch):
     root = _minimal_server_root(tmp_path)
-    skill_md = root / "skills/demo/SKILL.md"
-    skill_md.parent.mkdir(parents=True)
-    skill_md.write_text("---\nname: demo\ndescription: 演示\n---\n正文\n")
+    _write_skill(root / "skills/demo/SKILL.md", "---\nname: demo\ndescription: 演示\n---\n正文\n")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_fake_docker_for_baseline(bin_dir)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     baseline = tmp_path / "baseline"
     STATE["capture_baseline"](root, baseline)
-    assert (baseline / "skills/demo/SKILL.md").read_text() == skill_md.read_text()
+    assert not (baseline / "skills").exists()
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
-    assert volume["source"] == str(baseline / "skills")
+    # The literal ${QUICKQUIP_ROOT:-..}/skills placeholder resolves to the
+    # deployment-root shared directory.
+    assert volume["source"] == str(root / "skills")
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
 
 
-def test_capture_baseline_without_skills_dir_materializes_empty(tmp_path, monkeypatch):
+def test_resolve_defaulted_variables():
+    resolve = STATE["resolve_defaulted_variables"]
+    assert resolve("${QUICKQUIP_ROOT:-..}/skills") == "../skills"
+    assert resolve("${QUICKQUIP_ROOT:-/opt/QuickQuip}/skills") == "/opt/QuickQuip/skills"
+    assert resolve("/opt/QuickQuip/skills") == "/opt/QuickQuip/skills"
+    assert resolve("${QUICKQUIP_ROOT}/skills") == "${QUICKQUIP_ROOT}/skills"
+
+
+def test_capture_baseline_rejects_variable_without_default(tmp_path, monkeypatch):
     root = _minimal_server_root(tmp_path)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_fake_docker_for_baseline(bin_dir)
+    _write_fake_docker_for_baseline(bin_dir, source="${QUICKQUIP_ROOT}/skills")
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    baseline = tmp_path / "baseline"
-    STATE["capture_baseline"](root, baseline)
-    assert (baseline / "skills").is_dir()
-    assert list((baseline / "skills").iterdir()) == []
-    config = json.loads((baseline / "prod/docker-compose.yml").read_text())
-    (volume,) = config["services"]["quickquip"]["volumes"]
-    assert volume["source"] == str(baseline / "skills")
+    with pytest.raises(ValueError, match="unsupported bind mount"):
+        STATE["capture_baseline"](root, tmp_path / "baseline")
+
+
+def test_seed_skips_existing_shared_skills(deployment):
+    root, inbox, _ = deployment
+    marker = root / "skills/marker.txt"
+    marker.parent.mkdir()
+    marker.write_text("web-installed")
+    (root / "releases" / OLD / "skills/old-skill").mkdir(parents=True)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert marker.read_text() == "web-installed"
+    assert not (root / "skills/old-skill").exists()
+
+
+def test_seed_prefers_previous_current_release(deployment):
+    root, inbox, _ = deployment
+    _write_skill(root / "releases" / OLD / "skills/old-skill/SKILL.md", "old")
+    _write_skill(inbox / "tree/skills/new-skill/SKILL.md", "new")
+    _write_skill(inbox / "tree/skills/old-skill/SKILL.md", "new-version")
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/old-skill/SKILL.md").read_text() == "old"
+    assert (root / "skills/new-skill/SKILL.md").read_text() == "new"
+    assert f"seeded shared skills/ from previous release {OLD}" in result.stdout
+    assert f"merged release {NEW} skills/ into shared catalog" in result.stdout
+
+
+def test_seed_empty_then_merges_uploaded_release(deployment):
+    root, inbox, _ = deployment
+    _write_skill(inbox / "tree/skills/new-skill/SKILL.md", "new")
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/new-skill/SKILL.md").read_text() == "new"
+    assert "created empty shared skills/ directory" in result.stdout
+    assert f"merged release {NEW} skills/ into shared catalog" in result.stdout
+
+
+def test_merge_adds_repo_skills_without_overwriting(deployment):
+    root, inbox, _ = deployment
+    _write_skill(root / "skills/web-skill/SKILL.md", "web-edited")
+    _write_skill(inbox / "tree/skills/repo-skill/SKILL.md", "repo")
+    _write_skill(inbox / "tree/skills/web-skill/SKILL.md", "repo-version")
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/repo-skill/SKILL.md").read_text() == "repo"
+    assert (root / "skills/web-skill/SKILL.md").read_text() == "web-edited"
+
+
+def test_merge_falls_back_to_sudo_for_root_owned_skills(deployment):
+    root, inbox, env = deployment
+    _write_skill(root / "skills/web-skill/SKILL.md", "web-edited")
+    _write_skill(inbox / "tree/skills/repo-skill/SKILL.md", "repo")
+    (root / "skills").chmod(0o555)
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    _write_fake_sudo(bin_dir, available=True)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills/repo-skill/SKILL.md").read_text() == "repo"
+    assert "with sudo; catalog ownership restored" in result.stdout
+    calls = (root / "sudo-calls").read_text()
+    assert "cp -an" in calls
+    owner = f"{os.getuid()}:{os.getgid()}"
+    assert f"chown -R {owner} {os.path.realpath(root)}/skills" in calls
+
+
+def test_merge_without_sudo_prints_chown_guidance(deployment):
+    root, inbox, env = deployment
+    _write_skill(root / "skills/web-skill/SKILL.md", "web-edited")
+    _write_skill(inbox / "tree/skills/repo-skill/SKILL.md", "repo")
+    (root / "skills").chmod(0o555)
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    _write_fake_sudo(bin_dir, available=False)
+    result = run_deploy(deployment)
+    (root / "skills").chmod(0o755)
+    assert result.returncode == 1, result.stdout + result.stderr
+    owner = f"{os.getuid()}:{os.getgid()}"
+    guidance = f"sudo chown -R {owner} {os.path.realpath(root)}/skills"
+    assert guidance in result.stderr
+
+
+def test_seed_creates_empty_directory_without_sources(deployment):
+    root, _, _ = deployment
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "skills").is_dir()
+    assert list((root / "skills").iterdir()) == []
+    assert "created empty shared skills/ directory" in result.stdout
+
+
+@pytest.mark.parametrize("bind", ["shared", "shared-child"])
+def test_rollback_keeps_shared_skills_and_merges_target(deployment, bind):
+    root, _, _ = deployment
+    marker = root / "skills/marker.txt"
+    marker.parent.mkdir()
+    marker.write_text("web-installed")
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    _write_skill(target / "skills/rollback-skill/SKILL.md", "rollback")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback", TEST_SKILL_BIND=bind)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert marker.read_text() == "web-installed"
+    assert (root / "skills/rollback-skill/SKILL.md").read_text() == "rollback"
+
+
+@pytest.mark.parametrize("bind", ["local", "shared"])
+def test_rollback_requires_catalog_merge_only_for_shared_mount(deployment, bind):
+    root, _, env = deployment
+    _write_skill(root / "skills/marker.txt", "web-installed")
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    _write_skill(target / "skills/rollback-skill/SKILL.md", "rollback")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    _write_fake_sudo(bin_dir, available=False)
+    cp = bin_dir / "cp"
+    cp.write_text('#!/bin/bash\ntouch "$TEST_ROOT/merge-attempt"\nexit 1\n')
+    cp.chmod(0o700)
+
+    result = run_deploy(deployment, action="rollback", TEST_SKILL_BIND=bind)
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    target_started = any(
+        "up" in call and str(target / "prod/docker-compose.yml") in call for call in calls
+    )
+    assert (root / "skills/marker.txt").read_text() == "web-installed"
+    assert (target / "skills/rollback-skill/SKILL.md").read_text() == "rollback"
+    if bind == "local":
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert target_started
+        assert not (root / "merge-attempt").exists()
+        assert (root / "current").readlink() == Path("releases") / NEW
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert not target_started
+        assert (root / "merge-attempt").exists()
+        assert (root / "current").readlink() == Path("releases") / OLD
+        assert "RECOVERY SUCCEEDED" in result.stdout
+
+
+def test_rollback_rejects_unknown_mount_layout(deployment):
+    root, _, _ = deployment
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback", FAIL_CONFIG_JSON="1")
+    assert result.returncode == 1
+    assert "layout could not be resolved" in result.stderr
+    assert (root / "current").readlink() == Path("releases") / OLD
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    assert not any(
+        "up" in call and str(target / "prod/docker-compose.yml") in call for call in calls
+    )

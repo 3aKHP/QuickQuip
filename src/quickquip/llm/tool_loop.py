@@ -69,6 +69,7 @@ async def run_tool_call_loop(
             temperature=current_request.temperature,
             max_output_tokens=current_request.max_output_tokens,
             thinking_budget=current_request.thinking_budget,
+            reasoning_effort=current_request.reasoning_effort,
             tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,
@@ -239,6 +240,9 @@ async def run_tool_call_loop(
             # 字节超限自动省略）；跨轮原生回放由 history_projection 经 owner
             # 校验后写入 native_content（PR-B）。
             assistant_message.native_content = response.native_blocks
+            source_effort = response.owner.extra.get("effort") if response.owner else None
+            if isinstance(source_effort, str):
+                assistant_message.native_effort = source_effort
 
         logger.info(
             "LLM tool calls requested: provider=%s model=%s names=%s",
@@ -309,6 +313,7 @@ async def run_tool_call_loop(
             temperature=current_request.temperature,
             max_output_tokens=current_request.max_output_tokens,
             thinking_budget=current_request.thinking_budget,
+            reasoning_effort=current_request.reasoning_effort,
             tools=discovery.loaded_specs(current_request.tools),
             allow_tool_calls=current_request.allow_tool_calls,
             tool_choice=current_request.tool_choice,

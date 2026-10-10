@@ -7,7 +7,7 @@ import contextlib
 import json
 import types
 
-from quickquip.adapters.nonebot import awakening_plugin
+from quickquip.adapters.nonebot import awakening_plugin, group_messages
 from quickquip.chat.awakening import AwakeningConfig, AwakeningDefaults, get_state
 from tests.fixtures.onebot import DummyMessage, DummySegment
 
@@ -107,7 +107,7 @@ def test_boredom_check_sends_segments_and_confirms_only_success(monkeypatch):
         if kwargs["group_id"] == 456:
             raise RuntimeError("send failed")
 
-    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg)
+    bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg, self_id="999")
     plan = types.SimpleNamespace(
         group_id="123",
         reply_result={"reply": "冒个泡 [CQ:at,qq=all]", "images": ["cXctaW1n"]},
@@ -128,6 +128,10 @@ def test_boredom_check_sends_segments_and_confirms_only_success(monkeypatch):
     monkeypatch.setattr(awakening_plugin, "_ensure_llm_bindings", lambda: None)
     monkeypatch.setattr(awakening_plugin, "get_llm_service", lambda: object())
     monkeypatch.setattr(awakening_plugin, "iter_boredom_send_plans", fake_iter_plans)
+    # 名字通道解析器打桩：本测试不依赖真实身份存储与规则开关状态
+    monkeypatch.setattr(
+        group_messages, "build_outbound_mention_resolver", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         awakening_plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext()
     )

@@ -5,6 +5,7 @@ pyproject.toml
 requirements.txt
 scripts/backfill_chat_archive.py
 scripts/backfill_record_identities.py
+scripts/sync_preset_skills.py
 config
 frontend/dist
 llm_about

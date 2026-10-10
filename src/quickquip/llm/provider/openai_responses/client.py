@@ -41,6 +41,16 @@ logger = logging.getLogger(__name__)
 _DEGRADED_PLACEHOLDER = "…[历史推理内容已按降级重试省略]…"
 
 
+def _payload_wire_effort(payload: dict[str, Any]) -> str | None:
+    """从最终 payload 取实际 wire 思考档位（密文来源档；含 extra_body 覆盖后形态）。"""
+    reasoning = payload.get("reasoning")
+    if isinstance(reasoning, dict):
+        effort = reasoning.get("effort")
+        if isinstance(effort, str) and effort.strip():
+            return effort.strip()
+    return None
+
+
 class OpenAIResponsesProviderClient(BaseProviderClient):
     def _profile(self):
         return resolve_profile(self.config.responses_profile or DEFAULT_PROFILE_ID)
@@ -128,7 +138,9 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         url, headers, payload = await self._build_request_parts(request)
         data, final_url = await self._post_json_candidate(url, headers, payload)
         response = self._parse_response(data, request.model)
-        response.owner = build_response_owner(self.config, final_url, request.model)
+        response.owner = build_response_owner(
+            self.config, final_url, request.model, effort=_payload_wire_effort(payload)
+        )
         return response
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
@@ -136,7 +148,9 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         payload["stream"] = True
         chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
         response = self._assemble_stream_response(chunks, request.model)
-        response.owner = build_response_owner(self.config, final_url, request.model)
+        response.owner = build_response_owner(
+            self.config, final_url, request.model, effort=_payload_wire_effort(payload)
+        )
         return response
 
     async def complete(self, request: LLMRequest) -> LLMResponse:

@@ -24,6 +24,7 @@ MAX_NAME_LENGTH = 64
 SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 _FRONTMATTER_FENCE = re.compile(r"^---\s*$")
+_UTF8_BOM = b"\xef\xbb\xbf"
 _KNOWN_FRONTMATTER_KEYS = {
     "name",
     "description",
@@ -188,6 +189,22 @@ def parse_skill_markdown(content: str, expected_name: str = "") -> ParseSkillRes
         body_sha256=hashlib.sha256(body.encode("utf-8")).hexdigest(),
         diagnostics=diagnostics,
     )
+
+
+def parse_skill_bytes(raw: bytes, expected_name: str = "") -> ParseSkillResult:
+    """字节形态 SKILL.md 的统一解析入口：BOM 剥离 + 严格 UTF-8 解码 + 完整校验。
+
+    非 UTF-8 载荷不抛异常，以 ``invalid-utf8`` 诊断表达（fail-closed），
+    与其他校验失败同一返回通道；运行时扫描与 Web 安装准入共用，保证
+    字节归一化逻辑只有这一份。
+    """
+    if raw.startswith(_UTF8_BOM):
+        raw = raw[len(_UTF8_BOM):]
+    try:
+        content = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return _fail([SkillDiagnostic("invalid-utf8", "SKILL.md 不是有效 UTF-8。")])
+    return parse_skill_markdown(content, expected_name=expected_name)
 
 
 def _read_metadata_map(raw: object) -> dict[str, str] | SkillDiagnostic:

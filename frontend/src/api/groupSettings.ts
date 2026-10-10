@@ -14,6 +14,7 @@ export type GroupOverrideField =
   | 'allow_prefix'
   | 'allow_at'
   | 'history_limit'
+  | 'reasoning_effort'
 
 /** 单字段取值：布尔开关 / 字符串 id 或前缀 / 数值上限；null 见下方三态约定 */
 export type GroupOverrideValue = boolean | string | number | null
@@ -39,6 +40,8 @@ export interface GroupOverrideDraft {
   allow_prefix: boolean | null
   allow_at: boolean | null
   history_limit: number | null
+  /** 思考档位覆盖：六档词表之一；null = 跟随 provider 配置档 */
+  reasoning_effort: string | null
 }
 
 /**
@@ -58,6 +61,8 @@ export interface GroupSettingsProviderOption {
   id: string
   default_model: string | null
   models: string[]
+  /** provider 配置档（llm.toml reasoning_effort）；空串/缺省 = 模型默认档 */
+  reasoning_effort?: string
 }
 
 export interface GroupSettingsPersonaOption {
