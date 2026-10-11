@@ -11,6 +11,7 @@ project ``.env`` (same source as ``web_api.py``); a wildcard bind host
 (``0.0.0.0`` / ``::``) is connected via ``127.0.0.1``.
 """
 
+import contextlib
 import sys
 import time
 import urllib.request
@@ -33,8 +34,8 @@ def _wait_for_admin(base_url: str) -> None:
     deadline = time.time() + WAIT_TIMEOUT
     while time.time() < deadline:
         try:
-            urllib.request.urlopen(f"{base_url}/ops/", timeout=1)
-            return
+            with contextlib.closing(urllib.request.urlopen(f"{base_url}/ops/", timeout=1)):
+                return
         except Exception:
             time.sleep(1)
     print(f"Warning: admin not ready after {WAIT_TIMEOUT}s", file=sys.stderr)
