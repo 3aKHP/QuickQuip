@@ -29,7 +29,8 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 |------|------|
 | [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
 | [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
-| [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、`llm.toml`、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
+| [admin/llm-configuration.md](admin/llm-configuration.md) | LLM 数据库配置管理——迁移、草稿保存与应用、JSON 交换、备份恢复及 1.16.1 回退 |
+| [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、LLM 配置数据库、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
 | [admin/tool-discovery.md](admin/tool-discovery.md) | LLM 工具发现配置——大量 MCP 工具接入时的 `tool_search`、`tool_list`、常驻工具和排障建议 |
 | [admin/mcp-servers.md](admin/mcp-servers.md) | MCP Server 接入指南——transport 选择、接入清单、最小 http 示例与排障 |
 | [admin/skills.md](admin/skills.md) | Skill 系统部署与安全模型——`skills/` 目录约定、脚本执行隔离、资源上限与预置 Skill |
@@ -52,6 +53,8 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/architecture.md](dev/architecture.md) | 项目架构与结构——三层架构、依赖方向、组合根、目录用途与数据边界 |
 | [docs/dev/record-identities.md](dev/record-identities.md) | 记录正文与成员身份契约——正文片段结构、身份分层缓存与消费口径 |
 | [docs/dev/game-framework.md](dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
+| [docs/dev/llm-configuration-api.md](dev/llm-configuration-api.md) | LLM 配置 API——修订冲突、任务状态、参数 metadata 与前端接口契约 |
+| [docs/dev/llm-configuration-frontend.md](dev/llm-configuration-frontend.md) | LLM 配置前端交付——页面任务、保存与应用、字段继承、接口接线和设计验收 |
 | [docs/dev/llm-module.md](dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
 | [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、Docker Socket 取舍、推荐架构、现有 MCP server 列表 |
 | [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——从零开始，以项目实际规则为例，覆盖基础语法到进阶特性 |

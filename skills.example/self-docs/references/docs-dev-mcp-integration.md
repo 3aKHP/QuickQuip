@@ -2,11 +2,13 @@
 
 # QuickQuip MCP 集成说明
 
+配置示例为导出 JSON 中的字段片段；请在 Web Admin「LLM 配置」中编辑，或修改完整导出文件后预览导入、保存草稿并单独应用。完整交换格式见 [LLM 配置管理](../admin/llm-configuration.md)。
+
 ## 当前状态
 
 项目当前已经具备以下 MCP 能力：
 
-- `config/llm.toml` 内可直接声明 `[[mcp.servers]]`
+- 通过配置应用服务在 `data/llm_config.db` 保存 `settings.mcp.servers`
 - 支持 `stdio`、`docker`、`http`、`sse` 四种 transport
 - 配置值支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}` 展开
 - 启动时自动发现 MCP tools，并桥接到现有 `ToolRegistry`
@@ -51,7 +53,7 @@ QuickQuip 把 MCP 作为项目自己的工具后端来源之一，而不是把 C
 
 QuickQuip 应该维护自己的项目配置。当前实现已经把 MCP 配置并入：
 
-- `config/llm.toml`
+- `data/llm_config.db`
 
 ### 3.2 Docker Socket 的取舍
 
@@ -82,9 +84,9 @@ GHCR 分发镜像和生产模板镜像已内置 Docker CLI，以便需要时启�
 
 1. `src/quickquip/llm/service.py`（MCP 生命周期归属 `service_parts/mcp_lifecycle.py`）/ `src/quickquip/llm/tool_registry.py`
 2. `src/quickquip/llm/mcp/`（包，v1.8.9 从单文件 `mcp.py` 拆分而来）
-3. `config/llm.toml` 内的 `[[mcp.servers]]` 定义
+3. `data/llm_config.db` 内的 `settings.mcp.servers` 定义
 
-MCP client 的连接生命周期（启动、重载、关闭、工具别名重注册）由 `service_parts/mcp_lifecycle.py` 单一持有。
+配置运行层管理 MCP 资源代际及租约；连接与工具发现由 `service_parts/mcp_lifecycle.py` 装配。无关字段修改保持已有连接，正在执行的任务持有原资源直到结束。
 
 这样可以保持：
 
@@ -94,24 +96,39 @@ MCP client 的连接生命周期（启动、重载、关闭、工具别名重注
 
 ### 4.2 当前项目配置形式
 
-当前项目使用 `config/llm.toml` 配置 MCP server：
+当前项目在导出 JSON 的 `settings.mcp.servers` 配置 MCP server，保存草稿后单独应用：
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "github"
-transport = "docker"
-image = "ghcr.io/github/github-mcp-server"
-env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}" }
-include_tools = ["search_repositories", "search_code", "get_file_contents"]
-
-[[mcp.servers]]
-id = "arxiv"
-transport = "docker"
-image = "arxiv-mcp-server:latest"
-mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"]
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "github",
+          "transport": "docker",
+          "image": "ghcr.io/github/github-mcp-server",
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+          },
+          "include_tools": [
+            "search_repositories",
+            "search_code",
+            "get_file_contents"
+          ]
+        },
+        {
+          "id": "arxiv",
+          "transport": "docker",
+          "image": "arxiv-mcp-server:latest",
+          "mounts": [
+            "${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers}"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
 这份配置只服务于 QuickQuip，不混入 Codex 配置。
@@ -191,9 +208,9 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
   - 走 MCP 侧 `tavily_search` / `tavily_crawl` / `tavily_research`
 - GitHub / arXiv / PRTS Wiki
   - 已支持作为 MCP 接入
-  - 是否启用由 `config/llm.toml` 与环境变量控制
+  - 是否启用由 `data/llm_config.db` 与环境变量控制
 - 大批量 MCP 工具
-  - 在 `[[mcp.servers]]` 上用 `include_tools` / `exclude_tools` 先治理工具集合
+  - 在 `settings.mcp.servers` 上用 `include_tools` / `exclude_tools` 先治理工具集合
   - 通过 `[tools] discovery_mode = "auto"` 走本地 `tool_search` 按需发现
   - `tool_search` 搜不到但工具存在时，可用 `tool_list` 列工具组并按精确名称加载
   - 初始请求只暴露 `always_loaded` 中的常驻工具，匹配到的 MCP 工具会在下一轮工具调用中加载
@@ -215,7 +232,7 @@ mounts = ["${MCP_ARXIV_PAPERS_MOUNT:-arxiv-papers:/root/.arxiv-mcp-server/papers
 
 1. 补充 `tools/list_changed` 的动态刷新
 2. 为 Docker 型 server 增加更细的状态诊断
-3. 把部分 `env` 从 `config/llm.toml` 进一步抽到更细的部署层
+3. 把部分 `env` 从 `data/llm_config.db` 进一步抽到更细的部署层
 4. 按需要继续接新的 MCP server
 
 不要一开始就同时接多个 server。
@@ -259,13 +276,24 @@ QuickQuip 的 `negotiation` 字段控制每个 HTTP MCP Server 的协商模式�
 
 ### 配置示例
 
-```toml
-[[mcp.servers]]
-id = "modern_api"
-transport = "http"
-negotiation = "auto"
-supported_protocol_versions = ["2026-07-28"]
-url = "https://modern-mcp.example.com/mcp"
+```json
+{
+  "settings": {
+    "mcp": {
+      "servers": [
+        {
+          "id": "modern_api",
+          "transport": "http",
+          "negotiation": "auto",
+          "supported_protocol_versions": [
+            "2026-07-28"
+          ],
+          "url": "https://modern-mcp.example.com/mcp"
+        }
+      ]
+    }
+  }
+}
 ```
 
 ### 协商规则

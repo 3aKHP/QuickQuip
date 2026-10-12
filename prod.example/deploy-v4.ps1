@@ -80,7 +80,7 @@ try {
         $List = Join-Path $Temp 'manifest.txt'
         $Archive = Join-Path $Temp 'release.tar.gz'
         [System.IO.File]::WriteAllText($List, (($entries -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
-        Invoke-Native 'release archive' { tar --exclude=__pycache__ --exclude='*.pyc' -czf $Archive -T $List }
+        Invoke-Native 'release archive' { tar --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -czf $Archive -T $List }
         if ($DryRun) {
             Invoke-Native 'archive preview' { tar -tzf $Archive }
             Write-Host 'Preview complete; frontend built locally, temporary archive removed, no remote connection or upload.'

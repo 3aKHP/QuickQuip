@@ -155,7 +155,7 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本群上下文改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理，窗口随对话增长、冷场后收缩）；重启和 `/llm clear_context` 不影响此设置 |
 | `/llm clear_context` | 清空本群短期上下文，AI“串台”或记错上下文时用 |
 | `/llm delete_msg` | 引用一条消息发送本命令，或 `/llm delete_msg <消息ID>`，从上下文删除该条 |
-| `/llm reload` | 重载 LLM 配置并重置本群上下文条数覆盖；作用于整个部署，重载后的探活会发一条真实请求，可能产生计费 |
+| `/llm reload` | 重载已发布 LLM 配置并重置本群上下文条数覆盖；作用于整个部署，重载后的探活会发一条真实请求，可能产生计费 |
 | `/llm probe` | 并发探活所有 provider，逐个汇报可用性 |
 | `/llm mcp reload` | 拉取 MCP 镜像并重连，完成后返回连接状态 |
 
@@ -200,7 +200,7 @@ AI 聊天自带两个行为开关（默认开启）：
 
 ### 每日播报与总结
 
-播报（早/午/晚报）和总结（日报/周报/月报）默认关闭，开启需要管理员执行命令，且部署者需在 `config/llm.toml` 全局启用对应功能。生成与发布时刻由部署配置的定时任务决定。立即生成类命令每分钟限一次。
+播报（早/午/晚报）和总结（日报/周报/月报）默认关闭，开启需要管理员执行命令，且部署者需在 LLM 配置中全局启用对应功能并保存应用。生成与发布时刻由部署配置的定时任务决定。立即生成类命令每分钟限一次。
 
 | 命令 | 说明 |
 |------|------|
@@ -226,7 +226,7 @@ AI 聊天自带两个行为开关（默认开启）：
 | `/schedule on / off <任务ID>` | 启用 / 停用任务 |
 | `/schedule del <任务ID>` | 删除任务 |
 
-普通群友也可以直接对 bot 说"今晚七点提醒我看 KPL"之类的话，AI 会自行创建一次性的 LLM 定时任务（需要部署者在 `config/llm.toml` 的 `[tools] enabled` 中启用 `manage_scheduled_messages`）。LLM 类任务受规则开关 `scheduled_message_llm` 控制（`/disable` / `/enable`），且需要本群 LLM 处于启用状态。
+普通群友也可以直接对 bot 说"今晚七点提醒我看 KPL"之类的话，AI 会自行创建一次性的 LLM 定时任务（需要部署者在 LLM 配置的 `settings.tools.enabled` 中启用并保存应用 `manage_scheduled_messages`）。LLM 类任务受规则开关 `scheduled_message_llm` 控制（`/disable` / `/enable`），且需要本群 LLM 处于启用状态。
 
 ### 统计、词云与热重载
 

@@ -63,7 +63,7 @@ LLM 相关核心文件如下：
 - `src/quickquip/app/message_pipeline.py`
   - 应用组合根：chat / games / tieba 单例装配、`resolve_reply()` 规则链、`reload_chat_rules_pipeline()`、`save_all()` / `close_persistent_stores()` 与 `_ensure_llm_bindings()`
 - `src/quickquip/llm/config.py`
-  - 负责读取 `config/llm.toml`
+  - 保留业务配置对象；数据库应用服务读取已发布快照，`config_document.py` 负责校验、编译与模型参数解析
 - `src/quickquip/llm/provider/`（包）
   - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Claude 签名 thinking 块在工具循环内经通用重建回传，带工具的已关闭 Loop 跨轮走原生回放（owner 五元组匹配且签名有效时）；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client` / `replay_guard`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
 - `src/quickquip/llm/tool_loop.py`
@@ -119,9 +119,9 @@ LLM 相关核心文件如下：
 
 配置文件：
 
-- `config/llm.toml`
+- `data/llm_config.db`
   - 真实运行配置，本地私有
-- `config/llm.toml.example`
+- `config/llm.json.example`
   - 原始通用示例，保留为参考模板
 
 群资料文件：
@@ -184,7 +184,7 @@ LLM 默认只在以下场景触发：
 | `awakening_boredom` | APScheduler 定时检查沉寂群，并向 opt-in 群发送低频冒泡消息 |
 | `awakening_fallback` | 普通消息按配置概率兜底触发 |
 
-相关性与答疑判定会使用 `[triggers.quick_judge]` 指定的小模型配置；阈值 `>= 1.0` 时跳过对应 LLM 判定。
+相关性与答疑判定会使用 `settings.quick_judge` 指定的小模型配置；阈值 `>= 1.0` 时跳过对应 LLM 判定。
 
 `awakening_extend` 只由显式 LLM 入口打开，例如前缀或艾特触发。兴趣、兜底、无聊、相关性和答疑唤醒都是一次性触发，不会继续刷新延长窗口。延长窗口内仍会过滤图片-only、CQ-only、短语气词和过短无实义文本。
 
@@ -217,7 +217,7 @@ LLM 默认只在以下场景触发：
 LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
 
 - 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长、不逐轮位移——这是自动前缀缓存跨轮命中的结构性前提
-- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次，付费 miss 换优雅降级）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `llm.toml` 的 `[runtime]` / `[[providers]]` 用 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
+- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次，付费 miss 换优雅降级）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `settings.runtime` 与渠道／模型 `parameters` 的 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
 - 窗口单位是 token 估算（`token_estimate.py`），不再是行数；另有 1024 行的行数硬兜底（防海量超短行撑爆 provider 的 messages 数组）
 - 锚点只落在 user/assistant 对边界，且保留最少 4 行（防单条超长转发把窗口吃空）
 - 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
@@ -234,7 +234,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读
 - 候选 =（上次服役之后的新消息）∪（`recent_context_floor_seconds`=300s 滑动保底窗内的消息），再按 message_id 剔除 history 已覆盖者与当前触发消息，最后从最新往回截到 `recent_context_token_budget`=800 token（估算，至少保留最新一条；非法取值回退默认并告警）
 - 读即服役：取出后 `note_patch_served` 推进按群游标；失败轮丢失超保底窗的旧补丁，由保底窗兜底
 - **被动唤醒的近期图不受增量语义收窄**：`include_recent_images` 路径的图片源是 `list_recent` 全量快照（TTL 窗语义，与文本补丁解耦）——无聊唤醒恰在冷场（补丁最空）时触发，图若随增量游标收窄该特性会静默失效
-- 预算只在服役侧执行：buffer 写入侧仍按 20 条 + TTL 1800s 收口（内存上界不动），estimator/budget/floor 全部由 service 按 `[runtime]` 配置注入（仅全局键，无 provider 覆盖）
+- 预算只在服役侧执行：buffer 写入侧仍按 20 条 + TTL 1800s 收口（内存上界不动），estimator/budget/floor 全部由 service 按 `settings.runtime` 配置注入（仅全局键，无 provider 覆盖）
 - 适配层不再向 `generate_reply` 传快照；service 在群聊且未显式注入时自取（`recent_messages=[]` 显式空是测试注入口）。私聊不自取
 - `list_recent` 全量快照保留给两个不适用增量语义的消费者：`context_rules` 规则引擎与「读近期消息」模型工具
 
@@ -266,7 +266,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读
 - provider 图片下载按客户端实例缓存（TTL 10 分钟、容量 32 张 LRU，仅缓存成功结果）：同一轮内工具循环重建请求与退避重试不再重复下载同一 URL；GIF 首帧转码结果按内容哈希缓存，逐轮序列化不重复解码
 - 请求组装先统一准备用户消息与各批工具结果图片，共享字节预算和内容去重；优先最新用户消息中的当前/引用/近期图片，再按新到旧处理工具结果与历史图片。预算耗尽后停止接纳后续低优先级图片，重试和并发请求各自创建预算。协议序列化保留完整工具结果批次与原消息顺序
 - 如果只有图片没有文字提示，会自动补一个默认识图提示
-- 视觉主模型直接接收原图；列入 `non_vision_models` 的主模型接收带来源和序号的视觉转述
+- 视觉主模型直接接收原图；模型条目 `vision = false` 的主模型接收带来源和序号的视觉转述
 - 前置视觉识别不可用、返回空内容或任一图片识别失败时，本轮终止并提示用户重试
 
 MCP 工具也可返回经过校验的内联图片。它们不写入对话数据库、普通日志或 MCP 状态；视觉模型在下一轮工具调用消息中接收图片，非视觉模型仅接收经过二次敏感词扫描的转述文本。工具图片的转述不可用或失败时，Agent Loop 继续使用安全工具文本，而不会把原图或编码降级为文本。
@@ -347,7 +347,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ### 5.4 Provider 风格覆盖
 
-每个 `[[providers]]` 条目支持可选字段 `style_overrides`（多行字符串）。
+每个 `providers` 条目支持可选字段 `style_overrides`（多行字符串）。
 
 此字段的内容会在每次调用该 provider 时，追加到 persona 的 `style_prompt` 之后，用于修正特定模型的口癖。
 
@@ -387,63 +387,20 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ## 6. 配置说明
 
-### 6.1 `config/llm.toml`
+### 6.1 `data/llm_config.db`
 
-主要区块：
+配置服务保留草稿、不可变发布快照、修订号、应用任务与 Bot 心跳。Web 和 CLI 共用校验与修订检查，Bot 以租约领取控制任务；保存草稿不会修改运行时，重启加载已发布版本。每个 Agent Loop 和独立报告任务固定配置、价格、工具与资源直到结束。
 
-- `[runtime]`
-  - `enabled`
-  - `memory_enabled`
-  - `default_provider`
-  - `default_persona`
-  - `history_limit`
-  - `history_max_messages_per_group`
-  - `memory_limit`
-  - `memory_max_items_per_group`
-  - `max_prompt_chars`
-  - `tool_calling_enabled`
-  - `tool_max_rounds`
-  - `tool_max_calls_per_round`
-  - `auto_memory_enabled`
-  - `auto_memory_prompt`
-  - `auto_memory_max_tokens`
-  - `agent_delivery_intermediate_enabled` / `agent_delivery_final_enabled`（Agent Loop 分段交付两域的全局默认：中间轮发送与最终轮分段；旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射）
-- `[triggers]`
-  - `default_prefix`
-  - `allow_prefix`
-  - `allow_at`
-  - `empty_prompt_reply`
-  - `[triggers.quick_judge]`：唤醒模块和语境规则使用的快速判定模型
-- `[tools]`
-  - `enabled`
-  - `enabled_mode`：`enabled` 非空时的作用方式，`append`（默认，默认白名单 + MCP 之上追加）/ `replace`（精确过滤）
-  - `discovery_mode`
-  - `discovery_min_tools`
-  - `discovery_search_limit`
-  - `discovery_max_loaded_tools`
-  - `always_loaded`
-- `[[providers]]`
-  - `id`
-  - `protocol`
-  - `base_url`
-  - `api_key_env`
-  - `default_model`
-  - `models`
-  - `timeout_seconds`
-  - `temperature`
-  - `max_output_tokens`
-  - `style_overrides`（可选，追加到每次调用的 system prompt 末尾）
-  - `auth_method`（可选，`api_key` / `bearer`，默认 `api_key`；Claude 控制 `x-api-key` / Bearer，Gemini 控制查询参数 key / Bearer）
-  - `prompt_caching`（可选，`claude` 协议专用，启用 Anthropic Prompt Caching）
-  - `cache_ttl`（可选，`claude` 协议专用，`"1h"` 启用 1h 扩展缓存、留空=默认 5min；仅 `prompt_caching` 开启时生效）
-- `[daily_briefing]`
-  - 每日早/午/晚播报全局开关、三段 cron、最小消息数、活跃用户/热词/样本上限、上下文规模、输出长度、模型级联列表
-- `[daily_summary]`
-  - 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表
+交换格式的主要字段：
 
-`[runtime]` 的完整键集（会话纪元 `epoch_*`、重试退避、请求/重放预算、回复分段、Loop 记录等）以 [../admin/configuration.md](../admin/configuration.md) 为准；本文 §4.2 详述纪元与预算机制。
+- `providers`：有序渠道、模型与别名；固定认证／地址字段在渠道层，请求参数在渠道或模型的 `parameters`。
+- `style_profiles` 与 `pricing`：共享风格及价格，价格用显式渠道 ID 与响应模型名匹配。
+- `routes`：四类报告的有序候选，以 `{provider_id, model}` 引用；`@default` 动态选择默认模型。
+- `settings.runtime` / `triggers` / `auto_search` / `quick_judge` / `image_preprocessing`：全局运行、触发与专用模型选择。
+- `settings.tools` / `skills` / `mcp`：工具绑定、Skill 资源限额与 MCP 配置。
+- `settings.daily_summary` / `daily_briefing` / `weekly_report` / `monthly_report`：报告开关、提示与时间配置。
 
-Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每个 `.toml` 一个人格文件，`_shared.toml` 存储共享行为准则与风格规则。
+完整字段见 [配置参考](../admin/configuration.md)，状态和操作契约见 [配置 API](llm-configuration-api.md)。`config/personas/` 和 `config/generation.toml` 继续维护独立配置；旧 TOML 仅供迁移与迁移前版本回退。配置修订号覆盖配置库，外部文件和环境变量保持独立生命周期。
 
 ### 6.2 工具发现
 
@@ -475,7 +432,7 @@ Skill 系统是 1.16 引入的运行时可扩展能力：部署者把 Skill 包�
 - `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
 - `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
 
-配置集中在 `llm.toml` 的 `[skills]` 段（键与默认值见 [../admin/configuration.md](../admin/configuration.md)）；群友侧用 `/skill list` 查看已安装与已激活项。部署方式与安全模型见 [../admin/skills.md](../admin/skills.md)，编写自己的 Skill 见教程 [skill-tutorial.md](skill-tutorial.md)。
+配置集中在 `settings.skills`（键与默认值见 [../admin/configuration.md](../admin/configuration.md)）；群友侧用 `/skill list` 查看已安装与已激活项。部署方式与安全模型见 [../admin/skills.md](../admin/skills.md)，编写自己的 Skill 见教程 [skill-tutorial.md](skill-tutorial.md)。
 
 ### 6.4 `config/awakening.toml`
 
@@ -533,9 +490,9 @@ LLM 相关的多模态输入/产出配置在 `generation.toml` 中维护：
 
 ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /audio/transcriptions`。配置示例见 `config/generation.toml.example`。
 
-`draw_svg` 是内置工具但**不在默认启用名单**：需要在 `generation.toml [svg]` 设 `enabled = true`，并在 `llm.toml [tools] enabled` 中加入 `"draw_svg"`。渲染由 `quickquip.generation.svg` 编排——输入硬约束与静态清洗（`svg_sanitize.py`）、输出尺寸服务端覆盖（剥离根节点 width/height 后按 viewBox×2 显式传参）、spawn 子进程沙箱（Linux 带 RLIMIT_AS/RLIMIT_CPU，墙钟超时兜底）。工具结果图片经 `ToolExecutionContext.outbound_images` 外发通道直接发给用户（不回喂模型），单次回复上限 3 张，渲染限流为全局 10 次/分钟、单用户 2 次/分钟。
+`draw_svg` 是内置工具但**不在默认启用名单**：需要在 `generation.toml [svg]` 设 `enabled = true`，并在 `settings.tools.enabled` 中加入 `"draw_svg"`。渲染由 `quickquip.generation.svg` 编排——输入硬约束与静态清洗（`svg_sanitize.py`）、输出尺寸服务端覆盖（剥离根节点 width/height 后按 viewBox×2 显式传参）、spawn 子进程沙箱（Linux 带 RLIMIT_AS/RLIMIT_CPU，墙钟超时兜底）。工具结果图片经 `ToolExecutionContext.outbound_images` 外发通道直接发给用户（不回喂模型），单次回复上限 3 张，渲染限流为全局 10 次/分钟、单用户 2 次/分钟。
 
-两层可选安全防护：`harden`（默认启用）控制第一层渲染硬防线（输入约束+清洗+尺寸覆盖+沙箱 rlimit）；`content_judge`（默认关闭）控制第二层内容裁决，复用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做安全判定，判定失败 fail-open。详见 `config/generation.toml.example` 中 `[svg]` 段注释。
+两层可选安全防护：`harden`（默认启用）控制第一层渲染硬防线（输入约束+清洗+尺寸覆盖+沙箱 rlimit）；`content_judge`（默认关闭）控制第二层内容裁决，复用 `settings.quick_judge` 的廉价模型对图片可见文本做安全判定，判定失败 fail-open。详见 `config/generation.toml.example` 中 `[svg]` 段注释。
 
 ---
 
@@ -550,7 +507,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm health [verbose|detail|full]`
   - 运行 LLM 健康检查（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings、auto_memory 共 13 项）
 - `/llm reload`
-  - 仅管理员。重载 LLM 配置，并探活当前会话实际生效的 provider/model
+  - 仅管理员。重载已发布 LLM 配置，并探活当前会话实际生效的 provider/model；草稿通过管理后台或 CLI 单独应用
   - reload 后探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费；api_key 未设置时自动跳过
 - `/llm probe`
   - 仅管理员。并发探活所有 provider（每个发一条 max_tokens=1 的请求），报告可达性与延迟
@@ -614,7 +571,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 部署要点：
 
-- `config/llm.toml` 应在运行环境中提供
+- 初始化／迁移准备共享 `data/llm_config.db`，Bot 启动加载已发布快照，草稿通过独立任务应用
 - `config/generation.toml` 启用 ASR 时需要配置可用的 `[asr]` provider
 - `llm_about` 应在运行环境中提供
   - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
@@ -644,7 +601,7 @@ LLM 侧的联网搜索有两条互斥路径：
 - 不默认把所有外部工具都改成 MCP
 - 敏感词表更新会改写 history 行的当轮渲染字节（加载时以当前词表重 scrub，不回写存储），使该轮前缀缓存 miss——安全优先的刻意取舍
 
-注：每日总结（`daily_summary`）模块已实现模型级联策略，生成失败时自动降级到下一个 provider/model，顺序在 `[daily_summary] model_cascade` 中配置。这是总结生成专用的级联，不影响普通 LLM 对话的 provider 选择。
+注：每日总结（`daily_summary`）模块已实现模型级联策略，生成失败时自动降级到下一个 provider/model，顺序在 `routes.daily_summary` 有序引用数组中配置。这是总结生成专用的级联，不影响普通 LLM 对话的 provider 选择。
 
 ---
 
@@ -652,7 +609,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 如果准备正式上线，建议确认：
 
-- `config/llm.toml` 中默认 provider、model、persona 正确
+- `data/llm_config.db` 中默认 provider、model、persona 正确
 - `.env` 中 Gemini / OpenAI / Claude key 正确
 - `/llm current` 输出正常
 - `/llm memory status` 输出正常
@@ -671,7 +628,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 后续如果继续演进，建议遵守下面的顺序：
 
-1. 先改 `config/llm.toml` 和 persona 文案
+1. 通过 Web Admin 或 CLI 编辑 LLM 草稿并单独应用；人格文案保存在独立文件
 2. 再改 `identities.yaml`
 3. 再改 `vocab.yaml`
 4. 最后才考虑扩大自动记忆能力
@@ -681,7 +638,7 @@ LLM 侧的联网搜索有两条互斥路径：
 - 人格问题，优先改 prompt
 - 认人问题，优先改身份词表
 - 称呼理解问题，再改话题词表
-- 工具边界问题，优先改 `[tools]` 配置和注册表
+- 工具边界问题，优先改 `settings.tools` 配置和注册表
 - 记忆问题，最后改自动抽取逻辑
 
 不要反过来。

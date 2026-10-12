@@ -1,0 +1,5492 @@
+{
+  "components": {
+    "schemas": {
+      "ApplyBody": {
+        "properties": {
+          "expected_draft_revision": {
+            "minimum": 1.0,
+            "title": "Expected Draft Revision",
+            "type": "integer"
+          },
+          "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_draft_revision",
+          "request_id"
+        ],
+        "title": "ApplyBody",
+        "type": "object"
+      },
+      "BatchBody": {
+        "properties": {
+          "changes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Changes",
+            "type": "array"
+          },
+          "expected_draft_revision": {
+            "minimum": 1.0,
+            "title": "Expected Draft Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_draft_revision",
+          "changes"
+        ],
+        "title": "BatchBody",
+        "type": "object"
+      },
+      "ConfigDependencies": {
+        "properties": {
+          "dependencies": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigDiff": {
+        "properties": {
+          "changes": {
+            "items": {
+              "properties": {
+                "after": {},
+                "before": {},
+                "field_path": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "components": {
+            "properties": {
+              "mcp_reconnect": {
+                "type": "boolean"
+              },
+              "reschedule": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [],
+            "type": "object"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "format_version": {
+            "const": 1
+          },
+          "pricing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cache_read_per_mtok": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "cache_write_per_mtok": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "confidence": {
+                  "type": "string"
+                },
+                "input_per_mtok": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "output_per_mtok": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "provider_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "model"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "aliases": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "alias": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "alias",
+                      "model"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "api_key_env": {
+                  "type": "string"
+                },
+                "auth_method": {
+                  "enum": [
+                    "api_key",
+                    "bearer"
+                  ]
+                },
+                "base_url": {
+                  "type": "string"
+                },
+                "default_model": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "fallback_urls": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "headers": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "pattern": "^[A-Za-z0-9_.-]+$",
+                  "type": "string"
+                },
+                "models": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "context_window": {
+                        "minimum": 1024,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "model": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "parameters": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "agent_replay_loop_tokens": {
+                            "maximum": 4194304,
+                            "minimum": 512,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "builtin_search": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "cache_ttl": {
+                            "enum": [
+                              "",
+                              "5m",
+                              "1h",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "epoch_cap_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_cold_idle_seconds": {
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_cold_target_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_cold_trigger_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_context_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_hot_target_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "extra_body": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "max_inline_media_bytes": {
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "max_output_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "prompt_caching": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "reasoning_effort": {
+                            "enum": [
+                              "",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "ultra",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "request_input_token_budget": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "responses_profile": {
+                            "enum": [
+                              "codex-http-relay",
+                              "openai-public",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "retry_base_delay": {
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "retry_jitter": {
+                            "maximum": 1,
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "retry_max_attempts": {
+                            "maximum": 20,
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "stream_enabled": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "style_overrides": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "style_profile": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "temperature": {
+                            "maximum": 2,
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "timeout_seconds": {
+                            "minimum": 0.01,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "user_agent": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "vision": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "model"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "agent_replay_loop_tokens": {
+                      "maximum": 4194304,
+                      "minimum": 512,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "builtin_search": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "cache_ttl": {
+                      "enum": [
+                        "",
+                        "5m",
+                        "1h",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "epoch_cap_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_cold_idle_seconds": {
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_cold_target_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_cold_trigger_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_context_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_hot_target_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "extra_body": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "max_inline_media_bytes": {
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "max_output_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "prompt_caching": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "reasoning_effort": {
+                      "enum": [
+                        "",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "ultra",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "request_input_token_budget": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "responses_profile": {
+                      "enum": [
+                        "codex-http-relay",
+                        "openai-public",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "retry_base_delay": {
+                      "minimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "retry_jitter": {
+                      "maximum": 1,
+                      "minimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "retry_max_attempts": {
+                      "maximum": 20,
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "stream_enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "style_overrides": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "style_profile": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "temperature": {
+                      "maximum": 2,
+                      "minimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "timeout_seconds": {
+                      "minimum": 0.01,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "user_agent": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                },
+                "protocol": {
+                  "enum": [
+                    "openai",
+                    "claude",
+                    "gemini",
+                    "openai_responses"
+                  ],
+                  "type": "string"
+                },
+                "proxy": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "protocol",
+                "base_url",
+                "api_key_env",
+                "default_model",
+                "models"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "routes": {
+            "additionalProperties": false,
+            "properties": {
+              "daily_briefing": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "provider_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "provider_id",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "const": "@default"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "daily_summary": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "provider_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "provider_id",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "const": "@default"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "monthly_report": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "provider_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "provider_id",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "const": "@default"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              "weekly_report": {
+                "items": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "provider_id": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "provider_id",
+                        "model"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "const": "@default"
+                    }
+                  ]
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "settings": {
+            "additionalProperties": false,
+            "properties": {
+              "auto_search": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "search_max_calls_per_round": {
+                    "maximum": 32,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "daily_briefing": {
+                "additionalProperties": false,
+                "properties": {
+                  "active_users_limit": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "evening_cron": {
+                    "type": "string"
+                  },
+                  "hot_words_limit": {
+                    "type": "integer"
+                  },
+                  "max_context_chars": {
+                    "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "max_output_chars": {
+                    "minimum": 80,
+                    "type": "integer"
+                  },
+                  "min_messages_for_llm": {
+                    "type": "integer"
+                  },
+                  "morning_cron": {
+                    "type": "string"
+                  },
+                  "noon_cron": {
+                    "type": "string"
+                  },
+                  "sample_messages_limit": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "daily_summary": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "generate_cron": {
+                    "type": "string"
+                  },
+                  "min_messages": {
+                    "type": "integer"
+                  },
+                  "publish_cron": {
+                    "type": "string"
+                  },
+                  "summary_length_hint": {
+                    "minimum": 100,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "image_preprocessing": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "max_tokens": {
+                    "maximum": 2048,
+                    "minimum": 80,
+                    "type": "integer"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "provider_id": {
+                    "type": "string"
+                  },
+                  "temperature": {
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "mcp": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "servers": {
+                    "items": {
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "monthly_report": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "generate_cron": {
+                    "type": "string"
+                  },
+                  "input_char_budget": {
+                    "minimum": 8000,
+                    "type": "integer"
+                  },
+                  "length_hint": {
+                    "minimum": 200,
+                    "type": "integer"
+                  },
+                  "min_messages": {
+                    "type": "integer"
+                  },
+                  "publish_cron": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "quick_judge": {
+                "additionalProperties": false,
+                "properties": {
+                  "max_tokens": {
+                    "minimum": 8,
+                    "type": "integer"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "provider_id": {
+                    "type": "string"
+                  },
+                  "timeout": {
+                    "minimum": 0.5,
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "runtime": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_delivery_final_enabled": {
+                    "type": "boolean"
+                  },
+                  "agent_delivery_intermediate_enabled": {
+                    "type": "boolean"
+                  },
+                  "agent_record_max_bytes_per_scope": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "agent_record_max_loops_per_scope": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "agent_record_retention_days": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "agent_replay_loop_tokens": {
+                    "maximum": 4194304,
+                    "minimum": 512,
+                    "type": "integer"
+                  },
+                  "auto_memory_enabled": {
+                    "type": "boolean"
+                  },
+                  "auto_memory_max_tokens": {
+                    "minimum": 32,
+                    "type": "integer"
+                  },
+                  "auto_memory_prompt": {
+                    "type": "string"
+                  },
+                  "default_persona": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "default_provider": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "epoch_cap_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "epoch_cold_idle_seconds": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "epoch_cold_target_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "epoch_cold_trigger_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "epoch_context_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "epoch_hot_target_tokens": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "history_limit": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "history_max_messages_per_group": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "max_prompt_chars": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "memory_enabled": {
+                    "type": "boolean"
+                  },
+                  "memory_limit": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "memory_max_items_per_group": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mention_cooldown_seconds": {
+                    "maximum": 86400,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "recent_context_floor_seconds": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "recent_context_token_budget": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "reply_chunk_max_chars": {
+                    "minimum": 80,
+                    "type": "integer"
+                  },
+                  "reply_max_chunks_per_loop": {
+                    "maximum": 256,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "reply_send_interval_ms": {
+                    "maximum": 10000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "reply_split_threshold_chars": {
+                    "minimum": 80,
+                    "type": "integer"
+                  },
+                  "request_input_token_budget": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "retry_base_delay": {
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "retry_jitter": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number"
+                  },
+                  "retry_max_attempts": {
+                    "maximum": 20,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "tool_calling_enabled": {
+                    "type": "boolean"
+                  },
+                  "tool_max_calls_per_round": {
+                    "maximum": 32,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "tool_max_rounds": {
+                    "maximum": 16,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "skills": {
+                "additionalProperties": false,
+                "properties": {
+                  "catalog_dir": {
+                    "type": "string"
+                  },
+                  "catalog_max_bytes": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "resource_max_bytes": {
+                    "type": "integer"
+                  },
+                  "script_max_output_bytes": {
+                    "type": "integer"
+                  },
+                  "script_timeout_ms": {
+                    "maximum": 120000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "search_max_output_bytes": {
+                    "type": "integer"
+                  },
+                  "search_max_results": {
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
+              "tools": {
+                "additionalProperties": false,
+                "properties": {
+                  "always_loaded": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "discovery_max_loaded_tools": {
+                    "maximum": 64,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "discovery_min_tools": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "discovery_mode": {
+                    "enum": [
+                      "off",
+                      "on",
+                      "auto"
+                    ],
+                    "type": "string"
+                  },
+                  "discovery_search_limit": {
+                    "maximum": 20,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "items": {},
+                    "type": "array"
+                  },
+                  "enabled_mode": {
+                    "enum": [
+                      "append",
+                      "replace"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "triggers": {
+                "additionalProperties": false,
+                "properties": {
+                  "allow_at": {
+                    "type": "boolean"
+                  },
+                  "allow_prefix": {
+                    "type": "boolean"
+                  },
+                  "default_prefix": {
+                    "type": "string"
+                  },
+                  "empty_prompt_reply": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "weekly_report": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "generate_cron": {
+                    "type": "string"
+                  },
+                  "length_hint": {
+                    "minimum": 200,
+                    "type": "integer"
+                  },
+                  "min_messages": {
+                    "type": "integer"
+                  },
+                  "publish_cron": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "style_profiles": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "format_version"
+        ],
+        "type": "object"
+      },
+      "ConfigEffectiveParameters": {
+        "properties": {
+          "parameters": {
+            "additionalProperties": {
+              "properties": {
+                "configured": {},
+                "source": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [],
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigEnvelope": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/ConfigDocument"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "document"
+        ],
+        "type": "object"
+      },
+      "ConfigEnvironment": {
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "variables": {
+            "items": {
+              "properties": {
+                "configured": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigError": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "details": {},
+          "field_path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "field_path",
+          "details"
+        ],
+        "type": "object"
+      },
+      "ConfigHistory": {
+        "properties": {
+          "snapshots": {
+            "items": {
+              "properties": {
+                "created_at": {
+                  "type": "number"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigImportPreview": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ConfigValidation"
+          },
+          {
+            "properties": {
+              "changes": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "document": {
+                "$ref": "#/components/schemas/ConfigDocument"
+              },
+              "expected_draft_revision": {
+                "type": "integer"
+              }
+            },
+            "required": [],
+            "type": "object"
+          }
+        ]
+      },
+      "ConfigMetadata": {
+        "properties": {
+          "format_version": {
+            "type": "integer"
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "protocols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "route_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "settings": {
+            "type": "object"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigOperation": {
+        "properties": {
+          "automatic_retry": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "error": {},
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "apply",
+              "probe"
+            ]
+          },
+          "may_charge": {
+            "type": "boolean"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "result": {},
+          "stage": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "target_revision": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "target_revision",
+          "status",
+          "stage"
+        ],
+        "type": "object"
+      },
+      "ConfigOperationList": {
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigOperation"
+            },
+            "type": "array"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigProviderDetail": {
+        "properties": {
+          "pricing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "cache_read_per_mtok": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "cache_write_per_mtok": {
+                  "minimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "confidence": {
+                  "type": "string"
+                },
+                "input_per_mtok": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "output_per_mtok": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "provider_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "model"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "additionalProperties": false,
+            "properties": {
+              "aliases": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "alias": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "alias",
+                    "model"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "api_key_env": {
+                "type": "string"
+              },
+              "auth_method": {
+                "enum": [
+                  "api_key",
+                  "bearer"
+                ]
+              },
+              "base_url": {
+                "type": "string"
+              },
+              "default_model": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "fallback_urls": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "id": {
+                "pattern": "^[A-Za-z0-9_.-]+$",
+                "type": "string"
+              },
+              "models": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "context_window": {
+                      "minimum": 1024,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "model": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "parameters": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "agent_replay_loop_tokens": {
+                          "maximum": 4194304,
+                          "minimum": 512,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "builtin_search": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "cache_ttl": {
+                          "enum": [
+                            "",
+                            "5m",
+                            "1h",
+                            null
+                          ],
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "epoch_cap_tokens": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "epoch_cold_idle_seconds": {
+                          "minimum": 0,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "epoch_cold_target_tokens": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "epoch_cold_trigger_tokens": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "epoch_context_tokens": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "epoch_hot_target_tokens": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "extra_body": {
+                          "type": [
+                            "object",
+                            "null"
+                          ]
+                        },
+                        "max_inline_media_bytes": {
+                          "minimum": 0,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "max_output_tokens": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "prompt_caching": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "reasoning_effort": {
+                          "enum": [
+                            "",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra",
+                            null
+                          ],
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "request_input_token_budget": {
+                          "minimum": 1,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "responses_profile": {
+                          "enum": [
+                            "codex-http-relay",
+                            "openai-public",
+                            null
+                          ],
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "retry_base_delay": {
+                          "minimum": 0,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "retry_jitter": {
+                          "maximum": 1,
+                          "minimum": 0,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "retry_max_attempts": {
+                          "maximum": 20,
+                          "minimum": 0,
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "stream_enabled": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "style_overrides": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "style_profile": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "temperature": {
+                          "maximum": 2,
+                          "minimum": 0,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "timeout_seconds": {
+                          "minimum": 0.01,
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "user_agent": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "vision": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "model"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_replay_loop_tokens": {
+                    "maximum": 4194304,
+                    "minimum": 512,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "builtin_search": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "cache_ttl": {
+                    "enum": [
+                      "",
+                      "5m",
+                      "1h",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "epoch_cap_tokens": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "epoch_cold_idle_seconds": {
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "epoch_cold_target_tokens": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "epoch_cold_trigger_tokens": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "epoch_context_tokens": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "epoch_hot_target_tokens": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "extra_body": {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "max_inline_media_bytes": {
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "max_output_tokens": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "prompt_caching": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "reasoning_effort": {
+                    "enum": [
+                      "",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max",
+                      "ultra",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "request_input_token_budget": {
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "responses_profile": {
+                    "enum": [
+                      "codex-http-relay",
+                      "openai-public",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "retry_base_delay": {
+                    "minimum": 0,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "retry_jitter": {
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "retry_max_attempts": {
+                    "maximum": 20,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "stream_enabled": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "style_overrides": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "style_profile": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "temperature": {
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "timeout_seconds": {
+                    "minimum": 0.01,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "user_agent": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              },
+              "protocol": {
+                "enum": [
+                  "openai",
+                  "claude",
+                  "gemini",
+                  "openai_responses"
+                ],
+                "type": "string"
+              },
+              "proxy": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "protocol",
+              "base_url",
+              "api_key_env",
+              "default_model",
+              "models"
+            ],
+            "type": "object"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigProviders": {
+        "properties": {
+          "providers": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "aliases": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "alias": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "alias",
+                      "model"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "api_key_env": {
+                  "type": "string"
+                },
+                "auth_method": {
+                  "enum": [
+                    "api_key",
+                    "bearer"
+                  ]
+                },
+                "base_url": {
+                  "type": "string"
+                },
+                "default_model": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "fallback_urls": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "headers": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "pattern": "^[A-Za-z0-9_.-]+$",
+                  "type": "string"
+                },
+                "models": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "context_window": {
+                        "minimum": 1024,
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "model": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "parameters": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "agent_replay_loop_tokens": {
+                            "maximum": 4194304,
+                            "minimum": 512,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "builtin_search": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "cache_ttl": {
+                            "enum": [
+                              "",
+                              "5m",
+                              "1h",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "epoch_cap_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_cold_idle_seconds": {
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_cold_target_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_cold_trigger_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_context_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "epoch_hot_target_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "extra_body": {
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          },
+                          "max_inline_media_bytes": {
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "max_output_tokens": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "prompt_caching": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "reasoning_effort": {
+                            "enum": [
+                              "",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "ultra",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "request_input_token_budget": {
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "responses_profile": {
+                            "enum": [
+                              "codex-http-relay",
+                              "openai-public",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "retry_base_delay": {
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "retry_jitter": {
+                            "maximum": 1,
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "retry_max_attempts": {
+                            "maximum": 20,
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "stream_enabled": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "style_overrides": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "style_profile": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "temperature": {
+                            "maximum": 2,
+                            "minimum": 0,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "timeout_seconds": {
+                            "minimum": 0.01,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "user_agent": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "vision": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "model"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "parameters": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "agent_replay_loop_tokens": {
+                      "maximum": 4194304,
+                      "minimum": 512,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "builtin_search": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "cache_ttl": {
+                      "enum": [
+                        "",
+                        "5m",
+                        "1h",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "epoch_cap_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_cold_idle_seconds": {
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_cold_target_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_cold_trigger_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_context_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "epoch_hot_target_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "extra_body": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "max_inline_media_bytes": {
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "max_output_tokens": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "prompt_caching": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "reasoning_effort": {
+                      "enum": [
+                        "",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max",
+                        "ultra",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "request_input_token_budget": {
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "responses_profile": {
+                      "enum": [
+                        "codex-http-relay",
+                        "openai-public",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "retry_base_delay": {
+                      "minimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "retry_jitter": {
+                      "maximum": 1,
+                      "minimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "retry_max_attempts": {
+                      "maximum": 20,
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "stream_enabled": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "style_overrides": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "style_profile": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "temperature": {
+                      "maximum": 2,
+                      "minimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "timeout_seconds": {
+                      "minimum": 0.01,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "user_agent": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "type": "object"
+                },
+                "protocol": {
+                  "enum": [
+                    "openai",
+                    "claude",
+                    "gemini",
+                    "openai_responses"
+                  ],
+                  "type": "string"
+                },
+                "proxy": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "protocol",
+                "base_url",
+                "api_key_env",
+                "default_model",
+                "models"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigSection": {
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "value": {}
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigStatus": {
+        "properties": {
+          "bot": {
+            "anyOf": [
+              {
+                "properties": {
+                  "application_version": {
+                    "type": "string"
+                  },
+                  "boot_id": {
+                    "type": "string"
+                  },
+                  "components": {
+                    "type": "object"
+                  },
+                  "heartbeat_at": {
+                    "type": "number"
+                  },
+                  "loaded_revision": {
+                    "type": "integer"
+                  },
+                  "observed_at": {
+                    "type": "number"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "draft_revision": {
+            "type": "integer"
+          },
+          "published_revision": {
+            "type": "integer"
+          },
+          "schema_version": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ConfigValidation": {
+        "properties": {
+          "dependencies": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "valid",
+          "warnings",
+          "dependencies"
+        ],
+        "type": "object"
+      },
+      "DocumentBody": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/ConfigDocument"
+          },
+          "expected_draft_revision": {
+            "minimum": 1.0,
+            "title": "Expected Draft Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_draft_revision",
+          "document"
+        ],
+        "title": "DocumentBody",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PatchBody": {
+        "properties": {
+          "expected_draft_revision": {
+            "minimum": 1.0,
+            "title": "Expected Draft Revision",
+            "type": "integer"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "title": "Fields",
+            "type": "object"
+          }
+        },
+        "required": [
+          "expected_draft_revision",
+          "fields"
+        ],
+        "title": "PatchBody",
+        "type": "object"
+      },
+      "ProbeBody": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider_id": {
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "default": "published",
+            "title": "Source"
+          }
+        },
+        "required": [
+          "provider_id",
+          "model",
+          "request_id"
+        ],
+        "title": "ProbeBody",
+        "type": "object"
+      },
+      "RevisionBody": {
+        "properties": {
+          "expected_draft_revision": {
+            "minimum": 1.0,
+            "title": "Expected Draft Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_draft_revision"
+        ],
+        "title": "RevisionBody",
+        "type": "object"
+      },
+      "ValidateBody": {
+        "properties": {
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfigDocument"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ValidateBody",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValueBody": {
+        "properties": {
+          "expected_draft_revision": {
+            "minimum": 1.0,
+            "title": "Expected Draft Revision",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "expected_draft_revision",
+          "value"
+        ],
+        "title": "ValueBody",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "AdminSession": {
+        "in": "cookie",
+        "name": "quickquip_admin_session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "QuickQuip LLM Configuration API",
+    "version": "1.16.2"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/ops/api/llm-configuration": {
+      "get": {
+        "operationId": "get_document_ops_api_llm_configuration_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Document",
+        "tags": [
+          "LLM configuration"
+        ]
+      },
+      "put": {
+        "operationId": "put_document_ops_api_llm_configuration_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Document",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/apply": {
+      "post": {
+        "operationId": "apply_config_ops_api_llm_configuration_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Apply Config",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/batch": {
+      "post": {
+        "operationId": "batch_update_ops_api_llm_configuration_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Batch Update",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/dependencies": {
+      "get": {
+        "operationId": "get_dependencies_ops_api_llm_configuration_dependencies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDependencies"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Dependencies",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/diff": {
+      "get": {
+        "operationId": "get_diff_ops_api_llm_configuration_diff_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": false,
+            "schema": {
+              "default": "published",
+              "title": "Target",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Diff",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/environment": {
+      "get": {
+        "operationId": "get_environment_ops_api_llm_configuration_environment_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvironment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Environment",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/export": {
+      "get": {
+        "operationId": "export_config_ops_api_llm_configuration_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Export Config",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/history": {
+      "get": {
+        "operationId": "get_history_ops_api_llm_configuration_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get History",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/history/{revision}/restore": {
+      "post": {
+        "operationId": "restore_snapshot_ops_api_llm_configuration_history__revision__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Restore Snapshot",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/import": {
+      "post": {
+        "operationId": "import_config_ops_api_llm_configuration_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Import Config",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/import/preview": {
+      "post": {
+        "operationId": "preview_import_ops_api_llm_configuration_import_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigImportPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Preview Import",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/metadata": {
+      "get": {
+        "operationId": "get_metadata_ops_api_llm_configuration_metadata_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigMetadata"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Metadata",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/operations": {
+      "get": {
+        "operationId": "list_operations_ops_api_llm_configuration_operations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOperationList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "List Operations",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/operations/{operation_id}": {
+      "get": {
+        "operationId": "get_operation_ops_api_llm_configuration_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Operation",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/operations/{operation_id}/cancel": {
+      "post": {
+        "operationId": "cancel_operation_ops_api_llm_configuration_operations__operation_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Cancel Operation",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/probe": {
+      "post": {
+        "operationId": "probe_config_ops_api_llm_configuration_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigOperation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Probe Config",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/providers": {
+      "get": {
+        "operationId": "get_providers_ops_api_llm_configuration_providers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigProviders"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Providers",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/providers/{provider_id}": {
+      "delete": {
+        "operationId": "delete_provider_ops_api_llm_configuration_providers__provider_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_draft_revision",
+            "required": true,
+            "schema": {
+              "title": "Expected Draft Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Delete Provider",
+        "tags": [
+          "LLM configuration"
+        ]
+      },
+      "get": {
+        "operationId": "get_provider_ops_api_llm_configuration_providers__provider_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigProviderDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Provider",
+        "tags": [
+          "LLM configuration"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_provider_ops_api_llm_configuration_providers__provider_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Patch Provider",
+        "tags": [
+          "LLM configuration"
+        ]
+      },
+      "put": {
+        "operationId": "put_provider_ops_api_llm_configuration_providers__provider_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Provider",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/providers/{provider_id}/aliases": {
+      "put": {
+        "operationId": "put_aliases_ops_api_llm_configuration_providers__provider_id__aliases_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Aliases",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/providers/{provider_id}/effective": {
+      "get": {
+        "operationId": "get_effective_ops_api_llm_configuration_providers__provider_id__effective_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEffectiveParameters"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Effective",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/providers/{provider_id}/models": {
+      "put": {
+        "operationId": "put_models_ops_api_llm_configuration_providers__provider_id__models_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Models",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/sections/{section}": {
+      "get": {
+        "operationId": "get_section_ops_api_llm_configuration_sections__section__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "title": "Section",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "draft",
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Section",
+        "tags": [
+          "LLM configuration"
+        ]
+      },
+      "put": {
+        "operationId": "put_section_ops_api_llm_configuration_sections__section__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "title": "Section",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Section",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/settings/{name}": {
+      "put": {
+        "operationId": "put_settings_ops_api_llm_configuration_settings__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValueBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigEnvelope"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Settings",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/status": {
+      "get": {
+        "operationId": "get_status_ops_api_llm_configuration_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Get Status",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/validate": {
+      "post": {
+        "operationId": "validate_config_ops_api_llm_configuration_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigValidation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Validate Config",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    }
+  }
+}

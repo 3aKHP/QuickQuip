@@ -94,7 +94,7 @@ jobs:
           $expected = @(
             "staging\start.bat", "staging\.env.example", "staging\scripts\backfill_chat_archive.py", "staging\scripts\backfill_record_identities.py",
             "staging\scripts\sync_preset_skills.py",
-            "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
+            "staging\config\llm.json.example", "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
             "staging\config\generation.toml.example", "staging\config\games.toml.example",
             "staging\config\awakening.toml.example", "staging\config\sensitive_words.toml.example",
             "staging\config\niuniu_text.toml.example", "staging\config\niuniu_text_safe.toml.example",
@@ -134,6 +134,12 @@ jobs:
           staging\python\python.exe -c "import webview; print('pywebview ok')"
           Push-Location staging
           try {
+            .\python\python.exe -m quickquip.llm.config_cli init
+            if ($LASTEXITCODE -ne 0) { throw "Configuration database initialization failed" }
+            .\python\python.exe -m quickquip.llm.config_cli validate
+            if ($LASTEXITCODE -ne 0) { throw "Configuration database validation failed" }
+            .\python\python.exe -m quickquip.llm.config_cli validate config\llm.json.example
+            if ($LASTEXITCODE -ne 0) { throw "Configuration JSON example validation failed" }
             .\python\python.exe -c "import quickquip, plugins, web_api; print('app import ok')"
             .\python\python.exe scripts\sync_preset_skills.py --apply --skills-dir data\preset-sync-smoke
             if ($LASTEXITCODE -ne 0) { throw "Preset Skill sync startup smoke test failed" }
@@ -247,7 +253,7 @@ jobs:
 
       - name: Smoke test Docker image
         run: |
-          docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -c "import quickquip, plugins, web_api"'
+          docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -m quickquip.llm.config_cli init && python -m quickquip.llm.config_cli validate config/llm.json.example && python -c "import quickquip, plugins, web_api"'
           docker run --rm quickquip:smoke sh -euxc 'python scripts/sync_preset_skills.py --apply --skills-dir /tmp/preset-sync-smoke && python scripts/sync_preset_skills.py --check --skills-dir /tmp/preset-sync-smoke'
           # 存活探测：bot.py 必须活到 timeout（退出码 124）——import 冒烟抓不到
           # nonebot.load_plugins 的路径约束。勿改成 -euxc：set -e 会让 124 直接

@@ -31,7 +31,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **群周报与月报** — 每周/每月自动生成上一周期的群聊回顾，分天采样覆盖全周期，热词趋势与群内大事记一目了然
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具）；模型在对话中生成的图片也会直接送达群聊。统一收口 `config/generation.toml`
-- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
+- **Web 管理后台** — LLM 配置草稿、独立应用与 Bot 版本状态；Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。全部文档索引见 [docs/index.md](docs/index.md)。
@@ -89,7 +89,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 5. **可选：启用 LLM**
 
-   复制 `config/llm.toml.example` 为 `config/llm.toml`，复制 `config/personas.example/` 为 `config/personas/`，填入中转 URL、模型列表和人格定义。在 `.env` 中配置相应 API key：
+   复制 `config/personas.example/` 为 `config/personas/`，填写人格定义。在 `.env` 中配置相应 API key：
 
    ```env
    OPENAI_API_KEY=your_key
@@ -98,11 +98,11 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    DEEPSEEK_API_KEY=your_key
    ```
 
-   完整配置参考见 [docs/admin/configuration.md](docs/admin/configuration.md)。
+   运行 `python -m quickquip.llm.config_cli init` 初始化 `data/llm_config.db`；已有 `config/llm.toml` 时会执行一次迁移并保留原文件和资产备份。通过 Web Admin「LLM 配置」设置渠道、模型和全局开关，保存草稿后单独应用。也可按 `config/llm.json.example` 编辑完整 JSON，再通过 CLI 预览导入。Bot 启动读取已发布快照，重启不会应用草稿。操作与回退限制见 [LLM 配置管理](docs/admin/llm-configuration.md)，完整字段参考见 [配置参考](docs/admin/configuration.md)。
 
 6. **可选：启用图片/语音/音乐生成和语音识别**
 
-   复制 `config/generation.toml.example` 为 `config/generation.toml`，按注释填入 provider 和模型。不存在时图片部分回退读取 `llm.toml` 旧版配置。
+   复制 `config/generation.toml.example` 为 `config/generation.toml`，按注释填入 provider 和模型。旧多模态配置在首次迁移时提取到此文件；文件缺失时使用关闭状态的默认配置。
 
 7. **可选：启用群聊唤醒**
 
@@ -150,7 +150,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 ### Windows 懒人包
 
-Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
+Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停，LLM 数据库由初始化／迁移流程创建；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
 
 首次运行注意：
 

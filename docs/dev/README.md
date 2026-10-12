@@ -21,6 +21,8 @@
 | [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、发布和 hotfix 流程 |
 | [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`record-identities.md`](record-identities.md) | 记录正文、共享身份、引用索引与兼容读取契约 |
+| [`llm-configuration-api.md`](llm-configuration-api.md) | LLM 配置修订、结构化交换、参数 metadata 与控制任务的 API 契约 |
+| [`llm-configuration-frontend.md`](llm-configuration-frontend.md) | LLM 配置前端交付契约、用户操作、字段语义、运行状态与验收场景 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |
 | [`mcp-integration.md`](mcp-integration.md) | MCP 接入、协议协商、工具结果和安全边界 |
 | [`tool-discovery.md`](tool-discovery.md) | LLM 工具发现的策略、模式、限制和测试 |

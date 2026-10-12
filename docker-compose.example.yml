@@ -33,8 +33,8 @@ services:
     restart: unless-stopped
 
   # ── 联网搜索（SearXNG）──────────────────────────────────────────────────
-  # 自动联网判定依赖此服务。如不需要，可注释掉并在 config/llm.toml 中
-  # 将 auto_search.enabled 设为 false。
+  # 自动联网判定依赖此服务。如不需要，可在 LLM 配置数据库中
+  # 将 settings.auto_search.enabled 设为 false。
   searxng:
     image: ghcr.io/searxng/searxng:latest
     container_name: quickquip-searxng
@@ -52,14 +52,28 @@ services:
       SEARXNG_SECRET: "${SEARXNG_SECRET:?请设置 SEARXNG_SECRET}"
       SEARXNG_LIMITER: "false"
 
+  # 先完成配置迁移与资产提取，再启动只读配置消费者。
+  config-init:
+    image: ghcr.io/3akhp/quickquip:latest
+    command: ["python", "-m", "quickquip.llm.config_cli", "init"]
+    env_file: [.env]
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    restart: "no"
+
   # ── QQ Bot ──────────────────────────────────────────────────────────────
   quickquip:
     image: ghcr.io/3akhp/quickquip:latest
     container_name: quickquip
     init: true
     depends_on:
-      - llbot
-      - searxng
+      llbot:
+        condition: service_started
+      searxng:
+        condition: service_started
+      config-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:
@@ -82,7 +96,7 @@ services:
       # - ./skills:/app/skills:ro
       # host-healthcheck 可选增强（L2）：宿主机 /proc 只读挂载，默认关闭：
       # - /proc:/host/proc:ro
-      # 仅当 config/llm.toml 启用 docker transport MCP 时才挂载：
+      # 仅当已发布 LLM 配置启用 docker transport MCP 时才挂载：
       # - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
@@ -94,7 +108,10 @@ services:
     init: true
     command: ["python", "-u", "web_api.py"]
     depends_on:
-      - searxng
+      searxng:
+        condition: service_started
+      config-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:

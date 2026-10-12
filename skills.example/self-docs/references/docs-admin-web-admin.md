@@ -151,7 +151,7 @@ Web Admin 当前提供 29 个标签页（前端使用 vue-router 4 hash 模式�
 - **人格** — 在线编辑 `config/personas/*.toml`（含新建/删除，`_shared.toml` 保护）
 - **资料** — 在线编辑 `llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件（保存后执行 `/llm reload` 或重启 bot 生效）
 - **Skill** — Skill 目录管理（「LLM 工坊」区，`/ops/#/skills`）：列表含扫描坏项诊断与预置态标注，详情页可在线编辑/删除 `SKILL.md` 与 `scripts/` 等文本资源，写入即热生效；页内预置同步对照 `skills.example/` 勾选或一键对齐（覆盖前自动备份 `.preset-backups/`）；安装向导支持本地压缩包/文件夹/GitHub 仓库链接三种来源，两阶段「检查 → 确认」出示候选报告（含可执行脚本红色警示）。格式约束与安全边界见 [skills.md](skills.md)
-- **诊断** — LLM runtime 重载、MCP 重连、上下文清理、样本请求、文本规则回归测试、provider 探活（并发，按需计费）和 LLM 健康状态
+- **诊断** — 已发布 LLM 配置重载、MCP 手动重连、上下文清理、样本请求、文本规则回归测试、provider 探活（并发，按需计费）和 LLM 健康状态
 - **MCP** — MCP 服务器状态面板（transport、连接状态、工具数量、错误信息，支持 bot 与 web-admin 共享状态文件）
 - **用量** — LLM 用量/成本看板（provider/模型/功能/群/人格五维 breakdown 与筛选、定价状态展示）
 - **纪元** — 会话纪元运行态看板：锯齿时间轴（保留条数 / 窗口 tokens / 输入构成三模式）、锚点推进事件（冷场/触顶/行数兜底/换人格四色悬崖与纪元分段，事件 chips 逐事件回放）、窗口构成条（锚点罩住的对话区间，仅消息元数据不含正文）、信封构成条（最近一封【轮次上下文】的六段 token 分解）、KPI 行与冷场倒计时环。实时态经动作队列由 bot 进程快照回传，点击主图任意时刻可把构成条定格到该时刻
@@ -159,7 +159,8 @@ Web Admin 当前提供 29 个标签页（前端使用 vue-router 4 hash 模式�
 - **语录** — 语录管理（按群浏览、关键词搜索、删除；发言人优先显示标准身份及 QQ，改名时附收藏时原名片；正文使用当前身份并提供原文查看）
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
 - **词云** — 词云生成（today/week/month/year 时间窗、Top 词频排行、图片下载）
-- **配置** — `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；保存后按文件返回生效方式（`awakening`/`chat_rules` 自动重载，`llm` 引导手动 reload，其余需重启）。`llm.toml` 在文本编辑区上方另带 provider 级思考档位结构化面板：行级修改只动目标 provider 的 `reasoning_effort` 行、注释与其余内容原样保留，目标段含多行字符串时拒绝并引导改用文本编辑
+- **LLM 配置** — `/ops/#/llm-config` 结构化管理渠道、模型、请求参数、风格、价格、级联及设置；展示草稿／发布／Bot 实际加载版本，支持保存草稿、单独应用、冲突时保留编辑、JSON 导入预览／导出、历史快照恢复与任务取消。应用和模型探测通过配置数据库控制任务交由 Bot 执行；状态来自 Bot 心跳，20 秒无更新标为过期。详见 [LLM 配置管理](llm-configuration.md)
+- **配置** — `config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 多文件 TOML 编辑器；`awakening`／`chat_rules` 保存后自动重载，其余需重启。
 - **实时日志** — 当前运行日志流、连接状态与当前文件下载
 - **LLM Trace** — 按 HTTP 调用索引 QuickQuip 与 LLM Provider 之间的完整 JSON 请求/响应文本，支持持久开关、实时状态更新、分页和按需加载正文
 - **日志归档** — 历史轮转日志浏览、预览与下载
@@ -185,7 +186,9 @@ LLM Trace 以一次 HTTP 尝试为一条调用记录，并把同一轮 Agent Too
 
 `web_api.py` 是独立进程，不能直接复用 bot 进程里的 OneBot 连接。诊断页的运行时重载、LLM 健康检查、上下文清理、唤醒参数重载、群组页的“立即生成总结/播报/周报/月报”、定时消息页的任务重注册等需要 bot 进程执行的动作，会先写入 `data/web_admin_actions.db`。bot 端定时任务 `web_admin_action_queue` 每 5 秒领取并执行队列任务，结果回写到同一数据库；诊断页“最近动作”用于查看等待、执行中、成功或失败状态，并可通过“清空历史”按钮清除已结束（成功/失败）的动作记录，排队中与执行中的动作不受影响。动作队列数据库启用 WAL；若 bot 在领取任务后退出，后续轮询会将超时的 `running` 动作标记为失败，避免任务永久挂起。
 
-普通配置文件和群级开关仍走文件持久化路径。bot 端 `web_admin_state_sync` 每 30 秒检测 `rule_switch.json`、`config/awakening.toml`、每日总结/播报群组文件、无聊唤醒群组文件的修改并重载。唤醒标签页和配置页保存 `config/awakening.toml` 后也会主动入队一次 `awakening_reload`。
+LLM 配置控制任务存于 `data/llm_config.db`，与通用动作队列独立；任务状态为 queued／running／succeeded／failed／cancelled，只有排队任务可取消。Bot 每 5 秒领取任务并回报实际配置与组件状态。Web 不通过自身 LLM 实例推断 Bot 运行态；草稿在重启后仍保持未应用。
+
+其他配置文件和群级开关继续走各自的文件持久化路径。bot 端 `web_admin_state_sync` 每 30 秒检测 `rule_switch.json`、`config/awakening.toml`、每日总结/播报群组文件、无聊唤醒群组文件的修改并重载。唤醒标签页和配置页保存 `config/awakening.toml` 后也会主动入队一次 `awakening_reload`。
 
 ---
 

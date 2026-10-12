@@ -4,7 +4,7 @@
 >
 > **前置要求：** §1–§4 无编程要求；§5 需要了解 Python 基础语法（函数、字典、标准库导入）。
 >
-> **源码指引：** Skill 系统实现位于 `src/quickquip/llm/skills/`（frontmatter 校验 `parser.py`、目录扫描与路径加固 `catalog.py`、预置漂移检测 `preset_drift.py`、四个工具 `tools/`），工具注册与激活门控位于 `src/quickquip/llm/service_parts/skills.py`，`/skill` 命令位于 `src/quickquip/adapters/nonebot/command_parts/skills.py`。部署与安全模型的权威文档是 [docs/admin/skills.md](../admin/skills.md)，配置键与默认值见 `config/llm.toml.example` 的 `[skills]` 段。
+> **源码指引：** Skill 系统实现位于 `src/quickquip/llm/skills/`（frontmatter 校验 `parser.py`、目录扫描与路径加固 `catalog.py`、预置漂移检测 `preset_drift.py`、四个工具 `tools/`），工具注册与激活门控位于 `src/quickquip/llm/service_parts/skills.py`，`/skill` 命令位于 `src/quickquip/adapters/nonebot/command_parts/skills.py`。部署与安全模型的权威文档是 [docs/admin/skills.md](../admin/skills.md)，配置键与默认值见 `config/llm.json.example` 的 `settings.skills` 段。
 
 ---
 
@@ -95,7 +95,7 @@ skills/                     ← 部署目录（项目根，已被 git 忽略）
 
 ### 2.3 数值上限一览
 
-| 项 | 默认值 | 配置键（`config/llm.toml` `[skills]`） |
+| 项 | 默认值 | 配置键（`data/llm_config.db` `settings.skills`） |
 |----|--------|------|
 | 系统提示清单字节预算 | 8192 字节；实际预算取 min(模型上下文窗口 2%，此值) | `catalog_max_bytes` |
 | 单次读取资源 | 65536 字节（64KiB），超限截断前段 | `resource_max_bytes` |
@@ -416,7 +416,7 @@ def _collect_load(proc_root: Path) -> dict:
 | 读取报错"不是有效 UTF-8 文本" | 该文件是二进制 | 二进制资产放 `assets/`（激活时的资源清单会披露），文本资料放 `references/` |
 | 资源清单不完整 | 单 Skill 文件数超过 200 条上限，超出部分不编入清单 | 精简文件数量或合并资料 |
 
-通用排查入口：`/skill list`（装载面）、日志 WARNING（`跳过无效 skill` / `description-blocked` / `skill catalog 超过 … 字节预算`）、`config/llm.toml` 的 `[skills]` 段（上限面）。
+通用排查入口：`/skill list`（装载面）、日志 WARNING（`跳过无效 skill` / `description-blocked` / `skill catalog 超过 … 字节预算`）、`data/llm_config.db` 的 `settings.skills` 段（上限面）。
 
 ---
 
@@ -424,7 +424,7 @@ def _collect_load(proc_root: Path) -> dict:
 
 - [docs/admin/skills.md](../admin/skills.md)：Skill 系统的部署方式与安全模型（部署者视角的权威文档）。
 - [docs/dev/llm-module.md](llm-module.md)：LLM 模块运行时架构（工具注册、系统提示构建、工具调用循环）。
-- `config/llm.toml.example` 的 `[skills]` 段：全部配置键与默认值的带注释参考。
+- [配置参考](../admin/configuration.md) 的 `settings.skills` 表与 metadata 接口：配置键、默认值、类型及范围。
 - `skills.example/`：两个官方 Skill——`self-docs`（无脚本、纯 references 路由检索的范本）与 `host-healthcheck`（带脚本、输出契约与转述纪律的范本）。
 
 ---
