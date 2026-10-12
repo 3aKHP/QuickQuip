@@ -324,29 +324,34 @@ test('typing an existing provider ID prefix keeps the new entry editable across 
   assert.deepEqual(normalized(sent.providers[1]), { ...normalized(library.fieldTemplate('providers')), id: 'openai-2' })
 })
 
-test('save locks only submitted entries while a newly created replacement stays editable', async () => {
-  const saving = deferred()
-  let sent
-  const store = createStore({
-    saveLlmConfiguration: document => { sent = document; return saving.promise },
-    fetchLlmConfigStatus: async () => status,
+for (const [scenario, proxy] of [
+  ['identical bytes', ''],
+  ['later proxy edit', 'http://replacement.example.test'],
+]) {
+  test(`save preserves a new replacement entry with ${scenario}`, async () => {
+    const saving = deferred()
+    let sent
+    const store = createStore({
+      saveLlmConfiguration: document => { sent = document; return saving.promise },
+      fetchLlmConfigStatus: async () => status,
+    })
+    store.accept({ revision: 5, document: { providers: [] } })
+    const panel = providersPanel(store)
+    panel.addProvider()
+    panel.onIdInput('submitted')
+    const pending = store.save()
+    panel.removeProvider()
+    panel.addProvider()
+    panel.onIdInput('submitted')
+    panel.patch({ proxy })
+    saving.resolve({ revision: 6, document: sent })
+    await pending
+    panel.onIdInput('replacement')
+    assert.equal(store.document.value.providers[0].id, 'replacement')
+    assert.equal(store.document.value.providers[0].proxy, proxy)
+    assert.equal(store.dirty.value, true)
   })
-  store.accept({ revision: 5, document: { providers: [] } })
-  const panel = providersPanel(store)
-  panel.addProvider()
-  panel.onIdInput('submitted')
-  const pending = store.save()
-  panel.removeProvider()
-  panel.addProvider()
-  panel.onIdInput('submitted')
-  panel.patch({ proxy: 'http://replacement.example.test' })
-  saving.resolve({ revision: 6, document: sent })
-  await pending
-  panel.onIdInput('replacement')
-  assert.equal(store.document.value.providers[0].id, 'replacement')
-  assert.equal(store.document.value.providers[0].proxy, 'http://replacement.example.test')
-  assert.equal(store.dirty.value, true)
-})
+}
 
 function paramsEditor(modelValue, metadata = {}) {
   const props = { modelValue, metadata, styleProfiles: [] }

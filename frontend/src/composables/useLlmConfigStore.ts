@@ -156,8 +156,10 @@ export function createLlmConfigStore(api: Api) {
       markProvidersSaved(result.document)
       revision.value = result.revision
       original.value = JSON.stringify(result.document)
-      // 保存期间用户可能继续编辑：仅在内容未变时才用服务器规范化结果替换编辑态
-      if (JSON.stringify(document.value) === sent) document.value = result.document
+      // 服务器规范化结果只替换本次提交的条目，后续新建条目保留编辑身份。
+      const sameEntries = document.value !== null && providerEntries(document.value)
+        .every((provider, index) => providerEditState(provider) === sentProviderStates[index])
+      if (JSON.stringify(document.value) === sent && sameEntries) document.value = result.document
       await refreshStatus()
       return true
     } catch (cause) {
