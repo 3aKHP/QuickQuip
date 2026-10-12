@@ -216,10 +216,8 @@ def field_metadata(annotation: Any, rule: str, *, default: Any = None, inherit=F
     return result
 
 
-def metadata(*, config_dir=None) -> dict:
-    from quickquip.llm.client_fingerprints.catalog import profile_metadata
-    from quickquip.common.paths import CONFIG_DIR
-
+def field_registry() -> dict:
+    """Static field constraints, independent of deployment assets."""
     settings = {}
     for name, cls in SETTINGS.items():
         defaults = asdict(cls())
@@ -236,7 +234,6 @@ def metadata(*, config_dir=None) -> dict:
             parameter_defaults[f.name] = f.default_factory()
     return {
         "format_version": 1,
-        "client_fingerprints": profile_metadata(config_dir or CONFIG_DIR),
         "settings": settings,
         "parameters": {
             k: {
@@ -249,3 +246,10 @@ def metadata(*, config_dir=None) -> dict:
         "protocols": ["openai", "claude", "gemini", "openai_responses"],
         "route_names": ["daily_summary", "daily_briefing", "weekly_report", "monthly_report"],
     }
+
+
+def metadata(*, config_dir=None) -> dict:
+    from quickquip.llm.client_fingerprints.catalog import profile_metadata
+    from quickquip.common.paths import CONFIG_DIR
+
+    return {**field_registry(), "client_fingerprints": profile_metadata(config_dir or CONFIG_DIR)}

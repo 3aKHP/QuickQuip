@@ -8,7 +8,7 @@ from dataclasses import asdict
 from fastapi import FastAPI
 
 from quickquip.llm.config import PricingRates
-from quickquip.llm.config_document import metadata
+from quickquip.llm.config_fields import field_registry
 
 
 def _field(spec):
@@ -27,7 +27,7 @@ def _field(spec):
 
 
 def document_schema():
-    registry = metadata()
+    registry = field_registry()
     parameters = {
         "type": "object",
         "additionalProperties": False,

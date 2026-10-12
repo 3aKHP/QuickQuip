@@ -39,13 +39,13 @@ class ConfigService:
     def shared_lock(self):
         return self._references_lock
 
-    def initialize(self, legacy_path=None):
+    def initialize(self, legacy_path=None, *, services_stopped=False):
         ensure_directory(self.path.parent)
         with FileLock(str(self.path) + ".init.lock", timeout=60):
             if self.path.exists():
                 # An existing database is authoritative, including failure/new-schema cases.
                 with self.shared_lock:
-                    self.store.upgrade()
+                    self.store.upgrade(services_stopped=services_stopped)
                 self.store.verify()
                 return self.read()
             report = None
@@ -462,7 +462,7 @@ class ConfigService:
             raise ConfigError("invalid_field", "Restore must use a separate backup file")
         candidate = ConfigStore(source)
         candidate.verify()
-        recovered = ConfigService(source)
+        recovered = ConfigService(source, config_dir=self.config_dir)
         validate_document(recovered.read()["document"], config_dir=self.config_dir)
         validate_document(recovered.read("published")["document"], config_dir=self.config_dir)
         backup = self.path.with_name(f"{self.path.name}.{time.time_ns()}.backup")

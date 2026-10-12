@@ -68,9 +68,9 @@ def _columns(fields):
 
 
 def declared_schema(*, legacy=False):
-    from quickquip.llm.config_document import metadata
+    from quickquip.llm.config_fields import field_registry
 
-    registry = metadata()
+    registry = field_registry()
     columns = _columns(registry["parameters"])
     statements = [
         f"CREATE TABLE IF NOT EXISTS provider_parameters ("
@@ -217,7 +217,7 @@ class ConfigStore:
                 },
             )
 
-    def upgrade(self):
+    def upgrade(self, *, services_stopped=False):
         """Atomically extend a verified v1 database, preserving immutable snapshots."""
         from quickquip.llm.config_document import ConfigError
 
@@ -239,6 +239,11 @@ class ConfigStore:
                 self._verify_schema(conn)
             elif row and row[0] == 1:
                 self._verify_schema(conn, 1)
+                if not services_stopped:
+                    raise ConfigError(
+                        "services_running",
+                        "Stop bot and Web, back up the database, then run init --services-stopped",
+                    )
                 conn.execute('ALTER TABLE runtime_settings ADD COLUMN client_cluster TEXT')
                 conn.execute("UPDATE runtime_settings SET client_cluster=''")
                 conn.execute("UPDATE config_meta SET schema_version=?", (SCHEMA_VERSION,))
@@ -318,9 +323,9 @@ class ConfigStore:
 
 def project_document(conn, document):
     """Maintain relational indexes in the same transaction as the draft."""
-    from quickquip.llm.config_document import metadata
+    from quickquip.llm.config_fields import field_registry
 
-    registry = metadata()
+    registry = field_registry()
     for name in registry["settings"]:
         conn.execute(f'DELETE FROM "{name}_settings"')
     for table in (

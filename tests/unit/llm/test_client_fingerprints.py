@@ -13,7 +13,8 @@ import httpx
 import pytest
 
 from quickquip.llm.client_fingerprints.catalog import (
-    FingerprintRuntime, get_catalog, parse_profile, profile_metadata, resolve_profile,
+    FingerprintRuntime, _load_catalog, get_catalog, parse_profile, profile_metadata,
+    resolve_profile,
 )
 from quickquip.llm.client_fingerprints.identity import client_version, load_install_id
 from quickquip.llm.config import ProviderConfig
@@ -25,6 +26,16 @@ from quickquip.llm.provider import LLMProviderError, LLMRequest, RetryPolicy, bu
 from quickquip.llm.provider import base
 from quickquip.llm.session import create_session_identity
 from quickquip.llm.tools import LLMConversationMessage
+
+
+@pytest.fixture(autouse=True)
+def installed_version(monkeypatch):
+    original = metadata.version
+    monkeypatch.setattr(metadata, "version",
+                        lambda name: "2.3.4.dev5" if name == "quickquip" else original(name))
+    client_version.cache_clear()
+    yield
+    client_version.cache_clear()
 
 
 def _config(tmp_path, protocol="openai", **changes):
@@ -156,11 +167,11 @@ def test_local_overrides_and_apply_use_one_file_snapshot(tmp_path):
         same.providers["test"].fingerprint_runtime == config.providers["test"].fingerprint_runtime
     )
     # A fresh process would load the broken override rather than silently use the bundle.
-    get_catalog.cache_clear()
+    _load_catalog.cache_clear()
     with pytest.raises(ConfigError, match="Profile"):
         get_catalog(directory)
     path.write_text(custom, encoding="utf-8")
-    get_catalog.cache_clear()
+    _load_catalog.cache_clear()
 
 
 def test_custom_catalog_selection_and_invalid_file_policies(tmp_path):
@@ -235,7 +246,8 @@ async def test_retry_and_fallback_keep_frozen_brand_identity(tmp_path, monkeypat
     assert {r.url.host for r in seen} == {"example.test", "fallback.test"}
 
 
-def test_v1_database_upgrade_preserves_revisions_and_snapshots(tmp_path):
+@pytest.mark.parametrize("recorded_boot", [False, True])
+def test_v1_database_upgrade_preserves_revisions_and_snapshots(tmp_path, recorded_boot):
     path = tmp_path / "data/llm_config.db"
     path.parent.mkdir()
     doc = empty_document()
@@ -245,8 +257,19 @@ def test_v1_database_upgrade_preserves_revisions_and_snapshots(tmp_path):
         conn.execute("INSERT INTO config_meta VALUES(1,1,4,2,?)", (config_store.dumps(doc),))
         conn.execute("INSERT INTO config_snapshots VALUES(2,?,123)", (config_store.dumps(doc),))
         config_store.project_document(conn, doc)
+        if recorded_boot:
+            conn.execute("INSERT INTO bot_runtime VALUES(1,'old-boot',2,'old-version',0,'{}')")
     service = ConfigService(path)
-    assert service.initialize()["revision"] == 4
+    with pytest.raises(ConfigError) as error:
+        service.initialize()
+    assert error.value.code == "services_running"
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT schema_version FROM config_meta").fetchone()[0] == 1
+        assert "client_cluster" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(runtime_settings)")
+        }
+
+    assert service.initialize(services_stopped=True)["revision"] == 4
     assert service.status()["schema_version"] == 2
     assert service.read("published")["document"] == doc
     with service.store.connect() as conn:
@@ -255,3 +278,59 @@ def test_v1_database_upgrade_preserves_revisions_and_snapshots(tmp_path):
     assert service.replace(replacement, 4)["revision"] == 5
     effective = compile_document(service.read()["document"])
     assert effective.runtime.client_cluster == "synthetic-cluster"
+
+
+def test_default_and_explicit_catalog_calls_share_startup_snapshot(tmp_path, monkeypatch):
+    from quickquip.llm.client_fingerprints import catalog
+
+    overrides = tmp_path / "client_profiles"
+    overrides.mkdir()
+    path = overrides / "custom.toml"
+    path.write_text('format_version=1\nid="custom"\nlabel="Custom"\n[protocols.openai]\n')
+    monkeypatch.setattr(catalog, "CONFIG_DIR", tmp_path)
+    initial = get_catalog()
+    path.write_text("invalid TOML")
+    assert get_catalog(tmp_path) is initial
+    assert get_catalog(tmp_path / ".." / tmp_path.name) is initial
+    assert "custom" in {entry["id"] for entry in profile_metadata(tmp_path)}
+
+
+def test_isolated_cli_import_and_schema_do_not_read_unrelated_profiles(tmp_path, monkeypatch):
+    from quickquip.llm import config_cli
+    from quickquip.llm.client_fingerprints import catalog
+
+    unrelated = tmp_path / "unrelated"
+    (unrelated / "client_profiles").mkdir(parents=True)
+    (unrelated / "client_profiles/broken.toml").write_text("invalid TOML")
+    monkeypatch.setattr(catalog, "CONFIG_DIR", unrelated)
+    directory = tmp_path / "config/client_profiles"
+    directory.mkdir(parents=True)
+    (directory / "custom.toml").write_text(
+        'format_version=1\nid="custom"\nlabel="Custom"\n[protocols.openai]\n',
+    )
+    path = tmp_path / "data/llm_config.db"
+    ConfigService(path).initialize()
+    doc = _document()
+    doc["providers"][0]["client_fingerprint"] = "custom"
+    exchange = tmp_path / "exchange.json"
+    exchange.write_text(json.dumps(doc))
+    for command in (["validate", str(exchange)],
+                    ["import", str(exchange), "--expected-revision", "1"]):
+        result = config_cli.execute(config_cli.parser().parse_args(["--db", str(path), *command]))
+        assert result.get("valid", True)
+    assert ConfigService(path).read()["document"]["providers"][0]["client_fingerprint"] == "custom"
+
+
+async def test_uninstalled_source_uses_unknown_version_once(tmp_path, monkeypatch, caplog):
+    def unavailable(name):
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", unavailable)
+    monkeypatch.setenv("FINGERPRINT_TEST_KEY", "synthetic-key")
+    client_version.cache_clear()
+    client = build_provider_client(_config(tmp_path))
+    for _ in range(2):
+        _, headers, _ = await client._build_request_parts(_request())
+        assert headers["user-agent"] == "QuickQuip/unknown"
+        assert headers["x-quickquip-client"] == "unknown"
+    assert sum("package metadata" in record.message for record in caplog.records) == 1

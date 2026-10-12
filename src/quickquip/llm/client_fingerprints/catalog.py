@@ -138,9 +138,13 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
     return ClientFingerprintProfile(ident, label, ua, headers, bindings, tuple(entries))
 
 
+def get_catalog(config_dir: Path | None = None) -> tuple[ClientFingerprintProfile, ...]:
+    """All call shapes share one canonical startup snapshot per configuration root."""
+    return _load_catalog((Path(config_dir) if config_dir is not None else CONFIG_DIR).resolve())
+
+
 @lru_cache(maxsize=None)
-def get_catalog(config_dir: Path = CONFIG_DIR) -> tuple[ClientFingerprintProfile, ...]:
-    """File edits take effect on restart; configuration apply reuses this catalog."""
+def _load_catalog(config_dir: Path) -> tuple[ClientFingerprintProfile, ...]:
     bundled = files(__package__).joinpath("defaults")
     contents = {p.name[:-5]: p.read_text(encoding="utf-8")
                 for p in bundled.iterdir() if p.name.endswith(".toml")}
