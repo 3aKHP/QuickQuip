@@ -303,6 +303,7 @@ def test_isolated_cli_import_and_schema_do_not_read_unrelated_profiles(tmp_path,
     (unrelated / "client_profiles").mkdir(parents=True)
     (unrelated / "client_profiles/broken.toml").write_text("invalid TOML")
     monkeypatch.setattr(catalog, "CONFIG_DIR", unrelated)
+    monkeypatch.setattr("quickquip.common.paths.CONFIG_DIR", unrelated)
     directory = tmp_path / "config/client_profiles"
     directory.mkdir(parents=True)
     (directory / "custom.toml").write_text(
