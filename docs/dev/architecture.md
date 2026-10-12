@@ -153,8 +153,8 @@ src/quickquip/
 
 | 文件 | 层 | 说明 |
 |---|---|---|
-| `llm.toml.example` | 分发层（追踪） | LLM provider / runtime / tools / MCP 配置模板 |
-| `llm.toml` | 自用层（gitignore） | 真实 provider 配置，含 base_url / model 等 |
+| `llm.json.example` | 分发层（追踪） | LLM 数据库的 JSON 交换示例 |
+| `llm.toml` | 迁移资产（gitignore） | 首次迁移输入与迁移前版本回退配置 |
 | `generation.toml.example` | 分发层（追踪） | 多模态产出配置模板 |
 | `generation.toml` | 自用层（gitignore） | 真实图片/语音/音乐 provider 配置 |
 | `awakening.toml.example` | 分发层（追踪） | 群聊唤醒模块配置模板 |
@@ -192,6 +192,7 @@ data/
 ├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
 ├── audit.db                # Web Admin 审计日志（SQLite）
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
+├── llm_config.db           # 草稿、不可变发布快照、配置任务与 Bot 心跳
 ├── llm_usage.db            # LLM 用量与成本统计（SQLite）
 ├── mcp_status.json         # MCP server 装载状态快照
 ├── cron_jobs.json          # Cron 定时任务调度状态快照（bot 进程写，web-admin 读）
@@ -274,7 +275,8 @@ docs/
 | 路径 | 原因 |
 |---|---|
 | `.env`, `.env.*` | 含真实密钥（`.env.example` 除外） |
-| `config/llm.toml` | 含真实 provider 配置 |
+| `data/llm_config.db` | 运行配置、发布快照与控制状态 |
+| `config/llm.toml` | 首次迁移输入与迁移前版本回退资产 |
 | `config/llm.*.local.toml` | 同上 |
 | `config/generation.toml` | 含真实多模态 provider 配置 |
 | `config/awakening.toml` | 含真实唤醒阈值、兴趣话题和群覆盖 |

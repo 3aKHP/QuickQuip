@@ -309,7 +309,7 @@ function loopStatus(loopCalls: TraceCallSummary[]): string {
   return 'COMPLETE'
 }
 
-function loopVariant(loopCalls: TraceCallSummary[]): string {
+function loopVariant(loopCalls: TraceCallSummary[]): 'info' | 'success' | 'warn' | 'danger' {
   const status = loopStatus(loopCalls)
   return status === 'COMPLETE' ? 'success' : status === 'ERROR' ? 'danger' : 'warn'
 }

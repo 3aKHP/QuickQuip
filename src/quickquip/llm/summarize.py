@@ -17,10 +17,11 @@ from quickquip.llm.config import (
     ProviderConfig,
 )
 from quickquip.llm.context_windows import resolve_context_window
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.response_acceptance import is_response_accepted
 from quickquip.llm.tools import LLMConversationMessage
-from quickquip.llm.usage import new_usage_run_id, set_usage_scope
+from quickquip.llm.usage import configuration_pricing_entry, new_usage_run_id, set_usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,10 @@ def _resolve_cascade(
         if not provider_config.enabled:
             logger.info("summary cascade: provider %r disabled, skipping", provider_id)
             continue
+        try:
+            provider_config = resolve_model_provider(llm_config, provider_id, model)
+        except ValueError:
+            continue
         resolved.append((provider_id, model, provider_config))
     return resolved
 
@@ -266,6 +271,7 @@ async def _run_summary_cascade(
     raise RuntimeError(f"所有模型均调用失败，最后错误：{last_error}")
 
 
+@configuration_pricing_entry
 async def generate_daily_summary(
     messages: list[dict],
     persona: PersonaConfig,
@@ -376,6 +382,7 @@ def _build_period_system_prompt(
     return "\n\n".join(parts)
 
 
+@configuration_pricing_entry
 async def generate_period_report(
     messages: list[dict],
     persona: PersonaConfig,

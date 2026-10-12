@@ -4,7 +4,7 @@
       <span class="diag-card__icon"><UiIcon name="Send" :size="18" /></span>
       <div>
         <h3>样本请求<UiInfoTip text="会真实调用所选 provider/model 并计入「用量」页的成本统计，按该模型定价计费。" /></h3>
-        <p>按 provider / model 发送一次请求，查看解析结果和该次调用的原始 trace。</p>
+        <p>使用已发布快照 {{ publishedRevision ?? '…' }} 发送一次请求；可能产生模型费用。查看最终解析结果和原始 trace。</p>
       </div>
     </div>
 
@@ -19,13 +19,13 @@
         <div class="field">
           <label>Model</label>
           <select v-model="sample.model">
-            <option value="">(default)</option>
+            <option value="">默认：{{ currentProvider?.default_model || '…' }}</option>
             <option v-for="m in currentModels" :key="m" :value="m">{{ m }}</option>
           </select>
         </div>
         <div class="field field--small">
           <label>Max Tokens</label>
-          <input v-model.number="sample.max_output_tokens" type="number" min="1" max="4096" />
+          <input v-model.number="sample.max_output_tokens" type="number" min="1" max="16384" />
         </div>
       </div>
 
@@ -44,7 +44,9 @@
       </div>
 
       <div class="form-actions">
-        <UiButton icon="Send" :loading="sampleLoading" @click="sendSample">发送请求</UiButton>
+        <UiButton icon="Send" :loading="sampleLoading" :disabled="samplePending || !sample.provider_id || publishedRevision == null" @click="sendSample">发送一次请求</UiButton>
+        <UiButton v-if="samplePending && !sampleLoading" icon="RefreshCw" @click="sampleTask.resume()">{{ sampleOperation ? '继续查询' : '恢复提交结果' }}</UiButton>
+        <span v-if="sampleStatus" class="duration">{{ sampleStatus }}</span>
         <span v-if="sampleResult" class="duration">耗时 {{ sampleResult.duration_ms }}ms</span>
       </div>
     </div>
@@ -100,11 +102,13 @@ import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { fetchProviders, runSampleRequest } from '../../api/diagnostics'
 import type { DiagnosticsProvider, SampleRequestResult } from '../../api/diagnostics'
+import { useDiagnosticTask } from '../../composables/useDiagnosticTask'
 
 const providers = ref<DiagnosticsProvider[]>([])
-const sampleLoading = ref(false)
-const sampleError = ref<string | null>(null)
-const sampleResult = ref<SampleRequestResult | null>(null)
+const publishedRevision = ref<number | null>(null)
+const sampleTask = useDiagnosticTask<SampleRequestResult>()
+const { loading: sampleLoading, error: sampleError, result: sampleResult,
+  pending: samplePending, operation: sampleOperation, statusText: sampleStatus } = sampleTask
 
 interface SampleRequest {
   provider_id: string
@@ -122,10 +126,8 @@ const sample = ref<SampleRequest>({
   max_output_tokens: 256,
 })
 
-const currentModels = computed(() => {
-  const provider = providers.value.find(p => p.id === sample.value.provider_id)
-  return provider ? provider.models : []
-})
+const currentProvider = computed(() => providers.value.find(p => p.id === sample.value.provider_id))
+const currentModels = computed(() => currentProvider.value?.models || [])
 
 function onProviderChange() {
   sample.value.model = ''
@@ -144,6 +146,7 @@ async function loadProviders() {
     const data = await fetchProviders()
     if (data?.providers) {
       providers.value = data.providers
+      publishedRevision.value = data.revision
       if (!sample.value.provider_id && providers.value.length) {
         sample.value.provider_id = providers.value[0].id
       }
@@ -154,23 +157,18 @@ async function loadProviders() {
 }
 
 async function sendSample() {
-  sampleLoading.value = true
-  sampleError.value = null
-  sampleResult.value = null
-  try {
-    sampleResult.value = await runSampleRequest({
-      provider_id: sample.value.provider_id,
-      model: sample.value.model || null,
-      system_prompt: sample.value.system_prompt,
-      user_prompt: sample.value.user_prompt,
-      stream: false,
-      max_output_tokens: sample.value.max_output_tokens,
-    })
-  } catch (e: unknown) {
-    sampleError.value = (e as Error).message
-  } finally {
-    sampleLoading.value = false
+  if (samplePending.value || publishedRevision.value == null || !currentProvider.value) return
+  const body = {
+    source: publishedRevision.value,
+    request_id: crypto.randomUUID(),
+    provider_id: sample.value.provider_id,
+    model: sample.value.model || currentProvider.value.default_model,
+    system_prompt: sample.value.system_prompt,
+    user_prompt: sample.value.user_prompt,
+    stream: false,
+    max_output_tokens: sample.value.max_output_tokens,
   }
+  await sampleTask.start(() => runSampleRequest(body))
 }
 
 onMounted(() => {

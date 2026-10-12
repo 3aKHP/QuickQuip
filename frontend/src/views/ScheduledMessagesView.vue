@@ -12,7 +12,7 @@
     <UiCard v-else padding="none" shadow="sm">
       <div class="table-scroll">
         <table class="job-table">
-          <thead><tr><th>ID</th><th>cron</th><th>群号</th><th>类型<UiInfoTip text="固定文案 = 到点原样发送；LLM 任务 = 到点把内容作为指令交给 LLM、生成结果再发群。该群 LLM 被关闭时，LLM 任务的当次触发会被跳过。" /></th><th>启用</th><th>来源<UiInfoTip text="任务的创建渠道：命令 = 群内 /schedule 命令；LLM = LLM 的 manage_scheduled_messages 工具（需在 config/llm.toml [tools] 启用）；Web = 本后台创建。" /></th><th>消息</th><th>更新时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>cron</th><th>群号</th><th>类型<UiInfoTip text="固定文案 = 到点原样发送；LLM 任务 = 到点把内容作为指令交给 LLM、生成结果再发群。该群 LLM 被关闭时，LLM 任务的当次触发会被跳过。" /></th><th>启用</th><th>来源<UiInfoTip text="任务的创建渠道：命令 = 群内 /schedule 命令；LLM = LLM 的 manage_scheduled_messages 工具（需在 LLM 配置 [tools] 启用）；Web = 本后台创建。" /></th><th>消息</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="job in jobs" :key="job.id">
               <td class="mono">{{ job.id }}</td>

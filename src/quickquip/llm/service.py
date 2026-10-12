@@ -30,8 +30,6 @@ from quickquip.llm.config import (
     LLMConfig,
     PersonaConfig,
     ProviderConfig,
-    load_llm_config,
-    load_personas_only,
     provider_builtin_search_active,
 )
 from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
@@ -133,6 +131,7 @@ from quickquip.llm.usage import (
 from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
+from quickquip.llm.runtime_snapshot import RuntimeSnapshotMixin, chat_model_entry, snapshot_entry
 from quickquip.llm.tool_loop import run_tool_call_loop
 from quickquip.llm.tools import (
     LLMConversationMessage,
@@ -142,7 +141,6 @@ from quickquip.llm.tools import (
 )
 from quickquip.llm.vocab import VocabIndex
 from quickquip.common.paths import (
-    CONFIG_LLM_TOML,
     LLM_DB_PATH,
     LLM_IDENTITIES_YAML_PATH,
     LLM_VOCAB_YAML_PATH,
@@ -155,7 +153,9 @@ if TYPE_CHECKING:
     from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
 
-CONFIG_PATH = CONFIG_LLM_TOML
+from quickquip.common.paths import DATA_DIR
+
+CONFIG_PATH = DATA_DIR / "llm_config.db"
 DB_PATH = LLM_DB_PATH
 VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
@@ -172,6 +172,7 @@ _PASSIVE_QUEUE_KINDS = frozenset(
 
 
 class LLMService(
+    RuntimeSnapshotMixin,
     ScopeMixin,
     ToolMixin,
     McpLifecycleMixin,
@@ -191,6 +192,8 @@ class LLMService(
         vocab_path: str | Path = VOCAB_PATH,
         identity_path: str | Path = IDENTITY_PATH,
         image_preprocessor: ImagePreprocessor | None = None,
+        config: LLMConfig | None = None,
+        config_service=None,
     ):
         self.config_path = Path(config_path)
         self.vocab_path = Path(vocab_path)
@@ -215,7 +218,25 @@ class LLMService(
         self._init_error: str | None = None
 
         self._register_builtin_tools()
-        self.config = load_llm_config(self.config_path)
+        self.config_service = config_service
+        if config is None:
+            if self.config_service is None:
+                from quickquip.llm.config_service import ConfigService
+                self.config_service = ConfigService(self.config_path)
+                from quickquip.common.paths import CONFIG_LLM_TOML
+                from quickquip.llm.config_runtime import initialize_for_bot
+                initialize_for_bot(
+                    self.config_service,
+                    CONFIG_LLM_TOML if self.config_path == CONFIG_PATH else None
+                )
+            from quickquip.llm.config_document import compile_document
+            published = self.config_service.read("published")
+            config = compile_document(
+                published["document"], config_dir=self.config_path.parent.parent / "config",
+                revision=published["revision"],
+            )
+        self.config = config
+        self._init_configuration_leases()
         # skills 需要在 config 就位后做启动注册；空目录时留待每轮构建系统
         # 提示时惰性注册（热部署，无 reload 钩子）。
         self._init_skills()
@@ -283,18 +304,27 @@ class LLMService(
         return self._resolve_identities(group_id)
 
     def reload_config(self) -> LLMConfig:
-        self.config = load_llm_config(self.config_path)
+        if self.config_service is None:
+            return self.config
+        from quickquip.llm.config_document import compile_document
+        published = self.config_service.read("published")
+        config = compile_document(
+            published["document"], config_dir=self.config_path.parent.parent / "config",
+            revision=published["revision"],
+        )
+        if config.mcp != self.config.mcp:
+            raise RuntimeError("MCP 配置更新须通过配置应用任务执行")
+        self.activate_configuration(self.prepare_configuration(config))
         _reload_sensitive_filter()
         self.rebuild_image_preprocessor()
         self.vocab = VocabIndex.from_file(self.vocab_path)
         self._identity_repository.invalidate()
         identities.invalidate()
         self._group_vocabs.clear()
-        self.mark_mcp_dirty()
         return self.config
 
     def reload_personas(self) -> tuple[int, str | None]:
-        """Reload only the personas section (``[[personas]]`` + ``config/personas/``).
+        """Reload independent files from ``config/personas/``.
 
         Does **not** touch providers / MCP / runtime — those stay as loaded at
         startup, since reloading them requires restarting provider clients and
@@ -302,14 +332,16 @@ class LLMService(
         error or an empty result, the previous ``self.config.personas`` is kept.
         """
         try:
-            new_personas = load_personas_only(self.config_path)
+            from quickquip.llm.personas import load_personas
+            new_personas = load_personas(self.config_path.parent.parent / "config" / "personas")
         except Exception as exc:
             return 0, str(exc)
         if not new_personas:
             return 0, "配置中没有可用的人格"
-        self.config.personas = new_personas
-        if self.config.runtime.default_persona not in new_personas:
-            self.config.runtime.default_persona = next(iter(new_personas))
+        runtime = self.config.runtime
+        if runtime.default_persona not in new_personas:
+            runtime = replace(runtime, default_persona=next(iter(new_personas)))
+        self.config = replace(self.config, personas=new_personas, runtime=runtime)
         return len(new_personas), None
 
     def get_chat_settings(
@@ -332,7 +364,11 @@ class LLMService(
     def _update_chat_settings(
         self, chat_id: int | str, chat_type: str = "group", **fields: object
     ) -> None:
-        self.store.update_group_settings(self.build_chat_scope_key(chat_id, chat_type), **fields)
+        scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        if self.config_service is not None:
+            self.config_service.update_group_override(self.store, scope_key, **fields)
+        else:
+            self.store.update_group_settings(scope_key, **fields)
 
     def _build_system_prompt(
         self,
@@ -417,6 +453,7 @@ class LLMService(
             quoted_user_id=quoted_user_id,
         )
 
+    @snapshot_entry
     async def quick_judge(self, prompt: str, max_tokens: int | None = None) -> str:
         """
         一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
@@ -431,6 +468,7 @@ class LLMService(
             self.config, prompt, max_tokens, client_builder=build_provider_client
         )
 
+    @snapshot_entry
     async def quick_judge_detailed(
         self, prompt: str, max_tokens: int | None = None
     ) -> QuickJudgeResult:
@@ -933,7 +971,7 @@ class LLMService(
 
         if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
             generation_at_schedule, _ = self.store.agent_scope_state(scope_key)
-            asyncio.create_task(
+            self.create_configuration_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
                     user_id=user_id,
@@ -986,6 +1024,7 @@ class LLMService(
                 )
             return await self._generate_reply_for_scope_locked(request)
 
+    @chat_model_entry
     async def _generate_reply_for_scope_locked(
         self, request: ChatTurnRequest
     ) -> ReplyResult:
@@ -1027,6 +1066,14 @@ class LLMService(
             return reply_result(
                 DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id), llm_used=False
             )
+
+        from quickquip.llm.config_document import resolve_model_provider
+        try:
+            provider = resolve_model_provider(
+                self.config, provider.id, settings.model or provider.default_model
+            )
+        except ValueError:
+            return reply_result("当前模型不可用。", llm_used=False)
 
         persona = self.config.personas.get(settings.persona_id)
         if persona is None:

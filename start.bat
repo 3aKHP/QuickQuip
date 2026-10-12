@@ -9,15 +9,12 @@ if not exist "data" mkdir "data"
 
 set "_ENV_CREATED=0"
 call :copy_env_if_missing ".env.example" ".env"
-call :copy_if_missing "config\llm.toml.example" "config\llm.toml"
 call :copy_if_missing "config\chat_rules.toml.example" "config\chat_rules.toml"
-call :copy_if_missing "config\generation.toml.example" "config\generation.toml"
 call :copy_if_missing "config\games.toml.example" "config\games.toml"
 call :copy_if_missing "config\awakening.toml.example" "config\awakening.toml"
 call :copy_if_missing "config\sensitive_words.toml.example" "config\sensitive_words.toml"
 call :copy_if_missing "config\niuniu_text.toml.example" "config\niuniu_text.toml"
 call :copy_if_missing "config\niuniu_text_safe.toml.example" "config\niuniu_text_safe.toml"
-call :copy_dir_if_missing "config\personas.example" "config\personas"
 call :copy_dir_if_missing "skills.example" "skills"
 call :copy_if_missing "llm_about\vocab.yaml.example" "llm_about\vocab.yaml"
 call :copy_if_missing "llm_about\identities.yaml.example" "llm_about\identities.yaml"
@@ -39,6 +36,18 @@ if exist ".\python\pythonw.exe" (
     set "_PYTHON=python"
     set "_PYTHONW=pythonw"
 )
+
+echo Initializing LLM configuration database...
+"%_PYTHON%" -m quickquip.llm.config_cli init
+if errorlevel 1 (
+    echo Configuration initialization failed. Review the error above before restarting.
+    pause
+    exit /b 1
+)
+
+rem Seed independent templates after migration has prepared legacy assets.
+call :copy_if_missing "config\generation.toml.example" "config\generation.toml"
+call :copy_dir_if_missing "config\personas.example" "config\personas"
 
 echo Starting Web Admin...
 rem pythonw 没有控制台流，uvicorn/loguru 启动即写无效流会静默崩溃（无 traceback 可查）；
@@ -67,7 +76,8 @@ if not exist "%~2" (
 )
 exit /b
 
-:copy_if_missing "%~2" (
+:copy_if_missing
+if not exist "%~2" (
     if exist "%~1" (
         echo [First run] Copy %~1 -^> %~2
         copy "%~1" "%~2" >nul

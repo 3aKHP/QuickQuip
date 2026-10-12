@@ -43,6 +43,19 @@ async def test_health_verbose_skips_probe_when_key_missing(llm_service, monkeypa
     assert "provider_reachable" not in items["provider"].details
 
 
+async def test_health_warns_and_skips_paid_probe_for_disabled_model(llm_service, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic")
+    llm_service.config.providers["openai-main"].model_enabled["gpt-test"] = False
+    async def unexpected_probe(*args):
+        raise AssertionError("Disabled model must not send a paid probe")
+    monkeypatch.setattr("quickquip.llm.health._probe_provider", unexpected_probe)
+    report = await llm_service.build_health_report(10001, probe_provider=True)
+    provider = next(item for item in report.items if item.name == "provider")
+    assert provider.status == "warn"
+    assert provider.details["model_enabled"] is False
+    assert "provider_reachable" not in provider.details
+
+
 async def test_health_tool_returns_formatted_report(llm_service, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     context = ToolExecutionContext(
@@ -67,79 +80,38 @@ async def test_health_tool_returns_formatted_report(llm_service, monkeypatch):
 
 
 async def test_health_reports_bound_image_preprocessor(llm_service, monkeypatch):
-    from tests.fixtures.configs import MIN_LLM_CONFIG_TOML
-
-    class _StubClient:
-        pass
-
-    monkeypatch.setattr(
-        "quickquip.llm.service.build_provider_client", lambda provider: _StubClient()
+    from quickquip.llm.config import ImagePreprocessingConfig
+    llm_service.config.image_preprocessing = ImagePreprocessingConfig(
+        enabled=True, provider_id="openai-main", model="gpt-test"
     )
-    llm_service.config_path.write_text(
-        MIN_LLM_CONFIG_TOML
-        + """
-
-[image_preprocessing]
-enabled = true
-provider_id = "openai-main"
-model = "gpt-test"
-""",
-        encoding="utf-8",
-    )
-    llm_service.reload_config()
-
+    llm_service.rebuild_image_preprocessor()
     report = await llm_service.build_health_report(10001)
     items = {item.name: item for item in report.items}
-
     assert items["image_preprocessing"].status == "ok"
     assert items["image_preprocessing"].details["runtime_bound"] is True
 
 
 async def test_health_warns_when_image_preprocessor_provider_missing(llm_service):
-    from tests.fixtures.configs import MIN_LLM_CONFIG_TOML
-
-    llm_service.config_path.write_text(
-        MIN_LLM_CONFIG_TOML
-        + """
-
-[image_preprocessing]
-enabled = true
-provider_id = "missing-provider"
-""",
-        encoding="utf-8",
+    from quickquip.llm.config import ImagePreprocessingConfig
+    llm_service.config.image_preprocessing = ImagePreprocessingConfig(
+        enabled=True, provider_id="missing-provider"
     )
-    llm_service.reload_config()
-
+    llm_service.rebuild_image_preprocessor()
     report = await llm_service.build_health_report(10001)
     items = {item.name: item for item in report.items}
-
     assert items["image_preprocessing"].status == "warn"
     assert items["image_preprocessing"].details["provider_declared"] is False
 
 
 async def test_health_rejects_non_vision_preprocessor_model(llm_service):
-    from tests.fixtures.configs import MIN_LLM_CONFIG_TOML
-
-    config = MIN_LLM_CONFIG_TOML.replace(
-        'models = ["gpt-test", "gpt-alt"]',
-        'models = ["gpt-test", "gpt-alt"]\nnon_vision_models = ["gpt-test"]',
+    from quickquip.llm.config import ImagePreprocessingConfig
+    llm_service.config.providers["openai-main"].non_vision_models = ["gpt-test"]
+    llm_service.config.image_preprocessing = ImagePreprocessingConfig(
+        enabled=True, provider_id="openai-main", model="gpt-test"
     )
-    llm_service.config_path.write_text(
-        config
-        + """
-
-[image_preprocessing]
-enabled = true
-provider_id = "openai-main"
-model = "gpt-test"
-""",
-        encoding="utf-8",
-    )
-    llm_service.reload_config()
-
+    llm_service.rebuild_image_preprocessor()
     report = await llm_service.build_health_report(10001)
     items = {item.name: item for item in report.items}
-
     assert items["image_preprocessing"].status == "warn"
     assert items["image_preprocessing"].details["model_declared_non_vision"] is True
     assert items["image_preprocessing"].details["runtime_bound"] is False

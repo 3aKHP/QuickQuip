@@ -33,6 +33,7 @@ from quickquip.app.web.routes import (
     epochs,
     scheduled_messages,
     skills,
+    llm_configuration,
 )
 from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
@@ -125,6 +126,14 @@ def create_app() -> FastAPI:
         scheduled_messages.router, prefix="/ops/api", dependencies=auth.protected_dependencies
     )
     app.include_router(skills.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+
+    app.include_router(
+        llm_configuration.router, prefix="/ops/api", dependencies=auth.protected_dependencies
+    )
+
+    from quickquip.app.web.llm_configuration_schema import enrich_openapi
+    original_openapi = app.openapi
+    app.openapi = lambda: enrich_openapi(original_openapi())
 
     _register_root_redirect(app)
 

@@ -2,11 +2,13 @@
 
 # 从零理解 MCP —— 以 QuickQuip 项目为例
 
+配置示例为导出 JSON 中的字段片段；请在 Web Admin「LLM 配置」中编辑，或修改完整导出文件后预览导入、保存草稿并单独应用。完整交换格式见 [LLM 配置管理](../admin/llm-configuration.md)。
+
 > **面向读者：** 听说过 MCP、尚未实际接触过协议本身的开发者与高级部署者。
 >
-> **前置要求：** 会读写 TOML 配置；对 QuickQuip 的 LLM 工具调用链路有大致印象（可先浏览 [`llm-module.md`](llm-module.md)）。
+> **前置要求：** 会阅读 JSON 配置；对 QuickQuip 的 LLM 工具调用链路有大致印象（可先浏览 [`llm-module.md`](llm-module.md)）。
 >
-> **源码指引：** 协议实现位于 `src/quickquip/llm/mcp/`，配置解析位于 `src/quickquip/llm/config.py`，运行期生命周期位于 `src/quickquip/llm/service_parts/mcp_lifecycle.py`，命令入口位于 `src/quickquip/adapters/nonebot/command_parts/llm.py`。配置权威模板为 `config/llm.toml.example`。
+> **源码指引：** 协议实现位于 `src/quickquip/llm/mcp/`，配置校验与编译位于 `src/quickquip/llm/config_document.py`，运行期生命周期位于 `src/quickquip/llm/service_parts/mcp_lifecycle.py`，命令入口位于 `src/quickquip/adapters/nonebot/command_parts/llm.py`。配置权威模板为 `config/llm.json.example`。
 
 ---
 
@@ -71,7 +73,7 @@ QuickQuip 把 MCP 作为工具后端来源之一：MCP 工具与内置工具进�
 
 ### 2.1 启动时发生了什么
 
-`MCPClientManager.sync()`（`mcp/client.py`）在启动或重载时逐个处理 `[[mcp.servers]]`：
+`MCPClientManager.sync()`（`mcp/client.py`）在启动或重载时逐个处理 `settings.mcp.servers`：
 
 1. 建立连接：每个 server 最多尝试 3 次，间隔 2 秒。认证失败（401/403）、配置类错误与 4xx 直接判死不重试；超时、网络错误与 5xx 视为瞬态（应对 compose 冷启动时 sidecar 尚未就绪的竞态）；
 2. `tools/list` 拉取工具清单（分页循环），生成工具别名并按 server 级名单过滤（§4.2）；
@@ -106,27 +108,36 @@ MCP 状态
 - 聊天面只显示失败分类（如 `认证失败`），不显示服务端原始错误文本；Web Admin 的状态页可看清洗后的详情；
 - transport 后面的 `/modern`、`/auto/legacy` 等角标是双协议纪元标记（§5.1）；
 - `/llm mcp reload`（管理员）：重连全部 server，docker transport 会先强制拉取最新镜像；
-- `/llm reload`（管理员）：重载 `llm.toml` 并在后台重连 MCP；人格热重载路径不会触碰 MCP 连接。
+- LLM 配置通过草稿应用任务接纳；仅 MCP 配置改变时准备新资源代际。人格热重载与价格更新保持当前 MCP 连接。
 
 ---
 
 ## 3. 四种 transport 逐一实例
 
-`transport` 决定 client 与 server 之间消息怎么传输。四种都封装在 `mcp/transport.py`，协议层完全无感。以下配置块均可直接复制进 `config/llm.toml` 后按需改名。
+`transport` 决定 client 与 server 之间消息怎么传输。四种都封装在 `mcp/transport.py`，协议层完全无感。以下为导出 JSON 的字段片段，在 Web Admin 中编辑或补入完整导出文件后预览导入、保存并应用。
 
 ### 3.1 stdio —— 本地子进程
 
 适用场景：与 bot 同机的命令行 MCP server（`uvx` 拉起的 Python server、`npx` 拉起的 Node server 等），进程随 bot 启停。
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "fetch"
-transport = "stdio"
-command = "uvx"
-args = ["mcp-server-fetch"]
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "fetch",
+          "transport": "stdio",
+          "command": "uvx",
+          "args": [
+            "mcp-server-fetch"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：QuickQuip 派生子进程，stdin/stdout 上交换 JSON-RPC（按行分隔，自动兼容 `Content-Length` 帧格式），stderr 逐行写入日志；`env` 在当前进程环境之上合并注入。
@@ -137,17 +148,30 @@ args = ["mcp-server-fetch"]
 
 适用场景：社区只提供 CLI 镜像、没有 http/sse 端点的 server。需要本机 Docker CLI 与 daemon；容器化部署默认不挂载 docker.sock，仅适合裸机或可信宿主机。
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "github"
-transport = "docker"
-timeout_seconds = 30
-image = "ghcr.io/github/github-mcp-server"
-env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}" }
-include_tools = ["search_repositories", "get_file_contents", "search_code"]
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "github",
+          "transport": "docker",
+          "timeout_seconds": 30,
+          "image": "ghcr.io/github/github-mcp-server",
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+          },
+          "include_tools": [
+            "search_repositories",
+            "get_file_contents",
+            "search_code"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：QuickQuip 执行 `docker run -i --rm --pull <pull_policy> ...` 拉起容器；`env` 写入一块 0600 权限的临时 `--env-file` 传给容器，启动完成后立即删除，凭证不出现在进程命令行里。
@@ -158,16 +182,25 @@ include_tools = ["search_repositories", "get_file_contents", "search_code"]
 
 适用场景：自建或第三方的 HTTPS MCP 服务、宿主机 MCP 网关。生产环境首选。
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "prts_wiki"
-transport = "http"
-timeout_seconds = 30
-url = "https://mcp.example.com/mcp"
-headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "prts_wiki",
+          "transport": "http",
+          "timeout_seconds": 30,
+          "url": "https://mcp.example.com/mcp",
+          "headers": {
+            "Authorization": "Bearer ${MCP_PRTS_WIKI_TOKEN}"
+          }
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：单端点 POST；服务器从响应头下发 `mcp-session-id`，后续请求携带该头维持会话；响应体是 JSON 或内联 SSE。
@@ -187,15 +220,22 @@ curl -sS -X POST "https://mcp.example.com/mcp" \
 
 适用场景：仍只提供旧式 SSE 端点的存量远程 server。
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "tavily"
-transport = "sse"
-timeout_seconds = 30
-url = "http://mcp-tavily:8080/sse"
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "tavily",
+          "transport": "sse",
+          "timeout_seconds": 30,
+          "url": "http://mcp-tavily:8080/sse"
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：GET 打开一条长连接事件流，服务器发出 `endpoint` 事件告知 POST 地址（相对路径会按 SSE URL 解析），请求的响应从 `message` 事件回流。等待 `endpoint` 事件超过 `timeout_seconds` 会报「等待 endpoint 事件超时」。
@@ -206,9 +246,9 @@ url = "http://mcp-tavily:8080/sse"
 
 ## 4. 配置全解
 
-配置全部写在 `config/llm.toml`，解析代码为 `src/quickquip/llm/config.py` 的 `_read_mcp_servers()`。总开关 `[mcp] enabled` 默认 `false`；关闭时 `sync()` 直接返回，一个连接也不建立。
+配置通过共享应用服务保存到 `data/llm_config.db`，校验与编译见 `src/quickquip/llm/config_document.py`。总开关 `settings.mcp.enabled` 默认 `false`；关闭时 `sync()` 直接返回，一个连接也不建立。
 
-### 4.1 `[[mcp.servers]]` 全字段表
+### 4.1 `settings.mcp.servers` 全字段表
 
 默认值以现行解析代码为准（`MCPServerConfig` 与 `_read_mcp_servers`）。
 
@@ -278,12 +318,12 @@ ${ENV_VAR:-default}    带默认值；未设置时展开为 default（默认值�
 ```
 
 - 变量名需匹配 `[A-Za-z_][A-Za-z0-9_]*`；占位符支持嵌在更长字符串里（如 `"Bearer ${TOKEN}"`）；
-- 展开发生在**配置解析时**：进程启动加载 `llm.toml` 与 `/llm reload` 重载时各展开一次，运行期不重读环境变量；
-- `.env` 只在进程启动时加载一次：`/llm reload` 重载的是 TOML 展开（环境变量取自启动时快照），改动 `.env` 需要重启 bot 进程生效。
+- 展开发生在**配置解析时**：Bot 编译已发布快照或应用指定快照时展开，运行期不重读环境变量；
+- `.env` 只在进程启动时加载一次：快照编译从 Bot 当前进程环境读取变量，改动 `.env` 需要重启 bot 进程生效。
 
 ### 4.3 凭证安全惯例
 
-- 凭证一律放进程环境（部署上以仓库根目录 `.env` 为唯一涉密来源），`llm.toml` 里只写 `${ENV_VAR}` 占位，任何真实 token 不进配置文件；
+- 凭证一律放进程环境（部署上以仓库根目录 `.env` 为唯一涉密来源），JSON 和配置数据库里只写 `${ENV_VAR}` 占位，任何真实 token 不进配置文件；
 - http/sse 用 `headers` 注入 `Authorization`，stdio 用 `env`，docker 的 `env` 经临时 `--env-file` 注入，凭证不暴露在进程命令行；
 - 状态与日志侧有配套清洗：URL 去除 query、fragment 与 userinfo，异常文本截断脱敏后才能进入 status JSON 或日志——即使 token 误写进 URL，也不会从状态页泄漏。
 
@@ -311,18 +351,29 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 | `auto` | 先发 `server/discover` 探测：返回 DiscoverResult 就走 modern；收到 legacy 信号（JSON-RPC error，或 400/404/405 且响应体无 modern 错误码 -32022/-32020）就回退 legacy。401/403/5xx/超时直接失败不回退 |
 | `modern` | 只走 modern；探测判定为 legacy 时报协议协商失败 |
 
-- `negotiation` 配了 `auto`/`modern` 但 `transport` 非 `http`，或 `supported_protocol_versions` 为空：该 server 在配置校验阶段被跳过并记录告警（不会到连接阶段才失败）；
+- `negotiation` 配了 `auto`/`modern` 但 `transport` 非 `http`，或 `supported_protocol_versions` 为空：保存校验返回字段错误，修复后才可保存并应用；
 - modern 版本协商取客户端声明列表与服务器 `supportedVersions` 的交集，交集为空时报「modern 版本无交集」；
 - modern 模式下收到 `InputRequiredResult`（MRTR，响应带 `inputRequests`）按「暂不支持」返回稳定错误；
-- 协商在每次装载时执行（进程启动、`/llm reload`、`/llm mcp reload` 都会重新探测）；session 过期重连沿用当前装载周期的协商结论，不重新探测。
+- 协商在连接资源准备时执行（进程启动、MCP 配置应用、`/llm mcp reload`）；session 过期重连沿用当前装载周期的协商结论，不重新探测。
 
-```toml
-[[mcp.servers]]
-id = "modern_api"
-transport = "http"
-negotiation = "auto"
-supported_protocol_versions = ["2026-07-28"]
-url = "https://modern-mcp.example.com/mcp"
+```json
+{
+  "settings": {
+    "mcp": {
+      "servers": [
+        {
+          "id": "modern_api",
+          "transport": "http",
+          "negotiation": "auto",
+          "supported_protocol_versions": [
+            "2026-07-28"
+          ],
+          "url": "https://modern-mcp.example.com/mcp"
+        }
+      ]
+    }
+  }
+}
 ```
 
 ### 5.3 stale session 处理（legacy HTTP）
@@ -377,7 +428,7 @@ url = "https://modern-mcp.example.com/mcp"
 
 **处置**：
 
-1. 慢工具（深度调研、大范围爬取类）给所在 server 单独调大 `timeout_seconds`，`/llm reload` 生效；
+1. 慢工具（深度调研、大范围爬取类）给所在 server 单独调大 `timeout_seconds`，保存并应用后生效；
 2. docker transport 首次调用前可能需要拉镜像：检查 `pull_policy`，用 `/llm mcp reload` 强制拉取；
 3. 间歇性超时优先排查 server 端负载与网络；持续超时且 `tools/list` 正常，多半是单个工具执行确实超过阈值。
 
@@ -400,7 +451,7 @@ url = "https://modern-mcp.example.com/mcp"
 - [`docs/admin/mcp-servers.md`](../admin/mcp-servers.md)：接入实操清单，部署侧视角的 server 逐家配置与验证步骤；
 - [`mcp-integration.md`](mcp-integration.md)：设计决策与边界——目标边界、推荐路线、docker socket 取舍与安全决策的记录；
 - [`tool-discovery.md`](tool-discovery.md)：工具发现的策略、数据流与测试覆盖；
-- [`docs/admin/configuration.md`](../admin/configuration.md)：`config/llm.toml` 全量字段参考（含 `[mcp]` 段）；
+- [`docs/admin/configuration.md`](../admin/configuration.md)：`data/llm_config.db` 全量字段参考（含 `settings.mcp` 段）；
 - MCP 上游规范：<https://modelcontextprotocol.io>——协议方法、传输定义与各版本规范的权威来源。
 
 ---
@@ -408,5 +459,5 @@ url = "https://modern-mcp.example.com/mcp"
 > **文档信息**
 >
 > - 本文档基于 QuickQuip 项目编写，全部字段、默认值与行为描述以现行实现为准
-> - 相关源码：`src/quickquip/llm/mcp/`、`src/quickquip/llm/config.py`、`src/quickquip/llm/service_parts/mcp_lifecycle.py`、`src/quickquip/adapters/nonebot/command_parts/llm.py`
+> - 相关源码：`src/quickquip/llm/mcp/`、`src/quickquip/llm/config_document.py`、`src/quickquip/llm/service_parts/mcp_lifecycle.py`、`src/quickquip/adapters/nonebot/command_parts/llm.py`
 > - 最后更新：2026-09-19

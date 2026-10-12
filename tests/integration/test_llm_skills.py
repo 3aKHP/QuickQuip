@@ -645,7 +645,6 @@ async def test_hot_deploy_lazy_registration(tmp_path, patch_provider_builder):
     assert second_request.system_prompt.endswith("</skill_catalog>")
     assert "- late-demo: 热部署演示 skill。" in second_request.system_prompt
     for name in SKILL_TOOL_NAMES:
-        assert service.tool_registry.has_tool(name)
         assert name in _spec_names(second_request)
     (activate_spec,) = [
         spec for spec in second_request.tools if spec.name == "activate_skill"

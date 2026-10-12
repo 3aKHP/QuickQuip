@@ -14,7 +14,12 @@ const FIELDS: readonly GroupOverrideField[] = [
 
 function emptyDraft(): GroupOverrideDraft {
   // fromEntries 按 FIELDS 全量构造，键集合与 GroupOverrideDraft 一一对应
-  return Object.fromEntries(FIELDS.map(field => [field, null])) as GroupOverrideDraft
+  return {
+    enabled: null, memory_enabled: null, auto_memory_enabled: null,
+    agent_delivery_intermediate_enabled: null, agent_delivery_final_enabled: null,
+    provider_id: null, model: null, persona_id: null, trigger_prefix: null,
+    allow_prefix: null, allow_at: null, history_limit: null, reasoning_effort: null,
+  }
 }
 
 /**

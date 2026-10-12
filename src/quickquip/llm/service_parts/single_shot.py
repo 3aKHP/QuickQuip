@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from typing import Any
+from quickquip.llm.runtime_snapshot import snapshot_entry
 
 from quickquip.llm.single_shot import (
     CommandSingleShotSpec,
@@ -86,6 +87,7 @@ _TURMFLUCH_SPEC = CommandSingleShotSpec(
 class SingleShotEntriesMixin:
     """defectify / turmfluch / card_le_nearest 的命令入口与被动入口。"""
 
+    @snapshot_entry
     async def generate_defectify_reply(
         self,
         *,
@@ -116,6 +118,7 @@ class SingleShotEntriesMixin:
             quoted_user_id=quoted_user_id,
         )
 
+    @snapshot_entry
     async def generate_turmfluch_reply(
         self,
         *,
@@ -147,6 +150,7 @@ class SingleShotEntriesMixin:
             quoted_user_id=quoted_user_id,
         )
 
+    @snapshot_entry
     async def generate_card_le_nearest(
         self,
         *,

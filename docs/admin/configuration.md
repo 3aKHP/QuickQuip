@@ -1,5 +1,7 @@
 # QuickQuip 配置参考
 
+LLM 配置示例为导出 JSON 中的字段片段；请在 Web Admin「LLM 配置」中编辑，或修改完整导出文件后预览导入、保存草稿并单独应用。完整交换格式见 [LLM 配置管理](llm-configuration.md)。
+
 本文档列出 QuickQuip 主要可配置项，按文件和作用域分类。
 
 ---
@@ -30,7 +32,7 @@
 | `GITHUB_TOOLSETS` | GitHub MCP 启用的工具集，逗号分隔。可选：`context`, `repos`, `issues`, `pull_requests`, `users`, `actions` |
 | `GITHUB_READ_ONLY` | 设为非空时限制 GitHub MCP 为只读 |
 | `TAVILY_API_KEY` | Tavily API key（供 MCP sidecar 的 Tavily 工具使用，未启用 MCP Tavily 时无需填写） |
-| `MCP_PRTS_WIKI_TOKEN` | prts_wiki MCP 的鉴权 token（见 `config/llm.toml.example` 的 prts_wiki 示例） |
+| `MCP_PRTS_WIKI_TOKEN` | prts_wiki MCP 的鉴权 token（见 [MCP 接入指南](mcp-servers.md) 的 prts_wiki 示例） |
 
 ### 搜索
 
@@ -77,7 +79,7 @@ LLM 工具 `search_web` 与 `/search` 命令固定走项目内 SearXNG。普通�
 |------|------|
 | `MCP_ARXIV_PAPERS_MOUNT` | arXiv MCP server 论文保存卷挂载，格式 `host-path:container-path`。默认 `arxiv-papers:/root/.arxiv-mcp-server/papers` |
 
-其他 `${ENV_VAR}` 与 `${ENV_VAR:-default}` 语法在 `config/llm.toml` 的 MCP server 配置中均可用。
+MCP server 的普通字段支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`；认证字段使用 `${ENV_VAR}` 保存引用，密钥值维护在根 `.env`。
 
 ### Web Admin
 
@@ -101,13 +103,17 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 ---
 
-## config/llm.toml
+## LLM 配置数据库
 
-### `[runtime]` — 运行参数
+`data/llm_config.db` 是运行时的配置来源，JSON 是配置交换格式。通过 Web Admin「LLM 配置」或 `python -m quickquip.llm.config_cli` 修改草稿，再单独提交应用；Bot 启动加载已发布快照。`draft_revision`、`published_revision` 与 Bot 回报的 `loaded_revision` 分别表示草稿、发布和实际运行版本。旧 `config/llm.toml` 只作为首次迁移输入及 1.16.1 回退资产保留。完整流程、备份与回退说明见 [LLM 配置管理](llm-configuration.md)。
+
+下文路径对应完整 JSON 文档，认证字段只保存根 `.env` 的变量名或引用。字段范围、枚举和继承能力由 `/ops/api/llm-configuration/metadata` 提供；新增写入拒绝非法值。
+
+### `settings.runtime` — 运行参数
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
-| `enabled` | 全局 LLM 开关（`llm.toml.example` 中显式设为 `true`） | `false` |
+| `enabled` | 全局 LLM 开关（`config/llm.json.example` 中显式设为 `true`） | `false` |
 | `memory_enabled` | 全局记忆注入开关 | `true` |
 | `default_provider` | 默认 provider ID | — |
 | `default_persona` | 默认人格 ID | — |
@@ -133,22 +139,22 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
 | `recent_context_token_budget` | 【现场】补丁每轮 token 预算：近期消息缓冲服役给 LLM 的上限（从最新往回截） | `800` |
 | `recent_context_floor_seconds` | 【现场】滑动保底窗秒数：窗内消息即使已服役过也会重附（增量语义之外的保底） | `300` |
-| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：按「provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省」解析，超限时主链先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝发起；工具调用循环内的逐轮门禁超限立即中止该循环（无降级重试）；可在 `[[providers]]` 段按 provider 覆盖（非正数视为未配置） | `96000` |
+| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：按「provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省」解析，超限时主链先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝发起；工具调用循环内的逐轮门禁超限立即中止该循环（无降级重试）；可在渠道或模型的 `parameters` 覆盖（null 表示继承） | `96000` |
 | `agent_record_retention_days` | 已关闭对话轮（Loop）保留天数，按关闭时间计 | `30` |
 | `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
-| `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按「请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留」推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在 `[[providers]]` 段按 provider 硬覆盖 | `4096` |
+| `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按「请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留」推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在渠道或模型的 `parameters` 中硬覆盖 | `4096` |
 | `agent_delivery_intermediate_enabled` | 中间轮交付的全局默认：开启后工具调用多轮回复中非最终轮的普通正文照常先于工具执行外发；关闭时非最终正文只记录不发送（`suppressed_by_policy`） | `false` |
-| `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息经 sink 外发；关闭时最终正文沿旧单发路径整条发送。两域独立，旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射。各群/私聊会话可用 `/llm delivery intermediate/final/all …` 或 Web Admin「群设置」按会话覆盖 | `false` |
+| `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息经 sink 外发；关闭时最终正文沿旧单发路径整条发送。两域独立；旧迁移输入中的 `agent_delivery_enabled` 按两域同值转换。各群/私聊会话可用 `/llm delivery intermediate/final/all …` 或 Web Admin「群设置」按会话覆盖 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
 | `reply_chunk_max_chars` | 单段源文本上限，独立于 OneBot 协议报文长度 | `1200` |
 | `reply_send_interval_ms` | 同会话相邻发送开始时间的最小间隔（0-10000） | `800` |
 | `reply_max_chunks_per_loop` | 单次对话交付条目上限（含文字、媒体与通知，1-256） | `64` |
 | `mention_cooldown_seconds` | 出站「@名字」艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却，0-86400） | `600` |
 
-以上 6 个 `epoch_*` 键均可在 `[[providers]]` 条目里同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `[runtime]` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，非法时回退并记 warning。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
+以上 6 个 `epoch_*` 键均可在渠道或模型的 `parameters` 对象内同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `settings.runtime` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，新写入的非法组合由校验拒绝。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
 
-### `[triggers]` — 触发方式
+### `settings.triggers` — 触发方式
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
@@ -157,14 +163,14 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `allow_at` | 启用艾特触发 | `true` |
 | `empty_prompt_reply` | 空提示时的默认回复文本 | `请在触发指令或艾特后面补上想说的话。` |
 
-`[triggers.auto_search]` — 自动联网判定：
+`settings.auto_search` — 自动联网判定：
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `enabled` | 是否启用自动联网 | `false` |
 | `search_max_calls_per_round` | 单轮最大搜索调用数，范围 1-32 | `3` |
 
-`[triggers.quick_judge]` — 快速判定模型：
+`settings.quick_judge` — 快速判定模型：
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
@@ -175,22 +181,22 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 快速判定用于 `context_rules` 的 `llm_context`、唤醒模块的相关性/答疑判定等短 prompt 场景。技术失败（超时、provider 异常、空正文、截断、无效 JSON）一律按未触发处理（fail-closed），不会写入 60 秒判定缓存；只有成功解析的业务 true/false 会进缓存。选用带 reasoning 的模型时，reasoning token 计入 `max_tokens` 且延迟更高，需要同时调大 `max_tokens`（如 256）与 `timeout`（如 6 秒），否则会出现“预算被思考耗尽、可见判定为空”与大面积超时。
 
-### `[image_preprocessing]` — 非视觉模型图片转述
+### `settings.image_preprocessing` — 非视觉模型图片转述
 
-当当前主模型出现在所属 provider 的 `non_vision_models` 中时，运行时先调用指定视觉模型，将图片转成带来源和序号的文本，再交给主模型。视觉主模型直接接收原图，不调用该前置层。
+当当前主模型条目的 `vision` 为 `false` 时，运行时先调用指定视觉模型，将图片转成带来源和序号的文本，再交给主模型。视觉主模型直接接收原图，不调用该前置层。
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `enabled` | 启用非视觉模型图片转述 | `false` |
 | `provider_id` | 提供视觉识别能力的 provider ID | `""` |
 | `model` | 视觉模型 ID；留空使用该 provider 的默认模型 | `""` |
-| `max_tokens` | 单张图片转述输出上限，运行时限制为 80-2048 | `300` |
+| `max_tokens` | 单张图片转述输出上限，写入范围为 80-2048 | `300` |
 | `temperature` | 图片转述温度 | `0.3` |
 | `prompt` | 自定义转述 system prompt；留空使用内置提示 | `""` |
 
 单轮最多处理 5 张当前、引用或转发图片。被动唤醒需要近期图片时，会用剩余名额选择最新图片。任一图片转述失败时，本轮不会调用非视觉主模型，用户会收到可重试提示。
 
-### `[tools]` — 工具调用
+### `settings.tools` — 工具调用
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
@@ -212,9 +218,11 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 - 用 `enabled` 启用可选内置工具（如 `draw_svg`）：MCP 工具不再被名单误过滤，通常无需改动。
 - 需要严格工具白名单的部署：显式设置 `enabled_mode = "replace"`，恢复精确过滤语义。
 
-### `[[providers]]` — Provider 定义（可多个）
+### `providers` — Provider 定义（可多个）
 
-每个 provider 一个 `[[providers]]` 条目：
+`providers` 是有序渠道数组。协议、地址、身份和认证字段在渠道层维护；请求参数保存在渠道 `parameters` 中，模型 `parameters` 可覆盖全部同名请求参数。优先级为调用／会话覆盖 → 模型 → 渠道 → 具有覆盖职责的全局设置 → 内置默认；null 继承，空字符串、空对象、false 与合法零值均为显式值。`extra_body` 整体替换对象。
+
+下表请求参数键位于 `parameters`：
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
@@ -223,19 +231,19 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `base_url` | API 中转地址 | — |
 | `api_key_env` | API key 所在环境变量名 | — |
 | `default_model` | 默认模型 ID | — |
-| `models` | 可用模型 ID 数组 | — |
-| `enabled` | 暂时禁用该 provider：不进 `/llm providers`/`models` 列表、不参与探活、model_cascade 跳过、`/llm use` 拒绝；provider 保留在配置中，改回 `true` 即恢复 | `true` |
+| `models` | 有序模型对象数组：`model`、`enabled`、`vision`、`context_window`、`parameters` | `[]` |
+| `enabled` | 暂时禁用该 provider：不进 `/llm providers`/`models` 列表、不参与探活、级联候选跳过、`/llm use` 拒绝；provider 保留在配置中，改回 `true` 即恢复 | `true` |
 | `timeout_seconds` | 请求超时（秒） | `45` |
 | `temperature` | 温度参数 | `0.8` |
 | `max_output_tokens` | 最大输出 token 数 | `800` |
 | `style_overrides` | 可选，多行字符串，追加到每次调用的 system prompt 末尾 | — |
-| `style_profile` | 可选，引用 `[style_profiles]` 中预定义的共享 system prompt 段，与 `style_overrides` 拼接 | — |
-| `non_vision_models` | 该 provider 下不支持图片输入的模型 ID 列表 | `[]` |
+| `style_profile` | 可选，引用 `style_profiles` 中预定义的共享 system prompt 段，与 `style_overrides` 拼接 | — |
+| `models[].vision` | 模型支持图片输入；false 时走图片预处理 | `true` |
 | `stream_enabled` | 是否启用 SSE 流式响应 | `true` |
-| `aliases` | 模型短别名映射，如 `{ gpt4 = "gpt-5.4" }`，`/llm use` 时自动解析 | — |
+| `aliases` | 有序别名对象数组，如 `[{"alias":"gpt4","model":"gpt-5.4"}]` | `[]` |
 | `headers` | 注入到每次请求的额外 HTTP 头 | — |
 | `user_agent` | 自定义 User-Agent 请求头 | — |
-| `extra_body` | 注入到每次请求体的额外 JSON 字段（TOML inline table） | — |
+| `extra_body` | 注入到每次请求体的额外 JSON 对象，模型覆盖时整体替换 | — |
 | `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
 | `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
 | `auth_method` | 认证方式：`api_key` 或 `bearer`。Claude 分别使用 `x-api-key` / `Authorization: Bearer`；Gemini 分别使用兼容中转的 `?key=` / `Authorization: Bearer`；OpenAI 使用 Bearer | `api_key` |
@@ -243,11 +251,12 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
 | `responses_profile` | `openai_responses` 协议专属：后端能力位。`openai-public`（官方 `/v1/responses`）或 `codex-http-relay`（Codex 形态中转，不发 `service_tier`、容忍 `codex.*` 结构事件、终态缺省字段时以流式完整 item 为回放基准） | `openai-public` |
-| `reasoning_effort` | 思考档位（全协议生效）：`low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空不发送思考参数（模型默认档）。到 wire 参数的翻译按协议与后端能力自动完成，超档自动钳制（详见下文「思考档位跨协议映射」）。群内可用 `/llm effort <档>` 按群覆盖本配置（`/llm effort default` 恢复跟随；`/llm status` 与 `/llm effort status` 展示配置档 / 覆盖档 / 生效档三层口径）；Web Admin「配置」页提供本键的结构化编辑面板，「群 LLM」页提供按群三态覆盖 | `""` |
+| `reasoning_effort` | 思考档位（全协议生效）：`low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空不发送思考参数（模型默认档）。到 wire 参数的翻译按协议与后端能力自动完成，超档自动钳制（详见下文「思考档位跨协议映射」）。群内可用 `/llm effort <档>` 按群覆盖本配置（`/llm effort default` 恢复跟随；`/llm status` 与 `/llm effort status` 展示配置档 / 覆盖档 / 生效档三层口径）；Web Admin「LLM 配置」页提供渠道及模型的结构化参数编辑，「群 LLM」页提供按群三态覆盖 | `""` |
 
-> **会话纪元覆盖**：`[runtime]` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `[runtime]` 段说明。
+> **会话纪元覆盖**：`settings.runtime` 的 6 个 `epoch_*` 键可在本表同名覆盖（如 `epoch_cold_idle_seconds = 21600` 放宽 DeepSeek 的冷场判定），未覆盖的键继承全局缺省；详见 `settings.runtime` 段说明。
 
-> **预算与模型容量覆盖**：`request_input_token_budget`（显式请求输入预算，优先于窗口推导）与 `agent_replay_loop_tokens`（重放投影预算硬覆盖，优先于推导）可按 provider 覆盖。`model_context_windows` 以 inline table 声明 wire 模型名 → 上下文窗口 token 数（如 `{ "claude-sonnet-4-6" = 200000 }`）；未显式配置的模型按内置策展表按家族前缀解析（claude 200k、gemini-2.5/3 1M、gpt-5 400k 等），均未命中按 capacity unknown 处理（只保证应用侧估算预算）。中继自定义模型名建议显式配置。**升级提示**：自本版本起，模型名命中内置窗口表的既有部署无需任何配置改动即可获得按窗口推导的更大请求/重放预算（例如 gemini-2.5 系列的重放预算从 4096 量级放大到数十万 token）；希望维持旧收紧行为的部署应显式配置 `agent_replay_loop_tokens` / `request_input_token_budget`。
+> **预算与模型容量覆盖**：`request_input_token_budget` 与 `agent_replay_loop_tokens` 可在渠道或模型 `parameters` 中覆盖。每个模型的 `context_window` 声明上下文容量，null 时按现有模型家族注册表自动解析；未命中时标为容量未知。有效参数接口同时返回配置值、最终值及来源。
+
 
 #### 思考档位跨协议映射
 
@@ -266,7 +275,7 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 #### 各协议思考参数支持面
 
-归一化层只做映射、不做门禁：除 claude budget 的 1024 数学下限外，任何 协议×模型 组合都按上表形态照发思考参数。后端不支持某档位时上游返回 400 等 4xx 错误，即为不支持的信号。群内用 `/llm effort default` 清除会话覆盖并恢复跟随 provider 配置；provider 配置档也不受支持时，清除该 provider 的 `reasoning_effort` 并执行 `/llm reload`，让模型使用自身默认档。以下为 2026-10 调研的各后端支持面结论，供排障参考（不构成拦截依据）：
+归一化层只做映射、不做门禁：除 claude budget 的 1024 数学下限外，任何 协议×模型 组合都按上表形态照发思考参数。后端不支持某档位时上游返回 400 等 4xx 错误，即为不支持的信号。群内用 `/llm effort default` 清除会话覆盖并恢复跟随 provider 配置；provider 配置档也不受支持时，清除该 provider 的 `reasoning_effort` ，保存草稿并应用，让模型使用自身默认档。以下为 2026-10 调研的各后端支持面结论，供排障参考（不构成拦截依据）：
 
 - **claude 协议**：Anthropic 官方 extended thinking 自 3.7 代际引入，3.5 及更早代际无思考能力（照发旧式 budget 形态会被上游拒绝）；4.7+/5 系只接受 `adaptive + effort`，旧式 `type:"enabled"` 直接 400。
 - **claude 兼容端点**：Kimi（k3，思考词表 low/high/max）、MiMo（m2.5）、GLM Coding Plan 等均提供面向 Claude Code 类客户端的 Anthropic 形态端点，对 `adaptive + effort` 形态有实测旁证（端点把 Claude Code 的 effort 标签映射到自家思考档位）。照发意味着同时适用 Anthropic 温度契约：档位生效期间非默认 `temperature` 不下发，上游若实际忽略思考参数，温度配置也会随之不生效。个别端点对历史回放中的 thinking 内容块有特殊要求，QuickQuip 的历史回放分三层：无工具调用的对话轮与一切降级路径（owner 失配、敏感命中、预算精简、档案投影）为纯文本，不带 thinking；带工具调用的已关闭 Loop 在 owner 五元组匹配且结构有效时走原生回放，跨轮携带 thinking 内容（claude 签名块 / gemini thought parts / responses reasoning 密文）。对 claude 兼容端点的实际避坑机制是签名有效性闸门：无签名的 thinking 块自动降级为纯文本档案。注意 claude 协议暂无 openai_responses 式的「上游 400 时剥历史推理降级重试」兜底，返回签名块却拒绝历史 thinking 的端点存在暴露面。
@@ -282,42 +291,54 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 > **Responses 协议说明**（1.16 起）：`openai_responses` 协议采用 `store:false` 手动上下文管理，每轮全量回放 input items；reasoning 模型的当前工具循环会把 reasoning 密文与原生 output items（保序）原样回传，保证官方端点的连续工具调用可续接；工具批次超出单轮执行限额时整批拒绝（与 Gemini 同款 fail-closed）。跨轮 reasoning 密文回放已启用：owner 身份维度为 provider / 协议 / 模型 / profile / 端点（不含档位），同一 owner 的会话保留完整推理连续性，历史工具循环按原生形态回放；切换档位时新旧密文混档共存、回放估算按各密文生成档位逐条计量，切换其余维度自动降级为通用投影（工具事实保留），历史损坏或预算不足时按精简阶梯处理，上游拒绝历史形状时自动去除历史推理重试一次。部分思考系模型只接受默认温度，如遇请求被拒可把该 provider 的 `temperature` 调回 `1.0`。
 
-### `[style_profiles]` — 共享风格段
+### `style_profiles` — 共享风格段
 
 定义可被多个 provider 复用的 system prompt 风格段（多行字符串），provider 通过 `style_profile` 键引用：
 
-```toml
-[style_profiles]
-my_family = """
-……风格条目……
-"""
-
-[[providers]]
-id = "my-provider"
-style_profile = "my_family"   # 引用共享段
-style_overrides = "……"        # 可选，叠加微调
+```json
+{
+  "style_profiles": {
+    "my_family": "……风格条目……\n"
+  },
+  "providers": [
+    {
+      "id": "my-provider",
+      "parameters": {
+        "style_profile": "my_family",
+        "style_overrides": "……"
+      }
+    }
+  ]
+}
 ```
 
 - 拼接顺序：`style_profile` 段在前，`style_overrides` 追加在后，整体附加到每次调用的 system prompt 末尾。
 - 家族内容为空串是合法形态：声明家族占位、不注入任何内容，引用方等价于无风格附加块（例如为后续调校预留条目）。
-- 引用未定义的 `style_profile` 会记录 error 日志并忽略该引用，provider 仅保留 `style_overrides`。
-- 内置示例四家族（`openai_family` / `gemini_family` / `claude_family` / `general`）随 `config/llm.toml.example` 分发，按模型谱系对位命名，可直接复用或改写。
+- 引用未定义的 `style_profile` 会导致保存失败并返回依赖冲突；删除被引用的风格前应处理引用。
+- 内置示例四家族（`openai_family` / `gemini_family` / `claude_family` / `general`）随 `config/llm.json.example` 分发，按模型谱系对位命名，可直接复用或改写。
 
-### `[pricing.models]` — 模型定价（成本统计）
+### `pricing` — 模型定价（成本统计）
 
 per-MTok（每百万 token，USD）定价表，是 Web Admin LLM 用量页成本统计（`cost_usd`）的价格来源：
 
-```toml
-# 纯 model 名 = 官方价默认（所有 provider 的该 model 共享）
-[pricing.models."deepseek-chat"]
-input_per_mtok = 0.14
-output_per_mtok = 0.28
-cache_read_per_mtok = 0.003
-
-# "provider_id/model" = per-provider 覆盖（某中转实际价，优先于 model 默认）
-[pricing.models."my-provider/deepseek-chat"]
-input_per_mtok = 0.20
-output_per_mtok = 0.40
+```json
+{
+  "pricing": [
+    {
+      "provider_id": null,
+      "model": "deepseek-chat",
+      "input_per_mtok": 0.14,
+      "output_per_mtok": 0.28,
+      "cache_read_per_mtok": 0.003
+    },
+    {
+      "provider_id": "my-provider",
+      "model": "deepseek-chat",
+      "input_per_mtok": 0.2,
+      "output_per_mtok": 0.4
+    }
+  ]
+}
 ```
 
 | 键 | 说明 |
@@ -329,7 +350,7 @@ output_per_mtok = 0.40
 
 查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示“未定价”）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
 
-### `[skills]` — Skill 系统
+### `settings.skills` — Skill 系统
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
@@ -342,15 +363,15 @@ output_per_mtok = 0.40
 | `script_timeout_ms` | `run_skill_script` 默认超时（毫秒）；单次调用可另行指定，硬上限 120000 | `30000` |
 | `script_max_output_bytes` | 脚本 stdout/stderr 各自的输出字节上限，超限截断 | `65536` |
 
-非法取值回退默认值并记录告警。`skills/` 为空目录或不存在时工具不注册、系统提示不变。部署方式、目录约定与安全模型见 [skills.md](skills.md)。
+新写入的非法取值由字段校验拒绝，并返回字段路径及约束。`skills/` 为空目录或不存在时工具不注册、系统提示不变。部署方式、目录约定与安全模型见 [skills.md](skills.md)。
 
-### `[mcp]` — MCP 总开关
+### `settings.mcp` — MCP 总开关
 
 | 键 | 说明 |
 |----|------|
 | `enabled` | 是否启用 MCP |
 
-### `[[mcp.servers]]` — MCP Server 定义（可多个）
+### `settings.mcp.servers` — MCP Server 定义（可多个）
 
 | 键 | 说明 |
 |----|------|
@@ -381,7 +402,7 @@ output_per_mtok = 0.40
 
 `include_tools` 为空时默认接入该 MCP server 暴露的全部工具；`exclude_tools` 会在白名单之后生效。接入 GitHub MCP 这类大工具集时，生产环境建议优先使用 `include_tools` 收窄到读类工具，再交给 `tool_search` / `tool_list` 做按需加载。
 
-### `[daily_briefing]` — 每日播报
+### `settings.daily_briefing` — 每日播报
 
 | 键 | 说明 |
 |----|------|
@@ -395,11 +416,11 @@ output_per_mtok = 0.40
 | `sample_messages_limit` | 消息样本数量上限 |
 | `max_context_chars` | 送给模型的上下文字符上限 |
 | `max_output_chars` | 最大输出字符数 |
-| `model_cascade` | 模型级联列表（provider + model，失败自动降级） |
+| `routes.daily_briefing` | 独立的模型级联候选列表（失败自动降级） |
 
-`model_cascade` 会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求：日报 16384、简报与周/月报 8192，输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。仅当对应功能 `enabled = true` 时才校验 cascade 引用的 provider 是否存在；功能关闭时跳过校验，不产生 `load_error`。
+`routes.<报告类型>` 候选会按顺序尝试；如果某个模型提前截断或以非正常 finish reason 结束，会继续尝试下一项（不完整的正文一律不放行）。聊天记录容量与输出上限按**每跳模型自己的上下文窗口**逐跳推导（容量未知回退保守缺省）；输出上限缺省请求：日报 16384、简报与周/月报 8192，输出配额低于该值的模型会在该跳直接报错——级联模型需能接受相应输出上限。所有级联引用在保存时均检查存在性，包括关闭的功能。JSON 候选使用 `{"provider_id":"渠道","model":"wire 模型名"}`，`@default` 保持运行时动态解析。
 
-### `[daily_summary]` — 每日总结
+### `settings.daily_summary` — 每日总结
 
 | 键 | 说明 |
 |----|------|
@@ -408,11 +429,11 @@ output_per_mtok = 0.40
 | `publish_cron` | 发布 cron 表达式 |
 | `min_messages` | 最小消息数（不足时跳过） |
 | `summary_length_hint` | 目标字数 |
-| `model_cascade` | 模型级联列表（失败自动降级） |
+| `routes.daily_summary` | 独立的有序模型候选列表（失败自动降级） |
 
-### `[weekly_report]` / `[monthly_report]` — 群周报 / 群月报
+### `settings.weekly_report` / `settings.monthly_report` — 群周报 / 群月报
 
-每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源为聊天记录归档（`chat_archive.db`，全群 always-on、永不删除）。周报把全量消息经压缩序列化（按天分节、同分钟连发合并、复读折叠、URL 只留域名）后一次成文；月报按周公平分配字符预算组装输入，周内高活跃日优先整日保留，低活跃日抽稀，终稿输入维持在目标量级（默认约 24 万字符）。与 `[daily_summary]` 相互独立，可单独开启。
+每周一（周报）/每月 1 日（月报）自动生成上一周期的群聊回顾。数据源为聊天记录归档（`chat_archive.db`，全群 always-on、永不删除）。周报把全量消息经压缩序列化（按天分节、同分钟连发合并、复读折叠、URL 只留域名）后一次成文；月报按周公平分配字符预算组装输入，周内高活跃日优先整日保留，低活跃日抽稀，终稿输入维持在目标量级（默认约 24 万字符）。与 `settings.daily_summary` 相互独立，可单独开启。
 
 | 键 | 说明 |
 |----|------|
@@ -422,7 +443,7 @@ output_per_mtok = 0.40
 | `min_messages` | 周期内最小消息数（不足时跳过；周报默认 100，月报默认 300） |
 | `length_hint` | 目标字数（周报默认 2000，月报默认 2500） |
 | `input_char_budget` | 月报终稿聊天记录字符预算（默认 240000，最小 8000；分周公平分配，周内活跃日优先） |
-| `model_cascade` | 模型级联列表，支持 `@default` 占位符 |
+| `routes.weekly_report` / `routes.monthly_report` | 独立的有序模型候选列表，支持 `@default` |
 
 > 周报/月报通过 `/summary weekly|monthly on|off|status|now` 在群内按群开启。period 标识：周报为 ISO 周号（如 `2026-W24`），月报为年月（如 `2026-06`）。
 
@@ -430,7 +451,7 @@ output_per_mtok = 0.40
 
 ## config/generation.toml
 
-此文件不存在时，各模态段回退读取 `config/llm.toml` 中的旧版配置段：图片 `[image_generation]`、语音 `[audio_generation]`、音乐 `[music_generation]`、语音识别 `[asr]`、SVG `[svg]`。
+此文件负责图片、语音、音乐、ASR 和 SVG 的独立配置。首次迁移会将旧 TOML 中的内联多模态段提取到这里；已存在的独立文件保留其权威性。文件缺失时各能力使用关闭状态的默认配置。
 
 图片、语音和音乐的 `prompt_blocklist` 是生成业务专属限制。配置了`config/sensitive_words.toml` 时，生成 prompt、标题、歌词和引用文本还会经过部署级统一敏感词过滤。该检查只处理文本，不审核输入或输出的图片像素、音频波形和音乐成品。
 
@@ -537,13 +558,13 @@ ASR 用于把 OneBot V11 `record` 语音消息转写为文字，并注入 LLM �
 
 ### `[svg]` — SVG 画图（`draw_svg` 工具）
 
-LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写出 SVG 源码，本地 resvg 渲染成 PNG 随回复外发。不需要配置 provider/model（SVG 代码由当前群的对话模型生成），渲染字体沿用 `data/fonts/NotoSansSC-Regular.ttf`（与词云同源）。启用需两步：本段 `enabled = true`，且 `llm.toml [tools] enabled` 中加入 `"draw_svg"`。
+LLM 对话中自主调用 `draw_svg` 工具：模型在工具参数中直接写出 SVG 源码，本地 resvg 渲染成 PNG 随回复外发。不需要配置 provider/model（SVG 代码由当前群的对话模型生成），渲染字体沿用 `data/fonts/NotoSansSC-Regular.ttf`（与词云同源）。启用需两步：本段 `enabled = true`，且 `settings.tools.enabled` 中加入 `"draw_svg"`。
 
 | 键 | 默认 | 说明 |
 |----|------|------|
 | `enabled` | `false` | 功能总开关 |
 | `harden` | `true` | 第一层安全（默认启用）：输入硬约束（64KB / 嵌套 ≤2000 / viewBox ≤2048 / 滤镜参数上限）、静态清洗（剥 script、事件属性、外链）、输出尺寸服务端覆盖、渲染子进程 rlimit（地址空间 2GB / CPU 5s）。关闭即自担风险：恶意 SVG 可耗尽内存或 CPU |
-| `content_judge` | `false` | 第二层安全（默认关闭）：渲染前用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做内容安全裁决。判定失败（超时 / 非 JSON / 未配置）时放行渲染并记录 WARN（fail-open） |
+| `content_judge` | `false` | 第二层安全（默认关闭）：渲染前用 `settings.quick_judge` 的廉价模型对图片可见文本做内容安全裁决。判定失败（超时 / 非 JSON / 未配置）时放行渲染并记录 WARN（fail-open） |
 
 渲染始终在独立子进程内执行（结构性防段错误，不受 `harden` 开关影响）；渲染限流为全局 10 次/分钟、单用户 2 次/分钟，单次回复最多外发 3 张图片。
 

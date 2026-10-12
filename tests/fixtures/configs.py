@@ -3,6 +3,7 @@
 Provides minimal-but-valid TOML/YAML bodies for LLMService bootstrap, plus a
 pytest fixture that writes them to a tmp dir and returns a live LLMService.
 """
+
 from __future__ import annotations
 
 import textwrap
@@ -99,11 +100,19 @@ def write_llm_config_bundle(
     identities_yaml: str = IDENTITIES_YAML,
 ) -> dict[str, Path]:
     """Write the four canonical files into `base_dir` and return their paths."""
-    config_path = base_dir / "llm.toml"
+    legacy_path = base_dir / "config" / "llm.toml"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path = base_dir / "data" / "llm_config.db"
     db_path = base_dir / "llm.db"
     vocab_path = base_dir / "vocab.yaml"
     identity_path = base_dir / "identities.yaml"
-    config_path.write_text(config_toml, encoding="utf-8")
+    if "[skills]" not in config_toml:
+        import json
+        config_toml += "\n[skills]\ncatalog_dir = " + json.dumps(str(base_dir / "skills")) + "\n"
+    legacy_path.write_text(config_toml, encoding="utf-8")
+    from quickquip.llm.config_service import ConfigService
+
+    ConfigService(config_path).initialize(legacy_path)
     vocab_path.write_text(vocab_yaml, encoding="utf-8")
     identity_path.write_text(identities_yaml, encoding="utf-8")
     return {

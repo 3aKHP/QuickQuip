@@ -5,11 +5,12 @@ from dataclasses import replace
 
 from quickquip.chat.daily_briefing import DailyBriefingContext
 from quickquip.llm.config import DailyBriefingConfig, LLMConfig, PersonaConfig
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.provider import strip_leading_reasoning_content
 from quickquip.llm.response_acceptance import is_response_accepted
 from quickquip.llm.tools import LLMConversationMessage
-from quickquip.llm.usage import new_usage_run_id, set_usage_scope
+from quickquip.llm.usage import configuration_pricing_entry, new_usage_run_id, set_usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,7 @@ def _trim_output(text: str, max_chars: int) -> str:
     return clipped.rstrip("，、；,;") + "……"
 
 
+@configuration_pricing_entry
 async def generate_daily_briefing(
     *,
     context: DailyBriefingContext,
@@ -164,7 +166,12 @@ async def generate_daily_briefing(
             logger.info("daily_briefing: provider %r disabled, skipping", provider_id)
             continue
 
-        effective_config = replace(provider_config, stream_enabled=False)
+        try:
+            effective_config = replace(
+                resolve_model_provider(llm_config, provider_id, model), stream_enabled=False
+            )
+        except ValueError:
+            continue
         req = LLMRequest(
             model=model,
             system_prompt=system_prompt,

@@ -102,7 +102,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         fi
     fi
     if [ "$DryRun" = 1 ]; then
-        tar --exclude=__pycache__ --exclude='*.pyc' -cf /dev/null -v -T "$UploadManifest"
+        tar --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -cf /dev/null -v -T "$UploadManifest"
         printf 'Preview complete; frontend built locally, no remote connection or upload. Shared files: root .env, ops scripts, and present optional assets.\n'
         printf 'Version identity for this release: v%s+build.<server build time>\n' "$Version"
         exit 0
@@ -117,7 +117,7 @@ ssh "${ssh_args[@]}" "$HostAlias" \
 scp "${ssh_args[@]}" "$ScriptDir/remote-deploy-v4.sh" "$ScriptDir/deploy-state.py" "$HostAlias:$Incoming/"
 if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     ssh "${ssh_args[@]}" "$HostAlias" "umask 077; mkdir '$Incoming/tree' '$Incoming/shared'"
-    rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' "${rsync_args[@]}" \
+    rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' "${rsync_args[@]}" \
         --files-from="$UploadManifest" ./ "$HostAlias:$Incoming/tree/"
     Shared=(.env prod/check_bot.sh prod/cron_check_bot.sh)
     for item in prod/sendkey.env data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json prod/host_metrics_collector.py; do

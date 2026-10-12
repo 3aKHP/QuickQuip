@@ -6,15 +6,17 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from quickquip.app.web.audit import audit_logger
-from quickquip.common.paths import CONFIG_LLM_TOML, LLM_DB_PATH
-from quickquip.llm.config import REASONING_EFFORT_CHOICES, load_llm_config
+from quickquip.common.paths import LLM_DB_PATH
+from quickquip.llm.config import REASONING_EFFORT_CHOICES
+from quickquip.llm.config_document import compile_document
+from quickquip.llm.config_service import get_config_service
+from quickquip.app.web.routes.llm_configuration import ConfigurationRoute
 from quickquip.llm.store import LLMStore
 
-router = APIRouter()
+router = APIRouter(route_class=ConfigurationRoute)
 logger = logging.getLogger(__name__)
 
 _DB = LLM_DB_PATH
-_LLM_TOML = CONFIG_LLM_TOML
 
 # group_settings is keyed by LLMService.build_chat_scope_key output, which is
 # the raw numeric group_id for groups and "private:USER_ID" for private chats.
@@ -57,18 +59,17 @@ class GroupSettingsBody(BaseModel):
     @classmethod
     def _check_reasoning_effort(cls, value: str | None) -> str | None:
         if value is not None and value not in REASONING_EFFORT_CHOICES:
-            raise ValueError(
-                f"reasoning_effort 须为 {'/'.join(REASONING_EFFORT_CHOICES)} 之一"
-            )
+            raise ValueError(f"reasoning_effort 须为 {'/'.join(REASONING_EFFORT_CHOICES)} 之一")
         return value
 
 
 @router.get("/group-settings/options")
 def get_options():
     try:
-        cfg = load_llm_config(_LLM_TOML)
+        published = get_config_service().read("published")
+        cfg = compile_document(published["document"], revision=published["revision"])
     except Exception as e:
-        logger.warning("failed to load llm.toml for options: %s", e)
+        logger.warning("failed to load published LLM configuration: %s", type(e).__name__)
         return {"providers": [], "personas": [], "defaults": {}, "load_error": str(e)}
 
     providers = [
@@ -130,36 +131,36 @@ def _format_group_entry(group_id: str, row) -> dict:
         "updated_at": None,
     }
     if row is not None:
-        entry.update({
-            "enabled": None if row["enabled"] is None else bool(row["enabled"]),
-            "memory_enabled": (
-                None if row["memory_enabled"] is None else bool(row["memory_enabled"])
-            ),
-            "auto_memory_enabled": (
-                None
-                if row["auto_memory_enabled"] is None
-                else bool(row["auto_memory_enabled"])
-            ),
-            "agent_delivery_intermediate_enabled": (
-                None
-                if row["agent_delivery_intermediate_enabled"] is None
-                else bool(row["agent_delivery_intermediate_enabled"])
-            ),
-            "agent_delivery_final_enabled": (
-                None
-                if row["agent_delivery_final_enabled"] is None
-                else bool(row["agent_delivery_final_enabled"])
-            ),
-            "provider_id": row["provider_id"],
-            "model": row["model"],
-            "persona_id": row["persona_id"],
-            "trigger_prefix": row["trigger_prefix"],
-            "allow_prefix": None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
-            "allow_at": None if row["allow_at"] is None else bool(row["allow_at"]),
-            "history_limit": row["history_limit"],
-            "reasoning_effort": row["reasoning_effort"],
-            "updated_at": row["updated_at"],
-        })
+        entry.update(
+            {
+                "enabled": None if row["enabled"] is None else bool(row["enabled"]),
+                "memory_enabled": (
+                    None if row["memory_enabled"] is None else bool(row["memory_enabled"])
+                ),
+                "auto_memory_enabled": (
+                    None if row["auto_memory_enabled"] is None else bool(row["auto_memory_enabled"])
+                ),
+                "agent_delivery_intermediate_enabled": (
+                    None
+                    if row["agent_delivery_intermediate_enabled"] is None
+                    else bool(row["agent_delivery_intermediate_enabled"])
+                ),
+                "agent_delivery_final_enabled": (
+                    None
+                    if row["agent_delivery_final_enabled"] is None
+                    else bool(row["agent_delivery_final_enabled"])
+                ),
+                "provider_id": row["provider_id"],
+                "model": row["model"],
+                "persona_id": row["persona_id"],
+                "trigger_prefix": row["trigger_prefix"],
+                "allow_prefix": None if row["allow_prefix"] is None else bool(row["allow_prefix"]),
+                "allow_at": None if row["allow_at"] is None else bool(row["allow_at"]),
+                "history_limit": row["history_limit"],
+                "reasoning_effort": row["reasoning_effort"],
+                "updated_at": row["updated_at"],
+            }
+        )
     return entry
 
 
@@ -221,7 +222,7 @@ def put_group_settings(group_id: str, body: GroupSettingsBody, request: Request)
     if not payload:
         raise HTTPException(status_code=400, detail="no fields to update")
     store = _store()
-    store.update_group_settings(group_id, **payload)
+    get_config_service().update_group_override(store, group_id, **payload)
     logger.info("group_settings updated: group=%s fields=%s", group_id, list(payload.keys()))
     audit_logger.log(
         request,

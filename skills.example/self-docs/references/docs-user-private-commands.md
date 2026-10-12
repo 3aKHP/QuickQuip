@@ -73,7 +73,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理） |
 | `/llm clear_context` | 清空短期上下文，“串台”或记错上下文时用 |
 | `/llm delete_msg` | 引用一条消息发送本命令，或 `/llm delete_msg <消息ID>`，从上下文删除该条 |
-| `/llm reload` | 重载全局 LLM 配置，并重置你的上下文条数覆盖 |
+| `/llm reload` | 重载已发布 LLM 配置（草稿通过管理后台单独应用），并重置你的上下文条数覆盖 |
 | `/llm probe` | 并发探活所有 provider |
 | `/llm mcp reload` | 拉取 MCP 镜像并重连 |
 

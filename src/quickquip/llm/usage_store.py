@@ -4,6 +4,7 @@
 与 ``trace.py`` 的 debug-only 全正文 trace 一刀切：trace=调试、14 天、标志门控；
 usage=常驻计量、90 天、永不被标志门控。两者唯一共享面是 ``LLMResponse``。
 """
+
 from __future__ import annotations
 
 import logging
@@ -170,6 +171,7 @@ class LLMUsageStore:
                 # 因此每列 ALTER 前重查表结构；仍撞上 duplicate column name
                 # （该错误只会源于列已存在）同样视为已存在，保证两边都不抛。
                 migrations = {
+                    "config_revision": "INTEGER",
                     "feature": "TEXT",
                     "group_id": "TEXT",
                     "persona_id": "TEXT",
@@ -196,15 +198,12 @@ class LLMUsageStore:
                 }
                 for name, definition in migrations.items():
                     columns = {
-                        row[1]
-                        for row in conn.execute("PRAGMA table_info(llm_usage_events)")
+                        row[1] for row in conn.execute("PRAGMA table_info(llm_usage_events)")
                     }
                     if name in columns:
                         continue
                     try:
-                        conn.execute(
-                            f"ALTER TABLE llm_usage_events ADD COLUMN {name} {definition}"
-                        )
+                        conn.execute(f"ALTER TABLE llm_usage_events ADD COLUMN {name} {definition}")
                     except sqlite3.OperationalError as error:
                         if "duplicate column name" not in str(error):
                             raise
@@ -355,9 +354,7 @@ class LLMUsageStore:
                 "avg_envelope_tokens": round(total["avg_envelope"], 1)
                 if total["avg_envelope"] is not None
                 else 0.0,
-                "envelope_coverage": round(
-                    total["envelope_tracked"] / total["successes"], 4
-                )
+                "envelope_coverage": round(total["envelope_tracked"] / total["successes"], 4)
                 if total["successes"]
                 else 0.0,
                 # 第五张账本【纪元】：[anchor, head) history 段 token 估算；同信封口径
@@ -448,24 +445,31 @@ class LLMUsageStore:
         )
         if not fill_buckets:
             return [
-                {"date": r["d"], "cost": round(r["cost"], 6), "tokens": r["tokens"],
-                 "requests": r["requests"], "errors": r["errors"],
-                 "duration": round(r["duration"], 2),
-                 "value": self._timeline_value(r, metric)}
+                {
+                    "date": r["d"],
+                    "cost": round(r["cost"], 6),
+                    "tokens": r["tokens"],
+                    "requests": r["requests"],
+                    "errors": r["errors"],
+                    "duration": round(r["duration"], 2),
+                    "value": self._timeline_value(r, metric),
+                }
                 for r in rows
             ]
         while cursor <= end:
             key = cursor.strftime(fmt)
             row = indexed.get(key)
-            result.append({
-                "date": key,
-                "cost": round(row["cost"], 6) if row else 0.0,
-                "tokens": row["tokens"] if row else 0,
-                "requests": row["requests"] if row else 0,
-                "errors": row["errors"] if row else 0,
-                "duration": round(row["duration"], 2) if row else 0.0,
-                "value": self._timeline_value(row, metric),
-            })
+            result.append(
+                {
+                    "date": key,
+                    "cost": round(row["cost"], 6) if row else 0.0,
+                    "tokens": row["tokens"] if row else 0,
+                    "requests": row["requests"] if row else 0,
+                    "errors": row["errors"] if row else 0,
+                    "duration": round(row["duration"], 2) if row else 0.0,
+                    "value": self._timeline_value(row, metric),
+                }
+            )
             cursor += step
         return result
 

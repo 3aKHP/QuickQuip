@@ -425,22 +425,20 @@ def test_resolve_file_in_rejects_symlink_escape(make_skill, tmp_path):
 # ── read_configured_catalog_dir ──────────────────────────────────────
 
 
-def test_read_configured_catalog_dir_reads_value(tmp_path):
-    config = tmp_path / "llm.toml"
-    config.write_text('[skills]\ncatalog_dir = "/tmp/custom-skills"\n', encoding="utf-8")
+def test_read_configured_catalog_dir_uses_published_configuration(tmp_path):
+    from quickquip.llm.config_service import ConfigService
+    config = tmp_path / "llm_config.db"
+    service = ConfigService(config)
+    service.initialize()
+    document = service.read()["document"]
+    document["settings"]["skills"]["catalog_dir"] = "/tmp/custom-skills"
+    saved = service.replace(document, service.read()["revision"])
+    assert read_configured_catalog_dir(config) == ""
+    service.apply(saved["revision"], "test-publication")
+    claimed = service.tasks.claim("bot")
+    service.publish(claimed["id"], claimed["claim_token"])
     assert read_configured_catalog_dir(config) == "/tmp/custom-skills"
 
 
-def test_read_configured_catalog_dir_fallbacks(tmp_path):
-    # 文件缺失
-    assert read_configured_catalog_dir(tmp_path / "missing.toml") == ""
-    config = tmp_path / "llm.toml"
-    # 节缺失 / 键缺失
-    config.write_text("[runtime]\nenabled = true\n", encoding="utf-8")
-    assert read_configured_catalog_dir(config) == ""
-    # 非字符串
-    config.write_text("[skills]\ncatalog_dir = 123\n", encoding="utf-8")
-    assert read_configured_catalog_dir(config) == ""
-    # TOML 解析失败
-    config.write_text("not [valid toml", encoding="utf-8")
-    assert read_configured_catalog_dir(config) == ""
+def test_read_configured_catalog_dir_missing_database_uses_default(tmp_path):
+    assert read_configured_catalog_dir(tmp_path / "missing.db") == ""

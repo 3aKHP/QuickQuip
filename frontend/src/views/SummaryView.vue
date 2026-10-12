@@ -5,7 +5,7 @@
     <UiCard padding="md" shadow="sm" class="toolbar-card">
       <div class="toolbar-inner">
         <UiTabs :model-value="activeTab" :tabs="tabs" @change="switchTab" />
-        <UiInfoTip text="周报键为 ISO 周（如 2026-W24，周一起算），月报键为年月（如 2026-06）；内容均为上一个完整周期（上周/上月），由 llm.toml 的 [weekly_report]/[monthly_report] 定时生成。" />
+        <UiInfoTip text="周报键为 ISO 周（如 2026-W24，周一起算），月报键为年月（如 2026-06）；内容均为上一个完整周期（上周/上月），由 LLM 配置 的 [weekly_report]/[monthly_report] 定时生成。" />
         <label>
           群组
           <select v-model="groupId" @change="loadList">
@@ -283,7 +283,7 @@ const outcomeLabels: Record<string, string> = {
 // 「异常」表头说明：标签名直接引用 outcomeLabels，避免与映射表漂移；gloss 需随语义同步
 const outcomeTip = `各异常标签含义：${outcomeLabels.discarded_finish} = 模型非正常结束（截断/内容过滤等），正文被丢弃；${outcomeLabels.discarded_empty} = 模型返回空文本；${outcomeLabels.provider_error} = 服务商报错；${outcomeLabels.cancelled} = 请求中途被取消；${outcomeLabels.unknown} = 旧版本未记录该次结果。`
 
-const linkTip = '三条生成链路：日报 = 每日群聊总结；简报 = 早/午/晚播报（llm.toml [daily_briefing]，直接发群、不在下方归档列表）；周月报 = 周报与月报共用同一链路统计。'
+const linkTip = '三条生成链路：日报 = 每日群聊总结；简报 = 早/午/晚播报（LLM 配置 [daily_briefing]，直接发群、不在下方归档列表）；周月报 = 周报与月报共用同一链路统计。'
 const acceptTip = '该跳响应被采纳的判定：正文非空且模型正常结束（finish_reason 为 stop/end_turn/stop_sequence/eos 之一）；级联中未被采纳才会尝试下一跳。'
 
 function outcomeLabel(outcome: string): string {
@@ -419,7 +419,9 @@ async function loadHealth() {
   }
 }
 
-function switchTab(t: Tab) {
+function switchTab(value: string) {
+  if (!['daily', 'weekly', 'monthly'].includes(value)) return
+  const t = value as Tab
   if (activeTab.value === t) return
   activeTab.value = t
   selected.value = null

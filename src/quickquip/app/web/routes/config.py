@@ -19,11 +19,6 @@ _MAX_CONTENT_BYTES = 65536
 # Whitelist of editable root-level config files. Persona files live under
 # config/personas/ and are served by the dedicated personas router.
 _CONFIG_FILES: dict[str, dict] = {
-    "llm": {
-        "filename": "llm.toml",
-        "label": "LLM 配置",
-        "description": "文本对话模型、触发词、工具、MCP、人格装载",
-    },
     "generation": {
         "filename": "generation.toml",
         "label": "多模态产出配置",
@@ -62,6 +57,12 @@ class ConfigBody(BaseModel):
 
 
 def _resolve(key: str) -> Path:
+    if key == "llm":
+        raise HTTPException(status_code=410, detail={
+            "code": "llm_configuration_migrated",
+            "message": "LLM 配置由数据库管理，请使用 /ops/api/llm-configuration",
+            "field_path": "", "details": None,
+        })
     entry = _CONFIG_FILES.get(key)
     if entry is None:
         raise HTTPException(status_code=404, detail="unknown config key")
@@ -127,12 +128,6 @@ def put_config(key: str, body: ConfigBody, request: Request):
     elif key == "chat_rules":
         action_queue.enqueue("rules_reload")
         effect = "auto_reloading"
-    elif key == "llm":
-        # llm_reload 走 reload_runtime(background=True)，会触发 MCP 全量重连
-        # （含容器/子进程重启），静默执行绕过用户感知；且 llm 配置影响面大
-        # （provider/model/触发词/MCP），用户主动确认更稳妥，故引导手动 reload。
-        # 注：reload_runtime 本身不探活（探活只在 /llm reload 命令路径），不涉及计费。
-        effect = "manual_reload"
     else:
         # generation / games / niuniu_text* 无 reload 机制，需重启生效。
         effect = "restart_needed"

@@ -2,6 +2,8 @@
 
 # LLM 工具发现配置
 
+配置示例为导出 JSON 中的字段片段；请在 Web Admin「LLM 配置」中编辑，或修改完整导出文件后预览导入、保存草稿并单独应用。完整交换格式见 [LLM 配置管理](llm-configuration.md)。
+
 本文面向部署者和管理员，说明如何配置本地 `tool_search` 工具发现。该功能适合接入大量 MCP 工具时使用，例如 GitHub MCP 一次暴露几十个工具的场景。
 
 ---
@@ -16,18 +18,28 @@
 
 ## 2. 推荐配置
 
-在 `config/llm.toml` 中配置：
+在 Web Admin「LLM 配置」编辑 `settings.tools`，或在完整导出 JSON 中配置以下字段：
 
-```toml
-[tools]
-enabled = []
-
-discovery_mode = "auto"
-discovery_min_tools = 10
-discovery_search_limit = 5
-discovery_max_loaded_tools = 12
-# 留空时使用内置默认集；自行列出时建议保留下列六项（activate_skill 供 Skill 系统激活使用）
-always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]
+```json
+{
+  "settings": {
+    "tools": {
+      "enabled": [],
+      "discovery_mode": "auto",
+      "discovery_min_tools": 10,
+      "discovery_search_limit": 5,
+      "discovery_max_loaded_tools": 12,
+      "always_loaded": [
+        "tool_search",
+        "tool_list",
+        "get_identity",
+        "list_memories",
+        "search_web",
+        "activate_skill"
+      ]
+    }
+  }
+}
 ```
 
 字段说明：
@@ -74,15 +86,21 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "s
 
 如果某个 MCP 工具使用频率很高，也可以加入 `always_loaded`。例如：
 
-```toml
-always_loaded = [
-  "tool_search",
-  "tool_list",
-  "get_identity",
-  "list_memories",
-  "search_web",
-  "mcp_github_search_repositories"
-]
+```json
+{
+  "settings": {
+    "tools": {
+      "always_loaded": [
+        "tool_search",
+        "tool_list",
+        "get_identity",
+        "list_memories",
+        "search_web",
+        "mcp_github_search_repositories"
+      ]
+    }
+  }
+}
 ```
 
 ---
@@ -91,37 +109,60 @@ always_loaded = [
 
 GitHub MCP 工具数量较多时，建议：
 
-```toml
-[tools]
-discovery_mode = "auto"
-discovery_min_tools = 10
-discovery_search_limit = 5
-discovery_max_loaded_tools = 12
-always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]
+```json
+{
+  "settings": {
+    "tools": {
+      "discovery_mode": "auto",
+      "discovery_min_tools": 10,
+      "discovery_search_limit": 5,
+      "discovery_max_loaded_tools": 12,
+      "always_loaded": [
+        "tool_search",
+        "tool_list",
+        "get_identity",
+        "list_memories",
+        "search_web",
+        "activate_skill"
+      ]
+    }
+  }
+}
 ```
 
 如果希望模型总是先搜索 GitHub 能力，再调用具体 GitHub 工具，保持 GitHub MCP 工具不在 `always_loaded` 中即可。
 
 生产环境建议在 MCP server 层先收窄工具集合，再启用工具发现。例如只接入常用读类工具：
 
-```toml
-[[mcp.servers]]
-id = "github"
-transport = "http"
-tool_prefix = "github"
-url = "https://mcp.example.com/github/mcp"
-headers = { Authorization = "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}" }
-include_tools = [
-  "search_repositories",
-  "search_code",
-  "get_file_contents",
-  "list_issues",
-  "issue_read",
-  "list_pull_requests",
-  "pull_request_read",
-  "actions_list",
-  "actions_get",
-]
+```json
+{
+  "settings": {
+    "mcp": {
+      "servers": [
+        {
+          "id": "github",
+          "transport": "http",
+          "tool_prefix": "github",
+          "url": "https://mcp.example.com/github/mcp",
+          "headers": {
+            "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+          },
+          "include_tools": [
+            "search_repositories",
+            "search_code",
+            "get_file_contents",
+            "list_issues",
+            "issue_read",
+            "list_pull_requests",
+            "pull_request_read",
+            "actions_list",
+            "actions_get"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
 被 `include_tools` / `exclude_tools` 过滤掉的工具不会进入 QuickQuip 工具注册表，因此也不会出现在 `tool_search`、`tool_list` 或真实工具调用路径中。
@@ -138,7 +179,7 @@ include_tools = [
 
 检查：
 
-- `[tools].enabled` 是否把目标工具排除
+- `settings.tools.enabled` 是否把目标工具排除
 - MCP server 是否连接成功
 - `/llm mcp status` 是否能看到对应工具
 - 提问里是否包含工具来源或能力关键词
@@ -153,9 +194,14 @@ include_tools = [
 
 设置：
 
-```toml
-[tools]
-discovery_mode = "off"
+```json
+{
+  "settings": {
+    "tools": {
+      "discovery_mode": "off"
+    }
+  }
+}
 ```
 
-然后重载 LLM 配置。
+然后保存草稿并应用；等待配置任务完成并确认 Bot 实际加载版本。

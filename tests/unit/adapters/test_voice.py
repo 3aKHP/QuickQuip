@@ -56,10 +56,8 @@ async def test_transcribe_message_records_uses_get_record_and_asr(tmp_path: Path
             return {"file": str(audio_file)}
 
     original_config_path = generation_service.config_path
-    original_legacy_path = generation_service.legacy_llm_path
     original_config = generation_service._config
     original_active_mtime = generation_service._active_mtime
-    original_legacy_mtime = generation_service._legacy_mtime
 
     async def fake_transcribe(model_config, provider, audio_bytes, *, filename, mime_type):
         assert model_config.model == "whisper-1"
@@ -71,7 +69,6 @@ async def test_transcribe_message_records_uses_get_record_and_asr(tmp_path: Path
 
     try:
         generation_service.config_path = config_path
-        generation_service.legacy_llm_path = tmp_path / "missing-llm.toml"
         generation_service.reload()
         monkeypatch.setattr("quickquip.adapters.nonebot.voice.transcribe_audio", fake_transcribe)
 
@@ -83,7 +80,5 @@ async def test_transcribe_message_records_uses_get_record_and_asr(tmp_path: Path
         assert [item.text for item in transcripts] == ["转写结果"]
     finally:
         generation_service.config_path = original_config_path
-        generation_service.legacy_llm_path = original_legacy_path
         generation_service._config = original_config
         generation_service._active_mtime = original_active_mtime
-        generation_service._legacy_mtime = original_legacy_mtime

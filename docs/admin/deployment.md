@@ -37,6 +37,10 @@ bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退；目标 compose 使用共享目录时，回滚把目标 release 中新增的 Skill 非破坏性合并进共享目录）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
 
+配置备份使用 `python -m quickquip.llm.config_cli backup data/llm-config-backup.db` 的 SQLite backup 接口。恢复数据库前停止 Bot 和 Web，先备份当前库，再运行 `restore --file <备份路径> --services-stopped`；恢复会清除旧运行租约与心跳。配置回流、导入预览、应用及备份恢复可使用模板的 Bash／PowerShell 配置运维驱动，完整命令见 [LLM 配置管理](llm-configuration.md)。
+
+回退至 1.16.1 使用首次迁移前的 TOML 及人格／多模态资产备份；升级后新增的配置不会反向转换成 TOML。新库保留供再次升级，回退应同时核对运行代码与迁移前配置资产。
+
 运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
 
 ### 1. 服务器上安装 Docker
@@ -70,7 +74,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 
 - 根目录下的 `.env` 已存在，并填入 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
 - 如启用 MCP sidecar，再按你的私有 `prod/` 编排补充对应 API key
-- 根目录下的 `config/llm.toml` 已存在并填入真实 provider / model / base_url 配置
+- 共享 `data/llm_config.db` 已初始化／迁移，渠道、模型和地址通过 Web Admin 或配置 CLI 保存并应用；首次切换保留迁移前 `config/llm.toml` 与提取资产备份
 - 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
 - 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
 - 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
@@ -81,7 +85,7 @@ cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（�
 当前部署会把：
 
 - 根 `.env`
-- `config/` 目录下的运行配置（如 `llm.toml`、`generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
+- `config/` 目录下的运行配置（如 `generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
 - `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建；每次部署把其中新增的 Skill 非破坏性合并进服务器部署根共享 `skills/`：已存在文件不被覆盖、删除不传播，已安装 Skill 的更新与删除经 Web 管理页或服务器手动维护）
 - `llm_about/vocab.yaml`
 - `llm_about/identities.yaml`
@@ -121,9 +125,9 @@ docker compose --env-file ../.env up -d
 补充说明：
 
 - **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，当前默认模板为 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在适配器管理界面启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client（连接拓扑详见 [onebot-adapters.md](onebot-adapters.md)）。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
-- `config/llm.toml`、`config/awakening.toml`、`llm_about/vocab.yaml`、`llm_about/identities.yaml` 及群级覆盖文件虽然是 bind mount，但 `quickquip` 会在进程启动时把它们读入内存；`awakening.toml` 是这些文件中唯一的例外：bot 每 30 秒检测其 mtime，外部修改会自动重载
+- Bot 和 Web 共享本机 `data/llm_config.db`。部署保留生产库，不上传本地库或自动导入本地 TOML；首次启动前通过初始化／迁移准备配置与独立资产。Bot 重启读取已发布快照，草稿必须单独应用。`awakening.toml` 外部修改仍由 Bot 每 30 秒检查 mtime 并重载。
 - 部署脚本在切换发行目录后强制重建应用容器一次，使源码和配置挂载指向本次发行目录
-- 如果只是在线微调配置而不走部署脚本，也可以在群里手动执行 `/llm reload`；重载后会探活当前群实际生效的 provider/model，探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费
+- 在线调整 LLM 配置通过 Web Admin「LLM 配置」保存草稿并应用，等待任务完成及 Bot 实际版本确认。修改价格等无关字段保持 MCP 连接；MCP 改动的连接状态独立回报。`/llm reload` 重载已发布配置及相关独立资产，并探活当前模型，可能计费。
 
 ### 4.1 首次准备贴吧登录态
 
@@ -199,7 +203,8 @@ compose 会同时启动 `web-admin` 容器（`python web_api.py`，容器内监�
 - 消息统计（各群消息数、活跃用户、规则触发次数）
 - 群级规则开关（toggle 开关，实时生效）
 - 每日总结 / 每日播报群组管理
-- `config/llm.toml`、`config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 在线编辑（保存前校验 TOML 语法）
+- LLM 结构化配置、保存／应用、JSON 导入预览、实际 Bot 状态和配置任务
+- `config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 在线编辑（保存前校验 TOML 语法）
 - 敏感词过滤器只读状态查看；`config/sensitive_words.toml` 只通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑
 - 记忆、对话、人格、资料、唤醒、LLM 用量、MCP、贴吧、词云、语录、调度器监控、审计、金币经济和牛牛面板
 - 实时日志 / LLM Trace / 日志归档面板（日志读取 `../data/logs`，LLM HTTP 调用索引和正文读取 `../data/llm_trace.db`）
@@ -224,7 +229,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | 宿主路径 | 容器路径 | 权限 |
 |---|---|---|
 | `../data` | `/app/data` | 读写 |
-| `../config` | `/app/config` | **读写**（llm.toml 在线编辑需要） |
+| `../config` | `/app/config` | **读写**（独立配置在线编辑与首次迁移资产提取） |
 | `../llm_about` | `/app/llm_about` | **读写**（资料页在线编辑需要） |
 | `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写**（Skill 页在线安装/编辑/预置同步落盘） |
 | `../frontend/dist` | `/app/frontend/dist` | 只读 |
@@ -293,7 +298,7 @@ docker compose --env-file ../.env down
 
 不需要。
 
-如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 镜像到 `config/llm.toml`，应用密钥统一写入根 `.env`，宿主路径和 sidecar 编排留在私有 `prod/` 中维护。
+如果未来要给 QuickQuip 接 MCP，应该把 MCP 视为 QuickQuip 自己的外部工具后端。当前项目已经支持把 Codex 里常用的 Docker 型 MCP server 配置到 `settings.mcp.servers` 并保存应用，应用密钥统一写入根 `.env`，宿主路径和 sidecar 编排留在私有 `prod/` 中维护。
 
 当前项目通过 SearXNG 提供内置 `search_web` 搜索，通过 MCP 扩展接入 Tavily 等外部工具。MCP 集成的正式约定见 [docs/dev/mcp-integration.md](../../docs/dev/mcp-integration.md)。
 
@@ -320,11 +325,11 @@ docker compose --env-file ../.env logs -f llbot  # 找新的二维码
 
 优先检查以下几项：
 
-- `config/llm.toml` 是否存在且内容正确
+- 配置库 schema 是否受支持；草稿是否已单独应用，published_revision 与 Bot loaded_revision 是否一致，心跳是否新鲜
 - `.env` 中是否填了 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`
 - `.env` 中是否填了 `QQ_ACCOUNT` 以及启用 MCP 时需要的 API key
 - 搜索服务是否运行，QuickQuip 容器内是否能访问配置里的 `SEARXNG_BASE_URL`
 - `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在。文件缺失（INFO）、存在但为空模板（WARNING）、正常加载（`已加载 N 条身份`）在 bot 日志中均有对应记录，可据此核对身份索引是否生效
 - `docker compose --env-file ../.env logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
-- 如果文件内容已经更新，但 `/llm personas`、`/llm providers` 或词表行为仍旧是旧版本，先执行 `/llm reload`，或确认部署脚本是否已经把 `quickquip` 容器重建
+- 如果渠道／模型修改未生效，检查原应用任务的阶段与错误，并确认 Bot 心跳；单独重启不会应用草稿。人格或词表文件修改通过 `/llm reload` 或对应独立重载入口生效。
 - `/llm reload` 会在重载后探活当前群实际生效的 provider/model；如需全量巡检，在群内执行 `/llm probe` 或在 Web Admin 诊断页点击“探活 Provider”，会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费

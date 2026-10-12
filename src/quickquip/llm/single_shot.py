@@ -28,6 +28,7 @@ from quickquip.common.sensitive_filter import (
     scan_and_log,
 )
 from quickquip.llm.config import DISABLED_PROVIDER_REPLY, LLMConfig, ProviderConfig
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.provider import (
     BaseProviderClient,
     LLMProviderError,
@@ -184,6 +185,12 @@ async def run_command_single_shot(
         return _early_result(spec, f"当前 provider 不存在：{settings.provider_id}")
     if not provider.enabled:
         return _early_result(spec, DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id))
+    try:
+        provider = resolve_model_provider(
+            config, provider.id, settings.model or provider.default_model
+        )
+    except ValueError:
+        return _early_result(spec, "当前模型不可用。")
 
     prompt_pack = spec.prompt_builder(
         prompt=normalized_prompt,
@@ -267,6 +274,10 @@ async def run_card_le_nearest(
         return None
 
     prompt_pack = build_nearest_prompt(captured=captured)
+    try:
+        provider = resolve_model_provider(config, provider.id, qj.model or provider.default_model)
+    except ValueError:
+        return None
     request = _build_request(
         provider=provider,
         model=qj.model if qj.model else provider.default_model,
