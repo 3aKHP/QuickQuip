@@ -99,8 +99,13 @@ def _secrets(value: Any, path: str = "") -> None:
     elif isinstance(value, list):
         for i, child in enumerate(value):
             _secrets(child, f"{path}[{i}]")
-    elif isinstance(value, str) and value.startswith(("http://", "https://")):
-        parts = urlsplit(value)
+    elif isinstance(value, str):
+        try:
+            parts = urlsplit(value)
+        except ValueError:
+            reject(path, "地址格式无效")
+        if parts.scheme not in ("http", "https"):
+            return
         if parts.username or parts.password:
             reject(path, "地址中的认证值须使用独立变量引用", "literal_secret")
         for key, child in parse_qsl(parts.query):

@@ -263,6 +263,45 @@ def test_same_request_id_cannot_retarget_apply(service):
     assert exc.value.code == "operation_conflict"
 
 
+async def test_provider_only_override_protects_inherited_default_on_apply_and_write(
+    service, tmp_path
+):
+    from quickquip.llm.config_runtime import ConfigRuntimeWorker
+    from quickquip.llm.service import LLMService
+
+    configured_provider(service)
+    runtime = LLMService(
+        config_path=service.path, db_path=tmp_path / "history.db", config_service=service
+    )
+    worker = ConfigRuntimeWorker(service, runtime)
+    initial = service.apply(2, "publish-enabled-default")
+    await worker.tick()
+    assert service.tasks.get(initial["id"])["status"] == "succeeded"
+    service.update_group_override(runtime.store, "10001", provider_id="p", model=None)
+
+    draft = service.read()
+    draft["document"]["providers"][0]["models"][0]["enabled"] = False
+    saved = service.replace(draft["document"], draft["revision"])
+    operation = service.apply(saved["revision"], "disable-inherited-default")
+    await worker.tick()
+    result = service.tasks.get(operation["id"])
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "dependency_conflict"
+    assert service.status()["published_revision"] == runtime.config.revision == 2
+    assert runtime.config.providers["p"].model_enabled["m"]
+
+    service.update_group_override(runtime.store, "10001", provider_id=None, model=None)
+    operation = service.apply(saved["revision"], "disable-without-override")
+    await worker.tick()
+    assert service.tasks.get(operation["id"])["status"] == "succeeded"
+    with pytest.raises(ConfigError) as caught:
+        service.update_group_override(runtime.store, "10001", provider_id="p", model=None)
+    assert caught.value.code == "dependency_conflict"
+    assert caught.value.details["model"] == "m"
+    assert runtime.store.get_group_settings("10001").provider_id is None
+    await runtime.shutdown()
+
+
 def test_missing_restore_source_and_same_file_restore_are_rejected(service, tmp_path):
     missing = tmp_path / "missing.db"
     for path in (missing, service.path):

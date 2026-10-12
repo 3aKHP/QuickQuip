@@ -273,9 +273,10 @@ class ConfigService:
                 field_path=field_path,
                 details={"provider_id": pid},
             )
-        if model and not any(m["model"] == model and m["enabled"] for m in provider["models"]):
+        selected = model or provider["default_model"]
+        if not any(m["model"] == selected and m["enabled"] for m in provider["models"]):
             # Aliases resolve through the same enabled model list.
-            alias = next((a["model"] for a in provider["aliases"] if a["alias"] == model), None)
+            alias = next((a["model"] for a in provider["aliases"] if a["alias"] == selected), None)
             if not alias or not any(
                 m["model"] == alias and m["enabled"] for m in provider["models"]
             ):
@@ -283,7 +284,7 @@ class ConfigService:
                     "dependency_conflict",
                     "Group override references unavailable model",
                     field_path=field_path,
-                    details={"provider_id": pid, "model": model},
+                    details={"provider_id": pid, "model": selected},
                 )
 
     def validate_group_overrides(self, document, store):

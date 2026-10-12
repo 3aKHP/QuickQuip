@@ -142,6 +142,46 @@ def test_missing_disabled_route_reference_blocks_save():
     assert caught.value.field_path == "routes.monthly_report[0]"
 
 
+@pytest.mark.parametrize("location", ["base_url", "fallback_urls", "mcp"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "HTTPS://synthetic-user:private-url-sentinel@example.test/v1",
+        "hTtPs://example.test/v1?api_key=private-url-sentinel",
+        " \tHTTPS://example.test/v1?token=private-url-sentinel",
+        "ht\ttps://example.test/v1?token=private-url-sentinel",
+    ],
+)
+def test_parsed_authentication_urls_cannot_enter_database(tmp_path, location, url):
+    from quickquip.llm.config_service import ConfigService
+
+    service = ConfigService(tmp_path / "config.db")
+    service.initialize()
+    before = service.read()
+    doc = document()
+    if location == "mcp":
+        doc["settings"]["mcp"]["servers"] = [{"id": "remote", "transport": "http", "url": url}]
+    else:
+        doc["providers"][0][location] = [url] if location == "fallback_urls" else url
+    with pytest.raises(ConfigError) as caught:
+        service.replace(doc, before["revision"])
+    assert caught.value.code == "literal_secret"
+    assert "private-url-sentinel" not in json.dumps(caught.value.as_dict())
+    assert service.read() == before
+    assert service.read("published") == before
+
+
+def test_parsed_url_references_remain_exportable_and_invalid_urls_have_flat_errors():
+    doc = document()
+    doc["providers"][0]["base_url"] = " HTTPS://example.test/v1?api_key=${QQ_TEST_KEY}"
+    assert validate_document(doc)["providers"][0]["base_url"] == doc["providers"][0]["base_url"]
+    doc["providers"][0]["base_url"] = "HTTPS://[invalid]/private-url-sentinel"
+    with pytest.raises(ConfigError) as caught:
+        validate_document(doc)
+    assert caught.value.field_path == "providers[0].base_url"
+    assert "private-url-sentinel" not in json.dumps(caught.value.as_dict())
+
+
 def test_json_roundtrip_preserves_slash_models_and_order():
     doc = document()
     doc["providers"][0]["models"].append({"model": "other/a"})
