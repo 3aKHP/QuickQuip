@@ -9,6 +9,7 @@ from quickquip.llm.epoch import EpochKey, EpochManager
 from quickquip.llm.image_preprocessor import ImageDescription
 from quickquip.llm.provider import LLMGeneratedImage, LLMProviderError, LLMResponse
 from quickquip.llm.store import LLMStore
+from quickquip.llm.store_parts.agent_records import HistoryMutation
 from quickquip.llm.tools import LLMInlineImage, LLMToolCall, LLMToolOutput
 from tests.fixtures.provider_stubs import StubProviderClient, StubToolCallingProviderClient
 
@@ -174,9 +175,9 @@ async def test_archive_inflight_loop_and_resume_do_not_block_next_round(
 
 
 @pytest.mark.parametrize("error_type", [LLMProviderError, RuntimeError])
-@pytest.mark.parametrize("clear", [False, True])
+@pytest.mark.parametrize("mutation", ["none", "clear", "recall"])
 async def test_failed_continuation_only_returns_images_for_current_session(
-    llm_service, patch_provider_builder, monkeypatch, error_type, clear,
+    llm_service, patch_provider_builder, monkeypatch, error_type, mutation,
 ):
     started, release = asyncio.Event(), asyncio.Event()
     calls = []
@@ -202,17 +203,26 @@ async def test_failed_continuation_only_returns_images_for_current_session(
     patch_provider_builder(lambda provider: Client())
     task = asyncio.create_task(_reply(llm_service))
     await asyncio.wait_for(started.wait(), 5)
-    if clear:
+    if mutation == "clear":
         llm_service.clear_context(1001)
+    elif mutation == "recall":
+        llm_service._bump_scope_generation("1001", HistoryMutation.RECALL)
     release.set()
     result = await task
-    if clear:
+    if mutation != "none":
         assert result["cancelled_reason"] == "session_invalidated"
         assert result["reply"] == ""
         assert not result.get("images")
     else:
         assert "synthetic upstream failure" in result["reply"]
         assert len(result["images"]) == 1
+    with llm_service.store._connect() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM agent_loops WHERE closed_at IS NULL",
+        ).fetchone()[0] == 0
+    patch_provider_builder(lambda provider: StubProviderClient())
+    assert "stub::" in (await _reply(llm_service))["reply"]
+    assert llm_service._scope_gate.bypassed_count == 0
 
 
 @pytest.mark.parametrize("pause_at", ["tool", "image_description"])

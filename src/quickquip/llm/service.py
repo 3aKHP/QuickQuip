@@ -1327,6 +1327,15 @@ class LLMService(
         )
 
         recorder: TurnRecorder | None = None
+
+        def check_error_session() -> None:
+            try:
+                check_session()
+            except (SessionInvalidated, SessionStoreError):
+                if recorder is not None:
+                    recorder.close(LoopStatus.INTERRUPTED, "session_invalidated")
+                raise
+
         try:
             # 拿到群级 persona 后把聊天主链路升级为带人格归因的 scope；
             # scope 生命周期与 provider 调用同处一个函数，退出即复位。
@@ -1398,7 +1407,7 @@ class LLMService(
                 recorder.close(LoopStatus.INTERRUPTED, "request_cancelled")
             raise
         except DeliveryAborted as exc:
-            check_session()
+            check_error_session()
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
             # 静默的依据是「用户已看到至少一条成功交付的分段」——零交付时
@@ -1413,7 +1422,7 @@ class LLMService(
                 model=llm_request.model,
             )
         except LLMProviderError as exc:
-            check_session()
+            check_error_session()
             if recorder is not None:
                 recorder.close(LoopStatus.FAILED, "provider_error")
             return reply_result(
@@ -1425,7 +1434,7 @@ class LLMService(
                 images=outbound_images_payload(tool_context),
             )
         except Exception as exc:
-            check_session()
+            check_error_session()
             if recorder is not None:
                 recorder.close(LoopStatus.FAILED, "exception")
             return reply_result(
