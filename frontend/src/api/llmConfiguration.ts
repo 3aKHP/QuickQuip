@@ -13,7 +13,7 @@ export interface ConfigOperation {
 }
 export interface ConfigValidation { valid: boolean; warnings: JsonValue[]; dependencies: JsonValue[] }
 export interface ImportPreview extends ConfigValidation { document: JsonObject; changes: ConfigChange[]; expected_draft_revision: number }
-export interface ConfigMetadata { fields?: Record<string, FieldMetadata>; settings?: Record<string, Record<string, FieldMetadata>>; protocols?: string[]; route_names?: string[]; parameters?: Record<string, FieldMetadata>; [key: string]: unknown }
+export interface ConfigMetadata { client_fingerprints?: { id: string; label: string; protocols: string[] }[]; fields?: Record<string, FieldMetadata>; settings?: Record<string, Record<string, FieldMetadata>>; protocols?: string[]; route_names?: string[]; parameters?: Record<string, FieldMetadata>; [key: string]: unknown }
 export const fetchLlmConfiguration = (source = 'draft') => request<ConfigEnvelope>(`${ROOT}?source=${encodeURIComponent(source)}`)
 export const fetchLlmConfigMetadata = () => request<ConfigMetadata>(`${ROOT}/metadata`)
 export const fetchLlmConfigStatus = () => request<ConfigStatus>(`${ROOT}/status`)

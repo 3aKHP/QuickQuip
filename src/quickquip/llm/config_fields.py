@@ -32,6 +32,8 @@ PROVIDER_FIXED = {
     "api_key_env",
     "default_model",
     "enabled",
+    "client_fingerprint",
+    "fingerprint_runtime",
     "headers",
     "fallback_urls",
     "proxy",
@@ -214,7 +216,8 @@ def field_metadata(annotation: Any, rule: str, *, default: Any = None, inherit=F
     return result
 
 
-def metadata() -> dict:
+def field_registry() -> dict:
+    """Static field constraints, independent of deployment assets."""
     settings = {}
     for name, cls in SETTINGS.items():
         defaults = asdict(cls())
@@ -243,3 +246,10 @@ def metadata() -> dict:
         "protocols": ["openai", "claude", "gemini", "openai_responses"],
         "route_names": ["daily_summary", "daily_briefing", "weekly_report", "monthly_report"],
     }
+
+
+def metadata(*, config_dir=None) -> dict:
+    from quickquip.llm.client_fingerprints.catalog import profile_metadata
+    from quickquip.common.paths import CONFIG_DIR
+
+    return {**field_registry(), "client_fingerprints": profile_metadata(config_dir or CONFIG_DIR)}

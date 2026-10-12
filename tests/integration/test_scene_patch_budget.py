@@ -64,10 +64,12 @@ async def test_budget_rebuild_preserves_scene(scene_service, monkeypatch, budget
         key, store=service.store, params=service.config.resolve_epoch_params()
     )
     before = service._epochs.current_anchor(key)
+    before_epoch = service._epochs.current_id(key)
     result = await _reply(service)
     assert service._epochs.current_anchor(key) > before
     assert len(client.requests) == expected_calls
     if expected_calls:
+        assert client.requests[0].epoch_id == service._epochs.current_id(key) != before_epoch
         assert result["reply"] == "safe reply"
         assert "UNSERVED_SCENE" in client.requests[0].messages[-1].content
     else:

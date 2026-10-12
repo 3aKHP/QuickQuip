@@ -94,3 +94,7 @@ status 不包含活动任务字段，任务从 `/operations` 查询。返回的�
 稳定错误代码包括 `invalid_field`、`dependency_conflict`、`literal_secret`、`revision_conflict`、`operation_conflict`、`database_busy`、`unsupported_schema`、`database_corrupt`、`stale_claim` 和 `probe_result_unconfirmed`。前端按 code 处理状态，message 用于展示。
 
 更新约束或路由后运行 `python scripts/ci/export_llm_configuration_openapi.py`，同时提交生成的 OpenAPI 文件。接口回归使用隔离 SQLite 数据库与管理员会话，覆盖跨进程初始化、事务、租约、并发编辑、HTTP 鉴权、同源保护、导入预览与敏感数据边界。
+
+## 请求指纹配置
+
+Provider 的固定字段 `client_fingerprint` 缺省为 `default`，不可通过模型参数覆盖。metadata 的 `client_fingerprints` 数组提供 `id`、`label` 和支持的 `protocols`；Web 按协议提供选择。`settings.runtime.client_cluster` 是可选全局字符串，沿用草稿、保存和应用流程。四个 `x-quickquip-*` 专有头由自有 Profile 管理，附加头冲突返回 `profile_owned_header`。Profile 文件与安装身份契约见[请求指纹 Profile](../admin/client-fingerprints.md)。配置 schema 1 在初始化中事务性升级为 2，交换格式仍为 1。

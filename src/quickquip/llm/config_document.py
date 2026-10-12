@@ -24,6 +24,10 @@ from quickquip.llm.config_fields import (
     metadata,
 )
 from quickquip.llm.personas import load_personas
+from quickquip.llm.client_fingerprints.catalog import (
+    PROTOCOLS, get_catalog, FingerprintRuntime, header_value, resolve_profile,
+    validate_provider_headers,
+)
 
 __all__ = [
     "ConfigError",
@@ -155,7 +159,7 @@ def _validate_mcp(raw: dict) -> dict:
     return result
 
 
-def validate_document(document: Any) -> dict:
+def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
     """Normalize a complete replacement; no secret expansion or silent clamping."""
     allowed = {"format_version", "providers", "style_profiles", "pricing", "routes", "settings"}
     _object(document, "", allowed)
@@ -188,6 +192,7 @@ def validate_document(document: Any) -> dict:
                 "api_key_env",
                 "default_model",
                 "enabled",
+                "client_fingerprint",
                 "headers",
                 "fallback_urls",
                 "proxy",
@@ -201,7 +206,7 @@ def validate_document(document: Any) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", ident) or ident in ids:
             reject(path + ".id", "渠道 ID 须唯一且仅含字母、数字、点、下划线及连字符")
         ids.add(ident)
-        if raw.get("protocol") not in metadata()["protocols"]:
+        if raw.get("protocol") not in PROTOCOLS:
             reject(path + ".protocol", "不支持的协议")
         for key in ("base_url", "api_key_env", "default_model"):
             _text(raw.get(key), path + "." + key, nonempty=True)
@@ -211,6 +216,7 @@ def validate_document(document: Any) -> dict:
             reject(path + ".auth_method", "认证方式无效")
         base = {
             "enabled": True,
+            "client_fingerprint": "default",
             "headers": {},
             "fallback_urls": [],
             "proxy": "",
@@ -221,6 +227,10 @@ def validate_document(document: Any) -> dict:
         base.update(raw)
         check_value(base["enabled"], bool, path + ".enabled", "enabled")
         check_value(base["headers"], dict[str, str], path + ".headers", "headers")
+        validate_provider_headers(base["headers"], path + ".headers")
+        _text(base["client_fingerprint"], path + ".client_fingerprint", nonempty=True)
+        resolve_profile(base["client_fingerprint"], base["protocol"],
+                        Path(config_dir) if config_dir is not None else CONFIG_DIR)
         check_value(base["fallback_urls"], list[str], path + ".fallback_urls", "fallback_urls")
         _text(base["proxy"], path + ".proxy")
         parameters(base["parameters"], path + ".parameters")
@@ -270,6 +280,7 @@ def validate_document(document: Any) -> dict:
             check_fields(raw, cls, "settings." + name, exclude=("model_cascade",))
             output["settings"][name].update(raw)
     rt = output["settings"]["runtime"]
+    header_value(rt["client_cluster"], "settings.runtime.client_cluster")
     if rt["default_provider"] is not None and rt["default_provider"] not in ids:
         reject("settings.runtime.default_provider", "默认渠道不存在", "dependency_conflict")
     if rt["enabled"] and not providers:
@@ -398,8 +409,9 @@ def dependencies(document: dict) -> list[dict]:
 def compile_document(
     document: dict, config_dir: Path | str | None = None, revision=0
 ) -> c.LLMConfig:
-    doc = validate_document(document)
+    doc = validate_document(document, config_dir=config_dir)
     directory = Path(config_dir) if config_dir is not None else CONFIG_DIR
+    get_catalog(directory)
     config = c.LLMConfig(revision=revision, source_path=directory.parent / "data/llm_config.db")
     for name, cls in SETTINGS.items():
         if name == "mcp":
@@ -422,6 +434,7 @@ def compile_document(
                 "api_key_env",
                 "default_model",
                 "enabled",
+                "client_fingerprint",
                 "headers",
                 "fallback_urls",
                 "proxy",
@@ -433,6 +446,10 @@ def compile_document(
         append = values.get("style_overrides", "")
         fixed.update(values)
         provider = c.ProviderConfig(**fixed, models=[m["model"] for m in raw["models"]])
+        provider.fingerprint_runtime = FingerprintRuntime(
+            resolve_profile(provider.client_fingerprint, provider.protocol, directory),
+            config.runtime.client_cluster, directory.parent / "data",
+        )
         provider.model_parameters = {m["model"]: deepcopy(m["parameters"]) for m in raw["models"]}
         provider.model_enabled = {m["model"]: m["enabled"] for m in raw["models"]}
         provider.non_vision_models = [m["model"] for m in raw["models"] if not m["vision"]]
@@ -507,9 +524,11 @@ def resolve_model_provider(
     return result
 
 
-def effective_parameters(document: dict, provider_id: str, model: str) -> dict:
+def effective_parameters(
+    document: dict, provider_id: str, model: str, *, config_dir: Path | None = None,
+) -> dict:
     """Return unexpanded values and source for UI; never expose resolved credentials."""
-    doc = validate_document(document)
+    doc = validate_document(document, config_dir=config_dir)
     provider = next((p for p in doc["providers"] if p["id"] == provider_id), None)
     if provider is None:
         reject("provider_id", "渠道不存在", "dependency_conflict")

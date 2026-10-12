@@ -1,0 +1,26 @@
+format_version = 1
+id = "default"
+label = "当前默认"
+
+[protocols.openai]
+[protocols.openai_responses]
+[protocols.gemini]
+
+[protocols.claude.headers]
+accept = "application/json"
+accept-encoding = "gzip, deflate"
+anthropic-version = "2023-06-01"
+anthropic-beta = "claude-code-20250219,context-1m-2025-08-07,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24"
+anthropic-dangerous-direct-browser-access = "true"
+x-app = "cli"
+x-stainless-arch = "x64"
+x-stainless-lang = "js"
+x-stainless-package-version = "0.94.0"
+x-stainless-retry-count = "0"
+x-stainless-runtime = "node"
+x-stainless-runtime-version = "v24.3.0"
+x-stainless-timeout = "600"
+user-agent = "claude-cli/2.1.150 (external, cli)"
+
+[protocols.claude.bindings]
+x-stainless-os = "stainless_os"

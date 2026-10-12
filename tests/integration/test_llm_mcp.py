@@ -249,7 +249,7 @@ async def test_mcp_image_result_for_non_vision_model_uses_safe_description(
     from quickquip.llm.image_preprocessor import ImageDescription
 
     class _Preprocessor:
-        async def describe_inline_images(self, images, *, session=None):
+        async def describe_inline_images(self, images, *, session=None, epoch_id=None):
             return [ImageDescription(
                 source_url=image.source_label,
                 text_description="受控的工具图片转述",

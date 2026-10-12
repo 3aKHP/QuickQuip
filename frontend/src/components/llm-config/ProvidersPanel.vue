@@ -35,6 +35,7 @@
         <div class="form-grid">
           <SettingField label="渠道 ID" :model-value="String(current.id ?? '')" :hint="L.id.hint" placeholder="my-provider" @update:model-value="onIdInput" />
           <SettingField label="协议" :model-value="String(current.protocol ?? 'openai')" :options="protocolOptions" @update:model-value="patch({ protocol: String($event) })" />
+          <SettingField label="请求指纹 Profile" :model-value="String(current.client_fingerprint ?? 'default')" :options="fingerprintOptions" hint="QuickQuip Profile 会发送品牌 UA 和专有请求头；显式 UA 设置优先生效。" @update:model-value="patch({ client_fingerprint: String($event) })" />
           <SettingField class="form-grid__wide" label="API 地址" :model-value="String(current.base_url ?? '')" :hint="L.base_url.hint" :placeholder="L.base_url.placeholder" @update:model-value="patch({ base_url: String($event) })" />
           <div class="form-grid__wide api-key-row">
             <SettingField label="密钥环境变量" :model-value="String(current.api_key_env ?? '')" :hint="L.api_key_env.hint" :placeholder="L.api_key_env.placeholder" @update:model-value="patch({ api_key_env: String($event) })" />
@@ -198,6 +199,9 @@ const modelNames = computed(() => models.value.map(model => String(model.model ?
 const parametersMeta = computed(() => store.metadata.value.parameters || {})
 const styleProfileNames = computed(() => isObject(store.document.value?.style_profiles) ? Object.keys(store.document.value.style_profiles) : [])
 const protocolOptions = computed(() => (store.metadata.value.protocols?.length ? store.metadata.value.protocols : Object.keys(PROTOCOL_LABELS)).map(value => ({ value, label: PROTOCOL_LABELS[value] || value })))
+const fingerprintOptions = computed(() => (store.metadata.value.client_fingerprints || [])
+  .filter(profile => profile.protocols.includes(String(current.value?.protocol ?? 'openai')))
+  .map(profile => ({ value: profile.id, label: profile.label })))
 const authOptions = [{ value: 'api_key', label: 'API Key（x-api-key）' }, { value: 'bearer', label: 'Bearer Token' }]
 const defaultModelOptions = computed(() => [{ value: '', label: models.value.length ? '（未选择）' : '（先添加模型）' }, ...modelNames.value.map(name => ({ value: name, label: name }))])
 

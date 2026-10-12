@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import create_session_identity
 
 import asyncio
@@ -76,6 +77,7 @@ async def probe_provider(
 
     request = LLMRequest(
         session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=probe_model,
         system_prompt="",
         messages=[LLMConversationMessage(role="user", content="hi")],

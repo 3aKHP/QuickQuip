@@ -225,6 +225,7 @@ class TurnRequestAssembler:
     chat_type: str
     scope_key: str
     session: SessionIdentity
+    get_epoch_id: Callable[[], str | None]
     settings: "ResolvedGroupSettings"
     sensitive: SensitiveFilter
     user_id: int | str
@@ -331,6 +332,7 @@ class TurnRequestAssembler:
         )
         return LLMRequest(
             session=self.session,
+            epoch_id=self.get_epoch_id(),
             model=self.settings.model or self.provider.default_model,
             system_prompt=self.system_prompt,
             messages=self.messages,

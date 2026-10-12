@@ -1162,6 +1162,7 @@ class LLMService(
             include_recent_images=request.include_recent_images,
             sensitive=sensitive,
             session=session,
+            epoch_id=self._epochs.current_id(epoch_key),
         )
         check_session()
         if isinstance(image_outcome, dict):
@@ -1242,6 +1243,7 @@ class LLMService(
             chat_type=request.chat_type,
             scope_key=scope_key,
             session=session,
+            get_epoch_id=lambda: self._epochs.current_id(epoch_key),
             settings=settings,
             sensitive=sensitive,
             user_id=request.user_id,

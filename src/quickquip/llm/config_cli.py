@@ -17,7 +17,7 @@ from quickquip.llm.config_validation import validation_report
 MAX_IMPORT_BYTES = 1024 * 1024
 
 
-def read_document(path: Path) -> dict:
+def read_document(path: Path, *, config_dir: Path | None = None) -> dict:
     with path.open("rb") as stream:
         body = stream.read(MAX_IMPORT_BYTES + 1)
     if len(body) > MAX_IMPORT_BYTES:
@@ -26,7 +26,7 @@ def read_document(path: Path) -> dict:
         document = json.loads(body)
     except (UnicodeError, ValueError):
         raise ConfigError("invalid_json", "配置文件须为 UTF-8 JSON") from None
-    return validate_document(document)
+    return validate_document(document, config_dir=config_dir)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -38,6 +38,11 @@ def parser() -> argparse.ArgumentParser:
         q.add_argument("--legacy", type=Path, default=CONFIG_LLM_TOML)
         if name == "migrate-legacy":
             q.add_argument("--expected-revision", type=int)
+        else:
+            q.add_argument(
+                "--services-stopped", action="store_true",
+                help="确认旧 bot 和 Web 已停止，用于 schema 1 配置库升级",
+            )
     q = commands.add_parser("validate")
     q.add_argument("file", nargs="?", type=Path)
     q = commands.add_parser("export")
@@ -81,10 +86,10 @@ def _source(value: str):
 def execute(args) -> dict:
     service = ConfigService(args.db)
     if args.command == "init":
-        return service.initialize(args.legacy)
+        return service.initialize(args.legacy, services_stopped=args.services_stopped)
     if args.command == "validate" and args.file:
-        doc = read_document(args.file)
-        return validation_report(doc)
+        doc = read_document(args.file, config_dir=service.config_dir)
+        return validation_report(doc, config_dir=service.config_dir)
     if args.command == "migrate-legacy":
         if not service.path.exists():
             return service.initialize(args.legacy)
@@ -107,7 +112,7 @@ def execute(args) -> dict:
             return {"output": str(args.output)}
         return doc
     if args.command == "import":
-        doc = read_document(args.file)
+        doc = read_document(args.file, config_dir=service.config_dir)
         if args.preview:
             return service.preview_import(doc, args.expected_revision)
         return service.replace(doc, args.expected_revision)

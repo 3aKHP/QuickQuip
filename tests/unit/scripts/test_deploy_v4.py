@@ -587,6 +587,26 @@ def test_config_initialization_failure_preserves_current_release(deployment):
     assert not any("up" in json.loads(line) for line in (root / "calls").read_text().splitlines())
 
 
+def test_profile_assets_survive_upgrade_with_candidate_priority(deployment):
+    root, _, _ = deployment
+    old, candidate = _add_config_initializer(deployment)
+    (old / "client_profiles").mkdir()
+    (candidate / "client_profiles").mkdir()
+    (old / "client_profiles/quickquip.toml").write_text('id="quickquip"\n')
+    (old / "client_profiles/custom.toml").write_text('id="custom"\nlabel="server"\n')
+    selected = candidate / "client_profiles/custom.toml"
+    selected.write_text('id="custom"\nlabel="candidate"\n')
+    candidate_bytes = selected.read_bytes()
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    copied = root / "releases" / NEW / "config/client_profiles"
+    assert (copied / "quickquip.toml").read_bytes() == (
+        old / "client_profiles/quickquip.toml"
+    ).read_bytes()
+    assert (copied / "custom.toml").read_bytes() == candidate_bytes
+    assert 'label="server"' in (old / "client_profiles/custom.toml").read_text()
+
+
 def test_first_migration_breaks_candidate_generation_hardlink(deployment):
     root, _, _ = deployment
     old, candidate = _add_config_initializer(deployment)

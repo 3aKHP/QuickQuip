@@ -33,6 +33,9 @@ async def test_chat_identity_survives_rounds_model_persona_idle_crop_and_restart
     patch_provider_builder(lambda provider: stub)
     await _reply(llm_service)
     original = stub.last_request.session
+    original_epoch = stub.last_request.epoch_id
+    await _reply(llm_service)
+    assert stub.last_request.epoch_id == original_epoch
     for _ in range(8):
         llm_service.store.append_conversation_message("1001", "u", "user", "context " * 40)
         llm_service.store.append_conversation_message("1001", None, "assistant", "answer " * 40)
@@ -41,6 +44,7 @@ async def test_chat_identity_survives_rounds_model_persona_idle_crop_and_restart
     now[0] = 10.0
     await _reply(llm_service, user_id=2003)
     assert llm_service._epochs.current_anchor(key) > old_anchor
+    assert stub.last_request.epoch_id != original_epoch
     assert stub.last_request.session == original
     llm_service.set_group_model(1001, "openai-main", "gpt-alt")
     llm_service.set_group_persona(1001, "default")
@@ -50,8 +54,11 @@ async def test_chat_identity_survives_rounds_model_persona_idle_crop_and_restart
     await _reply(llm_service)
     assert llm_service.store.get_chat_session("1001") == original
     llm_service.set_group_enabled(1001, True)
+    before_restart = stub.last_request.epoch_id
     llm_service.store = LLMStore(llm_service.store.path)
+    llm_service._epochs = EpochManager(clock=lambda: now[0])
     await _reply(llm_service)
+    assert stub.last_request.epoch_id != before_restart
     assert stub.last_request.session == original
     llm_service.clear_context(1001)
     await _reply(llm_service)
@@ -67,6 +74,8 @@ async def test_tool_discovery_and_continuation_keep_the_frozen_identity(
     assert len(stub.requests) >= 2
     identity = llm_service.store.get_chat_session("1001")
     assert all(request.session == identity for request in stub.requests)
+    assert len({request.epoch_id for request in stub.requests}) == 1
+    assert stub.requests[0].epoch_id is not None
 
 
 async def test_clear_during_legacy_model_call_drops_late_reply(
@@ -104,7 +113,7 @@ async def test_clear_during_preprocessing_prevents_main_dispatch(
     observed = []
 
     class Preprocessor:
-        async def describe_images(self, urls, *, session=None):
+        async def describe_images(self, urls, *, session=None, epoch_id=None):
             observed.append(session)
             started.set()
             await release.wait()
@@ -241,7 +250,7 @@ async def test_archive_during_tool_processing_drops_late_results(
         )
 
     class Preprocessor:
-        async def describe_inline_images(self, images, *, session=None):
+        async def describe_inline_images(self, images, *, session=None, epoch_id=None):
             descriptions.append(session)
             if pause_at == "image_description":
                 started.set()

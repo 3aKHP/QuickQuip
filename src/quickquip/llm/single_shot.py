@@ -16,6 +16,7 @@ rate_limit_key/rule_name、扫描 channel、usage_scope 记账名、降级文案
 """
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import create_session_identity
 
 from collections.abc import Callable
@@ -89,6 +90,7 @@ def _build_request(
 ) -> LLMRequest:
     return LLMRequest(
         session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=model,
         system_prompt=prompt_pack.system_prompt,
         messages=[

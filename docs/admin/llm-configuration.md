@@ -14,6 +14,9 @@ python -m quickquip.llm.config_cli init
 
 初始化检查 `config/llm.toml`。有旧文件时只迁移一次；没有旧文件时建立关闭 LLM、无渠道的配置。已有数据库始终具有权威性，库损坏或 schema 不支持会明确报错。Windows `start.bat` 在启动服务前执行初始化；公开 Docker compose 的 `config-init` 在可写配置挂载中完成迁移，bot 和 Web 等待该服务成功后启动。
 
+请求指纹 Profile 基础设施使用配置 schema 2。初始化会事务性升级已验证的 schema 1，保留草稿修订、已发布快照和操作记录。schema 1 配置库需要先停止旧 Bot 与 Web、备份数据库，再执行 `python -m quickquip.llm.config_cli init --services-stopped`。普通 Web 请求与部署准备中的初始化会拒绝直接升级这类库，保持旧程序可用。升级后的数据库需要支持 schema 2 的程序。回退旧程序时使用升级前备份。schema 1 的历史备份可先复制到独立目录，运行新程序的 `init --services-stopped` 升级副本，再按恢复流程导入。Profile 选择缺省为 `default`，自有品牌需要显式启用，配置见[请求指纹 Profile](client-fingerprints.md)。
+
+
 迁移保留认证变量引用。发现认证字面量时，先将密钥写入根目录 `.env` 并把字段改为 `${VARIABLE}`。`api_key_env` 保存环境变量名称。认证 Header 可使用 `Bearer ${VARIABLE}`。数据库、导出、日志和操作错误不包含展开的认证值。
 
 迁移备份与报告存放在 `data/llm-config-migration/<源文件摘要>/`。报告列出字段转换、限制调整、移除和外部资产处理结果。内联人格写入 `config/personas/migrated-*.toml`，使用 `inherit_shared = false` 保持原提示应用语义；已有独立人格按加载优先级保留。已有 `config/generation.toml` 继续提供多模态配置，缺失时迁移提取旧段。原文件始终保留。文件冲突需要查看报告并处理后重新初始化。

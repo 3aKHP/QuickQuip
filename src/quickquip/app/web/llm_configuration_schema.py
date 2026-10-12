@@ -8,7 +8,7 @@ from dataclasses import asdict
 from fastapi import FastAPI
 
 from quickquip.llm.config import PricingRates
-from quickquip.llm.config_document import metadata
+from quickquip.llm.config_fields import field_registry
 
 
 def _field(spec):
@@ -27,7 +27,7 @@ def _field(spec):
 
 
 def document_schema():
-    registry = metadata()
+    registry = field_registry()
     parameters = {
         "type": "object",
         "additionalProperties": False,
@@ -63,6 +63,7 @@ def document_schema():
             "default_model": {"type": "string"},
             "enabled": {"type": "boolean"},
             "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+            "client_fingerprint": {"type": "string", "default": "default"},
             "fallback_urls": {"type": "array", "items": {"type": "string"}},
             "proxy": {"type": "string"},
             "auth_method": {"enum": ["api_key", "bearer"]},
@@ -250,6 +251,9 @@ def enrich_openapi(schema):
             "route_names": array(string),
             "parameters": {"type": "object"},
             "settings": {"type": "object"},
+            "client_fingerprints": array(object_schema({
+                "id": string, "label": string, "protocols": array(string),
+            })),
         }
     )
     components["ConfigProviders"] = object_schema(

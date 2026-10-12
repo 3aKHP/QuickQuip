@@ -184,6 +184,10 @@
                 "base_url": {
                   "type": "string"
                 },
+                "client_fingerprint": {
+                  "default": "default",
+                  "type": "string"
+                },
                 "default_model": {
                   "type": "string"
                 },
@@ -964,6 +968,9 @@
                   "auto_memory_prompt": {
                     "type": "string"
                   },
+                  "client_cluster": {
+                    "type": "string"
+                  },
                   "default_persona": {
                     "type": [
                       "string",
@@ -1358,6 +1365,27 @@
       },
       "ConfigMetadata": {
         "properties": {
+          "client_fingerprints": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "protocols": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "format_version": {
             "type": "integer"
           },
@@ -1531,6 +1559,10 @@
                 ]
               },
               "base_url": {
+                "type": "string"
+              },
+              "client_fingerprint": {
+                "default": "default",
                 "type": "string"
               },
               "default_model": {
@@ -2041,6 +2073,10 @@
                   ]
                 },
                 "base_url": {
+                  "type": "string"
+                },
+                "client_fingerprint": {
+                  "default": "default",
                   "type": "string"
                 },
                 "default_model": {

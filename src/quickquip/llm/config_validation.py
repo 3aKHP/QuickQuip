@@ -17,8 +17,8 @@ def document_diff(before, after, path=""):
     return changes
 
 
-def validation_report(document, before=None):
-    normalized = validate_document(document)
+def validation_report(document, before=None, *, config_dir=None):
+    normalized = validate_document(document, config_dir=config_dir)
     prices = {(p["provider_id"], p["model"]) for p in normalized["pricing"]}
     warnings = [
         {

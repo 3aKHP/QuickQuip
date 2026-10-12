@@ -265,12 +265,10 @@ class GeminiProviderClient(BaseProviderClient):
             # google_search 是服务端执行的工具声明，与客户端 functionDeclarations
             # 并列成独立 tools 条目；不依赖 allow_tool_calls / 客户端工具列表。
             payload.setdefault("tools", []).append({"google_search": {}})
-        headers.update(self.config.headers)
-        if self.config.user_agent:
-            headers["user-agent"] = self.config.user_agent
+        headers = self._assemble_headers(request, headers)
         if self.config.extra_body:
             payload.update(self.config.extra_body)
-        return url, headers, payload
+        return url, headers, self._project_body(request, payload)
 
     @staticmethod
     def _parse_candidate(candidate: dict[str, Any], fallback_model: str) -> LLMResponse:

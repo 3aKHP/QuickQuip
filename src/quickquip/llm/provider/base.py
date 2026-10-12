@@ -292,6 +292,7 @@ class LLMRequest:
     tool_choice: str = "auto"
     builtin_search: bool = False
     session: SessionIdentity | None = None
+    epoch_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -473,6 +474,25 @@ class BaseProviderClient:
                 f"环境变量 {self.config.api_key_env} 未设置，provider {self.config.id} 无法调用"
             )
         return api_key
+
+    def _assemble_headers(self, request, headers):
+        from quickquip.llm.client_fingerprints.assembly import assemble_headers
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            return assemble_headers(self.config, request, headers)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
+
+    def _project_body(self, request, payload):
+        from quickquip.llm.client_fingerprints.assembly import project_body
+        from quickquip.llm.client_fingerprints.catalog import resolve_profile
+
+        runtime = self.config.fingerprint_runtime
+        profile = runtime.profile if runtime else resolve_profile(
+            self.config.client_fingerprint, self.config.protocol,
+        )
+        return project_body(profile, request, payload)
 
     async def _dispatch_with_retry(
         self,

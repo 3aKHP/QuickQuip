@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import create_session_identity
 
 from dataclasses import dataclass, replace
@@ -173,6 +174,7 @@ async def generate_profile(
     client = build_provider_client(replace(provider_config, stream_enabled=False))
     response = await client.complete(LLMRequest(
         session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=model,
         system_prompt=system_prompt,
         messages=[user_message],
