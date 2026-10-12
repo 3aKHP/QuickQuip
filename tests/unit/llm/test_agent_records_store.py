@@ -163,7 +163,7 @@ def test_migration_is_idempotent(tmp_path: Path):
         count = conn.execute("SELECT COUNT(*) c FROM agent_loops").fetchone()["c"]
         versions = conn.execute("SELECT COUNT(*) c FROM agent_schema_migrations").fetchone()["c"]
     assert count == 4
-    assert versions == 1
+    assert versions == 2
 
 
 def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monkeypatch):
@@ -235,7 +235,7 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
             == original_rows
         )
         assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 4
-        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 2
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
@@ -392,6 +392,30 @@ def test_not_executed_terminal_with_reason(store: LLMStore):
         ).fetchone()
     assert row["status"] == "not_executed"
     assert json.loads(row["result_json"])["detail"] == "limit"
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_archiving_running_tool_rejects_late_result_in_closed_loop(store: LLMStore, resume):
+    store.get_or_create_chat_session("private:2002")
+    handle = _begin(store, "private:2002")
+    declaration = _declarations(1)[0]
+    store.commit_turn(handle, _response("tool started"), [declaration], [])
+    store.mark_tool_started(handle, declaration.execution_id)
+    store.end_private_chat_session("2002", save=True, persona_id=None, preset="")
+    if resume:
+        store.resume_private_chat_session("2002", 1)
+    with pytest.raises(ScopeGenerationMismatch):
+        store.finish_tool(
+            handle, declaration.execution_id,
+            ToolResultRecord(content="late result", is_error=False, original_bytes=11),
+        )
+    with store._connect() as conn:
+        row = conn.execute(
+            "SELECT status, result_json FROM agent_tool_executions WHERE execution_id = ?",
+            (declaration.execution_id,),
+        ).fetchone()
+    assert row["status"] == "indeterminate"
+    assert row["result_json"] is None
 
 
 # ── 交付 ─────────────────────────────────────────────────────────

@@ -16,83 +16,48 @@ class StateMixin:
     def set_chat_enabled(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
         self._update_chat_settings(chat_id, chat_type, enabled=int(enabled))
 
+    def _clear_session_caches(
+        self, scope_key: str, evictions: dict[EpochKey, tuple[int, int]],
+    ) -> None:
+        """Invalidate derived state only after the persistent transition commits."""
+        self._epochs.reset_scope(scope_key, store=self.store, evictions=evictions)
+        self._envelope_cache.clear_scope(scope_key)
+        self._skill_activations.clear_scope(scope_key)
+        if self.recent_message_buffer:
+            self.recent_message_buffer.clear_scope(scope_key)
+
     def start_private_session(self, user_id: int | str, *, preset: str = "") -> None:
         scope_key = self.build_chat_scope_key(user_id, "private")
-        self.clear_context(user_id, chat_type="private")
+        evictions = self._epochs.capture_scope_evictions(scope_key, self.store)
+        self.store.start_private_chat_session(str(user_id))
+        self._clear_session_caches(scope_key, evictions)
         self._session_presets.pop(scope_key, None)
-        self.set_chat_enabled(user_id, True, chat_type="private")
         if preset.strip():
             self._session_presets[scope_key] = preset.strip()
 
     def end_private_session(self, user_id: int | str, *, save: bool = True) -> dict:
         scope_key = self.build_chat_scope_key(user_id, "private")
-        user_id_str = str(user_id)
-        msg_count = self.store.count_conversation_messages(scope_key)
-        archive_number = None
-
-        if save and msg_count > 0:
-            archive_number = self.store.get_next_archive_number(user_id_str)
-            settings = self.get_chat_settings(user_id, chat_type="private")
-            preset = self._session_presets.get(scope_key, "")
-            created_at = self.store.get_earliest_message_time(scope_key)
-            self.store.create_session_archive(
-                user_id_str,
-                archive_number,
-                persona_id=settings.persona_id or None,
-                preset=preset or None,
-                message_count=msg_count,
-                created_at=created_at,
-            )
-            self.store.archive_conversation_messages(user_id_str, archive_number)
-            # 整 Loop 迁移（§9.4）：Loop/Turn/delivery ID 与时间不变，
-            # 双侧 scope generation 增长，两侧 buffer/epoch 由 clear/调用方清理。
-            self.store.migrate_loops_between_scopes(
-                scope_key, f"archive:{user_id_str}:{archive_number}"
-            )
-            # 行已迁移到 archive scope，clear 事件的驱逐统计按 0 记（键抹除是事实本体）
-            self._epochs.reset_scope(scope_key, store=self.store)
-            self._envelope_cache.clear_scope(scope_key)
-            self._skill_activations.clear_scope(scope_key)
-        else:
-            self.clear_context(user_id, chat_type="private")
-
-        self.set_chat_enabled(user_id, False, chat_type="private")
+        settings = self.get_chat_settings(user_id, chat_type="private")
+        evictions = self._epochs.capture_scope_evictions(scope_key, self.store) if not save else {}
+        result = self.store.end_private_chat_session(
+            str(user_id), save=save, persona_id=settings.persona_id or None,
+            preset=self._session_presets.get(scope_key, ""),
+        )
+        self._clear_session_caches(scope_key, evictions)
         self._session_presets.pop(scope_key, None)
-        return {"deleted": msg_count, "archive_number": archive_number}
+        return result
 
     def resume_private_session(self, user_id: int | str, archive_number: int | None = None) -> dict:
-        user_id_str = str(user_id)
-        if archive_number is None:
-            archive_number = self.store.get_latest_archive_number(user_id_str)
-            if archive_number is None:
-                return {"error": "没有可恢复的存档"}
-
-        archive = self.store.get_session_archive(user_id_str, archive_number)
-        if archive is None:
-            return {"error": f"存档 #{archive_number} 不存在"}
-
         scope_key = self.build_chat_scope_key(user_id, "private")
-        # 恢复前无条件清空当前短期上下文（含进程内缓冲），即使当前无存档消息。
-        self.clear_context(user_id, chat_type="private")
-
-        self.store.restore_conversation_messages(user_id_str, archive_number)
-        # 恢复同样走整 Loop 迁移（§9.4）；clear_context 已清目标侧 buffer/epoch。
-        self.store.migrate_loops_between_scopes(
-            f"archive:{user_id_str}:{archive_number}", scope_key
-        )
+        evictions = self._epochs.capture_scope_evictions(scope_key, self.store)
+        result = self.store.resume_private_chat_session(str(user_id), archive_number)
+        if "error" in result:
+            return result
+        self._clear_session_caches(scope_key, evictions)
         self._session_presets.pop(scope_key, None)
-        preset = archive.get("preset") or ""
-        if preset:
-            self._session_presets[scope_key] = preset
-        self.set_chat_enabled(user_id, True, chat_type="private")
-        self.store.delete_session_archive(user_id_str, archive_number)
-
-        return {
-            "archive_number": archive_number,
-            "message_count": archive.get("message_count", 0),
-            "preset": preset,
-            "persona_id": archive.get("persona_id") or "",
-        }
+        if result["preset"]:
+            self._session_presets[scope_key] = result["preset"]
+        return result
 
     def format_session_archives(self, user_id: int | str) -> str:
         archives = self.store.list_session_archives(str(user_id))
@@ -113,11 +78,7 @@ class StateMixin:
         return "\n".join(lines)
 
     def delete_session_archive_for_user(self, user_id: int | str, archive_number: int) -> bool:
-        archive_key = f"archive:{str(user_id)}:{archive_number}"
-        self.store.delete_loops_for_scope(archive_key)
-        _, revision = self.store.agent_scope_state(archive_key)
-        self.store.mutate_history(archive_key, revision, HistoryMutation.DELETE)
-        return self.store.delete_session_archive(str(user_id), archive_number)
+        return self.store.delete_archived_chat_session(str(user_id), archive_number)
 
     def get_session_preset(self, scope_key: str) -> str:
         return self._session_presets.get(scope_key, "")
@@ -394,21 +355,9 @@ class StateMixin:
 
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:
         scope_key = self.build_chat_scope_key(group_id, chat_type)
-        # 纪元清键先于删行：clear 事件的驱逐统计要能读到窗口内的行
-        # （epoch_events 旁路，失败仅告警不影响清理）。
-        self._epochs.reset_scope(scope_key, store=self.store)
-        self._envelope_cache.clear_scope(scope_key)
-        deleted = self.store.clear_conversation_messages(scope_key)
-        # Agent 执行记录随域清理（§9.3）：主表行删除后侧表不能留孤儿。
-        self.store.delete_loops_for_scope(scope_key)
-        # 短期上下文 = 持久会话库 + 进程内最近消息缓冲 + 会话纪元锚点 + 信封分解
-        # 缓存 + Skill 激活登记；只清前者会让 build_messages 继续把缓冲拼进提示词，
-        # 或让纪元锚点指向已删除的行，或让"已激活"登记挡住正文重注入，模型仍然
-        # "看得见"历史。五件齐清（私聊会话 start/end/resume 也走这里）。
-        if self.recent_message_buffer:
-            self.recent_message_buffer.clear_scope(scope_key)
-        self._skill_activations.clear_scope(scope_key)
-        self._bump_scope_generation(scope_key, HistoryMutation.CLEAR)
+        evictions = self._epochs.capture_scope_evictions(scope_key, self.store)
+        deleted = self.store.clear_chat_session(scope_key)
+        self._clear_session_caches(scope_key, evictions)
         return deleted
 
     def _bump_scope_generation(self, scope_key: str, mutation: str) -> None:

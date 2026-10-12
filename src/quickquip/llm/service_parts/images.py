@@ -23,6 +23,7 @@ from quickquip.llm.prompting import merge_image_urls
 from quickquip.llm.reply_chain import reply_result
 from quickquip.llm.service_parts.constants import MAX_TRIGGER_CONTEXT_MESSAGES
 from quickquip.llm.settings import ResolvedGroupSettings
+from quickquip.llm.session import SessionIdentity
 from quickquip.common.sensitive_filter import (
     DEFAULT_BLOCK_REPLY,
     SensitiveFilter,
@@ -62,6 +63,7 @@ class ImagesMixin:
         recent_messages: list[dict[str, str]] | None,
         include_recent_images: bool,
         sensitive: SensitiveFilter,
+        session: SessionIdentity | None = None,
     ) -> dict[str, object] | ImagePreprocessingOutcome:
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
@@ -113,7 +115,7 @@ class ImagesMixin:
                 )
 
             raw_descriptions = await self.image_preprocessor.describe_images(
-                [candidate.url for candidate in image_plan.candidates]
+                [candidate.url for candidate in image_plan.candidates], session=session,
             )
             description_match = match_image_descriptions(
                 image_plan.candidates,

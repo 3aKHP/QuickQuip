@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.llm.session import create_session_identity
+
 import logging
 from dataclasses import replace
 
@@ -147,6 +149,7 @@ async def generate_daily_briefing(
     cascade = briefing_config.model_cascade or [f"{default_provider_id}/{default_model}"]
     last_error: Exception | None = None
 
+    session = create_session_identity()
     for entry in cascade:
         if entry == "@default":
             provider_id = default_provider_id
@@ -173,6 +176,7 @@ async def generate_daily_briefing(
         except ValueError:
             continue
         req = LLMRequest(
+            session=session,
             model=model,
             system_prompt=system_prompt,
             messages=[user_message],

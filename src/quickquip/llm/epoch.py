@@ -194,7 +194,25 @@ class EpochManager:
         ]
         return min(anchors) if anchors else None
 
-    def reset_scope(self, scope_key: str, *, store: "LLMStore | None" = None) -> None:
+    def capture_scope_evictions(
+        self, scope_key: str, store: "LLMStore",
+    ) -> dict[EpochKey, tuple[int, int]]:
+        """Observe old-window counts before an atomic history transition."""
+        counts = {}
+        for key, state in list(self._states.items()):
+            if key.scope_key == scope_key:
+                try:
+                    counts[key] = store.conversation_range_stats(scope_key, state.anchor_id, None)
+                except Exception:
+                    logger.warning(
+                        "epoch eviction snapshot failed scope=%s", scope_key, exc_info=True,
+                    )
+        return counts
+
+    def reset_scope(
+        self, scope_key: str, *, store: "LLMStore | None" = None,
+        evictions: dict[EpochKey, tuple[int, int]] | None = None,
+    ) -> None:
         """clear_context 第三清：抹掉该 scope 的全部纪元键。
 
         带 store 时逐键落 ``reason='clear'`` 事件（new_anchor_id = NULL 表
@@ -204,7 +222,8 @@ class EpochManager:
         for key in doomed:
             if store is not None:
                 self._record_event(
-                    store, key, "clear", self._states[key].anchor_id, None
+                    store, key, "clear", self._states[key].anchor_id, None,
+                    evicted_stats=evictions.get(key, (0, 0)) if evictions is not None else None,
                 )
             del self._states[key]
 
@@ -331,10 +350,11 @@ class EpochManager:
         old_anchor_id: int,
         new_anchor_id: int | None,
         epoch_tokens: int = -1,
+        evicted_stats: tuple[int, int] | None = None,
     ) -> None:
         """锚点推进的旁路落库（epoch_events 表）：失败只告警，绝不阻断主链路。"""
         try:
-            evicted_rows, evicted_tokens = store.conversation_range_stats(
+            evicted_rows, evicted_tokens = evicted_stats or store.conversation_range_stats(
                 key.scope_key, old_anchor_id, new_anchor_id
             )
             store.record_epoch_event(

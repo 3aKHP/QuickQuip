@@ -16,6 +16,8 @@ rate_limit_key/rule_name、扫描 channel、usage_scope 记账名、降级文案
 """
 from __future__ import annotations
 
+from quickquip.llm.session import create_session_identity
+
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 import logging
@@ -86,6 +88,7 @@ def _build_request(
     image_urls: list[str] | None = None,
 ) -> LLMRequest:
     return LLMRequest(
+        session=create_session_identity(),
         model=model,
         system_prompt=prompt_pack.system_prompt,
         messages=[
