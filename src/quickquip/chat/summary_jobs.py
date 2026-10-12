@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
+from quickquip.llm.runtime_snapshot import leased_service
 from quickquip.chat.period_report import (
     PERIOD_WEEKLY,
     compute_period_window,
@@ -64,6 +65,7 @@ def _identity_resolver_from_svc(svc, group_id: str):
     return _resolve
 
 
+@leased_service(lambda *args, **kwargs: kwargs["svc"])
 async def run_summary_generation(
     group_id: str,
     start_ts: float,
@@ -223,6 +225,7 @@ async def publish_summaries_job(
 # ── 群周报 / 群月报 ──────────────────────────────────────────────────────
 
 
+@leased_service(lambda *args, **kwargs: kwargs["svc"])
 async def run_period_generation(
     group_id: str,
     period_type: str,

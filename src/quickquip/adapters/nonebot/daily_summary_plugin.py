@@ -441,7 +441,7 @@ async def _job_publish_period_reports(period_type: str) -> None:
     )
 
 
-def _register_period_jobs() -> None:
+def _register_period_jobs(period_types=None) -> None:
     """注册周报/月报的生成与发布 job。各自独立 enabled 开关。"""
     if not scheduler:
         return
@@ -469,6 +469,8 @@ def _register_period_jobs() -> None:
         (PERIOD_WEEKLY, svc.config.weekly_report),
         (PERIOD_MONTHLY, svc.config.monthly_report),
     ):
+        if period_types is not None and period_type not in period_types:
+            continue
         if not cfg.enabled:
             continue
         gen_id = f"{period_type}_report_generate"

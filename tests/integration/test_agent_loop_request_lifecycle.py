@@ -61,15 +61,14 @@ async def test_cancellation_closes_loop_preserves_facts_and_allows_next_request(
     client = AsyncMock()
     client.complete.side_effect = complete
     patch_provider_builder(lambda provider: client)
-    original_execute = llm_service.tool_registry.execute
-
-    async def execute(call, context):
-        if stage == "tool" and call.id == "call-1":
+    async def execute(arguments, context):
+        if stage == "tool" and execute_mock.await_count == 2:
             await wait_for_cancellation()
-        return await original_execute(call, context)
+        return await llm_service._tool_get_identity(arguments, context)
 
     execute_mock = AsyncMock(side_effect=execute)
-    monkeypatch.setattr(llm_service.tool_registry, "execute", execute_mock)
+    spec = llm_service.tool_registry.get_specs(["get_identity"])[0]
+    llm_service.tool_registry.register(spec, execute_mock)
     sink = CollectingSink()
 
     async def deliver(delivery_id, payload):

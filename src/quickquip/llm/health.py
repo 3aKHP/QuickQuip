@@ -11,6 +11,7 @@ from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_SENSITIVE_WORD
 from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.generation.config import load_generation_config
 from quickquip.llm.config import LLMConfig, ProviderConfig, provider_builtin_search_active
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.settings import ResolvedGroupSettings
 
 @dataclass(slots=True)
@@ -125,6 +126,11 @@ async def build_health_report(
         )
 
     provider = config.providers.get(settings.provider_id)
+    if provider is not None and provider.enabled:
+        try:
+            provider = resolve_model_provider(config, provider.id, settings.model)
+        except ValueError:
+            pass
     if provider is None:
         items.append(
             HealthCheckItem(
@@ -150,11 +156,15 @@ async def build_health_report(
         )
     else:
         model_ok = settings.model in provider.models or settings.model in provider.aliases
+        wire_model = provider.aliases.get(settings.model, settings.model)
+        model_enabled = provider.model_enabled.get(wire_model, True)
         env_status = _env_state(provider.api_key_env)
-        status = "ok" if model_ok and env_status == "set" else "warn"
+        status = "ok" if model_ok and model_enabled and env_status == "set" else "warn"
         summary_parts = [f"{provider.id} / {settings.model}"]
         if not model_ok:
             summary_parts.append("模型未在 provider 中声明")
+        elif not model_enabled:
+            summary_parts.append("当前模型已停用")
         if env_status != "set":
             summary_parts.append(f"环境变量 {provider.api_key_env or '(未配置)'} 未设置")
         details: dict[str, Any] = {
@@ -162,11 +172,12 @@ async def build_health_report(
             "protocol": provider.protocol,
             "model": settings.model,
             "model_declared": model_ok,
+            "model_enabled": model_enabled,
             "api_key_env": provider.api_key_env,
             "api_key_status": env_status,
             "timeout_seconds": provider.timeout_seconds,
         }
-        if probe_provider and env_status == "set":
+        if probe_provider and env_status == "set" and model_ok and model_enabled:
             reachable, probe_ms, error_type = await _probe_provider(provider, settings.model)
             details["provider_reachable"] = reachable
             details["probe_latency_ms"] = probe_ms

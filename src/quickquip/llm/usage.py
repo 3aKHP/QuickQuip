@@ -5,6 +5,7 @@
 ``_schedule_usage_record`` fire-and-forget 调度，计量失败**绝不影响主聊天
 路径**——全程 try/except 只 logger.exception。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +15,8 @@ import time
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import wraps
+from inspect import signature
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterator
@@ -32,7 +35,8 @@ class UsageScope:
 
 
 _USAGE_SCOPE: ContextVar[UsageScope | None] = ContextVar(
-    "quickquip_llm_usage_scope", default=None,
+    "quickquip_llm_usage_scope",
+    default=None,
 )
 
 
@@ -77,7 +81,8 @@ def set_usage_scope(
 
 
 _ENVELOPE_TOKENS: ContextVar[int | None] = ContextVar(
-    "quickquip_llm_envelope_tokens", default=None,
+    "quickquip_llm_envelope_tokens",
+    default=None,
 )
 
 
@@ -96,7 +101,8 @@ def envelope_meter(tokens: int | None) -> Iterator[None]:
 
 
 _EPOCH_HISTORY_TOKENS: ContextVar[int | None] = ContextVar(
-    "quickquip_llm_epoch_history_tokens", default=None,
+    "quickquip_llm_epoch_history_tokens",
+    default=None,
 )
 
 
@@ -114,7 +120,8 @@ def epoch_meter(tokens: int | None) -> Iterator[None]:
 
 
 _EPOCH_HISTORY_ROWS: ContextVar[int | None] = ContextVar(
-    "quickquip_llm_epoch_history_rows", default=None,
+    "quickquip_llm_epoch_history_rows",
+    default=None,
 )
 
 
@@ -132,7 +139,8 @@ def epoch_rows_meter(rows: int | None) -> Iterator[None]:
 
 
 _MEDIA_IMAGE_COUNT: ContextVar[int | None] = ContextVar(
-    "quickquip_llm_media_image_count", default=None,
+    "quickquip_llm_media_image_count",
+    default=None,
 )
 
 
@@ -152,7 +160,8 @@ def media_meter(count: int | None) -> Iterator[None]:
 
 
 _PATCH_TOKENS: ContextVar[int | None] = ContextVar(
-    "quickquip_llm_patch_tokens", default=None,
+    "quickquip_llm_patch_tokens",
+    default=None,
 )
 
 
@@ -172,11 +181,44 @@ def patch_meter(tokens: int | None) -> Iterator[None]:
 
 def _configured_pricing() -> dict:
     """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
+    pinned = _CONFIGURATION_PRICING.get()
+    if pinned is not None:
+        return pinned[1]
     try:
         from quickquip.llm.service import get_llm_service
-        return get_llm_service().config.pricing
+
+        config = get_llm_service().config
+        return config.pricing_references or config.pricing
     except Exception:
         return {}
+
+
+_CONFIGURATION_PRICING: ContextVar[tuple[int, dict] | None] = ContextVar(
+    "quickquip_configuration_pricing", default=None
+)
+
+
+@contextmanager
+def configuration_pricing(config):
+    token = _CONFIGURATION_PRICING.set(
+        (getattr(config, "revision", 0), config.pricing_references or config.pricing)
+    )
+    try:
+        yield
+    finally:
+        _CONFIGURATION_PRICING.reset(token)
+
+
+def configuration_pricing_entry(function):
+    parameters = signature(function)
+
+    @wraps(function)
+    async def wrapped(*args, **kwargs):
+        config = parameters.bind(*args, **kwargs).arguments["llm_config"]
+        with configuration_pricing(config):
+            return await function(*args, **kwargs)
+
+    return wrapped
 
 
 async def _record_usage(
@@ -198,6 +240,7 @@ async def _record_usage(
     try:
         scope = _USAGE_SCOPE.get()
         from quickquip.llm.provider.trace import current_agent_loop_id
+
         loop_id = current_agent_loop_id()  # 复用 trace.py 的 agent loop 边界，零接线
         model = response.model if response is not None else request.model
         duration_ms = (time.monotonic() - started) * 1000
@@ -246,7 +289,8 @@ async def _record_usage(
             if rates is not None:
                 pricing_model = (
                     f"{client.config.id}/{model}"
-                    if f"{client.config.id}/{model}" in configured
+                    if (client.config.id, model) in configured
+                    or f"{client.config.id}/{model}" in configured
                     else model
                 )
                 pricing_source = rates.source
@@ -254,6 +298,11 @@ async def _record_usage(
 
         row = {
             "provider_id": client.config.id,
+            "config_revision": (
+                _CONFIGURATION_PRICING.get()[0]
+                if _CONFIGURATION_PRICING.get() is not None
+                else None
+            ),
             "protocol": client.config.protocol,
             "model": model,
             "feature": scope.feature if scope else None,
@@ -301,8 +350,10 @@ async def _record_usage(
                 row["response_outcome"] = "provider_error"
             else:
                 from quickquip.llm.response_acceptance import classify_response
+
                 row["response_outcome"] = classify_response(response, feature=scope.feature)
         from quickquip.llm.usage_store import usage_store
+
         await asyncio.to_thread(usage_store.record, row)
     except (OSError, sqlite3.Error):
         logger.exception("LLM usage record failed")

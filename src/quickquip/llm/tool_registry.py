@@ -147,6 +147,12 @@ def validate_tool_arguments(schema: dict[str, Any], payload: Any) -> dict[str, A
 
 
 class ToolRegistry:
+    def fork(self) -> ToolRegistry:
+        """Freeze registered bindings for one task; later registrations stay local."""
+        registry = ToolRegistry()
+        registry._tools = dict(self._tools)
+        return registry
+
     def __init__(self) -> None:
         self._tools: dict[str, RegisteredTool] = {}
 

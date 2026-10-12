@@ -10,11 +10,15 @@ from quickquip.llm.config import LLMConfig, provider_builtin_search_active
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
 from quickquip.llm.provider import build_provider_client
 from quickquip.llm.service_parts.constants import (
+    ACTIVATE_SKILL_TOOL_NAME,
     DEFAULT_ALWAYS_LOADED_TOOLS,
     DEFAULT_ENABLED_TOOLS,
     MAX_TRIGGER_CONTEXT_MESSAGES,
     PRIVATE_UNAVAILABLE_TOOLS,
+    READ_SKILL_RESOURCE_TOOL_NAME,
+    RUN_SKILL_SCRIPT_TOOL_NAME,
     SEARCH_TOOL_NAME,
+    SEARCH_SKILL_RESOURCES_TOOL_NAME,
     TOOL_LIST_NAME,
     TOOL_SEARCH_NAME,
 )
@@ -260,7 +264,11 @@ class ToolMixin(McpLifecycleMixin):
         """该 provider 会话是否由内置搜索接管联网检索（从而移除 search_web）。"""
         if not provider_id:
             return False
-        provider = self.config.providers.get(provider_id)
+        provider = (
+            self.effective_request_provider(provider_id)
+            if hasattr(self, "effective_request_provider")
+            else self.config.providers.get(provider_id)
+        )
         return provider is not None and provider_builtin_search_active(provider)
 
     def _get_enabled_tool_names(
@@ -274,6 +282,12 @@ class ToolMixin(McpLifecycleMixin):
         else:  # append：默认白名单 + MCP 工具之上追加，opt-in 工具的启用路径
             names = [*DEFAULT_ENABLED_TOOLS, *sorted(self.mcp_tool_names), *configured]
         names = list(dict.fromkeys(names))
+        if not self.config.skills.enabled:
+            skill_tools = {
+                ACTIVATE_SKILL_TOOL_NAME, READ_SKILL_RESOURCE_TOOL_NAME,
+                SEARCH_SKILL_RESOURCES_TOOL_NAME, RUN_SKILL_SCRIPT_TOOL_NAME,
+            }
+            names = [name for name in names if name not in skill_tools]
         if chat_type == "private":
             names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
         if self._builtin_search_active(provider_id):
@@ -384,6 +398,14 @@ class ToolMixin(McpLifecycleMixin):
             return
 
         vision_model = img_cfg.model or vis_provider_cfg.default_model
+        from quickquip.llm.config_document import resolve_model_provider
+        try:
+            vis_provider_cfg = resolve_model_provider(
+                self.config, vis_provider_cfg.id, vision_model
+            )
+        except ValueError:
+            self.image_preprocessor = None
+            return
         if vision_model in vis_provider_cfg.non_vision_models:
             logger.warning(
                 "image_preprocessing model %r is declared non-vision by provider %r",
@@ -403,11 +425,9 @@ class ToolMixin(McpLifecycleMixin):
         )
 
     async def reload_runtime(self, *, background: bool = False) -> LLMConfig:
-        self.reload_config()
-        if background:
-            self.start_mcp_background(force=True)
-            return self.config
-        await self.ensure_mcp_ready(force=True)
+        async with self._configuration_gate:
+            self.reload_config()
+        await self.reload_mcp(background=background)
         return self.config
 
     async def _tool_get_identity(

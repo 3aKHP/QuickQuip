@@ -7,7 +7,7 @@ Covers:
 """
 from __future__ import annotations
 
-from quickquip.llm.config import _read_mcp_servers
+from quickquip.llm.config_legacy import _read_mcp_servers
 from quickquip.llm.mcp.client import _extract_modern_server_info
 from quickquip.llm.mcp.types import (
     MCPError,

@@ -4,8 +4,9 @@ import json
 
 from fastapi import APIRouter
 
-from quickquip.common.paths import CONFIG_LLM_TOML, MCP_STATUS_JSON_PATH
-from quickquip.llm.config import load_llm_config
+from quickquip.common.paths import MCP_STATUS_JSON_PATH
+from quickquip.llm.config_document import compile_document
+from quickquip.llm.config_service import get_config_service
 from quickquip.llm.mcp.types import format_mcp_era_tag
 
 router = APIRouter()
@@ -30,99 +31,63 @@ def get_mcp_dashboard():
             sid = b["server_id"]
             if sid not in server_tools:
                 server_tools[sid] = []
-            server_tools[sid].append({
-                "name": b["tool_name"],
-                "description": b["description"],
-            })
+            server_tools[sid].append(
+                {
+                    "name": b["tool_name"],
+                    "description": b["description"],
+                }
+            )
 
         servers = []
         for s in data["statuses"]:
             negotiation = s.get("negotiation", "legacy")
             era = s.get("era", "unknown")
-            servers.append({
-                "id": s["id"],
-                "transport": s.get("transport", ""),
-                "enabled": s.get("enabled", False),
-                "connected": s.get("connected", False),
-                "tool_count": s.get("tool_count", 0),
-                "error": s.get("error"),
-                "detail": s.get("detail", ""),
-                "server_identity": s.get("server_identity", ""),
-                "negotiation": negotiation,
-                "era": era,
-                "era_tag": format_mcp_era_tag(negotiation, era),
-                "failure_kind": s.get("failure_kind", ""),
-                "negotiated_protocol_version": s.get("negotiated_protocol_version", ""),
-                "tools": server_tools.get(s["id"], []),
-                "runtime_available": True,
-            })
+            servers.append(
+                {
+                    "id": s["id"],
+                    "transport": s.get("transport", ""),
+                    "enabled": s.get("enabled", False),
+                    "connected": s.get("connected", False),
+                    "tool_count": s.get("tool_count", 0),
+                    "error": s.get("error"),
+                    "detail": s.get("detail", ""),
+                    "server_identity": s.get("server_identity", ""),
+                    "negotiation": negotiation,
+                    "era": era,
+                    "era_tag": format_mcp_era_tag(negotiation, era),
+                    "failure_kind": s.get("failure_kind", ""),
+                    "negotiated_protocol_version": s.get("negotiated_protocol_version", ""),
+                    "tools": server_tools.get(s["id"], []),
+                    "runtime_available": True,
+                }
+            )
         return {"servers": servers}
 
-    # 2) Runtime MCP manager (same process, e.g. local dev)
-    try:
-        from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service
-
-        _ensure_llm_bindings()
-        svc = get_llm_service()
-        statuses = svc.mcp_manager.get_statuses()
-        bindings = svc.mcp_manager.bindings
-    except Exception:
-        statuses = []
-        bindings = {}
-
-    if statuses:
-        server_tools: dict[str, list[dict]] = {}
-        for binding in bindings.values():
-            if binding.server_id not in server_tools:
-                server_tools[binding.server_id] = []
-            server_tools[binding.server_id].append({
-                "name": binding.tool_name,
-                "description": binding.description,
-            })
-
-        servers = []
-        for status in statuses:
-            servers.append({
-                "id": status.id,
-                "transport": status.transport,
-                "enabled": status.enabled,
-                "connected": status.connected,
-                "tool_count": status.tool_count,
-                "error": status.error,
-                "detail": status.detail,
-                "server_identity": status.server_identity,
-                "negotiation": status.negotiation,
-                "era": status.era,
-                "era_tag": format_mcp_era_tag(status.negotiation, status.era),
-                "failure_kind": status.failure_kind,
-                "negotiated_protocol_version": status.negotiated_protocol_version,
-                "tools": server_tools.get(status.id, []),
-                "runtime_available": True,
-            })
-        return {"servers": servers}
-
-    # 3) Config-only: no runtime data available at all
-    config = load_llm_config(CONFIG_LLM_TOML)
+    # Published configuration describes expected servers; bot status is the runtime authority.
+    published = get_config_service().read("published")
+    config = compile_document(published["document"], revision=published["revision"])
     if config.load_error or not config.mcp.servers:
         return {"servers": []}
 
     servers = []
     for s in config.mcp.servers:
         negotiation = getattr(s, "negotiation", "legacy")
-        servers.append({
-            "id": s.id,
-            "transport": s.transport,
-            "enabled": s.enabled,
-            "connected": False,
-            "tool_count": 0,
-            "error": None,
-            "detail": "runtime 未连接（等待 bot 进程写入状态文件）",
-            "negotiation": negotiation,
-            "era": "unknown",
-            "era_tag": "",
-            "failure_kind": "",
-            "negotiated_protocol_version": "",
-            "tools": [],
-            "runtime_available": False,
-        })
+        servers.append(
+            {
+                "id": s.id,
+                "transport": s.transport,
+                "enabled": s.enabled,
+                "connected": False,
+                "tool_count": 0,
+                "error": None,
+                "detail": "runtime 未连接（等待 bot 进程写入状态文件）",
+                "negotiation": negotiation,
+                "era": "unknown",
+                "era_tag": "",
+                "failure_kind": "",
+                "negotiated_protocol_version": "",
+                "tools": [],
+                "runtime_available": False,
+            }
+        )
     return {"servers": servers}

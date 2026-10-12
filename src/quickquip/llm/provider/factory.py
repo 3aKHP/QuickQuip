@@ -16,14 +16,23 @@ from quickquip.llm.provider.retry import RetryPolicy
 
 
 def build_provider_client(
-    config: ProviderConfig, *, retry_policy: RetryPolicy | None = None
+    config: ProviderConfig, *, retry_policy: RetryPolicy | None = None,
+    single_dispatch: bool = False,
 ) -> BaseProviderClient:
     if config.protocol == "openai":
-        return OpenAIProviderClient(config, retry_policy=retry_policy)
+        return OpenAIProviderClient(
+            config, retry_policy=retry_policy, single_dispatch=single_dispatch
+        )
     if config.protocol == "claude":
-        return ClaudeProviderClient(config, retry_policy=retry_policy)
+        return ClaudeProviderClient(
+            config, retry_policy=retry_policy, single_dispatch=single_dispatch
+        )
     if config.protocol == "gemini":
-        return GeminiProviderClient(config, retry_policy=retry_policy)
+        return GeminiProviderClient(
+            config, retry_policy=retry_policy, single_dispatch=single_dispatch
+        )
     if config.protocol == "openai_responses":
-        return OpenAIResponsesProviderClient(config, retry_policy=retry_policy)
+        return OpenAIResponsesProviderClient(
+            config, retry_policy=retry_policy, single_dispatch=single_dispatch
+        )
     raise LLMProviderError(f"未知 provider 协议：{config.protocol}")

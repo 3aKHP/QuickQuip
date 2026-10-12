@@ -12,16 +12,22 @@ from tests.fixtures.provider_fakes import FakeClaudeClient
 
 def _config() -> ProviderConfig:
     return ProviderConfig(
-        id="fake", protocol="claude", base_url="https://x/v1",
-        api_key_env="K", default_model="m", models=["m"],
+        id="fake",
+        protocol="claude",
+        base_url="https://x/v1",
+        api_key_env="K",
+        default_model="m",
+        models=["m"],
     )
 
 
 def _req() -> LLMRequest:
     return LLMRequest(
-        model="m", system_prompt="s",
+        model="m",
+        system_prompt="s",
         messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
-        temperature=0.2, max_output_tokens=64,
+        temperature=0.2,
+        max_output_tokens=64,
     )
 
 
@@ -29,8 +35,14 @@ async def test_complete_ok_records_usage(monkeypatch):
     calls = []
 
     async def spy(
-        client, request, response, started, stream_used, state,
-        error_msg="", finished_at=None,
+        client,
+        request,
+        response,
+        started,
+        stream_used,
+        state,
+        error_msg="",
+        finished_at=None,
     ):
         calls.append((state, response is not None))
 
@@ -54,8 +66,14 @@ async def test_complete_does_not_await_usage_record(monkeypatch):
     calls = []
 
     async def spy(
-        client, request, response, started, stream_used, state,
-        error_msg="", finished_at=None,
+        client,
+        request,
+        response,
+        started,
+        stream_used,
+        state,
+        error_msg="",
+        finished_at=None,
     ):
         calls.append(state)
         entered.set()
@@ -81,8 +99,14 @@ async def test_complete_error_records_state(monkeypatch):
     calls = []
 
     async def spy(
-        client, request, response, started, stream_used, state,
-        error_msg="", finished_at=None,
+        client,
+        request,
+        response,
+        started,
+        stream_used,
+        state,
+        error_msg="",
+        finished_at=None,
     ):
         calls.append((state, response))
 
@@ -105,8 +129,14 @@ async def test_complete_cancelled_propagates(monkeypatch):
     calls = []
 
     async def spy(
-        client, request, response, started, stream_used, state,
-        error_msg="", finished_at=None,
+        client,
+        request,
+        response,
+        started,
+        stream_used,
+        state,
+        error_msg="",
+        finished_at=None,
     ):
         calls.append((state, response))
 
@@ -142,6 +172,7 @@ async def test_complete_error_message_masks_url(monkeypatch, tmp_path):
     await drain_usage_tasks()
 
     from quickquip.llm import usage_store as usage_store_module
+
     with usage_store_module.usage_store.connect() as conn:
         row = conn.execute("SELECT error_message FROM llm_usage_events").fetchone()
     assert row["error_message"].startswith("ConnectError:")
@@ -153,7 +184,11 @@ async def test_complete_error_message_masks_url(monkeypatch, tmp_path):
 async def test_record_usage_carries_context_meters_and_resets(monkeypatch, tmp_path):
     """同一请求的四种上下文计量一起落库，退出作用域后均复位。"""
     from quickquip.llm.usage import (
-        _record_usage, envelope_meter, epoch_meter, media_meter, patch_meter,
+        _record_usage,
+        envelope_meter,
+        epoch_meter,
+        media_meter,
+        patch_meter,
     )
     from quickquip.llm.usage_store import LLMUsageStore
     from plugins.llm_config import ProviderConfig
@@ -164,8 +199,12 @@ async def test_record_usage_carries_context_meters_and_resets(monkeypatch, tmp_p
 
     class FakeClient:
         config = ProviderConfig(
-            id="p", protocol="claude", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
+            id="p",
+            protocol="claude",
+            base_url="https://x/v1",
+            api_key_env="K",
+            default_model="m",
+            models=["m"],
         )
 
     class FakeReq:
@@ -182,7 +221,9 @@ async def test_record_usage_carries_context_meters_and_resets(monkeypatch, tmp_p
             "FROM llm_usage_events ORDER BY id"
         ).fetchall()
     assert [tuple(r) for r in rows] == [
-        (456, 4200, 2, 360), (456, 4200, 2, 360), (None, None, None, None),
+        (456, 4200, 2, 360),
+        (456, 4200, 2, 360),
+        (None, None, None, None),
     ]
 
 
@@ -198,16 +239,24 @@ async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
 
     class FakeClient:
         config = ProviderConfig(
-            id="p", protocol="claude", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
+            id="p",
+            protocol="claude",
+            base_url="https://x/v1",
+            api_key_env="K",
+            default_model="m",
+            models=["m"],
         )
 
     class FakeReq:
         model = "m"
 
     response = LLMResponse(
-        text="ok", model="m", input_tokens=100, output_tokens=50,
-        cache_creation_tokens=80, cache_read_tokens=200,
+        text="ok",
+        model="m",
+        input_tokens=100,
+        output_tokens=50,
+        cache_creation_tokens=80,
+        cache_read_tokens=200,
     )
     await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
     with fake_store.connect() as conn:
@@ -238,8 +287,12 @@ async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
 
     class FakeClient:
         config = ProviderConfig(
-            id="p1", protocol="openai", base_url="https://x/v1",
-            api_key_env="K", default_model="gpt-test", models=["gpt-test"],
+            id="p1",
+            protocol="openai",
+            base_url="https://x/v1",
+            api_key_env="K",
+            default_model="gpt-test",
+            models=["gpt-test"],
         )
 
     class FakeReq:
@@ -269,22 +322,28 @@ async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_pa
     async def _record(protocol: str) -> str | None:
         class FakeClient:
             config = ProviderConfig(
-                id="p", protocol=protocol, base_url="https://x/v1",
-                api_key_env="K", default_model="m", models=["m"],
+                id="p",
+                protocol=protocol,
+                base_url="https://x/v1",
+                api_key_env="K",
+                default_model="m",
+                models=["m"],
             )
 
         class FakeReq:
             model = "m"
 
         response = LLMResponse(
-            text="ok", model="m", input_tokens=100, output_tokens=50,
+            text="ok",
+            model="m",
+            input_tokens=100,
+            output_tokens=50,
             cache_read_tokens=200,
         )
         await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
         with fake_store.connect() as conn:
             return conn.execute(
-                "SELECT input_token_semantics FROM llm_usage_events"
-                " WHERE protocol = ?", (protocol,)
+                "SELECT input_token_semantics FROM llm_usage_events WHERE protocol = ?", (protocol,)
             ).fetchone()[0]
 
     assert await _record("claude") == "exclusive"
@@ -306,22 +365,28 @@ async def test_record_usage_persists_finish_reason(monkeypatch, tmp_path):
 
     class FakeClient:
         config = ProviderConfig(
-            id="p", protocol="claude", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
+            id="p",
+            protocol="claude",
+            base_url="https://x/v1",
+            api_key_env="K",
+            default_model="m",
+            models=["m"],
         )
 
     class FakeReq:
         model = "m"
 
     ok_response = LLMResponse(
-        text="ok", model="m", input_tokens=10, output_tokens=5, finish_reason="end_turn",
+        text="ok",
+        model="m",
+        input_tokens=10,
+        output_tokens=5,
+        finish_reason="end_turn",
     )
     await _record_usage(FakeClient(), FakeReq(), ok_response, 0.0, True, "ok")
     await _record_usage(FakeClient(), FakeReq(), None, 0.0, True, "error", "boom")
     with fake_store.connect() as conn:
-        rows = conn.execute(
-            "SELECT finish_reason FROM llm_usage_events ORDER BY id"
-        ).fetchall()
+        rows = conn.execute("SELECT finish_reason FROM llm_usage_events ORDER BY id").fetchall()
     assert [r["finish_reason"] for r in rows] == ["end_turn", None]
 
 
@@ -341,8 +406,12 @@ async def test_summary_usage_records_response_outcome_without_losing_cost(monkey
 
     class FakeClient:
         config = ProviderConfig(
-            id="p", protocol="openai", base_url="https://x/v1",
-            api_key_env="K", default_model="m", models=["m"],
+            id="p",
+            protocol="openai",
+            base_url="https://x/v1",
+            api_key_env="K",
+            default_model="m",
+            models=["m"],
         )
 
     class FakeReq:
@@ -353,7 +422,10 @@ async def test_summary_usage_records_response_outcome_without_losing_cost(monkey
             text="完整", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"
         ),
         LLMResponse(
-            text="残稿", model="m", input_tokens=100, output_tokens=50,
+            text="残稿",
+            model="m",
+            input_tokens=100,
+            output_tokens=50,
             finish_reason="MAX_TOKENS",
         ),
         LLMResponse(text="  ", model="m", input_tokens=100, output_tokens=50, finish_reason="stop"),
@@ -378,3 +450,34 @@ async def test_summary_usage_records_response_outcome_without_losing_cost(monkey
     assert rows[0]["cost_usd"] > 0
     assert rows[1]["cost_usd"] == rows[0]["cost_usd"]
     assert rows[2]["cost_usd"] == rows[0]["cost_usd"]
+
+
+async def test_compiled_tuple_price_identity_and_snapshot_revision_persist(monkeypatch, tmp_path):
+    from quickquip.llm.config import LLMConfig, PricingRates, ProviderConfig
+    from quickquip.llm.provider import LLMResponse
+    from quickquip.llm.usage import _record_usage, configuration_pricing
+    from quickquip.llm.usage_store import LLMUsageStore
+    from types import SimpleNamespace
+
+    store = LLMUsageStore(tmp_path / "usage.db")
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store", store)
+    old = LLMConfig(
+        revision=7,
+        pricing_references={
+            ("p", "org/model"): PricingRates(input_per_mtok=2),
+            (None, "org/model"): PricingRates(input_per_mtok=100),
+        },
+    )
+    client = SimpleNamespace(
+        config=ProviderConfig("p", "openai", "https://x", "KEY", "org/model", [])
+    )
+    response = LLMResponse(text="ok", model="org/model", input_tokens=100, output_tokens=0)
+    with configuration_pricing(old):
+        await _record_usage(client, SimpleNamespace(model="org/model"), response, 0, False, "ok")
+    with store.connect() as connection:
+        row = connection.execute(
+            "SELECT pricing_model,config_revision,cost_usd FROM llm_usage_events"
+        ).fetchone()
+    assert row["pricing_model"] == "p/org/model"
+    assert row["config_revision"] == 7
+    assert row["cost_usd"] == 100 * 2 / 1_000_000

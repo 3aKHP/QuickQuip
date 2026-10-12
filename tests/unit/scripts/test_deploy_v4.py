@@ -1,4 +1,5 @@
 """Isolated deployment transactions; no SSH or real Docker daemon access."""
+
 from __future__ import annotations
 
 import io
@@ -44,7 +45,9 @@ def deployment(tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
-    docker.write_text(f"#!{sys.executable}\n" + '''
+    docker.write_text(
+        f"#!{sys.executable}\n"
+        + """
 import json, os, pathlib, sys
 args = sys.argv[1:]
 root = pathlib.Path(os.environ["TEST_ROOT"])
@@ -79,6 +82,8 @@ if args[0] == "compose":
             ))
     elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
         sys.exit(1)
+    elif "run" in args and os.environ.get("FAIL_CONFIG_INIT") == "1":
+        sys.exit(1)
     elif "up" in args:
         if os.environ.get("FAIL_UP") == "all" or (
             os.environ.get("FAIL_UP") == "new" and release == os.environ["TEST_NEW"]
@@ -90,7 +95,8 @@ if args[0] == "compose":
         print("Bot 123456 connected")
 elif args[0] == "inspect":
     print("true")
-''')
+"""
+    )
     docker.chmod(0o700)
     env = dict(
         os.environ,
@@ -105,7 +111,10 @@ def run_deploy(deployment, action="deploy", target="", **overrides):
     root, inbox, env = deployment
     return subprocess.run(
         ["bash", str(inbox / "remote-deploy-v4.sh"), str(root), NEW, "4", action, target],
-        env=env | overrides, text=True, capture_output=True, timeout=20,
+        env=env | overrides,
+        text=True,
+        capture_output=True,
+        timeout=20,
     )
 
 
@@ -173,8 +182,15 @@ def test_bash_rejects_invalid_modes_before_side_effects(args):
 @pytest.mark.parametrize(
     "legacy",
     [
-        "-DryRun", "-Status", "-Rollback", "-Migrate", "-SkipHealth",
-        "-HostAlias", "-RemoteDir", "-KeepReleases", "-LocalCheck",
+        "-DryRun",
+        "-Status",
+        "-Rollback",
+        "-Migrate",
+        "-SkipHealth",
+        "-HostAlias",
+        "-RemoteDir",
+        "-KeepReleases",
+        "-LocalCheck",
     ],
 )
 def test_bash_rejects_legacy_single_dash_aliases(legacy):
@@ -283,9 +299,7 @@ def _write_fake_docker_for_baseline(
             "llbot": {"container_name": "llbot"},
             "quickquip": {
                 "container_name": "quickquip",
-                "volumes": [
-                    {"type": "bind", "source": source, "target": "/app/skills"}
-                ],
+                "volumes": [{"type": "bind", "source": source, "target": "/app/skills"}],
             },
             "web-admin": {"container_name": "web-admin"},
         }
@@ -526,3 +540,67 @@ def test_rollback_rejects_unknown_mount_layout(deployment):
     assert not any(
         "up" in call and str(target / "prod/docker-compose.yml") in call for call in calls
     )
+
+
+def _add_config_initializer(deployment):
+    root, inbox, _ = deployment
+    marker = inbox / "tree/src/quickquip/llm/config_cli.py"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("# isolated configuration initializer marker\n")
+    old = root / "releases" / OLD / "config"
+    old.mkdir()
+    (old / "llm.toml").write_text("[runtime]\nenabled = false\n")
+    candidate = inbox / "tree/config"
+    candidate.mkdir()
+    return old, candidate
+
+
+def test_config_migration_selects_server_assets_before_initializer(deployment):
+    root, _, _ = deployment
+    old, candidate = _add_config_initializer(deployment)
+    (candidate / "generation.toml").write_text("[image]\nenabled = false\n")
+    (candidate / "personas").mkdir()
+    (candidate / "personas/local.toml").write_text('id="local"\n')
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    config = root / "releases" / NEW / "config"
+    assert (config / "llm.toml").read_bytes() == (old / "llm.toml").read_bytes()
+    assert not (config / "generation.toml").exists()
+    assert (config / ".llm-upgrade-generation.toml").exists()
+    assert not (config / "personas/local.toml").exists()
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    build = next(i for i, call in enumerate(calls) if "build" in call)
+    initialize = next(
+        i for i, call in enumerate(calls) if "config_cli" in " ".join(call) and "init" in call
+    )
+    activate = next(i for i, call in enumerate(calls) if "up" in call)
+    assert build < initialize < activate
+
+
+def test_config_initialization_failure_preserves_current_release(deployment):
+    root, _, _ = deployment
+    _add_config_initializer(deployment)
+    result = run_deploy(deployment, FAIL_CONFIG_INIT="1")
+    assert result.returncode != 0
+    assert (root / "current").readlink() == Path("releases") / OLD
+    assert not (root / "data/llm_config.db").exists()
+    assert not any("up" in json.loads(line) for line in (root / "calls").read_text().splitlines())
+
+
+def test_first_migration_breaks_candidate_generation_hardlink(deployment):
+    root, _, _ = deployment
+    old, candidate = _add_config_initializer(deployment)
+    body = "[image]\nenabled = true\n"
+    (old / "generation.toml").write_text(body)
+    (candidate / "generation.toml").write_text(body)
+    (candidate / "generation.toml").chmod(0o644)
+    (old / "generation.toml").chmod(0o644)
+    # Force matching timestamps so the release driver chooses rsync's hardlink path.
+    source_stat = (old / "generation.toml").stat()
+    os.utime(candidate / "generation.toml", ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns))
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    current = root / "releases" / NEW / "config/generation.toml"
+    assert current.read_text() == body
+    assert (old / "generation.toml").read_text() == body
+    assert current.stat().st_ino != (old / "generation.toml").stat().st_ino

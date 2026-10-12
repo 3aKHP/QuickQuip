@@ -40,6 +40,7 @@ from quickquip.chat.daily_briefing import (
     normalize_period,
 )
 from quickquip.llm.briefing import generate_daily_briefing
+from quickquip.llm.runtime_snapshot import leased_service
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ def _is_group_enabled(group_id: int | str) -> bool:
     )
 
 
+@leased_service(lambda *args, **kwargs: get_llm_service())
 async def _render_briefing(group_id: str, period: BriefingPeriod) -> tuple[str, str]:
     _ensure_llm_bindings()
     svc = get_llm_service()
@@ -277,7 +279,7 @@ def register_daily_briefing_commands(on_command) -> None:
             if not cfg.enabled:
                 await briefing_cmd.finish(
                     "每日播报全局未开启，"
-                    "请先在 config/llm.toml 的 [daily_briefing] 中设置 enabled = true。"
+                    "请先在 LLM 配置管理中启用每日播报并应用配置。"
                 )
             daily_briefing_enabled_groups.add(group_id)
             rule_switch.enable(group_id, _RULE_NAME)

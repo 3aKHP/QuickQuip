@@ -431,8 +431,12 @@ def sanitize_gemini_schema(schema: Any) -> Any:
 
 
 class BaseProviderClient:
-    def __init__(self, config: ProviderConfig, retry_policy: RetryPolicy | None = None):
+    def __init__(
+        self, config: ProviderConfig, retry_policy: RetryPolicy | None = None,
+        *, single_dispatch: bool = False,
+    ):
         self.config = config
+        self.single_dispatch = single_dispatch
         self.retry_policy = retry_policy or RetryPolicy(
             max_attempts=config.retry_max_attempts,
             base_delay=config.retry_base_delay,
@@ -477,6 +481,8 @@ class BaseProviderClient:
         每次尝试内部已含 fallback_urls 链，退避等待发生在链与链之间；
         被重试吸收的失败不产生额外 usage 记录（明细见 HTTP trace）。
         """
+        if self.single_dispatch:
+            return await dispatch(request)
         policy = self.retry_policy
         attempt = 0
         while True:
@@ -515,6 +521,8 @@ class BaseProviderClient:
                 except LLMProviderError:
                     raise
                 except Exception:
+                    if self.single_dispatch:
+                        raise
                     stream_used = False
                     response = await self._dispatch_with_retry(self._complete_non_stream, request)
             else:
@@ -687,7 +695,7 @@ class BaseProviderClient:
         失败的可重试错误切换下一候选；不可重试立即抛。调用方用返回的
         URL 构造实际 owner，不共享可变"最后成功端点"字段。
         """
-        if not self.config.fallback_urls:
+        if self.single_dispatch or not self.config.fallback_urls:
             return await fn(url, headers, payload), url
         last_exc: LLMProviderError | None = None
         for candidate in self._candidate_urls(url):

@@ -16,6 +16,7 @@ from quickquip.llm.provider.openai_responses.profiles import resolve_profile
 from quickquip.llm.provider.openai_responses.request import reasoning_control
 from quickquip.llm.provider_health import format_probe_results, probe_all_providers, probe_provider
 from quickquip.llm.settings import ResolvedGroupSettings
+from quickquip.llm.runtime_snapshot import snapshot_entry
 from quickquip.llm.thinking import family_defaults_to_max_thinking, resolve_thinking
 from quickquip.llm.mcp.types import (
     MCP_FAILURE_AUTH,
@@ -311,6 +312,7 @@ class HealthMixin:
             lines.append(f"临时上下文：仅触发当下向前最多 {MAX_TRIGGER_CONTEXT_MESSAGES} 条群消息")
         return "\n".join(lines)
 
+    @snapshot_entry
     async def build_health_report(
         self, group_id: int | str, chat_type: str = "group", *, probe_provider: bool = False
     ) -> HealthReport:
@@ -357,11 +359,13 @@ class HealthMixin:
             verbose=verbose,
         )
 
+    @snapshot_entry
     async def format_provider_probe(self) -> str:
         """并发探活所有 provider 并格式化结果（/llm probe 用，每次调用即每次计费）。"""
         results = await probe_all_providers(self.config)
         return format_probe_results(results)
 
+    @snapshot_entry
     async def format_current_provider_probe(
         self, group_id: int | str, chat_type: str = "group"
     ) -> str:
@@ -372,6 +376,10 @@ class HealthMixin:
             return f"当前 provider 不存在：{settings.provider_id}"
         if not provider.enabled:
             return DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id)
+        from quickquip.llm.config_document import resolve_model_provider
+        provider = resolve_model_provider(
+            self.config, provider.id, settings.model or provider.default_model
+        )
         result = await probe_provider(provider, model=settings.model or None)
         body = format_probe_results([result])
         if result.status == "ok":

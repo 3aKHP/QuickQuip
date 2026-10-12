@@ -1,4 +1,5 @@
 """group-settings 路由的思考档位字段：options 投影、PUT 校验与列表投影。"""
+
 from __future__ import annotations
 
 import sqlite3
@@ -18,25 +19,35 @@ def test_options_providers_carry_reasoning_effort(monkeypatch, tmp_path):
 
     fake_providers = {
         "p1": types.SimpleNamespace(
-            id="p1", default_model="m1", models=["m1"], reasoning_effort="high",
+            id="p1",
+            default_model="m1",
+            models=["m1"],
+            reasoning_effort="high",
         ),
         "p2": types.SimpleNamespace(
-            id="p2", default_model="m2", models=["m2"], reasoning_effort="",
+            id="p2",
+            default_model="m2",
+            models=["m2"],
+            reasoning_effort="",
         ),
     }
     fake_cfg = types.SimpleNamespace(
         runtime=types.SimpleNamespace(
-            enabled=True, memory_enabled=True, auto_memory_enabled=False,
-            agent_delivery_intermediate_enabled=True, agent_delivery_final_enabled=False,
-            default_provider="p1", default_persona=None, history_limit=10,
+            enabled=True,
+            memory_enabled=True,
+            auto_memory_enabled=False,
+            agent_delivery_intermediate_enabled=True,
+            agent_delivery_final_enabled=False,
+            default_provider="p1",
+            default_persona=None,
+            history_limit=10,
         ),
         providers=fake_providers,
         personas={},
         triggers=types.SimpleNamespace(default_prefix="/", allow_prefix=True, allow_at=True),
         load_error=None,
     )
-    monkeypatch.setattr(routes, "load_llm_config", lambda path: fake_cfg)
-    monkeypatch.setattr(routes, "_LLM_TOML", tmp_path / "llm.toml")
+    monkeypatch.setattr(routes, "compile_document", lambda document, **kwargs: fake_cfg)
 
     payload = routes.get_options()
     efforts = {p["id"]: p["reasoning_effort"] for p in payload["providers"]}
@@ -55,19 +66,22 @@ def test_put_reasoning_effort_routes_to_store_and_validates(monkeypatch, tmp_pat
     monkeypatch.setattr(routes, "_store", lambda: FakeStore())
     monkeypatch.setattr(routes, "_DB", tmp_path / "llm.db")
     monkeypatch.setattr(
-        routes.audit_logger, "log",
+        routes.audit_logger,
+        "log",
         lambda request, **kwargs: audits.append(kwargs),
     )
 
     body = routes.GroupSettingsBody(reasoning_effort="high")
     assert routes.put_group_settings("10001", body, object()) == {"ok": True}
     assert calls == [("10001", {"reasoning_effort": "high"})]
-    assert audits == [{
-        "action": "update",
-        "target_type": "group_setting",
-        "target_id": "10001",
-        "summary_after": {"fields": ["reasoning_effort"]},
-    }]
+    assert audits == [
+        {
+            "action": "update",
+            "target_type": "group_setting",
+            "target_id": "10001",
+            "summary_after": {"fields": ["reasoning_effort"]},
+        }
+    ]
 
     # 显式 null 与未发送的区分：null 进 payload（清覆盖），缺省不进 payload
     clear_body = routes.GroupSettingsBody(reasoning_effort=None)
@@ -121,9 +135,11 @@ def test_list_group_settings_projects_reasoning_effort(monkeypatch, tmp_path):
     conn.close()
 
     import quickquip.app.message_pipeline as message_pipeline
+
     monkeypatch.setattr(routes, "_DB", db_path)
-    monkeypatch.setattr(message_pipeline, "stats_tracker",
-                        type("T", (), {"to_dict": staticmethod(lambda: {})})())
+    monkeypatch.setattr(
+        message_pipeline, "stats_tracker", type("T", (), {"to_dict": staticmethod(lambda: {})})()
+    )
 
     payload = routes.list_group_settings()
     entries = {g["group_id"]: g for g in payload["groups"]}
