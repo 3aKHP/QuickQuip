@@ -3,8 +3,7 @@
 各家 cache 上报有 inclusive/exclusive 两种约定：Claude exclusive（input_tokens
 不含 cache_read/cache_creation），OpenAI/Gemini inclusive（cached ⊆ prompt）。
 归一化前置到 ``normalize_usage``（Claude 还原为 inclusive），cost 计算完全中立，
-避免在朴素实现里写反互相掩盖。参照同机 agent-gateway 的 usage_from_mapping +
-estimate_cost 切分。
+用量归一化与费用估算各自处理对应口径。
 
 价格由已发布配置快照的价格表提供（不内置易过时的官方
 价表）；未覆盖的模型 → ``priced=False``，由仪表盘"未定价"可见性提示补填。

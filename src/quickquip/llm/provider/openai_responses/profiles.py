@@ -61,7 +61,7 @@ PROFILES: dict[str, ResponsesProfile] = {
     ),
     "codex-http-relay": ResponsesProfile(
         profile_id="codex-http-relay",
-        # AGW/CPA 中转 gpt-6 / gpt-5.6 系五档恒等（low..max）。Codex 客户端
+        # Codex 形态中转 gpt-6 / gpt-5.6 系五档恒等（low..max）。Codex 客户端
         # 目录对 sol/terra/astra 登记六档（含 ultra）、luna 系止于 max，但
         # 2026-10-03 实测中转网关校验层拒绝 ultra（HTTP 400，合法值止于
         # max）——网关能力位登记与 wire 透传是两回事，按实测收敛五档；
