@@ -1,10 +1,30 @@
 import { request } from './index'
 import type { TraceCallDetail } from './logs'
+import type { ConfigOperation } from './llmConfiguration'
 
 /** GET /api/diagnostics/providers 列表元素 */
 export interface DiagnosticsProvider {
   id: string
   models: string[]
+  default_model: string
+}
+
+export interface DiagnosticOperation<T> extends Omit<ConfigOperation, 'result'> {
+  result: T | null
+  may_charge?: boolean
+  automatic_retry?: boolean
+}
+
+export interface ProbeRequestBody {
+  source: number
+  provider_id: string
+  model: string
+  request_id: string
+}
+
+export interface ProbeOperationResult {
+  probe: ProviderProbeResult
+  revision: number
 }
 
 /** 对应 ProviderHealth.as_dict()；status ∈ ok / error / skipped（skipped 不产生计费） */
@@ -27,11 +47,9 @@ export interface TraceStatus {
 
 /**
  * POST /api/diagnostics/sample-request body。
- * 除 provider_id 外后端均有默认值（SampleRequest pydantic 模型），故列为可选。
+ * 目标与 request_id 固定到一次提交；配置来源为选定的已发布快照。
  */
-export interface SampleRequestBody {
-  provider_id: string
-  model?: string | null
+export interface SampleRequestBody extends ProbeRequestBody {
   system_prompt?: string
   user_prompt?: string
   stream?: boolean
@@ -69,12 +87,20 @@ export interface RegressionResult {
   rules: RegressionRuleMatch[]
 }
 
-export async function fetchProviders(): Promise<{ providers: DiagnosticsProvider[] }> {
-  return request('/api/diagnostics/providers')
+export async function fetchProviders(): Promise<{ revision: number; providers: DiagnosticsProvider[] }> {
+  return request('/api/diagnostics/providers', { signal: AbortSignal.timeout(10_000) })
 }
 
-export async function probeProviders(): Promise<{ results: ProviderProbeResult[]; text: string }> {
-  return request('/api/diagnostics/providers/probe', { method: 'POST' })
+export async function probeProviders(body: ProbeRequestBody): Promise<DiagnosticOperation<ProbeOperationResult>> {
+  return request('/api/diagnostics/providers/probe', {
+    method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout(10_000),
+  })
+}
+
+export async function fetchDiagnosticOperation<T>(id: string): Promise<DiagnosticOperation<T>> {
+  return request(`/api/llm-configuration/operations/${encodeURIComponent(id)}`, {
+    signal: AbortSignal.timeout(10_000),
+  })
 }
 
 export async function fetchTraceStatus(): Promise<TraceStatus> {
@@ -92,10 +118,11 @@ export async function clearTraces(): Promise<{ cleared: number }> {
   return request('/api/diagnostics/trace/clear', { method: 'POST' })
 }
 
-export async function runSampleRequest(body: SampleRequestBody): Promise<SampleRequestResult> {
+export async function runSampleRequest(body: SampleRequestBody): Promise<DiagnosticOperation<SampleRequestResult>> {
   return request('/api/diagnostics/sample-request', {
     method: 'POST',
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
   })
 }
 

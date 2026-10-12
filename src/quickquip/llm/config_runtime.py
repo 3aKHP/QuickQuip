@@ -207,12 +207,24 @@ class ConfigRuntimeWorker:
                     max_output_tokens=payload.get("max_output_tokens", 64),
                     temperature=0.0, tools=[], allow_tool_calls=False,
                 )
-                response = await asyncio.wait_for(client.complete(request), timeout=30)
+                from quickquip.llm.provider import collect_trace_calls, trace_store
+                from quickquip.llm.usage import usage_scope
+
+                started = time.monotonic()
+                with usage_scope("diagnostics"), collect_trace_calls(force=True) as trace_call_ids:
+                    response = await asyncio.wait_for(client.complete(request), timeout=30)
+                duration_ms = round((time.monotonic() - started) * 1000, 1)
+                trace_calls = [
+                    detail for call_id in trace_call_ids
+                    if (detail := trace_store.get_call(call_id)) is not None
+                ]
                 return {"revision": config.revision, "may_be_billable": True,
-                        "automatic_retries": False, "text": response.text[:8192],
+                        "automatic_retries": False, "text": response.text,
                         "model": response.model, "input_tokens": response.input_tokens,
                         "output_tokens": response.output_tokens,
-                        "finish_reason": response.finish_reason}
+                        "finish_reason": response.finish_reason,
+                        "thinking_blocks": response.thinking_blocks,
+                        "duration_ms": duration_ms, "trace_calls": trace_calls}
             result = await probe_provider(provider, model=payload["model"])
         return {"probe": asdict(result), "revision": operation["target_revision"],
                 "may_be_billable": True, "automatic_retries": False}

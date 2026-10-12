@@ -14,6 +14,74 @@ from quickquip.llm.service import LLMService
 from quickquip.llm.usage import _record_usage
 
 
+async def test_sample_operation_retains_parsed_trace_billing_and_single_dispatch(
+    llm_service, monkeypatch, tmp_path
+):
+    import json
+    import httpx
+    from quickquip.llm.provider import trace as trace_module
+    from quickquip.llm.usage import drain_usage_tasks
+
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic")
+    trace_store = trace_module.LLMTraceStore(tmp_path / "sample-trace.db")
+    monkeypatch.setattr(trace_module, "trace_store", trace_store)
+    monkeypatch.setattr("quickquip.llm.provider.trace_store", trace_store)
+    rows = []
+    monkeypatch.setattr("quickquip.llm.usage_store.usage_store.record", rows.append)
+    calls = []
+    response_text = ("parsed " * 1500).strip()
+
+    def dispatch(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "model": "gpt-test", "choices": [{"finish_reason": "stop", "message": {
+                "role": "assistant", "content": response_text,
+                "reasoning_content": "synthetic thought",
+            }}], "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000},
+        }, request=request)
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(dispatch)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(
+        transport=transport, **kwargs
+    ))
+    service = llm_service.config_service
+    draft = service.read()
+    draft["document"]["pricing"] = [{
+        "provider_id": "openai-main", "model": "gpt-test",
+        "input_per_mtok": 2, "output_per_mtok": 3,
+    }]
+    service.replace(draft["document"], draft["revision"])
+    payload = {"user_prompt": "synthetic sample", "system_prompt": "test",
+               "stream": False, "max_output_tokens": 256}
+    queued = service.probe("draft", "openai-main", "gpt-test", "sample-once", payload)
+    worker = ConfigRuntimeWorker(service, llm_service)
+    await worker.tick()
+    result = service.tasks.get(queued["id"])
+    assert result["status"] == "succeeded"
+    parsed = result["result"]
+    assert parsed["text"] == response_text
+    assert parsed["thinking_blocks"] == [
+        {"type": "reasoning", "reasoning_content": "synthetic thought"}
+    ]
+    assert parsed["duration_ms"] >= 0
+    assert parsed["finish_reason"] == "stop"
+    assert parsed["input_tokens"] == parsed["output_tokens"] == 1_000_000
+    assert len(parsed["trace_calls"]) == 1
+    assert json.loads(parsed["trace_calls"][0]["response_text"])["model"] == "gpt-test"
+    await drain_usage_tasks()
+    assert len(rows) == 1
+    assert rows[0]["feature"] == "diagnostics"
+    assert rows[0]["config_revision"] == queued["target_revision"]
+    assert rows[0]["cost_usd"] == 5
+    recovered = service.probe("draft", "openai-main", "gpt-test", "sample-once", payload)
+    assert recovered["id"] == queued["id"]
+    await worker.tick()
+    assert len(calls) == 1
+    assert calls[0]["model"] == "gpt-test"
+    assert calls[0]["messages"][-1]["content"] == "synthetic sample"
+    await llm_service.shutdown()
+
+
 def enqueue(runtime, change, request_id="apply-test"):
     service = runtime.config_service
     draft = service.read()

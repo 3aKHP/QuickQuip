@@ -43,10 +43,13 @@ class RegressionRequest(BaseModel):
 
 @router.get("/diagnostics/providers")
 def get_diagnostics_providers():
-    document = get_config_service().read("published")["document"]
+    snapshot = get_config_service().read("published")
+    document = snapshot["document"]
     return {
+        "revision": snapshot["revision"],
         "providers": [
-            {"id": p["id"], "models": [m["model"] for m in p["models"] if m["enabled"]]}
+            {"id": p["id"], "default_model": p["default_model"],
+             "models": [m["model"] for m in p["models"] if m["enabled"]]}
             for p in document["providers"]
             if p["enabled"]
         ]

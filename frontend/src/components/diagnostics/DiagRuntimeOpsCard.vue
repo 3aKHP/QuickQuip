@@ -11,12 +11,15 @@
     <div class="runtime-actions">
       <UiButton icon="Activity" :loading="healthLoading" @click="loadHealth(false)">健康检查</UiButton>
       <UiButton icon="ListTree" :loading="healthLoadingVerbose" @click="loadHealth(true)">详细健康</UiButton>
-      <UiButton icon="Zap" :loading="probeLoading" @click="runProbe">探活 Provider</UiButton>
+      <UiButton icon="Zap" :loading="probeLoading" :disabled="probePending" @click="runProbe">探活所有 Provider</UiButton>
+      <UiButton v-if="probePending && !probeLoading" icon="RefreshCw" @click="runProbe">{{ probeOperation ? '继续查询' : '恢复提交结果' }}</UiButton>
       <UiButton icon="RefreshCw" :loading="runtimeLoading === 'llm'" @click="runRuntimeAction('llm')">重载 LLM</UiButton>
       <UiButton icon="Network" :loading="runtimeLoading === 'mcp'" @click="runRuntimeAction('mcp')">重载 MCP</UiButton>
       <UiButton icon="Drama" :loading="runtimeLoading === 'personas'" @click="runRuntimeAction('personas')">重载人格</UiButton>
       <UiButton icon="ToggleLeft" :loading="runtimeLoading === 'rules'" @click="runRuntimeAction('rules')">重载规则</UiButton>
     </div>
+
+    <p class="duration">探活按已发布渠道的默认模型逐一排队，每个目标请求一次，可能产生模型费用。{{ probeStatus }}</p>
 
     <div class="context-tools">
       <label class="inline-field">
@@ -32,6 +35,7 @@
     </div>
 
     <div v-if="runtimeError" class="error-block">{{ runtimeError }}</div>
+    <div v-if="probeError" class="error-block">{{ probeError }}</div>
     <pre v-if="healthText" class="health-block">{{ healthText }}</pre>
     <pre v-if="probeText" class="health-block">{{ probeText }}</pre>
 
@@ -68,7 +72,9 @@ import UiEmpty from '../ui/UiEmpty.vue'
 import UiIcon from '../ui/UiIcon.vue'
 import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
-import { probeProviders } from '../../api/diagnostics'
+import { fetchProviders, probeProviders } from '../../api/diagnostics'
+import type { ProbeOperationResult, ProbeRequestBody } from '../../api/diagnostics'
+import { useDiagnosticTask } from '../../composables/useDiagnosticTask'
 import { clearLlmContext, clearLlmRuntimeActions, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../../api/llmRuntime'
 import type { RuntimeAction, RuntimeActionResponse } from '../../api/llmRuntime'
 import { toast } from '../../toast'
@@ -78,6 +84,10 @@ const healthLoadingVerbose = ref(false)
 const healthText = ref('')
 const probeLoading = ref(false)
 const probeText = ref('')
+const probeTask = useDiagnosticTask<ProbeOperationResult>()
+const { pending: probePending, operation: probeOperation, error: probeError, statusText: probeStatus } = probeTask
+let probeBatch: ProbeRequestBody[] = []
+let probeIndex = 0
 const runtimeError = ref<string | null>(null)
 
 type RuntimeActionKind = 'llm' | 'mcp' | 'personas' | 'rules'
@@ -175,11 +185,31 @@ async function loadHealth(verbose: boolean) {
 }
 
 async function runProbe() {
+  if (probeLoading.value) return
   probeLoading.value = true
   runtimeError.value = null
   try {
-    const data = await probeProviders()
-    probeText.value = data?.text || '没有已配置的 provider。'
+    if (!probePending.value) {
+      const snapshot = await fetchProviders()
+      probeBatch = snapshot.providers.map(provider => ({
+        source: snapshot.revision, provider_id: provider.id,
+        model: provider.default_model, request_id: crypto.randomUUID(),
+      }))
+      probeIndex = 0
+      probeText.value = probeBatch.length ? `已发布快照 ${snapshot.revision}，共 ${probeBatch.length} 个目标。` : '没有已启用的 provider。'
+    }
+    while (probeIndex < probeBatch.length) {
+      const body = probeBatch[probeIndex]
+      const operation = probePending.value
+        ? await probeTask.resume()
+        : await probeTask.start(() => probeProviders(body))
+      if (!operation) break
+      const result = operation.result?.probe
+      probeText.value += `\n${body.provider_id} / ${body.model}：${result
+        ? `${({ ok: '正常', error: '失败', skipped: '跳过' } as Record<string, string>)[result.status] || result.status} ${result.latency_ms == null ? '' : `${result.latency_ms}ms`} ${result.error || ''}`
+        : probeError.value || operation.status}`
+      probeIndex++
+    }
   } catch (e: unknown) {
     runtimeError.value = (e as Error).message
   } finally {
@@ -318,6 +348,12 @@ onMounted(() => {
   align-items: center;
   gap: var(--qq-gap-sm);
   flex-wrap: wrap;
+}
+
+.duration {
+  margin: 0;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
 }
 
 .action-panel {
