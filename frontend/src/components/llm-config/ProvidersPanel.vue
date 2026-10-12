@@ -192,9 +192,6 @@ const L = { id: { hint: '全局唯一，创建后不可修改。只允许字母�
 const providers = computed<JsonObject[]>(() => Array.isArray(store.document.value?.providers) ? store.document.value.providers.filter(isObject) : [])
 const selected = ref(0)
 const current = computed(() => providers.value[selected.value] || null)
-/** 新建渠道的 id 允许编辑，直到保存后视为既有渠道 */
-const freshIds = ref<Set<number>>(new Set())
-
 const models = computed<JsonObject[]>(() => current.value && Array.isArray(current.value.models) ? current.value.models.filter(isObject) : [])
 const aliases = computed<JsonObject[]>(() => current.value && Array.isArray(current.value.aliases) ? current.value.aliases.filter(isObject) : [])
 const modelNames = computed(() => models.value.map(model => String(model.model ?? '')).filter(Boolean))
@@ -237,7 +234,7 @@ function patch(fields: JsonObject) { if (current.value) commit(providers.value.m
 function onIdInput(event: JsonValue) {
   if (!current.value) return
   const id = String(event)
-  if (!freshIds.value.has(selected.value) && current.value.id && current.value.id !== id) {
+  if (!store.canEditProviderId(current.value) && current.value.id !== id) {
     toast('既有渠道的 ID 不可修改', 'error')
     return
   }
@@ -247,7 +244,6 @@ function addProvider() {
   const provider = structuredClone(fieldTemplate('providers'))
   commit([...providers.value, provider])
   selected.value = providers.value.length - 1
-  freshIds.value = new Set([...freshIds.value, selected.value])
 }
 function removeProvider() {
   if (!current.value) return

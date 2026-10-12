@@ -9,6 +9,24 @@ const POLL_INTERVAL = 5000
 /** 心跳超过该秒数视为过期（与后端 stale 口径一致） */
 const HEARTBEAT_STALE_SECONDS = 20
 
+// 客户端条目身份随对象展开保留；Symbol 属性不会进入交换 JSON。
+const PROVIDER_EDIT_STATE = Symbol('llm-provider-edit-state')
+interface ProviderEditState { saved: boolean }
+type EditableProvider = JsonObject & { [PROVIDER_EDIT_STATE]?: ProviderEditState }
+
+function providerEditState(provider: JsonObject): ProviderEditState {
+  const entry = provider as EditableProvider
+  return entry[PROVIDER_EDIT_STATE] ?? (entry[PROVIDER_EDIT_STATE] = { saved: false })
+}
+
+function providerEntries(document: JsonObject): JsonObject[] {
+  return Array.isArray(document.providers) ? document.providers.filter(isObject) : []
+}
+
+function markProvidersSaved(document: JsonObject) {
+  for (const provider of providerEntries(document)) providerEditState(provider).saved = true
+}
+
 /**
  * LLM 配置页状态层。视图与面板共享同一份草稿文档，
  * 保存/应用/冲突/轮询的编排逻辑集中在这里，组件只做展示与采集。
@@ -20,6 +38,7 @@ export function createLlmConfigStore(api: Api) {
   const metadata = shallowRef<apiModule.ConfigMetadata>({})
   const status = shallowRef<apiModule.ConfigStatus | null>(null)
   const observedTime = ref(Date.now() / 1000)
+  const statusReceivedAt = ref(observedTime.value)
   const history = ref<{ revision: number; created_at: number | string }[]>([])
   const environment = shallowRef<Awaited<ReturnType<Api['fetchLlmConfigEnvironment']>> | null>(null)
   const validation = shallowRef<apiModule.ConfigValidation | null>(null)
@@ -37,7 +56,9 @@ export function createLlmConfigStore(api: Api) {
 
   let requestVersion = 0
   let pollTimer: ReturnType<typeof setTimeout> | undefined
-  let stopped = false
+  let clockTimer: ReturnType<typeof setInterval> | undefined
+  let pollEpoch = 0
+  let stopped = true
   let pendingProbe: { source: string; provider: string; model: string; requestId: string } | null = null
   let pendingApply: { revision: number; requestId: string } | null = null
 
@@ -49,7 +70,9 @@ export function createLlmConfigStore(api: Api) {
     const current = bot.value
     if (!current) return true
     const heartbeat = typeof current.heartbeat_at === 'number' ? current.heartbeat_at : Date.parse(current.heartbeat_at) / 1000
-    return current.stale || !Number.isFinite(heartbeat) || observedTime.value - heartbeat > HEARTBEAT_STALE_SECONDS
+    const observed = typeof current.observed_at === 'number' ? current.observed_at : Date.parse(current.observed_at) / 1000
+    const elapsed = Math.max(0, observedTime.value - statusReceivedAt.value)
+    return current.stale || !Number.isFinite(heartbeat) || !Number.isFinite(observed) || observed - heartbeat + elapsed > HEARTBEAT_STALE_SECONDS
   })
   /** 草稿与已发布版本是否一致（都不存在时视为一致） */
   const inSync = computed(() => status.value !== null && status.value.draft_revision === status.value.published_revision)
@@ -64,6 +87,7 @@ export function createLlmConfigStore(api: Api) {
 
   /** 接受一份服务器草稿（初次载入/导入/恢复快照后调用） */
   function accept(data: apiModule.ConfigEnvelope) {
+    markProvidersSaved(data.document)
     document.value = data.document
     revision.value = data.revision
     original.value = JSON.stringify(data.document)
@@ -74,6 +98,7 @@ export function createLlmConfigStore(api: Api) {
 
   /** 面板局部编辑入口：替换文档的某个顶层 key */
   function updateSection(key: string, value: JsonValue) {
+    if (key === 'providers' && Array.isArray(value)) value.filter(isObject).forEach(providerEditState)
     if (document.value) document.value = { ...document.value, [key]: value }
     validation.value = null
     diff.value = null
@@ -104,11 +129,22 @@ export function createLlmConfigStore(api: Api) {
     }
   }
 
-  async function refreshStatus() { status.value = await api.fetchLlmConfigStatus() }
+  function acceptStatus(value: apiModule.ConfigStatus) {
+    status.value = value
+    statusReceivedAt.value = Date.now() / 1000
+    observedTime.value = statusReceivedAt.value
+  }
+
+  async function refreshStatus() { acceptStatus(await api.fetchLlmConfigStatus()) }
+
+  function canEditProviderId(provider: JsonObject): boolean {
+    return (provider as EditableProvider)[PROVIDER_EDIT_STATE]?.saved !== true
+  }
 
   async function save() {
     if (!document.value || busy.value || !dirty.value || conflict.value) return false
     const token = requestVersion
+    const sentProviderStates = providerEntries(document.value).map(providerEditState)
     const payload = JSON.parse(JSON.stringify(document.value)) as JsonObject
     const sent = JSON.stringify(payload)
     saving.value = true
@@ -116,6 +152,8 @@ export function createLlmConfigStore(api: Api) {
     try {
       const result = await api.saveLlmConfiguration(payload, revision.value)
       if (token !== requestVersion) return false
+      sentProviderStates.forEach(state => { state.saved = true })
+      markProvidersSaved(result.document)
       revision.value = result.revision
       original.value = JSON.stringify(result.document)
       // 保存期间用户可能继续编辑：仅在内容未变时才用服务器规范化结果替换编辑态
@@ -147,23 +185,22 @@ export function createLlmConfigStore(api: Api) {
     }
   }
 
-  async function poll() {
-    if (stopped) return
+  async function poll(epoch: number) {
+    if (stopped || epoch !== pollEpoch) return
     try {
       const results = await Promise.all([
         api.fetchLlmConfigStatus(),
         operation.value && !isOperationFinished(operation.value.status) ? api.fetchLlmConfigOperation(operation.value.id) : Promise.resolve(null),
       ])
-      if (stopped) return
-      status.value = results[0]
+      if (stopped || epoch !== pollEpoch) return
+      acceptStatus(results[0])
       if (results[1]) operation.value = results[1]
       pollError.value = ''
     } catch (cause) {
-      if (!stopped) pollError.value = configError(cause).message
+      if (!stopped && epoch === pollEpoch) pollError.value = configError(cause).message
     } finally {
-      if (!stopped) {
-        observedTime.value = Date.now() / 1000
-        pollTimer = setTimeout(poll, POLL_INTERVAL)
+      if (!stopped && epoch === pollEpoch) {
+        pollTimer = setTimeout(() => poll(epoch), POLL_INTERVAL)
       }
     }
   }
@@ -288,23 +325,28 @@ export function createLlmConfigStore(api: Api) {
    * 已有草稿时只刷新状态与任务，不覆盖本地编辑。
    */
   function start() {
+    if (!stopped) return
     stopped = false
+    const epoch = ++pollEpoch
+    observedTime.value = Date.now() / 1000
+    clockTimer = setInterval(() => { observedTime.value = Date.now() / 1000 }, 1000)
     if (document.value === null) void reload()
-    else void refreshStatus().catch(() => { /* 状态刷新失败由轮询继续尝试 */ })
     void recoverOperation()
     void recoverActiveOperation()
-    void poll()
+    void poll(epoch)
   }
   /** 停止轮询；不进行作废——进行中的读取/保存属于 store，应继续完成 */
   function stop() {
     stopped = true
+    ++pollEpoch
     clearTimeout(pollTimer)
+    clearInterval(clockTimer)
   }
 
   return {
     document, original, revision, metadata, status, history, environment, validation, diff,
     operation, recentOperations, loading, saving, applying, mutating, error, errorDetails, pollError, conflict,
-    observedTime, busy, dirty, activeOperation, bot, botStale, inSync,
+    observedTime, canEditProviderId, busy, dirty, activeOperation, bot, botStale, inSync,
     accept, updateSection, updateSettingsSection, reload, save, apply, validate, previewImportText, commitImport, restore,
     cancelOperation, loadDiff, loadOperations, loadEnvironment, probe, refreshStatus, recoverActiveOperation, start, stop,
     isOperationFinished,

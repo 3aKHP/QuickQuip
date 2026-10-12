@@ -15,15 +15,16 @@ function compile(source) {
 const library = vm.runInNewContext(`${compile(readFileSync(path.join(__dirname, '../src/lib/llmConfig.ts'), 'utf8'))};exports`, { exports: {}, TextEncoder })
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
-function createStore(api) {
+function createStore(api, bindings = {}) {
   const source = readFileSync(path.join(__dirname, '../src/composables/useLlmConfigStore.ts'), 'utf8')
   const module = vm.runInNewContext(`${compile(source)};exports`, {
-    exports: {}, ref, computed, watch, shallowRef, setTimeout, clearTimeout,
+    exports: {}, ref, computed, watch, shallowRef, setTimeout, clearTimeout, setInterval, clearInterval,
     configError: library.configError, isObject: library.isObject,
     isOperationFinished: library.isOperationFinished, parseConfigImport: library.parseConfigImport,
     crypto: { randomUUID: () => 'same-request-id' },
     sessionStorage: { getItem: () => null, setItem: () => {} },
     inject: () => undefined, provide: () => {},
+    ...bindings,
   })
   return module.createLlmConfigStore(api)
 }
@@ -114,13 +115,98 @@ test('pending apply conflict never blocks continued draft editing', async () => 
   assert.equal(saved, true)
 })
 
-test('Bot heartbeat ages to stale even when no new Web response arrives', () => {
-  const store = createStore({})
-  store.status.value = { bot: { heartbeat_at: 100, stale: false } }
-  store.observedTime.value = 120
+function controlledClock(initialTime = 400000) {
+  let now = initialTime, sequence = 0
+  const timers = new Map()
+  function schedule(callback, delay, interval) {
+    const id = ++sequence
+    timers.set(id, { callback, at: now + delay, interval })
+    return id
+  }
+  return {
+    bindings: {
+      Date: class extends Date { static now() { return now } },
+      setTimeout: (callback, delay) => schedule(callback, delay, 0),
+      clearTimeout: id => timers.delete(id),
+      setInterval: (callback, delay) => schedule(callback, delay, delay),
+      clearInterval: id => timers.delete(id),
+    },
+    count: interval => [...timers.values()].filter(timer => !!timer.interval === interval).length,
+    advance(milliseconds) {
+      const target = now + milliseconds
+      while (true) {
+        const next = [...timers.entries()].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0]
+        if (!next) break
+        const [id, timer] = next
+        now = timer.at
+        if (timer.interval) timer.at += timer.interval
+        else timers.delete(id)
+        timer.callback()
+      }
+      now = target
+    },
+  }
+}
+const flushRequests = () => new Promise(resolve => setImmediate(resolve))
+
+test('Bot heartbeat uses server observation and ages while the next status request hangs', async () => {
+  const clock = controlledClock() // 浏览器比服务器快 300 秒。
+  const hanging = deferred()
+  let requests = 0
+  const store = createStore({
+    fetchLlmConfigStatus: () => ++requests === 1 ? Promise.resolve({ bot: { heartbeat_at: 100, observed_at: 100, stale: false } }) : hanging.promise,
+    fetchLlmConfigOperations: async () => ({ operations: [] }),
+  }, clock.bindings)
+  store.accept(structuredClone(initial))
+  store.start()
+  await flushRequests()
   assert.equal(store.botStale.value, false)
-  store.observedTime.value = 121
+  clock.advance(5000)
+  assert.equal(requests, 2)
+  clock.advance(15000)
+  assert.equal(store.botStale.value, false)
+  clock.advance(1000)
   assert.equal(store.botStale.value, true)
+  store.stop()
+  assert.equal(clock.count(true), 0)
+  assert.equal(clock.count(false), 0)
+  hanging.resolve({ bot: { heartbeat_at: 110, observed_at: 110, stale: false } })
+  await flushRequests()
+  assert.equal(store.status.value.bot.heartbeat_at, 100)
+  assert.equal(clock.count(false), 0)
+})
+
+test('poll sessions discard previous responses and own one clock and one polling chain', async () => {
+  const clock = controlledClock()
+  const previous = deferred(), current = deferred()
+  let requests = 0
+  const store = createStore({
+    fetchLlmConfigStatus: () => ++requests === 1 ? previous.promise : requests === 2 ? current.promise : Promise.resolve({ bot: null, draft_revision: 9 }),
+    fetchLlmConfigOperations: async () => ({ operations: [] }),
+  }, clock.bindings)
+  store.accept(structuredClone(initial))
+  store.start()
+  store.start()
+  assert.equal(requests, 1)
+  assert.equal(clock.count(true), 1)
+  store.stop()
+  store.start()
+  current.resolve({ bot: null, draft_revision: 8 })
+  await flushRequests()
+  assert.equal(clock.count(false), 1)
+  previous.resolve({ bot: null, draft_revision: 7 })
+  await flushRequests()
+  assert.equal(store.status.value.draft_revision, 8)
+  assert.equal(clock.count(false), 1)
+  clock.advance(5000)
+  await flushRequests()
+  assert.equal(requests, 3)
+  assert.equal(clock.count(false), 1)
+  store.stop()
+  assert.equal(clock.count(true), 0)
+  assert.equal(clock.count(false), 0)
+  clock.advance(10000)
+  assert.equal(requests, 3)
 })
 
 test('restart with existing draft keeps local edits (section switch remount must not reload)', async () => {
@@ -167,6 +253,100 @@ function componentScript(filename, bindings, exportsList) {
   const script = source.match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
   return vm.runInNewContext(`${compile(script)};({${exportsList}})`, bindings)
 }
+
+function providersPanel(store) {
+  return componentScript('components/llm-config/ProvidersPanel.vue', {
+    computed, ref, watch, onMounted() {}, structuredClone, toast() {}, confirm: () => true,
+    injectLlmConfigStore: () => store,
+    PARAM_LABELS: library.PARAM_LABELS, PARAM_SOURCE_LABELS: library.PARAM_SOURCE_LABELS,
+    PROTOCOL_LABELS: library.PROTOCOL_LABELS, fieldTemplate: library.fieldTemplate,
+    isObject: library.isObject, providerEnvVars: library.providerEnvVars,
+  }, 'selected,addProvider,removeProvider,onIdInput,current,patch')
+}
+
+test('new provider identity survives panel remount and index shifts, then locks after save', async () => {
+  const saving = deferred()
+  let sent
+  const store = createStore({
+    saveLlmConfiguration: document => { sent = document; return saving.promise },
+    fetchLlmConfigStatus: async () => status,
+  })
+  store.accept({ revision: 5, document: { providers: [{ id: 'existing-a' }, { id: 'existing-b' }] } })
+  const panel = providersPanel(store)
+  panel.addProvider()
+  panel.onIdInput('new-draft')
+  panel.selected.value = 0
+  panel.removeProvider()
+  const remounted = providersPanel(store)
+  remounted.selected.value = 1
+  remounted.onIdInput('new-complete')
+  assert.equal(store.document.value.providers[1].id, 'new-complete')
+  remounted.selected.value = 0
+  remounted.onIdInput('existing-renamed')
+  assert.equal(store.document.value.providers[0].id, 'existing-b')
+  remounted.selected.value = 1
+  const pending = store.save()
+  saving.resolve({ revision: 6, document: sent })
+  await pending
+  remounted.onIdInput('saved-renamed')
+  assert.equal(store.document.value.providers[1].id, 'new-complete')
+  const afterSave = providersPanel(store)
+  afterSave.selected.value = 1
+  afterSave.onIdInput('saved-renamed-again')
+  assert.equal(store.document.value.providers[1].id, 'new-complete')
+})
+
+test('typing an existing provider ID prefix keeps the new entry editable across remount and saving', async () => {
+  const saving = deferred()
+  let sent
+  const store = createStore({
+    saveLlmConfiguration: document => { sent = document; return saving.promise },
+    fetchLlmConfigStatus: async () => status,
+  })
+  store.accept({ revision: 5, document: { providers: [{ id: 'openai' }] } })
+  const panel = providersPanel(store)
+  panel.addProvider()
+  for (const value of ['o', 'op', 'ope', 'open', 'opena', 'openai']) panel.onIdInput(value)
+  const remounted = providersPanel(store)
+  remounted.selected.value = 1
+  for (const value of ['openai-', 'openai-2']) remounted.onIdInput(value)
+  assert.equal(store.document.value.providers[1].id, 'openai-2')
+  const pending = store.save()
+  remounted.patch({ proxy: 'http://later-edit.example.test' })
+  saving.resolve({ revision: 6, document: structuredClone(sent) })
+  await pending
+  assert.equal(store.document.value.providers[1].proxy, 'http://later-edit.example.test')
+  assert.equal(store.dirty.value, true)
+  remounted.onIdInput('openai-3')
+  assert.equal(store.document.value.providers[1].id, 'openai-2')
+  assert.equal(store.document.value.providers[0].id, 'openai')
+  assert.equal(Object.getOwnPropertySymbols(sent.providers[1]).length, 0)
+  assert.deepEqual(normalized(sent.providers[1]), { ...normalized(library.fieldTemplate('providers')), id: 'openai-2' })
+})
+
+test('save locks only submitted entries while a newly created replacement stays editable', async () => {
+  const saving = deferred()
+  let sent
+  const store = createStore({
+    saveLlmConfiguration: document => { sent = document; return saving.promise },
+    fetchLlmConfigStatus: async () => status,
+  })
+  store.accept({ revision: 5, document: { providers: [] } })
+  const panel = providersPanel(store)
+  panel.addProvider()
+  panel.onIdInput('submitted')
+  const pending = store.save()
+  panel.removeProvider()
+  panel.addProvider()
+  panel.onIdInput('submitted')
+  panel.patch({ proxy: 'http://replacement.example.test' })
+  saving.resolve({ revision: 6, document: sent })
+  await pending
+  panel.onIdInput('replacement')
+  assert.equal(store.document.value.providers[0].id, 'replacement')
+  assert.equal(store.document.value.providers[0].proxy, 'http://replacement.example.test')
+  assert.equal(store.dirty.value, true)
+})
 
 function paramsEditor(modelValue, metadata = {}) {
   const props = { modelValue, metadata, styleProfiles: [] }
