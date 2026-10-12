@@ -135,6 +135,99 @@ up() {
     compose "$1" up -d --no-build --pull never --remove-orphans llbot || return 1
     compose "$1" up -d --no-build --pull never --force-recreate --remove-orphans quickquip web-admin
 }
+# Copy configuration assets into fresh inodes; existing candidate assets have priority.
+copy_configuration_assets() {
+    local mode="$1" source="$2" destination="$3" code=0 program uid gid
+    uid="$(id -u)"; gid="$(id -g)"
+    program="$(cat <<'PY'
+import os
+from pathlib import Path
+import shutil
+import stat
+import sys
+import tempfile
+
+mode, source, destination, uid, gid = sys.argv[1:]
+uid, gid = int(uid), int(gid)
+
+def directory(path):
+    if path.is_symlink():
+        raise ValueError("configuration destination is a symlink")
+    if not path.exists():
+        directory(path.parent)
+        path.mkdir(mode=0o755)
+        if os.geteuid() == 0:
+            os.chown(path, uid, gid)
+
+def copy_file(source, target, replace=False):
+    if not replace and os.path.lexists(target):
+        return
+    descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("configuration source is not a regular file")
+        directory(target.parent)
+        temporary_fd, name = tempfile.mkstemp(prefix=".configuration-copy-", dir=target.parent)
+        temporary = Path(name)
+        try:
+            with os.fdopen(temporary_fd, "wb") as output, os.fdopen(descriptor, "rb") as input:
+                descriptor = None
+                shutil.copyfileobj(input, output)
+                output.flush()
+                os.fchmod(output.fileno(), stat.S_IMODE(metadata.st_mode))
+                if os.geteuid() == 0:
+                    os.fchown(output.fileno(), uid, gid)
+                os.fsync(output.fileno())
+            os.utime(temporary, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+            if replace:
+                os.replace(temporary, target)
+            else:
+                try:
+                    os.link(temporary, target)
+                except FileExistsError:
+                    pass
+        finally:
+            temporary.unlink(missing_ok=True)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+def copy_personas(source, target):
+    with os.scandir(source) as entries:
+        for entry in entries:
+            original, copied = Path(entry.path), target / entry.name
+            if mode == "migrated":
+                if (entry.name.startswith("migrated-") and entry.name.endswith(".toml")
+                        and entry.is_file(follow_symlinks=False)):
+                    copy_file(original, copied)
+            elif entry.is_dir(follow_symlinks=False):
+                directory(copied)
+                copy_personas(original, copied)
+            else:
+                copy_file(original, copied)
+
+try:
+    if mode in ("migrated", "personas"):
+        copy_personas(Path(source), Path(destination))
+    else:
+        copy_file(Path(source), Path(destination), replace=mode == "replace")
+except PermissionError:
+    sys.exit(3)
+except (OSError, ValueError) as error:
+    print(f"configuration asset copy failed ({type(error).__name__})", file=sys.stderr)
+    sys.exit(1)
+PY
+)"
+    "$Python" -c "$program" "$mode" "$source" "$destination" "$uid" "$gid" || code=$?
+    if [ "$code" = 3 ]; then
+        step "configuration assets require noninteractive sudo for copying"
+        sudo -n "$Python" -c "$program" "$mode" "$source" "$destination" "$uid" "$gid" \
+            || fail "configuration asset copy failed with sudo; activation stopped"
+    elif [ "$code" != 0 ]; then
+        fail "configuration asset copy failed; activation stopped"
+    fi
+}
 # Candidate code owns initialization; existing DB is kept across releases.
 initialize_configuration() {
     local release="$1" source=""
@@ -147,7 +240,7 @@ initialize_configuration() {
         fi
         if [ -n "$source" ]; then
             mkdir -p "$Root/releases/$release/config"
-            cp -p "$source" "$Root/releases/$release/config/llm.toml"
+            copy_configuration_assets replace "$source" "$Root/releases/$release/config/llm.toml"
             local source_config candidate_config
             source_config="$(dirname "$source")"
             candidate_config="$Root/releases/$release/config"
@@ -155,14 +248,13 @@ initialize_configuration() {
                 mv "$candidate_config/personas" "$candidate_config/.llm-upgrade-personas"
             fi
             if [ -d "$source_config/personas" ]; then
-                cp -a "$source_config/personas" "$candidate_config/personas"
+                copy_configuration_assets personas "$source_config/personas" "$candidate_config/personas"
             fi
             if [ -f "$candidate_config/generation.toml" ]; then
                 mv "$candidate_config/generation.toml" "$candidate_config/.llm-upgrade-generation.toml"
             fi
             if [ -f "$source_config/generation.toml" ]; then
-                cp -p "$source_config/generation.toml" "$candidate_config/generation.toml.tmp"
-                mv -f "$candidate_config/generation.toml.tmp" "$candidate_config/generation.toml"
+                copy_configuration_assets file "$source_config/generation.toml" "$candidate_config/generation.toml"
             fi
             step "legacy configuration selected from server for first migration"
         fi
@@ -170,12 +262,10 @@ initialize_configuration() {
     if [ -n "$Prev" ]; then
         local previous_config="$Root/releases/$Prev/config" candidate_config="$Root/releases/$release/config"
         if [ -d "$previous_config/personas" ]; then
-            mkdir -p "$candidate_config/personas"
-            find "$previous_config/personas" -maxdepth 1 -name 'migrated-*.toml' -type f \
-                -exec cp -pn '{}' "$candidate_config/personas/" \;
+            copy_configuration_assets migrated "$previous_config/personas" "$candidate_config/personas"
         fi
         if [ -f "$previous_config/generation.toml" ] && [ ! -f "$candidate_config/generation.toml" ]; then
-            cp -p "$previous_config/generation.toml" "$candidate_config/generation.toml"
+            copy_configuration_assets file "$previous_config/generation.toml" "$candidate_config/generation.toml"
         fi
     fi
     compose "$release" run --rm --no-deps web-admin python -m quickquip.llm.config_cli init \

@@ -604,3 +604,167 @@ def test_first_migration_breaks_candidate_generation_hardlink(deployment):
     assert current.read_text() == body
     assert (old / "generation.toml").read_text() == body
     assert current.stat().st_ino != (old / "generation.toml").stat().st_ino
+
+
+@pytest.mark.parametrize("asset", ["persona", "generation"])
+def test_unreadable_configuration_asset_stops_before_activation(deployment, asset):
+    root, _, env = deployment
+    old, _ = _add_config_initializer(deployment)
+    (root / "data").mkdir()
+    (root / "data/llm_config.db").write_text("existing-db-marker")
+    path = old / "generation.toml"
+    if asset == "persona":
+        path = old / "personas/migrated-protected.toml"
+        path.parent.mkdir()
+    path.write_text('id="synthetic"\n')
+    path.chmod(0)
+    _write_fake_sudo(Path(env["PATH"].split(os.pathsep)[0]), available=False)
+    try:
+        result = run_deploy(deployment)
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert (root / "current").readlink() == Path("releases") / OLD
+        calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+        assert not any("run" in call or "up" in call for call in calls)
+        assert "configuration asset copy failed with sudo" in result.stderr
+        assert path.stat().st_mode & 0o777 == 0
+    finally:
+        path.chmod(0o600)
+
+
+def _inject_configuration_copy_permission(deployment, *, failure="permission", discovery=False):
+    """Inject errors at real filesystem I/O; execute the production copy program unchanged."""
+    root, _, env = deployment
+    bin_dir = Path(env["PATH"].split(os.pathsep)[0])
+    protected = str(root / "releases" / OLD / "config")
+    interpreter = bin_dir / "python3.13"
+    interpreter.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        'if len(sys.argv) > 2 and sys.argv[1] == "-c" and "def copy_personas" in sys.argv[2]:\n'
+        "    program = sys.argv[2]\n"
+        "    sys.argv = [sys.argv[0], *sys.argv[3:]]\n"
+        f"    protected = {protected!r}\n"
+        f"    failure = {failure!r}\n"
+        f"    discovery = {discovery!r}\n"
+        '    privileged = os.environ.get("TEST_COPY_SUDO") == "1"\n'
+        "    real_open, real_scandir = os.open, os.scandir\n"
+        "    def denied(path):\n"
+        "        if str(path).startswith(protected) and not privileged:\n"
+        '            if failure == "permission":\n'
+        '                raise PermissionError("synthetic protected source")\n'
+        '            raise OSError("synthetic I/O failure")\n'
+        "    def guarded_open(path, *args, **kwargs):\n"
+        "        if not discovery:\n"
+        "            denied(path)\n"
+        "        return real_open(path, *args, **kwargs)\n"
+        "    def guarded_scandir(path):\n"
+        "        if discovery:\n"
+        "            denied(path)\n"
+        "        return real_scandir(path)\n"
+        "    os.open, os.scandir = guarded_open, guarded_scandir\n"
+        "    if privileged:\n"
+        "        os.geteuid = lambda: 0\n"
+        "        real_fchown, real_chown = os.fchown, os.chown\n"
+        "        def record(path, uid, gid):\n"
+        '            with open(os.environ["TEST_ROOT"] + "/asset-owners", "a") as log:\n'
+        '                log.write(str(path) + " " + str(uid) + ":" + str(gid) + "\\n")\n'
+        "        def fchown(fd, uid, gid):\n"
+        '            record(os.readlink("/proc/self/fd/" + str(fd)), uid, gid)\n'
+        "            return real_fchown(fd, uid, gid)\n"
+        "        def chown(path, uid, gid):\n"
+        "            record(path, uid, gid)\n"
+        "            return real_chown(path, uid, gid)\n"
+        "        os.fchown, os.chown = fchown, chown\n"
+        '    exec(compile(program, "configuration-copy", "exec"), {})\n'
+        "else:\n"
+        "    os.execv(sys.executable, [sys.executable, *sys.argv[1:]])\n"
+    )
+    interpreter.chmod(0o700)
+    sudo = bin_dir / "sudo"
+    sudo.write_text(
+        '#!/bin/bash\n[ "$1" = "-n" ] || exit 1\nshift\n'
+        'echo "noninteractive configuration copy" >> "$TEST_ROOT/asset-sudo"\n'
+        'TEST_COPY_SUDO=1 exec "$@"\n'
+    )
+    sudo.chmod(0o700)
+
+
+def test_configuration_asset_sudo_copy_keeps_candidate_and_old_release(deployment):
+    root, _, _ = deployment
+    old, candidate = _add_config_initializer(deployment)
+    (root / "data").mkdir()
+    (root / "data/llm_config.db").write_text("existing-db-marker")
+    (old / "personas").mkdir()
+    (candidate / "personas").mkdir()
+    original = old / "personas/migrated-protected.toml"
+    original.write_text('id="default"\nsystem_prompt="server"\n')
+    original.chmod(0o600)
+    generation = old / "generation.toml"
+    generation.write_text("[image]\nenabled=false\n")
+    generation.chmod(0o600)
+    kept = old / "personas/migrated-kept.toml"
+    kept.write_text('id="kept"\nsystem_prompt="candidate-priority"\n')
+    kept.chmod(0o644)
+    os.link(kept, candidate / "personas" / kept.name)
+    before = [(path.read_bytes(), path.stat()) for path in (original, generation, kept)]
+    _inject_configuration_copy_permission(deployment)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    copied = root / "releases" / NEW / "config"
+    for path, (content, metadata) in zip((original, generation, kept), before):
+        assert path.read_bytes() == content
+        after = path.stat()
+        assert (after.st_uid, after.st_gid, after.st_mode, after.st_mtime_ns) == (
+            metadata.st_uid, metadata.st_gid, metadata.st_mode, metadata.st_mtime_ns
+        )
+    for path in (copied / "personas" / original.name, copied / generation.name):
+        assert path.stat().st_uid == os.getuid()
+        assert path.stat().st_gid == os.getgid()
+        assert path.stat().st_mode & 0o777 == 0o600
+    assert (copied / "personas" / original.name).read_bytes() == original.read_bytes()
+    assert (copied / generation.name).read_bytes() == generation.read_bytes()
+    assert (copied / "personas" / kept.name).stat().st_ino == kept.stat().st_ino
+    assert len((root / "asset-sudo").read_text().splitlines()) == 2
+    owners = (root / "asset-owners").read_text().splitlines()
+    assert len(owners) == 2
+    assert all(str(copied) in entry for entry in owners)
+    assert all(entry.endswith(f" {os.getuid()}:{os.getgid()}") for entry in owners)
+
+
+@pytest.mark.parametrize("discovery", [False, True])
+def test_configuration_copy_io_failure_stops_before_activation(deployment, discovery):
+    root, _, _ = deployment
+    old, _ = _add_config_initializer(deployment)
+    (root / "data").mkdir()
+    (root / "data/llm_config.db").write_text("existing-db-marker")
+    (old / "personas").mkdir()
+    (old / "personas/migrated-protected.toml").write_text('id="synthetic"\n')
+    _inject_configuration_copy_permission(deployment, failure="io", discovery=discovery)
+    result = run_deploy(deployment)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert (root / "current").readlink() == Path("releases") / OLD
+    assert not (root / "asset-sudo").exists()
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    assert not any("run" in call or "up" in call for call in calls)
+
+
+def test_first_migration_copies_protected_assets_as_deployment_user(deployment):
+    root, _, _ = deployment
+    old, _ = _add_config_initializer(deployment)
+    (old / "personas").mkdir()
+    (old / "personas/default.toml").write_text('id="default"\n')
+    (old / "generation.toml").write_text("[image]\nenabled=false\n")
+    _inject_configuration_copy_permission(deployment)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    config = root / "releases" / NEW / "config"
+    for relative in ("llm.toml", "personas/default.toml", "generation.toml"):
+        source, copied = old / relative, config / relative
+        assert copied.read_bytes() == source.read_bytes()
+        assert copied.stat().st_ino != source.stat().st_ino
+        assert (copied.stat().st_uid, copied.stat().st_gid) == (os.getuid(), os.getgid())
+    assert (config / "personas").stat().st_uid == os.getuid()
+    assert len((root / "asset-sudo").read_text().splitlines()) == 3
+    owners = (root / "asset-owners").read_text().splitlines()
+    assert len(owners) == 4
+    assert all(str(config) in entry for entry in owners)
