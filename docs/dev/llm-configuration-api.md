@@ -63,8 +63,8 @@ LLM 配置使用 `data/llm_config.db`。Web Admin、CLI 与 bot 通过同一个�
   "payload": {},
   "result": null,
   "error": null,
-  "created_at": 1791680000,
-  "updated_at": 1791680000
+  "created_at": 1791680000.0,
+  "updated_at": 1791680000.0
 }
 ```
 
