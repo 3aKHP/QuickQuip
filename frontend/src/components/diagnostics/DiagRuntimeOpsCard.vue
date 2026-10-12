@@ -197,7 +197,7 @@ async function runRuntimeAction(action: RuntimeActionKind) {
     else if (action === 'personas') data = await reloadPersonas()
     else data = await reloadRules()
     if (data?.load_error || data?.error) {
-      runtimeError.value = data.load_error || data.error
+      runtimeError.value = data.load_error || data.error || null
       toast('操作完成但存在错误', 'error')
     } else {
       toast(data?.queued ? '操作已入队' : '操作已完成')

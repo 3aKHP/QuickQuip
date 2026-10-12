@@ -10,13 +10,13 @@
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <p v-if="options && options.load_error" class="warn-text">
       <UiIcon name="AlertTriangle" :size="14" />
-      llm.toml 加载失败：{{ options.load_error }}；provider/persona 下拉可能为空
+      LLM 配置 加载失败：{{ options.load_error }}；provider/persona 下拉可能为空
     </p>
 
     <div class="settings-shell">
       <aside class="group-panel">
         <div class="panel-head">
-          <span class="panel-title">覆盖对象<UiInfoTip text="一条覆盖（override）是针对单个群或私聊会话的参数定制记录，未覆盖的字段一律沿用 llm.toml 全局默认；私聊对象以 private:QQ号 形式标识。" /></span>
+          <span class="panel-title">覆盖对象<UiInfoTip text="一条覆盖（override）是针对单个群或私聊会话的参数定制记录，未覆盖的字段一律沿用 LLM 配置 全局默认；私聊对象以 private:QQ号 形式标识。" /></span>
           <span class="panel-count">{{ groupList.length }}</span>
         </div>
 
@@ -95,7 +95,7 @@
             <h4>运行状态</h4>
             <div class="form-grid">
               <div class="field">
-                <label>LLM 启用<UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 llm.toml [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" /></label>
+                <label>LLM 启用<UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 LLM 配置 [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" /></label>
                 <select v-model="draftTriState.enabled">
                   <option :value="null">跟随默认（{{ defaultHint('enabled') }}）</option>
                   <option :value="true">开</option>
@@ -103,7 +103,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>记忆启用<UiInfoTip text="开启后每轮回复前会从该会话记忆库检索相关记忆注入提示词（注入条数为 llm.toml [runtime] memory_limit，默认 6）；关闭后既不读记忆，自动记忆抽取也不会生效。" /></label>
+                <label>记忆启用<UiInfoTip text="开启后每轮回复前会从该会话记忆库检索相关记忆注入提示词（注入条数为 LLM 配置 [runtime] memory_limit，默认 6）；关闭后既不读记忆，自动记忆抽取也不会生效。" /></label>
                 <select v-model="draftTriState.memory_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('memory_enabled') }}）</option>
                   <option :value="true">开</option>
@@ -119,7 +119,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 llm.toml 的 agent_delivery_intermediate_enabled 配置。" /></label>
+                <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 LLM 配置 的 agent_delivery_intermediate_enabled 配置。" /></label>
                 <select v-model="draftTriState.agent_delivery_intermediate_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate_enabled') }}）</option>
                   <option :value="true">开</option>
@@ -127,7 +127,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>最终轮分段<UiInfoTip text="开启后该会话的最终回复按自然段拆成多条消息发出；关闭时最终回复合并为一条。全局默认在 llm.toml 的 agent_delivery_final_enabled 配置。" /></label>
+                <label>最终轮分段<UiInfoTip text="开启后该会话的最终回复按自然段拆成多条消息发出；关闭时最终回复合并为一条。全局默认在 LLM 配置 的 agent_delivery_final_enabled 配置。" /></label>
                 <select v-model="draftTriState.agent_delivery_final_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('agent_delivery_final_enabled') }}）</option>
                   <option :value="true">开</option>
@@ -138,7 +138,7 @@
           </section>
 
           <section class="form-section">
-            <h4>模型与人格<UiInfoTip text="本区字段选「跟随默认」即沿用 llm.toml 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
+            <h4>模型与人格<UiInfoTip text="本区字段选「跟随默认」即沿用 LLM 配置 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
             <div class="form-grid">
               <div class="field">
                 <label>Provider</label>
@@ -167,7 +167,7 @@
                 </select>
               </div>
               <div class="field">
-                <label>思考档位<UiInfoTip text="该会话的思考档位覆盖（等效群内指令 /llm effort）：六档 low/medium/high/xhigh/max/ultra；选「跟随 provider 配置档」即沿用 llm.toml 中生效 provider 的 reasoning_effort，provider 留空时回模型默认档（不发送思考参数）。" /></label>
+                <label>思考档位<UiInfoTip text="该会话的思考档位覆盖（等效群内指令 /llm effort）：六档 low/medium/high/xhigh/max/ultra；选「跟随 provider 配置档」即沿用 LLM 配置 中生效 provider 的 reasoning_effort，provider 留空时回模型默认档（不发送思考参数）。" /></label>
                 <select v-model="draftTriState.reasoning_effort">
                   <option :value="null">跟随 provider 配置档（当前：{{ effortFollowHint }}）</option>
                   <option v-for="e in EFFORT_CHOICES" :key="e" :value="e">{{ e }}</option>
@@ -180,7 +180,7 @@
             <h4>触发方式</h4>
             <div class="form-grid">
               <div class="field">
-                <label>触发前缀<UiInfoTip text="以该前缀开头的消息会触发 LLM 回复。全局默认 /ai，可在 llm.toml 的 [triggers] 调整。" /></label>
+                <label>触发前缀<UiInfoTip text="以该前缀开头的消息会触发 LLM 回复。全局默认 /ai，可在 LLM 配置 的 [triggers] 调整。" /></label>
                 <div class="field-row">
                   <input v-model="prefixInput" :placeholder="defaults.trigger_prefix || '/ai'" />
                   <UiButton v-if="draftTriState.trigger_prefix !== null" size="sm" variant="ghost" icon="X" @click="clearPrefix">跟随</UiButton>

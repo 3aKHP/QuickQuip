@@ -24,7 +24,7 @@ import { useCountUp } from '../../composables/useCountUp'
 
 const props = withDefaults(defineProps<{
   label: string
-  value: string
+  value?: string
   /** 单位后缀：与数值同行的小号单位（如 tok/轮），避免单位混入大数值导致换行。 */
   unit?: string
   /** 标签术语的悬浮解释（UiInfoTip） */
@@ -37,6 +37,7 @@ const props = withDefaults(defineProps<{
   /** count-up 展示格式化（如万缩写），默认千分位取整 */
   countFormat?: (n: number) => string
 }>(), {
+  value: '',
   unit: undefined,
   tip: undefined,
   sub: undefined,

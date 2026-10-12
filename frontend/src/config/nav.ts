@@ -18,6 +18,7 @@ import TiebaView from '../views/TiebaView.vue'
 import QuotesView from '../views/QuotesView.vue'
 import WordcloudView from '../views/WordcloudView.vue'
 import ConfigView from '../views/ConfigView.vue'
+import LlmConfigView from '../views/LlmConfigView.vue'
 import LogsLiveView from '../views/LogsLiveView.vue'
 import LogsTraceView from '../views/LogsTraceView.vue'
 import LogsArchiveView from '../views/LogsArchiveView.vue'
@@ -67,6 +68,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle',   section: 'llm',      component: ConversationsView },
   { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',           section: 'llm',      component: PersonasView },
   { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',        section: 'llm',      component: LlmAboutView },
+  { key: 'llm-config',     path: '/llm-config',     label: 'LLM 配置', icon: 'SlidersHorizontal', section: 'llm',     component: LlmConfigView },
   { key: 'skills',         path: '/skills',         label: 'Skill',    icon: 'Sparkles',        section: 'llm',      component: SkillsView },
   { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
   { key: 'mcp-dashboard',  path: '/mcp-dashboard',  label: 'MCP',      icon: 'Network',         section: 'llm',      component: McpDashboardView },

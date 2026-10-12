@@ -61,7 +61,7 @@ export interface GroupSettingsProviderOption {
   id: string
   default_model: string | null
   models: string[]
-  /** provider 配置档（llm.toml reasoning_effort）；空串/缺省 = 模型默认档 */
+  /** provider 配置档（LLM 配置 reasoning_effort）；空串/缺省 = 模型默认档 */
   reasoning_effort?: string
 }
 
@@ -73,7 +73,7 @@ export interface GroupSettingsPersonaOption {
 
 /**
  * GET /api/group-settings/options 的 defaults（全局默认配置投影）。
- * llm.toml 加载失败时后端返回空对象，故全部字段可选。
+ * LLM 配置 加载失败时后端返回空对象，故全部字段可选。
  */
 export interface GroupSettingsDefaults {
   enabled?: boolean

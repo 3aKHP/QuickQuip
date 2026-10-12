@@ -150,8 +150,8 @@ type BreakdownKey = 'provider' | 'model' | 'feature' | 'group' | 'persona'
 
 /** 「未定价」口径唯一定义：统计卡片与事件详情「定价」行共用，避免同页两份文案漂移 */
 const UNPRICED_DEF = '「未定价」= 价表缺少该模型：token 照常计量、成本按 0 估算'
-const unpricedCardTip = `${UNPRICED_DEF}，在 llm.toml 补充定价后恢复计入；「错误」为失败请求数。`
-const pricingRowTip = `本次计费匹配的 llm.toml [pricing.models] 条目：key（provider/model 优先、纯 model 兜底）· source · confidence；${UNPRICED_DEF}。`
+const unpricedCardTip = `${UNPRICED_DEF}，在 LLM 配置中补充价格后恢复计入；「错误」为失败请求数。`
+const pricingRowTip = `本次计费匹配的配置价格条目：key（provider/model 优先、纯 model 兜底）· source · confidence；${UNPRICED_DEF}。`
 
 const range = ref('7d')
 const metric = ref<UsageMetric>('cost')
@@ -169,7 +169,7 @@ const filters = reactive<UsageFilters>({ provider: '', model: '', feature: '', g
 
 const avgRows = computed(() => {
   if (!data.value) return []
-  const bar = (v: number | null) => `${Math.min(100, Math.max(0, (v ?? 0) * 100)).toFixed(1)}%`
+  const bar = (v: number | null | undefined) => `${Math.min(100, Math.max(0, (v ?? 0) * 100)).toFixed(1)}%`
   return [
     { label: '轮次信封', value: `≈${fmtNum(Math.round(data.value.avg_envelope_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.envelope_coverage), coverage: pct(data.value.envelope_coverage ?? 0), note: '每轮全价 · 估算', tip: '每轮注入 user 消息头部的【轮次上下文】信封：时间、节日、参与成员、记忆与词表命中等逐轮变化的内容。逐轮重渲染、不吃缓存，按全价计。' },
     { label: '纪元窗口', value: `≈${fmtNum(Math.round(data.value.avg_epoch_history_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.epoch_coverage), coverage: pct(data.value.epoch_coverage ?? 0), note: 'history 段 · 估算', tip: '会话纪元读取的历史消息窗口（纪元锚点至最新消息）的 token 估算，是每轮上下文的主体；锚点随冷场或触顶前移而收缩。' },
@@ -243,7 +243,7 @@ const trendOption = computed<ECOption>(() => {
       trigger: 'axis',
       ...t.tooltip,
       axisPointer: { type: 'line', lineStyle: { color: t.primary } },
-      valueFormatter: (value: number | string) => metricDisplay(Number(value)),
+      valueFormatter: (value: unknown) => metricDisplay(Number(value)),
     },
     xAxis: {
       type: 'category',
@@ -284,10 +284,12 @@ const barOption = computed<ECOption>(() => {
     tooltip: {
       trigger: 'item',
       ...t.tooltip,
-      formatter: (params: { name: string; value: number }) =>
-        `${params.name}<br/>成本 $${fmtCost(params.value)}（${share(params.value)}）<br/>${
-          params.name === UNATTRIBUTED_KEY.value ? '未归因调用，不支持筛选' : '点击填入筛选器'
-        }`,
+      formatter: params => {
+        const item = Array.isArray(params) ? params[0] : params
+        if (!item) return ''
+        const cost = Number(item.value ?? 0)
+        return `${item.name}<br/>成本 $${fmtCost(cost)}（${share(cost)}）<br/>${item.name === UNATTRIBUTED_KEY.value ? '未归因调用，不支持筛选' : '点击填入筛选器'}`
+      },
     },
     xAxis: {
       type: 'value',
@@ -313,7 +315,7 @@ const barOption = computed<ECOption>(() => {
         position: 'right' as const,
         color: t.textMuted,
         fontSize: 11,
-        formatter: (params: { value: number }) => `$${fmtCost(params.value)} · ${share(params.value)}`,
+        formatter: params => `$${fmtCost(Number(params.value ?? 0))} · ${share(Number(params.value ?? 0))}`,
       },
     }],
   }
