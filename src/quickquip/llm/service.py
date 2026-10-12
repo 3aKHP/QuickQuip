@@ -42,7 +42,9 @@ from quickquip.llm.request_budget import (
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
 from quickquip.llm.service_parts.agent_runtime import DeliveryAborted, TurnRecorder
 from quickquip.llm.service_parts.scope_gate import ScopeGate
-from quickquip.llm.store_parts.agent_records import AgentStoreError, LoopNotWritable
+from quickquip.llm.store_parts.agent_records import (
+    AgentStoreError, LoopNotWritable, ScopeGenerationMismatch,
+)
 from quickquip.llm.identity import (
     IdentityIndex,
     collect_known_participants,
@@ -93,6 +95,7 @@ from quickquip.llm.reply_chain import (
     reply_result,
 )
 from quickquip.llm.reply_types import ChatTurnRequest, ReplyResult
+from quickquip.llm.session import SessionIdentity, SessionInvalidated, SessionStoreError
 from quickquip.llm.service_parts.constants import (
     DEFAULT_ENABLED_TOOLS as DEFAULT_ENABLED_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_MEMORY_RETRIEVAL_ITEMS,
@@ -636,6 +639,7 @@ class LLMService(
         trigger_kind: TriggerKind | None = None,
         agent_delivery_intermediate_enabled: bool,
         agent_delivery_final_enabled: bool,
+        expected_generation: int | None = None,
     ):
         """创建 Loop 与 user 触发行（§5.3.1），返回 TurnRecorder。
 
@@ -658,7 +662,9 @@ class LLMService(
             forward_image_urls=normalized_forward_image_urls,
             image_descriptions=image_descriptions,
         )
-        generation, _ = self.store.agent_scope_state(scope_key)
+        generation = expected_generation
+        if generation is None:
+            generation, _ = self.store.agent_scope_state(scope_key)
         if trigger_kind is not None:
             trigger = trigger_kind
         else:
@@ -679,6 +685,8 @@ class LLMService(
                     message_id=str(message_id) if message_id else None,
                 ),
             )
+        except ScopeGenerationMismatch as exc:
+            raise SessionInvalidated("会话在开始执行前已失效") from exc
         except LoopNotWritable as exc:
             # 闸门应已串行化同 scope 轮次：仍撞单飞约束即闸门旁路（编程
             # 错误），告警计数后走既有无记录路径兜底。
@@ -920,6 +928,8 @@ class LLMService(
         self,
         *,
         chat_id: int | str,
+        session: SessionIdentity,
+        session_generation: int,
         user_id: int | str,
         sender_name: str,
         scope_key: str,
@@ -940,6 +950,7 @@ class LLMService(
         recorder_rows_written: bool = False,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
+        user_message = None
         if store_user_message and not recorder_rows_written:
             raw_turn = build_raw_turn_text(
                 stored_prompt,
@@ -949,28 +960,21 @@ class LLMService(
                 forward_image_urls=normalized_forward_image_urls,
                 image_descriptions=image_descriptions,
             )
-            self.store.append_conversation_message(
-                scope_key,
-                user_id,
-                "user",
-                stored_prompt,
-                sender_name=sender_name,
-                canonical_name=current_identity.canonical_name,
-                message_id=str(message_id) if message_id else None,
-                raw_content=raw_turn,
-            )
-        if not recorder_rows_written:
-            self.store.append_conversation_message(scope_key, None, "assistant", text)
-        # 纪元裁剪：floor = 该 scope 所有纪元键的最老锚点（None = 只按硬上限兜底，
-        # 绝不按窗口重估删行——重启后懒初始化还要读旧行）
-        self.store.crop_conversation_messages(
-            scope_key,
+            user_message = {
+                "user_id": user_id, "sender_name": sender_name,
+                "canonical_name": current_identity.canonical_name,
+                "content": stored_prompt, "message_id": str(message_id) if message_id else None,
+                "raw_content": raw_turn,
+            }
+        self.store.append_session_reply(
+            scope_key, session, session_generation, user_message=user_message,
+            assistant_text=None if recorder_rows_written else text,
             floor_id=self._epochs.oldest_anchor(scope_key),
             keep_last=MAX_STORED_CONVERSATION_MESSAGES,
         )
 
         if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
-            generation_at_schedule, _ = self.store.agent_scope_state(scope_key)
+            generation_at_schedule = session_generation
             self.create_configuration_task(
                 self._extract_auto_memory(
                     scope_key=scope_key,
@@ -1022,7 +1026,15 @@ class LLMService(
                 return reply_result(
                     "", llm_used=False, cancelled_reason="queue_patience_exceeded"
                 )
-            return await self._generate_reply_for_scope_locked(request)
+            try:
+                if not self.config.load_error and (self.store is None or self.store._unavailable):
+                    raise SessionStoreError("LLM 会话存储不可用")
+                return await self._generate_reply_for_scope_locked(request)
+            except SessionInvalidated:
+                return reply_result("", llm_used=False, cancelled_reason="session_invalidated")
+            except SessionStoreError:
+                logger.exception("chat session storage failed scope=%s", scope_key)
+                return reply_result("会话存储不可用，请稍后重试。", llm_used=False)
 
     @chat_model_entry
     async def _generate_reply_for_scope_locked(
@@ -1053,6 +1065,8 @@ class LLMService(
         if self.config.load_error:
             return reply_result(f"LLM 配置不可用：{self.config.load_error}", llm_used=False)
 
+        if self.store is None or self.store._unavailable:
+            raise SessionStoreError("LLM 会话存储不可用")
         settings = self.get_chat_settings(request.chat_id, chat_type=request.chat_type)
         if not settings.enabled:
             return reply_result(
@@ -1078,6 +1092,11 @@ class LLMService(
         persona = self.config.personas.get(settings.persona_id)
         if persona is None:
             return reply_result(f"当前 persona 不存在：{settings.persona_id}", llm_used=False)
+
+        session, session_generation = self.store.get_or_create_chat_session(scope_key)
+
+        def check_session() -> None:
+            self.store.assert_chat_session(scope_key, session, session_generation)
 
         # ── history load + sensitive scrub + 【现场】补丁自取 + participants ──
         # 先于图片预处理：补丁去重要用 history 的 message_id，而预处理的
@@ -1142,7 +1161,9 @@ class LLMService(
             recent_messages=recent_images_source,
             include_recent_images=request.include_recent_images,
             sensitive=sensitive,
+            session=session,
         )
+        check_session()
         if isinstance(image_outcome, dict):
             return image_outcome
         effective_image_urls = image_outcome.effective_image_urls
@@ -1220,6 +1241,7 @@ class LLMService(
             chat_id=request.chat_id,
             chat_type=request.chat_type,
             scope_key=scope_key,
+            session=session,
             settings=settings,
             sensitive=sensitive,
             user_id=request.user_id,
@@ -1287,6 +1309,13 @@ class LLMService(
                     scope_key, degraded.old_anchor_id, degraded.new_anchor_id,
                 )
                 llm_request = assembler.assemble()
+        check_session()
+        budget_guard = self._build_request_guard(provider)
+
+        def request_guard(current_request: LLMRequest) -> None:
+            check_session()
+            budget_guard(current_request)
+
         tool_context = ToolExecutionContext(
             group_id=request.chat_id,
             user_id=request.user_id,
@@ -1324,6 +1353,7 @@ class LLMService(
                 trigger_kind=request.trigger_kind,
                 agent_delivery_intermediate_enabled=settings.agent_delivery_intermediate_enabled,
                 agent_delivery_final_enabled=settings.agent_delivery_final_enabled,
+                expected_generation=session_generation,
             )
             # 信封构成缓存：装配最终态已知（预算降级重建后的 assembler），
             # 记最近一次六段分解供纪元看板实时态导出。
@@ -1357,8 +1387,12 @@ class LLMService(
                     request=llm_request,
                     context=tool_context,
                     turn_recorder=recorder,
-                    request_guard=self._build_request_guard(provider),
+                    request_guard=request_guard,
                 )
+        except (SessionInvalidated, SessionStoreError):
+            if recorder is not None:
+                recorder.close(LoopStatus.INTERRUPTED, "session_invalidated")
+            raise
         except asyncio.CancelledError:
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, "request_cancelled")
@@ -1411,33 +1445,41 @@ class LLMService(
         )
 
         # ── persistence + auto-memory dispatch + reply assembly ──────
-        result_payload = self._persist_turn_and_build_reply(
-            chat_id=request.chat_id,
-            user_id=request.user_id,
-            sender_name=request.sender_name,
-            scope_key=scope_key,
-            settings=settings,
-            provider=provider,
-            model=llm_request.model,
-            text=text,
-            stored_prompt=turn.stored_prompt,
-            store_user_message=request.store_user_message,
-            trigger_auto_memory=request.trigger_auto_memory,
-            message_id=request.message_id,
-            normalized_quoted_text=turn.quoted_text,
-            normalized_quoted_image_urls=turn.quoted_image_urls,
-            normalized_forward_text=forward_text,
-            normalized_forward_image_urls=turn.forward_image_urls,
-            # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
-            # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
-            # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
-            image_descriptions=[
-                d for d in image_descriptions
-                if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)
-            ] or None,
-            tool_context=tool_context,
-            recorder_rows_written=recorder is not None,
-        )
+        try:
+            check_session()
+            result_payload = self._persist_turn_and_build_reply(
+                session=session,
+                session_generation=session_generation,
+                chat_id=request.chat_id,
+                user_id=request.user_id,
+                sender_name=request.sender_name,
+                scope_key=scope_key,
+                settings=settings,
+                provider=provider,
+                model=llm_request.model,
+                text=text,
+                stored_prompt=turn.stored_prompt,
+                store_user_message=request.store_user_message,
+                trigger_auto_memory=request.trigger_auto_memory,
+                message_id=request.message_id,
+                normalized_quoted_text=turn.quoted_text,
+                normalized_quoted_image_urls=turn.quoted_image_urls,
+                normalized_forward_text=forward_text,
+                normalized_forward_image_urls=turn.forward_image_urls,
+                # 落库图注只含当轮用户自己相关的三类（当前/引用/转发）；近期缓冲图是
+                # 他人消息的内容，落库会把他人图注记到触发者名下且跨轮重复累积——
+                # 当轮渲染仍走完整 image_descriptions（带「近期上下文图片 N」标签）
+                image_descriptions=[
+                    d for d in image_descriptions
+                    if not d.context_label.startswith(RECENT_IMAGE_CONTEXT_PREFIX)
+                ] or None,
+                tool_context=tool_context,
+                recorder_rows_written=recorder is not None,
+            )
+        except (SessionInvalidated, SessionStoreError):
+            if recorder is not None:
+                recorder.close(LoopStatus.INTERRUPTED, "session_invalidated")
+            raise
         if recorder is not None:
             terminal_status = (
                 LoopStatus.INTERRUPTED if recorder.terminal_reason else LoopStatus.COMPLETED

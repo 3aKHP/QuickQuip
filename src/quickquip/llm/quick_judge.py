@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+from quickquip.llm.session import create_session_identity
+
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import monotonic
@@ -105,6 +107,7 @@ async def run_quick_judge_detailed(
         )
 
     request = LLMRequest(
+        session=create_session_identity(),
         model=model,
         system_prompt="你是一个仅输出 JSON 的判定器。",
         messages=[

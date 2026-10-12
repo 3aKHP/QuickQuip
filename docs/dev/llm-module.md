@@ -210,6 +210,29 @@ LLM 默认只在以下场景触发：
 
 ### 4.2 LLM 短期会话
 
+**Session 身份与生命周期**：Session 表示业务层持续进行的一段 LLM 交互。群／私聊 scope 承载当前聊天，Session 身份跨轮保持；上下文纪元管理每次发送的历史窗口。内部身份为 UUIDv4，创建时间为 UTC，`SessionIdentity` 是不可变快照，`LLMRequest.session` 显式携带它。
+
+- 群聊首次通过输入与资格检查后懒创建，群内不同发言者共享当前 Session。显式私聊 start 创建新身份；清空结束当前身份，下一轮再创建。查看状态和被过滤的消息不创建聊天身份。
+- 工具续轮、重试、流式回退、历史裁剪、冷场、撤回、人格／模型／协议切换、禁用再启用均延续当前身份。活动身份保存于 SQLite，重启后继续使用。
+- 私聊保存结束时，将身份与历史归档；恢复保留原身份并替换当前 Session。空私聊结束不建存档；不保存结束、清空和删除存档解除相应绑定。
+- 身份、历史迁移与 generation 更新在同一写事务中完成；事务成功后清理派生缓存。每轮冻结身份及 generation，失效后停止工具续轮，并拒绝迟到结果写入或交付。无 Agent 记录路径同样使用事务写入屏障。
+- 播报、总结、周月报、人物志、触发判定、后台记忆提取、诊断与独立命令每次操作使用一个短任务身份，级联与操作内重试复用。聊天图片预处理和工具图片转述显式继承聊天身份。
+
+出口投影接口为 `SessionProjector = Callable[[SessionIdentity], str]`。目标客户端适配器接收稳定快照并实现其格式编码。当前阶段只传递内部元数据，Session 不加入请求头、body、缓存键或响应 owner 指纹；低层 `LLMRequest` 未提供身份时保留 `None`。
+
+HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已有追踪记录保持空值。传输层仅在当前 `complete()` 范围内绑定显式快照，退出或取消后恢复；不从外层任务上下文推断业务归属。管理页面继续使用现有展示。
+
+升级前备份会话与追踪 SQLite 库；新增身份列为可空字段，旧消息与存档保留。若回退旧代码并运行后再次升级，停止 Bot 与 Web，备份会话库后执行以下维护 SQL，再启动新版，使活动聊天与存档重新懒分配身份：
+
+```sql
+BEGIN IMMEDIATE;
+UPDATE agent_scopes SET session_id = NULL, session_created_at = NULL;
+UPDATE session_archives SET session_id = NULL, session_created_at = NULL;
+COMMIT;
+```
+
+该维护操作保留消息、存档、设置及 generation；追踪库中的历史身份继续作为观测记录保存。数据库不可用时，持续聊天停止执行并返回存储错误，不分配临时身份继续回复。
+
 工具历史投影在请求内按当前敏感词表检查完整 Loop。命中 block 或包含输出过滤替换态时，使用清洗后的文本档案并保留工具终态汇总，省略原生块、工具参数和结果正文；所有预算降级沿用该请求副本，持久化原文保持不变。未命中的 Loop 保留原有协议重放路径；原生回放（Claude 签名块 / Gemini parts / Responses output items）以 owner 五元组精确匹配为前提，失配或形状损坏按协议各自降级（档案/通用重建），Responses 侧另有跨 Loop call_id 冲突与配对完整的发送前守门。
 
 LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
@@ -221,7 +244,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读
 - 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
 - 锚点状态保存在进程内存中：进程重启 = 冷一次缓存，重启后首个请求按「距最新一条一个标准 CTX（8k token）跨度」重新懒初始化
 - `/llm context_limit <n>` **语义变更**：从「每次最多读取 n 条」变为「该会话（群聊/私聊均可，上限 1024 条）退化为保留最新 n 行的滚动窗」；`/llm context_limit reset` 恢复纪元自动管理。`[runtime] history_limit` 全局默认不再作为读取上限生效；`history_max_messages_per_group` 废弃（保留解析、不再生效）
-- `clear_context` 三件齐清：会话消息存储、最近消息缓冲、纪元锚点（私聊会话 start/end/resume 同路径）
+- `clear_context` 清理消息与 Agent 执行记录，解除 Session 绑定并推进 generation；提交后清理最近消息缓冲、纪元锚点、信封缓存和 Skill 激活登记。私聊 start/end/resume 使用相应事务与缓存清理流程。
 - `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点（system prompt 字节变化 = 缓存全灭 = 免费重置窗口）
 - history 渲染信任落库时定格的 `canonical_name`（渲染冻结），不再按当前身份索引重算——改名用户在前缀中保持旧名，正是冻结的目的
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.llm.session import create_session_identity
+
 from dataclasses import dataclass, replace
 
 from quickquip.llm.config import LLMConfig
@@ -170,6 +172,7 @@ async def generate_profile(
     provider_config = resolve_model_provider(llm_config, provider_id, model)
     client = build_provider_client(replace(provider_config, stream_enabled=False))
     response = await client.complete(LLMRequest(
+        session=create_session_identity(),
         model=model,
         system_prompt=system_prompt,
         messages=[user_message],

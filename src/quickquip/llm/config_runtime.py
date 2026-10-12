@@ -1,6 +1,8 @@
 """Bot-owned consumer of immutable configuration control operations."""
 from __future__ import annotations
 
+from quickquip.llm.session import create_session_identity
+
 import asyncio
 import errno
 from dataclasses import asdict, replace
@@ -187,6 +189,7 @@ class ConfigRuntimeWorker:
             self.report()
 
     async def _probe(self, operation, config):
+        session = create_session_identity()
         payload = operation["payload"]
         provider = resolve_model_provider(config, payload["provider_id"], payload["model"])
         with configuration_pricing(config):
@@ -202,6 +205,7 @@ class ConfigRuntimeWorker:
                     retry_policy=RetryPolicy.disabled(), single_dispatch=True,
                 )
                 request = LLMRequest(
+                    session=session,
                     model=payload["model"], system_prompt=payload.get("system_prompt", ""),
                     messages=[LLMConversationMessage(role="user", content=payload["user_prompt"])],
                     max_output_tokens=payload.get("max_output_tokens", 64),

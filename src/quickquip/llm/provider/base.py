@@ -38,8 +38,10 @@ from quickquip.llm.tools import (
 from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
+    trace_request_session,
 )
 from quickquip.llm.usage import _schedule_usage_record
+from quickquip.llm.session import SessionIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +291,7 @@ class LLMRequest:
     allow_tool_calls: bool = False
     tool_choice: str = "auto"
     builtin_search: bool = False
+    session: SessionIdentity | None = None
 
 
 @dataclass(slots=True)
@@ -500,6 +503,11 @@ class BaseProviderClient:
                 await asyncio.sleep(delay)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        """Dispatch and meter with the explicit request identity bound for tracing."""
+        with trace_request_session(request.session):
+            return await self._complete_with_usage(request)
+
+    async def _complete_with_usage(self, request: LLMRequest) -> LLMResponse:
         """Stream-then-fallback dispatch + retry + usage metering.
 
         When ``config.stream_enabled`` is set, try the streaming endpoint

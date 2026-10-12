@@ -99,6 +99,16 @@ async def test_daily_briefing_retries_on_max_tokens(monkeypatch):
 
     assert content == "第二条完整播报"
     assert model_used == "b/m2"
+    first_session = responses[0].requests[0].session
+    assert first_session is not None
+    assert responses[1].requests[0].session == first_session
+    await generate_daily_briefing(
+        context=_context(), persona=_llm_config().personas["default"], group_id="1001",
+        briefing_config=_llm_config().daily_briefing, llm_config=_llm_config(),
+        default_provider_id="a", default_model="m1",
+    )
+    assert responses[0].requests[1].session != first_session
+    assert responses[0].requests[1].session == responses[1].requests[1].session
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+from quickquip.llm.session import create_session_identity
+
 import asyncio
 import os
 import time
@@ -73,6 +75,7 @@ async def probe_provider(
         return ProviderHealth(provider.id, probe_model, "skipped", error="api_key_missing")
 
     request = LLMRequest(
+        session=create_session_identity(),
         model=probe_model,
         system_prompt="",
         messages=[LLMConversationMessage(role="user", content="hi")],
