@@ -394,6 +394,30 @@ def test_not_executed_terminal_with_reason(store: LLMStore):
     assert json.loads(row["result_json"])["detail"] == "limit"
 
 
+@pytest.mark.parametrize("resume", [False, True])
+def test_archiving_running_tool_rejects_late_result_in_closed_loop(store: LLMStore, resume):
+    store.get_or_create_chat_session("private:2002")
+    handle = _begin(store, "private:2002")
+    declaration = _declarations(1)[0]
+    store.commit_turn(handle, _response("tool started"), [declaration], [])
+    store.mark_tool_started(handle, declaration.execution_id)
+    store.end_private_chat_session("2002", save=True, persona_id=None, preset="")
+    if resume:
+        store.resume_private_chat_session("2002", 1)
+    with pytest.raises(ScopeGenerationMismatch):
+        store.finish_tool(
+            handle, declaration.execution_id,
+            ToolResultRecord(content="late result", is_error=False, original_bytes=11),
+        )
+    with store._connect() as conn:
+        row = conn.execute(
+            "SELECT status, result_json FROM agent_tool_executions WHERE execution_id = ?",
+            (declaration.execution_id,),
+        ).fetchone()
+    assert row["status"] == "indeterminate"
+    assert row["result_json"] is None
+
+
 # ── 交付 ─────────────────────────────────────────────────────────
 
 

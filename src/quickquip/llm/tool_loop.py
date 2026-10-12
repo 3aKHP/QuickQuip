@@ -268,7 +268,11 @@ async def run_tool_call_loop(
                     result = blocked_result
                 else:
                     result = await tool_registry.execute(call, context)
+                    if request_guard is not None:
+                        request_guard(current_request)
                     result = await result_pipeline.process_result(call, result)
+            if request_guard is not None:
+                request_guard(current_request)
             tool_results.append(result)
             if turn_recorder is not None and execution_id is not None:
                 turn_recorder.on_tool_finished(execution_id, result)

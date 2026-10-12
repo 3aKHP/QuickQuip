@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
+import pytest
+
 from quickquip.llm.epoch import EpochKey, EpochManager
 from quickquip.llm.image_preprocessor import ImageDescription
-from quickquip.llm.provider import LLMResponse
+from quickquip.llm.provider import LLMGeneratedImage, LLMProviderError, LLMResponse
 from quickquip.llm.store import LLMStore
+from quickquip.llm.tools import LLMInlineImage, LLMToolCall, LLMToolOutput
 from tests.fixtures.provider_stubs import StubProviderClient, StubToolCallingProviderClient
 
 
@@ -168,3 +171,93 @@ async def test_archive_inflight_loop_and_resume_do_not_block_next_round(
     assert "stub::" in result["reply"]
     assert stub.last_request.session == original
     assert llm_service._scope_gate.bypassed_count == 0
+
+
+@pytest.mark.parametrize("error_type", [LLMProviderError, RuntimeError])
+@pytest.mark.parametrize("clear", [False, True])
+async def test_failed_continuation_only_returns_images_for_current_session(
+    llm_service, patch_provider_builder, monkeypatch, error_type, clear,
+):
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+    monkeypatch.setattr(
+        "quickquip.llm.generated_images.generated_image_allowed", lambda *args: True,
+    )
+
+    class Client:
+        async def complete(self, request):
+            calls.append(request)
+            if len(calls) == 1:
+                return LLMResponse(
+                    text="", model=request.model,
+                    generated_images=[
+                        LLMGeneratedImage(data=b"synthetic-image", media_type="image/png"),
+                    ],
+                    tool_calls=[LLMToolCall("lookup", "get_identity", '{"query":"user"}')],
+                )
+            started.set()
+            await release.wait()
+            raise error_type("synthetic upstream failure")
+
+    patch_provider_builder(lambda provider: Client())
+    task = asyncio.create_task(_reply(llm_service))
+    await asyncio.wait_for(started.wait(), 5)
+    if clear:
+        llm_service.clear_context(1001)
+    release.set()
+    result = await task
+    if clear:
+        assert result["cancelled_reason"] == "session_invalidated"
+        assert result["reply"] == ""
+        assert not result.get("images")
+    else:
+        assert "synthetic upstream failure" in result["reply"]
+        assert len(result["images"]) == 1
+
+
+@pytest.mark.parametrize("pause_at", ["tool", "image_description"])
+async def test_archive_during_tool_processing_drops_late_results(
+    llm_service, patch_provider_builder, pause_at,
+):
+    started, release = asyncio.Event(), asyncio.Event()
+    descriptions = []
+
+    async def handler(arguments, context):
+        if pause_at == "tool":
+            started.set()
+            await release.wait()
+        return LLMToolOutput(
+            "late tool result", images=[LLMInlineImage(b"image", "image/png", "tool-image")],
+        )
+
+    class Preprocessor:
+        async def describe_inline_images(self, images, *, session=None):
+            descriptions.append(session)
+            if pause_at == "image_description":
+                started.set()
+                await release.wait()
+            return [
+                ImageDescription(image.source_label, "late description", True) for image in images
+            ]
+
+    spec = llm_service.tool_registry.get_specs(["get_identity"])[0]
+    llm_service.tool_registry.register(spec, handler, always_loaded=True)
+    llm_service.config.providers["openai-main"].non_vision_models.append("gpt-test")
+    llm_service.image_preprocessor = Preprocessor()
+    stub = StubToolCallingProviderClient()
+    patch_provider_builder(lambda provider: stub)
+    llm_service.start_private_session(2002)
+    task = asyncio.create_task(llm_service.generate_private_reply(
+        user_id=2002, sender_name="user", prompt="hello",
+    ))
+    await asyncio.wait_for(started.wait(), 5)
+    llm_service.end_private_session(2002)
+    release.set()
+    result = await task
+    assert result["cancelled_reason"] == "session_invalidated"
+    assert len(stub.requests) == 1
+    assert len(descriptions) == (0 if pause_at == "tool" else 1)
+    with llm_service.store._connect() as conn:
+        row = conn.execute("SELECT status, result_json FROM agent_tool_executions").fetchone()
+    assert row["status"] == "indeterminate"
+    assert row["result_json"] is None

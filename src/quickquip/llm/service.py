@@ -1398,6 +1398,7 @@ class LLMService(
                 recorder.close(LoopStatus.INTERRUPTED, "request_cancelled")
             raise
         except DeliveryAborted as exc:
+            check_session()
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, str(exc) or "delivery_aborted")
             # 静默的依据是「用户已看到至少一条成功交付的分段」——零交付时
@@ -1412,6 +1413,7 @@ class LLMService(
                 model=llm_request.model,
             )
         except LLMProviderError as exc:
+            check_session()
             if recorder is not None:
                 recorder.close(LoopStatus.FAILED, "provider_error")
             return reply_result(
@@ -1423,6 +1425,7 @@ class LLMService(
                 images=outbound_images_payload(tool_context),
             )
         except Exception as exc:
+            check_session()
             if recorder is not None:
                 recorder.close(LoopStatus.FAILED, "exception")
             return reply_result(

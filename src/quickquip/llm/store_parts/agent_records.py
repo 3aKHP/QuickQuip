@@ -812,6 +812,10 @@ class AgentRecordsStoreMixin:
             raise LoopNotWritable(f"loop={handle.loop_id} 不存在")
         if row["closed_at"] is not None or row["status"] != LoopStatus.RUNNING:
             raise LoopNotWritable(f"loop={handle.loop_id} 已关闭（{row['status']}）")
+        self._validate_loop_generation(conn, handle)
+
+    @staticmethod
+    def _validate_loop_generation(conn: sqlite3.Connection, handle: LoopHandle) -> None:
         scope = conn.execute(
             "SELECT generation FROM agent_scopes WHERE scope_key = ?",
             (handle.scope_key,),
@@ -1140,6 +1144,8 @@ class AgentRecordsStoreMixin:
             closed = self._loop_closed(conn, handle)
             if not closed:
                 self._validate_loop_writable(conn, handle)
+            else:
+                self._validate_loop_generation(conn, handle)
             exists = conn.execute(
                 "SELECT 1 FROM agent_tool_executions WHERE execution_id = ?", (execution_id,)
             ).fetchone()
