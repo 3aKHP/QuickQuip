@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import SessionIdentity, create_session_identity
 
 import asyncio
@@ -39,12 +40,14 @@ class ImagePreprocessor:
     """
 
     async def describe_images(
-        self, image_urls: list[str], *, session: SessionIdentity | None = None
+        self, image_urls: list[str], *, session: SessionIdentity | None = None,
+        epoch_id: str | None = None
     ) -> list[ImageDescription]:
         raise NotImplementedError
 
     async def describe_inline_images(
-        self, images: list[LLMInlineImage], *, session: SessionIdentity | None = None
+        self, images: list[LLMInlineImage], *, session: SessionIdentity | None = None,
+        epoch_id: str | None = None
     ) -> list[ImageDescription]:
         raise NotImplementedError
 
@@ -53,12 +56,14 @@ class NoOpImagePreprocessor(ImagePreprocessor):
     """Default: returns empty list. Images pass through to the provider as-is."""
 
     async def describe_images(
-        self, image_urls: list[str], *, session: SessionIdentity | None = None
+        self, image_urls: list[str], *, session: SessionIdentity | None = None,
+        epoch_id: str | None = None
     ) -> list[ImageDescription]:
         return []
 
     async def describe_inline_images(
-        self, images: list[LLMInlineImage], *, session: SessionIdentity | None = None
+        self, images: list[LLMInlineImage], *, session: SessionIdentity | None = None,
+        epoch_id: str | None = None
     ) -> list[ImageDescription]:
         return []
 
@@ -116,16 +121,18 @@ class VisionImagePreprocessor(ImagePreprocessor):
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
     async def describe_images(
-        self, image_urls: list[str], *, session: SessionIdentity | None = None
+        self, image_urls: list[str], *, session: SessionIdentity | None = None,
+        epoch_id: str | None = None
     ) -> list[ImageDescription]:
         if not image_urls:
             return []
 
         session = session or create_session_identity()
+        epoch_id = epoch_id or create_epoch_id()
         with usage_scope("vision"):
             async def _describe_one(url: str) -> ImageDescription:
                 async with self._semaphore:
-                    return await self._describe_single(url, session)
+                    return await self._describe_single(url, session, epoch_id)
 
             bounded_urls = image_urls[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
             tasks = [_describe_one(url) for url in bounded_urls]
@@ -145,16 +152,18 @@ class VisionImagePreprocessor(ImagePreprocessor):
             return descriptions
 
     async def describe_inline_images(
-        self, images: list[LLMInlineImage], *, session: SessionIdentity | None = None
+        self, images: list[LLMInlineImage], *, session: SessionIdentity | None = None,
+        epoch_id: str | None = None
     ) -> list[ImageDescription]:
         if not images:
             return []
 
         session = session or create_session_identity()
+        epoch_id = epoch_id or create_epoch_id()
         with usage_scope("vision"):
             async def _describe_one(image: LLMInlineImage) -> ImageDescription:
                 async with self._semaphore:
-                    return await self._describe_inline_single(image, session)
+                    return await self._describe_inline_single(image, session, epoch_id)
 
             bounded_images = images[:MAX_IMAGES_PER_PREPROCESSING_REQUEST]
             results = await asyncio.gather(
@@ -174,10 +183,13 @@ class VisionImagePreprocessor(ImagePreprocessor):
                     descriptions.append(result)
             return descriptions
 
-    async def _describe_single(self, image_url: str, session: SessionIdentity) -> ImageDescription:
+    async def _describe_single(
+        self, image_url: str, session: SessionIdentity, epoch_id: str
+    ) -> ImageDescription:
         try:
             request = LLMRequest(
                 session=session,
+                epoch_id=epoch_id,
                 model=self._model,
                 system_prompt=self._prompt,
                 messages=[
@@ -221,11 +233,12 @@ class VisionImagePreprocessor(ImagePreprocessor):
             )
 
     async def _describe_inline_single(
-        self, image: LLMInlineImage, session: SessionIdentity
+        self, image: LLMInlineImage, session: SessionIdentity, epoch_id: str
     ) -> ImageDescription:
         try:
             request = LLMRequest(
                 session=session,
+                epoch_id=epoch_id,
                 model=self._model,
                 system_prompt=self._prompt,
                 messages=[

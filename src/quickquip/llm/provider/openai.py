@@ -140,8 +140,6 @@ class OpenAIProviderClient(BaseProviderClient):
             payload["reasoning_effort"] = directive.effort
             if directive.thinking_type_enabled:
                 payload["thinking"] = {"type": "enabled"}
-        if self.config.user_agent:
-            headers["user-agent"] = self.config.user_agent
         if self.config.extra_body:
             payload.update(self.config.extra_body)
         if request.allow_tool_calls and request.tools:
@@ -157,7 +155,16 @@ class OpenAIProviderClient(BaseProviderClient):
                 for spec in request.tools
             ]
             payload["tool_choice"] = request.tool_choice
-        return url, headers, payload
+        headers = self._assemble_headers(request, headers)
+        # These protocols retain adapter-owned authentication precedence.
+        for key in tuple(headers):
+            if key.lower() in ("authorization", "content-type") and key not in (
+                "authorization", "content-type",
+            ):
+                del headers[key]
+        headers["authorization"] = f"Bearer {self._get_api_key()}"
+        headers["content-type"] = "application/json"
+        return url, headers, self._project_body(request, payload)
 
     @staticmethod
     def _parse_response(data: dict[str, Any], fallback_model: str) -> LLMResponse:

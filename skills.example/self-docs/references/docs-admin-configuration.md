@@ -244,6 +244,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `stream_enabled` | 是否启用 SSE 流式响应 | `true` |
 | `aliases` | 有序别名对象数组，如 `[{"alias":"gpt4","model":"gpt-5.4"}]` | `[]` |
 | `headers` | 注入到每次请求的额外 HTTP 头 | — |
+| `client_fingerprint` | 渠道固定字段，选择请求指纹 Profile；见[请求指纹 Profile](client-fingerprints.md) | `default` |
 | `user_agent` | 自定义 User-Agent 请求头 | — |
 | `extra_body` | 注入到每次请求体的额外 JSON 对象，模型覆盖时整体替换 | — |
 | `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
@@ -287,7 +288,7 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 > **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 
-> **协议适配说明**：`claude` 协议的请求默认带上完整的 Claude Code 客户端指纹头（`anthropic-version`、`anthropic-beta`、`x-app: cli`、全套 `x-stainless-*` 运行时遥测头、`anthropic-dangerous-direct-browser-access` 等），User-Agent 与 URL（`/messages?beta=true`）均对齐真实 claude-cli 客户端。`x-stainless-os` 按宿主 OS 动态探测。所有指纹头均可通过 `headers` 配置大小写无关地覆盖，`user_agent` 配置项优先级最高。
+> **协议适配说明**：`default` Profile 保留 `claude` 协议当前的 Claude Code 指纹头与 `/messages?beta=true` URL；`x-stainless-os` 按宿主 OS 动态探测。Profile 指纹值由 TOML 文件定义。附加头按大小写无关覆盖，`user_agent` 参数优先级最高。`quickquip` Profile 使用自有品牌，四个专有头由该 Profile 管理；全局 `settings.runtime.client_cluster` 可配置部署群标识。详情见[请求指纹 Profile](client-fingerprints.md)。
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
 

@@ -64,6 +64,7 @@ class ImagesMixin:
         include_recent_images: bool,
         sensitive: SensitiveFilter,
         session: SessionIdentity | None = None,
+        epoch_id: str | None = None,
     ) -> dict[str, object] | ImagePreprocessingOutcome:
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
@@ -115,7 +116,8 @@ class ImagesMixin:
                 )
 
             raw_descriptions = await self.image_preprocessor.describe_images(
-                [candidate.url for candidate in image_plan.candidates], session=session,
+                [candidate.url for candidate in image_plan.candidates],
+                session=session, epoch_id=epoch_id,
             )
             description_match = match_image_descriptions(
                 image_plan.candidates,

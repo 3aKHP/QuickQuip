@@ -28,6 +28,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
 | [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/llm-configuration.md](admin/llm-configuration.md) | LLM 数据库配置管理——迁移、草稿保存与应用、JSON 交换、备份恢复及 1.16.1 回退 |
+| [admin/client-fingerprints.md](admin/client-fingerprints.md) | 请求指纹 Profile——品牌 UA、安装与纪元身份及模板配置 |
 | [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、LLM 配置数据库、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
 | [admin/tool-discovery.md](admin/tool-discovery.md) | LLM 工具发现配置——大量 MCP 工具接入时的 `tool_search`、`tool_list`、常驻工具和排障建议 |
 | [admin/mcp-servers.md](admin/mcp-servers.md) | MCP Server 接入指南——transport 选择、接入清单、最小 http 示例与排障 |

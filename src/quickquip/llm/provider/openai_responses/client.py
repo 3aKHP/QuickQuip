@@ -64,8 +64,6 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
             "authorization": f"Bearer {self._get_api_key()}",
             "content-type": "application/json",
         }
-        if self.config.user_agent:
-            headers["user-agent"] = self.config.user_agent
         prepared_images = await self._prepare_request_images(request.messages)
         payload = build_responses_payload(
             request,
@@ -75,7 +73,16 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         )
         if self.config.extra_body:
             payload.update(self.config.extra_body)
-        return url, headers, payload
+        headers = self._assemble_headers(request, headers)
+        # These protocols retain adapter-owned authentication precedence.
+        for key in tuple(headers):
+            if key.lower() in ("authorization", "content-type") and key not in (
+                "authorization", "content-type",
+            ):
+                del headers[key]
+        headers["authorization"] = f"Bearer {self._get_api_key()}"
+        headers["content-type"] = "application/json"
+        return url, headers, self._project_body(request, payload)
 
     def _parse_response(self, data: dict[str, Any], fallback_model: str) -> LLMResponse:
         return parse_responses_body(

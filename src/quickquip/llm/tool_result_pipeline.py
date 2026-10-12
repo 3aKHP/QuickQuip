@@ -69,6 +69,7 @@ class ToolResultPipeline:
     def __init__(self, *, provider, request: LLMRequest, context, image_preprocessor=None):
         self._image_preprocessor = image_preprocessor
         self._session = request.session
+        self._epoch_id = request.epoch_id
         self._non_vision_model = context.model in provider.non_vision_models
         self._scope_key = getattr(context, "chat_scope", None) or str(
             getattr(context, "group_id", "?")
@@ -183,7 +184,7 @@ class ToolResultPipeline:
                 is_error=result.is_error,
             )
         descriptions = await self._image_preprocessor.describe_inline_images(
-            result.images, session=self._session,
+            result.images, session=self._session, epoch_id=self._epoch_id,
         )
         descriptions_by_label = {
             description.source_url: description

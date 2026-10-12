@@ -1078,7 +1078,7 @@ async def test_non_vision_strips_even_when_preprocessor_fails(
 
     # Preprocessor that always fails
     class _FailingPreprocessor:
-        async def describe_images(self, image_urls, *, session=None):
+        async def describe_images(self, image_urls, *, session=None, epoch_id=None):
             return [
                 ImageDescription(source_url=url, text_description="", success=False, error="fail")
                 for url in image_urls

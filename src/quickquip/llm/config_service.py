@@ -25,8 +25,12 @@ DEFAULT_CONFIG_DB = DATA_DIR / "llm_config.db"
 
 
 class ConfigService:
-    def __init__(self, path=DEFAULT_CONFIG_DB):
+    def __init__(self, path=DEFAULT_CONFIG_DB, *, config_dir=None):
         self.path = Path(path)
+        self.config_dir = Path(config_dir) if config_dir else self.path.parent.parent / "config"
+        from quickquip.llm.client_fingerprints.catalog import get_catalog
+
+        get_catalog(self.config_dir)
         self._references_lock = FileLock(str(self.path) + ".references.lock", timeout=10)
         self.store = ConfigStore(self.path)
         self.tasks = ConfigTaskQueue(self.store)
@@ -40,6 +44,8 @@ class ConfigService:
         with FileLock(str(self.path) + ".init.lock", timeout=60):
             if self.path.exists():
                 # An existing database is authoritative, including failure/new-schema cases.
+                with self.shared_lock:
+                    self.store.upgrade()
                 self.store.verify()
                 return self.read()
             report = None
@@ -50,7 +56,7 @@ class ConfigService:
                 document, report = migrate_legacy(legacy)
             else:
                 document = empty_document()
-            document = validate_document(document)
+            document = validate_document(document, config_dir=self.config_dir)
             self.store.create(document, report, str(legacy or ""))
         return self.read()
 
@@ -98,7 +104,7 @@ class ConfigService:
             return {**self.replace(document, expected_revision), "migration": report}
 
     def replace(self, document, expected_revision):
-        document = validate_document(copy.deepcopy(document))
+        document = validate_document(copy.deepcopy(document), config_dir=self.config_dir)
         with self.shared_lock, self.store.connect(write=True) as conn:
             meta = self._check_revision(conn, expected_revision)
             if dumps(document) == meta["document"]:
@@ -187,7 +193,7 @@ class ConfigService:
                 if row is None:
                     raise ConfigError("not_found", "Snapshot not found")
                 document = json.loads(row[0])
-            validate_document(document)
+            validate_document(document, config_dir=self.config_dir)
             if kind == "probe":
                 provider = next(
                     (p for p in document["providers"] if p["id"] == payload["provider_id"]), None
@@ -406,7 +412,8 @@ class ConfigService:
         return self.replace(self.read(revision)["document"], expected_revision)
 
     def validate(self, document=None):
-        return validation_report(self.read()["document"] if document is None else document)
+        return validation_report(self.read()["document"] if document is None else document,
+                                 config_dir=self.config_dir)
 
     def preview_import(self, document, expected_revision):
         draft = self.read()
@@ -416,15 +423,16 @@ class ConfigService:
                 "Draft changed since it was read",
                 details={"actual": draft["revision"]},
             )
-        normalized = validate_document(document)
+        normalized = validate_document(document, config_dir=self.config_dir)
         return {
-            **validation_report(normalized, draft["document"]),
+            **validation_report(normalized, draft["document"], config_dir=self.config_dir),
             "document": normalized,
             "expected_draft_revision": draft["revision"],
         }
 
     def diff(self, source="draft", target="published"):
-        return validation_report(self.read(source)["document"], self.read(target)["document"])
+        return validation_report(self.read(source)["document"], self.read(target)["document"],
+                                 config_dir=self.config_dir)
 
     def backup(self, destination):
         destination = Path(destination)
@@ -455,8 +463,8 @@ class ConfigService:
         candidate = ConfigStore(source)
         candidate.verify()
         recovered = ConfigService(source)
-        validate_document(recovered.read()["document"])
-        validate_document(recovered.read("published")["document"])
+        validate_document(recovered.read()["document"], config_dir=self.config_dir)
+        validate_document(recovered.read("published")["document"], config_dir=self.config_dir)
         backup = self.path.with_name(f"{self.path.name}.{time.time_ns()}.backup")
         self.backup(backup)
         with self.shared_lock, candidate.connect() as origin, sqlite3.connect(self.path) as target:

@@ -52,6 +52,9 @@ def _register_root_redirect(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     load_web_env()
+    from quickquip.llm.client_fingerprints.catalog import get_catalog
+
+    get_catalog()
     # web 进程独立运行，不经过 bot 的 startup；显式加载一次贴吧帖子池快照
     from quickquip.app.message_pipeline import tieba_service
 

@@ -261,7 +261,7 @@ function providersPanel(store) {
     PARAM_LABELS: library.PARAM_LABELS, PARAM_SOURCE_LABELS: library.PARAM_SOURCE_LABELS,
     PROTOCOL_LABELS: library.PROTOCOL_LABELS, fieldTemplate: library.fieldTemplate,
     isObject: library.isObject, providerEnvVars: library.providerEnvVars,
-  }, 'selected,addProvider,removeProvider,onIdInput,current,patch')
+  }, 'selected,addProvider,removeProvider,onIdInput,current,patch,fingerprintOptions')
 }
 
 test('new provider identity survives panel remount and index shifts, then locks after save', async () => {
@@ -625,4 +625,30 @@ test('import preview labels draft source while publish diff labels published', (
   assert.ok(exchange.includes('当前草稿：'))
   assert.ok(!exchange.includes('已发布：'))
   assert.ok(publish.includes('已发布'))
+})
+
+
+test('provider Profile options follow protocol and selection persists through draft save', async () => {
+  let sent
+  const store = createStore({
+    saveLlmConfiguration: async document => { sent = structuredClone(document); return { revision: 6, document } },
+    fetchLlmConfigStatus: async () => status,
+  })
+  const document = structuredClone(initial.document)
+  document.providers = [{ id: 'test', protocol: 'openai', client_fingerprint: 'default', models: [] }]
+  store.accept({ revision: 5, document })
+  store.metadata.value = { client_fingerprints: [
+    { id: 'default', label: 'Default', protocols: ['openai', 'claude'] },
+    { id: 'quickquip', label: 'QuickQuip', protocols: ['openai', 'claude'] },
+    { id: 'custom', label: 'Custom', protocols: ['claude'] },
+  ] }
+  const panel = providersPanel(store)
+  assert.deepEqual(normalized(panel.fingerprintOptions.value.map(entry => entry.value)), ['default', 'quickquip'])
+  panel.patch({ client_fingerprint: 'quickquip' })
+  store.updateSettingsSection('runtime', { enabled: false, client_cluster: 'synthetic-cluster' })
+  await store.save()
+  assert.equal(sent.providers[0].client_fingerprint, 'quickquip')
+  assert.equal(sent.settings.runtime.client_cluster, 'synthetic-cluster')
+  panel.patch({ protocol: 'claude' })
+  assert.deepEqual(normalized(panel.fingerprintOptions.value.map(entry => entry.value)), ['default', 'quickquip', 'custom'])
 })

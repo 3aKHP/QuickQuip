@@ -67,7 +67,7 @@ async def test_blocked_image_description_stops_main_provider(
     provider.non_vision_models.append("gpt-test")
 
     class _BlockedDescriptionPreprocessor:
-        async def describe_images(self, image_urls, *, session=None):
+        async def describe_images(self, image_urls, *, session=None, epoch_id=None):
             return [
                 ImageDescription(
                     source_url=url,
@@ -107,7 +107,7 @@ async def test_soft_image_description_continues_to_main_provider(
     provider.non_vision_models.append("gpt-test")
 
     class _SoftDescriptionPreprocessor:
-        async def describe_images(self, image_urls, *, session=None):
+        async def describe_images(self, image_urls, *, session=None, epoch_id=None):
             return [
                 ImageDescription(
                     source_url=url,

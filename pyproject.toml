@@ -17,6 +17,7 @@ dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.package-data]
 "quickquip.sts" = ["*.json"]
+"quickquip.llm.client_fingerprints" = ["defaults/*.toml"]
 
 [tool.ruff]
 line-length = 100

@@ -156,7 +156,7 @@ def _audit(request, action, target="draft"):
 
 @router.get("/metadata")
 def get_metadata():
-    return metadata()
+    return metadata(config_dir=get_config_service().config_dir)
 
 
 @router.get("")
@@ -290,7 +290,9 @@ def get_effective(provider_id: str, model: str, source: str = "draft"):
     result = get_config_service().read(_source(source))
     return {
         "revision": result["revision"],
-        "parameters": effective_parameters(result["document"], provider_id, model),
+        "parameters": effective_parameters(
+            result["document"], provider_id, model, config_dir=get_config_service().config_dir,
+        ),
     }
 
 

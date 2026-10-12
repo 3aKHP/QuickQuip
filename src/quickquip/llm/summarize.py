@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import create_session_identity
 
 import logging
@@ -203,6 +204,7 @@ async def _run_summary_cascade(
     last_error: Exception | None = None
 
     session = create_session_identity()
+    epoch_id = create_epoch_id()
     for hop, (provider_id, model, provider_config) in enumerate(resolved, start=1):
         char_budget, output_cap = _hop_limits(provider_config, model, max_output_tokens)
         chat_log, was_truncated = _truncate_chat_log(raw_log, char_budget)
@@ -212,6 +214,7 @@ async def _run_summary_cascade(
         effective_config = replace(provider_config, stream_enabled=False)
         req = LLMRequest(
             session=session,
+            epoch_id=epoch_id,
             model=model,
             system_prompt=system_prompt,
             messages=[user_message],

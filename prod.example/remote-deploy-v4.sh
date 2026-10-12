@@ -208,7 +208,7 @@ def copy_personas(source, target):
                 copy_file(original, copied)
 
 try:
-    if mode in ("migrated", "personas"):
+    if mode in ("migrated", "personas", "tree"):
         copy_personas(Path(source), Path(destination))
     else:
         copy_file(Path(source), Path(destination), replace=mode == "replace")
@@ -263,6 +263,9 @@ initialize_configuration() {
         local previous_config="$Root/releases/$Prev/config" candidate_config="$Root/releases/$release/config"
         if [ -d "$previous_config/personas" ]; then
             copy_configuration_assets migrated "$previous_config/personas" "$candidate_config/personas"
+        fi
+        if [ -d "$previous_config/client_profiles" ]; then
+            copy_configuration_assets tree "$previous_config/client_profiles" "$candidate_config/client_profiles"
         fi
         if [ -f "$previous_config/generation.toml" ] && [ ! -f "$candidate_config/generation.toml" ]; then
             copy_configuration_assets file "$previous_config/generation.toml" "$candidate_config/generation.toml"

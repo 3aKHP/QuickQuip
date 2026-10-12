@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.llm.client_fingerprints.catalog import FingerprintRuntime
+
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
@@ -111,6 +113,8 @@ class RuntimeConfig:
     # 出站「@名字」艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却）。
     mention_cooldown_seconds: float = 600.0
 
+    client_cluster: str = ""
+
 
 @dataclass(slots=True)
 class ToolsConfig:
@@ -217,6 +221,8 @@ class ProviderConfig:
     default_model: str
     models: list[str]
     enabled: bool = True  # false = 暂时禁用：不展示、不探活、cascade 跳过、拒绝切换
+    client_fingerprint: str = "default"
+    fingerprint_runtime: FingerprintRuntime | None = None
     non_vision_models: list[str] = field(default_factory=list)
     timeout_seconds: float = 45.0
     temperature: float = 0.8

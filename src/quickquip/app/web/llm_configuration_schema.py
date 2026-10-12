@@ -63,6 +63,7 @@ def document_schema():
             "default_model": {"type": "string"},
             "enabled": {"type": "boolean"},
             "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+            "client_fingerprint": {"type": "string", "default": "default"},
             "fallback_urls": {"type": "array", "items": {"type": "string"}},
             "proxy": {"type": "string"},
             "auth_method": {"enum": ["api_key", "bearer"]},
@@ -250,6 +251,9 @@ def enrich_openapi(schema):
             "route_names": array(string),
             "parameters": {"type": "object"},
             "settings": {"type": "object"},
+            "client_fingerprints": array(object_schema({
+                "id": string, "label": string, "protocols": array(string),
+            })),
         }
     )
     components["ConfigProviders"] = object_schema(

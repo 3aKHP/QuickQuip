@@ -1,6 +1,7 @@
 """Bot-owned consumer of immutable configuration control operations."""
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import create_session_identity
 
 import asyncio
@@ -32,7 +33,16 @@ def initialize_for_bot(service, legacy_path=None, *, wait_seconds=20, sleep=time
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             if service.path.exists():
-                return service.read("published")
+                try:
+                    service.store.verify()
+                    return service.read("published")
+                except ConfigError as pending:
+                    if pending.code != "unsupported_schema" or not isinstance(
+                        pending.details, dict,
+                    ):
+                        raise
+                    if pending.details.get("actual") != 1:
+                        raise
             sleep(min(0.25, max(0, deadline - time.monotonic())))
         raise ConfigError(
             "migration_required",
@@ -190,6 +200,7 @@ class ConfigRuntimeWorker:
 
     async def _probe(self, operation, config):
         session = create_session_identity()
+        epoch_id = create_epoch_id()
         payload = operation["payload"]
         provider = resolve_model_provider(config, payload["provider_id"], payload["model"])
         with configuration_pricing(config):
@@ -206,6 +217,7 @@ class ConfigRuntimeWorker:
                 )
                 request = LLMRequest(
                     session=session,
+                    epoch_id=epoch_id,
                     model=payload["model"], system_prompt=payload.get("system_prompt", ""),
                     messages=[LLMConversationMessage(role="user", content=payload["user_prompt"])],
                     max_output_tokens=payload.get("max_output_tokens", 64),

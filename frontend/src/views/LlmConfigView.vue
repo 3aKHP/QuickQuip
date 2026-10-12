@@ -168,7 +168,7 @@ watch(section, value => {
 
 const SETTINGS_BLOCKS: Record<string, SettingsBlock[]> = {
   general: [
-    { title: '总开关与默认', section: 'runtime', fields: ['enabled', 'memory_enabled', 'default_provider', 'default_persona'], tip: 'LLM 功能总开关；默认渠道留空时自动使用第一个启用的渠道。' },
+    { title: '总开关与默认', section: 'runtime', fields: ['enabled', 'memory_enabled', 'default_provider', 'default_persona', 'client_cluster'], tip: 'LLM 功能总开关；默认渠道留空时自动使用第一个启用的渠道。' },
   ],
   conversation: [
     { title: '触发规则', section: 'triggers' },

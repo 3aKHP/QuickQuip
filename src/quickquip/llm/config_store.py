@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import os
 import re
 import uuid
@@ -11,7 +12,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_meta (
@@ -66,7 +67,7 @@ def _columns(fields):
     )
 
 
-def declared_schema():
+def declared_schema(*, legacy=False):
     from quickquip.llm.config_document import metadata
 
     registry = metadata()
@@ -81,6 +82,8 @@ def declared_schema():
     ]
     for name, fields in registry["settings"].items():
         fields = {key: spec for key, spec in fields.items() if key != "model_cascade"}
+        if legacy and name == "runtime":
+            fields.pop("client_cluster", None)
         if name == "mcp":
             fields["servers"] = {"type": "array"}
         statements.append(
@@ -110,11 +113,11 @@ def _schema_tokens(sql):
 
 
 @lru_cache(maxsize=1)
-def expected_schema_objects():
+def expected_schema_objects(version=SCHEMA_VERSION):
     """Use SQLite's own stored DDL as the schema version's reference contract."""
     conn = sqlite3.connect(":memory:")
     try:
-        conn.executescript(_SCHEMA + declared_schema())
+        conn.executescript(_SCHEMA + declared_schema(legacy=version == 1))
         return {
             (row[0], row[1]): _schema_tokens(row[2])
             for row in conn.execute("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL")
@@ -194,10 +197,10 @@ class ConfigStore:
             conn.close()
 
     @staticmethod
-    def _verify_schema(conn):
+    def _verify_schema(conn, version=SCHEMA_VERSION):
         from quickquip.llm.config_document import ConfigError
 
-        expected = expected_schema_objects()
+        expected = expected_schema_objects(version)
         actual = {
             (row[0], row[1]): _schema_tokens(row[2])
             for row in conn.execute("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL")
@@ -213,6 +216,46 @@ class ConfigStore:
                     "changed": sorted(name for _, name in changed),
                 },
             )
+
+    def upgrade(self):
+        """Atomically extend a verified v1 database, preserving immutable snapshots."""
+        from quickquip.llm.config_document import ConfigError
+
+        conn = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA synchronous=FULL")
+            row = conn.execute(
+                "SELECT schema_version FROM config_meta WHERE singleton=1"
+            ).fetchone()
+            if row and row[0] == SCHEMA_VERSION:
+                self._verify_schema(conn)
+                return
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT schema_version FROM config_meta WHERE singleton=1"
+            ).fetchone()
+            if row and row[0] == SCHEMA_VERSION:
+                self._verify_schema(conn)
+            elif row and row[0] == 1:
+                self._verify_schema(conn, 1)
+                conn.execute('ALTER TABLE runtime_settings ADD COLUMN client_cluster TEXT')
+                conn.execute("UPDATE runtime_settings SET client_cluster=''")
+                conn.execute("UPDATE config_meta SET schema_version=?", (SCHEMA_VERSION,))
+                self._verify_schema(conn)
+            else:
+                raise ConfigError("unsupported_schema", "Unsupported configuration schema")
+            conn.commit()
+        except sqlite3.DatabaseError as exc:
+            conn.rollback()
+            if "readonly" in str(exc).lower():
+                raise PermissionError(errno.EROFS, "Writable configuration initialization required")
+            raise ConfigError("unsupported_schema", "Configuration schema upgrade failed") from None
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def verify(self):
         """Check a schema-compatible backup before it can replace live state."""

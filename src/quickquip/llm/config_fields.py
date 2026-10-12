@@ -32,6 +32,8 @@ PROVIDER_FIXED = {
     "api_key_env",
     "default_model",
     "enabled",
+    "client_fingerprint",
+    "fingerprint_runtime",
     "headers",
     "fallback_urls",
     "proxy",
@@ -214,7 +216,10 @@ def field_metadata(annotation: Any, rule: str, *, default: Any = None, inherit=F
     return result
 
 
-def metadata() -> dict:
+def metadata(*, config_dir=None) -> dict:
+    from quickquip.llm.client_fingerprints.catalog import profile_metadata
+    from quickquip.common.paths import CONFIG_DIR
+
     settings = {}
     for name, cls in SETTINGS.items():
         defaults = asdict(cls())
@@ -231,6 +236,7 @@ def metadata() -> dict:
             parameter_defaults[f.name] = f.default_factory()
     return {
         "format_version": 1,
+        "client_fingerprints": profile_metadata(config_dir or CONFIG_DIR),
         "settings": settings,
         "parameters": {
             k: {

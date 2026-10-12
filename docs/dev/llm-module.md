@@ -1,5 +1,11 @@
 # QuickQuip LLM 模块说明
 
+## 请求指纹与身份投影
+
+`client_fingerprints` 包拥有 TOML Profile 解析、启动目录快照、安装身份持久化与请求投影。Provider 固定字段 `client_fingerprint` 选择模板，编译时绑定全局 cluster 和数据目录；模型覆盖保留绑定。四协议在各自认证与 Body 映射边界调用共享 Header/Body 投影接口。Body 接口当前保持载荷原样，后续协议策略可使用同一配置文件簇承载静态特征。
+
+`LLMRequest.session` 是业务 Session，`epoch_id` 是不可变的请求纪元快照。EpochManager 拥有聊天窗口 UUID，TurnRequestAssembler 在历史加载及预算重组后取值；独立任务入口创建临时纪元，工具和识图按调用链传递。底层自有 Profile 请求必须提供 UUIDv4。动态投影头不参与 Responses 内容兼容指纹。管理员配置与文件格式见[请求指纹 Profile](../admin/client-fingerprints.md)。
+
 ## 1. 模块定位
 
 QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发扩展层**。

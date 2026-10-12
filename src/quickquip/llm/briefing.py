@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
 from quickquip.llm.session import create_session_identity
 
 import logging
@@ -150,6 +151,7 @@ async def generate_daily_briefing(
     last_error: Exception | None = None
 
     session = create_session_identity()
+    epoch_id = create_epoch_id()
     for entry in cascade:
         if entry == "@default":
             provider_id = default_provider_id
@@ -177,6 +179,7 @@ async def generate_daily_briefing(
             continue
         req = LLMRequest(
             session=session,
+            epoch_id=epoch_id,
             model=model,
             system_prompt=system_prompt,
             messages=[user_message],
