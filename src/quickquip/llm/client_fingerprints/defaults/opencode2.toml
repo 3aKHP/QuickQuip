@@ -5,6 +5,9 @@ id = "opencode2"
 label = "OpenCode 2 (2.0.27 native)"
 user_agent = "opencode/latest/2.0.27/cli"
 
+[protocols.openai]
+header_order = ["Authorization", "Content-Type", "User-Agent", "b3", "traceparent", "x-opencode-client", "x-opencode-project", "x-opencode-session", "x-opencode-session-id", "x-session-affinity", "x-session-id", "Connection", "Accept", "Host", "Accept-Encoding", "Content-Length"]
+
 [protocols.openai.headers]
 accept = "*/*"
 accept-encoding = "gzip, deflate, br, zstd"

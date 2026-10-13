@@ -465,6 +465,12 @@ class BaseProviderClient:
         kwargs: dict[str, Any] = {"timeout": timeout}
         if self._proxy:
             kwargs["proxy"] = self._proxy
+        from quickquip.llm.client_fingerprints.assembly import selected_profile
+        from quickquip.llm.client_fingerprints.transport_layout import request_layout_hook
+
+        order = selected_profile(self.config).for_protocol(self.config.protocol).header_order
+        if order:
+            kwargs["event_hooks"] = {"request": [request_layout_hook(order)]}
         return kwargs
 
     def _get_api_key(self) -> str:

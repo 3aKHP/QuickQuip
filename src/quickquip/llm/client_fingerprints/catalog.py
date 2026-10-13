@@ -30,6 +30,7 @@ class ProtocolFingerprint:
     headers: tuple[tuple[str, str], ...] = ()
     bindings: tuple[tuple[str, str], ...] = ()
     body: ChatBodyPolicy | None = None
+    header_order: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,14 +140,19 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
         raise ConfigError("invalid_profile", "QuickQuip requires its four bindings", location)
     entries = []
     for protocol, entry in protocols.items():
-        _table(entry, ("headers", "bindings", "body"), location)
+        _table(entry, ("headers", "bindings", "body", "header_order"), location)
         static = _headers(entry.get("headers", {}), ident, location)
         dynamic = _headers(entry.get("bindings", {}), ident, location, bindings=True)
         names = [k.lower() for k, _ in (*headers, *bindings, *static, *dynamic)]
         if len(names) != len(set(names)):
             raise ConfigError("invalid_profile", "Duplicate Profile header", location)
         body = parse_body_policy(entry["body"], protocol, location) if "body" in entry else None
-        entries.append((protocol, ProtocolFingerprint(static, dynamic, body)))
+        order = entry.get("header_order", [])
+        if (not isinstance(order, list)
+                or any(not isinstance(k, str) or not _HEADER.fullmatch(k) for k in order)
+                or len({k.lower() for k in order}) != len(order)):
+            raise ConfigError("invalid_profile", "Invalid Header order", location)
+        entries.append((protocol, ProtocolFingerprint(static, dynamic, body, tuple(order))))
     return ClientFingerprintProfile(ident, label, ua, headers, bindings, tuple(entries))
 
 

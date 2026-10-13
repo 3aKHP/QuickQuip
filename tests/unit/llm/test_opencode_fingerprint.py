@@ -102,6 +102,11 @@ async def test_final_native_layout_and_headers(tmp_path, capture, stream):
     assert wire.headers["user-agent"] == "opencode/latest/2.0.27/cli"
     assert wire.headers["accept"] == "*/*"
     assert wire.headers["accept-encoding"] == "gzip, deflate, br, zstd"
+    assert [n.decode() for n, _ in wire.headers.raw] == [
+        "Authorization", "Content-Type", "User-Agent", "b3", "traceparent", "x-opencode-client",
+        "x-opencode-project", "x-opencode-session", "x-opencode-session-id", "x-session-affinity",
+        "x-session-id", "Connection", "Accept", "Host", "Accept-Encoding", "Content-Length",
+    ]
     assert re.fullmatch(r"ses_[0-9a-f]{12}[0-9A-Za-z]{14}", wire.headers["x-opencode-session"])
     assert {wire.headers[n] for n in ("x-opencode-session-id", "x-opencode-session",
             "x-session-id", "x-session-affinity")} == {opencode_session_id(req.session)}
