@@ -27,6 +27,8 @@ python -m quickquip.llm.config_cli init
 
 `published_revision` 是已接纳的快照，`loaded_revision` 是 bot 实际加载版本。启动和重启加载已发布配置。心跳超过 20 秒未更新会显示过期；Web 的模型或 MCP 实例不会代表 bot 状态。MCP 准备中或部分服务不可用会单独显示。价格修改影响新任务，历史费用与已经开始的任务保持原价格。
 
+核心状态包含配置与业务存储的初始化结果。部署使用 `status --require-loaded` 检查新鲜心跳、发布修订加载和核心就绪；业务库不可用时返回失败。MCP 的准备或降级状态单独报告。
+
 每次 LLM 任务固定配置与资源至结束。MCP 变更建立新资源代际，旧任务继续使用旧连接。报告时间变更替换对应调度，已经开始的报告继续执行，不补发因调整时间错过的消息。配置修订号覆盖配置库；人格文件、Skill 内容、群覆盖与其他业务数据保持各自存储职责。
 
 ## 模型参数与引用
@@ -51,6 +53,7 @@ python -m quickquip.llm.config_cli import llm-export.json --expected-revision 1
 python -m quickquip.llm.config_cli diff
 python -m quickquip.llm.config_cli apply --expected-revision 2 --request-id unique-request-id
 python -m quickquip.llm.config_cli status
+python -m quickquip.llm.config_cli status --require-loaded
 python -m quickquip.llm.config_cli status --operation returned-operation-id
 python -m quickquip.llm.config_cli backup data/llm-config-backup.db
 python -m quickquip.llm.config_cli restore --snapshot 1 --expected-revision 2

@@ -163,7 +163,45 @@ def test_migration_is_idempotent(tmp_path: Path):
         count = conn.execute("SELECT COUNT(*) c FROM agent_loops").fetchone()["c"]
         versions = conn.execute("SELECT COUNT(*) c FROM agent_schema_migrations").fetchone()["c"]
     assert count == 4
-    assert versions == 2
+    assert versions == 3
+
+
+@pytest.mark.parametrize("old_version", [1, 2])
+def test_upgrade_detaches_missing_messages_and_preserves_turn_evidence(tmp_path, old_version):
+    store = LLMStore(tmp_path / "llm.db")
+    handle = _begin(store)
+    missing = store.commit_turn(handle, _response(native={"evidence": "preserved"}),
+                                _declarations(1), [])
+    retained = store.commit_turn(handle, _response("retained message"), [], [])
+    identity, _ = store.get_or_create_chat_session("1001")
+    with store._connect() as conn:
+        # Recreate the pre-fix schema, then delete history through its old behavior.
+        conn.execute("DROP TRIGGER IF EXISTS detach_agent_turn_message")
+        conn.execute("DELETE FROM agent_schema_migrations WHERE version > ?", (old_version,))
+        if old_version == 1:
+            for table in ("agent_scopes", "session_archives"):
+                for column in ("session_id", "session_created_at"):
+                    conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        conn.execute("DELETE FROM conversation_messages WHERE id = ?", (missing.message_row_id,))
+        native_before = conn.execute("SELECT native_state_json FROM agent_turns WHERE turn_id=?",
+                                     (missing.turn_id,)).fetchone()[0]
+
+    upgraded = LLMStore(store.path)
+    assert not upgraded._unavailable
+    assert upgraded.count_conversation_messages("1001") == 2  # user + retained assistant
+    with upgraded._connect() as conn:
+        rows = conn.execute("SELECT message_row_id,native_state_json FROM agent_turns "
+                            "WHERE loop_id=? ORDER BY turn_index", (handle.loop_id,)).fetchall()
+        assert rows[0]["message_row_id"] is None
+        assert rows[0]["native_state_json"] == native_before
+        assert rows[1]["message_row_id"] == retained.message_row_id
+        assert conn.execute("SELECT tool_name FROM agent_tool_executions "
+                            "WHERE turn_id=?", (missing.turn_id,)).fetchone()[0] == "get_identity"
+    if old_version == 2:
+        assert upgraded.get_chat_session("1001") == identity
+    reopened = LLMStore(store.path)
+    assert not reopened._unavailable
+    assert reopened.count_conversation_messages("1001") == 2
 
 
 def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monkeypatch):
@@ -235,7 +273,7 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
             == original_rows
         )
         assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 4
-        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 3
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

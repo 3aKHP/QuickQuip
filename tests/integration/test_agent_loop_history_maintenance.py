@@ -113,6 +113,36 @@ async def test_tool_loop_history_replays_with_tool_facts(tmp_path: Path, patch_p
 # ── 撤回（§9.2） ──────────────────────────────────────────────────
 
 
+async def test_reply_crop_detaches_turn_and_preserves_session_and_tool_evidence(tmp_path):
+    service = _store_service(tmp_path)
+    handle, _ = _seed_loop_with_turn(service.store)
+    store = service.store
+    identity, generation = store.get_or_create_chat_session("1001")
+    store.append_session_reply("1001", identity, generation, user_message=None,
+                               assistant_text="retained reply", keep_last=1)
+    assert [row["content"] for row in store.list_recent_conversation_messages("1001", 10)] == [
+        "retained reply"
+    ]
+    loop = store.load_closed_loops("1001")[0]
+    assert loop.loop_id == handle.loop_id
+    assert loop.turns[0].message_row_id is None
+    assert loop.turns[0].tools[0].result["content"] == "镜子是群友。"
+    assert loop.turns[0].deliveries[0].qq_message_ids == ("qq-1",)
+    assert store.get_chat_session("1001") == identity
+
+
+async def test_delete_assistant_keeps_detached_redacted_turn(tmp_path):
+    service = _store_service(tmp_path)
+    _, record = _seed_loop_with_turn(service.store)
+    assert service.store.delete_turn_by_message_row("1001", record.message_row_id)
+    turn = service.store.load_closed_loops("1001")[0].turns[0]
+    assert turn.message_row_id is None
+    assert turn.text == "" and turn.parts == ()
+    assert turn.text_policy == "redacted"
+    assert turn.tools[0].result is None and turn.tools[0].arguments_json is None
+    assert turn.deliveries == ()
+
+
 async def test_recall_by_qq_id_masks_chunk_and_clears_evidence(tmp_path: Path):
     service = _store_service(tmp_path)
     _seed_loop_with_turn(service.store, text="这一段会被撤回。", qq_id="qq-9")

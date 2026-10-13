@@ -60,7 +60,9 @@ def parser() -> argparse.ArgumentParser:
     q.add_argument("--request-id", default=None)
     q = commands.add_parser("status")
     q.add_argument("--operation", help="查询异步任务 ID")
-    q.add_argument("--require-loaded", action="store_true", help="检查 bot 心跳及发布版本已加载")
+    q.add_argument(
+        "--require-loaded", action="store_true", help="检查 bot 心跳、发布版本加载及核心就绪"
+    )
     q = commands.add_parser("backup")
     q.add_argument("file", type=Path)
     q = commands.add_parser("restore")
@@ -126,6 +128,8 @@ def execute(args) -> dict:
             bot = status.get("bot")
             if not bot or bot["stale"] or bot["loaded_revision"] != status["published_revision"]:
                 raise ConfigError("bot_not_loaded", "bot 心跳过期或尚未加载发布版本")
+            if bot["components"].get("core", {}).get("state") != "ready":
+                raise ConfigError("bot_not_ready", "bot 核心尚未就绪，请检查配置与业务存储")
         return status
     if args.command == "backup":
         return {"backup": str(service.backup(args.file))}

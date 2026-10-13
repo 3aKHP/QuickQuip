@@ -59,7 +59,7 @@ from quickquip.llm.store_parts._base import _utc_now
 
 logger = logging.getLogger(__name__)
 
-_AGENT_SCHEMA_VERSION = 2
+_AGENT_SCHEMA_VERSION = 3
 
 # 逐条执行（§4.3.1：迁移事务内不得 executescript 隐式提交）。
 _AGENT_SCHEMA_DDL: tuple[str, ...] = (
@@ -382,7 +382,7 @@ class LoadedDelivery:
 class LoadedTurn:
     turn_id: str
     turn_index: int
-    message_row_id: int
+    message_row_id: int | None
     text: str
     parts: tuple[dict[str, Any], ...]
     native_state: dict[str, Any] | None
@@ -443,8 +443,7 @@ class AgentRecordsStoreMixin:
                     "VALUES (?, ?)",
                     (1, _utc_now()),
                 )
-                self._verify_agent_schema(conn)
-            if _AGENT_SCHEMA_VERSION not in applied_versions:
+            if 2 not in applied_versions:
                 for table in ("agent_scopes", "session_archives"):
                     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
                     for column in ("session_id", "session_created_at"):
@@ -452,8 +451,29 @@ class AgentRecordsStoreMixin:
                             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
                 conn.execute(
                     "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
-                    (_AGENT_SCHEMA_VERSION, _utc_now()),
+                    (2, _utc_now()),
                 )
+            if 3 not in applied_versions:
+                # History and execution records have independent retention periods.
+                conn.execute(
+                    "UPDATE agent_turns SET message_row_id = NULL "
+                    "WHERE message_row_id IS NOT NULL AND NOT EXISTS "
+                    "(SELECT 1 FROM conversation_messages m "
+                    "WHERE m.id = agent_turns.message_row_id)"
+                )
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS detach_agent_turn_message
+                    AFTER DELETE ON conversation_messages
+                    BEGIN
+                        UPDATE agent_turns SET message_row_id = NULL
+                        WHERE message_row_id = OLD.id;
+                    END
+                """)
+                conn.execute(
+                    "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (3, _utc_now()),
+                )
+            if not {1, 2, _AGENT_SCHEMA_VERSION}.issubset(applied_versions):
                 self._verify_agent_schema(conn)
             conn.commit()
         except BaseException:
@@ -1933,7 +1953,7 @@ class AgentRecordsStoreMixin:
     def delete_turn_by_message_row(self, scope_key: str, message_row_id: int) -> bool:
         """删除一个 Turn 的全部正文范围与交付内容（§9.3）。
 
-        保留协议需要的状态占位：Turn 行与主表行移除，工具声明保留名称与
+        移除主表行并保留已脱离消息的 Turn 占位，工具声明保留名称与
         终态（结果正文清空），Loop 非公开证据（native/owner）清除。
         """
         if self._unavailable:
