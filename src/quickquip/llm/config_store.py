@@ -14,6 +14,10 @@ from pathlib import Path
 
 SCHEMA_VERSION = 2
 
+# Snapshot-owned settings that do not require a relational lookup/index column.
+# Keep the schema-2 projection compatible with databases from existing installations.
+DOCUMENT_ONLY_SETTINGS = {"runtime": frozenset({"claude_code_device_id"})}
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_meta (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1), schema_version INTEGER NOT NULL,
@@ -81,7 +85,8 @@ def declared_schema(*, legacy=False):
         f"ON DELETE CASCADE);",
     ]
     for name, fields in registry["settings"].items():
-        fields = {key: spec for key, spec in fields.items() if key != "model_cascade"}
+        fields = {key: spec for key, spec in fields.items()
+                  if key != "model_cascade" and key not in DOCUMENT_ONLY_SETTINGS.get(name, ())}
         if legacy and name == "runtime":
             fields.pop("client_cluster", None)
         if name == "mcp":
@@ -373,4 +378,6 @@ def project_document(conn, document):
             conn.execute("INSERT INTO route_entries VALUES(?,?,?)", (name, order, dumps(entry)))
     for name, settings in document.get("settings", {}).items():
         conn.execute("INSERT INTO config_settings VALUES(?,?)", (name, dumps(settings)))
-        _insert_fields(conn, f"{name}_settings", {"singleton": 1}, settings)
+        projected = {k: v for k, v in settings.items()
+                     if k not in DOCUMENT_ONLY_SETTINGS.get(name, ())}
+        _insert_fields(conn, f"{name}_settings", {"singleton": 1}, projected)

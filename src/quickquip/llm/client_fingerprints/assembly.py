@@ -11,9 +11,16 @@ from quickquip.common.paths import DATA_DIR
 from quickquip.llm.client_fingerprints.catalog import (
     FingerprintRuntime, header_value, resolve_profile, validate_provider_headers,
 )
-from quickquip.llm.client_fingerprints.identity import client_version, load_install_id
+from quickquip.llm.client_fingerprints.identity import (
+    client_version, load_install_id, load_claude_device_id,
+)
 from quickquip.llm.config_errors import ConfigError
-from quickquip.llm.client_fingerprints.body_policy import project_chat_body
+from quickquip.llm.client_fingerprints.body_policy import ChatBodyPolicy, project_chat_body
+from quickquip.llm.client_fingerprints.claude_policy import (
+    ClaudeBodyPolicy, derive_beta, project_claude_body, validate_claude_overrides,
+)
+from quickquip.llm.client_fingerprints.retry_context import retry_count
+from quickquip.llm.context_windows import resolve_context_window
 from quickquip.llm.client_fingerprints.body_bindings import project_body_bindings
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
 from quickquip.llm.client_fingerprints.trace_context import (
@@ -37,7 +44,8 @@ def assemble_headers(config, request, protocol_headers: dict[str, str]) -> dict[
         raise ConfigError(
             "invalid_profile", "Profile selection does not match its runtime snapshot",
         )
-    values = {"stainless_os": detect_stainless_os()}
+    values = {"stainless_os": detect_stainless_os(),
+              "timeout_seconds": format(config.timeout_seconds, "g")}
     sources = {v for _, v in (*profile.bindings, *protocol.bindings)}
     values.update({source: build(request, runtime.data_dir)
                    for source, build in SESSION_BINDINGS.items() if source in sources})
@@ -60,7 +68,7 @@ def assemble_headers(config, request, protocol_headers: dict[str, str]) -> dict[
         else:
             headers[key] = value
     for key, source in (*profile.bindings, *protocol.bindings):
-        if source in ATTEMPT_BINDINGS:
+        if source in (*ATTEMPT_BINDINGS, "retry_count"):
             continue
         value = values[source]
         if value:
@@ -121,17 +129,45 @@ def prepare_http_attempt(config, url, headers, payload, *, stream) -> PreparedAt
         for key, source in bindings:
             _set_header(result_headers, key, values[source])
     result_body = payload
-    if entry.body is not None:
+    if isinstance(entry.body, ChatBodyPolicy):
         current_request()  # Require the business entrypoint's frozen request context.
         result_body = project_chat_body(entry.body, payload, url=url, provider=config.id,
                                         stream=stream, overrides=config.extra_body)
+    elif isinstance(entry.body, ClaudeBodyPolicy):
+        validate_claude_overrides(entry.body, config.extra_body)
+        request = current_request()
+        runtime = config.fingerprint_runtime
+        user_id = None
+        if entry.body.metadata_user_id:
+            from quickquip.llm.client_fingerprints.session_projection import business_session_id
+
+            user_id = json.dumps({
+                "device_id": load_claude_device_id(
+                    runtime.data_dir if runtime else DATA_DIR,
+                    runtime.claude_code_device_id if runtime else "",
+                ),
+                "account_uuid": "", "session_id": business_session_id(request.session),
+            }, separators=(",", ":"))
+        result_body = project_claude_body(
+            entry.body, payload, user_id=user_id, use_cache=config.prompt_caching,
+            cache_ttl=config.cache_ttl, stream=stream,
+        )
+    for key, source in (*profile.bindings, *entry.bindings):
+        if source == "retry_count":
+            _set_header(result_headers, key, retry_count())
+    if entry.beta_rules and not any(k.lower() == "anthropic-beta" for k in config.headers):
+        _set_header(result_headers, "anthropic-beta", derive_beta(
+            entry.beta_rules, result_body,
+            resolve_context_window(config.model_context_windows, str(result_body.get("model", ""))),
+        ))
     if entry.body_bindings:
         runtime = config.fingerprint_runtime
         result_body = project_body_bindings(
             entry.body_bindings, current_request(), result_body,
             data_dir=runtime.data_dir if runtime else DATA_DIR, overrides=config.extra_body,
         )
-    if stream and entry.body is None:
+    if stream and (entry.stream_accept == "event-stream"
+                   or (not entry.stream_accept and entry.body is None)):
         result_headers = {**result_headers, "accept": "text/event-stream"}
     elif stream and not any(k.lower() == "accept" for k in result_headers):
         result_headers["accept"] = "text/event-stream"

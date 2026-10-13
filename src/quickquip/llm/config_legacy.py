@@ -578,6 +578,7 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
         logger.debug("[runtime] agent_delivery_enabled 已被两枚新键取代，忽略旧键")
     config = LLMConfig(
         runtime=RuntimeConfig(
+            claude_code_device_id=str(runtime_raw.get("claude_code_device_id", "")).strip(),
             enabled=as_bool(runtime_raw.get("enabled", False), default=False),
             memory_enabled=as_bool(runtime_raw.get("memory_enabled", True), default=True),
             default_provider=str(runtime_raw.get("default_provider", "")).strip() or None,

@@ -15,6 +15,7 @@ from quickquip.llm.tools import LLMConversationMessage
 
 def _config(protocol="openai", **overrides):
     return ProviderConfig(
+        client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id="test", protocol=protocol, base_url="https://example.test/v1",
         api_key_env="SESSION_TEST_KEY", default_model="m", models=["m"],
         stream_enabled=False, **overrides,

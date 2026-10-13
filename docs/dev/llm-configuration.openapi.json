@@ -968,6 +968,9 @@
                   "auto_memory_prompt": {
                     "type": "string"
                   },
+                  "claude_code_device_id": {
+                    "type": "string"
+                  },
                   "client_cluster": {
                     "type": "string"
                   },

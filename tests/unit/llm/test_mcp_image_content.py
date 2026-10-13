@@ -111,6 +111,7 @@ def test_strict_decoder_enforces_byte_limit_before_decoding(monkeypatch):
 
 def _config(protocol: str) -> ProviderConfig:
     return ProviderConfig(
+        client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id=f"fake-{protocol}",
         protocol=protocol,
         base_url="https://example.test/v1",
