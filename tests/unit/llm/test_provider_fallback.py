@@ -6,6 +6,7 @@ from __future__ import annotations
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMRequest, OpenAIProviderClient
 from plugins.llm_tools import LLMConversationMessage
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 class FakeStreamFallbackClient(OpenAIProviderClient):
@@ -29,7 +30,7 @@ class FakeStreamFallbackClient(OpenAIProviderClient):
 
 
 async def test_stream_failure_falls_back_to_json():
-    config = ProviderConfig(
+    config = protocol_only_config(ProviderConfig(
         id="test",
         protocol="openai",
         base_url="http://test",
@@ -37,7 +38,7 @@ async def test_stream_failure_falls_back_to_json():
         default_model="gpt-test",
         models=["gpt-test"],
         stream_enabled=True,
-    )
+    ))
     client = FakeStreamFallbackClient(
         config,
         {

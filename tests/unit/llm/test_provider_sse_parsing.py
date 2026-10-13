@@ -22,6 +22,7 @@ from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import LLMProviderError, OpenAIProviderClient
 from quickquip.llm.provider import trace
 from quickquip.llm.provider.base import _SSETextCapture
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _make_config(**overrides) -> ProviderConfig:
@@ -35,7 +36,7 @@ def _make_config(**overrides) -> ProviderConfig:
         stream_enabled=True,
     )
     defaults.update(overrides)
-    return ProviderConfig(**defaults)
+    return protocol_only_config(ProviderConfig(**defaults))
 
 
 class _FakeStreamResponse:

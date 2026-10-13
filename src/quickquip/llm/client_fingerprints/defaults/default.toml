@@ -2,11 +2,11 @@ format_version = 1
 id = "default"
 label = "协议默认"
 
-[protocols.openai.headers]
-accept-encoding = "gzip, deflate"
+[protocols.openai]
+protocol_ref = "opencode2"
 
-[protocols.openai_responses.headers]
-accept-encoding = "gzip, deflate"
+[protocols.openai_responses]
+protocol_ref = "codex"
 
 [protocols.gemini.headers]
 accept-encoding = "gzip, deflate"

@@ -4,12 +4,14 @@ Provider 的固定字段 `client_fingerprint` 选择客户端请求特征。内�
 
 | ID | 支持协议 | 行为 |
 |---|---|---|
-| `default` | 四种协议 | Anthropic 使用 Claude Code Profile，其他协议保留现有默认；作为缺省选择 |
+| `default` | 四种协议 | Chat 使用 OpenCode 2，Responses 使用 Codex，Anthropic 使用 Claude Code；Gemini 保留通用默认 |
 | `quickquip` | 四种协议 | QuickQuip 品牌 UA 与部署、纪元及版本标识，需要显式选择 |
-| `opencode2` | OpenAI Chat Completions | OpenCode 2.0.27 native 的 UA、身份头、追踪和 Body 布局，需要显式选择 |
-| `codex` | OpenAI Responses | Codex TUI 0.162.1 的静态身份、业务 Session 头与缓存键，需要显式选择 |
+| `opencode2` | OpenAI Chat Completions | OpenCode 2.0.27 native 的 UA、身份头、追踪和 Body 布局；Chat 默认采用 |
+| `codex` | OpenAI Responses | Codex TUI 0.162.1 的静态身份、业务 Session 头与缓存键；Responses 默认采用 |
 | `claude-code` | Anthropic Messages | Claude Code 2.1.296 Linux CLI 的 Header、身份、system、缓存与 Body 布局 |
 | `legacy-claude` | Anthropic Messages | 保留 2.1.150 的既有 Header 与 Body 行为，供兼容回退使用 |
+
+渠道字段缺省或显式选择 default 时采用协议默认策略。已有 default.toml 本地覆盖继续整份生效，需核对其中的协议配置；启用默认策略前检查动态 Header 与 Body 绑定的手工覆盖。需要通用请求形态时，可按下方最小示例定义自有 Profile；Anthropic 提供 legacy-claude 回退。
 
 在 Web Admin「LLM 配置 → 渠道」选择 Profile，保存草稿后应用。JSON 的 `client_fingerprint` 放在渠道对象内；模型参数覆盖不接受该字段。它与 OpenAI Responses 的 `responses_profile` 能力设置分别配置。
 
@@ -55,7 +57,7 @@ accept = "application/json"
 
 `user_agent` 仅支持 `{client_version}` 版本替换。动态 `bindings` 的来源为 `install_id`、`epoch_id`、`cluster_id`、`client_version`、`stainless_os`、`opencode_session_id`、`project_id`、`b3`、`traceparent`、`business_session_id`、`timeout_seconds`、`retry_count`。business_session_id 返回业务 Session 的规范 UUID；opencode_session_id 与 project_id 随请求绑定，b3 与 traceparent 在每次实际 HTTP 尝试时绑定；timeout_seconds 为渠道超时秒数，retry_count 为当前重试策略轮次。前四个来源归属 `quickquip` Profile。自有 Profile 必须保留四个专有头及其对应绑定。认证与 `content-type` 由协议适配器管理，Profile 文件不接受这些头。
 
-协议表可使用 `protocol_ref = "claude-code"` 引用另一 Profile 的同协议配置。引用表只包含此字段，目标使用协议局部配置，顶层 UA、Header 和 bindings 为空；禁止链式及循环引用。内置 default 的 Anthropic 部分通过该方式共享 CC 配置。修改本地 claude-code.toml 后重启，两种选择使用同一策略快照。
+协议表可使用 `protocol_ref = "claude-code"` 引用另一 Profile 的同协议配置。引用表只包含此字段，目标使用协议局部配置，顶层 UA、Header 和 bindings 为空；禁止链式及循环引用。内置 default 的 Chat、Responses 和 Anthropic 分别引用 opencode2、codex 和 claude-code。客户端模板的 UA 与其他特征定义在协议表中；已有 opencode2／codex 本地副本需将顶层 user_agent 移入对应 protocols.<协议>.headers 的 user-agent 字段，满足引用目标的协议局部约束；修改对应本地模板后重启，default 与显式客户端选择共用同一策略快照。
 
 解析器拒绝未知字段、非法动态来源、重复头和不支持的协议。Profile 文件不保存密钥，不执行表达式或脚本。附加认证配置继续使用根目录 `.env` 的变量引用。
 
@@ -75,7 +77,7 @@ b3 和 traceparent 共享进程内 trace ID，每次模型调用建立一个逻�
 
 实际输出预算、temperature、思考档位、人格和工具权限由已有业务配置决定，Profile 不采用捕获样本的工具集合或输出额度。工具返回省略冗余 name，空 assistant 工具正文使用 null；工具顺序、调用 ID、参数、结果、思考和图片继续保留。有工具历史而无当前工具时发送 tools=[]。显式 extra_body 优先于 Profile 缺省；同时配置 max_tokens 和 max_completion_tokens 会报错。手工覆盖可改变最终特征，管理员需要按上游协议填写。
 
-Body 在确定实际候选 URL、流式模式之后投影，以紧凑 UTF-8 JSON 发送。流式请求保留 Accept=*/*，声明 gzip/deflate/br/zstd 并具备对应解压支持。default 与 quickquip 默认继续声明 gzip/deflate。非流式配置及流式失败后的既有降级继续生效，这些兼容路径不代表原生 OpenCode 始终使用非流式请求。
+Body 在确定实际候选 URL、流式模式之后投影，以紧凑 UTF-8 JSON 发送。流式请求保留 Accept=*/*，声明 gzip/deflate/br/zstd 并具备对应解压支持。quickquip 默认声明 gzip/deflate；default 的 Chat 使用同一 OpenCode 压缩策略。非流式配置及流式失败后的既有降级继续生效，这些兼容路径不代表原生 OpenCode 始终使用非流式请求。
 
 协议表可增加 `body` 策略和 `header_order`；Chat Body 支持 `openai-chat-native`，字段及端点规则示例见随包 `opencode2.toml`。Header 布局在 HTTPX 补齐 Host、Connection、Content-Length 后应用，保留协议鉴权和值，仅按文件声明调整名称大小写及顺序；额外 Header 保留在声明字段之后。HTTP/1.1 实际序列化时，HTTPX 的 h11 传输层将 Host 放在首位，其他字段保持模板顺序和大小写；因此原生捕获中的 Host 位置属于当前传输边界。TLS、HTTP/2 和运行时内部行为另行校准。绑定新增来源为 opencode_session_id、project_id、b3、traceparent。策略和协议不匹配、错误类型、未知策略或未知字段会在加载阶段拒绝。完整模板中记录固定客户端版本和源码基线，升级目标版本时同步维护模板、证据和验证。
 
@@ -106,7 +108,7 @@ claude-code.toml 包含 claude-code-messages 策略、条件 beta 和 stream_acc
 
 session-id、thread-id、x-client-request-id 及 Body 的 prompt_cache_key 使用同一个业务 Session UUID。重试、工具续轮、冷场、历史裁剪及纪元推进保持；新建或清空业务 Session 后改变，恢复存档后沿用原身份。x-client-request-id 使用线程作用域。QuickQuip 当前没有独立子线程身份，三个请求头保持同值，直接使用已有 UUIDv4。
 
-动态身份头拒绝渠道 headers 手工覆盖，包括大小写变体。Body 绑定生效时，渠道及模型的 extra_body 均禁止包含 prompt_cache_key，包括 null；配置校验和运行时会明确报错。需要手工控制缓存键时，从本地 Profile 文件移除该绑定并重启。标准渠道／模型 extra_body 中的 prompt_cache_key 属于缓存亲和数据，各 Profile 均允许手工填写；当前 Profile 声明动态绑定时适用上述覆盖保护。其他位置和认证字段继续执行原有凭证校验。
+动态身份头拒绝渠道 headers 手工覆盖，包括大小写变体。Body 绑定生效时，渠道及模型的 extra_body 均禁止包含 prompt_cache_key，包括 null；配置校验和运行时会明确报错。需要手工控制缓存键时，从本地 Profile 文件移除该绑定并重启。标准渠道／模型 extra_body 中的 prompt_cache_key 属于缓存亲和数据，未声明动态绑定的 Profile 允许手工填写；default 的 Responses 和 codex 共同适用上述覆盖保护。其他位置和认证字段继续执行原有凭证校验。
 
 可选协议表 body_bindings 当前仅支持 OpenAI Responses 的以下绑定：
 

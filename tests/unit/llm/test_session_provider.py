@@ -11,15 +11,16 @@ from quickquip.llm.provider import LLMRequest, RetryPolicy, build_provider_clien
 from quickquip.llm.provider import base, trace
 from quickquip.llm.session import create_session_identity
 from quickquip.llm.tools import LLMConversationMessage
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _config(protocol="openai", **overrides):
-    return ProviderConfig(
+    return protocol_only_config(ProviderConfig(
         client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id="test", protocol=protocol, base_url="https://example.test/v1",
         api_key_env="SESSION_TEST_KEY", default_model="m", models=["m"],
         stream_enabled=False, **overrides,
-    )
+    ))
 
 
 def _request(session=None):

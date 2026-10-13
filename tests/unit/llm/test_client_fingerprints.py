@@ -68,13 +68,77 @@ def _document():
     return doc
 
 
+@pytest.mark.parametrize("protocol,client,ua", [
+    ("openai", "opencode2", "opencode/latest/2.0.27/cli"),
+    ("openai_responses", "codex",
+     "codex-tui/0.162.1 (Ubuntu 24.04; x86_64) unknown (codex-tui; 0.162.1)"),
+])
+@pytest.mark.parametrize("local_override", [False, True])
+async def test_implicit_default_sends_client_identity_and_body(
+    tmp_path, monkeypatch, protocol, client, ua, local_override,
+):
+    directory = tmp_path / "config"
+    if local_override:
+        overrides = directory / "client_profiles"
+        overrides.mkdir(parents=True)
+        source = files("quickquip.llm.client_fingerprints").joinpath(f"defaults/{client}.toml")
+        (overrides / f"{client}.toml").write_text(source.read_text().replace(ua, "Edited/1"))
+        ua = "Edited/1"
+    doc = _document()
+    provider = doc["providers"][0]
+    provider.pop("client_fingerprint")
+    provider["protocol"] = protocol
+    provider["parameters"] = {"stream_enabled": False}
+    cfg = compile_document(doc, config_dir=directory).providers["test"]
+    captured = []
+    def handler(sent):
+        captured.append(sent)
+        if protocol == "openai":
+            return httpx.Response(200, json={"model": "m", "choices": [
+                {"message": {"content": "ok"}, "finish_reason": "stop"},
+            ]})
+        return httpx.Response(200, json={"model": "m", "status": "completed", "output": [
+            {"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": "ok"},
+            ]},
+        ]})
+    original = httpx.AsyncClient
+    monkeypatch.setenv("FINGERPRINT_TEST_KEY", "synthetic-key")
+    monkeypatch.setattr(httpx, "AsyncClient",
+                        lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
+    req = _request()
+    response = await build_provider_client(cfg).complete(req)
+    assert response.text == "ok" and cfg.client_fingerprint == "default"
+    sent = captured[0]
+    assert sent.headers["user-agent"] == ua
+    assert not any(k.startswith("x-quickquip-") for k in sent.headers)
+    body = json.loads(sent.content)
+    if protocol == "openai":
+        sessions = {sent.headers[k] for k in (
+            "x-opencode-session", "x-opencode-session-id", "x-session-affinity", "x-session-id",
+        )}
+        assert len(sessions) == 1 and next(iter(sessions)).startswith("ses_")
+        assert body["max_completion_tokens"] == req.max_output_tokens
+        assert "max_tokens" not in body and body["store"] is False
+        assert sent.headers["accept-encoding"] == "gzip, deflate, br, zstd"
+    else:
+        assert body["prompt_cache_key"] == req.session.id
+        assert all(sent.headers[k] == req.session.id for k in (
+            "session-id", "thread-id", "x-client-request-id",
+        ))
+        assert sent.headers["originator"] == "codex-tui"
+        assert body["instructions"] == req.system_prompt
+
+
 @pytest.mark.parametrize("protocol", ["openai", "claude", "gemini", "openai_responses"])
 async def test_brand_headers_use_epoch_and_leave_body_unchanged(tmp_path, monkeypatch, protocol):
     monkeypatch.setenv("FINGERPRINT_TEST_KEY", "synthetic-key")
     config = _config(tmp_path, protocol)
     request = _request()
     url, headers, body = await build_provider_client(config)._build_request_parts(request)
-    default = replace(config, client_fingerprint="default", fingerprint_runtime=None)
+    default = replace(config, client_fingerprint="default", fingerprint_runtime=FingerprintRuntime(
+        resolve_profile("default", protocol), "", tmp_path,
+    ))
     default_url, default_headers, default_body = await build_provider_client(
         default,
     )._build_request_parts(request)

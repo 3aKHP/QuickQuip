@@ -21,6 +21,7 @@ from tests.fixtures.provider_fakes import (
     FakeGeminiClient,
     FakeOpenAIClient,
 )
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _encoded_image(image_format: str) -> str:
@@ -110,7 +111,7 @@ def test_strict_decoder_enforces_byte_limit_before_decoding(monkeypatch):
 
 
 def _config(protocol: str) -> ProviderConfig:
-    return ProviderConfig(
+    return protocol_only_config(ProviderConfig(
         client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id=f"fake-{protocol}",
         protocol=protocol,
@@ -118,7 +119,7 @@ def _config(protocol: str) -> ProviderConfig:
         api_key_env="TEST_KEY",
         default_model="test-model",
         models=["test-model"],
-    )
+    ))
 
 
 class _InlineOpenAIClient(FakeOpenAIClient):

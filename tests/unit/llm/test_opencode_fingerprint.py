@@ -353,8 +353,8 @@ async def test_cancelled_call_restores_context(tmp_path, monkeypatch):
     assert assert_trace(seen[0].headers)[2] != assert_trace(seen[1].headers)[2]
 
 
-@pytest.mark.parametrize("profile", ["default", "quickquip"])
-async def test_other_profiles_keep_existing_compression_and_body(tmp_path, capture, profile):
+@pytest.mark.parametrize("profile", ["quickquip"])
+async def test_brand_keeps_existing_compression_and_body(tmp_path, capture, profile):
     seen, _ = capture
     cfg = replace(config(tmp_path), client_fingerprint=profile,
                   fingerprint_runtime=FingerprintRuntime(resolve_profile(profile, "openai"),

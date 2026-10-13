@@ -5,17 +5,18 @@ from plugins.llm_provider import LLMRequest
 from plugins.llm_tools import LLMConversationMessage, LLMToolSpec
 
 from tests.fixtures.provider_fakes import FakeOpenAIClient
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _provider_config() -> ProviderConfig:
-    return ProviderConfig(
+    return protocol_only_config(ProviderConfig(
         id="fake",
         protocol="openai",
         base_url="https://example.test/v1",
         api_key_env="OPENAI_API_KEY",
         default_model="gpt-test",
         models=["gpt-test"],
-    )
+    ))
 
 
 def _tool_call_request() -> LLMRequest:

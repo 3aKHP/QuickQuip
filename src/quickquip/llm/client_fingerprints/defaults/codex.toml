@@ -4,9 +4,9 @@
 format_version = 1
 id = "codex"
 label = "Codex TUI (0.162.1, lightweight)"
-user_agent = "codex-tui/0.162.1 (Ubuntu 24.04; x86_64) unknown (codex-tui; 0.162.1)"
 
 [protocols.openai_responses.headers]
+user-agent = "codex-tui/0.162.1 (Ubuntu 24.04; x86_64) unknown (codex-tui; 0.162.1)"
 originator = "codex-tui"
 accept-encoding = "gzip, deflate"
 
