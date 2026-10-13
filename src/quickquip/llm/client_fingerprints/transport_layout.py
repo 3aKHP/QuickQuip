@@ -1,4 +1,4 @@
-"""Apply declared wire casing/order after HTTPX has added transport headers."""
+"""Apply HTTPX header layout; the HTTP/1.1 serializer emits Host first."""
 from __future__ import annotations
 
 import httpx

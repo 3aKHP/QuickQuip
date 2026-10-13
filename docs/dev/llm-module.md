@@ -2,7 +2,7 @@
 
 ## 请求指纹与身份投影
 
-`client_fingerprints` 包拥有 TOML Profile 解析、启动目录快照、安装身份持久化与请求投影。Provider 固定字段 `client_fingerprint` 选择模板，编译时绑定全局 cluster 和数据目录；模型覆盖保留绑定。四协议在各自认证与 Body 映射边界调用共享 Header/Body 投影接口。OpenCode 2 的 Chat Body 和物理尝试追踪在实际 URL、流式模式确定后进行最终投影；其他 Profile 的早期 Body 接口保留载荷原样。模板、字段顺序和端点兼容条件随 TOML 分发。
+`client_fingerprints` 包拥有 TOML Profile 解析、启动目录快照、安装身份持久化与请求投影。Provider 固定字段 `client_fingerprint` 选择模板，编译时绑定全局 cluster 和数据目录；模型覆盖保留绑定。四协议在各自认证与 Body 映射边界调用共享 Header/Body 投影接口。OpenCode 2 的 Chat Body 和物理尝试追踪在实际 URL、流式模式确定后进行最终投影；其他 Profile 的早期 Body 接口保留载荷原样。模板、字段顺序和端点兼容条件随 TOML 分发。Header 布局作用于 HTTPX 请求对象；HTTP/1.1 的 h11 序列化将 Host 移至首位，真实 socket 验证覆盖该边界和其余字段的排布。
 
 `LLMRequest.session` 是业务 Session，`epoch_id` 是不可变的请求纪元快照。EpochManager 拥有聊天窗口 UUID，TurnRequestAssembler 在历史加载及预算重组后取值；独立任务入口创建临时纪元，工具和识图按调用链传递。底层自有 Profile 请求必须提供 UUIDv4。动态投影头不参与 Responses 内容兼容指纹。管理员配置与文件格式见[请求指纹 Profile](../admin/client-fingerprints.md)。
 

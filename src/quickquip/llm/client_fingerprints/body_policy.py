@@ -93,13 +93,15 @@ def parse_body_policy(raw, protocol: str, location: str) -> ChatBodyPolicy:
         if any(h != h.lower() or not h or any(c not in
                "abcdefghijklmnopqrstuvwxyz0123456789.-" for c in h) for h in hosts):
             _invalid(location)
-        rules.append(EndpointRule(hosts, tuple(v.lower() for v in providers),
-                                  tuple(v.lower() for v in excluded),
-                                  tuple(_compat(rule, location).items())))
+        rules.append(EndpointRule(hosts=hosts, providers=tuple(v.lower() for v in providers),
+                                  exclude_models=tuple(v.lower() for v in excluded),
+                                  changes=tuple(_compat(rule, location).items())))
     compat = _compat(raw, location)
     assistant_order = _strings(raw.get("assistant_field_order", []), location, empty=True)
-    return ChatBodyPolicy(order, tool_fields, raw["omit_auto_tool_choice"],
-                          raw["assistant_tool_empty_null"], **compat, endpoint_rules=tuple(rules),
+    return ChatBodyPolicy(field_order=order, tool_message_fields=tool_fields,
+                          omit_auto_tool_choice=raw["omit_auto_tool_choice"],
+                          assistant_tool_empty_null=raw["assistant_tool_empty_null"],
+                          **compat, endpoint_rules=tuple(rules),
                           assistant_field_order=assistant_order)
 
 

@@ -1,7 +1,10 @@
 """Pure Profile projection around protocol-owned request construction."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+import json
 import platform
+from typing import Any
 import uuid
 
 from quickquip.common.paths import DATA_DIR
@@ -11,9 +14,9 @@ from quickquip.llm.client_fingerprints.catalog import (
 from quickquip.llm.client_fingerprints.identity import client_version, load_install_id
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import project_chat_body
-from quickquip.llm.client_fingerprints.request_identity import (
-    ATTEMPT_BINDINGS, attempt_bindings, current_request, deployment_project_id,
-    opencode_session_id,
+from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
+from quickquip.llm.client_fingerprints.trace_context import (
+    ATTEMPT_BINDINGS, attempt_bindings, current_request,
 )
 
 
@@ -35,10 +38,8 @@ def assemble_headers(config, request, protocol_headers: dict[str, str]) -> dict[
         )
     values = {"stainless_os": detect_stainless_os()}
     sources = {v for _, v in (*profile.bindings, *protocol.bindings)}
-    if "opencode_session_id" in sources:
-        values["opencode_session_id"] = opencode_session_id(request.session)
-    if "project_id" in sources:
-        values["project_id"] = deployment_project_id(runtime.data_dir)
+    values.update({source: build(request, runtime.data_dir)
+                   for source, build in SESSION_BINDINGS.items() if source in sources})
     if profile.id == "quickquip":
         try:
             epoch = uuid.UUID(request.epoch_id) if request.epoch_id else None
@@ -100,7 +101,14 @@ def uses_attempt_bindings(config) -> bool:
     return any(v in ATTEMPT_BINDINGS for _, v in (*profile.bindings, *entry.bindings))
 
 
-def prepare_http_attempt(config, url, headers, payload, *, stream):
+@dataclass(frozen=True, slots=True)
+class PreparedAttempt:
+    headers: dict[str, str]
+    payload: dict[str, Any]
+    body: bytes
+
+
+def prepare_http_attempt(config, url, headers, payload, *, stream) -> PreparedAttempt:
     """Lower fresh business payload and generate tracing for one physical HTTP exchange."""
     profile = selected_profile(config)
     entry = profile.for_protocol(config.protocol)
@@ -120,4 +128,6 @@ def prepare_http_attempt(config, url, headers, payload, *, stream):
         result_headers = {**result_headers, "accept": "text/event-stream"}
     elif stream and not any(k.lower() == "accept" for k in result_headers):
         result_headers["accept"] = "text/event-stream"
-    return result_headers, result_body, entry.body is not None
+    body = json.dumps(result_body, ensure_ascii=False,
+                      separators=(",", ":") if entry.body is not None else None).encode("utf-8")
+    return PreparedAttempt(headers=result_headers, payload=result_body, body=body)

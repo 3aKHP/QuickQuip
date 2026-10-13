@@ -52,7 +52,7 @@ accept = "application/json"
 
 文件名为 `custom.toml`。`protocols` 声明支持的协议，协议表可包含 `headers` 和 `bindings`。根表中的请求头用于全部已声明协议；协议表补充本协议的请求头，同一名称不能重复声明。
 
-`user_agent` 仅支持 `{client_version}` 版本替换。动态 `bindings` 的来源为 `install_id`、`epoch_id`、`cluster_id`、`client_version`、`stainless_os`；前四个来源归属 `quickquip` Profile。自有 Profile 必须保留四个专有头及其对应绑定。认证与 `content-type` 由协议适配器管理，Profile 文件不接受这些头。
+`user_agent` 仅支持 `{client_version}` 版本替换。动态 `bindings` 的来源为 `install_id`、`epoch_id`、`cluster_id`、`client_version`、`stainless_os`、`opencode_session_id`、`project_id`、`b3`、`traceparent`。opencode_session_id 与 project_id 随请求绑定，b3 与 traceparent 在每次实际 HTTP 尝试时绑定；前四个来源归属 `quickquip` Profile。自有 Profile 必须保留四个专有头及其对应绑定。认证与 `content-type` 由协议适配器管理，Profile 文件不接受这些头。
 
 解析器拒绝未知字段、非法动态来源、重复头和不支持的协议。Profile 文件不保存密钥，不执行表达式或脚本。附加认证配置继续使用根目录 `.env` 的变量引用。
 
@@ -74,4 +74,4 @@ b3 和 traceparent 共享进程内 trace ID，每次模型调用建立一个逻�
 
 Body 在确定实际候选 URL、流式模式之后投影，以紧凑 UTF-8 JSON 发送。流式请求保留 Accept=*/*，声明 gzip/deflate/br/zstd 并具备对应解压支持。default 与 quickquip 默认继续声明 gzip/deflate。非流式配置及流式失败后的既有降级继续生效，这些兼容路径不代表原生 OpenCode 始终使用非流式请求。
 
-协议表可增加 `body` 策略和 `header_order`；当前 Body 支持 `openai-chat-native`，字段及端点规则示例见随包 `opencode2.toml`。Header 布局在 HTTPX 补齐 Host、Connection、Content-Length 后应用，保留协议鉴权和值，仅按文件声明调整名称大小写及顺序；额外 Header 保留在声明字段之后。它不模拟 TLS、HTTP/2 或运行时内部实现。绑定新增来源为 opencode_session_id、project_id、b3、traceparent。策略和协议不匹配、错误类型、未知策略或未知字段会在加载阶段拒绝。完整模板中记录固定客户端版本和源码基线，升级目标版本时同步维护模板、证据和验证。
+协议表可增加 `body` 策略和 `header_order`；当前 Body 支持 `openai-chat-native`，字段及端点规则示例见随包 `opencode2.toml`。Header 布局在 HTTPX 补齐 Host、Connection、Content-Length 后应用，保留协议鉴权和值，仅按文件声明调整名称大小写及顺序；额外 Header 保留在声明字段之后。HTTP/1.1 实际序列化时，HTTPX 的 h11 传输层将 Host 放在首位，其他字段保持模板顺序和大小写；因此原生捕获中的 Host 位置属于当前传输边界。TLS、HTTP/2 和运行时内部行为另行校准。绑定新增来源为 opencode_session_id、project_id、b3、traceparent。策略和协议不匹配、错误类型、未知策略或未知字段会在加载阶段拒绝。完整模板中记录固定客户端版本和源码基线，升级目标版本时同步维护模板、证据和验证。

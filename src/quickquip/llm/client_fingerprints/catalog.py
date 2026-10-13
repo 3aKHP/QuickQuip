@@ -12,7 +12,8 @@ import tomllib
 from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import ChatBodyPolicy, parse_body_policy
-from quickquip.llm.client_fingerprints.request_identity import ATTEMPT_BINDINGS, SESSION_BINDINGS
+from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
+from quickquip.llm.client_fingerprints.trace_context import ATTEMPT_BINDINGS
 
 PROTOCOLS = ("openai", "claude", "gemini", "openai_responses")
 QUICKQUIP_BINDINGS = {

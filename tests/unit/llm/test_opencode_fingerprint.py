@@ -16,7 +16,7 @@ import zstandard
 from quickquip.llm.client_fingerprints.catalog import (
     FingerprintRuntime, parse_profile, profile_metadata, resolve_profile,
 )
-from quickquip.llm.client_fingerprints.request_identity import opencode_session_id
+from quickquip.llm.client_fingerprints.session_projection import opencode_session_id
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.config_document import ConfigError, compile_document, empty_document
 from quickquip.llm.epoch import create_epoch_id
@@ -81,7 +81,7 @@ def assert_trace(headers):
 
 
 @pytest.mark.parametrize("stream", [False, True])
-async def test_final_native_layout_and_headers(tmp_path, capture, stream):
+async def test_httpx_native_layout_and_headers(tmp_path, capture, stream):
     seen, _ = capture
     cfg = replace(config(tmp_path), stream_enabled=stream)
     req = request(tools=[LLMToolSpec("z_tool", "desc", {"type": "object"}),
@@ -117,6 +117,54 @@ async def test_final_native_layout_and_headers(tmp_path, capture, stream):
     assert "x-opencode-request" not in wire.headers
     assert_trace(wire.headers)
     assert req == original
+
+
+async def test_http11_socket_layout_preserves_host_first_boundary(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROFILE_TEST_KEY", "synthetic-key")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setattr(base, "_schedule_usage_record", lambda *args: None)
+    captured = asyncio.get_running_loop().create_future()
+
+    async def receive(reader, writer):
+        try:
+            headers = await reader.readuntil(b"\r\n\r\n")
+            names = [line.split(b":", 1)[0].decode() for line in headers.split(b"\r\n")[1:-2]]
+            length = next(int(line.split(b":", 1)[1]) for line in headers.split(b"\r\n")
+                          if line.lower().startswith(b"content-length:"))
+            body = await reader.readexactly(length)
+            captured.set_result((names, json.loads(body)))
+            response = b'{"choices":[{"message":{"content":"ok"}}]}'
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                         b"Connection: close\r\nContent-Length: " + str(len(response)).encode()
+                         + b"\r\n\r\n" + response)
+            await writer.drain()
+        except Exception as exc:
+            if not captured.done():
+                captured.set_exception(exc)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async with await asyncio.start_server(receive, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        cfg = replace(config(tmp_path), base_url=f"http://127.0.0.1:{port}/v1")
+        result = await asyncio.wait_for(build_provider_client(cfg).complete(request()), 5)
+        names, body = await asyncio.wait_for(captured, 5)
+    assert result.text == "ok" and body["max_completion_tokens"] == 128
+    assert names == [
+        "Host", "Authorization", "Content-Type", "User-Agent", "b3", "traceparent",
+        "x-opencode-client", "x-opencode-project", "x-opencode-session", "x-opencode-session-id",
+        "x-session-affinity", "x-session-id", "Connection", "Accept", "Accept-Encoding",
+        "Content-Length",
+    ]
+
+
+async def test_invalid_runtime_profile_uses_provider_error(tmp_path, capture):
+    seen, _ = capture
+    cfg = replace(config(tmp_path), client_fingerprint="missing", fingerprint_runtime=None)
+    with pytest.raises(LLMProviderError, match="invalid_profile"):
+        await build_provider_client(cfg).complete(request())
+    assert not seen
 
 
 async def test_retry_fallback_recomputes_endpoint_policy_and_span(tmp_path, capture):
@@ -273,7 +321,7 @@ async def test_stream_failure_fallback_retains_identity_with_new_span(
 
 
 async def test_cancelled_call_restores_context(tmp_path, monkeypatch):
-    from quickquip.llm.client_fingerprints.request_identity import current_request
+    from quickquip.llm.client_fingerprints.trace_context import current_request
 
     entered, release = asyncio.Event(), asyncio.Event()
     seen = []

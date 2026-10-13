@@ -540,10 +540,15 @@ class BaseProviderClient:
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Dispatch and meter with the explicit request identity bound for tracing."""
         from quickquip.llm.client_fingerprints.assembly import uses_attempt_bindings
-        from quickquip.llm.client_fingerprints.request_identity import request_context
+        from quickquip.llm.client_fingerprints.trace_context import request_context
+        from quickquip.llm.config_errors import ConfigError
 
+        try:
+            tracing = uses_attempt_bindings(self.config)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
         with (trace_request_session(request.session),
-              request_context(request, tracing=uses_attempt_bindings(self.config))):
+              request_context(request, tracing=tracing)):
             return await self._complete_with_usage(request)
 
     async def _complete_with_usage(self, request: LLMRequest) -> LLMResponse:
@@ -797,9 +802,8 @@ class BaseProviderClient:
     async def _post_json(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        headers, payload, compact = self._prepare_http_attempt(url, headers, payload, stream=False)
-        body = json.dumps(payload, ensure_ascii=False,
-                          separators=(",", ":") if compact else None).encode("utf-8")
+        attempt = self._prepare_http_attempt(url, headers, payload, stream=False)
+        headers, payload, body = attempt.headers, attempt.payload, attempt.body
         request_headers = _headers_to_text(headers)
         started = time.monotonic()
         call_id = await begin_http_trace(
@@ -915,9 +919,8 @@ class BaseProviderClient:
     async def _post_stream_sse(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        headers, payload, compact = self._prepare_http_attempt(url, headers, payload, stream=True)
-        body = json.dumps(payload, ensure_ascii=False,
-                          separators=(",", ":") if compact else None).encode("utf-8")
+        attempt = self._prepare_http_attempt(url, headers, payload, stream=True)
+        headers, payload, body = attempt.headers, attempt.payload, attempt.body
         started = time.monotonic()
         call_id = await begin_http_trace(
             provider_id=self.config.id,
