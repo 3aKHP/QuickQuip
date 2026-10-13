@@ -292,6 +292,11 @@ class LLMService(
         return merged
 
     @property
+    def storage_available(self) -> bool:
+        """Conversation storage can serve persistent chat and deployment readiness."""
+        return self.store is not None and not self.store._unavailable
+
+    @property
     def identities(self) -> IdentityIndex:
         return self._identity_repository.snapshot("").index
 
@@ -1027,7 +1032,7 @@ class LLMService(
                     "", llm_used=False, cancelled_reason="queue_patience_exceeded"
                 )
             try:
-                if not self.config.load_error and (self.store is None or self.store._unavailable):
+                if not self.config.load_error and not self.storage_available:
                     raise SessionStoreError("LLM 会话存储不可用")
                 return await self._generate_reply_for_scope_locked(request)
             except SessionInvalidated:
@@ -1065,7 +1070,7 @@ class LLMService(
         if self.config.load_error:
             return reply_result(f"LLM 配置不可用：{self.config.load_error}", llm_used=False)
 
-        if self.store is None or self.store._unavailable:
+        if not self.storage_available:
             raise SessionStoreError("LLM 会话存储不可用")
         settings = self.get_chat_settings(request.chat_id, chat_type=request.chat_type)
         if not settings.enabled:

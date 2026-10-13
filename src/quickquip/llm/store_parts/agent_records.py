@@ -1972,6 +1972,7 @@ class AgentRecordsStoreMixin:
             if turn is None:
                 conn.commit()
                 return False
+            # The schema 3 delete trigger detaches this retained Turn from its message.
             conn.execute(
                 "DELETE FROM conversation_messages WHERE id = ?", (int(message_row_id),)
             )

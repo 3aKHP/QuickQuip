@@ -15,12 +15,17 @@ from quickquip.llm.usage import _record_usage
 
 
 async def test_deployment_gate_rejects_unavailable_store_with_loaded_configuration(
-    llm_service, tmp_path,
+    llm_config_paths, tmp_path, monkeypatch,
 ):
     from quickquip.llm.config_cli import execute, parser
     from quickquip.llm.config_errors import ConfigError
     from quickquip.llm.store import LLMStore
 
+    def fail_vocab(path):
+        raise ValueError("synthetic vocabulary load failure")
+
+    monkeypatch.setattr("quickquip.llm.service.VocabIndex.from_file", fail_vocab)
+    llm_service = LLMService(**llm_config_paths)
     service = llm_service.config_service
     worker = ConfigRuntimeWorker(service, llm_service)
     args = parser().parse_args(["--db", str(service.path), "status", "--require-loaded"])

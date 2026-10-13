@@ -94,10 +94,7 @@ class ConfigRuntimeWorker:
         statuses = runtime.mcp_manager.get_statuses()
         required = set(environment_references(self.service.read("published")["document"]))
         required.update(environment_references(self.service.read("draft")["document"]))
-        core_ready = (
-            not runtime.config.load_error and not runtime._init_error
-            and runtime.store is not None and not runtime.store._unavailable
-        )
+        core_ready = not runtime.config.load_error and runtime.storage_available
         return {
             "environment": [{"name": name, "configured": bool(os.getenv(name))}
                             for name in sorted(required)],
