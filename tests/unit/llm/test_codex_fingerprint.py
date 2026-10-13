@@ -179,9 +179,7 @@ async def test_overlapping_calls_keep_their_own_cache_identity(tmp_path, capture
     assert_identity(seen[1], second.session.id)
 
 
-async def test_retry_backup_stream_fallback_and_history_degrade_keep_identity(
-    tmp_path, capture, monkeypatch,
-):
+async def test_retry_and_backup_keep_identity(tmp_path, capture):
     seen, replies = capture
     replies.extend([httpx.Response(503), httpx.Response(503)])
     cfg = config(tmp_path, fallback_urls=["https://backup.test/v1"])
@@ -191,7 +189,11 @@ async def test_retry_backup_stream_fallback_and_history_degrade_keep_identity(
     assert len(seen) == 3 and seen[1].url.host == "backup.test"
     for wire in seen:
         assert_identity(wire, req.session.id)
-    seen.clear()
+
+
+async def test_stream_fallback_keeps_identity(tmp_path, capture, monkeypatch):
+    seen, _ = capture
+    req = request()
     client = build_provider_client(config(tmp_path, stream_enabled=True))
     original = client._post_stream_sse
 
@@ -204,12 +206,15 @@ async def test_retry_backup_stream_fallback_and_history_degrade_keep_identity(
     assert [json.loads(w.content)["stream"] for w in seen] == [True, False]
     for wire in seen:
         assert_identity(wire, req.session.id)
-    seen.clear()
+
+
+async def test_history_degrade_keeps_identity_and_phase(tmp_path, capture):
+    seen, replies = capture
     items = [{"type": "reasoning", "id": "rs_old", "summary": [],
               "encrypted_content": "synthetic-cipher"},
              {"type": "message", "role": "assistant", "phase": "final_answer",
               "content": [{"type": "output_text", "text": "old"}]}]
-    req = replace(req, messages=[LLMConversationMessage("user", "old question"),
+    req = request(messages=[LLMConversationMessage("user", "old question"),
         LLMConversationMessage("assistant", "old", native_content=items),
         LLMConversationMessage("user", "new question")])
     replies.append(httpx.Response(400))

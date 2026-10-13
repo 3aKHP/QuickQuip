@@ -15,7 +15,9 @@ from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm import config as c
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import validate_body_overrides
-from quickquip.llm.client_fingerprints.body_bindings import validate_body_binding_overrides
+from quickquip.llm.client_fingerprints.body_bindings import (
+    CACHE_AFFINITY_FIELD, validate_body_binding_overrides,
+)
 from quickquip.llm.config_fields import (
     SETTINGS,
     PARAMETER_TYPES,
@@ -52,7 +54,8 @@ _SECRET_KEY = re.compile(
     re.I,
 )
 _CACHE_KEY_PATH = re.compile(
-    r"providers\[\d+\]\.(?:models\[\d+\]\.)?parameters\.extra_body\.prompt_cache_key\Z",
+    r"providers\[\d+\]\.(?:models\[\d+\]\.)?parameters\.extra_body\."
+    + re.escape(CACHE_AFFINITY_FIELD) + r"\Z",
 )
 
 
@@ -99,7 +102,7 @@ def _secrets(value: Any, path: str = "") -> None:
         for key, child in value.items():
             location = f"{path}.{key}" if path else key
             # This declared JSON field is cache affinity, outside the credential namespace.
-            cache_key = key == "prompt_cache_key" and _CACHE_KEY_PATH.fullmatch(location)
+            cache_key = key == CACHE_AFFINITY_FIELD and _CACHE_KEY_PATH.fullmatch(location)
             if _SECRET_KEY.fullmatch(key) and child and not cache_key:
                 if not isinstance(child, str) or not _REFERENCE.search(child):
                     reject(location, "认证值须迁入根目录 .env 并保存变量引用", "literal_secret")

@@ -84,7 +84,7 @@ Body 在确定实际候选 URL、流式模式之后投影，以紧凑 UTF-8 JSON
 
 session-id、thread-id、x-client-request-id 及 Body 的 prompt_cache_key 使用同一个业务 Session UUID。重试、工具续轮、冷场、历史裁剪及纪元推进保持；新建或清空业务 Session 后改变，恢复存档后沿用原身份。x-client-request-id 使用线程作用域。QuickQuip 当前没有独立子线程身份，三个请求头保持同值，直接使用已有 UUIDv4。
 
-动态身份头拒绝渠道 headers 手工覆盖，包括大小写变体。Body 绑定生效时，渠道及模型的 extra_body 均禁止包含 prompt_cache_key，包括 null；配置校验和运行时会明确报错。需要手工控制缓存键时，从本地 Profile 文件移除该绑定并重启。
+动态身份头拒绝渠道 headers 手工覆盖，包括大小写变体。Body 绑定生效时，渠道及模型的 extra_body 均禁止包含 prompt_cache_key，包括 null；配置校验和运行时会明确报错。需要手工控制缓存键时，从本地 Profile 文件移除该绑定并重启。标准渠道／模型 extra_body 中的 prompt_cache_key 属于缓存亲和数据，各 Profile 均允许手工填写；当前 Profile 声明动态绑定时适用上述覆盖保护。其他位置和认证字段继续执行原有凭证校验。
 
 可选协议表 body_bindings 当前仅支持 OpenAI Responses 的以下绑定：
 

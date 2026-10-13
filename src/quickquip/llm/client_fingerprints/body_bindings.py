@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
 from quickquip.llm.config_errors import ConfigError
 
 BodyBindings = tuple[tuple[str, str], ...]
+# Protocol data vocabulary; credential classification does not depend on Profile selection.
+CACHE_AFFINITY_FIELD = "prompt_cache_key"
+
+if TYPE_CHECKING:
+    from quickquip.llm.provider.base import LLMRequest
 
 
 def parse_body_bindings(raw: Any, protocol: str, location: str) -> BodyBindings:
     if (protocol != "openai_responses" or not isinstance(raw, dict)
-            or set(raw) - {"prompt_cache_key"}
+            or set(raw) - {CACHE_AFFINITY_FIELD}
             or any(source != "business_session_id" for source in raw.values())):
         raise ConfigError("invalid_profile", "Unsupported Body binding", location)
     return tuple(raw.items())
@@ -30,7 +35,7 @@ def validate_body_binding_overrides(
 
 
 def project_body_bindings(
-    bindings: BodyBindings, request, payload: dict[str, Any], *, data_dir: Path,
+    bindings: BodyBindings, request: LLMRequest, payload: dict[str, Any], *, data_dir: Path,
     overrides: dict[str, Any],
 ) -> dict[str, Any]:
     validate_body_binding_overrides(bindings, overrides)
