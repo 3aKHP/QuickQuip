@@ -14,6 +14,7 @@ from quickquip.llm.client_fingerprints.catalog import (
 from quickquip.llm.client_fingerprints.identity import client_version, load_install_id
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import project_chat_body
+from quickquip.llm.client_fingerprints.body_bindings import project_body_bindings
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
 from quickquip.llm.client_fingerprints.trace_context import (
     ATTEMPT_BINDINGS, attempt_bindings, current_request,
@@ -124,6 +125,12 @@ def prepare_http_attempt(config, url, headers, payload, *, stream) -> PreparedAt
         current_request()  # Require the business entrypoint's frozen request context.
         result_body = project_chat_body(entry.body, payload, url=url, provider=config.id,
                                         stream=stream, overrides=config.extra_body)
+    if entry.body_bindings:
+        runtime = config.fingerprint_runtime
+        result_body = project_body_bindings(
+            entry.body_bindings, current_request(), result_body,
+            data_dir=runtime.data_dir if runtime else DATA_DIR, overrides=config.extra_body,
+        )
     if stream and entry.body is None:
         result_headers = {**result_headers, "accept": "text/event-stream"}
     elif stream and not any(k.lower() == "accept" for k in result_headers):

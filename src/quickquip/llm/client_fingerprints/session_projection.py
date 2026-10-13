@@ -15,6 +15,16 @@ if TYPE_CHECKING:
 _BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 
+def business_session_id(session: SessionIdentity | None) -> str:
+    """Return the canonical existing business UUID without allocating new identity."""
+    try:
+        return str(uuid.UUID(session.id))
+    except (ValueError, TypeError, AttributeError):
+        raise ConfigError(
+            "missing_session_identity", "Profile requires a business Session UUID",
+        ) from None
+
+
 def opencode_session_id(session: SessionIdentity | None) -> str:
     """Project a persisted business identity into OpenCode's descending ID shape."""
     try:
@@ -44,6 +54,7 @@ def deployment_project_id(data_dir: Path) -> str:
 
 
 SESSION_BINDINGS = {
+    "business_session_id": lambda request, data_dir: business_session_id(request.session),
     "opencode_session_id": lambda request, data_dir: opencode_session_id(request.session),
     "project_id": lambda request, data_dir: deployment_project_id(data_dir),
 }
