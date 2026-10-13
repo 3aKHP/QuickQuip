@@ -11,6 +11,8 @@ import tomllib
 
 from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm.config_errors import ConfigError
+from quickquip.llm.client_fingerprints.body_policy import ChatBodyPolicy, parse_body_policy
+from quickquip.llm.client_fingerprints.request_identity import ATTEMPT_BINDINGS, SESSION_BINDINGS
 
 PROTOCOLS = ("openai", "claude", "gemini", "openai_responses")
 QUICKQUIP_BINDINGS = {
@@ -27,6 +29,7 @@ _IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z")
 class ProtocolFingerprint:
     headers: tuple[tuple[str, str], ...] = ()
     bindings: tuple[tuple[str, str], ...] = ()
+    body: ChatBodyPolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,11 +61,18 @@ def header_value(value: str, location: str) -> str:
     return value
 
 
-def validate_provider_headers(headers: dict[str, str], location="headers") -> None:
+def validate_provider_headers(
+    headers: dict[str, str], location="headers", *, profile=None, protocol=None,
+) -> None:
+    protected = set(QUICKQUIP_BINDINGS)
+    if profile is not None:
+        entry = profile.for_protocol(protocol)
+        protected.update(k.lower() for k, v in (*profile.bindings, *entry.bindings)
+                         if v in (*SESSION_BINDINGS, *ATTEMPT_BINDINGS))
     for name in headers:
-        if name.lower() in QUICKQUIP_BINDINGS:
+        if name.lower() in protected:
             raise ConfigError(
-                "profile_owned_header", "QuickQuip headers are managed by its Profile",
+                "profile_owned_header", "Dynamic headers are managed by the selected Profile",
                 f"{location}.{name}",
             )
 
@@ -88,7 +98,8 @@ def _headers(raw, profile_id, location, *, bindings=False):
         if key in QUICKQUIP_BINDINGS:
             if profile_id != "quickquip" or not bindings or value != QUICKQUIP_BINDINGS[key]:
                 raise ConfigError("invalid_profile", "Invalid QuickQuip header ownership", location)
-        if bindings and value not in (*QUICKQUIP_BINDINGS.values(), "stainless_os"):
+        if bindings and value not in (*QUICKQUIP_BINDINGS.values(), "stainless_os",
+                                      *SESSION_BINDINGS, *ATTEMPT_BINDINGS):
             raise ConfigError("invalid_profile", "Unknown dynamic binding", location)
         if bindings and value in QUICKQUIP_BINDINGS.values() and profile_id != "quickquip":
             raise ConfigError("invalid_profile", "QuickQuip identity is Profile-owned", location)
@@ -128,13 +139,14 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
         raise ConfigError("invalid_profile", "QuickQuip requires its four bindings", location)
     entries = []
     for protocol, entry in protocols.items():
-        _table(entry, ("headers", "bindings"), location)
+        _table(entry, ("headers", "bindings", "body"), location)
         static = _headers(entry.get("headers", {}), ident, location)
         dynamic = _headers(entry.get("bindings", {}), ident, location, bindings=True)
         names = [k.lower() for k, _ in (*headers, *bindings, *static, *dynamic)]
         if len(names) != len(set(names)):
             raise ConfigError("invalid_profile", "Duplicate Profile header", location)
-        entries.append((protocol, ProtocolFingerprint(static, dynamic)))
+        body = parse_body_policy(entry["body"], protocol, location) if "body" in entry else None
+        entries.append((protocol, ProtocolFingerprint(static, dynamic, body)))
     return ClientFingerprintProfile(ident, label, ua, headers, bindings, tuple(entries))
 
 

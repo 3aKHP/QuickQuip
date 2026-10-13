@@ -494,6 +494,15 @@ class BaseProviderClient:
         )
         return project_body(profile, request, payload)
 
+    def _prepare_http_attempt(self, url, headers, payload, *, stream):
+        from quickquip.llm.client_fingerprints.assembly import prepare_http_attempt
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            return prepare_http_attempt(self.config, url, headers, payload, stream=stream)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
+
     async def _dispatch_with_retry(
         self,
         dispatch: Callable[[LLMRequest], Awaitable[LLMResponse]],
@@ -524,7 +533,11 @@ class BaseProviderClient:
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Dispatch and meter with the explicit request identity bound for tracing."""
-        with trace_request_session(request.session):
+        from quickquip.llm.client_fingerprints.assembly import uses_attempt_bindings
+        from quickquip.llm.client_fingerprints.request_identity import request_context
+
+        with (trace_request_session(request.session),
+              request_context(request, tracing=uses_attempt_bindings(self.config))):
             return await self._complete_with_usage(request)
 
     async def _complete_with_usage(self, request: LLMRequest) -> LLMResponse:
@@ -778,7 +791,9 @@ class BaseProviderClient:
     async def _post_json(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers, payload, compact = self._prepare_http_attempt(url, headers, payload, stream=False)
+        body = json.dumps(payload, ensure_ascii=False,
+                          separators=(",", ":") if compact else None).encode("utf-8")
         request_headers = _headers_to_text(headers)
         started = time.monotonic()
         call_id = await begin_http_trace(
@@ -894,8 +909,9 @@ class BaseProviderClient:
     async def _post_stream_sse(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {**headers, "accept": "text/event-stream"}
+        headers, payload, compact = self._prepare_http_attempt(url, headers, payload, stream=True)
+        body = json.dumps(payload, ensure_ascii=False,
+                          separators=(",", ":") if compact else None).encode("utf-8")
         started = time.monotonic()
         call_id = await begin_http_trace(
             provider_id=self.config.id,

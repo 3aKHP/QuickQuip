@@ -1,0 +1,54 @@
+# OpenCode v2.0.27 native: source 1f4d07a4a519185955ae8ab2ea3607805509e386.
+# Header/Body literals and endpoint compatibility are editable startup snapshots.
+format_version = 1
+id = "opencode2"
+label = "OpenCode 2 (2.0.27 native)"
+user_agent = "opencode/latest/2.0.27/cli"
+
+[protocols.openai.headers]
+accept = "*/*"
+accept-encoding = "gzip, deflate, br, zstd"
+x-opencode-client = "cli"
+
+[protocols.openai.bindings]
+x-opencode-session-id = "opencode_session_id"
+x-session-affinity = "opencode_session_id"
+x-session-id = "opencode_session_id"
+x-opencode-session = "opencode_session_id"
+x-opencode-project = "project_id"
+b3 = "b3"
+traceparent = "traceparent"
+
+[protocols.openai.body]
+strategy = "openai-chat-native"
+field_order = ["model", "messages", "tools", "tool_choice", "stream", "stream_options", "tool_stream", "max_completion_tokens", "max_tokens", "temperature", "top_p", "frequency_penalty", "presence_penalty", "seed", "stop", "store", "prompt_cache_key", "reasoning_effort"]
+tool_message_fields = ["role", "tool_call_id", "content"]
+assistant_field_order = ["role", "content", "tool_calls", "reasoning_details", "reasoning_content"]
+omit_auto_tool_choice = true
+assistant_tool_empty_null = true
+max_tokens_field = "max_completion_tokens"
+supports_store = true
+supports_strict_mode = true
+supports_usage_in_streaming = true
+tool_stream = false
+
+[[protocols.openai.body.endpoint_rules]]
+providers = ["deepseek", "moonshotai", "togetherai", "zai", "zai-coding-plan", "zhipuai", "zhipuai-coding-plan", "nvidia", "cerebras", "chutes", "cloudflare-ai-gateway", "cloudflare-workers-ai"]
+hosts = ["deepseek.com", "api.moonshot.ai", "api.together.xyz", "api.together.ai", "api.z.ai", "open.bigmodel.cn", "integrate.api.nvidia.com", "cerebras.ai", "llm.chutes.ai", "gateway.ai.cloudflare.com", "api.cloudflare.com"]
+max_tokens_field = "max_tokens"
+
+[[protocols.openai.body.endpoint_rules]]
+providers = ["nvidia", "moonshotai", "moonshotai-cn", "togetherai", "together", "zai", "zai-coding-plan", "zhipuai", "zhipuai-coding-plan", "deepseek", "cerebras", "xai", "chutes", "cloudflare-workers-ai", "cloudflare-ai-gateway", "vercel-ai-gateway", "ant-ling", "opencode"]
+hosts = ["generativelanguage.googleapis.com", "integrate.api.nvidia.com", "api.moonshot.ai", "api.moonshot.cn", "api.together.xyz", "api.together.ai", "api.z.ai", "open.bigmodel.cn", "deepseek.com", "cerebras.ai", "api.x.ai", "chutes.ai", "api.cloudflare.com", "gateway.ai.cloudflare.com", "vercel.sh", "api.ant-ling.com", "opencode.ai"]
+supports_store = false
+
+[[protocols.openai.body.endpoint_rules]]
+providers = ["moonshotai", "moonshotai-cn", "togetherai", "together", "cloudflare-ai-gateway", "nvidia"]
+hosts = ["api.moonshot.ai", "api.moonshot.cn", "api.together.xyz", "api.together.ai", "gateway.ai.cloudflare.com", "integrate.api.nvidia.com"]
+supports_strict_mode = false
+
+[[protocols.openai.body.endpoint_rules]]
+providers = ["zai", "zai-coding-plan", "zhipuai", "zhipuai-coding-plan"]
+hosts = ["api.z.ai", "open.bigmodel.cn"]
+exclude_models = ["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4.5v"]
+tool_stream = true

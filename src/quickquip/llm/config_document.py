@@ -14,6 +14,7 @@ from quickquip.common.config_utils import expand_env_value
 from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm import config as c
 from quickquip.llm.config_errors import ConfigError
+from quickquip.llm.client_fingerprints.body_policy import validate_body_overrides
 from quickquip.llm.config_fields import (
     SETTINGS,
     PARAMETER_TYPES,
@@ -227,13 +228,17 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
         base.update(raw)
         check_value(base["enabled"], bool, path + ".enabled", "enabled")
         check_value(base["headers"], dict[str, str], path + ".headers", "headers")
-        validate_provider_headers(base["headers"], path + ".headers")
         _text(base["client_fingerprint"], path + ".client_fingerprint", nonempty=True)
-        resolve_profile(base["client_fingerprint"], base["protocol"],
-                        Path(config_dir) if config_dir is not None else CONFIG_DIR)
+        profile = resolve_profile(base["client_fingerprint"], base["protocol"],
+                                  Path(config_dir) if config_dir is not None else CONFIG_DIR)
+        validate_provider_headers(base["headers"], path + ".headers", profile=profile,
+                                  protocol=base["protocol"])
         check_value(base["fallback_urls"], list[str], path + ".fallback_urls", "fallback_urls")
         _text(base["proxy"], path + ".proxy")
         parameters(base["parameters"], path + ".parameters")
+        if profile.for_protocol(base["protocol"]).body is not None:
+            validate_body_overrides(base["parameters"].get("extra_body") or {},
+                                    path + ".parameters.extra_body")
         names = set()
         entries = []
         for j, entry in enumerate(_list(raw.get("models", []), path + ".models")):
@@ -251,6 +256,9 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
             if capacity is not None and (type(capacity) is not int or capacity < 1024):
                 reject(location + ".context_window", "模型容量须为至少 1024 的整数或 null")
             parameters(model["parameters"], location + ".parameters")
+            if profile.for_protocol(base["protocol"]).body is not None:
+                validate_body_overrides(model["parameters"].get("extra_body") or {},
+                                        location + ".parameters.extra_body")
             entries.append(model)
         base["models"] = entries
         models[ident] = names
