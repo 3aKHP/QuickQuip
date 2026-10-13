@@ -94,10 +94,11 @@ class ConfigRuntimeWorker:
         statuses = runtime.mcp_manager.get_statuses()
         required = set(environment_references(self.service.read("published")["document"]))
         required.update(environment_references(self.service.read("draft")["document"]))
+        core_ready = not runtime.config.load_error and runtime.storage_available
         return {
             "environment": [{"name": name, "configured": bool(os.getenv(name))}
                             for name in sorted(required)],
-            "core": {"state": "ready" if not runtime.config.load_error else "failed"},
+            "core": {"state": "ready" if core_ready else "failed"},
             "mcp": {
                 "state": "preparing" if (
                     runtime.is_mcp_initializing() or runtime.is_mcp_dirty()
