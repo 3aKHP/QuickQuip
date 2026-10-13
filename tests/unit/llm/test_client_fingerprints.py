@@ -136,7 +136,9 @@ async def test_brand_headers_use_epoch_and_leave_body_unchanged(tmp_path, monkey
     config = _config(tmp_path, protocol)
     request = _request()
     url, headers, body = await build_provider_client(config)._build_request_parts(request)
-    default = replace(config, client_fingerprint="default", fingerprint_runtime=None)
+    default = replace(config, client_fingerprint="default", fingerprint_runtime=FingerprintRuntime(
+        resolve_profile("default", protocol), "", tmp_path,
+    ))
     default_url, default_headers, default_body = await build_provider_client(
         default,
     )._build_request_parts(request)
