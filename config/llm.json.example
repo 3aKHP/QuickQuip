@@ -322,7 +322,8 @@
       "reply_send_interval_ms": 800,
       "reply_max_chunks_per_loop": 64,
       "mention_cooldown_seconds": 600.0,
-      "client_cluster": ""
+      "client_cluster": "",
+      "claude_code_device_id": ""
     },
     "triggers": {
       "default_prefix": "/ai",

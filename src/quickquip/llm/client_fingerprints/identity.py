@@ -8,6 +8,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import secrets
 import uuid
 
 from filelock import FileLock, Timeout
@@ -45,3 +46,39 @@ def load_install_id(data_dir: Path) -> str:
         raise ConfigError(
             "client_identity_failed", "Cannot load persistent client identity",
         ) from exc
+
+
+def normalize_device_id(value: str, location="settings.runtime.claude_code_device_id") -> str:
+    if not isinstance(value, str):
+        raise ConfigError("invalid_field", "Device identity must be a string", location)
+    value = value.strip().lower()
+    if value and not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ConfigError("invalid_field", "Device identity requires 64 hexadecimal characters",
+                          location)
+    return value
+
+
+def load_claude_device_id(data_dir: Path, override: str = "") -> str:
+    """One persistent random CC identity; explicit settings do not touch the automatic value."""
+    override = normalize_device_id(override)
+    if override:
+        return override
+    load_install_id(data_dir)
+    path = Path(data_dir) / "client_identity.json"
+    try:
+        with FileLock(str(path) + ".lock", timeout=10):
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or not re.fullmatch(
+                r"[0-9a-f]{64}", str(raw.get("install_id", "")),
+            ):
+                raise ValueError("invalid installation identity")
+            if "claude_code_device_id" not in raw:
+                raw["claude_code_device_id"] = secrets.token_hex(32)
+                durable_write(path, (json.dumps(raw) + "\n").encode("utf-8"))
+            value = raw["claude_code_device_id"]
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ValueError("invalid CC identity")
+            return value
+    except (OSError, ValueError, UnicodeError, Timeout) as exc:
+        raise ConfigError("client_identity_failed",
+                          "Cannot load persistent CC device identity") from exc

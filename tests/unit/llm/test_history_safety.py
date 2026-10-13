@@ -155,6 +155,7 @@ async def test_safe_history_serializes_without_native_or_blocked_payload(tmp_pat
         safe, target=owner, protocol=protocol, budget_tokens=10000, archive_loop_ids=archived,
     )
     provider = ProviderConfig(
+        client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id="p", protocol=protocol, base_url="https://example.test/v1",
         api_key_env="TEST_KEY", default_model="m", models=["m"],
     )

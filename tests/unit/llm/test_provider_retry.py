@@ -25,6 +25,7 @@ from tests.fixtures.provider_fakes import FakeClaudeClient
 
 def _config(**overrides) -> ProviderConfig:
     return ProviderConfig(
+        client_fingerprint="legacy-claude",
         id="fake", protocol="claude", base_url="https://x/v1",
         api_key_env="K", default_model="m", models=["m"],
         **overrides,

@@ -12,6 +12,7 @@ from tests.fixtures.provider_fakes import FakeClaudeClient
 
 def _config() -> ProviderConfig:
     return ProviderConfig(
+        client_fingerprint="legacy-claude",
         id="fake",
         protocol="claude",
         base_url="https://x/v1",
@@ -199,6 +200,7 @@ async def test_record_usage_carries_context_meters_and_resets(monkeypatch, tmp_p
 
     class FakeClient:
         config = ProviderConfig(
+            client_fingerprint="legacy-claude",
             id="p",
             protocol="claude",
             base_url="https://x/v1",
@@ -239,6 +241,7 @@ async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
 
     class FakeClient:
         config = ProviderConfig(
+            client_fingerprint="legacy-claude",
             id="p",
             protocol="claude",
             base_url="https://x/v1",
@@ -322,6 +325,7 @@ async def test_record_usage_input_semantics_matches_protocol(monkeypatch, tmp_pa
     async def _record(protocol: str) -> str | None:
         class FakeClient:
             config = ProviderConfig(
+                client_fingerprint="legacy-claude" if protocol == "claude" else "default",
                 id="p",
                 protocol=protocol,
                 base_url="https://x/v1",
@@ -365,6 +369,7 @@ async def test_record_usage_persists_finish_reason(monkeypatch, tmp_path):
 
     class FakeClient:
         config = ProviderConfig(
+            client_fingerprint="legacy-claude",
             id="p",
             protocol="claude",
             base_url="https://x/v1",

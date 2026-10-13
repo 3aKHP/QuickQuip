@@ -520,12 +520,16 @@ class BaseProviderClient:
         被重试吸收的失败不产生额外 usage 记录（明细见 HTTP trace）。
         """
         if self.single_dispatch:
-            return await dispatch(request)
+            from quickquip.llm.client_fingerprints.retry_context import retry_context
+            with retry_context(0):
+                return await dispatch(request)
         policy = self.retry_policy
         attempt = 0
         while True:
             try:
-                return await dispatch(request)
+                from quickquip.llm.client_fingerprints.retry_context import retry_context
+                with retry_context(attempt):
+                    return await dispatch(request)
             except LLMProviderError as exc:
                 attempt += 1
                 if attempt >= policy.max_attempts or not _is_retryable(exc):

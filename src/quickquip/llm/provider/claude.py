@@ -1,8 +1,7 @@
 """Anthropic Claude Messages API provider client.
 
-Includes the Claude Code wire-format fingerprint defaults (captured from
-a real claude-cli client) that let this client present itself as a
-first-party Claude Code session.
+Protocol content stays application-owned; selected client Profiles project
+their Header and Body features on copies at the HTTP boundary.
 """
 from __future__ import annotations
 

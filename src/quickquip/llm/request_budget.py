@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from quickquip.llm.config import (
     AGENT_REPLAY_LOOP_TOKENS_CEILING,
@@ -178,13 +178,36 @@ def check_request_budget(
     *,
     max_output_tokens: int | None = None,
 ) -> RequestBudgetCheck:
+    from quickquip.llm.client_fingerprints.assembly import selected_profile
+    from quickquip.llm.client_fingerprints.claude_policy import (
+        ClaudeBodyPolicy, validate_claude_overrides,
+    )
+    from quickquip.llm.provider.owner import resolve_wire_model
+
+    policy = (selected_profile(provider).for_protocol("claude").body
+              if provider.protocol == "claude" else None)
+    added_tokens = 0
+    added_items = 0
+    if isinstance(policy, ClaudeBodyPolicy):
+        validate_claude_overrides(policy, provider.extra_body)
+        limit = provider.extra_body.get(
+            "max_tokens", max_output_tokens or request.max_output_tokens,
+        )
+        if type(limit) is int and limit > 0:
+            max_output_tokens = limit
+        request = replace(request, model=resolve_wire_model(provider, request.model))
+        # One added text block; identity text is the same frozen asset sent by the projector.
+        added_tokens = estimate_native_blocks_tokens([
+            {"type": "text", "text": policy.identity_text},
+        ])
+        added_items = 1
     budget_limit = resolve_input_budget(
         config, provider, request.model, max_output_tokens=max_output_tokens
     )
     wire_model = request.model
     context_window = resolve_context_window(provider.model_context_windows, wire_model)
     output_reserve = (max_output_tokens or provider.max_output_tokens) + _RESERVE_TOKENS
-    estimated = estimate_request_tokens(
+    estimated = added_tokens + estimate_request_tokens(
         request, effort=request.reasoning_effort or provider.reasoning_effort
     )
     if context_window is None:
@@ -196,7 +219,7 @@ def check_request_budget(
         estimated_input_tokens=estimated,
         budget_limit=budget_limit,
         context_window=effective_window,
-        wire_items=count_wire_items(request),
+        wire_items=count_wire_items(request) + added_items,
         capacity_unknown=context_window is None,
     )
 

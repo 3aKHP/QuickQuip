@@ -18,6 +18,10 @@ from quickquip.llm.client_fingerprints.body_policy import validate_body_override
 from quickquip.llm.client_fingerprints.body_bindings import (
     CACHE_AFFINITY_FIELD, validate_body_binding_overrides,
 )
+from quickquip.llm.client_fingerprints.claude_policy import (
+    ClaudeBodyPolicy, validate_claude_overrides,
+)
+from quickquip.llm.client_fingerprints.identity import normalize_device_id
 from quickquip.llm.config_fields import (
     SETTINGS,
     PARAMETER_TYPES,
@@ -249,7 +253,11 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
             profile.for_protocol(base["protocol"]).body_bindings,
             base["parameters"].get("extra_body") or {}, path + ".parameters.extra_body",
         )
-        if profile.for_protocol(base["protocol"]).body is not None:
+        body_policy = profile.for_protocol(base["protocol"]).body
+        if isinstance(body_policy, ClaudeBodyPolicy):
+            validate_claude_overrides(body_policy, base["parameters"].get("extra_body") or {},
+                                      path + ".parameters.extra_body")
+        elif body_policy is not None:
             validate_body_overrides(base["parameters"].get("extra_body") or {},
                                     path + ".parameters.extra_body")
         names = set()
@@ -273,7 +281,10 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
                 profile.for_protocol(base["protocol"]).body_bindings,
                 model["parameters"].get("extra_body") or {}, location + ".parameters.extra_body",
             )
-            if profile.for_protocol(base["protocol"]).body is not None:
+            if isinstance(body_policy, ClaudeBodyPolicy):
+                validate_claude_overrides(body_policy, model["parameters"].get("extra_body") or {},
+                                          location + ".parameters.extra_body")
+            elif body_policy is not None:
                 validate_body_overrides(model["parameters"].get("extra_body") or {},
                                         location + ".parameters.extra_body")
             entries.append(model)
@@ -306,6 +317,7 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
             output["settings"][name].update(raw)
     rt = output["settings"]["runtime"]
     header_value(rt["client_cluster"], "settings.runtime.client_cluster")
+    rt["claude_code_device_id"] = normalize_device_id(rt["claude_code_device_id"])
     if rt["default_provider"] is not None and rt["default_provider"] not in ids:
         reject("settings.runtime.default_provider", "默认渠道不存在", "dependency_conflict")
     if rt["enabled"] and not providers:
@@ -474,6 +486,7 @@ def compile_document(
         provider.fingerprint_runtime = FingerprintRuntime(
             resolve_profile(provider.client_fingerprint, provider.protocol, directory),
             config.runtime.client_cluster, directory.parent / "data",
+            config.runtime.claude_code_device_id,
         )
         provider.model_parameters = {m["model"]: deepcopy(m["parameters"]) for m in raw["models"]}
         provider.model_enabled = {m["model"]: m["enabled"] for m in raw["models"]}

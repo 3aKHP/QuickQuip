@@ -57,7 +57,9 @@ def _payload_images(value):
 )
 def client(request, monkeypatch):
     protocol, client_type = request.param
-    config = ProviderConfig(id="review", protocol=protocol, base_url="https://example.test/v1",
+    config = ProviderConfig(
+        client_fingerprint="legacy-claude" if protocol == "claude" else "default",
+        id="review", protocol=protocol, base_url="https://example.test/v1",
                             api_key_env="TEST_MEDIA_KEY", default_model="test", models=["test"])
     monkeypatch.setenv("TEST_MEDIA_KEY", "synthetic-key")
     return client_type(config)

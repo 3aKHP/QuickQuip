@@ -114,6 +114,7 @@ class RuntimeConfig:
     mention_cooldown_seconds: float = 600.0
 
     client_cluster: str = ""
+    claude_code_device_id: str = ""
 
 
 @dataclass(slots=True)

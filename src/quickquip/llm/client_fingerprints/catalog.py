@@ -1,7 +1,7 @@
 """Validate TOML profiles and retain one immutable catalog per process/directory."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
@@ -13,6 +13,9 @@ from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import ChatBodyPolicy, parse_body_policy
 from quickquip.llm.client_fingerprints.body_bindings import BodyBindings, parse_body_bindings
+from quickquip.llm.client_fingerprints.claude_policy import (
+    BetaRule, ClaudeBodyPolicy, parse_beta_rules, parse_claude_policy,
+)
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
 from quickquip.llm.client_fingerprints.trace_context import ATTEMPT_BINDINGS
 
@@ -31,9 +34,12 @@ _IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z")
 class ProtocolFingerprint:
     headers: tuple[tuple[str, str], ...] = ()
     bindings: tuple[tuple[str, str], ...] = ()
-    body: ChatBodyPolicy | None = None
+    body: ChatBodyPolicy | ClaudeBodyPolicy | None = None
     header_order: tuple[str, ...] = ()
     body_bindings: BodyBindings = ()
+    beta_rules: tuple[BetaRule, ...] = ()
+    stream_accept: str = ""
+    protocol_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +63,7 @@ class FingerprintRuntime:
     profile: ClientFingerprintProfile
     cluster: str
     data_dir: Path
+    claude_code_device_id: str = ""
 
 
 def header_value(value: str, location: str) -> str:
@@ -103,6 +110,7 @@ def _headers(raw, profile_id, location, *, bindings=False):
             if profile_id != "quickquip" or not bindings or value != QUICKQUIP_BINDINGS[key]:
                 raise ConfigError("invalid_profile", "Invalid QuickQuip header ownership", location)
         if bindings and value not in (*QUICKQUIP_BINDINGS.values(), "stainless_os",
+                                      "timeout_seconds", "retry_count",
                                       *SESSION_BINDINGS, *ATTEMPT_BINDINGS):
             raise ConfigError("invalid_profile", "Unknown dynamic binding", location)
         if bindings and value in QUICKQUIP_BINDINGS.values() and profile_id != "quickquip":
@@ -143,13 +151,23 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
         raise ConfigError("invalid_profile", "QuickQuip requires its four bindings", location)
     entries = []
     for protocol, entry in protocols.items():
-        _table(entry, ("headers", "bindings", "body", "header_order", "body_bindings"), location)
+        _table(entry, ("headers", "bindings", "body", "header_order", "body_bindings",
+                       "beta_rules", "stream_accept", "protocol_ref"), location)
+        ref = entry.get("protocol_ref", "")
+        if (not isinstance(ref, str) or (ref and (not _IDENTIFIER.fullmatch(ref)
+                or ref == ident or set(entry) != {"protocol_ref"}))):
+            raise ConfigError("invalid_profile", "Invalid protocol reference", location)
         static = _headers(entry.get("headers", {}), ident, location)
         dynamic = _headers(entry.get("bindings", {}), ident, location, bindings=True)
         names = [k.lower() for k, _ in (*headers, *bindings, *static, *dynamic)]
         if len(names) != len(set(names)):
             raise ConfigError("invalid_profile", "Duplicate Profile header", location)
-        body = parse_body_policy(entry["body"], protocol, location) if "body" in entry else None
+        body = None
+        if "body" in entry:
+            if protocol == "claude":
+                body = parse_claude_policy(entry["body"], location)
+            else:
+                body = parse_body_policy(entry["body"], protocol, location)
         body_bindings = (parse_body_bindings(entry["body_bindings"], protocol, location)
                          if "body_bindings" in entry else ())
         order = entry.get("header_order", [])
@@ -157,9 +175,21 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
                 or any(not isinstance(k, str) or not _HEADER.fullmatch(k) for k in order)
                 or len({k.lower() for k in order}) != len(order)):
             raise ConfigError("invalid_profile", "Invalid Header order", location)
+        beta_rules = (parse_beta_rules(entry["beta_rules"], protocol, location)
+                      if "beta_rules" in entry else ())
+        stream_accept = entry.get("stream_accept", "")
+        if stream_accept not in ("", "preserve", "event-stream"):
+            raise ConfigError("invalid_profile", "Invalid streaming Accept policy", location)
+        if isinstance(body, ClaudeBodyPolicy) and body.metadata_user_id:
+            if dict((k.lower(), v) for k, v in (*bindings, *dynamic)).get(
+                "x-claude-code-session-id"
+            ) != "business_session_id":
+                raise ConfigError("invalid_profile", "CC metadata requires its Session binding",
+                                  location)
         entries.append((protocol, ProtocolFingerprint(
             headers=static, bindings=dynamic, body=body, header_order=tuple(order),
-            body_bindings=body_bindings,
+            body_bindings=body_bindings, beta_rules=beta_rules, stream_accept=stream_accept,
+            protocol_ref=ref,
         )))
     return ClientFingerprintProfile(ident, label, ua, headers, bindings, tuple(entries))
 
@@ -183,7 +213,27 @@ def _load_catalog(config_dir: Path) -> tuple[ClientFingerprintProfile, ...]:
                 contents[path.stem] = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise ConfigError("invalid_profile", "Cannot read Profile files") from exc
-    return tuple(parse_profile(contents[ident], ident) for ident in sorted(contents))
+    parsed = {ident: parse_profile(contents[ident], ident) for ident in sorted(contents)}
+    result = []
+    for profile in parsed.values():
+        entries = []
+        for protocol, entry in profile.protocols:
+            if entry.protocol_ref:
+                target = parsed.get(entry.protocol_ref)
+                if target is None or target.headers or target.bindings or target.user_agent:
+                    raise ConfigError("invalid_profile",
+                                      "Reference requires a protocol-local target")
+                entry = target.for_protocol(protocol)
+                if entry.protocol_ref:
+                    raise ConfigError("invalid_profile",
+                                      "Chained protocol references are unsupported")
+            names = [k.lower() for k, _ in
+                     (*profile.headers, *profile.bindings, *entry.headers, *entry.bindings)]
+            if len(set(names)) != len(names):
+                raise ConfigError("invalid_profile", "Duplicate referenced Header")
+            entries.append((protocol, entry))
+        result.append(replace(profile, protocols=tuple(entries)))
+    return tuple(result)
 
 
 def resolve_profile(ident: str, protocol: str, config_dir: Path = CONFIG_DIR):

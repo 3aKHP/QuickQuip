@@ -128,6 +128,7 @@ export const SETTINGS_SECTION_LABELS: Record<string, string> = {
 export const SETTINGS_FIELD_LABELS: Record<string, Record<string, FieldLabel>> = {
   runtime: {
     client_cluster: { label: '部署群标识', hint: '可选；仅 QuickQuip Profile 发送，所有渠道共用。', placeholder: 'my-cluster' },
+    claude_code_device_id: { label: 'Claude Code 设备标识', hint: '可选的 64 位十六进制 ID；所有 CC 渠道共用。留空使用持久随机身份，可填写已有 CC 的 userID。' },
     enabled: { label: '启用 LLM 功能', hint: '总开关。开启前至少需要一个可用渠道。' },
     memory_enabled: { label: '启用记忆', hint: '关闭后不再读写群记忆。' },
     default_provider: { label: '默认渠道', hint: '留空自动使用第一个启用的渠道。' },

@@ -14,6 +14,7 @@ def _provider_config() -> ProviderConfig:
     return ProviderConfig(
         id="fake-claude",
         protocol="claude",
+        client_fingerprint="legacy-claude",
         base_url="https://example.test/v1",
         api_key_env="ANTHROPIC_API_KEY",
         default_model="claude-test",
@@ -68,8 +69,8 @@ async def test_claude_tool_use_payload_and_response():
     assert response.tool_calls[0].arguments_json == '{"query": "哈基镜"}'
 
 
-async def test_claude_code_fingerprint_headers():
-    """Default Claude provider emits the full Claude Code wire-format fingerprint
+async def test_legacy_claude_code_fingerprint_headers():
+    """Legacy Claude provider preserves the captured wire-format fingerprint
     captured from a real claude-cli 2.1.150 (external, cli) client on Linux."""
     response_data = {
         "model": "claude-test",
