@@ -13,6 +13,7 @@ from quickquip.llm.config import ProviderConfig
 from quickquip.llm.provider import ClaudeProviderClient, GeminiProviderClient, OpenAIProviderClient
 from quickquip.llm.provider.base import LLMImageInput, LLMProviderError, LLMRequest
 from quickquip.llm.tools import LLMConversationMessage, LLMInlineImage, LLMToolCall
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _png(color: int) -> bytes:
@@ -57,10 +58,10 @@ def _payload_images(value):
 )
 def client(request, monkeypatch):
     protocol, client_type = request.param
-    config = ProviderConfig(
+    config = protocol_only_config(ProviderConfig(
         client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id="review", protocol=protocol, base_url="https://example.test/v1",
-                            api_key_env="TEST_MEDIA_KEY", default_model="test", models=["test"])
+                            api_key_env="TEST_MEDIA_KEY", default_model="test", models=["test"]))
     monkeypatch.setenv("TEST_MEDIA_KEY", "synthetic-key")
     return client_type(config)
 

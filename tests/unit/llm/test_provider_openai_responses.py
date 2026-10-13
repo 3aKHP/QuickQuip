@@ -47,6 +47,7 @@ from tests.fixtures.stream_chunks import (
     RESPONSES_TEXT_CHUNKS,
     RESPONSES_TOOL_CHUNKS,
 )
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _config(**overrides) -> ProviderConfig:
@@ -59,7 +60,7 @@ def _config(**overrides) -> ProviderConfig:
         models=["gpt-test"],
     )
     kwargs.update(overrides)
-    return ProviderConfig(**kwargs)
+    return protocol_only_config(ProviderConfig(**kwargs))
 
 
 def _request(messages: list[LLMConversationMessage], **overrides) -> LLMRequest:

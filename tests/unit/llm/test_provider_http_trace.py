@@ -11,6 +11,7 @@ from quickquip.llm.config import ProviderConfig
 from quickquip.llm.provider import BaseProviderClient, LLMRequest, OpenAIProviderClient, trace
 from quickquip.llm.provider import base as provider_base
 from quickquip.llm.tools import LLMConversationMessage, LLMInlineImage, LLMToolCall
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _config(**overrides) -> ProviderConfig:
@@ -23,7 +24,7 @@ def _config(**overrides) -> ProviderConfig:
         "models": ["m"],
     }
     values.update(overrides)
-    return ProviderConfig(**values)
+    return protocol_only_config(ProviderConfig(**values))
 
 
 class _FakeClient:

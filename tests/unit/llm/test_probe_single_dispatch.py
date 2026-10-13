@@ -11,6 +11,7 @@ from quickquip.llm.config import ProviderConfig
 from quickquip.llm.config_runtime import ConfigRuntimeWorker
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.provider_health import probe_provider
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 @pytest.fixture
@@ -33,11 +34,11 @@ def transport(monkeypatch):
 
 
 def provider():
-    return ProviderConfig(
+    return protocol_only_config(ProviderConfig(
         id="test", protocol="openai", base_url="https://primary.test/v1",
         api_key_env="TEST_PROBE_KEY", default_model="model", models=["model"],
         fallback_urls=["https://secondary.test/v1"], retry_max_attempts=5,
-    )
+    ))
 
 
 async def test_single_dispatch_blocks_retry_policy_and_endpoint_fallback(transport, monkeypatch):

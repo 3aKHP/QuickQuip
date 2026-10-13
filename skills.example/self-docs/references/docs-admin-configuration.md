@@ -288,7 +288,7 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 > **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 
-> **协议适配说明**：Anthropic 的内置 `default` 使用 Claude Code 2.1.296 Linux CLI 的 Header 与 Body 策略，保留 `/messages?beta=true` URL；`legacy-claude` 提供既有行为回退。Profile 指纹值由 TOML 文件定义。附加头按大小写无关覆盖，`user_agent` 参数优先级最高；自动 Session 与 Body 结构字段受到覆盖保护。`quickquip` Profile 使用自有品牌，四个专有头由该 Profile 管理；全局 `settings.runtime.client_cluster` 可配置部署群标识，`settings.runtime.claude_code_device_id` 可填写 CC 设备身份。详情见[请求指纹 Profile](client-fingerprints.md)。
+> **协议适配说明**：内置 `default` 的 Chat 使用 OpenCode 2，Responses 使用轻量 Codex，Gemini 保留通用默认；Anthropic 使用 Claude Code 2.1.296 Linux CLI 的 Header 与 Body 策略，保留 `/messages?beta=true` URL；`legacy-claude` 提供既有行为回退。Profile 指纹值由 TOML 文件定义。附加头按大小写无关覆盖，`user_agent` 参数优先级最高；自动 Session 与 Body 结构字段受到覆盖保护。`quickquip` Profile 使用自有品牌，四个专有头由该 Profile 管理；全局 `settings.runtime.client_cluster` 可配置部署群标识，`settings.runtime.claude_code_device_id` 可填写 CC 设备身份。详情见[请求指纹 Profile](client-fingerprints.md)。
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
 
