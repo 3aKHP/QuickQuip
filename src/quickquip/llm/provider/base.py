@@ -465,6 +465,12 @@ class BaseProviderClient:
         kwargs: dict[str, Any] = {"timeout": timeout}
         if self._proxy:
             kwargs["proxy"] = self._proxy
+        from quickquip.llm.client_fingerprints.assembly import selected_profile
+        from quickquip.llm.client_fingerprints.transport_layout import request_layout_hook
+
+        order = selected_profile(self.config).for_protocol(self.config.protocol).header_order
+        if order:
+            kwargs["event_hooks"] = {"request": [request_layout_hook(order)]}
         return kwargs
 
     def _get_api_key(self) -> str:
@@ -493,6 +499,15 @@ class BaseProviderClient:
             self.config.client_fingerprint, self.config.protocol,
         )
         return project_body(profile, request, payload)
+
+    def _prepare_http_attempt(self, url, headers, payload, *, stream):
+        from quickquip.llm.client_fingerprints.assembly import prepare_http_attempt
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            return prepare_http_attempt(self.config, url, headers, payload, stream=stream)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
 
     async def _dispatch_with_retry(
         self,
@@ -524,7 +539,16 @@ class BaseProviderClient:
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Dispatch and meter with the explicit request identity bound for tracing."""
-        with trace_request_session(request.session):
+        from quickquip.llm.client_fingerprints.assembly import uses_attempt_bindings
+        from quickquip.llm.client_fingerprints.trace_context import request_context
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            tracing = uses_attempt_bindings(self.config)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
+        with (trace_request_session(request.session),
+              request_context(request, tracing=tracing)):
             return await self._complete_with_usage(request)
 
     async def _complete_with_usage(self, request: LLMRequest) -> LLMResponse:
@@ -778,7 +802,8 @@ class BaseProviderClient:
     async def _post_json(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        attempt = self._prepare_http_attempt(url, headers, payload, stream=False)
+        headers, payload, body = attempt.headers, attempt.payload, attempt.body
         request_headers = _headers_to_text(headers)
         started = time.monotonic()
         call_id = await begin_http_trace(
@@ -894,8 +919,8 @@ class BaseProviderClient:
     async def _post_stream_sse(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {**headers, "accept": "text/event-stream"}
+        attempt = self._prepare_http_attempt(url, headers, payload, stream=True)
+        headers, payload, body = attempt.headers, attempt.payload, attempt.body
         started = time.monotonic()
         call_id = await begin_http_trace(
             provider_id=self.config.id,
