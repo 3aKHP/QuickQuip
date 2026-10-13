@@ -15,6 +15,9 @@ from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm import config as c
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import validate_body_overrides
+from quickquip.llm.client_fingerprints.body_bindings import (
+    CACHE_AFFINITY_FIELD, validate_body_binding_overrides,
+)
 from quickquip.llm.config_fields import (
     SETTINGS,
     PARAMETER_TYPES,
@@ -49,6 +52,10 @@ _SECRET_KEY = re.compile(
     r"(?:(?:.*[-_])?authorization|x-api-key|key|api[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|token|password|secret|cookie|.*[_-](?:token|secret|password|key))$",
     re.I,
+)
+_CACHE_KEY_PATH = re.compile(
+    r"providers\[\d+\]\.(?:models\[\d+\]\.)?parameters\.extra_body\."
+    + re.escape(CACHE_AFFINITY_FIELD) + r"\Z",
 )
 
 
@@ -94,7 +101,9 @@ def _secrets(value: Any, path: str = "") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             location = f"{path}.{key}" if path else key
-            if _SECRET_KEY.fullmatch(key) and child:
+            # This declared JSON field is cache affinity, outside the credential namespace.
+            cache_key = key == CACHE_AFFINITY_FIELD and _CACHE_KEY_PATH.fullmatch(location)
+            if _SECRET_KEY.fullmatch(key) and child and not cache_key:
                 if not isinstance(child, str) or not _REFERENCE.search(child):
                     reject(location, "认证值须迁入根目录 .env 并保存变量引用", "literal_secret")
                 residual = _REFERENCE.sub("", child).strip()
@@ -236,6 +245,10 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
         check_value(base["fallback_urls"], list[str], path + ".fallback_urls", "fallback_urls")
         _text(base["proxy"], path + ".proxy")
         parameters(base["parameters"], path + ".parameters")
+        validate_body_binding_overrides(
+            profile.for_protocol(base["protocol"]).body_bindings,
+            base["parameters"].get("extra_body") or {}, path + ".parameters.extra_body",
+        )
         if profile.for_protocol(base["protocol"]).body is not None:
             validate_body_overrides(base["parameters"].get("extra_body") or {},
                                     path + ".parameters.extra_body")
@@ -256,6 +269,10 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
             if capacity is not None and (type(capacity) is not int or capacity < 1024):
                 reject(location + ".context_window", "模型容量须为至少 1024 的整数或 null")
             parameters(model["parameters"], location + ".parameters")
+            validate_body_binding_overrides(
+                profile.for_protocol(base["protocol"]).body_bindings,
+                model["parameters"].get("extra_body") or {}, location + ".parameters.extra_body",
+            )
             if profile.for_protocol(base["protocol"]).body is not None:
                 validate_body_overrides(model["parameters"].get("extra_body") or {},
                                         location + ".parameters.extra_body")

@@ -12,6 +12,7 @@ import tomllib
 from quickquip.common.paths import CONFIG_DIR
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import ChatBodyPolicy, parse_body_policy
+from quickquip.llm.client_fingerprints.body_bindings import BodyBindings, parse_body_bindings
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
 from quickquip.llm.client_fingerprints.trace_context import ATTEMPT_BINDINGS
 
@@ -32,6 +33,7 @@ class ProtocolFingerprint:
     bindings: tuple[tuple[str, str], ...] = ()
     body: ChatBodyPolicy | None = None
     header_order: tuple[str, ...] = ()
+    body_bindings: BodyBindings = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,19 +143,24 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
         raise ConfigError("invalid_profile", "QuickQuip requires its four bindings", location)
     entries = []
     for protocol, entry in protocols.items():
-        _table(entry, ("headers", "bindings", "body", "header_order"), location)
+        _table(entry, ("headers", "bindings", "body", "header_order", "body_bindings"), location)
         static = _headers(entry.get("headers", {}), ident, location)
         dynamic = _headers(entry.get("bindings", {}), ident, location, bindings=True)
         names = [k.lower() for k, _ in (*headers, *bindings, *static, *dynamic)]
         if len(names) != len(set(names)):
             raise ConfigError("invalid_profile", "Duplicate Profile header", location)
         body = parse_body_policy(entry["body"], protocol, location) if "body" in entry else None
+        body_bindings = (parse_body_bindings(entry["body_bindings"], protocol, location)
+                         if "body_bindings" in entry else ())
         order = entry.get("header_order", [])
         if (not isinstance(order, list)
                 or any(not isinstance(k, str) or not _HEADER.fullmatch(k) for k in order)
                 or len({k.lower() for k in order}) != len(order)):
             raise ConfigError("invalid_profile", "Invalid Header order", location)
-        entries.append((protocol, ProtocolFingerprint(static, dynamic, body, tuple(order))))
+        entries.append((protocol, ProtocolFingerprint(
+            headers=static, bindings=dynamic, body=body, header_order=tuple(order),
+            body_bindings=body_bindings,
+        )))
     return ClientFingerprintProfile(ident, label, ua, headers, bindings, tuple(entries))
 
 
