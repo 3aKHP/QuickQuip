@@ -23,9 +23,13 @@ WAIT_TIMEOUT = 30
 
 def _admin_base_url() -> str:
     host = get_web_admin_host()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
     if host in {"0.0.0.0", "::"}:
         # 通配绑定地址不可作为连接目标
         host = "127.0.0.1"
+    if ":" in host:
+        host = f"[{host}]"
     return f"http://{host}:{get_web_admin_port()}"
 
 
