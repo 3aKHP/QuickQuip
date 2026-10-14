@@ -8,6 +8,55 @@
 
 （暂无）
 
+## [1.16.2] - 2026-10-14
+
+本版完善 **LLM 配置数据库与管理工作台、持久会话身份、四协议客户端请求 Profile**，继续为 1.16.5 的系列收口奠定基础。
+
+**升级说明**：
+
+- LLM 配置由 `data/llm_config.db` 管理。首次初始化迁移现有 `config/llm.toml`，保留源文件、人格及多模态资产备份与迁移报告；认证字段使用根目录 `.env` 的变量引用，迁移前须将认证字面量改为变量引用。后续配置通过 Web Admin 或 JSON／CLI 维护，保存草稿与应用分别操作，Bot 启动读取已发布快照。请同步 `prod.example/` 的初始化、挂载与启动模板，详情见 [LLM 配置管理](docs/admin/llm-configuration.md)。
+- 当前配置库为 schema 3。使用 1.16.2 开发版且已有 schema 1／2 数据库的部署者，先停止旧 Bot 与 Web、完成数据库一致备份，再运行 `python -m quickquip.llm.config_cli init --services-stopped`。回退旧程序使用升级前数据库备份。回退至 1.16.1 则使用迁移前 TOML、人格与 generation 资产；新库中的配置修改不反向写入旧 TOML。
+- 缺省或显式 `default` Profile 现按协议使用 OpenCode 2（Chat）、Codex（Responses）、Claude Code（Anthropic）和 Gemini CLI（Gemini）请求特征。升级前检查 `extra_body`、动态身份 Header 与本地模板覆盖；保留通用行为可选择 `legacy-claude`、`legacy-gemini` 或自定义 Profile。已有 OpenCode 2／Codex 本地模板的顶层 UA 须按 [Profile 文档](docs/admin/client-fingerprints.md) 移入协议局部配置；模板修改后重启 Bot 与 Web。Profile 名称与请求特征不保证具体上游渠道兼容。
+- 模型价格按「渠道 + 模型 ID」维护，移除全渠道兜底；旧数据升级及旧格式 JSON 导入会转换可归属价格，并报告被移除条目。升级后检查各渠道模型价格，使用新版 JSON 导出格式。价格影响新请求，历史费用与在途任务保持原口径。
+
+### 新增
+
+- **LLM 配置数据库**：提供修订草稿、独立应用、不可变发布快照、JSON 导入导出与预览、历史恢复和一致备份；配置生效状态区分草稿、已发布及 Bot 实际加载版本。
+- **持久会话身份**：业务 Session 跨轮与重启延续，私聊归档恢复保留原会话；新建或清空会话建立新身份。业务 Session、上下文纪元与请求追踪拥有独立生命周期。
+- **客户端请求 Profile**：新增可编辑 TOML 策略和渠道选择，内置 QuickQuip 品牌及 OpenCode 2、Codex、Claude Code、Gemini CLI 模板，支持请求身份、Header 与 Body 投影、缓存亲和及本地覆盖。安装身份随数据目录保留，手工身份设置通过全局配置维护。
+- **HTTP 调用追踪**：关联内部会话身份与实际 HTTP 尝试，保留请求、响应和流式原始记录，便于诊断跨轮、重试及协议问题。
+- **请求结构排障文档**：集中说明有效配置、静态前缀与动态信封、历史／当前工具回合、Responses 降级及追踪计量的取证方式。
+
+### 变更
+
+- **配置工作台**：按渠道与模型、功能路由、价格、回复风格、行为及发布管理分区；参数展示继承与覆盖关系，支持模型探测、版本备注、导入预览及冲突反馈。版本以保存时间和可编辑备注标记，各栏独立滚动。
+- **渠道模型定价**：价格面板按渠道分组、从配置模型中选择，支持复制价格；费用按实际请求模型匹配，响应中改写的模型名不改变定价。
+- **四协议默认请求策略**：采用对应客户端模板，default 与显式客户端选择共用本地覆盖；Gemini CLI 使用 Header API Key 鉴权和持久会话模型标识，提供通用模板回退。
+- **配置与资源快照**：在途任务保留开始时的配置、模型和资源；新任务使用已应用配置。MCP 变更建立新资源代际，旧任务继续使用原连接。
+- **响应解压**：支持 Brotli 和 Zstandard 响应解码，保留既有协议重试、工具权限和预算语义。
+- **发布审查流程**：普通累积版本执行独立发布专项 CR，核对已有交付证据、发布一致性与集成风险；特殊里程碑单独确定专项清单。Release 合并和最终 tag 分别需要人工批准。
+
+### 移除
+
+- LLM 全渠道兜底价格配置，统一按渠道与模型维护。
+
+### 修复
+
+- 修复配置编辑过程中对象替换或刷新导致编辑状态与选择丢失的问题，配置应用与诊断结果以 Bot 实际任务和加载状态为准。
+- 修复私聊归档、清空和会话失效后迟到工具结果进入错误会话的问题，并结束失效的错误 Loop。
+- 修复历史消息裁剪或删除后残留失效执行记录引用、导致业务会话库升级失败的问题；升级清理引用并保留执行记录，部署健康检查识别业务存储不可用状态。
+- 修复大体积 Trace 数据库重启后首次读取调用索引缓慢的问题，为 Pending 过期查找增加状态与时间组合索引。
+- 修复 Windows WebView 启动器的 IPv6 访问 URL 构造，支持裸地址、已有方括号与通配绑定地址。
+- 私聊开启提示统一推荐 `/start_session`，历史拼写入口继续可用。
+
+### 预置 Skill 变动
+
+随附 self-docs 已同步配置管理、客户端 Profile、排障及发布契约。部署后可通过 Web Admin 或 `scripts/sync_preset_skills.py` 检查并同步预置副本；同步覆盖前自动备份，操作方式见 [Skill 管理](docs/admin/skills.md)。
+
+### 已知限制
+
+Trace 中的内联媒体仍可能随历史请求重复存储，重度多模态部署需关注磁盘占用；单副本存储优化由 [#291](https://github.com/3aKHP/QuickQuip/issues/291) 跟踪。真实渠道与 QQ 端到端补验按系列计划安排到 1.16.5，当前本地与自动化验证范围见 Release PR。
+
 ## [1.16.1] - 2026-10-10
 
 本版补全 **Skill 管理与部署持久化、群聊引用回复与真实艾特、四协议思考档位控制**，并改善 Responses 历史回放的连续性与预算估算。
@@ -1060,7 +1109,8 @@
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.1...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.2...HEAD
+[1.16.2]: https://github.com/3aKHP/QuickQuip/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/3aKHP/QuickQuip/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/3aKHP/QuickQuip/compare/v1.15.4...v1.16.0
 [1.15.4]: https://github.com/3aKHP/QuickQuip/compare/v1.15.3...v1.15.4
