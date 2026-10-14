@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier, BrokenBarrierError
 
@@ -685,7 +686,9 @@ def test_prune_closed_loops_by_age_and_count(store: LLMStore):
     assert [row["content"] for row in rows] == ["问2", "问3"]
 
 
-def test_prune_respects_active_epoch_floor(store: LLMStore):
+@pytest.mark.parametrize("limit", ["count", "bytes", "age"])
+@pytest.mark.parametrize("tied_times", [False, True])
+def test_prune_respects_active_epoch_floor(store: LLMStore, limit, tied_times):
     handles = []
     for i in range(4):
         handle = store.begin_loop("1001", 0, TriggerKind.GROUP_DIRECT, _user_payload(f"问{i}"))
@@ -697,13 +700,33 @@ def test_prune_respects_active_epoch_floor(store: LLMStore):
         handles.append(handle)
     # 活动纪元从第 3 个 Loop 开始：最旧两个可删，其后受保护。
     floor = handles[2]
+    closed_at = datetime.now(timezone.utc)
+    if limit == "age":
+        closed_at -= timedelta(days=2)
     with store._connect() as conn:
+        for index, handle in enumerate(handles):
+            timestamp = closed_at + timedelta(seconds=0 if tied_times else index)
+            conn.execute(
+                "UPDATE agent_loops SET closed_at=? WHERE loop_id=?",
+                (timestamp.isoformat(), handle.loop_id),
+            )
         anchor = conn.execute(
             "SELECT anchor_row_id FROM agent_loops WHERE loop_id=?", (floor.loop_id,)
         ).fetchone()["anchor_row_id"]
+        active_bytes = conn.execute(
+            "SELECT SUM(record_bytes) FROM agent_loops WHERE anchor_row_id>=?",
+            (anchor,),
+        ).fetchone()[0]
     report = store.prune_closed_loops(
         "1001", active_anchors=[anchor],
-        policy=RetentionPolicy(retention_days=30, max_loops=1, max_bytes=64 * 1024 * 1024),
+        policy=RetentionPolicy(
+            retention_days=1 if limit == "age" else 30,
+            max_loops=1 if limit == "count" else 100,
+            max_bytes=active_bytes - 1 if limit == "bytes" else 64 * 1024 * 1024,
+        ),
     )
-    assert len(report.deleted_loop_ids) == 2
-    assert len(store.load_closed_loops("1001")) == 2
+    assert set(report.deleted_loop_ids) == {h.loop_id for h in handles[:2]}
+    assert {loop.loop_id for loop in store.load_closed_loops("1001")} == {
+        h.loop_id for h in handles[2:]
+    }
+    assert report.blocked_active_anchors == (() if limit == "age" else (anchor,))
