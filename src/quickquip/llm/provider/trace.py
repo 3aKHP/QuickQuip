@@ -221,6 +221,9 @@ class LLMTraceStore:
                     CREATE INDEX IF NOT EXISTS idx_llm_http_traces_provider
                     ON llm_http_traces(provider_id, id DESC);
 
+                    CREATE INDEX IF NOT EXISTS idx_llm_http_traces_state_started
+                    ON llm_http_traces(state, started_at);
+
                     CREATE TABLE IF NOT EXISTS llm_http_trace_events (
                         event_id   INTEGER PRIMARY KEY AUTOINCREMENT,
                         trace_id   INTEGER NOT NULL,
