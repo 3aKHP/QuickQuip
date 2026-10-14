@@ -36,4 +36,5 @@ jobs:
       - name: Verify configuration initialization and backup/restore
         run: >-
           python -m pytest tests/unit/llm/test_config_service.py
+          --basetemp "${{ runner.temp }}/pytest-quickquip"
           -k "two_processes_initialize_one_database or backup_is_consistent_and_restore_clears_leases"
