@@ -83,4 +83,4 @@ python -m quickquip.llm.config_cli restore --file data/llm-config-backup.db --se
 
 `prod/config-v1.sh` 与 `prod/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流通过 JSON 导出；数据库回流通过一致备份。
 
-回退至 1.16.1 使用迁移前 TOML、独立人格与 generation 资产。保留新库便于再次升级；升级后的新配置修改不反向导出为 TOML。生产发布需验证 Windows、新旧 Docker 消费者及真实双容器路径，前端联调完成后才进入正式 1.16.2 发布流程。
+回退至 1.16.1 使用迁移前 TOML、独立人格与 generation 资产。保留新库便于再次升级；升级后的新配置修改不反向导出为 TOML。发布检查与专项验收范围按[发布工作流](../dev/branching.md#release)确定；部署前核对实际配置来源、服务启动顺序和备份，平台与真实双容器路径的验证结果在交付记录中注明。
