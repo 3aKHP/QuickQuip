@@ -108,6 +108,7 @@ class RevisionBody(BaseModel):
 
 class DocumentBody(RevisionBody):
     document: dict[str, Any]
+    note: str | None = Field(default=None, max_length=120)
 
 
 class ValidateBody(BaseModel):
@@ -116,6 +117,12 @@ class ValidateBody(BaseModel):
 
 class ApplyBody(RevisionBody):
     request_id: str = Field(min_length=1, max_length=128)
+    note: str | None = Field(default=None, max_length=120)
+
+
+class NoteBody(BaseModel):
+    source: str = "draft"
+    note: str = Field(max_length=120)
 
 
 class ValueBody(RevisionBody):
@@ -166,7 +173,9 @@ def get_document(source: str = "draft"):
 
 @router.put("")
 def put_document(body: DocumentBody, request: Request):
-    result = get_config_service().replace(body.document, body.expected_draft_revision)
+    result = get_config_service().replace(
+        body.document, body.expected_draft_revision, note=body.note
+    )
     _audit(request, "update")
     return result
 
@@ -174,6 +183,13 @@ def put_document(body: DocumentBody, request: Request):
 @router.get("/status")
 def get_status():
     return get_config_service().status()
+
+
+@router.put("/note")
+def put_note(body: NoteBody, request: Request):
+    result = get_config_service().set_note(_source(body.source), body.note)
+    _audit(request, "note", body.source)
+    return result
 
 
 @router.get("/environment")
@@ -227,7 +243,9 @@ def export_config(source: str = "draft"):
 
 @router.post("/apply", status_code=202)
 def apply_config(body: ApplyBody, request: Request):
-    result = get_config_service().apply(body.expected_draft_revision, body.request_id)
+    result = get_config_service().apply(
+        body.expected_draft_revision, body.request_id, note=body.note
+    )
     _audit(request, "apply", result["id"])
     return result
 
@@ -281,8 +299,13 @@ def _provider(document, provider_id):
 
 @router.get("/providers")
 def get_providers(source: str = "draft"):
-    result = get_config_service().read(_source(source))
-    return {"revision": result["revision"], "providers": result["document"]["providers"]}
+    service = get_config_service()
+    result = service.read(_source(source))
+    return {
+        "revision": result["revision"],
+        "version": service.version(result["revision"] if source != "draft" else "draft"),
+        "providers": result["document"]["providers"],
+    }
 
 
 @router.get("/providers/{provider_id}/effective")
@@ -308,7 +331,6 @@ def get_provider(provider_id: str, source: str = "draft"):
             p
             for p in result["document"]["pricing"]
             if p["provider_id"] == provider_id
-            or (p["provider_id"] is None and p["model"] in model_names)
         ],
         "effective_parameters": {
             model: effective_parameters(result["document"], provider_id, model)

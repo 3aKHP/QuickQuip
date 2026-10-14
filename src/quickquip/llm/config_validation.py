@@ -29,8 +29,19 @@ def validation_report(document, before=None, *, config_dir=None):
         }
         for p in normalized["providers"]
         for m in p["models"]
-        if (p["id"], m["model"]) not in prices and (None, m["model"]) not in prices
+        if (p["id"], m["model"]) not in prices
     ]
+    configured = {(p["id"], m["model"]) for p in normalized["providers"] for m in p["models"]}
+    warnings.extend(
+        {
+            "code": "price_orphan",
+            "field_path": f"pricing[{index}]",
+            "message": "Price references a model the provider does not configure",
+            "details": {"provider_id": price["provider_id"], "model": price["model"]},
+        }
+        for index, price in enumerate(normalized["pricing"])
+        if (price["provider_id"], price["model"]) not in configured
+    )
     report = {"valid": True, "warnings": warnings, "dependencies": dependencies(normalized)}
     if before is not None:
         changes = document_diff(before, normalized)

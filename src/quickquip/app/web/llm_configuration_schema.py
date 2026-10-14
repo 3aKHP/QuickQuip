@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from quickquip.llm.config import PricingRates
 from quickquip.llm.config_fields import field_registry
+from quickquip.llm.config_document import FORMAT_VERSION
 
 
 def _field(spec):
@@ -97,17 +98,17 @@ def document_schema():
         "required": ["format_version"],
         "additionalProperties": False,
         "properties": {
-            "format_version": {"const": 1},
+            "format_version": {"const": FORMAT_VERSION},
             "providers": {"type": "array", "items": provider},
             "style_profiles": {"type": "object", "additionalProperties": {"type": "string"}},
             "pricing": {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["model"],
+                    "required": ["provider_id", "model"],
                     "additionalProperties": False,
                     "properties": {
-                        "provider_id": {"type": ["string", "null"]},
+                        "provider_id": {"type": "string"},
                         "model": {"type": "string"},
                         **rates,
                     },
@@ -214,17 +215,22 @@ def enrich_openapi(schema):
             ),
         }
     )
+    version = object_schema({"saved_at": {"type": ["number", "null"]}, "note": string})
+    components["ConfigVersion"] = version
     components["ConfigStatus"] = object_schema(
         {
             "schema_version": integer,
             "draft_revision": integer,
+            "draft_version": reference("ConfigVersion"),
             "published_revision": integer,
+            "published_version": reference("ConfigVersion"),
             "bot": {
                 "anyOf": [
                     object_schema(
                         {
                             "boot_id": string,
                             "loaded_revision": integer,
+                            "loaded_version": reference("ConfigVersion"),
                             "application_version": string,
                             "heartbeat_at": {"type": "number"},
                             "observed_at": {"type": "number"},
@@ -238,7 +244,18 @@ def enrich_openapi(schema):
         }
     )
     components["ConfigHistory"] = object_schema(
-        {"snapshots": array(object_schema({"revision": integer, "created_at": {"type": "number"}}))}
+        {
+            "snapshots": array(
+                object_schema(
+                    {
+                        "revision": integer,
+                        "created_at": {"type": "number"},
+                        "saved_at": {"type": ["number", "null"]},
+                        "note": string,
+                    }
+                )
+            )
+        }
     )
     components["ConfigOperationList"] = object_schema(
         {"operations": array(reference("ConfigOperation"))}
@@ -257,7 +274,11 @@ def enrich_openapi(schema):
         }
     )
     components["ConfigProviders"] = object_schema(
-        {"revision": integer, "providers": components["ConfigDocument"]["properties"]["providers"]}
+        {
+            "revision": integer,
+            "version": reference("ConfigVersion"),
+            "providers": components["ConfigDocument"]["properties"]["providers"],
+        }
     )
     components["ConfigProviderDetail"] = object_schema(
         {
@@ -309,6 +330,8 @@ def enrich_openapi(schema):
             response = (
                 "ConfigOperation"
                 if suffix in ("/apply", "/probe") or suffix.startswith("/operations/")
+                else "ConfigStatus"
+                if suffix == "/note"
                 else "ConfigDocument"
                 if suffix == "/export"
                 else "ConfigEnvelope"

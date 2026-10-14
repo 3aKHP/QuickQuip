@@ -379,8 +379,9 @@ class LLMConfig:
     monthly_report: MonthlyReportConfig = field(default_factory=MonthlyReportConfig)
     image_preprocessing: ImagePreprocessingConfig = field(default_factory=ImagePreprocessingConfig)
     style_profiles: dict[str, str] = field(default_factory=dict)
+    # 旧 TOML 的 [pricing.models] 原始键，仅供迁移读取；运行时计价只用 pricing_references。
     pricing: dict[str, PricingRates] = field(default_factory=dict)
-    pricing_references: dict[tuple[str | None, str], PricingRates] = field(default_factory=dict)
+    pricing_references: dict[tuple[str, str], PricingRates] = field(default_factory=dict)
     revision: int = 0
     load_error: str | None = None
     source_path: Path | None = None

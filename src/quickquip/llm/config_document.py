@@ -45,6 +45,7 @@ from quickquip.llm.client_fingerprints.catalog import (
 __all__ = [
     "ConfigError",
     "empty_document",
+    "upgrade_document",
     "validate_document",
     "compile_document",
     "metadata",
@@ -53,7 +54,7 @@ __all__ = [
     "effective_parameters",
     "environment_references",
 ]
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 ROUTES = ("daily_summary", "daily_briefing", "weekly_report", "monthly_report")
 _VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -80,6 +81,86 @@ def empty_document() -> dict:
         "routes": {name: [] for name in ROUTES},
         "settings": settings,
     }
+
+
+def upgrade_document(document: Any) -> tuple[Any, list[dict]]:
+    """Deterministically lift a format-1 exchange document to the current format.
+
+    Format 2 bills only by ``(provider_id, model)``. Format-1 catch-all prices
+    (``provider_id`` null) become provider prices when they name exactly one
+    owner; every other catch-all is dropped. Malformed input is returned as-is
+    for ``validate_document`` to reject.
+    """
+    if not isinstance(document, dict) or type(document.get("format_version")) is not int:
+        return document, []
+    if document["format_version"] != 1:
+        return document, []
+    doc = deepcopy(document)
+    doc["format_version"] = FORMAT_VERSION
+    prices = doc.get("pricing", [])
+    providers = doc.get("providers", [])
+    if not isinstance(prices, list) or not isinstance(providers, list):
+        return doc, []
+    configured: dict[str, set] = {}
+    for provider in providers:
+        if isinstance(provider, dict) and isinstance(provider.get("id"), str):
+            models = provider.get("models", [])
+            names = [m.get("model") for m in models if isinstance(m, dict)] if isinstance(
+                models, list
+            ) else []
+            configured[provider["id"]] = {name for name in names if isinstance(name, str)}
+    specific = {
+        (entry["provider_id"], entry["model"]): entry
+        for entry in prices
+        if isinstance(entry, dict)
+        and isinstance(entry.get("provider_id"), str)
+        and isinstance(entry.get("model"), str)
+    }
+
+    def rates(entry):
+        return {k: v for k, v in entry.items() if k not in ("provider_id", "model")}
+
+    kept, changes = [], []
+    for index, entry in enumerate(prices):
+        model = entry.get("model") if isinstance(entry, dict) else None
+        provider_id = entry.get("provider_id") if isinstance(model, str) else None
+        if isinstance(provider_id, str) and provider_id not in configured:
+            # Format 1 never checked the owner; format 2 rejects prices of unknown providers.
+            changes.append({"field_path": f"pricing[{index}]", "model": model,
+                            "provider_id": provider_id, "kind": "unknown_provider_dropped"})
+            continue
+        if not isinstance(model, str) or provider_id is not None:
+            kept.append(entry)
+            continue
+        base = {"field_path": f"pricing[{index}]", "model": model}
+        # A catch-all row priced both "<provider>/<model>" of that provider and every
+        # provider configuring the literal name; each meaning maps to one owner at most.
+        targets = []
+        prefix, _, rest = model.partition("/")
+        if rest and prefix in configured:
+            targets.append((prefix, rest))
+        owners = sorted(pid for pid, names in configured.items() if model in names)
+        unpriced = [pid for pid in owners if (pid, model) not in specific]
+        if len(unpriced) == 1:
+            targets.append((unpriced[0], model))
+        elif unpriced:
+            changes.append({**base, "kind": "ambiguous_dropped", "candidates": unpriced})
+        elif not targets:
+            kind = "superseded_dropped" if owners else "unmatched_dropped"
+            changes.append({**base, "kind": kind, "candidates": owners})
+        for target in targets:
+            if target in specific:
+                same = rates(specific[target]) == rates(entry)
+                kind = "duplicate_dropped" if same else "superseded_dropped"
+                changes.append({**base, "kind": kind, "provider_id": target[0]})
+            else:
+                converted = {**entry, "provider_id": target[0], "model": target[1]}
+                specific[target] = converted
+                kept.append(converted)
+                changes.append({**base, "kind": "converted", "provider_id": target[0],
+                                "target_model": target[1]})
+    doc["pricing"] = kept
+    return doc, changes
 
 
 def _object(value: Any, path: str, allowed: set[str] | None = None) -> dict:
@@ -182,7 +263,9 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
     """Normalize a complete replacement; no secret expansion or silent clamping."""
     allowed = {"format_version", "providers", "style_profiles", "pricing", "routes", "settings"}
     _object(document, "", allowed)
-    if type(document.get("format_version")) is not int or document["format_version"] != 1:
+    document, _ = upgrade_document(document)
+    version = document.get("format_version")
+    if type(version) is not int or version != FORMAT_VERSION:
         reject("format_version", "不支持的配置交换格式", "unsupported_format")
     _secrets(document)
     # Enforce JSON and reject NaN, unserializable objects and deep non-string key coercion.
@@ -360,9 +443,9 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
         location = f"pricing[{i}]"
         _object(entry, location, {"provider_id", "model", *asdict(c.PricingRates())})
         _text(entry.get("model"), location + ".model", nonempty=True)
-        provider = entry.get("provider_id")
-        if provider is not None:
-            _text(provider, location + ".provider_id", nonempty=True)
+        provider = _text(entry.get("provider_id"), location + ".provider_id", nonempty=True)
+        if provider not in ids:
+            reject(location + ".provider_id", "价格规则引用的渠道不存在", "dependency_conflict")
         price_id = (provider, entry["model"])
         if price_id in seen_prices:
             reject(location, "价格规则重复")
@@ -527,14 +610,10 @@ def compile_document(
             for e in doc["routes"][name]
         ]
     for price in doc["pricing"]:
-        name = price["model"]
-        if price["provider_id"]:
-            name = price["provider_id"] + "/" + name
         rates = c.PricingRates(
             **{k: v for k, v in price.items() if k not in ("provider_id", "model")}
         )
         config.pricing_references[(price["provider_id"], price["model"])] = rates
-        config.pricing[name] = rates
     return config
 
 

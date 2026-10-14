@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Snapshot-owned settings that do not require a relational lookup/index column.
 # Keep the schema-2 projection compatible with databases from existing installations.
@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS bot_runtime (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1), boot_id TEXT NOT NULL,
  loaded_revision INTEGER NOT NULL, application_version TEXT NOT NULL,
  heartbeat_at REAL NOT NULL, components TEXT NOT NULL);
+"""
+
+
+# Schema 3: per-revision version label (saved time + operator note). Kept apart from the
+# immutable snapshots so notes stay editable after a revision is published.
+_REVISIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS config_revisions (
+ revision INTEGER PRIMARY KEY, saved_at REAL, note TEXT NOT NULL DEFAULT '');
 """
 
 
@@ -122,7 +130,11 @@ def expected_schema_objects(version=SCHEMA_VERSION):
     """Use SQLite's own stored DDL as the schema version's reference contract."""
     conn = sqlite3.connect(":memory:")
     try:
-        conn.executescript(_SCHEMA + declared_schema(legacy=version == 1))
+        conn.executescript(
+            _SCHEMA
+            + (_REVISIONS_SCHEMA if version >= 3 else "")
+            + declared_schema(legacy=version == 1)
+        )
         return {
             (row[0], row[1]): _schema_tokens(row[2])
             for row in conn.execute("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL")
@@ -223,7 +235,7 @@ class ConfigStore:
             )
 
     def upgrade(self, *, services_stopped=False):
-        """Atomically extend a verified v1 database, preserving immutable snapshots."""
+        """Atomically extend a verified v1/v2 database, preserving immutable snapshots."""
         from quickquip.llm.config_document import ConfigError
 
         conn = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -242,15 +254,17 @@ class ConfigStore:
             ).fetchone()
             if row and row[0] == SCHEMA_VERSION:
                 self._verify_schema(conn)
-            elif row and row[0] == 1:
-                self._verify_schema(conn, 1)
+            elif row and row[0] in (1, 2):
+                self._verify_schema(conn, row[0])
                 if not services_stopped:
                     raise ConfigError(
                         "services_running",
                         "Stop bot and Web, back up the database, then run init --services-stopped",
                     )
-                conn.execute('ALTER TABLE runtime_settings ADD COLUMN client_cluster TEXT')
-                conn.execute("UPDATE runtime_settings SET client_cluster=''")
+                if row[0] == 1:
+                    conn.execute('ALTER TABLE runtime_settings ADD COLUMN client_cluster TEXT')
+                    conn.execute("UPDATE runtime_settings SET client_cluster=''")
+                _upgrade_to_revisions(conn)
                 conn.execute("UPDATE config_meta SET schema_version=?", (SCHEMA_VERSION,))
                 self._verify_schema(conn)
             else:
@@ -306,14 +320,18 @@ class ConfigStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=FULL")
-            conn.executescript(_SCHEMA + declared_schema())
+            conn.executescript(_SCHEMA + _REVISIONS_SCHEMA + declared_schema())
             with conn:
                 conn.execute(
                     "INSERT INTO config_meta VALUES (1,?,?,?,?)",
                     (SCHEMA_VERSION, 1, 1, dumps(document)),
                 )
+                now = time.time()
                 conn.execute(
-                    "INSERT INTO config_snapshots VALUES (?,?,?)", (1, dumps(document), time.time())
+                    "INSERT INTO config_snapshots VALUES (?,?,?)", (1, dumps(document), now)
+                )
+                conn.execute(
+                    "INSERT INTO config_revisions(revision,saved_at) VALUES(1,?)", (now,)
                 )
                 project_document(conn, document)
                 if report is not None:
@@ -324,6 +342,34 @@ class ConfigStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             conn.close()
+
+
+def _upgrade_to_revisions(conn):
+    """Schema 2 → 3: backfill revision labels and lift the draft to the current format.
+
+    Snapshot times are the best saved-time evidence for old revisions; an unsnapshotted
+    draft keeps an unknown time. Snapshots stay byte-identical: readers upgrade format-1
+    documents with the same deterministic function, so the draft keeps its revision.
+    """
+    import time
+
+    from quickquip.llm.config_document import upgrade_document
+
+    conn.execute(_REVISIONS_SCHEMA)
+    conn.execute(
+        "INSERT INTO config_revisions(revision,saved_at) "
+        "SELECT revision,created_at FROM config_snapshots"
+    )
+    meta = conn.execute("SELECT draft_revision,document FROM config_meta").fetchone()
+    conn.execute("INSERT OR IGNORE INTO config_revisions(revision) VALUES(?)", (meta[0],))
+    document, changes = upgrade_document(json.loads(meta[1]))
+    if dumps(document) != meta[1]:
+        conn.execute("UPDATE config_meta SET document=? WHERE singleton=1", (dumps(document),))
+        project_document(conn, document)
+    conn.execute(
+        "INSERT INTO config_migrations(source,report,created_at) VALUES(?,?,?)",
+        ("schema-3", dumps({"schema_version": 3, "pricing": changes}), time.time()),
+    )
 
 
 def project_document(conn, document):

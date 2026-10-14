@@ -353,7 +353,7 @@ def test_device_setting_persists_without_schema_change_and_snapshots_stay_frozen
         "claude_code_device_id"
     ] == "ab" * 32
     with sqlite3.connect(service.path) as conn:
-        assert conn.execute("SELECT schema_version FROM config_meta").fetchone()[0] == 2
+        assert conn.execute("SELECT schema_version FROM config_meta").fetchone()[0] == 3
         assert "claude_code_device_id" not in {r[1] for r in conn.execute(
             "PRAGMA table_info(runtime_settings)",
         )}

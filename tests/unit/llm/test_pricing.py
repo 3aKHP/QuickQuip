@@ -79,13 +79,11 @@ def test_estimate_cost_none_tokens_not_counted():
     assert priced is True
 
 
-def test_match_pricing_provider_overrides_model_fallback():
-    configured = {
-        "gpt-test": PricingRates(input_per_mtok=1.0),
-        "p1/gpt-test": PricingRates(input_per_mtok=2.0),
-    }
+def test_match_pricing_is_exact_provider_and_model_only():
+    configured = {("p1", "gpt-test"): PricingRates(input_per_mtok=2.0)}
     assert match_pricing("p1", "gpt-test", configured).input_per_mtok == 2.0
-    assert match_pricing("p2", "gpt-test", configured).input_per_mtok == 1.0
+    # 同名模型不跨渠道兜底
+    assert match_pricing("p2", "gpt-test", configured) is None
     assert match_pricing("p1", "unknown", configured) is None
 
 

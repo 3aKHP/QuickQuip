@@ -335,7 +335,7 @@ def test_v1_database_upgrade_preserves_revisions_and_snapshots(tmp_path, recorde
         }
 
     assert service.initialize(services_stopped=True)["revision"] == 4
-    assert service.status()["schema_version"] == 2
+    assert service.status()["schema_version"] == 3
     assert service.read("published")["document"] == doc
     with service.store.connect() as conn:
         assert conn.execute("SELECT created_at FROM config_snapshots").fetchone()[0] == 123
