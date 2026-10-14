@@ -79,7 +79,7 @@ def test_trace_store_cursor_pagination(tmp_path):
     assert len({item["call_id"] for item in store.list_calls(limit=10)}) == 3
 
 
-def test_trace_store_migrates_first_release_schema(tmp_path):
+def test_trace_store_migrates_first_release_schema(tmp_path, monkeypatch):
     # started_at 必须落在 14 天保留期内（相对 now 计算），否则行会在访问前被清理
     started = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     path = tmp_path / "trace.db"
@@ -127,6 +127,15 @@ def test_trace_store_migrates_first_release_schema(tmp_path):
         )
 
     store = trace.LLMTraceStore(path)
+    statements = []
+    original_connect = store._connect
+
+    def capture_connect():
+        conn = original_connect()
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    monkeypatch.setattr(store, "_connect", capture_connect)
     detail = store.get_call("legacy-call")
 
     assert detail is not None
@@ -134,6 +143,14 @@ def test_trace_store_migrates_first_release_schema(tmp_path):
     assert detail["loop_sequence"] == 1
     assert detail["response_raw_text"] == ""
     assert detail["response_raw_bytes"] == 0
+
+    # Explain the actual maintenance SELECT, guarding against payload-table scans.
+    pending_query = next(sql for sql in statements
+                         if " ".join(sql.split()).startswith("SELECT id FROM llm_http_traces"))
+    with sqlite3.connect(path) as conn:
+        plan = conn.execute("EXPLAIN QUERY PLAN " + pending_query).fetchall()
+    assert any("COVERING INDEX idx_llm_http_traces_state_started" in row[3] for row in plan)
+    assert trace.LLMTraceStore(path).get_call("legacy-call") == detail
 
 
 def test_trace_store_migration_is_serialized_across_instances(tmp_path):
@@ -256,17 +273,27 @@ def test_trace_store_expires_stale_pending_calls(monkeypatch, tmp_path):
     monkeypatch.setattr(trace.time, "monotonic", lambda: 1.0)
     store = trace.LLMTraceStore(tmp_path / "trace.db")
     call_id = _begin(store)
+    fresh_id = _begin(store)
+    finished_id = _begin(store)
+    store.finish_call(
+        finished_id, state="success", response_status=200, response_headers="",
+        response_text="{}", response_bytes=2, duration_ms=1.0,
+    )
     with sqlite3.connect(store.path) as conn:
         conn.execute(
-            "UPDATE llm_http_traces SET started_at = ? WHERE call_id = ?",
-            ("2000-01-01T00:00:00+00:00", call_id),
+            "UPDATE llm_http_traces SET started_at = ? WHERE call_id IN (?, ?)",
+            ((datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(),
+             call_id, finished_id),
         )
 
-    calls = store.list_calls()
+    calls = {call["call_id"]: call for call in store.list_calls()}
 
-    assert calls[0]["state"] == "error"
-    assert calls[0]["error_type"] == "StaleTrace"
-    assert [event["state"] for event in store.list_events()] == ["pending", "error"]
+    assert calls[call_id]["state"] == "error"
+    assert calls[call_id]["error_type"] == "StaleTrace"
+    assert calls[fresh_id]["state"] == "pending"
+    assert calls[finished_id]["state"] == "success"
+    assert [event["state"] for event in store.list_events()
+            if event["call_id"] == call_id] == ["pending", "error"]
 
 
 def test_trace_store_cleanup_removes_only_expired_legacy_jsonl(tmp_path):
