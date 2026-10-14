@@ -2,6 +2,9 @@
   <div class="usage-view">
     <UiPageHeader title="LLM 用量与成本" subtitle="按请求观察 token、成本、成功率与耗时">
       <template #actions>
+        <router-link to="/llm-config?section=pricing" custom v-slot="{ navigate }">
+          <UiButton variant="ghost" icon="Coins" @click="navigate">配置模型价格</UiButton>
+        </router-link>
         <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="changeRange" />
         <UiButton :loading="loading" icon="RefreshCw" @click="reload">刷新</UiButton>
       </template>
@@ -149,9 +152,9 @@ import {
 type BreakdownKey = 'provider' | 'model' | 'feature' | 'group' | 'persona'
 
 /** 「未定价」口径唯一定义：统计卡片与事件详情「定价」行共用，避免同页两份文案漂移 */
-const UNPRICED_DEF = '「未定价」= 价表缺少该模型：token 照常计量、成本按 0 估算'
+const UNPRICED_DEF = '「未定价」= 价表缺少该渠道的该模型：token 照常计量、成本按 0 估算'
 const unpricedCardTip = `${UNPRICED_DEF}，在 LLM 配置中补充价格后恢复计入；「错误」为失败请求数。`
-const pricingRowTip = `本次计费匹配的配置价格条目：key（provider/model 优先、纯 model 兜底）· source · confidence；${UNPRICED_DEF}。`
+const pricingRowTip = `本次计费匹配的配置价格条目：渠道/模型（按配置的模型 ID 精确匹配，不跨渠道兜底）· source · confidence；${UNPRICED_DEF}。`
 
 const range = ref('7d')
 const metric = ref<UsageMetric>('cost')

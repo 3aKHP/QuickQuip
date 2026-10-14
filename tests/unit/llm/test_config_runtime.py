@@ -128,7 +128,9 @@ def enqueue(runtime, change, request_id="apply-test"):
 async def test_apply_pins_target_and_old_task_prices(llm_service, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic")
     runtime = llm_service
-    runtime.config.pricing = {"gpt-test": PricingRates(input_per_mtok=2, output_per_mtok=3)}
+    runtime.config.pricing_references = {
+        ("openai-main", "gpt-test"): PricingRates(input_per_mtok=2, output_per_mtok=3)
+    }
     old_revision = runtime.config.revision
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -257,12 +259,14 @@ async def test_async_billing_keeps_snapshot_after_parent_lease_exits(llm_service
     gate = asyncio.Event()
     async def billing():
         await gate.wait()
-        return _configured_pricing()["gpt-test"].input_per_mtok
-    llm_service.config.pricing = {"gpt-test": PricingRates(input_per_mtok=2, output_per_mtok=0)}
+        return _configured_pricing()[("p", "gpt-test")].input_per_mtok
+    llm_service.config.pricing_references = {
+        ("p", "gpt-test"): PricingRates(input_per_mtok=2, output_per_mtok=0)
+    }
     async with llm_service.configuration_lease():
         task = asyncio.create_task(billing())
-    llm_service.config = replace(llm_service.config, pricing={
-        "gpt-test": PricingRates(input_per_mtok=20, output_per_mtok=0)
+    llm_service.config = replace(llm_service.config, pricing_references={
+        ("p", "gpt-test"): PricingRates(input_per_mtok=20, output_per_mtok=0)
     })
     gate.set()
     assert await task == 2

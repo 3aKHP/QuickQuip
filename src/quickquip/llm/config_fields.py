@@ -233,7 +233,7 @@ def field_registry() -> dict:
         elif f.default_factory is not MISSING:
             parameter_defaults[f.name] = f.default_factory()
     return {
-        "format_version": 1,
+        "format_version": 2,
         "settings": settings,
         "parameters": {
             k: {

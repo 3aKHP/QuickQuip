@@ -10,6 +10,9 @@
           <UiIcon name="Info" :size="14" />
           保存后会提示具体生效方式
         </span>
+        <router-link to="/llm-config" custom v-slot="{ navigate }">
+          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">LLM 配置中心</UiButton>
+        </router-link>
         <UiButton icon="RefreshCw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
         <UiButton variant="primary" :loading="saving" :disabled="!loaded" icon="Save" @click="save">保存</UiButton>
       </template>

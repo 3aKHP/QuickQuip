@@ -1,6 +1,6 @@
 import { request } from './index'
 import type { TraceCallDetail } from './logs'
-import type { ConfigOperation } from './llmConfiguration'
+import type { ConfigOperation, ConfigVersion } from './llmConfiguration'
 
 /** GET /api/diagnostics/providers 列表元素 */
 export interface DiagnosticsProvider {
@@ -87,7 +87,7 @@ export interface RegressionResult {
   rules: RegressionRuleMatch[]
 }
 
-export async function fetchProviders(): Promise<{ revision: number; providers: DiagnosticsProvider[] }> {
+export async function fetchProviders(): Promise<{ revision: number; version: ConfigVersion; providers: DiagnosticsProvider[] }> {
   return request('/api/diagnostics/providers', { signal: AbortSignal.timeout(10_000) })
 }
 

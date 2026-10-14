@@ -123,7 +123,8 @@ test('sample component binds published revision, default model and user text acr
   const result = { text: 'parsed', thinking_blocks: [{ text: 'thought' }], trace_calls: [{ id: 'trace' }], duration_ms: 42 }
   const state = load('components/diagnostics/DiagSampleCard.vue', {
     useDiagnosticTask: () => task(async () => operation('succeeded', result)),
-    fetchProviders: async () => ({ revision: 8, providers: [{ id: 'p', default_model: 'second-model', models: ['first-model', 'second-model'] }] }),
+    formatVersionLabel: (_time, _note, fallback) => fallback,
+    fetchProviders: async () => ({ revision: 8, version: { saved_at: 1760428800, note: '' }, providers: [{ id: 'p', default_model: 'second-model', models: ['first-model', 'second-model'] }] }),
     runSampleRequest: async body => {
       sent.push(normalize(body))
       if (sent.length === 1) throw new Error('response lost')
@@ -146,11 +147,12 @@ test('sample component binds published revision, default model and user text acr
 test('all-provider probe component queues each default model sequentially and displays final failures', async () => {
   const submitted = [], finished = []
   const state = load('components/diagnostics/DiagRuntimeOpsCard.vue', {
+    formatVersionLabel: (_time, _note, fallback) => fallback,
     useDiagnosticTask: () => task(async id => {
       finished.push(id)
       return operation('succeeded', { probe: { status: id === 'a' ? 'ok' : 'error', latency_ms: 5, error: id === 'b' ? 'timeout' : '' } }, null, id)
     }),
-    fetchProviders: async () => ({ revision: 8, providers: [
+    fetchProviders: async () => ({ revision: 8, version: { saved_at: 1760428800, note: '' }, providers: [
       { id: 'a', default_model: 'a-default', models: ['a-first', 'a-default'] },
       { id: 'b', default_model: 'b-default', models: ['b-default'] },
     ] }),

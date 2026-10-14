@@ -5,9 +5,9 @@
       <p class="muted">导出为 JSON 文件，可用于备份或迁移到另一套环境。</p>
       <div class="exchange-panel__row">
         <select v-model="exportSource" aria-label="选择导出版本">
-          <option value="draft">服务器草稿</option>
-          <option value="published">已发布快照</option>
-          <option v-for="snapshot in store.history.value" :key="snapshot.revision" :value="String(snapshot.revision)">历史快照 v{{ snapshot.revision }}</option>
+          <option value="draft">服务器草稿（{{ store.draftLabel.value }}）</option>
+          <option value="published">已发布快照（{{ store.publishedLabel.value }}）</option>
+          <option v-for="snapshot in store.history.value" :key="snapshot.revision" :value="String(snapshot.revision)">历史快照 · {{ store.versionLabel(snapshot.revision) }}</option>
         </select>
         <UiButton icon="Download" :disabled="store.busy.value" @click="download">导出 JSON</UiButton>
         <UiButton variant="ghost" :disabled="!store.document.value" @click="downloadLocal">导出当前编辑（含未保存修改）</UiButton>
@@ -28,7 +28,7 @@
         v-model="importText"
         rows="10"
         spellcheck="false"
-        placeholder='粘贴配置 JSON，例如 { "format_version": 1, ... }'
+        placeholder='粘贴配置 JSON，例如 { "format_version": 2, ... }'
         :disabled="store.busy.value"
         @input="preview = null"
       />
@@ -39,9 +39,9 @@
 
       <div v-if="preview" class="preview" :class="{ 'preview--invalid': !preview.valid }">
         <h4>{{ preview.valid ? '校验通过' : '校验未通过' }}</h4>
-        <p class="muted">与当前草稿 v{{ preview.expected_draft_revision }} 相比有 {{ preview.changes.length }} 处变更</p>
+        <p class="muted">与当前草稿 {{ store.draftLabel.value }} 相比有 {{ preview.changes.length }} 处变更</p>
         <div v-if="preview.warnings.length" class="preview__warnings">
-          <p v-for="(warning, index) in preview.warnings" :key="index" class="warn-text">{{ warningText(warning) }}</p>
+          <p v-for="(warning, index) in preview.warnings" :key="index" class="warn-text">{{ configWarningText(warning) }}</p>
         </div>
         <div v-if="preview.changes.length" class="preview__changes">
           <details v-for="item in summarizedChanges" :key="item.raw.field_path">
@@ -72,7 +72,7 @@ import UiIcon from '../ui/UiIcon.vue'
 import * as api from '../../api/llmConfiguration'
 import { injectLlmConfigStore } from '../../composables/useLlmConfigStore'
 import { toast } from '../../toast'
-import { describeChange, isObject, type JsonObject, type JsonValue } from '../../lib/llmConfig'
+import { configWarningText, describeChange, type JsonObject, type JsonValue } from '../../lib/llmConfig'
 
 const store = injectLlmConfigStore()
 
@@ -105,7 +105,10 @@ async function download() {
 }
 
 function downloadLocal() {
-  if (store.document.value) downloadObject(store.document.value, `llm-local-edit-v${store.revision.value}.json`)
+  if (store.document.value) {
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', '-').replace(':', '')
+    downloadObject(store.document.value, `llm-local-edit-${stamp}.json`)
+  }
 }
 
 async function readFile(event: Event) {
@@ -153,10 +156,6 @@ async function doCommit() {
   }
 }
 
-function warningText(warning: JsonValue): string {
-  if (isObject(warning) && typeof warning.message === 'string') return warning.message
-  return String(warning)
-}
 
 const JSON_PREVIEW_LIMIT = 200
 

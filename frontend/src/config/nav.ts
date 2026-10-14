@@ -23,7 +23,6 @@ import LogsLiveView from '../views/LogsLiveView.vue'
 import LogsTraceView from '../views/LogsTraceView.vue'
 import LogsArchiveView from '../views/LogsArchiveView.vue'
 import DiagnosticsView from '../views/DiagnosticsView.vue'
-import McpDashboardView from '../views/McpDashboardView.vue'
 import CronDashboardView from '../views/CronDashboardView.vue'
 import ScheduledMessagesView from '../views/ScheduledMessagesView.vue'
 import AuditView from '../views/AuditView.vue'
@@ -50,7 +49,7 @@ export interface NavSection {
 export const NAV_SECTIONS: NavSection[] = [
   { key: 'overview', label: '总览', icon: 'LayoutDashboard', description: '运行态与全局入口' },
   { key: 'ops', label: '群聊运营', icon: 'MessagesSquare', description: '群状态、规则、限流与 LLM 覆盖' },
-  { key: 'llm', label: 'LLM 工坊', icon: 'BrainCircuit', description: '记忆、人格、资料与诊断工具' },
+  { key: 'llm', label: 'LLM 工坊', icon: 'BrainCircuit', description: '全局配置、人格与 Skill 资产、对话与诊断看板' },
   { key: 'content', label: '内容流', icon: 'Newspaper', description: '总结、贴吧与词云产物' },
   { key: 'system', label: '系统', icon: 'ServerCog', description: '配置、日志、调度监控与审计记录' },
   { key: 'games', label: '游戏', icon: 'Gamepad2', description: '金币经济与牛牛大作战' },
@@ -64,16 +63,15 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'group-settings', path: '/group-settings', label: '群 LLM',   icon: 'SlidersHorizontal', section: 'ops',    component: GroupSettingsView },
   { key: 'awakening',      path: '/awakening',      label: '唤醒',     icon: 'BellRing',        section: 'ops',      component: AwakeningView },
   { key: 'rate-limit',     path: '/rate-limit',     label: '限流',     icon: 'Gauge',           section: 'ops',      component: RateLimitView },
+  { key: 'llm-config',     path: '/llm-config',     label: 'LLM 配置', icon: 'SlidersHorizontal', section: 'llm',     component: LlmConfigView },
+  { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',           section: 'llm',      component: PersonasView },
+  { key: 'skills',         path: '/skills',         label: 'Skill',    icon: 'Sparkles',        section: 'llm',      component: SkillsView },
+  { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',        section: 'llm',      component: LlmAboutView },
   { key: 'memory',         path: '/memory',         label: '记忆',     icon: 'Brain',           section: 'llm',      component: MemoryView },
   { key: 'conversations',  path: '/conversations',  label: '对话',     icon: 'MessageCircle',   section: 'llm',      component: ConversationsView },
-  { key: 'personas',       path: '/personas',       label: '人格',     icon: 'Drama',           section: 'llm',      component: PersonasView },
-  { key: 'llm-about',      path: '/llm-about',      label: '资料',     icon: 'BookUser',        section: 'llm',      component: LlmAboutView },
-  { key: 'llm-config',     path: '/llm-config',     label: 'LLM 配置', icon: 'SlidersHorizontal', section: 'llm',     component: LlmConfigView },
-  { key: 'skills',         path: '/skills',         label: 'Skill',    icon: 'Sparkles',        section: 'llm',      component: SkillsView },
-  { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
-  { key: 'mcp-dashboard',  path: '/mcp-dashboard',  label: 'MCP',      icon: 'Network',         section: 'llm',      component: McpDashboardView },
-  { key: 'llm-usage',      path: '/llm-usage',      label: '用量',     icon: 'Activity',        section: 'llm',      component: LlmUsageView },
   { key: 'epochs',         path: '/epochs',         label: '纪元',     icon: 'Hourglass',       section: 'llm',      component: EpochsView },
+  { key: 'llm-usage',      path: '/llm-usage',      label: '用量',     icon: 'Activity',        section: 'llm',      component: LlmUsageView },
+  { key: 'diagnostics',    path: '/diagnostics',    label: '诊断',     icon: 'Stethoscope',     section: 'llm',      component: DiagnosticsView },
   { key: 'summary',        path: '/summary',        label: '总结',     icon: 'FileText',        section: 'content',  component: SummaryView },
   { key: 'quotes',         path: '/quotes',         label: '语录',     icon: 'Quote',           section: 'content',  component: QuotesView },
   { key: 'tieba',          path: '/tieba',          label: '贴吧',     icon: 'BookOpen',        section: 'content',  component: TiebaView },

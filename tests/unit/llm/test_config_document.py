@@ -13,6 +13,7 @@ from quickquip.llm.config_document import (
     effective_parameters,
     empty_document,
     resolve_model_provider,
+    upgrade_document,
     validate_document,
 )
 from quickquip.llm.config_migration import migrate_legacy
@@ -229,9 +230,11 @@ output_per_mtok = 3.0
     assert config.personas["default"].system_prompt == "你是测试人格。"
     assert doc["providers"][0]["headers"]["Authorization"] == "Bearer ${QQ_TEST_KEY}"
     assert "private-sentinel" not in json.dumps(doc) + json.dumps(report)
-    assert list(config.pricing) == list(frozen.pricing)
-    assert config.pricing["openai-main/gpt-test"].input_per_mtok == 0
-    assert config.pricing["response-only"].cache_read_per_mtok is None
+    assert list(frozen.pricing) == ["openai-main/gpt-test", "response-only"]
+    assert list(config.pricing_references) == [("openai-main", "gpt-test")]
+    assert config.pricing_references[("openai-main", "gpt-test")].input_per_mtok == 0
+    dropped = [c for c in report["changes"] if c["field_path"] == "pricing.response-only"]
+    assert dropped[0]["kind"] == "unmatched_dropped"
     assert source.read_text() == original
     assert migrate_legacy(source)[0] == doc
     assert (Path(report["backup"]) / "llm.toml").read_text() == original
@@ -278,17 +281,101 @@ def test_public_legacy_example_migrates_without_secrets_or_lost_prices(tmp_path)
     assert validate_document(deepcopy(doc)) == doc
 
 
-def test_qualified_and_slash_fallback_prices_keep_distinct_identities(tmp_path):
-    from quickquip.llm.pricing import match_pricing
-
+def test_format_1_catch_all_prices_upgrade_to_single_provider_owners(tmp_path):
     doc = document()
+    doc["providers"].append({**deepcopy(doc["providers"][0]), "id": "q", "aliases": []})
+    doc["providers"][1]["models"].append({"model": "only-q"})
+    doc["format_version"] = 1
+    rate = {"input_per_mtok": 1.0}
     doc["pricing"] = [
-        {"provider_id": None, "model": "p/org/model", "input_per_mtok": 7},
-        {"provider_id": "p", "model": "org/model", "input_per_mtok": 2},
+        {"provider_id": "p", "model": "org/model", **rate},
+        {"provider_id": None, "model": "p/org/model", **rate},  # duplicate of exact row
+        {"provider_id": None, "model": "q/org/model", "input_per_mtok": 2.0},  # qualified
+        {"provider_id": None, "model": "org/model", **rate},  # both owners already priced
+        {"provider_id": None, "model": "only-q", **rate},
+        {"provider_id": None, "model": "nobody", **rate},
+        {"provider_id": "ghost", "model": "m", **rate},
+    ]
+    upgraded, changes = upgrade_document(doc)
+    assert upgraded["format_version"] == 2
+    kinds = [(c["kind"], c.get("provider_id")) for c in changes]
+    assert kinds == [
+        ("duplicate_dropped", "p"),
+        ("converted", "q"),
+        ("superseded_dropped", None),
+        ("converted", "q"),
+        ("unmatched_dropped", None),
+        ("unknown_provider_dropped", "ghost"),
+    ]
+    assert [(r["provider_id"], r["model"], r["input_per_mtok"]) for r in upgraded["pricing"]] == [
+        ("p", "org/model", 1.0),
+        ("q", "org/model", 2.0),
+        ("q", "only-q", 1.0),
     ]
     config = compile_document(doc, tmp_path)
-    assert match_pricing("p", "org/model", config.pricing_references).input_per_mtok == 2
-    assert match_pricing("other", "p/org/model", config.pricing_references).input_per_mtok == 7
+    assert set(config.pricing_references) == {("p", "org/model"), ("q", "org/model"),
+                                              ("q", "only-q")}
+    assert upgrade_document(upgraded) == (upgraded, [])
+
+
+def test_bare_catch_all_with_several_unpriced_owners_is_dropped_as_ambiguous():
+    doc = document()
+    doc["providers"].append({**deepcopy(doc["providers"][0]), "id": "q", "aliases": []})
+    doc["format_version"] = 1
+    doc["pricing"] = [{"provider_id": None, "model": "org/model", "input_per_mtok": 1.0}]
+    upgraded, changes = upgrade_document(doc)
+    assert upgraded["pricing"] == []
+    assert changes[0]["kind"] == "ambiguous_dropped"
+    assert changes[0]["candidates"] == ["p", "q"]
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1"])
+def test_non_integer_format_version_is_not_upgraded(version):
+    doc = document()
+    doc["format_version"] = version
+    assert upgrade_document(doc) == (doc, [])
+    with pytest.raises(ConfigError) as caught:
+        validate_document(doc)
+    assert caught.value.code == "unsupported_format"
+
+
+def test_qualified_catch_all_also_keeps_literal_model_owner_price():
+    doc = document()
+    for ident, model in (("anthropic", "claude-x"), ("openrouter", "anthropic/claude-x")):
+        doc["providers"].append({**deepcopy(doc["providers"][0]), "id": ident, "aliases": [],
+                                 "default_model": model, "models": [{"model": model}]})
+    doc["format_version"] = 1
+    doc["pricing"] = [{"provider_id": None, "model": "anthropic/claude-x", "input_per_mtok": 3.0}]
+    upgraded, changes = upgrade_document(doc)
+    assert {(r["provider_id"], r["model"]) for r in upgraded["pricing"]} == {
+        ("anthropic", "claude-x"), ("openrouter", "anthropic/claude-x")
+    }
+    assert [c["kind"] for c in changes] == ["converted", "converted"]
+
+
+@pytest.mark.parametrize("path", ["pricing", "models"])
+def test_malformed_format_1_values_are_rejected_not_crashed(path):
+    doc = document()
+    doc["format_version"] = 1
+    doc["pricing"] = [{"provider_id": None, "model": "org/model"}]
+    if path == "pricing":
+        doc["pricing"][0]["provider_id"] = ["x"]
+    else:
+        doc["providers"][0]["models"][0]["model"] = ["a"]
+    with pytest.raises(ConfigError):
+        validate_document(doc)
+
+
+def test_format_2_requires_existing_price_owner():
+    doc = document()
+    doc["pricing"] = [{"provider_id": None, "model": "org/model"}]
+    with pytest.raises(ConfigError) as caught:
+        validate_document(doc)
+    assert caught.value.field_path == "pricing[0].provider_id"
+    doc["pricing"] = [{"provider_id": "ghost", "model": "org/model"}]
+    with pytest.raises(ConfigError) as caught:
+        validate_document(doc)
+    assert caught.value.code == "dependency_conflict"
 
 
 def test_cli_and_web_share_missing_price_warning_and_preview_impacts(tmp_path):
@@ -319,7 +406,7 @@ def test_url_auth_reference_cannot_hide_literal_credential_parts():
     assert "sentinel" not in json.dumps(caught.value.as_dict())
 
 
-def test_legacy_qualified_prices_also_keep_response_name_fallback(tmp_path):
+def test_legacy_qualified_price_migrates_to_one_provider_price(tmp_path):
     from quickquip.llm.pricing import match_pricing
 
     source = tmp_path / "llm.toml"
@@ -331,15 +418,12 @@ input_per_mtok = 2
 output_per_mtok = 3
 """
     )
-    old = load_llm_config(source, preserve_env=True)
     doc, report = migrate_legacy(source)
     compiled = compile_document(doc, tmp_path)
-    for provider, response in [("openai-main", "gpt-test"), ("other", "openai-main/gpt-test")]:
-        before = match_pricing(provider, response, old.pricing)
-        after = match_pricing(provider, response, compiled.pricing_references)
-        assert before == after
+    assert match_pricing("openai-main", "gpt-test", compiled.pricing_references).input_per_mtok == 2
+    assert match_pricing("other", "openai-main/gpt-test", compiled.pricing_references) is None
     assert report["source_counts"]["pricing"] == 1
-    assert len(doc["pricing"]) == 2
+    assert len(doc["pricing"]) == 1
 
 
 def test_interrupted_independent_asset_backup_resumes_and_preserves_all_originals(

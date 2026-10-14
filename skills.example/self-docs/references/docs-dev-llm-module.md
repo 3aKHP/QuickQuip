@@ -429,7 +429,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 交换格式的主要字段：
 
 - `providers`：有序渠道、模型与别名；固定认证／地址字段在渠道层，请求参数在渠道或模型的 `parameters`。
-- `style_profiles` 与 `pricing`：共享风格及价格，价格用显式渠道 ID 与响应模型名匹配。
+- `style_profiles` 与 `pricing`：共享风格及价格，价格以 `(渠道 ID, 配置的模型 ID)` 精确匹配请求模型名，不跨渠道兜底。
 - `routes`：四类报告的有序候选，以 `{provider_id, model}` 引用；`@default` 动态选择默认模型。
 - `settings.runtime` / `triggers` / `auto_search` / `quick_judge` / `image_preprocessing`：全局运行、触发与专用模型选择。
 - `settings.tools` / `skills` / `mcp`：工具绑定、Skill 资源限额与 MCP 配置。

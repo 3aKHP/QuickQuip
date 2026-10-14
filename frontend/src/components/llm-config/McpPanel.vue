@@ -1,8 +1,16 @@
 <template>
   <div class="mcp-panel">
     <UiCard padding="lg">
-      <SettingsForm section="mcp" :fields="['enabled']" />
-      <p class="mcp-panel__note">MCP 服务为机器人提供外部工具。修改后应用配置会触发重连。</p>
+      <div class="mcp-panel__top">
+        <div class="mcp-panel__top-form">
+          <SettingsForm section="mcp" :fields="['enabled']" />
+          <p class="mcp-panel__note">MCP 服务为机器人提供外部工具。修改后点击顶部「保存草稿 → 应用到 Bot」触发重连。</p>
+        </div>
+        <div class="mcp-panel__top-actions">
+          <span v-if="liveSummary" class="mcp-live-summary">{{ liveSummary }}</span>
+          <UiButton size="sm" variant="ghost" icon="RefreshCw" :loading="loadingLive" @click="loadLiveStatus">刷新连接状态</UiButton>
+        </div>
+      </div>
     </UiCard>
 
     <UiCard v-for="(server, index) in servers" :key="index" padding="lg" :accent="server.enabled === false ? undefined : 'cyan'">
@@ -16,9 +24,33 @@
           @input="patch(index, { id: ($event.target as HTMLInputElement).value })"
         />
         <UiTag size="sm" variant="info">{{ server.transport || 'stdio' }}</UiTag>
+        <template v-if="liveFor(server)">
+          <span class="live-status">
+            <span class="live-dot" :class="dotClass(liveFor(server)!)" />
+            <span class="live-status__text">{{ statusText(liveFor(server)!) }}</span>
+          </span>
+          <UiTag v-if="liveFor(server)!.era_tag" size="sm" variant="info">{{ liveFor(server)!.era_tag }}</UiTag>
+          <span v-if="liveFor(server)!.negotiated_protocol_version" class="live-meta mono">v{{ liveFor(server)!.negotiated_protocol_version }}</span>
+          <span class="live-meta">{{ liveFor(server)!.tool_count }} 个工具</span>
+        </template>
         <UiToggle size="sm" :model-value="server.enabled !== false" @update:model-value="patch(index, { enabled: $event })" />
         <button type="button" class="server-remove" title="删除该服务" @click="remove(index)"><UiIcon name="Trash2" :size="14" /></button>
       </header>
+
+      <div v-if="liveFor(server)?.error" class="server-live-error">
+        <UiIcon name="AlertTriangle" :size="14" />
+        <span>{{ liveFor(server)!.error }}</span>
+      </div>
+
+      <details v-if="liveFor(server)?.tools?.length" class="server-live-tools">
+        <summary>已装载工具清单（{{ liveFor(server)!.tools.length }}）</summary>
+        <div class="server-live-tools__list">
+          <div v-for="tool in liveFor(server)!.tools" :key="tool.name" class="server-live-tool">
+            <span class="server-live-tool__name mono">{{ tool.name }}</span>
+            <span class="server-live-tool__desc">{{ tool.description }}</span>
+          </div>
+        </div>
+      </details>
 
       <div class="server-grid">
         <SettingField label="传输方式" :model-value="String(server.transport ?? 'stdio')" :options="transportOptions" @update:model-value="patch(index, { transport: String($event) })" />
@@ -90,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
@@ -102,10 +134,52 @@ import SettingField from './SettingField.vue'
 import StringListEditor from './StringListEditor.vue'
 import KeyValueEditor from './KeyValueEditor.vue'
 import SettingsForm from './SettingsForm.vue'
+import { fetchMcpDashboard, type McpServer } from '../../api/mcpDashboard'
 import { injectLlmConfigStore } from '../../composables/useLlmConfigStore'
 import { MCP_NEGOTIATION_OPTIONS, MCP_PULL_POLICY_OPTIONS, MCP_TRANSPORT_OPTIONS, fieldTemplate, isObject, type JsonObject, type JsonValue } from '../../lib/llmConfig'
 
 const store = injectLlmConfigStore()
+
+const liveServers = ref<McpServer[]>([])
+const loadingLive = ref(false)
+
+async function loadLiveStatus() {
+  loadingLive.value = true
+  try {
+    const data = await fetchMcpDashboard()
+    liveServers.value = data.servers || []
+  } catch {
+    /* ignore live status fetch error so config editing stays usable */
+  } finally {
+    loadingLive.value = false
+  }
+}
+
+function liveFor(server: JsonObject): McpServer | undefined {
+  const id = String(server.id ?? '')
+  return id ? liveServers.value.find(item => item.id === id) : undefined
+}
+
+const liveSummary = computed(() => {
+  if (!liveServers.value.length) return ''
+  const connected = liveServers.value.filter(s => s.connected).length
+  const totalTools = liveServers.value.reduce((acc, s) => acc + (s.tool_count || 0), 0)
+  return `运行态：${connected}/${liveServers.value.length} 已连接 · ${totalTools} 个工具`
+})
+
+function statusText(s: McpServer): string {
+  if (s.connected) return '已连接'
+  if (s.runtime_available === false) return '状态未知'
+  if (!s.enabled) return '已禁用'
+  return '连接失败'
+}
+
+function dotClass(s: McpServer): string {
+  if (s.connected) return 'live-dot--ok'
+  if (!s.enabled) return 'live-dot--off'
+  if (s.runtime_available === false) return 'live-dot--unk'
+  return 'live-dot--err'
+}
 
 const servers = computed<JsonObject[]>(() => {
   const settings = store.document.value?.settings
@@ -130,12 +204,39 @@ function transportOf(server: JsonObject) { const value = String(server.transport
 function stringList(value: JsonValue | undefined): string[] { return Array.isArray(value) ? value.map(String) : [] }
 function objectValue(value: JsonValue | undefined): JsonObject { return isObject(value) ? value : {} }
 function numberOr(value: JsonValue | undefined, fallback: number) { return typeof value === 'number' ? value : fallback }
+
+onMounted(() => { void loadLiveStatus() })
 </script>
 
 <style scoped>
 .mcp-panel {
   display: grid;
   gap: var(--qq-gap-md);
+}
+
+.mcp-panel__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--qq-gap-md);
+  flex-wrap: wrap;
+}
+
+.mcp-panel__top-form {
+  flex: 1;
+  min-width: 240px;
+}
+
+.mcp-panel__top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mcp-live-summary {
+  font-size: var(--qq-text-xs);
+  color: var(--qq-text-muted);
 }
 
 .mcp-panel__note {
@@ -149,11 +250,12 @@ function numberOr(value: JsonValue | undefined, fallback: number) { return typeo
   align-items: center;
   gap: 10px;
   margin-bottom: var(--qq-gap-md);
+  flex-wrap: wrap;
 }
 
 .server-head__id {
   flex: 1;
-  min-width: 0;
+  min-width: 140px;
   max-width: 260px;
   padding: 7px 10px;
   border: 1px solid var(--qq-border);
@@ -164,6 +266,87 @@ function numberOr(value: JsonValue | undefined, fallback: number) { return typeo
   font-size: var(--qq-text-sm);
   font-family: var(--qq-font-mono);
   font-weight: 600;
+}
+
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--qq-text-xs);
+  color: var(--qq-text-muted);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.live-dot--ok { background: var(--qq-success); }
+.live-dot--err { background: var(--qq-danger); }
+.live-dot--off { background: var(--qq-text-muted); }
+.live-dot--unk { background: var(--qq-warn); }
+
+.live-meta {
+  font-size: var(--qq-text-xs);
+  color: var(--qq-text-muted);
+}
+
+.mono {
+  font-family: var(--qq-font-mono);
+}
+
+.server-live-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--qq-gap-sm);
+  padding: 6px 10px;
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-danger-soft);
+  color: var(--qq-danger);
+  font-size: var(--qq-text-xs);
+}
+
+.server-live-tools {
+  margin-bottom: var(--qq-gap-md);
+  padding: 8px 10px;
+  border: 1px solid var(--qq-border-soft);
+  border-radius: var(--qq-radius-md);
+  background: var(--qq-surface-elevated);
+}
+
+.server-live-tools summary {
+  cursor: pointer;
+  font-size: var(--qq-text-xs);
+  color: var(--qq-text-muted);
+  font-weight: 500;
+}
+
+.server-live-tools__list {
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--qq-border);
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.server-live-tool {
+  display: grid;
+  gap: 2px;
+}
+
+.server-live-tool__name {
+  font-size: var(--qq-text-xs);
+  font-weight: 600;
+  color: var(--qq-text);
+}
+
+.server-live-tool__desc {
+  font-size: 11px;
+  color: var(--qq-text-muted);
 }
 
 .server-remove {

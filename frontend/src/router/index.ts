@@ -5,6 +5,8 @@ import type { NavItem } from '../config/nav'
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'home', component: NAV_ITEMS[0].component },
   { path: '/logs', redirect: '/logs-live' },
+  { path: '/mcp-dashboard', redirect: { path: '/llm-config', query: { section: 'tools' } } },
+  { path: '/mcp', redirect: { path: '/llm-config', query: { section: 'tools' } } },
   ...NAV_ITEMS.slice(1).map((item: NavItem) => ({
     path: `/${item.key}`,
     name: item.key,

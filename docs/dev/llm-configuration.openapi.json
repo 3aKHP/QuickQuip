@@ -8,6 +8,18 @@
             "title": "Expected Draft Revision",
             "type": "integer"
           },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "request_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -98,7 +110,7 @@
         "additionalProperties": false,
         "properties": {
           "format_version": {
-            "const": 1
+            "const": 2
           },
           "pricing": {
             "items": {
@@ -133,16 +145,14 @@
                   "type": "number"
                 },
                 "provider_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "source": {
                   "type": "string"
                 }
               },
               "required": [
+                "provider_id",
                 "model"
               ],
               "type": "object"
@@ -1331,8 +1341,17 @@
                 "created_at": {
                   "type": "number"
                 },
+                "note": {
+                  "type": "string"
+                },
                 "revision": {
                   "type": "integer"
+                },
+                "saved_at": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
                 }
               },
               "required": [],
@@ -1517,16 +1536,14 @@
                   "type": "number"
                 },
                 "provider_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "source": {
                   "type": "string"
                 }
               },
               "required": [
+                "provider_id",
                 "model"
               ],
               "type": "object"
@@ -2555,6 +2572,9 @@
           },
           "revision": {
             "type": "integer"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ConfigVersion"
           }
         },
         "required": [],
@@ -2591,6 +2611,9 @@
                   "loaded_revision": {
                     "type": "integer"
                   },
+                  "loaded_version": {
+                    "$ref": "#/components/schemas/ConfigVersion"
+                  },
                   "observed_at": {
                     "type": "number"
                   },
@@ -2609,8 +2632,14 @@
           "draft_revision": {
             "type": "integer"
           },
+          "draft_version": {
+            "$ref": "#/components/schemas/ConfigVersion"
+          },
           "published_revision": {
             "type": "integer"
+          },
+          "published_version": {
+            "$ref": "#/components/schemas/ConfigVersion"
           },
           "schema_version": {
             "type": "integer"
@@ -2644,6 +2673,21 @@
         ],
         "type": "object"
       },
+      "ConfigVersion": {
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "saved_at": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
       "DocumentBody": {
         "properties": {
           "document": {
@@ -2653,6 +2697,18 @@
             "minimum": 1.0,
             "title": "Expected Draft Revision",
             "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           }
         },
         "required": [
@@ -2673,6 +2729,25 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "NoteBody": {
+        "properties": {
+          "note": {
+            "maxLength": 120,
+            "title": "Note",
+            "type": "string"
+          },
+          "source": {
+            "default": "draft",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "NoteBody",
         "type": "object"
       },
       "PatchBody": {
@@ -3957,6 +4032,92 @@
           }
         ],
         "summary": "Get Metadata",
+        "tags": [
+          "LLM configuration"
+        ]
+      }
+    },
+    "/ops/api/llm-configuration/note": {
+      "put": {
+        "operationId": "put_note_ops_api_llm_configuration_note_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigError"
+                }
+              }
+            },
+            "description": "Configuration request rejected"
+          }
+        },
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ],
+        "summary": "Put Note",
         "tags": [
           "LLM configuration"
         ]

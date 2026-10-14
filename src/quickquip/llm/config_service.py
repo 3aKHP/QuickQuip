@@ -14,7 +14,12 @@ from pathlib import Path
 from filelock import FileLock
 
 from quickquip.common.paths import CONFIG_LLM_TOML, DATA_DIR
-from quickquip.llm.config_document import ConfigError, empty_document, validate_document
+from quickquip.llm.config_document import (
+    ConfigError,
+    empty_document,
+    upgrade_document,
+    validate_document,
+)
 from quickquip.llm.config_store import ConfigStore, SCHEMA_VERSION, dumps, project_document
 from quickquip.llm.config_durability import ensure_directory
 from quickquip.llm.config_tasks import ConfigTaskQueue, operation
@@ -22,6 +27,41 @@ from quickquip.llm.config_tasks import ConfigTaskQueue, operation
 from quickquip.llm.config_validation import document_diff as document_diff, validation_report
 
 DEFAULT_CONFIG_DB = DATA_DIR / "llm_config.db"
+MAX_NOTE_LENGTH = 120
+
+
+def _clean_note(note):
+    """Version notes are single-line labels shown as ``YYYY-MM-DD HH:mm (note)``."""
+    if note is None:
+        return None
+    if not isinstance(note, str) or "\x00" in note:
+        raise ConfigError("invalid_field", "Note must be a string", field_path="note")
+    cleaned = " ".join(note.split())
+    if len(cleaned) > MAX_NOTE_LENGTH:
+        raise ConfigError(
+            "invalid_field",
+            f"Note must be at most {MAX_NOTE_LENGTH} characters",
+            field_path="note",
+        )
+    return cleaned
+
+
+def _set_note(conn, revision, note):
+    conn.execute(
+        "INSERT INTO config_revisions(revision,note) VALUES(?,?) "
+        "ON CONFLICT(revision) DO UPDATE SET note=excluded.note",
+        (revision, note),
+    )
+
+
+def _version(conn, revision):
+    row = conn.execute(
+        "SELECT saved_at,note FROM config_revisions WHERE revision=?", (revision,)
+    ).fetchone()
+    return {"saved_at": row["saved_at"], "note": row["note"]} if row else {
+        "saved_at": None,
+        "note": "",
+    }
 
 
 class ConfigService:
@@ -66,7 +106,7 @@ class ConfigService:
             if source == "draft":
                 return {
                     "revision": meta["draft_revision"],
-                    "document": json.loads(meta["document"]),
+                    "document": upgrade_document(json.loads(meta["document"]))[0],
                 }
             try:
                 revision = meta["published_revision"] if source == "published" else int(source)
@@ -79,7 +119,8 @@ class ConfigService:
             ).fetchone()
             if row is None:
                 raise ConfigError("not_found", "Snapshot not found", details={"revision": revision})
-            return {"revision": revision, "document": json.loads(row[0])}
+            # Immutable format-1 snapshots are presented in the current format.
+            return {"revision": revision, "document": upgrade_document(json.loads(row[0]))[0]}
 
     @staticmethod
     def _check_revision(conn, expected_revision):
@@ -103,16 +144,31 @@ class ConfigService:
             document, report = migrate_legacy(path)
             return {**self.replace(document, expected_revision), "migration": report}
 
-    def replace(self, document, expected_revision):
+    def replace(self, document, expected_revision, *, note=None):
+        """Save a draft revision. Without an explicit note an unpublished draft keeps its
+        note across saves; the first save after publishing starts unlabeled."""
+        note = _clean_note(note)
         document = validate_document(copy.deepcopy(document), config_dir=self.config_dir)
         with self.shared_lock, self.store.connect(write=True) as conn:
             meta = self._check_revision(conn, expected_revision)
             if dumps(document) == meta["document"]:
+                if note is not None:
+                    _set_note(conn, expected_revision, note)
                 return {"revision": expected_revision, "document": document}
             revision = expected_revision + 1
+            if note is None:
+                note = (
+                    ""
+                    if expected_revision == meta["published_revision"]
+                    else _version(conn, expected_revision)["note"]
+                )
             conn.execute(
                 "UPDATE config_meta SET draft_revision=?,document=? WHERE singleton=1",
                 (revision, dumps(document)),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO config_revisions(revision,saved_at,note) VALUES(?,?,?)",
+                (revision, time.time(), note),
             )
             project_document(conn, document)
         return {"revision": revision, "document": document}
@@ -150,7 +206,8 @@ class ConfigService:
 
         return self.update(expected_revision, transform)
 
-    def _enqueue(self, kind, source, request_id, payload=None, expected_revision=None):
+    def _enqueue(self, kind, source, request_id, payload=None, expected_revision=None, note=None):
+        note = _clean_note(note)
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
             raise ConfigError(
                 "invalid_field",
@@ -208,6 +265,8 @@ class ConfigService:
                 "INSERT OR IGNORE INTO config_snapshots VALUES(?,?,?)",
                 (revision, dumps(document), time.time()),
             )
+            if note is not None:
+                _set_note(conn, revision, note)
             identifier = uuid.uuid4().hex
             now = time.time()
             conn.execute(
@@ -223,8 +282,10 @@ class ConfigService:
             result.pop("claim_token", None)
             return result
 
-    def apply(self, expected_revision, request_id):
-        return self._enqueue("apply", "draft", request_id, expected_revision=expected_revision)
+    def apply(self, expected_revision, request_id, *, note=None):
+        return self._enqueue(
+            "apply", "draft", request_id, expected_revision=expected_revision, note=note
+        )
 
     def probe(self, source, provider_id, model, request_id, payload=None):
         if source not in ("draft", "published"):
@@ -388,25 +449,64 @@ class ConfigService:
         with self.store.connect() as conn:
             meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
             row = conn.execute("SELECT * FROM bot_runtime WHERE singleton=1").fetchone()
+            draft_version = _version(conn, meta["draft_revision"])
+            published_version = _version(conn, meta["published_revision"])
+            loaded_version = _version(conn, row["loaded_revision"]) if row else None
         bot = dict(row) if row else None
         if bot:
             bot.pop("singleton")
             bot["components"] = json.loads(bot["components"])
             bot["observed_at"] = observed
             bot["stale"] = observed - bot["heartbeat_at"] > 20
+            bot["loaded_version"] = loaded_version
         return {
             "schema_version": SCHEMA_VERSION,
             "draft_revision": meta["draft_revision"],
+            "draft_version": draft_version,
             "published_revision": meta["published_revision"],
+            "published_version": published_version,
             "bot": bot,
         }
 
     def history(self):
         with self.store.connect() as conn:
             rows = conn.execute(
-                "SELECT revision,created_at FROM config_snapshots ORDER BY revision DESC"
+                """SELECT s.revision,s.created_at,r.saved_at,COALESCE(r.note,'') AS note
+                FROM config_snapshots s LEFT JOIN config_revisions r USING(revision)
+                ORDER BY s.revision DESC"""
             )
             return {"snapshots": [dict(row) for row in rows]}
+
+    def version(self, source="draft"):
+        """Label of a draft/published/snapshot revision: saved time and operator note."""
+        with self.store.connect() as conn:
+            meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
+            return _version(conn, self._revision(conn, meta, source))
+
+    def set_note(self, source, note):
+        note = _clean_note(note)
+        if note is None:
+            raise ConfigError("invalid_field", "Note must be a string", field_path="note")
+        with self.shared_lock, self.store.connect(write=True) as conn:
+            meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
+            _set_note(conn, self._revision(conn, meta, source), note)
+        return self.status()
+
+    @staticmethod
+    def _revision(conn, meta, source):
+        if source == "draft":
+            return meta["draft_revision"]
+        try:
+            revision = meta["published_revision"] if source == "published" else int(source)
+        except (TypeError, ValueError):
+            raise ConfigError(
+                "invalid_field", "Invalid configuration source", field_path="source"
+            ) from None
+        if not conn.execute(
+            "SELECT 1 FROM config_snapshots WHERE revision=?", (revision,)
+        ).fetchone():
+            raise ConfigError("not_found", "Snapshot not found", details={"revision": revision})
+        return revision
 
     def restore_snapshot(self, revision, expected_revision):
         return self.replace(self.read(revision)["document"], expected_revision)
@@ -424,8 +524,18 @@ class ConfigService:
                 details={"actual": draft["revision"]},
             )
         normalized = validate_document(document, config_dir=self.config_dir)
+        report = validation_report(normalized, draft["document"], config_dir=self.config_dir)
+        report["warnings"] = [
+            {
+                "code": "pricing_upgraded",
+                "field_path": change["field_path"],
+                "message": "Format 1 catch-all price was reassigned or dropped",
+                "details": change,
+            }
+            for change in upgrade_document(document)[1]
+        ] + report["warnings"]
         return {
-            **validation_report(normalized, draft["document"], config_dir=self.config_dir),
+            **report,
             "document": normalized,
             "expected_draft_revision": draft["revision"],
         }

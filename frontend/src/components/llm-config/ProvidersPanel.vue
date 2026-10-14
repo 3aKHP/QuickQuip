@@ -1,167 +1,198 @@
 <template>
   <div class="providers-panel">
-    <nav class="providers-panel__list">
+    <nav class="providers-panel__list" aria-label="LLM 渠道列表">
       <div class="providers-panel__list-head">
-        <span>渠道</span>
+        <span>渠道列表 ({{ providers.length }})</span>
         <UiButton size="sm" icon="Plus" @click="addProvider">添加渠道</UiButton>
       </div>
-      <UiEmpty v-if="!providers.length" icon="Server" title="还没有渠道" description="添加第一个 LLM 渠道，填写 API 地址和密钥变量名" />
-      <button
-        v-for="(provider, index) in providers"
-        :key="index"
-        class="provider-item qq-selectable"
-        :class="{ active: index === selected }"
-        @click="selected = index"
-      >
-        <span class="provider-item__head">
-          <span class="provider-item__id">{{ provider.id || '未命名渠道' }}</span>
-          <UiTag v-if="provider.enabled === false" size="sm">已停用</UiTag>
-          <UiTag v-if="isDefault(provider)" size="sm" variant="cyan">默认</UiTag>
-        </span>
-        <span class="provider-item__meta">
-          <span>{{ protocolLabel(provider.protocol) }}</span>
-          <span>{{ modelCount(provider) }} 个模型</span>
-          <span v-if="envState(provider) === 'missing'" class="provider-item__warn">密钥未配置</span>
-        </span>
-      </button>
+      <div class="providers-panel__list-scroll">
+        <UiEmpty v-if="!providers.length" icon="Server" title="还没有渠道" description="添加第一个 LLM 渠道，填写 API 地址和密钥变量名" />
+        <button
+          v-for="(provider, index) in providers"
+          :key="index"
+          class="provider-item qq-selectable"
+          :class="{ active: index === selected }"
+          @click="selected = index"
+        >
+          <span class="provider-item__head">
+            <span class="provider-item__id">{{ provider.id || '未命名渠道' }}</span>
+            <UiTag v-if="provider.enabled === false" size="sm">已停用</UiTag>
+            <UiTag v-if="isDefault(provider)" size="sm" variant="cyan">默认</UiTag>
+          </span>
+          <span class="provider-item__meta">
+            <span>{{ protocolLabel(provider.protocol) }}</span>
+            <span>{{ modelCount(provider) }} 个模型</span>
+            <span v-if="envState(provider) === 'missing'" class="provider-item__warn">密钥未配置</span>
+          </span>
+        </button>
+      </div>
     </nav>
 
     <div v-if="current" class="providers-panel__detail">
-      <UiCard padding="lg" class="detail-card">
-        <header class="detail-card__head">
-          <h3>基本设置</h3>
-          <UiToggle :model-value="current.enabled !== false" @update:model-value="patch({ enabled: $event })" />
-        </header>
-        <div class="form-grid">
-          <SettingField label="渠道 ID" :model-value="String(current.id ?? '')" :hint="L.id.hint" placeholder="my-provider" @update:model-value="onIdInput" />
-          <SettingField label="协议" :model-value="String(current.protocol ?? 'openai')" :options="protocolOptions" @update:model-value="patch({ protocol: String($event) })" />
-          <SettingField label="请求指纹 Profile" :model-value="String(current.client_fingerprint ?? 'default')" :options="fingerprintOptions" hint="QuickQuip Profile 会发送品牌 UA 和专有请求头；显式 UA 设置优先生效。" @update:model-value="patch({ client_fingerprint: String($event) })" />
-          <SettingField class="form-grid__wide" label="API 地址" :model-value="String(current.base_url ?? '')" :hint="L.base_url.hint" :placeholder="L.base_url.placeholder" @update:model-value="patch({ base_url: String($event) })" />
-          <div class="form-grid__wide api-key-row">
-            <SettingField label="密钥环境变量" :model-value="String(current.api_key_env ?? '')" :hint="L.api_key_env.hint" :placeholder="L.api_key_env.placeholder" @update:model-value="patch({ api_key_env: String($event) })" />
-            <span v-if="keyEnvState" class="env-badge" :class="`env-badge--${keyEnvState.kind}`">{{ keyEnvState.text }}</span>
-          </div>
-          <SettingField label="认证方式" :model-value="String(current.auth_method ?? 'api_key')" :options="authOptions" @update:model-value="patch({ auth_method: String($event) })" />
-          <SettingField label="默认模型" :model-value="String(current.default_model ?? '')" :options="defaultModelOptions" :hint="L.default_model.hint" @update:model-value="patch({ default_model: String($event) })" />
-          <SettingField class="form-grid__wide" label="代理" :model-value="String(current.proxy ?? '')" :placeholder="L.proxy.placeholder" @update:model-value="patch({ proxy: String($event) })" />
-          <div class="form-grid__wide">
-            <p class="sub-label">备用地址 <UiInfoTip :text="L.fallback_urls.hint" /></p>
-            <StringListEditor :model-value="stringList(current.fallback_urls)" @update:model-value="patch({ fallback_urls: $event })" />
-          </div>
-          <div class="form-grid__wide">
-            <p class="sub-label">附加请求头 <UiInfoTip :text="L.headers.hint" /></p>
-            <KeyValueEditor :model-value="objectValue(current.headers)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch({ headers: $event })" />
-          </div>
+      <div class="provider-overview-bar">
+        <div class="provider-overview-bar__info">
+          <strong class="provider-overview-bar__title">{{ current.id || '新建渠道（未命名）' }}</strong>
+          <UiTag size="sm" variant="info">{{ protocolLabel(current.protocol) }}</UiTag>
+          <UiTag v-if="isDefault(current)" size="sm" variant="cyan">全局默认渠道</UiTag>
+          <UiButton
+            v-else-if="current.id"
+            size="sm"
+            variant="ghost"
+            @click="setAsDefaultProvider"
+          >设为默认渠道</UiButton>
         </div>
-      </UiCard>
+        <div class="provider-overview-bar__tabs" role="tablist" aria-label="渠道配置分节">
+          <button
+            v-for="tab in detailTabs"
+            :key="tab.key"
+            type="button"
+            class="subtab-btn"
+            :class="{ active: activeTab === tab.key }"
+            @click="activeTab = tab.key"
+          >{{ tab.label }}</button>
+        </div>
+      </div>
 
-      <UiCard padding="lg" class="detail-card">
-        <header class="detail-card__head">
-          <h3>模型 <span class="head-count">{{ models.length }}</span></h3>
-          <UiButton size="sm" icon="Plus" @click="addModel">添加模型</UiButton>
-        </header>
-        <UiEmpty v-if="!models.length" icon="Boxes" title="尚未配置模型" description="渠道至少需要一个模型才能使用" />
-        <div v-for="(model, index) in models" :key="index" class="model-row">
-          <div class="model-row__main">
-            <UiToggle size="sm" :model-value="model.enabled !== false" @update:model-value="patchModel(index, { enabled: $event })" />
-            <input
-              class="model-row__name"
-              :value="String(model.model ?? '')"
-              placeholder="模型名（API 请求中的名称）"
-              autocomplete="off"
-              spellcheck="false"
-              @input="patchModel(index, { model: ($event.target as HTMLInputElement).value })"
-            />
-            <label class="model-row__flag" title="关闭后不再向该模型发送图片">
-              <input type="checkbox" :checked="model.vision !== false" @change="patchModel(index, { vision: ($event.target as HTMLInputElement).checked })" />
-              图片
+      <div class="providers-panel__detail-scroll">
+        <UiCard v-show="activeTab === 'all' || activeTab === 'connection'" padding="lg" class="detail-card">
+          <header class="detail-card__head">
+            <h3>连接与认证</h3>
+            <label class="toggle-inline">
+              <span class="muted">{{ current.enabled !== false ? '已启用' : '已停用' }}</span>
+              <UiToggle :model-value="current.enabled !== false" @update:model-value="patch({ enabled: $event })" />
             </label>
-            <input
-              class="model-row__context"
-              type="number"
-              min="1024"
-              step="1"
-              :value="model.context_window ?? ''"
-              placeholder="上下文容量（留空自动）"
-              title="上下文容量（token），留空自动识别"
-              @input="onContextInput(index, $event)"
-            />
-            <button type="button" class="model-row__remove" title="移除该模型" @click="removeModel(index)"><UiIcon name="X" :size="14" /></button>
+          </header>
+          <div class="form-grid">
+            <SettingField label="渠道 ID" :model-value="String(current.id ?? '')" :hint="L.id.hint" placeholder="my-provider" @update:model-value="onIdInput" />
+            <SettingField label="协议" :model-value="String(current.protocol ?? 'openai')" :options="protocolOptions" @update:model-value="patch({ protocol: String($event) })" />
+            <SettingField label="请求指纹 Profile" :model-value="String(current.client_fingerprint ?? 'default')" :options="fingerprintOptions" hint="QuickQuip Profile 会发送品牌 UA 和专有请求头；显式 UA 设置优先生效。" @update:model-value="patch({ client_fingerprint: String($event) })" />
+            <SettingField label="认证方式" :model-value="String(current.auth_method ?? 'api_key')" :options="authOptions" @update:model-value="patch({ auth_method: String($event) })" />
+            <SettingField class="form-grid__wide" label="API 地址" :model-value="String(current.base_url ?? '')" :hint="L.base_url.hint" :placeholder="L.base_url.placeholder" @update:model-value="patch({ base_url: String($event) })" />
+            <div class="form-grid__wide api-key-row">
+              <SettingField label="密钥环境变量" :model-value="String(current.api_key_env ?? '')" :hint="L.api_key_env.hint" :placeholder="L.api_key_env.placeholder" @update:model-value="patch({ api_key_env: String($event) })" />
+              <span v-if="keyEnvState" class="env-badge" :class="`env-badge--${keyEnvState.kind}`">{{ keyEnvState.text }}</span>
+            </div>
+            <SettingField label="默认模型" :model-value="String(current.default_model ?? '')" :options="defaultModelOptions" :hint="L.default_model.hint" @update:model-value="patch({ default_model: String($event) })" />
+            <SettingField label="代理" :model-value="String(current.proxy ?? '')" :placeholder="L.proxy.placeholder" @update:model-value="patch({ proxy: String($event) })" />
+            <div class="form-grid__wide">
+              <p class="sub-label">备用地址 <UiInfoTip :text="L.fallback_urls.hint" /></p>
+              <StringListEditor :model-value="stringList(current.fallback_urls)" @update:model-value="patch({ fallback_urls: $event })" />
+            </div>
+            <div class="form-grid__wide">
+              <p class="sub-label">附加请求头 <UiInfoTip :text="L.headers.hint" /></p>
+              <KeyValueEditor :model-value="objectValue(current.headers)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch({ headers: $event })" />
+            </div>
           </div>
-          <details class="model-row__params">
-            <summary>参数覆盖 <span v-if="overrideCount(model)" class="override-count">{{ overrideCount(model) }} 项</span></summary>
-            <ParamsEditor :model-value="objectValue(model.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patchModel(index, { parameters: $event })" />
-          </details>
-        </div>
-      </UiCard>
+        </UiCard>
 
-      <UiCard padding="lg" class="detail-card">
-        <header class="detail-card__head">
-          <h3>别名 <UiInfoTip text="给模型起短名，配置路由时用别名引用。别名在本渠道内唯一。" /></h3>
-          <UiButton size="sm" icon="Plus" :disabled="!models.length" @click="addAlias">添加别名</UiButton>
-        </header>
-        <p v-if="!aliases.length" class="muted">暂无别名。</p>
-        <div v-for="(alias, index) in aliases" :key="index" class="alias-row">
-          <input :value="String(alias.alias ?? '')" placeholder="别名" autocomplete="off" spellcheck="false" @input="patchAlias(index, { alias: ($event.target as HTMLInputElement).value })" />
-          <UiIcon name="ArrowRight" :size="14" class="alias-row__arrow" />
-          <select :value="String(alias.model ?? '')" @change="patchAlias(index, { model: ($event.target as HTMLSelectElement).value })">
-            <option value="" disabled>选择模型</option>
-            <option v-for="name in modelNames" :key="name" :value="name">{{ name }}</option>
-          </select>
-          <button type="button" class="model-row__remove" title="移除别名" @click="removeAlias(index)"><UiIcon name="X" :size="14" /></button>
-        </div>
-      </UiCard>
+        <UiCard v-show="activeTab === 'all' || activeTab === 'models'" padding="lg" class="detail-card">
+          <header class="detail-card__head">
+            <h3>模型清单 <span class="head-count">{{ models.length }}</span></h3>
+            <UiButton size="sm" icon="Plus" @click="addModel">添加模型</UiButton>
+          </header>
+          <UiEmpty v-if="!models.length" icon="Boxes" title="尚未配置模型" description="渠道至少需要一个模型才能使用" />
+          <div v-for="(model, index) in models" :key="index" class="model-row">
+            <div class="model-row__main">
+              <UiToggle size="sm" :model-value="model.enabled !== false" @update:model-value="patchModel(index, { enabled: $event })" />
+              <input
+                class="model-row__name"
+                :value="String(model.model ?? '')"
+                placeholder="模型名（API 请求中的名称）"
+                autocomplete="off"
+                spellcheck="false"
+                @input="patchModel(index, { model: ($event.target as HTMLInputElement).value })"
+              />
+              <label class="model-row__flag" title="关闭后不再向该模型发送图片">
+                <input type="checkbox" :checked="model.vision !== false" @change="patchModel(index, { vision: ($event.target as HTMLInputElement).checked })" />
+                支持图片
+              </label>
+              <input
+                class="model-row__context"
+                type="number"
+                min="1024"
+                step="1"
+                :value="model.context_window ?? ''"
+                placeholder="上下文容量（自动）"
+                title="上下文容量（token），留空自动识别"
+                @input="onContextInput(index, $event)"
+              />
+              <button type="button" class="model-row__remove" title="移除该模型" @click="removeModel(index)"><UiIcon name="X" :size="14" /></button>
+            </div>
+            <details class="model-row__params">
+              <summary>模型级参数覆盖 <span v-if="overrideCount(model)" class="override-count">已覆盖 {{ overrideCount(model) }} 项</span></summary>
+              <ParamsEditor :model-value="objectValue(model.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patchModel(index, { parameters: $event })" />
+            </details>
+          </div>
+        </UiCard>
 
-      <UiCard padding="lg" class="detail-card">
-        <header class="detail-card__head">
-          <h3>渠道参数覆盖 <UiInfoTip text="覆盖全局默认的请求参数；模型级覆盖优先于渠道级。" /></h3>
-        </header>
-        <ParamsEditor :model-value="objectValue(current.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patch({ parameters: $event })" />
-      </UiCard>
-
-      <UiCard padding="lg" class="detail-card">
-        <header class="detail-card__head">
-          <h3>生效参数与探测</h3>
-        </header>
-        <div class="effective-bar">
-          <select v-model="effectiveModel">
-            <option value="" disabled>选择模型</option>
-            <option v-for="name in modelNames" :key="name" :value="name">{{ name }}</option>
-          </select>
-          <UiButton size="sm" :disabled="!effectiveModel || store.dirty.value" :title="store.dirty.value ? '先保存草稿再查看' : ''" @click="loadEffective">查看生效参数</UiButton>
-        </div>
-        <p v-if="store.dirty.value" class="muted">有未保存修改，生效参数基于已保存草稿。</p>
-        <table v-if="effective" class="effective-table">
-          <thead><tr><th>参数</th><th>生效值</th><th>来源</th></tr></thead>
-          <tbody>
-            <tr v-for="(parameter, key) in effective.parameters" :key="key">
-              <td>{{ paramLabel(String(key)) }}</td>
-              <td class="mono">{{ formatValue(parameter.value) }}</td>
-              <td><UiTag size="sm" :variant="parameter.source === 'unknown' ? 'warn' : 'info'">{{ PARAM_SOURCE_LABELS[parameter.source] || parameter.source }}</UiTag></td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="probe-bar">
-          <p class="muted">探测会让 Bot 用该配置发起一次真实请求，<strong>可能产生费用</strong>，且不会自动重试。</p>
-          <div class="probe-bar__controls">
-            <select v-model="probeSource">
-              <option value="published">按已发布配置</option>
-              <option value="draft">按已保存草稿</option>
+        <UiCard v-show="activeTab === 'all' || activeTab === 'models'" padding="lg" class="detail-card">
+          <header class="detail-card__head">
+            <h3>模型别名 <span class="head-count">{{ aliases.length }}</span> <UiInfoTip text="给模型起短名，配置路由或群指令切换时可用别名引用。别名在本渠道内唯一。" /></h3>
+            <UiButton size="sm" icon="Plus" :disabled="!models.length" @click="addAlias">添加别名</UiButton>
+          </header>
+          <p v-if="!aliases.length" class="muted">暂无别名。</p>
+          <div v-for="(alias, index) in aliases" :key="index" class="alias-row">
+            <input :value="String(alias.alias ?? '')" placeholder="短别名（如 fast）" autocomplete="off" spellcheck="false" @input="patchAlias(index, { alias: ($event.target as HTMLInputElement).value })" />
+            <UiIcon name="ArrowRight" :size="14" class="alias-row__arrow" />
+            <select :value="String(alias.model ?? '')" @change="patchAlias(index, { model: ($event.target as HTMLSelectElement).value })">
+              <option value="" disabled>选择目标模型</option>
+              <option v-for="name in modelNames" :key="name" :value="name">{{ name }}</option>
             </select>
-            <UiButton size="sm" variant="danger" icon="Zap" :disabled="!effectiveModel || store.dirty.value || store.busy.value" @click="probe">探测该模型</UiButton>
+            <button type="button" class="model-row__remove" title="移除别名" @click="removeAlias(index)"><UiIcon name="X" :size="14" /></button>
           </div>
-        </div>
-      </UiCard>
+        </UiCard>
 
-      <UiCard padding="lg" class="detail-card detail-card--danger">
-        <header class="detail-card__head">
-          <h3>危险操作</h3>
-        </header>
-        <div class="danger-row">
-          <p class="muted">删除后保存时会检查引用依赖；仍被路由、默认渠道或功能引用时不允许删除。</p>
-          <UiButton size="sm" variant="danger" icon="Trash2" @click="removeProvider">删除渠道</UiButton>
-        </div>
-      </UiCard>
+        <UiCard v-show="activeTab === 'all' || activeTab === 'params'" padding="lg" class="detail-card">
+          <header class="detail-card__head">
+            <h3>渠道级默认参数覆盖 <UiInfoTip text="覆盖全局默认的请求参数；模型级覆盖优先于渠道级。" /></h3>
+          </header>
+          <ParamsEditor :model-value="objectValue(current.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patch({ parameters: $event })" />
+        </UiCard>
+
+        <UiCard v-show="activeTab === 'all' || activeTab === 'params'" padding="lg" class="detail-card">
+          <header class="detail-card__head">
+            <h3>生效参数预览与在线探测</h3>
+          </header>
+          <div class="effective-bar">
+            <select v-model="effectiveModel">
+              <option value="" disabled>选择要检查的模型</option>
+              <option v-for="name in modelNames" :key="name" :value="name">{{ name }}</option>
+            </select>
+            <UiButton size="sm" :disabled="!effectiveModel || store.dirty.value" :title="store.dirty.value ? '先保存草稿再查看' : ''" @click="loadEffective">计算生效参数</UiButton>
+          </div>
+          <p v-if="store.dirty.value" class="muted">有未保存修改，需先保存草稿才能计算最新生效参数或发起探测。</p>
+          <table v-if="effective" class="effective-table">
+            <thead><tr><th>参数</th><th>最终生效值</th><th>生效来源</th></tr></thead>
+            <tbody>
+              <tr v-for="(parameter, key) in effective.parameters" :key="key">
+                <td>{{ paramLabel(String(key)) }}</td>
+                <td class="mono">{{ formatValue(parameter.value) }}</td>
+                <td><UiTag size="sm" :variant="parameter.source === 'unknown' ? 'warn' : 'info'">{{ PARAM_SOURCE_LABELS[parameter.source] || parameter.source }}</UiTag></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="probe-bar">
+            <p class="muted">探测会让 Bot 用该模型发起一次真实请求，<strong>可能产生费用</strong>，且不会自动重试。</p>
+            <div class="probe-bar__controls">
+              <select v-model="probeSource">
+                <option value="published">按已发布版本</option>
+                <option value="draft">按已保存草稿</option>
+              </select>
+              <UiButton size="sm" variant="danger" icon="Zap" :disabled="!effectiveModel || store.dirty.value || store.busy.value" @click="probe">探测该模型</UiButton>
+            </div>
+          </div>
+        </UiCard>
+
+        <UiCard v-show="activeTab === 'all' || activeTab === 'connection'" padding="lg" class="detail-card detail-card--danger">
+          <header class="detail-card__head">
+            <h3>危险操作</h3>
+          </header>
+          <div class="danger-row">
+            <p class="muted">删除后保存时会检查引用依赖；仍被路由、默认渠道或群设置引用时不允许删除。</p>
+            <UiButton size="sm" variant="danger" icon="Trash2" @click="removeProvider">删除渠道</UiButton>
+          </div>
+        </UiCard>
+      </div>
     </div>
     <div v-else class="providers-panel__placeholder">
       <UiEmpty icon="Server" title="从左侧选择渠道查看与编辑" />
@@ -192,6 +223,7 @@ const L = { id: { hint: '全局唯一，创建后不可修改。只允许字母�
 
 const providers = computed<JsonObject[]>(() => Array.isArray(store.document.value?.providers) ? store.document.value.providers.filter(isObject) : [])
 const selected = ref(0)
+const activeTab = ref<'all' | 'connection' | 'models' | 'params'>('all')
 const current = computed(() => providers.value[selected.value] || null)
 const models = computed<JsonObject[]>(() => current.value && Array.isArray(current.value.models) ? current.value.models.filter(isObject) : [])
 const aliases = computed<JsonObject[]>(() => current.value && Array.isArray(current.value.aliases) ? current.value.aliases.filter(isObject) : [])
@@ -205,11 +237,25 @@ const fingerprintOptions = computed(() => (store.metadata.value.client_fingerpri
 const authOptions = [{ value: 'api_key', label: 'API Key（x-api-key）' }, { value: 'bearer', label: 'Bearer Token' }]
 const defaultModelOptions = computed(() => [{ value: '', label: models.value.length ? '（未选择）' : '（先添加模型）' }, ...modelNames.value.map(name => ({ value: name, label: name }))])
 
+const detailTabs = computed(() => [
+  { key: 'all' as const, label: '全部视图' },
+  { key: 'connection' as const, label: '连接与认证' },
+  { key: 'models' as const, label: `模型与别名 (${models.value.length})` },
+  { key: 'params' as const, label: '默认参数与探测' },
+])
+
 watch(providers, list => { if (selected.value > Math.max(0, list.length - 1)) selected.value = Math.max(0, list.length - 1) })
 
 function protocolLabel(value: JsonValue) { return PROTOCOL_LABELS[String(value)] || String(value ?? '—') }
 function modelCount(provider: JsonObject) { return Array.isArray(provider.models) ? provider.models.length : 0 }
 function isDefault(provider: JsonObject) { const settings = store.document.value?.settings; return isObject(settings) && isObject(settings.runtime) && settings.runtime.default_provider === provider.id }
+function setAsDefaultProvider() {
+  if (!current.value?.id) return
+  const settings = store.document.value?.settings
+  const runtime = isObject(settings) && isObject(settings.runtime) ? settings.runtime : {}
+  store.updateSettingsSection('runtime', { ...runtime, default_provider: String(current.value.id) })
+  toast(`已将「${current.value.id}」设为全局默认渠道（保存并应用后生效）`)
+}
 function stringList(value: JsonValue | undefined): string[] { return Array.isArray(value) ? value.map(String) : [] }
 function objectValue(value: JsonValue | undefined): JsonObject { return isObject(value) ? value : {} }
 function overrideCount(model: JsonObject) { return Object.values(objectValue(model.parameters)).filter(value => value !== null && value !== undefined).length }
@@ -242,6 +288,12 @@ function onIdInput(event: JsonValue) {
     toast('既有渠道的 ID 不可修改', 'error')
     return
   }
+  // 未保存渠道改名时，价格行跟随新 ID
+  const previous = current.value.id
+  const pricing = store.document.value?.pricing
+  if (previous && Array.isArray(pricing) && pricing.some(row => isObject(row) && row.provider_id === previous)) {
+    store.updateSection('pricing', pricing.map(row => isObject(row) && row.provider_id === previous ? { ...row, provider_id: id } : row))
+  }
   patch({ id })
 }
 function addProvider() {
@@ -251,7 +303,12 @@ function addProvider() {
 }
 function removeProvider() {
   if (!current.value) return
-  if (!confirm(`确定删除渠道「${current.value.id || '未命名渠道'}」？保存时将检查引用依赖。`)) return
+  if (!confirm(`确定删除渠道「${current.value.id || '未命名渠道'}」及其模型价格？保存时将检查引用依赖。`)) return
+  const removed = current.value.id
+  const pricing = store.document.value?.pricing
+  if (Array.isArray(pricing) && pricing.some(row => isObject(row) && row.provider_id === removed)) {
+    store.updateSection('pricing', pricing.filter(row => !isObject(row) || row.provider_id !== removed))
+  }
   commit(providers.value.filter((_, i) => i !== selected.value))
   selected.value = Math.max(0, selected.value - 1)
 }
@@ -299,39 +356,64 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
 <style scoped>
 .providers-panel {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 248px minmax(0, 1fr);
   gap: var(--qq-gap-md);
-  align-items: start;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .providers-panel__list {
-  display: grid;
-  gap: 4px;
-  position: sticky;
-  top: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--qq-surface);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  padding: 10px;
+  gap: 8px;
 }
 
 .providers-panel__list-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px 8px;
+  padding: 2px 4px 6px;
   color: var(--qq-text-muted);
-  font-size: var(--qq-text-sm);
+  font-size: var(--qq-text-xs);
   font-weight: 600;
+  border-bottom: 1px solid var(--qq-border-soft);
+  flex-shrink: 0;
+}
+
+.providers-panel__list-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .provider-item {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-card);
-  background: var(--qq-surface);
+  border: 1px solid var(--qq-border-soft);
+  border-radius: var(--qq-radius-md);
+  background: var(--qq-surface-elevated);
   cursor: pointer;
   font: inherit;
   text-align: left;
+  flex-shrink: 0;
+  transition: border-color var(--qq-transition-fast), background var(--qq-transition-fast);
+}
+
+.provider-item:hover {
+  border-color: var(--qq-primary-border);
 }
 
 .provider-item__head {
@@ -361,18 +443,97 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
 }
 
 .providers-panel__detail {
-  display: grid;
-  gap: var(--qq-gap-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-sm);
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
+}
+
+.provider-overview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-sm);
+  padding: 10px 14px;
+  background: var(--qq-surface);
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-card);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.provider-overview-bar__info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.provider-overview-bar__title {
+  font-size: var(--qq-text-base);
+  color: var(--qq-text);
+  font-family: var(--qq-font-mono);
+}
+
+.provider-overview-bar__tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--qq-radius-md);
+  background: var(--qq-surface-elevated);
+  border: 1px solid var(--qq-border-soft);
+  flex-wrap: wrap;
+}
+
+.subtab-btn {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--qq-radius-sm);
+  background: transparent;
+  color: var(--qq-text-muted);
+  font: inherit;
+  font-size: var(--qq-text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--qq-transition-fast);
+}
+
+.subtab-btn:hover {
+  color: var(--qq-text);
+}
+
+.subtab-btn.active {
+  background: var(--qq-primary-soft);
+  color: var(--qq-primary);
+  font-weight: 600;
+}
+
+.providers-panel__detail-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-md);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  padding-bottom: var(--qq-gap-md);
 }
 
 .providers-panel__placeholder {
   display: grid;
   place-items: center;
+  height: 100%;
   min-height: 320px;
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
+}
+
+.detail-card {
+  flex-shrink: 0;
 }
 
 .detail-card__head {
@@ -389,6 +550,12 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.toggle-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .head-count {
@@ -509,28 +676,31 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
 .model-row__params summary {
   cursor: pointer;
   color: var(--qq-text-muted);
-  font-size: var(--qq-text-sm);
-}
-
-.model-row__params[open] summary {
-  margin-bottom: 8px;
+  font-size: var(--qq-text-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .override-count {
-  color: var(--qq-cyan-deep);
-  font-size: var(--qq-text-xs);
+  padding: 1px 6px;
+  border-radius: var(--qq-radius-full);
+  background: var(--qq-primary-soft);
+  color: var(--qq-primary);
 }
 
 .alias-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(160px, 2fr) auto;
   gap: 8px;
-  margin-bottom: 8px;
+  align-items: center;
+  margin-bottom: 6px;
 }
 
 .alias-row input,
-.alias-row select {
-  min-width: 0;
+.alias-row select,
+.effective-bar select,
+.probe-bar select {
   padding: 7px 10px;
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-md);
@@ -540,58 +710,52 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   font-size: var(--qq-text-sm);
 }
 
-.alias-row input { width: 180px; font-family: var(--qq-font-mono); }
-.alias-row select { flex: 1; }
-.alias-row__arrow { color: var(--qq-text-quiet); flex-shrink: 0; }
+.alias-row__arrow {
+  color: var(--qq-text-quiet);
+}
 
-.effective-bar,
-.probe-bar__controls {
+.effective-bar {
   display: flex;
   gap: 8px;
-  align-items: center;
   flex-wrap: wrap;
-}
-
-.effective-bar select,
-.probe-bar__controls select {
-  padding: 7px 10px;
-  border: 1px solid var(--qq-border);
-  border-radius: var(--qq-radius-md);
-  background: var(--qq-bg);
-  color: var(--qq-text);
-  font: inherit;
-  font-size: var(--qq-text-sm);
+  margin-bottom: 8px;
 }
 
 .effective-table {
   width: 100%;
-  margin-top: 10px;
   border-collapse: collapse;
-  font-size: var(--qq-text-sm);
+  font-size: var(--qq-text-xs);
+  margin: 8px 0 12px;
 }
 
 .effective-table th,
 .effective-table td {
-  border-bottom: 1px solid var(--qq-border);
-  padding: 7px 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--qq-border-soft);
   text-align: left;
-  overflow-wrap: anywhere;
 }
 
 .effective-table th {
   color: var(--qq-text-muted);
-  font-size: var(--qq-text-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 
-.mono { font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); }
+.mono {
+  font-family: var(--qq-font-mono);
+}
 
 .probe-bar {
-  margin-top: var(--qq-gap-md);
+  border-top: 1px solid var(--qq-border-soft);
   padding-top: var(--qq-gap-sm);
-  border-top: 1px solid var(--qq-border);
+  margin-top: var(--qq-gap-sm);
   display: grid;
   gap: 8px;
+}
+
+.probe-bar__controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .danger-row {
@@ -605,8 +769,20 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
 .danger-row .muted { flex: 1; min-width: 220px; }
 
 @media (max-width: 900px) {
-  .providers-panel { grid-template-columns: 1fr; }
-  .providers-panel__list { position: static; }
+  .providers-panel {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  .providers-panel__list {
+    height: auto;
+    max-height: 220px;
+  }
+  .providers-panel__detail,
+  .providers-panel__detail-scroll {
+    height: auto;
+    overflow: visible;
+  }
   .form-grid { grid-template-columns: 1fr; }
 }
 </style>

@@ -17,6 +17,7 @@ from quickquip.llm.config_document import (
     ROUTES,
     _secrets,
     empty_document,
+    upgrade_document,
     validate_document,
 )
 from quickquip.llm.config_fields import PARAMETER_TYPES, RANGES
@@ -299,17 +300,13 @@ def migrate_legacy(path: str | Path) -> tuple[dict, dict]:
                     "aliases": [{"alias": a, "model": m} for a, m in provider.aliases.items()],
                 }
             )
+        # 旧键先按 format 1 的兜底行落入，再由 upgrade_document 统一归属到渠道。
         for key, rates in legacy.pricing.items():
             doc["pricing"].append({"provider_id": None, "model": key, **asdict(rates)})
-            if "/" in key and key.split("/", 1)[0] in raw_providers:
-                provider_id, model = key.split("/", 1)
-                doc["pricing"].append({"provider_id": provider_id, "model": model, **asdict(rates)})
-                report["changes"].append(
-                    {
-                        "field_path": "pricing." + key,
-                        "kind": "qualified_and_response_fallback_preserved",
-                    }
-                )
+        doc["format_version"] = 1
+        doc, pricing_changes = upgrade_document(doc)
+        for change in pricing_changes:
+            report["changes"].append({**change, "field_path": "pricing." + change["model"]})
         report["source_counts"] = {
             "providers": len(raw_providers),
             "models": sum(len(p.models) for p in legacy.providers.values()),

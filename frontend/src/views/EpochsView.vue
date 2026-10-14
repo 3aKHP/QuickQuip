@@ -2,6 +2,9 @@
   <div class="epochs-view">
     <UiPageHeader title="纪元看板" subtitle="锚点推进与上下文窗口运行态：保留条数、驱逐事件与信封成本">
       <template #actions>
+        <router-link to="/llm-config?section=epoch" custom v-slot="{ navigate }">
+          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">调整纪元阈值</UiButton>
+        </router-link>
         <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="reloadTimeline" />
         <UiButton :loading="snapshotLoading" icon="RefreshCw" @click="refreshSnapshot()">刷新快照</UiButton>
       </template>

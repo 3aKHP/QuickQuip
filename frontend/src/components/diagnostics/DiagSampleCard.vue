@@ -4,7 +4,7 @@
       <span class="diag-card__icon"><UiIcon name="Send" :size="18" /></span>
       <div>
         <h3>样本请求<UiInfoTip text="会真实调用所选 provider/model 并计入「用量」页的成本统计，按该模型定价计费。" /></h3>
-        <p>使用已发布快照 {{ publishedRevision ?? '…' }} 发送一次请求；可能产生模型费用。查看最终解析结果和原始 trace。</p>
+        <p>使用已发布版本 {{ publishedVersionText }} 发送一次请求；可能产生模型费用。查看最终解析结果和原始 trace。</p>
       </div>
     </div>
 
@@ -103,9 +103,12 @@ import UiTag from '../ui/UiTag.vue'
 import { fetchProviders, runSampleRequest } from '../../api/diagnostics'
 import type { DiagnosticsProvider, SampleRequestResult } from '../../api/diagnostics'
 import { useDiagnosticTask } from '../../composables/useDiagnosticTask'
+import { formatVersionLabel } from '../../lib/llmConfig'
 
 const providers = ref<DiagnosticsProvider[]>([])
 const publishedRevision = ref<number | null>(null)
+const publishedVersionText = ref('…')
+
 const sampleTask = useDiagnosticTask<SampleRequestResult>()
 const { loading: sampleLoading, error: sampleError, result: sampleResult,
   pending: samplePending, operation: sampleOperation, statusText: sampleStatus } = sampleTask
@@ -147,6 +150,7 @@ async function loadProviders() {
     if (data?.providers) {
       providers.value = data.providers
       publishedRevision.value = data.revision
+      publishedVersionText.value = formatVersionLabel(data.version.saved_at, data.version.note, '当前生效版本')
       if (!sample.value.provider_id && providers.value.length) {
         sample.value.provider_id = providers.value[0].id
       }

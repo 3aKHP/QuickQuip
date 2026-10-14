@@ -16,7 +16,7 @@ python -m quickquip.llm.config_cli init
 
 初始化检查 `config/llm.toml`。有旧文件时只迁移一次；没有旧文件时建立关闭 LLM、无渠道的配置。已有数据库始终具有权威性，库损坏或 schema 不支持会明确报错。Windows `start.bat` 在启动服务前执行初始化；公开 Docker compose 的 `config-init` 在可写配置挂载中完成迁移，bot 和 Web 等待该服务成功后启动。
 
-请求指纹 Profile 基础设施使用配置 schema 2。初始化会事务性升级已验证的 schema 1，保留草稿修订、已发布快照和操作记录。schema 1 配置库需要先停止旧 Bot 与 Web、备份数据库，再执行 `python -m quickquip.llm.config_cli init --services-stopped`。普通 Web 请求与部署准备中的初始化会拒绝直接升级这类库，保持旧程序可用。升级后的数据库需要支持 schema 2 的程序。回退旧程序时使用升级前备份。schema 1 的历史备份可先复制到独立目录，运行新程序的 `init --services-stopped` 升级副本，再按恢复流程导入。Profile 选择缺省为 `default`，自有品牌需要显式启用，配置见[请求指纹 Profile](client-fingerprints.md)。
+配置数据库当前为 schema 3：schema 2 增加请求指纹 Profile 字段，schema 3 增加版本标记（修订保存时间与备注）并把价格统一为按渠道计费。初始化会事务性升级已验证的 schema 1 或 2，保留草稿修订、已发布快照和操作记录。旧 schema 的配置库需要先停止旧 Bot 与 Web、备份数据库，再执行 `python -m quickquip.llm.config_cli init --services-stopped`。普通 Web 请求与部署准备中的初始化会拒绝直接升级这类库，保持旧程序可用。升级后的数据库需要支持 schema 3 的程序。回退旧程序时使用升级前备份。旧 schema 的历史备份可先复制到独立目录，运行新程序的 `init --services-stopped` 升级副本，再按恢复流程导入。升级到 schema 3 时，价格表中的全渠道兜底行会归属到渠道或移除，逐条结果写入升级报告，规则见下文价格。Profile 选择缺省为 `default`，自有品牌需要显式启用，配置见[请求指纹 Profile](client-fingerprints.md)。
 
 
 迁移保留认证变量引用。发现认证字面量时，先将密钥写入根目录 `.env` 并把字段改为 `${VARIABLE}`。`api_key_env` 保存环境变量名称。认证 Header 可使用 `Bearer ${VARIABLE}`。数据库、导出、日志和操作错误不包含展开的认证值。
@@ -24,6 +24,8 @@ python -m quickquip.llm.config_cli init
 迁移备份与报告存放在 `data/llm-config-migration/<源文件摘要>/`。报告列出字段转换、限制调整、移除和外部资产处理结果。内联人格写入 `config/personas/migrated-*.toml`，使用 `inherit_shared = false` 保持原提示应用语义；已有独立人格按加载优先级保留。已有 `config/generation.toml` 继续提供多模态配置，缺失时迁移提取旧段。原文件始终保留。文件冲突需要查看报告并处理后重新初始化。
 
 ## 保存与应用
+
+Web Admin 以「YYYY-MM-DD HH:mm (备注)」标记版本：时间是该修订的保存时刻，备注可在状态条、发布页或历史快照上随时修改。尚未发布的草稿在多次保存间保留备注，发布后的下一次保存从空备注开始。
 
 保存增加 `draft_revision`，机器人继续使用已发布快照。应用指定草稿修订号，建立不可变快照并返回配置任务 ID。后续草稿编辑继续允许；已有应用尚未结束时，再次应用返回冲突。只有 bot 已切换并回报实际版本后，任务才成功。
 
@@ -39,7 +41,11 @@ python -m quickquip.llm.config_cli init
 
 有效值顺序为调用或会话覆盖、模型覆盖、渠道默认、具有该字段职责的全局设置、内置默认。覆盖参数 `null` 继承上一层；空字符串、空对象、false 和允许的零值保存明确意图。`extra_body` 整体替换。`style_profile` 选择共享风格，`style_overrides` 保存追加文本，两者独立覆盖。新写入拒绝越界数值。
 
-JSON 模型引用使用 `{ "provider_id": "渠道ID", "model": "wire模型名" }`。级联数组顺序就是尝试顺序，`"@default"` 在任务运行时解析默认选择。模型名可以包含 `/`。价格允许 `provider_id: null` 表示纯响应模型名回退，明确渠道价格优先。免费价格是零，未定价缺少记录，缓存价格 `null` 使用输入单价。
+JSON 模型引用使用 `{ "provider_id": "渠道ID", "model": "wire模型名" }`。级联数组顺序就是尝试顺序，`"@default"` 在任务运行时解析默认选择。模型名可以包含 `/`。
+
+价格以「渠道 + 配置的模型 ID」为唯一计费单位，`provider_id` 必须是已存在的渠道。用量按请求发出的模型名匹配价格，上游响应改写的模型名（中转去前缀、带日期的快照名等）不影响定价；同名模型在不同渠道需要各自定价，不存在全渠道兜底。免费价格是零，未定价缺少记录，缓存价格 `null` 使用输入单价。导入旧格式（`format_version: 1`）JSON 时，`渠道ID/模型` 形式的兜底价格归属到该渠道；纯模型名兜底价格只在恰好一个尚未定价的渠道配置了该模型时归属，否则移除；导入预览逐条列出结果。
+
+Web Admin 的「模型价格」按渠道分组：模型从该渠道的模型清单中选择，未定价模型可点击补行，新行的单价留空、填写后才能保存；可以把一行价格复制到同样配置了该模型的其他渠道。删除渠道时一并删除它的价格。
 
 删除被引用对象会返回依赖。停用渠道和模型保留会话与历史记录。群覆盖只允许已发布且可用的渠道与模型；应用前会重新检查已有覆盖。
 

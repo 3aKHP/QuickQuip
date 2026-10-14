@@ -9,7 +9,7 @@ export function fieldTemplate(key: string): JsonObject {
     aliases: { alias: '', model: '' },
     entries: { provider_id: '', model: '' },
     style_profiles: { id: '', prompt: '' },
-    pricing: { provider_id: null, model: '', input_per_mtok: 0, output_per_mtok: 0, cache_read_per_mtok: null, cache_write_per_mtok: null },
+    pricing: { provider_id: '', model: '', input_per_mtok: 0, output_per_mtok: 0, cache_read_per_mtok: null, cache_write_per_mtok: null },
     daily_summary: { provider_id: '', model: '' },
     daily_briefing: { provider_id: '', model: '' },
     weekly_report: { provider_id: '', model: '' },
@@ -356,8 +356,8 @@ function describeParams(prev: JsonObject, next: JsonObject, prefix: string): str
 
 function describePricing(before: JsonValue, after: JsonValue): string[] {
   if (!Array.isArray(before) || !Array.isArray(after)) return []
-  const keyOf = (item: JsonObject) => `${item.provider_id ?? '*'}::${String(item.model ?? '')}`
-  const nameOf = (item: JsonObject) => item.provider_id ? `仅 ${item.provider_id} 的 ${item.model}` : `${item.model}（全渠道兜底）`
+  const keyOf = (item: JsonObject) => `${String(item.provider_id ?? '')}::${String(item.model ?? '')}`
+  const nameOf = (item: JsonObject) => `${item.provider_id} · ${item.model}`
   const beforeMap = byIdentity(before, keyOf)
   const afterMap = byIdentity(after, keyOf)
   const lines: string[] = []
@@ -444,4 +444,60 @@ export function epochChainError(values: Record<string, unknown>): string {
   if (!(hot < cap)) return '热态压缩目标必须小于纪元容量上限'
   if (!(ctx > 0)) return '纪元上下文容量必须大于 0'
   return ''
+}
+
+/** 将 Unix 秒/毫秒或 ISO 时间格式化为 YYYY-MM-DD HH:mm */
+export function formatVersionTime(raw: number | string | null | undefined): string {
+  if (raw === null || raw === undefined || raw === '') return ''
+  let date: Date
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw) || raw <= 0) return ''
+    date = new Date(raw < 1e11 ? raw * 1000 : raw)
+  } else {
+    const trimmed = raw.trim()
+    if (!trimmed) return ''
+    const num = Number(trimmed)
+    date = Number.isFinite(num) && num > 0
+      ? new Date(num < 1e11 ? num * 1000 : num)
+      : new Date(trimmed)
+  }
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** 版本标记「2026-10-14 15:30 (备注)」，替代 v1 等自增修订号 */
+export function formatVersionLabel(
+  timestamp?: number | string | null,
+  note?: string | null,
+  fallback = '时间待同步',
+): string {
+  const timeText = formatVersionTime(timestamp)
+  const cleanNote = typeof note === 'string' ? note.trim() : ''
+  if (timeText && cleanNote) return `${timeText} (${cleanNote})`
+  if (timeText) return timeText
+  if (cleanNote) return `${fallback} (${cleanNote})`
+  return fallback
+}
+
+const PRICING_UPGRADE_TEXT: Record<string, string> = {
+  converted: '已归属到渠道',
+  duplicate_dropped: '与渠道价格重复，已移除',
+  superseded_dropped: '对应渠道已有价格，已移除',
+  ambiguous_dropped: '多个渠道配置了该模型，无法归属，已移除',
+  unmatched_dropped: '没有渠道配置该模型，已移除',
+  unknown_provider_dropped: '所属渠道不存在，已移除',
+}
+
+/** 校验/导入预览警告的人话版本；未知代码回退后端 message */
+export function configWarningText(warning: JsonValue): string {
+  if (!isObject(warning)) return String(warning)
+  const details = isObject(warning.details) ? warning.details : {}
+  if (warning.code === 'pricing_upgraded') {
+    const target = details.kind === 'converted' ? `（${details.provider_id} · ${details.target_model}）` : ''
+    return `旧格式价格「${details.model}」${PRICING_UPGRADE_TEXT[String(details.kind)] || String(details.kind)}${target}`
+  }
+  if (warning.code === 'price_missing') return `渠道模型未定价：${String(warning.field_path).replace(/^providers\./, '').replace(/\.models$/, '')} · ${details.model}`
+  if (warning.code === 'price_orphan') return `价格不在渠道模型清单：${details.provider_id} · ${details.model}`
+  return typeof warning.message === 'string' ? warning.message : String(warning)
 }

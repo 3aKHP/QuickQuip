@@ -410,3 +410,108 @@ def test_model_only_group_override_uses_automatic_enabled_default():
     with pytest.raises(ConfigError) as caught:
         ConfigService.validate_group_reference(config, None, "org/model")
     assert caught.value.code == "dependency_conflict"
+
+
+def publish(service, revision, request_id, note=None):
+    operation = service.apply(revision, request_id, note=note)
+    claim = service.tasks.claim("bot")
+    service.publish(claim["id"], claim["claim_token"])
+    service.tasks.finish(claim["id"], claim["claim_token"])
+    return operation
+
+
+def test_revision_notes_follow_unpublished_draft_and_reset_after_publish(service):
+    initial = service.status()
+    assert initial["draft_version"] == initial["published_version"]
+    assert initial["draft_version"]["note"] == ""
+    assert isinstance(initial["draft_version"]["saved_at"], float)
+
+    draft = service.read()
+    draft["document"]["settings"]["triggers"]["default_prefix"] = "/ask"
+    service.replace(draft["document"], 1, note="调整\n唤醒词")
+    change(service, "/chat")
+    assert service.status()["draft_version"]["note"] == "调整 唤醒词"
+
+    publish(service, 3, "apply-carry")
+    status = service.status()
+    assert status["published_version"] == status["draft_version"]
+    assert status["published_version"]["note"] == "调整 唤醒词"
+    change(service, "/next")
+    assert service.status()["draft_version"]["note"] == ""
+
+    publish(service, 4, "apply-note", note="上线")
+    assert service.status()["published_version"]["note"] == "上线"
+    service.set_note(1, "初始导入")
+    notes = {s["revision"]: s["note"] for s in service.history()["snapshots"]}
+    assert notes == {4: "上线", 3: "调整 唤醒词", 1: "初始导入"}
+    with pytest.raises(ConfigError) as caught:
+        service.set_note(2, "never snapshotted")
+    assert caught.value.code == "not_found"
+    with pytest.raises(ConfigError):
+        service.set_note("draft", "x" * 121)
+
+
+def test_unchanged_save_only_relabels_current_draft(service):
+    draft = service.read()
+    assert service.replace(draft["document"], 1, note="只改备注")["revision"] == 1
+    assert service.status()["published_version"]["note"] == "只改备注"
+
+
+def test_schema_2_upgrade_backfills_versions_and_lifts_draft_pricing(tmp_path):
+    from dataclasses import asdict
+
+    from quickquip.llm import config_store
+    from quickquip.llm.config import PricingRates
+    from quickquip.llm.config_document import validate_document
+
+    path = tmp_path / "llm_config.db"
+    doc = empty_document()
+    doc["providers"] = [{
+        "id": "p", "protocol": "openai", "base_url": "https://example.test/v1",
+        "api_key_env": "QQ_TEST_KEY", "default_model": "m", "models": [{"model": "m"}],
+    }]
+    doc = validate_document(doc)
+    rates = asdict(PricingRates(input_per_mtok=1.0))
+    doc["format_version"] = 1
+    doc["pricing"] = [{"provider_id": None, "model": "p/m", **rates}]
+    stored = config_store.dumps(doc)
+    with sqlite3.connect(path) as conn:
+        conn.executescript(config_store._SCHEMA + config_store.declared_schema())
+        conn.execute("INSERT INTO config_meta VALUES(1,2,3,3,?)", (stored,))
+        conn.execute("INSERT INTO config_snapshots VALUES(1,?,100)", (stored,))
+        conn.execute("INSERT INTO config_snapshots VALUES(3,?,300)", (stored,))
+        config_store.project_document(conn, doc)
+    service = ConfigService(path)
+    with pytest.raises(ConfigError) as caught:
+        service.initialize()
+    assert caught.value.code == "services_running"
+
+    service.initialize(services_stopped=True)
+    status = service.status()
+    assert status["schema_version"] == 3
+    assert status["published_version"] == {"saved_at": 300.0, "note": ""}
+    draft = service.read()
+    assert draft["revision"] == 3
+    assert draft["document"]["format_version"] == 2
+    assert draft["document"]["pricing"] == [{"provider_id": "p", "model": "m", **rates}]
+    # Immutable snapshots keep their bytes but read back in the current format.
+    assert service.read("published")["document"] == draft["document"]
+    assert service.diff()["changes"] == []
+    with service.store.connect() as conn:
+        snapshot = conn.execute("SELECT document FROM config_snapshots WHERE revision=3")
+        assert snapshot.fetchone()[0] == stored
+        report = conn.execute("SELECT report FROM config_migrations WHERE source='schema-3'")
+        assert '"kind":"converted"' in report.fetchone()[0]
+        projected = conn.execute("SELECT document FROM pricing_rules").fetchone()[0]
+        assert '"provider_id":"p"' in projected
+    assert service.history()["snapshots"][0]["saved_at"] == 300.0
+
+
+def test_import_preview_reports_format_1_pricing_upgrade(service):
+    doc = service.read()["document"]
+    doc["format_version"] = 1
+    doc["pricing"] = [{"provider_id": None, "model": "gone", "input_per_mtok": 1.0}]
+    preview = service.preview_import(doc, 1)
+    assert preview["warnings"][0]["code"] == "pricing_upgraded"
+    assert preview["warnings"][0]["details"]["kind"] == "unmatched_dropped"
+    assert preview["document"]["pricing"] == []

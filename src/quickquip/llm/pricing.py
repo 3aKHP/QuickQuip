@@ -116,19 +116,11 @@ def estimate_cost_components(
 
 
 def match_pricing(
-    provider_id: str, model: str, configured: dict[str | tuple[str | None, str], PricingRates]
+    provider_id: str, model: str, configured: dict[tuple[str, str], PricingRates]
 ) -> PricingRates | None:
-    """先查 ``provider_id/model``（per-provider 中转实际价），miss 回退纯 ``model``
-    （官方价默认），再 miss → None（未定价）。
-
-    key 为 ``f"{provider_id}/{model}"`` 精确拼接——即使 model 名本身含 ``/``（如
-    OpenRouter 的 ``google/gemma-4-31b-it``），拼接后 ``openrouter/google/gemma-4-31b-it``
-    仍与 configured 同名 key 精确匹配，无歧义；``is not None`` 判断避免依赖 truthiness。"""
-    if any(isinstance(key, tuple) for key in configured):
-        specific = configured.get((provider_id, model))
-        return specific if specific is not None else configured.get((None, model))
-    specific = configured.get(f"{provider_id}/{model}")
-    return specific if specific is not None else configured.get(model)
+    """计费唯一单位是 ``(provider_id, model)``：model 为配置中的模型 ID（即请求发出的
+    模型名），不做跨渠道的同名模型兜底；miss → None（未定价）。"""
+    return configured.get((provider_id, model))
 
 
 def _mtok(tokens: int | None, rate_per_mtok: float) -> float:

@@ -1,5 +1,5 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "providers": [
     {
       "enabled": true,
@@ -210,7 +210,7 @@
   },
   "pricing": [
     {
-      "provider_id": null,
+      "provider_id": "deepseek",
       "model": "deepseek-chat",
       "input_per_mtok": 0.14,
       "output_per_mtok": 0.28,

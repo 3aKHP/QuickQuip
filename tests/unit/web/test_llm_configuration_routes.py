@@ -170,7 +170,7 @@ def test_parameter_patch_keeps_omitted_values_and_replaces_extra_body(client, co
         "extra_body": {"old": {"inner": 1}},
     }
     document["providers"] = [entry]
-    document["pricing"] = [{"provider_id": None, "model": "owner/model", "input_per_mtok": 0}]
+    document["pricing"] = [{"provider_id": "p", "model": "owner/model", "input_per_mtok": 0}]
     config_service.replace(document, 1)
     response = client.patch(
         f"{BASE}/providers/p",
@@ -185,5 +185,21 @@ def test_parameter_patch_keeps_omitted_values_and_replaces_extra_body(client, co
     assert parameters["temperature"] is None
     assert parameters["extra_body"] == {}
     detail = client.get(f"{BASE}/providers/p").json()
-    assert detail["pricing"][0]["provider_id"] is None
+    assert detail["pricing"][0]["provider_id"] == "p"
     assert detail["effective_parameters"]["owner/model"]["stream_enabled"]["source"] == "provider"
+
+
+def test_note_endpoint_labels_draft_and_snapshots(client, config_service):
+    login(client)
+    response = client.put(f"{BASE}/note", json={"source": "draft", "note": "  首版\n基线  "})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["draft_version"]["note"] == "首版 基线"
+    assert body["published_version"] == body["draft_version"]
+    assert isinstance(body["draft_version"]["saved_at"], float)
+    history = client.get(f"{BASE}/history").json()["snapshots"]
+    assert history[0]["note"] == "首版 基线"
+    assert client.put(f"{BASE}/note", json={"source": "99", "note": "x"}).status_code == 404
+    assert client.put(f"{BASE}/note", json={"note": "x" * 121}).status_code == 422
+    providers = client.get(f"{BASE}/providers?source=published").json()
+    assert providers["version"]["note"] == "首版 基线"

@@ -272,8 +272,8 @@ async def test_record_usage_writes_db_row(monkeypatch, tmp_path):
     assert row["priced"] == 0
 
 
-async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
-    """e2e: _record_usage 传 client.config.id，provider 级价（覆盖 model 默认）落 cost_usd。"""
+async def test_record_usage_prices_requested_model_of_provider(monkeypatch, tmp_path):
+    """e2e: 按 (client.config.id, request.model) 计价；上游回报名不同也不影响定价。"""
     from quickquip.llm.config import PricingRates
     from quickquip.llm.usage import _record_usage
     from quickquip.llm.usage_store import LLMUsageStore
@@ -283,8 +283,8 @@ async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
     fake_store = LLMUsageStore(tmp_path / "u.db")
     monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
     configured = {
-        "gpt-test": PricingRates(input_per_mtok=1.0, output_per_mtok=5.0),
-        "p1/gpt-test": PricingRates(input_per_mtok=2.0, output_per_mtok=10.0),
+        ("p0", "gpt-test"): PricingRates(input_per_mtok=1.0, output_per_mtok=5.0),
+        ("p1", "gpt-test"): PricingRates(input_per_mtok=2.0, output_per_mtok=10.0),
     }
     monkeypatch.setattr("quickquip.llm.usage._configured_pricing", lambda: configured)
 
@@ -301,11 +301,17 @@ async def test_record_usage_uses_provider_level_pricing(monkeypatch, tmp_path):
     class FakeReq:
         model = "gpt-test"
 
-    response = LLMResponse(text="ok", model="gpt-test", input_tokens=100, output_tokens=50)
+    response = LLMResponse(
+        text="ok", model="gpt-test-2026-10-01", input_tokens=100, output_tokens=50
+    )
     await _record_usage(FakeClient(), FakeReq(), response, 0.0, True, "ok")
     with fake_store.connect() as conn:
-        row = conn.execute("SELECT cost_usd, priced FROM llm_usage_events").fetchone()
-    # provider p1 覆盖价（非 model 默认）：actual_input 100*2 + completion 50*10（per MTok）
+        row = conn.execute(
+            "SELECT cost_usd, priced, model, pricing_model FROM llm_usage_events"
+        ).fetchone()
+    assert row["model"] == "gpt-test-2026-10-01"
+    assert row["pricing_model"] == "p1/gpt-test"
+    # p1 的价：actual_input 100*2 + completion 50*10（per MTok）
     expected = 100 * 2 / 1e6 + 50 * 10 / 1e6
     assert abs(row["cost_usd"] - expected) < 1e-9
     assert row["priced"] == 1
@@ -406,7 +412,7 @@ async def test_summary_usage_records_response_outcome_without_losing_cost(monkey
     monkeypatch.setattr("quickquip.llm.usage_store.usage_store", fake_store)
     monkeypatch.setattr(
         "quickquip.llm.usage._configured_pricing",
-        lambda: {"m": PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
+        lambda: {("p", "m"): PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
     )
 
     class FakeClient:

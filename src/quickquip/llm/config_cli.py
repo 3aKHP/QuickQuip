@@ -41,7 +41,7 @@ def parser() -> argparse.ArgumentParser:
         else:
             q.add_argument(
                 "--services-stopped", action="store_true",
-                help="确认旧 bot 和 Web 已停止，用于 schema 1 配置库升级",
+                help="确认旧 bot 和 Web 已停止，用于旧 schema（1、2）配置库升级",
             )
     q = commands.add_parser("validate")
     q.add_argument("file", nargs="?", type=Path)

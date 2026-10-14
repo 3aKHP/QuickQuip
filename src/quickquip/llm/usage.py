@@ -180,7 +180,7 @@ def patch_meter(tokens: int | None) -> Iterator[None]:
 
 
 def _configured_pricing() -> dict:
-    """从 llm_service 取 [pricing.models]（延迟 import 避免 provider↔service 循环）。"""
+    """从 llm_service 取 (provider_id, model) 价格表（延迟 import 避免 provider↔service 循环）。"""
     pinned = _CONFIGURATION_PRICING.get()
     if pinned is not None:
         return pinned[1]
@@ -188,7 +188,7 @@ def _configured_pricing() -> dict:
         from quickquip.llm.service import get_llm_service
 
         config = get_llm_service().config
-        return config.pricing_references or config.pricing
+        return config.pricing_references
     except Exception:
         return {}
 
@@ -201,7 +201,7 @@ _CONFIGURATION_PRICING: ContextVar[tuple[int, dict] | None] = ContextVar(
 @contextmanager
 def configuration_pricing(config):
     token = _CONFIGURATION_PRICING.set(
-        (getattr(config, "revision", 0), config.pricing_references or config.pricing)
+        (getattr(config, "revision", 0), config.pricing_references)
     )
     try:
         yield
@@ -266,7 +266,9 @@ async def _record_usage(
                 response.cache_read_tokens,
             )
             configured = _configured_pricing()
-            rates = match_pricing(client.config.id, model, configured)
+            # 按配置的模型 ID（请求发出的模型名）计价；response.model 只做观测记录，
+            # 上游改写的回报名（如中转去掉前缀、带日期快照）不影响定价。
+            rates = match_pricing(client.config.id, request.model, configured)
             components, priced_flag = estimate_cost_components(usage, rates)
             input_cost_usd = components["input_cost_usd"]
             output_cost_usd = components["output_cost_usd"]
@@ -287,12 +289,7 @@ async def _record_usage(
                 "exclusive" if client.config.protocol == "claude" else "inclusive"
             )
             if rates is not None:
-                pricing_model = (
-                    f"{client.config.id}/{model}"
-                    if (client.config.id, model) in configured
-                    or f"{client.config.id}/{model}" in configured
-                    else model
-                )
+                pricing_model = f"{client.config.id}/{request.model}"
                 pricing_source = rates.source
                 pricing_confidence = rates.confidence
 

@@ -19,7 +19,7 @@ function createStore(api, bindings = {}) {
   const source = readFileSync(path.join(__dirname, '../src/composables/useLlmConfigStore.ts'), 'utf8')
   const module = vm.runInNewContext(`${compile(source)};exports`, {
     exports: {}, ref, computed, watch, shallowRef, setTimeout, clearTimeout, setInterval, clearInterval,
-    configError: library.configError, isObject: library.isObject,
+    configError: library.configError, formatVersionLabel: library.formatVersionLabel, isObject: library.isObject,
     isOperationFinished: library.isOperationFinished, parseConfigImport: library.parseConfigImport,
     crypto: { randomUUID: () => 'same-request-id' },
     sessionStorage: { getItem: () => null, setItem: () => {} },
@@ -30,7 +30,8 @@ function createStore(api, bindings = {}) {
 }
 
 const initial = { revision: 5, document: { format_version: 1, providers: [], settings: { runtime: { enabled: false } } } }
-const status = { schema_version: 1, draft_revision: 6, published_revision: 4, bot: null }
+const version = { saved_at: 1760428800, note: '' }
+const status = { schema_version: 3, draft_revision: 6, draft_version: version, published_revision: 4, published_version: version, bot: null }
 const normalized = value => JSON.parse(JSON.stringify(value))
 
 test('save acknowledges sent configuration while later edits remain dirty', async () => {
@@ -72,7 +73,7 @@ test('apply retries a lost HTTP response with same request id and never reports 
     applyLlmConfiguration: async (...args) => { calls.push(args); if (calls.length === 1) throw new Error('connection interrupted'); return { id: 'operation-1', status: 'queued', target_revision: 5 } },
   })
   store.accept(structuredClone(initial)); await store.apply(); await store.apply()
-  assert.deepEqual(normalized(calls), [[5, 'same-request-id'], [5, 'same-request-id']])
+  assert.deepEqual(normalized(calls), [[5, 'same-request-id', null], [5, 'same-request-id', null]])
   assert.equal(store.operation.value.status, 'queued')
   await store.apply()
   assert.equal(calls.length, 2)
@@ -537,10 +538,10 @@ test('providers array diff summarizes add remove and model level changes', () =>
 
 test('pricing and route diffs use identity and chain wording', () => {
   const pricing = library.describeChange('pricing',
-    [{ provider_id: null, model: 'm', input_per_mtok: 1, output_per_mtok: 2 }],
-    [{ provider_id: null, model: 'm', input_per_mtok: 3, output_per_mtok: 2 }, { provider_id: 'p', model: 'n', input_per_mtok: 0, output_per_mtok: 0 }])
-  assert.match(pricing.lines.join('\n'), /新增价格 仅 p 的 n/)
-  assert.match(pricing.lines.join('\n'), /价格 m（全渠道兜底）：输入价/)
+    [{ provider_id: 'q', model: 'm', input_per_mtok: 1, output_per_mtok: 2 }],
+    [{ provider_id: 'q', model: 'm', input_per_mtok: 3, output_per_mtok: 2 }, { provider_id: 'p', model: 'n', input_per_mtok: 0, output_per_mtok: 0 }])
+  assert.match(pricing.lines.join('\n'), /新增价格 p · n/)
+  assert.match(pricing.lines.join('\n'), /价格 q · m：输入价 1 → 3/)
   const routes = library.describeChange('routes.weekly_report', ['@default'], [{ provider_id: 'p', model: 'm' }])
   assert.match(routes.lines[0], /每周报告：默认渠道 ⇒ p\/m/)
 })
@@ -651,4 +652,123 @@ test('provider Profile options follow protocol and selection persists through dr
   assert.equal(sent.settings.runtime.client_cluster, 'synthetic-cluster')
   panel.patch({ protocol: 'claude' })
   assert.deepEqual(normalized(panel.fingerprintOptions.value.map(entry => entry.value)), ['default', 'quickquip', 'custom'])
+})
+
+test('version labels render saved time and note instead of numeric revisions', async () => {
+  const ts = 1760428800
+  const formatted = library.formatVersionLabel(ts, '切换主模型', '未发布')
+  assert.match(formatted, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(切换主模型\)$/)
+  assert.equal(library.formatVersionLabel(null, '', '未发布'), '未发布')
+  assert.equal(library.formatVersionLabel(null, '仅备注', '未记录时间'), '未记录时间 (仅备注)')
+
+  let savedNoteArgs = null
+  const live = { saved_at: ts - 3600, note: '线上稳定版' }
+  const store = createStore({
+    fetchLlmConfigStatus: async () => ({
+      ...status, draft_revision: 5, draft_version: { saved_at: ts, note: '草稿备注' },
+      published_revision: 4, published_version: live,
+      bot: { boot_id: 'b', loaded_revision: 4, loaded_version: live, heartbeat_at: ts, observed_at: ts, stale: false, components: {} },
+    }),
+    fetchLlmConfigHistory: async () => ({ snapshots: [{ revision: 4, created_at: ts, saved_at: ts - 3600, note: '线上稳定版' }] }),
+    saveLlmConfigNote: async (source, note) => {
+      savedNoteArgs = { source, note }
+      return { ...status, draft_revision: 5, draft_version: { saved_at: ts, note }, published_revision: 4, published_version: live, bot: null }
+    },
+  })
+  await store.refreshStatus()
+  await store.refreshHistory()
+  assert.match(store.draftLabel.value, /\(草稿备注\)$/)
+  assert.match(store.publishedLabel.value, /\(线上稳定版\)$/)
+  assert.match(store.botLoadedLabel.value, /\(线上稳定版\)$/)
+  assert.equal(store.versionLabel(4), store.publishedLabel.value)
+  assert.equal(store.versionLabel(5), store.draftLabel.value)
+  assert.equal(store.versionLabel(2), '历史版本')
+
+  assert.equal(await store.saveNote(4, '新备注'), true)
+  assert.deepEqual(savedNoteArgs, { source: '4', note: '新备注' })
+})
+
+test('LlmConfigView consolidates sidebar into 6 core modules and preserves legacy query aliases', () => {
+  const viewSource = readFileSync(path.join(__dirname, '../src/views/LlmConfigView.vue'), 'utf8')
+  for (const key of ['providers', 'conversation', 'tools', 'reports', 'pricing', 'publish']) {
+    assert.ok(viewSource.includes(`key: '${key}'`), `expected module key ${key}`)
+  }
+  for (const legacy of ['general', 'retry', 'epoch', 'context', 'styles', 'mcp', 'skills', 'routes', 'exchange']) {
+    assert.ok(viewSource.includes(`${legacy}:`), `expected alias for ${legacy}`)
+  }
+  assert.ok(viewSource.includes("context: { section: 'conversation', subTab: 'memory' }"))
+})
+
+
+function pricingPanel(store) {
+  return componentScript('components/llm-config/PricingPanel.vue', {
+    computed, ref, structuredClone, injectLlmConfigStore: () => store,
+    fieldTemplate: library.fieldTemplate, isObject: library.isObject,
+  }, 'groups,missing,incomplete,orphans,dupes,addMissing,copyTargets,copyTo,patchNumber,modelOptions')
+}
+
+test('pricing panel bills per provider model and never defaults new rows to free', () => {
+  const store = createStore({})
+  store.accept({ revision: 1, document: {
+    providers: [
+      { id: 'a', models: [{ model: 'm' }, { model: 'n' }] },
+      { id: 'b', models: [{ model: 'm' }] },
+    ],
+    pricing: [
+      { provider_id: 'a', model: 'm', input_per_mtok: 1, output_per_mtok: 2, cache_read_per_mtok: null, cache_write_per_mtok: null },
+      { provider_id: 'a', model: 'gone', input_per_mtok: 1, output_per_mtok: 2 },
+    ],
+  } })
+  const panel = pricingPanel(store)
+  assert.deepEqual(normalized(panel.missing.value), [{ provider: 'a', model: 'n' }, { provider: 'b', model: 'm' }])
+  assert.equal(panel.orphans.value.length, 1)
+  assert.deepEqual(normalized(panel.modelOptions(panel.groups.value[0], store.document.value.pricing[0])), ['m', 'n'])
+  assert.deepEqual(normalized(panel.copyTargets(store.document.value.pricing[0])), ['b'])
+
+  panel.copyTo(store.document.value.pricing[0], { target: { value: 'b' } })
+  assert.deepEqual(normalized(store.document.value.pricing[2]), { ...normalized(store.document.value.pricing[0]), provider_id: 'b' })
+  assert.deepEqual(normalized(panel.copyTargets(store.document.value.pricing[0])), [])
+
+  panel.addMissing(panel.missing.value)
+  const added = store.document.value.pricing[3]
+  assert.equal(added.provider_id, 'a')
+  assert.equal(added.model, 'n')
+  assert.equal(added.input_per_mtok, null)
+  assert.equal(panel.incomplete.value.length, 1)
+
+  panel.patchNumber(3, 'input_per_mtok', { target: { value: '0.50' } })
+  panel.patchNumber(3, 'output_per_mtok', { target: { value: '0' } })
+  assert.equal(store.document.value.pricing[3].input_per_mtok, 0.5)
+  assert.equal(panel.incomplete.value.length, 0)
+  const input = { value: '-1' }
+  panel.patchNumber(3, 'output_per_mtok', { target: input })
+  assert.equal(store.document.value.pricing[3].output_per_mtok, 0)
+  assert.equal(input.value, '0')
+  panel.patchNumber(3, 'cache_read_per_mtok', { target: { value: '' } })
+  assert.equal(store.document.value.pricing[3].cache_read_per_mtok, null)
+})
+
+test('deleting a provider also drops its prices', () => {
+  const store = createStore({})
+  store.accept({ revision: 1, document: {
+    providers: [{ id: 'a', models: [] }, { id: 'b', models: [] }],
+    pricing: [{ provider_id: 'a', model: 'm' }, { provider_id: 'b', model: 'm' }],
+  } })
+  const panel = providersPanel(store)
+  panel.selected.value = 0
+  panel.removeProvider()
+  assert.deepEqual(normalized(store.document.value.pricing), [{ provider_id: 'b', model: 'm' }])
+  assert.deepEqual(store.document.value.providers.map(p => p.id), ['b'])
+})
+
+test('renaming an unsaved provider carries its prices', () => {
+  const store = createStore({})
+  store.accept({ revision: 1, document: { providers: [], pricing: [] } })
+  const panel = providersPanel(store)
+  panel.addProvider()
+  panel.onIdInput('draft-id')
+  store.updateSection('pricing', [{ provider_id: 'draft-id', model: 'm' }])
+  panel.onIdInput('final-id')
+  assert.deepEqual(normalized(store.document.value.pricing), [{ provider_id: 'final-id', model: 'm' }])
+  assert.equal(store.document.value.providers[0].id, 'final-id')
 })
