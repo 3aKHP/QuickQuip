@@ -71,6 +71,15 @@ jobs:
         env:
           PLAYWRIGHT_BROWSERS_PATH: "0"
 
+      - name: Install QuickQuip project
+        run: |
+          staging\python\python.exe -m pip install --no-warn-script-location "setuptools>=68" wheel
+          if ($LASTEXITCODE -ne 0) { throw "QuickQuip build dependencies installation failed" }
+          # Embedded Python uses ._pth; build with the installed backend.
+          staging\python\python.exe -m pip install --no-deps --no-build-isolation --no-warn-script-location .
+        env:
+          PIP_NO_CACHE_DIR: "1"
+
       - name: Copy project files
         run: |
           Copy-Item -Recurse src\quickquip staging\
@@ -132,6 +141,8 @@ jobs:
         run: |
           staging\python\python.exe -m compileall -q staging\bot.py staging\web_api.py staging\webview_launcher.py staging\quickquip staging\plugins
           staging\python\python.exe -c "import webview; print('pywebview ok')"
+          staging\python\python.exe -c "from importlib.metadata import version; from pathlib import Path; from packaging.version import Version; import tomllib; expected = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']; assert Version(version('quickquip')) == Version(expected); print('QuickQuip installed version ok')"
+          if ($LASTEXITCODE -ne 0) { throw "QuickQuip package version smoke test failed" }
           Push-Location staging
           try {
             .\python\python.exe -m quickquip.llm.config_cli init
@@ -140,7 +151,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Configuration database validation failed" }
             .\python\python.exe -m quickquip.llm.config_cli validate config\llm.json.example
             if ($LASTEXITCODE -ne 0) { throw "Configuration JSON example validation failed" }
-            .\python\python.exe -c "import quickquip, plugins, web_api; print('app import ok')"
+            .\python\python.exe -c "import quickquip, plugins, web_api; from importlib.metadata import version; from quickquip.llm.client_fingerprints.identity import client_version; assert client_version() == version('quickquip'); print('app import and client version ok')"
+            if ($LASTEXITCODE -ne 0) { throw "Application import and client version smoke test failed" }
             .\python\python.exe scripts\sync_preset_skills.py --apply --skills-dir data\preset-sync-smoke
             if ($LASTEXITCODE -ne 0) { throw "Preset Skill sync startup smoke test failed" }
             .\python\python.exe scripts\sync_preset_skills.py --check --skills-dir data\preset-sync-smoke
