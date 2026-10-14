@@ -15,3 +15,26 @@ concurrency:
 jobs:
   tests:
     uses: ./.github/workflows/_tests.yml
+
+  windows-config:
+    name: Windows configuration lifecycle
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pip install --no-deps -e .
+      - name: Verify configuration initialization and backup/restore
+        run: >-
+          python -m pytest tests/unit/llm/test_config_service.py
+          --basetemp "${{ runner.temp }}/pytest-quickquip"
+          -k "two_processes_initialize_one_database or backup_is_consistent_and_restore_clears_leases"

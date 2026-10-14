@@ -555,7 +555,7 @@ class ConfigService:
                 source.backup(target)
             finally:
                 target.close()
-        with destination.open("rb") as stream:
+        with destination.open("r+b") as stream:
             os.fsync(stream.fileno())
         from quickquip.llm.config_durability import sync_directory
 
