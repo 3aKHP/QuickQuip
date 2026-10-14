@@ -22,8 +22,8 @@ body:
   - type: textarea
     id: boundaries
     attributes:
-      label: 边界与非目标 / Boundaries & non-goals
-      description: 范围之外的内容；不应改变的行为。
+      label: 使用条件与取舍 / Constraints & trade-offs
+      description: 影响方案选择的实际条件、目标范围与需要保留的行为。
   - type: textarea
     id: related
     attributes:

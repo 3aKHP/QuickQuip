@@ -46,7 +46,7 @@ def test_sensitive_words_config_key_is_not_writable(monkeypatch, tmp_path):
     with pytest.raises(HTTPException) as exc:
         config.put_config(
             "sensitive_words",
-            config.ConfigBody(content="[block]\nwords = [\"secret\"]\n"),
+            config.ConfigBody(content='[block]\nwords = ["secret"]\n'),
             _mock_request(),
         )
 
@@ -58,7 +58,8 @@ def test_put_awakening_config_queues_reload(monkeypatch, tmp_path):
     base = _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
     monkeypatch.setattr(
-        config.action_queue, "enqueue",
+        config.action_queue,
+        "enqueue",
         lambda action_type: captured.append(action_type) or {"id": "a1"},
     )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
@@ -78,7 +79,8 @@ def test_put_chat_rules_config_queues_rules_reload(monkeypatch, tmp_path):
     _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
     monkeypatch.setattr(
-        config.action_queue, "enqueue",
+        config.action_queue,
+        "enqueue",
         lambda action_type: captured.append(action_type) or {"id": "r1"},
     )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
@@ -93,32 +95,27 @@ def test_put_chat_rules_config_queues_rules_reload(monkeypatch, tmp_path):
     assert captured == ["rules_reload"]
 
 
-def test_put_llm_config_does_not_queue_reload(monkeypatch, tmp_path):
-    """llm 改动不自动 reload——reload_runtime 含探活会静默扣费（opt-in）。"""
-    _patch_config_dir(monkeypatch, tmp_path)
-    captured: list[str] = []
-    monkeypatch.setattr(
-        config.action_queue, "enqueue",
-        lambda action_type: captured.append(action_type) or {"id": "x1"},
-    )
-    monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)
-
-    result = config.put_config(
-        "llm",
-        config.ConfigBody(content="[runtime]\nenabled = true\n"),
-        _mock_request(),
-    )
-
-    assert result["effect"] == "manual_reload"
-    assert captured == []  # 不入队，避免静默探活扣费
+def test_legacy_llm_editor_returns_migration_notice(monkeypatch, tmp_path):
+    base = _patch_config_dir(monkeypatch, tmp_path)
+    for call in (
+        lambda: config.get_config("llm"),
+        lambda: config.put_config("llm", config.ConfigBody(content=""), _mock_request()),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 410
+        assert exc.value.detail["code"] == "llm_configuration_migrated"
+    assert not (base / "llm.toml").exists()
+    assert "llm" not in {entry["key"] for entry in config.list_configs()["configs"]}
 
 
-@pytest.mark.parametrize("key", ["games", "generation", "niuniu_text", "niuniu_text_safe"])
+@pytest.mark.parametrize("key", ["generation", "games", "niuniu_text", "niuniu_text_safe"])
 def test_put_restart_needed_configs_do_not_queue_reload(monkeypatch, tmp_path, key):
     _patch_config_dir(monkeypatch, tmp_path)
     captured: list[str] = []
     monkeypatch.setattr(
-        config.action_queue, "enqueue",
+        config.action_queue,
+        "enqueue",
         lambda action_type: captured.append(action_type) or {"id": "g1"},
     )
     monkeypatch.setattr(config.audit_logger, "log", lambda *args, **kwargs: None)

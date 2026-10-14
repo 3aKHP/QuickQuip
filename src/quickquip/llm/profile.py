@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
+from quickquip.llm.session import create_session_identity
+
 from dataclasses import dataclass, replace
 
 from quickquip.llm.config import LLMConfig
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
+from quickquip.llm.config_document import resolve_model_provider
+from quickquip.llm.usage import configuration_pricing_entry
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.usage import set_usage_scope
 
@@ -102,6 +107,7 @@ def _fit_recent_samples(
     return selected, len(selected) < len(recent_samples)
 
 
+@configuration_pricing_entry
 async def generate_profile(
     target_name: str,
     message_count: int,
@@ -164,8 +170,11 @@ async def generate_profile(
         raise LLMProviderError(f"Provider 未配置：{provider_id}")
     if not provider_config.enabled:
         raise LLMProviderError(f"Provider 已禁用：{provider_id}（enabled = false）")
+    provider_config = resolve_model_provider(llm_config, provider_id, model)
     client = build_provider_client(replace(provider_config, stream_enabled=False))
     response = await client.complete(LLMRequest(
+        session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=model,
         system_prompt=system_prompt,
         messages=[user_message],

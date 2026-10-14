@@ -95,8 +95,8 @@ async def test_defectify_load_error_short_circuits(llm_service, monkeypatch):
 
 
 async def test_defectify_missing_provider(llm_service):
-    # 绕过 set_chat_model 的存在性校验，直接写入一个未知 provider override
-    llm_service._update_chat_settings(1001, "group", provider_id="missing-provider")
+    # Simulate an invalid historical row outside the validated write service.
+    llm_service.store.update_group_settings(1001, provider_id="missing-provider")
 
     result = await llm_service.generate_defectify_reply(
         **_CHAT, prompt="测试内容"
@@ -221,7 +221,7 @@ async def test_turmfluch_load_error_short_circuits(llm_service, monkeypatch):
 
 
 async def test_turmfluch_missing_provider(llm_service):
-    llm_service._update_chat_settings(1001, "group", provider_id="missing-provider")
+    llm_service.store.update_group_settings(1001, provider_id="missing-provider")
 
     result = await llm_service.generate_turmfluch_reply(**_CHAT, prompt="今天好倒霉")
     assert set(result) == _EARLY_KEYS

@@ -2,7 +2,7 @@
 #
 # 格式说明：
 # - 每个文件对应一个人格，文件名任意（建议与 id 保持一致）
-# - 必填字段：id, display_name, system_prompt
+# - 必填字段：id, display_name；正文用 system_prompt 或结构化表填写
 # - 可选字段：style_prompt
 # - 自由扩展字段：可以任意添加额外的顶层键值（如 source、author、tags 等），加载器会保存到 extras 字典供外部读取
 # - 下划线开头的文件（如 _shared.toml）为保留文件，不会被识别为人格定义

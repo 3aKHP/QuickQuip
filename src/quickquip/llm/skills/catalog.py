@@ -21,7 +21,6 @@ import logging
 import os
 import re
 import stat
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -117,24 +116,14 @@ def resolve_catalog_dir(configured: str = "") -> Path:
 
 
 def read_configured_catalog_dir(config_path: Path) -> str:
-    """从 llm.toml 直读 ``[skills].catalog_dir`` 原始字符串。
-
-    文件缺失/不可读、TOML 解析失败、节或键缺失、值非字符串一律回退 ``""``
-    （即默认目录）。分工说明：运行时类型化配置由 ``llm/config.py`` 在自身
-    解析管线内读取同一键（含校验与默认值），本函数服务 Web Admin 等只需要
-    生效目录原始值、不想连带装入整套运行时配置的场景；两侧共用
-    ``resolve_catalog_dir`` 的解析语义，config.py 侧维持现状不复用本函数。
-    """
-    try:
-        with Path(config_path).open("rb") as handle:
-            data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    """Read the published Skill directory from the configuration database."""
+    from quickquip.llm.config_service import ConfigService
+    from quickquip.llm.config_document import compile_document
+    if not Path(config_path).exists():
         return ""
-    section = data.get("skills")
-    if not isinstance(section, dict):
-        return ""
-    value = section.get("catalog_dir")
-    return value if isinstance(value, str) else ""
+    snapshot = ConfigService(config_path).read("published")
+    config = compile_document(snapshot["document"], revision=snapshot["revision"])
+    return config.skills.catalog_dir
 
 
 def derive_catalog_budget_bytes(

@@ -1,4 +1,5 @@
 """group-settings 路由的交付两域字段：写入路由、默认投影与列表形状。"""
+
 from __future__ import annotations
 
 import sqlite3
@@ -19,9 +20,14 @@ def test_options_defaults_carry_both_delivery_domains(monkeypatch, tmp_path):
     import types
 
     fake_runtime = types.SimpleNamespace(
-        enabled=True, memory_enabled=True, auto_memory_enabled=False,
-        agent_delivery_intermediate_enabled=True, agent_delivery_final_enabled=False,
-        default_provider="p1", default_persona=None, history_limit=10,
+        enabled=True,
+        memory_enabled=True,
+        auto_memory_enabled=False,
+        agent_delivery_intermediate_enabled=True,
+        agent_delivery_final_enabled=False,
+        default_provider="p1",
+        default_persona=None,
+        history_limit=10,
     )
     fake_cfg = types.SimpleNamespace(
         runtime=fake_runtime,
@@ -30,8 +36,7 @@ def test_options_defaults_carry_both_delivery_domains(monkeypatch, tmp_path):
         triggers=types.SimpleNamespace(default_prefix="/", allow_prefix=True, allow_at=True),
         load_error=None,
     )
-    monkeypatch.setattr(routes, "load_llm_config", lambda path: fake_cfg)
-    monkeypatch.setattr(routes, "_LLM_TOML", tmp_path / "llm.toml")
+    monkeypatch.setattr(routes, "compile_document", lambda document, **kwargs: fake_cfg)
 
     payload = routes.get_options()
     assert payload["defaults"]["agent_delivery_intermediate_enabled"] is True
@@ -41,11 +46,11 @@ def test_options_defaults_carry_both_delivery_domains(monkeypatch, tmp_path):
 
 def test_options_defaults_empty_when_llm_toml_load_fails(monkeypatch, tmp_path):
     """读 llm.toml 抛异常时兜底空 defaults + 非空 load_error（不向上抛）。"""
-    def _boom(path):
+
+    def _boom(document, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(routes, "load_llm_config", _boom)
-    monkeypatch.setattr(routes, "_LLM_TOML", tmp_path / "llm.toml")
+    monkeypatch.setattr(routes, "compile_document", _boom)
 
     payload = routes.get_options()
     assert payload["providers"] == []
@@ -117,9 +122,11 @@ def test_list_group_settings_projects_both_delivery_domains(monkeypatch, tmp_pat
     conn.close()
 
     import quickquip.app.message_pipeline as message_pipeline
+
     monkeypatch.setattr(routes, "_DB", db_path)
-    monkeypatch.setattr(message_pipeline, "stats_tracker",
-                        type("T", (), {"to_dict": staticmethod(lambda: {})})())
+    monkeypatch.setattr(
+        message_pipeline, "stats_tracker", type("T", (), {"to_dict": staticmethod(lambda: {})})()
+    )
 
     payload = routes.list_group_settings()
     entry = next(g for g in payload["groups"] if g["group_id"] == "10001")

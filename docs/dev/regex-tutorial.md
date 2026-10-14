@@ -1,10 +1,36 @@
 # 从零开始学习正则表达式 —— 以 QuickQuip 项目为例
 
-> **面向读者：** 零基础的 Python 初学者，希望通过真实项目案例理解正则表达式。
->
-> **前置要求：** 了解基本的 Python 语法（字符串、函数调用）。
->
-> **源码指引：** 本文引用的源码路径以 `src/quickquip/` 下的主实现为准。`src/plugins/` 目录是 NoneBot2 插件入口层，只做 re-export，不包含业务逻辑。文字规则配置在 `config/chat_rules.toml`（部署级私有，权威模板为 `config/chat_rules.toml.example`，由 `src/quickquip/chat/config.py` 加载），规则匹配引擎位于 `src/quickquip/chat/text_rules.py`。
+本教程面向了解 Python 字符串和函数调用的初学者，通过 QuickQuip 的回复规则学习正则匹配、捕获和替换。
+
+项目规则在 `config/chat_rules.toml` 中配置，公开示例见 [`config/chat_rules.toml.example`](../../config/chat_rules.toml.example)，匹配引擎位于 `src/quickquip/chat/text_rules.py`。§1–§5 学习语法，§6 介绍如何把正则配置成机器人规则。
+
+### 先运行一个练习
+
+准备 Python 3.11 及以上版本，`re` 是 Python 自带模块。打开终端，进入准备存放练习的文件夹，运行 `python3 --version` 确认版本；Windows 使用已安装的 Python 时可用 `py --version`，使用 QuickQuip 懒人包时，在解压根目录用 PowerShell 执行 `.\python\python.exe --version`。
+
+用文本编辑器在这个文件夹创建 `regex_practice.py`，以 UTF-8 保存下面的完整代码。Windows 保存时确认文件名为 `.py`，而非 `.py.txt`。
+
+```python
+import re
+
+pattern = r"玩(?P<target>.+?)玩的"
+text = "玩原神玩的"
+match = re.search(pattern, text)
+print("是否匹配：", bool(match))
+if match:
+    print("匹配的文本：", match.group(0))
+    print("捕获的内容：", match.groups())
+```
+
+在同一文件夹运行 `python3 regex_practice.py`；Windows 对应使用 `py regex_practice.py`，懒人包使用 `.\python\python.exe regex_practice.py`。输出如下，其中最后一行列出捕获到的内容：
+
+```text
+是否匹配： True
+匹配的文本： 玩原神玩的
+捕获的内容： ('原神',)
+```
+
+后续练习可以替换这里的 `pattern` 和 `text` 后重新运行。形如 `r"..."` 的单行片段只展示模式，填入 `pattern =` 后使用；带 `import re` 的完整教学示例可替换整个文件。标有“源码位置”的片段用于理解项目实现，TOML 片段则按 §6 合入机器人配置。
 
 ---
 
@@ -25,12 +51,12 @@
 
 ## 1. 什么是正则表达式？
 
-**正则表达式**（Regular Expression，简称 regex 或 regexp）是一种用来描述“文本模式”的微型语言。你可以把它想象成一个**超级升级版的搜索功能**：
+**正则表达式**（Regular Expression，简称 regex 或 regexp）是一种用来描述“文本模式”的微型语言。你可以把它想象成一个能描述文本形状的搜索功能：
 
 - 普通搜索：在文本中找“猫” → 只能精确匹配“猫”这个字
 - 正则搜索：在文本中找“任意一个汉字重复两次后跟`你的`” → 能匹配“牛牛你的”“哈哈你的”“嘿嘿你的”……
 
-在 QuickQuip 项目中，正则表达式是**规则引擎的核心**。机器人收到一条群聊消息后，会依次用多个正则表达式去“试探”这条消息是否匹配某个趣味回复规则。一旦匹配成功，就提取关键信息、填入模板、发送回复。
+在 QuickQuip 项目中，正则表达式是**规则引擎的核心**。机器人收到一条群聊消息后，会依次用多个正则表达式去“试探”这条消息是否匹配某个趣味回复规则。匹配后提取信息、填入回复模板，再按规则开关、概率和限流决定是否发送。
 
 ### 一个直观的例子
 
@@ -41,11 +67,12 @@ r"玩(?P<target>.+?)玩的"
 ```
 
 它做了这些事：
+
 1. 寻找以 `玩` 开头的文本
 2. 捕获中间的内容（`原神`），并命名为 `target`
 3. 确认以 `玩的` 结尾
 
-这就是正则表达式的威力——用一条简短的规则，匹配无穷多种输入。
+同一个模式可以提取“玩星铁玩的”“玩原神玩的”等消息中的游戏名。
 
 ---
 
@@ -102,12 +129,12 @@ print(result)  # "还在打游戏"
 你会注意到项目中的正则表达式都以 `r` 开头。这是 Python 的**原始字符串**（raw string），它会阻止 Python 解释反斜杠转义：
 
 ```python
-# 不用 r：\d 会被 Python 当作转义序列（虽然 \d 恰好不是有效转义，但 \b 就会出问题）
+# 普通字符串中，用双反斜杠保留正则需要的反斜杠
 pattern1 = "\\d+"     # 需要双反斜杠
 pattern2 = r"\d+"     # ✅ 推荐写法，所见即所得
 ```
 
-**经验法则：写正则时永远用 `r"..."` 前缀。**
+**建议：** 正则模式使用 `r"..."`，让反斜杠按正则语法解释。
 
 ---
 
@@ -132,20 +159,22 @@ rate_limit_key = 'divine_arrival'
 priority       = 100
 ```
 
-`patterns` 用 TOML 字面量字符串（单引号）：字面量字符串不处理转义序列，正则里的 `\1`、`\u4e00` 会原样传给 `re` 编译——等价于 Python 的 `r'...'`。若用双引号基本字符串，转义序列 `\u4e00` 会被 TOML 解码成实际汉字（正则仍然可用），但 `\1` 是非法转义会直接报解析错误，所以含反向引用的模式必须用单引号。任意一条 pattern 命中即触发。
+`patterns` 用 TOML 字面量字符串（单引号）：字面量字符串不处理转义序列，正则里的 `\1`、`\u4e00` 会原样传给 `re` 编译——等价于 Python 的 `r'...'`。若用双引号基本字符串，转义序列 `\u4e00` 会被 TOML 解码成实际汉字（正则仍然可用），`\1` 会导致 TOML 解析失败。使用单引号字面量字符串，可以直接书写正则的反斜杠；双引号字符串则需要把反斜杠写成 `\\`。任意一条 pattern 命中，即可进入后续触发检查。
 
 ### 3.2 锚点——限定匹配位置
 
 | 符号 | 含义 | 示例 |
 |------|------|------|
 | `^` | 字符串**开头** | `^我` 匹配以“我”开头的文本 |
-| `$` | 字符串**结尾** | `的$` 匹配以“的”结尾的文本 |
+| `$` | 字符串结尾，或末尾换行符之前 | `的$` 匹配以“的”结尾的文本 |
 
-当 `^` 和 `$` 同时出现时，要求**整个字符串**完全符合模式：
+对于单行消息，`^` 与 `$` 可以限定匹配范围：
 
 ```python
-r"^我喜欢(.+)$"    # 整条消息必须是“我喜欢...”的格式
+r"^我喜欢(.+)$"    # 匹配“我喜欢...”格式的单行消息
 ```
+
+需要严格检查整条字符串时，使用 `re.fullmatch()`，见 §8.3。
 
 ### 3.3 字符类——匹配一类字符
 
@@ -153,9 +182,9 @@ r"^我喜欢(.+)$"    # 整条消息必须是“我喜欢...”的格式
 |------|------|------|
 | `[abc]` | 匹配 a、b 或 c 中的任意一个 | `[？?]` 匹配中文或英文问号 |
 | `[a-z]` | 匹配 a 到 z 的任意小写字母 | |
-| `[\u4e00-\u9fa5]` | 匹配任意一个**中文汉字** | 这是 Unicode 范围 |
+| `[\u4e00-\u9fa5]` | 匹配此 Unicode 范围内的一个汉字 | 范围说明见 §8.4 |
 | `.` | 匹配**任意字符**（换行符除外） | `玩.+?玩的` |
-| `\d` | 匹配数字 `[0-9]` | `\$(\d+)` 匹配 `$1`、`$2` |
+| `\d` | 匹配 Unicode 十进制数字；ASCII 数字用 `[0-9]` | `\$(\d+)` 匹配 `$1`、`$2` |
 | `\s` | 匹配空白字符（空格、制表符等） | `[，,]\s*` |
 
 项目中汉字范围 `[\u4e00-\u9fa5]` 出现了多次：
@@ -183,8 +212,8 @@ r"^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$"
 默认情况下，量词是**贪婪**的——尽可能多地匹配：
 
 ```python
-r"玩(.+)玩的"   # 贪婪：输入“玩A玩B玩的”会匹配到“A玩B”
-r"玩(.+?)玩的"  # 非贪婪（加 ?）：匹配到“A”就停止
+r"玩(.+)玩的"   # 输入“玩A玩的，玩B玩的”时捕获“A玩的，玩B”
+r"玩(.+?)玩的"  # 相同输入捕获“A”，在第一个“玩的”前停止
 ```
 
 在量词后加 `?` 可以切换为**非贪婪**模式。QuickQuip 中的 `play_target` 规则就使用了非贪婪匹配：
@@ -229,7 +258,7 @@ priority       = 100
 | `我神临了` | ✅ | 子串匹配 |
 | `神来了` | ❌ | 不包含“神临” |
 
-> **要点：** 引擎用 `search()` 匹配，默认搜索子串。如果要求整条消息完全等于某个模式，需要加 `^` 和 `$` 锚点。
+> **要点：** 引擎用 `search()` 搜索子串。单行规则可用 `^` 和 `$` 限定范围；严格检查整个字符串时用 `fullmatch()`。
 
 ### 4.2 锚点 + 捕获组——`like_reply` 规则
 
@@ -255,6 +284,7 @@ priority       = 60
 **关键概念——捕获组 `(...)`：**
 
 圆括号将匹配到的内容“捕获”起来，存入编号组中：
+
 - `$0` / `group(0)`：整个匹配结果
 - `$1` / `group(1)`：第一个括号捕获的内容
 - `$2` / `group(2)`：第二个括号捕获的内容……
@@ -310,9 +340,10 @@ print(m.groupdict())         # {"target": "原神"}
 
 **关键概念——非贪婪 `.+?`：**
 
-如果使用贪婪的 `.+`，面对 `玩王者玩原神玩的` 这种输入：
-- `.+`（贪婪）→ 捕获 `王者玩原神`
-- `.+?`（非贪婪）→ 捕获 `王者`（遇到第一个“玩的”就停止）
+如果使用贪婪的 `.+`，面对 `玩王者玩的，玩原神玩的` 这种输入：
+
+- `.+`（贪婪）捕获 `王者玩的，玩原神`。
+- `.+?`（非贪婪）捕获 `王者`，让后面的“玩的”匹配第一个结束位置。
 
 ### 4.4 反向引用——`double_char_ni_de` 规则
 
@@ -338,15 +369,15 @@ priority       = 80
 
 **关键概念——反向引用 `\1`：**
 
-`\1` 不是“再匹配一个汉字”，而是“匹配与第 1 个捕获组**完全相同**的内容”。这保证了两个字必须一模一样。
+`\1` 匹配与第 1 个捕获组**完全相同**的内容，因此前两个汉字必须相同。
 
 ```python
 import re
 # ✅ 匹配：两个“牛”是相同的
-re.search(r"^([\u4e00-\u9fa5])(\1)你的$", "牛牛你的")
+print(bool(re.search(r"^([\u4e00-\u9fa5])(\1)你的$", "牛牛你的")))  # True
 
 # ❌ 不匹配：“牛”和“马”不同
-re.search(r"^([\u4e00-\u9fa5])(\1)你的$", "牛马你的")
+print(bool(re.search(r"^([\u4e00-\u9fa5])(\1)你的$", "牛马你的")))  # False
 ```
 
 | 输入 | 匹配？ | `$1` | 回复 |
@@ -379,6 +410,7 @@ priority       = 75
 ```
 
 这个“三明治”结构要求：
+
 1. 开头一个汉字 A
 2. 中间至少两个字符 B（被捕获为 `$2`）
 3. 再出现相同的汉字 A
@@ -409,7 +441,7 @@ rate_limit_key = 'new_three_kingdoms'
 priority       = 87
 ```
 
-**正则分析：** 这条新三国规则展示了三种捕获方式的协同——命名捕获组 `(?P<person>...)` 提取人名，字符类选择 `(称帝|撑地)` 是一个普通捕获组（第 2 组），模板里 `{person}` 与 `$2` 混用，各自引用。
+**正则分析：** 这条新三国规则展示了三种捕获方式的协同——命名捕获组 `(?P<person>...)` 提取人名，分支 `(称帝|撑地)` 是一个普通捕获组（第 2 组），模板里 `{person}` 与 `$2` 混用，各自引用。
 
 ```
 恭喜(?P<person>.+?)可以(称帝|撑地)了
@@ -425,7 +457,7 @@ priority       = 87
 | `恭喜刘禅可以撑地了` | `刘禅` | `撑地` | `恭喜刘禅可以撑地了` |
 | `恭喜曹丕登基了` | — | — | 不匹配（缺“可以”和分支词） |
 
-> **历史教学案例（非仓库规则）：** 曾有规则使用 `(?:的)?` 这样的**非捕获组 + 可选**结构——只分组不占用捕获组编号，在多捕获组规则里避免打乱 `$1`、`$2` 的编号。需要该技巧时可参考本节把 `(称帝|撑地)` 换成 `(?:称帝|撑地)` 对比理解：前者可用 `$2` 引用，后者不占编号。
+**非捕获组** `(?:...)` 用于组织模式，捕获组编号保持原有顺序。例如 `(?:的)?` 表示可选的“的”。本节的 `(称帝|撑地)` 需要用 `$2` 生成回复，因此使用普通捕获组。
 
 ### 4.7 命名捕获组 + 黑名单过滤——`i_do` 规则
 
@@ -456,7 +488,7 @@ verb = [
 └──── ^ 开头 + 字面“我”
 ```
 
-这条规则的巧妙之处在于它结合了**正则匹配**和**程序逻辑过滤**：
+这条规则分两步判断：
 
 1. 正则部分：匹配“我” + 两个汉字 + 可选标点
 2. 程序部分：`[rules.blocked_named_groups]` 声明捕获组 `verb` 的黑名单，引擎在 `is_rule_match_allowed()`（`text_rules.py`）里检查命中的 `verb` 是否在列表中，命中则不触发、继续尝试下一条规则
@@ -469,7 +501,7 @@ verb = [
 | `我觉得` | ✅ verb=`觉得` | **在黑名单** | ❌ | 不回复 |
 | `我ABC` | ❌ | — | ❌ | 非汉字不匹配 |
 
-**模板中的 `$1`：** 虽然使用了命名捕获组 `(?P<verb>...)`，但 `$1` 仍然有效——命名捕获组同时拥有名称和数字编号。
+**模板中的 `$1`：** 命名捕获组同时拥有名称和数字编号，`(?P<verb>...)` 在这里既可以用 `{verb}` 引用，也可以用 `$1` 引用。
 
 按组号索引的黑名单（`blocked_groups`）用法相同，位置捕获组规则可用。
 
@@ -496,9 +528,12 @@ GOOD_GIRL_START_PATTERN = re.compile(r"^(.+?)是好(.+?)吗[？?]*$")
 这条正则使用 `re.compile()` 预编译，然后通过 `.fullmatch()` 调用——要求**整条消息**完全匹配模式。
 
 ```python
-# .fullmatch() = 隐含了 ^ 和 $（尽管这里已经写了）
+import re
+GOOD_GIRL_START_PATTERN = re.compile(r"^(.+?)是好(.+?)吗[？?]*$")
+# fullmatch 要求整个字符串符合模式
 start_match = GOOD_GIRL_START_PATTERN.fullmatch("小明是好学生吗？")
 lead_char = start_match.group(1)[0]  # “小”（取第一个字）
+print(lead_char)  # 小
 ```
 
 | 输入 | 匹配？ | `group(1)` | `group(2)` |
@@ -549,7 +584,7 @@ priority       = 95
 
 ### 5.1 `re.sub` 与回调函数——模板引擎的秘密
 
-QuickQuip 的回复模板中使用 `$1`、`$2` 作为占位符，而 Python 的 `str.format()` 使用 `{}`。项目通过 `re.sub()` 巧妙地桥接了两者。
+QuickQuip 的回复模板中使用 `$1`、`$2` 作为占位符，而 Python 的 `str.format()` 使用 `{}`。项目先用 `re.sub()` 替换编号捕获组，再填入命名变量。
 
 **源码位置：** `src/quickquip/chat/text_rules.py`（`replace_regex_groups` 函数）
 
@@ -600,7 +635,7 @@ context = {**base_context, **match.groupdict()}
 ```python
 import re
 m = re.search(r"玩(?P<target>.+?)玩的", "玩原神玩的")
-m.groupdict()  # {"target": "原神"}
+print(m.groupdict())  # {'target': '原神'}
 ```
 
 项目将它与基础上下文合并，使得模板中既可以用 `{target}`（来自正则），也可以用 `{sender_name}`（来自程序）。基础上下文由 `build_rule_context()` 构造，包含三个程序侧变量：
@@ -609,10 +644,10 @@ m.groupdict()  # {"target": "原神"}
 base_context = {"current_time": "2026-08-30 14:00", "user_id": "123456", "sender_name": "张三"}
 regex_context = {"target": "原神"}
 context = {**base_context, **regex_context}
-# {"current_time": ..., "user_id": ..., "sender_name": "张三", "target": "原神"}
+print(context)  # 包含 current_time、user_id、sender_name 和 target 四项
 ```
 
-### 5.3 预编译与热重载——引擎的现行选择
+### 5.3 预编译与热重载
 
 现行引擎对**全部规则正则统一预编译**：`text_rules.py` 在模块加载时把 `TEXT_REPLY_RULES` 里每条规则的 `patterns` 编译进模块级列表 `_COMPILED_PATTERNS`，匹配主循环只调用 `compiled.search(text)`：
 
@@ -628,9 +663,9 @@ def recompile_patterns() -> None:
 
 注意 `recompile_patterns()` 用切片赋值 `_COMPILED_PATTERNS[:] = ...` **原地重建**列表——持有该列表引用的调用方（匹配主循环）无需重新导入即可看到新规则，这是配置热重载能即时生效的关键（见 §6.6）。
 
-引擎之外仍有少量固定模式直接预编译为模块常量，例如 `good_girl_chain.py` 的 `GOOD_GIRL_START_PATTERN`、`chain_game.py` 的 `_REF_RE`。
+其他模块也会将固定模式预编译为模块常量，例如 `good_girl_chain.py` 的 `GOOD_GIRL_START_PATTERN`、`chain_game.py` 的 `_REF_RE`。
 
-> **性能说明：** Python 的 `re` 模块内部有缓存机制（默认缓存最近 512 个模式），即使逐条内联 `re.search` 也不会有明显性能损失；统一预编译的意义更多在于**热重载时能整体换新**，而非单纯的匹配速度。
+预编译让启动和重载时统一检查模式语法，运行时直接使用已编译对象。
 
 ---
 
@@ -638,15 +673,42 @@ def recompile_patterns() -> None:
 
 写对正则只是第一步。一条规则要真正上线，还要放进 `config/chat_rules.toml` 的完整结构里，经过限流、开关、上下文判定等一系列机制。本节是这套体系的速览，权威参考始终是 `config/chat_rules.toml.example` 的注释。
 
+### 先新增一条规则并验证
+
+以下步骤用于已经运行、能接收测试群消息的 QuickQuip。需要修改该实例配置文件的权限，并由测试群的群主、群管理员或[全局管理员](../admin/global-admins.md)执行重载。容器部署时，编辑[挂载到容器的宿主机配置目录](../admin/deployment.md)里的文件；懒人包在解压根目录操作。
+
+1. 先复制实际使用的 `config/chat_rules.toml` 作为备份，再用编辑器打开原文件。首次配置且文件尚未创建时，将 `config/chat_rules.toml.example` 复制为 `config/chat_rules.toml`。
+2. 找到已有的 `[rate_limit_rules]` 行，在它之后、下一个以 `[` 开头的配置段之前加入下面这一行。这是向现有表增加一项，保留原有桶。
+
+   ```toml
+   regex_tutorial = {global_limit = 6, user_limit = 3}
+   ```
+
+3. 在文件末尾追加下面的完整规则段，以 UTF-8 保存。`regex_tutorial` 是本次示例的名称，文件中已有同名规则或桶时换一个唯一名称，并同步修改上一步的桶名和下方的 `rate_limit_key`。
+
+   ```toml
+   [[rules]]
+   name           = 'regex_tutorial'
+   patterns       = ['^正则练习：(?P<target>.+)$']
+   reply_template = '收到：{target}'
+   rate_limit_key = 'regex_tutorial'
+   priority       = 40
+   ```
+
+4. 在测试群发送 `/reload_rules`，等待机器人回复 `chat_rules 已重载（text … / context … / chain … / rate_limit …）`。这个操作会更新该运行实例的规则配置。
+5. 在同一群发送 `正则练习：原神`，预期回复为 `收到：原神`。该桶默认触发概率为 1；同一用户每 60 秒最多触发 3 次，同一群共用最多 6 次。
+
+收到“仅管理员可执行此操作”时，请让上述管理员执行重载。重载报错或 `/rules` 中没有新规则时，检查 Bot 日志中的 TOML 与正则错误；不要重复添加 `[rate_limit_rules]` 表头。没有回复时，用 `/rules` 查看开关，已禁用则由管理员执行 `/enable regex_tutorial`；连续测试达到限流次数时等待 60 秒。出现其他回复时，按下方 `priority` 说明检查规则竞争。
+
 ### 6.1 `[[rules]]` 字段速查
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `name` | ✅ | 规则唯一名称，用于统计（`/stats`）和开关控制（`/disable` / `/enable`） |
-| `patterns` | ✅ | 触发正则列表（TOML 字面量字符串，单引号避免反斜杠转义），任意一条命中即触发 |
+| `patterns` | ✅ | 触发正则列表（TOML 字面量字符串，单引号避免反斜杠转义），任意一条命中即可进入后续检查 |
 | `reply_template` | ✅* | 回复模板（与 `reply_templates` 二选一） |
 | `rate_limit_key` | ✅ | 限流桶名称（需在 `[rate_limit_rules]` 定义，或引用系统预定义桶） |
-| `priority` | ✅ | 整数越大越优先；同一消息命中多条规则时只触发最高优先级那条 |
+| `priority` | ✅ | 整数越大越优先；同一消息有多条规则通过匹配与概率检查时，优先选择数值最高的规则 |
 | `reply_templates` | | 加权随机回复列表（见 §6.3） |
 | `blocked_named_groups` | | 命名捕获组黑名单（见 §4.7） |
 | `blocked_groups` | | 位置捕获组黑名单，按组号索引，用法同上 |
@@ -674,7 +736,7 @@ image_gen  = {global_limit = 10, user_limit = 2, scope = "global", window = 60}
 | `suppress_after_hit` | 防连发：同一规则同一群命中后，接下来 N 次命中强制沉默；默认 0 关闭 |
 | `pity_step` | 保底步进：连哑越多概率越高（`p_eff = p × (1 + 连哑数 × 步进)`）；默认 0 关闭 |
 
-要点：多条规则可共用一个桶（命中任意一条都消耗同一配额）；时区、LLM、贴吧、复读、接龙等系统规则的桶已在 `src/quickquip/chat/config.py` 预定义，TOML 里只需定义文字规则专用桶。概率与防连发/保底的完整语义（掷骰时机、按规则×群的状态隔离、状态机类桶不建议配概率、系统预定义桶覆写需整条重写等）见 `docs/admin/configuration.md` 的「自动回复概率」节。
+多条规则可共用一个桶，发送任意一条回复都消耗同一配额。时区、LLM、贴吧、复读、接龙等系统规则的桶已在 `src/quickquip/chat/config.py` 预定义，TOML 里只需定义文字规则专用桶。概率与防连发/保底的完整语义（掷骰时机、按规则×群的状态隔离、状态机类桶不建议配概率、系统预定义桶覆写需整条重写等）见[配置参考的自动回复概率一节](../admin/configuration.md#自动回复概率)。
 
 ### 6.3 `reply_templates` 加权随机回复
 
@@ -705,7 +767,7 @@ weight   = 1
 两种类型：
 
 - `regex_context`：`context_conditions` 是上下文条件正则列表，需要在最近 `context_window` 条消息（默认 5）里搜到任意一条匹配才放行。**留空视为不放行**（该规则永不触发，模块加载时会打 warning）。
-- `llm_context`：`llm_judge_prompt` 让 LLM 结合最近群聊记录判断语境，只输出 `{"trigger": true/false}` JSON；`llm_timeout`（默认 2.0s，超时视为不触发）与 `llm_cache_ttl`（按规则+群+文本缓存判定结果，默认 60s）控制成本。
+- `llm_context`：`llm_judge_prompt` 让 LLM 结合最近群聊记录判断语境，输出包含布尔值 `trigger` 的 JSON，例如 `{"trigger": true}`；`llm_timeout`（默认 2.0s，超时视为不触发）与 `llm_cache_ttl`（按规则+群+文本缓存判定结果，默认 60s）控制成本。
 
 字段细节与示例见 `config/chat_rules.toml.example` 的 `[[context_rules]]` 段（新三国梗里有 7 条实战配置可参考）。
 
@@ -749,7 +811,7 @@ rate_limit_key  = 'good_girl_chain_entry'
 ```text
 修改 toml 文件
       │
-      ├── 群里执行 /reload_rules（或 /reload_personas 重载人格）
+      ├── 群内管理员执行 /reload_rules
       └── Web Admin 在线编辑并保存规则文件
       │
       ▼
@@ -768,7 +830,7 @@ recompile_patterns()         ← text_rules.py，_COMPILED_PATTERNS[:] 原地重
 
 ## 7. 项目中的正则表达式全景索引
 
-**配置侧正则的权威清单是 `config/chat_rules.toml.example`**：共 32 条命名规则——25 条 `[[rules]]`（含 18 条新三国 `ntk_*`）+ 7 条 `[[context_rules]]`（新三国语境判定）。部署方私有规则不在公开仓库。本文不逐一复制该清单（避免双份维护漂移），只索引**引擎与代码侧**的正则：
+**配置侧的完整规则清单见 [`config/chat_rules.toml.example`](../../config/chat_rules.toml.example)**，包括普通规则、新三国语境判定与接龙示例。下面列出引擎与代码侧模式，方便继续阅读实现：
 
 | 位置 | 正则 | 用途 |
 |------|------|------|
@@ -794,7 +856,7 @@ pattern = "我\b"
 pattern = r"我\b"
 ```
 
-TOML 侧同理：patterns 要用单引号字面量字符串（`'^我喜欢(.+)$'`）。双引号基本字符串里转义序列 `\u4e00` 会被 TOML 解码成实际汉字（正则仍然可用），而 `\1` 这类反向引用是 TOML 非法转义，会直接解析失败。
+TOML 侧同理：patterns 推荐用单引号字面量字符串（`'^我喜欢(.+)$'`）。双引号基本字符串里转义序列 `\u4e00` 会被 TOML 解码成实际汉字（正则仍然可用），而 `\1` 这类反向引用是 TOML 非法转义，会直接解析失败。
 
 ### 8.2 贪婪匹配导致的意外
 
@@ -802,53 +864,53 @@ TOML 侧同理：patterns 要用单引号字面量字符串（`'^我喜欢(.+)$'
 import re
 
 # 贪婪：匹配到最后一个“玩的”
-re.search(r"玩(.+)玩的", "玩A玩B玩的").group(1)
-# 结果：“A玩B” —— 可能不是你想要的
+print(re.search(r"玩(.+)玩的", "玩A玩的，玩B玩的").group(1))
+# 结果：“A玩的，玩B”
 
 # 非贪婪：匹配到第一个“玩的”
-re.search(r"玩(.+?)玩的", "玩A玩B玩的").group(1)
-# 结果：“A” —— 通常更符合预期
+print(re.search(r"玩(.+?)玩的", "玩A玩的，玩B玩的").group(1))
+# 结果：“A”
 ```
 
 **经验法则：** 当捕获的内容“比预期多”时，检查是否应该使用非贪婪量词 `+?` 或 `*?`。
 
 ### 8.3 `search` vs `match` vs `fullmatch`
 
-| 方法 | 行为 | 等价写法 |
-|------|------|---------|
-| `re.search(p, s)` | 在字符串**任意位置**找第一个匹配 | — |
-| `re.match(p, s)` | 只从字符串**开头**匹配 | `re.search(r"^" + p, s)` |
-| `re.fullmatch(p, s)` | 要求**整个字符串**完全匹配 | `re.search(r"^" + p + r"$", s)` |
+| 方法 | 行为 |
+|------|------|
+| `re.search(p, s)` | 在字符串任意位置找第一个匹配 |
+| `re.match(p, s)` | 从字符串开头匹配 |
+| `re.fullmatch(p, s)` | 要求整个字符串完全匹配 |
+
+`$` 可以匹配末尾换行符之前，而 `fullmatch` 要求匹配实际结束位置。例如 `re.search(r"^猫$", "猫\n")` 可以命中，`re.fullmatch(r"猫", "猫\n")` 返回 `None`。锚点与匹配方法的完整语义见 [Python `re` 文档](https://docs.python.org/3.11/library/re.html)。
 
 ```python
 import re
 
 text = "我喜欢编程"
 
-re.search(r"喜欢", text)     # 匹配成功（子串匹配）
-re.match(r"喜欢", text)      # 不匹配（开头不是“喜欢”）
-re.fullmatch(r"喜欢", text)  # 不匹配（整个字符串不等于“喜欢”）
+print(bool(re.search(r"喜欢", text)))     # True：匹配成功（子串匹配）
+print(bool(re.match(r"喜欢", text)))      # False：不匹配（开头不是“喜欢”）
+print(bool(re.fullmatch(r"喜欢", text)))  # False：不匹配（整个字符串不等于“喜欢”）
 
-re.match(r"我喜欢", text)      # 匹配成功（开头匹配）
-re.fullmatch(r"我喜欢编程", text)  # 匹配成功（完全匹配）
+print(bool(re.match(r"我喜欢", text)))      # True：匹配成功（开头匹配）
+print(bool(re.fullmatch(r"我喜欢编程", text)))  # True：匹配成功（完全匹配）
 ```
 
 QuickQuip 中的选择：
+
 - TOML 规则统一走 `compiled.search()`，锚定由规则作者用 `^`、`$` 显式控制
-- `good_girl_chain.py` 使用 `re.compile().fullmatch()`，是一种等价的风格选择
+- `good_girl_chain.py` 使用 `re.compile().fullmatch()`，要求完整匹配接龙触发消息
 
 ### 8.4 Unicode 汉字范围的局限
 
-`[\u4e00-\u9fa5]` 覆盖了 CJK 统一汉字基本区（20,902 个字符），但不包括：
-- 扩展区 A（`㐀-䶿`）
-- 扩展区 B 及以后（需要代理对）
-- 兼容汉字
-
-对于群聊机器人来说，基本区已经覆盖了日常使用的绝大多数汉字，因此足够使用。STS 被动公式用的 `[一-鿿]` 是同一基本区的另一种写法。
+`[\u4e00-\u9fa5]` 包含 20,902 个码位，覆盖常用汉字。STS 模式中的 `[一-鿿]` 对应 U+4E00–U+9FFF，结束位置更靠后。这两种范围都限于 CJK 统一汉字基本区；需要匹配扩展区或兼容汉字时，应按任务扩展字符范围。Python 3 字符串可直接表示扩展区汉字。
 
 ### 8.5 调试正则的实用方法
 
-**方法 1：Python 交互式环境**
+**方法 1：在练习文件中批量测试**
+
+将下面代码保存到开篇的 `regex_practice.py`，按同样的命令运行，输出每条输入是否匹配及其捕获组。
 
 ```python
 import re
@@ -878,9 +940,10 @@ pattern = re.compile(r"""
     [！!。，,？?]*               # 可选的中英文标点
     $                           # 结尾
 """, re.VERBOSE)
+print(pattern.fullmatch("吃饭！").group("verb"))  # 吃饭
 ```
 
-`re.VERBOSE` 模式忽略空白和 `#` 注释，让复杂正则更易读。（注意：TOML 规则的 patterns 不支持 VERBOSE——需要注释时写在 TOML 的 `#` 注释行里。）
+`re.VERBOSE` 模式忽略空白和 `#` 注释，让复杂正则更易读。TOML 模式可用内联标志 `(?x)` 启用该模式；日常配置说明写在 TOML 的 `#` 注释行里。
 
 **方法 4：真机验证**
 
@@ -900,16 +963,19 @@ pattern = re.compile(r"""
 # 提示：使用 re.IGNORECASE 标志
 import re
 pattern = r"yyds"
-re.search(pattern, "这个真的是YYDS", re.IGNORECASE)
+print(bool(re.search(pattern, "这个真的是YYDS", re.IGNORECASE)))  # True
 ```
 
 <details>
 <summary>参考答案</summary>
 
 ```python
-r"(?i)yyds"
-# 或者
-re.search(r"yyds", text, re.IGNORECASE)
+import re
+
+text = "这个真的是YYDS"
+print(bool(re.search(r"(?i)yyds", text)))  # True
+# 等价写法
+print(bool(re.search(r"yyds", text, re.IGNORECASE)))  # True
 ```
 
 `(?i)` 是内联标志，等价于 `re.IGNORECASE`。
@@ -932,7 +998,7 @@ re.search(r"yyds", text, re.IGNORECASE)
 r"^(.+?)太强了[！!]*$"
 ```
 
-使用非贪婪 `.+?` 防止过度匹配，末尾允许可选感叹号。
+用 `.+?` 捕获主题，末尾允许可选感叹号。
 
 </details>
 
@@ -976,15 +1042,13 @@ rate_limit_key = 'compare_reply'
 priority       = 40
 ```
 
-别忘了限流桶要先在 `[rate_limit_rules]` 定义（或复用现成桶如 `group_meme`）。
-
-> **注意：** 纯正则无法验证“两个捕获组内容不同”这一约束。如果需要这个逻辑，可以参考 `i_do` 规则的方式，在 `blocked_named_groups` 中做程序级过滤。
+将 `compare_reply` 桶合入已有 `[rate_limit_rules]` 表，把 `[[rules]]` 段追加到规则列表。也可以让规则复用 `group_meme` 等已有桶。
 
 </details>
 
 ### 练习 5：理解执行流程（难度 ★★★★★）
 
-阅读下面的代码（摘自现行 `src/quickquip/chat/text_rules.py`，略有精简），回答问题：
+下面的教学代码保留规则匹配、捕获与优先级排序；实际引擎还会进行概率检查。阅读后回答问题：
 
 ```python
 def match_text_rule(text, user_id, sender_name, now=None):
@@ -1008,12 +1072,14 @@ def match_text_rule(text, user_id, sender_name, now=None):
             })
             break
     matched_rules.sort(key=lambda item: (-item["priority"], item["rule_index"]))
+    if not matched_rules:
+        return None
     best_match = matched_rules[0]
     best_match.pop("rule_index", None)
     return best_match
 ```
 
-**问题：** 如果一条消息同时命中了 `divine_arrival`（priority=100，配置文件中靠前）和 `ntk_nizoule`（priority=100，配置文件中靠后），最终会触发哪条规则？为什么？
+**问题：** 假设两条规则均已通过匹配和概率检查，一条消息同时命中了 `divine_arrival`（priority=100，配置文件中靠前）和 `ntk_nizoule`（priority=100，配置文件中靠后），最终会触发哪条规则？为什么？
 
 <details>
 <summary>参考答案</summary>
@@ -1055,8 +1121,8 @@ def match_text_rule(text, user_id, sender_name, now=None):
 | `{n,m}` | n 到 m 次 | `a{2,4}` 匹配 `aa`、`aaa`、`aaaa` |
 | `[abc]` | 字符类 | `[aeiou]` 匹配元音 |
 | `[^abc]` | 否定字符类 | `[^0-9]` 匹配非数字 |
-| `\d` | 数字 `[0-9]` | |
-| `\w` | 单词字符 `[a-zA-Z0-9_]` | |
+| `\d` | Unicode 十进制数字，ASCII 数字用 `[0-9]` | |
+| `\w` | Unicode 字母、数字与下划线 | |
 | `\s` | 空白字符 | |
 | `\b` | 单词边界 | |
 | `(...)` | 捕获组 | |
@@ -1069,6 +1135,6 @@ def match_text_rule(text, user_id, sender_name, now=None):
 
 > **文档信息**
 >
-> - 本文档基于 QuickQuip 项目编写，代码示例均来自项目实际源码与 `config/chat_rules.toml.example`
+> - 项目规则案例依据实际源码与 `config/chat_rules.toml.example`；入门演示与练习题为教学示例
 > - 适用 Python 版本：≥ 3.11
-> - 最后更新：2026-08-30
+> - 最后核对：2026-10-14

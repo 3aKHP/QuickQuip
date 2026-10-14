@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from quickquip.llm.agent_records import ToolSkipReason
 from quickquip.llm.generated_images import collect_generated_images
 from quickquip.llm.provider import LLMRequest
@@ -62,18 +64,8 @@ async def run_tool_call_loop(
     )
 
     if tool_discovery_enabled:
-        current_request = LLMRequest(
-            model=current_request.model,
-            system_prompt=current_request.system_prompt,
-            messages=current_request.messages,
-            temperature=current_request.temperature,
-            max_output_tokens=current_request.max_output_tokens,
-            thinking_budget=current_request.thinking_budget,
-            reasoning_effort=current_request.reasoning_effort,
-            tools=discovery.loaded_specs(current_request.tools),
-            allow_tool_calls=current_request.allow_tool_calls,
-            tool_choice=current_request.tool_choice,
-            builtin_search=current_request.builtin_search,
+        current_request = replace(
+            current_request, tools=discovery.loaded_specs(current_request.tools),
         )
 
     for round_index in range(search_failsafe_max_rounds + 1):
@@ -83,6 +75,8 @@ async def run_tool_call_loop(
             request_guard(current_request)
         # 上游 429/5xx 的退避重试由 provider client 的 complete() 内建
         response = await client.complete(current_request)
+        if request_guard is not None:
+            request_guard(current_request)
         # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发
         # 通道：与工具路径同上限同语义，后续调用失败不丢弃已产出图片。
         collect_generated_images(response, context)
@@ -253,6 +247,8 @@ async def run_tool_call_loop(
         tool_results: list[LLMToolResult] = []
         result_pipeline.begin_round()
         for call in selected_calls:
+            if request_guard is not None:
+                request_guard(current_request)
             execution_id = execution_ids.get(call.id)
             if turn_recorder is not None and execution_id is not None:
                 turn_recorder.on_tool_started(execution_id)
@@ -272,7 +268,11 @@ async def run_tool_call_loop(
                     result = blocked_result
                 else:
                     result = await tool_registry.execute(call, context)
+                    if request_guard is not None:
+                        request_guard(current_request)
                     result = await result_pipeline.process_result(call, result)
+            if request_guard is not None:
+                request_guard(current_request)
             tool_results.append(result)
             if turn_recorder is not None and execution_id is not None:
                 turn_recorder.on_tool_finished(execution_id, result)
@@ -306,18 +306,10 @@ async def run_tool_call_loop(
             for item in tool_results
         ]
 
-        current_request = LLMRequest(
-            model=current_request.model,
-            system_prompt=current_request.system_prompt,
+        current_request = replace(
+            current_request,
             messages=[*current_request.messages, assistant_message, *tool_messages],
-            temperature=current_request.temperature,
-            max_output_tokens=current_request.max_output_tokens,
-            thinking_budget=current_request.thinking_budget,
-            reasoning_effort=current_request.reasoning_effort,
             tools=discovery.loaded_specs(current_request.tools),
-            allow_tool_calls=current_request.allow_tool_calls,
-            tool_choice=current_request.tool_choice,
-            builtin_search=current_request.builtin_search,
         )
 
     raise RuntimeError("工具调用循环未按预期结束")

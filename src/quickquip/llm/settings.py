@@ -37,6 +37,14 @@ def resolve_group_settings(store, config, group_id: int | str) -> ResolvedGroupS
     provider_id = overrides.provider_id or config.runtime.default_provider or ""
     provider = config.providers.get(provider_id)
     model = overrides.model or (provider.default_model if provider else "")
+    if provider is not None:
+        model = provider.aliases.get(model, model)
+    if provider is not None and model:
+        from quickquip.llm.config_document import resolve_model_provider
+        try:
+            provider = resolve_model_provider(config, provider_id, model)
+        except ValueError:
+            pass
 
     return ResolvedGroupSettings(
         enabled=overrides.enabled if overrides.enabled is not None else config.runtime.enabled,

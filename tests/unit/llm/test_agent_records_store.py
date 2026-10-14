@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier, BrokenBarrierError
 
@@ -163,7 +164,45 @@ def test_migration_is_idempotent(tmp_path: Path):
         count = conn.execute("SELECT COUNT(*) c FROM agent_loops").fetchone()["c"]
         versions = conn.execute("SELECT COUNT(*) c FROM agent_schema_migrations").fetchone()["c"]
     assert count == 4
-    assert versions == 1
+    assert versions == 4
+
+
+@pytest.mark.parametrize("old_version", [1, 2])
+def test_upgrade_detaches_missing_messages_and_preserves_turn_evidence(tmp_path, old_version):
+    store = LLMStore(tmp_path / "llm.db")
+    handle = _begin(store)
+    missing = store.commit_turn(handle, _response(native={"evidence": "preserved"}),
+                                _declarations(1), [])
+    retained = store.commit_turn(handle, _response("retained message"), [], [])
+    identity, _ = store.get_or_create_chat_session("1001")
+    with store._connect() as conn:
+        # Recreate the pre-fix schema, then delete history through its old behavior.
+        conn.execute("DROP TRIGGER IF EXISTS detach_agent_turn_message")
+        conn.execute("DELETE FROM agent_schema_migrations WHERE version > ?", (old_version,))
+        if old_version == 1:
+            for table in ("agent_scopes", "session_archives"):
+                for column in ("session_id", "session_created_at"):
+                    conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        conn.execute("DELETE FROM conversation_messages WHERE id = ?", (missing.message_row_id,))
+        native_before = conn.execute("SELECT native_state_json FROM agent_turns WHERE turn_id=?",
+                                     (missing.turn_id,)).fetchone()[0]
+
+    upgraded = LLMStore(store.path)
+    assert not upgraded._unavailable
+    assert upgraded.count_conversation_messages("1001") == 2  # user + retained assistant
+    with upgraded._connect() as conn:
+        rows = conn.execute("SELECT message_row_id,native_state_json FROM agent_turns "
+                            "WHERE loop_id=? ORDER BY turn_index", (handle.loop_id,)).fetchall()
+        assert rows[0]["message_row_id"] is None
+        assert rows[0]["native_state_json"] == native_before
+        assert rows[1]["message_row_id"] == retained.message_row_id
+        assert conn.execute("SELECT tool_name FROM agent_tool_executions "
+                            "WHERE turn_id=?", (missing.turn_id,)).fetchone()[0] == "get_identity"
+    if old_version == 2:
+        assert upgraded.get_chat_session("1001") == identity
+    reopened = LLMStore(store.path)
+    assert not reopened._unavailable
+    assert reopened.count_conversation_messages("1001") == 2
 
 
 def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monkeypatch):
@@ -235,7 +274,7 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
             == original_rows
         )
         assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 4
-        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 4
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
@@ -392,6 +431,30 @@ def test_not_executed_terminal_with_reason(store: LLMStore):
         ).fetchone()
     assert row["status"] == "not_executed"
     assert json.loads(row["result_json"])["detail"] == "limit"
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_archiving_running_tool_rejects_late_result_in_closed_loop(store: LLMStore, resume):
+    store.get_or_create_chat_session("private:2002")
+    handle = _begin(store, "private:2002")
+    declaration = _declarations(1)[0]
+    store.commit_turn(handle, _response("tool started"), [declaration], [])
+    store.mark_tool_started(handle, declaration.execution_id)
+    store.end_private_chat_session("2002", save=True, persona_id=None, preset="")
+    if resume:
+        store.resume_private_chat_session("2002", 1)
+    with pytest.raises(ScopeGenerationMismatch):
+        store.finish_tool(
+            handle, declaration.execution_id,
+            ToolResultRecord(content="late result", is_error=False, original_bytes=11),
+        )
+    with store._connect() as conn:
+        row = conn.execute(
+            "SELECT status, result_json FROM agent_tool_executions WHERE execution_id = ?",
+            (declaration.execution_id,),
+        ).fetchone()
+    assert row["status"] == "indeterminate"
+    assert row["result_json"] is None
 
 
 # ── 交付 ─────────────────────────────────────────────────────────
@@ -623,7 +686,9 @@ def test_prune_closed_loops_by_age_and_count(store: LLMStore):
     assert [row["content"] for row in rows] == ["问2", "问3"]
 
 
-def test_prune_respects_active_epoch_floor(store: LLMStore):
+@pytest.mark.parametrize("limit", ["count", "bytes", "age"])
+@pytest.mark.parametrize("tied_times", [False, True])
+def test_prune_respects_active_epoch_floor(store: LLMStore, limit, tied_times):
     handles = []
     for i in range(4):
         handle = store.begin_loop("1001", 0, TriggerKind.GROUP_DIRECT, _user_payload(f"问{i}"))
@@ -635,13 +700,33 @@ def test_prune_respects_active_epoch_floor(store: LLMStore):
         handles.append(handle)
     # 活动纪元从第 3 个 Loop 开始：最旧两个可删，其后受保护。
     floor = handles[2]
+    closed_at = datetime.now(timezone.utc)
+    if limit == "age":
+        closed_at -= timedelta(days=2)
     with store._connect() as conn:
+        for index, handle in enumerate(handles):
+            timestamp = closed_at + timedelta(seconds=0 if tied_times else index)
+            conn.execute(
+                "UPDATE agent_loops SET closed_at=? WHERE loop_id=?",
+                (timestamp.isoformat(), handle.loop_id),
+            )
         anchor = conn.execute(
             "SELECT anchor_row_id FROM agent_loops WHERE loop_id=?", (floor.loop_id,)
         ).fetchone()["anchor_row_id"]
+        active_bytes = conn.execute(
+            "SELECT SUM(record_bytes) FROM agent_loops WHERE anchor_row_id>=?",
+            (anchor,),
+        ).fetchone()[0]
     report = store.prune_closed_loops(
         "1001", active_anchors=[anchor],
-        policy=RetentionPolicy(retention_days=30, max_loops=1, max_bytes=64 * 1024 * 1024),
+        policy=RetentionPolicy(
+            retention_days=1 if limit == "age" else 30,
+            max_loops=1 if limit == "count" else 100,
+            max_bytes=active_bytes - 1 if limit == "bytes" else 64 * 1024 * 1024,
+        ),
     )
-    assert len(report.deleted_loop_ids) == 2
-    assert len(store.load_closed_loops("1001")) == 2
+    assert set(report.deleted_loop_ids) == {h.loop_id for h in handles[:2]}
+    assert {loop.loop_id for loop in store.load_closed_loops("1001")} == {
+        h.loop_id for h in handles[2:]
+    }
+    assert report.blocked_active_anchors == (() if limit == "age" else (anchor,))

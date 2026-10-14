@@ -1,0 +1,80 @@
+# Claude Code 2.1.296 Linux CLI; API key and attribution disabled.
+# Fixed Header/Body baseline; business instructions and tools remain application-owned.
+format_version = 1
+id = "claude-code"
+label = "Claude Code (2.1.296, Linux CLI)"
+
+[protocols.claude]
+stream_accept = "preserve"
+header_order = ["Accept", "Authorization", "x-api-key", "Content-Type", "User-Agent", "X-Claude-Code-Session-Id", "X-Stainless-Arch", "X-Stainless-Lang", "X-Stainless-OS", "X-Stainless-Package-Version", "X-Stainless-Retry-Count", "X-Stainless-Runtime", "X-Stainless-Runtime-Version", "X-Stainless-Timeout", "anthropic-beta", "anthropic-dangerous-direct-browser-access", "anthropic-version", "x-app", "Connection", "Host", "Accept-Encoding", "Content-Length"]
+
+[protocols.claude.headers]
+accept = "application/json"
+accept-encoding = "gzip, deflate, br, zstd"
+connection = "keep-alive"
+user-agent = "claude-cli/2.1.296 (external, cli)"
+anthropic-dangerous-direct-browser-access = "true"
+anthropic-version = "2023-06-01"
+x-app = "cli"
+x-stainless-arch = "x64"
+x-stainless-lang = "js"
+x-stainless-os = "Linux"
+x-stainless-package-version = "0.128.0"
+x-stainless-runtime = "node"
+x-stainless-runtime-version = "v26.3.0"
+
+[protocols.claude.bindings]
+X-Claude-Code-Session-Id = "business_session_id"
+X-Stainless-Timeout = "timeout_seconds"
+X-Stainless-Retry-Count = "retry_count"
+
+[protocols.claude.body]
+strategy = "claude-code-messages"
+identity_text = "You are Claude Code, Anthropic's official CLI for Claude."
+metadata_user_id = true
+field_order = ["model", "messages", "system", "tools", "metadata", "max_tokens", "temperature", "thinking", "context_management", "output_config", "stream"]
+context_management = { edits = [{ type = "clear_thinking_20251015", keep = "all" }] }
+cache_system = true
+cache_tools = false
+cache_message_tail = true
+
+[[protocols.claude.beta_rules]]
+name = "claude-code-20250219"
+when = "always"
+
+[[protocols.claude.beta_rules]]
+name = "context-1m-2025-08-07"
+when = "context_window_above"
+threshold = 200000
+
+[[protocols.claude.beta_rules]]
+name = "interleaved-thinking-2025-05-14"
+when = "always"
+
+[[protocols.claude.beta_rules]]
+name = "thinking-token-count-2026-05-13"
+when = "tools_thinking_or_effort"
+
+[[protocols.claude.beta_rules]]
+name = "context-management-2025-06-27"
+when = "always"
+
+[[protocols.claude.beta_rules]]
+name = "prompt-caching-scope-2026-01-05"
+when = "always"
+
+[[protocols.claude.beta_rules]]
+name = "mid-conversation-system-2026-04-07"
+when = "tools_thinking_or_effort"
+
+[[protocols.claude.beta_rules]]
+name = "mid-conversation-tool-changes-2026-07-01"
+when = "tools_thinking_or_effort"
+
+[[protocols.claude.beta_rules]]
+name = "effort-2025-11-24"
+when = "effort"
+
+[[protocols.claude.beta_rules]]
+name = "structured-outputs-2025-12-15"
+when = "json_schema"

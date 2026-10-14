@@ -107,39 +107,16 @@ def test_dashboard_status_file_branch_defaults_missing_era_fields(tmp_path, monk
     assert server["negotiated_protocol_version"] == ""
 
 
-def test_dashboard_runtime_branch_exposes_era_tag(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from quickquip.llm.mcp.types import MCPServerStatus
-
+def test_dashboard_never_uses_web_local_runtime(tmp_path, monkeypatch, config_service):
     import quickquip.app.message_pipeline as message_pipeline
 
     monkeypatch.setattr(mcp_dashboard, "_STATUS_PATH", tmp_path / "missing.json")
-
-    status = MCPServerStatus(
-        id="runtime-server",
-        transport="http",
-        enabled=True,
-        connected=True,
-        tool_count=3,
-        negotiation="modern",
-        era="modern",
-    )
-
-    manager = SimpleNamespace(
-        get_statuses=lambda: [status],
-        bindings={},
-    )
-    monkeypatch.setattr(message_pipeline, "_ensure_llm_bindings", lambda: None)
     monkeypatch.setattr(
-        message_pipeline, "get_llm_service", lambda: SimpleNamespace(mcp_manager=manager)
+        message_pipeline,
+        "get_llm_service",
+        lambda: (_ for _ in ()).throw(AssertionError("Web runtime consulted")),
     )
-
-    server = mcp_dashboard.get_mcp_dashboard()["servers"][0]
-
-    assert server["id"] == "runtime-server"
-    assert server["runtime_available"] is True
-    assert server["era_tag"] == "/modern"
+    assert mcp_dashboard.get_mcp_dashboard() == {"servers": []}
 
 
 def test_dashboard_config_only_branch_era_tag_empty(tmp_path, monkeypatch):
@@ -159,10 +136,10 @@ def test_dashboard_config_only_branch_era_tag_empty(tmp_path, monkeypatch):
         id="cfg-server", transport="stdio", enabled=True, negotiation="modern"
     )
 
-    def _fake_load(_path):
+    def _fake_load(document, **kwargs):
         return SimpleNamespace(load_error=None, mcp=SimpleNamespace(servers=[server_entry]))
 
-    monkeypatch.setattr(mcp_dashboard, "load_llm_config", _fake_load)
+    monkeypatch.setattr(mcp_dashboard, "compile_document", _fake_load)
 
     server = mcp_dashboard.get_mcp_dashboard()["servers"][0]
 

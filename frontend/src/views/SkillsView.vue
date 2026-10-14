@@ -5,6 +5,9 @@
         <UiInfoTip text="Skill 每次群聊轮次现扫生效，保存文件后无需重启。scripts/ 下的脚本以 bot 进程权限在本机运行，编辑与安装前请确认来源可信。" />
       </template>
       <template #actions>
+        <router-link to="/llm-config?section=tools" custom v-slot="{ navigate }">
+          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">运行时设置</UiButton>
+        </router-link>
         <UiButton icon="RefreshCw" :disabled="listing" @click="onRefresh">刷新</UiButton>
         <UiButton icon="Plus" @click="startCreate">新建</UiButton>
         <UiButton variant="primary" icon="Upload" @click="installOpen = true">安装</UiButton>

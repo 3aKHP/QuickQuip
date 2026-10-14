@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
+from quickquip.llm.session import create_session_identity
+
 import logging
 from collections.abc import Callable
 from dataclasses import replace
@@ -17,10 +20,11 @@ from quickquip.llm.config import (
     ProviderConfig,
 )
 from quickquip.llm.context_windows import resolve_context_window
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.response_acceptance import is_response_accepted
 from quickquip.llm.tools import LLMConversationMessage
-from quickquip.llm.usage import new_usage_run_id, set_usage_scope
+from quickquip.llm.usage import configuration_pricing_entry, new_usage_run_id, set_usage_scope
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +153,10 @@ def _resolve_cascade(
         if not provider_config.enabled:
             logger.info("summary cascade: provider %r disabled, skipping", provider_id)
             continue
+        try:
+            provider_config = resolve_model_provider(llm_config, provider_id, model)
+        except ValueError:
+            continue
         resolved.append((provider_id, model, provider_config))
     return resolved
 
@@ -195,6 +203,8 @@ async def _run_summary_cascade(
     hops: list[str] = []
     last_error: Exception | None = None
 
+    session = create_session_identity()
+    epoch_id = create_epoch_id()
     for hop, (provider_id, model, provider_config) in enumerate(resolved, start=1):
         char_budget, output_cap = _hop_limits(provider_config, model, max_output_tokens)
         chat_log, was_truncated = _truncate_chat_log(raw_log, char_budget)
@@ -203,6 +213,8 @@ async def _run_summary_cascade(
         )
         effective_config = replace(provider_config, stream_enabled=False)
         req = LLMRequest(
+            session=session,
+            epoch_id=epoch_id,
             model=model,
             system_prompt=system_prompt,
             messages=[user_message],
@@ -266,6 +278,7 @@ async def _run_summary_cascade(
     raise RuntimeError(f"所有模型均调用失败，最后错误：{last_error}")
 
 
+@configuration_pricing_entry
 async def generate_daily_summary(
     messages: list[dict],
     persona: PersonaConfig,
@@ -376,6 +389,7 @@ def _build_period_system_prompt(
     return "\n\n".join(parts)
 
 
+@configuration_pricing_entry
 async def generate_period_report(
     messages: list[dict],
     persona: PersonaConfig,

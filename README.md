@@ -22,14 +22,16 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **STS 公式化回复** — 《杀戮尖塔》梗能力：消息命中“xxx了”时按卡牌名公式回复，`/turmfluch` 一次性生成诅咒文案（v1.10）。详见 [docs/dev/sts-formula.md](docs/dev/sts-formula.md)
 - **LLM 扩展** — 兼容 OpenAI / Claude / Gemini / OpenAI Responses 四类协议，按群切换 provider/model/persona，支持工具调用、MCP 桥接、Skill 扩展包（部署者安装、AI 遇匹配请求自主激活）、图片理解、语音消息转写、联网搜索、故障机器人转写。详见 [docs/dev/llm-module.md](docs/dev/llm-module.md)
 - **思考档位控制** — `/llm effort` 按群或私聊切换思考档位，四协议统一适配；Web Admin 支持 provider 默认档与会话覆盖配置
+- **请求身份与客户端 Profile** — 会话身份跨轮和重启延续，四协议采用可编辑的客户端请求模板，支持渠道选择与本地覆盖；HTTP 调用追踪帮助关联请求。详见 [请求指纹 Profile](docs/admin/client-fingerprints.md)
 - **群聊引用与艾特** — LLM 回复引用触发消息，`@名字` 可解析为真实艾特；按群开关、身份唯一解析与通知冷却共同控制互动
+- **回复分段** — 可按群或私聊开启工具调用中的过程回复，以及最终长回复的自然段拆分；用 `/llm delivery` 设置发送方式
 - **低频唤醒** — 按群配置唤醒延长、兴趣话题、相关性/答疑判定、无聊冒泡和兜底概率，所有入口受规则开关与限流保护
 - **LLM 用量/成本看板** — 全链路 token 计量与成本估算，按 provider/功能/模型/群/人格五维归因，Web Admin 提供用量面板与定价状态展示
 - **每日播报与总结** — 按群开启早/中/晚报和每日 2000 字小作文，模型级联失败自动降级
-- **群周报与月报** — 每周/每月自动生成上一周期的群聊回顾，分天采样覆盖全周期，热词趋势与群内大事记一目了然
+- **群周报与月报** — 每周/每月自动生成上一周期的群聊回顾，周报压缩全周期聊天记录，月报按周分配输入预算，提炼热词趋势与群内大事记
 - **多贴吧随机搬运** — 多来源帖子池维护，支持随机抽取和定时同步
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具）；模型在对话中生成的图片也会直接送达群聊。统一收口 `config/generation.toml`
-- **Web 管理后台** — Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
+- **Web 管理后台** — LLM 配置数据库与分区工作台，草稿独立应用、保存时间与备注标记、Bot 实际加载状态，以及按渠道管理的模型价格；Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。全部文档索引见 [docs/index.md](docs/index.md)。
@@ -55,16 +57,28 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 2. **创建虚拟环境并安装依赖**
 
+   Linux／macOS（Bash）：
+
    ```bash
    python -m venv .venv
-   # Windows: .venv\Scripts\activate  |  Linux/macOS: source .venv/bin/activate
+   source .venv/bin/activate
    pip install -r requirements.txt
-   pip install -e .     # 可编辑安装（src layout 必须）
+   pip install -e .
    ```
+
+   Windows（PowerShell）：
+
+   ```powershell
+   python -m venv .venv
+   .venv/Scripts/python.exe -m pip install -r requirements.txt
+   .venv/Scripts/python.exe -m pip install -e .
+   ```
+
+   后续示例使用 `python`。Windows 下可使用 `.venv/Scripts/python.exe`，或先激活 `.venv/Scripts/Activate.ps1`。
 
 3. **配置环境变量**
 
-   在项目根目录创建 `.env` 文件，参考 NoneBot2 文档配置连接参数：
+   参考 [`.env.example`](.env.example) 在项目根目录创建 `.env`，按[部署指南](docs/admin/deployment.md)配置 OneBot 连接。以下是本机运行的基础配置片段：
 
    ```env
    DRIVER=~fastapi+~websockets
@@ -85,9 +99,9 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    默认暴露到 `http://127.0.0.1:8888`，开启 JSON 搜索接口。
 
-5. **可选：启用 LLM**
+5. **可选：准备 LLM 人格与密钥**
 
-   复制 `config/llm.toml.example` 为 `config/llm.toml`，复制 `config/personas.example/` 为 `config/personas/`，填入中转 URL、模型列表和人格定义。在 `.env` 中配置相应 API key：
+   首次安装将 `config/personas.example/` 复制为 `config/personas/`，可以先使用其中的默认人格。在 `.env` 中填写所选渠道的 API key；下面列出常用变量名，按选用的渠道填写：
 
    ```env
    OPENAI_API_KEY=your_key
@@ -96,11 +110,11 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    DEEPSEEK_API_KEY=your_key
    ```
 
-   完整配置参考见 [docs/admin/configuration.md](docs/admin/configuration.md)。
+   运行 `python -m quickquip.llm.config_cli init` 初始化 `data/llm_config.db`；已有 `config/llm.toml` 时会执行一次迁移并保留原文件和资产备份。首次启用在第 11 步进行，此时后台和 Bot 都已运行。旧配置升级与 JSON 导入见 [LLM 配置管理](docs/admin/llm-configuration.md)。
 
 6. **可选：启用图片/语音/音乐生成和语音识别**
 
-   复制 `config/generation.toml.example` 为 `config/generation.toml`，按注释填入 provider 和模型。不存在时图片部分回退读取 `llm.toml` 旧版配置。
+   复制 `config/generation.toml.example` 为 `config/generation.toml`，按注释填入 provider 和模型。旧多模态配置在首次迁移时提取到此文件；文件缺失时使用关闭状态的默认配置。
 
 7. **可选：启用群聊唤醒**
 
@@ -140,15 +154,25 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
    访问 `http://127.0.0.1:5104/ops/`。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)。
 
+   保持后台进程运行，另开一个终端执行下一步；新终端也需使用第 2 步的虚拟环境，并进入项目根目录。
+
 10. **启动机器人**
 
    ```bash
    python bot.py
    ```
 
+   保持此终端运行。在测试群发送“早安”，收到规则回复后即可继续设置 LLM。
+
+11. **可选：在后台启用 LLM 并验证第一条回复**
+
+    用根 `.env` 中的 `WEB_ADMIN_PASSWORD` 登录后台，按[首次启用 LLM](docs/admin/llm-configuration.md#首次启用-llm)添加一个渠道和模型、选择默认人格，保存草稿并应用到 Bot。等待状态条显示 Bot 已加载刚发布的版本，再由群管理员发送 `/llm on`，随后发送 `/ai 请回复“测试成功”`。收到 AI 回答即完成首次配置；该提问会调用所选模型 API，按渠道计费。
+
 ### Windows 懒人包
 
-Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
+Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停，LLM 数据库由初始化／迁移流程创建；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
+
+保持启动窗口运行，浏览器打开 `http://127.0.0.1:5104/ops/`，输入刚设置的管理口令。启用 AI 对话时接着按[首次启用 LLM](docs/admin/llm-configuration.md#首次启用-llm)操作。懒人包中的 Python 命令使用解压目录内的 `python\python.exe`。
 
 首次运行注意：
 

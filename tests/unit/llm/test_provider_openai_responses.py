@@ -47,6 +47,7 @@ from tests.fixtures.stream_chunks import (
     RESPONSES_TEXT_CHUNKS,
     RESPONSES_TOOL_CHUNKS,
 )
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 def _config(**overrides) -> ProviderConfig:
@@ -59,7 +60,7 @@ def _config(**overrides) -> ProviderConfig:
         models=["gpt-test"],
     )
     kwargs.update(overrides)
-    return ProviderConfig(**kwargs)
+    return protocol_only_config(ProviderConfig(**kwargs))
 
 
 def _request(messages: list[LLMConversationMessage], **overrides) -> LLMRequest:
@@ -939,7 +940,7 @@ def test_stream_relay_reconcile_mismatch_fail_closed():
 
 
 def test_reasoning_effort_relay_profile_mapping():
-    """AGW/CPA 中转五档恒等；ultra 经降档规则落 max（2026-10-03 实测网关拒绝 ultra）。"""
+    """Codex 形态中转五档恒等；ultra 经降档规则落 max（2026-10-03 实测拒绝 ultra）。"""
     for tier in ("low", "medium", "high", "xhigh", "max"):
         control = reasoning_control(
             _config(reasoning_effort=tier), resolve_profile("codex-http-relay")

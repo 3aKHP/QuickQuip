@@ -9,7 +9,7 @@
     <UiCard padding="md" shadow="sm" class="section">
       <h3 class="st section-title">群组</h3>
       <div class="lookup">
-        <select v-model="selectedGroup" @change="loadQuotes" class="group-select">
+        <select v-model="selectedGroup" @change="loadQuotes()" class="group-select">
           <option value="">请选择群组</option>
           <option v-for="g in groups" :key="g.group_id" :value="g.group_id">
             {{ g.group_id }}（{{ g.count }} 条）

@@ -9,7 +9,7 @@
 | 路径 | 是否公开 | 权威性 | 内容 |
 |---|---|---|---|
 | `docs/dev/` | 追踪并公开 | 当前开发与运行时契约 | 架构、工程规范、实现说明、测试与发布流程 |
-| 本地 gitignore 工作区 | 不公开 | 仅作辅助上下文 | 计划、草稿、私有记录、沙箱、执行证据和历史归档 |
+| 本地已忽略工作区 | 不公开 | 辅助上下文 | 计划、草稿、私有记录、沙箱、执行证据和历史归档 |
 
 公开开发文档不得依赖本地工作区中的任何文件。私有计划形成长期规则或已发布行为时，应提炼为本目录或相应的用户/管理员文档，并移除本机路径、私有拓扑、账号、token 和其他敏感内容。
 
@@ -17,14 +17,19 @@
 
 | 文档 | 职责 |
 |---|---|
+| [`documenting.md`](documenting.md) | 全仓公开文档规范：读者与职责、事实与证据、文风、操作示例、格式、维护与审查 |
 | [`architecture.md`](architecture.md) | 目录结构、分层、依赖方向、组合根和数据/部署边界 |
 | [`style.md`](style.md) | 源码结构、可维护性、类型与输入边界、错误与状态、测试和评审问题 |
 | [`testing.md`](testing.md) | 测试纪律、准入与断言依据、典型反模式、合并删除和验证 |
 | [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、发布和 hotfix 流程 |
 | [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`record-identities.md`](record-identities.md) | 记录正文、共享身份、引用索引与兼容读取契约 |
+| [`llm-configuration-api.md`](llm-configuration-api.md) | LLM 配置修订、结构化交换、参数 metadata 与控制任务的 API 契约 |
+| [`llm-configuration-frontend.md`](llm-configuration-frontend.md) | LLM 配置前端交付契约、用户操作、字段语义、运行状态与验收场景 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |
 | [`mcp-integration.md`](mcp-integration.md) | MCP 接入、协议协商、工具结果和安全边界 |
+| [`mcp-tutorial.md`](mcp-tutorial.md) | MCP 概念、四种 transport 与首次接入练习导航 |
+| [`skill-tutorial.md`](skill-tutorial.md) | Skill 安装、无脚本编写与完整脚本实战 |
 | [`tool-discovery.md`](tool-discovery.md) | LLM 工具发现的策略、模式、限制和测试 |
 | [`game-framework.md`](game-framework.md) | 游戏注册、经济系统和扩展框架 |
 | [`regex-tutorial.md`](regex-tutorial.md) | 零基础正则教学（以项目规则为实例）与现行规则体系速览 |
@@ -34,10 +39,4 @@
 
 ## 维护规则
 
-- 新规则写入拥有该决策的文档；只有形成独立、长期的契约时才新建文件。
-- 架构边界、协议行为、配置语义或持久化契约变更时，在同一变更中更新对应文档。
-- 公共文档使用仓库相对链接，不出现私有工作区路径、真实 `prod/` 内容、本机绝对路径、凭据或未经验证的平台结论。
-- Markdown 段落和列表项保持自然换行；仅在 Markdown 结构或语义需要时手动换行。
-- 中文散文使用弯引号（“” ‘’）；行内 code 里的命令示例保持 ASCII 直引号（`--preset` 等参数解析器只认直引号）。
-- 交付前按变化范围搜索过时术语、配置键、命令和路径，并如实记录无法执行的验证。
-- 修改 self-docs 同步源内的公开文档（`docs/` 各页面、根目录公开 Markdown、AI 协作配置与 GitHub 模板等；权威名单见 `scripts/ci/sync_self_docs_references.py`）时，在同一变更中运行 `python scripts/ci/sync_self_docs_references.py` 并提交重新生成的 `skills.example/self-docs/references/`（预置 self-docs Skill 随仓库分发的文档副本）；CI 契约测试会强制这一同步，未提交的变更会被判红。
+撰写、维护和审查本目录及全仓公开文档时，遵循 [`documenting.md`](documenting.md)。文档职责、表达方式、格式、示例验证、公开信息保护与 self-docs 同步要求统一由该规范维护。

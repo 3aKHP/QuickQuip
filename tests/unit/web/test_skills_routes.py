@@ -934,27 +934,18 @@ def test_github_inspect_invalid_url_422(catalog_dir, stash_dir):
 # ── 生效目录解析 ────────────────────────────────────────────────────
 
 
-def test_effective_catalog_dir_reads_llm_toml(monkeypatch, tmp_path):
+def test_effective_catalog_dir_reads_published_database(config_service, tmp_path):
     custom = tmp_path / "custom-skills"
-    config = tmp_path / "llm.toml"
-    config.write_text(f'[skills]\ncatalog_dir = "{custom}"\n', encoding="utf-8")
-    monkeypatch.setattr(skills, "_LLM_CONFIG_PATH", config)
-
+    draft = config_service.read()
+    draft["document"]["settings"]["skills"]["catalog_dir"] = str(custom)
+    config_service.replace(draft["document"], 1)
+    assert _effective_catalog_dir() == SKILLS_DIR
+    submitted = config_service.apply(2, "skills")
+    claimed = config_service.tasks.claim("bot")
+    assert claimed["id"] == submitted["id"]
+    config_service.publish(claimed["id"], claimed["claim_token"])
     assert _effective_catalog_dir() == custom
 
 
-def test_effective_catalog_dir_fallbacks(monkeypatch, tmp_path):
-    # 文件缺失
-    monkeypatch.setattr(skills, "_LLM_CONFIG_PATH", tmp_path / "missing.toml")
-    assert _effective_catalog_dir() == SKILLS_DIR
-    # 键缺失
-    config = tmp_path / "llm.toml"
-    config.write_text("[runtime]\nenabled = true\n", encoding="utf-8")
-    monkeypatch.setattr(skills, "_LLM_CONFIG_PATH", config)
-    assert _effective_catalog_dir() == SKILLS_DIR
-    # 非字符串
-    config.write_text("[skills]\ncatalog_dir = 123\n", encoding="utf-8")
-    assert _effective_catalog_dir() == SKILLS_DIR
-    # TOML 解析失败
-    config.write_text("not [valid toml", encoding="utf-8")
+def test_effective_catalog_dir_defaults(config_service):
     assert _effective_catalog_dir() == SKILLS_DIR

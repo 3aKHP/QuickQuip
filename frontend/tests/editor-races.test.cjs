@@ -85,43 +85,9 @@ test('edits made during save remain dirty until those bytes are saved', async ()
 
 function configEditor(api) {
   return componentScript('views/ConfigView.vue', {
-    fetchLlmEffort: async () => ({ providers: [] }), ...api,
-  }, 'load, onEffortChange, save, currentKey, content, originalContent, dirty')
+    ...api,
+  }, 'load, save, currentKey, content, originalContent, dirty')
 }
-
-test('effort completion never fills or saves the new config with LLM text', async () => {
-  const write = deferred()
-  let saved
-  const editor = configEditor({
-    saveLlmEffort: () => write.promise,
-    fetchConfig: async key => ({ content: `${key} source` }),
-    saveConfig: async (...args) => { saved = args; return {} },
-  })
-  await editor.load('llm')
-  const operation = editor.onEffortChange({ id: 'demo' }, { target: { value: 'high' } })
-  await editor.load('games')
-  write.resolve({ ok: true })
-  await operation
-  assert.equal(editor.content.value, 'games source')
-  editor.content.value = 'games edited'
-  await editor.save()
-  assert.equal(JSON.stringify(saved), JSON.stringify(['games', 'games edited']))
-})
-
-test('effort refresh preserves text typed while its save is pending', async () => {
-  const write = deferred()
-  const editor = configEditor({
-    saveLlmEffort: () => write.promise,
-    fetchConfig: async () => ({ content: 'server text' }),
-  })
-  await editor.load('llm')
-  const operation = editor.onEffortChange({ id: 'demo' }, { target: { value: 'high' } })
-  editor.content.value = 'new unsaved text'
-  write.resolve({ ok: true })
-  await operation
-  assert.equal(editor.content.value, 'new unsaved text')
-  assert.equal(editor.dirty.value, true)
-})
 
 test('ordinary config save acknowledges only the text actually sent', async () => {
   const write = deferred()

@@ -1,13 +1,13 @@
 # QuickQuip 开发工作流与发布流程
 
-本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，测试纪律见 [`testing.md`](testing.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，主题版本、累积更新与开发版本约定见 [`versioning.md`](versioning.md)。
+本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，测试纪律见 [`testing.md`](testing.md)，公开文档规范见 [`documenting.md`](documenting.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，版本约定见 [`versioning.md`](versioning.md)。
 
 ## 硬规则
 
 - 只有收到明确指令时才 commit、push、开 PR、合并或打 tag。
 - 一个分支或 PR 只承载一个主要意图；大变更先拆分。
 - 行为、配置、协议、部署契约或用户文档变化时，同一变更更新拥有该事实的文档；`feat`、`fix`、`refactor` 依项目约定维护本地 changelog 草稿。
-- 不提交 secret、`.env`、`data/`、真实 `prod/`、本机工作材料或生成物。
+- 不提交 secret、`.env`、`data/`、真实 `prod/`、本机工作材料或临时构建产物。受追踪的文档副本与接口契约按生成工具同步。
 - 使用 Conventional Commits；PR 保留 merge 历史，不 squash。
 
 ## 分支模型
@@ -40,7 +40,7 @@ hotfix/* (仅生产阻断) ────────────────→ m
 | **Standard PR** | 中型或高风险域 | 从 `dev` 建短分支 | 独立 CR + Bot Review，并行 | 无未解决 Blocking/Should-fix 后请求人工合并 |
 | **Huge PR** | 大型、跨模块、高风险 | 短分支；必要时拆多个 PR | 全量 Tier 2 Deep-CR；每个拆分 PR 保持 Standard | Deep-CR 结论收口后请求人工合并 |
 | **Hot-Fix** | `main` 或 tag 的阻断回归 | 从 `main` | 按风险，非平凡变更至少 Tier 1 | PR 到 `main`，再回灌 `dev` |
-| **Release** | 公开发布 | `dev → main`；必要时 `release/*` | 独立 CR + 发行物/消费者验收 | 合并 `main` 后打 tag |
+| **Release** | 公开发布 | `dev → main`；必要时 `release/*` | 独立发布专项 CR + 常规检查；特殊里程碑另定专项清单 | 人工批准合并；tag 单独批准 |
 
 ### Develop direct
 
@@ -65,7 +65,7 @@ hotfix/* (仅生产阻断) ────────────────→ m
 
 ### Huge PR
 
-触发条件：大型、跨模块、高风险改动，以及面向 `main`、tag 或 release 准备的改动。高风险路径映射和数值门槛以 `scripts/check/deep-cr-trigger.sh <base>` 的输出为唯一权威；它无法解析 base 时 fail-safe 地要求 Deep-CR，而不会假定变更低风险。
+触发条件：大型、跨模块、高风险的实现改动。高风险路径映射和数值门槛以 `scripts/check/deep-cr-trigger.sh <base>` 的输出为唯一权威；它无法解析 base 时 fail-safe 地要求 Deep-CR，而不会假定变更低风险。发布期间新增的功能性修复按其自身差异分级；Release 累计交付范围的评审采用下方发布专项 CR 规则。
 
 开始前在本地私有工作区编写专题计划，写明目标与验收条件、涉及子系统、风险与失败模式，以及拆分方案。必要时把实现拆为多个 Standard PR，每个 PR 只保留一个主要意图。
 
@@ -85,7 +85,23 @@ hotfix/* (仅生产阻断) ────────────────→ m
 
 ### Release
 
-Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外收束，可使用 `release/v<version>-<topic>`。发布评审至少达到 Standard，满足 Deep-CR 触发条件时按 Huge 执行，并完成与风险相称的 Windows/Docker/Linux 消费者验收。详情见下方“发布生命周期”。
+Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外收束，可使用 `release/v<version>-<topic>`。冻结记录包含起始 SHA、目标分支基线和最终候选 SHA。后续开发改动进入发行范围须明确选择并更新记录。
+
+普通累积版本执行一轮独立发布专项 CR 和常规完整检查。新一代 Minor、Minecraft 版本号致敬等特殊里程碑，由维护者在冻结时确定额外审查与消费者验收清单。普通 Release 可直接准备正式版本；RC、候选构建入口与平台专项验收按明确需要安排。
+
+#### 发布专项 CR
+
+由未参与发布准备的 reviewer 独立检查以下内容，并读取相关实际代码、测试与契约：
+
+1. **交付与证据**：以上一发行 tag／目标分支到候选的累计范围建立变更摘要，关联已有 PR 的评审和验证，核对遗漏、未解决发现与延期事项。
+2. **发布一致性**：检查发布准备新增的差异，以及版本、CHANGELOG、升级说明、公开文档、配置模板、启动／打包／部署入口之间的一致性。
+3. **集成风险**：沿本期重要的跨 PR 接口核对状态生命周期、配置生效、数据迁移与回退等契约，检查现有验证是否覆盖实际边界。
+
+复审范围由已有交付证据和具体问题确定。证据缺口、契约冲突或可复现问题触发对应模块的扩展审查。累计 Diff 的规模及其 Deep-CR 脚本输出用于定位风险，普通 Release 按上述专项范围审查；新增实现改动按 Standard／Huge 规则执行，以该改动的起始 SHA 为分级基线。
+
+报告注明累计范围、发布准备范围、重点检查的边界及证据链接，使用 Blocking、Should-fix、Nits、Verified claims、Not verified。Blocking 必须修复；Should-fix 修复或在 PR 记录延期理由。普通 Release 保留完整自动化检查，平台与真实渠道未验证内容如实报告。Tag 后由现有发行流水线构建和 smoke，并核对实际产物。
+
+Release PR 合并和最终 tag 分别需要维护者专门人工审核批准，并各自记录获批的 SHA。候选 SHA 改变后更新审查与验证，重新提交审核。详情见下方“发布生命周期”。
 
 ## 日常迭代与验证
 
@@ -101,7 +117,8 @@ Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外�
 | 小型 Python 改动 | `.venv/bin/ruff check .` 与相关 pytest |
 | 小型前端改动 | `pnpm --dir frontend type-check` 与必要的 build/组件检查 |
 | LLM/MCP、持久化、消息管线、Web Admin、配置或部署 | Ruff、相关 pytest、前端 type-check（触及前端时）、示例配置校验与实际边界 smoke |
-| release / `main` 候选 | 完整 pytest、Ruff、示例配置校验、前端 type-check/build、发行 workflow 产物验证，以及可行的真实消费者验收 |
+| Release 候选 | 完整 pytest、Ruff、示例配置校验、self-docs 与 ID 检查、前端测试/type-check/build、发布说明提取检查；特殊里程碑按冻结清单补验 |
+| Tag 后发行 | 发行 workflow 的构建与 smoke；tag、版本、ZIP、镜像 revision/digest 与 Release notes 一致性核对 |
 
 常用命令：
 
@@ -113,12 +130,13 @@ pnpm --dir frontend type-check
 pnpm --dir frontend build
 ```
 
-无法执行的网络、Playwright、真实 provider 或平台验证必须在 PR/交接中明确报告为未验证，而不能作为通过。
+在 PR 或交接中逐项记录验证对象与结果；无法执行的网络、Playwright、真实 provider 或平台检查标记为未验证。
 
 ## 两级代码评审
 
 - **Tier 1（默认）**：对所有 Standard PR 和非平凡 Hot-Fix 运行一轮独立、只读的 CR。`.claude/agents/quickquip-cr-reviewer.md` 是可复用的 reviewer 定义；任何未参与实现的合格审查者均可执行相同契约。
 - **Tier 2（Deep-CR）**：仅用于 Huge PR。五个领域 finder 独立寻找候选，再由其他审查者复核证据与置信度。`scripts/check/deep-cr-trigger.sh` 只负责确定是否达到门槛；它不替代实际审查。
+- **Release 专项 CR**：执行“发布专项 CR”中的一轮独立检查，范围包括发布准备差异和选定集成边界；特殊里程碑按维护者确定的清单扩展。
 
 评审输出统一使用：Blocking（合并前修复）、Should-fix（除非记录延后理由否则修复）、Nits（可选）和 Verified claims（可记录于 PR/merge notes）。
 
@@ -132,7 +150,7 @@ Bot Review（KHPilot，PR 侧自动评审）的机制事实与两轨汇合纪律
 - **评审进行中 PR head 移动会立即中断当轮评审**；中断后一般不补审，确有必要按下条请求复审。双轨编排因此固定为：**先开 PR（触发 Bot）、再启动本地独立 CR**——本地 CR 完工时 Bot 结论通常恰好到达，两轨正好汇合。
 - 评审耗时随 diff 规模线性：小型 PR 约 3–10 分钟，百文件级大 diff 可近 1 小时。
 - `@khpilot` 评论触发的是**对话式回应**（摘要回复），与 opened 触发的结构化评审（check run + 四分类 findings）是两条管线。请求复审仅在 Bot 结论对合并决策确有必要时进行，评论中给出新 head SHA 与验证结果，避免主执行 Agent 与 Bot 陷入循环。
-- **沉默不代表 approval**；Bot review 也不是 CI check 或合并门禁，CI 结果仍以 GitHub Checks 为准。
+- Bot Review 的状态以实际评审结论为准；没有结论时记录为待确认。CI 结果以 GitHub Checks 为准，人工合并按本文件的授权与评审要求执行。
 
 ### 等待编排
 
@@ -172,8 +190,8 @@ fi
 
 1. 按 [`versioning.md`](versioning.md) 确定本次目标版本，在 `dev` 或用于额外收束的 `release/*` 冻结候选 SHA、`pyproject.toml` 版本、CHANGELOG、公开文档和配置模板；需要预发布验收时使用 `X.Y.Z-rc.N`，正式发布前定为 `X.Y.Z`。
 2. 汇总本地 changelog 草稿与已合并历史，将 `Unreleased` 形成新版本段并更新比较链接；确认草稿在 release 成功后再清理。
-3. 为 `dev → main`（使用发布准备分支时为 `release/* → main`）开 release PR，标题为 `release: vX.Y.Z — <摘要>`；完成分级要求的评审和验证。
-4. 合并 release PR 后，在 `main` 的已接受提交上创建并推送 `vX.Y.Z` tag。
+3. 为 `dev → main`（使用发布准备分支时为 `release/* → main`）开 release PR，标题为 `release: vX.Y.Z — <摘要>`；完成发布专项 CR、常规检查和已确定的专项清单，提交最终候选 SHA 供维护者人工审核。收到该候选的合并批准后，保留 merge 历史合并。
+4. 合并后核对 `main` 上的已接受提交及 CI，把准确 tag 名和目标 SHA 提交维护者单独审核。收到 tag 批准后创建并推送 `vX.Y.Z`。
 5. tag 触发 `release.yml`：完整测试、Windows 懒人包、Docker 镜像与 GitHub Release。核对 tag、版本、ZIP、镜像 revision/digest 和 Release notes 一致。
 6. 把 `main` 回灌 `dev`：若能快进则 `git merge --ff-only main`；否则开 `chore/back-merge-vX.Y.Z` PR。确认 post-merge CI 后清理已发布的本地草稿与短分支。
 7. back-merge 完成后核对 dev 的下一目标版本：常规发布后默认进入下一个 Patch 的 `-dev.0`，确定新主题时进入下一 Minor；已开始后续开发时保留其有效目标。需要调整时更新 `pyproject.toml`，按授权以 `chore:` 提交、推送。Hotfix 占用目标版本时，按 [`versioning.md`](versioning.md) 重新选择目标，确保后续开发使用开发版本标识。

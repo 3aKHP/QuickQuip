@@ -84,7 +84,7 @@ const rankColLabel = computed(() => RANK_COL_LABELS[rankType.value] || '长度 (
 
 const AL: Record<string, string> = { register: '注册', unsubscribe: '注销', gluing: '打胶', fencing: '击剑', fenced: '被击', fencing_draw: '平局', fencing_self_hurt: '自伤', admin_adjust: '修正' }
 function al(a: string) { return AL[a] || a }
-function tv(a: string): string { return ({ fencing: 'success', fenced: 'danger', gluing: 'info', fencing_draw: 'warn', fencing_self_hurt: 'danger', admin_adjust: 'warn' } as any)[a] || '' }
+function tv(a: string): 'info' | 'success' | 'warn' | 'danger' { return ({ fencing: 'success', fenced: 'danger', gluing: 'info', fencing_draw: 'warn', fencing_self_hurt: 'danger', admin_adjust: 'warn' } as any)[a] || '' }
 
 onMounted(() => { loadRankings(); loadTextModes() })
 async function loadRankings() { rankLoading.value = true; try { const data = await getRankings(rankType.value); rankings.value = data.rankings || []; totalUsers.value = data.total_users || 0 } catch (e: any) { loadError.value = e.message || String(e) } finally { rankLoading.value = false } }

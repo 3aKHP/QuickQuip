@@ -1,7 +1,6 @@
 """Skill 管理路由：目录 CRUD、预置同步与两阶段安装管线（``/ops/api/skills``）。
 
-生效目录经 ``_effective_catalog_dir()`` 现读 ``config/llm.toml`` 的
-``[skills].catalog_dir``（缺失/异常回退默认 ``SKILLS_DIR``），配合运行时
+生效目录经 ``_effective_catalog_dir()`` 读取已发布配置库的 Skill 设置，配合运行时
 每轮现扫实现天然热部署（W5/W6）。文本资源写入走 FileLock + tmp/replace
 原子落盘；锁文件统一在 catalog 根（skill 内容树外，避免被资源扫描编入
 清单、被 preset_drift 计入指纹）；全部写操作记审计。固定路径
@@ -26,13 +25,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from quickquip.app.web import skill_import, skill_import_github, skill_import_stash
 from quickquip.app.web.audit import audit_logger
-from quickquip.common.paths import CONFIG_LLM_TOML, DATA_DIR, SKILLS_EXAMPLE_DIR
+from quickquip.common.paths import DATA_DIR, SKILLS_EXAMPLE_DIR
 from quickquip.llm.skills import preset_sync
 from quickquip.llm.skills.catalog import (
     SKILL_FILE_NAME,
     assert_safe_relative_path,
     load_skill_with_diagnostics,
-    read_configured_catalog_dir,
     resolve_catalog_dir,
     resolve_file_in,
 )
@@ -49,7 +47,7 @@ logger = logging.getLogger(__name__)
 # patch ``_effective_catalog_dir`` 即可整体重定向。
 _EXAMPLE_DIR = SKILLS_EXAMPLE_DIR
 _STASH_DIR = DATA_DIR / "tmp" / "skill-import"
-_LLM_CONFIG_PATH = CONFIG_LLM_TOML
+_LLM_CONFIG_PATH = DATA_DIR / "llm_config.db"
 
 # zip 安装包以 base64 字符串承载：pydantic 按字符数卡上限，换算为恰好放行
 # 16MiB 解码字节的 b64 长度；解码后的字节数在路由里再显式校验一次。
@@ -59,8 +57,7 @@ _MAX_ARCHIVE_B64_CHARS = math.ceil(_MAX_ARCHIVE_BYTES / 3) * 4
 _MAX_FILE_B64_CHARS = 2 * 1024 * 1024
 # 文件夹按解码总量计费；各文件分别编码产生的 padding 留出有界余量。
 _MAX_FOLDER_B64_CHARS = (
-    math.ceil(skill_import.MAX_IMPORT_TOTAL_BYTES / 3) * 4
-    + 4 * skill_import.MAX_IMPORT_ENTRIES
+    math.ceil(skill_import.MAX_IMPORT_TOTAL_BYTES / 3) * 4 + 4 * skill_import.MAX_IMPORT_ENTRIES
 )
 
 
@@ -115,8 +112,11 @@ class ImportConfirmBody(BaseModel):
 
 
 def _effective_catalog_dir() -> Path:
-    """``[skills].catalog_dir`` 的生效目录：tomllib 直读，缺失/异常回退默认。"""
-    return resolve_catalog_dir(read_configured_catalog_dir(_LLM_CONFIG_PATH))
+    """Resolve the catalog directory from the published database snapshot."""
+    from quickquip.llm.config_service import get_config_service
+
+    settings = get_config_service().read("published")["document"]["settings"]["skills"]
+    return resolve_catalog_dir(settings["catalog_dir"])
 
 
 def _validate_name(name: str) -> None:
@@ -149,10 +149,7 @@ def _diagnostics_payload(diagnostics) -> list[dict]:
 
 
 def _preset_states(catalog_dir: Path) -> dict[str, preset_sync.SyncState]:
-    return {
-        row.name: row.state
-        for row in preset_sync.classify_presets(catalog_dir, _EXAMPLE_DIR)
-    }
+    return {row.name: row.state for row in preset_sync.classify_presets(catalog_dir, _EXAMPLE_DIR)}
 
 
 def _resolve_for_write(skill_dir: Path, relative_path: str) -> Path:
@@ -219,21 +216,23 @@ def list_skills():
             loaded, load_diagnostics = load_skill_with_diagnostics(child)
             resource_count, has_scripts, total_bytes = _dir_stats(child)
             state = states.get(child.name)
-            items.append({
-                "name": child.name,
-                "ok": loaded is not None,
-                "description": loaded.metadata.description if loaded else "",
-                "diagnostics": _diagnostics_payload(load_diagnostics),
-                "resource_count": resource_count,
-                "has_scripts": has_scripts,
-                "total_bytes": total_bytes,
-                "mtime": int(child.stat().st_mtime),
-                "preset_state": (
-                    state.value
-                    if state in (preset_sync.SyncState.CURRENT, preset_sync.SyncState.DIVERGED)
-                    else None
-                ),
-            })
+            items.append(
+                {
+                    "name": child.name,
+                    "ok": loaded is not None,
+                    "description": loaded.metadata.description if loaded else "",
+                    "diagnostics": _diagnostics_payload(load_diagnostics),
+                    "resource_count": resource_count,
+                    "has_scripts": has_scripts,
+                    "total_bytes": total_bytes,
+                    "mtime": int(child.stat().st_mtime),
+                    "preset_state": (
+                        state.value
+                        if state in (preset_sync.SyncState.CURRENT, preset_sync.SyncState.DIVERGED)
+                        else None
+                    ),
+                }
+            )
     return {"skills": items}
 
 
@@ -292,9 +291,7 @@ def create_skill(body: SkillCreateBody, request: Request):
         except Exception:
             tmp.unlink(missing_ok=True)
             raise
-    logger.warning(
-        "skill created via web admin: %s (%d bytes)", body.name, len(body.content)
-    )
+    logger.warning("skill created via web admin: %s (%d bytes)", body.name, len(body.content))
     audit_logger.log(request, action="create", target_type="skill", target_id=body.name)
     return {"name": body.name}
 
@@ -323,7 +320,10 @@ def apply_presets_route(body: PresetApplyBody, request: Request):
     names = set(body.names) if body.names else None
     catalog_dir.mkdir(parents=True, exist_ok=True)
     outcomes, failures = preset_sync.apply_presets(
-        rows, catalog_dir, _EXAMPLE_DIR, names,
+        rows,
+        catalog_dir,
+        _EXAMPLE_DIR,
+        names,
         lock_factory=lambda name: _skill_lock(catalog_dir, name),
     )
     logger.warning(
@@ -360,9 +360,7 @@ def _inspect_and_stash(
     candidates = skill_import.discover_candidates(entries, _effective_catalog_dir())
     if not candidates and empty_detail is not None:
         raise HTTPException(status_code=422, detail=empty_detail)
-    token = skill_import_stash.stash_payload(
-        _STASH_DIR, entries, kind=kind, source_url=source_url
-    )
+    token = skill_import_stash.stash_payload(_STASH_DIR, entries, kind=kind, source_url=source_url)
     return {
         "token": token,
         "candidates": [asdict(candidate) for candidate in candidates],

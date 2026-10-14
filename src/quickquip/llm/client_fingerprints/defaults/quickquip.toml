@@ -1,0 +1,22 @@
+format_version = 1
+id = "quickquip"
+label = "QuickQuip"
+user_agent = "QuickQuip/{client_version}"
+
+[headers]
+accept-encoding = "gzip, deflate"
+
+[bindings]
+x-quickquip-install = "install_id"
+x-quickquip-session = "epoch_id"
+x-quickquip-cluster = "cluster_id"
+x-quickquip-client = "client_version"
+
+[protocols.openai]
+[protocols.openai_responses]
+[protocols.gemini]
+
+[protocols.claude.headers]
+accept = "application/json"
+anthropic-version = "2023-06-01"
+anthropic-beta = "context-1m-2025-08-07,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,effort-2025-11-24"

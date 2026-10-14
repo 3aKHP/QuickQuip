@@ -21,7 +21,10 @@ import {
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
   CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
   Quote, ZapOff, AlarmClock, Mail, Layers, Image, CircleHelp,
-  Database, Hourglass, History, Pause
+  Database, Hourglass, History, Pause,
+  Route, Palette, Power, MessageSquare, CalendarClock, Rocket,
+  ArrowLeftRight, Boxes, RotateCcw, ArrowUp, ArrowDown, GitCompareArrows,
+  Tag, ArrowUpRight, ListPlus
 } from 'lucide-vue-next'
 import { computed } from 'vue'
 import type { Component } from 'vue'
@@ -43,6 +46,9 @@ type IconName =
   | 'CalendarRange' | 'CalendarDays' | 'Copy' | 'MousePointerClick' | 'ShieldAlert'
   | 'Quote' | 'ZapOff' | 'AlarmClock' | 'Mail' | 'Layers' | 'Image' | 'CircleHelp'
   | 'Database' | 'Hourglass' | 'History' | 'Pause'
+  | 'Route' | 'Palette' | 'Power' | 'MessageSquare' | 'CalendarClock' | 'Rocket'
+  | 'ArrowLeftRight' | 'Boxes' | 'RotateCcw' | 'ArrowUp' | 'ArrowDown' | 'GitCompareArrows'
+  | 'Tag' | 'ArrowUpRight' | 'ListPlus'
 
 const ICON_MAP: Record<IconName, Component> = {
   BarChart3, ToggleLeft, Users, Brain, FileText,
@@ -59,7 +65,10 @@ const ICON_MAP: Record<IconName, Component> = {
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
   CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
   Quote, ZapOff, AlarmClock, Mail, Layers, Image, CircleHelp,
-  Database, Hourglass, History, Pause
+  Database, Hourglass, History, Pause,
+  Route, Palette, Power, MessageSquare, CalendarClock, Rocket,
+  ArrowLeftRight, Boxes, RotateCcw, ArrowUp, ArrowDown, GitCompareArrows,
+  Tag, ArrowUpRight, ListPlus,
 }
 
 const props = defineProps<{

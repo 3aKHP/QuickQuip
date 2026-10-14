@@ -7,21 +7,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from quickquip.common.paths import CONFIG_LLM_TOML
-from quickquip.llm.config import load_llm_config
-from quickquip.llm.provider import (
-    LLMRequest,
-    RetryPolicy,
-    build_provider_client,
-    collect_trace_calls,
-    trace_store,
-    _TRACE_FLAG_FILE,
-)
-from quickquip.llm.provider_health import format_probe_results, probe_all_providers
-from quickquip.llm.tools import LLMConversationMessage
-from quickquip.llm.usage import set_usage_scope
+from quickquip.llm.config_service import get_config_service
+from quickquip.app.web.routes.llm_configuration import ConfigurationRoute, ProbeBody
+from quickquip.llm.provider import trace_store, _TRACE_FLAG_FILE
 
-router = APIRouter()
+router = APIRouter(route_class=ConfigurationRoute)
 
 
 class SampleRequest(BaseModel):
@@ -30,7 +20,9 @@ class SampleRequest(BaseModel):
     system_prompt: str = "你是一个测试助手。"
     user_prompt: str = "你好，请做一下自我介绍。"
     stream: bool = False
-    max_output_tokens: int = 256
+    max_output_tokens: int = Field(default=256, ge=1, le=16384)
+    source: str | int = "published"
+    request_id: str = Field(min_length=1, max_length=128)
 
 
 class TraceToggle(BaseModel):
@@ -51,28 +43,25 @@ class RegressionRequest(BaseModel):
 
 @router.get("/diagnostics/providers")
 def get_diagnostics_providers():
-    config = load_llm_config(CONFIG_LLM_TOML)
-    if config.load_error:
-        return {"providers": []}
+    service = get_config_service()
+    snapshot = service.read("published")
+    document = snapshot["document"]
     return {
+        "revision": snapshot["revision"],
+        "version": service.version("published"),
         "providers": [
-            {"id": p.id, "models": p.models}
-            for p in config.providers.values()
+            {"id": p["id"], "default_model": p["default_model"],
+             "models": [m["model"] for m in p["models"] if m["enabled"]]}
+            for p in document["providers"]
+            if p["enabled"]
         ]
     }
 
 
-@router.post("/diagnostics/providers/probe")
-async def probe_providers():
-    """并发探活所有 provider，返回结构化结果 + 格式化文本（无状态，每次即每次计费）。"""
-    config = load_llm_config(CONFIG_LLM_TOML)
-    if config.load_error:
-        raise HTTPException(status_code=400, detail=f"config load error: {config.load_error}")
-    results = await probe_all_providers(config)
-    return {
-        "results": [r.as_dict() for r in results],
-        "text": format_probe_results(results),
-    }
+@router.post("/diagnostics/providers/probe", status_code=202)
+def probe_providers(body: ProbeBody):
+    result = get_config_service().probe(body.source, body.provider_id, body.model, body.request_id)
+    return {**result, "may_charge": True, "automatic_retry": False}
 
 
 # ── Trace control ────────────────────────────────────────────────────────────
@@ -119,62 +108,23 @@ def clear_traces():
 # ── Sample request ───────────────────────────────────────────────────────────
 
 
-@router.post("/diagnostics/sample-request")
-async def run_sample_request(body: SampleRequest):
-    set_usage_scope("diagnostics")
-    import time
+@router.post("/diagnostics/sample-request", status_code=202)
+def run_sample_request(body: SampleRequest):
+    service = get_config_service()
+    document = service.read(body.source)["document"]
+    provider = next((p for p in document["providers"] if p["id"] == body.provider_id), None)
+    from quickquip.llm.config_document import ConfigError
 
-    config = load_llm_config(CONFIG_LLM_TOML)
-    if config.load_error:
-        raise HTTPException(status_code=400, detail=f"config load error: {config.load_error}")
-
-    provider = config.providers.get(body.provider_id)
     if provider is None:
-        raise HTTPException(status_code=400, detail=f"unknown provider: {body.provider_id}")
-
-    model = body.model or provider.default_model
-    if model not in provider.models:
-        raise HTTPException(status_code=400, detail=f"model {model} not available")
-
-    try:
-        # 诊断采样要反映单次调用的真实行为，关闭自动重试
-        client = build_provider_client(provider, retry_policy=RetryPolicy.disabled())
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"failed to build client: {exc}") from exc
-
-    req = LLMRequest(
-        model=model,
-        system_prompt=body.system_prompt,
-        messages=[LLMConversationMessage(role="user", content=body.user_prompt)],
-        temperature=provider.temperature,
-        max_output_tokens=body.max_output_tokens,
-        allow_tool_calls=False,
+        raise ConfigError("dependency_conflict", "Unknown provider", field_path="provider_id")
+    result = service.probe(
+        body.source,
+        body.provider_id,
+        body.model or provider["default_model"],
+        body.request_id,
+        body.model_dump(exclude={"source", "request_id"}),
     )
-
-    t0 = time.monotonic()
-    try:
-        with collect_trace_calls(force=True) as trace_call_ids:
-            response = await client.complete(req)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"API call failed: {exc}") from exc
-
-    elapsed_ms = (time.monotonic() - t0) * 1000
-    trace_calls = [
-        detail
-        for call_id in trace_call_ids
-        if (detail := trace_store.get_call(call_id)) is not None
-    ]
-
-    return {
-        "text": response.text,
-        "model": response.model,
-        "finish_reason": response.finish_reason,
-        "input_tokens": response.input_tokens,
-        "output_tokens": response.output_tokens,
-        "thinking_blocks": response.thinking_blocks,
-        "duration_ms": round(elapsed_ms, 1),
-        "trace_calls": trace_calls,
-    }
+    return {**result, "may_charge": True, "automatic_retry": False}
 
 
 # ── Regression test ──────────────────────────────────────────────────────────
@@ -201,16 +151,20 @@ def run_regression(body: RegressionRequest):
                 if m and is_rule_match_allowed(rule, m):
                     rule_matches.append(compiled.pattern)
             if rule_matches:
-                matches.append({
-                    "name": rule.get("name", f"rule_{rule_index}"),
-                    "patterns": rule_matches,
-                    "priority": int(rule.get("priority", 0)),
-                })
-        results.append({
-            "label": sample.label,
-            "text": text,
-            "matched": bool(matches),
-            "rules": matches[:10],
-        })
+                matches.append(
+                    {
+                        "name": rule.get("name", f"rule_{rule_index}"),
+                        "patterns": rule_matches,
+                        "priority": int(rule.get("priority", 0)),
+                    }
+                )
+        results.append(
+            {
+                "label": sample.label,
+                "text": text,
+                "matched": bool(matches),
+                "rules": matches[:10],
+            }
+        )
 
     return {"samples": results}

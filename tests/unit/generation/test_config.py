@@ -48,7 +48,7 @@ def test_load_generation_config_from_dedicated_file(tmp_path: Path, monkeypatch)
     assert resolved.model_config.model == "doubao-seedream-4-0"
 
 
-def test_load_generation_config_falls_back_to_legacy_llm_file(tmp_path: Path):
+def test_missing_generation_file_does_not_load_legacy_llm_file(tmp_path: Path):
     legacy_path = tmp_path / "llm.toml"
     legacy_path.write_text(
         textwrap.dedent(
@@ -72,17 +72,11 @@ def test_load_generation_config_falls_back_to_legacy_llm_file(tmp_path: Path):
         encoding="utf-8",
     )
 
-    loaded = load_generation_config(
-        tmp_path / "generation.toml",
-        legacy_llm_path=legacy_path,
-    )
-
-    assert loaded.load_error is None
-    assert loaded.source_kind == "llm_legacy"
-    assert loaded.source_path == legacy_path
-    assert loaded.image.enabled is True
-    assert loaded.image.default_model == "minimax-image"
-    assert loaded.image.resolve_model("minimax-image") is not None
+    loaded = load_generation_config(tmp_path / "generation.toml")
+    assert loaded.load_error is not None
+    assert loaded.source_kind == "generation"
+    assert loaded.image.enabled is False
+    assert loaded.image.resolve_model("minimax-image") is None
 
 
 def test_generation_service_prefers_dedicated_config_over_legacy(tmp_path: Path):
@@ -129,7 +123,7 @@ def test_generation_service_prefers_dedicated_config_over_legacy(tmp_path: Path)
         encoding="utf-8",
     )
 
-    service = GenerationService(generation_path, legacy_llm_path=legacy_path)
+    service = GenerationService(generation_path)
     resolved = service.resolve_image_model()
 
     assert resolved is not None

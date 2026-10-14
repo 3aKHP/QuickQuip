@@ -255,7 +255,9 @@ class StubImagePreprocessor:
         self.call_count = 0
         self._descriptions = list(descriptions or [])
 
-    async def describe_images(self, image_urls: list[str]) -> list[object]:
+    async def describe_images(
+        self, image_urls: list[str], *, session=None, epoch_id=None,
+    ) -> list[object]:
         self.last_urls = list(image_urls)
         self.call_count += 1
         from quickquip.llm.image_preprocessor import ImageDescription

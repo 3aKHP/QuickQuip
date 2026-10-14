@@ -1,7 +1,11 @@
 """Extract release notes for a given tag from CHANGELOG.md.
 
-Usage: python scripts/ci/extract_release_notes.py v0.8.1
-Writes release_notes.md in the current working directory.
+Run from the project root:
+    python scripts/ci/extract_release_notes.py v1.16.2
+
+Writes release_notes.md in the current working directory. A prerelease tag
+such as v1.16.2-rc.1 selects the base 1.16.2 section. Missing or empty sections
+produce a nonzero exit code.
 """
 from __future__ import annotations
 

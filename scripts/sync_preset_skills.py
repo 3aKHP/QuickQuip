@@ -11,14 +11,14 @@
 
 默认（或 --check）只报告不写入，有 missing/diverged 时退出码 1；
 --apply 执行同步：missing 直接安装，diverged 先把本地副本整体移入
-skills/.preset-backups/<name>.preset-backup-<时间戳> 再安装预置副本（备份
-容器自身无 SKILL.md，运行时扫描不感知；本地定制不丢，确认后自行清理）。
-bot 每轮请求现扫 skills/，同步当轮生效，无需重启。
+skills/.preset-backups/<name>.preset-backup-<时间戳> 再安装预置副本。
+本地定制保存在备份中，确认新副本后可自行清理。机器人下一轮请求扫描时
+加载同步后的内容。
 
 核心逻辑在包内 quickquip.llm.skills.preset_sync（stdlib 自包含，供
 Web Admin 后端复用），本脚本只承载 CLI 呈现，按文件路径装载该实现。
 
-用法：
+在项目根运行，使用 Python 3 标准库即可：
     python scripts/sync_preset_skills.py            # 只报告
     python scripts/sync_preset_skills.py --check    # 只报告（部署脚本用）
     python scripts/sync_preset_skills.py --apply    # 执行同步（留备份）

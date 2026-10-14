@@ -1,10 +1,14 @@
 # 从零理解 MCP —— 以 QuickQuip 项目为例
 
+本文解释 MCP 的概念、传输方式和 QuickQuip 的协议行为。第一次接入服务可先完成[本地 echo 练习](../admin/mcp-servers.md#首次接入本地-echo-练习)，再对照本文理解连接与调用过程。
+
+配置示例是完整导出 JSON 中的字段片段。使用 Web Admin 时，在“工具与技能 → MCP 服务与状态”添加服务并按示例填写字段。使用 JSON 时，先导出完整配置，将服务对象追加到 `settings.mcp.servers`，保留其他字段与已有服务，再预览导入、保存草稿并应用。完整交换流程见 [LLM 配置管理](../admin/llm-configuration.md)。
+
 > **面向读者：** 听说过 MCP、尚未实际接触过协议本身的开发者与高级部署者。
 >
-> **前置要求：** 会读写 TOML 配置；对 QuickQuip 的 LLM 工具调用链路有大致印象（可先浏览 [`llm-module.md`](llm-module.md)）。
+> **前置要求：** 会阅读 JSON 配置；对 QuickQuip 的 LLM 工具调用链路有大致印象（可先浏览 [`llm-module.md`](llm-module.md)）。
 >
-> **源码指引：** 协议实现位于 `src/quickquip/llm/mcp/`，配置解析位于 `src/quickquip/llm/config.py`，运行期生命周期位于 `src/quickquip/llm/service_parts/mcp_lifecycle.py`，命令入口位于 `src/quickquip/adapters/nonebot/command_parts/llm.py`。配置权威模板为 `config/llm.toml.example`。
+> **源码指引：** 协议实现位于 `src/quickquip/llm/mcp/`，配置校验与编译位于 `src/quickquip/llm/config_document.py`，运行期生命周期位于 `src/quickquip/llm/service_parts/mcp_lifecycle.py`，命令入口位于 `src/quickquip/adapters/nonebot/command_parts/llm.py`。配置权威模板为 `config/llm.json.example`。
 
 ---
 
@@ -22,15 +26,17 @@
 
 ## 1. MCP 是什么：解决什么问题
 
-MCP（Model Context Protocol，模型上下文协议）是一套为「AI 应用 × 工具提供方」定义交互方式的开放协议。它要解决的问题是集成成本的 N×M 困境：工具提供方（搜索引擎、代码托管平台、数据服务……）各自暴露一套私有接口，AI 应用方每接一个新工具都要写一份专门的对接代码——M 个工具 × N 个应用就是 M×N 份胶水，任何一侧变动都牵动另一侧。
+假设你问机器人：“某个仓库的 README 写了什么？”模型可以提出读取文件的工具请求，QuickQuip 把请求交给仓库服务，服务读取文件并返回内容，模型再据此组织回复。模型负责判断需要什么信息，QuickQuip 负责联系工具服务，服务负责执行具体操作。
 
-MCP 把这层关系标准化：工具提供方实现一次 **MCP server**，把能力以 **tools**（可调用工具）和 **resources**（只读资源）的形式声明出来；AI 应用方实现一次 **MCP client**，按协议完成发现、协商与调用。此后每新增一个 server，所有 client 直接获得它的工具；每新增一个 client，天然能用上全部存量 server。
+MCP（Model Context Protocol，模型上下文协议）规定应用与工具服务如何介绍能力、发送请求和返回结果。工具提供方（搜索引擎、代码托管平台、数据服务……）各自暴露一套私有接口时，M 个工具与 N 个应用需要 M×N 份专门的对接代码；MCP 让双方复用一套协议实现。
+
+MCP 把这层关系标准化：工具提供方实现 **MCP server**，把能力以 **tools**（可调用工具）和 **resources**（只读资源）的形式声明出来；AI 应用方实现 **MCP client**，按协议完成发现、协商与调用。接入新的服务时，应用复用这套协议实现，再配置兼容的传输、版本、凭据与工具范围。
 
 ### 1.1 四个核心概念
 
 | 概念 | 含义 | 在 QuickQuip 中的落点 |
 |------|------|----------------------|
-| client | 协议中的调用方端点，负责与单个 server 通信 | `MCPClient`（每个 server 一个实例，`mcp/client.py`） |
+| client | 向工具服务发送请求并接收结果的调用方 | `MCPClient`（每个 server 一个实例，`mcp/client.py`） |
 | server | 工具提供方，声明并执行工具 | GitHub MCP、arXiv MCP、Tavily MCP 等 |
 | tools | server 暴露的可调用能力（名称 + 描述 + 参数 schema） | 桥接进 `ToolRegistry` 的 `mcp_*` 工具 |
 | resources | server 暴露的只读数据 | QuickQuip 只消费工具结果中内联的 resource 文本（见 §5.4） |
@@ -59,7 +65,7 @@ QuickQuip（client）                          MCP Server
 3. **调用**：模型决定使用某工具后，host 通过 client 发出 `tools/call`，携带工具名与参数；
 4. **结果**：server 返回 content 列表，client 做安全归一化（§5.4）后交回工具调用循环。
 
-QuickQuip 的协议面只落在这三个核心方法上：`initialize`（legacy 握手）、`tools/list`、`tools/call`，外加一个 `notifications/initialized` 通知（`mcp/client.py`）。这套协议面之下由 transport 承载消息、之上桥接进项目的工具注册表，正是下一节的主题。
+QuickQuip 用 `initialize` 与 `notifications/initialized` 完成 legacy 握手，用 `server/discover` 发现 modern 服务，再通过 `tools/list` 和 `tools/call` 发现和调用工具。transport 承载这些消息，项目工具注册表将发现的能力提供给模型。
 
 ---
 
@@ -69,9 +75,9 @@ QuickQuip 把 MCP 作为工具后端来源之一：MCP 工具与内置工具进�
 
 ### 2.1 启动时发生了什么
 
-`MCPClientManager.sync()`（`mcp/client.py`）在启动或重载时逐个处理 `[[mcp.servers]]`：
+`MCPClientManager.sync()`（`mcp/client.py`）在启动或重载时逐个处理 `settings.mcp.servers`：
 
-1. 建立连接：每个 server 最多尝试 3 次，间隔 2 秒。认证失败（401/403）、配置类错误与 4xx 直接判死不重试；超时、网络错误与 5xx 视为瞬态（应对 compose 冷启动时 sidecar 尚未就绪的竞态）；
+1. 建立连接：每个 server 最多尝试 3 次，间隔 2 秒。认证失败（401/403）、配置类错误与 4xx 直接报告失败；超时、网络错误与 5xx 按瞬态错误重试，可处理 Compose 冷启动时服务尚未就绪的情况；
 2. `tools/list` 拉取工具清单（分页循环），生成工具别名并按 server 级名单过滤（§4.2）；
 3. 桥接注册：`mcp_lifecycle.py` 把每个工具按别名注册进 `ToolRegistry`，来源与分类标记为 `mcp:<server_id>`，描述冠以 `[MCP/<server_id>]` 前缀；
 4. 写出状态文件（`data/mcp_status.json`），供 Web Admin 展示同一份装载结果。
@@ -83,12 +89,12 @@ QuickQuip 把 MCP 作为工具后端来源之一：MCP 工具与内置工具进�
 | 层 | 配置 | 生效时机 |
 |----|------|---------|
 | server 级 | `include_tools` / `exclude_tools` | 桥接前，决定哪些 MCP 工具被注册 |
-| 全局级 | `[tools] enabled` + `enabled_mode` | 组装请求时，决定暴露给模型的工具集合 |
-| 会话级 | `[tools] discovery_mode` | 决定首轮携带哪些工具、其余如何按需加载 |
+| 全局级 | `settings.tools.enabled` + `enabled_mode` | 组装请求时，决定暴露给模型的工具集合 |
+| 请求加载策略 | `settings.tools.discovery_mode` | 全局配置决定首轮携带哪些工具，单次工具循环按需加载其他工具 |
 
-全局级的行为：`enabled = []` 时暴露默认白名单加全部 MCP 工具；`enabled_mode = "append"` 在此之上追加所列工具；`enabled_mode = "replace"` 精确过滤，只暴露名单内的工具（MCP 工具也会被名单滤掉）。
+模型使用工具前，需开启 `settings.runtime.tool_calling_enabled`，其默认值为 `false`。全局级的行为是：`enabled = []` 时使用默认名单加全部已注册 MCP 工具；非空名单中，`enabled_mode = "append"` 在默认集合上追加所列工具，`enabled_mode = "replace"` 按所列名称精确过滤，MCP 工具同样受该名单约束。空名单在两种模式下都使用默认集合。
 
-会话级与工具发现：`discovery_mode = "auto"`（默认）时，首轮请求只携带 `always_loaded` 常驻工具，模型用本地元工具 `tool_search` 按需搜索、`tool_list` 列目录或按精确名称加载，命中的 MCP 工具在下一轮请求中生效。接入大批量 MCP 工具时，先用 server 级 `include_tools` 收窄能力面，再交给发现机制控制提示词体积；实现细节见 [`tool-discovery.md`](tool-discovery.md)。
+`discovery_mode = "auto"`（默认）在可延迟工具数超过 `discovery_min_tools` 时开启发现机制：首轮请求携带 `always_loaded` 常驻工具，模型用 `tool_search` 搜索，或用 `tool_list` 查看目录、按精确名称加载。新加载的 MCP 工具在下一轮请求中生效；小工具集直接发送全部启用工具。接入大批量 MCP 工具时，先用 server 级 `include_tools` 选择能力，再通过发现机制控制工具定义体积。实现细节见[工具发现说明](tool-discovery.md)。
 
 ### 2.3 查看装载结果：`/llm mcp status`
 
@@ -101,30 +107,39 @@ MCP 状态
 - github [docker] ERROR tools=0 error=认证失败
 ```
 
-- 聊天面只显示失败分类（如 `认证失败`），不显示服务端原始错误文本；Web Admin 的状态页可看清洗后的详情；
+- 聊天面显示失败分类，如 `认证失败`；Web Admin 的状态页提供清洗后的错误详情；
 - transport 后面的 `/modern`、`/auto/legacy` 等角标是双协议纪元标记（§5.1）；
 - `/llm mcp reload`（管理员）：重连全部 server，docker transport 会先强制拉取最新镜像；
-- `/llm reload`（管理员）：重载 `llm.toml` 并在后台重连 MCP；人格热重载路径不会触碰 MCP 连接。
+- LLM 配置通过草稿应用任务接纳；仅 MCP 配置改变时准备新资源代际。人格热重载与价格更新保持当前 MCP 连接。
 
 ---
 
 ## 3. 四种 transport 逐一实例
 
-`transport` 决定 client 与 server 之间消息怎么传输。四种都封装在 `mcp/transport.py`，协议层完全无感。以下配置块均可直接复制进 `config/llm.toml` 后按需改名。
+`transport` 决定 client 与 server 之间消息怎么传输。四种都封装在 `mcp/transport.py`，共用协议层。以下示例用于对照传输方式与字段；服务准备、表单填写和实际调用步骤见[管理员接入指南](../admin/mcp-servers.md)。
 
 ### 3.1 stdio —— 本地子进程
 
 适用场景：与 bot 同机的命令行 MCP server（`uvx` 拉起的 Python server、`npx` 拉起的 Node server 等），进程随 bot 启停。
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "fetch"
-transport = "stdio"
-command = "uvx"
-args = ["mcp-server-fetch"]
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "fetch",
+          "transport": "stdio",
+          "command": "uvx",
+          "args": [
+            "mcp-server-fetch"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：QuickQuip 派生子进程，stdin/stdout 上交换 JSON-RPC（按行分隔，自动兼容 `Content-Length` 帧格式），stderr 逐行写入日志；`env` 在当前进程环境之上合并注入。
@@ -135,17 +150,30 @@ args = ["mcp-server-fetch"]
 
 适用场景：社区只提供 CLI 镜像、没有 http/sse 端点的 server。需要本机 Docker CLI 与 daemon；容器化部署默认不挂载 docker.sock，仅适合裸机或可信宿主机。
 
-```toml
-[mcp]
-enabled = true
-
-[[mcp.servers]]
-id = "github"
-transport = "docker"
-timeout_seconds = 30
-image = "ghcr.io/github/github-mcp-server"
-env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_PERSONAL_ACCESS_TOKEN}" }
-include_tools = ["search_repositories", "get_file_contents", "search_code"]
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "github",
+          "transport": "docker",
+          "timeout_seconds": 30,
+          "image": "ghcr.io/github/github-mcp-server",
+          "env": {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+          },
+          "include_tools": [
+            "search_repositories",
+            "get_file_contents",
+            "search_code"
+          ]
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：QuickQuip 执行 `docker run -i --rm --pull <pull_policy> ...` 拉起容器；`env` 写入一块 0600 权限的临时 `--env-file` 传给容器，启动完成后立即删除，凭证不出现在进程命令行里。
@@ -156,44 +184,67 @@ include_tools = ["search_repositories", "get_file_contents", "search_code"]
 
 适用场景：自建或第三方的 HTTPS MCP 服务、宿主机 MCP 网关。生产环境首选。
 
-```toml
-[mcp]
-enabled = true
+端点是服务提供方给 MCP 客户端使用的完整 URL，通常含 `/mcp`；按该服务的说明填写。下面的 `mcp.example.com` 是占位地址，`MCP_PRTS_WIKI_TOKEN` 代表该服务签发的凭据。服务地址和凭据取得后替换示例；可直接启动的练习服务见[本地 echo 练习](../admin/mcp-servers.md#首次接入本地-echo-练习)。
 
-[[mcp.servers]]
-id = "prts_wiki"
-transport = "http"
-timeout_seconds = 30
-url = "https://mcp.example.com/mcp"
-headers = { Authorization = "Bearer ${MCP_PRTS_WIKI_TOKEN}" }
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "prts_wiki",
+          "transport": "http",
+          "timeout_seconds": 30,
+          "url": "https://mcp.example.com/mcp",
+          "headers": {
+            "Authorization": "Bearer ${MCP_PRTS_WIKI_TOKEN}"
+          }
+        }
+      ]
+    }
+  }
+}
 ```
 
-机制：单端点 POST；服务器从响应头下发 `mcp-session-id`，后续请求携带该头维持会话；响应体是 JSON 或内联 SSE。
+机制：请求发往同一 POST 端点，响应为 JSON 或内联 SSE。默认 legacy 模式下，服务器可从响应头下发 `mcp-session-id`，后续请求携带该头；modern 模式按 §5.1 的逐请求元数据通信。
 
 验证：可先用 curl 模拟一次 legacy 握手确认端点与凭证可达：
 
 ```bash
-curl -sS -X POST "https://mcp.example.com/mcp" \
+curl -i -sS --max-time 10 -X POST "https://mcp.example.com/mcp" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer ${MCP_PRTS_WIKI_TOKEN}" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
 ```
 
-返回 JSON-RPC result 即端点可用；再以 `/llm mcp status` 确认装载。
+在 Bash 中执行该命令，先设置令牌环境变量，并将示例 URL 换成实际端点。Streamable HTTP 请求须通过 `Accept` 声明同时接收 JSON 与 SSE，[协议要求见此](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)。`-i` 显示 HTTP 状态和响应头，`--max-time 10` 在 10 秒后结束探测。
+
+正常响应为 HTTP 200：`Content-Type: application/json` 时，正文包含初始化 `result`；`text/event-stream` 时，事件的 `data:` 中包含同一 JSON-RPC 结果。部分 legacy 服务还返回 `Mcp-Session-Id` 响应头。401/403 时核对凭据，404/405 时核对 MCP 端点与传输方式；随后通过 `/llm mcp status` 查看 Bot 装载状态，按接入指南发起一次工具调用。探测本地 echo 时，URL 使用 `http://127.0.0.1:8017/mcp`，省略 `Authorization` 头。
 
 ### 3.4 sse —— 经典 HTTP+SSE
 
-适用场景：仍只提供旧式 SSE 端点的存量远程 server。
+适用场景：提供经典 SSE 端点的远程 server。
 
-```toml
-[mcp]
-enabled = true
+下例假定你已在 Bot 所在网络启动名为 `mcp-tavily` 的服务，且该服务提供 8080 端口的 `/sse` 入口；容器名、端口和路径按实际服务调整。
 
-[[mcp.servers]]
-id = "tavily"
-transport = "sse"
-timeout_seconds = 30
-url = "http://mcp-tavily:8080/sse"
+```json
+{
+  "settings": {
+    "mcp": {
+      "enabled": true,
+      "servers": [
+        {
+          "id": "tavily",
+          "transport": "sse",
+          "timeout_seconds": 30,
+          "url": "http://mcp-tavily:8080/sse"
+        }
+      ]
+    }
+  }
+}
 ```
 
 机制：GET 打开一条长连接事件流，服务器发出 `endpoint` 事件告知 POST 地址（相对路径会按 SSE URL 解析），请求的响应从 `message` 事件回流。等待 `endpoint` 事件超过 `timeout_seconds` 会报「等待 endpoint 事件超时」。
@@ -204,17 +255,17 @@ url = "http://mcp-tavily:8080/sse"
 
 ## 4. 配置全解
 
-配置全部写在 `config/llm.toml`，解析代码为 `src/quickquip/llm/config.py` 的 `_read_mcp_servers()`。总开关 `[mcp] enabled` 默认 `false`；关闭时 `sync()` 直接返回，一个连接也不建立。
+配置通过共享应用服务保存到 `data/llm_config.db`，校验与编译见 `src/quickquip/llm/config_document.py`。总开关 `settings.mcp.enabled` 默认 `false`；关闭时 `sync()` 直接返回，一个连接也不建立。
 
-### 4.1 `[[mcp.servers]]` 全字段表
+### 4.1 `settings.mcp.servers` 全字段表
 
-默认值以现行解析代码为准（`MCPServerConfig` 与 `_read_mcp_servers`）。
+默认值以 `MCPServerConfig` 为准；JSON 写入约束由 `config_document.py` 校验。保存与导入预览返回具体字段错误，修正后才能保存整份草稿。
 
 **通用字段**
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `id` | （必填） | server 唯一标识；缺失或与已出现 id 重复的条目整段跳过（重复时记录告警），也是工具别名与 `mcp:<id>` 分类的来源 |
+| `id` | （必填） | server 唯一标识；缺失或重复会使配置校验失败，也是工具别名与 `mcp:<id>` 分类的来源 |
 | `transport` | `"stdio"` | `stdio` / `docker` / `http` / `sse` |
 | `enabled` | `true` | 单 server 开关；`false` 时状态记为 disabled，不参与连接 |
 | `timeout_seconds` | `30` | 连接、探测与每次请求等待的上限秒数（float） |
@@ -264,7 +315,7 @@ docker 的 `args` 附加在镜像名之后，作为 server 自身参数；`env` 
 |------|--------|------|
 | `protocol_version` | `"2025-03-26"` | legacy 握手时声明的协议版本 pin |
 | `negotiation` | `"legacy"` | `legacy` / `auto` / `modern`，仅 `http` transport 生效（§5.2） |
-| `supported_protocol_versions` | `[]` | `auto` / `modern` 模式下客户端声明的可接受版本列表（这两种模式必填非空，否则该 server 在配置校验阶段被跳过并告警） |
+| `supported_protocol_versions` | `[]` | `auto` / `modern` 模式下客户端声明的可接受版本列表；这两种模式必填非空，缺失使配置校验失败 |
 
 ### 4.2 `${ENV_VAR}` 展开规则与时机
 
@@ -276,14 +327,14 @@ ${ENV_VAR:-default}    带默认值；未设置时展开为 default（默认值�
 ```
 
 - 变量名需匹配 `[A-Za-z_][A-Za-z0-9_]*`；占位符支持嵌在更长字符串里（如 `"Bearer ${TOKEN}"`）；
-- 展开发生在**配置解析时**：进程启动加载 `llm.toml` 与 `/llm reload` 重载时各展开一次，运行期不重读环境变量；
-- `.env` 只在进程启动时加载一次：`/llm reload` 重载的是 TOML 展开（环境变量取自启动时快照），改动 `.env` 需要重启 bot 进程生效。
+- 展开发生在**配置解析时**：Bot 编译已发布快照或应用指定快照时展开，运行期不重读环境变量；
+- `.env` 只在进程启动时加载一次：快照编译从 Bot 当前进程环境读取变量，改动 `.env` 需要重启 bot 进程生效。
 
 ### 4.3 凭证安全惯例
 
-- 凭证一律放进程环境（部署上以仓库根目录 `.env` 为唯一涉密来源），`llm.toml` 里只写 `${ENV_VAR}` 占位，任何真实 token 不进配置文件；
+- 凭证一律放进程环境（部署上以仓库根目录 `.env` 为唯一涉密来源），JSON 和配置数据库里只写 `${ENV_VAR}` 占位，任何真实 token 不进配置文件；
 - http/sse 用 `headers` 注入 `Authorization`，stdio 用 `env`，docker 的 `env` 经临时 `--env-file` 注入，凭证不暴露在进程命令行；
-- 状态与日志侧有配套清洗：URL 去除 query、fragment 与 userinfo，异常文本截断脱敏后才能进入 status JSON 或日志——即使 token 误写进 URL，也不会从状态页泄漏。
+- 状态与日志对 URL 去除 query、fragment 和 userinfo，对异常文本做截断和凭据清洗。使用环境变量引用配置凭据，避免把令牌写进 URL。
 
 ---
 
@@ -309,18 +360,29 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 | `auto` | 先发 `server/discover` 探测：返回 DiscoverResult 就走 modern；收到 legacy 信号（JSON-RPC error，或 400/404/405 且响应体无 modern 错误码 -32022/-32020）就回退 legacy。401/403/5xx/超时直接失败不回退 |
 | `modern` | 只走 modern；探测判定为 legacy 时报协议协商失败 |
 
-- `negotiation` 配了 `auto`/`modern` 但 `transport` 非 `http`，或 `supported_protocol_versions` 为空：该 server 在配置校验阶段被跳过并记录告警（不会到连接阶段才失败）；
+- `negotiation` 配了 `auto`/`modern` 但 `transport` 非 `http`，或 `supported_protocol_versions` 为空：保存校验返回字段错误，修复后才可保存并应用；
 - modern 版本协商取客户端声明列表与服务器 `supportedVersions` 的交集，交集为空时报「modern 版本无交集」；
 - modern 模式下收到 `InputRequiredResult`（MRTR，响应带 `inputRequests`）按「暂不支持」返回稳定错误；
-- 协商在每次装载时执行（进程启动、`/llm reload`、`/llm mcp reload` 都会重新探测）；session 过期重连沿用当前装载周期的协商结论，不重新探测。
+- 协商在连接资源准备时执行（进程启动、MCP 配置应用、`/llm mcp reload`）；session 过期重连沿用当前装载周期的协商结论，不重新探测。
 
-```toml
-[[mcp.servers]]
-id = "modern_api"
-transport = "http"
-negotiation = "auto"
-supported_protocol_versions = ["2026-07-28"]
-url = "https://modern-mcp.example.com/mcp"
+```json
+{
+  "settings": {
+    "mcp": {
+      "servers": [
+        {
+          "id": "modern_api",
+          "transport": "http",
+          "negotiation": "auto",
+          "supported_protocol_versions": [
+            "2026-07-28"
+          ],
+          "url": "https://modern-mcp.example.com/mcp"
+        }
+      ]
+    }
+  }
+}
 ```
 
 ### 5.3 stale session 处理（legacy HTTP）
@@ -330,7 +392,7 @@ url = "https://modern-mcp.example.com/mcp"
 - `tools/list` 等只读请求：有界重连，最多 2 次——重新 `initialize` 换取新 session-id；新连接不继承旧 session-id 与旧 request-id；
 - `tools/call`：**不自动重放**，直接失败并报「session 过期，未自动重放」。工具调用可能有副作用，重放会造成重复执行。
 
-对使用者的含义：偶发的 404 对工具清单无感知；聊天中偶见「MCP 工具 xxx 调用失败：…session 过期」时，下一轮对话通常已用新会话自动恢复，持续出现才需要排查服务器侧会话超时设置。
+工具清单遇到会话过期时在上述次数内重连；工具调用返回失败并标记需要重连，后续请求建立新会话。反复出现会话过期时，检查服务器会话保留时间和网络状态。
 
 ### 5.4 工具结果内容边界
 
@@ -360,9 +422,9 @@ url = "https://modern-mcp.example.com/mcp"
 
 | 根因 | 表现 |
 |------|------|
-| `url` / `command` / `image` 缺失 | 配置错误，日志明示「缺少 url/command/image」 |
-| `id` 重复 | 后出现的条目被跳过并告警 |
-| `negotiation = "auto"/"modern"` 但 transport 非 http，或未填 `supported_protocol_versions` | 配置校验阶段跳过并告警，status 里根本不出现 |
+| `url` / `command` / `image` 缺失 | 对应 transport 装载时返回配置错误，日志明示缺失字段；补齐连接配置后保存并应用 |
+| `id` 重复 | 整份配置校验失败，调整为唯一 ID 后再保存 |
+| `negotiation = "auto"/"modern"` 但 transport 非 http，或未填 `supported_protocol_versions` | 配置校验失败；http 的新纪元模式需声明非空版本列表 |
 | 两个 server 的工具归一后同名 | fail-closed，冲突绑定全部不注册，error 为「alias 冲突」 |
 | compose 冷启动竞态 | 超时/5xx 自动重试 3 次，通常自愈；认证/4xx 不重试 |
 | 凭证无效 | 认证失败，检查 `.env` 与 `headers`/`env` 占位是否展开（展开为空串时服务器侧表现为匿名请求） |
@@ -375,7 +437,7 @@ url = "https://modern-mcp.example.com/mcp"
 
 **处置**：
 
-1. 慢工具（深度调研、大范围爬取类）给所在 server 单独调大 `timeout_seconds`，`/llm reload` 生效；
+1. 慢工具（深度调研、大范围爬取类）给所在 server 单独调大 `timeout_seconds`，保存并应用后生效；
 2. docker transport 首次调用前可能需要拉镜像：检查 `pull_policy`，用 `/llm mcp reload` 强制拉取；
 3. 间歇性超时优先排查 server 端负载与网络；持续超时且 `tools/list` 正常，多半是单个工具执行确实超过阈值。
 
@@ -383,7 +445,7 @@ url = "https://modern-mcp.example.com/mcp"
 
 **现象**：工具文本末尾出现 `…[MCP resource 正文超长，已截断]`，或提示 `MCP 工具省略了 N 个无效或超出限制的图片项` / `MCP 工具省略了尚未支持的内容：N 个 resource 项`。
 
-**解释**：这些提示全部来自 §5.4 的结果边界，属于刻意防护——正文仍会正常进入模型，只是超界部分被收拢为固定提示。
+**解释**：结果处理按 §5.4 的规则交付可用文本和有效图片，对截断、无效或暂不支持的内容附加省略提示。
 
 **处置**：
 
@@ -395,16 +457,10 @@ url = "https://modern-mcp.example.com/mcp"
 
 ## 7. 延伸阅读
 
-- [`docs/admin/mcp-servers.md`](../admin/mcp-servers.md)：接入实操清单，部署侧视角的 server 逐家配置与验证步骤；
+- [`docs/admin/mcp-servers.md`](../admin/mcp-servers.md)：本地 echo 首次练习、服务配置与工具调用验证；
 - [`mcp-integration.md`](mcp-integration.md)：设计决策与边界——目标边界、推荐路线、docker socket 取舍与安全决策的记录；
 - [`tool-discovery.md`](tool-discovery.md)：工具发现的策略、数据流与测试覆盖；
-- [`docs/admin/configuration.md`](../admin/configuration.md)：`config/llm.toml` 全量字段参考（含 `[mcp]` 段）；
+- [`docs/admin/configuration.md`](../admin/configuration.md)：`data/llm_config.db` 全量字段参考（含 `settings.mcp` 段）；
 - MCP 上游规范：<https://modelcontextprotocol.io>——协议方法、传输定义与各版本规范的权威来源。
 
 ---
-
-> **文档信息**
->
-> - 本文档基于 QuickQuip 项目编写，全部字段、默认值与行为描述以现行实现为准
-> - 相关源码：`src/quickquip/llm/mcp/`、`src/quickquip/llm/config.py`、`src/quickquip/llm/service_parts/mcp_lifecycle.py`、`src/quickquip/adapters/nonebot/command_parts/llm.py`
-> - 最后更新：2026-09-19

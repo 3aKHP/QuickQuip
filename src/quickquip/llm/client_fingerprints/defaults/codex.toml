@@ -1,0 +1,19 @@
+# Codex TUI 0.162.1: source 092d3acd6bec3e3a14bdc7e7a2810ab628ab759d.
+# Static Linux environment preset; edit the file to choose another environment.
+# Session UUIDs retain QuickQuip business identity and lifecycle.
+format_version = 1
+id = "codex"
+label = "Codex TUI (0.162.1, lightweight)"
+
+[protocols.openai_responses.headers]
+user-agent = "codex-tui/0.162.1 (Ubuntu 24.04; x86_64) unknown (codex-tui; 0.162.1)"
+originator = "codex-tui"
+accept-encoding = "gzip, deflate"
+
+[protocols.openai_responses.bindings]
+session-id = "business_session_id"
+thread-id = "business_session_id"
+x-client-request-id = "business_session_id"
+
+[protocols.openai_responses.body_bindings]
+prompt_cache_key = "business_session_id"

@@ -1,6 +1,12 @@
 <template>
   <div class="mem-view">
-    <UiPageHeader title="记忆管理" />
+    <UiPageHeader title="记忆管理" subtitle="按群查看、编辑与新增长期记忆条目">
+      <template #actions>
+        <router-link to="/llm-config?section=context" custom v-slot="{ navigate }">
+          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">配置记忆提取与上限</UiButton>
+        </router-link>
+      </template>
+    </UiPageHeader>
     <div class="toolbar">
       <label>群组<select v-model="groupId" @change="load"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g" :value="g">{{ g }}</option></select></label>
       <input v-model="keyword" placeholder="关键词过滤" class="kw-input" @keyup.enter="load" /><UiInfoTip text="支持正文关键词、成员名字、别名和 QQ；留空显示全部（最多 200 条）。" />

@@ -156,7 +156,7 @@ async def test_real_cascade_persists_discarded_and_accepted_hops(temp_usage_stor
     )
     monkeypatch.setattr(
         "quickquip.llm.usage._configured_pricing",
-        lambda: {"m": PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
+        lambda: {("p", "m"): PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
     )
     with usage_scope("summary", group_id="10001", run_id="run-x"):
         text, model = await _run_summary_cascade(
@@ -237,7 +237,7 @@ async def test_usage_ts_stamped_at_schedule_time_not_insert_time(temp_usage_stor
     )
     monkeypatch.setattr(
         "quickquip.llm.usage._configured_pricing",
-        lambda: {"m": PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
+        lambda: {("p", "m"): PricingRates(input_per_mtok=1.0, output_per_mtok=2.0)},
     )
     with usage_scope("summary", group_id="10001", run_id="run-ts"):
         await _run_summary_cascade(

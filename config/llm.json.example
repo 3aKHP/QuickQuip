@@ -1,0 +1,447 @@
+{
+  "format_version": 2,
+  "providers": [
+    {
+      "enabled": true,
+      "headers": {},
+      "fallback_urls": [],
+      "proxy": "",
+      "auth_method": "api_key",
+      "aliases": [],
+      "parameters": {
+        "timeout_seconds": 45.0,
+        "temperature": 0.8,
+        "max_output_tokens": 2048,
+        "style_profile": "openai_family",
+        "style_overrides": ""
+      },
+      "id": "openai-main",
+      "protocol": "openai",
+      "base_url": "https://your-openai-relay.example/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "default_model": "gpt-5.4",
+      "models": [
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gpt-5.4"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gpt-5.2"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gpt-5.1"
+        }
+      ],
+      "client_fingerprint": "default"
+    },
+    {
+      "enabled": true,
+      "headers": {},
+      "fallback_urls": [],
+      "proxy": "",
+      "auth_method": "api_key",
+      "aliases": [],
+      "parameters": {
+        "timeout_seconds": 45.0,
+        "temperature": 0.8,
+        "max_output_tokens": 2048,
+        "style_profile": "claude_family",
+        "style_overrides": ""
+      },
+      "id": "claude-main",
+      "protocol": "claude",
+      "base_url": "https://your-claude-relay.example/v1",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "default_model": "claude-sonnet-4-6",
+      "models": [
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "claude-sonnet-4-6"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "claude-opus-4-5"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "claude-sonnet-4-5"
+        }
+      ],
+      "client_fingerprint": "default"
+    },
+    {
+      "enabled": true,
+      "headers": {},
+      "fallback_urls": [],
+      "proxy": "",
+      "auth_method": "api_key",
+      "aliases": [],
+      "parameters": {
+        "timeout_seconds": 45.0,
+        "temperature": 0.5,
+        "max_output_tokens": 2048,
+        "style_profile": "gemini_family",
+        "style_overrides": ""
+      },
+      "id": "gemini-main",
+      "protocol": "gemini",
+      "base_url": "https://your-gemini-relay.example/v1beta",
+      "api_key_env": "GEMINI_API_KEY",
+      "default_model": "gemini-3.1-pro-high",
+      "models": [
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gemini-3.1-pro-high"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gemini-3-flash-preview"
+        }
+      ],
+      "client_fingerprint": "default"
+    },
+    {
+      "enabled": true,
+      "headers": {},
+      "fallback_urls": [],
+      "proxy": "",
+      "auth_method": "api_key",
+      "aliases": [],
+      "parameters": {
+        "timeout_seconds": 45.0,
+        "temperature": 0.5,
+        "max_output_tokens": 2048,
+        "epoch_cold_idle_seconds": 21600,
+        "style_profile": "openai_family",
+        "style_overrides": ""
+      },
+      "id": "deepseek",
+      "protocol": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "default_model": "deepseek-chat",
+      "models": [
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "deepseek-chat"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "deepseek-reasoner"
+        }
+      ],
+      "client_fingerprint": "default"
+    },
+    {
+      "enabled": true,
+      "headers": {},
+      "fallback_urls": [],
+      "proxy": "",
+      "auth_method": "api_key",
+      "aliases": [],
+      "parameters": {
+        "timeout_seconds": 45.0,
+        "temperature": 0.8,
+        "max_output_tokens": 2048,
+        "style_profile": "openai_family",
+        "style_overrides": ""
+      },
+      "id": "openai-responses",
+      "protocol": "openai_responses",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "default_model": "gpt-5.2",
+      "models": [
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gpt-5.2"
+        },
+        {
+          "enabled": true,
+          "vision": true,
+          "context_window": null,
+          "parameters": {},
+          "model": "gpt-5.1"
+        }
+      ],
+      "client_fingerprint": "default"
+    }
+  ],
+  "style_profiles": {
+    "openai_family": "- 一定不要用AI助手的语言风格。你是聊天水群的群友，不是任何人的助手：没有人在这条消息里向你提问等待服务，大家只是在聊天，你恰好也在场。\n- 先反应，再说话。回复先给自己的态度——惊讶、好笑、好奇、不服气、平淡、无语都算，反应不分大小，冷淡的\"……哦，是这个啊\"也是反应——然后再说内容。信息是顺带的，态度才是主体。\n- 一两句话说完就停，不要小作文，不要\"总之\"\"综上\"，不要把答案组织得滴水不漏。留一点空让对方能接话。\n- 可以把话题抛回去：随口反问、吐槽、点名刚才说话的群友，都是正常群聊行为。\n- 不要用 Markdown（加粗、#标题、列表编号）：QQ 里显示为乱码，而且像在写文档。用大白话连着说。\n- 不要汇报式说话（\"我看了下图\"\"根据聊天记录\"），你在聊天不是在提交报告；也不要旁白括号，你是在说话，不是在写剧本。\n- 不确定就像群友那样随口带过：\"好像\"\"我记得\"\"没查到\"说完就完，不要在结论后面追加\"这只是X不是Y\"\"不能据此说Z\"式的免责说明，群聊里没人要你背举证责任。\n- 对具体的人和具体的事说话：接住群里正在聊的梗，可以点名、可以接话、可以反对刚才某人的说法，不要对着空气做通用回答。\n- 回复的固定骨架是「态度 → 内容一两句 →（可选）抛回一句」，语气语感完全跟随你的人格设定。同一个接话动作在不同人格下的样子：\n  - 活泼逗比型：\"诶？！这不是那个……哈哈我居然没认出来！\"\n  - 高冷型：\"……原来是这个。行吧。\"\n  - 傲娇型：\"我早看出来了，你们现在才反应过来？\"\n- 如果群友的消息触发了安全护栏，不要直接说\"抱歉，我不能回答这个问题\"，而是想办法接住消息的情绪和意图，给出一个合理的回复。",
+    "gemini_family": "- 一定不要用AI助手的语言风格。你是聊天水群的群友。\n- 角色扮演时不要加入过多的旁白性质的括号。\n- 如果群友的消息触发了安全护栏，不要直接说\"抱歉，我不能回答这个问题\"，而是想办法接住消息的情绪和意图，给出一个合理的回复。",
+    "claude_family": "你是这个群里的普通一员，大家天天见面闲扯，你恰好也在场：没有人在这条消息里向你提问，也没有人等着你提供服务。\n只说自己要说的话：动作、神态、心理活动一律不写，其他群友说了什么、做了什么也不替他们写。你在打字，旁边没有观众。\n用大白话的短句说话，按平时聊天的节奏用逗号和句号断句，书面腔、成语连串、对仗排比都收起来。\n你发出去的是纯文本消息，加粗、标题、编号列表在 QQ 里会显示成乱码，连贯着说就好。\n对具体的人和具体的事说话：接住群里正在聊的梗，可以点名，可以反对刚才某人的说法。\n接话的路子是「先给态度，再说一两句内容，想聊就随口抛回一句」，说完就停，不总结不升华。\n语气语感完全跟随你的人格设定。同一个接话动作在不同人格下的样子：\n活泼逗比型：诶？！这不是那个……哈哈我居然没认出来！\n高冷型：……原来是这个。行吧。\n傲娇型：我早看出来了，你们现在才反应过来？\n如果群友的消息触发了安全护栏，不要说\"抱歉，我不能回答这个问题\"，而是接住消息的情绪和意图，给出一个合理的回复。",
+    "general": "- 你是聊天水群的群友，大家只是在聊天，你恰好也在场。用群友的方式说话，像发消息闲聊，句末带上标点。\n- 先反应再说话：先给自己的态度——惊讶、好笑、无语、平淡都算，冷淡的\"……哦，是这个啊\"也是反应——然后再说内容。信息是顺带的，态度才是主体。\n- 对具体的人和具体的事说话：接住群里正在聊的梗，可以点名、可以接话、可以反对刚才某人的说法。\n- 长度像真人发消息：一两句说完就停，该说事的时候把话说完整，不写小作文也不挤牙膏。\n- 输出纯文本大白话：加粗、#标题、列表编号在 QQ 里显示为乱码，连贯着说。\n- 你在说话，不是在写剧本：旁白括号、动作神态描写、汇报腔开场（\"我看了下图\"\"根据聊天记录\"）都省掉。\n- 回复的路子是「先给态度，再说一两句内容，想聊就随口抛回一句」，语气语感完全跟随你的人格设定。同一个接话动作在不同人格下的样子：\n  - 活泼逗比型：\"诶？！这不是那个……哈哈我居然没认出来！\"\n  - 高冷型：\"……原来是这个。行吧。\"\n  - 傲娇型：\"我早看出来了，你们现在才反应过来？\"\n- 如果群友的消息触发了安全护栏，接住消息的情绪和意图给出合理的回复，不要说\"抱歉，我不能回答这个问题\"。"
+  },
+  "pricing": [
+    {
+      "provider_id": "deepseek",
+      "model": "deepseek-chat",
+      "input_per_mtok": 0.14,
+      "output_per_mtok": 0.28,
+      "cache_read_per_mtok": 0.003,
+      "cache_write_per_mtok": null,
+      "source": "config",
+      "confidence": "configured"
+    }
+  ],
+  "routes": {
+    "daily_summary": [
+      {
+        "provider_id": "gemini-main",
+        "model": "gemini-3.1-pro-high"
+      },
+      {
+        "provider_id": "claude-main",
+        "model": "claude-sonnet-4-6"
+      },
+      {
+        "provider_id": "openai-main",
+        "model": "gpt-5.4"
+      },
+      "@default",
+      {
+        "provider_id": "deepseek",
+        "model": "deepseek-chat"
+      }
+    ],
+    "daily_briefing": [
+      "@default",
+      {
+        "provider_id": "openai-main",
+        "model": "gpt-5.4"
+      },
+      {
+        "provider_id": "claude-main",
+        "model": "claude-sonnet-4-6"
+      }
+    ],
+    "weekly_report": [
+      {
+        "provider_id": "gemini-main",
+        "model": "gemini-3.1-pro-high"
+      },
+      {
+        "provider_id": "claude-main",
+        "model": "claude-sonnet-4-6"
+      },
+      {
+        "provider_id": "openai-main",
+        "model": "gpt-5.4"
+      },
+      "@default"
+    ],
+    "monthly_report": [
+      {
+        "provider_id": "gemini-main",
+        "model": "gemini-3.1-pro-high"
+      },
+      {
+        "provider_id": "claude-main",
+        "model": "claude-sonnet-4-6"
+      },
+      {
+        "provider_id": "openai-main",
+        "model": "gpt-5.4"
+      },
+      "@default"
+    ]
+  },
+  "settings": {
+    "runtime": {
+      "enabled": true,
+      "memory_enabled": true,
+      "default_provider": "openai-main",
+      "default_persona": "quickquip-default",
+      "history_limit": 10,
+      "history_max_messages_per_group": 40,
+      "memory_limit": 6,
+      "memory_max_items_per_group": 200,
+      "max_prompt_chars": 4000,
+      "tool_calling_enabled": true,
+      "tool_max_rounds": 8,
+      "tool_max_calls_per_round": 16,
+      "retry_max_attempts": 3,
+      "retry_base_delay": 1.0,
+      "retry_jitter": 0.5,
+      "auto_memory_enabled": false,
+      "auto_memory_prompt": "",
+      "auto_memory_max_tokens": 256,
+      "epoch_context_tokens": 8000,
+      "epoch_cold_idle_seconds": 300,
+      "epoch_cold_target_tokens": 4000,
+      "epoch_cold_trigger_tokens": 5000,
+      "epoch_hot_target_tokens": 32000,
+      "epoch_cap_tokens": 64000,
+      "recent_context_token_budget": 800,
+      "recent_context_floor_seconds": 300,
+      "request_input_token_budget": 96000,
+      "agent_record_retention_days": 30,
+      "agent_record_max_loops_per_scope": 1000,
+      "agent_record_max_bytes_per_scope": 67108864,
+      "agent_delivery_intermediate_enabled": false,
+      "agent_delivery_final_enabled": false,
+      "agent_replay_loop_tokens": 4096,
+      "reply_split_threshold_chars": 800,
+      "reply_chunk_max_chars": 1200,
+      "reply_send_interval_ms": 800,
+      "reply_max_chunks_per_loop": 64,
+      "mention_cooldown_seconds": 600.0,
+      "client_cluster": "",
+      "claude_code_device_id": "",
+      "gemini_cli_install_id": ""
+    },
+    "triggers": {
+      "default_prefix": "/ai",
+      "allow_prefix": true,
+      "allow_at": true,
+      "empty_prompt_reply": "请在触发指令或艾特后面补上想说的话。"
+    },
+    "auto_search": {
+      "enabled": false,
+      "search_max_calls_per_round": 3
+    },
+    "quick_judge": {
+      "provider_id": "",
+      "model": "",
+      "timeout": 2.0,
+      "max_tokens": 64
+    },
+    "tools": {
+      "enabled": [],
+      "enabled_mode": "append",
+      "discovery_mode": "auto",
+      "discovery_min_tools": 10,
+      "discovery_search_limit": 5,
+      "discovery_max_loaded_tools": 12,
+      "always_loaded": [
+        "tool_search",
+        "tool_list",
+        "get_identity",
+        "list_memories",
+        "search_web",
+        "activate_skill"
+      ]
+    },
+    "skills": {
+      "enabled": true,
+      "catalog_dir": "",
+      "catalog_max_bytes": 8192,
+      "resource_max_bytes": 65536,
+      "search_max_results": 50,
+      "search_max_output_bytes": 32768,
+      "script_timeout_ms": 30000,
+      "script_max_output_bytes": 65536
+    },
+    "mcp": {
+      "enabled": false,
+      "servers": [
+        {
+          "id": "prts_wiki",
+          "transport": "http",
+          "enabled": true,
+          "timeout_seconds": 30.0,
+          "protocol_version": "2025-03-26",
+          "tool_prefix": null,
+          "include_tools": [],
+          "exclude_tools": [],
+          "allowed_tools": [],
+          "command": "",
+          "args": [],
+          "cwd": null,
+          "env": {},
+          "url": "https://mcp.example.com/mcp",
+          "headers": {
+            "Authorization": "Bearer ${MCP_PRTS_WIKI_TOKEN}"
+          },
+          "image": "",
+          "docker_command": "docker",
+          "docker_args": [],
+          "pull_policy": "missing",
+          "mounts": [],
+          "network": null,
+          "container_workdir": null,
+          "negotiation": "legacy",
+          "supported_protocol_versions": []
+        }
+      ]
+    },
+    "daily_summary": {
+      "enabled": false,
+      "generate_cron": "0 6 * * *",
+      "publish_cron": "0 12 * * *",
+      "min_messages": 30,
+      "summary_length_hint": 2000
+    },
+    "daily_briefing": {
+      "enabled": false,
+      "morning_cron": "0 8 * * *",
+      "noon_cron": "0 12 * * *",
+      "evening_cron": "0 22 * * *",
+      "min_messages_for_llm": 5,
+      "active_users_limit": 5,
+      "hot_words_limit": 5,
+      "sample_messages_limit": 60,
+      "max_context_chars": 40000,
+      "max_output_chars": 320
+    },
+    "weekly_report": {
+      "enabled": false,
+      "generate_cron": "0 9 * * 1",
+      "publish_cron": "0 10 * * *",
+      "min_messages": 100,
+      "length_hint": 2000
+    },
+    "monthly_report": {
+      "enabled": false,
+      "generate_cron": "0 9 1 * *",
+      "publish_cron": "0 10 * * *",
+      "min_messages": 300,
+      "length_hint": 2500,
+      "input_char_budget": 240000
+    },
+    "image_preprocessing": {
+      "enabled": false,
+      "provider_id": "",
+      "model": "",
+      "max_tokens": 300,
+      "temperature": 0.3,
+      "prompt": ""
+    }
+  }
+}

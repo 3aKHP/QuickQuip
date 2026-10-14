@@ -25,7 +25,8 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import uuid
 from typing import TYPE_CHECKING
 
 from quickquip.llm.token_estimate import estimate_tokens
@@ -74,6 +75,7 @@ class EpochState:
     # 该键最近一次 LLM 请求派发的时间（不是群内最近消息）——只有请求才续期
     # provider 侧缓存。
     last_activity_at: float
+    id: str = field(default_factory=lambda: create_epoch_id())
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +167,10 @@ class EpochManager:
         state = self._states.get(key)
         return state.anchor_id if state is not None else None
 
+    def current_id(self, key: EpochKey) -> str | None:
+        state = self._states.get(key)
+        return state.id if state is not None else None
+
     def snapshot(self) -> list[dict[str, object]]:
         """全量锚点状态的值拷贝导出（epoch_snapshot action 消费）。
 
@@ -194,7 +200,25 @@ class EpochManager:
         ]
         return min(anchors) if anchors else None
 
-    def reset_scope(self, scope_key: str, *, store: "LLMStore | None" = None) -> None:
+    def capture_scope_evictions(
+        self, scope_key: str, store: "LLMStore",
+    ) -> dict[EpochKey, tuple[int, int]]:
+        """Observe old-window counts before an atomic history transition."""
+        counts = {}
+        for key, state in list(self._states.items()):
+            if key.scope_key == scope_key:
+                try:
+                    counts[key] = store.conversation_range_stats(scope_key, state.anchor_id, None)
+                except Exception:
+                    logger.warning(
+                        "epoch eviction snapshot failed scope=%s", scope_key, exc_info=True,
+                    )
+        return counts
+
+    def reset_scope(
+        self, scope_key: str, *, store: "LLMStore | None" = None,
+        evictions: dict[EpochKey, tuple[int, int]] | None = None,
+    ) -> None:
         """clear_context 第三清：抹掉该 scope 的全部纪元键。
 
         带 store 时逐键落 ``reason='clear'`` 事件（new_anchor_id = NULL 表
@@ -204,7 +228,8 @@ class EpochManager:
         for key in doomed:
             if store is not None:
                 self._record_event(
-                    store, key, "clear", self._states[key].anchor_id, None
+                    store, key, "clear", self._states[key].anchor_id, None,
+                    evicted_stats=evictions.get(key, (0, 0)) if evictions is not None else None,
                 )
             del self._states[key]
 
@@ -305,6 +330,8 @@ class EpochManager:
     ) -> EpochResetEvent:
         old_anchor = state.anchor_id
         state.anchor_id = self._pair_align(store, key.scope_key, candidate_anchor)
+        if state.anchor_id > old_anchor:
+            state.id = create_epoch_id()
         logger.info(
             "epoch advance scope=%s provider=%s model=%s reason=%s anchor=%d->%d tokens=%d",
             key.scope_key,
@@ -331,10 +358,11 @@ class EpochManager:
         old_anchor_id: int,
         new_anchor_id: int | None,
         epoch_tokens: int = -1,
+        evicted_stats: tuple[int, int] | None = None,
     ) -> None:
         """锚点推进的旁路落库（epoch_events 表）：失败只告警，绝不阻断主链路。"""
         try:
-            evicted_rows, evicted_tokens = store.conversation_range_stats(
+            evicted_rows, evicted_tokens = evicted_stats or store.conversation_range_stats(
                 key.scope_key, old_anchor_id, new_anchor_id
             )
             store.record_epoch_event(
@@ -378,3 +406,8 @@ class EpochManager:
         # MIN_EPOCH_ROWS 保护：单条超长行（如大转发）不得把窗口吃空到不足 4 行。
         idx = min(idx, max(0, len(rows) - MIN_EPOCH_ROWS))
         return int(rows[idx]["id"])
+
+
+def create_epoch_id() -> str:
+    """Temporary operations and chat windows use distinct UUIDv4 epoch identities."""
+    return str(uuid.uuid4())

@@ -6,13 +6,17 @@
 """
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
+from quickquip.llm.session import create_session_identity
+
 import asyncio
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.usage import set_usage_scope
 
 PROBE_TIMEOUT_SECONDS = 5.0
@@ -72,6 +76,8 @@ async def probe_provider(
         return ProviderHealth(provider.id, probe_model, "skipped", error="api_key_missing")
 
     request = LLMRequest(
+        session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=probe_model,
         system_prompt="",
         messages=[LLMConversationMessage(role="user", content="hi")],
@@ -79,7 +85,10 @@ async def probe_provider(
         max_output_tokens=_PROBE_MAX_TOKENS,
     )
     # 探活要反映 provider 当前真实可用性，关闭自动重试
-    client = build_provider_client(provider, retry_policy=RetryPolicy.disabled())
+    client = build_provider_client(
+        replace(provider, fallback_urls=[], stream_enabled=False),
+        retry_policy=RetryPolicy.disabled(), single_dispatch=True,
+    )
     started = time.monotonic()
     try:
         await asyncio.wait_for(client.complete(request), timeout=timeout)
@@ -109,9 +118,20 @@ async def probe_all_providers(
     """并发探活所有 provider，总耗时 ≈ 单次 timeout，不随 provider 数线性增长。"""
     if not config.providers:
         return []
+    providers = []
+    unavailable = []
+    for provider in config.providers.values():
+        if not provider.enabled:
+            continue
+        try:
+            providers.append(resolve_model_provider(config, provider.id, provider.default_model))
+        except ValueError:
+            unavailable.append(ProviderHealth(
+                provider.id, provider.default_model, "skipped", error="model_unavailable"
+            ))
     return await asyncio.gather(
-        *(probe_provider(p, timeout=timeout) for p in config.providers.values() if p.enabled)
-    )
+        *(probe_provider(p, timeout=timeout) for p in providers)
+    ) + unavailable
 
 
 def format_probe_results(results: list[ProviderHealth]) -> str:

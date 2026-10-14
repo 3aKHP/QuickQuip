@@ -27,11 +27,13 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 |------|------|
 | [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
 | [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
-| [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、`llm.toml`、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
+| [admin/llm-configuration.md](admin/llm-configuration.md) | LLM 数据库配置管理——迁移、草稿保存与应用、JSON 交换、备份恢复及 1.16.1 回退 |
+| [admin/client-fingerprints.md](admin/client-fingerprints.md) | 请求指纹 Profile——品牌 UA、安装与纪元身份及模板配置 |
+| [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、LLM 配置数据库、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
 | [admin/tool-discovery.md](admin/tool-discovery.md) | LLM 工具发现配置——大量 MCP 工具接入时的 `tool_search`、`tool_list`、常驻工具和排障建议 |
-| [admin/mcp-servers.md](admin/mcp-servers.md) | MCP Server 接入指南——transport 选择、接入清单、最小 http 示例与排障 |
+| [admin/mcp-servers.md](admin/mcp-servers.md) | MCP Server 接入指南——本地 echo 首次练习、transport 选择、接入清单与排障 |
 | [admin/skills.md](admin/skills.md) | Skill 系统部署与安全模型——`skills/` 目录约定、脚本执行隔离、资源上限与预置 Skill |
-| [admin/game-config.md](admin/game-config.md) | 游戏系统管理——游戏开关、参数配置、数据库文件、故障排查 |
+| [admin/game-config.md](admin/game-config.md) | 游戏系统管理——结束对局、停用方式、参数配置、数据维护与排障 |
 | [admin/sensitive-filter.md](admin/sensitive-filter.md) | 敏感词过滤器——词表配置、接入点、日志与测试方法 |
 | [admin/migration-napcat-to-llbot.md](admin/migration-napcat-to-llbot.md) | NapCat → LLBot 历史迁移记录——当时的风控背景、迁移步骤与回退思路 |
 | [admin/web-admin.md](admin/web-admin.md) | Web 管理后台——鉴权结构、Session 管理、反向代理配置、日志/Trace/各标签页功能列表 |
@@ -43,16 +45,19 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | 文件 | 说明 |
 |------|------|
 | [docs/dev/README.md](dev/README.md) | 开发文档索引——公共/私有边界、文档职责和维护规则 |
+| [docs/dev/documenting.md](dev/documenting.md) | 全仓公开文档规范——读者与职责、事实与证据、文风、操作示例、维护与审查 |
 | [docs/dev/style.md](dev/style.md) | 代码规范与架构原则——职责边界、禁止的上帝结构、输入/状态/测试契约 |
-| [docs/dev/testing.md](dev/testing.md) | 测试纪律——不要为了测试而测试；准入、断言、反模式与删留依据 |
+| [docs/dev/testing.md](dev/testing.md) | 测试纪律——保护目标、准入、断言、反模式与删留依据 |
 | [docs/dev/branching.md](dev/branching.md) | 开发工作流与发布流程——六级变更分级、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、验证、release 与 hotfix |
 | [docs/dev/versioning.md](dev/versioning.md) | 版本号约定——三段式版本、主题更新系列、dev 批次与发布候选规则 |
 | [docs/dev/architecture.md](dev/architecture.md) | 项目架构与结构——三层架构、依赖方向、组合根、目录用途与数据边界 |
 | [docs/dev/record-identities.md](dev/record-identities.md) | 记录正文与成员身份契约——正文片段结构、身份分层缓存与消费口径 |
 | [docs/dev/game-framework.md](dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
+| [docs/dev/llm-configuration-api.md](dev/llm-configuration-api.md) | LLM 配置 API——修订冲突、任务状态、参数 metadata 与前端接口契约 |
+| [docs/dev/llm-configuration-frontend.md](dev/llm-configuration-frontend.md) | LLM 配置前端交付——页面任务、保存与应用、字段继承、接口接线和设计验收 |
 | [docs/dev/llm-module.md](dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
-| [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、Docker Socket 取舍、推荐架构、现有 MCP server 列表 |
-| [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——从零开始，以项目实际规则为例，覆盖基础语法到进阶特性 |
+| [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、协议协商、部署职责与工具结果处理 |
+| [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——运行第一个练习、上线一条回复规则，再学习基础语法到进阶特性 |
 | [docs/dev/skill-tutorial.md](dev/skill-tutorial.md) | Skill 编写教程——从零开始写自己的 Skill：规范速查、安装激活、无脚本与带脚本实战 |
 | [docs/dev/mcp-tutorial.md](dev/mcp-tutorial.md) | MCP 概念教程——协议概念、QuickQuip 接入模型、四种 transport 实例与配置全解 |
 | [docs/dev/tool-discovery.md](dev/tool-discovery.md) | LLM 工具发现实现说明——manifest、动态加载循环、模式语义和测试覆盖 |
@@ -65,5 +70,5 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | 文件 | 说明 |
 |------|------|
 | [../README.md](../README.md) | 项目入口——功能亮点与快速开始 |
-| [../ROADMAP.md](../ROADMAP.md) | 演进路线——版本锁定 scope 与中长期方向 |
+| [../ROADMAP.md](../ROADMAP.md) | 演进路线——候选计划、待调研问题与中长期方向 |
 | [../CHANGELOG.md](../CHANGELOG.md) | 变更记录——按 Keep a Changelog 规范维护 |

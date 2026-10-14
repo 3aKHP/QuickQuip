@@ -1,6 +1,5 @@
 from .config import (
     DEFAULT_GENERATION_CONFIG_PATH,
-    DEFAULT_LEGACY_LLM_CONFIG_PATH,
     AudioGenerationConfig,
     AudioModelConfig,
     AudioProviderConfig,
@@ -33,7 +32,6 @@ from .service import GenerationService, generation_service
 
 __all__ = [
     "DEFAULT_GENERATION_CONFIG_PATH",
-    "DEFAULT_LEGACY_LLM_CONFIG_PATH",
     "AudioGenerationConfig",
     "AudioModelConfig",
     "AudioProviderConfig",

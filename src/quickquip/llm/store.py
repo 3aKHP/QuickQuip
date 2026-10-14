@@ -24,6 +24,7 @@ from quickquip.llm.store_parts.epoch_events import EpochEventsStoreMixin
 from quickquip.llm.store_parts.group_settings import GroupSettingsMixin
 from quickquip.llm.store_parts.memory import MemoryStoreMixin
 from quickquip.llm.store_parts.session_archive import SessionArchiveMixin
+from quickquip.llm.store_parts.session_lifecycle import SessionLifecycleMixin
 
 
 class LLMStore(
@@ -31,6 +32,7 @@ class LLMStore(
     ConversationStoreMixin,
     MemoryStoreMixin,
     SessionArchiveMixin,
+    SessionLifecycleMixin,
     GroupSettingsMixin,
     AgentRecordsStoreMixin,
     EpochEventsStoreMixin,

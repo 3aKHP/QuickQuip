@@ -59,7 +59,16 @@ from quickquip.llm.store_parts._base import _utc_now
 
 logger = logging.getLogger(__name__)
 
-_AGENT_SCHEMA_VERSION = 1
+_AGENT_SCHEMA_VERSION = 4
+
+_SESSION_MODEL_DDL = """
+    CREATE TABLE IF NOT EXISTS session_client_models (
+        session_id TEXT NOT NULL,
+        client TEXT NOT NULL,
+        model TEXT NOT NULL,
+        PRIMARY KEY (session_id, client)
+    )
+"""
 
 # 逐条执行（§4.3.1：迁移事务内不得 executescript 隐式提交）。
 _AGENT_SCHEMA_DDL: tuple[str, ...] = (
@@ -382,7 +391,7 @@ class LoadedDelivery:
 class LoadedTurn:
     turn_id: str
     turn_index: int
-    message_row_id: int
+    message_row_id: int | None
     text: str
     parts: tuple[dict[str, Any], ...]
     native_state: dict[str, Any] | None
@@ -433,7 +442,7 @@ class AgentRecordsStoreMixin:
                 "SELECT version FROM agent_schema_migrations"
             ).fetchall() if self._agent_table_exists(conn, "agent_schema_migrations") else []
             applied_versions = {int(row["version"]) for row in applied}
-            if _AGENT_SCHEMA_VERSION not in applied_versions:
+            if 1 not in applied_versions:
                 for statement in _AGENT_SCHEMA_DDL:
                     conn.execute(statement)
                 self._add_agent_conversation_columns(conn)
@@ -441,8 +450,45 @@ class AgentRecordsStoreMixin:
                 conn.execute(
                     "INSERT OR REPLACE INTO agent_schema_migrations (version, applied_at) "
                     "VALUES (?, ?)",
-                    (_AGENT_SCHEMA_VERSION, _utc_now()),
+                    (1, _utc_now()),
                 )
+            if 2 not in applied_versions:
+                for table in ("agent_scopes", "session_archives"):
+                    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                    for column in ("session_id", "session_created_at"):
+                        if column not in columns:
+                            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+                conn.execute(
+                    "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (2, _utc_now()),
+                )
+            if 3 not in applied_versions:
+                # History and execution records have independent retention periods.
+                conn.execute(
+                    "UPDATE agent_turns SET message_row_id = NULL "
+                    "WHERE message_row_id IS NOT NULL AND NOT EXISTS "
+                    "(SELECT 1 FROM conversation_messages m "
+                    "WHERE m.id = agent_turns.message_row_id)"
+                )
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS detach_agent_turn_message
+                    AFTER DELETE ON conversation_messages
+                    BEGIN
+                        UPDATE agent_turns SET message_row_id = NULL
+                        WHERE message_row_id = OLD.id;
+                    END
+                """)
+                conn.execute(
+                    "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (3, _utc_now()),
+                )
+            if 4 not in applied_versions:
+                conn.execute(_SESSION_MODEL_DDL)
+                conn.execute(
+                    "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (4, _utc_now()),
+                )
+            if not {1, 2, 3, _AGENT_SCHEMA_VERSION}.issubset(applied_versions):
                 self._verify_agent_schema(conn)
             conn.commit()
         except BaseException:
@@ -801,6 +847,10 @@ class AgentRecordsStoreMixin:
             raise LoopNotWritable(f"loop={handle.loop_id} 不存在")
         if row["closed_at"] is not None or row["status"] != LoopStatus.RUNNING:
             raise LoopNotWritable(f"loop={handle.loop_id} 已关闭（{row['status']}）")
+        self._validate_loop_generation(conn, handle)
+
+    @staticmethod
+    def _validate_loop_generation(conn: sqlite3.Connection, handle: LoopHandle) -> None:
         scope = conn.execute(
             "SELECT generation FROM agent_scopes WHERE scope_key = ?",
             (handle.scope_key,),
@@ -1129,6 +1179,8 @@ class AgentRecordsStoreMixin:
             closed = self._loop_closed(conn, handle)
             if not closed:
                 self._validate_loop_writable(conn, handle)
+            else:
+                self._validate_loop_generation(conn, handle)
             exists = conn.execute(
                 "SELECT 1 FROM agent_tool_executions WHERE execution_id = ?", (execution_id,)
             ).fetchone()
@@ -1395,88 +1447,95 @@ class AgentRecordsStoreMixin:
     def close_loop(
         self, handle: LoopHandle, status: LoopStatus, reason: str | None
     ) -> None:
-        """幂等关闭（§4.2/§5.5：基于已提交子项补齐缺失终态后关闭一次）。"""
+        """Converge pending children and close once in a write transaction."""
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT closed_at FROM agent_loops WHERE loop_id = ?", (handle.loop_id,)
-            ).fetchone()
-            if row is None:
-                raise AgentStoreError(f"loop={handle.loop_id} 不存在")
-            if row["closed_at"] is not None:
-                conn.commit()
-                return
-            # 收敛在途子项（§5.5）：未开始的交付 skipped、未落库回执 unknown、
-            # 声明未启动的工具 not_executed、执行中未落结果的工具 indeterminate
-            # （终止原因见 Loop terminal_reason）。
-            conn.execute(
-                """
-                UPDATE agent_tool_executions
-                SET status = ?, result_json = COALESCE(result_json, ?),
-                    finished_at = COALESCE(finished_at, ?)
-                WHERE status = ?
-                  AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
-                """,
-                (
-                    ToolExecutionStatus.NOT_EXECUTED,
-                    self._bounded_result_json(
-                        None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY
-                    ),
-                    _utc_now(), ToolExecutionStatus.DECLARED, handle.loop_id,
-                ),
-            )
-            conn.execute(
-                """
-                UPDATE agent_tool_executions
-                SET status = ?, finished_at = COALESCE(finished_at, ?)
-                WHERE status = ?
-                  AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
-                """,
-                (
-                    ToolExecutionStatus.INDETERMINATE,
-                    _utc_now(),
-                    ToolExecutionStatus.RUNNING,
-                    handle.loop_id,
-                ),
-            )
-            conn.execute(
-                """
-                UPDATE agent_deliveries SET status = ?
-                WHERE loop_id = ? AND status = ?
-                """,
-                (DeliveryStatus.SKIPPED, handle.loop_id, DeliveryStatus.PLANNED),
-            )
-            conn.execute(
-                "\n"
-                "                UPDATE agent_delivery_attempts SET status = ?, "
-                "finished_at = COALESCE(finished_at, ?)\n"
-                "                WHERE status = ?\n"
-                "                  AND delivery_id IN "
-                "(SELECT delivery_id FROM agent_deliveries WHERE loop_id = ?)\n"
-                "                ",
-                (DeliveryStatus.UNKNOWN, _utc_now(), DeliveryStatus.SENDING, handle.loop_id),
-            )
-            conn.execute(
-                """
-                UPDATE agent_deliveries SET status = ?
-                WHERE loop_id = ? AND status = ?
-                """,
-                (DeliveryStatus.UNKNOWN, handle.loop_id, DeliveryStatus.SENDING),
-            )
-            conn.execute(
-                "UPDATE agent_loops SET closed_at = ?, status = ?, terminal_reason = ? "
-                "WHERE loop_id = ?",
-                (_utc_now(), status, reason, handle.loop_id),
-            )
+            self._close_loop_in_transaction(conn, handle, status, reason)
             conn.commit()
         except BaseException:
             conn.rollback()
             raise
         finally:
             conn.close()
+
+    def _close_loop_in_transaction(
+        self, conn: sqlite3.Connection, handle: LoopHandle,
+        status: LoopStatus, reason: str | None,
+    ) -> None:
+        """Share terminal-state convergence with atomic session transitions."""
+        row = conn.execute(
+            "SELECT closed_at FROM agent_loops WHERE loop_id = ?", (handle.loop_id,)
+        ).fetchone()
+        if row is None:
+            # A concurrent clear removes the Loop and all pending children.
+            return
+        if row["closed_at"] is not None:
+            return
+        # 收敛在途子项（§5.5）：未开始的交付 skipped、未落库回执 unknown、
+        # 声明未启动的工具 not_executed、执行中未落结果的工具 indeterminate
+        # （终止原因见 Loop terminal_reason）。
+        conn.execute(
+            """
+            UPDATE agent_tool_executions
+            SET status = ?, result_json = COALESCE(result_json, ?),
+                finished_at = COALESCE(finished_at, ?)
+            WHERE status = ?
+              AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
+            """,
+            (
+                ToolExecutionStatus.NOT_EXECUTED,
+                self._bounded_result_json(
+                    None, ResultRetention.BOUNDED, ToolSkipReason.RECOVERY
+                ),
+                _utc_now(), ToolExecutionStatus.DECLARED, handle.loop_id,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE agent_tool_executions
+            SET status = ?, finished_at = COALESCE(finished_at, ?)
+            WHERE status = ?
+              AND turn_id IN (SELECT turn_id FROM agent_turns WHERE loop_id = ?)
+            """,
+            (
+                ToolExecutionStatus.INDETERMINATE,
+                _utc_now(),
+                ToolExecutionStatus.RUNNING,
+                handle.loop_id,
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE agent_deliveries SET status = ?
+            WHERE loop_id = ? AND status = ?
+            """,
+            (DeliveryStatus.SKIPPED, handle.loop_id, DeliveryStatus.PLANNED),
+        )
+        conn.execute(
+            "\n"
+            "                UPDATE agent_delivery_attempts SET status = ?, "
+            "finished_at = COALESCE(finished_at, ?)\n"
+            "                WHERE status = ?\n"
+            "                  AND delivery_id IN "
+            "(SELECT delivery_id FROM agent_deliveries WHERE loop_id = ?)\n"
+            "                ",
+            (DeliveryStatus.UNKNOWN, _utc_now(), DeliveryStatus.SENDING, handle.loop_id),
+        )
+        conn.execute(
+            """
+            UPDATE agent_deliveries SET status = ?
+            WHERE loop_id = ? AND status = ?
+            """,
+            (DeliveryStatus.UNKNOWN, handle.loop_id, DeliveryStatus.SENDING),
+        )
+        conn.execute(
+            "UPDATE agent_loops SET closed_at = ?, status = ?, terminal_reason = ? "
+            "WHERE loop_id = ?",
+            (_utc_now(), status, reason, handle.loop_id),
+        )
 
     @staticmethod
     def _loop_closed(conn: sqlite3.Connection, handle: LoopHandle) -> bool:
@@ -1909,7 +1968,7 @@ class AgentRecordsStoreMixin:
     def delete_turn_by_message_row(self, scope_key: str, message_row_id: int) -> bool:
         """删除一个 Turn 的全部正文范围与交付内容（§9.3）。
 
-        保留协议需要的状态占位：Turn 行与主表行移除，工具声明保留名称与
+        移除主表行并保留已脱离消息的 Turn 占位，工具声明保留名称与
         终态（结果正文清空），Loop 非公开证据（native/owner）清除。
         """
         if self._unavailable:
@@ -1928,6 +1987,7 @@ class AgentRecordsStoreMixin:
             if turn is None:
                 conn.commit()
                 return False
+            # The schema 3 delete trigger detaches this retained Turn from its message.
             conn.execute(
                 "DELETE FROM conversation_messages WHERE id = ?", (int(message_row_id),)
             )

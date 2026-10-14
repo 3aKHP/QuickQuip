@@ -50,6 +50,9 @@ async def test_updated_filter_scrubs_complete_history(
     sensitive = make_sensitive_filter(tmp_path, "block", marker)
     client.answer = "safe reply"
     await reply("Second question")
-    assert marker not in json.dumps(asdict(requests[-1]), ensure_ascii=False)
+    serialized = json.dumps(
+        asdict(requests[-1]), ensure_ascii=False, default=lambda value: value.isoformat(),
+    )
+    assert marker not in serialized
     after = llm_service.store.list_recent_conversation_messages(scope, limit=50)
     assert all(row in after for row in before)

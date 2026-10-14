@@ -27,6 +27,8 @@ from quickquip.app.message_pipeline import (
 )
 from quickquip.chat.group_quotes import resolve_quote_display_name
 from quickquip.llm.profile import generate_profile
+from quickquip.llm.config_document import resolve_model_provider
+from quickquip.llm.runtime_snapshot import leased_service
 from quickquip.llm.provider import LLMProviderError
 from quickquip.adapters.nonebot.record_content import prepare_body, reply_source
 from quickquip.app.identities import identities, IdentitySnapshot
@@ -86,6 +88,7 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
     profile_cmd = on_command("profile", priority=10, block=True)
 
     @profile_cmd.handle()
+    @leased_service(lambda *args, **kwargs: get_llm_service())
     async def _(bot, event):
         if _is_private_chat(event):
             await profile_cmd.finish(MessageSegment.text("该命令仅支持群聊"))
@@ -112,6 +115,10 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         if not provider:
             await profile_cmd.finish(MessageSegment.text("LLM provider 未配置"))
         effective_model = settings.model or provider.default_model
+        try:
+            provider = resolve_model_provider(svc.config, provider_id, effective_model)
+        except ValueError:
+            await profile_cmd.finish(MessageSegment.text("当前模型不可用，无法生成人物志"))
 
         persona_id = settings.persona_id or svc.config.runtime.default_persona or ""
         persona = svc.config.personas.get(persona_id) if persona_id else None

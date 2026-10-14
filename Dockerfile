@@ -5,11 +5,13 @@
 # Build:
 #   docker build -t quickquip .
 #
-# Run bot only:
-#   docker run --rm -v ./config:/app/config -v ./data:/app/data quickquip
-#
-# Run web admin only:
-#   docker run --rm -p 5104:5104 -v ./config:/app/config quickquip python -u web_api.py
+# Run services through docker-compose.example.yml, with the project-root .env
+# and shared data/config mounts prepared per docs/admin/deployment.md.
+# To use the local build, set the config-init, quickquip and web-admin service
+# images to quickquip in your Compose configuration.
+# Its config-init service initializes or migrates LLM configuration before
+# starting the bot and Web Admin. For production deployment, see
+# prod.example/README.md.
 
 ARG PLAYWRIGHT_BASE_IMAGE=mcr.microsoft.com/playwright/python:v1.58.0-noble
 
@@ -69,12 +71,8 @@ COPY scripts/backfill_chat_archive.py scripts/backfill_record_identities.py scri
 # earlier, still present) is read by setuptools dynamic deps during metadata
 # generation, so it must remain in the image at this point.
 RUN pip install --no-deps --no-cache-dir .
-# WHY this copy is needed (do not "deduplicate" it away): pip install puts the
-# top-level `plugins` package into site-packages, but nonebot's load_plugins
-# (bot.py) derives module names relative to CWD (/app) and raises ValueError
-# for paths outside it. /app/plugins wins on sys.path (script dir first) and
-# satisfies the CWD constraint. Source-mount (hybrid) and dev layouts resolve
-# plugins under CWD already and are unaffected.
+# NoneBot derives plugin names relative to /app. Provide /app/plugins beside
+# the installed package so load_plugins resolves the expected module names.
 COPY src/plugins/ plugins/
 COPY config/ config/
 COPY llm_about/ llm_about/

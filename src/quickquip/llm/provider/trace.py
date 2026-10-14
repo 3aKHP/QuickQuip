@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar
+from quickquip.llm.session import SessionIdentity
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -60,6 +61,19 @@ _AGENT_LOOP_TRACE: ContextVar[AgentLoopTrace | None] = ContextVar(
     "quickquip_llm_agent_loop_trace",
     default=None,
 )
+_REQUEST_SESSION: ContextVar[SessionIdentity | None] = ContextVar(
+    "quickquip_llm_request_session", default=None,
+)
+
+
+@contextmanager
+def trace_request_session(identity: SessionIdentity | None) -> Iterator[None]:
+    """Bind an explicit request snapshot for tracing, including explicit absence."""
+    token = _REQUEST_SESSION.set(identity)
+    try:
+        yield
+    finally:
+        _REQUEST_SESSION.reset(token)
 
 
 @contextmanager
@@ -207,6 +221,9 @@ class LLMTraceStore:
                     CREATE INDEX IF NOT EXISTS idx_llm_http_traces_provider
                     ON llm_http_traces(provider_id, id DESC);
 
+                    CREATE INDEX IF NOT EXISTS idx_llm_http_traces_state_started
+                    ON llm_http_traces(state, started_at);
+
                     CREATE TABLE IF NOT EXISTS llm_http_trace_events (
                         event_id   INTEGER PRIMARY KEY AUTOINCREMENT,
                         trace_id   INTEGER NOT NULL,
@@ -253,6 +270,8 @@ class LLMTraceStore:
                         "PRAGMA table_info(llm_http_traces)"
                     ).fetchall()
                 }
+                if "session_id" not in trace_columns:
+                    conn.execute("ALTER TABLE llm_http_traces ADD COLUMN session_id TEXT")
                 if "agent_loop_id" not in trace_columns:
                     conn.execute(
                         "ALTER TABLE llm_http_traces ADD COLUMN agent_loop_id TEXT"
@@ -281,6 +300,7 @@ class LLMTraceStore:
         return {
             "id": int(row["id"]),
             "call_id": row["call_id"],
+            "session_id": row["session_id"],
             "agent_loop_id": row["agent_loop_id"] or row["call_id"],
             "loop_sequence": int(row["loop_sequence"] or 1),
             "started_at": row["started_at"],
@@ -315,6 +335,7 @@ class LLMTraceStore:
         request_bytes: int,
         agent_loop_id: str = "",
         loop_sequence: int = 1,
+        session_id: str | None = None,
     ) -> str:
         self._ensure_schema()
         self._cleanup_if_due()
@@ -325,8 +346,8 @@ class LLMTraceStore:
                 INSERT INTO llm_http_traces (
                     call_id, agent_loop_id, loop_sequence, started_at,
                     provider_id, protocol, model, stream,
-                    method, url, request_headers, request_text, request_bytes, state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    method, url, request_headers, request_text, request_bytes, session_id, state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     call_id,
@@ -342,6 +363,7 @@ class LLMTraceStore:
                     request_headers,
                     request_text,
                     request_bytes,
+                    session_id,
                 ),
             )
             conn.execute(
@@ -433,7 +455,7 @@ class LLMTraceStore:
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT id, call_id, agent_loop_id, loop_sequence,
+                SELECT id, call_id, session_id, agent_loop_id, loop_sequence,
                        started_at, completed_at, provider_id, protocol,
                        model, stream, method, url, request_bytes, response_status,
                        response_bytes, response_raw_bytes, duration_ms,
@@ -489,7 +511,7 @@ class LLMTraceStore:
             rows = conn.execute(
                 f"""
                 SELECT events.event_id, events.state AS event_state,
-                       traces.id, traces.call_id, traces.agent_loop_id,
+                       traces.id, traces.call_id, traces.session_id, traces.agent_loop_id,
                        traces.loop_sequence, traces.started_at, traces.completed_at,
                        traces.provider_id, traces.protocol, traces.model, traces.stream,
                        traces.method, traces.url, traces.request_bytes,
@@ -650,6 +672,8 @@ async def begin_http_trace(**values: object) -> str | None:
 
     if not trace_active():
         return None
+    identity = _REQUEST_SESSION.get()
+    values["session_id"] = identity.id if identity is not None else None
     loop = _AGENT_LOOP_TRACE.get()
     if loop is not None:
         loop.sequence += 1

@@ -13,11 +13,15 @@
 """
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
+from quickquip.llm.session import create_session_identity
+
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import monotonic
 
 from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.provider import (
     BaseProviderClient,
     LLMRequest,
@@ -93,11 +97,19 @@ async def run_quick_judge_detailed(
             model="",
         )
     provider_id = provider.id  # 诊断字段跟随实际降级后的 provider
-    judge_provider = replace(provider, stream_enabled=False)
-
-    model = qj.model if qj.model else judge_provider.default_model
+    model = qj.model if qj.model else provider.default_model
+    try:
+        judge_provider = replace(
+            resolve_model_provider(config, provider.id, model), stream_enabled=False
+        )
+    except ValueError:
+        return QuickJudgeResult(
+            text='', outcome="no_provider", provider_id=provider_id, model=model
+        )
 
     request = LLMRequest(
+        session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=model,
         system_prompt="你是一个仅输出 JSON 的判定器。",
         messages=[

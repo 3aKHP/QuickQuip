@@ -1,10 +1,7 @@
 #!/bin/bash
 # QuickQuip Bot status checker and QR login helper (Linux local driver).
-# Linux equivalent of check_bot.ps1. SSHes into the server, calls the
-# server-side prod/check_bot.sh worker, and renders the QR code locally.
-#
-# NOTE: this file is named check_bot_local.sh (not check_bot.sh) on purpose:
-# check_bot.sh is the SERVER-side worker that this script invokes remotely.
+# SSHes into the server, calls the prod/check_bot.sh worker, and renders
+# the login QR code on the local machine.
 #
 # Usage:
 #   bash prod/check_bot_local.sh

@@ -208,7 +208,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
                 svc.start_private_session(chat_id, preset=preset)
                 msg = (
                     f"{scope_label}会话已开启。"
-                    f"也可以直接使用 /start_sesssion，上下文由会话纪元自动管理。"
+                    f"也可以直接使用 /start_session，上下文由会话纪元自动管理。"
                 )
                 if preset:
                     preview = preset[:80] + ("..." if len(preset) > 80 else "")

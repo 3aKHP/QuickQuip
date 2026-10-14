@@ -5,8 +5,7 @@ description: 当用户询问服务器/宿主机健康状态（CPU 负载、内�
 
 # host-healthcheck 宿主机健康检查
 
-用只读采集脚本回答"服务器/机器人现在运行状态如何"类问题。全部能力在
-`scripts/collect.py`（纯 Python 3 标准库，只读探测，一秒内完成）。
+运行 `scripts/collect.py`，用采集结果回答“服务器／机器人现在运行状态如何”类问题。脚本使用 Python 3 标准库进行只读探测。
 
 ## 工作方式
 
@@ -19,11 +18,9 @@ description: 当用户询问服务器/宿主机健康状态（CPU 负载、内�
 顶层字段：
 
 - `schema` / `generated_at` / `platform`：报告版本、生成时间、运行平台。
-- `levels`：三层增强探测结果。`L0` 恒真（零配置默认可用）；`L1` 表示检测到
-  宿主机 cron 采集文件；`L2` 表示检测到部署者只读挂载的 `/host/proc`。
+- `levels`：三层增强探测结果。`L0` 恒真（零配置默认可用）；`L1` 表示检测到宿主机 cron 采集文件；`L2` 表示检测到部署者只读挂载的 `/host/proc`。
 - `views`：四种来源视图的语义说明，转述来源时以它为准。
-- `groups`：指标组，每组都有 `status`（`ok` / `stale` / `unavailable`）与
-  `view`（来源视图）字段。
+- `groups`：指标组，每组都有 `status`（`ok` / `stale` / `unavailable`）与 `view`（来源视图）字段。
 - `reporting_rule`：转述纪律，必须遵守。
 
 指标组：
@@ -38,19 +35,14 @@ description: 当用户询问服务器/宿主机健康状态（CPU 负载、内�
 | `disk` | data 卷的磁盘用量（df 语义） | host-mount |
 | `host_metrics` | 宿主机 cron 采集的进程数、全量磁盘、温度等 | host-metrics-file |
 
-## 来源视图与诚实条款
+## 来源视图与转述
 
-Linux 容器对 loadavg/meminfo/uptime/stat 不做命名空间隔离，`/proc` 直读即
-宿主机整机值；被遮住的只是进程表、网络接口与未挂载磁盘。转述时遵守：
+项目默认的 Linux Docker 部署中，`/proc/loadavg`、`/proc/meminfo`、`/proc/uptime` 和 `/proc/stat` 提供宿主机整体指标；容器的进程表、网络接口和可见磁盘按其隔离与挂载配置确定。转述时按指标组的来源说明范围：
 
-- `host-proc`：宿主机整机实测。`source` 以 `/host/proc` 开头时取自部署者
-  显式只读挂载的宿主机 proc（L2）。
-- `cgroup`：容器自身限额视角，只约束机器人进程；回答"机器人自己还剩多少
-  内存/CPU"时用它，回答"整台服务器"时用 host-proc 组。
+- `host-proc`：宿主机整体指标。`source` 以 `/host/proc` 开头时取自部署者显式只读挂载的宿主机 proc（L2）。
+- `cgroup`：容器自身的限额与用量。回答“机器人所在容器还剩多少内存／CPU”时用它，回答“整台服务器”时用 `host-proc` 组。
 - `host-mount`：data 卷位于宿主机真实磁盘分区，用量为该分区的 df 值。
-- `host-metrics-file`：宿主机实测（cron 每分钟写入）。`stale` 说明采集器
-  可能已停止，给出 `age_seconds` 并提示部署者检查；`unavailable` 说明未部署，
-  此时进程数、全量磁盘、温度无从得知，如实说明即可。
+- `host-metrics-file`：宿主机采集结果（cron 每分钟写入）。`stale` 时给出 `age_seconds` 并提示部署者检查采集器；`unavailable` 时说明本次缺少进程数、全量磁盘和温度数据。
 
 缺失（unavailable）与陈旧（stale）必须明说，不得推测补全数字。
 

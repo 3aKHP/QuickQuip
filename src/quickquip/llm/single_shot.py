@@ -16,6 +16,9 @@ rate_limit_key/rule_name、扫描 channel、usage_scope 记账名、降级文案
 """
 from __future__ import annotations
 
+from quickquip.llm.epoch import create_epoch_id
+from quickquip.llm.session import create_session_identity
+
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 import logging
@@ -28,6 +31,7 @@ from quickquip.common.sensitive_filter import (
     scan_and_log,
 )
 from quickquip.llm.config import DISABLED_PROVIDER_REPLY, LLMConfig, ProviderConfig
+from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.provider import (
     BaseProviderClient,
     LLMProviderError,
@@ -85,6 +89,8 @@ def _build_request(
     image_urls: list[str] | None = None,
 ) -> LLMRequest:
     return LLMRequest(
+        session=create_session_identity(),
+        epoch_id=create_epoch_id(),
         model=model,
         system_prompt=prompt_pack.system_prompt,
         messages=[
@@ -184,6 +190,12 @@ async def run_command_single_shot(
         return _early_result(spec, f"当前 provider 不存在：{settings.provider_id}")
     if not provider.enabled:
         return _early_result(spec, DISABLED_PROVIDER_REPLY.format(provider_id=settings.provider_id))
+    try:
+        provider = resolve_model_provider(
+            config, provider.id, settings.model or provider.default_model
+        )
+    except ValueError:
+        return _early_result(spec, "当前模型不可用。")
 
     prompt_pack = spec.prompt_builder(
         prompt=normalized_prompt,
@@ -267,6 +279,10 @@ async def run_card_le_nearest(
         return None
 
     prompt_pack = build_nearest_prompt(captured=captured)
+    try:
+        provider = resolve_model_provider(config, provider.id, qj.model or provider.default_model)
+    except ValueError:
+        return None
     request = _build_request(
         provider=provider,
         model=qj.model if qj.model else provider.default_model,

@@ -4,7 +4,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-import quickquip.llm.service as llm_runtime_module
+import quickquip.llm.config_legacy as llm_runtime_module
 
 
 CONFIG_WITH_ENV_VARS = textwrap.dedent(

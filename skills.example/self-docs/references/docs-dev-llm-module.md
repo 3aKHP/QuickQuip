@@ -2,29 +2,13 @@
 
 # QuickQuip LLM 模块说明
 
+本文面向 LLM 运行时维护者，说明消息触发、Session 与上下文、请求组装、人格和工具的契约。配置与部署操作见[管理员文档](../admin/llm-configuration.md)，实现排障见本页第 11 节。
+
 ## 1. 模块定位
 
-QuickQuip 的 LLM 模块是建立在原有规则机器人之上的**显式触发扩展层**。
+QuickQuip 的 LLM 模块为规则机器人提供对话扩展。管理员按群或私聊选择渠道、模型和人格，并控制触发、记忆与工具。默认入口为配置前缀、艾特机器人和 `/search`；群聊唤醒按第 3 节的开关与条件启用。
 
-它在保留原有规则回复体系的前提下，提供一套受开关、触发条件和上下文边界约束的 LLM 能力：
-
-- 可按群开关
-- 可按群切换 provider / model / persona
-- 仅在指令或艾特时触发
-- 带有限定人格注入
-- 带有严格边界的短期上下文与长期记忆
-
-的 LLM 能力。
-
-当前模块还额外覆盖两类能力：
-
-- 显式触发下的图片理解
-- 显式触发下的语音消息转写
-- 基于项目内搜索后端的联网搜索
-- gemini provider 的内置联网搜索（`google_search` grounding，按 provider 开启）
-- 标准化工具调用（身份查询、记忆查询、联网搜索）
-
-如果后续需要把外部工具后端扩展为 MCP，单独查看 [mcp-integration.md](mcp-integration.md)。当前文档只描述已经落在项目内的 LLM 与工具调用实现。
+模块支持图片理解、语音转写、项目搜索后端、Gemini 原生搜索和工具调用。MCP 服务作为外部工具来源接入同一注册表，契约见[MCP 集成说明](mcp-integration.md)。
 
 LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message、Gemini GenerateContent 或 OpenAI Responses 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
 
@@ -36,74 +20,64 @@ LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每�
 
 ---
 
+### 1.2 请求指纹与身份投影
+
+`client_fingerprints` 模块负责 TOML Profile 解析、启动目录快照、安装身份持久化和请求投影。Provider 固定字段 `client_fingerprint` 选择模板，编译时绑定全局 cluster 和数据目录；模型覆盖保留绑定。四协议在各自认证与 Body 映射边界调用共享 Header/Body 投影接口。OpenCode 2 的 Chat Body 和物理尝试追踪在实际 URL、流式模式确定后进行最终投影；其他 Profile 的早期 Body 接口保留载荷原样。Codex 的可选 body_bindings 在实际 HTTP 尝试边界投影业务 Session，只补充缓存键，保留适配器的其他 Body 字段与序列化策略。模板、字段顺序和端点兼容条件随 TOML 分发。Header 布局作用于 HTTPX 请求对象；HTTP/1.1 的 h11 序列化将 Host 移至首位，真实 socket 验证覆盖该边界和其余字段的排布。
+
+`LLMRequest.session` 是业务 Session，`epoch_id` 是不可变的请求纪元快照。EpochManager 拥有聊天窗口 UUID，TurnRequestAssembler 在历史加载及预算重组后取值；独立任务入口创建临时纪元，工具和识图按调用链传递。底层自有 Profile 请求必须提供 UUIDv4。动态投影头不参与 Responses 内容兼容指纹。管理员配置与文件格式见[请求指纹 Profile](../admin/client-fingerprints.md)。
+
+OpenCode 的 Session ID 是业务 Session 的纯派生，恢复后稳定，纪元推进不旋转。Codex 的 session-id、thread-id、x-client-request-id 和 prompt_cache_key 共用业务 UUID 投影；绑定字段由 Profile 拥有，Provider／Model 手工覆盖在配置及运行时拒绝。请求级 ContextVar 保存冻结请求和逻辑 parent span；HTTP 尝试生成新 span 并在 trace 记录前完成 Header/Body 投影，重试和备用地址各自生成。取消、异常和嵌套调用退出时恢复上下文。HTTP 适配器保留鉴权、代理、超时、SSE 解析和计量职责；Profile 不访问业务存储或替换人格与工具策略。
+
 ## 2. 当前代码结构
 
-LLM 相关核心文件如下：
+LLM 维护入口按职责列在下表：
 
-- `src/quickquip/adapters/nonebot/commands.py`
-  - 负责 `/llm`、`/search` 等命令注册；注册逻辑按域拆到 `command_parts/`（llm / memory / sts / media 等）
-- `src/quickquip/adapters/nonebot/group_messages.py`
-  - 负责 NoneBot 群消息入口，并把消息交给应用层管线
-- `src/quickquip/adapters/nonebot/daily_summary_plugin.py`
-  - 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机）
-- `src/quickquip/llm/service.py`
-  - 框架无关的 LLM 服务核心（`LLMService`），NoneBot2 插件从此处 re-export；群级配置解析、人格注入、身份注入、词表注入、记忆检索、工具调用循环与请求拼装均在这里完成；v1.12.1 后按域拆为 `service_parts/` 子包的 mixin 组合（scope、MCP 生命周期、内置工具、draw_svg、定时消息工具、Skill 工具、STS 单发入口、图像预处理、健康检查、状态、自动记忆、Agent Loop 运行时等，见 `service_parts/__init__.py`）。回复主链的输入收敛为 `llm/reply_types.py` 的 `ChatTurnRequest`，请求装配（替代旧闭包）、输入规范化、输出后处理与返回形状构造在 `llm/reply_chain.py`
-- `src/quickquip/llm/reply_chain.py`
-  - 回复主链的装配与产出 shaping：`TurnRequestAssembler`（首轮与预算降级重建共用的显式装配对象）、`normalize_turn_input`、`finalize_reply_text`、`reply_result` 工厂与触发行 `raw_content` 拼装；只收显式参数，不 import `LLMService`
-- `src/quickquip/llm/quick_judge.py`
-  - quick_judge 诊断通道（`QuickJudgeResult`、provider 选择策略、detailed 通道），`LLMService` 仅保留薄委托
-- `src/quickquip/llm/single_shot.py`
-  - 一次性生成入口的共享管线骨架（defectify / turmfluch / card_le_nearest），各入口差异点通过 `CommandSingleShotSpec` 显式传入
-- `src/quickquip/llm/prompting.py`
-  - 负责 system prompt 组装（仅跨轮稳定段，字节稳定契约）、**当轮上下文信封渲染**（`build_turn_envelope`：时间/节日/participants/memories/词表命中，组装时渲染、不落库）、场景块构建、统一发言者格式渲染与 messages 数组拼装
-- `src/quickquip/llm/summarize.py`
-  - 每日总结与周/月报生成逻辑（模型级联、prompt 构建）；聊天记录输入统一经 `src/quickquip/chat/period_serializer.py` 压缩序列化（日分节【MM-DD 周X】→ 分钟块 `[HH:MM]` 块首带时间戳 → 块内同身份连发以 `/` 合并、复读折叠 ×N、URL 只留域名、bot 发言标记 `(bot)`）。周报与日报全量进序列化器；月报由 `src/quickquip/chat/period_serializer.py` 的 `build_monthly_chat_input` 按周公平分配 `input_char_budget` 字符预算组装（平静日整日保留，高活跃日优先用满剩余预算，放不下则等距抽稀），输出附 `【第N周 …】` 周节标题
-- `src/quickquip/llm/briefing.py`
-  - 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联）
-- `src/quickquip/app/message_pipeline.py`
-  - 应用组合根：chat / games / tieba 单例装配、`resolve_reply()` 规则链、`reload_chat_rules_pipeline()`、`save_all()` / `close_persistent_stores()` 与 `_ensure_llm_bindings()`
-- `src/quickquip/llm/config.py`
-  - 负责读取 `config/llm.toml`
-- `src/quickquip/llm/provider/`（包）
-  - 负责 OpenAI / Claude / Gemini / OpenAI Responses 四类协议适配，并处理工具调用协议映射；`complete()` 内建上游 429/5xx/网络错误的指数退避自动重试（`retry.py` 提供策略与延迟计算，所有 LLM 调用路径统一继承，探活/诊断经 `RetryPolicy.disabled()` 豁免）；Gemini 原生工具回合会保留并原样回放含 `thoughtSignature` 的有序 parts；Claude 签名 thinking 块在工具循环内经通用重建回传，带工具的已关闭 Loop 跨轮走原生回放（owner 五元组匹配且签名有效时）；Responses 后端为 `openai_responses/` 包（`profiles` / `request` / `response` / `stream` / `client` / `replay_guard`，`store:false` 全量回放 + 当前工具循环原生 items 回传 + call_id 记账 fail-closed，1.16 起）；Responses 的历史原生回放（含 reasoning 密文）经 owner 五元组校验后跨轮重放，上游 400 时剥历史 reasoning 降级重试一次（当前循环 items 不受降级影响）；v1.8.9 从单文件 `provider.py` 拆为子包（`base.py` 基类 + `openai.py` / `claude.py` / `gemini.py` 协议实现 + `factory.py` + `retry.py` + `trace.py`）
-- `src/quickquip/llm/tool_loop.py`
-  - 负责工具调用循环编排（Agent Loop trace、会话消息推进）
-- `src/quickquip/llm/thinking.py`
-  - 思考档位归一化层：内部六档（low/medium/high/xhigh/max/ultra）到各协议 wire 参数的映射与钳制（openai chat 家族钳制表、claude 代际分派 adaptive effort / 旧式 budget 固定值表、gemini 代际分派 thinkingLevel/thinkingBudget；openai_responses 走自身 profile 词表层）；纯映射层，除 claude budget 1024 数学下限外一律照发（后端不支持由上游 400 暴露），钳制与照发决策均经节流日志 fail-visible
-- `src/quickquip/llm/tool_discovery.py`
-  - 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler
-- `src/quickquip/llm/tool_result_pipeline.py`
-  - 负责工具执行前后的强制处理：参数与结果的敏感词扫描、单请求工具图片预算、非视觉模型图片降级
-- `src/quickquip/llm/tool_registry.py`
-  - 负责工具白名单注册、参数校验和执行调度
-- `src/quickquip/llm/skills/`
-  - Skill 系统域包（1.16 起）：`parser`（SKILL.md frontmatter 与体积校验）、`catalog`（目录扫描、路径加固与内容校验）、`context`（catalog 块与激活标记的文本渲染）、`state`（per-会话激活状态登记）、`preset_drift`（预置副本字节级指纹与同名分叉检测，stdlib 自包含，同步脚本与运行时共用），以及 `tools/` 下的四枚工具（`activate_skill` 激活、`read_skill_resource` 读资料、`search_skill_resources` 检索、`run_skill_script` 执行脚本）；`service_parts/skills.py` 负责每轮目录扫描（零延迟热部署）、Skill 描述清单注入系统提示与激活接缝；命令入口 `/skill list`。部署、安全模型与编写教程见 [../admin/skills.md](../admin/skills.md) 与 [skill-tutorial.md](skill-tutorial.md)
-- `src/quickquip/llm/store.py`
-  - 负责 SQLite 持久化（会话/记忆/归档/群设置）；v1.8.9 后按域拆为 `store_parts/` 子包的 mixin 组合
-- `src/quickquip/llm/vocab.py`
-  - 负责从 `llm_about/vocab.yaml` 读取群别名与黑话词表，并按需注入
-- `src/quickquip/llm/identity.py`
-  - 身份域：从 `llm_about/identities.yaml` 读取 QQ 号到标准身份的映射（共享身份模型 re-export），并承载当轮信封的身份编排（参与者归并 `collect_known_participants`、被艾特成员档案采集 `collect_mention_profiles`，供 turn envelope 注入）
-- `src/quickquip/llm/rendering.py`
-  - 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特
-- `src/quickquip/llm/message_segments.py`
-  - 负责消息段叶子节点渲染、bot 身份集合归一化等共享小逻辑
-- `src/quickquip/llm/health.py`
-  - LLM 健康检查模块（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings、auto_memory 共 13 项检查）
-- `src/quickquip/llm/image_preprocessor.py`
-  - 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点
-- `src/quickquip/adapters/nonebot/voice.py`
-  - 负责 OneBot V11 `record` 语音段提取、转码与 ASR 转写注入
-- `src/quickquip/generation/asr.py`
-  - 负责 ASR provider 调用，当前支持 OpenAI-compatible `/audio/transcriptions`
-- `src/quickquip/common/recent_message_buffer.py`
-  - 负责“触发前最近群消息”内存缓冲
-- `src/quickquip/llm/inputs.py`
-  - 负责从消息段中提取文本触发、艾特触发和图片 URL
-- `src/quickquip/search/web_search.py`
-  - 负责项目内 SearXNG 搜索客户端，供 `/search` 与 `search_web` 工具使用
-- `src/quickquip/llm/provider/gemini.py` + `src/quickquip/llm/rendering.py`
-  - 负责内置搜索的请求声明（`google_search` 工具条目）、`groundingMetadata` 解析（`LLMWebSearchReport`）与回复来源块渲染
+| 文件或目录 | 职责 |
+|---|---|
+| `src/quickquip/adapters/nonebot/commands.py` | 负责 `/llm`、`/search` 等命令注册；注册逻辑按域拆到 `command_parts/`（llm / memory / sts / media 等） |
+| `src/quickquip/adapters/nonebot/group_messages.py` | 负责 NoneBot 群消息入口，并把消息交给应用层管线 |
+| `src/quickquip/adapters/nonebot/daily_summary_plugin.py` | 负责每日总结/周期报告的定时任务注册与 `/summary` 命令；生成与发布编排本体在 `src/quickquip/chat/summary_jobs.py`（窗口、min_messages 门槛、persona 兜底、发布状态机） |
+| `src/quickquip/llm/service.py` | `LLMService` 门面，装配会话设置、提示、记忆、工具与请求；各域实现见 `service_parts/`。回复入口采用 `ChatTurnRequest` |
+| `src/quickquip/llm/reply_chain.py` | 装配首轮与预算降级请求，规范输入、处理输出并构造回复结果 |
+| `src/quickquip/llm/quick_judge.py` | 结构化快速判定与诊断结果，服务门面向它委托调用 |
+| `src/quickquip/llm/single_shot.py` | 独立生成的共享管线，以 `CommandSingleShotSpec` 表达各命令差异 |
+| `src/quickquip/llm/prompting.py` | 组装稳定的 system prompt、当轮上下文信封、场景消息和发言者标签 |
+| `src/quickquip/llm/summarize.py` | 生成每日总结与周月报，串联模型候选和压缩输入 |
+| `src/quickquip/llm/briefing.py` | 每日播报生成（群人格、模型级联、失败回退；遇到非正常 finish_reason 会继续尝试下一条级联） |
+| `src/quickquip/app/message_pipeline.py` | 应用组合根：chat / games / tieba 单例装配、`resolve_reply()` 规则链、`reload_chat_rules_pipeline()`、`save_all()` / `close_persistent_stores()` 与 `_ensure_llm_bindings()` |
+| `src/quickquip/llm/config.py` | 保留业务配置对象；数据库应用服务读取已发布快照，`config_document.py` 负责校验、编译与模型参数解析 |
+| `src/quickquip/llm/provider/` | 适配四类协议，序列化请求、解析响应、执行重试并记录 HTTP Trace |
+| `src/quickquip/llm/tool_loop.py` | 负责工具调用循环编排（Agent Loop trace、会话消息推进） |
+| `src/quickquip/llm/thinking.py` | 映射内部六档思考设置到各协议的参数与钳制规则 |
+| `src/quickquip/llm/tool_discovery.py` | 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler |
+| `src/quickquip/llm/tool_result_pipeline.py` | 负责工具执行前后的强制处理：参数与结果的敏感词扫描、单请求工具图片预算、非视觉模型图片降级 |
+| `src/quickquip/llm/tool_registry.py` | 负责工具白名单注册、参数校验和执行调度 |
+| `src/quickquip/llm/skills/` | 解析、扫描与执行 Skill 包；模块职责见第 6.3 节 |
+| `src/quickquip/llm/store.py` | SQLite 持久化门面，按域组合 `store_parts/` 的会话、记忆、归档与群设置实现 |
+| `src/quickquip/llm/vocab.py` | 负责从 `llm_about/vocab.yaml` 读取群别名与黑话词表，并按需注入 |
+| `src/quickquip/llm/identity.py` | 复用共享身份模型，归并参与者并收集被艾特成员档案 |
+| `src/quickquip/llm/rendering.py` | 负责把消息段标准化为给 LLM 使用的纯文本，并解析艾特 |
+| `src/quickquip/llm/message_segments.py` | 负责消息段叶子节点渲染、bot 身份集合归一化等共享小逻辑 |
+| `src/quickquip/llm/health.py` | 配置、渠道、数据库、资料、工具与运行时健康检查 |
+| `src/quickquip/llm/image_preprocessor.py` | 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点 |
+| `src/quickquip/adapters/nonebot/voice.py` | 负责 OneBot V11 `record` 语音段提取、转码与 ASR 转写注入 |
+| `src/quickquip/generation/asr.py` | 负责 ASR provider 调用，当前支持 OpenAI-compatible `/audio/transcriptions` |
+| `src/quickquip/common/recent_message_buffer.py` | 负责“触发前最近群消息”内存缓冲 |
+| `src/quickquip/llm/inputs.py` | 负责从消息段中提取文本触发、艾特触发和图片 URL |
+| `src/quickquip/search/web_search.py` | 负责项目内 SearXNG 搜索客户端，供 `/search` 与 `search_web` 工具使用 |
+| `src/quickquip/llm/provider/gemini.py`、`rendering.py` | 声明 Gemini 内置搜索，解析 `groundingMetadata` 并渲染回复来源 |
+
+### 请求组装与协议处理
+
+服务实现按 scope、MCP 生命周期、内置工具、SVG、定时消息、Skill、独立生成、图像预处理、健康检查、状态、自动记忆和 Agent Loop 拆分，模块清单见 `service_parts/__init__.py`。`reply_chain.py` 中的 `TurnRequestAssembler` 共用首轮与预算降级装配，输入和输出分别由 `normalize_turn_input`、`finalize_reply_text` 处理，`reply_result` 构造返回结果与触发行正文；该模块接收显式参数，与服务门面单向依赖。
+
+报告输入经 `chat/period_serializer.py` 压缩：按日分节、按分钟分块，同身份连续消息用斜杠合并，复读折叠为 ×N，URL 保留域名，机器人标记为 (bot)。日报和周报将整个周期交给序列化器；月报由 `build_monthly_chat_input` 按周分配 `input_char_budget`，保留平静日，高活跃日使用剩余额度并按需等距抽稀，输出包含周节标题。
+
+协议客户端的 `complete()` 对 429、5xx 和网络错误执行指数退避，策略由 `retry.py` 提供；探活和诊断使用 `RetryPolicy.disabled()` 禁用自动重试。基类、四协议实现、工厂、重试和追踪分别由相应子模块维护。
+
+Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 parts。Claude 当前工具循环通过通用重建回传签名 thinking 块，已关闭且包含工具的 Loop 在归属匹配和签名有效时跨轮原生回放。Responses 使用 `store:false` 全量回放，当前工具循环回传原生 items，并检查 call_id 记账、冲突和结果配对；已关闭历史经归属校验回放 reasoning 密文，上游返回 HTTP 400 时剥离历史 reasoning 重试一次。当前工具循环内容保留。历史投影规则见第 4.2 节。
+
+思考设置使用 low、medium、high、xhigh、max、ultra 六档。OpenAI Chat 按模型家族钳制；Claude 按代际选择 adaptive effort 或固定 budget 表；Gemini 按代际选择 thinkingLevel 或 thinkingBudget；Responses 使用自己的 profile 词表。Claude budget 至少为 1024，其余由映射规则照发，上游以 400 报告不支持的参数；钳制与照发决策记录节流日志。
 
 兼容层说明：
 
@@ -119,10 +93,10 @@ LLM 相关核心文件如下：
 
 配置文件：
 
-- `config/llm.toml`
+- `data/llm_config.db`
   - 真实运行配置，本地私有
-- `config/llm.toml.example`
-  - 原始通用示例，保留为参考模板
+- `config/llm.json.example`
+  - 可导入配置数据库的 JSON 交换模板
 
 群资料文件：
 
@@ -159,17 +133,13 @@ LLM 默认只在以下场景触发：
    - `awakening_relevance`
    - `awakening_qa`
    - `awakening_fallback`
-6. 如果仍未命中，则继续原有规则流：
+6. 如果各唤醒条件均未命中，继续规则流：
    - 复读
    - 接龙
    - 彩蛋规则
    - 时区猜测
 
-这意味着：
-
-- 默认配置下 LLM 不会吞掉普通消息
-- 规则系统依然是默认主流程
-- 显式调用优先级高于唤醒模块，唤醒模块优先级高于普通规则回复
+显式调用优先于唤醒，唤醒优先于规则回复。默认关闭唤醒时，普通群消息进入规则回复流程。
 
 ### 3.1 唤醒模块
 
@@ -184,13 +154,13 @@ LLM 默认只在以下场景触发：
 | `awakening_boredom` | APScheduler 定时检查沉寂群，并向 opt-in 群发送低频冒泡消息 |
 | `awakening_fallback` | 普通消息按配置概率兜底触发 |
 
-相关性与答疑判定会使用 `[triggers.quick_judge]` 指定的小模型配置；阈值 `>= 1.0` 时跳过对应 LLM 判定。
+相关性与答疑判定会使用 `settings.quick_judge` 指定的小模型配置；阈值 `>= 1.0` 时跳过对应 LLM 判定。
 
-`awakening_extend` 只由显式 LLM 入口打开，例如前缀或艾特触发。兴趣、兜底、无聊、相关性和答疑唤醒都是一次性触发，不会继续刷新延长窗口。延长窗口内仍会过滤图片-only、CQ-only、短语气词和过短无实义文本。
+`awakening_extend` 只由显式 LLM 入口打开，例如前缀或艾特触发。兴趣、兜底、无聊、相关性和答疑唤醒都是一次性触发，不会继续刷新延长窗口。延长窗口内会过滤纯图片、纯 CQ 码、短语气词和过短无实义文本。
 
 唤醒触发会给本轮 LLM 请求附加内部触发说明，例如命中的兴趣话题或兜底触发背景，并要求模型不要暴露唤醒机制。内部说明不会作为群友原文写入 LLM 对话历史。
 
-被动唤醒会携带群内近期历史图片（不再只注入当前触发消息里的图片）。`awakening_extend`、`awakening_interest`、`awakening_relevance`、`awakening_qa` 和 `awakening_boredom` 携带群内近期历史图片；`awakening_fallback` 不注入图片。非视觉模型仍由 LLM 运行时的图片预处理与剥离逻辑统一处理。
+`awakening_extend`、`awakening_interest`、`awakening_relevance`、`awakening_qa` 和 `awakening_boredom` 携带群内近期历史图片；`awakening_fallback` 不注入图片。非视觉模型的图片由 LLM 运行时统一预处理或剥离。
 
 无聊唤醒有两层开关：先在 `config/awakening.toml` 中设置沉寂秒数、概率、检查间隔和免打扰时间，再由群管理员执行 `/awakening boredom on`，写入 `data/awakening_boredom_groups.json`。
 
@@ -200,78 +170,85 @@ LLM 默认只在以下场景触发：
 
 ### 4.1 临时上下文
 
-为避免长期运行后将 24 小时持续监听数据混入模型，当前实现明确限定：
-
-- 仅在一次 LLM 触发发生时，读取**该群向前最多 20 条消息**
-- 这 20 条消息来自 `RecentMessageBuffer`
-- 这部分数据**仅保存在内存中**
-- 不写入 `data/llm.db`
-- 不作为长期记忆保存
-
-这是当前最重要的设计边界之一。
+`RecentMessageBuffer` 在内存中保存当前群最近 20 条消息，默认 TTL 为 1800 秒。LLM 触发时按增量补丁规则选取需要补充的现场消息；具体游标、保底时间窗和 token 预算见下一节。缓冲内容用于当轮请求，LLM 对话历史与自动记忆由各自写入流程管理。
 
 ### 4.2 LLM 短期会话
 
-工具历史投影在请求内按当前敏感词表检查完整 Loop。命中 block 或包含输出过滤替换态时，使用清洗后的文本档案并保留工具终态汇总，省略原生块、工具参数和结果正文；所有预算降级沿用该请求副本，持久化原文保持不变。未命中的 Loop 保留原有协议重放路径；原生回放（Claude 签名块 / Gemini parts / Responses output items）以 owner 五元组精确匹配为前提，失配或形状损坏按协议各自降级（档案/通用重建），Responses 侧另有跨 Loop call_id 冲突与配对完整的发送前守门。
+**Session 身份与生命周期**：Session 表示业务层持续进行的一段 LLM 交互。群／私聊 scope 承载当前聊天，Session 身份跨轮保持；上下文纪元管理每次发送的历史窗口。内部身份为 UUIDv4，创建时间为 UTC，`SessionIdentity` 是不可变快照，`LLMRequest.session` 显式携带它。
 
-LLM 自身的问答往返会写入 SQLite，用于多轮延续。自 1.14 起读取窗口由**会话纪元**（session epoch）机制管理，取代旧的「行数滚动窗」：
+- 群聊首次通过输入与资格检查后懒创建，群内不同发言者共享当前 Session。显式私聊 start 创建新身份；清空结束当前身份，下一轮再创建。查看状态和被过滤的消息不创建聊天身份。
+- 工具续轮、重试、流式回退、历史裁剪、冷场、撤回、人格／模型／协议切换、禁用再启用均延续当前身份。活动身份保存于 SQLite，重启后继续使用。
+- 私聊保存结束时，将身份与历史归档；恢复保留原身份并替换当前 Session。空私聊结束不建存档；不保存结束、清空和删除存档解除相应绑定。
+- 身份、历史迁移与 generation 更新在同一写事务中完成；事务成功后清理派生缓存。每轮冻结身份及 generation，失效后停止工具续轮，并拒绝迟到结果写入或交付。无 Agent 记录路径同样使用事务写入屏障。
+- 播报、总结、周月报、人物志、触发判定、后台记忆提取、诊断与独立命令每次操作使用一个短任务身份，级联与操作内重试复用。聊天图片预处理和工具图片转述显式继承聊天身份。
 
-- 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长、不逐轮位移——这是自动前缀缓存跨轮命中的结构性前提
-- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次，付费 miss 换优雅降级）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `llm.toml` 的 `[runtime]` / `[[providers]]` 用 `epoch_*` 键调整（见 `docs/admin/configuration.md`）
-- 窗口单位是 token 估算（`token_estimate.py`），不再是行数；另有 1024 行的行数硬兜底（防海量超短行撑爆 provider 的 messages 数组）
-- 锚点只落在 user/assistant 对边界，且保留最少 4 行（防单条超长转发把窗口吃空）
+出口投影接口为 `SessionProjector = Callable[[SessionIdentity], str]`。客户端 Profile 接收业务身份，按协议生成请求 Header、Body 或缓存键，具体契约见[请求指纹 Profile](../admin/client-fingerprints.md)。低层 `LLMRequest` 未提供身份时保留 `None`；依赖业务身份的 Profile 会在发送前拒绝缺失身份。
+
+`SessionIdentity` 的可序列化字段保持身份与创建时间；`SessionModelProjection` 承载 Session 的首次使用模型绑定，运行时投影状态不进入身份 JSON。Agent schema 4 的 `session_client_models` 按 Session 与客户端原子保存模型名，持续聊天每次绑定验证当前身份及 generation；存档恢复保留绑定，清空或删除最后一份存档时清理无引用绑定。独立操作在内存中绑定，Gemini CLI 的 default 与显式模板共用同一客户端键，模板版本跟随当前冻结配置。
+
+HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已有追踪记录保持空值。传输层仅在当前 `complete()` 范围内绑定显式快照，退出或取消后恢复；不从外层任务上下文推断业务归属。管理页面继续使用现有展示。
+
+升级前备份会话与追踪 SQLite 库；新增身份列为可空字段，旧消息与存档保留。回退旧代码运行后再次升级，须停服、备份并重置活动与存档绑定，使新版重新分配身份；维护 SQL、数据库路径与执行方式统一见[管理员回退与再次升级流程](../admin/llm-configuration.md#回退旧版本后再次升级)。该维护保留消息、存档、设置和 generation，追踪历史身份继续作为观测记录保存。数据库不可用时，持续聊天停止执行并返回存储错误，不分配临时身份继续回复。
+
+聊天消息与 Agent 执行记录各自遵循保留策略。消息裁剪或删除时，数据库在同一事务中将相关 Turn 的 `message_row_id` 置空；Turn、工具和交付记录按执行记录的保留规则维护。显式撤回继续清理正文及原生证据，清空会话删除整个 Scope 的执行记录。业务库 Agent schema 3 在首次打开时修复已有的悬空消息引用并安装删除保护，保留现存消息、执行记录和 Session 身份。
+
+工具历史投影在请求内按当前敏感词表检查完整 Loop。命中 block 或包含输出过滤替换态时，使用清洗后的文本档案并保留工具终态汇总，省略原生块、工具参数和结果正文；所有预算降级沿用该请求副本，持久化原文保持不变。未命中的 Loop 保留原有协议重放路径；原生回放（Claude 签名块 / Gemini parts / Responses output items）以 owner 五元组精确匹配为前提：渠道 ID、协议、实际请求模型、端点指纹和协议 Profile 指纹全部相同，失配或形状损坏按协议各自降级（档案/通用重建），Responses 侧另有跨 Loop call_id 冲突与配对完整的发送前守门。
+
+LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由**会话纪元**（session epoch）管理：
+
+- 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长，锚点保持稳定以支持跨轮前缀缓存
+- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `settings.runtime` 与渠道／模型 `parameters` 的 `epoch_*` 键调整（见[配置参考](../admin/configuration.md)）
+- 窗口使用 `token_estimate.py` 估算 token；1024 行硬上限同时控制消息数组长度
+- 锚点只落在 user/assistant 对边界，且保留最少 4 行，为超长消息保留基本对话配对
 - 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
-- 锚点状态保存在进程内存中：进程重启 = 冷一次缓存，重启后首个请求按「距最新一条一个标准 CTX（8k token）跨度」重新懒初始化
-- `/llm context_limit <n>` **语义变更**：从「每次最多读取 n 条」变为「该会话（群聊/私聊均可，上限 1024 条）退化为保留最新 n 行的滚动窗」；`/llm context_limit reset` 恢复纪元自动管理。`[runtime] history_limit` 全局默认不再作为读取上限生效；`history_max_messages_per_group` 废弃（保留解析、不再生效）
-- `clear_context` 三件齐清：会话消息存储、最近消息缓冲、纪元锚点（私聊会话 start/end/resume 同路径）
-- `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点（system prompt 字节变化 = 缓存全灭 = 免费重置窗口）
-- history 渲染信任落库时定格的 `canonical_name`（渲染冻结），不再按当前身份索引重算——改名用户在前缀中保持旧名，正是冻结的目的
+- 锚点状态保存在进程内存中：进程重启后，首个请求按距最新消息约 8k token 的范围懒初始化锚点
+- `/llm context_limit <n>` 将群聊或私聊会话设为保留最新 n 行的滚动窗，上限 1024 行；`/llm context_limit reset` 恢复纪元管理。读取上限由会话覆盖与纪元规则决定；旧 `history_limit` 全局默认和 `history_max_messages_per_group` 保留解析，运行时忽略这两个旧值
+- `clear_context` 清理消息与 Agent 执行记录，解除 Session 绑定并推进 generation；提交后清理最近消息缓冲、纪元锚点、信封缓存和 Skill 激活登记。私聊 start/end/resume 使用相应事务与缓存清理流程。
+- `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点，以适应人格提示变化后的窗口重建
+- 历史消息按落库时冻结的 `canonical_name` 渲染；用户改名后，历史前缀保留当时的名称
 
-**近期消息缓冲 = 【现场】补丁**：`recent_message_buffer.py` 对 LLM 请求路径不再提供全量快照，而是增量补丁（`list_patch`）：
+**近期消息的【现场】补丁**：LLM 请求通过 `recent_message_buffer.py` 的 `list_patch` 取得增量现场消息：
 
 单次请求在首次读取后保存补丁快照，首轮装配与预算缩窗重建共用该快照，并按最新历史去重。缓冲游标仅在自取时推进；私聊未参与补丁与显式空补丁保持独立计量语义。近期图片继续使用独立的全量快照。
 
 - 候选 =（上次服役之后的新消息）∪（`recent_context_floor_seconds`=300s 滑动保底窗内的消息），再按 message_id 剔除 history 已覆盖者与当前触发消息，最后从最新往回截到 `recent_context_token_budget`=800 token（估算，至少保留最新一条；非法取值回退默认并告警）
 - 读即服役：取出后 `note_patch_served` 推进按群游标；失败轮丢失超保底窗的旧补丁，由保底窗兜底
-- **被动唤醒的近期图不受增量语义收窄**：`include_recent_images` 路径的图片源是 `list_recent` 全量快照（TTL 窗语义，与文本补丁解耦）——无聊唤醒恰在冷场（补丁最空）时触发，图若随增量游标收窄该特性会静默失效
-- 预算只在服役侧执行：buffer 写入侧仍按 20 条 + TTL 1800s 收口（内存上界不动），estimator/budget/floor 全部由 service 按 `[runtime]` 配置注入（仅全局键，无 provider 覆盖）
-- 适配层不再向 `generate_reply` 传快照；service 在群聊且未显式注入时自取（`recent_messages=[]` 显式空是测试注入口）。私聊不自取
+- `include_recent_images` 通过 `list_recent` 全量快照取图，使用 TTL 时间窗，与文本补丁游标独立
+- 预算只在服役侧执行：buffer 写入侧按 20 条与 TTL 1800 秒控制容量，estimator/budget/floor 全部由 service 按 `settings.runtime` 配置注入（仅全局键，无 provider 覆盖）
+- service 在群聊且调用方未显式注入时取得补丁；`recent_messages=[]` 表示显式空输入，供测试或调用方控制现场内容。私聊跳过自取
 - `list_recent` 全量快照保留给两个不适用增量语义的消费者：`context_rules` 规则引擎与「读近期消息」模型工具
 
 **场景块消息结构**：当前 messages 数组采用“以 bot 回复为边界的场景块”模式：
 
 - 连续的多人发言归入同一 `role="user"` 场景块（bot 回复打断场景）
 - 所有发言者使用统一格式：`身份（QQ 号）：内容`
-- 场景以 `【上文】`（历史）或 `【当前提问】`（最后一轮提问）标记；现场补丁独立成 `【现场】` 段（带说明行，标识为氛围而非直接对话），尾巴顺序定型 `【轮次上下文】→【上文】→【现场】→【当前提问】`
-- 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，但不从合成内容抽取自动记忆（`store_user_message` 与 `trigger_auto_memory` 双开关）；合成 user_id（`boredom_timer`/`scheduled_timer`）既不进信封参与者，渲染时也直接以名字呈现（不包装成「（QQ xxx，未登记）」伪身份）
+- 场景以 `【上文】`（历史）或 `【当前提问】`（最后一轮提问）标记；现场补丁独立成 `【现场】` 段（说明这些消息作为聊天氛围使用），消息尾部顺序为 `【轮次上下文】→【上文】→【现场】→【当前提问】`
+- 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，但不从合成内容抽取自动记忆（`store_user_message` 与 `trigger_auto_memory` 双开关）；合成 user_id（`boredom_timer`/`scheduled_timer`）既不进信封参与者，渲染时也直接以名字呈现
 - 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
 - 引用消息会同时保留“当前提问者”和“引用发送者”，并显式区分机器人自己，避免 A 引用 B 时被误读成 B 在发言
-- 合并转发会递归展开多层节点，并保留每层的文字和图片信息，不再只剩一个占位外壳；组合文本总长封顶 4000 字符，超出在最外层出口硬切并追加「…（合并转发内容过长，已截断）」
+- 合并转发会递归展开多层节点，并保留每层的文字和图片信息；组合文本总长封顶 4000 字符，超出在最外层出口硬切并追加「…（合并转发内容过长，已截断）」
 - 非视觉模型的图注以文本身份落库：落库 `raw_content` 追加 `[图片 N 张：…]`（转发图注并入转发文本），落库字节即下一轮 history 的前缀字节，转述内容不随轮丢失、前缀稳定
 
-这样做的好处：
-- 模型只看到一种“某人说了某话”的语法，消除历史/缓冲/当前三种格式的解析负担
-- `【当前提问】` 明确标记最后一轮——模型无需自己推断该回答谁
-- 不存在 DB 存取嵌套包装（旧实现将已格式化的文本再次包入历史消息外层）
+统一格式使模型可以按发言者理解历史、现场和当前提问；`【当前提问】` 指定需要回答的最后一轮。格式化发生在请求组装阶段，数据库保存原始正文，避免重复包装。
 
 ### 4.3 图片输入边界
 
 图片理解遵循显式触发和受限被动唤醒规则：
 
-- 必须和 `/ai` 或 `@机器人` 同时出现
-- 单次最多处理 5 张当前、引用图片与近期上下文图片；转发图片不再作为图片本体附带（视觉模型同样不附），只以文字/图注形式进入
-- 被动唤醒在 `awakening_extend`、`awakening_interest`、`awakening_relevance` 和 `awakening_qa` 中携带群内近期历史图片
+- 群聊当前图片通过配置前缀或艾特机器人触发；被动唤醒按下述规则补充近期图片
+- 单次最多处理 5 张当前、引用图片与近期上下文图片；转发图片以文字或图注形式进入请求
+- `awakening_extend`、`awakening_interest`、`awakening_relevance`、`awakening_qa` 和 `awakening_boredom` 携带群内近期历史图片
 - 近期历史图片使用当前请求剩余的图片名额，并优先保留最新图片
-- 单张图片（解码后）上限 5MB；发送前统一过内联媒体收口（`provider/media_guard.py`）：GIF 按魔数嗅探自动取首帧转 PNG（各家模型对动图的实际口径为拒收或仅首帧，转码无能力损失）、同请求内相同内容去重、MIME 按实际字节归一，并对全部图片施加解码字节总量预算（默认 5MB，provider 级 `max_inline_media_bytes` 覆盖，0 = 不限）。超出单图上限或剩余额度的图片先降采样重编码（EXIF 方向校正、透明平铺白底、原始尺寸优先 + 长边 2560→768 阶梯 × JPEG q85/q70 两档，命中即停；结果按「原始字节哈希 + 目标额度」缓存），额度低于 96KB 不再压缩。压缩后仍装不下的按候选优先级前缀止停：第一张连同其后全部跳过并记日志，避免丢弃当前大图却保留后续无关小图
-- provider 图片下载按客户端实例缓存（TTL 10 分钟、容量 32 张 LRU，仅缓存成功结果）：同一轮内工具循环重建请求与退避重试不再重复下载同一 URL；GIF 首帧转码结果按内容哈希缓存，逐轮序列化不重复解码
+- 单张图片（解码后）上限 5 MiB；发送前统一过内联媒体收口（`provider/media_guard.py`）：GIF 按魔数嗅探自动取首帧转 PNG、同请求内相同内容去重、MIME 按实际字节归一，并对全部图片施加解码字节总量预算（默认 5 MiB，provider 级 `max_inline_media_bytes` 覆盖，0 = 不限）。超出单图上限或剩余额度的图片先降采样重编码（EXIF 方向校正、透明平铺白底、原始尺寸优先 + 长边 2560→768 阶梯 × JPEG q85/q70 两档，命中即停；结果按「原始字节哈希 + 目标额度」缓存），额度低于 96 KiB 不再压缩。压缩后仍装不下的按候选优先级前缀止停：第一张连同其后全部跳过并记日志，避免丢弃当前大图却保留后续无关小图
+- provider 图片下载按客户端实例缓存（TTL 10 分钟、容量 32 张 LRU，仅缓存成功结果）：同一轮内工具循环重建请求与退避重试复用同一 URL 的成功下载结果；GIF 首帧转码结果按内容哈希缓存，逐轮序列化不重复解码
 - 请求组装先统一准备用户消息与各批工具结果图片，共享字节预算和内容去重；优先最新用户消息中的当前/引用/近期图片，再按新到旧处理工具结果与历史图片。预算耗尽后停止接纳后续低优先级图片，重试和并发请求各自创建预算。协议序列化保留完整工具结果批次与原消息顺序
 - 如果只有图片没有文字提示，会自动补一个默认识图提示
-- 视觉主模型直接接收原图；列入 `non_vision_models` 的主模型接收带来源和序号的视觉转述
+- 视觉主模型直接接收原图；模型条目 `vision = false` 的主模型接收带来源和序号的视觉转述
 - 前置视觉识别不可用、返回空内容或任一图片识别失败时，本轮终止并提示用户重试
 
 MCP 工具也可返回经过校验的内联图片。它们不写入对话数据库、普通日志或 MCP 状态；视觉模型在下一轮工具调用消息中接收图片，非视觉模型仅接收经过二次敏感词扫描的转述文本。工具图片的转述不可用或失败时，Agent Loop 继续使用安全工具文本，而不会把原图或编码降级为文本。
 
-模型产出的图片（Responses 内置 image_generation 工具条目——codex 类后端会在服务端注入，请求未声明也会出现；以及 Gemini 响应的 inlineData 图片 parts）由各协议适配器提取为归一的响应侧 `generated_images` 附件，并从原生回放批次剥除：base64 不进 native_blocks，回放无收益纯成本。工具循环在每轮响应到达时把附件收进外发图片通道——与 draw_svg 等工具路径同通道、同上限（`MAX_OUTBOUND_TOOL_IMAGES`）、同「后续调用失败不丢弃已产出图片」语义，送达由适配层拼在正文后发送；收集侧挂与 svg_render 同风格的独立限流（全局 10 次/分钟、单用户 2 次/分钟）。
+模型产出的图片（Responses 内置 image_generation 工具条目——codex 类后端会在服务端注入，请求未声明也会出现；以及 Gemini 响应的 inlineData 图片 parts）由各协议适配器提取为归一的响应侧 `generated_images` 附件，并从原生回放批次剥除，base64 不进入 native_blocks。工具循环在每轮响应到达时把附件收进外发图片通道——与 draw_svg 等工具路径同通道、同上限（`MAX_OUTBOUND_TOOL_IMAGES`）、同「后续调用失败不丢弃已产出图片」语义，送达由适配层拼在正文后发送；收集侧挂与 svg_render 同风格的独立限流（全局 10 次/分钟、单用户 2 次/分钟）。
 
 ### 4.4 语音输入边界
 
@@ -282,19 +259,11 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - 若 OneBot 协议端的 `record` 段已经包含 `text` / `transcript` / `transcription`，直接使用该文本
 - 否则通过 OneBot `get_record` 获取音频文件，并调用 `config/generation.toml` 中 `[asr]` 配置的 provider
 - 转写结果会作为 `[语音转文字：...]` 拼入当前用户消息，并进入最近消息、日报/播报采集和词云输入
-- ASR 失败时不阻塞原消息处理；没有可用转写时按原有文字/图片输入逻辑继续
+- ASR 失败时不阻塞原消息处理；没有可用转写时按文字和图片输入逻辑继续
 
 ### 4.5 长期记忆
 
-长期记忆当前来源非常保守：
-
-- 人工 `/remember`
-- 自动记忆抽取开启时，仅从 LLM 已触发会话内提取稳定事实
-
-明确不允许：
-
-- 直接把 24 小时全群监听内容塞进记忆
-- 把所有群聊消息无差别持久化给 LLM 模块
+长期记忆由人工 `/remember` 和自动事实抽取写入。自动抽取开启时，从已触发的 LLM 会话提取稳定事实；普通群聊归档由聊天记录系统维护。
 
 ---
 
@@ -317,7 +286,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ### 5.2 群风格约束
 
-这部分不靠整份群资料硬灌，而是抽取稳定特征：
+人格提示从群资料中选择稳定的交流特征：
 
 - 熟人化
 - 深夜活跃
@@ -327,27 +296,11 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ### 5.3 词表按需注入
 
-`vocab.yaml` 不会整份注入模型。
-
-当前做法是：
-
-- 只有当 prompt 命中某个别名或黑话
-- 才在当轮 user 消息头部的【轮次上下文】信封里追加一小段消歧说明（system prompt 已静态化，见下）
-
-例如：
-
-- `哈基镜` 通常指镜子
-- 注意不要和王者荣耀的镜混淆
-
-这样做的好处：
-
-- 模型更会“听懂”
-- 不会变成背词表机器
-- 不容易把群资料污染成固定口癖
+当输入命中 `vocab.yaml` 中的别名或黑话时，运行时在当轮 user 消息头部的【轮次上下文】信封追加对应的消歧说明。例如某个昵称指向群成员或物品时，只注入相关解释。system prompt 保持稳定，词表按实际命中参与当轮理解。
 
 ### 5.4 Provider 风格覆盖
 
-每个 `[[providers]]` 条目支持可选字段 `style_overrides`（多行字符串）。
+渠道的 `providers[].parameters.style_overrides` 支持多行字符串；模型的 `models[].parameters.style_overrides` 可覆盖该值。共享风格段通过同一 `parameters` 对象中的 `style_profile` 引用。
 
 此字段的内容会在每次调用该 provider 时，追加到 persona 的 `style_prompt` 之后，用于修正特定模型的口癖。
 
@@ -357,7 +310,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - DeepSeek：禁止分点列举
 - Claude / Gemini：禁止旁白括号、禁止过于简略的回复
 
-修改后需 `/llm reload` 生效。
+通过 Web Admin「LLM 配置 → 渠道与模型」保存草稿，再单独应用并确认 Bot 已加载目标版本；在途任务保持原快照，后续请求使用新风格。`/llm reload` 读取已发布配置。完整参数继承与交换流程见[LLM 配置管理](../admin/llm-configuration.md)。
 
 ### 5.5 身份映射注入
 
@@ -365,9 +318,9 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 标识符分层：**LLM 层认人以标准身份（名字）为主锚**，QQ 号作为名字后的常驻后缀（区分同名无档案成员）；代码层（at 段解析、身份索引配对、存储列、注入管理）一律以 QQ 号为唯一键。`identities.yaml` 是 canonical name 的权威源，`vocab.yaml` 的标准名属称呼提示层，两处命名须保持同名对齐。群级合并仅对纯数字 `group_id` 生效：空串或非数字 scope（如私聊复合 id）不加载群级文件，`group_identities` 直接返回全局索引。
 
-当前做法是：
+身份解析与消息交付遵循以下规则：
 
-- **统一发言者格式**：所有进入 LLM 的消息（历史、缓冲、当前提问）均使用同一格式 `身份（QQ 号）：内容`，不再区分三种不同的包装语法
+- **统一发言者格式**：历史、现场和当前提问均使用 `身份（QQ 号）：内容`
 - 提问者进入 LLM 时，按 QQ 号解析标准身份；认人规则教模型**名字优先**、QQ 号仅作同名区分
 - 最近群聊上下文中的发言者也会按 QQ 号显示标准身份
 - 消息中的艾特在**入口 ingestion 时**按**群合并身份索引**渲染为 `@标准身份`（引用消息、合并转发子消息同索引）；未登记成员经群成员名片缓存（`get_group_member_info`，按 群×QQ 带 TTL）退化为 `@当前群名片`，查询失败才回退 `@QQ 号` 数字形态——名片预取覆盖消息顶层 @；引用/转发子消息内未登记 @ 不做名片预取，仅有段自带名称或与顶层重叠的预取名片时降级使用，否则回退数字形态
@@ -375,75 +328,32 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - **艾特档案注入（信封段）**：被艾特但未在窗口内发言的登记成员，其标准身份＋别名＋备注随当轮【轮次上下文】信封注入（名字在前、QQ 作配对键，上限 5 条）；候选来自入口结构化采集（at 段 QQ）与对窗口文本的 `@QQ 数字` 扫描（覆盖冻结落库的存量形态），已在窗口带发言人标签者跳过
 - **出站艾特还原**：模型回复文本中的 `@QQ 号` 数字形态在发送出口（`_llm_reply.py`）切分为真实 at 段（右边界防幻觉长号）；群级开关 `llm_at_mention`（默认开）另启用「@名字」通道——按群合并身份快照的标准身份/别名/观察名片做最长匹配，歧义、艾特 bot 自身或未登记名字一律保留为纯文本（at-all 结构上不可达），群聊 LLM 路径（显式/被动/无聊唤醒/定时任务）共用同一解析出口
 - **艾特护栏**：单条回复真实艾特上限 3 个（两通道合计，超出降级为文本）；「@名字」通道对同一（群 × QQ）有 `mention_cooldown_seconds` 冷却（默认 600 秒，0 关闭）——冷却在送达确认（可信 message_id）后记账、解析侧只读，发送失败不消耗名额，窗内重复艾特降级为文本
-- **引用锚定**：群级开关 `llm_quote_reply`（默认开）让群聊 LLM 回复以引用段锚定触发它的那条消息（机械化接线，LLM 无感）；协议端显式拒绝引用段时去段重发正文，超时等传输异常不重试
+- **引用锚定**：群级开关 `llm_quote_reply`（默认开）让群聊 LLM 回复以引用段锚定触发它的那条消息；协议端显式拒绝引用段时去段重发正文，超时等传输异常不重试
 - **周期报告读时重解析**：日总结/周报/月报/每日播报的序列化输入在读取时按身份索引把登记成员渲染名换成标准身份（归档仅存 user_id，无需回填）；同名不同 QQ 碰撞时给碰撞者附 QQ 后缀（碰撞触发式，控制压缩文本体积）
-- **身份信息只在 messages 中呈现**：system prompt 不再重复声明“当前提问者是谁”——消除双信息源冲突
-- **system prompt 完全静态化（前缀缓存契约）**：当前时间/星期、节日提示、对话参与成员、持久记忆、词表命中等逐轮变化的内容一律只在当轮 user 消息头部的【轮次上下文】信封呈现（组装时渲染、不落库），system 跨轮、跨日字节稳定，自动前缀缓存可跨轮命中。信封 token 经 `envelope_meter` 落 `envelope_tokens` 列进用量账本：Agent Loop 内每行同值，看板只按 **AVG** 解读为每轮成本，**禁止 SUM**（同回合重复计）
+- **发言者身份**：messages 标记当前提问者与各轮发言者，system prompt 维护稳定的人格与行为要求
+- **静态前缀与当轮信封**：时间、星期、节日、参与者、记忆和词表命中在当轮 user 消息头部的【轮次上下文】信封呈现，组装时渲染。同一配置、人格和工具集合下，system 跨轮、跨日字节稳定，支持前缀缓存。`envelope_meter` 将信封 token 记入 `envelope_tokens`；同一个 Agent Loop 的各行记录相同值，看板用 **AVG** 统计每轮成本，求和会重复计数
 - **加载可观测**：`identities.yaml` 缺失（INFO）/存在但无有效条目（WARNING）/正常加载条目数（INFO）均有日志；空模板与缺失在索引层面等价
 
-这样可以减少群友频繁改名带来的身份漂移，并且让模型在单一信息源中自然识别发言者归属。
+身份索引负责当前成员解析，冻结历史保留记录时名称；消息标签和当轮信封分别承载发言归属与当前资料。
 
 ---
 
 ## 6. 配置说明
 
-### 6.1 `config/llm.toml`
+### 6.1 `data/llm_config.db`
 
-主要区块：
+配置服务保留草稿、不可变发布快照、修订号、应用任务与 Bot 心跳。Web 和 CLI 共用校验与修订检查，Bot 以租约领取控制任务；保存草稿不会修改运行时，重启加载已发布版本。每个 Agent Loop 和独立报告任务固定配置、价格、工具与资源直到结束。
 
-- `[runtime]`
-  - `enabled`
-  - `memory_enabled`
-  - `default_provider`
-  - `default_persona`
-  - `history_limit`
-  - `history_max_messages_per_group`
-  - `memory_limit`
-  - `memory_max_items_per_group`
-  - `max_prompt_chars`
-  - `tool_calling_enabled`
-  - `tool_max_rounds`
-  - `tool_max_calls_per_round`
-  - `auto_memory_enabled`
-  - `auto_memory_prompt`
-  - `auto_memory_max_tokens`
-  - `agent_delivery_intermediate_enabled` / `agent_delivery_final_enabled`（Agent Loop 分段交付两域的全局默认：中间轮发送与最终轮分段；旧键 `agent_delivery_enabled` 未删除，读取时按两域同值映射）
-- `[triggers]`
-  - `default_prefix`
-  - `allow_prefix`
-  - `allow_at`
-  - `empty_prompt_reply`
-  - `[triggers.quick_judge]`：唤醒模块和语境规则使用的快速判定模型
-- `[tools]`
-  - `enabled`
-  - `enabled_mode`：`enabled` 非空时的作用方式，`append`（默认，默认白名单 + MCP 之上追加）/ `replace`（精确过滤）
-  - `discovery_mode`
-  - `discovery_min_tools`
-  - `discovery_search_limit`
-  - `discovery_max_loaded_tools`
-  - `always_loaded`
-- `[[providers]]`
-  - `id`
-  - `protocol`
-  - `base_url`
-  - `api_key_env`
-  - `default_model`
-  - `models`
-  - `timeout_seconds`
-  - `temperature`
-  - `max_output_tokens`
-  - `style_overrides`（可选，追加到每次调用的 system prompt 末尾）
-  - `auth_method`（可选，`api_key` / `bearer`，默认 `api_key`；Claude 控制 `x-api-key` / Bearer，Gemini 控制查询参数 key / Bearer）
-  - `prompt_caching`（可选，`claude` 协议专用，启用 Anthropic Prompt Caching）
-  - `cache_ttl`（可选，`claude` 协议专用，`"1h"` 启用 1h 扩展缓存、留空=默认 5min；仅 `prompt_caching` 开启时生效）
-- `[daily_briefing]`
-  - 每日早/午/晚播报全局开关、三段 cron、最小消息数、活跃用户/热词/样本上限、上下文规模、输出长度、模型级联列表
-- `[daily_summary]`
-  - 每日总结全局开关、生成/发布 cron、最小消息数、字数目标、模型级联列表
+交换格式的主要字段：
 
-`[runtime]` 的完整键集（会话纪元 `epoch_*`、重试退避、请求/重放预算、回复分段、Loop 记录等）以 [../admin/configuration.md](../admin/configuration.md) 为准；本文 §4.2 详述纪元与预算机制。
+- `providers`：有序渠道、模型与别名；固定认证／地址字段在渠道层，请求参数在渠道或模型的 `parameters`。
+- `style_profiles` 与 `pricing`：共享风格及价格，价格以 `(渠道 ID, 配置的模型 ID)` 精确匹配请求模型名，不跨渠道兜底。
+- `routes`：四类报告的有序候选，以 `{provider_id, model}` 引用；`@default` 动态选择默认模型。
+- `settings.runtime` / `triggers` / `auto_search` / `quick_judge` / `image_preprocessing`：全局运行、触发与专用模型选择。
+- `settings.tools` / `skills` / `mcp`：工具绑定、Skill 资源限额与 MCP 配置。
+- `settings.daily_summary` / `daily_briefing` / `weekly_report` / `monthly_report`：报告开关、提示与时间配置。
 
-Persona 定义已从 `llm.toml` 移出，改为 `config/personas/` 目录下每个 `.toml` 一个人格文件，`_shared.toml` 存储共享行为准则与风格规则。
+完整字段见 [配置参考](../admin/configuration.md)，状态和操作契约见 [配置 API](llm-configuration-api.md)。`config/personas/` 和 `config/generation.toml` 继续维护独立配置；旧 TOML 仅供迁移与迁移前版本回退。配置修订号覆盖配置库，外部文件和环境变量保持独立生命周期。
 
 ### 6.2 工具发现
 
@@ -455,27 +365,23 @@ Gemini 3 原生工具回合把 `thoughtSignature` 视为不可解释、不可重
 
 实现细节见 [tool-discovery.md](tool-discovery.md)，MCP 大工具集场景见 [mcp-integration.md](mcp-integration.md)。
 
-注意：
-
-- 这里的配置是“逻辑配置”
-- 真正的硬上限仍然在代码里存在
-- 即使把 `history_max_messages_per_group` 写大，实际仍会被代码上限截断
+窗口的 token 预算和行数上限见第 4.2 节；工具发现的数量约束由 `settings.tools` 与运行时加载规则执行。
 
 ### 6.3 Skill 系统
 
-Skill 系统是 1.16 引入的运行时可扩展能力：部署者把 Skill 包（一个子目录一个 Skill：`SKILL.md` 指令正文 + 可选 `references/` 参考资料 + 可选 `scripts/` 脚本）放入 `skills/` 目录，已安装 Skill 的描述清单常驻系统提示，AI 遇到匹配的请求时自行激活，按需读取资料、检索内容或执行脚本后作答。未部署任何 Skill 时工具不注册、系统提示不变，实例行为与此前完全一致。
+部署者将 Skill 包放入 `skills/`，每个子目录包含一份 `SKILL.md`，并可附带 `references/` 资料和 `scripts/` 脚本。Skill 开关开启且目录存在有效条目时，运行时注册 Skill 工具；工具调用总开关开启后，描述清单进入系统提示。AI 根据请求激活 Skill，再按需读取资料、检索内容或执行脚本。
 
 运行时结构（`llm/skills/` 域包，文件级清单见 §2）：
 
 - `parser`：SKILL.md 校验（name 命名约束与长度、description 长度、包体积上限）
-- `catalog`：`skills/` 目录扫描——每轮请求现扫、改动零延迟生效（无缓存失效问题）；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
+- `catalog`：`skills/` 目录每轮请求扫描，下一轮使用新的目录内容；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
 - `state`：按会话维护激活状态登记，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
 - `context`：catalog 块与激活标记的文本渲染（模型可见面的唯一出口，纯函数无状态）
 - `preset_drift`：预置 Skill 漂移检测——`skills/` 与 `skills.example/` 同名目录的全文件字节级指纹比对（只读）；分叉名单变化时记 WARNING，`/skill list` 标注分叉条目，结果只进日志与命令回复，不进 catalog 块与系统提示；`skills.example/` 缺失时 fail-open。主机侧同步脚本 `scripts/sync_preset_skills.py` 按文件路径装载同一实现（stdlib，无 venv 依赖）
 - `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
 - `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
 
-配置集中在 `llm.toml` 的 `[skills]` 段（键与默认值见 [../admin/configuration.md](../admin/configuration.md)）；群友侧用 `/skill list` 查看已安装与已激活项。部署方式与安全模型见 [../admin/skills.md](../admin/skills.md)，编写自己的 Skill 见教程 [skill-tutorial.md](skill-tutorial.md)。
+配置集中在 `settings.skills`（键与默认值见 [../admin/configuration.md](../admin/configuration.md)）；群友侧用 `/skill list` 查看已安装与已激活项。部署方式与安全模型见 [../admin/skills.md](../admin/skills.md)，编写自己的 Skill 见教程 [skill-tutorial.md](skill-tutorial.md)。
 
 ### 6.4 `config/awakening.toml`
 
@@ -506,13 +412,13 @@ interest_topics = ["关键词"]
 
 ### 6.5 `.env`
 
-本地开发与容器运行都需要：
+在根目录 `.env` 配置实际使用的渠道凭据；公开模板中的变量名示例为：
 
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `GEMINI_API_KEY`
 
-此外容器部署还会用到：
+OneBot 连接与 NoneBot 启动按部署模板配置，相关变量包括：
 
 - `QQ_ACCOUNT`
 - `ONEBOT_WS_URLS`
@@ -533,9 +439,9 @@ LLM 相关的多模态输入/产出配置在 `generation.toml` 中维护：
 
 ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /audio/transcriptions`。配置示例见 `config/generation.toml.example`。
 
-`draw_svg` 是内置工具但**不在默认启用名单**：需要在 `generation.toml [svg]` 设 `enabled = true`，并在 `llm.toml [tools] enabled` 中加入 `"draw_svg"`。渲染由 `quickquip.generation.svg` 编排——输入硬约束与静态清洗（`svg_sanitize.py`）、输出尺寸服务端覆盖（剥离根节点 width/height 后按 viewBox×2 显式传参）、spawn 子进程沙箱（Linux 带 RLIMIT_AS/RLIMIT_CPU，墙钟超时兜底）。工具结果图片经 `ToolExecutionContext.outbound_images` 外发通道直接发给用户（不回喂模型），单次回复上限 3 张，渲染限流为全局 10 次/分钟、单用户 2 次/分钟。
+`draw_svg` 是内置工具但**不在默认启用名单**：需要在 `generation.toml [svg]` 设 `enabled = true`，并在 `settings.tools.enabled` 中加入 `"draw_svg"`。渲染由 `quickquip.generation.svg` 编排——输入硬约束与静态清洗（`svg_sanitize.py`）、输出尺寸服务端覆盖（剥离根节点 width/height 后按 viewBox×2 显式传参）、spawn 子进程沙箱（Linux 带 RLIMIT_AS/RLIMIT_CPU，墙钟超时兜底）。工具结果图片经 `ToolExecutionContext.outbound_images` 外发通道直接发给用户（不回喂模型），单次回复上限 3 张，渲染限流为全局 10 次/分钟、单用户 2 次/分钟。
 
-两层可选安全防护：`harden`（默认启用）控制第一层渲染硬防线（输入约束+清洗+尺寸覆盖+沙箱 rlimit）；`content_judge`（默认关闭）控制第二层内容裁决，复用 `[triggers.quick_judge]` 的廉价模型对图片可见文本做安全判定，判定失败 fail-open。详见 `config/generation.toml.example` 中 `[svg]` 段注释。
+`harden` 默认启用，控制输入约束、清洗、尺寸覆盖和子进程资源限制。`content_judge` 默认关闭，开启后复用 `settings.quick_judge` 模型检查图片中的可见文本；判定服务失败时继续渲染。完整设置见 `config/generation.toml.example` 的 `[svg]` 注释。
 
 ---
 
@@ -550,11 +456,11 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm health [verbose|detail|full]`
   - 运行 LLM 健康检查（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings、auto_memory 共 13 项）
 - `/llm reload`
-  - 仅管理员。重载 LLM 配置，并探活当前会话实际生效的 provider/model
+  - 仅管理员。重载已发布 LLM 配置，并探活当前会话实际生效的 provider/model；草稿通过管理后台或 CLI 单独应用
   - reload 后探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费；api_key 未设置时自动跳过
 - `/llm probe`
   - 仅管理员。并发探活所有 provider（每个发一条 max_tokens=1 的请求），报告可达性与延迟
-  - 每次调用都可能产生 provider 计费——按需触发，不静默扣费；api_key 未设置的 provider 自动跳过
+  - 每次调用可能产生 provider 计费；api_key 未设置的 provider 自动跳过
 
 ### 7.2 provider / model / persona
 
@@ -614,7 +520,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 部署要点：
 
-- `config/llm.toml` 应在运行环境中提供
+- 初始化／迁移准备共享 `data/llm_config.db`，Bot 启动加载已发布快照，草稿通过独立任务应用
 - `config/generation.toml` 启用 ASR 时需要配置可用的 `[asr]` provider
 - `llm_about` 应在运行环境中提供
   - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
@@ -633,55 +539,54 @@ LLM 侧的联网搜索有两条互斥路径：
 
 ---
 
-## 9. 现阶段已知边界
+## 9. 数据作用域与安全处理
 
-当前模块定位为刻意收边的群聊 LLM，边界如下：
+群聊和私聊以各自 scope 管理会话状态与记忆。自动记忆从已触发会话抽取，群资料按人格设计和词表命中使用。工具来源按第 6 节的配置与注册职责接入。
 
-- 不自动扫全群消息做长期记忆
-- 不自动做复杂摘要归档
-- 不做跨群共享人格状态
-- 不把 `群聊简介和概况.md` 全文直接注入模型
-- 不默认把所有外部工具都改成 MCP
-- 敏感词表更新会改写 history 行的当轮渲染字节（加载时以当前词表重 scrub，不回写存储），使该轮前缀缓存 miss——安全优先的刻意取舍
+历史消息在读取时按当前敏感词表清洗，持久化原文保持不变；过滤结果变化会改变本轮请求字节，从而影响前缀缓存。完整 Loop 的敏感内容与原生回放规则见第 4.2 节。
 
-注：每日总结（`daily_summary`）模块已实现模型级联策略，生成失败时自动降级到下一个 provider/model，顺序在 `[daily_summary] model_cascade` 中配置。这是总结生成专用的级联，不影响普通 LLM 对话的 provider 选择。
-
----
+总结生成按 `routes.daily_summary` 的候选顺序级联，失败时尝试下一模型；普通聊天由当前会话选择的渠道与模型执行。
 
 ## 10. 上线前建议检查项
 
-如果准备正式上线，建议确认：
+部署检查以实际启用的能力为对象：
 
-- `config/llm.toml` 中默认 provider、model、persona 正确
-- `.env` 中 Gemini / OpenAI / Claude key 正确
-- `/llm current` 输出正常
-- `/llm memory status` 输出正常
-- `/llm clear_context` 可用
-- `@机器人` 和 `/ai` 触发都可用
-- 关闭记忆注入后，模型仍能正常回复
-- Docker 容器内日志没有出现：
-  - 配置文件缺失
-  - API key 缺失
-  - `vocab.yaml` 缺失
-  - `identities.yaml` 缺失或为空模板（日志关键字：`身份资料文件`；正常加载会输出 `已加载 N 条身份`）
+- 在管理后台确认默认渠道、模型、人格与 Bot 加载版本，根目录 `.env` 配置这些渠道需要的凭据。
+- 用 `/llm current` 与 `/llm memory status` 查看当前会话设置，验证配置前缀和艾特入口，以及 `/llm clear_context`。
+- 按部署所需验证记忆开关、工具、识图或语音入口；记忆关闭时聊天按正常对话流程回复。
+- 查看配置、凭据和群资料加载日志。`identities.yaml` 缺失或为空时按默认身份解析；需要标准身份时配置资料，并确认“已加载 N 条身份”日志。
 
----
+## 11. 请求结构排障
 
-## 11. 推荐维护方式
+排查请求失败、设置生效或跨轮连续性时，先确认任务使用的配置，再核对最终发送载荷。配置保存、应用和 Bot 实际加载状态见 [LLM 配置管理](../admin/llm-configuration.md)；参数继承与整体覆盖见该文档的“模型参数与引用”；请求特征及受管字段见 [请求指纹 Profile](../admin/client-fingerprints.md)。
 
-后续如果继续演进，建议遵守下面的顺序：
+### 生命周期与生效边界
 
-1. 先改 `config/llm.toml` 和 persona 文案
-2. 再改 `identities.yaml`
-3. 再改 `vocab.yaml`
-4. 最后才考虑扩大自动记忆能力
+- **静态前缀与当轮信封**：system 包含人格、风格和工具说明；时间、节日、参与者、记忆和词表命中进入当轮信封。同一配置、人格和工具曝光面下保持前缀稳定。配置、人格、Skill 目录或工具曝光面变化时，按对应变更解释前缀差异。实现与计量见 §5.5 的前缀缓存契约。
+- **配置与群覆盖**：LLM 任务持有开始时的配置和资源快照；已经进入生成的任务继续使用捕获的群设置，群覆盖修改后的新请求读取新设置。群覆盖、人格文件与 Skill 内容分别管理，配置修订号只覆盖配置库。检查群设置时同时核对实际请求的渠道、模型和人格。
+- **Session、纪元与追踪**：业务 Session 表示持续互动，纪元表示当前上下文窗口；重试和工具续轮沿用所属业务身份。请求追踪按逻辑调用和实际 HTTP 尝试分别建立标识。各 Profile 的字段与生命周期见本页“请求指纹与身份投影”和 Profile 文档。
+- **当前工具回合与已关闭历史**：当前回合的原生块、签名、调用 ID 和结果配对须完整。已关闭历史按 owner、完整性及预算决定原生回放或通用投影。Responses 收到上游 HTTP 400 且存在可剥离的历史 reasoning 时重试一次，保留当前回合内容；网络、鉴权、非 400 和协议终态错误使用各自错误处理路径。
 
-原因很简单：
+### 核对顺序与证据
 
-- 人格问题，优先改 prompt
-- 认人问题，优先改身份词表
-- 称呼理解问题，再改话题词表
-- 工具边界问题，优先改 `[tools]` 配置和注册表
-- 记忆问题，最后改自动抽取逻辑
+1. 记录代码 SHA、安装版本、配置修订与 Bot 实际加载状态，注明操作发生在旧任务开始前还是开始后。分别确认全局默认、群覆盖、模型参数和实际选中的人格。
+2. 记录协议、Provider、请求模型、`client_fingerprint` 与 `responses_profile`。渠道上的 `extra_body`、Profile 的策略和受管字段按各适配器契约共同形成最终载荷；检查实际请求，确认覆盖字段的位置、类型和效果。
+3. 在 Web Admin 的 LLM Trace 中核对该 Loop 的实际 Header、请求正文、HTTP 状态或流终态，区分首轮、工具续轮、重试和备用地址。Trace 采集须在复现前开启；未采集的历史请求无法补回。HTTP Trace 与模型执行记录的原生内容分别服务传输取证和历史回放。
+4. 对跨轮问题记录 owner 校验、预算投影和降级原因，同时核对工具声明、结果与签名。切换模型后出现历史投影变化时，将其与当前回合的协议错误分别定位。
+5. 对照 Trace 和用量记录核实实际 HTTP 次数。Responses 的历史降级重试会形成失败与重试各自的用量记录；基座内部重试沿用其既有计量口径。配置任务提交成功、Bot 加载成功与模型请求成功分别由对应结果确认。
 
-不要反过来。
+公开复现使用脱敏样本，保留定位所需的字段结构、顺序、错误和生命周期信息；真实凭据、账号、用户正文及签名或密文仅在受保护的排障环境中核对。真实渠道结论注明具体模型、端点、Profile、代码基线和验证日期。本地替身测试记录具体覆盖的客户端契约。
+
+## 12. 推荐维护方式
+
+按问题归属选择修改入口：
+
+| 问题 | 维护入口 |
+|---|---|
+| 人格与交流风格 | `config/personas/` 和渠道／模型风格参数 |
+| 成员身份解析 | `llm_about/identities.yaml` |
+| 昵称与黑话理解 | `llm_about/vocab.yaml` |
+| 工具可见范围与执行契约 | `settings.tools` 和工具注册表 |
+| 记忆事实提取 | 自动抽取提示与实现 |
+
+数据库设置通过草稿保存和独立应用生效；人格与资料文件按各自重载方式加载。先核对设置、输入和实际请求，再修改相应领域实现。

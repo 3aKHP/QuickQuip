@@ -86,8 +86,8 @@ const deletion = useConversationDeletion(async scope => {
 })
 
 function typeLabel(type: string): string { return { group: '群聊', private: '私聊', archive: '归档' }[type] || type }
-function typeVariant(type: string): string { return { group: 'info', private: 'success', archive: 'warn' }[type] || 'info' }
-function roleVariant(role: string): string { return { user: 'info', assistant: 'success', system: 'warn', tool: 'warn' }[role] || 'info' }
+function typeVariant(type: string): 'info' | 'success' | 'warn' | 'danger' { return ({ group: 'info', private: 'success', archive: 'warn' } as const)[type as 'group' | 'private' | 'archive'] || 'info' }
+function roleVariant(role: string): 'info' | 'success' | 'warn' | 'danger' { return ({ user: 'info', assistant: 'success', system: 'warn', tool: 'warn' } as const)[role as 'user' | 'assistant' | 'system' | 'tool'] || 'info' }
 function displayGroupId(conv: Conversation): string { if (conv.type === 'private') return conv.group_id.slice('private:'.length); if (conv.type === 'archive') return conv.group_id.slice('archive:'.length); return conv.group_id }
 function formatTime(iso: string): string { if (!iso) return ''; const d = new Date(iso); if (Number.isNaN(d.getTime())) return iso; const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` }
 

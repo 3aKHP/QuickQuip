@@ -22,6 +22,7 @@ from quickquip.llm.image_preprocessor import ImageDescription
 from quickquip.llm.rendering import append_web_search_source_block
 from quickquip.llm.reply_types import ChatTurnRequest, ReplyResult
 from quickquip.llm.provider import LLMRequest, strip_leading_reasoning_content
+from quickquip.llm.session import SessionIdentity
 
 if TYPE_CHECKING:
     from quickquip.llm.config import ProviderConfig
@@ -223,6 +224,8 @@ class TurnRequestAssembler:
     chat_id: int | str
     chat_type: str
     scope_key: str
+    session: SessionIdentity
+    get_epoch_id: Callable[[], str | None]
     settings: "ResolvedGroupSettings"
     sensitive: SensitiveFilter
     user_id: int | str
@@ -328,6 +331,8 @@ class TurnRequestAssembler:
             projected_history_segments=self.projected_segments,
         )
         return LLMRequest(
+            session=self.session,
+            epoch_id=self.get_epoch_id(),
             model=self.settings.model or self.provider.default_model,
             system_prompt=self.system_prompt,
             messages=self.messages,

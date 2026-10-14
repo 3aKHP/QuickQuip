@@ -3,12 +3,12 @@
 各家 cache 上报有 inclusive/exclusive 两种约定：Claude exclusive（input_tokens
 不含 cache_read/cache_creation），OpenAI/Gemini inclusive（cached ⊆ prompt）。
 归一化前置到 ``normalize_usage``（Claude 还原为 inclusive），cost 计算完全中立，
-避免在朴素实现里写反互相掩盖。参照同机 agent-gateway 的 usage_from_mapping +
-estimate_cost 切分。
+用量归一化与费用估算各自处理对应口径。
 
-价格全由 ``llm.toml`` 的 ``[pricing.models.<name>]`` 提供（不内置易过时的官方
+价格由已发布配置快照的价格表提供（不内置易过时的官方
 价表）；未覆盖的模型 → ``priced=False``，由仪表盘"未定价"可见性提示补填。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -99,9 +99,7 @@ def estimate_cost_components(
             "cache_creation_cost_usd": 0.0,
         }, False
     cache_read_rate = (
-        rates.cache_read_per_mtok
-        if rates.cache_read_per_mtok is not None
-        else rates.input_per_mtok
+        rates.cache_read_per_mtok if rates.cache_read_per_mtok is not None else rates.input_per_mtok
     )
     cache_write_rate = (
         rates.cache_write_per_mtok
@@ -118,16 +116,11 @@ def estimate_cost_components(
 
 
 def match_pricing(
-    provider_id: str, model: str, configured: dict[str, PricingRates]
+    provider_id: str, model: str, configured: dict[tuple[str, str], PricingRates]
 ) -> PricingRates | None:
-    """先查 ``provider_id/model``（per-provider 中转实际价），miss 回退纯 ``model``
-    （官方价默认），再 miss → None（未定价）。
-
-    key 为 ``f"{provider_id}/{model}"`` 精确拼接——即使 model 名本身含 ``/``（如
-    OpenRouter 的 ``google/gemma-4-31b-it``），拼接后 ``openrouter/google/gemma-4-31b-it``
-    仍与 configured 同名 key 精确匹配，无歧义；``is not None`` 判断避免依赖 truthiness。"""
-    specific = configured.get(f"{provider_id}/{model}")
-    return specific if specific is not None else configured.get(model)
+    """计费唯一单位是 ``(provider_id, model)``：model 为配置中的模型 ID（即请求发出的
+    模型名），不做跨渠道的同名模型兜底；miss → None（未定价）。"""
+    return configured.get((provider_id, model))
 
 
 def _mtok(tokens: int | None, rate_per_mtok: float) -> float:

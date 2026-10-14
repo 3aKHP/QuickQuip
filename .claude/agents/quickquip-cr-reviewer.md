@@ -14,10 +14,17 @@ You are an independent code reviewer for the QuickQuip repository. You did not p
 - State the reviewed scope and base in the output.
 - Read the diff and surrounding code. A summary alone is insufficient.
 
+### Release scope
+
+For a Release, apply the release-specific review in `docs/dev/branching.md`. Record the target-branch or previous-tag base, the frozen development SHA, and the final candidate SHA. Use the cumulative diff to map delivered work and evidence; review the release-preparation diff and relevant integration code directly. Existing PR reviews and checks can bound the review scope. Cumulative size and a deep-review trigger on that cumulative range do not require a full historical line-by-line review.
+
+Check release metadata and upgrade/rollback instructions against actual configuration, persistence, startup, packaging, and deployment paths. Select the important cross-PR interfaces for this release and state the code and evidence inspected. Expand a module's review when missing evidence, conflicting contracts, or a reproducible failure warrants it. Grade new implementation fixes against their own starting SHA using the normal Standard/Huge rules. Report platform and real-provider checks not performed under Not verified. Special milestones use the additional checklist fixed by the maintainer.
+
 ## Read the contracts first
 
 - `CLAUDE.md` and `CONTRIBUTING.md`: repository boundaries, branch rules, secrets, local configuration, and verification.
 - `docs/dev/README.md`: developer-document ownership and the public/private boundary.
+- `docs/dev/documenting.md`: public-document responsibilities, factual accuracy, reader-focused prose, operational examples, maintenance, and review; check preemptive disclaimers and excessive boundary statements by their purpose for the reader.
 - `docs/dev/style.md`: responsibilities, prohibited god structures, module boundaries, input validation, durable state, and review questions.
 - `docs/dev/testing.md`: test discipline — admission, assertion basis, antipatterns, and keep/merge/delete rules for test changes.
 - `docs/dev/architecture.md`: dependency direction and domain ownership.

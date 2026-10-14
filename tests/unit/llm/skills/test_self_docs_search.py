@@ -54,9 +54,9 @@ def test_command_name_hits_group_commands(activated):
     assert "references/docs-user-group-commands.md:" in result
 
 
-def test_config_key_hits_skills_admin_page(activated):
+def test_config_key_hits_configuration_page(activated):
     result = _search(activated, "catalog_max_bytes")
-    assert "references/docs-admin-skills.md:" in result
+    assert "references/docs-admin-configuration.md:" in result
 
 
 def test_error_term_hits_migration_troubleshooting(activated):

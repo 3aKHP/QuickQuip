@@ -4,7 +4,6 @@ from pathlib import Path
 
 from quickquip.generation.config import (
     DEFAULT_GENERATION_CONFIG_PATH,
-    DEFAULT_LEGACY_LLM_CONFIG_PATH,
     GenerationConfig,
     ResolvedAsrModel,
     ResolvedAudioModel,
@@ -18,14 +17,10 @@ class GenerationService:
     def __init__(
         self,
         config_path: str | Path = DEFAULT_GENERATION_CONFIG_PATH,
-        *,
-        legacy_llm_path: str | Path = DEFAULT_LEGACY_LLM_CONFIG_PATH,
     ) -> None:
         self.config_path = Path(config_path)
-        self.legacy_llm_path = Path(legacy_llm_path)
         self._config: GenerationConfig | None = None
         self._active_mtime: float | None = None
-        self._legacy_mtime: float | None = None
 
     def _stat_mtime(self, path: Path) -> float | None:
         try:
@@ -37,16 +32,11 @@ class GenerationService:
         if self._config is None:
             return True
         active_mtime = self._stat_mtime(self.config_path)
-        legacy_mtime = self._stat_mtime(self.legacy_llm_path)
-        return active_mtime != self._active_mtime or legacy_mtime != self._legacy_mtime
+        return active_mtime != self._active_mtime
 
     def reload(self) -> GenerationConfig:
-        self._config = load_generation_config(
-            self.config_path,
-            legacy_llm_path=self.legacy_llm_path,
-        )
+        self._config = load_generation_config(self.config_path)
         self._active_mtime = self._stat_mtime(self.config_path)
-        self._legacy_mtime = self._stat_mtime(self.legacy_llm_path)
         return self._config
 
     def get_config(self, *, force_reload: bool = False) -> GenerationConfig:

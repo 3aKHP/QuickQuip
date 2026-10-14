@@ -38,8 +38,10 @@ from quickquip.llm.tools import (
 from quickquip.llm.provider.trace import (
     begin_http_trace,
     finish_http_trace,
+    trace_request_session,
 )
 from quickquip.llm.usage import _schedule_usage_record
+from quickquip.llm.session import SessionIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +291,8 @@ class LLMRequest:
     allow_tool_calls: bool = False
     tool_choice: str = "auto"
     builtin_search: bool = False
+    session: SessionIdentity | None = None
+    epoch_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -431,8 +435,12 @@ def sanitize_gemini_schema(schema: Any) -> Any:
 
 
 class BaseProviderClient:
-    def __init__(self, config: ProviderConfig, retry_policy: RetryPolicy | None = None):
+    def __init__(
+        self, config: ProviderConfig, retry_policy: RetryPolicy | None = None,
+        *, single_dispatch: bool = False,
+    ):
         self.config = config
+        self.single_dispatch = single_dispatch
         self.retry_policy = retry_policy or RetryPolicy(
             max_attempts=config.retry_max_attempts,
             base_delay=config.retry_base_delay,
@@ -457,6 +465,12 @@ class BaseProviderClient:
         kwargs: dict[str, Any] = {"timeout": timeout}
         if self._proxy:
             kwargs["proxy"] = self._proxy
+        from quickquip.llm.client_fingerprints.assembly import selected_profile
+        from quickquip.llm.client_fingerprints.transport_layout import request_layout_hook
+
+        order = selected_profile(self.config).for_protocol(self.config.protocol).header_order
+        if order:
+            kwargs["event_hooks"] = {"request": [request_layout_hook(order)]}
         return kwargs
 
     def _get_api_key(self) -> str:
@@ -466,6 +480,34 @@ class BaseProviderClient:
                 f"环境变量 {self.config.api_key_env} 未设置，provider {self.config.id} 无法调用"
             )
         return api_key
+
+    def _assemble_headers(self, request, headers):
+        from quickquip.llm.client_fingerprints.assembly import assemble_headers
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            return assemble_headers(self.config, request, headers)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
+
+    def _project_body(self, request, payload):
+        from quickquip.llm.client_fingerprints.assembly import project_body
+        from quickquip.llm.client_fingerprints.catalog import resolve_profile
+
+        runtime = self.config.fingerprint_runtime
+        profile = runtime.profile if runtime else resolve_profile(
+            self.config.client_fingerprint, self.config.protocol,
+        )
+        return project_body(profile, request, payload)
+
+    def _prepare_http_attempt(self, url, headers, payload, *, stream):
+        from quickquip.llm.client_fingerprints.assembly import prepare_http_attempt
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            return prepare_http_attempt(self.config, url, headers, payload, stream=stream)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
 
     async def _dispatch_with_retry(
         self,
@@ -477,11 +519,17 @@ class BaseProviderClient:
         每次尝试内部已含 fallback_urls 链，退避等待发生在链与链之间；
         被重试吸收的失败不产生额外 usage 记录（明细见 HTTP trace）。
         """
+        if self.single_dispatch:
+            from quickquip.llm.client_fingerprints.retry_context import retry_context
+            with retry_context(0):
+                return await dispatch(request)
         policy = self.retry_policy
         attempt = 0
         while True:
             try:
-                return await dispatch(request)
+                from quickquip.llm.client_fingerprints.retry_context import retry_context
+                with retry_context(attempt):
+                    return await dispatch(request)
             except LLMProviderError as exc:
                 attempt += 1
                 if attempt >= policy.max_attempts or not _is_retryable(exc):
@@ -494,6 +542,20 @@ class BaseProviderClient:
                 await asyncio.sleep(delay)
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
+        """Dispatch and meter with the explicit request identity bound for tracing."""
+        from quickquip.llm.client_fingerprints.assembly import uses_attempt_bindings
+        from quickquip.llm.client_fingerprints.trace_context import request_context
+        from quickquip.llm.config_errors import ConfigError
+
+        try:
+            tracing = uses_attempt_bindings(self.config)
+        except ConfigError as exc:
+            raise LLMProviderError(f"{exc.code}: {exc.message}") from exc
+        with (trace_request_session(request.session),
+              request_context(request, tracing=tracing)):
+            return await self._complete_with_usage(request)
+
+    async def _complete_with_usage(self, request: LLMRequest) -> LLMResponse:
         """Stream-then-fallback dispatch + retry + usage metering.
 
         When ``config.stream_enabled`` is set, try the streaming endpoint
@@ -515,6 +577,8 @@ class BaseProviderClient:
                 except LLMProviderError:
                     raise
                 except Exception:
+                    if self.single_dispatch:
+                        raise
                     stream_used = False
                     response = await self._dispatch_with_retry(self._complete_non_stream, request)
             else:
@@ -687,7 +751,7 @@ class BaseProviderClient:
         失败的可重试错误切换下一候选；不可重试立即抛。调用方用返回的
         URL 构造实际 owner，不共享可变"最后成功端点"字段。
         """
-        if not self.config.fallback_urls:
+        if self.single_dispatch or not self.config.fallback_urls:
             return await fn(url, headers, payload), url
         last_exc: LLMProviderError | None = None
         for candidate in self._candidate_urls(url):
@@ -742,7 +806,8 @@ class BaseProviderClient:
     async def _post_json(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        attempt = self._prepare_http_attempt(url, headers, payload, stream=False)
+        headers, payload, body = attempt.headers, attempt.payload, attempt.body
         request_headers = _headers_to_text(headers)
         started = time.monotonic()
         call_id = await begin_http_trace(
@@ -858,8 +923,8 @@ class BaseProviderClient:
     async def _post_stream_sse(
         self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {**headers, "accept": "text/event-stream"}
+        attempt = self._prepare_http_attempt(url, headers, payload, stream=True)
+        headers, payload, body = attempt.headers, attempt.payload, attempt.body
         started = time.monotonic()
         call_id = await begin_http_trace(
             provider_id=self.config.id,

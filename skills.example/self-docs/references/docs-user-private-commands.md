@@ -35,7 +35,7 @@
 
 会话行为补充：
 
-- 引用一条消息追问时，当前提问与被引用内容会分开理解；引用里的合并转发会尽量读取其中的正文（转发中的图片不再附带原图，非视觉模型下以文字图注形式进入）。
+- 引用一条消息追问时，当前提问与被引用内容会分开理解。引用合并转发时会尽量读取正文；转发内的原图不会作为图片附件发送，非视觉模型使用文字图注。
 - 上下文由会话纪元自动管理：AI 能回看的对话窗口随会话增长（默认上限约 6.4 万 token，冷场后自动收缩）；用 `/llm context_limit <n>` 可把本会话改为固定保留最新 n 条（上限 1024），`reset` 恢复自动管理。
 
 ---
@@ -58,7 +58,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm mcp` | 外部工具（MCP）连接状态（`mcp status` 同此） |
 | `/skill list` | 查看已安装的 Skill 与当前会话已激活的项（Skill 是部署者安装的 AI 扩展能力包，见 [Skill 说明](llm-skills.md)） |
 
-改动类子命令私聊中任何人可用（群聊中仅管理员）：
+改动类子命令私聊中任何人可用；群聊中需要群管理、群主或已登记的[全局管理员](../admin/global-admins.md)身份：
 
 | 子命令 | 说明 |
 |------|------|
@@ -69,21 +69,23 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm memory on / off` | 开关记忆注入 |
 | `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、重置为全局默认、查看 |
 | `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本会话思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；回复会给出实际下发结果（部分模型词表较窄会自动调整）；不配置时模型用自身默认档。切换后若回复出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
-| `/llm delivery intermediate / final / all <on / off / reset>` | 分段交付两域的开关：`intermediate` = 中间轮发送（多轮工具回复的过程正文照常发出），`final` = 最终轮分段（最终长回复按自然段拆成多条），`all` = 两域同时操作；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
+| `/llm delivery intermediate / final / all <on / off / reset>` | 设置回复发送方式：`intermediate` 控制是否发送多轮工具调用中的过程正文，`final` 控制是否把最终长回复按自然段拆成多条，`all` 同时设置这两项；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理） |
 | `/llm clear_context` | 清空短期上下文，“串台”或记错上下文时用 |
 | `/llm delete_msg` | 引用一条消息发送本命令，或 `/llm delete_msg <消息ID>`，从上下文删除该条 |
-| `/llm reload` | 重载全局 LLM 配置，并重置你的上下文条数覆盖 |
+| `/llm reload` | 重载已发布 LLM 配置（草稿通过管理后台单独应用），并重置你的上下文条数覆盖 |
 | `/llm probe` | 并发探活所有 provider |
 | `/llm mcp reload` | 拉取 MCP 镜像并重连 |
 
-两点注意：`/llm trigger at` 仅群聊有效，私聊只支持前缀触发；`/llm reload` 与 `/llm probe` 虽然私聊任何人可执行，但作用于全局运行时——reload 之后的探活会发一条真实请求，可能产生 provider 计费。
+私聊会话开启后会自动回应普通消息；触发设置中可调整前缀，艾特触发由群聊使用。
+
+`/llm reload` 与 `/llm probe` 会重载或探测整个机器人部署的渠道。私聊用户也可以执行；探活会发送真实模型请求，可能产生费用。
 
 ---
 
 ## 3. 记忆管理
 
-长期记忆是跨会话保留的笔记，AI 每次回复时都会参考（即“记忆注入”）。
+长期记忆是跨会话保留的笔记。开启记忆注入后，AI 会在回复时参考；可用 `/llm memory status` 查看开关状态。
 
 | 命令 | 说明 |
 |------|------|
@@ -114,7 +116,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | 功能 | 群聊 | 私聊 |
 |------|------|------|
 | 触发 AI | `/ai` 前缀或 @机器人（需规则开启） | 开启会话后自动响应 |
-| 会话与上下文 | 共享群上下文，无会话开关 | 独立会话，支持存档与恢复 |
+| 会话与上下文 | 群内共享上下文，用 `/llm on / off` 开关 AI | 独立会话，支持存档与恢复 |
 | AI 配置修改 | 仅管理员 | 任何人 |
 | 记忆管理 | 仅管理员 | 任何人 |
 | `/stats`、`/rules` | 可用 | 不可用 |
@@ -128,4 +130,4 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 
 **发消息 AI 不理我？** 先 `/llm status` 确认会话已开启；未开启则 `/start_session`。
 
-**回复很怪、像“串台”了？** `/llm current` 检查当前配置，`/llm clear_context` 清空短期上下文；仍不正常可用 `/llm delete_msg` 移除具体某条有问题的消息。
+**回复很怪、像“串台”了？** 用 `/llm current` 检查当前配置；引用有问题的消息并发送 `/llm delete_msg`，可定点删除。需要重新开始对话时，用 `/llm clear_context` 清空短期上下文。

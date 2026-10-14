@@ -61,10 +61,10 @@ const briefingPeriods = ref<Record<string, string>>({})
 
 const activeTab = ref<GroupType>('summary')
 const typeTabs: { key: GroupType; label: string; tip: string }[] = [
-  { key: 'summary', label: '每日总结', tip: '开启后每天定时把前一个 06:00–06:00 窗口的群聊消息交给 LLM 生成长文总结并发布到群；生成/发布时间、最少消息数在 llm.toml 的 [daily_summary]。' },
-  { key: 'briefing', label: '每日简报', tip: '每天早/午/晚三个时段定时播报到群：早报回顾昨天，午报、晚报回顾当天截至当前，含消息数、活跃用户、热词等；时段 cron 在 llm.toml 的 [daily_briefing]。' },
-  { key: 'weekly', label: '群周报', tip: '每周一生成上一个完整 ISO 周（上周）的群聊回顾，数据来自聊天归档，不足 min_messages 条则跳过；配置在 llm.toml 的 [weekly_report]。' },
-  { key: 'monthly', label: '群月报', tip: '每月 1 日生成上一个自然月（上月）的群聊回顾，数据来自聊天归档，不足 min_messages 条则跳过；配置在 llm.toml 的 [monthly_report]。' },
+  { key: 'summary', label: '每日总结', tip: '开启后每天定时把前一个 06:00–06:00 窗口的群聊消息交给 LLM 生成长文总结并发布到群；生成/发布时间、最少消息数在 LLM 配置 的 [daily_summary]。' },
+  { key: 'briefing', label: '每日简报', tip: '每天早/午/晚三个时段定时播报到群：早报回顾昨天，午报、晚报回顾当天截至当前，含消息数、活跃用户、热词等；时段 cron 在 LLM 配置 的 [daily_briefing]。' },
+  { key: 'weekly', label: '群周报', tip: '每周一生成上一个完整 ISO 周（上周）的群聊回顾，数据来自聊天归档，不足 min_messages 条则跳过；配置在 LLM 配置 的 [weekly_report]。' },
+  { key: 'monthly', label: '群月报', tip: '每月 1 日生成上一个自然月（上月）的群聊回顾，数据来自聊天归档，不足 min_messages 条则跳过；配置在 LLM 配置 的 [monthly_report]。' },
 ]
 const typeLabels: Record<GroupType, string> = {
   summary: '每日总结', briefing: '每日简报', weekly: '群周报', monthly: '群月报',

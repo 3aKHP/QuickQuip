@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Preview or explicitly backfill record references; original content is retained."""
+"""Preview or backfill member references in memories, quotes and offline messages.
+
+Run from the project root with the application environment:
+    python scripts/backfill_record_identities.py
+    python scripts/backfill_record_identities.py --database quotes --group 123456
+    python scripts/backfill_record_identities.py --apply
+
+The default mode previews records. --apply creates a timestamped database backup
+beside each target before writing references; original content is retained.
+Use --preview-limit 0 to show counts only. An error produces a nonzero exit code.
+"""
 from __future__ import annotations
 
 import argparse

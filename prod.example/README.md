@@ -18,7 +18,22 @@ When `prod/` already exists, move it aside before copying. The drivers reject a 
 - Bash client: Bash, rsync, SSH/SCP, tar, Node.js and pnpm.
 - PowerShell client: PowerShell 5.1 or 7, SSH/SCP, tar, Node.js and pnpm on PATH. The server materializes the release archive with `deploy-state.py` (Python tarfile); rsync on the server is used for precondition checks only.
 - Initialize SSH host trust before unattended use. `quickquip-prod` is a placeholder SSH alias.
-- Fill root `.env`, `config/llm.toml` and other enabled feature configuration. Set `QUICKQUIP_SEARXNG_BASE_URL` for the external search service.
+- Fill root `.env` and enabled feature files, including personas when using LLM. Set `QUICKQUIP_SEARXNG_BASE_URL` for the external search service. The driver initializes the server configuration database before activation; an existing server legacy TOML is migrated once. Configure channels through Web after Bot and Web are running.
+
+## SSH Connection
+
+The deployment drivers use your local SSH configuration. Open `~/.ssh/config` on Linux/macOS or `%USERPROFILE%\.ssh\config` on Windows in a text editor; create the file if needed. Add an entry, replacing the example IP and user with your server details:
+
+```sshconfig
+Host quickquip-prod
+    HostName 192.0.2.10
+    User deploy
+    Port 22
+```
+
+In a local terminal, run `ssh quickquip-prod` to verify the target and complete the first host-key check. Configure your SSH public key so subsequent connections can run unattended. Once you see the server shell, run `exit` to return to your computer. Use this alias with `--host-alias quickquip-prod` (PowerShell: `-HostAlias quickquip-prod`).
+
+First application setup, including a standalone search-service route and the required environment values, is in the [deployment guide](../docs/admin/deployment.md#3-准备生产运维目录和环境变量). Start Bot and Web before using the [first LLM setup steps](../docs/admin/llm-configuration.md#首次启用-llm).
 
 ## Commands
 
@@ -42,7 +57,15 @@ Every release carries a version identity built from the deployed `pyproject.toml
 
 For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` after an explicit `--skip-health` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `prod/check_bot.sh`; `prod/cron_check_bot.sh` remains the cron entry.
 
-`prod/host_metrics_collector.py` is an optional host-side cron collector (the host-healthcheck skill's L1 enhancement): it writes `<root>/data/host_metrics.json` atomically once per run with the host process count, full disk view and temperatures. The crontab install line is in the file header; the container reads the file read-only through the existing `data/` bind mount. Skills live in a shared catalog at `<root>/skills` beside `data/`: the bot mounts it read-only and Web Admin read-write, so skills installed through the Web Admin Skill page survive container recreation and later deployments. The drivers upload the local `skills/` directory with each release, and every deployment non-destructively merges repository-added skills into the catalog: existing files, including Web Admin installs and edits, are kept and deletions never propagate, so skill updates and removals go through the Web Admin Skill page or manual maintenance on the server. When `<root>/skills` is absent, the server seeds it from the previous current release before the merge, or creates an empty directory. The catalog belongs to the deployment user; skills installed through Web Admin can be root-owned because the web-admin container runs as root. When the merge meets such entries it retries with noninteractive sudo and pulls ownership of the whole catalog back to the deployment user; without sudo permission the deployment stops and prints the manual `chown` command to run.
+`prod/host_metrics_collector.py` optionally supplies host process counts, full disk usage and temperatures for the host-healthcheck Skill. Install its cron entry from the file header. Each run atomically writes `<root>/data/host_metrics.json`, which the container reads through the existing read-only `data/` bind mount.
+
+### Shared Skill Catalog
+
+Skills live at `<root>/skills` beside `data/`. The bot mounts the catalog read-only and Web Admin read-write, so Web-installed Skills survive container recreation and later deployments.
+
+The drivers upload the local `skills/` directory and add missing files to the shared catalog. Existing files, including Web Admin installs and edits, are preserved; updates and removals go through the Web Admin Skill page or manual server maintenance. On first use, the server seeds an absent catalog from the previous current release, or creates an empty directory, before adding the uploaded files.
+
+The catalog belongs to the deployment user. Web-installed files can be root-owned because the Web Admin container runs as root. When a merge requires access to those entries, it retries with noninteractive sudo and restores ownership of the whole catalog to the deployment user. If sudo is unavailable, deployment stops and prints the manual `chown` command to run.
 
 ## Layout and Transaction
 
@@ -62,7 +85,7 @@ For first login, use `bash prod/check_bot_local.sh` or `prod/check_bot.ps1` afte
 
 Each operation has a UTC timestamp plus random suffix. Uploads enter an exclusive private directory; live files are modified only under the server deployment lock. The candidate compose is validated against the staged environment and its image built before shared files are applied. Unchanged application files use rsync hardlinks; release roots and transaction directories restrict access to the deployment user. Web Admin configuration writes use atomic file replacement, preserving older hardlinked content.
 
-Before activation, the server snapshots shared files that it will replace, including existing LLBot WebSocket configuration. It applies the candidate environment, switches `current`, and recreates application containers once. The health gate checks all three services, the bot connection log and Web Admin HTTP inside its container. SSH disconnects do not stop the detached transaction; drivers reconnect to its log.
+Before activation, the server snapshots shared files that it will replace, including existing LLBot WebSocket configuration. It applies the candidate environment, switches `current`, and recreates application containers once. The health gate checks all three services, the bot connection log, Web Admin HTTP, configuration schema and the bot heartbeat/load acknowledgement inside its container. The bot core must be ready with an available conversation store. Remote models and MCP servers can remain unavailable independently. SSH disconnects do not stop the detached transaction; drivers reconnect to its log.
 
 Successful operations remove private staging and rollback copies, retaining `.deploy/<id>.log` and `.exit`. Interrupted uploads can leave staging directories; inspect operation status before manually removing these. Failed recovery retains its private backup and returns exit code 2. The requested action still returns nonzero when automatic recovery succeeds.
 
@@ -72,8 +95,13 @@ Successful operations remove private staging and rollback copies, retaining `.de
 
 Automatic recovery restores pre-operation shared files, links and containers, then verifies health. Manual rollback selects an existing release and its local images, retains the current root `.env`, runtime data and the shared `skills/` catalog (applying the same non-destructive merge from the rollback target's `skills/` when its compose consumes the shared catalog), and verifies health. Historical releases whose compose mounts a release-local `skills/` keep using that frozen copy when rolled back. Missing rollback images are never pulled or rebuilt. Do not prune retained release tags manually.
 
-Database migrations and external effects are outside filesystem rollback. Check upgrade notes and prepare a separate data backup when required; code rollback can require coordinated data restore. Server-side configuration edits belong to their release; subsequent deployments use local candidate configuration.
+Filesystem rollback restores deployment files and containers. Database migrations and external effects require their own recovery steps; check upgrade notes and prepare the necessary data backups before deployment.
 
+The LLM configuration database is shared in `data/` across releases. Normal uploads exclude local database files and legacy LLM TOML. First migration uses server-side configuration after a successful candidate image build. Generated persona assets and local client Profile overrides persist through subsequent deployments; other release-local configuration follows the candidate files.
+
+Reading root-owned migration assets uses noninteractive sudo when required, and copied assets belong to the deployment user. Copy or discovery failure stops activation; existing candidate assets retain priority.
+
+A schema 1 or schema 2 LLM configuration database requires a separate maintenance step before deploying this candidate: stop the old bot and Web, back up the shared database, then use the new code to run `python -m quickquip.llm.config_cli init --services-stopped`. Ordinary preparation refuses this upgrade and leaves the database intact. Schema 3 requires compatible code; restoring older code requires the pre-upgrade database backup. The schema 3 upgrade reassigns or drops catch-all prices and records each result in the migration report. This maintenance step is outside automatic filesystem recovery.
 Retention removes older successfully deployed release directories and application images, protecting `current`, `previous` and migration baselines. Failed candidates and operation logs remain for manual inspection. Root `.env` remains the application credential source; transaction copies are private and transient.
 
 `deploy-v4-bak.sh` and `deploy-v4-bak.ps1` preserve the archived flat-layout drivers for inspection and controlled legacy tests. They refuse targets with a release directory or a current link. Use `deploy-v4` for current deployments.
@@ -93,3 +121,21 @@ docker compose --env-file "$QUICKQUIP_ENV_FILE" logs -f quickquip
 For manual flat-layout installation, build the frontend, then run `docker compose --env-file ../.env build quickquip` and `docker compose --env-file ../.env up -d` from `prod/`. Both application services use the same image.
 
 Application prerequisites and platform notes: [deployment guide](../docs/admin/deployment.md).
+
+## LLM Configuration Operations
+
+`config-v1.sh` and `config-v1.ps1` run the same configuration CLI inside the active release's Web Admin container over SSH. Configure the host alias and deployment root when calling them. These commands keep secrets in the root `.env`, exchange JSON and check the expected draft revision.
+
+```bash
+bash prod/config-v1.sh status
+bash prod/config-v1.sh export --source published --file llm-export.json
+bash prod/config-v1.sh preview --file llm-export.json --revision 1
+bash prod/config-v1.sh import --file llm-export.json --revision 1
+bash prod/config-v1.sh apply --revision 2
+bash prod/config-v1.sh backup --file llm-config-backup.db
+bash prod/config-v1.sh restore --file llm-config-backup.db
+```
+
+PowerShell equivalents use `-Action`, `-File`, `-Revision`, `-Source`, `-HostAlias` and `-RemoteDir`. Restore stops bot and Web first, backs up the current database, restores and restarts services only after successful recovery. A restore failure leaves services stopped for inspection. Import saves a draft; apply submits a separate bot-owned operation.
+
+Before rollback to 1.16.1, use the migration backup TOML and independent assets. Back up the configuration, conversation and Trace databases before changing versions. The new configuration database remains available for a subsequent upgrade; configuration changes made after migration have no reverse TOML export. After running older code, stop bot and Web and reset the conversation Session identity columns before upgrading again; preserve a current conversation backup first. The database paths and maintenance SQL are in [rollback and re-upgrade](../docs/admin/llm-configuration.md#回退旧版本后再次升级).

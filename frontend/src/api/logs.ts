@@ -3,6 +3,7 @@ import { request } from './index'
 export interface TraceCallSummary {
   id: number
   call_id: string
+  session_id?: string | null
   agent_loop_id: string
   loop_sequence: number
   event_id?: number

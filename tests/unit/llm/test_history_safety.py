@@ -16,6 +16,7 @@ from quickquip.llm.store_parts.agent_records import LoadedLoop, LoadedToolExecut
 from quickquip.llm.tools import LLMConversationMessage
 from tests.fixtures.provider_fakes import FakeClaudeClient, FakeGeminiClient, FakeOpenAIClient
 from tests.fixtures.sensitive_filter import make_sensitive_filter
+from tests.fixtures.client_fingerprints import protocol_only_config
 
 
 MARKER = "blocked"
@@ -154,10 +155,11 @@ async def test_safe_history_serializes_without_native_or_blocked_payload(tmp_pat
     projection = project_loops_with_budget(
         safe, target=owner, protocol=protocol, budget_tokens=10000, archive_loop_ids=archived,
     )
-    provider = ProviderConfig(
+    provider = protocol_only_config(ProviderConfig(
+        client_fingerprint="legacy-claude" if protocol == "claude" else "default",
         id="p", protocol=protocol, base_url="https://example.test/v1",
         api_key_env="TEST_KEY", default_model="m", models=["m"],
-    )
+    ))
     clients = {
         "openai": (FakeOpenAIClient, {"choices": [{"message": {"content": "ok"}}]}),
         "claude": (FakeClaudeClient, {"content": [{"type": "text", "text": "ok"}]}),

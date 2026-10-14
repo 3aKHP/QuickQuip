@@ -1,6 +1,6 @@
 <template>
   <div class="llm-about-view page-view-fill">
-    <UiPageHeader title="资料"><template #actions><span class="hint"><UiIcon name="Info" :size="14" />保存后执行 /llm reload 或重启 bot 生效</span><span v-if="basePath" class="hint mono">{{ basePath }}</span><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreateGroup">新建群资料</UiButton></template></UiPageHeader>
+    <UiPageHeader title="资料" subtitle="管理全局与分群的群友身份档案（identities.yaml）和群内黑话词表（vocab.yaml）"><template #actions><span class="hint"><UiIcon name="Info" :size="14" />保存后执行 /llm reload 或在「诊断」页重载 LLM 生效</span><span v-if="basePath" class="hint mono">{{ basePath }}</span><router-link to="/diagnostics" custom v-slot="{ navigate }"><UiButton variant="ghost" icon="Stethoscope" @click="navigate">去重载</UiButton></router-link><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreateGroup">新建群资料</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
     <div class="split">

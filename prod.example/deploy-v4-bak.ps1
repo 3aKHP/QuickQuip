@@ -1,8 +1,8 @@
 # Archived flat-layout deployment driver. Use deploy-v4.ps1 for releases.
 # Usage: run from project root:
-#   .\prod\deploy-v4.ps1
+#   .\prod\deploy-v4-bak.ps1
 # Local archive check:
-#   .\prod\deploy-v4.ps1 -LocalCheck
+#   .\prod\deploy-v4-bak.ps1 -LocalCheck
 
 param(
     [switch]$LocalCheck,

@@ -132,14 +132,14 @@ const loadingMore = ref(false)
 const detail = ref<TiebaThread | null>(null)
 
 const STATUS_MAP: Record<string, string> = { ok: '正常', running: '同步中', error: '错误', idle: '未同步' }
-const VARIANT_MAP: Record<string, string> = { ok: 'success', running: 'info', error: 'danger', idle: 'info' }
+const VARIANT_MAP: Record<string, 'info' | 'success' | 'warn' | 'danger'> = { ok: 'success', running: 'info', error: 'danger', idle: 'info' }
 
 function syncLabel(f: TiebaForumInfo): string {
   if (f.login_required) return '需登录'
   return STATUS_MAP[f.last_sync_status] || f.last_sync_status
 }
 
-function syncVariant(f: TiebaForumInfo): string {
+function syncVariant(f: TiebaForumInfo): 'info' | 'success' | 'warn' | 'danger' {
   if (f.login_required) return 'warn'
   return VARIANT_MAP[f.last_sync_status] || 'info'
 }

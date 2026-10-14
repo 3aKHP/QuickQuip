@@ -7,11 +7,10 @@ from typing import Any
 import tomllib
 
 from quickquip.common.config_utils import as_bool, as_dict, expand_env_value
-from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_LLM_TOML
+from quickquip.common.paths import CONFIG_GENERATION_TOML
 
 
 DEFAULT_GENERATION_CONFIG_PATH = CONFIG_GENERATION_TOML
-DEFAULT_LEGACY_LLM_CONFIG_PATH = CONFIG_LLM_TOML
 _SUPPORTED_IMAGE_PROTOCOLS = {"openai_images", "gemini_imagen", "minimax_images"}
 _SUPPORTED_AUDIO_PROTOCOLS = {"minimax_t2a_http", "minimax_t2a_async", "openai_tts", "http_tts"}
 _SUPPORTED_MUSIC_PROTOCOLS = {"minimax_music"}
@@ -628,8 +627,6 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 def load_generation_config(
     path: str | Path = DEFAULT_GENERATION_CONFIG_PATH,
-    *,
-    legacy_llm_path: str | Path = DEFAULT_LEGACY_LLM_CONFIG_PATH,
 ) -> GenerationConfig:
     config_path = Path(path)
     if config_path.exists():
@@ -642,20 +639,6 @@ def load_generation_config(
             svg=_read_svg_section(data),
             source_path=config_path,
             source_kind="generation",
-        )
-        return _validate_generation_config(config)
-
-    legacy_path = Path(legacy_llm_path)
-    if legacy_path.exists():
-        data = _load_toml(legacy_path)
-        config = GenerationConfig(
-            image=_read_image_generation_section(data),
-            audio=_read_audio_generation_section(data),
-            music=_read_music_generation_section(data),
-            asr=_read_asr_section(data),
-            svg=_read_svg_section(data),
-            source_path=legacy_path,
-            source_kind="llm_legacy",
         )
         return _validate_generation_config(config)
 

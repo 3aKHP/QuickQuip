@@ -1,12 +1,12 @@
 #!/bin/bash
 # Archived flat-layout deployment driver. Use deploy-v4.sh for releases.
-# Linux equivalent of deploy-v4.ps1: builds the frontend locally, packs the
+# Builds the frontend locally, packs the
 # project, uploads it via scp, and runs the remote deploy over ssh.
 #
 # Usage (run from project root):
-#   bash prod/deploy-v4.sh
-#   bash prod/deploy-v4.sh -LocalCheck        # pack + report size, no upload
-#   bash prod/deploy-v4.sh -HostAlias <host> -RemoteDir </opt/QuickQuip>
+#   bash prod/deploy-v4-bak.sh
+#   bash prod/deploy-v4-bak.sh -LocalCheck    # pack and report size locally
+#   bash prod/deploy-v4-bak.sh -HostAlias <host> -RemoteDir </opt/QuickQuip>
 #
 # quickquip-prod is a placeholder SSH host alias; change it via -HostAlias.
 

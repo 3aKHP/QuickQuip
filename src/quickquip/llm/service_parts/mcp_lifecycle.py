@@ -61,9 +61,10 @@ class McpLifecycleMixin:
 
     def _register_mcp_tools(self) -> None:
         self._clear_mcp_tools()
+        manager = self.mcp_manager
         for binding in self.mcp_manager.bindings.values():
             async def _handler(arguments, context, *, alias=binding.alias):
-                return await self.mcp_manager.execute(alias, arguments, context)
+                return await manager.execute(alias, arguments, context)
 
             self.tool_registry.register(
                 LLMToolSpec(
@@ -81,6 +82,7 @@ class McpLifecycleMixin:
     async def ensure_mcp_ready(self, force: bool = False, force_pull: bool = False) -> None:
         async with self._mcp_lock:
             if not force and not self._mcp_dirty:
+                self._register_mcp_tools()
                 return
             await self.mcp_manager.sync(self.config.mcp, force_pull=force_pull)
             self._register_mcp_tools()
@@ -114,6 +116,9 @@ class McpLifecycleMixin:
         await self.ensure_mcp_ready(force=True)
 
     async def shutdown(self) -> None:
+        if hasattr(self, "_runtime_snapshot"):
+            await self.drain_configuration_resources()
+            return
         if self._mcp_startup_task is not None:
             self._mcp_startup_task.cancel()
             await asyncio.gather(self._mcp_startup_task, return_exceptions=True)
@@ -122,6 +127,27 @@ class McpLifecycleMixin:
 
     async def reload_mcp(self, *, background: bool = False) -> None:
         """重连所有 MCP 服务器，对 docker transport 强制 pull 最新镜像。"""
+        if hasattr(self, "_runtime_snapshot"):
+            base = self._runtime_snapshot
+            snapshot = self.prepare_configuration(self.config, force_mcp=True)
+            try:
+                if not background:
+                    with self.configuration_view(snapshot):
+                        await self.ensure_mcp_ready(force=True, force_pull=True)
+                async with self._configuration_gate:
+                    if self._runtime_snapshot is not base:
+                        raise RuntimeError(
+                            "Configuration changed during MCP preparation; retry reload"
+                        )
+                    self.activate_configuration(snapshot)
+                if background:
+                    with self.configuration_view(snapshot):
+                        self.start_mcp_background(force=True, force_pull=True)
+            except BaseException:
+                if snapshot is not self._runtime_snapshot:
+                    await self._close_resources(snapshot.resources)
+                raise
+            return
         self._mcp_dirty = True
         if background:
             self.start_mcp_background(force=True, force_pull=True)

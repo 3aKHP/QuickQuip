@@ -11,6 +11,7 @@ from quickquip.llm.image_preprocessor import (
     VisionImagePreprocessor,
 )
 from quickquip.llm.provider import LLMRequest, LLMResponse, LLMProviderError
+from quickquip.llm.session import create_session_identity
 
 
 # ── stub vision provider client ───────────────────────────────────────
@@ -37,6 +38,28 @@ async def test_describe_images_empty_returns_empty():
     v = VisionImagePreprocessor(provider_client=_StubVisionProvider(), model="gpt-4o")
     result = await v.describe_images([])
     assert result == []
+
+
+async def test_image_batch_keeps_parent_identity_and_independent_batches_are_distinct():
+    stub = _StubVisionProvider()
+    vision = VisionImagePreprocessor(provider_client=stub, model="gpt-4o")
+    identity = create_session_identity()
+    from quickquip.llm.epoch import create_epoch_id
+
+    epoch_id = create_epoch_id()
+    await vision.describe_images(
+        ["https://example.test/a", "https://example.test/b"], session=identity, epoch_id=epoch_id,
+    )
+    assert [request.session for request in stub.requests] == [identity, identity]
+    assert [request.epoch_id for request in stub.requests] == [epoch_id, epoch_id]
+    await vision.describe_images(["https://example.test/c", "https://example.test/d"])
+    independent = stub.requests[2].session
+    assert independent != identity
+    assert stub.requests[3].session == independent
+    assert stub.requests[2].epoch_id == stub.requests[3].epoch_id != epoch_id
+    await vision.describe_images(["https://example.test/e"])
+    assert stub.requests[4].session != independent
+    assert stub.requests[4].epoch_id != stub.requests[3].epoch_id
 
 
 @pytest.mark.asyncio

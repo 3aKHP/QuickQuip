@@ -33,6 +33,7 @@ from quickquip.app.web.routes import (
     epochs,
     scheduled_messages,
     skills,
+    llm_configuration,
 )
 from quickquip.app.web.settings import load_web_env
 from quickquip.common.env import PROJECT_ROOT
@@ -51,6 +52,9 @@ def _register_root_redirect(app: FastAPI) -> None:
 
 def create_app() -> FastAPI:
     load_web_env()
+    from quickquip.llm.client_fingerprints.catalog import get_catalog
+
+    get_catalog()
     # web 进程独立运行，不经过 bot 的 startup；显式加载一次贴吧帖子池快照
     from quickquip.app.message_pipeline import tieba_service
 
@@ -125,6 +129,14 @@ def create_app() -> FastAPI:
         scheduled_messages.router, prefix="/ops/api", dependencies=auth.protected_dependencies
     )
     app.include_router(skills.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
+
+    app.include_router(
+        llm_configuration.router, prefix="/ops/api", dependencies=auth.protected_dependencies
+    )
+
+    from quickquip.app.web.llm_configuration_schema import enrich_openapi
+    original_openapi = app.openapi
+    app.openapi = lambda: enrich_openapi(original_openapi())
 
     _register_root_redirect(app)
 

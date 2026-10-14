@@ -1,16 +1,17 @@
 """Anthropic Claude Messages API provider client.
 
-Includes the Claude Code wire-format fingerprint defaults (captured from
-a real claude-cli client) that let this client present itself as a
-first-party Claude Code session.
+Protocol content stays application-owned; selected client Profiles project
+their Header and Body features on copies at the HTTP boundary.
 """
 from __future__ import annotations
 
 import json
 import logging
-import platform
 from copy import deepcopy
 from typing import Any
+from quickquip.llm.client_fingerprints.assembly import (
+    detect_stainless_os as _detect_stainless_os,  # noqa: F401 - compatibility export
+)
 
 from quickquip.llm.tools import LLMConversationMessage, LLMToolCall
 from quickquip.llm.provider.owner import build_response_owner
@@ -22,51 +23,6 @@ from quickquip.llm.provider.base import (
     LLMResponse,
     _json_string,
 )
-
-# Claude Code wire-format fingerprint defaults.
-# Captured from a real claude-cli 2.1.150 (external, cli) client running on
-# Linux, routed through a capturing proxy. Each value is overridable via
-# ProviderConfig.headers (case-insensitive lookup). Header keys are lowercase
-# to match the undici wire format that httpx preserves on the wire.
-#
-# Note: x-stainless-os is injected dynamically in _build_request_parts because
-# the real client reports the host OS rather than a fixed value.
-_CLAUDE_CODE_FINGERPRINT: dict[str, str] = {
-    "accept": "application/json",
-    # Real claude-cli advertises "gzip, deflate, br, zstd", but httpx can only
-    # auto-decompress gzip/deflate without optional brotli/zstandard deps.
-    # Advertising encodings we cannot decode would corrupt the response body,
-    # so we claim only what httpx can handle. Relays fall back to gzip.
-    "accept-encoding": "gzip, deflate",
-    "anthropic-version": "2023-06-01",
-    "anthropic-beta": (
-        "claude-code-20250219,context-1m-2025-08-07,"
-        "interleaved-thinking-2025-05-14,context-management-2025-06-27,"
-        "prompt-caching-scope-2026-01-05,advanced-tool-use-2025-11-20,"
-        "effort-2025-11-24"
-    ),
-    "anthropic-dangerous-direct-browser-access": "true",
-    "x-app": "cli",
-    "x-stainless-arch": "x64",
-    "x-stainless-lang": "js",
-    "x-stainless-package-version": "0.94.0",
-    "x-stainless-retry-count": "0",
-    "x-stainless-runtime": "node",
-    "x-stainless-runtime-version": "v24.3.0",
-    "x-stainless-timeout": "600",
-}
-_CLAUDE_CODE_USER_AGENT = "claude-cli/2.1.150 (external, cli)"
-
-
-def _detect_stainless_os() -> str:
-    """Map the host OS to the value claude-cli's Stainless SDK reports."""
-    system = platform.system()
-    if system == "Windows":
-        return "Windows"
-    if system == "Darwin":
-        return "MacOS"
-    return system or "Linux"
-
 
 def _cache_creation_tokens(usage: dict[str, Any]) -> int | None:
     """缓存写 token：顶层 cache_creation_input_tokens 优先，否则 5m/1h 细分求和。"""
@@ -209,35 +165,10 @@ class ClaudeProviderClient(BaseProviderClient):
         auth_key = "authorization" if self.config.auth_method == "bearer" else "x-api-key"
         auth_value = f"Bearer {api_key}" if self.config.auth_method == "bearer" else api_key
 
-        # User overrides, indexed case-insensitively so that any fingerprint
-        # default can be overridden without worrying about header casing.
-        overrides = {k.lower(): v for k, v in self.config.headers.items()}
-
-        # Build headers in undici wire order: auth + content-type first, then
-        # inject Claude Code fingerprint defaults (x-stainless-os is dynamic),
-        # then apply user overrides on top (preserving original casing).
-        headers: dict[str, str] = {
+        headers = self._assemble_headers(request, {
             auth_key: auth_value,
             "content-type": "application/json",
-        }
-        for key, value in _CLAUDE_CODE_FINGERPRINT.items():
-            if key not in overrides:
-                headers[key] = value
-        # x-stainless-os reflects the host OS; inject unless user overrode it.
-        if "x-stainless-os" not in overrides:
-            headers["x-stainless-os"] = _detect_stainless_os()
-        for key, value in self.config.headers.items():
-            headers[key] = value
-        # user_agent config field takes precedence over both the fingerprint
-        # default and any user-agent header set via config.headers. Strip any
-        # existing user-agent key (regardless of casing) first to avoid a
-        # duplicate header on the wire when both are set.
-        if self.config.user_agent:
-            for existing in [k for k in headers if k.lower() == "user-agent"]:
-                del headers[existing]
-            headers["user-agent"] = self.config.user_agent
-        elif "user-agent" not in overrides:
-            headers["user-agent"] = _CLAUDE_CODE_USER_AGENT
+        })
         use_cache = self.config.prompt_caching
         # cache_control 块：默认 ephemeral=5min；cache_ttl="1h" 启用 1h 扩展缓存。
         # 1h write 2× input（vs 5min 1.25×），仅当请求间隔 >5min 才更划算（如群聊）。
@@ -325,7 +256,7 @@ class ClaudeProviderClient(BaseProviderClient):
             if use_cache and tools:
                 tools[-1]["cache_control"] = dict(cache_control)
             payload["tools"] = tools
-        return url, headers, payload
+        return url, headers, self._project_body(request, payload)
 
     @staticmethod
     def _parse_response(data: dict[str, Any], fallback_model: str) -> LLMResponse:

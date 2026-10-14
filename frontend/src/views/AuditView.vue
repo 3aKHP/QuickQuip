@@ -33,7 +33,7 @@ const stripItems = computed(() => [
   { label: '记录总数', value: total.value, icon: 'ShieldCheck' },
   { label: '当前页条数', value: items.value.length, icon: 'FileText' },
 ])
-const filters = reactive<AuditQueryParams>({ action: '', target_type: '', since: '', until: '' })
+const filters = reactive({ action: '', target_type: '', since: '', until: '' })
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit)))
 function av(a: string) { return ({ create: 'success', update: 'info', delete: 'danger', toggle: 'warn' } as any)[a] || 'info' }
 function tv(t: string) { return ({ rule: 'warn', group: 'info', memory: 'success', config: 'danger', llm_about: 'success', group_setting: 'warn' } as any)[t] || 'info' }

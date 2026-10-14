@@ -216,7 +216,7 @@ class SkillsToolMixin:
         不改会话与历史状态；会刷新记忆化的漂移名单（分叉状态翻转时记日志）。
         """
         if not self.config.skills.enabled:
-            return "Skill 功能当前未启用（config/llm.toml [skills] enabled = false）。"
+            return "Skill 功能当前未启用，请在 LLM 配置管理中启用。"
         catalog_dir = resolve_catalog_dir(self.config.skills.catalog_dir)
         skills = self._drop_blocked_skill_descriptions(scan_skills(catalog_dir))
         scope = self.build_chat_scope_key(chat_id, chat_type)
@@ -231,7 +231,7 @@ class SkillsToolMixin:
     def _skills_disabled_result(self) -> LLMToolOutput | None:
         if not self.config.skills.enabled:
             return LLMToolOutput(
-                content="Skill 功能当前未启用（config/llm.toml [skills] enabled = false）。",
+                content="Skill 功能当前未启用，请在 LLM 配置管理中启用。",
                 is_error=True,
             )
         return None
