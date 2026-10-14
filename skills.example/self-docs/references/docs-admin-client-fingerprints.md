@@ -94,7 +94,7 @@ system 为可编辑 CLI 身份文字和原有 QuickQuip 业务指令两个 text 
 
 X-Claude-Code-Session-Id 与 metadata.user_id.session_id 共用业务 Session UUID；冷场、裁剪、纪元推进、重启及恢复保持，新建或清空改变。user_id 是紧凑 JSON 字符串，键序为 device_id、account_uuid、session_id。API Key 基线的 account_uuid 为空，当前不发送 Agent／parent-agent ID 或 billing 连续性字段。
 
-全局 settings.runtime.claude_code_device_id 可在 Web Admin 设置，所有使用 CC 策略的渠道共用。非空值须为 64 位十六进制，保存时规范为小写；可填写已有 CC 的 userID。使用现成身份时，同步调整模板 OS／arch 以对应其来源环境。该字段作为配置文档和发布快照保存，配置数据库继续使用 schema 2。
+全局 settings.runtime.claude_code_device_id 可在 Web Admin 设置，所有使用 CC 策略的渠道共用。非空值须为 64 位十六进制，保存时规范为小写；可填写已有 CC 的 userID。使用现成身份时，同步调整模板 OS／arch 以对应其来源环境。该字段作为配置文档和发布快照保存，不增加配置数据库结构。
 
 留空时首次使用生成随机 32 字节，并将 64hex 自动身份保存到 data/client_identity.json 的 claude_code_device_id 字段。文件升级保留 install_id，通过跨进程锁和原子写入保存；损坏时明确报错。手工设置不覆盖自动值，清空设置恢复自动身份。备份恢复和部署迁移保留身份；复制数据卷建立独立部署时，可填写独立值，或停止服务、备份后移除新副本的自动 CC 字段再启动。该标识表达安装级身份，不采集硬件指纹，不作为鉴权凭据，也不证明上游认可客户端。
 
@@ -133,7 +133,7 @@ Gemini 的内置 default 与 gemini-cli 采用 Gemini CLI 0.64.0、JavaScript SD
 
 持续聊天的模型锚点由业务存储原子维护，Agent schema 4 为现有 Session 增加首次使用绑定，不猜测历史模型。临时总结、诊断等操作的锚点仅在该 Session 内存中保持；辅助识图继承传入 Session。该方案采用 QuickQuip 业务 Session 作用域；参考客户端在请求客户端创建时冻结 UA 模型，普通切换模型时也保持。当前 API Key 路径没有专有业务 Session Header。
 
-全局 settings.runtime.gemini_cli_install_id 可在 Web 设置，为可选 UUIDv4，保存时规范为小写。留空时首次发送安装绑定生成独立随机 UUIDv4，保存在 data/client_identity.json 的 gemini_cli_install_id 字段，跨进程与重启稳定。手工设置不修改自动值，清空设置恢复自动值；损坏的已存身份会报错。x-gemini-api-privileged-user-id 使用此值，仅在声明绑定的 Profile 下发送，渠道 headers 禁止覆盖；需要省略时，从本地模板移除该绑定。它表达安装维度身份，随数据卷备份恢复，独立部署应使用独立身份。配置数据库保持 schema 2。
+全局 settings.runtime.gemini_cli_install_id 可在 Web 设置，为可选 UUIDv4，保存时规范为小写。留空时首次发送安装绑定生成独立随机 UUIDv4，保存在 data/client_identity.json 的 gemini_cli_install_id 字段，跨进程与重启稳定。手工设置不修改自动值，清空设置恢复自动值；损坏的已存身份会报错。x-gemini-api-privileged-user-id 使用此值，仅在声明绑定的 Profile 下发送，渠道 headers 禁止覆盖；需要省略时，从本地模板移除该绑定。它表达安装维度身份，随数据卷备份恢复，独立部署应使用独立身份。该设置不增加配置数据库结构。
 
 协议局部 api_key_transport 支持 query 或 header。新模板选择 header，由适配器注入 x-goog-api-key，不将凭据放入 URL；显式 auth_method=bearer 保持 Authorization: Bearer。认证字段不接受 Profile 静态配置。legacy-gemini 和未声明该设置的自定义 Profile 使用既有查询参数传输。
 
