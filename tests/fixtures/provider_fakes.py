@@ -69,7 +69,9 @@ class FakeClaudeClient(ClaudeProviderClient):
 
 class FakeGeminiClient(GeminiProviderClient):
     def __init__(self, config: ProviderConfig, response_data: dict):
-        super().__init__(_force_non_streaming(config))
+        from tests.fixtures.client_fingerprints import protocol_only_config
+
+        super().__init__(_force_non_streaming(protocol_only_config(config)))
         self.response_data = response_data
         self.last_payload: dict | None = None
         self.last_headers: dict | None = None

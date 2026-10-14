@@ -8,8 +8,8 @@ protocol_ref = "opencode2"
 [protocols.openai_responses]
 protocol_ref = "codex"
 
-[protocols.gemini.headers]
-accept-encoding = "gzip, deflate"
+[protocols.gemini]
+protocol_ref = "gemini-cli"
 
 [protocols.claude]
 protocol_ref = "claude-code"

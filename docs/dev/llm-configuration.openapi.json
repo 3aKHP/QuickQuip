@@ -1013,6 +1013,9 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "gemini_cli_install_id": {
+                    "type": "string"
+                  },
                   "history_limit": {
                     "minimum": 0,
                     "type": "integer"

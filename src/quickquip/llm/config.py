@@ -115,6 +115,7 @@ class RuntimeConfig:
 
     client_cluster: str = ""
     claude_code_device_id: str = ""
+    gemini_cli_install_id: str = ""
 
 
 @dataclass(slots=True)

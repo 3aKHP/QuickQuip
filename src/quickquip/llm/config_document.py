@@ -21,7 +21,12 @@ from quickquip.llm.client_fingerprints.body_bindings import (
 from quickquip.llm.client_fingerprints.claude_policy import (
     ClaudeBodyPolicy, validate_claude_overrides,
 )
-from quickquip.llm.client_fingerprints.identity import normalize_device_id
+from quickquip.llm.client_fingerprints.identity import (
+    normalize_device_id, normalize_gemini_install_id,
+)
+from quickquip.llm.client_fingerprints.gemini_policy import (
+    GeminiBodyPolicy, validate_gemini_overrides,
+)
 from quickquip.llm.config_fields import (
     SETTINGS,
     PARAMETER_TYPES,
@@ -257,6 +262,9 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
         if isinstance(body_policy, ClaudeBodyPolicy):
             validate_claude_overrides(body_policy, base["parameters"].get("extra_body") or {},
                                       path + ".parameters.extra_body")
+        elif isinstance(body_policy, GeminiBodyPolicy):
+            validate_gemini_overrides(base["parameters"].get("extra_body") or {},
+                                      path + ".parameters.extra_body")
         elif body_policy is not None:
             validate_body_overrides(base["parameters"].get("extra_body") or {},
                                     path + ".parameters.extra_body")
@@ -283,6 +291,9 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
             )
             if isinstance(body_policy, ClaudeBodyPolicy):
                 validate_claude_overrides(body_policy, model["parameters"].get("extra_body") or {},
+                                          location + ".parameters.extra_body")
+            elif isinstance(body_policy, GeminiBodyPolicy):
+                validate_gemini_overrides(model["parameters"].get("extra_body") or {},
                                           location + ".parameters.extra_body")
             elif body_policy is not None:
                 validate_body_overrides(model["parameters"].get("extra_body") or {},
@@ -318,6 +329,7 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
     rt = output["settings"]["runtime"]
     header_value(rt["client_cluster"], "settings.runtime.client_cluster")
     rt["claude_code_device_id"] = normalize_device_id(rt["claude_code_device_id"])
+    rt["gemini_cli_install_id"] = normalize_gemini_install_id(rt["gemini_cli_install_id"])
     if rt["default_provider"] is not None and rt["default_provider"] not in ids:
         reject("settings.runtime.default_provider", "默认渠道不存在", "dependency_conflict")
     if rt["enabled"] and not providers:
@@ -486,7 +498,7 @@ def compile_document(
         provider.fingerprint_runtime = FingerprintRuntime(
             resolve_profile(provider.client_fingerprint, provider.protocol, directory),
             config.runtime.client_cluster, directory.parent / "data",
-            config.runtime.claude_code_device_id,
+            config.runtime.claude_code_device_id, config.runtime.gemini_cli_install_id,
         )
         provider.model_parameters = {m["model"]: deepcopy(m["parameters"]) for m in raw["models"]}
         provider.model_enabled = {m["model"]: m["enabled"] for m in raw["models"]}

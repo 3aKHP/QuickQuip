@@ -16,6 +16,7 @@ from quickquip.llm.client_fingerprints.body_bindings import BodyBindings, parse_
 from quickquip.llm.client_fingerprints.claude_policy import (
     BetaRule, ClaudeBodyPolicy, parse_beta_rules, parse_claude_policy,
 )
+from quickquip.llm.client_fingerprints.gemini_policy import GeminiBodyPolicy, parse_gemini_policy
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
 from quickquip.llm.client_fingerprints.trace_context import ATTEMPT_BINDINGS
 
@@ -34,12 +35,14 @@ _IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9_.-]*\Z")
 class ProtocolFingerprint:
     headers: tuple[tuple[str, str], ...] = ()
     bindings: tuple[tuple[str, str], ...] = ()
-    body: ChatBodyPolicy | ClaudeBodyPolicy | None = None
+    body: ChatBodyPolicy | ClaudeBodyPolicy | GeminiBodyPolicy | None = None
     header_order: tuple[str, ...] = ()
     body_bindings: BodyBindings = ()
     beta_rules: tuple[BetaRule, ...] = ()
     stream_accept: str = ""
     protocol_ref: str = ""
+    user_agent_template: str = ""
+    api_key_transport: str = "query"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +67,7 @@ class FingerprintRuntime:
     cluster: str
     data_dir: Path
     claude_code_device_id: str = ""
+    gemini_cli_install_id: str = ""
 
 
 def header_value(value: str, location: str) -> str:
@@ -79,7 +83,9 @@ def validate_provider_headers(
     if profile is not None:
         entry = profile.for_protocol(protocol)
         protected.update(k.lower() for k, v in (*profile.bindings, *entry.bindings)
-                         if v in (*SESSION_BINDINGS, *ATTEMPT_BINDINGS))
+                         if v in (*SESSION_BINDINGS, *ATTEMPT_BINDINGS, "gemini_cli_install_id"))
+        if protocol == "gemini" and entry.api_key_transport == "header":
+            protected.add("x-goog-api-key")
     for name in headers:
         if name.lower() in protected:
             raise ConfigError(
@@ -103,7 +109,7 @@ def _headers(raw, profile_id, location, *, bindings=False):
             raise ConfigError("invalid_profile", "Invalid or duplicate header", location)
         key = name.lower()
         seen.add(key)
-        if key in ("authorization", "x-api-key", "content-type"):
+        if key in ("authorization", "x-api-key", "x-goog-api-key", "content-type"):
             raise ConfigError("invalid_profile", "Protocol headers are adapter-owned", location)
         header_value(value, location)
         if key in QUICKQUIP_BINDINGS:
@@ -111,6 +117,7 @@ def _headers(raw, profile_id, location, *, bindings=False):
                 raise ConfigError("invalid_profile", "Invalid QuickQuip header ownership", location)
         if bindings and value not in (*QUICKQUIP_BINDINGS.values(), "stainless_os",
                                       "timeout_seconds", "retry_count",
+                                      "gemini_cli_install_id",
                                       *SESSION_BINDINGS, *ATTEMPT_BINDINGS):
             raise ConfigError("invalid_profile", "Unknown dynamic binding", location)
         if bindings and value in QUICKQUIP_BINDINGS.values() and profile_id != "quickquip":
@@ -152,7 +159,8 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
     entries = []
     for protocol, entry in protocols.items():
         _table(entry, ("headers", "bindings", "body", "header_order", "body_bindings",
-                       "beta_rules", "stream_accept", "protocol_ref"), location)
+                       "beta_rules", "stream_accept", "protocol_ref", "user_agent_template",
+                       "api_key_transport"), location)
         ref = entry.get("protocol_ref", "")
         if (not isinstance(ref, str) or (ref and (not _IDENTIFIER.fullmatch(ref)
                 or ref == ident or set(entry) != {"protocol_ref"}))):
@@ -166,6 +174,8 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
         if "body" in entry:
             if protocol == "claude":
                 body = parse_claude_policy(entry["body"], location)
+            elif protocol == "gemini":
+                body = parse_gemini_policy(entry["body"], location)
             else:
                 body = parse_body_policy(entry["body"], protocol, location)
         body_bindings = (parse_body_bindings(entry["body_bindings"], protocol, location)
@@ -180,6 +190,26 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
         stream_accept = entry.get("stream_accept", "")
         if stream_accept not in ("", "preserve", "event-stream"):
             raise ConfigError("invalid_profile", "Invalid streaming Accept policy", location)
+        ua_template = header_value(entry.get("user_agent_template", ""), location)
+        if ua_template:
+            try:
+                if protocol != "gemini" or any(
+                    field is not None and (field != "session_model" or spec or conversion)
+                    for _, field, spec, conversion in Formatter().parse(ua_template)
+                ):
+                    raise ValueError("unsupported template")
+            except ValueError:
+                raise ConfigError("invalid_profile", "Invalid Gemini UA template",
+                                  location) from None
+            if any(k.lower() == "user-agent" for k, _ in (*headers, *static, *bindings, *dynamic)):
+                raise ConfigError("invalid_profile", "Duplicate Profile UA", location)
+        transport = entry.get("api_key_transport", "query")
+        if transport not in ("query", "header") or ("api_key_transport" in entry
+                                                   and protocol != "gemini"):
+            raise ConfigError("invalid_profile", "Invalid Gemini API Key transport", location)
+        if any(v == "gemini_cli_install_id" for _, v in (*bindings, *dynamic)):
+            if protocol != "gemini":
+                raise ConfigError("invalid_profile", "Gemini identity requires Gemini", location)
         if isinstance(body, ClaudeBodyPolicy) and body.metadata_user_id:
             if dict((k.lower(), v) for k, v in (*bindings, *dynamic)).get(
                 "x-claude-code-session-id"
@@ -190,6 +220,7 @@ def parse_profile(content: str, expected_id: str) -> ClientFingerprintProfile:
             headers=static, bindings=dynamic, body=body, header_order=tuple(order),
             body_bindings=body_bindings, beta_rules=beta_rules, stream_accept=stream_accept,
             protocol_ref=ref,
+            user_agent_template=ua_template, api_key_transport=transport,
         )))
     return ClientFingerprintProfile(ident, label, ua, headers, bindings, tuple(entries))
 

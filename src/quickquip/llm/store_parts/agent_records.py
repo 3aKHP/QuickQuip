@@ -59,7 +59,16 @@ from quickquip.llm.store_parts._base import _utc_now
 
 logger = logging.getLogger(__name__)
 
-_AGENT_SCHEMA_VERSION = 3
+_AGENT_SCHEMA_VERSION = 4
+
+_SESSION_MODEL_DDL = """
+    CREATE TABLE IF NOT EXISTS session_client_models (
+        session_id TEXT NOT NULL,
+        client TEXT NOT NULL,
+        model TEXT NOT NULL,
+        PRIMARY KEY (session_id, client)
+    )
+"""
 
 # 逐条执行（§4.3.1：迁移事务内不得 executescript 隐式提交）。
 _AGENT_SCHEMA_DDL: tuple[str, ...] = (
@@ -473,7 +482,13 @@ class AgentRecordsStoreMixin:
                     "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
                     (3, _utc_now()),
                 )
-            if not {1, 2, _AGENT_SCHEMA_VERSION}.issubset(applied_versions):
+            if 4 not in applied_versions:
+                conn.execute(_SESSION_MODEL_DDL)
+                conn.execute(
+                    "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (4, _utc_now()),
+                )
+            if not {1, 2, 3, _AGENT_SCHEMA_VERSION}.issubset(applied_versions):
                 self._verify_agent_schema(conn)
             conn.commit()
         except BaseException:

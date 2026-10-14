@@ -163,7 +163,7 @@ def test_migration_is_idempotent(tmp_path: Path):
         count = conn.execute("SELECT COUNT(*) c FROM agent_loops").fetchone()["c"]
         versions = conn.execute("SELECT COUNT(*) c FROM agent_schema_migrations").fetchone()["c"]
     assert count == 4
-    assert versions == 3
+    assert versions == 4
 
 
 @pytest.mark.parametrize("old_version", [1, 2])
@@ -273,7 +273,7 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
             == original_rows
         )
         assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 4
-        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 3
+        assert conn.execute("SELECT COUNT(*) FROM agent_schema_migrations").fetchone()[0] == 4
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
