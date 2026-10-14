@@ -119,6 +119,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `memory_enabled` | 全局记忆注入开关 | `true` |
 | `default_provider` | 默认 provider ID | — |
 | `default_persona` | 默认人格 ID | — |
+| `gemini_cli_install_id` | 可选 Gemini CLI 安装 UUIDv4；留空使用持久随机身份，见[请求指纹 Profile](client-fingerprints.md) | `""` |
 | `history_limit` | 单次调用读取的对话行数兜底——**自 1.14 起语义变更**：不再默认生效（默认路径由会话纪元自动管理）；仅当某会话通过 `/llm context_limit <n>` 显式覆盖时（群聊/私聊均可，上限 1024 条），该会话退化为保留最新 n 行的滚动窗 | `10` |
 | `history_max_messages_per_group` | **自 1.14 起废弃（保留解析、不再生效）**：存储裁剪由会话纪元锚点驱动，硬上限统一为 2048 行（`service_parts/constants.py`） | `40` |
 | `memory_limit` | 单次调用注入的记忆条数上限 | `6` |
@@ -249,7 +250,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `extra_body` | 注入到每次请求体的额外 JSON 对象，模型覆盖时整体替换 | — |
 | `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
 | `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
-| `auth_method` | 认证方式：`api_key` 或 `bearer`。Claude 分别使用 `x-api-key` / `Authorization: Bearer`；Gemini 分别使用兼容中转的 `?key=` / `Authorization: Bearer`；OpenAI 使用 Bearer | `api_key` |
+| `auth_method` | 认证方式：`api_key` 或 `bearer`。Claude 分别使用 `x-api-key` / `Authorization: Bearer`；Gemini 的 API Key 传输由 Profile 决定：新默认使用 `x-goog-api-key`，legacy-gemini 使用 `?key=`；显式 bearer 使用 `Authorization: Bearer`；OpenAI 使用 Bearer | `api_key` |
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |

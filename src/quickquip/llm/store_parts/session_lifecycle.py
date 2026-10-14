@@ -5,10 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
+from dataclasses import replace
 import sqlite3
 
 from quickquip.llm.session import (
-    SessionIdentity, SessionInvalidated, SessionStoreError, create_session_identity,
+    SessionIdentity, SessionInvalidated, SessionStoreError, SessionModelProjection,
+    create_session_identity,
 )
 from quickquip.llm.store_parts._base import _utc_now
 from quickquip.llm.agent_records import LoopStatus, TriggerKind
@@ -81,14 +83,39 @@ class SessionLifecycleMixin:
         with self._session_connection(write=True) as conn:
             identity = self._ensure_chat_identity(conn, scope)
             generation = self._ensure_session_scope(conn, scope)["generation"]
-        return identity, int(generation)
+        return self._projectable_identity(scope, identity, int(generation)), int(generation)
+
+    def _projectable_identity(self, scope, identity, generation):
+        def persist(client: str, model: str) -> str:
+            with self._session_connection(write=True) as conn:
+                self._check_chat_session(conn, scope, identity, generation)
+                conn.execute(
+                    "INSERT OR IGNORE INTO session_client_models (session_id, client, model) "
+                    "VALUES (?, ?, ?)", (identity.id, client, model),
+                )
+                return conn.execute(
+                    "SELECT model FROM session_client_models WHERE session_id = ? AND client = ?",
+                    (identity.id, client),
+                ).fetchone()["model"]
+        return replace(identity, projection=SessionModelProjection(persist))
+
+    @staticmethod
+    def _prune_session_models(conn: sqlite3.Connection, session_id: str | None) -> None:
+        conn.execute(
+            "DELETE FROM session_client_models WHERE session_id = ? "
+            "AND NOT EXISTS (SELECT 1 FROM agent_scopes WHERE session_id = ?) "
+            "AND NOT EXISTS (SELECT 1 FROM session_archives WHERE session_id = ?)",
+            (session_id, session_id, session_id),
+        )
 
     def get_chat_session(self, scope: str) -> SessionIdentity | None:
         with self._session_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM agent_scopes WHERE scope_key = ?", (scope,),
             ).fetchone()
-        return _identity(row) if row is not None else None
+        identity = _identity(row) if row is not None else None
+        return (self._projectable_identity(scope, identity, row["generation"])
+                if identity is not None else None)
 
     @staticmethod
     def _check_chat_session(
@@ -107,7 +134,7 @@ class SessionLifecycleMixin:
             self._check_chat_session(conn, scope, identity, generation)
 
     def _clear_session_scope(self, conn: sqlite3.Connection, scope: str) -> int:
-        self._ensure_session_scope(conn, scope)
+        old_session = self._ensure_session_scope(conn, scope)["session_id"]
         deleted = conn.execute(
             "DELETE FROM conversation_messages WHERE group_id = ?", (scope,),
         ).rowcount
@@ -117,6 +144,7 @@ class SessionLifecycleMixin:
             "generation = generation + 1, history_revision = history_revision + 1 "
             "WHERE scope_key = ?", (scope,),
         )
+        self._prune_session_models(conn, old_session)
         return deleted
 
     def clear_chat_session(self, scope: str) -> int:
@@ -137,7 +165,8 @@ class SessionLifecycleMixin:
             self._clear_session_scope(conn, scope)
             identity = self._ensure_chat_identity(conn, scope)
             self._set_private_enabled(conn, scope, True)
-        return identity
+            generation = self._ensure_session_scope(conn, scope)["generation"]
+        return self._projectable_identity(scope, identity, generation)
 
     def _move_session_history(self, conn: sqlite3.Connection, source: str, target: str) -> None:
         self._ensure_session_scope(conn, source)
@@ -231,13 +260,15 @@ class SessionLifecycleMixin:
     def delete_archived_chat_session(self, user_id: str, number: int) -> bool:
         with self._session_connection(write=True) as conn:
             present = conn.execute(
-                "SELECT id FROM session_archives WHERE user_id = ? AND archive_number = ?",
+                "SELECT id, session_id FROM session_archives "
+                "WHERE user_id = ? AND archive_number = ?",
                 (user_id, number),
             ).fetchone()
             if present is None:
                 return False
             self._clear_session_scope(conn, f"archive:{user_id}:{number}")
             conn.execute("DELETE FROM session_archives WHERE id = ?", (present["id"],))
+            self._prune_session_models(conn, present["session_id"])
         return True
 
     def append_session_reply(

@@ -323,7 +323,8 @@
       "reply_max_chunks_per_loop": 64,
       "mention_cooldown_seconds": 600.0,
       "client_cluster": "",
-      "claude_code_device_id": ""
+      "claude_code_device_id": "",
+      "gemini_cli_install_id": ""
     },
     "triggers": {
       "default_prefix": "/ai",

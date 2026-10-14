@@ -16,7 +16,7 @@ SCHEMA_VERSION = 2
 
 # Snapshot-owned settings that do not require a relational lookup/index column.
 # Keep the schema-2 projection compatible with databases from existing installations.
-DOCUMENT_ONLY_SETTINGS = {"runtime": frozenset({"claude_code_device_id"})}
+DOCUMENT_ONLY_SETTINGS = {"runtime": frozenset({"claude_code_device_id", "gemini_cli_install_id"})}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_meta (

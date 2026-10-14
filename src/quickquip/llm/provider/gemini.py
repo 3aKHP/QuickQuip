@@ -20,6 +20,10 @@ from quickquip.llm.provider.base import (
     _json_string,
     sanitize_gemini_schema,
 )
+from quickquip.llm.client_fingerprints.assembly import selected_profile
+from quickquip.llm.client_fingerprints.gemini_policy import (
+    GeminiBodyPolicy, validate_gemini_overrides,
+)
 
 
 def _inline_image_payload(part: dict[str, Any]) -> tuple[str, str] | None:
@@ -207,11 +211,17 @@ class GeminiProviderClient(BaseProviderClient):
         self, request: LLMRequest, *, stream: bool = False
     ) -> tuple[str, dict[str, str], dict[str, Any]]:
         api_key = self._get_api_key()
+        fingerprint = selected_profile(self.config).for_protocol("gemini")
+        policy = fingerprint.body
+        if isinstance(policy, GeminiBodyPolicy):
+            validate_gemini_overrides(self.config.extra_body)
         action = "streamGenerateContent" if stream else "generateContent"
         url = self.config.base_url.rstrip("/") + f"/models/{request.model}:{action}"
         headers = {"content-type": "application/json"}
         if self.config.auth_method == "bearer":
             headers["authorization"] = f"Bearer {api_key}"
+        elif fingerprint.api_key_transport == "header":
+            headers["x-goog-api-key"] = api_key
         else:
             # Preserve the existing Gemini-compatible relay contract. Gateway
             # deployments should select bearer auth so credentials stay out of
@@ -255,7 +265,13 @@ class GeminiProviderClient(BaseProviderClient):
                         {
                             "name": spec.name,
                             "description": spec.description,
-                            "parameters": sanitize_gemini_schema(spec.input_schema),
+                            (policy.tool_schema_field if isinstance(policy, GeminiBodyPolicy)
+                             else "parameters"): (
+                                deepcopy(spec.input_schema)
+                                if isinstance(policy, GeminiBodyPolicy)
+                                and policy.tool_schema_field == "parametersJsonSchema"
+                                else sanitize_gemini_schema(spec.input_schema)
+                            ),
                         }
                         for spec in request.tools
                     ]

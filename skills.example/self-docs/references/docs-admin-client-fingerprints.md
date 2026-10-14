@@ -6,14 +6,16 @@ Provider 的固定字段 `client_fingerprint` 选择客户端请求特征。内�
 
 | ID | 支持协议 | 行为 |
 |---|---|---|
-| `default` | 四种协议 | Chat 使用 OpenCode 2，Responses 使用 Codex，Anthropic 使用 Claude Code；Gemini 保留通用默认 |
+| `default` | 四种协议 | Chat 使用 OpenCode 2，Responses 使用 Codex，Anthropic 使用 Claude Code；Gemini 使用 Gemini CLI |
 | `quickquip` | 四种协议 | QuickQuip 品牌 UA 与部署、纪元及版本标识，需要显式选择 |
 | `opencode2` | OpenAI Chat Completions | OpenCode 2.0.27 native 的 UA、身份头、追踪和 Body 布局；Chat 默认采用 |
 | `codex` | OpenAI Responses | Codex TUI 0.162.1 的静态身份、业务 Session 头与缓存键；Responses 默认采用 |
 | `claude-code` | Anthropic Messages | Claude Code 2.1.296 Linux CLI 的 Header、身份、system、缓存与 Body 布局 |
+| `gemini-cli` | Gemini GenerateContent | Gemini CLI 0.64.0 TUI 的 Header、安装 UUID、Session 模型锚点和 Body 布局 |
+| `legacy-gemini` | Gemini GenerateContent | 保留通用 Gemini 请求与 API Key 查询参数鉴权，供兼容回退使用 |
 | `legacy-claude` | Anthropic Messages | 保留 2.1.150 的既有 Header 与 Body 行为，供兼容回退使用 |
 
-渠道字段缺省或显式选择 default 时采用协议默认策略。已有 default.toml 本地覆盖继续整份生效，需核对其中的协议配置；启用默认策略前检查动态 Header 与 Body 绑定的手工覆盖。需要通用请求形态时，可按下方最小示例定义自有 Profile；Anthropic 提供 legacy-claude 回退。
+渠道字段缺省或显式选择 default 时采用协议默认策略。已有 default.toml 本地覆盖继续整份生效，需核对其中的协议配置；启用默认策略前检查动态 Header 与 Body 绑定的手工覆盖。需要通用请求形态时，可按下方最小示例定义自有 Profile；Anthropic 提供 legacy-claude，Gemini 提供 legacy-gemini 回退。
 
 在 Web Admin「LLM 配置 → 渠道」选择 Profile，保存草稿后应用。JSON 的 `client_fingerprint` 放在渠道对象内；模型参数覆盖不接受该字段。它与 OpenAI Responses 的 `responses_profile` 能力设置分别配置。
 
@@ -57,9 +59,9 @@ accept = "application/json"
 
 文件名为 `custom.toml`。`protocols` 声明支持的协议，协议表可包含 `headers` 和 `bindings`。根表中的请求头用于全部已声明协议；协议表补充本协议的请求头，同一名称不能重复声明。
 
-`user_agent` 仅支持 `{client_version}` 版本替换。动态 `bindings` 的来源为 `install_id`、`epoch_id`、`cluster_id`、`client_version`、`stainless_os`、`opencode_session_id`、`project_id`、`b3`、`traceparent`、`business_session_id`、`timeout_seconds`、`retry_count`。business_session_id 返回业务 Session 的规范 UUID；opencode_session_id 与 project_id 随请求绑定，b3 与 traceparent 在每次实际 HTTP 尝试时绑定；timeout_seconds 为渠道超时秒数，retry_count 为当前重试策略轮次。前四个来源归属 `quickquip` Profile。自有 Profile 必须保留四个专有头及其对应绑定。认证与 `content-type` 由协议适配器管理，Profile 文件不接受这些头。
+`user_agent` 仅支持 `{client_version}` 版本替换。动态 `bindings` 的来源为 `install_id`、`epoch_id`、`cluster_id`、`client_version`、`stainless_os`、`opencode_session_id`、`project_id`、`b3`、`traceparent`、`business_session_id`、`timeout_seconds`、`retry_count`、`gemini_cli_install_id`。business_session_id 返回业务 Session 的规范 UUID；opencode_session_id 与 project_id 随请求绑定，b3 与 traceparent 在每次实际 HTTP 尝试时绑定；timeout_seconds 为渠道超时秒数，retry_count 为当前重试策略轮次；gemini_cli_install_id 为 Gemini CLI 安装 UUID，仅支持 Gemini 协议。前四个来源归属 `quickquip` Profile。自有 Profile 必须保留四个专有头及其对应绑定。认证与 `content-type` 由协议适配器管理，Profile 文件不接受这些头。
 
-协议表可使用 `protocol_ref = "claude-code"` 引用另一 Profile 的同协议配置。引用表只包含此字段，目标使用协议局部配置，顶层 UA、Header 和 bindings 为空；禁止链式及循环引用。内置 default 的 Chat、Responses 和 Anthropic 分别引用 opencode2、codex 和 claude-code。客户端模板的 UA 与其他特征定义在协议表中；已有 opencode2／codex 本地副本需将顶层 user_agent 移入对应 protocols.<协议>.headers 的 user-agent 字段，满足引用目标的协议局部约束；修改对应本地模板后重启，default 与显式客户端选择共用同一策略快照。
+协议表可使用 `protocol_ref = "claude-code"` 引用另一 Profile 的同协议配置。引用表只包含此字段，目标使用协议局部配置，顶层 UA、Header 和 bindings 为空；禁止链式及循环引用。内置 default 的 Chat、Responses、Anthropic 和 Gemini 分别引用 opencode2、codex、claude-code 和 gemini-cli。客户端模板的 UA 与其他特征定义在协议表中；已有 opencode2／codex 本地副本需将顶层 user_agent 移入对应 protocols.<协议>.headers 的 user-agent 字段，满足引用目标的协议局部约束；修改对应本地模板后重启，default 与显式客户端选择共用同一策略快照。
 
 解析器拒绝未知字段、非法动态来源、重复头和不支持的协议。Profile 文件不保存密钥，不执行表达式或脚本。附加认证配置继续使用根目录 `.env` 的变量引用。
 
@@ -122,3 +124,21 @@ prompt_cache_key = "business_session_id"
 投影在实际 HTTP 尝试边界读取冻结请求，对载荷副本赋值；未知字段、来源、类型或协议组合会在加载阶段拒绝。格式版本仍为1，无新增身份文件或数据库迁移。
 
 Codex Profile 提供轻量客户端身份及缓存亲和特征。既有 instructions、输出预算、temperature、工具权限、reasoning 档位、原生 items 和 phase 回放继续由 Responses 适配器管理，HTTP／SSE、备用地址与降级路径继续使用原有策略。responses_profile 单独控制后端能力。默认声明 gzip, deflate；此 Profile 不发送自有品牌四头、Codex turn/window 元数据或内部功能标记，不增加 WebSocket 和遥测。
+
+## Gemini CLI Profile
+
+Gemini 的内置 default 与 gemini-cli 采用 Gemini CLI 0.64.0、JavaScript SDK 1.30.0、Node 24.18.0、Linux x64 terminal TUI 的 HTTP/1.1 基线。版本、环境、静态头、Header 次序和 Body 布局保存在 gemini-cli.toml，支持现有本地覆盖。Accept 为 */*，流式请求保持此值；压缩声明 br, gzip, deflate，使用发行物已有 Brotli 解码依赖。
+
+协议局部 user_agent_template 支持 {session_model}，默认 UA 为 GeminiCLI-tui/0.64.0/{session_model} (linux; x64; terminal)。业务 Session 首次使用该模板时，冻结实际请求的模型名；之后切换模型或渠道、工具续轮、重试及纪元推进沿用原锚点。default 与显式 gemini-cli 共用锚点。重启、聊天存档与恢复保留；清空或新开 Session 后重新绑定。模板版本和环境仍跟随当前配置快照，显式 UA 覆盖优先级沿用本页约定。
+
+持续聊天的模型锚点由业务存储原子维护，Agent schema 4 为现有 Session 增加首次使用绑定，不猜测历史模型。临时总结、诊断等操作的锚点仅在该 Session 内存中保持；辅助识图继承传入 Session。该方案采用 QuickQuip 业务 Session 作用域；参考客户端在请求客户端创建时冻结 UA 模型，普通切换模型时也保持。当前 API Key 路径没有专有业务 Session Header。
+
+全局 settings.runtime.gemini_cli_install_id 可在 Web 设置，为可选 UUIDv4，保存时规范为小写。留空时首次发送安装绑定生成独立随机 UUIDv4，保存在 data/client_identity.json 的 gemini_cli_install_id 字段，跨进程与重启稳定。手工设置不修改自动值，清空设置恢复自动值；损坏的已存身份会报错。x-gemini-api-privileged-user-id 使用此值，仅在声明绑定的 Profile 下发送，渠道 headers 禁止覆盖；需要省略时，从本地模板移除该绑定。它表达安装维度身份，随数据卷备份恢复，独立部署应使用独立身份。配置数据库保持 schema 2。
+
+协议局部 api_key_transport 支持 query 或 header。新模板选择 header，由适配器注入 x-goog-api-key，不将凭据放入 URL；显式 auth_method=bearer 保持 Authorization: Bearer。认证字段不接受 Profile 静态配置。legacy-gemini 和未声明该设置的自定义 Profile 使用既有查询参数传输。
+
+Body 的 gemini-cli-generate-content 策略保留业务 system 正文，以单个 text 的 systemInstruction 表示，并补充 role=user；不添加原生编程提示词。工具声明使用 parametersJsonSchema，保留实际 JSON Schema、工具及权限。输出预算、采样、thinking、媒体、工具 ID 与原生 thoughtSignature 使用业务数据。结构重排作用于发送副本，数组顺序和任意工具参数内容保留，JSON 为紧凑 UTF-8 且无末尾换行。
+
+contents、systemInstruction、tools 为策略管理字段，渠道及模型 extra_body 中包含这些字段时，在保存和发送阶段拒绝；其余覆盖保持现有语义。启用新默认前核对受管字段与供应商 JSON Schema 支持，必要时选择 legacy-gemini。已有本地 default.toml 继续整份覆盖生效。
+
+此 Profile 对齐应用层特征和现有 HTTP/1.1 布局。HTTPX 连接生命周期、TLS、Node 运行时行为及任意 JSON 数值的逐字节编码另行校准；请求重试和工具调度继续由现有业务策略管理。

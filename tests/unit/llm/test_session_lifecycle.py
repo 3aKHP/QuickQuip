@@ -155,7 +155,7 @@ def test_v2_migration_is_additive_and_does_not_repeat_legacy_backfill(tmp_path):
     with upgraded._connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM agent_loops").fetchone()[0] == 0
         versions = {row[0] for row in conn.execute("SELECT version FROM agent_schema_migrations")}
-        assert versions == {1, 2, 3}
+        assert versions == {1, 2, 3, 4}
     assert (
         LLMStore(store.path).get_or_create_chat_session("g")
         == upgraded.get_or_create_chat_session("g")

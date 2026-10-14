@@ -12,12 +12,13 @@ label = "Protocol test fixture"
 accept-encoding = "gzip, deflate"
 [protocols.openai]
 [protocols.openai_responses]
+[protocols.gemini]
 ''', "protocol-only")
 
 
 def protocol_only_config(config):
     """Retain protocol/retry/media assertions under an explicit identity-free Profile."""
-    if (config.protocol not in ("openai", "openai_responses")
+    if (config.protocol not in ("openai", "openai_responses", "gemini")
             or config.client_fingerprint != "default"):
         return config
     return replace(config, client_fingerprint="protocol-only",

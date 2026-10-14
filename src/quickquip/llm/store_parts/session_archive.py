@@ -129,6 +129,10 @@ class SessionArchiveMixin:
             raise RuntimeError("LLM存储 数据库不可用")
         archive_key = f"archive:{user_id}:{archive_number}"
         with self._connect() as conn:
+            archive = conn.execute(
+                "SELECT session_id FROM session_archives WHERE user_id = ? AND archive_number = ?",
+                (user_id, archive_number),
+            ).fetchone()
             conn.execute(
                 "DELETE FROM conversation_messages WHERE group_id = ?",
                 (archive_key,),
@@ -137,4 +141,6 @@ class SessionArchiveMixin:
                 "DELETE FROM session_archives WHERE user_id = ? AND archive_number = ?",
                 (user_id, archive_number),
             )
+            if archive is not None:
+                self._prune_session_models(conn, archive["session_id"])
             return int(cursor.rowcount) > 0

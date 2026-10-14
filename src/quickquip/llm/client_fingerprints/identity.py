@@ -82,3 +82,45 @@ def load_claude_device_id(data_dir: Path, override: str = "") -> str:
     except (OSError, ValueError, UnicodeError, Timeout) as exc:
         raise ConfigError("client_identity_failed",
                           "Cannot load persistent CC device identity") from exc
+
+
+def normalize_gemini_install_id(value: str, location="settings.runtime.gemini_cli_install_id"):
+    if not isinstance(value, str):
+        raise ConfigError("invalid_field", "Installation identity must be a string", location)
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        ident = uuid.UUID(value)
+        if ident.version != 4:
+            raise ValueError("not UUIDv4")
+    except ValueError:
+        raise ConfigError("invalid_field", "Installation identity requires UUIDv4",
+                          location) from None
+    return str(ident)
+
+
+def load_gemini_install_id(data_dir: Path, override: str = "") -> str:
+    """Preserve the independent automatic identity when an administrator overrides it."""
+    override = normalize_gemini_install_id(override)
+    if override:
+        return override
+    load_install_id(data_dir)
+    path = Path(data_dir) / "client_identity.json"
+    try:
+        with FileLock(str(path) + ".lock", timeout=10):
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or not re.fullmatch(
+                r"[0-9a-f]{64}", str(raw.get("install_id", "")),
+            ):
+                raise ValueError("invalid installation identity")
+            if "gemini_cli_install_id" not in raw:
+                raw["gemini_cli_install_id"] = str(uuid.uuid4())
+                durable_write(path, (json.dumps(raw) + "\n").encode("utf-8"))
+            value = normalize_gemini_install_id(raw["gemini_cli_install_id"])
+            if not value:
+                raise ValueError("empty Gemini installation identity")
+            return value
+    except (OSError, ValueError, UnicodeError, Timeout, ConfigError) as exc:
+        raise ConfigError("client_identity_failed",
+                          "Cannot load persistent Gemini installation identity") from exc

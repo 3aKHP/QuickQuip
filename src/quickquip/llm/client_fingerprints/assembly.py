@@ -12,7 +12,7 @@ from quickquip.llm.client_fingerprints.catalog import (
     FingerprintRuntime, header_value, resolve_profile, validate_provider_headers,
 )
 from quickquip.llm.client_fingerprints.identity import (
-    client_version, load_install_id, load_claude_device_id,
+    client_version, load_install_id, load_claude_device_id, load_gemini_install_id,
 )
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.client_fingerprints.body_policy import ChatBodyPolicy, project_chat_body
@@ -20,6 +20,9 @@ from quickquip.llm.client_fingerprints.claude_policy import (
     ClaudeBodyPolicy, derive_beta, project_claude_body, validate_claude_overrides,
 )
 from quickquip.llm.client_fingerprints.retry_context import retry_count
+from quickquip.llm.client_fingerprints.gemini_policy import (
+    GeminiBodyPolicy, project_gemini_body, validate_gemini_overrides,
+)
 from quickquip.llm.context_windows import resolve_context_window
 from quickquip.llm.client_fingerprints.body_bindings import project_body_bindings
 from quickquip.llm.client_fingerprints.session_projection import SESSION_BINDINGS
@@ -49,6 +52,10 @@ def assemble_headers(config, request, protocol_headers: dict[str, str]) -> dict[
     sources = {v for _, v in (*profile.bindings, *protocol.bindings)}
     values.update({source: build(request, runtime.data_dir)
                    for source, build in SESSION_BINDINGS.items() if source in sources})
+    if "gemini_cli_install_id" in sources:
+        values["gemini_cli_install_id"] = load_gemini_install_id(
+            runtime.data_dir, runtime.gemini_cli_install_id,
+        )
     if profile.id == "quickquip":
         try:
             epoch = uuid.UUID(request.epoch_id) if request.epoch_id else None
@@ -75,6 +82,12 @@ def assemble_headers(config, request, protocol_headers: dict[str, str]) -> dict[
             headers[key] = header_value(value, key)
     if default_ua:
         headers["user-agent"] = default_ua
+    if protocol.user_agent_template:
+        if request.session is None:
+            raise ConfigError("missing_session_identity", "Gemini CLI requires a business Session")
+        model = header_value(request.model, "model")
+        anchor = request.session.model_projection.get_or_bind_model("gemini-cli", model)
+        headers["User-Agent"] = protocol.user_agent_template.format(session_model=anchor)
     if profile.user_agent:
         headers["user-agent"] = (
             profile.user_agent.format(client_version=client_version())
@@ -152,6 +165,9 @@ def prepare_http_attempt(config, url, headers, payload, *, stream) -> PreparedAt
             entry.body, payload, user_id=user_id, use_cache=config.prompt_caching,
             cache_ttl=config.cache_ttl, stream=stream,
         )
+    elif isinstance(entry.body, GeminiBodyPolicy):
+        validate_gemini_overrides(config.extra_body)
+        result_body = project_gemini_body(entry.body, payload)
     for key, source in (*profile.bindings, *entry.bindings):
         if source == "retry_count":
             _set_header(result_headers, key, retry_count())

@@ -1,0 +1,35 @@
+# Gemini CLI v0.64.0: 4a0749aceac5643e6f85a36d7420314d85e13b52.
+# JavaScript Gen AI SDK v1.30.0: 38cac5bbf4941ec5fa760238bd423c0ecc2c6f04.
+# Linux x64 terminal TUI preset. The business system text remains unchanged.
+format_version = 1
+id = "gemini-cli"
+label = "Gemini CLI (0.64.0)"
+
+[protocols.gemini]
+user_agent_template = "GeminiCLI-tui/0.64.0/{session_model} (linux; x64; terminal)"
+api_key_transport = "header"
+stream_accept = "preserve"
+header_order = ["host", "connection", "User-Agent", "x-goog-api-client", "Content-Type", "x-gemini-api-privileged-user-id", "x-goog-api-key", "accept", "accept-language", "sec-fetch-mode", "accept-encoding", "content-length"]
+
+[protocols.gemini.headers]
+x-goog-api-client = "google-genai-sdk/1.30.0 gl-node/v24.18.0"
+accept = "*/*"
+accept-language = "*"
+sec-fetch-mode = "cors"
+accept-encoding = "br, gzip, deflate"
+connection = "keep-alive"
+
+[protocols.gemini.bindings]
+x-gemini-api-privileged-user-id = "gemini_cli_install_id"
+
+[protocols.gemini.body]
+strategy = "gemini-cli-generate-content"
+system_role = "user"
+tool_schema_field = "parametersJsonSchema"
+field_order = ["contents", "systemInstruction", "safetySettings", "tools", "toolConfig", "cachedContent", "generationConfig"]
+content_field_order = ["parts", "role"]
+part_field_order = ["mediaResolution", "codeExecutionResult", "executableCode", "fileData", "functionCall", "functionResponse", "inlineData", "text", "thought", "thoughtSignature", "videoMetadata"]
+function_call_field_order = ["id", "args", "name"]
+function_response_field_order = ["id", "name", "response"]
+declaration_field_order = ["name", "description", "parametersJsonSchema"]
+generation_field_order = ["temperature", "topP", "topK", "candidateCount", "maxOutputTokens", "stopSequences", "responseLogprobs", "logprobs", "presencePenalty", "frequencyPenalty", "seed", "responseMimeType", "responseSchema", "responseJsonSchema", "routingConfig", "modelSelectionConfig", "responseModalities", "mediaResolution", "speechConfig", "audioTimestamp", "thinkingConfig", "imageConfig", "enableEnhancedCivicAnswers"]

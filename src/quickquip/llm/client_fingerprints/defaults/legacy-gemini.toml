@@ -1,0 +1,6 @@
+format_version = 1
+id = "legacy-gemini"
+label = "Gemini generic (legacy)"
+
+[protocols.gemini.headers]
+accept-encoding = "gzip, deflate"
