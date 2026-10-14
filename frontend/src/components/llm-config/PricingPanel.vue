@@ -1,29 +1,51 @@
 <template>
   <div class="pricing-panel">
-    <p class="pricing-panel__intro">
-      价格用于用量统计的费用估算，单位是 <strong>美元 / 百万 token</strong>。0 表示免费；缓存价留空表示与输入价相同。
-      「全渠道兜底」适用于任何渠道下的同名模型；精确到渠道的价格优先于兜底价。
-    </p>
-
-    <UiCard v-if="missingPriced.length" padding="md" accent="warn">
-      <p class="missing-note">
-        以下 {{ missingPriced.length }} 个已配置模型未配置价格，暂无法估算费用：
-        <span v-for="item in missingPriced" :key="item" class="missing-note__item mono">{{ item }}</span>
+    <UiCard padding="md" class="pricing-summary">
+      <div class="pricing-summary__stats">
+        <span><strong>{{ rows.length }}</strong> 条价格</span>
+        <span :class="{ warn: missing.length }"><strong>{{ missing.length }}</strong> 个模型未定价</span>
+        <span v-if="incomplete.length" class="warn"><strong>{{ incomplete.length }}</strong> 条单价未填写</span>
+        <span v-if="orphans.length" class="warn"><strong>{{ orphans.length }}</strong> 条不在渠道模型清单</span>
+        <span v-if="dupes.size" class="danger"><strong>{{ dupes.size }}</strong> 组重复</span>
+      </div>
+      <div class="pricing-summary__actions">
+        <select v-model="providerFilter" aria-label="按渠道筛选">
+          <option value="">全部渠道</option>
+          <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.id }}</option>
+        </select>
+        <UiButton size="sm" icon="ListPlus" :disabled="!visibleMissing.length" @click="addMissing(visibleMissing)">为未定价模型添加价格行</UiButton>
+      </div>
+      <p class="pricing-summary__hint">
+        计费按「渠道 + 配置的模型 ID」精确匹配，不跨渠道兜底。单位为美元 / 百万 token；0 表示免费，缓存价留空表示与输入价相同。新添加的行需填写输入价与输出价后才能保存。
       </p>
     </UiCard>
 
-    <UiCard padding="lg">
-      <div class="pricing-panel__toolbar">
-        <h3>价格表 <span class="count">{{ rows.length }}</span></h3>
-        <UiButton size="sm" icon="Plus" @click="addRow">添加价格</UiButton>
+    <UiEmpty v-if="!groups.length" icon="Server" title="还没有渠道" description="先在「渠道与模型」添加渠道和模型，再为模型配置价格" />
+
+    <UiCard v-for="group in visibleGroups" :key="group.id" padding="lg" class="pricing-group" :accent="group.known ? undefined : 'danger'">
+      <header class="pricing-group__head">
+        <div class="pricing-group__title">
+          <h3 class="mono">{{ group.id }}</h3>
+          <UiTag v-if="!group.known" size="sm" variant="danger">渠道不存在</UiTag>
+          <UiTag v-else-if="group.disabled" size="sm">已停用</UiTag>
+          <span class="muted">已定价 {{ group.priced }} / {{ group.models.length }} 个模型</span>
+        </div>
+        <UiButton v-if="group.known" size="sm" icon="Plus" :disabled="!group.unpriced.length" :title="group.unpriced.length ? '' : '该渠道所有模型均已定价'" @click="addMissing(group.unpriced.map(model => ({ provider: group.id, model })))">添加价格</UiButton>
+      </header>
+
+      <div v-if="group.unpriced.length" class="unpriced">
+        <span class="unpriced__label">未定价：</span>
+        <button v-for="model in group.unpriced" :key="model" type="button" class="unpriced__chip mono" title="点击添加该模型的价格行" @click="addMissing([{ provider: group.id, model }])">
+          <UiIcon name="Plus" :size="12" />{{ model }}
+        </button>
       </div>
-      <UiEmpty v-if="!rows.length" icon="Coins" title="暂无价格配置" description="添加模型价格后，用量页才会统计费用" />
+
+      <p v-if="!group.rows.length" class="muted">该渠道暂无价格。</p>
       <div v-else class="pricing-table-wrap">
         <table class="pricing-table">
           <thead>
             <tr>
               <th>模型</th>
-              <th>渠道</th>
               <th>输入价</th>
               <th>输出价</th>
               <th>缓存读价</th>
@@ -32,34 +54,49 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in rows" :key="index" :class="{ 'pricing-table--dupe': isDupe(index) }">
-              <td><input :value="String(row.model ?? '')" placeholder="模型名" autocomplete="off" spellcheck="false" @input="patch(index, { model: ($event.target as HTMLInputElement).value })" /></td>
-              <td>
-                <select :value="row.provider_id === null || row.provider_id === undefined ? '' : String(row.provider_id)" @change="patch(index, { provider_id: ($event.target as HTMLSelectElement).value || null })">
-                  <option value="">全渠道兜底</option>
-                  <option v-for="provider in providers" :key="String(provider.id)" :value="String(provider.id)">仅 {{ provider.id }}</option>
+            <tr v-for="{ row, index } in group.rows" :key="index" :class="{ 'row--dupe': isDupe(row), 'row--orphan': isOrphan(row) }">
+              <td class="model-cell">
+                <select :value="String(row.model ?? '')" :disabled="!group.known" @change="patch(index, { model: ($event.target as HTMLSelectElement).value })">
+                  <option v-if="!row.model" value="" disabled>选择模型</option>
+                  <option v-if="row.model && isOrphan(row)" :value="String(row.model)">{{ row.model }}（不在模型清单）</option>
+                  <option v-for="model in modelOptions(group, row)" :key="model" :value="model">{{ model }}</option>
                 </select>
               </td>
-              <td><input type="number" min="0" step="any" :value="numberText(row.input_per_mtok)" @input="patchNumber(index, 'input_per_mtok', $event)" /></td>
-              <td><input type="number" min="0" step="any" :value="numberText(row.output_per_mtok)" @input="patchNumber(index, 'output_per_mtok', $event)" /></td>
-              <td><input type="number" min="0" step="any" :value="nullableText(row.cache_read_per_mtok)" placeholder="同输入价" @input="patchNullableNumber(index, 'cache_read_per_mtok', $event)" /></td>
-              <td><input type="number" min="0" step="any" :value="nullableText(row.cache_write_per_mtok)" placeholder="同输入价" @input="patchNullableNumber(index, 'cache_write_per_mtok', $event)" /></td>
-              <td><button type="button" class="row-remove" title="删除该价格" @click="remove(index)"><UiIcon name="X" :size="14" /></button></td>
+              <td><input type="number" min="0" step="any" :value="numberText(row.input_per_mtok)" :class="{ invalid: !isNumber(row.input_per_mtok) }" placeholder="必填" @change="patchNumber(index, 'input_per_mtok', $event)" /></td>
+              <td><input type="number" min="0" step="any" :value="numberText(row.output_per_mtok)" :class="{ invalid: !isNumber(row.output_per_mtok) }" placeholder="必填" @change="patchNumber(index, 'output_per_mtok', $event)" /></td>
+              <td><input type="number" min="0" step="any" :value="numberText(row.cache_read_per_mtok)" placeholder="同输入价" @change="patchNumber(index, 'cache_read_per_mtok', $event)" /></td>
+              <td><input type="number" min="0" step="any" :value="numberText(row.cache_write_per_mtok)" placeholder="同输入价" @change="patchNumber(index, 'cache_write_per_mtok', $event)" /></td>
+              <td>
+                <div class="row-actions">
+                  <select
+                    v-if="group.known"
+                    class="copy-select"
+                    :disabled="!copyTargets(row).length"
+                    :title="copyTargets(row).length ? '把这行单价复制到配置了同名模型且尚未定价的渠道' : '没有其他渠道配置了该模型且未定价'"
+                    value=""
+                    @change="copyTo(row, $event)"
+                  >
+                    <option value="">复制到…</option>
+                    <option v-for="target in copyTargets(row)" :key="target" :value="target">{{ target }}</option>
+                  </select>
+                  <button type="button" class="row-remove" title="删除该价格" @click="remove(index)"><UiIcon name="X" :size="14" /></button>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
-      <p v-if="dupes.length" class="dupe-note">存在重复的「渠道 + 模型」组合：{{ dupes.join('、') }}，保存时会被拒绝。</p>
     </UiCard>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
 import UiIcon from '../ui/UiIcon.vue'
+import UiTag from '../ui/UiTag.vue'
 import { injectLlmConfigStore } from '../../composables/useLlmConfigStore'
 import { fieldTemplate, isObject, type JsonObject, type JsonValue } from '../../lib/llmConfig'
 
@@ -67,48 +104,94 @@ const store = injectLlmConfigStore()
 
 const rows = computed<JsonObject[]>(() => Array.isArray(store.document.value?.pricing) ? store.document.value.pricing.filter(isObject) : [])
 const providers = computed<JsonObject[]>(() => Array.isArray(store.document.value?.providers) ? store.document.value.providers.filter(isObject) : [])
+const providerFilter = ref('')
+
+/** 每个渠道配置的模型 ID（计费键的唯一合法取值） */
+const configured = computed(() => new Map(providers.value.map(provider => [
+  String(provider.id ?? ''),
+  (Array.isArray(provider.models) ? provider.models.filter(isObject) : []).map(model => String(model.model ?? '')).filter(Boolean),
+])))
+
+function keyOf(row: JsonObject) { return `${String(row.provider_id ?? '')}::${String(row.model ?? '')}` }
+const priced = computed(() => new Set(rows.value.map(keyOf)))
+const dupes = computed(() => {
+  const seen = new Map<string, number>()
+  for (const row of rows.value) seen.set(keyOf(row), (seen.get(keyOf(row)) ?? 0) + 1)
+  return new Set([...seen].filter(([, count]) => count > 1).map(([key]) => key))
+})
+function isDupe(row: JsonObject) { return dupes.value.has(keyOf(row)) }
+function isOrphan(row: JsonObject) {
+  const models = configured.value.get(String(row.provider_id ?? ''))
+  return !!row.model && !models?.includes(String(row.model))
+}
+function isNumber(value: JsonValue | undefined) { return typeof value === 'number' && Number.isFinite(value) }
+
+interface Group {
+  id: string; known: boolean; disabled: boolean; models: string[]; unpriced: string[]; priced: number
+  rows: { row: JsonObject; index: number }[]
+}
+/** 展示按渠道分组；行仍按文档原序存放，index 指回 pricing 数组 */
+const groups = computed<Group[]>(() => {
+  const byProvider = new Map<string, Group>()
+  for (const provider of providers.value) {
+    const id = String(provider.id ?? '')
+    if (!id) continue
+    const models = configured.value.get(id) ?? []
+    // 未定价提示只看启用的模型；停用模型仍可在下拉中选择定价
+    const enabled = (Array.isArray(provider.models) ? provider.models.filter(isObject) : []).filter(model => model.enabled !== false).map(model => String(model.model ?? ''))
+    const unpriced = models.filter(model => enabled.includes(model) && !priced.value.has(`${id}::${model}`))
+    byProvider.set(id, { id, known: true, disabled: provider.enabled === false, models, unpriced, priced: models.filter(model => priced.value.has(`${id}::${model}`)).length, rows: [] })
+  }
+  rows.value.forEach((row, index) => {
+    const id = String(row.provider_id ?? '')
+    if (!byProvider.has(id)) byProvider.set(id, { id: id || '（未指定渠道）', known: false, disabled: false, models: [], unpriced: [], priced: 0, rows: [] })
+    byProvider.get(id)!.rows.push({ row, index })
+  })
+  return [...byProvider.values()]
+})
+const visibleGroups = computed(() => providerFilter.value ? groups.value.filter(group => group.id === providerFilter.value) : groups.value)
+const missing = computed(() => groups.value.filter(group => !group.disabled).flatMap(group => group.unpriced.map(model => ({ provider: group.id, model }))))
+const visibleMissing = computed(() => providerFilter.value ? missing.value.filter(item => item.provider === providerFilter.value) : missing.value)
+const incomplete = computed(() => rows.value.filter(row => !isNumber(row.input_per_mtok) || !isNumber(row.output_per_mtok)))
+const orphans = computed(() => rows.value.filter(isOrphan))
+
+/** 模型下拉：本行当前值 + 本渠道尚未定价的模型 */
+function modelOptions(group: Group, row: JsonObject) {
+  const current = String(row.model ?? '')
+  return group.models.filter(model => model === current || !priced.value.has(`${group.id}::${model}`))
+}
+function copyTargets(row: JsonObject) {
+  const model = String(row.model ?? '')
+  if (!model) return []
+  return [...configured.value].filter(([id, models]) => id !== row.provider_id && models.includes(model) && !priced.value.has(`${id}::${model}`)).map(([id]) => id)
+}
 
 function commit(next: JsonObject[]) { store.updateSection('pricing', next) }
 function patch(index: number, fields: JsonObject) { commit(rows.value.map((row, i) => i === index ? { ...row, ...fields } : row)) }
 function remove(index: number) { commit(rows.value.filter((_, i) => i !== index)) }
-function addRow() { commit([...rows.value, structuredClone(fieldTemplate('pricing'))]) }
-
-function numberText(value: JsonValue | undefined) { return typeof value === 'number' ? String(value) : '0' }
-function nullableText(value: JsonValue | undefined) { return typeof value === 'number' ? String(value) : '' }
-function patchNumber(index: number, key: string, event: Event) {
-  const value = Number((event.target as HTMLInputElement).value)
-  if (Number.isFinite(value)) patch(index, { [key]: value })
+/** 新行单价留空：0 是「免费」，不能当默认值；未填写时后端拒绝保存 */
+function addMissing(items: { provider: string; model: string }[]) {
+  const template = fieldTemplate('pricing') as JsonObject
+  commit([...rows.value, ...items.map(item => ({ ...structuredClone(template), provider_id: item.provider, model: item.model, input_per_mtok: null, output_per_mtok: null }))])
 }
-function patchNullableNumber(index: number, key: string, event: Event) {
-  const text = (event.target as HTMLInputElement).value
+function copyTo(row: JsonObject, event: Event) {
+  const select = event.target as HTMLSelectElement
+  const target = select.value
+  select.value = ''
+  if (target) commit([...rows.value, { ...row, provider_id: target }])
+}
+
+function numberText(value: JsonValue | undefined) { return isNumber(value) ? String(value) : '' }
+/** change（失焦/回车）时提交：输入过程中不回写，避免小数点与退格被规范化吞掉。
+ * 清空即 null：缓存价表示「同输入价」，输入/输出价表示待填写（保存时被拒绝） */
+function patchNumber(index: number, key: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  const text = input.value.trim()
   if (text === '') { patch(index, { [key]: null }); return }
   const value = Number(text)
-  if (Number.isFinite(value)) patch(index, { [key]: value })
+  if (Number.isFinite(value) && value >= 0) patch(index, { [key]: value })
+  else input.value = numberText(rows.value[index]?.[key])
 }
-
-function keyOf(row: JsonObject) { return `${row.provider_id ?? ''}::${String(row.model ?? '')}` }
-const dupes = computed(() => {
-  const seen = new Map<string, number>()
-  for (const row of rows.value) seen.set(keyOf(row), (seen.get(keyOf(row)) ?? 0) + 1)
-  return [...seen.entries()].filter(([, count]) => count > 1).map(([key]) => key.replace('::', ' / ') || '（空）')
-})
-function isDupe(index: number) { const key = keyOf(rows.value[index]!); return dupes.value.some(dupe => dupe === (key.replace('::', ' / ') || '（空）')) }
-
-/** 已配置但无任何匹配价格的「渠道 · 模型」，与后端 price_missing 口径一致（精确 → 兜底） */
-const missingPriced = computed(() => {
-  const missing: string[] = []
-  for (const provider of providers.value) {
-    if (provider.enabled === false) continue
-    const models = Array.isArray(provider.models) ? provider.models.filter(isObject) : []
-    for (const model of models) {
-      if (model.enabled === false) continue
-      const name = String(model.model ?? '')
-      const hit = rows.value.some(row => String(row.model ?? '') === name && (row.provider_id === null || row.provider_id === undefined || row.provider_id === provider.id))
-      if (name && !hit) missing.push(`${provider.id} · ${name}`)
-    }
-  }
-  return missing
-})
 </script>
 
 <style scoped>
@@ -117,45 +200,101 @@ const missingPriced = computed(() => {
   gap: var(--qq-gap-md);
 }
 
-.pricing-panel__intro {
-  margin: 0;
-  color: var(--qq-text-muted);
+.pricing-summary__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
   font-size: var(--qq-text-sm);
+  color: var(--qq-text-muted);
+}
+
+.pricing-summary__stats strong {
+  color: var(--qq-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pricing-summary__stats .warn,
+.pricing-summary__stats .warn strong { color: var(--qq-warn); }
+.pricing-summary__stats .danger,
+.pricing-summary__stats .danger strong { color: var(--qq-danger); }
+
+.pricing-summary__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--qq-gap-sm);
+}
+
+.pricing-summary__hint {
+  margin: var(--qq-gap-sm) 0 0;
+  color: var(--qq-text-quiet);
+  font-size: var(--qq-text-xs);
   line-height: 1.7;
 }
 
-.missing-note {
-  margin: 0;
-  color: var(--qq-warn);
+select {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-bg);
+  color: var(--qq-text);
+  font: inherit;
   font-size: var(--qq-text-sm);
-  line-height: 1.8;
 }
 
-.missing-note__item {
-  display: inline-block;
-  margin: 2px 4px 2px 0;
-  padding: 1px 8px;
-  border-radius: var(--qq-radius-full);
-  background: var(--qq-warn-soft);
-}
-
-.pricing-panel__toolbar {
+.pricing-group__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   margin-bottom: var(--qq-gap-sm);
 }
 
-.pricing-panel__toolbar h3 {
+.pricing-group__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pricing-group__title h3 {
   margin: 0;
   font-size: var(--qq-text-md);
 }
 
-.count {
-  color: var(--qq-text-quiet);
-  font-size: var(--qq-text-sm);
-  font-weight: 500;
+.muted {
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
 }
+
+.unpriced {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--qq-gap-sm);
+  font-size: var(--qq-text-xs);
+}
+
+.unpriced__label { color: var(--qq-warn); }
+
+.unpriced__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px dashed var(--qq-warn);
+  border-radius: var(--qq-radius-full);
+  background: var(--qq-warn-soft);
+  color: var(--qq-text);
+  font-size: var(--qq-text-xs);
+  cursor: pointer;
+}
+
+.unpriced__chip:hover { border-style: solid; }
 
 .pricing-table-wrap {
   overflow-x: auto;
@@ -182,10 +321,8 @@ const missingPriced = computed(() => {
   border-bottom: 1px solid var(--qq-border-soft);
 }
 
-.pricing-table input,
-.pricing-table select {
-  width: 100%;
-  min-width: 0;
+.pricing-table input {
+  width: 110px;
   padding: 6px 8px;
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-sm);
@@ -195,12 +332,27 @@ const missingPriced = computed(() => {
   font-size: var(--qq-text-sm);
 }
 
-.pricing-table td:first-child input { font-family: var(--qq-font-mono); }
+.pricing-table input.invalid { border-color: var(--qq-warn); }
 
-.pricing-table input[type='number'] { width: 110px; }
+.model-cell select {
+  width: 100%;
+  min-width: 180px;
+  font-family: var(--qq-font-mono);
+}
 
-.pricing-table--dupe td {
-  background: var(--qq-warn-soft);
+.row--dupe td { background: var(--qq-danger-soft); }
+.row--orphan td { background: var(--qq-warn-soft); }
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.copy-select {
+  width: 96px;
+  font-size: var(--qq-text-xs);
 }
 
 .row-remove {
@@ -219,12 +371,6 @@ const missingPriced = computed(() => {
 .row-remove:hover {
   background: var(--qq-danger-soft);
   color: var(--qq-danger);
-}
-
-.dupe-note {
-  margin: 10px 0 0;
-  color: var(--qq-warn);
-  font-size: var(--qq-text-sm);
 }
 
 .mono { font-family: var(--qq-font-mono); }

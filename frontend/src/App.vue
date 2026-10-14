@@ -28,7 +28,7 @@
           <div class="page-stage">
             <router-view v-slot="{ Component, route: viewRoute }">
               <Transition name="page-shell">
-                <component :is="Component" :key="viewRoute.fullPath" class="page-view" />
+                <component :is="Component" :key="viewRoute.path" class="page-view" />
               </Transition>
             </router-view>
           </div>
@@ -91,7 +91,7 @@ function routeDepth(path: string): number {
 }
 
 watch(
-  () => route.fullPath,
+  () => route.path,
   (nextPath, prevPath) => {
     const nextDepth = routeDepth(nextPath)
     const prevDepth = prevPath ? routeDepth(prevPath) : nextDepth
@@ -196,6 +196,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
+  min-height: 0;
 }
 
 .auth-shell {

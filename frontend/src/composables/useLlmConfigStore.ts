@@ -1,6 +1,6 @@
 import { computed, inject, provide, ref, shallowRef, watch, type InjectionKey } from 'vue'
 import type * as apiModule from '../api/llmConfiguration'
-import { configError, isObject, isOperationFinished, parseConfigImport, type JsonObject, type JsonValue } from '../lib/llmConfig'
+import { configError, formatVersionLabel, isObject, isOperationFinished, parseConfigImport, type JsonObject, type JsonValue } from '../lib/llmConfig'
 
 type Api = typeof apiModule
 
@@ -39,7 +39,7 @@ export function createLlmConfigStore(api: Api) {
   const status = shallowRef<apiModule.ConfigStatus | null>(null)
   const observedTime = ref(Date.now() / 1000)
   const statusReceivedAt = ref(observedTime.value)
-  const history = ref<{ revision: number; created_at: number | string }[]>([])
+  const history = ref<apiModule.ConfigSnapshot[]>([])
   const environment = shallowRef<Awaited<ReturnType<Api['fetchLlmConfigEnvironment']>> | null>(null)
   const validation = shallowRef<apiModule.ConfigValidation | null>(null)
   const diff = shallowRef<Awaited<ReturnType<Api['diffLlmConfiguration']>> | null>(null)
@@ -76,6 +76,24 @@ export function createLlmConfigStore(api: Api) {
   })
   /** 草稿与已发布版本是否一致（都不存在时视为一致） */
   const inSync = computed(() => status.value !== null && status.value.draft_revision === status.value.published_revision)
+
+  /** 修订的版本标记；未知修订（无快照、非当前草稿）回退为提示文本 */
+  function versionLabel(target: 'draft' | 'published' | number): string {
+    const current = status.value
+    if (target === 'draft') return formatVersionLabel(current?.draft_version.saved_at, current?.draft_version.note, '未记录时间')
+    if (target === 'published') return formatVersionLabel(current?.published_version.saved_at, current?.published_version.note, '未发布')
+    const snapshot = history.value.find(item => item.revision === target)
+    if (snapshot) return formatVersionLabel(snapshot.saved_at ?? snapshot.created_at, snapshot.note, '历史版本')
+    if (current?.draft_revision === target) return versionLabel('draft')
+    return '历史版本'
+  }
+
+  const draftLabel = computed(() => versionLabel('draft'))
+  const publishedLabel = computed(() => versionLabel('published'))
+  const botLoadedLabel = computed(() => {
+    const loaded = bot.value?.loaded_version
+    return loaded ? formatVersionLabel(loaded.saved_at, loaded.note, '已加载') : '未报告'
+  })
 
   function showError(cause: unknown) {
     const parsed = configError(cause)
@@ -137,11 +155,31 @@ export function createLlmConfigStore(api: Api) {
 
   async function refreshStatus() { acceptStatus(await api.fetchLlmConfigStatus()) }
 
+  /** 历史列表只用于版本标记，刷新失败不打断主流程 */
+  async function refreshHistory() {
+    try { history.value = (await api.fetchLlmConfigHistory()).snapshots } catch { /* 保留旧列表 */ }
+  }
+
+  async function saveNote(source: 'draft' | 'published' | number, note: string) {
+    mutating.value = true
+    clearError()
+    try {
+      acceptStatus(await api.saveLlmConfigNote(String(source), note))
+      await refreshHistory()
+      return true
+    } catch (cause) {
+      showError(cause)
+      return false
+    } finally {
+      mutating.value = false
+    }
+  }
+
   function canEditProviderId(provider: JsonObject): boolean {
     return (provider as EditableProvider)[PROVIDER_EDIT_STATE]?.saved !== true
   }
 
-  async function save() {
+  async function save(note?: string) {
     if (!document.value || busy.value || !dirty.value || conflict.value) return false
     const token = requestVersion
     const sentProviderStates = providerEntries(document.value).map(providerEditState)
@@ -150,7 +188,7 @@ export function createLlmConfigStore(api: Api) {
     saving.value = true
     clearError()
     try {
-      const result = await api.saveLlmConfiguration(payload, revision.value)
+      const result = await api.saveLlmConfiguration(payload, revision.value, note)
       if (token !== requestVersion) return false
       sentProviderStates.forEach(state => { state.saved = true })
       markProvidersSaved(result.document)
@@ -170,21 +208,23 @@ export function createLlmConfigStore(api: Api) {
     }
   }
 
-  async function apply() {
+  async function apply(note?: string) {
     if (!document.value || busy.value || dirty.value || conflict.value || activeOperation.value) return false
     if (!pendingApply || pendingApply.revision !== revision.value) pendingApply = { revision: revision.value, requestId: crypto.randomUUID() }
     applying.value = true
     clearError()
     try {
-      operation.value = await api.applyLlmConfiguration(pendingApply.revision, pendingApply.requestId)
+      operation.value = await api.applyLlmConfiguration(pendingApply.revision, pendingApply.requestId, note)
       pendingApply = null
-      return true
     } catch (cause) {
       showError(cause)
       return false
     } finally {
       applying.value = false
     }
+    // 任务已入队；标记刷新失败交给轮询补齐，不把提交误报为失败
+    await Promise.all([refreshStatus().catch(() => {}), refreshHistory()])
+    return true
   }
 
   async function poll(epoch: number) {
@@ -349,6 +389,7 @@ export function createLlmConfigStore(api: Api) {
     document, original, revision, metadata, status, history, environment, validation, diff,
     operation, recentOperations, loading, saving, applying, mutating, error, errorDetails, pollError, conflict,
     observedTime, canEditProviderId, busy, dirty, activeOperation, bot, botStale, inSync,
+    versionLabel, draftLabel, publishedLabel, botLoadedLabel, saveNote, refreshHistory,
     accept, updateSection, updateSettingsSection, reload, save, apply, validate, previewImportText, commitImport, restore,
     cancelOperation, loadDiff, loadOperations, loadEnvironment, probe, refreshStatus, recoverActiveOperation, start, stop,
     isOperationFinished,

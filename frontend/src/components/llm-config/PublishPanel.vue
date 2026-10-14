@@ -1,17 +1,17 @@
 <template>
   <div class="publish-panel">
     <UiCard padding="lg">
-      <h3 class="publish-panel__title">当前状态</h3>
+      <h3 class="publish-panel__title">当前版本状态</h3>
       <div class="pipeline">
         <div class="pipeline__node">
-          <span class="pipeline__label">草稿</span>
-          <span class="pipeline__value">v{{ store.status.value?.draft_revision ?? '—' }}</span>
-          <span class="pipeline__note" :class="{ warn: store.dirty.value }">{{ store.dirty.value ? '有未保存修改' : '与页面内容一致' }}</span>
+          <span class="pipeline__label">草稿（最后修改）</span>
+          <span class="pipeline__value">{{ store.draftLabel.value }}</span>
+          <span class="pipeline__note" :class="{ warn: store.dirty.value }">{{ store.dirty.value ? '有未保存本地修改' : '草稿已落库' }}</span>
         </div>
         <UiIcon name="ArrowRight" :size="16" class="pipeline__arrow" />
         <div class="pipeline__node">
           <span class="pipeline__label">已发布</span>
-          <span class="pipeline__value">v{{ store.status.value?.published_revision ?? '—' }}</span>
+          <span class="pipeline__value">{{ store.publishedLabel.value }}</span>
           <span class="pipeline__note">{{ store.inSync.value ? '与草稿一致' : '落后于草稿' }}</span>
         </div>
         <UiIcon name="ArrowRight" :size="16" class="pipeline__arrow" />
@@ -23,18 +23,18 @@
       </div>
       <div v-if="componentChips.length" class="components-row">
         <span v-for="chip in componentChips" :key="chip.text" class="component-chip" :class="`component-chip--${chip.kind}`">{{ chip.text }}</span>
-        <span v-if="store.bot.value?.observed_at" class="observed-at">观察于 {{ time(store.bot.value.observed_at) }}</span>
+        <span v-if="store.bot.value?.observed_at" class="observed-at">观察于 {{ formatVersionTime(store.bot.value.observed_at) }}</span>
       </div>
       <div v-if="store.operation.value && !store.isOperationFinished(store.operation.value.status)" class="operation-active" role="status">
         <UiIcon name="Loader2" :size="15" class="spin" />
-        <span>{{ OPERATION_KIND_LABELS[store.operation.value.kind] || '配置任务' }} · {{ stageLabel(store.operation.value.stage) }} · 目标版本 v{{ store.operation.value.target_revision }}</span>
+        <span>{{ OPERATION_KIND_LABELS[store.operation.value.kind] || '配置任务' }} · {{ stageLabel(store.operation.value.stage) }} · 目标版本 {{ store.versionLabel(store.operation.value.target_revision) }}</span>
         <UiButton v-if="store.operation.value.status === 'queued'" size="sm" @click="store.cancelOperation()">取消排队</UiButton>
       </div>
     </UiCard>
 
     <UiCard padding="lg">
       <div class="publish-panel__bar">
-        <h3 class="publish-panel__title">草稿与运行版本的差异</h3>
+        <h3 class="publish-panel__title">草稿与已发布版本的差异</h3>
         <UiButton size="sm" icon="GitCompareArrows" :disabled="store.busy.value" @click="store.loadDiff()">查看差异</UiButton>
       </div>
       <template v-if="store.diff.value">
@@ -63,15 +63,36 @@
           </div>
         </template>
       </template>
+
+      <div class="note-editor">
+        <label class="note-editor__label" for="llm-draft-note-input">
+          当前版本备注（Note）
+          <span class="note-editor__sub">将组合显示为「YYYY-MM-DD HH:mm (备注)」</span>
+        </label>
+        <div class="note-editor__row">
+          <input
+            id="llm-draft-note-input"
+            v-model="draftNoteInput"
+            class="note-editor__input"
+            maxlength="120"
+            placeholder="例如：接入 Claude 4 渠道 / 调低日报触发门槛"
+            @keyup.enter="saveDraftNote"
+          />
+          <UiButton size="sm" variant="ghost" icon="Tag" :disabled="store.busy.value" @click="saveDraftNote">保存备注</UiButton>
+        </div>
+      </div>
+
       <p class="muted apply-note">应用后由 Bot 编译并切换到新配置；进行中的任务继续使用旧配置直到完成。</p>
-      <UiButton
-        variant="primary"
-        icon="Rocket"
-        :loading="store.applying.value"
-        :disabled="store.busy.value || store.dirty.value || store.conflict.value || store.activeOperation.value"
-        @click="apply"
-      >应用草稿到 Bot</UiButton>
-      <p v-if="store.dirty.value" class="muted">先保存草稿，才能应用。</p>
+      <div class="apply-actions">
+        <UiButton
+          variant="primary"
+          icon="Rocket"
+          :loading="store.applying.value"
+          :disabled="store.busy.value || store.dirty.value || store.conflict.value || store.activeOperation.value"
+          @click="apply"
+        >应用草稿到 Bot</UiButton>
+        <span v-if="store.dirty.value" class="muted">请先点击顶部「保存草稿」，再应用到 Bot。</span>
+      </div>
     </UiCard>
 
     <UiCard padding="lg">
@@ -94,12 +115,34 @@
     </UiCard>
 
     <UiCard padding="lg">
-      <h3 class="publish-panel__title">历史快照</h3>
+      <div class="publish-panel__bar">
+        <h3 class="publish-panel__title">历史版本快照</h3>
+        <span class="muted">可为任意历史快照设置自定义备注，或将其恢复为新草稿</span>
+      </div>
       <UiEmpty v-if="!store.history.value.length" icon="History" title="暂无历史快照" description="每次应用成功都会留下不可变快照" />
       <div v-for="snapshot in store.history.value" :key="snapshot.revision" class="history-row">
-        <span class="history-row__label">v{{ snapshot.revision }}</span>
-        <span class="history-row__time">{{ time(snapshot.created_at) }}</span>
-        <UiButton size="sm" :disabled="store.busy.value || store.conflict.value" @click="restore(snapshot.revision)">恢复为草稿</UiButton>
+        <div class="history-row__main">
+          <span class="history-row__label">{{ store.versionLabel(snapshot.revision) }}</span>
+          <span class="history-row__time">快照于 {{ formatVersionTime(snapshot.created_at) }}</span>
+          <UiTag v-if="store.status.value?.published_revision === snapshot.revision" size="sm" variant="success">已发布</UiTag>
+          <UiTag v-if="store.bot.value?.loaded_revision === snapshot.revision" size="sm" variant="info">Bot 运行中</UiTag>
+        </div>
+        <div v-if="editingSnapshotRev === snapshot.revision" class="history-row__note-edit">
+          <input
+            v-model="editingSnapshotNote"
+            class="note-editor__input note-editor__input--sm"
+            maxlength="120"
+            placeholder="输入版本备注（留空清除）"
+            @keyup.enter="commitSnapshotNote(snapshot.revision)"
+            @keyup.esc="editingSnapshotRev = null"
+          />
+          <UiButton size="sm" variant="primary" :disabled="store.busy.value" @click="commitSnapshotNote(snapshot.revision)">确定</UiButton>
+          <UiButton size="sm" variant="ghost" @click="editingSnapshotRev = null">取消</UiButton>
+        </div>
+        <div v-else class="history-row__actions">
+          <UiButton size="sm" variant="ghost" icon="Tag" :disabled="store.busy.value" @click="startEditSnapshotNote(snapshot)">{{ snapshot.note ? '改备注' : '加备注' }}</UiButton>
+          <UiButton size="sm" :disabled="store.busy.value || store.conflict.value" @click="restore(snapshot)">恢复为草稿</UiButton>
+        </div>
       </div>
     </UiCard>
 
@@ -111,8 +154,8 @@
       <UiEmpty v-if="!store.recentOperations.value.length" icon="ListChecks" title="暂无任务记录" />
       <div v-for="item in store.recentOperations.value" :key="item.id" class="history-row">
         <UiTag size="sm" :variant="statusVariant(item.status)">{{ OPERATION_STATUS_LABELS[item.status] || item.status }}</UiTag>
-        <span class="history-row__label">{{ OPERATION_KIND_LABELS[item.kind] || item.kind }} · v{{ item.target_revision }}</span>
-        <span class="history-row__time">{{ time(item.created_at) }}</span>
+        <span class="history-row__label">{{ OPERATION_KIND_LABELS[item.kind] || item.kind }} · {{ store.versionLabel(item.target_revision) }}</span>
+        <span class="history-row__time">触发于 {{ formatVersionTime(item.created_at) }}</span>
         <UiButton size="sm" variant="ghost" @click="viewing = item">详情</UiButton>
       </div>
       <div v-if="detailOperation" class="operation-result">
@@ -125,7 +168,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
@@ -134,10 +177,53 @@ import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { injectLlmConfigStore } from '../../composables/useLlmConfigStore'
 import { toast } from '../../toast'
-import { OPERATION_KIND_LABELS, OPERATION_STATUS_LABELS, PARAM_LABELS, SETTINGS_FIELD_LABELS, SETTINGS_SECTION_LABELS, ROUTE_LABELS, describeChange, isObject, type JsonValue } from '../../lib/llmConfig'
+import {
+  OPERATION_KIND_LABELS,
+  OPERATION_STATUS_LABELS,
+  PARAM_LABELS,
+  SETTINGS_FIELD_LABELS,
+  SETTINGS_SECTION_LABELS,
+  ROUTE_LABELS,
+  describeChange,
+  formatVersionTime,
+  isObject,
+  type JsonValue,
+} from '../../lib/llmConfig'
 import type * as apiModule from '../../api/llmConfiguration'
 
 const store = injectLlmConfigStore()
+
+const draftNoteInput = ref(store.status.value?.draft_version.note || '')
+watch(
+  () => store.status.value?.draft_version.note,
+  next => {
+    if (typeof next === 'string' && next !== draftNoteInput.value) {
+      draftNoteInput.value = next
+    }
+  },
+  { immediate: true },
+)
+
+const editingSnapshotRev = ref<number | null>(null)
+const editingSnapshotNote = ref('')
+
+function startEditSnapshotNote(snapshot: apiModule.ConfigSnapshot) {
+  editingSnapshotRev.value = snapshot.revision
+  editingSnapshotNote.value = snapshot.note
+}
+
+async function commitSnapshotNote(revision: number) {
+  if (await store.saveNote(revision, editingSnapshotNote.value.trim())) {
+    editingSnapshotRev.value = null
+    toast('版本备注已更新')
+  }
+}
+
+async function saveDraftNote() {
+  if (await store.saveNote('draft', draftNoteInput.value.trim())) {
+    toast('当前草稿备注已保存')
+  }
+}
 
 /** 用户在历史列表里点「详情」查看的任务：只读展示，不接管活动任务监控 */
 const viewing = shallowRef<apiModule.ConfigOperation | null>(null)
@@ -148,10 +234,7 @@ const detailOperation = computed(() => {
 })
 const isViewingHistory = computed(() => viewing.value !== null && viewing.value.id !== store.operation.value?.id)
 
-const botLoaded = computed(() => {
-  const bot = store.bot.value
-  return bot ? `v${bot.loaded_revision}` : '未报告'
-})
+const botLoaded = computed(() => store.botLoadedLabel.value)
 const botNote = computed(() => {
   if (!store.bot.value) return 'Bot 未连接或未开启心跳'
   return store.botStale.value ? '心跳过期，状态可能不准' : '心跳正常'
@@ -239,10 +322,6 @@ function fullJson(value: JsonValue): string {
   return JSON.stringify(value, null, 2)
 }
 
-function time(value: number | string) {
-  return new Date(typeof value === 'number' ? value * 1000 : value).toLocaleString()
-}
-
 function stageLabel(stage: string) {
   return ({ queued: '排队中', preparing: '准备中', switching: '切换中', published: '已发布', finished: '完成' } as Record<string, string>)[stage] || stage
 }
@@ -266,12 +345,14 @@ function pillClass(configured: boolean | null) {
 }
 
 async function apply() {
-  if (await store.apply()) toast('配置任务已提交，等待 Bot 执行')
+  const note = draftNoteInput.value.trim()
+  if (await store.apply(note)) toast('配置任务已提交，等待 Bot 执行')
 }
 
-async function restore(target: number) {
-  if (!confirm(`将快照 v${target} 恢复为新草稿${store.dirty.value ? '，并覆盖当前未保存修改' : ''}。是否继续？`)) return
-  if (await store.restore(target)) toast('已恢复为新草稿，需要单独应用')
+async function restore(snapshot: apiModule.ConfigSnapshot) {
+  const label = store.versionLabel(snapshot.revision)
+  if (!confirm(`将版本「${label}」恢复为新草稿${store.dirty.value ? '，并覆盖当前未保存修改' : ''}。是否继续？`)) return
+  if (await store.restore(snapshot.revision)) toast('已恢复为新草稿，需要单独应用')
 }
 
 onMounted(() => {
@@ -300,6 +381,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: var(--qq-gap-sm);
   margin-bottom: var(--qq-gap-sm);
+  flex-wrap: wrap;
 }
 
 .pipeline {
@@ -313,8 +395,8 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 2px;
-  padding: 10px 12px;
+  gap: 4px;
+  padding: 12px 14px;
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-md);
   background: var(--qq-surface-elevated);
@@ -327,9 +409,10 @@ onMounted(() => {
 
 .pipeline__value {
   color: var(--qq-text);
-  font-size: var(--qq-text-lg);
-  font-weight: 700;
+  font-size: var(--qq-text-base);
+  font-weight: 600;
   font-family: var(--qq-font-mono);
+  word-break: break-word;
 }
 
 .pipeline__note {
@@ -345,6 +428,63 @@ onMounted(() => {
   align-self: center;
   color: var(--qq-text-quiet);
   flex-shrink: 0;
+}
+
+.note-editor {
+  margin-top: var(--qq-gap-md);
+  padding: 12px;
+  border-radius: var(--qq-radius-md);
+  background: var(--qq-surface-elevated);
+  border: 1px solid var(--qq-border-soft);
+  display: grid;
+  gap: 8px;
+}
+
+.note-editor__label {
+  font-size: var(--qq-text-sm);
+  font-weight: 500;
+  color: var(--qq-text);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.note-editor__sub {
+  font-size: var(--qq-text-xs);
+  color: var(--qq-text-quiet);
+  font-weight: 400;
+}
+
+.note-editor__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.note-editor__input {
+  flex: 1;
+  min-width: 220px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--qq-border);
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-surface-strong);
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+}
+
+.note-editor__input--sm {
+  height: 30px;
+  min-width: 180px;
+}
+
+.apply-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-sm);
+  flex-wrap: wrap;
 }
 
 .operation-active {
@@ -531,25 +671,44 @@ onMounted(() => {
 .history-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--qq-border-soft);
+  flex-wrap: wrap;
 }
 
 .history-row:last-child {
   border-bottom: 0;
 }
 
+.history-row__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .history-row__label {
   font-weight: 600;
   font-size: var(--qq-text-sm);
   color: var(--qq-text);
+  font-family: var(--qq-font-mono);
 }
 
 .history-row__time {
   flex: 1;
   color: var(--qq-text-muted);
   font-size: var(--qq-text-xs);
+}
+
+.history-row__actions,
+.history-row__note-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .operation-result {

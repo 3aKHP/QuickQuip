@@ -78,6 +78,7 @@ import { useDiagnosticTask } from '../../composables/useDiagnosticTask'
 import { clearLlmContext, clearLlmRuntimeActions, deleteLlmContextMessage, fetchLlmHealth, fetchLlmRuntimeActions, reloadLlmRuntime, reloadMcpRuntime, reloadPersonas, reloadRules } from '../../api/llmRuntime'
 import type { RuntimeAction, RuntimeActionResponse } from '../../api/llmRuntime'
 import { toast } from '../../toast'
+import { formatVersionLabel } from '../../lib/llmConfig'
 
 const healthLoading = ref(false)
 const healthLoadingVerbose = ref(false)
@@ -196,7 +197,8 @@ async function runProbe() {
         model: provider.default_model, request_id: crypto.randomUUID(),
       }))
       probeIndex = 0
-      probeText.value = probeBatch.length ? `已发布快照 ${snapshot.revision}，共 ${probeBatch.length} 个目标。` : '没有已启用的 provider。'
+      const label = formatVersionLabel(snapshot.version.saved_at, snapshot.version.note, '当前生效版本')
+      probeText.value = probeBatch.length ? `已发布版本 ${label}，共 ${probeBatch.length} 个目标。` : '没有已启用的 provider。'
     }
     while (probeIndex < probeBatch.length) {
       const body = probeBatch[probeIndex]
