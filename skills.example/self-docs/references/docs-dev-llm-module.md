@@ -228,7 +228,9 @@ LLM 默认只在以下场景触发：
 - 身份、历史迁移与 generation 更新在同一写事务中完成；事务成功后清理派生缓存。每轮冻结身份及 generation，失效后停止工具续轮，并拒绝迟到结果写入或交付。无 Agent 记录路径同样使用事务写入屏障。
 - 播报、总结、周月报、人物志、触发判定、后台记忆提取、诊断与独立命令每次操作使用一个短任务身份，级联与操作内重试复用。聊天图片预处理和工具图片转述显式继承聊天身份。
 
-出口投影接口为 `SessionProjector = Callable[[SessionIdentity], str]`。目标客户端适配器接收稳定快照并实现其格式编码。当前阶段只传递内部元数据，Session 不加入请求头、body、缓存键或响应 owner 指纹；低层 `LLMRequest` 未提供身份时保留 `None`。
+出口投影接口为 `SessionProjector = Callable[[SessionIdentity], str]`。客户端 Profile 接收业务身份，按协议生成请求 Header、Body 或缓存键，具体契约见[请求指纹 Profile](../admin/client-fingerprints.md)。低层 `LLMRequest` 未提供身份时保留 `None`；依赖业务身份的 Profile 会在发送前拒绝缺失身份。
+
+`SessionIdentity` 的可序列化字段保持身份与创建时间；`SessionModelProjection` 承载 Session 的首次使用模型绑定，运行时投影状态不进入身份 JSON。Agent schema 4 的 `session_client_models` 按 Session 与客户端原子保存模型名，持续聊天每次绑定验证当前身份及 generation；存档恢复保留绑定，清空或删除最后一份存档时清理无引用绑定。独立操作在内存中绑定，Gemini CLI 的 default 与显式模板共用同一客户端键，模板版本跟随当前冻结配置。
 
 HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已有追踪记录保持空值。传输层仅在当前 `complete()` 范围内绑定显式快照，退出或取消后恢复；不从外层任务上下文推断业务归属。管理页面继续使用现有展示。
 
