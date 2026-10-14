@@ -15,12 +15,12 @@
 
 ## Root 文档
 
-- `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：data/llm_config.db、config/llm.toml、.env、prod.example/、default、extra_body、legacy-claude、legacy-gemini、/start_session、scripts/sync_preset_skills.py
+- `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：data/llm_config.db、config/llm.toml、.env、prod.example/、default、extra_body、legacy-claude、legacy-gemini、client_fingerprint、/start_session
 - `CLAUDE.md` → `references/root-claude.md` — CLAUDE.md — AI 协作者说明 ｜ 关键词：docs/dev/、docs/dev/README.md、docs/dev/branching.md、docs/admin/、docs/user/、prod.example/、prod/、.venv、uv venv、.venv/bin/
 - `CODE_OF_CONDUCT.md` → `references/root-code_of_conduct.md` — RFC 325799 — QuickQuip Code of Conduct ｜ 关键词：∀t: Reading(t) → Reading(t)、submit(x) → (User(x) ↔ User(x))、|P| ∈ {0, 1} → ∀p ∈ P: Civil(p, air)、Comply(x) → ¬Violate(x)、Disagree(x) → (C ≡ C)、P(reply) + P(¬reply) = 1
 - `CONTRIBUTING.md` → `references/root-contributing.md` — Contributing to QuickQuip ｜ 关键词：docs/dev/README.md、docs/dev/branching.md、docs/dev/style.md、docs/dev/testing.md、src/、uv venv、uv pip install、.venv/bin/python、.venv/Scripts/python.exe、python
 - `README.md` → `references/root-readme.md` — QuickQuip — QQ 群聊妙语机器人 ｜ 关键词：regex_context、llm_context、config/games.toml、/roll、/choose、/fortune、/vote、/quote、/find、/tell
-- `ROADMAP.md` → `references/root-roadmap.md` — ROADMAP ｜ 关键词：docs/、config/llm.toml、/llm reload、effect、awakening、chat_rules、llm、generation、games、niuniu_text*
+- `ROADMAP.md` → `references/root-roadmap.md` — ROADMAP ｜ 关键词：docs/、/llm reload、awakening、chat_rules、generation、games、niuniu_text*、/llm probe、context_limit、builtin_search
 - `SECURITY.md` → `references/root-security.md` — 安全策略 / Security Policy ｜ 关键词：dev、-dev.N、-rc.N、cccp1945@vip.qq.com、[QuickQuip security]
 
 ## 文档导航

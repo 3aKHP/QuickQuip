@@ -250,13 +250,13 @@ curl -sS -X POST "https://mcp.example.com/mcp" \
 
 ### 4.1 `settings.mcp.servers` 全字段表
 
-默认值以现行解析代码为准（`MCPServerConfig` 与 `_read_mcp_servers`）。
+默认值以 `MCPServerConfig` 为准；JSON 写入约束由 `config_document.py` 校验。保存与导入预览返回具体字段错误，修正后才能保存整份草稿。
 
 **通用字段**
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
-| `id` | （必填） | server 唯一标识；缺失或与已出现 id 重复的条目整段跳过（重复时记录告警），也是工具别名与 `mcp:<id>` 分类的来源 |
+| `id` | （必填） | server 唯一标识；缺失或重复会使配置校验失败，也是工具别名与 `mcp:<id>` 分类的来源 |
 | `transport` | `"stdio"` | `stdio` / `docker` / `http` / `sse` |
 | `enabled` | `true` | 单 server 开关；`false` 时状态记为 disabled，不参与连接 |
 | `timeout_seconds` | `30` | 连接、探测与每次请求等待的上限秒数（float） |
@@ -306,7 +306,7 @@ docker 的 `args` 附加在镜像名之后，作为 server 自身参数；`env` 
 |------|--------|------|
 | `protocol_version` | `"2025-03-26"` | legacy 握手时声明的协议版本 pin |
 | `negotiation` | `"legacy"` | `legacy` / `auto` / `modern`，仅 `http` transport 生效（§5.2） |
-| `supported_protocol_versions` | `[]` | `auto` / `modern` 模式下客户端声明的可接受版本列表（这两种模式必填非空，否则该 server 在配置校验阶段被跳过并告警） |
+| `supported_protocol_versions` | `[]` | `auto` / `modern` 模式下客户端声明的可接受版本列表；这两种模式必填非空，缺失使配置校验失败 |
 
 ### 4.2 `${ENV_VAR}` 展开规则与时机
 
@@ -413,9 +413,9 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 
 | 根因 | 表现 |
 |------|------|
-| `url` / `command` / `image` 缺失 | 配置错误，日志明示「缺少 url/command/image」 |
-| `id` 重复 | 后出现的条目被跳过并告警 |
-| `negotiation = "auto"/"modern"` 但 transport 非 http，或未填 `supported_protocol_versions` | 配置校验阶段跳过并告警，status 里根本不出现 |
+| `url` / `command` / `image` 缺失 | 对应 transport 装载时返回配置错误，日志明示缺失字段；补齐连接配置后保存并应用 |
+| `id` 重复 | 整份配置校验失败，调整为唯一 ID 后再保存 |
+| `negotiation = "auto"/"modern"` 但 transport 非 http，或未填 `supported_protocol_versions` | 配置校验失败；http 的新纪元模式需声明非空版本列表 |
 | 两个 server 的工具归一后同名 | fail-closed，冲突绑定全部不注册，error 为「alias 冲突」 |
 | compose 冷启动竞态 | 超时/5xx 自动重试 3 次，通常自愈；认证/4xx 不重试 |
 | 凭证无效 | 认证失败，检查 `.env` 与 `headers`/`env` 占位是否展开（展开为空串时服务器侧表现为匿名请求） |

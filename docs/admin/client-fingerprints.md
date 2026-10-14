@@ -17,6 +17,8 @@ Provider 的固定字段 `client_fingerprint` 选择客户端请求特征。内�
 
 在 Web Admin「LLM 配置 → 渠道」选择 Profile，保存草稿后应用。JSON 的 `client_fingerprint` 放在渠道对象内；模型参数覆盖不接受该字段。它与 OpenAI Responses 的 `responses_profile` 能力设置分别配置。
 
+首次从旧 TOML 迁移且存在受管 Body／Header 冲突时，初始化会先失败；应按[首次迁移的 Profile 字段冲突](llm-configuration.md#首次迁移的-profile-字段冲突)处理迁移输入，再进入 Web 选择兼容 Profile。配置数据库准备完成后，渠道的 Profile 选择与手工字段调整可在同一草稿中保存并应用。
+
 ## 自有品牌请求头
 
 默认 UA 为 `QuickQuip/<实际安装包版本>`，例如 `QuickQuip/1.16.2.dev1`。版本来自 `importlib.metadata`，缺少包元数据时使用 `unknown` 并记录诊断。Provider 参数 `user_agent` 优先于附加请求头中的 UA，附加 UA 优先于 Profile 默认 UA；请求头名称按大小写无关处理。

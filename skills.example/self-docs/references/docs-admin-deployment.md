@@ -41,7 +41,7 @@ bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 配置备份使用 `python -m quickquip.llm.config_cli backup data/llm-config-backup.db` 的 SQLite backup 接口。恢复数据库前停止 Bot 和 Web，先备份当前库，再运行 `restore --file <备份路径> --services-stopped`；恢复会清除旧运行租约与心跳。配置回流、导入预览、应用及备份恢复可使用模板的 Bash／PowerShell 配置运维驱动，完整命令见 [LLM 配置管理](llm-configuration.md)。
 
-回退至 1.16.1 使用首次迁移前的 TOML 及人格／多模态资产备份；升级后新增的配置不会反向转换成 TOML。新库保留供再次升级，回退应同时核对运行代码与迁移前配置资产。
+回退至 1.16.1 使用首次迁移前的 TOML 及人格／多模态资产备份；升级后新增的配置不会反向转换成 TOML。新库保留供再次升级，回退应同时核对运行代码与迁移前配置资产。升级与回退前还需备份会话库和追踪库；旧代码运行后再次升级的 Session 身份维护步骤见[回退旧版本后再次升级](llm-configuration.md#回退旧版本后再次升级)。
 
 运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。下列步骤说明手动平铺安装；版本目录部署由上述脚本管理。
 

@@ -232,16 +232,7 @@ LLM 默认只在以下场景触发：
 
 HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已有追踪记录保持空值。传输层仅在当前 `complete()` 范围内绑定显式快照，退出或取消后恢复；不从外层任务上下文推断业务归属。管理页面继续使用现有展示。
 
-升级前备份会话与追踪 SQLite 库；新增身份列为可空字段，旧消息与存档保留。若回退旧代码并运行后再次升级，停止 Bot 与 Web，备份会话库后执行以下维护 SQL，再启动新版，使活动聊天与存档重新懒分配身份：
-
-```sql
-BEGIN IMMEDIATE;
-UPDATE agent_scopes SET session_id = NULL, session_created_at = NULL;
-UPDATE session_archives SET session_id = NULL, session_created_at = NULL;
-COMMIT;
-```
-
-该维护操作保留消息、存档、设置及 generation；追踪库中的历史身份继续作为观测记录保存。数据库不可用时，持续聊天停止执行并返回存储错误，不分配临时身份继续回复。
+升级前备份会话与追踪 SQLite 库；新增身份列为可空字段，旧消息与存档保留。回退旧代码运行后再次升级，须停服、备份并重置活动与存档绑定，使新版重新分配身份；维护 SQL、数据库路径与执行方式统一见[管理员回退与再次升级流程](../admin/llm-configuration.md#回退旧版本后再次升级)。该维护保留消息、存档、设置和 generation，追踪历史身份继续作为观测记录保存。数据库不可用时，持续聊天停止执行并返回存储错误，不分配临时身份继续回复。
 
 聊天消息与 Agent 执行记录各自遵循保留策略。消息裁剪或删除时，数据库在同一事务中将相关 Turn 的 `message_row_id` 置空；Turn、工具和交付记录按执行记录的保留规则维护。显式撤回继续清理正文及原生证据，清空会话删除整个 Scope 的执行记录。业务库 Agent schema 3 在首次打开时修复已有的悬空消息引用并安装删除保护，保留现存消息、执行记录和 Session 身份。
 
@@ -380,7 +371,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ### 5.4 Provider 风格覆盖
 
-每个 `providers` 条目支持可选字段 `style_overrides`（多行字符串）。
+渠道的 `providers[].parameters.style_overrides` 支持多行字符串；模型的 `models[].parameters.style_overrides` 可覆盖该值。共享风格段通过同一 `parameters` 对象中的 `style_profile` 引用。
 
 此字段的内容会在每次调用该 provider 时，追加到 persona 的 `style_prompt` 之后，用于修正特定模型的口癖。
 
@@ -390,7 +381,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - DeepSeek：禁止分点列举
 - Claude / Gemini：禁止旁白括号、禁止过于简略的回复
 
-修改后需 `/llm reload` 生效。
+通过 Web Admin「LLM 配置 → 渠道与模型」保存草稿，再单独应用并确认 Bot 已加载目标版本；在途任务保持原快照，后续请求使用新风格。`/llm reload` 读取已发布配置。完整参数继承与交换流程见[LLM 配置管理](../admin/llm-configuration.md)。
 
 ### 5.5 身份映射注入
 

@@ -119,6 +119,8 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `memory_enabled` | 全局记忆注入开关 | `true` |
 | `default_provider` | 默认 provider ID | — |
 | `default_persona` | 默认人格 ID | — |
+| `client_cluster` | 可选部署群标识，仅使用可打印 ASCII；由 QuickQuip Profile 投影为品牌请求头，见[请求指纹 Profile](client-fingerprints.md) | `""` |
+| `claude_code_device_id` | 可选 Claude Code 设备身份，填写 64hex 字符串；留空使用数据目录中的持久随机身份 | `""` |
 | `gemini_cli_install_id` | 可选 Gemini CLI 安装 UUIDv4；留空使用持久随机身份，见[请求指纹 Profile](client-fingerprints.md) | `""` |
 | `history_limit` | 单次调用读取的对话行数兜底——**自 1.14 起语义变更**：不再默认生效（默认路径由会话纪元自动管理）；仅当某会话通过 `/llm context_limit <n>` 显式覆盖时（群聊/私聊均可，上限 1024 条），该会话退化为保留最新 n 行的滚动窗 | `10` |
 | `history_max_messages_per_group` | **自 1.14 起废弃（保留解析、不再生效）**：存储裁剪由会话纪元锚点驱动，硬上限统一为 2048 行（`service_parts/constants.py`） | `40` |
@@ -225,7 +227,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 `providers` 是有序渠道数组。协议、地址、身份和认证字段在渠道层维护；请求参数保存在渠道 `parameters` 中，模型 `parameters` 可覆盖全部同名请求参数。优先级为调用／会话覆盖 → 模型 → 渠道 → 具有覆盖职责的全局设置 → 内置默认；null 继承，空字符串、空对象、false 与合法零值均为显式值。`extra_body` 整体替换对象。
 
-下表请求参数键位于 `parameters`：
+渠道固定字段位于 `providers[]` 对象：
 
 | 键 | 说明 | 默认值 |
 |----|------|--------|
@@ -236,21 +238,28 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `default_model` | 默认模型 ID | — |
 | `models` | 有序模型对象数组：`model`、`enabled`、`vision`、`context_window`、`parameters` | `[]` |
 | `enabled` | 暂时禁用该 provider：不进 `/llm providers`/`models` 列表、不参与探活、级联候选跳过、`/llm use` 拒绝；provider 保留在配置中，改回 `true` 即恢复 | `true` |
+| `aliases` | 有序别名对象数组，如 `[{"alias":"gpt4","model":"gpt-5.4"}]` | `[]` |
+| `headers` | 注入到每次请求的额外 HTTP 头 | — |
+| `client_fingerprint` | 渠道固定字段，选择请求指纹 Profile；见[请求指纹 Profile](client-fingerprints.md) | `default` |
+| `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
+| `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
+| `auth_method` | 认证方式：`api_key` 或 `bearer`。Claude 分别使用 `x-api-key` / `Authorization: Bearer`；Gemini 的 API Key 传输由 Profile 决定：新默认使用 `x-goog-api-key`，legacy-gemini 使用 `?key=`；显式 bearer 使用 `Authorization: Bearer`；OpenAI 使用 Bearer | `api_key` |
+| `parameters` | 渠道请求参数对象；模型的同名对象可覆盖参数 | `{}` |
+
+模型对象位于 `models[]`：`model` 为实际请求模型名，`enabled` 控制可用性，`vision` 声明图片能力（缺省 true），`context_window` 声明容量，`parameters` 保存模型请求参数覆盖。别名对象与模型清单均在渠道层维护。
+
+以下请求参数位于渠道或模型的 `parameters` 对象：
+
+| 键 | 说明 | 默认值 |
+|----|------|--------|
 | `timeout_seconds` | 请求超时（秒） | `45` |
 | `temperature` | 温度参数 | `0.8` |
 | `max_output_tokens` | 最大输出 token 数 | `800` |
 | `style_overrides` | 可选，多行字符串，追加到每次调用的 system prompt 末尾 | — |
 | `style_profile` | 可选，引用 `style_profiles` 中预定义的共享 system prompt 段，与 `style_overrides` 拼接 | — |
-| `models[].vision` | 模型支持图片输入；false 时走图片预处理 | `true` |
 | `stream_enabled` | 是否启用 SSE 流式响应 | `true` |
-| `aliases` | 有序别名对象数组，如 `[{"alias":"gpt4","model":"gpt-5.4"}]` | `[]` |
-| `headers` | 注入到每次请求的额外 HTTP 头 | — |
-| `client_fingerprint` | 渠道固定字段，选择请求指纹 Profile；见[请求指纹 Profile](client-fingerprints.md) | `default` |
 | `user_agent` | 自定义 User-Agent 请求头 | — |
 | `extra_body` | 注入到每次请求体的额外 JSON 对象，模型覆盖时整体替换 | — |
-| `fallback_urls` | 备用 base URL 列表，主地址 5xx/网络错误时自动切换 | `[]` |
-| `proxy` | HTTP(S) 代理地址（如 `http://127.0.0.1:7890`），所有请求均走代理，含 fallback 重试 | — |
-| `auth_method` | 认证方式：`api_key` 或 `bearer`。Claude 分别使用 `x-api-key` / `Authorization: Bearer`；Gemini 的 API Key 传输由 Profile 决定：新默认使用 `x-goog-api-key`，legacy-gemini 使用 `?key=`；显式 bearer 使用 `Authorization: Bearer`；OpenAI 使用 Bearer | `api_key` |
 | `prompt_caching` | 启用 Anthropic Prompt Caching（仅 `claude` 协议生效，需中转站支持 CLI 格式） | `false` |
 | `cache_ttl` | Claude prompt cache TTL：空值默认 5min，`"1h"` 使用扩展缓存（仅 `claude` 协议生效） | `""` |
 | `builtin_search` | 声明 provider 原生搜索工具（仅 `gemini` 协议生效）：请求携带 `google_search` 服务端检索声明，回复末尾自动附上 grounding 来源；开启后该 provider 的会话移除 `search_web` 工具，提示词引导同步切换。其他协议下该键不生效（配置加载时记录 warning）。检索在 provider 侧执行并计费，本地轮次上限与 token 看板不覆盖 grounding 调用本身。注意：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型需关闭该 provider 的 `builtin_search` 或全局 `tool_calling_enabled`，否则聊天请求会被 API 拒绝 | `false` |
@@ -261,6 +270,29 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 > **预算与模型容量覆盖**：`request_input_token_budget` 与 `agent_replay_loop_tokens` 可在渠道或模型 `parameters` 中覆盖。每个模型的 `context_window` 声明上下文容量，null 时按现有模型家族注册表自动解析；未命中时标为容量未知。有效参数接口同时返回配置值、最终值及来源。
 
+
+#### 渠道与模型的 JSON 层级
+
+以下为结构片段；编辑完整导出文件时更新对应渠道，保留其他渠道及被引用的模型。固定连接字段位于渠道对象，模型温度覆盖位于该模型的 `parameters`：
+
+```json
+{
+  "providers": [
+    {
+      "id": "openai-main",
+      "protocol": "openai",
+      "base_url": "https://your-openai-relay.example/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "default_model": "gpt-5.4",
+      "client_fingerprint": "default",
+      "parameters": {"temperature": 0.8, "max_output_tokens": 2048},
+      "models": [
+        {"model": "gpt-5.4", "parameters": {"temperature": 0.5}}
+      ]
+    }
+  ]
+}
+```
 
 #### 思考档位跨协议映射
 
@@ -289,7 +321,7 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 > **内联媒体预算**：`max_inline_media_bytes`（provider 级键，缺省 `5242880`，`0` = 不限）限制单次请求全部内联图片的解码字节总量，用户消息与各批工具结果共享预算和内容去重。发送前 GIF 自动取首帧转静态 PNG。超出单图上限或请求额度的图片先自动降采样重编码为 JPEG 压入剩余额度（原始尺寸优先、长边阶梯递减；额度低于 96KB 时不再压缩）；压缩后仍装不下的第一张图片及其后低优先级图片全部跳过并记录日志。优先保留最新用户消息中的图片（当前 → 引用 → 近期），再按新到旧处理工具结果与历史用户图片。每次请求组装独立计算预算，协议中的消息与工具结果顺序保持完整。该预算同时决定请求体上限（图片 base64 膨胀约 4/3，缺省值对应最坏约 6.7MiB 请求体）；上游网关按更紧的请求体或 token 口径风控（部分网关把图片 base64 按文本估算 token）的部署应显式配置更小的值。
 
-> **协议适配说明**：内置 `default` 的 Chat 使用 OpenCode 2，Responses 使用轻量 Codex，Gemini 保留通用默认；Anthropic 使用 Claude Code 2.1.296 Linux CLI 的 Header 与 Body 策略，保留 `/messages?beta=true` URL；`legacy-claude` 提供既有行为回退。Profile 指纹值由 TOML 文件定义。附加头按大小写无关覆盖，`user_agent` 参数优先级最高；自动 Session 与 Body 结构字段受到覆盖保护。`quickquip` Profile 使用自有品牌，四个专有头由该 Profile 管理；全局 `settings.runtime.client_cluster` 可配置部署群标识，`settings.runtime.claude_code_device_id` 可填写 CC 设备身份。详情见[请求指纹 Profile](client-fingerprints.md)。
+> **协议适配说明**：内置 `default` 的 Chat、Responses、Anthropic 和 Gemini 分别使用 OpenCode 2、轻量 Codex、Claude Code 和 Gemini CLI 策略；`legacy-claude` 与 `legacy-gemini` 提供通用行为回退。Profile 的版本、UA、Header 和 Body 特征由随包 TOML 定义，本地同名模板整份覆盖，修改后重启 Bot 与 Web。附加头按大小写无关覆盖，`user_agent` 参数优先级最高；自动 Session 与 Body 结构字段受到覆盖保护。`quickquip` Profile 使用自有品牌，四个专有头由该 Profile 管理；全局 `settings.runtime.client_cluster` 可配置部署群标识，`settings.runtime.claude_code_device_id` 可填写 CC 设备身份。详情见[请求指纹 Profile](client-fingerprints.md)。
 
 > **Gemini 工具回放说明**：`gemini` 协议会把模型返回的有序 `parts` 作为 provider opaque data 保留，并在工具结果回送时原样恢复 `thoughtSignature`。并行 `functionCall` 与 `functionResponse` 必须保持完整批次；超过单轮工具上限时本轮 fail-closed，不向 Gemini 发送截断历史。工具结果图片放在完整 `functionResponse` 批次之后的独立 user turn。连接只接受 Bearer token 的原生 Gemini 网关时设置 `auth_method = "bearer"`，避免凭据进入 URL 和代理访问日志。
 
@@ -323,13 +355,13 @@ openai chat 渠道再按模型家族钳制：DeepSeek / GLM-5.3 / Kimi k3 三档
 
 ### `pricing` — 模型定价（成本统计）
 
-per-MTok（每百万 token，USD）定价表，是 Web Admin LLM 用量页成本统计（`cost_usd`）的价格来源：
+per-MTok（每百万 token，USD）定价表，是 Web Admin LLM 用量页成本统计（`cost_usd`）的价格来源。下例假设 `deepseek` 与 `my-provider` 是两个已配置渠道，均提供 `deepseek-chat`；请按实际渠道 ID 和请求模型名修改完整导出文件的 `pricing` 数组：
 
 ```json
 {
   "pricing": [
     {
-      "provider_id": null,
+      "provider_id": "deepseek",
       "model": "deepseek-chat",
       "input_per_mtok": 0.14,
       "output_per_mtok": 0.28,
@@ -347,12 +379,16 @@ per-MTok（每百万 token，USD）定价表，是 Web Admin LLM 用量页成本
 
 | 键 | 说明 |
 |----|------|
+| `provider_id` | 已存在的渠道 ID，须为非空字符串 |
+| `model` | 该渠道实际请求发出的模型 ID，同名模型在各渠道单独定价 |
 | `input_per_mtok` | 输入价（USD/百万 token） |
 | `output_per_mtok` | 输出价（USD/百万 token） |
 | `cache_read_per_mtok` | 缓存读价；模型无该缓存机制时省略，计算时回退 input 价 |
 | `cache_write_per_mtok` | 缓存写价；同上，无缓存溢价时省略 |
 
-查价顺序：先查 `"provider_id/model"`（per-provider 覆盖），未命中回退纯 `"model"`（官方价默认），再未命中标记未定价（cost=0，用量页显示“未定价”）。第三方中转建议按模型 id 填官方价默认，再按中转实际计费加 provider 覆盖；国产 CNY 价按汇率换算成 USD。
+价格按 `(provider_id, model)` 唯一匹配，模型名取本次请求实际发送的值；上游响应中改写的模型名不影响定价。免费模型填写零价格；缺少匹配记录时标记“未定价”，成本暂计为 0。同名模型在不同渠道分别配置，第三方渠道按实际计费填写 USD 单价。缓存价格为 null 或省略时回退输入价。
+
+JSON 交换格式当前为整数 `format_version: 2`。导入旧格式 1 时，后端将可明确归属的全渠道价格转换到渠道，并在预览中列出归属和移除结果；导入前核对报告，保存草稿后单独应用。升级与导入规则见 [LLM 配置管理](llm-configuration.md#模型参数与引用)。
 
 ### `settings.skills` — Skill 系统
 

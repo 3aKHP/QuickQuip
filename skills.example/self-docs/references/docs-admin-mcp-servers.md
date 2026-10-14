@@ -19,6 +19,8 @@ QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的�
 
 ## 接入清单
 
+先确认基础 LLM 对话可用，并在「LLM 配置 → 工具与技能」开启 `settings.runtime.tool_calling_enabled`。新建配置库的工具调用缺省关闭，MCP 连接成功后仍需此开关才会向模型提供工具；若采用 `settings.tools.enabled_mode = "replace"`，显式允许需要的 MCP 工具。以下配置与工具开关一并保存草稿并应用。
+
 1. **拿到连接信息**：远程 server 记下端点 URL 与鉴权凭证（如 Bearer token）；本地 server 记下启动命令或镜像名，以及所需环境变量。
 2. **写配置**：在 Web Admin「LLM 配置」的 `settings.mcp` 打开总开关并声明 server 条目，以下为导出 JSON 内的配置片段：
 
@@ -64,7 +66,7 @@ QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的�
    - fetch [sse] ERROR tools=0 error=连接超时
    ```
 
-   `ON` 表示已连接，`OFF` 表示该 server 被停用，`ERROR` 表示装载失败；聊天面的 `error=` 只显示失败类别，脱敏后的具体错误文本在 Web Admin「MCP」页查看。配置了 `negotiation` 的 http server 会在 transport 后附带协议纪元标记（如 `[http/auto/modern]`），表示协商模式与实际协商结果。
+   `ON` 表示已连接，`OFF` 表示该 server 被停用，`ERROR` 表示装载失败；聊天面的 `error=` 只显示失败类别，脱敏后的具体错误文本在「LLM 配置 → 工具与技能 → MCP 服务与状态」查看。配置了 `negotiation` 的 http server 会在 transport 后附带协议纪元标记（如 `[http/auto/modern]`），表示协商模式与实际协商结果。
 6. **健康检查与用量观察**：`/llm probe`（管理员）并发探活全部 LLM provider，确认模型侧链路可用（每次调用按 provider 计费）。MCP 工具在 LLM 工具循环内执行，相关用量与成本在 Web Admin「用量」页按 provider / 模型 / 功能 / 群 / 人格维度查看。
 
 ## 最小 http 示例

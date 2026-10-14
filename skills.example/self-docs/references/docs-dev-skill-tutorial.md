@@ -59,7 +59,7 @@ Skill 的格式遵循 Agent Skills 开放标准的可移植核心：一个子目
 
 ### 1.2 零影响原则
 
-`[skills] enabled = false`，或 `skills/` 目录为空、不存在时：四个工具不注册，catalog 块渲染为空串，系统提示保持逐字节不变。未部署 Skill 的实例，其行为与没有这套系统的实例完全一致（`src/quickquip/llm/service_parts/skills.py` 的空目录短路逻辑）。
+`settings.skills.enabled = false`，或 `skills/` 目录为空、不存在时：四个工具不注册，catalog 块渲染为空串，系统提示保持逐字节不变。未部署 Skill 的实例，其行为与没有这套系统的实例完全一致（`src/quickquip/llm/service_parts/skills.py` 的空目录短路逻辑）。
 
 ---
 
@@ -120,6 +120,7 @@ skills/                     ← 部署目录（项目根，已被 git 忽略）
 
 ```bash
 # 从官方模板复制（在项目根执行）
+mkdir -p skills
 cp -r skills.example/self-docs skills/          # 装一个
 cp -r skills.example/. skills/                  # 全装
 
@@ -130,6 +131,8 @@ mkdir -p skills/group-meme-pedia/references
 目录在每轮构建系统提示时现扫一次，**无需重启**：放入或删掉 Skill 后，进行中会话的下一轮请求即可看到变化。Docker 镜像只含 `skills.example/`，容器化部署经 compose 挂载供给 `skills/`，方式见 `prod.example/` 模板与 [docs/admin/skills.md](../admin/skills.md)。配置键 `catalog_dir` 可把目录指到别处：留空 = 项目根 `skills/`，相对路径按项目根解析。
 
 ### 3.2 用 `/skill list` 查看
+
+在基础 LLM 对话可用后，通过配置工作台开启 `settings.runtime.tool_calling_enabled` 并保持 `settings.skills.enabled = true`，保存草稿后应用。工具调用关闭时模型看不到 Skill 清单与工具；完整启用与工具名单要求见[Skill 部署说明](../admin/skills.md#配置settingsskills)。
 
 群里发送 `/skill list` 可查看已安装 Skill 与当前会话已激活项（只读）。输出形如（`src/quickquip/llm/skills/context.py` 的 `render_skill_list`）：
 
@@ -142,7 +145,7 @@ mkdir -p skills/group-meme-pedia/references
 
 与当前版本预置副本（`skills.example/`）字节级分叉的已安装条目会附带标注「（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）」，提示部署者同步预置更新，见 [docs/admin/skills.md](../admin/skills.md) 的「预置 Skill」节。
 
-`/skill` 只有 `list` 一个子参数，其他写法会收到用法提示。`[skills] enabled = false` 时该命令直接提示功能未启用。
+`/skill` 只有 `list` 一个子参数，其他写法会收到用法提示。`settings.skills.enabled = false` 时该命令直接提示功能未启用。
 
 ### 3.3 激活机制
 
@@ -408,7 +411,7 @@ def _collect_load(proc_root: Path) -> dict:
 | 症状 | 常见原因 | 处置 |
 |------|---------|------|
 | `/skill list` 里没有新 Skill | name 校验失败（正则、超 64 字符、与目录名不一致）；description 缺失或超 1024 字符；缺 frontmatter 围栏；文件超 256KiB；非 UTF-8；SKILL.md 是符号链接 | 对照 §2.2 逐项检查；日志里搜 `跳过无效 skill`，告警带具体原因 |
-| 描述没问题，AI 从不激活 | description 没写清触发条件；或命中敏感词被整只剔除（日志 `[description-blocked]`） | 把触发条件写具体（"当用户询问……时使用"）；对照敏感词表改措辞 |
+| 描述没问题，AI 从不激活 | 工具调用或 Skill 开关关闭；严格工具名单没有 Skill 工具；description 没写清触发条件；或命中敏感词被整只剔除（日志 `[description-blocked]`） | 检查 `settings.runtime.tool_calling_enabled`、`settings.skills.enabled` 与工具名单，保存应用；再核对触发条件及敏感词措辞 |
 | 激活了但正文没出现 | 注入正文命中拦截词，被输出管道整段替换 | 修正 SKILL.md 措辞；系统未留登记，直接重试即可 |
 | 脚本被终止："脚本运行超过 N ms" | 超过超时上限（默认 30s，硬上限 120s） | 精简脚本耗时；必要时调大 `script_timeout_ms` |
 | 脚本结果带"[输出超过 N 字节上限，已截断]" | stdout 或 stderr 超过 65536 字节 | 输出汇总数字，避免全量明细；必要时分多次运行 |

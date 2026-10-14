@@ -21,6 +21,8 @@ Skill 是受信任的部署资产：部署者把技能包放进 `skills/` 目录
 
 通过 Web Admin「LLM 配置」或配置 CLI 编辑并保存草稿，单独应用后由 Bot 接纳。资源上限与开关保存在 `data/llm_config.db`，Skill 内容继续由独立目录维护。完整流程见 [LLM 配置管理](llm-configuration.md)。
 
+首次启用先确认基础 LLM 对话可用，在「LLM 配置 → 工具与技能」开启工具调用（`settings.runtime.tool_calling_enabled = true`），并在「工具与技能」保持 `settings.skills.enabled = true`，保存草稿后应用。新建配置库的工具调用缺省关闭；仅安装 Skill 不会向模型展示清单或工具。若使用 `settings.tools.enabled_mode = "replace"`，名单须允许下表所需的 Skill 工具；工具发现设置见[工具发现配置](tool-discovery.md)。
+
 | 键 | 说明 | 默认值 |
 |----|------|--------|
 | `enabled` | Skill 系统总开关 | `true` |
@@ -84,7 +86,7 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 ## Web 管理与导入
 
-Web Admin 导航「LLM 工坊」区的「Skill」页（`/ops/#/skills`）提供 Skill 目录的在线管理面，作用目录与 `[skills].catalog_dir` 的生效目录一致。所有写入直接落盘：运行时下次构建系统提示即重新扫描目录，保存即热生效，无需 reload 或重启。容器化部署下写入落在部署根共享 `skills/`（web-admin 容器读写挂载），容器重建与版本部署后仍然保留；部署流程只向共享目录合入仓库新增的 Skill，不覆盖也不删除已有内容。全部写操作（新建、编辑、删除、预置同步、安装）记入审计日志（`data/audit.db`，Web Admin 审计页可见）。
+Web Admin 导航「LLM 工坊」区的「Skill」页（`/ops/#/skills`）提供 Skill 目录的在线管理面，作用目录与 `settings.skills.catalog_dir` 的生效目录一致。所有写入直接落盘：运行时下次构建系统提示即重新扫描目录，保存即热生效，无需 reload 或重启。容器化部署下写入落在部署根共享 `skills/`（web-admin 容器读写挂载），容器重建与版本部署后仍然保留；部署流程只向共享目录合入仓库新增的 Skill，不覆盖也不删除已有内容。全部写操作（新建、编辑、删除、预置同步、安装）记入审计日志（`data/audit.db`，Web Admin 审计页可见）。
 
 ### 管理与在线编辑
 

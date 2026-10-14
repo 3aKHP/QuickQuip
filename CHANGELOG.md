@@ -14,7 +14,9 @@
 
 - LLM 配置由 `data/llm_config.db` 管理。首次初始化迁移现有 `config/llm.toml`，保留源文件、人格及多模态资产备份与迁移报告；认证字段使用根目录 `.env` 的变量引用，迁移前须将认证字面量改为变量引用。后续配置通过 Web Admin 或 JSON／CLI 维护，保存草稿与应用分别操作，Bot 启动读取已发布快照。请同步 `prod.example/` 的初始化、挂载与启动模板，详情见 [LLM 配置管理](docs/admin/llm-configuration.md)。
 - 当前配置库为 schema 3。使用 1.16.2 开发版且已有 schema 1／2 数据库的部署者，先停止旧 Bot 与 Web、完成数据库一致备份，再运行 `python -m quickquip.llm.config_cli init --services-stopped`。回退旧程序使用升级前数据库备份。回退至 1.16.1 则使用迁移前 TOML、人格与 generation 资产；新库中的配置修改不反向写入旧 TOML。
+- 升级或回退前分别备份配置、会话与追踪数据库。已经运行过新版、回退旧代码并继续会话操作后再次升级时，先停服并备份当前会话库，再重置新增 Session 身份字段，避免沿用旧程序未维护的绑定；维护 SQL 与 Python 执行方式见[回退旧版本后再次升级](docs/admin/llm-configuration.md#回退旧版本后再次升级)。消息与存档保留。
 - 缺省或显式 `default` Profile 现按协议使用 OpenCode 2（Chat）、Codex（Responses）、Claude Code（Anthropic）和 Gemini CLI（Gemini）请求特征。升级前检查 `extra_body`、动态身份 Header 与本地模板覆盖；保留通用行为可选择 `legacy-claude`、`legacy-gemini` 或自定义 Profile。已有 OpenCode 2／Codex 本地模板的顶层 UA 须按 [Profile 文档](docs/admin/client-fingerprints.md) 移入协议局部配置；模板修改后重启 Bot 与 Web。Profile 名称与请求特征不保证具体上游渠道兼容。
+- 首次 TOML 迁移被 Profile 受管字段冲突阻断时，先按[迁移冲突流程](docs/admin/llm-configuration.md#首次迁移的-profile-字段冲突)备份并处理输入，再初始化配置库、选择兼容策略并恢复必要手工覆盖；旧 TOML 的 `client_fingerprint` 字段不承担新版 Profile 选择。
 - 模型价格按「渠道 + 模型 ID」维护，移除全渠道兜底；旧数据升级及旧格式 JSON 导入会转换可归属价格，并报告被移除条目。升级后检查各渠道模型价格，使用新版 JSON 导出格式。价格影响新请求，历史费用与在途任务保持原口径。
 
 ### 新增

@@ -296,8 +296,8 @@ QuickQuip 的 `negotiation` 字段控制每个 HTTP MCP Server 的协商模式�
 
 ### 协商规则
 
-- `stdio`、`docker`、`sse` transport 只支持 legacy。配置 `auto`/`modern` 会在配置校验阶段被跳过并记录 warning。
-- `supported_protocol_versions` 为空时 `auto`/`modern` 也会被跳过。
+- `stdio`、`docker`、`sse` transport 只支持 legacy；配置 `auto`/`modern` 时保存或导入预览返回字段错误，须修正后再保存草稿。
+- `auto`/`modern` 要求非空 `supported_protocol_versions`；缺失时整个配置校验失败。运行时连接与协商失败通过对应 server 状态报告，配置校验和网络装载分别处理。
 - `auto` 探测的结论在当前装载周期内保持：session 过期重连不重新探测，`/llm mcp reload` 或 `/llm reload` 触发的重新装载会重新探测。
 - modern version 无交集时明确报 negotiation failure。
 - `tools/call` 在 modern 模式下收到 `InputRequiredResult`（MRTR）时返回稳定的 unsupported 结果。

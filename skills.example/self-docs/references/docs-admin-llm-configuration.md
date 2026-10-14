@@ -4,7 +4,7 @@
 
 LLM 配置由 `data/llm_config.db` 保存。渠道、模型、别名、请求参数、风格、价格、级联与全局设置通过 Web Admin 的“LLM 配置”页面维护。JSON 交换示例见 [`config/llm.json.example`](../../config/llm.json.example)，字段类型、继承规则与范围见受保护接口 `/ops/api/llm-configuration/metadata`，完整后端契约见 [API 文档](../dev/llm-configuration-api.md)。
 
-页面按任务分区：配置（渠道与模型、功能路由、价格、回复风格）、行为（总开关与默认、触发与回复、上下文与记忆、纪元与代理、重试、工具与搜索、Skill、MCP 服务、报告调度）、管理（发布与历史、导入导出）。顶部状态条展示草稿→已发布→Bot 运行的版本管道；渠道与模型的参数覆盖以“跟随上层/覆盖”表达继承，渠道详情内可直接查看生效参数与发起模型探测。
+页面包含渠道与模型、对话与上下文、工具与技能、报告与路由、模型价格、发布与历史六个模块。渠道模块包含模型参数与回复风格，工具模块包含 MCP 状态，发布模块提供 JSON 导入导出与历史管理。顶部状态条展示草稿→已发布→Bot 运行的版本管道；渠道与模型的参数覆盖以“跟随上层/覆盖”表达继承，渠道详情内可直接查看生效参数与发起模型探测。
 
 ## 初始化与升级
 
@@ -22,6 +22,17 @@ python -m quickquip.llm.config_cli init
 迁移保留认证变量引用。发现认证字面量时，先将密钥写入根目录 `.env` 并把字段改为 `${VARIABLE}`。`api_key_env` 保存环境变量名称。认证 Header 可使用 `Bearer ${VARIABLE}`。数据库、导出、日志和操作错误不包含展开的认证值。
 
 迁移备份与报告存放在 `data/llm-config-migration/<源文件摘要>/`。报告列出字段转换、限制调整、移除和外部资产处理结果。内联人格写入 `config/personas/migrated-*.toml`，使用 `inherit_shared = false` 保持原提示应用语义；已有独立人格按加载优先级保留。已有 `config/generation.toml` 继续提供多模态配置，缺失时迁移提取旧段。原文件始终保留。文件冲突需要查看报告并处理后重新初始化。
+
+### 首次迁移的 Profile 字段冲突
+
+旧 TOML 的 `extra_body` 或 Header 可能覆盖新版默认 Profile 管理的字段，例如 Claude 的 `system`／`messages`／`tools`、Gemini 的 `contents`／`systemInstruction`／`tools`、Responses 的 `prompt_cache_key`，以及自动 Session Header。初始化返回 `profile_owned_body` 或 `profile_owned_header` 时，数据库尚未准备完成，须先处理迁移输入：
+
+1. 停止旧服务，保留旧 TOML、人格、多模态资产及数据目录备份，认证字面量先转为根 `.env` 的变量引用。
+2. 根据错误字段路径，从用于迁移的 TOML 中移除冲突的手工字段，保留原值于备份；重新运行 `python -m quickquip.llm.config_cli init`。
+3. 启动新版 Bot 与 Web 后，在渠道详情选择兼容策略：Claude／Gemini 可选 `legacy-claude`／`legacy-gemini`；其他情况按[自定义 Profile](client-fingerprints.md#编辑-profile-文件)定义未管理该字段的策略，并在放置模板后重启 Bot 与 Web。
+4. 将仍需使用的手工字段填回渠道 `parameters.extra_body` 或固定 `headers`，预览实际变更，保存草稿并应用，确认 Bot 已加载。认证 Header 继续使用变量引用。
+
+旧 TOML 加入 `client_fingerprint` 不会迁移为渠道选择；Profile 选择通过新版配置维护。原备份用于旧版本回退，迁移输入的调整与新版配置分别保存。
 
 ## 保存与应用
 
@@ -48,6 +59,16 @@ JSON 模型引用使用 `{ "provider_id": "渠道ID", "model": "wire模型名" }
 Web Admin 的「模型价格」按渠道分组：模型从该渠道的模型清单中选择，未定价模型可点击补行，新行的单价留空、填写后才能保存；可以把一行价格复制到同样配置了该模型的其他渠道。删除渠道时一并删除它的价格。
 
 删除被引用对象会返回依赖。停用渠道和模型保留会话与历史记录。群覆盖只允许已发布且可用的渠道与模型；应用前会重新检查已有覆盖。
+
+### 迁移群绑定与退役渠道
+
+应用返回 `dependency_conflict` 且字段路径为 `group_settings.<scope>` 时，检查该群或私聊的渠道／模型覆盖。已关闭的群或私聊仍可保留覆盖，`/llm off` 不会删除引用。替换渠道时按以下顺序操作：
+
+1. 添加新渠道与模型，保存并应用，使目标成为已发布可用对象。
+2. 在「群 LLM」找到受影响 scope，将渠道／模型改为新目标或跟随默认并保存；私聊也可用 `/llm use <provider> [model]` 迁移。需要移除全部覆盖时，先核对页面“清空”将同时重置的设置。
+3. 再停用或删除旧渠道／模型，检查功能路由等其他引用，保存草稿后应用。
+
+群覆盖保存影响后续请求，已在途请求仍使用原绑定与快照。
 
 ## CLI
 
@@ -84,3 +105,24 @@ python -m quickquip.llm.config_cli restore --file data/llm-config-backup.db --se
 `prod/config-v1.sh` 与 `prod/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流通过 JSON 导出；数据库回流通过一致备份。
 
 回退至 1.16.1 使用迁移前 TOML、独立人格与 generation 资产。保留新库便于再次升级；升级后的新配置修改不反向导出为 TOML。发布检查与专项验收范围按[发布工作流](../dev/branching.md#release)确定；部署前核对实际配置来源、服务启动顺序和备份，平台与真实双容器路径的验证结果在交付记录中注明。
+
+### 回退旧版本后再次升级
+
+升级或回退前，备份配置数据库及业务会话库 `data/llm.db`、追踪库 `data/llm_trace.db`；这些数据库分别保存配置、聊天／存档与 HTTP 观测记录。使用一致备份，或先停止 Bot 与 Web 后备份实际数据目录。配置库的 CLI `backup` 只覆盖 `llm_config.db`。
+
+若已经运行过 1.16.2，随后回退旧代码并产生会话操作，再次升级时需重新分配业务会话身份。旧程序不会维护新增身份字段：在停止 Bot 与 Web、备份当前 `data/llm.db` 后，对该会话库执行以下维护 SQL，完成后启动新版：
+
+```sql
+BEGIN IMMEDIATE;
+UPDATE agent_scopes SET session_id = NULL, session_created_at = NULL;
+UPDATE session_archives SET session_id = NULL, session_created_at = NULL;
+COMMIT;
+```
+
+可在项目根通过 Python 执行，无需另外安装 SQLite 命令行工具：
+
+```bash
+python -c "import sqlite3; c = sqlite3.connect('file:data/llm.db?mode=rw', uri=True); c.executescript('BEGIN IMMEDIATE; UPDATE agent_scopes SET session_id = NULL, session_created_at = NULL; UPDATE session_archives SET session_id = NULL, session_created_at = NULL; COMMIT;'); c.close()"
+```
+
+Windows 懒人包将 `python` 换为 `python\python.exe`；容器部署在挂载真实数据目录的维护环境中执行，并核对数据库路径。该操作用于已经包含身份字段的会话库，保留消息、存档、设置和 generation；活动聊天与恢复的存档在新版中重新懒分配身份。追踪库的历史身份保留为观测记录。常规首次升级无需这项身份维护。
