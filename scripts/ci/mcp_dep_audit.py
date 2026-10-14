@@ -1,13 +1,14 @@
-"""MCP dual-era dependency audit (Wave 0 gate).
+"""Inspect the installed dependency sets of two pinned MCP package candidates.
 
 Evaluates the dependency surface of two candidates:
 
-- ``mcp-types==2.0.0`` — lightweight schema-only package (if it exists as a
-  standalone distribution)
-- ``mcp==2.0.0`` — full SDK v2 (pulls in httpx2, OpenTelemetry, PyJWT, etc.)
+- ``mcp-types==2.0.0``
+- ``mcp==2.0.0``
 
-Creates a throw-away venv for each, installs the package, and reports the
-total installed footprint plus the delta.  Exits 0 on success.
+Creates a temporary venv for each candidate, installs from the configured
+package index, and reports installed package names and their difference.
+Installation failures appear in the report; the tool returns 0 after reporting.
+Run on Linux with network access to the package index.
 
 Usage::
 

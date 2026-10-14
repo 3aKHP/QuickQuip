@@ -1,12 +1,12 @@
 # ── QuickQuip Docker Compose ─────────────────────────────────────────────
-# 将所有 ${VAR} 替换为实际值或创建 .env 文件后运行：
-#   docker compose up -d
+# 在项目根按 .env.example 创建 .env，填写账号、凭据和功能配置后运行：
+#   docker compose -f docker-compose.example.yml up -d
 #
-# 仅启动 Bot + Web Admin：
-#   docker compose up -d quickquip web-admin
+# 启动 Bot、Web Admin 及其依赖：
+#   docker compose -f docker-compose.example.yml up -d quickquip web-admin
 #
-# MCP sidecar 请参考 docker/mcp-example.Dockerfile.example 和 config/llm.toml.example
-# 在自己的部署编排中添加。
+# MCP sidecar 构建参考 docker/mcp-example.Dockerfile.example，
+# 服务配置在 LLM 工作台的“工具与技能”中维护，保存草稿后应用。
 
 name: quickquip
 
@@ -33,8 +33,7 @@ services:
     restart: unless-stopped
 
   # ── 联网搜索（SearXNG）──────────────────────────────────────────────────
-  # 自动联网判定依赖此服务。如不需要，可在 LLM 配置数据库中
-  # 将 settings.auto_search.enabled 设为 false。
+  # 联网搜索使用此服务，自动搜索由 LLM 配置的 settings.auto_search.enabled 控制。
   searxng:
     image: ghcr.io/searxng/searxng:latest
     container_name: quickquip-searxng
@@ -94,7 +93,7 @@ services:
       # 与 web-admin 侧的 skills 挂载同时取消注释：bot 只读消费，web-admin 读写
       # 支撑 Skill 管理页落盘持久化。
       # - ./skills:/app/skills:ro
-      # host-healthcheck 可选增强（L2）：宿主机 /proc 只读挂载，默认关闭：
+      # host-healthcheck 可选宿主机视图：取消下一行注释，将 /proc 只读挂载：
       # - /proc:/host/proc:ro
       # 仅当已发布 LLM 配置启用 docker transport MCP 时才挂载：
       # - /var/run/docker.sock:/var/run/docker.sock

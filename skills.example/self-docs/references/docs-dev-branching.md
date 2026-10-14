@@ -2,14 +2,14 @@
 
 # QuickQuip 开发工作流与发布流程
 
-本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，测试纪律见 [`testing.md`](testing.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，主题版本、累积更新与开发版本约定见 [`versioning.md`](versioning.md)。
+本项目采用精简 GitFlow：`dev` 是日常集成分支，`main` 是发布专线。源码结构规则见 [`style.md`](style.md)，测试纪律见 [`testing.md`](testing.md)，公开文档规范见 [`documenting.md`](documenting.md)，架构与领域所有权见 [`architecture.md`](architecture.md)，版本约定见 [`versioning.md`](versioning.md)。
 
 ## 硬规则
 
 - 只有收到明确指令时才 commit、push、开 PR、合并或打 tag。
 - 一个分支或 PR 只承载一个主要意图；大变更先拆分。
 - 行为、配置、协议、部署契约或用户文档变化时，同一变更更新拥有该事实的文档；`feat`、`fix`、`refactor` 依项目约定维护本地 changelog 草稿。
-- 不提交 secret、`.env`、`data/`、真实 `prod/`、本机工作材料或生成物。
+- 不提交 secret、`.env`、`data/`、真实 `prod/`、本机工作材料或临时构建产物。受追踪的文档副本与接口契约按生成工具同步。
 - 使用 Conventional Commits；PR 保留 merge 历史，不 squash。
 
 ## 分支模型
@@ -99,11 +99,11 @@ Release 在 `dev` 上冻结版本、CHANGELOG 与发行范围；若需要额外�
 2. **发布一致性**：检查发布准备新增的差异，以及版本、CHANGELOG、升级说明、公开文档、配置模板、启动／打包／部署入口之间的一致性。
 3. **集成风险**：沿本期重要的跨 PR 接口核对状态生命周期、配置生效、数据迁移与回退等契约，检查现有验证是否覆盖实际边界。
 
-已有交付证据用于限定复审范围。累计 Diff 的文件数、行数或 Deep-CR 脚本对累计范围的输出不自动要求全量逐行重审。证据缺口、契约冲突或可复现问题触发对应模块的扩展审查；新增实现改动仍按 Standard／Huge 规则执行，以该改动的起始 SHA 为分级基线。
+复审范围由已有交付证据和具体问题确定。证据缺口、契约冲突或可复现问题触发对应模块的扩展审查。累计 Diff 的规模及其 Deep-CR 脚本输出用于定位风险，普通 Release 按上述专项范围审查；新增实现改动按 Standard／Huge 规则执行，以该改动的起始 SHA 为分级基线。
 
 报告注明累计范围、发布准备范围、重点检查的边界及证据链接，使用 Blocking、Should-fix、Nits、Verified claims、Not verified。Blocking 必须修复；Should-fix 修复或在 PR 记录延期理由。普通 Release 保留完整自动化检查，平台与真实渠道未验证内容如实报告。Tag 后由现有发行流水线构建和 smoke，并核对实际产物。
 
-Release PR 合并和最终 tag 分别需要维护者专门人工审核批准。开发 PR 的自动合并授权不覆盖这两步；候选 SHA 改变后更新审查与验证，重新提交审核。详情见下方“发布生命周期”。
+Release PR 合并和最终 tag 分别需要维护者专门人工审核批准，并各自记录获批的 SHA。候选 SHA 改变后更新审查与验证，重新提交审核。详情见下方“发布生命周期”。
 
 ## 日常迭代与验证
 
@@ -132,7 +132,7 @@ pnpm --dir frontend type-check
 pnpm --dir frontend build
 ```
 
-无法执行的网络、Playwright、真实 provider 或平台验证必须在 PR/交接中明确报告为未验证，而不能作为通过。
+在 PR 或交接中逐项记录验证对象与结果；无法执行的网络、Playwright、真实 provider 或平台检查标记为未验证。
 
 ## 两级代码评审
 
@@ -152,7 +152,7 @@ Bot Review（KHPilot，PR 侧自动评审）的机制事实与两轨汇合纪律
 - **评审进行中 PR head 移动会立即中断当轮评审**；中断后一般不补审，确有必要按下条请求复审。双轨编排因此固定为：**先开 PR（触发 Bot）、再启动本地独立 CR**——本地 CR 完工时 Bot 结论通常恰好到达，两轨正好汇合。
 - 评审耗时随 diff 规模线性：小型 PR 约 3–10 分钟，百文件级大 diff 可近 1 小时。
 - `@khpilot` 评论触发的是**对话式回应**（摘要回复），与 opened 触发的结构化评审（check run + 四分类 findings）是两条管线。请求复审仅在 Bot 结论对合并决策确有必要时进行，评论中给出新 head SHA 与验证结果，避免主执行 Agent 与 Bot 陷入循环。
-- **沉默不代表 approval**；Bot review 也不是 CI check 或合并门禁，CI 结果仍以 GitHub Checks 为准。
+- Bot Review 的状态以实际评审结论为准；没有结论时记录为待确认。CI 结果以 GitHub Checks 为准，人工合并按本文件的授权与评审要求执行。
 
 ### 等待编排
 

@@ -1,6 +1,6 @@
 # Sensitive word filter — deployment-specific configuration.
 #
-# This file is GITIGNORED. Copy this template to `config/sensitive_words.toml`
+# Copy this public template to the ignored `config/sensitive_words.toml`
 # and fill in the categories you need for your deployment.
 #
 # Two severity tiers:
@@ -13,16 +13,15 @@
 #
 # See docs/admin/sensitive-filter.md for the recommended 17-category scaffold
 # (政治人物 / 历史敏感事件 / 领土主权 / 民族宗教 / etc.) and pointers on
-# where to source words from. This template intentionally ships only generic
-# anti-fraud / anti-spam terms so the public repository carries no
-# jurisdiction-specific content.
+# where to source words from. This template provides generic anti-fraud and
+# anti-spam examples; tailor categories to your deployment and provider policies.
 #
 # Matching is performed on a normalized form of the input (casefold +
 # zero-width strip + whitespace strip). Add words in their canonical form;
 # trivial obfuscation like "杀 猪 盘" or zero-width insertions still hit.
 #
 # Tips:
-# - Start small. 50-80 high-confidence terms catch most real abuse.
+# - Start with a small set of relevant terms and review actual matches.
 # - Use the [soft] tier liberally for monitoring before promoting to [block].
 # - Review hit logs (logger=quickquip.common.sensitive_filter) weekly to
 #   catch false positives early.
@@ -32,7 +31,7 @@
 # ─────────────────────────────────────────────────────────────────────
 
 [block.fraud]
-# 反诈：典型电信网络诈骗术语。这些组合在正常群聊中几乎不会出现。
+# 反诈示例：按实际匹配情况检查误判。
 words = [
     "杀猪盘",
     "出售身份证",
@@ -44,7 +43,7 @@ words = [
 ]
 
 [block.gambling]
-# 赌博平台引流：这些词出现在群聊里基本只有引流一种用途。
+# 赌博平台引流示例。
 words = [
     "网赌平台",
     "私彩平台",
@@ -114,10 +113,10 @@ words = [
 #   [block.private_info_doxxing]
 #   [block.discrimination]
 #
-# We deliberately do NOT publish word lists for these categories in the
-# public repo. Sources to consider:
+# Maintain deployment-specific terms in the ignored configuration. Sources
+# to consider:
 #   1. Your provider's "Content Exists Risk" / safety-rejection logs
-#      (free labelled data — every rejection is a confirmed sensitive term).
+#      (review the rejected context before selecting a term).
 #   2. Open-source compilations on GitHub, lightly filtered for relevance.
 #   3. Commercial content-moderation APIs (Aliyun / Tencent) if you need
 #      breadth without curation cost.

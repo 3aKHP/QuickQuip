@@ -37,10 +37,14 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 群聊命令（触发 AI、语录、留言、管理员命令等） | `references/docs-user-group-commands.md` |
 | 群内游戏玩法（金币经济等） | `references/docs-user-group-games.md` |
 | AI 工具发现（用户视角） | `references/docs-user-llm-tool-discovery.md` |
+| AI Skill 扩展能力（用户视角） | `references/docs-user-llm-skills.md` |
 | 私聊命令、私聊与群聊区别 | `references/docs-user-private-commands.md` |
 | 新三国梗触发 | `references/docs-user-three-kingdoms-memes.md` |
 | 云端部署、安装、启动、升级 | `references/docs-admin-deployment.md` |
 | 配置项参考（.env 与各 TOML） | `references/docs-admin-configuration.md` |
+| LLM 配置数据库、迁移、草稿与应用、JSON 交换和备份恢复 | `references/docs-admin-llm-configuration.md` |
+| 请求身份、客户端 Profile 与模板覆盖 | `references/docs-admin-client-fingerprints.md` |
+| 全局管理员配置与权限 | `references/docs-admin-global-admins.md` |
 | 游戏系统管理与配置 | `references/docs-admin-game-config.md` |
 | OneBot 适配器状态与选择 | `references/docs-admin-onebot-adapters.md` |
 | NapCat → LLBot 迁移 | `references/docs-admin-migration-napcat-to-llbot.md` |
@@ -51,7 +55,10 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | Web Admin 管理后台 | `references/docs-admin-web-admin.md` |
 | 项目架构与结构 | `references/docs-dev-architecture.md` |
 | LLM 模块实现说明 | `references/docs-dev-llm-module.md` |
+| LLM 配置 API、修订与控制任务 | `references/docs-dev-llm-configuration-api.md` |
+| LLM 配置前端契约与验收 | `references/docs-dev-llm-configuration-frontend.md` |
 | 开发者文档索引 | `references/docs-dev-readme.md` |
+| 公开文档写作、文风、维护与审查规范 | `references/docs-dev-documenting.md` |
 | 开发工作流、分支与发布 | `references/docs-dev-branching.md` |
 | 代码规范与架构原则 | `references/docs-dev-style.md` |
 | 测试纪律、反模式与删留依据 | `references/docs-dev-testing.md` |
@@ -60,6 +67,8 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | MCP 集成 | `references/docs-dev-mcp-integration.md` |
 | 记录正文与成员身份契约 | `references/docs-dev-record-identities.md` |
 | 正则表达式教程 | `references/docs-dev-regex-tutorial.md` |
+| Skill 编写与脚本教程 | `references/docs-dev-skill-tutorial.md` |
+| MCP 概念与接入教程 | `references/docs-dev-mcp-tutorial.md` |
 | STS 公式化回复模块 | `references/docs-dev-sts-formula.md` |
 | 工具发现实现说明 | `references/docs-dev-tool-discovery.md` |
 | CR 评审流程、独立评审 agent 约定 | `references/claude-agents-quickquip-cr-reviewer.md` |

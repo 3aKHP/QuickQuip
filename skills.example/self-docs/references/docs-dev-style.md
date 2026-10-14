@@ -2,7 +2,7 @@
 
 # QuickQuip 代码规范与架构原则
 
-本文件定义 QuickQuip 源码应如何组织，使贡献者能够安全地理解、修改和验证它。分层与领域所有权见 [`architecture.md`](architecture.md)；分支、评审和验证流程见 [`branching.md`](branching.md)。
+本文件定义 QuickQuip 源码应如何组织，使贡献者能够安全地理解、修改和验证它。分层与领域所有权见 [`architecture.md`](architecture.md)；分支、评审和验证流程见 [`branching.md`](branching.md)；全仓公开文档的写作、维护和审查规范见 [`documenting.md`](documenting.md)。
 
 ## 工具基线
 

@@ -7,13 +7,16 @@ branch: "main"
 
 QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则优先：文字 meme、复读检测、接龙游戏、时区猜测为骨架；LLM 聊天为可选 opt-in 层。Python ≥ 3.11。
 
+撰写、修改或审查公开文档前，阅读并遵循 [`docs/dev/documenting.md`](docs/dev/documenting.md)，按读者任务组织信息，并检查预防性免责语调与过度边界。
+
 ## 相关文档
 
 | 想看... | 去哪里 |
 |---|---|
 | 架构设计、分层、消息流 | `docs/dev/` |
-| 开发文档职责与公共/私有边界 | `docs/dev/README.md` |
-| 变更分级、评审与发布流程 | `docs/dev/branching.md` |
+| 开发文档职责与公开内容范围 | [开发文档索引](docs/dev/README.md) |
+| 全仓公开文档写作、维护与审查规范 | [公开文档规范](docs/dev/documenting.md) |
+| 变更分级、评审与发布流程 | [工作流与发布流程](docs/dev/branching.md) |
 | 部署与运维配置 | `docs/admin/` |
 | 用户向命令与功能说明 | `docs/user/` |
 | 公开生产运维模板 | `prod.example/` |
@@ -109,7 +112,7 @@ git commit -m "feat(llm): add proxy support to ProviderConfig" \
 - feat/fix/refactor 级改动**不直接编辑 `CHANGELOG.md`**，改记一条本地草稿（机制见 [`CONTRIBUTING.md`](CONTRIBUTING.md)），避免并行分支在 `## [Unreleased]` 处冲突
 - 每条**一行**，只写“做了什么”和“为什么重要”，不写文件路径和实现细节
 - PR 描述里附上该条目正文，便于 review
-- release 时由协作者汇总本地草稿（主）与已合并 commit 历史（兜底），按 `### 新增` / `### 变更` / `### 修复` / `### 移除` 分组写入 `CHANGELOG.md` 新版本段（沿用 2026-09 统一后的纯中文小节形态），并清掉已发布草稿
+- release 时以本地草稿为主，结合已合并历史核对遗漏，按“新增、变更、弃用、移除、修复、安全”分组写入新版本段，只列有内容的分类；发布成功后清理已发布草稿
 - chore/docs/style 不更新 CHANGELOG
 
 ## 敏感词文件保护

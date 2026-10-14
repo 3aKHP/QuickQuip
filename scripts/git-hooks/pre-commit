@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Pre-commit hook: keep real private IDs out of the public repo.
 # Reads the ID list from .redact-ids at the repo root (gitignored, one ID per
-# line, '#' comments allowed). This hook file itself contains no real IDs.
-# Install: cp scripts/git-hooks/pre-commit .git/hooks/pre-commit && chmod +x
+# line, '#' comments allowed). Matching values are kept out of hook output.
+# Install from the project root:
+#   cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
 set -euo pipefail
 
 LIST=.redact-ids

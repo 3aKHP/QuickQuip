@@ -4,50 +4,23 @@
 
 ---
 
-## 系统架构
+## 游戏操作与管理权限
 
-游戏系统由三层组成：
+`/game list` 查看已注册的数字炸弹、21 点和俄罗斯轮盘，`/game stop` 结束本群正在进行的游戏。这两个命令向群友开放。牛牛使用独立命令，玩法见[群内小游戏](../user/group-games.md)。
 
-```
-金币经济 (game_economy.db)     ← SQLite，签到 / 金币账户 / 转账
-    ├── BaseGame 游戏          ← 21 点 / 俄罗斯轮盘 / 数字炸弹（session 型）
-    └── NiuNiu RPG             ← 牛牛大作战（持久化，niuniu.db）
-```
+结束 21 点时，发牌前取消会退还赌注，发牌后结束保留已扣赌注。俄罗斯轮盘在准备阶段尚未扣款，游玩阶段取消会退还双方赌注。
 
-所有数据存储在 `data/` 目录下，gitignore 排除。游戏模块代码在 `src/quickquip/games/` 下。
+群管理员可用 `/rules` 查看已登记规则，再用 `/disable <rule_name>` 或 `/enable <rule_name>` 调整自定义接龙等规则的回复。内置数字炸弹、21 点、俄罗斯轮盘和牛牛没有对应的规则总开关。
 
----
-
-## 群管理员命令
-
-### 游戏进程控制
-
-| 命令 | 说明 |
-|------|------|
-| `/game list` | 查看本群当前可用的游戏列表 |
-| `/game stop` | 强制结束本群正在进行的游戏 |
-| `/disable <rule_name>` | 禁用某条游戏规则 |
-| `/enable <rule_name>` | 启用某条游戏规则 |
-
-### 金币管理（预留）
-
-当前版本金币系统仅支持签到获取，管理员暂无可直接增减金币的群内命令。可通过 Web Admin 的数据管理或直接操作 SQLite 调整。
+金币管理通过 Web Admin“金币”页进行：选择群和账户，填写增减金额及原因，操作写入审计日志。群内金币命令用于签到、余额和排行查询。
 
 ---
 
 ## 部署者配置
 
-### 游戏总开关
+### 配置范围
 
-游戏注册在 `src/quickquip/app/message_pipeline.py` 中。要禁用某个游戏，注释掉对应的 `game_registry.register()` 行：
-
-```python
-# 当前注册的游戏
-game_registry.register(NumberBombGame(config=games_config.number_bomb))                                          # 数字炸弹
-game_registry.register(BlackjackGame(economy=game_economy, config=games_config.blackjack))          # 21 点
-game_registry.register(RussianRouletteGame(economy=game_economy, config=games_config.russian_roulette))    # 俄罗斯轮盘
-# NiuNiu 不走 GameRegistry，删除 niuniu_store 行即可禁用
-```
+`config/games.toml` 提供经济和游戏参数，当前没有全局或按群停用游戏的配置项。结束当前局使用 `/game stop`；调整游戏实现和注册方式的开发说明见[游戏框架](../dev/game-framework.md)。
 
 ### 游戏参数调整
 
@@ -74,8 +47,8 @@ game_registry.register(RussianRouletteGame(economy=game_economy, config=games_co
 | `[niuniu]` | `fenced_protection` | 300 | 被击保护期（秒） |
 | `[niuniu]` | `glue_cooldown` | 180 | 打胶 CD（秒） |
 | `[niuniu]` | `unsubscribe_gold` | 500 | 注销费用 |
-| `[niuniu]` | `decay_rate_high` | 0.01 | 高长度衰减率（\|length\| > 50）；正侧按此率、负侧减半 |
-| `[niuniu]` | `decay_rate_normal` | 0.005 | 正常衰减率（\|length\| ≤ 50） |
+| `[niuniu]` | `decay_rate_high` | 0.01 | 长度 > 50 时按此率缩短；长度 < -50 时，绝对值按此率的 0.4 倍缩小 |
+| `[niuniu]` | `decay_rate_normal` | 0.005 | 长度在 -50 至 50 时：正侧按此率缩短，负侧绝对值按此率的 0.8 倍增加 |
 | `[niuniu]` | `luck_sigma` | 1.0 | 打胶运势对数标准差（lg(x) ~ N(0, σ)） |
 | `[niuniu]` | `fence_luck_sigma` | 1.0 | 击剑运势对数标准差（同上分布） |
 | `[niuniu]` | `luck_power` | 0.75 | 运势幂压缩指数（luck^0.75：中位运势行为不变，仅温和化极端运势的实际影响） |
@@ -137,18 +110,18 @@ QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按�
 ### 游戏无响应
 
 1. 确认游戏是否注册成功：机器人启动时会输出已注册的游戏列表
-2. 检查本群是否已有进行中的游戏：`/game stop` 强制结束
-3. 确认群规则开关没有禁用该游戏：`/rules` 查看
+2. 检查本群是否已有进行中的游戏；需要结束当前局时使用 `/game stop`
+3. 自定义接龙检查 `/rules` 中的规则状态；内置游戏检查启动日志和命令返回的错误
 
 ### 金币异常
 
 1. 金币数据在 `data/game_economy.db`，可用任意 SQLite 浏览器查看
-2. 所有金币操作都有原子事务保护（`BEGIN IMMEDIATE`）
-3. 转账失败会自动回滚，不会出现“一方扣了一方没加”的情况
+2. 在 Web Admin“审计”页检查人工余额调整，在游戏记录中核对结算
+3. 金币转移在同一事务中执行；失败操作会回滚，可根据日志检查原因
 
 ### NiuNiu 数据问题
 
 1. 用户数据在 `data/niuniu.db` 的 `niuniu_users` 表
 2. 操作记录在 `niuniu_records` 表，可用于排查异常长度变化
-3. CD 状态存储在内存中，重启机器人后 CD 全部重置
+3. 动作冷却存储在内存中，重启机器人后清空冷却状态
 4. 文案模式切换通过 `/牛牛文案 <模式名>` 命令或 Web Admin 牛牛面板操作，数据存储在 `niuniu_group_text` 表

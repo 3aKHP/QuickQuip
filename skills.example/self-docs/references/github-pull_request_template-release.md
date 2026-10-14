@@ -35,7 +35,7 @@
 - Blocking / Should-fix / Nits：
 - Verified claims / Not verified：
 
-按 `docs/dev/branching.md` 的发布专项 CR 执行；累计 Diff 的体量不自动要求全量重审。新增功能性修复按自身差异执行 Standard／Huge 规则。
+按 `docs/dev/branching.md` 的发布专项 CR 检查交付证据、发布准备差异和重要集成接口；复审范围由证据与具体问题确定。新增功能性修复按自身差异执行 Standard／Huge 规则。
 
 ## Test Plan
 
@@ -53,7 +53,7 @@
 - [ ] 最终候选 SHA 的 CI 通过，评审结论与该 SHA 对应
 - [ ] 维护者已专门批准该候选合并；批准记录：
 
-候选变化后更新检查与结论，重新提交审核。合并批准不包含 tag 批准。
+候选变化后更新检查与结论，重新提交审核。合并与 tag 分别记录批准。
 
 ## 合并后 / After merge
 

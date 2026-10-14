@@ -3,9 +3,9 @@ enabled = false
 default_model = "dalle3"
 # prompt_blocklist = ["naked", "gore", "blood"]
 
-# 图片生成配置已从 llm.toml 中拆出，统一归入 generation.toml。
-# 当前版本仍兼容旧的 [image_generation] 读取方式，但新配置建议全部写在这里，
-# 便于后续接入音频、视频等更多产出模态。
+# 图片、语音、识别和音乐生成由 config/generation.toml 管理。
+# 从本模板复制后，填写所需服务并开启对应分区，重启 Bot 生效。
+# 首次 LLM 配置迁移会将旧 TOML 的多模态分区提取到此独立文件。
 #
 # 支持的 protocol（每个 [[image.providers]] 条目配置）：
 #   openai_images   — POST /images/generations，兼容 OpenAI DALL-E/GPT Image 系列
@@ -54,17 +54,17 @@ harden = true
 content_judge = false
 
 # SVG 画图（LLM 工具 draw_svg）：模型在对话中自主生成 SVG 并渲染成 PNG 发送。
-# 不需要 provider/model 配置——SVG 源码由当前群的对话模型在工具参数中直接写出，
+# SVG 源码由当前群的对话模型在工具参数中写出，
 # 渲染由本地 resvg 完成（字体沿用 data/fonts/NotoSansSC-Regular.ttf，与词云同源）。
-# 启用步骤：本段 enabled = true，并在 llm.toml 的 [tools] enabled 中加入 "draw_svg"。
+# 启用步骤：本段 enabled = true；在 LLM 工作台开启工具调用，并允许 draw_svg，保存草稿后应用。
 #
-# 两层安全防护均为可选项（默认值守住底线，取舍自由归部署者）：
+# 渲染约束与内容判断分别配置：
 #   harden        — 第一层（默认启用）：输入大小/嵌套/滤镜参数硬约束、静态清洗
 #                   （剥 script/事件属性/外链）、输出尺寸服务端覆盖、渲染子进程
-#                   rlimit（地址空间 2GB / CPU 5s）。关闭即自担风险：恶意 SVG 可
-#                   耗尽内存或 CPU（实测未设限时 160GB 位图分配可打挂整机）。
+#                   rlimit（地址空间 2GB / CPU 5s，POSIX 系统生效）。关闭会允许
+#                   高内存或高 CPU 消耗的 SVG，请按部署资源保留约束。
 #                   渲染始终在独立子进程内执行（结构性防段错误），不受此开关影响。
-#   content_judge — 第二层（默认关闭）：渲染前用 llm.toml [triggers.quick_judge]
+#   content_judge — 第二层（默认关闭）：渲染前用 LLM 配置的 settings.quick_judge
 #                   配置的廉价模型对图片可见文本做一次内容安全裁决，拦截涉政、
 #                   辱骂、隐私信息等语义层面的风险。判定失败（超时/非 JSON/未配置）
 #                   时放行渲染并记录 WARN（fail-open）。
@@ -73,9 +73,8 @@ content_judge = false
 enabled = false
 default_model = "minimax-speech"
 
-# 当前实现优先支持 MiniMax 同步 TTS（/tts）。
-# 如后续需要长文本异步任务，可把 provider.protocol 改为 minimax_t2a_async，
-# 底层已支持 create/query/retrieve 链路，但首版命令仍默认走同步直出。
+# /tts 按所选服务的 protocol 调用语音合成。
+# MiniMax 支持同步 minimax_t2a_http，以及创建、查询、下载任务的 minimax_t2a_async。
 #
 # [[audio.providers]] 字段：
 #   id              — provider 唯一标识
@@ -213,13 +212,11 @@ response_format = "json"
 enabled = false
 default_model = "minimax-music"
 
-# 当前实现只覆盖“纯文本入参”的 MiniMax 音乐能力：
+# MiniMax 音乐功能接受文本描述或歌词：
 #   - /music lyrics <主题>：歌词生成
 #   - /music lyrics edit <要求>：基于现有歌词编辑/续写（可用 --lyrics 或回复消息传入）
 #   - /music <风格描述>：先写词，再生成歌曲
 #   - /music --instrumental <风格描述>：纯音乐生成
-#
-# 当前不会接入翻唱前处理、音频参考、cover_feature_id 等依赖音频输入的链路。
 #
 # [[music.providers]] 字段：
 #   id              — provider 唯一标识

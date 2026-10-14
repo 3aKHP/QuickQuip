@@ -2,9 +2,105 @@
 
 # MCP Server 接入指南
 
-示例表示完整导出 JSON 内的字段片段，通过 Web Admin「LLM 配置」保存草稿并单独应用。操作流程见 [LLM 配置管理](llm-configuration.md)。
+本文面向已经能用 Bot 正常对话的部署者，说明如何接入 MCP 工具服务并确认工具实际执行。MCP 服务提供搜索、读文件等能力；模型提出工具请求后，QuickQuip 联系服务执行，再把结果交给模型组织回复。概念与协议详解见 [MCP 教程](../dev/mcp-tutorial.md)。
 
-QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的工具调用循环中按需使用。本文面向部署者，给出把现成 MCP server 接入 QuickQuip 的操作清单；MCP 协议概念与字段详解见 [docs/dev/mcp-tutorial.md](../dev/mcp-tutorial.md)，server 开发不在本文范围。
+第一次接入可完成下方本地 echo 练习；已有服务地址和凭据时，从[接入清单](#接入清单)开始。JSON 示例是完整导出配置中的字段片段，表单填写与片段合入位置在清单中说明，完整保存、应用流程见 [LLM 配置管理](llm-configuration.md)。
+
+## 首次接入：本地 echo 练习
+
+这个服务把传入文字原样回显，方便核对“Bot → 工具服务 → 模型回复”的过程。练习适用于同一台电脑上运行的源码 Bot 或 Windows 包；需要 Web Admin 管理权限、支持工具调用的模型，以及用于运行练习服务的标准 Python 3.11 或更高版本。Windows 使用标准 Python 的 `py` 启动器。
+
+### 1. 准备练习目录
+
+在 Bot 主机的个人工作目录中创建独立目录，放在项目仓库或 Windows 包目录之外。安装固定版本的[官方 MCP Python SDK](https://pypi.org/project/mcp/1.26.0/)；下面命令在独立虚拟环境安装服务依赖。
+
+Linux／macOS 的 Bash：
+
+```bash
+mkdir mcp-echo-lab
+cd mcp-echo-lab
+python3 -m venv .venv
+.venv/bin/python -m pip install "mcp==1.26.0"
+```
+
+Windows PowerShell：
+
+```powershell
+New-Item -ItemType Directory mcp-echo-lab
+Set-Location mcp-echo-lab
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "mcp==1.26.0"
+```
+
+### 2. 创建并启动服务
+
+用文本编辑器在刚创建的目录保存 `echo_server.py`，内容如下：
+
+```python
+from mcp.server.fastmcp import FastMCP
+
+server = FastMCP(
+    "QuickQuip Echo", host="127.0.0.1", port=8017,
+    stateless_http=True, json_response=True,
+)
+
+
+@server.tool()
+def echo(text: str) -> str:
+    """回显传入文本，供 MCP 接入测试。"""
+    print(f"echo 收到：{text}", flush=True)
+    return f"echo: {text}"
+
+
+if __name__ == "__main__":
+    server.run(transport="streamable-http")
+```
+
+在练习目录中启动。Bash 执行：
+
+```bash
+.venv/bin/python echo_server.py
+```
+
+PowerShell 执行：
+
+```powershell
+.\.venv\Scripts\python.exe echo_server.py
+```
+
+终端出现 `Uvicorn running on http://127.0.0.1:8017` 后保持运行。MCP 端点为 `http://127.0.0.1:8017/mcp`：端点就是客户端提交 MCP 请求的完整地址，包含服务使用的路径。本例只监听本机回环地址，提供一个回显工具，无需账号或令牌。实现使用 SDK 1.26.0 的 Streamable HTTP，QuickQuip 使用缺省的 `legacy` 协商和 `2025-03-26` 版本即可；示例与官方 SDK 于 2026-10-14 核对。
+
+容器中的 `127.0.0.1` 指向容器自身。本机练习使用直接运行在主机上的 Bot；容器 Bot 接入服务时，填写容器实际可达的地址：同一 Docker 网络中的服务可使用服务名，服务需监听该网络接口；宿主机服务需监听容器可达地址，并配置对应网关或路由。`host.docker.internal` 的解析取决于部署配置。生产接入可使用服务提供方已鉴权的 HTTPS 端点。
+
+### 3. 在 Web Admin 添加服务
+
+打开“LLM 配置 → 工具与技能”，开启“启用工具调用”。在“MCP 服务与状态”开启 MCP 总开关，点击“添加 MCP 服务”，填写：
+
+| 表单项 | 值 |
+|---|---|
+| 服务 ID | `echo_lab` |
+| 传输方式 | `http` |
+| 服务地址 | `http://127.0.0.1:8017/mcp` |
+| 请求头 | 留空 |
+| 协议协商 | `legacy` |
+| 协议版本 | `2025-03-26` |
+| 只装载这些工具 | `echo` |
+
+其余字段保留缺省值。若已有非空工具名单采用 `replace`，把 `mcp_echo_lab_echo` 加入该名单。点击顶部“保存草稿 → 应用到 Bot”，等待任务成功和 Bot 加载目标版本。刷新连接状态，`echo_lab` 应显示已连接、1 个工具；展开“已装载工具清单”可看到服务原始工具名 `echo`。Bot 使用的调用名称为 `mcp_echo_lab_echo`，由服务 ID 与原始工具名组成。
+
+### 4. 调用并确认结果
+
+在已开启 AI 的群或私聊发送下面的提问。这里使用默认 `/ai` 前缀；已修改前缀的会话使用实际设置：
+
+```text
+/ai 请调用 mcp_echo_lab_echo，text 参数为 quickquip-mcp-162，并告诉我工具返回了什么。如果工具尚未加载，请先搜索 echo 工具再调用。
+```
+
+服务终端出现 `echo 收到：quickquip-mcp-162`，表示服务已执行这次调用，并返回 `echo: quickquip-mcp-162`。机器人随后据此回复。确认时把服务终端的调用记录与机器人给出的工具结果对照。
+
+若服务已连接而没有调用记录，检查当前模型是否支持工具调用，以及工具调用开关和工具名单；工具发现开启时，让模型先搜索并加载 echo。若显示连接失败，先确认服务终端保持运行、Bot 与服务在同一台主机、端口与 `/mcp` 路径一致，详细错误在“MCP 服务与状态”查看。
+
+回显服务在本机执行；通过 Bot 测试会请求已配置的模型，按该模型渠道计费。后台“用量”显示模型费用，其他 MCP 服务自己的收费在对应服务账号核对。练习结束后，在 Web 停用或删除 `echo_lab` 并保存应用，再在服务终端按 Ctrl+C 停止服务。
 
 ## Transport 怎么选
 
@@ -19,10 +115,10 @@ QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的�
 
 ## 接入清单
 
-先确认基础 LLM 对话可用，并在「LLM 配置 → 工具与技能」开启 `settings.runtime.tool_calling_enabled`。新建配置库的工具调用缺省关闭，MCP 连接成功后仍需此开关才会向模型提供工具；若采用 `settings.tools.enabled_mode = "replace"`，显式允许需要的 MCP 工具。以下配置与工具开关一并保存草稿并应用。
+先确认基础 LLM 对话可用，并在“LLM 配置 → 工具与技能”开启 `settings.runtime.tool_calling_enabled`。新建配置库的工具调用缺省关闭，Bot 通过此开关向模型提供已连接的 MCP 工具；若工具名单非空且采用 `settings.tools.enabled_mode = "replace"`，显式允许需要的 MCP 工具。以下配置与工具开关一并保存草稿并应用。
 
-1. **拿到连接信息**：远程 server 记下端点 URL 与鉴权凭证（如 Bearer token）；本地 server 记下启动命令或镜像名，以及所需环境变量。
-2. **写配置**：在 Web Admin「LLM 配置」的 `settings.mcp` 打开总开关并声明 server 条目，以下为导出 JSON 内的配置片段：
+1. **拿到连接信息**：从服务提供方的接入说明取得 MCP 端点 URL、传输方式、协议版本和鉴权方法。端点包含服务使用的路径；凭据由该工具服务签发，与模型渠道的 API key 分别配置。先选择一个读类工具，按其所需权限申请凭据，并核对服务方计费说明。本地 server 还需准备启动命令或镜像，以及所需环境变量。
+2. **写配置**：在“工具与技能 → MCP 服务与状态”打开 MCP 总开关，点击“添加 MCP 服务”，按示例填写服务 ID、传输方式和服务地址。以下为导出 JSON 内的字段对照，`mcp.example.com` 需替换为实际 MCP 端点：
 
    ```json
    {
@@ -42,7 +138,7 @@ QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的�
    }
    ```
 
-   `id` 在全部 server 间唯一，重复条目会被保存校验拒绝；`transport` 缺省为 `stdio`，`timeout_seconds` 缺省为 30，单个 server 的 `enabled` 缺省为 `true`，设为 `false` 可临时停用而保留配置。
+   使用 JSON 导入时，先导出完整配置，将示例服务对象追加到 `settings.mcp.servers`，设置 `settings.mcp.enabled` 并保留其他字段与已有服务；预览完整文件差异后再导入。`id` 在全部 server 间唯一，重复条目会被保存校验拒绝；`transport` 缺省为 `stdio`，`timeout_seconds` 缺省为 30，单个 server 的 `enabled` 缺省为 `true`，设为 `false` 可临时停用而保留配置。
 3. **凭证走环境变量**：server 条目内的普通字符串支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}` 展开；认证字段只保存 `${ENV_VAR}` 引用——未设置的 `${ENV_VAR}` 展开为空串，`${ENV_VAR:-default}` 展开为默认值。凭证一律写在仓库根 `.env`，配置数据库和 JSON 中仅保存变量引用：
 
    ```json
@@ -66,12 +162,12 @@ QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的�
    - fetch [sse] ERROR tools=0 error=连接超时
    ```
 
-   `ON` 表示已连接，`OFF` 表示该 server 被停用，`ERROR` 表示装载失败；聊天面的 `error=` 只显示失败类别，脱敏后的具体错误文本在「LLM 配置 → 工具与技能 → MCP 服务与状态」查看。配置了 `negotiation` 的 http server 会在 transport 后附带协议纪元标记（如 `[http/auto/modern]`），表示协商模式与实际协商结果。
-6. **健康检查与用量观察**：`/llm probe`（管理员）并发探活全部 LLM provider，确认模型侧链路可用（每次调用按 provider 计费）。MCP 工具在 LLM 工具循环内执行，相关用量与成本在 Web Admin「用量」页按 provider / 模型 / 功能 / 群 / 人格维度查看。
+   `ON` 表示已连接，`OFF` 表示该 server 被停用，`ERROR` 表示装载失败；聊天面的 `error=` 只显示失败类别，脱敏后的具体错误文本在“LLM 配置 → 工具与技能 → MCP 服务与状态”查看。配置了 `negotiation` 的 http server 会在 transport 后附带协议纪元标记（如 `[http/auto/modern]`），表示协商模式与实际协商结果。
+6. **调用与费用确认**：在已开启 AI 的会话中，请机器人调用选定的读类工具，给出明确参数；将服务调用日志与返回内容对照，核对预期结果，本地练习的方法见上文。模型调用用量和估算费用在 Web Admin“用量”页查看，工具服务的收费在该服务账号核对。需要巡检模型渠道时，管理员可另行执行 `/llm probe`；它会请求全部启用渠道的默认模型并可能产生费用。
 
-## 最小 http 示例
+## 需要鉴权的 HTTP 配置模板
 
-一个带 Bearer token 的远程 server，token 全部走环境变量引用：
+服务提供方要求 Bearer token 时，按其说明取得令牌，将下方占位 URL 换成实际端点。令牌保存在根 `.env`，请求头字段填写变量引用；其他鉴权方法按提供方指定的 Header 名称填写。
 
 ```json
 {
@@ -96,9 +192,9 @@ QuickQuip 可以把外部 MCP server 提供的工具桥接给 AI，在对话的�
 
 对应 `.env` 条目（体例同 `.env.example`）：
 
-```bash
+```env
 # prts_wiki MCP 的鉴权 token，对应上面的服务配置。
-MCP_PRTS_WIKI_TOKEN=<你的 token>
+MCP_PRTS_WIKI_TOKEN=your_token_here
 ```
 
 ## 常用进阶配置
@@ -116,10 +212,11 @@ MCP_PRTS_WIKI_TOKEN=<你的 token>
 
 ## 排障
 
-- **装载失败**：先看 `/llm mcp status` 的 `error=` 类别（配置错误 / 认证失败 / 连接超时 / 传输错误等）；显示「总开关：OFF」时检查 `settings.mcp.enabled = true` 是否已设。脱敏后的具体错误文本与手动重连入口在 Web Admin「MCP」页和「诊断」页。启动时的瞬时连接失败会自动重试（最多 3 次、间隔 2 秒），认证与配置类错误直接失败。
-- **别名冲突**：不同 server 生成相同工具名时按 fail-closed 处理，冲突工具全部不注册，status 标为配置错误；用 `tool_prefix` 区分。
+- **装载失败**：先看 `/llm mcp status` 的 `error=` 类别（配置错误 / 认证失败 / 连接超时 / 传输错误等）；显示“总开关：OFF”时检查 `settings.mcp.enabled = true` 是否已设。脱敏后的具体错误文本与手动重连入口在 “LLM 配置 → 工具与技能 → MCP 服务与状态”和“诊断”页。启动时的瞬时连接失败会自动重试（最多 3 次、间隔 2 秒），认证与配置类错误直接失败。
+- **别名冲突**：不同 server 生成相同工具名时冲突工具全部不注册，status 标为配置错误；用 `tool_prefix` 区分。
 - **server 已连接但工具没出现**：检查该 server 的 `include_tools` / `exclude_tools` 过滤，以及 `settings.tools` 的 `enabled` / `enabled_mode` 是否把 MCP 工具从工具面过滤掉。
-- **stale session（http legacy）**：会话过期后 `tools/list` 等只读请求会在有界次数内（最多 2 次）自动重连；`tools/call` 不自动重放，当次调用失败，下一次调用走新会话。
+- **工具已装载但模型没有调用**：确认当前模型支持工具调用，全局工具调用开关已应用；给出具体工具名称、参数和任务。工具发现启用时，模型先通过 `tool_search` 或 `tool_list` 加载工具，再发起调用。
+- **stale session（http legacy）**：会话过期后 `tools/list` 等只读请求会最多自动重连 2 次；`tools/call` 不自动重放，当次调用失败，下一次调用走新会话。
 - **工具结果大小边界**：resource 文本超过 60,000 code point 截断并附固定标记；图片单张上限 5 MiB、每个工具结果最多交付 5 张（仅 PNG / JPEG / GIF / WebP）。
 - 深入排查见 [mcp-integration.md](../dev/mcp-integration.md)。
 

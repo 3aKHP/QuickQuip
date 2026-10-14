@@ -70,7 +70,7 @@ This is the only provision in this document that carries information. Handle acc
 
 ## 5. Security Considerations
 
-This document raises no security considerations. For those, see SECURITY.md, which has a serious mailbox and serious procedures.
+This document raises no security considerations. For those, see [SECURITY.md](SECURITY.md), which has a serious mailbox and serious procedures.
 
 ## 6. IANA Considerations
 

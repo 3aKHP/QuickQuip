@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """从 nkhoit/spire-archive 重建杀戮尖塔（1+2 代）卡牌/遗物中文词表。
 
-词表是 STS 公式化模块的地基。本脚本从上游两代游戏的 cards/relics 数据 +
-简中本地化做 join、按中文名跨代去重，输出一份带元信息的 JSON，供
-``quickquip.sts.lexicon`` 加载。
+按 ID 关联上游两代游戏的卡牌、遗物与简中名称，再按中文名去重，
+生成随包分发的 JSON 词表。来源提交和游戏版本记录在元信息中。
 
-设计要点：
-- vendored 文件保持**完整**（与上游去重结果一致，含"打击""防御"等标准打防牌）。
-  具体排除项（歧义词、标准打防）在 ``quickquip.sts.config.EXCLUDED_NAMES`` 维护，
-  加载时套用——这样刷新不会回退排除，新增排除也无需重跑数据。
-- pin 上游 commit SHA 保证可复现；要刷新时改 ``SOURCE_SHA`` 重跑即可。
+在项目根运行前，核对采用的上游提交，更新 SOURCE_SHA 和 SOURCE_DATE。
+脚本会联网读取公开数据，并覆盖 src/quickquip/sts/sts_lexicon.json。
+生成文件保留完整词表；运行时排除项在 quickquip.sts.config.EXCLUDED_NAMES
+维护，刷新后继续生效。
 
 用法：``python3 scripts/refresh_sts_lexicon.py``
 """

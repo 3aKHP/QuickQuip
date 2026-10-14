@@ -2,7 +2,7 @@
 
 # 游戏框架开发者指南
 
-本文档介绍 QuickQuip 游戏系统的架构、扩展接口和开发约定。
+本文面向已完成[开发环境搭建](../../CONTRIBUTING.md)、能阅读 Python 类和类型注解的贡献者，介绍如何将自己实现的游戏接入 QuickQuip 的消息管线、配置和金币系统。完整的 Session 型游戏可参考[数字炸弹](../../src/quickquip/games/number_bomb.py)，带金币结算的实例见 [21 点](../../src/quickquip/games/blackjack.py)。
 
 ---
 
@@ -35,10 +35,11 @@ src/quickquip/games/
 
 ### Session 型游戏：BaseGame
 
-适用于有明确开始/结束的一局游戏。继承 `BaseGame`，实现 4 个方法：
+适用于有明确开始和结束的一局游戏。继承 `BaseGame`，提供名称，并实现开始、结束、消息处理和活动状态查询；`aliases` 可按需覆盖。以下是接口骨架，省略了各方法的游戏逻辑：
 
 ```python
 from quickquip.games.registry import BaseGame, GameResult
+from typing import Optional
 
 class MyGame(BaseGame):
     @property
@@ -66,15 +67,17 @@ class MyGame(BaseGame):
         ...
 ```
 
-**注册**：在 `src/quickquip/app/message_pipeline.py` 中注册并注入依赖：
+在 `src/quickquip/app/message_pipeline.py` 中注册实例。若游戏构造函数接收金币依赖，可按以下片段注入：
 
 ```python
 game_registry.register(MyGame(economy=game_economy))
 ```
 
-**GameResult 字段**：
+消息处理返回 `GameResult`。注册表根据 `finished` 清理群与游戏的关联，并把回复、艾特、限流桶和统计规则交给消息管线。字段定义如下：
 
 ```python
+from dataclasses import dataclass
+
 @dataclass
 class GameResult:
     reply: str                              # 回复文本
@@ -84,13 +87,18 @@ class GameResult:
     rule_name: str = "game_interaction"     # 统计用规则名
 ```
 
-**Session 管理**：每个游戏自己维护 `OrderedDict[str, Session]`，key 为 `group_id`。GameRegistry 只管理“哪个群在玩哪个游戏”的映射。
+每个游戏自己维护以 `group_id` 为键的会话状态，现有实现使用 `OrderedDict[str, Session]`。GameRegistry 管理“哪个群在玩哪个游戏”的映射。
 
 ### 持久 RPG 系统：独立 Store
 
 适用于用户数据跨游戏 session 持久化的场景（如牛牛大作战）。不走 GameRegistry，直接在 `src/quickquip/app/message_pipeline.py` 中初始化单例，在 `src/quickquip/adapters/nonebot/commands.py` 或对应 `command_parts/` 中注册独立命令。
 
+以下存储骨架展示连接管理；实际实现还需创建数据目录并定义 `_ensure_schema()`：
+
 ```python
+from pathlib import Path
+import sqlite3
+
 class MyRPGStore:
     def __init__(self, path: str = "data/my_rpg.db"):
         self.path = Path(path)
@@ -124,6 +132,10 @@ GameConfig
 1. 在 `config.py` 中新增 dataclass：
 
 ```python
+from __future__ import annotations
+from dataclasses import dataclass, field, fields
+from typing import Any
+
 @dataclass(slots=True)
 class MyGameConfig:
     min_bet: int = 20
@@ -149,7 +161,7 @@ my_game=MyGameConfig.from_dict(data.get("my_game")),
 
 4. 游戏构造函数接收 config：
 ```python
-def __init__(self, config: MyGameConfig | None = None, ...):
+def __init__(self, config: MyGameConfig | None = None):
     self._config = config or MyGameConfig()
 ```
 
@@ -170,7 +182,9 @@ game_registry.register(MyGame(config=games_config.my_game))
 
 金币系统对游戏开发者暴露以下接口：
 
-```python
+下面的 API 签名摘要用于查找方法；实现见 `src/quickquip/games/economy.py`：
+
+```text
 class GameEconomyStore:
     # 账户查询
     def get_balance(self, user_id: str, group_id: str) -> dict
@@ -197,11 +211,7 @@ class GameEconomyStore:
     def sign_in(self, user_id: str, group_id: str, today: str = "") -> dict
 ```
 
-**要点**：
-- 所有方法自动 `_ensure_account`，无需预先创建账户
-- `transfer_gold` 使用 `BEGIN IMMEDIATE` 保证原子性
-- `deduct_gold` 有余额检查（`WHERE gold >= ?`），不会出现负数
-- 每个游戏调用方应自行处理 `if self._economy:` 的 None 检查（支持无金币模式）
+账户查询与变更会自动创建缺失账户；排行读取群内已有账户。`transfer_gold` 使用 `BEGIN IMMEDIATE` 保证原子性，`deduct_gold` 通过 `WHERE gold >= ?` 检查余额。支持无金币模式的游戏在调用前检查 `self._economy is not None`。
 
 ---
 
@@ -227,11 +237,11 @@ class GameEconomyStore:
 
 ## 设计原则
 
-1. **游戏数据按群隔离** — 金币账户、BaseGame session 的 key 都是 `group_id`
-2. **纯文本输出** — 不使用 HTML/图片渲染，消息即时送达
+1. **游戏数据按群隔离** — 金币账户按用户与群共同定位；BaseGame session 按 `group_id` 定位
+2. **纯文本输出** — 游戏结果提供回复文本，由消息管线发送
 3. **自带超时** — 所有交互式游戏必须有 `expires_at` 机制，防止僵尸 session
 4. **金币 None-safe** — 所有 `self._economy` 调用前检查 `is not None`
-5. **原子操作** — 多用户金币变动用 `transfer_gold`，不要手动 add + deduct
+5. **原子操作** — 多用户金币转账用 `transfer_gold` 在同一事务中完成
 6. **单文件原则（session 型）** — session 型游戏一个 `.py` 文件，业务逻辑不跨文件拆分；RPG 系统可按域拆包（如 `niuniu/`）
 
 ---
@@ -249,7 +259,7 @@ if now_ts > session.expires_at:
 session.expires_at = now_ts + TIMEOUT_SECONDS
 ```
 
-GameRegistry 不管理超时——各游戏自行在 `process()` 中检查。这样每个游戏可以有不同的超时时长。
+各游戏在 `process()` 中检查超时并执行自己的结算，GameRegistry 根据返回的 `finished` 清理关联。超时时长由各游戏配置决定。
 
 ---
 
@@ -276,4 +286,4 @@ _cd.clear(uid)              # 手动清除
 - Session 型游戏通过 `/game start`、`/game stop`、`/game score` 统一入口
 - 游戏内消息（如“拿牌”、“开枪”）由 `GameRegistry.process()` 统一分发
 - RPG 系统在 `src/quickquip/adapters/nonebot/commands.py` 或对应 `command_parts/` 中用 `on_command()` 独立注册
-- 命令别名用 `aliases=` 参数（如 `aliases={"签到"}`），不用重复注册
+- 命令别名通过 `aliases=` 参数声明，如 `aliases={"签到"}`

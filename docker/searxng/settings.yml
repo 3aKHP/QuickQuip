@@ -33,7 +33,7 @@ server:
   bind_address: "0.0.0.0"
   base_url: false
 
-# Enable engines that are accessible from mainland China
+# Explicit engine choices; adjust to match the deployment network
 engines:
   - name: bing
     disabled: false

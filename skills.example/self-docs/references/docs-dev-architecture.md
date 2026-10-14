@@ -2,13 +2,13 @@
 
 # QuickQuip 项目架构与结构
 
-本文档记录整个仓库的目录与文件用途，以及“分发层”与“自用层”的划分原则。
+本文面向开发者和部署维护者，说明仓库目录、代码分层、依赖方向，以及公开分发内容和私有部署资产的存储位置。
 
 开发文档的公共/私有边界与职责索引见 [`README.md`](README.md)；源码结构规则见 [`style.md`](style.md)。
 
 ---
 
-## 核心概念：分发层 vs 自用层
+## 核心概念：分发层与自用层
 
 | 层 | 含义 | 存储位置 |
 |---|---|---|
@@ -32,9 +32,9 @@
 
 QuickQuip 代码组织为三层结构：
 
-1. **`src/quickquip/chat|common|llm|games|sts|tieba|search|generation`** — 框架无关的业务逻辑
+1. **业务逻辑** — `src/quickquip/` 下的 `chat`、`common`、`llm`、`games`、`sts`、`tieba`、`search` 和 `generation`，独立于框架运行
 2. **`src/quickquip/adapters/nonebot/`** — NoneBot2 适配层（所有 matcher / command 注册在此）
-3. **`src/plugins/`** — NoneBot2 插件发现入口，只做 re-export，不含业务逻辑
+3. **`src/plugins/`** — 通过 re-export 暴露插件对象，供 NoneBot2 发现
 
 消息流顺序：
 
@@ -53,11 +53,11 @@ NoneBot2 event → tz_tracker_plugin matcher
 4. `text_reply_rules` — 正则彩蛋匹配（优先级 + 加权随机）
 5. `context_rules` — 语境感知规则（regex_context / llm_context 判定）
 6. `build_timezone_reply()` — 时区猜测
-7. STS `card_le` — “xxx了”公式，位于规则链末尾（「X了」正则快筛、规则开关、限频预检与概率掷骰均先于 `match_card_le` 的 LLM 判定；不得抢占时区等具体规则；按符号定位：`resolve_reply` 中的 `match_card_le` block）
-8. `rule_switch.is_enabled()` — 每步均受群级规则开关控制
-9. `reply_probability.roll_reply()` — 概率掷骰：text/context 规则在匹配器内掷一次并打 `PROBABILITY_CHECKED` 标记（card_le 在快筛后掷并打标），其余路径（复读/接龙/游戏/时区）由 `resolve_reply` 出口按限流桶兜底掷；显式 LLM、群唤醒与无聊唤醒在各自发送路径掷，私聊按用户隔离状态。未配置概率默认必回
-10. `rate_limit.allow()` — 发送前限流检查
-11. `stats_tracker` — 消息统计与规则触发计数
+7. STS `card_le` — “xxx了”公式，位于规则链末尾。`resolve_reply` 中的 `match_card_le` 分支先执行“X了”正则快筛、规则开关、限频预检和概率掷骰，再进行 LLM 判定
+
+规则回复经过群级 `rule_switch.is_enabled()` 检查，管理员可切换的规则由 `SWITCHABLE_RULES` 登记。内置游戏当前的操作与停用范围见[游戏管理](../admin/game-config.md#配置范围)。text/context 规则在匹配器内掷骰并写入 `PROBABILITY_CHECKED` 标记；card_le 在快筛后掷骰并写入同一标记。复读、接龙、游戏和时区路径由 `resolve_reply` 出口按限流桶掷骰；显式 LLM、群唤醒和无聊唤醒在各自发送路径掷骰，私聊按用户隔离状态。未配置概率时默认回复。
+
+发送前由 `rate_limit.allow()` 检查限流，`stats_tracker` 记录消息统计和规则触发次数。
 
 ### 依赖方向与组合根
 
@@ -118,7 +118,7 @@ QuickQuip/
 
 ## `src/quickquip/` — 业务逻辑包
 
-项目采用 src layout，所有源码位于 `src/` 下。包导入路径 `quickquip.*` 保持不变。
+项目采用 src layout，源码位于 `src/` 下，业务包通过 `quickquip.*` 导入。
 
 ```
 src/quickquip/
@@ -174,7 +174,9 @@ src/quickquip/
 | `personas.example/` | 分发层（追踪） | persona 配置格式示例 |
 | `personas/` | 自用层（gitignore） | 真实 persona 定义（含人格描述、系统提示等） |
 
-**原则**：永远只编辑 `.toml` / `personas/`，不编辑 `.example`。`.example` 只在格式需要变更时更新。例外：`niuniu_text.toml` / `niuniu_text_safe.toml` 虽是无 `.example` 后缀的 `.toml`，但属**被追踪的分发层，勿写入私有内容**——私有文案放在未被追踪的独立文件中，通过 `games.toml` 的 `niuniu_text_path` / `niuniu_safe_text_path` 指向（与 configuration.md 一致）。
+部署者从 `.example` 复制私有配置，再编辑自己的配置文件与 `personas/`；LLM 配置通过数据库草稿管理。贡献者在格式或示例行为变化时更新公开模板。
+
+`niuniu_text.toml` 和 `niuniu_text_safe.toml` 是被追踪的分发文件，内容应适合公开。私有文案放在未被追踪的独立文件中，通过 `games.toml` 的 `niuniu_text_path` 或 `niuniu_safe_text_path` 指向，字段说明见[配置参考](../admin/configuration.md)。
 
 ---
 
@@ -233,7 +235,10 @@ docs/
 │   ├── deployment.md
 │   ├── onebot-adapters.md
 │   ├── configuration.md
+│   ├── llm-configuration.md
+│   ├── client-fingerprints.md
 │   ├── game-config.md
+│   ├── global-admins.md
 │   ├── migration-napcat-to-llbot.md
 │   ├── mcp-servers.md
 │   ├── record-identities.md
@@ -248,19 +253,18 @@ docs/
 
 ## 私有部署材料
 
-真实部署脚本配置、运维通知密钥、compose 运行态目录和临时分析材料均属自用层，不属于公共仓库分发内容。公共文档只记录通用配置格式和运行方式，不记录个人生产目录结构。
+真实部署脚本配置、运维通知密钥、compose 运行态目录和临时分析材料均属自用层。公共文档记录可公开使用的配置格式、模板和运行方式。
 
 ### `prod.example/` 与 `prod/`
 
 - `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
 - `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、OneBot 协议端登录态目录和运维通知密钥。
-- 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档，不承担生产环境变量覆盖职责。
+- 本地私有工作区保存草稿、测试沙箱、探针脚本和工作文档。
 
 ### 私有环境变量与根 `.env` 的关系
 
 - **根 `.env`**：QuickQuip 应用唯一的涉密环境变量来源，供本地运行与 `prod/` 容器部署共同读取，必须保持 gitignore。
 - **`prod/sendkey.env`**：可选运维通知密钥，仅由巡检脚本读取，不被 QuickQuip 应用加载。
-- 本地私有工作区只用于草稿、测试沙箱、探针脚本和工作文档。
 
 ### `llm_about` 部署路径
 
@@ -268,7 +272,7 @@ docs/
 
 - 宿主机 `llm_about/` → 容器内 `/app/llm_about/`
 
-历史私有资料路径已弃用，不应再被 compose 挂载或由部署脚本读写。
+Compose 挂载与部署脚本使用上述统一路径。
 
 ---
 
@@ -279,7 +283,7 @@ docs/
 | `.env`, `.env.*` | 含真实密钥（`.env.example` 除外） |
 | `data/llm_config.db` | 运行配置、发布快照与控制状态 |
 | `config/llm.toml` | 首次迁移输入与迁移前版本回退资产 |
-| `config/llm.*.local.toml` | 同上 |
+| `config/llm.*.local.toml` | 旧部署的本地覆盖资产 |
 | `config/generation.toml` | 含真实多模态 provider 配置 |
 | `config/awakening.toml` | 含真实唤醒阈值、兴趣话题和群覆盖 |
 | `config/sensitive_words.toml` | 含部署者填充的敏感词词表 |

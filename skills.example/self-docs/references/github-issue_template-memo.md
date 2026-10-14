@@ -20,15 +20,15 @@ labels: [memo]
 
 ## 现象与锚点 / Observations & anchors
 
-<!-- 每条一行，带 file:line 或 #issue 锚点；多条目备忘逐条编号 -->
+<!-- 记录具体观察与证据；需要定位实现时附 file:line 或 #issue，多条目逐条编号 -->
 
 ## 待厘清的设计问题 / Open design questions
 
 <!-- 推进前必须先回答什么 -->
 
-## 边界与非目标 / Boundaries & non-goals
+## 约束与取舍 / Constraints & trade-offs
 
-<!-- 不承诺实现 / 不冻结方案 / 不因本 issue 改动的既有合同 -->
+<!-- 写明影响方案选择的实际条件、已确定的范围与需要保留的行为 -->
 
 ## 范围与状态 / Scope & status
 

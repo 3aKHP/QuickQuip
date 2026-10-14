@@ -1,8 +1,7 @@
 name: quickquip
 
 services:
-  # SearXNG 不内置于运维模板：请用外部独立 searxng 实例提供搜索能力，
-  # 并通过 QUICKQUIP_SEARXNG_BASE_URL 指向它（见 quickquip / web-admin 的 environment）。
+  # 运维模板使用外部 SearXNG，通过 QUICKQUIP_SEARXNG_BASE_URL 配置其地址。
   # 面向终端用户的开箱即用自带 searxng 见仓库根目录 docker-compose.example.yml。
   llbot:
     image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # pin 说明见 docs/admin/onebot-adapters.md 的 LLBot profile
@@ -56,8 +55,7 @@ services:
       # Skill 目录（共享）：位于部署根（与 data/ 同级），跨 release 与容器重建持久；
       # bot 只读消费，在线安装/编辑经 web-admin 的读写挂载落盘。
       - ${QUICKQUIP_ROOT:-..}/skills:/app/skills:ro
-      # host-healthcheck 可选增强（L2）：宿主机 /proc 只读挂载，默认关闭。
-      # 只读、无 privileged、不挂 docker.sock；启用时去掉下一行的注释。
+      # host-healthcheck 可选宿主机视图：取消下一行注释，将 /proc 只读挂载。
       # - /proc:/host/proc:ro
     restart: unless-stopped
 

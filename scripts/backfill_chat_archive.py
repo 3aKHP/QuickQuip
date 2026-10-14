@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
-"""把既有 JSONL 采集器历史数据回灌进聊天归档（1.15.2 一次性运维脚本）。
+"""把旧 JSONL 采集器历史回灌进聊天归档。
 
 数据源：data/daily_msgs/ 与 data/wordcloud_msgs/（群目录/<日期>.jsonl）。
 同一消息被双采集器各记一份：归档按内容哈希（group|秒|sender|text，另带
 同秒同文的出现序号）跨源去重；daily_msgs 行携带 user_id 时回填归因字段
 （因此 daily 源先处理，其首入行直接带全字段）。
 
-用法（部署新版本后执行一次）：
+在部署根执行，先备份 data/chat_archive.db 与旧 JSONL 目录：
+    python scripts/backfill_chat_archive.py --dry-run  # 预览读取条数
     python scripts/backfill_chat_archive.py            # 执行回灌
-    python scripts/backfill_chat_archive.py --dry-run  # 只统计不写入
+
+检查输出中的新增、归因回填、已存在、跳过和写入失败数量。写入失败时退出码
+为非零；修复后可重新执行。确认结果符合预期后，再清理旧 JSONL 目录。
+Windows 懒人包使用 python\\python.exe 替换上述 python。
 """
 from __future__ import annotations
 

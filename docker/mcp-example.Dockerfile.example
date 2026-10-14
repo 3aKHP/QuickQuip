@@ -6,10 +6,9 @@
 #   2. Adjust the FROM image and the upstream command after `--`
 #   3. Build via docker compose or `docker build`
 #
-# CRITICAL: Always include `--pass-environment` in ENTRYPOINT. mcp-proxy
-# defaults to `--no-pass-environment`, which leaves the spawned child with
-# an empty env, causing "<KEY> environment variable is required" errors
-# even when the key is correctly set in the container.
+# Include --pass-environment in ENTRYPOINT to forward container environment
+# variables, including API credentials, to the upstream command. Set the
+# required credentials in the container environment before starting the service.
 
 # ── Pattern A: Debian-based Python venv upstream ──────────────────────────
 # FROM <upstream-image>

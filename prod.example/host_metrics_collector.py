@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """QuickQuip host metrics collector, intended for cron on the Docker host.
 
-L1 enhancement of the host-healthcheck skill: writes
-<root>/data/host_metrics.json atomically once per run (process count, full
-disk view, temperatures when sensors exist). The quickquip container reads it
-read-only through the existing data/ bind mount; nothing is exposed back.
+Collects optional host data for the host-healthcheck Skill: process count,
+full disk usage and temperatures when sensors exist. Each run atomically
+writes <root>/data/host_metrics.json, which the quickquip container reads
+through its data/ bind mount.
 
 Install (crontab -e on the host):
 

@@ -24,6 +24,7 @@ Check release metadata and upgrade/rollback instructions against actual configur
 
 - `CLAUDE.md` and `CONTRIBUTING.md`: repository boundaries, branch rules, secrets, local configuration, and verification.
 - `docs/dev/README.md`: developer-document ownership and the public/private boundary.
+- `docs/dev/documenting.md`: public-document responsibilities, factual accuracy, reader-focused prose, operational examples, maintenance, and review; check preemptive disclaimers and excessive boundary statements by their purpose for the reader.
 - `docs/dev/style.md`: responsibilities, prohibited god structures, module boundaries, input validation, durable state, and review questions.
 - `docs/dev/testing.md`: test discipline — admission, assertion basis, antipatterns, and keep/merge/delete rules for test changes.
 - `docs/dev/architecture.md`: dependency direction and domain ownership.

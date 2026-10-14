@@ -1,9 +1,8 @@
 """Guard against real-looking QQ/group ID literals in public files.
 
 Scans tracked files under a fixed set of public-facing paths for 9-11 digit
-decimal literals and fails if any hit is not in the synthetic allowlist. The
-script intentionally contains no real IDs; the allowlist holds only the
-project's synthetic placeholders.
+decimal literals and fails if any hit is outside the synthetic allowlist.
+Use the project's synthetic placeholders in examples and fixtures.
 
 Exits with non-zero if any file contains a disallowed literal.
 """
