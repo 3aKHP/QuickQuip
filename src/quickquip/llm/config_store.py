@@ -301,7 +301,7 @@ class ConfigStore:
         temporary = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.initializing")
         try:
             ConfigStore(temporary)._create(document, report, source)
-            with temporary.open("rb") as stream:
+            with temporary.open("r+b") as stream:
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)
             from quickquip.llm.config_durability import sync_directory
