@@ -56,6 +56,7 @@ LLM 工具 `search_web` 与 `/search` 命令固定走项目内 SearXNG。普通�
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `LLM_TRACE_FLAG_FILE` | LLM HTTP Trace 持久开关文件路径；文件存在时按调用记录完整请求/响应 JSON 文本到 `data/llm_trace.db`，供 Web Admin 的 LLM Trace 页面按需读取 | — |
+| `LLM_TRACE_MEDIA_MIN_BYTES` | 内联 base64 媒体载荷的截断门槛（字节）。达到门槛、且载荷构成被引号正确闭合的完整 JSON 字符串时，载荷本体写入 `data/trace_blobs/` 下的内容寻址副本，正文替换为 `[qq:blob sha256=<hex> bytes=<n>]` 占位符；同一份载荷在请求、重组响应与原始 SSE 中只落盘一份。未设置或为 `0` 时原样存储。进程启动时读取 | `0` |
 
 ### 贴吧
 
