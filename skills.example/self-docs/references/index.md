@@ -15,7 +15,7 @@
 
 ## Root 文档
 
-- `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：config/llm.toml、data/llm_config.db、.env、config/、data/、prod.example/、python -m quickquip.llm.config_cli init、data/llm-config-migration/、/start_session、scripts/sync_preset_skills.py
+- `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：response.metadata、scripts/sync_preset_skills.py、config/llm.toml、data/llm_config.db、.env、config/、data/、prod.example/、python -m quickquip.llm.config_cli init、data/llm-config-migration/
 - `CLAUDE.md` → `references/root-claude.md` — CLAUDE.md — AI 协作者说明 ｜ 关键词：docs/dev/documenting.md、docs/dev/、docs/admin/、docs/user/、prod.example/、prod/、.venv、uv venv、.venv/bin/、uv pip install
 - `CODE_OF_CONDUCT.md` → `references/root-code_of_conduct.md` — RFC 325799 — QuickQuip Code of Conduct ｜ 关键词：∀t: Reading(t) → Reading(t)、submit(x) → (User(x) ↔ User(x))、|P| ∈ {0, 1} → ∀p ∈ P: Civil(p, air)、Comply(x) → ¬Violate(x)、Disagree(x) → (C ≡ C)、P(reply) + P(¬reply) = 1
 - `CONTRIBUTING.md` → `references/root-contributing.md` — Contributing to QuickQuip ｜ 关键词：docs/dev/README.md、docs/dev/branching.md、style.md、testing.md、documenting.md、src/、python、CLAUDE.md、CLAUDE.local.md、scripts/git-hooks/pre-push
