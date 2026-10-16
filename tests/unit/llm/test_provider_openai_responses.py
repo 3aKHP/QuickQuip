@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 from copy import deepcopy
 import json
+import logging
 import textwrap
 from pathlib import Path
 
@@ -470,9 +471,55 @@ def test_stream_fold_relay_reconciliation():
     assert response.tool_calls[0].id == "call_1"
 
 
-def test_stream_relay_events_rejected_on_public_profile():
-    with pytest.raises(LLMProviderError, match="未知"):
-        _fold(RESPONSES_RELAY_TOOL_CHUNKS, profile_id="openai-public")
+def test_stream_relay_events_do_not_enable_public_reconciliation():
+    response = _fold(RESPONSES_RELAY_TOOL_CHUNKS, profile_id="openai-public")
+    assert response.tool_calls[0].id == "call_1"
+    assert "summary" not in response.native_blocks[0]
+
+
+@pytest.mark.parametrize("numbered", [True, False])
+@pytest.mark.parametrize("profile_id", ["openai-public", "codex-http-relay"])
+def test_stream_moderation_metadata_preserves_response(numbered, profile_id):
+    chunks = deepcopy(RESPONSES_TEXT_CHUNKS)
+    metadata = {
+        "type": "response.metadata",
+        "response_id": "resp_1",
+        "metadata": {
+            "openai_chatgpt_moderation_metadata": {
+                "prompt": {}, "generation": {}, "tool_call": {}, "tool_response": {},
+            }
+        },
+    }
+    if numbered:
+        metadata["sequence_number"] = chunks[-1]["sequence_number"]
+    chunks[-1]["sequence_number"] += 1
+    chunks.insert(-1, metadata)
+
+    response = _fold(chunks, profile_id=profile_id)
+    assert response.text == "你好，世界"
+    assert response.input_tokens == 300
+    assert response.cache_read_tokens == 250
+    assert response.thinking_tokens == 15
+    assert [item["type"] for item in response.native_blocks] == ["message"]
+
+
+@pytest.mark.parametrize("invalid", ["sequence_gap", "after_terminal", "text_mismatch"])
+@pytest.mark.parametrize("profile_id", ["openai-public", "codex-http-relay"])
+def test_stream_unknown_event_keeps_stream_validation(invalid, profile_id):
+    chunks = deepcopy(RESPONSES_TEXT_CHUNKS)
+    metadata = {"type": "response.future_metadata", "sequence_number": 5, "metadata": {}}
+    if invalid == "after_terminal":
+        metadata["sequence_number"] = 6
+        chunks.append(metadata)
+        error = "终态事件后"
+    else:
+        chunks.insert(-1, metadata)
+        chunks[-1]["sequence_number"] = 7 if invalid == "sequence_gap" else 6
+        if invalid == "text_mismatch":
+            chunks[2]["delta"] = "不匹配"
+        error = "序号" if invalid == "sequence_gap" else "正文"
+    with pytest.raises(LLMProviderError, match=error):
+        _fold(chunks, profile_id=profile_id)
 
 
 def test_stream_sequence_jump_fail_closed():
@@ -491,13 +538,110 @@ def test_stream_event_after_terminal_fail_closed():
         _fold(chunks)
 
 
-def test_stream_unknown_event_fail_closed():
+@pytest.mark.parametrize("profile_id", ["openai-public", "codex-http-relay"])
+@pytest.mark.parametrize(
+    "event_type", ["response.future_shiny_event", "response.future_text.delta"]
+)
+def test_stream_unknown_event_uses_validated_terminal(event_type, profile_id):
+    terminal = deepcopy(RESPONSES_TOOL_CHUNKS[-1])
+    chunks = [
+        {"type": "response.created", "sequence_number": 0},
+        {"type": event_type, "sequence_number": 1, "delta": "附加内容"},
+        {**terminal, "sequence_number": 2},
+    ]
+    response = _fold(chunks, profile_id=profile_id)
+    assert [(c.id, c.name) for c in response.tool_calls] == [
+        ("call_1", "get_identity"),
+        ("call_2", "search_web"),
+    ]
+    assert response.native_blocks[0]["encrypted_content"] == "gAAAAABoGogL0EiS"
+    assert response.thinking_blocks[0]["reasoning_content"] == "需要先查询身份。"
+
+
+def test_stream_unknown_event_requires_terminal():
     chunks = [
         {"type": "response.created"},
         {"type": "response.future_shiny_event"},
     ]
-    with pytest.raises(LLMProviderError, match="未知"):
+    with pytest.raises(LLMProviderError, match="response.completed") as excinfo:
         _fold(chunks)
+    assert excinfo.value.transport
+
+
+@pytest.mark.parametrize("profile_id", ["openai-public", "codex-http-relay"])
+@pytest.mark.parametrize("item_type", ["custom_tool_call", "web_search_call"])
+def test_stream_unknown_event_does_not_hide_unsupported_output(profile_id, item_type):
+    terminal = deepcopy(RESPONSES_TEXT_CHUNKS[-1]["response"])
+    terminal["output"].append(
+        {"type": item_type, "call_id": "call_new", "name": "new_tool", "input": "hello"}
+    )
+    with pytest.raises(LLMProviderError, match="不支持.*output item"):
+        _fold(
+            [
+                {"type": "response.future_progress"},
+                {"type": "response.completed", "response": terminal},
+            ],
+            profile_id=profile_id,
+        )
+
+
+@pytest.mark.parametrize("event_type", ["error", "response.failed"])
+def test_stream_unknown_event_does_not_hide_errors(event_type):
+    error = {"code": "insufficient_quota", "message": "quota"}
+    failure = {"type": event_type}
+    if event_type == "error":
+        failure["error"] = error
+    else:
+        failure["response"] = {"status": "failed", "error": error}
+    with pytest.raises(LLMProviderError, match="insufficient_quota") as excinfo:
+        _fold(
+            [
+                {"type": "response.future_progress"},
+                failure,
+                RESPONSES_TEXT_CHUNKS[-1],
+            ]
+        )
+    assert excinfo.value.status_code == 400
+
+
+@pytest.mark.parametrize("event", [[], {}, {"type": ""}, {"type": 123}])
+def test_stream_unknown_event_does_not_hide_malformed_events(event):
+    with pytest.raises(LLMProviderError, match="流畸形"):
+        _fold([{"type": "response.future_progress"}, event])
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"type": "response.output_text.delta", "delta": None},
+        {"type": "response.reasoning_summary_text.delta", "delta": []},
+        {"type": "response.function_call_arguments.delta", "output_index": 0, "delta": 1},
+    ],
+)
+def test_stream_unknown_event_does_not_hide_malformed_known_delta(event):
+    with pytest.raises(LLMProviderError, match="畸形"):
+        _fold([{"type": "response.future_progress"}, event])
+
+
+def test_stream_unknown_event_logs_are_bounded_and_exclude_payloads(caplog):
+    caplog.set_level(logging.WARNING, logger="quickquip.llm.provider.openai_responses.stream")
+    long_type = "response.future\n" + "x" * 200 + "EVENT_NAME_TAIL_SENTINEL"
+    types = [long_type, *(f"response.future_{i}" for i in range(12))]
+    chunks = [
+        {"type": event_type, "metadata": {"private": "RAW_PAYLOAD_SECRET_SENTINEL"}}
+        for event_type in types
+        for _ in range(3)
+    ]
+    chunks.append(deepcopy(RESPONSES_TEXT_CHUNKS[-1]))
+    for index, chunk in enumerate(chunks):
+        chunk["sequence_number"] = index
+    response = _fold(chunks)
+    assert response.text == "你好，世界"
+    assert len(caplog.records) == 8
+    assert len({record.getMessage() for record in caplog.records}) == 8
+    assert all("\n" not in record.getMessage() for record in caplog.records)
+    assert "RAW_PAYLOAD_SECRET_SENTINEL" not in caplog.text
+    assert "EVENT_NAME_TAIL_SENTINEL" not in caplog.text
 
 
 def test_stream_terminal_text_mismatch():
@@ -514,6 +658,7 @@ def test_stream_terminal_arguments_mismatch():
     for chunk in chunks:
         if chunk.get("type") == "response.function_call_arguments.delta":
             chunk["delta"] = '{"tampered":1}'
+    chunks.insert(0, {"type": "response.future_progress"})
     with pytest.raises(LLMProviderError, match="arguments"):
         _fold(chunks)
 
@@ -649,7 +794,11 @@ async def test_client_stream_round_trip():
             self.stream_calls.append((url, payload))
             return list(self.stream_chunks)
 
-    client = _StreamFake(_config(), RESPONSES_TOOL_CHUNKS)
+    chunks = deepcopy(RESPONSES_TOOL_CHUNKS)
+    chunks.insert(-1, {"type": "response.future_progress"})
+    for index, chunk in enumerate(chunks):
+        chunk["sequence_number"] = index
+    client = _StreamFake(_config(), chunks)
     response = await client.complete(
         _request([LLMConversationMessage(role="user", content="hi")])
     )
@@ -657,6 +806,8 @@ async def test_client_stream_round_trip():
     url, payload = client.stream_calls[0]
     assert url == "https://example.test/v1/responses"
     assert payload["stream"] is True
+    assert len(client.stream_calls) == 1
+    assert client.payloads == []
 
 
 def test_factory_builds_responses_client():
@@ -1495,13 +1646,17 @@ def test_stream_relay_keepalive_events_tolerated_on_relay_profile():
     assert response.text == "保活也画好了"
 
 
-def test_stream_keepalive_rejected_on_public_profile():
+def test_stream_keepalive_on_public_profile_waits_for_terminal():
     chunks = [
         {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_ka"}},
         {"type": "keepalive", "sequence_number": 1},
+        {
+            "type": "response.completed",
+            "sequence_number": 2,
+            "response": deepcopy(RESPONSES_TEXT_CHUNKS[-1]["response"]),
+        },
     ]
-    with pytest.raises(LLMProviderError, match="未知"):
-        _fold(chunks, profile_id="openai-public")
+    assert _fold(chunks, profile_id="openai-public").text == "你好，世界"
 
 
 def test_reasoning_effort_request_scope_overrides_provider_config():
