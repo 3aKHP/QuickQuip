@@ -5,7 +5,7 @@ profile 是"有日期的兼容契约"：新能力不得改写既有 profile id �
 
 - ``openai-public``：官方 ``/v1/responses`` 端点。
 - ``codex-http-relay``：Codex 形态中转（HTTP+SSE）。差异点：不发
-  ``service_tier``；容忍 ``codex.*`` 等中转私有结构事件；终态 ``output``
+  ``service_tier``；识别 ``codex.*`` 等预期附加事件并静默忽略；终态 ``output``
   可能缺省可选字段，以流式 ``output_item.done`` 的完整 item 为回放基准。
 
 深搜/MiMo 式 stateless subset profile（无 ``store:false``、明文 reasoning）
@@ -43,8 +43,8 @@ class ResponsesProfile:
     wire_efforts: frozenset[str]
     # 请求 service_tier 字段值；None = 不发送。
     service_tier: str | None
-    # 容忍中转私有结构事件（codex.rate_limits 等，见 stream.py）。
-    tolerate_relay_events: bool
+    # 将中转附加事件识别为预期事件；其他事件走共用的限量记录与忽略策略。
+    recognize_relay_events: bool
     # 终态 output 与流式 output_item.done 逐项子集核对后以流式为准。
     reconcile_relay_items: bool
 
@@ -56,7 +56,7 @@ PROFILES: dict[str, ResponsesProfile] = {
         # 官方端点实测六档全支持后放开。
         wire_efforts=frozenset({"low", "medium", "high", "xhigh"}),
         service_tier="auto",
-        tolerate_relay_events=False,
+        recognize_relay_events=False,
         reconcile_relay_items=False,
     ),
     "codex-http-relay": ResponsesProfile(
@@ -69,7 +69,7 @@ PROFILES: dict[str, ResponsesProfile] = {
         # 编排，juice 与 max 相同，无实际能力损失）。
         wire_efforts=frozenset({"low", "medium", "high", "xhigh", "max"}),
         service_tier=None,
-        tolerate_relay_events=True,
+        recognize_relay_events=True,
         reconcile_relay_items=True,
     ),
 }
