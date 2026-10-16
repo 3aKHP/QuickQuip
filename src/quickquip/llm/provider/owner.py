@@ -25,7 +25,7 @@ SENSITIVE_QUERY_KEYS = frozenset(
 # 条件化追加（见 profile_fingerprint）——直接入列会让全部协议的存量
 # 指纹一次性失配。
 _PROFILE_FIELDS = ("protocol", "prompt_caching", "cache_ttl", "auth_method", "builtin_search")
-# openai_responses 专属的指纹输入：profile 决定 service_tier/中转事件容忍/
+# openai_responses 专属的指纹输入：profile 决定 service_tier/预期中转事件/
 # items 回放基准。reasoning_effort 按 2026-09-18 定调不入指纹（方案 b：
 # 切档不断回放，与 claude/gemini 思维参数先例拉齐）；密文的生成档位改经
 # owner.extra["effort"] 逐 turn 记录，供 per-effort 计量使用。存量记录的

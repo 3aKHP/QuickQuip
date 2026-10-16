@@ -77,6 +77,10 @@ LLM 维护入口按职责列在下表：
 
 Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 parts。Claude 当前工具循环通过通用重建回传签名 thinking 块，已关闭且包含工具的 Loop 在归属匹配和签名有效时跨轮原生回放。Responses 使用 `store:false` 全量回放，当前工具循环回传原生 items，并检查 call_id 记账、冲突和结果配对；已关闭历史经归属校验回放 reasoning 密文，上游返回 HTTP 400 时剥离历史 reasoning 重试一次。当前工具循环内容保留。历史投影规则见第 4.2 节。
 
+Responses 的 `openai-public` 与 `codex-http-relay` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
+
+Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
+
 思考设置使用 low、medium、high、xhigh、max、ultra 六档。OpenAI Chat 按模型家族钳制；Claude 按代际选择 adaptive effort 或固定 budget 表；Gemini 按代际选择 thinkingLevel 或 thinkingBudget；Responses 使用自己的 profile 词表。Claude budget 至少为 1024，其余由映射规则照发，上游以 400 报告不支持的参数；钳制与照发决策记录节流日志。
 
 兼容层说明：

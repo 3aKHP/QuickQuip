@@ -8,6 +8,18 @@
 
 （暂无）
 
+## [1.16.3] - 2026-10-16
+
+本版修复 Responses 后端新增流式事件时群聊 LLM 调用失败的问题。
+
+### 修复
+
+- OpenAI Responses 与 Codex 形态中转兼容新增的元数据和进度事件，修复收到 `response.metadata` 时整次调用失败、已生成的文字或图片无法送达的问题。未知事件限量记录后继续接收回复，终态输出和工具调用保持严格校验。
+
+### 预置 Skill 变动
+
+self-docs 同步 Responses 事件兼容策略。已安装副本可通过 Web Admin 或 `scripts/sync_preset_skills.py` 更新，操作见 [Skill 管理](docs/admin/skills.md)。
+
 ## [1.16.2] - 2026-10-14
 
 本版完善 **LLM 配置管理、持久会话身份和四协议客户端请求 Profile**，为规划中的 1.16.5“向 Minecraft 致敬”彩蛋版本奠定基础。
@@ -1125,7 +1137,8 @@ Trace 会随历史请求重复存储内联媒体，多模态请求较多的部�
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.2...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.3...HEAD
+[1.16.3]: https://github.com/3aKHP/QuickQuip/compare/v1.16.2...v1.16.3
 [1.16.2]: https://github.com/3aKHP/QuickQuip/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/3aKHP/QuickQuip/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/3aKHP/QuickQuip/compare/v1.15.4...v1.16.0
