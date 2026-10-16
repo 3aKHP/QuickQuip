@@ -1,9 +1,9 @@
 """Responses SSE 事件折叠状态机。
 
-移植自 prism-vesicle stream.ts（HTTP 路径），防御性校验策略直译：
+Responses 流采用前向兼容的事件接收与严格的输出校验：
 
 - 语义事件（delta/output_item.done/completed/failed/incomplete/error）
-  显式处理；结构型事件显式容忍忽略；**未知事件 fail-closed 抛错**。
+  显式处理；已知附加事件忽略；未知事件限量记录后跳过，继续等待终态。
 - ``sequence_number`` 连续性校验；个别事件被中转剥除序号后退化为
   单调递增校验（剥除事件消耗了全局序号位，严格等值会误报跳变）。
 - 终态（response.completed）之后再收到任何事件即畸形。
@@ -20,11 +20,18 @@ dict 列表并容忍无 ``[DONE]`` 终止（Responses 以 response.completed 收
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from typing import Any
 
 from quickquip.llm.provider.base import LLMProviderError, LLMResponse
 from quickquip.llm.provider.openai_responses.profiles import ResponsesProfile
 from quickquip.llm.provider.openai_responses.response import parse_responses_body
+
+logger = logging.getLogger(__name__)
+
+# 每条流最多记录八种未知事件，每种一次；载荷由现有 HTTP Trace 保存。
+_MAX_LOGGED_UNKNOWN_EVENT_TYPES = 8
+_MAX_LOGGED_EVENT_TYPE_LENGTH = 128
 
 # 结构型事件：协议演进新增的转发形态，显式容忍忽略。
 _TOLERATED_EVENTS = frozenset(
@@ -51,13 +58,15 @@ _TOLERATED_EVENTS = frozenset(
     }
 )
 
-# codex-http-relay 的中转私有结构事件（profile 能力位放行）。
+# codex-http-relay 的预期附加事件；该 Profile 静默忽略这些事件。
 # keepalive 是中转在长生成（如内置生图）期间的连接保活噪声，携带
 # 全局序号（占用序号位），放行后严格 +1 校验无缝续接。
 _RELAY_EVENTS = frozenset(
     {
         "codex.rate_limits",
         "codex.response.metadata",
+        # Codex 上游的审核、验证与安全等待元数据，当前作为附加信息处理。
+        "response.metadata",
         "responsesapi.websocket_timing",
         "keepalive",
     }
@@ -93,6 +102,7 @@ def fold_stream_events(
     expected_sequence = 0
     # 一旦出现无序号事件（中转剥除），序号校验退化为单调不减。
     saw_unnumbered = False
+    logged_unknown_event_types: set[str] = set()
 
     def _malformed(detail: str) -> LLMProviderError:
         return LLMProviderError(f"[{provider_id}] Responses 流畸形：{detail}")
@@ -216,10 +226,22 @@ def fold_stream_events(
             )
         elif event_type in _TOLERATED_EVENTS:
             continue
-        elif profile.tolerate_relay_events and event_type in _RELAY_EVENTS:
+        elif profile.recognize_relay_events and event_type in _RELAY_EVENTS:
             continue
         else:
-            raise _malformed(f"未知的语义事件 {event_type}。")
+            # 新事件类型属于上游的兼容扩展。成功仍取决于终态 output
+            # 的完整解析、工具结构校验及已消费 delta 的交叉核对。
+            if (
+                event_type not in logged_unknown_event_types
+                and len(logged_unknown_event_types) < _MAX_LOGGED_UNKNOWN_EVENT_TYPES
+            ):
+                logged_unknown_event_types.add(event_type)
+                logger.warning(
+                    "[%s] Skipping unknown Responses event type %r; "
+                    "terminal output will be validated",
+                    provider_id,
+                    event_type[:_MAX_LOGGED_EVENT_TYPE_LENGTH],
+                )
 
     if terminal is None:
         raise LLMProviderError(
