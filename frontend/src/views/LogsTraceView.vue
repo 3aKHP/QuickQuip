@@ -90,7 +90,7 @@
           >加载更早记录</UiButton>
         </section>
 
-        <TraceDetailPanel :detail="detail" :loading="detailLoading" @close="closeDetail" />
+        <TraceDetailPanel :detail="detail" :loading="detailLoading" :class="{ 'detail--mobile-pending': !selectedCallId }" @close="closeDetail" />
       </div>
     </UiCard>
   </div>
@@ -165,13 +165,23 @@ const groupedCalls = computed(() => {
 })
 
 function upsertCall(call: TraceCallSummary) {
-  const index = calls.value.findIndex(item => item.call_id === call.call_id)
-  if (index >= 0) calls.value.splice(index, 1, call)
-  else {
-    calls.value.unshift(call)
-    totalCount.value += 1
+  const existingIndex = calls.value.findIndex(item => item.call_id === call.call_id)
+  // 同一调用的状态推进复用同一行落库记录（id 不变），原位替换即已保序
+  if (existingIndex >= 0 && calls.value[existingIndex].id === call.id) {
+    calls.value.splice(existingIndex, 1, call)
+  } else {
+    if (existingIndex >= 0) calls.value.splice(existingIndex, 1)
+    else totalCount.value += 1
+    // 列表始终按 id 降序，二分定位插入点，避免每条 SSE 事件一次全量 sort
+    let lo = 0
+    let hi = calls.value.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (calls.value[mid].id > call.id) lo = mid + 1
+      else hi = mid
+    }
+    calls.value.splice(lo, 0, call)
   }
-  calls.value.sort((a, b) => b.id - a.id)
   if (calls.value.length > MAX_LIVE_CALLS) calls.value.length = MAX_LIVE_CALLS
   if (selectedCallId.value === call.call_id && call.state !== 'pending') void selectCall(call.call_id)
 }
@@ -354,6 +364,8 @@ onBeforeUnmount(() => source?.close())
 .call-error { color: var(--qq-danger); }
 .call-meta { display: grid; align-content: start; justify-items: end; gap: 2px; color: var(--qq-text-muted); font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); white-space: nowrap; }
 .load-more { width: 100%; margin-top: var(--qq-gap-sm); }
-@media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } .call-list { max-height: 48vh; padding: 0 0 var(--qq-gap-md); } }
+@media (max-width: 900px) { .workspace { grid-template-columns: 1fr; } .call-list { max-height: 48vh; padding: 0 0 var(--qq-gap-md); }
+  /* 移动端上下堆叠：未选中记录时收起详情面板，空态不占屏；选中后展开、可用面板内 × 关闭 */
+  .detail--mobile-pending { display: none; } }
 @media (max-width: 640px) { .toolbar { align-items: stretch; flex-direction: column; } .call-row { grid-template-columns: 34px minmax(0, 1fr); } .call-meta { grid-column: 2; grid-template-columns: repeat(2, max-content); justify-content: space-between; justify-items: start; width: 100%; } }
 </style>

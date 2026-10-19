@@ -2,11 +2,13 @@
   <div class="epochs-view">
     <UiPageHeader title="纪元看板" subtitle="锚点推进与上下文窗口运行态：保留条数、驱逐事件与信封成本">
       <template #actions>
-        <router-link to="/llm-config?section=epoch" custom v-slot="{ navigate }">
-          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">调整纪元阈值</UiButton>
-        </router-link>
-        <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="reloadTimeline" />
-        <UiButton :loading="snapshotLoading" icon="RefreshCw" @click="refreshSnapshot()">刷新快照</UiButton>
+        <div class="page-actions">
+          <router-link to="/llm-config?section=epoch" custom v-slot="{ navigate }">
+            <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">调整纪元阈值</UiButton>
+          </router-link>
+          <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="reloadTimeline" />
+          <UiButton :loading="snapshotLoading" icon="RefreshCw" @click="refreshSnapshot()">刷新快照</UiButton>
+        </div>
       </template>
     </UiPageHeader>
 
@@ -73,7 +75,7 @@
         <span><i :style="{ background: epochColors.window }" />纪元窗口</span>
         <span v-if="mode === 'stack'"><i :style="{ background: epochColors.envelope }" />信封层</span>
       </div>
-      <EChart v-if="hasChartData" :option="chartOption" :height="380" plot-click @plot-click="onScrub" />
+      <EChart v-if="hasChartData" :option="chartOption" :cursor-at="selectedTime" :height="380" plot-click @plot-click="onScrub" />
       <UiEmpty v-else icon="Activity" title="暂无时间轴数据" description="该会话在时间范围内没有 LLM 请求记录。" />
       <p class="hint">
         <UiIcon name="MousePointerClick" :size="13" /> 点击主图任意位置，把窗口/信封构成条定格到该时刻
@@ -326,7 +328,12 @@ function validateSnapshot(result: RuntimeActionResult): EpochSnapshot {
   return result as unknown as EpochSnapshot
 }
 
+let snapshotInFlight = false
+
 async function refreshSnapshot(auto = false) {
+  // 手动点击与 60s auto tick 并发只留一个在飞，避免重复 enqueue 服务端 action
+  if (snapshotInFlight) return
+  snapshotInFlight = true
   if (!auto) snapshotLoading.value = true
   try {
     const queued = await requestEpochSnapshot()
@@ -342,6 +349,7 @@ async function refreshSnapshot(auto = false) {
       error.value = caught instanceof Error ? caught.message : '快照获取失败'
     }
   } finally {
+    snapshotInFlight = false
     snapshotLoading.value = false
   }
 }
@@ -681,6 +689,8 @@ function epochSpans(): Array<{ from: number; to: number; color: string; index: n
   return spans
 }
 
+// 整树 option：刻意不依赖 selectedTime——cursor 位置由 EChart 的 cursorAt prop
+// 增量合并，播放/擦洗不触发本 computed 重算全 series
 const chartOption = computed(() => {
   const t = chartTheme.value
   const colors = epochColors.value
@@ -822,7 +832,9 @@ const chartOption = computed(() => {
       symbol: 'none',
       silent: true,
       animation: false,
-      data: selectedTime.value != null ? [{ xAxis: selectedTime.value }] : [],
+      // 位置不进整树 option：由 EChart 的 cursorAt prop 按 id 增量合并，
+      // 播放/擦洗只更新这条 markLine，不触发全 series 重建
+      data: [] as Array<{ xAxis: number }>,
       lineStyle: { color: t.textMuted, type: 'dashed' as const, width: 1.2 },
       label: { show: false },
     },
@@ -892,7 +904,8 @@ onMounted(async () => {
     nowTick.value = Date.now()
   }, 1000)
   snapshotTimer = setInterval(() => {
-    void refreshSnapshot(true)
+    // 隐藏标签页不向 bot action queue 提交快照任务
+    if (!document.hidden) void refreshSnapshot(true)
   }, SNAPSHOT_AUTO_MS)
   // 快照优先：refreshSnapshot 内部 ensureDefaultGroup 选快照里最活跃的键；
   // 键空（bot 重启后尚无 chat）时退到会话列表回退选中
@@ -922,6 +935,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.page-actions { display: flex; align-items: center; gap: var(--qq-gap-sm); }
+@media (max-width: 767px) {
+  /* 移动端按钮组换行独占一行；钳制在页内容宽内（main padding = --qq-gap-md），
+     避免按单行 max-content 撑破整页横向滚动 */
+  .page-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100vw - 2 * var(--qq-gap-md));
+  }
 }
 .error {
   color: var(--qq-danger);

@@ -47,7 +47,8 @@ function tick() {
 
 onMounted(() => {
   tick()
-  timer = setInterval(tick, 1000)
+  // 隐藏标签页不刷时钟：无人观看，跳过重渲染
+  timer = setInterval(() => { if (!document.hidden) tick() }, 1000)
 })
 
 onUnmounted(() => {
