@@ -4,7 +4,7 @@
 
 本文供配置 API 调用方和维护者查阅。LLM 配置使用 `data/llm_config.db`，Web Admin、CLI 与 Bot 通过同一个应用服务保存草稿、建立快照和提交控制任务。人格文件、Skill 内容、群覆盖、历史记录、用量和 Trace 由各自存储维护。
 
-接口前缀为 `/ops/api/llm-configuration`，需要现有管理员会话 Cookie `quickquip_admin_session`。写请求必须携带同源 `Origin` 或 `Referer`。请求体上限为 1 MiB，分块传输也执行此限制。完整机器契约见 [OpenAPI JSON](llm-configuration.openapi.json)；运行中的管理 API 在 `/openapi.json` 提供同一字段约束。
+接口前缀为 `/ops/api/llm-configuration`，需要现有管理员会话 Cookie `quickquip_admin_session`。写请求必须携带同源 `Origin` 或 `Referer`。请求体上限为 1 MiB，分块传输也执行此限制。完整机器契约见 [OpenAPI JSON](llm-configuration.openapi.json)，由 `python scripts/ci/export_llm_configuration_openapi.py` 在进程内构造应用导出，随约束或路由变更同步提交；运行中的管理 API 不提供 `/docs`、`/redoc`、`/openapi.json` 文档端点。
 
 前端设计与操作流程见[前端交付契约](llm-configuration-frontend.md)，其中说明中文字段含义、参数继承控件、保存与应用、冲突处理及设计验收场景。
 
