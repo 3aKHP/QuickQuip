@@ -7,12 +7,23 @@
         <p class="muted">请输入管理员口令</p>
       </div>
       <form @submit.prevent="handleSubmit">
+        <input
+          type="text"
+          name="username"
+          autocomplete="username"
+          value="admin"
+          hidden
+          tabindex="-1"
+          aria-hidden="true"
+        />
         <div class="login-card__field">
           <UiIcon name="Lock" :size="16" class="login-card__field-icon" />
           <input
             ref="inputRef"
             v-model="password"
             type="password"
+            name="password"
+            autocomplete="current-password"
             placeholder="口令"
             class="login-card__input"
             :disabled="submitting"
