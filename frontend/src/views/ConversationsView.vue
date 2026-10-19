@@ -1,5 +1,5 @@
 <template>
-  <div class="conv-view page-view-fill">
+  <div class="conv-view">
     <UiPageHeader title="对话日志"><template #actions><UiButton icon="RefreshCw" :disabled="listing || loadingMessages" @click="refreshAll">刷新</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
@@ -19,7 +19,7 @@
       </nav>
 
       <div class="main-col">
-        <div v-if="!selectedKey" class="hint-panel"><UiEmpty icon="BookOpen" title="从左侧选择一个会话查看消息" /></div>
+        <div v-if="!selectedKey" class="hint-panel"><UiEmpty icon="BookOpen" title="选择一个会话查看消息" /></div>
         <template v-else>
           <div class="filter-bar">
             <span class="mono selected-id">{{ selectedKey }}</span>
@@ -50,7 +50,8 @@
                 <div class="msg-body">{{ m.content }}</div>
               </div>
               <div class="load-more">
-                <UiButton v-if="hasMore" :loading="loadingMore" icon="ChevronUp" @click="loadMore">加载更早</UiButton>
+                <span v-if="reachedSoftCap" class="muted">已达 {{ LIST_SOFT_CAP }} 条上限，请用关键词缩小范围</span>
+                <UiButton v-else-if="hasMore" :loading="loadingMore" icon="ChevronUp" @click="loadMore">加载更早</UiButton>
                 <span v-else class="muted">已到最早</span>
               </div>
             </div>
@@ -62,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -74,9 +75,11 @@ import { listConversations, fetchMessages, type Conversation, type ConversationM
 import { useConversationDeletion } from '../composables/useConversationDeletion'
 
 const PAGE_SIZE = 50
+const LIST_SOFT_CAP = 500
 const conversations = ref<Conversation[]>([]); const listing = ref(false); const listError = ref<string | null>(null)
 const selectedKey = ref(''); const keyword = ref(''); const messages = ref<ConversationMessage[]>([])
 const loadingMessages = ref(false); const loadingMore = ref(false); const loadError = ref<string | null>(null); const hasMore = ref(false)
+const reachedSoftCap = computed(() => messages.value.length >= LIST_SOFT_CAP)
 let messageRequest = 0
 let listRequest = 0
 let disposed = false
@@ -125,7 +128,7 @@ async function reload() {
   }
 }
 async function loadMore() {
-  if (!messages.value.length || loadingMessages.value || loadingMore.value) return
+  if (!messages.value.length || loadingMessages.value || loadingMore.value || reachedSoftCap.value) return
   const requestId = ++messageRequest
   loadingMore.value = true
   try {
@@ -150,14 +153,15 @@ loadConversations()
 </script>
 
 <style scoped>
-.conv-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; overflow: hidden; }
+.conv-view { display: flex; flex-direction: column; }
 .error { color: var(--qq-danger); }
 .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }
 
-.split { display: flex; gap: var(--qq-gap-md); flex: 1; min-height: 0; }
+.split { display: flex; gap: var(--qq-gap-md); }
 
-.list-panel { width: 260px; flex-shrink: 0; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); display: flex; flex-direction: column; overflow: hidden; }
+/* 会话列表吸附在页面滚动容器顶部，长列表在吸附面板内自滚，消息区随页面整高铺开 */
+.list-panel { width: 260px; flex-shrink: 0; align-self: flex-start; position: sticky; top: var(--qq-gap-lg); max-height: calc(100vh - var(--qq-gap-lg) * 2); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); display: flex; flex-direction: column; overflow: hidden; }
 .list-scroll { overflow-y: auto; flex: 1; }
 
 .list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; border-radius: 0; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
@@ -165,15 +169,15 @@ loadConversations()
 .list-item-id { color: var(--qq-text); font-size: var(--qq-text-sm); }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); display: flex; gap: 4px; }
 
-.main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; gap: var(--qq-gap-sm); }
+.main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: var(--qq-gap-sm); }
 .hint-panel { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 
 .filter-bar { display: flex; align-items: center; gap: var(--qq-gap-sm); padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); flex-wrap: wrap; }
 .selected-id { font-size: var(--qq-text-sm); color: var(--qq-text-muted); white-space: nowrap; }
 .filter-input { flex: 1; min-width: 180px; }
 
-.messages-panel { flex: 1; min-height: 0; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
-.messages-scroll { overflow-y: auto; flex: 1; padding: var(--qq-gap-sm); display: flex; flex-direction: column; gap: 6px; }
+.messages-panel { background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
+.messages-scroll { padding: var(--qq-gap-sm); display: flex; flex-direction: column; gap: 6px; }
 
 .msg { padding: 10px 12px; border-radius: var(--qq-radius-sm); background: var(--qq-surface-strong); border-left: 3px solid var(--qq-border); }
 .msg--user { border-left-color: var(--qq-primary); }
@@ -191,5 +195,9 @@ loadConversations()
 .msg-body { font-size: var(--qq-text-sm); color: var(--qq-text); line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .load-more { display: flex; justify-content: center; padding: var(--qq-gap-sm); }
 
-@media (max-width: 900px) { .split { flex-direction: column; } .list-panel { width: 100%; max-height: 200px; } }
+@media (max-width: 900px) {
+  /* 分栏改为纵向堆叠：会话列表收为限高切换器，消息区随页面级滚动铺开 */
+  .split { flex-direction: column; }
+  .list-panel { width: 100%; max-height: 200px; position: static; }
+}
 </style>

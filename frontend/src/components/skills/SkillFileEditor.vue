@@ -180,8 +180,6 @@ defineExpose({ confirmLeave, openPath, reset })
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-sm);
-  min-height: 0;
-  flex: 1;
 }
 
 .file-table-wrap {
@@ -284,9 +282,8 @@ defineExpose({ confirmLeave, openPath, reset })
 }
 
 .file-editor {
-  flex: 1;
   width: 100%;
-  min-height: 300px;
+  min-height: 55vh;
   padding: var(--qq-gap-md);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
