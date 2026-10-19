@@ -2,11 +2,13 @@
   <div class="usage-view">
     <UiPageHeader title="LLM 用量与成本" subtitle="按请求观察 token、成本、成功率与耗时">
       <template #actions>
-        <router-link to="/llm-config?section=pricing" custom v-slot="{ navigate }">
-          <UiButton variant="ghost" icon="Coins" @click="navigate">配置模型价格</UiButton>
-        </router-link>
-        <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="changeRange" />
-        <UiButton :loading="loading" icon="RefreshCw" @click="reload">刷新</UiButton>
+        <div class="page-actions">
+          <router-link to="/llm-config?section=pricing" custom v-slot="{ navigate }">
+            <UiButton variant="ghost" icon="Coins" @click="navigate">配置模型价格</UiButton>
+          </router-link>
+          <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="changeRange" />
+          <UiButton :loading="loading" icon="RefreshCw" @click="reload">刷新</UiButton>
+        </div>
       </template>
     </UiPageHeader>
 
@@ -409,6 +411,16 @@ onMounted(() => {
 
 <style scoped>
 .usage-view { display: flex; flex-direction: column; gap: var(--qq-gap-md); }
+.page-actions { display: flex; align-items: center; gap: var(--qq-gap-sm); }
+@media (max-width: 767px) {
+  /* 移动端按钮组换行独占一行；钳制在页内容宽内（main padding = --qq-gap-md），
+     避免按单行 max-content 撑破整页横向滚动 */
+  .page-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100vw - 2 * var(--qq-gap-md));
+  }
+}
 .filters { display: flex; flex-wrap: wrap; gap: var(--qq-gap-sm); }
 .filters select { min-width: 130px; font-size: var(--qq-text-sm); }
 .bounds-note, .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }

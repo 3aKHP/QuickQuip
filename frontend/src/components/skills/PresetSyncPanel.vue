@@ -154,6 +154,13 @@ defineExpose({ reload })
   display: flex;
   align-items: center;
   gap: var(--qq-gap-xs);
+  flex-wrap: wrap;
+}
+
+/* 标题不换行：窄屏下由按钮组折行，避免「预置同/步」词中断行 */
+.preset-head .section-title {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .preset-spacer { flex: 1; }

@@ -53,7 +53,8 @@
   /* ── Semantics ── */
   --qq-success: #07c160;
   --qq-success-soft: rgba(7, 193, 96, 0.12);
-  --qq-warn: #fa9d3b;
+  /* 浅色下取深琥珀（徽标文字对比度 4.5:1+，达 WCAG AA）；暗色覆盖回亮橙 */
+  --qq-warn: #b45309;
   --qq-warn-soft: rgba(250, 157, 59, 0.12);
   --qq-danger: #fa5151;
   --qq-danger-deep: #e03e3e;
@@ -283,6 +284,8 @@
   --qq-epoch-stripe-agg-b: #464e60;
 
   --qq-success-soft: rgba(7, 193, 96, 0.16);
+  /* 暗色保持亮橙：浅底加深后的 #b45309 在暗底上对比不足 */
+  --qq-warn: #fa9d3b;
   --qq-warn-soft: rgba(250, 157, 59, 0.16);
   --qq-danger-soft: rgba(250, 81, 81, 0.16);
   --qq-danger-deep: #e85a5a;

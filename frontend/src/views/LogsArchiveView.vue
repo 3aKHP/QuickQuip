@@ -34,7 +34,7 @@
 
         <div class="archive-preview">
           <UiLoading v-if="previewLoading" text="正在读取日志尾部" />
-          <UiEmpty v-else-if="!selectedFile" icon="FolderOpen" title="从左侧选择一个日志文件" />
+          <UiEmpty v-else-if="!selectedFile && files.length" icon="FolderOpen" title="选择一个日志文件查看预览" />
           <template v-else>
             <div class="preview-head">
               <span class="preview-title">{{ selectedFile }}</span>

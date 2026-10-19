@@ -2,11 +2,13 @@
   <div class="tieba-view">
     <UiPageHeader title="贴吧帖子池" subtitle="只读视图，依赖 tieba 爬虫后台同步的数据">
       <template #actions>
-        <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
-        <UiButton icon="Download" :loading="syncing" @click="startSync(null)">立即同步全部</UiButton>
-        <UiInfoTip text="除后台按 TIEBA_SYNC_INTERVAL_SECONDS 周期自动同步外，点此立即手动全量同步各吧缓存。" />
-        <UiButton icon="Radar" :disabled="!selectedForum" :loading="peeking" @click="peekSelected">现爬一条</UiButton>
-        <UiInfoTip text="实时抓取该吧首页帖子、优先随机返回带图帖，仅预览不写入本地帖子池。" />
+        <div class="page-actions">
+          <UiButton icon="RefreshCw" :loading="loading" @click="loadAll">刷新</UiButton>
+          <UiButton icon="Download" :loading="syncing" @click="confirmSyncAll">立即同步全部</UiButton>
+          <UiInfoTip text="除后台按 TIEBA_SYNC_INTERVAL_SECONDS 周期自动同步外，点此立即手动全量同步各吧缓存。" />
+          <UiButton icon="Radar" :disabled="!selectedForum" :loading="peeking" @click="peekSelected">现爬一条</UiButton>
+          <UiInfoTip text="实时抓取该吧首页帖子、优先随机返回带图帖，仅预览不写入本地帖子池。" />
+        </div>
       </template>
     </UiPageHeader>
 
@@ -46,7 +48,7 @@
 
       <div class="main-col">
         <UiCard v-if="!selectedForum" padding="lg" shadow="sm" class="hint-card">
-          <UiEmpty icon="BookOpen" title="从左侧选择一个贴吧查看帖子" />
+          <UiEmpty icon="BookOpen" title="选择一个贴吧查看帖子" />
         </UiCard>
 
         <template v-else>
@@ -84,7 +86,8 @@
                 </div>
               </div>
               <div class="load-more-wrap">
-                <UiButton v-if="hasMore" :loading="loadingMore" icon="ChevronDown" @click="loadMore">加载更多</UiButton>
+                <span v-if="reachedSoftCap" class="muted">已达 {{ LIST_SOFT_CAP }} 条上限，请用关键词缩小范围</span>
+                <UiButton v-else-if="hasMore" :loading="loadingMore" icon="ChevronDown" @click="loadMore">加载更多</UiButton>
                 <span v-else-if="threads.length" class="muted">已到末尾</span>
               </div>
             </div>
@@ -98,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -114,6 +117,7 @@ import { useTiebaSync } from '../composables/useTiebaSync'
 import { toast } from '../toast'
 
 const PAGE_SIZE = 30
+const LIST_SOFT_CAP = 500
 
 const forums = ref<TiebaForumInfo[]>([])
 const loading = ref(false)
@@ -128,6 +132,7 @@ const total = ref(0)
 const hasMore = ref(false)
 const loadingThreads = ref(false)
 const loadingMore = ref(false)
+const reachedSoftCap = computed(() => threads.value.length >= LIST_SOFT_CAP)
 
 const detail = ref<TiebaThread | null>(null)
 
@@ -168,6 +173,13 @@ async function loadAll() {
 
 const { syncing, syncLog, logEl, startSync, clearLog } = useTiebaSync(loadAll)
 
+/** 全量同步会向贴吧发起多轮外部请求，沿用仓库 confirm 惯例做二次确认（单吧同步为一键轻量操作，不确认） */
+function confirmSyncAll() {
+  if (syncing.value) return
+  if (!confirm('立即对所有已配置贴吧执行全量同步？这会向贴吧发起多轮外部请求，耗时较长。')) return
+  startSync(null)
+}
+
 async function selectForum(forum: string) {
   if (forum === selectedForum.value) return
   selectedForum.value = forum
@@ -198,7 +210,7 @@ async function reload() {
 }
 
 async function loadMore() {
-  if (!hasMore.value) return
+  if (!hasMore.value || reachedSoftCap.value) return
   loadingMore.value = true
   try {
     const data = await fetchTiebaThreads(selectedForum.value, {
@@ -250,6 +262,18 @@ loadAll()
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+
+.page-actions { display: flex; align-items: center; gap: var(--qq-gap-sm); }
+
+@media (max-width: 767px) {
+  /* 移动端按钮组换行独占一行；钳制在页内容宽内（main padding = --qq-gap-md），
+     避免按单行 max-content 撑破整页横向滚动 */
+  .page-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100vw - 2 * var(--qq-gap-md));
+  }
 }
 
 .error { color: var(--qq-danger); }
