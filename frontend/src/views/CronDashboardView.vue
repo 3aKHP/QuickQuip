@@ -24,7 +24,9 @@ function formatTime(iso: string | null): string { if (!iso) return '—'; try { 
 function formatTrigger(raw: string): string { const m = raw.match(/^cron\[(.*)\]$/); return m ? m[1] : raw }
 
 const snapshotText = computed(() => snapshotAt.value ? formatTime(snapshotAt.value) : '—')
-const snapshotStale = computed(() => { if (!snapshotAt.value) return false; const t = new Date(snapshotAt.value).getTime(); return Number.isFinite(t) && Date.now() - t > 5 * 60_000 })
+// nowTick 随每轮 loadJobs 推进，让 snapshotStale 在页面存活期间也能随时间翻转
+const nowTick = ref(Date.now())
+const snapshotStale = computed(() => { if (!snapshotAt.value) return false; const t = new Date(snapshotAt.value).getTime(); return Number.isFinite(t) && nowTick.value - t > 5 * 60_000 })
 
 // 空态区分「真无任务」与「取不到数」：快照缺失/过期都指向 bot 进程侧问题，而非任务清单为空
 const emptyTitle = computed(() => !snapshotAt.value ? 'Bot 尚未上报调度快照' : snapshotStale.value ? '调度快照已过期' : '暂无调度任务')
@@ -34,7 +36,7 @@ const emptyDescription = computed(() => {
   return 'Bot 调度器快照正常：当前没有登记的 Cron 任务。'
 })
 
-async function loadJobs() { loading.value = true; loadError.value = null; try { const d = await fetchCronDashboard(); jobs.value = d.jobs || []; snapshotAt.value = d.updated_at ?? null; _failures = 0 } catch (e: unknown) { loadError.value = (e as Error).message; _failures += 1 } finally { loading.value = false } }
+async function loadJobs() { loading.value = true; loadError.value = null; try { const d = await fetchCronDashboard(); jobs.value = d.jobs || []; snapshotAt.value = d.updated_at ?? null; _failures = 0 } catch (e: unknown) { loadError.value = (e as Error).message; _failures += 1 } finally { nowTick.value = Date.now(); loading.value = false } }
 function scheduleNext() { if (!_stopped) _timer = setTimeout(tick, Math.min(POLL_INTERVAL * 2 ** _failures, POLL_BACKOFF_CAP)) }
 async function tick() { if (!document.hidden) await loadJobs(); scheduleNext() } // 隐藏标签页跳过本轮，节拍本身保持
 onMounted(() => { _stopped = false; void loadJobs().then(scheduleNext) })

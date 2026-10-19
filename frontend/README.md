@@ -10,7 +10,7 @@ Vue 3.5（`<script setup>`）+ TypeScript strict + Vite 8 + vue-router 4（hash 
 
 ```
 src/
-├── views/        # 路由页面（30 个）
+├── views/        # 路由页面（29 个，由 config/nav.ts 派生；登录门 LoginView 由 App.vue 静态引入）
 ├── components/   # ui/ 设计系统组件 + llm-config 等业务域子目录
 ├── api/          # 后端接口封装，每个领域一个模块；API 响应类型归属此处
 ├── composables/  # 可复用状态与请求编排

@@ -332,7 +332,11 @@ let snapshotInFlight = false
 
 async function refreshSnapshot(auto = false) {
   // 手动点击与 60s auto tick 并发只留一个在飞，避免重复 enqueue 服务端 action
-  if (snapshotInFlight) return
+  if (snapshotInFlight) {
+    // 手动点击撞上在飞请求时给出 loading 反馈（复用在飞请求的结果），不再重复入队
+    if (!auto) snapshotLoading.value = true
+    return
+  }
   snapshotInFlight = true
   if (!auto) snapshotLoading.value = true
   try {

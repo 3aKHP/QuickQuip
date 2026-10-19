@@ -50,7 +50,7 @@
                 <div class="msg-body">{{ m.content }}</div>
               </div>
               <div class="load-more">
-                <span v-if="reachedSoftCap" class="muted">已达 {{ LIST_SOFT_CAP }} 条上限，请用关键词缩小范围</span>
+                <span v-if="reachedSoftCap && hasMore" class="muted">已达 {{ LIST_SOFT_CAP }} 条上限，请用关键词缩小范围</span>
                 <UiButton v-else-if="hasMore" :loading="loadingMore" icon="ChevronUp" @click="loadMore">加载更早</UiButton>
                 <span v-else class="muted">已到最早</span>
               </div>
