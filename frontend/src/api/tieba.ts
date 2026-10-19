@@ -64,14 +64,15 @@ export function tiebaImgProxyUrl(url: string) {
 }
 
 export interface TiebaSyncStream {
-  /** 中止同步流（组件卸载时调用）；服务端的抓取任务可能继续执行至完成 */
+  /** 中止同步流（组件卸载时调用）；中止后不再触发 onMessage/onDone；服务端的抓取任务可能继续执行至完成 */
   close: () => void
 }
 
 /**
  * 触发贴吧同步并消费其 SSE 进度流。同步有副作用，走 POST + fetch 流式读取
  * （EventSource 只支持 GET），返回的句柄用于主动关闭。
- * 结束语义：收到 [done]、流结束或连接出错即视为完成（不重连），回调 onDone。
+ * 结束语义：收到 [done]、流结束或连接出错即视为完成（不重连），回调 onDone；
+ * HTTP 错误先以一行状态文本走 onMessage。主动 close() 后不再有任何回调。
  */
 export function startTiebaSync(
   forum: string,
@@ -80,9 +81,10 @@ export function startTiebaSync(
 ): TiebaSyncStream {
   const controller = new AbortController()
   const params = forum ? `?forum=${encodeURIComponent(forum)}` : ''
+  let aborted = false
   let doneFired = false
   const fireDone = () => {
-    if (doneFired) return
+    if (doneFired || aborted) return
     doneFired = true
     onDone()
   }
@@ -93,7 +95,10 @@ export function startTiebaSync(
     signal: controller.signal,
   })
     .then(async (res) => {
-      if (!res.ok || !res.body) return
+      if (!res.ok || !res.body) {
+        if (!aborted) onMessage(`✕ 同步请求失败（HTTP ${res.status}），请查看服务日志`)
+        return
+      }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -108,14 +113,19 @@ export function startTiebaSync(
           sep = buffer.indexOf('\n\n')
           const data = frame.startsWith('data: ') ? frame.slice(6) : null
           if (data === '[done]') return
-          if (data) onMessage(data)
+          if (data && !aborted) onMessage(data)
         }
       }
     })
     .catch(() => {})
     .finally(fireDone)
 
-  return { close: () => controller.abort() }
+  return {
+    close: () => {
+      aborted = true
+      controller.abort()
+    },
+  }
 }
 
 export async function listTiebaForums(): Promise<TiebaForumsResponse> {
