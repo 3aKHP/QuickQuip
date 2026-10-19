@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { defineConfig } from 'vite'
+import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 const pyproject = readFileSync(new URL('../pyproject.toml', import.meta.url), 'utf8')
@@ -14,6 +15,15 @@ export default defineConfig({
   base: '/ops/',
   define: {
     __QUICKQUIP_VERSION__: JSON.stringify(version),
+  },
+  resolve: {
+    // 与 tsconfig paths 对齐，供 vitest 用例与源码统一使用 @/ 前缀
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
+  test: {
+    environment: 'happy-dom',
+    // 只收 tests/unit 下的 vitest 用例；tests/*.test.cjs 由 node --test 跑，避免双跑
+    include: ['tests/unit/**/*.test.ts'],
   },
   server: {
     proxy: {

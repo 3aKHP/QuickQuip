@@ -41,7 +41,7 @@
         </div>
         <div class="add-group-row">
           <input v-model="newGroupId" placeholder="群号" style="width:160px" @keyup.enter="doAddGroupMode" />
-          <select v-model="newGroupMode"><option v-for="m in textModes" :key="m" :value="m">{{ m }}</option></select>
+          <select v-model="newGroupMode"><option value="" disabled>选择模式</option><option v-for="m in textModes" :key="m" :value="m">{{ m }}</option></select>
           <UiButton icon="Plus" :loading="addModeLoading" @click="doAddGroupMode">设置</UiButton>
         </div>
         <div v-if="textModeGroups.length" class="table-scroll" style="margin-top:var(--qq-gap-md)"><table><thead><tr><th>群号</th><th class="num">当前模式</th><th class="num">切换</th></tr></thead><tbody><tr v-for="g in textModeGroups" :key="g.group_id"><td class="mono">{{ g.group_id }}</td><td class="num"><UiTag size="sm" :variant="g.text_mode === textDefault ? 'warn' : 'info'">{{ g.text_mode }}</UiTag></td><td class="num"><select :value="g.text_mode" @change="doSwitchMode(g.group_id, ($event.target as HTMLSelectElement).value)"><option v-for="m in textModes" :key="m" :value="m">{{ m }}</option></select></td></tr></tbody></table></div>

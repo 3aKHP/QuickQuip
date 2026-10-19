@@ -5,27 +5,40 @@
         <span>渠道列表 ({{ providers.length }})</span>
         <UiButton size="sm" icon="Plus" @click="addProvider">添加渠道</UiButton>
       </div>
-      <div class="providers-panel__list-scroll">
-        <UiEmpty v-if="!providers.length" icon="Server" title="还没有渠道" description="添加第一个 LLM 渠道，填写 API 地址和密钥变量名" />
-        <button
-          v-for="(provider, index) in providers"
-          :key="index"
-          class="provider-item qq-selectable"
-          :class="{ active: index === selected }"
-          @click="selected = index"
-        >
-          <span class="provider-item__head">
-            <span class="provider-item__id">{{ provider.id || '未命名渠道' }}</span>
-            <UiTag v-if="provider.enabled === false" size="sm">已停用</UiTag>
-            <UiTag v-if="isDefault(provider)" size="sm" variant="cyan">默认</UiTag>
-          </span>
-          <span class="provider-item__meta">
-            <span>{{ protocolLabel(provider.protocol) }}</span>
-            <span>{{ modelCount(provider) }} 个模型</span>
-            <span v-if="envState(provider) === 'missing'" class="provider-item__warn">密钥未配置</span>
-          </span>
-        </button>
-      </div>
+      <UiEmpty v-if="!providers.length" icon="Server" title="还没有渠道" description="添加第一个 LLM 渠道，填写 API 地址和密钥变量名" />
+      <template v-else>
+        <div class="providers-panel__mobile-picker">
+          <select
+            :value="selected"
+            aria-label="选择渠道"
+            @change="selected = Number(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="(provider, index) in providers" :key="index" :value="index">
+              {{ provider.id || '未命名渠道' }}（{{ protocolLabel(provider.protocol) }} · {{ modelCount(provider) }} 个模型{{ provider.enabled === false ? ' · 已停用' : '' }}）
+            </option>
+          </select>
+        </div>
+        <div class="providers-panel__list-scroll">
+          <button
+            v-for="(provider, index) in providers"
+            :key="index"
+            class="provider-item qq-selectable"
+            :class="{ active: index === selected }"
+            @click="selected = index"
+          >
+            <span class="provider-item__head">
+              <span class="provider-item__id">{{ provider.id || '未命名渠道' }}</span>
+              <UiTag v-if="provider.enabled === false" size="sm">已停用</UiTag>
+              <UiTag v-if="isDefault(provider)" size="sm" variant="cyan">默认</UiTag>
+            </span>
+            <span class="provider-item__meta">
+              <span>{{ protocolLabel(provider.protocol) }}</span>
+              <span>{{ modelCount(provider) }} 个模型</span>
+              <span v-if="envState(provider) === 'missing'" class="provider-item__warn">密钥未配置</span>
+            </span>
+          </button>
+        </div>
+      </template>
     </nav>
 
     <div v-if="current" class="providers-panel__detail">
@@ -358,16 +371,15 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   gap: var(--qq-gap-md);
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+  align-items: start;
 }
 
 .providers-panel__list {
+  position: sticky;
+  top: var(--qq-gap-lg);
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  max-height: calc(100vh - var(--qq-gap-lg) * 2);
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
@@ -385,6 +397,10 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   font-weight: 600;
   border-bottom: 1px solid var(--qq-border-soft);
   flex-shrink: 0;
+}
+
+.providers-panel__mobile-picker {
+  display: none;
 }
 
 .providers-panel__list-scroll {
@@ -446,10 +462,7 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-sm);
-  height: 100%;
-  min-height: 0;
   min-width: 0;
-  overflow: hidden;
 }
 
 .provider-overview-bar {
@@ -515,17 +528,12 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-md);
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
   padding-bottom: var(--qq-gap-md);
 }
 
 .providers-panel__placeholder {
   display: grid;
   place-items: center;
-  height: 100%;
   min-height: 320px;
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
@@ -771,17 +779,19 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
 @media (max-width: 900px) {
   .providers-panel {
     grid-template-columns: 1fr;
-    height: auto;
-    overflow: visible;
   }
   .providers-panel__list {
-    height: auto;
-    max-height: 220px;
+    position: static;
+    max-height: none;
   }
-  .providers-panel__detail,
-  .providers-panel__detail-scroll {
-    height: auto;
-    overflow: visible;
+  .providers-panel__mobile-picker {
+    display: block;
+  }
+  .providers-panel__mobile-picker select {
+    width: 100%;
+  }
+  .providers-panel__list-scroll {
+    display: none;
   }
   .form-grid { grid-template-columns: 1fr; }
 }

@@ -1,5 +1,5 @@
 <template>
-  <div class="config-view page-view-fill">
+  <div class="config-view">
     <UiPageHeader title="配置" subtitle="在线编辑常规 TOML 配置文件，保存后部分自动重载，其余需手动 reload 或重启">
       <template #actions>
         <span v-if="current && current.exists === false" class="warn">
@@ -190,8 +190,6 @@ async function save() {
 <style scoped>
 .config-view {
   display: flex;
-  flex: 1;
-  min-height: 0;
   flex-direction: column;
 }
 
@@ -218,27 +216,29 @@ async function save() {
 
 .config-shell {
   display: grid;
-  flex: 1;
-  min-height: 0;
   grid-template-columns: 220px minmax(0, 1fr) 180px;
   gap: var(--qq-gap-md);
+  align-items: start;
 }
 
 .config-list,
 .config-editor,
 .config-side {
   min-width: 0;
-  min-height: 0;
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   box-shadow: var(--qq-shadow-card);
 }
 
+/* 文件列表吸附在页面滚动容器顶部，超出时在吸附面板内自滚 */
 .config-list {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  position: sticky;
+  top: var(--qq-gap-lg);
+  max-height: calc(100vh - var(--qq-gap-lg) * 2);
 }
 
 .panel-head {
@@ -366,9 +366,8 @@ async function save() {
 }
 
 .toml-editor {
-  flex: 1;
   width: 100%;
-  min-height: 360px;
+  min-height: 60vh;
   padding: var(--qq-gap-sm);
   border: 0;
   border-top: 1px solid var(--qq-border);
@@ -484,13 +483,15 @@ async function save() {
 }
 
 @media (max-width: 767px) {
+  /* 单列布局按内容整高堆叠，溢出交给 .content 页面级滚动 */
   .config-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(360px, 1fr);
   }
 
   .config-list {
-    max-height: 160px;
+    overflow-y: visible;
+    position: static;
+    max-height: none;
   }
 
   .editor-head {

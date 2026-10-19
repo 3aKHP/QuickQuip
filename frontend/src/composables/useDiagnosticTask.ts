@@ -4,6 +4,9 @@ import type { DiagnosticOperation } from '../api/diagnostics'
 
 const finished = (status: string) => ['succeeded', 'failed', 'cancelled'].includes(status)
 
+/** 连续读失败的退避上限：读间隔逐次翻倍，封顶 10s，成功复位 */
+const READ_BACKOFF_CAP_MS = 10_000
+
 function failureMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error) return String(error.message)
   return '诊断请求失败'
@@ -28,19 +31,23 @@ export function useDiagnosticTask<T>(
 
   async function observe(): Promise<DiagnosticOperation<T> | null> {
     const deadline = Date.now() + observation.timeoutMs
+    let readFailures = 0
     while (operation.value && !finished(operation.value.status)) {
       if (disposed) return null
       if (Date.now() >= deadline) {
         error.value = '任务结果尚未确认，请检查 Bot 在线状态后继续查询。继续查询不会重新调用模型。'
         return null
       }
-      await new Promise(resolve => setTimeout(resolve, observation.intervalMs))
+      // 只有读失败参与退避：成功一次即复位到基础间隔
+      await new Promise(resolve => setTimeout(resolve, Math.min(observation.intervalMs * 2 ** readFailures, READ_BACKOFF_CAP_MS)))
       if (disposed) return null
       try {
         operation.value = await read(operation.value.id)
         error.value = ''
+        readFailures = 0
       } catch (cause) {
         // Only reads are retried. Submission remains bound to its original request id.
+        readFailures += 1
         error.value = failureMessage(cause)
       }
     }

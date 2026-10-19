@@ -151,6 +151,18 @@ src/quickquip/
 
 ---
 
+## `frontend/` — Web 管理后台前端
+
+Web Admin 前端是独立的 pnpm 工程（`quickquip-admin-v2`），技术栈为 Vue 3.5 + TypeScript strict + Vite 8 + vue-router 4（hash 模式，base `/ops/`）。关键约定：
+
+- 路由页面在 `src/config/nav.ts` 登记，路由由其派生；除首页静态引入外，页面组件一律路由级动态 import。
+- 后端接口封装按领域收在 `src/api/`，可复用状态与请求编排收在 `src/composables/`，`src/components/ui/` 是设计系统组件。
+- 构建产物 `frontend/dist/`（gitignore）由 `app/web/` 以 StaticFiles 挂载到 `/ops/`；前端不设路由守卫，鉴权由后端强制。
+
+开发命令、测试双栈与部署形态见 [`../../frontend/README.md`](../../frontend/README.md)。
+
+---
+
 ## `config/` — 配置文件目录
 
 | 文件 | 层 | 说明 |

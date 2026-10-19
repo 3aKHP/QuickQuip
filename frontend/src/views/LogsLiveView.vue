@@ -10,7 +10,7 @@
     <UiCard padding="md" shadow="sm" class="panel">
       <div class="meta-row">
         <UiTag size="sm" variant="info">{{ currentFileLabel }}</UiTag><UiInfoTip text="机器人当前正在写入的日志文件，按日期命名 quickquip_YYYY-MM-DD.log，每天 0 点切换到新文件，仅保留最近 14 天；文件只记录 INFO 及以上级别（DEBUG 不落盘）。" />
-        <UiTag size="sm" :variant="connected ? 'success' : 'warn'">{{ connected ? '已连接' : '连接中断' }}</UiTag><UiInfoTip text="实时日志推送通道（SSE）的连接状态；断开后浏览器会自动重连，跨天轮转会自动跟随新的当日文件。" />
+        <UiTag size="sm" :variant="connected ? 'success' : 'warn'">{{ connected ? (currentFile ? '已连接' : '已连接，等待日志') : '连接中断' }}</UiTag><UiInfoTip text="实时日志推送通道（SSE）的连接状态；断开后浏览器会自动重连，跨天轮转会自动跟随新的当日文件。" />
       </div>
 
       <div class="toolbar">
@@ -27,7 +27,7 @@
 
       <div ref="logEl" class="stream-box">
         <div v-if="filteredLines.length" class="stream-lines">
-          <div v-for="item in filteredLines" :key="item.id" class="stream-line" :class="classifyLine(item.text)">
+          <div v-for="item in filteredLines" :key="item.id" class="stream-line" :class="item.cls">
             {{ item.text }}
           </div>
         </div>
@@ -48,7 +48,7 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { buildLogDownloadUrl, buildLogStreamUrl, fetchLogIndex } from '../api/logs'
 
-interface LogLine { id: number; text: string }
+interface LogLine { id: number; text: string; cls: string }
 
 const MAX_LINES = 1800
 const MAX_PENDING_LINES = 320
@@ -65,7 +65,7 @@ let source: EventSource | null = null
 let nextId = 0
 let rafId: number | null = null
 let fallbackTimerId: number | null = null
-const pending: string[] = []
+const pending: Array<{ text: string; cls: string }> = []
 
 const currentFileLabel = computed(() => currentFile.value ? `当前文件：${currentFile.value}` : '当前文件：暂无')
 
@@ -116,7 +116,8 @@ async function loadCurrent() {
 }
 
 function enqueueLine(line: string) {
-  pending.push(line)
+  // 级别 class 在入队时算一次并随条目存储，模板渲染只读字段，不再每行每渲染跑正则
+  pending.push({ text: line, cls: classifyLine(line) })
   if (pending.length > MAX_PENDING_LINES) pending.splice(0, pending.length - MAX_PENDING_LINES)
   scheduleFlush()
 }
@@ -145,8 +146,8 @@ function runScheduledFlush() {
 
 function flushPending() {
   if (!pending.length) return
-  for (const text of pending) {
-    lines.value.push({ id: nextId++, text })
+  for (const entry of pending) {
+    lines.value.push({ id: nextId++, text: entry.text, cls: entry.cls })
   }
   if (lines.value.length > MAX_LINES) lines.value.splice(0, lines.value.length - MAX_LINES)
   pending.length = 0
@@ -276,8 +277,9 @@ onBeforeUnmount(() => {
 .lvl-debug { color: var(--qq-log-debug); }
 
 @media (max-width: 640px) {
+  /* 收敛移动端整页轻微超高（约 20px）：流区下限略降，首屏内不截断 */
   .stream-box {
-    min-height: 56vh;
+    min-height: 52vh;
   }
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <div class="llm-about-view page-view-fill">
+  <div class="llm-about-view">
     <UiPageHeader title="资料" subtitle="管理全局与分群的群友身份档案（identities.yaml）和群内黑话词表（vocab.yaml）"><template #actions><span class="hint"><UiIcon name="Info" :size="14" />保存后执行 /llm reload 或在「诊断」页重载 LLM 生效</span><span v-if="basePath" class="hint mono">{{ basePath }}</span><router-link to="/diagnostics" custom v-slot="{ navigate }"><UiButton variant="ghost" icon="Stethoscope" @click="navigate">去重载</UiButton></router-link><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreateGroup">新建群资料</UiButton></template></UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
@@ -75,19 +75,20 @@ loadList()
 </script>
 
 <style scoped>
-.llm-about-view { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; overflow: hidden; }
+.llm-about-view { display: flex; flex-direction: column; }
 .error { color: var(--qq-danger); font-size: var(--qq-text-sm); }
 .hint { display: inline-flex; align-items: center; gap: 6px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
-.split { display: flex; gap: var(--qq-gap-md); flex: 1; min-height: 0; }
+.split { display: flex; gap: var(--qq-gap-md); }
 
-.list-panel { width: 280px; flex-shrink: 0; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
+/* 侧栏吸附在页面滚动容器顶部，长 scope 列表在吸附面板内自滚，编辑列随页面整高铺开 */
+.list-panel { width: 280px; flex-shrink: 0; align-self: flex-start; position: sticky; top: var(--qq-gap-lg); max-height: calc(100vh - var(--qq-gap-lg) * 2); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }
 .list-scroll { overflow-y: auto; flex: 1; }
 .list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
 .list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; color: var(--qq-text); font-size: var(--qq-text-base); font-weight: 500; }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); display: flex; gap: var(--qq-gap-xs); }
 .mono { font-family: var(--qq-font-mono); }
 
-.editor-col { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; gap: var(--qq-gap-sm); }
+.editor-col { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: var(--qq-gap-sm); }
 .hint-panel { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 
 .kind-tabs { align-self: flex-start; max-width: 100%; }
@@ -95,9 +96,18 @@ loadList()
 .editor-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-md); flex-wrap: wrap; }
 .editor-bar-title { display: flex; align-items: center; gap: var(--qq-gap-sm); color: var(--qq-text); font-size: var(--qq-text-base); }
 .editor-bar-actions { display: flex; gap: var(--qq-gap-sm); }
-.editor-wrap { flex: 1; min-height: 0; border-radius: var(--qq-radius-card); overflow: hidden; box-shadow: var(--qq-shadow-card); }
-.yaml-editor { display: block; width: 100%; height: 100%; min-height: 300px; background: var(--qq-surface); color: var(--qq-text); font-family: var(--qq-font-mono); font-size: var(--qq-text-sm); line-height: 1.7; padding: var(--qq-gap-md); resize: none; outline: none; border: none; }
+.editor-wrap { border-radius: var(--qq-radius-card); overflow: hidden; box-shadow: var(--qq-shadow-card); }
+.yaml-editor { display: block; width: 100%; min-height: 55vh; background: var(--qq-surface); color: var(--qq-text); font-family: var(--qq-font-mono); font-size: var(--qq-text-sm); line-height: 1.7; padding: var(--qq-gap-md); resize: none; outline: none; border: none; }
 .yaml-editor:focus { box-shadow: inset 0 0 0 1px var(--qq-primary); }
 
-@media (max-width: 900px) { .split { flex-direction: column; } .list-panel { width: 100%; max-height: 200px; } }
+@media (max-width: 900px) {
+  /* 分栏改为纵向堆叠：列表全宽，编辑器随页面级滚动铺开 */
+  .split { flex-direction: column; }
+  .list-panel { width: 100%; position: static; max-height: none; }
+}
+
+@media (max-width: 767px) {
+  /* basePath 长路径在 actions 折行区内可收缩并任意断行，避免撑出视口 */
+  .hint.mono { min-width: 0; overflow-wrap: anywhere; }
+}
 </style>
