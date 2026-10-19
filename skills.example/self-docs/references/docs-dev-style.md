@@ -88,6 +88,8 @@ God file、God function、God class、mega-controller、service locator、宽 co
 - `<script setup>` 中的业务状态、请求编排或图表配置形成稳定职责时抽为 composable 或子组件。
 - API 响应类型归属 `api/`；组件局部类型置于 `<script setup>` 顶部。
 - 加载、错误和正常页面是不同的展示职责时，用组件或清晰分支保持主视图可读。
+- 新增路由页面在 `config/nav.ts` 登记并使用路由级动态 import；导航结构与路由路径以 `nav.ts` 为唯一真值源。
+- 新组件与 composable 的测试优先使用 vitest 栈（`tests/unit/`）；存量 `tests/*.test.cjs`（node --test）保持运行。
 
 ## 测试与评审
 
