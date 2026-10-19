@@ -161,10 +161,6 @@ def create_app() -> FastAPI:
         llm_configuration.router, prefix="/ops/api", dependencies=auth.protected_dependencies
     )
 
-    from quickquip.app.web.llm_configuration_schema import enrich_openapi
-    original_openapi = app.openapi
-    app.openapi = lambda: enrich_openapi(original_openapi())
-
     _register_root_redirect(app)
 
     if _DIST.exists():

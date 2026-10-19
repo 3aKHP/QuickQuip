@@ -89,6 +89,7 @@ MCP server 的普通字段支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`；认证
 | `WEB_ADMIN_HOST` | 监听地址 | `127.0.0.1` |
 | `WEB_ADMIN_PORT` | 监听端口 | `5104` |
 | `WEB_ADMIN_SESSION_TTL_HOURS` | session 有效期（小时） | `168` |
+| `WEB_ADMIN_SESSION_MAX_AGE_HOURS` | session 绝对寿命（小时），自创建起超过后必须重新登录 | `168` |
 | `WEB_ADMIN_COOKIE_SECURE` | 是否下发 Secure cookie：`auto` / `true` / `false` | `auto` |
 
 ### Docker 构建相关

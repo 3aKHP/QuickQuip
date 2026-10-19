@@ -193,7 +193,7 @@ async def peek_tieba(forum: str = Query(..., max_length=32)):
         # 登录态失效的文案由领域异常自带，可直接回显给管理员
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TiebaServiceError as exc:
-        logger.warning("tieba peek failed for forum %s: %s", forum, exc)
+        logger.exception("tieba peek failed for forum %s", forum)
         raise HTTPException(status_code=502, detail="贴吧访问失败，请查看服务日志") from exc
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")

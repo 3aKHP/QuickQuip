@@ -7,6 +7,11 @@ and takes the rightmost untrusted hop: proxies append the peer they saw, so
 the first non-private entry from the right is the real client even when the
 client itself prepended a spoofed XFF value. A public direct peer means no
 trusted proxy is in the path, and XFF is ignored entirely.
+
+The heuristic assumes every trusted proxy is a private/loopback hop. With a
+public front proxy (CDN, cloud LB) between nginx and the client, the result
+is that proxy's egress address, and rate limiting is shared per egress; see
+docs/admin/web-admin.md for the deployment guidance.
 """
 
 import ipaddress

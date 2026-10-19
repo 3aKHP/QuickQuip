@@ -25,8 +25,9 @@ load_web_env()
 
 # --- 登录速率限制（H2）---
 # 每 IP 最多 5 次失败 / 60 秒；超过后封禁 300 秒。
-# 两个字典有容量上限并周期性清扫过期键，伪造来源无法让它们无界增长；
-# 容量占满时放弃追踪新键（口令校验与既有封禁不受影响）。
+# 两个字典均有容量上限并周期性清扫过期键，伪造来源无法让它们无界增长；
+# 容量占满时逐出最旧的键为新键腾位——限流跟踪不会因满载出现真空，
+# 被逐出的代价只是对应来源的失败计数或封禁提前结束。
 _LOGIN_WINDOW = 60       # 秒
 _LOGIN_MAX_FAILS = 5
 _LOGIN_BAN_SECONDS = 300
@@ -79,11 +80,15 @@ def _record_login_failure(ip: str) -> None:
         fails = _login_fails.get(ip)
         if fails is None:
             if len(_login_fails) >= _LOGIN_TRACK_LIMIT:
-                return
+                # 逐出最旧键而非拒收新来源：拒收会让满载后的新来源完全不受限流
+                # （dict 保持插入序，首键即最旧）
+                _login_fails.pop(next(iter(_login_fails)))
             fails = []
             _login_fails[ip] = fails
         fails.append(now)
         if len(fails) >= _LOGIN_MAX_FAILS:
+            if len(_login_bans) >= _LOGIN_TRACK_LIMIT:
+                _login_bans.pop(next(iter(_login_bans)))
             _login_bans[ip] = now + _LOGIN_BAN_SECONDS
             _login_fails.pop(ip, None)
             logger.warning("web admin login: ip=%s banned for %ds", ip, _LOGIN_BAN_SECONDS)
@@ -219,7 +224,9 @@ def _load_fresh_session(request: Request, response: Response) -> tuple[dict[str,
     try:
         created_at = datetime.fromisoformat(session["created_at"])
     except (KeyError, ValueError):
-        created_at = now
+        # 存储行损坏时按失效处理，不为来源不明的会话重置绝对寿命
+        store.delete_session(session_id)
+        raise HTTPException(status_code=401, detail="session invalid, please login again") from None
     absolute_deadline = created_at + _session_max_age()
     if absolute_deadline <= now:
         store.delete_session(session_id)

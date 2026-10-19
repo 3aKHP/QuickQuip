@@ -28,12 +28,24 @@ class TestLoginRateLimitBounds:
             auth._check_login_rate_limit("1.2.3.4")
         assert getattr(exc_info.value, "status_code", None) == 429
 
-    def test_new_key_not_tracked_when_fails_dict_at_cap(self, monkeypatch):
+    def test_oldest_key_evicted_when_fails_dict_at_cap(self, monkeypatch):
         monkeypatch.setattr(auth, "_LOGIN_TRACK_LIMIT", 2)
         auth._record_login_failure("1.1.1.1")
         auth._record_login_failure("2.2.2.2")
         auth._record_login_failure("3.3.3.3")
-        assert set(auth._login_fails) == {"1.1.1.1", "2.2.2.2"}
+        # 表满时逐出最旧的键：新来源始终被追踪，不存在满载后的限流真空
+        assert set(auth._login_fails) == {"2.2.2.2", "3.3.3.3"}
+
+    def test_oldest_ban_evicted_when_bans_dict_at_cap(self, monkeypatch):
+        monkeypatch.setattr(auth, "_LOGIN_TRACK_LIMIT", 1)
+        for _ in range(auth._LOGIN_MAX_FAILS):
+            auth._record_login_failure("1.1.1.1")
+        assert "1.1.1.1" in auth._login_bans
+        for _ in range(auth._LOGIN_MAX_FAILS):
+            auth._record_login_failure("2.2.2.2")
+        assert "2.2.2.2" in auth._login_bans
+        assert "1.1.1.1" not in auth._login_bans
+        assert len(auth._login_bans) == 1
 
     def test_sweep_removes_stale_fails_and_expired_bans(self, monkeypatch):
         monkeypatch.setattr(auth, "_LOGIN_SWEEP_INTERVAL", 0)
@@ -110,6 +122,20 @@ class TestSessionAbsoluteExpiry:
         # 续期结果被绝对寿命截断在 30 分钟附近，而不是完整滑动 24 小时
         remaining = (expires_at - datetime.now(timezone.utc)).total_seconds()
         assert 0 < remaining < 3600
+
+    def test_corrupted_created_at_is_treated_as_expired(self, client):
+        session_id = _login(client)
+        key = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        with sqlite3.connect(client.sessions.path) as conn:
+            conn.execute(
+                "UPDATE admin_sessions SET created_at = ? WHERE session_id = ?",
+                ("not-a-date", key),
+            )
+
+        response = client.get("/ops/api/auth/me")
+
+        assert response.status_code == 401
+        assert client.sessions.get_session(session_id) is None
 
 
 class TestSessionIdHashing:
