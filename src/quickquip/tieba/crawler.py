@@ -222,7 +222,13 @@ class TiebaCrawler:
             return None
 
         title = clean_thread_title(str(thread.get("title", "")) or fallback_title) or fallback_title
-        thread_url = str(thread.get("thread_share_link", "")).strip() or f"https://tieba.baidu.com/p/{tid}"
+        # 上游 thread_share_link 只接受 http(s) scheme，其余（含 javascript: 形态）丢弃
+        raw_url = str(thread.get("thread_share_link", "")).strip()
+        thread_url = (
+            raw_url
+            if raw_url.lower().startswith(("http://", "https://"))
+            else f"https://tieba.baidu.com/p/{tid}"
+        )
 
         author_name = clean_text(
             str(thread.get("author", {}).get("name_show", ""))

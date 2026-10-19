@@ -1,27 +1,30 @@
-import { ref, nextTick } from 'vue'
-import { openTiebaSyncStream } from '../api/tieba'
+import { ref, nextTick, onScopeDispose } from 'vue'
+import { startTiebaSync, type TiebaSyncStream } from '../api/tieba'
 
 /**
- * 贴吧同步流（SSE）：连接、日志缓冲与自动滚动。
- * 结束语义与 api/tieba.openTiebaSyncStream 一致：收到 [done] 或连接出错
- * 即关闭流并视为完成（不重连），随后回调 onSynced 让调用方刷新数据。
- * 组件卸载时不主动关流（沿用拆分前视图的行为；SSE 生命周期强化留待后续）。
+ * 贴吧同步流（POST + fetch 流式读取）：连接、日志缓冲与自动滚动。
+ * 结束语义与 api/tieba.startTiebaSync 一致：收到 [done]、流结束或连接出错
+ * 即视为完成（不重连），随后回调 onSynced 让调用方刷新数据。
+ * 组件卸载时主动中止流；服务端的抓取任务可能继续执行至完成。
  */
 export function useTiebaSync(onSynced: () => void) {
   const syncing = ref(false)
   const syncLog = ref<string[]>([])
   const logEl = ref<HTMLPreElement | null>(null)
+  let stream: TiebaSyncStream | null = null
 
   function startSync(forum: string | null) {
+    stream?.close()
     syncing.value = true
     syncLog.value = [`▶ 开始同步${forum ? ' ' + forum + '吧' : '全部贴吧'}…`]
-    openTiebaSyncStream(
+    stream = startTiebaSync(
       forum || '',
       (msg) => {
         syncLog.value.push(msg)
         nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight })
       },
       () => {
+        stream = null
         syncing.value = false
         onSynced()
       },
@@ -31,6 +34,12 @@ export function useTiebaSync(onSynced: () => void) {
   function clearLog() {
     syncLog.value = []
   }
+
+  onScopeDispose(() => {
+    stream?.close()
+    stream = null
+    syncing.value = false
+  })
 
   return { syncing, syncLog, logEl, startSync, clearLog }
 }

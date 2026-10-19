@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import urllib.request
 
@@ -12,6 +13,7 @@ _IMAGE_PROXY_HEADERS = {
 }
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _FORUM_RE = re.compile(r"^[^\s/\\:]{1,32}$")
 _TID_RE = re.compile(r"^\d{1,20}$")
@@ -140,7 +142,9 @@ def proxy_image(url: str = Query(..., max_length=512)):
     return Response(content=data, media_type=content_type)
 
 
-@router.get("/tieba/sync")
+# 同步有真实副作用（对外抓取、改写帖子池状态），必须是 POST；
+# 同源校验对 GET/HEAD/OPTIONS 豁免的前提正是 GET 无副作用。
+@router.post("/tieba/sync")
 async def sync_tieba(forum: str | None = Query(default=None, max_length=32)):
     if forum is not None:
         _validate_forum(forum)
@@ -186,9 +190,11 @@ async def peek_tieba(forum: str = Query(..., max_length=32)):
     try:
         thread = await tieba_service.peek_random_thread(forum)
     except TiebaLoginRequiredError as exc:
+        # 登录态失效的文案由领域异常自带，可直接回显给管理员
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except TiebaServiceError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        logger.warning("tieba peek failed for forum %s: %s", forum, exc)
+        raise HTTPException(status_code=502, detail="贴吧访问失败，请查看服务日志") from exc
     if thread is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return thread.to_dict()
