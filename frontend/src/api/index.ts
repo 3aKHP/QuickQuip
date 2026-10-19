@@ -1,4 +1,4 @@
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
+export const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 class ApiError extends Error {
   status: number

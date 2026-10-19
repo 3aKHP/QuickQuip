@@ -84,9 +84,9 @@ async def render_wordcloud(
 
     try:
         freq = await asyncio.to_thread(build_word_frequencies, messages, WORDCLOUD_STOPWORDS)
-    except Exception as e:
+    except Exception:
         logger.exception("wordcloud: build_word_frequencies failed for group %s", group)
-        raise HTTPException(status_code=500, detail=f"词频统计失败：{e}")
+        raise HTTPException(status_code=500, detail="词频统计失败，请查看服务日志")
 
     word_count = sum(freq.values())
     if word_count < WORDCLOUD_MIN_WORDS:
@@ -97,11 +97,12 @@ async def render_wordcloud(
 
     try:
         png_bytes = await asyncio.to_thread(render_wordcloud_bytes, freq)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
+    except FileNotFoundError:
         logger.exception("wordcloud: render failed for group %s", group)
-        raise HTTPException(status_code=500, detail=f"渲染失败：{e}")
+        raise HTTPException(status_code=500, detail="渲染失败：字体文件缺失，请查看服务日志")
+    except Exception:
+        logger.exception("wordcloud: render failed for group %s", group)
+        raise HTTPException(status_code=500, detail="渲染失败，请查看服务日志")
 
     top_words = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
     return {
