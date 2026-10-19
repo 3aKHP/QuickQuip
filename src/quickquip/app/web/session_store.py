@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _hash_session_id(session_id: str) -> str:
+    """落库主键只存会话 id 的 SHA-256；明文 id 仅存在于 cookie 与内存中。"""
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
 
 
 class WebAdminSessionStore:
@@ -78,7 +84,7 @@ class WebAdminSessionStore:
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    session_id,
+                    _hash_session_id(session_id),
                     now,
                     expires_at,
                     now,
@@ -104,7 +110,7 @@ class WebAdminSessionStore:
                 FROM admin_sessions
                 WHERE session_id = ?
                 """,
-                (session_id,),
+                (_hash_session_id(session_id),),
             ).fetchone()
         if row is None:
             return None
@@ -121,7 +127,7 @@ class WebAdminSessionStore:
                 SET expires_at = ?, last_seen_at = ?
                 WHERE session_id = ?
                 """,
-                (expires_at, now, session_id),
+                (expires_at, now, _hash_session_id(session_id)),
             )
             return int(cursor.rowcount) > 0
 
@@ -131,6 +137,6 @@ class WebAdminSessionStore:
         with self._connect() as conn:
             cursor = conn.execute(
                 "DELETE FROM admin_sessions WHERE session_id = ?",
-                (session_id,),
+                (_hash_session_id(session_id),),
             )
             return int(cursor.rowcount) > 0

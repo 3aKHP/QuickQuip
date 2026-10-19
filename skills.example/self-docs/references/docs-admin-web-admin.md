@@ -52,9 +52,9 @@ FastAPI 管理接口独立校验应用会话。内层登录带速率限制：同
 
 - 存储位置：`data/web_admin_sessions.db`
 - 介质：SQLite
-- 内容：`session_id`、创建时间、过期时间、最近访问时间、客户端 IP、User-Agent
+- 内容：`session_id` 的 SHA-256 哈希（明文 id 只存在于浏览器 cookie）、创建时间、过期时间、最近访问时间、客户端 IP、User-Agent
 
-管理员登录后，浏览器通过会话 Cookie 访问后台；口令只用于登录校验。
+管理员登录后，浏览器通过会话 Cookie 访问后台；口令只用于登录校验。会话随活动滑动续期（`WEB_ADMIN_SESSION_TTL_HOURS`），同时受绝对寿命限制（`WEB_ADMIN_SESSION_MAX_AGE_HOURS`）：自创建起超过绝对寿命的会话会被删除并要求重新登录。
 
 ### 3. cookie 属性
 
@@ -86,6 +86,7 @@ Web Admin 使用以下环境变量：
 ```env
 WEB_ADMIN_PASSWORD=change-this-admin-password
 WEB_ADMIN_SESSION_TTL_HOURS=168
+WEB_ADMIN_SESSION_MAX_AGE_HOURS=168
 WEB_ADMIN_COOKIE_SECURE=auto
 ```
 
@@ -93,6 +94,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 - `WEB_ADMIN_PASSWORD`  应用层登录口令，必填
 - `WEB_ADMIN_SESSION_TTL_HOURS`  session 续期窗口，默认 `168`
+- `WEB_ADMIN_SESSION_MAX_AGE_HOURS`  session 绝对寿命，默认 `168`，自创建起超过该时长必须重新登录
 - `WEB_ADMIN_COOKIE_SECURE`  `auto | true | false`
 
 在根目录 `.env` 设置这些变量后，源码安装重新启动 Web 进程，容器安装重新创建 Web 服务。源码安装先在 `frontend/` 构建前端，再从项目根运行 `python web_api.py`；容器安装与变量更新步骤见[部署指南](deployment.md)。`web_api.py` 启动时读取根 `.env`，已有进程环境变量优先。
@@ -106,10 +108,24 @@ WEB_ADMIN_COOKIE_SECURE=auto
 ```nginx
 proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header Host $host;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-For $remote_addr;
 ```
 
 这样 `WEB_ADMIN_COOKIE_SECURE=auto` 才能正确判断当前请求应当下发 `Secure` cookie。
+
+`X-Forwarded-For` 使用 `$remote_addr` 覆盖语义：后端从直连对端为内网地址的请求中取 XFF 最右一个非内网跳作为真实客户端 IP，登录限流按该 IP 计数。`$proxy_add_x_forwarded_for` 会把客户端自带的 XFF 保留在链上，覆盖语义可以让链上只有 nginx 实际看到的对端地址。
+
+外层 `auth_basic` 本身没有速率限制，建议在 nginx 站点中为 `/ops/` 位置补充请求限流，例如：
+
+```nginx
+limit_req_zone $binary_remote_addr zone=quickquip_ops:10m rate=10r/m;
+
+location /ops/ {
+    limit_req zone=quickquip_ops burst=20 nodelay;
+    auth_basic "quickquip";
+    ...
+}
+```
 
 如果你的站点已经明确只通过 HTTPS 暴露，但暂时不方便补这些 header，也可以直接设置：
 
@@ -126,6 +142,7 @@ WEB_ADMIN_COOKIE_SECURE=true
 - 浏览器会话使用 `SameSite=Strict`
 - 写操作会额外检查 `Origin` / `Referer` 是否与当前请求宿主一致
 - FastAPI 独立校验应用登录会话
+- 后端对全部响应统一下发安全响应头（CSP、`X-Frame-Options`、`X-Content-Type-Options`、`Referrer-Policy`）
 
 外层站点访问控制和应用层 session 共同组成后台的纵深防御边界。
 

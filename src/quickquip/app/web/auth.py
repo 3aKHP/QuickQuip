@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import hmac
@@ -17,6 +16,7 @@ from quickquip.app.web.settings import (
     get_web_admin_cookie_secure_mode,
     get_web_admin_password,
     get_web_admin_session_db_path,
+    get_web_admin_session_max_age_hours,
     get_web_admin_session_ttl_hours,
     load_web_env,
 )
@@ -24,37 +24,68 @@ from quickquip.app.web.settings import (
 load_web_env()
 
 # --- 登录速率限制（H2）---
-# 每 IP 最多 5 次失败 / 60 秒；超过后封禁 300 秒
+# 每 IP 最多 5 次失败 / 60 秒；超过后封禁 300 秒。
+# 两个字典有容量上限并周期性清扫过期键，伪造来源无法让它们无界增长；
+# 容量占满时放弃追踪新键（口令校验与既有封禁不受影响）。
 _LOGIN_WINDOW = 60       # 秒
 _LOGIN_MAX_FAILS = 5
 _LOGIN_BAN_SECONDS = 300
+_LOGIN_TRACK_LIMIT = 4096
+_LOGIN_SWEEP_INTERVAL = 60  # 秒
 
 _login_lock = threading.Lock()
-_login_fails: dict[str, list[float]] = defaultdict(list)  # ip -> [timestamp, ...]
-_login_bans: dict[str, float] = {}                         # ip -> ban_until
+_login_fails: dict[str, list[float]] = {}   # ip -> [timestamp, ...]
+_login_bans: dict[str, float] = {}          # ip -> ban_until
+_login_last_sweep = 0.0
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _sweep_login_state(now: float) -> None:
+    """清扫窗口外的失败记录与已过期的封禁。调用方须持有 _login_lock。"""
+    global _login_last_sweep
+    if now - _login_last_sweep < _LOGIN_SWEEP_INTERVAL:
+        return
+    _login_last_sweep = now
+    for ip in [
+        ip
+        for ip, stamps in _login_fails.items()
+        if all(now - t >= _LOGIN_WINDOW for t in stamps)
+    ]:
+        _login_fails.pop(ip, None)
+    for ip in [ip for ip, ban_until in _login_bans.items() if now >= ban_until]:
+        _login_bans.pop(ip, None)
 
 
 def _check_login_rate_limit(ip: str) -> None:
     """H2: 登录速率限制。超限时抛出 429。"""
     now = time.monotonic()
     with _login_lock:
+        _sweep_login_state(now)
         ban_until = _login_bans.get(ip, 0)
         if now < ban_until:
             raise HTTPException(status_code=429, detail="too many failed attempts, try later")
         # 清理窗口外的记录
-        _login_fails[ip] = [t for t in _login_fails[ip] if now - t < _LOGIN_WINDOW]
+        fails = _login_fails.get(ip)
+        if fails is not None:
+            _login_fails[ip] = [t for t in fails if now - t < _LOGIN_WINDOW]
 
 
 def _record_login_failure(ip: str) -> None:
     now = time.monotonic()
     with _login_lock:
-        _login_fails[ip].append(now)
-        if len(_login_fails[ip]) >= _LOGIN_MAX_FAILS:
+        _sweep_login_state(now)
+        fails = _login_fails.get(ip)
+        if fails is None:
+            if len(_login_fails) >= _LOGIN_TRACK_LIMIT:
+                return
+            fails = []
+            _login_fails[ip] = fails
+        fails.append(now)
+        if len(fails) >= _LOGIN_MAX_FAILS:
             _login_bans[ip] = now + _LOGIN_BAN_SECONDS
-            _login_fails[ip] = []
+            _login_fails.pop(ip, None)
             logger.warning("web admin login: ip=%s banned for %ds", ip, _LOGIN_BAN_SECONDS)
 
 
@@ -84,6 +115,10 @@ def _session_ttl() -> timedelta:
     return timedelta(hours=get_web_admin_session_ttl_hours())
 
 
+def _session_max_age() -> timedelta:
+    return timedelta(hours=get_web_admin_session_max_age_hours())
+
+
 def _format_dt(value: datetime) -> str:
     return value.isoformat()
 
@@ -109,8 +144,9 @@ def _cookie_secure(request: Request) -> bool:
     return _request_scheme(request) == "https"
 
 
-def _set_session_cookie(response: Response, request: Request, session_id: str) -> None:
-    max_age = int(_session_ttl().total_seconds())
+def _set_session_cookie(
+    response: Response, request: Request, session_id: str, *, max_age: int
+) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
         value=session_id,
@@ -168,9 +204,8 @@ def _enforce_same_origin(request: Request) -> None:
     raise HTTPException(status_code=403, detail="missing origin header")
 
 
-def require_admin_session(request: Request, response: Response) -> dict[str, str]:
-    _enforce_same_origin(request)
-
+def _load_fresh_session(request: Request, response: Response) -> tuple[dict[str, str], datetime]:
+    """读取会话并滑动续期；续期以 created_at + 绝对寿命为上界，超过即删除并要求重新登录。"""
     session_id = request.cookies.get(COOKIE_NAME, "").strip()
     if not session_id:
         raise HTTPException(status_code=401, detail="admin login required")
@@ -180,10 +215,29 @@ def require_admin_session(request: Request, response: Response) -> dict[str, str
     if session is None:
         raise HTTPException(status_code=401, detail="admin login required")
 
-    expires_at = _utc_now() + _session_ttl()
+    now = _utc_now()
+    try:
+        created_at = datetime.fromisoformat(session["created_at"])
+    except (KeyError, ValueError):
+        created_at = now
+    absolute_deadline = created_at + _session_max_age()
+    if absolute_deadline <= now:
+        store.delete_session(session_id)
+        raise HTTPException(status_code=401, detail="session expired, please login again")
+
+    expires_at = min(now + _session_ttl(), absolute_deadline)
     store.touch_session(session_id, expires_at=_format_dt(expires_at))
-    _set_session_cookie(response, request, session_id)
+    _set_session_cookie(
+        response, request, session_id,
+        max_age=max(1, int((expires_at - now).total_seconds())),
+    )
     request.state.admin_session = session
+    return session, expires_at
+
+
+def require_admin_session(request: Request, response: Response) -> dict[str, str]:
+    _enforce_same_origin(request)
+    session, _ = _load_fresh_session(request, response)
     return session
 
 
@@ -192,17 +246,7 @@ protected_dependencies = [Depends(require_admin_session)]
 
 @router.get("/auth/me")
 def get_auth_state(request: Request, response: Response):
-    session_id = request.cookies.get(COOKIE_NAME, "").strip()
-    if not session_id:
-        raise HTTPException(status_code=401, detail="admin login required")
-
-    session = _session_store().get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=401, detail="admin login required")
-
-    expires_at = _utc_now() + _session_ttl()
-    _session_store().touch_session(session_id, expires_at=_format_dt(expires_at))
-    _set_session_cookie(response, request, session_id)
+    _, expires_at = _load_fresh_session(request, response)
     return {
         "authenticated": True,
         "expires_at": _format_dt(expires_at),
@@ -229,12 +273,17 @@ def login(body: LoginBody, request: Request, response: Response):
     if existing_session_id:
         store.delete_session(existing_session_id)
 
+    now = _utc_now()
+    expires_at = now + min(_session_ttl(), _session_max_age())
     session = store.create_session(
-        expires_at=_format_dt(_utc_now() + _session_ttl()),
+        expires_at=_format_dt(expires_at),
         client_ip=client_ip,
         user_agent=request.headers.get("user-agent", ""),
     )
-    _set_session_cookie(response, request, session["session_id"])
+    _set_session_cookie(
+        response, request, session["session_id"],
+        max_age=max(1, int((expires_at - now).total_seconds())),
+    )
     logger.info("web admin login succeeded: ip=%s", client_ip)
     return {
         "ok": True,
