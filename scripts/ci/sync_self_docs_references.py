@@ -15,6 +15,7 @@ from each path component, root files get a "root-" prefix); name collisions
 are fatal. Generated files carry a "<!-- Generated from <source>; do not edit
 -->" marker, and a keyword-enhanced index.md (per-page title + backtick-quoted
 command/config tokens) is produced as the grep-miss fallback.
+Numbered ADRs carry validated status and replacement metadata in that index.
 
 Fail-closed source checks reject symlinks, non-regular files, NUL bytes,
 invalid UTF-8, oversize resources, unsafe names, and any content embedding the
@@ -33,6 +34,8 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+import yaml
 
 MAX_RESOURCES = 200
 MAX_RESOURCE_BYTES = 256 * 1024
@@ -65,6 +68,9 @@ REFERENCES_DIR_NAME = "references"
 _TITLE_PATTERN = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _BACKTICK_PATTERN = re.compile(r"`([^`\n]{2,48})`")
 _ROUTING_REFERENCE_PATTERN = re.compile(r"references/[A-Za-z0-9._-]+")
+_ADR_DIRECTORY = "docs/dev/adr/"
+_ADR_FILENAME_PATTERN = re.compile(r"[0-9]{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.md")
+_ADR_STATUSES = {"Proposed", "Accepted", "Rejected", "Superseded"}
 
 INDEX_MARKER = (
     "<!-- Generated index; do not edit. "
@@ -81,6 +87,12 @@ class SourceEntry:
     public_path: str
     absolute_path: Path
     resource_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdrMetadata:
+    status: str
+    superseded_by: tuple[str, ...]
 
 
 def generated_marker(public_path: str) -> str:
@@ -190,32 +202,88 @@ def extract_keywords(text: str) -> list[str]:
     return keywords
 
 
+def collect_adr_metadata(
+    entries: list[SourceEntry], source_texts: dict[str, str]
+) -> dict[str, AdrMetadata]:
+    records = {
+        entry.public_path: entry
+        for entry in entries
+        if entry.public_path.startswith(_ADR_DIRECTORY)
+        and _ADR_FILENAME_PATTERN.fullmatch(entry.public_path.removeprefix(_ADR_DIRECTORY))
+    }
+    metadata_by_path: dict[str, AdrMetadata] = {}
+    numbers: set[str] = set()
+    for public_path, entry in records.items():
+        filename = public_path.removeprefix(_ADR_DIRECTORY)
+        number = filename.split("-", 1)[0]
+        if number in numbers:
+            raise SyncError(f"{public_path}: ADR 编号 {number} 重复。")
+        numbers.add(number)
+        lines = source_texts[entry.resource_name].splitlines()
+        if not lines or lines[0] != "---" or "---" not in lines[1:]:
+            raise SyncError(f"{public_path}: ADR 缺少 YAML front matter（status）。")
+        end = lines.index("---", 1)
+        try:
+            metadata = yaml.safe_load("\n".join(lines[1:end]))
+        except yaml.YAMLError as exc:
+            raise SyncError(f"{public_path}: ADR 元信息不是有效 YAML。") from exc
+        if not isinstance(metadata, dict):
+            raise SyncError(f"{public_path}: ADR 元信息必须包含 status。")
+        status = metadata.get("status")
+        if not isinstance(status, str) or status not in _ADR_STATUSES:
+            raise SyncError(
+                f"{public_path}: ADR status 必须为 Proposed/Accepted/Rejected/Superseded。"
+            )
+        replacements = metadata.get("superseded_by", [])
+        if not isinstance(replacements, list) or any(
+            not isinstance(name, str) or not _ADR_FILENAME_PATTERN.fullmatch(name)
+            for name in replacements
+        ):
+            raise SyncError(f"{public_path}: superseded_by 必须为同目录 ADR 文件名列表。")
+        if (status == "Superseded") != bool(replacements):
+            raise SyncError(
+                f"{public_path}: Superseded 状态必须与 superseded_by 替代记录同时设置。"
+            )
+        for name in replacements:
+            if name == filename or _ADR_DIRECTORY + name not in records:
+                raise SyncError(f"{public_path}: superseded_by 引用无效：{name}。")
+        metadata_by_path[public_path] = AdrMetadata(status, tuple(replacements))
+    return metadata_by_path
+
+
 def _categorize(public_path: str) -> str:
     if "/" not in public_path:
         return "root"
     if public_path == "docs/index.md":
         return "index"
+    if public_path == "docs/glossary.md":
+        return "glossary"
     if public_path.startswith("docs/user/"):
         return "user"
     if public_path.startswith("docs/admin/"):
         return "admin"
+    if public_path.startswith(_ADR_DIRECTORY):
+        return "adr"
     if public_path.startswith("docs/dev/"):
         return "dev"
     return "other"
 
 
-_SECTION_ORDER = ("root", "index", "user", "admin", "dev", "other")
+_SECTION_ORDER = ("root", "index", "glossary", "user", "admin", "dev", "adr", "other")
 _SECTION_TITLES = {
     "root": "Root 文档",
     "index": "文档导航",
+    "glossary": "项目术语",
     "user": "用户文档（群友）",
     "admin": "管理文档（部署与运维）",
     "dev": "开发文档",
+    "adr": "架构决策记录（含历史）",
     "other": "其他",
 }
 
 
 def generate_index(entries: list[SourceEntry], source_texts: dict[str, str]) -> str:
+    adr_metadata = collect_adr_metadata(entries, source_texts)
     lines = [
         INDEX_MARKER,
         "",
@@ -228,6 +296,9 @@ def generate_index(entries: list[SourceEntry], source_texts: dict[str, str]) -> 
         "- 群友命令、玩法、梗触发 → 用户文档（`docs-user-*`）。",
         "- 部署、配置、运维、报错排查 → 管理文档（`docs-admin-*`）。",
         "- 架构、模块契约、开发约定 → 开发文档（`docs-dev-*`）。",
+        "- 项目概念与名称 → 术语表（`docs-glossary.md`）；设计理由与取舍 → ADR。",
+        "- ADR 按状态与替代关系阅读；Accepted 表示方案获接受，"
+        "当前实现与操作以相应现行契约为准。",
         "- 项目概览与安装 → `root-readme.md`；版本行为变更 → `root-changelog.md`；"
         "计划功能 → `root-roadmap.md`。",
         "- 每条列出该页标题与关键词；`search_skill_resources` 未命中时按关键词挑页，"
@@ -248,6 +319,15 @@ def generate_index(entries: list[SourceEntry], source_texts: dict[str, str]) -> 
             text = source_texts[entry.resource_name]
             title = extract_title(text, entry.resource_name.removesuffix(".md"))
             line = f"- `{entry.public_path}` → `references/{entry.resource_name}` — {title}"
+            adr = adr_metadata.get(entry.public_path)
+            if adr is not None:
+                line += f" ｜ 状态：{adr.status}"
+                if adr.superseded_by:
+                    links = [
+                        f"[{name}]({resource_name_for(_ADR_DIRECTORY + name)})"
+                        for name in adr.superseded_by
+                    ]
+                    line += " ｜ 替代记录：" + "、".join(links)
             keywords = extract_keywords(text)
             if keywords:
                 line += " ｜ 关键词：" + "、".join(keywords)

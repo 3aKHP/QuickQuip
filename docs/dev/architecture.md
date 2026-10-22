@@ -4,6 +4,8 @@
 
 开发文档的公共/私有边界与职责索引见 [`README.md`](README.md)；源码结构规则见 [`style.md`](style.md)。
 
+项目概念见[术语表](../glossary.md)，重要技术选择的背景和取舍见[架构决策索引](adr/README.md)。其中，[领域分层与装配](adr/0006-layered-architecture-composition.md)、[统一聊天归档](adr/0007-unified-chat-archive.md)和[事务部署](adr/0011-transactional-deployment-recovery.md)记录本页核心结构的依据。
+
 ---
 
 ## 核心概念：分发层与自用层

@@ -4,6 +4,8 @@
 
 本文面向记录存储与身份解析的开发者，说明正文格式、关联索引、编辑和检索契约。记忆、语录和留言以 QQ 作为稳定关联键，展示名称按“本群标准身份 → 本群已知名片 → 消息段名称或记录快照 → QQ 占位”解析。群级身份覆盖同 QQ 的全局条目；同名的不同 QQ 保留为多个候选。私聊记录使用既有 `private:<QQ>` 作用域，仅使用全局身份。
 
+结构化正文、稳定成员关联与读时名称解析的选择依据见 [ADR-0008](adr/0008-record-content-member-identity.md)。
+
 ## 分层与缓存
 
 `common/identity.py` 定义身份表和合并规则，`common/identity_sources.py` 提供独立于 LLM provider 的文件缓存、群级合并缓存与身份快照，`app/identities.py` 装配 Bot 和 Web 的来源。`llm/identity.py` 承载当轮信封的身份编排（参与者归并、被艾特成员档案采集）并保留兼容导入，`LLMService.group_identities()` 保留服务入口。

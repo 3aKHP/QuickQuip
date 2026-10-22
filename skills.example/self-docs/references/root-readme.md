@@ -229,6 +229,8 @@ src/
 | 文档 | 说明 |
 |------|------|
 | [docs/index.md](docs/index.md) | 文档总导航 |
+| [docs/glossary.md](docs/glossary.md) | 项目术语与概念关系 |
+| [docs/dev/adr/README.md](docs/dev/adr/README.md) | 重要架构决策的背景、理由与取舍 |
 | [docs/user/group-commands.md](docs/user/group-commands.md) | 群内指令速查 |
 | [docs/user/private-commands.md](docs/user/private-commands.md) | 私聊指令速查 |
 | [docs/admin/deployment.md](docs/admin/deployment.md) | 云端部署指南 |

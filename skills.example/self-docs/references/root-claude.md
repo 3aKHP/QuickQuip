@@ -18,6 +18,8 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 | 架构设计、分层、消息流 | `docs/dev/` |
 | 开发文档职责与公开内容范围 | [开发文档索引](docs/dev/README.md) |
 | 全仓公开文档写作、维护与审查规范 | [公开文档规范](docs/dev/documenting.md) |
+| 项目术语、概念定义与别名 | [术语表](docs/glossary.md) |
+| 重要技术选择的背景、理由与状态 | [架构决策索引](docs/dev/adr/README.md) |
 | 变更分级、评审与发布流程 | [工作流与发布流程](docs/dev/branching.md) |
 | 部署与运维配置 | `docs/admin/` |
 | 用户向命令与功能说明 | `docs/user/` |
