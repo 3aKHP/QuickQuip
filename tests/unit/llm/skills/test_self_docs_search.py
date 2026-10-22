@@ -64,6 +64,35 @@ def test_error_term_hits_migration_troubleshooting(activated):
     assert "references/docs-admin-migration-napcat-to-llbot.md:" in result
 
 
+@pytest.mark.parametrize(
+    "query, resource, expected",
+    [
+        ("业务会话", "docs-glossary.md", "Session"),
+        ("ADR-0003", "docs-dev-adr-0003-epoch-history-freezing.md", "纪元"),
+        ("superseded_by", "docs-dev-adr-0003-epoch-history-freezing.md", "Accepted"),
+    ],
+)
+def test_concept_and_decision_search_supports_ranged_read(
+    activated, query: str, resource: str, expected: str
+):
+    result = _search(activated, query)
+    match = re.search(rf"references/{re.escape(resource)}:(\d+):", result)
+    assert match, result
+    line = int(match.group(1))
+    skills, state = activated
+    read = read_skill_resource(
+        skill_name="self-docs",
+        path=f"references/{resource}",
+        skills=skills,
+        state=state,
+        scope=_SCOPE,
+        max_bytes=_RESOURCE_MAX_BYTES,
+        start_line=max(1, line - 2),
+        end_line=line + 2,
+    )
+    assert expected in read
+
+
 def test_search_hit_line_number_guides_ranged_read(activated):
     result = _search(activated, "/quote search")
     match = re.search(r"references/docs-user-group-commands\.md:(\d+):", result)

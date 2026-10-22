@@ -51,6 +51,8 @@ Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat`
 
 ## 工具面
 
+清单、激活与按需读取的设计依据见 [ADR-0015](../dev/adr/0015-progressive-skill-loading.md)。
+
 启用后，系统提示包含已安装 Skill 的名称和描述清单，AI 据此决定何时激活；激活后 `SKILL.md` 正文才进入对话。四个工具：
 
 | 工具 | 行为 |
@@ -63,6 +65,8 @@ Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat`
 脚本按扩展名选择解释器：`.py` 优先使用 PATH 中的 `python3`，找不到时使用运行 Bot 的 Python；`.sh` 使用 PATH 中的 `sh`。解释器直接读取脚本，执行位与 shebang 不影响选择。Windows 主机优先使用 `.py`；需要 `.sh` 时须先在 Bot 环境提供 `sh`，缺失会返回错误。
 
 ## 安全模型
+
+资产信任与脚本执行的设计依据见 [ADR-0016](../dev/adr/0016-trusted-skill-execution.md)。
 
 Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令正文会进入对话上下文，脚本会在部署主机上执行。运行时按以下规则读取资源和执行脚本：
 
@@ -78,6 +82,8 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 `run_skill_script` 只用于执行 Skill 自带、服务于该 Skill 用途的脚本。编写 `SKILL.md` 时不要指引 AI 借脚本执行 grep/find 等通用命令来绕过检索工具——`search_skill_resources` 已覆盖 Skill 目录内检索。运维侧审查第三方 Skill 时，同样应拒绝包含此类指引的 Skill。
 
 ## 预置 Skill
+
+可选副本、漂移检测与显式同步的选择依据见 [ADR-0017](../dev/adr/0017-preset-skill-distribution.md)。
 
 `skills.example/` 随附两个官方 Skill：
 

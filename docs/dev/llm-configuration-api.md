@@ -6,6 +6,8 @@
 
 前端设计与操作流程见[前端交付契约](llm-configuration-frontend.md)，其中说明中文字段含义、参数继承控件、保存与应用、冲突处理及设计验收场景。
 
+概念含义见[配置术语](../glossary.md#config-draft)，草稿、快照与运行状态分离的选择依据见[ADR-0001](adr/0001-config-snapshot-publication.md)。
+
 配置交换格式为 JSON，`format_version` 当前为 `2`。顶层字段为 `providers`、`style_profiles`、`pricing`、`routes` 与 `settings`。渠道身份为公开 `id`，模型身份为 wire 名称；引用使用 `{provider_id, model}`，支持包含 `/` 的模型名称。认证信息保存 `.env` 变量名称或 `${VARIABLE}` 引用。导出、字段错误及审计日志保留引用，运行时展开值不进入接口。
 
 format 2 的价格必须指定已存在的 `provider_id`。导入、读取历史快照与编译时，format 1 文档按确定规则升级：`渠道ID/模型` 形式的兜底价格归属到该渠道，已有同键价格时移除；纯模型名兜底价格只在恰好一个尚未定价的渠道配置了该模型时归属到该渠道，其余移除；引用不存在渠道的价格移除。不可变快照保持原字节，读取接口返回升级后的文档。

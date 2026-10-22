@@ -16,6 +16,8 @@
 
 ## 鉴权结构
 
+服务端会话与 Cookie 授权的选择依据见 [ADR-0009](../dev/adr/0009-web-admin-server-sessions.md)。
+
 ```text
 浏览器
   ↓

@@ -33,3 +33,5 @@ global_admins = [
 ## 与 NoneBot 超用户的关系
 
 QuickQuip 的全局管理员唯一配置来源是 `config/admins.toml`。NoneBot 的 `SUPERUSERS` 设置对这些管理命令的授权无效，请在管理员名单中填写 QQ 号。
+
+注册表与统一角色解析的选择依据见 [ADR-0010](../dev/adr/0010-global-admin-registry.md)。

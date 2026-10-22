@@ -100,6 +100,101 @@ def test_write_then_check_roundtrip(tmp_path: Path):
     assert check.returncode == 0, check.stderr
 
 
+def _write_adr(root: Path, filename: str, front_matter: str) -> Path:
+    path = root / "docs" / "dev" / "adr" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\n{front_matter}\n---\n\n# 决策示例\n\n保留 `session_id` 的业务归属。\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.mark.parametrize("status", ["Proposed", "Accepted", "Rejected", "Superseded"])
+def test_adr_status_and_replacement_survive_sync(tmp_path: Path, status: str):
+    _make_repo(tmp_path)
+    _write_adr(tmp_path, "0002-session-identity.md", "status: Accepted")
+    replacement = '["0002-session-identity.md"]' if status == "Superseded" else "[]"
+    adr = _write_adr(
+        tmp_path, "0001-session-identity.md",
+        f"status: {status}\nsuperseded_by: {replacement}",
+    )
+    # A guide and a fenced template are not decisions; their examples need no metadata.
+    (adr.parent / "README.md").write_text("# 决策索引\n", encoding="utf-8")
+    (adr.parent / "template.md").write_text(
+        "# 模板\n\n```yaml\nstatus: 待填写\n```\n", encoding="utf-8"
+    )
+    (tmp_path / "docs" / "glossary.md").write_text(
+        "# 项目术语\n\n业务会话（Session）。\n", encoding="utf-8"
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    references = tmp_path / "skills.example" / "self-docs" / "references"
+    copied = (references / "docs-dev-adr-0001-session-identity.md").read_text(encoding="utf-8")
+    assert copied == (
+        "<!-- Generated from docs/dev/adr/0001-session-identity.md; do not edit -->\n\n"
+        + adr.read_text(encoding="utf-8")
+    )
+    index = (references / "index.md").read_text(encoding="utf-8")
+    entry = next(line for line in index.splitlines() if "adr/0001-" in line)
+    assert f"状态：{status}" in entry
+    if status == "Superseded":
+        assert "[0002-session-identity.md](docs-dev-adr-0002-session-identity.md)" in entry
+    assert "references/docs-glossary.md" in index
+    assert (references / "docs-dev-adr-template.md").is_file()
+    assert _run(tmp_path, "--check").returncode == 0
+
+
+@pytest.mark.parametrize(
+    "front_matter, error_field",
+    [
+        ("superseded_by: []", "status"),
+        ("status: Draft", "status"),
+        ("status: [Accepted]", "status"),
+        ("status: [", "YAML"),
+        ("status: Superseded", "superseded_by"),
+        ('status: Accepted\nsuperseded_by: ["0002-next.md"]', "superseded_by"),
+        ('status: Superseded\nsuperseded_by: "0002-next.md"', "superseded_by"),
+        ('status: Superseded\nsuperseded_by: ["0002-missing.md"]', "superseded_by"),
+        ('status: Superseded\nsuperseded_by: ["../llm-module.md"]', "superseded_by"),
+        ('status: Superseded\nsuperseded_by: ["0001-session.md"]', "superseded_by"),
+    ],
+)
+def test_invalid_adr_keeps_existing_references(
+    tmp_path: Path, front_matter: str, error_field: str
+):
+    _make_repo(tmp_path)
+    assert _run(tmp_path).returncode == 0
+    references = tmp_path / "skills.example" / "self-docs" / "references"
+    before = {path.name: path.read_bytes() for path in references.iterdir()}
+    _write_adr(tmp_path, "0001-session.md", front_matter)
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "0001-session.md" in result.stderr
+    assert error_field in result.stderr
+    assert {path.name: path.read_bytes() for path in references.iterdir()} == before
+
+
+def test_numbered_adr_requires_front_matter(tmp_path: Path):
+    _make_repo(tmp_path)
+    adr = _write_adr(tmp_path, "0001-session.md", "status: Accepted")
+    adr.write_text("# 业务身份\n", encoding="utf-8")
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "0001-session.md" in result.stderr
+    assert "status" in result.stderr
+
+
+def test_duplicate_adr_number_is_rejected(tmp_path: Path):
+    _make_repo(tmp_path)
+    _write_adr(tmp_path, "0001-session.md", "status: Accepted")
+    _write_adr(tmp_path, "0001-window.md", "status: Accepted")
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "0001" in result.stderr
+    assert "重复" in result.stderr
+
+
 def test_missing_extra_source_file_fails(tmp_path: Path):
     _make_repo(tmp_path)
     (tmp_path / ".github" / "pull_request_template.md").unlink()
