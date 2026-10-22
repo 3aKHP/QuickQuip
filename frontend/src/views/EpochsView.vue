@@ -38,13 +38,14 @@
         快照中该会话暂无纪元键——bot 进程重启后首轮请求才会懒初始化锚点。
       </p>
       <p v-if="activeKey?.history_limit != null" class="hint warn-hint">
-        该会话已设置 context_limit = {{ activeKey.history_limit }} 条，纪元退化为行数滚动窗（水位线仅供参考）。
+        该会话已设置 context_limit = {{ activeKey.history_limit }} 条，窗口按完整对话轮对齐；最新单轮超过行数时保留其有界表达（水位线仅供参考）。
       </p>
     </section>
 
     <div class="stat-cards stat-cards--kpi">
-      <UiStatCard label="当前保留条数" :value="kpiRows" unit="条" icon="Layers" tip="锚点之后的窗口行数（bot 进程实时快照）。" />
+      <UiStatCard label="当前保留条数" :value="kpiRows" unit="条" icon="Layers" tip="最近组装的历史窗口行数（bot 进程快照）。" />
       <UiStatCard label="窗口 tokens" :value="kpiTokens" unit="tokens" icon="Database" tip="窗口纪元预算估算（含每行 speaker 标签开销），与请求计量同口径。" />
+      <UiStatCard label="回放估算" :value="fmtTokens(activeKey?.replay_tokens)" :sub="activeKey ? `冻结历史 ${activeKey.frozen_segments} 段` : undefined" unit="tokens" icon="Database" tip="工具历史与原生块的回放估算，单独受回放预算约束。" />
       <UiStatCard label="信封 ≈ 每轮" :value="kpiEnvelope" unit="tok/轮" icon="Mail" tip="【轮次上下文】信封的每轮固定输入成本（时间范围内每轮均值）。" />
       <UiStatCard label="本纪元已存活" :value="kpiAge" icon="Hourglass" :tip="epochAgeTip" />
       <div class="kpi ring-card">
@@ -185,6 +186,11 @@ const REASON_NAMES: Record<string, string> = {
   persona: '换人格',
   init: '初始化',
   clear: '清空上下文',
+  budget: '回放或请求预算',
+  context_limit: '会话行数限制',
+  history: '历史修订',
+  profile: '投影配置变化',
+  retention: '保留清理',
 }
 
 const SNAPSHOT_AUTO_MS = 60_000
