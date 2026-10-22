@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import asdict, replace
+from copy import deepcopy
+import json
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -32,7 +34,8 @@ from quickquip.llm.config import (
     ProviderConfig,
     provider_builtin_search_active,
 )
-from quickquip.llm.history_projection import HistoryProjectionError, project_loops_with_budget
+from quickquip.llm.history_projection import HistoryProjectionError
+from quickquip.llm.epoch_history import select_history
 from quickquip.llm.history_safety import prepare_safe_history
 from quickquip.llm.request_budget import (
     RequestBudgetExceeded,
@@ -66,7 +69,6 @@ from quickquip.llm.prompting import (
 from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.envelope_cache import EnvelopeBreakdownCache
 from quickquip.llm.epoch import (
-    DEFAULT_EPOCH_MAX_ROWS,
     EpochKey,
     EpochManager,
     EpochParams,
@@ -524,8 +526,7 @@ class LLMService(
     def maintain_agent_retention(self, scope_key: str) -> None:
         """D5 保留维护（§8.4）：Loop 关闭后调用，按三上限清理最旧完整 Loop。
 
-        硬上限要求删除活动纪元覆盖的记录时返回的 blocked 锚点只记日志；
-        推进纪元由 epoch 管理按容量 reset 路径处理。
+        数量或字节硬上限要求删除活动记录时，先推进受影响纪元再清理。
         """
         from quickquip.llm.store_parts.agent_records import RetentionPolicy
 
@@ -540,6 +541,15 @@ class LLMService(
             if anchor is not None
         ]
         report = self.store.prune_closed_loops(scope_key, active_anchors, policy)
+        if report.required_anchor_id is not None:
+            self._epochs.advance_scope(
+                scope_key, report.required_anchor_id, store=self.store, reason="retention",
+            )
+            self._skill_activations.clear_scope(scope_key)
+            remaining = self._epochs.oldest_anchor(scope_key)
+            report = self.store.prune_closed_loops(
+                scope_key, [remaining] if remaining is not None else [], policy,
+            )
         if report.deleted_loop_ids:
             logger.info(
                 "agent record pruned scope=%s loops=%d",
@@ -728,12 +738,16 @@ class LLMService(
         turn_recorder: TurnRecorder | None = None,
         request_guard=None,
     ):
+        epoch_key = EpochKey(context.chat_scope, provider.id, request.model)
         return await run_tool_call_loop(
             provider=provider,
             request=request,
             context=context,
             turn_recorder=turn_recorder,
             request_guard=request_guard,
+            on_provider_activity=lambda: self._epochs.note_activity(
+                epoch_key, epoch_id=request.epoch_id,
+            ),
             build_provider_client=build_provider_client,
             tool_registry=self.tool_registry,
             runtime_config=self.config.runtime,
@@ -773,6 +787,7 @@ class LLMService(
         epoch_key: EpochKey,
         epoch_params: EpochParams,
         provider: ProviderConfig | None = None,
+        replay_budget: int | None = None,
     ) -> tuple[
         list[dict[str, object]],
         list[dict[str, str]],
@@ -788,13 +803,19 @@ class LLMService(
             # 锚点推进 = 窗口内历史被丢弃：激活注入的正文可能随之出窗，
             # 清掉登记让模型需要时重新激活（重新注入正文）。
             self._skill_activations.clear_scope(scope_key)
+        self._epochs.activate(epoch_key, store=self.store)
         anchor = self._epochs.current_anchor(epoch_key) or 0
         if settings.history_limit is not None:
             # 显式 /llm context_limit 覆盖：尊重"更小窗口"意图，退化为该会话的
             # 行数兜底滚动窗（每轮按行数重新锚定）。
             backstop = self.store.find_anchor_row_id_by_rows(scope_key, settings.history_limit)
             if backstop is not None:
-                anchor = max(anchor, backstop)
+                backstop = self.store.align_history_anchor(scope_key, backstop)
+                if backstop > anchor:
+                    self._epochs.rebuild(
+                        epoch_key, store=self.store, reason="context_limit", anchor=backstop,
+                    )
+                    anchor = self._epochs.current_anchor(epoch_key) or 0
         # 窗口守卫（Deep-CR L1-3/L3-1）：生效锚点越过登记的激活尾部即激活轮
         # 出窗，清掉登记让重新激活走完整注入——否则去重短路会向模型声称
         # "正文不再重复注入"而正文已不可见。覆盖锚点推进类收缩（行数兜底；
@@ -802,7 +823,7 @@ class LLMService(
         # 不在本守卫内，残留登记的自救是模型自行 read_skill_resource。
         self._skill_activations.drop_outdated(scope_key, anchor)
         history = self.store.list_conversation_messages_since(
-            scope_key, anchor, limit=DEFAULT_EPOCH_MAX_ROWS,
+            scope_key, anchor, limit=None,
         )
         if sensitive.is_loaded and history:
             # Re-scan history with the *current* word list — entries written
@@ -824,6 +845,18 @@ class LLMService(
                     "sensitive_filter[history] scrubbed scope=%s fields=%d",
                     scope_key, history_blocked,
                 )
+        projected_segments: dict[str, list[LLMConversationMessage]] = {}
+        if provider is not None:
+            projected_segments = self._projected_history_segments(
+                scope_key=scope_key,
+                history=history,
+                provider=provider,
+                model=epoch_key.model,
+                sensitive=sensitive,
+                effort=settings.reasoning_effort,
+                replay_budget=replay_budget,
+            )
+
         # 【现场】补丁自取：仅群聊、调用方未显式注入（None=自取，[]=显式空，
         # 后者是测试注入口）、buffer 已绑定。去重 = history 已覆盖的
         # message_id ∪ 当前触发消息（_remember_recent_message 先于本调用，
@@ -860,74 +893,57 @@ class LLMService(
             quoted_user_id=quoted_user_id,
             group_id=str(chat_id),
         )
-        projected_segments: dict[str, list[LLMConversationMessage]] = {}
-        if provider is not None:
-            projected_segments = self._projected_history_segments(
-                scope_key=scope_key,
-                history=history,
-                provider=provider,
-                model=epoch_key.model,
-                sensitive=sensitive,
-                effort=settings.reasoning_effort,
-            )
         return history, participants, recent_messages, projected_segments
 
     def _projected_history_segments(
-        self,
-        *,
-        scope_key: str,
-        history: list[dict[str, object]],
-        provider: ProviderConfig,
-        model: str,
-        sensitive: SensitiveFilter,
-        effort: str = "",
+        self, *, scope_key: str, history: list[dict[str, object]],
+        provider: ProviderConfig, model: str, sensitive: SensitiveFilter,
+        effort: str = "", replay_budget: int | None = None,
     ) -> dict[str, list[LLMConversationMessage]]:
-        """携带工具事实的 Loop 用投影替换行渲染（§8.1/§5.3.2）。
-
-        无工具的 Loop 保持行渲染（1.14 字节稳定前缀契约）。目标 owner 取
-        主端点；配置了 fallback_urls 的 provider 不启用原生路径（§7.3 的
-        逐候选重投影属后置增强，跨端点签名泄露风险先收紧为保守降级）。
-        ``effort`` 为当前请求的生效思考档位（settings 解析后），作未标注
-        密文的回落档。
-        """
-        loop_ids = {
-            str(row["agent_loop_id"])
-            for row in history
-            if row.get("agent_loop_id")
-        }
-        if not loop_ids:
-            return {}
-        tool_loop_ids = self.store.loops_with_tools(scope_key, loop_ids)
-        if not tool_loop_ids:
-            return {}
-        loaded = self.store.load_closed_loops_by_ids(scope_key, tool_loop_ids)
+        """Freeze allowed historical expressions, rebuilding the epoch on changes."""
+        key = EpochKey(scope_key, provider.id, model)
+        params = self.config.resolve_epoch_params(provider)
+        if self._epochs.current_id(key) is None:
+            self._epochs.maybe_advance(key, store=self.store, params=params)
+        loop_ids = {str(row["agent_loop_id"]) for row in history if row.get("agent_loop_id")}
+        loaded = self.store.load_closed_loops_by_ids(scope_key, loop_ids) if loop_ids else []
+        closed_ids = {loop.loop_id for loop in loaded}
+        # An active Loop is never installed as historical input.
+        history[:] = [row for row in history if not row.get("agent_loop_id")
+                      or row["agent_loop_id"] in closed_ids]
         loaded, archive_loop_ids = prepare_safe_history(loaded, sensitive)
-        target = None
-        if not provider.fallback_urls:
-            target = build_response_owner(provider, primary_endpoint_url(provider, model), model)
+        target = None if provider.fallback_urls else build_response_owner(
+            provider, primary_endpoint_url(provider, model), model,
+        )
+        budget = derive_replay_budget(self.config, provider, model)
+        profile = json.dumps((asdict(target) if target else None, provider.protocol,
+                              budget, effort or provider.reasoning_effort), sort_keys=True)
+        previous = self._epochs.frozen_history(key)
         try:
-            result = project_loops_with_budget(
-                loaded, target=target, protocol=provider.protocol,
-                budget_tokens=derive_replay_budget(self.config, provider, model),
-                archive_loop_ids=archive_loop_ids,
-                effort=effort or provider.reasoning_effort,
+            selection = select_history(
+                history, loaded, previous=previous, target=target,
+                protocol=provider.protocol, profile=profile, budget=budget,
+                target_ratio=params.hot_target_tokens / params.cap_tokens,
+                archive_loop_ids=archive_loop_ids, effort=effort or provider.reasoning_effort,
+                rebuild_budget=replay_budget,
             )
         except HistoryProjectionError:
-            # 结构损坏不砖化会话（Deep-CR 兜底）：该请求退回行渲染，损坏
-            # Loop 留待运维检查；工具事实本轮缺席属可观测降级。
-            logger.exception(
-                "history projection failed structurally scope=%s loops=%d；本轮退回行渲染",
-                scope_key, len(loaded),
-            )
+            logger.exception("history projection failed scope=%s; using stored text", scope_key)
+            self._epochs.rebuild(key, store=self.store, reason="history")
             return {}
-        for decision in result.decisions:
-            if decision.reason is not None:
-                logger.info(
-                    "history projection degraded scope=%s loop=%s path=%s reason=%s",
-                    scope_key, decision.loop_id, decision.path, decision.reason,
-                )
-        # Empty segments keep evicted Loops out of the row-rendering fallback.
-        return {loop.loop_id: result.segments.get(loop.loop_id, []) for loop in loaded}
+        if selection.reason:
+            self._epochs.rebuild(
+                key, store=self.store, reason=selection.reason, anchor=selection.anchor,
+            )
+            self._skill_activations.clear_scope(scope_key)
+            logger.info(
+                "epoch history rebuilt scope=%s epoch=%s reason=%s replay_tokens=%d",
+                scope_key, self._epochs.current_id(key), selection.reason,
+                selection.frozen.replay_tokens,
+            )
+        history[:] = selection.frozen.rows
+        self._epochs.install_history(key, selection.frozen)
+        return deepcopy(selection.frozen.segments)
 
     def _persist_turn_and_build_reply(
         self,
@@ -1303,18 +1319,24 @@ class LLMService(
                     epoch_key, store=self.store, params=epoch_params
                 )
                 if degraded is None:
-                    return reply_result(
-                        BUDGET_EXCEEDED_REPLY,
-                        llm_used=False,
-                        provider_id=provider.id,
-                        model=llm_request.model,
-                    )
+                    frozen = self._epochs.frozen_history(epoch_key)
+                    if frozen and frozen.replay_tokens:
+                        assembler.replay_budget = max(1, frozen.replay_tokens // 2)
+                    elif len(assembler.history) > 4:
+                        candidate = int(assembler.history[len(assembler.history) // 2]["id"])
+                        aligned = self.store.align_history_anchor(scope_key, candidate)
+                        if aligned > (self._epochs.current_anchor(epoch_key) or 0):
+                            degraded = self._epochs.rebuild(
+                                epoch_key, store=self.store, reason="budget", anchor=aligned,
+                            )
+                    if degraded is None and assembler.replay_budget is None:
+                        return reply_result(
+                            BUDGET_EXCEEDED_REPLY, llm_used=False,
+                            provider_id=provider.id, model=llm_request.model,
+                        )
                 self._skill_activations.clear_scope(scope_key)
                 budget_retry_used = True
-                logger.info(
-                    "epoch hot degrade for budget scope=%s anchor=%d->%d",
-                    scope_key, degraded.old_anchor_id, degraded.new_anchor_id,
-                )
+                logger.info("epoch budget rebuild scope=%s", scope_key)
                 llm_request = assembler.assemble()
         check_session()
         budget_guard = self._build_request_guard(provider)
@@ -1396,8 +1418,6 @@ class LLMService(
                     else None
                 ),
             ):
-                # 只有请求才续期 provider 侧缓存；失败请求也可能已写缓存，保守续期
-                self._epochs.note_activity(epoch_key)
                 response = await self._run_tool_call_loop(
                     provider=provider,
                     request=llm_request,

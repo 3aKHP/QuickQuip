@@ -79,12 +79,11 @@ class ConversationStoreMixin:
         group_id: int | str,
         anchor_id: int,
         *,
-        limit: int,
+        limit: int | None,
     ) -> list[dict[str, object]]:
         """会话纪元范围读：返回 ``id >= anchor_id`` 的行（ASC 正序，含 id/message_id）。
 
-        与 ``list_recent_conversation_messages``（DESC LIMIT 尾读，auto_memory 专用）
-        是两种读模式：主生成链路用锚点范围读保证纪元内前缀逐字节稳定。
+        调用方确定完整历史边界后传 ``limit=None``，避免截断最后一个 Loop。
         """
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
@@ -98,7 +97,7 @@ class ConversationStoreMixin:
                 "                ORDER BY id ASC\n"
                 "                LIMIT ?\n"
                 "                ",
-                (str(group_id), int(anchor_id), int(limit)),
+                (str(group_id), int(anchor_id), -1 if limit is None else int(limit)),
             ).fetchall()
         return [
             {
@@ -120,6 +119,36 @@ class ConversationStoreMixin:
                 (str(group_id),),
             ).fetchone()
         return int(row[0])
+
+    def align_history_anchor(self, group_id: int | str, anchor_id: int) -> int:
+        """Move toward newer complete Loops; keep the latest Loop as a soft exception."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, agent_loop_id FROM conversation_messages "
+                "WHERE group_id = ? AND id >= ? ORDER BY id LIMIT 1",
+                (str(group_id), anchor_id),
+            ).fetchone()
+            if row is None:
+                return anchor_id
+            if row["agent_loop_id"]:
+                first = conn.execute(
+                    "SELECT MIN(id) FROM conversation_messages "
+                    "WHERE group_id=? AND agent_loop_id=?",
+                    (str(group_id), row["agent_loop_id"]),
+                ).fetchone()[0]
+                if first >= anchor_id:
+                    return int(first)
+                next_row = conn.execute(
+                    "SELECT id FROM conversation_messages WHERE group_id=? AND id>? "
+                    "AND role='user' AND (agent_loop_id IS NULL OR agent_loop_id != ?) "
+                    "ORDER BY id LIMIT 1", (str(group_id), row["id"], row["agent_loop_id"]),
+                ).fetchone()
+                return int(next_row[0]) if next_row else int(first)
+            next_row = conn.execute(
+                "SELECT id FROM conversation_messages WHERE group_id=? AND id>=? "
+                "AND role='user' ORDER BY id LIMIT 1", (str(group_id), anchor_id),
+            ).fetchone()
+            return int(next_row[0]) if next_row else anchor_id
 
     def find_anchor_row_id_by_rows(self, group_id: int | str, keep_rows: int) -> int | None:
         """返回「保留最新 keep_rows 行」的锚点行 id（第 keep_rows 新的行）。
