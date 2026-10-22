@@ -50,7 +50,7 @@
         <UiStatCard label="总成本" :value="`$${fmtCost(data.total_cost)}`" :sub="`${fmtNum(data.total_tokens)} tokens`" icon="Coins" variant="primary" />
         <UiStatCard label="请求 / 成功率" :value="fmtNum(data.request_count)" :sub="`${pct(data.success_rate)} 成功`" icon="Activity" tip="时间范围内的 LLM 请求总数（含错误与取消）；成功率 = 成功请求 ÷ 总请求，仅成功请求计入成本与 token。" />
         <UiStatCard label="平均耗时" :value="fmtDuration(data.average_duration_ms)" sub="所有请求" icon="Clock" />
-        <UiStatCard label="缓存命中率" :value="pct(data.cache_hit_rate)" :sub="`${fmtNum(data.total_cache_read_tokens)} read tokens`" icon="Zap" tip="输入的前缀缓存命中部分按折扣计价；read tokens 为周期内命中缓存读取的输入 token 总量。" />
+        <UiStatCard label="缓存 token 比例" :value="pct(data.cache_hit_rate)" :sub="`请求命中 ${pct(data.cache_hit_request_rate ?? 0)} · 字段覆盖 ${pct(data.cache_reporting_rate ?? 0)}`" icon="Zap" tip="输入的前缀缓存命中部分按折扣计价；请求命中和字段覆盖均以成功调用为分母；缺失字段表示未上报。" />
         <UiStatCard label="未定价 / 错误" :value="`${data.unpriced_calls_count} / ${data.error_count}`" :sub="`${fmtNum(data.unpriced_tokens_total)} tokens`" icon="AlertTriangle" :variant="data.unpriced_calls_count > 0 ? 'warn' : 'default'" :tip="unpricedCardTip" />
       </div>
       <section class="panel avg-panel">

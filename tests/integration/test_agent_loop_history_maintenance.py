@@ -9,6 +9,102 @@ from quickquip.llm.provider import LLMRequest, LLMResponse
 from tests.fixtures.configs import write_llm_config_bundle
 
 
+async def test_frozen_tool_history_rebuilds_after_recall(tmp_path, patch_provider_builder):
+    from quickquip.llm.epoch import EpochKey
+
+    service = _store_service(tmp_path)
+    _seed_loop_with_turn(service.store, text="RECALL_SENTINEL", qq_id="recall-sentinel")
+    requests = []
+
+    class Client:
+        async def complete(self, request):
+            requests.append(request)
+            return LLMResponse(text="next answer", model=request.model)
+
+    patch_provider_builder(lambda provider: Client())
+    async def ask():
+        await service.generate_reply(group_id=1001, user_id="4004", sender_name="B", prompt="next")
+
+    await ask()
+    settings = service.get_chat_settings(1001)
+    key = EpochKey("1001", settings.provider_id, requests[0].model)
+    first_epoch = service._epochs.current_id(key)
+    assert any("RECALL_SENTINEL" in m.content for m in requests[0].messages)
+    assert service.delete_message_from_context("1001", "recall-sentinel")
+    await ask()
+    assert service._epochs.current_id(key) != first_epoch
+    assert not any("RECALL_SENTINEL" in m.content for m in requests[-1].messages)
+
+
+def test_context_limit_keeps_latest_complete_loop_and_retention_advances(tmp_path):
+    from quickquip.llm.epoch import EpochKey
+
+    service = _store_service(tmp_path)
+    _, record = _seed_loop_with_turn(service.store)
+    loop = service.store.load_closed_loops("1001")[0]
+    assert service.store.align_history_anchor("1001", record.message_row_id) == loop.anchor_row_id
+    key = EpochKey("1001", "openai-main", "gpt-main")
+    service._epochs.maybe_advance(
+        key, store=service.store, params=service.config.resolve_epoch_params(),
+    )
+    previous = service._epochs.current_id(key)
+    service.config.runtime.agent_record_max_bytes_per_scope = 1
+    service.maintain_agent_retention("1001")
+    assert not service.store.load_closed_loops("1001")
+    assert service._epochs.current_anchor(key) > record.message_row_id
+    assert service._epochs.current_id(key) != previous
+
+
+def test_oversized_latest_loop_remains_complete_without_repeated_epoch_resets(tmp_path):
+    from quickquip.llm.epoch import EpochKey, EpochParams
+
+    service = _store_service(tmp_path)
+    handle, _ = _seed_loop_with_turn(service.store)
+    with service.store._connect() as conn:
+        conn.executemany(
+            "INSERT INTO conversation_messages "
+            "(group_id, role, content, agent_loop_id, created_at) "
+            "VALUES ('1001', 'assistant', 'continued answer', ?, '2026-01-01')",
+            [(handle.loop_id,)] * 1024,
+        )
+    key = EpochKey("1001", "openai-main", "gpt-main")
+    params = EpochParams(context_tokens=100, hot_target_tokens=100, cap_tokens=200)
+    service._epochs.maybe_advance(key, store=service.store, params=params)
+    epoch_id = service._epochs.current_id(key)
+    anchor = service._epochs.current_anchor(key)
+    rows = service.store.list_conversation_messages_since("1001", anchor, limit=None)
+    assert len(rows) == 1026
+    assert rows[0]["role"] == "user"
+    assert service._epochs.maybe_advance(key, store=service.store, params=params) is None
+    assert service._epochs.force_advance_to_hot(key, store=service.store, params=params) is None
+    assert service._epochs.current_id(key) == epoch_id
+
+
+async def test_long_completion_refreshes_epoch_activity_even_on_error(
+    tmp_path, patch_provider_builder,
+):
+    from quickquip.llm.epoch import EpochKey
+    from quickquip.llm.provider import LLMProviderError
+
+    service = _store_service(tmp_path)
+    now = [1000.0]
+    service._epochs._clock = lambda: now[0]
+    requests = []
+
+    class Client:
+        async def complete(self, request):
+            requests.append(request)
+            now[0] += 600
+            raise LLMProviderError("synthetic failure")
+
+    patch_provider_builder(lambda provider: Client())
+    await service.generate_reply(group_id=1001, user_id="4004", sender_name="B", prompt="next")
+    settings = service.get_chat_settings(1001)
+    key = EpochKey("1001", settings.provider_id, requests[0].model)
+    state = next(s for s in service._epochs.snapshot() if s["model"] == key.model)
+    assert state["last_activity_at"] == 1600
+
+
 def _store_service(tmp_path: Path) -> LLMService:
     paths = write_llm_config_bundle(tmp_path)
     return LLMService(**paths)

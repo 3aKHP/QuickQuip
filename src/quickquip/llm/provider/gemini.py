@@ -430,15 +430,17 @@ class GeminiProviderClient(BaseProviderClient):
                     continue
                 if content.get("role"):
                     candidate["content"]["role"] = content["role"]
-                for raw_part in content.get("parts") or []:
+                for part_index, raw_part in enumerate(content.get("parts") or []):
                     if not isinstance(raw_part, dict):
                         continue
                     parts = candidate["content"]["parts"]
                     if "text" in raw_part:
                         thought = bool(raw_part.get("thought"))
                         if (
-                            parts
+                            part_index == 0
+                            and parts
                             and "text" in parts[-1]
+                            and not parts[-1].get("thoughtSignature")
                             and bool(parts[-1].get("thought")) == thought
                         ):
                             parts[-1]["text"] = (

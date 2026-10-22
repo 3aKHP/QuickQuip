@@ -299,6 +299,10 @@ class LLMUsageStore:
                 f"AS output, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_read_tokens "
                 f"ELSE 0 END), 0) AS cache_read, "
+                f"SUM(CASE WHEN state = 'ok' AND cache_read_tokens > 0 THEN 1 ELSE 0 END) "
+                f"AS cache_hit_calls, "
+                f"SUM(CASE WHEN state = 'ok' AND cache_read_tokens IS NOT NULL "
+                f"THEN 1 ELSE 0 END) AS cache_reported_calls, "
                 f"COALESCE(SUM(CASE WHEN state = 'ok' THEN cache_creation_tokens "
                 f"ELSE 0 END), 0) AS cache_creation, "
                 f"COUNT(*) AS calls, "
@@ -349,6 +353,12 @@ class LLMUsageStore:
                 "cache_hit_rate": round(total["cache_read"] / input_total, 4)
                 if input_total
                 else 0.0,
+                "cache_hit_request_rate": round(
+                    total["cache_hit_calls"] / total["successes"], 4
+                ) if total["successes"] else 0.0,
+                "cache_reporting_rate": round(
+                    total["cache_reported_calls"] / total["successes"], 4
+                ) if total["successes"] else 0.0,
                 # 第四张账本【信封】：Agent Loop 内每行同值，只可按 AVG 解读为
                 # 每轮成本，禁止 SUM；coverage = 有估算行的成功调用占比
                 "avg_envelope_tokens": round(total["avg_envelope"], 1)

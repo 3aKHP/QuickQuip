@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import time
 
-from quickquip.llm.epoch import DEFAULT_EPOCH_MAX_ROWS, estimate_rows_budget
+from quickquip.llm.epoch import estimate_rows_budget
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,11 @@ def _scope_parts(scope_key: str) -> tuple[str, str]:
     return scope_key, "group"
 
 
-def _epoch_params_dict(svc, provider_id: str) -> dict[str, int] | None:
+def _epoch_params_dict(svc, provider_id: str, model: str) -> dict[str, int] | None:
     try:
-        provider = svc.config.providers.get(provider_id)
+        from quickquip.llm.config_document import resolve_model_provider
+
+        provider = resolve_model_provider(svc.config, provider_id, model)
         params = svc.config.resolve_epoch_params(provider)
     except Exception:
         logger.warning(
@@ -61,7 +63,7 @@ def build_epoch_snapshot(svc) -> dict[str, object]:
     for entry in entries:
         item: dict[str, object] = dict(entry)
         item["idle_seconds"] = max(0.0, generated_at - float(entry["last_activity_at"]))
-        item["params"] = _epoch_params_dict(svc, str(entry["provider_id"]))
+        item["params"] = _epoch_params_dict(svc, str(entry["provider_id"]), str(entry["model"]))
 
         scope_key = str(entry["scope_key"])
         if scope_key not in history_limits:
@@ -78,9 +80,15 @@ def build_epoch_snapshot(svc) -> dict[str, object]:
         window_tokens: int | None = None
         if store is not None:
             try:
-                rows = store.list_conversation_messages_since(
-                    scope_key, int(entry["anchor_id"]), limit=DEFAULT_EPOCH_MAX_ROWS
-                )
+                from quickquip.llm.epoch import EpochKey
+
+                frozen = svc._epochs.frozen_history(EpochKey(
+                    scope_key, str(entry["provider_id"]), str(entry["model"]),
+                ))
+                rows = (frozen.rows if frozen is not None
+                        else store.list_conversation_messages_since(
+                            scope_key, int(entry["anchor_id"]), limit=None,
+                        ))
                 window_rows = len(rows)
                 window_tokens = estimate_rows_budget(rows)
             except Exception:

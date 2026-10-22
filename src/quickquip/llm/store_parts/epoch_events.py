@@ -43,7 +43,7 @@ class EpochEventsStoreMixin:
         evicted_rows: int = 0,
         evicted_tokens: int = 0,
     ) -> None:
-        """落一行锚点推进事件（reason ∈ cold/hot/rows/persona/init/clear）。"""
+        """记录纪元重建原因与窗口变化，允许原锚点重建。"""
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
         with self._connect() as conn:

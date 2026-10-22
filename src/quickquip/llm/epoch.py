@@ -1,23 +1,8 @@
-"""会话纪元（session epoch）：history 读取的只追加窗口机制。
+"""会话纪元：固定锚点、冻结历史表达与显式窗口重建。
 
-设计要点（权威设计见私有计划文档 §4，本模块为落地实现）：
-
-- 窗口单位从「行数滚动窗」（``ORDER BY id DESC LIMIT N``，每轮首条位移、
-  前缀缓存结构性失效）改为 ``id >= anchor_id`` 的只追加纪元窗——纪元内
-  前缀逐字节稳定。
-- 锚点状态是**进程内字典**（本模块的 ``EpochManager._states``），不落库：
-  进程重启 = 冷一次缓存，重启后首个请求按「距 head 标准 CTX 跨度」懒初始化。
-- 重置时机只绑两件事：缓存已冷（距上次 LLM 请求 > T 且窗口 > H_cold，免费
-  miss，缩到 L_cold）或触顶（窗口 > cap，付费 miss 一次，缩到 L_hot）。
-- 逐出原子性：锚点只落在 user/assistant 对边界（user 行），``MIN_EPOCH_ROWS``
-  保护防单条超长转发吃空下限。
-- 预算单位是 token（``token_estimate.estimate_tokens``），每行加
-  ``ROW_OVERHEAD_TOKENS`` 的 speaker 标签渲染开销，以 usage 实际值持续校准。
-- ``DEFAULT_EPOCH_MAX_ROWS`` 行数硬兜底：防海量 1-token 行撑爆 provider 侧
-  messages 数组；行数约束一律转化为锚点推进，绝不对范围读直接 LIMIT 截断
-  （ASC + LIMIT 会截掉最新行——错误的一端）。
-- 推进/初始化/清键经 ``epoch_events`` 表旁路落库（低频、失败仅告警）：
-  真值仍是本模块的进程内状态，事件表只服务历史时间轴与排障。
+冷场按空闲时间和可见历史水位缩窗；容量、历史修订和投影配置变化
+统一重建纪元。完整 Loop 是裁剪边界，旧会话行沿用 user/assistant 配对。
+状态驻留进程内存，重启后按 context_tokens 初始化；事件表提供旁路诊断。
 """
 
 from __future__ import annotations
@@ -33,12 +18,13 @@ from quickquip.llm.token_estimate import estimate_tokens
 
 if TYPE_CHECKING:
     from quickquip.llm.store import LLMStore
+    from quickquip.llm.epoch_history import FrozenHistory
 
 logger = logging.getLogger(__name__)
 
-# 纪元读取的行数硬兜底（防海量 1-token 行撑爆 messages 数组）。
+# 纪元行数裁剪目标；完整的最新 Loop 可超过此值。
 DEFAULT_EPOCH_MAX_ROWS = 1024
-# 锚点推进时保留的最少行数（防单条超长转发吃空下限）。
+# 旧式 user/assistant 配对的两轮软下限。
 MIN_EPOCH_ROWS = 4
 # 每行 speaker 标签渲染开销的估算补偿（`_render_scene_to_text` 的标签约 10~15 token）。
 ROW_OVERHEAD_TOKENS = 12
@@ -72,15 +58,16 @@ class EpochKey:
 @dataclass(slots=True)
 class EpochState:
     anchor_id: int
-    # 该键最近一次 LLM 请求派发的时间（不是群内最近消息）——只有请求才续期
-    # provider 侧缓存。
+    # 该键最近一次 provider 调用开始或结束的时间，用于空闲判定。
     last_activity_at: float
     id: str = field(default_factory=lambda: create_epoch_id())
+    history: FrozenHistory | None = None
+    released: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class EpochResetEvent:
-    """一次锚点推进的记录（reason ∈ cold / hot / rows / persona）。"""
+    """一次纪元重建的记录；历史修订可保持原锚点。"""
 
     reason: str
     old_anchor_id: int
@@ -132,35 +119,72 @@ class EpochManager:
         # 行数硬兜底：锚点跨度超 DEFAULT_EPOCH_MAX_ROWS 时先按行数缩，
         # 防海量 1-token 行让 messages 数组爆炸。
         row_anchor = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS)
+        if row_anchor is not None:
+            row_anchor = self._pair_align(store, key.scope_key, row_anchor)
         if row_anchor is not None and row_anchor > state.anchor_id:
             event = self._advance(state, store, key, row_anchor, reason="rows")
 
         rows = store.list_conversation_messages_since(
-            key.scope_key, state.anchor_id, limit=DEFAULT_EPOCH_MAX_ROWS
+            key.scope_key, state.anchor_id, limit=None
         )
         total = estimate_rows_budget(rows)
         idle = self._clock() - state.last_activity_at
 
         if idle > params.cold_idle_seconds and total > params.cold_trigger_tokens:
-            # 冷场：provider 侧缓存已死，重置是免费 miss，缩回冷场水位。
-            candidate = self._pick_anchor_by_tokens(rows, params.cold_target_tokens)
+            # 冷场主动缩回目标水位；实际缓存寿命由渠道决定。
+            candidate = self._pair_align(
+                store, key.scope_key, self._pick_anchor_by_tokens(rows, params.cold_target_tokens),
+            )
             if candidate > state.anchor_id:
                 event = self._advance(
                     state, store, key, candidate, reason="cold", epoch_tokens=total
                 )
         elif total > params.cap_tokens:
             # 触顶：付费 miss 仅这一次，缩到热水位保住长话题。
-            candidate = self._pick_anchor_by_tokens(rows, params.hot_target_tokens)
+            candidate = self._pair_align(
+                store, key.scope_key, self._pick_anchor_by_tokens(rows, params.hot_target_tokens),
+            )
             if candidate > state.anchor_id:
                 event = self._advance(
                     state, store, key, candidate, reason="hot", epoch_tokens=total
                 )
         return event
 
-    def note_activity(self, key: EpochKey) -> None:
-        """请求派发前调用：续期该键的活动时间（失败请求也可能已写缓存，保守续期）。"""
+    def frozen_history(self, key: EpochKey) -> FrozenHistory | None:
         state = self._states.get(key)
-        if state is not None:
+        return state.history if state else None
+
+    def install_history(self, key: EpochKey, history: FrozenHistory) -> None:
+        self._states[key].history = history
+
+    def activate(self, key: EpochKey, *, store: LLMStore) -> None:
+        """Keep large projections only for the current model in each scope."""
+        for other_key, state in self._states.items():
+            if other_key.scope_key == key.scope_key and other_key != key and state.history:
+                state.history = None
+                state.released = True
+        state = self._states.get(key)
+        if state is not None and state.released:
+            self.rebuild(key, store=store, reason="profile")
+            state.released = False
+
+    def rebuild(
+        self, key: EpochKey, *, store: LLMStore, reason: str, anchor: int | None = None,
+    ) -> EpochResetEvent:
+        state = self._states[key]
+        return self._advance(
+            state, store, key, max(state.anchor_id, anchor or state.anchor_id), reason=reason,
+        )
+
+    def advance_scope(self, scope_key: str, anchor: int, *, store: LLMStore, reason: str) -> None:
+        for key, state in list(self._states.items()):
+            if key.scope_key == scope_key and state.anchor_id < anchor:
+                self.rebuild(key, store=store, reason=reason, anchor=anchor)
+
+    def note_activity(self, key: EpochKey, *, epoch_id: str | None = None) -> None:
+        """模型调用派发和结束时更新活动；失效请求不能续期新纪元。"""
+        state = self._states.get(key)
+        if state is not None and (epoch_id is None or state.id == epoch_id):
             state.last_activity_at = self._clock()
 
     def current_anchor(self, key: EpochKey) -> int | None:
@@ -184,6 +208,9 @@ class EpochManager:
                 "model": key.model,
                 "anchor_id": state.anchor_id,
                 "last_activity_at": state.last_activity_at,
+                "epoch_id": state.id,
+                "frozen_segments": state.history.segment_count if state.history else 0,
+                "replay_tokens": state.history.replay_tokens if state.history else 0,
             }
             # list() 先把 items 原子快照（C 层循环不释放 GIL）：epoch_snapshot
             # 经 asyncio.to_thread 在 worker 线程执行，迭代期间事件循环线程
@@ -249,12 +276,14 @@ class EpochManager:
             state = self._lazy_init(key, store, params)
             self._states[key] = state
         rows = store.list_conversation_messages_since(
-            key.scope_key, state.anchor_id, limit=DEFAULT_EPOCH_MAX_ROWS
+            key.scope_key, state.anchor_id, limit=None
         )
         total = estimate_rows_budget(rows)
         event: EpochResetEvent | None = None
         if total > params.cold_trigger_tokens:
-            candidate = self._pick_anchor_by_tokens(rows, params.cold_target_tokens)
+            candidate = self._pair_align(
+                store, key.scope_key, self._pick_anchor_by_tokens(rows, params.cold_target_tokens),
+            )
             if candidate > state.anchor_id:
                 event = self._advance(
                     state, store, key, candidate, reason=reason, epoch_tokens=total
@@ -282,12 +311,16 @@ class EpochManager:
             return None
         event: EpochResetEvent | None = None
         row_anchor = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS)
+        if row_anchor is not None:
+            row_anchor = self._pair_align(store, key.scope_key, row_anchor)
         if row_anchor is not None and row_anchor > state.anchor_id:
             event = self._advance(state, store, key, row_anchor, reason="rows")
         rows = store.list_conversation_messages_since(
-            key.scope_key, state.anchor_id, limit=DEFAULT_EPOCH_MAX_ROWS
+            key.scope_key, state.anchor_id, limit=None
         )
-        candidate = self._pick_anchor_by_tokens(rows, params.hot_target_tokens)
+        candidate = self._pair_align(
+            store, key.scope_key, self._pick_anchor_by_tokens(rows, params.hot_target_tokens),
+        )
         if candidate > state.anchor_id:
             return self._advance(
                 state, store, key, candidate, reason="hot", epoch_tokens=estimate_rows_budget(rows)
@@ -307,8 +340,9 @@ class EpochManager:
         ``ASC + LIMIT`` 会读到最旧一批行，CTX 跨度就量在了错误的一端。
         """
         start = store.find_anchor_row_id_by_rows(key.scope_key, DEFAULT_EPOCH_MAX_ROWS) or 0
+        start = self._pair_align(store, key.scope_key, start)
         rows = store.list_conversation_messages_since(
-            key.scope_key, start, limit=DEFAULT_EPOCH_MAX_ROWS
+            key.scope_key, start, limit=None
         )
         anchor = 0
         if rows:
@@ -330,8 +364,8 @@ class EpochManager:
     ) -> EpochResetEvent:
         old_anchor = state.anchor_id
         state.anchor_id = self._pair_align(store, key.scope_key, candidate_anchor)
-        if state.anchor_id > old_anchor:
-            state.id = create_epoch_id()
+        state.id = create_epoch_id()
+        state.history = None
         logger.info(
             "epoch advance scope=%s provider=%s model=%s reason=%s anchor=%d->%d tokens=%d",
             key.scope_key,
@@ -387,13 +421,12 @@ class EpochManager:
             )
 
     def _pair_align(self, store: LLMStore, scope_key: str, anchor_id: int) -> int:
-        """锚点只落在 user/assistant 对边界：对齐到 >= anchor 的首条 user 行。"""
-        next_user = store.find_next_user_row_id(scope_key, anchor_id)
-        return next_user if next_user is not None else anchor_id
+        """对齐完整 Loop 或旧式 user/assistant 配对边界。"""
+        return store.align_history_anchor(scope_key, anchor_id)
 
     @staticmethod
     def _pick_anchor_by_tokens(rows: list[dict[str, object]], target_tokens: int) -> int:
-        """从 head 向旧累加预算到 >= target，返回锚点候选行 id（含 MIN_EPOCH_ROWS 保护）。"""
+        """从最新消息向旧累加到目标预算，至少选择两个完整历史单元。"""
         if not rows:
             return 0
         total = 0
@@ -403,8 +436,12 @@ class EpochManager:
             total += row_budget(rows[idx])
             if total >= target_tokens:
                 break
-        # MIN_EPOCH_ROWS 保护：单条超长行（如大转发）不得把窗口吃空到不足 4 行。
-        idx = min(idx, max(0, len(rows) - MIN_EPOCH_ROWS))
+        from quickquip.llm.epoch_history import history_units
+
+        units = history_units(rows)
+        soft_floor = int(units[max(0, len(units) - 2)][0]["id"])
+        floor_index = next(i for i, row in enumerate(rows) if int(row["id"]) == soft_floor)
+        idx = min(idx, floor_index)
         return int(rows[idx]["id"])
 
 
