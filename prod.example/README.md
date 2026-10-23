@@ -35,23 +35,37 @@ In a local terminal, run `ssh quickquip-prod` to verify the target and complete 
 
 First application setup, including a standalone search-service route and the required environment values, is in the [deployment guide](../docs/admin/deployment.md#3-准备生产运维目录和环境变量). Start Bot and Web before using the [first LLM setup steps](../docs/admin/llm-configuration.md#首次启用-llm).
 
+## Configuration Synchronization
+
+First upgrade the server to synchronization-capable code with `bash prod/deploy-v4.sh --config-sync off`. This preserves server configuration and credentials. A new server additionally needs `--env local`. Then choose the initial source explicitly:
+
+```bash
+bash prod/config-v1.sh sync init --from remote
+bash prod/config-v1.sh sync --plan
+bash prod/config-v1.sh sync --mode auto
+```
+
+Normal deployment defaults to `--config-sync auto` once the baseline exists. `push` and `pull` select a direction; `off` retains server configuration without advancing the baseline. `--plan` reads the remote configuration without building or modifying files. Root `.env` is retained by default; pass `--env local` to update it. PowerShell uses `-ConfigSync`, `-Plan`, and `-EnvSource`.
+
+Configuration drivers require the installed local Python environment. File synchronization can recreate Bot and Web containers. Database-only updates use Bot-owned application and target-revision acknowledgement. Both endpoints retain private snapshots and operation journals. See [configuration synchronization](../docs/admin/config-sync.md) for conflicts, unpublished drafts, recovery, PowerShell examples, and the exact asset scope.
+
 ## Commands
 
 Both local drivers share `remote-deploy-v4.sh` and `deploy-state.py`.
 
 | Action | Bash | PowerShell |
 |---|---|---|
-| Deploy | `bash prod/deploy-v4.sh` | `prod/deploy-v4.ps1` |
+| Deploy after initializing configuration sync | `bash prod/deploy-v4.sh` | `prod/deploy-v4.ps1` |
 | Local preview | `bash prod/deploy-v4.sh --dry-run` | `prod/deploy-v4.ps1 -DryRun` |
 | Status | `bash prod/deploy-v4.sh --status` | `prod/deploy-v4.ps1 -Status` |
 | Previous release | `bash prod/deploy-v4.sh --rollback` | `prod/deploy-v4.ps1 -Rollback` |
 | Explicit rollback | `bash prod/deploy-v4.sh --rollback <id>` | `prod/deploy-v4.ps1 -Rollback -ReleaseId <id>` |
-| Flat-layout migration and deploy | `bash prod/deploy-v4.sh --migrate` | `prod/deploy-v4.ps1 -Migrate` |
-| First deployment awaiting QQ login | `bash prod/deploy-v4.sh --skip-health` | `prod/deploy-v4.ps1 -SkipHealth` |
+| Flat-layout migration and deploy | `bash prod/deploy-v4.sh --migrate --config-sync off` | `prod/deploy-v4.ps1 -Migrate -ConfigSync off` |
+| First deployment awaiting QQ login | `bash prod/deploy-v4.sh --config-sync off --env local --skip-health` | `prod/deploy-v4.ps1 -ConfigSync off -EnvSource local -SkipHealth` |
 
 Shared parameters: `--host-alias`, `--remote-dir` (default `/opt/QuickQuip`), `--keep-releases` (2..100, default 4); the PowerShell driver takes the matching single-dash forms (`-HostAlias`, `-RemoteDir`, `-KeepReleases`). Remote paths use letters, digits, dot, slash, underscore or hyphen. Run `bash prod/deploy-v4.sh --help` for the full interface.
 
-`--dry-run` builds the frontend locally and previews the upload; PowerShell creates and removes a temporary archive. It makes no remote connection. `--local-check` (PowerShell: `-LocalCheck`) is a compatibility alias. Combining preview with migration, rollback or status is rejected. `--skip-health` applies only to deployment/migration and explicitly marks the result unverified; manual rollback always requires health verification.
+`--dry-run` builds the frontend locally and previews the upload; PowerShell creates and removes a temporary archive. It makes no remote connection. `--local-check` (PowerShell: `-LocalCheck`) is a compatibility alias. Combining preview with migration, rollback or status is rejected. `--skip-health` requires `--config-sync off` and applies only to deployment/migration and explicitly marks the result unverified; manual rollback always requires health verification.
 
 Every release carries a version identity built from the deployed `pyproject.toml` version plus a timestamp captured on the server when the image build finishes (for example `1.15.3-dev.2+build.20260909.065235`); it is echoed in the `image built` and `release complete` transaction log lines. If you maintain your own private ops-trail tooling, `remote-deploy-v4.sh` marks the spot where `$VersionId` is available for you to record it.
 
@@ -81,13 +95,13 @@ The catalog belongs to the deployment user. Web-installed files can be root-owne
   .deploy/                   private staging, operation logs and exit status
 ```
 
-`deploy-manifest.txt` lists application paths. Listed directories are recursive: review their contents before deployment. Root `.env`, maintenance scripts and optional `prod/sendkey.env`, font and `data/tieba/storage_state.json` are uploaded separately to private staging. LLBot login directories are never uploaded. For a test server, prepare an isolated checkout without real credentials or Tieba session files.
+`deploy-manifest.txt` lists application paths. Listed directories are recursive: review their contents before deployment. The selected root `.env`, maintenance scripts and optional `prod/sendkey.env`, font and `data/tieba/storage_state.json` are uploaded separately to private staging. LLBot login directories are never uploaded. For a test server, prepare an isolated checkout without real credentials or Tieba session files.
 
 Each operation has a UTC timestamp plus random suffix. Uploads enter an exclusive private directory; live files are modified only under the server deployment lock. The candidate compose is validated against the staged environment and its image built before shared files are applied. Unchanged application files use rsync hardlinks; release roots and transaction directories restrict access to the deployment user. Web Admin configuration writes use atomic file replacement, preserving older hardlinked content.
 
 Before activation, the server snapshots shared files that it will replace, including existing LLBot WebSocket configuration. It applies the candidate environment, switches `current`, and recreates application containers once. The health gate checks all three services, the bot connection log, Web Admin HTTP, configuration schema and the bot heartbeat/load acknowledgement inside its container. The bot core must be ready with an available conversation store. Remote models and MCP servers can remain unavailable independently. SSH disconnects do not stop the detached transaction; drivers reconnect to its log.
 
-Successful operations remove private staging and rollback copies, retaining `.deploy/<id>.log` and `.exit`. Interrupted uploads can leave staging directories; inspect operation status before manually removing these. Failed recovery retains its private backup and returns exit code 2. The requested action still returns nonzero when automatic recovery succeeds.
+Successful operations remove private staging and rollback copies, retaining `.deploy/<id>.log`, `.exit`, and the synchronization deployment `.transaction.json` recovery record. Interrupted uploads can leave staging directories; inspect operation status before manually removing these. Failed recovery retains its private backup and returns exit code 2. The requested action still returns nonzero when automatic recovery succeeds.
 
 ## Migration and Recovery
 
@@ -97,7 +111,7 @@ Automatic recovery restores pre-operation shared files, links and containers, th
 
 Filesystem rollback restores deployment files and containers. Database migrations and external effects require their own recovery steps; check upgrade notes and prepare the necessary data backups before deployment.
 
-The LLM configuration database is shared in `data/` across releases. Normal uploads exclude local database files and legacy LLM TOML. First migration uses server-side configuration after a successful candidate image build. Generated persona assets and local client Profile overrides persist through subsequent deployments; other release-local configuration follows the candidate files.
+The LLM configuration database is shared in `data/` across releases. Normal uploads exclude local database files and legacy LLM TOML. First migration uses server-side configuration after a successful candidate image build. Managed configuration assets follow the synchronization result. With synchronization off, the candidate retains server configuration after pausing its writers.
 
 Reading root-owned migration assets uses noninteractive sudo when required, and copied assets belong to the deployment user. Copy or discovery failure stops activation; existing candidate assets retain priority.
 

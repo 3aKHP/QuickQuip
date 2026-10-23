@@ -32,6 +32,8 @@ format 2 的价格必须指定已存在的 `provider_id`。导入、读取历史
 | `PUT /settings/{name}` | `{expected_draft_revision, value}`，替换单一设置域 |
 | `POST /batch` | `{expected_draft_revision, changes:[{section,value}]}`，一次事务完整替换多个配置域 |
 
+配置同步维护期间，草稿、应用和引用变更返回 `409 configuration_busy`；等待同步确认或恢复后重试。
+
 所有草稿有效修改增加修订号。相同内容保存保持原修订号。版本冲突返回 `409 revision_conflict`；调用方重新取得草稿并处理冲突后提交。渠道或模型参数的 `null` 表示继承，`false`、合法零值、空字符串及空对象表示显式值。`extra_body` 覆盖整个对象。
 
 `/llm-effort` 兼容入口读取草稿修订；`PUT /llm-effort/{id}` 需要 `{expected_draft_revision, effort}`，保存后返回 `effect: saved_draft`。旧 `/config/llm` 入口返回 `410 llm_configuration_migrated`。

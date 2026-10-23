@@ -258,7 +258,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 执行前，`prod/` 已从 `prod.example/` 复制，根 `.env` 和所选功能配置已填写，`quickquip-prod` 已替换为自己的 SSH 连接名称。首次准备见第 3 步；日常命令位于[自动部署操作](#自动部署操作)。
 
-已有平铺部署首次使用 `--migrate`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `--skip-health`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`；完整接口见 `bash prod/deploy-v4.sh --help`。
+已有平铺部署首次使用 `--migrate --config-sync off`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `--config-sync off --env local --skip-health`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`；完整接口见 `bash prod/deploy-v4.sh --help`。
 
 每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
@@ -269,6 +269,8 @@ WEB_ADMIN_COOKIE_SECURE=auto
 回退至 1.16.1 使用首次迁移前的 TOML 及人格／多模态资产备份；升级后新增的配置不会反向转换成 TOML。新库保留供再次升级，回退应同时核对运行代码与迁移前配置资产。升级与回退前还需备份会话库和追踪库；旧代码运行后再次升级的 Session 身份维护步骤见[回退旧版本后再次升级](llm-configuration.md#回退旧版本后再次升级)。
 
 运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。手动平铺安装按上方 1–7 步进行，版本目录部署由脚本管理。
+
+部署默认保留服务器根 `.env`，需要更新凭据时使用 `--env local`（PowerShell：`-EnvSource local`）。新版配置同步需要先完成一次保留线上配置的能力升级并建立基线，操作见[配置同步](config-sync.md)。
 
 ### 自动部署操作
 
@@ -283,7 +285,7 @@ bash prod/deploy-v4.sh --host-alias quickquip-prod
 bash prod/deploy-v4.sh --status --host-alias quickquip-prod
 ```
 
-新服务器首次需要扫码时，首次部署使用 `--skip-health`，之后按第 5、7 步登录，并按[生产模板的首次健康检查](../../prod.example/README.md#commands)核验。版本目录服务器执行 Compose 命令前，按[手动访问说明](../../prod.example/README.md#manual-compose-access)设置路径与版本变量；上面的手动安装命令使用平铺目录。
+新服务器首次需要扫码时，首次部署使用 `--config-sync off --env local --skip-health`，之后按第 5、7 步登录，并按[生产模板的首次健康检查](../../prod.example/README.md#commands)核验。版本目录服务器执行 Compose 命令前，按[手动访问说明](../../prod.example/README.md#manual-compose-access)设置路径与版本变量；上面的手动安装命令使用平铺目录。
 
 回滚由需要恢复上一版本的部署单独执行：
 

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
+from quickquip.common.config_writes import ConfigurationBusy
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
 from quickquip.app.web.routes import (
@@ -86,6 +87,12 @@ def create_app() -> FastAPI:
     # 管理 API 的 OpenAPI/文档端点不对网络暴露；llm-configuration 的公开机器契约
     # 由 scripts/ci/export_llm_configuration_openapi.py 在进程内导出维护。
     app = FastAPI(title="QuickQuip Admin", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.exception_handler(ConfigurationBusy)
+    async def configuration_busy_handler(request, error):
+        return JSONResponse(status_code=409, content={
+            "code": "configuration_busy", "message": str(error),
+        })
 
     _register_security_headers(app)
 

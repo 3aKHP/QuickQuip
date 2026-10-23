@@ -40,14 +40,16 @@ def atomic_write(
 ) -> None:
     missing_parents = []
     parent = path.parent
-    while new_owner is not None and not parent.exists():
+    while not parent.exists():
         missing_parents.append(parent)
         parent = parent.parent
     path.parent.mkdir(parents=True, exist_ok=True)
     for parent in reversed(missing_parents):
-        os.chmod(parent, 0o755)
-        if os.geteuid() == 0:
+        if new_owner is not None:
+            os.chmod(parent, 0o755)
+        if new_owner is not None and os.geteuid() == 0:
             os.chown(parent, *new_owner)
+        _sync_directory(parent.parent)
     owner = path.stat() if path.exists() else None
     fd, name = tempfile.mkstemp(prefix=".deploy-", dir=path.parent)
     try:
@@ -61,8 +63,32 @@ def atomic_write(
         elif new_owner is not None and os.geteuid() == 0:
             os.chown(name, *new_owner)
         os.replace(name, path)
+        _sync_directory(path.parent)
     finally:
         Path(name).unlink(missing_ok=True)
+
+
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def durable_tree(root: Path) -> None:
+    """Persist uploaded runners and candidate bind mounts before recording activation."""
+    validate_tree(root)
+    directories = [root]
+    for path in root.rglob("*"):
+        if path.is_dir():
+            directories.append(path)
+        else:
+            with path.open("rb") as stream:
+                os.fsync(stream.fileno())
+    for path in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+        _sync_directory(path)
+    _sync_directory(root.parent)
 
 
 def checked_path(root: Path, relative: str) -> Path:
@@ -93,6 +119,7 @@ def validate_tree(root: Path) -> None:
 
 def snapshot_shared(root: Path, incoming: Path, backup: Path) -> None:
     backup.mkdir(mode=0o700)
+    _sync_directory(backup.parent)
     names = [name for name in SHARED_FILES if (incoming / "shared" / name).is_file()]
     llbot = root / "prod/llbot-data"
     names += [str(path.relative_to(root)) for path in (
@@ -238,6 +265,36 @@ def skill_catalog_layout(root: Path) -> None:
 
 def main() -> None:
     action, *args = sys.argv[1:]
+    if action == "transaction":
+        root, release, *values = args
+        names = ("previous", "previous_previous", "original", "changed", "activated",
+                 "stopped", "sync_operation", "shared_sudo")
+        if len(values) != len(names):
+            raise ValueError("invalid deployment journal")
+        payload = dict(zip(names, values))
+        for name in names[:3]:
+            if payload[name] and not re.fullmatch(
+                r"[0-9]{8}-[0-9]{6}(?:-[a-f0-9]{12})?(?:-baseline)?", payload[name]
+            ):
+                raise ValueError("invalid journal release")
+        if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-f0-9]{12}", release):
+            raise ValueError("invalid journal id")
+        if any(payload[name] not in ("0", "1") for name in (*names[3:6], "shared_sudo")):
+            raise ValueError("invalid transaction state")
+        if not re.fullmatch(r"[a-f0-9]{32}", payload["sync_operation"]):
+            raise ValueError("invalid synchronization id")
+        atomic_write(Path(root) / ".deploy" / f"{release}.transaction.json",
+                     json.dumps(payload).encode(), 0o600)
+        return
+    if action == "read-transaction":
+        root, release = args
+        if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-f0-9]{12}", release):
+            raise ValueError("invalid journal id")
+        payload = json.loads((Path(root) / ".deploy" / f"{release}.transaction.json").read_text())
+        for name in ("previous", "previous_previous", "original", "changed", "activated",
+                     "stopped", "sync_operation", "shared_sudo"):
+            print(payload[name] or "_")
+        return
     paths = [Path(arg).absolute() for arg in args]
     actions = {
         "extract": extract,
@@ -247,6 +304,7 @@ def main() -> None:
         "restore": restore_shared,
         "baseline": capture_baseline,
         "skill-layout": skill_catalog_layout,
+        "durable": durable_tree,
     }
     actions[action](*paths)
 

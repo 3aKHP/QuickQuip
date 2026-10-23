@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from functools import wraps
 import json
 import os
 import sqlite3
@@ -62,6 +63,19 @@ def _version(conn, revision):
         "saved_at": None,
         "note": "",
     }
+
+
+def configuration_mutation(method):
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        from quickquip.common.config_writes import ConfigurationBusy, configuration_write
+
+        try:
+            with configuration_write(self.path.parent):
+                return method(self, *args, **kwargs)
+        except ConfigurationBusy as exc:
+            raise ConfigError("configuration_busy", str(exc)) from exc
+    return guarded
 
 
 class ConfigService:
@@ -133,6 +147,7 @@ class ConfigService:
             )
         return meta
 
+    @configuration_mutation
     def migrate_legacy(self, path, expected_revision):
         from quickquip.llm.config_migration import migrate_legacy
 
@@ -144,6 +159,7 @@ class ConfigService:
             document, report = migrate_legacy(path)
             return {**self.replace(document, expected_revision), "migration": report}
 
+    @configuration_mutation
     def replace(self, document, expected_revision, *, note=None):
         """Save a draft revision. Without an explicit note an unpublished draft keeps its
         note across saves; the first save after publishing starts unlabeled."""
@@ -206,6 +222,7 @@ class ConfigService:
 
         return self.update(expected_revision, transform)
 
+    @configuration_mutation
     def _enqueue(self, kind, source, request_id, payload=None, expected_revision=None, note=None):
         note = _clean_note(note)
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
@@ -364,6 +381,7 @@ class ConfigService:
                 document, row["provider_id"], row["model"], f"group_settings.{row['group_id']}"
             )
 
+    @configuration_mutation
     def update_group_override(self, store, group_id, **payload):
         if "provider_id" not in payload and "model" not in payload:
             return store.update_group_settings(group_id, **payload)
@@ -483,6 +501,7 @@ class ConfigService:
             meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
             return _version(conn, self._revision(conn, meta, source))
 
+    @configuration_mutation
     def set_note(self, source, note):
         note = _clean_note(note)
         if note is None:
@@ -562,6 +581,7 @@ class ConfigService:
         sync_directory(destination.parent)
         return destination
 
+    @configuration_mutation
     def restore_database(self, source, *, stopped=False):
         if not stopped:
             raise ConfigError("services_running", "Stop bot and Web before database restore")

@@ -8,10 +8,15 @@ Id="${2:?operation id required}"
 Keep="${3:?retention count required}"
 Action="${4:?action required}"
 Target="${5:-}"
+ConfigSync=${CONFIG_SYNC:-off}
+SyncOperation=${SYNC_OPERATION:-}
+[[ "$ConfigSync" =~ ^(auto|push|pull|off)$ ]] || exit 2
+[[ -z "$SyncOperation" || "$SyncOperation" =~ ^[a-f0-9]{32}$ ]] || exit 2
+[[ "$Action" = status || "$Action" = rollback || "$ConfigSync" = off || -n "$SyncOperation" ]] || exit 2
 [[ "$Root" =~ ^/[a-zA-Z0-9_./-]+$ && "$Root" != / && "$Root" != *'/../'* ]] || exit 2
 [[ "$Id" =~ ^[0-9]{8}-[0-9]{6}-[a-f0-9]{12}$ ]] || exit 2
 [[ "$Keep" =~ ^[0-9]+$ && "$Keep" -ge 2 && "$Keep" -le 100 ]] || exit 2
-[[ "$Action" =~ ^(deploy|migrate|rollback|status)$ ]] || exit 2
+[[ "$Action" =~ ^(deploy|migrate|rollback|status|recover)$ ]] || exit 2
 [[ -z "$Target" || "$Target" =~ ^[0-9]{8}-[0-9]{6}(-[a-f0-9]{12})?(-baseline)?$ ]] || exit 2
 
 Root="$(realpath -m "$Root")"
@@ -20,18 +25,6 @@ Incoming="$Root/.deploy/incoming/$Id"
 StateTool="$Incoming/deploy-state.py"
 Log="$Root/.deploy/$Id.log"
 ExitFile="$Root/.deploy/$Id.exit"
-if [ "${DETACH:-0}" = 1 ]; then
-    exec 8>"$Incoming/start.lock"
-    flock -n 8 || exit 1
-    [ ! -e "$Incoming/started" ] || exit 0
-    touch "$Incoming/started"
-    : > "$Log"
-    DETACH=0 EXIT_FILE="$ExitFile" setsid nohup bash -c \
-        'bash "$0" "$@"; code=$?; printf "%s\n" "$code" > "$EXIT_FILE"' \
-        "$0" "$@" >>"$Log" 2>&1 </dev/null 8>&- &
-    exit 0
-fi
-
 step() { printf '[deploy] %s\n' "$*"; }
 fail() { step "FAILED: $*" >&2; exit 1; }
 Python=""
@@ -42,6 +35,28 @@ for candidate in python3.13 python3.12 python3.11 python3; do
     fi
 done
 [ -n "$Python" ] || fail "Python >= 3.11.8 required on server"
+if [ "${DETACH:-0}" = 1 ]; then
+    exec 8>"$Incoming/start.lock"
+    flock -n 8 || exit 1
+    [ ! -e "$Incoming/started" ] || exit 0
+    touch "$Incoming/started"
+    "$Python" "$StateTool" durable "$Incoming" || fail "upload persistence failed"
+    : > "$Log"
+    ReceiptCode='import os,sys,tempfile
+path=sys.argv[1]; parent=os.path.dirname(path)
+fd, temporary=tempfile.mkstemp(dir=parent)
+with os.fdopen(fd,"w") as stream:
+    stream.write(sys.argv[2]+"\n"); stream.flush(); os.fsync(stream.fileno())
+os.replace(temporary,path)
+fd=os.open(parent,os.O_RDONLY|os.O_DIRECTORY)
+try: os.fsync(fd)
+finally: os.close(fd)'
+    DETACH=0 EXIT_FILE="$ExitFile" DEPLOY_PYTHON="$Python" DEPLOY_RECEIPT_CODE="$ReceiptCode" setsid nohup bash -c \
+        'bash "$0" "$@"; code=$?; "$DEPLOY_PYTHON" -c "$DEPLOY_RECEIPT_CODE" "$EXIT_FILE" "$code"' \
+        "$0" "$@" >>"$Log" 2>&1 </dev/null 8>&- &
+    exit 0
+fi
+
 export QUICKQUIP_ROOT="$Root"
 export QUICKQUIP_ENV_FILE="$Root/.env"
 Release="$Root/releases/$Id"
@@ -53,6 +68,14 @@ Changed=0
 Activated=0
 Succeeded=0
 SharedSudo=0
+ServicesStopped=0
+RecoveryReady=0
+
+record_transaction() {
+    [ -z "$SyncOperation" ] || "$Python" "$StateTool" transaction "$Root" "$Id" \
+        "$Prev" "$PrevPrevious" "$OriginalCurrent" "$Changed" "$Activated" \
+        "$ServicesStopped" "$SyncOperation" "$SharedSudo"
+}
 
 shared_state() {
     if [ "$SharedSudo" = 1 ]; then
@@ -68,6 +91,7 @@ snapshot_shared() {
         rm -rf "$Backup"
         step "shared files require sudo; retrying snapshot with noninteractive sudo"
         SharedSudo=1
+        record_transaction
         shared_state snapshot "$Root" "$Incoming" "$Backup"
     else
         return "$code"
@@ -76,9 +100,13 @@ snapshot_shared() {
 
 release_id() { readlink "$Root/$1" 2>/dev/null | sed 's|^releases/||' || true; }
 set_link() {
-    local name="$1" value="$2" temp="$Root/.${1}-$Id"
-    if [ -z "$value" ]; then rm -f "$Root/$name"; return 0; fi
-    ln -s "releases/$value" "$temp" && mv -Tf "$temp" "$Root/$name"
+    local name="$1" value="$2" temp="$Root/.${1}-$Id-$RANDOM-$RANDOM"
+    if [ -z "$value" ]; then
+        rm -f "$Root/$name" || return 1
+    else
+        ln -s "releases/$value" "$temp" && mv -Tf "$temp" "$Root/$name" || return 1
+    fi
+    "$Python" -c 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY|os.O_DIRECTORY); os.fsync(fd); os.close(fd)' "$Root"
 }
 # Seed (only when $Root/skills is missing) and merge (on every call) the
 # shared skill catalog at the deployment root, beside data/. $1 = release id
@@ -259,7 +287,7 @@ initialize_configuration() {
             step "legacy configuration selected from server for first migration"
         fi
     fi
-    if [ -n "$Prev" ]; then
+    if [ -n "$Prev" ] && [ -z "$SyncOperation" ]; then
         local previous_config="$Root/releases/$Prev/config" candidate_config="$Root/releases/$release/config"
         if [ -d "$previous_config/personas" ]; then
             copy_configuration_assets migrated "$previous_config/personas" "$candidate_config/personas"
@@ -278,8 +306,14 @@ initialize_configuration() {
 configuration_health() {
     local release="$1"
     [ -f "$Root/releases/$release/src/quickquip/llm/config_cli.py" ] || return 0
-    compose "$release" exec -T web-admin python -m quickquip.llm.config_cli status --require-loaded \
-        >/dev/null 2>&1
+    local container started
+    container="$(compose "$release" ps -q quickquip)" || return 1
+    started="$(docker inspect -f '{{.State.StartedAt}}' "$container")" || return 1
+    started="$("$Python" -c 'from datetime import datetime; import sys; print(datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp())' "$started")" || return 1
+    # Read the stable status payload so older releases remain valid rollback targets.
+    compose "$release" exec -T web-admin python -m quickquip.llm.config_cli status --require-loaded 2>/dev/null \
+        | "$Python" -c 'import json,sys; status=json.load(sys.stdin); sys.exit(0 if status["bot"]["heartbeat_at"] >= float(sys.argv[1]) else 1)' \
+            "$started" >/dev/null 2>&1
 }
 health() {
     local release="$1" deadline=$((SECONDS + ${DEPLOY_HEALTH_TIMEOUT:-150})) bad container service
@@ -309,7 +343,33 @@ health() {
 finish() {
     local code=$? restored=1
     trap - EXIT INT TERM
+    if [ "$Action" = recover ] && [ "$RecoveryReady" = 0 ]; then
+        step "recovery journal invalid; preserve transaction files"
+        exit 2
+    fi
     export QUICKQUIP_ENV_FILE="$Root/.env"
+    if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ]; then
+        if [ "$Activated" = 1 ]; then
+            if ! compose "$Id" stop quickquip web-admin \
+                || ! compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
+                    recover --operation "$SyncOperation" --services-stopped; then
+                step "CONFIG RECOVERY FAILED; preserve operation $SyncOperation and $Incoming"
+                exit 2
+            fi
+        elif [ -n "$Prev" ]; then
+            RecoveryArgs=()
+            if [ "$Action" = recover ] || [ "$ServicesStopped" = 1 ]; then
+                ServicesStopped=1
+                compose "$Prev" stop quickquip web-admin || exit 2
+                RecoveryArgs=(--services-stopped)
+            fi
+            if ! compose "$Prev" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
+                recover --operation "$SyncOperation" "${RecoveryArgs[@]}"; then
+                step "CONFIG RECOVERY FAILED; preserve operation $SyncOperation and $Incoming"
+                exit 2
+            fi
+        fi
+    fi
     if [ "$Succeeded" = 0 ] && [ "$Changed" = 1 ]; then
         step "restoring shared files and previous release: ${Prev:-none}"
         shared_state restore "$Root" "$Backup" || restored=0
@@ -333,6 +393,13 @@ finish() {
             step "RECOVERY FAILED; containers may be unavailable; preserve $Incoming"
             exit 2
         fi
+    fi
+    if [ "$Succeeded" = 0 ] && [ "$ServicesStopped" = 1 ] && [ "$Activated" = 0 ] && [ -n "$Prev" ]; then
+        up "$Prev" && health "$Prev" || { step "RECOVERY FAILED: previous services unavailable"; exit 2; }
+    fi
+    if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ] && [ -n "$Prev" ]; then
+        compose "$Prev" exec -T web-admin python -m quickquip.config_sync.rpc \
+            recovery-verified --operation "$SyncOperation" || { step "CONFIG RECOVERY UNVERIFIED"; exit 2; }
     fi
     # Secrets are transient; retain only logs and numeric exit status.
     if [ "$SharedSudo" = 1 ]; then sudo -n rm -rf "$Backup" || exit 2; fi
@@ -359,6 +426,29 @@ mkdir -p "$Root/releases"
 Prev="$(release_id current)"
 OriginalCurrent="$Prev"
 PrevPrevious="$(release_id previous)"
+if [ "$Action" = recover ]; then
+    Saved="$("$Python" "$StateTool" read-transaction "$Root" "$Id")" || fail "recovery journal unavailable"
+    mapfile -t Fields <<<"$Saved"
+    [ "${Fields[6]}" = "$SyncOperation" ] || fail "recovery operation mismatch"
+    Prev=${Fields[0]#_}
+    PrevPrevious=${Fields[1]#_}
+    OriginalCurrent=${Fields[2]#_}
+    Current="$(release_id current)"
+    [[ "$Current" = "$Id" || "$Current" = "$Prev" ]] || fail "another release replaced the interrupted operation"
+    Changed=${Fields[3]}
+    SharedSudo=${Fields[7]}
+    Activated=0
+    [ "$Current" != "$Id" ] || Activated=1
+    ServicesStopped=1
+    RecoveryReady=1
+    step "recovering interrupted deployment $Id"
+    exit 1
+fi
+if [ -n "$SyncOperation" ]; then
+    record_transaction
+    compose "$Prev" exec -T web-admin python -m quickquip.config_sync.rpc \
+        bind-deployment --operation "$SyncOperation" --release "$Id" || fail "configuration deployment binding failed"
+fi
 
 if [ "$Action" = rollback ]; then
     Target="${Target:-$PrevPrevious}"
@@ -366,6 +456,13 @@ if [ "$Action" = rollback ]; then
     [ "$Target" != "$Prev" ] || fail "target is already current"
     verify_release "$Prev" || fail "current release cannot be used for recovery"
     verify_release "$Target" || fail "rollback target or image missing"
+    compose "$Prev" run --rm --no-deps web-admin python -c \
+        'from pathlib import Path; import sys; sys.exit(1 if Path("/app/data/config-sync/maintenance.json").exists() else 0)' \
+        || fail "finish configuration synchronization before rollback"
+    if [ -f "$Root/releases/$Target/src/quickquip/config_sync/rpc.py" ]; then
+        printf '{"source":"published"}' | compose "$Target" run --rm --no-deps -T web-admin \
+            python -m quickquip.config_sync.rpc read >/dev/null || fail "rollback configuration incompatible"
+    fi
     RollbackVersion=""
     if [ -f "$Root/releases/$Target/pyproject.toml" ]; then
         RollbackVersion="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$Root/releases/$Target/pyproject.toml" | head -1)"
@@ -397,6 +494,10 @@ if [ -f "$Incoming/release.tar.gz" ]; then
     "$Python" "$StateTool" extract "$Incoming/release.tar.gz" "$Incoming/tree"
 fi
 "$Python" "$StateTool" validate "$Incoming/tree"
+if [ "${ENV_SOURCE:-local}" = server ]; then
+    [ -f "$Root/.env" ] || fail "server environment unavailable; first deployment requires --env local"
+    copy_configuration_assets replace "$Root/.env" "$Incoming/shared/.env"
+fi
 [ -f "$Incoming/shared/.env" ] || fail "staged environment missing"
 if [ "$Action" = migrate ]; then
     [ -z "$Prev" ] || fail "already migrated"
@@ -439,13 +540,40 @@ compose "$Id" build quickquip
 BuildStamp="$(date +%Y%m%d.%H%M%S)"
 VersionId="${DEPLOY_VERSION:-unknown}+build.$BuildStamp"
 step "image built: quickquip-app:$Id ($VersionId)"
+if [ -n "$SyncOperation" ]; then
+    compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
+        stage --operation "$SyncOperation" --release "$Id" || fail "configuration stage failed"
+elif [ -n "$Prev" ] && [ -f "$Release/src/quickquip/config_sync/rpc.py" ]; then
+    compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc idle \
+        || fail "finish or recover pending configuration synchronization first"
+    ServicesStopped=1
+    compose "$Prev" stop quickquip web-admin || fail "could not pause configuration writers"
+    compose "$Id" run --rm --no-deps -v "$Root/releases/$Prev:/sync-previous:ro" \
+        web-admin python -m quickquip.config_sync.rpc preserve || fail "server configuration preservation failed"
+fi
 initialize_configuration "$Id"
+DurableCode=0
+"$Python" "$StateTool" durable "$Release" || DurableCode=$?
+if [ "$DurableCode" = 3 ]; then
+    sudo -n "$Python" "$StateTool" durable "$Release" || fail "candidate persistence failed"
+elif [ "$DurableCode" != 0 ]; then
+    fail "candidate persistence failed"
+fi
 snapshot_shared
 Changed=1
+record_transaction
 shared_state apply "$Root" "$Incoming" "$Backup"
 export QUICKQUIP_ENV_FILE="$Root/.env"
-set_link current "$Id"
+if [ -n "$SyncOperation" ]; then
+    ServicesStopped=1
+    record_transaction
+    compose "$Prev" stop quickquip web-admin || fail "configuration consumers could not stop"
+    compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
+        restart-fence --operation "$SyncOperation" || fail "could not fence previous bot heartbeat"
+fi
 Activated=1
+record_transaction
+set_link current "$Id"
 # Must run before any compose up; see sync_shared_skills.
 sync_shared_skills "$Id"
 up "$Id" || fail "deployment startup failed"
@@ -453,6 +581,13 @@ if [ "${SKIP_HEALTH:-0}" = 1 ]; then
     step "health explicitly skipped; release is UNVERIFIED"
 else
     health "$Id" || fail "deployment health failed"
+fi
+if [ -n "$SyncOperation" ]; then
+    [ "${SKIP_HEALTH:-0}" = 0 ] || fail "synchronization requires health verification"
+    compose "$Id" exec -T web-admin python -m quickquip.config_sync.rpc \
+        candidate-commit --operation "$SyncOperation" || fail "configuration commit failed"
+    compose "$Id" exec -T web-admin python -m quickquip.config_sync.rpc \
+        wait --operation "$SyncOperation" || fail "configuration application failed"
 fi
 set_link previous "$Prev"
 Succeeded=1

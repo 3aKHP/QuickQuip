@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from quickquip.common.config_writes import configuration_write
 import logging
 import re
 import tempfile
@@ -66,8 +68,10 @@ def _resolve(scope: str, kind: str) -> Path:
     return _scope_dir(scope) / _KINDS[kind]["filename"]
 
 
-def _lock_for(path: Path) -> FileLock:
-    return FileLock(str(path) + ".lock")
+@contextmanager
+def _lock_for(path: Path):
+    with configuration_write(_LLM_ABOUT_DIR.parent / "data"), FileLock(str(path) + ".lock"):
+        yield
 
 
 def _file_meta(scope: str, kind: str) -> dict:
@@ -251,10 +255,11 @@ def create_llm_about_group(body: LLMAboutGroupCreate, request: Request):
         raise HTTPException(status_code=422, detail="group_id must be 5-12 digits")
 
     target_dir = _LLM_ABOUT_DIR / group_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    if body.copy_example:
-        for kind in _KINDS:
-            _copy_example_file(target_dir, kind)
+    with configuration_write(_LLM_ABOUT_DIR.parent / "data"):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if body.copy_example:
+            for kind in _KINDS:
+                _copy_example_file(target_dir, kind)
 
     logger.warning("llm_about group scope created via web admin: %s", group_id)
     audit_logger.log(

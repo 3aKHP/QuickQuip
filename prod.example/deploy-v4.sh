@@ -11,6 +11,11 @@ SkipHealth=0
 KeepReleases=4
 ReleaseId=""
 Version=""
+ConfigSync=auto
+EnvSource=server
+ConfigPlan=0
+SyncOperation=""
+SyncPython=""
 
 usage() {
     cat <<USAGE
@@ -23,6 +28,9 @@ Actions:
   --migrate            One-time migration of a legacy flat deployment
 
 Options:
+  --config-sync <mode> auto (default), push, pull, or off (retain server config)
+  --env <source>       server (default) or local
+  --plan               Read-only remote configuration plan
   --dry-run            Build frontend locally and preview the upload manifest
   --skip-health        Skip the post-deploy health check (deploy/migrate only)
   --host-alias <name>  SSH host alias (default $HostAlias)
@@ -42,6 +50,9 @@ while [ $# -gt 0 ]; do
             if [ -n "${2:-}" ] && [[ "$2" != -* ]]; then ReleaseId="$2"; shift; fi ;;
         --migrate) Mode=migrate; Modes=$((Modes + 1)) ;;
         --skip-health) SkipHealth=1 ;;
+        --config-sync) ConfigSync="${2:?missing sync mode}"; shift ;;
+        --env) EnvSource="${2:?missing environment source}"; shift ;;
+        --plan) ConfigPlan=1 ;;
         --host-alias) HostAlias="${2:?missing host}"; shift ;;
         --remote-dir) RemoteDir="${2:?missing root}"; shift ;;
         --keep-releases) KeepReleases="${2:?missing retention}"; shift ;;
@@ -54,6 +65,10 @@ TmpManifest=""
 cleanup() { if [ -n "$TmpManifest" ]; then rm -f "$TmpManifest"; fi; }
 trap cleanup EXIT
 
+[[ "$ConfigSync" =~ ^(auto|push|pull|off)$ ]] || die "invalid configuration sync mode"
+[[ "$EnvSource" =~ ^(server|local)$ ]] || die "invalid environment source"
+[[ "$ConfigPlan" = 0 || ( "$Mode" = deploy && "$DryRun" = 0 && "$SkipHealth" = 0 ) ]] || die "plan supports deployment only"
+[[ "$SkipHealth" = 0 || "$ConfigSync" = off ]] || die "skip-health requires --config-sync off"
 [[ "$Modes" -le 1 ]] || die "choose only one action"
 [[ "$DryRun" = 0 || ( "$Mode" = deploy && "$SkipHealth" = 0 ) ]] || die "DryRun supports deployment preview only"
 [[ "$SkipHealth" = 0 || "$Mode" = deploy || "$Mode" = migrate ]] || die "SkipHealth supports deploy/migrate only"
@@ -74,7 +89,18 @@ ssh_args=(-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout
 rsync_args=(--rsh "ssh ${ssh_args[*]}")
 
 if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
-    [ -f .env ] || die "root .env missing"
+    if [ "$EnvSource" = local ]; then [ -f .env ] || die "root .env missing"; fi
+    if [ "$DryRun" = 0 ] && [ "$ConfigSync" != off ]; then
+        for candidate in .venv/bin/python .venv/Scripts/python.exe python3 python; do
+            if command -v "$candidate" >/dev/null 2>&1; then SyncPython="$candidate"; break; fi
+        done
+        [ -n "$SyncPython" ] || die "local Python environment required for configuration sync"
+        if [ "$ConfigPlan" = 1 ]; then
+            exec "$SyncPython" -m quickquip.config_sync.cli --plan --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir"
+        fi
+    elif [ "$ConfigPlan" = 1 ]; then
+        die "--plan requires a synchronization mode"
+    fi
     [ -f "$ScriptDir/deploy-manifest.txt" ] || die "manifest missing"
     Version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)"
     [[ "$Version" =~ ^[0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.]+)*$ ]] || die "cannot parse project version from pyproject.toml"
@@ -108,6 +134,12 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         exit 0
     fi
     command -v rsync >/dev/null || die "local rsync required"
+    if [ "$ConfigSync" != off ]; then
+        SyncOperation="$("$SyncPython" -m quickquip.config_sync.cli deploy-prepare --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir")" || die "configuration preparation failed; inspect sync status"
+        [[ "$SyncOperation" =~ ^[a-f0-9]{32}$ ]] || die "invalid synchronization operation"
+        printf 'Configuration operation: %s
+' "$SyncOperation"
+    fi
 fi
 
 # All uploads are private, unique and outside live directories.
@@ -119,14 +151,17 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     ssh "${ssh_args[@]}" "$HostAlias" "umask 077; mkdir '$Incoming/tree' '$Incoming/shared'"
     rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' "${rsync_args[@]}" \
         --files-from="$UploadManifest" ./ "$HostAlias:$Incoming/tree/"
-    Shared=(.env prod/check_bot.sh prod/cron_check_bot.sh)
+    Shared=(prod/check_bot.sh prod/cron_check_bot.sh)
+    if [ "$EnvSource" = local ]; then
+        Shared+=(.env)
+    fi
     for item in prod/sendkey.env data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json prod/host_metrics_collector.py; do
         [ ! -f "$item" ] || Shared+=("$item")
     done
     rsync -aR --chmod=D700,F600 "${rsync_args[@]}" "${Shared[@]}" "$HostAlias:$Incoming/shared/"
 fi
 ssh "${ssh_args[@]}" "$HostAlias" \
-    "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$SkipHealth bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
+    "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
     || die "launch uncertain; inspect $RemoteDir/.deploy/$Id.log and .exit before retrying"
 Log="$RemoteDir/.deploy/$Id.log"
 ExitFile="$RemoteDir/.deploy/$Id.exit"
@@ -139,4 +174,7 @@ until ssh "${ssh_args[@]}" "$HostAlias" \
 done
 code="$(ssh "${ssh_args[@]}" "$HostAlias" "cat '$ExitFile'")" || die "cannot read completion status: $ExitFile"
 [ "$code" = 0 ] || die "remote action failed (exit $code): $Log"
+if [ -n "$SyncOperation" ]; then
+    "$SyncPython" -m quickquip.config_sync.cli deploy-finish --operation "$SyncOperation" --host-alias "$HostAlias" --remote-dir "$RemoteDir" || die "deployment finished; configuration acknowledgement needs resume"
+fi
 printf '%s complete. Status: bash prod/deploy-v4.sh --status --host-alias %s --remote-dir %s\n' "$Mode" "$HostAlias" "$RemoteDir"

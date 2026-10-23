@@ -93,8 +93,15 @@ if args[0] == "compose":
         print("test-container")
     elif "logs" in args:
         print("Bot 123456 connected")
+    elif "exec" in args and "quickquip.llm.config_cli" in args and "status" in args:
+        import argparse
+        # The previous release supports require-loaded but no timestamp argument.
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--require-loaded", action="store_true")
+        parser.parse_args(args[args.index("status") + 1:])
+        print(json.dumps({"bot": {"heartbeat_at": float(os.environ.get("BOT_HEARTBEAT", "2"))}}))
 elif args[0] == "inspect":
-    print("true")
+    print("1970-01-01T00:00:01Z" if "{{.State.StartedAt}}" in args else "true")
 """
     )
     docker.chmod(0o700)
@@ -152,6 +159,31 @@ def test_failed_recovery_retains_private_backup_and_reports_failure(deployment):
     assert (inbox / "backup/.env").read_text() == "ONEBOT_ACCESS_TOKEN=old\n"
     assert (inbox / "backup").stat().st_mode & 0o777 == 0o700
     assert (root / "current").readlink() == Path("releases") / OLD
+
+
+def test_upgrade_failure_recovers_legacy_configuration_health(deployment):
+    root, _, _ = deployment
+    cli = root / "releases" / OLD / "src/quickquip/llm/config_cli.py"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("# Previous release with status --require-loaded.\n")
+    result = run_deploy(deployment, FAIL_UP="new", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
+
+
+def test_rollback_checks_legacy_configuration_health(deployment):
+    root, _, _ = deployment
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    cli = target / "src/quickquip/llm/config_cli.py"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("# Previous release with status --require-loaded.\n")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "current").readlink() == Path("releases") / NEW
 
 
 def test_lock_rejects_second_action_before_live_mutation(deployment):
@@ -555,6 +587,15 @@ def _add_config_initializer(deployment):
     return old, candidate
 
 
+def test_previous_bot_heartbeat_cannot_acknowledge_new_container(deployment):
+    root, _, _ = deployment
+    _add_config_initializer(deployment)
+    result = run_deploy(deployment, BOT_HEARTBEAT="0", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
+
+
 def test_config_migration_selects_server_assets_before_initializer(deployment):
     root, _, _ = deployment
     old, candidate = _add_config_initializer(deployment)
@@ -788,3 +829,80 @@ def test_first_migration_copies_protected_assets_as_deployment_user(deployment):
     owners = (root / "asset-owners").read_text().splitlines()
     assert len(owners) == 4
     assert all(str(config) in entry for entry in owners)
+
+
+def _sync_candidate(deployment):
+    root, inbox, _ = deployment
+    marker = inbox / 'tree/src/quickquip/config_sync/rpc.py'
+    marker.parent.mkdir(parents=True)
+    marker.write_text('# isolated configuration protocol marker\n')
+    return root, inbox
+
+
+def test_sync_deployment_preserves_selected_environment(deployment):
+    root, _ = _sync_candidate(deployment)
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32,
+                        ENV_SOURCE='server')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / '.env').read_text() == 'ONEBOT_ACCESS_TOKEN=old\n'
+    calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+    stage = next(i for i, call in enumerate(calls) if 'stage' in call)
+    commit = next(i for i, call in enumerate(calls) if 'candidate-commit' in call)
+    application_up = next(i for i, call in enumerate(calls) if '--force-recreate' in call)
+    assert stage < application_up < commit
+    assert any('wait' in call for call in calls[commit:])
+
+
+def test_sync_failure_restores_database_before_previous_containers(deployment):
+    root, _ = _sync_candidate(deployment)
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32,
+                        FAIL_UP='new')
+    assert result.returncode == 1, result.stdout + result.stderr
+    calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+    restore = next(i for i, call in enumerate(calls) if 'recover' in call)
+    old_up = next(i for i, call in enumerate(calls)
+                  if 'up' in call and any(OLD in value for value in call))
+    verified = next(i for i, call in enumerate(calls) if 'recovery-verified' in call)
+    assert restore < old_up < verified
+
+
+def test_sync_exact_assets_do_not_reinherit_deleted_files(deployment):
+    root, inbox = _sync_candidate(deployment)
+    initializer = inbox / 'tree/src/quickquip/llm/config_cli.py'
+    initializer.parent.mkdir(parents=True)
+    initializer.write_text('# initializer marker\n')
+    old = root / 'releases' / OLD / 'config'
+    (old / 'personas').mkdir(parents=True)
+    (old / 'client_profiles').mkdir()
+    (old / 'personas/migrated-removed.toml').write_text('id="removed"\n')
+    (old / 'client_profiles/removed.toml').write_text('id="removed"\n')
+    (old / 'generation.toml').write_text('[image]\nenabled=false\n')
+    (root / 'data').mkdir()
+    (root / 'data/llm_config.db').write_text('existing marker')
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32)
+    assert result.returncode == 0, result.stdout + result.stderr
+    candidate = root / 'releases' / NEW / 'config'
+    assert not (candidate / 'personas/migrated-removed.toml').exists()
+    assert not (candidate / 'client_profiles/removed.toml').exists()
+    assert not (candidate / 'generation.toml').exists()
+
+
+def test_interrupted_deployment_recovers_using_durable_journal(deployment):
+    root, inbox = _sync_candidate(deployment)
+    docker = Path(deployment[2]['PATH'].split(os.pathsep)[0]) / 'docker'
+    body = docker.read_text().replace(
+        '    elif "up" in args:',
+        '''    elif "candidate-commit" in args and os.environ.get("KILL_COMMIT") == "1":
+        os.kill(os.getppid(), 9)
+    elif "up" in args:''',
+    )
+    docker.write_text(body)
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32, KILL_COMMIT='1')
+    assert result.returncode == -9
+    assert (root / 'current').readlink() == Path('releases') / NEW
+    assert (root / '.deploy' / f'{NEW}.transaction.json').exists()
+    result = run_deploy(deployment, action='recover', CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (root / 'current').readlink() == Path('releases') / OLD
+    assert (root / '.env').read_text() == 'ONEBOT_ACCESS_TOKEN=old\n'
+    assert not inbox.exists()
