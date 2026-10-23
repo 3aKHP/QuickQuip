@@ -60,7 +60,7 @@ Both local drivers share `remote-deploy-v4.sh` and `deploy-state.py`.
 | Status | `bash prod/deploy-v4.sh --status` | `prod/deploy-v4.ps1 -Status` |
 | Previous release | `bash prod/deploy-v4.sh --rollback` | `prod/deploy-v4.ps1 -Rollback` |
 | Explicit rollback | `bash prod/deploy-v4.sh --rollback <id>` | `prod/deploy-v4.ps1 -Rollback -ReleaseId <id>` |
-| Flat-layout migration and deploy | `bash prod/deploy-v4.sh --migrate` | `prod/deploy-v4.ps1 -Migrate` |
+| Flat-layout migration and deploy | `bash prod/deploy-v4.sh --migrate --config-sync off` | `prod/deploy-v4.ps1 -Migrate -ConfigSync off` |
 | First deployment awaiting QQ login | `bash prod/deploy-v4.sh --config-sync off --env local --skip-health` | `prod/deploy-v4.ps1 -ConfigSync off -EnvSource local -SkipHealth` |
 
 Shared parameters: `--host-alias`, `--remote-dir` (default `/opt/QuickQuip`), `--keep-releases` (2..100, default 4); the PowerShell driver takes the matching single-dash forms (`-HostAlias`, `-RemoteDir`, `-KeepReleases`). Remote paths use letters, digits, dot, slash, underscore or hyphen. Run `bash prod/deploy-v4.sh --help` for the full interface.
