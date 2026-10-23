@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import contextmanager
 from contextvars import ContextVar
 from quickquip.llm.session import SessionIdentity
@@ -18,12 +19,25 @@ from uuid import uuid4
 import logging
 
 from quickquip.common.paths import LLM_TRACE_DB_PATH, LOGS_DIR
+from quickquip.llm.provider.media_truncator import (
+    MediaBlobStore,
+    MediaTruncator,
+    collect_manifest_shas,
+    decode_payload,
+    find_manifest_mime,
+    resolve_min_bytes,
+    parse_manifest,
+    merge_field_manifests,
+)
 
 
 logger = logging.getLogger(__name__)
 
 _TRACE_FLAG_FILE = os.getenv("LLM_TRACE_FLAG_FILE", "")
 _TRACE_RETENTION_DAYS = 14
+_TRACE_BLOB_DIR_NAME = "trace_blobs"
+# 孤立文件保留一天，给失败写入和运维检查留下恢复窗口。
+_TRACE_BLOB_GRACE_SECONDS = 24 * 3600
 _LEGACY_TRACE_GLOB = "quickquip_trace_????-??-??.jsonl"
 _TRACE_STALE_AFTER = timedelta(hours=1)
 _TRACE_STALE_CHECK_INTERVAL_SECONDS = 60
@@ -131,12 +145,26 @@ class LLMTraceStore:
         path: str | Path = LLM_TRACE_DB_PATH,
         *,
         legacy_trace_dir: str | Path | None = None,
+        blob_dir: str | Path | None = None,
+        media_min_bytes: int | None = None,
     ):
         self.path = Path(path)
         self.legacy_trace_dir = (
             Path(legacy_trace_dir)
             if legacy_trace_dir is not None
             else self.path.parent / "logs"
+        )
+        # blob 库刻意不按天分桶：滚动留存下，全局内容寻址库才能真正做到
+        # 跨天严格单副本（issue #291）。min_bytes <= 0 表示截断关闭。
+        self.blob_dir = (
+            Path(blob_dir)
+            if blob_dir is not None
+            else self.path.parent / _TRACE_BLOB_DIR_NAME
+        )
+        self.blob_store = MediaBlobStore(self.blob_dir)
+        self.truncator = MediaTruncator(
+            self.blob_store,
+            min_bytes=resolve_min_bytes() if media_min_bytes is None else media_min_bytes,
         )
         self._schema_ready = False
         self._schema_lock = threading.Lock()
@@ -209,6 +237,7 @@ class LLMTraceStore:
                         response_bytes   INTEGER NOT NULL DEFAULT 0,
                         response_raw_text TEXT,
                         response_raw_bytes INTEGER NOT NULL DEFAULT 0,
+                        media_truncation TEXT,
                         duration_ms      REAL,
                         state            TEXT NOT NULL,
                         error_type       TEXT,
@@ -293,6 +322,11 @@ class LLMTraceStore:
                         "ALTER TABLE llm_http_traces ADD COLUMN response_raw_bytes "
                         "INTEGER NOT NULL DEFAULT 0"
                     )
+                if "media_truncation" not in trace_columns:
+                    # 旧行保持 NULL，读端视作「原样存储」，天然兼容。
+                    conn.execute(
+                        "ALTER TABLE llm_http_traces ADD COLUMN media_truncation TEXT"
+                    )
             self._schema_ready = True
 
     @staticmethod
@@ -341,13 +375,18 @@ class LLMTraceStore:
         self._cleanup_if_due()
         call_id = uuid4().hex
         with self._connect() as conn:
+            # 与 GC 使用同一数据库写锁，覆盖文件创建/复用直到引用提交。
+            conn.execute("BEGIN IMMEDIATE")
+            outcome = self.truncator.truncate(request_text)
+            manifest_json = merge_field_manifests(None, {"request": outcome.manifest})
             cursor = conn.execute(
                 """
                 INSERT INTO llm_http_traces (
                     call_id, agent_loop_id, loop_sequence, started_at,
                     provider_id, protocol, model, stream,
-                    method, url, request_headers, request_text, request_bytes, session_id, state
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    method, url, request_headers, request_text, request_bytes, session_id,
+                    media_truncation, state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """,
                 (
                     call_id,
@@ -361,9 +400,10 @@ class LLMTraceStore:
                     method,
                     url,
                     request_headers,
-                    request_text,
+                    outcome.text,
                     request_bytes,
                     session_id,
+                    manifest_json,
                 ),
             )
             conn.execute(
@@ -392,12 +432,29 @@ class LLMTraceStore:
     ) -> None:
         self._ensure_schema()
         with self._connect() as conn:
-            cursor = conn.execute(
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT id, media_truncation FROM llm_http_traces WHERE call_id = ?",
+                (call_id,),
+            ).fetchone()
+            if existing is None:
+                return
+            response_outcome = self.truncator.truncate(response_text or "")
+            raw_outcome = self.truncator.truncate(response_raw_text or "")
+            manifest_json = merge_field_manifests(
+                existing["media_truncation"],
+                {
+                    "response": response_outcome.manifest,
+                    "response_raw": raw_outcome.manifest,
+                },
+            )
+            conn.execute(
                 """
                 UPDATE llm_http_traces
                 SET completed_at = ?, response_status = ?, response_headers = ?,
                     response_text = ?, response_bytes = ?, duration_ms = ?,
                     response_raw_text = ?, response_raw_bytes = ?,
+                    media_truncation = ?,
                     state = ?, error_type = ?, error_message = ?
                 WHERE call_id = ?
                 """,
@@ -405,30 +462,25 @@ class LLMTraceStore:
                     _utc_now(),
                     response_status,
                     response_headers,
-                    response_text,
+                    response_outcome.text,
                     response_bytes,
                     duration_ms,
-                    response_raw_text or None,
+                    raw_outcome.text or None,
                     response_raw_bytes,
+                    manifest_json,
                     state,
                     error_type or None,
                     error_message or None,
                     call_id,
                 ),
             )
-            if cursor.rowcount:
-                row = conn.execute(
-                    "SELECT id FROM llm_http_traces WHERE call_id = ?",
-                    (call_id,),
-                ).fetchone()
-                if row is not None:
-                    conn.execute(
-                        """
-                        INSERT INTO llm_http_trace_events (trace_id, state, created_at)
-                        VALUES (?, ?, ?)
-                        """,
-                        (int(row["id"]), state, _utc_now()),
-                    )
+            conn.execute(
+                """
+                INSERT INTO llm_http_trace_events (trace_id, state, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (int(existing["id"]), state, _utc_now()),
+            )
 
     def list_calls(
         self,
@@ -487,7 +539,78 @@ class LLMTraceStore:
             "response_headers": row["response_headers"] or "",
             "response_text": row["response_text"] or "",
             "response_raw_text": row["response_raw_text"] or "",
+            "media_truncation": parse_manifest(row["media_truncation"]),
         }
+
+    def restore_call(self, call_id: str) -> dict[str, object] | None:
+        """按 manifest 回拼字节级原始报文；无清单的行原样返回。
+
+        校验不通过时抛 ``ValueError``——调用方据此判断「存坏了」，而不是把
+        残缺内容当成原始报文交付。
+        """
+
+        entry = self.get_call(call_id)
+        if entry is None:
+            return None
+        result: dict[str, object] = dict(entry)
+        manifest = entry.get("media_truncation")
+        if not isinstance(manifest, dict):
+            return result
+        for field_name, key in (
+            ("request_text", "request"),
+            ("response_text", "response"),
+            ("response_raw_text", "response_raw"),
+        ):
+            field_manifest = manifest.get(key)
+            if not isinstance(field_manifest, dict):
+                continue
+            try:
+                result[field_name] = self.truncator.restore(
+                    str(entry[field_name]), field_manifest
+                )
+            except ValueError:
+                logger.exception(
+                    "Trace 媒体回拼校验失败：call_id=%s field=%s", call_id, key
+                )
+                raise
+        return result
+
+    def find_blob_mime(self, sha256: str) -> str | None:
+        """从最多 20 个含摘要的 JSON 清单中读取声明的 MIME，供诊断使用。"""
+
+        self._ensure_schema()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT media_truncation FROM llm_http_traces
+                WHERE media_truncation LIKE ?
+                LIMIT 20
+                """,
+                (f"%{sha256}%",),
+            ).fetchall()
+        for row in rows:
+            mime = find_manifest_mime(row["media_truncation"], sha256)
+            if mime is not None:
+                return mime
+        return None
+
+    def download_blob(self, sha256: str) -> tuple[bytes, str] | None:
+        """取出 blob 并解成二进制；返回 ``(bytes, mime)``，缺失返回 ``None``。"""
+
+        self._ensure_schema()
+        self._cleanup_if_due()
+        declared_mime = self.find_blob_mime(sha256)
+        if declared_mime is None:
+            return None
+        payload = self.blob_store.load(sha256)
+        if payload is None or hashlib.sha256(payload.encode("utf-8")).hexdigest() != sha256:
+            return None
+        decoded = decode_payload(payload)
+        if decoded is None:
+            return None
+        data, mime = decoded
+        resolved = mime or declared_mime
+        return data, resolved or "application/octet-stream"
 
     def list_events(
         self,
@@ -565,9 +688,12 @@ class LLMTraceStore:
     def clear(self) -> int:
         self._ensure_schema()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             count = int(conn.execute("SELECT COUNT(*) FROM llm_http_traces").fetchone()[0])
             conn.execute("DELETE FROM llm_http_trace_events")
             conn.execute("DELETE FROM llm_http_traces")
+            # 先提交引用移除，再清理文件；即使清理失败，孤立文件也不可下载。
+        self._collect_orphaned_blobs(grace_seconds=0)
         return count
 
     def storage_bytes(self) -> int:
@@ -601,6 +727,8 @@ class LLMTraceStore:
                 )
                 conn.execute("DELETE FROM llm_http_traces WHERE started_at < ?", (cutoff,))
             self._cleanup_legacy_trace_files((now - retention).timestamp())
+            # 先 DELETE 过期行再 sweep：此刻的引用集合才是准确的 mark。
+            self._collect_orphaned_blobs()
             self._last_cleanup_date = today
 
     def _cleanup_legacy_trace_files(self, cutoff_timestamp: float) -> None:
@@ -616,6 +744,30 @@ class LLMTraceStore:
                     path.unlink()
             except OSError:
                 logger.debug("Failed to clean legacy LLM trace file: %s", path)
+
+    def _collect_orphaned_blobs(self, *, grace_seconds=_TRACE_BLOB_GRACE_SECONDS) -> None:
+        """持有数据库写锁扫描引用并清理，协调 Bot/Web 的跨进程写入。"""
+
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                rows = conn.execute(
+                    "SELECT media_truncation FROM llm_http_traces "
+                    "WHERE media_truncation IS NOT NULL"
+                )
+                referenced: set[str] = set()
+                for row in rows:
+                    if parse_manifest(row["media_truncation"]) is None:
+                        raise ValueError("invalid media manifest; skip blob GC")
+                    referenced |= collect_manifest_shas(row["media_truncation"])
+                removed = self.blob_store.collect_orphaned(
+                    referenced, grace_seconds,
+                )
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("LLM trace blob 引用扫描或清理失败")
+            return
+        if removed:
+            logger.info("LLM trace blob GC 已清理 %d 个无引用 blob", removed)
 
     def _expire_stale_pending_if_due(self) -> None:
         checked_at = time.monotonic()
