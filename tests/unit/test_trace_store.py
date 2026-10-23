@@ -140,6 +140,7 @@ def test_trace_store_migrates_first_release_schema(tmp_path, monkeypatch):
 
     assert detail is not None
     assert detail["agent_loop_id"] == "legacy-call"
+    assert store.restore_call("legacy-call")["media_truncation"] is None
     assert detail["loop_sequence"] == 1
     assert detail["response_raw_text"] == ""
     assert detail["response_raw_bytes"] == 0
@@ -408,3 +409,170 @@ async def test_agent_loop_groups_http_calls_with_monotonic_sequence(monkeypatch,
         details[0]["agent_loop_id"]  # type: ignore[index]
     }
     assert [detail["loop_sequence"] for detail in details if detail] == [1, 2]
+
+
+def _begin_media(store, text):
+    return store.begin_call(
+        provider_id="demo", protocol="openai", model="test", stream=True,
+        method="POST", url="https://example.test", request_headers="{}",
+        request_text=text, request_bytes=len(text.encode()),
+    )
+
+
+def _finish_media(store, call_id, text):
+    store.finish_call(
+        call_id, state="success", response_status=200, response_headers="{}",
+        response_text=text, response_bytes=len(text.encode()), duration_ms=1,
+        response_raw_text="data: " + text + "\n\n",
+        response_raw_bytes=len(("data: " + text + "\n\n").encode()),
+    )
+
+
+def test_media_three_field_restore_disable_and_missing_call(tmp_path):
+    import json
+    import pytest
+
+    store = trace.LLMTraceStore(tmp_path / "trace.db", media_min_bytes=64)
+    text = json.dumps({"note": "中文", "image": "A" * 256})
+    call_id = _begin_media(store, text)
+    _finish_media(store, call_id, text)
+    entry = store.get_call(call_id)
+    assert set(entry["media_truncation"]) == {"v", "request", "response", "response_raw"}
+    assert entry["request_bytes"] == entry["response_bytes"] == len(text.encode())
+    assert entry["response_raw_bytes"] == len(("data: " + text + "\n\n").encode())
+    assert len(list(store.blob_dir.rglob("*.b64"))) == 1
+
+    disabled = trace.LLMTraceStore(store.path, media_min_bytes=0)
+    restored = disabled.restore_call(call_id)
+    assert restored["request_text"] == restored["response_text"] == text
+    assert restored["response_raw_text"] == "data: " + text + "\n\n"
+    plain_id = _begin_media(disabled, text)
+    _finish_media(disabled, plain_id, text)
+    assert disabled.restore_call(plain_id)["media_truncation"] is None
+    assert disabled.get_call(plain_id)["request_text"] == text
+    assert disabled.restore_call("missing") is None
+    before_events = store.latest_event_id()
+    _finish_media(store, "missing", json.dumps({"image": "B" * 256}))
+    assert store.latest_event_id() == before_events
+    assert len(list(store.blob_dir.rglob("*.b64"))) == 1
+
+    blob = next(store.blob_dir.rglob("*.b64"))
+    blob.write_text("corrupt", encoding="utf-8")
+    with pytest.raises(ValueError):
+        store.restore_call(call_id)
+    blob.unlink()
+    with pytest.raises(ValueError):
+        store.restore_call(call_id)
+
+
+def test_finish_replacement_removes_stale_response_manifest(tmp_path):
+    store = trace.LLMTraceStore(tmp_path / "trace.db", media_min_bytes=64)
+    text = '{"image":"' + "A" * 256 + '"}'
+    call_id = _begin_media(store, text)
+    _finish_media(store, call_id, text)
+    _finish_media(store, call_id, '{"text":"replacement"}')
+    restored = store.restore_call(call_id)
+    assert restored["request_text"] == text
+    assert restored["response_text"] == '{"text":"replacement"}'
+    assert set(restored["media_truncation"]) == {"v", "request"}
+
+
+def _media_writer_process(path, text, ready, start, attempting, result):
+    store = trace.LLMTraceStore(path, media_min_bytes=64)
+    store._ensure_schema()
+    store._last_cleanup_date = datetime.now(timezone.utc).date().isoformat()
+    connect = store._connect
+
+    def observe_connect():
+        attempting.set()
+        return connect()
+
+    store._connect = observe_connect
+    ready.set()
+    if not start.wait(15):
+        raise RuntimeError("writer start timed out")
+    result.put(_begin_media(store, text))
+
+
+def test_gc_and_new_reference_are_coordinated_across_processes(tmp_path, monkeypatch):
+    import multiprocessing
+
+    ctx = multiprocessing.get_context("spawn")
+    ready, start, attempting = (ctx.Event() for _ in range(3))
+    result = ctx.Queue()
+    store = trace.LLMTraceStore(tmp_path / "trace.db", media_min_bytes=64)
+    text = '{"image":"' + "A" * 256 + '"}'
+    old_call = _begin_media(store, text)
+    old_time = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE llm_http_traces SET started_at=? WHERE call_id=?", (old_time, old_call),
+        )
+    blob = next(store.blob_dir.rglob("*.b64"))
+    old_mtime = time.time() - 3 * 86400
+    os.utime(blob, (old_mtime, old_mtime))
+    scanned, release = threading.Event(), threading.Event()
+    sweep = store.blob_store.collect_orphaned
+
+    def paused_sweep(referenced, grace_seconds):
+        assert not referenced
+        scanned.set()
+        assert release.wait(15)
+        return sweep(referenced, grace_seconds)
+
+    monkeypatch.setattr(store.blob_store, "collect_orphaned", paused_sweep)
+    writer = ctx.Process(
+        target=_media_writer_process,
+        args=(store.path, text, ready, start, attempting, result),
+    )
+    writer.start()
+    try:
+        assert ready.wait(15)
+        store._last_cleanup_date = None
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(store.count_calls)
+            try:
+                assert scanned.wait(15)
+                start.set()
+                assert attempting.wait(15)
+            finally:
+                release.set()
+            future.result(timeout=15)
+        writer.join(timeout=15)
+        assert writer.exitcode == 0
+        call_id = result.get(timeout=5)
+        assert store.restore_call(call_id)["request_text"] == text
+        assert blob.exists()
+    finally:
+        release.set()
+        start.set()
+        if writer.is_alive():
+            writer.terminate()
+        writer.join(timeout=5)
+        result.close()
+
+
+def test_clear_removes_media_and_orphan_downloads(tmp_path):
+    store = trace.LLMTraceStore(tmp_path / "trace.db", media_min_bytes=64)
+    call_id = _begin_media(store, '{"image":"' + "A" * 256 + '"}')
+    sha = store.get_call(call_id)["media_truncation"]["request"]["splices"][0]["sha256"]
+    assert store.download_blob(sha) is not None
+    assert store.clear() == 1
+    assert store.count_calls() == 0
+    assert store.download_blob(sha) is None
+    assert not list(store.blob_dir.rglob("*.b64"))
+    # 即使失败写入留下无引用文件，也不允许按摘要绕过记录生命周期下载。
+    orphan, _ = store.blob_store.store("A" * 256)
+    assert store.download_blob(orphan) is None
+
+
+def test_gc_skips_invalid_manifest_without_deleting_media(tmp_path):
+    store = trace.LLMTraceStore(tmp_path / "trace.db", media_min_bytes=64)
+    call_id = _begin_media(store, '{"image":"' + "A" * 256 + '"}')
+    blob = next(store.blob_dir.rglob("*.b64"))
+    with store._connect() as conn:
+        conn.execute(
+            "UPDATE llm_http_traces SET media_truncation=? WHERE call_id=?", ("{broken", call_id),
+        )
+    store._collect_orphaned_blobs(grace_seconds=0)
+    assert blob.exists()

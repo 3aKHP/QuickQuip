@@ -258,10 +258,18 @@ def get_trace_call(call_id: str, restore: bool = False):
 def get_trace_blob(sha256: str):
     """Download one content-addressed media blob by its sha256 digest."""
 
-    if not _SHA256_RE.match(sha256):
+    if not _SHA256_RE.fullmatch(sha256):
         raise HTTPException(status_code=422, detail="invalid blob digest")
     result = trace_store.download_blob(sha256)
     if result is None:
         raise HTTPException(status_code=404, detail="blob not found")
-    data, mime = result
-    return Response(content=data, media_type=mime)
+    data, _ = result
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{sha256}.bin"',
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
+    )

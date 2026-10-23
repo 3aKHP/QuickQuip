@@ -95,7 +95,7 @@ def test_nested_escaped_json_payload_is_replaced(tmp_path):
 def test_same_payload_is_stored_once(tmp_path):
     truncator = _truncator(tmp_path)
     payload = "F" * 2000
-    original = '{"a": "' + payload + '", "b": "' + payload + '"}'
+    original = '{"image": "' + payload + '", "b64_json": "' + payload + '"}'
 
     outcome = truncator.truncate(original)
 
@@ -109,7 +109,7 @@ def test_same_payload_is_stored_once(tmp_path):
 
 def test_splice_offsets_point_at_placeholders(tmp_path):
     truncator = _truncator(tmp_path)
-    original = '{"a": "' + "L" * 2000 + '", "b": "' + "M" * 2000 + '"}'
+    original = '{"image": "' + "L" * 2000 + '", "b64_json": "' + "M" * 2000 + '"}'
 
     outcome = truncator.truncate(original)
 
@@ -169,7 +169,8 @@ def test_manifest_helpers_accept_field_and_wrapped_shapes(tmp_path):
     assert collect_manifest_shas(json.dumps(field_manifest)) == {digest}
     assert collect_manifest_shas(json.dumps(wrapped)) == {digest}
     assert find_manifest_mime(json.dumps(wrapped), digest) == "image/webp"
-    assert collect_manifest_shas("{not json") == set()
+    with pytest.raises(ValueError):
+        collect_manifest_shas("{not json")
     assert find_manifest_mime(None, digest) is None
 
 
@@ -203,3 +204,72 @@ def test_resolve_min_bytes_reads_env_switch():
     assert resolve_min_bytes({"LLM_TRACE_MEDIA_MIN_BYTES": "65536"}) == 65536
     assert resolve_min_bytes({"LLM_TRACE_MEDIA_MIN_BYTES": "abc"}) == 0
     assert resolve_min_bytes({"LLM_TRACE_MEDIA_MIN_BYTES": "-5"}) == 0
+
+
+@pytest.mark.parametrize("key", ["content", "text", "result", "data"])
+@pytest.mark.parametrize("value", ["These are ordinary English words " * 80, "abcd" * 600])
+def test_plain_text_stays_readable_even_if_valid_base64(tmp_path, key, value):
+    original = json.dumps({key: value})
+    outcome = _truncator(tmp_path).truncate(original)
+    assert outcome.text == original
+    assert outcome.manifest is None
+    assert not list(tmp_path.rglob("*.b64"))
+
+
+@pytest.mark.parametrize("shape", [
+    {"inlineData": {"mimeType": "image/png", "data": "A" * 2000}},
+    {"source": {"type": "base64", "media_type": "image/png", "data": "A" * 2000}},
+    {"type": "image_generation_call", "result": "A" * 2000},
+    {"type": "response.image_generation_call.partial_image", "partial_image_b64": "A" * 2000},
+])
+def test_protocol_media_fields_and_sse_restore(tmp_path, shape):
+    original = 'event: result\ndata: ' + json.dumps(shape) + '\n\ndata: [DONE]\n\n'
+    truncator = _truncator(tmp_path)
+    outcome = truncator.truncate(original)
+    assert outcome.manifest is not None
+    assert truncator.restore(outcome.text, outcome.manifest) == original
+
+
+@pytest.mark.parametrize("payload", ["A" * 2001, "A" * 1999 + "=A", "A " * 1000])
+def test_invalid_base64_in_media_field_is_preserved(tmp_path, payload):
+    original = _text(payload)
+    outcome = _truncator(tmp_path).truncate(original)
+    assert outcome.text == original
+    assert outcome.manifest is None
+
+
+@pytest.mark.parametrize("suffix", [",", ' trailing', ', "image": "duplicate"}'])
+def test_malformed_or_duplicate_key_json_is_preserved(tmp_path, suffix):
+    original = _text("A" * 2000)[:-1] + suffix
+    outcome = _truncator(tmp_path).truncate(original)
+    assert outcome.text == original
+    assert outcome.manifest is None
+
+
+def test_nested_json_unicode_offsets_and_same_text_in_non_media_field(tmp_path):
+    payload = "A" * 2000
+    nested = json.dumps({"note": "中文😀\n", "image": payload, "content": payload})
+    original = json.dumps({"body": nested, "text": payload})
+    truncator = _truncator(tmp_path)
+    outcome = truncator.truncate(original)
+    assert len(outcome.manifest["splices"]) == 1
+    assert json.loads(json.loads(outcome.text)["body"])["content"] == payload
+    assert json.loads(outcome.text)["text"] == payload
+    assert truncator.restore(outcome.text, outcome.manifest) == original
+
+
+def test_multimegabyte_payload_scanning_has_bounded_memory():
+    import tracemalloc
+    from quickquip.llm.provider.media_truncator import _json_payloads
+
+    # 1 MiB 编码载荷曾引起约 150 MiB 正则回溯分配；容许线性副本开销。
+    original = json.dumps({"image": "A" * (1024 * 1024)})
+    tracemalloc.start()
+    try:
+        cuts = _json_payloads(original)
+        current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(cuts) == 1
+    assert peak < 32 * len(original)
+    assert current < len(original)

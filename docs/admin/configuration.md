@@ -56,7 +56,17 @@ LLM 工具 `search_web` 与 `/search` 命令固定走项目内 SearXNG。普通�
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `LLM_TRACE_FLAG_FILE` | LLM HTTP Trace 持久开关文件路径；文件存在时按调用记录完整请求/响应 JSON 文本到 `data/llm_trace.db`，供 Web Admin 的 LLM Trace 页面按需读取 | — |
-| `LLM_TRACE_MEDIA_MIN_BYTES` | 内联 base64 媒体载荷的截断门槛（字节）。达到门槛、且载荷构成被引号正确闭合的完整 JSON 字符串时，载荷本体写入 `data/trace_blobs/` 下的内容寻址副本，正文替换为 `[qq:blob sha256=<hex> bytes=<n>]` 占位符；同一份载荷在请求、重组响应与原始 SSE 中只落盘一份。未设置或为 `0` 时原样存储。进程启动时读取 | `0` |
+| `LLM_TRACE_MEDIA_MIN_BYTES` | Trace 内联媒体抽取门槛（载荷原文 UTF-8 字节数），推荐启用值 `65536`；未设置或为 `0` 时关闭。Bot 和 Web 在启动时读取。操作见下方“Trace 媒体存储” | `0` |
+
+### Trace 媒体存储
+
+Trace 开启期间，可在根 `.env` 设置 `LLM_TRACE_MEDIA_MIN_BYTES=65536` 并重启 Bot 与 Web，对新记录中达到门槛的内联媒体去重。正文显示占位符，原始载荷保存在 `data/trace_blobs/`；既有记录继续按原格式读取。完整 JSON 与 SSE 单行 JSON 中的 data URI 和明确媒体字段受支持。
+
+备份与恢复时，将 `data/llm_trace.db` 和 `data/trace_blobs/` 作为一组：停服后同时备份，恢复时同时还原。部署模板挂载整个 `data/`，无需额外挂载。不要把多个独立 Trace 数据库指向同一个 blob 目录。
+
+设置为 `0` 并重启会停止新记录的媒体抽取，当前版本仍能恢复已抽取记录。回退到不支持该清单格式的旧版本时，旧程序会显示占位符；需要完整历史报文时，应先在支持此功能的版本中导出原文，或恢复启用前的 Trace 备份。已有大记录的批量转换另行安排。
+
+管理员可通过 `/ops/api/logs/trace/calls/{call_id}?restore=true` 获取经校验的完整正文；`call_id` 使用详情记录中的实际 ID。`/ops/api/logs/trace/blobs/{sha256}` 使用占位符中的摘要下载媒体附件，两个接口均要求有效的后台登录态。文件缺失或恢复校验失败时，先检查数据库与 blob 目录是否来自同一备份。清空 Trace 会移除记录并清理无引用媒体文件；下载只开放给仍被记录引用的载荷。
 
 ### 贴吧
 

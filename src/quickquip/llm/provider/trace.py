@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import hashlib
 from contextlib import contextmanager
 from contextvars import ContextVar
 from quickquip.llm.session import SessionIdentity
@@ -20,13 +20,14 @@ import logging
 
 from quickquip.common.paths import LLM_TRACE_DB_PATH, LOGS_DIR
 from quickquip.llm.provider.media_truncator import (
-    MANIFEST_VERSION,
     MediaBlobStore,
     MediaTruncator,
     collect_manifest_shas,
     decode_payload,
     find_manifest_mime,
     resolve_min_bytes,
+    parse_manifest,
+    merge_field_manifests,
 )
 
 
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 _TRACE_FLAG_FILE = os.getenv("LLM_TRACE_FLAG_FILE", "")
 _TRACE_RETENTION_DAYS = 14
 _TRACE_BLOB_DIR_NAME = "trace_blobs"
-# GC 保守带：blob 先落盘、引用行后提交，清扫必须避开这个并发窗口。
+# 孤立文件保留一天，给失败写入和运维检查留下恢复窗口。
 _TRACE_BLOB_GRACE_SECONDS = 24 * 3600
 _LEGACY_TRACE_GLOB = "quickquip_trace_????-??-??.jsonl"
 _TRACE_STALE_AFTER = timedelta(hours=1)
@@ -48,42 +49,6 @@ _SQLITE_RETRYABLE_LOCK_CODES = {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_manifest(raw: str | None) -> dict[str, object] | None:
-    """解析落库的 manifest JSON；非法或为空返回 ``None``（视作原样存储）。"""
-
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except (ValueError, TypeError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _merge_field_manifests(
-    existing_json: str | None,
-    additions: dict[str, dict[str, object] | None],
-) -> str | None:
-    """把新字段的清单并入已有 manifest，避免后写的一次覆盖前一次。
-
-    ``begin_call`` 落 request，``finish_call`` 落 response 与 response_raw，
-    三者共用一个 ``media_truncation`` 列，必须合并而非覆盖。全部字段都无
-    截断时返回 ``None``——该行就是「原样存储」。
-    """
-
-    payload = _parse_manifest(existing_json) or {}
-    changed = False
-    for field_name, manifest in additions.items():
-        if manifest is None:
-            continue
-        payload[field_name] = manifest
-        changed = True
-    if not changed:
-        return existing_json or None
-    payload["v"] = MANIFEST_VERSION
-    return json.dumps(payload, ensure_ascii=False)
 
 
 @dataclass(slots=True)
@@ -409,11 +374,11 @@ class LLMTraceStore:
         self._ensure_schema()
         self._cleanup_if_due()
         call_id = uuid4().hex
-        # 唯一写入咽喉之一：三个大文本在落库前过一遍截断器，provider 层零改动。
-        # request_bytes 仍记原始字节数（等同 full_bytes），语义不变。
-        outcome = self.truncator.truncate(request_text)
-        manifest_json = _merge_field_manifests(None, {"request": outcome.manifest})
         with self._connect() as conn:
+            # 与 GC 使用同一数据库写锁，覆盖文件创建/复用直到引用提交。
+            conn.execute("BEGIN IMMEDIATE")
+            outcome = self.truncator.truncate(request_text)
+            manifest_json = merge_field_manifests(None, {"request": outcome.manifest})
             cursor = conn.execute(
                 """
                 INSERT INTO llm_http_traces (
@@ -466,18 +431,17 @@ class LLMTraceStore:
         response_raw_bytes: int = 0,
     ) -> None:
         self._ensure_schema()
-        # 重组响应与原始 SSE 帧各含一份同样的 base64：两处截断后同哈希指向
-        # 同一个 blob，这正是「同一次调用双份」膨胀源的坍缩点。
-        response_outcome = self.truncator.truncate(response_text or "")
-        raw_outcome = self.truncator.truncate(response_raw_text or "")
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 "SELECT id, media_truncation FROM llm_http_traces WHERE call_id = ?",
                 (call_id,),
             ).fetchone()
             if existing is None:
                 return
-            manifest_json = _merge_field_manifests(
+            response_outcome = self.truncator.truncate(response_text or "")
+            raw_outcome = self.truncator.truncate(response_raw_text or "")
+            manifest_json = merge_field_manifests(
                 existing["media_truncation"],
                 {
                     "response": response_outcome.manifest,
@@ -575,7 +539,7 @@ class LLMTraceStore:
             "response_headers": row["response_headers"] or "",
             "response_text": row["response_text"] or "",
             "response_raw_text": row["response_raw_text"] or "",
-            "media_truncation": _parse_manifest(row["media_truncation"]),
+            "media_truncation": parse_manifest(row["media_truncation"]),
         }
 
     def restore_call(self, call_id: str) -> dict[str, object] | None:
@@ -612,7 +576,7 @@ class LLMTraceStore:
         return result
 
     def find_blob_mime(self, sha256: str) -> str | None:
-        """反查某个 blob 的 mime，供下载端点作 Content-Type。"""
+        """从最多 20 个含摘要的 JSON 清单中读取声明的 MIME，供诊断使用。"""
 
         self._ensure_schema()
         with self._connect() as conn:
@@ -633,14 +597,19 @@ class LLMTraceStore:
     def download_blob(self, sha256: str) -> tuple[bytes, str] | None:
         """取出 blob 并解成二进制；返回 ``(bytes, mime)``，缺失返回 ``None``。"""
 
+        self._ensure_schema()
+        self._cleanup_if_due()
+        declared_mime = self.find_blob_mime(sha256)
+        if declared_mime is None:
+            return None
         payload = self.blob_store.load(sha256)
-        if payload is None:
+        if payload is None or hashlib.sha256(payload.encode("utf-8")).hexdigest() != sha256:
             return None
         decoded = decode_payload(payload)
         if decoded is None:
             return None
         data, mime = decoded
-        resolved = mime or self.find_blob_mime(sha256) or ""
+        resolved = mime or declared_mime
         return data, resolved or "application/octet-stream"
 
     def list_events(
@@ -719,9 +688,12 @@ class LLMTraceStore:
     def clear(self) -> int:
         self._ensure_schema()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             count = int(conn.execute("SELECT COUNT(*) FROM llm_http_traces").fetchone()[0])
             conn.execute("DELETE FROM llm_http_trace_events")
             conn.execute("DELETE FROM llm_http_traces")
+            # 先提交引用移除，再清理文件；即使清理失败，孤立文件也不可下载。
+        self._collect_orphaned_blobs(grace_seconds=0)
         return count
 
     def storage_bytes(self) -> int:
@@ -773,26 +745,27 @@ class LLMTraceStore:
             except OSError:
                 logger.debug("Failed to clean legacy LLM trace file: %s", path)
 
-    def _collect_orphaned_blobs(self) -> None:
-        """mark-sweep 清扫无引用 blob；挂在每日留存清理末尾。
-
-        选扫描式而非引用计数：对任意删除路径（含运维手工清库）免疫，
-        不存在计数漂移。24h 保守带规避「blob 已写入、引用行尚未提交」。
-        """
+    def _collect_orphaned_blobs(self, *, grace_seconds=_TRACE_BLOB_GRACE_SECONDS) -> None:
+        """持有数据库写锁扫描引用并清理，协调 Bot/Web 的跨进程写入。"""
 
         try:
             with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
                 rows = conn.execute(
                     "SELECT media_truncation FROM llm_http_traces "
                     "WHERE media_truncation IS NOT NULL"
-                ).fetchall()
-        except sqlite3.Error:
-            logger.exception("LLM trace blob 引用扫描失败")
+                )
+                referenced: set[str] = set()
+                for row in rows:
+                    if parse_manifest(row["media_truncation"]) is None:
+                        raise ValueError("invalid media manifest; skip blob GC")
+                    referenced |= collect_manifest_shas(row["media_truncation"])
+                removed = self.blob_store.collect_orphaned(
+                    referenced, grace_seconds,
+                )
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("LLM trace blob 引用扫描或清理失败")
             return
-        referenced: set[str] = set()
-        for row in rows:
-            referenced |= collect_manifest_shas(row["media_truncation"])
-        removed = self.blob_store.collect_orphaned(referenced, _TRACE_BLOB_GRACE_SECONDS)
         if removed:
             logger.info("LLM trace blob GC 已清理 %d 个无引用 blob", removed)
 

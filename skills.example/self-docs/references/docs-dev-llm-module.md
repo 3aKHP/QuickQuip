@@ -14,7 +14,13 @@ QuickQuip 的 LLM 模块为规则机器人提供对话扩展。管理员按群�
 
 LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message、Gemini GenerateContent 或 OpenAI Responses 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
 
-多模态消息的内联 base64 载荷在落库前按内容寻址去重：`LLM_TRACE_MEDIA_MIN_BYTES` 达到门槛的载荷写入 `data/trace_blobs/`，正文只留 `[qq:blob sha256=<hex> bytes=<n>]` 占位符，同一份载荷在请求、重组响应与原始 SSE 三处共用一个副本。每次截断把 splice 清单与全文哈希记入 `media_truncation` 列；读端默认返回占位符文本，`restore` 参数按清单回拼并逐项校验。每日留存清理之后，按剩余行的引用集合 mark-sweep 未被引用的 blob。截断只发生在落库侧，发往上游的报文不变；未达门槛、畸形或被截断的字符串一律原样存储。配置键与默认值见[管理员配置](../admin/configuration.md)。
+启用 `LLM_TRACE_MEDIA_MIN_BYTES` 后，Trace 会在入库前抽取达到门槛的内联 base64 载荷。识别范围为完整 JSON、SSE 的完整单行 JSON data 记录及其中最多四层嵌套 JSON 字符串；data URI 须通过严格 base64 校验，裸编码还须处于明确的媒体字段，例如 `b64_json`、`partial_image_b64`、带媒体类型的 `data` 或图片生成结果。普通正文、未达门槛、畸形及不支持的编码形态按原文保存。
+
+载荷原文按 SHA-256 存入 `data/trace_blobs/`，正文替换为 `[qq:blob sha256=<hex> bytes=<n>]`。完全相同的载荷文本跨请求、重组响应和原始 SSE 共用一个文件；data URI 前缀参与哈希。每个正文的替换位置和哈希保存在同一条记录的 `media_truncation` 清单中，原始字节计数保持原义。请求发送路径使用原始载荷。
+
+每份 blob 目录由一份 Trace 数据库拥有。Bot 和 Web 通过该数据库的 `BEGIN IMMEDIATE` 写事务协调载荷创建／复用、引用提交，以及 GC 引用扫描到文件删除的整个区间。每日留存清理后删除无引用且超过一天的文件；文件年龄用于保留失败写入的恢复窗口，并发安全由事务保证。清单无效时跳过该次文件清理。显式清空会删除记录并清理无引用文件，下载入口同时检查记录引用。
+
+管理员详情接口默认返回含占位符的正文，`restore=true` 按清单恢复并核验全文与载荷哈希；文件缺失或校验失败返回 409。blob 下载继承管理员鉴权，统一返回 `application/octet-stream` 附件，并设置 `nosniff` 与限制性 CSP。抽取开关关闭后仍能恢复已抽取记录。配置、备份及升级操作见[管理员配置](../admin/configuration.md#trace-媒体存储)。
 
 ### 1.1 执行记录的请求边界
 
