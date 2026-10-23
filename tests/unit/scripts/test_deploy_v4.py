@@ -93,6 +93,13 @@ if args[0] == "compose":
         print("test-container")
     elif "logs" in args:
         print("Bot 123456 connected")
+    elif "exec" in args and "quickquip.llm.config_cli" in args and "status" in args:
+        import argparse
+        # The previous release supports require-loaded but no timestamp argument.
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--require-loaded", action="store_true")
+        parser.parse_args(args[args.index("status") + 1:])
+        print(json.dumps({"bot": {"heartbeat_at": float(os.environ.get("BOT_HEARTBEAT", "2"))}}))
 elif args[0] == "inspect":
     print("1970-01-01T00:00:01Z" if "{{.State.StartedAt}}" in args else "true")
 """
@@ -152,6 +159,31 @@ def test_failed_recovery_retains_private_backup_and_reports_failure(deployment):
     assert (inbox / "backup/.env").read_text() == "ONEBOT_ACCESS_TOKEN=old\n"
     assert (inbox / "backup").stat().st_mode & 0o777 == 0o700
     assert (root / "current").readlink() == Path("releases") / OLD
+
+
+def test_upgrade_failure_recovers_legacy_configuration_health(deployment):
+    root, _, _ = deployment
+    cli = root / "releases" / OLD / "src/quickquip/llm/config_cli.py"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("# Previous release with status --require-loaded.\n")
+    result = run_deploy(deployment, FAIL_UP="new", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
+
+
+def test_rollback_checks_legacy_configuration_health(deployment):
+    root, _, _ = deployment
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    cli = target / "src/quickquip/llm/config_cli.py"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("# Previous release with status --require-loaded.\n")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "current").readlink() == Path("releases") / NEW
 
 
 def test_lock_rejects_second_action_before_live_mutation(deployment):
@@ -553,6 +585,15 @@ def _add_config_initializer(deployment):
     candidate = inbox / "tree/config"
     candidate.mkdir()
     return old, candidate
+
+
+def test_previous_bot_heartbeat_cannot_acknowledge_new_container(deployment):
+    root, _, _ = deployment
+    _add_config_initializer(deployment)
+    result = run_deploy(deployment, BOT_HEARTBEAT="0", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
 
 
 def test_config_migration_selects_server_assets_before_initializer(deployment):

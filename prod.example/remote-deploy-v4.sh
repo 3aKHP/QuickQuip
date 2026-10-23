@@ -310,8 +310,10 @@ configuration_health() {
     container="$(compose "$release" ps -q quickquip)" || return 1
     started="$(docker inspect -f '{{.State.StartedAt}}' "$container")" || return 1
     started="$("$Python" -c 'from datetime import datetime; import sys; print(datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp())' "$started")" || return 1
-    compose "$release" exec -T web-admin python -m quickquip.llm.config_cli status --require-loaded \
-        --not-before "$started" >/dev/null 2>&1
+    # Read the stable status payload so older releases remain valid rollback targets.
+    compose "$release" exec -T web-admin python -m quickquip.llm.config_cli status --require-loaded 2>/dev/null \
+        | "$Python" -c 'import json,sys; status=json.load(sys.stdin); sys.exit(0 if status["bot"]["heartbeat_at"] >= float(sys.argv[1]) else 1)' \
+            "$started" >/dev/null 2>&1
 }
 health() {
     local release="$1" deadline=$((SECONDS + ${DEPLOY_HEALTH_TIMEOUT:-150})) bad container service
