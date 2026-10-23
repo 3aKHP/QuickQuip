@@ -49,6 +49,17 @@ def get_web_admin_session_ttl_hours() -> int:
     return min(max(value, 1), 24 * 365)
 
 
+def get_web_admin_session_max_age_hours() -> int:
+    """WEB_ADMIN_SESSION_MAX_AGE_HOURS（.env），会话绝对寿命，超时强制重新登录。"""
+    load_web_env()
+    raw = os.environ.get("WEB_ADMIN_SESSION_MAX_AGE_HOURS", "168").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return 168
+    return min(max(value, 1), 24 * 365)
+
+
 def get_web_admin_cookie_secure_mode() -> str:
     load_web_env()
     raw = os.environ.get("WEB_ADMIN_COOKIE_SECURE", "auto").strip().lower()

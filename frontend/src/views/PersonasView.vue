@@ -16,7 +16,7 @@
       </nav>
 
       <div class="editor-col">
-        <div v-if="!selectedName" class="hint-panel"><UiEmpty icon="FileText" title="从左侧选择一个人格开始编辑" /></div>
+        <div v-if="!selectedName" class="hint-panel"><UiEmpty icon="FileText" title="选择一个人格开始编辑" description="从列表中选择一个人格查看与编辑其 TOML 内容。" /></div>
         <template v-else>
           <div class="editor-bar">
             <div class="editor-bar-title"><span class="mono">{{ selectedName }}.toml</span><UiTag v-if="isCreating" size="sm" variant="success">待创建</UiTag><UiTag v-else-if="isProtected" size="sm" variant="info">不可删除</UiTag><UiInfoTip v-if="isProtected" text="受保护的保留文件名（当前仅 _shared），后端拒绝删除与同名创建。" /></div>
@@ -74,7 +74,8 @@ loadList()
 .mono { font-family: var(--qq-font-mono); }
 
 .editor-col { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; gap: var(--qq-gap-sm); }
-.hint-panel { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
+/* 桌面端人格列表可长达数千 px，hint 贴顶对齐，避免垂直居中后被推到首屏视口外 */
+.hint-panel { flex: 1; display: flex; align-items: flex-start; justify-content: center; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 .editor-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-md); flex-wrap: wrap; }
 .editor-bar-title { display: flex; align-items: center; gap: var(--qq-gap-sm); color: var(--qq-text); font-size: var(--qq-text-base); }
 .editor-bar-actions { display: flex; gap: var(--qq-gap-sm); }
@@ -82,5 +83,10 @@ loadList()
 .toml-editor { display: block; width: 100%; height: 100%; min-height: 300px; background: var(--qq-surface); color: var(--qq-text); font-family: var(--qq-font-mono); font-size: var(--qq-text-sm); line-height: 1.7; padding: var(--qq-gap-md); resize: none; outline: none; border: none; }
 .toml-editor:focus { box-shadow: inset 0 0 0 1px var(--qq-primary); }
 
-@media (max-width: 900px) { .split { flex-direction: column; } .list-panel { width: 100%; max-height: 200px; } }
+@media (max-width: 900px) {
+  .split { flex-direction: column; }
+  .list-panel { width: 100%; }
+  .editor-wrap { flex: none; }
+  .toml-editor { height: auto; min-height: 55vh; }
+}
 </style>

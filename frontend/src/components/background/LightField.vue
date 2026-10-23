@@ -32,7 +32,8 @@ const stage = createLightFieldStage({
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let raf = 0
 
-const onMouseMove = (e: MouseEvent) => stage.onMouseMove(e)
+// 静态模式（低动效/reduced-motion）不消费指针视差，跳过坐标更新
+const onMouseMove = (e: MouseEvent) => { if (!shouldStatic()) stage.onMouseMove(e) }
 
 /** 静态渲染判定：系统 reduced-motion 或用户开启低动态 */
 function shouldStatic(): boolean {

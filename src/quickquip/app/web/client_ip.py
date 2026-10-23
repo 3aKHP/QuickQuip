@@ -1,21 +1,41 @@
 """Shared helper to resolve the real client IP from a FastAPI request.
 
-Sits behind a Docker bridge (request.client.host is always the gateway). When
-the direct peer is a private / loopback address this helper trusts the
-leftmost X-Forwarded-For value; otherwise it returns the direct TCP peer IP.
+Sits behind a Docker bridge or nginx reverse proxy (request.client.host is
+then always the gateway / loopback). When the direct peer is a private or
+loopback address this helper walks the X-Forwarded-For chain right-to-left
+and takes the rightmost untrusted hop: proxies append the peer they saw, so
+the first non-private entry from the right is the real client even when the
+client itself prepended a spoofed XFF value. A public direct peer means no
+trusted proxy is in the path, and XFF is ignored entirely.
+
+The heuristic assumes every trusted proxy is a private/loopback hop. With a
+public front proxy (CDN, cloud LB) between nginx and the client, the result
+is that proxy's egress address, and rate limiting is shared per egress; see
+docs/admin/web-admin.md for the deployment guidance.
 """
+
+import ipaddress
 
 from fastapi import Request
 
-_TRUSTED_PREFIXES = ("127.", "::1", "10.", "172.", "192.168.")
+
+def _is_trusted_proxy(ip_text: str) -> bool:
+    try:
+        address = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback
 
 
 def get_client_ip(request: Request) -> str:
     direct_ip = request.client.host if request.client else ""
-    if direct_ip and any(direct_ip.startswith(p) for p in _TRUSTED_PREFIXES):
-        forwarded_for = request.headers.get("x-forwarded-for", "")
-        if forwarded_for:
-            candidate = forwarded_for.split(",")[0].strip()
-            if candidate and "\n" not in candidate and "\r" not in candidate:
-                return candidate
+    if not direct_ip or not _is_trusted_proxy(direct_ip):
+        return direct_ip
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    for hop in reversed(forwarded_for.split(",")):
+        candidate = hop.strip()
+        if not candidate or "\n" in candidate or "\r" in candidate:
+            continue
+        if not _is_trusted_proxy(candidate):
+            return candidate
     return direct_ip

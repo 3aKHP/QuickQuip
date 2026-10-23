@@ -35,6 +35,7 @@ async def run_tool_call_loop(
     image_preprocessor=None,
     turn_recorder=None,
     request_guard=None,
+    on_provider_activity=None,
 ):
 
     client = build_provider_client(provider)
@@ -74,7 +75,13 @@ async def run_tool_call_loop(
             # 超限按契约终止 Loop（request_budget_exceeded），不放行 HTTP。
             request_guard(current_request)
         # 上游 429/5xx 的退避重试由 provider client 的 complete() 内建
-        response = await client.complete(current_request)
+        if on_provider_activity is not None:
+            on_provider_activity()
+        try:
+            response = await client.complete(current_request)
+        finally:
+            if on_provider_activity is not None:
+                on_provider_activity()
         if request_guard is not None:
             request_guard(current_request)
         # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发

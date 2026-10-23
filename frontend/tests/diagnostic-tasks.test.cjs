@@ -118,6 +118,16 @@ test('an offline bot leaves queued work observable after a bounded wait without 
   assert.equal(submitted, 1)
 })
 
+test('consecutive read failures back off instead of hammering a fixed cadence', async () => {
+  let reads = 0
+  const state = task(async () => { reads++; throw new Error('backend down') }, { intervalMs: 25, timeoutMs: 400 })
+  await state.start(async () => operation('queued'))
+  // 固定 25ms 节奏在 400ms 窗口内约 16 次读；退避（25→50→100→200→400）只读约 5 次
+  assert.ok(reads >= 3 && reads <= 7, `expected bounded reads under backoff, got ${reads}`)
+  assert.match(state.error.value, /尚未确认/)
+  assert.equal(state.pending.value, true)
+})
+
 test('sample component binds published revision, default model and user text across lost responses', async () => {
   const sent = []
   const result = { text: 'parsed', thinking_blocks: [{ text: 'thought' }], trace_calls: [{ id: 'trace' }], duration_ms: 42 }

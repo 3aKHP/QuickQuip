@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import pytest
 
+
 from quickquip.llm.agent_records import ResponseOwner
 from quickquip.llm.history_projection import (
     HistoryProjectionError,
@@ -810,3 +811,19 @@ def test_owner_unknown_label_applies_across_protocols(protocol):
     decision = result.decisions[0]
     assert decision.path == PATH_STRUCTURED
     assert decision.reason == "owner_unknown"
+
+
+@pytest.mark.parametrize("budget", [100000, 150])
+def test_trigger_projection_preserves_identity_quote_and_caption(budget):
+    from quickquip.llm.history_projection import project_loops_with_budget
+
+    loop = _loop("with_quote", (_turn("turn_0"),))
+    loop = replace(loop, user_row={
+        "content": "这个怎么样", "user_id": "123", "canonical_name": "Alice",
+        "raw_content": "引用：QUOTE\n转发：FORWARD\n[图片：CAPTION]\n这个怎么样",
+    })
+    result = project_loops_with_budget(
+        [loop], target=None, protocol="gemini", budget_tokens=budget,
+    )
+    trigger = result.messages[0].content
+    assert all(value in trigger for value in ("Alice", "123", "QUOTE", "FORWARD", "CAPTION"))

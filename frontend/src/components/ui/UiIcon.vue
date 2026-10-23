@@ -9,23 +9,23 @@
 
 <script setup lang="ts">
 import {
-  BarChart3, ToggleLeft, Users, Brain, FileText, MessageCircle,
+  ChartColumn, ToggleLeft, Users, Brain, FileText, MessageCircle,
   Drama, BookUser, SlidersHorizontal, Zap, BookOpen, Newspaper,
   Settings, Stethoscope, Server, Clock, ShieldCheck, Coins, Swords,
-  Loader2, CircleX, Info, LogOut, Menu, Bot, Sun, Moon, ChevronRight,
-  Search, Plus, Trash2, Pencil, RotateCw, Upload, ExternalLink,
+  LoaderCircle, CircleX, Info, LogOut, Menu, Bot, Sun, Moon, ChevronRight,
+  Search, Plus, Trash, Pencil, RotateCw, Upload, ExternalLink,
   Check, X, ChevronDown, FolderOpen, Lock, RefreshCw, LayoutDashboard,
   MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
-  AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
+  TriangleAlert, Play, Save, ChevronLeft, Download, Sparkles,
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
   CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
-  Quote, ZapOff, AlarmClock, Mail, Layers, Image, CircleHelp,
-  Database, Hourglass, History, Pause,
+  Quote, ZapOff, AlarmClock, Mail, Layers, Image, CircleQuestionMark,
+  Database, Hourglass, RotateCcwClock, Pause,
   Route, Palette, Power, MessageSquare, CalendarClock, Rocket,
   ArrowLeftRight, Boxes, RotateCcw, ArrowUp, ArrowDown, GitCompareArrows,
   Tag, ArrowUpRight, ListPlus
-} from 'lucide-vue-next'
+} from '@lucide/vue'
 import { computed } from 'vue'
 import type { Component } from 'vue'
 
@@ -51,21 +51,21 @@ type IconName =
   | 'Tag' | 'ArrowUpRight' | 'ListPlus'
 
 const ICON_MAP: Record<IconName, Component> = {
-  BarChart3, ToggleLeft, Users, Brain, FileText,
+  BarChart3: ChartColumn, ToggleLeft, Users, Brain, FileText,
   MessageCircle, Drama, BookUser, SlidersHorizontal,
   Zap, BookOpen, Newspaper, Settings, Stethoscope,
   Server, Clock, ShieldCheck, Coins, Swords,
-  Loader2, CircleX, Info, LogOut, Menu, Bot,
-  Sun, Moon, ChevronRight, Search, Plus, Trash2,
+  Loader2: LoaderCircle, CircleX, Info, LogOut, Menu, Bot,
+  Sun, Moon, ChevronRight, Search, Plus, Trash2: Trash,
   Pencil, RotateCw, Upload, ExternalLink, Check,
   X, ChevronDown, FolderOpen, Lock, RefreshCw, LayoutDashboard,
   MessagesSquare, BrainCircuit, ServerCog, Gamepad2, Gauge, Network,
   Cloud, ArrowRight, ChevronUp, Send, FileCode, ListChecks,
-  AlertTriangle, Play, Save, ChevronLeft, Download, Sparkles,
+  AlertTriangle: TriangleAlert, Play, Save, ChevronLeft, Download, Sparkles,
   BellRing, Radar, Wrench, ListTree, Eraser, Activity,
   CalendarRange, CalendarDays, Copy, MousePointerClick, ShieldAlert,
-  Quote, ZapOff, AlarmClock, Mail, Layers, Image, CircleHelp,
-  Database, Hourglass, History, Pause,
+  Quote, ZapOff, AlarmClock, Mail, Layers, Image, CircleHelp: CircleQuestionMark,
+  Database, Hourglass, History: RotateCcwClock, Pause,
   Route, Palette, Power, MessageSquare, CalendarClock, Rocket,
   ArrowLeftRight, Boxes, RotateCcw, ArrowUp, ArrowDown, GitCompareArrows,
   Tag, ArrowUpRight, ListPlus,

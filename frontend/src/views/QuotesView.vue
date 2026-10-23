@@ -19,6 +19,8 @@
       </div>
     </UiCard>
 
+    <UiEmpty v-if="!selectedGroup" icon="Quote" title="请先选择群组" description="从上方下拉选择一个群组，浏览、搜索或管理该群收藏的名言语录。" />
+
     <template v-if="selectedGroup">
       <!-- Search -->
       <UiCard padding="md" shadow="sm" class="section">
@@ -67,7 +69,8 @@
         </table></div>
 
         <div v-if="hasMore && entries.length" class="load-more">
-          <UiButton :loading="loading" @click="loadMore">加载更多</UiButton>
+          <span v-if="reachedSoftCap" class="muted">已达 {{ LIST_SOFT_CAP }} 条上限，请用关键词缩小范围</span>
+          <UiButton v-else :loading="loading" @click="loadMore">加载更多</UiButton>
         </div>
       </UiCard>
     </template>
@@ -104,6 +107,8 @@ const hasMore = ref(false)
 const keyword = ref('')
 const offset = ref(0)
 const pageSize = 50
+const LIST_SOFT_CAP = 500
+const reachedSoftCap = computed(() => entries.value.length >= LIST_SOFT_CAP)
 
 onMounted(() => loadGroups())
 
@@ -145,6 +150,7 @@ function clearSearch() {
 }
 
 function loadMore() {
+  if (reachedSoftCap.value) return
   offset.value += pageSize
   loadQuotes(false)
 }
@@ -205,4 +211,5 @@ function formatTime(ts: number): string {
 .sender-qq { margin-top: 2px; opacity: 0.7; font-variant-numeric: tabular-nums; }
 .time { white-space: nowrap; font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
 .load-more { margin-top: var(--qq-gap-sm); text-align: center; }
+.muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 </style>

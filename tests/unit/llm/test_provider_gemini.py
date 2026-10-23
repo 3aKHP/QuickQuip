@@ -10,6 +10,25 @@ from plugins.llm_tools import LLMConversationMessage, LLMToolSpec
 from tests.fixtures.provider_fakes import FakeGeminiClient
 
 
+def test_stream_preserves_independent_signed_parts_and_text_deltas():
+    def chunk(parts):
+        return {"candidates": [{"content": {"parts": parts}}]}
+
+    response = GeminiProviderClient._assemble_stream_response([
+        chunk([{"text": "a"}, {"text": "b", "thoughtSignature": "sig-b"}]),
+        chunk([{"text": "c"}]),
+        chunk([{"text": "d"}]),
+        chunk([{"text": "", "thoughtSignature": "sig-cd"}]),
+        chunk([{"text": "e", "thoughtSignature": "sig-e"}]),
+    ], "m")
+    assert response.native_blocks == [
+        {"text": "a"}, {"text": "b", "thoughtSignature": "sig-b"},
+        {"text": "cd", "thoughtSignature": "sig-cd"},
+        {"text": "e", "thoughtSignature": "sig-e"},
+    ]
+    assert response.text == "abcde"
+
+
 def _provider_config() -> ProviderConfig:
     return ProviderConfig(
         id="fake-gemini",

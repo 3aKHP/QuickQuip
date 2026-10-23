@@ -14,6 +14,8 @@
 
 ## 鉴权结构
 
+服务端会话与 Cookie 授权的选择依据见 [ADR-0009](../dev/adr/0009-web-admin-server-sessions.md)。
+
 ```text
 浏览器
   ↓
@@ -50,9 +52,9 @@ FastAPI 管理接口独立校验应用会话。内层登录带速率限制：同
 
 - 存储位置：`data/web_admin_sessions.db`
 - 介质：SQLite
-- 内容：`session_id`、创建时间、过期时间、最近访问时间、客户端 IP、User-Agent
+- 内容：`session_id` 的 SHA-256 哈希（明文 id 只存在于浏览器 cookie）、创建时间、过期时间、最近访问时间、客户端 IP、User-Agent
 
-管理员登录后，浏览器通过会话 Cookie 访问后台；口令只用于登录校验。
+管理员登录后，浏览器通过会话 Cookie 访问后台；口令只用于登录校验。会话随活动滑动续期（`WEB_ADMIN_SESSION_TTL_HOURS`），同时受绝对寿命限制（`WEB_ADMIN_SESSION_MAX_AGE_HOURS`）：自创建起超过绝对寿命的会话会被删除并要求重新登录。
 
 ### 3. cookie 属性
 
@@ -84,6 +86,7 @@ Web Admin 使用以下环境变量：
 ```env
 WEB_ADMIN_PASSWORD=change-this-admin-password
 WEB_ADMIN_SESSION_TTL_HOURS=168
+WEB_ADMIN_SESSION_MAX_AGE_HOURS=168
 WEB_ADMIN_COOKIE_SECURE=auto
 ```
 
@@ -91,6 +94,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 - `WEB_ADMIN_PASSWORD`  应用层登录口令，必填
 - `WEB_ADMIN_SESSION_TTL_HOURS`  session 续期窗口，默认 `168`
+- `WEB_ADMIN_SESSION_MAX_AGE_HOURS`  session 绝对寿命，默认 `168`，自创建起超过该时长必须重新登录
 - `WEB_ADMIN_COOKIE_SECURE`  `auto | true | false`
 
 在根目录 `.env` 设置这些变量后，源码安装重新启动 Web 进程，容器安装重新创建 Web 服务。源码安装先在 `frontend/` 构建前端，再从项目根运行 `python web_api.py`；容器安装与变量更新步骤见[部署指南](deployment.md)。`web_api.py` 启动时读取根 `.env`，已有进程环境变量优先。
@@ -104,10 +108,26 @@ WEB_ADMIN_COOKIE_SECURE=auto
 ```nginx
 proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header Host $host;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-For $remote_addr;
 ```
 
 这样 `WEB_ADMIN_COOKIE_SECURE=auto` 才能正确判断当前请求应当下发 `Secure` cookie。
+
+`X-Forwarded-For` 使用 `$remote_addr` 覆盖语义：后端从直连对端为内网地址的请求中取 XFF 最右一个非内网跳作为真实客户端 IP，登录限流按该 IP 计数。`$proxy_add_x_forwarded_for` 会把客户端自带的 XFF 保留在链上，覆盖语义可以让链上只有 nginx 实际看到的对端地址。
+
+该算法假定可信代理全是内网地址。如果 nginx 前面还有公网前置代理（CDN、云负载均衡），取到的将是前置代理的出口地址而非终端客户端：限流与封禁按出口地址共享计数，误伤同出口的其他管理员；这种拓扑下应在最外层代理做限流。反过来，不要把后台直接绑定到不信任的二层网络（源码安装时显式设置 `WEB_ADMIN_HOST=0.0.0.0` 且无代理）——此时对端是内网地址而路径上没有代理追加真实来源，XFF 完全由客户端控制，限流键可被任意伪造。
+
+外层 `auth_basic` 本身没有速率限制，建议在 nginx 站点中为 `/ops/` 位置补充请求限流，例如：
+
+```nginx
+limit_req_zone $binary_remote_addr zone=quickquip_ops:10m rate=10r/m;
+
+location /ops/ {
+    limit_req zone=quickquip_ops burst=20 nodelay;
+    auth_basic "quickquip";
+    ...
+}
+```
 
 如果你的站点已经明确只通过 HTTPS 暴露，但暂时不方便补这些 header，也可以直接设置：
 
@@ -124,6 +144,7 @@ WEB_ADMIN_COOKIE_SECURE=true
 - 浏览器会话使用 `SameSite=Strict`
 - 写操作会额外检查 `Origin` / `Referer` 是否与当前请求宿主一致
 - FastAPI 独立校验应用登录会话
+- 后端对全部响应统一下发安全响应头（CSP、`X-Frame-Options`、`X-Content-Type-Options`、`Referrer-Policy`）
 
 外层站点访问控制和应用层 session 共同组成后台的纵深防御边界。
 
@@ -147,7 +168,7 @@ WEB_ADMIN_COOKIE_SECURE=true
 - **Skill** — 查看技能包状态与诊断、编辑文本资源、同步预置包，并从压缩包、文件夹或 GitHub 导入。安装先检查再确认，覆盖前自动备份；含脚本的包会提示审阅。入口为“LLM 工坊”的 `/ops/#/skills`，操作与约束见[Skill 管理](skills.md)
 - **诊断** — 已发布 LLM 配置重载、MCP 手动重连、上下文清理、样本请求、文本规则回归测试、provider 探活（Bot 队列逐目标执行，按需计费）和 LLM 健康状态
 - **用量** — LLM 用量/成本看板（渠道／模型／功能／群／人格五维统计与筛选、定价状态展示）
-- **纪元** — 查看会话窗口条数、token 及输入构成随时间的变化，按冷场、触顶、行数限制和切换人格事件回看窗口推进。显示轮次上下文构成、实时水位与冷场倒计时，点击时间点可定格查看
+- **纪元** — 查看会话窗口条数、token 及输入构成随时间的变化，按冷场、触顶、行数限制、预算、历史修订、投影配置、记录清理和人格切换事件回看窗口重建。显示冻结历史段数、回放估算、轮次上下文构成、生效水位与冷场倒计时，点击时间点可定格查看
 - **总结** — 查阅/删除每日总结、群周报、群月报存档（顶部切换日/周/月）；“生成健康度”按链路汇总近 7/30 天日报、简报和周月报的调用次数、接受率、异常构成、成本与均耗时。一次级联可产生多次尝试，成本包含已丢弃正文的调用；旧记录缺少正文接受结果时计入未知。每篇报文详情内的“生成日志”展示为得到该报文经历的级联各跳（时间点、模型、耗时、token、finish_reason、采纳/丢弃结果）；1.15.3 起每次生成携带 run_id 精确归因，历史报文按生成时间窗推算
 - **语录** — 语录管理（按群浏览、关键词搜索、删除；发言人优先显示标准身份及 QQ，改名时附收藏时原名片；正文使用当前身份并提供原文查看）
 - **贴吧** — 贴吧帖子池浏览（同步状态/关键词搜索/图文详情/立即同步/实时抓取）
@@ -165,7 +186,9 @@ WEB_ADMIN_COOKIE_SECURE=true
 
 敏感词过滤器没有独立标签页。后台提供只读接口 `GET /ops/api/sensitive-filter/status`，LLM 健康检查也会汇总过滤器加载状态和词表数量。`config/sensitive_words.toml` 属于高敏部署文件，只在服务器本地维护，Web Admin 不提供内容读取或在线编辑入口。
 
-纪元看板的数据口径：主图每轮对话保留一个采样点，同轮多次模型调用按对话轮去重。锚点推进事件从功能上线后开始记录；窗口构成条展示消息编号、角色和 token 估算，正文在“对话”页浏览。信封构成展示最近一封的缓存分解，定格历史时刻也会标注这是最近一封。实时锚点、窗口行数、token 和生效水位来自 Bot 运行快照；重启后首次请求会重新建立纪元看板数据。
+纪元看板的数据口径：主图每轮对话保留一个采样点，同轮多次模型调用按对话轮去重。窗口构成条展示消息编号、角色和 token 估算，正文在“对话”页浏览。信封构成展示最近一封的缓存分解，定格历史时刻也会标注这是最近一封。窗口行数及 token 取最近组装的历史快照，回放估算单独统计工具历史表达；生效水位包含模型覆盖。纪元重建会更新标识，历史修订时锚点可以保持原位。重启后首次请求会重新建立运行快照。
+
+用量页同时展示三项缓存指标：“缓存 token 比例”沿用上游缓存读 token 占输入 token 的口径；“请求命中”是成功调用中缓存读 token 大于零的比例；“字段覆盖”是成功调用中上游提供缓存读字段的比例。字段明确为零表示已报告未命中，缺少字段计入未覆盖。评估渠道时先查看覆盖情况，再比较命中表现。
 
 诊断页的“探活 Provider”按钮会对已发布配置中启用的 provider 默认模型分别提交探测任务，每个目标最多发一次 max_tokens=1 的真实请求，可能产生 provider 计费，用于管理员主动巡检。页面展示排队和执行状态，通过 Bot 的最终任务结果确认完成；提交响应丢失时复用任务请求标识查询，未确认结果不自动重发模型请求。样本请求使用同一任务机制，完成后展示模型正文、用量、耗时和 Trace。群内 `/llm reload` 的重载后验证只探活当前会话实际生效的 provider/model。
 

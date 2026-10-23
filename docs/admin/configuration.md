@@ -90,6 +90,7 @@ MCP server 的普通字段支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`；认证
 | `WEB_ADMIN_HOST` | 监听地址 | `127.0.0.1` |
 | `WEB_ADMIN_PORT` | 监听端口 | `5104` |
 | `WEB_ADMIN_SESSION_TTL_HOURS` | session 有效期（小时） | `168` |
+| `WEB_ADMIN_SESSION_MAX_AGE_HOURS` | session 绝对寿命（小时），自创建起超过后必须重新登录 | `168` |
 | `WEB_ADMIN_COOKIE_SECURE` | 是否下发 Secure cookie：`auto` / `true` / `false` | `auto` |
 
 ### Docker 构建相关
@@ -136,18 +137,18 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `auto_memory_prompt` | 自动记忆抽取自定义判定 prompt | `""` |
 | `auto_memory_max_tokens` | 自动记忆抽取判定最大输出 token | `256` |
 | `epoch_context_tokens` | 会话纪元标尺（标准 CTX）：懒初始化与 `/llm use` 新键的锚点跨度 | `8000` |
-| `epoch_cold_idle_seconds` | 冷场判定 T：距该键上次 LLM 请求超过此秒数视为缓存已冷（宁短勿长：设短退化为滚动窗形态，设长则每轮全价且窗口更长） | `300` |
+| `epoch_cold_idle_seconds` | 冷场缩窗等待时间 T：距该会话／渠道／模型最近一次调用开始或结束超过此秒数，且窗口超过冷场触发水位时缩窗；工具续轮、失败及取消也更新活动时间 | `300` |
 | `epoch_cold_target_tokens` | 冷场重置后窗口缩到的 token 估算目标（L_cold） | `4000` |
 | `epoch_cold_trigger_tokens` | 冷场重置触发水位：冷场且窗口超过此值才缩（H_cold） | `5000` |
 | `epoch_hot_target_tokens` | 触顶重置后窗口缩到的 token 估算目标（L_hot，长话题保护） | `32000` |
 | `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
 | `recent_context_token_budget` | 【现场】补丁每轮 token 预算：近期消息缓冲服役给 LLM 的上限（从最新往回截） | `800` |
 | `recent_context_floor_seconds` | 【现场】滑动保底窗秒数：窗内消息即使已服役过也会重附（增量语义之外的保底） | `300` |
-| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：按“provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省”解析，超限时主链先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝发起；工具调用循环内的逐轮门禁超限立即中止该循环（无降级重试）；可在渠道或模型的 `parameters` 覆盖（null 表示继承） | `96000` |
+| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径）：按“provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省”解析。超限时主链先缩到热水位，无法缩窗时进一步减少历史回放，重组重试一次；仍超限则拒绝发起。工具续轮超限立即中止。可在渠道或模型 `parameters` 覆盖（null 表示继承） | `96000` |
 | `agent_record_retention_days` | 已关闭对话轮（Loop）保留天数，按关闭时间计 | `30` |
-| `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
+| `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限；数量或字节先触顶者触发清理最旧完整 Loop，并推进受影响的活动纪元 | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
-| `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按“请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留”推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在渠道或模型的 `parameters` 中硬覆盖 | `4096` |
+| `agent_replay_loop_tokens` | 整个历史 Loop 回放预算的推导下限（token 估算，512-4194304）：实际预算按“请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留”推导。可在渠道或模型 `parameters` 中硬覆盖。超限时重建纪元并保留完整历史后缀，目标为预算的 `epoch_hot_target_tokens / epoch_cap_tokens`；最新单个 Loop 仍超限时按既有阶梯精简并冻结表达 | `4096` |
 | `agent_delivery_intermediate_enabled` | 中间轮交付的全局默认：开启后工具调用多轮回复中非最终轮的普通正文照常先于工具执行外发；关闭时非最终正文只记录不发送（`suppressed_by_policy`） | `false` |
 | `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息发送；关闭时最终正文整条发送。两域独立；旧迁移输入中的 `agent_delivery_enabled` 按两域同值转换。各群/私聊会话可用 `/llm delivery intermediate/final/all …` 或 Web Admin“群 LLM”按会话覆盖 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
@@ -156,7 +157,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `reply_max_chunks_per_loop` | 单次对话交付条目上限（含文字、媒体与通知，1-256） | `64` |
 | `mention_cooldown_seconds` | 出站“@名字”艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却，0-86400） | `600` |
 
-以上 6 个 `epoch_*` 键均可在渠道或模型的 `parameters` 对象内同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `settings.runtime` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，新写入的非法组合由校验拒绝。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
+以上 6 个 `epoch_*` 键均可在渠道或模型的 `parameters` 对象内同名覆盖；未覆盖的键继承 `settings.runtime` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，新写入的非法组合由校验拒绝。冷场时间决定应用何时缩窗，调整时结合用量页的缓存指标与纪元事件观察。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
 
 ### `settings.triggers` — 触发方式
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="llm-config-view page-view-fill">
+  <div class="llm-config-view">
     <UiPageHeader title="LLM 全局配置中心" subtitle="负责渠道、参数、工具策略与版本发布；修改先存为草稿，应用到 Bot 后生效">
       <template #subtitle>
         <UiInfoTip text="所有编辑只影响草稿；应用后 Bot 拉取并编译新配置，进行中的对话继续用完旧配置。密钥始终只填环境变量名。" />
@@ -126,7 +126,7 @@
         </div>
       </aside>
 
-      <main class="panel-area" :class="{ 'panel-area--fill': section === 'providers' }">
+      <main ref="scrollAreaEl" class="panel-area">
         <div v-if="currentMeta" class="section-banner">
           <div class="section-banner__text">
             <h2 class="section-banner__title">{{ currentMeta.title }}</h2>
@@ -161,7 +161,7 @@
           <ProvidersPanel />
         </div>
 
-        <div v-else ref="scrollAreaEl" class="panel-area__scroll">
+        <div v-else class="panel-area__scroll">
           <template v-if="section === 'conversation'">
             <SettingsGroup v-show="activeSubTab === 'all' || activeSubTab === 'triggers'" :blocks="SETTINGS_BLOCKS.conversation" />
             <EpochPanel v-show="activeSubTab === 'all' || activeSubTab === 'epoch'" />
@@ -280,7 +280,7 @@ const SUB_TABS: Record<string, { key: string; label: string }[]> = {
 const SECTION_META: Record<string, { title: string; desc: string; links?: { label: string; path: string; icon: string }[] }> = {
   providers: {
     title: '渠道与模型',
-    desc: '管理 LLM 供应商 API 地址、密钥变量名、模型清单、别名及模型级参数覆盖。左栏选渠道、右栏编辑详情，两栏独立滚动。',
+    desc: '管理 LLM 供应商 API 地址、密钥变量名、模型清单、别名及模型级参数覆盖。左栏选渠道、右栏编辑详情，左栏随页面滚动吸附在视口顶部。',
     links: [
       { label: '诊断与批量探活', path: '/diagnostics', icon: 'Stethoscope' },
       { label: '按群覆盖模型', path: '/group-settings', icon: 'SlidersHorizontal' },
@@ -367,7 +367,11 @@ watch(section, value => {
   const validSubs = SUB_TABS[value]?.map(t => t.key) || ['all']
   if (!validSubs.includes(activeSubTab.value)) activeSubTab.value = 'all'
   if (route.query.section !== value) router.replace({ query: { ...route.query, section: value } })
-  void nextTick(() => { scrollAreaEl.value?.scrollTo({ top: 0 }) })
+  // 页面级滚动为主：切分区回到页面顶部（.content 是 App 壳层的页面滚动容器）
+  void nextTick(() => {
+    const scroller = scrollAreaEl.value?.closest('.content')
+    if (scroller instanceof HTMLElement) scroller.scrollTo({ top: 0 })
+  })
 })
 
 const currentMeta = computed(() => SECTION_META[section.value] || null)
@@ -467,9 +471,6 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .pipeline-strip {
@@ -477,7 +478,7 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 8px 14px;
+  padding: 6px 12px;
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   background: var(--qq-surface);
@@ -649,21 +650,19 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
   gap: 16px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  align-items: start;
 }
 
 .side-nav {
+  position: sticky;
+  top: var(--qq-gap-lg);
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  max-height: calc(100vh - var(--qq-gap-lg) * 2);
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   padding: 10px;
-  overflow: hidden;
 }
 
 .side-nav__scroll {
@@ -784,12 +783,9 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
 
 .panel-area {
   min-width: 0;
-  height: 100%;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-sm);
-  overflow: hidden;
 }
 
 .section-banner {
@@ -797,7 +793,7 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
   align-items: center;
   justify-content: space-between;
   gap: var(--qq-gap-md);
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: var(--qq-surface);
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
@@ -877,37 +873,21 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
   color: var(--qq-text-quiet);
 }
 
-.panel-area__providers-host {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .panel-area__scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-md);
-  padding-right: 4px;
   padding-bottom: var(--qq-gap-md);
 }
 
 @media (max-width: 900px) {
-  .llm-config-view {
-    overflow: visible;
-    height: auto;
-  }
-
   .llm-config-layout {
     grid-template-columns: 1fr;
-    overflow: visible;
-    height: auto;
   }
 
   .side-nav {
-    height: auto;
+    position: static;
+    max-height: none;
     padding: 8px;
   }
 
@@ -929,13 +909,6 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
     width: auto;
     flex-shrink: 0;
     white-space: nowrap;
-  }
-
-  .panel-area,
-  .panel-area__providers-host,
-  .panel-area__scroll {
-    height: auto;
-    overflow: visible;
   }
 }
 </style>

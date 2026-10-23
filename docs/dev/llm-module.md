@@ -2,6 +2,8 @@
 
 本文面向 LLM 运行时维护者，说明消息触发、Session 与上下文、请求组装、人格和工具的契约。配置与部署操作见[管理员文档](../admin/llm-configuration.md)，实现排障见本页第 11 节。
 
+核心概念见[项目术语表](../glossary.md#session)，会话身份、纪元冻结和执行交付的选择依据见[架构决策索引](adr/README.md)。
+
 ## 1. 模块定位
 
 QuickQuip 的 LLM 模块为规则机器人提供对话扩展。管理员按群或私聊选择渠道、模型和人格，并控制触发、记忆与工具。默认入口为配置前缀、艾特机器人和 `/search`；群聊唤醒按第 3 节的开关与条件启用。
@@ -76,6 +78,10 @@ LLM 维护入口按职责列在下表：
 协议客户端的 `complete()` 对 429、5xx 和网络错误执行指数退避，策略由 `retry.py` 提供；探活和诊断使用 `RetryPolicy.disabled()` 禁用自动重试。基类、四协议实现、工厂、重试和追踪分别由相应子模块维护。
 
 Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 parts。Claude 当前工具循环通过通用重建回传签名 thinking 块，已关闭且包含工具的 Loop 在归属匹配和签名有效时跨轮原生回放。Responses 使用 `store:false` 全量回放，当前工具循环回传原生 items，并检查 call_id 记账、冲突和结果配对；已关闭历史经归属校验回放 reasoning 密文，上游返回 HTTP 400 时剥离历史 reasoning 重试一次。当前工具循环内容保留。历史投影规则见第 4.2 节。
+
+Responses 的 `openai-public` 与 `codex-http-relay` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
+
+Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
 
 思考设置使用 low、medium、high、xhigh、max、ultra 六档。OpenAI Chat 按模型家族钳制；Claude 按代际选择 adaptive effort 或固定 budget 表；Gemini 按代际选择 thinkingLevel 或 thinkingBudget；Responses 使用自己的 profile 词表。Claude budget 至少为 1024，其余由映射规则照发，上游以 400 报告不支持的参数；钳制与照发决策记录节流日志。
 
@@ -196,16 +202,19 @@ HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已
 
 LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由**会话纪元**（session epoch）管理：
 
-- 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长，锚点保持稳定以支持跨轮前缀缓存
-- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `settings.runtime` 与渠道／模型 `parameters` 的 `epoch_*` 键调整（见[配置参考](../admin/configuration.md)）
-- 窗口使用 `token_estimate.py` 估算 token；1024 行硬上限同时控制消息数组长度
-- 锚点只落在 user/assistant 对边界，且保留最少 4 行，为超长消息保留基本对话配对
-- 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
-- 锚点状态保存在进程内存中：进程重启后，首个请求按距最新消息约 8k token 的范围懒初始化锚点
-- `/llm context_limit <n>` 将群聊或私聊会话设为保留最新 n 行的滚动窗，上限 1024 行；`/llm context_limit reset` 恢复纪元管理。读取上限由会话覆盖与纪元规则决定；旧 `history_limit` 全局默认和 `history_max_messages_per_group` 保留解析，运行时忽略这两个旧值
+- 每个键（`scope × provider × model`）维护读取锚点、纪元 UUID 和历史表达快照。历史首次进入窗口时确定文本或协议投影；同一纪元后续追加新片段，复用已确定的表达。发送前使用请求副本，重试中的协议降级保持快照不变。
+- **冷场**按该键最近一次 provider 调用开始或结束时间计算空闲：超过 T 秒且可见窗口超过 H_cold 时缩回 L_cold；工具续轮、失败和取消后的结束时间同样刷新活动记录。**触顶**在窗口超过 cap 时缩回 L_hot。默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），可在渠道／模型 `parameters` 覆盖（见[配置参考](../admin/configuration.md)）。冷场阈值是应用的缩窗策略。
+- 窗口按 `token_estimate.py` 估算 token，行数裁剪目标为 1024。裁剪以完整 Loop 为边界，旧记录按 user/assistant 配对；token 目标有最近两个完整单元的软下限。最新单个 Loop 超过行数目标时完整保留，由回放预算与请求预算控制发送体积。
+- 历史工具投影另受整个历史的回放预算约束。追加后超限时开启新纪元，按 `L_hot / cap` 比例选择完整历史后缀；两个单元的软下限服从回放预算。最新单个 Loop 仍超限时，使用既有精简阶梯确定表达并冻结。请求总预算超限时先缩到热水位；锚点无法前移时收紧回放预算或缩短普通历史，重组重试一次。
+- 撤回、删除、敏感清洗结果或 Loop 修订变化会使相关快照失效；协议归属及投影预算变化也会重建。重建可保留原锚点，纪元 UUID 随之更新。事件分别记录 `history`、`profile`、`budget`，便于区分内容变化与容量变化。
+- 会话消息存储裁剪以所有纪元键的最老锚点为准；无锚点时按 2048 行兜底。Agent 记录达到数量或字节上限时，先以 `retention` 原因推进该会话全部受影响纪元，再删除旧完整 Loop；按时间清理仍保护活动窗口。
+- 快照保存在进程内存中，切换模型释放旧模型的历史表达；重启后首个请求按距最新消息约 8k token 的范围初始化。数据库保存的事实用于重建快照。
+- `/llm context_limit <n>` 将群聊或私聊会话设为目标保留最新 n 行的滚动窗（1–1024），按完整 Loop 对齐，最新单个 Loop 可超过目标；实际窗口变化记录 `context_limit` 事件。`reset` 恢复纪元管理。旧 `history_limit` 全局默认和 `history_max_messages_per_group` 保留解析，运行时忽略这两个旧值。
 - `clear_context` 清理消息与 Agent 执行记录，解除 Session 绑定并推进 generation；提交后清理最近消息缓冲、纪元锚点、信封缓存和 Skill 激活登记。私聊 start/end/resume 使用相应事务与缓存清理流程。
 - `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点，以适应人格提示变化后的窗口重建
 - 历史消息按落库时冻结的 `canonical_name` 渲染；用户改名后，历史前缀保留当时的名称
+
+冻结对象是允许进入历史的规范表达。触发行保留 `raw_content` 中的引用、转发和图注，并使用落库身份；当轮信封、【现场】补丁和图片本体保持请求级生命周期，跨轮沿用已保存的文字记录。
 
 **近期消息的【现场】补丁**：LLM 请求通过 `recent_message_buffer.py` 的 `list_patch` 取得增量现场消息：
 

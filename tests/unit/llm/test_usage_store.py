@@ -3,6 +3,20 @@ import os
 from quickquip.llm.usage_store import LLMUsageStore
 
 
+def test_cache_metrics_distinguish_tokens_requests_and_missing_reports(tmp_path):
+    store = LLMUsageStore(tmp_path / "usage.db")
+    for state, cached in [("ok", 60), ("ok", 0), ("ok", None), ("error", 100)]:
+        store.record({"provider_id": "p", "protocol": "gemini", "model": "m",
+                      "stream": 0, "state": state, "input_tokens": 100,
+                      "cache_read_tokens": cached})
+    result = store.summary("2000-01-01")
+    assert result["cache_hit_rate"] == 0.2
+    assert result["cache_hit_request_rate"] == round(1 / 3, 4)
+    assert result["cache_reporting_rate"] == round(2 / 3, 4)
+    empty = store.summary("2999-01-01")
+    assert empty["cache_hit_request_rate"] == empty["cache_reporting_rate"] == 0
+
+
 def test_record_creates_schema_and_row(tmp_path):
     store = LLMUsageStore(tmp_path / "u.db")
     store.record({

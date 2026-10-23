@@ -8,6 +8,12 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 本文档目录帮你按角色快速找到需要的信息。
 
+## 共同参考
+
+| 文件 | 说明 |
+|------|------|
+| [glossary.md](glossary.md) | 项目术语表——配置、会话、执行、历史与扩展能力的统一名称和定义 |
+
 ---
 
 ## 用户手册（群友阅读）
@@ -51,6 +57,8 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/branching.md](dev/branching.md) | 开发工作流与发布流程——六级变更分级、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、验证、release 与 hotfix |
 | [docs/dev/versioning.md](dev/versioning.md) | 版本号约定——三段式版本、主题更新系列、dev 批次与发布候选规则 |
 | [docs/dev/architecture.md](dev/architecture.md) | 项目架构与结构——三层架构、依赖方向、组合根、目录用途与数据边界 |
+| [dev/adr/README.md](dev/adr/README.md) | 架构决策索引——重要选择的背景、理由、状态、替代关系与编写模板 |
+| [../frontend/README.md](../frontend/README.md) | Web Admin 前端模块入口——技术栈、目录约定、开发命令、测试双栈与部署形态 |
 | [docs/dev/record-identities.md](dev/record-identities.md) | 记录正文与成员身份契约——正文片段结构、身份分层缓存与消费口径 |
 | [docs/dev/game-framework.md](dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
 | [docs/dev/llm-configuration-api.md](dev/llm-configuration-api.md) | LLM 配置 API——修订冲突、任务状态、参数 metadata 与前端接口契约 |

@@ -638,10 +638,6 @@ reloadAll()
   .settings-shell {
     grid-template-columns: 1fr;
   }
-
-  .group-panel {
-    max-height: 260px;
-  }
 }
 
 @media (max-width: 767px) {

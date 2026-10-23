@@ -4,6 +4,8 @@
 
 开发文档的公共/私有边界与职责索引见 [`README.md`](README.md)；源码结构规则见 [`style.md`](style.md)。
 
+项目概念见[术语表](../glossary.md)，重要技术选择的背景和取舍见[架构决策索引](adr/README.md)。其中，[领域分层与装配](adr/0006-layered-architecture-composition.md)、[统一聊天归档](adr/0007-unified-chat-archive.md)和[事务部署](adr/0011-transactional-deployment-recovery.md)记录本页核心结构的依据。
+
 ---
 
 ## 核心概念：分发层与自用层
@@ -146,6 +148,18 @@ src/quickquip/
 源码位于 `src/plugins/`。每个文件都是薄层 re-export，把 `quickquip.*` 里的对象暴露给 NoneBot2 插件发现机制。不含任何业务逻辑。
 
 `bot.py` 通过 `nonebot.load_plugins(*plugins.__path__)` 加载已安装的 `plugins` 包路径。
+
+---
+
+## `frontend/` — Web 管理后台前端
+
+Web Admin 前端是独立的 pnpm 工程（`quickquip-admin-v2`），技术栈为 Vue 3.5 + TypeScript strict + Vite 8 + vue-router 4（hash 模式，base `/ops/`）。关键约定：
+
+- 路由页面在 `src/config/nav.ts` 登记，路由由其派生；除首页静态引入外，页面组件一律路由级动态 import。
+- 后端接口封装按领域收在 `src/api/`，可复用状态与请求编排收在 `src/composables/`，`src/components/ui/` 是设计系统组件。
+- 构建产物 `frontend/dist/`（gitignore）由 `app/web/` 以 StaticFiles 挂载到 `/ops/`；前端不设路由守卫，鉴权由后端强制。
+
+开发命令、测试双栈与部署形态见 [`../../frontend/README.md`](../../frontend/README.md)。
 
 ---
 

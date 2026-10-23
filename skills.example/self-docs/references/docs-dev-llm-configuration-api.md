@@ -4,9 +4,11 @@
 
 本文供配置 API 调用方和维护者查阅。LLM 配置使用 `data/llm_config.db`，Web Admin、CLI 与 Bot 通过同一个应用服务保存草稿、建立快照和提交控制任务。人格文件、Skill 内容、群覆盖、历史记录、用量和 Trace 由各自存储维护。
 
-接口前缀为 `/ops/api/llm-configuration`，需要现有管理员会话 Cookie `quickquip_admin_session`。写请求必须携带同源 `Origin` 或 `Referer`。请求体上限为 1 MiB，分块传输也执行此限制。完整机器契约见 [OpenAPI JSON](llm-configuration.openapi.json)；运行中的管理 API 在 `/openapi.json` 提供同一字段约束。
+接口前缀为 `/ops/api/llm-configuration`，需要现有管理员会话 Cookie `quickquip_admin_session`。写请求必须携带同源 `Origin` 或 `Referer`。请求体上限为 1 MiB，分块传输也执行此限制。完整机器契约见 [OpenAPI JSON](llm-configuration.openapi.json)，由 `python scripts/ci/export_llm_configuration_openapi.py` 在进程内构造应用导出，随约束或路由变更同步提交；运行中的管理 API 不提供 `/docs`、`/redoc`、`/openapi.json` 文档端点。
 
 前端设计与操作流程见[前端交付契约](llm-configuration-frontend.md)，其中说明中文字段含义、参数继承控件、保存与应用、冲突处理及设计验收场景。
+
+概念含义见[配置术语](../glossary.md#config-draft)，草稿、快照与运行状态分离的选择依据见[ADR-0001](adr/0001-config-snapshot-publication.md)。
 
 配置交换格式为 JSON，`format_version` 当前为 `2`。顶层字段为 `providers`、`style_profiles`、`pricing`、`routes` 与 `settings`。渠道身份为公开 `id`，模型身份为 wire 名称；引用使用 `{provider_id, model}`，支持包含 `/` 的模型名称。认证信息保存 `.env` 变量名称或 `${VARIABLE}` 引用。导出、字段错误及审计日志保留引用，运行时展开值不进入接口。
 

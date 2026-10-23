@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from quickquip.llm.agent_records import ResponseOwner
+from quickquip.llm.prompting import render_history_trigger
 from quickquip.llm.provider.openai_responses import (
     blocks_replay_valid,
     replay_guard_violations,
@@ -259,7 +260,7 @@ def _decide_loop_path(
 
 def _user_trigger_message(loop: LoadedLoop) -> LLMConversationMessage:
     if loop.user_row:
-        content = str(loop.user_row.get("content") or "")
+        content = render_history_trigger(loop.user_row)
     else:
         content = _ORPHAN_TRIGGER_NOTE
     return LLMConversationMessage(role="user", content=content)
@@ -559,7 +560,7 @@ def _project_loop_archive_bounded(
         omitted = len(text) - 2 * half
         return text[:half] + f"…[省略 {omitted} 字符]…" + text[-half:]
 
-    trigger = str(loop.user_row.get("content") or "") if loop.user_row else _ORPHAN_TRIGGER_NOTE
+    trigger = _user_trigger_message(loop).content
     per_turn = max(64, char_budget // (len(loop.turns) + 1))
     lines = [f"{_ARCHIVE_TAG} 以下为归档的历史会话记录（字符额度 {char_budget}）。"]
     lines.append(f"用户：{_excerpt(trigger, per_turn)}")

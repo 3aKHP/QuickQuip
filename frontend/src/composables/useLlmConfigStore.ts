@@ -6,8 +6,15 @@ type Api = typeof apiModule
 
 /** 轮询间隔（毫秒）：状态与进行中的任务共用一个节拍 */
 const POLL_INTERVAL = 5000
+/** 连续失败时轮询间隔按 2 的幂退避的上限（成功即复位到基础节拍） */
+const POLL_BACKOFF_CAP = 30_000
 /** 心跳超过该秒数视为过期（与后端 stale 口径一致） */
 const HEARTBEAT_STALE_SECONDS = 20
+
+/** 标签页隐藏判定。store 内的草稿状态命名为 document，会遮蔽全局 Document，故收敛在模块顶层取值 */
+function pageHidden(): boolean {
+  return document.hidden
+}
 
 // 客户端条目身份随对象展开保留；Symbol 属性不会进入交换 JSON。
 const PROVIDER_EDIT_STATE = Symbol('llm-provider-edit-state')
@@ -58,6 +65,7 @@ export function createLlmConfigStore(api: Api) {
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   let clockTimer: ReturnType<typeof setInterval> | undefined
   let pollEpoch = 0
+  let pollFailures = 0
   let stopped = true
   let pendingProbe: { source: string; provider: string; model: string; requestId: string } | null = null
   let pendingApply: { revision: number; requestId: string } | null = null
@@ -230,6 +238,8 @@ export function createLlmConfigStore(api: Api) {
   async function poll(epoch: number) {
     if (stopped || epoch !== pollEpoch) return
     try {
+      // 隐藏标签页不制造请求；finally 照常按节拍续链，回到前台自动恢复
+      if (pageHidden()) return
       const results = await Promise.all([
         api.fetchLlmConfigStatus(),
         operation.value && !isOperationFinished(operation.value.status) ? api.fetchLlmConfigOperation(operation.value.id) : Promise.resolve(null),
@@ -238,11 +248,16 @@ export function createLlmConfigStore(api: Api) {
       acceptStatus(results[0])
       if (results[1]) operation.value = results[1]
       pollError.value = ''
+      pollFailures = 0
     } catch (cause) {
-      if (!stopped && epoch === pollEpoch) pollError.value = configError(cause).message
+      if (!stopped && epoch === pollEpoch) {
+        pollError.value = configError(cause).message
+        pollFailures += 1
+      }
     } finally {
       if (!stopped && epoch === pollEpoch) {
-        pollTimer = setTimeout(() => poll(epoch), POLL_INTERVAL)
+        // 连续失败指数退避：5s 起逐次翻倍，封顶 30s
+        pollTimer = setTimeout(() => poll(epoch), Math.min(POLL_INTERVAL * 2 ** pollFailures, POLL_BACKOFF_CAP))
       }
     }
   }
@@ -369,9 +384,11 @@ export function createLlmConfigStore(api: Api) {
   function start() {
     if (!stopped) return
     stopped = false
+    pollFailures = 0
     const epoch = ++pollEpoch
     observedTime.value = Date.now() / 1000
-    clockTimer = setInterval(() => { observedTime.value = Date.now() / 1000 }, 1000)
+    // 隐藏标签页不刷新观察时钟：botStale 只在可见时有展示意义
+    clockTimer = setInterval(() => { if (!pageHidden()) observedTime.value = Date.now() / 1000 }, 1000)
     if (document.value === null) void reload()
     void recoverOperation()
     void recoverActiveOperation()

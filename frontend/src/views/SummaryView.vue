@@ -1,8 +1,8 @@
 <template>
-  <div class="sum-view page-view-fill">
+  <div ref="rootEl" class="sum-view">
     <UiPageHeader title="总结" />
 
-    <UiCard padding="md" shadow="sm" class="toolbar-card">
+    <UiCard v-if="!selected" padding="md" shadow="sm" class="toolbar-card">
       <div class="toolbar-inner">
         <UiTabs :model-value="activeTab" :tabs="tabs" @change="switchTab" />
         <UiInfoTip text="周报键为 ISO 周（如 2026-W24，周一起算），月报键为年月（如 2026-06）；内容均为上一个完整周期（上周/上月），由 LLM 配置 的 [weekly_report]/[monthly_report] 定时生成。" />
@@ -17,7 +17,7 @@
       </div>
     </UiCard>
 
-    <UiCard v-if="health" padding="md" shadow="sm" class="health-card">
+    <UiCard v-if="health && !selected" padding="md" shadow="sm" class="health-card">
       <div class="health-head">
         <strong>生成健康度<UiInfoTip text="汇总日报、简报、周月报三条生成链路近期的 LLM 调用结果：正文是否被采纳、异常分布、耗时与按模型定价估算的美元成本；未记录结果的历史调用计入「历史未知」。" /></strong>
         <label class="health-days">
@@ -68,7 +68,7 @@
       description="每日总结、周报与月报按群组归档；从上方群组下拉框开始。"
     />
 
-    <Transition name="tab-pane" mode="out-in">
+    <Transition name="tab-pane" mode="out-in" @after-enter="onPaneEnter">
       <div v-if="!selected && groupId" :key="activeTab" class="summary-list">
         <article
           v-for="item in normalizedList"
@@ -151,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -232,6 +232,21 @@ const selected = ref<string | null>(null)
 const detail = ref<SummaryDetailRow | null>(null)
 const detailLoading = ref(false)
 const detailError = ref<string | null>(null)
+
+// 阅读模式脱离锁高链走页面级滚动：进入时回到页面顶部，返回列表时恢复列表滚动位
+const rootEl = ref<HTMLElement | null>(null)
+let listScrollTop: number | null = null
+
+function pageScroller(): HTMLElement | null {
+  return rootEl.value?.closest('.content') as HTMLElement | null
+}
+
+function onPaneEnter() {
+  if (selected.value || listScrollTop == null) return
+  const top = listScrollTop
+  listScrollTop = null
+  pageScroller()?.scrollTo({ top })
+}
 
 const normalizedList = computed<SummaryListItem[]>(() => {
   return list.value
@@ -465,11 +480,13 @@ async function loadList() {
 }
 
 async function open(key: string) {
+  listScrollTop = pageScroller()?.scrollTop ?? 0
   selected.value = key
   detail.value = null
   detailError.value = null
   detailLoading.value = true
   resetGenLog()
+  void nextTick(() => pageScroller()?.scrollTo({ top: 0 }))
   try {
     detail.value = await current.value.fetchDetail(groupId.value, key)
   } catch (e: unknown) {
@@ -505,8 +522,6 @@ function closeDetail() {
 .sum-view {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
   gap: var(--qq-gap-md);
 }
 
@@ -540,9 +555,6 @@ function closeDetail() {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   padding-top: 2px;
   padding-bottom: var(--qq-gap-md);
 }
@@ -619,9 +631,6 @@ function closeDetail() {
 .detail-card {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .detail-bar {
@@ -642,10 +651,7 @@ function closeDetail() {
 }
 
 .detail-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: var(--qq-gap-sm);
+  overflow: visible;
 }
 
 .detail-loading {

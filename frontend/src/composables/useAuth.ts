@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { getAuthState, login as apiLogin, logout as apiLogout } from '../api/auth'
 import { setUnauthorizedHandler } from '../api/index'
-import { toastMsg } from '../toast'
+import { toast, toastMsg } from '../toast'
 
 interface ApiError {
   status?: number
@@ -55,11 +55,12 @@ async function handleLogout(): Promise<void> {
   authError.value = ''
   try {
     await apiLogout()
-  } catch (error: unknown) {
-    const err = error as ApiError
-    authError.value = err.data?.detail || err.message || '退出失败'
-  } finally {
     authenticated.value = false
+  } catch (error: unknown) {
+    // 退出请求失败时服务端会话可能仍有效，保留登录态并如实提示
+    const err = error as ApiError
+    toast(`退出失败，当前会话仍有效：${err.data?.detail || err.message || '请稍后重试'}`, 'error')
+  } finally {
     authBusy.value = false
   }
 }

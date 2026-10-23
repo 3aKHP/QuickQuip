@@ -497,6 +497,25 @@ def _history_text(item: dict[str, object]) -> str:
     return str(item.get("raw_content") or item.get("content", ""))
 
 
+def history_speaker(item: Mapping[str, object]) -> dict[str, str]:
+    """Use the trigger text and identity captured when the message was stored."""
+    return {
+        "user_id": str(item.get("user_id") or ""),
+        "sender_name": str(item.get("sender_name") or ""),
+        "canonical_name": str(item.get("canonical_name") or ""),
+        "text": str(item.get("raw_content") or item.get("content") or ""),
+    }
+
+
+def render_history_trigger(item: Mapping[str, object]) -> str:
+    speaker = history_speaker(item)
+    if not any(speaker[key] for key in ("user_id", "sender_name", "canonical_name")):
+        return speaker["text"]
+    return _render_scene_to_text(
+        LLMSceneMessage(speakers=[speaker], images=[], scene_type="history")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Scene-based message assembly (new pipeline)
 # ---------------------------------------------------------------------------
@@ -529,18 +548,7 @@ def _build_scenes_from_history(
                 pending_speakers = []
                 pending_images = []
         else:
-            user_id = str(item.get("user_id") or "")
-            sender_name = str(item.get("sender_name") or "")
-            raw_text = _history_text(item)
-            # 渲染冻结：history 行信任落库定格的 canonical_name
-            # （前缀稳定契约，见 docs/dev/llm-module.md §4.2）
-            canonical_name = str(item.get("canonical_name") or "")
-            pending_speakers.append({
-                "user_id": user_id,
-                "sender_name": sender_name,
-                "canonical_name": canonical_name,
-                "text": raw_text,
-            })
+            pending_speakers.append(history_speaker(item))
 
     if pending_speakers:
         scenes.append(LLMSceneMessage(
@@ -806,18 +814,7 @@ def build_messages(
                 content=str(item["content"]),
             ))
         else:
-            user_id = str(item.get("user_id") or "")
-            sender_name = str(item.get("sender_name") or "")
-            raw_text = _history_text(item)
-            # 渲染冻结：history 行信任落库定格的 canonical_name
-            # （前缀稳定契约，见 docs/dev/llm-module.md §4.2）
-            canonical_name = str(item.get("canonical_name") or "")
-            pending_speakers.append({
-                "user_id": user_id,
-                "sender_name": sender_name,
-                "canonical_name": canonical_name,
-                "text": raw_text,
-            })
+            pending_speakers.append(history_speaker(item))
 
     # Recent buffer 改岗：不再并入 pending（上文），渲染为独立【现场】 scene，
     # 让模型能区分"与我对话"与"现场氛围"。增量与去重由 list_patch 在服役侧保证。

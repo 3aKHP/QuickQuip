@@ -23,6 +23,7 @@ function createStore(api, bindings = {}) {
     isOperationFinished: library.isOperationFinished, parseConfigImport: library.parseConfigImport,
     crypto: { randomUUID: () => 'same-request-id' },
     sessionStorage: { getItem: () => null, setItem: () => {} },
+    document: { hidden: false },
     inject: () => undefined, provide: () => {},
     ...bindings,
   })
@@ -208,6 +209,66 @@ test('poll sessions discard previous responses and own one clock and one polling
   assert.equal(clock.count(false), 0)
   clock.advance(10000)
   assert.equal(requests, 3)
+})
+
+test('consecutive poll failures back off exponentially and success resets the cadence', async () => {
+  const clock = controlledClock()
+  let requests = 0
+  const store = createStore({
+    fetchLlmConfigStatus: () => { requests += 1; return requests <= 2 ? Promise.reject(new Error('down')) : Promise.resolve({ bot: null, draft_revision: 9 }) },
+    fetchLlmConfigOperations: async () => ({ operations: [] }),
+  }, clock.bindings)
+  store.accept(structuredClone(initial))
+  store.start()
+  await flushRequests()
+  assert.equal(requests, 1)
+  assert.match(store.pollError.value, /down/)
+  clock.advance(9999)
+  await flushRequests()
+  assert.equal(requests, 1) // 首次失败后退避到 10s，5s 处不再发请求
+  clock.advance(1)
+  await flushRequests()
+  assert.equal(requests, 2)
+  clock.advance(19999)
+  await flushRequests()
+  assert.equal(requests, 2) // 第二次失败后退避到 20s
+  clock.advance(1)
+  await flushRequests()
+  assert.equal(requests, 3) // 成功，节拍复位
+  assert.equal(store.pollError.value, '')
+  clock.advance(4999)
+  await flushRequests()
+  assert.equal(requests, 3)
+  clock.advance(1)
+  await flushRequests()
+  assert.equal(requests, 4) // 回到 5s 基础节拍
+  store.stop()
+  assert.equal(clock.count(false), 0)
+})
+
+test('hidden tab skips poll fetches but keeps the chain alive for visible recovery', async () => {
+  const clock = controlledClock()
+  const tab = { hidden: false }
+  let requests = 0
+  const store = createStore({
+    fetchLlmConfigStatus: async () => { requests += 1; return { bot: null, draft_revision: 9 } },
+    fetchLlmConfigOperations: async () => ({ operations: [] }),
+  }, { ...clock.bindings, document: tab })
+  store.accept(structuredClone(initial))
+  store.start()
+  await flushRequests()
+  assert.equal(requests, 1)
+  tab.hidden = true
+  clock.advance(10000)
+  await flushRequests()
+  assert.equal(requests, 1) // 隐藏期间不产生请求
+  assert.equal(clock.count(false), 1) // 轮询链保持，不按失败退避
+  tab.hidden = false
+  clock.advance(5000)
+  await flushRequests()
+  assert.equal(requests, 2) // 回到前台后按原节拍恢复
+  store.stop()
+  assert.equal(clock.count(false), 0)
 })
 
 test('restart with existing draft keeps local edits (section switch remount must not reload)', async () => {

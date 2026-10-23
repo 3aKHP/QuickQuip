@@ -2,6 +2,8 @@
 
 本文面向维护 LLM 工具链和部署 MCP 的开发者，说明工具来源、运行时资源、部署选择与结果处理契约。接入步骤见[管理员指南](../admin/mcp-servers.md)，协议入门与完整配置字段见[MCP 教程](mcp-tutorial.md)。
 
+类型化结果与内容交付边界的选择依据见 [ADR-0018](adr/0018-mcp-result-normalization.md)。
+
 配置示例为导出 JSON 中的字段片段；请在 Web Admin「LLM 配置」中编辑，或修改完整导出文件后预览导入、保存草稿并单独应用。完整交换格式见 [LLM 配置管理](../admin/llm-configuration.md)。
 
 ## 1. 配置归属
