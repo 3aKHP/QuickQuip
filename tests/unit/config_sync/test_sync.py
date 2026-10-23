@@ -318,6 +318,8 @@ def test_external_file_edit_blocks_automatic_restore(endpoint):
 
 
 def test_maintenance_rejects_another_process(endpoint):
+    import os
+    from pathlib import Path
     import subprocess
     import sys
 
@@ -337,6 +339,7 @@ sys.exit(1)
 """
     result = subprocess.run(
         [sys.executable, "-c", code, str(endpoint.service.path)],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3] / "src")},
         capture_output=True,
         text=True,
         timeout=15,
