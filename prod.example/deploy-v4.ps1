@@ -6,6 +6,9 @@ param(
     [string]$ReleaseId = "",
     [switch]$Migrate,
     [switch]$SkipHealth,
+    [ValidateSet('auto','push','pull','off')][string]$ConfigSync = 'auto',
+    [ValidateSet('server','local')][string]$EnvSource = 'server',
+    [switch]$Plan,
     [string]$HostAlias = "quickquip-prod",
     [string]$RemoteDir = "/opt/QuickQuip",
     [int]$KeepReleases = 4
@@ -28,6 +31,10 @@ if ($ReleaseId -and $ReleaseId -cnotmatch '^[0-9]{8}-[0-9]{6}(-[a-f0-9]{12})?(-b
 if ($RemoteDir -cnotmatch '^/[a-zA-Z0-9_./-]+$' -or $RemoteDir -eq '/' -or $RemoteDir.Contains('/../')) { throw "Invalid absolute deployment root" }
 if ($HostAlias -cnotmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$') { throw "Invalid SSH alias" }
 if ($KeepReleases -lt 2 -or $KeepReleases -gt 100) { throw "KeepReleases must be 2..100" }
+if ($Plan -and ($Mode -ne 'deploy' -or $DryRun -or $SkipHealth -or $ConfigSync -eq 'off')) { throw 'Plan requires a normal synchronization deployment' }
+if ($SkipHealth -and $ConfigSync -ne 'off') { throw 'SkipHealth requires ConfigSync off' }
+$SyncOperation = ''
+$SyncPython = ''
 $Version = ""
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
@@ -42,7 +49,16 @@ try {
         if (-not (Test-Path (Join-Path $ScriptDir $file))) { throw "Missing $file" }
     }
     if ($Mode -in @('deploy', 'migrate')) {
-        if (-not (Test-Path '.env')) { throw 'Root .env missing' }
+        if ($EnvSource -eq 'local' -and -not (Test-Path '.env')) { throw 'Root .env missing' }
+        if (-not $DryRun -and $ConfigSync -ne 'off') {
+            $SyncPython = @('.venv/Scripts/python.exe', '.venv/bin/python', 'python3', 'python') |
+                Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+            if (-not $SyncPython) { throw 'Local Python environment required for configuration sync' }
+            if ($Plan) {
+                Invoke-Native 'configuration plan' { & $SyncPython -m quickquip.config_sync.cli --plan --mode $ConfigSync --host-alias $HostAlias --remote-dir $RemoteDir }
+                return
+            }
+        }
         $versionLine = Select-String -Path 'pyproject.toml' -Pattern '^version = "(.+)"$' | Select-Object -First 1
         if (-not $versionLine) { throw 'Cannot parse project version from pyproject.toml' }
         $Version = $versionLine.Matches[0].Groups[1].Value
@@ -76,6 +92,11 @@ try {
                 }
             }
         }
+        if (-not $DryRun -and $ConfigSync -ne 'off') {
+            $SyncOperation = & $SyncPython -m quickquip.config_sync.cli deploy-prepare --mode $ConfigSync --host-alias $HostAlias --remote-dir $RemoteDir
+            if ($LASTEXITCODE -ne 0 -or $SyncOperation -cnotmatch '^[a-f0-9]{32}$') { throw 'Configuration preparation failed; inspect sync status' }
+            Write-Host "Configuration operation: $SyncOperation"
+        }
         New-Item -ItemType Directory $Temp | Out-Null
         $List = Join-Path $Temp 'manifest.txt'
         $Archive = Join-Path $Temp 'release.tar.gz'
@@ -96,7 +117,10 @@ try {
     }
     if ($Mode -in @('deploy', 'migrate')) {
         Invoke-Native 'archive upload' { scp @SshArgs $Archive "${HostAlias}:$Incoming/release.tar.gz" }
-        $shared = @('.env', 'prod/check_bot.sh', 'prod/cron_check_bot.sh')
+        $shared = @('prod/check_bot.sh', 'prod/cron_check_bot.sh')
+        if ($EnvSource -eq 'local') {
+            $shared += '.env'
+        }
         foreach ($item in @('prod/sendkey.env', 'data/fonts/NotoSansSC-Regular.ttf', 'data/tieba/storage_state.json', 'prod/host_metrics_collector.py')) {
             if (Test-Path $item) { $shared += $item }
         }
@@ -108,7 +132,7 @@ try {
     }
     $skip = if ($SkipHealth) { '1' } else { '0' }
     Invoke-Native 'launch (if uncertain, inspect operation log before retrying)' {
-        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$skip bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
+        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$skip ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
     }
     $Log = "$RemoteDir/.deploy/$Id.log"
     $ExitFile = "$RemoteDir/.deploy/$Id.exit"
@@ -122,6 +146,11 @@ try {
     }
     $code = ssh @SshArgs $HostAlias "cat '$ExitFile'"
     if ($LASTEXITCODE -ne 0 -or "$code".Trim() -ne '0') { throw "Remote action failed (exit $code): $Log" }
+    if ($SyncOperation) {
+        Invoke-Native 'configuration acknowledgement; resume if interrupted' {
+            & $SyncPython -m quickquip.config_sync.cli deploy-finish --operation $SyncOperation --host-alias $HostAlias --remote-dir $RemoteDir
+        }
+    }
     Write-Host "$Mode complete. Status: prod/deploy-v4.ps1 -Status -HostAlias $HostAlias -RemoteDir $RemoteDir"
 } finally {
     if (Test-Path $Temp) { Remove-Item -Recurse -Force $Temp }

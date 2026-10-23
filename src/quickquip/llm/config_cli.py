@@ -58,8 +58,11 @@ def parser() -> argparse.ArgumentParser:
     q = commands.add_parser("apply")
     q.add_argument("--expected-revision", type=int, required=True)
     q.add_argument("--request-id", default=None)
+    q.add_argument("--wait", action="store_true")
+    q.add_argument("--timeout", type=int, default=150)
     q = commands.add_parser("status")
     q.add_argument("--operation", help="查询异步任务 ID")
+    q.add_argument("--not-before", type=float, help="要求 Bot 心跳晚于容器启动时间")
     q.add_argument(
         "--require-loaded", action="store_true", help="检查 bot 心跳、发布版本加载及核心就绪"
     )
@@ -121,13 +124,24 @@ def execute(args) -> dict:
     if args.command == "diff":
         return service.diff(_source(args.source), _source(args.target))
     if args.command == "apply":
-        return service.apply(args.expected_revision, args.request_id or uuid.uuid4().hex)
+        if args.timeout <= 0:
+            raise ConfigError("invalid_field", "Timeout must be positive")
+        task = service.apply(args.expected_revision, args.request_id or uuid.uuid4().hex)
+        if args.wait:
+            from quickquip.llm.config_wait import wait_loaded
+            wait_loaded(
+                service, task["target_revision"], operation=task["id"], timeout=args.timeout
+            )
+            return service.tasks.get(task["id"])
+        return task
     if args.command == "status":
         status = service.tasks.get(args.operation) if args.operation else service.status()
         if args.require_loaded:
             bot = status.get("bot")
             if not bot or bot["stale"] or bot["loaded_revision"] != status["published_revision"]:
                 raise ConfigError("bot_not_loaded", "bot 心跳过期或尚未加载发布版本")
+            if args.not_before is not None and bot["heartbeat_at"] < args.not_before:
+                raise ConfigError("bot_not_loaded", "等待当前容器中的 Bot 上报心跳")
             if bot["components"].get("core", {}).get("state") != "ready":
                 raise ConfigError("bot_not_ready", "bot 核心尚未就绪，请检查配置与业务存储")
         return status

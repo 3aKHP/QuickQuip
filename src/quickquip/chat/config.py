@@ -127,25 +127,8 @@ CONTEXT_REPLY_RULES: list[dict] = []
 CHAIN_GAME_CONFIGS: list[dict] = []
 
 
-def reload_chat_rules() -> bool:
-    """Reload chat_rules.toml, replacing module-level containers atomically.
-
-    Returns True on success, False if the file is missing / unparseable (previous
-    state is preserved in that case).
-
-    The parse-then-replace ordering ensures a broken config never leaves the
-    system with an empty rule set.
-    """
-    path = CHAT_RULES_TOML_PATH
-    raw_data: dict = {}
-    if path.exists():
-        try:
-            with open(path, "rb") as f:
-                raw_data = tomllib.load(f)
-        except tomllib.TOMLDecodeError as exc:
-            logger.warning("chat_rules.toml 语法错误，保留旧规则：%s", exc)
-            return False
-
+def parse_chat_rule_state(raw_data: dict):
+    """Parse rule containers without mutating the active rules."""
     # Parse new state into temporaries before touching module-level containers.
     new_rate_limits = dict(_BUILTIN_RATE_LIMIT_RULES)
     for key, entry in raw_data.get("rate_limit_rules", {}).items():
@@ -183,6 +166,32 @@ def reload_chat_rules() -> bool:
         list(raw_data.get("context_rules", [])), label="context_rules"
     )
     new_chain_games = list(raw_data.get("chain_games", []))
+
+    return new_rate_limits, new_text_rules, new_context_rules, new_chain_games
+
+
+def reload_chat_rules() -> bool:
+    """Reload chat_rules.toml, replacing module-level containers atomically.
+
+    Returns True on success, False if the file is missing / unparseable (previous
+    state is preserved in that case).
+
+    The parse-then-replace ordering ensures a broken config never leaves the
+    system with an empty rule set.
+    """
+    path = CHAT_RULES_TOML_PATH
+    raw_data: dict = {}
+    if path.exists():
+        try:
+            with open(path, "rb") as f:
+                raw_data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            logger.warning("chat_rules.toml 语法错误，保留旧规则：%s", exc)
+            return False
+
+    new_rate_limits, new_text_rules, new_context_rules, new_chain_games = (
+        parse_chat_rule_state(raw_data)
+    )
 
     # Atomic replacement.
     RATE_LIMIT_RULES.clear()

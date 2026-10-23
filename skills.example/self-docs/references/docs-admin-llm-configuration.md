@@ -115,9 +115,9 @@ python -m quickquip.llm.config_cli restore --file data/llm-config-backup.db --se
 
 ## 生产与回退
 
-生产配置通过 Web 或配置运维驱动变更。普通 deploy-v4 保留服务器配置数据库，上传排除本地 DB 和本地旧 LLM TOML；首次切换选择服务器迁移输入，并在候选构建通过后、启动前初始化。迁移后生成的人格文件随生产部署保留。
+生产配置通过 Web 或配置运维驱动变更。deploy-v4 使用[共同基线进行双向配置同步](config-sync.md)，排除本地 DB 和旧 LLM TOML 的原始上传。首次升级同步能力使用 `--config-sync off` 保留服务器配置，随后选择初始来源建立基线。候选版本构建通过后初始化配置，配置变更通过服务提交和 Bot 应用确认。
 
-`prod/config-v1.sh` 与 `prod/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流通过 JSON 导出；数据库回流通过一致备份。
+`prod/config-v1.sh` 与 `prod/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流支持[共同基线同步](config-sync.md)和单独 JSON 导出；数据库回流通过一致备份。
 
 回退至 1.16.1 使用迁移前 TOML、独立人格与 generation 资产。保留新库便于再次升级；升级后的新配置修改不反向导出为 TOML。部署前核对实际配置来源、服务启动顺序和备份。
 

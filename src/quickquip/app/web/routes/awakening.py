@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from quickquip.common.config_writes import configuration_write
+
 import re
 from dataclasses import asdict, fields
 from pathlib import Path
@@ -116,9 +119,11 @@ def _toml_value(value: Any) -> str:
     raise TypeError(f"unsupported TOML value: {value!r}")
 
 
-def _lock_for(path: Path) -> FileLock:
+@contextmanager
+def _lock_for(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    return FileLock(str(path) + ".lock")
+    with configuration_write(_CONFIG_PATH.parent.parent / "data"), FileLock(str(path) + ".lock"):
+        yield
 
 
 def _render_awakening_config(cfg: AwakeningConfig) -> str:

@@ -22,7 +22,7 @@
 - `CODE_OF_CONDUCT.md` → `references/root-code_of_conduct.md` — RFC 325799 — QuickQuip Code of Conduct ｜ 关键词：∀t: Reading(t) → Reading(t)、submit(x) → (User(x) ↔ User(x))、|P| ∈ {0, 1} → ∀p ∈ P: Civil(p, air)、Comply(x) → ¬Violate(x)、Disagree(x) → (C ≡ C)、P(reply) + P(¬reply) = 1
 - `CONTRIBUTING.md` → `references/root-contributing.md` — Contributing to QuickQuip ｜ 关键词：docs/dev/README.md、docs/dev/branching.md、style.md、testing.md、documenting.md、src/、python、CLAUDE.md、CLAUDE.local.md、scripts/git-hooks/pre-push
 - `README.md` → `references/root-readme.md` — QuickQuip — QQ 群聊妙语机器人 ｜ 关键词：regex_context、llm_context、config/games.toml、/roll、/choose、/fortune、/vote、/quote、/find、/tell
-- `ROADMAP.md` → `references/root-roadmap.md` — ROADMAP ｜ 关键词：docs/、/llm reload、awakening、chat_rules、generation、games、niuniu_text*、/llm probe、context_limit、builtin_search
+- `ROADMAP.md` → `references/root-roadmap.md` — ROADMAP ｜ 关键词：docs/、null、/llm reload、awakening、chat_rules、generation、games、niuniu_text*、/llm probe、context_limit
 - `SECURITY.md` → `references/root-security.md` — 安全策略 / Security Policy ｜ 关键词：dev、-dev.N、-rc.N、cccp1945@vip.qq.com、[QuickQuip security]
 
 ## 文档导航
@@ -45,6 +45,7 @@
 ## 管理文档（部署与运维）
 
 - `docs/admin/client-fingerprints.md` → `references/docs-admin-client-fingerprints.md` — 请求指纹 Profile ｜ 关键词：client_fingerprint、default、quickquip、opencode2、codex、claude-code、system、gemini-cli、legacy-gemini、legacy-claude
+- `docs/admin/config-sync.md` → `references/docs-admin-config-sync.md` — 本地与线上配置同步 ｜ 关键词：prod.example/、prod/、bash prod/deploy-v4.sh --config-sync off、.env、--migrate、--config-sync off --env local、--skip-health、--from local、python -m quickquip.llm.config_cli init、data/config-sync/
 - `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：.env、DRIVER、~websockets、~fastapi+~websockets、HOST、0.0.0.0、PORT、8080、QQ_ACCOUNT、ONEBOT_WS_URLS
 - `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端部署指南 ｜ 关键词：prod.example/、prod/、.env、QQ_ACCOUNT、ONEBOT_ACCESS_TOKEN、DRIVER、~fastapi+~websockets、WEB_ADMIN_PASSWORD、QUICKQUIP_SEARXNG_BASE_URL、OPENAI_API_KEY
 - `docs/admin/game-config.md` → `references/docs-admin-game-config.md` — 游戏系统管理 ｜ 关键词：/game list、/game stop、/rules、/disable <rule_name>、/enable <rule_name>、config/games.toml、config/games.toml.example、[economy]、sign_base_gold、sign_streak_bonus
@@ -100,6 +101,7 @@
 - `docs/dev/adr/0016-trusted-skill-execution.md` → `references/docs-dev-adr-0016-trusted-skill-execution.md` — ADR-0016：由部署者管理受信任 Skill 并约束脚本执行 ｜ 状态：Accepted
 - `docs/dev/adr/0017-preset-skill-distribution.md` → `references/docs-dev-adr-0017-preset-skill-distribution.md` — ADR-0017：保留可选 Skill 副本并显式检测和同步漂移 ｜ 状态：Accepted
 - `docs/dev/adr/0018-mcp-result-normalization.md` → `references/docs-dev-adr-0018-mcp-result-normalization.md` — ADR-0018：将 MCP 结果归一化为受控内部内容 ｜ 状态：Accepted
+- `docs/dev/adr/0019-configuration-three-way-sync.md` → `references/docs-dev-adr-0019-configuration-three-way-sync.md` — ADR-0019：通过共同配置基线协调双向同步 ｜ 状态：Accepted ｜ 关键词：.env
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

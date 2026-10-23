@@ -13,3 +13,4 @@ skills.example
 src
 prod/Dockerfile
 prod/docker-compose.yml
+prod/remote-config-sync.sh

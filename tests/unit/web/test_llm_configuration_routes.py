@@ -203,3 +203,17 @@ def test_note_endpoint_labels_draft_and_snapshots(client, config_service):
     assert client.put(f"{BASE}/note", json={"note": "x" * 121}).status_code == 422
     providers = client.get(f"{BASE}/providers?source=published").json()
     assert providers["version"]["note"] == "首版 基线"
+
+
+def test_configuration_maintenance_reports_conflict_without_saving(client, config_service):
+    from quickquip.config_sync.state import State
+    login(client)
+    before = config_service.read()
+    State(config_service.path.parent).write(
+        "maintenance.json", {"operation": "a" * 32, "token": "synthetic"}
+    )
+    response = client.put(BASE, json={'expected_draft_revision': before['revision'],
+                                      'document': before['document']})
+    assert response.status_code == 409
+    assert response.json()['code'] == 'configuration_busy'
+    assert config_service.read() == before
