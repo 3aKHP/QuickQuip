@@ -32,7 +32,7 @@ QuickQuip 与模型服务交换请求和响应的格式约定，例如 OpenAI Ch
 <a id="config-workspace"></a>
 ### 配置工作副本（Configuration workspace）
 
-由本地草稿和受管资产生成的可编辑 TOML 簇，独立保存注释、来源基线与恢复资料。刷新接收数据库变化并保留工作副本的单边修改。见[工作副本操作](admin/config-workspace.md)。
+由本地草稿和受管资产生成的可编辑 TOML 簇，独立保存注释、来源基线与恢复资料。组装保存草稿，刷新接收数据库变化；发布和服务器同步各自确认生效。见[工作副本操作](admin/config-workspace.md)。
 
 <a id="config-revision"></a>
 ### 配置修订（Configuration revision）
