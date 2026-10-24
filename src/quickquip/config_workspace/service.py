@@ -18,8 +18,10 @@ from quickquip.config_workspace.storage import (
 )
 from quickquip.config_workspace.transactions import (
     advance,
+    require_stopped,
     rollback,
     summary,
+    validate_target,
 )
 from quickquip.llm.config_durability import durable_write, sync_directory
 from quickquip.llm.config_errors import ConfigError
@@ -84,12 +86,12 @@ class Workspace:
             tree = read_tree(self.storage.directory)
             return {"valid": True, "bundle_hash": digest(tree.bundle), "files": len(tree.files)}
 
-    def plan(self, *, action="refresh", overwrite=False):
+    def plan(self, *, action="pack", overwrite=False):
         with self.storage.lock():
             result, *_ = preview(self.storage, self.endpoint, action=action, overwrite=overwrite)
             return public_plan(result)
 
-    def execute(self, action, expected_plan, *, overwrite=False):
+    def execute(self, action, expected_plan, *, overwrite=False, services_stopped=False):
         with self.storage.lock():
             result, state, tree, captured, target_files = preview(
                 self.storage,
@@ -105,11 +107,18 @@ class Workspace:
                     "Workspace and database changed the same unit",
                     details={"conflicts": result["conflicts"]},
                 )
+            root_write = action == "pack" and digest(captured["bundle"]) != result["target_hash"]
+            if action == "pack":
+                validate_target(result, captured)
+            if root_write and result["assets_changed"]:
+                require_stopped(self.endpoint, services_stopped)
             # Guard workspace edits made while the source and candidate were validated.
             if read_tree(self.storage.directory).files != tree.files:
                 raise ConfigError("revision_conflict", "Workspace changed after planning")
             target_state = baseline(self.endpoint.root, captured)
-            if tree.files == target_files and state == target_state:
+            if action == "pack":
+                target_state.update(base=result["bundle"], base_hash=result["target_hash"])
+            if not root_write and tree.files == target_files and state == target_state:
                 return {
                     "action": action,
                     "phase": "unchanged",
@@ -123,13 +132,15 @@ class Workspace:
                 "source": str(self.endpoint.root),
                 "workspace": str(self.storage.directory),
                 "source_version": captured["version"],
+                "root_write": root_write,
+                "assets_changed": result["assets_changed"],
                 "before_state": state,
                 "target_state": target_state,
                 "before_files": file_map(tree.files),
                 "target_files": file_map(target_files),
             }
             self.storage.begin(record)
-            return advance(self.storage, self.endpoint, record)
+            return advance(self.storage, self.endpoint, record, services_stopped=services_stopped)
 
     def status(self, operation=None):
         with self.storage.lock():
@@ -150,21 +161,21 @@ class Workspace:
                 )
             return result
 
-    def resume(self, operation):
+    def resume(self, operation, *, services_stopped=False):
         with self.storage.lock():
             active = self.storage.active()
             if active and active != operation:
                 raise ConfigError("operation_conflict", "Another workspace operation is active")
             record = self.storage.operation(operation)
-            return advance(self.storage, self.endpoint, record)
+            return advance(self.storage, self.endpoint, record, services_stopped=services_stopped)
 
-    def recover(self, operation):
+    def recover(self, operation, *, services_stopped=False):
         with self.storage.lock():
             active = self.storage.active()
             if active and active != operation:
                 raise ConfigError("operation_conflict", "Another workspace operation is active")
             record = self.storage.operation(operation)
-            return rollback(self.storage, self.endpoint, record)
+            return rollback(self.storage, self.endpoint, record, services_stopped=services_stopped)
 
 
 def validate_offline(directory):

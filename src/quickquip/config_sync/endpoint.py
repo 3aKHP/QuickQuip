@@ -114,9 +114,12 @@ class Endpoint:
                 yield record
 
     def prepare(
-        self, operation, bundle, expected, *, publish=False, overwrite=False, deployment=False
+        self, operation, bundle, expected, *, publish=False, overwrite=False, deployment=False,
+        local_only=False,
     ):
         identifier(operation)
+        if local_only and (publish or deployment):
+            raise ConfigError("invalid_field", "Local-only operations cannot publish or deploy")
         bundle = validate_bundle(bundle, environment=publish and not deployment)
         self.state.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         with write_lock(self.state.directory.resolve()):
@@ -130,6 +133,7 @@ class Endpoint:
                         digest(existing["target"]) != digest(bundle)
                         or existing["publish"] != publish
                         or existing.get("deployment_pending", False) != deployment
+                        or existing.get("local_only", False) != local_only
                         or existing["before"]["version"] != expected
                     ):
                         raise ConfigError("operation_conflict", "Operation has a different target")
@@ -169,6 +173,7 @@ class Endpoint:
                     "expected": expected,
                     "write_document": write_document,
                     "deployment_pending": deployment,
+                    "local_only": local_only,
                 }
                 directory = self.state.directory / "backups" / operation
                 from quickquip.llm.config_durability import ensure_directory
@@ -410,6 +415,8 @@ class Endpoint:
 
     def confirm(self, operation, peer):
         with self.owned_operation(operation) as record:
+            if record.get("local_only"):
+                raise ConfigError("operation_conflict", "Local-only operations have no peer")
             identifier(peer)
             if record["phase"] == "confirmed":
                 if record.get("peer") != peer:
@@ -427,6 +434,22 @@ class Endpoint:
                     raise ConfigError("revision_conflict", "Endpoint changed before confirmation")
             self.state.acknowledge(peer, record["target"], operation)
             record["peer"] = peer
+            record["phase"] = "confirmed"
+            self.state.save_operation(record)
+            self.state.clear_maintenance(record["token"])
+            return self.summary(record)
+
+    def complete_local(self, operation):
+        """Finish a local workspace transaction without acknowledging a remote baseline."""
+        with self.owned_operation(operation) as record:
+            if not record.get("local_only") or record["publish"]:
+                raise ConfigError("operation_conflict", "Operation is not local-only")
+            if record["phase"] not in ("committed", "confirmed"):
+                raise ConfigError("recovery_required", "Local operation has not committed")
+            if digest(self.capture()["bundle"]) != digest(record["target"]):
+                raise ConfigError(
+                    "revision_conflict", "Local configuration changed before confirmation"
+                )
             record["phase"] = "confirmed"
             self.state.save_operation(record)
             self.state.clear_maintenance(record["token"])
