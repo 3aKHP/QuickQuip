@@ -7,7 +7,7 @@ import tomllib
 
 import tomlkit
 from tomlkit.container import OutOfOrderTableProxy
-from tomlkit.items import AoT, Array, InlineTable, Table
+from tomlkit.items import AoT, Array, Comment, InlineTable, Null, Table
 
 from quickquip.config_sync.bundle import digest
 from quickquip.llm.config_errors import ConfigError
@@ -145,6 +145,46 @@ def _identity(items):
     return None
 
 
+def _move_header_comments(owner, end, table):
+    if "\n" in table.trivia.indent:
+        return
+    start = end
+    while start and owner.body[start - 1][0] is None and isinstance(
+        owner.body[start - 1][1], Comment
+    ):
+        start -= 1
+    if start == end:
+        return
+    table.trivia.indent = (
+        "".join(item.as_string() for _, item in owner.body[start:end]) + table.trivia.indent
+    )
+    # Keep indexed keys in place: comments are unkeyed AST entries.
+    for index in range(start, end):
+        owner._body[index] = (None, Null())
+
+
+def _attach_aot_comments(container, array):
+    owners = container._tables if isinstance(container, OutOfOrderTableProxy) else [container]
+    for owner in owners:
+        owner = owner.value if isinstance(owner, Table) else owner
+        for index, (_, item) in enumerate(owner.body):
+            if item is array:
+                _move_header_comments(owner, index, array[0])
+                break
+    for index in range(1, len(array)):
+        owner = array[index - 1].value
+        # A comment before the next array header can live in the last nested table.
+        while owner.body:
+            last = owner.body[-1][1]
+            if isinstance(last, Table):
+                owner = last.value
+            elif isinstance(last, AoT) and last:
+                owner = last[-1].value
+            else:
+                break
+        _move_header_comments(owner, len(owner.body), array[index])
+
+
 def _assign(container, key, value, *, inline=False):
     if key not in container:
         container[key] = _inline(value) if inline else _item(value)
@@ -154,6 +194,8 @@ def _assign(container, key, value, *, inline=False):
         if hasattr(container, "item")
         else container._internal_container.item(key)
     )
+    if isinstance(previous, AoT) and previous and digest(previous.unwrap()) != digest(value):
+        _attach_aot_comments(container, previous)
     updated = _patch(previous, value, inline=inline)
     if updated is previous:
         return

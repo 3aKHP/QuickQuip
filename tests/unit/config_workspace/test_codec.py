@@ -172,3 +172,49 @@ z=3 # keep z
     expected["a"] = {}
     cleared = render_value(expected, result)
     assert load_value(cleared, "interleaved.toml") == expected
+
+
+@pytest.mark.parametrize("indices", [[1, 0], [0], [1]])
+def test_comments_before_model_headers_follow_identity_on_reorder_and_removal(indices):
+    original = b'''[value]
+id = "alpha"
+# first explanation
+[[value.models]]
+model = "first"
+context_window = 32000
+# second explanation
+[[value.models]]
+model = "second"
+context_window = 64000
+'''
+    value = load_value(original, "models.toml")
+    assert render_value(value, original) == original
+    value["models"] = [value["models"][index] for index in indices]
+    changed = render_value(value, original)
+    assert load_value(changed, "models.toml") == value
+    names = ["first", "second"]
+    for index in indices:
+        name = names[index]
+        assert (
+            f'# {name} explanation\n[[value.models]]\nmodel = "{name}"'.encode() in changed
+        )
+    for index in set(range(2)) - set(indices):
+        assert f"# {names[index]} explanation".encode() not in changed
+
+
+def test_blank_line_separates_a_model_trailing_comment_from_the_next_header():
+    original = b'''[value]
+id = "alpha"
+[[value.models]]
+model = "first"
+# first trailing note
+
+[[value.models]]
+model = "second"
+'''
+    value = load_value(original, "models.toml")
+    value["models"].reverse()
+    changed = render_value(value, original)
+    assert b'model = "first"\n# first trailing note' in changed
+    assert changed.index(b'model = "second"') < changed.index(b"# first trailing note")
+    assert load_value(changed, "models.toml") == value
