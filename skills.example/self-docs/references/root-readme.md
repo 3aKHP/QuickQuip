@@ -35,6 +35,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具）；模型在对话中生成的图片也会直接送达群聊。统一收口 `config/generation.toml`
 - **Web 管理后台** — LLM 配置数据库与分区工作台，草稿独立应用、保存时间与备注标记、Bot 实际加载状态，以及按渠道管理的模型价格；Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
+- **TOML 配置工作副本** — 从 SQLite 草稿导出分组文件，在编辑器中保留注释审阅修改；支持校验、数据库刷新、三方差异和中断恢复。详见 [工作副本指南](docs/admin/config-workspace.md)
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。全部文档索引见 [docs/index.md](docs/index.md)。
 

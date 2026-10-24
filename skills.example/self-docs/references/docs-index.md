@@ -36,6 +36,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
 | [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/config-sync.md](admin/config-sync.md) | 本地与线上配置同步、共同基线、冲突与恢复 |
+| [admin/config-workspace.md](admin/config-workspace.md) | TOML 工作副本的导出、编辑、刷新与恢复 |
 | [admin/llm-configuration.md](admin/llm-configuration.md) | LLM 数据库配置管理——迁移、草稿保存与应用、JSON 交换、备份恢复及 1.16.1 回退 |
 | [admin/client-fingerprints.md](admin/client-fingerprints.md) | 请求指纹 Profile——品牌 UA、安装与纪元身份及模板配置 |
 | [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、LLM 配置数据库、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
@@ -65,6 +66,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/record-identities.md](dev/record-identities.md) | 记录正文与成员身份契约——正文片段结构、身份分层缓存与消费口径 |
 | [docs/dev/game-framework.md](dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
 | [docs/dev/llm-configuration-api.md](dev/llm-configuration-api.md) | LLM 配置 API——修订冲突、任务状态、参数 metadata 与前端接口契约 |
+| [docs/dev/config-workspace.md](dev/config-workspace.md) | TOML 工作副本格式、值编码、计划与事务契约 |
 | [docs/dev/llm-configuration-frontend.md](dev/llm-configuration-frontend.md) | LLM 配置前端交付——页面任务、保存与应用、字段继承、接口接线和设计验收 |
 | [docs/dev/llm-module.md](dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
 | [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、协议协商、部署职责与工具结果处理 |

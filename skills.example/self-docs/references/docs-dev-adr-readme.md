@@ -27,6 +27,7 @@
 | 编号 | 决策 | 状态 | 替代记录 |
 |---|---|---|---|
 | [ADR-0019](0019-configuration-three-way-sync.md) | 通过共同配置基线协调双向同步 | Accepted | — |
+| [ADR-0020](0020-editable-configuration-workspaces.md) | 以持久 TOML 工作副本编辑配置包 | Accepted | — |
 | [ADR-0001](0001-config-snapshot-publication.md) | 通过不可变快照发布配置 | Accepted | — |
 | [ADR-0002](0002-business-session-identity.md) | 由业务维护 Session 身份 | Accepted | — |
 | [ADR-0003](0003-epoch-history-freezing.md) | 在纪元内冻结历史表达 | Accepted | — |

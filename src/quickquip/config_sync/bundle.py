@@ -165,7 +165,7 @@ def validate_bundle(bundle: dict, *, environment=False) -> dict:
         raise ConfigError("body_too_large", "LLM configuration exceeds 1 MiB")
     total = 0
     with tempfile.TemporaryDirectory(prefix="quickquip-config-validate-") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         names = set()
         for name, entry in bundle["assets"].items():
             if name.casefold() in names:
