@@ -54,7 +54,7 @@ PowerShell 使用 `-Action sync -Mode auto -Plan` 预览，去掉 `-Plan` 执行
 
 ## 配置范围与生效
 
-本地草稿和受管资产可导出为[持久 TOML 工作副本](config-workspace.md)审阅、编辑和校验。线上热修先回流本地，再刷新工作副本。
+本地草稿和受管资产可导出为[持久 TOML 工作副本](config-workspace.md)，编辑后校验并组装回本地，再使用本文的同步流程推送。线上热修先回流本地，再刷新工作副本。
 
 同步包括 LLM 草稿／发布文档、`config/personas/*.toml`、`config/client_profiles/*.toml`，以及 generation、chat_rules、games、awakening、sensitive_words、admins、niuniu_text、niuniu_text_safe 的 TOML 文件。`llm_about` 的全局和群目录中 `vocab.yaml`、`identities.yaml` 同时同步。
 

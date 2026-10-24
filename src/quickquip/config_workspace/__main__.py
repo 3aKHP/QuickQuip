@@ -17,15 +17,17 @@ def parser():
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--root", type=Path, default=PROJECT_ROOT)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "validate", "plan", "refresh", "status", "resume", "recover"):
+    for name in ("init", "validate", "plan", "pack", "refresh", "status", "resume", "recover"):
         command = commands.add_parser(name)
         command.add_argument("directory", type=Path)
         if name == "plan":
-            command.add_argument("--action", choices=("refresh",), default="refresh")
-        if name in ("plan", "refresh"):
+            command.add_argument("--action", choices=("pack", "refresh"), default="pack")
+        if name in ("plan", "pack", "refresh"):
             command.add_argument("--overwrite", action="store_true")
-        if name == "refresh":
+        if name in ("pack", "refresh"):
             command.add_argument("--expected-plan", required=True)
+        if name in ("pack", "resume", "recover"):
+            command.add_argument("--services-stopped", action="store_true")
         if name in ("status", "resume", "recover"):
             command.add_argument("--operation", required=name != "status")
     return result
@@ -39,16 +41,19 @@ def execute(args):
         return workspace.initialize()
     if args.command == "plan":
         return workspace.plan(action=args.action, overwrite=args.overwrite)
-    if args.command == "refresh":
+    if args.command in ("pack", "refresh"):
         return workspace.execute(
             args.command,
             args.expected_plan,
             overwrite=args.overwrite,
+            services_stopped=getattr(args, "services_stopped", False),
         )
     if args.command == "status":
         return workspace.status(args.operation)
     if args.command in ("resume", "recover"):
-        return getattr(workspace, args.command)(args.operation)
+        return getattr(workspace, args.command)(
+            args.operation, services_stopped=args.services_stopped
+        )
     raise ConfigError("invalid_command", "Unknown workspace command")
 
 
