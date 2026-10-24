@@ -39,3 +39,7 @@ jobs:
           tests/unit/llm/test_config_cli_encoding.py
           --basetemp "${{ runner.temp }}/pytest-quickquip"
           -k "two_processes_initialize_one_database or backup_is_consistent_and_restore_clears_leases or config_cli_emits_utf8"
+      - name: Verify TOML workspaces and local recovery
+        run: >-
+          python -m pytest tests/unit/config_workspace
+          --basetemp "${{ runner.temp }}/pytest-config-workspace"
