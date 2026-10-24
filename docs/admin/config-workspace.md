@@ -23,7 +23,7 @@ python -m quickquip.config_workspace init /path/to/config-workspace
 
 逻辑文件以 `value` 为根：渠道字段位于 `[value]`，模型位于 `[[value.models]]`。新增、删除或重命名文件时，同时更新清单；渠道清单顺序决定组装后的渠道顺序。未登记的配置 TOML 会报错，编辑器 `.bak` 等辅助文件不参与组装。
 
-空值写为 `context_window = { __quickquip_value__ = "null" }`。缺少字段和显式空值按配置自身规则解释。大整数和包含保留键的对象由工具编码，见[格式契约](../dev/config-workspace.md)。应用密钥继续由项目根 `.env` 管理。
+空值写为 `context_window = { __quickquip_value__ = "null" }`。缺少字段和显式空值按配置自身规则解释。大整数和包含保留键的对象由工具编码，见[格式契约](../dev/config-workspace.md)。应用密钥继续由项目根 `.env` 管理。CLI 读取所选根目录的 `.env`，已设置的进程变量优先；工作副本保留变量引用。离线校验含环境引用的资产时，提供对应变量或用 `--root` 指定含 `.env` 的项目。
 
 ## 校验并组装
 

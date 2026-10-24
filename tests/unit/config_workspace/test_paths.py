@@ -107,3 +107,44 @@ def test_symlinked_private_state_is_rejected(workspace, tmp_path):
     with pytest.raises(ConfigError):
         workspace.storage.save({"id": "a" * 32})
     assert not list(other.iterdir())
+
+
+@pytest.mark.parametrize("command", ["resume", "recover"])
+def test_case_only_asset_rename_can_refresh_and_restore(workspace, source, monkeypatch, command):
+    from quickquip.config_workspace.service import Workspace
+    from quickquip.config_workspace.storage import Storage
+
+    folder = source.root / "config/personas"
+    folder.mkdir()
+    old = folder / "alpha.toml"
+    old.write_text('id = "alpha"\ndisplay_name = "Test"\nsystem_prompt = "Test"\n')
+    workspace.execute("refresh", workspace.plan(action="refresh")["plan_hash"])
+    before = read_tree(workspace.storage.directory).files
+    old.rename(folder / "Alpha.toml")
+    version = source.version()
+    original = Storage.write
+
+    def interrupt_state(self, name, value):
+        if name == "state.json":
+            raise OSError("interrupted renamed asset receipt")
+        return original(self, name, value)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Storage, "write", interrupt_state)
+        with pytest.raises(OSError):
+            workspace.execute("refresh", workspace.plan(action="refresh")["plan_hash"])
+    operation = workspace.storage.active()
+    assert operation
+    resumed = Workspace(workspace.storage.directory, source.root)
+    assert getattr(resumed, command)(operation)["phase"] == (
+        "confirmed" if command == "resume" else "recovered"
+    )
+    assert resumed.storage.active() is None
+    files = read_tree(resumed.storage.directory).files
+    if command == "resume":
+        assert "assets/config/personas/Alpha.toml" in files
+        assert "assets/config/personas/alpha.toml" not in files
+        assert read_tree(resumed.storage.directory).bundle == source.capture()["bundle"]
+    else:
+        assert files == before
+    assert source.version() == version

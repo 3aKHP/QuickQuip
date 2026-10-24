@@ -150,6 +150,15 @@ class Storage:
     def install(self, record, *, restore=False):
         current = self.check_files(record)
         target = file_bytes(record["before_files"] if restore else record["target_files"])
+        # Delete old names first so case-only renames work on Windows.
+        for name in sorted(current.keys() - target.keys()):
+            path = safe_path(self.directory, name)
+            if path.read_bytes() != current[name]:
+                raise ConfigError(
+                    "revision_conflict", "Workspace file changed before deletion", name
+                )
+            path.unlink()
+            sync_directory(path.parent)
         # The manifest switches last. The active journal fences normal readers meanwhile.
         for name in sorted(target, key=lambda name: (name == "workspace.toml", name)):
             if current.get(name) == target[name]:
@@ -163,14 +172,6 @@ class Storage:
             private_directory(path.parent)
             durable_write(path, target[name])
             path.chmod(0o600)
-        for name in sorted(current.keys() - target.keys()):
-            path = safe_path(self.directory, name)
-            if path.read_bytes() != current[name]:
-                raise ConfigError(
-                    "revision_conflict", "Workspace file changed before deletion", name
-                )
-            path.unlink()
-            sync_directory(path.parent)
         if self.check_files(record) != target:
             raise ConfigError("revision_conflict", "Workspace changed before confirmation")
         self.write("state.json", record["before_state"] if restore else record["target_state"])

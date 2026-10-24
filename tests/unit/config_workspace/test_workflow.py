@@ -1,5 +1,6 @@
 from copy import deepcopy
 import os
+from pathlib import Path
 import subprocess
 import sys
 
@@ -223,6 +224,7 @@ def test_offline_validation_and_cli_utf8_do_not_require_original_root(workspace)
             "validate",
             str(workspace.storage.directory),
         ],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3] / "src")},
         capture_output=True,
         timeout=30,
     )
@@ -303,3 +305,53 @@ def test_workspace_pack_is_visible_to_existing_sync_plan_and_push(workspace, tmp
         sync.remote.endpoint.capture("published")["bundle"]
         == workspace.endpoint.capture()["bundle"]
     )
+
+
+@pytest.mark.parametrize("inherited", [False, True])
+def test_cli_uses_selected_root_dotenv_preserving_references_and_environment_precedence(
+    workspace, tmp_path, inherited
+):
+    root = workspace.endpoint.root
+    asset = b'''[image]
+enabled = false
+default_model = "image"
+[[image.providers]]
+id = "images"
+protocol = "openai_images"
+base_url = "${TEST_WORKSPACE_BASE}"
+api_key_env = "TEST_WORKSPACE_SECRET"
+[[image.providers.models]]
+id = "image"
+model = "image"
+'''
+    (root / "config/generation.toml").write_bytes(asset)
+    file_url = "" if inherited else "https://file.invalid/v1"
+    secret = "synthetic-workspace-dotenv-secret"
+    (root / ".env").write_text(
+        f'TEST_WORKSPACE_BASE="{file_url}"\nTEST_WORKSPACE_SECRET="{secret}"\n'
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3] / "src")}
+    env.pop("TEST_WORKSPACE_BASE", None)
+    env.pop("TEST_WORKSPACE_SECRET", None)
+    if inherited:
+        env["TEST_WORKSPACE_BASE"] = "https://inherited.invalid/v1"
+    directory = tmp_path / "dotenv-workspace"
+    for command in ("init", "validate"):
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "quickquip.config_workspace", "--root", str(root),
+                command, str(directory),
+            ],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr.decode()
+        assert secret.encode() not in result.stdout + result.stderr
+    assert (directory / "assets/config/generation.toml").read_bytes() == asset
+    for path in directory.rglob("*"):
+        if path.is_file():
+            contents = path.read_bytes()
+            assert secret.encode() not in contents
+            assert b"https://file.invalid/v1" not in contents
+            assert b"https://inherited.invalid/v1" not in contents

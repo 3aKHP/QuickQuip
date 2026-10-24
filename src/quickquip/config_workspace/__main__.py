@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 
+from dotenv import load_dotenv
 from filelock import Timeout
 
 from quickquip.common.config_writes import ConfigurationBusy
@@ -60,6 +61,7 @@ def execute(args):
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        load_dotenv(args.root / ".env", override=False)
         result = execute(args)
     except (ConfigError, ConfigurationBusy, OSError, Timeout, ValueError) as exc:
         error = (
