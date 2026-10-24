@@ -32,17 +32,18 @@ def advance(storage, endpoint, record, *, services_stopped=False):
     if record["phase"] == "recovering":
         return rollback(storage, endpoint, record, services_stopped=services_stopped)
     existing = (
-        endpoint.state.read(f"operations/{record['id']}.json") if record["root_write"] else None
+        endpoint.state.read(f"operations/{record['id']}.json") if record.get("root_write") else None
     )
     if existing and existing.get("local_only") and existing["phase"] == "confirmed":
         # Source confirmation follows durable workspace installation. Later source or
         # working-file edits are new work; repairing this receipt must leave them alone.
         if storage.read("state.json") != record["target_state"]:
             raise ConfigError("revision_conflict", "Committed workspace baseline changed")
+        endpoint.release_terminal(record["id"])
         storage.finish(record, "confirmed")
         return summary(record)
     storage.check_files(record)
-    if record["root_write"]:
+    if record.get("root_write"):
         if existing is None:
             if record["assets_changed"]:
                 require_stopped(endpoint, services_stopped)
@@ -75,7 +76,7 @@ def advance(storage, endpoint, record, *, services_stopped=False):
     record["phase"] = "writing"
     storage.save(record)
     storage.install(record)
-    if record["root_write"]:
+    if record.get("root_write"):
         endpoint.complete_local(record["id"])
     elif endpoint.version() != record["source_version"]:
         raise ConfigError("revision_conflict", "Source changed during workspace refresh")
@@ -92,7 +93,7 @@ def rollback(storage, endpoint, record, *, services_stopped=False):
         return summary(record)
     storage.check_files(record)
     operation = (
-        endpoint.state.read(f"operations/{record['id']}.json") if record["root_write"] else None
+        endpoint.state.read(f"operations/{record['id']}.json") if record.get("root_write") else None
     )
     if operation is not None:
         if operation["phase"] == "confirmed":

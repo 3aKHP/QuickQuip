@@ -67,6 +67,35 @@ def test_receipt_resume_preserves_later_source_and_workspace_edits(workspace, so
     )
 
 
+def test_resume_clears_source_maintenance_after_confirmation_interruption(workspace, monkeypatch):
+    from quickquip.common.config_writes import ConfigurationBusy
+    from quickquip.config_sync.state import State
+
+    before = workspace.endpoint.version()
+    edit_value(
+        workspace, provider_file(workspace), lambda p: p["parameters"].update(timeout_seconds=42.0)
+    )
+
+    def interrupt_cleanup(self, token):
+        raise OSError("source confirmed before maintenance cleanup")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(State, "clear_maintenance", interrupt_cleanup)
+        with pytest.raises(OSError):
+            workspace.execute("pack", workspace.plan()["plan_hash"])
+    operation = workspace.storage.active()
+    assert workspace.endpoint.state.operation(operation)["phase"] == "confirmed"
+    with pytest.raises(ConfigurationBusy):
+        workspace.endpoint.capture()
+    resumed = Workspace(workspace.storage.directory, workspace.endpoint.root)
+    assert resumed.resume(operation)["phase"] == "confirmed"
+    assert resumed.storage.active() is None
+    assert resumed.endpoint.state.read("maintenance.json") is None
+    after = resumed.endpoint.capture()
+    assert after["version"]["draft_revision"] == before["draft_revision"] + 1
+    assert after["draft"]["providers"][0]["parameters"]["timeout_seconds"] == 42.0
+
+
 def test_refresh_partial_file_install_can_resume_from_a_new_process_owner(
     workspace, source, monkeypatch
 ):
@@ -120,6 +149,41 @@ def test_refresh_recovery_restores_exact_workspace_text_and_baseline(
     assert (
         source.service.read()["document"]["providers"][0]["parameters"]["timeout_seconds"] == 42.0
     )
+
+
+@pytest.mark.parametrize("command", ["resume", "recover"])
+def test_legacy_refresh_journal_can_finish_after_pack_upgrade(
+    workspace, source, monkeypatch, command
+):
+    change_source(source, 42.0)
+    before_files = read_tree(workspace.storage.directory).files
+    source_version = source.version()
+    original = Storage.write
+
+    def interrupt_state(self, name, value):
+        if name == "state.json":
+            raise OSError("refresh state write interrupted")
+        return original(self, name, value)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Storage, "write", interrupt_state)
+        with pytest.raises(OSError):
+            workspace.execute("refresh", workspace.plan(action="refresh")["plan_hash"])
+    operation = workspace.storage.active()
+    legacy = workspace.storage.operation(operation)
+    legacy.pop("root_write")
+    legacy.pop("assets_changed")
+    workspace.storage.save(legacy)
+    resumed = Workspace(workspace.storage.directory, source.root)
+    assert getattr(resumed, command)(operation)["phase"] == (
+        "confirmed" if command == "resume" else "recovered"
+    )
+    assert resumed.storage.active() is None
+    assert source.version() == source_version
+    if command == "resume":
+        assert read_tree(resumed.storage.directory).bundle == source.capture()["bundle"]
+    else:
+        assert read_tree(resumed.storage.directory).files == before_files
 
 
 @pytest.mark.parametrize("after_commit", [False, True])
