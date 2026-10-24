@@ -46,6 +46,7 @@
 
 - `docs/admin/client-fingerprints.md` → `references/docs-admin-client-fingerprints.md` — 请求指纹 Profile ｜ 关键词：client_fingerprint、default、quickquip、opencode2、codex、claude-code、system、gemini-cli、legacy-gemini、legacy-claude
 - `docs/admin/config-sync.md` → `references/docs-admin-config-sync.md` — 本地与线上配置同步 ｜ 关键词：prod.example/、prod/、bash prod/deploy-v4.sh --config-sync off、.env、--migrate、--config-sync off --env local、--skip-health、--from local、python -m quickquip.llm.config_cli init、data/config-sync/
+- `docs/admin/config-workspace.md` → `references/docs-admin-config-workspace.md` — 在 TOML 工作副本中审阅配置 ｜ 关键词：data/llm_config.db、config/、data/、llm_about/、--root /path/to/QuickQuip、workspace.toml、providers/*.toml、settings/*.toml、styles/*.toml、routes.toml
 - `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：.env、DRIVER、~websockets、~fastapi+~websockets、HOST、0.0.0.0、PORT、8080、QQ_ACCOUNT、ONEBOT_WS_URLS
 - `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端部署指南 ｜ 关键词：prod.example/、prod/、.env、QQ_ACCOUNT、ONEBOT_ACCESS_TOKEN、DRIVER、~fastapi+~websockets、WEB_ADMIN_PASSWORD、QUICKQUIP_SEARXNG_BASE_URL、OPENAI_API_KEY
 - `docs/admin/game-config.md` → `references/docs-admin-game-config.md` — 游戏系统管理 ｜ 关键词：/game list、/game stop、/rules、/disable <rule_name>、/enable <rule_name>、config/games.toml、config/games.toml.example、[economy]、sign_base_gold、sign_streak_bonus
@@ -64,6 +65,7 @@
 
 - `docs/dev/architecture.md` → `references/docs-dev-architecture.md` — QuickQuip 项目架构与结构 ｜ 关键词：README.md、style.md、pip install -e .、python bot.py、.env、prod/、src/quickquip/、chat、common、llm
 - `docs/dev/branching.md` → `references/docs-dev-branching.md` — QuickQuip 开发工作流与发布流程 ｜ 关键词：dev、main、style.md、testing.md、documenting.md、architecture.md、versioning.md、feat、fix、refactor
+- `docs/dev/config-workspace.md` → `references/docs-dev-config-workspace.md` — TOML 配置工作副本契约 ｜ 关键词：workspace.toml、format_version、document_format_version、providers、settings、styles、routes、pricing、assets、{id,file}
 - `docs/dev/documenting.md` → `references/docs-dev-documenting.md` — QuickQuip 公开文档规范 ｜ 关键词：docs/、README.md、docs/glossary.md、docs/user/、docs/admin/、docs/dev/、docs/dev/adr/、CHANGELOG.md、ROADMAP.md、../index.md
 - `docs/dev/game-framework.md` → `references/docs-dev-game-framework.md` — 游戏框架开发者指南 ｜ 关键词：BaseGame、aliases、src/quickquip/app/message_pipeline.py、GameResult、finished、group_id、OrderedDict[str, Session]、src/quickquip/adapters/nonebot/commands.py、command_parts/、_ensure_schema()
 - `docs/dev/llm-configuration-api.md` → `references/docs-dev-llm-configuration-api.md` — LLM 配置后端接口 ｜ 关键词：data/llm_config.db、/ops/api/llm-configuration、quickquip_admin_session、Origin、Referer、在进程内构造应用导出，随约束或路由变更同步提交；运行中的管理 API 不提供、/redoc、/openapi.json、format_version、。顶层字段为
@@ -102,6 +104,7 @@
 - `docs/dev/adr/0017-preset-skill-distribution.md` → `references/docs-dev-adr-0017-preset-skill-distribution.md` — ADR-0017：保留可选 Skill 副本并显式检测和同步漂移 ｜ 状态：Accepted
 - `docs/dev/adr/0018-mcp-result-normalization.md` → `references/docs-dev-adr-0018-mcp-result-normalization.md` — ADR-0018：将 MCP 结果归一化为受控内部内容 ｜ 状态：Accepted
 - `docs/dev/adr/0019-configuration-three-way-sync.md` → `references/docs-dev-adr-0019-configuration-three-way-sync.md` — ADR-0019：通过共同配置基线协调双向同步 ｜ 状态：Accepted ｜ 关键词：.env
+- `docs/dev/adr/0020-editable-configuration-workspaces.md` → `references/docs-dev-adr-0020-editable-configuration-workspaces.md` — ADR-0020：以持久 TOML 工作副本编辑配置包 ｜ 状态：Accepted
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

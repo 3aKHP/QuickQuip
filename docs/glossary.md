@@ -29,6 +29,11 @@ QuickQuip 与模型服务交换请求和响应的格式约定，例如 OpenAI Ch
 
 配置数据库中供编辑和校验的当前文档。保存草稿后，通过独立的应用操作把选定内容交给 Bot。见[配置操作](admin/llm-configuration.md#首次启用-llm)。
 
+<a id="config-workspace"></a>
+### 配置工作副本（Configuration workspace）
+
+由本地草稿和受管资产生成的可编辑 TOML 簇，独立保存注释、来源基线与恢复资料。刷新接收数据库变化并保留工作副本的单边修改。见[工作副本操作](admin/config-workspace.md)。
+
 <a id="config-revision"></a>
 ### 配置修订（Configuration revision）
 
