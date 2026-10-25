@@ -10,6 +10,9 @@ Action="${4:?action required}"
 Target="${5:-}"
 ConfigSync=${CONFIG_SYNC:-off}
 SyncOperation=${SYNC_OPERATION:-}
+MigrateStorage=${MIGRATE_STORAGE:-0}
+[[ "$MigrateStorage" =~ ^[01]$ ]] || exit 2
+[[ "$MigrateStorage" = 0 || ( "$ConfigSync" = off && "${SKIP_HEALTH:-0}" = 0 ) ]] || exit 2
 [[ "$ConfigSync" =~ ^(auto|push|pull|off)$ ]] || exit 2
 [[ -z "$SyncOperation" || "$SyncOperation" =~ ^[a-f0-9]{32}$ ]] || exit 2
 [[ "$Action" = status || "$Action" = rollback || "$ConfigSync" = off || -n "$SyncOperation" ]] || exit 2
@@ -69,6 +72,7 @@ Activated=0
 Succeeded=0
 SharedSudo=0
 ServicesStopped=0
+StorageBackup=""
 RecoveryReady=0
 
 record_transaction() {
@@ -260,7 +264,7 @@ PY
 initialize_configuration() {
     local release="$1" source=""
     [ -f "$Root/releases/$release/src/quickquip/llm/config_cli.py" ] || return 0
-    if [ ! -f "$Root/data/llm_config.db" ]; then
+    if [ ! -f "$Root/config/managed/config.db" ] && [ ! -f "$Root/data/llm_config.db" ]; then
         if [ -n "$Prev" ] && [ -f "$Root/releases/$Prev/config/llm.toml" ]; then
             source="$Root/releases/$Prev/config/llm.toml"
         elif [ -f "$Root/config/llm.toml" ]; then
@@ -348,6 +352,12 @@ finish() {
         exit 2
     fi
     export QUICKQUIP_ENV_FILE="$Root/.env"
+    if [ "$Succeeded" = 0 ] && [ -n "$StorageBackup" ]; then
+        compose "$Id" stop quickquip web-admin || exit 2
+        compose "$Id" run --rm --no-deps web-admin python -m quickquip.llm.config_cli \
+            migrate-storage --services-stopped --rollback "$StorageBackup" \
+            || { step "STORAGE RECOVERY FAILED; keep migration backup"; exit 2; }
+    fi
     if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ]; then
         if [ "$Activated" = 1 ]; then
             if ! compose "$Id" stop quickquip web-admin \
@@ -456,6 +466,9 @@ if [ "$Action" = rollback ]; then
     [ "$Target" != "$Prev" ] || fail "target is already current"
     verify_release "$Prev" || fail "current release cannot be used for recovery"
     verify_release "$Target" || fail "rollback target or image missing"
+    if [ -f "$Root/config/managed/config.db" ] && [ ! -f "$Root/releases/$Target/src/quickquip/configuration/paths.py" ]; then
+        fail "restore the storage migration backup before rolling back to this release"
+    fi
     compose "$Prev" run --rm --no-deps web-admin python -c \
         'from pathlib import Path; import sys; sys.exit(1 if Path("/app/data/config-sync/maintenance.json").exists() else 0)' \
         || fail "finish configuration synchronization before rollback"
@@ -518,6 +531,7 @@ LinkDest=()
 rsync -ar --chmod=D755,F644 --exclude=__pycache__ --exclude='*.pyc' \
     "${LinkDest[@]}" "$Incoming/tree/" "$Release/"
 chmod 700 "$Release"
+mkdir -p "$Release/config/managed"
 export QUICKQUIP_ENV_FILE="$Incoming/shared/.env"
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.
@@ -550,6 +564,17 @@ elif [ -n "$Prev" ] && [ -f "$Release/src/quickquip/config_sync/rpc.py" ]; then
     compose "$Prev" stop quickquip web-admin || fail "could not pause configuration writers"
     compose "$Id" run --rm --no-deps -v "$Root/releases/$Prev:/sync-previous:ro" \
         web-admin python -m quickquip.config_sync.rpc preserve || fail "server configuration preservation failed"
+fi
+if [ "$MigrateStorage" = 1 ]; then
+    ServicesStopped=1
+    if [ -n "$Prev" ]; then
+        compose "$Prev" stop quickquip web-admin || fail "could not stop storage consumers"
+    fi
+    compose "$Id" run --rm --no-deps web-admin python -m quickquip.llm.config_cli \
+        migrate-storage --services-stopped > "$Incoming/storage-migration.json" \
+        || fail "storage migration failed; original storage restored"
+    StorageBackup="$("$Python" -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["backup"] if r.get("changed", False) else "")' "$Incoming/storage-migration.json")"
+    step "storage migration complete; local backup retained"
 fi
 initialize_configuration "$Id"
 DurableCode=0

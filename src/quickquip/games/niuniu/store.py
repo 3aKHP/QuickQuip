@@ -104,9 +104,12 @@ def _random_initial_length(store: NiuNiuStore) -> float:
 class NiuNiuStore:
     """SQLite-backed persistent store for 牛牛大作战 user data."""
 
-    def __init__(self, path: str = "data/niuniu.db", config: NiuNiuConfig | None = None):
+    def __init__(self, path: str = "data/niuniu.db", config: NiuNiuConfig | None = None,
+                 *, text_modes=None):
         self.path = Path(path)
         self.config = config or NiuNiuConfig()
+        from quickquip.configuration.text_modes import TextModeRepository
+        self.text_modes = text_modes or TextModeRepository()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._unavailable = False
         try:
@@ -152,10 +155,6 @@ class NiuNiuStore:
                 CREATE INDEX IF NOT EXISTS idx_records_uid
                 ON niuniu_records(uid, id DESC);
 
-                CREATE TABLE IF NOT EXISTS niuniu_group_text (
-                    group_id  TEXT PRIMARY KEY,
-                    text_mode TEXT NOT NULL DEFAULT 'default'
-                );
                 """
             )
         self._migrate()
@@ -215,25 +214,12 @@ class NiuNiuStore:
         return self.texts.get(mode, self.texts["default"])
 
     def get_group_text_mode(self, group_id: str) -> str:
-        if self._unavailable:
-            raise RuntimeError("牛牛大作战 数据库不可用")
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT text_mode FROM niuniu_group_text WHERE group_id = ?", (group_id,)
-            ).fetchone()
-        return row["text_mode"] if row else "default"
+        return self.text_modes.get(str(group_id))
 
     def set_group_text_mode(self, group_id: str, mode: str) -> bool:
-        """Set text mode. Returns False if mode is unknown, True on success."""
-        if self._unavailable:
-            raise RuntimeError("牛牛大作战 数据库不可用")
         if mode not in self.texts:
             return False
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO niuniu_group_text (group_id, text_mode) VALUES (?, ?)",
-                (group_id, mode),
-            )
+        self.text_modes.set(str(group_id), mode)
         return True
 
     # ── daily glue luck (打胶运势) ──────────────────────────────────────

@@ -6,6 +6,7 @@ param(
     [string]$ReleaseId = "",
     [switch]$Migrate,
     [switch]$SkipHealth,
+    [switch]$MigrateStorage,
     [ValidateSet('auto','push','pull','off')][string]$ConfigSync = 'auto',
     [ValidateSet('server','local')][string]$EnvSource = 'server',
     [switch]$Plan,
@@ -33,6 +34,11 @@ if ($HostAlias -cnotmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$') { throw "Invalid SSH
 if ($KeepReleases -lt 2 -or $KeepReleases -gt 100) { throw "KeepReleases must be 2..100" }
 if ($Plan -and ($Mode -ne 'deploy' -or $DryRun -or $SkipHealth -or $ConfigSync -eq 'off')) { throw 'Plan requires a normal synchronization deployment' }
 if ($SkipHealth -and $ConfigSync -ne 'off') { throw 'SkipHealth requires ConfigSync off' }
+if ($MigrateStorage) {
+    if ($Mode -notin @('deploy', 'migrate') -or $SkipHealth -or $Plan) { throw 'Storage migration requires deployment and health checks' }
+    if ($PSBoundParameters.ContainsKey('ConfigSync') -and $ConfigSync -ne 'off') { throw 'Storage migration retains server configuration; use ConfigSync off' }
+    $ConfigSync = 'off'
+}
 $SyncOperation = ''
 $SyncPython = ''
 $Version = ""
@@ -101,7 +107,7 @@ try {
         $List = Join-Path $Temp 'manifest.txt'
         $Archive = Join-Path $Temp 'release.tar.gz'
         [System.IO.File]::WriteAllText($List, (($entries -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
-        Invoke-Native 'release archive' { tar --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -czf $Archive -T $List }
+        Invoke-Native 'release archive' { tar --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='config/managed' --exclude='config/managed/**' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -czf $Archive -T $List }
         if ($DryRun) {
             Invoke-Native 'archive preview' { tar -tzf $Archive }
             Write-Host 'Preview complete; frontend built locally, temporary archive removed, no remote connection or upload.'
@@ -131,8 +137,9 @@ try {
         }
     }
     $skip = if ($SkipHealth) { '1' } else { '0' }
+    $storage = if ($MigrateStorage) { '1' } else { '0' }
     Invoke-Native 'launch (if uncertain, inspect operation log before retrying)' {
-        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$skip ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
+        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$storage SKIP_HEALTH=$skip ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
     }
     $Log = "$RemoteDir/.deploy/$Id.log"
     $ExitFile = "$RemoteDir/.deploy/$Id.exit"

@@ -221,5 +221,5 @@ MCP_PRTS_WIKI_TOKEN=your_token_here
 ## 延伸阅读
 
 - [docs/dev/mcp-tutorial.md](../dev/mcp-tutorial.md) — MCP 概念教程
-- [configuration.md](configuration.md) — `data/llm_config.db` 字段全集
+- [configuration.md](configuration.md) — `config/managed/config.db` 字段全集
 - [docs/dev/mcp-integration.md](../dev/mcp-integration.md) — MCP 集成设计与决策

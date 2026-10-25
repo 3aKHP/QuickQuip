@@ -54,6 +54,7 @@ export type GroupOverridePatch = Partial<Record<GroupOverrideField, GroupOverrid
 export interface GroupOverrideEntry extends GroupOverrideDraft {
   group_id: string
   type: 'group' | 'private'
+  session_active?: boolean
   updated_at: string | null
 }
 
@@ -121,5 +122,13 @@ export async function saveGroupSettings(
 export async function clearGroupSettings(groupId: string): Promise<{ deleted: number }> {
   return request(`/api/group-settings/${encodeURIComponent(groupId)}`, {
     method: 'DELETE',
+  })
+}
+
+/** Pause/resume private responses without changing saved preferences or history. */
+export async function setPrivateSessionState(userId: string, active: boolean) {
+  return request<{ active: boolean }>(`/api/private-sessions/${encodeURIComponent(userId)}/state`, {
+    method: 'PUT',
+    body: JSON.stringify({ active }),
   })
 }

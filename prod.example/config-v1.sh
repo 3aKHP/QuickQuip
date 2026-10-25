@@ -57,6 +57,11 @@ fi
 if [[ "$Action" =~ ^(export|preview|import|backup|restore)$ ]]; then
     [ -n "$File" ] || { echo '--file required' >&2; exit 2; }
 fi
+if [ "$Action" = restore ]; then
+    [ -f "$File" ] && [ -f "$File.runtime.db" ] || {
+        echo 'Restore requires the backup and its .runtime.db file' >&2; exit 2;
+    }
+fi
 Revision=${Revision:-0}
 TransferId="$(date -u +%Y%m%d%H%M%S)-${RANDOM}-${RANDOM}"
 RequestId=${RequestId:-$TransferId}
@@ -71,6 +76,10 @@ if [[ "$Action" =~ ^(preview|import|restore)$ ]]; then
     File="$(cd "$(dirname "$File")" && pwd)/$(basename "$File")"
     scp "$File" "$HostAlias:$Transfer/input"
     ssh "$HostAlias" "chmod 600 '$Transfer/input'"
+    if [ "$Action" = restore ]; then
+        scp "$File.runtime.db" "$HostAlias:$Transfer/input.runtime.db"
+        ssh "$HostAlias" "chmod 600 '$Transfer/input.runtime.db'"
+    fi
 fi
 ssh "$HostAlias" bash -s -- "$RemoteDir" "$Action" "$TransferId" "$Revision" "$Source" "$RequestId" "$Wait" "$Timeout" "$Operation" <<'REMOTE'
 set -euo pipefail
@@ -112,16 +121,23 @@ case "$Action" in
         ;;
 esac
 # Container may run as root; enable private transfer read-back for deployment user.
-if [ -f "$Root/data/.llm-transfer-$TransferId/output" ]; then
-    "${Compose[@]}" exec -T web-admin python -c \
-        'import os,sys; os.chmod(sys.argv[1], 0o600); os.chown(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))' \
-        "$Path/output" "$(id -u)" "$(id -g)"
-fi
+for name in output output.runtime.db; do
+    if [ -f "$Root/data/.llm-transfer-$TransferId/$name" ]; then
+        "${Compose[@]}" exec -T web-admin python -c \
+            'import os,sys; os.chmod(sys.argv[1], 0o600); os.chown(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))' \
+            "$Path/$name" "$(id -u)" "$(id -g)"
+    fi
+done
 REMOTE
 if [[ "$Action" =~ ^(export|backup)$ ]]; then
     Destination="$(cd "$(dirname "$File")" && pwd)/$(basename "$File")"
     Temporary="$(mktemp "${Destination}.XXXXXX")"
     scp "$HostAlias:$Transfer/output" "$Temporary"
+    if [ "$Action" = backup ]; then
+        RuntimeTemporary="$(mktemp "${Destination}.runtime.db.XXXXXX")"
+        scp "$HostAlias:$Transfer/output.runtime.db" "$RuntimeTemporary"
+        mv "$RuntimeTemporary" "$Destination.runtime.db"
+    fi
     mv "$Temporary" "$Destination"
     echo "Saved $Destination"
 fi

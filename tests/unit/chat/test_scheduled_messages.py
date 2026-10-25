@@ -150,3 +150,36 @@ def test_update_for_audit_captures_before_after(tmp_path):
     assert noop_after is noop_before or noop_after.to_dict() == noop_before.to_dict()
 
     assert store.update_for_audit("sm_missing", message="x") == (None, None)
+
+
+def test_consuming_one_shot_does_not_rewrite_recurring_configuration(tmp_path):
+    import os
+    from quickquip.chat.scheduled_messages import ScheduledMessageStore
+    store = ScheduledMessageStore(tmp_path / "recurring.json")
+    store.add(cron="0 8 * * *", group_ids=["12345"], message="repeat")
+    pending = store.add(cron="0 9 * * *", group_ids=["12345"], message="once", recurring=False)
+    os.utime(store.path, (123, 123))
+    original = store.path.read_bytes()
+    store.remove(pending.id)
+    assert store.path.read_bytes() == original
+    assert store.path.stat().st_mtime_ns == 123_000_000_000
+    assert len(store.list()) == 1
+
+
+def test_recurring_conversion_recovers_after_second_file_write_fails(tmp_path, monkeypatch):
+    import pytest
+    from quickquip.chat.scheduled_messages import ScheduledMessageStore
+    store = ScheduledMessageStore(tmp_path / "recurring.json")
+    job = store.add(cron="0 8 * * *", group_ids=["12345"], message="convert")
+    write = store._write_file
+    def interrupted(path, jobs):
+        if path == store.pending_path:
+            raise OSError("interrupted transfer")
+        write(path, jobs)
+    monkeypatch.setattr(store, "_write_file", interrupted)
+    with pytest.raises(OSError, match="interrupted"):
+        store.update(job.id, recurring=False)
+    recovered = ScheduledMessageStore(store.path)
+    jobs = recovered.list()
+    assert len(jobs) == 1 and jobs[0].id == job.id and not jobs[0].recurring
+    assert not recovered.intent_path.exists()

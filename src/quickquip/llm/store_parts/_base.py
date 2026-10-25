@@ -9,13 +9,13 @@
 from __future__ import annotations
 
 from quickquip.common.identity_sources import IdentityRepository, identities
+from quickquip.llm.scope_types import GroupSettingsOverride as GroupSettingsOverride
 
 import json
 import logging
 import re
 import sqlite3
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,41 +59,6 @@ def _build_query_tokens(query: str) -> list[str]:
                 _push(part[index:index + 2])
 
     return tokens[:12]
-
-
-@dataclass(slots=True)
-class GroupSettingsOverride:
-    enabled: bool | None = None
-    memory_enabled: bool | None = None
-    auto_memory_enabled: bool | None = None
-    agent_delivery_intermediate_enabled: bool | None = None
-    agent_delivery_final_enabled: bool | None = None
-    provider_id: str | None = None
-    model: str | None = None
-    persona_id: str | None = None
-    trigger_prefix: str | None = None
-    allow_prefix: bool | None = None
-    allow_at: bool | None = None
-    history_limit: int | None = None
-    # 思考档位覆盖（六档词表；None = 跟随 provider 配置档）
-    reasoning_effort: str | None = None
-
-
-def _backfill_delivery_split_columns(conn: sqlite3.Connection, existing_columns: set[str]) -> None:
-    """交付开关拆分（中间轮/最终轮）的加列 + 一次性回填。
-
-    回填只与各自加列绑定执行——若挂在启动路径无条件重跑，会与后续 reset
-    （列置 NULL 跟随默认）的语义冲突，重启后覆盖用户选择；按列独立门控，
-    半迁移状态下不跨列覆写另一列的已有取值。
-    """
-    for column in ("agent_delivery_intermediate_enabled", "agent_delivery_final_enabled"):
-        if column in existing_columns:
-            continue
-        conn.execute(f"ALTER TABLE group_settings ADD COLUMN {column} INTEGER")
-        conn.execute(
-            f"UPDATE group_settings SET {column} = agent_delivery_enabled "
-            "WHERE agent_delivery_enabled IS NOT NULL"
-        )
 
 
 
@@ -170,23 +135,6 @@ class _StoreBase:
         with self._connect() as conn:
             conn.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS group_settings (
-                    group_id TEXT PRIMARY KEY,
-                    enabled INTEGER,
-                    memory_enabled INTEGER,
-                    auto_memory_enabled INTEGER,
-                    agent_delivery_enabled INTEGER,
-                    agent_delivery_intermediate_enabled INTEGER,
-                    agent_delivery_final_enabled INTEGER,
-                    provider_id TEXT,
-                    model TEXT,
-                    persona_id TEXT,
-                    trigger_prefix TEXT,
-                    allow_prefix INTEGER,
-                    allow_at INTEGER,
-                    updated_at TEXT NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS conversation_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     group_id TEXT NOT NULL,
@@ -252,21 +200,6 @@ class _StoreBase:
             # Serialize column discovery and ALTER for concurrent Bot/Web upgrades.
             # executescript above must finish before acquiring this transaction.
             conn.execute("BEGIN IMMEDIATE")
-            existing_columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(group_settings)").fetchall()
-            }
-            if "memory_enabled" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN memory_enabled INTEGER")
-            if "history_limit" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN history_limit INTEGER")
-            if "auto_memory_enabled" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN auto_memory_enabled INTEGER")
-            if "agent_delivery_enabled" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN agent_delivery_enabled INTEGER")
-            if "reasoning_effort" not in existing_columns:
-                conn.execute("ALTER TABLE group_settings ADD COLUMN reasoning_effort TEXT")
-            _backfill_delivery_split_columns(conn, existing_columns)
             conversation_columns = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(conversation_messages)").fetchall()

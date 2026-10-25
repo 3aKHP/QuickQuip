@@ -41,8 +41,12 @@ def parser() -> argparse.ArgumentParser:
         else:
             q.add_argument(
                 "--services-stopped", action="store_true",
-                help="确认旧 bot 和 Web 已停止，用于旧 schema（1、2）配置库升级",
+                help="兼容停服调用；存储布局升级使用 migrate-storage 子命令",
             )
+    q = commands.add_parser("migrate-storage", help="停服后拆分配置与运行数据")
+    q.add_argument("--root", type=Path, default=DEFAULT_CONFIG_DB.parents[2])
+    q.add_argument("--services-stopped", action="store_true")
+    q.add_argument("--rollback", type=Path, help="恢复指定迁移备份目录")
     q = commands.add_parser("validate")
     q.add_argument("file", nargs="?", type=Path)
     q = commands.add_parser("export")
@@ -89,6 +93,11 @@ def _source(value: str):
 
 
 def execute(args) -> dict:
+    if args.command == "migrate-storage":
+        from quickquip.configuration.migration import migrate, rollback
+        if args.rollback:
+            return rollback(args.root, args.rollback, services_stopped=args.services_stopped)
+        return migrate(args.root, services_stopped=args.services_stopped)
     service = ConfigService(args.db)
     if args.command == "init":
         return service.initialize(args.legacy, services_stopped=args.services_stopped)
@@ -146,7 +155,9 @@ def execute(args) -> dict:
                 raise ConfigError("bot_not_ready", "bot 核心尚未就绪，请检查配置与业务存储")
         return status
     if args.command == "backup":
-        return {"backup": str(service.backup(args.file))}
+        from quickquip.llm.config_backup import runtime_backup
+        return {"backup": str(service.backup(args.file)),
+                "runtime_backup": str(runtime_backup(args.file))}
     if args.command == "restore":
         if args.file:
             return service.restore_database(args.file, stopped=args.services_stopped)

@@ -40,6 +40,9 @@ if ($Timeout -le 0) { throw 'Timeout must be positive' }
 if ($HostAlias.StartsWith('-') -or $RemoteDir -eq '/' -or $RemoteDir.Contains('..')) { throw 'Unsafe SSH target' }
 if ($Action -in @('preview','import','apply') -and $Revision -lt 1) { throw 'Expected Revision required' }
 if ($Action -in @('export','preview','import','backup','restore') -and -not $File) { throw 'File required' }
+if ($Action -eq 'restore' -and -not (Test-Path -LiteralPath "$File.runtime.db" -PathType Leaf)) {
+    throw 'Restore requires the backup and its .runtime.db file'
+}
 $transferId = [guid]::NewGuid().ToString('N')
 if (-not $RequestId) { $RequestId = $transferId }
 $transfer = "$RemoteDir/data/.llm-transfer-$transferId"
@@ -53,6 +56,10 @@ try {
         $localFile = (Resolve-Path -LiteralPath $File).Path
         Invoke-Checked { scp $localFile "${HostAlias}:$transfer/input" }
         Invoke-Checked { ssh $HostAlias "chmod 600 '$transfer/input'" }
+        if ($Action -eq 'restore') {
+            Invoke-Checked { scp "$localFile.runtime.db" "${HostAlias}:$transfer/input.runtime.db" }
+            Invoke-Checked { ssh $HostAlias "chmod 600 '$transfer/input.runtime.db'" }
+        }
     }
     $server = @'
 set -euo pipefail
@@ -89,11 +96,13 @@ case "$Action" in
         "${Compose[@]}" up -d --no-build quickquip web-admin
         ;;
 esac
-if [ -f "$Root/data/.llm-transfer-$TransferId/output" ]; then
-    "${Compose[@]}" exec -T web-admin python -c \
-        'import os,sys; os.chmod(sys.argv[1], 0o600); os.chown(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))' \
-        "$Path/output" "$(id -u)" "$(id -g)"
-fi
+for name in output output.runtime.db; do
+    if [ -f "$Root/data/.llm-transfer-$TransferId/$name" ]; then
+        "${Compose[@]}" exec -T web-admin python -c \
+            'import os,sys; os.chmod(sys.argv[1], 0o600); os.chown(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))' \
+            "$Path/$name" "$(id -u)" "$(id -g)"
+    fi
+done
 '@
     $server = $server.Replace("`r`n", "`n")
     $server | ssh $HostAlias bash -s -- $RemoteDir $Action $transferId $Revision $Source $RequestId ([int][bool]$Wait) $Timeout "'$Operation'"
@@ -102,6 +111,11 @@ fi
         $destination = [IO.Path]::GetFullPath($File)
         $temporary = "$destination.$transferId.tmp"
         Invoke-Checked { scp "${HostAlias}:$transfer/output" $temporary }
+        if ($Action -eq 'backup') {
+            $runtimeTemporary = "$destination.runtime.db.$transferId.tmp"
+            Invoke-Checked { scp "${HostAlias}:$transfer/output.runtime.db" $runtimeTemporary }
+            Move-Item -LiteralPath $runtimeTemporary -Destination "$destination.runtime.db" -Force
+        }
         Move-Item -LiteralPath $temporary -Destination $destination -Force
     }
 } finally {

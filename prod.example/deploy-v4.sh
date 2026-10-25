@@ -8,6 +8,8 @@ Mode=deploy
 Modes=0
 DryRun=0
 SkipHealth=0
+MigrateStorage=0
+ConfigSyncExplicit=0
 KeepReleases=4
 ReleaseId=""
 Version=""
@@ -32,6 +34,7 @@ Options:
   --env <source>       server (default) or local
   --plan               Read-only remote configuration plan
   --dry-run            Build frontend locally and preview the upload manifest
+  --migrate-storage    Stop services and separate configuration from runtime storage
   --skip-health        Skip the post-deploy health check (deploy/migrate only)
   --host-alias <name>  SSH host alias (default $HostAlias)
   --remote-dir <path>  Remote deployment root (default $RemoteDir)
@@ -50,7 +53,8 @@ while [ $# -gt 0 ]; do
             if [ -n "${2:-}" ] && [[ "$2" != -* ]]; then ReleaseId="$2"; shift; fi ;;
         --migrate) Mode=migrate; Modes=$((Modes + 1)) ;;
         --skip-health) SkipHealth=1 ;;
-        --config-sync) ConfigSync="${2:?missing sync mode}"; shift ;;
+        --migrate-storage) MigrateStorage=1 ;;
+        --config-sync) ConfigSync="${2:?missing sync mode}"; ConfigSyncExplicit=1; shift ;;
         --env) EnvSource="${2:?missing environment source}"; shift ;;
         --plan) ConfigPlan=1 ;;
         --host-alias) HostAlias="${2:?missing host}"; shift ;;
@@ -65,6 +69,12 @@ TmpManifest=""
 cleanup() { if [ -n "$TmpManifest" ]; then rm -f "$TmpManifest"; fi; }
 trap cleanup EXIT
 
+if [ "$MigrateStorage" = 1 ]; then
+    [[ "$Mode" = deploy || "$Mode" = migrate ]] || die "storage migration requires deploy"
+    [[ "$SkipHealth" = 0 && "$ConfigPlan" = 0 ]] || die "storage migration requires health checks"
+    [[ "$ConfigSyncExplicit" = 0 || "$ConfigSync" = off ]] || die "storage migration retains server configuration; use --config-sync off"
+    ConfigSync=off
+fi
 [[ "$ConfigSync" =~ ^(auto|push|pull|off)$ ]] || die "invalid configuration sync mode"
 [[ "$EnvSource" =~ ^(server|local)$ ]] || die "invalid environment source"
 [[ "$ConfigPlan" = 0 || ( "$Mode" = deploy && "$DryRun" = 0 && "$SkipHealth" = 0 ) ]] || die "plan supports deployment only"
@@ -128,7 +138,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         fi
     fi
     if [ "$DryRun" = 1 ]; then
-        tar --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -cf /dev/null -v -T "$UploadManifest"
+        tar --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='config/managed' --exclude='config/managed/**' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' -cf /dev/null -v -T "$UploadManifest"
         printf 'Preview complete; frontend built locally, no remote connection or upload. Shared files: root .env, ops scripts, and present optional assets.\n'
         printf 'Version identity for this release: v%s+build.<server build time>\n' "$Version"
         exit 0
@@ -149,7 +159,7 @@ ssh "${ssh_args[@]}" "$HostAlias" \
 scp "${ssh_args[@]}" "$ScriptDir/remote-deploy-v4.sh" "$ScriptDir/deploy-state.py" "$HostAlias:$Incoming/"
 if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     ssh "${ssh_args[@]}" "$HostAlias" "umask 077; mkdir '$Incoming/tree' '$Incoming/shared'"
-    rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' "${rsync_args[@]}" \
+    rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='config/managed' --exclude='config/managed/**' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' "${rsync_args[@]}" \
         --files-from="$UploadManifest" ./ "$HostAlias:$Incoming/tree/"
     Shared=(prod/check_bot.sh prod/cron_check_bot.sh)
     if [ "$EnvSource" = local ]; then
@@ -161,7 +171,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     rsync -aR --chmod=D700,F600 "${rsync_args[@]}" "${Shared[@]}" "$HostAlias:$Incoming/shared/"
 fi
 ssh "${ssh_args[@]}" "$HostAlias" \
-    "DEPLOY_VERSION='$Version' DETACH=1 SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
+    "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$MigrateStorage SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
     || die "launch uncertain; inspect $RemoteDir/.deploy/$Id.log and .exit before retrying"
 Log="$RemoteDir/.deploy/$Id.log"
 ExitFile="$RemoteDir/.deploy/$Id.exit"

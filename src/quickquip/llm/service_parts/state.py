@@ -14,7 +14,10 @@ from quickquip.llm.store_parts.agent_records import HistoryMutation
 
 class StateMixin:
     def set_chat_enabled(self, chat_id: int | str, enabled: bool, chat_type: str = "group") -> None:
-        self._update_chat_settings(chat_id, chat_type, enabled=int(enabled))
+        if chat_type == "private":
+            self.store.set_private_chat_active(str(chat_id), enabled)
+        else:
+            self._update_chat_settings(chat_id, chat_type, enabled=int(enabled))
 
     def _clear_session_caches(
         self, scope_key: str, evictions: dict[EpochKey, tuple[int, int]],

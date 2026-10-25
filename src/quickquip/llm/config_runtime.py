@@ -78,7 +78,7 @@ class ConfigRuntimeWorker:
             current = runtime.config
             config = self.compiler(
                 published["document"], revision=published["revision"],
-                config_dir=runtime.config_path.parent.parent / "config",
+                config_dir=service.config_dir,
             )
             snapshot = runtime.prepare_configuration(config)
             if schedules is not None:
@@ -123,7 +123,7 @@ class ConfigRuntimeWorker:
 
     def _verify(self, operation):
         self.service.assert_bot_boot(self.boot_id)
-        with self.service.store.connect() as conn:
+        with self.service.execution.connect() as conn:
             self.service.tasks.assert_claim(conn, operation["id"], operation["claim_token"])
 
     def _validate_local(self, config, document):
@@ -131,10 +131,7 @@ class ConfigRuntimeWorker:
         validate_runtime_configuration(config, document)
 
     def _validate_overrides(self, document):
-        store = self.runtime.store
-        if store is None:
-            return
-        self.service.validate_group_overrides(document, store)
+        self.service.validate_group_overrides(document)
 
     async def _renew(self, operation):
         while True:
@@ -237,11 +234,11 @@ class ConfigRuntimeWorker:
                 return
             heartbeat = asyncio.create_task(self._renew(operation))
             try:
-                target = self.service.read(operation["target_revision"])
+                target = self.service.read_execution(operation["target_revision"])
                 self._verify(operation)
                 config = self.compiler(
                     target["document"], revision=target["revision"],
-                    config_dir=self.runtime.config_path.parent.parent / "config",
+                    config_dir=self.service.config_dir,
                 )
                 execution = asyncio.create_task(
                     self._apply(operation, config, target["document"])

@@ -32,7 +32,7 @@ Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat`
 
 ## 配置（`settings.skills`）
 
-通过 Web Admin“LLM 配置”或配置 CLI 编辑并保存草稿，单独应用后由 Bot 接纳。资源上限与开关保存在 `data/llm_config.db`，Skill 内容继续由独立目录维护。完整流程见 [LLM 配置管理](llm-configuration.md)。
+通过 Web Admin“LLM 配置”或配置 CLI 编辑并保存草稿，单独应用后由 Bot 接纳。资源上限与开关保存在 `config/managed/config.db`，Skill 内容继续由独立目录维护。完整流程见 [LLM 配置管理](llm-configuration.md)。
 
 首次启用在“LLM 工坊 → LLM 配置 → 工具与技能”操作：
 

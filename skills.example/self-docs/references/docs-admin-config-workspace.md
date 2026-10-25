@@ -2,7 +2,7 @@
 
 # 在 TOML 工作副本中编辑配置
 
-本文面向在 VSCode 中审阅配置或委托 LLM 修改配置的部署者。需要 Python 3.11+、当前项目依赖和已初始化的本地 `data/llm_config.db`。工作副本保留文本注释；组装保存本地草稿，发布和推送继续使用[配置管理](llm-configuration.md)及[配置同步](config-sync.md)。
+本文面向在 VSCode 中审阅配置或委托 LLM 修改配置的部署者。需要 Python 3.11+、当前项目依赖和已初始化的本地 `config/managed/config.db`。工作副本保留文本注释；组装保存本地草稿，发布和推送继续使用[配置管理](llm-configuration.md)及[配置同步](config-sync.md)。
 
 ## 建立工作副本
 

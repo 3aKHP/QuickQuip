@@ -10,7 +10,7 @@
 
 ## 1. 配置归属
 
-QuickQuip 的 MCP client 发现外部服务工具，并将它们桥接到与内置工具共用的 `ToolRegistry`。项目 MCP 配置保存在 `data/llm_config.db` 的 `settings.mcp` 中。
+QuickQuip 的 MCP client 发现外部服务工具，并将它们桥接到与内置工具共用的 `ToolRegistry`。项目 MCP 配置保存在 `config/managed/config.db` 的 `settings.mcp` 中。
 
 Codex 的 `config.toml` 属于 Codex 宿主，包含它自己的环境、路径与信任设置。部署 QuickQuip 时，使用项目配置服务和下文的传输实现。
 
@@ -46,7 +46,7 @@ MCP 集成分为三部分：
 
 1. `src/quickquip/llm/service.py`（MCP 生命周期归属 `service_parts/mcp_lifecycle.py`）/ `src/quickquip/llm/tool_registry.py`
 2. `src/quickquip/llm/mcp/`：协议协商、传输、工具发现、调用与结果归一化
-3. `data/llm_config.db` 内的 `settings.mcp.servers` 定义
+3. `config/managed/config.db` 内的 `settings.mcp.servers` 定义
 
 配置运行层管理 MCP 资源代际及租约；连接与工具发现由 `service_parts/mcp_lifecycle.py` 装配。无关字段修改保持已有连接，正在执行的任务持有原资源直到结束。
 

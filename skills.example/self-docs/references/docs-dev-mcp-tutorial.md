@@ -257,7 +257,7 @@ curl -i -sS --max-time 10 -X POST "https://mcp.example.com/mcp" \
 
 ## 4. 配置全解
 
-配置通过共享应用服务保存到 `data/llm_config.db`，校验与编译见 `src/quickquip/llm/config_document.py`。总开关 `settings.mcp.enabled` 默认 `false`；关闭时 `sync()` 直接返回，一个连接也不建立。
+配置通过共享应用服务保存到 `config/managed/config.db`，校验与编译见 `src/quickquip/llm/config_document.py`。总开关 `settings.mcp.enabled` 默认 `false`；关闭时 `sync()` 直接返回，一个连接也不建立。
 
 ### 4.1 `settings.mcp.servers` 全字段表
 
@@ -462,7 +462,7 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 - [`docs/admin/mcp-servers.md`](../admin/mcp-servers.md)：本地 echo 首次练习、服务配置与工具调用验证；
 - [`mcp-integration.md`](mcp-integration.md)：设计决策与边界——目标边界、推荐路线、docker socket 取舍与安全决策的记录；
 - [`tool-discovery.md`](tool-discovery.md)：工具发现的策略、数据流与测试覆盖；
-- [`docs/admin/configuration.md`](../admin/configuration.md)：`data/llm_config.db` 全量字段参考（含 `settings.mcp` 段）；
+- [`docs/admin/configuration.md`](../admin/configuration.md)：`config/managed/config.db` 全量字段参考（含 `settings.mcp` 段）；
 - MCP 上游规范：<https://modelcontextprotocol.io>——协议方法、传输定义与各版本规范的权威来源。
 
 ---

@@ -34,7 +34,7 @@ class Endpoint:
     def service(self):
         if self._service is None:
             self._service = ConfigService(
-                self.data / "llm_config.db", config_dir=self.root / "config"
+                self.root / "config/managed/config.db", config_dir=self.root / "config"
             )
         return self._service
 
@@ -43,26 +43,22 @@ class Endpoint:
         self._service = value
 
     def _raw_snapshot(self):
-        from quickquip.llm.config_store import ConfigStore
-
         check_writable(self.data)
-        store = ConfigStore(self.data / "llm_config.db")
+        store = self.service.store
         store.verify()
         assets = read_assets(self.root)
-        with store.connect() as conn:
+        with self.service.shared_lock, store.connect() as conn:
             conn.execute("BEGIN")
             projection_consistent(conn)
             meta = dict(conn.execute("SELECT * FROM config_meta").fetchone())
-            published = json.loads(
-                conn.execute(
-                    "SELECT document FROM config_snapshots WHERE revision=?",
-                    (meta["published_revision"],),
-                ).fetchone()[0]
-            )
+            publication = self.service.read("published")
+            meta["published_revision"] = publication["revision"]
+            published = publication["document"]
             draft = json.loads(meta["document"])
-            pending = conn.execute(
-                "SELECT COUNT(*) FROM config_operations WHERE status IN ('queued','running')"
-            ).fetchone()[0]
+            with self.service.execution.connect() as runtime:
+                pending = runtime.execute(
+                    "SELECT COUNT(*) FROM config_operations WHERE status IN ('queued','running')"
+                ).fetchone()[0]
         if assets != read_assets(self.root):
             raise ConfigError("revision_conflict", "Configuration assets changed while reading")
         return meta, draft, published, pending, assets
@@ -227,9 +223,7 @@ class Endpoint:
 
     def _fence_stopped_bot(self, record):
         """Called only after the deployment worker has stopped Bot and Web."""
-        from quickquip.llm.config_store import ConfigStore
-
-        with ConfigStore(self.data / "llm_config.db").connect(write=True) as conn:
+        with self.service.execution.connect(write=True) as conn:
             bot = conn.execute("SELECT boot_id FROM bot_runtime").fetchone()
             record["boot_before_restart"] = bot[0] if bot else None
             self.state.save_operation(record)
@@ -348,19 +342,7 @@ class Endpoint:
                         raise ConfigError(
                             "revision_conflict", "External asset edit prevents recovery", name
                         )
-                from quickquip.llm.config_store import ConfigStore
-
-                with ConfigStore(self.data / "llm_config.db").connect() as conn:
-                    conn.execute("BEGIN")
-                    projection_consistent(conn)
-                    meta = conn.execute("SELECT * FROM config_meta").fetchone()
-                    draft = json.loads(meta["document"])
-                    published = json.loads(
-                        conn.execute(
-                            "SELECT document FROM config_snapshots WHERE revision=?",
-                            (meta["published_revision"],),
-                        ).fetchone()[0]
-                    )
+                _, draft, published, _, _ = self._raw_snapshot()
                 if digest(published) not in (
                     record["before"]["version"]["published_hash"],
                     digest(record["target"]["document"]),

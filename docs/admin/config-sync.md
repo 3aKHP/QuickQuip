@@ -4,7 +4,7 @@
 
 ## 建立第一次同步
 
-先将 `prod.example/` 中的新驱动合入自己的 `prod/`。已有服务器升级同步能力时，执行一次 `bash prod/deploy-v4.sh --config-sync off`，保留服务器配置与根 `.env`。平铺目录同时指定 `--migrate`。新服务器首次部署使用 `--config-sync off --env local`；等待 QQ 登录时可以再加 `--skip-health`，登录和健康检查完成后建立配置基线。
+先将 `prod.example/` 中的新驱动合入自己的 `prod/`。采用混合存储的已有安装先完成[存储迁移](storage-migration.md)。已有服务器升级同步能力时，执行一次 `bash prod/deploy-v4.sh --config-sync off`，保留服务器配置与根 `.env`。平铺目录同时指定 `--migrate`。新服务器首次部署使用 `--config-sync off --env local`；等待 QQ 登录时可以再加 `--skip-health`，登录和健康检查完成后建立配置基线。
 
 在本地项目根目录选择首次配置来源。以下命令以线上已发布配置覆盖本地草稿和受管文件，覆盖前保存恢复副本：
 

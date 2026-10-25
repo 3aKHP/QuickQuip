@@ -14,7 +14,7 @@ from quickquip.llm.config_service import ConfigService
 @pytest.fixture
 def endpoint(tmp_path):
     (tmp_path / "config").mkdir()
-    service = ConfigService(tmp_path / "data/llm_config.db")
+    service = ConfigService(tmp_path / "config/managed/config.db")
     service.initialize()
     return Endpoint(tmp_path)
 
@@ -184,7 +184,7 @@ class LocalRemote:
 def pair(endpoint, tmp_path):
     root = tmp_path / "remote"
     (root / "config").mkdir(parents=True)
-    ConfigService(root / "data/llm_config.db").initialize()
+    ConfigService(root / "config/managed/config.db").initialize()
     from quickquip.config_sync.client import Synchronizer
 
     remote = LocalRemote(Endpoint(root))
@@ -513,6 +513,8 @@ def test_staged_candidate_recovers_real_assets_after_activation_failure(endpoint
     candidate = endpoint.root / "candidate"
     (candidate / "config").mkdir(parents=True)
     (candidate / "data").symlink_to(endpoint.data, target_is_directory=True)
+    (candidate / "config/managed").symlink_to(endpoint.root / "config/managed",
+                                             target_is_directory=True)
     new = Endpoint(candidate)
     execute(new, "stage", {"operation": "a" * 32, "release": "20261024-010000-" + "b" * 12})
     assert (candidate / "config/games.toml").read_text() == "a=2\n"

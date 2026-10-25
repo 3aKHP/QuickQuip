@@ -10,7 +10,7 @@ from quickquip.llm.config_service import ConfigService
 def workspace(tmp_path):
     root = tmp_path / "project"
     (root / "config").mkdir(parents=True)
-    service = ConfigService(root / "data/llm_config.db")
+    service = ConfigService(root / "config/managed/config.db")
     service.initialize()
     document = empty_document()
     document["style_profiles"] = {"general": "中文提示\n第二行\n"}

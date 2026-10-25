@@ -49,6 +49,7 @@ services:
     volumes:
       - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config:ro
+      - ${QUICKQUIP_ROOT:-..}/config/managed:/app/config/managed
       - ../llm_about:/app/llm_about:ro
       - ../bot.py:/app/bot.py:ro
       - ../src:/app/src:ro
@@ -77,6 +78,7 @@ services:
     volumes:
       - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config
+      - ${QUICKQUIP_ROOT:-..}/config/managed:/app/config/managed
       - ../llm_about:/app/llm_about
       - ../frontend/dist:/app/frontend/dist:ro
       - ../web_api.py:/app/web_api.py:ro

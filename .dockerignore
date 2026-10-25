@@ -40,3 +40,6 @@ README.md
 CHANGELOG.md
 ROADMAP.md
 requirements-dev.txt
+
+# Persistent configuration is provided through shared mounts.
+config/managed/

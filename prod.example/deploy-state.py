@@ -26,7 +26,7 @@ SERVICES = ("llbot", "quickquip", "web-admin")
 # Deployment-root subdirectories whose bind-mounted content is shared state;
 # migration keeps their live source path. Prefix match: a mount of a data/ or
 # skills/ subdirectory is still shared state, not release-private content.
-ROOT_SHARED_SUBDIRS = ("data", "skills")
+ROOT_SHARED_SUBDIRS = ("data", "skills", "config/managed")
 DEFAULTED_VARIABLE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-([^}]*)\}")
 
 
@@ -201,7 +201,8 @@ def capture_baseline(root: Path, baseline: Path) -> None:
         source = checked_path(root, name)
         if source.is_dir():
             validate_tree(source)
-            shutil.copytree(source, baseline / name, dirs_exist_ok=True)
+            shutil.copytree(source, baseline / name, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns("managed") if name == "config" else None)
         elif source.is_file():
             atomic_write(baseline / name, source.read_bytes(), 0o644)
     for service, spec in config["services"].items():
@@ -228,7 +229,8 @@ def capture_baseline(root: Path, baseline: Path) -> None:
             if not source.is_relative_to(root):
                 raise ValueError(f"external bind mount requires manual migration: {source}")
             relative = source.relative_to(root)
-            if relative.parts[0] in ROOT_SHARED_SUBDIRS or str(relative) in (
+            if any(relative == Path(name) or Path(name) in relative.parents
+                   for name in ROOT_SHARED_SUBDIRS) or str(relative) in (
                 "prod/llbot-qq", "prod/llbot-data", ".env",
             ):
                 volume["source"] = str(source)

@@ -76,7 +76,8 @@ _AGENT_SCHEMA_DDL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS agent_scopes (
         scope_key TEXT PRIMARY KEY,
         generation INTEGER NOT NULL DEFAULT 0,
-        history_revision INTEGER NOT NULL DEFAULT 0
+        history_revision INTEGER NOT NULL DEFAULT 0,
+        private_chat_active INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -443,6 +444,11 @@ class AgentRecordsStoreMixin:
                 "SELECT version FROM agent_schema_migrations"
             ).fetchall() if self._agent_table_exists(conn, "agent_schema_migrations") else []
             applied_versions = {int(row["version"]) for row in applied}
+            if self._agent_table_exists(conn, "agent_scopes"):
+                columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_scopes)")}
+                if "private_chat_active" not in columns:
+                    conn.execute("ALTER TABLE agent_scopes ADD COLUMN private_chat_active "
+                                 "INTEGER NOT NULL DEFAULT 0")
             if 1 not in applied_versions:
                 for statement in _AGENT_SCHEMA_DDL:
                     conn.execute(statement)

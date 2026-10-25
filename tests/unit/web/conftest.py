@@ -23,4 +23,6 @@ def config_service(monkeypatch, tmp_path):
     ):
         module = importlib.import_module(f"quickquip.app.web.routes.{name}")
         monkeypatch.setattr(module, "get_config_service", lambda: service)
+        if name == "group_settings":
+            monkeypatch.setattr(module, "_DB", tmp_path / "chat.db")
     return service

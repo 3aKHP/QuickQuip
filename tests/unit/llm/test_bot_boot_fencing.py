@@ -45,7 +45,7 @@ async def test_resumed_old_boot_is_fenced_after_new_bot_applies_later_revision(
         )
         worker = ConfigRuntimeWorker(service, restarted)
         replacement.update(runtime=restarted, worker=worker)
-        with service.store.connect(write=True) as conn:
+        with service.execution.connect(write=True) as conn:
             conn.execute("UPDATE config_operations SET lease_until=0 WHERE id=?",
                          (first_operation["id"],))
         recovered = service.tasks.claim(worker.boot_id, boot_id=worker.boot_id)
@@ -60,7 +60,7 @@ async def test_resumed_old_boot_is_fenced_after_new_bot_applies_later_revision(
         document = service.read(claimed["target_revision"])
         config = compile_document(
             document["document"], revision=document["revision"],
-            config_dir=old.config_path.parent.parent / "config",
+            config_dir=old.config_dir,
         )
         restarted.activate_configuration(restarted.prepare_configuration(config))
         worker.report()
