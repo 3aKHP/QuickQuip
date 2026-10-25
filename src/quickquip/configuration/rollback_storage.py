@@ -63,10 +63,10 @@ def reverse(paths):
         with configuration.connect() as config:
             _restore_scopes(paths.root / "data/llm.db", config)
             _restore_text_modes(paths.root / "data/niuniu.db", config)
-        jobs = []
-        for path in (paths.recurring, paths.pending):
-            if path.exists():
-                jobs.extend(json.loads(path.read_text(encoding="utf-8"))["jobs"])
+        from quickquip.chat.scheduled_messages import ScheduledMessageStore
+
+        schedules = ScheduledMessageStore(paths.recurring, pending_path=paths.pending)
+        jobs = [job.to_dict() for job in schedules.list()]
         durable_write(
             paths.root / "data/scheduled_messages.json",
             (json.dumps({"jobs": jobs}, ensure_ascii=False, indent=2) + "\n").encode(),

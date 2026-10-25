@@ -118,6 +118,9 @@ elif args[0] == "inspect":
         PATH=f"{bin_dir}:{os.environ['PATH']}",
         TEST_ROOT=str(root),
         TEST_NEW=NEW,
+        PYTHONPATH=os.pathsep.join((
+            str(TEMPLATE.parent / "src"), os.environ.get("PYTHONPATH", ""),
+        )),
     )
     return root, inbox, env
 

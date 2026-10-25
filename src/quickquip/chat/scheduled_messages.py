@@ -175,13 +175,14 @@ class ScheduledMessageStore:
 
     def __init__(self, path: str | Path = SCHEDULED_MESSAGES_JSON_PATH,
                  *, pending_path: str | Path | None = None) -> None:
-        from quickquip.configuration.paths import PATHS
+        from quickquip.configuration.paths import StoragePaths
         self.path = Path(path)
-        standard = self.path == PATHS.recurring
+        managed = self.path.parent.name == "managed" and self.path.name == "scheduled_messages.json"
+        paths = StoragePaths(self.path.resolve().parents[2]) if managed else None
         self.pending_path = Path(pending_path) if pending_path else (
-            PATHS.pending if standard else self.path.with_suffix(".pending.json")
+            paths.pending if paths else self.path.with_suffix(".pending.json")
         )
-        self.intent_path = (PATHS.root / "data/scheduled-message-transfer.json" if standard
+        self.intent_path = (paths.schedule_transfer if paths
                             else self.path.with_suffix(".transfer.json"))
 
     def _lock(self) -> FileLock:

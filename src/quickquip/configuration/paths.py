@@ -31,6 +31,10 @@ class StoragePaths:
         return self.root / "data" / "pending_scheduled_messages.json"
 
     @property
+    def schedule_transfer(self):
+        return self.root / "data" / "scheduled-message-transfer.json"
+
+    @property
     def migration(self):
         return self.root / "data" / "storage-migration.json"
 

@@ -155,7 +155,9 @@ def execute(args) -> dict:
                 raise ConfigError("bot_not_ready", "bot 核心尚未就绪，请检查配置与业务存储")
         return status
     if args.command == "backup":
-        return {"backup": str(service.backup(args.file))}
+        from quickquip.llm.config_backup import runtime_backup
+        return {"backup": str(service.backup(args.file)),
+                "runtime_backup": str(runtime_backup(args.file))}
     if args.command == "restore":
         if args.file:
             return service.restore_database(args.file, stopped=args.services_stopped)

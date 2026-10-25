@@ -168,3 +168,28 @@ def test_completed_migration_rollback_keeps_new_activity_and_consumed_tasks(tmp_
         for job in json.loads((tmp_path / "data/scheduled_messages.json").read_text())["jobs"]
     ] == ["repeat"]
     assert not paths.configuration.exists()
+
+
+def test_rollback_recovers_interrupted_schedule_transfer(tmp_path, monkeypatch):
+    from quickquip.chat.scheduled_messages import ScheduledMessageStore
+
+    paths, _ = legacy_installation(tmp_path)
+    result = migrate(tmp_path, services_stopped=True)
+    schedules = ScheduledMessageStore(paths.recurring, pending_path=paths.pending)
+    assert schedules.intent_path == paths.schedule_transfer
+    write = schedules._write_file
+
+    def interrupt(path, jobs):
+        if path == paths.pending:
+            raise OSError("interrupted pending write")
+        return write(path, jobs)
+
+    monkeypatch.setattr(schedules, "_write_file", interrupt)
+    with pytest.raises(OSError, match="interrupted"):
+        schedules.update("repeat", recurring=False)
+    assert paths.schedule_transfer.exists()
+    rollback(tmp_path, result["backup"], services_stopped=True)
+    jobs = json.loads((tmp_path / "data/scheduled_messages.json").read_text())["jobs"]
+    assert {job["id"] for job in jobs} == {"repeat", "once"}
+    assert all(not job["recurring"] for job in jobs)
+    assert not paths.schedule_transfer.exists()
