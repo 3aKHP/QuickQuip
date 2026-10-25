@@ -1,275 +1,241 @@
-"""Manifest-owned workspace layout and exact-byte configuration assets."""
+"""Automatically discovered business TOML alongside mirrored configuration files."""
 
-import base64
+from copy import deepcopy
 from dataclasses import dataclass
-import hashlib
-from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+from pathlib import Path
+from dataclasses import asdict
+from quickquip.llm.config import PricingRates
 
-from quickquip.config_sync.bundle import MAX_BYTES, allowed, asset_bytes, digest, validate_bundle
-from quickquip.config_workspace.codec import load_value, parse, render_table, render_value
-from quickquip.llm.config_errors import ConfigError
-
-FORMAT = 1
-MAX_TREE_BYTES = MAX_BYTES + 8 * 1024 * 1024
-MANIFEST = "workspace.toml"
-GROUPS = ("providers", "settings", "styles")
+from quickquip.configuration.errors import ConfigError
+from quickquip.config_workspace.codec import decode, encode, parse, render_table
+from quickquip.config_workspace.inventory import read_files, safe_path, entry
+from quickquip.llm.config_document import empty_document
 
 
 @dataclass
 class Tree:
-    bundle: dict
-    files: dict[str, bytes]
-    manifest: dict
+    snapshot: dict
+    files: dict
 
 
-def relative_path(name: str) -> PurePosixPath:
-    if not isinstance(name, str) or not name:
-        raise ConfigError("invalid_workspace", "Invalid relative workspace path")
-    path = PurePosixPath(name)
-    if (
-        not isinstance(name, str)
-        or not name
-        or path.is_absolute()
-        or str(path) != name
-        or ".." in path.parts
-        or "\\" in name
-    ):
-        raise ConfigError("invalid_workspace", "Invalid relative workspace path")
-    for part in path.parts:
-        if (
-            PureWindowsPath(part).is_reserved()
-            or re.search(r'[<>:"|?*\x00-\x1f]', part)
-            or part.endswith((" ", "."))
-        ):
-            raise ConfigError("invalid_workspace", "Workspace path is not portable", name)
-    return path
+def _read(path):
+    value = decode(parse(path.read_bytes(), path.name))
+    if not isinstance(value, dict):
+        raise ConfigError("invalid_workspace", "Expected a TOML table", path.name)
+    return value
 
 
-def safe_path(directory: Path, name: str) -> Path:
-    relative_path(name)
-    target = directory / name
-    for component in (target, *target.parents):
-        if component.is_symlink():
-            raise ConfigError("invalid_workspace", "Workspace paths cannot be symbolic links", name)
-        if component == directory:
-            break
-    if target.exists() and not target.is_file():
-        raise ConfigError("invalid_workspace", "Expected a regular workspace file", name)
-    return target
-
-
-def read_file(directory: Path, name: str, limit=MAX_TREE_BYTES) -> bytes:
-    path = safe_path(directory, name)
-    try:
-        with path.open("rb") as stream:
-            content = stream.read(limit + 1)
-    except FileNotFoundError:
-        raise ConfigError("invalid_workspace", "Manifest file is missing", name) from None
-    if len(content) > limit:
-        raise ConfigError("body_too_large", "Workspace file exceeds its size limit", name)
-    return content
-
-
-def scan(directory: Path) -> dict[str, bytes]:
-    """Collect managed text paths even when an interrupted manifest is incomplete."""
-    names = set()
-    if (directory / MANIFEST).exists():
-        names.add(MANIFEST)
-    for path in directory.glob("*.toml"):
-        names.add(path.relative_to(directory).as_posix())
-    for group in (*GROUPS, "assets"):
-        folder = directory / group
-        if folder.is_symlink():
-            raise ConfigError("invalid_workspace", "Workspace directory is redirected", group)
-        if not folder.exists():
-            continue
-        for path in folder.rglob("*"):
-            if path.is_symlink():
-                raise ConfigError("invalid_workspace", "Workspace contains a symbolic link")
-            if path.is_file() and (group == "assets" or path.suffix == ".toml"):
-                names.add(path.relative_to(directory).as_posix())
-    result, total = {}, 0
-    for name in sorted(names):
-        result[name] = read_file(directory, name, MAX_TREE_BYTES - total)
-        total += len(result[name])
-    return result
-
-
-def _manifest(files):
-    try:
-        raw = files[MANIFEST]
-    except KeyError:
-        raise ConfigError("invalid_workspace", "workspace.toml is missing") from None
-    if len(raw) > 1024 * 1024:
-        raise ConfigError("body_too_large", "Workspace manifest exceeds 1 MiB", MANIFEST)
-    manifest = parse(raw, MANIFEST)
-    keys = {"format_version", "document_format_version", *GROUPS, "routes", "pricing", "assets"}
-    if set(manifest) != keys or type(manifest["format_version"]) is not int:
-        raise ConfigError("invalid_workspace", "Invalid workspace manifest", MANIFEST)
-    if manifest["format_version"] != FORMAT:
-        raise ConfigError("unsupported_format", "Unsupported workspace format", MANIFEST)
-    registered = [MANIFEST]
-    for group in GROUPS:
-        entries = manifest[group]
-        if not isinstance(entries, list):
-            raise ConfigError("invalid_workspace", "Expected a file list", group)
-        for entry in entries:
-            if group != "providers":
-                if (
-                    not isinstance(entry, dict)
-                    or set(entry) != {"id", "file"}
-                    or not isinstance(entry["id"], str)
-                ):
-                    raise ConfigError("invalid_workspace", "Expected an id/file entry", group)
-                name = entry["file"]
-            else:
-                name = entry
-            if (
-                not isinstance(name, str)
-                or not name.startswith(group + "/")
-                or len(PurePosixPath(name).parts) != 2
-                or not name.endswith(".toml")
-            ):
-                raise ConfigError(
-                    "invalid_workspace", "Invalid configuration file registration", group
-                )
-            relative_path(name)
-            registered.append(name)
-    for group in ("routes", "pricing"):
-        name = manifest[group]
-        if not isinstance(name, str) or name != group + ".toml":
-            raise ConfigError("invalid_workspace", "Invalid singleton configuration file", group)
-        registered.append(name)
-    if not isinstance(manifest["assets"], list):
-        raise ConfigError("invalid_workspace", "Expected an asset list", "assets")
-    for name in manifest["assets"]:
-        if not isinstance(name, str) or not allowed(name):
-            raise ConfigError("invalid_asset", "Asset is outside the configuration scope")
-        registered.append("assets/" + name)
-    if len({name.casefold() for name in registered}) != len(registered):
-        raise ConfigError("invalid_workspace", "Workspace file registrations collide", MANIFEST)
-    if set(registered) != set(files):
-        raise ConfigError(
-            "invalid_workspace",
-            "Manifest and workspace files differ",
-            MANIFEST,
-            {
-                "missing": sorted(set(registered) - files.keys()),
-                "unregistered": sorted(files.keys() - set(registered)),
-            },
-        )
-    return manifest
-
-
-def parse_tree(files: dict[str, bytes]) -> Tree:
-    if sum(len(body) for body in files.values()) > MAX_TREE_BYTES:
-        raise ConfigError("body_too_large", "Workspace exceeds its size limit")
-    manifest = _manifest(files)
-    document = {
-        "format_version": manifest["document_format_version"],
-        "providers": [],
-        "settings": {},
-        "style_profiles": {},
-    }
-    for name in manifest["providers"]:
-        document["providers"].append(load_value(files[name], name))
-    for group, key in (("settings", "settings"), ("styles", "style_profiles")):
-        for entry in manifest[group]:
-            if entry["id"] in document[key]:
-                raise ConfigError("invalid_workspace", "Duplicate configuration identity", group)
-            document[key][entry["id"]] = load_value(files[entry["file"]], entry["file"])
-    for group in ("routes", "pricing"):
-        name = manifest[group]
-        document[group] = load_value(files[name], name)
-    assets = {
-        name: {
-            "content": base64.b64encode(files["assets/" + name]).decode("ascii"),
-            "mode": 0o644 if name.startswith("config/niuniu_text") else 0o600,
+def _omit_nulls(value):
+    # Optional fields default back to None; arbitrary request bodies retain null sentinels.
+    if isinstance(value, dict):
+        return {
+            key: (_omit_nulls(item) if key not in ("extra_body", "parameters") else item)
+            for key, item in value.items()
+            if item is not None
         }
-        for name in manifest["assets"]
-    }
-    try:
-        bundle = validate_bundle({"format": 1, "document": document, "assets": assets})
-    except ConfigError as exc:
-        # Keep domain field paths and identify their editable source file.
-        field = exc.field_path
-        name = MANIFEST
-        match = re.match(r"providers\[(\d+)\]", field)
-        if match and int(match[1]) < len(manifest["providers"]):
-            name = manifest["providers"][int(match[1])]
-        elif field.startswith(("config/", "llm_about/")):
-            name = "assets/" + field
-        else:
-            for group in ("routes", "pricing"):
-                if field.startswith(group):
-                    name = manifest[group]
-            if field.startswith("settings."):
-                key = field.split(".", 2)[1]
-                name = next((e["file"] for e in manifest["settings"] if e["id"] == key), name)
-        exc.details = {"file": name, "cause": exc.details}
-        raise
-    return Tree(bundle, files, manifest)
+    if isinstance(value, list):
+        return [_omit_nulls(item) for item in value]
+    return value
 
 
-def read_tree(directory: Path) -> Tree:
-    files = scan(directory)
-    tree = parse_tree(files)
-    if scan(directory) != files:
-        raise ConfigError("revision_conflict", "Workspace changed while reading")
-    return tree
-
-
-def _filename(group, ident, used):
-    slug = re.sub(r"[^a-z0-9_.-]+", "-", ident.lower()).strip(".-")[:48] or "item"
-    suffix = hashlib.sha256(ident.encode("utf-8")).hexdigest()
-    for size in range(12, 65, 4):
-        name = f"{group}/{slug}--{suffix[:size]}.toml"
-        if name.casefold() not in used:
-            return name
-    raise ConfigError("invalid_workspace", "Configuration identities have colliding filenames")
-
-
-def render_tree(bundle: dict, previous: Tree | None = None) -> dict[str, bytes]:
-    if previous and digest(bundle) == digest(previous.bundle):
-        return dict(previous.files)
-    document = bundle["document"]
-    manifest = {
-        "format_version": FORMAT,
-        "document_format_version": document["format_version"],
-        "providers": [],
-        "settings": [],
-        "styles": [],
-        "routes": "routes.toml",
-        "pricing": "pricing.toml",
-        "assets": sorted(bundle["assets"]),
-    }
-    old_files = previous.files if previous else {}
-    old_names = {group: {} for group in GROUPS}
-    if previous:
-        for name in previous.manifest["providers"]:
-            old_names["providers"][load_value(old_files[name], name)["id"]] = name
-        for group in ("settings", "styles"):
-            old_names[group] = {e["id"]: e["file"] for e in previous.manifest[group]}
-    used = {name.casefold() for names in old_names.values() for name in names.values()}
-    result = {}
-    values = {
-        "providers": [(p["id"], p) for p in document["providers"]],
-        "settings": list(document["settings"].items()),
-        "styles": list(document["style_profiles"].items()),
-    }
-    for group in GROUPS:
-        for ident, value in values[group]:
-            name = old_names[group].get(ident) or _filename(group, ident, used)
+def _names(values, original):
+    result, used = {}, set()
+    for name, value in original.items():
+        ident = value.get("id")
+        if ident in values and ident not in result:
+            result[ident] = name
             used.add(name.casefold())
-            manifest[group].append(name if group == "providers" else {"id": ident, "file": name})
-            result[name] = render_value(value, old_files.get(name))
-    for group in ("routes", "pricing"):
-        name = manifest[group]
-        result[name] = render_value(document[group], old_files.get(name))
-    for name, entry in bundle["assets"].items():
-        result["assets/" + name] = asset_bytes(entry)
-    result[MANIFEST] = render_table(manifest, old_files.get(MANIFEST))
-    if digest(parse_tree(result).bundle) != digest(bundle):
-        raise ConfigError("invalid_workspace", "Workspace rendering changed the configuration")
+    for ident in values:
+        if ident in result:
+            continue
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", ident).strip(". -") or "item"
+        slug = slug[:64].rstrip(". ") or "item"
+        if slug.split(".")[0].lower() in {
+            "con",
+            "prn",
+            "aux",
+            "nul",
+            *(f"{prefix}{n}" for prefix in ("com", "lpt") for n in range(1, 10)),
+        }:
+            slug = "item-" + slug
+        name, number = slug + ".toml", 2
+        while name.casefold() in used:
+            name = f"{slug}-{number}.toml"
+            number += 1
+        result[ident] = name
+        used.add(name.casefold())
     return result
+
+
+def read_tree(directory):
+    directory = Path(directory)
+    for folder in (
+        "db",
+        "db/llm",
+        "db/llm/settings",
+        "db/scopes",
+        "db/scopes/groups",
+        "db/scopes/private",
+        "db/games",
+    ):
+        if (directory / folder).is_symlink():
+            raise ConfigError("invalid_workspace", "Database directory is redirected", folder)
+    if (directory / "workspace.toml").exists() or (directory / ".quickquip").exists():
+        raise ConfigError(
+            "legacy_workspace", "Keep the old workspace and unpack into a new directory"
+        )
+    document = empty_document()
+    paths, providers, styles, scopes = {}, {}, {}, {}
+    for group in ("providers", "styles"):
+        folder = directory / f"db/llm/{group}"
+        if folder.is_symlink():
+            raise ConfigError("invalid_workspace", "Database directory is redirected")
+        for path in sorted(folder.glob("*.toml")):
+            name = path.relative_to(directory).as_posix()
+            value = _read(safe_path(directory, name))
+            ident = value.get("id")
+            target = providers if group == "providers" else styles
+            if not isinstance(ident, str) or not ident or ident in target:
+                raise ConfigError("invalid_workspace", "Object ID is missing or duplicated", name)
+            target[ident] = value if group == "providers" else value.get("content")
+            paths[name] = path.read_bytes()
+    order_path = directory / "db/llm/order.toml"
+    order = []
+    if order_path.exists():
+        order = _read(safe_path(directory, "db/llm/order.toml")).get("providers", [])
+        if not isinstance(order, list) or any(not isinstance(i, str) for i in order):
+            raise ConfigError(
+                "invalid_workspace", "Expected provider ID order", "db/llm/order.toml"
+            )
+        if len(set(order)) != len(order):
+            raise ConfigError("invalid_workspace", "Provider order contains duplicate IDs")
+        paths["db/llm/order.toml"] = order_path.read_bytes()
+    document["providers"] = [providers[key] for key in order if key in providers] + [
+        item for key, item in providers.items() if key not in order
+    ]
+    for provider in document["providers"]:
+        defaults = {
+            "enabled": True,
+            "client_fingerprint": "default",
+            "headers": {},
+            "fallback_urls": [],
+            "proxy": "",
+            "auth_method": "api_key",
+            "aliases": [],
+            "parameters": {},
+        }
+        for key, value in defaults.items():
+            provider.setdefault(key, value)
+        for model in provider.get("models", []):
+            for key, value in {
+                "enabled": True,
+                "vision": True,
+                "context_window": None,
+                "parameters": {},
+            }.items():
+                model.setdefault(key, value)
+    document["style_profiles"] = styles
+    for path in sorted((directory / "db/llm/settings").glob("*.toml")):
+        name = path.relative_to(directory).as_posix()
+        if path.stem not in document["settings"]:
+            raise ConfigError("invalid_workspace", "Unknown settings section", name)
+        document["settings"][path.stem].update(_read(safe_path(directory, name)))
+        paths[name] = path.read_bytes()
+    for section in ("routes", "pricing"):
+        name = f"db/llm/{section}.toml"
+        path = safe_path(directory, name)
+        if path.exists():
+            value = _read(path)
+            document[section] = value if section == "routes" else value["rules"]
+            paths[name] = path.read_bytes()
+    document["pricing"] = [{**asdict(PricingRates()), **rule} for rule in document["pricing"]]
+    for category in ("groups", "private"):
+        for path in sorted((directory / f"db/scopes/{category}").glob("*.toml")):
+            name = path.relative_to(directory).as_posix()
+            value = _read(safe_path(directory, name))
+            ident = value.pop("id", None)
+            if not isinstance(ident, str) or not ident.isdigit():
+                raise ConfigError("invalid_workspace", "Expected numeric scope ID", name)
+            key = f"private:{ident}" if category == "private" else ident
+            if key in scopes:
+                raise ConfigError("invalid_workspace", "Duplicate scope ID", name)
+            scopes[key] = value
+            paths[name] = path.read_bytes()
+    game_name = "db/games/niuniu.toml"
+    game_path = safe_path(directory, game_name)
+    modes = _read(game_path).get("groups", {}) if game_path.exists() else {}
+    if game_path.exists():
+        paths[game_name] = game_path.read_bytes()
+    # Reject unknown database TOML rather than silently dropping user configuration.
+    for path in (directory / "db").rglob("*.toml"):
+        if path.relative_to(directory).as_posix() not in paths:
+            raise ConfigError(
+                "invalid_workspace",
+                "Unknown database configuration file",
+                path.relative_to(directory).as_posix(),
+            )
+    snapshot = {
+        "document": document,
+        "scopes": scopes,
+        "text_modes": modes,
+        "files": read_files(directory),
+    }
+    return Tree(snapshot, paths)
+
+
+def render_tree(snapshot, original=None):
+    original = original or {}
+    files = {}
+
+    def add(name, value):
+        files[name] = render_table(encode(value), original.get(name))
+
+    doc = snapshot["document"]
+    for group, values in (
+        ("providers", {item["id"]: _omit_nulls(item) for item in doc["providers"]}),
+        (
+            "styles",
+            {key: {"id": key, "content": value} for key, value in doc["style_profiles"].items()},
+        ),
+    ):
+        prefix = f"db/llm/{group}/"
+        old = {}
+        for name, content in original.items():
+            if name.startswith(prefix):
+                old[name[len(prefix) :]] = decode(parse(content, name))
+        names = _names(values, old)
+        for ident, value in values.items():
+            add(prefix + names[ident], value)
+    order = {"providers": [p["id"] for p in doc["providers"]]}
+    # An absent optional order file remains absent if lexical order already suffices.
+    provider_order = [
+        decode(parse(files[name], name))["id"]
+        for name in sorted(files)
+        if name.startswith("db/llm/providers/")
+    ]
+    if "db/llm/order.toml" in original or order["providers"] != provider_order:
+        add("db/llm/order.toml", order)
+    for name, value in doc["settings"].items():
+        add(f"db/llm/settings/{name}.toml", _omit_nulls(value))
+    add("db/llm/routes.toml", doc["routes"])
+    add("db/llm/pricing.toml", {"rules": _omit_nulls(doc["pricing"])})
+    for scope, value in snapshot["scopes"].items():
+        category = "private" if scope.startswith("private:") else "groups"
+        ident = scope.removeprefix("private:")
+        name = f"db/scopes/{category}/{ident}.toml"
+        for old_name, content in original.items():
+            if old_name.startswith(f"db/scopes/{category}/"):
+                if decode(parse(content, old_name)).get("id") == ident:
+                    name = old_name
+                    break
+        add(name, {"id": ident, **_omit_nulls(value)})
+    add("db/games/niuniu.toml", {"groups": snapshot["text_modes"]})
+    return files
+
+
+def workspace_files(snapshot, original=None):
+    return {
+        **{name: entry(content) for name, content in render_tree(snapshot, original).items()},
+        **deepcopy(snapshot["files"]),
+    }

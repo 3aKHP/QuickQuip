@@ -1,187 +1,270 @@
-"""Workspace operations: inspect, plan and orchestrate recoverable local changes."""
+"""Local workspace orchestration, independent of server synchronization endpoints."""
 
 import os
+from contextlib import contextmanager
+from copy import deepcopy
 from pathlib import Path
 import tempfile
-import uuid
 
-from quickquip.config_sync.bundle import digest
-from quickquip.config_sync.endpoint import Endpoint
-from quickquip.config_workspace.layout import read_tree, render_tree, safe_path
-from quickquip.config_workspace.planning import preview, public_plan
-from quickquip.config_workspace.storage import (
-    Storage,
-    baseline,
-    file_map,
-    private_directory,
-    write_json,
-)
-from quickquip.config_workspace.transactions import (
-    advance,
-    require_stopped,
-    rollback,
-    summary,
-    validate_target,
-)
-from quickquip.llm.config_durability import durable_write, sync_directory
-from quickquip.llm.config_errors import ConfigError
+from quickquip.common.config_writes import configuration_write, maintenance_owner
+from quickquip.configuration import activity
+from quickquip.configuration.errors import ConfigError
+from quickquip.config_workspace import content, database, planning, transactions
+from quickquip.config_workspace.inventory import entry, safe_path
+from quickquip.config_workspace.layout import read_tree, workspace_files
+from quickquip.config_workspace.merge import same
+from quickquip.config_workspace.storage import FORMAT, Storage, read_json
 
 
 def validate_location(directory, root):
     if root.is_relative_to(directory):
-        raise ConfigError("invalid_workspace", "Workspace must not contain the active project root")
+        raise ConfigError("invalid_workspace", "Workspace must not contain the source project")
     if any(
-        directory.is_relative_to((root / name).resolve())
-        for name in ("config", "data", "llm_about")
+        directory.is_relative_to(root / name)
+        for name in (
+            "config",
+            "data",
+            "llm_about",
+            "prod",
+            "docker",
+            "skills",
+            ".config-staging",
+            ".config-staging.new",
+            ".config-staging.previous",
+        )
     ):
         raise ConfigError(
-            "invalid_workspace", "Workspace must be outside active configuration and data"
+            "invalid_workspace", "Workspace must be separate from active configuration"
         )
 
 
 class Workspace:
-    def __init__(self, directory, root):
-        self.storage = Storage(directory)
-        self.endpoint = Endpoint(root)
-        validate_location(self.storage.directory, self.endpoint.root)
+    def __init__(self, directory=None, root=None):
+        from quickquip.common.env import PROJECT_ROOT
 
-    def initialize(self):
-        directory = self.storage.directory
-        if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
-            raise ConfigError("workspace_exists", "Initialization requires an empty destination")
-        captured = self.endpoint.capture()
-        files = render_tree(captured["bundle"])
-        directory.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(
-            prefix=".quickquip-workspace-", dir=directory.parent
-        ) as tmp:
-            staged = Path(tmp) / "tree"
-            private_directory(staged)
-            for name, body in files.items():
-                path = safe_path(staged, name)
-                private_directory(path.parent)
-                durable_write(path, body)
-                path.chmod(0o600)
-            write_json(staged / ".quickquip/state.json", baseline(self.endpoint.root, captured))
-            if self.endpoint.version() != captured["version"]:
+        self.root = Path(root or PROJECT_ROOT).resolve()
+        safe_path(self.root, "data/qqconf/active.json")
+        for name in (
+            "data/qqconf",
+            ".config-staging",
+            ".config-staging.new",
+            ".config-staging.previous",
+        ):
+            if (self.root / name).is_symlink():
                 raise ConfigError(
-                    "revision_conflict", "Source changed during workspace initialization"
+                    "invalid_workspace", "Configuration state path is redirected", name
                 )
-            if directory.exists():
-                # rmdir only removes a still-empty directory and rejects racing user content.
-                directory.rmdir()
-            os.rename(staged, directory)
-            sync_directory(directory.parent)
+        self.storage = Storage(directory or self.root / ".config-workspace")
+        validate_location(self.storage.directory, self.root)
+
+    def _state(self):
+        state = self.storage.state()
+        if state["source"] != str(self.root):
+            raise ConfigError("endpoint_changed", "Workspace belongs to a different project root")
+        return state
+
+    def _pending(self):
+        return self.storage.pending() or any(
+            (self.root / "data/qqconf" / name).exists() for name in ("active.json", "staging.json")
+        )
+
+    @contextmanager
+    def _write(self):
+        with self.storage.lock():
+            with activity.offline(self.root) as status:
+                marker = self.root / "data/qqconf/active.json"
+                if marker.exists():
+                    if status != "stopped":
+                        raise ConfigError(
+                            "recovery_required", "Stop services before recovering configuration"
+                        )
+                    with (
+                        maintenance_owner("qqconf:" + str(self.storage.directory)),
+                        configuration_write(self.root / "data"),
+                    ):
+                        transactions.recover_source(self.root, self.storage)
+                transactions.recover_candidate(self.root, self.storage)
+                self.storage.recover()
+                yield status
+
+    def _inputs(self, prefer):
+        state = self._state()
+        tree = read_tree(self.storage.directory)
+        workspace = tree.snapshot
+        source = content.read(self.root)
+        target, conflicts = planning.merge(state["base"], workspace, source, prefer)
+        # Always validate the complete merged result; conflict inspection is still readable.
+        if not conflicts or prefer:
+            target = content.validate(target)
+        return state, tree, workspace, source, target, conflicts
+
+    def refresh(self, *, prefer=None, show_secrets=False):
+        if self._pending():
+            return {
+                "action": "refresh",
+                "recovery_required": True,
+                "message": "Run qqconf pack to recover the unfinished write",
+            }
+        state, tree, workspace, source, target, conflicts = self._inputs(prefer)
+        with activity.offline(self.root) as status:
+            destination = "source" if status == "stopped" else "candidate"
+        result = planning.preview(
+            state["base"], workspace, source, target, conflicts, show_secrets=show_secrets
+        )
+        candidate = self.root / ".config-staging/candidate.json"
+        result.update(
+            action="refresh",
+            services=status,
+            destination=destination,
+            candidate_present=candidate.exists(),
+        )
+        if candidate.exists():
+            previous = read_json(candidate)
+            staged = content.read(self.root / ".config-staging")
+            result.update(
+                candidate_pending=not same(staged, source),
+                candidate_stale=not same(previous["base"], source),
+                candidate_matches_workspace=same(staged, target),
+            )
+        return result
+
+    def unpack(self, *, prefer=None):
+        def require_source_ready():
+            if any(
+                (self.root / "data/qqconf" / name).exists()
+                for name in ("active.json", "staging.json")
+            ):
+                raise ConfigError("recovery_required", "Run qqconf pack before unpacking")
+
+        require_source_ready()
+        directory = self.storage.directory
+        if not (self.storage.private / "state.json").exists():
+            if (
+                directory.exists()
+                and any(directory.iterdir())
+                and not self.storage.private.is_dir()
+            ):
+                raise ConfigError(
+                    "workspace_exists", "Unpack requires an empty or qqconf workspace"
+                )
+            with self.storage.lock():
+                self.storage.recover()
+                if any(
+                    path.is_file() and not path.is_relative_to(self.storage.private)
+                    for path in directory.rglob("*")
+                ):
+                    raise ConfigError(
+                        "workspace_exists", "Unpack requires an empty or qqconf workspace"
+                    )
+                snapshot = content.read(self.root)
+                require_source_ready()
+                state = {"format": FORMAT, "source": str(self.root), "base": snapshot}
+                if not same(content.read(self.root), snapshot):
+                    raise ConfigError("revision_conflict", "Source changed; run unpack again")
+                require_source_ready()
+                self.storage.save({}, workspace_files(snapshot), state)
+            return {"action": "unpack", "phase": "created", "workspace": str(directory)}
+        if any(
+            (self.root / "data/qqconf" / name).exists() for name in ("active.json", "staging.json")
+        ):
+            raise ConfigError("recovery_required", "Run qqconf pack before unpacking")
+        with self.storage.lock():
+            self.storage.recover()
+            state, tree, workspace, source, target, conflicts = self._inputs(prefer)
+            self._require_resolved(conflicts, prefer)
+            before = self._work_files(tree, workspace)
+            after = self._render(target, tree, before)
+            state = {**state, "base": source}
+            if content.read(self.root) != source:
+                raise ConfigError("revision_conflict", "Source changed; run unpack again")
+            require_source_ready()
+            self.storage.save(before, after, state)
+        return {"action": "unpack", "phase": "updated", "workspace": str(directory)}
+
+    def _work_files(self, tree, workspace):
         return {
-            "directory": str(directory),
-            "baseline_hash": digest(captured["bundle"]),
-            "draft_revision": captured["version"]["draft_revision"],
-            "files": len(files),
+            **{
+                name: entry(
+                    raw,
+                    (self.storage.directory / name).stat().st_mode & 0o777
+                    if os.name != "nt"
+                    else 0o600,
+                )
+                for name, raw in tree.files.items()
+            },
+            **workspace["files"],
         }
 
-    def validate(self):
-        with self.storage.lock():
-            self.storage.require_idle()
-            self.storage.state()
-            tree = read_tree(self.storage.directory)
-            return {"valid": True, "bundle_hash": digest(tree.bundle), "files": len(tree.files)}
+    @staticmethod
+    def _render(target, tree, before):
+        after = workspace_files(target, tree.files)
+        for name in after.keys() & before.keys():
+            if name.startswith("db/"):
+                after[name]["mode"] = before[name]["mode"]
+        return after
 
-    def plan(self, *, action="pack", overwrite=False):
-        with self.storage.lock():
-            result, *_ = preview(self.storage, self.endpoint, action=action, overwrite=overwrite)
-            return public_plan(result)
-
-    def execute(self, action, expected_plan, *, overwrite=False, services_stopped=False):
-        with self.storage.lock():
-            result, state, tree, captured, target_files = preview(
-                self.storage,
-                self.endpoint,
-                action=action,
-                overwrite=overwrite,
+    @staticmethod
+    def _require_resolved(conflicts, prefer):
+        if conflicts and not prefer:
+            raise ConfigError(
+                "configuration_conflict",
+                "Edit the conflicting fields and retry",
+                details={"conflicts": conflicts},
             )
-            if not expected_plan or expected_plan != result["plan_hash"]:
-                raise ConfigError("revision_conflict", "Workspace plan changed; preview it again")
-            if result["conflicts"]:
-                raise ConfigError(
-                    "configuration_conflict",
-                    "Workspace and database changed the same unit",
-                    details={"conflicts": result["conflicts"]},
+
+    def pack(self, *, prefer=None):
+        with self._write() as status:
+            state, tree, workspace, source, target, conflicts = self._inputs(prefer)
+            self._require_resolved(conflicts, prefer)
+            before = self._work_files(tree, workspace)
+            after = self._render(target, tree, before)
+            destination = "source" if status == "stopped" else "candidate"
+            state = {**state, "base": target if destination == "source" else source}
+            candidate = self.root / ".config-staging"
+            if destination == "candidate" and (candidate.exists() or not same(target, source)):
+                state["packed"] = deepcopy(target)
+            else:
+                state.pop("packed", None)
+            unchanged = (
+                same(target, source)
+                if destination == "source"
+                else (same(target, source) and not candidate.exists())
+            )
+            if destination == "candidate" and candidate.exists():
+                manifest = read_json(candidate / "candidate.json")
+                unchanged = (
+                    manifest.get("source_root") == str(self.root)
+                    and same(content.read(candidate), target)
+                    and same(manifest.get("base"), source)
                 )
-            root_write = action == "pack" and digest(captured["bundle"]) != result["target_hash"]
-            if action == "pack":
-                validate_target(result, captured)
-            if root_write and result["assets_changed"]:
-                require_stopped(self.endpoint, services_stopped)
-            # Guard workspace edits made while the source and candidate were validated.
-            if read_tree(self.storage.directory).files != tree.files:
-                raise ConfigError("revision_conflict", "Workspace changed after planning")
-            target_state = baseline(self.endpoint.root, captured)
-            if action == "pack":
-                target_state.update(base=result["bundle"], base_hash=result["target_hash"])
-            if not root_write and tree.files == target_files and state == target_state:
+            if unchanged:
+                self.storage.save(before, after, state)
                 return {
-                    "action": action,
+                    "action": "pack",
                     "phase": "unchanged",
-                    "baseline_hash": state["base_hash"],
-                    "draft_revision": captured["version"]["draft_revision"],
+                    "destination": destination,
+                    "services": status,
                 }
-            record = {
-                "id": uuid.uuid4().hex,
-                "phase": "prepared",
-                "action": action,
-                "source": str(self.endpoint.root),
-                "workspace": str(self.storage.directory),
-                "source_version": captured["version"],
-                "root_write": root_write,
-                "assets_changed": result["assets_changed"],
-                "before_state": state,
-                "target_state": target_state,
-                "before_files": file_map(tree.files),
-                "target_files": file_map(target_files),
-            }
-            self.storage.begin(record)
-            return advance(self.storage, self.endpoint, record, services_stopped=services_stopped)
-
-    def status(self, operation=None):
-        with self.storage.lock():
-            state = self.storage.state()
-            active = self.storage.active()
-            result = {
-                "baseline_hash": state["base_hash"],
-                "source_revision": state["version"]["draft_revision"],
-                "active_operation": active,
-            }
-            if operation or active:
-                result["operation"] = summary(self.storage.operation(operation or active))
-            if not active:
-                tree = read_tree(self.storage.directory)
-                result.update(
-                    workspace_hash=digest(tree.bundle),
-                    dirty=digest(tree.bundle) != state["base_hash"],
-                )
-            return result
-
-    def resume(self, operation, *, services_stopped=False):
-        with self.storage.lock():
-            active = self.storage.active()
-            if active and active != operation:
-                raise ConfigError("operation_conflict", "Another workspace operation is active")
-            record = self.storage.operation(operation)
-            return advance(self.storage, self.endpoint, record, services_stopped=services_stopped)
-
-    def recover(self, operation, *, services_stopped=False):
-        with self.storage.lock():
-            active = self.storage.active()
-            if active and active != operation:
-                raise ConfigError("operation_conflict", "Another workspace operation is active")
-            record = self.storage.operation(operation)
-            return rollback(self.storage, self.endpoint, record, services_stopped=services_stopped)
-
-
-def validate_offline(directory):
-    storage = Storage(directory)
-    with storage.lock():
-        storage.require_idle()
-        storage.state()
-        tree = read_tree(storage.directory)
-        return {"valid": True, "bundle_hash": digest(tree.bundle), "files": len(tree.files)}
+            with configuration_write(self.root / "data"):
+                if not same(content.read(self.root), source):
+                    raise ConfigError("revision_conflict", "Source changed; run pack again")
+                # Re-read working bytes to reject an editor racing the snapshot above.
+                current = read_tree(self.storage.directory)
+                if current.files != tree.files or current.snapshot["files"] != workspace["files"]:
+                    raise ConfigError("revision_conflict", "Workspace changed; run pack again")
+                with tempfile.TemporaryDirectory(prefix="qqconf-database-") as directory:
+                    prepared = Path(directory) / "config.db"
+                    database.prepare(self.root / database.DB_NAME, prepared, target)
+                    commit = (
+                        transactions.commit_source
+                        if destination == "source"
+                        else transactions.commit_candidate
+                    )
+                    commit(self.root, self.storage, source, target, prepared, before, after, state)
+        return {
+            "action": "pack",
+            "phase": "written",
+            "destination": destination,
+            "services": status,
+            "activation": "pending_deployment",
+        }

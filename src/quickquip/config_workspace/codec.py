@@ -9,7 +9,7 @@ import tomlkit
 from tomlkit.container import OutOfOrderTableProxy
 from tomlkit.items import AoT, Array, Comment, InlineTable, Null, Table
 
-from quickquip.config_sync.bundle import digest
+from quickquip.config_workspace.merge import same
 from quickquip.llm.config_errors import ConfigError
 
 TAG = "__quickquip_value__"
@@ -149,8 +149,8 @@ def _move_header_comments(owner, end, table):
     if "\n" in table.trivia.indent:
         return
     start = end
-    while start and owner.body[start - 1][0] is None and isinstance(
-        owner.body[start - 1][1], Comment
+    while (
+        start and owner.body[start - 1][0] is None and isinstance(owner.body[start - 1][1], Comment)
     ):
         start -= 1
     if start == end:
@@ -194,7 +194,7 @@ def _assign(container, key, value, *, inline=False):
         if hasattr(container, "item")
         else container._internal_container.item(key)
     )
-    if isinstance(previous, AoT) and previous and digest(previous.unwrap()) != digest(value):
+    if isinstance(previous, AoT) and previous and not same(previous.unwrap(), value):
         _attach_aot_comments(container, previous)
     updated = _patch(previous, value, inline=inline)
     if updated is previous:
@@ -208,7 +208,7 @@ def _assign(container, key, value, *, inline=False):
 
 
 def _patch(node, value, *, inline=False):
-    if digest(node.unwrap() if hasattr(node, "unwrap") else node) == digest(value):
+    if same(node.unwrap() if hasattr(node, "unwrap") else node, value):
         return node
     if isinstance(node, InlineTable) and isinstance(value, dict):
         for key in list(node):
@@ -273,7 +273,7 @@ def _patch(node, value, *, inline=False):
 
 def render_table(value: dict, original: bytes | None = None) -> bytes:
     if original is not None:
-        if digest(parse(original, "")) == digest(value):
+        if same(parse(original, ""), value):
             return original
         document = tomlkit.parse(original.decode("utf-8"))
         for key in list(document):
@@ -284,7 +284,7 @@ def render_table(value: dict, original: bytes | None = None) -> bytes:
     for key, item in value.items():
         _assign(document, key, item)
     result = tomlkit.dumps(document).encode("utf-8")
-    if digest(parse(result, "")) != digest(value):
+    if not same(parse(result, ""), value):
         raise ConfigError("invalid_workspace", "TOML serialization changed configuration values")
     return result
 

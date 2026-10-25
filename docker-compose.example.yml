@@ -76,6 +76,7 @@ services:
     env_file:
       - .env
     environment:
+      QUICKQUIP_MANAGED_CONTAINER: "1"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
       PORT: "8080"
@@ -115,6 +116,7 @@ services:
     env_file:
       - .env
     environment:
+      QUICKQUIP_MANAGED_CONTAINER: "1"
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"

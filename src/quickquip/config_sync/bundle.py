@@ -2,7 +2,6 @@
 
 import base64
 import hashlib
-import json
 import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import tempfile
@@ -13,6 +12,7 @@ import yaml
 from quickquip.llm.config_document import validate_document
 from quickquip.llm.config_errors import ConfigError
 from quickquip.llm.config_store import dumps
+from quickquip.llm.config_store import projection_consistent as projection_consistent
 
 FORMAT = 1
 MAX_BYTES = 32 * 1024 * 1024
@@ -204,36 +204,3 @@ def validate_bundle(bundle: dict, *, environment=False) -> dict:
             if compiled.runtime.default_persona not in compiled.personas:
                 raise ConfigError("missing_persona", "Default persona asset is missing")
     return {"format": FORMAT, "document": normalized, "assets": bundle["assets"]}
-
-
-def projection_consistent(connection) -> None:
-    """Compare stored projections against an independently projected draft in memory."""
-    import sqlite3
-    from quickquip.llm.config_store import (
-        _SCHEMA,
-        _REVISIONS_SCHEMA,
-        declared_schema,
-        project_document,
-    )
-
-    document = json.loads(connection.execute("SELECT document FROM config_meta").fetchone()[0])
-    with sqlite3.connect(":memory:") as expected:
-        expected.executescript(_SCHEMA + _REVISIONS_SCHEMA + declared_schema())
-        project_document(expected, document)
-        tables = [
-            row[0]
-            for row in expected.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            if not row[0].startswith("config_") and row[0] != "bot_runtime"
-        ]
-        tables.append("config_settings")
-        for table in tables:
-            actual_rows = sorted(
-                tuple(row) for row in connection.execute(f'SELECT * FROM "{table}"')
-            )
-            expected_rows = sorted(expected.execute(f'SELECT * FROM "{table}"').fetchall())
-            if actual_rows != expected_rows:
-                raise ConfigError(
-                    "projection_mismatch",
-                    "Draft and relational projections differ; use ConfigService",
-                    table,
-                )

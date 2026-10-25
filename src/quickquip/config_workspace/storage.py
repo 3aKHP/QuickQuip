@@ -1,187 +1,163 @@
-"""Private workspace state, byte leases and recoverable multi-file writes."""
+"""Private baselines and durable file-set installation without user-managed tokens."""
 
-import base64
-from contextlib import contextmanager
+from contextlib import closing
 import json
 import os
 from pathlib import Path
+import sqlite3
+import tempfile
+from uuid import uuid4
 
 from filelock import FileLock
 
-from quickquip.config_sync.bundle import digest, validate_bundle
-from quickquip.config_sync.state import identifier
-from quickquip.config_workspace.layout import read_file, safe_path, scan
-from quickquip.llm.config_durability import durable_write, ensure_directory, sync_directory
-from quickquip.llm.config_errors import ConfigError
+from quickquip.configuration.errors import ConfigError
+from quickquip.config_workspace.inventory import body, entry, safe_path
+from quickquip.config_workspace.database import read_only, checked_path
+from quickquip.llm.config_durability import durable_write, sync_directory
 
-STATE_FORMAT = 1
-MAX_STATE_BYTES = 256 * 1024 * 1024
-
-
-def private_directory(path):
-    ensure_directory(path)
-    path.chmod(0o700)
+FORMAT = 2
 
 
 def write_json(path, value):
-    private_directory(path.parent)
-    durable_write(path, (json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n").encode())
-    path.chmod(0o600)
+    durable_write(
+        Path(path), (json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n").encode()
+    )
+    Path(path).chmod(0o600)
 
 
-def file_map(files):
-    return {name: base64.b64encode(body).decode("ascii") for name, body in files.items()}
-
-
-def file_bytes(files):
+def read_json(path):
     try:
-        return {name: base64.b64decode(body, validate=True) for name, body in files.items()}
-    except (TypeError, ValueError):
-        raise ConfigError("invalid_workspace", "Invalid workspace recovery data") from None
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ConfigError("invalid_workspace", "Workspace metadata cannot be read") from None
+
+
+def observed(root, names):
+    result = {}
+    for name in names:
+        path = safe_path(root, name)
+        if path.exists():
+            mode = (path.stat().st_mode & 0o777) if os.name != "nt" else 0o600
+            result[name] = entry(path.read_bytes(), mode)
+    return result
+
+
+def install(root, before, after):
+    """Check the recorded bytes before each mutation; remove aliases before adding names."""
+
+    def checked(name):
+        current = observed(root, {name}).get(name)
+        if current not in (before.get(name), after.get(name)):
+            raise ConfigError("configuration_conflict", "External edit prevents recovery", name)
+        return current
+
+    current = observed(root, before.keys() | after.keys())
+    for name in sorted(before.keys() | after.keys()):
+        if current.get(name) not in (before.get(name), after.get(name)):
+            raise ConfigError("configuration_conflict", "External edit prevents recovery", name)
+    for name in sorted(before.keys() - after.keys()):
+        checked(name)
+        path = safe_path(root, name)
+        path.unlink(missing_ok=True)
+        sync_directory(path.parent)
+    for name in sorted(after):
+        if checked(name) == after[name]:
+            continue
+        path = safe_path(root, name)
+        durable_write(path, body(after[name]))
+        path.chmod(after[name]["mode"])
 
 
 class Storage:
     def __init__(self, directory):
         self.directory = Path(directory).absolute()
-        for path in (self.directory, *self.directory.parents):
-            if path.is_symlink():
-                raise ConfigError("invalid_workspace", "Workspace directory is redirected")
+        if any(path.is_symlink() for path in (self.directory, *self.directory.parents)):
+            raise ConfigError("invalid_workspace", "Workspace path is redirected")
         self.directory = self.directory.resolve()
-        self.private = self.directory / ".quickquip"
+        self.private = self.directory / ".qqconf"
         if self.private.is_symlink():
-            raise ConfigError("invalid_workspace", "Workspace state directory is redirected")
-
-    def read(self, name, default=None):
-        path = safe_path(self.private, name)
-        if not path.exists():
-            return default
-        try:
-            body = read_file(self.private, name, MAX_STATE_BYTES)
-            return json.loads(body)
-        except (ValueError, UnicodeError):
-            raise ConfigError("invalid_workspace", "Workspace state is unreadable", name) from None
-
-    def write(self, name, value):
-        path = safe_path(self.private, name)
-        write_json(path, value)
+            raise ConfigError("invalid_workspace", "Workspace metadata is redirected")
 
     def state(self):
-        state = self.read("state.json")
-        if not isinstance(state, dict) or state.get("format") != STATE_FORMAT:
-            raise ConfigError("invalid_workspace", "Workspace state is missing or unsupported")
-        if state.get("base_hash") != digest(state.get("base")):
-            raise ConfigError("invalid_workspace", "Workspace baseline digest differs")
-        validate_bundle(state["base"])
-        if not isinstance(state.get("source"), str) or not isinstance(state.get("version"), dict):
-            raise ConfigError("invalid_workspace", "Workspace source metadata is invalid")
+        state = read_json(self.private / "state.json")
+        if state.get("format") != FORMAT:
+            raise ConfigError("legacy_workspace", "Unpack into a new workspace")
         return state
 
-    @contextmanager
     def lock(self):
-        if not self.private.is_dir():
-            raise ConfigError("invalid_workspace", "Workspace is not initialized")
-        path = safe_path(self.private, "write.lock")
-        with FileLock(str(path), timeout=10):
-            if os.name != "nt":
-                path.chmod(0o600)
-            yield
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name != "nt":
+            self.directory.chmod(0o700)
+        self.private.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return FileLock(str(self.private / "write.lock"), timeout=10)
 
-    def active(self):
-        value = self.read("active.json")
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            raise ConfigError("invalid_workspace", "Invalid active workspace operation")
-        return identifier(value.get("operation"))
+    def pending(self):
+        return (self.private / "transaction.json").exists()
 
-    def require_idle(self):
-        active = self.active()
-        if active:
-            raise ConfigError(
-                "recovery_required",
-                "Resume or recover the active workspace operation",
-                details={"operation": active},
-            )
-
-    def operation(self, operation):
-        value = self.read(f"operations/{identifier(operation)}.json")
-        if value is None:
-            raise ConfigError("not_found", "Workspace operation not found")
-        if value.get("id") != operation:
-            raise ConfigError("invalid_workspace", "Workspace operation identity differs")
-        return value
-
-    def save(self, record):
-        self.write(f"operations/{identifier(record['id'])}.json", record)
-
-    def begin(self, record):
-        self.require_idle()
-        self.save(record)
-        self.write("active.json", {"operation": record["id"]})
-
-    def finish(self, record, phase):
-        record["phase"] = phase
-        self.save(record)
-        active = self.active()
-        if active and active != record["id"]:
-            raise ConfigError("operation_conflict", "A different workspace operation is active")
-        if active:
-            (self.private / "active.json").unlink()
+    def recover(self):
+        if not self.pending():
+            return
+        record = read_json(self.private / "transaction.json")
+        if (self.private / "state.json").exists() and self.state() == record["state_after"]:
+            (self.private / "transaction.json").unlink()
             sync_directory(self.private)
+            return
+        install(self.directory, record["after"], record["before"])
+        if record["state_before"] is None:
+            (self.private / "state.json").unlink(missing_ok=True)
+        else:
+            write_json(self.private / "state.json", record["state_before"])
+        (self.private / "transaction.json").unlink()
+        sync_directory(self.private)
 
-    def check_files(self, record):
-        before, target = file_bytes(record["before_files"]), file_bytes(record["target_files"])
-        current = scan(self.directory)
-        for name in current.keys() | before.keys() | target.keys():
-            if current.get(name) not in (before.get(name), target.get(name)):
-                raise ConfigError(
-                    "revision_conflict",
-                    "External workspace edit prevents recovery",
-                    name,
-                    {"operation": record["id"]},
-                )
-        state = self.read("state.json")
-        if state not in (record["before_state"], record["target_state"]):
-            raise ConfigError(
-                "revision_conflict", "Workspace baseline changed during the operation"
-            )
-        return current
-
-    def install(self, record, *, restore=False):
-        current = self.check_files(record)
-        target = file_bytes(record["before_files"] if restore else record["target_files"])
-        # Delete old names first so case-only renames work on Windows.
-        for name in sorted(current.keys() - target.keys()):
-            path = safe_path(self.directory, name)
-            if path.read_bytes() != current[name]:
-                raise ConfigError(
-                    "revision_conflict", "Workspace file changed before deletion", name
-                )
-            path.unlink()
-            sync_directory(path.parent)
-        # The manifest switches last. The active journal fences normal readers meanwhile.
-        for name in sorted(target, key=lambda name: (name == "workspace.toml", name)):
-            if current.get(name) == target[name]:
-                continue
-            path = safe_path(self.directory, name)
-            observed = path.read_bytes() if path.exists() else None
-            if observed != current.get(name):
-                raise ConfigError(
-                    "revision_conflict", "Workspace file changed before writing", name
-                )
-            private_directory(path.parent)
-            durable_write(path, target[name])
-            path.chmod(0o600)
-        if self.check_files(record) != target:
-            raise ConfigError("revision_conflict", "Workspace changed before confirmation")
-        self.write("state.json", record["before_state"] if restore else record["target_state"])
+    def save(self, before, after, state):
+        previous = self.state() if (self.private / "state.json").exists() else None
+        if before == after and previous == state:
+            return
+        if previous is not None and previous.get("receipt") == state.get("receipt"):
+            state["receipt"] = uuid4().hex
+        write_json(
+            self.private / "transaction.json",
+            {
+                "before": before,
+                "after": after,
+                "state_before": previous,
+                "state_after": state,
+            },
+        )
+        try:
+            install(self.directory, before, after)
+            write_json(self.private / "state.json", state)
+        except BaseException:
+            self.recover()
+            raise
+        (self.private / "transaction.json").unlink()
+        sync_directory(self.private)
 
 
-def baseline(source: Path, captured: dict) -> dict:
-    return {
-        "format": STATE_FORMAT,
-        "source": str(source.resolve()),
-        "base": captured["bundle"],
-        "base_hash": digest(captured["bundle"]),
-        "version": captured["version"],
-    }
+def sqlite_bytes(path):
+    """Include committed WAL data in a self-contained rollback image."""
+    with tempfile.TemporaryDirectory(prefix="qqconf-sqlite-") as directory:
+        target = Path(directory) / "backup.db"
+        with read_only(path) as source, closing(sqlite3.connect(target)) as destination:
+            source.backup(destination)
+        return target.read_bytes()
+
+
+def install_database(path, content):
+    # SQLite backup replaces pages through SQLite, preserving live WAL/SHM semantics.
+    with tempfile.TemporaryDirectory(prefix="qqconf-restore-") as directory:
+        source_path = Path(directory) / "source.db"
+        source_path.write_bytes(content)
+        path = checked_path(path)
+        for suffix in ("-wal", "-journal", "-shm"):
+            checked_path(str(path) + suffix)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with (
+            closing(sqlite3.connect(source_path)) as source,
+            closing(sqlite3.connect(path)) as target,
+        ):
+            source.backup(target)
+        with path.open("r+b") as stream:
+            os.fsync(stream.fileno())
+        sync_directory(path.parent)

@@ -1,1 +1,1 @@
-"""Editable TOML workspaces over versioned configuration bundles."""
+"""qqconf: editable local configuration workspaces and configuration-only packing."""

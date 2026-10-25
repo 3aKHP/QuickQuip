@@ -1,84 +1,110 @@
-"""CLI for persistent TOML configuration workspaces."""
+"""qqconf: unpack, inspect and pack a local configuration workspace."""
 
 import argparse
 import json
 from pathlib import Path
+import sqlite3
 import sys
 
-from dotenv import load_dotenv
 from filelock import Timeout
 
 from quickquip.common.config_writes import ConfigurationBusy
-from quickquip.common.paths import PROJECT_ROOT
-from quickquip.config_workspace.service import Workspace, validate_offline
-from quickquip.llm.config_errors import ConfigError
+from quickquip.configuration.errors import ConfigError
+from quickquip.config_workspace.service import Workspace
 
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("--root", type=Path, default=PROJECT_ROOT)
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("init", "validate", "plan", "pack", "refresh", "status", "resume", "recover"):
+    for name in ("unpack", "refresh", "pack"):
         command = commands.add_parser(name)
-        command.add_argument("directory", type=Path)
-        if name == "plan":
-            command.add_argument("--action", choices=("pack", "refresh"), default="pack")
-        if name in ("plan", "pack", "refresh"):
-            command.add_argument("--overwrite", action="store_true")
-        if name in ("pack", "refresh"):
-            command.add_argument("--expected-plan", required=True)
-        if name in ("pack", "resume", "recover"):
-            command.add_argument("--services-stopped", action="store_true")
-        if name in ("status", "resume", "recover"):
-            command.add_argument("--operation", required=name != "status")
+        command.add_argument("--root", type=Path, help="Source QuickQuip project root")
+        command.add_argument("--workspace", type=Path, help="Editable configuration directory")
+        command.add_argument(
+            "--prefer",
+            choices=("workspace", "source"),
+            help="Select conflicting fields, retaining independent changes",
+        )
+        command.add_argument("--json", action="store_true", help="Machine-readable output")
+        command.add_argument(
+            "--show-secrets",
+            action="store_true",
+            help="Show sensitive preview values in this invocation",
+        )
     return result
 
 
 def execute(args):
-    if args.command == "validate":
-        return validate_offline(args.directory)
-    workspace = Workspace(args.directory, args.root)
-    if args.command == "init":
-        return workspace.initialize()
-    if args.command == "plan":
-        return workspace.plan(action=args.action, overwrite=args.overwrite)
-    if args.command in ("pack", "refresh"):
-        return workspace.execute(
-            args.command,
-            args.expected_plan,
-            overwrite=args.overwrite,
-            services_stopped=getattr(args, "services_stopped", False),
+    workspace = Workspace(args.workspace, args.root)
+    method = getattr(workspace, args.command)
+    options = {"prefer": args.prefer}
+    if args.command == "refresh":
+        options["show_secrets"] = args.show_secrets
+    return method(**options)
+
+
+def _human(result):
+    if result["action"] != "refresh":
+        print(f"{result['action']}: {result['phase']}")
+        if result.get("destination"):
+            print(f"Destination: {result['destination']} (services: {result['services']})")
+        if result.get("activation"):
+            print("Configuration written; deployment activates it.")
+        if result.get("workspace"):
+            print(f"Workspace: {result['workspace']}")
+        return
+    if result.get("recovery_required"):
+        print(result["message"])
+        return
+    print(f"Services: {result['services']}; pack destination: {result['destination']}")
+    for label in ("workspace_changes", "source_changes", "write_changes"):
+        print(f"{label}: {len(result[label])}")
+        for change in result[label]:
+            if "lines" in change:
+                print("\n".join(change["lines"]))
+            else:
+                before = json.dumps(change["before"], ensure_ascii=False, default=str)
+                after = json.dumps(change["after"], ensure_ascii=False, default=str)
+                print(f"  {change['field']}: {before} -> {after}")
+    for conflict in result["conflicts"]:
+        print(f"CONFLICT: {conflict['field']}")
+    if result.get("candidate_present"):
+        print(
+            f"Candidate: pending={result['candidate_pending']}, stale={result['candidate_stale']}"
         )
-    if args.command == "status":
-        return workspace.status(args.operation)
-    if args.command in ("resume", "recover"):
-        return getattr(workspace, args.command)(
-            args.operation, services_stopped=args.services_stopped
-        )
-    raise ConfigError("invalid_command", "Unknown workspace command")
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     args = parser().parse_args(argv)
     try:
-        load_dotenv(args.root / ".env", override=False)
         result = execute(args)
-    except (ConfigError, ConfigurationBusy, OSError, Timeout, ValueError) as exc:
+    except (ConfigError, ConfigurationBusy, OSError, Timeout, ValueError, sqlite3.Error) as exc:
         error = (
             exc.as_dict()
             if isinstance(exc, ConfigError)
             else {
                 "code": "configuration_busy"
-                if isinstance(exc, (ConfigurationBusy, Timeout))
+                if isinstance(exc, (Timeout, ConfigurationBusy))
                 else "file_error",
-                "message": "Workspace operation failed; inspect its status",
-                "field_path": "",
-                "details": None,
+                "message": "Configuration operation failed; run qqconf refresh",
             }
         )
-        print(json.dumps({"error": error}, ensure_ascii=False), file=sys.stderr)
+        if args.json:
+            print(json.dumps({"error": error}, ensure_ascii=False, default=str), file=sys.stderr)
+        else:
+            print(f"{error['code']}: {error['message']}", file=sys.stderr)
+            if error.get("field_path"):
+                print(error["field_path"], file=sys.stderr)
+            for conflict in (error.get("details") or {}).get("conflicts", []):
+                print(f"CONFLICT: {conflict['field']}", file=sys.stderr)
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    else:
+        _human(result)
     return 0
 
 

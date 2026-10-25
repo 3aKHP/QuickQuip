@@ -1,6 +1,6 @@
 ---
-status: Accepted
-superseded_by: []
+status: Superseded
+superseded_by: [0022-local-configuration-workspace-cli.md]
 ---
 
 # ADR-0020：以持久 TOML 工作副本编辑配置包

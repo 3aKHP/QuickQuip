@@ -56,7 +56,7 @@ PowerShell 使用 `-Action sync -Mode auto -Plan` 预览，去掉 `-Plan` 执行
 
 ## 配置范围与生效
 
-本地草稿和受管资产可导出为[持久 TOML 工作副本](config-workspace.md)，编辑后校验并组装回本地，再使用本文的同步流程推送。线上热修先回流本地，再刷新工作副本。
+[qqconf](config-workspace.md) 负责编辑本地工作副本。本文工具直接连接本地真实文件和服务器；线上热修回流后运行 `qqconf unpack` 接入副本。qqconf 的管理范围包含更多本地配置，现有同步工具仍按下述清单交换内容，且尚未读取 `.config-staging/`。
 
 同步包括 LLM 草稿／发布文档、`config/personas/*.toml`、`config/client_profiles/*.toml`，以及 generation、chat_rules、games、awakening、sensitive_words、admins、niuniu_text、niuniu_text_safe 的 TOML 文件。`llm_about` 的全局和群目录中 `vocab.yaml`、`identities.yaml` 同时同步。
 

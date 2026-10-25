@@ -88,3 +88,7 @@ docker/*.Dockerfile
 # Frontend build output
 dist/
 node_modules/
+
+# Local configuration workspaces and generated candidates
+/.config-workspace/
+/.config-staging*/

@@ -342,3 +342,31 @@ def project_document(conn, document):
         projected = {k: v for k, v in settings.items()
                      if k not in DOCUMENT_ONLY_SETTINGS.get(name, ())}
         _insert_fields(conn, f"{name}_settings", {"singleton": 1}, projected)
+
+
+def projection_consistent(connection) -> None:
+    """Compare stored projections against an independently projected draft in memory."""
+    import sqlite3
+    from quickquip.configuration.errors import ConfigError
+
+    document = json.loads(connection.execute("SELECT document FROM config_meta").fetchone()[0])
+    with sqlite3.connect(":memory:") as expected:
+        expected.executescript(_SCHEMA + _REVISIONS_SCHEMA + declared_schema())
+        project_document(expected, document)
+        tables = [
+            row[0]
+            for row in expected.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            if not row[0].startswith("config_") and row[0] != "bot_runtime"
+        ]
+        tables.append("config_settings")
+        for table in tables:
+            actual_rows = sorted(
+                tuple(row) for row in connection.execute(f'SELECT * FROM "{table}"')
+            )
+            expected_rows = sorted(expected.execute(f'SELECT * FROM "{table}"').fetchall())
+            if actual_rows != expected_rows:
+                raise ConfigError(
+                    "projection_mismatch",
+                    "Draft and relational projections differ; use ConfigService",
+                    table,
+                )

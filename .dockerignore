@@ -43,3 +43,7 @@ requirements-dev.txt
 
 # Persistent configuration is provided through shared mounts.
 config/managed/
+
+# Local configuration workspaces and generated candidates
+/.config-workspace/
+/.config-staging*/
