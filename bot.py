@@ -3,7 +3,8 @@ from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 from loguru import logger
 
 import plugins
-from quickquip.common.env import load_root_env_file
+from quickquip.common.env import load_root_env_file, PROJECT_ROOT
+from quickquip.configuration.migration import require_fresh_layout
 from quickquip.common.logging_bridge import install_stdlib_bridge
 
 logger.add(
@@ -21,6 +22,7 @@ logger.add(
 install_stdlib_bridge()
 
 load_root_env_file()
+require_fresh_layout(PROJECT_ROOT)
 nonebot.init()
 driver = nonebot.get_driver()
 driver.register_adapter(OneBotV11Adapter)

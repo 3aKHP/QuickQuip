@@ -5,8 +5,6 @@ from __future__ import annotations
 import copy
 from functools import wraps
 import json
-import os
-import sqlite3
 import time
 import uuid
 from functools import lru_cache
@@ -14,7 +12,7 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from quickquip.common.paths import CONFIG_LLM_TOML, DATA_DIR
+from quickquip.common.paths import CONFIG_LLM_TOML
 from quickquip.llm.config_document import (
     ConfigError,
     empty_document,
@@ -23,11 +21,13 @@ from quickquip.llm.config_document import (
 )
 from quickquip.llm.config_store import ConfigStore, SCHEMA_VERSION, dumps, project_document
 from quickquip.llm.config_durability import ensure_directory
-from quickquip.llm.config_tasks import ConfigTaskQueue, operation
+from quickquip.llm.config_tasks import ConfigTaskQueue
 
 from quickquip.llm.config_validation import document_diff as document_diff, validation_report
 
-DEFAULT_CONFIG_DB = DATA_DIR / "llm_config.db"
+from quickquip.configuration.paths import PATHS
+
+DEFAULT_CONFIG_DB = PATHS.configuration
 MAX_NOTE_LENGTH = 120
 
 
@@ -71,7 +71,7 @@ def configuration_mutation(method):
         from quickquip.common.config_writes import ConfigurationBusy, configuration_write
 
         try:
-            with configuration_write(self.path.parent):
+            with configuration_write(self.data_dir):
                 return method(self, *args, **kwargs)
         except ConfigurationBusy as exc:
             raise ConfigError("configuration_busy", str(exc)) from exc
@@ -79,21 +79,40 @@ def configuration_mutation(method):
 
 
 class ConfigService:
-    def __init__(self, path=DEFAULT_CONFIG_DB, *, config_dir=None):
+    def __init__(self, path=DEFAULT_CONFIG_DB, *, config_dir=None, runtime_path=None):
         self.path = Path(path)
-        self.config_dir = Path(config_dir) if config_dir else self.path.parent.parent / "config"
+        self.config_dir = Path(config_dir) if config_dir else (
+            self.path.parent.parent if self.path.parent.name == "managed"
+            else self.path.parent.parent / "config"
+        )
+        self.data_dir = (self.config_dir.parent / "data"
+                         if config_dir is not None or self.path.parent.name == "managed"
+                         else self.path.parent)
+        from quickquip.llm.config_execution_store import ConfigExecutionStore
+        from quickquip.llm.scope_settings import ScopeSettingsRepository
+        execution_path = runtime_path or (
+            self.data_dir / "config_runtime.db" if self.path.parent.name == "managed"
+            else (self.path.with_name(self.path.name + ".runtime.db")
+                  if self.path.with_name(self.path.name + ".runtime.db").exists()
+                  else self.path.with_name(self.path.stem + ".runtime.db"))
+        )
+        self.execution = ConfigExecutionStore(execution_path)
+        self.scope_settings = ScopeSettingsRepository(self.path, data_dir=self.data_dir)
         from quickquip.llm.client_fingerprints.catalog import get_catalog
 
         get_catalog(self.config_dir)
         self._references_lock = FileLock(str(self.path) + ".references.lock", timeout=10)
         self.store = ConfigStore(self.path)
-        self.tasks = ConfigTaskQueue(self.store)
+        self.tasks = ConfigTaskQueue(self.execution)
 
     @property
     def shared_lock(self):
         return self._references_lock
 
     def initialize(self, legacy_path=None, *, services_stopped=False):
+        if self.path == DEFAULT_CONFIG_DB and not self.path.exists():
+            from quickquip.configuration.migration import require_fresh_layout
+            require_fresh_layout(PATHS.root)
         ensure_directory(self.path.parent)
         with FileLock(str(self.path) + ".init.lock", timeout=60):
             if self.path.exists():
@@ -101,6 +120,7 @@ class ConfigService:
                 with self.shared_lock:
                     self.store.upgrade(services_stopped=services_stopped)
                 self.store.verify()
+                self.execution.verify()
                 return self.read()
             report = None
             legacy = Path(legacy_path) if legacy_path else None
@@ -112,9 +132,19 @@ class ConfigService:
                 document = empty_document()
             document = validate_document(document, config_dir=self.config_dir)
             self.store.create(document, report, str(legacy or ""))
+            try:
+                self.execution.create(1, dumps(document), time.time())
+            except BaseException:
+                for suffix in ("", "-wal", "-shm"):
+                    Path(str(self.path) + suffix).unlink(missing_ok=True)
+                raise
         return self.read()
 
     def read(self, source="draft"):
+        if source == "published":
+            result = self.execution.read_published()
+            return {"revision": result["revision"],
+                    "document": upgrade_document(json.loads(result["document"]))[0]}
         with self.store.connect() as conn:
             meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
             if source == "draft":
@@ -123,7 +153,7 @@ class ConfigService:
                     "document": upgrade_document(json.loads(meta["document"]))[0],
                 }
             try:
-                revision = meta["published_revision"] if source == "published" else int(source)
+                revision = int(source)
             except (TypeError, ValueError):
                 raise ConfigError(
                     "invalid_field", "Invalid configuration source", field_path="source"
@@ -175,7 +205,7 @@ class ConfigService:
             if note is None:
                 note = (
                     ""
-                    if expected_revision == meta["published_revision"]
+                    if expected_revision == self.read("published")["revision"]
                     else _version(conn, expected_revision)["note"]
                 )
             conn.execute(
@@ -226,78 +256,75 @@ class ConfigService:
     def _enqueue(self, kind, source, request_id, payload=None, expected_revision=None, note=None):
         note = _clean_note(note)
         if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
-            raise ConfigError(
-                "invalid_field",
-                "request_id must contain 1 to 128 characters",
-                field_path="request_id",
-            )
-        with self.shared_lock, self.store.connect(write=True) as conn:
-            existing = conn.execute(
-                "SELECT * FROM config_operations WHERE request_id=?", (request_id,)
-            ).fetchone()
+            raise ConfigError("invalid_field", "request_id must contain 1 to 128 characters",
+                              field_path="request_id")
+        payload = payload or {}
+        with self.shared_lock:
+            with self.execution.connect() as conn:
+                existing = conn.execute(
+                    "SELECT * FROM config_operations WHERE request_id=?", (request_id,)
+                ).fetchone()
             if existing:
-                if (
-                    existing["kind"] != kind
-                    or (
-                        expected_revision is not None
-                        and existing["target_revision"] != expected_revision
-                    )
-                    or existing["payload"] != dumps(payload or {})
-                ):
+                if (existing["kind"] != kind or existing["payload"] != dumps(payload)
+                    or (expected_revision is not None
+                        and existing["target_revision"] != expected_revision)):
                     raise ConfigError(
                         "operation_conflict", "Request ID belongs to another operation"
                     )
                 return self.tasks.get(existing["id"])
-            meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
-            if expected_revision is not None:
-                self._check_revision(conn, expected_revision)
-            if (
-                kind == "apply"
-                and conn.execute("""SELECT 1 FROM config_operations
-                    WHERE kind='apply' AND status IN ('queued','running')""").fetchone()
-            ):
-                raise ConfigError("operation_conflict", "A configuration apply is already pending")
-            if source == "draft":
-                revision, document = meta["draft_revision"], json.loads(meta["document"])
-            else:
-                revision = meta["published_revision"] if source == "published" else int(source)
-                row = conn.execute(
-                    "SELECT document FROM config_snapshots WHERE revision=?", (revision,)
-                ).fetchone()
-                if row is None:
-                    raise ConfigError("not_found", "Snapshot not found")
-                document = json.loads(row[0])
+            target = self.read(source)
+            revision, document = target["revision"], target["document"]
+            if expected_revision is not None and revision != expected_revision:
+                raise ConfigError("revision_conflict", "Draft changed before operation enqueue")
             validate_document(document, config_dir=self.config_dir)
             if kind == "probe":
-                provider = next(
-                    (p for p in document["providers"] if p["id"] == payload["provider_id"]), None
-                )
-                if not provider or not any(
-                    m["model"] == payload["model"] for m in provider["models"]
-                ):
-                    raise ConfigError(
-                        "invalid_reference", "Unknown probe target", field_path="model"
-                    )
-            conn.execute(
-                "INSERT OR IGNORE INTO config_snapshots VALUES(?,?,?)",
-                (revision, dumps(document), time.time()),
-            )
-            if note is not None:
-                _set_note(conn, revision, note)
-            identifier = uuid.uuid4().hex
+                provider = next((p for p in document["providers"]
+                                 if p["id"] == payload["provider_id"]), None)
+                if not provider or not any(m["model"] == payload["model"]
+                                           for m in provider["models"]):
+                    raise ConfigError("invalid_reference", "Unknown probe target", "model")
             now = time.time()
-            conn.execute(
-                """INSERT INTO config_operations
-                (id,request_id,kind,target_revision,status,stage,payload,created_at,updated_at)
-                VALUES(?,?,?,?, 'queued','queued',?,?,?)""",
-                (identifier, request_id, kind, revision, dumps(payload or {}), now, now),
-            )
-            row = conn.execute(
-                "SELECT * FROM config_operations WHERE id=?", (identifier,)
-            ).fetchone()
-            result = operation(row)
-            result.pop("claim_token", None)
-            return result
+            with self.store.connect(write=True) as conn:
+                if source == "draft":
+                    self._check_revision(conn, revision)
+                conn.execute("INSERT OR IGNORE INTO config_snapshots VALUES(?,?,?)",
+                             (revision, dumps(document), now))
+                if note is not None:
+                    _set_note(conn, revision, note)
+            with self.execution.connect(write=True) as conn:
+                if kind == "apply" and conn.execute(
+                    "SELECT 1 FROM config_operations WHERE kind='apply' "
+                    "AND status IN ('queued','running')"
+                ).fetchone():
+                    raise ConfigError(
+                        "operation_conflict", "A configuration apply is already pending"
+                    )
+                conn.execute("INSERT OR IGNORE INTO execution_snapshots VALUES(?,?,?)",
+                             (revision, dumps(document), now))
+                pinned = conn.execute(
+                    "SELECT document FROM execution_snapshots WHERE revision=?", (revision,)
+                ).fetchone()[0]
+                if dumps(upgrade_document(json.loads(pinned))[0]) != dumps(document):
+                    raise ConfigError(
+                        "revision_conflict", "Execution revision has different content"
+                    )
+                identifier = uuid.uuid4().hex
+                conn.execute(
+                    "INSERT INTO config_operations "
+                    "(id,request_id,kind,target_revision,status,stage,payload,"
+                    "created_at,updated_at) "
+                    "VALUES(?,?,?,?, 'queued','queued',?,?,?)",
+                    (identifier, request_id, kind, revision, dumps(payload), now, now),
+                )
+            return self.tasks.get(identifier)
+
+    def read_execution(self, revision):
+        with self.execution.connect() as conn:
+            row = conn.execute("SELECT document FROM execution_snapshots WHERE revision=?",
+                               (revision,)).fetchone()
+        if row is None:
+            raise ConfigError("not_found", "Execution input not found")
+        return {"revision": revision, "document": upgrade_document(json.loads(row[0]))[0]}
 
     def apply(self, expected_revision, request_id, *, note=None):
         return self._enqueue(
@@ -326,14 +353,14 @@ class ConfigService:
             return self._publish_locked(operation_id, token, boot_id=boot_id)
 
     def _publish_locked(self, operation_id, token, boot_id=None):
-        with self.store.connect(write=True) as conn:
+        with self.execution.connect(write=True) as conn:
             if boot_id is not None:
                 self._assert_bot_boot(conn, boot_id)
             row = self.tasks.assert_claim(conn, operation_id, token)
             if row["kind"] != "apply":
                 raise ConfigError("operation_conflict", "Only apply operations can publish")
             conn.execute(
-                "UPDATE config_meta SET published_revision=? WHERE singleton=1",
+                "UPDATE publication SET published_revision=? WHERE singleton=1",
                 (row["target_revision"],),
             )
             conn.execute(
@@ -371,28 +398,28 @@ class ConfigService:
                     details={"provider_id": pid, "model": selected},
                 )
 
-    def validate_group_overrides(self, document, store):
-        if not store.path.exists():
-            return
-        with store._connect() as conn:
-            rows = conn.execute("SELECT group_id,provider_id,model FROM group_settings").fetchall()
-        for row in rows:
+    def validate_group_overrides(self, document):
+        for row in self.scope_settings.list():
             self.validate_group_reference(
-                document, row["provider_id"], row["model"], f"group_settings.{row['group_id']}"
+                document, row["provider_id"], row["model"], f"scope_settings.{row['group_id']}"
             )
 
     @configuration_mutation
-    def update_group_override(self, store, group_id, **payload):
-        if "provider_id" not in payload and "model" not in payload:
-            return store.update_group_settings(group_id, **payload)
+    def update_group_override(self, group_id, **payload):
         with self.shared_lock:
-            existing = store.get_group_settings(group_id)
-            self.validate_group_reference(
-                self.read("published")["document"],
-                payload.get("provider_id", existing.provider_id),
-                payload.get("model", existing.model),
-            )
-            return store.update_group_settings(group_id, **payload)
+            existing = self.scope_settings.get_group_settings(group_id)
+            if "provider_id" in payload or "model" in payload:
+                self.validate_group_reference(
+                    self.read("published")["document"],
+                    payload.get("provider_id", existing.provider_id),
+                    payload.get("model", existing.model),
+                )
+            return self.scope_settings.update_group_settings(group_id, **payload)
+
+    @configuration_mutation
+    def delete_group_override(self, group_id):
+        with self.shared_lock:
+            return self.scope_settings.delete(group_id)
 
     @staticmethod
     def _assert_bot_boot(conn, boot_id):
@@ -401,12 +428,12 @@ class ConfigService:
             raise ConfigError("runtime_superseded", "A newer bot boot owns configuration control")
 
     def assert_bot_boot(self, boot_id):
-        with self.store.connect() as conn:
+        with self.execution.connect() as conn:
             self._assert_bot_boot(conn, boot_id)
 
     def register_bot_boot(self, boot_id, loaded_revision, application_version=""):
         """Atomically advance the boot epoch; registration is separate from heartbeats."""
-        with self.store.connect(write=True) as conn:
+        with self.execution.connect(write=True) as conn:
             row = conn.execute("SELECT boot_id FROM bot_runtime WHERE singleton=1").fetchone()
             try:
                 previous_epoch = int(row[0].split(":", 1)[0]) if row else 0
@@ -448,7 +475,7 @@ class ConfigService:
         return token
 
     def report_bot(self, boot_id, loaded_revision, components=None, application_version=""):
-        with self.store.connect(write=True) as conn:
+        with self.execution.connect(write=True) as conn:
             self._assert_bot_boot(conn, boot_id)
             conn.execute(
                 """UPDATE bot_runtime SET loaded_revision=?,application_version=?,
@@ -464,11 +491,13 @@ class ConfigService:
 
     def status(self):
         observed = time.time()
+        published_revision = self.read("published")["revision"]
+        with self.execution.connect() as conn:
+            row = conn.execute("SELECT * FROM bot_runtime WHERE singleton=1").fetchone()
         with self.store.connect() as conn:
             meta = conn.execute("SELECT * FROM config_meta WHERE singleton=1").fetchone()
-            row = conn.execute("SELECT * FROM bot_runtime WHERE singleton=1").fetchone()
             draft_version = _version(conn, meta["draft_revision"])
-            published_version = _version(conn, meta["published_revision"])
+            published_version = _version(conn, published_revision)
             loaded_version = _version(conn, row["loaded_revision"]) if row else None
         bot = dict(row) if row else None
         if bot:
@@ -479,10 +508,8 @@ class ConfigService:
             bot["loaded_version"] = loaded_version
         return {
             "schema_version": SCHEMA_VERSION,
-            "draft_revision": meta["draft_revision"],
-            "draft_version": draft_version,
-            "published_revision": meta["published_revision"],
-            "published_version": published_version,
+            "draft_revision": meta["draft_revision"], "draft_version": draft_version,
+            "published_revision": published_revision, "published_version": published_version,
             "bot": bot,
         }
 
@@ -511,12 +538,13 @@ class ConfigService:
             _set_note(conn, self._revision(conn, meta, source), note)
         return self.status()
 
-    @staticmethod
-    def _revision(conn, meta, source):
+    def _revision(self, conn, meta, source):
         if source == "draft":
             return meta["draft_revision"]
+        if source == "published":
+            return self.read("published")["revision"]
         try:
-            revision = meta["published_revision"] if source == "published" else int(source)
+            revision = int(source)
         except (TypeError, ValueError):
             raise ConfigError(
                 "invalid_field", "Invalid configuration source", field_path="source"
@@ -564,57 +592,13 @@ class ConfigService:
                                  config_dir=self.config_dir)
 
     def backup(self, destination):
-        destination = Path(destination)
-        if destination.resolve() == self.path.resolve():
-            raise ConfigError("invalid_field", "Backup must use a separate file")
-        ensure_directory(destination.parent)
-        with self.store.connect() as source:
-            target = sqlite3.connect(destination)
-            try:
-                source.backup(target)
-            finally:
-                target.close()
-        with destination.open("r+b") as stream:
-            os.fsync(stream.fileno())
-        from quickquip.llm.config_durability import sync_directory
-
-        sync_directory(destination.parent)
-        return destination
+        from quickquip.llm.config_backup import backup
+        return backup(self, destination)
 
     @configuration_mutation
     def restore_database(self, source, *, stopped=False):
-        if not stopped:
-            raise ConfigError("services_running", "Stop bot and Web before database restore")
-        source = Path(source)
-        if not source.is_file():
-            raise ConfigError("not_found", "Backup database does not exist")
-        if source.resolve() == self.path.resolve():
-            raise ConfigError("invalid_field", "Restore must use a separate backup file")
-        candidate = ConfigStore(source)
-        candidate.verify()
-        recovered = ConfigService(source, config_dir=self.config_dir)
-        validate_document(recovered.read()["document"], config_dir=self.config_dir)
-        validate_document(recovered.read("published")["document"], config_dir=self.config_dir)
-        backup = self.path.with_name(f"{self.path.name}.{time.time_ns()}.backup")
-        self.backup(backup)
-        with self.shared_lock, candidate.connect() as origin, sqlite3.connect(self.path) as target:
-            origin.backup(target)
-            with target:
-                target.execute("DELETE FROM bot_runtime")
-                target.execute(
-                    """UPDATE config_operations SET status='failed',stage='restored',
-                    claim_token=NULL,lease_until=NULL,error=?
-                    WHERE status IN ('queued','running')""",
-                    (
-                        dumps(
-                            {
-                                "code": "database_restored",
-                                "message": "Operation cleared by database restore",
-                            }
-                        ),
-                    ),
-                )
-        return {"backup": str(backup), **self.status()}
+        from quickquip.llm.config_backup import restore
+        return restore(self, source, stopped=stopped)
 
 
 @lru_cache(maxsize=1)

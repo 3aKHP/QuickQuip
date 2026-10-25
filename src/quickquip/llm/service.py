@@ -158,9 +158,10 @@ if TYPE_CHECKING:
     from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
 
-from quickquip.common.paths import DATA_DIR
 
-CONFIG_PATH = DATA_DIR / "llm_config.db"
+from quickquip.common.paths import LLM_CONFIG_DB_PATH
+
+CONFIG_PATH = LLM_CONFIG_DB_PATH
 DB_PATH = LLM_DB_PATH
 VOCAB_PATH = LLM_VOCAB_YAML_PATH
 IDENTITY_PATH = LLM_IDENTITIES_YAML_PATH
@@ -201,6 +202,10 @@ class LLMService(
         config_service=None,
     ):
         self.config_path = Path(config_path)
+        self.config_dir = config_service.config_dir if config_service is not None else (
+            self.config_path.parent.parent if self.config_path.parent.name == "managed"
+            else self.config_path.parent.parent / "config"
+        )
         self.vocab_path = Path(vocab_path)
         self.identity_path = Path(identity_path)
         self.tool_registry = ToolRegistry()
@@ -237,9 +242,19 @@ class LLMService(
             from quickquip.llm.config_document import compile_document
             published = self.config_service.read("published")
             config = compile_document(
-                published["document"], config_dir=self.config_path.parent.parent / "config",
+                published["document"], config_dir=self.config_dir,
                 revision=published["revision"],
             )
+        if self.config_service is not None:
+            self.scope_settings = self.config_service.scope_settings
+        else:
+            from quickquip.llm.scope_settings import ScopeSettingsRepository
+            from quickquip.llm.config_store import ConfigStore
+            from quickquip.llm.config_document import empty_document
+            scope_path = Path(db_path).with_name("scope_configuration.db")
+            if not scope_path.exists():
+                ConfigStore(scope_path).create(empty_document())
+            self.scope_settings = ScopeSettingsRepository(scope_path)
         self.config = config
         self._init_configuration_leases()
         # skills 需要在 config 就位后做启动注册；空目录时留待每轮构建系统
@@ -319,7 +334,7 @@ class LLMService(
         from quickquip.llm.config_document import compile_document
         published = self.config_service.read("published")
         config = compile_document(
-            published["document"], config_dir=self.config_path.parent.parent / "config",
+            published["document"], config_dir=self.config_dir,
             revision=published["revision"],
         )
         if config.mcp != self.config.mcp:
@@ -343,7 +358,7 @@ class LLMService(
         """
         try:
             from quickquip.llm.personas import load_personas
-            new_personas = load_personas(self.config_path.parent.parent / "config" / "personas")
+            new_personas = load_personas(self.config_dir / "personas")
         except Exception as exc:
             return 0, str(exc)
         if not new_personas:
@@ -358,12 +373,11 @@ class LLMService(
         self, chat_id: int | str, chat_type: str = "group"
     ) -> ResolvedGroupSettings:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
-        overrides = self.store.get_group_settings(scope_key)
-        settings = resolve_group_settings(self.store, self.config, scope_key)
+        settings = resolve_group_settings(self.scope_settings, self.config, scope_key)
         if chat_type == "private":
             settings = replace(
                 settings,
-                enabled=False if overrides.enabled is None else settings.enabled,
+                enabled=self.store.private_chat_active(str(chat_id)),
                 allow_at=False,
             )
         return settings
@@ -376,9 +390,9 @@ class LLMService(
     ) -> None:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
         if self.config_service is not None:
-            self.config_service.update_group_override(self.store, scope_key, **fields)
+            self.config_service.update_group_override(scope_key, **fields)
         else:
-            self.store.update_group_settings(scope_key, **fields)
+            self.scope_settings.update_group_settings(scope_key, **fields)
 
     def _build_system_prompt(
         self,

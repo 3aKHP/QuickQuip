@@ -35,6 +35,16 @@ from quickquip.games.niuniu.gluing import _glue_growth
 from quickquip.games.niuniu.store import _roll_lognormal
 
 
+def create_store(path, config=None):
+    from quickquip.configuration.text_modes import TextModeRepository
+    from quickquip.llm.config_document import empty_document
+    from quickquip.llm.config_store import ConfigStore
+    configuration = Path(path).with_name("configuration.db")
+    if not configuration.exists():
+        ConfigStore(configuration).create(empty_document())
+    return NiuNiuStore(path, config=config, text_modes=TextModeRepository(configuration))
+
+
 # ── helpers ────────────────────────────────────────────────────────────────
 
 
@@ -86,7 +96,7 @@ def _clean_cds():
 
 @pytest.fixture
 def store(tmp_path: Path) -> NiuNiuStore:
-    return NiuNiuStore(str(tmp_path / "test_niuniu.db"))
+    return create_store(str(tmp_path / "test_niuniu.db"))
 
 
 @pytest.fixture
@@ -252,7 +262,7 @@ class TestNiuNiuStoreCRUD:
             """
         )
         conn.close()
-        store = NiuNiuStore(db_path)
+        store = create_store(db_path)
         with store.connect() as c:
             cols = {
                 r["name"]
@@ -819,7 +829,7 @@ def safe_store(tmp_path: Path) -> NiuNiuStore:
     path = tmp_path / "niuniu_text_safe.toml"
     path.write_text(_SAFE_TEXT_TOML, encoding="utf-8")
     cfg = NiuNiuConfig(niuniu_safe_text_path=str(path))
-    return NiuNiuStore(str(tmp_path / "test_niuniu.db"), config=cfg)
+    return create_store(str(tmp_path / "test_niuniu.db"), config=cfg)
 
 
 class TestTextPartialOverride:
@@ -875,7 +885,7 @@ class TestTextPartialOverride:
         path = tmp_path / "empty_safe.toml"
         path.write_text("# nothing here\n", encoding="utf-8")
         cfg = NiuNiuConfig(niuniu_safe_text_path=str(path))
-        store = NiuNiuStore(str(tmp_path / "db.db"), config=cfg)
+        store = create_store(str(tmp_path / "db.db"), config=cfg)
         safe = store.texts["safe"]
         default = store.texts["default"]
         assert [e["name"] for e in safe.glue_events] == [
@@ -889,7 +899,7 @@ class TestTextPartialOverride:
         path = tmp_path / "niuniu_text.toml"
         path.write_text(_SAFE_TEXT_TOML, encoding="utf-8")
         cfg = NiuNiuConfig(niuniu_text_path=str(path))
-        store = NiuNiuStore(str(tmp_path / "db.db"), config=cfg)
+        store = create_store(str(tmp_path / "db.db"), config=cfg)
         default = store.texts["default"]
         names = {e["name"] for e in default.glue_events}
         assert "normal" in names and "brand_new_event" in names

@@ -101,7 +101,7 @@ def test_set_chat_model_rejects_disabled(tmp_path: Path):
 async def test_generate_reply_rejects_disabled_provider(tmp_path: Path, monkeypatch):
     """群设置停留在被禁 provider 时：主链拒绝、不构造 client、不计费。"""
     service = _make_service(tmp_path)
-    service.store.update_group_settings(123, provider_id="p-off", model="m1")
+    service.scope_settings.update_group_settings(123, provider_id="p-off", model="m1")
 
     built: list[str] = []
 

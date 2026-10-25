@@ -221,7 +221,7 @@ def test_format_effort_status_missing_provider(tmp_path: Path) -> None:
     """渠道已删除但有覆盖：明确报渠道缺失并保留覆盖信息，不伪造实际行为。"""
     service = _make_service(tmp_path)
     service.set_chat_reasoning_effort(123, "high")
-    service.store.update_group_settings("123", provider_id="p-deleted")
+    service.scope_settings.update_group_settings("123", provider_id="p-deleted")
     line = service.format_effort_status(123)
     assert "思考档位：无法解析。当前渠道配置缺失（可能已删除或改名）；本群设置为 high。" in line
 

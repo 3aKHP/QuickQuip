@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import runpy
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -80,6 +81,13 @@ if args[0] == "compose":
                     "environment": {"ONEBOT_ACCESS_TOKEN": "new"}, "volumes": volumes,
                 }}}
             ))
+    elif "run" in args and "migrate-storage" in args:
+        from quickquip.configuration.migration import migrate, rollback
+        if "--rollback" in args:
+            print(json.dumps(rollback(root, args[args.index("--rollback") + 1],
+                                      services_stopped=True)))
+        else:
+            print(json.dumps(migrate(root, services_stopped=True)))
     elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
         sys.exit(1)
     elif "run" in args and os.environ.get("FAIL_CONFIG_INIT") == "1":
@@ -382,21 +390,21 @@ def _write_fake_sudo(bin_dir: Path, available: bool) -> None:
     sudo.chmod(0o700)
 
 
-def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shared", ["skills", "config/managed", "config/managed/child"])
+def test_capture_baseline_keeps_shared_volumes_on_root(tmp_path, monkeypatch, shared):
     root = _minimal_server_root(tmp_path)
     _write_skill(root / "skills/demo/SKILL.md", "---\nname: demo\ndescription: 演示\n---\n正文\n")
+    _write_skill(root / shared / "state", "shared content")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_fake_docker_for_baseline(bin_dir)
+    _write_fake_docker_for_baseline(bin_dir, source="${QUICKQUIP_ROOT:-..}/" + shared)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     baseline = tmp_path / "baseline"
     STATE["capture_baseline"](root, baseline)
-    assert not (baseline / "skills").exists()
+    assert not (baseline / shared).exists()
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
-    # The literal ${QUICKQUIP_ROOT:-..}/skills placeholder resolves to the
-    # deployment-root shared directory.
-    assert volume["source"] == str(root / "skills")
+    assert volume["source"] == str(root / shared)
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
 
 
@@ -906,3 +914,47 @@ def test_interrupted_deployment_recovers_using_durable_journal(deployment):
     assert (root / 'current').readlink() == Path('releases') / OLD
     assert (root / '.env').read_text() == 'ONEBOT_ACCESS_TOKEN=old\n'
     assert not inbox.exists()
+
+
+@pytest.mark.parametrize("failure", ["", "new", "migration"])
+def test_storage_migration_precedes_start_and_reverses_before_old_release(deployment, failure):
+    root, _, _ = deployment
+    _add_config_initializer(deployment)
+    (root / "data").mkdir()
+    with sqlite3.connect(root / "data/niuniu.db") as connection:
+        connection.executescript(
+            "CREATE TABLE players(uid TEXT PRIMARY KEY,score INTEGER);"
+            "INSERT INTO players VALUES('player',99);"
+            "CREATE TABLE niuniu_group_text(group_id TEXT PRIMARY KEY,text_mode TEXT);"
+            "INSERT INTO niuniu_group_text VALUES('12345','safe');"
+        )
+    if failure == "migration":
+        (root / "data/scheduled_messages.json").write_text("invalid JSON")
+    result = run_deploy(deployment, MIGRATE_STORAGE="1", FAIL_UP=failure)
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    migration = next(i for i, call in enumerate(calls) if "migrate-storage" in call)
+    old_compose = str(root / "releases" / OLD / "prod/docker-compose.yml")
+    old_stop = next(i for i, call in enumerate(calls)
+                    if "stop" in call and old_compose in call)
+    assert old_stop < migration
+    if not failure:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (root / "config/managed/config.db").exists()
+        start = next(i for i, call in enumerate(calls) if "up" in call)
+        assert migration < start
+        assert (root / "current").readlink() == Path("releases") / NEW
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert not (root / "config/managed/config.db").exists()
+        assert (root / "current").readlink() == Path("releases") / OLD
+        if failure == "new":
+            reverse = next(i for i, call in enumerate(calls) if "--rollback" in call)
+            restart = next(i for i, call in enumerate(calls)
+                           if "up" in call and old_compose in call)
+            assert migration < reverse < restart
+    with sqlite3.connect(root / "data/niuniu.db") as connection:
+        assert connection.execute("SELECT score FROM players").fetchone()[0] == 99
+        if failure:
+            assert connection.execute("SELECT text_mode FROM niuniu_group_text").fetchone() == (
+                "safe",
+            )

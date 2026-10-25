@@ -151,13 +151,27 @@ class SessionLifecycleMixin:
         with self._session_connection(write=True) as conn:
             return self._clear_session_scope(conn, scope)
 
-    @staticmethod
-    def _set_private_enabled(conn: sqlite3.Connection, scope: str, enabled: bool) -> None:
-        conn.execute(
-            "INSERT INTO group_settings (group_id, enabled, updated_at) VALUES (?, ?, ?) "
-            "ON CONFLICT(group_id) DO UPDATE SET enabled = excluded.enabled, "
-            "updated_at = excluded.updated_at", (scope, int(enabled), _utc_now()),
-        )
+    def _set_private_enabled(self, conn: sqlite3.Connection, scope: str, enabled: bool) -> None:
+        self._ensure_session_scope(conn, scope)
+        conn.execute("UPDATE agent_scopes SET private_chat_active=? WHERE scope_key=?",
+                     (int(enabled), scope))
+
+    def private_chat_active(self, user_id: str) -> bool:
+        with self._session_connection() as conn:
+            row = conn.execute("SELECT private_chat_active FROM agent_scopes WHERE scope_key=?",
+                               (f"private:{user_id}",)).fetchone()
+        return bool(row[0]) if row else False
+
+    def set_private_chat_active(self, user_id: str, active: bool):
+        with self._session_connection(write=True) as conn:
+            self._set_private_enabled(conn, f"private:{user_id}", active)
+
+    def list_private_chat_states(self):
+        with self._session_connection() as conn:
+            return {row["scope_key"]: bool(row["private_chat_active"]) for row in conn.execute(
+                "SELECT scope_key,private_chat_active FROM agent_scopes "
+                "WHERE scope_key LIKE 'private:%'"
+            )}
 
     def start_private_chat_session(self, user_id: str) -> SessionIdentity:
         scope = f"private:{user_id}"

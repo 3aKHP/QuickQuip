@@ -173,57 +173,86 @@ class ScheduledMessageStore:
     写操作在 FileLock 内重读-合并-原子落盘。
     """
 
-    def __init__(self, path: str | Path = SCHEDULED_MESSAGES_JSON_PATH) -> None:
+    def __init__(self, path: str | Path = SCHEDULED_MESSAGES_JSON_PATH,
+                 *, pending_path: str | Path | None = None) -> None:
+        from quickquip.configuration.paths import PATHS
         self.path = Path(path)
+        standard = self.path == PATHS.recurring
+        self.pending_path = Path(pending_path) if pending_path else (
+            PATHS.pending if standard else self.path.with_suffix(".pending.json")
+        )
+        self.intent_path = (PATHS.root / "data/scheduled-message-transfer.json" if standard
+                            else self.path.with_suffix(".transfer.json"))
 
     def _lock(self) -> FileLock:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        return FileLock(str(self.path) + ".lock")
+        self.intent_path.parent.mkdir(parents=True, exist_ok=True)
+        return FileLock(str(self.intent_path) + ".lock")
 
-    def _load_unlocked(self) -> list[ScheduledMessage]:
-        if not self.path.exists():
+    @staticmethod
+    def _read_file(path):
+        if not path.exists():
             return []
         try:
-            with self.path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
+            with path.open("r", encoding="utf-8") as stream:
+                data = json.load(stream)
         except (OSError, json.JSONDecodeError):
-            logger.warning("scheduled_messages: bad JSON in %s, treating as empty", self.path)
+            logger.warning("scheduled_messages: invalid JSON in %s", path)
             return []
-        jobs: list[ScheduledMessage] = []
-        for raw in data.get("jobs", []):
+        jobs = []
+        for item in data.get("jobs", []):
             try:
-                jobs.append(ScheduledMessage.from_dict(raw))
+                jobs.append(ScheduledMessage.from_dict(item))
             except ValueError:
-                logger.warning("scheduled_messages: skipping invalid entry: %r", raw)
+                logger.warning("scheduled_messages: invalid task in %s", path)
         return jobs
 
+    @staticmethod
+    def _write_file(path, jobs):
+        from quickquip.llm.config_durability import durable_write
+        content = json.dumps({"jobs": jobs}, ensure_ascii=False, indent=2) + "\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        durable_write(path, content.encode("utf-8"))
+
+    def _clear_intent(self):
+        if self.intent_path.exists():
+            from quickquip.llm.config_durability import sync_directory
+            self.intent_path.unlink()
+            sync_directory(self.intent_path.parent)
+
+    def _recover_transfer(self):
+        if self.intent_path.exists():
+            content = json.loads(self.intent_path.read_text(encoding="utf-8"))
+            self._write_file(self.path, content["recurring"])
+            self._write_file(self.pending_path, content["pending"])
+            self._clear_intent()
+
+    def _load_unlocked(self) -> list[ScheduledMessage]:
+        self._recover_transfer()
+        return self._read_file(self.path) + self._read_file(self.pending_path)
+
     def _save_unlocked(self, jobs: list[ScheduledMessage]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        try:
-            with tmp.open("w", encoding="utf-8") as f:
-                json.dump(
-                    {"jobs": [j.to_dict() for j in jobs]},
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            tmp.replace(self.path)
-        except OSError:
-            logger.warning("scheduled_messages: failed to save to %s", self.path, exc_info=True)
-            tmp.unlink(missing_ok=True)
-            raise
+        groups = {"recurring": [job.to_dict() for job in jobs if job.recurring],
+                  "pending": [job.to_dict() for job in jobs if not job.recurring]}
+        updates = []
+        for path, name in ((self.path, "recurring"), (self.pending_path, "pending")):
+            previous = [job.to_dict() for job in self._read_file(path)]
+            if previous != groups[name]:
+                updates.append((path, groups[name]))
+        if len(updates) > 1:
+            from quickquip.llm.config_durability import durable_write
+            durable_write(self.intent_path, json.dumps(groups, ensure_ascii=False).encode("utf-8"))
+        for path, content in updates:
+            self._write_file(path, content)
+        self._clear_intent()
 
     # ── Read ─────────────────────────────────────────────────────────────
 
     def list(self) -> list[ScheduledMessage]:
-        return self._load_unlocked()
+        with self._lock():
+            return self._load_unlocked()
 
     def get(self, job_id: str) -> ScheduledMessage | None:
-        for job in self._load_unlocked():
-            if job.id == job_id:
-                return job
-        return None
+        return next((job for job in self.list() if job.id == job_id), None)
 
     # ── Write ────────────────────────────────────────────────────────────
 

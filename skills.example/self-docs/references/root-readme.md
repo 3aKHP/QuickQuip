@@ -113,7 +113,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    DEEPSEEK_API_KEY=your_key
    ```
 
-   运行 `python -m quickquip.llm.config_cli init` 初始化 `data/llm_config.db`；已有 `config/llm.toml` 时会执行一次迁移并保留原文件和资产备份。首次启用在第 11 步进行，此时后台和 Bot 都已运行。旧配置升级与 JSON 导入见 [LLM 配置管理](docs/admin/llm-configuration.md)。
+   运行 `python -m quickquip.llm.config_cli init` 初始化 `config/managed/config.db`；已有 `config/llm.toml` 时会执行一次迁移并保留原文件和资产备份。首次启用在第 11 步进行，此时后台和 Bot 都已运行。旧配置升级与 JSON 导入见 [LLM 配置管理](docs/admin/llm-configuration.md)。
 
 6. **可选：启用图片/语音/音乐生成和语音识别**
 

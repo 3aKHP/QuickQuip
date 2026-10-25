@@ -205,7 +205,7 @@ def test_upgrade_detaches_missing_messages_and_preserves_turn_evidence(tmp_path,
     assert reopened.count_conversation_messages("1001") == 2
 
 
-def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monkeypatch):
+def test_concurrent_runtime_upgrade_preserves_legacy_data(tmp_path: Path, monkeypatch):
     db_path = tmp_path / "llm.db"
     build_legacy_db(db_path)
     with sqlite3.connect(db_path) as conn:
@@ -242,7 +242,7 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
 
     class UpgradeConnection(sqlite3.Connection):
         def execute(self, sql, parameters=()):
-            if sql == "PRAGMA table_info(group_settings)":
+            if sql == "PRAGMA table_info(conversation_messages)":
                 return self.cursor(factory=UpgradeCursor).execute(sql, parameters)
             return super().execute(sql, parameters)
 
@@ -263,11 +263,12 @@ def test_concurrent_upgrade_from_114_preserves_legacy_data(tmp_path: Path, monke
         stores = [future.result(timeout=10) for future in futures]
 
     assert all(not store._unavailable for store in stores)
-    for store in stores:
-        assert store.get_group_settings("1001").enabled is True
     with sqlite3.connect(db_path) as conn:
         columns = [row[1] for row in conn.execute("PRAGMA table_info(group_settings)")]
-        assert columns.count("agent_delivery_enabled") == 1
+        assert "agent_delivery_enabled" not in columns
+        assert conn.execute(
+            "SELECT enabled FROM group_settings WHERE group_id='1001'"
+        ).fetchone()[0] == 1
         select = ", ".join(original_columns)
         assert (
             conn.execute(f"SELECT {select} FROM conversation_messages ORDER BY id").fetchall()

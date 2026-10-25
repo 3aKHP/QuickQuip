@@ -1,6 +1,6 @@
 # LLM 配置后端接口
 
-本文供配置 API 调用方和维护者查阅。LLM 配置使用 `data/llm_config.db`，Web Admin、CLI 与 Bot 通过同一个应用服务保存草稿、建立快照和提交控制任务。人格文件、Skill 内容、群覆盖、历史记录、用量和 Trace 由各自存储维护。
+本文供配置 API 调用方和维护者查阅。配置内容及本机历史保存在 `config/managed/config.db`，任务固定输入、发布指针及运行状态保存在 `data/config_runtime.db`。Web Admin、CLI 与 Bot 通过配置服务协作，存储归属与事务边界见[配置与运行存储](configuration-storage.md)。
 
 接口前缀为 `/ops/api/llm-configuration`，需要现有管理员会话 Cookie `quickquip_admin_session`。写请求必须携带同源 `Origin` 或 `Referer`。请求体上限为 1 MiB，分块传输也执行此限制。完整机器契约见 [OpenAPI JSON](llm-configuration.openapi.json)，由 `python scripts/ci/export_llm_configuration_openapi.py` 在进程内构造应用导出，随约束或路由变更同步提交；运行中的管理 API 不提供 `/docs`、`/redoc`、`/openapi.json` 文档端点。
 
@@ -60,7 +60,7 @@ format 2 的价格必须指定已存在的 `provider_id`。导入、读取历史
 
 界面以“YYYY-MM-DD HH:mm (备注)”标记修订，接口以自增修订号识别快照并检查并发修改。`config_revisions` 记录每个草稿修订的保存时刻 `saved_at` 与单行备注 `note`（最多 120 字符，换行折叠为空格），各接口以 `{saved_at, note}` 返回。快照的 `created_at` 是应用或探测建立快照的时刻。保存与应用可携带 note；未携带时，尚未发布的草稿沿用上一修订的备注，发布后的首次保存从空备注开始。`PUT /note` 可修改当前草稿或任意快照修订的备注，不改变修订号。
 
-schema 3 新增 `config_revisions`。schema 2 初始化升级时按快照时间回填，未建立快照的草稿保存时间未知（`saved_at: null`）；草稿文档同时就地升级到交换格式 2，修订号不变。升级同样要求停止服务后执行 `init --services-stopped`，升级报告写入 `config_migrations`（source 为 `schema-3`）。
+schema 4 将配置与运行存储分离。`config_revisions` 保留修订保存时间和备注，草稿与配置历史仍由本环境维护；发布与执行状态使用独立运行库。已有安装通过[停服迁移](../admin/storage-migration.md)保留修订、快照和任务进度。
 
 ## 应用、探测与运行状态
 
@@ -110,6 +110,13 @@ schema 3 新增 `config_revisions`。schema 2 初始化升级时按快照时间�
 
 ## 请求指纹配置
 
-Provider 的固定字段 `client_fingerprint` 缺省为 `default`，由渠道选择；模型参数覆盖该字段会被拒绝。default 的 Chat、Responses、Anthropic、Gemini 分别引用 OpenCode 2、Codex、Claude Code、Gemini CLI 的协议策略；引用与显式选择适用同一动态字段覆盖保护。metadata 的 `client_fingerprints` 数组提供 `id`、`label` 和支持的 `protocols`；Web 按协议提供选择。`settings.runtime.client_cluster` 是可选全局字符串，沿用草稿、保存和应用流程。四个 `x-quickquip-*` 专有头由自有 Profile 管理，附加头冲突返回 `profile_owned_header`。Profile 文件与安装身份契约见[请求指纹 Profile](../admin/client-fingerprints.md)。配置 schema 1、2 在初始化中事务性升级为 3，见本页[版本标记](#版本标记)。
+Provider 的固定字段 `client_fingerprint` 缺省为 `default`，由渠道选择；模型参数覆盖该字段会被拒绝。default 的 Chat、Responses、Anthropic、Gemini 分别引用 OpenCode 2、Codex、Claude Code、Gemini CLI 的协议策略；引用与显式选择适用同一动态字段覆盖保护。metadata 的 `client_fingerprints` 数组提供 `id`、`label` 和支持的 `protocols`；Web 按协议提供选择。`settings.runtime.client_cluster` 是可选全局字符串，沿用草稿、保存和应用流程。四个 `x-quickquip-*` 专有头由自有 Profile 管理，附加头冲突返回 `profile_owned_header`。Profile 文件与安装身份契约见[请求指纹 Profile](../admin/client-fingerprints.md)。配置存储升级流程见[存储迁移](../admin/storage-migration.md)。
 
 `settings.runtime.claude_code_device_id` 是可选全局 64hex 字符串，写入时规范为小写；空值表示持久随机设备身份。它保存在权威配置 JSON、config_settings 文档及不可变发布快照中，不增加关系索引列。Claude Code 自动 Body 策略拒绝覆盖 `system`、`messages`、`tools` 和受管 `metadata.user_id`，返回 `profile_owned_body`；非法 `metadata` 类型返回 `invalid_field`。
+
+
+## 作用域配置与私聊状态
+
+`/ops/api/group-settings` 保留参数覆盖接口。群聊 `enabled` 是三态配置；私聊参数返回 `enabled: null` 和独立的 `session_active`，提交私聊 `enabled` 返回 `422 invalid_field`。删除私聊覆盖保留会话状态及历史。
+
+`GET /ops/api/private-sessions/{user_id}/state` 返回 `{active: boolean}`；同地址 `PUT` 接收 `{active: boolean}`，暂停或恢复响应，保留历史。接口使用现有管理员鉴权和同源写入保护。

@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from quickquip.app.web import skill_import, skill_import_github, skill_import_stash
 from quickquip.app.web.audit import audit_logger
-from quickquip.common.paths import DATA_DIR, SKILLS_EXAMPLE_DIR
+from quickquip.common.paths import DATA_DIR, SKILLS_EXAMPLE_DIR, LLM_CONFIG_DB_PATH
 from quickquip.llm.skills import preset_sync
 from quickquip.llm.skills.catalog import (
     SKILL_FILE_NAME,
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # patch ``_effective_catalog_dir`` 即可整体重定向。
 _EXAMPLE_DIR = SKILLS_EXAMPLE_DIR
 _STASH_DIR = DATA_DIR / "tmp" / "skill-import"
-_LLM_CONFIG_PATH = DATA_DIR / "llm_config.db"
+_LLM_CONFIG_PATH = LLM_CONFIG_DB_PATH
 
 # zip 安装包以 base64 字符串承载：pydantic 按字符数卡上限，换算为恰好放行
 # 16MiB 解码字节的 b64 长度；解码后的字节数在路由里再显式校验一次。

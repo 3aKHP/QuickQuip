@@ -93,7 +93,7 @@ skills/                     ← 部署目录（项目根，已被 git 忽略）
 
 ### 2.3 数值上限一览
 
-| 项 | 默认值 | 配置键（`data/llm_config.db` `settings.skills`） |
+| 项 | 默认值 | 配置键（`config/managed/config.db` `settings.skills`） |
 |----|--------|------|
 | 系统提示清单字节预算 | 8192 字节；实际预算取 min(模型上下文窗口 2%，此值) | `catalog_max_bytes` |
 | 单次读取资源 | 65536 字节（64KiB），超限截断前段 | `resource_max_bytes` |

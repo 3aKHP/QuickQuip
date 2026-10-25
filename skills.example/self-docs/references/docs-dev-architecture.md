@@ -196,13 +196,17 @@ Web Admin 前端是独立的 pnpm 工程（`quickquip-admin-v2`），技术栈�
 
 ---
 
+## 受管配置存储
+
+`config/managed/config.db` 集中保存 SQLite 配置及本机配置历史，`config/managed/scheduled_messages.json` 保存循环任务。生产部署共享挂载该目录，Bot 与 Web 通过领域仓储写入。发布执行状态、私聊活跃状态和业务记录保存在运行存储，具体归属与事务见[配置与运行存储](configuration-storage.md)。
+
 ## `data/` — 运行时持久化数据（自用层，gitignore）
 
 ```
 data/
 ├── stats.json              # 群消息统计
 ├── rule_switch.json        # 群规则开关状态
-├── scheduled_messages.json # 群聊定时消息任务
+├── pending_scheduled_messages.json # 一次性待办任务
 ├── llm.db                  # LLM 对话历史与长期记忆（SQLite）
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
 ├── period_reports.db       # 周期报告（周报/月报）存档（SQLite）
@@ -212,7 +216,7 @@ data/
 ├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
 ├── audit.db                # Web Admin 审计日志（SQLite）
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
-├── llm_config.db           # 草稿、不可变发布快照、配置任务与 Bot 心跳
+├── config_runtime.db       # 发布指针、任务固定输入、执行状态与 Bot 心跳
 ├── llm_usage.db            # LLM 用量与成本统计（SQLite）
 ├── mcp_status.json         # MCP server 装载状态快照
 ├── cron_jobs.json          # Cron 定时任务调度状态快照（bot 进程写，web-admin 读）
@@ -297,7 +301,7 @@ Compose 挂载与部署脚本使用上述统一路径。
 | 路径 | 原因 |
 |---|---|
 | `.env`, `.env.*` | 含真实密钥（`.env.example` 除外） |
-| `data/llm_config.db` | 运行配置、发布快照与控制状态 |
+| `config/managed/` | SQLite 配置与循环任务，包含私有配置 |
 | `config/llm.toml` | 首次迁移输入与迁移前版本回退资产 |
 | `config/llm.*.local.toml` | 旧部署的本地覆盖资产 |
 | `config/generation.toml` | 含真实多模态 provider 配置 |

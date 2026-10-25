@@ -13,6 +13,7 @@
 | [ADR-0006](0006-layered-architecture-composition.md) | 按领域分层并由应用层装配 | Accepted | — |
 | [ADR-0007](0007-unified-chat-archive.md) | 统一群聊归档并按消费方序列化 | Accepted | — |
 | [ADR-0008](0008-record-content-member-identity.md) | 分离记录正文、成员关联与展示名称 | Accepted | — |
+| [ADR-0021](0021-configuration-runtime-storage-separation.md) | 先分离配置与运行数据，再重构本地配置工具 | Accepted | — |
 
 ### 权限与部署
 

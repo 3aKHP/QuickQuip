@@ -544,7 +544,7 @@ def compile_document(
     doc = validate_document(document, config_dir=config_dir)
     directory = Path(config_dir) if config_dir is not None else CONFIG_DIR
     get_catalog(directory)
-    config = c.LLMConfig(revision=revision, source_path=directory.parent / "data/llm_config.db")
+    config = c.LLMConfig(revision=revision, source_path=directory / "managed/config.db")
     for name, cls in SETTINGS.items():
         if name == "mcp":
             mcp = doc["settings"][name]

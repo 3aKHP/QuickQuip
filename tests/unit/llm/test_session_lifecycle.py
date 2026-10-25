@@ -45,7 +45,10 @@ def test_concurrent_first_allocation_is_one_identity(tmp_path):
 def test_clear_rotates_even_empty_history_and_rejects_late_write(tmp_path):
     store = LLMStore(tmp_path / "chat.db")
     original, generation = store.get_or_create_chat_session("g")
-    store.update_group_settings("g", model="m")
+    from quickquip.llm.config_service import ConfigService
+    service = ConfigService(tmp_path / "configuration.db")
+    service.initialize()
+    service.scope_settings.update_group_settings("g", model="m")
     store.add_memory("g", "persistent fact")
     assert store.clear_chat_session("g") == 0
     assert store.get_chat_session("g") is None
@@ -57,7 +60,7 @@ def test_clear_rotates_even_empty_history_and_rejects_late_write(tmp_path):
             "g", original, generation, user_message=None, assistant_text="late",
         )
     assert store.count_conversation_messages("g") == 0
-    assert store.get_group_settings("g").model == "m"
+    assert service.scope_settings.get_group_settings("g").model == "m"
     assert store.count_memories("g") == 1
 
 
@@ -71,13 +74,13 @@ def test_archive_preserves_identity_and_resume_replaces_current(tmp_path):
     archived = store.end_private_chat_session("u", save=True, persona_id="p", preset="preset")
     assert archived == {"deleted": 1, "archive_number": 1}
     assert store.get_chat_session("private:u") is None
-    assert store.get_group_settings("private:u").enabled is False
+    assert store.private_chat_active("u") is False
     replacement = store.start_private_chat_session("u")
     assert replacement != original
     restored = store.resume_private_chat_session("u", 1)
     assert restored["preset"] == "preset"
     assert store.get_chat_session("private:u") == original
-    assert store.get_group_settings("private:u").enabled is True
+    assert store.private_chat_active("u") is True
     assert store.list_recent_conversation_messages("private:u", 10)[0]["content"] == "saved"
     assert store.get_session_archive("u", 1) is None
 
@@ -87,7 +90,7 @@ def test_empty_private_session_ends_without_archive_and_missing_resume_is_non_de
     original = store.start_private_chat_session("u")
     assert "error" in store.resume_private_chat_session("u", 99)
     assert store.get_chat_session("private:u") == original
-    assert store.get_group_settings("private:u").enabled is True
+    assert store.private_chat_active("u") is True
     assert store.end_private_chat_session("u", save=True, persona_id=None, preset="") == {
         "deleted": 0, "archive_number": None,
     }
@@ -118,7 +121,7 @@ def test_archive_failure_rolls_back_all_transition_state(tmp_path):
     )
     with store._connect() as conn:
         conn.execute(
-            "CREATE TRIGGER fail_end BEFORE UPDATE OF enabled ON group_settings "
+            "CREATE TRIGGER fail_end BEFORE UPDATE OF private_chat_active ON agent_scopes "
             "WHEN NEW.enabled = 0 BEGIN SELECT RAISE(ABORT, 'injected'); END"
         )
     with pytest.raises(SessionStoreError):
@@ -126,7 +129,7 @@ def test_archive_failure_rolls_back_all_transition_state(tmp_path):
     assert store.get_or_create_chat_session("private:u") == (identity, generation)
     assert store.count_conversation_messages("private:u") == 1
     assert store.list_session_archives("u") == []
-    assert store.get_group_settings("private:u").enabled is True
+    assert store.private_chat_active("u") is True
 
 
 def test_legacy_archive_allocates_identity_on_resume(tmp_path):

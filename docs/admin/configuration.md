@@ -117,7 +117,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 
 ## LLM 配置数据库
 
-`data/llm_config.db` 是运行时的配置来源，JSON 是配置交换格式。通过 Web Admin“LLM 配置”或 `python -m quickquip.llm.config_cli` 修改草稿，再单独提交应用；Bot 启动加载已发布快照。`draft_revision`、`published_revision` 与 Bot 回报的 `loaded_revision` 分别表示草稿、发布和实际运行版本。旧 `config/llm.toml` 只作为首次迁移输入及 1.16.1 回退资产保留。完整流程、备份与回退说明见 [LLM 配置管理](llm-configuration.md)。
+`config/managed/config.db` 是运行时的配置来源，JSON 是配置交换格式。通过 Web Admin“LLM 配置”或 `python -m quickquip.llm.config_cli` 修改草稿，再单独提交应用；Bot 启动加载已发布快照。`draft_revision`、`published_revision` 与 Bot 回报的 `loaded_revision` 分别表示草稿、发布和实际运行版本。旧 `config/llm.toml` 只作为首次迁移输入及 1.16.1 回退资产保留。完整流程、备份与回退说明见 [LLM 配置管理](llm-configuration.md)。
 
 下文路径对应完整 JSON 文档，认证字段只保存根 `.env` 的变量名或引用。字段范围、枚举和继承能力由 `/ops/api/llm-configuration/metadata` 提供；新增写入拒绝非法值。
 

@@ -250,7 +250,7 @@ def test_configuration_override_is_document_only_and_structural_conflicts_are_re
     normalized = validate_document(doc)
     service.replace(normalized, 1)
     with service.store.connect() as conn:
-        assert conn.execute("SELECT schema_version FROM config_meta").fetchone()[0] == 3
+        assert conn.execute("SELECT schema_version FROM config_meta").fetchone()[0] == 4
     reloaded = ConfigService(service.path).read()["document"]
     assert reloaded["settings"]["runtime"]["gemini_cli_install_id"] == override
     for provider_or_model in (doc["providers"][0], doc["providers"][0]["models"][0]):

@@ -101,13 +101,13 @@ Responses 对已消费事件的必要字段、流式正文与工具参数的一�
 持久化文件：
 
 - `data/llm.db`
-  - 群级 LLM 设置
+  - 会话运行状态
   - 短期 LLM 会话记录
   - 长期记忆
 
 配置文件：
 
-- `data/llm_config.db`
+- `config/managed/config.db`
   - 真实运行配置，本地私有
 - `config/llm.json.example`
   - 可导入配置数据库的 JSON 交换模板
@@ -357,9 +357,9 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ## 6. 配置说明
 
-### 6.1 `data/llm_config.db`
+### 6.1 `config/managed/config.db`
 
-配置服务保留草稿、不可变发布快照、修订号、应用任务与 Bot 心跳。Web 和 CLI 共用校验与修订检查，Bot 以租约领取控制任务；保存草稿不会修改运行时，重启加载已发布版本。每个 Agent Loop 和独立报告任务固定配置、价格、工具与资源直到结束。
+配置库保留草稿、不可变历史和修订号，`data/config_runtime.db` 保存任务固定输入、发布指针、应用任务与 Bot 心跳。存储归属见[配置与运行存储](configuration-storage.md)。Web 和 CLI 共用校验与修订检查，Bot 以租约领取控制任务；保存草稿不会修改运行时，重启加载已发布版本。每个 Agent Loop 和独立报告任务固定配置、价格、工具与资源直到结束。
 
 交换格式的主要字段：
 
@@ -537,7 +537,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 部署要点：
 
-- 初始化／迁移准备共享 `data/llm_config.db`，Bot 启动加载已发布快照，草稿通过独立任务应用
+- 初始化／迁移准备共享 `config/managed/config.db`，Bot 启动加载已发布快照，草稿通过独立任务应用
 - `config/generation.toml` 启用 ASR 时需要配置可用的 `[asr]` provider
 - `llm_about` 应在运行环境中提供
   - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录

@@ -86,7 +86,8 @@ The catalog belongs to the deployment user. Web-installed files can be root-owne
 ```text
 <root>/
   .env                       application credentials
-  data/                      databases, logs, font and optional Tieba state
+  config/managed/            shared configuration database and recurring schedules
+  data/                      execution/business databases, logs, font and optional Tieba state
   skills/                    shared skill catalog (bot read-only, Web Admin read-write)
   prod/                      LLBot state, maintenance scripts, sendkey.env
   releases/<id>/             application, config, frontend and compose
@@ -111,11 +112,11 @@ Automatic recovery restores pre-operation shared files, links and containers, th
 
 Filesystem rollback restores deployment files and containers. Database migrations and external effects require their own recovery steps; check upgrade notes and prepare the necessary data backups before deployment.
 
-The LLM configuration database is shared in `data/` across releases. Normal uploads exclude local database files and legacy LLM TOML. First migration uses server-side configuration after a successful candidate image build. Managed configuration assets follow the synchronization result. With synchronization off, the candidate retains server configuration after pausing its writers.
+The configuration database and recurring schedules are shared in `config/managed/`; publication and task state are shared in `data/config_runtime.db`. Normal uploads exclude local database files and legacy LLM TOML. First migration uses server-side configuration after a successful candidate image build. Managed configuration assets follow the synchronization result. With synchronization off, the candidate retains server configuration after pausing its writers.
 
 Reading root-owned migration assets uses noninteractive sudo when required, and copied assets belong to the deployment user. Copy or discovery failure stops activation; existing candidate assets retain priority.
 
-A schema 1 or schema 2 LLM configuration database requires a separate maintenance step before deploying this candidate: stop the old bot and Web, back up the shared database, then use the new code to run `python -m quickquip.llm.config_cli init --services-stopped`. Ordinary preparation refuses this upgrade and leaves the database intact. Schema 3 requires compatible code; restoring older code requires the pre-upgrade database backup. The schema 3 upgrade reassigns or drops catch-all prices and records each result in the migration report. This maintenance step is outside automatic filesystem recovery.
+Existing mixed-storage installations use `bash prod/deploy-v4.sh --migrate-storage` (PowerShell: `-MigrateStorage`). This retains server configuration, pauses Bot and Web after the candidate image builds, separates configuration and execution storage, then verifies startup. An incomplete migration restores its backup; a completed migration is reversed on startup failure while preserving subsequent business records and task progress. Schema 1/2 configuration databases first need the schema-3 upgrade using the corresponding older application. See [storage migration](../docs/admin/storage-migration.md).
 Retention removes older successfully deployed release directories and application images, protecting `current`, `previous` and migration baselines. Failed candidates and operation logs remain for manual inspection. Root `.env` remains the application credential source; transaction copies are private and transient.
 
 `deploy-v4-bak.sh` and `deploy-v4-bak.ps1` preserve the archived flat-layout drivers for inspection and controlled legacy tests. They refuse targets with a release directory or a current link. Use `deploy-v4` for current deployments.

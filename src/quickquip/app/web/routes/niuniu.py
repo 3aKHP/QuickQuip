@@ -228,13 +228,7 @@ async def get_text_modes(request: Request):
 
     store: NiuNiuStore = niuniu_store
     modes = list(store.texts.keys())
-    groups: list[dict] = []
-    with store.connect() as conn:
-        rows = conn.execute(
-            "SELECT group_id, text_mode FROM niuniu_group_text ORDER BY group_id"
-        ).fetchall()
-        for r in rows:
-            groups.append({"group_id": r["group_id"], "text_mode": r["text_mode"]})
+    groups = store.text_modes.list()
     return {"modes": modes, "default": "default", "groups": groups}
 
 

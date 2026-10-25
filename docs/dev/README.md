@@ -25,6 +25,7 @@
 | [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`record-identities.md`](record-identities.md) | 记录正文、共享身份、引用索引与兼容读取契约 |
 | [`../admin/config-sync.md`](../admin/config-sync.md) | 配置包、共同基线、双向同步与恢复操作 |
+| [`configuration-storage.md`](configuration-storage.md) | 配置与运行存储的归属、事务和部署边界 |
 | [`config-workspace.md`](config-workspace.md) | TOML 工作副本格式、值编码、三方计划和本地恢复事务 |
 | [`llm-configuration-api.md`](llm-configuration-api.md) | LLM 配置修订、结构化交换、参数 metadata 与控制任务的 API 契约 |
 | [`llm-configuration-frontend.md`](llm-configuration-frontend.md) | LLM 配置前端交付契约、用户操作、字段语义、运行状态与验收场景 |

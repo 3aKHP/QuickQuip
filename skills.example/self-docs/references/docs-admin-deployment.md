@@ -124,7 +124,7 @@ docker compose --env-file ../.env up -d
 补充说明：
 
 - **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，当前默认模板为 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在适配器管理界面启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client（连接拓扑详见 [onebot-adapters.md](onebot-adapters.md)）。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
-- Bot 和 Web 共享本机 `data/llm_config.db`。手动安装使用上面的初始化命令准备配置与独立资产；已有部署升级按[迁移步骤](llm-configuration.md#初始化与升级)执行。部署脚本保留生产库，本地配置库和旧 TOML 由各自的配置运维流程管理。Bot 重启读取已发布快照，草稿通过后台单独应用。Bot 每 30 秒检查 `awakening.toml` 的修改时间并重载。
+- Bot 和 Web 共享本机 `config/managed/config.db`。手动安装使用上面的初始化命令准备配置与独立资产；已有部署升级按[存储迁移步骤](storage-migration.md)执行。部署脚本保留生产库，本地配置库和旧 TOML 由各自的配置运维流程管理。Bot 重启读取已发布快照，草稿通过后台单独应用。Bot 每 30 秒检查 `awakening.toml` 的修改时间并重载。
 - 部署脚本在切换发行目录后强制重建应用容器一次，使源码和配置挂载指向本次发行目录
 - 在线调整 LLM 配置通过 Web Admin“LLM 配置”保存草稿并应用，等待任务完成及 Bot 实际版本确认。修改价格等无关字段保持 MCP 连接；MCP 改动的连接状态独立回报。`/llm reload` 重载已发布配置及相关独立资产，并探活当前模型，可能计费。
 

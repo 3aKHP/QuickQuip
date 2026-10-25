@@ -311,38 +311,34 @@ async def test_retry_and_fallback_keep_frozen_brand_identity(tmp_path, monkeypat
     assert {r.url.host for r in seen} == {"example.test", "fallback.test"}
 
 
-@pytest.mark.parametrize("recorded_boot", [False, True])
-def test_v1_database_upgrade_preserves_revisions_and_snapshots(tmp_path, recorded_boot):
+@pytest.mark.parametrize("schema_version", [1, 2])
+def test_old_database_requires_explicit_upgrade_without_mutating_history(tmp_path, schema_version):
     path = tmp_path / "data/llm_config.db"
     path.parent.mkdir()
     doc = empty_document()
     doc["settings"]["runtime"].pop("client_cluster")
     with sqlite3.connect(path) as conn:
-        conn.executescript(config_store._SCHEMA + config_store.declared_schema(legacy=True))
-        conn.execute("INSERT INTO config_meta VALUES(1,1,4,2,?)", (config_store.dumps(doc),))
+        conn.executescript("""
+            CREATE TABLE config_meta(singleton INTEGER PRIMARY KEY, schema_version INTEGER,
+                draft_revision INTEGER, published_revision INTEGER, document TEXT);
+            CREATE TABLE config_snapshots(revision INTEGER PRIMARY KEY, document TEXT,
+                created_at REAL);
+        """)
+        conn.execute("INSERT INTO config_meta VALUES(1,?,4,2,?)",
+                     (schema_version, config_store.dumps(doc)))
         conn.execute("INSERT INTO config_snapshots VALUES(2,?,123)", (config_store.dumps(doc),))
-        config_store.project_document(conn, doc)
-        if recorded_boot:
-            conn.execute("INSERT INTO bot_runtime VALUES(1,'old-boot',2,'old-version',0,'{}')")
     service = ConfigService(path)
-    with pytest.raises(ConfigError) as error:
-        service.initialize()
-    assert error.value.code == "services_running"
+    for stopped in (False, True):
+        with pytest.raises(ConfigError) as error:
+            service.initialize(services_stopped=stopped)
+        assert error.value.code == "unsupported_schema"
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT schema_version FROM config_meta").fetchone()[0] == 1
-        assert "client_cluster" not in {
-            row[1] for row in conn.execute("PRAGMA table_info(runtime_settings)")
-        }
-
-    assert service.initialize(services_stopped=True)["revision"] == 4
-    assert service.status()["schema_version"] == 3
-    assert service.read("published")["document"] == doc
-    with service.store.connect() as conn:
-        assert conn.execute("SELECT created_at FROM config_snapshots").fetchone()[0] == 123
-    replacement = _document()
-    assert service.replace(replacement, 4)["revision"] == 5
-    effective = compile_document(service.read()["document"])
-    assert effective.runtime.client_cluster == "synthetic-cluster"
+        assert conn.execute("SELECT schema_version,draft_revision,published_revision "
+                            "FROM config_meta").fetchone() == (schema_version, 4, 2)
+        assert conn.execute("SELECT document,created_at FROM config_snapshots").fetchone() == (
+            config_store.dumps(doc), 123,
+        )
+    assert not service.execution.path.exists()
 
 
 def test_default_and_explicit_catalog_calls_share_startup_snapshot(tmp_path, monkeypatch):

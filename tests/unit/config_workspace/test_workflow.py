@@ -258,8 +258,11 @@ def test_published_persona_asset_is_protected_before_any_pack_write(workspace, t
     document["settings"]["runtime"].update(
         enabled=True, default_provider="alpha", default_persona="base"
     )
-    service = ConfigService(root / "data/llm_config.db")
+    service = ConfigService(root / "config/managed/config.db")
     service.store.create(validate_document(document, config_dir=root / "config"))
+    from quickquip.llm.config_store import dumps
+    import time
+    service.execution.create(1, dumps(document), time.time())
     value = Workspace(tmp_path / "published-workspace", root)
     value.initialize()
     tree = read_tree(value.storage.directory)
@@ -286,7 +289,7 @@ def test_workspace_pack_is_visible_to_existing_sync_plan_and_push(workspace, tmp
 
     root = tmp_path / "remote"
     (root / "config").mkdir(parents=True)
-    ConfigService(root / "data/llm_config.db").initialize()
+    ConfigService(root / "config/managed/config.db").initialize()
     monkeypatch.setenv("TEST_API_KEY", "synthetic-test-key")
     sync = Synchronizer(workspace.endpoint, LocalRemote(Endpoint(root)))
     assert sync.run(initial="local")["phase"] == "confirmed"

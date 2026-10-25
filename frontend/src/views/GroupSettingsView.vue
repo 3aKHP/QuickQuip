@@ -35,7 +35,10 @@
                 {{ g.type === 'private' ? '私聊' : '群聊' }}
               </UiTag>
               <span class="mono group-id">{{ displayId(g.group_id) }}</span>
-              <UiTag v-if="g.enabled === true" size="sm" variant="success">LLM 开</UiTag>
+              <UiTag v-if="g.type === 'private'" size="sm" :variant="g.session_active ? 'success' : 'info'">
+                {{ g.session_active ? '私聊响应中' : '私聊已暂停' }}
+              </UiTag>
+              <UiTag v-else-if="g.enabled === true" size="sm" variant="success">LLM 开</UiTag>
               <UiTag v-else-if="g.enabled === false" size="sm" variant="danger">LLM 关</UiTag>
             </span>
             <span class="group-item__meta">
@@ -93,8 +96,15 @@
 
           <section class="form-section">
             <h4>运行状态</h4>
+            <div v-if="selectedIsPrivate" class="field">
+              <label>私聊响应：{{ selectedSessionActive ? '运行中' : '已暂停' }}</label>
+              <button type="button" :disabled="sessionSaving" @click="onToggleSession">
+                {{ selectedSessionActive ? '暂停响应' : '恢复响应' }}
+              </button>
+              <small>暂停和恢复会保留会话历史；参数配置单独保存。</small>
+            </div>
             <div class="form-grid">
-              <div class="field">
+              <div v-if="!selectedIsPrivate" class="field">
                 <label>LLM 启用<UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 LLM 配置 [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" /></label>
                 <select v-model="draftTriState.enabled">
                   <option :value="null">跟随默认（{{ defaultHint('enabled') }}）</option>
@@ -232,6 +242,7 @@ import {
   fetchOptions,
   listGroupSettings,
   saveGroupSettings,
+  setPrivateSessionState,
 } from '../api/groupSettings'
 import type {
   GroupOverrideEntry,
@@ -248,6 +259,7 @@ const loadError = ref<string | null>(null)
 const selectedGroupId = ref('')
 const saving = ref(false)
 const saveError = ref<string | null>(null)
+const sessionSaving = ref(false)
 
 const {
   draft: draftTriState,
@@ -269,6 +281,22 @@ function displayId(key: string): string {
 }
 
 const selectedIsPrivate = computed(() => selectedGroupId.value.startsWith('private:'))
+const selectedSessionActive = computed(() =>
+  groupList.value.find((entry) => entry.group_id === selectedGroupId.value)?.session_active ?? false,
+)
+
+async function onToggleSession() {
+  sessionSaving.value = true
+  try {
+    await setPrivateSessionState(displayId(selectedGroupId.value), !selectedSessionActive.value)
+    groupList.value = (await listGroupSettings()).groups
+  } catch (error: unknown) {
+    toast((error as Error).message, 'error')
+  } finally {
+    sessionSaving.value = false
+  }
+}
+
 const providers = computed(() => options.value?.providers || [])
 const personas = computed(() => options.value?.personas || [])
 const defaults = computed(() => options.value?.defaults || {})
@@ -354,6 +382,7 @@ function startAdd() {
 
 async function onSave() {
   const diff = buildPatch()
+  if (selectedIsPrivate.value) delete diff.enabled
   if (!Object.keys(diff).length) return
   saving.value = true
   saveError.value = null
