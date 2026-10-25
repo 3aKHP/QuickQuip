@@ -235,3 +235,77 @@ def test_delete_modify_conflict_is_atomic_and_source_preference_keeps_other_edit
     result = service.read()["document"]["providers"][0]
     assert result["parameters"]["temperature"] == 0.2
     assert result["models"][1]["context_window"] == 64000
+
+
+@pytest.mark.parametrize("exported", [False, True])
+def test_target_env_validates_references_without_changing_process_environment(
+    project, monkeypatch, exported
+):
+    from quickquip.common.config_utils import expand_env_value
+
+    root, _ = project
+    url, persona = "QQCONF_TEST_GENERATION_URL", "QQCONF_TEST_PERSONA_ID"
+    for key in (url, persona):
+        if exported:
+            monkeypatch.setenv(key, "host-environment-value")
+        else:
+            monkeypatch.delenv(key, raising=False)
+    snapshot = content.read(root)
+    raw_env = f"{url}=https://generation.test/v1\n{persona}=target-persona\n".encode()
+    snapshot["files"][".env"] = entry(raw_env)
+    generation = b"""[[image.providers]]
+id = "images"
+protocol = "openai_images"
+base_url = "${QQCONF_TEST_GENERATION_URL}"
+api_key_env = "SYNTHETIC_API_KEY"
+"""
+    snapshot["files"]["config/generation.toml"] = entry(generation)
+    snapshot["files"]["config/personas/example.toml"] = entry(b'id="${QQCONF_TEST_PERSONA_ID}"\n')
+    snapshot["document"]["settings"]["runtime"]["default_persona"] = "target-persona"
+    result = content.validate(snapshot)
+    assert body(result["files"]["config/generation.toml"]) == generation
+    assert body(result["files"][".env"]) == raw_env
+    expected = "host-environment-value" if exported else ""
+    assert expand_env_value("${" + persona + "}") == expected
+    snapshot["files"][".env"] = entry(f"{url}=\n{persona}=target-persona\n".encode())
+    with pytest.raises(ConfigError, match="domain configuration"):
+        content.validate(snapshot)
+    assert expand_env_value("${" + persona + "}") == expected
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_install_keeps_external_edit_made_while_other_files_are_writing(
+    tmp_path, monkeypatch, remove
+):
+    from quickquip.config_workspace import storage
+
+    before = {name: entry(b"original") for name in ("config/a.toml", "config/b.toml")}
+    storage.install(tmp_path, {}, before)
+    after = {"config/a.toml": entry(b"target")}
+    if not remove:
+        after["config/b.toml"] = entry(b"target")
+    write = storage.durable_write
+
+    def concurrent_edit(path, value):
+        write(path, value)
+        if path.name == "a.toml":
+            (tmp_path / "config/b.toml").write_bytes(b"external editor")
+
+    monkeypatch.setattr(storage, "durable_write", concurrent_edit)
+    # Deletions run first, so use two removed files to expose a mid-delete edit as well.
+    if remove:
+        from pathlib import Path
+
+        unlink = Path.unlink
+        after = {}
+
+        def concurrent_delete(path, *args, **kwargs):
+            result = unlink(path, *args, **kwargs)
+            if path.name == "a.toml":
+                (tmp_path / "config/b.toml").write_bytes(b"external editor")
+            return result
+
+        monkeypatch.setattr(Path, "unlink", concurrent_delete)
+    with pytest.raises(ConfigError, match="External edit"):
+        storage.install(tmp_path, before, after)
+    assert (tmp_path / "config/b.toml").read_bytes() == b"external editor"

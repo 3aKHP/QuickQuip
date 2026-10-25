@@ -128,7 +128,7 @@ def commit_candidate(root, storage, before, target, prepared_db, work_before, wo
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(prepared_db, path)
         path.chmod(0o600)
-        with path.open("rb") as stream:
+        with path.open("r+b") as stream:
             os.fsync(stream.fileno())
         write_json(
             building / "candidate.json",

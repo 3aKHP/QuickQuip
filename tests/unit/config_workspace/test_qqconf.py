@@ -1,7 +1,9 @@
 """Configuration round trips, reconciliation and side effects through the real local API."""
 
 import json
+import os
 import sqlite3
+import stat
 import subprocess
 import sys
 
@@ -252,3 +254,24 @@ def test_offline_lease_prevents_service_start(project):
         with pytest.raises(ConfigError):
             with service_guard(root, "web"):
                 pass
+
+
+def test_pack_flushes_writable_files_for_windows(workspace, project, monkeypatch):
+    root, _ = project
+    fsync = os.fsync
+
+    def require_write_access(descriptor):
+        if stat.S_ISREG(os.fstat(descriptor).st_mode):
+            # Windows cannot flush a read-only handle; a zero-byte write models that rule.
+            os.write(descriptor, b"")
+        fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", require_write_access)
+    edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.2))
+    assert workspace.pack()["destination"] == "source"
+    edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.3))
+    with service_guard(root, "web"):
+        assert workspace.pack()["destination"] == "candidate"
+    assert content.read(root)["document"]["providers"][0]["parameters"]["temperature"] == 0.2
+    staged = content.read(root / ".config-staging")
+    assert staged["document"]["providers"][0]["parameters"]["temperature"] == 0.3

@@ -44,16 +44,24 @@ def observed(root, names):
 
 def install(root, before, after):
     """Check the recorded bytes before each mutation; remove aliases before adding names."""
+
+    def checked(name):
+        current = observed(root, {name}).get(name)
+        if current not in (before.get(name), after.get(name)):
+            raise ConfigError("configuration_conflict", "External edit prevents recovery", name)
+        return current
+
     current = observed(root, before.keys() | after.keys())
     for name in sorted(before.keys() | after.keys()):
         if current.get(name) not in (before.get(name), after.get(name)):
             raise ConfigError("configuration_conflict", "External edit prevents recovery", name)
     for name in sorted(before.keys() - after.keys()):
+        checked(name)
         path = safe_path(root, name)
         path.unlink(missing_ok=True)
         sync_directory(path.parent)
     for name in sorted(after):
-        if current.get(name) == after[name]:
+        if checked(name) == after[name]:
             continue
         path = safe_path(root, name)
         durable_write(path, body(after[name]))
@@ -150,6 +158,6 @@ def install_database(path, content):
             closing(sqlite3.connect(path)) as target,
         ):
             source.backup(target)
-        with path.open("rb") as stream:
+        with path.open("r+b") as stream:
             os.fsync(stream.fileno())
         sync_directory(path.parent)

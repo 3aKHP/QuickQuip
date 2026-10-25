@@ -3,10 +3,15 @@
 from copy import deepcopy
 from dataclasses import asdict
 import json
+import os
 import sqlite3
+from io import StringIO
 from pathlib import Path
 import tempfile
 
+from dotenv import dotenv_values
+
+from quickquip.common.config_utils import expansion_environment
 from quickquip.configuration.errors import ConfigError
 from quickquip.configuration.paths import StoragePaths
 from quickquip.configuration.validation import validate_asset_tree
@@ -58,8 +63,25 @@ def read(root):
 
 
 def validate(snapshot):
+    environment = dict(os.environ)
+    dotenv = snapshot["files"].get(".env")
+    if dotenv is not None:
+        raw = body(dotenv)
+        text.parse(".env", raw)
+        environment.update(
+            {
+                key: value
+                for key, value in dotenv_values(stream=StringIO(raw.decode("utf-8"))).items()
+                if value is not None
+            }
+        )
+    with expansion_environment(environment):
+        return _validate(snapshot)
+
+
+def _validate(snapshot):
     value = deepcopy(snapshot)
-    # Parsers receive candidate assets, never active files or expanded secret values.
+    # Materialize candidate assets; environment expansion stays inside validation.
     with tempfile.TemporaryDirectory(prefix="qqconf-validation-") as directory:
         root = Path(directory)
         for name, item in value["files"].items():

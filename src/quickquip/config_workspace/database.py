@@ -77,7 +77,7 @@ def backup(source, destination):
         closing(sqlite3.connect(destination)) as target,
     ):
         origin.backup(target)
-    with destination.open("rb") as stream:
+    with destination.open("r+b") as stream:
         os.fsync(stream.fileno())
 
 
