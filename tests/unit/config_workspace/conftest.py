@@ -1,10 +1,20 @@
 """Isolated project and initialized workspace for the qqconf contract."""
 
+import os
+from pathlib import Path
+
 import pytest
 
 from quickquip.configuration.activity import service_guard
 from quickquip.config_workspace.service import Workspace
 from quickquip.llm.config_service import ConfigService
+
+
+@pytest.fixture(autouse=True)
+def subprocess_source_path(monkeypatch):
+    monkeypatch.setenv(
+        "PYTHONPATH", str(Path(__file__).resolve().parents[3] / "src"), prepend=os.pathsep
+    )
 
 
 @pytest.fixture
