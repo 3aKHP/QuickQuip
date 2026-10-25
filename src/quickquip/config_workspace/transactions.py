@@ -1,131 +1,161 @@
-"""Coordinate a workspace journal with a local configuration endpoint transaction."""
+"""Recover configuration installations and candidate publication from local receipts."""
 
-from quickquip.config_sync.bundle import digest, validate_bundle
-from quickquip.config_workspace.storage import baseline
-from quickquip.llm.config_errors import ConfigError
+import os
+from pathlib import Path
+import shutil
+from uuid import uuid4
 
-
-def require_stopped(endpoint, stopped):
-    if not stopped:
-        raise ConfigError("services_running", "Stop Bot and Web, then pass --services-stopped")
-    bot = endpoint.service.status()["bot"]
-    if bot and not bot["stale"]:
-        raise ConfigError("services_running", "Bot heartbeat is still fresh; wait for it to expire")
-
-
-def check_source(record, endpoint, storage):
-    if record["source"] != str(endpoint.root):
-        raise ConfigError("endpoint_changed", "Recovery must use the original configuration root")
-    if record.get("workspace") != str(storage.directory):
-        raise ConfigError(
-            "endpoint_changed",
-            "Resume or recover from the original workspace directory",
-            details={"workspace": record.get("workspace"), "operation": record["id"]},
-        )
+from quickquip.configuration.errors import ConfigError
+from quickquip.config_workspace.database import DB_NAME, same_image
+from quickquip.config_workspace.inventory import body, entry
+from quickquip.config_workspace.storage import (
+    install,
+    install_database,
+    read_json,
+    sqlite_bytes,
+    write_json,
+)
+from quickquip.llm.config_durability import sync_directory
 
 
-def advance(storage, endpoint, record, *, services_stopped=False):
-    check_source(record, endpoint, storage)
-    if record["phase"] in ("confirmed", "recovered"):
-        storage.finish(record, record["phase"])
-        return summary(record)
-    if record["phase"] == "recovering":
-        return rollback(storage, endpoint, record, services_stopped=services_stopped)
-    existing = (
-        endpoint.state.read(f"operations/{record['id']}.json") if record.get("root_write") else None
-    )
-    if existing and existing.get("local_only") and existing["phase"] == "confirmed":
-        # Source confirmation follows durable workspace installation. Later source or
-        # working-file edits are new work; repairing this receipt must leave them alone.
-        if storage.read("state.json") != record["target_state"]:
-            raise ConfigError("revision_conflict", "Committed workspace baseline changed")
-        endpoint.release_terminal(record["id"])
-        storage.finish(record, "confirmed")
-        return summary(record)
-    storage.check_files(record)
-    if record.get("root_write"):
-        if existing is None:
-            if record["assets_changed"]:
-                require_stopped(endpoint, services_stopped)
-            endpoint.prepare(
-                record["id"],
-                record["target_state"]["base"],
-                record["source_version"],
-                local_only=True,
-            )
-        elif not existing.get("local_only"):
-            raise ConfigError(
-                "operation_conflict", "Operation belongs to configuration synchronization"
-            )
-        if record["assets_changed"]:
-            require_stopped(endpoint, services_stopped)
-        endpoint.commit(record["id"])
-        with endpoint.owned_operation(record["id"]):
-            captured = endpoint.capture()
-            if digest(captured["bundle"]) != record["target_state"]["base_hash"]:
-                raise ConfigError(
-                    "revision_conflict", "Committed draft differs from the workspace plan"
-                )
-            record["target_state"] = baseline(endpoint.root, captured)
-        record["phase"] = "root_committed"
-        storage.save(record)
-    else:
-        # Refresh and no-op pack must not commit an obsolete source snapshot.
-        if endpoint.version() != record["source_version"]:
-            raise ConfigError("revision_conflict", "Source configuration changed after planning")
-    record["phase"] = "writing"
-    storage.save(record)
-    storage.install(record)
-    if record.get("root_write"):
-        endpoint.complete_local(record["id"])
-    elif endpoint.version() != record["source_version"]:
-        raise ConfigError("revision_conflict", "Source changed during workspace refresh")
-    storage.finish(record, "confirmed")
-    return summary(record)
+def _committed(record, storage):
+    path = storage.private / "state.json"
+    return path.exists() and read_json(path) == record["state_after"]
 
 
-def rollback(storage, endpoint, record, *, services_stopped=False):
-    check_source(record, endpoint, storage)
-    if record["phase"] == "confirmed":
-        raise ConfigError("operation_conflict", "Confirmed workspace operation cannot be recovered")
-    if record["phase"] == "recovered":
-        storage.finish(record, "recovered")
-        return summary(record)
-    storage.check_files(record)
-    operation = (
-        endpoint.state.read(f"operations/{record['id']}.json") if record.get("root_write") else None
-    )
-    if operation is not None:
-        if operation["phase"] == "confirmed":
-            raise ConfigError(
-                "operation_conflict", "Local transaction committed; resume its receipt"
-            )
-        if operation["phase"] not in ("prepared", "recovered"):
-            require_stopped(endpoint, services_stopped)
-        endpoint.recover(record["id"], services_stopped=services_stopped)
-    record["phase"] = "recovering"
-    storage.save(record)
-    storage.install(record, restore=True)
-    storage.finish(record, "recovered")
-    return summary(record)
+def recover_source(root, storage):
+    root = Path(root)
+    marker = root / "data/qqconf/active.json"
+    if not marker.exists():
+        return
+    record = read_json(marker)
+    if record["workspace"] != str(storage.directory):
+        raise ConfigError("recovery_required", "Recover using the original workspace")
+    if not _committed(record, storage):
+        current = sqlite_bytes(root / DB_NAME)
+        if not any(same_image(current, body(record[name])) for name in ("db_before", "db_after")):
+            raise ConfigError("configuration_conflict", "External database edit prevents recovery")
+        install(root, record["files_after"], record["files_before"])
+        install_database(root / DB_NAME, body(record["db_before"]))
+    storage.recover()
+    marker.unlink()
+    sync_directory(marker.parent)
 
 
-def validate_target(result, captured):
-    if captured["pending"]:
-        raise ConfigError("operation_conflict", "Finish pending configuration tasks first")
-    if result["assets_changed"]:
-        validate_bundle({**result["bundle"], "document": captured["published"]})
-
-
-def summary(record):
-    return {
-        "operation": record["id"],
-        "action": record["action"],
-        "phase": record["phase"],
-        "baseline_hash": record["target_state"]["base_hash"]
-        if record["phase"] != "recovered"
-        else record["before_state"]["base_hash"],
-        "draft_revision": record["target_state"]["version"]["draft_revision"]
-        if record["phase"] != "recovered"
-        else record["before_state"]["version"]["draft_revision"],
+def commit_source(root, storage, before, target, prepared_db, work_before, work_after, state):
+    state["receipt"] = uuid4().hex
+    root = Path(root)
+    marker = root / "data/qqconf/active.json"
+    record = {
+        "workspace": str(storage.directory),
+        "state_after": state,
+        "files_before": before["files"],
+        "files_after": target["files"],
+        "db_before": entry(sqlite_bytes(root / DB_NAME)),
+        "db_after": entry(Path(prepared_db).read_bytes()),
     }
+    write_json(marker, record)
+    try:
+        install(root, before["files"], target["files"])
+        install_database(root / DB_NAME, body(record["db_after"]))
+        storage.save(work_before, work_after, state)
+    except BaseException:
+        recover_source(root, storage)
+        raise
+    marker.unlink()
+    sync_directory(marker.parent)
+
+
+def recover_candidate(root, storage):
+    root = Path(root)
+    marker = root / "data/qqconf/staging.json"
+    if not marker.exists():
+        return
+    record = read_json(marker)
+    if record["workspace"] != str(storage.directory):
+        raise ConfigError("recovery_required", "Recover the candidate using its original workspace")
+    candidate, building, previous = [
+        root / name
+        for name in (
+            ".config-staging",
+            ".config-staging.new",
+            ".config-staging.previous",
+        )
+    ]
+    if not _committed(record, storage):
+        if previous.exists():
+            shutil.rmtree(candidate, ignore_errors=True)
+            previous.rename(candidate)
+        elif not record["existed"]:
+            shutil.rmtree(candidate, ignore_errors=True)
+    for path in (building, previous):
+        if path.exists():
+            shutil.rmtree(path)
+    storage.recover()
+    marker.unlink()
+    sync_directory(root)
+    sync_directory(marker.parent)
+
+
+def commit_candidate(root, storage, before, target, prepared_db, work_before, work_after, state):
+    state["receipt"] = uuid4().hex
+    root = Path(root)
+    candidate, building, previous = [
+        root / name
+        for name in (
+            ".config-staging",
+            ".config-staging.new",
+            ".config-staging.previous",
+        )
+    ]
+    if candidate.exists():
+        manifest = candidate / "candidate.json"
+        if not manifest.is_file() or read_json(manifest).get("source_root") != str(root):
+            raise ConfigError(
+                "candidate_conflict", "Existing candidate belongs to a different source"
+            )
+    if building.exists() or previous.exists():
+        raise ConfigError("recovery_required", "Unfinished candidate files require recovery")
+    marker = root / "data/qqconf/staging.json"
+    write_json(
+        marker,
+        {"workspace": str(storage.directory), "state_after": state, "existed": candidate.exists()},
+    )
+    try:
+        building.mkdir(mode=0o700)
+        install(building, {}, target["files"])
+        path = building / DB_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(prepared_db, path)
+        path.chmod(0o600)
+        with path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        write_json(
+            building / "candidate.json",
+            {
+                "format": 1,
+                "source_root": str(root),
+                "base": before,
+                "managed_files": sorted([DB_NAME, *target["files"]]),
+                "deleted_files": sorted(before["files"].keys() - target["files"].keys()),
+            },
+        )
+        for directory in sorted(
+            (p for p in building.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True
+        ):
+            sync_directory(directory)
+        sync_directory(building)
+        if candidate.exists():
+            candidate.rename(previous)
+            sync_directory(root)
+        building.rename(candidate)
+        sync_directory(root)
+        storage.save(work_before, work_after, state)
+    except BaseException:
+        recover_candidate(root, storage)
+        raise
+    if previous.exists():
+        shutil.rmtree(previous)
+    marker.unlink()
+    sync_directory(root)
+    sync_directory(marker.parent)

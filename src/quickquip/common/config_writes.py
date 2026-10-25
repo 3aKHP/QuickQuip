@@ -33,6 +33,11 @@ def maintenance_owner(token: str):
 
 
 def check_writable(data_dir: Path = DATA_DIR) -> None:
+    recovery = Path(data_dir) / "qqconf" / "active.json"
+    if recovery.exists():
+        state = json.loads(recovery.read_text(encoding="utf-8"))
+        if _OWNER.get() != "qqconf:" + state["workspace"]:
+            raise ConfigurationBusy("Interrupted local configuration write; run qqconf pack")
     marker = Path(data_dir) / "config-sync" / "maintenance.json"
     if marker.exists():
         state = json.loads(marker.read_text(encoding="utf-8"))

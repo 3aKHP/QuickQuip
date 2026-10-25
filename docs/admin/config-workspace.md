@@ -1,84 +1,109 @@
-# 在 TOML 工作副本中编辑配置
+# 用 qqconf 编辑本地配置
 
-本文面向在 VSCode 中审阅配置或委托 LLM 修改配置的部署者。需要 Python 3.11+、当前项目依赖和已初始化的本地 `config/managed/config.db`。工作副本保留文本注释；组装保存本地草稿，发布和推送继续使用[配置管理](llm-configuration.md)及[配置同步](config-sync.md)。
+`qqconf` 把本地配置整理成独立工作副本，供编辑器或 LLM 修改，再写回本地。需要 Python 3.11+、已安装的项目依赖，以及完成[存储初始化或迁移](storage-migration.md)的 `config/managed/config.db`。
 
-## 建立工作副本
+## 日常使用
 
-在项目根目录执行，选择活动 `config/`、`data/`、`llm_about/` 之外的空目录：
+在项目根目录执行：
 
 ```bash
-python -m quickquip.config_workspace init /path/to/config-workspace
+qqconf unpack
+# 在 .config-workspace/ 中修改配置
+qqconf refresh
+qqconf pack
 ```
 
-来源为当前本地草稿和受管资产。已有非空目录会被拒绝。在其他位置执行时，在子命令前指定 `--root /path/to/QuickQuip`。
+源码环境也可以使用 `python -m quickquip.config_workspace` 替代 `qqconf`。在其他目录执行时，在子命令后加 `--root /path/to/QuickQuip`。自定义工作目录使用 `--workspace /path/to/workspace`。
 
-| 位置 | 内容 |
+| 命令 | 结果 |
 |---|---|
-| `workspace.toml` | 文件清单及有序集合的顺序 |
-| `providers/*.toml` | 每个渠道及其模型、别名、参数 |
-| `settings/*.toml`、`styles/*.toml` | 分组设置及回复风格 |
-| `routes.toml`、`pricing.toml` | 有序级联及模型价格 |
-| `assets/` | 按源相对路径保留的人格、Profile 和其他受管文件 |
-| `.quickquip/` | 私有来源、基线、操作日志和恢复副本 |
+| `unpack` | 首次建立工作副本；后续接收本地真实配置的变化，保留副本中的独立修改 |
+| `refresh` | 只读查看双方变化、冲突、预计写入位置及候选状态 |
+| `pack` | 校验完整目标并写回，随后同步工作副本 |
 
-逻辑文件以 `value` 为根：渠道字段位于 `[value]`，模型位于 `[[value.models]]`。新增、删除或重命名文件时，同时更新清单；渠道清单顺序决定组装后的渠道顺序。未登记的配置 TOML 会报错，编辑器 `.bak` 等辅助文件不参与组装。
+预览可选。`pack` 每次重新比较当前内容，无需复制哈希或操作编号。命令成功退出为 0，校验、冲突或写入失败为 1；`refresh` 输出冲突时仍为成功预览。自动化使用 `--json`。
 
-空值写为 `context_window = { __quickquip_value__ = "null" }`。缺少字段和显式空值按配置自身规则解释。大整数和包含保留键的对象由工具编码，见[格式契约](../dev/config-workspace.md)。应用密钥继续由项目根 `.env` 管理。CLI 读取所选根目录的 `.env`，已设置的进程变量优先；工作副本保留变量引用。离线校验含环境引用的资产时，提供对应变量或用 `--root` 指定含 `.env` 的项目。
+## 工作副本中有什么
 
-## 校验并组装
+默认目录 `.config-workspace/` 已被 Git 和容器构建忽略。其中含凭据，应按私有配置保存。
 
-```bash
-python -m quickquip.config_workspace validate /path/to/config-workspace
-python -m quickquip.config_workspace plan /path/to/config-workspace --action pack
-python -m quickquip.config_workspace pack /path/to/config-workspace --expected-plan PLAN_HASH
+| 工作副本路径 | 配置内容 |
+|---|---|
+| `db/llm/providers/*.toml` | 每个供应商、模型、别名和请求参数 |
+| `db/llm/settings/*.toml`、`db/llm/styles/*.toml` | LLM 设置与回复风格 |
+| `db/llm/routes.toml`、`db/llm/pricing.toml` | 路由级联与价格 |
+| `db/scopes/groups/*.toml`、`db/scopes/private/*.toml` | 群和私聊参数覆盖 |
+| `db/games/niuniu.toml` | 群级游戏文案选择 |
+| 其余路径 | 按真实相对路径保留的原格式文本，见下表 |
+| `.qqconf/` | 工具维护的共同基线和恢复资料 |
+
+数据库内容来自 `config/managed/config.db` 的可编辑配置。配置修订和历史保留在本环境数据库，工作副本编辑 LLM 草稿。
+
+| 真实文件或目录 | 纳入内容 |
+|---|---|
+| 根 `.env` | 应用环境变量，保留 `${变量}` 引用 |
+| `config/` | `generation.toml`、`chat_rules.toml`、`games.toml`、`awakening.toml`、`sensitive_words.toml`、`admins.toml`、`niuniu_text.toml`、`niuniu_text_safe.toml` |
+| `config/personas/`、`config/client_profiles/` | 目录中的 TOML 文件，自动发现新增与删除 |
+| `llm_about/` 及其数字群目录 | `vocab.yaml`、`identities.yaml` |
+| `data/` | `rule_switch.json`、`daily_summary_groups.json`、`daily_briefing_groups.json`、`weekly_report_groups.json`、`monthly_report_groups.json`、`awakening_boredom_groups.json` |
+| `config/managed/scheduled_messages.json` | 循环定时消息定义 |
+| 根目录和 `prod/` | `compose`、`compose.override`、`docker-compose`、`docker-compose.override` 的 `.yml` / `.yaml` 文件 |
+| `docker/searxng/settings.yml`、`prod/sendkey.env` | 项目内的搜索与运维通知配置 |
+
+Skills、LLBot 登录与混合配置、Trace 当前开关、一次性定时任务、业务数据库及示例模板由各自工具维护。LLM 设置中的 Skill 选项和 `.env` 中的路径值照常保存，`qqconf` 不跟随路径读取外部文件。
+
+## 编辑供应商和其他对象
+
+供应商文件直接使用业务字段：
+
+```toml
+id = "example"
+protocol = "openai"
+base_url = "https://example.test/v1"
+api_key_env = "EXAMPLE_API_KEY"
+default_model = "example-model"
+
+[[models]]
+model = "example-model"
 ```
 
-把 `PLAN_HASH` 替换为预览输出的 `plan_hash`。预览包含配置单元变化、字段差异、文件变化和冲突。预览后继续编辑文件或数据库，计划即失效，应重新预览。
+新增对象时在对应目录新建 TOML；删除文件即删除该对象。身份取自文件内的 `id`，重命名文件保留身份。可选的 `db/llm/order.toml` 用 `providers = ["example", "another"]` 指定顺序；未列出的新增供应商按文件名顺序追加。更改供应商 ID 时，一并修改路由和作用域引用，完整目标会统一校验。
 
-组装完成后，数据库获得目标草稿，工作副本基线推进到此次结果。正文未改变时保持修订号，只改注释也保持修订号。已发布快照、Bot 加载状态和服务器同步基线由各自现有流程管理。
+普通可选空字段可以省略。任意 JSON 请求体中的 `null` 等特殊值有可逆的 TOML 表示，见[值编码契约](../dev/config-workspace.md#值编码与文本保留)。
 
-含受管资产变更时，先停止本地 Bot 和 Web，再给 `pack` 增加 `--services-stopped`。Bot 心跳须过期，待处理配置任务须先结束。目标资产还须支持当前发布启动；删除发布态正在引用的人格或 Profile 时，先发布引用迁移，再组装删除改动。
+## 合并双方修改
 
-确认草稿后可以按需应用到本地 Bot，或预览并推送服务器：
+工具比较上次共同基线、工作副本和当前真实配置。不同字段自动组合。例如副本调整温度、Web Admin 调整超时，两项都会保留。同一字段改成不同值，或一方删除、另一方修改同一对象时，写命令停止。
 
-```bash
-bash prod/config-v1.sh sync --plan
-bash prod/config-v1.sh sync --mode auto
-```
-
-## 接收数据库和线上修改
-
-线上 Web Admin 热修先回流本地，再刷新工作副本：
+先用 `refresh` 定位字段，再在副本中整理成希望保留的值。也可在本次命令中选择冲突字段的来源：
 
 ```bash
-bash prod/config-v1.sh sync --mode pull
-python -m quickquip.config_workspace plan /path/to/config-workspace --action refresh
-python -m quickquip.config_workspace refresh /path/to/config-workspace --expected-plan PLAN_HASH
+qqconf refresh --prefer workspace
+qqconf pack --prefer workspace
+qqconf unpack --prefer source
 ```
 
-刷新组合数据库变化和工作副本单边修改，以此次数据库内容为新基线。已有 TOML 按节点更新，未变文件保持原字节，注释随工作副本保存。尚未组装的单边修改继续保留，`status` 的 `dirty` 可以仍为 `true`。
+`--prefer` 只选择冲突字段，双方独立修改继续合并。路由级联、普通数组和自由文本按整个值选择；预览同时给出字段或文本行差异。默认隐藏凭据和全部 dotenv 值，需要查看时加 `refresh --show-secrets`。
 
-## 冲突与覆盖
+线上热修先通过[同步工具](config-sync.md)回流本地真实文件，再运行 `qqconf unpack` 接入工作副本。`refresh` 始终只读。
 
-比较采用共同基线、工作副本和当前本地配置。整份 LLM 文档是一个单元，每个资产文件各是一个单元。双方不同修改同一单元时，普通组装和刷新停止写入。
+## pack 写到哪里，何时生效
 
-显式覆盖仍须先预览：
+| 本地 Bot / Web 状态 | 写入位置 |
+|---|---|
+| 两者均确认停止 | 本地真实配置 |
+| 任一运行，或状态无法确认 | `.config-staging/` 候选目录 |
 
-```bash
-python -m quickquip.config_workspace plan /path/to/config-workspace --action pack --overwrite
-python -m quickquip.config_workspace pack /path/to/config-workspace --overwrite --expected-plan PLAN_HASH
-```
+状态由服务整个生命周期持有的锁判断；Compose 提供跨宿主系统的补充判断。首次升级后，分别通过新版 `bot.py` 和 `web_api.py` 启停过一次，工具才能确认本机两者均停止。缺少状态记录时会生成候选。
 
-`pack --overwrite` 选择完整工作副本，`refresh --overwrite` 选择完整数据库配置。预览的 `discarded_units` 列出目标侧将被替换的独立修改。手工组合双方修改时，先保留编辑副本，再刷新取得当前数据库内容，在其上补入要保留的修改并重新预览。
+候选按真实路径包含完整受管配置和独立配置库。`refresh` 显示候选是否待部署、真实来源是否已改变。下一次 `pack` 从真实配置重新计算并替换此前候选。停止两个服务后再次 `pack`，可将当前目标写入真实配置。
 
-## 中断后继续或恢复
+写回后的生效由配置应用和部署流程负责。LLM 保存为草稿，按[配置管理](llm-configuration.md)应用；其他文件依其加载方式重新加载或重启。第二个同步／部署 CLI 将对接真实文件和候选目录，独立于工作副本。现有 `config-v1` 的同步范围见其[清单](config-sync.md#配置范围与生效)，它尚未接入候选目录。
 
-```bash
-python -m quickquip.config_workspace status /path/to/config-workspace
-python -m quickquip.config_workspace resume /path/to/config-workspace --operation OPERATION_ID
-python -m quickquip.config_workspace recover /path/to/config-workspace --operation OPERATION_ID --services-stopped
-```
+## 中断后继续
 
-文件组装的继续操作同样需要停止服务并加 `--services-stopped`。数据库已经写入的失败操作在恢复前也须停止服务；已确认内容通过新修订回退。外部修改与恢复副本不一致时，工具保留现场并报冲突。数据库已确认而客户端回执中断时，继续操作仅补齐回执，保留确认后的新修改。
+普通写入失败会自动还原。进程意外退出时，`refresh` 报告待恢复状态；在原项目和原工作副本路径重新运行 `pack`，工具先恢复，再重新处理当前修改。首次 `unpack` 中断后可重新运行 `unpack`。
 
-操作完成前保留工作副本的原路径、`.quickquip/` 及源项目的同步状态目录；复制或移动的进行中工作副本不能接管原操作。工作副本绑定创建时的来源，包含私有配置并采用私有权限；换来源使用新的空目录。
+真实配置写到一半时，Bot、Web 和配置写入入口会等待恢复。恢复发现其他工具改过文件或数据库时，保留现场并报冲突；先核对这些修改及恢复资料，再处理冲突。恢复完成前保留 `.qqconf/`、`data/qqconf/` 和候选相关目录。
+
+旧版工作副本可以保留作备份，在新的空目录执行 `unpack`，再迁入需要保留的编辑。
