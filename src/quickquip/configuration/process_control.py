@@ -1,7 +1,7 @@
 """Project-local control of native service supervisors through private files."""
 
+from contextlib import contextmanager
 import json
-import os
 from pathlib import Path
 import time
 import uuid
@@ -19,35 +19,22 @@ def control_path(root, role, suffix):
     return directory(root) / f"{role}.{suffix}"
 
 
+@contextmanager
 def _open_control(path):
-    if os.name != "nt":
-        return Path(path).open(encoding="utf-8")
-    import ctypes
-    from ctypes import wintypes
-    import msvcrt
+    with FileLock(str(path) + ".io.lock", timeout=5):
+        with Path(path).open(encoding="utf-8") as stream:
+            yield stream
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    create = kernel.CreateFileW
-    create.argtypes = (
-        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
-        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
-    )
-    create.restype = wintypes.HANDLE
-    # Share read/write/delete so polling never blocks the writer's atomic replacement.
-    handle = create(str(path), 0x80000000, 0x1 | 0x2 | 0x4, None, 3, 0x80, None)
-    if handle == ctypes.c_void_p(-1).value:
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_NOINHERIT)
-    except BaseException:
-        close = kernel.CloseHandle
-        close.argtypes, close.restype = (wintypes.HANDLE,), wintypes.BOOL
-        close(handle)
-        raise
-    return os.fdopen(descriptor, encoding="utf-8")
+
+def write_control(path, value):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + ".io.lock", timeout=5):
+        write_json(path, value)
 
 
 def read_control(path):
+    if not Path(path).exists():
+        return None
     try:
         with _open_control(path) as stream:
             value = json.load(stream)
@@ -107,7 +94,7 @@ def request(root, role, action, *, timeout=45):
                 "service_control_unavailable", "Restart the service through its updated entrypoint"
             )
         identifier = uuid.uuid4().hex
-        write_json(control_path(root, role, "request.json"), {
+        write_control(control_path(root, role, "request.json"), {
             "id": identifier, "supervisor": current["record"]["id"], "action": action,
         })
         deadline = time.monotonic() + timeout

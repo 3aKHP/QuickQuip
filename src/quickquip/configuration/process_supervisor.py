@@ -12,9 +12,8 @@ import uuid
 
 from quickquip.configuration.activity import Lease, directory
 from quickquip.configuration.errors import ConfigError
-from quickquip.configuration.files import write_json
 from quickquip.configuration.process_control import (
-    control_path, held, read_control, supervisor_running,
+    control_path, held, read_control, supervisor_running, write_control,
 )
 
 CHILD_ROLE = "_QUICKQUIP_SERVICE_CHILD"
@@ -65,7 +64,7 @@ class Supervisor:
         self.last_request = None
 
     def _record(self):
-        write_json(control_path(self.root, self.role, "supervisor.json"), {
+        write_control(control_path(self.root, self.role, "supervisor.json"), {
             "format": 1, "id": self.identity, "root": str(self.root), "role": self.role,
             "pid": os.getpid(), "child_pid": self.child.pid if self.child else None,
             "command": self.command, "state": self.state,
@@ -94,7 +93,7 @@ class Supervisor:
 
     def _pause(self):
         if self.child is not None and self.child.poll() is None:
-            write_json(control_path(self.root, self.role, "shutdown.json"), {
+            write_control(control_path(self.root, self.role, "shutdown.json"), {
                 "child": self.child_id,
             })
             try:
@@ -130,7 +129,7 @@ class Supervisor:
         except (OSError, ValueError, subprocess.SubprocessError):
             response["error"] = "Managed service control failed"
         response["state"] = self.state
-        write_json(control_path(self.root, self.role, "response.json"), response)
+        write_control(control_path(self.root, self.role, "response.json"), response)
         return action == "stop" and "error" not in response
 
     def run(self):

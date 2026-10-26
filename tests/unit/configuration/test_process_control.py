@@ -180,14 +180,25 @@ def test_service_start_waits_for_a_concurrent_status_probe(native_services, lock
         observer.join(timeout=20)
 
 
-def test_control_record_can_be_replaced_while_a_reader_holds_the_previous_record(tmp_path):
-    from quickquip.configuration.files import write_json
-    from quickquip.configuration.process_control import _open_control, read_control
+def test_control_record_writer_waits_until_the_reader_closes(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from quickquip.configuration.process_control import _open_control, read_control, write_control
 
     path = tmp_path / "supervisor.json"
-    write_json(path, {"state": "starting"})
-    with _open_control(path) as reader:
-        write_json(path, {"state": "running"})
-        assert json.load(reader) == {"state": "starting"}
-        assert read_control(path) == {"state": "running"}
+    write_control(path, {"state": "starting"})
+    started, completed = threading.Event(), threading.Event()
+
+    def publish():
+        started.set()
+        write_control(path, {"state": "running"})
+        completed.set()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with _open_control(path) as reader:
+            writer = pool.submit(publish)
+            assert started.wait(2)
+            assert not completed.wait(0.1)
+            assert json.load(reader) == {"state": "starting"}
+        writer.result(timeout=5)
+    assert read_control(path) == {"state": "running"}
     assert read_control(tmp_path / "absent.json") is None
