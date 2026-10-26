@@ -119,9 +119,12 @@ def test_pause_and_resume_retains_supervisor_and_runs_shutdown_cleanup(native_se
     assert process.wait(timeout=5) == 0
     assert (root / f"{role}.events").read_text().count("stopped:") == 2
     # A prior supervisor's stop request must not stop a new invocation.
-    replacement = start(role)
-    assert replacement.poll() is None
-    assert status(root, role)["record"]["pid"] == replacement.pid
+    for _ in range(5):
+        replacement = start(role)
+        assert replacement.poll() is None
+        assert status(root, role)["record"]["pid"] == replacement.pid
+        request(root, role, "stop")
+        assert replacement.wait(timeout=5) == 0
 
 
 def test_control_of_bot_keeps_web_running(native_services):
@@ -202,3 +205,35 @@ def test_control_record_writer_waits_until_the_reader_closes(tmp_path):
         writer.result(timeout=5)
     assert read_control(path) == {"state": "running"}
     assert read_control(tmp_path / "absent.json") is None
+
+
+@pytest.mark.parametrize("winerror", [5, 32, None])
+def test_control_publication_retries_only_transient_windows_denials(
+    tmp_path, monkeypatch, winerror
+):
+    from quickquip.configuration.process_control import read_control, write_control
+
+    path = tmp_path / "supervisor.json"
+    write_control(path, {"state": "starting"})
+    replace = os.replace
+    attempted = False
+
+    def temporarily_busy(source, target):
+        nonlocal attempted
+        if not attempted:
+            attempted = True
+            error = PermissionError("replacement denied")
+            if winerror is not None:
+                error.winerror = winerror
+            raise error
+        return replace(source, target)
+
+    monkeypatch.setattr(os, "replace", temporarily_busy)
+    if winerror is None:
+        with pytest.raises(PermissionError):
+            write_control(path, {"state": "running"})
+        assert read_control(path) == {"state": "starting"}
+    else:
+        write_control(path, {"state": "running"})
+        assert read_control(path) == {"state": "running"}
+    assert not list(tmp_path.glob(".llm-config-write-*"))
