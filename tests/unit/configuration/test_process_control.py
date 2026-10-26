@@ -1,6 +1,7 @@
 """Real native subprocesses retain their supervisor and exit cleanly during deployment."""
 
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -177,3 +178,16 @@ def test_service_start_waits_for_a_concurrent_status_probe(native_services, lock
         assert status(root, "web")["running"]
     finally:
         observer.join(timeout=20)
+
+
+def test_control_record_can_be_replaced_while_a_reader_holds_the_previous_record(tmp_path):
+    from quickquip.configuration.files import write_json
+    from quickquip.configuration.process_control import _open_control, read_control
+
+    path = tmp_path / "supervisor.json"
+    write_json(path, {"state": "starting"})
+    with _open_control(path) as reader:
+        write_json(path, {"state": "running"})
+        assert json.load(reader) == {"state": "starting"}
+        assert read_control(path) == {"state": "running"}
+    assert read_control(tmp_path / "absent.json") is None

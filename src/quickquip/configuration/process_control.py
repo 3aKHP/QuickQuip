@@ -1,6 +1,7 @@
 """Project-local control of native service supervisors through private files."""
 
 import json
+import os
 from pathlib import Path
 import time
 import uuid
@@ -18,9 +19,38 @@ def control_path(root, role, suffix):
     return directory(root) / f"{role}.{suffix}"
 
 
+def _open_control(path):
+    if os.name != "nt":
+        return Path(path).open(encoding="utf-8")
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = (
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    )
+    create.restype = wintypes.HANDLE
+    # Share read/write/delete so polling never blocks the writer's atomic replacement.
+    handle = create(str(path), 0x80000000, 0x1 | 0x2 | 0x4, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_NOINHERIT)
+    except BaseException:
+        close = kernel.CloseHandle
+        close.argtypes, close.restype = (wintypes.HANDLE,), wintypes.BOOL
+        close(handle)
+        raise
+    return os.fdopen(descriptor, encoding="utf-8")
+
+
 def read_control(path):
     try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        with _open_control(path) as stream:
+            value = json.load(stream)
     except FileNotFoundError:
         return None
     except (OSError, ValueError):
