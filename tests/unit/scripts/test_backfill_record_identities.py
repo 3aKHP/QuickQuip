@@ -93,9 +93,10 @@ def test_backfill_shipped_and_standalone_help(tmp_path):
         )
     assert script in (root / "scripts/deploy/deploy-manifest.txt").read_text().splitlines()
     workflow = (root / ".github/workflows/release.yml").read_text()
-    assert "scripts\\backfill_record_identities.py --help" in workflow
+    windows_script = script.replace("/", "\\")
+    assert windows_script + " --help" in workflow
     assert any(
-        "Copy-Item" in line and "scripts\\backfill_record_identities.py" in line
+        "Copy-Item" in line and windows_script in line
         for line in workflow.splitlines()
     )
     result = subprocess.run(
