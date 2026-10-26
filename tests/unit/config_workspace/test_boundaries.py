@@ -8,11 +8,11 @@ import sqlite3
 import pytest
 
 from quickquip.configuration.errors import ConfigError
-from quickquip.config_workspace import content, planning, text
-from quickquip.config_workspace.database import read_only
-from quickquip.config_workspace.inventory import body, entry
+from quickquip.configuration import snapshot as content, comparison as planning, text
+from quickquip.configuration.images import read_only
+from quickquip.configuration.inventory import body, entry
 from quickquip.config_workspace.layout import read_tree
-from quickquip.config_workspace.merge import reconcile
+from quickquip.configuration.merge import reconcile
 from quickquip.config_workspace.service import Workspace
 
 from .test_qqconf import files
@@ -277,7 +277,7 @@ api_key_env = "SYNTHETIC_API_KEY"
 def test_install_keeps_external_edit_made_while_other_files_are_writing(
     tmp_path, monkeypatch, remove
 ):
-    from quickquip.config_workspace import storage
+    from quickquip.configuration import files as storage
 
     before = {name: entry(b"original") for name in ("config/a.toml", "config/b.toml")}
     storage.install(tmp_path, {}, before)

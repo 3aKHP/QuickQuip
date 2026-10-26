@@ -8,7 +8,8 @@ import pytest
 from quickquip.common.config_writes import ConfigurationBusy, configuration_write
 from quickquip.configuration.activity import service_guard
 from quickquip.configuration.errors import ConfigError
-from quickquip.config_workspace import content, transactions
+from quickquip.configuration import snapshot as content
+from quickquip.config_workspace import transactions
 from quickquip.config_workspace.service import Workspace
 
 from .test_qqconf import edit, files, provider

@@ -13,7 +13,7 @@ from quickquip.configuration.activity import offline, service_guard
 from quickquip.configuration.errors import ConfigError
 from quickquip.config_workspace.codec import decode, encode, parse, render_table
 from quickquip.config_workspace.layout import read_tree
-from quickquip.config_workspace import content
+from quickquip.configuration import snapshot as content
 
 
 def provider(workspace):

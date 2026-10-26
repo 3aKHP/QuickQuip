@@ -6,9 +6,9 @@ import shutil
 from uuid import uuid4
 
 from quickquip.configuration.errors import ConfigError
-from quickquip.config_workspace.database import DB_NAME, same_image
-from quickquip.config_workspace.inventory import body, entry
-from quickquip.config_workspace.storage import (
+from quickquip.configuration.images import DB_NAME, same_image
+from quickquip.configuration.inventory import body, entry
+from quickquip.configuration.files import (
     install,
     install_database,
     read_json,

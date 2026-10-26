@@ -15,9 +15,9 @@ from quickquip.common.config_utils import expansion_environment
 from quickquip.configuration.errors import ConfigError
 from quickquip.configuration.paths import StoragePaths
 from quickquip.configuration.validation import validate_asset_tree
-from quickquip.config_workspace.inventory import body, read_files, safe_path, GROUP_FILES
-from quickquip.config_workspace import text
-from quickquip.config_workspace.database import read_only
+from quickquip.configuration.inventory import body, read_files, safe_path, GROUP_FILES
+from quickquip.configuration import text
+from quickquip.configuration.images import read_only
 from quickquip.llm.config_document import validate_document
 from quickquip.llm.config_service import ConfigService
 from quickquip.llm.scope_types import GroupSettingsOverride

@@ -12,7 +12,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 | 文件 | 说明 |
 |------|------|
-| [glossary.md](glossary.md) | 项目术语表——配置、会话、执行、历史与扩展能力的统一名称和定义 |
+| [glossary.md](glossary.md) | 项目术语表——部署、配置、会话、执行、历史与扩展能力的统一名称和定义 |
 
 ---
 
@@ -32,7 +32,8 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | 文件 | 说明 |
 |------|------|
 | [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
-| [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
+| [admin/installation.md](admin/installation.md) | 安装与部署方式——本地／云端、源码／Docker 两个维度的定义、前提与四种组合的教程入口 |
+| [admin/deployment.md](admin/deployment.md) | 云端 Docker 部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/storage-migration.md](admin/storage-migration.md) | 配置与运行存储停服迁移、生产升级及回退 |
 | [admin/config-sync.md](admin/config-sync.md) | 本地与线上配置同步、共同基线、冲突与恢复 |
 | [admin/config-workspace.md](admin/config-workspace.md) | qqconf 的展开、编辑、只读预览、打包与恢复 |

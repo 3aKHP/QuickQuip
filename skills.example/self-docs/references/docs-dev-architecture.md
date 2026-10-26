@@ -127,7 +127,8 @@ src/quickquip/
 ├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集与生成编排、周期报告、唤醒、词云、节日检测）
 ├── common/                  # 通用工具（限流、持久化、消息去重、最近消息缓冲）
 ├── config_sync/             # 配置包、共同基线、端点事务和 SSH 同步
-├── config_workspace/        # qqconf 工作副本、字段合并、配置候选和本地恢复
+├── config_workspace/        # qqconf 工作副本编码、布局、配置候选和编辑恢复
+├── configuration/           # 配置归属、逻辑快照、字段合并、原格式文本和持久写入
 ├── games/                   # 游戏模块（registry、scores、economy、config、各游戏实现）
 ├── llm/                     # LLM 运行时（多 provider、工具调用循环、MCP 客户端、记忆存储、persona、身份映射、词表、健康检查、用量统计与定价、quick_judge、single_shot；核心门面拆到 service_parts/）
 ├── generation/              # 多模态产出配置、模型解析、图片/语音/音乐 provider 调用

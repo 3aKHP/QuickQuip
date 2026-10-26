@@ -41,6 +41,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 ## 快速开始
 
+按[安装与部署方式](docs/admin/installation.md)选择本地／云端与源码／Docker。以下安装步骤使用主机 Python 环境。
+
 ### 环境要求
 
 - **Python** ≥ 3.11
@@ -232,7 +234,8 @@ src/
 | [docs/dev/adr/README.md](docs/dev/adr/README.md) | 重要架构决策的背景、理由与取舍 |
 | [docs/user/group-commands.md](docs/user/group-commands.md) | 群内指令速查 |
 | [docs/user/private-commands.md](docs/user/private-commands.md) | 私聊指令速查 |
-| [docs/admin/deployment.md](docs/admin/deployment.md) | 云端部署指南 |
+| [docs/admin/installation.md](docs/admin/installation.md) | 部署分类与四种组合的安装入口 |
+| [docs/admin/deployment.md](docs/admin/deployment.md) | 云端 Docker 部署指南 |
 | [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md) | OneBot 适配器状态与选择 |
 | [docs/admin/configuration.md](docs/admin/configuration.md) | 完整配置参考 |
 | [docs/admin/web-admin.md](docs/admin/web-admin.md) | Web 管理后台 |

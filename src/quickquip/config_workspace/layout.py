@@ -9,7 +9,7 @@ from quickquip.llm.config import PricingRates
 
 from quickquip.configuration.errors import ConfigError
 from quickquip.config_workspace.codec import decode, encode, parse, render_table
-from quickquip.config_workspace.inventory import read_files, safe_path, entry
+from quickquip.configuration.inventory import read_files, safe_path, entry
 from quickquip.llm.config_document import empty_document
 
 

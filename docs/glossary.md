@@ -1,6 +1,18 @@
 # QuickQuip 项目术语表
 
-本文供用户、管理员和开发者查阅项目概念。条目给出统一名称、常用英文或代码映射及简短定义；字段约束和操作步骤由链接的领域文档维护。术语按配置、会话、历史和扩展能力分组。
+本文供用户、管理员和开发者查阅项目概念。条目给出统一名称、常用英文或代码映射及简短定义；字段约束和操作步骤由链接的领域文档维护。术语按部署、配置、会话、历史和扩展能力分组。
+
+## 部署与运行
+
+<a id="deployment-location"></a>
+### 部署位置（Deployment location）
+
+相对于执行配置或部署命令的电脑区分本地与云端。本地直接操作当前项目的配置和服务；云端通过 SSH 操作另一台服务器。它与应用的运行方式独立。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
+
+<a id="runtime-mode"></a>
+### 运行方式（Runtime mode）
+
+QuickQuip Bot 和 Web Admin 使用主机 Python 进程或 Docker 容器运行，文档分别称为源码与 Docker。Windows 懒人包归入主机 Python 进程；源码构建镜像和挂载源码的 hybrid 部署归入 Docker。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
 
 ## 配置与生效
 

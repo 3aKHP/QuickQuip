@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 import time
 
-from quickquip.config_workspace.merge import same
+from quickquip.configuration.merge import same
 from quickquip.configuration.errors import ConfigError
 from quickquip.llm.config_store import ConfigStore, dumps, project_document
 from quickquip.llm.scope_types import GroupSettingsOverride
