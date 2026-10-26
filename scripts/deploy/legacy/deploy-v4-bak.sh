@@ -4,9 +4,9 @@
 # project, uploads it via scp, and runs the remote deploy over ssh.
 #
 # Usage (run from project root):
-#   bash prod/deploy-v4-bak.sh
-#   bash prod/deploy-v4-bak.sh -LocalCheck    # pack and report size locally
-#   bash prod/deploy-v4-bak.sh -HostAlias <host> -RemoteDir </opt/QuickQuip>
+#   bash scripts/deploy/legacy/deploy-v4-bak.sh
+#   bash scripts/deploy/legacy/deploy-v4-bak.sh -LocalCheck    # pack and report size locally
+#   bash scripts/deploy/legacy/deploy-v4-bak.sh -HostAlias <host> -RemoteDir </opt/QuickQuip>
 #
 # quickquip-prod is a placeholder SSH host alias; change it via -HostAlias.
 
@@ -32,7 +32,7 @@ else
 fi
 
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ProjectRoot="$(cd "$ScriptDir/.." && pwd)"
+ProjectRoot="$(cd "$ScriptDir/../../.." && pwd)"
 cd "$ProjectRoot"
 
 TmpBase="${TMPDIR:-/tmp}"
@@ -55,7 +55,7 @@ run_step() {
     fi
 }
 
-for required_path in ".env" "prod/Dockerfile" "prod/docker-compose.yml" "pyproject.toml" "requirements.txt" "src/quickquip" "src/plugins" "config/llm.toml" "llm_about/_example/vocab.yaml" "llm_about/_example/identities.yaml" "docker/searxng/settings.yml"; do
+for required_path in ".env" "docker/Dockerfile.prod" "prod/docker-compose.yml" "pyproject.toml" "requirements.txt" "src/quickquip" "src/plugins" "config/llm.toml" "llm_about/_example/vocab.yaml" "llm_about/_example/identities.yaml" "docker/searxng/settings.yml"; do
     [ -e "$required_path" ] || { echo "${R}Missing required file: $required_path${N}" >&2; exit 1; }
 done
 

@@ -2,9 +2,9 @@
 """Preview or backfill member references in memories, quotes and offline messages.
 
 Run from the project root with the application environment:
-    python scripts/backfill_record_identities.py
-    python scripts/backfill_record_identities.py --database quotes --group 123456
-    python scripts/backfill_record_identities.py --apply
+    python scripts/maintenance/backfill_record_identities.py
+    python scripts/maintenance/backfill_record_identities.py --database quotes --group 123456
+    python scripts/maintenance/backfill_record_identities.py --apply
 
 The default mode previews records. --apply creates a timestamped database backup
 beside each target before writing references; original content is retained.
@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SOURCE_ROOT if SOURCE_ROOT.is_dir() else PROJECT_ROOT))
 

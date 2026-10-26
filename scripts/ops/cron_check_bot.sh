@@ -30,7 +30,7 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
 }
 
-STATUS=$(bash "$REMOTE_DIR/prod/check_bot.sh" status 2>&1 || echo "ERROR")
+STATUS=$(bash "$REMOTE_DIR/scripts/ops/check_bot.sh" status 2>&1 || echo "ERROR")
 log "status=$STATUS"
 
 case "$STATUS" in
@@ -44,7 +44,7 @@ case "$STATUS" in
         if [ ! -f "$FLAG_FILE" ]; then
             touch "$FLAG_FILE"
             log "Bot offline, sending notification"
-            _notify "Bot offline - QR login required" "QuickQuip Bot status: $STATUS. $(date '+%Y-%m-%d %H:%M:%S')%0a%0aRun (Windows): .\prod\check_bot.ps1%0aRun (Linux):   bash prod/check_bot_local.sh"
+            _notify "Bot offline - QR login required" "QuickQuip Bot status: $STATUS. $(date '+%Y-%m-%d %H:%M:%S')%0a%0aRun (Windows): .\scripts\ops\check_bot.ps1%0aRun (Linux):   bash scripts/ops/check_bot_local.sh"
         else
             log "Bot still offline, notification already sent"
         fi
@@ -53,7 +53,7 @@ case "$STATUS" in
         if [ ! -f "$FLAG_FILE" ]; then
             touch "$FLAG_FILE"
             log "Bot idle, sending notification"
-            _notify "Bot may be silently disconnected" "QuickQuip Bot status: $STATUS. $(date '+%Y-%m-%d %H:%M:%S')%0a%0aRun (Windows): .\prod\check_bot.ps1%0aRun (Linux):   bash prod/check_bot_local.sh"
+            _notify "Bot may be silently disconnected" "QuickQuip Bot status: $STATUS. $(date '+%Y-%m-%d %H:%M:%S')%0a%0aRun (Windows): .\scripts\ops\check_bot.ps1%0aRun (Linux):   bash scripts/ops/check_bot_local.sh"
         else
             log "Bot still idle, notification already sent"
         fi

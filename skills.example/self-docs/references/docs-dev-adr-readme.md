@@ -22,6 +22,7 @@
 | [ADR-0009](0009-web-admin-server-sessions.md) | 通过服务端会话保护管理接口 | Accepted | — |
 | [ADR-0010](0010-global-admin-registry.md) | 由项目注册表维护全局管理员 | Accepted | — |
 | [ADR-0011](0011-transactional-deployment-recovery.md) | 以事务部署版本并保留共享运行数据 | Accepted | — |
+| [ADR-0025](0025-tracked-operations-programs.md) | 统一分发运维程序并分离生产配置 | Accepted | — |
 
 ### 配置、会话与模型请求
 

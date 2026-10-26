@@ -92,7 +92,7 @@ def render_skill_list(
     for skill in skills:
         line = f"- {skill.name}：{skill.metadata.description}"
         if skill.name in diverged_names:
-            line += "（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）"
+            line += "（与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新）"
         lines.append(line)
     if activated_names:
         lines.append(f"当前会话已激活：{'、'.join(activated_names)}")

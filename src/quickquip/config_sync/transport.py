@@ -85,7 +85,9 @@ class SSHRemote:
         mode = "recover" if recover else "activate"
         self._ssh(
             f"set -eu; umask 077; mkdir -p {root}/.deploy; "
-            f"nohup bash {root}/current/prod/remote-config-sync.sh {root} {operation} {mode} "
+            f"runner={root}/current/scripts/deploy/legacy/remote-config-sync.sh; "
+            f'test -f "$runner" || runner={root}/current/prod/remote-config-sync.sh; '
+            f'nohup bash "$runner" {root} {operation} {mode} '
             f">>{root}/.deploy/sync-{operation}.log 2>&1 </dev/null &"
         )
 

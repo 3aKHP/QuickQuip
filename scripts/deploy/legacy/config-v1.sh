@@ -8,7 +8,7 @@ Action=${1:-help}
 [ "$#" = 0 ] || shift
 if [ "$Action" = sync ]; then
     ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    cd "$ScriptDir/.."
+    cd "$ScriptDir/../../.."
     Python=""
     for candidate in .venv/bin/python .venv/Scripts/python.exe python3 python; do
         if command -v "$candidate" >/dev/null 2>&1; then Python="$candidate"; break; fi

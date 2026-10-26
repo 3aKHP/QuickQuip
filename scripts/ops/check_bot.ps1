@@ -1,11 +1,11 @@
 # QuickQuip Bot status checker and QR login helper.
 # Usage:
-#   .\prod\check_bot.ps1
-#   .\prod\check_bot.ps1 -ForceRecreate
+#   .\scripts\ops\check_bot.ps1
+#   .\scripts\ops\check_bot.ps1 -ForceRecreate
 
 param(
-    [string]$Server = "quickquip-prod",
-    [string]$RemoteDir = "/opt/QuickQuip",
+    [string]$Server = "",
+    [string]$RemoteDir = "",
     [switch]$ForceRecreate
 )
 
@@ -15,8 +15,20 @@ function Write-Step($msg) { Write-Host $msg -ForegroundColor Cyan }
 function Write-OK($msg) { Write-Host $msg -ForegroundColor Green }
 function Write-Err($msg) { Write-Host $msg -ForegroundColor Red }
 
+$projectRoot = Split-Path (Split-Path $PSScriptRoot)
+$connectionPython = @("$projectRoot/.venv/Scripts/python.exe", "$projectRoot/.venv/bin/python", 'python3', 'python') |
+    Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
+if (-not $connectionPython) { throw 'Local Python environment required' }
+$connection = & $connectionPython -m quickquip.config_sync.deployment connection --root $projectRoot
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read root .env deployment connection' }
+$defaults = "$connection".Split(' ')
+if (-not $Server) { $Server = $defaults[0] }
+if (-not $RemoteDir) { $RemoteDir = $defaults[1] }
+if ($Server -cnotmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$') { throw 'Invalid SSH alias' }
+if ($RemoteDir -cnotmatch '^/[a-zA-Z0-9_./-]+$' -or $RemoteDir -eq '/' -or $RemoteDir.Contains('..')) { throw 'Invalid deployment root' }
+
 function Invoke-Server($cmd) {
-    $full = "REMOTE_DIR='$RemoteDir' bash '$RemoteDir/prod/check_bot.sh' $cmd"
+    $full = "if test -f '$RemoteDir/scripts/ops/check_bot.sh'; then REMOTE_DIR='$RemoteDir' bash '$RemoteDir/scripts/ops/check_bot.sh' $cmd; else REMOTE_DIR='$RemoteDir' bash '$RemoteDir/prod/check_bot.sh' $cmd; fi"
     $result = ssh -o StrictHostKeyChecking=no $Server $full 2>&1 | ForEach-Object { "$_" }
     $result = ($result -join "`n").Trim()
     if ($LASTEXITCODE -ne 0) {
@@ -99,7 +111,7 @@ Write-Step "QR URL: $rawQrUrl"
 Write-Host "Rendering terminal QR code..."
 Write-Host ""
 
-$projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$projectRoot = Split-Path (Split-Path $PSScriptRoot)
 $venvPython = Join-Path $projectRoot ".venv\Scripts\python.exe"
 
 $pyScript = @"
@@ -155,5 +167,5 @@ if ($loginStatus -eq "ONLINE") {
     Write-OK "Bot is online."
 } else {
     Write-Err "Timed out. Check whether the QR code was scanned."
-    Write-Host "If this repeats, try: .\prod\check_bot.ps1 -ForceRecreate" -ForegroundColor Yellow
+    Write-Host "If this repeats, try: .\scripts\ops\check_bot.ps1 -ForceRecreate" -ForegroundColor Yellow
 }

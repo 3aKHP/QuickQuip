@@ -16,8 +16,9 @@ import tarfile
 import pytest
 
 
-TEMPLATE = Path(__file__).resolve().parents[3] / "prod.example"
-STATE = runpy.run_path(str(TEMPLATE / "deploy-state.py"))
+PROJECT = Path(__file__).resolve().parents[3]
+TEMPLATE = PROJECT / "scripts/deploy"
+STATE = runpy.run_path(str(TEMPLATE / "server/deploy-state.py"))
 OLD = "20260907-010000-aaaaaaaaaaaa"
 NEW = "20260907-020000-bbbbbbbbbbbb"
 
@@ -32,7 +33,7 @@ def deployment(tmp_path):
     inbox = root / ".deploy/incoming" / NEW
     inbox.mkdir(parents=True)
     for name in ("deploy-state.py", "remote-deploy-v4.sh"):
-        shutil.copyfile(TEMPLATE / name, inbox / name)
+        shutil.copyfile(TEMPLATE / "server" / name, inbox / name)
     tree = inbox / "tree"
     (tree / "prod").mkdir(parents=True)
     (tree / "prod/docker-compose.yml").write_text("services: {}\n")
@@ -88,8 +89,20 @@ if args[0] == "compose":
                                       services_stopped=True)))
         else:
             print(json.dumps(migrate(root, services_stopped=True)))
-    elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
-        sys.exit(1)
+    elif "build" in args:
+        import yaml
+        directory = root / "releases" / release
+        config = yaml.safe_load((directory / "prod/docker-compose.yml").read_text())
+        build = config.get("services", {}).get("quickquip", {}).get("build")
+        if build and not (directory / build["dockerfile"]).is_file():
+            sys.exit("Build Dockerfile missing")
+        if os.environ.get("FAIL_BUILD") == "1":
+            sys.exit(1)
+    elif "stage" in args and os.environ.get("STAGED_COMPOSE"):
+        target = args[args.index("--release") + 1] if "--release" in args else release
+        (root / "releases" / target / "prod/docker-compose.yml").write_text(
+            os.environ["STAGED_COMPOSE"]
+        )
     elif "run" in args and os.environ.get("FAIL_CONFIG_INIT") == "1":
         sys.exit(1)
     elif "up" in args:
@@ -119,7 +132,7 @@ elif args[0] == "inspect":
         TEST_ROOT=str(root),
         TEST_NEW=NEW,
         PYTHONPATH=os.pathsep.join((
-            str(TEMPLATE.parent / "src"), os.environ.get("PYTHONPATH", ""),
+            str(PROJECT / "src"), os.environ.get("PYTHONPATH", ""),
         )),
     )
     return root, inbox, env
@@ -145,6 +158,74 @@ def test_success_commits_environment_and_previous(deployment):
     assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
     assert (root / ".env").stat().st_mode & 0o777 == 0o600
     assert not inbox.exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_private_hook_runs_after_activation_without_changing_release_result(deployment, exit_code):
+    root, inbox, _ = deployment
+    hook = inbox / "shared/prod/hooks/deployment.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text(
+        '#!/bin/bash\n'
+        'printf "%s:%s" "$1" "$(readlink "$QUICKQUIP_ROOT/current")" '
+        '> "$QUICKQUIP_ROOT/hook-result"\n'
+        f'exit {exit_code}\n'
+    )
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "hook-result").read_text() == "deploy:releases/" + NEW
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
+    assert not inbox.exists()
+
+
+def test_private_hook_ignoring_termination_cannot_hold_deployment_lock(deployment):
+    root, inbox, env = deployment
+    hook = inbox / "shared/prod/hooks/deployment.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("trap '' TERM\nwhile :; do sleep 1; done\n")
+    # Scale the real timeout arguments down; preserve signal/grace semantics.
+    timeout = Path(env["PATH"].split(os.pathsep)[0]) / "timeout"
+    timeout.write_text(
+        f'#!{sys.executable}\nimport os,sys\n'
+        'args = ["--kill-after=0.1" if arg == "--kill-after=5" else '
+        '"0.1" if arg == "30" else arg for arg in sys.argv[1:]]\n'
+        f'os.execv({shutil.which("timeout")!r}, ["timeout", *args])\n'
+    )
+    timeout.chmod(0o700)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "private deployment hook failed" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert not inbox.exists()
+    # A separate process must be able to acquire the released deployment lock.
+    acquired = subprocess.run(["flock", "-n", str(root / ".deploy/lock"), "true"])
+    assert acquired.returncode == 0
+
+
+@pytest.mark.parametrize("direction", ["off", "push", "pull"])
+def test_legacy_compose_builds_with_tracked_dockerfile(deployment, direction):
+    root, inbox = _sync_candidate(deployment)
+    dockerfile = inbox / "tree/docker/Dockerfile.prod"
+    dockerfile.parent.mkdir()
+    dockerfile.write_text("FROM synthetic-current-source\n")
+    legacy = "services:\n  quickquip:\n    build:\n      dockerfile: prod/Dockerfile\n"
+    compose = inbox / "tree/prod/docker-compose.yml"
+    compose.write_text(legacy if direction != "pull" else legacy.replace(
+        "prod/Dockerfile", "docker/Dockerfile.prod"
+    ))
+    options = {"CONFIG_SYNC": direction}
+    if direction != "off":
+        options |= {"SYNC_OPERATION": "a" * 32, "CONFIG_SYNC_PROTOCOL": "2"}
+    if direction == "pull":
+        # The remote stage replaces even an already updated local Compose.
+        options["STAGED_COMPOSE"] = legacy
+    result = run_deploy(deployment, **options)
+    assert result.returncode == 0, result.stdout + result.stderr
+    release = root / "releases" / NEW
+    assert (release / "prod/docker-compose.yml").read_text() == legacy
+    assert (release / "prod/Dockerfile").read_text() == "FROM synthetic-current-source\n"
+    assert not (root / "prod/Dockerfile").exists()
 
 
 @pytest.mark.parametrize("failure", ["build", "up"])
@@ -964,7 +1045,9 @@ def test_storage_migration_precedes_start_and_reverses_before_old_release(deploy
 
 
 def test_configuration_rollback_stops_candidate_with_its_staged_environment(tmp_path):
-    script = (Path(__file__).resolve().parents[3] / 'prod.example/remote-deploy-v4.sh').read_text()
+    script = (
+        Path(__file__).resolve().parents[3] / 'scripts/deploy/server/remote-deploy-v4.sh'
+    ).read_text()
     finish = script[script.index('finish() {'):script.index('\ntrap finish EXIT')]
     root = tmp_path / 'root'
     incoming = root / '.deploy/incoming/new'

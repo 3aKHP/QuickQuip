@@ -91,8 +91,8 @@ jobs:
           Copy-Item -Recurse config staging\
           Copy-Item -Recurse skills.example staging\
           Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
-          New-Item -ItemType Directory -Force staging\scripts | Out-Null
-          Copy-Item scripts\backfill_chat_archive.py, scripts\backfill_record_identities.py, scripts\sync_preset_skills.py staging\scripts\
+          New-Item -ItemType Directory -Force staging\scripts\maintenance | Out-Null
+          Copy-Item scripts\maintenance\backfill_chat_archive.py, scripts\maintenance\backfill_record_identities.py, scripts\maintenance\sync_preset_skills.py staging\scripts\maintenance\
           New-Item -ItemType Directory -Force staging\data | Out-Null
 
       - name: Verify lazy package template manifest
@@ -101,8 +101,8 @@ jobs:
           # start.bat 首启依赖的模板清单：copy_if_missing 对缺失源静默跳过，
           # 这里在打包前钉住"模板都在 staging 里"（对齐 Docker smoke 的 test -f 思路）。
           $expected = @(
-            "staging\start.bat", "staging\.env.example", "staging\scripts\backfill_chat_archive.py", "staging\scripts\backfill_record_identities.py",
-            "staging\scripts\sync_preset_skills.py",
+            "staging\start.bat", "staging\.env.example", "staging\scripts\maintenance\backfill_chat_archive.py", "staging\scripts\maintenance\backfill_record_identities.py",
+            "staging\scripts\maintenance\sync_preset_skills.py",
             "staging\config\llm.json.example", "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
             "staging\config\generation.toml.example", "staging\config\games.toml.example",
             "staging\config\awakening.toml.example", "staging\config\sensitive_words.toml.example",
@@ -153,17 +153,17 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Configuration JSON example validation failed" }
             .\python\python.exe -c "import quickquip, plugins, web_api; from importlib.metadata import version; from quickquip.llm.client_fingerprints.identity import client_version; assert client_version() == version('quickquip'); print('app import and client version ok')"
             if ($LASTEXITCODE -ne 0) { throw "Application import and client version smoke test failed" }
-            .\python\python.exe scripts\sync_preset_skills.py --apply --skills-dir data\preset-sync-smoke
+            .\python\python.exe scripts\maintenance\sync_preset_skills.py --apply --skills-dir data\preset-sync-smoke
             if ($LASTEXITCODE -ne 0) { throw "Preset Skill sync startup smoke test failed" }
-            .\python\python.exe scripts\sync_preset_skills.py --check --skills-dir data\preset-sync-smoke
+            .\python\python.exe scripts\maintenance\sync_preset_skills.py --check --skills-dir data\preset-sync-smoke
             if ($LASTEXITCODE -ne 0) { throw "Preset Skill sync contents smoke test failed" }
-            .\python\python.exe scripts\backfill_record_identities.py --help
+            .\python\python.exe scripts\maintenance\backfill_record_identities.py --help
             if ($LASTEXITCODE -ne 0) { throw "Record identities script startup smoke test failed" }
             New-Item -ItemType Directory -Force data\daily_msgs\10001 | Out-Null
             '{"sender":"smoke","text":"backfill ok","ts":1788998400.0,"user_id":"1"}' | Set-Content -Encoding utf8 data\daily_msgs\10001\2026-09-10.jsonl
-            .\python\python.exe scripts\backfill_chat_archive.py --dry-run
+            .\python\python.exe scripts\maintenance\backfill_chat_archive.py --dry-run
             if ($LASTEXITCODE -ne 0) { throw "Chat archive dry-run smoke test failed" }
-            .\python\python.exe scripts\backfill_chat_archive.py
+            .\python\python.exe scripts\maintenance\backfill_chat_archive.py
             if ($LASTEXITCODE -ne 0) { throw "Chat archive backfill smoke test failed" }
             .\python\python.exe -c "from quickquip.chat.archive import ChatArchive; assert ChatArchive().stats()['messages'] == 1; print('chat archive backfill ok')"
             if ($LASTEXITCODE -ne 0) { throw "Chat archive contents smoke test failed" }
@@ -266,7 +266,7 @@ jobs:
       - name: Smoke test Docker image
         run: |
           docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -m quickquip.llm.config_cli init && python -m quickquip.llm.config_cli validate config/llm.json.example && python -c "import quickquip, plugins, web_api"'
-          docker run --rm quickquip:smoke sh -euxc 'python scripts/sync_preset_skills.py --apply --skills-dir /tmp/preset-sync-smoke && python scripts/sync_preset_skills.py --check --skills-dir /tmp/preset-sync-smoke'
+          docker run --rm quickquip:smoke sh -euxc 'python scripts/maintenance/sync_preset_skills.py --apply --skills-dir /tmp/preset-sync-smoke && python scripts/maintenance/sync_preset_skills.py --check --skills-dir /tmp/preset-sync-smoke'
           # 存活探测：bot.py 必须活到 timeout（退出码 124）——import 冒烟抓不到
           # nonebot.load_plugins 的路径约束。勿改成 -euxc：set -e 会让 124 直接
           # 中止 shell，存活判定恒假。

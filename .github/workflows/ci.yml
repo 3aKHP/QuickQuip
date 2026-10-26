@@ -54,6 +54,28 @@ jobs:
           python -m pytest tests/unit/config_sync/test_session.py
           tests/unit/config_sync/test_installation.py tests/unit/config_sync/test_reconciliation.py
           --basetemp "${{ runner.temp }}/pytest-qqsync"
+      - name: Verify tracked deployment client and private connection settings
+        run: >-
+          python -m pytest tests/unit/scripts/test_deployment_clients.py
+          --basetemp "${{ runner.temp }}/pytest-deployment-clients"
+      - name: Smoke packaged maintenance tools
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'maintenance-package'
+          New-Item -ItemType Directory -Force "$package/scripts/maintenance" | Out-Null
+          Copy-Item -Recurse src/quickquip, skills.example $package
+          Copy-Item scripts/maintenance/backfill_chat_archive.py, scripts/maintenance/backfill_record_identities.py, scripts/maintenance/sync_preset_skills.py "$package/scripts/maintenance/"
+          Push-Location $package
+          try {
+            python scripts/maintenance/sync_preset_skills.py --apply
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged Skill sync failed' }
+            python scripts/maintenance/sync_preset_skills.py --check
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged Skill contents differ' }
+            python scripts/maintenance/backfill_record_identities.py --help
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged identities helper failed' }
+            python scripts/maintenance/backfill_chat_archive.py --dry-run
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged archive helper failed' }
+          } finally { Pop-Location }
 
   docker-config:
     name: Docker configuration lifecycle
@@ -69,10 +91,18 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Build application smoke image
         run: >-
-          docker build -f prod.example/Dockerfile -t quickquip-qqsync-smoke
+          docker build -f docker/Dockerfile.prod -t quickquip-qqsync-smoke
           --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim
           --build-arg PIP_INDEX_URL=https://pypi.org/simple
           --build-arg PIP_TRUSTED_HOST=pypi.org .
+      - name: Verify legacy Compose Dockerfile reference
+        run: |
+          mkdir -p prod
+          cp docker/Dockerfile.prod prod/Dockerfile
+          docker build -f prod/Dockerfile -t quickquip-qqsync-smoke \
+            --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim \
+            --build-arg PIP_INDEX_URL=https://pypi.org/simple \
+            --build-arg PIP_TRUSTED_HOST=pypi.org .
       - name: Verify real Compose synchronization
         env:
           QUICKQUIP_DOCKER_SMOKE: "1"

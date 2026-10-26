@@ -10,9 +10,11 @@ from quickquip.chat.group_quotes import GroupQuoteStore
 
 from tests.fixtures.record_identities import snapshot as snapshot
 
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts/maintenance/backfill_record_identities.py"
+
 def test_backfill_preview_repeat_race_backup_and_match_parity(tmp_path, snapshot):
     backfill = runpy.run_path(
-        str(Path(__file__).resolve().parents[3] / "scripts/backfill_record_identities.py")
+        str(SCRIPT)
     )["backfill"]
     path = tmp_path / "old.db"
     raw = "[CQ:at,name=旧名,qq=12345] 的事实"
@@ -50,7 +52,7 @@ def test_backfill_preview_repeat_race_backup_and_match_parity(tmp_path, snapshot
 
 def test_backfill_repairs_only_missing_index_and_failure_exit(tmp_path):
     script = runpy.run_path(
-        str(Path(__file__).resolve().parents[3] / "scripts/backfill_record_identities.py")
+        str(SCRIPT)
     )
     path = tmp_path / "quotes.db"
     store = GroupQuoteStore(path)
@@ -82,18 +84,19 @@ def test_backfill_shipped_and_standalone_help(tmp_path):
     import subprocess
     import sys
     root = Path(__file__).resolve().parents[3]
-    script = "scripts/backfill_record_identities.py"
+    script = "scripts/maintenance/backfill_record_identities.py"
     assert "!" + script in (root / ".dockerignore").read_text().splitlines()
-    for dockerfile in ("Dockerfile", "prod.example/Dockerfile"):
+    for dockerfile in ("Dockerfile", "docker/Dockerfile.prod"):
         assert any(
             line.startswith("COPY ") and script in line
             for line in (root / dockerfile).read_text().splitlines()
         )
-    assert script in (root / "prod.example/deploy-manifest.txt").read_text().splitlines()
+    assert script in (root / "scripts/deploy/deploy-manifest.txt").read_text().splitlines()
     workflow = (root / ".github/workflows/release.yml").read_text()
-    assert "scripts\\backfill_record_identities.py --help" in workflow
+    windows_script = script.replace("/", "\\")
+    assert windows_script + " --help" in workflow
     assert any(
-        "Copy-Item" in line and "scripts\\backfill_record_identities.py" in line
+        "Copy-Item" in line and windows_script in line
         for line in workflow.splitlines()
     )
     result = subprocess.run(

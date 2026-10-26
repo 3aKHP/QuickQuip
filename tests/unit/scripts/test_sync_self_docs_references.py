@@ -31,6 +31,10 @@ EXTRA_FILES = {
     ".github/PULL_REQUEST_TEMPLATE/release.md": "# Release 模板\n",
     ".github/pull_request_template.md": "# PR 模板\n",
     "prod.example/README.md": "# 生产模板\n\n复制为 `prod/`。\n",
+    "scripts/README.md": "# 脚本导航\n",
+    "scripts/deploy/README.md": "# 部署程序\n",
+    "scripts/ops/README.md": "# 巡检程序\n",
+    "scripts/maintenance/README.md": "# 维护程序\n",
 }
 
 
@@ -78,6 +82,10 @@ def test_write_then_check_roundtrip(tmp_path: Path):
         "index.md",
         "prod.example-readme.md",
         "root-readme.md",
+        "scripts-deploy-readme.md",
+        "scripts-maintenance-readme.md",
+        "scripts-ops-readme.md",
+        "scripts-readme.md",
     ]
 
     readme = (references / "root-readme.md").read_text(encoding="utf-8")

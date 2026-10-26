@@ -16,9 +16,10 @@ import tempfile
 SHARED_FILES = {
     ".env": 0o600,
     "prod/sendkey.env": 0o600,
-    "prod/check_bot.sh": 0o700,
-    "prod/cron_check_bot.sh": 0o700,
-    "prod/host_metrics_collector.py": 0o700,
+    "prod/hooks/deployment.sh": 0o700,
+    "scripts/ops/check_bot.sh": 0o700,
+    "scripts/ops/cron_check_bot.sh": 0o700,
+    "scripts/ops/host_metrics_collector.py": 0o700,
     "data/fonts/NotoSansSC-Regular.ttf": 0o644,
     "data/tieba/storage_state.json": 0o600,
 }

@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 if ($Action -eq 'sync') {
     if ($SyncAction -eq 'init' -and -not $From) { throw 'Initialization requires explicit From local or remote' }
     $SyncTimeout = if ($PSBoundParameters.ContainsKey('Timeout')) { $Timeout } else { 240 }
-    Push-Location (Split-Path $PSScriptRoot)
+    Push-Location (Split-Path (Split-Path (Split-Path $PSScriptRoot)))
     try {
         $python = @('.venv/Scripts/python.exe', '.venv/bin/python', 'python3', 'python') |
             Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1

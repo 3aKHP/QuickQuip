@@ -1,6 +1,6 @@
 #!/bin/bash
 # Server-side helper for check_bot.ps1.
-# Usage: bash prod/check_bot.sh [status|gen-qr|force-recreate|wait-login]
+# Usage: bash scripts/ops/check_bot.sh [status|gen-qr|force-recreate|wait-login]
 
 REMOTE_DIR="${REMOTE_DIR:-/opt/QuickQuip}"
 if [ -L "$REMOTE_DIR/current" ]; then
