@@ -2,6 +2,7 @@
 
 from quickquip.common.env import PROJECT_ROOT
 from quickquip.configuration.activity import service_guard
+from quickquip.configuration.process_supervisor import managed_entrypoint
 
 
 def main():
@@ -33,4 +34,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(managed_entrypoint(PROJECT_ROOT, "bot", main))

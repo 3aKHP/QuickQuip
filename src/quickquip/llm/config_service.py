@@ -19,7 +19,9 @@ from quickquip.llm.config_document import (
     upgrade_document,
     validate_document,
 )
-from quickquip.llm.config_store import ConfigStore, SCHEMA_VERSION, dumps, project_document
+from quickquip.llm.config_store import (
+    ConfigStore, SCHEMA_VERSION, dumps, next_revision, project_document,
+)
 from quickquip.llm.config_durability import ensure_directory
 from quickquip.llm.config_tasks import ConfigTaskQueue
 
@@ -201,7 +203,7 @@ class ConfigService:
                 if note is not None:
                     _set_note(conn, expected_revision, note)
                 return {"revision": expected_revision, "document": document}
-            revision = expected_revision + 1
+            revision = next_revision(conn)
             if note is None:
                 note = (
                     ""
@@ -330,6 +332,20 @@ class ConfigService:
         return self._enqueue(
             "apply", "draft", request_id, expected_revision=expected_revision, note=note
         )
+
+    @configuration_mutation
+    def prepare_deployment(self, document, expected_revision, *, draft=None, note="qqsync"):
+        """Pin a deployment input while independently retaining the editable draft."""
+        from quickquip.llm.config_deployment import prepare
+
+        return prepare(self, document, expected_revision, draft=draft, note=_clean_note(note))
+
+    @configuration_mutation
+    def publish_offline(self, revision, request_id, stopped, *, environment=None):
+        """Publish a validated deployment while holding the Bot lifetime lock."""
+        from quickquip.llm.config_deployment import publish_offline
+
+        return publish_offline(self, revision, request_id, stopped, environment=environment)
 
     def probe(self, source, provider_id, model, request_id, payload=None):
         if source not in ("draft", "published"):

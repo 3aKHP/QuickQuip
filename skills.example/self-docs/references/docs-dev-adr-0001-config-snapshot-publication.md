@@ -1,8 +1,9 @@
 <!-- Generated from docs/dev/adr/0001-config-snapshot-publication.md; do not edit -->
 
 ---
-status: Accepted
-superseded_by: []
+status: Superseded
+superseded_by:
+  - 0023-online-and-offline-configuration-publication.md
 ---
 
 # ADR-0001：通过不可变快照发布配置

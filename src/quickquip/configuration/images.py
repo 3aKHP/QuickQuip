@@ -12,7 +12,7 @@ import time
 
 from quickquip.configuration.merge import same
 from quickquip.configuration.errors import ConfigError
-from quickquip.llm.config_store import ConfigStore, dumps, project_document
+from quickquip.llm.config_store import ConfigStore, dumps, next_revision, project_document
 from quickquip.llm.scope_types import GroupSettingsOverride
 from dataclasses import asdict
 
@@ -88,7 +88,7 @@ def prepare(source, destination, snapshot):
         meta = connection.execute("SELECT * FROM config_meta").fetchone()
         document = snapshot["document"]
         if not same(json.loads(meta["document"]), document):
-            revision = meta["draft_revision"] + 1
+            revision = next_revision(connection)
             connection.execute(
                 "UPDATE config_meta SET draft_revision=?,document=?", (revision, dumps(document))
             )

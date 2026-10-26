@@ -5,7 +5,7 @@ from quickquip.llm.config_document import resolve_model_provider, environment_re
 from quickquip.llm.config_errors import ConfigError
 
 
-def validate_runtime_configuration(config, document):
+def validate_runtime_configuration(config, document, *, environment=None):
     if config.load_error:
         raise ConfigError("configuration_failed", "Configuration could not be compiled")
     required_providers = set()
@@ -74,7 +74,7 @@ def validate_runtime_configuration(config, document):
     missing = [
         name
         for name in environment_references({"providers": active_providers})
-        if not os.getenv(name)
+        if not (os.getenv(name) if environment is None else environment.get(name))
     ]
     if missing:
         raise ConfigError(
