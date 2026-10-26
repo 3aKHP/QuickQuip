@@ -21,16 +21,32 @@ class Compose:
         self.file = path(info["compose"]) if info["compose"] else None
         self.overrides = info["overrides"]
         self.helper_image = None
+        self.helper_pythonpath = None
+        self.helper_mounts = []
         self.target_project = None
 
     def bind(self, original, target_project=None):
         self.helper_image = original.get("helper_image")
+        self.helper_pythonpath = original.get("helper_pythonpath")
+        self.helper_mounts = original.get("helper_mounts", [])
         self.target_project = target_project
 
     def image(self, definition=None):
         if self.helper_image is None:
             definition = definition or json.loads(self.run(["config", "--format", "json"]))
-            image = definition["services"]["web-admin"]["image"]
+            service = definition["services"]["web-admin"]
+            image = service["image"]
+            self.helper_pythonpath = service.get("environment", {}).get("PYTHONPATH")
+            paths = (self.helper_pythonpath or "").split(":")
+            self.helper_mounts = [
+                {"source": volume["source"], "target": volume["target"]}
+                for volume in service.get("volumes", [])
+                if volume["type"] == "bind"
+                and any(
+                    path == volume["target"] or path.startswith(volume["target"].rstrip("/") + "/")
+                    for path in paths
+                )
+            ]
             self.helper_image = self.runner(
                 ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
                 {},
@@ -104,6 +120,8 @@ class Compose:
             "services": services,
             "project": definition["name"],
             "helper_image": self.image(definition),
+            "helper_pythonpath": self.helper_pythonpath,
+            "helper_mounts": self.helper_mounts,
         }
 
     def pause(self, original):
@@ -188,6 +206,12 @@ except Exception:
                 "-e",
                 f"QUICKQUIP_SYNC_GID={self.description['gid']}",
             ]
+        image = self.image()
+        sources = []
+        if self.helper_pythonpath is not None:
+            sources.extend(["-e", "PYTHONPATH=" + self.helper_pythonpath])
+        for mount in self.helper_mounts:
+            sources.extend(["-v", mount["source"] + ":" + mount["target"] + ":ro"])
         raw = self.runner(
             [
                 "docker",
@@ -199,7 +223,8 @@ except Exception:
                 "-v",
                 str(self.root) + ":/qqsync-host",
                 *ownership,
-                self.image(),
+                *sources,
+                image,
                 "-m",
                 "quickquip.config_sync.worker",
                 action,

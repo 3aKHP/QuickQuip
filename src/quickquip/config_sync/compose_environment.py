@@ -13,7 +13,8 @@ def resolve(description, files):
     root, application = Path(description["root"]), Path(description["application"])
     compose = Path(description["compose"])
     with tempfile.TemporaryDirectory(prefix="qqsync-compose-") as directory:
-        staging = Path(directory)
+        # Compose defaults the project name to its directory; preserve that basename.
+        staging = Path(directory) / application.name
         # Materialize the Compose inputs; other managed files are irrelevant to interpolation.
         names = [".env", str(compose.relative_to(application))]
         names.extend(str(Path(path).relative_to(application)) for path in description["overrides"])

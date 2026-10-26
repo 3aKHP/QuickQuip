@@ -1,5 +1,10 @@
 """Exercise qqconf staging and directional qqsync through real configuration endpoints."""
 
+from contextlib import redirect_stdout
+import io
+import json
+import sys
+
 import pytest
 
 from quickquip.config_sync.peers import Local
@@ -148,3 +153,48 @@ def test_local_staging_edits_existing_draft_without_false_conflict(tmp_path, tar
             == target_history
         )
     assert not (root / ".config-staging").exists()
+
+
+def test_remote_prepare_write_failure_retains_operation_through_worker_envelope(
+    tmp_path, monkeypatch
+):
+    from quickquip.config_sync import worker
+    from quickquip.config_sync.installation import Installation
+    from quickquip.config_sync.peers import response
+
+    left, right = tmp_path / "left", tmp_path / "right"
+    local = project(left, "cloud")
+    project(right, "cloud")
+    document = local.read()["document"]
+    document["settings"]["runtime"]["history_limit"] = 23
+    local.replace(document, 1)
+
+    class WorkerPeer(Local):
+        def call(self, action, body=None):
+            output = io.StringIO()
+            with monkeypatch.context() as patch, redirect_stdout(output):
+                patch.setattr(
+                    sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(body or {}).encode()))
+                )
+                assert worker.main([action, "--root", str(self.root)]) == 0
+            return response(output.getvalue())
+
+    session = Session(left, remote_factory=lambda *_: WorkerPeer(right))
+    save = Installation.save
+
+    def interrupted(receiver, record):
+        if receiver.root == right and record["phase"] == "prepared":
+            raise OSError("receipt write interrupted")
+        save(receiver, record)
+
+    monkeypatch.setattr(Installation, "save", interrupted)
+    with pytest.raises(ConfigError) as error:
+        session.run("push")
+    assert error.value.code == "configuration_failed"
+    operation = session.pending()["id"]
+    receiver = Installation(right)
+    assert receiver.state.read("maintenance.json")["token"] == operation
+    monkeypatch.setattr(Installation, "save", save)
+    assert session.run("push")["phase"] == "confirmed"
+    assert receiver.read(operation)["phase"] == "confirmed"
+    assert receiver.state.read("maintenance.json") is None

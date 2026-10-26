@@ -269,8 +269,8 @@ class Session:
                 self._consume(record)
                 self._save(record, "confirmed")
         except ConfigError as error:
-            # Lost transport acknowledgement is uncertain; the next command resumes its receipt.
-            if error.code in ("transport_error", "protocol_error"):
+            # Transport and persistence failures may follow a durable write; retain its receipt.
+            if error.code in ("transport_error", "protocol_error", "configuration_failed"):
                 raise
             if record["phase"] == "preparing":
                 self._save(record, "recovered")

@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 import socket
 import subprocess
 import time
@@ -203,3 +204,60 @@ receiver.install(body['operation'], environment=body['environment'])
                 )
     finally:
         controller.run(["down", "--remove-orphans"])
+
+
+def test_hybrid_helper_uses_mounted_code_when_image_lacks_sync_module(tmp_path):
+    image = "qqsync-hybrid-" + uuid.uuid4().hex[:12]
+    dockerfile = (
+        "FROM quickquip-qqsync-smoke\n"
+        'RUN python -c "import pathlib, quickquip, shutil; '
+        "shutil.rmtree(pathlib.Path(quickquip.__file__).parent / 'config_sync')\"\n"
+    )
+    subprocess.run(
+        ["docker", "build", "-t", image, "-"],
+        input=dockerfile,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=90,
+    )
+    try:
+        missing = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                image,
+                "python",
+                "-m",
+                "quickquip.config_sync.worker",
+                "--help",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        assert missing.returncode != 0
+        source = Path(__file__).resolve().parents[2] / "src"
+        (tmp_path / ".env").write_text(
+            "QUICKQUIP_DEPLOY_LOCATION=local\nQUICKQUIP_DEPLOY_RUNTIME=docker\n"
+        )
+        compose_file = tmp_path / "docker-compose.yml"
+        compose_file.write_text(
+            "services:\n"
+            f"  quickquip:\n    image: {image}\n"
+            f"  web-admin:\n    image: {image}\n"
+            "    environment:\n      PYTHONPATH: /app/src\n"
+            f"    volumes:\n      - {source}:/app/src:ro\n"
+        )
+        ConfigService(tmp_path / "config/managed/config.db").initialize()
+        controller = Compose(tmp_path)
+        before = controller.call("capture", {})
+        original = controller.inspect()
+        controller.environment(before["snapshot"])
+        assert controller.target_project == original["project"]
+        compose_file.unlink()
+        resumed = Compose(tmp_path)
+        resumed.bind(original)
+        assert resumed.call("capture", {})["snapshot"]["document"] == before["snapshot"]["document"]
+    finally:
+        subprocess.run(["docker", "image", "rm", image], capture_output=True, timeout=30)
