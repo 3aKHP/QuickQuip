@@ -9,6 +9,7 @@ llm_about
 skills.example
 src
 docker/Dockerfile.prod
+docker/searxng/settings.yml
 prod/docker-compose.yml
 scripts/maintenance/backfill_chat_archive.py
 scripts/maintenance/backfill_record_identities.py

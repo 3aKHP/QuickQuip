@@ -598,6 +598,10 @@ elif [ -n "$Prev" ] && [ -f "$Release/src/quickquip/config_sync/rpc.py" ]; then
     compose "$Prev" stop quickquip web-admin || fail "could not pause configuration writers"
     compose "$Id" run --rm --no-deps -v "$Root/releases/$Prev:/sync-previous:ro" \
         web-admin python -m quickquip.config_sync.rpc preserve || fail "server configuration preservation failed"
+    if [ -f "$Root/releases/$Prev/docker/searxng/settings.yml" ]; then
+        copy_configuration_assets replace "$Root/releases/$Prev/docker/searxng/settings.yml" \
+            "$Release/docker/searxng/settings.yml"
+    fi
 fi
 if [ "$MigrateStorage" = 1 ]; then
     ServicesStopped=1
