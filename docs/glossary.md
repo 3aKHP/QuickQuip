@@ -209,3 +209,7 @@ Bot 最近回报已接纳的运行配置版本，通过 `loaded_revision` 等状
 ### MCP 服务（MCP server）
 
 通过 Model Context Protocol 向 QuickQuip 提供工具或资源的外部服务。连接、能力发现、参数适配和结果校验由 MCP 集成层负责。见[MCP 集成](dev/mcp-integration.md)及[结果归一化决策](dev/adr/0018-mcp-result-normalization.md)。
+
+## 运维程序与生产配置
+
+通用运维程序由 `scripts/deploy/`、`scripts/ops/` 维护，随代码升级。`prod.example/` 分发配置模板，`prod/` 保存私有配置和协议端登录资产。生产镜像构建程序位于 `docker/Dockerfile.prod`。目录职责和入口见[脚本导航](../scripts/README.md)。

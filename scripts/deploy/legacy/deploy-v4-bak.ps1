@@ -1,8 +1,8 @@
 # Archived flat-layout deployment driver. Use deploy-v4.ps1 for releases.
 # Usage: run from project root:
-#   .\prod\deploy-v4-bak.ps1
+#   .\scripts\deploy\legacy\deploy-v4-bak.ps1
 # Local archive check:
-#   .\prod\deploy-v4-bak.ps1 -LocalCheck
+#   .\scripts\deploy\legacy\deploy-v4-bak.ps1 -LocalCheck
 
 param(
     [switch]$LocalCheck,
@@ -15,7 +15,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $TempArchive = "$env:TEMP\quickquip-deploy.tar.gz"
 $TiebaStateArchive = "$env:TEMP\quickquip-tieba-state.tar.gz"
-$ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$ProjectRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot))
 $LocalPrivateWorkspace = "d" + "ev"
 $TiebaStateFile = "data/tieba/storage_state.json"
 $SendkeyEnvFile = "prod/sendkey.env"
@@ -102,7 +102,7 @@ Push-Location $ProjectRoot
 Initialize-NodeToolchainPath
 $PnpmCommand = Get-PnpmCommand
 
-foreach ($requiredPath in @(".env", "prod/Dockerfile", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
+foreach ($requiredPath in @(".env", "docker/Dockerfile.prod", "prod/docker-compose.yml", "pyproject.toml", "requirements.txt", "src/quickquip", "src/plugins", "config/llm.toml", "llm_about/_example/vocab.yaml", "llm_about/_example/identities.yaml", "docker/searxng/settings.yml")) {
     if (-not (Test-Path $requiredPath)) {
         Write-Host "Missing required file: $requiredPath" -ForegroundColor Red
         Pop-Location

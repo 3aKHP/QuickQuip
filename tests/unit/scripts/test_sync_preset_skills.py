@@ -12,19 +12,19 @@ import pytest
 
 from quickquip.llm.skills import scan_skills
 
-SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "sync_preset_skills.py"
+SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts/maintenance/sync_preset_skills.py"
 
 
 @pytest.mark.parametrize("layout", ["src", "flat"])
 def test_cli_runs_from_distributed_layout_without_dependencies(tmp_path, layout):
     """发行布局中的脚本用标准库加载真实领域实现，支持报告和同步。"""
-    (tmp_path / "scripts").mkdir()
-    script = tmp_path / "scripts" / SCRIPT_PATH.name
+    (tmp_path / "scripts/maintenance").mkdir(parents=True)
+    script = tmp_path / "scripts/maintenance" / SCRIPT_PATH.name
     shutil.copyfile(SCRIPT_PATH, script)
     package = tmp_path / ("src/quickquip" if layout == "src" else "quickquip")
     module_dir = package / "llm" / "skills"
     module_dir.mkdir(parents=True)
-    sources = SCRIPT_PATH.parent.parent / "src" / "quickquip" / "llm" / "skills"
+    sources = SCRIPT_PATH.parents[2] / "src" / "quickquip" / "llm" / "skills"
     for filename in ("preset_sync.py", "preset_drift.py"):
         shutil.copyfile(sources / filename, module_dir / filename)
     _write(tmp_path / "skills.example" / "alpha", {"SKILL.md": "preset content"})

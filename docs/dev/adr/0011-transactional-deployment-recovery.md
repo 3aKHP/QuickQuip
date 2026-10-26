@@ -37,7 +37,7 @@ superseded_by: []
 ## 依据与相关契约
 
 - [PR #226：事务化 v4 部署](https://github.com/3aKHP/QuickQuip/pull/226)
-- [部署事务与恢复契约](../../../prod.example/README.md#layout-and-transaction)
-- [迁移、自动恢复与人工回滚](../../../prod.example/README.md#migration-and-recovery)
-- [服务器事务执行器](../../../prod.example/remote-deploy-v4.sh)、[部署状态处理](../../../prod.example/deploy-state.py)
+- [部署事务与恢复契约](../../../scripts/deploy/README.md#layout-and-transaction)
+- [迁移、自动恢复与人工回滚](../../../scripts/deploy/README.md#migration-and-recovery)
+- [服务器事务执行器](../../../scripts/deploy/server/remote-deploy-v4.sh)、[部署状态处理](../../../scripts/deploy/server/deploy-state.py)
 - [PR #274：共享 Skill 目录](https://github.com/3aKHP/QuickQuip/pull/274)

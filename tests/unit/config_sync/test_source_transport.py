@@ -5,12 +5,35 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import uuid
 
 import pytest
 
 from quickquip.config_sync.peers import Remote
 from quickquip.llm.config_service import ConfigService
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Linux remote recovery worker")
+@pytest.mark.parametrize("location", ["prod", "scripts/deploy/legacy"])
+def test_legacy_recovery_launches_on_old_and_reorganized_releases(tmp_path, monkeypatch, location):
+    from quickquip.config_sync.transport import SSHRemote
+
+    script = tmp_path / "current" / location / "remote-config-sync.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text('#!/bin/sh\nprintf "%s" "$3" > "$1/finished"\n')
+
+    def local_shell(self, command, body=None):
+        result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=5)
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    monkeypatch.setattr(SSHRemote, "_ssh", local_shell)
+    SSHRemote("synthetic", str(tmp_path)).start("a" * 32, recover=True)
+    deadline = time.monotonic() + 3
+    while not (tmp_path / "finished").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert (tmp_path / "finished").read_text() == "recover"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Linux SSH source deployment")

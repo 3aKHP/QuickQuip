@@ -8,7 +8,7 @@ through its data/ bind mount.
 
 Install (crontab -e on the host):
 
-    * * * * * /usr/bin/python3 /opt/QuickQuip/prod/host_metrics_collector.py
+    * * * * * /usr/bin/python3 /opt/QuickQuip/scripts/ops/host_metrics_collector.py
 
 QUICKQUIP_ROOT defaults to /opt/QuickQuip (the deployment root whose data/ is
 bind-mounted into the container); set it as a crontab environment line when the

@@ -148,7 +148,7 @@ Windows 用文件管理器在目标位置新建 `skills` 文件夹，把 `skills
 
 安装数量取决于目录已有内容。再发送 `/ai 你的 /quote 命令怎么用？`，应收到基于文档的用法说明；再次发送 `/skill list`，查看当前会话已激活项中是否出现 `self-docs`。本文使用默认 `/ai` 前缀；已修改前缀的部署使用自己的前缀。AI 对话会请求已配置的模型，费用按渠道计费。
 
-与当前版本预置副本（`skills.example/`）字节级分叉的已安装条目会附带标注“（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）”，提示部署者同步预置更新，见 [docs/admin/skills.md](../admin/skills.md) 的“预置 Skill”节。
+与当前版本预置副本（`skills.example/`）字节级分叉的已安装条目会附带标注“（与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新）”，提示部署者同步预置更新，见 [docs/admin/skills.md](../admin/skills.md) 的“预置 Skill”节。
 
 `/skill` 只有 `list` 一个子参数，其他写法会收到用法提示。`settings.skills.enabled = false` 时该命令直接提示功能未启用。
 

@@ -113,7 +113,7 @@ MCP server 的普通字段支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`；认证
 | `PIP_TRUSTED_HOST` | pip 信任主机 |
 | `PLAYWRIGHT_BASE_IMAGE` | Playwright 基础镜像（可含国内代理前缀） |
 
-GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜像构建，并内置 Docker CLI，便于贴吧采集和可选 MCP docker transport 使用。使用 docker transport 时须自行挂载宿主机 Docker socket；默认 compose 保持该 socket 未挂载。
+GHCR 分发镜像和 `docker/Dockerfile.prod` 均基于 Playwright Python 镜像构建，并内置 Docker CLI，便于贴吧采集和可选 MCP docker transport 使用。使用 docker transport 时须自行挂载宿主机 Docker socket；默认 compose 保持该 socket 未挂载。
 
 ---
 

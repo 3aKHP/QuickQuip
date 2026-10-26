@@ -124,5 +124,5 @@ def test_skill_list_marks_diverged_preset_copies(make_skill):
     lines = text.splitlines()
     assert lines[1] == "- alpha：一。"
     assert lines[2] == (
-        "- beta：二。（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）"
+        "- beta：二。（与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新）"
     )

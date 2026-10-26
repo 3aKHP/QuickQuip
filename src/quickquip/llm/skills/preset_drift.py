@@ -7,7 +7,7 @@
 不占 catalog 预算。
 
 本模块刻意保持 stdlib 自包含（不 import 包内任何模块）：主机侧同步脚本
-``scripts/sync_preset_skills.py`` 按文件路径直接装载本模块，与运行时共用
+``scripts/maintenance/sync_preset_skills.py`` 按文件路径直接装载本模块，与运行时共用
 同一份实现，在无项目 venv 的部署驱动机上也能运行。
 """
 

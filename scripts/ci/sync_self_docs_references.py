@@ -8,7 +8,7 @@ Sources are limited to a closed allowlist in three parts: the root-file list
 (README.md / CHANGELOG.md / ROADMAP.md / CONTRIBUTING.md / SECURITY.md /
 CODE_OF_CONDUCT.md / CLAUDE.md), every docs/**/*.md page (docs/assets/
 excluded), and an explicit extra-file list (.claude/, .github/ templates,
-prod.example/README.md). Local private files (AGENTS.md, CLAUDE.local.md)
+prod.example/README.md and scripts/*/README.md). Local private files (AGENTS.md, CLAUDE.local.md)
 stay excluded structurally. Each page flattens to a deterministic one-level
 resource name under references/ (lowercase, "/" → "-", leading dots stripped
 from each path component, root files get a "root-" prefix); name collisions
@@ -60,6 +60,10 @@ EXTRA_SOURCE_FILES = (
     ".github/PULL_REQUEST_TEMPLATE/release.md",
     ".github/pull_request_template.md",
     "prod.example/README.md",
+    "scripts/README.md",
+    "scripts/deploy/README.md",
+    "scripts/ops/README.md",
+    "scripts/maintenance/README.md",
 )
 
 SKILL_DIR = Path("skills.example") / "self-docs"

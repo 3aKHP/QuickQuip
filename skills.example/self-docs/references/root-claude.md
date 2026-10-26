@@ -23,7 +23,8 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 | 变更分级、评审与发布流程 | [工作流与发布流程](docs/dev/branching.md) |
 | 部署与运维配置 | `docs/admin/` |
 | 用户向命令与功能说明 | `docs/user/` |
-| 公开生产运维模板 | `prod.example/` |
+| 生产配置模板 | `prod.example/` |
+| 通用部署与巡检程序 | `scripts/deploy/`、`scripts/ops/` |
 | 真实生产运维资产 | `prod/`（已 gitignored） |
 
 ## 环境
@@ -36,7 +37,7 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 
 ### 私有目录边界
 
-- `prod.example/` 是可公开分发的生产运维模板；`prod/` 是真实生产运维目录，不提交。
+- `prod.example/` 分发生产配置模板；`prod/` 保存真实配置与登录资产，不提交。通用程序从受追踪的 `scripts/` 执行。
 - 根目录 `.env` 是 QuickQuip 应用层唯一涉密凭证来源；`prod/sendkey.env` 只供运维巡检/通知脚本使用。
 - 本地开发辅助目录（草稿/沙箱/私有材料）由开发者自行建立并排除，机制见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 

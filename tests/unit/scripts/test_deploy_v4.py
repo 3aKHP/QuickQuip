@@ -16,8 +16,9 @@ import tarfile
 import pytest
 
 
-TEMPLATE = Path(__file__).resolve().parents[3] / "prod.example"
-STATE = runpy.run_path(str(TEMPLATE / "deploy-state.py"))
+PROJECT = Path(__file__).resolve().parents[3]
+TEMPLATE = PROJECT / "scripts/deploy"
+STATE = runpy.run_path(str(TEMPLATE / "server/deploy-state.py"))
 OLD = "20260907-010000-aaaaaaaaaaaa"
 NEW = "20260907-020000-bbbbbbbbbbbb"
 
@@ -32,7 +33,7 @@ def deployment(tmp_path):
     inbox = root / ".deploy/incoming" / NEW
     inbox.mkdir(parents=True)
     for name in ("deploy-state.py", "remote-deploy-v4.sh"):
-        shutil.copyfile(TEMPLATE / name, inbox / name)
+        shutil.copyfile(TEMPLATE / "server" / name, inbox / name)
     tree = inbox / "tree"
     (tree / "prod").mkdir(parents=True)
     (tree / "prod/docker-compose.yml").write_text("services: {}\n")
@@ -119,7 +120,7 @@ elif args[0] == "inspect":
         TEST_ROOT=str(root),
         TEST_NEW=NEW,
         PYTHONPATH=os.pathsep.join((
-            str(TEMPLATE.parent / "src"), os.environ.get("PYTHONPATH", ""),
+            str(PROJECT / "src"), os.environ.get("PYTHONPATH", ""),
         )),
     )
     return root, inbox, env
@@ -144,6 +145,25 @@ def test_success_commits_environment_and_previous(deployment):
     assert (root / "previous").readlink() == Path("releases") / OLD
     assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
     assert (root / ".env").stat().st_mode & 0o777 == 0o600
+    assert not inbox.exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_private_hook_runs_after_activation_without_changing_release_result(deployment, exit_code):
+    root, inbox, _ = deployment
+    hook = inbox / "shared/prod/hooks/deployment.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text(
+        '#!/bin/bash\n'
+        'printf "%s:%s" "$1" "$(readlink "$QUICKQUIP_ROOT/current")" '
+        '> "$QUICKQUIP_ROOT/hook-result"\n'
+        f'exit {exit_code}\n'
+    )
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "hook-result").read_text() == "deploy:releases/" + NEW
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
     assert not inbox.exists()
 
 
@@ -964,7 +984,9 @@ def test_storage_migration_precedes_start_and_reverses_before_old_release(deploy
 
 
 def test_configuration_rollback_stops_candidate_with_its_staged_environment(tmp_path):
-    script = (Path(__file__).resolve().parents[3] / 'prod.example/remote-deploy-v4.sh').read_text()
+    script = (
+        Path(__file__).resolve().parents[3] / 'scripts/deploy/server/remote-deploy-v4.sh'
+    ).read_text()
     finish = script[script.index('finish() {'):script.index('\ntrap finish EXIT')]
     root = tmp_path / 'root'
     incoming = root / '.deploy/incoming/new'

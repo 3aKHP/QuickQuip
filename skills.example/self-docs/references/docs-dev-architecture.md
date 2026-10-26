@@ -92,12 +92,13 @@ QuickQuip/
 │   ├── quickquip/          # 业务逻辑包
 │   └── plugins/            # NoneBot2 插件入口薄层
 ├── tests/                  # pytest 测试套件
-├── scripts/                # 运维与数据回灌脚本（部分随镜像分发）
+├── scripts/                # 按部署、巡检、维护、CI 与钩子分类的通用程序
 ├── frontend/               # Web 管理后台前端（Vue 3 SPA）
 │   ├── src/                # 源码
 │   └── dist/               # 构建产物（gitignore）
 ├── docker-compose.example.yml  # Docker Compose 编排示例（含内置 SearXNG）
 ├── docker/
+│   ├── Dockerfile.prod     # 生产镜像构建
 │   └── searxng/
 │       └── settings.yml    # SearXNG 配置
 ├── config/                 # 配置文件目录（见下文专节）
@@ -278,8 +279,10 @@ docs/
 
 ### `prod.example/` 与 `prod/`
 
-- `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
-- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、OneBot 协议端登录态目录和运维通知密钥。
+- `prod.example/`：生产 Compose 和运维通知配置模板。
+- `prod/`：Git 忽略的真实 Compose、OneBot 协议端登录目录和运维通知配置。
+- `scripts/deploy/`、`scripts/ops/`：由 Git 维护的部署和巡检程序；[脚本导航](../../scripts/README.md)说明各子目录。
+- `docker/Dockerfile.prod`：生产构建程序，构建参数通过 Compose 和根 `.env` 配置。
 - 本地私有工作区保存草稿、测试沙箱、探针脚本和工作文档。
 
 ### 私有环境变量与根 `.env` 的关系

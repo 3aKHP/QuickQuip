@@ -2,8 +2,8 @@
 # Local release driver. DryRun builds locally and previews the upload manifest.
 set -euo pipefail
 umask 077
-HostAlias="quickquip-prod"
-RemoteDir="/opt/QuickQuip"
+HostAlias=""
+RemoteDir=""
 Mode=deploy
 Modes=0
 DryRun=0
@@ -19,6 +19,7 @@ EnvSourceExplicit=0
 ConfigPlan=0
 SyncOperation=""
 SyncPython=""
+Note=""
 
 usage() {
     cat <<USAGE
@@ -36,9 +37,10 @@ Options:
   --plan               Read-only remote configuration plan
   --dry-run            Build frontend locally and preview the upload manifest
   --migrate-storage    Stop services and separate configuration from runtime storage
+  -m, --message <text>  Note passed to the optional private deployment hook
   --skip-health        Skip the post-deploy health check (deploy/migrate only)
-  --host-alias <name>  SSH host alias (default $HostAlias)
-  --remote-dir <path>  Remote deployment root (default $RemoteDir)
+  --host-alias <name>  SSH host alias (root .env or quickquip-prod)
+  --remote-dir <path>  Remote deployment root (root .env or /opt/QuickQuip)
   --keep-releases <n>  Completed releases to retain, 2..100 (default $KeepReleases)
   -h, --help           Show this help
 USAGE
@@ -46,6 +48,7 @@ USAGE
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        -m|--message) Note="${2:?missing message}"; shift ;;
         -h|--help) usage; exit 0 ;;
         --dry-run|--local-check) DryRun=1 ;;
         --status) Mode=status; Modes=$((Modes + 1)) ;;
@@ -84,16 +87,25 @@ fi
 [[ "$Modes" -le 1 ]] || die "choose only one action"
 [[ "$DryRun" = 0 || ( "$Mode" = deploy && "$SkipHealth" = 0 ) ]] || die "DryRun supports deployment preview only"
 [[ "$SkipHealth" = 0 || "$Mode" = deploy || "$Mode" = migrate ]] || die "SkipHealth supports deploy/migrate only"
+ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ScriptDir/../.."
+ConnectionPython=""
+for candidate in .venv/bin/python .venv/Scripts/python.exe python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then ConnectionPython="$candidate"; break; fi
+done
+[ -n "$ConnectionPython" ] || die "local Python environment required"
+Connection="$("$ConnectionPython" -m quickquip.config_sync.deployment connection --root "$PWD")" || die "cannot read root .env deployment connection"
+read -r DefaultHost DefaultRoot <<< "$Connection"
+HostAlias=${HostAlias:-$DefaultHost}
+RemoteDir=${RemoteDir:-$DefaultRoot}
 [[ "$RemoteDir" =~ ^/[a-zA-Z0-9_./-]+$ && "$RemoteDir" != / && "$RemoteDir" != *'/../'* ]] || die "use an absolute root with letters, digits, dot, slash, underscore or hyphen"
 [[ "$HostAlias" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$ ]] || die "invalid SSH alias"
 [[ "$KeepReleases" =~ ^[0-9]+$ && "$KeepReleases" -ge 2 && "$KeepReleases" -le 100 ]] || die "KeepReleases must be 2..100"
 [[ -z "$ReleaseId" || "$ReleaseId" =~ ^[0-9]{8}-[0-9]{6}(-[a-f0-9]{12})?(-baseline)?$ ]] || die "invalid release id"
 
-ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ScriptDir/.."
 [ ! -d prod/prod.example ] || die "nested prod/prod.example; move it aside and initialize prod again"
 for file in remote-deploy-v4.sh deploy-state.py; do
-    [ -f "$ScriptDir/$file" ] || die "missing $file"
+    [ -f "$ScriptDir/server/$file" ] || die "missing $file"
 done
 Id="$(date -u +%Y%m%d-%H%M%S)-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
 Incoming="$RemoteDir/.deploy/incoming/$Id"
@@ -108,7 +120,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         done
         [ -n "$SyncPython" ] || die "local Python environment required for configuration sync"
         if [ "$ConfigPlan" = 1 ]; then
-            exec "$SyncPython" -m quickquip.config_sync.deployment plan --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir"
+            exec "$SyncPython" -m quickquip.config_sync.deployment plan --root "$PWD" --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir"
         fi
     elif [ "$ConfigPlan" = 1 ]; then
         die "--plan requires a synchronization mode"
@@ -136,7 +148,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
             if command -v "$candidate" >/dev/null 2>&1; then SyncPy="$candidate"; break; fi
         done
         if [ -n "$SyncPy" ]; then
-            "$SyncPy" scripts/sync_preset_skills.py --check || true
+            "$SyncPy" scripts/maintenance/sync_preset_skills.py --check || true
         fi
     fi
     if [ "$DryRun" = 1 ]; then
@@ -147,7 +159,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     fi
     command -v rsync >/dev/null || die "local rsync required"
     if [ "$ConfigSync" != off ]; then
-        SyncOperation="$("$SyncPython" -m quickquip.config_sync.deployment deploy-prepare --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir")" || die "configuration preparation failed; inspect sync status"
+        SyncOperation="$("$SyncPython" -m quickquip.config_sync.deployment deploy-prepare --root "$PWD" --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir")" || die "configuration preparation failed; inspect sync status"
         [[ "$SyncOperation" =~ ^[a-f0-9]{32}$ ]] || die "invalid synchronization operation"
         EnvSource=sync
         printf 'Configuration operation: %s
@@ -159,23 +171,24 @@ fi
 ssh "${ssh_args[@]}" "$HostAlias" \
     "command -v rsync >/dev/null && command -v flock >/dev/null && docker compose version >/dev/null && umask 077 && mkdir -p '$RemoteDir/.deploy/incoming' && chmod 700 '$RemoteDir/.deploy' '$RemoteDir/.deploy/incoming' && mkdir '$Incoming'" \
     || die "remote prerequisites or exclusive staging directory failed"
-scp "${ssh_args[@]}" "$ScriptDir/remote-deploy-v4.sh" "$ScriptDir/deploy-state.py" "$HostAlias:$Incoming/"
+scp "${ssh_args[@]}" "$ScriptDir/server/remote-deploy-v4.sh" "$ScriptDir/server/deploy-state.py" "$HostAlias:$Incoming/"
 if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     ssh "${ssh_args[@]}" "$HostAlias" "umask 077; mkdir '$Incoming/tree' '$Incoming/shared'"
     rsync -ar --chmod=D700,F600 --exclude=__pycache__ --exclude='*.pyc' --exclude='config/llm.toml' --exclude='config/managed' --exclude='config/managed/**' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' "${rsync_args[@]}" \
         --files-from="$UploadManifest" ./ "$HostAlias:$Incoming/tree/"
-    Shared=(prod/check_bot.sh prod/cron_check_bot.sh)
+    Shared=(scripts/ops/check_bot.sh scripts/ops/cron_check_bot.sh)
     if [ "$EnvSource" = local ]; then
         Shared+=(.env)
     fi
-    for item in prod/sendkey.env data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json prod/host_metrics_collector.py; do
+    for item in prod/sendkey.env prod/hooks/deployment.sh data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json scripts/ops/host_metrics_collector.py; do
         if [ "$ConfigSync" != off ] && [ "$item" = prod/sendkey.env ]; then continue; fi
         [ ! -f "$item" ] || Shared+=("$item")
     done
     rsync -aR --chmod=D700,F600 "${rsync_args[@]}" "${Shared[@]}" "$HostAlias:$Incoming/shared/"
 fi
+EncodedNote="$(printf '%s' "$Note" | base64 | tr -d '\r\n')"
 ssh "${ssh_args[@]}" "$HostAlias" \
-    "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$MigrateStorage SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC_PROTOCOL=2 CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
+    "DEPLOY_VERSION='$Version' DEPLOY_NOTE_B64='$EncodedNote' DETACH=1 MIGRATE_STORAGE=$MigrateStorage SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC_PROTOCOL=2 CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
     || die "launch uncertain; inspect $RemoteDir/.deploy/$Id.log and .exit before retrying"
 Log="$RemoteDir/.deploy/$Id.log"
 ExitFile="$RemoteDir/.deploy/$Id.exit"
@@ -189,6 +202,6 @@ done
 code="$(ssh "${ssh_args[@]}" "$HostAlias" "cat '$ExitFile'")" || die "cannot read completion status: $ExitFile"
 [ "$code" = 0 ] || die "remote action failed (exit $code): $Log"
 if [ -n "$SyncOperation" ]; then
-    "$SyncPython" -m quickquip.config_sync.deployment deploy-finish --operation "$SyncOperation" --host-alias "$HostAlias" --remote-dir "$RemoteDir" || die "deployment finished; configuration acknowledgement needs resume"
+    "$SyncPython" -m quickquip.config_sync.deployment deploy-finish --root "$PWD" --operation "$SyncOperation" --host-alias "$HostAlias" --remote-dir "$RemoteDir" || die "deployment finished; configuration acknowledgement needs resume"
 fi
-printf '%s complete. Status: bash prod/deploy-v4.sh --status --host-alias %s --remote-dir %s\n' "$Mode" "$HostAlias" "$RemoteDir"
+printf '%s complete. Status: bash scripts/deploy/deploy-v4.sh --status --host-alias %s --remote-dir %s\n' "$Mode" "$HostAlias" "$RemoteDir"

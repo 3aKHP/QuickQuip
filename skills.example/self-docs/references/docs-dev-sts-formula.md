@@ -20,7 +20,7 @@
 卡牌与遗物中文名存放在随包分发的词表中，生成元信息记录来源快照。
 
 - **数据源**：[`nkhoit/spire-archive`](https://github.com/nkhoit/spire-archive)。两代游戏的卡牌、遗物数据与简中本地化，覆盖 STS1（361 卡 / 181 遗物）与 STS2（577 卡 / 289 遗物，EA 快照 v0.107.1）。
-- **构建**：`scripts/refresh_sts_lexicon.py` 按 ID 关联两代条目与简中名称，再按中文名跨代去重，输出 `src/quickquip/sts/sts_lexicon.json`（1117 条，来源提交 `14e05c09dc38`，日期 2026-07-23）。刷新时在项目根运行 `python scripts/refresh_sts_lexicon.py`；先核对要采用的上游提交，并更新脚本的 `SOURCE_SHA` 和 `SOURCE_DATE`，生成后检查词条与元信息。
+- **构建**：`scripts/maintenance/refresh_sts_lexicon.py` 按 ID 关联两代条目与简中名称，再按中文名跨代去重，输出 `src/quickquip/sts/sts_lexicon.json`（1117 条，来源提交 `14e05c09dc38`，日期 2026-07-23）。刷新时在项目根运行 `python scripts/maintenance/refresh_sts_lexicon.py`；先核对要采用的上游提交，并更新脚本的 `SOURCE_SHA` 和 `SOURCE_DATE`，生成后检查词条与元信息。
 - **加载**：`lexicon.py` 经 `importlib.resources` 读取 vendored JSON，套用 `config.EXCLUDED_NAMES` 得到活跃集合 `NAMES`。词表文件保留上游去重结果，排除项单独维护，刷新词表时继续生效。
 - **排除标准打防牌**：每个角色的初始 Strike/Defend 跨代去重后坍缩为“打击”“防御”两个 2 字裸词，歧义过大（群聊里几乎不会是玩梗），故排除；含该子串的“完美打击”“究极防御”等不受影响。新增歧义词只需追加到 `EXCLUDED_NAMES`。
 
@@ -100,7 +100,7 @@ src/quickquip/sts/
 | 词表数据 | `src/quickquip/sts/sts_lexicon.json` |
 | 词表加载/排除/查询 | `src/quickquip/sts/lexicon.py` |
 | 排除项与正则、规则名 | `src/quickquip/sts/config.py` |
-| 词表刷新脚本 | `scripts/refresh_sts_lexicon.py` |
+| 词表刷新脚本 | `scripts/maintenance/refresh_sts_lexicon.py` |
 | 被动匹配器 | `src/quickquip/sts/formulas/card_le/passive.py` |
 | 故障化 prompt | `src/quickquip/sts/formulas/defectify/prompting.py` |
 | 命令注册 | `src/quickquip/adapters/nonebot/command_parts/sts.py`（turmfluch + defectify） |

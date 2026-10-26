@@ -32,6 +32,11 @@ Log="$Root/.deploy/$Id.log"
 ExitFile="$Root/.deploy/$Id.exit"
 step() { printf '[deploy] %s\n' "$*"; }
 fail() { step "FAILED: $*" >&2; exit 1; }
+deployment_hook() {
+    local hook="$Root/prod/hooks/deployment.sh"
+    [ -f "$hook" ] || return 0
+    timeout 30 bash "$hook" "$1" "$2" "$3" || step "private deployment hook failed; release result retained"
+}
 Python=""
 for candidate in python3.13 python3.12 python3.11 python3; do
     if command -v "$candidate" >/dev/null && "$candidate" -c 'import sys; assert sys.version_info >= (3, 11, 8)' 2>/dev/null; then
@@ -519,6 +524,7 @@ if [ "$Action" = rollback ]; then
     set_link previous "$Prev"
     Succeeded=1
     step "rollback complete: $Target ($RollbackVersion) (current credentials and data retained)"
+    deployment_hook rollback "$RollbackVersion" "$Target"
     exit 0
 fi
 
@@ -643,6 +649,7 @@ fi
 set_link previous "$Prev"
 Succeeded=1
 step "release complete: $Id ($VersionId)"
+deployment_hook "$Action" "$VersionId" "$Id"
 # Only collect completed deployments; never remove current, previous or baselines.
 touch "$Release/.complete"
 count=0

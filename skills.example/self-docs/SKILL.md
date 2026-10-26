@@ -78,5 +78,8 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 提 Issue（备忘/Memo 模板） | `references/github-issue_template-memo.md` |
 | 提 PR 怎么写（通用模板、变更分级） | `references/github-pull_request_template.md` |
 | 发布 PR 模板（dev → main） | `references/github-pull_request_template-release.md` |
-| 生产运维脚本、部署事务细节 | `references/prod.example-readme.md` |
+| 生产配置模板 | `references/prod.example-readme.md` |
+| 生产运维脚本、部署事务细节 | `references/scripts-deploy-readme.md` |
+| 巡检、登录与指标采集 | `references/scripts-ops-readme.md` |
+| 数据与资产维护 | `references/scripts-maintenance-readme.md` |
 | 全部页面索引（标题 + 关键词） | `references/index.md` |

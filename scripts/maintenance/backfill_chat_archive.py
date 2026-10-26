@@ -7,8 +7,8 @@
 （因此 daily 源先处理，其首入行直接带全字段）。
 
 在部署根执行，先备份 data/chat_archive.db 与旧 JSONL 目录：
-    python scripts/backfill_chat_archive.py --dry-run  # 预览读取条数
-    python scripts/backfill_chat_archive.py            # 执行回灌
+    python scripts/maintenance/backfill_chat_archive.py --dry-run  # 预览读取条数
+    python scripts/maintenance/backfill_chat_archive.py            # 执行回灌
 
 检查输出中的新增、归因回填、已存在、跳过和写入失败数量。写入失败时退出码
 为非零；修复后可重新执行。确认结果符合预期后，再清理旧 JSONL 目录。
@@ -22,7 +22,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SOURCE_ROOT if SOURCE_ROOT.is_dir() else PROJECT_ROOT))
 

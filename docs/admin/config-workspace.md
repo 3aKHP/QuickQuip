@@ -50,7 +50,7 @@ qqconf pack
 | 根目录和 `prod/` | `compose`、`compose.override`、`docker-compose`、`docker-compose.override` 的 `.yml` / `.yaml` 文件 |
 | `docker/searxng/settings.yml`、`prod/sendkey.env` | 项目内的搜索与运维通知配置 |
 
-Skills、LLBot 登录与混合配置、Trace 当前开关、一次性定时任务、业务数据库及示例模板由各自工具维护。LLM 设置中的 Skill 选项和 `.env` 中的路径值照常保存，`qqconf` 不跟随路径读取外部文件。
+Skills、LLBot 登录与混合配置、私有部署钩子、Trace 当前开关、一次性定时任务、业务数据库及示例模板由各自工具维护。LLM 设置中的 Skill 选项和 `.env` 中的路径值照常保存，`qqconf` 不跟随路径读取外部文件。
 
 ## 编辑供应商和其他对象
 

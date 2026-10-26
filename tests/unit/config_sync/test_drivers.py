@@ -8,7 +8,8 @@ import sys
 
 import pytest
 
-TEMPLATE = Path(__file__).resolve().parents[3] / "prod.example"
+PROJECT = Path(__file__).resolve().parents[3]
+TEMPLATE = PROJECT / "scripts/deploy/legacy"
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
@@ -156,7 +157,7 @@ elif '-c' in args:
              "--remote-dir", str(root), "--file", str(destination)]
         )
         return subprocess.run(args, env={**os.environ, "TEST_ROOT": str(root),
-                              "PYTHONPATH": os.pathsep.join((str(TEMPLATE.parent / "src"),
+                              "PYTHONPATH": os.pathsep.join((str(PROJECT / "src"),
                                                             os.environ.get("PYTHONPATH", ""))),
                               "PATH": str(binaries) + os.pathsep + os.environ["PATH"]},
                               capture_output=True, text=True, timeout=20)

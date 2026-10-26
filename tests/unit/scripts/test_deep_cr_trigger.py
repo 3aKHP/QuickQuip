@@ -21,6 +21,9 @@ SCRIPT = Path(__file__).resolve().parents[3] / "scripts/check/deep-cr-trigger.sh
         ("src/quickquip/configuration/snapshot.py", 350, True),
         ("src/quickquip/llm/config_deployment.py", 350, True),
         ("src/quickquip/configuration/files.py", 2, False),
+        ("scripts/deploy/server/remote-deploy-v4.sh", 350, True),
+        ("scripts/ops/check_bot.sh", 350, True),
+        ("docker/Dockerfile.prod", 350, True),
         ("docs/admin/example.md", 350, False),
     ],
 )

@@ -1,0 +1,17 @@
+.dockerignore
+bot.py
+web_api.py
+pyproject.toml
+requirements.txt
+config
+frontend/dist
+llm_about
+skills.example
+src
+docker/Dockerfile.prod
+prod/docker-compose.yml
+scripts/maintenance/backfill_chat_archive.py
+scripts/maintenance/backfill_record_identities.py
+scripts/maintenance/sync_preset_skills.py
+scripts/deploy
+scripts/ops

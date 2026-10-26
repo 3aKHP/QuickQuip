@@ -9,7 +9,7 @@
 生成文件保留完整词表；运行时排除项在 quickquip.sts.config.EXCLUDED_NAMES
 维护，刷新后继续生效。
 
-用法：``python3 scripts/refresh_sts_lexicon.py``
+用法：``python3 scripts/maintenance/refresh_sts_lexicon.py``
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ KINDSEC = {"card": "cards", "relic": "relics"}  # 本地化顶层键是复数
 
 # 输出路径（仓库根 / src/quickquip/sts/sts_lexicon.json；不放在 data/ 子目录——
 # 根 .gitignore 的 `data/` 规则会忽略任意层级的 data 目录）
-OUT = Path(__file__).resolve().parent.parent / "src" / "quickquip" / "sts" / "sts_lexicon.json"
+OUT = Path(__file__).resolve().parents[2] / "src" / "quickquip" / "sts" / "sts_lexicon.json"
 
 
 def _fetch(path: str) -> object:

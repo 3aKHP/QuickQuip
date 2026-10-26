@@ -25,7 +25,6 @@ config/personas/
 skills/
 d[e]v/*
 prod/*
-!prod/Dockerfile
 prod.example/
 frontend-v2/
 llm_about/**/*.yaml
@@ -33,9 +32,11 @@ llm_about/**/*.yaml
 !llm_about/_example/*.yaml
 tests/
 scripts/*
-!scripts/backfill_chat_archive.py
-!scripts/backfill_record_identities.py
-!scripts/sync_preset_skills.py
+!scripts/maintenance/
+scripts/maintenance/*
+!scripts/maintenance/backfill_chat_archive.py
+!scripts/maintenance/backfill_record_identities.py
+!scripts/maintenance/sync_preset_skills.py
 README.md
 CHANGELOG.md
 ROADMAP.md

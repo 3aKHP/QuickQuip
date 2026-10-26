@@ -156,7 +156,7 @@ def finish(session, record=None, *, timeout=240):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("deploy-prepare", "deploy-finish", "plan"))
+    parser.add_argument("action", choices=("connection", "deploy-prepare", "deploy-finish", "plan"))
     parser.add_argument("--root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--mode", choices=("push", "pull"), default="push")
     parser.add_argument("--host-alias")
@@ -165,6 +165,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     session = Session(args.root, host=args.host_alias, remote_dir=args.remote_dir)
     try:
+        if args.action == "connection":
+            mode = session.mode()
+            print(mode.host, mode.remote_dir)
+            return 0
         if args.action == "deploy-prepare":
             print(prepare(session, args.mode))
             return 0

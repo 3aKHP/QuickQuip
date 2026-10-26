@@ -1,18 +1,18 @@
 #!/bin/bash
 # QuickQuip Bot status checker and QR login helper (Linux local driver).
-# SSHes into the server, calls the prod/check_bot.sh worker, and renders
+# SSHes into the server, calls the scripts/ops/check_bot.sh worker, and renders
 # the login QR code on the local machine.
 #
 # Usage:
-#   bash prod/check_bot_local.sh
-#   bash prod/check_bot_local.sh -ForceRecreate
+#   bash scripts/ops/check_bot_local.sh
+#   bash scripts/ops/check_bot_local.sh -ForceRecreate
 #
 # quickquip-prod is a placeholder SSH host alias; change it via -Server.
 
 set -u
 
-Server="quickquip-prod"
-RemoteDir="/opt/QuickQuip"
+Server=""
+RemoteDir=""
 ForceRecreate=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -34,11 +34,23 @@ ok()   { printf '%s%s%s\n' "$G" "$*" "$N"; }
 err()  { printf '%s%s%s\n' "$R" "$*" "$N" >&2; }
 
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ProjectRoot="$(cd "$ScriptDir/.." && pwd)"
+ProjectRoot="$(cd "$ScriptDir/../.." && pwd)"
+ConnectionPython=""
+for candidate in "$ProjectRoot/.venv/bin/python" "$ProjectRoot/.venv/Scripts/python.exe" python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then ConnectionPython="$candidate"; break; fi
+done
+[ -n "$ConnectionPython" ] || { err "Local Python environment required"; exit 1; }
+Connection="$("$ConnectionPython" -m quickquip.config_sync.deployment connection --root "$ProjectRoot")" || exit 1
+read -r DefaultHost DefaultRoot <<< "$Connection"
+Server=${Server:-$DefaultHost}
+RemoteDir=${RemoteDir:-$DefaultRoot}
+[[ "$Server" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$ ]] || exit 2
+[[ "$RemoteDir" =~ ^/[a-zA-Z0-9_./-]+$ && "$RemoteDir" != / && "$RemoteDir" != *..* ]] || exit 2
 
 invoke_server() {
     local cmd="$1" result rc
-    result=$(ssh -o StrictHostKeyChecking=no "$Server" "REMOTE_DIR='$RemoteDir' bash '$RemoteDir/prod/check_bot.sh' $cmd" 2>&1)
+    result=$(ssh -o StrictHostKeyChecking=no "$Server" \
+        "if test -f '$RemoteDir/scripts/ops/check_bot.sh'; then REMOTE_DIR='$RemoteDir' bash '$RemoteDir/scripts/ops/check_bot.sh' $cmd; else REMOTE_DIR='$RemoteDir' bash '$RemoteDir/prod/check_bot.sh' $cmd; fi" 2>&1)
     rc=$?
     if [ "$rc" -ne 0 ]; then
         err "SSH failed: $result"
@@ -171,5 +183,5 @@ if [ "$loginStatus" = "ONLINE" ]; then
     ok "Bot is online."
 else
     err "Timed out. Check whether the QR code was scanned."
-    printf '%sIf this repeats, try: bash prod/check_bot_local.sh -ForceRecreate%s\n' "$Y" "$N"
+    printf '%sIf this repeats, try: bash scripts/ops/check_bot_local.sh -ForceRecreate%s\n' "$Y" "$N"
 fi

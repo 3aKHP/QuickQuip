@@ -25,13 +25,13 @@ python -m quickquip.llm.config_cli migrate-storage --services-stopped
 将新版生产模板合入自己的运维目录后执行：
 
 ```bash
-bash prod/deploy-v4.sh --migrate-storage
+bash scripts/deploy/deploy-v4.sh --migrate-storage
 ```
 
 PowerShell：
 
 ```powershell
-prod/deploy-v4.ps1 -MigrateStorage
+scripts/deploy/deploy-v4.ps1 -MigrateStorage
 ```
 
 此选项保留服务器配置，自动关闭本次配置同步。根 `.env` 默认使用服务器版本，显式指定 `--env local` 或 `-EnvSource local` 可上传本地凭据。驱动先构建候选镜像，再停止 Bot 和 Web、迁移、启动候选并执行健康检查。迁移失败时恢复原存储；候选启动后检查失败时反向转换存储，再启动旧版本。备份保留在共享数据目录。

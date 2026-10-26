@@ -19,9 +19,9 @@ skills/.preset-backups/<name>.preset-backup-<时间戳> 再安装预置副本。
 Web Admin 后端复用），本脚本只承载 CLI 呈现，按文件路径装载该实现。
 
 在项目根运行，使用 Python 3 标准库即可：
-    python scripts/sync_preset_skills.py            # 只报告
-    python scripts/sync_preset_skills.py --check    # 只报告（部署脚本用）
-    python scripts/sync_preset_skills.py --apply    # 执行同步（留备份）
+    python scripts/maintenance/sync_preset_skills.py            # 只报告
+    python scripts/maintenance/sync_preset_skills.py --check    # 只报告（部署脚本用）
+    python scripts/maintenance/sync_preset_skills.py --apply    # 执行同步（留备份）
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 默认目录与 quickquip.common.paths 的 SKILLS_DIR / SKILLS_EXAMPLE_DIR 一致。
 # 本工具刻意不 import 包（避免连带 yaml/dotenv 等第三方依赖，保证无项目
 # venv 的部署驱动机可跑），路径规则在此保留一份带注释的副本。
@@ -145,7 +145,7 @@ def main() -> int:
     if not args.apply:
         if pending:
             print(
-                "提示：可运行 python scripts/sync_preset_skills.py --apply "
+                "提示：可运行 python scripts/maintenance/sync_preset_skills.py --apply "
                 "安装缺失项、更新分叉项（原副本自动备份）；暂不更新不影响使用。"
             )
             return 1
