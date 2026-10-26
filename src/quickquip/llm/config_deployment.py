@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 
-from dotenv import dotenv_values
+from dotenv.main import DotEnv
 
 from quickquip.common.config_utils import expansion_environment
 from quickquip.configuration.activity import StoppedService
@@ -68,11 +68,14 @@ def prepare(service, document, expected_revision, *, draft=None, note="qqsync"):
 
 
 def _environment(service):
-    values = dict(os.environ)
-    values.update({
-        key: value for key, value in dotenv_values(service.config_dir.parent / ".env").items()
+    # Match load_root_env_file(override=False) in the process being restarted.
+    values = {
+        key: value for key, value in DotEnv(
+            service.config_dir.parent / ".env", override=False
+        ).dict().items()
         if value is not None
-    })
+    }
+    values.update(os.environ)
     return values
 
 
@@ -84,6 +87,17 @@ def publish_offline(service, revision, request_id, stopped, *, environment=None)
     if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
         raise ConfigError("invalid_field", "Expected a deployment request ID", "request_id")
     with service.shared_lock:
+        with service.execution.connect() as connection:
+            existing = connection.execute(
+                "SELECT * FROM config_operations WHERE request_id=?", (request_id,)
+            ).fetchone()
+        if existing is not None:
+            if (
+                existing["kind"] != "apply" or existing["target_revision"] != revision
+                or json.loads(existing["payload"]) != {"offline": True}
+            ):
+                raise ConfigError("operation_conflict", "Request belongs to another operation")
+            return json.loads(existing["result"])
         from quickquip.llm.client_fingerprints.catalog import _load_catalog
 
         _load_catalog.cache_clear()
@@ -96,16 +110,6 @@ def publish_offline(service, revision, request_id, stopped, *, environment=None)
             service.validate_group_overrides(document)
         stopped.verify(root, "bot")
         with service.execution.connect(write=True) as connection:
-            existing = connection.execute(
-                "SELECT * FROM config_operations WHERE request_id=?", (request_id,)
-            ).fetchone()
-            if existing is not None:
-                if (
-                    existing["kind"] != "apply" or existing["target_revision"] != revision
-                    or json.loads(existing["payload"]) != {"offline": True}
-                ):
-                    raise ConfigError("operation_conflict", "Request belongs to another operation")
-                return json.loads(existing["result"])
             if connection.execute(
                 "SELECT 1 FROM config_operations WHERE kind='apply' "
                 "AND status IN ('queued','running')"

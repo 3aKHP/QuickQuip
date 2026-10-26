@@ -61,6 +61,13 @@ def test_native_web_restart_reads_updated_root_environment(tmp_path):
             return None
 
     log_path = tmp_path / "web.log"
+
+    def diagnostics():
+        return "\n".join(
+            path.read_text(encoding="utf-8", errors="replace")
+            for path in (log_path, tmp_path / "data/web-admin.log") if path.exists()
+        )
+
     with log_path.open("wb") as log:
         process = subprocess.Popen(
             [executable, str(tmp_path / "web_api.py")], cwd=tmp_path, env=env,
@@ -72,11 +79,9 @@ def test_native_web_restart_reads_updated_root_environment(tmp_path):
             while time.monotonic() < deadline:
                 if call() == 401:
                     return
-                assert process.poll() is None, log_path.read_text(
-                    encoding="utf-8", errors="replace"
-                )
+                assert process.poll() is None, diagnostics()
                 time.sleep(0.05)
-            raise AssertionError(log_path.read_text(encoding="utf-8", errors="replace"))
+            raise AssertionError(diagnostics())
 
         try:
             ready()

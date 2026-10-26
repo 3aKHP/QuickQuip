@@ -83,6 +83,7 @@ class Supervisor:
         )
         self.child = subprocess.Popen(
             self.command, cwd=self.root,
+            stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
             env={
                 **os.environ, CHILD_ROLE: self.role, CHILD_ID: self.child_id,
                 SUPERVISOR_ID: self.identity,
@@ -174,6 +175,15 @@ def managed_entrypoint(root, role, run):
     """Compose owns container processes; native entrypoints retain a small supervisor."""
     if os.getenv("QUICKQUIP_MANAGED_CONTAINER") == "1":
         return run()
+    # pythonw can start without console streams; libraries such as Uvicorn require them.
+    if sys.stdout is None or sys.stderr is None:
+        log = Path(root) / "data" / ("web-admin.log" if role == "web" else "bot.log")
+        log.parent.mkdir(parents=True, exist_ok=True)
+        stream = log.open("a", encoding="utf-8", buffering=1)
+        if sys.stdout is None:
+            sys.stdout = stream
+        if sys.stderr is None:
+            sys.stderr = stream
     if os.getenv(CHILD_ROLE) == role and os.getenv(CHILD_ID) and os.getenv(SUPERVISOR_ID):
         with _child_control(root, role):
             return run()

@@ -121,9 +121,34 @@ def test_offline_publication_validates_target_environment_without_exporting_it(
         result = service.publish_offline(
             prepared["revision"], "valid", stopped, environment={"SYNTHETIC_KEY": "sentinel"}
         )
+        assert service.publish_offline(
+            prepared["revision"], "valid", stopped, environment={}
+        ) == result
     import os
     assert "SYNTHETIC_KEY" not in os.environ
     assert result["published_revision"] == prepared["revision"]
+
+
+def test_offline_preflight_uses_the_same_environment_priority_as_native_startup(
+    deployment, monkeypatch
+):
+    root, service = deployment
+    (root / ".env").write_text("SYNTHETIC_KEY=file-value\n", encoding="utf-8")
+    monkeypatch.setenv("SYNTHETIC_KEY", "")
+    document = service.read()["document"]
+    document["providers"] = [{
+        "id": "example", "protocol": "openai", "base_url": "https://example.test/v1",
+        "api_key_env": "SYNTHETIC_KEY", "default_model": "example-model",
+        "models": [{"model": "example-model"}],
+    }]
+    document["settings"]["quick_judge"].update(provider_id="example", model="example-model")
+    prepared = service.prepare_deployment(document, 1)
+    with stopped_service(root, "bot") as stopped:
+        with pytest.raises(ConfigError) as error:
+            service.publish_offline(prepared["revision"], "native-environment", stopped)
+        assert error.value.code == "missing_environment"
+        monkeypatch.delenv("SYNTHETIC_KEY")
+        service.publish_offline(prepared["revision"], "native-environment", stopped)
 
 
 def test_offline_publication_reloads_profiles_after_asset_installation(deployment):
